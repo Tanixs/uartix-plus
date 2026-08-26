@@ -1,0 +1,61 @@
+use serde::Serialize;
+use std::fs::File;
+use std::io::Write;
+use tauri::State;
+
+use crate::serial::SerialManager;
+
+#[tauri::command]
+pub fn save_text_file(path: String, content: String) -> Result<(), String> {
+    let mut f = File::create(&path).map_err(|e| format!("创建文件失败: {e}"))?;
+    f.write_all(content.as_bytes())
+        .map_err(|e| format!("写入文件失败: {e}"))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_binary_file(path: String, content: Vec<u8>) -> Result<(), String> {
+    let mut f = File::create(&path).map_err(|e| format!("创建文件失败: {e}"))?;
+    f.write_all(&content)
+        .map_err(|e| format!("写入文件失败: {e}"))?;
+    Ok(())
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub seq: u64,
+}
+
+#[tauri::command]
+pub fn hex_search(
+    pattern: Vec<u8>,
+    state: State<SerialManager>,
+) -> Result<Vec<SearchHit>, String> {
+    if pattern.is_empty() {
+        return Err("搜索内容为空".into());
+    }
+    let ring = state
+        .ctx
+        .pipeline
+        .ring
+        .lock()
+        .map_err(|_| "缓冲锁中毒".to_string())?;
+    let (start, bytes) = ring.fetch(0, u64::MAX);
+    let mut hits = Vec::new();
+    let plen = pattern.len();
+    if bytes.len() >= plen {
+        let n = bytes.len() - plen;
+        for i in 0..=n {
+            if &bytes[i..i + plen] == pattern.as_slice() {
+                hits.push(SearchHit {
+                    seq: start + i as u64,
+                });
+                if hits.len() >= 500 {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(hits)
+}
