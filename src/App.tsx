@@ -267,7 +267,7 @@ export default function App() {
     <div className="app">
       <header className="toolbar">
         <div className="brand">
-          VisualSerial
+          Uartix+
           <span className="chip">M5</span>
         </div>
         <SerialToolbar />

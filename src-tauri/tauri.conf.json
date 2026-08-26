@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Larix-Visual-Serial",
+  "productName": "Uartix-Plus",
   "version": "0.1.0",
-  "identifier": "com.larix.visualserial",
+  "identifier": "com.uartix.plus",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "VisualSerial",
+        "title": "Uartix+",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,

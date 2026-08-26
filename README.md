@@ -1,7 +1,37 @@
-# Tauri + React + Typescript
+# Uartix+
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+**Uartix+** 是一款面向嵌入式工程师（惯导 / 机器人 / 航模 / 自动控制）的高自由度可视化串口协议分析仪。通过鼠标拖拽框选原始字节流即可定义私有协议帧结构，将数据实时映射为物理量、二维曲线、3D 姿态，并通过可视化控件（滑条 / 按钮 / 开关 / 摇杆 / 脚本）向下位机发送格式化指令，实现真正的双向闭环调试。
 
-## Recommended IDE Setup
+## 特性一览
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- **协议零代码定义**：在 Hex 数据流上拖拽框选字节 → 右键定义为帧头 / 长度 / 载荷 / 校验，多协议模板按帧头自动并行路由
+- **校验引擎**：Sum8 / XOR8 / CRC16-Modbus / CRC16-CCITT / CRC32，支持负偏移覆盖区间
+- **字段解析**：u8/i8/u16/i16/u32/i32/f32/f64/ASCII/BCD/位域，大小端可切，缩放偏置即时生效
+- **2D 曲线**：图例眼睛一键绘图，多通道独立颜色，左键平移 / 中键框选缩放 / 双击复位，X 轴可挂载时间、序号或任意变量，起止标识线
+- **3D 姿态**：欧拉角（六种旋转顺序 + 三轴取反）/ 四元数双模式，四轴飞行器与立方体模型，丝滑 slerp
+- **控制画布**：滑条 / 按钮 / 开关 / 多档开关 / LED / 数值监视 / 摇杆 / 类C脚本，吸附网格自由布局，页签与画布锁
+- **命令库**：树形分组管理常用指令，点击即发，拖拽部署到控件；每条命令可独立启用脚本模式
+- **变量系统**：解析字段自动注册为变量，指令模板与脚本中直接引用实时数据
+- **数据表格**：虚拟列表、排序筛选、暂停刷新、CSV / Excel 导出
+- **串口基石**：热插拔监听、断线自动重连、日志录制、文件发送
+
+## 技术栈
+
+Tauri 2 (Rust) · React 19 · TypeScript · dockview · uPlot · Three.js · serialport
+
+## 开发
+
+```bash
+npm install
+npm run tauri dev
+```
+
+## 构建
+
+```bash
+npm run tauri build
+```
+
+## 许可
+
+详见 LICENSE
