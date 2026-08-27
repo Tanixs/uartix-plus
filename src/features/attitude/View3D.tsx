@@ -175,7 +175,17 @@ export function View3D() {
       const eul = new THREE.Euler();
       let raf = 0;
       let last = performance.now();
+      let lastRender = 0;
+      let visible = true;
+      const io = new IntersectionObserver((es) => {
+        visible = es[0]?.isIntersecting ?? true;
+      });
+      io.observe(host);
+      const FRAME_MS = 1000 / 30;
       const loop = (now: number) => {
+        raf = requestAnimationFrame(loop);
+        if (!visible || now - lastRender < FRAME_MS) return;
+        lastRender = now;
         const dt = Math.min(0.1, (now - last) / 1000);
         last = now;
         controls.update();
@@ -199,7 +209,6 @@ export function View3D() {
             : "等待姿态数据…";
         }
         renderer.render(scene, camera);
-        raf = requestAnimationFrame(loop);
       };
       raf = requestAnimationFrame(loop);
 
@@ -214,6 +223,7 @@ export function View3D() {
 
       cleanup = () => {
         cancelAnimationFrame(raf);
+        io.disconnect();
         ro.disconnect();
         controls.dispose();
         renderer.dispose();

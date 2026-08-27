@@ -490,6 +490,8 @@ export function LedCardView(props: {
         <div
           className="led-dot"
           style={{
+            width: Math.max(22, Math.min(110, Math.floor(Math.min(props.width - 28, props.height - 46)))),
+            height: Math.max(22, Math.min(110, Math.floor(Math.min(props.width - 28, props.height - 46)))),
             background: on ? card.onColor : "var(--bg-inset)",
             boxShadow: on ? `0 0 14px ${card.onColor}` : "none",
             borderColor: on ? card.onColor : "var(--border)",
@@ -591,6 +593,22 @@ export function JoystickCardView(props: {
   const { card } = props;
   const padRef = useRef<HTMLDivElement>(null);
   const knobRef = useRef<HTMLDivElement>(null);
+  const [padSize, setPadSize] = useState(118);
+  useEffect(() => {
+    const pad = padRef.current;
+    if (!pad) return;
+    const parent = pad.parentElement;
+    if (!parent) return;
+    const ro = new ResizeObserver(() => {
+      const s = Math.max(
+        56,
+        Math.min(parent.clientWidth - 16, parent.clientHeight - 34),
+      );
+      setPadSize(Math.floor(s));
+    });
+    ro.observe(parent);
+    return () => ro.disconnect();
+  }, []);
   const activeRef = useRef(false);
   const throttleRef = useRef<{ last: number; timer: number | null }>({
     last: 0,
@@ -684,6 +702,7 @@ export function JoystickCardView(props: {
       <div
         className="joy-pad"
         ref={padRef}
+        style={{ width: padSize, height: padSize }}
         onMouseDown={(e) => e.stopPropagation()}
         onPointerDown={(e) => {
           e.stopPropagation();

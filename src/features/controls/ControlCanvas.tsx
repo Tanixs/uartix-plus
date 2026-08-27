@@ -5,6 +5,7 @@ import * as serialStore from "../serial/serialStore";
 import * as variableStore from "./variableStore";
 import * as commandStore from "./commandStore";
 import { isGroup } from "./commandStore";
+import { useSettings } from "../settings/settingsStore";
 import { beep, runScript } from "./scriptRunner";
 import { TextInput } from "../protocol/PropertiesPanel";
 import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider } from "../../shared/icons";
@@ -20,8 +21,8 @@ import {
   SwitchCardView,
 } from "./CardViews";
 
-const CARD_H = 78;
 const GAP = 8;
+const OFF = GAP / 2;
 
 
 const WIDGET_TYPES: { type: ControlType; label: string }[] = [
@@ -35,6 +36,8 @@ const WIDGET_TYPES: { type: ControlType; label: string }[] = [
 
 export function ControlCanvas() {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const settings = useSettings();
+  const CELL = [60, 72, 90, 110].includes(settings.cellSize) ? settings.cellSize : 90;
   const cmds = useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   const page = store.activePage();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -52,20 +55,21 @@ export function ControlCanvas() {
         y0: number;
         el: HTMLDivElement;
         moved: boolean;
+        nx?: number;
+        ny?: number;
       }
   >(null);
   const resizeRef = useRef<
     | null
-    | { card: ControlCard; startX: number; startY: number; el: HTMLDivElement }
+    | { card: ControlCard; startX: number; startY: number; el: HTMLDivElement; w?: number; h?: number }
   >(null);
-  const [wrapW, setWrapW] = useState(320);
   const [err, setErr] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ cardId: string; x: number; y: number } | null>(null);
   const [mountOpen, setMountOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [renamingCard, setRenamingCard] = useState<string | null>(null);
   const [renamingPage, setRenamingPage] = useState<string | null>(null);
-  const [sideTab, setSideTab] = useState<"widgets" | "commands" | null>("commands");
+  const [sideTab, setSideTab] = useState<"widgets" | "commands" | null>(null);
   const [editingCmd, setEditingCmd] = useState<string | null>(null);
   const [renamingNode, setRenamingNode] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -99,22 +103,22 @@ export function ControlCanvas() {
   }, []);
 
   useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const ro = new ResizeObserver(() => setWrapW(wrap.clientWidth));
-    ro.observe(wrap);
-    setWrapW(wrap.clientWidth);
-    return () => ro.disconnect();
-  }, [page?.id]);
-
-  useEffect(() => {
+    const STEP = CELL + GAP;
     const move = (e: MouseEvent) => {
       const rz = resizeRef.current;
       if (rz) {
-        rz.el.style.width = `${rz.el.offsetWidth + (e.clientX - rz.startX)}px`;
-        rz.el.style.height = `${rz.el.offsetHeight + (e.clientY - rz.startY)}px`;
-        rz.startX = e.clientX;
-        rz.startY = e.clientY;
+        const cur = store.activePage();
+        const maxW = Math.max(1, (cur?.cols ?? 8) - rz.card.x);
+        const maxH = Math.max(1, (cur?.rows || 48) - rz.card.y);
+        const nw0 = Math.max(1, Math.min(maxW, rz.card.w + Math.round((e.clientX - rz.startX) / STEP)));
+        const nh0 = Math.max(1, Math.min(maxH, (rz.card.h || 1) + Math.round((e.clientY - rz.startY) / STEP)));
+        const isJoy = rz.card.type === "joystick";
+        const nw = isJoy ? Math.min(nw0, nh0) : nw0;
+        const nh = isJoy ? Math.min(nw0, nh0) : nh0;
+        rz.w = nw;
+        rz.h = nh;
+        rz.el.style.width = `${nw * STEP - GAP}px`;
+        rz.el.style.height = `${nh * STEP - GAP}px`;
         rz.el.style.zIndex = "60";
         return;
       }
@@ -122,59 +126,76 @@ export function ControlCanvas() {
       if (!d) return;
       const dx = e.clientX - d.startX;
       const dy = e.clientY - d.startY;
-      if (!d.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+      if (!d.moved && Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
       d.moved = true;
-      d.el.style.transform = `translate(${dx}px, ${dy}px)`;
-      d.el.style.opacity = "0.65";
+      const cur = store.activePage();
+      const maxCx = Math.max(0, (cur?.cols ?? 8) - d.card.w);
+      const maxCy = Math.max(0, (cur?.rows || 48) - (d.card.h || 1));
+      const nx = Math.max(0, Math.min(maxCx, d.x0 + Math.round(dx / STEP)));
+      const ny = Math.max(0, Math.min(maxCy, d.y0 + Math.round(dy / STEP)));
+      d.nx = nx;
+      d.ny = ny;
+      d.el.classList.add("dragging");
+      d.el.style.left = `${nx * STEP + OFF}px`;
+      d.el.style.top = `${ny * STEP + OFF}px`;
       d.el.style.zIndex = "60";
     };
-    const up = (e: MouseEvent) => {
+    const up = () => {
       const rz = resizeRef.current;
       if (rz) {
         resizeRef.current = null;
         rz.el.style.zIndex = "";
         const cur = store.activePage();
-        const wrap = wrapRef.current;
-        if (!cur || !wrap) return;
-        const cellW = (wrap.clientWidth - GAP * (cur.cols - 1)) / cur.cols;
-        const nw = Math.max(
-          1,
-          Math.min(
-            cur.cols - rz.card.x,
-            Math.round((rz.el.offsetWidth + GAP) / (cellW + GAP)),
-          ),
-        );
-        const nh = Math.max(
-          1,
-          Math.min(8, Math.round((rz.el.offsetHeight + GAP) / (CARD_H + GAP))),
-        );
+        if (!cur) {
+          rz.el.style.width = "";
+          rz.el.style.height = "";
+          return;
+        }
+        const nw = rz.w ?? rz.card.w;
+        const nh = rz.h ?? (rz.card.h || 1);
+        const hit = (w: number, h: number) =>
+          cur.cards.some(
+            (c) =>
+              c.id !== rz.card.id &&
+              !(
+                rz.card.x + w <= c.x ||
+                c.x + c.w <= rz.card.x ||
+                rz.card.y + h <= c.y ||
+                c.y + (c.h || 1) <= rz.card.y
+              ),
+          );
+        let fw = nw;
+        let fh = nh;
+        while (fw > 1 && hit(fw, fh)) fw--;
+        while (fh > 1 && hit(fw, fh)) fh--;
+        if (rz.card.type === "joystick") {
+          const n = Math.min(fw, fh);
+          fw = n;
+          fh = n;
+        }
+        if (fw === rz.card.w && fh === (rz.card.h || 1)) {
+          rz.el.style.width = `${fw * STEP - GAP}px`;
+          rz.el.style.height = `${fh * STEP - GAP}px`;
+          return;
+        }
         rz.el.style.width = "";
         rz.el.style.height = "";
-        store.patchCard(cur.id, rz.card.id, { w: nw, h: nh });
+        store.patchCard(cur.id, rz.card.id, { w: fw, h: fh });
         return;
       }
       const d = dragRef.current;
       if (!d) return;
       dragRef.current = null;
-      d.el.style.transform = "";
-      d.el.style.opacity = "";
+      d.el.classList.remove("dragging");
       d.el.style.zIndex = "";
       if (!d.moved) return;
+      const nx = d.nx ?? d.x0;
+      const ny = d.ny ?? d.y0;
+      if (nx === d.card.x && ny === d.card.y) return;
+      d.el.style.left = "";
+      d.el.style.top = "";
       const cur = store.activePage();
-      const wrap = wrapRef.current;
-      if (!cur || !wrap) return;
-      const cellW = (wrap.clientWidth - GAP * (cur.cols - 1)) / cur.cols;
-      const nx = Math.max(
-        0,
-        Math.min(
-          cur.cols - d.card.w,
-          d.x0 + Math.round((e.clientX - d.startX) / (cellW + GAP)),
-        ),
-      );
-      const ny = Math.max(
-        0,
-        d.y0 + Math.round((e.clientY - d.startY) / (CARD_H + GAP)),
-      );
+      if (!cur) return;
       store.moveCard(cur.id, d.card.id, nx, ny);
     };
     window.addEventListener("mousemove", move);
@@ -183,7 +204,7 @@ export function ControlCanvas() {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
     };
-  }, []);
+  }, [CELL]);
 
   useEffect(() => {
     if (!menu) return;
@@ -404,9 +425,9 @@ export function ControlCanvas() {
     }
   };
 
-  const wrapWNow = wrapRef.current?.clientWidth || wrapW;
-  const cellW = Math.floor((wrapWNow - GAP * (page.cols - 1)) / page.cols);
-  const rows = page.cards.reduce((m, c) => Math.max(m, c.y + (c.h || 1)), 1);
+  const STEP = CELL + GAP;
+  const usedRows = page.cards.reduce((m, c) => Math.max(m, c.y + (c.h || 1)), 1);
+  const gridRows = Math.max(page.rows || 8, usedRows);
   const menuCard = menu ? page.cards.find((c) => c.id === menu.cardId) : null;
   const editCard = editing ? page.cards.find((c) => c.id === editing) : null;
   const ctxFor = (c: ControlCard): Record<string, number | string> => {
@@ -432,11 +453,12 @@ export function ControlCanvas() {
     c.type === "joystick";
 
   const renderCard = (c: ControlCard) => {
+    const ch = c.h || 1;
     const geo = {
-      left: c.x * (cellW + GAP),
-      top: c.y * (CARD_H + GAP),
-      width: c.w * cellW + (c.w - 1) * GAP,
-      height: (c.h || 1) * (CARD_H + GAP) - GAP,
+      left: c.x * STEP + OFF,
+      top: c.y * STEP + OFF,
+      width: c.w * STEP - GAP,
+      height: ch * STEP - GAP,
     };
     const common = {
       card: c,
@@ -696,6 +718,60 @@ export function ControlCanvas() {
         >
           ＋
         </button>
+        <button
+          className="ctl-tab-add"
+          title="导出控制画布（JSON）"
+          onClick={async () => {
+            const { save } = await import("@tauri-apps/plugin-dialog");
+            const { invoke } = await import("@tauri-apps/api/core");
+            const path = await save({
+              title: "导出控制画布",
+              defaultPath: `uartix-controls-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`,
+              filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+            });
+            if (!path) return;
+            await invoke("save_text_file", {
+              path,
+              content: JSON.stringify(
+                { kind: "uartix-controls", version: 1, data: store.exportPages() },
+                null,
+                2,
+              ),
+            });
+          }}
+        >
+          ⭳
+        </button>
+        <button
+          className="ctl-tab-add"
+          title="导入控制画布为新页"
+          onClick={async () => {
+            const { open } = await import("@tauri-apps/plugin-dialog");
+            const { invoke } = await import("@tauri-apps/api/core");
+            const path = await open({
+              multiple: false,
+              filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+            });
+            if (typeof path !== "string") return;
+            try {
+              const obj = JSON.parse(await invoke<string>("read_text_file", { path })) as {
+                kind?: string;
+                data?: unknown;
+              };
+              if (obj.kind !== "uartix-controls" || !obj.data) {
+                alert("不是控制画布文件（kind 不匹配）");
+                return;
+              }
+              const d = obj.data as { name?: string; cols?: number; cards?: Record<string, unknown>[] };
+              const arr = Array.isArray(d) ? d[0] : d;
+              store.importPage(arr);
+            } catch (e) {
+              alert(`导入失败: ${e}`);
+            }
+          }}
+        >
+          ⭱
+        </button>
         <div className="ctl-tabs-spacer" />
         <button
           className="btn icon-btn"
@@ -710,9 +786,21 @@ export function ControlCanvas() {
           title="网格列数"
           onChange={(e) => store.setPageCols(page.id, Number(e.target.value))}
         >
-          {[2, 3, 4, 5, 6].map((n) => (
+          {[4, 6, 8, 10, 12, 16, 20, 24].map((n) => (
             <option key={n} value={n}>
               {n} 列
+            </option>
+          ))}
+        </select>
+        <select
+          className="input"
+          value={page.rows ?? 8}
+          title="网格行数"
+          onChange={(e) => store.setPageRows(page.id, Number(e.target.value))}
+        >
+          {[4, 6, 8, 10, 12, 16, 20, 24, 32, 48].map((n) => (
+            <option key={n} value={n}>
+              {n} 行
             </option>
           ))}
         </select>
@@ -867,7 +955,14 @@ export function ControlCanvas() {
           >
             <div
               className="ctl-grid-inner"
-              style={{ height: rows * (CARD_H + GAP) + 16 }}
+              style={{
+                width: page.cols * STEP + GAP,
+                height: gridRows * STEP + GAP,
+                backgroundImage:
+                  "linear-gradient(to right, rgba(128,140,160,0.22) 1px, transparent 1px), linear-gradient(to bottom, rgba(128,140,160,0.22) 1px, transparent 1px)",
+                backgroundSize: `${STEP}px ${STEP}px`,
+                backgroundPosition: "0 0",
+              }}
             >
               {page.cards.map((c) => renderCard(c))}
               {page.cards.length === 0 && (

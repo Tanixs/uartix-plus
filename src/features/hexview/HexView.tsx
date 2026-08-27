@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { FieldDef, HexSlice, SpanOut } from "../../ipc/types";
 import * as serialStore from "../serial/serialStore";
 import * as templateStore from "../protocol/templateStore";
+import * as telemetryStore from "../protocol/telemetryStore";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 
 const ROW_H = 20;
@@ -49,6 +50,10 @@ export function HexView() {
   const proto = useSyncExternalStore(
     templateStore.subscribe,
     templateStore.getSnapshot,
+  );
+  const tele = useSyncExternalStore(
+    telemetryStore.subscribe,
+    telemetryStore.getSnapshot,
   );
   const serial = useSyncExternalStore(
     serialStore.subscribe,
@@ -715,8 +720,8 @@ export function HexView() {
             : "拖拽框选字节 → 右键定义为协议字段 · Ctrl+F 搜索"}
         </span>
         <span className="hex-status-right">
-          缓冲 {serial.rxTotal} B · 帧 {proto.stats.total} · 错帧{" "}
-          {proto.stats.errors}
+          缓冲 {serial.rxTotal} B · 帧 {tele.stats.total} · 错帧{" "}
+          {tele.stats.errors}
         </span>
       </div>
       {menu && (

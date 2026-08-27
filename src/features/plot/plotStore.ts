@@ -155,6 +155,13 @@ export function removeChannel(id: string) {
   emit();
 }
 
+export function removeByTpl(tplId: string, fieldId: string | null) {
+  const doomed = channels.filter(
+    (c) => c.tplId === tplId && (!fieldId || c.fieldId === fieldId),
+  );
+  for (const ch of doomed) removeChannel(ch.id);
+}
+
 export function toggleVisible(id: string) {
   channels = channels.map((c) =>
     c.id === id ? { ...c, visible: !c.visible } : c,
@@ -191,3 +198,13 @@ export function channelState(tplId: string, fieldId: string): "off" | "hidden" |
   if (!ch) return "off";
   return ch.visible ? "on" : "hidden";
 }
+
+(() => {
+  try {
+    (window as unknown as { uartixPlot: { removeByTpl: (a: string, b: string | null) => void } }).uartixPlot = {
+      removeByTpl,
+    };
+  } catch {
+    return;
+  }
+})();

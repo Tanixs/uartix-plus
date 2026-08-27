@@ -124,9 +124,9 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
         },
     );
     if !rows.is_empty() {
-        let (total, errors) = {
+        let (total, errors, dropped) = {
             let engine = ctx.pipeline.engine.lock().unwrap();
-            (engine.total, engine.errors)
+            (engine.total, engine.errors, engine.dropped)
         };
         let _ = app.emit(
             "parser:frames",
@@ -134,6 +134,7 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
                 rows,
                 total,
                 errors,
+                dropped,
             },
         );
     }

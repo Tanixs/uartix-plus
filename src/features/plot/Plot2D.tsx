@@ -360,9 +360,18 @@ export function Plot2D() {
   }, [plot.channels, plot.settings, themeTick]);
 
   useEffect(() => {
+    let visible = true;
+    let io: IntersectionObserver | null = null;
+    const wrap = wrapRef.current;
+    if (wrap) {
+      io = new IntersectionObserver((es) => {
+        visible = es[0]?.isIntersecting ?? true;
+      });
+      io.observe(wrap);
+    }
     const timer = setInterval(() => {
       const u = uRef.current;
-      if (!u || !plotStore.isDirty()) return;
+      if (!u || !visible || !plotStore.isDirty()) return;
       plotStore.clearDirty();
       const settings = plotStore.getSnapshot().settings;
       const aligned = plotStore.buildAligned();
@@ -389,7 +398,10 @@ export function Plot2D() {
         u.setScale("x", { min: last - span, max: last + span * 0.05 });
       }
     }, 120);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      io?.disconnect();
+    };
   }, [plot.channels]);
 
   const autoY = () => {

@@ -1,4 +1,4 @@
-﻿use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +41,10 @@ pub struct Boundary {
     pub footer_bytes: Option<Vec<u8>>,
     #[serde(default)]
     pub max_length: Option<usize>,
+    #[serde(default)]
+    pub disc_offset: Option<usize>,
+    #[serde(default)]
+    pub disc_value: Option<Vec<u8>>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -86,6 +90,10 @@ pub struct FieldDef {
     pub color: String,
     #[serde(default)]
     pub bits: Option<BitsCfg>,
+    #[serde(default)]
+    pub csv_delim: Option<String>,
+    #[serde(default)]
+    pub csv_type: Option<String>,
 }
 
 fn default_endian() -> String {
@@ -118,6 +126,8 @@ pub struct FrameRow {
     pub valid: bool,
     pub error: Option<String>,
     pub fields: Vec<FieldOut>,
+    #[serde(default)]
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Serialize, Clone)]
@@ -126,6 +136,7 @@ pub struct FramesEvent {
     pub rows: Vec<FrameRow>,
     pub total: u64,
     pub errors: u64,
+    pub dropped: u64,
 }
 
 enum Eval {
@@ -150,6 +161,7 @@ impl Machine {
         ts: u64,
         total: &mut u64,
         errors: &mut u64,
+        dropped: &mut u64,
         rows: &mut Vec<FrameRow>,
     ) {
         if !tpl.enabled {
@@ -160,28 +172,40 @@ impl Machine {
             let abs = base_seq + j as u64;
             if !self.collecting {
                 self.buf.push(b);
-                if self.buf.len() >= header.len() {
+                if header.is_empty() {
+                    self.collecting = true;
+                    self.frame_start = abs;
+                } else if self.buf.len() >= header.len() {
                     if self.buf.ends_with(header) {
                         if self.buf.len() > header.len() {
+                            *dropped += (self.buf.len() - header.len()) as u64;
                             self.buf.drain(..self.buf.len() - header.len());
                         }
                         self.collecting = true;
                         self.frame_start = abs + 1 - header.len() as u64;
                     } else {
-                        self.resync(header);
+                        *dropped += self.resync(header);
                     }
                 }
             } else {
                 self.buf.push(b);
                 match self.evaluate(tpl) {
                     Eval::Need => {
-                        if self.buf.len() > header.len() && self.buf.ends_with(header) {
+                        if !header.is_empty() && self.buf.len() > header.len() && self.buf.ends_with(header) {
+                            *dropped += (self.buf.len() - header.len()) as u64;
                             self.frame_start = abs + 1 - header.len() as u64;
                             self.buf.drain(..self.buf.len() - header.len());
                         }
                     }
-                    Eval::TooBig => self.reset(),
+                    Eval::TooBig => {
+                        *dropped += self.buf.len() as u64;
+                        self.reset();
+                    }
                     Eval::Complete => {
+                        if self.reject_by_disc(tpl) {
+                            self.reset();
+                            continue;
+                        }
                         let (valid, err) = verify(tpl, &self.buf);
                         let fields = if valid {
                             decode_fields(tpl, &self.buf)
@@ -202,6 +226,7 @@ impl Machine {
                             valid,
                             error: err,
                             fields,
+                            bytes: self.buf.clone(),
                         });
                         self.reset();
                     }
@@ -210,18 +235,38 @@ impl Machine {
         }
     }
 
-    fn resync(&mut self, header: &[u8]) {
+    fn reject_by_disc(&self, tpl: &FrameTemplate) -> bool {
+        let (Some(off), Some(val)) = (tpl.boundary.disc_offset, tpl.boundary.disc_value.as_deref()) else {
+            return false;
+        };
+        if val.is_empty() {
+            return false;
+        }
+        if self.buf.len() < off + val.len() {
+            return false;
+        }
+        &self.buf[off..off + val.len()] != val
+    }
+
+    fn resync(&mut self, header: &[u8]) -> u64 {
+        if header.is_empty() {
+            return 0;
+        }
+        let mut dropped = 0u64;
         while self.buf.len() > header.len() {
             match self.buf[1..].iter().position(|&c| c == header[0]) {
                 Some(pos) => {
                     self.buf.drain(..1 + pos);
+                    dropped += 1 + pos as u64;
                 }
                 None => {
+                    let n = self.buf.len() as u64;
                     self.buf.clear();
-                    return;
+                    return dropped + n;
                 }
             }
         }
+        dropped
     }
 
     fn reset(&mut self) {
@@ -296,6 +341,7 @@ pub struct ParserEngine {
     machines: Vec<Machine>,
     pub total: u64,
     pub errors: u64,
+    pub dropped: u64,
 }
 
 impl ParserEngine {
@@ -305,6 +351,7 @@ impl ParserEngine {
             machines: Vec::new(),
             total: 0,
             errors: 0,
+            dropped: 0,
         }
     }
 
@@ -326,6 +373,7 @@ impl ParserEngine {
             .collect();
         self.total = 0;
         self.errors = 0;
+        self.dropped = 0;
         Ok(())
     }
 
@@ -339,10 +387,11 @@ impl ParserEngine {
             machines,
             total,
             errors,
+            dropped,
         } = self;
         for m in machines.iter_mut() {
             let tpl = &templates[m.tpl_idx];
-            m.feed(tpl, data, base_seq, ts, total, errors, &mut rows);
+            m.feed(tpl, data, base_seq, ts, total, errors, dropped, &mut rows);
         }
         rows
     }
@@ -350,20 +399,22 @@ impl ParserEngine {
 
 fn validate(tpl: &FrameTemplate) -> Result<(), String> {
     let b = &tpl.boundary;
-    if b.header_bytes.is_empty() {
-        return Err(format!("模板[{}]缺少帧头字节", tpl.name));
-    }
     if b.header_bytes.len() > 8 {
         return Err(format!("模板[{}]帧头长度不能超过8字节", tpl.name));
     }
     let max_len = b.max_length.unwrap_or(512);
-    if max_len < b.header_bytes.len() + 1 || max_len > 65536 {
+    if max_len < (b.header_bytes.len() + 1).min(2) || max_len > 65536 {
         return Err(format!("模板[{}]最大帧长不合法", tpl.name));
+    }
+    if let (Some(off), Some(val)) = (b.disc_offset, b.disc_value.as_deref()) {
+        if !val.is_empty() && off + val.len() < b.header_bytes.len() {
+            return Err(format!("模板[{}]识别位与帧头重叠", tpl.name));
+        }
     }
     match b.mode.as_str() {
         "fixedLength" => {
             let t = b.fixed_length.unwrap_or(0);
-            if t < b.header_bytes.len() || t > max_len {
+            if t == 0 || t < b.header_bytes.len() || t > max_len {
                 return Err(format!(
                     "模板[{}]固定帧长不合法（需≥帧头长度且≤最大帧长）",
                     tpl.name
@@ -452,7 +503,7 @@ fn verify(tpl: &FrameTemplate, buf: &[u8]) -> (bool, Option<String>) {
 
 fn checksum_size(algo: &str) -> usize {
     match algo {
-        "crc16_modbus" | "crc16_ccitt" => 2,
+        "crc16_modbus" | "crc16_ccitt" | "sumadd" => 2,
         "crc32" => 4,
         _ => 1,
     }
@@ -461,6 +512,15 @@ fn checksum_size(algo: &str) -> usize {
 pub fn checksum_compute(algo: &str, data: &[u8]) -> u64 {
     match algo {
         "sum8" => data.iter().fold(0u8, |acc, &b| acc.wrapping_add(b)) as u64,
+        "sumadd" => {
+            let mut sc = 0u8;
+            let mut ac = 0u8;
+            for &b in data {
+                sc = sc.wrapping_add(b);
+                ac = ac.wrapping_add(sc);
+            }
+            sc as u64 | ((ac as u64) << 8)
+        }
         "xor8" => data.iter().fold(0u8, |acc, &b| acc ^ b) as u64,
         "crc16_modbus" => crc16_modbus(data) as u64,
         "crc16_ccitt" => crc16_ccitt(data) as u64,
@@ -536,9 +596,34 @@ fn type_size(f: &FieldDef) -> usize {
         "float64" => 8,
         "bcd" => f.size.unwrap_or(2),
         "ascii" => f.size.unwrap_or(4),
+        "csv" => 0,
         _ => f.size.unwrap_or(1),
     }
 }
+
+fn csv_delim_of(f: &FieldDef) -> Vec<u8> {
+    let d = f.csv_delim.as_deref().unwrap_or(",");
+    d.bytes().collect()
+}
+
+fn parse_csv_num(s: &str, ty: &str) -> Option<f64> {
+    let t = s.trim();
+    if t.is_empty() {
+        return None;
+    }
+    match ty {
+        "int8" => t.parse::<i8>().ok().map(|v| v as f64),
+        "uint8" => t.parse::<u8>().ok().map(|v| v as f64),
+        "int16" => t.parse::<i16>().ok().map(|v| v as f64),
+        "uint16" => t.parse::<u16>().ok().map(|v| v as f64),
+        "int32" => t.parse::<i32>().ok().map(|v| v as f64),
+        "uint32" => t.parse::<u32>().ok().map(|v| v as f64),
+        "float64" => t.parse::<f64>().ok(),
+        _ => t.parse::<f32>().ok().map(|v| v as f64),
+    }
+}
+
+const CSV_MAX_CH: usize = 64;
 
 fn decode_numeric(f: &FieldDef, bytes: &[u8]) -> f64 {
     match f.field_type.as_str() {
@@ -578,6 +663,47 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
         if !matches!(f.role.as_str(), "data" | "payload" | "id" | "seq" | "length") {
             continue;
         }
+        if f.field_type == "csv" {
+            let delim = csv_delim_of(f);
+            let rt = reserved_tail_len(tpl);
+            let end = buf.len().saturating_sub(rt).max(f.offset);
+            if f.offset < end {
+                let sl = &buf[f.offset..end];
+                let text = String::from_utf8_lossy(sl).to_string();
+                let pat = String::from_utf8_lossy(&delim).to_string();
+                let segs: Vec<&str> = if pat.is_empty() {
+                    text.split(',').collect()
+                } else {
+                    text.split(pat.as_str()).collect()
+                };
+                let ty = f.csv_type.as_deref().unwrap_or("float32");
+                let name = f.name.clone();
+                let scale = f.scale.unwrap_or(1.0);
+                let offv = f.offset_value.unwrap_or(0.0);
+                out.push(FieldOut {
+                    id: f.id.clone(),
+                    name: name.clone(),
+                    raw: 0.0,
+                    value: 0.0,
+                    text: Some(text.clone()),
+                });
+                for (i, seg) in segs.iter().enumerate() {
+                    if i >= CSV_MAX_CH {
+                        break;
+                    }
+                    if let Some(v) = parse_csv_num(seg, ty) {
+                        out.push(FieldOut {
+                            id: format!("{}#{}", f.id, i + 1),
+                            name: format!("{}{}", name, i + 1),
+                            raw: v,
+                            value: v * scale + offv,
+                            text: None,
+                        });
+                    }
+                }
+            }
+            continue;
+        }
         let size = type_size(f);
         if f.offset + size > buf.len() {
             continue;
@@ -606,6 +732,21 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
     out
 }
 
+fn reserved_tail_len(tpl: &FrameTemplate) -> usize {
+    let mut rt = 0;
+    if let Some(ck) = &tpl.checksum {
+        if ck.algo != "none" && ck.coverage_end < 0 {
+            rt += checksum_size(&ck.algo);
+        }
+    }
+    if tpl.boundary.mode == "footer" {
+        if let Some(fb) = &tpl.boundary.footer_bytes {
+            rt += fb.len();
+        }
+    }
+    rt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +769,8 @@ mod tests {
                         length_adjust: Some(3),
                         footer_bytes: None,
                         max_length: Some(512),
+                        disc_offset: None,
+                        disc_value: None,
                     },
                     checksum: Some(ChecksumCfg {
                         algo: "sum8".into(),
@@ -655,6 +798,8 @@ mod tests {
                         length_adjust: None,
                         footer_bytes: None,
                         max_length: Some(512),
+                        disc_offset: None,
+                        disc_value: None,
                     },
                     checksum: Some(ChecksumCfg {
                         algo: "crc16_modbus".into(),
@@ -689,6 +834,8 @@ mod tests {
             unit: None,
             color: "#888888".into(),
             bits: None,
+            csv_delim: None,
+            csv_type: None,
         }
     }
 
@@ -797,5 +944,326 @@ mod tests {
         let rows = eng.feed(&frame, 0, 1);
         assert_eq!(rows.len(), 1);
         assert!(rows[0].valid);
+    }
+
+    fn ano_rules() -> ParseRules {
+        ParseRules {
+            templates: vec![FrameTemplate {
+                id: "v7".into(),
+                name: "匿名V7".into(),
+                color: "#4e9cef".into(),
+                enabled: true,
+                boundary: Boundary {
+                    mode: "lengthField".into(),
+                    header_bytes: vec![0xAA],
+                    fixed_length: None,
+                    length_offset: Some(3),
+                    length_size: Some(1),
+                    length_endian: None,
+                    length_adjust: Some(6),
+                    footer_bytes: None,
+                    max_length: Some(64),
+                    disc_offset: None,
+                    disc_value: None,
+                },
+                checksum: Some(ChecksumCfg {
+                    algo: "sumadd".into(),
+                    coverage_start: 0,
+                    coverage_end: -2,
+                    endian: "little".into(),
+                }),
+                fields: vec![FieldDef {
+                    id: "f-id".into(),
+                    name: "功能码".into(),
+                    role: "payload".into(),
+                    offset: 2,
+                    field_type: "uint8".into(),
+                    endian: "little".into(),
+                    size: None,
+                    scale: None,
+                    offset_value: None,
+                    unit: None,
+                    color: "#4e9cef".into(),
+                    bits: None,
+                    csv_delim: None,
+                    csv_type: None,
+                }],
+            }],
+        }
+    }
+
+    fn build_ano(data: &[u8], daddr: u8, fid: u8) -> Vec<u8> {
+        let mut f = vec![0xAA, daddr, fid, data.len() as u8];
+        f.extend_from_slice(data);
+        let mut sc = 0u8;
+        let mut ac = 0u8;
+        for &b in &f {
+            sc = sc.wrapping_add(b);
+            ac = ac.wrapping_add(sc);
+        }
+        f.push(sc);
+        f.push(ac);
+        f
+    }
+
+    #[test]
+    fn ano_v7_sumadd_verify() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ano_rules()).unwrap();
+        let frame = build_ano(&[1, 2, 3, 4, 5, 6, 7, 8], 0xFF, 0xF1);
+        assert_eq!(frame.len(), 14);
+        let rows = eng.feed(&frame, 0, 1);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].valid);
+        assert_eq!(rows[0].len, frame.len());
+        assert_eq!(rows[0].bytes, frame);
+        let id = rows[0].fields.iter().find(|f| f.id == "f-id").unwrap();
+        assert_eq!(id.raw, 241.0);
+        assert_eq!(eng.errors, 0);
+        assert_eq!(eng.dropped, 0);
+
+        let mut bad = build_ano(&[9, 9, 9], 0xFF, 0x03);
+        let n = bad.len();
+        bad[n - 3] ^= 0x01;
+        let rows = eng.feed(&bad, 100, 2);
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].valid);
+        assert!(rows[0].error.is_some());
+        assert_eq!(eng.errors, 1);
+    }
+
+    #[test]
+    fn dropped_counts_junk_bytes() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ano_rules()).unwrap();
+        let mut stream = vec![0x11, 0x22, 0x33];
+        stream.extend_from_slice(&build_ano(&[7, 7], 0xFF, 0xF2));
+        let rows = eng.feed(&stream, 0, 1);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].valid);
+        assert!(eng.dropped >= 3, "帧前杂散字节应计数, got {}", eng.dropped);
+    }
+
+    fn comma_rules() -> ParseRules {
+        ParseRules {
+            templates: vec![FrameTemplate {
+                id: "csv".into(),
+                name: "逗号帧".into(),
+                color: "#39c5cf".into(),
+                enabled: true,
+                boundary: Boundary {
+                    mode: "footer".into(),
+                    header_bytes: Vec::new(),
+                    fixed_length: None,
+                    length_offset: None,
+                    length_size: None,
+                    length_endian: None,
+                    length_adjust: None,
+                    footer_bytes: Some(vec![0x2C]),
+                    max_length: Some(32),
+                    disc_offset: None,
+                    disc_value: None,
+                },
+                checksum: None,
+                fields: vec![FieldDef {
+                    id: "v".into(),
+                    name: "数值".into(),
+                    role: "data".into(),
+                    offset: 0,
+                    field_type: "ascii".into(),
+                    endian: "little".into(),
+                    size: Some(4),
+                    scale: None,
+                    offset_value: None,
+                    unit: Some("cm".into()),
+                    color: "#3fb950".into(),
+                    bits: None,
+                    csv_delim: None,
+                    csv_type: None,
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn no_header_comma_delimited_ascii_frames() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(comma_rules()).unwrap();
+        let stream = b"12.3,12.6,15.6,17.6,".to_vec();
+        let rows = eng.feed(&stream, 0, 1);
+        assert_eq!(rows.len(), 4, "应为4个逗号分隔帧: {rows:?}");
+        for (i, r) in rows.iter().enumerate() {
+            assert!(r.valid, "第{i}帧应有效: {:?}", r.error);
+            assert_eq!(r.len, 5);
+            let txt = r.fields.iter().find(|f| f.id == "v").unwrap().text.as_deref();
+            let want = ["12.3", "12.6", "15.6", "17.6"][i];
+            assert_eq!(txt, Some(want));
+        }
+        assert_eq!(eng.dropped, 0);
+        assert_eq!(eng.errors, 0);
+    }
+
+    fn v7_disc_rules() -> ParseRules {
+        let tpl = |id: &str, name: &str, fid_val: u8| FrameTemplate {
+            id: id.into(),
+            name: name.into(),
+            color: "#4e9cef".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "lengthField".into(),
+                header_bytes: vec![0xAA],
+                fixed_length: None,
+                length_offset: Some(3),
+                length_size: Some(1),
+                length_endian: None,
+                length_adjust: Some(6),
+                footer_bytes: None,
+                max_length: Some(64),
+                disc_offset: Some(2),
+                disc_value: Some(vec![fid_val]),
+            },
+            checksum: Some(ChecksumCfg {
+                algo: "sumadd".into(),
+                coverage_start: 0,
+                coverage_end: -2,
+                endian: "little".into(),
+            }),
+            fields: vec![FieldDef {
+                id: format!("{id}-fid"),
+                name: "功能码".into(),
+                role: "payload".into(),
+                offset: 2,
+                field_type: "uint8".into(),
+                endian: "little".into(),
+                size: None,
+                scale: None,
+                offset_value: None,
+                unit: None,
+                color: "#4e9cef".into(),
+                bits: None,
+                csv_delim: None,
+                csv_type: None,
+            }],
+        };
+        ParseRules {
+            templates: vec![
+                tpl("v7-01", "惯性传感", 0x01),
+                tpl("v7-03", "姿态欧拉", 0x03),
+            ],
+        }
+    }
+
+    #[test]
+    fn v7_like_dual_template_discriminator() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(v7_disc_rules()).unwrap();
+        let f1 = build_ano(&[1, 2, 3, 4, 5], 0xFF, 0x03);
+        let f2 = build_ano(&[9, 8, 7], 0xFF, 0x01);
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&f1);
+        stream.extend_from_slice(&f2);
+        let rows = eng.feed(&stream, 0, 1);
+        assert_eq!(rows.len(), 2, "同头不同功能码应各归其模板: {rows:?}");
+        let r0 = rows.iter().find(|r| r.tpl_id == "v7-03").expect("应有欧拉帧行");
+        assert!(r0.valid);
+        assert_eq!(r0.len, f1.len());
+        let r1 = rows.iter().find(|r| r.tpl_id == "v7-01").expect("应有惯性帧行");
+        assert!(r1.valid);
+        assert_eq!(r1.len, f2.len());
+        assert_eq!(eng.total, 2);
+        assert_eq!(eng.errors, 0);
+    }
+
+    #[test]
+    fn disc_mismatched_frame_rejected() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(v7_disc_rules()).unwrap();
+        let mut eng2 = ParserEngine::new();
+        eng2.set_rules(v7_disc_rules()).unwrap();
+        let other = build_ano(&[5, 5, 5], 0xFF, 0x02);
+        let rows = eng.feed(&other, 0, 1);
+        assert!(rows.is_empty(), "非本模板帧应被识别位拒绝");
+        assert_eq!(eng.dropped, 0, "非本模板帧不应计为杂散数据");
+        let rows2 = eng2.feed(&other, 0, 1);
+        assert!(rows2.is_empty());
+    }
+
+    fn csv_rules(delim: &str, ty: &str) -> ParseRules {
+        ParseRules {
+            templates: vec![FrameTemplate {
+                id: "csvf".into(),
+                name: "自适应文本帧".into(),
+                color: "#39c5cf".into(),
+                enabled: true,
+                boundary: Boundary {
+                    mode: "footer".into(),
+                    header_bytes: Vec::new(),
+                    fixed_length: None,
+                    length_offset: None,
+                    length_size: None,
+                    length_endian: None,
+                    length_adjust: None,
+                    footer_bytes: Some(vec![0x0A]),
+                    max_length: Some(128),
+                    disc_offset: None,
+                    disc_value: None,
+                },
+                checksum: None,
+                fields: vec![FieldDef {
+                    id: "vals".into(),
+                    name: "通道".into(),
+                    role: "data".into(),
+                    offset: 0,
+                    field_type: "csv".into(),
+                    endian: "little".into(),
+                    size: None,
+                    scale: None,
+                    offset_value: None,
+                    unit: None,
+                    color: "#3fb950".into(),
+                    bits: None,
+                    csv_delim: Some(delim.into()),
+                    csv_type: Some(ty.into()),
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn csv_adaptive_float_channels() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(csv_rules(",", "float32")).unwrap();
+        let rows = eng.feed(b"12.5,-3.0,1001.75,0.5\n", 0, 1);
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert!(r.valid);
+        let ch = |k: &str| r.fields.iter().find(|f| f.id == k).map(|f| f.value);
+        assert_eq!(ch("vals#1"), Some(12.5));
+        assert_eq!(ch("vals#2"), Some(-3.0));
+        assert_eq!(ch("vals#3"), Some(1001.75));
+        assert_eq!(ch("vals#4"), Some(0.5));
+        assert!(r.fields.iter().find(|f| f.id == "vals#5").is_none());
+        let rows2 = eng.feed(b"7.25,8.5\n", 0, 2);
+        let r2 = &rows2[0];
+        assert_eq!(
+            r2.fields.iter().find(|f| f.id == "vals#2").map(|f| f.value),
+            Some(8.5)
+        );
+        assert!(r2.fields.iter().find(|f| f.id == "vals#3").is_none());
+    }
+
+    #[test]
+    fn csv_custom_delim_and_uint8() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(csv_rules("\\", "uint8")).unwrap();
+        let rows = eng.feed(b"200\\1\\55\n", 0, 1);
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert!(r.valid);
+        let ch = |k: &str| r.fields.iter().find(|f| f.id == k).map(|f| f.value);
+        assert_eq!(ch("vals#1"), Some(200.0));
+        assert_eq!(ch("vals#2"), Some(1.0));
+        assert_eq!(ch("vals#3"), Some(55.0));
+        assert_eq!(ch("vals#4"), None);
     }
 }

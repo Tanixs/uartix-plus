@@ -1,9 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import type {
   FieldDef,
   FieldType,
-  FramesEventPayload,
   FrameTemplate,
   ParseRules,
 } from "../../ipc/types";
@@ -19,24 +17,21 @@ export type Selection =
   | { kind: "field"; templateId: string; fieldId: string }
   | null;
 
-export interface LatestValue {
-  value: number;
-  text: string | null;
-  ts: number;
-  seq: number;
-  valid: boolean;
-}
-
 export interface ProtocolSnapshot {
   rules: ParseRules;
   selection: Selection;
   hexSelection: HexSelection | null;
-  stats: { total: number; errors: number };
-  tplStats: Record<string, { ok: number; err: number }>;
-  latest: Record<string, LatestValue>;
   locateReq: { seq: number; nonce: number } | null;
   syncError: string | null;
   demoRunning: boolean;
+  undoStack: string[];
+  redoStack: string[];
+  grpRev: number;
+}
+
+export interface GroupMeta {
+  name: string;
+  color?: string;
 }
 
 export const PALETTE = [
@@ -62,9 +57,11 @@ export const FIELD_SIZES: Record<FieldType, number | null> = {
   ascii: null,
   bcd: null,
   bits: 1,
+  csv: null,
 };
 
 export function fieldSize(f: FieldDef): number {
+  if (f.type === "csv") return 1;
   const fixed = FIELD_SIZES[f.type];
   if (fixed !== null) return fixed;
   return f.size ?? (f.type === "bcd" ? 2 : 4);
@@ -77,6 +74,7 @@ export const DEMO_RULES: ParseRules = {
       name: "演示-环境帧",
       color: "#4e9cef",
       enabled: true,
+      presetKey: "demo",
       boundary: {
         mode: "lengthField",
         headerBytes: [0xaa, 0x55],
@@ -98,6 +96,7 @@ export const DEMO_RULES: ParseRules = {
       name: "演示-姿态帧",
       color: "#e5534b",
       enabled: true,
+      presetKey: "demo",
       boundary: {
         mode: "fixedLength",
         headerBytes: [0xbb, 0x66],
@@ -119,22 +118,240 @@ let snapshot: ProtocolSnapshot = {
   rules: { templates: [] },
   selection: null,
   hexSelection: null,
-  stats: { total: 0, errors: 0 },
-  tplStats: {},
-  latest: {},
   locateReq: null,
   syncError: null,
   demoRunning: false,
+  undoStack: [],
+  redoStack: [],
+  grpRev: 0,
 };
 
 const listeners = new Set<() => void>();
 let initialized = false;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let locateNonce = 0;
+let grpUid = 0;
 
 function set(patch: Partial<ProtocolSnapshot>) {
   snapshot = { ...snapshot, ...patch };
   listeners.forEach((l) => l());
+}
+
+function pushHistory() {
+  const rs = JSON.stringify(snapshot.rules);
+  const stack = snapshot.undoStack;
+  if (stack[stack.length - 1] === rs) return;
+  set({
+    undoStack: [...stack, rs].slice(-50),
+    redoStack: [],
+  });
+}
+
+export function undo() {
+  const { undoStack, redoStack } = snapshot;
+  if (undoStack.length === 0) return;
+  const last = undoStack[undoStack.length - 1];
+  const cur = JSON.stringify(snapshot.rules);
+  if (last === cur) {
+    set({ undoStack: undoStack.slice(0, -1) });
+    return;
+  }
+  set({ undoStack: undoStack.slice(0, -1), redoStack: [...redoStack, cur] });
+  set({ rules: JSON.parse(last) });
+  scheduleSync();
+}
+
+export function redo() {
+  const { undoStack, redoStack } = snapshot;
+  const next = redoStack[redoStack.length - 1];
+  if (!next) return;
+  const cur = JSON.stringify(snapshot.rules);
+  set({
+    redoStack: redoStack.slice(0, -1),
+    undoStack: [...undoStack, cur],
+  });
+  set({ rules: JSON.parse(next) });
+  scheduleSync();
+}
+
+const GRPS_KEY = "vs.grps";
+let grpMeta: Record<string, GroupMeta> = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(GRPS_KEY) ?? "{}") as Record<string, GroupMeta>;
+  } catch {
+    return {};
+  }
+})();
+
+export function setGroupMeta(key: string, meta: Partial<GroupMeta>) {
+  const cur = grpMeta[key] ?? { name: key };
+  grpMeta = { ...grpMeta, [key]: { ...cur, ...meta } };
+  try {
+    localStorage.setItem(GRPS_KEY, JSON.stringify(grpMeta));
+  } catch {
+    return;
+  }
+  set({ grpRev: snapshot.grpRev + 1 });
+}
+
+export function getGroupMeta(key: string): GroupMeta | null {
+  return grpMeta[key] ?? null;
+}
+
+export function exportTemplatesWithMeta(): {
+  templates: FrameTemplate[];
+  groups: Record<string, GroupMeta>;
+} {
+  return {
+    templates: structuredClone(snapshot.rules.templates),
+    groups: structuredClone(grpMeta),
+  };
+}
+
+export function importGroupsMeta(meta: Record<string, GroupMeta>) {
+  for (const [k, v] of Object.entries(meta)) {
+    if (!grpMeta[k]) setGroupMeta(k, v);
+  }
+}
+
+let tplClip: FrameTemplate | null = null;
+
+export function canPaste(): boolean {
+  return tplClip !== null;
+}
+
+export function copyTpl(tplId: string): boolean {
+  const t = snapshot.rules.templates.find((x) => x.id === tplId);
+  if (!t) return false;
+  tplClip = structuredClone(t);
+  return true;
+}
+
+export function pasteTpl(groupKey: string): string | null {
+  if (!tplClip) return null;
+  pushHistory();
+  const dup = structuredClone(tplClip);
+  dup.id = crypto.randomUUID();
+  dup.name = `${dup.name.replace(/\s*\(副本\)\s*$/, "")} (副本)`;
+  dup.groupKey = groupKey;
+  set({
+    rules: { templates: [...snapshot.rules.templates, dup] },
+    selection: { kind: "template", templateId: dup.id },
+  });
+  scheduleSync();
+  return dup.id;
+}
+
+function stripClusterSuffix(n: string): string {
+  return n.replace(/\s*·帧型\d+\s*$/, "");
+}
+
+export function createCluster(name: string, count: number, len: number): string {
+  pushHistory();
+  const grpKey = `usr-${Date.now().toString(36)}-${(grpUid++).toString(36)}`;
+  setGroupMeta(grpKey, { name });
+  const tpls: FrameTemplate[] = Array.from({ length: Math.max(1, Math.min(64, count)) }, (_, i) => ({
+    id: crypto.randomUUID(),
+    name: `${newName(name)}·帧型${i + 1}`,
+    color: PALETTE[(snapshot.rules.templates.length + i) % PALETTE.length],
+    enabled: false,
+    boundary: {
+      mode: "fixedLength",
+      headerBytes: [],
+      fixedLength: len,
+      maxLength: 256,
+    },
+    checksum: null,
+    fields: [],
+    groupKey: grpKey,
+  }));
+  set({
+    rules: { templates: [...snapshot.rules.templates, ...tpls] },
+    selection: { kind: "template", templateId: tpls[0].id },
+  });
+  scheduleSync();
+  return tpls[0].id;
+}
+
+function newName(base: string): string {
+  const taken = new Set(snapshot.rules.templates.map((t) => stripClusterSuffix(t.name)));
+  if (!taken.has(base)) return base;
+  let i = 2;
+  while (taken.has(`${base} (${i})`)) i++;
+  return `${base} (${i})`;
+}
+
+export function createCsvTemplate(delim: string, elemType: string, lineEnd: string): string {
+  pushHistory();
+  const footer =
+    lineEnd === "CRLF" ? [0x0d, 0x0a] : lineEnd === "CR" ? [0x0d] : lineEnd === "TAB" ? [0x09] : [0x0a];
+  const tpl: FrameTemplate = {
+    id: crypto.randomUUID(),
+    name: newName("自适应文本帧"),
+    color: "#39c5cf",
+    enabled: true,
+    boundary: {
+      mode: "footer",
+      headerBytes: [],
+      footerBytes: footer,
+      maxLength: 512,
+    },
+    checksum: null,
+    fields: [
+      {
+        id: crypto.randomUUID(),
+        name: "通道",
+        role: "data",
+        offset: 0,
+        type: "csv",
+        endian: "little",
+        color: "#3fb950",
+        csvDelim: delim,
+        csvType: elemType,
+      },
+    ],
+    presetKey: null,
+  };
+  set({
+    rules: { templates: [...snapshot.rules.templates, tpl] },
+    selection: { kind: "template", templateId: tpl.id },
+  });
+  scheduleSync();
+  return tpl.id;
+}
+
+export function renameGroup(key: string, name: string) {
+  const tpls = snapshot.rules.templates.filter((t) => (t.presetKey ?? t.groupKey) === key);
+  if (tpls.length === 0) {
+    setGroupMeta(key, { name });
+    return;
+  }
+  pushHistory();
+  setGroupMeta(key, { name });
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((t) => {
+        if ((t.presetKey ?? t.groupKey) !== key) return t;
+        if (t.presetKey) return t;
+        const m = t.name.match(/^(.*?)·帧型(\d+)$/);
+        if (!m) return t;
+        return { ...t, name: `${name}·帧型${m[2]}` };
+      }),
+    },
+  });
+  scheduleSync();
+}
+
+export function setGroupEnabled(key: string, enabled: boolean, keyOf: (t: FrameTemplate) => string) {
+  pushHistory();
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((t) =>
+        keyOf(t) === key ? { ...t, enabled } : t,
+      ),
+    },
+  });
+  scheduleSync();
 }
 
 export function subscribe(cb: () => void) {
@@ -150,47 +367,33 @@ export function getSnapshot() {
 
 function scheduleSync() {
   if (syncTimer) clearTimeout(syncTimer);
-  syncTimer = setTimeout(async () => {
-    localStorage.setItem("vs.rules", JSON.stringify(snapshot.rules));
-    try {
-      await invoke("parser_set_rules", { rules: snapshot.rules });
-      set({ syncError: null });
-    } catch (e) {
-      set({ syncError: String(e) });
-    }
-  }, 250);
+  syncTimer = setTimeout(flushRules, 250);
+}
+
+async function flushRules(): Promise<boolean> {
+  if (syncTimer) {
+    clearTimeout(syncTimer);
+    syncTimer = null;
+  }
+  localStorage.setItem("vs.rules", JSON.stringify(snapshot.rules));
+  try {
+    await invoke("parser_set_rules", { rules: snapshot.rules });
+    set({ syncError: null });
+    return true;
+  } catch (e) {
+    set({ syncError: String(e) });
+    return false;
+  }
+}
+
+export async function saveNow(): Promise<boolean> {
+  const ok = await flushRules();
+  return ok;
 }
 
 export async function init() {
   if (initialized) return;
   initialized = true;
-
-  await listen<FramesEventPayload>("parser:frames", (e) => {
-    const tplStats = { ...snapshot.tplStats };
-    const latest = { ...snapshot.latest };
-    for (const row of e.payload.rows) {
-      const cur = tplStats[row.tplId] ?? { ok: 0, err: 0 };
-      tplStats[row.tplId] = row.valid
-        ? { ...cur, ok: cur.ok + 1 }
-        : { ...cur, err: cur.err + 1 };
-      if (row.valid) {
-        for (const f of row.fields) {
-          latest[f.id] = {
-            value: f.value,
-            text: f.text,
-            ts: row.tsMs,
-            seq: row.seq,
-            valid: row.valid,
-          };
-        }
-      }
-    }
-    set({
-      stats: { total: e.payload.total, errors: e.payload.errors },
-      tplStats,
-      latest,
-    });
-  });
 
   try {
     const saved = localStorage.getItem("vs.rules");
@@ -225,6 +428,7 @@ export function locate(seq: number) {
 }
 
 export function addTemplate(headerBytes: number[]): string {
+  pushHistory();
   const tpl: FrameTemplate = {
     id: crypto.randomUUID(),
     name: `模板${snapshot.rules.templates.length + 1}`,
@@ -247,7 +451,56 @@ export function addTemplate(headerBytes: number[]): string {
   return tpl.id;
 }
 
+export function createBlankTemplate(len: number): string {
+  pushHistory();
+  const n = snapshot.rules.templates.filter((t) => t.presetKey === null || t.presetKey === undefined).length + 1;
+  const tpl: FrameTemplate = {
+    id: crypto.randomUUID(),
+    name: `协议 ${n}`,
+    color: PALETTE[snapshot.rules.templates.length % PALETTE.length],
+    enabled: false,
+    boundary: {
+      mode: "fixedLength",
+      headerBytes: [],
+      fixedLength: len,
+      maxLength: 256,
+    },
+    checksum: null,
+    fields: [],
+    presetKey: null,
+  };
+  set({
+    rules: { templates: [...snapshot.rules.templates, tpl] },
+    selection: { kind: "template", templateId: tpl.id },
+  });
+  scheduleSync();
+  return tpl.id;
+}
+
+export function importTemplates(tpls: FrameTemplate[], presetKey?: string | null) {
+  if (tpls.length === 0) return;
+  pushHistory();
+  const names = new Set(snapshot.rules.templates.map((t) => t.name));
+  const renamed = tpls.map((t) => {
+    let base = t;
+    if (presetKey !== undefined) {
+      base = { ...t, presetKey: presetKey ?? null };
+    }
+    if (!names.has(base.name)) return base;
+    let i = 2;
+    while (names.has(`${base.name} (${i})`)) i++;
+    return { ...base, name: `${base.name} (${i})` };
+  });
+  set({
+    rules: { templates: [...snapshot.rules.templates, ...renamed] },
+    selection: { kind: "template", templateId: renamed[renamed.length - 1].id },
+  });
+  scheduleSync();
+}
+
 export function removeTemplate(id: string) {
+  pushHistory();
+  plotCleanup(id, null);
   set({
     rules: { templates: snapshot.rules.templates.filter((t) => t.id !== id) },
     selection: null,
@@ -255,7 +508,14 @@ export function removeTemplate(id: string) {
   scheduleSync();
 }
 
+export function replaceRules(templates: FrameTemplate[]) {
+  pushHistory();
+  set({ rules: { templates } });
+  scheduleSync();
+}
+
 export function patchTemplate(id: string, patch: Partial<FrameTemplate>) {
+  pushHistory();
   set({
     rules: {
       templates: snapshot.rules.templates.map((t) =>
@@ -270,6 +530,7 @@ export function patchBoundary(
   id: string,
   patch: Partial<FrameTemplate["boundary"]>,
 ) {
+  pushHistory();
   set({
     rules: {
       templates: snapshot.rules.templates.map((t) =>
@@ -286,6 +547,7 @@ export function patchChecksum(
 ) {
   const tpl = snapshot.rules.templates.find((t) => t.id === id);
   if (!tpl) return;
+  pushHistory();
   const checksum = { ...(tpl.checksum ?? { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" }), ...patch };
   set({
     rules: {
@@ -298,6 +560,7 @@ export function patchChecksum(
 }
 
 export function addField(templateId: string, field: FieldDef) {
+  pushHistory();
   set({
     rules: {
       templates: snapshot.rules.templates.map((t) =>
@@ -314,6 +577,7 @@ export function patchField(
   fieldId: string,
   patch: Partial<FieldDef>,
 ) {
+  pushHistory();
   set({
     rules: {
       templates: snapshot.rules.templates.map((t) =>
@@ -332,6 +596,8 @@ export function patchField(
 }
 
 export function removeField(templateId: string, fieldId: string) {
+  pushHistory();
+  plotCleanup(templateId, fieldId);
   set({
     rules: {
       templates: snapshot.rules.templates.map((t) =>
@@ -350,12 +616,20 @@ export function removeField(templateId: string, fieldId: string) {
 }
 
 export function loadDemoRules() {
+  pushHistory();
   const rules = JSON.parse(JSON.stringify(DEMO_RULES)) as ParseRules;
   set({ rules, selection: null });
   scheduleSync();
 }
 
-export async function toggleDemo(): Promise<void> {
+function plotCleanup(tplId: string, fieldId: string | null) {
+  try {
+    const plot = (window as unknown as { uartixPlot?: { removeByTpl: (a: string, b: string | null) => void } }).uartixPlot;
+    plot?.removeByTpl(tplId, fieldId);
+  } catch {
+    return;
+  }
+}export async function toggleDemo(): Promise<void> {
   if (snapshot.demoRunning) {
     await invoke("demo_stop");
     set({ demoRunning: false });

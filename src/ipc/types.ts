@@ -8,7 +8,8 @@ export type PanelId =
   | "console"
   | "table"
   | "plot2d"
-  | "view3d";
+  | "view3d"
+  | "framecanvas";
 
 export interface PanelMeta {
   id: PanelId;
@@ -56,6 +57,7 @@ export type Endian = "little" | "big";
 export type ChecksumAlgo =
   | "none"
   | "sum8"
+  | "sumadd"
   | "xor8"
   | "crc16_modbus"
   | "crc16_ccitt"
@@ -71,15 +73,18 @@ export type FieldType =
   | "float64"
   | "ascii"
   | "bcd"
-  | "bits";
+  | "bits"
+  | "csv";
 export type FieldRole =
   | "header"
-  | "length"
+  | "addr"
   | "id"
   | "seq"
-  | "payload"
+  | "length"
   | "data"
+  | "payload"
   | "checksum"
+  | "checksum2"
   | "footer";
 
 export interface Boundary {
@@ -92,6 +97,8 @@ export interface Boundary {
   lengthAdjust?: number | null;
   footerBytes?: number[] | null;
   maxLength: number;
+  discOffset?: number | null;
+  discValue?: number[] | null;
 }
 
 export interface ChecksumCfg {
@@ -119,6 +126,9 @@ export interface FieldDef {
   unit?: string | null;
   color: string;
   bits?: BitsCfg | null;
+  locked?: boolean | null;
+  csvDelim?: string | null;
+  csvType?: string | null;
 }
 
 export interface FrameTemplate {
@@ -129,6 +139,8 @@ export interface FrameTemplate {
   boundary: Boundary;
   checksum: ChecksumCfg | null;
   fields: FieldDef[];
+  presetKey?: string | null;
+  groupKey?: string | null;
 }
 
 export interface ParseRules {
@@ -153,12 +165,14 @@ export interface FrameRow {
   valid: boolean;
   error: string | null;
   fields: FieldOut[];
+  bytes?: number[];
 }
 
 export interface FramesEventPayload {
   rows: FrameRow[];
   total: number;
   errors: number;
+  dropped?: number;
 }
 
 export interface SpanOut {

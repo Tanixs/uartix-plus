@@ -7,6 +7,15 @@ mod serial;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
+        .unwrap_or_default()
+        .is_empty()
+    {
+        std::env::set_var(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--disable-features=msWebView2DragDropGlobalApiEnabled --disable-gpu-compositing",
+        );
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -24,6 +33,7 @@ pub fn run() {
             demo::demo_stop,
             demo::demo_running,
             files::save_text_file,
+            files::read_text_file,
             files::save_binary_file,
             files::hex_search
         ])

@@ -7,48 +7,98 @@ import {
 } from "dockview-react";
 import { panelComponents, PANEL_TITLES } from "./panels/panels";
 import { SerialToolbar } from "./features/serial/SerialToolbar";
+import { TitleBar } from "./shell/TitleBar";
+import { IconColumns } from "./shared/icons";
+import type { IfaceKind } from "./features/serial/serialStore";
+import type { WorkspacePreset } from "./features/settings/settingsStore";
+import { useSettings } from "./features/settings/settingsStore";
+import { SettingsModal } from "./features/settings/SettingsModal";
+import { HelpModal } from "./features/help/HelpModal";
+import type { PanelId } from "./ipc/types";
 import * as serialStore from "./features/serial/serialStore";
 import * as templateStore from "./features/protocol/templateStore";
 import * as framesStore from "./features/table/framesStore";
 import * as plotStore from "./features/plot/plotStore";
 import * as attitudeStore from "./features/attitude/attitudeStore";
 import * as variableStore from "./features/controls/variableStore";
-import type { PanelId, ThemeMode } from "./ipc/types";
+import * as fcStore from "./features/framecanvas/frameStore";
+import * as telemetryStore from "./features/protocol/telemetryStore";
 
-const THEME_KEY = "vs.theme";
 const LAYOUT_KEY = "vs.layout.v2";
 
-function applyDefaultLayout(api: DockviewApi) {
-  const clamp = (v: number, lo: number, hi: number) =>
-    Math.min(Math.max(v, lo), hi);
+function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto") {
   const w = window.innerWidth;
   const h = window.innerHeight;
-  const leftW = clamp(Math.round(w * 0.16), 190, 330);
-  const rightW = clamp(Math.round(w * 0.18), 240, 400);
-  const centerW = Math.max(400, w - leftW - rightW);
-  const bottomH = clamp(Math.round(h * 0.34), 170, 420);
-  const ctrlH = clamp(Math.round(h * 0.3), 150, 380);
-  const bottomColW = clamp(Math.round(centerW / 3), 240, 560);
+  const leftW = Math.max(240, Math.round(w * 0.25));
+  const rightW = Math.max(260, Math.round(w * 0.25));
+  const midW = Math.max(480, w - leftW - rightW);
+  const bottomH = Math.round(h * 0.5);
+  const bottomColW = Math.max(280, Math.round(midW / 2));
 
   api.addPanel({
     id: "templates",
     component: "templates",
     title: "协议模板",
-    minimumWidth: 180,
+    minimumWidth: 200,
   });
+
+  if (preset === "console") {
+    api.addPanel({
+      id: "hexview",
+      component: "hexview",
+      title: "Hex 数据流",
+      initialWidth: midW,
+      position: { referencePanel: "templates", direction: "right" },
+    });
+    api.addPanel({
+      id: "console",
+      component: "console",
+      title: "控制台",
+      initialHeight: Math.round(h * 0.4),
+      minimumHeight: 140,
+      position: { referencePanel: "hexview", direction: "below" },
+    });
+    api.addPanel({
+      id: "controls",
+      component: "controls",
+      title: "控制画布",
+      initialWidth: rightW,
+      minimumWidth: 230,
+      position: { referencePanel: "hexview", direction: "right" },
+    });
+    api.getPanel("hexview")?.api.setActive();
+    return;
+  }
+
+  const centerPanels =
+    preset === "analyze"
+      ? (["plot2d", "hexview", "console"] as const)
+      : (["framecanvas", "hexview", "console"] as const);
+
+  const first = centerPanels[0];
   api.addPanel({
-    id: "hexview",
-    component: "hexview",
-    title: "Hex 数据流",
-    initialWidth: centerW,
+    id: first,
+    component: first,
+    title: PANEL_TITLES[first as PanelId],
+    initialWidth: midW + rightW,
     position: { referencePanel: "templates", direction: "right" },
   });
-  api.addPanel({
-    id: "console",
-    component: "console",
-    title: "控制台",
-    position: { referencePanel: "hexview", direction: "within" },
-  });
+  for (let i = 1; i < centerPanels.length; i++) {
+    api.addPanel({
+      id: centerPanels[i],
+      component: centerPanels[i],
+      title: PANEL_TITLES[centerPanels[i] as PanelId],
+      position: { referencePanel: first, direction: "within" },
+    });
+  }
+  if (preset === "attitude") {
+    api.addPanel({
+      id: "view3d",
+      component: "view3d",
+      title: "3D 姿态",
+      position: { referencePanel: first, direction: "within" },
+    });
+  }
   api.addPanel({
     id: "properties",
     component: "properties",
@@ -56,24 +106,19 @@ function applyDefaultLayout(api: DockviewApi) {
     initialWidth: rightW,
     minimumWidth: 230,
     minimumHeight: 260,
-    position: { referencePanel: "hexview", direction: "right" },
+    position: { referencePanel: first, direction: "right" },
   });
+  const bottomMain = preset === "attitude" ? "table" : "table";
   api.addPanel({
-    id: "controls",
-    component: "controls",
-    title: "控制画布",
-    initialHeight: ctrlH,
-    minimumHeight: 120,
-    position: { referencePanel: "properties", direction: "below" },
-  });
-  api.addPanel({
-    id: "table",
-    component: "table",
-    title: "数据表格",
+    id: bottomMain,
+    component: bottomMain,
+    title: PANEL_TITLES[bottomMain as PanelId],
     initialHeight: bottomH,
     minimumHeight: 140,
-    position: { referencePanel: "hexview", direction: "below" },
+    position: { referencePanel: first, direction: "below" },
   });
+  const bottomRight = preset === "analyze" ? "table" : "plot2d";
+  void bottomRight;
   api.addPanel({
     id: "plot2d",
     component: "plot2d",
@@ -82,41 +127,65 @@ function applyDefaultLayout(api: DockviewApi) {
     minimumWidth: 240,
     position: { referencePanel: "table", direction: "right" },
   });
+  if (preset === "analyze" || preset === "attitude") {
+    api.addPanel({
+      id: "view3d",
+      component: "view3d",
+      title: "3D 姿态",
+      initialWidth: bottomColW,
+      minimumWidth: 240,
+      position: { referencePanel: "plot2d", direction: "right" },
+    });
+  }
   api.addPanel({
-    id: "view3d",
-    component: "view3d",
-    title: "3D 姿态",
-    initialWidth: bottomColW,
-    minimumWidth: 240,
-    position: { referencePanel: "plot2d", direction: "right" },
+    id: "controls",
+    component: "controls",
+    title: "控制画布",
+    initialHeight: bottomH,
+    minimumHeight: 120,
+    position: { referencePanel: "properties", direction: "below" },
   });
-  api.getPanel("hexview")?.api.setActive();
+  api.getPanel(first)?.api.setActive();
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<ThemeMode>(() =>
-    localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark",
-  );
+  const settings = useSettings();
+  const theme = settings.theme;
   const [editLayout, setEditLayout] = useState(false);
+  const [perfOn, setPerfOn] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [groupBoxes, setGroupBoxes] = useState<
     { id: string; left: number; top: number; width: number; height: number }[]
   >([]);
   const apiRef = useRef<DockviewApi | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const serial = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
-  const proto = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
+  const tele = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
+  renderTick += 1;
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
   useEffect(() => {
+    document.documentElement.style.zoom = `${settings.zoom}%`;
+  }, [settings.zoom]);
+
+  useEffect(() => {
+    if (perfOn !== settings.perfHud) setPerfOn(settings.perfHud);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.perfHud]);
+
+  useEffect(() => {
     serialStore.init();
     templateStore.init();
+    telemetryStore.init();
     framesStore.init();
     plotStore.init();
     attitudeStore.init();
     variableStore.init();
+    fcStore.init();
     const preventNav = (e: DragEvent) => {
       e.preventDefault();
     };
@@ -209,20 +278,12 @@ export default function App() {
     group?.panels.forEach((p) => api.removePanel(p));
   };
 
-  const toggleTheme = () => {
-    setTheme((t) => {
-      const next: ThemeMode = t === "dark" ? "light" : "dark";
-      localStorage.setItem(THEME_KEY, next);
-      return next;
-    });
-  };
-
-  const resetLayout = () => {
+  const resetLayout = (preset: WorkspacePreset = "proto") => {
     const api = apiRef.current;
     if (!api) return;
     localStorage.removeItem(LAYOUT_KEY);
     api.clear();
-    applyDefaultLayout(api);
+    applyDefaultLayout(api, preset);
   };
 
   const addOrFocusPanel = (id: string) => {
@@ -265,12 +326,13 @@ export default function App() {
 
   return (
     <div className="app">
+      <TitleBar onOpenSettings={() => setSettingsOpen(true)} onOpenHelp={() => setHelpOpen(true)} />
       <header className="toolbar">
-        <div className="brand">
-          Uartix+
-          <span className="chip">M5</span>
-        </div>
-        <SerialToolbar />
+        {serial.iface === "serial" ? (
+          <SerialToolbar />
+        ) : (
+          <NetIfaceBar kind={serial.iface} />
+        )}
         <div className="toolbar-spacer" />
         <div className="toolbar-group">
           <select
@@ -288,34 +350,12 @@ export default function App() {
               </option>
             ))}
           </select>
-          <select className="input" defaultValue="proto" title="工作区预设">
-            <option value="proto">预设：协议调试</option>
-            <option value="analyze" disabled>
-              预设：数据分析
-            </option>
-            <option value="attitude" disabled>
-              预设：姿态调参
-            </option>
-            <option value="console" disabled>
-              预设：纯串口
-            </option>
-          </select>
           <button
-            className={`btn ${editLayout ? "warn" : ""}`}
+            className={`btn icon-btn${editLayout ? " warn" : ""}`}
             onClick={() => setEditLayout((v) => !v)}
             title="编辑显示区布局：沿显示区边缘的 + 号向对应方向新建空显示区"
           >
-            编辑布局
-          </button>
-          <button
-            className="btn"
-            onClick={resetLayout}
-            title="清除当前布局，按窗口尺寸恢复默认自动布局"
-          >
-            重置布局
-          </button>
-          <button className="btn" onClick={toggleTheme} title="切换明暗主题">
-            ◐ {theme === "dark" ? "暗色" : "亮色"}
+            <IconColumns />
           </button>
         </div>
       </header>
@@ -377,12 +417,99 @@ export default function App() {
           <span className={`dot ${serial.status}`} />
           {statusText}
           {serial.error && <span className="status-error">{serial.error}</span>}
+          {perfOn && <PerfHud />}
         </span>
         <span className="status-right">
           RX {serial.rxTotal} B · TX {serial.txTotal} B · {bpsText} · 帧{" "}
-          {proto.stats.total}/错 {proto.stats.errors}
+          {tele.stats.total}/错 {tele.stats.errors}
         </span>
       </footer>
+      {settingsOpen && (
+        <SettingsModal
+          onClose={() => setSettingsOpen(false)}
+          onResetLayout={(p) => resetLayout(p)}
+        />
+      )}
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
     </div>
+  );
+}
+
+let renderTick = 0;
+
+function NetIfaceBar({ kind }: { kind: IfaceKind }) {
+  const s = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
+  const label =
+    kind === "tcp-client" ? "TCP 客户端" : kind === "tcp-server" ? "TCP 服务端" : "UDP";
+  return (
+    <div className="toolbar-group">
+      <button className="btn" disabled title="网络接口将在后续版本提供">
+        <span className="dot disconnected" />
+        连接
+      </button>
+      <input
+        className="input"
+        value={s.net.remoteHost}
+        disabled
+        title="远程地址（即将支持）"
+        placeholder="远程 IP"
+        onChange={(e) => serialStore.setNet({ remoteHost: e.target.value })}
+      />
+      <input
+        className="input baud"
+        value={String(s.net.remotePort)}
+        disabled
+        title="远程端口（即将支持）"
+        onChange={(e) => serialStore.setNet({ remotePort: Number(e.target.value) || 0 })}
+      />
+      {kind !== "tcp-client" && (
+        <input
+          className="input baud"
+          value={String(s.net.localPort)}
+          disabled
+          title="本地端口（即将支持）"
+          onChange={(e) => serialStore.setNet({ localPort: Number(e.target.value) || 0 })}
+        />
+      )}
+      <span className="iface-soon">{label} · 即将支持</span>
+    </div>
+  );
+}
+
+function PerfHud() {
+  const [info, setInfo] = useState({ fps: 0, long: 0, render: 0 });
+  const state = useRef({ frames: 0, long: 0, raf: 0 });
+  useEffect(() => {
+    const s = state.current;
+    let po: PerformanceObserver | null = null;
+    try {
+      po = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) {
+          if (e.duration > 50) s.long += 1;
+        }
+      });
+      po.observe({ entryTypes: ["longtask"] });
+    } catch {
+      po = null;
+    }
+    const loop = () => {
+      s.frames += 1;
+      s.raf = requestAnimationFrame(loop);
+    };
+    s.raf = requestAnimationFrame(loop);
+    const timer = setInterval(() => {
+      setInfo({ fps: s.frames, long: s.long, render: renderTick });
+      s.frames = 0;
+    }, 1000);
+    return () => {
+      cancelAnimationFrame(s.raf);
+      clearInterval(timer);
+      po?.disconnect();
+    };
+  }, []);
+  return (
+    <span className="perf-hud" title="每秒刷新：FPS / >50ms 长任务累计 / React 渲染次数">
+      {info.fps}fps · 长{info.long} · 渲{info.render}
+    </span>
   );
 }

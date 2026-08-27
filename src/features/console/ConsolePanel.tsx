@@ -68,6 +68,7 @@ export function ConsolePanel() {
   const showTxRef = useRef(true);
   const showRxRef = useRef(true);
   const modeRef = useRef(mode);
+  const visibleRef = useRef(true);
 
   pausedRef.current = paused || autoPaused;
   showTxRef.current = showTx;
@@ -100,12 +101,23 @@ export function ConsolePanel() {
   }, []);
 
   useEffect(() => {
+    const el = viewRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((es) => {
+      visibleRef.current = es[0]?.isIntersecting ?? true;
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       const chunks = chunksRef.current;
       if (!chunks.length || pausedRef.current) return;
-      chunksRef.current = [];
       const el = viewRef.current;
       if (!el) return;
+      if (!visibleRef.current) return;
+      chunksRef.current = [];
       let appended = false;
       for (const c of chunks) {
         let s: string;

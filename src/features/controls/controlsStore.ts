@@ -14,7 +14,7 @@ export interface BaseCard {
   name: string;
   x: number;
   y: number;
-  w: 1 | 2;
+  w: number;
   h: number;
 }
 
@@ -103,6 +103,7 @@ export interface ControlPage {
   id: string;
   name: string;
   cols: number;
+  rows: number;
   cards: ControlCard[];
   locked: boolean;
 }
@@ -118,8 +119,8 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
     name: String(raw.name ?? "卡片"),
     x: Number(raw.x ?? 0),
     y: Number(raw.y ?? 0),
-    w: (Number(raw.w) === 2 ? 2 : 1) as 1 | 2,
-    h: Math.max(1, Number(raw.h ?? 1)),
+    w: Math.max(1, Math.min(64, Math.round(Number(raw.w) || 1))),
+    h: Math.max(1, Math.min(64, Math.round(Number(raw.h) || 1))),
   };
   const type = (raw.type ?? "slider") as ControlType;
   switch (type) {
@@ -164,9 +165,12 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         unit: String(raw.unit ?? ""),
         decimals: Number(raw.decimals ?? 2),
       };
-    case "joystick":
+    case "joystick": {
+      const side = base.w;
       return {
         ...base,
+        w: side,
+        h: side,
         type,
         template: String(raw.template ?? "J:%x,%y!"),
         sendMode: (raw.sendMode as SendMode) ?? "ascii",
@@ -176,6 +180,7 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         useScript: Boolean(raw.useScript),
         script: String(raw.script ?? ""),
       };
+    }
     default:
       return {
         ...base,
@@ -205,6 +210,32 @@ function migrateLegacyScript(raw: Record<string, unknown>): ControlCard {
   });
 }
 
+function declumpCards(cards: ControlCard[], cols: number, rows: number): ControlCard[] {
+  const placed: ControlCard[] = [];
+  const free = (x: number, y: number, w: number, h: number) =>
+    !placed.some(
+      (c) => !(x + w <= c.x || c.x + c.w <= x || y + h <= c.y || c.y + (c.h || 1) <= y),
+    );
+  const sorted = [...cards].sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const c of sorted) {
+    const w = Math.min(c.w, cols);
+    const h = Math.min(c.h || 1, rows);
+    let x = Math.min(c.x, cols - w);
+    let y = Math.min(c.y, Math.max(0, rows - h));
+    let guard = 0;
+    while (!free(x, y, w, h) && guard < rows * 2) {
+      y++;
+      if (y > rows - h) {
+        y = 0;
+        x = x + w > cols - w ? 0 : x + w;
+      }
+      guard++;
+    }
+    placed.push({ ...c, w, h, x: Math.max(0, x), y: Math.max(0, y) });
+  }
+  return placed;
+}
+
 function load(): ControlsSnapshot {
   try {
     const saved = localStorage.getItem("vs.controls");
@@ -213,13 +244,20 @@ function load(): ControlsSnapshot {
       if (parsed.pages && parsed.pages.length) {
         return {
           activePageId: parsed.activePageId,
-          pages: parsed.pages.map((p) => ({
-            ...p,
-            locked: Boolean(p.locked),
-            cards: (p.cards as unknown as Record<string, unknown>[]).map((r) =>
+          pages: parsed.pages.map((p) => {
+            const cols = Math.max(2, Math.min(24, Math.round(Number(p.cols) || 8)));
+            const rows = Math.max(2, Math.min(48, Math.round(Number((p as ControlPage).rows) || 8)));
+            const cards = (p.cards as unknown as Record<string, unknown>[]).map((r) =>
               r.type === "script" ? migrateLegacyScript(r) : migrateCard(r),
-            ),
-          })),
+            );
+            return {
+              ...p,
+              cols,
+              rows,
+              locked: Boolean(p.locked),
+              cards: declumpCards(cards, cols, rows),
+            };
+          }),
         };
       }
     }
@@ -229,7 +267,8 @@ function load(): ControlsSnapshot {
   const page: ControlPage = {
     id: crypto.randomUUID(),
     name: "控制页 1",
-    cols: 3,
+    cols: 8,
+    rows: 8,
     cards: [],
     locked: false,
   };
@@ -276,7 +315,8 @@ export function addPage() {
   const page: ControlPage = {
     id: crypto.randomUUID(),
     name: `控制页 ${snapshot.pages.length + 1}`,
-    cols: 3,
+    cols: 12,
+    rows: 12,
     cards: [],
     locked: false,
   };
@@ -298,6 +338,39 @@ export function removePage(id: string) {
   emit();
 }
 
+export function importPage(raw: {
+  name?: string;
+  cols?: number;
+  rows?: number;
+  cards?: Record<string, unknown>[];
+}): string {
+  pushHistoryLike();
+  const page: ControlPage = {
+    id: crypto.randomUUID(),
+    name: String(raw.name ?? "导入控制页").slice(0, 24),
+    cols: clampGrid(raw.cols ?? 8, 24),
+    rows: clampGrid(raw.rows ?? 8, 48),
+    locked: false,
+    cards: (raw.cards ?? []).map((r) =>
+      r.type === "script" ? migrateLegacyScript(r) : migrateCard(r),
+    ),
+  };
+  snapshot = {
+    pages: [...snapshot.pages, page],
+    activePageId: page.id,
+  };
+  emit();
+  return page.id;
+}
+
+export function exportPages(): ControlPage[] {
+  return structuredClone(snapshot.pages);
+}
+
+function pushHistoryLike() {
+  localStorage.setItem("vs.controls", JSON.stringify(snapshot));
+}
+
 export function renamePage(id: string, name: string) {
   snapshot = {
     ...snapshot,
@@ -309,9 +382,44 @@ export function renamePage(id: string, name: string) {
 export function setPageCols(id: string, cols: number) {
   snapshot = {
     ...snapshot,
-    pages: snapshot.pages.map((p) => (p.id === id ? { ...p, cols } : p)),
+    pages: snapshot.pages.map((p) =>
+      p.id === id
+        ? {
+            ...p,
+            cols: clampGrid(cols, 24),
+            cards: p.cards.map((c) => ({
+              ...c,
+              w: Math.min(c.w, clampGrid(cols, 24)),
+              x: Math.min(c.x, clampGrid(cols, 24) - Math.min(c.w, clampGrid(cols, 24))),
+            })),
+          }
+        : p,
+    ),
   };
   emit();
+}
+
+export function setPageRows(id: string, rows: number) {
+  snapshot = {
+    ...snapshot,
+    pages: snapshot.pages.map((p) =>
+      p.id === id
+        ? {
+            ...p,
+            rows: clampGrid(rows, 48),
+            cards: p.cards.map((c) => ({
+              ...c,
+              y: Math.min(c.y, clampGrid(rows, 48) - Math.min(c.h || 1, clampGrid(rows, 48))),
+            })),
+          }
+        : p,
+    ),
+  };
+  emit();
+}
+
+function clampGrid(v: number, max: number): number {
+  return Math.max(2, Math.min(max, Math.round(Number(v) || 2)));
 }
 
 export function setPageLocked(id: string, locked: boolean) {
@@ -323,14 +431,20 @@ export function setPageLocked(id: string, locked: boolean) {
 }
 
 function defaultCard(type: ControlType, name: string): ControlCard {
+  const size =
+    type === "joystick"
+      ? { w: 2, h: 2 }
+      : type === "slider" || type === "monitor"
+        ? { w: 2, h: 1 }
+        : { w: 1, h: 1 };
   const base = {
     id: crypto.randomUUID(),
     type,
     name,
     x: 0,
     y: 0,
-    w: 1 as 1 | 2,
-    h: 1,
+    w: size.w,
+    h: size.h,
   };
   switch (type) {
     case "button":
@@ -438,11 +552,15 @@ export function patchCard(
       p.id === pageId
         ? {
             ...p,
-            cards: p.cards.map((c) =>
-              c.id === cardId
-                ? (migrateCard({ ...c, ...patch }) as ControlCard)
-                : c,
-            ),
+            cards: p.cards.map((c) => {
+              if (c.id !== cardId) return c;
+              const merged = migrateCard({ ...c, ...patch }) as ControlCard;
+              merged.w = Math.max(1, Math.min(merged.w, p.cols));
+              merged.h = Math.max(1, Math.min(merged.h, p.rows || 48));
+              merged.x = Math.max(0, Math.min(merged.x, p.cols - merged.w));
+              merged.y = Math.max(0, Math.min(merged.y, Math.max(0, (p.rows || 48) - merged.h)));
+              return merged;
+            }),
           }
         : p,
     ),
@@ -485,7 +603,11 @@ export function moveCard(
         ),
     );
   let ny = Math.max(0, y);
-  while (occupied(x, ny) && ny < 200) ny++;
+  const maxX = Math.max(0, page.cols - card.w);
+  const maxY = Math.max(0, (page.rows || 48) - ch);
+  const cx = Math.max(0, Math.min(x, maxX));
+  while (occupied(cx, ny) && ny < maxY) ny++;
+  ny = Math.min(ny, maxY);
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) =>
@@ -493,7 +615,7 @@ export function moveCard(
         ? {
             ...p,
             cards: p.cards.map((c) =>
-              c.id === cardId ? { ...c, x, y: ny } : c,
+              c.id === cardId ? { ...c, x: cx, y: ny } : c,
             ),
           }
         : p,

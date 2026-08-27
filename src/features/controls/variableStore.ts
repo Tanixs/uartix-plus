@@ -10,14 +10,32 @@ export interface VarDef {
 }
 
 let registry: VarDef[] = [];
+const byField = new Map<string, VarDef>();
 const values = new Map<string, number | string>();
 const listeners = new Set<() => void>();
 let initialized = false;
 let version = 0;
+let notifyTimer: ReturnType<typeof setTimeout> | null = null;
+let notifyPending = false;
 
 function notify() {
   version++;
   listeners.forEach((l) => l());
+}
+
+function scheduleNotify() {
+  if (notifyTimer) {
+    notifyPending = true;
+    return;
+  }
+  notifyTimer = setTimeout(() => {
+    notifyTimer = null;
+    if (notifyPending) {
+      notifyPending = false;
+      scheduleNotify();
+    }
+    notify();
+  }, 100);
 }
 
 export function subscribe(cb: () => void) {
@@ -42,6 +60,7 @@ export function getVar(name: string): number | string | undefined {
 function rebuild() {
   const used = new Set<string>();
   registry = [];
+  byField.clear();
   values.clear();
   const templates = templateStore
     .getSnapshot()
@@ -55,12 +74,14 @@ function rebuild() {
         name = `${base}_${i++}`;
       }
       used.add(name);
-      registry.push({
+      const def: VarDef = {
         name,
         tplId: t.id,
         fieldId: f.id,
         kind: f.type === "ascii" ? "str" : "num",
-      });
+      };
+      registry.push(def);
+      byField.set(f.id, def);
     }
   }
   notify();
@@ -72,12 +93,24 @@ export async function init() {
   templateStore.subscribe(rebuild);
   rebuild();
   await listen<FramesEventPayload>("parser:frames", (e) => {
-    if (registry.length === 0) return;
+    if (byField.size === 0) return;
     let changed = false;
     for (const row of e.payload.rows) {
       if (!row.valid) continue;
       for (const f of row.fields) {
-        const def = registry.find((v) => v.fieldId === f.id);
+        let def = byField.get(f.id);
+        if (!def && f.id.includes("#") && f.text === null) {
+          const baseId = f.id.split("#")[0];
+          const base = byField.get(baseId);
+          if (base && !byField.has(f.id)) {
+            def = { ...base, fieldId: f.id, name: f.name, kind: "num" };
+            byField.set(f.id, def);
+            registry.push(def);
+            changed = true;
+          } else {
+            def = byField.get(f.id);
+          }
+        }
         if (!def) continue;
         const val = def.kind === "str" ? (f.text ?? "") : f.value;
         if (values.get(def.name) !== val) {
@@ -86,7 +119,7 @@ export async function init() {
         }
       }
     }
-    if (changed) notify();
+    if (changed) scheduleNotify();
   });
 }
 

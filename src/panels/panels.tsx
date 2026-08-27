@@ -8,6 +8,7 @@ import { DataTable } from "../features/table/DataTable";
 import { Plot2D } from "../features/plot/Plot2D";
 import { View3D } from "../features/attitude/View3D";
 import { ControlCanvas } from "../features/controls/ControlCanvas";
+import FrameCanvas from "../features/framecanvas/FrameCanvas";
 
 export const PANEL_TITLES: Record<PanelId, string> = {
   hexview: "Hex 数据流",
@@ -18,6 +19,7 @@ export const PANEL_TITLES: Record<PanelId, string> = {
   table: "数据表格",
   plot2d: "2D 曲线",
   view3d: "3D 姿态",
+  framecanvas: "帧画布",
 };
 
 const MTemplates = memo(TemplatesPanel);
@@ -28,6 +30,7 @@ const MConsole = memo(ConsolePanel);
 const MTable = memo(DataTable);
 const MPlot2D = memo(Plot2D);
 const MView3D = memo(View3D);
+const MFrameCanvas = memo(FrameCanvas);
 
 export const panelComponents = {
   templates: () => <MTemplates />,
@@ -38,6 +41,7 @@ export const panelComponents = {
   table: () => <MTable />,
   plot2d: () => <MPlot2D />,
   view3d: () => <MView3D />,
+  framecanvas: () => <MFrameCanvas />,
   placeholder: () => (
     <div className="ph">
       <div className="ph-card">

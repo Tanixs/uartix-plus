@@ -119,15 +119,16 @@ function HexBytesInput({
 
 const FIELD_TYPES: FieldType[] = [
   "uint8", "int8", "uint16", "int16", "uint32", "int32",
-  "float32", "float64", "ascii", "bcd", "bits",
+  "float32", "float64", "ascii", "bcd", "bits", "csv",
 ];
-const ROLES: FieldRole[] = ["header", "length", "id", "seq", "payload", "data", "checksum", "footer"];
+const ROLES: FieldRole[] = ["header", "addr", "id", "length", "seq", "payload", "data", "checksum", "checksum2", "footer"];
 const ROLE_NAMES: Record<FieldRole, string> = {
-  header: "帧头", length: "长度", id: "帧ID", seq: "序号",
-  payload: "载荷", data: "数据", checksum: "校验", footer: "帧尾",
+  header: "帧头", addr: "目标地址", id: "功能码", length: "数据长度", seq: "序号",
+  payload: "数据载荷", data: "数据内容", checksum: "和校验", checksum2: "附加校验", footer: "帧尾",
 };
 const ALGOS: { id: ChecksumAlgo; name: string }[] = [
   { id: "sum8", name: "累加和 Sum8" },
+  { id: "sumadd", name: "双重累加 Sum+Add (匿名V7)" },
   { id: "xor8", name: "异或 XOR8" },
   { id: "crc16_modbus", name: "CRC16 Modbus" },
   { id: "crc16_ccitt", name: "CRC16 CCITT-FALSE" },
@@ -405,11 +406,14 @@ export function PropertiesPanel() {
     <div className="props-panel">
       <div className="props-title">
         <button
-          className="btn back-btn"
+          className="back-btn"
           onClick={() => store.setSelection({ kind: "template", templateId: tpl.id })}
           title="返回模板属性"
         >
-          ←
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 6 9 12 15 18" />
+          </svg>
+          返回模板
         </button>
         <span className="tpl-dot" style={{ background: field.color }} />
         字段属性 · {tpl.name}
@@ -459,7 +463,7 @@ export function PropertiesPanel() {
           >
             {FIELD_TYPES.map((t) => (
               <option key={t} value={t}>
-                {t}
+                {t === "csv" ? "csv·自适应分隔" : t}
               </option>
             ))}
           </select>
@@ -475,6 +479,34 @@ export function PropertiesPanel() {
           </div>
         )}
       </div>
+      {field.type === "csv" && (
+        <div className="form-row">
+          <div className="form-pair">
+            <label>分隔符</label>
+            <TextInput
+              value={field.csvDelim ?? ","}
+              onCommit={(v) => patch({ csvDelim: v || "," })}
+            />
+          </div>
+          <div className="form-pair">
+            <label>元素类型</label>
+            <select
+              className="input"
+              value={field.csvType ?? "float32"}
+              onChange={(e) => patch({ csvType: e.target.value })}
+            >
+              <option value="float32">float32</option>
+              <option value="float64">float64</option>
+              <option value="uint8">uint8</option>
+              <option value="int8">int8</option>
+              <option value="uint16">uint16</option>
+              <option value="int16">int16</option>
+              <option value="uint32">uint32</option>
+              <option value="int32">int32</option>
+            </select>
+          </div>
+        </div>
+      )}
       {numeric && field.type !== "uint8" && field.type !== "int8" && field.type !== "bits" && (
         <div className="form-row">
           <label>字节序</label>

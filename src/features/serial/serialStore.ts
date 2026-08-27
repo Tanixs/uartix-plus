@@ -7,6 +7,14 @@ import type {
   SerialStatus,
 } from "../../ipc/types";
 
+export type IfaceKind = "serial" | "tcp-client" | "tcp-server" | "udp";
+
+export interface IfaceNetConfig {
+  remoteHost: string;
+  remotePort: number;
+  localPort: number;
+}
+
 export interface SerialSnapshot {
   ports: PortInfo[];
   config: SerialConfig;
@@ -15,6 +23,8 @@ export interface SerialSnapshot {
   rxTotal: number;
   txTotal: number;
   bps: number;
+  iface: IfaceKind;
+  net: IfaceNetConfig;
 }
 
 const DEFAULT_CONFIG: SerialConfig = {
@@ -25,6 +35,12 @@ const DEFAULT_CONFIG: SerialConfig = {
   stopBits: 1,
 };
 
+const DEFAULT_NET: IfaceNetConfig = {
+  remoteHost: "127.0.0.1",
+  remotePort: 1346,
+  localPort: 1347,
+};
+
 let snapshot: SerialSnapshot = {
   ports: [],
   config: DEFAULT_CONFIG,
@@ -33,6 +49,8 @@ let snapshot: SerialSnapshot = {
   rxTotal: 0,
   txTotal: 0,
   bps: 0,
+  iface: "serial",
+  net: DEFAULT_NET,
 };
 
 const listeners = new Set<() => void>();
@@ -103,6 +121,14 @@ export async function init() {
 
 export function setConfig(patch: Partial<SerialConfig>) {
   set({ config: { ...snapshot.config, ...patch } });
+}
+
+export function setIface(iface: IfaceKind) {
+  set({ iface });
+}
+
+export function setNet(patch: Partial<IfaceNetConfig>) {
+  set({ net: { ...snapshot.net, ...patch } });
 }
 
 export function setError(msg: string | null) {

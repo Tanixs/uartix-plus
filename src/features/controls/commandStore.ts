@@ -236,3 +236,20 @@ export function flatCommands(): { item: CommandItem; depth: number }[] {
   walk(snapshot.groups, 0);
   return out;
 }
+
+export function exportGroups(): CommandGroup[] {
+  return structuredClone(snapshot.groups);
+}
+
+export function importGroupsMerge(incoming: CommandGroup[]) {
+  const taken = new Set(snapshot.groups.map((g) => g.name));
+  const cloned = structuredClone(incoming).map((g) => {
+    let name = g.name;
+    let i = 2;
+    while (taken.has(name)) name = `${g.name} (${i++})`;
+    taken.add(name);
+    return { ...g, name, id: crypto.randomUUID() };
+  });
+  snapshot = { ...snapshot, groups: [...snapshot.groups, ...cloned] };
+  emit();
+}

@@ -21,6 +21,8 @@ let capped = false;
 let snapshot: FramesSnapshot = { rows, paused, maxRows, capped };
 const listeners = new Set<() => void>();
 let initialized = false;
+let pending: FrameRow[] = [];
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function emit() {
   snapshot = { rows, paused, maxRows, capped };
@@ -43,13 +45,24 @@ export async function init() {
   initialized = true;
   await listen<FramesEventPayload>("parser:frames", (e) => {
     if (e.payload.rows.length === 0) return;
-    rows = rows.concat(e.payload.rows);
-    if (rows.length > maxRows) {
-      rows = rows.slice(rows.length - maxRows);
-      capped = true;
+    pending = pending.concat(e.payload.rows);
+    if (!flushTimer) {
+      flushTimer = setTimeout(flush, 150);
     }
-    emit();
   });
+}
+
+function flush() {
+  flushTimer = null;
+  if (pending.length === 0) return;
+  const incoming = pending;
+  pending = [];
+  rows = rows.concat(incoming);
+  if (rows.length > maxRows) {
+    rows = rows.slice(rows.length - maxRows);
+    capped = true;
+  }
+  emit();
 }
 
 export function setPaused(v: boolean) {
