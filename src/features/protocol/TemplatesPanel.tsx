@@ -7,6 +7,7 @@ import * as plotStore from "../plot/plotStore";
 import { EmptyState } from "../../shared/EmptyState";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
+import { patch as patchSettings, useSettings } from "../settings/settingsStore";
 
 function EyeIcon({ open }: { open: boolean }) {
   return (
@@ -42,6 +43,7 @@ function toggleEye(
   tplId: string,
   fieldId: string,
   name: string,
+  color: string,
 ): void {
   const st = plotStore.channelState(tplId, fieldId);
   if (st === "off") {
@@ -49,7 +51,7 @@ function toggleEye(
       tplId,
       fieldId,
       name,
-      color: plotStore.nextColor(),
+      color,
     });
   } else {
     const ch = plotStore.getSnapshot().channels.find(
@@ -110,10 +112,8 @@ export function TemplatesPanel() {
   const [expGrp, setExpGrp] = useState<Set<string>>(() => new Set());
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
   const [rename, setRename] = useState<{ kind: "grp" | "tpl"; key: string; id: string; init: string } | null>(null);
-  const [decimals, setDecimals] = useState<number>(() => {
-    const v = parseInt(localStorage.getItem("vs.decimals") ?? "2", 10);
-    return [0, 2, 4, 6].includes(v) ? v : 2;
-  });
+  const settings = useSettings();
+  const decimals = settings.decimals;
   const [splitPct, setSplitPct] = useState<number | null>(() => {
     try {
       const v = Number(localStorage.getItem("vs.tplSplitPct"));
@@ -266,10 +266,11 @@ export function TemplatesPanel() {
     <div className="tpl-panel">
       <div className="tpl-header">
         <span>协议模板</span>
-        <button className="btn" title="新建空白协议或协议簇（多帧型分组，可复制/粘贴帧型）" onClick={() => setNewOpen(true)}>
-          ＋ 新建
-        </button>
-        <div className="tpl-preset-wrap">
+        <div className="tpl-header-actions">
+          <button className="btn" title="新建空白协议或协议簇（多帧型分组，可复制/粘贴帧型）" onClick={() => setNewOpen(true)}>
+            ＋ 新建
+          </button>
+          <div className="tpl-preset-wrap">
           <button className="btn" title="从预设导入协议副本（可反复添加，改崩了删除副本再添加）" onClick={() => setPMenu((v) => !v)}>
             ＋ 预设 ▾
           </button>
@@ -294,6 +295,7 @@ export function TemplatesPanel() {
               </div>
             </>
           )}
+          </div>
         </div>
       </div>
 
@@ -488,13 +490,8 @@ export function TemplatesPanel() {
         字段图例（实时值）
         <button
           className="legend-dec"
-          title="图例小数位数（点击切换 0/2/4/6 位）"
-          onClick={() => {
-            const order = [0, 2, 4, 6];
-            const next = order[(order.indexOf(decimals) + 1) % order.length];
-            setDecimals(next);
-            localStorage.setItem("vs.decimals", String(next));
-          }}
+          title="图例小数位数（点击 0→6 循环；也可在设置页自由填写 0~6）"
+          onClick={() => patchSettings({ decimals: (decimals + 1) % 7 })}
         >
           {decimals}位
         </button>
@@ -553,7 +550,7 @@ export function TemplatesPanel() {
                       title={eye === "off" ? "开启 2D 曲线" : eye === "hidden" ? "显示曲线（当前隐藏）" : "隐藏曲线"}
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggleEye(tpl.id, f.id, `${tpl.name}·${f.name}`);
+                        toggleEye(tpl.id, f.id, `${tpl.name}·${f.name}`, f.color);
                       }}
                     >
                       <EyeIcon open={eyeOpen} />

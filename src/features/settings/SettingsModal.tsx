@@ -150,19 +150,21 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
             )}
             {tab === "data" && (
               row(t("set.decimals"), (
-                <div className="set-seg">
-                  {[0, 2, 4, 6].map((d) => (
-                    <button
-                      key={d}
-                      className={settings.decimals === d ? "on" : ""}
-                      onClick={() => {
-                        patch({ decimals: d });
-                        localStorage.setItem("vs.decimals", String(d));
-                      }}
-                    >
-                      {d} 位
-                    </button>
-                  ))}
+                <div className="form-row">
+                  <input
+                    type="number"
+                    className="input"
+                    style={{ width: 72 }}
+                    min={0}
+                    max={6}
+                    value={settings.decimals}
+                    onChange={(e) => {
+                      const v = Math.round(Number(e.target.value));
+                      if (!Number.isFinite(v)) return;
+                      patch({ decimals: Math.max(0, Math.min(6, v)) });
+                    }}
+                  />
+                  <span className="form-hint">0~6 位；字段图例上的「N位」按钮可循环切换，与此处实时同步</span>
                 </div>
               ))
             )}

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as store from "./controlsStore";
 import type {
+  BuzzerCard,
   ButtonCard,
   ControlCard,
   JoystickCard,
   LedCard,
+  LedOp,
   MonitorCard,
   SendMode,
   SliderCard,
@@ -17,6 +19,27 @@ import { Section } from "../../shared/Section";
 function fmtVal(v: number): string {
   if (Number.isInteger(v)) return String(v);
   return v.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function evalCond(
+  op: LedOp,
+  value: number,
+  strValue: string,
+  val: number | string | undefined,
+): boolean {
+  if (val === undefined) return false;
+  if (op === "eq")
+    return typeof val === "string" ? val === strValue : Number(val) === value;
+  if (op === "ne")
+    return typeof val === "string" ? val !== strValue : Number(val) !== value;
+  const n = Number(val);
+  return op === "gt"
+    ? n > value
+    : op === "ge"
+      ? n >= value
+      : op === "lt"
+        ? n < value
+        : n <= value;
 }
 
 export interface CardFrameProps {
@@ -445,30 +468,7 @@ export function LedCardView(props: {
   const { card } = props;
   useSyncExternalStore(variableStore.subscribe, variableStore.getSnapshot);
   const val = variableStore.getVar(card.varName);
-  let on = false;
-  if (val !== undefined) {
-    if (card.op === "eq") {
-      on =
-        typeof val === "string"
-          ? val === card.strValue
-          : Number(val) === card.value;
-    } else if (card.op === "ne") {
-      on =
-        typeof val === "string"
-          ? val !== card.strValue
-          : Number(val) !== card.value;
-    } else {
-      const n = Number(val);
-      on =
-        card.op === "gt"
-          ? n > card.value
-          : card.op === "ge"
-            ? n >= card.value
-            : card.op === "lt"
-              ? n < card.value
-              : n <= card.value;
-    }
-  }
+  const on = evalCond(card.op, card.value, card.strValue, val);
   return (
     <CardFrame
       card={card}
@@ -497,6 +497,90 @@ export function LedCardView(props: {
             borderColor: on ? card.onColor : "var(--border)",
           }}
         />
+      </div>
+      <div className="ctl-name center">
+        {card.name}
+        {card.varName ? ` · ${card.varName}` : ""}
+      </div>
+    </CardFrame>
+  );
+}
+
+export function BuzzerCardView(props: {
+  card: BuzzerCard;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  renaming: boolean;
+  locked?: boolean;
+  onMenu: (card: ControlCard, x: number, y: number) => void;
+  onDragStart: (e: React.MouseEvent<HTMLDivElement>, card: ControlCard) => void;
+  onRenameCommit: (name: string) => void;
+  onRenameCancel: () => void;
+  onDropTemplate: (
+    card: ControlCard,
+    cmd: {
+        template: string;
+        sendMode: SendMode;
+        script: string;
+        scriptEnabled: boolean;
+      },
+  ) => void;
+  resizable?: boolean;
+  onResizeStart?: (e: React.MouseEvent, card: ControlCard) => void;
+}) {
+  const { card } = props;
+  useSyncExternalStore(variableStore.subscribe, variableStore.getSnapshot);
+  const val = variableStore.getVar(card.varName);
+  const on = evalCond(card.op, card.value, card.strValue, val);
+  const sz = Math.max(
+    22,
+    Math.min(110, Math.floor(Math.min(props.width - 28, props.height - 46))),
+  );
+  return (
+    <CardFrame
+      card={card}
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      height={props.height}
+      renaming={props.renaming}
+      locked={props.locked}
+      onMenu={props.onMenu}
+      onDragStart={props.onDragStart}
+      onRenameCommit={props.onRenameCommit}
+      onRenameCancel={props.onRenameCancel}
+      onDropTemplate={props.onDropTemplate}
+      resizable={props.resizable}
+      onResizeStart={props.onResizeStart}
+    >
+      <div className="led-dot-wrap">
+        <svg
+          className="buzzer-icon"
+          viewBox="0 0 24 24"
+          width={sz}
+          height={sz}
+          fill="none"
+          stroke={on ? card.onColor : "var(--border)"}
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={
+            on
+              ? { filter: `drop-shadow(0 0 8px ${card.onColor})` }
+              : undefined
+          }
+        >
+          <path d="M12 4a5 5 0 0 0-5 5v3.6L5.4 16h13.2L17 12.6V9a5 5 0 0 0-5-5z" />
+          <path d="M10 19a2 2 0 0 0 4 0" />
+          {on && (
+            <>
+              <path d="M20 7c1.2 1.4 1.2 3.6 0 5" />
+              <path d="M4 7c-1.2 1.4-1.2 3.6 0 5" />
+            </>
+          )}
+        </svg>
       </div>
       <div className="ctl-name center">
         {card.name}
@@ -809,7 +893,7 @@ export function CardModal(props: {
           </select>
         </div>
       </Section>
-      {card.type === "led" && (
+      {(card.type === "led" || card.type === "buzzer") && (
         <Section title="触发条件">
           <div className="form-row">
             <label>变量</label>
@@ -837,7 +921,7 @@ export function CardModal(props: {
               onCommit={(v) => patch({ strValue: v })}
               placeholder="字符串变量用此处"
             />
-            <label>点亮色</label>
+            <label>{card.type === "buzzer" ? "触发色" : "点亮色"}</label>
             <input
               type="color"
               className="color-input"

@@ -4,6 +4,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { RxEventPayload, TxEventPayload } from "../../ipc/types";
 import * as store from "../serial/serialStore";
 import { IconPause, IconPlay, IconTrash } from "../../shared/icons";
+import { QuickCommandBar } from "./QuickCommandBar";
 
 interface Chunk {
   kind: "rx" | "tx";
@@ -310,6 +311,7 @@ export function ConsolePanel() {
         className={`console-view ${wrap ? "wrap" : ""}`}
         onScroll={onScroll}
       />
+      <QuickCommandBar />
       <div className="console-send">
         <select
           className="input"

@@ -15,12 +15,17 @@ export interface Settings {
 
 const KEY = "vs.settings";
 
+function clampDecimals(v: unknown, fallback: number): number {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n >= 0 && n <= 6 ? n : fallback;
+}
+
 function load(): Settings {
   const fallback: Settings = {
     theme: localStorage.getItem("vs.theme") === "light" ? "light" : "dark",
     locale: "zh",
     zoom: 100,
-    decimals: parseInt(localStorage.getItem("vs.decimals") ?? "2", 10) || 2,
+    decimals: clampDecimals(localStorage.getItem("vs.decimals") ?? "2", 2),
     perfHud: false,
     workspace: "proto",
     cellSize: 90,
@@ -33,7 +38,7 @@ function load(): Settings {
       theme: p.theme === "light" ? "light" : p.theme === "dark" ? "dark" : fallback.theme,
       locale: p.locale === "en" ? "en" : "zh",
       zoom: [90, 100, 110, 125].includes(p.zoom ?? 100) ? (p.zoom as number) : 100,
-      decimals: [0, 2, 4, 6].includes(p.decimals ?? 2) ? (p.decimals as number) : 2,
+      decimals: clampDecimals(p.decimals ?? 2, 2),
       perfHud: Boolean(p.perfHud),
       workspace: (["proto", "analyze", "attitude", "console"] as const).includes(
         p.workspace as WorkspacePreset,

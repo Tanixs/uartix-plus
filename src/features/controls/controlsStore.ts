@@ -5,6 +5,7 @@ export type ControlType =
   | "button"
   | "switch"
   | "led"
+  | "buzzer"
   | "monitor"
   | "joystick";
 
@@ -64,6 +65,15 @@ export interface LedCard extends BaseCard {
   onColor: string;
 }
 
+export interface BuzzerCard extends BaseCard {
+  type: "buzzer";
+  varName: string;
+  op: LedOp;
+  value: number;
+  strValue: string;
+  onColor: string;
+}
+
 export interface MonitorCard extends BaseCard {
   type: "monitor";
   varName: string;
@@ -87,6 +97,7 @@ export type ControlCard =
   | ButtonCard
   | SwitchCard
   | LedCard
+  | BuzzerCard
   | MonitorCard
   | JoystickCard;
 
@@ -95,6 +106,7 @@ export const PANEL_TYPE_NAMES: Record<ControlType, string> = {
   button: "按钮",
   switch: "开关",
   led: "LED 灯",
+  buzzer: "蜂鸣器",
   monitor: "数值监视",
   joystick: "摇杆",
 };
@@ -117,8 +129,8 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
   const base = {
     id: String(raw.id ?? crypto.randomUUID()),
     name: String(raw.name ?? "卡片"),
-    x: Number(raw.x ?? 0),
-    y: Number(raw.y ?? 0),
+    x: Math.max(0, Math.round(Number(raw.x) || 0)),
+    y: Math.max(0, Math.round(Number(raw.y) || 0)),
     w: Math.max(1, Math.min(64, Math.round(Number(raw.w) || 1))),
     h: Math.max(1, Math.min(64, Math.round(Number(raw.h) || 1))),
   };
@@ -148,6 +160,7 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         script: String(raw.script ?? ""),
       };
     case "led":
+    case "buzzer":
       return {
         ...base,
         type,
@@ -471,6 +484,7 @@ function defaultCard(type: ControlType, name: string): ControlCard {
         script: "",
       };
     case "led":
+    case "buzzer":
       return {
         ...base,
         type,
@@ -478,7 +492,7 @@ function defaultCard(type: ControlType, name: string): ControlCard {
         op: "gt",
         value: 0,
         strValue: "",
-        onColor: "#3fb950",
+        onColor: type === "buzzer" ? "#d29922" : "#3fb950",
       };
     case "monitor":
       return { ...base, type, varName: "", unit: "", decimals: 2 };
@@ -580,6 +594,68 @@ export function removeCard(pageId: string, cardId: string) {
   emit();
 }
 
+export function declumpPage(pageId: string) {
+  const page = snapshot.pages.find((p) => p.id === pageId);
+  if (!page) return;
+  snapshot = {
+    ...snapshot,
+    pages: snapshot.pages.map((p) =>
+      p.id === pageId
+        ? { ...p, cards: declumpCards(p.cards, p.cols, p.rows || 8) }
+        : p,
+    ),
+  };
+  emit();
+}
+
+/** 修复重叠：只挪动确实与其他卡片重叠的卡片（就近找空位），不动正常卡片 */
+export function resolveOverlaps(pageId: string) {
+  const page = snapshot.pages.find((p) => p.id === pageId);
+  if (!page) return;
+  const cols = page.cols;
+  const rows = page.rows || 8;
+  const cards = page.cards.map((c) => ({ ...c }));
+  const placed: ControlCard[] = [];
+  const free = (x: number, y: number, w: number, h: number) =>
+    !placed.some(
+      (c) => !(x + w <= c.x || c.x + c.w <= x || y + h <= c.y || c.y + (c.h || 1) <= y),
+    );
+  let changed = false;
+  for (const c of cards) {
+    const ch = c.h || 1;
+    if (free(c.x, c.y, c.w, ch)) {
+      placed.push(c);
+      continue;
+    }
+    // 就近搜索空位（环形，半径最多撑满画布）
+    let found: { x: number; y: number } | null = null;
+    const maxR = Math.max(cols, rows);
+    for (let r = 0; r <= maxR && !found; r++) {
+      for (let dx = -r; dx <= r && !found; dx++) {
+        for (let dy = -r; dy <= r && !found; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = c.x + dx;
+          const y = c.y + dy;
+          if (x < 0 || y < 0 || x + c.w > cols || y + ch > rows) continue;
+          if (free(x, y, c.w, ch)) found = { x, y };
+        }
+      }
+    }
+    if (found) {
+      c.x = found.x;
+      c.y = found.y;
+      changed = true;
+    }
+    placed.push(c);
+  }
+  if (!changed) return;
+  snapshot = {
+    ...snapshot,
+    pages: snapshot.pages.map((p) => (p.id === pageId ? { ...p, cards } : p)),
+  };
+  emit();
+}
+
 export function moveCard(
   pageId: string,
   cardId: string,
@@ -591,23 +667,10 @@ export function moveCard(
   const card = page.cards.find((c) => c.id === cardId);
   if (!card) return;
   const ch = card.h || 1;
-  const occupied = (nx: number, ny: number) =>
-    page.cards.some(
-      (c) =>
-        c.id !== cardId &&
-        !(
-          nx + card.w <= c.x ||
-          c.x + c.w <= nx ||
-          ny + ch <= c.y ||
-          c.y + (c.h || 1) <= ny
-        ),
-    );
-  let ny = Math.max(0, y);
   const maxX = Math.max(0, page.cols - card.w);
   const maxY = Math.max(0, (page.rows || 48) - ch);
   const cx = Math.max(0, Math.min(x, maxX));
-  while (occupied(cx, ny) && ny < maxY) ny++;
-  ny = Math.min(ny, maxY);
+  const cy = Math.max(0, Math.min(y, maxY));
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) =>
@@ -615,7 +678,7 @@ export function moveCard(
         ? {
             ...p,
             cards: p.cards.map((c) =>
-              c.id === cardId ? { ...c, x: cx, y: ny } : c,
+              c.id === cardId ? { ...c, x: cx, y: cy } : c,
             ),
           }
         : p,

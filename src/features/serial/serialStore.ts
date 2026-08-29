@@ -144,6 +144,11 @@ export function setError(msg: string | null) {
   set({ error: msg });
 }
 
+export function resetRx() {
+  rxWindow.length = 0;
+  setSilent({ rxTotal: 0, bps: 0 });
+}
+
 export async function openPort() {
   set({ error: null });
   try {

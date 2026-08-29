@@ -29,6 +29,7 @@ pub fn run() {
             serial::stop_record,
             pipeline::parser_set_rules,
             pipeline::hex_fetch,
+            pipeline::hex_clear,
             demo::demo_start,
             demo::demo_stop,
             demo::demo_running,

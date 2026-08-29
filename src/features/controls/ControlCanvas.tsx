@@ -12,6 +12,7 @@ import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider } from "../
 import { EmptyState } from "../../shared/EmptyState";
 import type { CommandItem } from "./commandStore";
 import {
+  BuzzerCardView,
   ButtonCardView,
   CardModal,
   JoystickCardView,
@@ -30,6 +31,7 @@ const WIDGET_TYPES: { type: ControlType; label: string }[] = [
   { type: "button", label: "按钮" },
   { type: "switch", label: "开关" },
   { type: "led", label: "LED 灯" },
+  { type: "buzzer", label: "蜂鸣器" },
   { type: "monitor", label: "数值监视" },
   { type: "joystick", label: "摇杆" },
 ];
@@ -38,8 +40,34 @@ export function ControlCanvas() {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const settings = useSettings();
   const CELL = [48, 60, 72, 90, 110].includes(settings.cellSize) ? settings.cellSize : 90;
+  // 全局 CSS zoom 会让卡片边框与背景网格线落在不同取整结果上（视觉间隙随机），
+  // 这里把几何值预先取整到 zoom 缩放后的整数设备像素，保证间隙恒定。
+  const zfactor = (settings.zoom || 100) / 100;
+  const snapPx = (v: number) => (zfactor === 1 ? v : Math.round(v * zfactor) / zfactor);
+  const showGhost = (
+    gx: number,
+    gy: number,
+    gw: number,
+    gh: number,
+    ok: boolean,
+  ) => {
+    const g = ghostRef.current;
+    if (!g) return;
+    const step = CELL + GAP;
+    g.style.display = "block";
+    g.style.left = `${snapPx(gx * step + OFF)}px`;
+    g.style.top = `${snapPx(gy * step + OFF)}px`;
+    g.style.width = `${snapPx(gw * step - GAP)}px`;
+    g.style.height = `${snapPx(gh * step - GAP)}px`;
+    g.className = `ctl-ghost ${ok ? "ok" : "bad"}`;
+  };
+  const hideGhost = () => {
+    const g = ghostRef.current;
+    if (g) g.style.display = "none";
+  };
   const cmds = useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   const page = store.activePage();
+  const gridRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const valuesRef = useRef<Map<string, number>>(new Map());
   const throttleRef = useRef<
@@ -49,20 +77,47 @@ export function ControlCanvas() {
     | null
     | {
         card: ControlCard;
-        startX: number;
-        startY: number;
-        x0: number;
-        y0: number;
         el: HTMLDivElement;
         moved: boolean;
-        nx?: number;
-        ny?: number;
+        /** 按下时指针 client 坐标 */
+        startClientX: number;
+        startClientY: number;
+        /** 卡片初始逻辑像素位置（含 OFF） */
+        cardLeft0: number;
+        cardTop0: number;
+        /** 网格内容器按下时 rect 宽度（用于实测缩放比，规避 offsetWidth 新旧规范差异） */
+        innerW0: number;
+        /** 当前落点候选（幽灵框位置） */
+        settleX: number;
+        settleY: number;
+        /** 落点候选是否合法 */
+        valid: boolean;
       }
   >(null);
+  const ghostRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<
     | null
-    | { card: ControlCard; startX: number; startY: number; el: HTMLDivElement; w?: number; h?: number }
+    | {
+        card: ControlCard;
+        el: HTMLDivElement;
+        startClientX: number;
+        startClientY: number;
+        innerW0: number;
+        w?: number;
+        h?: number;
+      }
   >(null);
+
+  /**
+   * 实测缩放比：用"当前 rect 宽 / 按下时 rect 宽"两个同源测量值的比值，
+   * 不依赖 offsetWidth（新版 WebView2/Chromium 的 offsetWidth 已含 zoom，
+   * 旧的 rect/offsetWidth 换算在新内核下恒为 1，曾导致拖拽时指针与卡片分离）。
+   */
+  const liveScale = (innerW0: number) => {
+    const g = gridRef.current;
+    if (!g || !innerW0) return 1;
+    return g.getBoundingClientRect().width / innerW0;
+  };
   const [err, setErr] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ cardId: string; x: number; y: number } | null>(null);
   const [mountOpen, setMountOpen] = useState(false);
@@ -110,37 +165,65 @@ export function ControlCanvas() {
         const cur = store.activePage();
         const maxW = Math.max(1, (cur?.cols ?? 8) - rz.card.x);
         const maxH = Math.max(1, (cur?.rows || 48) - rz.card.y);
-        const nw0 = Math.max(1, Math.min(maxW, rz.card.w + Math.round((e.clientX - rz.startX) / STEP)));
-        const nh0 = Math.max(1, Math.min(maxH, (rz.card.h || 1) + Math.round((e.clientY - rz.startY) / STEP)));
+        const scale = liveScale(rz.innerW0);
+        const nw0 = Math.max(
+          1,
+          Math.min(maxW, rz.card.w + Math.round((e.clientX - rz.startClientX) / (STEP * scale))),
+        );
+        const nh0 = Math.max(
+          1,
+          Math.min(maxH, (rz.card.h || 1) + Math.round((e.clientY - rz.startClientY) / (STEP * scale))),
+        );
         const isJoy = rz.card.type === "joystick";
         const nw = isJoy ? Math.min(nw0, nh0) : nw0;
         const nh = isJoy ? Math.min(nw0, nh0) : nh0;
         rz.w = nw;
         rz.h = nh;
-        rz.el.style.width = `${nw * STEP - GAP}px`;
-        rz.el.style.height = `${nh * STEP - GAP}px`;
+        rz.el.style.width = `${snapPx(nw * STEP - GAP)}px`;
+        rz.el.style.height = `${snapPx(nh * STEP - GAP)}px`;
         rz.el.style.zIndex = "60";
         return;
       }
       const d = dragRef.current;
       if (!d) return;
-      const dx = e.clientX - d.startX;
-      const dy = e.clientY - d.startY;
-      if (!d.moved && Math.abs(dx) < 2 && Math.abs(dy) < 2) return;
-      d.moved = true;
+      // 释放保护：指针在窗口外松开时 mouseup 可能丢失（buttons=0 说明已松开）
+      if (e.buttons === 0) {
+        finish();
+        return;
+      }
+      if (!d.moved) {
+        const sdx = e.clientX - d.startClientX;
+        const sdy = e.clientY - d.startClientY;
+        if (Math.abs(sdx) < 3 && Math.abs(sdy) < 3) return;
+        d.moved = true;
+        // 卡片本体原地变暗，不跟随指针——拖动期间任何东西都不会与其他卡片重叠
+        d.el.classList.add("drag-src");
+      }
       const cur = store.activePage();
-      const maxCx = Math.max(0, (cur?.cols ?? 8) - d.card.w);
-      const maxCy = Math.max(0, (cur?.rows || 48) - (d.card.h || 1));
-      const nx = Math.max(0, Math.min(maxCx, d.x0 + Math.round(dx / STEP)));
-      const ny = Math.max(0, Math.min(maxCy, d.y0 + Math.round(dy / STEP)));
-      d.nx = nx;
-      d.ny = ny;
-      d.el.classList.add("dragging");
-      d.el.style.left = `${nx * STEP + OFF}px`;
-      d.el.style.top = `${ny * STEP + OFF}px`;
-      d.el.style.zIndex = "60";
+      if (!cur) return;
+      const cols = cur.cols ?? 8;
+      const rows = cur.rows || 48;
+      const ch = d.card.h || 1;
+      // 指针逻辑位移（用于推导目标格）
+      const scale = liveScale(d.innerW0);
+      const leftPx = d.cardLeft0 + (e.clientX - d.startClientX) / scale;
+      const topPx = d.cardTop0 + (e.clientY - d.startClientY) / scale;
+      // 落点格（clamp 在画布内）
+      const tx = Math.max(0, Math.min(cols - d.card.w, Math.round((leftPx - OFF) / STEP)));
+      const ty = Math.max(0, Math.min(rows - ch, Math.round((topPx - OFF) / STEP)));
+      // 落点候选：目标格空 → 直接用；占用 → 半径 2 格内找最近空位（禁长距离瞬移）
+      const s = settleNear(cur, d.card, tx, ty);
+      if (s) {
+        d.valid = true;
+        d.settleX = s.x;
+        d.settleY = s.y;
+        showGhost(s.x, s.y, d.card.w, ch, true);
+      } else {
+        d.valid = false;
+        showGhost(tx, ty, d.card.w, ch, false);
+      }
     };
-    const up = () => {
+    const finish = () => {
       const rz = resizeRef.current;
       if (rz) {
         resizeRef.current = null;
@@ -174,8 +257,8 @@ export function ControlCanvas() {
           fh = n;
         }
         if (fw === rz.card.w && fh === (rz.card.h || 1)) {
-          rz.el.style.width = `${fw * STEP - GAP}px`;
-          rz.el.style.height = `${fh * STEP - GAP}px`;
+          rz.el.style.width = `${snapPx(fw * STEP - GAP)}px`;
+          rz.el.style.height = `${snapPx(fh * STEP - GAP)}px`;
           return;
         }
         rz.el.style.width = "";
@@ -186,25 +269,26 @@ export function ControlCanvas() {
       const d = dragRef.current;
       if (!d) return;
       dragRef.current = null;
-      d.el.classList.remove("dragging");
-      d.el.style.zIndex = "";
+      d.el.classList.remove("drag-src");
+      hideGhost();
       if (!d.moved) return;
-      const nx = d.nx ?? d.x0;
-      const ny = d.ny ?? d.y0;
-      if (nx === d.card.x && ny === d.card.y) return;
-      d.el.style.left = "";
-      d.el.style.top = "";
       const cur = store.activePage();
       if (!cur) return;
-      store.moveCard(cur.id, d.card.id, nx, ny);
+      // 无合法落点 → 卡片回原位（本体一直没动）
+      if (!d.valid) return;
+      if (d.settleX !== d.card.x || d.settleY !== d.card.y) {
+        store.moveCard(cur.id, d.card.id, d.settleX, d.settleY);
+      }
+      // 保险：修复历史遗留的重叠卡片（只挪动确实重叠的）
+      store.resolveOverlaps(cur.id);
     };
     window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    window.addEventListener("mouseup", finish);
     return () => {
       window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
+      window.removeEventListener("mouseup", finish);
     };
-  }, [CELL]);
+  }, [CELL, zfactor]);
 
   useEffect(() => {
     if (!menu) return;
@@ -257,7 +341,12 @@ export function ControlCanvas() {
     ctx: Record<string, number | string>,
     force = false,
   ) => {
-    if (card.type !== "led" && card.type !== "monitor" && card.useScript) {
+    if (
+      card.type !== "led" &&
+      card.type !== "buzzer" &&
+      card.type !== "monitor" &&
+      card.useScript
+    ) {
       try {
         await runCardScript(card.script, ctx);
         setErr(null);
@@ -373,15 +462,53 @@ export function ControlCanvas() {
     const el = (e.currentTarget as HTMLElement).closest(
       ".ctl-card",
     ) as HTMLDivElement;
+    const inner = gridRef.current;
+    if (!inner) return;
     dragRef.current = {
       card,
-      startX: e.clientX,
-      startY: e.clientY,
-      x0: card.x,
-      y0: card.y,
       el,
       moved: false,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      cardLeft0: card.x * (CELL + GAP) + OFF,
+      cardTop0: card.y * (CELL + GAP) + OFF,
+      innerW0: inner.getBoundingClientRect().width,
+      settleX: card.x,
+      settleY: card.y,
+      valid: true,
     };
+  };
+
+  /** 落点候选：目标格空 → 直接用；占用 → 仅在半径 radius 格内找最近空位（找不到返回 null，禁长距离瞬移） */
+  const settleNear = (
+    cur: { cards: ControlCard[]; cols: number; rows?: number },
+    card: ControlCard,
+    nx: number,
+    ny: number,
+    radius = 2,
+  ): { x: number; y: number } | null => {
+    const ch = card.h || 1;
+    const cols = cur.cols ?? 8;
+    const rows = cur.rows || 48;
+    const occ = (x: number, y: number) =>
+      cur.cards.some(
+        (c) =>
+          c.id !== card.id &&
+          !(x + card.w <= c.x || c.x + c.w <= x || y + ch <= c.y || c.y + (c.h || 1) <= y),
+      );
+    if (!occ(nx, ny)) return { x: nx, y: ny };
+    for (let r = 1; r <= radius; r++) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dy = -r; dy <= r; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = nx + dx;
+          const y = ny + dy;
+          if (x < 0 || y < 0 || x + card.w > cols || y + ch > rows) continue;
+          if (!occ(x, y)) return { x, y };
+        }
+      }
+    }
+    return null;
   };
 
   const onResizeStart = (e: React.MouseEvent, card: ControlCard) => {
@@ -393,7 +520,15 @@ export function ControlCanvas() {
     );
     if (!el) return;
     e.preventDefault();
-    resizeRef.current = { card, startX: e.clientX, startY: e.clientY, el };
+    const inner = gridRef.current;
+    if (!inner) return;
+    resizeRef.current = {
+      card,
+      el,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      innerW0: inner.getBoundingClientRect().width,
+    };
   };
 
   const mountCommand = (
@@ -455,10 +590,10 @@ export function ControlCanvas() {
   const renderCard = (c: ControlCard) => {
     const ch = c.h || 1;
     const geo = {
-      left: c.x * STEP + OFF,
-      top: c.y * STEP + OFF,
-      width: c.w * STEP - GAP,
-      height: ch * STEP - GAP,
+      left: snapPx(c.x * STEP + OFF),
+      top: snapPx(c.y * STEP + OFF),
+      width: snapPx(c.w * STEP - GAP),
+      height: snapPx(ch * STEP - GAP),
     };
     const common = {
       card: c,
@@ -506,6 +641,8 @@ export function ControlCanvas() {
         return <SwitchCardView key={c.id} {...common} card={c} onSend={sendControl} />;
       case "led":
         return <LedCardView key={c.id} {...common} card={c} />;
+      case "buzzer":
+        return <BuzzerCardView key={c.id} {...common} card={c} />;
       case "monitor":
         return <MonitorCardView key={c.id} {...common} card={c} />;
       case "joystick":
@@ -805,6 +942,18 @@ export function ControlCanvas() {
           ))}
         </select>
         <button
+          className="btn icon-btn"
+          title="整理：清除重叠并重新排布当前页卡片"
+          onClick={() => store.declumpPage(page.id)}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+        </button>
+        <button
           className={`btn icon-btn ${page.locked ? "warn" : ""}`}
           onClick={() => store.setPageLocked(page.id, !page.locked)}
           title={
@@ -954,6 +1103,7 @@ export function ControlCanvas() {
             }}
           >
             <div
+              ref={gridRef}
               className="ctl-grid-inner"
               style={{
                 width: page.cols * STEP + GAP,
@@ -965,6 +1115,7 @@ export function ControlCanvas() {
               }}
             >
               {page.cards.map((c) => renderCard(c))}
+              <div ref={ghostRef} className="ctl-ghost" />
               {page.cards.length === 0 && (
                 <EmptyState
                   title="画布为空"

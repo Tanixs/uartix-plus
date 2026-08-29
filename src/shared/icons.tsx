@@ -42,6 +42,15 @@ export const IconLed = () =>
     </>,
   );
 
+export const IconBuzzer = () =>
+  svg(
+    <>
+      <path d="M12 4a5 5 0 0 0-5 5v3.6L5.4 16h13.2L17 12.6V9a5 5 0 0 0-5-5z" />
+      <path d="M10 19a2 2 0 0 0 4 0" />
+      <path d="M20 7c1.2 1.4 1.2 3.6 0 5M4 7c-1.2 1.4-1.2 3.6 0 5" />
+    </>,
+  );
+
 export const IconMonitor = () =>
   svg(<polyline points="3 16 9 10 13 14 21 6" />);
 
@@ -123,6 +132,7 @@ export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   button: IconButton(),
   switch: IconSwitch(),
   led: IconLed(),
+  buzzer: IconBuzzer(),
   monitor: IconMonitor(),
   joystick: IconJoystick(),
 };

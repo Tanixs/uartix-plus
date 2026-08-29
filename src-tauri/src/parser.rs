@@ -388,6 +388,16 @@ impl ParserEngine {
         }
     }
 
+    pub fn reset_stats(&mut self) {
+        self.total = 0;
+        self.errors = 0;
+        self.dropped = 0;
+        for m in &mut self.machines {
+            m.buf.clear();
+            m.collecting = false;
+        }
+    }
+
     pub fn set_rules(&mut self, rules: ParseRules) -> Result<(), String> {
         for t in &rules.templates {
             validate(t)?;

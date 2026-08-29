@@ -375,6 +375,8 @@ function FrameCanvas() {
   const [dlg, setDlg] = useState<DlgInit | null>(null);
   const [menuState, setMenuState] = useState<{ x: number; y: number } | null>(null);
   const [tabRev, setTabRev] = useState(0);
+  const [errOpen, setErrOpen] = useState(false);
+  const [pending, setPending] = useState<{ msg: string; apply?: () => void } | null>(null);
   const [saveSt, setSaveSt] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const doSave = async () => {
@@ -522,14 +524,11 @@ function FrameCanvas() {
 
     let real = resolvedRef.current.fr;
     if (viewRef.current.live) {
-      const arch = fcStore.archiveRef();
       const tid = curRef.current?.id;
-      for (let i = arch.list.length - 1; i >= 0; i--) {
-        if (!tid || arch.list[i].tplId === tid) {
-          real = arch.list[i];
-          viewRef.current.fi = i;
-          break;
-        }
+      const lr = tid ? fcStore.lastOf(tid) : null;
+      if (lr) {
+        real = lr;
+        viewRef.current.fi = fcStore.lastIndexOf(tid!);
       }
     }
     const tplD = curRef.current;
@@ -575,6 +574,7 @@ function FrameCanvas() {
     const rowsTotal0 = 0;
     void rowsTotal0;
     const sbW = SCROLL_W;
+    const fldMap = new Map((tplD?.fields ?? []).map((f) => [f.id, f]));
     const pieces = buildBlocks(curRef.current, frLen);
     const first0 = layoutBlocks(pieces, s, w);
     const sbReserve = first0.rows.length > Math.max(1, Math.floor((h - PAD_T - 6) / first0.rowH)) ? sbW : 0;
@@ -669,6 +669,13 @@ function FrameCanvas() {
                 const fb = tplBT.boundary.footerBytes;
                 const fStart = frLen - fb.length;
                 if (g >= fStart) bb = fb[g - fStart];
+              }
+            }
+            if (bb === undefined && blk.kind === "fld" && blk.fid) {
+              const fd = fldMap.get(blk.fid);
+              const di = fd ? g - fd.offset : -1;
+              if (fd?.disc?.length && di >= 0 && di < fd.disc.length) {
+                bb = fd.disc[di];
               }
             }
             const cx = x0 + (g - it.g0) * s + s / 2;
@@ -961,9 +968,7 @@ function FrameCanvas() {
       return;
     }
     if (selDragRef.current) {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const lx = ev.clientX - rect.left;
-      const ly = ev.clientY - rect.top;
+      const { lx, ly } = localXY(ev);
       const dx = lx - selDragRef.current.downX;
       const dy = ly - selDragRef.current.downY;
       if (Math.abs(dx) + Math.abs(dy) > 4) selDragRef.current.moved = true;
@@ -1040,62 +1045,57 @@ function FrameCanvas() {
 
   const onCtx = (ev: React.MouseEvent) => {
     ev.preventDefault();
-    if (menuRef.current || dragSbRef.current || selDragRef.current) {
+    const { lx, ly } = localXY(ev);
+    const p = hitOffset(lx, ly);
+    if (!p) {
       closeMenu();
       return;
     }
-    const { lx, ly } = localXY(ev);
-    const p = hitOffset(lx, ly);
-    if (!p) return;
-    if (selDragRef.current || selRef.current) {
-      const fr = resolvedRef.current.fr;
-      const tpl = curRef.current;
-      if (!fr || !tpl || !selRef.current) return;
-      if (selRef.current.lo <= selRef.current.hi) {
-        menuRef.current = {
-          kind: "sel",
-          tplId: tpl.id,
-          lo: selRef.current.lo,
-          size: selRef.current.hi - selRef.current.lo + 1,
-        };
-        openMenuAt(ev.clientX, ev.clientY);
-        return;
-      }
-    }
-    const hit = hitOffset(lx, ly);
-    if (!hit) return;
     const tpl = curRef.current;
-    if (tpl) {
-      const fld = findFieldAt(tpl, hit.off);
-      if (fld) {
-        menuRef.current = {
-          kind: "field",
-          tplId: tpl.id,
-          fid: fld.id,
-          locked: !!fld.locked,
-        };
+    if (!tpl) return;
+    const sel = selRef.current;
+    if (sel && sel.lo <= sel.hi && p.off >= sel.lo && p.off <= sel.hi) {
+      menuRef.current = {
+        kind: "sel",
+        tplId: tpl.id,
+        lo: sel.lo,
+        size: sel.hi - sel.lo + 1,
+      };
+      openMenuAt(ev.clientX, ev.clientY);
+      return;
+    }
+    selRef.current = { lo: p.off, hi: p.off };
+    dirtyRef.current = true;
+    const fld = findFieldAt(tpl, p.off);
+    if (fld) {
+      menuRef.current = {
+        kind: "field",
+        tplId: tpl.id,
+        fid: fld.id,
+        locked: !!fld.locked,
+      };
+      openMenuAt(ev.clientX, ev.clientY);
+      return;
+    }
+    const fr = resolvedRef.current.fr;
+    if (fr && fr.len > 0) {
+      const hb = tpl.boundary.headerBytes;
+      const rt = reservedTail(tpl);
+      const tailStart = fr.len - rt;
+      if (p.off < hb.length) {
+        menuRef.current = { kind: "hdr", tplId: tpl.id, nbytes: hb.length };
         openMenuAt(ev.clientX, ev.clientY);
         return;
       }
-      const fr = resolvedRef.current.fr;
-      if (fr && fr.len > 0) {
-        const hb = tpl.boundary.headerBytes;
-        const rt = reservedTail(tpl);
-        const tailStart = fr.len - rt;
-        if (hit.off < hb.length) {
-          menuRef.current = { kind: "hdr", tplId: tpl.id, nbytes: hb.length };
-          openMenuAt(ev.clientX, ev.clientY);
-          return;
-        }
-        if (rt > 0 && hit.off >= tailStart && hit.off < fr.len) {
-          const hasFB = tpl.boundary.mode === "footer";
-          menuRef.current = { kind: "ftr", tplId: tpl.id, hasFB };
-          openMenuAt(ev.clientX, ev.clientY);
-          return;
-        }
+      if (rt > 0 && p.off >= tailStart && p.off < fr.len) {
+        const hasFB = tpl.boundary.mode === "footer";
+        menuRef.current = { kind: "ftr", tplId: tpl.id, hasFB };
+        openMenuAt(ev.clientX, ev.clientY);
+        return;
       }
     }
-    closeMenu();
+    menuRef.current = { kind: "sel", tplId: tpl.id, lo: p.off, size: 1 };
+    openMenuAt(ev.clientX, ev.clientY);
   };
 
   const openMenuAt = (cx: number, cy: number) => {
@@ -1112,7 +1112,9 @@ function FrameCanvas() {
     const up = () => {
       dragSbRef.current = null;
       if (selDragRef.current) {
+        const a = selDragRef.current.anchor;
         selDragRef.current = null;
+        selRef.current = { lo: a, hi: a };
         dirtyRef.current = true;
       }
     };
@@ -1314,18 +1316,23 @@ function FrameCanvas() {
     scrollRef.current = 0;
     dirtyRef.current = true;
     setTabRev((v) => v + 1);
+    const cur = templateStore.getSnapshot().selection;
+    if (!cur || cur.templateId !== tid) {
+      templateStore.setSelection({ kind: "template", templateId: tid });
+    }
   };
   void tabRev;
 
   useEffect(() => {
     const sel = proto.selection;
-    if (sel && (sel.kind === "template" || sel.kind === "field")) {
-      tplSelRef.current = sel.templateId;
-      viewRef.current = { live: true, fi: 0 };
-      selRef.current = null;
-      dirtyRef.current = true;
-      setTabRev((v) => v + 1);
-    }
+    if (!sel) return;
+    if (tplSelRef.current === sel.templateId) return;
+    tplSelRef.current = sel.templateId;
+    viewRef.current = { live: true, fi: 0 };
+    selRef.current = null;
+    scrollRef.current = 0;
+    dirtyRef.current = true;
+    setTabRev((v) => v + 1);
   }, [proto.selection]);
 
   return (
@@ -1344,7 +1351,15 @@ function FrameCanvas() {
         >
           {saveSt === "ok" ? <IconCheck /> : saveSt === "err" ? <IconAlert /> : <IconSave />}
         </button>
-        {proto.syncError ? <span className="fc-sync-warn" title={proto.syncError}>模板校验未通过</span> : null}
+        {proto.syncError ? (
+          <span
+            className={`fc-sync-warn${errOpen ? " open" : ""}`}
+            title={proto.syncError}
+            onClick={() => setErrOpen((v) => !v)}
+          >
+            {errOpen ? `校验未通过：${proto.syncError}` : "校验未通过（点击查看原因）"}
+          </span>
+        ) : null}
         <ArchStat />
         <span className="fc-navinfo" ref={navRef} />
         <label className="fc-cellsz" title="单元格尺寸">
@@ -1408,6 +1423,46 @@ function FrameCanvas() {
                       <button className="fc-menu-item primary" onClick={defineFromMenu}>
                         ✎ 定义为字段…
                       </button>
+                      {(() => {
+                        const tpl0 = curRef.current;
+                        if (
+                          !tpl0 ||
+                          tpl0.boundary.mode !== "fixedLength" ||
+                          m.size !== 1
+                        )
+                          return null;
+                        const fld0 = findFieldAt(tpl0, m.lo);
+                        if (fld0) return null;
+                        if (m.lo < tpl0.boundary.headerBytes.length) return null;
+                        if (m.lo >= (tpl0.boundary.fixedLength ?? 0)) return null;
+                        return (
+                          <>
+                            <button
+                              className="fc-menu-item"
+                              onClick={() => {
+                                const e2 = templateStore.insertFrameCell(m.tplId, m.lo);
+                                closeMenu();
+                                if (e2) setPending({ msg: e2 });
+                                dirtyRef.current = true;
+                              }}
+                            >
+                              ⤒ 在此格前插入格（帧长 +1）
+                            </button>
+                            <button
+                              className="fc-menu-item"
+                              onClick={() => {
+                                const e2 = templateStore.deleteFrameCell(m.tplId, m.lo);
+                                closeMenu();
+                                if (e2) setPending({ msg: e2 });
+                                selRef.current = null;
+                                dirtyRef.current = true;
+                              }}
+                            >
+                              ✕ 删除此格（帧长 −1）
+                            </button>
+                          </>
+                        );
+                      })()}
                       <button className="fc-menu-item" onClick={() => { selRef.current = null; closeMenu(); dirtyRef.current = true; }}>
                         取消选择 (Esc)
                       </button>
@@ -1475,34 +1530,78 @@ function FrameCanvas() {
               </>
             );
           })()}
+        {pending && (
+          <div className="modal-mask" onMouseDown={() => setPending(null)}>
+            <div className="modal fc-confirm" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="modal-title">字段冲突</div>
+              <div className="fc-confirm-body">{pending.msg}</div>
+              <div className="modal-foot">
+                <span />
+                <button className="btn" onClick={() => setPending(null)}>取消</button>
+                {pending.apply && (
+                  <button
+                    className="btn primary"
+                    onClick={() => {
+                      pending.apply?.();
+                      setPending(null);
+                    }}
+                  >
+                    覆盖并继续
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {dlg &&
           (dlg.kind === "field" ? (
             <FieldDialog
               init={dlg}
               onCancel={() => setDlg(null)}
               onOk={(f) => {
-                if (dlg.edit && dlg.field) {
-                  templateStore.patchField(dlg.tplId, dlg.field.id, {
-                    id: dlg.field.id,
-                    name: f.name,
-                    role: f.role,
-                    type: f.type,
-                    endian: f.endian,
-                    scale: f.scale,
-                    unit: f.unit,
-                    color: f.color,
-                    size: f.size,
-                    csvDelim: f.csvDelim,
-                    csvType: f.csvType,
-                  });
-                  fireAnim(`${dlg.tplId}:${dlg.field.id}`);
-                } else {
-                  templateStore.addField(dlg.tplId, f);
-                  fireAnim(`${dlg.tplId}:${f.id}`);
+                const applyIt = () => {
+                  if (dlg.edit && dlg.field) {
+                    templateStore.patchField(dlg.tplId, dlg.field.id, {
+                      id: dlg.field.id,
+                      name: f.name,
+                      role: f.role,
+                      type: f.type,
+                      endian: f.endian,
+                      scale: f.scale,
+                      unit: f.unit,
+                      color: f.color,
+                      size: f.size,
+                      csvDelim: f.csvDelim,
+                      csvType: f.csvType,
+                    });
+                    fireAnim(`${dlg.tplId}:${dlg.field.id}`);
+                  } else {
+                    templateStore.addField(dlg.tplId, f);
+                    fireAnim(`${dlg.tplId}:${f.id}`);
+                  }
+                  setDlg(null);
+                  selRef.current = null;
+                  dirtyRef.current = true;
+                };
+                const base = dlg.edit && dlg.field ? dlg.field : f;
+                const c = templateStore.fieldConflictInfo(
+                  dlg.tplId,
+                  base.id,
+                  f.offset,
+                  fieldSize({ ...base, ...f }),
+                );
+                if (c.overFrame) {
+                  setPending({ msg: `无法保存：${c.overFrame}。请先增大「总帧长/最大帧长」或缩小字段。` });
+                  return;
                 }
-                setDlg(null);
-                selRef.current = null;
-                dirtyRef.current = true;
+                if (c.overlapName) {
+                  setPending({
+                    msg: `保存后将覆盖字段「${c.overlapName}」的前 ${c.overlapBytes} 字节。是否继续？`,
+                    apply: applyIt,
+                  });
+                  return;
+                }
+                applyIt();
               }}
             />
           ) : (
@@ -1580,6 +1679,27 @@ function HeadTailDialog({
     init.bytes.map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" "),
   );
   const [err, setErr] = useState<string | null>(null);
+  const protoLive = useSyncExternalStore(
+    templateStore.subscribe,
+    templateStore.getSnapshot,
+  );
+  useEffect(() => {
+    const t = protoLive.rules.templates.find((x) => x.id === init.tplId);
+    if (!t) return;
+    const live = isHdr
+      ? t.boundary.headerBytes
+      : t.boundary.footerBytes ?? [];
+    const cur = parseHex(text);
+    const same =
+      cur !== null &&
+      cur.length === live.length &&
+      cur.every((b, i) => b === live[i]);
+    if (!same) {
+      setText(
+        live.map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" "),
+      );
+    }
+  }, [protoLive, init.tplId, isHdr]);
   const bump = (n: number) => {
     const cur = parseHex(text);
     if (!cur) return;

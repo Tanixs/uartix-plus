@@ -42,10 +42,17 @@ export function SerialToolbar() {
   return (
     <div className="toolbar-group">
       <button
-        className={`btn ${s.status === "connected" ? "danger" : "primary"}`}
+        className={`connect-btn ${s.status}`}
         onClick={onConnect}
+        title={
+          s.status === "connected"
+            ? "点击断开串口"
+            : s.status === "reconnecting"
+              ? "串口断开，正在自动重连"
+              : "打开串口连接"
+        }
       >
-        <span className={`dot ${s.status}`} />
+        <span className="connect-dot" />
         {label}
       </button>
       <select

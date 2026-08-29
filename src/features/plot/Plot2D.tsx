@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import * as plotStore from "./plotStore";
@@ -16,6 +17,14 @@ function hexA(hex: string, alpha: number): string {
   const b = parseInt(m.slice(4, 6), 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
+
+type PathsFactory = NonNullable<uPlot.Series["paths"]>;
+
+const LINE_PATHS: Record<string, PathsFactory> = {
+  linear: uPlot.paths.linear as PathsFactory,
+  step: uPlot.paths.stepped!({ align: 1 }) as PathsFactory,
+  smooth: uPlot.paths.spline!() as PathsFactory,
+};
 
 export function Plot2D() {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -38,7 +47,27 @@ export function Plot2D() {
   const [dragOver, setDragOver] = useState(false);
   const [themeTick, setThemeTick] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
+  const [sub, setSub] = useState<null | "x" | "y">(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [, setTick] = useState(0);
   const plot = useSyncExternalStore(plotStore.subscribe, plotStore.getSnapshot);
+
+  useEffect(() => {
+    const t = setInterval(() => setTick((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const r = menuRef.current.getBoundingClientRect();
+    let left = Math.max(8, Math.min(menu.x, window.innerWidth - r.width - 8));
+    let top = menu.y;
+    if (top + r.height > window.innerHeight - 8) {
+      top = Math.max(8, window.innerHeight - r.height - 8);
+    }
+    setMenuPos({ left, top });
+  }, [menu]);
 
   useEffect(() => {
     const mo = new MutationObserver(() => setThemeTick((t) => t + 1));
@@ -108,7 +137,8 @@ export function Plot2D() {
           stroke: ch.color,
           width: settings.plotMode === "points" ? 0 : settings.lineWidth,
           show: ch.visible,
-          spanGaps: false,
+          spanGaps: true,
+          paths: LINE_PATHS[settings.lineStyle],
           points: { show: settings.plotMode === "points", size: 3 },
           value: (_u: uPlot, v: number | null) => fmtVal(v),
         })),
@@ -441,20 +471,6 @@ export function Plot2D() {
   return (
     <div className="plot">
       <div className="plot-bar">
-        <select
-          className="input"
-          value={plot.settings.xSource}
-          title="X 轴数据源"
-          onChange={(e) => plotStore.setSetting({ xSource: e.target.value })}
-        >
-          <option value="time">X：时间</option>
-          <option value="index">X：序号</option>
-          {plot.channels.map((ch) => (
-            <option key={ch.id} value={`ch:${ch.id}`}>
-              X：{ch.name}
-            </option>
-          ))}
-        </select>
         <button
           className="btn"
           onClick={autoY}
@@ -468,25 +484,29 @@ export function Plot2D() {
           </button>
         )}
         <div className="plot-bar-spacer" />
-        {plot.channels.map((ch) => (
-          <span key={ch.id} className="plot-chip" title="点击名称切换显示">
-            <input
-              type="color"
-              className="color-input"
-              value={ch.color}
-              onChange={(e) => plotStore.setColor(ch.id, e.target.value)}
-            />
-            <span
-              className={`plot-chip-name ${ch.visible ? "" : "off"}`}
-              onClick={() => plotStore.toggleVisible(ch.id)}
-            >
-              {ch.name}
+        {plot.channels.map((ch) => {
+          const hz = plotStore.sampleRate(ch.id);
+          return (
+            <span key={ch.id} className="plot-chip" title={`实际采样率约 ${hz.toFixed(0)} Hz（由设备输出率决定）\n点击名称切换显示`}>
+              <input
+                type="color"
+                className="color-input"
+                value={ch.color}
+                onChange={(e) => plotStore.setColor(ch.id, e.target.value)}
+              />
+              <span
+                className={`plot-chip-name ${ch.visible ? "" : "off"}`}
+                onClick={() => plotStore.toggleVisible(ch.id)}
+              >
+                {ch.name}
+              </span>
+              {hz > 0 && <span className="plot-chip-hz">{hz.toFixed(0)}Hz</span>}
+              <button className="tpl-del" onClick={() => plotStore.removeChannel(ch.id)}>
+                ×
+              </button>
             </span>
-            <button className="tpl-del" onClick={() => plotStore.removeChannel(ch.id)}>
-              ×
-            </button>
-          </span>
-        ))}
+          );
+        })}
       </div>
       <div
         ref={wrapRef}
@@ -511,96 +531,191 @@ export function Plot2D() {
           </div>
         )}
       </div>
-      {menu && (
-        <div
-          className="ctx-menu"
-          style={{ left: menu.x, top: menu.y }}
-          onContextMenu={(e) => e.preventDefault()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="ctx-title">图表设置</div>
-          <div className="ctx-group">Y 轴</div>
-          <button
-            className="ctx-item"
-            onClick={() => plotStore.setSetting({ yMode: "auto" })}
+      {menu &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="ctx-menu"
+            style={{
+              left: menuPos?.left ?? -9999,
+              top: menuPos?.top ?? -9999,
+              visibility: menuPos ? "visible" : "hidden",
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={(e) => e.stopPropagation()}
           >
-            {plot.settings.yMode === "auto" ? "●" : "○"} 自动范围
-          </button>
-          <button
-            className="ctx-item"
-            onClick={() => plotStore.setSetting({ yMode: "zero" })}
-          >
-            {plot.settings.yMode === "zero" ? "●" : "○"} 包含零点（对称）
-          </button>
-          <div className="ctx-group">X 轴源</div>
-          <button
-            className="ctx-item"
-            onClick={() => plotStore.setSetting({ xSource: "time" })}
-          >
-            {plot.settings.xSource === "time" ? "●" : "○"} 时间
-          </button>
-          <button
-            className="ctx-item"
-            onClick={() => plotStore.setSetting({ xSource: "index" })}
-          >
-            {plot.settings.xSource === "index" ? "●" : "○"} 序号
-          </button>
-          {plot.channels.map((ch) => (
+            <div className="ctx-title">图表设置</div>
+            <div className="ctx-group">Y 轴</div>
             <button
-              key={ch.id}
               className="ctx-item"
-              onClick={() => plotStore.setSetting({ xSource: `ch:${ch.id}` })}
+              onClick={() => plotStore.setSetting({ yMode: "auto" })}
             >
-              {plot.settings.xSource === `ch:${ch.id}` ? "●" : "○"} {ch.name}
+              {plot.settings.yMode === "auto" ? "●" : "○"} 自动范围
             </button>
-          ))}
-          <div className="ctx-group">绘图</div>
-          <button
-            className="ctx-item"
-            onClick={() => plotStore.setSetting({ plotMode: "line" })}
-          >
-            {plot.settings.plotMode === "line" ? "●" : "○"} 连线
-          </button>
-          <button
-            className="ctx-item"
-            onClick={() => plotStore.setSetting({ plotMode: "points" })}
-          >
-            {plot.settings.plotMode === "points" ? "●" : "○"} 仅画点
-          </button>
-          <div className="form-row" style={{ padding: "4px 8px" }}>
-            <label>线宽</label>
-            <select
-              className="input"
-              value={plot.settings.lineWidth}
-              onChange={(e) =>
-                plotStore.setSetting({ lineWidth: Number(e.target.value) })
-              }
+            <button
+              className="ctx-item"
+              onClick={() => plotStore.setSetting({ yMode: "zero" })}
             >
-              {[1, 2, 3].map((w) => (
-                <option key={w} value={w}>
-                  {w}px
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            className="ctx-item"
-            onClick={() => plotStore.setSetting({ grid: !plot.settings.grid })}
-          >
-            {plot.settings.grid ? "●" : "○"} 网格线
-          </button>
-          <div className="ctx-group">视图</div>
-          <button className="ctx-item" onClick={() => { followXRef.current = true; setMenu(null); }}>
-            {followXRef.current ? "●" : "○"} X 轴跟随最新
-          </button>
-          <button className="ctx-item" onClick={autoY}>
-            Auto Y 轴
-          </button>
-          <button className="ctx-item" onClick={resetView}>
-            复位视图
-          </button>
-        </div>
-      )}
+              {plot.settings.yMode === "zero" ? "●" : "○"} 包含零点（对称）
+            </button>
+            <div
+              className="ctx-row"
+              onMouseEnter={() => setSub("x")}
+              onMouseLeave={() => setSub(null)}
+            >
+              <button className="ctx-item">
+                X 轴源 ▸
+                <span className="ctx-cur">
+                  {plot.settings.xSource === "time"
+                    ? "时间"
+                    : plot.settings.xSource === "index"
+                      ? "序号"
+                      : plot.channels.find(
+                          (c) => `ch:${c.id}` === plot.settings.xSource,
+                        )?.name ?? ""}
+                </span>
+              </button>
+              {sub === "x" && (
+                <div className="ctx-sub">
+                  <button
+                    className="ctx-item"
+                    onClick={() => {
+                      plotStore.setSetting({ xSource: "time" });
+                      setMenu(null);
+                    }}
+                  >
+                    {plot.settings.xSource === "time" ? "●" : "○"} 时间
+                  </button>
+                  <button
+                    className="ctx-item"
+                    onClick={() => {
+                      plotStore.setSetting({ xSource: "index" });
+                      setMenu(null);
+                    }}
+                  >
+                    {plot.settings.xSource === "index" ? "●" : "○"} 序号
+                  </button>
+                  {plot.channels.map((ch) => (
+                    <button
+                      key={ch.id}
+                      className="ctx-item"
+                      onClick={() => {
+                        plotStore.setSetting({ xSource: `ch:${ch.id}` });
+                        setMenu(null);
+                      }}
+                    >
+                      {plot.settings.xSource === `ch:${ch.id}` ? "●" : "○"}{" "}
+                      {ch.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div
+              className="ctx-row"
+              onMouseEnter={() => setSub("y")}
+              onMouseLeave={() => setSub(null)}
+            >
+              <button className="ctx-item">
+                Y 轴源（通道显隐）▸
+                <span className="ctx-cur">
+                  {plot.channels.filter((c) => c.visible).length}/
+                  {plot.channels.length}
+                </span>
+              </button>
+              {sub === "y" && (
+                <div className="ctx-sub">
+                  {plot.channels.length === 0 && (
+                    <div className="ctx-group">暂无通道</div>
+                  )}
+                  {plot.channels.map((ch) => (
+                    <button
+                      key={ch.id}
+                      className="ctx-item"
+                      onClick={() => plotStore.toggleVisible(ch.id)}
+                    >
+                      <span
+                        className="tpl-dot"
+                        style={{ background: ch.color, marginRight: 6 }}
+                      />
+                      {ch.visible ? "●" : "○"} {ch.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="ctx-group">绘图</div>
+            <button
+              className="ctx-item"
+              onClick={() => plotStore.setSetting({ lineStyle: "linear" })}
+            >
+              {plot.settings.lineStyle === "linear" ? "●" : "○"} 直线连接
+            </button>
+            <button
+              className="ctx-item"
+              onClick={() => plotStore.setSetting({ lineStyle: "step" })}
+            >
+              {plot.settings.lineStyle === "step" ? "●" : "○"} 台阶（保持末值）
+            </button>
+            <button
+              className="ctx-item"
+              onClick={() => plotStore.setSetting({ lineStyle: "smooth" })}
+            >
+              {plot.settings.lineStyle === "smooth" ? "●" : "○"} 平滑样条
+            </button>
+            <button
+              className="ctx-item"
+              onClick={() => plotStore.setSetting({ plotMode: "line" })}
+            >
+              {plot.settings.plotMode === "line" ? "●" : "○"} 连线
+            </button>
+            <button
+              className="ctx-item"
+              onClick={() => plotStore.setSetting({ plotMode: "points" })}
+            >
+              {plot.settings.plotMode === "points" ? "●" : "○"} 仅画点
+            </button>
+            <div className="form-row" style={{ padding: "4px 8px" }}>
+              <label>线宽</label>
+              <select
+                className="input"
+                value={plot.settings.lineWidth}
+                onChange={(e) =>
+                  plotStore.setSetting({ lineWidth: Number(e.target.value) })
+                }
+              >
+                {[1, 2, 3].map((w) => (
+                  <option key={w} value={w}>
+                    {w}px
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              className="ctx-item"
+              onClick={() => plotStore.setSetting({ grid: !plot.settings.grid })}
+            >
+              {plot.settings.grid ? "●" : "○"} 网格线
+            </button>
+            <div className="ctx-group">视图</div>
+            <button
+              className="ctx-item"
+              onClick={() => {
+                followXRef.current = true;
+                setMenu(null);
+              }}
+            >
+              {followXRef.current ? "●" : "○"} X 轴跟随最新
+            </button>
+            <button className="ctx-item" onClick={autoY}>
+              Auto Y 轴
+            </button>
+            <button className="ctx-item" onClick={resetView}>
+              复位视图
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

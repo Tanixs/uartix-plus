@@ -4,6 +4,7 @@ import type { FieldDef, HexSlice, SpanOut } from "../../ipc/types";
 import * as serialStore from "../serial/serialStore";
 import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
+import * as fcStore from "../framecanvas/frameStore";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 
 const ROW_H = 20;
@@ -581,6 +582,17 @@ export function HexView() {
     dirtyRef.current = true;
   };
 
+  const clearData = async () => {
+    try {
+      await invoke("hex_clear");
+    } catch {
+      return;
+    }
+    serialStore.resetRx();
+    fcStore.clearArchive();
+    dirtyRef.current = true;
+  };
+
   const sel = proto.hexSelection;
   const selLen = sel ? sel.end - sel.start + 1 : 0;
   const selHex = sel
@@ -738,6 +750,15 @@ export function HexView() {
             跟随最新 ↓
           </button>
         )}
+        <button
+          className="btn hex-clear-btn"
+          title="清空接收缓冲、帧归档与统计"
+          onClick={() => void clearData()}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+          </svg>
+        </button>
         {searchOpen && (
           <div className="hex-search">
             <input

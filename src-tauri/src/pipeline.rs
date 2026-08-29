@@ -57,6 +57,10 @@ impl SpanRing {
             .cloned()
             .collect()
     }
+
+    pub fn clear(&mut self) {
+        self.spans.clear();
+    }
 }
 
 pub struct Pipeline {
@@ -179,6 +183,19 @@ pub fn parser_set_rules(
         .lock()
         .map_err(|_| "解析引擎锁中毒")?
         .set_rules(rules)
+}
+
+#[tauri::command]
+pub fn hex_clear(state: State<SerialManager>) {
+    if let Ok(mut ring) = state.ctx.pipeline.ring.lock() {
+        ring.clear();
+    }
+    if let Ok(mut spans) = state.ctx.pipeline.spans.lock() {
+        spans.clear();
+    }
+    if let Ok(mut engine) = state.ctx.pipeline.engine.lock() {
+        engine.reset_stats();
+    }
 }
 
 #[tauri::command]

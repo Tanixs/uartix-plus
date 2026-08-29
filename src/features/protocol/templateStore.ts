@@ -61,10 +61,36 @@ export const FIELD_SIZES: Record<FieldType, number | null> = {
 };
 
 export function fieldSize(f: FieldDef): number {
-  if (f.type === "csv") return 1;
-  const fixed = FIELD_SIZES[f.type];
-  if (fixed !== null) return fixed;
-  return f.size ?? (f.type === "bcd" ? 2 : 4);
+  const base =
+    f.type === "csv"
+      ? 1
+      : (FIELD_SIZES[f.type] ?? f.size ?? (f.type === "bcd" ? 2 : 4));
+  return Math.max(base, f.disc?.length ?? 0);
+}
+
+export function fieldConflictInfo(
+  tplId: string,
+  fieldId: string,
+  nextOffset: number,
+  nextSize: number,
+): { overFrame?: string; overlapName?: string; overlapBytes?: number } {
+  const t = snapshot.rules.templates.find((x) => x.id === tplId);
+  if (!t) return {};
+  const b = t.boundary;
+  const frameLen = b.mode === "fixedLength" ? (b.fixedLength ?? 0) : (b.maxLength ?? 512);
+  const res: { overFrame?: string; overlapName?: string; overlapBytes?: number } = {};
+  if (frameLen > 0 && nextOffset + nextSize > frameLen) {
+    res.overFrame = `字段将延伸到 ${nextOffset + nextSize} B，超出帧长 ${frameLen} B`;
+  }
+  const others = t.fields
+    .filter((f) => f.id !== fieldId && f.offset > nextOffset)
+    .sort((a, b2) => a.offset - b2.offset);
+  const nf = others[0];
+  if (nf && nextOffset + nextSize > nf.offset) {
+    res.overlapName = nf.name;
+    res.overlapBytes = nextOffset + nextSize - nf.offset;
+  }
+  return res;
 }
 
 export const DEMO_RULES: ParseRules = {
@@ -370,10 +396,29 @@ function scheduleSync() {
   syncTimer = setTimeout(flushRules, 250);
 }
 
+function humanizeRulesError(raw: string): string {
+  const s = raw.replace(/^invalid args `rules` for command `parser_set_rules`:\s*/, "")
+    .replace(/^Error:\s*/, "");
+  const map: [RegExp, string][] = [
+    [/invalid type: null, expected a sequence/, "识别位列表为空值（旧版数据残留），请重新开关一次帧识别位"],
+    [/missing field `(\w+)`/, "缺少必需字段 $1"],
+    [/invalid type: [^,]+, expected/, "字段类型不匹配"],
+  ];
+  for (const [re, msg] of map) {
+    if (re.test(s)) return s.replace(re, msg);
+  }
+  return s;
+}
+
 async function flushRules(): Promise<boolean> {
   if (syncTimer) {
     clearTimeout(syncTimer);
     syncTimer = null;
+  }
+  try {
+    snapshot = { ...snapshot, rules: sanitizeRules(snapshot.rules) };
+  } catch {
+    /* noop */
   }
   localStorage.setItem("vs.rules", JSON.stringify(snapshot.rules));
   try {
@@ -381,7 +426,7 @@ async function flushRules(): Promise<boolean> {
     set({ syncError: null });
     return true;
   } catch (e) {
-    set({ syncError: String(e) });
+    set({ syncError: humanizeRulesError(String(e)) });
     return false;
   }
 }
@@ -391,6 +436,21 @@ export async function saveNow(): Promise<boolean> {
   return ok;
 }
 
+function sanitizeRules(rs: ParseRules): ParseRules {
+  return {
+    templates: (rs.templates ?? []).map((t) => ({
+      ...t,
+      boundary: {
+        ...t.boundary,
+        headerBytes: t.boundary.headerBytes ?? [],
+        maxLength: t.boundary.maxLength ?? 512,
+        discs: t.boundary.discs ?? [],
+      },
+      fields: (t.fields ?? []).map((f) => ({ ...f })),
+    })),
+  };
+}
+
 export async function init() {
   if (initialized) return;
   initialized = true;
@@ -398,7 +458,7 @@ export async function init() {
   try {
     const saved = localStorage.getItem("vs.rules");
     if (saved) {
-      snapshot = { ...snapshot, rules: JSON.parse(saved) as ParseRules };
+      snapshot = { ...snapshot, rules: sanitizeRules(JSON.parse(saved) as ParseRules) };
     }
   } catch {
     localStorage.removeItem("vs.rules");
@@ -557,7 +617,7 @@ export function setFieldDisc(
                 ...t.boundary,
                 discOffset: null,
                 discValue: null,
-                discs: null,
+                discs: [],
               },
               fields: t.fields.map((f) =>
                 f.id === fieldId ? { ...f, disc: bytes } : f,
@@ -568,6 +628,75 @@ export function setFieldDisc(
     },
   });
   scheduleSync();
+}
+
+export function insertFrameCell(tplId: string, g: number): string | null {
+  const t = snapshot.rules.templates.find((x) => x.id === tplId);
+  if (!t) return "模板不存在";
+  if (t.boundary.mode !== "fixedLength") return "仅「固定长度」模式支持插入格";
+  const hb = t.boundary.headerBytes.length;
+  const fl = t.boundary.fixedLength ?? 0;
+  if (g < hb) return "不能插入到帧头内部";
+  if (g >= fl) return "插入位置超出帧长";
+  for (const f of t.fields) {
+    const sz = fieldSize(f);
+    if (g > f.offset && g < f.offset + sz) {
+      return `位置被字段「${f.name}」占用，请先取消该字段`;
+    }
+  }
+  pushHistory();
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((x) =>
+        x.id === tplId
+          ? {
+              ...x,
+              boundary: { ...x.boundary, fixedLength: fl + 1 },
+              fields: x.fields.map((f) =>
+                f.offset >= g ? { ...f, offset: f.offset + 1 } : f,
+              ),
+            }
+          : x,
+      ),
+    },
+  });
+  scheduleSync();
+  return null;
+}
+
+export function deleteFrameCell(tplId: string, g: number): string | null {
+  const t = snapshot.rules.templates.find((x) => x.id === tplId);
+  if (!t) return "模板不存在";
+  if (t.boundary.mode !== "fixedLength") return "仅「固定长度」模式支持删除格";
+  const hb = t.boundary.headerBytes.length;
+  const fl = t.boundary.fixedLength ?? 0;
+  if (g < hb) return "不能删除帧头字节（请用帧头编辑）";
+  if (g >= fl) return "位置超出帧长";
+  if (fl - 1 < hb + 1) return "删除后帧长不能小于帧头 + 1 字节";
+  for (const f of t.fields) {
+    const sz = fieldSize(f);
+    if (g > f.offset && g < f.offset + sz) {
+      return `位置被字段「${f.name}」占用，请先取消该字段`;
+    }
+  }
+  pushHistory();
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((x) =>
+        x.id === tplId
+          ? {
+              ...x,
+              boundary: { ...x.boundary, fixedLength: fl - 1 },
+              fields: x.fields.map((f) =>
+                f.offset > g ? { ...f, offset: f.offset - 1 } : f,
+              ),
+            }
+          : x,
+      ),
+    },
+  });
+  scheduleSync();
+  return null;
 }
 
 export function patchChecksum(

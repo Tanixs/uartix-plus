@@ -23,6 +23,13 @@ impl RingBuffer {
         self.total
     }
 
+    pub fn clear(&mut self) {
+        self.head = 0;
+        self.total = 0;
+        self.filled = 0;
+        self.ts_ring.clear();
+    }
+
     pub fn start_seq(&self) -> u64 {
         self.total - self.filled as u64
     }

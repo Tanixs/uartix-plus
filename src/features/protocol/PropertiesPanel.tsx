@@ -10,6 +10,7 @@ import type {
 import * as store from "./templateStore";
 import { fieldSize } from "./templateStore";
 import { Section } from "../../shared/Section";
+import { HelpHint } from "../../shared/HelpHint";
 
 export function NumInput({
   value,
@@ -144,6 +145,7 @@ const ALGOS: { id: ChecksumAlgo; name: string }[] = [
 export function PropertiesPanel() {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const sel = s.selection;
+  const [confirm, setConfirm] = useState<{ fid: string; msg: string; apply?: () => void } | null>(null);
 
   if (!sel) {
     return (
@@ -199,6 +201,7 @@ export function PropertiesPanel() {
             <option value="lengthField">固定帧头 + 长度字段</option>
             <option value="footer">固定帧头 + 帧尾</option>
           </select>
+          <HelpHint text="定长：找到帧头后收满「总帧长」即一帧。长度字段：按帧内长度域动态计算帧长。帧尾：收到帧尾字节序列时结帧。" />
         </div>
         <div className="form-row">
           <label>帧头字节</label>
@@ -257,17 +260,13 @@ export function PropertiesPanel() {
                 </select>
               </div>
               <div className="form-pair">
-                <label>修正</label>
+                <label>修正 <HelpHint text="总帧长 = 长度域原始值 + 修正值。例：长度域表示帧头之后的字节数时，修正 = 帧头长度 + 长度域宽度。" /></label>
                 <NumInput
                   value={b.lengthAdjust ?? 0}
                   width={64}
                   onCommit={(v) => store.patchBoundary(tpl.id, { lengthAdjust: v })}
-                  title="总帧长 = 长度值 + 修正值"
                 />
               </div>
-            </div>
-            <div className="form-hint">
-              总帧长 = 长度字段原始值 + 修正值。例：长度值表示帧头之后的字节数，修正 = 帧头长度 + 长度字段宽度。
             </div>
           </>
         )}
@@ -285,12 +284,12 @@ export function PropertiesPanel() {
           <NumInput
             value={b.maxLength}
             onCommit={(v) => store.patchBoundary(tpl.id, { maxLength: v })}
-            title="安全上限：超长候选帧直接丢弃重新同步"
           />
+          <HelpHint text="安全上限：候选帧超过此长度直接丢弃并重新同步，防止坏数据撑爆解析器。" />
         </div>
         <div className="form-hint">
-          识别位（功能码/帧型码等第二阶固定识别）在<b>字段属性</b>中设置：
-          点击下方字段列表或画布中的字段 → 「帧型识别 → 识别期望值」。
+          帧识别字段（功能码/帧型码）在字段属性中开启。
+          <HelpHint text="协议解析链路：帧头（同步字）定位 → 长度域/固定长度/帧尾定界 → 帧识别字段筛选帧型 → 校验域验证。收满一帧后校验识别字段偏移处的固定字节串，匹配才认定本帧型，不匹配静默丢弃；同簇多帧型（如 WIT 0x51~0x5A、匿名 V7 功能码）靠不同识别值区分。" />
           {(() => {
             const discAt: string[] = [];
             if (b.discOffset != null && b.discValue?.length)
@@ -335,17 +334,13 @@ export function PropertiesPanel() {
                 />
               </div>
               <div className="form-pair">
-                <label>终点</label>
+                <label>终点 <HelpHint text="正数=相对帧头的字节偏移；负数=距帧尾的字节数（-1 = 不含最后1字节，-2 = 不含末尾2字节）。校验只计算覆盖区间内的字节。" /></label>
                 <NumInput
                   value={tpl.checksum.coverageEnd}
                   width={64}
                   onCommit={(v) => store.patchChecksum(tpl.id, { coverageEnd: v })}
-                  title="正数=相对帧头偏移；负数=距帧尾的字节数（如 -2 表示排除末尾2字节）"
                 />
               </div>
-            </div>
-            <div className="form-hint">
-              终点为负数时表示从帧尾倒数（-1 = 不含最后1字节，-2 = 不含末尾2字节）。
             </div>
           </>
         )}
@@ -420,6 +415,23 @@ export function PropertiesPanel() {
   }
 
   const patch = (p: Partial<FieldDef>) => store.patchField(tpl.id, field.id, p);
+  const commitSized = (p: Partial<FieldDef>) => {
+    const next = { ...field, ...p };
+    const c = store.fieldConflictInfo(tpl.id, field.id, next.offset, fieldSize(next));
+    if (c.overFrame) {
+      setConfirm({ fid: field.id, msg: `无法修改：${c.overFrame}。请先增大「总帧长/最大帧长」或缩小字段。` });
+      return;
+    }
+    if (c.overlapName) {
+      setConfirm({
+        fid: field.id,
+        msg: `修改后将覆盖字段「${c.overlapName}」的前 ${c.overlapBytes} 字节。是否继续？`,
+        apply: () => patch(p),
+      });
+      return;
+    }
+    patch(p);
+  };
   const numeric = !["ascii", "bcd"].includes(field.type);
 
   return (
@@ -466,7 +478,7 @@ export function PropertiesPanel() {
         </div>
         <div className="form-pair">
           <label>偏移</label>
-          <NumInput value={field.offset} width={64} onCommit={(v) => patch({ offset: v })} title="相对帧头的字节偏移" />
+          <NumInput value={field.offset} width={64} onCommit={(v) => commitSized({ offset: Math.max(0, Math.round(v)) })} title="相对帧头的字节偏移" />
         </div>
       </div>
       <div className="form-row">
@@ -478,7 +490,7 @@ export function PropertiesPanel() {
             onChange={(e) => {
               const t = e.target.value as FieldType;
               const size = fieldSize({ ...field, type: t });
-              patch({ type: t, size: ["ascii", "bcd"].includes(t) ? (field.size ?? size) : null });
+              commitSized({ type: t, size: ["ascii", "bcd"].includes(t) ? (field.size ?? size) : null });
             }}
           >
             {FIELD_TYPES.map((t) => (
@@ -494,7 +506,7 @@ export function PropertiesPanel() {
             <NumInput
               value={field.size ?? fieldSize(field)}
               width={64}
-              onCommit={(v) => patch({ size: v })}
+              onCommit={(v) => commitSized({ size: Math.max(1, Math.round(v)) })}
             />
           </div>
         )}
@@ -553,29 +565,48 @@ export function PropertiesPanel() {
         </div>
       )}
       </Section>
-      <Section title="帧型识别">
-      <div className="form-row">
-        <label>识别期望值</label>
-        <HexBytesInput
-          allowEmpty
-          value={(() => {
-            if (field.disc?.length) return field.disc;
-            const b = tpl.boundary;
-            if (b.discOffset === field.offset && b.discValue?.length) return b.discValue;
-            const d = b.discs?.find((x) => x.offset === field.offset && x.value.length);
-            if (d) return d.value;
-            return [];
-          })()}
-          onCommit={(v) => store.setFieldDisc(tpl.id, field.id, v.length ? v : null)}
-          title="本字段位置的固定字节（Hex）。第二阶识别：整帧收齐后校验，不匹配整帧丢弃"
-          placeholder="如 51；留空=不识别"
-        />
-      </div>
-      <div className="form-hint">
-        第二阶识别（帧头/帧尾为第一阶）：整帧收齐后校验本字段偏移处的固定字节，
-        全部匹配才认定为本帧型，不匹配的帧静默丢弃；同栈多帧型（如 WIT 0x51~0x5A）靠它区分。
-        留空 = 本字段不作识别。识别随字段偏移自动跟随，删除字段自动移除。
-      </div>
+      <Section title="帧识别字段">
+      {(() => {
+        const b = tpl.boundary;
+        const effective = field.disc?.length
+          ? field.disc
+          : b.discOffset === field.offset && b.discValue?.length
+            ? b.discValue
+            : b.discs?.find((x) => x.offset === field.offset && x.value.length)?.value;
+        const on = !!effective?.length;
+        return (
+          <>
+            <div className="form-row">
+              <label>帧识别位</label>
+              <label className="set-switch" title="将此字段用作帧识别位">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={(e) =>
+                    store.setFieldDisc(tpl.id, field.id, e.target.checked ? (effective?.length ? effective : [0]) : null)
+                  }
+                />
+                <span />
+              </label>
+              <span className="form-hint" style={{ margin: 0 }}>
+                {on ? "已启用" : "关闭"}
+              </span>
+              <HelpHint text="帧头（同步字）定位后，解析器用本字段偏移处的固定识别值筛选帧型：收满一帧后校验该位置字节串，匹配才认定本帧型，不匹配的帧静默丢弃。同一协议簇内不同帧型（如 WIT 0x51~0x5A、匿名 V7 功能码 0x01~0x41）依靠不同识别值区分。识别值占位随字段偏移自动跟随，删除字段即移除识别。" />
+            </div>
+            {on && (
+              <div className="form-row">
+                <label>识别值</label>
+                <HexBytesInput
+                  value={effective!}
+                  onCommit={(v) => v.length && store.setFieldDisc(tpl.id, field.id, v)}
+                  placeholder="如 51"
+                />
+                <HelpHint text="本字段偏移处应有的固定字节（Hex），可写多个连续字节，如 5A 或 45 56 23。字段占位将自动扩展到识别值长度。" />
+              </div>
+            )}
+          </>
+        );
+      })()}
       </Section>
       <Section title="换算与显示">
       <div className="form-row">
@@ -605,6 +636,25 @@ export function PropertiesPanel() {
       <div className="form-hint">
         修改即时生效：解析规则已热更新到内核，左侧图例数值将按新类型刷新。
       </div>
+      {confirm && confirm.fid === field.id && (
+        <div className="props-confirm">
+          <div className="props-confirm-msg">{confirm.msg}</div>
+          <div className="props-confirm-actions">
+            <button className="btn" onClick={() => setConfirm(null)}>取消</button>
+            {confirm.apply && (
+              <button
+                className="btn primary"
+                onClick={() => {
+                  confirm.apply?.();
+                  setConfirm(null);
+                }}
+              >
+                覆盖并继续
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       <button className="btn danger-btn" onClick={() => store.removeField(tpl.id, field.id)}>
         删除该字段
       </button>

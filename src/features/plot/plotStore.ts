@@ -17,6 +17,7 @@ export interface PlotSettings {
   xSource: string;
   plotMode: "line" | "points";
   lineWidth: number;
+  lineStyle: "linear" | "step" | "smooth";
 }
 
 export interface PlotSnapshot {
@@ -33,6 +34,7 @@ let settings: PlotSettings = {
   xSource: "time",
   plotMode: "line",
   lineWidth: 2,
+  lineStyle: "linear",
 };
 let snapshot: PlotSnapshot = { channels, settings };
 const listeners = new Set<() => void>();
@@ -105,20 +107,44 @@ export function buildAligned(): {
       events.push({ t: d.t[i], ci, v: d.v[i], seq: i });
     }
   }
-  events.sort((a, b) => a.t - b.t || a.seq - b.seq);
+  events.sort((a, b) => a.t - b.t || a.ci - b.ci || a.seq - b.seq);
   const x: number[] = [];
   const cols: (number | null)[][] = chans.map(() => []);
+  const lastV: (number | null)[] = chans.map(() => null);
   let last = -Infinity;
   for (const ev of events) {
     let t = ev.t;
     if (t <= last) t = last + 0.001;
     last = t;
+    lastV[ev.ci] = ev.v;
     x.push(t);
     for (let j = 0; j < chans.length; j++) {
-      cols[j].push(j === ev.ci ? ev.v : null);
+      cols[j].push(lastV[j]);
     }
   }
-  return { x, cols };
+  const xsrc = settings.xSource;
+  let outX = x;
+  if (xsrc === "index") {
+    outX = x.map((_, i) => i);
+  } else if (xsrc.startsWith("ch:")) {
+    const ci = chans.findIndex((c) => c.id === xsrc.slice(3));
+    if (ci >= 0) {
+      const col = cols[ci];
+      const xs: number[] = [];
+      let prev = 0;
+      for (let i = 0; i < col.length; i++) {
+        const v = col[i];
+        if (v === null) {
+          xs.push(prev);
+        } else {
+          prev = v;
+          xs.push(v);
+        }
+      }
+      outX = xs;
+    }
+  }
+  return { x: outX, cols };
 }
 
 export async function init() {
@@ -187,6 +213,14 @@ export function nextColor(): string {
 export function setSetting(patch: Partial<PlotSettings>) {
   settings = { ...settings, ...patch };
   emit();
+}
+
+export function sampleRate(id: string): number {
+  const d = dataMap.get(id);
+  if (!d || d.t.length < 2) return 0;
+  const span = d.t[d.t.length - 1] - d.t[0];
+  if (span <= 0) return 0;
+  return ((d.t.length - 1) / span) * 1000;
 }
 
 export function hasChannel(tplId: string, fieldId: string): boolean {
