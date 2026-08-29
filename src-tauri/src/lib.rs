@@ -1,5 +1,6 @@
 mod demo;
 mod files;
+mod net;
 mod parser;
 mod pipeline;
 mod ring;
@@ -16,10 +17,15 @@ pub fn run() {
             "--disable-features=msWebView2DragDropGlobalApiEnabled --disable-gpu-compositing",
         );
     }
+    let serial_mgr = serial::SerialManager::new();
+    let net_mgr = net::NetManager::new(serial_mgr.ctx.clone());
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(serial::SerialManager::new())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(serial_mgr)
+        .manage(net_mgr)
         .invoke_handler(tauri::generate_handler![
             serial::list_ports,
             serial::open_port,
@@ -27,6 +33,8 @@ pub fn run() {
             serial::send_data,
             serial::start_record,
             serial::stop_record,
+            net::open_net,
+            net::close_net,
             pipeline::parser_set_rules,
             pipeline::hex_fetch,
             pipeline::hex_clear,

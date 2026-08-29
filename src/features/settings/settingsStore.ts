@@ -22,7 +22,7 @@ function clampDecimals(v: unknown, fallback: number): number {
 
 function load(): Settings {
   const fallback: Settings = {
-    theme: localStorage.getItem("vs.theme") === "light" ? "light" : "dark",
+    theme: localStorage.getItem("vs.theme") === "dark" ? "dark" : "light",
     locale: "zh",
     zoom: 100,
     decimals: clampDecimals(localStorage.getItem("vs.decimals") ?? "2", 2),

@@ -25,6 +25,8 @@ export interface SerialSnapshot {
   bps: number;
   iface: IfaceKind;
   net: IfaceNetConfig;
+  /** 最近一次 serial:state 事件里的连接描述（串口名 或 网络地址） */
+  portName: string | null;
 }
 
 const DEFAULT_CONFIG: SerialConfig = {
@@ -51,6 +53,7 @@ let snapshot: SerialSnapshot = {
   bps: 0,
   iface: "serial",
   net: DEFAULT_NET,
+  portName: null,
 };
 
 const listeners = new Set<() => void>();
@@ -152,7 +155,19 @@ export function resetRx() {
 export async function openPort() {
   set({ error: null });
   try {
-    await invoke("open_port", { config: snapshot.config });
+    if (snapshot.iface === "serial") {
+      if (!snapshot.config.port) throw new Error("请先选择串口");
+      await invoke("open_port", { config: snapshot.config });
+    } else {
+      await invoke("open_net", {
+        config: {
+          kind: snapshot.iface,
+          remoteHost: snapshot.net.remoteHost,
+          remotePort: snapshot.net.remotePort,
+          localPort: snapshot.net.localPort,
+        },
+      });
+    }
   } catch (e) {
     set({ error: String(e) });
     throw e;
@@ -160,7 +175,11 @@ export async function openPort() {
 }
 
 export async function closePort() {
-  await invoke("close_port");
+  if (snapshot.iface === "serial") {
+    await invoke("close_port");
+  } else {
+    await invoke("close_net");
+  }
 }
 
 export function sendData(mode: "ascii" | "hex", text: string) {

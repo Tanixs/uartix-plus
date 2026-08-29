@@ -3,20 +3,21 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as serialStore from "../features/serial/serialStore";
 import { useSyncExternalStore } from "react";
 import type { IfaceKind } from "../features/serial/serialStore";
+import { t } from "../i18n/strings";
 import iconPlain from "../assets/icon-plain.svg";
 
 const IFACE_LABEL: Record<IfaceKind, string> = {
-  serial: "串口",
-  "tcp-client": "TCP 客户端",
-  "tcp-server": "TCP 服务端",
-  udp: "UDP",
+  serial: t("iface.serial"),
+  "tcp-client": t("iface.tcpClient"),
+  "tcp-server": t("iface.tcpServer"),
+  udp: t("iface.udp"),
 };
 
-const IFACE_ITEMS: { key: IfaceKind; label: string; ready: boolean }[] = [
-  { key: "serial", label: "串口", ready: true },
-  { key: "tcp-client", label: "TCP 客户端", ready: false },
-  { key: "tcp-server", label: "TCP 服务端", ready: false },
-  { key: "udp", label: "UDP", ready: false },
+const IFACE_ITEMS: { key: IfaceKind; ready: boolean }[] = [
+  { key: "serial", ready: true },
+  { key: "tcp-client", ready: true },
+  { key: "tcp-server", ready: true },
+  { key: "udp", ready: true },
 ];
 
 function tbSvg(children: React.ReactNode) {
@@ -67,27 +68,28 @@ const IfaceMenu = () => {
   return (
     <div className="tb-iface" ref={ref}>
       <button className="tb-btn tb-iface-btn" onClick={() => setOpen((v) => !v)} title="数据接口">
-        <span className={`tb-iface-dot${s.iface === "serial" && s.status === "connected" ? " on" : ""}`} />
+        <span className={`tb-iface-dot${s.status === "connected" ? " on" : ""}`} />
         {IFACE_LABEL[s.iface]}
         <span className="tb-iface-caret">▾</span>
       </button>
       {open && (
         <div className="tb-menu">
-          <span className="tb-menu-title">数据接口</span>
+          <span className="tb-menu-title">{t("iface.title")}</span>
           {IFACE_ITEMS.map((it) => (
             <button
               key={it.key}
               className={`tb-menu-item${s.iface === it.key ? " on" : ""}`}
-              disabled={!it.ready}
-              title={it.ready ? `切换到 ${it.label}` : "即将支持，后续版本提供"}
+              title={`${t("iface.title")}：${IFACE_LABEL[it.key]}`}
               onClick={() => {
+                if (s.status === "connected" || s.status === "reconnecting") {
+                  void serialStore.closePort();
+                }
                 serialStore.setIface(it.key);
                 setOpen(false);
               }}
             >
-              {it.label}
+              {IFACE_LABEL[it.key]}
               {s.iface === it.key ? <em className="tb-menu-check">✓</em> : null}
-              {!it.ready && <em className="tb-menu-soon">即将支持</em>}
             </button>
           ))}
         </div>
@@ -146,7 +148,7 @@ export function TitleBar({
           draggable={false}
         />
         Uartix+
-        <span className="tb-ver">0.1.0</span>
+        <span className="tb-ver">0.2.0</span>
       </div>
       <IfaceMenu />
       <div className="tb-spacer" data-tauri-drag-region />

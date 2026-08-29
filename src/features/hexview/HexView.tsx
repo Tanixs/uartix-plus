@@ -6,6 +6,8 @@ import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
 import * as fcStore from "../framecanvas/frameStore";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
+import { useSettings } from "../settings/settingsStore";
+import { t } from "../../i18n/strings";
 
 const ROW_H = 20;
 const COLS = 16;
@@ -27,6 +29,7 @@ function hexA(hex: string, alpha: number): string {
 }
 
 export function HexView() {
+  useSettings(); // 语言切换时随设置重渲染
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef({ follow: true, viewEnd: COLS - 1 });
@@ -328,7 +331,7 @@ export function HexView() {
     if (!v.follow) {
       ctx.fillStyle = dimCol;
       ctx.font = `11px "Segoe UI", "Microsoft YaHei", sans-serif`;
-      ctx.fillText("↑ 历史模式", w - 150, 14);
+      ctx.fillText(t("hx.historyMode"), w - 150, 14);
     }
   };
 
@@ -747,12 +750,12 @@ export function HexView() {
         />
         {!viewRef.current.follow && (
           <button className="btn hex-follow-btn" onClick={jumpToTail}>
-            跟随最新 ↓
+            {t("hx.follow")}
           </button>
         )}
         <button
           className="btn hex-clear-btn"
-          title="清空接收缓冲、帧归档与统计"
+          title={t("hx.clear")}
           onClick={() => void clearData()}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -764,7 +767,7 @@ export function HexView() {
             <input
               autoFocus
               className="input"
-              placeholder="搜索 Hex 字节，如 AA 55"
+              placeholder={t("hx.searchPlaceholder")}
               value={searchPattern}
               onChange={(e) => setSearchPattern(e.target.value)}
               onKeyDown={(e) => {
@@ -772,23 +775,23 @@ export function HexView() {
               }}
             />
             <button className="btn" onClick={doSearch}>
-              搜索
+              {t("hx.search")}
             </button>
             {searchHits.length > 0 && (
               <>
                 <span className="hex-search-count">
                   {searchIdx + 1}/{searchHits.length}
                 </span>
-                <button className="btn" onClick={() => stepSearch(-1)} title="上一个">
+                <button className="btn" onClick={() => stepSearch(-1)} title={t("hx.prev")}>
                   ↑
                 </button>
-                <button className="btn" onClick={() => stepSearch(1)} title="下一个">
+                <button className="btn" onClick={() => stepSearch(1)} title={t("hx.next")}>
                   ↓
                 </button>
               </>
             )}
             {searchErr && <span className="hex-search-err">{searchErr}</span>}
-            <button className="btn" onClick={closeSearch} title="关闭">
+            <button className="btn" onClick={closeSearch} title={t("hx.close")}>
               ×
             </button>
           </div>
@@ -797,12 +800,12 @@ export function HexView() {
       <div className="hex-status">
         <span className="hex-status-left">
           {sel
-            ? `选区 ${selLen} 字节：${selHex || "…"}`
-            : "拖拽框选字节 → 右键定义为协议字段 · Ctrl+F 搜索"}
+            ? `${t("hx.selection")} ${selLen} B：${selHex || "…"}`
+            : t("hx.hint")}
         </span>
         <span className="hex-status-right">
-          缓冲 {serial.rxTotal} B · 帧 {tele.stats.total} · 错帧{" "}
-          {tele.stats.errors}
+          {t("hx.buffer")} {serial.rxTotal} B · {t("hx.frames")} {tele.stats.total} ·{" "}
+          {t("hx.badFrames")} {tele.stats.errors}
         </span>
       </div>
       {menu && (

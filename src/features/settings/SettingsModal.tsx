@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { useSettings, patch, type WorkspacePreset } from "./settingsStore";
 import { t } from "../../i18n/strings";
 import * as templateStore from "../protocol/templateStore";
@@ -60,6 +63,38 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
   const settings = useSettings();
   const [tab, setTab] = useState("general");
   const [msg, setMsg] = useState("");
+  const [appVersion, setAppVersion] = useState("");
+  const [updState, setUpdState] = useState<{
+    status: "idle" | "checking" | "downloading" | "latest" | "ready" | "error";
+    msg: string;
+  }>({ status: "idle", msg: "" });
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => setAppVersion(""));
+  }, []);
+
+  const runUpdateCheck = async () => {
+    setUpdState({ status: "checking", msg: "正在检查更新…" });
+    try {
+      const upd = await check();
+      if (!upd) {
+        setUpdState({ status: "latest", msg: "当前已是最新版本" });
+        return;
+      }
+      setUpdState({ status: "downloading", msg: `发现新版本 ${upd.version}，正在下载安装…` });
+      await upd.downloadAndInstall();
+      setUpdState({ status: "ready", msg: `已更新到 ${upd.version}，即将重启应用…` });
+      setTimeout(() => void relaunch(), 1200);
+    } catch (e) {
+      const raw = String(e).replace(/^Error:\s*/i, "").replace(/^updater\s*/i, "");
+      setUpdState({
+        status: "error",
+        msg: `检查更新失败：${raw}（若提示未配置更新源，说明更新服务尚未发布）`,
+      });
+    }
+  };
 
   const tabs: { key: string; label: string }[] = [
     { key: "general", label: t("set.general") },
@@ -273,7 +308,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     <div className="set-about-desc">可视化串口协议分析仪</div>
                   </div>
                 </div>
-                {row(t("set.version"), <span className="set-mono">0.1.0 (M6)</span>)}
+                {row(t("set.version"), <span className="set-mono">{appVersion ? `${appVersion} (M7)` : "0.2.0 (M7)"}</span>)}
                 {row("官网", (
                   <button className="btn" onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl("https://larix.teuioe.cn/uartix-plus"))}>
                     larix.teuioe.cn/uartix-plus
@@ -285,7 +320,18 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                   </button>
                 ))}
                 {row(t("set.license"), <span>MIT</span>)}
-                {row("", <button className="btn" disabled title="updater 将在后续版本接入">{t("set.checkUpdate")}</button>)}
+                {row("", (
+                  <div className="qk-fgroup">
+                    <button
+                      className="btn"
+                      disabled={updState.status === "checking" || updState.status === "downloading"}
+                      onClick={() => void runUpdateCheck()}
+                    >
+                      {updState.status === "checking" || updState.status === "downloading" ? "检查中…" : t("set.checkUpdate")}
+                    </button>
+                    {updState.msg && <span className="qk-fhint">{updState.msg}</span>}
+                  </div>
+                ))}
               </>
             )}
             {msg && <div className="set-msg">{msg}</div>}

@@ -1,6 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { ParityMode } from "../../ipc/types";
 import * as store from "./serialStore";
+import { useSettings } from "../settings/settingsStore";
+import { t } from "../../i18n/strings";
 
 const BAUDS = [
   9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000,
@@ -9,6 +11,7 @@ const BAUDS = [
 
 export function SerialToolbar() {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  useSettings(); // 语言切换时随设置重渲染
   const locked = s.status !== "disconnected";
   const [baudText, setBaudText] = useState(String(s.config.baud));
 
@@ -19,7 +22,7 @@ export function SerialToolbar() {
   const onConnect = async () => {
     if (s.status === "disconnected") {
       if (!s.config.port) {
-        store.setError("请先选择串口");
+        store.setError(t("tb.selectPortFirst"));
         return;
       }
       try {
@@ -34,10 +37,10 @@ export function SerialToolbar() {
 
   const label =
     s.status === "connected"
-      ? "断开"
+      ? t("tb.disconnect")
       : s.status === "reconnecting"
-        ? "重连中…"
-        : "连接";
+        ? t("tb.reconnecting")
+        : t("tb.connect");
 
   return (
     <div className="toolbar-group">
@@ -46,10 +49,10 @@ export function SerialToolbar() {
         onClick={onConnect}
         title={
           s.status === "connected"
-            ? "点击断开串口"
+            ? t("tb.clickDisconnect")
             : s.status === "reconnecting"
-              ? "串口断开，正在自动重连"
-              : "打开串口连接"
+              ? t("tb.serialReconnecting")
+              : t("tb.openSerial")
         }
       >
         <span className="connect-dot" />
@@ -60,9 +63,9 @@ export function SerialToolbar() {
         disabled={locked}
         value={s.config.port}
         onChange={(e) => store.setConfig({ port: e.target.value })}
-        title="串口"
+        title={t("tb.port")}
       >
-        <option value="">COM 口</option>
+        <option value="">{t("tb.portPlaceholder")}</option>
         {s.ports.map((p) => (
           <option key={p.name} value={p.name}>
             {p.name} — {p.friendly}
@@ -74,7 +77,7 @@ export function SerialToolbar() {
         list="vs-bauds"
         disabled={locked}
         value={baudText}
-        title="波特率（预设或自定义）"
+        title={t("tb.baud")}
         onChange={(e) => {
           setBaudText(e.target.value);
           const v = parseInt(e.target.value, 10);
@@ -90,7 +93,7 @@ export function SerialToolbar() {
         className="input"
         disabled={locked}
         value={s.config.dataBits}
-        title="数据位"
+        title={t("tb.dataBits")}
         onChange={(e) =>
           store.setConfig({ dataBits: Number(e.target.value) as 7 | 8 })
         }
@@ -102,20 +105,20 @@ export function SerialToolbar() {
         className="input"
         disabled={locked}
         value={s.config.parity}
-        title="校验位"
+        title={t("tb.parity")}
         onChange={(e) =>
           store.setConfig({ parity: e.target.value as ParityMode })
         }
       >
-        <option value="none">无校验</option>
-        <option value="even">偶校验</option>
-        <option value="odd">奇校验</option>
+        <option value="none">{t("tb.parityNone")}</option>
+        <option value="even">{t("tb.parityEven")}</option>
+        <option value="odd">{t("tb.parityOdd")}</option>
       </select>
       <select
         className="input"
         disabled={locked}
         value={s.config.stopBits}
-        title="停止位"
+        title={t("tb.stopBits")}
         onChange={(e) =>
           store.setConfig({ stopBits: Number(e.target.value) as 1 | 2 })
         }

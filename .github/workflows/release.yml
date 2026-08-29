@@ -1,0 +1,70 @@
+name: Release
+
+# 推送 v* 标签时自动构建 Windows(NSIS) + Linux(AppImage/deb) 并创建 Release
+# （按需求不构建 macOS）
+# 前置条件：在仓库 Settings → Secrets and variables → Actions 配置：
+#   TAURI_SIGNING_PRIVATE_KEY          = C:\Users\Firs\.tauri\uartix-plus.key 的文件内容
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD = 留空即可（该密钥无密码）
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+          - platform: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'ubuntu-22.04' && 'x86_64-unknown-linux-gnu' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install Linux dependencies (ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libfuse2
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "Uartix+ v__VERSION__"
+          releaseBody: "见 HANDOFF.md 的版本说明。Windows 安装包（NSIS）与 Linux 包（AppImage/deb）；latest.json 为自动更新清单。"
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true

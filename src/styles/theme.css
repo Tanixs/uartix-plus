@@ -86,7 +86,10 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* 不用 100vh：CSS zoom 下视口单位会被双重缩放，非 100% 缩放时底部出现黑边/白边；
+     百分比沿 html→body→#root 的 100% 链解析，任何缩放都能精确铺满窗口 */
+  height: 100%;
+  min-height: 0;
 }
 
 .toolbar {
@@ -762,6 +765,13 @@ body {
 .qk-parts .fp.data { color: #1a7f37; background: rgba(63, 185, 80, 0.14); }
 .qk-parts .fp.check { color: #9e6a03; background: rgba(210, 153, 34, 0.16); }
 .qk-note { font-size: 11px; color: var(--text-dim); }
+
+/* 控制台时间戳分色 */
+.console-ts {
+  color: var(--accent);
+  opacity: 0.8;
+  font-family: var(--font-mono);
+}
 
 /* 自定义协议编辑器 */
 .qk-editor { max-width: 860px; width: min(860px, 92vw); }
@@ -3230,6 +3240,10 @@ body {
 .set-row { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
 .set-row > label { flex: 0 0 120px; font-size: 12.5px; color: var(--text-dim); text-align: left; }
 .set-ctl { flex: 1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 设置行内嵌表单：去除 form-row 自带的 label 定宽/底边距与 form-hint 的 84px 缩进，保证整行对齐 */
+.set-ctl .form-row { margin-bottom: 0; }
+.set-ctl .form-row > label { width: auto; min-width: 0; text-align: left; }
+.set-ctl .form-hint { margin: 2px 0 0; flex-basis: 100%; }
 .set-seg { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
 .set-seg.col { flex-direction: column; }
 .set-seg button {
@@ -3350,5 +3364,12 @@ label.set-switch,
   background: var(--bg-inset); border: 1px solid var(--border-soft); border-radius: 8px;
   padding: 10px 12px; font-family: var(--font-mono); font-size: 11.5px; overflow-x: auto; margin: 6px 0 10px;
 }
-.help-content code { font-family: var(--font-mono); background: var(--bg-inset); padding: 0 4px; border-radius: 3px; }
+.help-content code {
+  font-family: var(--font-mono);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
 .btn.icon-btn { display: inline-flex; align-items: center; justify-content: center; padding: 0 7px; }

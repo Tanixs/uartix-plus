@@ -4,6 +4,8 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { RxEventPayload, TxEventPayload } from "../../ipc/types";
 import * as store from "../serial/serialStore";
 import { IconPause, IconPlay, IconTrash } from "../../shared/icons";
+import { useSettings } from "../settings/settingsStore";
+import { t } from "../../i18n/strings";
 import { QuickCommandBar } from "./QuickCommandBar";
 
 interface Chunk {
@@ -40,6 +42,7 @@ function applyNewline(
 }
 
 export function ConsolePanel() {
+  useSettings(); // 语言切换时随设置重渲染
   const [mode, setMode] = useState<"ascii" | "hex">("ascii");
   const [showTs, setShowTs] = useState(true);
   const [wrap, setWrap] = useState(true);
@@ -134,7 +137,7 @@ export function ConsolePanel() {
           if (!body) continue;
           s = (showTs ? `[${fmtTime(c.ts)}] ` : "") + body;
         }
-        el.appendChild(document.createTextNode(s));
+        appendConsoleText(el, s);
         appended = true;
         while (el.childNodes.length > MAX_CONSOLE_BLOCKS) {
           el.removeChild(el.firstChild as ChildNode);
@@ -146,6 +149,23 @@ export function ConsolePanel() {
     }, 100);
     return () => clearInterval(timer);
   }, []);
+
+  // 时间戳分色：把 [TX hh:mm:ss.mmm] / [hh:mm:ss.mmm] 前缀包进彩色 span
+  const TS_SPLIT = /(\[(?:TX )?\d{1,2}:\d{2}:\d{2}\.\d{2,3}\] ?)/;
+  function appendConsoleText(el: HTMLElement, s: string) {
+    const parts = s.split(TS_SPLIT);
+    for (const p of parts) {
+      if (!p) continue;
+      if (/^\[(?:TX )?\d{1,2}:\d{2}:\d{2}\.\d{2,3}\] ?$/.test(p)) {
+        const span = document.createElement("span");
+        span.className = "console-ts";
+        span.textContent = p;
+        el.appendChild(span);
+      } else {
+        el.appendChild(document.createTextNode(p));
+      }
+    }
+  }
 
   const onScroll = () => {
     const el = viewRef.current;
@@ -167,7 +187,7 @@ export function ConsolePanel() {
         setRecording(false);
       } else {
         const path = await save({
-          title: "保存接收日志",
+          title: t("con.saveLogTitle"),
           defaultPath: `vs-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.log`,
           filters: [
             { name: "日志文件", extensions: ["log", "txt"] },
@@ -243,7 +263,7 @@ export function ConsolePanel() {
             setMode(e.target.value as "ascii" | "hex");
             decoderRef.current = new TextDecoder("utf-8");
           }}
-          title="接收显示模式"
+          title={t("con.mode")}
         >
           <option value="ascii">ASCII</option>
           <option value="hex">Hex</option>
@@ -254,7 +274,7 @@ export function ConsolePanel() {
             checked={showTs}
             onChange={(e) => setShowTs(e.target.checked)}
           />
-          时间戳
+          {t("con.ts")}
         </label>
         <label className="chk">
           <input
@@ -262,7 +282,7 @@ export function ConsolePanel() {
             checked={wrap}
             onChange={(e) => setWrap(e.target.checked)}
           />
-          自动换行
+          {t("con.wrap")}
         </label>
         <label className="chk">
           <input
@@ -270,7 +290,7 @@ export function ConsolePanel() {
             checked={showRx}
             onChange={(e) => setShowRx(e.target.checked)}
           />
-          显示RX
+          {t("con.showRx")}
         </label>
         <label className="chk">
           <input
@@ -278,7 +298,7 @@ export function ConsolePanel() {
             checked={showTx}
             onChange={(e) => setShowTx(e.target.checked)}
           />
-          显示TX
+          {t("con.showTx")}
         </label>
         <button
           className={`btn icon-btn ${effectivePaused ? "warn" : ""}`}
@@ -288,22 +308,22 @@ export function ConsolePanel() {
             setAutoPaused(false);
             store.setViewFrozen(next);
           }}
-          title={effectivePaused ? "继续" : "暂停"}
+          title={effectivePaused ? t("con.resume") : t("con.pause")}
         >
           {effectivePaused ? <IconPlay /> : <IconPause />}
         </button>
-        <button className="btn icon-btn" onClick={clearAll} title="清空">
+        <button className="btn icon-btn" onClick={clearAll} title={t("con.clear")}>
           <IconTrash />
         </button>
         <div className="console-spacer" />
         {recording && (
           <span className="rec">
             <span className="rec-dot" />
-            记录中
+            {t("con.recording")}
           </span>
         )}
         <button className="btn" onClick={toggleRecord}>
-          {recording ? "停止记录" : "记录日志"}
+          {recording ? t("con.stopRecord") : t("con.record")}
         </button>
       </div>
       <div
@@ -317,7 +337,7 @@ export function ConsolePanel() {
           className="input"
           value={sendMode}
           onChange={(e) => setSendMode(e.target.value as "ascii" | "hex")}
-          title="发送模式"
+          title={t("con.sendMode")}
         >
           <option value="ascii">ASCII</option>
           <option value="hex">Hex</option>
@@ -329,9 +349,9 @@ export function ConsolePanel() {
             onChange={(e) =>
               setNewline(e.target.value as "none" | "lf" | "crlf")
             }
-            title="追加换行符"
+            title={t("con.newline")}
           >
-            <option value="none">无换行</option>
+            <option value="none">{t("con.newlineNone")}</option>
             <option value="lf">\n</option>
             <option value="crlf">\r\n</option>
           </select>
@@ -339,7 +359,9 @@ export function ConsolePanel() {
         <input
           className="input console-input"
           placeholder={
-            sendMode === "hex" ? "AA 55 01（十六进制）" : "输入要发送的内容，回车发送"
+            sendMode === "hex"
+              ? t("con.sendPlaceholderHex")
+              : t("con.sendPlaceholderAscii")
           }
           value={sendText}
           onChange={(e) => setSendText(e.target.value)}
@@ -353,9 +375,12 @@ export function ConsolePanel() {
           onChange={(e) => {
             if (e.target.value) setSendText(e.target.value);
           }}
-          title="发送历史"
+          title={t("con.history")}
         >
-          <option value="">历史{history.length ? `(${history.length})` : ""}</option>
+          <option value="">
+            {t("con.history")}
+            {history.length ? `(${history.length})` : ""}
+          </option>
           {history.map((h, i) => (
             <option key={i} value={h}>
               {h.slice(0, 40)}
@@ -363,10 +388,10 @@ export function ConsolePanel() {
           ))}
         </select>
         <button className="btn primary" onClick={doSend}>
-          发送
+          {t("con.send")}
         </button>
         <button className="btn" onClick={() => fileRef.current?.click()}>
-          发文件
+          {t("con.sendFile")}
         </button>
         <input
           ref={fileRef}

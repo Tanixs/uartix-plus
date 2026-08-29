@@ -92,14 +92,14 @@ impl SerialManager {
     }
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
 }
 
-fn emit_state(app: &AppHandle, status: &str, port: Option<String>, error: Option<String>) {
+pub(crate) fn emit_state(app: &AppHandle, status: &str, port: Option<String>, error: Option<String>) {
     let _ = app.emit(
         "serial:state",
         ConnState {
@@ -265,6 +265,7 @@ pub fn send_data(
     text: String,
     app: AppHandle,
     state: State<SerialManager>,
+    net: State<'_, crate::net::NetManager>,
 ) -> Result<(), String> {
     let bytes = match mode.as_str() {
         "hex" => parse_hex(&text)?,
@@ -272,6 +273,15 @@ pub fn send_data(
     };
     if bytes.is_empty() {
         return Err("发送内容为空".into());
+    }
+    // 网络接口已连接则优先走网络（串口路径不受影响）
+    match crate::net::try_send(&net, &bytes) {
+        Ok(true) => {
+            crate::net::notify_tx(&app, &net, bytes);
+            return Ok(());
+        }
+        Ok(false) => {}
+        Err(e) => return Err(e),
     }
     {
         let mut shared = state.shared.lock().map_err(|_| "状态锁中毒")?;

@@ -11,6 +11,8 @@ import {
   IconTrash,
 } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
+import { useSettings } from "../settings/settingsStore";
+import { t } from "../../i18n/strings";
 
 const ROW_H = 26;
 const HEADER_H = 26;
@@ -32,6 +34,7 @@ interface Col {
 }
 
 export function DataTable() {
+  useSettings(); // 语言切换时随设置重渲染
   const frames = useSyncExternalStore(framesStore.subscribe, framesStore.getSnapshot);
   const proto = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
@@ -152,7 +155,7 @@ export function DataTable() {
 
   const doExport = async (kind: "csv" | "xlsx") => {
     const path = await save({
-      title: "导出表格数据",
+      title: t("tbl.exportTitle"),
       defaultPath: `vs-data-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${kind}`,
       filters: [
         { name: kind === "csv" ? "CSV 文件" : "Excel 工作簿", extensions: [kind] },
@@ -210,38 +213,38 @@ export function DataTable() {
         <button
           className={`btn icon-btn ${frames.paused ? "warn" : ""}`}
           onClick={() => framesStore.setPaused(!frames.paused)}
-          title={frames.paused ? "继续刷新" : "暂停刷新"}
+          title={frames.paused ? t("tbl.resume") : t("tbl.pause")}
         >
           {frames.paused ? <IconPlay /> : <IconPause />}
         </button>
-        <button className="btn icon-btn" onClick={() => framesStore.clearRows()} title="清空">
+        <button className="btn icon-btn" onClick={() => framesStore.clearRows()} title={t("tbl.clear")}>
           <IconTrash />
         </button>
         <select
           className="input"
           value={frames.maxRows}
-          title="表格缓存行数上限"
+          title={t("tbl.cap")}
           onChange={(e) => framesStore.setMaxRows(Number(e.target.value))}
         >
           {[500, 1000, 5000, 10000, 50000].map((n) => (
             <option key={n} value={n}>
-              缓存 {n} 行
+              {t("tbl.cache")} {n}
             </option>
           ))}
         </select>
         <input
           className="input tbl-filter"
-          placeholder="筛选（时间 / 模板 / 字段值）"
+          placeholder={t("tbl.filter")}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
         <details className="col-menu">
-          <summary className="btn icon-btn" title="选择表格显示的字段列（导出仅含显示列）">
+          <summary className="btn icon-btn" title={t("tbl.columns")}>
             <IconColumns />
           </summary>
           <div className="col-menu-pop">
             {fieldColsAll.length === 0 && (
-              <div className="tpl-empty">暂无字段列</div>
+              <div className="tpl-empty">{t("tbl.noCols")}</div>
             )}
             {fieldColsAll.map((c) => (
               <label key={c.key} className="chk">
@@ -255,21 +258,21 @@ export function DataTable() {
             ))}
             {fieldColsAll.length > 0 && (
               <button className="btn" onClick={() => setHiddenCols(new Set())}>
-                全部显示
+                {t("tbl.showAll")}
               </button>
             )}
           </div>
         </details>
         <div className="tbl-bar-spacer" />
         {frames.capped && (
-          <span className="tbl-capped" title="超出上限，最旧数据已移除">
-            已截断
+          <span className="tbl-capped" title={t("tbl.capped")}>
+            {t("tbl.truncated")}
           </span>
         )}
-        <button className="btn" onClick={() => doExport("csv")} title="导出 CSV">
+        <button className="btn" onClick={() => doExport("csv")} title={t("tbl.exportCsv")}>
           CSV
         </button>
-        <button className="btn" onClick={() => doExport("xlsx")} title="导出 Excel">
+        <button className="btn" onClick={() => doExport("xlsx")} title={t("tbl.exportExcel")}>
           XLSX
         </button>
       </div>
@@ -284,14 +287,14 @@ export function DataTable() {
                 key={c.key}
                 className="tbl-hcell"
                 onClick={() => toggleSort(c.key)}
-                title={`点击排序：${c.label}`}
+                title={`${t("tbl.sortBy")}：${c.label}`}
               >
                 {c.label}
                 {arrow(c.key)}
                 {!["ts", "tpl", "valid"].includes(c.key) && (
                   <button
                     className="tbl-col-del"
-                    title="隐藏该列（可在列设置中恢复）"
+                    title={t("tbl.hideCol")}
                     onClick={(e) => {
                       e.stopPropagation();
                       toggleCol(c.key);
@@ -308,7 +311,7 @@ export function DataTable() {
               key={r.seq.toString() + r.tsMs.toString() + i}
               className={`tbl-row ${r.valid ? "" : "err"}`}
               style={{ top: HEADER_H + (start + i) * ROW_H, gridTemplateColumns: gridCols, height: ROW_H }}
-              title={r.error ?? "点击定位到 Hex 区"}
+              title={r.error ?? t("tbl.locate")}
               onClick={() => templateStore.locate(r.seq)}
             >
               {cols.map((c) => (
@@ -321,7 +324,7 @@ export function DataTable() {
           {total === 0 && (
             <div className="tbl-empty-slot">
               <EmptyState
-                title="暂无数据"
+                title={t("tbl.empty")}
                 hint={[
                   "启动演示源或连接串口并定义协议模板后",
                   "解析帧将逐行显示在此",

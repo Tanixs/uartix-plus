@@ -23,6 +23,7 @@ import * as attitudeStore from "./features/attitude/attitudeStore";
 import * as variableStore from "./features/controls/variableStore";
 import * as fcStore from "./features/framecanvas/frameStore";
 import * as telemetryStore from "./features/protocol/telemetryStore";
+import { t } from "./i18n/strings";
 
 const LAYOUT_KEY = "vs.layout.v2";
 
@@ -314,10 +315,12 @@ export default function App() {
 
   const statusText =
     serial.status === "connected"
-      ? `已连接 ${serial.config.port} @ ${serial.config.baud}`
+      ? serial.iface === "serial"
+        ? `${t("st.connected")} ${serial.config.port} @ ${serial.config.baud}`
+        : `${t("st.connected")} ${serial.portName ?? ""}`
       : serial.status === "reconnecting"
-        ? "连接断开，自动重连中…"
-        : "未连接";
+        ? t("st.reconnecting")
+        : t("st.disconnected");
 
   const bpsText =
     serial.bps >= 1024
@@ -439,39 +442,53 @@ let renderTick = 0;
 
 function NetIfaceBar({ kind }: { kind: IfaceKind }) {
   const s = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
+  useSettings(); // 语言切换时随设置重渲染
   const label =
-    kind === "tcp-client" ? "TCP 客户端" : kind === "tcp-server" ? "TCP 服务端" : "UDP";
+    kind === "tcp-client"
+      ? t("iface.tcpClient")
+      : kind === "tcp-server"
+        ? t("iface.tcpServer")
+        : t("iface.udp");
+  const busy = s.status === "connected" || s.status === "reconnecting";
   return (
     <div className="toolbar-group">
-      <button className="btn" disabled title="网络接口将在后续版本提供">
-        <span className="dot disconnected" />
-        连接
+      <button
+        className={`btn${busy ? " warn" : ""}`}
+        title={busy ? t("tb.disconnect") : t("tb.connect")}
+        onClick={() => (busy ? serialStore.closePort() : serialStore.openPort())}
+      >
+        <span className={`dot ${busy ? "connected" : "disconnected"}`} />
+        {busy ? t("tb.disconnect") : t("tb.connect")}
       </button>
-      <input
-        className="input"
-        value={s.net.remoteHost}
-        disabled
-        title="远程地址（即将支持）"
-        placeholder="远程 IP"
-        onChange={(e) => serialStore.setNet({ remoteHost: e.target.value })}
-      />
-      <input
-        className="input baud"
-        value={String(s.net.remotePort)}
-        disabled
-        title="远程端口（即将支持）"
-        onChange={(e) => serialStore.setNet({ remotePort: Number(e.target.value) || 0 })}
-      />
+      {kind !== "tcp-server" && (
+        <input
+          className="input"
+          value={s.net.remoteHost}
+          disabled={busy}
+          title={t("tb.remoteHost")}
+          placeholder={t("tb.remoteHost")}
+          onChange={(e) => serialStore.setNet({ remoteHost: e.target.value })}
+        />
+      )}
+      {kind !== "tcp-server" && (
+        <input
+          className="input baud"
+          value={String(s.net.remotePort)}
+          disabled={busy}
+          title={t("tb.remotePort")}
+          onChange={(e) => serialStore.setNet({ remotePort: Number(e.target.value) || 0 })}
+        />
+      )}
       {kind !== "tcp-client" && (
         <input
           className="input baud"
           value={String(s.net.localPort)}
-          disabled
-          title="本地端口（即将支持）"
+          disabled={busy}
+          title={kind === "tcp-server" ? t("tb.localPort") : t("tb.localPortUdp")}
           onChange={(e) => serialStore.setNet({ localPort: Number(e.target.value) || 0 })}
         />
       )}
-      <span className="iface-soon">{label} · 即将支持</span>
+      <span className="iface-soon">{busy && s.portName ? `${label} · ${s.portName}` : label}</span>
     </div>
   );
 }
