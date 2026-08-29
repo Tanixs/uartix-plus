@@ -23,6 +23,15 @@ pub struct FrameTemplate {
 
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct DiscCfg {
+    #[serde(default)]
+    pub offset: usize,
+    #[serde(default)]
+    pub value: Vec<u8>,
+}
+
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Boundary {
     pub mode: String,
     #[serde(default)]
@@ -45,6 +54,8 @@ pub struct Boundary {
     pub disc_offset: Option<usize>,
     #[serde(default)]
     pub disc_value: Option<Vec<u8>>,
+    #[serde(default)]
+    pub discs: Vec<DiscCfg>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -94,6 +105,8 @@ pub struct FieldDef {
     pub csv_delim: Option<String>,
     #[serde(default)]
     pub csv_type: Option<String>,
+    #[serde(default)]
+    pub disc: Option<Vec<u8>>,
 }
 
 fn default_endian() -> String {
@@ -191,7 +204,11 @@ impl Machine {
                 self.buf.push(b);
                 match self.evaluate(tpl) {
                     Eval::Need => {
-                        if !header.is_empty() && self.buf.len() > header.len() && self.buf.ends_with(header) {
+                        if tpl.boundary.mode != "fixedLength"
+                            && !header.is_empty()
+                            && self.buf.len() > header.len()
+                            && self.buf.ends_with(header)
+                        {
                             *dropped += (self.buf.len() - header.len()) as u64;
                             self.frame_start = abs + 1 - header.len() as u64;
                             self.buf.drain(..self.buf.len() - header.len());
@@ -236,14 +253,30 @@ impl Machine {
     }
 
     fn reject_by_disc(&self, tpl: &FrameTemplate) -> bool {
-        let (Some(off), Some(val)) = (tpl.boundary.disc_offset, tpl.boundary.disc_value.as_deref()) else {
-            return false;
-        };
-        if val.is_empty() {
-            return false;
+        let b = &tpl.boundary;
+        if let (Some(off), Some(val)) = (b.disc_offset, b.disc_value.as_deref()) {
+            if !val.is_empty() && self.matches_disc(off, val) {
+                return true;
+            }
         }
+        for d in &b.discs {
+            if !d.value.is_empty() && self.matches_disc(d.offset, &d.value) {
+                return true;
+            }
+        }
+        for f in &tpl.fields {
+            if let Some(val) = f.disc.as_deref() {
+                if !val.is_empty() && self.matches_disc(f.offset, val) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn matches_disc(&self, off: usize, val: &[u8]) -> bool {
         if self.buf.len() < off + val.len() {
-            return false;
+            return true;
         }
         &self.buf[off..off + val.len()] != val
     }
@@ -408,6 +441,14 @@ fn validate(tpl: &FrameTemplate) -> Result<(), String> {
     }
     if let (Some(off), Some(val)) = (b.disc_offset, b.disc_value.as_deref()) {
         if !val.is_empty() && off + val.len() < b.header_bytes.len() {
+            return Err(format!("模板[{}]识别位与帧头重叠", tpl.name));
+        }
+    }
+    for d in &b.discs {
+        if d.value.is_empty() {
+            return Err(format!("模板[{}]识别位期望值不能为空", tpl.name));
+        }
+        if d.offset + d.value.len() < b.header_bytes.len() {
             return Err(format!("模板[{}]识别位与帧头重叠", tpl.name));
         }
     }
@@ -771,6 +812,7 @@ mod tests {
                         max_length: Some(512),
                         disc_offset: None,
                         disc_value: None,
+                        discs: Vec::new(),
                     },
                     checksum: Some(ChecksumCfg {
                         algo: "sum8".into(),
@@ -800,6 +842,7 @@ mod tests {
                         max_length: Some(512),
                         disc_offset: None,
                         disc_value: None,
+                        discs: Vec::new(),
                     },
                     checksum: Some(ChecksumCfg {
                         algo: "crc16_modbus".into(),
@@ -836,6 +879,7 @@ mod tests {
             bits: None,
             csv_delim: None,
             csv_type: None,
+            disc: None,
         }
     }
 
@@ -946,6 +990,129 @@ mod tests {
         assert!(rows[0].valid);
     }
 
+    fn wit_rules() -> ParseRules {
+        let mk = |id: &str, ty: u8| FrameTemplate {
+            id: id.into(),
+            name: id.into(),
+            color: "#4e9cef".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "fixedLength".into(),
+                header_bytes: vec![0x55],
+                fixed_length: Some(6),
+                length_offset: None,
+                length_size: None,
+                length_endian: None,
+                length_adjust: None,
+                footer_bytes: None,
+                max_length: Some(16),
+                disc_offset: Some(1),
+                disc_value: Some(vec![ty]),
+                discs: Vec::new(),
+            },
+            checksum: Some(ChecksumCfg {
+                algo: "sum8".into(),
+                coverage_start: 0,
+                coverage_end: -1,
+                endian: "little".into(),
+            }),
+            fields: vec![FieldDef {
+                id: format!("f-{id}"),
+                name: "D1".into(),
+                role: "data".into(),
+                offset: 2,
+                field_type: "uint8".into(),
+                endian: "little".into(),
+                size: None,
+                scale: None,
+                offset_value: None,
+                unit: None,
+                color: "#3fb950".into(),
+                bits: None,
+                csv_delim: None,
+                csv_type: None,
+                disc: None,
+            }],
+        };
+        ParseRules {
+            templates: vec![mk("t51", 0x51), mk("t52", 0x52), mk("t53", 0x53)],
+        }
+    }
+
+    fn build_wit(ty: u8, d1: u8, d2: u8, d3: u8) -> Vec<u8> {
+        let mut f = vec![0x55, ty, d1, d2, d3];
+        let sum = f.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+        f.push(sum);
+        f
+    }
+
+    #[test]
+    fn wit_back_to_back_stream_with_0x55_data() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(wit_rules()).unwrap();
+        let mut stream = Vec::new();
+        for i in 0u8..9 {
+            let ty = 0x51 + (i % 3);
+            stream.extend_from_slice(&build_wit(ty, 0x55, i, 0x00));
+        }
+        let rows = eng.feed(&stream, 0, 1);
+        assert_eq!(rows.len(), 9, "{rows:?}");
+        assert!(rows.iter().all(|r| r.valid), "{rows:?}");
+        assert_eq!(eng.errors, 0);
+    }
+
+    #[test]
+    fn multi_disc_list_rejects_mismatch() {
+        let mut rules = wit_rules();
+        rules.templates.truncate(1);
+        let t = &mut rules.templates[0];
+        t.fields.push(FieldDef {
+            id: "f-ty".into(),
+            name: "TYPE".into(),
+            role: "id".into(),
+            offset: 1,
+            field_type: "uint8".into(),
+            endian: "little".into(),
+            size: None,
+            scale: None,
+            offset_value: None,
+            unit: None,
+            color: "#f0883e".into(),
+            bits: None,
+            csv_delim: None,
+            csv_type: None,
+            disc: Some(vec![0x51]),
+        });
+        t.fields.push(FieldDef {
+            id: "f-d3".into(),
+            name: "D3".into(),
+            role: "data".into(),
+            offset: 4,
+            field_type: "uint8".into(),
+            endian: "little".into(),
+            size: None,
+            scale: None,
+            offset_value: None,
+            unit: None,
+            color: "#3fb950".into(),
+            bits: None,
+            csv_delim: None,
+            csv_type: None,
+            disc: Some(vec![0xAA]),
+        });
+        let mut eng = ParserEngine::new();
+        eng.set_rules(rules).unwrap();
+        let mut stream = Vec::new();
+        stream.extend_from_slice(&build_wit(0x51, 0x55, 1, 0xAA));
+        stream.extend_from_slice(&build_wit(0x51, 0x55, 2, 0x00));
+        stream.extend_from_slice(&build_wit(0x52, 0x55, 3, 0xAA));
+        stream.extend_from_slice(&build_wit(0x51, 0x55, 4, 0xAA));
+        let rows = eng.feed(&stream, 0, 1);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(rows.iter().all(|r| r.valid), "{rows:?}");
+        assert_eq!(eng.errors, 0);
+    }
+
     fn ano_rules() -> ParseRules {
         ParseRules {
             templates: vec![FrameTemplate {
@@ -965,6 +1132,7 @@ mod tests {
                     max_length: Some(64),
                     disc_offset: None,
                     disc_value: None,
+                    discs: Vec::new(),
                 },
                 checksum: Some(ChecksumCfg {
                     algo: "sumadd".into(),
@@ -987,6 +1155,7 @@ mod tests {
                     bits: None,
                     csv_delim: None,
                     csv_type: None,
+                    disc: None,
                 }],
             }],
         }
@@ -1063,6 +1232,7 @@ mod tests {
                     max_length: Some(32),
                     disc_offset: None,
                     disc_value: None,
+                    discs: Vec::new(),
                 },
                 checksum: None,
                 fields: vec![FieldDef {
@@ -1080,6 +1250,7 @@ mod tests {
                     bits: None,
                     csv_delim: None,
                     csv_type: None,
+                    disc: None,
                 }],
             }],
         }
@@ -1121,6 +1292,7 @@ mod tests {
                 max_length: Some(64),
                 disc_offset: Some(2),
                 disc_value: Some(vec![fid_val]),
+                discs: Vec::new(),
             },
             checksum: Some(ChecksumCfg {
                 algo: "sumadd".into(),
@@ -1143,6 +1315,7 @@ mod tests {
                 bits: None,
                 csv_delim: None,
                 csv_type: None,
+                disc: None,
             }],
         };
         ParseRules {
@@ -1207,6 +1380,7 @@ mod tests {
                     max_length: Some(128),
                     disc_offset: None,
                     disc_value: None,
+                    discs: Vec::new(),
                 },
                 checksum: None,
                 fields: vec![FieldDef {
@@ -1224,6 +1398,7 @@ mod tests {
                     bits: None,
                     csv_delim: Some(delim.into()),
                     csv_type: Some(ty.into()),
+                    disc: None,
                 }],
             }],
         }

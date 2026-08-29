@@ -37,7 +37,7 @@ const WIDGET_TYPES: { type: ControlType; label: string }[] = [
 export function ControlCanvas() {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const settings = useSettings();
-  const CELL = [60, 72, 90, 110].includes(settings.cellSize) ? settings.cellSize : 90;
+  const CELL = [48, 60, 72, 90, 110].includes(settings.cellSize) ? settings.cellSize : 90;
   const cmds = useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   const page = store.activePage();
   const wrapRef = useRef<HTMLDivElement>(null);

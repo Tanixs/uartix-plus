@@ -1785,6 +1785,8 @@ body {
   margin-top: 16px;
 }
 
+.set-modal .modal-foot { padding: 0 20px; }
+
 .modal-foot .danger-btn {
   margin-top: 0;
   width: auto;
@@ -2820,9 +2822,9 @@ body {
 }
 .set-nav button:hover { color: var(--text); background: var(--accent-soft); }
 .set-nav button.on { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
-.set-content { flex: 1; padding: 14px 18px; overflow-y: auto; }
-.set-row { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
-.set-row > label { flex: 0 0 120px; font-size: 12.5px; color: var(--text-dim); text-align: right; }
+.set-content { flex: 1; padding: 16px 20px; overflow-y: auto; }
+.set-row { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+.set-row > label { flex: 0 0 120px; font-size: 12.5px; color: var(--text-dim); text-align: left; }
 .set-ctl { flex: 1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .set-seg { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
 .set-seg.col { flex-direction: column; }
@@ -2849,11 +2851,15 @@ body {
 }
 .set-switch input:checked + span { background: var(--accent); }
 .set-switch input:checked + span::after { transform: translateX(18px); }
-.set-io-block { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: 8px; }
+.set-io-block { margin-bottom: 16px; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: 8px; }
 .set-io-label { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
 .set-io-actions { display: flex; gap: 8px; }
 .set-io-hint { font-size: 11px; color: var(--text-dim); }
 .set-mono { font-family: var(--font-mono); font-size: 12px; }
+.set-about-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.set-about-head img { border-radius: 12px; }
+.set-about-name { font-size: 16px; font-weight: 700; }
+.set-about-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
 .set-msg {
   margin-top: 10px; padding: 6px 10px; border-radius: 6px;
   background: rgba(63,185,80,.12); color: #3fb950; font-size: 12px;

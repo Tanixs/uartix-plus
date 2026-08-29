@@ -107,7 +107,10 @@ export function ConsolePanel() {
       visibleRef.current = es[0]?.isIntersecting ?? true;
     });
     io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      io.disconnect();
+      store.setViewFrozen(false);
+    };
   }, []);
 
   useEffect(() => {
@@ -279,8 +282,10 @@ export function ConsolePanel() {
         <button
           className={`btn icon-btn ${effectivePaused ? "warn" : ""}`}
           onClick={() => {
-            setPaused(!paused);
+            const next = !paused;
+            setPaused(next);
             setAutoPaused(false);
+            store.setViewFrozen(next);
           }}
           title={effectivePaused ? "继续" : "暂停"}
         >

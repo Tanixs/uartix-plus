@@ -67,6 +67,7 @@ function rebuild() {
     .rules.templates.filter((t) => t.enabled);
   for (const t of templates) {
     for (const f of t.fields) {
+      if (f.role === "header") continue;
       let name = f.name.trim() || f.id;
       const base = name;
       let i = 1;

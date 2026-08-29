@@ -40,7 +40,7 @@ function load(): Settings {
       )
         ? (p.workspace as WorkspacePreset)
         : "proto",
-      cellSize: [60, 72, 90, 110].includes(p.cellSize ?? 90) ? (p.cellSize as number) : 90,
+      cellSize: [48, 60, 72, 90, 110].includes(p.cellSize ?? 90) ? (p.cellSize as number) : 90,
     };
   } catch {
     return fallback;

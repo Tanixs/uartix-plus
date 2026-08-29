@@ -92,6 +92,8 @@ function v7Tpl(
   color: string,
   fields: FieldDef[],
 ): FrameTemplate {
+  const fs = [...v7Head(), ...fields];
+  fs[1] = { ...fs[1], disc: [fidVal] };
   return {
     id: nid("v7"),
     name: `V7·0x${fidVal.toString(16).toUpperCase().padStart(2, "0")}${name}`,
@@ -105,11 +107,9 @@ function v7Tpl(
       lengthEndian: "little",
       lengthAdjust: 6,
       maxLength: 64,
-      discOffset: 2,
-      discValue: [fidVal],
     },
     checksum: { algo: "sumadd", coverageStart: 0, coverageEnd: -2, endian: "little" },
-    fields,
+    fields: fs,
   };
 }
 
@@ -411,7 +411,6 @@ export const PRESETS: PresetDef[] = [
       "换算系数已内置（角速度×2000°/s、角度×180°、四元数/32768 等）。",
     build: () => {
       const head = () => [
-        f("帧头", "header", 0, "uint8", "#e8a33d", { locked: true }),
         f("TYPE", "id", 1, "uint8", C_ID),
       ];
       const wit = (ty: number, name: string, color: string, fields: FieldDef[]): FrameTemplate => ({
@@ -424,11 +423,9 @@ export const PRESETS: PresetDef[] = [
           headerBytes: [0x55],
           fixedLength: 11,
           maxLength: 16,
-          discOffset: 1,
-          discValue: [ty],
         },
         checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
-        fields,
+        fields: fields.map((x) => (x.role === "id" ? { ...x, disc: [ty] } : x)),
       });
       return [
         wit(0x51, "加速度", "#39c5cf", [

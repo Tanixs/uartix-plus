@@ -75,10 +75,14 @@ function HexBytesInput({
   value,
   onCommit,
   title,
+  allowEmpty,
+  placeholder,
 }: {
   value: number[];
   onCommit: (v: number[]) => void;
   title?: string;
+  allowEmpty?: boolean;
+  placeholder?: string;
 }) {
   const [txt, setTxt] = useState(
     value.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" "),
@@ -98,7 +102,7 @@ function HexBytesInput({
       }
       out.push(parseInt(m, 16));
     }
-    if (ok && out.length) onCommit(out);
+    if (ok && (out.length || allowEmpty)) onCommit(out);
     else
       setTxt(
         value.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" "),
@@ -109,6 +113,7 @@ function HexBytesInput({
       className="input hexbytes"
       style={{ width: 130 }}
       title={title}
+      placeholder={placeholder}
       value={txt}
       onChange={(e) => setTxt(e.target.value)}
       onBlur={commit}
@@ -282,6 +287,21 @@ export function PropertiesPanel() {
             onCommit={(v) => store.patchBoundary(tpl.id, { maxLength: v })}
             title="安全上限：超长候选帧直接丢弃重新同步"
           />
+        </div>
+        <div className="form-hint">
+          识别位（功能码/帧型码等第二阶固定识别）在<b>字段属性</b>中设置：
+          点击下方字段列表或画布中的字段 → 「帧型识别 → 识别期望值」。
+          {(() => {
+            const discAt: string[] = [];
+            if (b.discOffset != null && b.discValue?.length)
+              discAt.push(`@${b.discOffset}=${b.discValue.map((x) => x.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`);
+            for (const d of b.discs ?? [])
+              discAt.push(`@${d.offset}=${d.value.map((x) => x.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`);
+            for (const f of tpl.fields)
+              if (f.disc?.length)
+                discAt.push(`@${f.offset}=${f.disc.map((x) => x.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`);
+            return discAt.length ? `当前生效：${discAt.join("、")}` : "当前未设置";
+          })()}
         </div>
 
           </Section>
@@ -532,6 +552,30 @@ export function PropertiesPanel() {
           </div>
         </div>
       )}
+      </Section>
+      <Section title="帧型识别">
+      <div className="form-row">
+        <label>识别期望值</label>
+        <HexBytesInput
+          allowEmpty
+          value={(() => {
+            if (field.disc?.length) return field.disc;
+            const b = tpl.boundary;
+            if (b.discOffset === field.offset && b.discValue?.length) return b.discValue;
+            const d = b.discs?.find((x) => x.offset === field.offset && x.value.length);
+            if (d) return d.value;
+            return [];
+          })()}
+          onCommit={(v) => store.setFieldDisc(tpl.id, field.id, v.length ? v : null)}
+          title="本字段位置的固定字节（Hex）。第二阶识别：整帧收齐后校验，不匹配整帧丢弃"
+          placeholder="如 51；留空=不识别"
+        />
+      </div>
+      <div className="form-hint">
+        第二阶识别（帧头/帧尾为第一阶）：整帧收齐后校验本字段偏移处的固定字节，
+        全部匹配才认定为本帧型，不匹配的帧静默丢弃；同栈多帧型（如 WIT 0x51~0x5A）靠它区分。
+        留空 = 本字段不作识别。识别随字段偏移自动跟随，删除字段自动移除。
+      </div>
       </Section>
       <Section title="换算与显示">
       <div className="form-row">

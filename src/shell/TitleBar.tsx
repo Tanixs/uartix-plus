@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as serialStore from "../features/serial/serialStore";
 import { useSyncExternalStore } from "react";
 import type { IfaceKind } from "../features/serial/serialStore";
+import iconPlain from "../assets/icon-plain.svg";
 
 const IFACE_LABEL: Record<IfaceKind, string> = {
   serial: "串口",
@@ -136,6 +137,14 @@ export function TitleBar({
       }}
     >
       <div className="tb-brand" data-tauri-drag-region>
+        <img
+          src={iconPlain}
+          alt=""
+          width={16}
+          height={16}
+          style={{ filter: "drop-shadow(0 1px 1.5px rgba(0,0,0,.35))" }}
+          draggable={false}
+        />
         Uartix+
         <span className="tb-ver">0.1.0</span>
       </div>

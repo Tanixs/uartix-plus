@@ -87,6 +87,11 @@ export type FieldRole =
   | "checksum2"
   | "footer";
 
+export interface DiscSpec {
+  offset: number;
+  value: number[];
+}
+
 export interface Boundary {
   mode: BoundaryMode;
   headerBytes: number[];
@@ -99,6 +104,7 @@ export interface Boundary {
   maxLength: number;
   discOffset?: number | null;
   discValue?: number[] | null;
+  discs?: DiscSpec[] | null;
 }
 
 export interface ChecksumCfg {
@@ -129,6 +135,7 @@ export interface FieldDef {
   locked?: boolean | null;
   csvDelim?: string | null;
   csvType?: string | null;
+  disc?: number[] | null;
 }
 
 export interface FrameTemplate {

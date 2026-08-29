@@ -39,7 +39,12 @@ export function HexView() {
     | { kind: "sb"; grab: number }
   >(null);
   const flashRef = useRef<{ seq: number; until: number } | null>(null);
-  const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
+  const hitsRef = useRef<{ seqs: number[]; len: number; idx: number }>({
+    seqs: [],
+    len: 0,
+    idx: 0,
+  });
+  const sizeRef = useRef({ w: 0, h: 0, dpr: 1, zf: 1 });
   const protoRef = useRef(templateStore.getSnapshot());
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -138,6 +143,24 @@ export function HexView() {
     return null;
   };
 
+  const hitAt = (seq: number): number => {
+    const hits = hitsRef.current;
+    if (!hits.len || !hits.seqs.length) return -1;
+    let lo = 0;
+    let hi = hits.seqs.length - 1;
+    let ans = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (hits.seqs[mid] <= seq) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    if (ans < 0) return -1;
+    const s = hits.seqs[ans];
+    return seq < s + hits.len ? s : -1;
+  };
+
   const tplById = (id: string) =>
     protoRef.current.rules.templates.find((t) => t.id === id) ?? null;
 
@@ -154,7 +177,8 @@ export function HexView() {
   const ensureData = () => {
     const total = serialStore.getSnapshot().rxTotal;
     const v = viewRef.current;
-    if (v.follow) v.viewEnd = Math.max(total - 1, COLS - 1);
+    const frozen = serialStore.isViewFrozen();
+    if (v.follow && !frozen) v.viewEnd = Math.max(total - 1, COLS - 1);
     v.viewEnd = clampViewEnd(v.viewEnd, total);
     const rows = rowsVisible();
     const wantStart = Math.max(0, v.viewEnd + 1 - rows * COLS - FETCH_MARGIN);
@@ -217,6 +241,11 @@ export function HexView() {
       flashRef.current && flashRef.current.until > performance.now()
         ? flashRef.current
         : null;
+    const hits = hitsRef.current;
+    const curHit =
+      hits.len && hits.seqs.length
+        ? hits.seqs[Math.min(hits.idx, hits.seqs.length - 1)]
+        : -1;
     const sel = selRef.current;
     const selLo = sel ? Math.min(sel.anchor, sel.focus) : 0;
     const selHi = sel ? Math.max(sel.anchor, sel.focus) : -1;
@@ -250,13 +279,26 @@ export function HexView() {
         }
         const field = span && span.valid ? fieldAt(span, seq) : null;
         if (field) fill = hexA(field.color, 0.3);
+        if (hitAt(seq) >= 0) fill = hexA(accent, 0.16);
         if (flash && span && span.start === flash.seq) {
           fill = hexA(accent, 0.45);
         }
         if (seq >= selLo && seq <= selHi) fill = hexA(accent, 0.4);
+        if (curHit >= 0 && seq >= curHit && seq < curHit + hits.len)
+          fill = hexA(accent, 0.5);
         if (fill) {
           ctx.fillStyle = fill;
           ctx.fillRect(x - 2, PAD_T + r * ROW_H + 1, charW * 2 + 6, ROW_H - 2);
+        }
+        if (curHit >= 0 && seq >= curHit && seq < curHit + hits.len) {
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 1.2;
+          ctx.strokeRect(
+            x - 2.5,
+            PAD_T + r * ROW_H + 0.5,
+            charW * 2 + 7,
+            ROW_H - 1,
+          );
         }
         ctx.fillStyle = textCol;
         ctx.fillText(
@@ -292,7 +334,7 @@ export function HexView() {
   useEffect(() => {
     let raf = 0;
     const unsubA = serialStore.subscribe(() => {
-      dirtyRef.current = true;
+      if (!serialStore.isViewFrozen()) dirtyRef.current = true;
     });
     const unsubB = templateStore.subscribe(() => {
       dirtyRef.current = true;
@@ -319,12 +361,17 @@ export function HexView() {
     if (!wrap || !canvas) return;
     const ro = new ResizeObserver(() => {
       const rect = wrap.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      sizeRef.current = { w: rect.width, h: rect.height, dpr };
-      canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(rect.height * dpr);
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
+      const zf = rect.width > 0 && wrap.offsetWidth > 0 ? rect.width / wrap.offsetWidth : 1;
+      sizeRef.current = {
+        w: rect.width / zf,
+        h: rect.height / zf,
+        dpr: (window.devicePixelRatio || 1) * zf,
+        zf,
+      };
+      canvas.width = Math.round(sizeRef.current.w * sizeRef.current.dpr);
+      canvas.height = Math.round(sizeRef.current.h * sizeRef.current.dpr);
+      canvas.style.width = `${sizeRef.current.w}px`;
+      canvas.style.height = `${sizeRef.current.h}px`;
       dirtyRef.current = true;
     });
     ro.observe(wrap);
@@ -354,7 +401,7 @@ export function HexView() {
     if (!req) return;
     viewRef.current.follow = false;
     viewRef.current.viewEnd =
-      req.seq + rowsVisible() * COLS - Math.floor(COLS / 2);
+      req.seq + Math.floor((rowsVisible() * COLS) / 2);
     viewRef.current.viewEnd = clampViewEnd(
       viewRef.current.viewEnd,
       serialStore.getSnapshot().rxTotal,
@@ -380,12 +427,12 @@ export function HexView() {
         e.preventDefault();
         setSearchOpen(true);
       } else if (e.key === "Escape") {
-        setSearchOpen(false);
+        if (searchOpen) closeSearch();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [searchOpen]);
 
   const parsePattern = (text: string): number[] | null => {
     const out: number[] = [];
@@ -410,6 +457,7 @@ export function HexView() {
         pattern: bytes,
       });
       const seqs = hits.map((h) => h.seq);
+      hitsRef.current = { seqs, len: bytes.length, idx: 0 };
       setSearchHits(seqs);
       setSearchIdx(0);
       if (seqs.length) templateStore.locate(seqs[0]);
@@ -423,7 +471,14 @@ export function HexView() {
     if (!searchHits.length) return;
     const n = (searchIdx + d + searchHits.length) % searchHits.length;
     setSearchIdx(n);
+    hitsRef.current.idx = n;
     templateStore.locate(searchHits[n]);
+  };
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    hitsRef.current = { seqs: [], len: 0, idx: 0 };
+    dirtyRef.current = true;
   };
 
   const hitTest = (x: number, y: number): number | null => {
@@ -457,11 +512,15 @@ export function HexView() {
     }
   };
 
+  const localXY = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const zf = sizeRef.current.zf || 1;
+    return { x: (e.clientX - rect.left) / zf, y: (e.clientY - rect.top) / zf };
+  };
+
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (e.button !== 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { x, y } = localXY(e);
     const g = sbGeom();
     if (x >= g.sbX) {
       const inThumb = y >= g.thumbY && y <= g.thumbY + g.thumbH;
@@ -480,10 +539,11 @@ export function HexView() {
   const onMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - rect.top;
+    const { y } = localXY(e);
     if (drag.kind === "sel") {
-      const seq = hitTest(e.clientX - rect.left, y);
+      const rect = e.currentTarget.getBoundingClientRect();
+      const zf = sizeRef.current.zf || 1;
+      const seq = hitTest((e.clientX - rect.left) / zf, y);
       if (seq !== null && selRef.current) {
         selRef.current.focus = seq;
         dirtyRef.current = true;
@@ -500,8 +560,8 @@ export function HexView() {
 
   const onContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    const rect = e.currentTarget.getBoundingClientRect();
-    const seq = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+    const { x, y } = localXY(e);
+    const seq = hitTest(x, y);
     if (seq === null) return;
     const sel = selRef.current;
     const covers =
@@ -707,7 +767,7 @@ export function HexView() {
               </>
             )}
             {searchErr && <span className="hex-search-err">{searchErr}</span>}
-            <button className="btn" onClick={() => setSearchOpen(false)} title="关闭">
+            <button className="btn" onClick={closeSearch} title="关闭">
               ×
             </button>
           </div>

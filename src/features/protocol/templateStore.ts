@@ -541,6 +541,35 @@ export function patchBoundary(
   scheduleSync();
 }
 
+export function setFieldDisc(
+  tplId: string,
+  fieldId: string,
+  bytes: number[] | null,
+) {
+  pushHistory();
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((t) =>
+        t.id === tplId
+          ? {
+              ...t,
+              boundary: {
+                ...t.boundary,
+                discOffset: null,
+                discValue: null,
+                discs: null,
+              },
+              fields: t.fields.map((f) =>
+                f.id === fieldId ? { ...f, disc: bytes } : f,
+              ),
+            }
+          : t,
+      ),
+    },
+  });
+  scheduleSync();
+}
+
 export function patchChecksum(
   id: string,
   patch: Partial<NonNullable<FrameTemplate["checksum"]>>,

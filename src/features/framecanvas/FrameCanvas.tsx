@@ -246,6 +246,7 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
   let pos = hb.length;
   for (const f of fields) {
     const sz = fieldSize(f);
+    if (hb.length > 0 && f.offset >= 0 && f.offset + sz <= hb.length) continue;
     if (f.offset > pos) {
       pieces.push({ start: pos, len: f.offset - pos, key: `g${pos}`, kind: "gap", fid: null, color: "", label: null, role: null, locked: false });
     }
@@ -347,7 +348,8 @@ function FrameCanvas() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const tipRef = useRef<HTMLDivElement | null>(null);
-  const sizeRef = useRef({ w: 600, h: 400, dpr: 1 });
+  const navRef = useRef<HTMLSpanElement | null>(null);
+  const sizeRef = useRef({ w: 600, h: 400, dpr: 1, zf: 1 });
   const cellRef = useRef(28);
   const layoutRef = useRef<Layout | null>(null);
   const viewRef = useRef<{ live: boolean; fi: number }>({ live: true, fi: 0 });
@@ -453,7 +455,13 @@ function FrameCanvas() {
     if (!el) return;
     const ro = new ResizeObserver(() => {
       const r = el.getBoundingClientRect();
-      sizeRef.current = { w: r.width, h: r.height, dpr: window.devicePixelRatio || 1 };
+      const zf = r.width > 0 && el.offsetWidth > 0 ? r.width / el.offsetWidth : 1;
+      sizeRef.current = {
+        w: r.width / zf,
+        h: r.height / zf,
+        dpr: (window.devicePixelRatio || 1) * zf,
+        zf,
+      };
       dirtyRef.current = true;
     });
     ro.observe(el);
@@ -512,8 +520,26 @@ function FrameCanvas() {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    const real = resolvedRef.current.fr;
+    let real = resolvedRef.current.fr;
+    if (viewRef.current.live) {
+      const arch = fcStore.archiveRef();
+      const tid = curRef.current?.id;
+      for (let i = arch.list.length - 1; i >= 0; i--) {
+        if (!tid || arch.list[i].tplId === tid) {
+          real = arch.list[i];
+          viewRef.current.fi = i;
+          break;
+        }
+      }
+    }
     const tplD = curRef.current;
+    if (navRef.current) {
+      navRef.current.textContent = real
+        ? `#${viewRef.current.fi} · ${real.len}B · ${real.tplName}`
+        : tplD
+          ? "骨架编辑 · 未收流"
+          : "";
+    }
     const draftLen = !real && tplD ? skeletonLen(tplD) : 0;
     const fr =
       real ??
@@ -813,6 +839,10 @@ function FrameCanvas() {
     const fieldLine = field
       ? `<div class="fc-tip-row"><span>字段</span><b>${field.name}${roleChip ? ` [${roleChip}]` : ""}</b></div>`
       : "";
+    const discLine =
+      field && field.disc?.length && hv.off === field.offset
+        ? `<div class="fc-tip-row"><span>识别</span><b>${field.disc.map((x) => x.toString(16).padStart(2, "0").toUpperCase()).join(" ")}</b></div>`
+        : "";
     let valLine = "";
     if (field) {
       if (hv.off === field.offset) {
@@ -828,6 +858,7 @@ function FrameCanvas() {
       `<div class="fc-tip-row"><span>ASCII</span><b>${ascii}</b></div>` +
       `<div class="fc-tip-row"><span>类别</span><b>${cat}</b></div>` +
       fieldLine +
+      discLine +
       valLine +
       `<div class="fc-tip-row"><span>位置</span><b>帧内 ${hv.off} B</b></div>`;
     tip.style.display = "block";
@@ -850,6 +881,12 @@ function FrameCanvas() {
     return () => cancelAnimationFrame(raf);
   }, [paint]);
 
+  const localXY = (ev: React.MouseEvent) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const zf = sizeRef.current.zf || 1;
+    return { lx: (ev.clientX - rect.left) / zf, ly: (ev.clientY - rect.top) / zf };
+  };
+
   const hitOffset = (lx: number, ly: number): { off: number } | null => {
     const lay = layoutRef.current;
     if (!lay) return null;
@@ -870,9 +907,7 @@ function FrameCanvas() {
 
   const onDown = (ev: React.MouseEvent) => {
     closeMenu();
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const lx = ev.clientX - rect.left;
-    const ly = ev.clientY - rect.top;
+    const { lx, ly } = localXY(ev);
     if (ev.button !== 0) return;
     if (lx >= sizeRef.current.w - SCROLL_W - 2) {
       const lay = layoutRef.current;
@@ -910,8 +945,7 @@ function FrameCanvas() {
 
   const onMove = (ev: React.MouseEvent) => {
     if (dragSbRef.current) {
-      const rect = canvasRef.current!.getBoundingClientRect();
-      const ly = ev.clientY - rect.top;
+      const ly = localXY(ev).ly;
       const lay = layoutRef.current;
       if (!lay) return;
       const rowsTotal = lay.rows.length;
@@ -944,9 +978,7 @@ function FrameCanvas() {
       dirtyRef.current = true;
       return;
     }
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const lx = ev.clientX - rect.left;
-    const ly = ev.clientY - rect.top;
+    const { lx, ly } = localXY(ev);
     const p = hitOffset(lx, ly);
     if (!p) {
       if (hoverRef.current) {
@@ -1012,9 +1044,7 @@ function FrameCanvas() {
       closeMenu();
       return;
     }
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const lx = ev.clientX - rect.left;
-    const ly = ev.clientY - rect.top;
+    const { lx, ly } = localXY(ev);
     const p = hitOffset(lx, ly);
     if (!p) return;
     if (selDragRef.current || selRef.current) {
@@ -1224,8 +1254,8 @@ function FrameCanvas() {
   };
 
   const onDblClick = (ev: React.MouseEvent) => {
-    const rect = canvasRef.current!.getBoundingClientRect();
-    const p = hitOffset(ev.clientX - rect.left, ev.clientY - rect.top);
+    const { lx, ly } = localXY(ev);
+    const p = hitOffset(lx, ly);
     if (!p) return;
     const tpl = curRef.current;
     const fr = resolvedRef.current.fr;
@@ -1316,13 +1346,7 @@ function FrameCanvas() {
         </button>
         {proto.syncError ? <span className="fc-sync-warn" title={proto.syncError}>模板校验未通过</span> : null}
         <ArchStat />
-        <span className="fc-navinfo">
-          {resolved.fr ? (
-            <>#{resolved.fi} · {resolved.fr.len}B · {resolved.fr.tplName}</>
-          ) : curTpl ? (
-            <>骨架编辑 · 未收流</>
-          ) : null}
-        </span>
+        <span className="fc-navinfo" ref={navRef} />
         <label className="fc-cellsz" title="单元格尺寸">
           <input
             type="range"

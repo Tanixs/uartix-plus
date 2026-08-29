@@ -57,6 +57,15 @@ const listeners = new Set<() => void>();
 const rxWindow: { t: number; n: number }[] = [];
 let initialized = false;
 let countersDirty = false;
+let viewFrozen = false;
+
+export function setViewFrozen(v: boolean) {
+  viewFrozen = v;
+}
+
+export function isViewFrozen() {
+  return viewFrozen;
+}
 
 function set(patch: Partial<SerialSnapshot>) {
   snapshot = { ...snapshot, ...patch };

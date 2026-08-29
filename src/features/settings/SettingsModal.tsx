@@ -7,6 +7,7 @@ import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
 import { Section } from "../../shared/Section";
+import appIcon from "../../assets/icon.svg";
 
 const PRESETS: { key: WorkspacePreset; label: string }[] = [
   { key: "proto", label: t("set.preset.proto") },
@@ -138,9 +139,9 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                 {row("", <button className="btn" onClick={() => onResetLayout(settings.workspace)}>{t("set.resetLayout")}</button>)}
                 {row("控制画板格尺寸", (
                   <div className="set-seg">
-                    {([60, 72, 90, 110] as const).map((c) => (
+                    {([48, 60, 72, 90, 110] as const).map((c) => (
                       <button key={c} className={settings.cellSize === c ? "on" : ""} onClick={() => patch({ cellSize: c })}>
-                        {c === 60 ? "60 极小" : c === 72 ? "72 紧凑" : c === 90 ? "90 标准" : "110 宽松"}
+                        {c === 48 ? "48 微型" : c === 60 ? "60 极小" : c === 72 ? "72 紧凑" : c === 90 ? "90 标准" : "110 宽松"}
                       </button>
                     ))}
                   </div>
@@ -263,7 +264,19 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
             )}
             {tab === "about" && (
               <>
+                <div className="set-about-head">
+                  <img src={appIcon} alt="Uartix+" width={56} height={56} />
+                  <div>
+                    <div className="set-about-name">Uartix+</div>
+                    <div className="set-about-desc">可视化串口协议分析仪</div>
+                  </div>
+                </div>
                 {row(t("set.version"), <span className="set-mono">0.1.0 (M6)</span>)}
+                {row("官网", (
+                  <button className="btn" onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl("https://larix.teuioe.cn/uartix-plus"))}>
+                    larix.teuioe.cn/uartix-plus
+                  </button>
+                ))}
                 {row(t("set.repo"), (
                   <button className="btn" onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl("https://github.com/Tanixs/uartix-plus"))}>
                     github.com/Tanixs/uartix-plus

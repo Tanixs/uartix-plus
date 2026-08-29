@@ -503,7 +503,9 @@ export function TemplatesPanel() {
         {s.rules.templates
           .filter((tpl) => tpl.enabled)
           .flatMap((tpl) =>
-            tpl.fields.flatMap((f) => {
+            tpl.fields
+              .filter((f) => f.role !== "header")
+              .flatMap((f) => {
               const lv = tele.latest[f.id];
               const selected =
                 s.selection?.kind === "field" && s.selection.fieldId === f.id;
