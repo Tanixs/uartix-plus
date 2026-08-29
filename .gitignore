@@ -23,3 +23,6 @@ dist-ssr
 *.sln
 *.sw?
 HANDOFF.md
+
+# 私有协议文档（仅本地参考，不发布）
+JY901P-WIT私有协议.md
