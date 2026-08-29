@@ -60,9 +60,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 密钥无密码：不传 TAURI_SIGNING_PRIVATE_KEY_PASSWORD，
-          # 否则空字符串会被 tauri 当作"加密密钥"路径，导致解码失败
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # 无密码密钥也必须提供此变量（值留空的 Secret），否则 tauri 走错解析路径
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v__VERSION__
           releaseName: "Uartix+ v__VERSION__"
