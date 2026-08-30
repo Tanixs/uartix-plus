@@ -74,6 +74,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <tr><td>数据表格</td><td>逐帧列表，可排序/筛选/导出 CSV·XLSX</td></tr>
                     <tr><td>2D 曲线</td><td>字段图例点眼睛开曲线；支持平移/框选缩放/双击复位</td></tr>
                     <tr><td>3D 姿态</td><td>把欧拉角或四元数字段映射到 3D 模型（+面板可添加）</td></tr>
+                    <tr><td>图传</td><td>把每帧数据渲染为画面：暂停/回看/保存帧、镜像翻转、缩放拖动；「解析设置」定义帧定界方式</td></tr>
                     <tr><td>控制画布</td><td>拖拽部署滑条/按钮/开关/LED/蜂鸣器等控件向下位机发指令；拖动时虚线幽灵框指示落点，松手只会落到空格</td></tr>
                     <tr><td>控制台</td><td>原始收发日志（时间戳彩色），可发 ASCII/Hex、发送文件、录制日志；上方快捷指令栏一键发送，指令工厂可组各协议帧</td></tr>
                   </tbody>
@@ -91,6 +92,15 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 </Section>
                 <Section title="骨架编辑">
                   <p>选中一个模板但还没有收到匹配数据时，画布显示骨架格（按模板定义推算长度）——此时就能框选定义字段；协议完全匹配后格子才切换为真实数据。帧头/帧尾格固定显示模板字节。</p>
+                </Section>
+                <Section title="图传（视频链路）">
+                  <p>把数据流按帧渲染成画面（如无人机摄像头的 JPEG 帧流）。使用步骤：</p>
+                  <ol className="help-ol">
+                    <li>工具栏点<code>解析设置</code>，选择帧定界方式（定长 / 长度域 / 帧尾）——每解析出一帧即刷新画面。</li>
+                    <li><code>⏸/▶</code> 暂停后可点选历史帧回看，<code>⬇</code> 保存当前显示的帧。</li>
+                    <li><code>↔</code> 水平镜像、<code>↕</code> 垂直翻转矫正画面方向；滚轮缩放、拖动平移，双击复位。</li>
+                    <li>数据来源与串口/网络完全一致：TCP/UDP 接收图传流同样可用。</li>
+                  </ol>
                 </Section>
               </>
             )}

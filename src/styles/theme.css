@@ -3855,6 +3855,86 @@ label.set-switch,
   align-items: center;
 }
 
+/* 波特率组合框：可写 + 下拉选预设 */
+.baud-combo { position: relative; display: inline-flex; flex: 0 0 auto; }
+.baud-combo .input.baud {
+  width: 86px;
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+}
+.baud-toggle {
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 0 7px;
+  cursor: pointer;
+  transition: color .12s;
+}
+.baud-toggle:hover:not(:disabled) { color: var(--accent); }
+.baud-toggle:disabled { opacity: .45; cursor: not-allowed; }
+.baud-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 60;
+  min-width: 100%;
+  max-height: 250px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, .18));
+  padding: 4px;
+}
+.baud-menu button {
+  all: unset;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--text);
+}
+.baud-menu button:hover { background: var(--accent-soft); color: var(--accent); }
+.baud-menu button.on { color: var(--accent); font-weight: 600; }
+
+/* 图传工具栏：图标按钮加大 + 常用按钮颜色区分 */
+.video-bar .icon-btn {
+  width: 32px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.video-bar .icon-btn svg { width: 15px; height: 15px; }
+.video-bar .icon-btn:first-child {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.video-bar .icon-btn:first-child:hover { filter: brightness(1.1); }
+.video-bar .icon-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.video-bar .icon-btn:hover:not(.primary):not(:first-child) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.video-bar .icon-btn:hover:has(svg[stroke-dasharray="3 3"]):not(.primary) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.video-bar .icon-btn:disabled { opacity: .45; cursor: not-allowed; }
+
 .help-content { font-size: 12.5px; line-height: 1.75; }
 .help-content p { margin: 0 0 10px; }
 .help-ol { margin: 6px 0 10px; padding-left: 20px; }

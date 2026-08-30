@@ -314,9 +314,10 @@ export function ControlCanvas() {
           1,
           Math.min(maxH, (rz.card.h || 1) + Math.round((e.clientY - rz.startClientY) / (STEP * scale))),
         );
-        const isJoy = rz.card.type === "joystick";
-        const nw = isJoy ? Math.min(nw0, nh0) : nw0;
-        const nh = isJoy ? Math.min(nw0, nh0) : nh0;
+        // 摇杆与键盘遥控锁定正方形（n×n），杜绝拖成 1×N 长条
+        const isSquare = rz.card.type === "joystick" || rz.card.type === "keypad";
+        const nw = isSquare ? Math.min(nw0, nh0) : nw0;
+        const nh = isSquare ? Math.min(nw0, nh0) : nh0;
         rz.w = nw;
         rz.h = nh;
         rz.el.style.width = `${snapPx(nw * STEP - GAP)}px`;

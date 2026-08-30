@@ -225,6 +225,9 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         repeat: Boolean(raw.repeat),
       };
     case "keypad": {
+      // 强制正方形（n×n），历史数据里被拉成长条的自动还原
+      const side = Math.max(base.w, base.h);
+      const sq = { ...base, w: side, h: side };
       const keys = (raw.keys as string[]) ?? [];
       const labels = (raw.labels as string[]) ?? [];
       const templates = (raw.templates as string[]) ?? [];
@@ -232,8 +235,8 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
       const fix = (arr: string[], dflt: string[]) =>
         [0, 1, 2, 3].map((i) => String(arr[i] ?? dflt[i]));
       return {
-        ...base,
-        type,
+        ...sq,
+        type: "keypad",
         sendMode: (raw.sendMode as SendMode) ?? "ascii",
         keys: fix(keys, ["w", "s", "a", "d"]),
         labels: fix(labels, ["上", "下", "左", "右"]),

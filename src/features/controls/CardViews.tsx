@@ -1146,6 +1146,12 @@ export function KeymonCardView(props: {
 const SCRIPT_API_HINT =
   "脚本 API：await send(text, mode?) 发送指令（mode 省略按卡片 ASCII/Hex 设置）· beep(freq, ms) 蜂鸣 · await delay_ms(ms) 延时 · get(\"变量\") 读取 · set(\"变量\", 值) 写入 · await waitParse(\"字段\", ms?) 等待解析帧 · setControl(\"控件名\", 值) 联动触发其他控件（按钮发送/开关切档/滑条设值/键盘遥控方向）· await repeat(n, i => …) 循环 · log(text) 输出控制台。完整 JS 语法可用（for/while/if/function/Math…）；解析字段名可直接当变量使用（重名自动 _1/_2）；模板串支持 {字段名:.2f} 格式化插值。";
 
+const DEFAULT_KEYPAD_SCRIPT = `// dir: 0上 1下 2左 3右；phase: press/release
+if (dir === 0) send("FWD:" + phase);
+else if (dir === 1) send("BAK:" + phase);
+else if (dir === 2) send("LFT:" + phase);
+else send("RGT:" + phase);`;
+
 function ScriptFields({
   value,
   onCommit,
@@ -1220,15 +1226,19 @@ export function CardModal(props: {
         <div className="form-row">
           <label>名称</label>
           <TextInput value={card.name} onCommit={(v) => patch({ name: v })} />
-          <label>宽度</label>
-          <select
-            className="input"
-            value={card.w}
-            onChange={(e) => patch({ w: Number(e.target.value) })}
-          >
-            <option value={1}>1 格</option>
-            <option value={2}>2 格</option>
-          </select>
+          {card.type !== "keypad" && (
+            <>
+              <label>宽度</label>
+              <select
+                className="input"
+                value={card.w}
+                onChange={(e) => patch({ w: Number(e.target.value) })}
+              >
+                <option value={1}>1 格</option>
+                <option value={2}>2 格</option>
+              </select>
+            </>
+          )}
         </div>
       </Section>
       {(card.type === "led" || card.type === "buzzer") && (
@@ -1403,7 +1413,22 @@ export function CardModal(props: {
             <select
               className="input"
               value={card.useScript ? "script" : "template"}
-              onChange={(e) => patch({ useScript: e.target.value === "script" })}
+              onChange={(e) => {
+                const toScript = e.target.value === "script";
+                // 键盘遥控切到脚本时默认填入 5 行示例，改键位名即可用
+                if (
+                  toScript &&
+                  card.type === "keypad" &&
+                  !card.script.trim()
+                ) {
+                  patch({
+                    useScript: true,
+                    script: DEFAULT_KEYPAD_SCRIPT,
+                  });
+                  return;
+                }
+                patch({ useScript: toScript });
+              }}
             >
               <option value="template">模板串</option>
               <option value="script">脚本（类C）</option>
