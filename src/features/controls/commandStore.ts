@@ -262,6 +262,17 @@ function parentOf(
   return undefined;
 }
 
+function findNodeById(items: CommandNode[], id: string): CommandNode | null {
+  for (const n of items) {
+    if (n.id === id) return n;
+    if (isGroup(n)) {
+      const r = findNodeById(n.items, id);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
 export function moveNode(
   id: string,
   targetParentId: string | null,
@@ -274,7 +285,9 @@ export function moveNode(
   if (targetParentId !== null) {
     const target = findGroupById(snapshot.groups, targetParentId);
     if (!target) return false;
-    if (targetParentId === id || containsNode([{ ...target }], id))
+    // 仅禁止把分组拖进它自己的子树（防环）；同组内重排与拖出分组不受限
+    const dragged = findNodeById(snapshot.groups, id);
+    if (dragged && isGroup(dragged) && containsNode(dragged.items, targetParentId))
       return false;
   }
   if (cur === targetParentId && !refId) return false;

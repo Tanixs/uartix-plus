@@ -1,0 +1,6 @@
+CesiumDrone.glb
+Source: Cesium (CesiumGS/cesium), Apps/SampleData/models/CesiumDrone
+License: Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+Copyright: Analytical Graphics, Inc. / Cesium
+
+ bundled in the public/models directory of Uartix+

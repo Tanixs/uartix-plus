@@ -19,6 +19,11 @@ pub fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
+    std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))
+}
+
+#[tauri::command]
 pub fn save_binary_file(path: String, content: Vec<u8>) -> Result<(), String> {
     let mut f = File::create(&path).map_err(|e| format!("创建文件失败: {e}"))?;
     f.write_all(&content)

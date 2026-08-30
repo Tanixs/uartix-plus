@@ -61,6 +61,7 @@ pub fn run() {
             demo::demo_running,
             files::save_text_file,
             files::read_text_file,
+            files::read_binary_file,
             files::save_binary_file,
             files::hex_search
         ])

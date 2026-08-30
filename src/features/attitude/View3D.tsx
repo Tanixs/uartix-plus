@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import type * as THREE_NS from "three";
 import type { OrbitControls as OrbitControlsType } from "three/examples/jsm/controls/OrbitControls.js";
+import type { GLTFLoader as GLTFLoaderType } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as store from "./attitudeStore";
 import type { EulerOrder } from "./attitudeStore";
 import * as templateStore from "../protocol/templateStore";
@@ -8,6 +11,67 @@ import * as templateStore from "../protocol/templateStore";
 const ORDERS: EulerOrder[] = ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"];
 
 const deg2rad = (d: number) => (d * Math.PI) / 180;
+
+type ModelSel = "uav" | "cube" | "cesium" | "custom";
+
+interface CustomMeta {
+  name: string;
+  path: string;
+}
+
+const SEL_KEY = "vs.3d.sel";
+const CUSTOM_KEY = "vs.3d.custom";
+const ROT_KEY = "vs.3d.rot";
+
+let customBytesCache: ArrayBuffer | null = null;
+
+function loadSel(): ModelSel {
+  const s = localStorage.getItem(SEL_KEY);
+  return s === "cube" || s === "cesium" || s === "custom" ? s : "uav";
+}
+
+function loadCustom(): CustomMeta | null {
+  try {
+    const raw = localStorage.getItem(CUSTOM_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as CustomMeta;
+    return p && p.path ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 平面"贴纸"箭头：平放在模型顶部，指向 +X 机头方向 */
+function addStickerArrow(
+  model: THREE_NS.Group,
+  THREE: typeof THREE_NS,
+  topY: number,
+  span: number,
+): void {
+  const s = span * 0.34;
+  const shape = new THREE.Shape();
+  shape.moveTo(-0.62 * s, -0.2 * s);
+  shape.lineTo(0.1 * s, -0.2 * s);
+  shape.lineTo(0.1 * s, -0.42 * s);
+  shape.lineTo(0.62 * s, 0);
+  shape.lineTo(0.1 * s, 0.42 * s);
+  shape.lineTo(0.1 * s, 0.2 * s);
+  shape.lineTo(-0.62 * s, 0.2 * s);
+  shape.closePath();
+  const geo = new THREE.ShapeGeometry(shape);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffd43b,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.95,
+    polygonOffset: true,
+    polygonOffsetFactor: -4,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = topY + span * 0.012;
+  model.add(mesh);
+}
 
 function buildModel(
   model: THREE_NS.Group,
@@ -38,142 +102,180 @@ function buildModel(
     nose.rotation.z = -Math.PI / 2;
     nose.position.set(1.1, 0, 0);
     model.add(nose);
-  } else {
-    // ---- 四轴（X 布局，机头朝 +X）----
-    const darkMat = new THREE.MeshStandardMaterial({
-      color: 0x272c35,
-      metalness: 0.35,
-      roughness: 0.55,
-    });
-    const midMat = new THREE.MeshStandardMaterial({
-      color: 0x39414e,
-      metalness: 0.3,
-      roughness: 0.5,
-    });
-    const metalMat = new THREE.MeshStandardMaterial({
-      color: 0x8b93a1,
-      metalness: 0.85,
-      roughness: 0.3,
-    });
-    const accentSolid = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(accent),
-      metalness: 0.2,
-      roughness: 0.45,
-    });
-    const canopyMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(accent),
-      metalness: 0.1,
-      roughness: 0.2,
-      transparent: true,
-      opacity: 0.55,
-    });
-    const props: THREE_NS.Group[] = [];
-
-    // 机身：下主版 + 上舱盖 + 前挡风 + 电池
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.16, 0.78), darkMat);
-    model.add(plate);
-    const canopy = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.17, 0.5), midMat);
-    canopy.position.set(-0.08, 0.16, 0);
-    model.add(canopy);
-    const windshield = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.13, 0.42), canopyMat);
-    windshield.position.set(0.26, 0.16, 0);
-    windshield.rotation.z = -0.5;
-    model.add(windshield);
-    const battery = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.12, 0.32), darkMat);
-    battery.position.set(-0.05, 0.3, 0);
-    model.add(battery);
-    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.13, 0.34), accentSolid);
-    strap.position.set(-0.05, 0.3, 0);
-    model.add(strap);
-    // 机头标识条
-    const noseBar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.6), accentSolid);
-    noseBar.position.set(0.52, 0.02, 0);
-    model.add(noseBar);
-
-    // 起落架：两侧滑橇 + 支腿
-    const railGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.92, 8);
-    const legGeo = new THREE.CylinderGeometry(0.024, 0.024, 0.3, 8);
-    for (const sx of [1, -1]) {
-      const rail = new THREE.Mesh(railGeo, metalMat);
-      rail.rotation.x = Math.PI / 2;
-      rail.position.set(sx * 0.3, -0.32, 0);
-      model.add(rail);
-      for (const sz of [1, -1]) {
-        const leg = new THREE.Mesh(legGeo, darkMat);
-        leg.position.set(sx * 0.3, -0.17, sz * 0.26);
-        leg.rotation.x = sz * 0.22;
-        model.add(leg);
-      }
-    }
-
-    // 四条斜臂 + 电机 + 双叶桨（对桨反向自转）
-    const armGeo = new THREE.BoxGeometry(0.09, 0.075, 0.82);
-    const bellGeo = new THREE.CylinderGeometry(0.1, 0.125, 0.15, 14);
-    const hubGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.05, 10);
-    const bladeGeo = new THREE.SphereGeometry(1, 12, 8);
-    const dirs: [number, number][] = [
-      [1, 1],
-      [1, -1],
-      [-1, 1],
-      [-1, -1],
-    ];
-    dirs.forEach(([sx, sz]) => {
-      const inv = 1 / Math.SQRT2;
-      const arm = new THREE.Mesh(armGeo, darkMat);
-      arm.rotation.y = sx * sz > 0 ? Math.PI / 4 : -Math.PI / 4;
-      arm.position.set(sx * 0.45, 0.02, sz * 0.45);
-      model.add(arm);
-
-      const bell = new THREE.Mesh(bellGeo, metalMat);
-      bell.position.set(sx * 0.72 * inv, 0.1, sz * 0.72 * inv);
-      model.add(bell);
-
-      const prop = new THREE.Group();
-      prop.position.set(sx * 0.72 * inv, 0.2, sz * 0.72 * inv);
-      const hub = new THREE.Mesh(hubGeo, darkMat);
-      prop.add(hub);
-      for (const rot of [0, Math.PI]) {
-        const blade = new THREE.Mesh(bladeGeo, accentSolid);
-        blade.scale.set(0.46, 0.012, 0.075);
-        blade.position.set(Math.cos(rot) * 0.23, 0.015, Math.sin(rot) * 0.23);
-        blade.rotation.y = rot;
-        prop.add(blade);
-      }
-      model.add(prop);
-      props.push(prop);
-    });
-    model.userData.props = props;
+    addStickerArrow(model, THREE, 0.88, 1.4);
+    return;
   }
 
-  const axisLen = type === "cube" ? 1.35 : 1.15;
-  const mkAxis = (color: number, dir: [number, number, number]) => {
-    const geo = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(dir[0] * axisLen, dir[1] * axisLen, dir[2] * axisLen),
-    ]);
-    return new THREE.Line(geo, new THREE.LineBasicMaterial({ color }));
-  };
-  model.add(mkAxis(0xe5534b, [1, 0, 0]));
-  model.add(mkAxis(0x3fb950, [0, 1, 0]));
-  model.add(mkAxis(0x4e9cef, [0, 0, 1]));
-
-  // 机头方向箭头（亮黄自发光，悬浮于机体上方，指向 +X）
-  const arrowY = type === "cube" ? 1.08 : 0.5;
-  const arrowMat = new THREE.MeshStandardMaterial({
-    color: 0xffcc33,
-    emissive: 0xffa500,
-    emissiveIntensity: 0.5,
-    metalness: 0.15,
-    roughness: 0.35,
+  // ---- 四轴（X 布局，机头朝 +X）----
+  const darkMat = new THREE.MeshStandardMaterial({
+    color: 0x272c35,
+    metalness: 0.35,
+    roughness: 0.55,
   });
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.48, 12), arrowMat);
-  shaft.rotation.z = -Math.PI / 2;
-  shaft.position.set(0.09, arrowY, 0);
-  model.add(shaft);
-  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.28, 16), arrowMat);
-  tip.rotation.z = -Math.PI / 2;
-  tip.position.set(0.47, arrowY, 0);
-  model.add(tip);
+  const midMat = new THREE.MeshStandardMaterial({
+    color: 0x39414e,
+    metalness: 0.3,
+    roughness: 0.5,
+  });
+  const metalMat = new THREE.MeshStandardMaterial({
+    color: 0x8b93a1,
+    metalness: 0.85,
+    roughness: 0.3,
+  });
+  const accentSolid = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(accent),
+    metalness: 0.2,
+    roughness: 0.45,
+  });
+  const ledMat = new THREE.MeshStandardMaterial({
+    color: 0xe5534b,
+    emissive: 0xe5534b,
+    emissiveIntensity: 0.9,
+  });
+  const lensMat = new THREE.MeshStandardMaterial({
+    color: 0x11151b,
+    metalness: 0.1,
+    roughness: 0.15,
+  });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(accent),
+    metalness: 0.1,
+    roughness: 0.2,
+    transparent: true,
+    opacity: 0.55,
+  });
+  const props: THREE_NS.Group[] = [];
+
+  // 碳板机架：下主板 + 上盖板 + 4 铜柱
+  const plate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.14, 0.78), darkMat);
+  model.add(plate);
+  const topPlate = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.5), midMat);
+  topPlate.position.set(-0.06, 0.3, 0);
+  model.add(topPlate);
+  const standoffGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.17, 8);
+  for (const sx of [1, -1]) {
+    for (const sz of [1, -1]) {
+      const so = new THREE.Mesh(standoffGeo, metalMat);
+      so.position.set(-0.06 + sx * 0.24, 0.22, sz * 0.18);
+      model.add(so);
+    }
+  }
+
+  // 舱盖 + 前挡风
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.44), midMat);
+  canopy.position.set(-0.1, 0.42, 0);
+  model.add(canopy);
+  const windshield = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.13, 0.38), glassMat);
+  windshield.position.set(0.2, 0.42, 0);
+  windshield.rotation.z = -0.5;
+  model.add(windshield);
+
+  // 电池（顶置）+ 扎带
+  const battery = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.11, 0.3), darkMat);
+  battery.position.set(-0.08, 0.5, 0);
+  model.add(battery);
+  for (const sx of [1, -1]) {
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.32), accentSolid);
+    strap.position.set(-0.08 + sx * 0.12, 0.5, 0);
+    model.add(strap);
+  }
+
+  // 前置云台相机：球机 + 镜头 + 挂架
+  const gimbalArm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.06), metalMat);
+  gimbalArm.position.set(0.4, -0.08, 0);
+  model.add(gimbalArm);
+  const camBall = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), midMat);
+  camBall.position.set(0.4, -0.18, 0);
+  model.add(camBall);
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.05, 12), lensMat);
+  lens.rotation.z = Math.PI / 2;
+  lens.position.set(0.5, -0.18, 0);
+  model.add(lens);
+  const lensRing = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.012, 8, 16), accentSolid);
+  lensRing.rotation.y = Math.PI / 2;
+  lensRing.position.set(0.51, -0.18, 0);
+  model.add(lensRing);
+
+  // 机头标识条 + 尾部 LED
+  const noseBar = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.56), accentSolid);
+  noseBar.position.set(0.5, 0.02, 0);
+  model.add(noseBar);
+  const tailLed = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.5), ledMat);
+  tailLed.position.set(-0.5, 0.02, 0);
+  model.add(tailLed);
+
+  // 天线：两根后向斜立 5.8G 鞭状天线
+  const antGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.34, 6);
+  const antCap = new THREE.SphereGeometry(0.024, 8, 8);
+  for (const sz of [1, -1]) {
+    const ant = new THREE.Mesh(antGeo, lensMat);
+    ant.position.set(-0.42, 0.42, sz * 0.1);
+    ant.rotation.x = sz * 0.5;
+    ant.rotation.z = 0.35;
+    model.add(ant);
+    const cap = new THREE.Mesh(antCap, accentSolid);
+    cap.position.set(-0.51, 0.55, sz * 0.16);
+    model.add(cap);
+  }
+
+  // 起落架：两侧滑橇 + 支腿
+  const railGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.92, 8);
+  const legGeo = new THREE.CylinderGeometry(0.024, 0.024, 0.3, 8);
+  for (const sx of [1, -1]) {
+    const rail = new THREE.Mesh(railGeo, metalMat);
+    rail.rotation.x = Math.PI / 2;
+    rail.position.set(sx * 0.3, -0.34, 0);
+    model.add(rail);
+    for (const sz of [1, -1]) {
+      const leg = new THREE.Mesh(legGeo, darkMat);
+      leg.position.set(sx * 0.3, -0.18, sz * 0.26);
+      leg.rotation.x = sz * 0.22;
+      model.add(leg);
+    }
+  }
+
+  // 四条斜臂 + 电机（铃 + 顶盖 + 桨帽）+ 双叶桨（对桨反向自转）
+  const armGeo = new THREE.BoxGeometry(0.09, 0.07, 0.82);
+  const bellGeo = new THREE.CylinderGeometry(0.1, 0.125, 0.15, 14);
+  const bellTopGeo = new THREE.CylinderGeometry(0.06, 0.1, 0.05, 14);
+  const hubGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.05, 10);
+  const bladeGeo = new THREE.SphereGeometry(1, 12, 8);
+  const dirs: [number, number][] = [
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ];
+  dirs.forEach(([sx, sz]) => {
+    const inv = 1 / Math.SQRT2;
+    const arm = new THREE.Mesh(armGeo, darkMat);
+    arm.rotation.y = sx * sz > 0 ? Math.PI / 4 : -Math.PI / 4;
+    arm.position.set(sx * 0.45, 0.02, sz * 0.45);
+    model.add(arm);
+
+    const bell = new THREE.Mesh(bellGeo, metalMat);
+    bell.position.set(sx * 0.72 * inv, 0.08, sz * 0.72 * inv);
+    model.add(bell);
+    const bellTop = new THREE.Mesh(bellTopGeo, darkMat);
+    bellTop.position.set(sx * 0.72 * inv, 0.18, sz * 0.72 * inv);
+    model.add(bellTop);
+
+    const prop = new THREE.Group();
+    prop.position.set(sx * 0.72 * inv, 0.22, sz * 0.72 * inv);
+    const hub = new THREE.Mesh(hubGeo, darkMat);
+    prop.add(hub);
+    for (const rot of [0, Math.PI]) {
+      const blade = new THREE.Mesh(bladeGeo, accentSolid);
+      blade.scale.set(0.46, 0.012, 0.075);
+      blade.position.set(Math.cos(rot) * 0.23, 0.015, Math.sin(rot) * 0.23);
+      blade.rotation.y = rot;
+      prop.add(blade);
+    }
+    model.add(prop);
+    props.push(prop);
+  });
+  model.userData.props = props;
+  addStickerArrow(model, THREE, 0.58, 1.0);
 }
 
 export function View3D() {
@@ -187,6 +289,10 @@ export function View3D() {
   const attitude = useSyncExternalStore(store.subscribe, store.getSnapshot);
   cfgRef.current = attitude.config;
   const proto = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
+  const [sel, setSel] = useState<ModelSel>(loadSel);
+  const [custom, setCustom] = useState<CustomMeta | null>(loadCustom);
+  const [rot, setRot] = useState<number>(() => Number(localStorage.getItem(ROT_KEY) ?? 0));
+  const [loadErr, setLoadErr] = useState<string | null>(null);
 
   useEffect(() => {
     const mo = new MutationObserver(() => setThemeTick((t) => t + 1));
@@ -255,7 +361,55 @@ export function View3D() {
       scene.add(new THREE.AxesHelper(1.5));
 
       const model = new THREE.Group();
-      buildModel(model, cfgRef.current.model, THREE, accent);
+      if (sel === "cesium" || sel === "custom") {
+        try {
+          const { GLTFLoader } = (await import(
+            "three/examples/jsm/loaders/GLTFLoader.js"
+          )) as { GLTFLoader: typeof GLTFLoaderType };
+          let buf: ArrayBuffer | null = null;
+          if (sel === "cesium") {
+            const res = await fetch("/models/CesiumDrone.glb");
+            if (!res.ok) throw new Error(`模型资源缺失 (${res.status})`);
+            buf = await res.arrayBuffer();
+          } else if (custom) {
+            if (customBytesCache) {
+              buf = customBytesCache;
+            } else {
+              const bin = await invoke<number[]>("read_binary_file", { path: custom.path });
+              buf = new Uint8Array(bin).buffer;
+              customBytesCache = buf;
+            }
+          }
+          if (disposed) return;
+          if (!buf) throw new Error("未选择模型文件");
+          const loader = new GLTFLoader();
+          const gltf = await new Promise<{ scene: THREE_NS.Group }>(
+            (resolve, reject) => loader.parse(buf as ArrayBuffer, "", resolve, reject),
+          );
+          if (disposed) return;
+          // 归一化：等比缩放至 ~2.4 单位，居中到原点，机头朝向可修正
+          const inner = gltf.scene;
+          inner.rotation.y = deg2rad(rot);
+          const box0 = new THREE.Box3().setFromObject(inner);
+          const size = box0.getSize(new THREE.Vector3());
+          const s = 2.4 / (Math.max(size.x, size.y, size.z) || 1);
+          inner.scale.setScalar(s);
+          const box1 = new THREE.Box3().setFromObject(inner);
+          const center = box1.getCenter(new THREE.Vector3());
+          inner.position.x -= center.x;
+          inner.position.z -= center.z;
+          inner.position.y -= center.y;
+          model.add(inner);
+          const box2 = new THREE.Box3().setFromObject(model);
+          const span = box2.max.y - box2.min.y;
+          addStickerArrow(model, THREE, box2.max.y, Math.max(span, 0.8));
+        } catch (e) {
+          setLoadErr(String(e).replace(/^Error:\s*/, ""));
+          buildModel(model, "uav", THREE, accent);
+        }
+      } else {
+        buildModel(model, sel, THREE, accent);
+      }
       scene.add(model);
 
       const targetQ = new THREE.Quaternion();
@@ -337,7 +491,7 @@ export function View3D() {
       disposed = true;
       cleanup();
     };
-  }, [themeTick, attitude.config.model]);
+  }, [themeTick, sel, rot, custom]);
 
   const onTemplateChange = (templateId: string) => {
     const t = proto.rules.templates.find((x) => x.id === templateId);
@@ -345,6 +499,35 @@ export function View3D() {
       ? store.autoMatch(t.fields.filter((f) => f.type !== "ascii"))
       : {};
     store.setConfig({ templateId, ...patch });
+  };
+
+  const pickModel = async () => {
+    const path = await open({
+      title: "选择 3D 模型（建议 GLB）",
+      multiple: false,
+      filters: [{ name: "3D 模型", extensions: ["glb", "gltf"] }],
+    });
+    if (typeof path !== "string") return;
+    try {
+      await invoke<number[]>("read_binary_file", { path });
+      const meta: CustomMeta = {
+        name: path.split(/[\\/]/).pop() ?? "模型",
+        path,
+      };
+      localStorage.setItem(CUSTOM_KEY, JSON.stringify(meta));
+      setCustom(meta);
+      setLoadErr(null);
+      setSel("custom");
+      localStorage.setItem(SEL_KEY, "custom");
+    } catch (e) {
+      setLoadErr(`导入失败：${String(e).replace(/^Error:\s*/, "")}`);
+    }
+  };
+
+  const changeSel = (v: ModelSel) => {
+    localStorage.setItem(SEL_KEY, v);
+    setLoadErr(null);
+    setSel(v);
   };
 
   const resetView = () => {
@@ -357,6 +540,7 @@ export function View3D() {
   };
 
   const isEuler = attitude.config.mode === "euler";
+  const isGltf = sel === "cesium" || sel === "custom";
   const fieldSelect = (
     value: string,
     onChange: (v: string) => void,
@@ -384,15 +568,35 @@ export function View3D() {
       <div className="v3d-bar">
         <select
           className="input"
-          value={attitude.config.model}
+          value={sel}
           title="模型"
-          onChange={(e) =>
-            store.setConfig({ model: e.target.value as "cube" | "uav" })
-          }
+          onChange={(e) => changeSel(e.target.value as ModelSel)}
         >
           <option value="uav">四轴飞行器</option>
           <option value="cube">立方体</option>
+          <option value="cesium">四轴 · 精细（Cesium）</option>
+          {custom && <option value="custom">外部模型 · {custom.name}</option>}
         </select>
+        <button className="btn" onClick={() => void pickModel()} title="导入外部 GLB/GLTF 模型">
+          导入模型
+        </button>
+        {isGltf && (
+          <select
+            className="input"
+            value={rot}
+            title="机头朝向修正（绕竖直轴旋转）"
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              localStorage.setItem(ROT_KEY, String(v));
+              setRot(v);
+            }}
+          >
+            <option value={0}>机头 +X</option>
+            <option value={90}>机头 +Z</option>
+            <option value={180}>机头 -X</option>
+            <option value={270}>机头 -Z</option>
+          </select>
+        )}
         <button className="btn" onClick={resetView} title="复位观察视角">
           复位视角
         </button>
@@ -402,6 +606,7 @@ export function View3D() {
       </div>
       <div className="v3d-canvas" ref={wrapRef}>
         <div className="v3d-host" ref={hostRef} />
+        {loadErr && <div className="v3d-loaderr">模型加载失败：{loadErr}（已回退内置四轴）</div>}
       </div>
       <div className="v3d-bind">
         <div className="v3d-bind-row">

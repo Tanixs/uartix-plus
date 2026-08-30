@@ -1303,11 +1303,7 @@ export function ControlCanvas() {
                   doMove(d.id, dt.id, dt.pos);
                   return;
                 }
-                // 顶层只允许分组；命令落到空白处不移动，避免污染 groups 结构
-                if (d.kind !== "group") {
-                  setErr("命令只能放入分组内，请拖到某个分组或命令行附近");
-                  return;
-                }
+                // 落到空白处：按树末尾移动（命令/分组均可放顶层，自由拖拽）
                 if (!commandStore.moveNode(d.id, null)) setErr("无法移动");
               }}
                 >
