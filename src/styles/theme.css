@@ -1771,32 +1771,71 @@ body {
 
 .plot-measure {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  left: 10px;
+  bottom: 10px;
   z-index: 4;
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  backdrop-filter: blur(4px);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 11.5px;
+  padding: 7px 10px 8px;
+  font-size: 11px;
   color: var(--text);
   box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.18));
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  max-width: 46%;
+}
+
+.plot-measure-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.plot-measure-head > span {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--text-dim);
 }
 
 .plot-measure-dt {
   font-family: var(--font-mono);
   font-weight: 600;
-  color: var(--accent);
+  color: var(--text);
+  margin-bottom: 2px;
 }
 
-.plot-measure-row {
+.plot-measure-grid {
+  display: grid;
+  grid-template-columns: 10px minmax(48px, auto) 56px 56px 62px;
+  gap: 0 8px;
+  align-items: center;
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+.plot-measure-head-row {
+  color: var(--text-dim);
+  font-size: 10px;
+  font-family: inherit;
+}
+.plot-measure-grid .tpl-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.plot-measure-grid .pm-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+}
+.plot-measure-grid .pm-val { color: var(--text); }
+.plot-measure-grid .pm-dv { color: var(--accent); }
 
 .video-panel {
   display: flex;
@@ -3686,11 +3725,17 @@ label.set-switch,
 .keypad-wrap, .keymon-wrap {
   position: absolute; inset: 0;
 }
+.keypad-wrap {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  padding: 5px;
+  gap: 3px;
+}
 .keypad-btn {
-  position: absolute;
-  width: 37%;
+  place-self: center;
+  width: min(100%, 52px);
   aspect-ratio: 1;
-  height: auto;
   border: none;
   border-radius: 50%;
   background: #e2622b;
@@ -3706,10 +3751,10 @@ label.set-switch,
 .keypad-btn:hover { filter: brightness(1.12); }
 .keypad-btn.held { filter: brightness(1.3); transform: scale(1.1); }
 .keypad-btn:active { transform: scale(.94); }
-.keypad-btn.up { left: 31.5%; top: 2%; }
-.keypad-btn.down { left: 31.5%; bottom: 2%; }
-.keypad-btn.left { left: 2%; top: 31.5%; }
-.keypad-btn.right { right: 2%; top: 31.5%; }
+.keypad-btn.up { grid-area: 1 / 2; }
+.keypad-btn.left { grid-area: 2 / 1; }
+.keypad-btn.right { grid-area: 2 / 3; }
+.keypad-btn.down { grid-area: 3 / 2; }
 .kbadge {
   position: absolute;
   left: 50%;
@@ -3751,32 +3796,64 @@ label.set-switch,
   flex: 0 0 auto;
 }
 .keycap-input.cap { border-color: var(--accent); color: var(--accent); }
+/* 单键监控：机械键帽风格的蓝色方形按钮 */
+.keymon-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
 .keymon-dot {
-  width: 56%;
+  width: 46%;
+  max-width: 56px;
+  min-width: 30px;
   aspect-ratio: 1;
-  height: auto;
-  margin: 6px auto 2px;
-  border-radius: 50%;
-  background: #e2622b;
-  color: #1c1f24;
+  border: none;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
   font-family: var(--font-mono);
   cursor: pointer;
   user-select: none;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
-  transition: transform .08s, filter .12s;
+  /* 键帽立体感：顶部高光 + 底部阴影 */
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, .35),
+    inset 0 -3px 0 rgba(0, 0, 0, .28),
+    0 3px 5px rgba(0, 0, 0, .3);
+  transition: transform .06s, box-shadow .06s, filter .12s;
 }
+.keymon-dot:hover { filter: brightness(1.1); }
 .keymon-dot.held {
-  filter: brightness(1.3);
-  transform: scale(1.08);
-  box-shadow: 0 0 14px rgba(226, 98, 43, .85);
+  transform: translateY(2px);
+  filter: brightness(1.18);
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, .35),
+    0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
 }
-.keymon-dot:active { transform: scale(.94); }
-.keymon-wrap .ctl-name { position: absolute; left: 0; right: 0; bottom: 4px; }
+.keymon-wrap .ctl-name { font-size: 10.5px; }
+.keypad-cfg-row {
+  display: grid;
+  grid-template-columns: 30px 92px 30px minmax(0, 1fr) 30px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.keypad-cfg-row .kc-dir {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+}
+.keypad-cfg-row .kc-hint {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  text-align: right;
+}
+.modal-section-tip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}
 
 .help-content { font-size: 12.5px; line-height: 1.75; }
 .help-content p { margin: 0 0 10px; }

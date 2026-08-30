@@ -529,11 +529,13 @@ export function setPageLocked(id: string, locked: boolean) {
 
 function defaultCard(type: ControlType, name: string): ControlCard {
   const size =
-    type === "joystick" || type === "keypad"
+    type === "joystick"
       ? { w: 2, h: 2 }
-      : type === "slider" || type === "monitor"
-        ? { w: 2, h: 1 }
-        : { w: 1, h: 1 };
+      : type === "keypad"
+        ? { w: 3, h: 3 }
+        : type === "slider" || type === "monitor"
+          ? { w: 2, h: 1 }
+          : { w: 1, h: 1 };
   const base = {
     id: crypto.randomUUID(),
     type,

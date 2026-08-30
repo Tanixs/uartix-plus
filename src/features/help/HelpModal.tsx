@@ -148,6 +148,19 @@ if (get("温度") > 60) {
   setControl("警报声", 0);
 }`}</pre>
                   <p className="help-tip">控件名 = 卡片左下角显示的名称，双击卡片可改名；联动目标控件不需要启用脚本。</p>
+                  <p>
+                    <b>LED 灯 / 蜂鸣器</b>是变量驱动的显示控件：在控件属性里绑定一个解析变量与条件（如 变量「报警」 &gt; 0），脚本里 <code>set("报警", 1)</code> 后即点亮/鸣响，<code>set("报警", 0)</code> 恢复。用变量而非 setControl 驱动它们，可以保证状态来源唯一、不与解析数据打架。
+                  </p>
+                  <pre>{`// 例：解析帧到达 → 报警变量置位 → LED/蜂鸣器自动响应
+set("报警", get("温度") > 60 ? 1 : 0);`}</pre>
+                  <p className="help-tip">
+                    键盘遥控/单键监控也可以被联动：<code>setControl("方向键盘", 0)</code> 等价于按下「上」。四个方向共享一个脚本，用 <code>dir</code>（0上/1下/2左/3右）与 <code>phase</code>（press/release）区分：
+                  </p>
+                  <pre>{`// 键盘遥控脚本示例：不同方向发不同指令
+if (dir === 0) send("FWD:" + phase);
+else if (dir === 1) send("BAK:" + phase);
+else if (dir === 2) send("LFT:" + phase);
+else send("RGT:" + phase);`}</pre>
                 </Section>
                 <Section title="JS 基础语法速查">
                   <table className="help-table">

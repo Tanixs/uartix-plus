@@ -706,8 +706,12 @@ export function Plot2D() {
                 dv: v1 != null && v2 != null ? v2 - v1 : null,
               };
             });
+          const dSpan = (cur.b as number) - (cur.a as number);
           setMeasure({
-            dt: `${(((cur.b as number) - (cur.a as number)) * 1000).toFixed(1)} ms`,
+            dt:
+              settings.xSource === "time"
+                ? `${(dSpan * 1000).toFixed(1)} ms`
+                : `${dSpan.toFixed(1)} 格`,
             rows,
           });
         } else {
@@ -851,15 +855,30 @@ export function Plot2D() {
         )}
         {measure && (
           <div className="plot-measure">
+            <div className="plot-measure-head">
+              游标测量
+              <span>拖动 A/B 竖线 · 按住线头拖动</span>
+            </div>
             <div className="plot-measure-dt">Δt = {measure.dt}</div>
+            <div className="plot-measure-grid plot-measure-head-row">
+              <span />
+              <span>A</span>
+              <span>B</span>
+              <span>Δ</span>
+            </div>
             {measure.rows.map((r) => (
-              <div key={r.name} className="plot-measure-row">
+              <div key={r.name} className="plot-measure-grid">
                 <span
                   className="tpl-dot"
-                  style={{ background: r.color, marginRight: 6 }}
+                  style={{ background: r.color }}
+                  title={r.name}
                 />
-                {r.name}: {fmtVal(r.v1)} → {fmtVal(r.v2)}（Δ{" "}
-                {r.dv != null ? fmtVal(r.dv) : "—"}）
+                <span className="pm-name" title={r.name}>
+                  {r.name}
+                </span>
+                <span className="pm-val">{fmtVal(r.v1)}</span>
+                <span className="pm-val">{fmtVal(r.v2)}</span>
+                <span className="pm-dv">{r.dv != null ? fmtVal(r.dv) : "—"}</span>
               </div>
             ))}
           </div>

@@ -100,6 +100,30 @@ export const IconKeymon = () =>
     </>,
   );
 
+export const IconFlipH = () =>
+  svg(
+    <>
+      <path d="M12 3v18" strokeDasharray="3 3" />
+      <path d="M8 7L4 12l4 5M16 7l4 5-4 5" />
+    </>,
+  );
+
+export const IconFlipV = () =>
+  svg(
+    <>
+      <path d="M3 12h18" strokeDasharray="3 3" />
+      <path d="M7 8L12 4l5 4M7 16l5 4 5-4" />
+    </>,
+  );
+
+export const IconGear = () =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
+    </>,
+  );
+
 export const IconPause = () =>
   svg(
     <>

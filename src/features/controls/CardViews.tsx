@@ -18,6 +18,7 @@ import * as variableStore from "./variableStore";
 import { beep } from "./scriptRunner";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import { Section } from "../../shared/Section";
+import { HelpHint } from "../../shared/HelpHint";
 
 function fmtVal(v: number): string {
   if (Number.isInteger(v)) return String(v);
@@ -1055,6 +1056,7 @@ export function KeymonCardView(props: {
 }) {
   const { card } = props;
   const [held, setHeld] = useState(false);
+  const [flash, setFlash] = useState<number | null>(null);
   const cardRef = useRef(card);
   cardRef.current = card;
   const sendRef = useRef(props.onSend);
@@ -1068,6 +1070,7 @@ export function KeymonCardView(props: {
       if (!match(e.key)) return;
       e.preventDefault();
       setHeld(true);
+      setFlash(Date.now());
       sendRef.current(cardRef.current, {
         phase: "press",
         key: keyLabel(e.key),
@@ -1112,6 +1115,11 @@ export function KeymonCardView(props: {
     >
       <div className="keymon-wrap">
         {held && <span className="kglow" />}
+        {flash && (
+          <span key={flash} className="kbadge">
+            {keyLabel(card.key)}
+          </span>
+        )}
         <div
           className={`keymon-dot ${held ? "held" : ""}`}
           onMouseDown={(e) => {
@@ -1135,6 +1143,9 @@ export function KeymonCardView(props: {
   );
 }
 
+const SCRIPT_API_HINT =
+  "脚本 API：await send(text, mode?) 发送指令（mode 省略按卡片 ASCII/Hex 设置）· beep(freq, ms) 蜂鸣 · await delay_ms(ms) 延时 · get(\"变量\") 读取 · set(\"变量\", 值) 写入 · await waitParse(\"字段\", ms?) 等待解析帧 · setControl(\"控件名\", 值) 联动触发其他控件（按钮发送/开关切档/滑条设值/键盘遥控方向）· await repeat(n, i => …) 循环 · log(text) 输出控制台。完整 JS 语法可用（for/while/if/function/Math…）；解析字段名可直接当变量使用（重名自动 _1/_2）；模板串支持 {字段名:.2f} 格式化插值。";
+
 function ScriptFields({
   value,
   onCommit,
@@ -1146,7 +1157,10 @@ function ScriptFields({
 }) {
   return (
     <div className="form-col">
-      <label>{hint}</label>
+      <label>
+        {hint}
+        <HelpHint text={SCRIPT_API_HINT} />
+      </label>
       <textarea
         className="input ctl-tpl-input ctl-script-input"
         rows={8}
@@ -1154,12 +1168,6 @@ function ScriptFields({
         value={value}
         onChange={(e) => onCommit(e.target.value)}
       />
-      <div className="form-hint">
-        API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) ·
-        get("变量") · await waitParse(字段, ms) · set(变量, 值) ·
-        setControl(控件, 值) · await repeat(n, i=&gt;…) · log(文本)；完整 JS
-        语法可用（for/while/if）；解析字段名可直接当变量使用
-      </div>
     </div>
   );
 }
@@ -1331,13 +1339,13 @@ export function CardModal(props: {
         </Section>
       )}
       {card.type === "keypad" && (
-        <Section title="键位与指令">
-          <div className="form-hint" style={{ marginBottom: 8 }}>
-            全局监听键位（焦点在输入框/菜单时不触发）。按下发送「按下指令」，松开发送「松开指令」（留空不发送）。脚本模式可用变量 dir（0~3）、dirName、phase（press/release）、key。
-          </div>
+        <Section
+          title="键位与指令"
+          tip="全局监听键位（焦点在输入框/菜单时不触发）。按下发送「按下指令」，松开发送「松开指令」（留空不发送）。四个方向共享一个脚本：脚本模式可用变量 dir（0上/1下/2左/3右）、dirName、phase（press/release）、key。"
+        >
           {DIR_LABELS.map((lbl, i) => (
-            <div className="form-row" key={i}>
-              <label>{lbl} 键位</label>
+            <div className="keypad-cfg-row" key={i}>
+              <span className="kc-dir">{lbl}</span>
               <KeyCaptureInput
                 value={card.keys[i]}
                 onCommit={(v) => {
@@ -1346,20 +1354,18 @@ export function CardModal(props: {
                   patch({ keys: a });
                 }}
               />
-              <label>按下</label>
+              <span className="kc-hint">按下</span>
               <TextInput
                 value={card.templates[i]}
-                width={130}
                 onCommit={(v) => {
                   const a = [...card.templates];
                   a[i] = v;
                   patch({ templates: a });
                 }}
               />
-              <label>松开</label>
+              <span className="kc-hint">松开</span>
               <TextInput
                 value={card.releaseTemplates[i]}
-                width={130}
                 placeholder="留空不发送"
                 onCommit={(v) => {
                   const a = [...card.releaseTemplates];
@@ -1372,24 +1378,21 @@ export function CardModal(props: {
         </Section>
       )}
       {card.type === "keymon" && (
-        <Section title="键位与指令">
-          <div className="form-row">
-            <label>监听键位</label>
+        <Section
+          title="键位与指令"
+          tip="全局监听键位（焦点在输入框/菜单时不触发）。按下发送「按下指令」，松开发送「松开指令」（留空不发送）。脚本模式可用变量 phase（press/release）、key。"
+        >
+          <div className="keypad-cfg-row">
+            <span className="kc-dir">键位</span>
             <KeyCaptureInput value={card.key} onCommit={(v) => patch({ key: v })} />
-            <label>按下指令</label>
-            <TextInput value={card.template} width={150} onCommit={(v) => patch({ template: v })} />
-          </div>
-          <div className="form-row">
-            <label>松开指令</label>
+            <span className="kc-hint">按下</span>
+            <TextInput value={card.template} onCommit={(v) => patch({ template: v })} />
+            <span className="kc-hint">松开</span>
             <TextInput
               value={card.releaseTemplate}
-              width={150}
-              placeholder="留空则松开不发送"
+              placeholder="留空不发送"
               onCommit={(v) => patch({ releaseTemplate: v })}
             />
-          </div>
-          <div className="form-hint">
-            全局监听键位（焦点在输入框/菜单时不触发）。脚本模式可用变量 phase（press/release）、key。
           </div>
         </Section>
       )}

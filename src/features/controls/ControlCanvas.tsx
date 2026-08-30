@@ -12,6 +12,7 @@ import { TextInput } from "../protocol/PropertiesPanel";
 import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider, IconChevron } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
+import { HelpHint } from "../../shared/HelpHint";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -561,6 +562,12 @@ export function ControlCanvas() {
       card.type !== "monitor" &&
       card.useScript
     ) {
+      if (!card.script.trim()) {
+        setErr(
+          `「${card.name}」已选择脚本模式但脚本为空，请在卡片设置中填写脚本或切回模板串`,
+        );
+        return;
+      }
       try {
         await runCardScript(card.script, ctx);
         setErr(null);
@@ -1348,10 +1355,10 @@ export function ControlCanvas() {
                       {w.label}
                     </div>
                   ))}
-                  <div className="widget-hint">
-                    拖控件到右侧画布创建；右键卡片「设置」可切换模板串 / 脚本，
-                    脚本内可用全部解析变量
-                  </div>
+                <div className="widget-hint">
+                  拖控件到右侧画布创建
+                  <HelpHint text="右键卡片「设置」可切换模板串 / 脚本模式，脚本内可用全部解析变量；键盘遥控与单键监控会全局监听键位（焦点在输入框时不触发）。" />
+                </div>
                 </div>
               )}
               {sideTab === "commands" && (
@@ -1387,8 +1394,8 @@ export function ControlCanvas() {
   </div>
                   {renderCmdTree(cmds.groups, 0)}
                   <div className="widget-hint">
-                    单击命令立即发送 · 双击编辑 · 拖到画布部署（支持 {"{变量}"}
-                    与解析变量）
+                    单击发送 · 双击编辑 · 拖到画布部署
+                    <HelpHint text="命令支持 {变量} 插值与解析变量；脚本 API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(“变量”) · set(“变量”, 值) · await waitParse(“字段”, ms?) · setControl(“控件名”, 值) 联动触发其他控件 · await repeat(n, i => …) · log(text)。完整 JS 语法可用，详见 帮助 → 脚本命令详解。" />
                   </div>
                 </div>
               )}
