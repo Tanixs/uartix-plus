@@ -132,6 +132,40 @@ const duty = Math.round(value * 2.55);
 send("PWM:" + duty);`}</pre>
                   <p className="help-tip">模板串写法：<code>{"{温度:.1f}"}</code> 按格式插值、<code>{"{名称:str}"}</code> 文本插值、<code>{"%d"}</code> 等printf风格用于命令库。</p>
                 </Section>
+                <Section title="控件联动（setControl）">
+                  <p>
+                    <code>setControl("控件名", 值)</code> 可以在任意脚本里<b>真正触发</b>其他控件（按控件名）：
+                    <b>按钮</b> = 触发一次发送；<b>开关</b> = 切到目标档位并发送该档指令（2 档用 0/1）；<b>滑条</b> = 设值并立即发送；<b>键盘遥控</b> = 模拟按下方向（0上/1下/2左/3右）。
+                  </p>
+                  <pre>{`// 例：温度超过阈值 → 报警灯亮、蜂鸣器响、油门清零
+if (get("温度") > 60) {
+  setControl("报警灯", 1);
+  setControl("警报声", 1);
+  setControl("油门", 0);
+  send("ALARM ON");
+} else {
+  setControl("报警灯", 0);
+  setControl("警报声", 0);
+}`}</pre>
+                  <p className="help-tip">控件名 = 卡片左下角显示的名称，双击卡片可改名；联动目标控件不需要启用脚本。</p>
+                </Section>
+                <Section title="JS 基础语法速查">
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>变量</td><td>let x = 1; const name = "abc";（const 不可重新赋值）</td></tr>
+                      <tr><td>判断</td><td>if (x &gt; 0) {"{ … }"} else if (x === 0) {"{ … }"} else {"{ … }"}；比较：&gt; &lt; &gt;= &lt;= ==（值）!= ===（值+类型）</td></tr>
+                      <tr><td>逻辑</td><td>&amp;&amp;（且）||（或）!（非），如 if (a &gt; 0 &amp;&amp; b &lt; 10)</td></tr>
+                      <tr><td>循环</td><td>for (let i = 0; i &lt; 10; i++) {"{ … }"}；while (条件) {"{ … }"}；await repeat(10, i =&gt; {"{ … }"})</td></tr>
+                      <tr><td>函数</td><td>function 步进(n) {"{ return n * 2; }"} 或 const 步进 = (n) =&gt; n * 2;</td></tr>
+                      <tr><td>数学</td><td>Math.abs(-5)=5 · Math.min(a,b) · Math.max(a,b) · Math.round(1.6)=2 · Math.floor(1.9)=1 · Math.random()∈[0,1)</td></tr>
+                      <tr><td>文本</td><td>"共" + n + "帧" 拼接；s.toFixed(2) 保留2位小数；s.includes("ON") 包含判断</td></tr>
+                      <tr><td>数组</td><td>const arr = [1, 2, 3]; arr[0]; arr.push(4); arr.length; for (const v of arr) {"{ … }"}</td></tr>
+                      <tr><td>异步</td><td>await delay_ms(500) 等待；await waitParse("温度") 等解析帧；顶层可直接 await</td></tr>
+                      <tr><td>异常</td><td>throw new Error("原因") 中止脚本并在控制台提示</td></tr>
+                    </tbody>
+                  </table>
+                  <p className="help-tip">解析字段的字段名可直接当变量使用（重名自动 _1/_2）；字符串模板支持 {"{字段名:.2f}"} 格式化插值。</p>
+                </Section>
               </>
             )}
             {tab === "keys" && (

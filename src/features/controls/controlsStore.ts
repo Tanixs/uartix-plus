@@ -7,7 +7,9 @@ export type ControlType =
   | "led"
   | "buzzer"
   | "monitor"
-  | "joystick";
+  | "joystick"
+  | "keypad"
+  | "keymon";
 
 export interface BaseCard {
   id: string;
@@ -75,7 +77,37 @@ export interface BuzzerCard extends BaseCard {
   freq: number;
   volume: number;
   durationMs: number;
+  /** 循环鸣叫时两次鸣叫的间隔（ms） */
+  gapMs: number;
   repeat: boolean;
+}
+
+/** 键盘遥控：四方向键位触发（按下/松开可各发一条指令） */
+export interface KeypadCard extends BaseCard {
+  type: "keypad";
+  sendMode: SendMode;
+  /** 上/下/左/右 的键盘键位（KeyboardEvent.key） */
+  keys: string[];
+  labels: string[];
+  /** 按下时发送的模板（按方向索引） */
+  templates: string[];
+  /** 松开时发送的模板（空 = 不发送） */
+  releaseTemplates: string[];
+  useScript: boolean;
+  script: string;
+}
+
+/** 单键监控：单个键位触发 */
+export interface KeymonCard extends BaseCard {
+  type: "keymon";
+  sendMode: SendMode;
+  key: string;
+  /** 按下时发送的模板 */
+  template: string;
+  /** 松开时发送的模板（空 = 不发送） */
+  releaseTemplate: string;
+  useScript: boolean;
+  script: string;
 }
 
 export interface MonitorCard extends BaseCard {
@@ -103,7 +135,9 @@ export type ControlCard =
   | LedCard
   | BuzzerCard
   | MonitorCard
-  | JoystickCard;
+  | JoystickCard
+  | KeypadCard
+  | KeymonCard;
 
 export const PANEL_TYPE_NAMES: Record<ControlType, string> = {
   slider: "滑条",
@@ -113,6 +147,8 @@ export const PANEL_TYPE_NAMES: Record<ControlType, string> = {
   buzzer: "蜂鸣器",
   monitor: "数值监视",
   joystick: "摇杆",
+  keypad: "键盘遥控",
+  keymon: "单键监控",
 };
 
 export interface ControlPage {
@@ -185,7 +221,38 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         freq: Math.max(20, Math.min(20000, Number(raw.freq ?? 2000))),
         volume: Math.max(0, Math.min(100, Number(raw.volume ?? 50))),
         durationMs: Math.max(30, Math.min(5000, Number(raw.durationMs ?? 200))),
+        gapMs: Math.max(30, Math.min(10000, Number(raw.gapMs ?? 300))),
         repeat: Boolean(raw.repeat),
+      };
+    case "keypad": {
+      const keys = (raw.keys as string[]) ?? [];
+      const labels = (raw.labels as string[]) ?? [];
+      const templates = (raw.templates as string[]) ?? [];
+      const releaseTemplates = (raw.releaseTemplates as string[]) ?? [];
+      const fix = (arr: string[], dflt: string[]) =>
+        [0, 1, 2, 3].map((i) => String(arr[i] ?? dflt[i]));
+      return {
+        ...base,
+        type,
+        sendMode: (raw.sendMode as SendMode) ?? "ascii",
+        keys: fix(keys, ["w", "s", "a", "d"]),
+        labels: fix(labels, ["上", "下", "左", "右"]),
+        templates: fix(templates, ["KEY:U!", "KEY:D!", "KEY:L!", "KEY:R!"]),
+        releaseTemplates: fix(releaseTemplates, ["", "", "", ""]),
+        useScript: Boolean(raw.useScript),
+        script: String(raw.script ?? ""),
+      };
+    }
+    case "keymon":
+      return {
+        ...base,
+        type,
+        sendMode: (raw.sendMode as SendMode) ?? "ascii",
+        key: String(raw.key ?? "b"),
+        template: String(raw.template ?? "SHOT!"),
+        releaseTemplate: String(raw.releaseTemplate ?? ""),
+        useScript: Boolean(raw.useScript),
+        script: String(raw.script ?? ""),
       };
     case "monitor":
       return {
@@ -462,7 +529,7 @@ export function setPageLocked(id: string, locked: boolean) {
 
 function defaultCard(type: ControlType, name: string): ControlCard {
   const size =
-    type === "joystick"
+    type === "joystick" || type === "keypad"
       ? { w: 2, h: 2 }
       : type === "slider" || type === "monitor"
         ? { w: 2, h: 1 }
@@ -522,7 +589,31 @@ function defaultCard(type: ControlType, name: string): ControlCard {
         freq: 2000,
         volume: 50,
         durationMs: 200,
+        gapMs: 300,
         repeat: false,
+      };
+    case "keypad":
+      return {
+        ...base,
+        type,
+        sendMode: "ascii",
+        keys: ["w", "s", "a", "d"],
+        labels: ["上", "下", "左", "右"],
+        templates: ["KEY:U!", "KEY:D!", "KEY:L!", "KEY:R!"],
+        releaseTemplates: ["", "", "", ""],
+        useScript: false,
+        script: "",
+      };
+    case "keymon":
+      return {
+        ...base,
+        type,
+        sendMode: "ascii",
+        key: "b",
+        template: "SHOT!",
+        releaseTemplate: "",
+        useScript: false,
+        script: "",
       };
     case "monitor":
       return { ...base, type, varName: "", unit: "", decimals: 2 };
@@ -715,6 +806,26 @@ export function moveCard(
     ),
   };
   emit();
+}
+
+export function findCardByName(
+  name: string,
+): { pageId: string; card: ControlCard } | null {
+  for (const p of snapshot.pages) {
+    const c = p.cards.find((x) => x.name === name);
+    if (c) return { pageId: p.id, card: c };
+  }
+  return null;
+}
+
+export function findCardById(
+  cardId: string,
+): { pageId: string; card: ControlCard } | null {
+  for (const p of snapshot.pages) {
+    const c = p.cards.find((x) => x.id === cardId);
+    if (c) return { pageId: p.id, card: c };
+  }
+  return null;
 }
 
 export function formatTemplate(

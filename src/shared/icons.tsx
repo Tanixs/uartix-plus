@@ -82,6 +82,24 @@ export const IconJoystick = () =>
     </>,
   );
 
+export const IconKeypad = () =>
+  svg(
+    <>
+      <circle cx="12" cy="6" r="2.6" />
+      <circle cx="12" cy="18" r="2.6" />
+      <circle cx="6" cy="12" r="2.6" />
+      <circle cx="18" cy="12" r="2.6" />
+    </>,
+  );
+
+export const IconKeymon = () =>
+  svg(
+    <>
+      <rect x="4" y="6" width="16" height="12" rx="2" />
+      <path d="M8 10h8M8 14h5" />
+    </>,
+  );
+
 export const IconPause = () =>
   svg(
     <>
@@ -155,4 +173,6 @@ export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   buzzer: IconBuzzer(),
   monitor: IconMonitor(),
   joystick: IconJoystick(),
+  keypad: IconKeypad(),
+  keymon: IconKeymon(),
 };

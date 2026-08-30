@@ -267,8 +267,8 @@ function buildModel(
     prop.add(hub);
     for (const rot of [0, Math.PI]) {
       const blade = new THREE.Mesh(bladeGeo, accentSolid);
-      blade.scale.set(0.36, 0.012, 0.06);
-      blade.position.set(Math.cos(rot) * 0.18, 0.015, Math.sin(rot) * 0.18);
+      blade.scale.set(0.22, 0.012, 0.055);
+      blade.position.set(Math.cos(rot) * 0.25, 0.015, Math.sin(rot) * 0.25);
       blade.rotation.y = rot;
       prop.add(blade);
     }
@@ -680,7 +680,7 @@ export function View3D() {
               {(["X", "Y", "Z"] as const).map((ax) => (
                 <button
                   key={ax}
-                  className={`btn inv-chip ${attitude.config[`invert${ax}`] ? "warn" : ""}`}
+                  className={`btn inv-chip ${attitude.config[`invert${ax}`] ? "on" : ""}`}
                   onClick={() =>
                     store.setConfig({
                       [`invert${ax}`]: !attitude.config[`invert${ax}`],
@@ -688,7 +688,11 @@ export function View3D() {
                   }
                   title={`反转 ${ax} 轴角度`}
                 >
-                  {ax}⊖
+                  {ax}
+                  <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                    <path d="M5 0.5 L8 4 H2 Z" fill="currentColor" />
+                    <path d="M5 9.5 L2 6 H8 Z" fill="currentColor" />
+                  </svg>
                 </button>
               ))}
             </div>

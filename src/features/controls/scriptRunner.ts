@@ -76,15 +76,14 @@ function builtinSet(name: string, value: number | string): void {
 }
 
 function builtinSetControl(name: string, value: number): void {
-  const snap = controlsStore.getSnapshot();
-  for (const page of snap.pages) {
-    const card = page.cards.find((c) => c.name === name);
-    if (card) {
-      controlsStore.patchCard(page.id, card.id, { value });
-      return;
-    }
-  }
-  throw new Error(`setControl: 找不到控件「${name}」`);
+  const found = controlsStore.findCardByName(name);
+  if (!found) throw new Error(`setControl: 找不到控件「${name}」`);
+  // 通过事件桥交给控制画布按控件类型真正触发（按钮发送/开关切档/滑条设值/键盘遥控方向）
+  window.dispatchEvent(
+    new CustomEvent("vs-control-trigger", {
+      detail: { cardId: found.card.id, value },
+    }),
+  );
 }
 
 async function builtinRepeat(

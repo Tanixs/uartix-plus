@@ -5,6 +5,8 @@ import type {
   ButtonCard,
   ControlCard,
   JoystickCard,
+  KeypadCard,
+  KeymonCard,
   LedCard,
   LedOp,
   MonitorCard,
@@ -543,12 +545,13 @@ export function BuzzerCardView(props: {
   }, [on, card.freq, card.durationMs, vol]);
   useEffect(() => {
     if (!on || !card.repeat) return;
+    const gap = Math.max(30, card.gapMs ?? 300);
     const t = window.setInterval(
       () => beep(card.freq, card.durationMs, vol),
-      card.durationMs + 150,
+      card.durationMs + gap,
     );
     return () => window.clearInterval(t);
-  }, [on, card.repeat, card.freq, card.durationMs, vol]);
+  }, [on, card.repeat, card.freq, card.durationMs, card.gapMs, vol]);
   const sz = Math.max(
     22,
     Math.min(110, Math.floor(Math.min(props.width - 28, props.height - 46))),
@@ -824,6 +827,314 @@ export function JoystickCardView(props: {
   );
 }
 
+/** 键位显示名：ArrowUp → ↑，字母转大写 */
+export function keyLabel(k: string): string {
+  if (k === " ") return "Space";
+  const map: Record<string, string> = {
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    ArrowLeft: "←",
+    ArrowRight: "→",
+  };
+  if (map[k]) return map[k];
+  return k.length === 1 ? k.toUpperCase() : k;
+}
+
+function normKey(k: string): string {
+  return k.length === 1 ? k.toLowerCase() : k;
+}
+
+/** 键位捕获输入框：聚焦后按任意键即录入（Esc 取消） */
+export function KeyCaptureInput({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+}) {
+  const [cap, setCap] = useState(false);
+  return (
+    <input
+      className={`input keycap-input ${cap ? "cap" : ""}`}
+      readOnly
+      value={cap ? "按下任意键…" : keyLabel(value)}
+      onFocus={() => setCap(true)}
+      onBlur={() => setCap(false)}
+      onKeyDown={(e) => {
+        if (!cap) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.key !== "Escape") onCommit(e.key);
+        setCap(false);
+        (e.target as HTMLInputElement).blur();
+      }}
+    />
+  );
+}
+
+/** 按键触发期间禁止输入框抢占：焦点在任何可编辑元素上时不监听 */
+function editableTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  return (
+    t.tagName === "INPUT" ||
+    t.tagName === "TEXTAREA" ||
+    t.tagName === "SELECT" ||
+    t.isContentEditable
+  );
+}
+
+const DIR_LABELS = ["上", "下", "左", "右"];
+
+/** 键盘遥控：四方向键位监听，按下/松开各可发指令，触发时边缘光晕+键位徽标渐隐 */
+export function KeypadCardView(props: {
+  card: KeypadCard;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  renaming: boolean;
+  locked?: boolean;
+  onSend: (card: ControlCard, ctx: Record<string, number | string>) => void;
+  onMenu: (card: ControlCard, x: number, y: number) => void;
+  onDragStart: (e: React.MouseEvent<HTMLDivElement>, card: ControlCard) => void;
+  onRenameCommit: (name: string) => void;
+  onRenameCancel: () => void;
+  onDropTemplate: (
+    card: ControlCard,
+    cmd: {
+      template: string;
+      sendMode: SendMode;
+      script: string;
+      scriptEnabled: boolean;
+    },
+  ) => void;
+  resizable?: boolean;
+  onResizeStart?: (e: React.MouseEvent, card: ControlCard) => void;
+}) {
+  const { card } = props;
+  const [held, setHeld] = useState<number[]>([]);
+  const [flash, setFlash] = useState<{ dir: number; n: number } | null>(null);
+  const cardRef = useRef(card);
+  cardRef.current = card;
+  const sendRef = useRef(props.onSend);
+  sendRef.current = props.onSend;
+
+  useEffect(() => {
+    const idxOf = (key: string) =>
+      cardRef.current.keys.findIndex((k) => normKey(k) === normKey(key));
+    const onDown = (e: KeyboardEvent) => {
+      if (e.repeat || editableTarget(e.target)) return;
+      const i = idxOf(e.key);
+      if (i < 0) return;
+      e.preventDefault();
+      const c = cardRef.current;
+      setHeld((h) => (h.includes(i) ? h : [...h, i]));
+      setFlash({ dir: i, n: Date.now() });
+      sendRef.current(c, {
+        dir: i,
+        dirName: c.labels[i] ?? DIR_LABELS[i],
+        phase: "press",
+        key: keyLabel(e.key),
+      });
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (editableTarget(e.target)) return;
+      const i = idxOf(e.key);
+      if (i < 0) return;
+      const c = cardRef.current;
+      setHeld((h) => h.filter((x) => x !== i));
+      sendRef.current(c, {
+        dir: i,
+        dirName: c.labels[i] ?? DIR_LABELS[i],
+        phase: "release",
+        key: keyLabel(e.key),
+      });
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+    };
+  }, []);
+
+  const trig = (i: number, phase: "press" | "release") => {
+    props.onSend(card, {
+      dir: i,
+      dirName: card.labels[i] ?? DIR_LABELS[i],
+      phase,
+      key: keyLabel(card.keys[i]),
+    });
+  };
+
+  const btn = (i: number, cls: string, rot: number) => (
+    <button
+      className={`keypad-btn ${cls} ${held.includes(i) ? "held" : ""}`}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        setHeld((h) => (h.includes(i) ? h : [...h, i]));
+        setFlash({ dir: i, n: Date.now() });
+        trig(i, "press");
+      }}
+      onMouseUp={(e) => {
+        e.stopPropagation();
+        setHeld((h) => h.filter((x) => x !== i));
+        trig(i, "release");
+      }}
+      onMouseLeave={() => setHeld((h) => h.filter((x) => x !== i))}
+      title={`${card.labels[i] ?? DIR_LABELS[i]}（${keyLabel(card.keys[i])}）`}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+        <polygon
+          points="7,3 11,9 3,9"
+          fill="currentColor"
+          transform={`rotate(${rot} 7 7)`}
+        />
+      </svg>
+    </button>
+  );
+
+  return (
+    <CardFrame
+      card={card}
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      height={props.height}
+      renaming={props.renaming}
+      locked={props.locked}
+      onMenu={props.onMenu}
+      onDragStart={props.onDragStart}
+      onRenameCommit={props.onRenameCommit}
+      onRenameCancel={props.onRenameCancel}
+      onDropTemplate={props.onDropTemplate}
+      resizable={props.resizable}
+      onResizeStart={props.onResizeStart}
+    >
+      <div className="keypad-wrap">
+        {flash && (
+          <span key={flash.n} className="kbadge" data-dir={flash.dir}>
+            {keyLabel(card.keys[flash.dir])} {card.labels[flash.dir] ?? ""}
+          </span>
+        )}
+        {flash && <span key={`g${flash.n}`} className="kglow" />}
+        {btn(0, "up", 0)}
+        {btn(2, "left", -90)}
+        {btn(3, "right", 90)}
+        {btn(1, "down", 180)}
+      </div>
+    </CardFrame>
+  );
+}
+
+/** 单键监控：单个键位按下/松开触发 */
+export function KeymonCardView(props: {
+  card: KeymonCard;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  renaming: boolean;
+  locked?: boolean;
+  onSend: (card: ControlCard, ctx: Record<string, number | string>) => void;
+  onMenu: (card: ControlCard, x: number, y: number) => void;
+  onDragStart: (e: React.MouseEvent<HTMLDivElement>, card: ControlCard) => void;
+  onRenameCommit: (name: string) => void;
+  onRenameCancel: () => void;
+  onDropTemplate: (
+    card: ControlCard,
+    cmd: {
+      template: string;
+      sendMode: SendMode;
+      script: string;
+      scriptEnabled: boolean;
+    },
+  ) => void;
+  resizable?: boolean;
+  onResizeStart?: (e: React.MouseEvent, card: ControlCard) => void;
+}) {
+  const { card } = props;
+  const [held, setHeld] = useState(false);
+  const cardRef = useRef(card);
+  cardRef.current = card;
+  const sendRef = useRef(props.onSend);
+  sendRef.current = props.onSend;
+
+  useEffect(() => {
+    const match = (key: string) =>
+      normKey(key) === normKey(cardRef.current.key);
+    const onDown = (e: KeyboardEvent) => {
+      if (e.repeat || editableTarget(e.target)) return;
+      if (!match(e.key)) return;
+      e.preventDefault();
+      setHeld(true);
+      sendRef.current(cardRef.current, {
+        phase: "press",
+        key: keyLabel(e.key),
+      });
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (editableTarget(e.target)) return;
+      if (!match(e.key)) return;
+      setHeld(false);
+      sendRef.current(cardRef.current, {
+        phase: "release",
+        key: keyLabel(e.key),
+      });
+    };
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+    };
+  }, []);
+
+  const trig = (phase: "press" | "release") =>
+    props.onSend(card, { phase, key: keyLabel(card.key) });
+
+  return (
+    <CardFrame
+      card={card}
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      height={props.height}
+      renaming={props.renaming}
+      locked={props.locked}
+      onMenu={props.onMenu}
+      onDragStart={props.onDragStart}
+      onRenameCommit={props.onRenameCommit}
+      onRenameCancel={props.onRenameCancel}
+      onDropTemplate={props.onDropTemplate}
+      resizable={props.resizable}
+      onResizeStart={props.onResizeStart}
+    >
+      <div className="keymon-wrap">
+        {held && <span className="kglow" />}
+        <div
+          className={`keymon-dot ${held ? "held" : ""}`}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            setHeld(true);
+            trig("press");
+          }}
+          onMouseUp={(e) => {
+            e.stopPropagation();
+            setHeld(false);
+            trig("release");
+          }}
+          onMouseLeave={() => setHeld(false)}
+          title={`按下键盘 ${keyLabel(card.key)} 触发`}
+        >
+          {keyLabel(card.key)}
+        </div>
+        <div className="ctl-name center">{card.name}</div>
+      </div>
+    </CardFrame>
+  );
+}
+
 function ScriptFields({
   value,
   onCommit,
@@ -869,7 +1180,9 @@ export function CardModal(props: {
     card.type === "slider" ||
     card.type === "button" ||
     card.type === "switch" ||
-    card.type === "joystick";
+    card.type === "joystick" ||
+    card.type === "keypad" ||
+    card.type === "keymon";
 
   const varSelect = (
     value: string,
@@ -985,6 +1298,13 @@ export function CardModal(props: {
               checked={card.repeat}
               onChange={(e) => patch({ repeat: e.target.checked })}
             />
+            <label>间歇</label>
+            <NumInput
+              value={card.gapMs ?? 300}
+              width={64}
+              onCommit={(v) => patch({ gapMs: Math.max(30, Math.min(10000, Math.round(v))) })}
+              title="两次鸣叫之间的间隔（ms），循环鸣叫时生效"
+            />
             <button
               className="btn"
               onClick={() => beep(card.freq, card.durationMs, (card.volume / 100) * 0.3)}
@@ -1007,6 +1327,69 @@ export function CardModal(props: {
               width={56}
               onCommit={(v) => patch({ decimals: Math.max(0, Math.min(8, v)) })}
             />
+          </div>
+        </Section>
+      )}
+      {card.type === "keypad" && (
+        <Section title="键位与指令">
+          <div className="form-hint" style={{ marginBottom: 8 }}>
+            全局监听键位（焦点在输入框/菜单时不触发）。按下发送「按下指令」，松开发送「松开指令」（留空不发送）。脚本模式可用变量 dir（0~3）、dirName、phase（press/release）、key。
+          </div>
+          {DIR_LABELS.map((lbl, i) => (
+            <div className="form-row" key={i}>
+              <label>{lbl} 键位</label>
+              <KeyCaptureInput
+                value={card.keys[i]}
+                onCommit={(v) => {
+                  const a = [...card.keys];
+                  a[i] = v;
+                  patch({ keys: a });
+                }}
+              />
+              <label>按下</label>
+              <TextInput
+                value={card.templates[i]}
+                width={130}
+                onCommit={(v) => {
+                  const a = [...card.templates];
+                  a[i] = v;
+                  patch({ templates: a });
+                }}
+              />
+              <label>松开</label>
+              <TextInput
+                value={card.releaseTemplates[i]}
+                width={130}
+                placeholder="留空不发送"
+                onCommit={(v) => {
+                  const a = [...card.releaseTemplates];
+                  a[i] = v;
+                  patch({ releaseTemplates: a });
+                }}
+              />
+            </div>
+          ))}
+        </Section>
+      )}
+      {card.type === "keymon" && (
+        <Section title="键位与指令">
+          <div className="form-row">
+            <label>监听键位</label>
+            <KeyCaptureInput value={card.key} onCommit={(v) => patch({ key: v })} />
+            <label>按下指令</label>
+            <TextInput value={card.template} width={150} onCommit={(v) => patch({ template: v })} />
+          </div>
+          <div className="form-row">
+            <label>松开指令</label>
+            <TextInput
+              value={card.releaseTemplate}
+              width={150}
+              placeholder="留空则松开不发送"
+              onCommit={(v) => patch({ releaseTemplate: v })}
+            />
+          </div>
+          <div className="form-hint">
+            全局监听键位（焦点在输入框/菜单时不触发）。脚本模式可用变量 phase（press/release）、key。
           </div>
         </Section>
       )}

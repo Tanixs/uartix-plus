@@ -18,6 +18,8 @@ import {
   ButtonCardView,
   CardModal,
   JoystickCardView,
+  KeypadCardView,
+  KeymonCardView,
   LedCardView,
   MonitorCardView,
   SliderCardView,
@@ -36,6 +38,8 @@ const WIDGET_TYPES: { type: ControlType; label: string }[] = [
   { type: "buzzer", label: "蜂鸣器" },
   { type: "monitor", label: "数值监视" },
   { type: "joystick", label: "摇杆" },
+  { type: "keypad", label: "键盘遥控" },
+  { type: "keymon", label: "单键监控" },
 ];
 
 function MountCascade(props: {
@@ -466,6 +470,50 @@ export function ControlCanvas() {
     [],
   );
 
+  // 脚本 setControl 联动桥：接收 vs-control-trigger 事件，按控件类型真正触发发送
+  useEffect(() => {
+    const onCtl = (e: Event) => {
+      const d = (e as CustomEvent<{ cardId: string; value: number }>).detail;
+      if (!d?.cardId) return;
+      const found = store.findCardById(d.cardId);
+      if (!found) return;
+      const { pageId, card } = found;
+      switch (card.type) {
+        case "button":
+          void sendControl(card, {});
+          break;
+        case "switch": {
+          const st = Math.max(
+            0,
+            Math.min(card.positions - 1, Math.round(Number(d.value))),
+          );
+          store.patchCard(pageId, card.id, { state: st });
+          void sendControl(card, { state: st });
+          break;
+        }
+        case "slider": {
+          const v = Number(d.value);
+          valuesRef.current.set(card.id, v);
+          store.patchCard(pageId, card.id, { defaultValue: v });
+          void sendControl(card, { value: v }, true);
+          break;
+        }
+        case "keypad": {
+          const dir = Math.max(0, Math.min(3, Math.round(Number(d.value))));
+          void sendControl(card, { dir, phase: "press" });
+          break;
+        }
+        case "keymon":
+          void sendControl(card, { phase: "press" });
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener("vs-control-trigger", onCtl);
+    return () => window.removeEventListener("vs-control-trigger", onCtl);
+  });
+
   if (!page) {
     return <div className="ctl"><div className="ctl-empty">无控制页</div></div>;
   }
@@ -553,6 +601,24 @@ export function ControlCanvas() {
           ),
         );
         break;
+      case "keypad": {
+        const dir = Math.max(0, Math.min(3, Math.round(Number(ctx.dir ?? 0))));
+        const phase = String(ctx.phase ?? "press");
+        const tpl =
+          (phase === "release" ? card.releaseTemplates[dir] : card.templates[dir]) ?? "";
+        if (tpl) {
+          await sendRaw(card.sendMode, variableStore.resolveVars(tpl));
+        }
+        break;
+      }
+      case "keymon": {
+        const phase = String(ctx.phase ?? "press");
+        const tpl = phase === "release" ? card.releaseTemplate : card.template;
+        if (tpl) {
+          await sendRaw(card.sendMode, variableStore.resolveVars(tpl));
+        }
+        break;
+      }
       default:
         break;
     }
@@ -816,6 +882,10 @@ export function ControlCanvas() {
         return <MonitorCardView key={c.id} {...common} card={c} />;
       case "joystick":
         return <JoystickCardView key={c.id} {...common} card={c} onSend={sendControl} />;
+      case "keypad":
+        return <KeypadCardView key={c.id} {...common} card={c} onSend={sendControl} />;
+      case "keymon":
+        return <KeymonCardView key={c.id} {...common} card={c} onSend={sendControl} />;
       default:
         return null;
     }

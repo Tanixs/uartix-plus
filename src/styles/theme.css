@@ -2071,10 +2071,27 @@ body {
 
 .inv-chip {
   height: 24px;
-  padding: 0 7px;
+  padding: 0 8px;
   font-size: 11px;
   font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
 }
+.inv-chip svg { opacity: .55; }
+.inv-chip:hover { color: var(--text); border-color: var(--accent); }
+.inv-chip.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.inv-chip.on svg { opacity: 1; }
 
 .ctl {
   height: 100%;
@@ -3665,6 +3682,102 @@ label.set-switch,
   from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
+/* 键盘遥控 / 单键监控 */
+.keypad-wrap, .keymon-wrap {
+  position: absolute; inset: 0;
+}
+.keypad-btn {
+  position: absolute;
+  width: 37%;
+  aspect-ratio: 1;
+  height: auto;
+  border: none;
+  border-radius: 50%;
+  background: #e2622b;
+  color: #1c1f24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
+  transition: transform .08s, filter .12s;
+  padding: 0;
+}
+.keypad-btn:hover { filter: brightness(1.12); }
+.keypad-btn.held { filter: brightness(1.3); transform: scale(1.1); }
+.keypad-btn:active { transform: scale(.94); }
+.keypad-btn.up { left: 31.5%; top: 2%; }
+.keypad-btn.down { left: 31.5%; bottom: 2%; }
+.keypad-btn.left { left: 2%; top: 31.5%; }
+.keypad-btn.right { right: 2%; top: 31.5%; }
+.kbadge {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  transform: translateX(-50%);
+  z-index: 5;
+  pointer-events: none;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  animation: kbadge .6s ease-out forwards;
+}
+@keyframes kbadge {
+  0% { opacity: 0; transform: translateX(-50%) translateY(4px) scale(.85); }
+  18% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-10px) scale(1); }
+}
+.kglow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  border: 2px solid var(--accent);
+  animation: kglow .55s ease-out forwards;
+}
+@keyframes kglow {
+  0% { opacity: .95; }
+  100% { opacity: 0; }
+}
+.keycap-input {
+  width: 92px;
+  text-align: center;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.keycap-input.cap { border-color: var(--accent); color: var(--accent); }
+.keymon-dot {
+  width: 56%;
+  aspect-ratio: 1;
+  height: auto;
+  margin: 6px auto 2px;
+  border-radius: 50%;
+  background: #e2622b;
+  color: #1c1f24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
+  transition: transform .08s, filter .12s;
+}
+.keymon-dot.held {
+  filter: brightness(1.3);
+  transform: scale(1.08);
+  box-shadow: 0 0 14px rgba(226, 98, 43, .85);
+}
+.keymon-dot:active { transform: scale(.94); }
+.keymon-wrap .ctl-name { position: absolute; left: 0; right: 0; bottom: 4px; }
+
 .help-content { font-size: 12.5px; line-height: 1.75; }
 .help-content p { margin: 0 0 10px; }
 .help-ol { margin: 6px 0 10px; padding-left: 20px; }
