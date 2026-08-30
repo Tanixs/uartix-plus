@@ -11,7 +11,11 @@ import { TitleBar } from "./shell/TitleBar";
 import { IconColumns } from "./shared/icons";
 import type { IfaceKind } from "./features/serial/serialStore";
 import type { WorkspacePreset } from "./features/settings/settingsStore";
-import { useSettings } from "./features/settings/settingsStore";
+import {
+  getSnapshot as getSettingsSnapshot,
+  useSettings,
+} from "./features/settings/settingsStore";
+import * as controlsStore from "./features/controls/controlsStore";
 import { SettingsModal } from "./features/settings/SettingsModal";
 import { HelpModal } from "./features/help/HelpModal";
 import type { PanelId } from "./ipc/types";
@@ -71,6 +75,42 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     return;
   }
 
+  if (preset === "video") {
+    api.addPanel({
+      id: "video",
+      component: "video",
+      title: PANEL_TITLES.video,
+      initialWidth: midW + rightW,
+      position: { referencePanel: "templates", direction: "right" },
+    });
+    api.addPanel({
+      id: "hexview",
+      component: "hexview",
+      title: PANEL_TITLES.hexview,
+      initialHeight: Math.round(h * 0.35),
+      minimumHeight: 140,
+      position: { referencePanel: "video", direction: "below" },
+    });
+    api.addPanel({
+      id: "properties",
+      component: "properties",
+      title: PANEL_TITLES.properties,
+      initialWidth: rightW,
+      minimumWidth: 230,
+      position: { referencePanel: "video", direction: "right" },
+    });
+    api.addPanel({
+      id: "console",
+      component: "console",
+      title: "控制台",
+      initialHeight: Math.round(h * 0.3),
+      minimumHeight: 120,
+      position: { referencePanel: "properties", direction: "below" },
+    });
+    api.getPanel("video")?.api.setActive();
+    return;
+  }
+
   const centerPanels =
     preset === "analyze"
       ? (["plot2d", "hexview", "console"] as const)
@@ -118,17 +158,17 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     minimumHeight: 140,
     position: { referencePanel: first, direction: "below" },
   });
-  const bottomRight = preset === "analyze" ? "table" : "plot2d";
-  void bottomRight;
-  api.addPanel({
-    id: "plot2d",
-    component: "plot2d",
-    title: "2D 曲线",
-    initialWidth: bottomColW,
-    minimumWidth: 240,
-    position: { referencePanel: "table", direction: "right" },
-  });
-  if (preset === "analyze" || preset === "attitude") {
+  if (preset !== "analyze") {
+    api.addPanel({
+      id: "plot2d",
+      component: "plot2d",
+      title: "2D 曲线",
+      initialWidth: bottomColW,
+      minimumWidth: 240,
+      position: { referencePanel: "table", direction: "right" },
+    });
+  }
+  if (preset === "analyze") {
     api.addPanel({
       id: "view3d",
       component: "view3d",
@@ -213,7 +253,7 @@ export default function App() {
         localStorage.removeItem(LAYOUT_KEY);
       }
     }
-    applyDefaultLayout(api);
+    applyDefaultLayout(api, getSettingsSnapshot().workspace);
   }, []);
 
   useEffect(() => {
@@ -285,6 +325,26 @@ export default function App() {
     localStorage.removeItem(LAYOUT_KEY);
     api.clear();
     applyDefaultLayout(api, preset);
+    if (preset === "attitude") {
+      const exists = controlsStore
+        .getSnapshot()
+        .pages.some((p) => p.name === "姿态调参");
+      if (!exists) {
+        controlsStore.importPage({
+          name: "姿态调参",
+          cols: 12,
+          rows: 8,
+          cards: Array.from({ length: 6 }, (_, i) => ({
+            type: "slider",
+            name: `参数${i + 1}`,
+            x: (i % 3) * 4,
+            y: Math.floor(i / 3) * 2,
+            w: 2,
+            h: 1,
+          })),
+        });
+      }
+    }
   };
 
   const addOrFocusPanel = (id: string) => {
@@ -328,7 +388,15 @@ export default function App() {
       : `${serial.bps} B/s`;
 
   return (
-    <div className="app">
+    <div
+      className="app"
+      onContextMenu={(e) => {
+        const t = e.target as HTMLElement;
+        if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+          return;
+        e.preventDefault();
+      }}
+    >
       <TitleBar onOpenSettings={() => setSettingsOpen(true)} onOpenHelp={() => setHelpOpen(true)} />
       <header className="toolbar">
         {serial.iface === "serial" ? (

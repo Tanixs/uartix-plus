@@ -1,5 +1,6 @@
 import { memo } from "react";
 import type { PanelId } from "../ipc/types";
+import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { ConsolePanel } from "../features/console/ConsolePanel";
 import { HexView } from "../features/hexview/HexView";
 import { TemplatesPanel } from "../features/protocol/TemplatesPanel";
@@ -9,6 +10,7 @@ import { Plot2D } from "../features/plot/Plot2D";
 import { View3D } from "../features/attitude/View3D";
 import { ControlCanvas } from "../features/controls/ControlCanvas";
 import FrameCanvas from "../features/framecanvas/FrameCanvas";
+import { VideoLink } from "../features/video/VideoLink";
 
 export const PANEL_TITLES: Record<PanelId, string> = {
   hexview: "Hex 数据流",
@@ -20,6 +22,7 @@ export const PANEL_TITLES: Record<PanelId, string> = {
   plot2d: "2D 曲线",
   view3d: "3D 姿态",
   framecanvas: "帧画布",
+  video: "图传",
 };
 
 const MTemplates = memo(TemplatesPanel);
@@ -31,17 +34,59 @@ const MTable = memo(DataTable);
 const MPlot2D = memo(Plot2D);
 const MView3D = memo(View3D);
 const MFrameCanvas = memo(FrameCanvas);
+const MVideo = memo(VideoLink);
 
 export const panelComponents = {
-  templates: () => <MTemplates />,
-  hexview: () => <MHexView />,
-  properties: () => <MProperties />,
-  controls: () => <MControls />,
-  console: () => <MConsole />,
-  table: () => <MTable />,
-  plot2d: () => <MPlot2D />,
-  view3d: () => <MView3D />,
-  framecanvas: () => <MFrameCanvas />,
+  templates: () => (
+    <ErrorBoundary label={PANEL_TITLES.templates}>
+      <MTemplates />
+    </ErrorBoundary>
+  ),
+  hexview: () => (
+    <ErrorBoundary label={PANEL_TITLES.hexview}>
+      <MHexView />
+    </ErrorBoundary>
+  ),
+  properties: () => (
+    <ErrorBoundary label={PANEL_TITLES.properties}>
+      <MProperties />
+    </ErrorBoundary>
+  ),
+  controls: () => (
+    <ErrorBoundary label={PANEL_TITLES.controls}>
+      <MControls />
+    </ErrorBoundary>
+  ),
+  console: () => (
+    <ErrorBoundary label={PANEL_TITLES.console}>
+      <MConsole />
+    </ErrorBoundary>
+  ),
+  table: () => (
+    <ErrorBoundary label={PANEL_TITLES.table}>
+      <MTable />
+    </ErrorBoundary>
+  ),
+  plot2d: () => (
+    <ErrorBoundary label={PANEL_TITLES.plot2d}>
+      <MPlot2D />
+    </ErrorBoundary>
+  ),
+  view3d: () => (
+    <ErrorBoundary label={PANEL_TITLES.view3d}>
+      <MView3D />
+    </ErrorBoundary>
+  ),
+  framecanvas: () => (
+    <ErrorBoundary label={PANEL_TITLES.framecanvas}>
+      <MFrameCanvas />
+    </ErrorBoundary>
+  ),
+  video: () => (
+    <ErrorBoundary label={PANEL_TITLES.video}>
+      <MVideo />
+    </ErrorBoundary>
+  ),
   placeholder: () => (
     <div className="ph">
       <div className="ph-card">

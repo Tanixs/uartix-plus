@@ -4,6 +4,7 @@ import type { CommandItem } from "../controls/commandStore";
 import * as serialStore from "../serial/serialStore";
 import * as variableStore from "../controls/variableStore";
 import { beep, runScript } from "../controls/scriptRunner";
+import { IconChevron } from "../../shared/icons";
 import { useSettings } from "../settings/settingsStore";
 import { CODECS, userCodecToCodec, type Codec, type FactoryField } from "./commandFactory";
 import * as userCodecStore from "./userCodecStore";
@@ -371,7 +372,7 @@ export function QuickCommandBar() {
     <div className="qk-bar">
       <div className="qk-head">
         <button className="qk-fold" onClick={toggleOpen} title={open ? "收起快捷指令栏" : "展开快捷指令栏"}>
-          {open ? "▾" : "▸"} 快捷指令
+          <IconChevron size={13} dir={open ? "down" : "right"} /> 快捷指令
         </button>
         {open && (
           <>

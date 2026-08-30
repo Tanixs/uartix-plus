@@ -57,6 +57,12 @@ export function getVar(name: string): number | string | undefined {
   return values.get(name);
 }
 
+/** 脚本 set(name, v)：手动写入变量（供模板 {name} 插值发送；同名解析帧到达时会被覆盖） */
+export function setVar(name: string, value: number | string): void {
+  values.set(name, value);
+  scheduleNotify();
+}
+
 function rebuild() {
   const used = new Set<string>();
   registry = [];

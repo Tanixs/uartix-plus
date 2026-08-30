@@ -9,6 +9,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
     { key: "canvas", label: "协议画布教程" },
     { key: "script", label: "脚本命令详解" },
     { key: "keys", label: "快捷键与技巧" },
+    { key: "export", label: "导出文件格式" },
   ];
   return (
     <div className="modal-mask" onMouseDown={onClose}>
@@ -83,7 +84,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
             {tab === "canvas" && (
               <>
                 <Section title="协议簇">
-                  <p>一个协议可含多个帧型（如匿名 V7 的 22 种功能码）：左侧列表一行代表整簇，点行选中，点 ▸ 箭头展开帧型；簇内右键可复制/粘贴帧型。画布顶部页签与左侧联动。</p>
+                  <p>一个协议可含多个帧型（如匿名 V7 的 22 种功能码）：左侧列表一行代表整簇，点行选中，点行首箭头展开帧型；簇内右键可复制/粘贴帧型。画布顶部页签与左侧联动。</p>
                 </Section>
                 <Section title="自适应文本帧（JustFloat 式）">
                   <p><code>＋ 新建 → 自适应文本帧</code>：设分隔符（, \ ;）与元素类型（float/uint8…），按每帧实际段数动态生成 通道1…通道N，各通道可单独绘图、供脚本引用。</p>
@@ -103,6 +104,11 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>beep(freq, ms)</td><td>蜂鸣提示，如 beep(1000, 200)</td></tr>
                       <tr><td>delay_ms(ms)</td><td>异步延时，await delay_ms(500)</td></tr>
                       <tr><td>get(name)</td><td>读取变量当前值，如 get("温度")</td></tr>
+                      <tr><td>set(name, v)</td><td>写入变量（配合模板 {"{name}"} 插值发送）；同名解析帧到达时会被覆盖</td></tr>
+                      <tr><td>await waitParse(name, ms?)</td><td>等待解析字段出现并取值（默认超时 5s），校准流程用</td></tr>
+                      <tr><td>setControl(控件名, v)</td><td>驱动控制画布滑条/开关等控件的值（自动化联动）</td></tr>
+                      <tr><td>await repeat(n, i=&gt;…)</td><td>循环语法糖；也可直接用 JS 的 for / while / if</td></tr>
+                      <tr><td>log(text)</td><td>输出到控制台（前缀 [脚本]），调试脚本用</td></tr>
                       <tr><td>变量名</td><td>启用模板的字段名直接可用（重名自动 _1/_2）；自适应帧为 通道1/通道2…</td></tr>
                     </tbody>
                   </table>
@@ -141,6 +147,101 @@ send("PWM:" + duty);`}</pre>
                   <tr><td>拖拽图例</td><td>把字段拖到 2D 曲线区直接开线</td></tr>
                 </tbody>
               </table>
+            )}
+            {tab === "export" && (
+              <>
+                <Section title="外层信封（三种文件通用）">
+                  <p>设置 → 导入 / 导出 中的三类文件均为 JSON，外层统一包裹，导入时按 <code>kind</code> 校验类型：</p>
+                  <pre>{`{
+  "kind": "uartix-templates | uartix-controls | uartix-commands",
+  "version": 1,
+  "data": { ... }
+}`}</pre>
+                </Section>
+                <Section title="协议模板（kind = uartix-templates）">
+                  <p>data 含 <code>templates</code>（帧型数组）与 <code>groups</code>（协议簇名映射）。导入时以副本追加，重名自动加后缀。</p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>id / name / color / enabled</td><td>帧型唯一标识、名称、图例颜色、是否启用解析</td></tr>
+                      <tr><td>presetKey / groupKey</td><td>预设协议标识（自建为 null）/ 自建簇的分组 key</td></tr>
+                      <tr><td>boundary.mode</td><td>定界方式：fixedLength 定长 / lengthField 长度域 / footer 帧尾</td></tr>
+                      <tr><td>boundary.headerBytes</td><td>帧头同步字节数组，如 [170, 85]（即 AA 55）</td></tr>
+                      <tr><td>boundary.fixedLength</td><td>定长模式的帧总长（字节）</td></tr>
+                      <tr><td>boundary.lengthOffset / lengthSize / lengthEndian / lengthAdjust</td><td>长度域模式的：域偏移 / 位宽 / 字节序 / 修正值（总帧长 = 原始值 + 修正）</td></tr>
+                      <tr><td>boundary.footerBytes</td><td>帧尾模式：帧尾字节序列</td></tr>
+                      <tr><td>boundary.maxLength</td><td>安全上限，超长候选帧直接丢弃重新同步</td></tr>
+                      <tr><td>boundary.discs</td><td>帧识别字段列表：{"{ offset, value: number[] }"}，用于同簇多帧型筛选</td></tr>
+                      <tr><td>checksum.algo</td><td>none / sum8 / sumadd / xor8 / crc16_modbus / crc16_ccitt / crc32</td></tr>
+                      <tr><td>checksum.coverageStart / coverageEnd</td><td>校验覆盖区间；正数=帧头偏移，负数=距帧尾（-1 = 不含最后 1 字节）</td></tr>
+                      <tr><td>checksum.endian</td><td>校验值存储字节序：little / big</td></tr>
+                      <tr><td>fields[].role</td><td>header / addr / id / seq / length / data / payload / checksum / checksum2 / footer</td></tr>
+                      <tr><td>fields[].type</td><td>uint8 / int8 / uint16 / int16 / uint32 / int32 / float32 / float64 / ascii / bcd / bits / csv</td></tr>
+                      <tr><td>fields[].offset / endian</td><td>帧内字节偏移 / 解析字节序</td></tr>
+                      <tr><td>fields[].scale / offsetValue / unit</td><td>物理值 = 原始值 × scale + offsetValue；unit 为显示单位</td></tr>
+                      <tr><td>fields[].disc</td><td>帧识别值（本字段偏移处应有的固定字节串）</td></tr>
+                      <tr><td>fields[].bits / csvDelim / csvType</td><td>位域：{"{ index, count }"}；文本帧：分隔符 / 元素类型</td></tr>
+                    </tbody>
+                  </table>
+                  <pre>{`{
+  "templates": [{
+    "id": "…uuid…", "name": "姿态帧", "color": "#e5534b", "enabled": true,
+    "boundary": { "mode": "fixedLength", "headerBytes": [187, 102],
+      "fixedLength": 12, "maxLength": 512, "discs": [] },
+    "checksum": { "algo": "crc16_modbus", "coverageStart": 0, "coverageEnd": -2, "endian": "little" },
+    "fields": [
+      { "id": "…", "name": "Roll", "role": "data", "offset": 4,
+        "type": "int16", "endian": "big", "scale": 0.1, "unit": "°", "color": "#3fb950" }
+    ],
+    "presetKey": null, "groupKey": "usr-…"
+  }],
+  "groups": { "usr-…": { "name": "我的协议" } }
+}`}</pre>
+                </Section>
+                <Section title="控制画布（kind = uartix-controls）">
+                  <p>data 为控制页数组（导入取第一个，生成新页，不影响现有页面）。</p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>页级字段</td><td>id / name / cols(2~24) / rows(2~48) / locked / cards[]</td></tr>
+                      <tr><td>卡片公共字段</td><td>id / type / name / x / y / w / h（网格坐标与宽高）</td></tr>
+                      <tr><td>slider 滑条</td><td>template / sendMode(ascii|hex) / min / max / step / defaultValue / sendTrigger(onRelease|continuous) / minIntervalMs / useScript / script</td></tr>
+                      <tr><td>button 按钮</td><td>template / sendMode / holdRepeat(长按连发) / minIntervalMs / useScript / script</td></tr>
+                      <tr><td>switch 开关</td><td>positions(2|3) / templates[] / labels[] / sendMode / state / useScript / script</td></tr>
+                      <tr><td>led 指示灯</td><td>varName / op(gt|ge|lt|le|eq|ne) / value / strValue / onColor</td></tr>
+                      <tr><td>buzzer 蜂鸣器</td><td>varName / op / value / strValue / onColor / freq / volume / durationMs / repeat</td></tr>
+                      <tr><td>monitor 数值监视</td><td>varName / unit / decimals</td></tr>
+                      <tr><td>joystick 摇杆</td><td>template(%x,%y) / sendMode / range / minIntervalMs / springBack / useScript / script</td></tr>
+                    </tbody>
+                  </table>
+                  <pre>{`[{
+  "id": "…", "name": "控制页 1", "cols": 12, "rows": 12, "locked": false,
+  "cards": [{
+    "id": "…", "type": "slider", "name": "油门",
+    "x": 0, "y": 0, "w": 2, "h": 1,
+    "template": "PWM:%.2f!", "sendMode": "ascii",
+    "min": 0, "max": 100, "step": 1, "defaultValue": 50,
+    "sendTrigger": "onRelease", "minIntervalMs": 50,
+    "useScript": false, "script": ""
+  }]
+}]`}</pre>
+                </Section>
+                <Section title="命令库（kind = uartix-commands）">
+                  <p>data 为分组数组，<b>递归树</b>：节点含 <code>items</code> 即分组，否则为命令。导入按顶层分组名合并，重名自动改名。</p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>分组节点</td><td>{"{ id, name, items: [子节点…] }"}，items 可继续嵌套分组</td></tr>
+                      <tr><td>命令节点</td><td>id / name / template（发送串）/ sendMode(ascii|hex) / note / script / scriptEnabled</td></tr>
+                    </tbody>
+                  </table>
+                  <pre>{`[{
+  "id": "…", "name": "电机控制",
+  "items": [
+    { "id": "…", "name": "复位", "template": "RST!",
+      "sendMode": "ascii", "note": "下位机复位", "script": "", "scriptEnabled": false },
+    { "id": "…", "name": "子分组", "items": [ /* … */ ] }
+  ]
+}]`}</pre>
+                </Section>
+              </>
             )}
           </div>
         </div>

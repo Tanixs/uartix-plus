@@ -225,6 +225,96 @@ export function getCommand(cmdId: string): CommandItem | null {
   return found;
 }
 
+function findGroupById(
+  items: CommandNode[],
+  id: string,
+): CommandGroup | null {
+  for (const n of items) {
+    if (isGroup(n)) {
+      if (n.id === id) return n;
+      const r = findGroupById(n.items, id);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+function containsNode(items: CommandNode[], id: string): boolean {
+  for (const n of items) {
+    if (n.id === id) return true;
+    if (isGroup(n) && containsNode(n.items, id)) return true;
+  }
+  return false;
+}
+
+function parentOf(
+  items: CommandNode[],
+  id: string,
+  parent: string | null,
+): string | null | undefined {
+  for (const n of items) {
+    if (n.id === id) return parent;
+    if (isGroup(n)) {
+      const r = parentOf(n.items, id, n.id);
+      if (r !== undefined) return r;
+    }
+  }
+  return undefined;
+}
+
+export function moveNode(
+  id: string,
+  targetParentId: string | null,
+  refId?: string | null,
+  before?: boolean,
+): boolean {
+  if (id === targetParentId) return false;
+  const cur = parentOf(snapshot.groups, id, null);
+  if (cur === undefined) return false;
+  if (targetParentId !== null) {
+    const target = findGroupById(snapshot.groups, targetParentId);
+    if (!target) return false;
+    if (targetParentId === id || containsNode([{ ...target }], id))
+      return false;
+  }
+  if (cur === targetParentId && !refId) return false;
+  let node: CommandNode | null = null;
+  const strip = (items: CommandNode[]): CommandNode[] =>
+    items
+      .filter((n) => {
+        if (n.id === id) {
+          node = n;
+          return false;
+        }
+        return true;
+      })
+      .map((n) => (isGroup(n) ? { ...n, items: strip(n.items) } : n));
+  let groups = strip(snapshot.groups) as CommandGroup[];
+  const moved = node;
+  if (!moved) return false;
+  let arr: CommandNode[];
+  if (targetParentId === null) {
+    arr = groups;
+  } else {
+    const g = findGroupById(groups as CommandNode[], targetParentId);
+    if (!g) return false;
+    arr = g.items;
+  }
+  let idx = arr.length;
+  if (refId) {
+    const ri = arr.findIndex((n) => n.id === refId);
+    if (ri >= 0) idx = before ? ri : ri + 1;
+  }
+  arr.splice(Math.max(0, Math.min(idx, arr.length)), 0, moved);
+  snapshot = { ...snapshot, groups };
+  emit();
+  return true;
+}
+
+export function parentOfId(id: string): string | null | undefined {
+  return parentOf(snapshot.groups, id, null);
+}
+
 export function flatCommands(): { item: CommandItem; depth: number }[] {
   const out: { item: CommandItem; depth: number }[] = [];
   const walk = (items: CommandNode[], depth: number) => {

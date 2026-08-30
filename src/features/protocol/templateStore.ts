@@ -446,9 +446,26 @@ function sanitizeRules(rs: ParseRules): ParseRules {
         maxLength: t.boundary.maxLength ?? 512,
         discs: t.boundary.discs ?? [],
       },
-      fields: (t.fields ?? []).map((f) => ({ ...f })),
+      fields: dedupeTwinFields(t.fields ?? []).map((f) => ({ ...f })),
     })),
   };
+}
+
+function dedupeTwinFields(fs: FieldDef[]): FieldDef[] {
+  const out: FieldDef[] = [];
+  for (const f of fs) {
+    const twin = out.some(
+      (g) =>
+        g.offset === f.offset &&
+        g.name === f.name &&
+        g.type === f.type &&
+        (g.endian ?? null) === (f.endian ?? null) &&
+        (g.scale ?? null) === (f.scale ?? null) &&
+        (g.offsetValue ?? null) === (f.offsetValue ?? null),
+    );
+    if (!twin) out.push(f);
+  }
+  return out;
 }
 
 export async function init() {
@@ -493,7 +510,7 @@ export function addTemplate(headerBytes: number[]): string {
     id: crypto.randomUUID(),
     name: `模板${snapshot.rules.templates.length + 1}`,
     color: PALETTE[snapshot.rules.templates.length % PALETTE.length],
-    enabled: true,
+    enabled: false,
     boundary: {
       mode: "fixedLength",
       headerBytes,

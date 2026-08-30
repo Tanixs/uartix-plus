@@ -5,6 +5,7 @@ import * as store from "./templateStore";
 import * as teleStore from "./telemetryStore";
 import * as plotStore from "../plot/plotStore";
 import { EmptyState } from "../../shared/EmptyState";
+import { IconChevron } from "../../shared/icons";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
 import { patch as patchSettings, useSettings } from "../settings/settingsStore";
@@ -271,8 +272,8 @@ export function TemplatesPanel() {
             ＋ 新建
           </button>
           <div className="tpl-preset-wrap">
-          <button className="btn" title="从预设导入协议副本（可反复添加，改崩了删除副本再添加）" onClick={() => setPMenu((v) => !v)}>
-            ＋ 预设 ▾
+          <button className="btn tpl-preset-btn" title="从预设导入协议副本（可反复添加，改崩了删除副本再添加）" onClick={() => setPMenu((v) => !v)}>
+            ＋ 预设 <IconChevron size={11} dir="down" />
           </button>
           {pMenu && (
             <>

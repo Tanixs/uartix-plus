@@ -18,6 +18,10 @@ export interface PlotSettings {
   plotMode: "line" | "points";
   lineWidth: number;
   lineStyle: "linear" | "step" | "smooth";
+  /** 多通道示波器：每通道独立归一化并垂直均分面板 */
+  stack: boolean;
+  /** 双游标测量模式 */
+  cursors: boolean;
 }
 
 export interface PlotSnapshot {
@@ -35,6 +39,8 @@ let settings: PlotSettings = {
   plotMode: "line",
   lineWidth: 2,
   lineStyle: "linear",
+  stack: false,
+  cursors: false,
 };
 let snapshot: PlotSnapshot = { channels, settings };
 const listeners = new Set<() => void>();
@@ -100,23 +106,32 @@ export function buildAligned(): {
   cols: (number | null)[][];
 } {
   const chans = channels;
-  const events: { t: number; ci: number; v: number; seq: number }[] = [];
-  for (let ci = 0; ci < chans.length; ci++) {
-    const d = getChanData(chans[ci].id);
-    for (let i = 0; i < d.t.length; i++) {
-      events.push({ t: d.t[i], ci, v: d.v[i], seq: i });
-    }
-  }
-  events.sort((a, b) => a.t - b.t || a.ci - b.ci || a.seq - b.seq);
+  const cursors = chans.map((ch) => {
+    const d = getChanData(ch.id);
+    return { t: d.t, v: d.v, i: 0 };
+  });
   const x: number[] = [];
   const cols: (number | null)[][] = chans.map(() => []);
   const lastV: (number | null)[] = chans.map(() => null);
   let last = -Infinity;
-  for (const ev of events) {
-    let t = ev.t;
+  for (;;) {
+    let best = -1;
+    let bt = Infinity;
+    for (let ci = 0; ci < cursors.length; ci++) {
+      const c = cursors[ci];
+      if (c.i < c.t.length && c.t[c.i] < bt) {
+        bt = c.t[c.i];
+        best = ci;
+      }
+    }
+    if (best < 0) break;
+    const c = cursors[best];
+    let t = c.t[c.i];
+    const v = c.v[c.i];
+    c.i += 1;
     if (t <= last) t = last + 0.001;
     last = t;
-    lastV[ev.ci] = ev.v;
+    lastV[best] = v;
     x.push(t);
     for (let j = 0; j < chans.length; j++) {
       cols[j].push(lastV[j]);
@@ -126,6 +141,8 @@ export function buildAligned(): {
   let outX = x;
   if (xsrc === "index") {
     outX = x.map((_, i) => i);
+  } else if (xsrc === "time") {
+    outX = x.map((v) => v / 1000);
   } else if (xsrc.startsWith("ch:")) {
     const ci = chans.findIndex((c) => c.id === xsrc.slice(3));
     if (ci >= 0) {
@@ -212,6 +229,15 @@ export function nextColor(): string {
 
 export function setSetting(patch: Partial<PlotSettings>) {
   settings = { ...settings, ...patch };
+  emit();
+}
+
+/** 图例点击聚焦：solo 该通道或恢复全部 */
+export function toggleSolo(id: string) {
+  const vis = channels.filter((c) => c.visible);
+  const isSolo = vis.length === 1 && vis[0].id === id;
+  channels = channels.map((c) => ({ ...c, visible: isSolo ? true : c.id === id }));
+  dirty = true;
   emit();
 }
 

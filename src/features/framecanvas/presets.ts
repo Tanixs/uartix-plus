@@ -135,7 +135,6 @@ export const PRESETS: PresetDef[] = [
       "帧型由「功能码识别位」自动区分（同栈全部启用也不会重复解析）；双重校验 sumadd 内置。",
     build: () => [
       v7Tpl(0x01, "惯性传感", "#39c5cf", [
-        ...v7Head(),
         f("ACC_X", "data", 4, "int16", C_DATA),
         f("ACC_Y", "data", 6, "int16", C_DATA),
         f("ACC_Z", "data", 8, "int16", C_DATA),
@@ -145,7 +144,6 @@ export const PRESETS: PresetDef[] = [
         f("震动状态", "data", 16, "uint8", C_LEN),
       ]),
       v7Tpl(0x02, "罗盘气压温度", "#c678dd", [
-        ...v7Head(),
         f("MAG_X", "data", 4, "int16", C_MAG),
         f("MAG_Y", "data", 6, "int16", C_MAG),
         f("MAG_Z", "data", 8, "int16", C_MAG),
@@ -155,14 +153,12 @@ export const PRESETS: PresetDef[] = [
         f("罗盘状态", "data", 17, "uint8", C_LEN),
       ]),
       v7Tpl(0x03, "欧拉姿态", "#3fb950", [
-        ...v7Head(),
         f("横滚 ROL", "data", 4, "int16", C_DATA, { scale: 0.01, unit: "°" }),
         f("俯仰 PIT", "data", 6, "int16", C_DATA, { scale: 0.01, unit: "°" }),
         f("航向 YAW", "data", 8, "int16", C_DATA, { scale: 0.01, unit: "°" }),
         f("融合状态", "data", 10, "uint8", C_LEN),
       ]),
       v7Tpl(0x04, "四元数姿态", "#3fb950", [
-        ...v7Head(),
         f("Q0", "data", 4, "int16", C_DATA, { scale: 0.0001 }),
         f("Q1", "data", 6, "int16", C_DATA, { scale: 0.0001 }),
         f("Q2", "data", 8, "int16", C_DATA, { scale: 0.0001 }),
@@ -170,13 +166,11 @@ export const PRESETS: PresetDef[] = [
         f("融合状态", "data", 12, "uint8", C_LEN),
       ]),
       v7Tpl(0x05, "高度数据", "#39c5cf", [
-        ...v7Head(),
         f("ALT_FU", "data", 4, "int32", C_DATA, { unit: "cm" }),
         f("ALT_ADD", "data", 8, "int32", C_DATA, { unit: "cm" }),
         f("测距状态", "data", 12, "uint8", C_LEN),
       ]),
       v7Tpl(0x06, "运行模式", "#d29922", [
-        ...v7Head(),
         f("MODE", "data", 4, "uint8", C_LEN),
         f("LOCKED", "data", 5, "uint8", C_LEN),
         f("CID", "data", 6, "uint8", C_LEN),
@@ -184,66 +178,55 @@ export const PRESETS: PresetDef[] = [
         f("CMD1", "data", 8, "uint8", C_LEN),
       ]),
       v7Tpl(0x07, "飞行速度", "#3fb950", [
-        ...v7Head(),
         f("SPEED_X", "data", 4, "int16", C_DATA, { unit: "cm/s" }),
         f("SPEED_Y", "data", 6, "int16", C_DATA, { unit: "cm/s" }),
         f("SPEED_Z", "data", 8, "int16", C_DATA, { unit: "cm/s" }),
       ]),
       v7Tpl(0x08, "位置偏移", "#39c5cf", [
-        ...v7Head(),
         f("POS_X", "data", 4, "int32", C_DATA, { unit: "cm" }),
         f("POS_Y", "data", 8, "int32", C_DATA, { unit: "cm" }),
       ]),
       v7Tpl(0x09, "风速估计", "#39c5cf", [
-        ...v7Head(),
         f("WIND_X", "data", 4, "int16", C_DATA, { unit: "cm/s" }),
         f("WIND_Y", "data", 6, "int16", C_DATA, { unit: "cm/s" }),
       ]),
       v7Tpl(0x0a, "目标姿态", "#f0883e", [
-        ...v7Head(),
         f("TAR_ROL", "data", 4, "int16", C_FG, { scale: 0.01, unit: "°" }),
         f("TAR_PIT", "data", 6, "int16", C_FG, { scale: 0.01, unit: "°" }),
         f("TAR_YAW", "data", 8, "int16", C_FG, { scale: 0.01, unit: "°" }),
       ]),
       v7Tpl(0x0b, "目标速度", "#f0883e", [
-        ...v7Head(),
         f("TAR_SPEED_X", "data", 4, "int16", C_FG, { unit: "cm/s" }),
         f("TAR_SPEED_Y", "data", 6, "int16", C_FG, { unit: "cm/s" }),
         f("TAR_SPEED_Z", "data", 8, "int16", C_FG, { unit: "cm/s" }),
       ]),
       v7Tpl(0x0c, "回航信息", "#d29922", [
-        ...v7Head(),
         f("R_A", "data", 4, "int16", C_ADDR, { scale: 0.1, unit: "°" }),
         f("R_D", "data", 6, "uint16", C_DATA, { unit: "m" }),
       ]),
       v7Tpl(0x0d, "电压电流", "#e5534b", [
-        ...v7Head(),
         f("VOTAGE", "data", 4, "uint16", C_DATA, { scale: 0.01, unit: "V" }),
         f("CURRENT", "data", 6, "uint16", C_DATA, { scale: 0.01, unit: "A" }),
       ]),
       v7Tpl(0x0e, "外接模块状态", "#bc8cff", [
-        ...v7Head(),
         f("STA_G_VEL", "data", 4, "uint8", C_LEN),
         f("STA_G_POS", "data", 5, "uint8", C_LEN),
         f("STA_GPS", "data", 6, "uint8", C_LEN),
         f("STA_ALT_ADD", "data", 7, "uint8", C_LEN),
       ]),
       v7Tpl(0x0f, "RGB 亮度", "#db61a2", [
-        ...v7Head(),
         f("BRI_R", "data", 4, "uint8", C_GYRO),
         f("BRI_G", "data", 5, "uint8", C_DATA),
         f("BRI_B", "data", 6, "uint8", C_DATA),
         f("BRI_A", "data", 7, "uint8", C_DATA),
       ]),
       v7Tpl(0x21, "飞控输出控制", "#f0883e", [
-        ...v7Head(),
         f("CTRL_ROL", "data", 4, "int16", C_FG),
         f("CTRL_PIT", "data", 6, "int16", C_FG),
         f("CTRL_THR", "data", 8, "int16", C_FG),
         f("CTRL_YAW", "data", 10, "int16", C_FG),
       ]),
       v7Tpl(0x30, "GPS 定位", "#bc8cff", [
-        ...v7Head(),
         f("FIX_STA", "data", 4, "uint8", C_LEN),
         f("S_NUM", "data", 5, "uint8", C_LEN),
         f("经度 LNG", "data", 6, "int32", C_DATA, { scale: 1e-7, unit: "°" }),
@@ -257,25 +240,21 @@ export const PRESETS: PresetDef[] = [
         f("VACC", "data", 26, "uint8", C_LEN, { scale: 0.01, unit: "m" }),
       ]),
       v7Tpl(0x32, "通用位置", "#bc8cff", [
-        ...v7Head(),
         f("POS_X", "data", 4, "int32", C_DATA, { unit: "cm" }),
         f("POS_Y", "data", 8, "int32", C_DATA, { unit: "cm" }),
         f("POS_Z", "data", 12, "int32", C_DATA, { unit: "cm" }),
       ]),
       v7Tpl(0x33, "通用速度", "#39c5cf", [
-        ...v7Head(),
         f("SPEED_X", "data", 4, "int16", C_DATA, { unit: "cm/s" }),
         f("SPEED_Y", "data", 6, "int16", C_DATA, { unit: "cm/s" }),
         f("SPEED_Z", "data", 8, "int16", C_DATA, { unit: "cm/s" }),
       ]),
       v7Tpl(0x34, "通用测距", "#d29922", [
-        ...v7Head(),
         f("DIRECTION", "data", 4, "uint8", C_LEN),
         f("ANGLE", "data", 5, "uint16", C_DATA, { unit: "°" }),
         f("DIST", "data", 7, "uint32", C_DATA, { unit: "cm" }),
       ]),
       v7Tpl(0x40, "遥控器数据", "#f0883e", [
-        ...v7Head(),
         f("THR", "data", 4, "int16", C_FG),
         f("YAW", "data", 6, "int16", C_FG),
         f("ROL", "data", 8, "int16", C_FG),
@@ -288,7 +267,6 @@ export const PRESETS: PresetDef[] = [
         f("AUX6", "data", 22, "int16", C_FG),
       ]),
       v7Tpl(0x41, "实时控制", "#f0883e", [
-        ...v7Head(),
         f("CTRL_ROL", "data", 4, "int16", C_FG, { scale: 0.01, unit: "°" }),
         f("CTRL_PIT", "data", 6, "int16", C_FG, { scale: 0.01, unit: "°" }),
         f("CTRL_THR", "data", 8, "int16", C_FG, { scale: 0.1, unit: "%" }),

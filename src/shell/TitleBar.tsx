@@ -4,6 +4,7 @@ import * as serialStore from "../features/serial/serialStore";
 import { useSyncExternalStore } from "react";
 import type { IfaceKind } from "../features/serial/serialStore";
 import { t } from "../i18n/strings";
+import { IconChevron } from "../shared/icons";
 import iconPlain from "../assets/icon-plain.svg";
 
 const IFACE_LABEL: Record<IfaceKind, string> = {
@@ -70,7 +71,7 @@ const IfaceMenu = () => {
       <button className="tb-btn tb-iface-btn" onClick={() => setOpen((v) => !v)} title="数据接口">
         <span className={`tb-iface-dot${s.status === "connected" ? " on" : ""}`} />
         {IFACE_LABEL[s.iface]}
-        <span className="tb-iface-caret">▾</span>
+        <span className="tb-iface-caret"><IconChevron size={11} dir="down" /></span>
       </button>
       {open && (
         <div className="tb-menu">

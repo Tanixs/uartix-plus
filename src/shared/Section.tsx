@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { IconChevron } from "./icons";
 
 export function Section({
   title,
@@ -17,7 +18,9 @@ export function Section({
         onClick={() => setOpen(!open)}
         title={open ? "折叠" : "展开"}
       >
-        <span className="modal-section-arrow">{open ? "▾" : "▸"}</span>
+        <span className="modal-section-arrow">
+          <IconChevron size={13} dir={open ? "down" : "right"} />
+        </span>
         {title}
       </button>
       {open && <div className="modal-section-body">{children}</div>}

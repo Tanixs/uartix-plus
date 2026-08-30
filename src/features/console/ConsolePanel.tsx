@@ -12,7 +12,11 @@ interface Chunk {
   kind: "rx" | "tx";
   bytes: Uint8Array;
   ts: number;
+  /** 超长二进制摘要：原始总字节数（bytes 只保留头部样本） */
+  summary?: number;
 }
+
+const BIG_CHUNK = 512;
 
 const FILE_CHUNK_BYTES = 2048;
 const MAX_CONSOLE_BLOCKS = 400;
@@ -87,18 +91,31 @@ export function ConsolePanel() {
   useEffect(() => {
     const unsubs: UnlistenFn[] = [];
     listen<RxEventPayload>("serial:rx", (e) => {
+      const raw = e.payload.bytes;
+      const big = raw.length > BIG_CHUNK;
       chunksRef.current.push({
         kind: "rx",
-        bytes: Uint8Array.from(e.payload.bytes),
+        bytes: big ? Uint8Array.from(raw.slice(0, 64)) : Uint8Array.from(raw),
         ts: e.payload.tsLast,
+        summary: big ? raw.length : undefined,
       });
     }).then((u) => unsubs.push(u));
     listen<TxEventPayload>("serial:tx", (e) => {
       if (fileBusyRef.current > 0) return;
+      const raw = e.payload.bytes;
+      const big = raw.length > BIG_CHUNK;
       chunksRef.current.push({
         kind: "tx",
-        bytes: Uint8Array.from(e.payload.bytes),
+        bytes: big ? Uint8Array.from(raw.slice(0, 64)) : Uint8Array.from(raw),
         ts: e.payload.ts,
+        summary: big ? raw.length : undefined,
+      });
+    }).then((u) => unsubs.push(u));
+    listen<{ text: unknown }>("script:log", (e) => {
+      chunksRef.current.push({
+        kind: "rx",
+        bytes: new TextEncoder().encode(`[脚本] ${String(e.payload.text)}`),
+        ts: Date.now(),
       });
     }).then((u) => unsubs.push(u));
     return () => unsubs.forEach((u) => u());
@@ -130,10 +147,15 @@ export function ConsolePanel() {
         let s: string;
         if (c.kind === "tx") {
           if (!showTxRef.current) continue;
-          s = `[TX ${fmtTime(c.ts)}] ${renderBytes(c.bytes)}\n`;
+          const head = c.summary
+            ? ` ⇥ 二进制 ${c.summary} B（头部 ${renderBytes(c.bytes)}… 详情见 Hex 数据流）`
+            : ` ${renderBytes(c.bytes)}`;
+          s = `[TX ${fmtTime(c.ts)}]${head}\n`;
         } else {
           if (!showRxRef.current) continue;
-          const body = renderBytes(c.bytes);
+          const body = c.summary
+            ? `⇥ 二进制 ${c.summary} B（头部 ${renderBytes(c.bytes)}… 详情见 Hex 数据流）`
+            : renderBytes(c.bytes);
           if (!body) continue;
           s = (showTs ? `[${fmtTime(c.ts)}] ` : "") + body;
         }

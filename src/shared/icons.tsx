@@ -15,6 +15,26 @@ const svg = (children: React.ReactNode) => (
   </svg>
 );
 
+export const IconChevron = (props: { dir?: "right" | "down"; size?: number }) => (
+  <svg
+    width={props.size ?? 14}
+    height={props.size ?? 14}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.4"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{
+      transform: props.dir === "down" ? "rotate(90deg)" : undefined,
+      transition: "transform 0.15s",
+      flex: "none",
+    }}
+  >
+    <polyline points="9 6 15 12 9 18" />
+  </svg>
+);
+
 export const IconSlider = () =>
   svg(
     <>

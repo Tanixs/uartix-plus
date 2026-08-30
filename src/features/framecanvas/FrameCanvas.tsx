@@ -145,15 +145,20 @@ function checksumLen(algo: string | null): number {
   return 2;
 }
 
+function checksumTail(tpl: FrameTemplate): number {
+  return tpl.checksum && tpl.checksum.algo !== "none"
+    ? checksumLen(tpl.checksum.algo)
+    : 0;
+}
+
+function footerTail(tpl: FrameTemplate): number {
+  return tpl.boundary.mode === "footer" && tpl.boundary.footerBytes?.length
+    ? tpl.boundary.footerBytes.length
+    : 0;
+}
+
 function reservedTail(tpl: FrameTemplate): number {
-  let rt = 0;
-  if (tpl.checksum && tpl.checksum.algo !== "none") {
-    if (tpl.checksum.coverageEnd <= 0) rt += checksumLen(tpl.checksum.algo);
-  }
-  if (tpl.boundary.mode === "footer" && tpl.boundary.footerBytes?.length) {
-    rt += tpl.boundary.footerBytes.length;
-  }
-  return rt;
+  return checksumTail(tpl) + footerTail(tpl);
 }
 
 function skeletonLen(tpl: FrameTemplate): number {
@@ -266,25 +271,34 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
     }
     if (f.offset + sz > pos) pos = f.offset + sz;
   }
-  const rt = reservedTail(tpl);
-  if (rt > 0 && pos < frLen) {
-    const tailLen = Math.min(rt, frLen - pos);
+  pos = Math.min(pos, frLen);
+  const tailLen = Math.min(checksumTail(tpl) + footerTail(tpl), frLen);
+  const tailStart = Math.max(pos, frLen - tailLen);
+  if (tailStart > pos) {
     pieces.push({
       start: pos,
-      len: tailLen,
+      len: tailStart - pos,
+      key: `g${pos}`,
+      kind: "gap",
+      fid: null,
+      color: "",
+      label: null,
+      role: null,
+      locked: false,
+    });
+  }
+  if (tailStart < frLen) {
+    pieces.push({
+      start: tailStart,
+      len: frLen - tailStart,
       key: "ck0",
       kind: "ftr",
       fid: null,
       color: "#db61a2",
-      label: "校验",
+      label: footerTail(tpl) > 0 ? "帧尾" : "校验",
       role: null,
       locked: false,
     });
-  } else if (tpl.boundary.mode === "footer" && tpl.boundary.footerBytes?.length && pos < frLen) {
-    const fl = Math.min(tpl.boundary.footerBytes.length, frLen - pos);
-    pieces.push({ start: pos, len: fl, key: "ft0", kind: "ftr", fid: null, color: "#db61a2", label: "帧尾", role: null, locked: false });
-  } else if (pos < frLen) {
-    pieces.push({ start: pos, len: frLen - pos, key: `g${pos}`, kind: "gap", fid: null, color: "", label: null, role: null, locked: false });
   }
   if (pieces.length === 0) {
     pieces.push({ start: 0, len: frLen, key: "g0", kind: "gap", fid: null, color: "", label: null, role: null, locked: false });
@@ -356,7 +370,7 @@ function FrameCanvas() {
   const tplSelRef = useRef<string | null>(null);
   const selRef = useRef<{ lo: number; hi: number } | null>(null);
   const selDragRef = useRef<{ anchor: number; downX: number; downY: number; moved: boolean } | null>(null);
-  const hoverRef = useRef<{ off: number; x: number; y: number } | null>(null);
+  const hoverRef = useRef<{ off: number; x: number; y: number; blk?: Blk } | null>(null);
   const dragSbRef = useRef<{ grabY: number; grabScroll: number } | null>(null);
   const scrollRef = useRef(0);
   const dirtyRef = useRef(true);
@@ -616,9 +630,9 @@ function FrameCanvas() {
           ctx.fillStyle = hexA("#e8a33d", dark ? 0.96 : 0.92);
           rrLR(ctx, x0 - 1, yTop, wRun + 2, s, rl, rv);
           ctx.fill();
-          if (wRun > 56) {
+          if (wRun > 44) {
             ctx.fillStyle = "#fff";
-            ctx.fillText("HDR", x0 + 12, yTop + s / 2 + 1);
+            ctx.fillText(blk.label ?? "帧头", x0 + 12, yTop + s / 2 + 1);
           }
         } else if (blk.kind === "ftr") {
           ctx.fillStyle = hexA(blk.color, dark ? 0.45 : 0.38);
@@ -627,9 +641,15 @@ function FrameCanvas() {
           ctx.strokeStyle = hexA(blk.color, 0.8);
           rrLR(ctx, x0 + 0.5, yTop + 0.5, wRun - 1, s - 1, rl, rv);
           ctx.stroke();
-          if (wRun > 56) {
+          if (wRun > 44) {
             ctx.fillStyle = dark ? mixC(cFg, blk.color, 0.7) : "#000000";
-            ctx.fillText("CK", x0 + 12, yTop + s / 2 + 1);
+            const algo = blk.label === "帧尾" ? null : curRef.current?.checksum?.algo ?? null;
+            const txt = blk.label === "帧尾"
+              ? "帧尾"
+              : algo && wRun > 96
+                ? `校验·${algo}`
+                : "校验";
+            ctx.fillText(txt, x0 + 12, yTop + s / 2 + 1);
           }
         } else if (blk.kind === "fld") {
           const animKey = `${curRef.current?.id}:${blk.fid}`;
@@ -817,13 +837,13 @@ function FrameCanvas() {
       if (tip) tip.style.display = "none";
       return;
     }
-    const { fr } = resolvedRef.current;
-    if (!fr || !fr.bytes || hv.off >= fr.bytes.length) {
-      tip.style.display = "none";
-      return;
-    }
-    const b = fr.bytes[hv.off];
     const tpl = curRef.current;
+    const { fr } = resolvedRef.current;
+    const frBytes = fr?.bytes;
+    const live = !!(frBytes && hv.off < frBytes.length);
+    const b = live ? frBytes[hv.off] : null;
+    const blkKind = hv.blk?.kind ?? "gap";
+    const blkLabel = hv.blk?.label ?? "";
     let field: FieldDef | null = null;
     if (tpl) {
       for (const f of tpl.fields) {
@@ -834,39 +854,67 @@ function FrameCanvas() {
         }
       }
     }
-    const isHdr = tpl ? hv.off < tpl.boundary.headerBytes.length : false;
-    const ascii = b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : "—";
     let cat: string;
-    if (isHdr) cat = "帧头";
-    else if (field) {
+    if (blkKind === "hdr") cat = "帧头（保留区）";
+    else if (blkKind === "ftr") {
+      cat = blkLabel === "帧尾"
+        ? "帧尾（保留区）"
+        : `校验域${tpl?.checksum ? ` · ${tpl.checksum.algo}` : ""}`;
+    } else if (field) {
       const rm = roleOf(field);
-      cat = `${ROLE_META[rm].zh}${field.locked ? " 🔒" : ""}${field.role === "checksum" || field.role === "checksum2" || field.role === "footer" ? "（未验证连接）" : ""}`;
+      cat = `${ROLE_META[rm].zh}${field.locked ? " 🔒" : ""}`;
     } else cat = "未定义字节";
     const roleChip = field ? ROLE_META[roleOf(field)].tag : "";
     const fieldLine = field
       ? `<div class="fc-tip-row"><span>字段</span><b>${field.name}${roleChip ? ` [${roleChip}]` : ""}</b></div>`
+      : "";
+    const endianTxt =
+      field && ["uint16", "int16", "uint32", "int32", "float32", "float64"].includes(field.type)
+        ? ` · ${field.endian === "big" ? "BE" : "LE"}`
+        : "";
+    const scaleTxt = field?.scale != null ? ` × ${field.scale}` : "";
+    const unitTxt = field?.unit ? ` ${field.unit}` : "";
+    const typeLine = field
+      ? `<div class="fc-tip-row"><span>类型</span><b>${TYPE_LABEL[field.type]}${endianTxt}${scaleTxt}${unitTxt}</b></div>`
       : "";
     const discLine =
       field && field.disc?.length && hv.off === field.offset
         ? `<div class="fc-tip-row"><span>识别</span><b>${field.disc.map((x) => x.toString(16).padStart(2, "0").toUpperCase()).join(" ")}</b></div>`
         : "";
     let valLine = "";
-    if (field) {
-      if (hv.off === field.offset) {
-        const lv = teleRef.current.latest[field.id];
-        if (lv && lv.valid) {
-          valLine = `<div class="fc-tip-row"><span>数值</span><b>${lv.text ?? String(round4(lv.value))}${field.unit ? ` ${field.unit}` : ""}</b></div>`;
-        }
+    if (field && live && hv.off === field.offset) {
+      const lv = teleRef.current.latest[field.id];
+      if (lv && lv.valid) {
+        valLine = `<div class="fc-tip-row"><span>数值</span><b>${lv.text ?? String(round4(lv.value))}${field.unit ? ` ${field.unit}` : ""}</b></div>`;
       }
     }
+    const ckLine =
+      blkKind === "ftr" && blkLabel !== "帧尾"
+        ? `<div class="fc-tip-row"><span>说明</span><b>引擎自动计算 · 点击修改算法</b></div>`
+        : "";
+    let head = "";
+    if (live && b !== null) {
+      const ascii = b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : "—";
+      head =
+        `<div class="fc-tip-hex">${b.toString(16).toUpperCase().padStart(2, "0")}h</div>` +
+        `<div class="fc-tip-row"><span>十进制</span><b>${b}</b></div>` +
+        `<div class="fc-tip-row"><span>ASCII</span><b>${ascii}</b></div>`;
+    } else if (tpl && blkKind === "hdr" && hv.off < tpl.boundary.headerBytes.length) {
+      const hb = tpl.boundary.headerBytes[hv.off];
+      head =
+        `<div class="fc-tip-hex">${hb.toString(16).toUpperCase().padStart(2, "0")}h</div>` +
+        `<div class="fc-tip-row"><span>十进制</span><b>${hb}</b></div>`;
+    } else if (blkKind !== "gap") {
+      head = `<div class="fc-tip-hex">--</div>`;
+    }
     tip.innerHTML =
-      `<div class="fc-tip-hex">${b.toString(16).toUpperCase().padStart(2, "0")}h</div>` +
-      `<div class="fc-tip-row"><span>十进制</span><b>${b}</b></div>` +
-      `<div class="fc-tip-row"><span>ASCII</span><b>${ascii}</b></div>` +
+      head +
       `<div class="fc-tip-row"><span>类别</span><b>${cat}</b></div>` +
       fieldLine +
+      typeLine +
       discLine +
       valLine +
+      ckLine +
       `<div class="fc-tip-row"><span>位置</span><b>帧内 ${hv.off} B</b></div>`;
     tip.style.display = "block";
     tip.style.left = `${Math.min(hv.x + 14, sizeRef.current.w - tip.offsetWidth - 10)}px`;
@@ -894,7 +942,7 @@ function FrameCanvas() {
     return { lx: (ev.clientX - rect.left) / zf, ly: (ev.clientY - rect.top) / zf };
   };
 
-  const hitOffset = (lx: number, ly: number): { off: number } | null => {
+  const hitOffset = (lx: number, ly: number): { off: number; blk: Blk } | null => {
     const lay = layoutRef.current;
     if (!lay) return null;
     const { rows, rowH, s } = lay;
@@ -906,7 +954,7 @@ function FrameCanvas() {
       const right = it.x0 + s * (it.g1 - it.g0 + 1) - BLOK_PAD;
       if (lx >= it.x0 && lx < right) {
         const ci = Math.min(Math.max(0, Math.floor((lx - it.x0) / s)), it.g1 - it.g0);
-        return { off: it.g0 + ci };
+        return { off: it.g0 + ci, blk: it.blk };
       }
     }
     return null;
@@ -995,25 +1043,15 @@ function FrameCanvas() {
       return;
     }
     const prev = hoverRef.current;
-    hoverRef.current = { off: p.off, x: lx, y: ly };
+    hoverRef.current = { off: p.off, x: lx, y: ly, blk: p.blk };
     if (!prev || prev.off !== p.off) {
       dirtyRef.current = true;
       updateTooltip();
     }
-    const { fr } = resolvedRef.current;
-    const tpl = curRef.current;
-    let overReserved = false;
-    let overField = false;
-    if (fr && tpl) {
-      const rt = reservedTail(tpl);
-      overReserved = p.off < tpl.boundary.headerBytes.length || p.off >= fr.len - rt;
-      overField = !!findFieldAt(tpl, p.off);
-    }
-    canvasRef.current!.style.cursor = overField
+    const bk = p.blk.kind;
+    canvasRef.current!.style.cursor = bk === "fld" || bk === "hdr" || bk === "ftr"
       ? "pointer"
-      : overReserved
-        ? "not-allowed"
-        : "crosshair";
+      : "crosshair";
   };
 
   const onUp = (ev: React.MouseEvent) => {
@@ -1024,9 +1062,13 @@ function FrameCanvas() {
       dirtyRef.current = true;
       if (ev.button !== 2 && !wasSel.moved && selRef.current && selRef.current.hi >= selRef.current.lo) {
         const tpl = curRef.current;
-        const fld = tpl ? findFieldAt(tpl, selRef.current.lo) : null;
-        if (fld && tpl) {
-          templateStore.setSelection({ kind: "field", templateId: tpl.id, fieldId: fld.id });
+        const { lx, ly } = localXY(ev);
+        const hit = hitOffset(lx, ly);
+        const blk = hit?.blk ?? null;
+        if (tpl && blk?.kind === "fld" && blk.fid) {
+          templateStore.setSelection({ kind: "field", templateId: tpl.id, fieldId: blk.fid });
+        } else if (tpl && (blk?.kind === "hdr" || blk?.kind === "ftr")) {
+          templateStore.setSelection({ kind: "template", templateId: tpl.id });
         } else {
           templateStore.setSelection(null);
         }
@@ -1521,6 +1563,17 @@ function FrameCanvas() {
                           校验尾（长度由校验算法决定）
                         </button>
                       )}
+                      <button
+                        className="fc-menu-item"
+                        onClick={() => {
+                          templateStore.setSelection({ kind: "template", templateId: m.tplId });
+                          selRef.current = null;
+                          closeMenu();
+                          dirtyRef.current = true;
+                        }}
+                      >
+                        ⚙ 查看校验配置<span className="fc-menu-sub">右侧属性面板</span>
+                      </button>
                       <button className="fc-menu-item" onClick={() => { selRef.current = null; closeMenu(); dirtyRef.current = true; }}>
                         取消选择 (Esc)
                       </button>
@@ -1777,9 +1830,10 @@ function HeadTailDialog({
 }
 
 const ROLE_GROUPS: { label: string; roles: FieldRole[] }[] = [
-  { label: "定位", roles: ["header", "addr", "id", "seq", "length"] },
+  { label: "帧结构", roles: ["header", "footer"] },
+  { label: "控制", roles: ["addr", "id", "seq", "length"] },
   { label: "数据", roles: ["data", "payload"] },
-  { label: "校验", roles: ["checksum", "checksum2", "footer"] },
+  { label: "校验", roles: ["checksum", "checksum2"] },
 ];
 
 function FieldDialog({

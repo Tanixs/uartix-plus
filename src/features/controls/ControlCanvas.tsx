@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import * as store from "./controlsStore";
 import type { ControlCard, ControlType, SendMode, SliderCard } from "./controlsStore";
 import * as serialStore from "../serial/serialStore";
@@ -8,9 +9,10 @@ import { isGroup } from "./commandStore";
 import { useSettings } from "../settings/settingsStore";
 import { beep, runScript } from "./scriptRunner";
 import { TextInput } from "../protocol/PropertiesPanel";
-import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider } from "../../shared/icons";
+import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider, IconChevron } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
-import type { CommandItem } from "./commandStore";
+import { Flyout } from "../../shared/Flyout";
+import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
   ButtonCardView,
@@ -36,10 +38,92 @@ const WIDGET_TYPES: { type: ControlType; label: string }[] = [
   { type: "joystick", label: "摇杆" },
 ];
 
+function MountCascade(props: {
+  anchorEl: HTMLElement | null;
+  zf: number;
+  onArm: () => void;
+  onDisarm: () => void;
+  onPick: (item: CommandItem) => void;
+}) {
+  const cmds = useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
+  const [path, setPath] = useState<string[]>([]);
+  const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
+
+  const childrenOf = (id: string | null): CommandNode[] => {
+    const walk = (ns: CommandNode[]): CommandNode[] | null => {
+      for (const n of ns) {
+        if (!isGroup(n)) continue;
+        if (n.id === id) return n.items;
+        const sub = walk(n.items);
+        if (sub) return sub;
+      }
+      return null;
+    };
+    return id === null ? cmds.groups : (walk(cmds.groups) ?? []);
+  };
+
+  const levels: CommandNode[][] = [];
+  for (let i = 0; i <= path.length; i++) {
+    levels.push(childrenOf(i === 0 ? null : path[i - 1]));
+  }
+
+  return (
+    <>
+      {levels.map((nodes, i) => (
+        <Flyout
+          key={i}
+          anchor={i === 0 ? props.anchorEl : (rowRefs.current.get(path[i - 1]) ?? null)}
+          zf={props.zf}
+          onArm={props.onArm}
+          onDisarm={props.onDisarm}
+        >
+          {nodes.length === 0 && (
+            <div className="ctx-group">
+              {i === 0 ? "命令库为空（左侧「命令」Tab 添加）" : "空分组"}
+            </div>
+          )}
+          {nodes.map((n) =>
+            isGroup(n) ? (
+              <div
+                key={n.id}
+                ref={(el) => {
+                  if (el) rowRefs.current.set(n.id, el);
+                  else rowRefs.current.delete(n.id);
+                }}
+                className="ctx-item ctx-has-sub"
+                onMouseEnter={() => {
+                  props.onDisarm();
+                  setPath([...path.slice(0, i), n.id]);
+                }}
+              >
+                {n.name} <span className="ctx-arrow"><IconChevron size={12} /></span>
+              </div>
+            ) : (
+              <button
+                key={n.id}
+                className="ctx-item"
+                title={n.scriptEnabled && n.script ? "脚本命令" : n.template}
+                onClick={() => props.onPick(n)}
+                onMouseEnter={() => {
+                  props.onDisarm();
+                  setPath(path.slice(0, i));
+                }}
+              >
+                {n.name}
+                {n.scriptEnabled && n.script ? " ⚡" : ""}
+              </button>
+            ),
+          )}
+        </Flyout>
+      ))}
+    </>
+  );
+}
+
 export function ControlCanvas() {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const settings = useSettings();
-  const CELL = [48, 60, 72, 90, 110].includes(settings.cellSize) ? settings.cellSize : 90;
+  const CELL = [48, 60, 72, 90, 110].includes(settings.cellSize) ? settings.cellSize : 60;
   // 全局 CSS zoom 会让卡片边框与背景网格线落在不同取整结果上（视觉间隙随机），
   // 这里把几何值预先取整到 zoom 缩放后的整数设备像素，保证间隙恒定。
   const zfactor = (settings.zoom || 100) / 100;
@@ -120,7 +204,11 @@ export function ControlCanvas() {
   };
   const [err, setErr] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ cardId: string; x: number; y: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [mountOpen, setMountOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const mountAnchorRef = useRef<HTMLDivElement | null>(null);
+  const mountCloseRef = useRef<number | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [renamingCard, setRenamingCard] = useState<string | null>(null);
   const [renamingPage, setRenamingPage] = useState<string | null>(null);
@@ -129,7 +217,33 @@ export function ControlCanvas() {
   const [renamingNode, setRenamingNode] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [flashCmd, setFlashCmd] = useState<string | null>(null);
+  const [cmdMenu, setCmdMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [cmdMenuPos, setCmdMenuPos] = useState<{ left: number; top: number } | null>(null);
+  const cmdMenuRef = useRef<HTMLDivElement | null>(null);
   const [groupMenuId, setGroupMenuId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    id: string;
+    pos: "before" | "after" | "into";
+  } | null>(null);
+  const dragNodeRef = useRef<{ id: string; kind: "cmd" | "group" } | null>(null);
+  const dropPosRef = useRef<{ id: string; pos: "before" | "after" | "into" } | null>(null);
+
+  const doMove = (
+    dragId: string,
+    refId: string,
+    pos: "before" | "after" | "into",
+  ): boolean => {
+    if (pos === "into") {
+      if (commandStore.moveNode(dragId, refId)) return true;
+      setErr("不能移动到自己的子分组内");
+      return false;
+    }
+    const parent = commandStore.parentOfId(refId) ?? null;
+    if (commandStore.moveNode(dragId, parent, refId, pos === "before"))
+      return true;
+    if (parent !== null && commandStore.moveNode(dragId, parent)) return true;
+    return false;
+  };
   const [sideW, setSideW] = useState(190);
   const sideDragRef = useRef<null | { startX: number; w0: number }>(null);
 
@@ -139,6 +253,27 @@ export function ControlCanvas() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [groupMenuId]);
+
+  useEffect(() => {
+    if (!cmdMenu) return;
+    const close = () => setCmdMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [cmdMenu]);
+
+  useLayoutEffect(() => {
+    if (!cmdMenu || !cmdMenuRef.current) return;
+    const r = cmdMenuRef.current.getBoundingClientRect();
+    const zf = zfactor || 1;
+    const w = r.width / zf;
+    const h = r.height / zf;
+    const vw = window.innerWidth / zf;
+    const vh = window.innerHeight / zf;
+    let left = Math.max(8, Math.min(cmdMenu.x / zf, vw - w - 8));
+    let top = cmdMenu.y / zf;
+    if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
+    setCmdMenuPos({ left, top });
+  }, [cmdMenu, zfactor]);
 
   useEffect(() => {
     const move = (e: MouseEvent) => {
@@ -299,6 +434,37 @@ export function ControlCanvas() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [menu]);
+
+  useLayoutEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const r = menuRef.current.getBoundingClientRect();
+    const zf = zfactor || 1;
+    const w = r.width / zf;
+    const h = r.height / zf;
+    const vw = window.innerWidth / zf;
+    const vh = window.innerHeight / zf;
+    let left = Math.max(8, Math.min(menu.x / zf, vw - w - 8));
+    let top = menu.y / zf;
+    if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
+    setMenuPos({ left, top });
+  }, [menu, zfactor]);
+
+  const armMountClose = () => {
+    if (mountCloseRef.current !== null) window.clearTimeout(mountCloseRef.current);
+    mountCloseRef.current = window.setTimeout(() => setMountOpen(false), 300);
+  };
+  const disarmMountClose = () => {
+    if (mountCloseRef.current !== null) {
+      window.clearTimeout(mountCloseRef.current);
+      mountCloseRef.current = null;
+    }
+  };
+  useEffect(
+    () => () => {
+      if (mountCloseRef.current !== null) window.clearTimeout(mountCloseRef.current);
+    },
+    [],
+  );
 
   if (!page) {
     return <div className="ctl"><div className="ctl-empty">无控制页</div></div>;
@@ -603,8 +769,11 @@ export function ControlCanvas() {
       height: geo.height,
       renaming: renamingCard === c.id,
       locked: page.locked,
-      onMenu: (card: ControlCard, x: number, y: number) =>
-        setMenu({ cardId: card.id, x, y }),
+      onMenu: (card: ControlCard, x: number, y: number) => {
+        setMenuPos(null);
+        setMountOpen(false);
+        setMenu({ cardId: card.id, x, y });
+      },
       onDragStart: onCardDragStart,
       onRenameCommit: (name: string) => {
         if (name.trim()) store.patchCard(page.id, c.id, { name: name.trim() });
@@ -659,7 +828,59 @@ export function ControlCanvas() {
           const collapsed = collapsedGroups.has(n.id);
           return (
             <div key={n.id} className="cmd-group" style={{ marginLeft: depth ? 10 : 0 }}>
-              <div className="cmd-group-head">
+              <div
+                className={`cmd-group-head${
+                  dropTarget && dropTarget.id === n.id
+                    ? dropTarget.pos === "into"
+                      ? " drop-into"
+                      : dropTarget.pos === "before"
+                        ? " drop-before"
+                        : " drop-after"
+                    : ""
+                }`}
+                draggable={renamingNode !== n.id}
+                onDragStart={(e) => {
+                  dragNodeRef.current = { id: n.id, kind: "group" };
+                  e.dataTransfer.setData("application/x-vs-node", n.id);
+                  e.dataTransfer.effectAllowed = "copyMove";
+                }}
+                onDragEnd={() => {
+                  dragNodeRef.current = null;
+                  setDropTarget(null);
+                }}
+                onDragOver={(e) => {
+                  const d = dragNodeRef.current;
+                  if (!d || d.id === n.id) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "move";
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const t = (e.clientY - r.top) / Math.max(1, r.height);
+                  const pos = t < 0.33 ? "before" : t > 0.67 ? "after" : "into";
+                  dropPosRef.current = { id: n.id, pos };
+                  setDropTarget((p) =>
+                    p && p.id === n.id && p.pos === pos
+                      ? p
+                      : { id: n.id, pos },
+                  );
+                }}
+                onDragLeave={() => {
+                  if (dropPosRef.current?.id === n.id) dropPosRef.current = null;
+                  setDropTarget((p) => (p && p.id === n.id ? null : p));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const d = dragNodeRef.current;
+                  const dt = dropPosRef.current;
+                  dropPosRef.current = null;
+                  setDropTarget(null);
+                  dragNodeRef.current = null;
+                  if (!d || d.id === n.id) return;
+                  const pos = dt && dt.id === n.id ? dt.pos : "into";
+                  doMove(d.id, n.id, pos);
+                }}
+              >
                 <button
                   className="cmd-fold"
                   title={collapsed ? "展开" : "折叠"}
@@ -670,7 +891,7 @@ export function ControlCanvas() {
                     setCollapsedGroups(next);
                   }}
                 >
-                  {collapsed ? "▸" : "▾"}
+                  <IconChevron size={13} dir={collapsed ? "right" : "down"} />
                 </button>
                 <span
                   className="cmd-group-name"
@@ -709,7 +930,7 @@ export function ControlCanvas() {
                     setGroupMenuId(groupMenuId === n.id ? null : n.id);
                   }}
                 >
-                  ＋▾
+                  ＋<IconChevron size={11} dir="down" />
                 </button>
                 {groupMenuId === n.id && (
                   <div
@@ -745,9 +966,16 @@ export function ControlCanvas() {
         return (
           <div key={n.id} className="cmd-item-wrap" style={{ marginLeft: depth ? 10 : 0 }}>
             <div
-              className={`cmd-item ${n.scriptEnabled && n.script ? "script" : ""} ${flashCmd === n.id ? "flash" : ""}`}
+              className={`cmd-item ${n.scriptEnabled && n.script ? "script" : ""} ${flashCmd === n.id ? "flash" : ""} ${
+                dropTarget && dropTarget.id === n.id
+                  ? dropTarget.pos === "before"
+                    ? " drop-before"
+                    : " drop-after"
+                  : ""
+              }`}
               draggable
               onDragStart={(e) => {
+                dragNodeRef.current = { id: n.id, kind: "cmd" };
                 e.dataTransfer.setData(
                   "text/vs-cmd",
                   JSON.stringify({
@@ -758,7 +986,38 @@ export function ControlCanvas() {
                     name: n.name,
                   }),
                 );
-                e.dataTransfer.effectAllowed = "copy";
+                e.dataTransfer.setData("application/x-vs-node", n.id);
+                e.dataTransfer.effectAllowed = "copyMove";
+              }}
+              onDragEnd={() => {
+                dragNodeRef.current = null;
+                setDropTarget(null);
+              }}
+              onDragOver={(e) => {
+                const d = dragNodeRef.current;
+                if (!d || d.id === n.id) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = "move";
+                const r = e.currentTarget.getBoundingClientRect();
+                const after = e.clientY > r.top + r.height / 2;
+                const pos = after ? "after" : "before";
+                dropPosRef.current = { id: n.id, pos };
+                setDropTarget((p) =>
+                  p && p.id === n.id && p.pos === pos ? p : { id: n.id, pos },
+                );
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const d = dragNodeRef.current;
+                const dt = dropPosRef.current;
+                dropPosRef.current = null;
+                setDropTarget(null);
+                dragNodeRef.current = null;
+                if (!d || d.id === n.id) return;
+                const pos = dt && dt.id === n.id ? dt.pos : "after";
+                doMove(d.id, n.id, pos);
               }}
               onClick={() => {
                 if (n.scriptEnabled && n.script) {
@@ -775,7 +1034,13 @@ export function ControlCanvas() {
                 window.setTimeout(() => setFlashCmd(null), 500);
               }}
               onDoubleClick={() => setEditingCmd(editing ? null : n.id)}
-              title="单击发送 · 双击编辑 · 可拖到画布部署"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setCmdMenuPos(null);
+                setCmdMenu({ id: n.id, x: e.clientX, y: e.clientY });
+              }}
+              title="单击发送 · 双击编辑 · 右键更多 · 可拖到画布部署"
             >
               <span className="cmd-item-name">{n.name}</span>
               <span className="cmd-item-tpl">
@@ -1020,7 +1285,27 @@ export function ControlCanvas() {
                 </div>
               )}
               {sideTab === "commands" && (
-                <div className="cmd-tree">
+                <div
+                  className="cmd-tree"
+                  onDragOver={(e) => {
+                    if (dragNodeRef.current) e.preventDefault();
+                  }}
+              onDrop={(e) => {
+                const d = dragNodeRef.current;
+                if (!d) return;
+                e.preventDefault();
+                // 若行上的 drop 未触发（拖到行间隙/边缘），使用最后记录的行落点自愈
+                const dt = dropPosRef.current;
+                dropPosRef.current = null;
+                setDropTarget(null);
+                dragNodeRef.current = null;
+                if (dt && dt.id !== d.id) {
+                  doMove(d.id, dt.id, dt.pos);
+                  return;
+                }
+                if (!commandStore.moveNode(d.id, null)) setErr("无法移动");
+              }}
+                >
                   <div className="cmd-toolbar">
                     <button
                       className="btn"
@@ -1131,65 +1416,111 @@ export function ControlCanvas() {
         </div>
       </div>
 
-      {menu && menuCard && (
-        <div
-          className="ctx-menu"
-          style={{ left: menu.x, top: menu.y }}
-          onContextMenu={(e) => e.preventDefault()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="ctx-title">{menuCard.name}</div>
-          <button className="ctx-item" onClick={() => { setEditing(menuCard.id); setMenu(null); }}>
-            设置…
-          </button>
-          <button className="ctx-item" onClick={() => { setRenamingCard(menuCard.id); setMenu(null); }}>
-            重命名
-          </button>
-          {canSend(menuCard) && (
-            <button
-              className="ctx-item"
-              onClick={() => { void sendControl(menuCard, ctxFor(menuCard), true); setMenu(null); }}
-            >
-              立即发送
-            </button>
-          )}
+      {menu && menuCard &&
+        createPortal(
           <div
-            className="ctx-item"
-            onClick={(e) => { e.stopPropagation(); setMountOpen((v) => !v); }}
+            ref={menuRef}
+            className="ctx-menu"
+            style={{
+              left: menuPos?.left ?? -9999,
+              top: menuPos?.top ?? -9999,
+              visibility: menuPos ? "visible" : "hidden",
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={(e) => e.stopPropagation()}
+            onMouseEnter={disarmMountClose}
+            onMouseLeave={armMountClose}
           >
-            挂载命令 ▸
-          </div>
-          {mountOpen && (
-            <div className="ctx-mount">
-              {commandStore.flatCommands().length === 0 && (
-                <div className="ctx-group">命令库为空（左侧「命令」Tab 添加）</div>
-              )}
-              {commandStore.flatCommands().map(({ item, depth }) => (
-                <button
-                  key={item.id}
-                  className="ctx-item"
-                  style={{ paddingLeft: 8 + depth * 12 }}
-                  title={item.scriptEnabled && item.script ? "脚本命令" : item.template}
-                  onClick={() => {
-                    mountCommand(menuCard, item);
-                    setMenu(null);
-                  }}
-                >
-                  {item.name}
-                  {item.scriptEnabled && item.script ? " ⚡" : ""}
-                </button>
-              ))}
+            <div className="ctx-title">{menuCard.name}</div>
+            <button className="ctx-item" onClick={() => { setEditing(menuCard.id); setMenu(null); }}>
+              设置…
+            </button>
+            <button className="ctx-item" onClick={() => { setRenamingCard(menuCard.id); setMenu(null); }}>
+              重命名
+            </button>
+            {canSend(menuCard) && (
+              <button
+                className="ctx-item"
+                onClick={() => { void sendControl(menuCard, ctxFor(menuCard), true); setMenu(null); }}
+              >
+                立即发送
+              </button>
+            )}
+            <div
+              ref={mountAnchorRef}
+              className="ctx-item ctx-has-sub"
+              onClick={(e) => { e.stopPropagation(); setMountOpen((v) => !v); }}
+              onMouseEnter={() => { disarmMountClose(); setMountOpen(true); }}
+            >
+              挂载命令 <span className="ctx-arrow"><IconChevron size={12} /></span>
             </div>
-          )}
-          <div className="ctx-group">操作</div>
-          <button
-            className="ctx-item danger"
-            onClick={() => { store.removeCard(page.id, menuCard.id); setMenu(null); }}
+            {mountOpen && (
+              <MountCascade
+                anchorEl={mountAnchorRef.current}
+                zf={zfactor}
+                onArm={armMountClose}
+                onDisarm={disarmMountClose}
+                onPick={(item) => {
+                  mountCommand(menuCard, item);
+                  setMenu(null);
+                  setMountOpen(false);
+                }}
+              />
+            )}
+            <div className="ctx-group">操作</div>
+            <button
+              className="ctx-item danger"
+              onClick={() => { store.removeCard(page.id, menuCard.id); setMenu(null); }}
+            >
+              删除
+            </button>
+          </div>,
+          document.body,
+        )}
+
+      {cmdMenu &&
+        createPortal(
+          <div
+            ref={cmdMenuRef}
+            className="ctx-menu"
+            style={{
+              left: cmdMenuPos?.left ?? -9999,
+              top: cmdMenuPos?.top ?? -9999,
+              visibility: cmdMenuPos ? "visible" : "hidden",
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={(e) => e.stopPropagation()}
           >
-            删除
-          </button>
-        </div>
-      )}
+            {(() => {
+              const node = commandStore.getCommand(cmdMenu.id);
+              if (!node) return null;
+              return (
+                <>
+                  <div className="ctx-title">{node.name}</div>
+                  <button
+                    className="ctx-item"
+                    onClick={() => {
+                      setEditingCmd(cmdMenu.id);
+                      setCmdMenu(null);
+                    }}
+                  >
+                    编辑…
+                  </button>
+                  <button
+                    className="ctx-item danger"
+                    onClick={() => {
+                      commandStore.removeNode(cmdMenu.id);
+                      setCmdMenu(null);
+                    }}
+                  >
+                    删除命令
+                  </button>
+                </>
+              );
+            })()}
+          </div>,
+          document.body,
+        )}
 
       {editCard && (
         <CardModal
@@ -1263,43 +1594,52 @@ function CommandModal(props: {
                 })
               }
             />
-            启用（开启后优先执行脚本，隐藏普通模板）
+            优先执行脚本（隐藏指令模板）
           </label>
         </div>
         {!scriptOn && (
-          <div className="form-col">
-            <label>指令模板（%f %.2f %d，支持 {"{变量}"} 引用解析数据）</label>
-            <textarea
-              className="input ctl-tpl-input"
-              rows={2}
-              value={item.template}
-              placeholder="VRp=%.2f!"
-              onChange={(e) =>
-                commandStore.patchCommand(item.id, { template: e.target.value })
-              }
-            />
-          </div>
+          <>
+            <div className="form-row">
+              <label>指令模板</label>
+              <textarea
+                className="input ctl-tpl-input cmd-ta"
+                rows={5}
+                value={item.template}
+                placeholder={"VRp=%.2f!"}
+                onChange={(e) =>
+                  commandStore.patchCommand(item.id, { template: e.target.value })
+                }
+              />
+            </div>
+            <div className="cmd-hint">
+              语法：%f %.2f %d，支持 {"{变量}"} 引用解析数据
+            </div>
+          </>
         )}
         {scriptOn && (
-          <div className="form-col">
-            <label>第二轨脚本（开启第二轨后优先于模板执行）</label>
-            <textarea
-              className="input ctl-tpl-input ctl-script-input"
-              rows={7}
-              spellCheck={false}
-              value={item.script}
-              placeholder={
-                'if (Roll > 45) {\n  await send("ALARM:high!");\n  beep(880, 200);\n}'
-              }
-              onChange={(e) =>
-                commandStore.patchCommand(item.id, { script: e.target.value })
-              }
-            />
-            <div className="form-hint">
-              API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms)
-              · get("变量")；解析字段名可直接当变量使用
+          <>
+            <div className="form-row">
+              <label>脚本</label>
+              <textarea
+                className="input ctl-tpl-input ctl-script-input cmd-ta"
+                rows={5}
+                spellCheck={false}
+                value={item.script}
+                placeholder={
+                  'if (Roll > 45) {\n  await send("ALARM:high!");\n  beep(880, 200);\n}'
+                }
+                onChange={(e) =>
+                  commandStore.patchCommand(item.id, { script: e.target.value })
+                }
+              />
             </div>
-          </div>
+            <div className="cmd-hint">
+              API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms)
+              · get("变量") · await waitParse(字段, ms) · set(变量, 值) ·
+              setControl(控件, 值) · await repeat(n, i=&gt;…) · log(文本)；完整 JS
+              语法可用（for/while/if）；解析字段名可直接当变量使用
+            </div>
+          </>
         )}
         <div className="form-row">
           <label>备注</label>

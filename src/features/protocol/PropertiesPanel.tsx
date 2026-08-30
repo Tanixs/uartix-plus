@@ -215,7 +215,7 @@ export function PropertiesPanel() {
           <div className="form-row">
             <label>总帧长</label>
             <NumInput
-              value={b.fixedLength ?? 12}
+              value={b.fixedLength ?? 16}
               onCommit={(v) => store.patchBoundary(tpl.id, { fixedLength: v })}
               title="完整帧的总字节数（含帧头与校验）"
             />

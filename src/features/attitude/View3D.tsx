@@ -25,11 +25,6 @@ function buildModel(
     metalness: 0.2,
     roughness: 0.4,
   });
-  const rotorMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(accent),
-    transparent: true,
-    opacity: 0.4,
-  });
 
   if (type === "cube") {
     const box = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.7, 1.7), bodyMat);
@@ -44,36 +39,110 @@ function buildModel(
     nose.position.set(1.1, 0, 0);
     model.add(nose);
   } else {
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.78, 0.2, 0.78), bodyMat);
+    // ---- 四轴（X 布局，机头朝 +X）----
+    const darkMat = new THREE.MeshStandardMaterial({
+      color: 0x272c35,
+      metalness: 0.35,
+      roughness: 0.55,
+    });
+    const midMat = new THREE.MeshStandardMaterial({
+      color: 0x39414e,
+      metalness: 0.3,
+      roughness: 0.5,
+    });
+    const metalMat = new THREE.MeshStandardMaterial({
+      color: 0x8b93a1,
+      metalness: 0.85,
+      roughness: 0.3,
+    });
+    const accentSolid = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(accent),
+      metalness: 0.2,
+      roughness: 0.45,
+    });
+    const canopyMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(accent),
+      metalness: 0.1,
+      roughness: 0.2,
+      transparent: true,
+      opacity: 0.55,
+    });
+    const props: THREE_NS.Group[] = [];
+
+    // 机身：下主版 + 上舱盖 + 前挡风 + 电池
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.16, 0.78), darkMat);
     model.add(plate);
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), accentMat);
-    dome.position.set(0.32, 0.14, 0);
-    model.add(dome);
-    const armGeo = new THREE.CylinderGeometry(0.045, 0.045, 1.35, 10);
-    const podGeo = new THREE.CylinderGeometry(0.11, 0.11, 0.16, 12);
-    const rotorGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.02, 24);
-    for (const [sx, sz] of [
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.17, 0.5), midMat);
+    canopy.position.set(-0.08, 0.16, 0);
+    model.add(canopy);
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.13, 0.42), canopyMat);
+    windshield.position.set(0.26, 0.16, 0);
+    windshield.rotation.z = -0.5;
+    model.add(windshield);
+    const battery = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.12, 0.32), darkMat);
+    battery.position.set(-0.05, 0.3, 0);
+    model.add(battery);
+    const strap = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.13, 0.34), accentSolid);
+    strap.position.set(-0.05, 0.3, 0);
+    model.add(strap);
+    // 机头标识条
+    const noseBar = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.05, 0.6), accentSolid);
+    noseBar.position.set(0.52, 0.02, 0);
+    model.add(noseBar);
+
+    // 起落架：两侧滑橇 + 支腿
+    const railGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.92, 8);
+    const legGeo = new THREE.CylinderGeometry(0.024, 0.024, 0.3, 8);
+    for (const sx of [1, -1]) {
+      const rail = new THREE.Mesh(railGeo, metalMat);
+      rail.rotation.x = Math.PI / 2;
+      rail.position.set(sx * 0.3, -0.32, 0);
+      model.add(rail);
+      for (const sz of [1, -1]) {
+        const leg = new THREE.Mesh(legGeo, darkMat);
+        leg.position.set(sx * 0.3, -0.17, sz * 0.26);
+        leg.rotation.x = sz * 0.22;
+        model.add(leg);
+      }
+    }
+
+    // 四条斜臂 + 电机 + 双叶桨（对桨反向自转）
+    const armGeo = new THREE.BoxGeometry(0.09, 0.075, 0.82);
+    const bellGeo = new THREE.CylinderGeometry(0.1, 0.125, 0.15, 14);
+    const hubGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.05, 10);
+    const bladeGeo = new THREE.SphereGeometry(1, 12, 8);
+    const dirs: [number, number][] = [
       [1, 1],
       [1, -1],
       [-1, 1],
       [-1, -1],
-    ]) {
-      const arm = new THREE.Mesh(armGeo, bodyMat);
-      arm.rotation.z = Math.PI / 2;
-      arm.rotation.y = Math.atan2(sz, sx);
-      arm.position.set(sx * 0.5, 0, sz * 0.5);
+    ];
+    dirs.forEach(([sx, sz]) => {
+      const inv = 1 / Math.SQRT2;
+      const arm = new THREE.Mesh(armGeo, darkMat);
+      arm.rotation.y = sx * sz > 0 ? Math.PI / 4 : -Math.PI / 4;
+      arm.position.set(sx * 0.45, 0.02, sz * 0.45);
       model.add(arm);
-      const pod = new THREE.Mesh(podGeo, bodyMat);
-      pod.position.set(sx * 0.92, 0.08, sz * 0.92);
-      model.add(pod);
-      const rotor = new THREE.Mesh(rotorGeo, rotorMat);
-      rotor.position.set(sx * 0.92, 0.18, sz * 0.92);
-      model.add(rotor);
-    }
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.42, 16), accentMat);
-    nose.rotation.z = -Math.PI / 2;
-    nose.position.set(0.62, 0.05, 0);
-    model.add(nose);
+
+      const bell = new THREE.Mesh(bellGeo, metalMat);
+      bell.position.set(sx * 0.72 * inv, 0.1, sz * 0.72 * inv);
+      model.add(bell);
+
+      const prop = new THREE.Group();
+      prop.position.set(sx * 0.72 * inv, 0.2, sz * 0.72 * inv);
+      const hub = new THREE.Mesh(hubGeo, darkMat);
+      prop.add(hub);
+      for (const rot of [0, Math.PI]) {
+        const blade = new THREE.Mesh(bladeGeo, accentSolid);
+        blade.scale.set(0.46, 0.012, 0.075);
+        blade.position.set(Math.cos(rot) * 0.23, 0.015, Math.sin(rot) * 0.23);
+        blade.rotation.y = rot;
+        prop.add(blade);
+      }
+      model.add(prop);
+      props.push(prop);
+    });
+    model.userData.props = props;
   }
 
   const axisLen = type === "cube" ? 1.35 : 1.15;
@@ -203,6 +272,12 @@ export function View3D() {
           targetQ.set(v.qx, v.qy, v.qz, v.qw).normalize();
         }
         model.quaternion.slerp(targetQ, 1 - Math.exp(-dt * 14));
+        const props = model.userData.props as THREE_NS.Group[] | undefined;
+        if (props) {
+          for (let i = 0; i < props.length; i++) {
+            props[i].rotation.y += dt * (i % 2 === 0 ? 16 : -16);
+          }
+        }
         if (hudRef.current) {
           hudRef.current.textContent = v.has
             ? `R ${v.roll.toFixed(1)}°  P ${v.pitch.toFixed(1)}°  Y ${v.yaw.toFixed(1)}°`

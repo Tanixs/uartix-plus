@@ -13,6 +13,7 @@ import type {
   SwitchCard,
 } from "./controlsStore";
 import * as variableStore from "./variableStore";
+import { beep } from "./scriptRunner";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import { Section } from "../../shared/Section";
 
@@ -534,6 +535,20 @@ export function BuzzerCardView(props: {
   useSyncExternalStore(variableStore.subscribe, variableStore.getSnapshot);
   const val = variableStore.getVar(card.varName);
   const on = evalCond(card.op, card.value, card.strValue, val);
+  const vol = (card.volume / 100) * 0.3;
+  const prevOnRef = useRef(false);
+  useEffect(() => {
+    if (on && !prevOnRef.current) beep(card.freq, card.durationMs, vol);
+    prevOnRef.current = on;
+  }, [on, card.freq, card.durationMs, vol]);
+  useEffect(() => {
+    if (!on || !card.repeat) return;
+    const t = window.setInterval(
+      () => beep(card.freq, card.durationMs, vol),
+      card.durationMs + 150,
+    );
+    return () => window.clearInterval(t);
+  }, [on, card.repeat, card.freq, card.durationMs, vol]);
   const sz = Math.max(
     22,
     Math.min(110, Math.floor(Math.min(props.width - 28, props.height - 46))),
@@ -830,7 +845,9 @@ function ScriptFields({
       />
       <div className="form-hint">
         API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) ·
-        get("变量")；解析字段名可直接当变量使用
+        get("变量") · await waitParse(字段, ms) · set(变量, 值) ·
+        setControl(控件, 值) · await repeat(n, i=&gt;…) · log(文本)；完整 JS
+        语法可用（for/while/if）；解析字段名可直接当变量使用
       </div>
     </div>
   );
@@ -928,6 +945,52 @@ export function CardModal(props: {
               value={card.onColor}
               onChange={(e) => patch({ onColor: e.target.value })}
             />
+          </div>
+        </Section>
+      )}
+      {card.type === "buzzer" && (
+        <Section title="声音">
+          <div className="form-row">
+            <label>频率</label>
+            <NumInput
+              value={card.freq}
+              width={72}
+              onCommit={(v) => patch({ freq: Math.max(20, Math.min(20000, Math.round(v))) })}
+            />
+            <label>Hz</label>
+          </div>
+          <div className="form-row">
+            <label>音量</label>
+            <input
+              type="range"
+              className="input"
+              min={0}
+              max={100}
+              value={card.volume}
+              onChange={(e) => patch({ volume: Number(e.target.value) })}
+            />
+            <label>时长</label>
+            <NumInput
+              value={card.durationMs}
+              width={64}
+              onCommit={(v) => patch({ durationMs: Math.max(30, Math.min(5000, Math.round(v))) })}
+            />
+          </div>
+          <div className="form-row">
+            <label>循环鸣叫</label>
+            <input
+              type="checkbox"
+              className="chk-box"
+              title="持续触发期间重复响"
+              checked={card.repeat}
+              onChange={(e) => patch({ repeat: e.target.checked })}
+            />
+            <button
+              className="btn"
+              onClick={() => beep(card.freq, card.durationMs, (card.volume / 100) * 0.3)}
+            >
+              试听
+            </button>
           </div>
         </Section>
       )}

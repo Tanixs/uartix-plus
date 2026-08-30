@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { ThemeMode } from "../../ipc/types";
 
-export type WorkspacePreset = "proto" | "analyze" | "attitude" | "console";
+export type WorkspacePreset = "proto" | "analyze" | "attitude" | "console" | "video";
 
 export interface Settings {
   theme: ThemeMode;
@@ -28,7 +28,7 @@ function load(): Settings {
     decimals: clampDecimals(localStorage.getItem("vs.decimals") ?? "2", 2),
     perfHud: false,
     workspace: "proto",
-    cellSize: 90,
+    cellSize: 60,
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -40,12 +40,14 @@ function load(): Settings {
       zoom: [90, 100, 110, 125].includes(p.zoom ?? 100) ? (p.zoom as number) : 100,
       decimals: clampDecimals(p.decimals ?? 2, 2),
       perfHud: Boolean(p.perfHud),
-      workspace: (["proto", "analyze", "attitude", "console"] as const).includes(
+      workspace: (["proto", "analyze", "attitude", "console", "video"] as const).includes(
         p.workspace as WorkspacePreset,
       )
         ? (p.workspace as WorkspacePreset)
         : "proto",
-      cellSize: [48, 60, 72, 90, 110].includes(p.cellSize ?? 90) ? (p.cellSize as number) : 90,
+      cellSize: [48, 60, 72, 90, 110].includes(p.cellSize ?? 60)
+        ? (p.cellSize as number)
+        : 60,
     };
   } catch {
     return fallback;

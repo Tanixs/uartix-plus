@@ -10,13 +10,15 @@ import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
 import { Section } from "../../shared/Section";
+import { HelpHint } from "../../shared/HelpHint";
 import appIcon from "../../assets/icon.svg";
 
-const PRESETS: { key: WorkspacePreset; label: string }[] = [
-  { key: "proto", label: t("set.preset.proto") },
-  { key: "analyze", label: t("set.preset.analyze") },
-  { key: "attitude", label: t("set.preset.attitude") },
-  { key: "console", label: t("set.preset.console") },
+const PRESETS: { key: WorkspacePreset; label: string; desc: string }[] = [
+  { key: "proto", label: t("set.preset.proto"), desc: "画布 + 属性 + Hex" },
+  { key: "analyze", label: t("set.preset.analyze"), desc: "表格 + 2D 曲线" },
+  { key: "attitude", label: t("set.preset.attitude"), desc: "3D 姿态 + 曲线" },
+  { key: "console", label: t("set.preset.console"), desc: "仅控制台" },
+  { key: "video", label: t("set.preset.video"), desc: "图传 + 控制画板" },
 ];
 
 async function saveJson(kind: string, data: unknown): Promise<void> {
@@ -100,15 +102,32 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
     { key: "general", label: t("set.general") },
     { key: "workspace", label: t("set.workspace") },
     { key: "data", label: t("set.data") },
-    { key: "diagnostics", label: t("set.diagnostics") },
     { key: "io", label: t("set.io") },
     { key: "about", label: t("set.about") },
   ];
 
-  const row = (label: string, node: React.ReactNode) => (
+  const row = (label: string, node: React.ReactNode, tip?: string) => (
     <div className="set-row">
-      <label>{label}</label>
+      <label>
+        {label}
+        {tip && <HelpHint text={tip} />}
+      </label>
       <div className="set-ctl">{node}</div>
+    </div>
+  );
+
+  const ioBlock = (label: string, tip: string, onExport: () => Promise<void>, onImport: () => Promise<void>) => (
+    <div className="set-io-block">
+      <div className="set-io-head">
+        <div className="set-io-label">
+          {label}
+          <HelpHint text={tip} />
+        </div>
+        <div className="set-io-actions">
+          <button className="btn" onClick={() => void onExport()}>{t("set.export")}</button>
+          <button className="btn" onClick={() => void onImport()}>{t("set.import")}</button>
+        </div>
+      </div>
     </div>
   );
 
@@ -141,7 +160,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                       </button>
                     ))}
                   </div>
-                ))}
+                ), t("set.theme.tip"))}
                 {row(t("set.zoom"), (
                   <div className="set-seg">
                     {[90, 100, 110, 125].map((z) => (
@@ -150,28 +169,31 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                       </button>
                     ))}
                   </div>
-                ))}
+                ), t("set.zoom.tip"))}
               </>
             )}
             {tab === "workspace" && (
               <>
                 {row(t("set.preset"), (
-                  <div className="set-seg col">
+                  <div className="preset-grid">
                     {PRESETS.map((p) => (
                       <button
                         key={p.key}
-                        className={settings.workspace === p.key ? "on" : ""}
+                        className={`preset-card${settings.workspace === p.key ? " on" : ""}`}
                         onClick={() => {
                           patch({ workspace: p.key });
                           onResetLayout(p.key);
                         }}
                       >
-                        {p.label}
+                        <span className="preset-name">{p.label}</span>
+                        <span className="preset-desc">{p.desc}</span>
                       </button>
                     ))}
                   </div>
-                ))}
-                {row("", <button className="btn" onClick={() => onResetLayout(settings.workspace)}>{t("set.resetLayout")}</button>)}
+                ), t("set.preset.tip"))}
+                {row(t("set.resetLayout"), (
+                  <button className="btn" onClick={() => onResetLayout(settings.workspace)}>{t("set.resetLayout")}</button>
+                ), t("set.resetLayout.tip"))}
                 {row("控制画板格尺寸", (
                   <div className="set-seg">
                     {([48, 60, 72, 90, 110] as const).map((c) => (
@@ -180,122 +202,89 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                       </button>
                     ))}
                   </div>
-                ))}
+                ), t("set.cellSize.tip"))}
               </>
             )}
             {tab === "data" && (
-              row(t("set.decimals"), (
-                <div className="form-row">
-                  <input
-                    type="number"
-                    className="input"
-                    style={{ width: 72 }}
-                    min={0}
-                    max={6}
-                    value={settings.decimals}
-                    onChange={(e) => {
-                      const v = Math.round(Number(e.target.value));
-                      if (!Number.isFinite(v)) return;
-                      patch({ decimals: Math.max(0, Math.min(6, v)) });
-                    }}
-                  />
-                  <span className="form-hint">0~6 位；字段图例上的「N位」按钮可循环切换，与此处实时同步</span>
-                </div>
-              ))
-            )}
-            {tab === "diagnostics" && (
-              row(t("set.perfHud"), (
-                <label className="set-switch">
-                  <input
-                    type="checkbox"
-                    checked={settings.perfHud}
-                    onChange={(e) => patch({ perfHud: e.target.checked })}
-                  />
-                  <span />
-                </label>
-              ))
+              <>
+                {row(t("set.decimals"), (
+                  <div className="form-row">
+                    <input
+                      type="number"
+                      className="input"
+                      style={{ width: 72 }}
+                      min={0}
+                      max={6}
+                      value={settings.decimals}
+                      onChange={(e) => {
+                        const v = Math.round(Number(e.target.value));
+                        if (!Number.isFinite(v)) return;
+                        patch({ decimals: Math.max(0, Math.min(6, v)) });
+                      }}
+                    />
+                    <span className="form-hint">0~6 位；字段图例上的「N位」按钮可循环切换，与此处实时同步</span>
+                  </div>
+                ), t("set.decimals.tip"))}
+                {row(t("set.perfHud"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.perfHud}
+                      onChange={(e) => patch({ perfHud: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), t("set.perfHud.tip"))}
+              </>
             )}
             {tab === "io" && (
               <>
-                <div className="set-io-block">
-                  <div className="set-io-label">{t("set.exportTemplates")}</div>
-                  <div className="set-io-actions">
-                    <button
-                      className="btn"
-                      onClick={async () => {
-                        const d = templateStore.exportTemplatesWithMeta();
-                        await saveJson("uartix-templates", d);
-                        setMsg("模板已导出");
-                      }}
-                    >
-                      {t("set.export")}
-                    </button>
-                    <button
-                      className="btn"
-                      onClick={async () => {
-                        const d = await loadJson<{ templates: Parameters<typeof templateStore.importTemplates>[0]; groups?: Record<string, { name: string }> }>(["uartix-templates"]);
-                        if (!d) return;
-                        if (d.groups) templateStore.importGroupsMeta(d.groups);
-                        templateStore.importTemplates(d.templates);
-                        setMsg(`已导入 ${d.templates.length} 个模板（副本）`);
-                      }}
-                    >
-                      {t("set.import")}
-                    </button>
-                  </div>
-                </div>
-                <div className="set-io-block">
-                  <div className="set-io-label">{t("set.exportControls")}</div>
-                  <div className="set-io-actions">
-                    <button
-                      className="btn"
-                      onClick={async () => {
-                        await saveJson("uartix-controls", controlsStore.exportPages());
-                        setMsg("控制画布已导出");
-                      }}
-                    >
-                      {t("set.export")}
-                    </button>
-                    <button
-                      className="btn"
-                      onClick={async () => {
-                        const d = await loadJson<Parameters<typeof controlsStore.importPage>[0] & { name?: string }>(["uartix-controls"]);
-                        if (!d) return;
-                        const arr = Array.isArray(d) ? d[0] : d;
-                        const id = controlsStore.importPage(arr);
-                        setMsg(`已导入为新控制页（${(arr.cards ?? []).length} 卡片）`);
-                        void id;
-                      }}
-                    >
-                      {t("set.import")}
-                    </button>
-                  </div>
-                </div>
-                <div className="set-io-block">
-                  <div className="set-io-label">{t("set.exportCommands")}</div>
-                  <div className="set-io-actions">
-                    <button
-                      className="btn"
-                      onClick={async () => {
-                        await saveJson("uartix-commands", commandStore.exportGroups());
-                        setMsg("命令库已导出");
-                      }}
-                    >
-                      {t("set.export")}
-                    </button>
-                    <button
-                      className="btn"
-                      onClick={async () => {
-                        const d = await loadJson<Parameters<typeof commandStore.importGroupsMerge>[0]>(["uartix-commands"]);
-                        if (!d) return;
-                        commandStore.importGroupsMerge(d);
-                        setMsg("命令库已合并导入");
-                      }}
-                    >
-                      {t("set.import")}
-                    </button>
-                  </div>
-                </div>
+                {ioBlock(
+                  t("set.exportTemplates"),
+                  t("set.io.templates.tip"),
+                  async () => {
+                    const d = templateStore.exportTemplatesWithMeta();
+                    await saveJson("uartix-templates", d);
+                    setMsg("模板已导出");
+                  },
+                  async () => {
+                    const d = await loadJson<{ templates: Parameters<typeof templateStore.importTemplates>[0]; groups?: Record<string, { name: string }> }>(["uartix-templates"]);
+                    if (!d) return;
+                    if (d.groups) templateStore.importGroupsMeta(d.groups);
+                    templateStore.importTemplates(d.templates);
+                    setMsg(`已导入 ${d.templates.length} 个模板（副本）`);
+                  },
+                )}
+                {ioBlock(
+                  t("set.exportControls"),
+                  t("set.io.controls.tip"),
+                  async () => {
+                    await saveJson("uartix-controls", controlsStore.exportPages());
+                    setMsg("控制画布已导出");
+                  },
+                  async () => {
+                    const d = await loadJson<Parameters<typeof controlsStore.importPage>[0] & { name?: string }>(["uartix-controls"]);
+                    if (!d) return;
+                    const arr = Array.isArray(d) ? d[0] : d;
+                    const id = controlsStore.importPage(arr);
+                    setMsg(`已导入为新控制页（${(arr.cards ?? []).length} 卡片）`);
+                    void id;
+                  },
+                )}
+                {ioBlock(
+                  t("set.exportCommands"),
+                  t("set.io.commands.tip"),
+                  async () => {
+                    await saveJson("uartix-commands", commandStore.exportGroups());
+                    setMsg("命令库已导出");
+                  },
+                  async () => {
+                    const d = await loadJson<Parameters<typeof commandStore.importGroupsMerge>[0]>(["uartix-commands"]);
+                    if (!d) return;
+                    commandStore.importGroupsMerge(d);
+                    setMsg("命令库已合并导入");
+                  },
+                )}
                 <div className="set-io-hint">{t("set.ioHint")}</div>
               </>
             )}
@@ -320,7 +309,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                   </button>
                 ))}
                 {row(t("set.license"), <span>MIT</span>)}
-                {row("", (
+                {row(t("set.checkUpdate"), (
                   <div className="qk-fgroup">
                     <button
                       className="btn"
@@ -331,7 +320,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     </button>
                     {updState.msg && <span className="qk-fhint">{updState.msg}</span>}
                   </div>
-                ))}
+                ), t("set.checkUpdate.tip"))}
               </>
             )}
             {msg && <div className="set-msg">{msg}</div>}

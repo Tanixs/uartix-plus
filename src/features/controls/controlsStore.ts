@@ -72,6 +72,10 @@ export interface BuzzerCard extends BaseCard {
   value: number;
   strValue: string;
   onColor: string;
+  freq: number;
+  volume: number;
+  durationMs: number;
+  repeat: boolean;
 }
 
 export interface MonitorCard extends BaseCard {
@@ -160,7 +164,6 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         script: String(raw.script ?? ""),
       };
     case "led":
-    case "buzzer":
       return {
         ...base,
         type,
@@ -169,6 +172,20 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         value: Number(raw.value ?? 0),
         strValue: String(raw.strValue ?? ""),
         onColor: String(raw.onColor ?? "#3fb950"),
+      };
+    case "buzzer":
+      return {
+        ...base,
+        type,
+        varName: String(raw.varName ?? ""),
+        op: (raw.op as LedOp) ?? "gt",
+        value: Number(raw.value ?? 0),
+        strValue: String(raw.strValue ?? ""),
+        onColor: String(raw.onColor ?? "#d29922"),
+        freq: Math.max(20, Math.min(20000, Number(raw.freq ?? 2000))),
+        volume: Math.max(0, Math.min(100, Number(raw.volume ?? 50))),
+        durationMs: Math.max(30, Math.min(5000, Number(raw.durationMs ?? 200))),
+        repeat: Boolean(raw.repeat),
       };
     case "monitor":
       return {
@@ -484,6 +501,15 @@ function defaultCard(type: ControlType, name: string): ControlCard {
         script: "",
       };
     case "led":
+      return {
+        ...base,
+        type,
+        varName: "",
+        op: "gt",
+        value: 0,
+        strValue: "",
+        onColor: "#3fb950",
+      };
     case "buzzer":
       return {
         ...base,
@@ -492,7 +518,11 @@ function defaultCard(type: ControlType, name: string): ControlCard {
         op: "gt",
         value: 0,
         strValue: "",
-        onColor: type === "buzzer" ? "#d29922" : "#3fb950",
+        onColor: "#d29922",
+        freq: 2000,
+        volume: 50,
+        durationMs: 200,
+        repeat: false,
       };
     case "monitor":
       return { ...base, type, varName: "", unit: "", decimals: 2 };

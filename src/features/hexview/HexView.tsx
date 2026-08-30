@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useSyncExternalStore, Fragment } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import type { FieldDef, HexSlice, SpanOut } from "../../ipc/types";
 import * as serialStore from "../serial/serialStore";
@@ -7,6 +8,8 @@ import * as telemetryStore from "../protocol/telemetryStore";
 import * as fcStore from "../framecanvas/frameStore";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 import { useSettings } from "../settings/settingsStore";
+import { Flyout } from "../../shared/Flyout";
+import { IconChevron } from "../../shared/icons";
 import { t } from "../../i18n/strings";
 
 const ROW_H = 20;
@@ -29,7 +32,8 @@ function hexA(hex: string, alpha: number): string {
 }
 
 export function HexView() {
-  useSettings(); // 语言切换时随设置重渲染
+  const settings = useSettings(); // 语言/缩放切换时随设置重渲染
+  const zf = (settings.zoom || 100) / 100;
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef({ follow: true, viewEnd: COLS - 1 });
@@ -42,6 +46,7 @@ export function HexView() {
     | { kind: "sel" }
     | { kind: "sb"; grab: number }
   >(null);
+  const midDragRef = useRef<null | { x0: number; y0: number; viewEnd0: number }>(null);
   const flashRef = useRef<{ seq: number; until: number } | null>(null);
   const hitsRef = useRef<{ seqs: number[]; len: number; idx: number }>({
     seqs: [],
@@ -51,6 +56,13 @@ export function HexView() {
   const sizeRef = useRef({ w: 0, h: 0, dpr: 1, zf: 1 });
   const protoRef = useRef(templateStore.getSnapshot());
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
+  const [defOpen, setDefOpen] = useState(false);
+  const [tplSub, setTplSub] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const defAnchorRef = useRef<HTMLDivElement | null>(null);
+  const tplRowRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const subTimer = useRef<number | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchPattern, setSearchPattern] = useState("");
   const [searchHits, setSearchHits] = useState<number[]>([]);
@@ -418,12 +430,41 @@ export function HexView() {
     if (!menu) return;
     const close = () => setMenu(null);
     window.addEventListener("click", close);
-    window.addEventListener("wheel", close, { passive: true });
-    return () => {
-      window.removeEventListener("click", close);
-      window.removeEventListener("wheel", close);
-    };
+    return () => window.removeEventListener("click", close);
   }, [menu]);
+
+  useLayoutEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const r = menuRef.current.getBoundingClientRect();
+    const w = r.width / zf;
+    const h = r.height / zf;
+    const vw = window.innerWidth / zf;
+    const vh = window.innerHeight / zf;
+    let left = Math.max(8, Math.min(menu.x / zf, vw - w - 8));
+    let top = menu.y / zf;
+    if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
+    setMenuPos({ left, top });
+  }, [menu, zf]);
+
+  const armSub = () => {
+    if (subTimer.current !== null) window.clearTimeout(subTimer.current);
+    subTimer.current = window.setTimeout(() => {
+      setDefOpen(false);
+      setTplSub(null);
+    }, 250);
+  };
+  const disarmSub = () => {
+    if (subTimer.current !== null) {
+      window.clearTimeout(subTimer.current);
+      subTimer.current = null;
+    }
+  };
+  useEffect(
+    () => () => {
+      if (subTimer.current !== null) window.clearTimeout(subTimer.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -431,12 +472,41 @@ export function HexView() {
         e.preventDefault();
         setSearchOpen(true);
       } else if (e.key === "Escape") {
+        if (menu) setMenu(null);
         if (searchOpen) closeSearch();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [searchOpen]);
+  }, [searchOpen, menu]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const md = midDragRef.current;
+      if (!md) return;
+      const total = serialStore.getSnapshot().rxTotal;
+      const canvas = canvasRef.current;
+      const bytesPerPx = canvas
+        ? (rowsVisible() * COLS) / Math.max(1, canvas.clientHeight)
+        : 1;
+      const v = viewRef.current;
+      v.viewEnd = clampViewEnd(md.viewEnd0 + (e.clientY - md.y0) * bytesPerPx, total);
+      v.follow = v.viewEnd >= total - 1 - COLS;
+      dirtyRef.current = true;
+    };
+    const onUp = () => {
+      if (midDragRef.current) {
+        midDragRef.current = null;
+        if (canvasRef.current) canvasRef.current.style.cursor = "";
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
 
   const parsePattern = (text: string): number[] | null => {
     const out: number[] = [];
@@ -523,6 +593,16 @@ export function HexView() {
   };
 
   const onMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 1) {
+      e.preventDefault();
+      midDragRef.current = {
+        x0: e.clientX,
+        y0: e.clientY,
+        viewEnd0: viewRef.current.viewEnd,
+      };
+      if (canvasRef.current) canvasRef.current.style.cursor = "grabbing";
+      return;
+    }
     if (e.button !== 0) return;
     const { x, y } = localXY(e);
     const g = sbGeom();
@@ -577,6 +657,9 @@ export function HexView() {
       commitSelection();
       dirtyRef.current = true;
     }
+    setMenuPos(null);
+    setDefOpen(false);
+    setTplSub(null);
     setMenu({ x: e.clientX, y: e.clientY });
   };
 
@@ -606,6 +689,7 @@ export function HexView() {
     : "";
 
   const selSpan = sel ? spanAt(sel.start) : null;
+  const closeMenu = () => setMenu(null);
   const menuItems = (() => {
     if (!sel || !selLen) return null;
     const templates = proto.rules.templates;
@@ -656,6 +740,46 @@ export function HexView() {
       });
       void tplName;
     };
+    const roleBtn = (tpl: (typeof templates)[number], role: "length" | "checksum" | "data") => {
+      const off = Math.max(offset, 0);
+      const notIn = !inSpan(tpl.id);
+      let disabled = notIn;
+      let why = notIn ? "选区不在该模板已解析出的帧内" : "";
+      if (!notIn) {
+        if (role === "length") {
+          if (selLen > 2) {
+            disabled = true;
+            why = "长度字段最多 2 字节";
+          } else if (offset < tpl.boundary.headerBytes.length) {
+            disabled = true;
+            why = "选区与帧头重叠";
+          }
+        } else if (role === "checksum" && selLen > 4) {
+          disabled = true;
+          why = "校验字段最多 4 字节";
+        }
+      }
+      const label = role === "length" ? "长度字段" : role === "checksum" ? "校验字段" : "数据字段";
+      return (
+        <button
+          key={role}
+          className="ctx-item"
+          aria-disabled={disabled}
+          title={why || `帧内偏移 ${off}`}
+          onClick={() => {
+            if (disabled) return;
+            addFieldFor(tpl.id, role, tpl.name, tpl.fields.length);
+            closeMenu();
+          }}
+        >
+          {label}
+          <span className="ctx-cur">{disabled && why ? why : `偏移 ${off}`}</span>
+        </button>
+      );
+    };
+    const fullHex = sel.bytes
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join(" ");
     return (
       <>
         <div className="ctx-title">
@@ -665,60 +789,45 @@ export function HexView() {
         <button
           className="ctx-item"
           disabled={selLen > 8}
-          onClick={() => templateStore.addTemplate(sel.bytes)}
+          title={
+            selLen > 8
+              ? "帧头最多 8 字节"
+              : "以选区字节为帧头新建模板：帧长 = 帧头 + 8、默认 sum8 校验；创建后默认停用，配置好再启用"
+          }
+          onClick={() => {
+            templateStore.addTemplate(sel.bytes);
+            closeMenu();
+          }}
         >
           新建模板（帧头 = 选区字节）
         </button>
-        {templates.map((tpl) => (
-          <Fragment key={tpl.id}>
-            <div className="ctx-group">
-              <span
-                className="tpl-dot"
-                style={{ background: tpl.color }}
-              />
-              {tpl.name}
-            </div>
-            <button
-              className="ctx-item"
-              disabled={
-                !inSpan(tpl.id) || selLen > 2 || offset < tpl.boundary.headerBytes.length
-              }
-              onClick={() =>
-                addFieldFor(tpl.id, "length", tpl.name, tpl.fields.length)
-              }
-            >
-              定义为长度字段（偏移 {Math.max(offset, 0)}）
-            </button>
-            <button
-              className="ctx-item"
-              disabled={!inSpan(tpl.id) || selLen > 4}
-              onClick={() =>
-                addFieldFor(tpl.id, "checksum", tpl.name, tpl.fields.length)
-              }
-            >
-              定义为校验字段（偏移 {Math.max(offset, 0)}）
-            </button>
-            <button
-              className="ctx-item"
-              disabled={!inSpan(tpl.id)}
-              onClick={() =>
-                addFieldFor(tpl.id, "data", tpl.name, tpl.fields.length)
-              }
-            >
-              定义为数据字段（偏移 {Math.max(offset, 0)}）
-            </button>
-          </Fragment>
-        ))}
-        <div className="ctx-group">其他</div>
+        <div
+          ref={defAnchorRef}
+          className="ctx-item ctx-has-sub"
+          onClick={(e) => {
+            e.stopPropagation();
+            setDefOpen((v) => !v);
+          }}
+          onMouseEnter={() => {
+            disarmSub();
+            setDefOpen(true);
+          }}
+        >
+          定义为字段 <span className="ctx-arrow"><IconChevron size={12} /></span>
+        </div>
+        <div className="ctx-group">复制</div>
         <button
           className="ctx-item"
-          onClick={() => navigator.clipboard.writeText(selHex)}
+          onClick={() => {
+            navigator.clipboard.writeText(fullHex);
+            closeMenu();
+          }}
         >
           复制为 Hex
         </button>
         <button
           className="ctx-item"
-          onClick={() =>
+          onClick={() => {
             navigator.clipboard.writeText(
               sel.bytes
                 .map((b) =>
@@ -727,11 +836,57 @@ export function HexView() {
                     : "·",
                 )
                 .join(""),
-            )
-          }
+            );
+            closeMenu();
+          }}
         >
           复制为 ASCII
         </button>
+        {defOpen && (
+          <Flyout anchor={defAnchorRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={170}>
+            {templates.length === 0 && (
+              <div className="ctx-group">暂无模板（帧画布「＋ 新建」创建）</div>
+            )}
+            {templates.map((tpl) => (
+              <div
+                key={tpl.id}
+                ref={(el) => {
+                  if (el) tplRowRefs.current.set(tpl.id, el);
+                  else tplRowRefs.current.delete(tpl.id);
+                }}
+                className="ctx-item ctx-has-sub"
+                onMouseEnter={() => {
+                  disarmSub();
+                  setTplSub(tpl.id);
+                }}
+              >
+                <span className="ctx-item-l">
+                  <span className="tpl-dot" style={{ background: tpl.color }} />
+                  {tpl.name}
+                </span>
+                <span className="ctx-arrow"><IconChevron size={12} /></span>
+              </div>
+            ))}
+          </Flyout>
+        )}
+        {tplSub &&
+          (() => {
+            const tpl = templates.find((x) => x.id === tplSub);
+            if (!tpl) return null;
+            return (
+              <Flyout
+                anchor={tplRowRefs.current.get(tplSub) ?? null}
+                zf={zf}
+                onArm={armSub}
+                onDisarm={disarmSub}
+                minWidth={190}
+              >
+                {roleBtn(tpl, "length")}
+                {roleBtn(tpl, "checksum")}
+                {roleBtn(tpl, "data")}
+              </Flyout>
+            );
+          })()}
       </>
     );
   })();
@@ -808,16 +963,26 @@ export function HexView() {
           {t("hx.badFrames")} {tele.stats.errors}
         </span>
       </div>
-      {menu && (
-        <div
-          className="ctx-menu"
-          style={{ left: menu.x, top: menu.y }}
-          onContextMenu={(e) => e.preventDefault()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {menuItems}
-        </div>
-      )}
+      {menu &&
+        menuItems &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="ctx-menu"
+            style={{
+              left: menuPos?.left ?? -9999,
+              top: menuPos?.top ?? -9999,
+              visibility: menuPos ? "visible" : "hidden",
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={(e) => e.stopPropagation()}
+            onMouseEnter={disarmSub}
+            onMouseLeave={armSub}
+          >
+            {menuItems}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
