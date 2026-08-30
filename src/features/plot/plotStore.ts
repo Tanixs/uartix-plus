@@ -101,15 +101,46 @@ function appendPoint(chId: string, t: number, v: number) {
   }
 }
 
-export function buildAligned(): {
+export function buildAligned(maxPoints = 0): {
   x: number[];
   cols: (number | null)[][];
 } {
   const chans = channels;
-  const cursors = chans.map((ch) => {
+  // 显示降采样：通道数据总量远超 maxPoints 时，逐通道做 min/max 抽稀（保留波形峰谷），
+  // 再对抽稀后的流做多路归并。限制了对齐输出的规模，避免多通道大数据量的分配与重绘风暴。
+  const streams = chans.map((ch) => {
     const d = getChanData(ch.id);
     return { t: d.t, v: d.v, i: 0 };
   });
+  if (maxPoints > 0) {
+    const total = streams.reduce((s, c) => s + c.t.length, 0);
+    if (total > maxPoints * 2) {
+      for (const c of streams) {
+        const n = c.t.length;
+        if (n < 4) continue;
+        const buckets = Math.max(1, Math.round((maxPoints * n) / total));
+        const bucket = Math.ceil(n / buckets);
+        if (bucket <= 2) continue;
+        const dt: number[] = [];
+        const dv: number[] = [];
+        for (let s = 0; s < n; s += bucket) {
+          const e = Math.min(n, s + bucket);
+          let mi = s;
+          let ma = s;
+          for (let j = s + 1; j < e; j++) {
+            if (c.v[j] < c.v[mi]) mi = j;
+            if (c.v[j] > c.v[ma]) ma = j;
+          }
+          const first = mi <= ma ? mi : ma;
+          const second = mi <= ma ? ma : mi;
+          dt.push(c.t[first], c.t[second]);
+          dv.push(c.v[first], c.v[second]);
+        }
+        c.t = dt;
+        c.v = dv;
+      }
+    }
+  }
   const x: number[] = [];
   const cols: (number | null)[][] = chans.map(() => []);
   const lastV: (number | null)[] = chans.map(() => null);
@@ -117,15 +148,15 @@ export function buildAligned(): {
   for (;;) {
     let best = -1;
     let bt = Infinity;
-    for (let ci = 0; ci < cursors.length; ci++) {
-      const c = cursors[ci];
+    for (let ci = 0; ci < streams.length; ci++) {
+      const c = streams[ci];
       if (c.i < c.t.length && c.t[c.i] < bt) {
         bt = c.t[c.i];
         best = ci;
       }
     }
     if (best < 0) break;
-    const c = cursors[best];
+    const c = streams[best];
     let t = c.t[c.i];
     const v = c.v[c.i];
     c.i += 1;

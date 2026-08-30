@@ -1,5 +1,3 @@
-export type ThemeMode = "light" | "dark";
-
 export type PanelId =
   | "templates"
   | "hexview"

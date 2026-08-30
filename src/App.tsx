@@ -11,6 +11,7 @@ import { TitleBar } from "./shell/TitleBar";
 import { IconColumns } from "./shared/icons";
 import type { IfaceKind } from "./features/serial/serialStore";
 import type { WorkspacePreset } from "./features/settings/settingsStore";
+import { JsonDropImport } from "./features/settings/JsonDropImport";
 import {
   getSnapshot as getSettingsSnapshot,
   useSettings,
@@ -206,7 +207,16 @@ export default function App() {
   renderTick += 1;
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      document.documentElement.dataset.theme =
+        theme === "system" ? (mq.matches ? "dark" : "light") : theme;
+    };
+    apply();
+    if (theme === "system") {
+      mq.addEventListener("change", apply);
+      return () => mq.removeEventListener("change", apply);
+    }
   }, [theme]);
 
   useEffect(() => {
@@ -502,6 +512,7 @@ export default function App() {
         />
       )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      <JsonDropImport />
     </div>
   );
 }

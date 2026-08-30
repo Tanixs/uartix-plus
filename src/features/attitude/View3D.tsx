@@ -156,6 +156,24 @@ function buildModel(
   model.add(mkAxis(0xe5534b, [1, 0, 0]));
   model.add(mkAxis(0x3fb950, [0, 1, 0]));
   model.add(mkAxis(0x4e9cef, [0, 0, 1]));
+
+  // 机头方向箭头（亮黄自发光，悬浮于机体上方，指向 +X）
+  const arrowY = type === "cube" ? 1.08 : 0.5;
+  const arrowMat = new THREE.MeshStandardMaterial({
+    color: 0xffcc33,
+    emissive: 0xffa500,
+    emissiveIntensity: 0.5,
+    metalness: 0.15,
+    roughness: 0.35,
+  });
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.48, 12), arrowMat);
+  shaft.rotation.z = -Math.PI / 2;
+  shaft.position.set(0.09, arrowY, 0);
+  model.add(shaft);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.28, 16), arrowMat);
+  tip.rotation.z = -Math.PI / 2;
+  tip.position.set(0.47, arrowY, 0);
+  model.add(tip);
 }
 
 export function View3D() {

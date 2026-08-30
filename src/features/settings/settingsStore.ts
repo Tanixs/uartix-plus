@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
-import type { ThemeMode } from "../../ipc/types";
 
 export type WorkspacePreset = "proto" | "analyze" | "attitude" | "console" | "video";
+
+export type ThemeMode = "light" | "dark" | "system";
 
 export interface Settings {
   theme: ThemeMode;
@@ -35,7 +36,10 @@ function load(): Settings {
     if (!raw) return fallback;
     const p = JSON.parse(raw) as Partial<Settings>;
     return {
-      theme: p.theme === "light" ? "light" : p.theme === "dark" ? "dark" : fallback.theme,
+      theme:
+        p.theme === "light" || p.theme === "dark" || p.theme === "system"
+          ? p.theme
+          : fallback.theme,
       locale: p.locale === "en" ? "en" : "zh",
       zoom: [90, 100, 110, 125].includes(p.zoom ?? 100) ? (p.zoom as number) : 100,
       decimals: clampDecimals(p.decimals ?? 2, 2),

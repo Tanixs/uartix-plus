@@ -5,6 +5,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useSettings, patch, type WorkspacePreset } from "./settingsStore";
+import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
 import { t } from "../../i18n/strings";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
@@ -154,9 +155,9 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                 ))}
                 {row(t("set.theme"), (
                   <div className="set-seg">
-                    {(["dark", "light"] as const).map((th) => (
+                    {(["dark", "light", "system"] as const).map((th) => (
                       <button key={th} className={settings.theme === th ? "on" : ""} onClick={() => patch({ theme: th })}>
-                        {th === "dark" ? t("set.theme.dark") : t("set.theme.light")}
+                        {th === "dark" ? t("set.theme.dark") : th === "light" ? t("set.theme.light") : t("set.theme.system")}
                       </button>
                     ))}
                   </div>
@@ -208,22 +209,19 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
             {tab === "data" && (
               <>
                 {row(t("set.decimals"), (
-                  <div className="form-row">
-                    <input
-                      type="number"
-                      className="input"
-                      style={{ width: 72 }}
-                      min={0}
-                      max={6}
-                      value={settings.decimals}
-                      onChange={(e) => {
-                        const v = Math.round(Number(e.target.value));
-                        if (!Number.isFinite(v)) return;
-                        patch({ decimals: Math.max(0, Math.min(6, v)) });
-                      }}
-                    />
-                    <span className="form-hint">0~6 位；字段图例上的「N位」按钮可循环切换，与此处实时同步</span>
-                  </div>
+                  <input
+                    type="number"
+                    className="input"
+                    style={{ width: 72 }}
+                    min={0}
+                    max={6}
+                    value={settings.decimals}
+                    onChange={(e) => {
+                      const v = Math.round(Number(e.target.value));
+                      if (!Number.isFinite(v)) return;
+                      patch({ decimals: Math.max(0, Math.min(6, v)) });
+                    }}
+                  />
                 ), t("set.decimals.tip"))}
                 {row(t("set.perfHud"), (
                   <label className="set-switch">
@@ -240,6 +238,19 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
             {tab === "io" && (
               <>
                 {ioBlock(
+                  t("set.exportFull"),
+                  t("set.io.full.tip"),
+                  async () => {
+                    await saveJson(FULL_KIND, exportFullBackup());
+                    setMsg("全部配置已导出");
+                  },
+                  async () => {
+                    const d = await loadJson<unknown>([FULL_KIND]);
+                    if (!d) return;
+                    setMsg(await importDispatch(FULL_KIND, d));
+                  },
+                )}
+                {ioBlock(
                   t("set.exportTemplates"),
                   t("set.io.templates.tip"),
                   async () => {
@@ -248,11 +259,10 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     setMsg("模板已导出");
                   },
                   async () => {
-                    const d = await loadJson<{ templates: Parameters<typeof templateStore.importTemplates>[0]; groups?: Record<string, { name: string }> }>(["uartix-templates"]);
+                    const d = await loadJson<unknown>(["uartix-templates"]);
                     if (!d) return;
-                    if (d.groups) templateStore.importGroupsMeta(d.groups);
-                    templateStore.importTemplates(d.templates);
-                    setMsg(`已导入 ${d.templates.length} 个模板（副本）`);
+                    const obj = d as { kind?: string; data?: unknown };
+                    setMsg(await importDispatch(obj.kind ?? "uartix-templates", obj.data ?? d));
                   },
                 )}
                 {ioBlock(
@@ -263,12 +273,10 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     setMsg("控制画布已导出");
                   },
                   async () => {
-                    const d = await loadJson<Parameters<typeof controlsStore.importPage>[0] & { name?: string }>(["uartix-controls"]);
+                    const d = await loadJson<unknown>(["uartix-controls"]);
                     if (!d) return;
-                    const arr = Array.isArray(d) ? d[0] : d;
-                    const id = controlsStore.importPage(arr);
-                    setMsg(`已导入为新控制页（${(arr.cards ?? []).length} 卡片）`);
-                    void id;
+                    const obj = d as { kind?: string; data?: unknown };
+                    setMsg(await importDispatch(obj.kind ?? "uartix-controls", obj.data ?? d));
                   },
                 )}
                 {ioBlock(
@@ -279,10 +287,10 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     setMsg("命令库已导出");
                   },
                   async () => {
-                    const d = await loadJson<Parameters<typeof commandStore.importGroupsMerge>[0]>(["uartix-commands"]);
+                    const d = await loadJson<unknown>(["uartix-commands"]);
                     if (!d) return;
-                    commandStore.importGroupsMerge(d);
-                    setMsg("命令库已合并导入");
+                    const obj = d as { kind?: string; data?: unknown };
+                    setMsg(await importDispatch(obj.kind ?? "uartix-commands", obj.data ?? d));
                   },
                 )}
                 <div className="set-io-hint">{t("set.ioHint")}</div>

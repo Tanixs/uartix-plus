@@ -8,6 +8,24 @@ mod serial;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // panic 日志：崩溃排查用（写入系统临时目录，追加模式）
+    std::panic::set_hook(Box::new(|info| {
+        use std::io::Write;
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join("uartix-plus-panic.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+            let _ = writeln!(f, "[ts={ts}ms] PANIC: {info}");
+            let _ = writeln!(
+                f,
+                "[ts={ts}ms] thread={:?} loc={:?}",
+                std::thread::current().name(),
+                info.location()
+            );
+        }
+    }));
     if std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS")
         .unwrap_or_default()
         .is_empty()

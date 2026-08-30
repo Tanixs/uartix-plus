@@ -23,6 +23,9 @@ function hexA(hex: string, alpha: number): string {
 
 type PathsFactory = NonNullable<uPlot.Series["paths"]>;
 
+/** 喂给 uPlot 的每通道显示点数上限（min/max 抽稀），与缓冲上限解耦，控制重绘成本 */
+const FED_CAP = 8000;
+
 const LINE_PATHS: Record<string, PathsFactory> = {
   linear: uPlot.paths.linear!() as PathsFactory,
   step: uPlot.paths.stepped!({ align: 1 }) as PathsFactory,
@@ -228,7 +231,10 @@ export function Plot2D() {
           width: settings.plotMode === "points" ? 0 : settings.lineWidth,
           show: ch.visible,
           spanGaps: true,
-          paths: LINE_PATHS[settings.lineStyle],
+          paths:
+            settings.stack && settings.lineStyle === "smooth"
+              ? LINE_PATHS.linear
+              : LINE_PATHS[settings.lineStyle],
           points: { show: settings.plotMode === "points", size: 3 },
           value: (_u: uPlot, v: number | null) => fmtVal(v),
         })),
@@ -537,7 +543,7 @@ export function Plot2D() {
       },
     };
 
-    const aligned = plotStore.buildAligned();
+    const aligned = plotStore.buildAligned(FED_CAP);
     const data: uPlot.AlignedData = [aligned.x, ...aligned.cols];
     fedXRef.current = aligned.x;
     const u = new uPlot(opts, data, chart);
@@ -588,12 +594,10 @@ export function Plot2D() {
       if (!u || !visible || !plotStore.isDirty()) return;
       plotStore.clearDirty();
       const settings = plotStore.getSnapshot().settings;
-      const aligned = plotStore.buildAligned();
+      const aligned = plotStore.buildAligned(FED_CAP);
       const data: uPlot.AlignedData = [aligned.x, ...aligned.cols];
-      fedXRef.current = aligned.x;
-      u.setData(data, false);
-      if (panRef.current || boxRef.current) return;
       const snap = plotStore.getSnapshot();
+      // 堆叠：先原地仿射变换再 setData —— 只触发一次重绘（旧实现 setData→变换→setScale 三次全量重绘）
       if (settings.stack) {
         const vis = snap.channels
           .map((ch, i) => ({ ch, i }))
@@ -637,8 +641,11 @@ export function Plot2D() {
             hi: mx,
           };
         });
-        u.setScale("y", { min: 0, max: 1 });
-      } else if (!yManualRef.current) {
+      }
+      fedXRef.current = aligned.x;
+      u.setData(data, false);
+      if (panRef.current || boxRef.current) return;
+      if (!settings.stack && !yManualRef.current) {
         if (settings.yMode === "zero") {
           let m = 0;
           plotStore.getSnapshot().channels.forEach((ch, i) => {
@@ -679,15 +686,21 @@ export function Plot2D() {
       if (settings.cursors) {
         const cur = cursorRef.current;
         if (cur.a != null && cur.b != null) {
+          // 在喂给图表的对齐数据上插值：游标存的是 X 轴坐标值（随 xSource 变化），
+          // 与 data[0] 同一坐标系；旧实现对原始毫秒时间戳插值导致测量恒钳在首点
           const rows = snap.channels
-            .filter((ch) => ch.visible)
-            .map((ch) => {
-              const d = plotStore.getChanData(ch.id);
-              const v1 = interpAt(d, cur.a as number);
-              const v2 = interpAt(d, cur.b as number);
+            .map((ch, i) => ({
+              name: ch.name,
+              color: ch.color,
+              fed: { t: xs as number[], v: data[i + 1] as number[] },
+            }))
+            .filter((x) => x.fed.t.length > 0)
+            .map((x) => {
+              const v1 = interpAt(x.fed, cur.a as number);
+              const v2 = interpAt(x.fed, cur.b as number);
               return {
-                name: ch.name,
-                color: ch.color,
+                name: x.name,
+                color: x.color,
                 v1,
                 v2,
                 dv: v1 != null && v2 != null ? v2 - v1 : null,
