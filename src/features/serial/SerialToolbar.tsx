@@ -1,23 +1,18 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import type { ParityMode } from "../../ipc/types";
 import * as store from "./serialStore";
 import { useSettings } from "../settings/settingsStore";
 import { t } from "../../i18n/strings";
 
 const BAUDS = [
-  9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1000000, 2000000,
-  3000000,
+  1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600,
+  1000000, 2000000, 3000000,
 ];
 
 export function SerialToolbar() {
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   useSettings(); // 语言切换时随设置重渲染
   const locked = s.status !== "disconnected";
-  const [baudText, setBaudText] = useState(String(s.config.baud));
-
-  useEffect(() => {
-    setBaudText(String(s.config.baud));
-  }, [s.config.baud]);
 
   const onConnect = async () => {
     if (s.status === "disconnected") {
@@ -72,23 +67,23 @@ export function SerialToolbar() {
           </option>
         ))}
       </select>
-      <input
+      <select
         className="input baud"
-        list="vs-bauds"
         disabled={locked}
-        value={baudText}
+        value={s.config.baud}
         title={t("tb.baud")}
-        onChange={(e) => {
-          setBaudText(e.target.value);
-          const v = parseInt(e.target.value, 10);
-          if (!Number.isNaN(v) && v > 0) store.setConfig({ baud: v });
-        }}
-      />
-      <datalist id="vs-bauds">
+        onChange={(e) => store.setConfig({ baud: Number(e.target.value) || 115200 })}
+      >
         {BAUDS.map((b) => (
-          <option key={b} value={b} />
+          <option key={b} value={b}>
+            {b}
+          </option>
         ))}
-      </datalist>
+        {/* 历史自定义波特率不在预设中时保留显示 */}
+        {!BAUDS.includes(s.config.baud) && (
+          <option value={s.config.baud}>{s.config.baud}</option>
+        )}
+      </select>
       <select
         className="input"
         disabled={locked}

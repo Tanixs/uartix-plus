@@ -23,6 +23,30 @@ pub fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))
 }
 
+#[derive(Serialize)]
+pub struct LocalAddr {
+    /// 网卡/接口名（如 以太网、WLAN、vEthernet (Default Switch)）
+    pub name: String,
+    /// IPv4 地址
+    pub ip: String,
+}
+
+#[tauri::command]
+pub fn list_local_addrs() -> Vec<LocalAddr> {
+    let mut out: Vec<LocalAddr> = Vec::new();
+    if let Ok(addrs) = if_addrs::get_if_addrs() {
+        for a in addrs {
+            if let if_addrs::IfAddr::V4(v4) = a.addr {
+                let ip = v4.ip.to_string();
+                if !out.iter().any(|x| x.ip == ip) {
+                    out.push(LocalAddr { name: a.name, ip });
+                }
+            }
+        }
+    }
+    out
+}
+
 #[tauri::command]
 pub fn save_binary_file(path: String, content: Vec<u8>) -> Result<(), String> {
     let mut f = File::create(&path).map_err(|e| format!("创建文件失败: {e}"))?;

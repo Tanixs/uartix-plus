@@ -62,6 +62,7 @@ pub fn run() {
             files::save_text_file,
             files::read_text_file,
             files::read_binary_file,
+            files::list_local_addrs,
             files::save_binary_file,
             files::hex_search
         ])

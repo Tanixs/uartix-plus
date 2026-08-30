@@ -108,17 +108,17 @@ function buildModel(
 
   // ---- 四轴（X 布局，机头朝 +X）----
   const darkMat = new THREE.MeshStandardMaterial({
-    color: 0x272c35,
+    color: 0x47505f,
     metalness: 0.35,
     roughness: 0.55,
   });
   const midMat = new THREE.MeshStandardMaterial({
-    color: 0x39414e,
+    color: 0x5c6678,
     metalness: 0.3,
     roughness: 0.5,
   });
   const metalMat = new THREE.MeshStandardMaterial({
-    color: 0x8b93a1,
+    color: 0x9aa3b1,
     metalness: 0.85,
     roughness: 0.3,
   });
@@ -146,17 +146,17 @@ function buildModel(
   });
   const props: THREE_NS.Group[] = [];
 
-  // 碳板机架：下主板 + 上盖板 + 4 铜柱
+  // 碳板机架：下主板 + 上盖板 + 4 铜柱（铜柱严格连接两板：0.07 → 0.26）
   const plate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.14, 0.78), darkMat);
   model.add(plate);
   const topPlate = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.08, 0.5), midMat);
   topPlate.position.set(-0.06, 0.3, 0);
   model.add(topPlate);
-  const standoffGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.17, 8);
+  const standoffGeo = new THREE.CylinderGeometry(0.028, 0.028, 0.19, 8);
   for (const sx of [1, -1]) {
     for (const sz of [1, -1]) {
       const so = new THREE.Mesh(standoffGeo, metalMat);
-      so.position.set(-0.06 + sx * 0.24, 0.22, sz * 0.18);
+      so.position.set(-0.06 + sx * 0.24, 0.165, sz * 0.18);
       model.add(so);
     }
   }
@@ -235,7 +235,8 @@ function buildModel(
   }
 
   // 四条斜臂 + 电机（铃 + 顶盖 + 桨帽）+ 双叶桨（对桨反向自转）
-  const armGeo = new THREE.BoxGeometry(0.09, 0.07, 0.82);
+  // 桨盘直径 0.72：相邻桨间隙 ≥0.34，绝不互相碰撞；电机沿臂外移到 0.78
+  const armGeo = new THREE.BoxGeometry(0.09, 0.07, 0.86);
   const bellGeo = new THREE.CylinderGeometry(0.1, 0.125, 0.15, 14);
   const bellTopGeo = new THREE.CylinderGeometry(0.06, 0.1, 0.05, 14);
   const hubGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.05, 10);
@@ -250,24 +251,24 @@ function buildModel(
     const inv = 1 / Math.SQRT2;
     const arm = new THREE.Mesh(armGeo, darkMat);
     arm.rotation.y = sx * sz > 0 ? Math.PI / 4 : -Math.PI / 4;
-    arm.position.set(sx * 0.45, 0.02, sz * 0.45);
+    arm.position.set(sx * 0.47, 0.02, sz * 0.47);
     model.add(arm);
 
     const bell = new THREE.Mesh(bellGeo, metalMat);
-    bell.position.set(sx * 0.72 * inv, 0.08, sz * 0.72 * inv);
+    bell.position.set(sx * 0.78 * inv, 0.08, sz * 0.78 * inv);
     model.add(bell);
     const bellTop = new THREE.Mesh(bellTopGeo, darkMat);
-    bellTop.position.set(sx * 0.72 * inv, 0.18, sz * 0.72 * inv);
+    bellTop.position.set(sx * 0.78 * inv, 0.18, sz * 0.78 * inv);
     model.add(bellTop);
 
     const prop = new THREE.Group();
-    prop.position.set(sx * 0.72 * inv, 0.22, sz * 0.72 * inv);
+    prop.position.set(sx * 0.78 * inv, 0.22, sz * 0.78 * inv);
     const hub = new THREE.Mesh(hubGeo, darkMat);
     prop.add(hub);
     for (const rot of [0, Math.PI]) {
       const blade = new THREE.Mesh(bladeGeo, accentSolid);
-      blade.scale.set(0.46, 0.012, 0.075);
-      blade.position.set(Math.cos(rot) * 0.23, 0.015, Math.sin(rot) * 0.23);
+      blade.scale.set(0.36, 0.012, 0.06);
+      blade.position.set(Math.cos(rot) * 0.18, 0.015, Math.sin(rot) * 0.18);
       blade.rotation.y = rot;
       prop.add(blade);
     }
@@ -275,7 +276,7 @@ function buildModel(
     props.push(prop);
   });
   model.userData.props = props;
-  addStickerArrow(model, THREE, 0.58, 1.0);
+  addStickerArrow(model, THREE, 0.555, 1.0);
 }
 
 export function View3D() {

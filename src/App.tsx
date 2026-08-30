@@ -558,6 +558,29 @@ function NetIfaceBar({ kind }: { kind: IfaceKind }) {
           onChange={(e) => serialStore.setNet({ remotePort: Number(e.target.value) || 0 })}
         />
       )}
+      {kind === "tcp-server" && (
+        <select
+          className="input"
+          value={s.net.localHost}
+          disabled={busy}
+          title="服务端监听地址：0.0.0.0 接受所有网卡连接，指定网卡则只接受发往该地址的连接"
+          onChange={(e) => serialStore.setNet({ localHost: e.target.value })}
+        >
+          <option value="0.0.0.0">0.0.0.0 (所有地址都将开启侦听)</option>
+          <option value="127.0.0.1">127.0.0.1 (本地回环地址)</option>
+          {s.localAddrs.map((a) => (
+            <option key={a.ip} value={a.ip}>
+              {a.ip} ({a.name})
+            </option>
+          ))}
+          {s.net.localHost &&
+            s.net.localHost !== "0.0.0.0" &&
+            s.net.localHost !== "127.0.0.1" &&
+            !s.localAddrs.some((a) => a.ip === s.net.localHost) && (
+              <option value={s.net.localHost}>{s.net.localHost} (自定义)</option>
+            )}
+        </select>
+      )}
       {kind !== "tcp-client" && (
         <input
           className="input baud"

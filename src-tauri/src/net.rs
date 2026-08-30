@@ -29,6 +29,9 @@ pub struct NetConfig {
     pub remote_host: String,
     pub remote_port: u16,
     pub local_port: u16,
+    /// 服务端监听地址（默认 0.0.0.0）
+    #[serde(default)]
+    pub local_host: String,
 }
 
 struct NetShared {
@@ -95,8 +98,18 @@ use std::io::Write;
 
 fn desc_of(cfg: &NetConfig) -> String {
     match cfg.kind.as_str() {
-        "tcp-server" => format!("0.0.0.0:{}", cfg.local_port),
+        "tcp-server" => format!("{}:{}", bind_host_of(cfg), cfg.local_port),
         _ => format!("{}:{}", cfg.remote_host, cfg.remote_port),
+    }
+}
+
+/// 服务端监听地址（空串回退 0.0.0.0）
+pub fn bind_host_of(cfg: &NetConfig) -> String {
+    let h = cfg.local_host.trim();
+    if h.is_empty() {
+        "0.0.0.0".into()
+    } else {
+        h.to_string()
     }
 }
 
@@ -301,10 +314,16 @@ fn spawn_tcp_server(
     cfg: NetConfig,
     my_epoch: u64,
 ) -> bool {
-    let listener = match TcpListener::bind(("0.0.0.0", cfg.local_port)) {
+    let bind_host = bind_host_of(&cfg);
+    let listener = match TcpListener::bind((bind_host.as_str(), cfg.local_port)) {
         Ok(l) => l,
         Err(e) => {
-            let _ = e;
+            emit_state(
+                app,
+                "disconnected",
+                None,
+                Some(format!("监听 {}:{} 失败: {e}", bind_host, cfg.local_port)),
+            );
             return false;
         }
     };

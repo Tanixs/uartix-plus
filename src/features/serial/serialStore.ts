@@ -13,6 +13,8 @@ export interface IfaceNetConfig {
   remoteHost: string;
   remotePort: number;
   localPort: number;
+  /** 服务端监听地址（tcp-server 用，默认 0.0.0.0） */
+  localHost: string;
 }
 
 export interface SerialSnapshot {
@@ -27,6 +29,8 @@ export interface SerialSnapshot {
   net: IfaceNetConfig;
   /** 最近一次 serial:state 事件里的连接描述（串口名 或 网络地址） */
   portName: string | null;
+  /** 本机网卡 IPv4 列表（服务端监听地址预设） */
+  localAddrs: { name: string; ip: string }[];
 }
 
 const DEFAULT_CONFIG: SerialConfig = {
@@ -41,6 +45,7 @@ const DEFAULT_NET: IfaceNetConfig = {
   remoteHost: "127.0.0.1",
   remotePort: 1346,
   localPort: 1347,
+  localHost: "0.0.0.0",
 };
 
 let snapshot: SerialSnapshot = {
@@ -54,6 +59,7 @@ let snapshot: SerialSnapshot = {
   iface: "serial",
   net: DEFAULT_NET,
   portName: null,
+  localAddrs: [],
 };
 
 const listeners = new Set<() => void>();
@@ -129,6 +135,11 @@ export async function init() {
   }, 500);
 
   set({ ports: await invoke<PortInfo[]>("list_ports") });
+  try {
+    set({ localAddrs: await invoke<{ name: string; ip: string }[]>("list_local_addrs") });
+  } catch {
+    /* 枚举失败时下拉仅保留预设项 */
+  }
 }
 
 export function setConfig(patch: Partial<SerialConfig>) {
@@ -165,6 +176,7 @@ export async function openPort() {
           remoteHost: snapshot.net.remoteHost,
           remotePort: snapshot.net.remotePort,
           localPort: snapshot.net.localPort,
+          localHost: snapshot.net.localHost,
         },
       });
     }
