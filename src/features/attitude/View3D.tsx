@@ -5,12 +5,47 @@ import type * as THREE_NS from "three";
 import type { OrbitControls as OrbitControlsType } from "three/examples/jsm/controls/OrbitControls.js";
 import type { GLTFLoader as GLTFLoaderType } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as store from "./attitudeStore";
-import type { EulerOrder } from "./attitudeStore";
+import type { BindKey, EulerOrder, FieldRef } from "./attitudeStore";
 import * as templateStore from "../protocol/templateStore";
+import type { FieldDef, FieldType } from "../../ipc/types";
+import { Flyout } from "../../shared/Flyout";
+import { IconChevron } from "../../shared/icons";
+import { useSettings } from "../settings/settingsStore";
 
 const ORDERS: EulerOrder[] = ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"];
 
 const deg2rad = (d: number) => (d * Math.PI) / 180;
+
+/** 可作为姿态来源的数值字段类型（ascii/csv 为文本类，csv 通道 id 动态生成无法静态绑定） */
+const NUMERIC_TYPES = new Set<FieldType>([
+  "uint8",
+  "int8",
+  "uint16",
+  "int16",
+  "uint32",
+  "int32",
+  "float32",
+  "float64",
+  "bcd",
+  "bits",
+]);
+
+const TYPE_LABEL: Record<FieldType, string> = {
+  uint8: "U8",
+  int8: "S8",
+  uint16: "U16",
+  int16: "S16",
+  uint32: "U32",
+  int32: "S32",
+  float32: "F32",
+  float64: "F64",
+  ascii: "文本",
+  bcd: "BCD",
+  bits: "位",
+  csv: "CSV",
+};
+
+const isNumericField = (f: FieldDef): boolean => NUMERIC_TYPES.has(f.type);
 
 type ModelSel = "uav" | "cube" | "cesium" | "custom";
 
@@ -294,6 +329,14 @@ export function View3D() {
   const [custom, setCustom] = useState<CustomMeta | null>(loadCustom);
   const [rot, setRot] = useState<number>(() => Number(localStorage.getItem(ROT_KEY) ?? 0));
   const [loadErr, setLoadErr] = useState<string | null>(null);
+  const settings = useSettings();
+  const zf = (settings.zoom || 100) / 100;
+  /** 级联选择器状态：tplId 为 null 表示第一层（模板列表），否则为该模板的字段层 */
+  const [pick, setPick] = useState<{
+    key: BindKey;
+    tplId: string | null;
+    anchor: HTMLElement;
+  } | null>(null);
 
   useEffect(() => {
     const mo = new MutationObserver(() => setThemeTick((t) => t + 1));
@@ -301,10 +344,27 @@ export function View3D() {
     return () => mo.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (!pick) return;
+    const close = () => setPick(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [pick]);
+
   const tpl = proto.rules.templates.find(
     (t) => t.id === attitude.config.templateId,
   );
-  const numericFields = (tpl?.fields ?? []).filter((f) => f.type !== "ascii");
+  const enabledTpls = proto.rules.templates.filter((t) => t.enabled);
+  const tplById = (id: string) =>
+    proto.rules.templates.find((t) => t.id === id);
+  const refInfo = (ref: FieldRef | null) => {
+    if (!ref) return { text: "—", title: "未绑定（点击选择，可跨已启用模板）" };
+    const t = tplById(ref.tplId);
+    const f = t?.fields.find((x) => x.id === ref.fieldId);
+    if (!t || !f)
+      return { text: "已失效", title: "绑定的模板或字段不存在，请重新选择" };
+    return { text: f.name, title: `${t.name} · ${f.name}` };
+  };
 
   useEffect(() => {
     let disposed = false;
@@ -496,10 +556,12 @@ export function View3D() {
 
   const onTemplateChange = (templateId: string) => {
     const t = proto.rules.templates.find((x) => x.id === templateId);
-    const patch = t
-      ? store.autoMatch(t.fields.filter((f) => f.type !== "ascii"))
-      : {};
-    store.setConfig({ templateId, ...patch });
+    store.setConfig({
+      templateId,
+      ...(t
+        ? store.autoMatch(templateId, t.fields.filter(isNumericField))
+        : {}),
+    });
   };
 
   const pickModel = async () => {
@@ -542,27 +604,32 @@ export function View3D() {
 
   const isEuler = attitude.config.mode === "euler";
   const isGltf = sel === "cesium" || sel === "custom";
-  const fieldSelect = (
-    value: string,
-    onChange: (v: string) => void,
-    label: string,
-  ) => (
-    <label className="v3d-field">
-      <span>{label}</span>
-      <select
-        className="input"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        <option value="">—</option>
-        {numericFields.map((f) => (
-          <option key={f.id} value={f.id}>
-            {f.name}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+  /** 单个变量选择器：按钮 + 两层级联浮层（已启用模板 → 数值字段） */
+  const refPicker = (label: string, key: BindKey) => {
+    const ref = attitude.config[key];
+    const info = refInfo(ref);
+    return (
+      <label className="v3d-field">
+        <span>{label}</span>
+        <button
+          type="button"
+          className="input v3d-ref-btn"
+          title={info.title}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (pick && pick.key === key) {
+              setPick(null);
+              return;
+            }
+            setPick({ key, tplId: null, anchor: e.currentTarget });
+          }}
+        >
+          <span className={`v3d-ref-name ${ref ? "" : "dim"}`}>{info.text}</span>
+          <IconChevron dir="down" size={10} />
+        </button>
+      </label>
+    );
+  };
 
   return (
     <div className="view3d">
@@ -645,7 +712,7 @@ export function View3D() {
             className="btn"
             onClick={() =>
               store.setConfig(
-                store.autoMatch(numericFields),
+                tpl ? store.autoMatch(tpl.id, tpl.fields.filter(isNumericField)) : {},
               )
             }
             title="按字段名关键词自动匹配（roll/pitch/yaw 或 qw/qx/qy/qz）"
@@ -655,9 +722,9 @@ export function View3D() {
         </div>
         {isEuler ? (
           <div className="v3d-bind-row">
-            {fieldSelect(attitude.config.roll, (v) => store.setConfig({ roll: v }), "Roll")}
-            {fieldSelect(attitude.config.pitch, (v) => store.setConfig({ pitch: v }), "Pitch")}
-            {fieldSelect(attitude.config.yaw, (v) => store.setConfig({ yaw: v }), "Yaw")}
+            {refPicker("Roll", "roll")}
+            {refPicker("Pitch", "pitch")}
+            {refPicker("Yaw", "yaw")}
             <label className="v3d-field">
               <span>顺序</span>
               <select
@@ -699,13 +766,109 @@ export function View3D() {
           </div>
         ) : (
           <div className="v3d-bind-row">
-            {fieldSelect(attitude.config.qw, (v) => store.setConfig({ qw: v }), "W")}
-            {fieldSelect(attitude.config.qx, (v) => store.setConfig({ qx: v }), "X")}
-            {fieldSelect(attitude.config.qy, (v) => store.setConfig({ qy: v }), "Y")}
-            {fieldSelect(attitude.config.qz, (v) => store.setConfig({ qz: v }), "Z")}
+            {refPicker("W", "qw")}
+            {refPicker("X", "qx")}
+            {refPicker("Y", "qy")}
+            {refPicker("Z", "qz")}
           </div>
         )}
       </div>
+      {pick && (
+        <Flyout anchor={pick.anchor} zf={zf} minWidth={190}>
+          {pick.tplId === null ? (
+            <>
+              <div className="v3d-crumb">
+                <span className="v3d-crumb-cur">选择模板</span>
+              </div>
+              <button
+                type="button"
+                className="ctx-item"
+                onClick={() => {
+                  store.setConfig(
+                    { [pick.key]: null } as Partial<typeof attitude.config>,
+                  );
+                  setPick(null);
+                }}
+              >
+                {attitude.config[pick.key] ? "○" : "●"} 清除绑定
+              </button>
+              <div className="ctx-group">已启用模板</div>
+              {enabledTpls.length === 0 && (
+                <div className="ctx-group">暂无已启用模板</div>
+              )}
+              {enabledTpls.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className="ctx-item"
+                  onClick={() => setPick({ ...pick, tplId: t.id })}
+                >
+                  <span className="ctx-item-l">
+                    <span className="tpl-dot" style={{ background: t.color }} />
+                    {t.name}
+                  </span>
+                  <span className="ctx-arrow">
+                    <IconChevron size={12} />
+                  </span>
+                </button>
+              ))}
+            </>
+          ) : (
+            <>
+              <div className="v3d-crumb">
+                <button
+                  type="button"
+                  className="v3d-crumb-btn"
+                  onClick={() => setPick({ ...pick, tplId: null })}
+                >
+                  <span
+                    className="ctx-arrow"
+                    style={{ transform: "rotate(180deg)" }}
+                  >
+                    <IconChevron size={12} />
+                  </span>
+                  返回
+                </button>
+                <span className="v3d-crumb-sep">/</span>
+                <span className="v3d-crumb-cur" title={tplById(pick.tplId)?.name}>
+                  {tplById(pick.tplId)?.name ?? "未知模板"}
+                </span>
+              </div>
+              <div className="ctx-group">数值字段</div>
+              {(tplById(pick.tplId)?.fields ?? [])
+                .filter(isNumericField)
+                .map((f) => {
+                  const cur = attitude.config[pick.key];
+                  const active =
+                    cur !== null &&
+                    cur.tplId === pick.tplId &&
+                    cur.fieldId === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className="ctx-item"
+                      onClick={() => {
+                        store.setConfig({
+                          [pick.key]: {
+                            tplId: pick.tplId as string,
+                            fieldId: f.id,
+                          },
+                        } as Partial<typeof attitude.config>);
+                        setPick(null);
+                      }}
+                    >
+                      <span className="ctx-item-l">
+                        {active ? "●" : "○"} {f.name}
+                      </span>
+                      <span className="ctx-cur">{TYPE_LABEL[f.type]}</span>
+                    </button>
+                  );
+                })}
+            </>
+          )}
+        </Flyout>
+      )}
     </div>
   );
 }

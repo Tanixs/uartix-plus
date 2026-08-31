@@ -197,6 +197,9 @@ export default function App() {
   const [perfOn, setPerfOn] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [sysDark, setSysDark] = useState(
+    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
   const [groupBoxes, setGroupBoxes] = useState<
     { id: string; left: number; top: number; width: number; height: number }[]
   >([]);
@@ -207,21 +210,49 @@ export default function App() {
   renderTick += 1;
 
   useEffect(() => {
+    // 跟随系统时监听系统配色变化；navy 归暗色系、ocean 归亮色系（dockview 基础主题）
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
+      const base =
+        theme === "system" ? (mq.matches ? "dark" : "light") : theme === "navy" ? "dark" : theme === "ocean" ? "light" : theme;
       document.documentElement.dataset.theme =
-        theme === "system" ? (mq.matches ? "dark" : "light") : theme;
+        theme === "system" ? base : theme;
     };
     apply();
-    if (theme === "system") {
-      mq.addEventListener("change", apply);
-      return () => mq.removeEventListener("change", apply);
-    }
+    const onChange = () => {
+      setSysDark(mq.matches);
+      apply();
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
   }, [theme]);
+
+  const dockBase =
+    theme === "system"
+      ? sysDark
+        ? "dark"
+        : "light"
+      : theme === "navy"
+        ? "dark"
+        : theme === "ocean"
+          ? "light"
+          : theme;
 
   useEffect(() => {
     document.documentElement.style.zoom = `${settings.zoom}%`;
   }, [settings.zoom]);
+
+  // 保险：dockview 容器类名 DOM 级同步（部分版本对 className prop 变化不响应，
+  // 导致主题切换后面板框架停留在旧配色；变量覆写已解耦，这里兜底类名本身）
+  useEffect(() => {
+    const el = shellRef.current?.querySelector?.(
+      ".dockview-theme-dark, .dockview-theme-light",
+    );
+    if (el) {
+      el.classList.toggle("dockview-theme-dark", dockBase === "dark");
+      el.classList.toggle("dockview-theme-light", dockBase !== "dark");
+    }
+  }, [dockBase]);
 
   useEffect(() => {
     if (perfOn !== settings.perfHud) setPerfOn(settings.perfHud);
@@ -445,7 +476,7 @@ export default function App() {
           components={panelComponents}
           onReady={onReady}
           className={
-            theme === "dark" ? "dockview-theme-dark" : "dockview-theme-light"
+            dockBase === "dark" ? "dockview-theme-dark" : "dockview-theme-light"
           }
         />
         {editLayout &&

@@ -3,16 +3,25 @@ import type { FieldDef, FramesEventPayload } from "../../ipc/types";
 
 export type EulerOrder = "XYZ" | "XZY" | "YXZ" | "YZX" | "ZXY" | "ZYX";
 
+/** 变量引用：指向某个模板下的某个字段（7 个选择器可各自跨模板绑定） */
+export interface FieldRef {
+  tplId: string;
+  fieldId: string;
+}
+
+export type BindKey = "roll" | "pitch" | "yaw" | "qw" | "qx" | "qy" | "qz";
+
 export interface AttitudeConfig {
+  /** 默认模板：自动匹配来源，也是旧版单 fieldId 配置的迁移目标 */
   templateId: string;
   mode: "euler" | "quaternion";
-  roll: string;
-  pitch: string;
-  yaw: string;
-  qw: string;
-  qx: string;
-  qy: string;
-  qz: string;
+  roll: FieldRef | null;
+  pitch: FieldRef | null;
+  yaw: FieldRef | null;
+  qw: FieldRef | null;
+  qx: FieldRef | null;
+  qy: FieldRef | null;
+  qz: FieldRef | null;
   order: EulerOrder;
   invertX: boolean;
   invertY: boolean;
@@ -47,13 +56,13 @@ export const values: AttitudeValues = {
 const DEFAULT_CONFIG: AttitudeConfig = {
   templateId: "",
   mode: "euler",
-  roll: "",
-  pitch: "",
-  yaw: "",
-  qw: "",
-  qx: "",
-  qy: "",
-  qz: "",
+  roll: null,
+  pitch: null,
+  yaw: null,
+  qw: null,
+  qx: null,
+  qy: null,
+  qz: null,
   order: "ZYX",
   invertX: false,
   invertY: false,
@@ -61,11 +70,40 @@ const DEFAULT_CONFIG: AttitudeConfig = {
   model: "uav",
 };
 
+/** 旧配置（roll 等为单 fieldId 字符串）迁移为 {tplId, fieldId}，映射到当时的默认模板 */
+function migrateRef(v: unknown, tplId: string): FieldRef | null {
+  if (typeof v === "string") {
+    return v && tplId ? { tplId, fieldId: v } : null;
+  }
+  if (v && typeof v === "object") {
+    const r = v as Partial<FieldRef>;
+    if (typeof r.tplId === "string" && r.tplId && typeof r.fieldId === "string" && r.fieldId) {
+      return { tplId: r.tplId, fieldId: r.fieldId };
+    }
+  }
+  return null;
+}
+
 function loadConfig(): AttitudeConfig {
   try {
     const saved = localStorage.getItem("vs.attitude");
     if (saved) {
-      return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+      const raw = JSON.parse(saved) as Record<string, unknown>;
+      const tplId = typeof raw.templateId === "string" ? raw.templateId : "";
+      const cfg: AttitudeConfig = {
+        ...DEFAULT_CONFIG,
+        ...raw,
+        templateId: tplId,
+        roll: migrateRef(raw.roll, tplId),
+        pitch: migrateRef(raw.pitch, tplId),
+        yaw: migrateRef(raw.yaw, tplId),
+        qw: migrateRef(raw.qw, tplId),
+        qx: migrateRef(raw.qx, tplId),
+        qy: migrateRef(raw.qy, tplId),
+        qz: migrateRef(raw.qz, tplId),
+      };
+      localStorage.setItem("vs.attitude", JSON.stringify(cfg));
+      return cfg;
     }
   } catch {
     localStorage.removeItem("vs.attitude");
@@ -104,11 +142,18 @@ export async function init() {
   initialized = true;
   await listen<FramesEventPayload>("parser:frames", (e) => {
     const cfg = snapshot.config;
-    if (!cfg.templateId) return;
+    const refs =
+      cfg.mode === "euler"
+        ? [cfg.roll, cfg.pitch, cfg.yaw]
+        : [cfg.qw, cfg.qx, cfg.qy, cfg.qz];
+    const tplIds = new Set<string>();
+    for (const r of refs) if (r) tplIds.add(r.tplId);
+    if (tplIds.size === 0) return;
     for (const row of e.payload.rows) {
-      if (!row.valid || row.tplId !== cfg.templateId) continue;
-      const get = (id: string): number | null => {
-        const f = row.fields.find((x) => x.id === id);
+      if (!row.valid || !tplIds.has(row.tplId)) continue;
+      const get = (ref: FieldRef | null): number | null => {
+        if (!ref || ref.tplId !== row.tplId) return null;
+        const f = row.fields.find((x) => x.id === ref.fieldId);
         return f ? f.value : null;
       };
       if (cfg.mode === "euler") {
@@ -134,11 +179,13 @@ export async function init() {
   });
 }
 
-export function autoMatch(fields: FieldDef[]): Partial<AttitudeConfig> {
-  const find = (...kws: string[]): string =>
-    fields.find((f) =>
-      kws.some((k) => f.name.toLowerCase().includes(k.toLowerCase())),
-    )?.id ?? "";
+export function autoMatch(tplId: string, fields: FieldDef[]): Partial<AttitudeConfig> {
+  const find = (...kws: string[]): FieldRef | null => {
+    const f = fields.find((x) =>
+      kws.some((k) => x.name.toLowerCase().includes(k.toLowerCase())),
+    );
+    return f ? { tplId, fieldId: f.id } : null;
+  };
   return {
     roll: find("roll", "横滚"),
     pitch: find("pitch", "俯仰"),

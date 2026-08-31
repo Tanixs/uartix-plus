@@ -13,6 +13,7 @@ import * as commandStore from "../controls/commandStore";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import appIcon from "../../assets/icon.svg";
+import avatarUrl from "../../assets/avatar.png";
 
 const PRESETS: { key: WorkspacePreset; label: string; desc: string }[] = [
   { key: "proto", label: t("set.preset.proto"), desc: "画布 + 属性 + Hex" },
@@ -155,9 +156,18 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                 ))}
                 {row(t("set.theme"), (
                   <div className="set-seg">
-                    {(["dark", "light", "system"] as const).map((th) => (
-                      <button key={th} className={settings.theme === th ? "on" : ""} onClick={() => patch({ theme: th })}>
-                        {th === "dark" ? t("set.theme.dark") : th === "light" ? t("set.theme.light") : t("set.theme.system")}
+                    {(["dark", "light", "navy", "ocean", "system"] as const).map((th) => (
+                      <button key={th} className={settings.theme === th ? "on" : ""} onClick={() => {
+                        patch({ theme: th });
+                        // 即时同步 DOM（不等 effect 时序）；system 立即解析一次
+                        document.documentElement.dataset.theme =
+                          th === "system"
+                            ? window.matchMedia("(prefers-color-scheme: dark)").matches
+                              ? "dark"
+                              : "light"
+                            : th;
+                      }}>
+                        {th === "dark" ? t("set.theme.dark") : th === "light" ? t("set.theme.light") : th === "navy" ? t("set.theme.navy") : th === "ocean" ? t("set.theme.ocean") : t("set.theme.system")}
                       </button>
                     ))}
                   </div>
@@ -199,7 +209,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                   <div className="set-seg">
                     {([48, 60, 72, 90, 110] as const).map((c) => (
                       <button key={c} className={settings.cellSize === c ? "on" : ""} onClick={() => patch({ cellSize: c })}>
-                        {c === 48 ? "48 微型" : c === 60 ? "60 极小" : c === 72 ? "72 紧凑" : c === 90 ? "90 标准" : "110 宽松"}
+                        {c === 48 ? "48 紧凑" : c === 60 ? "60 标准" : c === 72 ? "72 宽松" : c === 90 ? "90 更宽松" : "110 超宽松"}
                       </button>
                     ))}
                   </div>
@@ -297,7 +307,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
               </>
             )}
             {tab === "about" && (
-              <>
+              <div className="set-about-rows">
                 <div className="set-about-head">
                   <img src={appIcon} alt="Uartix+" width={56} height={56} />
                   <div>
@@ -306,6 +316,16 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                   </div>
                 </div>
                 {row(t("set.version"), <span className="set-mono">{appVersion ? `${appVersion} (M7)` : "0.2.0 (M7)"}</span>)}
+                {row("作者", (
+                  <button
+                    className="author-link"
+                    onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl("http://larix.teuioe.cn/"))}
+                    title="访问作者主页"
+                  >
+                    <img src={avatarUrl} alt="Tanix" width={22} height={22} className="author-avatar" />
+                    <span className="author-name">Tanix</span>
+                  </button>
+                ))}
                 {row("官网", (
                   <button className="btn" onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl("https://larix.teuioe.cn/uartix-plus"))}>
                     larix.teuioe.cn/uartix-plus
@@ -329,7 +349,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     {updState.msg && <span className="qk-fhint">{updState.msg}</span>}
                   </div>
                 ), t("set.checkUpdate.tip"))}
-              </>
+              </div>
             )}
             {msg && <div className="set-msg">{msg}</div>}
           </div>

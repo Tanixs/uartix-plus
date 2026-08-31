@@ -355,6 +355,12 @@ export function HexView() {
     const unsubB = templateStore.subscribe(() => {
       dirtyRef.current = true;
     });
+    // 主题切换 → 置脏重绘（draw 每次实时读 CSS 变量，但此前主题变化不触发重绘，
+    // 浅色主题下画布停留在启动时的暗色底）
+    const mo = new MutationObserver(() => {
+      dirtyRef.current = true;
+    });
+    mo.observe(document.documentElement, { attributeFilter: ["data-theme"] });
     const loop = () => {
       if (dirtyRef.current) {
         dirtyRef.current = false;
@@ -368,6 +374,7 @@ export function HexView() {
       cancelAnimationFrame(raf);
       unsubA();
       unsubB();
+      mo.disconnect();
     };
   }, []);
 

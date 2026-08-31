@@ -24,7 +24,7 @@ function hexA(hex: string, alpha: number): string {
 type PathsFactory = NonNullable<uPlot.Series["paths"]>;
 
 /** 喂给 uPlot 的每通道显示点数上限（min/max 抽稀），与缓冲上限解耦，控制重绘成本 */
-const FED_CAP = 8000;
+const FED_CAP = 16000;
 
 const LINE_PATHS: Record<string, PathsFactory> = {
   linear: uPlot.paths.linear!() as PathsFactory,
@@ -81,13 +81,13 @@ export function Plot2D() {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [sub, setSub] = useState<null | "x" | "y">(null);
+  const [subPinned, setSubPinned] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const xRowRef = useRef<HTMLDivElement | null>(null);
   const yRowRef = useRef<HTMLDivElement | null>(null);
   const subTimer = useRef<number | null>(null);
   const [, setTick] = useState(0);
   const [followState, setFollowState] = useState(true);
-  const [showFollowChip, setShowFollowChip] = useState(false);
   const fedXRef = useRef<number[]>([]);
   const yManualRef = useRef(false);
   const affineRef = useRef<({ a: number; b: number } | null)[]>([]);
@@ -99,6 +99,8 @@ export function Plot2D() {
     b: null,
   });
   const activeCursorRef = useRef<null | "a" | "b">(null);
+  const yCurInitRef = useRef(false);
+  const [backlog, setBacklog] = useState(0);
   const [measure, setMeasure] = useState<{
     dt: string;
     rows: {
@@ -207,6 +209,7 @@ export function Plot2D() {
           grid: { stroke: settings.grid ? gridColor : "transparent", width: 1 },
           ticks: { stroke: gridColor },
           labelSize: 0,
+          font: '10px "Cascadia Mono", Consolas, monospace',
           values:
             settings.xSource === "time"
               ? undefined
@@ -219,6 +222,7 @@ export function Plot2D() {
           stroke: axisColor,
           grid: { stroke: settings.grid ? gridColor : "transparent", width: 1 },
           ticks: { stroke: gridColor },
+          font: '10px "Cascadia Mono", Consolas, monospace',
           values: (_u, splits) =>
             settings.stack ? [] : splits.map((v) => fmtVal(v)),
         },
@@ -245,6 +249,52 @@ export function Plot2D() {
             const ctx = u.ctx;
             const xs = fedXRef.current;
             const sx = u.scales.x;
+            /** 本帧已放置的徽标矩形，用于防重叠（A/B/最新 挤在一起时自动换行） */
+            const badgeRects: { x: number; y: number; w: number; h: number }[] = [];
+            /** 顶部/底部徽标标签（填充色块 + 白字），保证游标一眼可见 */
+            const drawBadge = (
+              px: number,
+              py: number,
+              label: string,
+              color: string,
+              side: "l" | "r" | "tr",
+            ) => {
+              ctx.save();
+              ctx.font = 'bold 11px "Segoe UI", sans-serif';
+              const tw = ctx.measureText(label).width;
+              const bw = tw + 10;
+              let bx: number;
+              let by = py;
+              if (side === "tr") {
+                bx = px + 6 + bw > u.bbox.left + u.bbox.width ? px - 6 - bw : px + 6;
+              } else {
+                bx = side === "l" ? px + 6 : px - 6 - bw;
+                if (bx < u.bbox.left + 2) bx = u.bbox.left + 2;
+                if (bx + bw > u.bbox.left + u.bbox.width - 2)
+                  bx = u.bbox.left + u.bbox.width - 2 - bw;
+              }
+              // 防重叠：与已放置徽标碰撞则下移一行（最多 3 行）
+              for (let row = 0; row < 3; row++) {
+                const cand = { x: bx, y: by, w: bw, h: 16 };
+                const clash = badgeRects.some(
+                  (r) =>
+                    cand.x < r.x + r.w + 4 &&
+                    r.x < cand.x + cand.w + 4 &&
+                    cand.y < r.y + r.h + 2 &&
+                    r.y < cand.y + cand.h + 2,
+                );
+                if (!clash) break;
+                by += 18;
+              }
+              badgeRects.push({ x: bx, y: by, w: bw, h: 16 });
+              ctx.fillStyle = color;
+              ctx.fillRect(bx, by - 8, bw, 16);
+              ctx.fillStyle = "#fff";
+              ctx.textAlign = "left";
+              ctx.fillText(label, bx + 5, by + 4);
+              ctx.restore();
+            };
+            /** 竖直参考线（游标/最新线）：2px 实线 + 上下三角旗标 + 徽标；越界时画边缘指示箭头 */
             const drawV = (
               val: number,
               color: string,
@@ -254,11 +304,34 @@ export function Plot2D() {
               if (!Number.isFinite(val)) return;
               if (sx.min == null || sx.max == null || sx.max === sx.min) return;
               const frac = (val - sx.min) / (sx.max - sx.min);
-              if (frac < 0 || frac > 1) return;
+              if (frac < -0.02 || frac > 1.02) {
+                // 视野外：贴边画指示箭头，提示游标在可见区间之外
+                const ex =
+                  frac < 0 ? u.bbox.left : u.bbox.left + u.bbox.width;
+                const dir = frac < 0 ? 1 : -1;
+                ctx.save();
+                ctx.fillStyle = hexA(color, 0.9);
+                ctx.beginPath();
+                ctx.moveTo(ex, u.bbox.top + 8);
+                ctx.lineTo(ex + dir * 8, u.bbox.top + 15);
+                ctx.lineTo(ex, u.bbox.top + 22);
+                ctx.closePath();
+                ctx.fill();
+                ctx.font = 'bold 10px "Segoe UI", sans-serif';
+                ctx.fillStyle = color;
+                ctx.textAlign = frac < 0 ? "left" : "right";
+                ctx.fillText(
+                  label,
+                  frac < 0 ? ex + 11 : ex - 11,
+                  u.bbox.top + 19,
+                );
+                ctx.restore();
+                return;
+              }
               const px = u.bbox.left + frac * u.bbox.width;
               ctx.save();
               ctx.strokeStyle = color;
-              ctx.lineWidth = dash ? 1 : 1.5;
+              ctx.lineWidth = dash ? 1 : 2;
               if (dash) ctx.setLineDash([5, 4]);
               ctx.beginPath();
               ctx.moveTo(px, u.bbox.top);
@@ -266,21 +339,79 @@ export function Plot2D() {
               ctx.stroke();
               ctx.setLineDash([]);
               if (!dash) {
+                // 上下两端三角旗标
                 ctx.fillStyle = color;
                 ctx.beginPath();
-                ctx.moveTo(px - 4, u.bbox.top);
-                ctx.lineTo(px + 4, u.bbox.top);
-                ctx.lineTo(px, u.bbox.top + 6);
+                ctx.moveTo(px - 5, u.bbox.top);
+                ctx.lineTo(px + 5, u.bbox.top);
+                ctx.lineTo(px, u.bbox.top + 7);
+                ctx.closePath();
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(px - 5, u.bbox.top + u.bbox.height);
+                ctx.lineTo(px + 5, u.bbox.top + u.bbox.height);
+                ctx.lineTo(px, u.bbox.top + u.bbox.height - 7);
                 ctx.closePath();
                 ctx.fill();
               }
-              ctx.fillStyle = color;
-              ctx.font = '10px "Segoe UI", sans-serif';
-              ctx.textAlign =
-                px > u.bbox.left + u.bbox.width - 46 ? "right" : "left";
-              const lx = px > u.bbox.left + u.bbox.width - 46 ? px - 4 : px + 4;
-              ctx.fillText(label, lx, u.bbox.top + 14);
               ctx.restore();
+              drawBadge(px, u.bbox.top + 12, label, color, "tr");
+            };
+            /** 水平游标（Y 轴测量）：2px 横线 + 左右三角旗标 + 徽标；越界时画边缘指示 */
+            const drawH = (val: number, color: string, label: string) => {
+              const sy = u.scales.y;
+              if (
+                !Number.isFinite(val) ||
+                sy.min == null ||
+                sy.max == null ||
+                sy.max === sy.min
+              )
+                return;
+              const frac = (sy.max - val) / (sy.max - sy.min);
+              if (frac < -0.02 || frac > 1.02) {
+                const ey =
+                  frac < 0 ? u.bbox.top : u.bbox.top + u.bbox.height;
+                const dir = frac < 0 ? 1 : -1;
+                ctx.save();
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.moveTo(u.bbox.left + 8, ey);
+                ctx.lineTo(u.bbox.left + 15, ey + dir * 8);
+                ctx.lineTo(u.bbox.left + 22, ey);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+                return;
+              }
+              const py = u.bbox.top + frac * u.bbox.height;
+              ctx.save();
+              ctx.strokeStyle = color;
+              ctx.lineWidth = 2;
+              ctx.beginPath();
+              ctx.moveTo(u.bbox.left, py);
+              ctx.lineTo(u.bbox.left + u.bbox.width, py);
+              ctx.stroke();
+              ctx.fillStyle = color;
+              ctx.beginPath();
+              ctx.moveTo(u.bbox.left, py - 5);
+              ctx.lineTo(u.bbox.left, py + 5);
+              ctx.lineTo(u.bbox.left + 7, py);
+              ctx.closePath();
+              ctx.fill();
+              ctx.beginPath();
+              ctx.moveTo(u.bbox.left + u.bbox.width, py - 5);
+              ctx.lineTo(u.bbox.left + u.bbox.width, py + 5);
+              ctx.lineTo(u.bbox.left + u.bbox.width - 7, py);
+              ctx.closePath();
+              ctx.fill();
+              ctx.restore();
+              drawBadge(
+                u.bbox.left + u.bbox.width,
+                py - 10 < u.bbox.top + 8 ? py + 12 : py - 10,
+                label,
+                color,
+                "r",
+              );
             };
             if (xs.length > 0) {
               drawV(xs[0], dimColor, true, "起");
@@ -319,7 +450,9 @@ export function Plot2D() {
               (["a", "b"] as const).forEach((k) => {
                 const tv = cur[k];
                 if (tv == null) return;
-                drawV(tv, k === "a" ? "#18b893" : "#e8a13c", false, k.toUpperCase());
+                const color = k === "a" ? "#18b893" : "#e8a13c";
+                if (st.cursorMode === "y") drawH(tv, color, k.toUpperCase());
+                else drawV(tv, color, false, k.toUpperCase());
               });
             }
             const box = boxRef.current;
@@ -361,8 +494,10 @@ export function Plot2D() {
             };
             const zoomY = (clientY: number, k: number) => {
               const sy = u.scales.y;
-              let min = sy.min ?? 0;
-              let max = sy.max ?? 1;
+              // Y 范围未就绪时跳过（否则会围绕 [0,1] 伪范围缩放并锁死 Y 手动态）
+              if (sy.min == null || sy.max == null) return;
+              let min = sy.min;
+              let max = sy.max;
               if (min === max) {
                 min -= 1;
                 max += 1;
@@ -377,13 +512,21 @@ export function Plot2D() {
               yManualRef.current = true;
             };
             u.root.addEventListener("dblclick", () => {
+              // 双击 = 保形回实时：保持当前 X 窗宽与 Y 范围不变，仅把窗口平移到最新数据
               setFollow(true);
-              yManualRef.current = false;
-              u.setScale("y", {
-                min: undefined as unknown as number,
-                max: undefined as unknown as number,
-              });
-              u.redraw();
+              const xs = fedXRef.current;
+              if (xs.length) {
+                const sx = u.scales.x;
+                const span = Math.max(
+                  (sx.max ?? 0) - (sx.min ?? 0),
+                  settingsRef.current.xSource === "time" ? 10 : 200,
+                );
+                const last = xs[xs.length - 1];
+                u.setScale("x", {
+                  min: last - span * 0.95,
+                  max: last + span * 0.05,
+                });
+              }
             });
             u.root.addEventListener(
               "wheel",
@@ -394,10 +537,23 @@ export function Plot2D() {
                   e.clientX < rect.left &&
                   e.clientY >= rect.top &&
                   e.clientY <= rect.bottom;
+                const inXZone =
+                  e.clientY > rect.bottom &&
+                  e.clientX >= rect.left &&
+                  e.clientX <= rect.right;
                 const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
                 const k = Math.exp(dy * 0.0012);
-                if (inYZone) zoomY(e.clientY, k);
-                else zoomX(e.clientX, k);
+                if (inYZone) {
+                  // Y 轴区滚轮：只缩 Y
+                  zoomY(e.clientY, k);
+                } else if (inXZone) {
+                  // X 轴区滚轮：只缩 X
+                  zoomX(e.clientX, k);
+                } else {
+                  // 图区滚轮：X/Y 等比缩放，围绕鼠标位置（地图式缩放手感）
+                  zoomX(e.clientX, k);
+                  zoomY(e.clientY, k);
+                }
               },
               { passive: false },
             );
@@ -412,17 +568,34 @@ export function Plot2D() {
                 return;
               if (e.button === 0 && settingsRef.current.cursors) {
                 const cur = cursorRef.current;
-                const pick = (t: number | null) => {
+                const isY = settingsRef.current.cursorMode === "y";
+                const sy = u.scales.y;
+                const pickY = (v: number | null) => {
+                  if (
+                    v == null ||
+                    sy.min == null ||
+                    sy.max == null ||
+                    sy.max === sy.min
+                  )
+                    return Infinity;
+                  const py =
+                    r.top + ((sy.max - v) / (sy.max - sy.min)) * r.height;
+                  // 钳制到绘图区内：游标越界贴边时（边缘指示箭头处）也能抓到
+                  const cy = Math.min(r.bottom - 2, Math.max(r.top + 2, py));
+                  return Math.abs(e.clientY - cy);
+                };
+                const pickX = (t: number | null) => {
                   if (t == null) return Infinity;
                   const sx = u.scales.x;
                   if (sx.min == null || sx.max == null) return Infinity;
                   const px =
                     r.left + ((t - sx.min) / (sx.max - sx.min)) * r.width;
-                  return Math.abs(e.clientX - px);
+                  const cx = Math.min(r.right - 2, Math.max(r.left + 2, px));
+                  return Math.abs(e.clientX - cx);
                 };
-                const da = pick(cur.a);
-                const db = pick(cur.b);
-                if (Math.min(da, db) <= 24) {
+                const da = isY ? pickY(cur.a) : pickX(cur.a);
+                const db = isY ? pickY(cur.b) : pickX(cur.b);
+                if (Math.min(da, db) <= 32) {
                   activeCursorRef.current = da <= db ? "a" : "b";
                   e.preventDefault();
                   return;
@@ -452,16 +625,37 @@ export function Plot2D() {
               }
             };
             const onMove = (e: MouseEvent) => {
+              // 卡死保护：按键全部松开但 mouseup 丢失（如在窗口外释放）→ 复位拖拽状态
+              if (e.buttons === 0) {
+                if (panRef.current || boxRef.current || activeCursorRef.current) {
+                  panRef.current = null;
+                  boxRef.current = null;
+                  activeCursorRef.current = null;
+                }
+              }
               if (activeCursorRef.current) {
                 const r = overRect();
-                const sx = u.scales.x;
-                if (sx.min != null && sx.max != null) {
-                  const t = u.posToVal(e.clientX - r.left, "x");
-                  cursorRef.current = {
-                    ...cursorRef.current,
-                    [activeCursorRef.current]: t,
-                  };
-                  u.redraw();
+                const isY = settingsRef.current.cursorMode === "y";
+                if (isY) {
+                  const sy = u.scales.y;
+                  if (sy.min != null && sy.max != null) {
+                    const v = u.posToVal(e.clientY - r.top, "y");
+                    cursorRef.current = {
+                      ...cursorRef.current,
+                      [activeCursorRef.current]: v,
+                    };
+                    u.redraw();
+                  }
+                } else {
+                  const sx = u.scales.x;
+                  if (sx.min != null && sx.max != null) {
+                    const t = u.posToVal(e.clientX - r.left, "x");
+                    cursorRef.current = {
+                      ...cursorRef.current,
+                      [activeCursorRef.current]: t,
+                    };
+                    u.redraw();
+                  }
                 }
                 return;
               }
@@ -490,12 +684,103 @@ export function Plot2D() {
                 u.redraw();
               }
             };
+            // 空闲态：鼠标靠近游标线时给出可拖拽光标反馈
+            const nearCursor = (e: MouseEvent) => {
+              if (panRef.current || boxRef.current || activeCursorRef.current)
+                return;
+              if (!settingsRef.current.cursors) return;
+              const r = overRect();
+              const sx = u.scales.x;
+              const sy = u.scales.y;
+              const cur = cursorRef.current;
+              const isY = settingsRef.current.cursorMode === "y";
+              const clamp = (v: number, lo: number, hi: number) =>
+                Math.min(hi, Math.max(lo, v));
+              let near = false;
+              const yMin = sy.min;
+              const yMax = sy.max;
+              const xMin = sx.min;
+              const xMax = sx.max;
+              if (isY && yMin != null && yMax != null && yMax > yMin) {
+                const py = (v: number | null) =>
+                  v == null
+                    ? Infinity
+                    : clamp(
+                        r.top + ((yMax - v) / (yMax - yMin)) * r.height,
+                        r.top,
+                        r.bottom,
+                      );
+                near =
+                  Math.min(
+                    Math.abs(e.clientY - py(cur.a)),
+                    Math.abs(e.clientY - py(cur.b)),
+                  ) <= 10;
+              } else if (
+                !isY &&
+                xMin != null &&
+                xMax != null &&
+                xMax > xMin
+              ) {
+                const px = (t: number | null) =>
+                  t == null
+                    ? Infinity
+                    : clamp(
+                        r.left + ((t - xMin) / (xMax - xMin)) * r.width,
+                        r.left,
+                        r.right,
+                      );
+                near =
+                  Math.min(
+                    Math.abs(e.clientX - px(cur.a)),
+                    Math.abs(e.clientX - px(cur.b)),
+                  ) <= 10;
+              }
+              u.over.style.cursor = near ? (isY ? "ns-resize" : "ew-resize") : "";
+            };
             const onUp = (e: MouseEvent) => {
               if (activeCursorRef.current && e.button === 0) {
                 activeCursorRef.current = null;
                 return;
               }
-              if (panRef.current && e.button === 0) panRef.current = null;
+              if (panRef.current && e.button === 0) {
+                const p = panRef.current;
+                panRef.current = null;
+                // 单击（无拖动）+ 游标开启 + 有空缺标尺 → 在该位置铺设（先 A 后 B）
+                if (!p.moved && settingsRef.current.cursors) {
+                  const cur = cursorRef.current;
+                  if (cur.a == null || cur.b == null) {
+                    const r = overRect();
+                    const isY = settingsRef.current.cursorMode === "y";
+                    const sy = u.scales.y;
+                    const sx = u.scales.x;
+                    if (
+                      isY &&
+                      sy.min != null &&
+                      sy.max != null &&
+                      e.clientY >= r.top &&
+                      e.clientY <= r.bottom
+                    ) {
+                      const v = u.posToVal(e.clientY - r.top, "y");
+                      cursorRef.current =
+                        cur.a == null ? { ...cur, a: v } : { ...cur, b: v };
+                    } else if (
+                      !isY &&
+                      sx.min != null &&
+                      sx.max != null &&
+                      e.clientX >= r.left &&
+                      e.clientX <= r.right
+                    ) {
+                      const t = u.posToVal(e.clientX - r.left, "x");
+                      cursorRef.current =
+                        cur.a == null ? { ...cur, a: t } : { ...cur, b: t };
+                    } else {
+                      return;
+                    }
+                    u.redraw();
+                    return;
+                  }
+                }
+              }
               if (boxRef.current && e.button === 1) {
                 const b = boxRef.current;
                 boxRef.current = null;
@@ -525,15 +810,18 @@ export function Plot2D() {
               e.preventDefault();
               setMenuPos(null);
               setSub(null);
+              setSubPinned(false);
               setMenu({ x: e.clientX, y: e.clientY });
             };
             u.over.addEventListener("mousedown", onDown);
             window.addEventListener("mousemove", onMove);
+            window.addEventListener("mousemove", nearCursor);
             window.addEventListener("mouseup", onUp);
             u.root.addEventListener("contextmenu", onCtx);
             removers.push(() => {
               u.over.removeEventListener("mousedown", onDown);
               window.removeEventListener("mousemove", onMove);
+              window.removeEventListener("mousemove", nearCursor);
               window.removeEventListener("mouseup", onUp);
               u.root.removeEventListener("contextmenu", onCtx);
             });
@@ -553,10 +841,16 @@ export function Plot2D() {
     affineRef.current = channels.map(() => null);
     stackMetaRef.current = [];
     if (settings.cursors) {
-      const sx = u.scales.x;
-      const lo = sx.min ?? 0;
-      const hi = sx.max ?? 1;
-      cursorRef.current = { a: lo + (hi - lo) * 0.35, b: lo + (hi - lo) * 0.65 };
+      if (settings.cursorMode === "y") {
+        // Y 范围可能尚未就绪（自动范围在首个 tick 计算），延迟到 tick 初始化
+        cursorRef.current = { a: null, b: null };
+        yCurInitRef.current = false;
+      } else {
+        const sx = u.scales.x;
+        const lo = sx.min ?? 0;
+        const hi = sx.max ?? 1;
+        cursorRef.current = { a: lo + (hi - lo) * 0.35, b: lo + (hi - lo) * 0.65 };
+      }
     } else {
       cursorRef.current = { a: null, b: null };
     }
@@ -580,18 +874,13 @@ export function Plot2D() {
   }, [plot.channels, plot.settings, themeTick]);
 
   useEffect(() => {
-    let visible = true;
-    let io: IntersectionObserver | null = null;
-    const wrap = wrapRef.current;
-    if (wrap) {
-      io = new IntersectionObserver((es) => {
-        visible = es[0]?.isIntersecting ?? true;
-      });
-      io.observe(wrap);
-    }
     const timer = setInterval(() => {
       const u = uRef.current;
-      if (!u || !visible || !plotStore.isDirty()) return;
+      const wrap = wrapRef.current;
+      // 面板不可见（宽度为 0，如 dock 标签未激活）时才跳过；
+      // 不用 IntersectionObserver——CSS zoom 下其判定不稳定，会把可见面板误判为
+      // 不可见，导致数据停更、跟最新按钮"无反应"
+      if (!u || !wrap || wrap.clientWidth === 0 || !plotStore.isDirty()) return;
       plotStore.clearDirty();
       const settings = plotStore.getSnapshot().settings;
       const aligned = plotStore.buildAligned(FED_CAP);
@@ -646,13 +935,21 @@ export function Plot2D() {
       u.setData(data, false);
       if (panRef.current || boxRef.current) return;
       if (!settings.stack && !yManualRef.current) {
+        // Y 自适应只统计当前视野内的点（示波器行为）：
+        // 全量统计会让历史极值把 Y 拉爆，滚轮缩放到历史区后波形被压成占满面板
+        const xLo = u.scales.x.min;
+        const xHi = u.scales.x.max;
+        const inView = (j: number) =>
+          (xLo == null || (data[0] as number[])[j] >= xLo) &&
+          (xHi == null || (data[0] as number[])[j] <= xHi);
         if (settings.yMode === "zero") {
           let m = 0;
           plotStore.getSnapshot().channels.forEach((ch, i) => {
             if (!ch.visible) return;
             const ys = data[i + 1] as (number | null)[];
-            for (const v of ys) {
-              if (v !== null && Math.abs(v) > m) m = Math.abs(v);
+            for (let j = 0; j < ys.length; j++) {
+              const v = ys[j];
+              if (v !== null && inView(j) && Math.abs(v) > m) m = Math.abs(v);
             }
           });
           if (m > 0) u.setScale("y", { min: -m * 1.15, max: m * 1.15 });
@@ -662,8 +959,9 @@ export function Plot2D() {
           plotStore.getSnapshot().channels.forEach((ch, i) => {
             if (!ch.visible) return;
             const ys = data[i + 1] as (number | null)[];
-            for (const v of ys) {
-              if (v !== null && v !== undefined) {
+            for (let j = 0; j < ys.length; j++) {
+              const v = ys[j];
+              if (v !== null && v !== undefined && inView(j)) {
                 if (v < mn) mn = v;
                 if (v > mx) mx = v;
               }
@@ -682,10 +980,37 @@ export function Plot2D() {
         (sx.max ?? 0) - (sx.min ?? 0),
         settings.xSource === "time" ? 10 : 200,
       );
-      setShowFollowChip(!followXRef.current && last > (sx.max ?? 0));
+      // 浏览态积压：视野右边界之外的新点数量，提示用户回到跟随
+      let bl = 0;
+      if (sx.max != null) {
+        for (let i = xs.length - 1; i >= 0 && xs[i] > sx.max; i--) bl++;
+      }
+      setBacklog(bl);
+      // Y 游标延迟初始化：等 Y 自动范围就绪后按比例落位
+      if (
+        settings.cursors &&
+        settings.cursorMode === "y" &&
+        !yCurInitRef.current
+      ) {
+        const sy = u.scales.y;
+        if (sy.min != null && sy.max != null && sy.max > sy.min) {
+          cursorRef.current = {
+            a: sy.min + (sy.max - sy.min) * 0.35,
+            b: sy.min + (sy.max - sy.min) * 0.65,
+          };
+          yCurInitRef.current = true;
+        }
+      }
       if (settings.cursors) {
         const cur = cursorRef.current;
         if (cur.a != null && cur.b != null) {
+          if (settings.cursorMode === "y") {
+            // Y 轴游标：直接测两横线间的 ΔV
+            setMeasure({
+              dt: fmtVal((cur.b as number) - (cur.a as number)),
+              rows: [],
+            });
+          } else {
           // 在喂给图表的对齐数据上插值：游标存的是 X 轴坐标值（随 xSource 变化），
           // 与 data[0] 同一坐标系；旧实现对原始毫秒时间戳插值导致测量恒钳在首点
           const rows = snap.channels
@@ -714,6 +1039,7 @@ export function Plot2D() {
                 : `${dSpan.toFixed(1)} 格`,
             rows,
           });
+          }
         } else {
           setMeasure(null);
         }
@@ -721,16 +1047,43 @@ export function Plot2D() {
         setMeasure(null);
       }
       if (followXRef.current && xs.length > 1) {
+        // 跟随态：X 游标按窗口比例"骑行"，保持相对位置不变
+        const cur = cursorRef.current;
+        let fa: number | null = null;
+        let fb: number | null = null;
+        if (
+          settings.cursors &&
+          settings.cursorMode !== "y" &&
+          sx.min != null &&
+          sx.max != null &&
+          sx.max > sx.min
+        ) {
+          const s0 = sx.max - sx.min;
+          if (cur.a != null) fa = (cur.a - sx.min) / s0;
+          if (cur.b != null) fb = (cur.b - sx.min) / s0;
+        }
         // 保持总 span 恒定：min/max 之和恰为 span，避免每 tick 5% 复利放大
         u.setScale("x", {
           min: last - span * 0.95,
           max: last + span * 0.05,
         });
+        if (fa != null || fb != null) {
+          const nmin = last - span * 0.95;
+          cursorRef.current = {
+            a: fa != null ? nmin + fa * span : cur.a,
+            b: fb != null ? nmin + fb * span : cur.b,
+          };
+          u.redraw();
+        }
+      } else {
+        // 浏览态显式重绘：uPlot 的 setData(data,false) 只更新数据引用、不触发绘制
+        // （源码：仅 resetScales!==false 分支才 commit），而 yManual 时又跳过了
+        // 唯一的 setScale("y")，导致拖动/缩放后新点永远不上屏（须双击/滚轮才刷新）
+        u.redraw();
       }
     }, 120);
     return () => {
       clearInterval(timer);
-      io?.disconnect();
     };
   }, [plot.channels]);
 
@@ -793,7 +1146,7 @@ export function Plot2D() {
         <button
           className={`btn ${plot.settings.cursors ? "primary" : ""}`}
           onClick={() => plotStore.setSetting({ cursors: !plot.settings.cursors })}
-          title="双游标测量：拖动 A/B 竖线，显示 Δt 与各通道 ΔV"
+          title="双游标测量：X 轴（竖线测 Δt）/ Y 轴（横线测 ΔV），模式可在测量框内切换"
         >
           游标
         </button>
@@ -840,47 +1193,87 @@ export function Plot2D() {
           <div className="plot-empty">
             打开左侧「字段图例」的眼睛即可实时绘图
             <br />
-            左键拖动平移 · 中键框选缩放 · 双击复位 · 滚轮缩放（轴区对应轴） ·
-            右键图表更多设置
+            左键拖动平移 · 中键框选缩放 · 双击保形回实时 ·
+            滚轮缩放（轴区对应轴） · 右键图表更多设置
           </div>
         )}
-        {showFollowChip && (
+        {backlog > 0 && (
           <button
             className="plot-follow-chip"
             onClick={() => setFollow(true)}
             title="回到跟随模式，视野钉住最新数据"
           >
-            跟随最新 <IconChevron size={11} />
+            跟最新 · {backlog} 新点 <IconChevron size={11} />
           </button>
         )}
         {measure && (
           <div className="plot-measure">
             <div className="plot-measure-head">
               游标测量
-              <span>拖动 A/B 竖线 · 按住线头拖动</span>
+              <span className="pm-seg">
+                <button
+                  className={plot.settings.cursorMode === "x" ? "on" : ""}
+                  onClick={() => plotStore.setSetting({ cursorMode: "x" })}
+                  title="竖线游标：测时间差 Δt"
+                >
+                  X·Δt
+                </button>
+                <button
+                  className={plot.settings.cursorMode === "y" ? "on" : ""}
+                  onClick={() => plotStore.setSetting({ cursorMode: "y" })}
+                  title="横线游标：测幅值差 ΔV"
+                >
+                  Y·ΔV
+                </button>
+              </span>
+              <span>
+                {plot.settings.cursorMode === "y"
+                  ? "拖动 A/B 横线"
+                  : "拖动 A/B 竖线"}
+              </span>
+              <button
+                className="pm-clear"
+                onClick={() => {
+                  // 只清标尺、不关功能：A/B 置空后可在图上单击重新铺设
+                  cursorRef.current = { a: null, b: null };
+                  setMeasure(null);
+                  uRef.current?.redraw();
+                }}
+                title="清除 A/B 标尺（功能保持开启，在图上单击可重新铺设）"
+              >
+                清除
+              </button>
             </div>
-            <div className="plot-measure-dt">Δt = {measure.dt}</div>
-            <div className="plot-measure-grid plot-measure-head-row">
-              <span />
-              <span>A</span>
-              <span>B</span>
-              <span>Δ</span>
+            <div className="plot-measure-dt">
+              {plot.settings.cursorMode === "y" ? "ΔV" : "Δt"} = {measure.dt}
             </div>
-            {measure.rows.map((r) => (
-              <div key={r.name} className="plot-measure-grid">
-                <span
-                  className="tpl-dot"
-                  style={{ background: r.color }}
-                  title={r.name}
-                />
-                <span className="pm-name" title={r.name}>
-                  {r.name}
-                </span>
-                <span className="pm-val">{fmtVal(r.v1)}</span>
-                <span className="pm-val">{fmtVal(r.v2)}</span>
-                <span className="pm-dv">{r.dv != null ? fmtVal(r.dv) : "—"}</span>
-              </div>
-            ))}
+            {measure.rows.length > 0 && (
+              <>
+                <div className="plot-measure-grid plot-measure-head-row">
+                  <span />
+                  <span>A</span>
+                  <span>B</span>
+                  <span>Δ</span>
+                </div>
+                {measure.rows.map((r) => (
+                  <div key={r.name} className="plot-measure-grid">
+                    <span
+                      className="tpl-dot"
+                      style={{ background: r.color }}
+                      title={r.name}
+                    />
+                    <span className="pm-name" title={r.name}>
+                      {r.name}
+                    </span>
+                    <span className="pm-val">{fmtVal(r.v1)}</span>
+                    <span className="pm-val">{fmtVal(r.v2)}</span>
+                    <span className="pm-dv">
+                      {r.dv != null ? fmtVal(r.dv) : "—"}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -915,7 +1308,13 @@ export function Plot2D() {
               ref={xRowRef}
               className="ctx-row"
               onMouseEnter={() => { disarmSub(); setSub("x"); }}
-              onMouseLeave={armSub}
+              onMouseLeave={() => { if (!subPinned) armSub(); }}
+              onClick={() => {
+                // 点击展开并钉住：不依赖 hover 时序，避免子菜单还没点到就被 250ms 定时器收起
+                setSub((s) => (s === "x" ? null : "x"));
+                setSubPinned(sub !== "x");
+                disarmSub();
+              }}
             >
               <button className="ctx-item">
                 <span className="ctx-item-l">
@@ -936,7 +1335,12 @@ export function Plot2D() {
               ref={yRowRef}
               className="ctx-row"
               onMouseEnter={() => { disarmSub(); setSub("y"); }}
-              onMouseLeave={armSub}
+              onMouseLeave={() => { if (!subPinned) armSub(); }}
+              onClick={() => {
+                setSub((s) => (s === "y" ? null : "y"));
+                setSubPinned(sub !== "y");
+                disarmSub();
+              }}
             >
               <button className="ctx-item">
                 <span className="ctx-item-l">

@@ -189,6 +189,15 @@ export const IconSearch = () =>
     </>,
   );
 
+export const IconTune = () =>
+  svg(
+    <>
+      <path d="M4 7h9M19.5 7H20M4 17h1M11 17h9" />
+      <circle cx="16" cy="7" r="2.4" />
+      <circle cx="8" cy="17" r="2.4" />
+    </>,
+  );
+
 export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   slider: IconSlider(),
   button: IconButton(),

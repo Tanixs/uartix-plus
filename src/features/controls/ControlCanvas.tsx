@@ -212,6 +212,9 @@ export function ControlCanvas() {
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [mountOpen, setMountOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [gridMenu, setGridMenu] = useState<{ x: number; y: number; gx: number; gy: number } | null>(null);
+  const [gridMenuPos, setGridMenuPos] = useState<{ left: number; top: number } | null>(null);
+  const gridMenuRef = useRef<HTMLDivElement | null>(null);
   const mountAnchorRef = useRef<HTMLDivElement | null>(null);
   const mountCloseRef = useRef<number | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -390,12 +393,19 @@ export function ControlCanvas() {
           );
         let fw = nw;
         let fh = nh;
-        while (fw > 1 && hit(fw, fh)) fw--;
-        while (fh > 1 && hit(fw, fh)) fh--;
-        if (rz.card.type === "joystick") {
-          const n = Math.min(fw, fh);
+        const isSq = rz.card.type === "joystick" || rz.card.type === "keypad";
+        if (isSq) {
+          let n = Math.min(fw, fh);
+          while (n > 1 && hit(n, n)) n--;
           fw = n;
           fh = n;
+        } else {
+          // 碰撞缩减不越过本次缩放前的原尺寸：放大撞到邻居时最多退回原尺寸，
+          // 绝不会把宽度挤成 1×N 竖条（缩小方向本来就不会产生碰撞）
+          const minW = Math.min(nw, rz.card.w);
+          const minH = Math.min(nh, rz.card.h || 1);
+          while (fh > minH && hit(fw, fh)) fh--;
+          while (fw > minW && hit(fw, fh)) fw--;
         }
         if (fw === rz.card.w && fh === (rz.card.h || 1)) {
           rz.el.style.width = `${snapPx(fw * STEP - GAP)}px`;
@@ -405,6 +415,8 @@ export function ControlCanvas() {
         rz.el.style.width = "";
         rz.el.style.height = "";
         store.patchCard(cur.id, rz.card.id, { w: fw, h: fh });
+        // 缩到原尺寸仍与邻居重叠（历史遗留）→ 就近挪开，而不是继续压扁自己
+        store.resolveOverlaps(cur.id);
         return;
       }
       const d = dragRef.current;
@@ -440,6 +452,27 @@ export function ControlCanvas() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [menu]);
+
+  useEffect(() => {
+    if (!gridMenu) return;
+    const close = () => setGridMenu(null);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [gridMenu]);
+
+  useLayoutEffect(() => {
+    if (!gridMenu || !gridMenuRef.current) return;
+    const r = gridMenuRef.current.getBoundingClientRect();
+    const zf = zfactor || 1;
+    const w = r.width / zf;
+    const h = r.height / zf;
+    const vw = window.innerWidth / zf;
+    const vh = window.innerHeight / zf;
+    let left = Math.max(8, Math.min(gridMenu.x / zf, vw - w - 8));
+    let top = gridMenu.y / zf;
+    if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
+    setGridMenuPos({ left, top });
+  }, [gridMenu, zfactor]);
 
   useLayoutEffect(() => {
     if (!menu || !menuRef.current) return;
@@ -828,11 +861,16 @@ export function ControlCanvas() {
     c.type === "joystick";
 
   const renderCard = (c: ControlCard) => {
-    const ch = c.h || 1;
+    // 渲染兜底：w/h/x/y 非有限值时按最小 1×1 格渲染，绝不产生 sub-cell 扁条
+    const qw = Number.isFinite(c.w) && c.w >= 1 ? Math.round(c.w) : 1;
+    const qh = Number.isFinite(c.h) && c.h >= 1 ? Math.round(c.h) : 1;
+    const qx = Number.isFinite(c.x) ? Math.round(c.x) : 0;
+    const qy = Number.isFinite(c.y) ? Math.round(c.y) : 0;
+    const ch = qh;
     const geo = {
-      left: snapPx(c.x * STEP + OFF),
-      top: snapPx(c.y * STEP + OFF),
-      width: snapPx(c.w * STEP - GAP),
+      left: snapPx(qx * STEP + OFF),
+      top: snapPx(qy * STEP + OFF),
+      width: snapPx(qw * STEP - GAP),
       height: snapPx(ch * STEP - GAP),
     };
     const common = {
@@ -846,6 +884,7 @@ export function ControlCanvas() {
       onMenu: (card: ControlCard, x: number, y: number) => {
         setMenuPos(null);
         setMountOpen(false);
+        setGridMenu(null);
         setMenu({ cardId: card.id, x, y });
       },
       onDragStart: onCardDragStart,
@@ -1474,8 +1513,23 @@ export function ControlCanvas() {
                 height: gridRows * STEP + GAP,
                 backgroundImage:
                   "linear-gradient(to right, rgba(128,140,160,0.22) 1px, transparent 1px), linear-gradient(to bottom, rgba(128,140,160,0.22) 1px, transparent 1px)",
-                backgroundSize: `${STEP}px ${STEP}px`,
+                backgroundSize: `${snapPx(STEP)}px ${snapPx(STEP)}px`,
                 backgroundPosition: "0 0",
+              }}
+              onContextMenu={(e) => {
+                const g = gridRef.current;
+                if (!g) return;
+                e.preventDefault();
+                const r = g.getBoundingClientRect();
+                const zf = zfactor || 1;
+                const lx = (e.clientX - r.left) / zf;
+                const ly = (e.clientY - r.top) / zf;
+                const gx = Math.max(0, Math.min(page.cols - 1, Math.floor(lx / STEP)));
+                const gy = Math.max(0, Math.min(gridRows - 1, Math.floor(ly / STEP)));
+                setMenu(null);
+                setMenuPos(null);
+                setGridMenuPos(null);
+                setGridMenu({ x: e.clientX, y: e.clientY, gx, gy });
               }}
             >
               {page.cards.map((c) => renderCard(c))}
@@ -1517,6 +1571,13 @@ export function ControlCanvas() {
             <button className="ctx-item" onClick={() => { setRenamingCard(menuCard.id); setMenu(null); }}>
               重命名
             </button>
+            <button
+              className="ctx-item"
+              onClick={() => { store.copyCard(page.id, menuCard.id); setMenu(null); }}
+              title="复制控件全部属性（模板指令 / 脚本 / 键位等），在画布空白处右键粘贴"
+            >
+              复制
+            </button>
             {canSend(menuCard) && (
               <button
                 className="ctx-item"
@@ -1552,6 +1613,41 @@ export function ControlCanvas() {
               onClick={() => { store.removeCard(page.id, menuCard.id); setMenu(null); }}
             >
               删除
+            </button>
+          </div>,
+          document.body,
+        )}
+
+      {gridMenu &&
+        createPortal(
+          <div
+            ref={gridMenuRef}
+            className="ctx-menu"
+            style={{
+              left: gridMenuPos?.left ?? -9999,
+              top: gridMenuPos?.top ?? -9999,
+              visibility: gridMenuPos ? "visible" : "hidden",
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="ctx-title">控制画布</div>
+            <button
+              className="ctx-item"
+              disabled={!store.hasClipboard()}
+              onClick={() => {
+                store.pasteCard(page.id, gridMenu.gx, gridMenu.gy);
+                setGridMenu(null);
+              }}
+              title={store.hasClipboard() ? "粘贴已复制的控件到此处" : "先右键控件选「复制」"}
+            >
+              粘贴
+            </button>
+            <button
+              className="ctx-item"
+              onClick={() => { store.declumpPage(page.id); setGridMenu(null); }}
+            >
+              整理布局
             </button>
           </div>,
           document.body,

@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 export type WorkspacePreset = "proto" | "analyze" | "attitude" | "console" | "video";
 
-export type ThemeMode = "light" | "dark" | "system";
+export type ThemeMode = "light" | "dark" | "navy" | "ocean" | "system";
 
 export interface Settings {
   theme: ThemeMode;
@@ -37,7 +37,11 @@ function load(): Settings {
     const p = JSON.parse(raw) as Partial<Settings>;
     return {
       theme:
-        p.theme === "light" || p.theme === "dark" || p.theme === "system"
+        p.theme === "light" ||
+        p.theme === "dark" ||
+        p.theme === "navy" ||
+        p.theme === "ocean" ||
+        p.theme === "system"
           ? p.theme
           : fallback.theme,
       locale: p.locale === "en" ? "en" : "zh",

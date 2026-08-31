@@ -3,6 +3,7 @@ import type { ParityMode } from "../../ipc/types";
 import * as store from "./serialStore";
 import { useSettings } from "../settings/settingsStore";
 import { t } from "../../i18n/strings";
+import { IconChevron } from "../../shared/icons";
 
 const BAUDS = [
   1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600,
@@ -97,12 +98,12 @@ export function SerialToolbar() {
           }}
         />
         <button
-          className="baud-toggle"
+          className={`baud-toggle ${baudOpen ? "open" : ""}`}
           disabled={locked}
           title="常用波特率"
           onClick={() => setBaudOpen((v) => !v)}
         >
-          ▾
+          <IconChevron size={13} dir="down" />
         </button>
         {baudOpen && (
           <div className="baud-menu">

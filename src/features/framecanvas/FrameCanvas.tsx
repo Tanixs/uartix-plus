@@ -230,6 +230,16 @@ function fmtB(n: number): string {
   return `${n} B`;
 }
 
+function fitLabel(ctx: CanvasRenderingContext2D, text: string, maxW: number): string | null {
+  if (maxW <= 0) return null;
+  if (ctx.measureText(text).width <= maxW) return text;
+  for (let n = text.length - 1; n > 0; n--) {
+    const t = `${text.slice(0, n)}…`;
+    if (ctx.measureText(t).width <= maxW) return t;
+  }
+  return ctx.measureText("…").width <= maxW ? "…" : null;
+}
+
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
@@ -304,7 +314,22 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
     pieces.push({ start: 0, len: frLen, key: "g0", kind: "gap", fid: null, color: "", label: null, role: null, locked: false });
   }
   pieces.sort((a, b) => a.start - b.start);
-  return pieces;
+  const merged: Blk[] = [];
+  for (const p of pieces) {
+    if (p.kind === "gap") {
+      const end = Math.min(p.start + p.len, frLen);
+      if (end <= p.start) continue;
+      const prev = merged[merged.length - 1];
+      if (prev && prev.kind === "gap" && p.start <= prev.start + prev.len) {
+        prev.len = Math.max(prev.start + prev.len, end) - prev.start;
+      } else {
+        merged.push({ ...p, len: end - p.start });
+      }
+    } else {
+      merged.push(p);
+    }
+  }
+  return merged;
 }
 
 function layoutBlocks(
@@ -505,10 +530,15 @@ function FrameCanvas() {
     };
   }, []);
 
-  const drawGapBg = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) => {
-    ctx.fillStyle = "rgba(128,128,160,0.07)";
+  const drawGapBg = (ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, dark: boolean) => {
+    ctx.fillStyle = dark ? "rgba(128,128,160,0.05)" : "rgba(120,124,148,0.06)";
     rr(ctx, x, y, w, h, 4);
     ctx.fill();
+    ctx.strokeStyle = dark ? "rgba(140,144,170,0.30)" : "rgba(104,110,132,0.32)";
+    ctx.setLineDash([3, 3]);
+    rr(ctx, x + 0.5, y + 0.5, Math.max(1, w - 1), Math.max(1, h - 1), 4);
+    ctx.stroke();
+    ctx.setLineDash([]);
   };
 
   const paint = useCallback(() => {
@@ -632,7 +662,10 @@ function FrameCanvas() {
           ctx.fill();
           if (wRun > 44) {
             ctx.fillStyle = "#fff";
-            ctx.fillText(blk.label ?? "帧头", x0 + 12, yTop + s / 2 + 1);
+            ctx.textAlign = "left";
+            const shown = fitLabel(ctx, blk.label ?? "帧头", wRun - 16);
+            if (shown) ctx.fillText(shown, x0 + 10, yTop + s / 2 + 1);
+            ctx.textAlign = "center";
           }
         } else if (blk.kind === "ftr") {
           ctx.fillStyle = hexA(blk.color, dark ? 0.45 : 0.38);
@@ -649,7 +682,10 @@ function FrameCanvas() {
               : algo && wRun > 96
                 ? `校验·${algo}`
                 : "校验";
-            ctx.fillText(txt, x0 + 12, yTop + s / 2 + 1);
+            ctx.textAlign = "left";
+            const shown = fitLabel(ctx, txt, wRun - 16);
+            if (shown) ctx.fillText(shown, x0 + 10, yTop + s / 2 + 1);
+            ctx.textAlign = "center";
           }
         } else if (blk.kind === "fld") {
           const animKey = `${curRef.current?.id}:${blk.fid}`;
@@ -673,7 +709,7 @@ function FrameCanvas() {
             ctx.fill();
           }
         } else {
-          drawGapBg(ctx, x0, yTop, wRun, s);
+          drawGapBg(ctx, x0, yTop, wRun, s, dark);
         }
 
         if (blk.kind !== "gap") {
@@ -728,11 +764,11 @@ function FrameCanvas() {
               ctx.fillText(valTxt, x1 - 5, yTop + 9);
             }
           }
-          if (wRun >= 52) {
-            const nameW = ctx.measureText(blk.label).width;
-            if (nameW <= wRun - 10) {
+          if (wRun >= 34) {
+            const shown = fitLabel(ctx, blk.label, wRun - 10);
+            if (shown) {
               ctx.fillStyle = dark ? mixC(cFg, blk.color, 0.66) : mixC("#000000", blk.color, 0.55);
-              ctx.fillText(blk.label, x1 - 5, yTop + s - 4);
+              ctx.fillText(shown, x1 - 5, yTop + s - 4);
             }
           }
           ctx.textAlign = "center";
@@ -863,7 +899,7 @@ function FrameCanvas() {
     } else if (field) {
       const rm = roleOf(field);
       cat = `${ROLE_META[rm].zh}${field.locked ? " 🔒" : ""}`;
-    } else cat = "未定义字节";
+    } else cat = "未定义字节（帧长未被子字段覆盖）";
     const roleChip = field ? ROLE_META[roleOf(field)].tag : "";
     const fieldLine = field
       ? `<div class="fc-tip-row"><span>字段</span><b>${field.name}${roleChip ? ` [${roleChip}]` : ""}</b></div>`

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { EmptyState } from "../../shared/EmptyState";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
+import { IconDownload, IconFlipH, IconFlipV, IconPause, IconPlay, IconTune, IconTrash } from "../../shared/icons";
 
 interface FrameRec {
   url: string;
@@ -349,34 +350,34 @@ export function VideoLink() {
     <div className="video-panel">
       <div className="video-bar">
         <button className={`btn icon-btn ${paused ? "primary" : ""}`} onClick={togglePause} title={paused ? "继续" : "暂停"}>
-          {paused ? (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20" /></svg>
-          ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-          )}
+          {paused ? <IconPlay /> : <IconPause />}
         </button>
         <button className="btn icon-btn" onClick={saveFrame} disabled={!view} title="保存当前显示的帧">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5" /><path d="M4 21h16" /></svg>
+          <IconDownload />
         </button>
         <button
           className={`btn icon-btn ${mirror ? "primary" : ""}`}
           onClick={() => setMirror((v) => !v)}
           title="水平镜像"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18" strokeDasharray="3 3" /><path d="M8 7L4 12l4 5M16 7l4 5-4 5" /></svg>
+          <IconFlipH />
         </button>
         <button
           className={`btn icon-btn ${flip ? "primary" : ""}`}
           onClick={() => setFlip((v) => !v)}
           title="垂直翻转"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h18" strokeDasharray="3 3" /><path d="M7 8L12 4l5 4M7 16l5 4 5-4" /></svg>
+          <IconFlipV />
         </button>
-        <button className={`btn ${cfg.mode === "raw" ? "primary" : ""}`} onClick={() => setRawOpen(true)}>
-          解析设置
+        <button
+          className={`btn icon-btn ${cfg.mode === "raw" ? "primary" : ""}`}
+          onClick={() => setRawOpen(true)}
+          title="解析设置（JPEG 自动 / RAW 自定义帧）"
+        >
+          <IconTune />
         </button>
         <button className="btn icon-btn" onClick={clearAll} title="清空全部帧">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg>
+          <IconTrash />
         </button>
         <div className="video-bar-spacer" />
         <span className="video-stat">

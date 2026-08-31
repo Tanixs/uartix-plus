@@ -22,6 +22,8 @@ export interface PlotSettings {
   stack: boolean;
   /** 双游标测量模式 */
   cursors: boolean;
+  /** 游标方向：x=竖线测 Δt，y=横线测 ΔV */
+  cursorMode: "x" | "y";
 }
 
 export interface PlotSnapshot {
@@ -41,6 +43,7 @@ let settings: PlotSettings = {
   lineStyle: "linear",
   stack: false,
   cursors: false,
+  cursorMode: "x",
 };
 let snapshot: PlotSnapshot = { channels, settings };
 const listeners = new Set<() => void>();

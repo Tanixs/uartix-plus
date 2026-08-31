@@ -266,7 +266,7 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         decimals: Number(raw.decimals ?? 2),
       };
     case "joystick": {
-      const side = base.w;
+      const side = Math.max(base.w, base.h);
       return {
         ...base,
         w: side,
@@ -310,6 +310,43 @@ function migrateLegacyScript(raw: Record<string, unknown>): ControlCard {
   });
 }
 
+/** 统一几何出口：类型形状约束 + 整数化 + 页边界钳制（只动位置不动形状，页缩小时才缩尺寸） */
+export function normalizeGeometry(
+  card: ControlCard,
+  cols: number,
+  rows: number,
+): ControlCard {
+  const c = { ...card };
+  // 全字段数值防护：NaN/Infinity/负数/小数一律收敛到合法格尺寸。
+  // 任何非法值穿透都会让渲染层算出 sub-cell 宽度（卡片被压成不足一格的扁条）。
+  const qw = Math.round(Number(c.w));
+  const qh = Math.round(Number(c.h ?? 1));
+  c.w = Number.isFinite(qw) && qw >= 1 ? qw : 1;
+  c.h = Number.isFinite(qh) && qh >= 1 ? qh : 1;
+  if (c.type === "keypad" || c.type === "joystick") {
+    const side = Math.max(c.w, c.h);
+    c.w = side;
+    c.h = side;
+  }
+  const maxW = Math.max(1, Math.round(Number(cols)) || 1);
+  const maxH = Math.max(1, Math.round(Number(rows)) || 1);
+  if (c.w > maxW || c.h > maxH) {
+    if (c.type === "keypad" || c.type === "joystick") {
+      const side = Math.min(c.w, c.h, maxW, maxH);
+      c.w = side;
+      c.h = side;
+    } else {
+      c.w = Math.min(c.w, maxW);
+      c.h = Math.min(c.h, maxH);
+    }
+  }
+  const qx = Math.round(Number(c.x));
+  const qy = Math.round(Number(c.y));
+  c.x = Number.isFinite(qx) ? Math.max(0, Math.min(qx, maxW - c.w)) : 0;
+  c.y = Number.isFinite(qy) ? Math.max(0, Math.min(qy, maxH - c.h)) : 0;
+  return c;
+}
+
 function declumpCards(cards: ControlCard[], cols: number, rows: number): ControlCard[] {
   const placed: ControlCard[] = [];
   const free = (x: number, y: number, w: number, h: number) =>
@@ -318,10 +355,11 @@ function declumpCards(cards: ControlCard[], cols: number, rows: number): Control
     );
   const sorted = [...cards].sort((a, b) => a.y - b.y || a.x - b.x);
   for (const c of sorted) {
-    const w = Math.min(c.w, cols);
-    const h = Math.min(c.h || 1, rows);
-    let x = Math.min(c.x, cols - w);
-    let y = Math.min(c.y, Math.max(0, rows - h));
+    const n = normalizeGeometry(c, cols, rows);
+    const w = n.w;
+    const h = n.h;
+    let x = n.x;
+    let y = n.y;
     let guard = 0;
     while (!free(x, y, w, h) && guard < rows * 2) {
       y++;
@@ -480,18 +518,15 @@ export function renamePage(id: string, name: string) {
 }
 
 export function setPageCols(id: string, cols: number) {
+  const nc = clampGrid(cols, 24);
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) =>
       p.id === id
         ? {
             ...p,
-            cols: clampGrid(cols, 24),
-            cards: p.cards.map((c) => ({
-              ...c,
-              w: Math.min(c.w, clampGrid(cols, 24)),
-              x: Math.min(c.x, clampGrid(cols, 24) - Math.min(c.w, clampGrid(cols, 24))),
-            })),
+            cols: nc,
+            cards: p.cards.map((c) => normalizeGeometry(c, nc, p.rows || 48)),
           }
         : p,
     ),
@@ -500,17 +535,15 @@ export function setPageCols(id: string, cols: number) {
 }
 
 export function setPageRows(id: string, rows: number) {
+  const nr = clampGrid(rows, 48);
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) =>
       p.id === id
         ? {
             ...p,
-            rows: clampGrid(rows, 48),
-            cards: p.cards.map((c) => ({
-              ...c,
-              y: Math.min(c.y, clampGrid(rows, 48) - Math.min(c.h || 1, clampGrid(rows, 48))),
-            })),
+            rows: nr,
+            cards: p.cards.map((c) => normalizeGeometry(c, p.cols, nr)),
           }
         : p,
     ),
@@ -531,13 +564,14 @@ export function setPageLocked(id: string, locked: boolean) {
 }
 
 function defaultCard(type: ControlType, name: string): ControlCard {
+  // monitor 默认 2×2（应用图标式正方，此前 2×1 拖入即扁）
   const size =
     type === "joystick"
       ? { w: 2, h: 2 }
       : type === "keypad"
         ? { w: 3, h: 3 }
-        : type === "slider" || type === "monitor"
-          ? { w: 2, h: 1 }
+        : type === "monitor"
+          ? { w: 2, h: 2 }
           : { w: 1, h: 1 };
   const base = {
     id: crypto.randomUUID(),
@@ -695,11 +729,7 @@ export function patchCard(
             cards: p.cards.map((c) => {
               if (c.id !== cardId) return c;
               const merged = migrateCard({ ...c, ...patch }) as ControlCard;
-              merged.w = Math.max(1, Math.min(merged.w, p.cols));
-              merged.h = Math.max(1, Math.min(merged.h, p.rows || 48));
-              merged.x = Math.max(0, Math.min(merged.x, p.cols - merged.w));
-              merged.y = Math.max(0, Math.min(merged.y, Math.max(0, (p.rows || 48) - merged.h)));
-              return merged;
+              return normalizeGeometry(merged, p.cols, p.rows || 48);
             }),
           }
         : p,
@@ -821,6 +851,80 @@ export function findCardByName(
     if (c) return { pageId: p.id, card: c };
   }
   return null;
+}
+
+let clipboard: ControlCard | null = null;
+
+export function copyCard(pageId: string, cardId: string) {
+  const page = snapshot.pages.find((p) => p.id === pageId);
+  const card = page?.cards.find((c) => c.id === cardId);
+  if (card) clipboard = structuredClone(card);
+}
+
+export function hasClipboard(): boolean {
+  return clipboard !== null;
+}
+
+/** 粘贴卡片：全属性复制，新 id，名字自动 _1/_2；gx/gy 为期望左上格坐标，被占则就近找空位 */
+export function pasteCard(
+  pageId: string,
+  gx?: number,
+  gy?: number,
+): string | null {
+  const page = snapshot.pages.find((p) => p.id === pageId);
+  if (!page || !clipboard) return null;
+  const rows = page.rows || 48;
+  const card = normalizeGeometry(
+    structuredClone(clipboard),
+    page.cols,
+    rows,
+  );
+  card.id = crypto.randomUUID();
+  const base = card.name.replace(/_\d+$/, "") || card.name;
+  const used = new Set(page.cards.map((c) => c.name));
+  let i = 1;
+  while (used.has(`${base}_${i}`)) i++;
+  card.name = `${base}_${i}`;
+  const tx = Math.max(0, Math.min(Math.round(gx ?? 0), page.cols - card.w));
+  const ty = Math.max(0, Math.min(Math.round(gy ?? 0), rows - card.h));
+  const freeAt = (x: number, y: number) =>
+    !page.cards.some(
+      (c) =>
+        !(
+          x + card.w <= c.x ||
+          c.x + c.w <= x ||
+          y + card.h <= c.y ||
+          c.y + c.h <= y
+        ),
+    );
+  let pos = { x: tx, y: ty };
+  if (!freeAt(tx, ty)) {
+    let found: { x: number; y: number } | null = null;
+    const maxR = Math.max(page.cols, rows);
+    for (let r = 0; r <= maxR && !found; r++) {
+      for (let dx = -r; dx <= r && !found; dx++) {
+        for (let dy = -r; dy <= r && !found; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const x = tx + dx;
+          const y = ty + dy;
+          if (x < 0 || y < 0 || x + card.w > page.cols || y + card.h > rows)
+            continue;
+          if (freeAt(x, y)) found = { x, y };
+        }
+      }
+    }
+    if (found) pos = found;
+  }
+  card.x = pos.x;
+  card.y = pos.y;
+  snapshot = {
+    ...snapshot,
+    pages: snapshot.pages.map((p) =>
+      p.id === pageId ? { ...p, cards: [...p.cards, card] } : p,
+    ),
+  };
+  emit();
+  return card.id;
 }
 
 export function findCardById(
