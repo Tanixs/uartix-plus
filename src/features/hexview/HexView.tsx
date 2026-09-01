@@ -61,6 +61,15 @@ export function HexView() {
   const sliceRef = useRef<(Omit<HexSlice, "bytes"> & { bytes: Uint8Array }) | null>(null);
   const fetchingRef = useRef(false);
   const dirtyRef = useRef(true);
+  // 暂停：停更画面（数据仍在后台接收累计），恢复后立即补刷一次
+  const pausedRef = useRef(false);
+  const [paused, setPaused] = useState(false);
+  const togglePause = () => {
+    const next = !pausedRef.current;
+    pausedRef.current = next;
+    setPaused(next);
+    if (!next) dirtyRef.current = true; // 恢复即补刷暂停期间积压的数据
+  };
   const selRef = useRef<{ anchor: number; focus: number } | null>(null);
   const dragRef = useRef<
     | null
@@ -363,9 +372,10 @@ export function HexView() {
   useEffect(() => {
     let raf = 0;
     // 数据到达 → 置脏（事件驱动，每批 RX 一次；此前挂 serialStore 全局订阅，
-    // 计数器监听拆分后全局在收流期间静默导致不再跟随——回归修复）
+    // 计数器监听拆分后全局在收流期间静默导致不再跟随——回归修复）。
+    // pausedRef：本面板独立暂停（不共用控制台的 viewFrozen，二者互不干扰）
     const unsubA = onRx(() => {
-      if (!serialStore.isViewFrozen()) dirtyRef.current = true;
+      if (!pausedRef.current && !serialStore.isViewFrozen()) dirtyRef.current = true;
     });
     const unsubB = templateStore.subscribe(() => {
       dirtyRef.current = true;
@@ -933,6 +943,22 @@ export function HexView() {
             {t("hx.follow")}
           </button>
         )}
+        <button
+          className={`btn hex-pause-btn ${paused ? "on" : ""}`}
+          title={paused ? t("hx.resume") : t("hx.pause")}
+          onClick={togglePause}
+        >
+          {paused ? (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <polygon points="7 4 20 12 7 20" />
+            </svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <rect x="6" y="5" width="4" height="14" rx="1" />
+              <rect x="14" y="5" width="4" height="14" rx="1" />
+            </svg>
+          )}
+        </button>
         <button
           className="btn hex-clear-btn"
           title={t("hx.clear")}

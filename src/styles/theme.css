@@ -678,10 +678,23 @@ body {
 
 .hex-follow-btn {
   position: absolute;
-  right: 60px;
+  right: 94px;
   bottom: 10px;
   box-shadow: var(--shadow);
 }
+
+.hex-pause-btn {
+  position: absolute;
+  right: 60px;
+  bottom: 8px;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-dim);
+  z-index: 3;
+}
+.hex-pause-btn:hover { color: var(--text); }
+.hex-pause-btn.on { color: var(--accent); border-color: var(--accent); }
 
 .hex-clear-btn {
   position: absolute;
@@ -3839,14 +3852,27 @@ body {
 }
 .set-row:last-child { border-bottom: none; }
 .set-row > label {
-  flex: 0 0 132px;
+  /* label 左对齐 + 控件列起点统一（min-width 补齐短标签） */
+  flex: 0 0 auto;
+  min-width: 108px;
+  max-width: 40%;
   font-size: 12.5px;
   color: var(--text);
   text-align: left;
+  justify-content: flex-start;
   display: flex;
   align-items: center;
   gap: 6px;
   line-height: 1.5;
+}
+/* 高内容行（主题色卡 / 预设卡）：label 顶部对齐，不再垂直悬在中间 */
+.set-row:has(> .set-ctl .theme-grid),
+.set-row:has(> .set-ctl .preset-grid) {
+  align-items: flex-start;
+}
+.set-row:has(> .set-ctl .theme-grid) > label,
+.set-row:has(> .set-ctl .preset-grid) > label {
+  padding-top: 8px;
 }
 .set-ctl { flex: 1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* 设置行内嵌表单：去除 form-row 自带的 label 定宽/底边距与 form-hint 的 84px 缩进，保证整行对齐 */

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import * as serialStore from "../features/serial/serialStore";
 import { useSyncExternalStore } from "react";
 import type { IfaceKind } from "../features/serial/serialStore";
@@ -109,6 +110,11 @@ export function TitleBar({
   const win = getCurrentWindow();
   const [maxed, setMaxed] = useState(false);
   const [pinned, setPinned] = useState(false);
+  const [ver, setVer] = useState<string | null>(null);
+  useEffect(() => {
+    // 版本号动态读取（tauri.conf.json 单一来源），硬编码会随发版遗忘
+    void getVersion().then((v) => setVer(v)).catch(() => setVer(null));
+  }, []);
   useEffect(() => {
     let un1: () => void = () => {};
     const unP = win.onResized(() => {
@@ -149,7 +155,7 @@ export function TitleBar({
           draggable={false}
         />
         Uartix+
-        <span className="tb-ver">0.2.0</span>
+        <span className="tb-ver">{ver ?? ""}</span>
       </div>
       <IfaceMenu />
       <div className="tb-spacer" data-tauri-drag-region />

@@ -237,7 +237,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                 {row(t("set.resetLayout"), (
                   <button className="btn" onClick={() => onResetLayout(settings.workspace)}>{t("set.resetLayout")}</button>
                 ), t("set.resetLayout.tip"))}
-                {row("控制画板格尺寸", (
+                {row(t("set.cellSize"), (
                   <div className="set-seg">
                     {([48, 60, 72, 90, 110] as const).map((c) => (
                       <button key={c} className={settings.cellSize === c ? "on" : ""} onClick={() => patch({ cellSize: c })}>
@@ -347,7 +347,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     <div className="set-about-desc">可视化串口协议分析仪</div>
                   </div>
                 </div>
-                {row(t("set.version"), <span className="set-mono">{appVersion ? `${appVersion} (M7)` : "0.2.0 (M7)"}</span>)}
+                {row(t("set.version"), <span className="set-mono">{appVersion ?? "0.3.0"}</span>)}
                 {row("作者", (
                   <button
                     className="author-link"

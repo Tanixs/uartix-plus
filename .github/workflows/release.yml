@@ -16,7 +16,34 @@ permissions:
   contents: write
 
 jobs:
+  # 前置单例 job：先建草稿 Release（读 note 文件）。
+  # 修竞态：此前两个 matrix job 并行各自建同 tag 草稿，GitHub 允许同 tag 存在
+  # 多个草稿 → tauri-action 按 tag 找草稿时资产分裂到两个 release，Publish 其一
+  # 后另一份资产（Linux/固定名副本）永远缺失。现在只有本 job 创建，build 复用。
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: echo "tag=v$(jq -r .version src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release with notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # 已存在（重发/补资产场景）则复用：tauri-action 与固定名上传都按 tag 定位
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --draft \
+            --title "Uartix+ ${{ steps.ver.outputs.tag }}" \
+            --notes-file "docs/RELEASE_NOTES/${{ steps.ver.outputs.tag }}.md" \
+            || echo "::warning::release ${{ steps.ver.outputs.tag }} already exists, reusing it"
+
   build:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -56,24 +83,6 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      # 固定 tag/版本号（供后续步骤复用）
-      - name: Resolve version
-        id: ver
-        shell: bash
-        run: echo "tag=v$(jq -r .version src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
-
-      # 草稿 Release 用仓库内 note 文件驱动（每次发版改 docs/RELEASE_NOTES/vX.Y.Z.md）
-      # tauri-action 发现同 tag Release 已存在时会直接复用上传资产，不会覆盖 note
-      - name: Create draft release with notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          gh release create "${{ steps.ver.outputs.tag }}" \
-            --draft \
-            --title "Uartix+ ${{ steps.ver.outputs.tag }}" \
-            --notes-file "docs/RELEASE_NOTES/${{ steps.ver.outputs.tag }}.md" || true
-
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -93,9 +102,9 @@ jobs:
       - name: Upload stable-named assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.ver.outputs.tag }}
         shell: bash
         run: |
+          TAG="v$(jq -r .version src-tauri/tauri.conf.json)"
           VER="${TAG#v}"
           if [ "$RUNNER_OS" = "Windows" ]; then
             SRC="src-tauri/target/release/bundle/nsis/Uartix-Plus_${VER}_x64-setup.exe"
