@@ -1,5 +1,6 @@
-import { listen } from "@tauri-apps/api/event";
 import type { FieldDef, FramesEventPayload } from "../../ipc/types";
+import { onFrames } from "../../ipc/framesBus";
+import * as panelActivity from "../../panels/panelActivity";
 
 export type EulerOrder = "XYZ" | "XZY" | "YXZ" | "YZX" | "ZXY" | "ZYX";
 
@@ -140,7 +141,9 @@ export function setConfig(patch: Partial<AttitudeConfig>) {
 export async function init() {
   if (initialized) return;
   initialized = true;
-  await listen<FramesEventPayload>("parser:frames", (e) => {
+  onFrames((ev: FramesEventPayload) => {
+    // 面板关闭 → 完全停止解析绑定变量（关闭了的面板绝不允许后台运行）
+    if (!panelActivity.isOpen("view3d")) return;
     const cfg = snapshot.config;
     const refs =
       cfg.mode === "euler"
@@ -149,7 +152,7 @@ export async function init() {
     const tplIds = new Set<string>();
     for (const r of refs) if (r) tplIds.add(r.tplId);
     if (tplIds.size === 0) return;
-    for (const row of e.payload.rows) {
+    for (const row of ev.rows) {
       if (!row.valid || !tplIds.has(row.tplId)) continue;
       const get = (ref: FieldRef | null): number | null => {
         if (!ref || ref.tplId !== row.tplId) return null;

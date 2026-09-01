@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { onRx } from "../../ipc/binbus";
 import { EmptyState } from "../../shared/EmptyState";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import { IconDownload, IconFlipH, IconFlipV, IconPause, IconPlay, IconTune, IconTrash } from "../../shared/icons";
@@ -139,9 +139,9 @@ export function VideoLink() {
   };
 
   useEffect(() => {
-    const unlisten = listen<{ bytes: number[] }>("serial:rx", (e) => {
+    const unlisten = onRx((p) => {
       if (pausedRef.current) return;
-      const inc = e.payload.bytes;
+      const inc = p.bytes;
       if (!inc.length) return;
       const buf = bufRef.current;
       const merged = new Uint8Array(buf.length + inc.length);
@@ -273,7 +273,7 @@ export function VideoLink() {
       setFrames((prev) => prev.slice(-MAX_FRAMES));
     });
     return () => {
-      void unlisten.then((f) => f());
+      unlisten();
       for (const u of urlsRef.current) URL.revokeObjectURL(u);
       urlsRef.current = [];
     };

@@ -1,5 +1,5 @@
-import { listen } from "@tauri-apps/api/event";
 import type { FramesEventPayload } from "../../ipc/types";
+import { onFrames } from "../../ipc/framesBus";
 
 export interface LatestValue {
   value: number;
@@ -59,11 +59,11 @@ export function getSnapshot() {
 export async function init() {
   if (initialized) return;
   initialized = true;
-  await listen<FramesEventPayload>("parser:frames", (e) => {
+  onFrames((p: FramesEventPayload) => {
     const tplStats = { ...snapshot.tplStats };
     const latest = { ...snapshot.latest };
     let touched = false;
-    for (const row of e.payload.rows) {
+    for (const row of p.rows) {
       const cur = tplStats[row.tplId] ?? { ok: 0, err: 0 };
       tplStats[row.tplId] = row.valid
         ? { ...cur, ok: cur.ok + 1 }
@@ -83,7 +83,7 @@ export async function init() {
     }
     if (!touched) return;
     set({
-      stats: { total: e.payload.total, errors: e.payload.errors },
+      stats: { total: p.total, errors: p.errors },
       tplStats,
       latest,
     });

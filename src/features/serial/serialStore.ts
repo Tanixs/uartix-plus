@@ -6,6 +6,8 @@ import type {
   SerialConfig,
   SerialStatus,
 } from "../../ipc/types";
+import { onRx, onTx } from "../../ipc/binbus";
+import { recordIpcLatency } from "../../ipc/ipcLatency";
 
 export type IfaceKind = "serial" | "tcp-client" | "tcp-server" | "udp";
 
@@ -93,6 +95,24 @@ export function subscribe(cb: () => void) {
   };
 }
 
+/**
+ * 计数器专用监听（rxTotal/txTotal/bps，5Hz 批量通知）。
+ * 全局 listeners 只在真正的状态变化时通知——否则高速收流时顶栏/工具栏/
+ * 整个 App 会被计数器拖着 5Hz 全量重渲染。只有状态栏等计数器消费者订阅这里。
+ */
+const counterListeners = new Set<() => void>();
+
+export function subscribeCounters(cb: () => void) {
+  counterListeners.add(cb);
+  return () => {
+    counterListeners.delete(cb);
+  };
+}
+
+function notifyCounters() {
+  counterListeners.forEach((l) => l());
+}
+
 export function getSnapshot() {
   return snapshot;
 }
@@ -107,18 +127,21 @@ export async function init() {
   await listen<ConnStatePayload>("serial:state", (e) => {
     set({ status: e.payload.status, error: e.payload.error });
   });
-  await listen<{ bytes: number[] }>("serial:rx", (e) => {
-    rxWindow.push({ t: Date.now(), n: e.payload.bytes.length });
-    setSilent({ rxTotal: snapshot.rxTotal + e.payload.bytes.length });
+  // rx/tx 走二进制总线（binbus），不再监听 JSON 事件（监听常驻，随进程生命周期）
+  onRx((p) => {
+    recordIpcLatency(p.emitTs);
+    const n = p.bytes.length;
+    rxWindow.push({ t: Date.now(), n });
+    setSilent({ rxTotal: snapshot.rxTotal + n });
   });
-  await listen<{ bytes: number[] }>("serial:tx", (e) => {
-    setSilent({ txTotal: snapshot.txTotal + e.payload.bytes.length });
+  onTx((p) => {
+    setSilent({ txTotal: snapshot.txTotal + p.bytes.length });
   });
 
   setInterval(() => {
     if (countersDirty) {
       countersDirty = false;
-      listeners.forEach((l) => l());
+      notifyCounters();
     }
   }, 200);
 
@@ -130,7 +153,7 @@ export async function init() {
       .reduce((acc, w) => acc + w.n, 0);
     if (bps !== snapshot.bps) {
       snapshot = { ...snapshot, bps };
-      listeners.forEach((l) => l());
+      notifyCounters();
     }
   }, 500);
 
@@ -161,6 +184,7 @@ export function setError(msg: string | null) {
 export function resetRx() {
   rxWindow.length = 0;
   setSilent({ rxTotal: 0, bps: 0 });
+  notifyCounters();
 }
 
 export async function openPort() {

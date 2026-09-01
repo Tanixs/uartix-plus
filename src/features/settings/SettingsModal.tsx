@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { useSettings, patch, type WorkspacePreset } from "./settingsStore";
+import { THEME_LIST, useSettings, patch, type ThemeMode, type WorkspacePreset } from "./settingsStore";
 import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
 import { t } from "../../i18n/strings";
 import * as templateStore from "../protocol/templateStore";
@@ -22,6 +22,23 @@ const PRESETS: { key: WorkspacePreset; label: string; desc: string }[] = [
   { key: "console", label: t("set.preset.console"), desc: "仅控制台" },
   { key: "video", label: t("set.preset.video"), desc: "图传 + 控制画板" },
 ];
+
+/** 主题色板预览：bg=窗口底色 panel=内容区 accent=高亮条（与 theme.css 变量块保持一致） */
+const THEME_SWATCH: Record<ThemeMode, { bg: string; panel: string; accent: string }> = {
+  light: { bg: "#f5f6f8", panel: "#ffffff", accent: "#2f6fce" },
+  dark: { bg: "#0f1115", panel: "#161a20", accent: "#4e9cef" },
+  navy: { bg: "#0d1322", panel: "#131b2e", accent: "#559df0" },
+  ocean: { bg: "#eff4fa", panel: "#ffffff", accent: "#1e6fd9" },
+  matcha: { bg: "#eef5ea", panel: "#fbfdf9", accent: "#3e8e52" },
+  amber: { bg: "#fdf4ea", panel: "#fffbf6", accent: "#e07b1f" },
+  begonia: { bg: "#fbf1f2", panel: "#fffcfc", accent: "#c8445c" },
+  glaze: { bg: "#0e1420", panel: "#151d2c", accent: "#d05f6e" },
+  system: {
+    bg: "linear-gradient(135deg,#f5f6f8 49%,#0f1115 51%)",
+    panel: "rgba(128,128,128,0.35)",
+    accent: "#4e9cef",
+  },
+};
 
 async function saveJson(kind: string, data: unknown): Promise<void> {
   const path = await save({
@@ -155,21 +172,36 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                   </select>
                 ))}
                 {row(t("set.theme"), (
-                  <div className="set-seg">
-                    {(["dark", "light", "navy", "ocean", "system"] as const).map((th) => (
-                      <button key={th} className={settings.theme === th ? "on" : ""} onClick={() => {
-                        patch({ theme: th });
-                        // 即时同步 DOM（不等 effect 时序）；system 立即解析一次
-                        document.documentElement.dataset.theme =
-                          th === "system"
-                            ? window.matchMedia("(prefers-color-scheme: dark)").matches
-                              ? "dark"
-                              : "light"
-                            : th;
-                      }}>
-                        {th === "dark" ? t("set.theme.dark") : th === "light" ? t("set.theme.light") : th === "navy" ? t("set.theme.navy") : th === "ocean" ? t("set.theme.ocean") : t("set.theme.system")}
-                      </button>
-                    ))}
+                  <div className="theme-grid">
+                    {THEME_LIST.map((th) => {
+                      const sw = THEME_SWATCH[th];
+                      return (
+                        <button
+                          key={th}
+                          className={`theme-card ${settings.theme === th ? "on" : ""}`}
+                          title={t(`set.theme.${th}`)}
+                          onClick={() => {
+                            patch({ theme: th });
+                            // 即时同步 DOM（不等 effect 时序）；system 立即解析一次
+                            document.documentElement.dataset.theme =
+                              th === "system"
+                                ? window.matchMedia("(prefers-color-scheme: dark)").matches
+                                  ? "dark"
+                                  : "light"
+                                : th;
+                          }}
+                        >
+                          <span
+                            className="theme-swatch"
+                            style={{ background: sw.bg }}
+                          >
+                            <span className="theme-bar" style={{ background: sw.accent }} />
+                            <span className="theme-panel" style={{ background: sw.panel }} />
+                          </span>
+                          <span className="theme-name">{t(`set.theme.${th}`)}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 ), t("set.theme.tip"))}
                 {row(t("set.zoom"), (

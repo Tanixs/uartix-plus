@@ -133,6 +133,11 @@ export function ControlCanvas() {
   // 这里把几何值预先取整到 zoom 缩放后的整数设备像素，保证间隙恒定。
   const zfactor = (settings.zoom || 100) / 100;
   const snapPx = (v: number) => (zfactor === 1 ? v : Math.round(v * zfactor) / zfactor);
+  // 网格步长/边距/间隙先量化到整数设备像素，卡片坐标 = 格号 × 量化步长，
+  // 与背景线（周期 = 量化步长）严格同格，杜绝逐格累积的取整漂移（不对齐根因）
+  const STEPq = snapPx(CELL + GAP);
+  const OFFq = snapPx(OFF);
+  const GAPq = snapPx(GAP);
   const showGhost = (
     gx: number,
     gy: number,
@@ -142,12 +147,11 @@ export function ControlCanvas() {
   ) => {
     const g = ghostRef.current;
     if (!g) return;
-    const step = CELL + GAP;
     g.style.display = "block";
-    g.style.left = `${snapPx(gx * step + OFF)}px`;
-    g.style.top = `${snapPx(gy * step + OFF)}px`;
-    g.style.width = `${snapPx(gw * step - GAP)}px`;
-    g.style.height = `${snapPx(gh * step - GAP)}px`;
+    g.style.left = `${gx * STEPq + OFFq}px`;
+    g.style.top = `${gy * STEPq + OFFq}px`;
+    g.style.width = `${gw * STEPq - GAPq}px`;
+    g.style.height = `${gh * STEPq - GAPq}px`;
     g.className = `ctl-ghost ${ok ? "ok" : "bad"}`;
   };
   const hideGhost = () => {
@@ -301,8 +305,13 @@ export function ControlCanvas() {
   }, []);
 
   useEffect(() => {
-    const STEP = CELL + GAP;
     const move = (e: MouseEvent) => {
+      // 释放保护：在窗口外松手时 mouseup 可能丢失（buttons=0 说明已松开）。
+      // 必须放在 resize 分支之前——否则 resizeRef 卡住，鼠标悬停滑过就会持续缩放卡片（压成竖条根因）
+      if (e.buttons === 0) {
+        if (resizeRef.current || dragRef.current) finish();
+        return;
+      }
       const rz = resizeRef.current;
       if (rz) {
         const cur = store.activePage();
@@ -311,11 +320,11 @@ export function ControlCanvas() {
         const scale = liveScale(rz.innerW0);
         const nw0 = Math.max(
           1,
-          Math.min(maxW, rz.card.w + Math.round((e.clientX - rz.startClientX) / (STEP * scale))),
+          Math.min(maxW, rz.card.w + Math.round((e.clientX - rz.startClientX) / (STEPq * scale))),
         );
         const nh0 = Math.max(
           1,
-          Math.min(maxH, (rz.card.h || 1) + Math.round((e.clientY - rz.startClientY) / (STEP * scale))),
+          Math.min(maxH, (rz.card.h || 1) + Math.round((e.clientY - rz.startClientY) / (STEPq * scale))),
         );
         // 摇杆与键盘遥控锁定正方形（n×n），杜绝拖成 1×N 长条
         const isSquare = rz.card.type === "joystick" || rz.card.type === "keypad";
@@ -323,18 +332,13 @@ export function ControlCanvas() {
         const nh = isSquare ? Math.min(nw0, nh0) : nh0;
         rz.w = nw;
         rz.h = nh;
-        rz.el.style.width = `${snapPx(nw * STEP - GAP)}px`;
-        rz.el.style.height = `${snapPx(nh * STEP - GAP)}px`;
+        rz.el.style.width = `${nw * STEPq - GAPq}px`;
+        rz.el.style.height = `${nh * STEPq - GAPq}px`;
         rz.el.style.zIndex = "60";
         return;
       }
       const d = dragRef.current;
       if (!d) return;
-      // 释放保护：指针在窗口外松开时 mouseup 可能丢失（buttons=0 说明已松开）
-      if (e.buttons === 0) {
-        finish();
-        return;
-      }
       if (!d.moved) {
         const sdx = e.clientX - d.startClientX;
         const sdy = e.clientY - d.startClientY;
@@ -353,8 +357,8 @@ export function ControlCanvas() {
       const leftPx = d.cardLeft0 + (e.clientX - d.startClientX) / scale;
       const topPx = d.cardTop0 + (e.clientY - d.startClientY) / scale;
       // 落点格（clamp 在画布内）
-      const tx = Math.max(0, Math.min(cols - d.card.w, Math.round((leftPx - OFF) / STEP)));
-      const ty = Math.max(0, Math.min(rows - ch, Math.round((topPx - OFF) / STEP)));
+      const tx = Math.max(0, Math.min(cols - d.card.w, Math.round((leftPx - OFFq) / STEPq)));
+      const ty = Math.max(0, Math.min(rows - ch, Math.round((topPx - OFFq) / STEPq)));
       // 落点候选：目标格空 → 直接用；占用 → 半径 2 格内找最近空位（禁长距离瞬移）
       const s = settleNear(cur, d.card, tx, ty);
       if (s) {
@@ -408,8 +412,8 @@ export function ControlCanvas() {
           while (fw > minW && hit(fw, fh)) fw--;
         }
         if (fw === rz.card.w && fh === (rz.card.h || 1)) {
-          rz.el.style.width = `${snapPx(fw * STEP - GAP)}px`;
-          rz.el.style.height = `${snapPx(fh * STEP - GAP)}px`;
+          rz.el.style.width = `${fw * STEPq - GAPq}px`;
+          rz.el.style.height = `${fh * STEPq - GAPq}px`;
           return;
         }
         rz.el.style.width = "";
@@ -743,8 +747,8 @@ export function ControlCanvas() {
       moved: false,
       startClientX: e.clientX,
       startClientY: e.clientY,
-      cardLeft0: card.x * (CELL + GAP) + OFF,
-      cardTop0: card.y * (CELL + GAP) + OFF,
+      cardLeft0: card.x * STEPq + OFFq,
+      cardTop0: card.y * STEPq + OFFq,
       innerW0: inner.getBoundingClientRect().width,
       settleX: card.x,
       settleY: card.y,
@@ -833,7 +837,6 @@ export function ControlCanvas() {
     }
   };
 
-  const STEP = CELL + GAP;
   const usedRows = page.cards.reduce((m, c) => Math.max(m, c.y + (c.h || 1)), 1);
   const gridRows = Math.max(page.rows || 8, usedRows);
   const menuCard = menu ? page.cards.find((c) => c.id === menu.cardId) : null;
@@ -867,11 +870,12 @@ export function ControlCanvas() {
     const qx = Number.isFinite(c.x) ? Math.round(c.x) : 0;
     const qy = Number.isFinite(c.y) ? Math.round(c.y) : 0;
     const ch = qh;
+    // 与背景网格线共用量化步长，保证卡片边缘严格贴网格
     const geo = {
-      left: snapPx(qx * STEP + OFF),
-      top: snapPx(qy * STEP + OFF),
-      width: snapPx(qw * STEP - GAP),
-      height: snapPx(ch * STEP - GAP),
+      left: qx * STEPq + OFFq,
+      top: qy * STEPq + OFFq,
+      width: qw * STEPq - GAPq,
+      height: ch * STEPq - GAPq,
     };
     const common = {
       card: c,
@@ -1509,11 +1513,11 @@ export function ControlCanvas() {
               ref={gridRef}
               className="ctl-grid-inner"
               style={{
-                width: page.cols * STEP + GAP,
-                height: gridRows * STEP + GAP,
+                width: page.cols * STEPq + GAPq,
+                height: gridRows * STEPq + GAPq,
                 backgroundImage:
                   "linear-gradient(to right, rgba(128,140,160,0.22) 1px, transparent 1px), linear-gradient(to bottom, rgba(128,140,160,0.22) 1px, transparent 1px)",
-                backgroundSize: `${snapPx(STEP)}px ${snapPx(STEP)}px`,
+                backgroundSize: `${STEPq}px ${STEPq}px`,
                 backgroundPosition: "0 0",
               }}
               onContextMenu={(e) => {
@@ -1524,8 +1528,8 @@ export function ControlCanvas() {
                 const zf = zfactor || 1;
                 const lx = (e.clientX - r.left) / zf;
                 const ly = (e.clientY - r.top) / zf;
-                const gx = Math.max(0, Math.min(page.cols - 1, Math.floor(lx / STEP)));
-                const gy = Math.max(0, Math.min(gridRows - 1, Math.floor(ly / STEP)));
+                const gx = Math.max(0, Math.min(page.cols - 1, Math.floor(lx / STEPq)));
+                const gy = Math.max(0, Math.min(gridRows - 1, Math.floor(ly / STEPq)));
                 setMenu(null);
                 setMenuPos(null);
                 setGridMenuPos(null);

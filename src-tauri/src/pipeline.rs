@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::parser::{FramesEvent, ParseRules, ParserEngine};
 use crate::ring::RingBuffer;
@@ -119,26 +119,20 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
             let _ = f.write_all(data);
         }
     }
-    let _ = app.emit(
-        "serial:rx",
-        crate::serial::RxEvent {
-            bytes: data.to_vec(),
-            ts_first: ts,
-            ts_last: ts,
-        },
-    );
+    crate::busevt::send_rx(app, ts, ts, data);
     if !rows.is_empty() {
         let (total, errors, dropped) = {
             let engine = ctx.pipeline.engine.lock().unwrap();
             (engine.total, engine.errors, engine.dropped)
         };
-        let _ = app.emit(
-            "parser:frames",
-            FramesEvent {
+        crate::busevt::send_frames(
+            app,
+            &FramesEvent {
                 rows,
                 total,
                 errors,
                 dropped,
+                emit_ts: ts_now(),
             },
         );
     }
@@ -165,6 +159,7 @@ pub struct SpanOut {
 pub struct HexSlice {
     pub start: u64,
     pub total: u64,
+    #[serde(with = "crate::b64")]
     pub bytes: Vec<u8>,
     pub ts_first: u64,
     pub ts_last: u64,

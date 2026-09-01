@@ -44,14 +44,18 @@ pub struct ConnState {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RxEvent {
+    #[serde(with = "crate::b64")]
     pub bytes: Vec<u8>,
     pub ts_first: u64,
     pub ts_last: u64,
+    /// Rust 侧发出事件的时刻：前端用于测量 IPC 投递延迟（诊断事件积压）
+    pub emit_ts: u64,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct TxEvent {
+    #[serde(with = "crate::b64")]
     pub bytes: Vec<u8>,
     pub ts: u64,
 }
@@ -201,22 +205,34 @@ fn list_infos() -> Vec<PortInfo> {
 }
 
 #[tauri::command]
-pub fn list_ports() -> Vec<PortInfo> {
-    list_infos()
+pub async fn list_ports() -> Result<Vec<PortInfo>, String> {
+    // available_ports 在 Windows 上走设备/注册表枚举：USB 设备异常或被拔出时
+    // 可能阻塞数百毫秒。同步命令跑在主线程 → 拔线瞬间整窗无响应（实测卡死的
+    // 直接元凶之一）。改 async + spawn_blocking 移到线程池执行。
+    tauri::async_runtime::spawn_blocking(list_infos)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn open_port(
+pub async fn open_port(
     config: SerialConfig,
     app: AppHandle,
-    state: State<SerialManager>,
+    state: State<'_, SerialManager>,
 ) -> Result<(), String> {
     {
-        let mut shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
+        let shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
         if shared.port.is_some() {
             return Err("串口已打开，请先关闭当前连接".into());
         }
-        let port = open_with(&config)?;
+    }
+    // 打开串口（驱动握手）可能阻塞，同样移出主线程
+    let cfg = config.clone();
+    let port = tauri::async_runtime::spawn_blocking(move || open_with(&cfg))
+        .await
+        .map_err(|e| e.to_string())??;
+    {
+        let mut shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
         shared.port = Some(port);
         shared.config = Some(config.clone());
     }
@@ -240,7 +256,7 @@ pub fn open_port(
 }
 
 #[tauri::command]
-pub fn close_port(app: AppHandle, state: State<SerialManager>) -> Result<(), String> {
+pub async fn close_port(app: AppHandle, state: State<'_, SerialManager>) -> Result<(), String> {
     state.epoch.fetch_add(1, Ordering::SeqCst);
     state.reconnect_flag.store(false, Ordering::SeqCst);
     state.run_flag.store(false, Ordering::SeqCst);
@@ -260,11 +276,11 @@ pub fn close_port(app: AppHandle, state: State<SerialManager>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn send_data(
+pub async fn send_data(
     mode: String,
     text: String,
     app: AppHandle,
-    state: State<SerialManager>,
+    state: State<'_, SerialManager>,
     net: State<'_, crate::net::NetManager>,
 ) -> Result<(), String> {
     let bytes = match mode.as_str() {
@@ -291,13 +307,17 @@ pub fn send_data(
         port.flush().map_err(|e| format!("发送失败: {e}"))?;
     }
     state.tx_total.fetch_add(bytes.len() as u64, Ordering::SeqCst);
-    let _ = app.emit("serial:tx", TxEvent { bytes, ts: now_ms() });
+    crate::busevt::send_tx(&app, now_ms(), &bytes);
     Ok(())
 }
 
 #[tauri::command]
-pub fn start_record(path: String, state: State<SerialManager>) -> Result<(), String> {
-    let file = File::create(&path).map_err(|e| format!("创建日志文件失败: {e}"))?;
+pub async fn start_record(path: String, state: State<'_, SerialManager>) -> Result<(), String> {
+    // 文件创建可能碰上杀软扫描/网络盘阻塞，移出主线程
+    let file = tauri::async_runtime::spawn_blocking(move || File::create(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("创建日志文件失败: {e}"))?;
     *state
         .ctx
         .record
@@ -307,7 +327,7 @@ pub fn start_record(path: String, state: State<SerialManager>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn stop_record(state: State<SerialManager>) -> Result<(), String> {
+pub async fn stop_record(state: State<'_, SerialManager>) -> Result<(), String> {
     let mut rec = state.ctx.record.lock().map_err(|_| "状态锁中毒")?;
     if let Some(f) = rec.as_mut() {
         let _ = f.flush();
@@ -353,6 +373,10 @@ fn spawn_read_thread(
         let mut buf = [0u8; READ_BUF_SIZE];
         let mut pending: Vec<u8> = Vec::with_capacity(EMIT_MAX_BYTES);
         let mut last_emit = Instant::now();
+        // 拔线守护：部分驱动（CH340/CP210x 某些状态）在设备移除后 read
+        // 永远返回 Ok(0)/超时而不报错 → 永远走不到重连分支，界面停在
+        // “已连接”且无数据。持续无数据时主动核对端口是否仍在系统中。
+        let mut last_rx = Instant::now();
 
         loop {
             if !run_flag.load(Ordering::SeqCst) || epoch.load(Ordering::SeqCst) != my_epoch {
@@ -371,9 +395,13 @@ fn spawn_read_thread(
             };
 
             match read_result {
-                Ok(0) => {}
+                // 个别驱动拔线后立即返回 Ok(0)：睡 1ms 防忙转吃满 CPU
+                Ok(0) => {
+                    thread::sleep(Duration::from_millis(1));
+                }
                 Ok(n) => {
                     pending.extend_from_slice(&buf[..n]);
+                    last_rx = Instant::now();
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
                 Err(_) => {
@@ -402,6 +430,53 @@ fn spawn_read_thread(
                     emit_state(&app, "connected", config_port_name(&shared), None);
                     pending.clear();
                     last_emit = Instant::now();
+                    last_rx = Instant::now();
+                    continue;
+                }
+            }
+
+            // 拔线检测：2s 无数据时核对端口存在性（枚举失败不判定断开，避免误杀）
+            if last_rx.elapsed() >= Duration::from_millis(2000) {
+                last_rx = Instant::now();
+                let port_gone = match config_port_name(&shared) {
+                    Some(name) => match serialport::available_ports() {
+                        Ok(ports) => !ports.iter().any(|p| p.port_name == name),
+                        Err(_) => false,
+                    },
+                    None => false,
+                };
+                if port_gone {
+                    {
+                        let mut guard = match shared.lock() {
+                            Ok(g) => g,
+                            Err(_) => break,
+                        };
+                        guard.port = None;
+                    }
+                    if !reconnect_flag.load(Ordering::SeqCst)
+                        || epoch.load(Ordering::SeqCst) != my_epoch
+                    {
+                        break;
+                    }
+                    emit_state(
+                        &app,
+                        "reconnecting",
+                        config_port_name(&shared),
+                        Some("串口设备已移除，等待重新接入…".into()),
+                    );
+                    if !try_reconnect(
+                        &shared,
+                        &reconnect_flag,
+                        &run_flag,
+                        &epoch,
+                        my_epoch,
+                    ) {
+                        break;
+                    }
+                    emit_state(&app, "connected", config_port_name(&shared), None);
+                    pending.clear();
+                    last_emit = Instant::now();
+                    last_rx = Instant::now();
                     continue;
                 }
             }

@@ -139,7 +139,7 @@ pub struct FrameRow {
     pub valid: bool,
     pub error: Option<String>,
     pub fields: Vec<FieldOut>,
-    #[serde(default)]
+    #[serde(default, with = "crate::b64")]
     pub bytes: Vec<u8>,
 }
 
@@ -150,6 +150,8 @@ pub struct FramesEvent {
     pub total: u64,
     pub errors: u64,
     pub dropped: u64,
+    /// Rust 侧发出事件的时刻：前端用于测量 IPC 投递延迟（诊断事件积压）
+    pub emit_ts: u64,
 }
 
 enum Eval {

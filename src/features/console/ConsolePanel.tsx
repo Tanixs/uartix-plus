@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
-import type { RxEventPayload, TxEventPayload } from "../../ipc/types";
+import { onRx, onTx } from "../../ipc/binbus";
 import * as store from "../serial/serialStore";
 import { IconPause, IconPlay, IconTrash } from "../../shared/icons";
 import { useSettings } from "../settings/settingsStore";
@@ -20,6 +20,8 @@ const BIG_CHUNK = 512;
 
 const FILE_CHUNK_BYTES = 2048;
 const MAX_CONSOLE_BLOCKS = 400;
+/** 暂停/不可见时待处理 chunk 的上限，超出丢弃最旧并计数 */
+const MAX_PENDING_CHUNKS = 2000;
 
 function toHex(bytes: Uint8Array): string {
   let out = "";
@@ -68,6 +70,7 @@ export function ConsolePanel() {
   const [error, setError] = useState<string | null>(null);
 
   const chunksRef = useRef<Chunk[]>([]);
+  const droppedRef = useRef(0);
   const viewRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const fileBusyRef = useRef(0);
@@ -75,12 +78,14 @@ export function ConsolePanel() {
   const pausedRef = useRef(false);
   const showTxRef = useRef(true);
   const showRxRef = useRef(true);
+  const showTsRef = useRef(true);
   const modeRef = useRef(mode);
   const visibleRef = useRef(true);
 
   pausedRef.current = paused || autoPaused;
   showTxRef.current = showTx;
   showRxRef.current = showRx;
+  showTsRef.current = showTs;
   modeRef.current = mode;
 
   const renderBytes = (bytes: Uint8Array): string =>
@@ -90,29 +95,41 @@ export function ConsolePanel() {
 
   useEffect(() => {
     const unsubs: UnlistenFn[] = [];
-    listen<RxEventPayload>("serial:rx", (e) => {
-      const raw = e.payload.bytes;
+    // 暂停/不可见时 flush 会提前 return，chunks 只进不出；
+    // 必须设上限，否则高频串口下无限堆积最终卡死主线程
+    const pushChunk = (c: Chunk) => {
+      const arr = chunksRef.current;
+      arr.push(c);
+      if (arr.length > MAX_PENDING_CHUNKS) {
+        const drop = arr.length - MAX_PENDING_CHUNKS;
+        arr.splice(0, drop);
+        droppedRef.current += drop;
+      }
+    };
+    // rx/tx 走二进制总线（binbus）：payload.bytes 已是 Uint8Array
+    onRx((p) => {
+      const raw = p.bytes;
       const big = raw.length > BIG_CHUNK;
-      chunksRef.current.push({
+      pushChunk({
         kind: "rx",
-        bytes: big ? Uint8Array.from(raw.slice(0, 64)) : Uint8Array.from(raw),
-        ts: e.payload.tsLast,
+        bytes: big ? raw.slice(0, 64) : raw,
+        ts: p.tsLast,
         summary: big ? raw.length : undefined,
       });
-    }).then((u) => unsubs.push(u));
-    listen<TxEventPayload>("serial:tx", (e) => {
+    });
+    onTx((p) => {
       if (fileBusyRef.current > 0) return;
-      const raw = e.payload.bytes;
+      const raw = p.bytes;
       const big = raw.length > BIG_CHUNK;
-      chunksRef.current.push({
+      pushChunk({
         kind: "tx",
-        bytes: big ? Uint8Array.from(raw.slice(0, 64)) : Uint8Array.from(raw),
-        ts: e.payload.ts,
+        bytes: big ? raw.slice(0, 64) : raw,
+        ts: p.ts,
         summary: big ? raw.length : undefined,
       });
-    }).then((u) => unsubs.push(u));
+    });
     listen<{ text: unknown }>("script:log", (e) => {
-      chunksRef.current.push({
+      pushChunk({
         kind: "rx",
         bytes: new TextEncoder().encode(`[脚本] ${String(e.payload.text)}`),
         ts: Date.now(),
@@ -143,6 +160,11 @@ export function ConsolePanel() {
       if (!visibleRef.current) return;
       chunksRef.current = [];
       let appended = false;
+      if (droppedRef.current > 0) {
+        appendConsoleText(el, `… 已省略 ${droppedRef.current} 段（面板暂停/隐藏中）…\n`);
+        droppedRef.current = 0;
+        appended = true;
+      }
       for (const c of chunks) {
         let s: string;
         if (c.kind === "tx") {
@@ -150,14 +172,14 @@ export function ConsolePanel() {
           const head = c.summary
             ? ` ⇥ 二进制 ${c.summary} B（头部 ${renderBytes(c.bytes)}… 详情见 Hex 数据流）`
             : ` ${renderBytes(c.bytes)}`;
-          s = `[TX ${fmtTime(c.ts)}]${head}\n`;
+          s = showTsRef.current ? `[TX ${fmtTime(c.ts)}]${head}\n` : `[TX]${head}\n`;
         } else {
           if (!showRxRef.current) continue;
           const body = c.summary
             ? `⇥ 二进制 ${c.summary} B（头部 ${renderBytes(c.bytes)}… 详情见 Hex 数据流）`
             : renderBytes(c.bytes);
           if (!body) continue;
-          s = (showTs ? `[${fmtTime(c.ts)}] ` : "") + body;
+          s = (showTsRef.current ? `[${fmtTime(c.ts)}] ` : "") + body;
         }
         appendConsoleText(el, s);
         appended = true;

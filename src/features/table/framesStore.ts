@@ -1,5 +1,6 @@
-import { listen } from "@tauri-apps/api/event";
 import type { FrameRow, FramesEventPayload } from "../../ipc/types";
+import { onFrames } from "../../ipc/framesBus";
+import * as panelActivity from "../../panels/panelActivity";
 
 export interface FramesSnapshot {
   rows: FrameRow[];
@@ -23,6 +24,8 @@ const listeners = new Set<() => void>();
 let initialized = false;
 let pending: FrameRow[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+/** 面板在标签组后台期间发生过入库（切回前台需补一次 emit） */
+let dirtyWhileHidden = false;
 
 function emit() {
   snapshot = { rows, paused, maxRows, capped };
@@ -43,11 +46,22 @@ export function getSnapshot() {
 export async function init() {
   if (initialized) return;
   initialized = true;
-  await listen<FramesEventPayload>("parser:frames", (e) => {
-    if (e.payload.rows.length === 0) return;
-    pending = pending.concat(e.payload.rows);
+  onFrames((p: FramesEventPayload) => {
+    if (p.rows.length === 0) return;
+    // 面板关闭 → 完全停止（用户红线：关闭了的面板绝不允许后台运行）；
+    // 重新打开后从新数据继续，历史行保留（静态）
+    if (!panelActivity.isOpen("table")) return;
+    pending = pending.concat(p.rows);
     if (!flushTimer) {
       flushTimer = setTimeout(flush, 150);
+    }
+  });
+  // 堆叠在后台的表格：数据照常入有界缓冲但不触发 React 渲染；
+  // 切回前台（任一 dockview 事件同步可见性）时补一次 emit
+  panelActivity.subscribe(() => {
+    if (dirtyWhileHidden && panelActivity.isVisible("table")) {
+      dirtyWhileHidden = false;
+      emit();
     }
   });
 }
@@ -62,7 +76,12 @@ function flush() {
     rows = rows.slice(rows.length - maxRows);
     capped = true;
   }
-  emit();
+  // 后台页签跳过 emit（省掉 1000 行级 React 重渲染），仅入库
+  if (panelActivity.isVisible("table")) {
+    emit();
+  } else {
+    dirtyWhileHidden = true;
+  }
 }
 
 export function setPaused(v: boolean) {

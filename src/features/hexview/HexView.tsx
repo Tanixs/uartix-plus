@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
+import { onRx } from "../../ipc/binbus";
+import { b64ToBytes } from "../../ipc/types";
 import type { FieldDef, HexSlice, SpanOut } from "../../ipc/types";
 import * as serialStore from "../serial/serialStore";
 import * as templateStore from "../protocol/templateStore";
@@ -31,13 +33,32 @@ function hexA(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+/** 状态栏统计叶子组件：独立订阅计数器与遥测，收流时不再拖着整个 HexView
+ *  重渲染（画布走 rAF 脏标记，与 React 渲染无关） */
+function HexStatusStats() {
+  const serial = useSyncExternalStore(
+    serialStore.subscribeCounters,
+    serialStore.getSnapshot,
+  );
+  const tele = useSyncExternalStore(
+    telemetryStore.subscribe,
+    telemetryStore.getSnapshot,
+  );
+  return (
+    <>
+      {t("hx.buffer")} {serial.rxTotal} B · {t("hx.frames")} {tele.stats.total} ·{" "}
+      {t("hx.badFrames")} {tele.stats.errors}
+    </>
+  );
+}
+
 export function HexView() {
   const settings = useSettings(); // 语言/缩放切换时随设置重渲染
   const zf = (settings.zoom || 100) / 100;
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef({ follow: true, viewEnd: COLS - 1 });
-  const sliceRef = useRef<HexSlice | null>(null);
+  const sliceRef = useRef<(Omit<HexSlice, "bytes"> & { bytes: Uint8Array }) | null>(null);
   const fetchingRef = useRef(false);
   const dirtyRef = useRef(true);
   const selRef = useRef<{ anchor: number; focus: number } | null>(null);
@@ -71,14 +92,6 @@ export function HexView() {
   const proto = useSyncExternalStore(
     templateStore.subscribe,
     templateStore.getSnapshot,
-  );
-  const tele = useSyncExternalStore(
-    telemetryStore.subscribe,
-    telemetryStore.getSnapshot,
-  );
-  const serial = useSyncExternalStore(
-    serialStore.subscribe,
-    serialStore.getSnapshot,
   );
   protoRef.current = proto;
 
@@ -209,7 +222,7 @@ export function HexView() {
       fetchingRef.current = true;
       invoke<HexSlice>("hex_fetch", { start: wantStart, end: wantEnd })
         .then((s) => {
-          sliceRef.current = s;
+          sliceRef.current = { ...s, bytes: b64ToBytes(s.bytes) };
           fetchingRef.current = false;
           dirtyRef.current = true;
         })
@@ -349,7 +362,9 @@ export function HexView() {
 
   useEffect(() => {
     let raf = 0;
-    const unsubA = serialStore.subscribe(() => {
+    // 数据到达 → 置脏（事件驱动，每批 RX 一次；此前挂 serialStore 全局订阅，
+    // 计数器监听拆分后全局在收流期间静默导致不再跟随——回归修复）
+    const unsubA = onRx(() => {
       if (!serialStore.isViewFrozen()) dirtyRef.current = true;
     });
     const unsubB = templateStore.subscribe(() => {
@@ -362,7 +377,10 @@ export function HexView() {
     });
     mo.observe(document.documentElement, { attributeFilter: ["data-theme"] });
     const loop = () => {
-      if (dirtyRef.current) {
+      // 面板不在前台（堆叠后台页签的 DOM 被 dockview 摘除，clientWidth=0）
+      // → 跳过取数+重绘；数据在 Rust ring buffer 不丢，切回前台自动补取
+      const canvas = canvasRef.current;
+      if (dirtyRef.current && canvas && canvas.clientWidth > 0) {
         dirtyRef.current = false;
         ensureData();
         draw();
@@ -966,8 +984,7 @@ export function HexView() {
             : t("hx.hint")}
         </span>
         <span className="hex-status-right">
-          {t("hx.buffer")} {serial.rxTotal} B · {t("hx.frames")} {tele.stats.total} ·{" "}
-          {t("hx.badFrames")} {tele.stats.errors}
+          <HexStatusStats />
         </span>
       </div>
       {menu &&

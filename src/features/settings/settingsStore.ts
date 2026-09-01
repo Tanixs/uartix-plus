@@ -2,7 +2,29 @@ import { useSyncExternalStore } from "react";
 
 export type WorkspacePreset = "proto" | "analyze" | "attitude" | "console" | "video";
 
-export type ThemeMode = "light" | "dark" | "navy" | "ocean" | "system";
+export type ThemeMode =
+  | "light"
+  | "dark"
+  | "navy"
+  | "ocean"
+  | "matcha"
+  | "amber"
+  | "begonia"
+  | "glaze"
+  | "system";
+
+/** 全部主题（设置页色板网格顺序） */
+export const THEME_LIST: ThemeMode[] = [
+  "light",
+  "dark",
+  "system",
+  "ocean",
+  "navy",
+  "matcha",
+  "amber",
+  "begonia",
+  "glaze",
+];
 
 export interface Settings {
   theme: ThemeMode;
@@ -36,14 +58,9 @@ function load(): Settings {
     if (!raw) return fallback;
     const p = JSON.parse(raw) as Partial<Settings>;
     return {
-      theme:
-        p.theme === "light" ||
-        p.theme === "dark" ||
-        p.theme === "navy" ||
-        p.theme === "ocean" ||
-        p.theme === "system"
-          ? p.theme
-          : fallback.theme,
+      theme: THEME_LIST.includes(p.theme as ThemeMode)
+        ? (p.theme as ThemeMode)
+        : fallback.theme,
       locale: p.locale === "en" ? "en" : "zh",
       zoom: [90, 100, 110, 125].includes(p.zoom ?? 100) ? (p.zoom as number) : 100,
       decimals: clampDecimals(p.decimals ?? 2, 2),

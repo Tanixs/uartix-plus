@@ -56,6 +56,24 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # 固定 tag/版本号（供后续步骤复用）
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: echo "tag=v$(jq -r .version src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
+
+      # 草稿 Release 用仓库内 note 文件驱动（每次发版改 docs/RELEASE_NOTES/vX.Y.Z.md）
+      # tauri-action 发现同 tag Release 已存在时会直接复用上传资产，不会覆盖 note
+      - name: Create draft release with notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --draft \
+            --title "Uartix+ ${{ steps.ver.outputs.tag }}" \
+            --notes-file "docs/RELEASE_NOTES/${{ steps.ver.outputs.tag }}.md" || true
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -65,7 +83,26 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "Uartix+ v__VERSION__"
-          releaseBody: "见 HANDOFF.md 的版本说明。Windows 安装包（NSIS）与 Linux 包（AppImage/deb）；latest.json 为自动更新清单。"
+          releaseBody: "见 docs/RELEASE_NOTES。"
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
+
+      # 固定文件名副本 → releases/latest/download/<固定名> 成为永久下载地址
+      # （官网/外链一次配置，发新版后自动指向最新，无需再改）
+      - name: Upload stable-named assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        shell: bash
+        run: |
+          VER="${TAG#v}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            SRC="src-tauri/target/release/bundle/nsis/Uartix-Plus_${VER}_x64-setup.exe"
+            cp "$SRC" "Uartix-Plus-windows-x64-Setup.exe"
+            gh release upload "$TAG" "Uartix-Plus-windows-x64-Setup.exe" --clobber
+          else
+            cp src-tauri/target/release/bundle/appimage/*.AppImage "Uartix-Plus-linux-x64.AppImage"
+            cp src-tauri/target/release/bundle/deb/*.deb "Uartix-Plus-linux-x64.deb"
+            gh release upload "$TAG" "Uartix-Plus-linux-x64.AppImage" "Uartix-Plus-linux-x64.deb" --clobber
+          fi

@@ -1,6 +1,6 @@
-import { listen } from "@tauri-apps/api/event";
 import * as templateStore from "../protocol/templateStore";
 import type { FramesEventPayload } from "../../ipc/types";
+import { onFrames } from "../../ipc/framesBus";
 
 export interface VarDef {
   name: string;
@@ -99,10 +99,10 @@ export async function init() {
   initialized = true;
   templateStore.subscribe(rebuild);
   rebuild();
-  await listen<FramesEventPayload>("parser:frames", (e) => {
+  onFrames((p: FramesEventPayload) => {
     if (byField.size === 0) return;
     let changed = false;
-    for (const row of e.payload.rows) {
+    for (const row of p.rows) {
       if (!row.valid) continue;
       for (const f of row.fields) {
         let def = byField.get(f.id);

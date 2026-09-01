@@ -83,6 +83,82 @@
   --scrollbar-hover: #a5b9ca;
 }
 
+/* 护眼绿（Matcha）：亮色系，低饱和抹茶绿，长时间观看不易疲劳 */
+:root[data-theme="matcha"] {
+  color-scheme: light;
+  --bg: #eef5ea;
+  --bg-panel: #fbfdf9;
+  --bg-inset: #e2eedd;
+  --bg-titlebar: #e7f0e2;
+  --border: #c6d8bd;
+  --border-soft: #d8e6d1;
+  --text: #26331f;
+  --text-dim: #5f7157;
+  --accent: #3e8e52;
+  --accent-soft: rgba(62, 142, 82, 0.13);
+  --danger: #c94a3f;
+  --shadow: 0 8px 24px rgba(38, 51, 31, 0.13);
+  --scrollbar: #bfd3b6;
+  --scrollbar-hover: #a3bc98;
+}
+
+/* 活力橙（Amber）：亮色系，暖橙基调，醒目有活力 */
+:root[data-theme="amber"] {
+  color-scheme: light;
+  --bg: #fdf4ea;
+  --bg-panel: #fffbf6;
+  --bg-inset: #f9e9d6;
+  --bg-titlebar: #faeedd;
+  --border: #ecd0ae;
+  --border-soft: #f3e0c6;
+  --text: #43301b;
+  --text-dim: #8a6f4e;
+  --accent: #e07b1f;
+  --accent-soft: rgba(224, 123, 31, 0.14);
+  --danger: #d43a31;
+  --shadow: 0 8px 24px rgba(67, 48, 27, 0.14);
+  --scrollbar: #e6c9a2;
+  --scrollbar-hover: #d4b184;
+}
+
+/* 海棠（Begonia）：亮色系，淡粉底色 + 海棠红点缀，柔和不刺眼 */
+:root[data-theme="begonia"] {
+  color-scheme: light;
+  --bg: #fbf1f2;
+  --bg-panel: #fffcfc;
+  --bg-inset: #f6e4e6;
+  --bg-titlebar: #f8e9ea;
+  --border: #e7c9cd;
+  --border-soft: #f0dadd;
+  --text: #3d2428;
+  --text-dim: #8a6167;
+  --accent: #c8445c;
+  --accent-soft: rgba(200, 68, 92, 0.12);
+  --danger: #c9372c;
+  --shadow: 0 8px 24px rgba(61, 36, 40, 0.14);
+  --scrollbar: #e3c2c7;
+  --scrollbar-hover: #cfa6ad;
+}
+
+/* 琉璃（Glaze）：暗色系，深蓝琉璃底 + 胭脂色点缀，沉静通透 */
+:root[data-theme="glaze"] {
+  color-scheme: dark;
+  --bg: #0e1420;
+  --bg-panel: #151d2c;
+  --bg-inset: #0a0f19;
+  --bg-titlebar: #111827;
+  --border: #2a3850;
+  --border-soft: #1e2a3e;
+  --text: #e6ecf6;
+  --text-dim: #8898b4;
+  --accent: #d05f6e;
+  --accent-soft: rgba(208, 95, 110, 0.16);
+  --danger: #e5534b;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --scrollbar: #2d3c56;
+  --scrollbar-hover: #3f5170;
+}
+
 html,
 body,
 #root {
@@ -1807,6 +1883,84 @@ body {
   background: color-mix(in srgb, var(--accent) 24%, var(--bg-panel));
 }
 
+/* 2D 曲线工具栏图标按钮 */
+.plot-bar .icon-btn {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.plot-bar .icon-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.plot-bar .icon-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* 自绘十字线（替代 uPlot DOM 游标：后者在 CSS zoom 下会被二次放大错位）。
+   transform 由 JS 按「屏幕像素 ÷ zoom」写入，与指针针尖严格重合 */
+.u-over .plot-cross-v,
+.u-over .plot-cross-h {
+  position: absolute;
+  pointer-events: none;
+  z-index: 3;
+}
+.u-over .plot-cross-v {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  border-left: 1px dashed color-mix(in srgb, var(--text-dim) 70%, transparent);
+}
+.u-over .plot-cross-h {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--text-dim) 70%, transparent);
+}
+
+/* 指针十字最近点读数：贴着交点淡显 x/y 值（颜色=所属通道色，JS 写入） */
+.u-over .plot-hover-tip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 4;
+  pointer-events: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  opacity: 0.72;
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  text-shadow: 0 0 4px var(--bg-panel);
+}
+
+/* 游标放置提示（开启游标但尚未放置时显示） */
+.plot-cursor-hint {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 4;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--bg-panel) 90%, transparent);
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.plot-cursor-hint b { color: var(--accent); }
+
 .plot-measure {
   position: absolute;
   left: 10px;
@@ -1828,6 +1982,18 @@ body {
   max-width: 46%;
 }
 
+/* 幅值游标默认右下，与时间游标（左下）错开，避免两面板叠在一起 */
+.plot-measure.plot-measure-y {
+  left: auto;
+  right: 10px;
+}
+
+/* 标题栏 = 拖拽把手 */
+.plot-measure-head.pm-drag {
+  cursor: move;
+  user-select: none;
+}
+
 .plot-measure-head {
   display: flex;
   align-items: baseline;
@@ -1841,26 +2007,29 @@ body {
   font-size: 10px;
   color: var(--text-dim);
 }
-/* 测量框内游标方向分段按钮（X 轴 Δt / Y 轴 ΔV） */
-.pm-seg {
+/* A/B 位置行：圆形字母徽标 + 坐标 */
+.pm-pos {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+}
+.pm-tag {
   display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  flex: none;
 }
-.pm-seg button {
-  border: none;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: 10.5px;
-  font-weight: 600;
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: background .12s, color .12s;
-}
-.pm-seg button + button { border-left: 1px solid var(--border); }
-.pm-seg button:hover { color: var(--text); background: var(--accent-soft); }
-.pm-seg button.on { background: var(--accent); color: #fff; }
+.pm-tag.a { background: #18b893; }
+.pm-tag.b { background: #e8a13c; }
+.pm-coord { color: var(--text); }
+.pm-coord i { color: var(--text-dim); font-style: normal; }
 /* 测量框内一键清除游标 */
 .pm-clear {
   margin-left: auto;
@@ -1880,6 +2049,18 @@ body {
   font-weight: 600;
   color: var(--text);
   margin-bottom: 2px;
+  display: flex;
+  gap: 14px;
+}
+
+/* 幅值游标堆叠模式：读数所依据的聚焦通道 */
+.pm-focus {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-top: 2px;
 }
 
 .plot-measure-grid {
@@ -3711,6 +3892,55 @@ body {
 .preset-name { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .preset-card.on .preset-name { color: var(--accent); }
 .preset-desc { font-size: 10.5px; color: var(--text-dim); }
+
+/* 主题色板卡片网格 */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+.theme-card {
+  all: unset;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 6px 7px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s;
+}
+.theme-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.theme-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.theme-swatch {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 34px;
+  border-radius: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  overflow: hidden;
+}
+.theme-swatch .theme-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  height: 6px;
+}
+.theme-swatch .theme-panel {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 12px;
+  bottom: 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(128, 128, 128, 0.25);
+}
+.theme-name { font-size: 11px; color: var(--text-dim); }
+.theme-card.on .theme-name { color: var(--accent); font-weight: 600; }
 .set-switch { position: relative; display: inline-block; width: 34px; height: 18px; flex: 0 0 auto; }
 label.set-switch,
 .form-row > label.set-switch,

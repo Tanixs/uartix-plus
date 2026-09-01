@@ -6,6 +6,7 @@ import {
   SerializedDockview,
 } from "dockview-react";
 import { panelComponents, PANEL_TITLES } from "./panels/panels";
+import * as panelActivity from "./panels/panelActivity";
 import { SerialToolbar } from "./features/serial/SerialToolbar";
 import { TitleBar } from "./shell/TitleBar";
 import { IconColumns } from "./shared/icons";
@@ -29,6 +30,7 @@ import * as variableStore from "./features/controls/variableStore";
 import * as fcStore from "./features/framecanvas/frameStore";
 import * as telemetryStore from "./features/protocol/telemetryStore";
 import { t } from "./i18n/strings";
+import { takeIpcLatency } from "./ipc/ipcLatency";
 
 const LAYOUT_KEY = "vs.layout.v2";
 
@@ -206,7 +208,6 @@ export default function App() {
   const apiRef = useRef<DockviewApi | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const serial = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
-  const tele = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
   renderTick += 1;
 
   useEffect(() => {
@@ -214,7 +215,13 @@ export default function App() {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
       const base =
-        theme === "system" ? (mq.matches ? "dark" : "light") : theme === "navy" ? "dark" : theme === "ocean" ? "light" : theme;
+        theme === "system"
+          ? mq.matches
+            ? "dark"
+            : "light"
+          : theme === "navy" || theme === "dark" || theme === "glaze"
+            ? "dark"
+            : "light"; // light / ocean / matcha / amber / begonia 均归亮色系（dockview 基础主题）
       document.documentElement.dataset.theme =
         theme === "system" ? base : theme;
     };
@@ -232,11 +239,9 @@ export default function App() {
       ? sysDark
         ? "dark"
         : "light"
-      : theme === "navy"
+      : theme === "navy" || theme === "dark"
         ? "dark"
-        : theme === "ocean"
-          ? "light"
-          : theme;
+        : "light"; // light / ocean / matcha / amber 均归亮色系
 
   useEffect(() => {
     document.documentElement.style.zoom = `${settings.zoom}%`;
@@ -282,6 +287,17 @@ export default function App() {
   const onReady = useCallback((event: DockviewReadyEvent) => {
     const api = event.api;
     apiRef.current = api;
+    // 面板开/关与前后台状态 → panelActivity（store 门控与渲染节流的依据）。
+    // panel.api.isVisible 由 dockview 维护：所在标签组前台页签 = true。
+    const syncPanels = () => {
+      panelActivity.syncPanels(
+        api.panels.map((p) => ({ id: p.id, visible: p.api.isVisible })),
+      );
+    };
+    syncPanels();
+    api.onDidAddPanel(syncPanels);
+    api.onDidRemovePanel(syncPanels);
+    api.onDidActivePanelChange(syncPanels);
     api.onDidLayoutChange(() => {
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(api.toJSON()));
     });
@@ -289,12 +305,16 @@ export default function App() {
     if (saved) {
       try {
         api.fromJSON(JSON.parse(saved) as SerializedDockview);
+        syncPanels();
         return;
       } catch {
         localStorage.removeItem(LAYOUT_KEY);
       }
     }
     applyDefaultLayout(api, getSettingsSnapshot().workspace);
+    syncPanels();
+    // 兜底：布局恢复/首帧渲染后可见性可能尚未稳定，延迟再同步一次
+    window.setTimeout(syncPanels, 200);
   }, []);
 
   useEffect(() => {
@@ -414,20 +434,6 @@ export default function App() {
     });
   };
 
-  const statusText =
-    serial.status === "connected"
-      ? serial.iface === "serial"
-        ? `${t("st.connected")} ${serial.config.port} @ ${serial.config.baud}`
-        : `${t("st.connected")} ${serial.portName ?? ""}`
-      : serial.status === "reconnecting"
-        ? t("st.reconnecting")
-        : t("st.disconnected");
-
-  const bpsText =
-    serial.bps >= 1024
-      ? `${(serial.bps / 1024).toFixed(1)} KB/s`
-      : `${serial.bps} B/s`;
-
   return (
     <div
       className="app"
@@ -524,18 +530,7 @@ export default function App() {
             </div>
           ))}
       </div>
-      <footer className="statusbar">
-        <span className="status-left">
-          <span className={`dot ${serial.status}`} />
-          {statusText}
-          {serial.error && <span className="status-error">{serial.error}</span>}
-          {perfOn && <PerfHud />}
-        </span>
-        <span className="status-right">
-          RX {serial.rxTotal} B · TX {serial.txTotal} B · {bpsText} · 帧{" "}
-          {tele.stats.total}/错 {tele.stats.errors}
-        </span>
-      </footer>
+      <StatusBar perfOn={perfOn} />
       {settingsOpen && (
         <SettingsModal
           onClose={() => setSettingsOpen(false)}
@@ -549,6 +544,47 @@ export default function App() {
 }
 
 let renderTick = 0;
+
+/** 状态栏叶子组件：独立订阅串口状态+计数器与遥测统计。
+ *  收流期间计数器 5Hz 变化只重渲染这个小叶子，不再拖着整个 App 重渲染 */
+function StatusBar({ perfOn }: { perfOn: boolean }) {
+  const subBoth = (cb: () => void) => {
+    const u1 = serialStore.subscribe(cb);
+    const u2 = serialStore.subscribeCounters(cb);
+    return () => {
+      u1();
+      u2();
+    };
+  };
+  const serial = useSyncExternalStore(subBoth, serialStore.getSnapshot);
+  const tele = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
+  const statusText =
+    serial.status === "connected"
+      ? serial.iface === "serial"
+        ? `${t("st.connected")} ${serial.config.port} @ ${serial.config.baud}`
+        : `${t("st.connected")} ${serial.portName ?? ""}`
+      : serial.status === "reconnecting"
+        ? t("st.reconnecting")
+        : t("st.disconnected");
+  const bpsText =
+    serial.bps >= 1024
+      ? `${(serial.bps / 1024).toFixed(1)} KB/s`
+      : `${serial.bps} B/s`;
+  return (
+    <footer className="statusbar">
+      <span className="status-left">
+        <span className={`dot ${serial.status}`} />
+        {statusText}
+        {serial.error && <span className="status-error">{serial.error}</span>}
+        {perfOn && <PerfHud />}
+      </span>
+      <span className="status-right">
+        RX {serial.rxTotal} B · TX {serial.txTotal} B · {bpsText} · 帧{" "}
+        {tele.stats.total}/错 {tele.stats.errors}
+      </span>
+    </footer>
+  );
+}
 
 function NetIfaceBar({ kind }: { kind: IfaceKind }) {
   const s = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
@@ -627,7 +663,7 @@ function NetIfaceBar({ kind }: { kind: IfaceKind }) {
 }
 
 function PerfHud() {
-  const [info, setInfo] = useState({ fps: 0, long: 0, render: 0 });
+  const [info, setInfo] = useState({ fps: 0, long: 0, render: 0, ipc: 0, ipcMax: 0 });
   const state = useRef({ frames: 0, long: 0, raf: 0 });
   useEffect(() => {
     const s = state.current;
@@ -648,7 +684,14 @@ function PerfHud() {
     };
     s.raf = requestAnimationFrame(loop);
     const timer = setInterval(() => {
-      setInfo({ fps: s.frames, long: s.long, render: renderTick });
+      const ipc = takeIpcLatency();
+      setInfo({
+        fps: s.frames,
+        long: s.long,
+        render: renderTick,
+        ipc: Math.round(ipc.avg),
+        ipcMax: Math.round(ipc.max),
+      });
       s.frames = 0;
     }, 1000);
     return () => {
@@ -658,8 +701,11 @@ function PerfHud() {
     };
   }, []);
   return (
-    <span className="perf-hud" title="每秒刷新：FPS / >50ms 长任务累计 / React 渲染次数">
-      {info.fps}fps · 长{info.long} · 渲{info.render}
+    <span
+      className="perf-hud"
+      title="每秒刷新：FPS / >50ms 长任务累计 / React 渲染次数 / IPC 投递延迟（均值·峰值，主线程积压时飙升）"
+    >
+      {info.fps}fps · 长{info.long} · 渲{info.render} · IPC{info.ipc}/{info.ipcMax}ms
     </span>
   );
 }

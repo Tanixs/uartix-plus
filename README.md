@@ -32,15 +32,17 @@
 
 **可视化**
 
-- 2D 曲线：图例点击即绘图，直线 / 阶梯 / 样条三种线型，实时采样率显示，框选缩放，万点不卡
-- 3D 姿态：欧拉角（六种旋转顺序 + 三轴取反）/ 四元数双模式，四轴飞行器与立方体模型
+- 2D 曲线：图例点击即绘图，直线 / 阶梯 / 样条三种线型，实时采样率显示；双游标测量（时间尺 + 幅度尺，面板可拖拽、位置记忆）、指针十字贴近曲线交点显示原始读数、相对秒时间轴（0s / 60s / 1.2h）、最新线锚定、Y 轴自动贴合 + 一次性 Auto 键；峰谷保形抽稀，平坦通道不崎岖，长跑不卡
+- 视频传输（图传）：把数据帧实时渲染为画面，支持网络图传源（TCP/UDP）、暂停 / 回看 / 保存帧 / 镜像 / 翻转、帧定界解析设置
+- 3D 姿态：欧拉角（六种旋转顺序 + 三轴取反）/ 四元数双模式，四轴飞行器与立方体模型；变量支持跨模板选择
 - 帧画布：字节悬停看属性，右键插入 / 删除帧格；Hex 数据流搜索高亮、字节属性面板
 - 数据表格：虚拟列表、排序筛选、CSV / Excel 导出
 - 控制台：Hex / ASCII / 时间戳多视图，收发分色；演示源无设备也可体验全部功能
+- 六套主题（深蓝 / 浅蓝 / 护眼绿 / 琥珀 / 海棠 / 琉璃）色卡选择，深浅完整覆盖
 
 **下行控制**
 
-- 控制画布：滑条 / 按钮 / 开关 / LED / 蜂鸣器 / 数值监视 / 摇杆，拖拽带落点幽灵框（碰撞检测 + 就近吸附，永不重叠）
+- 控制画布：滑条 / 按钮 / 开关 / LED / 蜂鸣器 / 数值监视 / 摇杆，拖拽带落点幽灵框（碰撞检测 + 就近吸附，永不重叠）；卡片复制粘贴，键盘遥控卡片锁定 n×n，脚本模式自动填充示例
 - 指令工厂：可视化组帧，内置 WIT 写寄存器（自动解锁→写入→保存）、匿名 V7 功能触发 / 参数读写、Modbus RTU、校验工具；「我的协议」支持自定义帧模板（固定字节 + 变量字段 + 长度段 + 校验段），实时分段预览
 - 快捷指令栏：命令芯片点击即发，悬浮预览实际发送内容
 - 类 C 脚本与变量系统：解析字段自动注册变量，指令模板 `%x` 占位，脚本 `send` / `beep` / `delay_ms`
@@ -53,15 +55,21 @@
 
 ## 下载
 
-**v0.2.0**
+**下载地址永久固定**——以下链接永远指向最新版，发新版无需修改（可放心配到官网/导航）：
 
-| 平台 | 国内镜像 | GitHub |
-|---|---|---|
-| Windows x64 | [安装包](https://larix.teuioe.cn/dl/v0.2.0/Uartix-Plus_0.2.0_x64-setup.exe) | [安装包](https://github.com/Tanixs/uartix-plus/releases/download/v0.2.0/Uartix-Plus_0.2.0_x64-setup.exe) / [MSI](https://github.com/Tanixs/uartix-plus/releases/download/v0.2.0/Uartix-Plus_0.2.0_x64_en-US.msi) |
-| Linux | [AppImage](https://larix.teuioe.cn/dl/v0.2.0/Uartix-Plus_0.2.0_amd64.AppImage) · [deb](https://larix.teuioe.cn/dl/v0.2.0/Uartix-Plus_0.2.0_amd64.deb) | [AppImage](https://github.com/Tanixs/uartix-plus/releases/download/v0.2.0/Uartix-Plus_0.2.0_amd64.AppImage) · [deb](https://github.com/Tanixs/uartix-plus/releases/download/v0.2.0/Uartix-Plus_0.2.0_amd64.deb) · [RPM](https://github.com/Tanixs/uartix-plus/releases/download/v0.2.0/Uartix-Plus-0.2.0-1.x86_64.rpm) |
+| 平台 | 固定地址|
+|---|---|
+| Windows x64 安装包 | [Uartix-Plus-windows-x64-Setup.exe](https://github.com/Tanixs/uartix-plus/releases/latest/download/Uartix-Plus-windows-x64-Setup.exe) |
+| Linux AppImage | [Uartix-Plus-linux-x64.AppImage](https://github.com/Tanixs/uartix-plus/releases/latest/download/Uartix-Plus-linux-x64.AppImage) |
+| Linux deb | [Uartix-Plus-linux-x64.deb](https://github.com/Tanixs/uartix-plus/releases/latest/download/Uartix-Plus-linux-x64.deb) |
+
+也可以前往 [Releases 页面](https://github.com/Tanixs/uartix-plus/releases/latest) 下载历史版本与完整变更说明。
+
+**官网（教程 / 文档 / 动态）**：[larix.teuioe.cn/uartix-plus](https://larix.teuioe.cn/uartix-plus)
 
 - Windows 首次运行如被 SmartScreen 拦截，点击「更多信息 → 仍要运行」
 - Linux AppImage 需要 `libfuse2`（`sudo apt install libfuse2`）；deb 用 `sudo dpkg -i` 安装
+- 已安装用户：应用内「设置 → 检查更新」可自动升级
 
 ## 快速上手
 

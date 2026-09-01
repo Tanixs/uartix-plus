@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use crate::pipeline::{ingest, IngestCtx};
-use crate::serial::{emit_state, now_ms, TxEvent};
+use crate::serial::{emit_state, now_ms};
 
 const EMIT_INTERVAL_MS: u64 = 33;
 const EMIT_MAX_BYTES: usize = 16384;
@@ -245,10 +245,27 @@ fn spawn_tcp_client(
             if !alive() {
                 break;
             }
-            match TcpStream::connect(addr.clone()) {
+            // connect_timeout（3s）：裸 connect 在对端不可达时阻塞 ~21s（Windows
+            // SYN 重试），期间状态事件发不出去，界面看起来“卡在已连接/无响应”
+            let connect_result = {
+                use std::net::ToSocketAddrs;
+                match addr.to_socket_addrs() {
+                    Ok(mut it) => match it.next() {
+                        Some(sa) => TcpStream::connect_timeout(&sa, Duration::from_secs(3)),
+                        None => Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "地址解析为空",
+                        )),
+                    },
+                    Err(e) => Err(e),
+                }
+            };
+            match connect_result {
                 Ok(stream) => {
                     let _ = stream.set_nodelay(true);
                     let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+                    // 写超时：对端断开后 write 可能长时间阻塞（吃满发送缓冲前）
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(1000)));
                     let write_half = match stream.try_clone() {
                         Ok(s) => s,
                         Err(_) => break,
@@ -287,7 +304,12 @@ fn spawn_tcp_client(
                     if !alive() {
                         break;
                     }
-                    emit_state(&app, "reconnecting", Some(desc.clone()), None);
+                    emit_state(
+                        &app,
+                        "reconnecting",
+                        Some(desc.clone()),
+                        Some("连接已断开，正在重连…".into()),
+                    );
                     thread::sleep(Duration::from_millis(RECONNECT_POLL_MS));
                 }
                 Err(e) => {
@@ -348,6 +370,7 @@ fn spawn_tcp_server(
                 Ok((stream, addr)) => {
                     let _ = stream.set_nodelay(true);
                     let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+                    let _ = stream.set_write_timeout(Some(Duration::from_millis(1000)));
                     let write_half = stream.try_clone().ok();
                     if let Some(w) = &write_half {
                         let _ = w;
@@ -401,6 +424,7 @@ fn spawn_udp(
         Err(_) => return false,
     };
     let _ = sock.set_read_timeout(Some(Duration::from_millis(100)));
+    let _ = sock.set_write_timeout(Some(Duration::from_millis(1000)));
     // connect 仅设置默认对端，不影响接收任意来源
     let _ = sock.connect((cfg.remote_host.as_str(), cfg.remote_port));
     let write_sock = match sock.try_clone() {
@@ -436,7 +460,13 @@ fn spawn_udp(
                 Ok((n, _)) => batcher.push(&ctx, &app, &buf[..n]),
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-                Err(_) => break,
+                Err(_) => {
+                    // Windows 下对端 ICMP 端口不可达会让 recv_from 立即报错
+                    // （WSAECONNRESET）。若在此 break：线程退出但 run_flag 仍为
+                    // true → 界面显示“已连接”却永远收不到数据。
+                    // 容错续跑 + 短暂退避，等待对端恢复发送。
+                    thread::sleep(Duration::from_millis(50));
+                }
             }
             batcher.flush(&ctx, &app);
         }
@@ -451,7 +481,7 @@ fn spawn_udp(
 /// 发送完成后由 send_data 调用：更新 tx 计数并广播 serial:tx
 pub fn notify_tx(app: &AppHandle, state: &NetManager, bytes: Vec<u8>) {
     set_tx(state, bytes.len());
-    let _ = app.emit("serial:tx", TxEvent { bytes, ts: now_ms() });
+    crate::busevt::send_tx(app, now_ms(), &bytes);
 }
 
 #[cfg(test)]

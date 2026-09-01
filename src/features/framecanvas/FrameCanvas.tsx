@@ -962,7 +962,10 @@ function FrameCanvas() {
     const loop = () => {
       if (animsRef.current.size > 0) dirtyRef.current = true;
       for (const [k, u] of animsRef.current) if (u < Date.now()) animsRef.current.delete(k);
-      if (dirtyRef.current) {
+      // 面板不在前台（堆叠后台页签的 DOM 被 dockview 摘除，clientWidth=0）
+      // → 跳过重绘，dirty 保留到切回前台
+      const canvas = canvasRef.current;
+      if (dirtyRef.current && canvas && canvas.clientWidth > 0) {
         dirtyRef.current = false;
         paint();
       }

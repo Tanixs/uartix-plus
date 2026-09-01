@@ -1,3 +1,5 @@
+mod b64;
+mod busevt;
 mod demo;
 mod files;
 mod net;
@@ -30,9 +32,12 @@ pub fn run() {
         .unwrap_or_default()
         .is_empty()
     {
+        // 注意：不再加 --disable-gpu-compositing（P6 为修白闪曾加）——它会把
+        // WebView2 整页合成压到 CPU 上，长时间高频重绘时 CPU 打满、界面卡死。
+        // 白闪改由窗口 backgroundColor（tauri.conf.json）缓解；若白闪复现再评估。
         std::env::set_var(
             "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            "--disable-features=msWebView2DragDropGlobalApiEnabled --disable-gpu-compositing",
+            "--disable-features=msWebView2DragDropGlobalApiEnabled",
         );
     }
     let serial_mgr = serial::SerialManager::new();
@@ -44,7 +49,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(serial_mgr)
         .manage(net_mgr)
+        .manage(busevt::BinBus::default())
         .invoke_handler(tauri::generate_handler![
+            busevt::ipc_subscribe,
             serial::list_ports,
             serial::open_port,
             serial::close_port,

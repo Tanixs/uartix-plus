@@ -1,5 +1,5 @@
-import { listen } from "@tauri-apps/api/event";
 import type { FramesEventPayload } from "../../ipc/types";
+import { onFrames } from "../../ipc/framesBus";
 import * as variableStore from "./variableStore";
 import * as controlsStore from "./controlsStore";
 
@@ -43,8 +43,8 @@ const latestVals = new Map<string, number | string>();
 async function ensureWatch(): Promise<void> {
   if (watchInit) return;
   watchInit = true;
-  await listen<FramesEventPayload>("parser:frames", (e) => {
-    for (const row of e.payload.rows) {
+  onFrames((p: FramesEventPayload) => {
+    for (const row of p.rows) {
       if (!row.valid) continue;
       for (const f of row.fields) {
         latestVals.set(f.name, f.text ?? f.value);

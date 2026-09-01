@@ -198,6 +198,64 @@ export const IconTune = () =>
     </>,
   );
 
+/* 2D 曲线工具栏图标 */
+
+/* 十字准星游标 */
+export const IconCrosshair = () =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="7" />
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4" />
+    </>,
+  );
+
+/* 堆叠（三层斜叠，Material "layers" 造型） */
+export const IconStack = () =>
+  svg(
+    <>
+      <path d="M12 2 2.5 7 12 12l9.5-5L12 2z" />
+      <path d="M2.5 12 12 17l9.5-5" />
+      <path d="M2.5 17 12 22l9.5-5" />
+    </>,
+  );
+
+/* Y 轴自动缩放（上下箭头 + 中线） */
+export const IconAutoY = () =>
+  svg(
+    <>
+      <path d="M12 3v18" />
+      <path d="M8 7l4-4 4 4M8 17l4 4 4-4" />
+    </>,
+  );
+
+/* 一次性自适应（四角外扩箭头，Material "fit" 造型） */
+export const IconFitView = () =>
+  svg(
+    <>
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+    </>,
+  );
+
+/* 时间游标（垂直标尺线 + 上下旗标） */
+export const IconCursorX = () =>
+  svg(
+    <>
+      <path d="M12 3v18" />
+      <path d="M8 3h8l-4 4-4-4z" fill="currentColor" stroke="none" />
+      <path d="M8 21h8l-4-4-4 4z" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+/* 幅值游标（水平标尺线 + 左右旗标） */
+export const IconCursorY = () =>
+  svg(
+    <>
+      <path d="M3 12h18" />
+      <path d="M3 8v8l4-4-4-4z" fill="currentColor" stroke="none" />
+      <path d="M21 8v8l-4-4 4-4z" fill="currentColor" stroke="none" />
+    </>,
+  );
+
 export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   slider: IconSlider(),
   button: IconButton(),

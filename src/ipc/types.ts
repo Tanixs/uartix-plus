@@ -34,6 +34,18 @@ export interface SerialConfig {
 
 export type SerialStatus = "disconnected" | "connected" | "reconnecting";
 
+/** IPC 中的字节负载：热路径事件（frames/rx/tx）已改走二进制总线
+ *  （src/ipc/binbus.ts），直接以 Uint8Array 交付，无 base64/JSON 开销。
+ *  BytesB64 仅剩 hex_fetch 命令响应（HexSlice，低频）仍用 base64。 */
+export type BytesB64 = string;
+
+export function b64ToBytes(s: BytesB64): Uint8Array {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 export interface ConnStatePayload {
   status: SerialStatus;
   port: string | null;
@@ -41,13 +53,15 @@ export interface ConnStatePayload {
 }
 
 export interface RxEventPayload {
-  bytes: number[];
+  bytes: Uint8Array;
   tsFirst: number;
   tsLast: number;
+  /** Rust 侧发出事件的时刻（Date.now 基准），用于测量 IPC 投递延迟 */
+  emitTs?: number;
 }
 
 export interface TxEventPayload {
-  bytes: number[];
+  bytes: Uint8Array;
   ts: number;
 }
 
@@ -171,7 +185,8 @@ export interface FrameRow {
   valid: boolean;
   error: string | null;
   fields: FieldOut[];
-  bytes?: number[];
+  /** 原始帧字节（二进制总线直出的 Uint8Array 视图，无 base64） */
+  bytes?: Uint8Array;
 }
 
 export interface FramesEventPayload {
@@ -179,6 +194,8 @@ export interface FramesEventPayload {
   total: number;
   errors: number;
   dropped?: number;
+  /** Rust 侧发出事件的时刻（Date.now 基准），用于测量 IPC 投递延迟 */
+  emitTs?: number;
 }
 
 export interface SpanOut {
@@ -191,7 +208,7 @@ export interface SpanOut {
 export interface HexSlice {
   start: number;
   total: number;
-  bytes: number[];
+  bytes: BytesB64;
   tsFirst: number;
   tsLast: number;
   spans: SpanOut[];
