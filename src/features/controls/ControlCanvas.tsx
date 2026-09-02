@@ -305,6 +305,21 @@ export function ControlCanvas() {
   }, []);
 
   useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const h = (e: WheelEvent) => {
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      const dx = e.deltaMode === 1 ? e.deltaX * 33 : e.deltaX;
+      if (!dy && !dx) return;
+      e.preventDefault();
+      el.scrollTop += dy;
+      el.scrollLeft += dx;
+    };
+    el.addEventListener("wheel", h, { passive: false });
+    return () => el.removeEventListener("wheel", h);
+  }, []);
+
+  useEffect(() => {
     const move = (e: MouseEvent) => {
       // 释放保护：在窗口外松手时 mouseup 可能丢失（buttons=0 说明已松开）。
       // 必须放在 resize 分支之前——否则 resizeRef 卡住，鼠标悬停滑过就会持续缩放卡片（压成竖条根因）

@@ -34,7 +34,35 @@ export interface Settings {
   perfHud: boolean;
   workspace: WorkspacePreset;
   cellSize: number;
+  aiPreset: AiPreset;
+  aiFormat: AiFormat;
+  aiBaseUrl: string;
+  aiApiKey: string;
+  aiModel: string;
+  aiTemperature: number;
+  aiProxy: string;
+  aiNoProxy: string;
+  aiCreativity: boolean;
+  aiWidgetSend: boolean;
 }
+
+export type AiPreset = "openai" | "deepseek" | "qwen" | "ollama" | "anthropic";
+
+export type AiFormat = "chat" | "anthropic" | "responses";
+
+export const AI_FORMATS: { key: AiFormat; label: string }[] = [
+  { key: "chat", label: "Chat Completions (/chat/completions)" },
+  { key: "anthropic", label: "Anthropic Messages (/v1/messages)" },
+  { key: "responses", label: "Responses (/responses)" },
+];
+
+export const AI_PRESETS: Record<AiPreset, { label: string; baseUrl: string; model: string }> = {
+  openai: { label: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat" },
+  qwen: { label: "通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  ollama: { label: "本地 Ollama", baseUrl: "http://localhost:11434/v1", model: "qwen2.5:7b" },
+  anthropic: { label: "Anthropic Claude", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-4-5" },
+};
 
 const KEY = "vs.settings";
 
@@ -52,6 +80,16 @@ function load(): Settings {
     perfHud: false,
     workspace: "proto",
     cellSize: 60,
+    aiPreset: "deepseek",
+    aiFormat: "chat",
+    aiBaseUrl: AI_PRESETS.deepseek.baseUrl,
+    aiApiKey: "",
+    aiModel: AI_PRESETS.deepseek.model,
+    aiTemperature: 0.3,
+    aiProxy: "",
+    aiNoProxy: "",
+    aiCreativity: false,
+    aiWidgetSend: false,
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -73,6 +111,25 @@ function load(): Settings {
       cellSize: [48, 60, 72, 90, 110].includes(p.cellSize ?? 60)
         ? (p.cellSize as number)
         : 60,
+      aiPreset: (["openai", "deepseek", "qwen", "ollama", "anthropic"] as const).includes(
+        p.aiPreset as AiPreset,
+      )
+        ? (p.aiPreset as AiPreset)
+        : "deepseek",
+      aiFormat: (["chat", "anthropic", "responses"] as const).includes(p.aiFormat as AiFormat)
+        ? (p.aiFormat as AiFormat)
+        : "chat",
+      aiBaseUrl: typeof p.aiBaseUrl === "string" ? p.aiBaseUrl : AI_PRESETS.deepseek.baseUrl,
+      aiApiKey: typeof p.aiApiKey === "string" ? p.aiApiKey : "",
+      aiModel: typeof p.aiModel === "string" && p.aiModel ? p.aiModel : AI_PRESETS.deepseek.model,
+      aiTemperature:
+        typeof p.aiTemperature === "number" && p.aiTemperature >= 0 && p.aiTemperature <= 2
+          ? p.aiTemperature
+          : 0.3,
+      aiProxy: typeof p.aiProxy === "string" ? p.aiProxy : "",
+      aiNoProxy: typeof p.aiNoProxy === "string" ? p.aiNoProxy : "",
+      aiCreativity: Boolean(p.aiCreativity),
+      aiWidgetSend: Boolean(p.aiWidgetSend),
     };
   } catch {
     return fallback;

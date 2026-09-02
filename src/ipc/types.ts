@@ -8,7 +8,8 @@ export type PanelId =
   | "plot2d"
   | "view3d"
   | "framecanvas"
-  | "video";
+  | "video"
+  | "ai";
 
 export interface PanelMeta {
   id: PanelId;

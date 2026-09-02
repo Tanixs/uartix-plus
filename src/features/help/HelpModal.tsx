@@ -53,6 +53,16 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>提示：远程地址填 127.0.0.1 时数据会发给自己（本机回环），适合自测；发送前请确认状态栏已显示<code>已连接 地址</code>。</li>
                   </ol>
                 </Section>
+                <Section title="AI 助手">
+                  <ol className="help-ol">
+                    <li>先到<code>设置 → AI 服务</code>选服务商预设（DeepSeek / OpenAI 兼容 / 通义 / Claude / 本地 Ollama），选<code>接口格式</code>并填入 API Key；如需代理可填 HTTP 代理地址。</li>
+                    <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；浮窗可拖动、缩放、最小化到角落气泡，也可一键<code>停靠为面板</code>（面板内可再弹出为浮窗）。</li>
+                    <li><b>识别协议</b>：在 Hex 数据流框选一段字节 → 右键「AI 识别协议」，AI 输出候选帧结构表（帧头/长度/字段/校验+置信度），点「写入协议模板」即可直接解析。</li>
+                    <li><b>解读数据 / 分析曲线</b>：一键概括设备状态、诊断振荡与噪声；发现坏帧率偏高、数据停滞、字段突变时面板顶部会主动提示。</li>
+                    <li><b>生成指令 / 生成卡片</b>：自然语言生成命令模板或控制卡片，回复内直接点「加入命令库」「临时发送」「写入控制画布」，生成即可用。</li>
+                    <li>发送前可在输入框上方勾选「本次发送的上下文」（协议摘要/数据样本/Hex 选区等），AI 只看你授权的内容。</li>
+                  </ol>
+                </Section>
                 <Section title="控制台与快捷指令">
                   <ol className="help-ol">
                     <li>发送框上方是<code>快捷指令</code>栏：命令芯片<b>左键立即发送</b>，鼠标悬停可预览实际内容（自动识别 Hex/ASCII/脚本）。</li>
@@ -64,7 +74,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
               </>
             )}
             {tab === "panels" && (
-              <Section title="九个面板与推荐工作流">
+              <Section title="面板一览与推荐工作流">
                 <table className="help-table">
                   <tbody>
                     <tr><td>协议模板</td><td>协议簇管理：导入预设、新建、启停解析、复制/粘贴帧型</td></tr>
@@ -77,6 +87,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <tr><td>图传</td><td>把每帧数据渲染为画面：暂停/回看/保存帧、镜像翻转、缩放拖动；「解析设置」定义帧定界方式</td></tr>
                     <tr><td>控制画布</td><td>拖拽部署滑条/按钮/开关/LED/蜂鸣器等控件向下位机发指令；拖动时虚线幽灵框指示落点，松手只会落到空格</td></tr>
                     <tr><td>控制台</td><td>原始收发日志（时间戳彩色），可发 ASCII/Hex、发送文件、录制日志；上方快捷指令栏一键发送，指令工厂可组各协议帧</td></tr>
+                    <tr><td>AI 助手</td><td>AI 调试助手：协议识别、数据解读、曲线分析、指令/卡片生成、诊断排查、调试报告；Ctrl+K 唤起浮窗，可停靠为面板（+面板 可添加）</td></tr>
                   </tbody>
                 </table>
                 <p className="help-tip">推荐流：Hex/帧画布定义协议 → 表格与曲线观察 → 控制画布下发指令闭环调试。</p>
@@ -195,6 +206,7 @@ else send("RGT:" + phase);`}</pre>
               <table className="help-table">
                 <tbody>
                   <tr><td>Ctrl+F</td><td>Hex 数据流搜索（Esc 关闭）</td></tr>
+                  <tr><td>Ctrl+K</td><td>AI 助手浮窗开关</td></tr>
                   <tr><td>Ctrl+Z / Ctrl+Y</td><td>协议编辑撤销 / 重做（全局 50 步）</td></tr>
                   <tr><td>← / →</td><td>帧画布上一帧 / 下一帧</td></tr>
                   <tr><td>Esc</td><td>取消框选 / 关闭菜单</td></tr>

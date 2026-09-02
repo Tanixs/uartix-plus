@@ -13,6 +13,11 @@ import { IconColumns } from "./shared/icons";
 import type { IfaceKind } from "./features/serial/serialStore";
 import type { WorkspacePreset } from "./features/settings/settingsStore";
 import { JsonDropImport } from "./features/settings/JsonDropImport";
+import { AiFloat } from "./features/ai/AiFloat";
+import { WidgetFloats } from "./features/ai/WidgetFloats";
+import { startWidgetHub } from "./features/ai/widgetHub";
+import * as chatStore from "./features/ai/chatStore";
+import { onAiScene, onOpenSettings, onPop } from "./features/ai/aiBus";
 import {
   getSnapshot as getSettingsSnapshot,
   useSettings,
@@ -199,6 +204,7 @@ export default function App() {
   const [perfOn, setPerfOn] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [sysDark, setSysDark] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
@@ -273,16 +279,45 @@ export default function App() {
     attitudeStore.init();
     variableStore.init();
     fcStore.init();
+    void chatStore.init();
+    startWidgetHub();
+    const unScene = onAiScene((req) => {
+      setAiOpen(true);
+      chatStore.pushScene(req.scene, req.payload);
+    });
+    const unSettings = onOpenSettings(() => setSettingsOpen(true));
+    const unPop = onPop(() => {
+      chatStore.setFloatOpen(true);
+      setAiOpen(true);
+      const api = apiRef.current;
+      const panel = api?.getPanel("ai");
+      if (api && panel) api.removePanel(panel);
+    });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        setAiOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
     const preventNav = (e: DragEvent) => {
       e.preventDefault();
     };
     window.addEventListener("dragover", preventNav);
     window.addEventListener("drop", preventNav);
     return () => {
+      unScene();
+      unSettings();
+      unPop();
+      window.removeEventListener("keydown", onKey);
       window.removeEventListener("dragover", preventNav);
       window.removeEventListener("drop", preventNav);
     };
   }, []);
+
+  useEffect(() => {
+    chatStore.setFloatOpen(aiOpen);
+  }, [aiOpen]);
 
   const onReady = useCallback((event: DockviewReadyEvent) => {
     const api = event.api;
@@ -444,7 +479,11 @@ export default function App() {
         e.preventDefault();
       }}
     >
-      <TitleBar onOpenSettings={() => setSettingsOpen(true)} onOpenHelp={() => setHelpOpen(true)} />
+      <TitleBar
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenHelp={() => setHelpOpen(true)}
+        onOpenAi={() => setAiOpen((v) => !v)}
+      />
       <header className="toolbar">
         {serial.iface === "serial" ? (
           <SerialToolbar />
@@ -538,6 +577,16 @@ export default function App() {
         />
       )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      {aiOpen && (
+        <AiFloat
+          onDock={() => {
+            setAiOpen(false);
+            addOrFocusPanel("ai");
+          }}
+          onClose={() => setAiOpen(false)}
+        />
+      )}
+      <WidgetFloats />
       <JsonDropImport />
     </div>
   );

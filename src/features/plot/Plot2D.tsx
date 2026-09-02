@@ -5,6 +5,7 @@ import "uplot/dist/uPlot.min.css";
 import * as plotStore from "./plotStore";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
+import { invokeAiScene } from "../ai/aiBus";
 import {
   IconChevron,
   IconCursorX,
@@ -1924,6 +1925,14 @@ export function Plot2D() {
             </button>
             <button className="ctx-item" onClick={fitView}>
               Auto 自适应（X/Y 一步取景，执行一次）
+            </button>
+            <div className="ctx-group">AI</div>
+            <button
+              className="ctx-item"
+              title="AI 根据各通道统计特征总结趋势、诊断振荡/噪声并给出采样率建议"
+              onClick={() => invokeAiScene("analyzeCurve")}
+            >
+              AI 分析当前曲线
             </button>
             <div
               ref={xRowRef}

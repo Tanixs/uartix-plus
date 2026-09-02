@@ -1,3 +1,4 @@
+mod ai;
 mod b64;
 mod busevt;
 mod demo;
@@ -50,8 +51,12 @@ pub fn run() {
         .manage(serial_mgr)
         .manage(net_mgr)
         .manage(busevt::BinBus::default())
+        .manage(ai::AiState::default())
         .invoke_handler(tauri::generate_handler![
             busevt::ipc_subscribe,
+            ai::ai_chat,
+            ai::ai_abort,
+            ai::ai_upload_report,
             serial::list_ports,
             serial::open_port,
             serial::close_port,

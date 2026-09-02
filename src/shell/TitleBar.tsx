@@ -5,7 +5,7 @@ import * as serialStore from "../features/serial/serialStore";
 import { useSyncExternalStore } from "react";
 import type { IfaceKind } from "../features/serial/serialStore";
 import { t } from "../i18n/strings";
-import { IconChevron } from "../shared/icons";
+import { IconChevron, IconSparkle } from "../shared/icons";
 import iconPlain from "../assets/icon-plain.svg";
 
 const IFACE_LABEL: Record<IfaceKind, string> = {
@@ -103,9 +103,11 @@ const IfaceMenu = () => {
 export function TitleBar({
   onOpenSettings,
   onOpenHelp,
+  onOpenAi,
 }: {
   onOpenSettings: () => void;
   onOpenHelp: () => void;
+  onOpenAi: () => void;
 }) {
   const win = getCurrentWindow();
   const [maxed, setMaxed] = useState(false);
@@ -159,6 +161,9 @@ export function TitleBar({
       </div>
       <IfaceMenu />
       <div className="tb-spacer" data-tauri-drag-region />
+      <button className="tb-btn" title="AI 助手 (Ctrl+K)" onClick={onOpenAi}>
+        <IconSparkle />
+      </button>
       <button className="tb-btn" title="设置" onClick={onOpenSettings}>
         <IconSettings />
       </button>

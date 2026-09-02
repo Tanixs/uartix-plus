@@ -256,6 +256,69 @@ export const IconCursorY = () =>
     </>,
   );
 
+export const IconSend = () =>
+  svg(<path d="M4 12h13M13 6l6 6-6 6" />);
+
+export const IconStop = () =>
+  svg(<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />);
+
+export const IconSparkle = () =>
+  svg(
+    <>
+      <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" />
+      <path d="M19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16z" />
+    </>,
+  );
+
+export const IconDock = () =>
+  svg(
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M15 4v16" />
+    </>,
+  );
+
+export const IconUpload = () =>
+  svg(
+    <>
+      <path d="M12 15V4M7 9l5-5 5 5" />
+      <path d="M4 21h16" />
+    </>,
+  );
+
+export const IconPop = () =>
+  svg(
+    <>
+      <path d="M15 4h5v5" />
+      <path d="M20 4l-7 7" />
+      <path d="M19 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" />
+    </>,
+  );
+
+export const IconEye = () =>
+  svg(
+    <>
+      <path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </>,
+  );
+
+export const IconEyeOff = () =>
+  svg(
+    <>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 5.1A10.9 10.9 0 0 1 12 5c6.5 0 10 7 10 7a17.4 17.4 0 0 1-3.1 3.9M6.1 6.1A16.6 16.6 0 0 0 2 12s3.5 7 10 7a9.9 9.9 0 0 0 4.4-1" />
+      <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+    </>,
+  );
+
+export const IconPuzzle = () =>
+  svg(
+    <>
+      <path d="M9 4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H5v-4a2 2 0 1 0 0-4V4h4z" />
+    </>,
+  );
+
 export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   slider: IconSlider(),
   button: IconButton(),

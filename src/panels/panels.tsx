@@ -11,6 +11,7 @@ import { View3D } from "../features/attitude/View3D";
 import { ControlCanvas } from "../features/controls/ControlCanvas";
 import FrameCanvas from "../features/framecanvas/FrameCanvas";
 import { VideoLink } from "../features/video/VideoLink";
+import { AiChat } from "../features/ai/AiChat";
 
 export const PANEL_TITLES: Record<PanelId, string> = {
   hexview: "Hex 数据流",
@@ -23,6 +24,7 @@ export const PANEL_TITLES: Record<PanelId, string> = {
   view3d: "3D 姿态",
   framecanvas: "帧画布",
   video: "图传",
+  ai: "AI 助手",
 };
 
 const MTemplates = memo(TemplatesPanel);
@@ -35,6 +37,7 @@ const MPlot2D = memo(Plot2D);
 const MView3D = memo(View3D);
 const MFrameCanvas = memo(FrameCanvas);
 const MVideo = memo(VideoLink);
+const MAi = memo(AiChat);
 
 export const panelComponents = {
   templates: () => (
@@ -85,6 +88,11 @@ export const panelComponents = {
   video: () => (
     <ErrorBoundary label={PANEL_TITLES.video}>
       <MVideo />
+    </ErrorBoundary>
+  ),
+  ai: () => (
+    <ErrorBoundary label={PANEL_TITLES.ai}>
+      <MAi />
     </ErrorBoundary>
   ),
   placeholder: () => (

@@ -4,14 +4,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { THEME_LIST, useSettings, patch, type ThemeMode, type WorkspacePreset } from "./settingsStore";
+import { THEME_LIST, useSettings, patch, type ThemeMode, type WorkspacePreset, AI_PRESETS, AI_FORMATS, type AiPreset, type AiFormat } from "./settingsStore";
 import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
 import { t } from "../../i18n/strings";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
+import { clearAll } from "../ai/widgetStore";
+import { clearAiTheme } from "../ai/aiTheme";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
+import { IconEye, IconEyeOff } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 
@@ -84,6 +87,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
   const settings = useSettings();
   const [tab, setTab] = useState("general");
   const [msg, setMsg] = useState("");
+  const [showKey, setShowKey] = useState(false);
   const [appVersion, setAppVersion] = useState("");
   const [updState, setUpdState] = useState<{
     status: "idle" | "checking" | "downloading" | "latest" | "ready" | "error";
@@ -121,6 +125,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
     { key: "general", label: t("set.general") },
     { key: "workspace", label: t("set.workspace") },
     { key: "data", label: t("set.data") },
+    { key: "ai", label: t("set.ai") },
     { key: "io", label: t("set.io") },
     { key: "about", label: t("set.about") },
   ];
@@ -275,6 +280,166 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     <span />
                   </label>
                 ), t("set.perfHud.tip"))}
+              </>
+            )}
+            {tab === "ai" && (
+              <>
+                {row(t("set.ai.preset"), (
+                  <select
+                    className="input"
+                    value={settings.aiPreset}
+                    onChange={(e) => {
+                      const p = e.target.value as AiPreset;
+                      patch({
+                        aiPreset: p,
+                        aiBaseUrl: AI_PRESETS[p].baseUrl,
+                        aiModel: AI_PRESETS[p].model,
+                        aiFormat: p === "anthropic" ? "anthropic" : "chat",
+                      });
+                    }}
+                  >
+                    {(Object.keys(AI_PRESETS) as AiPreset[]).map((k) => (
+                      <option key={k} value={k}>
+                        {AI_PRESETS[k].label}
+                      </option>
+                    ))}
+                  </select>
+                ), t("set.ai.preset.tip"))}
+                {row(t("set.ai.format"), (
+                  <select
+                    className="input"
+                    value={settings.aiFormat}
+                    onChange={(e) => patch({ aiFormat: e.target.value as AiFormat })}
+                  >
+                    {AI_FORMATS.map((f) => (
+                      <option key={f.key} value={f.key}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                ), t("set.ai.format.tip"))}
+                {row(t("set.ai.baseUrl"), (
+                  <input
+                    className="input"
+                    style={{ width: 280 }}
+                    value={settings.aiBaseUrl}
+                    placeholder="https://api.deepseek.com"
+                    onChange={(e) => patch({ aiBaseUrl: e.target.value })}
+                  />
+                ), t("set.ai.baseUrl.tip"))}
+                {row(t("set.ai.key"), (
+                  <div className="ai-key-wrap">
+                    <input
+                      className="input"
+                      style={{ width: 280 }}
+                      type={showKey ? "text" : "password"}
+                      value={settings.aiApiKey}
+                      placeholder={settings.aiPreset === "ollama" ? "本地 Ollama 无需 Key" : "sk-…"}
+                      onChange={(e) => patch({ aiApiKey: e.target.value })}
+                    />
+                    <button
+                      className="ai-key-eye"
+                      title={showKey ? "隐藏 API Key" : "显示 API Key"}
+                      onClick={() => setShowKey((v) => !v)}
+                    >
+                      {showKey ? <IconEyeOff /> : <IconEye />}
+                    </button>
+                  </div>
+                ), t("set.ai.key.tip"))}
+                {row(t("set.ai.model"), (
+                  <input
+                    className="input"
+                    style={{ width: 280 }}
+                    value={settings.aiModel}
+                    onChange={(e) => patch({ aiModel: e.target.value })}
+                  />
+                ), t("set.ai.model.tip"))}
+                {row(t("set.ai.temp"), (
+                  <input
+                    type="number"
+                    className="input"
+                    style={{ width: 72 }}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={settings.aiTemperature}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v)) return;
+                      patch({ aiTemperature: Math.max(0, Math.min(2, v)) });
+                    }}
+                  />
+                ), t("set.ai.temp.tip"))}
+                {row(t("set.ai.proxy"), (
+                  <input
+                    className="input"
+                    style={{ width: 280 }}
+                    value={settings.aiProxy}
+                    placeholder="http://127.0.0.1:7890（留空 = 跟随系统）"
+                    onChange={(e) => patch({ aiProxy: e.target.value })}
+                  />
+                ), t("set.ai.proxy.tip"))}
+                {row(t("set.ai.noProxy"), (
+                  <input
+                    className="input"
+                    style={{ width: 280 }}
+                    value={settings.aiNoProxy}
+                    placeholder="localhost,127.0.0.1,.cn,*.lan"
+                    onChange={(e) => patch({ aiNoProxy: e.target.value })}
+                  />
+                ), t("set.ai.noProxy.tip"))}
+                {row(t("set.ai.creative"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.aiCreativity}
+                      onChange={(e) => patch({ aiCreativity: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), t("set.ai.creative.tip"))}
+                {settings.aiCreativity && row(t("set.ai.widgetSend"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.aiWidgetSend}
+                      onChange={(e) => patch({ aiWidgetSend: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), t("set.ai.widgetSend.tip"))}
+                {row(t("set.ai.reset"), (
+                  <div className="qk-fgroup">
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        if (!confirm("清除全部 AI 创造内容？（自定义主题 + 已安装挂件；协议/画布/命令不受影响）")) return;
+                        clearAll();
+                        clearAiTheme();
+                        document.documentElement.style.cssText = "";
+                        setMsg("已重置 AI 创造内容");
+                      }}
+                    >
+                      {t("set.ai.reset")}
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        if (!confirm("恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与 AI 创造内容，且不可恢复。确定继续？")) return;
+                        const kill: string[] = [];
+                        for (let i = 0; i < localStorage.length; i++) {
+                          const k = localStorage.key(i);
+                          if (k?.startsWith("vs.")) kill.push(k);
+                        }
+                        kill.forEach((k) => localStorage.removeItem(k));
+                        location.reload();
+                      }}
+                    >
+                      {t("set.ai.factory")}
+                    </button>
+                  </div>
+                ), t("set.ai.reset.tip"))}
+                <div className="set-io-hint">{t("set.ai.privacy")}</div>
               </>
             )}
             {tab === "io" && (

@@ -8,6 +8,7 @@ import * as serialStore from "../serial/serialStore";
 import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
 import * as fcStore from "../framecanvas/frameStore";
+import { invokeAiScene } from "../ai/aiBus";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
@@ -821,6 +822,26 @@ export function HexView() {
           选区 0x{sel.start.toString(16)} ~ 0x{sel.end.toString(16)} ·{" "}
           {selLen} 字节 · {selHex}
         </div>
+        <button
+          className="ctx-item"
+          title="AI 分析选中字节流，推断帧结构（帧头/长度/字段/校验）并生成候选模板"
+          onClick={() => {
+            invokeAiScene("protocol", { hex: fullHex });
+            closeMenu();
+          }}
+        >
+          AI 识别协议
+        </button>
+        <button
+          className="ctx-item"
+          title="按当前模板逐字节解释这段选区的含义"
+          onClick={() => {
+            invokeAiScene("explainBytes", { hex: fullHex });
+            closeMenu();
+          }}
+        >
+          AI 解释这段字节
+        </button>
         <button
           className="ctx-item"
           disabled={selLen > 8}

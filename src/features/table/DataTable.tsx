@@ -123,6 +123,21 @@ export function DataTable() {
     return () => ro.disconnect();
   }, []);
 
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const h = (e: WheelEvent) => {
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      const dx = e.deltaMode === 1 ? e.deltaX * 33 : e.deltaX;
+      if (!dy && !dx) return;
+      e.preventDefault();
+      el.scrollTop += dy;
+      el.scrollLeft += dx;
+    };
+    el.addEventListener("wheel", h, { passive: false });
+    return () => el.removeEventListener("wheel", h);
+  }, []);
+
   const onScroll = () => {
     const el = bodyRef.current;
     if (!el) return;
