@@ -7,6 +7,8 @@ import { getSnapshot as getPlot, fullAligned } from "../plot/plotStore";
 export interface ContextSelection {
   conn: boolean;
   protocol: boolean;
+  /** 协议完整定义（帧头/校验/偏移全文；默认关，只带一行式清单） */
+  protoFull: boolean;
   samples: boolean;
   hex: boolean;
 }
@@ -14,6 +16,7 @@ export interface ContextSelection {
 export const DEFAULT_CONTEXT: ContextSelection = {
   conn: false,
   protocol: true,
+  protoFull: false,
   samples: false,
   hex: true,
 };
@@ -54,6 +57,19 @@ export function summaryTemplates(): string {
     .join("\n");
 }
 
+/** 一行式协议清单（几十 token，默认随消息附带） */
+export function summaryTemplatesBrief(): string {
+  const proto = getProto();
+  const enabled = proto.rules.templates.filter((t) => t.enabled);
+  if (enabled.length === 0) return "（当前无启用的协议模板）";
+  return enabled
+    .map((t) => {
+      const fs = t.fields.filter((f) => f.role === "data" || f.role === "payload").map((f) => f.name);
+      return `【${t.name}】字段：${fs.length ? fs.join("、") : "无"}`;
+    })
+    .join("\n");
+}
+
 export function collectContext(sel: ContextSelection): ContextBlock[] {
   const blocks: ContextBlock[] = [];
   if (sel.conn) {
@@ -71,7 +87,11 @@ export function collectContext(sel: ContextSelection): ContextBlock[] {
     });
   }
   if (sel.protocol) {
-    blocks.push({ key: "protocol", title: "协议模板摘要", text: summaryTemplates() });
+    if (sel.protoFull) {
+      blocks.push({ key: "protoFull", title: "协议模板完整定义", text: summaryTemplates() });
+    } else {
+      blocks.push({ key: "protocol", title: "协议清单", text: summaryTemplatesBrief() });
+    }
   }
   if (sel.samples) {
     const rows = getFrames().rows.slice(-SAMPLE_N);
@@ -109,6 +129,15 @@ export function contextToText(blocks: ContextBlock[]): string {
   return `\n\n---\n[以下为用户授权附加的软件内上下文]\n${blocks
     .map((b) => `<<${b.title}>>\n${b.text}`)
     .join("\n")}`;
+}
+
+/** 粗略 token 估算：CJK 字符约 1 字 1 token，其余约 4 字符 1 token */
+export function estimateTokens(text: string): number {
+  let cjk = 0;
+  for (const ch of text) {
+    if (/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/.test(ch)) cjk++;
+  }
+  return Math.ceil(cjk + (text.length - cjk) / 4);
 }
 
 export function curveStatsText(): string {

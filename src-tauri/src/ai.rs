@@ -154,6 +154,35 @@ fn extract_delta(format: &str, v: &serde_json::Value) -> (Option<String>, Option
     }
 }
 
+fn done_json(req_id: &str, aborted: bool, usage: Option<(u64, u64)>) -> serde_json::Value {
+    let mut v = serde_json::json!({ "reqId": req_id, "aborted": aborted });
+    if let Some((p, c)) = usage {
+        v["usage"] = serde_json::json!({ "prompt": p, "completion": c });
+    }
+    v
+}
+
+/// 从 SSE chunk 的 usage 字段提取 token 用量（chat/anthropic/responses 三种格式兼容）。
+/// 输入/输出 token 分开合并，避免 anthropic 的 message_delta 只带 output 时丢失 input。
+fn extract_usage(v: &serde_json::Value, last: &mut Option<(u64, u64)>) {
+    if let Some(u) = v.get("usage") {
+        let p = u
+            .get("prompt_tokens")
+            .and_then(|x| x.as_u64())
+            .or_else(|| u.get("input_tokens").and_then(|x| x.as_u64()));
+        let c = u
+            .get("completion_tokens")
+            .and_then(|x| x.as_u64())
+            .or_else(|| u.get("output_tokens").and_then(|x| x.as_u64()));
+        let (cp, cc) = last.unwrap_or((0, 0));
+        let np = p.unwrap_or(cp);
+        let nc = c.unwrap_or(cc);
+        if np > 0 || nc > 0 {
+            *last = Some((np, nc));
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn ai_chat(
     app: AppHandle,
@@ -243,7 +272,7 @@ pub async fn ai_chat(
         Ok(r) => r,
         Err(e) => {
             if flag.load(Ordering::Relaxed) {
-                let _ = app.emit("ai:done", serde_json::json!({ "reqId": req_id, "aborted": true }));
+                let _ = app.emit("ai:done", done_json(&req_id, true, None));
                 return Ok(());
             }
             state
@@ -285,6 +314,7 @@ pub async fn ai_chat(
 
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
+    let mut last_usage: Option<(u64, u64)> = None;
 
     loop {
         if flag.load(Ordering::Relaxed) {
@@ -326,7 +356,7 @@ pub async fn ai_chat(
                             .map(|mut m| m.remove(&req_id));
                         let _ = app.emit(
                             "ai:done",
-                            serde_json::json!({ "reqId": req_id, "aborted": false }),
+                            done_json(&req_id, false, last_usage),
                         );
                         return Ok(());
                     }
@@ -334,6 +364,7 @@ pub async fn ai_chat(
                         Ok(v) => v,
                         Err(_) => continue,
                     };
+                    extract_usage(&v, &mut last_usage);
                     let (delta, reasoning, done) = extract_delta(fmt, &v);
                     if let Some(text) = delta {
                         if !text.is_empty() {
@@ -359,7 +390,7 @@ pub async fn ai_chat(
                             .map(|mut m| m.remove(&req_id));
                         let _ = app.emit(
                             "ai:done",
-                            serde_json::json!({ "reqId": req_id, "aborted": false }),
+                            done_json(&req_id, false, last_usage),
                         );
                         return Ok(());
                     }
@@ -375,7 +406,7 @@ pub async fn ai_chat(
         .map(|mut m| m.remove(&req_id));
     let _ = app.emit(
         "ai:done",
-        serde_json::json!({ "reqId": req_id, "aborted": flag.load(Ordering::Relaxed) }),
+        done_json(&req_id, flag.load(Ordering::Relaxed), last_usage),
     );
     Ok(())
 }

@@ -10,6 +10,8 @@ import type {
 import * as templateStore from "../protocol/templateStore";
 import * as commandStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
+import { validateUserCodec, buildUserFrame, type UserSeg } from "../console/commandFactory";
+import * as ucStore from "../console/userCodecStore";
 
 const BOUNDARY_MODES = ["fixedLength", "lengthField", "footer"];
 const CHECKSUM_ALGOS: ChecksumAlgo[] = [
@@ -180,15 +182,49 @@ const CARD_TYPES = [
   "joystick",
   "keypad",
   "keymon",
+  "group",
+  "custom",
 ];
 
+/** 单个控制页 custom 沙箱卡片上限（iframe 性能保护） */
+const MAX_CUSTOM_PER_PAGE = 8;
+
 export function writeCommandFromAiJson(raw: string): WriteResult {
-  let obj: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    obj = JSON.parse(raw) as Record<string, unknown>;
+    parsed = JSON.parse(raw);
   } catch {
     return { ok: false, msg: "JSON 解析失败：代码块内容不是合法 JSON" };
   }
+  // 兼容三种形态：{"commands":[...]}、纯数组、单对象
+  let list: unknown[] | null = null;
+  if (Array.isArray(parsed)) {
+    list = parsed;
+  } else if (
+    parsed &&
+    typeof parsed === "object" &&
+    Array.isArray((parsed as { commands?: unknown }).commands)
+  ) {
+    list = (parsed as { commands: unknown[] }).commands;
+  }
+  if (!list) return writeOneCommand(parsed as Record<string, unknown>);
+  if (list.length === 0) return { ok: false, msg: "commands 数组为空" };
+  if (list.length > 32) list = list.slice(0, 32);
+  const results: string[] = [];
+  let okCount = 0;
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const r = writeOneCommand(item as Record<string, unknown>);
+    if (r.ok) {
+      okCount++;
+      results.push(String((item as Record<string, unknown>).name ?? "指令"));
+    }
+  }
+  if (okCount === 0) return { ok: false, msg: "没有可写入的命令（template 与 script 均缺失或非法）" };
+  return { ok: true, msg: `${okCount} 条命令已写入命令库「AI 生成」分组：${results.join("、")}` };
+}
+
+function writeOneCommand(obj: Record<string, unknown>): WriteResult {
   const template =
     typeof obj.template === "string" && obj.template.trim()
       ? obj.template.trim()
@@ -250,6 +286,80 @@ export function writeCommandFromAiJson(raw: string): WriteResult {
   };
 }
 
+/** uartix-codec：AI 生成指令工厂自定义协议 */
+export function writeCodecFromAiJson(raw: string): WriteResult {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { ok: false, msg: "JSON 解析失败：代码块内容不是合法 JSON" };
+  }
+  const name = typeof obj.name === "string" && obj.name.trim() ? obj.name.trim() : "";
+  if (!name) return { ok: false, msg: "缺少协议名 name" };
+  if (!Array.isArray(obj.segs) || obj.segs.length < 2) {
+    return { ok: false, msg: "segs 缺失或不足 2 段（至少帧头 + 校验）" };
+  }
+  // 段合法性清洗：kind 校验 + 数值/布尔规范化
+  const CHECK_ALGOS = ["sum8", "xor8", "sum16", "crc16-modbus", "crc16-ccitt", "crc16-x25", "ano-scac"];
+  const VAR_TYPES = ["u8", "u16", "u32", "s16", "s32", "f32", "ascii"];
+  const segs: UserSeg[] = [];
+  for (const rawSeg of obj.segs) {
+    if (!rawSeg || typeof rawSeg !== "object") continue;
+    const s = rawSeg as Record<string, unknown>;
+    if (s.kind === "fixed") {
+      segs.push({
+        kind: "fixed",
+        label: typeof s.label === "string" ? s.label : "固定",
+        bytes: typeof s.bytes === "string" ? s.bytes : "",
+      });
+    } else if (s.kind === "var") {
+      if (!VAR_TYPES.includes(String(s.type))) continue;
+      segs.push({
+        kind: "var",
+        name: typeof s.name === "string" ? s.name : `字段${segs.length}`,
+        type: s.type as Extract<UserSeg, { kind: "var" }>["type"],
+        le: s.le !== false,
+        def: typeof s.def === "string" ? s.def : undefined,
+      });
+    } else if (s.kind === "len") {
+      segs.push({ kind: "len" });
+    } else if (s.kind === "check") {
+      if (!CHECK_ALGOS.includes(String(s.algo))) continue;
+      segs.push({
+        kind: "check",
+        algo: s.algo as Extract<UserSeg, { kind: "check" }>["algo"],
+        be: s.be === true,
+      });
+    }
+  }
+  const def = { name, note: typeof obj.note === "string" ? obj.note : "由 AI 助手生成", segs };
+  const vErr = validateUserCodec({ name, segs });
+  if (vErr) return { ok: false, msg: `协议校验失败：${vErr}` };
+  // 试组一帧，确保模板可运行（用变量默认值）
+  try {
+    const sample: Record<string, string> = {};
+    for (const s of segs) {
+      if (s.kind === "var") {
+        sample[`f_${s.name}`] = s.def || (s.type === "ascii" ? "ABC" : "1");
+      }
+    }
+    buildUserFrame(
+      { id: "tmp", name, note: def.note, segs, createdAt: 0 },
+      sample,
+    );
+  } catch (e) {
+    return {
+      ok: false,
+      msg: `试组帧失败（默认参数无法组出合法帧）：${String(e).replace(/^Error:\s*/, "")}`,
+    };
+  }
+  ucStore.add({ name, note: def.note, segs });
+  return {
+    ok: true,
+    msg: `自定义协议「${name}」已加入指令工厂（打开控制台 → 指令工厂 → 我的协议 即可使用）`,
+  };
+}
+
 export function writeCardFromAiJson(raw: string): WriteResult {
   let obj: Record<string, unknown>;
   try {
@@ -276,6 +386,18 @@ function writeOneCard(obj: Record<string, unknown>): WriteResult {
     page = controlsStore.activePage();
   }
   if (!page) return { ok: false, msg: "控制页不存在且创建失败" };
+  if (type === "custom" && !String(obj.html ?? "").trim()) {
+    return { ok: false, msg: "custom 卡片缺少 html 字段" };
+  }
+  if (
+    type === "custom" &&
+    page.cards.filter((c) => c.type === "custom").length >= MAX_CUSTOM_PER_PAGE
+  ) {
+    return {
+      ok: false,
+      msg: `当前控制页自定义卡片已达上限（${MAX_CUSTOM_PER_PAGE} 个），请换页或先删除部分`,
+    };
+  }
 
   const before = new Set(page.cards.map((c) => c.id));
   const cardId = controlsStore.addCard(page.id, type);
@@ -283,9 +405,19 @@ function writeOneCard(obj: Record<string, unknown>): WriteResult {
     return { ok: false, msg: "卡片写入失败" };
   }
   const patch: Record<string, unknown> = {};
-  for (const k of ["name", "min", "max", "step", "template", "script", "unit"] as const) {
+  for (const k of ["name", "min", "max", "step", "template", "script", "unit", "html"] as const) {
     const v = obj[k];
     if (typeof v === "string" || typeof v === "number") patch[k] = v;
+  }
+  if (obj.sendMode === "hex" || obj.sendMode === "ascii") {
+    patch.sendMode = obj.sendMode;
+  }
+  if (Array.isArray(obj.children)) {
+    patch.children = obj.children;
+    // 子控件数量决定卡片高度：每 2 个子项 1 格，至少 2 格
+    const n = Math.min(8, obj.children.length);
+    if (!patch.h) patch.h = Math.max(2, Math.ceil(n / 2) + 1);
+    if (!patch.w) patch.w = 2;
   }
   for (const k of ["x", "y", "w", "h"] as const) {
     const n = Number(obj[k]);

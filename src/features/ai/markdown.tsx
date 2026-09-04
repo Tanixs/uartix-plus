@@ -5,6 +5,8 @@ export interface MdSegment {
   lang?: string;
   code?: string;
   text?: string;
+  /** 代码围栏是否已闭合（流式期间未闭合 → 内容不完整，安装/执行类 UI 需禁用） */
+  closed?: boolean;
 }
 
 export function parseSegments(content: string): MdSegment[] {
@@ -30,8 +32,9 @@ export function parseSegments(content: string): MdSegment[] {
         code.push(lines[i]);
         i++;
       }
+      const closed = i < lines.length;
       i++;
-      segs.push({ kind: "code", lang, code: code.join("\n") });
+      segs.push({ kind: "code", lang, code: code.join("\n"), closed });
       continue;
     }
     textBuf.push(line);

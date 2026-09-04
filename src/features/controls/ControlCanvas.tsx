@@ -1,7 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import * as store from "./controlsStore";
-import type { ControlCard, ControlType, SendMode, SliderCard } from "./controlsStore";
+import type {
+  ControlCard,
+  ControlType,
+  GroupCard,
+  GroupChild,
+  SendMode,
+  SliderCard,
+} from "./controlsStore";
 import * as serialStore from "../serial/serialStore";
 import * as variableStore from "./variableStore";
 import * as commandStore from "./commandStore";
@@ -13,16 +20,19 @@ import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider, IconChevro
 import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
 import { HelpHint } from "../../shared/HelpHint";
+import { tx, useLocale } from "../../i18n/strings";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
   ButtonCardView,
   CardModal,
+  GroupCardView,
   JoystickCardView,
   KeypadCardView,
   KeymonCardView,
   LedCardView,
   MonitorCardView,
+  CustomCardView,
   SliderCardView,
   SwitchCardView,
 } from "./CardViews";
@@ -41,6 +51,8 @@ const WIDGET_TYPES: { type: ControlType; label: string }[] = [
   { type: "joystick", label: "摇杆" },
   { type: "keypad", label: "键盘遥控" },
   { type: "keymon", label: "单键监控" },
+  { type: "group", label: "组合控件" },
+  { type: "custom", label: "自定义卡片" },
 ];
 
 function MountCascade(props: {
@@ -51,6 +63,7 @@ function MountCascade(props: {
   onPick: (item: CommandItem) => void;
 }) {
   const cmds = useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
+  useLocale();
   const [path, setPath] = useState<string[]>([]);
   const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
 
@@ -84,7 +97,9 @@ function MountCascade(props: {
         >
           {nodes.length === 0 && (
             <div className="ctx-group">
-              {i === 0 ? "命令库为空（左侧「命令」Tab 添加）" : "空分组"}
+              {i === 0
+                ? tx("命令库为空（左侧「命令」Tab 添加）", "Command library is empty (add in the Commands tab)")
+                : tx("空分组", "Empty group")}
             </div>
           )}
           {nodes.map((n) =>
@@ -247,7 +262,7 @@ export function ControlCanvas() {
   ): boolean => {
     if (pos === "into") {
       if (commandStore.moveNode(dragId, refId)) return true;
-      setErr("不能移动到自己的子分组内");
+      setErr(tx("不能移动到自己的子分组内", "Cannot move a group into itself"));
       return false;
     }
     const parent = commandStore.parentOfId(refId) ?? null;
@@ -569,7 +584,7 @@ export function ControlCanvas() {
   });
 
   if (!page) {
-    return <div className="ctl"><div className="ctl-empty">无控制页</div></div>;
+    return <div className="ctl"><div className="ctl-empty">{tx("无控制页", "No control pages")}</div></div>;
   }
 
   const getVal = (c: SliderCard): number =>
@@ -613,6 +628,8 @@ export function ControlCanvas() {
       card.type !== "led" &&
       card.type !== "buzzer" &&
       card.type !== "monitor" &&
+      card.type !== "group" &&
+      card.type !== "custom" &&
       card.useScript
     ) {
       if (!card.script.trim()) {
@@ -681,6 +698,41 @@ export function ControlCanvas() {
       }
       default:
         break;
+    }
+  };
+
+  /** 组合控件子项发送：滑条松手/按钮点击/开关切换 */
+  const sendChild = async (
+    card: GroupCard,
+    child: GroupChild,
+    ctx: Record<string, number | string>,
+  ) => {
+    const mode = card.sendMode;
+    try {
+      switch (child.kind) {
+        case "slider": {
+          const value = Number(ctx.value ?? child.min);
+          await sendRaw(
+            mode,
+            store.formatTemplate(variableStore.resolveVars(child.template), value, mode),
+          );
+          break;
+        }
+        case "button":
+          await sendRaw(mode, variableStore.resolveVars(child.template));
+          break;
+        case "switch": {
+          const i = Number(ctx.state ?? 0) ? 1 : 0;
+          const tpl = child.templates[i] ?? "";
+          if (tpl) await sendRaw(mode, variableStore.resolveVars(tpl));
+          break;
+        }
+        default:
+          break;
+      }
+      setErr(null);
+    } catch (e) {
+      setErr(String(e));
     }
   };
 
@@ -952,6 +1004,17 @@ export function ControlCanvas() {
         return <KeypadCardView key={c.id} {...common} card={c} onSend={sendControl} />;
       case "keymon":
         return <KeymonCardView key={c.id} {...common} card={c} onSend={sendControl} />;
+      case "group":
+        return (
+          <GroupCardView
+            key={c.id}
+            {...common}
+            card={c}
+            onChildSend={sendChild}
+          />
+        );
+      case "custom":
+        return <CustomCardView key={c.id} {...common} card={c} />;
       default:
         return null;
     }
@@ -1019,7 +1082,7 @@ export function ControlCanvas() {
               >
                 <button
                   className="cmd-fold"
-                  title={collapsed ? "展开" : "折叠"}
+                  title={collapsed ? tx("展开", "Expand") : tx("折叠", "Collapse")}
                   onClick={() => {
                     const next = new Set(collapsedGroups);
                     if (collapsed) next.delete(n.id);
@@ -1060,7 +1123,7 @@ export function ControlCanvas() {
                 </span>
                 <button
                   className="cmd-add-toggle"
-                  title="添加命令 / 子分组"
+                  title={tx("添加命令 / 子分组", "Add command / subgroup")}
                   onClick={(e) => {
                     e.stopPropagation();
                     setGroupMenuId(groupMenuId === n.id ? null : n.id);
@@ -1079,19 +1142,19 @@ export function ControlCanvas() {
                         setGroupMenuId(null);
                       }}
                     >
-                      ＋ 添加命令
+                      {tx("＋ 添加命令", "＋ Add command")}
                     </button>
                     <button
                       onClick={() => {
-                        commandStore.addGroup("子分组", n.id);
+                        commandStore.addGroup(tx("子分组", "Subgroup"), n.id);
                         setGroupMenuId(null);
                       }}
                     >
-                      ＋ 添加子分组
+                      {tx("＋ 添加子分组", "＋ Add subgroup")}
                     </button>
                   </div>
                 )}
-                <button title="删除分组" onClick={() => commandStore.removeNode(n.id)}>×</button>
+                <button title={tx("删除分组", "Delete group")} onClick={() => commandStore.removeNode(n.id)}>×</button>
               </div>
               {!collapsed &&
                 (renamingNode === n.id ? null : renderCmdTree(n.items, depth + 1))}
@@ -1209,7 +1272,7 @@ export function ControlCanvas() {
             className={`ctl-tab ${p.id === s.activePageId ? "active" : ""}`}
             onClick={() => store.setActivePage(p.id)}
             onDoubleClick={() => setRenamingPage(p.id)}
-            title="双击重命名"
+            title={tx("双击重命名", "Double-click to rename")}
           >
             {renamingPage === p.id ? (
               <input
@@ -1282,7 +1345,7 @@ export function ControlCanvas() {
         </button>
         <button
           className="ctl-tab-add"
-          title="导入控制画布为新页"
+          title={tx("导入控制画布为新页", "Import control canvas as new page")}
           onClick={async () => {
             const { open } = await import("@tauri-apps/plugin-dialog");
             const { invoke } = await import("@tauri-apps/api/core");
@@ -1314,37 +1377,37 @@ export function ControlCanvas() {
         <button
           className="btn icon-btn"
           onClick={() => store.addCard(page.id, "slider")}
-          title="添加滑条卡片"
+          title={tx("添加滑条卡片", "Add slider card")}
         >
           <IconSlider />
         </button>
         <select
           className="input"
           value={page.cols}
-          title="网格列数"
+          title={tx("网格列数", "Grid columns")}
           onChange={(e) => store.setPageCols(page.id, Number(e.target.value))}
         >
           {[4, 6, 8, 10, 12, 16, 20, 24].map((n) => (
             <option key={n} value={n}>
-              {n} 列
+              {tx(`${n} 列`, `${n} col`)}
             </option>
           ))}
         </select>
         <select
           className="input"
           value={page.rows ?? 8}
-          title="网格行数"
+          title={tx("网格行数", "Grid rows")}
           onChange={(e) => store.setPageRows(page.id, Number(e.target.value))}
         >
           {[4, 6, 8, 10, 12, 16, 20, 24, 32, 48].map((n) => (
             <option key={n} value={n}>
-              {n} 行
+              {tx(`${n} 行`, `${n} row`)}
             </option>
           ))}
         </select>
         <button
           className="btn icon-btn"
-          title="整理：清除重叠并重新排布当前页卡片"
+          title={tx("整理：清除重叠并重新排布当前页卡片", "Tidy: clear overlaps and re-layout cards on this page")}
           onClick={() => store.declumpPage(page.id)}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1359,8 +1422,8 @@ export function ControlCanvas() {
           onClick={() => store.setPageLocked(page.id, !page.locked)}
           title={
             page.locked
-              ? "已锁定：卡片不可拖动/调整，仅可操作。点击解锁"
-              : "未锁定：可拖动卡片位置与右下角调整大小。点击锁定"
+              ? tx("已锁定：卡片不可拖动/调整，仅可操作。点击解锁", "Locked: cards can only be operated. Click to unlock")
+              : tx("未锁定：可拖动卡片位置与右下角调整大小。点击锁定", "Unlocked: drag cards to move, resize from the corner. Click to lock")
           }
         >
           {page.locked ? <IconLock /> : <IconUnlock />}
@@ -1368,7 +1431,7 @@ export function ControlCanvas() {
         <button
           className={`btn icon-btn ${sideTab ? "warn" : ""}`}
           onClick={() => setSideTab((t) => (t ? null : "commands"))}
-          title="打开/收起控件与命令侧栏"
+          title={tx("打开/收起控件与命令侧栏", "Toggle widgets & commands sidebar")}
         >
           <IconSidebar />
         </button>
@@ -1382,13 +1445,13 @@ export function ControlCanvas() {
                 className={sideTab === "widgets" ? "active" : ""}
                 onClick={() => setSideTab("widgets")}
               >
-                控件
+                {tx("控件", "Widgets")}
               </button>
               <button
                 className={sideTab === "commands" ? "active" : ""}
                 onClick={() => setSideTab("commands")}
               >
-                命令
+                {tx("命令", "Commands")}
               </button>
             </div>
             <div className="ctl-side-content">
@@ -1440,21 +1503,24 @@ export function ControlCanvas() {
                   return;
                 }
                 // 落到空白处：按树末尾移动（命令/分组均可放顶层，自由拖拽）
-                if (!commandStore.moveNode(d.id, null)) setErr("无法移动");
+                if (!commandStore.moveNode(d.id, null)) setErr(tx("无法移动", "Cannot move"));
               }}
                 >
                   <div className="cmd-toolbar">
                     <button
                       className="btn"
-                      onClick={() => commandStore.addGroup(`分组${cmds.groups.length + 1}`)}
+                      onClick={() => commandStore.addGroup(tx(`分组${cmds.groups.length + 1}`, `Group ${cmds.groups.length + 1}`))}
                     >
-                      ＋ 分组
+                      {tx("＋ 分组", "＋ Group")}
                     </button>
   </div>
                   {renderCmdTree(cmds.groups, 0)}
                   <div className="widget-hint">
-                    单击发送 · 双击编辑 · 拖到画布部署
-                    <HelpHint text="命令支持 {变量} 插值与解析变量；脚本 API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(“变量”) · set(“变量”, 值) · await waitParse(“字段”, ms?) · setControl(“控件名”, 值) 联动触发其他控件 · await repeat(n, i => …) · log(text)。完整 JS 语法可用，详见 帮助 → 脚本命令详解。" />
+                    {tx("单击发送 · 双击编辑 · 拖到画布部署", "Click to send · double-click to edit · drag onto canvas")}
+                    <HelpHint text={tx(
+                      "命令支持 {变量} 插值与解析变量；脚本 API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(“变量”) · set(“变量”, 值) · await waitParse(“字段”, ms?) · setControl(“控件名”, 值) 联动触发其他控件 · await repeat(n, i => …) · log(text)。完整 JS 语法可用，详见 帮助 → 脚本命令详解。",
+                      "Commands support {var} interpolation and parsed variables; script API: await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(name) · set(name, value) · await waitParse(field, ms?) · setControl(cardName, value) to trigger other controls · await repeat(n, i => …) · log(text). Full JS syntax available — see Help → Script Commands.",
+                    )} />
                   </div>
                 </div>
               )}
@@ -1585,24 +1651,24 @@ export function ControlCanvas() {
           >
             <div className="ctx-title">{menuCard.name}</div>
             <button className="ctx-item" onClick={() => { setEditing(menuCard.id); setMenu(null); }}>
-              设置…
+              {tx("设置…", "Settings…")}
             </button>
             <button className="ctx-item" onClick={() => { setRenamingCard(menuCard.id); setMenu(null); }}>
-              重命名
+              {tx("重命名", "Rename")}
             </button>
             <button
               className="ctx-item"
               onClick={() => { store.copyCard(page.id, menuCard.id); setMenu(null); }}
-              title="复制控件全部属性（模板指令 / 脚本 / 键位等），在画布空白处右键粘贴"
+              title={tx("复制控件全部属性（模板指令 / 脚本 / 键位等），在画布空白处右键粘贴", "Copy all card properties (template / script / keys), then right-click empty canvas to paste")}
             >
-              复制
+              {tx("复制", "Copy")}
             </button>
             {canSend(menuCard) && (
               <button
                 className="ctx-item"
                 onClick={() => { void sendControl(menuCard, ctxFor(menuCard), true); setMenu(null); }}
               >
-                立即发送
+                {tx("立即发送", "Send now")}
               </button>
             )}
             <div
@@ -1611,7 +1677,7 @@ export function ControlCanvas() {
               onClick={(e) => { e.stopPropagation(); setMountOpen((v) => !v); }}
               onMouseEnter={() => { disarmMountClose(); setMountOpen(true); }}
             >
-              挂载命令 <span className="ctx-arrow"><IconChevron size={12} /></span>
+              {tx("挂载命令", "Mount command")} <span className="ctx-arrow"><IconChevron size={12} /></span>
             </div>
             {mountOpen && (
               <MountCascade
@@ -1626,12 +1692,12 @@ export function ControlCanvas() {
                 }}
               />
             )}
-            <div className="ctx-group">操作</div>
+            <div className="ctx-group">{tx("操作", "Actions")}</div>
             <button
               className="ctx-item danger"
               onClick={() => { store.removeCard(page.id, menuCard.id); setMenu(null); }}
             >
-              删除
+              {tx("删除", "Delete")}
             </button>
           </div>,
           document.body,
@@ -1698,7 +1764,7 @@ export function ControlCanvas() {
                       setCmdMenu(null);
                     }}
                   >
-                    编辑…
+                    {tx("编辑…", "Edit…")}
                   </button>
                   <button
                     className="ctx-item danger"
@@ -1707,7 +1773,7 @@ export function ControlCanvas() {
                       setCmdMenu(null);
                     }}
                   >
-                    删除命令
+                    {tx("删除命令", "Delete command")}
                   </button>
                 </>
               );
@@ -1750,18 +1816,19 @@ function CommandModal(props: {
   onDelete: () => void;
 }) {
   const { item } = props;
+  useLocale();
   const scriptOn = item.scriptEnabled;
   return (
     <div className="modal-mask" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-title">命令设置 · {item.name}</div>
+        <div className="modal-title">{`${tx("命令设置", "Command Settings")} · ${item.name}`}</div>
         <div className="form-row">
-          <label>名称</label>
+          <label>{tx("名称", "Name")}</label>
           <TextInput
             value={item.name}
             onCommit={(v) => commandStore.patchCommand(item.id, { name: v })}
           />
-          <label>模式</label>
+          <label>{tx("模式", "Mode")}</label>
           <select
             className="input"
             value={item.sendMode}
@@ -1776,7 +1843,7 @@ function CommandModal(props: {
           </select>
         </div>
         <div className="form-row">
-          <label>脚本指令</label>
+          <label>{tx("脚本指令", "Script Command")}</label>
           <label className="chk">
             <input
               type="checkbox"
@@ -1788,13 +1855,13 @@ function CommandModal(props: {
                 })
               }
             />
-            优先执行脚本（隐藏指令模板）
+            {tx("优先执行脚本（隐藏指令模板）", "Run script first (hide template)")}
           </label>
         </div>
         {!scriptOn && (
           <>
             <div className="form-row">
-              <label>指令模板</label>
+              <label>{tx("指令模板", "Template")}</label>
               <textarea
                 className="input ctl-tpl-input cmd-ta"
                 rows={5}
@@ -1806,14 +1873,17 @@ function CommandModal(props: {
               />
             </div>
             <div className="cmd-hint">
-              语法：%f %.2f %d，支持 {"{变量}"} 引用解析数据
-            </div>
+                {tx(
+                  "语法：%f %.2f %d，支持 {变量} 引用解析数据",
+                  "Syntax: %f %.2f %d; {var} references parsed data",
+                )}
+              </div>
           </>
         )}
         {scriptOn && (
           <>
             <div className="form-row">
-              <label>脚本</label>
+              <label>{tx("脚本", "Script")}</label>
               <textarea
                 className="input ctl-tpl-input ctl-script-input cmd-ta"
                 rows={5}
@@ -1828,15 +1898,15 @@ function CommandModal(props: {
               />
             </div>
             <div className="cmd-hint">
-              API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms)
-              · get("变量") · await waitParse(字段, ms) · set(变量, 值) ·
-              setControl(控件, 值) · await repeat(n, i=&gt;…) · log(文本)；完整 JS
-              语法可用（for/while/if）；解析字段名可直接当变量使用
+              {tx(
+                "API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(变量) · await waitParse(字段, ms) · set(变量, 值) · setControl(控件, 值) · await repeat(n, i=>…) · log(文本)；完整 JS 语法可用（for/while/if）；解析字段名可直接当变量使用",
+                "API: await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(name) · await waitParse(field, ms) · set(name, value) · setControl(card, value) · await repeat(n, i=>…) · log(text); full JS syntax (for/while/if); parsed field names work as variables",
+              )}
             </div>
           </>
         )}
         <div className="form-row">
-          <label>备注</label>
+          <label>{tx("备注", "Note")}</label>
           <TextInput
             value={item.note}
             onCommit={(v) => commandStore.patchCommand(item.id, { note: v })}
@@ -1850,10 +1920,10 @@ function CommandModal(props: {
               props.onClose();
             }}
           >
-            删除命令
+            {tx("删除命令", "Delete command")}
           </button>
           <button className="btn primary" onClick={props.onClose}>
-            完成
+            {tx("完成", "Done")}
           </button>
         </div>
       </div>

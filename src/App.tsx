@@ -5,7 +5,7 @@ import {
   DockviewReadyEvent,
   SerializedDockview,
 } from "dockview-react";
-import { panelComponents, PANEL_TITLES } from "./panels/panels";
+import { panelComponents, PANEL_TITLES, panelTitleOf } from "./panels/panels";
 import * as panelActivity from "./panels/panelActivity";
 import { SerialToolbar } from "./features/serial/SerialToolbar";
 import { TitleBar } from "./shell/TitleBar";
@@ -16,10 +16,23 @@ import { JsonDropImport } from "./features/settings/JsonDropImport";
 import { AiFloat } from "./features/ai/AiFloat";
 import { WidgetFloats } from "./features/ai/WidgetFloats";
 import { startWidgetHub } from "./features/ai/widgetHub";
+import { startExtRuntime } from "./features/ai/extRuntime";
+import {
+  getExt as getExtSnapshot,
+  useExtensions,
+} from "./features/ai/extensionStore";
 import * as chatStore from "./features/ai/chatStore";
 import { onAiScene, onOpenSettings, onPop } from "./features/ai/aiBus";
+import { onRequestOpenExtPanel } from "./features/ai/extBus";
+import { subscribeAppBus } from "./features/ai/appBus";
+import {
+  backupAutoLayout,
+  getLayout,
+  saveLayout,
+} from "./features/settings/layoutsStore";
 import {
   getSnapshot as getSettingsSnapshot,
+  patch,
   useSettings,
 } from "./features/settings/settingsStore";
 import * as controlsStore from "./features/controls/controlsStore";
@@ -34,7 +47,7 @@ import * as attitudeStore from "./features/attitude/attitudeStore";
 import * as variableStore from "./features/controls/variableStore";
 import * as fcStore from "./features/framecanvas/frameStore";
 import * as telemetryStore from "./features/protocol/telemetryStore";
-import { t } from "./i18n/strings";
+import { notifyLocale, t, tx, useLocale } from "./i18n/strings";
 import { takeIpcLatency } from "./ipc/ipcLatency";
 
 const LAYOUT_KEY = "vs.layout.v2";
@@ -51,7 +64,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
   api.addPanel({
     id: "templates",
     component: "templates",
-    title: "协议模板",
+    title: panelTitleOf("templates"),
     minimumWidth: 200,
   });
 
@@ -59,14 +72,14 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: "hexview",
       component: "hexview",
-      title: "Hex 数据流",
+      title: panelTitleOf("hexview"),
       initialWidth: midW,
       position: { referencePanel: "templates", direction: "right" },
     });
     api.addPanel({
       id: "console",
       component: "console",
-      title: "控制台",
+      title: panelTitleOf("console"),
       initialHeight: Math.round(h * 0.4),
       minimumHeight: 140,
       position: { referencePanel: "hexview", direction: "below" },
@@ -74,7 +87,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: "controls",
       component: "controls",
-      title: "控制画布",
+      title: panelTitleOf("controls"),
       initialWidth: rightW,
       minimumWidth: 230,
       position: { referencePanel: "hexview", direction: "right" },
@@ -87,14 +100,14 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: "video",
       component: "video",
-      title: PANEL_TITLES.video,
+      title: panelTitleOf("video"),
       initialWidth: midW + rightW,
       position: { referencePanel: "templates", direction: "right" },
     });
     api.addPanel({
       id: "hexview",
       component: "hexview",
-      title: PANEL_TITLES.hexview,
+      title: panelTitleOf("hexview"),
       initialHeight: Math.round(h * 0.35),
       minimumHeight: 140,
       position: { referencePanel: "video", direction: "below" },
@@ -102,7 +115,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: "properties",
       component: "properties",
-      title: PANEL_TITLES.properties,
+      title: panelTitleOf("properties"),
       initialWidth: rightW,
       minimumWidth: 230,
       position: { referencePanel: "video", direction: "right" },
@@ -110,7 +123,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: "console",
       component: "console",
-      title: "控制台",
+      title: panelTitleOf("console"),
       initialHeight: Math.round(h * 0.3),
       minimumHeight: 120,
       position: { referencePanel: "properties", direction: "below" },
@@ -128,7 +141,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
   api.addPanel({
     id: first,
     component: first,
-    title: PANEL_TITLES[first as PanelId],
+    title: panelTitleOf(first),
     initialWidth: midW + rightW,
     position: { referencePanel: "templates", direction: "right" },
   });
@@ -136,7 +149,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: centerPanels[i],
       component: centerPanels[i],
-      title: PANEL_TITLES[centerPanels[i] as PanelId],
+      title: panelTitleOf(centerPanels[i]),
       position: { referencePanel: first, direction: "within" },
     });
   }
@@ -144,14 +157,14 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: "view3d",
       component: "view3d",
-      title: "3D 姿态",
+      title: panelTitleOf("view3d"),
       position: { referencePanel: first, direction: "within" },
     });
   }
   api.addPanel({
     id: "properties",
     component: "properties",
-    title: "属性",
+    title: panelTitleOf("properties"),
     initialWidth: rightW,
     minimumWidth: 230,
     minimumHeight: 260,
@@ -161,7 +174,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
   api.addPanel({
     id: bottomMain,
     component: bottomMain,
-    title: PANEL_TITLES[bottomMain as PanelId],
+    title: panelTitleOf(bottomMain),
     initialHeight: bottomH,
     minimumHeight: 140,
     position: { referencePanel: first, direction: "below" },
@@ -170,7 +183,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: "plot2d",
       component: "plot2d",
-      title: "2D 曲线",
+      title: panelTitleOf("plot2d"),
       initialWidth: bottomColW,
       minimumWidth: 240,
       position: { referencePanel: "table", direction: "right" },
@@ -180,7 +193,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     api.addPanel({
       id: "view3d",
       component: "view3d",
-      title: "3D 姿态",
+      title: panelTitleOf("view3d"),
       initialWidth: bottomColW,
       minimumWidth: 240,
       position: { referencePanel: "plot2d", direction: "right" },
@@ -189,7 +202,7 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
   api.addPanel({
     id: "controls",
     component: "controls",
-    title: "控制画布",
+    title: panelTitleOf("controls"),
     initialHeight: bottomH,
     minimumHeight: 120,
     position: { referencePanel: "properties", direction: "below" },
@@ -203,6 +216,7 @@ export default function App() {
   const [editLayout, setEditLayout] = useState(false);
   const [perfOn, setPerfOn] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const [helpOpen, setHelpOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [sysDark, setSysDark] = useState(
@@ -212,8 +226,12 @@ export default function App() {
     { id: string; left: number; top: number; width: number; height: number }[]
   >([]);
   const apiRef = useRef<DockviewApi | null>(null);
+  const syncPanelsRef = useRef<(() => void) | null>(null);
+  const retitlePanelsRef = useRef<(() => void) | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const serial = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
+  const exts = useExtensions();
+  const extPanelOptions = exts.exts.filter((e) => e.type === "panel" && e.enabled);
   renderTick += 1;
 
   useEffect(() => {
@@ -245,13 +263,21 @@ export default function App() {
       ? sysDark
         ? "dark"
         : "light"
-      : theme === "navy" || theme === "dark"
+      : theme === "navy" || theme === "dark" || theme === "glaze"
         ? "dark"
-        : "light"; // light / ocean / matcha / amber 均归亮色系
+        : "light"; // light / ocean / matcha / amber / begonia 均归亮色系
 
   useEffect(() => {
     document.documentElement.style.zoom = `${settings.zoom}%`;
+    // 通知浮窗类组件重算逻辑坐标（zoom 改变 vw/vh 语义但不触发 resize）
+    window.dispatchEvent(new Event("vs-zoom-change"));
   }, [settings.zoom]);
+
+  // 语言切换 → 驱动订阅 useLocale 的深度面板重渲染（P33 i18n）；页签名同步重挂
+  useEffect(() => {
+    notifyLocale();
+    retitlePanelsRef.current?.();
+  }, [settings.locale]);
 
   // 保险：dockview 容器类名 DOM 级同步（部分版本对 className prop 变化不响应，
   // 导致主题切换后面板框架停留在旧配色；变量覆写已解耦，这里兜底类名本身）
@@ -281,11 +307,27 @@ export default function App() {
     fcStore.init();
     void chatStore.init();
     startWidgetHub();
+    startExtRuntime();
     const unScene = onAiScene((req) => {
       setAiOpen(true);
       chatStore.pushScene(req.scene, req.payload);
     });
-    const unSettings = onOpenSettings(() => setSettingsOpen(true));
+    const unExtPanel = onRequestOpenExtPanel((extId) => {
+      addOrFocusPanel(`ext-panel-${extId}`);
+    });
+    // AI App Action：打开面板 / 切工作区预设（来自脚本、小部件、自定义卡片）
+    const unAppBus = subscribeAppBus((msg) => {
+      if (msg.kind === "openPanel") {
+        addOrFocusPanel(msg.panel);
+      } else if (msg.kind === "applyPreset") {
+        patch({ workspace: msg.preset as WorkspacePreset });
+        resetLayout(msg.preset as WorkspacePreset);
+      }
+    });
+    const unSettings = onOpenSettings((tab) => {
+      setSettingsTab(tab);
+      setSettingsOpen(true);
+    });
     const unPop = onPop(() => {
       chatStore.setFloatOpen(true);
       setAiOpen(true);
@@ -307,6 +349,8 @@ export default function App() {
     window.addEventListener("drop", preventNav);
     return () => {
       unScene();
+      unExtPanel();
+      unAppBus();
       unSettings();
       unPop();
       window.removeEventListener("keydown", onKey);
@@ -329,8 +373,26 @@ export default function App() {
         api.panels.map((p) => ({ id: p.id, visible: p.api.isVisible })),
       );
     };
+    syncPanelsRef.current = syncPanels;
     syncPanels();
-    api.onDidAddPanel(syncPanels);
+    // 页签名语言感知：按当前语言重挂标题（占位区 ph-* 除外；扩展面板取扩展名）
+    const retitlePanels = () => {
+      for (const p of api.panels) {
+        if (p.id.startsWith("ph-")) continue;
+        const want = panelTitleOf(p.id);
+        if (p.title !== want) p.api.setTitle(want);
+      }
+    };
+    retitlePanelsRef.current = retitlePanels;
+    // 稳定主题作用域：面板根 DOM 挂 data-panel=<组件名>，主题/样式层不再依赖易变类名
+    const tagPanel = (p: { type?: string; window?: HTMLElement | null }) => {
+      if (p.window && p.type) p.window.setAttribute("data-panel", p.type);
+    };
+    api.onDidAddPanel((e) => {
+      tagPanel(e as unknown as { type?: string; window?: HTMLElement | null });
+      retitlePanels();
+      syncPanels();
+    });
     api.onDidRemovePanel(syncPanels);
     api.onDidActivePanelChange(syncPanels);
     api.onDidLayoutChange(() => {
@@ -340,6 +402,7 @@ export default function App() {
     if (saved) {
       try {
         api.fromJSON(JSON.parse(saved) as SerializedDockview);
+        retitlePanels();
         syncPanels();
         return;
       } catch {
@@ -347,6 +410,7 @@ export default function App() {
       }
     }
     applyDefaultLayout(api, getSettingsSnapshot().workspace);
+    retitlePanels();
     syncPanels();
     // 兜底：布局恢复/首帧渲染后可见性可能尚未稳定，延迟再同步一次
     window.setTimeout(syncPanels, 200);
@@ -398,7 +462,7 @@ export default function App() {
     api.addPanel({
       id: `ph-${crypto.randomUUID()}`,
       component: "placeholder",
-      title: "空显示区",
+      title: tx("空显示区", "Empty area"),
       ...(horizontal
         ? { initialWidth: Math.max(170, Math.round(half ?? 260)) }
         : { initialHeight: Math.max(130, Math.round(half ?? 200)) }),
@@ -418,6 +482,12 @@ export default function App() {
   const resetLayout = (preset: WorkspacePreset = "proto") => {
     const api = apiRef.current;
     if (!api) return;
+    // 切内置预设前：把当前布局快照到「自动备份」槽，随时可切回
+    try {
+      if (api.panels.length > 0) backupAutoLayout(api.toJSON());
+    } catch {
+      /* 快照失败不阻塞切换 */
+    }
     localStorage.removeItem(LAYOUT_KEY);
     api.clear();
     applyDefaultLayout(api, preset);
@@ -443,12 +513,63 @@ export default function App() {
     }
   };
 
+  /** 应用自定义布局槽位 */
+  const applyLayoutSlot = (slotId: string) => {
+    const api = apiRef.current;
+    if (!api) return false;
+    const slot = getLayout(slotId);
+    if (!slot) return false;
+    try {
+      localStorage.removeItem(LAYOUT_KEY);
+      api.clear();
+      api.fromJSON(slot.layout as SerializedDockview);
+      syncPanelsRef.current?.();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /** 另存当前布局为命名槽位 */
+  const saveCurrentLayout = (name: string): boolean => {
+    const api = apiRef.current;
+    if (!api || api.panels.length === 0) return false;
+    try {
+      saveLayout(name, api.toJSON());
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const addOrFocusPanel = (id: string) => {
     const api = apiRef.current;
     if (!api) return;
     const exist = api.getPanel(id);
     if (exist) {
       exist.api.setActive();
+      return;
+    }
+    // AI 扩展面板：id 形如 ext-panel-<extId>，统一走 aiExtPanel 宿主组件
+    if (id.startsWith("ext-panel-")) {
+      const ext = getExtSnapshot(id.slice("ext-panel-".length));
+      const groups = api.groups;
+      const ref =
+        api.activePanel ??
+        (groups.length
+          ? groups[groups.length - 1].panels[
+              groups[groups.length - 1].panels.length - 1
+            ]
+          : null);
+      api.addPanel({
+        id,
+        component: "aiExtPanel",
+        title: `${ext?.name ?? tx("AI 面板", "AI Panel")}`,
+        params: { extId: id.slice("ext-panel-".length) },
+        ...(ref
+          ? { position: { referencePanel: ref.id, direction: "within" as const } }
+          : {}),
+      });
       return;
     }
     const groups = api.groups;
@@ -462,7 +583,7 @@ export default function App() {
     api.addPanel({
       id,
       component: id,
-      title: PANEL_TITLES[id as PanelId],
+      title: panelTitleOf(id as PanelId),
       ...(ref
         ? { position: { referencePanel: ref.id, direction: "within" as const } }
         : {}),
@@ -495,22 +616,31 @@ export default function App() {
           <select
             className="input"
             value=""
-            title="重新添加显示区：选择面板名即加入当前活动分组；全部关闭时将新建满屏显示区"
+            title={tx("重新添加显示区：选择面板名即加入当前活动分组；全部关闭时将新建满屏显示区", "Re-add a display area: picking a panel joins the active group; when all are closed a full-screen area is created")}
             onChange={(e) => {
               if (e.target.value) addOrFocusPanel(e.target.value);
             }}
           >
-            <option value="">+ 面板</option>
-            {Object.entries(PANEL_TITLES).map(([id, label]) => (
+            <option value="">{tx("+ 面板", "+ Panel")}</option>
+            {Object.entries(PANEL_TITLES()).map(([id, label]) => (
               <option key={id} value={id}>
                 {label}
               </option>
             ))}
+            {extPanelOptions.length > 0 && (
+              <optgroup label={tx("AI 扩展面板", "AI extension panels")}>
+                {extPanelOptions.map((e) => (
+                  <option key={`ext-panel-${e.id}`} value={`ext-panel-${e.id}`}>
+                    {e.name}（AI）
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <button
             className={`btn icon-btn${editLayout ? " warn" : ""}`}
             onClick={() => setEditLayout((v) => !v)}
-            title="编辑显示区布局：沿显示区边缘的 + 号向对应方向新建空显示区"
+            title={tx("编辑显示区布局：沿显示区边缘的 + 号向对应方向新建空显示区", "Edit layout: use the + buttons on area edges to add empty areas in that direction")}
           >
             <IconColumns />
           </button>
@@ -533,38 +663,38 @@ export default function App() {
             >
               <button
                 className="le-btn le-left"
-                title="向左新建显示区"
+                title={tx("向左新建显示区", "Add area to the left")}
                 onClick={() => addGroupInDirection(g.id, "left")}
               >
                 +
               </button>
               <button
                 className="le-btn le-right"
-                title="向右新建显示区"
+                title={tx("向右新建显示区", "Add area to the right")}
                 onClick={() => addGroupInDirection(g.id, "right")}
               >
                 +
               </button>
               <button
                 className="le-btn le-top"
-                title="向上新建显示区"
+                title={tx("向上新建显示区", "Add area above")}
                 onClick={() => addGroupInDirection(g.id, "above")}
               >
                 +
               </button>
               <button
                 className="le-btn le-bottom"
-                title="向下新建显示区"
+                title={tx("向下新建显示区", "Add area below")}
                 onClick={() => addGroupInDirection(g.id, "below")}
               >
                 +
               </button>
               <button
                 className="le-clear"
-                title="清空该显示区内所有面板（显示区随之消失）"
+                title={tx("清空该显示区内所有面板（显示区随之消失）", "Close all panels in this area (the area disappears with them)")}
                 onClick={() => clearGroup(g.id)}
               >
-                清空
+                {tx("清空", "Clear")}
               </button>
             </div>
           ))}
@@ -572,8 +702,11 @@ export default function App() {
       <StatusBar perfOn={perfOn} />
       {settingsOpen && (
         <SettingsModal
+          initialTab={settingsTab}
           onClose={() => setSettingsOpen(false)}
           onResetLayout={(p) => resetLayout(p)}
+          onApplyLayout={(id) => applyLayoutSlot(id)}
+          onSaveLayout={(name) => saveCurrentLayout(name)}
         />
       )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
@@ -628,8 +761,8 @@ function StatusBar({ perfOn }: { perfOn: boolean }) {
         {perfOn && <PerfHud />}
       </span>
       <span className="status-right">
-        RX {serial.rxTotal} B · TX {serial.txTotal} B · {bpsText} · 帧{" "}
-        {tele.stats.total}/错 {tele.stats.errors}
+        RX {serial.rxTotal} B · TX {serial.txTotal} B · {bpsText} · {tx("帧", "fr")}{" "}
+        {tele.stats.total}/{tx("错", "err")} {tele.stats.errors}
       </span>
     </footer>
   );
@@ -679,11 +812,11 @@ function NetIfaceBar({ kind }: { kind: IfaceKind }) {
           className="input"
           value={s.net.localHost}
           disabled={busy}
-          title="服务端监听地址：0.0.0.0 接受所有网卡连接，指定网卡则只接受发往该地址的连接"
+          title={tx("服务端监听地址：0.0.0.0 接受所有网卡连接，指定网卡则只接受发往该地址的连接", "Listen address: 0.0.0.0 accepts connections on all NICs; a specific address only accepts connections sent to it")}
           onChange={(e) => serialStore.setNet({ localHost: e.target.value })}
         >
-          <option value="0.0.0.0">0.0.0.0 (所有地址都将开启侦听)</option>
-          <option value="127.0.0.1">127.0.0.1 (本地回环地址)</option>
+          <option value="0.0.0.0">0.0.0.0 ({tx("所有地址都将开启侦听", "listen on all addresses")})</option>
+          <option value="127.0.0.1">127.0.0.1 ({tx("本地回环地址", "loopback only")})</option>
           {s.localAddrs.map((a) => (
             <option key={a.ip} value={a.ip}>
               {a.ip} ({a.name})
@@ -693,7 +826,7 @@ function NetIfaceBar({ kind }: { kind: IfaceKind }) {
             s.net.localHost !== "0.0.0.0" &&
             s.net.localHost !== "127.0.0.1" &&
             !s.localAddrs.some((a) => a.ip === s.net.localHost) && (
-              <option value={s.net.localHost}>{s.net.localHost} (自定义)</option>
+              <option value={s.net.localHost}>{s.net.localHost} ({tx("自定义", "custom")})</option>
             )}
         </select>
       )}
@@ -712,6 +845,7 @@ function NetIfaceBar({ kind }: { kind: IfaceKind }) {
 }
 
 function PerfHud() {
+  useLocale();
   const [info, setInfo] = useState({ fps: 0, long: 0, render: 0, ipc: 0, ipcMax: 0 });
   const state = useRef({ frames: 0, long: 0, raf: 0 });
   useEffect(() => {
@@ -752,9 +886,9 @@ function PerfHud() {
   return (
     <span
       className="perf-hud"
-      title="每秒刷新：FPS / >50ms 长任务累计 / React 渲染次数 / IPC 投递延迟（均值·峰值，主线程积压时飙升）"
+      title={tx("每秒刷新：FPS / >50ms 长任务累计 / React 渲染次数 / IPC 投递延迟（均值·峰值，主线程积压时飙升）", "Per-second: FPS / >50ms long tasks / React renders / IPC delivery latency (avg·peak, spikes when the main thread backs up)")}
     >
-      {info.fps}fps · 长{info.long} · 渲{info.render} · IPC{info.ipc}/{info.ipcMax}ms
+      {info.fps}fps · {tx("长", "lt")}{info.long} · {tx("渲", "ren")}{info.render} · IPC{info.ipc}/{info.ipcMax}ms
     </span>
   );
 }

@@ -13,6 +13,8 @@ import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 import { groupDisplayName, presetGroupKey } from "./presets";
+import { parseHexBytes } from "../../shared/hexBytes";
+import { getLocale, tx, useLocale } from "../../i18n/strings";
 
 const MONO = '"Cascadia Mono", Consolas, monospace';
 const PAD_L = 10;
@@ -42,10 +44,11 @@ const IconAlert = () => fsvg(<><circle cx="12" cy="12" r="9" /><line x1="12" y1=
 
 function ArchStat() {
   const meta = useSyncExternalStore(fcStore.subscribe, fcStore.getMeta);
+  useLocale();
   return (
-    <span className="fc-stat" title="归档的有效帧数与字节数；已过滤为剔除的杂散/坏包字节">
-      <b>{meta.frames}</b>帧<i>·</i>{fmtB(meta.bytes)}
-      {meta.dropped > 0 ? <em className="fc-stat-warn">滤{fmtB(meta.dropped)}</em> : null}
+    <span className="fc-stat" title={tx("归档的有效帧数与字节数；已过滤为剔除的杂散/坏包字节", "Archived valid frames and bytes; flt = discarded stray/bad bytes")}>
+      <b>{meta.frames}</b>{tx("帧", "fr")}<i>·</i>{fmtB(meta.bytes)}
+      {meta.dropped > 0 ? <em className="fc-stat-warn">{tx("滤", "flt")}{fmtB(meta.dropped)}</em> : null}
     </span>
   );
 }
@@ -55,18 +58,19 @@ function ArchEmptyGate({ children }: { children: React.ReactNode }) {
   return <>{meta.frames === 0 ? children : null}</>;
 }
 
-const ROLE_META: Record<FieldRole, { zh: string; tag: string; chip: string }> = {
-  header: { zh: "帧头", tag: "HDR", chip: "#e8a33d" },
-  addr: { zh: "目标地址", tag: "ADR", chip: "#39c5cf" },
-  id: { zh: "功能码", tag: "ID", chip: "#4e9cef" },
-  seq: { zh: "序号", tag: "SEQ", chip: "#f0883e" },
-  length: { zh: "数据长度", tag: "LEN", chip: "#3fb950" },
-  data: { zh: "数据内容", tag: "DATA", chip: "#bc8cff" },
-  payload: { zh: "数据载荷", tag: "PLD", chip: "#bc8cff" },
-  checksum: { zh: "和校验", tag: "CK1", chip: "#d29922" },
-  checksum2: { zh: "附加校验", tag: "CK2", chip: "#e5534b" },
-  footer: { zh: "帧尾", tag: "FTR", chip: "#db61a2" },
+const ROLE_META: Record<FieldRole, { zh: string; en: string; tag: string; chip: string }> = {
+  header: { zh: "帧头", en: "Header", tag: "HDR", chip: "#e8a33d" },
+  addr: { zh: "目标地址", en: "Address", tag: "ADR", chip: "#39c5cf" },
+  id: { zh: "功能码", en: "Command ID", tag: "ID", chip: "#4e9cef" },
+  seq: { zh: "序号", en: "Seq", tag: "SEQ", chip: "#f0883e" },
+  length: { zh: "数据长度", en: "Length", tag: "LEN", chip: "#3fb950" },
+  data: { zh: "数据内容", en: "Data", tag: "DATA", chip: "#bc8cff" },
+  payload: { zh: "数据载荷", en: "Payload", tag: "PLD", chip: "#bc8cff" },
+  checksum: { zh: "和校验", en: "Checksum", tag: "CK1", chip: "#d29922" },
+  checksum2: { zh: "附加校验", en: "Checksum2", tag: "CK2", chip: "#e5534b" },
+  footer: { zh: "帧尾", en: "Footer", tag: "FTR", chip: "#db61a2" },
 };
+const roleLabel = (r: FieldRole) => tx(ROLE_META[r].zh, ROLE_META[r].en);
 
 const TYPE_LABEL: Record<FieldType, string> = {
   uint8: "uint8",
@@ -82,6 +86,7 @@ const TYPE_LABEL: Record<FieldType, string> = {
   bits: "bits",
   csv: "csv·自适应",
 };
+const typeLabel = (t: FieldType) => (t === "csv" ? tx("csv·自适应", "csv·auto") : t);
 
 const SIZE_TYPES: Record<number, FieldType[]> = {
   1: ["uint8", "int8"],
@@ -98,6 +103,14 @@ const NAME_HINTS: Record<number, string[]> = {
   3: ["保留", "填充", "签名"],
   4: ["四元数W", "经度", "纬度", "速度"],
 };
+const NAME_HINTS_EN: Record<number, string[]> = {
+  1: ["Temp", "Voltage", "Status", "Signal"],
+  2: ["Temp", "Pitch", "Roll", "Yaw", "Current"],
+  3: ["Reserved", "Padding", "Signature"],
+  4: ["QuatW", "Longitude", "Latitude", "Speed"],
+};
+const nameHints = (size: number): string[] =>
+  (getLocale() === "en" ? NAME_HINTS_EN[size] : NAME_HINTS[size]) ?? [];
 
 const TYPE_ORDER: FieldType[] = [
   "uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "ascii", "bcd", "bits", "csv",
@@ -255,7 +268,7 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
   const hb = tpl.boundary.headerBytes;
   const pieces: Blk[] = [];
   if (hb.length > 0) {
-    pieces.push({ start: 0, len: hb.length, key: "h0", kind: "hdr", fid: null, color: "#e8a33d", label: "帧头", role: null, locked: false });
+    pieces.push({ start: 0, len: hb.length, key: "h0", kind: "hdr", fid: null, color: "#e8a33d", label: tx("帧头", "Header"), role: null, locked: false });
   }
   const fields = [...tpl.fields].sort((a, b) => a.offset - b.offset);
   let pos = hb.length;
@@ -305,7 +318,7 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
       kind: "ftr",
       fid: null,
       color: "#db61a2",
-      label: footerTail(tpl) > 0 ? "帧尾" : "校验",
+      label: footerTail(tpl) > 0 ? tx("帧尾", "Footer") : tx("校验", "Checksum"),
       role: null,
       locked: false,
     });
@@ -385,6 +398,9 @@ function layoutBlocks(
 
 function FrameCanvas() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const noframeRef = useRef<HTMLDivElement | null>(null);
+  // 本次会话内出现过实时帧的模板 id（徽标区分"从未匹配"与"回看历史"）
+  const seenRef = useRef<Set<string>>(new Set());
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const tipRef = useRef<HTMLDivElement | null>(null);
   const navRef = useRef<HTMLSpanElement | null>(null);
@@ -417,6 +433,11 @@ function FrameCanvas() {
   const [errOpen, setErrOpen] = useState(false);
   const [pending, setPending] = useState<{ msg: string; apply?: () => void } | null>(null);
   const [saveSt, setSaveSt] = useState<"idle" | "saving" | "ok" | "err">("idle");
+  const locale = useLocale();
+  useEffect(() => {
+    // 语言切换：画布文本在 paint 内即时取值，置 dirty 触发一次重绘
+    dirtyRef.current = true;
+  }, [locale]);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const doSave = async () => {
     if (saveSt === "saving") return;
@@ -580,7 +601,7 @@ function FrameCanvas() {
       navRef.current.textContent = real
         ? `#${viewRef.current.fi} · ${real.len}B · ${real.tplName}`
         : tplD
-          ? "骨架编辑 · 未收流"
+          ? tx("骨架编辑 · 未收流", "Skeleton edit · no stream")
           : "";
     }
     const draftLen = !real && tplD ? skeletonLen(tplD) : 0;
@@ -606,12 +627,27 @@ function FrameCanvas() {
         const bx = "0x" + tpl.boundary.headerBytes.map((b) => b.toString(16).padStart(2, "0")).join(" ").toUpperCase();
         ctx.fillStyle = dark ? "#5b6371" : "#98a0ab";
         ctx.font = `12px system-ui,sans-serif`;
-        ctx.fillText(`暂无「${tpl.name}」的帧数据 — 连接设备或打开演示源`, w / 2, h / 2 - 10);
-        ctx.fillText(`帧头 ${bx} · 启用的模板正在过滤数据流`, w / 2, h / 2 + 12);
+        ctx.fillText(
+          tx(`暂无「${tpl.name}」的帧数据 — 连接设备或打开演示源`, `No frames of "${tpl.name}" yet — connect the device or open the demo source`),
+          w / 2,
+          h / 2 - 10,
+        );
+        ctx.fillText(
+          tx(`帧头 ${bx} · 启用的模板正在过滤数据流`, `Header ${bx} · enabled templates are filtering the stream`),
+          w / 2,
+          h / 2 + 12,
+        );
       }
+      if (noframeRef.current) noframeRef.current.hidden = true;
       return;
     }
     const isDraft = !real;
+    if (!isDraft && tplD) seenRef.current.add(tplD.id);
+    // 骨架态徽标：模板已定义但一帧未匹配（DOM 直写，不进 React state）
+    if (noframeRef.current) {
+      noframeRef.current.hidden = !isDraft;
+      noframeRef.current.classList.toggle("live", !!tplD && !seenRef.current.has(tplD.id));
+    }
     const frLen = fr.len;
 
     const s = cellRef.current;
@@ -663,7 +699,7 @@ function FrameCanvas() {
           if (wRun > 44) {
             ctx.fillStyle = "#fff";
             ctx.textAlign = "left";
-            const shown = fitLabel(ctx, blk.label ?? "帧头", wRun - 16);
+            const shown = fitLabel(ctx, blk.label ?? tx("帧头", "Header"), wRun - 16);
             if (shown) ctx.fillText(shown, x0 + 10, yTop + s / 2 + 1);
             ctx.textAlign = "center";
           }
@@ -676,12 +712,13 @@ function FrameCanvas() {
           ctx.stroke();
           if (wRun > 44) {
             ctx.fillStyle = dark ? mixC(cFg, blk.color, 0.7) : "#000000";
-            const algo = blk.label === "帧尾" ? null : curRef.current?.checksum?.algo ?? null;
-            const txt = blk.label === "帧尾"
-              ? "帧尾"
+            const isFtr = curRef.current ? footerTail(curRef.current) > 0 : false;
+            const algo = isFtr ? null : curRef.current?.checksum?.algo ?? null;
+            const txt = isFtr
+              ? tx("帧尾", "Footer")
               : algo && wRun > 96
-                ? `校验·${algo}`
-                : "校验";
+                ? `${tx("校验", "Checksum")}·${algo}`
+                : tx("校验", "Checksum");
             ctx.textAlign = "left";
             const shown = fitLabel(ctx, txt, wRun - 16);
             if (shown) ctx.fillText(shown, x0 + 10, yTop + s / 2 + 1);
@@ -879,7 +916,6 @@ function FrameCanvas() {
     const live = !!(frBytes && hv.off < frBytes.length);
     const b = live ? frBytes[hv.off] : null;
     const blkKind = hv.blk?.kind ?? "gap";
-    const blkLabel = hv.blk?.label ?? "";
     let field: FieldDef | null = null;
     if (tpl) {
       for (const f of tpl.fields) {
@@ -891,18 +927,19 @@ function FrameCanvas() {
       }
     }
     let cat: string;
-    if (blkKind === "hdr") cat = "帧头（保留区）";
+    const isFtrTail = tpl ? footerTail(tpl) > 0 : false;
+    if (blkKind === "hdr") cat = tx("帧头（保留区）", "Header (reserved)");
     else if (blkKind === "ftr") {
-      cat = blkLabel === "帧尾"
-        ? "帧尾（保留区）"
-        : `校验域${tpl?.checksum ? ` · ${tpl.checksum.algo}` : ""}`;
+      cat = isFtrTail
+        ? tx("帧尾（保留区）", "Footer (reserved)")
+        : `${tx("校验域", "Checksum area")}${tpl?.checksum ? ` · ${tpl.checksum.algo}` : ""}`;
     } else if (field) {
       const rm = roleOf(field);
-      cat = `${ROLE_META[rm].zh}${field.locked ? " 🔒" : ""}`;
-    } else cat = "未定义字节（帧长未被子字段覆盖）";
+      cat = `${roleLabel(rm)}${field.locked ? " 🔒" : ""}`;
+    } else cat = tx("未定义字节（帧长未被子字段覆盖）", "Undefined bytes (not covered by sub-fields)");
     const roleChip = field ? ROLE_META[roleOf(field)].tag : "";
     const fieldLine = field
-      ? `<div class="fc-tip-row"><span>字段</span><b>${field.name}${roleChip ? ` [${roleChip}]` : ""}</b></div>`
+      ? `<div class="fc-tip-row"><span>${tx("字段", "Field")}</span><b>${field.name}${roleChip ? ` [${roleChip}]` : ""}</b></div>`
       : "";
     const endianTxt =
       field && ["uint16", "int16", "uint32", "int32", "float32", "float64"].includes(field.type)
@@ -911,47 +948,47 @@ function FrameCanvas() {
     const scaleTxt = field?.scale != null ? ` × ${field.scale}` : "";
     const unitTxt = field?.unit ? ` ${field.unit}` : "";
     const typeLine = field
-      ? `<div class="fc-tip-row"><span>类型</span><b>${TYPE_LABEL[field.type]}${endianTxt}${scaleTxt}${unitTxt}</b></div>`
+      ? `<div class="fc-tip-row"><span>${tx("类型", "Type")}</span><b>${typeLabel(field.type)}${endianTxt}${scaleTxt}${unitTxt}</b></div>`
       : "";
     const discLine =
       field && field.disc?.length && hv.off === field.offset
-        ? `<div class="fc-tip-row"><span>识别</span><b>${field.disc.map((x) => x.toString(16).padStart(2, "0").toUpperCase()).join(" ")}</b></div>`
+        ? `<div class="fc-tip-row"><span>${tx("识别", "Disc")}</span><b>${field.disc.map((x) => x.toString(16).padStart(2, "0").toUpperCase()).join(" ")}</b></div>`
         : "";
     let valLine = "";
     if (field && live && hv.off === field.offset) {
       const lv = teleRef.current.latest[field.id];
       if (lv && lv.valid) {
-        valLine = `<div class="fc-tip-row"><span>数值</span><b>${lv.text ?? String(round4(lv.value))}${field.unit ? ` ${field.unit}` : ""}</b></div>`;
+        valLine = `<div class="fc-tip-row"><span>${tx("数值", "Value")}</span><b>${lv.text ?? String(round4(lv.value))}${field.unit ? ` ${field.unit}` : ""}</b></div>`;
       }
     }
     const ckLine =
-      blkKind === "ftr" && blkLabel !== "帧尾"
-        ? `<div class="fc-tip-row"><span>说明</span><b>引擎自动计算 · 点击修改算法</b></div>`
+      blkKind === "ftr" && !isFtrTail
+        ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${tx("引擎自动计算 · 点击修改算法", "Computed by engine · click to change algorithm")}</b></div>`
         : "";
     let head = "";
     if (live && b !== null) {
       const ascii = b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : "—";
       head =
         `<div class="fc-tip-hex">${b.toString(16).toUpperCase().padStart(2, "0")}h</div>` +
-        `<div class="fc-tip-row"><span>十进制</span><b>${b}</b></div>` +
+        `<div class="fc-tip-row"><span>${tx("十进制", "Decimal")}</span><b>${b}</b></div>` +
         `<div class="fc-tip-row"><span>ASCII</span><b>${ascii}</b></div>`;
     } else if (tpl && blkKind === "hdr" && hv.off < tpl.boundary.headerBytes.length) {
       const hb = tpl.boundary.headerBytes[hv.off];
       head =
         `<div class="fc-tip-hex">${hb.toString(16).toUpperCase().padStart(2, "0")}h</div>` +
-        `<div class="fc-tip-row"><span>十进制</span><b>${hb}</b></div>`;
+        `<div class="fc-tip-row"><span>${tx("十进制", "Decimal")}</span><b>${hb}</b></div>`;
     } else if (blkKind !== "gap") {
       head = `<div class="fc-tip-hex">--</div>`;
     }
     tip.innerHTML =
       head +
-      `<div class="fc-tip-row"><span>类别</span><b>${cat}</b></div>` +
+      `<div class="fc-tip-row"><span>${tx("类别", "Category")}</span><b>${cat}</b></div>` +
       fieldLine +
       typeLine +
       discLine +
       valLine +
       ckLine +
-      `<div class="fc-tip-row"><span>位置</span><b>帧内 ${hv.off} B</b></div>`;
+      `<div class="fc-tip-row"><span>${tx("位置", "Position")}</span><b>${tx(`帧内 ${hv.off} B`, `frame +${hv.off} B`)}</b></div>`;
     tip.style.display = "block";
     tip.style.left = `${Math.min(hv.x + 14, sizeRef.current.w - tip.offsetWidth - 10)}px`;
     tip.style.top = `${Math.min(hv.y + 16, sizeRef.current.h - tip.offsetHeight - 10)}px`;
@@ -1356,7 +1393,7 @@ function FrameCanvas() {
 
   const renderTabs = () => (
     <div className="fc-tabs">
-      <div className="fc-tabs-label">协议</div>
+      <div className="fc-tabs-label">{tx("协议", "Protocol")}</div>
       {groups.map((g) => {
         const on = !!curTpl && g.tpls.some((t) => t.id === curTpl!.id);
         return (
@@ -1364,7 +1401,7 @@ function FrameCanvas() {
             <button
               className="fc-tab"
               onClick={() => selectTab(g.tpls.some((t) => t.id === curTpl?.id) ? curTpl!.id : g.tpls[0].id)}
-              title="点击切换到该协议"
+              title={tx("点击切换到该协议", "Click to switch to this protocol")}
             >
               <i style={{ background: g.color }} />
               {g.label}
@@ -1374,7 +1411,7 @@ function FrameCanvas() {
               <select
                 className="fc-tabsub"
                 value={curTpl && g.tpls.some((t) => t.id === curTpl!.id) ? curTpl.id : g.tpls[0].id}
-                title="选择帧型"
+                title={tx("选择帧型", "Select frame type")}
                 onChange={(e) => selectTab(e.target.value)}
               >
                 {g.tpls.map((t) => (
@@ -1424,10 +1461,10 @@ function FrameCanvas() {
           onClick={doSave}
           title={
             saveSt === "err"
-              ? "保存失败：模板格式未通过解析内核校验"
+              ? tx("保存失败：模板格式未通过解析内核校验", "Save failed: template rejected by parser core")
               : saveSt === "ok"
-                ? "已保存并同步到解析内核"
-                : "保存协议模板（立即同步到本地与解析内核）"
+                ? tx("已保存并同步到解析内核", "Saved & synced to parser core")
+                : tx("保存协议模板（立即同步到本地与解析内核）", "Save template (syncs to local & parser core)")
           }
         >
           {saveSt === "ok" ? <IconCheck /> : saveSt === "err" ? <IconAlert /> : <IconSave />}
@@ -1438,12 +1475,12 @@ function FrameCanvas() {
             title={proto.syncError}
             onClick={() => setErrOpen((v) => !v)}
           >
-            {errOpen ? `校验未通过：${proto.syncError}` : "校验未通过（点击查看原因）"}
+            {errOpen ? `${tx("校验未通过", "Validation failed")}: ${proto.syncError}` : tx("校验未通过（点击查看原因）", "Validation failed (click for reason)")}
           </span>
         ) : null}
         <ArchStat />
         <span className="fc-navinfo" ref={navRef} />
-        <label className="fc-cellsz" title="单元格尺寸">
+        <label className="fc-cellsz" title={tx("单元格尺寸", "Cell size")}>
           <input
             type="range"
             min={18}
@@ -1454,23 +1491,23 @@ function FrameCanvas() {
           />
           <b>{cellSize}</b>
         </label>
-        <button className="btn sm icon" onClick={doUndo} title="撤销 (Ctrl+Z)">
+        <button className="btn sm icon" onClick={doUndo} title={tx("撤销 (Ctrl+Z)", "Undo (Ctrl+Z)")}>
           <IconUndo />
         </button>
-        <button className="btn sm icon" onClick={doRedo} title="重做 (Ctrl+Y)">
+        <button className="btn sm icon" onClick={doRedo} title={tx("重做 (Ctrl+Y)", "Redo (Ctrl+Y)")}>
           <IconRedo />
         </button>
         <div className="fc-toolbar-spacer" />
-        <button className="btn sm icon nav" onClick={() => setViewF((f) => f - 1)} title="上一帧 (←)">
+        <button className="btn sm icon nav" onClick={() => setViewF((f) => f - 1)} title={tx("上一帧 (←)", "Previous frame (←)")}>
           <IconPrev />
         </button>
-        <button className={`btn sm icon${liveUI ? " primary" : ""}`} onClick={setViewLive} title="跟随最新有效帧（页签切换即跟随该类型）">
+        <button className={`btn sm icon${liveUI ? " primary" : ""}`} onClick={setViewLive} title={tx("跟随最新有效帧（页签切换即跟随该类型）", "Follow latest valid frame (tab switch follows that type)")}>
           <IconFollow on={liveUI} />
         </button>
-        <button className="btn sm icon nav" onClick={() => setViewF((f) => f + 1)} title="下一帧 (→)">
+        <button className="btn sm icon nav" onClick={() => setViewF((f) => f + 1)} title={tx("下一帧 (→)", "Next frame (→)")}>
           <IconNext />
         </button>
-        <button className="btn sm icon" onClick={() => { fcStore.clearArchive(); viewRef.current = { live: true, fi: 0 }; dirtyRef.current = true; }} title="清空帧归档字节池">
+        <button className="btn sm icon" onClick={() => { fcStore.clearArchive(); viewRef.current = { live: true, fi: 0 }; dirtyRef.current = true; }} title={tx("清空帧归档字节池", "Clear frame archive")}>
           <IconTrash />
         </button>
       </div>
@@ -1491,6 +1528,17 @@ function FrameCanvas() {
           onWheel={onWheel}
         />
         <div className="fc-tip" ref={tipRef} />
+        <div
+          className="fc-noframe-badge"
+          ref={noframeRef}
+          hidden
+          title={tx(
+            "该协议已定义但尚未匹配到任何有效帧。排查：①串口/网络是否连接并有数据；②波特率是否匹配；③帧头字节与设备实际输出是否一致；④同簇其他帧型的识别位是否抢占。",
+            "This protocol is defined but no valid frame matched yet. Check: 1) serial/network connected with data; 2) baud rate matches; 3) header bytes match device output; 4) sibling frame types in the cluster are not stealing the match.",
+          )}
+        >
+          {tx("未见有效帧", "No valid frame yet")}
+        </div>
         {menuState &&
           (() => {
             const m = menuRef.current;
@@ -1502,7 +1550,7 @@ function FrameCanvas() {
                   {m.kind === "sel" && (
                     <>
                       <button className="fc-menu-item primary" onClick={defineFromMenu}>
-                        ✎ 定义为字段…
+                        {tx("✎ 定义为字段…", "✎ Define as field…")}
                       </button>
                       {(() => {
                         const tpl0 = curRef.current;
@@ -1527,7 +1575,7 @@ function FrameCanvas() {
                                 dirtyRef.current = true;
                               }}
                             >
-                              ⤒ 在此格前插入格（帧长 +1）
+                              ⤒ {tx("在此格前插入格（帧长 +1）", "Insert cell here (length +1)")}
                             </button>
                             <button
                               className="fc-menu-item"
@@ -1539,13 +1587,13 @@ function FrameCanvas() {
                                 dirtyRef.current = true;
                               }}
                             >
-                              ✕ 删除此格（帧长 −1）
+                              {tx("✕ 删除此格（帧长 −1）", "✕ Delete this cell (length −1)")}
                             </button>
                           </>
                         );
                       })()}
                       <button className="fc-menu-item" onClick={() => { selRef.current = null; closeMenu(); dirtyRef.current = true; }}>
-                        取消选择 (Esc)
+                        {tx("取消选择 (Esc)", "Clear selection (Esc)")}
                       </button>
                     </>
                   )}
@@ -1558,7 +1606,7 @@ function FrameCanvas() {
                           editField(m.tplId, m.fid);
                         }}
                       >
-                        ✎ 编辑字段…
+                        {tx("✎ 编辑字段…", "✎ Edit field…")}
                       </button>
                       <button
                         className="fc-menu-item danger"
@@ -1568,7 +1616,7 @@ function FrameCanvas() {
                           undefine(m.tplId, m.fid);
                         }}
                       >
-                        ⨯ 取消字段定义{m.locked ? "（已锁定）" : ""}
+                        {tx("⨯ 取消字段定义", "⨯ Undefine field")}{m.locked ? tx("（已锁定）", " (locked)") : ""}
                       </button>
                       <button
                         className="fc-menu-item"
@@ -1577,17 +1625,17 @@ function FrameCanvas() {
                           toggleLock(m.tplId, m.fid);
                         }}
                       >
-                        {m.locked ? "🔓 解锁字段" : "🔒 锁定字段"}
+                        {m.locked ? tx("🔓 解锁字段", "🔓 Unlock field") : tx("🔒 锁定字段", "🔒 Lock field")}
                       </button>
                     </>
                   )}
                   {m.kind === "hdr" && (
                     <>
                       <button className="fc-menu-item primary" onClick={() => openHdrDlg(m.tplId)}>
-                        ✎ 编辑帧头…<span className="fc-menu-sub">当前 {m.nbytes} 字节</span>
+                        {tx("✎ 编辑帧头…", "✎ Edit header…")}<span className="fc-menu-sub">{tx(`当前 ${m.nbytes} 字节`, `${m.nbytes} bytes now`)}</span>
                       </button>
                       <button className="fc-menu-item" onClick={() => { selRef.current = null; closeMenu(); dirtyRef.current = true; }}>
-                        取消选择 (Esc)
+                        {tx("取消选择 (Esc)", "Clear selection (Esc)")}
                       </button>
                     </>
                   )}
@@ -1595,11 +1643,11 @@ function FrameCanvas() {
                     <>
                       {m.hasFB ? (
                         <button className="fc-menu-item primary" onClick={() => openFtrDlg(m.tplId)}>
-                          ✎ 编辑帧尾字节…<span className="fc-menu-sub">双击亦可</span>
+                          {tx("✎ 编辑帧尾字节…", "✎ Edit footer bytes…")}<span className="fc-menu-sub">{tx("双击亦可", "or double-click")}</span>
                         </button>
                       ) : (
                         <button className="fc-menu-item" disabled>
-                          校验尾（长度由校验算法决定）
+                          {tx("校验尾（长度由校验算法决定）", "Checksum tail (length set by algorithm)")}
                         </button>
                       )}
                       <button
@@ -1611,10 +1659,10 @@ function FrameCanvas() {
                           dirtyRef.current = true;
                         }}
                       >
-                        ⚙ 查看校验配置<span className="fc-menu-sub">右侧属性面板</span>
+                        ⚙ {tx("查看校验配置", "View checksum config")}<span className="fc-menu-sub">{tx("右侧属性面板", "properties panel on the right")}</span>
                       </button>
                       <button className="fc-menu-item" onClick={() => { selRef.current = null; closeMenu(); dirtyRef.current = true; }}>
-                        取消选择 (Esc)
+                        {tx("取消选择 (Esc)", "Clear selection (Esc)")}
                       </button>
                     </>
                   )}
@@ -1625,11 +1673,11 @@ function FrameCanvas() {
         {pending && (
           <div className="modal-mask" onMouseDown={() => setPending(null)}>
             <div className="modal fc-confirm" onMouseDown={(e) => e.stopPropagation()}>
-              <div className="modal-title">字段冲突</div>
+              <div className="modal-title">{tx("字段冲突", "Field conflict")}</div>
               <div className="fc-confirm-body">{pending.msg}</div>
               <div className="modal-foot">
                 <span />
-                <button className="btn" onClick={() => setPending(null)}>取消</button>
+                <button className="btn" onClick={() => setPending(null)}>{tx("取消", "Cancel")}</button>
                 {pending.apply && (
                   <button
                     className="btn primary"
@@ -1638,7 +1686,7 @@ function FrameCanvas() {
                       setPending(null);
                     }}
                   >
-                    覆盖并继续
+                    {tx("覆盖并继续", "Overwrite & continue")}
                   </button>
                 )}
               </div>
@@ -1683,12 +1731,23 @@ function FrameCanvas() {
                   fieldSize({ ...base, ...f }),
                 );
                 if (c.overFrame) {
-                  setPending({ msg: `无法保存：${c.overFrame}。请先增大「总帧长/最大帧长」或缩小字段。` });
+                  setPending({
+                    msg: tx(
+                      `无法保存：${c.overFrame}。请先增大「总帧长/最大帧长」或缩小字段。`,
+                      `Cannot save: ${c.overFrame}. Increase "total/max frame length" or shrink the field first.`,
+                    ),
+                  });
                   return;
                 }
                 if (c.overlapName) {
                   setPending({
-                    msg: `保存后将覆盖字段「${c.overlapName}」的前 ${c.overlapBytes} 字节。是否继续？`,
+                    msg:
+                      tx("保存后将覆盖字段「", "Saving will overwrite the first ") +
+                      String(c.overlapBytes ?? 0) +
+                      tx(" 字节", " bytes") +
+                      tx("，与字段「", " of the field \"") +
+                      c.overlapName +
+                      tx("」重叠。是否继续？", "\". Continue?"),
                     apply: applyIt,
                   });
                   return;
@@ -1715,11 +1774,11 @@ function FrameCanvas() {
         <ArchEmptyGate>
           {!curTpl && (
             <div className="fc-empty">
-              <div className="fc-empty-title">等待有效帧…</div>
+              <div className="fc-empty-title">{tx("等待有效帧…", "Waiting for a valid frame…")}</div>
               <div className="fc-empty-desc">
-                这里只呈现通过「协议模板」校验的完整数据帧。
-                {serial.status !== "connected" ? "可先连接设备或启动演示源；" : ""}
-                添加预设协议请用左侧「＋ 预设」。
+                {tx("这里只呈现通过「协议模板」校验的完整数据帧。", "Only complete frames that pass the protocol-template validation are shown here.")}
+                {serial.status !== "connected" ? tx("可先连接设备或启动演示源；", "Connect a device or start the demo source;") : ""}
+                {tx("添加预设协议请用左侧「＋ 预设」。", 'Add preset protocols with "+ Preset" on the left.')}
               </div>
             </div>
           )}
@@ -1744,17 +1803,7 @@ type DlgInit =
   | { kind: "hdr" | "ftr"; tplId: string; tplName: string; bytes: number[] };
 
 function parseHex(text: string): number[] | null {
-  const t = text.trim().replace(/，/g, " ");
-  if (!t) return [];
-  const words = t.split(/[\s,;]+/).filter((w) => w.length > 0);
-  const out: number[] = [];
-  for (const w of words) {
-    const v = parseInt(w, 16);
-    if (!/^0x[0-9a-fA-F]{1,2}$/.test(w) && !/^[0-9a-fA-F]{1,2}$/.test(w)) return null;
-    if (Number.isNaN(v) || v < 0 || v > 255) return null;
-    out.push(v);
-  }
-  return out;
+  return parseHexBytes(text);
 }
 
 function HeadTailDialog({
@@ -1808,7 +1857,7 @@ function HeadTailDialog({
   const save = () => {
     const ws = parseHex(text);
     if (ws === null) {
-      setErr("输入无效：仅接受 0–255 的十六进制字节，如 AA 55 0C");
+      setErr(tx("输入无效：仅接受 0–255 的十六进制字节，如 AA 55 0C", "Invalid input: only hex bytes 0–255, e.g. AA 55 0C"));
       return;
     }
     onSave(ws);
@@ -1819,13 +1868,13 @@ function HeadTailDialog({
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
       <div className="fc-dlg" onMouseDown={(e) => e.stopPropagation()}>
         <div className="fc-dlg-title">
-          {isHdr ? "编辑帧头" : "编辑帧尾"}{" "}
+          {isHdr ? tx("编辑帧头", "Edit header") : tx("编辑帧尾", "Edit footer")}{" "}
           <span className="fc-dlg-sub">
-            {init.tplName} · 十六进制字节序列
+            {init.tplName} · {tx("十六进制字节序列", "hex byte sequence")}
           </span>
         </div>
         <div className="fc-dlg-row">
-          <label className="fc-sb-l">字节</label>
+          <label className="fc-sb-l">{tx("字节", "Bytes")}</label>
           <input
             autoFocus
             value={text}
@@ -1834,45 +1883,47 @@ function HeadTailDialog({
               if (e.key === "Enter") save();
               e.stopPropagation();
             }}
-            placeholder={isHdr ? "如 AA 55" : "如 0D 0A 或 2C"}
+            placeholder={isHdr ? tx("如 AA 55", "e.g. AA 55") : tx("如 0D 0A 或 2C", "e.g. 0D 0A or 2C")}
           />
         </div>
         <div className="fc-dlg-row fc-sb-row">
           <span className={`fc-sb-info${curLen === null ? " bad" : ""}`}>
-            {curLen === null ? "解析失败" : `当前 ${text.trim() ? curLen : 0} 字节 · 空格/逗号分隔`}
+            {curLen === null
+              ? tx("解析失败", "Parse failed")
+              : tx(`当前 ${text.trim() ? curLen : 0} 字节 · 空格/逗号分隔`, `${text.trim() ? curLen : 0} bytes now · space/comma separated`)}
           </span>
-          <button className="btn sm" onClick={() => bump(-1)} disabled={!curLen || curLen <= 0} title="去掉末尾一个字节">
-            −1 字节
+          <button className="btn sm" onClick={() => bump(-1)} disabled={!curLen || curLen <= 0} title={tx("去掉末尾一个字节", "Remove the last byte")}>
+            {tx("−1 字节", "−1 byte")}
           </button>
-          <button className="btn sm" onClick={() => bump(1)} title="末尾追加一个 00 字节">
-            +1 字节
+          <button className="btn sm" onClick={() => bump(1)} title={tx("末尾追加一个 00 字节", "Append a 00 byte")}>
+            {tx("+1 字节", "+1 byte")}
           </button>
         </div>
         {isHdr ? (
           <div className="fc-dlg-warn soft">
-            帧头可为空（从首字节直接收集）；无需帧头的帧请在属性面板将模式改为「固定帧尾」。
+            {tx("帧头可为空（从首字节直接收集）；无需帧头的帧请在属性面板将模式改为「固定帧尾」。", "The header may be empty (bytes collected from the first byte). For header-less frames, switch the mode to \"fixed footer\" in the properties panel.")}
           </div>
         ) : (
           <div className="fc-dlg-warn soft">
-            帧尾字节为空时，该模板将被引擎以「缺少帧尾字节」拒绝，需在属性面板补充帧尾或换用「长度字段」成帧方式。
+            {tx("帧尾字节为空时，该模板将被引擎以「缺少帧尾字节」拒绝，需在属性面板补充帧尾或换用「长度字段」成帧方式。", "With an empty footer the engine rejects this template (missing footer bytes). Add footer bytes in the properties panel or switch to the \"length field\" framing mode.")}
           </div>
         )}
         {err && <div className="fc-dlg-warn">{err}</div>}
         <div className="fc-dlg-foot">
-          <button className="btn" onClick={() => { setText(""); setErr(null); }}>清空</button>
-          <button className="btn" onClick={onCancel}>取消</button>
-          <button className="btn primary" onClick={save}>保存生效</button>
+          <button className="btn" onClick={() => { setText(""); setErr(null); }}>{tx("清空", "Clear")}</button>
+          <button className="btn" onClick={onCancel}>{tx("取消", "Cancel")}</button>
+          <button className="btn primary" onClick={save}>{tx("保存生效", "Save")}</button>
         </div>
       </div>
     </div>
   );
 }
 
-const ROLE_GROUPS: { label: string; roles: FieldRole[] }[] = [
-  { label: "帧结构", roles: ["header", "footer"] },
-  { label: "控制", roles: ["addr", "id", "seq", "length"] },
-  { label: "数据", roles: ["data", "payload"] },
-  { label: "校验", roles: ["checksum", "checksum2"] },
+const ROLE_GROUPS: { zh: string; en: string; roles: FieldRole[] }[] = [
+  { zh: "帧结构", en: "Frame", roles: ["header", "footer"] },
+  { zh: "控制", en: "Control", roles: ["addr", "id", "seq", "length"] },
+  { zh: "数据", en: "Data", roles: ["data", "payload"] },
+  { zh: "校验", en: "Checksum", roles: ["checksum", "checksum2"] },
 ];
 
 function FieldDialog({
@@ -1885,8 +1936,10 @@ function FieldDialog({
   onCancel: () => void;
 }) {
   const recs = SIZE_TYPES[init.size] ?? [];
+  useLocale();
   const defType: FieldType = recs[0] ?? "uint8";
-  const [name, setName] = useState(NAME_HINTS[init.size]?.[0] ?? `字段${init.lo}`);
+  const defName = tx(`字段${init.lo}`, `Field ${init.lo}`);
+  const [name, setName] = useState(nameHints(init.size)[0] ?? defName);
   const [type, setType] = useState<FieldType>(defType);
   const [endian, setEndian] = useState<"little" | "big">("little");
   const [role, setRole] = useState<FieldRole>(init.field?.role ?? "data");
@@ -1913,27 +1966,29 @@ function FieldDialog({
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
       <div className="fc-dlg" onMouseDown={(e) => e.stopPropagation()}>
         <div className="fc-dlg-title">
-          {init.edit ? "编辑字段" : "定义字段"}{" "}
+          {init.edit ? tx("编辑字段", "Edit field") : tx("定义字段", "Define field")}{" "}
           <span className="fc-dlg-sub">
-            {init.tplName} · 帧内偏移 {init.lo} · 长度 {init.size}B
+            {init.tplName} · {tx(`帧内偏移 ${init.lo} · 长度 ${init.size}B`, `frame +${init.lo} · ${init.size}B`)}
           </span>
         </div>
         {init.size !== fixedSize && (
-          <div className="fc-dlg-warn">所选类型占 {fixedSize}B ≠ 选区 {init.size}B — 请核对长度</div>
+          <div className="fc-dlg-warn">
+            {tx(`所选类型占 ${fixedSize}B ≠ 选区 ${init.size}B — 请核对长度`, `Selected type occupies ${fixedSize}B ≠ ${init.size}B selection — check the length`)}
+          </div>
         )}
         {mismatched && (
-          <div className="fc-dlg-warn soft">智能推荐:{recs.map((r) => TYPE_LABEL[r]).join(" / ")}（{init.size}字节）</div>
+          <div className="fc-dlg-warn soft">{tx("智能推荐", "Suggested")}: {recs.map((r) => TYPE_LABEL[r]).join(" / ")}（{init.size}{tx("字节", "bytes")}）</div>
         )}
         <div className="fc-dlg-row">
-          <label>名称</label>
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="如 温度值" />
+          <label>{tx("名称", "Name")}</label>
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={tx("如 温度值", "e.g. Temperature")} />
         </div>
         <div className="fc-dlg-row">
-          <label>协议角色</label>
+          <label>{tx("协议角色", "Role")}</label>
           <div className="fc-dlg-roles">
             {ROLE_GROUPS.map((grp) => (
-              <div className="fc-dlg-roles-g" key={grp.label}>
-                <span className="fc-dlg-roles-l">{grp.label}</span>
+              <div className="fc-dlg-roles-g" key={grp.zh}>
+                <span className="fc-dlg-roles-l">{tx(grp.zh, grp.en)}</span>
                 {grp.roles.map((rl) => (
                   <button
                     key={rl}
@@ -1942,7 +1997,7 @@ function FieldDialog({
                     onClick={() => setRole(rl)}
                   >
                     <i />
-                    {ROLE_META[rl].zh}
+                    {roleLabel(rl)}
                   </button>
                 ))}
               </div>
@@ -1950,41 +2005,41 @@ function FieldDialog({
           </div>
         </div>
         <div className="fc-dlg-row">
-          <label>数据类型</label>
+          <label>{tx("数据类型", "Data type")}</label>
           <select value={type} onChange={(e) => setType(e.target.value as FieldType)}>
             {(recs.length ? [...recs, ...TYPE_ORDER.filter((t) => !recs.includes(t))] : TYPE_ORDER).map((t) => (
               <option key={t} value={t}>
-                {TYPE_LABEL[t]}
-                {recs.includes(t) ? " ✓推荐" : ""}
+                {typeLabel(t)}
+                {recs.includes(t) ? ` ${tx("✓推荐", "✓ suggested")}` : ""}
               </option>
             ))}
           </select>
         </div>
         <div className="fc-dlg-row">
-          <label>字节序</label>
+          <label>{tx("字节序", "Endianness")}</label>
           <select value={endian} onChange={(e) => setEndian(e.target.value as "little" | "big")} disabled={!needsEndian}>
-            <option value="little">小端 LE（低前）</option>
-            <option value="big">大端 BE（高前）</option>
+            <option value="little">{tx("小端 LE（低前）", "Little-endian LE")}</option>
+            <option value="big">{tx("大端 BE（高前）", "Big-endian BE")}</option>
           </select>
         </div>
         {type === "csv" && (
           <>
             <div className="fc-dlg-warn soft">
-              自适应分隔数值（JustFloat 式）：覆盖本字段区到校验/帧尾前，按每帧实际段数动态输出 通道1…通道N（上限 64）。
+              {tx("自适应分隔数值（JustFloat 式）：覆盖本字段区到校验/帧尾前，按每帧实际段数动态输出 通道1…通道N（上限 64）。", "Auto delimiter values (JustFloat style): covers from this field up to the checksum/footer and emits Channel 1…N per frame based on the actual segment count (max 64).")}
             </div>
             <div className="fc-dlg-row">
-              <label>分隔符</label>
+              <label>{tx("分隔符", "Delimiter")}</label>
               <input
                 value={csvDelim}
                 onChange={(e) => setCsvDelim(e.target.value)}
-                placeholder="如 , 或 \\ 或 ;"
+                placeholder={tx("如 , 或 \\ 或 ;", "e.g. , or \\ or ;")}
                 style={{ width: 90 }}
               />
             </div>
             <div className="fc-dlg-row">
-              <label>元素类型</label>
+              <label>{tx("元素类型", "Element type")}</label>
               <select value={csvType} onChange={(e) => setCsvType(e.target.value)}>
-                <option value="float32">float（小数）</option>
+                <option value="float32">{tx("float（小数）", "float (decimal)")}</option>
                 <option value="uint8">uint8</option>
                 <option value="int8">int8</option>
                 <option value="uint16">uint16</option>
@@ -1997,22 +2052,22 @@ function FieldDialog({
           </>
         )}
         <div className="fc-dlg-row">
-          <label>缩放倍率</label>
-          <input value={scale} onChange={(e) => setScale(e.target.value)} placeholder="如 0.01 或 100" />
+          <label>{tx("缩放倍率", "Scale")}</label>
+          <input value={scale} onChange={(e) => setScale(e.target.value)} placeholder={tx("如 0.01 或 100", "e.g. 0.01 or 100")} />
         </div>
         <div className="fc-dlg-row">
-          <label>单位</label>
-          <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="如 °C" />
+          <label>{tx("单位", "Unit")}</label>
+          <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder={tx("如 °C", "e.g. °C")} />
         </div>
         <div className="fc-dlg-row">
-          <label>颜色</label>
+          <label>{tx("颜色", "Color")}</label>
           <div className="fc-dlg-colors">
             <input
               type="color"
               value={color}
               onChange={(e) => setColor(e.target.value)}
               className="fc-color-picker"
-              title="自由取色"
+              title={tx("自由取色", "Custom color")}
             />
             {PALETTE.map((c) => (
               <button
@@ -2025,13 +2080,13 @@ function FieldDialog({
           </div>
         </div>
         <div className="fc-dlg-foot">
-          <button className="btn" onClick={onCancel}>取消</button>
+          <button className="btn" onClick={onCancel}>{tx("取消", "Cancel")}</button>
           <button
             className="btn primary"
             onClick={() =>
               onOk({
                 id: init.field?.id ?? crypto.randomUUID(),
-                name: name.trim() || `字段${init.lo}`,
+                name: name.trim() || defName,
                 role,
                 offset: init.lo,
                 type,
@@ -2047,7 +2102,7 @@ function FieldDialog({
               })
             }
           >
-            {init.edit ? "保存修改" : "确认定义"}
+            {init.edit ? tx("保存修改", "Save changes") : tx("确认定义", "Confirm definition")}
           </button>
         </div>
       </div>

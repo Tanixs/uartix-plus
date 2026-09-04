@@ -1,5 +1,7 @@
 export type SendMode = "ascii" | "hex";
 
+import { getLocale } from "../../i18n/strings";
+
 export type ControlType =
   | "slider"
   | "button"
@@ -9,7 +11,9 @@ export type ControlType =
   | "monitor"
   | "joystick"
   | "keypad"
-  | "keymon";
+  | "keymon"
+  | "group"
+  | "custom";
 
 export interface BaseCard {
   id: string;
@@ -128,6 +132,46 @@ export interface JoystickCard extends BaseCard {
   script: string;
 }
 
+/** 组合控件子项类型（v1 支持五种：滑条/按钮/开关/监视/LED） */
+export type GroupChildKind = "slider" | "button" | "switch" | "monitor" | "led";
+
+export interface GroupChild {
+  id: string;
+  kind: GroupChildKind;
+  label: string;
+  /** slider 参数 */
+  min: number;
+  max: number;
+  step: number;
+  /** slider / button 发送模板 */
+  template: string;
+  /** switch 两档指令：[关, 开] */
+  templates: string[];
+  /** switch 档位标签 */
+  labels: string[];
+  /** monitor / led 绑定变量 */
+  varName: string;
+  unit: string;
+  /** led 触发条件 */
+  op: LedOp;
+  value: number;
+  strValue: string;
+  onColor: string;
+}
+
+/** 组合控件：一张卡片内集成多个子控件，共享 sendMode */
+export interface GroupCard extends BaseCard {
+  type: "group";
+  sendMode: SendMode;
+  children: GroupChild[];
+}
+
+/** 自定义卡片：沙箱 iframe（与小部件同格式 HTML + postMessage 桥），任意风格与功能 */
+export interface CustomCard extends BaseCard {
+  type: "custom";
+  html: string;
+}
+
 export type ControlCard =
   | SliderCard
   | ButtonCard
@@ -137,7 +181,9 @@ export type ControlCard =
   | MonitorCard
   | JoystickCard
   | KeypadCard
-  | KeymonCard;
+  | KeymonCard
+  | GroupCard
+  | CustomCard;
 
 export const PANEL_TYPE_NAMES: Record<ControlType, string> = {
   slider: "滑条",
@@ -149,6 +195,22 @@ export const PANEL_TYPE_NAMES: Record<ControlType, string> = {
   joystick: "摇杆",
   keypad: "键盘遥控",
   keymon: "单键监控",
+  group: "组合控件",
+  custom: "自定义卡片",
+};
+
+const PANEL_TYPE_NAMES_EN: Record<ControlType, string> = {
+  slider: "Slider",
+  button: "Button",
+  switch: "Switch",
+  led: "LED",
+  buzzer: "Buzzer",
+  monitor: "Monitor",
+  joystick: "Joystick",
+  keypad: "Keypad",
+  keymon: "Key Monitor",
+  group: "Group Control",
+  custom: "Custom Card",
 };
 
 export interface ControlPage {
@@ -163,6 +225,84 @@ export interface ControlPage {
 export interface ControlsSnapshot {
   pages: ControlPage[];
   activePageId: string;
+}
+
+const GROUP_KINDS: GroupChildKind[] = ["slider", "button", "switch", "monitor", "led"];
+
+/** 校验并规范化组合控件子项：非法 kind 丢弃、数值收敛、最多 8 个 */
+export function sanitizeChildren(raw: unknown): GroupChild[] {
+  if (!Array.isArray(raw)) return [];
+  const out: GroupChild[] = [];
+  for (const item of raw.slice(0, 8)) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    const kind = String(r.kind ?? "") as GroupChildKind;
+    if (!GROUP_KINDS.includes(kind)) continue;
+    out.push({
+      id: String(r.id ?? crypto.randomUUID()),
+      kind,
+      label: String(r.label ?? GROUP_KIND_LABEL[kind]),
+      min: Number(r.min ?? 0),
+      max: Number(r.max ?? 100),
+      step: Math.max(Number(r.step) > 0 ? Number(r.step) : 1, 0.001),
+      template: String(r.template ?? ""),
+      templates: Array.isArray(r.templates)
+        ? [0, 1].map((i) => String((r.templates as unknown[])[i] ?? ""))
+        : ["", ""],
+      labels: Array.isArray(r.labels)
+        ? [0, 1].map((i) => String((r.labels as unknown[])[i] ?? ""))
+        : ["", ""],
+      varName: String(r.varName ?? ""),
+      unit: String(r.unit ?? ""),
+      op: (GROUP_OPS as string[]).includes(String(r.op)) ? (String(r.op) as LedOp) : "gt",
+      value: Number(r.value ?? 0),
+      strValue: String(r.strValue ?? ""),
+      onColor: String(r.onColor ?? "#3fb950"),
+    });
+  }
+  return out;
+}
+
+const GROUP_OPS: LedOp[] = ["gt", "ge", "lt", "le", "eq", "ne"];
+
+export const GROUP_KIND_LABEL: Record<GroupChildKind, string> = {
+  slider: "滑条",
+  button: "按钮",
+  switch: "开关",
+  monitor: "监视",
+  led: "LED",
+};
+
+const GROUP_KIND_LABEL_EN: Record<GroupChildKind, string> = {
+  slider: "Slider",
+  button: "Button",
+  switch: "Switch",
+  monitor: "Monitor",
+  led: "LED",
+};
+
+/** 语言感知的控件类型名（UI 展示用；存储默认 label 仍走 zh 保证分享包一致） */
+export function panelTypeName(t: ControlType): string {
+  return getLocale() === "en" ? PANEL_TYPE_NAMES_EN[t] : PANEL_TYPE_NAMES[t];
+}
+export function groupKindLabel(k: GroupChildKind): string {
+  return getLocale() === "en" ? GROUP_KIND_LABEL_EN[k] : GROUP_KIND_LABEL[k];
+}
+
+/** 新建一个带默认值的组合控件子项 */
+export function newGroupChild(kind: GroupChildKind): GroupChild {
+  return sanitizeChildren([
+    {
+      kind,
+      label: GROUP_KIND_LABEL[kind],
+      template:
+        kind === "slider" ? "CMD:%.2f!" : kind === "button" ? "CMD!" : "",
+      templates: kind === "switch" ? ["SW:0!", "SW:1!"] : [],
+      min: 0,
+      max: 100,
+      step: 1,
+    },
+  ])[0];
 }
 
 function migrateCard(raw: Record<string, unknown>): ControlCard {
@@ -281,6 +421,19 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         script: String(raw.script ?? ""),
       };
     }
+    case "group":
+      return {
+        ...base,
+        type,
+        sendMode: (raw.sendMode as SendMode) ?? "ascii",
+        children: sanitizeChildren(raw.children),
+      };
+    case "custom":
+      return {
+        ...base,
+        type,
+        html: String(raw.html ?? ""),
+      };
     default:
       return {
         ...base,
@@ -572,7 +725,13 @@ function defaultCard(type: ControlType, name: string): ControlCard {
         ? { w: 3, h: 3 }
         : type === "monitor"
           ? { w: 2, h: 2 }
-          : { w: 1, h: 1 };
+          : type === "group"
+            ? { w: 2, h: 3 }
+            : type === "custom"
+              ? { w: 3, h: 3 }
+              : type === "slider"
+                ? { w: 2, h: 1 }
+                : { w: 1, h: 1 };
   const base = {
     id: crypto.randomUUID(),
     type,
@@ -668,6 +827,50 @@ function defaultCard(type: ControlType, name: string): ControlCard {
         useScript: false,
         script: "",
       };
+    case "group":
+      return {
+        ...base,
+        type,
+        sendMode: "ascii",
+        children: [
+          {
+            id: crypto.randomUUID(),
+            kind: "slider",
+            label: "滑条",
+            min: 0,
+            max: 100,
+            step: 1,
+            template: "CMD:%.2f!",
+            templates: ["", ""],
+            labels: ["", ""],
+            varName: "",
+            unit: "",
+            op: "gt",
+            value: 0,
+            strValue: "",
+            onColor: "#3fb950",
+          },
+          {
+            id: crypto.randomUUID(),
+            kind: "button",
+            label: "按钮",
+            min: 0,
+            max: 100,
+            step: 1,
+            template: "CMD!",
+            templates: ["", ""],
+            labels: ["", ""],
+            varName: "",
+            unit: "",
+            op: "gt",
+            value: 0,
+            strValue: "",
+            onColor: "#3fb950",
+          },
+        ],
+      };
+    case "custom":
+      return { ...base, type, html: "" };
     default:
       return {
         ...base,
@@ -690,20 +893,9 @@ export function addCard(pageId: string, type: ControlType = "slider"): string {
   const page = snapshot.pages.find((p) => p.id === pageId);
   const card = defaultCard(type, `${type}_${(page?.cards.length ?? 0) + 1}`);
   if (page) {
-    const hh = card.h;
-    const occupied = (x: number, y: number) =>
-      page.cards.some(
-        (c) =>
-          !(
-            x + card.w <= c.x ||
-            c.x + c.w <= x ||
-            y + hh <= c.y ||
-            c.y + (c.h || 1) <= y
-          ),
-      );
-    let y = 0;
-    while (occupied(0, y) && y < 64) y++;
-    card.y = y;
+    const pos = findFlowPos(page, card.w, card.h);
+    card.x = pos.x;
+    card.y = pos.y;
   }
   snapshot = {
     ...snapshot,
@@ -713,6 +905,33 @@ export function addCard(pageId: string, type: ControlType = "slider"): string {
   };
   emit();
   return card.id;
+}
+
+/** 流式排布：从左上角起按行扫描（行优先），返回第一个能容纳 w×h 的空位 */
+export function findFlowPos(
+  page: Pick<ControlPage, "cards" | "cols" | "rows">,
+  w: number,
+  h: number,
+): { x: number; y: number } {
+  const rows = page.rows || 48;
+  const cols = page.cols;
+  const occupied = (x: number, y: number) =>
+    page.cards.some(
+      (c) =>
+        !(
+          x + w <= c.x ||
+          c.x + (c.w || 1) <= x ||
+          y + h <= c.y ||
+          c.y + (c.h || 1) <= y
+        ),
+    );
+  for (let y = 0; y <= rows - h; y++) {
+    for (let x = 0; x <= cols - w; x++) {
+      if (!occupied(x, y)) return { x, y };
+    }
+  }
+  // 画布放不下：追加到底部（用户可扩行或手动调整）
+  return { x: 0, y: rows };
 }
 
 export function patchCard(

@@ -319,6 +319,14 @@ export const IconPuzzle = () =>
     </>,
   );
 
+export const IconCode = () =>
+  svg(
+    <>
+      <path d="M8 6l-5 6 5 6" />
+      <path d="M16 6l5 6-5 6" />
+    </>,
+  );
+
 export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   slider: IconSlider(),
   button: IconButton(),
@@ -329,4 +337,6 @@ export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   joystick: IconJoystick(),
   keypad: IconKeypad(),
   keymon: IconKeymon(),
+  group: IconPuzzle(),
+  custom: IconCode(),
 };

@@ -13,12 +13,15 @@ export function invokeAiScene(scene: AiScene, payload?: Record<string, unknown>)
   window.dispatchEvent(new CustomEvent<EiPayload>(EVT, { detail: { scene, payload } }));
 }
 
-export function invokeOpenSettings() {
-  window.dispatchEvent(new CustomEvent(EVT_SETTINGS));
+export function invokeOpenSettings(tab?: string) {
+  window.dispatchEvent(new CustomEvent(EVT_SETTINGS, { detail: { tab } }));
 }
 
-export function onOpenSettings(cb: () => void): () => void {
-  const h = () => cb();
+export function onOpenSettings(cb: (tab?: string) => void): () => void {
+  const h = (e: Event) => {
+    const d = (e as CustomEvent<{ tab?: string }>).detail;
+    cb(d?.tab);
+  };
   window.addEventListener(EVT_SETTINGS, h);
   return () => window.removeEventListener(EVT_SETTINGS, h);
 }

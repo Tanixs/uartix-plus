@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSyncExternalStore } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import type { FrameTemplate } from "../../ipc/types";
 import * as store from "./templateStore";
 import * as teleStore from "./telemetryStore";
@@ -9,6 +11,7 @@ import { IconChevron } from "../../shared/icons";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
 import { patch as patchSettings, useSettings } from "../settings/settingsStore";
+import { tx, useLocale } from "../../i18n/strings";
 
 function EyeIcon({ open }: { open: boolean }) {
   return (
@@ -87,17 +90,18 @@ function RenameDlg({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(init);
+  useLocale();
   return (
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
       <div className="fc-dlg" onMouseDown={(e) => e.stopPropagation()}>
         <div className="fc-dlg-title">{title}</div>
         <div className="fc-dlg-row">
-          <label>名称</label>
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="名称" />
+          <label>{tx("名称", "Name")}</label>
+          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={tx("名称", "Name")} />
         </div>
         <div className="fc-dlg-foot">
-          <button className="btn" onClick={onCancel}>取消</button>
-          <button className="btn primary" onClick={() => onOk(name.trim() || init)}>确定</button>
+          <button className="btn" onClick={onCancel}>{tx("取消", "Cancel")}</button>
+          <button className="btn primary" onClick={() => onOk(name.trim() || init)}>{tx("确定", "OK")}</button>
         </div>
       </div>
     </div>
@@ -105,11 +109,13 @@ function RenameDlg({
 }
 
 export function TemplatesPanel() {
+  useLocale();
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const tele = useSyncExternalStore(teleStore.subscribe, teleStore.getSnapshot);
   const plot = useSyncExternalStore(plotStore.subscribe, plotStore.getSnapshot);
   const [newOpen, setNewOpen] = useState(false);
   const [pMenu, setPMenu] = useState(false);
+  const [note, setNote] = useState("");
   const [expGrp, setExpGrp] = useState<Set<string>>(() => new Set());
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
   const [rename, setRename] = useState<{ kind: "grp" | "tpl"; key: string; id: string; init: string } | null>(null);
@@ -179,6 +185,38 @@ export function TemplatesPanel() {
     store.setSelection({ kind: "template", templateId: id });
   };
 
+  /** 导出协议簇（或单协议）为 JSON：导入侧走 uartix-templates 副本追加 */
+  const exportCluster = async (key: string, tpls: FrameTemplate[]) => {
+    const name = groupDisplayName(key, tpls[0]);
+    try {
+      const path = await save({
+        title: tx("导出协议簇 JSON", "Export cluster JSON"),
+        defaultPath: `${name}.json`,
+        filters: [{ name: "Uartix+ " + tx("协议", "protocol"), extensions: ["json"] }],
+      });
+      if (typeof path !== "string") return;
+      const groups: Record<string, store.GroupMeta> = {};
+      const meta = store.getGroupMeta(key);
+      if (meta) groups[key] = meta;
+      const content = JSON.stringify(
+        { kind: "uartix-templates", version: 1, templates: tpls, groups },
+        null,
+        2,
+      );
+      await invoke("save_text_file", { path, content });
+      setNote(
+        tx("已导出「", "Exported \"") +
+          name +
+          tx("」（", "\" (") +
+          tpls.length +
+          tx(" 个帧型）", " frame types)"),
+      );
+    } catch (e) {
+      setNote(tx("导出失败：", "Export failed: ") + String(e).slice(0, 80));
+    }
+    window.setTimeout(() => setNote(""), 3200);
+  };
+
   const openCtx = (e: React.MouseEvent, key: string, tpls: FrameTemplate[], focused?: FrameTemplate) => {
     e.preventDefault();
     e.stopPropagation();
@@ -191,30 +229,30 @@ export function TemplatesPanel() {
         disabled: true,
       });
       items.push({
-        label: "复制帧型",
+        label: tx("复制帧型", "Copy frame type"),
         onClick: () => {
           store.copyTpl(focus.id);
           setCtx(null);
         },
       });
       items.push({
-        label: "粘贴帧型…",
+        label: tx("粘贴帧型…", "Paste frame type…"),
         disabled: !store.canPaste(),
-        title: store.canPaste() ? "粘贴到本组（跨组亦可先复制再粘贴）" : "请先复制一个帧型",
+        title: store.canPaste() ? tx("粘贴到本组（跨组亦可先复制再粘贴）", "Paste into this group (you can copy from another group first)") : tx("请先复制一个帧型", "Copy a frame type first"),
         onClick: () => {
           store.pasteTpl(key);
           setCtx(null);
         },
       });
       items.push({
-        label: "重命名帧型…",
+        label: tx("重命名帧型…", "Rename frame type…"),
         onClick: () => {
           setRename({ kind: "tpl", key, id: focus.id, init: focus.name });
           setCtx(null);
         },
       });
       items.push({
-        label: "删除帧型",
+        label: tx("删除帧型", "Delete frame type"),
         onClick: () => {
           store.removeTemplate(focus.id);
           setCtx(null);
@@ -223,16 +261,16 @@ export function TemplatesPanel() {
     } else if (multi) {
       const hasPreset = tpls.some((t) => !!t.presetKey);
       items.push({
-        label: "重命名协议簇…",
+        label: tx("重命名协议簇…", "Rename cluster…"),
         disabled: hasPreset,
-        title: hasPreset ? "预设协议簇不可重命名" : "修改簇名称",
+        title: hasPreset ? tx("预设协议簇不可重命名", "Preset clusters cannot be renamed") : tx("修改簇名称", "Change the cluster name"),
         onClick: () => {
           setRename({ kind: "grp", key, id: "", init: groupDisplayName(key, tpls[0]) });
           setCtx(null);
         },
       });
       items.push({
-        label: "粘贴帧型…",
+        label: tx("粘贴帧型…", "Paste frame type…"),
         disabled: !store.canPaste(),
         onClick: () => {
           store.pasteTpl(key);
@@ -240,14 +278,22 @@ export function TemplatesPanel() {
         },
       });
       items.push({
-        label: tpls.every((t) => t.enabled) ? "整组停用" : "整组启用",
+        label: tpls.every((t) => t.enabled) ? tx("整组停用", "Disable whole group") : tx("整组启用", "Enable whole group"),
         onClick: () => {
           store.setGroupEnabled(key, !tpls.every((t) => t.enabled), (t) => presetGroupKey(t) ?? t.id);
           setCtx(null);
         },
       });
       items.push({
-        label: "删除整组",
+        label: tx("导出此簇 JSON…", "Export cluster JSON…"),
+        title: tx("导出整簇为可分享文件（导入方以副本追加，不覆盖）", "Export the whole cluster as a shareable file (imported as copies, never overwritten)"),
+        onClick: () => {
+          setCtx(null);
+          void exportCluster(key, tpls);
+        },
+      });
+      items.push({
+        label: tx("删除整组", "Delete whole group"),
         onClick: () => {
           store.replaceRules(
             s.rules.templates.filter((t) => !tpls.some((x) => x.id === t.id)),
@@ -266,20 +312,20 @@ export function TemplatesPanel() {
   return (
     <div className="tpl-panel">
       <div className="tpl-header">
-        <span>协议模板</span>
+        <span>{tx("协议模板", "Protocol Templates")}</span>
         <div className="tpl-header-actions">
-          <button className="btn" title="新建空白协议或协议簇（多帧型分组，可复制/粘贴帧型）" onClick={() => setNewOpen(true)}>
-            ＋ 新建
+          <button className="btn" title={tx("新建空白协议或协议簇（多帧型分组，可复制/粘贴帧型）", "New blank protocol or cluster (multi frame-type group, copy/paste supported)")} onClick={() => setNewOpen(true)}>
+            {tx("＋ 新建", "+ New")}
           </button>
           <div className="tpl-preset-wrap">
-          <button className="btn tpl-preset-btn" title="从预设导入协议副本（可反复添加，改崩了删除副本再添加）" onClick={() => setPMenu((v) => !v)}>
-            ＋ 预设 <IconChevron size={11} dir="down" />
+          <button className="btn tpl-preset-btn" title={tx("从预设导入协议副本（可反复添加，改崩了删除副本再添加）", "Import editable copies from presets (add repeatedly; delete a broken copy and re-import)")} onClick={() => setPMenu((v) => !v)}>
+            {tx("＋ 预设", "+ Preset")} <IconChevron size={11} dir="down" />
           </button>
           {pMenu && (
             <>
               <div className="tpl-menu-mask" onClick={() => setPMenu(false)} />
               <div className="tpl-menu">
-                <span className="tpl-menu-title">导入预设副本</span>
+                <span className="tpl-menu-title">{tx("导入预设副本", "Import preset copies")}</span>
                 {PRESETS.map((p) => (
                   <button
                     key={p.key}
@@ -299,6 +345,7 @@ export function TemplatesPanel() {
           </div>
         </div>
       </div>
+      {note && <div className="tpl-note">{note}</div>}
 
       <div
         className="tpl-list"
@@ -307,8 +354,8 @@ export function TemplatesPanel() {
         {s.rules.templates.length === 0 && (
           <div className="tpl-empty-state">
             <EmptyState
-              title="尚无协议模板"
-              hint={["点「＋ 新建」创建空白协议/协议簇", "或「＋ 预设」导入已有协议"]}
+              title={tx("尚无协议模板", "No protocol templates yet")}
+              hint={[tx("点「＋ 新建」创建空白协议/协议簇", 'Click "+ New" to create a blank protocol / cluster'), tx("或「＋ 预设」导入已有协议", 'or "+ Preset" to import a built-in protocol')]}
             />
           </div>
         )}
@@ -330,12 +377,12 @@ export function TemplatesPanel() {
                   onGroupClick(tpls);
                 }}
                 onContextMenu={(e) => openCtx(e, key, tpls)}
-                title={multi ? `${label} · 点击选中，点箭头展开帧型；右键：簇菜单` : tpls[0].name}
+                title={multi ? `${label} · ${tx("点击选中，点箭头展开帧型；右键：簇菜单", "click to select, arrow expands frame types; right-click: cluster menu")}` : tpls[0].name}
               >
                 {multi ? (
                   <button
                     className={`tpl-chev-btn${open ? " open" : ""}`}
-                    title={open ? "收起帧型列表" : "展开帧型列表"}
+                    title={open ? tx("收起帧型列表", "Collapse frame types") : tx("展开帧型列表", "Expand frame types")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setExpGrp((prev) => {
@@ -358,21 +405,21 @@ export function TemplatesPanel() {
                   {label}
                   {multi ? (
                     <em className="tpl-src">
-                      {tpls.length} 帧型{someOn && !allOn ? "·部分解析" : ""}
+                      {tpls.length} {tx("帧型", "types")}{someOn && !allOn ? `·${tx("部分解析", "partial")}` : ""}
                     </em>
                   ) : (
-                    tpls[0].presetKey && <em className="tpl-src">预设</em>
+                    tpls[0].presetKey && <em className="tpl-src">{tx("预设", "preset")}</em>
                   )}
                   <span className="tpl-row-stats">
                     {cnt}
-                    {errs ? ` / 错${errs}` : ""}
+                    {errs ? ` / ${tx("错", "err")}${errs}` : ""}
                   </span>
                 </span>
                 <input
                   type="checkbox"
                   className="chk-box"
                   checked={allOn}
-                  title={allOn ? "整组解析中（取消停用）" : someOn ? "部分帧型解析中" : "整组停用（点击启用全部）"}
+                  title={allOn ? tx("整组解析中（取消停用）", "Whole group parsing (uncheck to disable)") : someOn ? tx("部分帧型解析中", "Some frame types parsing") : tx("整组停用（点击启用全部）", "Whole group disabled (click to enable all)")}
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => {
                     e.stopPropagation();
@@ -382,7 +429,7 @@ export function TemplatesPanel() {
                 />
                 <button
                   className="tpl-del"
-                  title="删除整组协议副本（预设源不受影响，可再导入）"
+                  title={tx("删除整组协议副本（预设源不受影响，可再导入）", "Delete all copies in this group (preset sources are untouched and can be re-imported)")}
                   onClick={(e) => {
                     e.stopPropagation();
                     store.replaceRules(
@@ -403,21 +450,21 @@ export function TemplatesPanel() {
                         className={`tpl-row tpl-subrow${currentTpl?.id === t.id ? " on" : ""}${t.enabled ? "" : " off"}`}
                         onClick={() => pick(t.id)}
                         onContextMenu={(e) => openCtx(e, key, tpls, t)}
-                        title={`${t.name} · 右键：复制/粘贴/重命名/删除`}
+                        title={`${t.name} · ${tx("右键：复制/粘贴/重命名/删除", "right-click: copy/paste/rename/delete")}`}
                       >
                         <span className="tpl-dot" style={{ background: t.color }} />
                         <span className="tpl-row-name">
                           {t.name}
                           <span className="tpl-row-stats">
                             {st.ok}
-                            {st.err ? ` / 错${st.err}` : ""}
+                            {st.err ? ` / ${tx("错", "err")}${st.err}` : ""}
                           </span>
                         </span>
                         <input
                           type="checkbox"
                           className="chk-box"
                           checked={t.enabled}
-                          title="启用/停用该帧型"
+                          title={tx("启用/停用该帧型", "Enable/disable this frame type")}
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => {
                             e.stopPropagation();
@@ -427,7 +474,7 @@ export function TemplatesPanel() {
                         />
                         <button
                           className="tpl-del"
-                          title="删除该帧型副本"
+                          title={tx("删除该帧型副本", "Delete this frame-type copy")}
                           onClick={(e) => {
                             e.stopPropagation();
                             store.removeTemplate(t.id);
@@ -447,31 +494,31 @@ export function TemplatesPanel() {
 
       {currentTpl && (
         <div className="tpl-meta">
-          帧头{" "}
+          {tx("帧头", "Header")}{" "}
           {currentTpl.boundary.headerBytes
             .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
-            .join(" ") || "（无）"}
+            .join(" ") || tx("（无）", "(none)")}
           {" · "}
           {currentTpl.boundary.mode === "fixedLength"
-            ? `固定帧长 ${currentTpl.boundary.fixedLength}`
+            ? tx(`固定帧长 ${currentTpl.boundary.fixedLength}`, `fixed length ${currentTpl.boundary.fixedLength}`)
             : currentTpl.boundary.mode === "lengthField"
-              ? "长度字段截帧"
-              : "帧尾截帧"}
+              ? tx("长度字段截帧", "length-field framing")
+              : tx("帧尾截帧", "footer framing")}
           {currentTpl.checksum && currentTpl.checksum.algo !== "none"
             ? ` · ${currentTpl.checksum.algo}`
             : ""}
           {currentTpl.boundary.discValue?.length
-            ? ` · 识别位@${currentTpl.boundary.discOffset}`
+            ? ` · ${tx("识别位", "disc")}@${currentTpl.boundary.discOffset}`
             : ""}
           <button className="tpl-open" onClick={() => pick(currentTpl.id)}>
-            在面板编辑 →
+            {tx("在面板编辑 →", "Edit in panel →")}
           </button>
         </div>
       )}
 
       <div
         className="tpl-splitter"
-        title="上下拖动调整列表高度（双击复位）"
+        title={tx("上下拖动调整列表高度（双击复位）", "Drag vertically to resize the list (double-click to reset)")}
         onMouseDown={(e) => {
           const panelEl = document.querySelector(".tpl-panel") as HTMLElement | null;
           dragRef.current = {
@@ -488,13 +535,13 @@ export function TemplatesPanel() {
       </div>
 
       <div className="legend-header">
-        字段图例（实时值）
+        {tx("字段图例（实时值）", "Field legend (live values)")}
         <button
           className="legend-dec"
-          title="图例小数位数（点击 0→6 循环；也可在设置页自由填写 0~6）"
+          title={tx("图例小数位数（点击 0→6 循环；也可在设置页自由填写 0~6）", "Legend decimals (click cycles 0→6; settings page accepts any 0~6)")}
           onClick={() => patchSettings({ decimals: (decimals + 1) % 7 })}
         >
-          {decimals}位
+          {decimals}{tx("位", "dp")}
         </button>
       </div>
       <div className="legend-list">
@@ -539,16 +586,16 @@ export function TemplatesPanel() {
                   }}
                   title={
                     f.type === "csv"
-                      ? "自适应分隔数值：展开行显示各通道实时值，眼睛开整组曲线"
+                      ? tx("自适应分隔数值：展开行显示各通道实时值，眼睛开整组曲线", "Auto delimiter values: the expanded row shows per-channel live values; the eye toggles the whole group")
                       : numeric
-                        ? "眼睛开关 2D 曲线；拖到曲线区也可添加；点击定位到 Hex 区"
-                        : "点击定位到 Hex 区 0x" + (lv ? lv.seq.toString(16) : "")
+                        ? tx("眼睛开关 2D 曲线；拖到曲线区也可添加；点击定位到 Hex 区", "Eye toggles the 2D curve; drag onto the plot to add; click locates it in the Hex view")
+                        : tx("点击定位到 Hex 区 0x", "Click to locate in the Hex view at 0x") + (lv ? lv.seq.toString(16) : "")
                   }
                 >
                   {numeric && (
                     <button
                       className={`legend-eye ${eye === "on" ? "on" : ""} ${eye === "hidden" ? "half" : ""}`}
-                      title={eye === "off" ? "开启 2D 曲线" : eye === "hidden" ? "显示曲线（当前隐藏）" : "隐藏曲线"}
+                      title={eye === "off" ? tx("开启 2D 曲线", "Show 2D curve") : eye === "hidden" ? tx("显示曲线（当前隐藏）", "Reveal curve (currently hidden)") : tx("隐藏曲线", "Hide curve")}
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleEye(tpl.id, f.id, `${tpl.name}·${f.name}`, f.color);
@@ -564,7 +611,7 @@ export function TemplatesPanel() {
                   <span className="legend-name">
                     {tpl.name}·{f.name}
                     {f.type === "csv" ? (
-                      <em className="tpl-src">自适应</em>
+                      <em className="tpl-src">{tx("自适应", "auto")}</em>
                     ) : null}
                   </span>
                   <span className="legend-value">
@@ -593,7 +640,7 @@ export function TemplatesPanel() {
                         fieldId: f.id,
                       });
                     }}
-                    title={`${f.name}${i}（点击选中该字段编辑）`}
+                    title={`${f.name}${i}${tx("（点击选中该字段编辑）", " (click to select this field for editing)")}`}
                   >
                     <span className="tpl-dot" style={{ background: f.color, opacity: 0.55 }} />
                     <span className="legend-name">
@@ -608,7 +655,7 @@ export function TemplatesPanel() {
           )}
         {s.rules.templates.filter((t) => t.enabled && t.fields.length > 0).length === 0 && (
           <div className="tpl-empty">
-            在协议画布框选字节 → 右键「定义为数据字段」
+            {tx("在协议画布框选字节 → 右键「定义为数据字段」", 'Drag-select bytes on the frame canvas → right-click "Define as field"')}
           </div>
         )}
       </div>
@@ -620,7 +667,7 @@ export function TemplatesPanel() {
             className={`btn ${s.demoRunning ? "danger" : ""}`}
             onClick={toggleDemo}
           >
-            {s.demoRunning ? "停止演示源" : "启动演示源"}
+            {s.demoRunning ? tx("停止演示源", "Stop demo source") : tx("启动演示源", "Start demo source")}
           </button>
         </div>
       </div>
@@ -643,7 +690,7 @@ export function TemplatesPanel() {
 
       {rename && (
         <RenameDlg
-          title={rename.kind === "grp" ? "重命名协议簇" : "重命名帧型"}
+          title={rename.kind === "grp" ? tx("重命名协议簇", "Rename cluster") : tx("重命名帧型", "Rename frame type")}
           init={rename.init}
           onOk={(nm) => {
             if (rename.kind === "grp") store.renameGroup(rename.key, nm);

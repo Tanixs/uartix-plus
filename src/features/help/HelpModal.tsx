@@ -6,6 +6,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
   const tabs: { key: string; label: string }[] = [
     { key: "start", label: "快速入门" },
     { key: "panels", label: "面板总览" },
+    { key: "ai", label: "AI 助手详解" },
     { key: "canvas", label: "协议画布教程" },
     { key: "script", label: "脚本命令详解" },
     { key: "keys", label: "快捷键与技巧" },
@@ -70,6 +71,116 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li><code>存为指令</code>后命令进入命令库，可拖挂到控制画布变成实体按键。</li>
                     <li>控制台时间戳以彩色显示；RX/TX 可分别隐藏。</li>
                   </ol>
+                </Section>
+              </>
+            )}
+            {tab === "ai" && (
+              <>
+                <Section title="基础操作">
+                  <ol className="help-ol">
+                    <li>先到<code>设置 → AI 服务</code>：选服务商预设（DeepSeek / OpenAI 兼容 / 通义 / Claude / 本地 Ollama）→ 填 API Key → 需要代理时在「高级连接」里填。</li>
+                    <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；可停靠为面板（工具栏「+ 面板」）。</li>
+                    <li>输入框：<code>Enter</code> 发送；<code>Shift+Enter</code> 或 <code>Ctrl+Enter</code> 换行。</li>
+                    <li>发送前在输入框上方勾选「本次发送的上下文」；<b>协议清单</b>（一行式，便宜）默认带，<b>协议完整定义</b>只在需要精确分析时勾。上下文栏实时显示 ≈token 消耗估算。</li>
+                    <li>支持思维链模型（如 deepseek-r1）：思考过程实时流式显示并计时，正文开始后自动折叠，可在设置关闭显示。</li>
+                    <li>消息悬停出现操作钮：复制 / 编辑重发 / 重新生成 / 删除；会话侧栏支持多会话、搜索、双击重命名。</li>
+                  </ol>
+                </Section>
+                <Section title="快捷按钮（顶部工具条）">
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>识别协议</td><td>先在 Hex 数据流框选字节 → 点击 → AI 推断帧结构并输出「写入协议模板」按钮</td></tr>
+                      <tr><td>解读数据</td><td>概括最近帧的设备状态、数值范围、趋势与异常</td></tr>
+                      <tr><td>分析曲线</td><td>统计各通道均值/极值/周期/趋势斜率，诊断振荡与噪声</td></tr>
+                      <tr><td>生成指令</td><td>描述需求 → 生成命令模板（写入命令库或临时发送）</td></tr>
+                      <tr><td>生成卡片</td><td>描述需求 → 生成控制卡片（直接写入控制画布）</td></tr>
+                      <tr><td>创造扩展</td><td>主题 / 样式 / 挂件 / 面板 / 脚本（需开启创造模式）</td></tr>
+                      <tr><td>诊断</td><td>结合连接状态与异常巡检给出结构化排查清单</td></tr>
+                      <tr><td>调试报告</td><td>汇总本次会话生成 Markdown 报告，可存档</td></tr>
+                    </tbody>
+                  </table>
+                </Section>
+                <Section title="九种代码块（回复中直接可用）">
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>动作执行<br /><code>uartix-action</code></td><td>让 AI 直接操作软件：打开面板、切主题/布局、清空画布、删除配置、开关连接等。回复中显示操作卡片，点「执行」逐个运行。<b>对 AI 说「清空控制画布」「打开曲线面板」「主题换成琉璃」即可。</b></td></tr>
+                      <tr><td>控制卡片<br /><code>uartix-card</code></td><td>生成滑条/按钮/开关/LED/摇杆/组合控件，或 <b>custom 自定义卡片</b>（任意 HTML 界面）。批量生成用 {"{"}"cards":[…]{"}"}。</td></tr>
+                      <tr><td>命令库命令<br /><code>uartix-command</code></td><td>单条或批量（{"{"}"commands":[…]{"}"}）写入命令库「AI 生成」分组，可带脚本。</td></tr>
+                      <tr><td>指令工厂协议<br /><code>uartix-codec</code></td><td>生成自定义协议（帧头/变量/长度/校验段），写入指令工厂「我的协议」，填参数即组帧。</td></tr>
+                      <tr><td>主题包<br /><code>uartix-theme</code></td><td>JSON 配色 + 整页风格 CSS（动效/光效/液态玻璃/贴图/面板级定制）。</td></tr>
+                      <tr><td>样式层<br /><code>uartix-style</code></td><td>纯 CSS 精细化定制任意界面元素，可预览再保留。</td></tr>
+                      <tr><td>沙箱小部件<br /><code>uartix-widget</code></td><td>自包含 HTML 浮窗，自动注入 <code>window.uartix</code> API：数据快照、AI 对话状态（思维链）、提问 AI、键盘/鼠标、串口发送、软件动作、窗口控制全套可用；支持无边框透明形态。</td></tr>
+                      <tr><td>自定义面板<br /><code>uartix-panel</code></td><td>与小部件同格式，安装为可停靠面板，适合大面积常驻可视化。</td></tr>
+                      <tr><td>行为脚本<br /><code>uartix-script</code></td><td>主窗口 JS（高权限）：读字段/发指令/联动控件/<b>api.app.* 控制软件</b>。</td></tr>
+                    </tbody>
+                  </table>
+                  <p className="help-tip">主题/样式/挂件/面板/脚本需在 设置 → AI 服务 开启「创造模式」；安装均需你点击确认，可在扩展管理启停/删除/导出。</p>
+                </Section>
+                <Section title="动作执行（uartix-action）示例">
+                  <p>对 AI 说「清空控制画布，然后打开 2D 曲线」，AI 输出：</p>
+                  <pre>{`{"actions":[
+  {"kind":"clearPage","args":{}},
+  {"kind":"openPanel","args":{"panel":"plot2d"}},
+  {"kind":"toast","args":{"msg":"已清空并打开曲线"}}
+]}`}</pre>
+                  <p>点「执行」逐步运行，每步结果显示在卡片上。含破坏性动作（清空/删除）时卡片红色标注。</p>
+                </Section>
+                <Section title="小部件 uartix API 与无边框形态">
+                  <ul className="help-ol">
+                    <li>所有沙箱组件（小部件 / 自定义面板 / 自定义卡片）自动注入全局 <code>window.uartix</code>，AI 生成的代码直接调用：onSnap 数据快照、<b>onChat 感知 AI 对话（phase + 思维链/正文尾部）</b>、ask 向 AI 提问、send 串口发送、app 软件动作、onKey 键盘（浮窗悬停即收）、onCursor 鼠标跟随、screen 屏幕尺寸、resize 高度。</li>
+                    <li>窗口控制 <code>uartix.win.*</code>：menu 弹菜单、close、popOut 弹出独立桌面窗、moveTo/moveBy/resizeTo/get、top 置顶、through 点击穿透（60 秒自动恢复）；移动类自动钳制屏幕边界，不会拖丢。</li>
+                    <li>右键菜单可完全自定义：<code>uartix.menu.define(items)</code> 换掉默认菜单（支持子菜单/分隔线/勾选/多组命名菜单），<code>uartix.onMenu(cb)</code> 接收点击，<code>uartix.menu.off()</code> 关闭自动菜单改由组件自己处理右键。</li>
+                    <li>无边框形态：AI 声明 <code>{"<meta name=\"uartix:chrome\" content=\"none\">"}</code>（卡片带「无边框形态」角标）——无标题栏、窗口透明，内容完全自绘：悬浮通知条、贴角信息窗、计时器、互动桌宠等任意形态。</li>
+                    <li>无边框形态开箱行为：按住空白处即拖动（按住跟随、松开即停、自动跳过按钮/输入框、限制不出屏幕）、右键自动弹菜单——由宿主内置，AI 不需要也不允许自己写拖拽代码。</li>
+                    <li>管理动作：listWidgets / openWidget / closeWidget / popWidget / removeWidget——「把某挂件弹出到桌面」「关闭某挂件浮窗」一句话直达。</li>
+                    <li>示例：对 AI 说「做一个无边框透明桌宠，眼睛跟随鼠标，AI 思考时冒问号，回答时气泡打字机，点击它能向 AI 提问，右键菜单里加『闹脾气』『睡觉』，串口断线时沮丧」。</li>
+                  </ul>
+                </Section>
+                <Section title="脚本 api.app.*（27 种动作速查）">
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>界面控制</td><td>openPanel({"{"}panel{"}"}) · applyPreset({"{"}preset{"}"}) · setTheme({"{"}theme{"}"})</td></tr>
+                      <tr><td>查询</td><td>listProtocols() · listCommands() · listCards() · listWidgets()</td></tr>
+                      <tr><td>曲线</td><td>addChannel({"{"}tpl,field{"}"}) · clearChannels()</td></tr>
+                      <tr><td>写入</td><td>writeCard / writeCommand / writeTemplate / writeCodec（参数 {"{"}json:"…"{"}"}）</td></tr>
+                      <tr><td>控制页</td><td>clearPage()【破坏性】· addPage({"{"}name{"}"}) · patchCard({"{"}name,patch{"}"})</td></tr>
+                      <tr><td>删除</td><td>removeCard / removeProtocol / removeCommand / removeCodec / removeWidget（按 name）【破坏性】</td></tr>
+                      <tr><td>挂件</td><td>openWidget / closeWidget / popWidget({"{"}name{"}"}) 浮窗管理与弹出桌面</td></tr>
+                      <tr><td>连接</td><td>openPort() · closePort()（需开启「小部件可发送数据」）</td></tr>
+                      <tr><td>通知</td><td>toast({"{"}msg{"}"})</td></tr>
+                    </tbody>
+                  </table>
+                  <pre>{`// 脚本示例：每天首次收到数据时自动切到分析布局
+api.app.applyPreset({ preset: "analyze" });
+await api.app.openPanel({ panel: "plot2d" });
+const protos = await api.app.listProtocols();
+console.log(protos.length);`}</pre>
+                  <p className="help-tip">小部件/自定义卡片内通过 postMessage 桥 {"{"}type:"aiw:app", action:{"{"}kind,args{"}"}{"}"} 调用同一套动作（不含破坏性动作）。</p>
+                </Section>
+                <Section title="常用诉求 → 一句话指令">
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>清空控制画布</td><td>「帮我清空控制画布」</td></tr>
+                      <tr><td>批量加控件</td><td>「加 6 个电机速度滑条，模板 MOTOR1~6，2×1 大小流式排布」</td></tr>
+                      <tr><td>自定义控件</td><td>「做一个圆表盘电压表卡片，实时显示 VOLT 字段，0~15V」</td></tr>
+                      <tr><td>生成命令</td><td>「生成一条归零指令加入命令库」「生成 3 条不同频率的采样指令」</td></tr>
+                      <tr><td>做协议</td><td>「做一个指令工厂协议：帧头 AA 55、命令 u8、长度、数据、CRC16-Modbus」</td></tr>
+                      <tr><td>换主题</td><td>「主题换成琉璃，加一点液态玻璃感」</td></tr>
+                      <tr><td>做挂件</td><td>「做一个桌面电压监视挂件，低于 10V 变红闪烁」</td></tr>
+                      <tr><td>无边框挂件</td><td>「做一个无边框透明挂件贴在屏幕角落，AI 回答时气泡提示」</td></tr>
+                      <tr><td>桌宠（示例）</td><td>「做一个无边框桌宠，AI 思考时冒问号，回答时气泡打字机」</td></tr>
+                      <tr><td>挂件管理</td><td>「把 XX 弹出到桌面」「关闭 XX 浮窗」「重新打开 XX」</td></tr>
+                      <tr><td>自动化</td><td>「写个脚本：每 100ms 上报一次 roll，越界时蜂鸣」</td></tr>
+                    </tbody>
+                  </table>
+                </Section>
+                <Section title="成本控制（省钱技巧）">
+                  <ul className="help-ol">
+                    <li>上下文默认只带「协议清单」（几十 token）；「协议完整定义」按需勾选。</li>
+                    <li>系统提示按需注入：AI 只在需要某格式时自动加载对应规范，普通问答不带全量提示词。</li>
+                    <li>多轮长对话定期「新对话」；历史只带最近 20 条。</li>
+                    <li>协议识别建议温度 ≤0.3；本地 Ollama 零成本。</li>
+                  </ul>
                 </Section>
               </>
             )}

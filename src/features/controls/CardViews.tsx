@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as store from "./controlsStore";
+import { getLocale, tx, useLocale } from "../../i18n/strings";
 import type {
   BuzzerCard,
   ButtonCard,
   ControlCard,
+  CustomCard,
+  GroupCard,
+  GroupChild,
+  GroupChildKind,
   JoystickCard,
   KeypadCard,
   KeymonCard,
@@ -16,6 +21,7 @@ import type {
 } from "./controlsStore";
 import * as variableStore from "./variableStore";
 import { beep } from "./scriptRunner";
+import { WidgetFrame } from "../ai/WidgetFrame";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
@@ -135,7 +141,7 @@ function CardFrame(props: CardFrameProps) {
       {props.resizable && (
         <div
           className="ctl-resize"
-          title="拖拽调整卡片大小"
+          title={tx("拖拽调整卡片大小", "Drag to resize the card")}
           onMouseDown={(e) => {
             e.stopPropagation();
             props.onResizeStart?.(e, card);
@@ -247,7 +253,7 @@ export function SliderCardView(props: {
         }}
       />
       <div className="ctl-foot">
-        <span className="ctl-name" title="右键更多操作">
+        <span className="ctl-name" title={tx("右键更多操作", "Right-click for more")}>
           {card.name}
           {card.useScript ? " ⚡" : ""}
         </span>
@@ -668,6 +674,180 @@ export function MonitorCardView(props: {
   );
 }
 
+/** 组合控件：一张卡片内纵向排布多个子控件（滑条/按钮/开关/监视/LED） */
+export function GroupCardView(props: {
+  card: GroupCard;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  renaming: boolean;
+  locked?: boolean;
+  onChildSend: (
+    card: GroupCard,
+    child: GroupChild,
+    ctx: Record<string, number | string>,
+  ) => void;
+  onMenu: (card: ControlCard, x: number, y: number) => void;
+  onDragStart: (e: React.MouseEvent<HTMLDivElement>, card: ControlCard) => void;
+  onRenameCommit: (name: string) => void;
+  onRenameCancel: () => void;
+  onDropTemplate: (
+    card: ControlCard,
+    cmd: {
+        template: string;
+        sendMode: SendMode;
+        script: string;
+        scriptEnabled: boolean;
+      },
+  ) => void;
+  resizable?: boolean;
+  onResizeStart?: (e: React.MouseEvent, card: ControlCard) => void;
+}) {
+  const { card } = props;
+  // monitor / led 子项随变量刷新
+  useSyncExternalStore(variableStore.subscribe, variableStore.getSnapshot);
+  const [sliderVals, setSliderVals] = useState<Record<string, number>>({});
+  const [swStates, setSwStates] = useState<Record<string, number>>({});
+
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
+  const sliderVal = (ch: GroupChild): number =>
+    sliderVals[ch.id] ?? ch.min + (ch.max - ch.min) / 2;
+
+  const commitSlider = (ch: GroupChild, raw: number) => {
+    const snapped = parseFloat(
+      (ch.min + Math.round((raw - ch.min) / ch.step) * ch.step).toFixed(6),
+    );
+    const v = Math.min(ch.max, Math.max(ch.min, snapped));
+    setSliderVals((m) => ({ ...m, [ch.id]: v }));
+    return v;
+  };
+
+  return (
+    <CardFrame
+      card={card}
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      height={props.height}
+      renaming={props.renaming}
+      locked={props.locked}
+      onMenu={props.onMenu}
+      onDragStart={props.onDragStart}
+      onRenameCommit={props.onRenameCommit}
+      onRenameCancel={props.onRenameCancel}
+      onDropTemplate={props.onDropTemplate}
+      resizable={props.resizable}
+      onResizeStart={props.onResizeStart}
+    >
+      <div className="ctl-group" onDoubleClick={stop}>
+        <div className="ctl-group-head">
+          <span className="ctl-name" title={tx("右键更多操作", "Right-click for more")}>
+            {card.name}
+          </span>
+        </div>
+        {card.children.map((ch) => {
+          if (ch.kind === "slider") {
+            const v = sliderVal(ch);
+            return (
+              <div className="ctlg-row ctlg-slider" key={ch.id} onMouseDown={stop}>
+                <span className="ctl-name ctlg-label">{ch.label}</span>
+                <input
+                  className="ctl-slider"
+                  type="range"
+                  min={ch.min}
+                  max={ch.max}
+                  step={ch.step}
+                  value={v}
+                  onInput={(e) =>
+                    commitSlider(ch, parseFloat((e.target as HTMLInputElement).value))
+                  }
+                  onPointerUp={() =>
+                    props.onChildSend(card, ch, { value: sliderVal(ch) })
+                  }
+                  onKeyUp={() =>
+                    props.onChildSend(card, ch, { value: sliderVal(ch) })
+                  }
+                />
+                <span className="ctl-group-val">{fmtVal(v)}</span>
+              </div>
+            );
+          }
+          if (ch.kind === "button") {
+            return (
+              <button
+                key={ch.id}
+                className="ctlg-btn"
+                onMouseDown={stop}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onChildSend(card, ch, {});
+                }}
+              >
+                {ch.label}
+              </button>
+            );
+          }
+          if (ch.kind === "switch") {
+            const st = swStates[ch.id] ?? 0;
+            return (
+              <div className="ctlg-row ctlg-switch" key={ch.id} onMouseDown={stop}>
+                <span className="ctl-name ctlg-label">{ch.label}</span>
+                <button
+                  className={`ctlg-sw ${st ? "on" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const ns = st ? 0 : 1;
+                    setSwStates((m) => ({ ...m, [ch.id]: ns }));
+                    props.onChildSend(card, ch, { state: ns });
+                  }}
+                >
+                  <span className="ctlg-sw-knob" />
+                </button>
+              </div>
+            );
+          }
+          if (ch.kind === "monitor") {
+            const val = variableStore.getVar(ch.varName);
+            const text =
+              val === undefined
+                ? "--"
+                : typeof val === "number"
+                  ? val.toFixed(2)
+                  : val;
+            return (
+              <div className="ctlg-row ctlg-monitor" key={ch.id}>
+                <span className="ctl-name ctlg-label">{ch.label}</span>
+                <span className="ctl-group-val">
+                  {text}
+                  {ch.unit ? <span className="ctl-unit">{ch.unit}</span> : null}
+                </span>
+              </div>
+            );
+          }
+          // led
+          const val = variableStore.getVar(ch.varName);
+          const on = evalCond(ch.op, ch.value, ch.strValue, val);
+          return (
+            <div className="ctlg-row ctlg-led" key={ch.id}>
+              <span className="ctl-name ctlg-label">{ch.label}</span>
+              <span
+                className="ctlg-led-dot"
+                style={{
+                  background: on ? ch.onColor : "var(--bg-inset)",
+                  boxShadow: on ? `0 0 8px ${ch.onColor}` : "none",
+                  borderColor: on ? ch.onColor : "var(--border)",
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </CardFrame>
+  );
+}
+
 export function JoystickCardView(props: {
   card: JoystickCard;
   left: number;
@@ -858,7 +1038,7 @@ export function KeyCaptureInput({
     <input
       className={`input keycap-input ${cap ? "cap" : ""}`}
       readOnly
-      value={cap ? "按下任意键…" : keyLabel(value)}
+      value={cap ? tx("按下任意键…", "Press any key…") : keyLabel(value)}
       onFocus={() => setCap(true)}
       onBlur={() => setCap(false)}
       onKeyDown={(e) => {
@@ -885,6 +1065,8 @@ function editableTarget(t: EventTarget | null): boolean {
 }
 
 const DIR_LABELS = ["上", "下", "左", "右"];
+const dirLabels = (): string[] =>
+  getLocale() === "en" ? ["Up", "Down", "Left", "Right"] : DIR_LABELS;
 
 /** 键盘遥控：四方向键位监听，按下/松开各可发指令，触发时边缘光晕+键位徽标渐隐 */
 export function KeypadCardView(props: {
@@ -1133,7 +1315,7 @@ export function KeymonCardView(props: {
             trig("release");
           }}
           onMouseLeave={() => setHeld(false)}
-          title={`按下键盘 ${keyLabel(card.key)} 触发`}
+          title={tx(`按下键盘 ${keyLabel(card.key)} 触发`, `Triggered by key ${keyLabel(card.key)}`)}
         >
           {keyLabel(card.key)}
         </div>
@@ -1143,8 +1325,70 @@ export function KeymonCardView(props: {
   );
 }
 
+/** 自定义卡片：沙箱 iframe（与小部件同一桥协议），任意风格与功能 */
+export function CustomCardView(props: {
+  card: CustomCard;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  renaming: boolean;
+  locked?: boolean;
+  onMenu: (card: ControlCard, x: number, y: number) => void;
+  onDragStart: (e: React.MouseEvent<HTMLDivElement>, card: ControlCard) => void;
+  onRenameCommit: (name: string) => void;
+  onRenameCancel: () => void;
+  onDropTemplate: (
+    card: ControlCard,
+    cmd: {
+        template: string;
+        sendMode: SendMode;
+        script: string;
+        scriptEnabled: boolean;
+      },
+  ) => void;
+  resizable?: boolean;
+  onResizeStart?: (e: React.MouseEvent, card: ControlCard) => void;
+}) {
+  const { card } = props;
+  return (
+    <CardFrame
+      card={card}
+      left={props.left}
+      top={props.top}
+      width={props.width}
+      height={props.height}
+      renaming={props.renaming}
+      locked={props.locked}
+      onMenu={props.onMenu}
+      onDragStart={props.onDragStart}
+      onRenameCommit={props.onRenameCommit}
+      onRenameCancel={props.onRenameCancel}
+      onDropTemplate={props.onDropTemplate}
+      resizable={props.resizable}
+      onResizeStart={props.onResizeStart}
+    >
+      {card.html ? (
+        <WidgetFrame
+          widget={{ id: `card-${card.id}`, name: card.name, html: card.html }}
+          isDesktop={false}
+        />
+      ) : (
+        <div className="ctl-custom-empty" title={tx("让 AI 生成，或右键「设置」粘贴 HTML", "Let AI generate it, or right-click Settings and paste HTML")}>
+          {tx("自定义卡片（空）", "Custom card (empty)")}
+          <br />
+          <span>{tx("在 AI 助手中描述想要的控件，type 选 custom", "Describe the widget to the AI assistant with type=custom")}</span>
+        </div>
+      )}
+    </CardFrame>
+  );
+}
+
 const SCRIPT_API_HINT =
   "脚本 API：await send(text, mode?) 发送指令（mode 省略按卡片 ASCII/Hex 设置）· beep(freq, ms) 蜂鸣 · await delay_ms(ms) 延时 · get(\"变量\") 读取 · set(\"变量\", 值) 写入 · await waitParse(\"字段\", ms?) 等待解析帧 · setControl(\"控件名\", 值) 联动触发其他控件（按钮发送/开关切档/滑条设值/键盘遥控方向）· await repeat(n, i => …) 循环 · log(text) 输出控制台。完整 JS 语法可用（for/while/if/function/Math…）；解析字段名可直接当变量使用（重名自动 _1/_2）；模板串支持 {字段名:.2f} 格式化插值。";
+
+const SCRIPT_API_HINT_EN =
+  "Script API: await send(text, mode?) — mode defaults to the card's ASCII/Hex setting · beep(freq, ms) · await delay_ms(ms) · get(name) · set(name, value) · await waitParse(field, ms?) · setControl(cardName, value) to trigger other controls (button send / switch position / slider value / keypad direction) · await repeat(n, i => …) · log(text) to console. Full JS syntax (for/while/if/function/Math…); parsed field names work as variables (duplicates get _1/_2); templates support {field:.2f} formatting.";
 
 const DEFAULT_KEYPAD_SCRIPT = `// dir: 0上 1下 2左 3右；phase: press/release
 if (dir === 0) send("FWD:" + phase);
@@ -1165,7 +1409,7 @@ function ScriptFields({
     <div className="form-col">
       <label>
         {hint}
-        <HelpHint text={SCRIPT_API_HINT} />
+        <HelpHint text={getLocale() === "en" ? SCRIPT_API_HINT_EN : SCRIPT_API_HINT} />
       </label>
       <textarea
         className="input ctl-tpl-input ctl-script-input"
@@ -1184,6 +1428,7 @@ export function CardModal(props: {
   onClose: () => void;
   onDelete: () => void;
 }) {
+  useLocale();
   const { card } = props;
   useSyncExternalStore(variableStore.subscribe, variableStore.getSnapshot);
   const vars = variableStore.listVars();
@@ -1207,7 +1452,7 @@ export function CardModal(props: {
       value={value}
       onChange={(e) => onCommit(e.target.value)}
     >
-      <option value="">— 选择变量 —</option>
+      <option value="">{tx("— 选择变量 —", "— Select variable —")}</option>
       {vars.map((v) => (
         <option key={v.name + v.fieldId} value={v.name}>
           {v.name}
@@ -1220,33 +1465,50 @@ export function CardModal(props: {
     <div className="modal-mask" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">
-        {store.PANEL_TYPE_NAMES[card.type]}设置 · {card.name}
+        {`${store.panelTypeName(card.type)}${tx("设置", "Settings")} · ${card.name}`}
       </div>
-      <Section title="基础">
+      <Section title={tx("基础", "Basics")}>
         <div className="form-row">
-          <label>名称</label>
+          <label>{tx("名称", "Name")}</label>
           <TextInput value={card.name} onCommit={(v) => patch({ name: v })} />
           {card.type !== "keypad" && (
             <>
-              <label>宽度</label>
+              <label>{tx("宽度", "Width")}</label>
               <select
                 className="input"
                 value={card.w}
                 onChange={(e) => patch({ w: Number(e.target.value) })}
               >
-                <option value={1}>1 格</option>
-                <option value={2}>2 格</option>
+                <option value={1}>{tx("1 格", "1 cell")}</option>
+                <option value={2}>{tx("2 格", "2 cells")}</option>
               </select>
             </>
           )}
         </div>
       </Section>
+      {card.type === "custom" && (
+        <Section title={tx("卡片内容（自包含 HTML）", "Card Content (self-contained HTML)")}>
+          <div className="form-col">
+            <textarea
+              className="input ctl-tpl-input ctl-script-input"
+              rows={10}
+              spellCheck={false}
+              value={card.html}
+              placeholder={tx(
+                "粘贴 AI 生成的小部件 HTML（与 uartix-widget 同格式，支持 aiw:snap/aiw:send 桥）",
+                "Paste AI-generated widget HTML (same format as uartix-widget, with aiw:snap/aiw:send bridge)",
+              )}
+              onChange={(e) => patch({ html: e.target.value })}
+            />
+          </div>
+        </Section>
+      )}
       {(card.type === "led" || card.type === "buzzer") && (
-        <Section title="触发条件">
+        <Section title={tx("触发条件", "Trigger")}>
           <div className="form-row">
-            <label>变量</label>
+            <label>{tx("变量", "Variable")}</label>
             {varSelect(card.varName, (v) => patch({ varName: v }))}
-            <label>条件</label>
+            <label>{tx("条件", "Condition")}</label>
             <select
               className="input"
               value={card.op}
@@ -1261,15 +1523,15 @@ export function CardModal(props: {
             </select>
           </div>
           <div className="form-row">
-            <label>数值</label>
+            <label>{tx("数值", "Number")}</label>
             <NumInput value={card.value} width={72} onCommit={(v) => patch({ value: v })} />
-            <label>字符串</label>
+            <label>{tx("字符串", "String")}</label>
             <TextInput
               value={card.strValue}
               onCommit={(v) => patch({ strValue: v })}
-              placeholder="字符串变量用此处"
+              placeholder={tx("字符串变量用此处", "for string variables")}
             />
-            <label>{card.type === "buzzer" ? "触发色" : "点亮色"}</label>
+            <label>{card.type === "buzzer" ? tx("触发色", "Trigger color") : tx("点亮色", "On color")}</label>
             <input
               type="color"
               className="color-input"
@@ -1280,9 +1542,9 @@ export function CardModal(props: {
         </Section>
       )}
       {card.type === "buzzer" && (
-        <Section title="声音">
+        <Section title={tx("声音", "Sound")}>
           <div className="form-row">
-            <label>频率</label>
+            <label>{tx("频率", "Frequency")}</label>
             <NumInput
               value={card.freq}
               width={72}
@@ -1291,7 +1553,7 @@ export function CardModal(props: {
             <label>Hz</label>
           </div>
           <div className="form-row">
-            <label>音量</label>
+            <label>{tx("音量", "Volume")}</label>
             <input
               type="range"
               className="input"
@@ -1300,7 +1562,7 @@ export function CardModal(props: {
               value={card.volume}
               onChange={(e) => patch({ volume: Number(e.target.value) })}
             />
-            <label>时长</label>
+            <label>{tx("时长", "Duration")}</label>
             <NumInput
               value={card.durationMs}
               width={64}
@@ -1308,38 +1570,38 @@ export function CardModal(props: {
             />
           </div>
           <div className="form-row">
-            <label>循环鸣叫</label>
+            <label>{tx("循环鸣叫", "Repeat")}</label>
             <input
               type="checkbox"
               className="chk-box"
-              title="持续触发期间重复响"
+              title={tx("持续触发期间重复响", "Repeats while the trigger holds")}
               checked={card.repeat}
               onChange={(e) => patch({ repeat: e.target.checked })}
             />
-            <label>间歇</label>
+            <label>{tx("间歇", "Gap")}</label>
             <NumInput
               value={card.gapMs ?? 300}
               width={64}
               onCommit={(v) => patch({ gapMs: Math.max(30, Math.min(10000, Math.round(v))) })}
-              title="两次鸣叫之间的间隔（ms），循环鸣叫时生效"
+              title={tx("两次鸣叫之间的间隔（ms），循环鸣叫时生效", "Gap between beeps (ms), used with repeat")}
             />
             <button
               className="btn"
               onClick={() => beep(card.freq, card.durationMs, (card.volume / 100) * 0.3)}
             >
-              试听
+              {tx("试听", "Preview")}
             </button>
           </div>
         </Section>
       )}
       {card.type === "monitor" && (
-        <Section title="显示">
+        <Section title={tx("显示", "Display")}>
           <div className="form-row">
-            <label>变量</label>
+            <label>{tx("变量", "Variable")}</label>
             {varSelect(card.varName, (v) => patch({ varName: v }))}
-            <label>单位</label>
+            <label>{tx("单位", "Unit")}</label>
             <TextInput value={card.unit} width={72} onCommit={(v) => patch({ unit: v })} />
-            <label>小数位</label>
+            <label>{tx("小数位", "Decimals")}</label>
             <NumInput
               value={card.decimals}
               width={56}
@@ -1348,12 +1610,207 @@ export function CardModal(props: {
           </div>
         </Section>
       )}
+      {card.type === "group" && (
+        <Section
+          title={tx("子控件", "Sub-controls")}
+          tip={tx(
+            "组合控件内可放置滑条、按钮、开关、监视与 LED 子项；滑条松手发送、按钮点击发送、开关切换发送。最多 8 个子项。",
+            "A group card can hold sliders, buttons, switches, monitors and LED children; sliders send on release, buttons on click, switches on toggle. Up to 8 children.",
+          )}
+        >
+          <div className="form-row">
+            <label>{tx("发送格式", "Send format")}</label>
+            <select
+              className="input"
+              value={card.sendMode}
+              onChange={(e) => patch({ sendMode: e.target.value })}
+            >
+              <option value="ascii">ASCII</option>
+              <option value="hex">HEX</option>
+            </select>
+            <label>{tx("添加", "Add")}</label>
+            <select
+              className="input"
+              value=""
+              onChange={(e) => {
+                const kind = e.target.value as GroupChildKind;
+                if (!kind) return;
+                if (card.children.length >= 8) return;
+                const ch = store.newGroupChild(kind);
+                patch({ children: [...card.children, ch] });
+              }}
+            >
+              <option value="">{tx("＋ 选择类型…", "＋ Add…")}</option>
+              {(Object.keys(store.GROUP_KIND_LABEL) as GroupChildKind[]).map((k) => (
+                <option key={k} value={k}>
+                  {store.groupKindLabel(k)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {card.children.map((ch, i) => (
+            <div className="form-col ctlg-cfg" key={ch.id}>
+              <div className="form-row">
+                <label>{store.groupKindLabel(ch.kind)}</label>
+                <TextInput
+                  value={ch.label}
+                  width={90}
+                  onCommit={(v) => {
+                    const children = [...card.children];
+                    children[i] = { ...ch, label: v };
+                    patch({ children });
+                  }}
+                />
+                {ch.kind === "led" && (
+                  <>
+                    <label>{tx("条件", "Condition")}</label>
+                    <select
+                      className="input"
+                      value={ch.op}
+                      onChange={(e) => {
+                        const children = [...card.children];
+                        children[i] = { ...ch, op: e.target.value as LedOp };
+                        patch({ children });
+                      }}
+                    >
+                      <option value="gt">&gt;</option>
+                      <option value="ge">≥</option>
+                      <option value="lt">&lt;</option>
+                      <option value="le">≤</option>
+                      <option value="eq">==</option>
+                      <option value="ne">!=</option>
+                    </select>
+                  </>
+                )}
+                <button
+                  className="btn danger-btn"
+                  title="删除该子控件"
+                  onClick={() =>
+                    patch({ children: card.children.filter((x) => x.id !== ch.id) })
+                  }
+                >
+                  ✕
+                </button>
+              </div>
+              {(ch.kind === "slider" || ch.kind === "button") && (
+                <div className="form-row">
+                  <label>指令</label>
+                  <TextInput
+                    value={ch.template}
+                    onCommit={(v) => {
+                      const children = [...card.children];
+                      children[i] = { ...ch, template: v };
+                      patch({ children });
+                    }}
+                  />
+                  {ch.kind === "slider" && (
+                    <>
+                      <label>{tx("范围", "Range")}</label>
+                      <NumInput
+                        value={ch.min}
+                        width={56}
+                        onCommit={(v) => {
+                          const children = [...card.children];
+                          children[i] = { ...ch, min: v };
+                          patch({ children });
+                        }}
+                      />
+                      <NumInput
+                        value={ch.max}
+                        width={56}
+                        onCommit={(v) => {
+                          const children = [...card.children];
+                          children[i] = { ...ch, max: v };
+                          patch({ children });
+                        }}
+                      />
+                      <label>步进</label>
+                      <NumInput
+                        value={ch.step}
+                        width={56}
+                        onCommit={(v) => {
+                          const children = [...card.children];
+                          children[i] = { ...ch, step: v > 0 ? v : 1 };
+                          patch({ children });
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+              {ch.kind === "switch" && (
+                <div className="form-row">
+                  <label>关/开指令</label>
+                  <TextInput
+                    value={ch.templates[0] ?? ""}
+                    onCommit={(v) => {
+                      const children = [...card.children];
+                      const templates = [...ch.templates];
+                      templates[0] = v;
+                      children[i] = { ...ch, templates };
+                      patch({ children });
+                    }}
+                  />
+                  <TextInput
+                    value={ch.templates[1] ?? ""}
+                    onCommit={(v) => {
+                      const children = [...card.children];
+                      const templates = [...ch.templates];
+                      templates[1] = v;
+                      children[i] = { ...ch, templates };
+                      patch({ children });
+                    }}
+                  />
+                </div>
+              )}
+              {(ch.kind === "monitor" || ch.kind === "led") && (
+                <div className="form-row">
+                  <label>{tx("变量", "Variable")}</label>
+                  {varSelect(ch.varName, (v) => {
+                    const children = [...card.children];
+                    children[i] = { ...ch, varName: v };
+                    patch({ children });
+                  })}
+                  {ch.kind === "led" && (
+                    <>
+                      <label>{tx("数值", "Number")}</label>
+                      <NumInput
+                        value={ch.value}
+                        width={56}
+                        onCommit={(v) => {
+                          const children = [...card.children];
+                          children[i] = { ...ch, value: v };
+                          patch({ children });
+                        }}
+                      />
+                      <label>{tx("点亮色", "On color")}</label>
+                      <input
+                        type="color"
+                        className="color-input"
+                        value={ch.onColor}
+                        onChange={(e) => {
+                          const children = [...card.children];
+                          children[i] = { ...ch, onColor: e.target.value };
+                          patch({ children });
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </Section>
+      )}
       {card.type === "keypad" && (
         <Section
-          title="键位与指令"
-          tip="全局监听键位（焦点在输入框/菜单时不触发）。按下发送「按下指令」，松开发送「松开指令」（留空不发送）。四个方向共享一个脚本：脚本模式可用变量 dir（0上/1下/2左/3右）、dirName、phase（press/release）、key。"
+          title={tx("键位与指令", "Keys & Commands")}
+          tip={tx(
+            "全局监听键位（焦点在输入框/菜单时不触发）。按下发送「按下指令」，松开发送「松开指令」（留空不发送）。四个方向共享一个脚本：脚本模式可用变量 dir（0上/1下/2左/3右）、dirName、phase（press/release）、key。",
+            "Global key listening (paused while inputs/menus have focus). Press sends the press command, release sends the release command (empty = no send). All 4 directions share one script: script mode exposes dir (0 up/1 down/2 left/3 right), dirName, phase (press/release), key.",
+          )}
         >
-          {DIR_LABELS.map((lbl, i) => (
+          {dirLabels().map((lbl, i) => (
             <div className="keypad-cfg-row" key={i}>
               <span className="kc-dir">{lbl}</span>
               <KeyCaptureInput
@@ -1364,7 +1821,7 @@ export function CardModal(props: {
                   patch({ keys: a });
                 }}
               />
-              <span className="kc-hint">按下</span>
+              <span className="kc-hint">{tx("按下", "Press")}</span>
               <TextInput
                 value={card.templates[i]}
                 onCommit={(v) => {
@@ -1373,10 +1830,10 @@ export function CardModal(props: {
                   patch({ templates: a });
                 }}
               />
-              <span className="kc-hint">松开</span>
+              <span className="kc-hint">{tx("松开", "Release")}</span>
               <TextInput
                 value={card.releaseTemplates[i]}
-                placeholder="留空不发送"
+                placeholder={tx("留空不发送", "empty = no send")}
                 onCommit={(v) => {
                   const a = [...card.releaseTemplates];
                   a[i] = v;
@@ -1389,27 +1846,30 @@ export function CardModal(props: {
       )}
       {card.type === "keymon" && (
         <Section
-          title="键位与指令"
-          tip="全局监听键位（焦点在输入框/菜单时不触发）。按下发送「按下指令」，松开发送「松开指令」（留空不发送）。脚本模式可用变量 phase（press/release）、key。"
+          title={tx("键位与指令", "Keys & Commands")}
+          tip={tx(
+            "全局监听键位（焦点在输入框/菜单时不触发）。按下发送「按下指令」，松开发送「松开指令」（留空不发送）。脚本模式可用变量 phase（press/release）、key。",
+            "Global key listening (paused while inputs/menus have focus). Press sends the press command, release sends the release command (empty = no send). Script mode exposes phase (press/release) and key.",
+          )}
         >
           <div className="keypad-cfg-row">
-            <span className="kc-dir">键位</span>
+            <span className="kc-dir">{tx("键位", "Key")}</span>
             <KeyCaptureInput value={card.key} onCommit={(v) => patch({ key: v })} />
-            <span className="kc-hint">按下</span>
+            <span className="kc-hint">{tx("按下", "Press")}</span>
             <TextInput value={card.template} onCommit={(v) => patch({ template: v })} />
-            <span className="kc-hint">松开</span>
+            <span className="kc-hint">{tx("松开", "Release")}</span>
             <TextInput
               value={card.releaseTemplate}
-              placeholder="留空不发送"
+              placeholder={tx("留空不发送", "empty = no send")}
               onCommit={(v) => patch({ releaseTemplate: v })}
             />
           </div>
         </Section>
       )}
       {hasScriptMode && (
-        <Section title="指令">
+        <Section title={tx("指令", "Command")}>
           <div className="form-row">
-            <label>指令模式</label>
+            <label>{tx("指令模式", "Command mode")}</label>
             <select
               className="input"
               value={card.useScript ? "script" : "template"}
@@ -1430,40 +1890,40 @@ export function CardModal(props: {
                 patch({ useScript: toScript });
               }}
             >
-              <option value="template">模板串</option>
-              <option value="script">脚本（类C）</option>
+              <option value="template">{tx("模板串", "Template")}</option>
+              <option value="script">{tx("脚本（类C）", "Script (C-like)")}</option>
             </select>
           </div>
           {card.type === "slider" && (
             <div className="form-row">
-              <label>发送时机</label>
+              <label>{tx("发送时机", "Send trigger")}</label>
               <select
                 className="input"
                 value={card.sendTrigger}
                 onChange={(e) => patch({ sendTrigger: e.target.value })}
               >
-                <option value="onRelease">松手时发送</option>
-                <option value="continuous">连续发送（随拖动）</option>
+                <option value="onRelease">{tx("松手时发送", "On release")}</option>
+                <option value="continuous">{tx("连续发送（随拖动）", "Continuous (while dragging)")}</option>
               </select>
-              <label>间隔</label>
+              <label>{tx("间隔", "Interval")}</label>
               <NumInput
                 value={card.minIntervalMs}
                 width={64}
                 onCommit={(v) => patch({ minIntervalMs: Math.max(10, v) })}
-                title="连续发送最小间隔（ms）"
+                title={tx("连续发送最小间隔（ms）", "Minimum interval for continuous send (ms)")}
               />
             </div>
           )}
           {card.type === "button" && (
             <div className="form-row">
-              <label>按住连发</label>
+              <label>{tx("按住连发", "Hold repeat")}</label>
               <input
                 type="checkbox"
                 className="chk-box"
                 checked={card.holdRepeat}
                 onChange={(e) => patch({ holdRepeat: e.target.checked })}
               />
-              <label>间隔</label>
+              <label>{tx("间隔", "Interval")}</label>
               <NumInput
                 value={card.minIntervalMs}
                 width={64}
@@ -1473,7 +1933,7 @@ export function CardModal(props: {
           )}
           {card.type === "joystick" && (
             <div className="form-row">
-              <label>松手回中</label>
+              <label>{tx("松手回中", "Spring back")}</label>
               <input
                 type="checkbox"
                 className="chk-box"
@@ -1484,7 +1944,7 @@ export function CardModal(props: {
           )}
           {card.type === "slider" && !card.useScript && (
             <div className="form-col">
-              <label>指令模板（%f %.2f %d，支持 {"{变量}"}）</label>
+              <label>{tx("指令模板（%f %.2f %d，支持 {变量}）", "Template (%f %.2f %d, {var} supported)")}</label>
               <textarea
                 className="input ctl-tpl-input"
                 rows={2}
@@ -1495,7 +1955,7 @@ export function CardModal(props: {
           )}
           {card.type === "button" && !card.useScript && (
             <div className="form-col">
-              <label>指令模板（%f %.2f %d，支持 {"{变量}"}）</label>
+              <label>{tx("指令模板（%f %.2f %d，支持 {变量}）", "Template (%f %.2f %d, {var} supported)")}</label>
               <textarea
                 className="input ctl-tpl-input"
                 rows={2}
@@ -1506,13 +1966,13 @@ export function CardModal(props: {
           )}
           {card.type === "switch" && !card.useScript && (
             <div className="form-col">
-              <label>每档指令</label>
+              <label>{tx("每档指令", "Per-position commands")}</label>
               {card.templates.map((t, i) => (
                 <input
                   key={i}
                   className="input ctl-tpl-input"
                   value={t}
-                  placeholder={`第 ${i + 1} 档指令（${card.labels[i] ?? i + 1}）`}
+                  placeholder={tx(`第 ${i + 1} 档指令（${card.labels[i] ?? i + 1}）`, `Command for position ${i + 1} (${card.labels[i] ?? i + 1})`)}
                   onChange={(e) => {
                     const arr = [...card.templates];
                     arr[i] = e.target.value;
@@ -1524,7 +1984,7 @@ export function CardModal(props: {
           )}
           {card.type === "joystick" && !card.useScript && (
             <div className="form-col">
-              <label>指令模板（%x = X 通道，%y = Y 通道，支持 {"{变量}"}）</label>
+              <label>{tx("指令模板（%x = X 通道，%y = Y 通道，支持 {变量}）", "Template (%x = X axis, %y = Y axis, {var} supported)")}</label>
               <textarea
                 className="input ctl-tpl-input"
                 rows={2}
@@ -1539,31 +1999,31 @@ export function CardModal(props: {
               onCommit={(v) => patch({ script: v })}
               hint={
                 card.type === "slider"
-                  ? "脚本（变量 value = 当前滑条值；松手/连续触发）"
+                  ? tx("脚本（变量 value = 当前滑条值；松手/连续触发）", "Script (value = slider position; release/continuous)")
                   : card.type === "switch"
-                    ? "脚本（变量 state = 档位序号, label = 档名）"
+                    ? tx("脚本（变量 state = 档位序号, label = 档名）", "Script (state = position index, label = position name)")
                     : card.type === "joystick"
-                      ? "脚本（变量 x / y = 摇杆输出）"
-                      : "脚本（点击时执行）"
+                      ? tx("脚本（变量 x / y = 摇杆输出）", "Script (x / y = joystick output)")
+                      : tx("脚本（点击时执行）", "Script (runs on click)")
               }
             />
           )}
         </Section>
       )}
       {(card.type === "slider" || card.type === "switch") && (
-        <Section title="参数" defaultOpen={false}>
+        <Section title={tx("参数", "Parameters")} defaultOpen={false}>
           {card.type === "slider" && (
             <div className="form-row">
               <div className="form-pair">
-                <label>最小</label>
+                <label>{tx("最小", "Min")}</label>
                 <NumInput value={card.min} width={72} onCommit={(v) => patch({ min: v })} />
               </div>
               <div className="form-pair">
-                <label>最大</label>
+                <label>{tx("最大", "Max")}</label>
                 <NumInput value={card.max} width={72} onCommit={(v) => patch({ max: v })} />
               </div>
               <div className="form-pair">
-                <label>步进</label>
+                <label>{tx("步进", "Step")}</label>
                 <NumInput
                   value={card.step}
                   width={72}
@@ -1571,7 +2031,7 @@ export function CardModal(props: {
                 />
               </div>
               <div className="form-pair">
-                <label>默认值</label>
+                <label>{tx("默认值", "Default")}</label>
                 <NumInput
                   value={card.defaultValue}
                   width={72}
@@ -1583,7 +2043,7 @@ export function CardModal(props: {
           {card.type === "switch" && (
             <>
               <div className="form-row">
-                <label>档位数</label>
+                <label>{tx("档位数", "Positions")}</label>
                 <select
                   className="input"
                   value={card.positions}
@@ -1596,14 +2056,14 @@ export function CardModal(props: {
                     patch({ positions, templates, labels });
                   }}
                 >
-                  <option value={2}>2 档</option>
-                  <option value={3}>3 档</option>
+                  <option value={2}>{tx("2 档", "2 positions")}</option>
+                  <option value={3}>{tx("3 档", "3 positions")}</option>
                 </select>
               </div>
               <div className="form-row">
                 {card.labels.map((l, i) => (
                   <div className="form-pair" key={i}>
-                    <label>档{i + 1}名</label>
+                    <label>{tx(`档${i + 1}名`, `Label ${i + 1}`)}</label>
                     <TextInput
                       value={l}
                       width={72}
@@ -1622,10 +2082,10 @@ export function CardModal(props: {
       )}
       <div className="modal-foot">
           <button className="btn danger-btn" onClick={props.onDelete}>
-            删除该卡片
+            {tx("删除该卡片", "Delete card")}
           </button>
           <button className="btn primary" onClick={props.onClose}>
-            完成
+            {tx("完成", "Done")}
           </button>
         </div>
       </div>

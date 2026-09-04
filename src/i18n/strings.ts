@@ -1,9 +1,22 @@
+import { useSyncExternalStore } from "react";
+
 export type Locale = "zh" | "en";
 
 type Dict = Record<string, string>;
 
 const zh: Dict = {
   "app.name": "Uartix+",
+  "c.ok": "确定",
+  "c.cancel": "取消",
+  "c.save": "保存",
+  "c.delete": "删除",
+  "c.rename": "重命名",
+  "c.copy": "复制",
+  "c.paste": "粘贴",
+  "c.close": "关闭",
+  "c.apply": "应用",
+  "c.enabled": "已启用",
+  "c.disabled": "已停用",
   "iface.title": "数据接口",
   "iface.serial": "串口",
   "iface.tcpClient": "TCP 客户端",
@@ -64,6 +77,17 @@ const zh: Dict = {
   "set.zoom.tip": "整体界面缩放，影响所有面板与文字大小；也可用 Ctrl+滚轮 快速调整。",
   "set.preset.tip": "一键切换面板组合布局，选择后立即生效并重排窗口。",
   "set.resetLayout.tip": "按当前预设重新排列所有面板位置，不清空协议、数据与脚本。",
+  "set.layouts.save": "另存当前布局",
+  "set.layouts.save.tip": "把当前面板布局保存为命名布局；切换内置预设前会自动把当前布局备份到「自动」槽，随时可切回。",
+  "set.layouts.namePh": "输入布局名称…",
+  "set.layouts.saved": "布局已保存",
+  "set.layouts.saveFail": "保存失败（无面板或布局异常）",
+  "set.layouts.title": "我的布局",
+  "set.layouts.tip": "点击卡片应用该布局；内置预设切换前的布局会自动出现在这里（自动槽，仅保留最近一次）。",
+  "set.layouts.applied": "已应用布局：",
+  "set.layouts.applyFail": "布局数据损坏，无法应用",
+  "set.layouts.applyTip": "点击应用此布局",
+  "set.layouts.autoTip": "切换内置预设前的自动备份（仅保留最近一次）",
   "set.cellSize": "控制画布格尺寸",
   "set.cellSize.tip": "控制画板网格的基础格距，数值越小同一屏能放置的控件越密集。",
   "set.decimals.tip": "字段图例与监视数值默认显示的小数位（0~6）；图例上的「N位」按钮可单独覆盖，并与此处实时同步。",
@@ -74,20 +98,31 @@ const zh: Dict = {
   "set.checkUpdate.tip": "通过 GitHub Releases 检查新版本并自动下载安装，更新后应用会自动重启。",
   "set.ai": "AI 服务",
   "set.ai.preset": "服务商预设",
-  "set.ai.preset.tip": "选择预设自动填入 Base URL 与模型名；也可手动改为任意兼容接口。",
+  "set.ai.preset.tip": "选择预设会自动填入下方 Base URL 与模型名；预设只是快捷方式，之后修改下方参数不会影响预设选择，也可随时换预设。",
   "set.ai.format": "接口格式",
   "set.ai.format.tip": "Chat Completions 兼容 OpenAI/DeepSeek/通义/Ollama；Anthropic Messages 用于 Claude 官方接口；Responses 为 OpenAI 新接口。",
   "set.ai.proxy": "HTTP 代理",
   "set.ai.proxy.tip": "如 http://127.0.0.1:7890；留空则跟随系统代理环境变量。AI 请求均经本机程序发出，代理对此生效。",
   "set.ai.noProxy": "不走代理的地址",
   "set.ai.noProxy.tip": "逗号分隔的后缀匹配列表，如 localhost,127.0.0.1,.cn；命中这些地址时直连。仅填写代理后生效。",
+  "set.ai.grp.preset": "服务商预设",
+  "set.ai.grp.model": "接口与密钥",
+  "set.ai.grp.net": "高级连接（代理）",
+  "set.ai.grp.creative": "创造模式（AI 扩展）",
   "set.ai.creative": "创造模式",
-  "set.ai.creative.tip": "开启后 AI 可输出 uartix-theme 自定义主题与 uartix-widget 沙箱小部件，回复内点击确认才会安装；重置按钮可一键清除。",
+  "set.ai.creative.tip": "开启后 AI 可创造五类扩展：主题（uartix-theme）、样式层（uartix-style）、沙箱小部件（uartix-widget）、自定义面板（uartix-panel）、行为脚本（uartix-script）。回复内展示权限清单，点击确认才会安装；扩展管理可启停、删除、导入导出。",
   "set.ai.widgetSend": "小部件可发送数据",
-  "set.ai.widgetSend.tip": "允许 AI 创造的小部件向串口/网络设备发送指令；默认关闭，仅在你明确需要虚拟摇杆/快捷指令盘类挂件时开启。",
+  "set.ai.widgetSend.tip": "允许 AI 创造的小部件/面板/脚本向串口/网络设备发送指令；默认关闭，仅在你明确需要虚拟摇杆/快捷指令盘类挂件时开启。",
+  "set.ai.script": "允许行为脚本（高权限）",
+  "set.ai.script.tip": "允许安装并运行 AI 生成的 uartix-script 行为脚本：脚本在主界面执行，可读取数据快照、发送数据（受发送权限限制）。每条脚本安装与启用均需确认；重置按钮可全部清除。",
   "set.ai.reset": "重置 AI 创造内容",
   "set.ai.factory": "恢复出厂",
-  "set.ai.reset.tip": "重置=清除 AI 生成的主题与挂件；恢复出厂=清空协议模板、控制画布、命令库、设置等全部本地数据（不可恢复，谨慎使用）。",
+  "set.ai.reset.tip": "重置=清除 AI 生成的全部扩展（主题/样式/小部件/面板/脚本）；恢复出厂=清空协议模板、控制画布、命令库、设置等全部本地数据（不可恢复，谨慎使用）。",
+  "set.ai.manage": "已安装扩展",
+  "set.ai.manage.tip": "查看、启停、删除、导入导出 AI 生成的扩展；也可将小部件弹出为桌面挂件。",
+  "set.ai.manageBtn": "管理扩展 →",
+  "set.ai.danger": "危险操作",
+  "set.ext": "扩展",
   "set.ai.baseUrl": "Base URL",
   "set.ai.baseUrl.tip": "OpenAI 兼容接口地址，以 /v1 结尾（DeepSeek 可不带）。请求由本机程序转发，不经过 WebView。",
   "set.ai.key": "API Key",
@@ -96,6 +131,8 @@ const zh: Dict = {
   "set.ai.model.tip": "如 deepseek-chat、qwen-plus、gpt-4o-mini、qwen2.5:7b。",
   "set.ai.temp": "温度",
   "set.ai.temp.tip": "越低回答越确定（0~2），协议识别建议 0.3 以下。",
+  "set.ai.thinking": "显示思考过程",
+  "set.ai.thinking.tip": "开启后，AI 的思维链在生成期间实时流式显示并自动计时，正文开始后自动折叠；关闭则生成期间不显示思考内容（完成后仍可展开回看）。",
   "set.ai.privacy": "AI 助手仅在发送时采集你勾选的上下文（协议摘要/数据样本等），不会持续上传数据；API Key 只存本机。",
   "tb.connect": "连接",
   "tb.disconnect": "断开",
@@ -177,6 +214,17 @@ const zh: Dict = {
 
 const en: Dict = {
   "app.name": "Uartix+",
+  "c.ok": "OK",
+  "c.cancel": "Cancel",
+  "c.save": "Save",
+  "c.delete": "Delete",
+  "c.rename": "Rename",
+  "c.copy": "Copy",
+  "c.paste": "Paste",
+  "c.close": "Close",
+  "c.apply": "Apply",
+  "c.enabled": "Enabled",
+  "c.disabled": "Disabled",
   "iface.title": "Data Interface",
   "iface.serial": "Serial Port",
   "iface.tcpClient": "TCP Client",
@@ -237,6 +285,17 @@ const en: Dict = {
   "set.zoom.tip": "Scales the entire UI including all panels and text; Ctrl+wheel also works.",
   "set.preset.tip": "Switch panel layout in one click; takes effect immediately.",
   "set.resetLayout.tip": "Re-arrange panels per current preset; keeps protocols, data and scripts.",
+  "set.layouts.save": "Save current layout",
+  "set.layouts.save.tip": "Save the current panel layout under a name. Before switching to a built-in preset, the current layout is auto-backed-up to the \"auto\" slot and can be restored anytime.",
+  "set.layouts.namePh": "Layout name…",
+  "set.layouts.saved": "Layout saved",
+  "set.layouts.saveFail": "Save failed (no panels or invalid layout)",
+  "set.layouts.title": "My layouts",
+  "set.layouts.tip": "Click a card to apply that layout. Layouts from before a preset switch appear here automatically (auto slot, most recent only).",
+  "set.layouts.applied": "Layout applied: ",
+  "set.layouts.applyFail": "Layout data corrupted; cannot apply",
+  "set.layouts.applyTip": "Click to apply this layout",
+  "set.layouts.autoTip": "Auto backup taken before switching to a built-in preset (most recent only)",
   "set.cellSize": "Control canvas grid size",
   "set.cellSize.tip": "Base grid size of the control canvas; smaller fits more widgets per screen.",
   "set.decimals.tip": "Default decimals (0~6) for field legends and monitors; the \"N\" button on a legend overrides it per field and stays in sync.",
@@ -247,7 +306,7 @@ const en: Dict = {
   "set.checkUpdate.tip": "Checks GitHub Releases for updates and installs automatically; the app restarts afterwards.",
   "set.ai": "AI Service",
   "set.ai.preset": "Provider preset",
-  "set.ai.preset.tip": "Pick a preset to auto-fill Base URL and model; any compatible endpoint works too.",
+  "set.ai.preset.tip": "Picking a preset auto-fills the Base URL and model below. It is only a shortcut — editing the fields afterwards never changes the preset, and you can switch presets anytime.",
   "set.ai.format": "API format",
   "set.ai.format.tip": "Chat Completions covers OpenAI/DeepSeek/Qwen/Ollama; Anthropic Messages is for Claude's native API; Responses is OpenAI's newer API.",
   "set.ai.proxy": "HTTP proxy",
@@ -262,6 +321,26 @@ const en: Dict = {
   "set.ai.model.tip": "e.g. deepseek-chat, qwen-plus, gpt-4o-mini, qwen2.5:7b.",
   "set.ai.temp": "Temperature",
   "set.ai.temp.tip": "Lower is more deterministic (0~2); 0.3 or below is recommended for protocol identification.",
+  "set.ai.thinking": "Show thinking process",
+  "set.ai.thinking.tip": "When on, the AI's chain of thought streams live with a timer during generation and auto-collapses once the answer starts; when off, thinking is hidden during generation (still viewable afterwards).",
+  "set.ai.grp.preset": "Provider preset",
+  "set.ai.grp.model": "Connection & credentials",
+  "set.ai.grp.net": "Advanced (proxy)",
+  "set.ai.grp.creative": "Creative mode (AI extensions)",
+  "set.ai.creative": "Creative mode",
+  "set.ai.creative.tip": "When enabled, the AI can create five kinds of extensions: theme, style layer, sandboxed widget, custom panel and behavior script. Each install shows a permission list and requires your confirmation.",
+  "set.ai.widgetSend": "Widgets may send data",
+  "set.ai.widgetSend.tip": "Allow AI-created widgets/panels/scripts to send commands to the serial/network device. Off by default.",
+  "set.ai.script": "Allow behavior scripts (high privilege)",
+  "set.ai.script.tip": "Allow installing and running AI-generated uartix-script behavior scripts. Each script runs in the main UI, can read data snapshots and send data (gated by the send permission). Every install/enable requires confirmation.",
+  "set.ai.reset": "Reset AI creations",
+  "set.ai.factory": "Factory reset",
+  "set.ai.reset.tip": "Reset = remove all AI extensions (theme/style/widget/panel/script). Factory reset = wipe ALL local data (irreversible).",
+  "set.ai.manage": "Installed extensions",
+  "set.ai.manage.tip": "View, enable/disable, delete, import/export AI extensions; pop widgets out as desktop gadgets.",
+  "set.ai.manageBtn": "Manage extensions →",
+  "set.ai.danger": "Danger zone",
+  "set.ext": "Extensions",
   "set.ai.privacy": "The AI assistant only collects the context you tick at send time; your API Key stays local.",
   "tb.connect": "Connect",
   "tb.disconnect": "Disconnect",
@@ -355,4 +434,34 @@ export function getLocale(): Locale {
 export function t(key: string): string {
   const loc = getLocale();
   return (loc === "en" ? en[key] : zh[key]) ?? zh[key] ?? key;
+}
+
+/* ---------------- 深度面板 i18n（P33） ----------------
+ * 一次性 UI 文案用 tx(中文, 英文) 就近双语，避免数百键的字典维护；
+ * 复用词（确定/取消/删除…）走 t("c.*") 中心键。
+ * 面板根组件调用 useLocale() 订阅语言切换重渲染；canvas 绘制文本在
+ * paint 内直接 tx()（每帧读当前语言），locale 变化时置脏重绘一次。
+ */
+
+const localeListeners = new Set<() => void>();
+
+export function subscribeLocale(cb: () => void): () => void {
+  localeListeners.add(cb);
+  return () => {
+    localeListeners.delete(cb);
+  };
+}
+
+/** 设置页切换语言后由 App 调用，驱动订阅了 useLocale 的面板重渲染 */
+export function notifyLocale(): void {
+  localeListeners.forEach((f) => f());
+}
+
+export function tx(zhText: string, enText: string): string {
+  return getLocale() === "en" ? enText : zhText;
+}
+
+export function useLocale(): Locale {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return useSyncExternalStore(subscribeLocale, getLocale);
 }

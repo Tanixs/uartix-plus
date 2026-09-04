@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { tx } from "../../i18n/strings";
 import type {
   FieldDef,
   FieldType,
@@ -649,16 +650,16 @@ export function setFieldDisc(
 
 export function insertFrameCell(tplId: string, g: number): string | null {
   const t = snapshot.rules.templates.find((x) => x.id === tplId);
-  if (!t) return "模板不存在";
-  if (t.boundary.mode !== "fixedLength") return "仅「固定长度」模式支持插入格";
+  if (!t) return tx("模板不存在", "Template not found");
+  if (t.boundary.mode !== "fixedLength") return tx("仅「固定长度」模式支持插入格", "Only fixed-length mode supports inserting cells");
   const hb = t.boundary.headerBytes.length;
   const fl = t.boundary.fixedLength ?? 0;
-  if (g < hb) return "不能插入到帧头内部";
-  if (g >= fl) return "插入位置超出帧长";
+  if (g < hb) return tx("不能插入到帧头内部", "Cannot insert inside the frame header");
+  if (g >= fl) return tx("插入位置超出帧长", "Insert position exceeds the frame length");
   for (const f of t.fields) {
     const sz = fieldSize(f);
     if (g > f.offset && g < f.offset + sz) {
-      return `位置被字段「${f.name}」占用，请先取消该字段`;
+      return tx("位置被字段「", "Position is occupied by field \"") + f.name + tx("」占用，请先取消该字段", "\" — undefine it first");
     }
   }
   pushHistory();

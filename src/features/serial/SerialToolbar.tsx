@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ParityMode } from "../../ipc/types";
 import * as store from "./serialStore";
 import { useSettings } from "../settings/settingsStore";
-import { t } from "../../i18n/strings";
+import { t, tx } from "../../i18n/strings";
 import { IconChevron } from "../../shared/icons";
 
 const BAUDS = [
@@ -100,7 +100,7 @@ export function SerialToolbar() {
         <button
           className={`baud-toggle ${baudOpen ? "open" : ""}`}
           disabled={locked}
-          title="常用波特率"
+          title={tx("常用波特率", "Common baud rates")}
           onClick={() => setBaudOpen((v) => !v)}
         >
           <IconChevron size={13} dir="down" />

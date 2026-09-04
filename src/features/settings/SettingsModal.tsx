@@ -5,13 +5,28 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { THEME_LIST, useSettings, patch, type ThemeMode, type WorkspacePreset, AI_PRESETS, AI_FORMATS, type AiPreset, type AiFormat } from "./settingsStore";
+import { useLayouts, removeLayout, renameLayout } from "./layoutsStore";
 import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
 import { t } from "../../i18n/strings";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
-import { clearAll } from "../ai/widgetStore";
-import { clearAiTheme } from "../ai/aiTheme";
+import {
+  clearAll,
+  removeExt,
+  setEnabled,
+  setOpen,
+  useExtensions,
+  importAll,
+  exportAll,
+  EXT_TYPE_LABEL,
+  PERM_LABEL,
+  type AiExtension,
+  type ExtType,
+} from "../ai/extensionStore";
+import { applyStyleExts, startScript, stopScript } from "../ai/extRuntime";
+import { popWidgetToDesktop } from "../ai/widgetShell";
+import { openExtPanel } from "../ai/extBus";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { IconEye, IconEyeOff } from "../../shared/icons";
@@ -83,9 +98,231 @@ async function loadJson<T>(kinds: string[]): Promise<T | null> {
   }
 }
 
-export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void; onResetLayout: (p: WorkspacePreset) => void }) {
+/** 权限短标签（行内展示；完整描述见 PERM_LABEL，hover 行可见） */
+const PERM_SHORT: Record<string, string> = {
+  css: "CSS",
+  read: "读",
+  send: "发",
+  script: "JS",
+};
+
+const EXT_FILTERS: { key: "all" | ExtType; label: string }[] = [
+  { key: "all", label: "全部" },
+  { key: "theme", label: EXT_TYPE_LABEL.theme },
+  { key: "style", label: EXT_TYPE_LABEL.style },
+  { key: "widget", label: EXT_TYPE_LABEL.widget },
+  { key: "panel", label: EXT_TYPE_LABEL.panel },
+  { key: "script", label: EXT_TYPE_LABEL.script },
+];
+
+/* ---------------- 扩展管理页 ---------------- */
+
+function ExtPage({ notify }: { notify: (s: string) => void }) {
   const settings = useSettings();
-  const [tab, setTab] = useState("general");
+  const es = useExtensions();
+  const [filter, setFilter] = useState<"all" | ExtType>("all");
+
+  const applyToggle = (ext: AiExtension, on: boolean) => {
+    if (ext.type === "script" && on) {
+      if (!settings.aiCreativity || !settings.aiScript) {
+        notify("启用脚本需要：AI 服务 → 创造模式 + 允许行为脚本");
+        return;
+      }
+      if (!confirm(`启用脚本「${ext.name}」将在主界面执行其 JS（高权限）。确定？`)) return;
+    }
+    setEnabled(ext.id, on);
+    if (ext.type === "script") {
+      if (on) startScript(ext);
+      else stopScript(ext.id);
+    } else if (ext.type === "theme" || ext.type === "style") {
+      applyStyleExts();
+    }
+  };
+
+  /** 批量启停：脚本不参与批量启用（需逐个确认），批量停用包含脚本 */
+  const bulk = (on: boolean) => {
+    for (const e of es.exts) {
+      if (e.enabled === on) continue;
+      if (e.type === "script" && on) continue;
+      setEnabled(e.id, on);
+    }
+    if (es.exts.some((e) => e.type === "theme" || e.type === "style")) applyStyleExts();
+    notify(on ? "已启用全部非脚本扩展" : "已停用全部扩展");
+  };
+
+  const popToDesktop = (ext: AiExtension) => {
+    popWidgetToDesktop({ id: ext.id, name: ext.name, chrome: ext.chrome });
+  };
+
+  const doExport = async () => {
+    const path = await save({
+      title: "导出 AI 扩展",
+      defaultPath: "uartix-extensions.json",
+      filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+    });
+    if (typeof path !== "string") return;
+    try {
+      await invoke("save_text_file", { path, content: exportAll() });
+      notify("扩展已导出");
+    } catch (e) {
+      notify(`导出失败：${String(e).slice(0, 80)}`);
+    }
+  };
+
+  const doImport = async () => {
+    const path = await open({
+      title: "导入 AI 扩展",
+      multiple: false,
+      filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+    });
+    if (typeof path !== "string") return;
+    try {
+      const content = await invoke<string>("read_text_file", { path });
+      notify(importAll(content).msg);
+    } catch (e) {
+      notify(`导入失败：${String(e).slice(0, 80)}`);
+    }
+  };
+
+  const list = filter === "all" ? es.exts : es.exts.filter((e) => e.type === filter);
+  const countOf = (k: "all" | ExtType) =>
+    k === "all" ? es.exts.length : es.exts.filter((x) => x.type === k).length;
+
+  return (
+    <>
+      <div className="ext-toolbar">
+        <div className="ext-chips">
+          {EXT_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              className={filter === f.key ? "on" : ""}
+              onClick={() => setFilter(f.key)}
+            >
+              {f.label}
+              <em>{countOf(f.key)}</em>
+            </button>
+          ))}
+        </div>
+        <div className="ext-ops">
+          <button className="btn" onClick={() => bulk(true)} disabled={!es.exts.length}>
+            全部启用
+          </button>
+          <button className="btn" onClick={() => bulk(false)} disabled={!es.exts.length}>
+            全部停用
+          </button>
+          <button className="btn" onClick={() => void doImport()}>导入</button>
+          <button className="btn" onClick={() => void doExport()}>导出</button>
+        </div>
+      </div>
+      {!settings.aiCreativity && (
+        <div className="ext-warn">
+          创造模式未开启：无法安装新扩展（已装扩展仍可使用）。到「AI 服务」页开启创造模式。
+        </div>
+      )}
+      {list.length === 0 ? (
+        <div className="ext-empty">
+          {es.exts.length === 0
+            ? "暂无扩展。开启创造模式后，在 AI 助手输入「做一个 XX 挂件/主题/面板」即可安装；也可在此导入他人分享的扩展包（uartix-extensions.json）。"
+            : "该类型下暂无扩展"}
+        </div>
+      ) : (
+        <div className="ext-list">
+          {list.map((e) => (
+            <div key={e.id} className={`ext-row${e.enabled ? " on" : ""}`} title={e.desc || e.name}>
+              <label className="set-switch" title={e.enabled ? "停用" : "启用"}>
+                <input
+                  type="checkbox"
+                  checked={e.enabled}
+                  onChange={(ev) => applyToggle(e, ev.target.checked)}
+                />
+                <span />
+              </label>
+              <div className="ext-info">
+                <div className="ext-name-line">
+                  <span className="ai-ext-badge">{EXT_TYPE_LABEL[e.type]}</span>
+                  <span className="ext-name">{e.name}</span>
+                  <span className="ext-ver">v{e.version}</span>
+                  {e.type === "script" && <span className="ext-risk">高权限</span>}
+                  {e.type === "script" && e.enabled && (
+                    <span className="ai-ext-running">运行中</span>
+                  )}
+                </div>
+                {e.desc && <div className="ext-desc">{e.desc}</div>}
+                <div
+                  className="ext-perms"
+                  title={`权限：${e.perms.map((p) => PERM_LABEL[p]).join("；")}`}
+                >
+                  {e.perms.map((p) => (
+                    <span key={p} className="ext-perm">
+                      {PERM_SHORT[p]}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="ai-widget-ops">
+                {e.type === "widget" && (
+                  <>
+                    <button
+                      className="btn"
+                      onClick={() => setOpen(e.id, !es.openIds.includes(e.id))}
+                    >
+                      {es.openIds.includes(e.id) ? "收起" : "打开"}
+                    </button>
+                    <button className="btn" onClick={() => void popToDesktop(e)}>
+                      桌面
+                    </button>
+                  </>
+                )}
+                {e.type === "panel" && (
+                  <button className="btn" onClick={() => openExtPanel(e.id)}>
+                    加入工作区
+                  </button>
+                )}
+                <button
+                  className="btn danger-btn"
+                  onClick={() => {
+                    if (!confirm(`删除扩展「${e.name}」？不可恢复。`)) return;
+                    if (e.type === "script") stopScript(e.id);
+                    removeExt(e.id);
+                    if (e.type === "theme" || e.type === "style") applyStyleExts();
+                  }}
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="set-danger">
+        <div className="set-danger-head">危险操作</div>
+        <div className="set-danger-body">
+          <button
+            className="btn danger-btn"
+            onClick={() => {
+              if (!confirm("清空全部扩展？（主题/样式/挂件/面板/脚本；协议/画布/命令不受影响）")) return;
+              for (const e of es.exts) if (e.type === "script") stopScript(e.id);
+              clearAll();
+              applyStyleExts();
+              notify("已清空全部扩展");
+            }}
+          >
+            清空全部扩展
+          </button>
+          <span className="set-danger-note">
+            移除全部扩展并停用其效果；协议模板、控制画布、命令库不受影响。
+          </span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayout, onSaveLayout }: { onClose: () => void; onResetLayout: (p: WorkspacePreset) => void; initialTab?: string; onApplyLayout: (id: string) => boolean; onSaveLayout: (name: string) => boolean }) {
+  const settings = useSettings();
+  const layouts = useLayouts();
+  const [layoutName, setLayoutName] = useState("");
+  const [tab, setTab] = useState(initialTab ?? "general");
   const [msg, setMsg] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [appVersion, setAppVersion] = useState("");
@@ -126,6 +363,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
     { key: "workspace", label: t("set.workspace") },
     { key: "data", label: t("set.data") },
     { key: "ai", label: t("set.ai") },
+    { key: "ext", label: t("set.ext") },
     { key: "io", label: t("set.io") },
     { key: "about", label: t("set.about") },
   ];
@@ -242,6 +480,83 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                 {row(t("set.resetLayout"), (
                   <button className="btn" onClick={() => onResetLayout(settings.workspace)}>{t("set.resetLayout")}</button>
                 ), t("set.resetLayout.tip"))}
+                {row(t("set.layouts.save"), (
+                  <div className="qk-fgroup">
+                    <input
+                      className="input"
+                      style={{ width: 160 }}
+                      placeholder={t("set.layouts.namePh")}
+                      maxLength={24}
+                      value={layoutName}
+                      onChange={(e) => setLayoutName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && layoutName.trim()) {
+                          if (onSaveLayout(layoutName)) {
+                            setLayoutName("");
+                            setMsg(t("set.layouts.saved"));
+                          }
+                        }
+                      }}
+                    />
+                    <button
+                      className="btn primary"
+                      disabled={!layoutName.trim()}
+                      onClick={() => {
+                        if (onSaveLayout(layoutName)) {
+                          setLayoutName("");
+                          setMsg(t("set.layouts.saved"));
+                        } else {
+                          setMsg(t("set.layouts.saveFail"));
+                        }
+                      }}
+                    >
+                      {t("set.layouts.save")}
+                    </button>
+                  </div>
+                ), t("set.layouts.save.tip"))}
+                {layouts.slots.length > 0 && row(t("set.layouts.title"), (
+                  <div className="preset-grid">
+                    {layouts.slots.map((s) => (
+                      <div
+                        key={s.id}
+                        className={`preset-card layout-slot${s.auto ? " auto" : ""}`}
+                        title={s.auto ? t("set.layouts.autoTip") : t("set.layouts.applyTip")}
+                        onClick={() => {
+                          if (onApplyLayout(s.id)) setMsg(`${t("set.layouts.applied")}${s.name}`);
+                          else setMsg(t("set.layouts.applyFail"));
+                        }}
+                      >
+                        <span className="preset-name">{s.name}</span>
+                        <span className="preset-desc">{new Date(s.ts).toLocaleString()}</span>
+                        {!s.auto && (
+                          <span className="layout-slot-ops">
+                            <button
+                              className="layout-op-btn"
+                              title="重命名"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                const nn = prompt("新名称", s.name);
+                                if (nn && nn.trim()) renameLayout(s.id, nn);
+                              }}
+                            >
+                              ✎
+                            </button>
+                            <button
+                              className="layout-op-btn danger"
+                              title="删除"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                if (confirm(`删除布局「${s.name}」？`)) removeLayout(s.id);
+                              }}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ), t("set.layouts.tip"))}
                 {row(t("set.cellSize"), (
                   <div className="set-seg">
                     {([48, 60, 72, 90, 110] as const).map((c) => (
@@ -284,6 +599,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
             )}
             {tab === "ai" && (
               <>
+                <div className="set-group-title">{t("set.ai.grp.preset")}</div>
                 {row(t("set.ai.preset"), (
                   <select
                     className="input"
@@ -305,28 +621,7 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     ))}
                   </select>
                 ), t("set.ai.preset.tip"))}
-                {row(t("set.ai.format"), (
-                  <select
-                    className="input"
-                    value={settings.aiFormat}
-                    onChange={(e) => patch({ aiFormat: e.target.value as AiFormat })}
-                  >
-                    {AI_FORMATS.map((f) => (
-                      <option key={f.key} value={f.key}>
-                        {f.label}
-                      </option>
-                    ))}
-                  </select>
-                ), t("set.ai.format.tip"))}
-                {row(t("set.ai.baseUrl"), (
-                  <input
-                    className="input"
-                    style={{ width: 280 }}
-                    value={settings.aiBaseUrl}
-                    placeholder="https://api.deepseek.com"
-                    onChange={(e) => patch({ aiBaseUrl: e.target.value })}
-                  />
-                ), t("set.ai.baseUrl.tip"))}
+                <div className="set-group-title">{t("set.ai.grp.model")}</div>
                 {row(t("set.ai.key"), (
                   <div className="ai-key-wrap">
                     <input
@@ -354,6 +649,28 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     onChange={(e) => patch({ aiModel: e.target.value })}
                   />
                 ), t("set.ai.model.tip"))}
+                {row(t("set.ai.baseUrl"), (
+                  <input
+                    className="input"
+                    style={{ width: 280 }}
+                    value={settings.aiBaseUrl}
+                    placeholder="https://api.deepseek.com"
+                    onChange={(e) => patch({ aiBaseUrl: e.target.value })}
+                  />
+                ), t("set.ai.baseUrl.tip"))}
+                {row(t("set.ai.format"), (
+                  <select
+                    className="input"
+                    value={settings.aiFormat}
+                    onChange={(e) => patch({ aiFormat: e.target.value as AiFormat })}
+                  >
+                    {AI_FORMATS.map((f) => (
+                      <option key={f.key} value={f.key}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </select>
+                ), t("set.ai.format.tip"))}
                 {row(t("set.ai.temp"), (
                   <input
                     type="number"
@@ -370,24 +687,40 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     }}
                   />
                 ), t("set.ai.temp.tip"))}
-                {row(t("set.ai.proxy"), (
-                  <input
-                    className="input"
-                    style={{ width: 280 }}
-                    value={settings.aiProxy}
-                    placeholder="http://127.0.0.1:7890（留空 = 跟随系统）"
-                    onChange={(e) => patch({ aiProxy: e.target.value })}
-                  />
-                ), t("set.ai.proxy.tip"))}
-                {row(t("set.ai.noProxy"), (
-                  <input
-                    className="input"
-                    style={{ width: 280 }}
-                    value={settings.aiNoProxy}
-                    placeholder="localhost,127.0.0.1,.cn,*.lan"
-                    onChange={(e) => patch({ aiNoProxy: e.target.value })}
-                  />
-                ), t("set.ai.noProxy.tip"))}
+                {row(t("set.ai.thinking"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.showThinking}
+                      onChange={(e) => patch({ showThinking: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), t("set.ai.thinking.tip"))}
+                <details className="set-coll">
+                  <summary>{t("set.ai.grp.net")}</summary>
+                  <div className="set-coll-body">
+                    {row(t("set.ai.proxy"), (
+                      <input
+                        className="input"
+                        style={{ width: 280 }}
+                        value={settings.aiProxy}
+                        placeholder="http://127.0.0.1:7890（留空 = 跟随系统）"
+                        onChange={(e) => patch({ aiProxy: e.target.value })}
+                      />
+                    ), t("set.ai.proxy.tip"))}
+                    {row(t("set.ai.noProxy"), (
+                      <input
+                        className="input"
+                        style={{ width: 280 }}
+                        value={settings.aiNoProxy}
+                        placeholder="localhost,127.0.0.1,.cn,*.lan"
+                        onChange={(e) => patch({ aiNoProxy: e.target.value })}
+                      />
+                    ), t("set.ai.noProxy.tip"))}
+                  </div>
+                </details>
+                <div className="set-group-title">{t("set.ai.grp.creative")}</div>
                 {row(t("set.ai.creative"), (
                   <label className="set-switch">
                     <input
@@ -408,24 +741,45 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     <span />
                   </label>
                 ), t("set.ai.widgetSend.tip"))}
-                {row(t("set.ai.reset"), (
-                  <div className="qk-fgroup">
+                {settings.aiCreativity && row(t("set.ai.script"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.aiScript}
+                      onChange={(e) => patch({ aiScript: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), t("set.ai.script.tip"))}
+                <div className="set-row">
+                  <label>
+                    {t("set.ai.manage")}
+                    <HelpHint text={t("set.ai.manage.tip")} />
+                  </label>
+                  <div className="set-ctl">
+                    <button className="btn primary" onClick={() => setTab("ext")}>
+                      {t("set.ai.manageBtn")}
+                    </button>
+                  </div>
+                </div>
+                <div className="set-danger">
+                  <div className="set-danger-head">{t("set.ai.danger")}</div>
+                  <div className="set-danger-body">
                     <button
-                      className="btn"
+                      className="btn danger-btn"
                       onClick={() => {
-                        if (!confirm("清除全部 AI 创造内容？（自定义主题 + 已安装挂件；协议/画布/命令不受影响）")) return;
+                        if (!confirm("清除全部 AI 扩展？（主题/样式/小部件/面板/脚本；协议/画布/命令不受影响）")) return;
                         clearAll();
-                        clearAiTheme();
-                        document.documentElement.style.cssText = "";
-                        setMsg("已重置 AI 创造内容");
+                        applyStyleExts();
+                        setMsg("已重置 AI 扩展");
                       }}
                     >
                       {t("set.ai.reset")}
                     </button>
                     <button
-                      className="btn"
+                      className="btn danger-btn"
                       onClick={() => {
-                        if (!confirm("恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与 AI 创造内容，且不可恢复。确定继续？")) return;
+                        if (!confirm("恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与 AI 扩展，且不可恢复。确定继续？")) return;
                         const kill: string[] = [];
                         for (let i = 0; i < localStorage.length; i++) {
                           const k = localStorage.key(i);
@@ -437,11 +791,13 @@ export function SettingsModal({ onClose, onResetLayout }: { onClose: () => void;
                     >
                       {t("set.ai.factory")}
                     </button>
+                    <span className="set-danger-note">{t("set.ai.reset.tip")}</span>
                   </div>
-                ), t("set.ai.reset.tip"))}
+                </div>
                 <div className="set-io-hint">{t("set.ai.privacy")}</div>
               </>
             )}
+            {tab === "ext" && <ExtPage notify={setMsg} />}
             {tab === "io" && (
               <>
                 {ioBlock(

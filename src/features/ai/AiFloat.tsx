@@ -3,38 +3,17 @@ import { createPortal } from "react-dom";
 import { AiChat } from "./AiChat";
 import { IconSparkle } from "../../shared/icons";
 
-const POS_KEY = "vs.aiFloat";
+/** v2：以「右下角锚点」持久化，窗口尺寸变化时始终贴边不漂移 */
+const POS_KEY = "vs.aiFloat.v2";
 
 interface FloatState {
-  x: number;
-  y: number;
+  /** 距窗口右缘的偏移（px，逻辑坐标） */
+  right: number;
+  /** 距窗口下缘的偏移（px，逻辑坐标） */
+  bottom: number;
   w: number;
   h: number;
   min: boolean;
-}
-
-function loadState(): FloatState {
-  const fallback: FloatState = {
-    x: Math.max(24, window.innerWidth - 420),
-    y: Math.max(80, Math.round(window.innerHeight * 0.12)),
-    w: 400,
-    h: Math.min(560, window.innerHeight - 160),
-    min: false,
-  };
-  try {
-    const raw = localStorage.getItem(POS_KEY);
-    if (!raw) return fallback;
-    const p = JSON.parse(raw) as Partial<FloatState>;
-    return {
-      x: typeof p.x === "number" ? p.x : fallback.x,
-      y: typeof p.y === "number" ? p.y : fallback.y,
-      w: typeof p.w === "number" ? Math.max(320, p.w) : fallback.w,
-      h: typeof p.h === "number" ? Math.max(280, p.h) : fallback.h,
-      min: Boolean(p.min),
-    };
-  } catch {
-    return fallback;
-  }
 }
 
 function zoomFactor(): number {
@@ -42,17 +21,46 @@ function zoomFactor(): number {
   return Number.isFinite(z) && z > 0 ? z / 100 : 1;
 }
 
-function clampState(s: FloatState): FloatState {
+function vwvh(): { vw: number; vh: number } {
   const zf = zoomFactor();
-  const vw = window.innerWidth / zf;
-  const vh = window.innerHeight / zf;
-  return {
-    ...s,
-    x: Math.min(Math.max(-s.w + 80, s.x), vw - 80),
-    y: Math.min(Math.max(0, s.y), vh - 48),
-    w: Math.min(Math.max(320, s.w), Math.max(320, vw - 40)),
-    h: Math.min(Math.max(280, s.h), Math.max(280, vh - 80)),
-  };
+  return { vw: window.innerWidth / zf, vh: window.innerHeight / zf };
+}
+
+function fallbackState(): FloatState {
+  const { vh } = vwvh();
+  const w = 400;
+  const h = Math.min(560, vh - 120);
+  return { right: 24, bottom: 24, w, h, min: false };
+}
+
+function loadState(): FloatState {
+  const fb = fallbackState();
+  try {
+    const raw = localStorage.getItem(POS_KEY);
+    if (!raw) return fb;
+    const p = JSON.parse(raw) as Partial<FloatState>;
+    return {
+      right: typeof p.right === "number" ? p.right : fb.right,
+      bottom: typeof p.bottom === "number" ? p.bottom : fb.bottom,
+      w: typeof p.w === "number" ? Math.max(320, p.w) : fb.w,
+      h: typeof p.h === "number" ? Math.max(280, p.h) : fb.h,
+      min: Boolean(p.min),
+    };
+  } catch {
+    return fb;
+  }
+}
+
+/** 在 x/y 语义下钳制，再换算回右下角锚点（保证浮窗至少 80px 留在屏内） */
+function clampState(s: FloatState): FloatState {
+  const { vw, vh } = vwvh();
+  const w = Math.min(Math.max(320, s.w), Math.max(320, vw - 40));
+  const h = Math.min(Math.max(280, s.h), Math.max(280, vh - 80));
+  const x = vw - s.right - w;
+  const y = vh - s.bottom - h;
+  const cx = Math.min(Math.max(-w + 80, x), vw - 80);
+  const cy = Math.min(Math.max(0, y), vh - 48);
+  return { ...s, w, h, right: vw - cx - w, bottom: vh - cy - h };
 }
 
 export function AiFloat({
@@ -63,12 +71,13 @@ export function AiFloat({
   onClose: () => void;
 }) {
   const [st, setSt] = useState<FloatState>(() => clampState(loadState()));
+  const [, setTick] = useState(0);
   const dragRef = useRef<{
     kind: "move" | "resize";
     sx: number;
     sy: number;
-    ox: number;
-    oy: number;
+    or: number;
+    ob: number;
     ow: number;
     oh: number;
   } | null>(null);
@@ -77,29 +86,38 @@ export function AiFloat({
     localStorage.setItem(POS_KEY, JSON.stringify(st));
   }, [st]);
 
+  // 窗口缩放 / 缩放系数变化时重钳制（右下角锚点自动跟随）
   useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      const d = dragRef.current;
-      if (!d) return;
-      const zf = zoomFactor();
-      const dx = (e.clientX - d.sx) / zf;
-      const dy = (e.clientY - d.sy) / zf;
-      if (d.kind === "move") {
-        setSt((s) => clampState({ ...s, x: d.ox + dx, y: d.oy + dy }));
-      } else {
-        setSt((s) => clampState({ ...s, w: d.ow + dx, h: d.oh + dy }));
-      }
-    };
-    const onUp = () => {
-      dragRef.current = null;
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    const onResize = () => setSt((s) => clampState(s));
+    const onZoom = () => setTick((t) => t + 1);
+    window.addEventListener("resize", onResize);
+    window.addEventListener("vs-zoom-change", onZoom);
     return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("vs-zoom-change", onZoom);
     };
   }, []);
+
+  const { vw, vh } = vwvh();
+  const left = vw - st.right - st.w;
+  const top = vh - st.bottom - st.h;
+
+  const onMove = (e: PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const zf = zoomFactor();
+    const dx = (e.clientX - d.sx) / zf;
+    const dy = (e.clientY - d.sy) / zf;
+    if (d.kind === "move") {
+      setSt((s) =>
+        clampState({ ...s, right: d.or - dx, bottom: d.ob - dy }),
+      );
+    } else {
+      setSt((s) =>
+        clampState({ ...s, w: d.ow + dx, h: d.oh + dy }),
+      );
+    }
+  };
 
   const startDrag = (kind: "move" | "resize") => (e: React.PointerEvent) => {
     if (e.button !== 0) return;
@@ -110,11 +128,18 @@ export function AiFloat({
       kind,
       sx: e.clientX,
       sy: e.clientY,
-      ox: st.x,
-      oy: st.y,
+      or: st.right,
+      ob: st.bottom,
       ow: st.w,
       oh: st.h,
     };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   };
 
   return createPortal(
@@ -129,7 +154,7 @@ export function AiFloat({
     ) : (
       <div
         className="ai-float"
-        style={{ left: st.x, top: st.y, width: st.w, height: st.h }}
+        style={{ left, top, width: st.w, height: st.h }}
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div

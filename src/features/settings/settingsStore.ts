@@ -44,6 +44,8 @@ export interface Settings {
   aiNoProxy: string;
   aiCreativity: boolean;
   aiWidgetSend: boolean;
+  aiScript: boolean;
+  showThinking: boolean;
 }
 
 export type AiPreset = "openai" | "deepseek" | "qwen" | "ollama" | "anthropic";
@@ -73,7 +75,7 @@ function clampDecimals(v: unknown, fallback: number): number {
 
 function load(): Settings {
   const fallback: Settings = {
-    theme: localStorage.getItem("vs.theme") === "dark" ? "dark" : "light",
+    theme: localStorage.getItem("vs.theme") === "dark" ? "dark" : "begonia",
     locale: "zh",
     zoom: 100,
     decimals: clampDecimals(localStorage.getItem("vs.decimals") ?? "2", 2),
@@ -90,6 +92,8 @@ function load(): Settings {
     aiNoProxy: "",
     aiCreativity: false,
     aiWidgetSend: false,
+    aiScript: false,
+    showThinking: true,
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -130,6 +134,8 @@ function load(): Settings {
       aiNoProxy: typeof p.aiNoProxy === "string" ? p.aiNoProxy : "",
       aiCreativity: Boolean(p.aiCreativity),
       aiWidgetSend: Boolean(p.aiWidgetSend),
+      aiScript: Boolean(p.aiScript),
+      showThinking: p.showThinking === undefined ? true : Boolean(p.showThinking),
     };
   } catch {
     return fallback;
