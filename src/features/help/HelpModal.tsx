@@ -27,7 +27,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
           <div className="set-content help-content">
             {tab === "start" && (
               <>
-                <p><b>Uartix+</b> 是可视化串口协议分析仪：定义协议 → 自动筛选有效帧 → 在干净数据上查看/绘图/控制。</p>
+                <p><b>Uartix+</b> 是一台跑在电脑上的可视化上位机：定义协议 → 自动筛选有效帧 → 在干净数据上查看、绘图并反向控制设备。</p>
                 <Section title="五步上手">
                   <ol className="help-ol">
                     <li>标题条选择<code>数据接口</code>（串口 / TCP 客户端 / TCP 服务端 / UDP），在工具栏完成参数设置后点击<code>连接</code>。</li>

@@ -11,7 +11,7 @@ export type AiScene =
   | "create"
   | "qa";
 
-const CAPABILITY_DIGEST = `Uartix+ 是一款可视化串口协议分析仪（Tauri 2 + Rust + React）。主要功能与面板：
+const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 2 + Rust + React）。主要功能与面板：
 - 串口/TCP/UDP 三类数据接口，支持热插拔识别、2 秒无数据断线检测与自动重连。
 - 协议模板面板：定义帧边界（固定长度/长度字段/帧尾三种模式）、识别位、校验（sum8/sumadd/xor8/crc16_modbus/crc16_ccitt/crc32）、字段（uint8~float64/ascii/bcd/bits/csv，支持字节序、scale 缩放、单位、识别位）。
 - Hex 数据流面板：实时字节流查看，框选字节后右键可定义帧头/长度/校验/数据字段，自动生成协议模板。
@@ -271,7 +271,7 @@ export function buildSystemPrompt(
   };
   // 专用输出场景 digest 用全量（回答"怎么用"需要细节）；其余用精简版控 token
   const digest = scene === "qa" || scene === "create" ? CAPABILITY_DIGEST : DIGEST_BRIEF;
-  let base = `你是 Uartix+（可视化串口协议分析仪）内置的 AI 调试助手，面向嵌入式/机器人/航模开发者。用简体中文回答，专业、简练。\n\n软件功能速览（回答用法问题时引用对应面板名）：\n${digest}\n\n当前用户的协议模板：\n${tplSummary}\n\n${BUG_PATROL}`;
+  let base = `你是 Uartix+（嵌入式可视化上位机）内置的 AI 调试助手，面向嵌入式、机器人、航模方向的开发者。用简体中文回答，专业、简练。\n\n软件功能速览（回答用法问题时引用对应面板名）：\n${digest}\n\n当前用户的协议模板：\n${tplSummary}\n\n${BUG_PATROL}`;
 
   if (scene === "create" && creative?.enabled) {
     // 创造工作台：全量规范一次到位（用户明确来创作的场景）

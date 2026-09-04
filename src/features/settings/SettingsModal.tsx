@@ -7,7 +7,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { THEME_LIST, useSettings, patch, type ThemeMode, type WorkspacePreset, AI_PRESETS, AI_FORMATS, type AiPreset, type AiFormat } from "./settingsStore";
 import { useLayouts, removeLayout, renameLayout } from "./layoutsStore";
 import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
-import { t } from "../../i18n/strings";
+import { t, tx } from "../../i18n/strings";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
@@ -865,10 +865,30 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   <img src={appIcon} alt="Uartix+" width={56} height={56} />
                   <div>
                     <div className="set-about-name">Uartix+</div>
-                    <div className="set-about-desc">可视化串口协议分析仪</div>
+                    <div className="set-about-desc">
+                      {tx("嵌入式可视化上位机", "Visual host-computer suite for embedded systems")}
+                    </div>
                   </div>
                 </div>
-                {row(t("set.version"), <span className="set-mono">{appVersion ?? "0.3.0"}</span>)}
+                <p className="set-about-intro">
+                  {tx(
+                    "Uartix+ 是一台跑在电脑上的上位机。向下，它连着单片机、惯导、云台、机器人这些下位机；向上，它把一串串看不懂的原始字节变成结构、数值、曲线和画面，再把你的操作回写成设备能够接受的指令。",
+                    "Uartix+ is a host computer running on your PC. Downward it talks to MCUs, IMUs, gimbots and robots; upward it turns raw bytes into structure, numbers, curves and pictures, then writes your actions back as commands the device accepts.",
+                  )}
+                </p>
+                <p className="set-about-intro">
+                  {tx(
+                    "它不是只会收发字符的串口助手。协议无需编写解析代码——在数据流上框选字节即可定义帧结构与字段含义；界面无需编写界面代码——拖拽控件就能拼出专属调试台。连接、校验、测量、可视化、脚本自动化与数据导出，在同一处完成闭环。",
+                    "It is far more than a serial terminal that echoes characters. Protocols need no parser code: select bytes on the stream to define the frame layout and what each field means. Interfaces need no UI code: drag widgets together into a bench of your own. Connecting, checksums, measurement, visualisation, scripting and export close the loop in one place.",
+                  )}
+                </p>
+                <p className="set-about-intro">
+                  {tx(
+                    "自 v0.3.6 起内置 AI 助手：说出需求，它便能生成协议模板、控制卡片、停靠面板乃至无边框悬浮小部件，并直接替你执行操作。Rust 内核与二进制数据通道，让数十万帧的长时间采集依旧流畅。",
+                    "Since v0.3.6 a built-in AI assistant turns requests into protocol templates, control cards, dockable panels and even borderless floating widgets, and carries out operations on your behalf. A Rust core over a binary data channel keeps hundreds of thousands of frames of long-running capture smooth.",
+                  )}
+                </p>
+                {row(t("set.version"), <span className="set-mono">{appVersion}</span>)}
                 {row("作者", (
                   <button
                     className="author-link"

@@ -4263,6 +4263,14 @@ label.set-switch,
 .set-about-head img { border-radius: 12px; }
 .set-about-name { font-size: 16px; font-weight: 700; }
 .set-about-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+/* 关于页正文介绍：紧凑段落，字号略小于正文、行高放宽，与右侧信息行区分 */
+.set-about-intro {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--text-dim);
+  text-align: justify;
+}
 /* 关于页紧凑行：标签与内容间距更近，自适应对齐 */
 .set-about-rows .set-row { gap: 10px; padding: 9px 0; }
 .set-about-rows .set-row > label { flex: 0 0 auto; min-width: 64px; }
