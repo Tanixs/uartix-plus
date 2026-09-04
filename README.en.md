@@ -24,7 +24,7 @@ Define protocols by drag-and-drop · Parse and visualise in real time · Debug i
 
 </div>
 
-![Uartix+ main window: templates, frame canvas, properties, 2D plot, data table and control canvas. The interface switches to English in one click.](docs/images/overview.png)
+![Uartix+ main window: templates, frame canvas, properties, 2D plot, data table and control canvas](docs/images/overview-en.png)
 
 ---
 
