@@ -503,8 +503,8 @@ export default function App() {
           cards: Array.from({ length: 6 }, (_, i) => ({
             type: "slider",
             name: `参数${i + 1}`,
-            x: (i % 3) * 4,
-            y: Math.floor(i / 3) * 2,
+            x: (i % 3) * 2,
+            y: Math.floor(i / 3),
             w: 2,
             h: 1,
           })),

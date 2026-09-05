@@ -4,6 +4,8 @@ import { save } from "@tauri-apps/plugin-dialog";
 import type { FrameRow } from "../../ipc/types";
 import * as framesStore from "./framesStore";
 import * as templateStore from "../protocol/templateStore";
+import { presetGroupKey, groupDisplayName } from "../framecanvas/presets";
+import { ColumnTreeMenu, type ColGroup } from "./ColumnTreeMenu";
 import {
   IconColumns,
   IconPause,
@@ -16,6 +18,16 @@ import { t } from "../../i18n/strings";
 
 const ROW_H = 26;
 const HEADER_H = 26;
+const DECODABLE_ROLES = new Set(["data", "payload", "id", "seq", "length"]);
+
+function loadHiddenCols(): Set<string> {
+  try {
+    const arr = JSON.parse(localStorage.getItem("vs.table.hidden") ?? "[]");
+    return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
 
 function fmtTime(ts: number): string {
   const d = new Date(ts);
@@ -39,7 +51,9 @@ export function DataTable() {
   const proto = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
   const [filter, setFilter] = useState("");
-  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(loadHiddenCols);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const colBtnRef = useRef<HTMLButtonElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewH, setViewH] = useState(240);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -52,9 +66,53 @@ export function DataTable() {
 
   const fieldColsAll: Col[] = useMemo(() => {
     return templates.flatMap((t) =>
-      t.fields.map((f) => ({ key: f.id, label: `${t.name}·${f.name}` })),
+      t.fields
+        .filter((f) => DECODABLE_ROLES.has(f.role))
+        .map((f) => ({ key: f.id, label: `${t.name}·${f.name}` })),
     );
   }, [templates]);
+
+  const colGroups: ColGroup[] = useMemo(() => {
+    const out: ColGroup[] = [];
+    const byKey = new Map<string, ColGroup>();
+    for (const t of templates) {
+      const fields = t.fields
+        .filter((f) => DECODABLE_ROLES.has(f.role))
+        .map((f) => ({ id: f.id, name: f.name, csv: f.type === "csv" }));
+      const key = presetGroupKey(t) ?? t.id;
+      let g = byKey.get(key);
+      if (!g) {
+        g = { key, name: groupDisplayName(key, t), tpls: [] };
+        byKey.set(key, g);
+        out.push(g);
+      }
+      g.tpls.push({ id: t.id, name: t.name, color: t.color, enabled: t.enabled, fields });
+    }
+    return out;
+  }, [templates]);
+
+  useEffect(() => {
+    localStorage.setItem("vs.table.hidden", JSON.stringify([...hiddenCols]));
+  }, [hiddenCols]);
+
+  useEffect(() => {
+    const ids = new Set(fieldColsAll.map((c) => c.key));
+    setHiddenCols((prev) => {
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [fieldColsAll]);
+
+  const setVisibleMany = (ids: string[], visible: boolean) => {
+    setHiddenCols((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (visible) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  };
 
   const cols: Col[] = useMemo(() => {
     return [
@@ -253,31 +311,24 @@ export function DataTable() {
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
-        <details className="col-menu">
-          <summary className="btn icon-btn" title={t("tbl.columns")}>
-            <IconColumns />
-          </summary>
-          <div className="col-menu-pop">
-            {fieldColsAll.length === 0 && (
-              <div className="tpl-empty">{t("tbl.noCols")}</div>
-            )}
-            {fieldColsAll.map((c) => (
-              <label key={c.key} className="chk">
-                <input
-                  type="checkbox"
-                  checked={!hiddenCols.has(c.key)}
-                  onChange={() => toggleCol(c.key)}
-                />
-                {c.label}
-              </label>
-            ))}
-            {fieldColsAll.length > 0 && (
-              <button className="btn" onClick={() => setHiddenCols(new Set())}>
-                {t("tbl.showAll")}
-              </button>
-            )}
-          </div>
-        </details>
+        <button
+          ref={colBtnRef}
+          className={`btn icon-btn ${menuOpen ? "primary" : ""}`}
+          title={t("tbl.columns")}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <IconColumns />
+        </button>
+        {menuOpen && (
+          <ColumnTreeMenu
+            anchor={colBtnRef.current}
+            groups={colGroups}
+            hidden={hiddenCols}
+            onSetMany={setVisibleMany}
+            onToggleField={toggleCol}
+            onClose={() => setMenuOpen(false)}
+          />
+        )}
         <div className="tbl-bar-spacer" />
         {frames.capped && (
           <span className="tbl-capped" title={t("tbl.capped")}>

@@ -2125,10 +2125,14 @@ export function Plot2D() {
               onClick={() => plotStore.toggleVisible(ch.id)}
             >
               <span
+                className={`chk-tri ${ch.visible ? "on" : "off"}`}
+                style={{ marginRight: 6 }}
+              />
+              <span
                 className="tpl-dot"
                 style={{ background: ch.color, marginRight: 6 }}
               />
-              {ch.visible ? "●" : "○"} {ch.name}
+              {ch.name}
             </button>
           ))}
         </Flyout>
