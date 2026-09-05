@@ -234,7 +234,7 @@ export function PropertiesPanel() {
                 <label>{tx("长度偏移", "Length Offset")}</label>
                 <NumInput
                   value={b.lengthOffset ?? b.headerBytes.length}
-                  onCommit={(v) => store.patchBoundary(tpl.id, { lengthOffset: v })}
+                  onCommit={(v) => store.setLengthDomain(tpl.id, { lengthOffset: v })}
                 />
               </div>
               <div className="form-pair">
@@ -243,13 +243,19 @@ export function PropertiesPanel() {
                   className="input"
                   value={b.lengthSize ?? 1}
                   onChange={(e) =>
-                    store.patchBoundary(tpl.id, { lengthSize: Number(e.target.value) })
+                    store.setLengthDomain(tpl.id, { lengthSize: Number(e.target.value) })
                   }
                 >
                   <option value={1}>u8</option>
                   <option value={2}>u16</option>
                 </select>
               </div>
+            </div>
+            <div className="form-hint">
+              {tx(
+                "长度域与画布上的「数据长度(LEN)」字段双向联动：改这里会同步移动 LEN 字段，反之亦然。",
+                "The length domain and the canvas LEN field are linked both ways: editing here moves the LEN field and vice versa.",
+              )}
             </div>
             <div className="form-row">
               <div className="form-pair grow">
@@ -528,6 +534,19 @@ export function PropertiesPanel() {
           </div>
         )}
       </div>
+      {(field.role === "data" || field.role === "payload") && field.type !== "csv" && (
+        <div className="form-row">
+          <label>{tx("变长载荷", "Variable span")}</label>
+          <label className="chk">
+            <input
+              type="checkbox"
+              checked={!!field.spanTail}
+              onChange={(e) => patch({ spanTail: e.target.checked })}
+            />
+            <span>{tx("延伸至载荷尾（自适应变长）", "Extend to payload end (adaptive)")}</span>
+          </label>
+        </div>
+      )}
       {field.type === "csv" && (
         <div className="form-row">
           <div className="form-pair">

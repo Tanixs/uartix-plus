@@ -107,6 +107,8 @@ pub struct FieldDef {
     pub csv_type: Option<String>,
     #[serde(default)]
     pub disc: Option<Vec<u8>>,
+    #[serde(default)]
+    pub span_tail: Option<bool>,
 }
 
 fn default_endian() -> String {
@@ -757,6 +759,29 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
             }
             continue;
         }
+        if f.span_tail.unwrap_or(false) && matches!(f.role.as_str(), "data" | "payload") {
+            let rt = reserved_tail_len(tpl);
+            let end = buf.len().saturating_sub(rt).max(f.offset);
+            if f.offset < end {
+                let sl = &buf[f.offset..end];
+                let text = if f.field_type == "ascii" {
+                    String::from_utf8_lossy(sl).to_string()
+                } else {
+                    sl.iter()
+                        .map(|b| format!("{:02X}", b))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                out.push(FieldOut {
+                    id: f.id.clone(),
+                    name: f.name.clone(),
+                    raw: 0.0,
+                    value: 0.0,
+                    text: Some(text),
+                });
+            }
+            continue;
+        }
         let size = type_size(f);
         if f.offset + size > buf.len() {
             continue;
@@ -892,6 +917,7 @@ mod tests {
             csv_delim: None,
             csv_type: None,
             disc: None,
+            span_tail: None,
         }
     }
 
@@ -1044,6 +1070,7 @@ mod tests {
                 csv_delim: None,
                 csv_type: None,
                 disc: None,
+                span_tail: None,
             }],
         };
         ParseRules {
@@ -1094,6 +1121,7 @@ mod tests {
             csv_delim: None,
             csv_type: None,
             disc: Some(vec![0x51]),
+            span_tail: None,
         });
         t.fields.push(FieldDef {
             id: "f-d3".into(),
@@ -1111,6 +1139,7 @@ mod tests {
             csv_delim: None,
             csv_type: None,
             disc: Some(vec![0xAA]),
+            span_tail: None,
         });
         let mut eng = ParserEngine::new();
         eng.set_rules(rules).unwrap();
@@ -1168,6 +1197,7 @@ mod tests {
                     csv_delim: None,
                     csv_type: None,
                     disc: None,
+                    span_tail: None,
                 }],
             }],
         }
@@ -1263,6 +1293,7 @@ mod tests {
                     csv_delim: None,
                     csv_type: None,
                     disc: None,
+                    span_tail: None,
                 }],
             }],
         }
@@ -1328,6 +1359,7 @@ mod tests {
                 csv_delim: None,
                 csv_type: None,
                 disc: None,
+                span_tail: None,
             }],
         };
         ParseRules {
@@ -1411,6 +1443,7 @@ mod tests {
                     csv_delim: Some(delim.into()),
                     csv_type: Some(ty.into()),
                     disc: None,
+                    span_tail: None,
                 }],
             }],
         }
@@ -1452,5 +1485,121 @@ mod tests {
         assert_eq!(ch("vals#2"), Some(1.0));
         assert_eq!(ch("vals#3"), Some(55.0));
         assert_eq!(ch("vals#4"), None);
+    }
+
+    fn span_tail_length_rules() -> FrameTemplate {
+        let mut pld = field("s-pld", "载荷", "payload", 3, "uint8", "little");
+        pld.span_tail = Some(true);
+        FrameTemplate {
+            id: "s".into(),
+            name: "变长帧".into(),
+            color: "#3fb950".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "lengthField".into(),
+                header_bytes: vec![0xAA, 0x55],
+                fixed_length: None,
+                length_offset: Some(2),
+                length_size: Some(1),
+                length_endian: Some("little".into()),
+                length_adjust: Some(0),
+                footer_bytes: None,
+                max_length: Some(64),
+                disc_offset: None,
+                disc_value: None,
+                discs: Vec::new(),
+            },
+            checksum: Some(ChecksumCfg {
+                algo: "sum8".into(),
+                coverage_start: 0,
+                coverage_end: -1,
+                endian: "little".into(),
+            }),
+            fields: vec![
+                field("s-len", "长度", "length", 2, "uint8", "little"),
+                pld,
+            ],
+        }
+    }
+
+    fn build_span_frame(payload: &[u8]) -> Vec<u8> {
+        let mut f = vec![0xAA, 0x55, (payload.len() + 4) as u8];
+        f.extend_from_slice(payload);
+        let sum = f.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
+        f.push(sum);
+        f
+    }
+
+    #[test]
+    fn span_tail_payload_adapts_to_length_field() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![span_tail_length_rules()],
+        })
+        .unwrap();
+        let mut stream = build_span_frame(&[0x11, 0x22, 0x33, 0x44]);
+        stream.extend_from_slice(&build_span_frame(&[0x55, 0x66]));
+        let rows = eng.feed(&stream, 0, 100);
+        assert_eq!(rows.len(), 2, "两种长度都应成帧: {rows:?}");
+        assert!(rows.iter().all(|r| r.valid), "校验应通过: {rows:?}");
+        assert_eq!(rows[0].len, 8);
+        assert_eq!(rows[1].len, 6);
+        let txt = |r: &FrameRow| {
+            r.fields
+                .iter()
+                .find(|f| f.id == "s-pld")
+                .map(|f| f.text.clone().unwrap_or_default())
+        };
+        assert_eq!(txt(&rows[0]), Some("11 22 33 44".into()));
+        assert_eq!(txt(&rows[1]), Some("55 66".into()));
+        let lenv = |r: &FrameRow| {
+            r.fields
+                .iter()
+                .find(|f| f.id == "s-len")
+                .map(|f| f.raw)
+        };
+        assert_eq!(lenv(&rows[0]), Some(8.0));
+        assert_eq!(lenv(&rows[1]), Some(6.0));
+    }
+
+    #[test]
+    fn span_tail_footer_ascii_text() {
+        let mut tpl = span_tail_length_rules();
+        tpl.id = "t".into();
+        tpl.boundary = Boundary {
+            mode: "footer".into(),
+            header_bytes: Vec::new(),
+            fixed_length: None,
+            length_offset: None,
+            length_size: None,
+            length_endian: None,
+            length_adjust: None,
+            footer_bytes: Some(vec![0x0A]),
+            max_length: Some(64),
+            disc_offset: None,
+            disc_value: None,
+            discs: Vec::new(),
+        };
+        tpl.checksum = None;
+        tpl.fields = vec![{
+            let mut a = field("s-txt", "文本", "payload", 0, "ascii", "little");
+            a.span_tail = Some(true);
+            a
+        }];
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules { templates: vec![tpl] }).unwrap();
+        let mut stream: Vec<u8> = b"1,2,3\n".to_vec();
+        stream.extend_from_slice(b"hello\n");
+        let rows = eng.feed(&stream, 0, 100);
+        assert_eq!(rows.len(), 2, "帧尾模式两帧: {rows:?}");
+        assert!(rows.iter().all(|r| r.valid));
+        let txt = |r: &FrameRow| {
+            r.fields
+                .iter()
+                .find(|f| f.id == "s-txt")
+                .map(|f| f.text.clone().unwrap_or_default())
+        };
+        assert_eq!(txt(&rows[0]), Some("1,2,3".into()));
+        assert_eq!(txt(&rows[1]), Some("hello".into()));
     }
 }

@@ -771,6 +771,65 @@ export function patchField(
   scheduleSync();
 }
 
+export function upsertFieldLinked(
+  templateId: string,
+  field: FieldDef,
+  editId: string | null,
+) {
+  pushHistory();
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((t) => {
+        if (t.id !== templateId) return t;
+        const fields = editId
+          ? t.fields.map((f) => (f.id === editId ? { ...f, ...field, id: editId } : f))
+          : [...t.fields, field];
+        const link =
+          field.role === "length" &&
+          t.boundary.mode === "lengthField" &&
+          (field.type === "uint8" || field.type === "uint16");
+        const boundary = link
+          ? {
+              ...t.boundary,
+              lengthOffset: field.offset,
+              lengthSize: field.type === "uint16" ? 2 : 1,
+            }
+          : t.boundary;
+        return { ...t, fields, boundary };
+      }),
+    },
+  });
+  scheduleSync();
+}
+
+export function setLengthDomain(
+  templateId: string,
+  patch: { lengthOffset?: number; lengthSize?: number },
+) {
+  pushHistory();
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((t) => {
+        if (t.id !== templateId) return t;
+        const boundary = { ...t.boundary, ...patch };
+        const size = boundary.lengthSize ?? 1;
+        const fields = t.fields.map((f) => {
+          if (f.role !== "length") return f;
+          const next = { ...f };
+          if (patch.lengthOffset != null) next.offset = patch.lengthOffset;
+          if (patch.lengthSize != null) {
+            next.type = size === 2 ? "uint16" : "uint8";
+            next.size = null;
+          }
+          return next;
+        });
+        return { ...t, boundary, fields };
+      }),
+    },
+  });
+  scheduleSync();
+}
+
 export function removeField(templateId: string, fieldId: string) {
   pushHistory();
   plotCleanup(templateId, fieldId);

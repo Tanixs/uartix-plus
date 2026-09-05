@@ -271,9 +271,14 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
     pieces.push({ start: 0, len: hb.length, key: "h0", kind: "hdr", fid: null, color: "#e8a33d", label: tx("帧头", "Header"), role: null, locked: false });
   }
   const fields = [...tpl.fields].sort((a, b) => a.offset - b.offset);
+  const tailReserved = checksumTail(tpl) + footerTail(tpl);
   let pos = hb.length;
   for (const f of fields) {
-    const sz = fieldSize(f);
+    const spanT = !!f.spanTail && (f.role === "data" || f.role === "payload") && f.type !== "csv";
+    let sz = fieldSize(f);
+    if (spanT && frLen > 0) {
+      sz = Math.max(f.offset, frLen - tailReserved) - f.offset;
+    }
     if (hb.length > 0 && f.offset >= 0 && f.offset + sz <= hb.length) continue;
     if (f.offset > pos) {
       pieces.push({ start: pos, len: f.offset - pos, key: `g${pos}`, kind: "gap", fid: null, color: "", label: null, role: null, locked: false });
@@ -287,7 +292,7 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
         kind: "fld",
         fid: f.id,
         color: f.color,
-        label: f.name,
+        label: spanT ? `${f.name} ↔` : f.name,
         role: f.role,
         locked: !!f.locked,
       });
@@ -954,6 +959,10 @@ function FrameCanvas() {
       field && field.disc?.length && hv.off === field.offset
         ? `<div class="fc-tip-row"><span>${tx("识别", "Disc")}</span><b>${field.disc.map((x) => x.toString(16).padStart(2, "0").toUpperCase()).join(" ")}</b></div>`
         : "";
+    const spanLine =
+      field && field.spanTail && (field.role === "data" || field.role === "payload")
+        ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${tx("自适应变长 · 覆盖至载荷尾", "Adaptive span · to payload end")}</b></div>`
+        : "";
     let valLine = "";
     if (field && live && hv.off === field.offset) {
       const lv = teleRef.current.latest[field.id];
@@ -986,6 +995,7 @@ function FrameCanvas() {
       fieldLine +
       typeLine +
       discLine +
+      spanLine +
       valLine +
       ckLine +
       `<div class="fc-tip-row"><span>${tx("位置", "Position")}</span><b>${tx(`帧内 ${hv.off} B`, `frame +${hv.off} B`)}</b></div>`;
@@ -1300,10 +1310,12 @@ function FrameCanvas() {
     const m = menuRef.current;
     closeMenu();
     if (!m || m.kind !== "sel") return;
+    const tplDef = protoRef.current.rules.templates.find((t) => t.id === m.tplId);
     dlgRef.current = {
       kind: "field",
       tplId: m.tplId,
-      tplName: protoRef.current.rules.templates.find((t) => t.id === m.tplId)?.name ?? "",
+      tplName: tplDef?.name ?? "",
+      mode: tplDef?.boundary.mode ?? "fixedLength",
       lo: m.lo,
       size: m.size,
       isAscii: false,
@@ -1338,6 +1350,7 @@ function FrameCanvas() {
       kind: "field",
       tplId,
       tplName: tpl.name,
+      mode: tpl.boundary.mode,
       lo: fd.offset,
       size: fieldSize(fd),
       edit: true,
@@ -1700,25 +1713,12 @@ function FrameCanvas() {
               onCancel={() => setDlg(null)}
               onOk={(f) => {
                 const applyIt = () => {
-                  if (dlg.edit && dlg.field) {
-                    templateStore.patchField(dlg.tplId, dlg.field.id, {
-                      id: dlg.field.id,
-                      name: f.name,
-                      role: f.role,
-                      type: f.type,
-                      endian: f.endian,
-                      scale: f.scale,
-                      unit: f.unit,
-                      color: f.color,
-                      size: f.size,
-                      csvDelim: f.csvDelim,
-                      csvType: f.csvType,
-                    });
-                    fireAnim(`${dlg.tplId}:${dlg.field.id}`);
-                  } else {
-                    templateStore.addField(dlg.tplId, f);
-                    fireAnim(`${dlg.tplId}:${f.id}`);
-                  }
+                  templateStore.upsertFieldLinked(
+                    dlg.tplId,
+                    f,
+                    dlg.edit && dlg.field ? dlg.field.id : null,
+                  );
+                  fireAnim(`${dlg.tplId}:${dlg.field?.id ?? f.id}`);
                   setDlg(null);
                   selRef.current = null;
                   dirtyRef.current = true;
@@ -1794,6 +1794,7 @@ type DlgInit =
       kind: "field";
       tplId: string;
       tplName: string;
+      mode: string;
       lo: number;
       size: number;
       edit?: boolean;
@@ -1948,6 +1949,7 @@ function FieldDialog({
   const [color, setColor] = useState(init.field?.color ?? PALETTE[Math.floor(Math.random() * PALETTE.length)]);
   const [csvDelim, setCsvDelim] = useState(init.field?.csvDelim ?? ",");
   const [csvType, setCsvType] = useState(init.field?.csvType ?? "float32");
+  const [spanTail, setSpanTail] = useState(!!init.field?.spanTail);
   useEffect(() => {
     if (init.field && init.edit) {
       setType(init.field.type);
@@ -1958,6 +1960,11 @@ function FieldDialog({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const lenRestricted = init.mode === "lengthField" && role === "length";
+  useEffect(() => {
+    if (lenRestricted && type !== "uint8" && type !== "uint16") setType("uint8");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lenRestricted]);
   const needsEndian = type === "uint16" || type === "int16" || type === "uint32" || type === "int32" || type === "float32" || type === "float64";
   const fixedSize = fieldSize({ id: "", name: "", role: "data", offset: 0, type, endian, color: "" });
   const mismatched = init.isAscii ? false : recs.length > 0 && !recs.includes(type);
@@ -2007,13 +2014,26 @@ function FieldDialog({
         <div className="fc-dlg-row">
           <label>{tx("数据类型", "Data type")}</label>
           <select value={type} onChange={(e) => setType(e.target.value as FieldType)}>
-            {(recs.length ? [...recs, ...TYPE_ORDER.filter((t) => !recs.includes(t))] : TYPE_ORDER).map((t) => (
+            {(lenRestricted
+              ? TYPE_ORDER.filter((t) => t === "uint8" || t === "uint16")
+              : recs.length
+                ? [...recs, ...TYPE_ORDER.filter((t) => !recs.includes(t))]
+                : TYPE_ORDER
+            ).map((t) => (
               <option key={t} value={t}>
                 {typeLabel(t)}
-                {recs.includes(t) ? ` ${tx("✓推荐", "✓ suggested")}` : ""}
+                {!lenRestricted && recs.includes(t) ? ` ${tx("✓推荐", "✓ suggested")}` : ""}
               </option>
             ))}
           </select>
+          {lenRestricted && (
+            <div className="fc-dlg-hint">
+              {tx(
+                "长度域仅支持 1/2 字节：选择后此字段自动作为帧的长度域（偏移与宽度同步到截帧配置）。",
+                "The length domain supports 1/2 bytes: this field doubles as the frame length field (offset & width sync to the framing config).",
+              )}
+            </div>
+          )}
         </div>
         <div className="fc-dlg-row">
           <label>{tx("字节序", "Endianness")}</label>
@@ -2022,6 +2042,29 @@ function FieldDialog({
             <option value="big">{tx("大端 BE（高前）", "Big-endian BE")}</option>
           </select>
         </div>
+        {(role === "data" || role === "payload") && type !== "csv" && (
+          <>
+            <div className="fc-dlg-row">
+              <label>{tx("变长载荷", "Variable span")}</label>
+              <label className="chk">
+                <input
+                  type="checkbox"
+                  checked={spanTail}
+                  onChange={(e) => setSpanTail(e.target.checked)}
+                />
+                {tx("延伸至载荷尾（自适应变长）", "Extend to payload end (adaptive)")}
+              </label>
+            </div>
+            {spanTail && (
+              <div className="fc-dlg-warn soft">
+                {tx(
+                  "本字段从其偏移一直覆盖到校验/帧尾之前，随每帧实际长度自适应；输出一个固定文本变量（ASCII 类型输出文本，其余输出 HEX），字段与变量数目不变。",
+                  "This field stretches from its offset to just before the checksum/footer, adapting to each frame's real length; it emits one fixed text variable (ASCII type as text, others as HEX). Field/variable count stays constant.",
+                )}
+              </div>
+            )}
+          </>
+        )}
         {type === "csv" && (
           <>
             <div className="fc-dlg-warn soft">
@@ -2099,6 +2142,10 @@ function FieldDialog({
                 locked: init.field?.locked ?? false,
                 csvDelim: type === "csv" ? csvDelim || "," : null,
                 csvType: type === "csv" ? csvType : null,
+                spanTail:
+                  (role === "data" || role === "payload") && type !== "csv"
+                    ? spanTail
+                    : null,
               })
             }
           >
