@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
+import { clampFlyoutMenu } from "../../shared/Flyout";
 import type { FieldDef, FieldRole, FieldType, FrameTemplate } from "../../ipc/types";
 import * as fcStore from "./frameStore";
 import * as serialStore from "../serial/serialStore";
@@ -404,6 +406,7 @@ function layoutBlocks(
 function FrameCanvas() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const noframeRef = useRef<HTMLDivElement | null>(null);
+  const menuElRef = useRef<HTMLDivElement | null>(null);
   // 本次会话内出现过实时帧的模板 id（徽标区分"从未匹配"与"回看历史"）
   const seenRef = useRef<Set<string>>(new Set());
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -701,13 +704,6 @@ function FrameCanvas() {
           ctx.fillStyle = hexA("#e8a33d", dark ? 0.96 : 0.92);
           rrLR(ctx, x0 - 1, yTop, wRun + 2, s, rl, rv);
           ctx.fill();
-          if (wRun > 44) {
-            ctx.fillStyle = "#fff";
-            ctx.textAlign = "left";
-            const shown = fitLabel(ctx, blk.label ?? tx("帧头", "Header"), wRun - 16);
-            if (shown) ctx.fillText(shown, x0 + 10, yTop + s / 2 + 1);
-            ctx.textAlign = "center";
-          }
         } else if (blk.kind === "ftr") {
           ctx.fillStyle = hexA(blk.color, dark ? 0.45 : 0.38);
           rrLR(ctx, x0, yTop, wRun, s, rl, rv);
@@ -715,20 +711,6 @@ function FrameCanvas() {
           ctx.strokeStyle = hexA(blk.color, 0.8);
           rrLR(ctx, x0 + 0.5, yTop + 0.5, wRun - 1, s - 1, rl, rv);
           ctx.stroke();
-          if (wRun > 44) {
-            ctx.fillStyle = dark ? mixC(cFg, blk.color, 0.7) : "#000000";
-            const isFtr = curRef.current ? footerTail(curRef.current) > 0 : false;
-            const algo = isFtr ? null : curRef.current?.checksum?.algo ?? null;
-            const txt = isFtr
-              ? tx("帧尾", "Footer")
-              : algo && wRun > 96
-                ? `${tx("校验", "Checksum")}·${algo}`
-                : tx("校验", "Checksum");
-            ctx.textAlign = "left";
-            const shown = fitLabel(ctx, txt, wRun - 16);
-            if (shown) ctx.fillText(shown, x0 + 10, yTop + s / 2 + 1);
-            ctx.textAlign = "center";
-          }
         } else if (blk.kind === "fld") {
           const animKey = `${curRef.current?.id}:${blk.fid}`;
           const until = animsRef.current.get(animKey);
@@ -1235,6 +1217,13 @@ function FrameCanvas() {
     setMenuState({ x: cx - rect.left, y: cy - rect.top });
     dirtyRef.current = true;
   };
+  useLayoutEffect(() => {
+    if (!menuState) return;
+    const el = menuElRef.current;
+    const wrap = wrapRef.current;
+    if (!el || !wrap) return;
+    clampFlyoutMenu(el, wrap, menuState.x, menuState.y);
+  }, [menuState]);
   const closeMenu = () => {
     setMenuState(null);
     menuRef.current = null;
@@ -1279,6 +1268,8 @@ function FrameCanvas() {
   };
 
   const onKeyDown = (ev: React.KeyboardEvent) => {
+    const tgt = ev.target as HTMLElement | null;
+    if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)) return;
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
       ev.preventDefault();
       ev.shiftKey ? doRedo() : doUndo();
@@ -1563,7 +1554,7 @@ function FrameCanvas() {
             return (
               <>
                 <div className="fc-menu-mask" onClick={closeMenu} onContextMenu={(e) => { e.preventDefault(); closeMenu(); }} />
-                <div className="fc-menu" style={{ left: menuState.x, top: menuState.y }}>
+                <div className="fc-menu" ref={menuElRef} style={{ left: menuState.x, top: menuState.y }}>
                   {m.kind === "sel" && (
                     <>
                       <button className="fc-menu-item primary" onClick={defineFromMenu}>
@@ -1871,7 +1862,13 @@ function HeadTailDialog({
 
   return (
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
-      <div className="fc-dlg" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="fc-dlg"
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onCancel();
+        }}
+      >
         <div className="fc-dlg-title">
           {isHdr ? tx("编辑帧头", "Edit header") : tx("编辑帧尾", "Edit footer")}{" "}
           <span className="fc-dlg-sub">
@@ -1886,6 +1883,7 @@ function HeadTailDialog({
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") save();
+              if (e.key === "Escape") onCancel();
               e.stopPropagation();
             }}
             placeholder={isHdr ? tx("如 AA 55", "e.g. AA 55") : tx("如 0D 0A 或 2C", "e.g. 0D 0A or 2C")}
@@ -1980,7 +1978,13 @@ function FieldDialog({
 
   return (
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
-      <div className="fc-dlg" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className="fc-dlg"
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onCancel();
+        }}
+      >
         <div className="fc-dlg-title">
           {init.edit ? tx("编辑字段", "Edit field") : tx("定义字段", "Define field")}{" "}
           <span className="fc-dlg-sub">

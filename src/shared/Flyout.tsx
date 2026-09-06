@@ -51,3 +51,24 @@ export function Flyout(props: {
     document.body,
   );
 }
+
+/** 容器内绝对定位菜单的统一钳制：x/y 为容器内视觉像素偏移，写回时补偿 CSS zoom。 */
+export function clampFlyoutMenu(
+  el: HTMLElement,
+  container: HTMLElement,
+  vx: number,
+  vy: number,
+): void {
+  const mr = el.getBoundingClientRect();
+  const cr = container.getBoundingClientRect();
+  if (mr.width <= 0 || cr.width <= 0) return;
+  const zf = Number(getComputedStyle(document.documentElement).zoom) || 1;
+  let x = vx;
+  let y = vy;
+  if (x + mr.width > cr.width - 4) x = cr.width - mr.width - 4;
+  if (y + mr.height > cr.height - 4) y = cr.height - mr.height - 4;
+  x = Math.max(4, x);
+  y = Math.max(4, y);
+  el.style.left = `${x / zf}px`;
+  el.style.top = `${y / zf}px`;
+}
