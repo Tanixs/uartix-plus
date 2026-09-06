@@ -586,7 +586,56 @@ export function removeChannel(id: string) {
 
 export function removeByTpl(tplId: string, fieldId: string | null) {
   const doomed = channels.filter(
-    (c) => c.tplId === tplId && (!fieldId || c.fieldId === fieldId),
+    (c) =>
+      c.tplId === tplId &&
+      (!fieldId || c.fieldId === fieldId || c.fieldId.startsWith(`${fieldId}#`)),
+  );
+  for (const ch of doomed) removeChannel(ch.id);
+}
+
+export function groupChannelState(
+  tplId: string,
+  baseId: string,
+): "off" | "on" | "half" {
+  const group = channels.filter(
+    (c) =>
+      c.tplId === tplId &&
+      (c.fieldId === baseId || c.fieldId.startsWith(`${baseId}#`)),
+  );
+  if (group.length === 0) return "off";
+  return group.every((c) => c.visible) ? "on" : "half";
+}
+
+export function addChannelGroup(
+  tplId: string,
+  baseId: string,
+  indices: number[],
+  name: string,
+  color: string,
+): void {
+  for (const i of indices) {
+    const fieldId = `${baseId}#${i}`;
+    if (channels.some((c) => c.tplId === tplId && c.fieldId === fieldId)) continue;
+    channels = [
+      ...channels,
+      {
+        id: crypto.randomUUID(),
+        tplId,
+        fieldId,
+        name: `${name}${i}`,
+        color,
+        visible: true,
+      },
+    ];
+  }
+  emit();
+}
+
+export function removeChannelGroup(tplId: string, baseId: string): void {
+  const doomed = channels.filter(
+    (c) =>
+      c.tplId === tplId &&
+      (c.fieldId === baseId || c.fieldId.startsWith(`${baseId}#`)),
   );
   for (const ch of doomed) removeChannel(ch.id);
 }

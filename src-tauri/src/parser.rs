@@ -109,6 +109,8 @@ pub struct FieldDef {
     pub disc: Option<Vec<u8>>,
     #[serde(default)]
     pub span_tail: Option<bool>,
+    #[serde(default)]
+    pub span_elem: Option<String>,
 }
 
 fn default_endian() -> String {
@@ -779,6 +781,27 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
                     value: 0.0,
                     text: Some(text),
                 });
+                if let Some(elem) = f.span_elem.as_deref() {
+                    let esize = span_elem_size(elem);
+                    if esize > 0 {
+                        let scale = f.scale.unwrap_or(1.0);
+                        let offv = f.offset_value.unwrap_or(0.0);
+                        let big = f.endian == "big";
+                        let mut i: usize = 0;
+                        while f.offset + (i + 1) * esize <= end && i < CSV_MAX_CH {
+                            let s2 = &buf[f.offset + i * esize..f.offset + (i + 1) * esize];
+                            let raw = decode_span_elem(elem, s2, big);
+                            out.push(FieldOut {
+                                id: format!("{}#{}", f.id, i + 1),
+                                name: format!("{}{}", f.name, i + 1),
+                                raw,
+                                value: raw * scale + offv,
+                                text: None,
+                            });
+                            i += 1;
+                        }
+                    }
+                }
             }
             continue;
         }
@@ -823,6 +846,30 @@ fn reserved_tail_len(tpl: &FrameTemplate) -> usize {
         }
     }
     rt
+}
+
+fn span_elem_size(elem: &str) -> usize {
+    match elem {
+        "uint8" | "int8" => 1,
+        "uint16" | "int16" => 2,
+        "uint32" | "int32" | "float32" => 4,
+        "float64" => 8,
+        _ => 0,
+    }
+}
+
+fn decode_span_elem(elem: &str, sl: &[u8], big: bool) -> f64 {
+    let endian = if big { "big" } else { "little" };
+    match elem {
+        "uint8" => sl[0] as f64,
+        "int8" => sl[0] as i8 as f64,
+        "uint16" | "uint32" => read_uint(sl, endian) as f64,
+        "int16" => (read_uint(sl, endian) as u16) as i16 as f64,
+        "int32" => (read_uint(sl, endian) as u32) as i32 as f64,
+        "float32" => f32::from_bits(read_uint(sl, endian) as u32) as f64,
+        "float64" => f64::from_bits(read_uint(sl, endian)),
+        _ => 0.0,
+    }
 }
 
 #[cfg(test)]
@@ -918,6 +965,7 @@ mod tests {
             csv_type: None,
             disc: None,
             span_tail: None,
+            span_elem: None,
         }
     }
 
@@ -1071,6 +1119,7 @@ mod tests {
                 csv_type: None,
                 disc: None,
                 span_tail: None,
+                span_elem: None,
             }],
         };
         ParseRules {
@@ -1122,6 +1171,7 @@ mod tests {
             csv_type: None,
             disc: Some(vec![0x51]),
             span_tail: None,
+            span_elem: None,
         });
         t.fields.push(FieldDef {
             id: "f-d3".into(),
@@ -1140,6 +1190,7 @@ mod tests {
             csv_type: None,
             disc: Some(vec![0xAA]),
             span_tail: None,
+            span_elem: None,
         });
         let mut eng = ParserEngine::new();
         eng.set_rules(rules).unwrap();
@@ -1198,6 +1249,7 @@ mod tests {
                     csv_type: None,
                     disc: None,
                     span_tail: None,
+                    span_elem: None,
                 }],
             }],
         }
@@ -1294,6 +1346,7 @@ mod tests {
                     csv_type: None,
                     disc: None,
                     span_tail: None,
+                    span_elem: None,
                 }],
             }],
         }
@@ -1360,6 +1413,7 @@ mod tests {
                 csv_type: None,
                 disc: None,
                 span_tail: None,
+                span_elem: None,
             }],
         };
         ParseRules {
@@ -1444,6 +1498,7 @@ mod tests {
                     csv_type: Some(ty.into()),
                     disc: None,
                     span_tail: None,
+                    span_elem: None,
                 }],
             }],
         }
@@ -1601,5 +1656,45 @@ mod tests {
         };
         assert_eq!(txt(&rows[0]), Some("1,2,3".into()));
         assert_eq!(txt(&rows[1]), Some("hello".into()));
+    }
+
+    #[test]
+    fn span_tail_element_sequence() {
+        let mut tpl = span_tail_length_rules();
+        let mut pld = field("s-pld", "温度", "payload", 3, "uint8", "little");
+        pld.span_tail = Some(true);
+        pld.span_elem = Some("float32".into());
+        pld.scale = Some(0.5);
+        tpl.fields = vec![field("s-len", "长度", "length", 2, "uint8", "little"), pld];
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules { templates: vec![tpl] }).unwrap();
+
+        let mut p1 = Vec::new();
+        p1.extend_from_slice(&1.5f32.to_le_bytes());
+        p1.extend_from_slice(&(-2.25f32).to_le_bytes());
+        p1.extend_from_slice(&100.0f32.to_le_bytes());
+        let mut stream = build_span_frame(&p1);
+        stream.extend_from_slice(&build_span_frame(&3.0f32.to_le_bytes()));
+        let rows = eng.feed(&stream, 0, 100);
+        assert_eq!(rows.len(), 2, "两帧都应成帧: {rows:?}");
+        assert!(rows.iter().all(|r| r.valid));
+        assert_eq!(rows[0].len, 16);
+        assert_eq!(rows[1].len, 8);
+
+        let ch = |r: &FrameRow, k: &str| {
+            r.fields.iter().find(|f| f.id == k).map(|f| f.value)
+        };
+        assert_eq!(ch(&rows[0], "s-pld#1"), Some(0.75));
+        assert_eq!(ch(&rows[0], "s-pld#2"), Some(-1.125));
+        assert_eq!(ch(&rows[0], "s-pld#3"), Some(50.0));
+        assert!(rows[0].fields.iter().find(|f| f.id == "s-pld#4").is_none());
+        assert!(rows[0]
+            .fields
+            .iter()
+            .find(|f| f.id == "s-pld")
+            .and_then(|f| f.text.as_deref())
+            .is_some(), "父文本输出应保留");
+        assert_eq!(ch(&rows[1], "s-pld#1"), Some(1.5));
+        assert!(rows[1].fields.iter().find(|f| f.id == "s-pld#2").is_none());
     }
 }

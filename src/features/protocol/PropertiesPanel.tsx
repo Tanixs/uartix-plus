@@ -535,17 +535,47 @@ export function PropertiesPanel() {
         )}
       </div>
       {(field.role === "data" || field.role === "payload") && field.type !== "csv" && (
-        <div className="form-row">
-          <label>{tx("变长载荷", "Variable span")}</label>
-          <label className="chk">
-            <input
-              type="checkbox"
-              checked={!!field.spanTail}
-              onChange={(e) => patch({ spanTail: e.target.checked })}
-            />
-            <span>{tx("延伸至载荷尾（自适应变长）", "Extend to payload end (adaptive)")}</span>
-          </label>
-        </div>
+        <>
+          <div className="form-row">
+            <label>{tx("变长载荷", "Variable span")}</label>
+            <label className="chk">
+              <input
+                type="checkbox"
+                checked={!!field.spanTail}
+                onChange={(e) =>
+                  patch({
+                    spanTail: e.target.checked,
+                    spanElem:
+                      e.target.checked && !field.spanElem ? "float32" : field.spanElem ?? null,
+                  })
+                }
+              />
+              <span>{tx("延伸至载荷尾（自适应变长）", "Extend to payload end (adaptive)")}</span>
+            </label>
+          </div>
+          {!!field.spanTail && (
+            <div className="form-row">
+              <label>{tx("元素类型", "Element type")}</label>
+              <select
+                className="input"
+                value={field.spanElem ?? "text"}
+                onChange={(e) =>
+                  patch({ spanElem: e.target.value === "text" ? null : e.target.value })
+                }
+              >
+                <option value="text">{tx("文本（HEX/ASCII 一整串）", "Text (one HEX/ASCII string)")}</option>
+                <option value="uint8">uint8</option>
+                <option value="int8">int8</option>
+                <option value="uint16">uint16</option>
+                <option value="int16">int16</option>
+                <option value="uint32">uint32</option>
+                <option value="int32">int32</option>
+                <option value="float32">float32</option>
+                <option value="float64">float64</option>
+              </select>
+            </div>
+          )}
+        </>
       )}
       {field.type === "csv" && (
         <div className="form-row">

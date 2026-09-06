@@ -48,7 +48,17 @@ function toggleEye(
   fieldId: string,
   name: string,
   color: string,
+  groupIndices?: number[],
 ): void {
+  if (groupIndices) {
+    const st = plotStore.groupChannelState(tplId, fieldId);
+    if (st === "off") {
+      plotStore.addChannelGroup(tplId, fieldId, groupIndices, name, color);
+    } else {
+      plotStore.removeChannelGroup(tplId, fieldId);
+    }
+    return;
+  }
   const st = plotStore.channelState(tplId, fieldId);
   if (st === "off") {
     plotStore.addChannel({
@@ -554,10 +564,25 @@ export function TemplatesPanel() {
               const lv = tele.latest[f.id];
               const selected =
                 s.selection?.kind === "field" && s.selection.fieldId === f.id;
-              const numeric = f.type !== "ascii";
-              const eye = numeric ? plotStore.channelState(tpl.id, f.id) : "off";
+              const seq = !!f.spanTail && !!f.spanElem;
+              const adaptive = f.type === "csv" || seq;
+              const seqIndices: number[] = [];
+              if (adaptive) {
+                for (let i = 1; i <= 64; i++) {
+                  if (!tele.latest[`${f.id}#${i}`]) break;
+                  seqIndices.push(i);
+                }
+              }
+              const numeric = f.type !== "ascii" || seq;
+              const eye = numeric
+                ? seq
+                  ? plotStore.groupChannelState(tpl.id, f.id)
+                  : plotStore.channelState(tpl.id, f.id)
+                : "off";
               const eyeOpen = plot.channels.some(
-                (c) => c.tplId === tpl.id && c.fieldId === f.id,
+                (c) =>
+                  c.tplId === tpl.id &&
+                  (c.fieldId === f.id || c.fieldId.startsWith(`${f.id}#`)),
               );
               const row = (
                 <div
@@ -585,8 +610,8 @@ export function TemplatesPanel() {
                     if (lv) store.locate(lv.seq);
                   }}
                   title={
-                    f.type === "csv"
-                      ? tx("自适应分隔数值：展开行显示各通道实时值，眼睛开整组曲线", "Auto delimiter values: the expanded row shows per-channel live values; the eye toggles the whole group")
+                    adaptive
+                      ? tx("自适应序列：展开行显示各元素实时值，眼睛开/关整组曲线", "Adaptive sequence: expanded rows show per-element live values; the eye toggles the whole group")
                       : numeric
                         ? tx("眼睛开关 2D 曲线；拖到曲线区也可添加；点击定位到 Hex 区", "Eye toggles the 2D curve; drag onto the plot to add; click locates it in the Hex view")
                         : tx("点击定位到 Hex 区 0x", "Click to locate in the Hex view at 0x") + (lv ? lv.seq.toString(16) : "")
@@ -594,11 +619,29 @@ export function TemplatesPanel() {
                 >
                   {numeric && (
                     <button
-                      className={`legend-eye ${eye === "on" ? "on" : ""} ${eye === "hidden" ? "half" : ""}`}
-                      title={eye === "off" ? tx("开启 2D 曲线", "Show 2D curve") : eye === "hidden" ? tx("显示曲线（当前隐藏）", "Reveal curve (currently hidden)") : tx("隐藏曲线", "Hide curve")}
+                      className={`legend-eye ${eye === "on" ? "on" : ""} ${eye === "hidden" || eye === "half" ? "half" : ""}`}
+                      title={
+                        eye === "off"
+                          ? adaptive
+                            ? tx("开启整组 2D 曲线", "Show group curves")
+                            : tx("开启 2D 曲线", "Show 2D curve")
+                          : eye === "on"
+                            ? adaptive
+                              ? tx("移除整组曲线", "Remove group curves")
+                              : tx("隐藏曲线", "Hide curve")
+                            : adaptive
+                              ? tx("移除整组曲线（部分已隐藏）", "Remove group curves (some hidden)")
+                              : tx("显示曲线（当前隐藏）", "Reveal curve (currently hidden)")
+                      }
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggleEye(tpl.id, f.id, `${tpl.name}·${f.name}`, f.color);
+                        toggleEye(
+                          tpl.id,
+                          f.id,
+                          `${tpl.name}·${f.name}`,
+                          f.color,
+                          seq ? seqIndices : undefined,
+                        );
                       }}
                     >
                       <EyeIcon open={eyeOpen} />
@@ -610,21 +653,26 @@ export function TemplatesPanel() {
                   />
                   <span className="legend-name">
                     {tpl.name}·{f.name}
-                    {f.type === "csv" ? (
+                    {adaptive ? (
                       <em className="tpl-src">{tx("自适应", "auto")}</em>
                     ) : null}
                   </span>
-                  <span className="legend-value">
+                  <span
+                    className="legend-value"
+                    title={lv?.text ?? undefined}
+                  >
                     {lv
-                      ? lv.text !== null
-                        ? lv.text
-                        : formatValue(lv.value, decimals)
+                      ? seq
+                        ? `×${seqIndices.length}`
+                        : lv.text !== null
+                          ? lv.text
+                          : formatValue(lv.value, decimals)
                       : "--"}
-                    {lv && f.unit && f.unit !== "ascii" ? ` ${f.unit}` : ""}
+                    {lv && f.unit && f.unit !== "ascii" && !seq ? ` ${f.unit}` : ""}
                   </span>
                 </div>
               );
-              if (f.type !== "csv") return [row];
+              if (!adaptive) return [row];
               const chans: React.ReactNode[] = [];
               for (let i = 1; i <= 64; i++) {
                 const cl = tele.latest[`${f.id}#${i}`];

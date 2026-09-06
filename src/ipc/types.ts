@@ -151,6 +151,7 @@ export interface FieldDef {
   csvType?: string | null;
   disc?: number[] | null;
   spanTail?: boolean | null;
+  spanElem?: string | null;
 }
 
 export interface FrameTemplate {

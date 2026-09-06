@@ -961,7 +961,11 @@ function FrameCanvas() {
         : "";
     const spanLine =
       field && field.spanTail && (field.role === "data" || field.role === "payload")
-        ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${tx("自适应变长 · 覆盖至载荷尾", "Adaptive span · to payload end")}</b></div>`
+        ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${
+            field.spanElem
+              ? `${tx("自适应变长", "Adaptive span")} · ${field.spanElem.toUpperCase()} ${field.endian === "big" ? "BE" : "LE"}`
+              : tx("自适应变长 · 文本", "Adaptive span · text")
+          }</b></div>`
         : "";
     let valLine = "";
     if (field && live && hv.off === field.offset) {
@@ -1950,6 +1954,9 @@ function FieldDialog({
   const [csvDelim, setCsvDelim] = useState(init.field?.csvDelim ?? ",");
   const [csvType, setCsvType] = useState(init.field?.csvType ?? "float32");
   const [spanTail, setSpanTail] = useState(!!init.field?.spanTail);
+  const [spanElem, setSpanElem] = useState<string>(
+    init.field?.spanTail ? (init.field?.spanElem ?? "text") : "float32",
+  );
   useEffect(() => {
     if (init.field && init.edit) {
       setType(init.field.type);
@@ -1965,7 +1972,9 @@ function FieldDialog({
     if (lenRestricted && type !== "uint8" && type !== "uint16") setType("uint8");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lenRestricted]);
-  const needsEndian = type === "uint16" || type === "int16" || type === "uint32" || type === "int32" || type === "float32" || type === "float64";
+  const spanElemNeedsEndian =
+    spanTail && spanElem !== "text" && spanElem !== "uint8" && spanElem !== "int8";
+  const needsEndian = type === "uint16" || type === "int16" || type === "uint32" || type === "int32" || type === "float32" || type === "float64" || spanElemNeedsEndian;
   const fixedSize = fieldSize({ id: "", name: "", role: "data", offset: 0, type, endian, color: "" });
   const mismatched = init.isAscii ? false : recs.length > 0 && !recs.includes(type);
 
@@ -2056,12 +2065,33 @@ function FieldDialog({
               </label>
             </div>
             {spanTail && (
-              <div className="fc-dlg-warn soft">
-                {tx(
-                  "本字段从其偏移一直覆盖到校验/帧尾之前，随每帧实际长度自适应；输出一个固定文本变量（ASCII 类型输出文本，其余输出 HEX），字段与变量数目不变。",
-                  "This field stretches from its offset to just before the checksum/footer, adapting to each frame's real length; it emits one fixed text variable (ASCII type as text, others as HEX). Field/variable count stays constant.",
-                )}
-              </div>
+              <>
+                <div className="fc-dlg-row">
+                  <label>{tx("元素类型", "Element type")}</label>
+                  <select value={spanElem} onChange={(e) => setSpanElem(e.target.value)}>
+                    <option value="text">{tx("文本（HEX/ASCII 一整串）", "Text (one HEX/ASCII string)")}</option>
+                    <option value="uint8">uint8</option>
+                    <option value="int8">int8</option>
+                    <option value="uint16">uint16</option>
+                    <option value="int16">int16</option>
+                    <option value="uint32">uint32</option>
+                    <option value="int32">int32</option>
+                    <option value="float32">float32</option>
+                    <option value="float64">float64</option>
+                  </select>
+                </div>
+                <div className="fc-dlg-warn soft">
+                  {spanElem === "text"
+                    ? tx(
+                        "本字段从其偏移一直覆盖到校验/帧尾之前，随每帧实际长度自适应；输出一个文本变量（ASCII 类型输出文本，其余输出 HEX）。",
+                        "This field stretches from its offset to just before the checksum/footer, adapting to each frame's real length; it emits one text variable (ASCII type as text, others as HEX).",
+                      )
+                    : tx(
+                        `载荷区按 ${spanElem} ${endian === "big" ? "大端" : "小端"} 逐元素解析（缩放/单位逐元素生效），输出 名称1..N 动态数值变量——可绘图、可脚本引用；随每帧实际长度自适应，上限 64。`,
+                        `Payload is parsed element-by-element as ${spanElem} ${endian === "big" ? "BE" : "LE"} (scale/unit apply per element), emitting dynamic numeric variables Name1..N — plottable and scriptable; adapts per frame, max 64.`,
+                      )}
+                </div>
+              </>
             )}
           </>
         )}
@@ -2145,6 +2175,13 @@ function FieldDialog({
                 spanTail:
                   (role === "data" || role === "payload") && type !== "csv"
                     ? spanTail
+                    : null,
+                spanElem:
+                  (role === "data" || role === "payload") &&
+                  type !== "csv" &&
+                  spanTail &&
+                  spanElem !== "text"
+                    ? spanElem
                     : null,
               })
             }

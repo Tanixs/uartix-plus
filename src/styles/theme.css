@@ -1374,6 +1374,11 @@ body {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text);
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tpl-footer {
