@@ -507,6 +507,20 @@ fn validate(tpl: &FrameTemplate) -> Result<(), String> {
             ));
         }
     }
+    if let Some(ck) = &tpl.checksum {
+        if ck.algo != "none" {
+            if let Some(f) = tpl.fields.iter().find(|f| f.role == "checksum") {
+                let fw = type_size(f);
+                let aw = checksum_size(&ck.algo);
+                if fw != aw {
+                    return Err(format!(
+                        "模板[{}]校验域占 {} B，但算法 {} 产出 {} B——请调整校验字段宽度或算法",
+                        tpl.name, fw, ck.algo, aw
+                    ));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1696,5 +1710,50 @@ mod tests {
             .is_some(), "父文本输出应保留");
         assert_eq!(ch(&rows[1], "s-pld#1"), Some(1.5));
         assert!(rows[1].fields.iter().find(|f| f.id == "s-pld#2").is_none());
+    }
+
+    fn ck_template(ck_type: &str) -> FrameTemplate {
+        FrameTemplate {
+            id: "ck".into(),
+            name: "校验帧".into(),
+            color: "#3fb950".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "fixedLength".into(),
+                header_bytes: Vec::new(),
+                fixed_length: Some(2),
+                length_offset: None,
+                length_size: None,
+                length_endian: None,
+                length_adjust: None,
+                footer_bytes: None,
+                max_length: Some(64),
+                disc_offset: None,
+                disc_value: None,
+                discs: Vec::new(),
+            },
+            checksum: Some(ChecksumCfg {
+                algo: "sum8".into(),
+                coverage_start: 0,
+                coverage_end: -1,
+                endian: "little".into(),
+            }),
+            fields: vec![field("ck1", "和校验", "checksum", 0, ck_type, "little")],
+        }
+    }
+
+    #[test]
+    fn checksum_field_width_must_match_algo() {
+        let mut eng = ParserEngine::new();
+        assert!(eng.set_rules(ParseRules { templates: vec![ck_template("uint8")] }).is_ok());
+        let err = eng
+            .set_rules(ParseRules {
+                templates: vec![ck_template("uint16")],
+            })
+            .unwrap_err();
+        assert!(err.contains("校验域占"), "应报出宽度一致性错误: {err}");
+        let rows = eng.feed(&[0x10, 0x10], 0, 1);
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].valid, "sum8(0x10)=0x10 应通过");
     }
 }

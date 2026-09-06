@@ -332,7 +332,7 @@ export function PropertiesPanel() {
             className="input"
             value={tpl.checksum?.algo ?? "sum8"}
             onChange={(e) =>
-              store.patchChecksum(tpl.id, { algo: e.target.value as ChecksumAlgo })
+              store.setChecksumAlgo(tpl.id, e.target.value as ChecksumAlgo)
             }
           >
             {ALGOS.map((a) => (
@@ -341,6 +341,12 @@ export function PropertiesPanel() {
               </option>
             ))}
           </select>
+        </div>
+        <div className="form-hint">
+          {tx(
+            "切换算法时画布上的校验域字段宽度会自动跟随（1/2/4 B）；若两者不一致，模板校验会报错阻止保存。",
+            "Canvas checksum fields auto-resize to match the algorithm (1/2/4 B); a width mismatch blocks saving with a clear error.",
+          )}
         </div>
         {tpl.checksum && tpl.checksum.algo !== "none" && (
           <>

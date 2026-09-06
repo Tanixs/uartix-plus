@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { tx } from "../../i18n/strings";
 import type {
+  ChecksumAlgo,
   FieldDef,
   FieldType,
   FrameTemplate,
@@ -771,10 +772,20 @@ export function patchField(
   scheduleSync();
 }
 
+export const CHECKSUM_SIZES: Record<string, number> = {
+  sum8: 1,
+  xor8: 1,
+  sumadd: 2,
+  crc16_modbus: 2,
+  crc16_ccitt: 2,
+  crc32: 4,
+};
+
 export function upsertFieldLinked(
   templateId: string,
   field: FieldDef,
   editId: string | null,
+  ckAlgo?: string | null,
 ) {
   pushHistory();
   set({
@@ -795,7 +806,47 @@ export function upsertFieldLinked(
               lengthSize: field.type === "uint16" ? 2 : 1,
             }
           : t.boundary;
-        return { ...t, fields, boundary };
+        const checksum =
+          field.role === "checksum" && ckAlgo && ckAlgo !== "none"
+            ? {
+                algo: ckAlgo as ChecksumAlgo,
+                coverageStart: t.checksum?.coverageStart ?? 0,
+                coverageEnd: -(fieldSize(field) || 1),
+                endian: (t.checksum?.endian ?? "little") as "little" | "big",
+              }
+            : t.checksum;
+        return { ...t, fields, boundary, checksum };
+      }),
+    },
+  });
+  scheduleSync();
+}
+
+export function setChecksumAlgo(templateId: string, algo: ChecksumAlgo) {
+  pushHistory();
+  const size = CHECKSUM_SIZES[algo] ?? 1;
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((t) => {
+        if (t.id !== templateId) return t;
+        const oldSize = t.checksum ? (CHECKSUM_SIZES[t.checksum.algo] ?? 1) : 1;
+        const oldEnd = t.checksum?.coverageEnd ?? -oldSize;
+        const checksum: NonNullable<FrameTemplate["checksum"]> = {
+          algo,
+          coverageStart: t.checksum?.coverageStart ?? 0,
+          coverageEnd: oldEnd === -oldSize ? -size : oldEnd,
+          endian: t.checksum?.endian ?? "little",
+        };
+        const fields =
+          algo === "none"
+            ? t.fields
+            : t.fields.map((f) => {
+                if (f.role !== "checksum") return f;
+                const want: FieldType =
+                  size === 1 ? "uint8" : size === 2 ? "uint16" : "uint32";
+                return f.type === want ? f : { ...f, type: want };
+              });
+        return { ...t, checksum, fields };
       }),
     },
   });

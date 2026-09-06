@@ -13,7 +13,7 @@ import * as fcStore from "./frameStore";
 import * as serialStore from "../serial/serialStore";
 import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
-import { fieldSize, PALETTE } from "../protocol/templateStore";
+import { fieldSize, PALETTE, CHECKSUM_SIZES } from "../protocol/templateStore";
 import { groupDisplayName, presetGroupKey } from "./presets";
 import { parseHexBytes } from "../../shared/hexBytes";
 import { getLocale, tx, useLocale } from "../../i18n/strings";
@@ -958,7 +958,15 @@ function FrameCanvas() {
     }
     const ckLine =
       blkKind === "ftr" && !isFtrTail
-        ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${tx("引擎自动计算 · 点击修改算法", "Computed by engine · click to change algorithm")}</b></div>`
+        ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${
+            tpl?.checksum && tpl.checksum.algo !== "none"
+              ? `${tx("校验", "Verify")} ${tpl.checksum.algo} · ${tx("覆盖", "coverage")} ${tpl.checksum.coverageStart}~${tpl.checksum.coverageEnd} · ${tx("点击修改", "click to change")}`
+              : tx("未启用校验 · 点击配置算法", "Checksum not enabled · click to configure")
+          }</b></div>`
+        : "";
+    const ck2Line =
+      field?.role === "checksum2"
+        ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${tx("视觉标注位 · 与 CK1 一起由算法验证", "Visual marker · verified with CK1 by the algorithm")}</b></div>`
         : "";
     let head = "";
     if (live && b !== null) {
@@ -982,6 +990,7 @@ function FrameCanvas() {
       typeLine +
       discLine +
       spanLine +
+      ck2Line +
       valLine +
       ckLine +
       `<div class="fc-tip-row"><span>${tx("位置", "Position")}</span><b>${tx(`帧内 ${hv.off} B`, `frame +${hv.off} B`)}</b></div>`;
@@ -1311,6 +1320,7 @@ function FrameCanvas() {
       tplId: m.tplId,
       tplName: tplDef?.name ?? "",
       mode: tplDef?.boundary.mode ?? "fixedLength",
+      ckAlgo: tplDef?.checksum?.algo ?? null,
       lo: m.lo,
       size: m.size,
       isAscii: false,
@@ -1346,6 +1356,7 @@ function FrameCanvas() {
       tplId,
       tplName: tpl.name,
       mode: tpl.boundary.mode,
+      ckAlgo: tpl.checksum?.algo ?? null,
       lo: fd.offset,
       size: fieldSize(fd),
       edit: true,
@@ -1706,12 +1717,13 @@ function FrameCanvas() {
             <FieldDialog
               init={dlg}
               onCancel={() => setDlg(null)}
-              onOk={(f) => {
+              onOk={(f, ckAlgo) => {
                 const applyIt = () => {
                   templateStore.upsertFieldLinked(
                     dlg.tplId,
                     f,
                     dlg.edit && dlg.field ? dlg.field.id : null,
+                    ckAlgo,
                   );
                   fireAnim(`${dlg.tplId}:${dlg.field?.id ?? f.id}`);
                   setDlg(null);
@@ -1790,6 +1802,7 @@ type DlgInit =
       tplId: string;
       tplName: string;
       mode: string;
+      ckAlgo: string | null;
       lo: number;
       size: number;
       edit?: boolean;
@@ -1935,7 +1948,7 @@ function FieldDialog({
   onCancel,
 }: {
   init: Extract<DlgInit, { kind: "field" }>;
-  onOk: (f: FieldDef) => void;
+  onOk: (f: FieldDef, ckAlgo: string | null) => void;
   onCancel: () => void;
 }) {
   const recs = SIZE_TYPES[init.size] ?? [];
@@ -1955,6 +1968,7 @@ function FieldDialog({
   const [spanElem, setSpanElem] = useState<string>(
     init.field?.spanTail ? (init.field?.spanElem ?? "text") : "float32",
   );
+  const [ckAlgo, setCkAlgo] = useState<string>(init.ckAlgo && init.ckAlgo !== "none" ? init.ckAlgo : "sum8");
   useEffect(() => {
     if (init.field && init.edit) {
       setType(init.field.type);
@@ -1970,6 +1984,15 @@ function FieldDialog({
     if (lenRestricted && type !== "uint8" && type !== "uint16") setType("uint8");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lenRestricted]);
+  useEffect(() => {
+    if (role !== "checksum" || ckAlgo === "none") return;
+    const want = CHECKSUM_SIZES[ckAlgo] ?? 1;
+    const cur = fieldSize({ id: "", name: "", role: "checksum", offset: 0, type, endian, color: "" });
+    if (cur !== want) {
+      setType(want === 2 ? "uint16" : want === 4 ? "uint32" : want === 8 ? "float64" : "uint8");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role, ckAlgo]);
   const spanElemNeedsEndian =
     spanTail && spanElem !== "text" && spanElem !== "uint8" && spanElem !== "int8";
   const needsEndian = type === "uint16" || type === "int16" || type === "uint32" || type === "int32" || type === "float32" || type === "float64" || spanElemNeedsEndian;
@@ -2024,6 +2047,41 @@ function FieldDialog({
             ))}
           </div>
         </div>
+        {role === "checksum" && (
+          <>
+            <div className="fc-dlg-row">
+              <label>{tx("校验算法", "Algorithm")}</label>
+              <select value={ckAlgo} onChange={(e) => setCkAlgo(e.target.value)}>
+                <option value="sum8">{tx("和校验 sum8（字节累加）", "sum8 (byte sum)")}</option>
+                <option value="xor8">{tx("异或 xor8", "XOR8")}</option>
+                <option value="sumadd">{tx("SC+AC（和 + 0xAA 累加）", "SC+AC")}</option>
+                <option value="crc16_modbus">CRC16 Modbus</option>
+                <option value="crc16_ccitt">CRC16 CCITT-FALSE</option>
+                <option value="crc32">CRC32</option>
+                <option value="none">{tx("不校验（仅标注）", "No verification (marker only)")}</option>
+              </select>
+            </div>
+            <div className="fc-dlg-warn soft">
+              {ckAlgo === "none"
+                ? tx(
+                    "仅作视觉标注，引擎不验证。要启用校验请选择算法。",
+                    "Visual marker only, no verification. Pick an algorithm to enable it.",
+                  )
+                : tx(
+                    `保存即启用 ${ckAlgo}：覆盖范围=帧首至校验域前（可在属性面板改），校验不过的帧会被过滤。字段宽度已自动匹配算法（${CHECKSUM_SIZES[ckAlgo] ?? 1} B）。`,
+                    `Saves with ${ckAlgo} enabled: coverage = frame start to before this field (editable in properties); failing frames are filtered. Field width auto-matches the algorithm (${CHECKSUM_SIZES[ckAlgo] ?? 1} B).`,
+                  )}
+            </div>
+          </>
+        )}
+        {role === "checksum2" && (
+          <div className="fc-dlg-warn soft">
+            {tx(
+              "CK2 为视觉标注位：与 CK1 一起由校验算法一次验证，不单独校验。",
+              "CK2 is a visual marker: verified together with CK1 by the algorithm, never separately.",
+            )}
+          </div>
+        )}
         <div className="fc-dlg-row">
           <label>{tx("数据类型", "Data type")}</label>
           <select value={type} onChange={(e) => setType(e.target.value as FieldType)}>
@@ -2187,7 +2245,7 @@ function FieldDialog({
                   spanElem !== "text"
                     ? spanElem
                     : null,
-              })
+              }, role === "checksum" ? ckAlgo : null)
             }
           >
             {init.edit ? tx("保存修改", "Save changes") : tx("确认定义", "Confirm definition")}
