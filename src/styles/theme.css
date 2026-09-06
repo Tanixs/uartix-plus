@@ -1425,6 +1425,10 @@ body {
   background: rgba(229, 83, 75, 0.08);
   border-radius: 6px;
 }
+.props-kv {
+  font-size: 12px;
+  color: var(--text);
+}
 
 .props-panel {
   height: 100%;

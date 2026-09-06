@@ -732,6 +732,84 @@ export function PropertiesPanel() {
         </div>
       )}
       </Section>
+      {field.role === "checksum" && (
+        <Section title={tx("校验域状态", "Checksum Status")}>
+          {!tpl.checksum || tpl.checksum.algo === "none" ? (
+            <div className="props-warn">
+              <span>
+                {tx(
+                  "校验算法未启用——此字段只是标注，引擎不验证任何帧。",
+                  "No checksum algorithm is enabled — this field is a marker only, nothing is verified.",
+                )}
+              </span>
+              <button
+                className="btn sm"
+                onClick={() => store.setChecksumAlgo(tpl.id, "sum8")}
+              >
+                {tx("一键启用 sum8", "Enable sum8")}
+              </button>
+            </div>
+          ) : (
+            <div className="form-row">
+              <label>{tx("算法", "Algorithm")}</label>
+              <span className="props-kv">
+                {tpl.checksum.algo} · {tx("覆盖", "coverage")} {tpl.checksum.coverageStart}~
+                {tpl.checksum.coverageEnd}
+              </span>
+            </div>
+          )}
+          {(() => {
+            const fl =
+              tpl.boundary.mode === "fixedLength" ? tpl.boundary.fixedLength ?? 0 : 0;
+            if (!fl) return null;
+            const w = fieldSize(field);
+            if (field.offset + w === fl) {
+              return (
+                <div className="form-hint">
+                  {tx(
+                    `位置正确：偏移 ${field.offset} + 宽度 ${w} = 帧长 ${fl}（紧贴帧尾）。`,
+                    `Position OK: offset ${field.offset} + width ${w} = frame length ${fl} (at the tail).`,
+                  )}
+                </div>
+              );
+            }
+            const aw = store.CHECKSUM_SIZES[tpl.checksum?.algo ?? ""] ?? 1;
+            const target = fl - aw;
+            const okTarget = target >= tpl.boundary.headerBytes.length;
+            return (
+              <div className="props-warn">
+                <span>
+                  {tx(
+                    `不在帧尾：偏移 ${field.offset} + 宽度 ${w} ≠ 帧长 ${fl}——引擎查的是帧中间的字节。`,
+                    `Not at the tail: offset ${field.offset} + width ${w} ≠ frame length ${fl} — the engine verifies mid-frame bytes.`,
+                  )}
+                </span>
+                <button
+                  className="btn sm"
+                  disabled={!okTarget}
+                  onClick={() =>
+                    store.upsertFieldLinked(
+                      tpl.id,
+                      {
+                        ...field,
+                        offset: target,
+                        type: (aw === 1 ? "uint8" : aw === 2 ? "uint16" : "uint32") as FieldType,
+                      },
+                      field.id,
+                      tpl.checksum?.algo ?? null,
+                    )
+                  }
+                >
+                  {tx(
+                    `一键修到帧尾（偏移 ${target} · ${aw}B）`,
+                    `Fix to tail (offset ${target} · ${aw}B)`,
+                  )}
+                </button>
+              </div>
+            );
+          })()}
+        </Section>
+      )}
       <Section title={tx("帧识别字段", "Frame Discriminator")}>
       {(() => {
         const b = tpl.boundary;

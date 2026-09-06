@@ -275,11 +275,15 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
   const fields = [...tpl.fields].sort((a, b) => a.offset - b.offset);
   const tailReserved = checksumTail(tpl) + footerTail(tpl);
   let pos = hb.length;
-  for (const f of fields) {
+  for (let fi = 0; fi < fields.length; fi++) {
+    const f = fields[fi];
     const spanT = !!f.spanTail && (f.role === "data" || f.role === "payload") && f.type !== "csv";
     let sz = fieldSize(f);
     if (spanT && frLen > 0) {
-      sz = Math.max(f.offset, frLen - tailReserved) - f.offset;
+      const end = Math.max(f.offset, frLen - tailReserved);
+      const nextOff =
+        fields[fi + 1] && fields[fi + 1].offset > f.offset ? fields[fi + 1].offset : end;
+      sz = Math.min(end, nextOff) - f.offset;
     }
     if (hb.length > 0 && f.offset >= 0 && f.offset + sz <= hb.length) continue;
     if (f.offset > pos) {
