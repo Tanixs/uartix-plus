@@ -400,6 +400,49 @@ export function PropertiesPanel() {
             }
             return null;
           })()}
+        {tpl.checksum && tpl.checksum.algo !== "none" &&
+          (() => {
+            const ck = tpl.fields.find((f) => f.role === "checksum");
+            const fl =
+              tpl.boundary.mode === "fixedLength" ? tpl.boundary.fixedLength ?? 0 : 0;
+            if (!ck || !fl) return null;
+            const w = store.CHECKSUM_SIZES[tpl.checksum.algo] ?? 1;
+            const end = ck.offset + fieldSize(ck);
+            if (end === fl) return null;
+            const target = fl - w;
+            const okTarget = target >= tpl.boundary.headerBytes.length;
+            return (
+              <div className="props-warn">
+                <span>
+                  {tx(
+                    `校验域不在帧尾：偏移 ${ck.offset} + 宽度 ${fieldSize(ck)} ≠ 帧长 ${fl}——引擎会去查错位置的字节。`,
+                    `Checksum field is not at the frame tail: offset ${ck.offset} + width ${fieldSize(ck)} ≠ frame length ${fl} — the engine verifies the wrong bytes.`,
+                  )}
+                </span>
+                <button
+                  className="btn sm"
+                  disabled={!okTarget}
+                  onClick={() =>
+                    store.upsertFieldLinked(
+                      tpl.id,
+                      {
+                        ...ck,
+                        offset: target,
+                        type: (w === 1 ? "uint8" : w === 2 ? "uint16" : "uint32") as FieldType,
+                      },
+                      ck.id,
+                      tpl.checksum?.algo ?? null,
+                    )
+                  }
+                >
+                  {tx(
+                    `一键修到帧尾（偏移 ${target} · ${w}B）`,
+                    `Fix to tail (offset ${target} · ${w}B)`,
+                  )}
+                </button>
+              </div>
+            );
+          })()}
         {tpl.checksum && tpl.checksum.algo !== "none" && (
           <>
             <div className="form-row">

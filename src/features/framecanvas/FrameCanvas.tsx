@@ -1233,6 +1233,29 @@ function FrameCanvas() {
     if (!el || !wrap) return;
     clampFlyoutMenu(el, wrap, menuState.x, menuState.y);
   }, [menuState]);
+
+  const rulesSigRef = useRef("");
+  useEffect(() => {
+    const check = () => {
+      const sig = JSON.stringify(
+        templateStore.getSnapshot().rules.templates.map((t) => [
+          t.id,
+          t.enabled,
+          t.boundary,
+          t.checksum,
+          t.fields,
+        ]),
+      );
+      if (rulesSigRef.current && rulesSigRef.current !== sig) {
+        fcStore.clearArchive();
+        viewRef.current = { live: true, fi: 0 };
+        dirtyRef.current = true;
+      }
+      rulesSigRef.current = sig;
+    };
+    check();
+    return templateStore.subscribe(check);
+  }, []);
   const closeMenu = () => {
     setMenuState(null);
     menuRef.current = null;
@@ -2071,6 +2094,12 @@ function FieldDialog({
                     `保存即启用 ${ckAlgo}：覆盖范围=帧首至校验域前（可在属性面板改），校验不过的帧会被过滤。字段宽度已自动匹配算法（${CHECKSUM_SIZES[ckAlgo] ?? 1} B）。`,
                     `Saves with ${ckAlgo} enabled: coverage = frame start to before this field (editable in properties); failing frames are filtered. Field width auto-matches the algorithm (${CHECKSUM_SIZES[ckAlgo] ?? 1} B).`,
                   )}
+            </div>
+            <div className="fc-dlg-hint">
+              {tx(
+                `当前偏移 ${init.lo}（帧内第 ${init.lo + 1} 字节）。校验域通常紧贴帧尾（偏移 = 帧长 − 校验宽度）；拖到哪个字节就固定在哪个字节，改位置请在属性面板改偏移或重新框选。`,
+                `Current offset ${init.lo} (byte ${init.lo + 1} of the frame). Checksums normally sit at the tail (offset = frame length − width); wherever you dragged is where it stays — adjust via properties or re-select.`,
+              )}
             </div>
           </>
         )}
