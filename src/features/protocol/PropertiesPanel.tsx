@@ -348,6 +348,58 @@ export function PropertiesPanel() {
             "Canvas checksum fields auto-resize to match the algorithm (1/2/4 B); a width mismatch blocks saving with a clear error.",
           )}
         </div>
+        {(!tpl.checksum || tpl.checksum.algo === "none") &&
+          (() => {
+            const ckField = tpl.fields.find((f) => f.role === "checksum");
+            if (ckField) {
+              return (
+                <div className="props-warn">
+                  <span>
+                    {tx(
+                      "画布上已有校验域字段，但算法未启用——校验没有生效，所有帧都会放行。",
+                      "A checksum field exists but no algorithm is enabled — every frame passes unverified.",
+                    )}
+                  </span>
+                  <button
+                    className="btn sm"
+                    onClick={() => store.setChecksumAlgo(tpl.id, "sum8")}
+                  >
+                    {tx("一键启用 sum8", "Enable sum8")}
+                  </button>
+                </div>
+              );
+            }
+            const lookalike = tpl.fields.find(
+              (f) =>
+                !["checksum", "checksum2"].includes(f.role) &&
+                /校验|checksum|crc|ck\d/i.test(f.name),
+            );
+            if (lookalike) {
+              return (
+                <div className="props-warn">
+                  <span>
+                    {tx(
+                      `字段「${lookalike.name}」名字像校验域，但角色是「${roleNames()[lookalike.role]}」——只有角色=和校验(CK1) 的字段参与校验，名字不起作用。`,
+                      `Field "${lookalike.name}" looks like a checksum, but its role is "${lookalike.role}" — only role CK1 participates; the name alone does nothing.`,
+                    )}
+                  </span>
+                  <button
+                    className="btn sm"
+                    onClick={() =>
+                      store.setSelection({
+                        kind: "field",
+                        templateId: tpl.id,
+                        fieldId: lookalike.id,
+                      })
+                    }
+                  >
+                    {tx("去修改该字段", "Edit this field")}
+                  </button>
+                </div>
+              );
+            }
+            return null;
+          })()}
         {tpl.checksum && tpl.checksum.algo !== "none" && (
           <>
             <div className="form-row">

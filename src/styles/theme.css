@@ -1412,6 +1412,19 @@ body {
   border-radius: 4px;
   word-break: break-all;
 }
+.props-warn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px 84px;
+  padding: 6px 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--danger);
+  background: rgba(229, 83, 75, 0.08);
+  border-radius: 6px;
+}
 
 .props-panel {
   height: 100%;
