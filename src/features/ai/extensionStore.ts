@@ -244,6 +244,16 @@ export function exportAll(): string {
   return JSON.stringify({ kind: "uartix-extensions", version: 1, data: snapshot.exts }, null, 2);
 }
 
+/** 导出指定扩展（按 id 集合）为分享包 */
+export function exportSome(ids: string[]): string {
+  const keep = new Set(ids);
+  return JSON.stringify(
+    { kind: "uartix-extensions", version: 1, data: snapshot.exts.filter((e) => keep.has(e.id)) },
+    null,
+    2,
+  );
+}
+
 /** 从分享包导入（跳过重复 id） */
 export function importAll(json: string): { ok: boolean; msg: string } {
   let parsed: unknown;

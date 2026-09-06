@@ -19,6 +19,7 @@ import {
   useExtensions,
   importAll,
   exportAll,
+  exportSome,
   EXT_TYPE_LABEL,
   PERM_LABEL,
   type AiExtension,
@@ -121,6 +122,7 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
   const settings = useSettings();
   const es = useExtensions();
   const [filter, setFilter] = useState<"all" | ExtType>("all");
+  const [sel, setSel] = useState<Set<string>>(() => new Set());
 
   const applyToggle = (ext: AiExtension, on: boolean) => {
     if (ext.type === "script" && on) {
@@ -169,6 +171,23 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
     }
   };
 
+  const doExportSelected = async () => {
+    const ids = es.exts.filter((e) => sel.has(e.id)).map((e) => e.id);
+    if (!ids.length) return;
+    const path = await save({
+      title: "导出所选扩展",
+      defaultPath: `uartix-extensions-${ids.length}.json`,
+      filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+    });
+    if (typeof path !== "string") return;
+    try {
+      await invoke("save_text_file", { path, content: exportSome(ids) });
+      notify(`已导出 ${ids.length} 个扩展`);
+    } catch (e) {
+      notify(`导出失败：${String(e).slice(0, 80)}`);
+    }
+  };
+
   const doImport = async () => {
     const path = await open({
       title: "导入 AI 扩展",
@@ -204,6 +223,36 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
           ))}
         </div>
         <div className="ext-ops">
+          <label className="ext-selall">
+            <input
+              type="checkbox"
+              ref={(el) => {
+                if (el) el.indeterminate = sel.size > 0 && sel.size < list.length;
+              }}
+              checked={list.length > 0 && list.every((e) => sel.has(e.id))}
+              onChange={() => {
+                setSel((prev) => {
+                  const next = new Set(prev);
+                  if (list.length > 0 && list.every((e) => next.has(e.id))) {
+                    list.forEach((e) => next.delete(e.id));
+                  } else {
+                    list.forEach((e) => next.add(e.id));
+                  }
+                  return next;
+                });
+              }}
+            />
+            {tx("全选", "All")}
+          </label>
+          <button
+            className="btn"
+            disabled={!sel.size}
+            title={tx("将勾选的扩展打包为一个分享包", "Pack the checked extensions into one share file")}
+            onClick={() => void doExportSelected()}
+          >
+            {tx("导出所选", "Export selected")}
+            {sel.size ? `（${sel.size}）` : ""}
+          </button>
           <button className="btn" onClick={() => bulk(true)} disabled={!es.exts.length}>
             全部启用
           </button>
@@ -211,7 +260,7 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
             全部停用
           </button>
           <button className="btn" onClick={() => void doImport()}>导入</button>
-          <button className="btn" onClick={() => void doExport()}>导出</button>
+          <button className="btn" onClick={() => void doExport()}>导出全部</button>
         </div>
       </div>
       {!settings.aiCreativity && (
@@ -229,6 +278,20 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
         <div className="ext-list">
           {list.map((e) => (
             <div key={e.id} className={`ext-row${e.enabled ? " on" : ""}`} title={e.desc || e.name}>
+              <input
+                type="checkbox"
+                className="ext-check"
+                title={tx("选中以便打包导出", "Check to include in export")}
+                checked={sel.has(e.id)}
+                onChange={() =>
+                  setSel((prev) => {
+                    const n = new Set(prev);
+                    if (n.has(e.id)) n.delete(e.id);
+                    else n.add(e.id);
+                    return n;
+                  })
+                }
+              />
               <label className="set-switch" title={e.enabled ? "停用" : "启用"}>
                 <input
                   type="checkbox"
@@ -279,11 +342,16 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
                   </button>
                 )}
                 <button
-                  className="btn danger-btn"
+                  className="btn sm danger-btn"
                   onClick={() => {
                     if (!confirm(`删除扩展「${e.name}」？不可恢复。`)) return;
                     if (e.type === "script") stopScript(e.id);
                     removeExt(e.id);
+                    setSel((prev) => {
+                      const n = new Set(prev);
+                      n.delete(e.id);
+                      return n;
+                    });
                     if (e.type === "theme" || e.type === "style") applyStyleExts();
                   }}
                 >

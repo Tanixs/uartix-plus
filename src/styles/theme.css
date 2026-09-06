@@ -4091,9 +4091,9 @@ body {
 .tb-menu-check { margin-left: auto; font-style: normal; }
 .tb-menu-soon { margin-left: auto; font-style: normal; font-size: 9.5px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .iface-soon { font-size: 11px; color: var(--text-dim); }
-.set-modal { width: min(820px, 94vw); padding: 0 0 14px; overflow: hidden; display: flex; flex-direction: column; }
+.set-modal { width: min(980px, 92vw); height: min(720px, 88vh); padding: 0 0 14px; overflow: hidden; display: flex; flex-direction: column; }
 .set-modal .modal-title { padding: 16px 20px 0; font-size: 15px; }
-.set-body { display: flex; gap: 0; min-height: 380px; max-height: 66vh; }
+.set-body { display: flex; gap: 0; flex: 1; min-height: 0; }
 .set-nav {
   flex: 0 0 168px;
   border-right: 1px solid var(--border-soft);
@@ -4101,6 +4101,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  overflow-y: auto;
 }
 .set-nav button {
   all: unset;
@@ -5728,12 +5729,36 @@ html.aiw-transparent-root #root {
 .ext-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px 12px;
-  padding: 10px 2px;
+  padding: 9px 2px;
   border-bottom: 1px solid var(--border-soft);
 }
 .ext-row:last-child { border-bottom: none; }
+.ext-check {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.ext-selall {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding-right: 8px;
+  border-right: 1px solid var(--border-soft);
+}
+.ext-selall input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+.ext-row .danger-btn {
+  width: auto;
+  margin: 0;
+  padding: 2px 8px;
+  height: 22px;
+  font-size: 11px;
+}
 .ext-info {
   flex: 1;
   min-width: 0;
