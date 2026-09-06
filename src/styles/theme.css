@@ -4120,7 +4120,7 @@ body {
 .tb-menu-check { margin-left: auto; font-style: normal; }
 .tb-menu-soon { margin-left: auto; font-style: normal; font-size: 9.5px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .iface-soon { font-size: 11px; color: var(--text-dim); }
-.set-modal { width: 84%; height: 80%; padding: 0 0 14px; overflow: hidden; display: flex; flex-direction: column; }
+.set-modal { width: min(896px, 84%); height: min(640px, 72%); padding: 0 0 14px; overflow: hidden; display: flex; flex-direction: column; }
 .set-modal .modal-title { padding: 16px 20px 0; font-size: 15px; }
 .set-body { display: flex; gap: 0; flex: 1; min-height: 0; }
 .set-nav {
