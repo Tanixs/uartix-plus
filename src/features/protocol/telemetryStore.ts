@@ -13,12 +13,14 @@ export interface TelemetrySnapshot {
   stats: { total: number; errors: number };
   tplStats: Record<string, { ok: number; err: number }>;
   latest: Record<string, LatestValue>;
+  seqLen: Record<string, number>;
 }
 
 let snapshot: TelemetrySnapshot = {
   stats: { total: 0, errors: 0 },
   tplStats: {},
   latest: {},
+  seqLen: {},
 };
 
 const listeners = new Set<() => void>();
@@ -62,6 +64,7 @@ export async function init() {
   onFrames((p: FramesEventPayload) => {
     const tplStats = { ...snapshot.tplStats };
     const latest = { ...snapshot.latest };
+    const seqLen = { ...snapshot.seqLen };
     let touched = false;
     for (const row of p.rows) {
       const cur = tplStats[row.tplId] ?? { ok: 0, err: 0 };
@@ -69,6 +72,7 @@ export async function init() {
         ? { ...cur, ok: cur.ok + 1 }
         : { ...cur, err: cur.err + 1 };
       if (row.valid) {
+        const counts: Record<string, number> = {};
         for (const f of row.fields) {
           latest[f.id] = {
             value: f.value,
@@ -77,7 +81,16 @@ export async function init() {
             seq: row.seq,
             valid: row.valid,
           };
+          const h = f.id.indexOf("#");
+          if (h > 0) {
+            const idx = Number.parseInt(f.id.slice(h + 1), 10);
+            if (Number.isFinite(idx)) {
+              const base = f.id.slice(0, h);
+              counts[base] = Math.max(counts[base] ?? 0, idx);
+            }
+          }
         }
+        for (const base of Object.keys(counts)) seqLen[base] = counts[base];
       }
       touched = true;
     }
@@ -86,6 +99,7 @@ export async function init() {
       stats: { total: p.total, errors: p.errors },
       tplStats,
       latest,
+      seqLen,
     });
     scheduleNotify();
   });

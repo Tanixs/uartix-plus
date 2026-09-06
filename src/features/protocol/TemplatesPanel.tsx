@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -7,6 +7,7 @@ import * as store from "./templateStore";
 import * as teleStore from "./telemetryStore";
 import * as plotStore from "../plot/plotStore";
 import { EmptyState } from "../../shared/EmptyState";
+import { clampFlyoutMenu } from "../../shared/Flyout";
 import { IconChevron } from "../../shared/icons";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
@@ -128,6 +129,17 @@ export function TemplatesPanel() {
   const [note, setNote] = useState("");
   const [expGrp, setExpGrp] = useState<Set<string>>(() => new Set());
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
+  const [hiddenSubs, setHiddenSubs] = useState<Map<string, number>>(() => new Map());
+  const tplRootRef = useRef<HTMLDivElement | null>(null);
+  const ctxMenuRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!ctx) return;
+    const el = ctxMenuRef.current;
+    const root = tplRootRef.current;
+    if (!el || !root) return;
+    const cr = root.getBoundingClientRect();
+    clampFlyoutMenu(el, root, ctx.x - cr.left, ctx.y - cr.top);
+  }, [ctx]);
   const [rename, setRename] = useState<{ kind: "grp" | "tpl"; key: string; id: string; init: string } | null>(null);
   const settings = useSettings();
   const decimals = settings.decimals;
@@ -320,7 +332,7 @@ export function TemplatesPanel() {
   };
 
   return (
-    <div className="tpl-panel">
+    <div className="tpl-panel" ref={tplRootRef}>
       <div className="tpl-header">
         <span>{tx("协议模板", "Protocol Templates")}</span>
         <div className="tpl-header-actions">
@@ -568,9 +580,16 @@ export function TemplatesPanel() {
               const adaptive = f.type === "csv" || seq;
               const seqIndices: number[] = [];
               if (adaptive) {
-                for (let i = 1; i <= 64; i++) {
-                  if (!tele.latest[`${f.id}#${i}`]) break;
-                  seqIndices.push(i);
+                const n = Math.min(64, tele.seqLen[f.id] ?? 0);
+                if (n > 0) {
+                  for (let i = 1; i <= n; i++) {
+                    if (tele.latest[`${f.id}#${i}`]) seqIndices.push(i);
+                  }
+                } else {
+                  for (let i = 1; i <= 64; i++) {
+                    if (!tele.latest[`${f.id}#${i}`]) break;
+                    seqIndices.push(i);
+                  }
                 }
               }
               const numeric = f.type !== "ascii" || seq;
@@ -675,11 +694,15 @@ export function TemplatesPanel() {
               if (!adaptive) return [row];
               const chans: React.ReactNode[] = [];
               for (let i = 1; i <= 64; i++) {
-                const cl = tele.latest[`${f.id}#${i}`];
+                const subId = `${f.id}#${i}`;
+                const cl = tele.latest[subId];
                 if (!cl) break;
+                const hidAt = hiddenSubs.get(subId);
+                if (hidAt !== undefined && cl.seq === hidAt) continue;
+                const st = plotStore.channelState(tpl.id, subId);
                 chans.push(
                   <div
-                    key={`${f.id}#${i}`}
+                    key={subId}
                     className="legend-item legend-sub"
                     onClick={() => {
                       store.setSelection({
@@ -688,8 +711,62 @@ export function TemplatesPanel() {
                         fieldId: f.id,
                       });
                     }}
-                    title={`${f.name}${i}${tx("（点击选中该字段编辑）", " (click to select this field for editing)")}`}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const items: CtxItem[] = [
+                        {
+                          label: tx("删除该变量（新帧出现时恢复）", "Delete variable (returns when new frames arrive)"),
+                          onClick: () => {
+                            const ch = plotStore
+                              .getSnapshot()
+                              .channels.find(
+                                (c) => c.tplId === tpl.id && c.fieldId === subId,
+                              );
+                            if (ch) plotStore.removeChannel(ch.id);
+                            setHiddenSubs((prev) => {
+                              const next = new Map(prev);
+                              next.set(subId, tele.latest[subId]?.seq ?? 0);
+                              return next;
+                            });
+                            setCtx(null);
+                          },
+                        },
+                      ];
+                      setCtx({ x: e.nativeEvent.clientX, y: e.nativeEvent.clientY, items });
+                    }}
+                    title={`${f.name}${i}${tx("（点击选中该字段编辑 · 右键删除该变量）", " (click to edit this field · right-click to delete this variable)")}`}
                   >
+                    <button
+                      className={`legend-eye ${st === "on" ? "on" : ""} ${st === "hidden" ? "half" : ""}`}
+                      title={
+                        st === "off"
+                          ? tx("开启该元素 2D 曲线", "Show this element's curve")
+                          : st === "hidden"
+                            ? tx("移除该曲线（当前隐藏）", "Remove this curve (hidden)")
+                            : tx("移除该曲线", "Remove this curve")
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const ch = plotStore
+                          .getSnapshot()
+                          .channels.find(
+                            (c) => c.tplId === tpl.id && c.fieldId === subId,
+                          );
+                        if (!ch) {
+                          plotStore.addChannel({
+                            tplId: tpl.id,
+                            fieldId: subId,
+                            name: `${f.name}${i}`,
+                            color: f.color,
+                          });
+                        } else {
+                          plotStore.removeChannel(ch.id);
+                        }
+                      }}
+                    >
+                      <EyeIcon open={st !== "off"} />
+                    </button>
                     <span className="tpl-dot" style={{ background: f.color, opacity: 0.55 }} />
                     <span className="legend-name">
                       {f.name}{i}
@@ -752,7 +829,7 @@ export function TemplatesPanel() {
       {ctx && (
         <>
           <div className="fc-menu-mask" onClick={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null); }} />
-          <div className="fc-menu" style={{ left: ctx.x, top: ctx.y }}>
+          <div className="fc-menu" ref={ctxMenuRef} style={{ left: ctx.x, top: ctx.y }}>
             {ctx.items.map((it) => (
               <button
                 key={it.label}

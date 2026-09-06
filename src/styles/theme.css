@@ -1361,6 +1361,17 @@ body {
   border-left-color: var(--accent);
 }
 
+.legend-sub {
+  padding-left: 34px;
+  background: color-mix(in srgb, var(--bg-inset) 55%, transparent);
+}
+.legend-sub .legend-name {
+  font-size: 10.5px;
+}
+.legend-sub .legend-value {
+  font-size: 10.5px;
+}
+
 .legend-name {
   flex: 1 1 auto;
   min-width: 0;
