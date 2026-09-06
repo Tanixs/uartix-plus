@@ -84,7 +84,8 @@ pub struct FieldDef {
     pub name: String,
     #[serde(default)]
     pub role: String,
-    pub offset: usize,
+    #[serde(default)]
+    pub offset: i64,
     #[serde(rename = "type")]
     pub field_type: String,
     #[serde(default = "default_endian")]
@@ -272,7 +273,7 @@ impl Machine {
         }
         for f in &tpl.fields {
             if let Some(val) = f.disc.as_deref() {
-                if !val.is_empty() && self.matches_disc(f.offset, val) {
+                if !val.is_empty() && f.offset >= 0 && self.matches_disc(f.offset as usize, val) {
                     return true;
                 }
             }
@@ -500,10 +501,17 @@ fn validate(tpl: &FrameTemplate) -> Result<(), String> {
         other => return Err(format!("模板[{}]未知帧边界模式: {other}", tpl.name)),
     }
     for f in &tpl.fields {
-        if f.offset >= max_len {
+        if f.offset >= 0 {
+            if f.offset >= max_len as i64 {
+                return Err(format!(
+                    "模板[{}]字段[{}]偏移{}超出最大帧长",
+                    tpl.name, f.name, f.offset
+                ));
+            }
+        } else if -f.offset > max_len as i64 {
             return Err(format!(
-                "模板[{}]字段[{}]偏移{}超出最大帧长",
-                tpl.name, f.name, f.offset
+                "模板[{}]字段[{}]负偏移{}超出最大帧长",
+                tpl.name, f.name, -f.offset
             ));
         }
     }
@@ -534,8 +542,14 @@ fn verify(tpl: &FrameTemplate, buf: &[u8]) -> (bool, Option<String>) {
     let size = checksum_size(&ck.algo);
     let exp_off = match tpl.fields.iter().find(|f| f.role == "checksum") {
         Some(f) => {
-            if tpl.boundary.mode == "fixedLength" {
-                f.offset
+            if f.offset < 0 {
+                let off = buf.len() as i64 + f.offset;
+                if off < 0 {
+                    return (false, Some("校验位置越界".into()));
+                }
+                off as usize
+            } else if tpl.boundary.mode == "fixedLength" {
+                f.offset as usize
             } else {
                 let fb = if tpl.boundary.mode == "footer" {
                     tpl.boundary.footer_bytes.as_deref().map_or(0, |v| v.len())
@@ -749,12 +763,13 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
         if !matches!(f.role.as_str(), "data" | "payload" | "id" | "seq" | "length") {
             continue;
         }
-        if f.field_type == "csv" {
+        if f.offset >= 0 && f.field_type == "csv" {
+            let off = f.offset as usize;
             let delim = csv_delim_of(f);
             let rt = reserved_tail_len(tpl);
-            let end = buf.len().saturating_sub(rt).max(f.offset);
-            if f.offset < end {
-                let sl = &buf[f.offset..end];
+            let end = buf.len().saturating_sub(rt).max(off);
+            if off < end {
+                let sl = &buf[off..end];
                 let text = String::from_utf8_lossy(sl).to_string();
                 let pat = String::from_utf8_lossy(&delim).to_string();
                 let segs: Vec<&str> = if pat.is_empty() {
@@ -790,11 +805,12 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
             }
             continue;
         }
-        if f.span_tail.unwrap_or(false) && matches!(f.role.as_str(), "data" | "payload") {
+        if f.offset >= 0 && f.span_tail.unwrap_or(false) && matches!(f.role.as_str(), "data" | "payload") {
+            let off = f.offset as usize;
             let rt = reserved_tail_len(tpl);
-            let end = buf.len().saturating_sub(rt).max(f.offset);
-            if f.offset < end {
-                let sl = &buf[f.offset..end];
+            let end = buf.len().saturating_sub(rt).max(off);
+            if off < end {
+                let sl = &buf[off..end];
                 let text = if f.field_type == "ascii" {
                     String::from_utf8_lossy(sl).to_string()
                 } else {
@@ -817,8 +833,8 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
                         let offv = f.offset_value.unwrap_or(0.0);
                         let big = f.endian == "big";
                         let mut i: usize = 0;
-                        while f.offset + (i + 1) * esize <= end && i < CSV_MAX_CH {
-                            let s2 = &buf[f.offset + i * esize..f.offset + (i + 1) * esize];
+                        while off + (i + 1) * esize <= end && i < CSV_MAX_CH {
+                            let s2 = &buf[off + i * esize..off + (i + 1) * esize];
                             let raw = decode_span_elem(elem, s2, big);
                             out.push(FieldOut {
                                 id: format!("{}#{}", f.id, i + 1),
@@ -835,10 +851,19 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
             continue;
         }
         let size = type_size(f);
-        if f.offset + size > buf.len() {
+        let start = if f.offset < 0 {
+            let s = buf.len() as i64 + f.offset;
+            if s < 0 {
+                continue;
+            }
+            s as usize
+        } else {
+            f.offset as usize
+        };
+        if start + size > buf.len() {
             continue;
         }
-        let sl = &buf[f.offset..f.offset + size];
+        let sl = &buf[start..start + size];
         let (raw, text) = match f.field_type.as_str() {
             "ascii" => (0.0, Some(String::from_utf8_lossy(sl).to_string())),
             "bcd" => {
@@ -973,7 +998,7 @@ mod tests {
         id: &str,
         name: &str,
         role: &str,
-        offset: usize,
+        offset: i64,
         ty: &str,
         endian: &str,
     ) -> FieldDef {
@@ -1795,5 +1820,34 @@ mod tests {
         let rows = eng.feed(&bad, 0, 100);
         assert_eq!(rows.len(), 1);
         assert!(!rows[0].valid, "尾字节被篡改应失败");
+    }
+
+    #[test]
+    fn negative_offset_field_anchors_to_tail() {
+        let mut tpl = span_tail_length_rules();
+        let mut st = field("s-st", "状态", "data", -2, "uint8", "little");
+        st.span_tail = None;
+        tpl.fields.push(st);
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules { templates: vec![tpl] }).unwrap();
+
+        let build = |payload: &[u8], status: u8| -> Vec<u8> {
+            let mut f = vec![0xAA, 0x55, (payload.len() + 5) as u8];
+            f.extend_from_slice(payload);
+            f.push(status);
+            let sum = f.iter().fold(0u8, |acc, &b| acc.wrapping_add(b));
+            f.push(sum);
+            f
+        };
+        let mut stream = build(&[0x11, 0x22, 0x33], 0x5A);
+        stream.extend_from_slice(&build(&[0x44], 0x2C));
+        let rows = eng.feed(&stream, 0, 100);
+        assert_eq!(rows.len(), 2, "两种长度都应成帧: {rows:?}");
+        assert!(rows.iter().all(|r| r.valid), "状态+和校验都应通过: {rows:?}");
+        let stv = |r: &FrameRow| {
+            r.fields.iter().find(|f| f.id == "s-st").map(|f| f.raw)
+        };
+        assert_eq!(stv(&rows[0]), Some(0x5A as f64), "状态应取自帧尾前1字节");
+        assert_eq!(stv(&rows[1]), Some(0x2C as f64), "短帧状态应随帧长自适应");
     }
 }

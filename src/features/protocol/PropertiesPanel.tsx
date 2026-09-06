@@ -602,8 +602,30 @@ export function PropertiesPanel() {
         </div>
         <div className="form-pair">
           <label>{tx("偏移", "Offset")}</label>
-          <NumInput value={field.offset} width={64} onCommit={(v) => commitSized({ offset: Math.max(0, Math.round(v)) })} title={tx("相对帧头的字节偏移", "Byte offset relative to the frame header")} />
+          <NumInput value={field.offset} width={64} onCommit={(v) => commitSized({ offset: Math.round(v) })} title={tx("相对帧头的字节偏移；负数=距帧尾（−1 即最后一字节）", "Byte offset from frame head; negative = from the tail (−1 = last byte)")} />
         </div>
+      </div>
+      <div className="form-hint">
+        {(() => {
+          const fl = tpl.boundary.mode === "fixedLength" ? tpl.boundary.fixedLength ?? 0 : 0;
+          if (fl > 0) {
+            const s = field.offset < 0 ? fl + field.offset : field.offset;
+            const e = s + fieldSize(field);
+            if (s < 0 || e > fl) {
+              return tx(
+                `当前帧长 ${fl} 下无有效位置（实际 ${s}~${e}），帧太短时该字段不解析。`,
+                `No valid position at frame length ${fl} (${s}~${e}); the field is skipped on short frames.`,
+              );
+            }
+            return tx(
+              `实际位置：帧内 ${s}~${e - 1}（帧长 ${fl}）。`,
+              `Effective position: frame ${s}~${e - 1} (length ${fl}).`,
+            );
+          }
+          return field.offset < 0
+            ? tx("负偏移=距帧尾：−1 即最后一字节，随每帧长度自适应。", "Negative = from the tail: −1 is the last byte, adapting per frame.")
+            : tx("偏移为负表示距帧尾（−1 = 最后一字节）。", "Negative offset means from the tail (−1 = last byte).");
+        })()}
       </div>
       <div className="form-row">
         <div className="form-pair grow">
@@ -635,7 +657,7 @@ export function PropertiesPanel() {
           </div>
         )}
       </div>
-      {(field.role === "data" || field.role === "payload") && field.type !== "csv" && (
+      {(field.role === "data" || field.role === "payload") && field.type !== "csv" && field.offset >= 0 && (
         <>
           <div className="form-row">
             <label>{tx("变长载荷", "Variable span")}</label>

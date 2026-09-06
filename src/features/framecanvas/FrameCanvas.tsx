@@ -182,6 +182,10 @@ function skeletonLen(tpl: FrameTemplate): number {
   }
   let end = tpl.boundary.headerBytes.length;
   for (const f of tpl.fields) {
+    if (f.offset < 0) {
+      end = Math.max(end, -f.offset);
+      continue;
+    }
     const sz = fieldSize(f);
     if (sz > 0) end = Math.max(end, f.offset + sz);
   }
@@ -272,30 +276,41 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
   if (hb.length > 0) {
     pieces.push({ start: 0, len: hb.length, key: "h0", kind: "hdr", fid: null, color: "#e8a33d", label: tx("帧头", "Header"), role: null, locked: false });
   }
-  const fields = [...tpl.fields].sort((a, b) => a.offset - b.offset);
+  const fields = [...tpl.fields].sort((a, b) => {
+    const ea = a.offset < 0 ? frLen + a.offset : a.offset;
+    const eb = b.offset < 0 ? frLen + b.offset : b.offset;
+    return ea - eb;
+  });
   const tailReserved = checksumTail(tpl) + footerTail(tpl);
-  let pos = hb.length;
   const ckVar = tpl.boundary.mode !== "fixedLength";
+  let pos = hb.length;
   for (let fi = 0; fi < fields.length; fi++) {
     const f = fields[fi];
-    const spanT = !!f.spanTail && (f.role === "data" || f.role === "payload") && f.type !== "csv";
+    const spanT =
+      !!f.spanTail &&
+      f.offset >= 0 &&
+      (f.role === "data" || f.role === "payload") &&
+      f.type !== "csv";
     let sz = fieldSize(f);
-    if (spanT && frLen > 0) {
-      const end = Math.max(f.offset, frLen - tailReserved);
-      const nextOff =
-        fields[fi + 1] && fields[fi + 1].offset > f.offset ? fields[fi + 1].offset : end;
-      sz = Math.min(end, nextOff) - f.offset;
-    }
     let blkStart = f.offset;
-    if (f.role === "checksum" && ckVar && frLen > 0) {
+    if (f.offset < 0 && frLen > 0) {
+      blkStart = Math.max(hb.length, frLen + f.offset);
+      if (blkStart + sz > frLen) sz = frLen - blkStart;
+    } else if (f.role === "checksum" && ckVar && frLen > 0) {
       blkStart = Math.max(hb.length, frLen - footerTail(tpl) - sz);
       sz = Math.min(sz, frLen - blkStart);
+    } else if (spanT && frLen > 0) {
+      const end = Math.max(f.offset, frLen - tailReserved);
+      const nf = fields[fi + 1];
+      const nextEff = nf ? (nf.offset < 0 ? frLen + nf.offset : nf.offset) : end;
+      const nextOff = nf && nextEff > f.offset ? nextEff : end;
+      sz = Math.min(end, nextOff) - f.offset;
     }
     if (hb.length > 0 && blkStart >= 0 && blkStart + sz <= hb.length) continue;
     if (blkStart > pos) {
       pieces.push({ start: pos, len: blkStart - pos, key: `g${pos}`, kind: "gap", fid: null, color: "", label: null, role: null, locked: false });
     }
-    if (sz > 0 && blkStart < frLen) {
+    if (sz > 0 && blkStart >= 0 && blkStart < frLen) {
       const m = Math.min(sz, frLen - blkStart);
       pieces.push({
         start: blkStart,
@@ -1363,6 +1378,7 @@ function FrameCanvas() {
       tplName: tplDef?.name ?? "",
       mode: tplDef?.boundary.mode ?? "fixedLength",
       ckAlgo: tplDef?.checksum?.algo ?? null,
+      frLen: resolvedRef.current.fr?.len ?? (tplDef ? skeletonLen(tplDef) : 0),
       lo: m.lo,
       size: m.size,
       isAscii: false,
@@ -1399,6 +1415,7 @@ function FrameCanvas() {
       tplName: tpl.name,
       mode: tpl.boundary.mode,
       ckAlgo: tpl.checksum?.algo ?? null,
+      frLen: resolvedRef.current.fr?.len ?? skeletonLen(tpl),
       lo: fd.offset,
       size: fieldSize(fd),
       edit: true,
@@ -1845,6 +1862,7 @@ type DlgInit =
       tplName: string;
       mode: string;
       ckAlgo: string | null;
+      frLen: number;
       lo: number;
       size: number;
       edit?: boolean;
@@ -2011,6 +2029,15 @@ function FieldDialog({
     init.field?.spanTail ? (init.field?.spanElem ?? "text") : "float32",
   );
   const [ckAlgo, setCkAlgo] = useState<string>(init.ckAlgo && init.ckAlgo !== "none" ? init.ckAlgo : "sum8");
+  const [tail, setTail] = useState<boolean>(
+    init.field
+      ? init.field.offset < 0
+      : init.mode !== "fixedLength" &&
+          init.frLen > 0 &&
+          init.lo >= 0 &&
+          init.lo < init.frLen &&
+          init.frLen - init.lo <= 8,
+  );
   useEffect(() => {
     if (init.field && init.edit) {
       setType(init.field.type);
@@ -2053,7 +2080,10 @@ function FieldDialog({
         <div className="fc-dlg-title">
           {init.edit ? tx("编辑字段", "Edit field") : tx("定义字段", "Define field")}{" "}
           <span className="fc-dlg-sub">
-            {init.tplName} · {tx(`帧内偏移 ${init.lo} · 长度 ${init.size}B`, `frame +${init.lo} · ${init.size}B`)}
+            {init.tplName} ·{" "}
+            {init.lo < 0
+              ? tx(`距帧尾 ${-init.lo} · 长度 ${init.size}B`, `${-init.lo}B from tail · ${init.size}B`)
+              : tx(`帧内偏移 ${init.lo} · 长度 ${init.size}B`, `frame +${init.lo} · ${init.size}B`)}
           </span>
         </div>
         {init.size !== fixedSize && (
@@ -2068,6 +2098,39 @@ function FieldDialog({
           <label>{tx("名称", "Name")}</label>
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={tx("如 温度值", "e.g. Temperature")} />
         </div>
+        <div className="fc-dlg-row">
+          <label>{tx("位置锚点", "Anchor")}</label>
+          <div className="fc-dlg-roles">
+            <button
+              className={`btn sm ${!tail ? "primary" : ""}`}
+              disabled={init.edit}
+              title={init.edit ? tx("编辑时不改变锚点", "Anchor cannot change while editing") : undefined}
+              onClick={() => setTail(false)}
+            >
+              {tx("帧头起算", "From head")}
+            </button>
+            <button
+              className={`btn sm ${tail ? "primary" : ""}`}
+              disabled={init.edit}
+              title={
+                init.edit
+                  ? tx("编辑时不改变锚点", "Anchor cannot change while editing")
+                  : tx("偏移记为负数（距帧尾），随每帧长度自适应", "Stored as a negative offset from the frame tail, adapting per frame")
+              }
+              onClick={() => setTail(true)}
+            >
+              {tx("帧尾起算", "From tail")}
+            </button>
+          </div>
+        </div>
+        {tail && (
+          <div className="fc-dlg-hint">
+            {tx(
+              `将存为负偏移 ${init.edit && init.field ? init.field.offset : init.lo - init.frLen}：距帧尾 ${Math.abs(init.edit && init.field ? init.field.offset : init.lo - init.frLen)} 字节起算，实际位置 帧内 ${init.frLen + (init.edit && init.field ? init.field.offset : init.lo - init.frLen)} 起（帧长 ${init.frLen}）。`,
+              `Stored as negative offset ${init.edit && init.field ? init.field.offset : init.lo - init.frLen}: starts ${Math.abs(init.edit && init.field ? init.field.offset : init.lo - init.frLen)} byte(s) before the tail (frame length ${init.frLen}).`,
+            )}
+          </div>
+        )}
         <div className="fc-dlg-row">
           <label>{tx("协议角色", "Role")}</label>
           <div className="fc-dlg-roles">
@@ -2166,7 +2229,7 @@ function FieldDialog({
             <option value="big">{tx("大端 BE（高前）", "Big-endian BE")}</option>
           </select>
         </div>
-        {(role === "data" || role === "payload") && type !== "csv" && (
+        {(role === "data" || role === "payload") && type !== "csv" && !tail && (
           <>
             <div className="fc-dlg-row">
               <label>{tx("变长载荷", "Variable span")}</label>
@@ -2276,7 +2339,12 @@ function FieldDialog({
                 id: init.field?.id ?? crypto.randomUUID(),
                 name: name.trim() || defName,
                 role,
-                offset: init.lo,
+                offset:
+                  init.edit && init.field
+                    ? init.field.offset
+                    : tail
+                      ? init.lo - init.frLen
+                      : init.lo,
                 type,
                 endian,
                 scale: scale.trim() ? Number(scale) : null,

@@ -81,6 +81,17 @@ export function fieldConflictInfo(
   const b = t.boundary;
   const frameLen = b.mode === "fixedLength" ? (b.fixedLength ?? 0) : (b.maxLength ?? 512);
   const res: { overFrame?: string; overlapName?: string; overlapBytes?: number } = {};
+  if (nextOffset < 0) {
+    const others = t.fields
+      .filter((f) => f.id !== fieldId && f.offset < 0 && f.offset > nextOffset)
+      .sort((a, b2) => a.offset - b2.offset);
+    const nf = others[0];
+    if (nf && nextOffset + nextSize > nf.offset) {
+      res.overlapName = nf.name;
+      res.overlapBytes = nextOffset + nextSize - nf.offset;
+    }
+    return res;
+  }
   if (frameLen > 0 && nextOffset + nextSize > frameLen) {
     res.overFrame = `字段将延伸到 ${nextOffset + nextSize} B，超出帧长 ${frameLen} B`;
   }
@@ -658,6 +669,7 @@ export function insertFrameCell(tplId: string, g: number): string | null {
   if (g < hb) return tx("不能插入到帧头内部", "Cannot insert inside the frame header");
   if (g >= fl) return tx("插入位置超出帧长", "Insert position exceeds the frame length");
   for (const f of t.fields) {
+    if (f.offset < 0) continue;
     const sz = fieldSize(f);
     if (g > f.offset && g < f.offset + sz) {
       return tx("位置被字段「", "Position is occupied by field \"") + f.name + tx("」占用，请先取消该字段", "\" — undefine it first");
@@ -693,6 +705,7 @@ export function deleteFrameCell(tplId: string, g: number): string | null {
   if (g >= fl) return "位置超出帧长";
   if (fl - 1 < hb + 1) return "删除后帧长不能小于帧头 + 1 字节";
   for (const f of t.fields) {
+    if (f.offset < 0) continue;
     const sz = fieldSize(f);
     if (g > f.offset && g < f.offset + sz) {
       return `位置被字段「${f.name}」占用，请先取消该字段`;
@@ -797,6 +810,7 @@ export function upsertFieldLinked(
           : [...t.fields, field];
         const link =
           field.role === "length" &&
+          field.offset >= 0 &&
           t.boundary.mode === "lengthField" &&
           (field.type === "uint8" || field.type === "uint16");
         const boundary = link
