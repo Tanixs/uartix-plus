@@ -533,7 +533,22 @@ fn verify(tpl: &FrameTemplate, buf: &[u8]) -> (bool, Option<String>) {
     }
     let size = checksum_size(&ck.algo);
     let exp_off = match tpl.fields.iter().find(|f| f.role == "checksum") {
-        Some(f) => f.offset,
+        Some(f) => {
+            if tpl.boundary.mode == "fixedLength" {
+                f.offset
+            } else {
+                let fb = if tpl.boundary.mode == "footer" {
+                    tpl.boundary.footer_bytes.as_deref().map_or(0, |v| v.len())
+                } else {
+                    0
+                };
+                let off = buf.len() as i64 - size as i64 - fb as i64;
+                if off < 0 {
+                    return (false, Some("校验位置越界".into()));
+                }
+                off as usize
+            }
+        }
         None => {
             let off = if ck.coverage_end < 0 {
                 buf.len() as i32 + ck.coverage_end
@@ -1755,5 +1770,30 @@ mod tests {
         let rows = eng.feed(&[0x10, 0x10], 0, 1);
         assert_eq!(rows.len(), 1);
         assert!(rows[0].valid, "sum8(0x10)=0x10 应通过");
+    }
+
+    #[test]
+    fn variable_mode_checksum_anchors_to_tail() {
+        let mut tpl = span_tail_length_rules();
+        let mut ck = field("s-ck", "和校验", "checksum", 3, "uint8", "little");
+        ck.span_tail = None;
+        tpl.fields.push(ck);
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules { templates: vec![tpl] }).unwrap();
+
+        let frame = build_span_frame(&[0x11, 0x22, 0x33]);
+        let rows = eng.feed(&frame, 0, 100);
+        assert_eq!(rows.len(), 1);
+        assert!(
+            rows[0].valid,
+            "尾字节=sum 应通过，即使 CK 字段偏移(3)在帧中间: {rows:?}"
+        );
+
+        let mut bad = build_span_frame(&[0x11, 0x22, 0x33]);
+        let n = bad.len();
+        bad[n - 1] ^= 0xFF;
+        let rows = eng.feed(&bad, 0, 100);
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].valid, "尾字节被篡改应失败");
     }
 }

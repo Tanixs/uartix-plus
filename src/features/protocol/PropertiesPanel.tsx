@@ -761,7 +761,16 @@ export function PropertiesPanel() {
           {(() => {
             const fl =
               tpl.boundary.mode === "fixedLength" ? tpl.boundary.fixedLength ?? 0 : 0;
-            if (!fl) return null;
+            if (!fl) {
+              return tpl.boundary.mode !== "fixedLength" ? (
+                <div className="form-hint">
+                  {tx(
+                    `变长帧：校验域自动锚定帧尾（帧长 − 校验宽度${tpl.boundary.mode === "footer" ? " − 帧尾字节" : ""}），固定偏移 ${field.offset} 仅作画布标注，无需修改。`,
+                    `Variable frames: the checksum auto-anchors to the tail; the fixed offset ${field.offset} is a canvas marker only.`,
+                  )}
+                </div>
+              ) : null;
+            }
             const w = fieldSize(field);
             if (field.offset + w === fl) {
               return (

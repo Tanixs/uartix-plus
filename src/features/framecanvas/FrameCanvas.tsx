@@ -275,6 +275,7 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
   const fields = [...tpl.fields].sort((a, b) => a.offset - b.offset);
   const tailReserved = checksumTail(tpl) + footerTail(tpl);
   let pos = hb.length;
+  const ckVar = tpl.boundary.mode !== "fixedLength";
   for (let fi = 0; fi < fields.length; fi++) {
     const f = fields[fi];
     const spanT = !!f.spanTail && (f.role === "data" || f.role === "payload") && f.type !== "csv";
@@ -285,14 +286,19 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
         fields[fi + 1] && fields[fi + 1].offset > f.offset ? fields[fi + 1].offset : end;
       sz = Math.min(end, nextOff) - f.offset;
     }
-    if (hb.length > 0 && f.offset >= 0 && f.offset + sz <= hb.length) continue;
-    if (f.offset > pos) {
-      pieces.push({ start: pos, len: f.offset - pos, key: `g${pos}`, kind: "gap", fid: null, color: "", label: null, role: null, locked: false });
+    let blkStart = f.offset;
+    if (f.role === "checksum" && ckVar && frLen > 0) {
+      blkStart = Math.max(hb.length, frLen - footerTail(tpl) - sz);
+      sz = Math.min(sz, frLen - blkStart);
     }
-    if (sz > 0 && f.offset < frLen) {
-      const m = Math.min(sz, frLen - f.offset);
+    if (hb.length > 0 && blkStart >= 0 && blkStart + sz <= hb.length) continue;
+    if (blkStart > pos) {
+      pieces.push({ start: pos, len: blkStart - pos, key: `g${pos}`, kind: "gap", fid: null, color: "", label: null, role: null, locked: false });
+    }
+    if (sz > 0 && blkStart < frLen) {
+      const m = Math.min(sz, frLen - blkStart);
       pieces.push({
-        start: f.offset,
+        start: blkStart,
         len: m,
         key: `f${f.id}`,
         kind: "fld",
@@ -303,7 +309,7 @@ function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  if (!tp
         locked: !!f.locked,
       });
     }
-    if (f.offset + sz > pos) pos = f.offset + sz;
+    if (blkStart + sz > pos) pos = blkStart + sz;
   }
   pos = Math.min(pos, frLen);
   const tailLen = Math.min(checksumTail(tpl) + footerTail(tpl), frLen);
@@ -907,8 +913,12 @@ function FrameCanvas() {
     const live = !!(frBytes && hv.off < frBytes.length);
     const b = live ? frBytes[hv.off] : null;
     const blkKind = hv.blk?.kind ?? "gap";
+    const blkFid = hv.blk?.kind === "fld" ? hv.blk.fid : null;
     let field: FieldDef | null = null;
-    if (tpl) {
+    if (tpl && blkFid) {
+      field = tpl.fields.find((f) => f.id === blkFid) ?? null;
+    }
+    if (tpl && !field) {
       for (const f of tpl.fields) {
         const sz = fieldSize(f);
         if (hv.off >= f.offset && hv.off < f.offset + sz) {
@@ -972,6 +982,10 @@ function FrameCanvas() {
       field?.role === "checksum2"
         ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${tx("视觉标注位 · 与 CK1 一起由算法验证", "Visual marker · verified with CK1 by the algorithm")}</b></div>`
         : "";
+    const ckVarLine =
+      field?.role === "checksum" && tpl && tpl.boundary.mode !== "fixedLength"
+        ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${tx("变长帧 · 锚定帧尾（帧长−宽度−帧尾字）", "Variable frames · anchored to the tail")}</b></div>`
+        : "";
     let head = "";
     if (live && b !== null) {
       const ascii = b >= 0x20 && b < 0x7f ? String.fromCharCode(b) : "—";
@@ -995,6 +1009,7 @@ function FrameCanvas() {
       discLine +
       spanLine +
       ck2Line +
+      ckVarLine +
       valLine +
       ckLine +
       `<div class="fc-tip-row"><span>${tx("位置", "Position")}</span><b>${tx(`帧内 ${hv.off} B`, `frame +${hv.off} B`)}</b></div>`;
@@ -2100,10 +2115,15 @@ function FieldDialog({
                   )}
             </div>
             <div className="fc-dlg-hint">
-              {tx(
-                `当前偏移 ${init.lo}（帧内第 ${init.lo + 1} 字节）。校验域通常紧贴帧尾（偏移 = 帧长 − 校验宽度）；拖到哪个字节就固定在哪个字节，改位置请在属性面板改偏移或重新框选。`,
-                `Current offset ${init.lo} (byte ${init.lo + 1} of the frame). Checksums normally sit at the tail (offset = frame length − width); wherever you dragged is where it stays — adjust via properties or re-select.`,
-              )}
+              {init.mode === "fixedLength"
+                ? tx(
+                    `当前偏移 ${init.lo}（帧内第 ${init.lo + 1} 字节）。校验域通常紧贴帧尾（偏移 = 帧长 − 校验宽度）；拖到哪个字节就固定在哪个字节，改位置请在属性面板改偏移或重新框选。`,
+                    `Current offset ${init.lo} (byte ${init.lo + 1} of the frame). Checksums normally sit at the tail; wherever you dragged is where it stays — adjust via properties or re-select.`,
+                  )
+                : tx(
+                    `变长帧的校验域自动锚定帧尾（帧长 − 宽度 − 帧尾字），固定偏移 ${init.lo} 仅作画布标注，无需修改。`,
+                    `Variable-length frames anchor the checksum to the tail automatically; the fixed offset ${init.lo} is a canvas marker only.`,
+                  )}
             </div>
           </>
         )}
