@@ -240,6 +240,59 @@ export function ControlCanvas() {
   const [renamingCard, setRenamingCard] = useState<string | null>(null);
   const [renamingPage, setRenamingPage] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<"widgets" | "commands" | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moreOpen]);
+
+  const doExportCanvas = async () => {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { invoke } = await import("@tauri-apps/api/core");
+    const path = await save({
+      title: "导出控制画布",
+      defaultPath: `uartix-controls-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`,
+      filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+    });
+    if (!path) return;
+    await invoke("save_text_file", {
+      path,
+      content: JSON.stringify(
+        { kind: "uartix-controls", version: 1, data: store.exportPages() },
+        null,
+        2,
+      ),
+    });
+  };
+
+  const doImportCanvas = async () => {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const { invoke } = await import("@tauri-apps/api/core");
+    const path = await open({
+      multiple: false,
+      filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+    });
+    if (typeof path !== "string") return;
+    try {
+      const obj = JSON.parse(await invoke<string>("read_text_file", { path })) as {
+        kind?: string;
+        data?: unknown;
+      };
+      if (obj.kind !== "uartix-controls" || !obj.data) {
+        alert("不是控制画布文件（kind 不匹配）");
+        return;
+      }
+      const d = obj.data as { name?: string; cols?: number; cards?: Record<string, unknown>[] };
+      const arr = Array.isArray(d) ? d[0] : d;
+      store.importPage(arr);
+    } catch (e) {
+      alert(`导入失败: ${e}`);
+    }
+  };
   const [editingCmd, setEditingCmd] = useState<string | null>(null);
   const [renamingNode, setRenamingNode] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -1319,60 +1372,6 @@ export function ControlCanvas() {
         >
           ＋
         </button>
-        <button
-          className="ctl-tab-add"
-          title="导出控制画布（JSON）"
-          onClick={async () => {
-            const { save } = await import("@tauri-apps/plugin-dialog");
-            const { invoke } = await import("@tauri-apps/api/core");
-            const path = await save({
-              title: "导出控制画布",
-              defaultPath: `uartix-controls-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`,
-              filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
-            });
-            if (!path) return;
-            await invoke("save_text_file", {
-              path,
-              content: JSON.stringify(
-                { kind: "uartix-controls", version: 1, data: store.exportPages() },
-                null,
-                2,
-              ),
-            });
-          }}
-        >
-          ⭳
-        </button>
-        <button
-          className="ctl-tab-add"
-          title={tx("导入控制画布为新页", "Import control canvas as new page")}
-          onClick={async () => {
-            const { open } = await import("@tauri-apps/plugin-dialog");
-            const { invoke } = await import("@tauri-apps/api/core");
-            const path = await open({
-              multiple: false,
-              filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
-            });
-            if (typeof path !== "string") return;
-            try {
-              const obj = JSON.parse(await invoke<string>("read_text_file", { path })) as {
-                kind?: string;
-                data?: unknown;
-              };
-              if (obj.kind !== "uartix-controls" || !obj.data) {
-                alert("不是控制画布文件（kind 不匹配）");
-                return;
-              }
-              const d = obj.data as { name?: string; cols?: number; cards?: Record<string, unknown>[] };
-              const arr = Array.isArray(d) ? d[0] : d;
-              store.importPage(arr);
-            } catch (e) {
-              alert(`导入失败: ${e}`);
-            }
-          }}
-        >
-          ⭱
-        </button>
         <div className="ctl-tabs-spacer" />
         <button
           className="btn icon-btn"
@@ -1380,42 +1379,6 @@ export function ControlCanvas() {
           title={tx("添加滑条卡片", "Add slider card")}
         >
           <IconSlider />
-        </button>
-        <select
-          className="input"
-          value={page.cols}
-          title={tx("网格列数", "Grid columns")}
-          onChange={(e) => store.setPageCols(page.id, Number(e.target.value))}
-        >
-          {[4, 6, 8, 10, 12, 16, 20, 24].map((n) => (
-            <option key={n} value={n}>
-              {tx(`${n} 列`, `${n} col`)}
-            </option>
-          ))}
-        </select>
-        <select
-          className="input"
-          value={page.rows ?? 8}
-          title={tx("网格行数", "Grid rows")}
-          onChange={(e) => store.setPageRows(page.id, Number(e.target.value))}
-        >
-          {[4, 6, 8, 10, 12, 16, 20, 24, 32, 48].map((n) => (
-            <option key={n} value={n}>
-              {tx(`${n} 行`, `${n} row`)}
-            </option>
-          ))}
-        </select>
-        <button
-          className="btn icon-btn"
-          title={tx("整理：清除重叠并重新排布当前页卡片", "Tidy: clear overlaps and re-layout cards on this page")}
-          onClick={() => store.declumpPage(page.id)}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
-            <rect x="14" y="14" width="7" height="7" rx="1" />
-          </svg>
         </button>
         <button
           className={`btn icon-btn ${page.locked ? "warn" : ""}`}
@@ -1435,6 +1398,84 @@ export function ControlCanvas() {
         >
           <IconSidebar />
         </button>
+        <button
+          className={`btn icon-btn ${moreOpen ? "warn" : ""}`}
+          onClick={() => setMoreOpen((v) => !v)}
+          title={tx("更多：网格、整理与导入导出", "More: grid, tidy, import/export")}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="5" cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        </button>
+        {moreOpen && (
+          <>
+            <div
+              className="ctl-more-mask"
+              onClick={() => setMoreOpen(false)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setMoreOpen(false);
+              }}
+            />
+            <div className="ctl-more-menu">
+              <div className="ctl-more-title">{tx("网格", "Grid")}</div>
+              <div className="ctl-more-row">
+                <select
+                  className="input"
+                  value={page.cols}
+                  title={tx("网格列数", "Grid columns")}
+                  onChange={(e) => store.setPageCols(page.id, Number(e.target.value))}
+                >
+                  {[4, 6, 8, 10, 12, 16, 20, 24].map((n) => (
+                    <option key={n} value={n}>
+                      {tx(`${n} 列`, `${n} col`)}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="input"
+                  value={page.rows ?? 8}
+                  title={tx("网格行数", "Grid rows")}
+                  onChange={(e) => store.setPageRows(page.id, Number(e.target.value))}
+                >
+                  {[4, 6, 8, 10, 12, 16, 20, 24, 32, 48].map((n) => (
+                    <option key={n} value={n}>
+                      {tx(`${n} 行`, `${n} row`)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn sm"
+                  title={tx("整理：清除重叠并重新排布当前页卡片", "Tidy: clear overlaps and re-layout cards on this page")}
+                  onClick={() => store.declumpPage(page.id)}
+                >
+                  {tx("整理", "Tidy")}
+                </button>
+              </div>
+              <div className="ctl-more-sep" />
+              <button
+                className="ctl-more-item"
+                onClick={() => {
+                  setMoreOpen(false);
+                  void doExportCanvas();
+                }}
+              >
+                {tx("导出控制画布…", "Export control canvas…")}
+              </button>
+              <button
+                className="ctl-more-item"
+                onClick={() => {
+                  setMoreOpen(false);
+                  void doImportCanvas();
+                }}
+              >
+                {tx("导入控制画布…", "Import control canvas…")}
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="ctl-body">
