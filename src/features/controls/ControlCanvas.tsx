@@ -241,6 +241,8 @@ export function ControlCanvas() {
   const [renamingPage, setRenamingPage] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<"widgets" | "commands" | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!moreOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -249,6 +251,25 @@ export function ControlCanvas() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [moreOpen]);
+  useLayoutEffect(() => {
+    if (!moreOpen) return;
+    const el = moreMenuRef.current;
+    const a = moreBtnRef.current;
+    if (!el || !a || !a.isConnected) return;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0) return;
+    const ar = a.getBoundingClientRect();
+    const zf = Number(getComputedStyle(document.documentElement).zoom) || 1;
+    let left = ar.right - r.width;
+    let top = ar.bottom + 6;
+    if (left + r.width > window.innerWidth - 8) left = window.innerWidth - 8 - r.width;
+    if (top + r.height > window.innerHeight - 8) top = ar.top - r.height - 6;
+    left = Math.max(8, left);
+    top = Math.max(8, top);
+    el.style.left = `${left / zf}px`;
+    el.style.top = `${top / zf}px`;
+    el.style.visibility = "visible";
+  });
 
   const doExportCanvas = async () => {
     const { save } = await import("@tauri-apps/plugin-dialog");
@@ -1399,6 +1420,7 @@ export function ControlCanvas() {
           <IconSidebar />
         </button>
         <button
+          ref={moreBtnRef}
           className={`btn icon-btn ${moreOpen ? "warn" : ""}`}
           onClick={() => setMoreOpen((v) => !v)}
           title={tx("更多：网格、整理与导入导出", "More: grid, tidy, import/export")}
@@ -1409,17 +1431,22 @@ export function ControlCanvas() {
             <circle cx="19" cy="12" r="1.8" />
           </svg>
         </button>
-        {moreOpen && (
-          <>
-            <div
-              className="ctl-more-mask"
-              onClick={() => setMoreOpen(false)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setMoreOpen(false);
-              }}
-            />
-            <div className="ctl-more-menu">
+        {moreOpen &&
+          createPortal(
+            <>
+              <div
+                className="ctl-more-mask"
+                onClick={() => setMoreOpen(false)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMoreOpen(false);
+                }}
+              />
+              <div
+                className="ctl-more-menu"
+                ref={moreMenuRef}
+                style={{ left: -9999, top: -9999, visibility: "hidden" }}
+              >
               <div className="ctl-more-title">{tx("网格", "Grid")}</div>
               <div className="ctl-more-row">
                 <select
@@ -1474,8 +1501,9 @@ export function ControlCanvas() {
                 {tx("导入控制画布…", "Import control canvas…")}
               </button>
             </div>
-          </>
-        )}
+          </>,
+            document.body,
+          )}
       </div>
 
       <div className="ctl-body">

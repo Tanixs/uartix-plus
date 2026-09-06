@@ -2651,10 +2651,8 @@ body {
 
 .ctl-more-mask { position: fixed; inset: 0; z-index: 90; }
 .ctl-more-menu {
-  position: absolute;
-  right: 6px;
-  top: calc(100% + 4px);
-  z-index: 95;
+  position: fixed;
+  z-index: 1000;
   min-width: 250px;
   background: var(--bg-lift, var(--bg-panel));
   border: 1px solid var(--border);
@@ -4122,7 +4120,7 @@ body {
 .tb-menu-check { margin-left: auto; font-style: normal; }
 .tb-menu-soon { margin-left: auto; font-style: normal; font-size: 9.5px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 3px; padding: 0 4px; }
 .iface-soon { font-size: 11px; color: var(--text-dim); }
-.set-modal { width: min(900px, 84vw); height: min(660px, 80vh); padding: 0 0 14px; overflow: hidden; display: flex; flex-direction: column; }
+.set-modal { width: 84vw; height: 80vh; padding: 0 0 14px; overflow: hidden; display: flex; flex-direction: column; }
 .set-modal .modal-title { padding: 16px 20px 0; font-size: 15px; }
 .set-body { display: flex; gap: 0; flex: 1; min-height: 0; }
 .set-nav {
