@@ -464,6 +464,6 @@ export function tx(zhText: string, enText: string): string {
 }
 
 export function useLocale(): Locale {
-  // eslint-disable-next-line react-hooks/rules-of-hooks
+   
   return useSyncExternalStore(subscribeLocale, getLocale);
 }

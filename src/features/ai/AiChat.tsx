@@ -278,7 +278,7 @@ function ActionBlock({ code }: { code: string }) {
 function widgetName(code: string): string {
   const t = code.match(/<title>([^<]{1,40})<\/title>/i);
   if (t) return t[1].trim();
-  const c = code.match(/(?:^|\n)\s*(?:<!--|\/\/|\/\*)\s*([^\n*\/]{2,40})/);
+  const c = code.match(/(?:^|\n)\s*(?:<!--|\/\/|\/\*)\s*([^\n*/]{2,40})/);
   if (c) return c[1].trim();
   return "AI 小部件";
 }
@@ -1140,7 +1140,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
       setUploadState("最近回复中没有巡检发现");
       return;
     }
-    let ver = "";
+    let ver: string;
     try {
       ver = await getVersion();
     } catch {

@@ -2,7 +2,7 @@ const KEY = "vs.aiTheme";
 
 export type ThemeVars = Record<string, string>;
 
-const VAR_RE = /^\-\-[a-z0-9-]+$/;
+const VAR_RE = /^--[a-z0-9-]+$/;
 
 export function loadAiTheme(): ThemeVars | null {
   try {

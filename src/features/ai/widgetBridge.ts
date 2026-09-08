@@ -120,6 +120,7 @@ api.menu.show(menuDefault,e.clientX,e.clientY);
 
 /** 把桥脚本注入到 HTML 的 <head>（或 <html> 之后，或最前） */
 export function injectBridge(html: string, bare: boolean): string {
+  // eslint-disable-next-line no-useless-escape -- 转义防源码被内联进 HTML 时提前终止 script 标签
   const script = `<script>${buildScript(bare)}<\/script>`;
   const head = html.match(/<head[^>]*>/i);
   if (head && head.index !== undefined) {

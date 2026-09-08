@@ -100,17 +100,17 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
     }
     let ts = ts_now();
     let start = {
-        let mut ring = ctx.pipeline.ring.lock().unwrap();
+        let mut ring = ctx.pipeline.ring.lock().expect("环形缓冲锁中毒");
         let s = ring.total();
         ring.append(data, ts);
         s
     };
     let rows = {
-        let mut engine = ctx.pipeline.engine.lock().unwrap();
+        let mut engine = ctx.pipeline.engine.lock().expect("解析引擎锁中毒");
         engine.feed(data, start, ts)
     };
     if !rows.is_empty() {
-        let mut spans = ctx.pipeline.spans.lock().unwrap();
+        let mut spans = ctx.pipeline.spans.lock().expect("帧区间锁中毒");
         for r in &rows {
             spans.push(Span {
                 start: r.seq,
@@ -119,7 +119,7 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
                 valid: r.valid,
             });
         }
-        let keep_from = ctx.pipeline.ring.lock().unwrap().start_seq();
+        let keep_from = ctx.pipeline.ring.lock().expect("环形缓冲锁中毒").start_seq();
         spans.prune(keep_from);
     }
     ctx.rx_total.fetch_add(data.len() as u64, Ordering::SeqCst);
@@ -131,7 +131,7 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
     crate::busevt::send_rx(app, ts, ts, data);
     if !rows.is_empty() {
         let (total, errors, dropped) = {
-            let engine = ctx.pipeline.engine.lock().unwrap();
+            let engine = ctx.pipeline.engine.lock().expect("解析引擎锁中毒");
             (engine.total, engine.errors, engine.dropped)
         };
         crate::busevt::send_frames(
@@ -218,7 +218,7 @@ pub fn replay_reset(ctx: &IngestCtx) {
 /// 会话回放回灌：RX 原始块入 hex 环形缓冲（与 ingest 同序：先入环后发前端）
 pub fn replay_rx(ctx: &IngestCtx, ts: u64, bytes: &[u8]) {
     let keep = {
-        let mut ring = ctx.pipeline.ring.lock().unwrap();
+        let mut ring = ctx.pipeline.ring.lock().expect("环形缓冲锁中毒");
         ring.append(bytes, ts);
         ring.start_seq()
     };
@@ -243,7 +243,7 @@ pub fn replay_spans(ctx: &IngestCtx, rows: &[crate::parser::FrameRow]) {
 
 #[tauri::command]
 pub fn hex_fetch(start: u64, end: u64, state: State<SerialManager>) -> HexSlice {
-    let ring = state.ctx.pipeline.ring.lock().unwrap();
+    let ring = state.ctx.pipeline.ring.lock().expect("环形缓冲锁中毒");
     let (s, bytes) = ring.fetch(start, end);
     let ts_first = if bytes.is_empty() {
         0
@@ -260,7 +260,7 @@ pub fn hex_fetch(start: u64, end: u64, state: State<SerialManager>) -> HexSlice 
         .pipeline
         .spans
         .lock()
-        .unwrap()
+        .expect("帧区间锁中毒")
         .in_range(s, s + bytes.len() as u64)
         .into_iter()
         .map(|sp| SpanOut {

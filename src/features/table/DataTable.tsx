@@ -257,12 +257,7 @@ export function DataTable() {
         const csv = "\uFEFF" + aoa.map((row) => row.map(esc).join(",")).join("\r\n");
         await invoke("save_text_file", { path, content: csv });
       } else {
-        const XLSX = await import("xlsx");
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "数据");
-        const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer;
-        await invoke("save_binary_file", { path, content: Array.from(new Uint8Array(buf)) });
+        await invoke("export_xlsx", { path, rows: aoa });
       }
     } catch (e) {
       console.error("导出失败", e);

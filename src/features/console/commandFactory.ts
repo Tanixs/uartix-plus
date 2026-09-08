@@ -594,8 +594,8 @@ export const CODECS: Codec[] = [
     build: (v) => {
       const bytes = parseHexBytes(v.data, "帧内容");
       const algo = parseIntInput(v.algo || "0", "校验算法");
-      let check: number[] = [];
-      let note = "";
+      let check: number[];
+      let note: string;
       if (algo === 0) {
         check = [sum8(bytes)];
         note = "SUM8";
@@ -699,11 +699,11 @@ function encodeVar(type: string, le: boolean, n: number): number[] {
   const dv = new DataView(buf);
   switch (type) {
     case "u8": return [n & 0xff];
-    case "u16": le ? dv.setUint16(0, n, true) : dv.setUint16(0, n, false); return Array.from(new Uint8Array(buf, 0, 2));
-    case "u32": le ? dv.setUint32(0, n, true) : dv.setUint32(0, n, false); return Array.from(new Uint8Array(buf, 0, 4));
-    case "s16": le ? dv.setInt16(0, n, true) : dv.setInt16(0, n, false); return Array.from(new Uint8Array(buf, 0, 2));
-    case "s32": le ? dv.setInt32(0, n, true) : dv.setInt32(0, n, false); return Array.from(new Uint8Array(buf, 0, 4));
-    case "f32": le ? dv.setFloat32(0, n, true) : dv.setFloat32(0, n, false); return Array.from(new Uint8Array(buf, 0, 4));
+    case "u16": dv.setUint16(0, n, le); return Array.from(new Uint8Array(buf, 0, 2));
+    case "u32": dv.setUint32(0, n, le); return Array.from(new Uint8Array(buf, 0, 4));
+    case "s16": dv.setInt16(0, n, le); return Array.from(new Uint8Array(buf, 0, 2));
+    case "s32": dv.setInt32(0, n, le); return Array.from(new Uint8Array(buf, 0, 4));
+    case "f32": dv.setFloat32(0, n, le); return Array.from(new Uint8Array(buf, 0, 4));
     default: return [n & 0xff];
   }
 }

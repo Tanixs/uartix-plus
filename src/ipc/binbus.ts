@@ -31,7 +31,7 @@ let started = false;
 const utf8 = new TextDecoder();
 
 /** 小端顺序读取器 */
-class Rd {
+export class Rd {
   private dv: DataView;
   private u8: Uint8Array;
   private o = 0;
@@ -75,7 +75,7 @@ class Rd {
   }
 }
 
-function decodeFrames(r: Rd): FramesEventPayload {
+export function decodeFrames(r: Rd): FramesEventPayload {
   const emitTs = r.u64();
   const total = r.u64();
   const errors = r.u64();
@@ -125,7 +125,7 @@ function decodeFrames(r: Rd): FramesEventPayload {
   return { rows, total, errors, dropped, emitTs };
 }
 
-function decodeRx(r: Rd): RxEventPayload {
+export function decodeRx(r: Rd): RxEventPayload {
   const tsFirst = r.u64();
   const tsLast = r.u64();
   const emitTs = r.u64();
@@ -133,7 +133,7 @@ function decodeRx(r: Rd): RxEventPayload {
   return { bytes, tsFirst, tsLast, emitTs };
 }
 
-function decodeTx(r: Rd): TxEventPayload {
+export function decodeTx(r: Rd): TxEventPayload {
   const ts = r.u64();
   const bytes = r.bytes(r.u32());
   return { bytes, ts };

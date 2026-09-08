@@ -93,7 +93,7 @@ function loadUsage(): UsageCounter {
   return { prompt: 0, completion: 0 };
 }
 
-let totalUsage: UsageCounter = loadUsage();
+const totalUsage: UsageCounter = loadUsage();
 
 export function usageTotals(): UsageCounter {
   return totalUsage;

@@ -79,7 +79,7 @@ async function loadJson<T>(kinds: string[]): Promise<T | null> {
     filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
   });
   if (typeof path !== "string") return null;
-  let content = "";
+  let content: string;
   try {
     content = await invoke<string>("read_text_file", { path });
   } catch (e) {

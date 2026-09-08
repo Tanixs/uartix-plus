@@ -370,7 +370,7 @@ export function ControlCanvas() {
     const h = r.height / zf;
     const vw = window.innerWidth / zf;
     const vh = window.innerHeight / zf;
-    let left = Math.max(8, Math.min(cmdMenu.x / zf, vw - w - 8));
+    const left = Math.max(8, Math.min(cmdMenu.x / zf, vw - w - 8));
     let top = cmdMenu.y / zf;
     if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
     setCmdMenuPos({ left, top });
@@ -576,7 +576,7 @@ export function ControlCanvas() {
     const h = r.height / zf;
     const vw = window.innerWidth / zf;
     const vh = window.innerHeight / zf;
-    let left = Math.max(8, Math.min(gridMenu.x / zf, vw - w - 8));
+    const left = Math.max(8, Math.min(gridMenu.x / zf, vw - w - 8));
     let top = gridMenu.y / zf;
     if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
     setGridMenuPos({ left, top });
@@ -590,7 +590,7 @@ export function ControlCanvas() {
     const h = r.height / zf;
     const vw = window.innerWidth / zf;
     const vh = window.innerHeight / zf;
-    let left = Math.max(8, Math.min(menu.x / zf, vw - w - 8));
+    const left = Math.max(8, Math.min(menu.x / zf, vw - w - 8));
     let top = menu.y / zf;
     if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
     setMenuPos({ left, top });

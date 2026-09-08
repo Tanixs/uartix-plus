@@ -390,7 +390,7 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
   // 统一数据链路：hub（主窗口内启动）每 ≤500ms 广播一次快照，
   // 应用内浮窗与桌面独立窗口走同一条 BroadcastChannel 通道。
   useEffect(() => {
-    let ch: BroadcastChannel | null = null;
+    let ch: BroadcastChannel;
     try {
       ch = new BroadcastChannel(getChannelName());
     } catch {

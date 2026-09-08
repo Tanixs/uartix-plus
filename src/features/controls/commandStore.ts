@@ -302,7 +302,7 @@ export function moveNode(
         return true;
       })
       .map((n) => (isGroup(n) ? { ...n, items: strip(n.items) } : n));
-  let groups = strip(snapshot.groups) as CommandGroup[];
+  const groups = strip(snapshot.groups) as CommandGroup[];
   const moved = node;
   if (!moved) return false;
   let arr: CommandNode[];

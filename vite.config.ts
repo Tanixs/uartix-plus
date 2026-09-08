@@ -12,7 +12,6 @@ export default defineConfig(async () => ({
       output: {
         manualChunks: {
           three: ["three"],
-          xlsx: ["xlsx"],
           dockview: ["dockview", "dockview-react"],
           uplot: ["uplot"],
         },
