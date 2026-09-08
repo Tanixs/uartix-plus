@@ -10,6 +10,7 @@ mod pipeline;
 mod ring;
 mod serial;
 mod session;
+mod xfer;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -46,6 +47,8 @@ pub fn run() {
     let serial_mgr = serial::SerialManager::new();
     let net_mgr = net::NetManager::new(serial_mgr.ctx.clone());
     let ble_mgr = ble::BleManager::new(serial_mgr.ctx.clone());
+    // 传输队列与 serial_mgr.ctx.xfer 同一实例（ingest tap / 发送任务共享）
+    let xfer_mgr = serial_mgr.ctx.xfer.clone();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -54,6 +57,7 @@ pub fn run() {
         .manage(serial_mgr)
         .manage(net_mgr)
         .manage(ble_mgr)
+        .manage(xfer_mgr)
         .manage(busevt::BinBus::default())
         .manage(ai::AiState::default())
         .manage(session::SessionState::default())
@@ -74,6 +78,8 @@ pub fn run() {
             ble::ble_scan_stop,
             ble::ble_connect,
             ble::ble_disconnect,
+            xfer::xfer_start,
+            xfer::xfer_abort,
             pipeline::parser_set_rules,
             pipeline::hex_fetch,
             pipeline::hex_clear,

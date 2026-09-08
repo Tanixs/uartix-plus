@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { onRx, onTx } from "../../ipc/binbus";
 import * as store from "../serial/serialStore";
 import { IconPause, IconPlay, IconTrash } from "../../shared/icons";
 import { useSettings } from "../settings/settingsStore";
-import { t } from "../../i18n/strings";
+import { t, tx } from "../../i18n/strings";
 import { QuickCommandBar } from "./QuickCommandBar";
+import { XferDialog } from "../xfer/XferDialog";
+import * as xferStore from "../xfer/xferStore";
 
 interface Chunk {
   kind: "rx" | "tx";
@@ -68,6 +70,22 @@ export function ConsolePanel() {
     }
   });
   const [error, setError] = useState<string | null>(null);
+  const [xferOpen, setXferOpen] = useState(false);
+  const [xferInit, setXferInit] = useState<{
+    proto: string;
+    path: string;
+    seq: number;
+  } | null>(null);
+  const xferSnap = useSyncExternalStore(xferStore.subscribe, xferStore.getSnapshot);
+
+  /** AI xferStart 动作：取走预填请求并打开传输对话框（seq 作 key 强制重挂载刷新初值） */
+  useEffect(() => {
+    const req = xferSnap.aiPrefill;
+    if (!req) return;
+    setXferInit({ proto: req.proto, path: req.path, seq: req.seq });
+    setXferOpen(true);
+    xferStore.consumeAiPrefill();
+  }, [xferSnap.aiPrefill]);
 
   const chunksRef = useRef<Chunk[]>([]);
   const droppedRef = useRef(0);
@@ -437,6 +455,16 @@ export function ConsolePanel() {
         <button className="btn" onClick={() => fileRef.current?.click()}>
           {t("con.sendFile")}
         </button>
+        <button
+          className="btn"
+          onClick={() => {
+            setXferInit(null);
+            setXferOpen(true);
+          }}
+          title={tx("XMODEM / YMODEM 协议传输（Bootloader 烧录）", "XMODEM / YMODEM protocol transfer (bootloader flashing)")}
+        >
+          {tx("协议传输", "Protocol")}
+        </button>
         <input
           ref={fileRef}
           type="file"
@@ -449,6 +477,13 @@ export function ConsolePanel() {
         />
       </div>
       {error && <div className="console-error">{error}</div>}
+      {xferOpen && (
+        <XferDialog
+          key={xferInit ? `ai-${xferInit.seq}` : "manual"}
+          initial={xferInit}
+          onClose={() => setXferOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -18,10 +18,90 @@ impl Default for AiState {
     }
 }
 
+/// 聊天消息：content 为字符串或 OpenAI 风格 parts 数组（[{type:"text",text},
+/// {type:"image_url",image_url:{url:"data:image/...;base64,..."}}]）。
+/// 请求体按 format 各自转换（anthropic/responses 的 parts 语法不同）
 #[derive(serde::Serialize, Deserialize)]
 pub struct AiMessage {
     pub role: String,
-    pub content: String,
+    pub content: serde_json::Value,
+}
+
+/// 提取纯文本（system 提示/摘要用）：字符串原样；parts 数组拼接 text 段
+fn content_text(v: &serde_json::Value) -> String {
+    if let Some(s) = v.as_str() {
+        return s.to_string();
+    }
+    if let Some(arr) = v.as_array() {
+        let mut s = String::new();
+        for p in arr {
+            if p.get("type").and_then(|t| t.as_str()) == Some("text") {
+                if let Some(t) = p.get("text").and_then(|t| t.as_str()) {
+                    s.push_str(t);
+                }
+            }
+        }
+        return s;
+    }
+    String::new()
+}
+
+/// data URL（data:image/png;base64,xxx）→ (media_type, base64 数据)；非法返回 None
+fn split_data_url(url: &str) -> Option<(String, String)> {
+    let rest = url.strip_prefix("data:")?;
+    let (meta, data) = rest.split_once(",")?;
+    let mt = meta.strip_suffix(";base64")?;
+    Some((mt.to_string(), data.to_string()))
+}
+
+/// OpenAI 风格 parts → 目标格式 content
+fn convert_content(v: &serde_json::Value, fmt: &str) -> serde_json::Value {
+    if v.is_string() {
+        return v.clone();
+    }
+    let arr = match v.as_array() {
+        Some(a) => a,
+        None => return serde_json::Value::String(String::new()),
+    };
+    let out: Vec<serde_json::Value> = arr
+        .iter()
+        .filter_map(|p| {
+            let ty = p.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            match (fmt, ty) {
+                ("anthropic", "text") => Some(serde_json::json!({
+                    "type": "text",
+                    "text": p.get("text").cloned().unwrap_or_default(),
+                })),
+                ("anthropic", "image_url") => {
+                    let url = p
+                        .get("image_url")
+                        .and_then(|i| i.get("url"))
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("");
+                    split_data_url(url).map(|(mt, data)| {
+                        serde_json::json!({
+                            "type": "image",
+                            "source": { "type": "base64", "media_type": mt, "data": data },
+                        })
+                    })
+                }
+                ("responses", "text") => Some(serde_json::json!({
+                    "type": "input_text",
+                    "text": p.get("text").cloned().unwrap_or_default(),
+                })),
+                ("responses", "image_url") => {
+                    let url = p
+                        .get("image_url")
+                        .and_then(|i| i.get("url"))
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("");
+                    Some(serde_json::json!({ "type": "input_image", "image_url": url }))
+                }
+                _ => Some(p.clone()), // openai 兼容：原样透传
+            }
+        })
+        .collect();
+    serde_json::Value::Array(out)
 }
 
 fn classify_error(status: u16, body: &str) -> String {
@@ -86,7 +166,7 @@ fn split_system(messages: &[AiMessage]) -> (Option<String>, Vec<&AiMessage>) {
     let mut rest = Vec::new();
     for m in messages {
         if m.role == "system" && system.is_none() {
-            system = Some(m.content.clone());
+            system = Some(content_text(&m.content));
         } else {
             rest.push(m);
         }
@@ -199,6 +279,17 @@ pub async fn ai_chat(
 ) -> Result<(), String> {
     let fmt = format.as_str();
     let url = endpoint_url(&base_url, fmt);
+    // anthropic/responses 的 parts 语法与 OpenAI 不同，逐条转换 content；
+    // openai 兼容格式原样透传（字符串保持字符串，parts 数组直接序列化）
+    let converted: Vec<serde_json::Value> = messages
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "role": m.role,
+                "content": convert_content(&m.content, fmt),
+            })
+        })
+        .collect();
     let body = match fmt {
         "anthropic" => {
             let (system, rest) = split_system(&messages);
@@ -207,7 +298,12 @@ pub async fn ai_chat(
                 "max_tokens": 8192,
                 "temperature": temperature,
                 "stream": true,
-                "messages": rest,
+                "messages": converted
+                    .iter()
+                    .zip(rest.iter())
+                    .filter(|(_, m)| m.role != "system")
+                    .map(|(v, _)| v.clone())
+                    .collect::<Vec<_>>(),
             });
             if let Some(s) = system {
                 b["system"] = serde_json::Value::String(s);
@@ -220,7 +316,12 @@ pub async fn ai_chat(
                 "model": model,
                 "temperature": temperature,
                 "stream": true,
-                "input": rest,
+                "input": converted
+                    .iter()
+                    .zip(rest.iter())
+                    .filter(|(_, m)| m.role != "system")
+                    .map(|(v, _)| v.clone())
+                    .collect::<Vec<_>>(),
             });
             if let Some(s) = system {
                 b["instructions"] = serde_json::Value::String(s);
@@ -231,7 +332,7 @@ pub async fn ai_chat(
             "model": model,
             "temperature": temperature,
             "stream": true,
-            "messages": messages,
+            "messages": converted,
         }),
     };
 
@@ -442,4 +543,69 @@ pub async fn ai_upload_report(
     }
     let snippet: String = text.chars().take(200).collect();
     Ok(snippet)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_data_url_parses_media_and_payload() {
+        let (mt, data) = split_data_url("data:image/png;base64,aGVsbG8=").unwrap();
+        assert_eq!(mt, "image/png");
+        assert_eq!(data, "aGVsbG8=");
+        assert!(split_data_url("https://example.com/a.png").is_none());
+        assert!(split_data_url("data:image/jpeg,aGVsbG8=").is_none()); // 非 base64 声明
+    }
+
+    #[test]
+    fn convert_content_anthropic_image_and_text() {
+        let v = serde_json::json!([
+            { "type": "text", "text": "看图" },
+            { "type": "image_url", "image_url": { "url": "data:image/jpeg;base64,QUJD" } },
+        ]);
+        let out = convert_content(&v, "anthropic");
+        let arr = out.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[1]["type"], "image");
+        assert_eq!(arr[1]["source"]["type"], "base64");
+        assert_eq!(arr[1]["source"]["media_type"], "image/jpeg");
+        assert_eq!(arr[1]["source"]["data"], "QUJD");
+    }
+
+    #[test]
+    fn convert_content_openai_passthrough_and_string() {
+        let s = serde_json::json!("纯文本");
+        assert_eq!(convert_content(&s, "openai"), s);
+        let v = serde_json::json!([
+            { "type": "text", "text": "hi" },
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,QQ==" } },
+        ]);
+        assert_eq!(convert_content(&v, "openai"), v);
+    }
+
+    #[test]
+    fn convert_content_responses_syntax() {
+        let v = serde_json::json!([
+            { "type": "text", "text": "hi" },
+            { "type": "image_url", "image_url": { "url": "https://x/a.png" } },
+        ]);
+        let out = convert_content(&v, "responses");
+        let arr = out.as_array().unwrap();
+        assert_eq!(arr[0]["type"], "input_text");
+        assert_eq!(arr[1]["type"], "input_image");
+        assert_eq!(arr[1]["image_url"], "https://x/a.png");
+    }
+
+    #[test]
+    fn content_text_concatenates_text_parts() {
+        let v = serde_json::json!([
+            { "type": "text", "text": "a" },
+            { "type": "image_url", "image_url": { "url": "data:image/png;base64,QQ==" } },
+            { "type": "text", "text": "b" },
+        ]);
+        assert_eq!(content_text(&v), "ab");
+        assert_eq!(content_text(&serde_json::json!("直接")), "直接");
+    }
 }

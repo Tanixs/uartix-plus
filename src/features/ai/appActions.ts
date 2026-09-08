@@ -19,6 +19,7 @@ import * as commandStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as ucStore from "../console/userCodecStore";
 import * as plotStore from "../plot/plotStore";
+import * as xferStore from "../xfer/xferStore";
 import { openPort, closePort } from "../serial/serialStore";
 import { requestOpenPanel, requestApplyPreset } from "./appBus";
 import { toast } from "./extRuntime";
@@ -81,6 +82,7 @@ export const APP_ACTION_KINDS = [
   "removeCodec",
   "openPort",
   "closePort",
+  "xferStart",
   "toast",
   "listWidgets",
   "openWidget",
@@ -296,6 +298,18 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
       }
       await closePort();
       return "连接已断开";
+    }
+    case "xferStart": {
+      const path = String(a.path ?? "").trim();
+      if (!path) throw new Error("缺少文件路径 path");
+      const proto = String(a.proto ?? "ymodem").trim();
+      if (!["ymodem", "xmodem1k", "xmodem"].includes(proto)) {
+        throw new Error(`未知传输协议：${proto}（可选：ymodem/xmodem1k/xmodem）`);
+      }
+      requestOpenPanel("console");
+      xferStore.requestAiPrefill(path, proto);
+      const fname = path.split(/[\\/]/).pop() ?? path;
+      return `已打开文件传输对话框并预填「${fname}」（${proto.toUpperCase()}），请在对话框中确认开始发送`;
     }
     case "toast": {
       const msg = String(a.msg ?? "（空通知）");

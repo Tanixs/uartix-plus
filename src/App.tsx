@@ -41,6 +41,7 @@ import { HelpModal } from "./features/help/HelpModal";
 import type { PanelId } from "./ipc/types";
 import * as serialStore from "./features/serial/serialStore";
 import * as sessionStore from "./features/session/sessionStore";
+import * as xferStore from "./features/xfer/xferStore";
 import * as templateStore from "./features/protocol/templateStore";
 import * as framesStore from "./features/table/framesStore";
 import * as plotStore from "./features/plot/plotStore";
@@ -307,6 +308,7 @@ export default function App() {
     variableStore.init();
     fcStore.init();
     sessionStore.init();
+    xferStore.init();
     void chatStore.init();
     startWidgetHub();
     startExtRuntime();

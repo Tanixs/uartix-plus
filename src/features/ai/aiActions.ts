@@ -72,21 +72,15 @@ export interface WriteResult {
   tplId?: string;
 }
 
-export function writeTemplateFromAiJson(raw: string): WriteResult {
-  let obj: Record<string, unknown>;
-  try {
-    obj = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return { ok: false, msg: "JSON 解析失败：代码块内容不是合法 JSON" };
-  }
-
+/** 单模板 JSON → FrameTemplate（字段清洗 + 默认值兜底），非法返回错误信息 */
+function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; err?: string } {
   const name =
-    typeof obj.name === "string" && obj.name.trim() ? obj.name.trim() : "AI 识别协议";
-  const b = (obj.boundary ?? {}) as Record<string, unknown>;
+    typeof o.name === "string" && o.name.trim() ? o.name.trim() : "AI 识别协议";
+  const b = (o.boundary ?? {}) as Record<string, unknown>;
   const mode = BOUNDARY_MODES.includes(String(b.mode)) ? String(b.mode) : "fixedLength";
   const headerBytes = toBytes(b.headerBytes) ?? [];
   if (headerBytes.length === 0 && mode !== "footer") {
-    return { ok: false, msg: "帧头 headerBytes 缺失或非法，无法写入模板" };
+    return { err: `模板「${name}」：帧头 headerBytes 缺失或非法` };
   }
 
   let boundary: Boundary;
@@ -117,7 +111,7 @@ export function writeTemplateFromAiJson(raw: string): WriteResult {
   }
 
   let checksum: FrameTemplate["checksum"] = null;
-  const c = obj.checksum as Record<string, unknown> | null | undefined;
+  const c = o.checksum as Record<string, unknown> | null | undefined;
   if (c && typeof c === "object") {
     const algo = CHECKSUM_ALGOS.includes(c.algo as ChecksumAlgo)
       ? (c.algo as ChecksumAlgo)
@@ -132,7 +126,7 @@ export function writeTemplateFromAiJson(raw: string): WriteResult {
     }
   }
 
-  const rawFields = Array.isArray(obj.fields) ? (obj.fields as Record<string, unknown>[]) : [];
+  const rawFields = Array.isArray(o.fields) ? (o.fields as Record<string, unknown>[]) : [];
   const fields: FieldDef[] = [];
   for (const f of rawFields) {
     const type = FIELD_TYPES.includes(f.type as FieldType) ? (f.type as FieldType) : null;
@@ -153,22 +147,61 @@ export function writeTemplateFromAiJson(raw: string): WriteResult {
     });
   }
 
-  const tpl: FrameTemplate = {
-    id: crypto.randomUUID(),
-    name,
-    color: templateStore.PALETTE[Math.floor(Math.random() * templateStore.PALETTE.length)],
-    enabled: false,
-    boundary,
-    checksum,
-    fields,
-    presetKey: null,
+  return {
+    tpl: {
+      id: crypto.randomUUID(),
+      name,
+      color: templateStore.PALETTE[Math.floor(Math.random() * templateStore.PALETTE.length)],
+      enabled: false,
+      boundary,
+      checksum,
+      fields,
+      presetKey: null,
+    },
   };
+}
 
-  templateStore.importTemplates([tpl]);
+/**
+ * AI → 协议模板写入。兼容三种形态：
+ * - 单模板对象（旧格式）：{"name","boundary","checksum","fields"}
+ * - 批量：{"templates":[...]} 或 {"group":"簇名","templates":[...]}
+ * 带 group 时自动创建协议簇并把全部模板归入该组（写入后默认停用）
+ */
+export function writeTemplateFromAiJson(raw: string): WriteResult {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { ok: false, msg: "JSON 解析失败：代码块内容不是合法 JSON" };
+  }
+
+  const groupName =
+    typeof obj.group === "string" && obj.group.trim() ? obj.group.trim() : null;
+  const rawList = Array.isArray(obj.templates) ? (obj.templates as unknown[]) : [obj];
+  if (rawList.length === 0) return { ok: false, msg: "templates 数组为空" };
+  if (rawList.length > 64) rawList.length = 64;
+
+  const tpls: FrameTemplate[] = [];
+  for (const item of rawList) {
+    if (!item || typeof item !== "object") continue;
+    const r = parseOneTemplate(item as Record<string, unknown>);
+    if (r.err || !r.tpl) return { ok: false, msg: r.err ?? "模板解析失败" };
+    tpls.push(r.tpl);
+  }
+  if (tpls.length === 0) return { ok: false, msg: "没有可写入的模板" };
+
+  if (groupName && tpls.length > 0) {
+    const grpKey = `usr-${Date.now().toString(36)}-ai`;
+    templateStore.setGroupMeta(grpKey, { name: groupName });
+    for (const t of tpls) t.groupKey = grpKey;
+  }
+  templateStore.importTemplates(tpls);
   return {
     ok: true,
-    msg: `模板「${name}」已写入协议模板（默认停用，请在协议模板面板启用）`,
-    tplId: tpl.id,
+    msg: groupName
+      ? `协议簇「${groupName}」已写入（${tpls.length} 个模板，默认停用，请在协议模板面板启用）`
+      : `模板「${tpls[0].name}」已写入协议模板（默认停用，请在协议模板面板启用）`,
+    tplId: tpls[0].id,
   };
 }
 

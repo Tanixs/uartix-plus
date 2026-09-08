@@ -43,6 +43,8 @@ It is far more than a serial terminal that echoes characters. **Protocols need n
 | Frame table and export | ❌ | ❌ | ✅ |
 | Dual-cursor / pointer readout | ❌ | basic | **time ruler + amplitude ruler** |
 | Video link beside telemetry | ❌ | ❌ | ✅ |
+| Session recording and replay | ❌ | CSV export only | **whole-panel rewind + virtual device** |
+| Firmware flashing (XMODEM / YMODEM) | external tools | ❌ | **built-in dialog** |
 | AI-generated components and actions | ❌ | ❌ | **built in (since v0.3.6)** |
 
 ---
@@ -61,6 +63,8 @@ Select a run of bytes on the Hex stream, right-click and declare it as header, l
 - **Text streams are protocols too**: the header may be empty, channels are split adaptively on the delimiter, and the channel count follows each frame's segment count
 - **Preset templates**: WitMotion JY901, Anonymous V7, Modbus, CSV text stream; any protocol exports to JSON for sharing
 - **Clusters**: one protocol per tab holding many frame types, with right-click copy / paste / rename / export
+- **Variable-length payloads**: spanTail adaptive fields extend to the end of the payload and can expand into `field#1..N` element variables; negative-offset fields anchor to the frame tail
+- **Structure discovery**: for unknown protocols, frame length / phase / column entropy are estimated automatically and header candidates turn into a template with one click
 
 </details>
 
@@ -96,9 +100,13 @@ The control canvas turns debugging panels into a drag-and-drop exercise: a ghost
 
 </details>
 
+### Session recording and replay
+
+Record a whole debugging session — parsed frames plus raw RX/TX bytes — into a `.usess` file and replay it any time. The replay engine mirrors the demo source, so the frame canvas / 2D plot / data table / 3D attitude / Hex stream all rewind in sync; speeds from 0.25× to 4×, click-to-seek on the progress bar, and timeline annotations (press M) are saved with the file and drawn on the 2D plot. Replay bridging turns a session into a "virtual device": open a TCP server and any third-party host tool receives the byte stream at the original pacing.
+
 ### Connectivity and performance
 
-Interfaces cover serial / TCP client / TCP server / UDP, all sharing one parsing pipeline, so network sources get the full feature set. A unplugged serial port is detected within two seconds and reconnects on replug; network drops reconnect automatically.
+Interfaces cover serial / TCP client / TCP server / UDP / Bluetooth BLE — all sharing one parsing pipeline, so network and BLE sources get the full feature set. A unplugged serial port is detected within two seconds and reconnects on replug; network drops reconnect automatically. XMODEM / XMODEM-1K / YMODEM sending is built in for Bootloader / IAP flashing — open a dialog and go, with receiver acknowledgements kept out of the parsing pipeline during transfer.
 
 <details>
 <summary><b>Engineering details</b> (performance / layout / themes / updates)</summary>
@@ -118,7 +126,10 @@ Interfaces cover serial / TCP client / TCP server / UDP, all sharing one parsing
 Since v0.3.6 the AI is not a chat box but an in-app engine.
 
 - **Create by conversation**: protocol templates / control cards / command library / frame-factory protocols / themes / global styles / dockable panels / sandbox widgets / borderless widgets / direct actions / privileged scripts — ten output kinds, each installed from a confirmation card
-- **Say it, it happens**: requests such as opening a panel, switching layout or connecting a port are executed directly rather than described, through 27 whitelisted actions; destructive ones are flagged red and still need your confirmation
+- **Say it, it happens**: requests such as opening a panel, switching layout or connecting a port are executed directly rather than described, through 28 whitelisted actions; destructive ones are flagged red and still need your confirmation
+- **Protocol clusters in one shot**: multi-frame protocols are generated as a whole cluster, auto-grouped and archived, disabled until you enable them
+- **Reads your screenshots**: paste or attach images (up to 4 per message, auto-compressed) and the AI answers from the picture
+- **Flashing hand-off**: the AI can pre-fill the transfer dialog (protocol + path); sending still waits for your click
 - **Everything is an API**: sandbox components receive `window.uartix` — keyboard / cursor listening, AI reasoning awareness, asking the AI, custom context menus, window control, cross-widget broadcast, speech, theme subscription
 - **Borderless mode**: transparent window, drag-to-move while held, snap-and-dock on release, screen-edge clamping — build floating dashboards, notification strips, or a desktop pet (the pet is only an example; the capability is general)
 - **Visible and safe**: multi-stage reasoning streamed as it happens, no install button until generation completes, and sandbox components follow global theme changes live

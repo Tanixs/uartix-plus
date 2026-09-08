@@ -83,6 +83,7 @@ impl SerialManager {
                 pipeline: Arc::new(Pipeline::new()),
                 record: Arc::new(Mutex::new(None)),
                 rx_total: Arc::new(AtomicU64::new(0)),
+                xfer: Arc::new(crate::xfer::XferManager::new()),
             }),
             shared: Arc::new(Mutex::new(Shared {
                 port: None,
@@ -304,32 +305,49 @@ pub async fn send_data(
     if bytes.is_empty() {
         return Err("发送内容为空".into());
     }
-    // 接口路由：网络已连接优先走网络，其次 BLE，最后串口
-    match crate::net::try_send(&net, &bytes) {
+    route_send(&app, &state, &net, &ble, &bytes).await
+}
+
+/// 串口直写（try_send 契约：Ok(false)=串口未接管）
+pub(crate) fn try_send_serial(state: &SerialManager, bytes: &[u8]) -> Result<(), String> {
+    let mut shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
+    let port = shared
+        .port
+        .as_mut()
+        .ok_or_else(|| "串口未连接".to_string())?;
+    port.write_all(bytes).map_err(|e| format!("发送失败: {e}"))?;
+    port.flush().map_err(|e| format!("发送失败: {e}"))?;
+    Ok(())
+}
+
+/// 统一发送路由：net → ble → serial；控制台 send_data 与文件传输（xfer.rs）共用。
+/// 三处都未接管时返回最后的串口错误（「串口未连接」）
+pub(crate) async fn route_send(
+    app: &AppHandle,
+    serial: &SerialManager,
+    net: &crate::net::NetManager,
+    ble: &crate::ble::BleManager,
+    bytes: &[u8],
+) -> Result<(), String> {
+    match crate::net::try_send(net, bytes) {
         Ok(true) => {
-            crate::net::notify_tx(&app, &net, bytes);
+            crate::net::notify_tx(app, net, bytes);
             return Ok(());
         }
         Ok(false) => {}
         Err(e) => return Err(e),
     }
-    match crate::ble::try_send(&ble, &bytes).await {
+    match crate::ble::try_send(ble, bytes).await {
         Ok(true) => {
-            crate::ble::notify_tx(&app, &bytes);
+            crate::ble::notify_tx(app, bytes);
             return Ok(());
         }
         Ok(false) => {}
         Err(e) => return Err(e),
     }
-    {
-        let mut shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
-        let port = shared.port.as_mut().ok_or("串口未连接")?;
-        port.write_all(&bytes)
-            .map_err(|e| format!("发送失败: {e}"))?;
-        port.flush().map_err(|e| format!("发送失败: {e}"))?;
-    }
-    state.tx_total.fetch_add(bytes.len() as u64, Ordering::SeqCst);
-    crate::busevt::send_tx(&app, now_ms(), &bytes);
+    try_send_serial(serial, bytes)?;
+    serial.tx_total.fetch_add(bytes.len() as u64, Ordering::SeqCst);
+    crate::busevt::send_tx(app, now_ms(), bytes);
     Ok(())
 }
 

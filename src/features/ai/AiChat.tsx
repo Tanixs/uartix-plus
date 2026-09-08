@@ -981,6 +981,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const [atBottom, setAtBottom] = useState(true);
   const [editingId, setEditingId] = useState("");
   const [editText, setEditText] = useState("");
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const imgInputRef = useRef<HTMLInputElement>(null);
   const ws = useExtensions();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
@@ -1042,14 +1044,45 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     el.scrollTop = el.scrollHeight;
   };
 
+  /** 图片压缩：长边压到 1024px 内、JPEG 0.85——控制多模态请求体积（每张 ~100-300KB） */
+  const addImages = (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return;
+    const room = 4 - pendingImages.length;
+    const list = Array.from(files).slice(0, Math.max(0, room));
+    if (list.length === 0) {
+      setNotice("每条消息最多附带 4 张图片");
+      return;
+    }
+    for (const f of list) {
+      if (!f.type.startsWith("image/")) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const scale = Math.min(1, 1024 / Math.max(img.width, img.height));
+          const cv = document.createElement("canvas");
+          cv.width = Math.max(1, Math.round(img.width * scale));
+          cv.height = Math.max(1, Math.round(img.height * scale));
+          cv.getContext("2d")?.drawImage(img, 0, 0, cv.width, cv.height);
+          const url = scale < 1 ? cv.toDataURL("image/jpeg", 0.85) : String(reader.result);
+          setPendingImages((prev) => (prev.length >= 4 ? prev : [...prev, url]));
+        };
+        img.src = String(reader.result);
+      };
+      reader.readAsDataURL(f);
+    }
+  };
+
   const doSend = () => {
     const text = input.trim();
-    if (!text || chat.streaming) return;
+    if ((!text && pendingImages.length === 0) || chat.streaming) return;
     const scene = mode;
+    const imgs = pendingImages.length ? pendingImages : undefined;
     setMode("qa");
     setInput("");
+    setPendingImages([]);
     stickRef.current = true;
-    void chatStore.sendText(text, scene);
+    void chatStore.sendText(text, scene, undefined, imgs);
   };
 
   const runScene = (scene: AiScene, payload?: Record<string, unknown>) => {
@@ -1359,7 +1392,16 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                       </div>
                     </div>
                   ) : m.role === "user" ? (
-                    <div className="ai-msg-text">{m.content}</div>
+                    <>
+                      {m.images && m.images.length > 0 && (
+                        <div className="ai-msg-imgs">
+                          {m.images.map((u, i) => (
+                            <img key={i} src={u} className="ai-msg-img" alt="" />
+                          ))}
+                        </div>
+                      )}
+                      <div className="ai-msg-text">{m.content}</div>
+                    </>
                   ) : isStreamingMsg ? (
                     <StreamBody
                       content={m.content}
@@ -1483,6 +1525,33 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             </button>
           </div>
         )}
+        {pendingImages.length > 0 && (
+          <div className="ai-img-strip">
+            {pendingImages.map((u, i) => (
+              <div key={i} className="ai-img-thumb">
+                <img src={u} alt="" />
+                <button
+                  className="ai-img-del"
+                  title="移除图片"
+                  onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <input
+          ref={imgInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            addImages(e.target.files);
+            e.target.value = "";
+          }}
+        />
         <div className="ai-input-row">
           <textarea
             ref={inputRef}
@@ -1490,7 +1559,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             placeholder={
               chat.streaming
                 ? "AI 正在回复…"
-                : "输入问题，Enter 发送，Shift+Enter 换行"
+                : "输入问题，Enter 发送，Shift+Enter 换行；可粘贴/附加图片"
             }
             rows={1}
             value={input}
@@ -1500,6 +1569,15 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               const el = e.target;
               el.style.height = "auto";
               el.style.height = Math.min(el.scrollHeight, 120) + "px";
+            }}
+            onPaste={(e) => {
+              const imgs = Array.from(e.clipboardData.files).filter((f) =>
+                f.type.startsWith("image/"),
+              );
+              if (imgs.length > 0) {
+                e.preventDefault();
+                addImages(imgs);
+              }
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.shiftKey || e.ctrlKey)) {
@@ -1517,14 +1595,23 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               <IconStop />
             </button>
           ) : (
-            <button
-              className="ai-send"
-              title="发送（Enter）"
-              disabled={!input.trim()}
-              onClick={doSend}
-            >
-              <IconSend />
-            </button>
+            <>
+              <button
+                className="ai-send attach"
+                title="附加图片（也可直接粘贴截图）"
+                onClick={() => imgInputRef.current?.click()}
+              >
+                <IconUpload />
+              </button>
+              <button
+                className="ai-send"
+                title="发送（Enter）"
+                disabled={!input.trim() && pendingImages.length === 0}
+                onClick={doSend}
+              >
+                <IconSend />
+              </button>
+            </>
           )}
         </div>
       </div>

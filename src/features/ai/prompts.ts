@@ -34,7 +34,7 @@ const BUG_PATROL = `另外，你在回答用户问题的同时，请顺带以资
 const TEMPLATE_SPEC = `输出格式要求：
 1. 先用简短文字说明分析思路。
 2. 用 Markdown 表格列出所有候选帧结构，列：编号/帧头/长度方式/字段划分/字节序/校验/置信度。
-3. 对最可信的候选，输出一个 \`\`\`uartix-template 代码块，内容为符合以下 TypeScript 类型的单个模板 JSON（不要输出数组）：
+3. 对最可信的候选，输出一个 \`\`\`uartix-template 代码块，内容为符合以下 TypeScript 类型的模板 JSON。单帧型输出单个模板对象；多帧型协议（同一帧头内用识别位/命令字节区分多种帧型，如 WIT/匿名 V7）输出协议簇批量 JSON：{"group":"簇名","templates":[Template,...]}（一次写入多个模板并自动建组归档，最多 64 个）：
 interface Boundary { mode: "fixedLength"|"lengthField"|"footer"; headerBytes: number[]; fixedLength?: number|null; lengthOffset?: number|null; lengthSize?: number|null; lengthEndian?: "little"|"big"|null; lengthAdjust?: number|null; footerBytes?: number[]|null; maxLength: number; }
 interface ChecksumCfg { algo: "none"|"sum8"|"sumadd"|"xor8"|"crc16_modbus"|"crc16_ccitt"|"crc32"; coverageStart: number; coverageEnd: number; endian: "little"|"big"; }
 （coverageEnd 为负数表示从帧尾回退，如 -1 表示不含最后 1 字节）
@@ -95,7 +95,8 @@ function schemaAction(): string {
 - setTheme({"theme":"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
 - listProtocols()/listCommands()/listCards() 查询配置清单
 - addChannel({"tpl":"模板名","field":"字段名"}) 加曲线通道；clearChannels() 清空通道
-- writeCard({"json":"…"})/writeCommand({"json":"…"})/writeTemplate({"json":"…"})/writeCodec({"json":"…"}) 写入配置
+- writeCard({"json":"…"})/writeCommand({"json":"…"})/writeTemplate({"json":"…"})/writeCodec({"json":"…"}) 写入配置（writeTemplate 支持 {"group":"簇名","templates":[…]} 一次写入协议簇并自动建组）
+- xferStart({"path":"D:/fw.bin","proto":"ymodem"}) 预填文件传输对话框（proto: ymodem/xmodem1k/xmodem，默认 ymodem；打开控制台面板并预填路径，用户在对话框确认后才开始发送）
 - clearPage() 清空控制画布当前页【破坏性】；addPage({"name":"页名"}) 新建控制页；patchCard({"name":"卡名","patch":{…}}) 改卡片属性
 - removeCard({"name":"卡名"})/removeProtocol({"name":"模板名"})/removeCommand({"name":"命令名"})/removeCodec({"name":"协议名"}) 按名删除【破坏性】
 - openPort()/closePort() 开关连接（需发送权限）
@@ -171,7 +172,8 @@ function schemaScript(script: boolean): string {
   · setTheme({theme:"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
   · listProtocols()/listCommands()/listCards() 获取现有配置清单
   · addChannel({tpl:"模板名",field:"字段名"}) 加曲线通道；clearChannels() 清空通道
-  · writeCard({json})/writeCommand({json})/writeTemplate({json})/writeCodec({json}) 写入配置（JSON 字符串，格式同对应输出格式）
+  · writeCard({json})/writeCommand({json})/writeTemplate({json})/writeCodec({json}) 写入配置（JSON 字符串，格式同对应输出格式；writeTemplate 支持 {"group":"簇名","templates":[…]} 批量写协议簇）
+  · xferStart({path, proto?}) 预填文件传输对话框（proto: ymodem/xmodem1k/xmodem，默认 ymodem），用户在对话框确认后才开始发送
   · clearPage() 清空控制画布当前页；addPage({name}) 新建控制页；patchCard({name,patch:{…}}) 改卡片属性
   · removeCard({name})/removeProtocol({name})/removeCommand({name})/removeCodec({name}) 按名删除（删除/清空类动作会 toast 告知）
   · openPort()/closePort() 开关连接（需发送权限）

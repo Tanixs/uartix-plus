@@ -269,11 +269,12 @@ export function Plot2D() {
   const [themeTick, setThemeTick] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
-  const [sub, setSub] = useState<null | "x" | "y">(null);
+  const [sub, setSub] = useState<null | "axis" | "style" | "cursor">(null);
   const [subPinned, setSubPinned] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const xRowRef = useRef<HTMLDivElement | null>(null);
-  const yRowRef = useRef<HTMLDivElement | null>(null);
+  const axisRowRef = useRef<HTMLDivElement | null>(null);
+  const styleRowRef = useRef<HTMLDivElement | null>(null);
+  const cursorRowRef = useRef<HTMLDivElement | null>(null);
   const subTimer = useRef<number | null>(null);
   const [, setTick] = useState(0);
   const [followState, setFollowState] = useState(true);
@@ -2003,168 +2004,9 @@ export function Plot2D() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="ctx-title">图表设置</div>
-            <div className="ctx-group">Y 轴</div>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ yMode: "auto" })}
-            >
-              {plot.settings.yMode === "auto" ? "●" : "○"} 自动范围
-            </button>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ yMode: "zero" })}
-            >
-              {plot.settings.yMode === "zero" ? "●" : "○"} 包含零点（对称）
-            </button>
-            <button
-              className="ctx-item"
-              onClick={() => {
-                const next = !plot.settings.yAuto;
-                plotStore.setSetting({ yAuto: next });
-                if (next) yManualRef.current = false;
-              }}
-            >
-              {plot.settings.yAuto ? "●" : "○"} Y 轴随视野自动缩放
-            </button>
+            <div className="ctx-group">视图</div>
             <button className="ctx-item" onClick={fitView}>
               Auto 自适应（X/Y 一步取景，执行一次）
-            </button>
-            <div className="ctx-group">AI</div>
-            <button
-              className="ctx-item"
-              title="AI 根据各通道统计特征总结趋势、诊断振荡/噪声并给出采样率建议"
-              onClick={() => invokeAiScene("analyzeCurve")}
-            >
-              AI 分析当前曲线
-            </button>
-            <div
-              ref={xRowRef}
-              className="ctx-row"
-              onMouseEnter={() => {
-                disarmSub();
-                setSub("x");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                setSub((s) => (s === "x" ? null : "x"));
-                setSubPinned(sub !== "x");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item">
-                <span className="ctx-item-l">
-                  X 轴源{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">
-                  {plot.settings.xSource === "time"
-                    ? "时间"
-                    : plot.settings.xSource === "index"
-                      ? "序号"
-                      : plot.channels.find(
-                          (c) => `ch:${c.id}` === plot.settings.xSource,
-                        )?.name ?? ""}
-                </span>
-              </button>
-            </div>
-            <div
-              ref={yRowRef}
-              className="ctx-row"
-              onMouseEnter={() => {
-                disarmSub();
-                setSub("y");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                setSub((s) => (s === "y" ? null : "y"));
-                setSubPinned(sub !== "y");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item">
-                <span className="ctx-item-l">
-                  Y 轴源（通道显隐）{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">
-                  {plot.channels.filter((c) => c.visible).length}/
-                  {plot.channels.length}
-                </span>
-              </button>
-            </div>
-            <div className="ctx-group">绘图</div>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ lineStyle: "linear" })}
-            >
-              {plot.settings.lineStyle === "linear" ? "●" : "○"} 直线连接
-            </button>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ lineStyle: "step" })}
-            >
-              {plot.settings.lineStyle === "step" ? "●" : "○"} 台阶（保持末值）
-            </button>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ lineStyle: "smooth" })}
-            >
-              {plot.settings.lineStyle === "smooth" ? "●" : "○"} 平滑样条
-            </button>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ plotMode: "line" })}
-            >
-              {plot.settings.plotMode === "line" ? "●" : "○"} 连线
-            </button>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ plotMode: "points" })}
-            >
-              {plot.settings.plotMode === "points" ? "●" : "○"} 仅画点
-            </button>
-            <div className="form-row" style={{ padding: "4px 8px" }}>
-              <label>线宽</label>
-              <select
-                className="input"
-                value={plot.settings.lineWidth}
-                onChange={(e) =>
-                  plotStore.setSetting({ lineWidth: Number(e.target.value) })
-                }
-              >
-                {[1, 2, 3].map((w) => (
-                  <option key={w} value={w}>
-                    {w}px
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ grid: !plot.settings.grid })}
-            >
-              {plot.settings.grid ? "●" : "○"} 网格线
-            </button>
-            <div className="ctx-group">视图</div>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ cursorX: !plot.settings.cursorX })}
-            >
-              {plot.settings.cursorX ? "●" : "○"} 时间游标（垂直标尺 Δt）
-            </button>
-            <button
-              className="ctx-item"
-              onClick={() => plotStore.setSetting({ cursorY: !plot.settings.cursorY })}
-            >
-              {plot.settings.cursorY ? "●" : "○"} 幅值游标（水平标尺 ΔV）
             </button>
             <button
               className="ctx-item"
@@ -2181,11 +2023,112 @@ export function Plot2D() {
             <button className="ctx-item" onClick={resetView}>
               复位视图
             </button>
+            <div className="ctx-group">设置</div>
+            <div
+              ref={axisRowRef}
+              className="ctx-row"
+              onMouseEnter={() => {
+                disarmSub();
+                setSub("axis");
+              }}
+              onMouseLeave={() => {
+                if (!subPinned) armSub();
+              }}
+              onClick={() => {
+                setSub((s) => (s === "axis" ? null : "axis"));
+                setSubPinned(sub !== "axis");
+                disarmSub();
+              }}
+            >
+              <button className="ctx-item">
+                <span className="ctx-item-l">
+                  坐标轴{" "}
+                  <span className="ctx-arrow">
+                    <IconChevron size={12} />
+                  </span>
+                </span>
+                <span className="ctx-cur">
+                  {plot.settings.xSource === "time"
+                    ? "X: 时间"
+                    : plot.settings.xSource === "index"
+                      ? "X: 序号"
+                      : `X: ${plot.channels.find((c) => `ch:${c.id}` === plot.settings.xSource)?.name ?? ""}`}
+                </span>
+              </button>
+            </div>
+            <div
+              ref={styleRowRef}
+              className="ctx-row"
+              onMouseEnter={() => {
+                disarmSub();
+                setSub("style");
+              }}
+              onMouseLeave={() => {
+                if (!subPinned) armSub();
+              }}
+              onClick={() => {
+                setSub((s) => (s === "style" ? null : "style"));
+                setSubPinned(sub !== "style");
+                disarmSub();
+              }}
+            >
+              <button className="ctx-item">
+                <span className="ctx-item-l">
+                  曲线样式{" "}
+                  <span className="ctx-arrow">
+                    <IconChevron size={12} />
+                  </span>
+                </span>
+                <span className="ctx-cur">
+                  {{ linear: "直线", step: "台阶", smooth: "平滑" }[plot.settings.lineStyle]} ·{" "}
+                  {{ line: "连线", points: "仅画点" }[plot.settings.plotMode]}
+                </span>
+              </button>
+            </div>
+            <div
+              ref={cursorRowRef}
+              className="ctx-row"
+              onMouseEnter={() => {
+                disarmSub();
+                setSub("cursor");
+              }}
+              onMouseLeave={() => {
+                if (!subPinned) armSub();
+              }}
+              onClick={() => {
+                setSub((s) => (s === "cursor" ? null : "cursor"));
+                setSubPinned(sub !== "cursor");
+                disarmSub();
+              }}
+            >
+              <button className="ctx-item">
+                <span className="ctx-item-l">
+                  游标与网格{" "}
+                  <span className="ctx-arrow">
+                    <IconChevron size={12} />
+                  </span>
+                </span>
+                <span className="ctx-cur">
+                  {[plot.settings.cursorX && "时间游标", plot.settings.cursorY && "幅值游标"]
+                    .filter(Boolean)
+                    .join(" + ") || "关"}
+                </span>
+              </button>
+            </div>
+            <div className="ctx-group">AI</div>
+            <button
+              className="ctx-item"
+              title="AI 根据各通道统计特征总结趋势、诊断振荡/噪声并给出采样率建议"
+              onClick={() => invokeAiScene("analyzeCurve")}
+            >
+              AI 分析当前曲线
+            </button>
           </div>,
           document.body,
         )}
-      {menu && sub === "x" && (
-        <Flyout anchor={xRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={150}>
+      {menu && sub === "axis" && (
+        <Flyout anchor={axisRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={180}>
+          <div className="ctx-group">X 轴源</div>
           <button
             className="ctx-item"
             onClick={() => {
@@ -2216,10 +2159,32 @@ export function Plot2D() {
               {plot.settings.xSource === `ch:${ch.id}` ? "●" : "○"} {ch.name}
             </button>
           ))}
-        </Flyout>
-      )}
-      {menu && sub === "y" && (
-        <Flyout anchor={yRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={150}>
+          <div className="ctx-group">Y 轴范围</div>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ yMode: "auto" })}
+          >
+            {plot.settings.yMode === "auto" ? "●" : "○"} 自动范围
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ yMode: "zero" })}
+          >
+            {plot.settings.yMode === "zero" ? "●" : "○"} 包含零点（对称）
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              const next = !plot.settings.yAuto;
+              plotStore.setSetting({ yAuto: next });
+              if (next) yManualRef.current = false;
+            }}
+          >
+            {plot.settings.yAuto ? "●" : "○"} Y 轴随视野自动缩放
+          </button>
+          <div className="ctx-group">
+            通道显隐（{plot.channels.filter((c) => c.visible).length}/{plot.channels.length}）
+          </div>
           {plot.channels.length === 0 && <div className="ctx-group">暂无通道</div>}
           {plot.channels.map((ch) => (
             <button
@@ -2238,6 +2203,80 @@ export function Plot2D() {
               {ch.name}
             </button>
           ))}
+        </Flyout>
+      )}
+      {menu && sub === "style" && (
+        <Flyout anchor={styleRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={160}>
+          <div className="ctx-group">线型</div>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ lineStyle: "linear" })}
+          >
+            {plot.settings.lineStyle === "linear" ? "●" : "○"} 直线连接
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ lineStyle: "step" })}
+          >
+            {plot.settings.lineStyle === "step" ? "●" : "○"} 台阶（保持末值）
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ lineStyle: "smooth" })}
+          >
+            {plot.settings.lineStyle === "smooth" ? "●" : "○"} 平滑样条
+          </button>
+          <div className="ctx-group">模式</div>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ plotMode: "line" })}
+          >
+            {plot.settings.plotMode === "line" ? "●" : "○"} 连线
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ plotMode: "points" })}
+          >
+            {plot.settings.plotMode === "points" ? "●" : "○"} 仅画点
+          </button>
+          <div className="form-row" style={{ padding: "4px 8px" }}>
+            <label>线宽</label>
+            <select
+              className="input"
+              value={plot.settings.lineWidth}
+              onChange={(e) =>
+                plotStore.setSetting({ lineWidth: Number(e.target.value) })
+              }
+            >
+              {[1, 2, 3].map((w) => (
+                <option key={w} value={w}>
+                  {w}px
+                </option>
+              ))}
+            </select>
+          </div>
+        </Flyout>
+      )}
+      {menu && sub === "cursor" && (
+        <Flyout anchor={cursorRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={180}>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ cursorX: !plot.settings.cursorX })}
+          >
+            {plot.settings.cursorX ? "●" : "○"} 时间游标（垂直标尺 Δt）
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ cursorY: !plot.settings.cursorY })}
+          >
+            {plot.settings.cursorY ? "●" : "○"} 幅值游标（水平标尺 ΔV）
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => plotStore.setSetting({ grid: !plot.settings.grid })}
+          >
+            {plot.settings.grid ? "●" : "○"} 网格线
+          </button>
         </Flyout>
       )}
     </div>

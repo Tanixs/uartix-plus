@@ -5200,6 +5200,47 @@ label.set-switch,
 .ai-send:hover:not(:disabled) { filter: brightness(1.1); }
 .ai-send:disabled { opacity: 0.45; cursor: not-allowed; }
 .ai-send.stop { background: var(--danger, #e5534b); }
+.ai-send.attach { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+.ai-send.attach:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); filter: none; }
+.ai-img-strip { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 12px 6px; }
+.ai-img-thumb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  flex: none;
+}
+.ai-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ai-img-del {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ai-img-del:hover { background: rgba(0, 0, 0, 0.75); }
+.ai-msg-imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.ai-msg-img {
+  max-width: 180px;
+  max-height: 120px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+  display: block;
+}
 
 .ai-tpl-block {
   margin: 6px 0;
@@ -5913,3 +5954,25 @@ html.aiw-transparent-root #root {
   gap: 6px;
 }
 .ai-widget-ops .btn { padding: 2px 8px; height: 22px; font-size: 11px; flex: none; }
+
+/* ==== XMODEM/YMODEM 文件传输（P49） ==== */
+.xfer-modal { width: min(560px, 92vw); }
+.xfer-body { padding: 14px 20px; display: flex; flex-direction: column; gap: 10px; }
+.xfer-row { display: flex; align-items: center; gap: 8px; }
+.xfer-row > label { width: 34px; flex: none; font-size: 12px; opacity: .75; }
+.xfer-row select { width: 140px; flex: none; }
+.xfer-path { flex: 1; min-width: 0; font-size: 12px; }
+.xfer-hint { font-size: 11px; opacity: .55; line-height: 1.4; flex: 1; min-width: 0; }
+.xfer-progress { display: flex; flex-direction: column; gap: 5px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-soft, rgba(127,127,127,.06)); }
+.xfer-phead { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+.xfer-run { color: #d29922; }
+.xfer-ok { color: #3fb950; }
+.xfer-bad { color: #e5534b; }
+.xfer-bar { height: 8px; border-radius: 4px; background: rgba(127,127,127,.18); overflow: hidden; }
+.xfer-bar-fill { height: 100%; background: linear-gradient(90deg, #3fb950, #4e9cef); transition: width .15s linear; }
+.xfer-meta { display: flex; gap: 14px; font-size: 11px; opacity: .7; }
+.xfer-retry { color: #d29922; }
+.xfer-result { font-size: 12px; padding: 7px 10px; border-radius: 6px; border: 1px solid transparent; }
+.xfer-result.xfer-ok { border-color: rgba(63,185,80,.4); background: rgba(63,185,80,.1); }
+.xfer-result.xfer-bad { border-color: rgba(229,83,75,.45); background: rgba(229,83,75,.1); }
+.xfer-tip { font-size: 11px; opacity: .5; line-height: 1.5; }

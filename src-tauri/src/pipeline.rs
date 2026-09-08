@@ -83,10 +83,19 @@ pub struct IngestCtx {
     pub pipeline: Arc<Pipeline>,
     pub record: Arc<Mutex<Option<File>>>,
     pub rx_total: Arc<AtomicU64>,
+    /// 文件传输状态机（传输激活期间 RX 控制字节改喂状态机）
+    pub xfer: Arc<crate::xfer::XferManager>,
 }
 
 pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
     if data.is_empty() {
+        return;
+    }
+    // 文件传输激活：RX 是 ACK/NAK/'C'/CAN 控制字节，只喂传输状态机并计数，
+    // 不进解析/HexView/录制/X-Ray——Bootloader 模式下无业务数据，吞掉防污染
+    if crate::xfer::is_active() {
+        ctx.xfer.feed_rx(data);
+        ctx.rx_total.fetch_add(data.len() as u64, Ordering::SeqCst);
         return;
     }
     let ts = ts_now();

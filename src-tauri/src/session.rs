@@ -824,6 +824,9 @@ fn play_from(
     if sess.recording.load(Ordering::SeqCst) {
         return Err("录制进行中，无法回放".into());
     }
+    if crate::xfer::is_active() {
+        return Err("文件传输进行中，请先完成或取消传输".into());
+    }
     if is_playing() {
         if seek_ts == 0 && sess.paused.load(Ordering::SeqCst) {
             // 暂停中再次播放 = 恢复（仅 session_play 路径；seek 总是重启）
@@ -955,7 +958,7 @@ pub fn session_status(sess: State<SessionState>) -> SessionStatus {
             None => (false, 0, 0),
         }
     };
-    let (first_ts, last_ts) = core_of(&sess)
+    let (first_ts, last_ts) = core
         .loaded
         .as_ref()
         .map(|l| (l.first_ts, l.last_ts))

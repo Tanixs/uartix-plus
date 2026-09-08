@@ -484,9 +484,9 @@ fn spawn_udp(
 }
 
 /// 发送完成后由 send_data 调用：更新 tx 计数并广播 serial:tx
-pub fn notify_tx(app: &AppHandle, state: &NetManager, bytes: Vec<u8>) {
+pub fn notify_tx(app: &AppHandle, state: &NetManager, bytes: &[u8]) {
     set_tx(state, bytes.len());
-    crate::busevt::send_tx(app, now_ms(), &bytes);
+    crate::busevt::send_tx(app, now_ms(), bytes);
 }
 
 #[cfg(test)]
@@ -509,6 +509,7 @@ mod tests {
             pipeline: Arc::new(crate::pipeline::Pipeline::new()),
             record: Arc::new(Mutex::new(None)),
             rx_total: Arc::new(AtomicU64::new(0)),
+            xfer: Arc::new(crate::xfer::XferManager::new()),
         }));
         assert!(!is_connected(&mgr));
         assert!(!try_send(&mgr, b"AB").unwrap());
@@ -547,6 +548,7 @@ mod tests {
             pipeline: Arc::new(crate::pipeline::Pipeline::new()),
             record: Arc::new(Mutex::new(None)),
             rx_total: Arc::new(AtomicU64::new(0)),
+            xfer: Arc::new(crate::xfer::XferManager::new()),
         }));
         mgr.run_flag.store(true, Ordering::SeqCst);
         let client = TcpStream::connect(("127.0.0.1", port)).unwrap();
@@ -567,6 +569,7 @@ mod tests {
             pipeline: Arc::new(crate::pipeline::Pipeline::new()),
             record: Arc::new(Mutex::new(None)),
             rx_total: Arc::new(AtomicU64::new(0)),
+            xfer: Arc::new(crate::xfer::XferManager::new()),
         }));
         mgr.run_flag.store(true, Ordering::SeqCst);
         // 已连接但 TCP 通道未就绪 → 明确报错（而不是静默回落串口）

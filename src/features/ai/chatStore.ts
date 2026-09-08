@@ -48,6 +48,8 @@ export interface ChatMsg {
   contextTitles?: string[];
   /** 该消息已自动续写的次数（[[need:xxx]] 机制），上限 2 */
   conts?: number;
+  /** 用户消息附带的图片（data URL，已压缩；不持久化，刷新后历史仅剩文字） */
+  images?: string[];
 }
 
 export interface UsageCounter {
@@ -175,9 +177,12 @@ function persistSoon() {
 }
 
 function persistNow() {
+  // 图片 data URL 不落盘（localStorage 容量保护）：历史仅保留文字，当前轮内可见
   const sessions = snapshot.sessions.slice(0, MAX_SESSIONS).map((s) => ({
     ...s,
-    messages: s.messages.length > MAX_MSGS ? s.messages.slice(-MAX_MSGS) : s.messages,
+    messages: (s.messages.length > MAX_MSGS ? s.messages.slice(-MAX_MSGS) : s.messages).map(
+      (m) => (m.images ? { ...m, images: undefined } : m),
+    ),
   }));
   try {
     localStorage.setItem(
@@ -524,15 +529,27 @@ export function consumeScene():
   return p;
 }
 
-/** 组装请求消息列表（system + 最近历史 + 本条用户消息） */
+/** 请求 content：纯文本，或 文本+图片 parts（OpenAI 风格，Rust 侧按 format 转换） */
+type ReqContent = string | Array<{ type: string; [k: string]: unknown }>;
+
+/** 用户消息 → 请求 content：带图片时展开为 parts */
+function userContent(text: string, images?: string[]): ReqContent {
+  if (!images || images.length === 0) return text;
+  return [
+    { type: "text", text },
+    ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+  ];
+}
+
 function buildRequestMessages(
   userText: string,
   scene: AiScene,
   blocks: ContextBlock[],
   extraSchemas?: NeedKey[],
-): { role: string; content: string }[] {
+  images?: string[],
+): { role: string; content: ReqContent }[] {
   const st = getSettings();
-  const messages: { role: string; content: string }[] = [
+  const messages: { role: string; content: ReqContent }[] = [
     {
       role: "system",
       content: buildSystemPrompt(
@@ -553,16 +570,16 @@ function buildRequestMessages(
   const hist = userText ? s.messages.slice(-21, -1) : s.messages.slice(-20);
   for (const m of hist) {
     if (m.error) continue;
-    messages.push({ role: m.role, content: m.content });
+    messages.push({ role: m.role, content: m.images?.length ? userContent(m.content, m.images) : m.content });
   }
   const contextText = contextToText(blocks);
-  messages.push({ role: "user", content: userText + contextText });
+  messages.push({ role: "user", content: userContent(userText + contextText, images) });
   return messages;
 }
 
 /** 底层请求：流式写回到 targetRef 指向的消息 */
 async function requestChat(
-  messages: { role: string; content: string }[],
+  messages: { role: string; content: ReqContent }[],
   targetRef: { current: ChatMsg | null },
 ): Promise<void> {
   const st = getSettings();
@@ -601,8 +618,9 @@ async function doSend(
   scene: AiScene,
   blocks: ContextBlock[],
   extraSchemas?: NeedKey[],
+  images?: string[],
 ): Promise<void> {
-  const messages = buildRequestMessages(userText, scene, blocks, extraSchemas);
+  const messages = buildRequestMessages(userText, scene, blocks, extraSchemas, images);
   const assistant: ChatMsg = {
     id: crypto.randomUUID(),
     role: "assistant",
@@ -656,6 +674,7 @@ export async function sendText(
   text: string,
   scene: AiScene = "qa",
   sel?: Partial<ContextSelection>,
+  images?: string[],
 ): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed || snapshot.streaming) return;
@@ -664,12 +683,19 @@ export async function sendText(
   const s = cur();
   s.messages = [
     ...s.messages,
-    { id: crypto.randomUUID(), role: "user", content: trimmed, ts: Date.now(), scene },
+    {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: trimmed,
+      ts: Date.now(),
+      scene,
+      ...(images && images.length ? { images } : {}),
+    },
   ];
   emit();
   // 普通对话：按用户消息预判需要的格式规范，命中则预注入（省去第二轮续写请求）
   const extra = scene === "qa" ? routeNeeds(trimmed).slice(0, 3) : undefined;
-  await doSend(trimmed, scene, collectContext(useSel), extra);
+  await doSend(trimmed, scene, collectContext(useSel), extra, images);
 }
 
 export async function runScene(

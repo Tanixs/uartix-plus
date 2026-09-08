@@ -80,6 +80,11 @@ impl BleManager {
         }
     }
 
+    /// 连接预检（xfer_start 等外部模块用）
+    pub fn is_connected(&self) -> bool {
+        self.run_flag.load(Ordering::SeqCst)
+    }
+
     async fn adapter(&self) -> Result<Arc<Adapter>, String> {
         let mut g = self.adapter.lock().await;
         if g.is_none() {
