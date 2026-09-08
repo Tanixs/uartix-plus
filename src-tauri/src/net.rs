@@ -119,6 +119,10 @@ pub fn open_net(
     app: AppHandle,
     state: tauri::State<NetManager>,
 ) -> Result<(), String> {
+    // 回放与真实连接互斥：回放进行中禁止打开网络接口（避免双源混淆）
+    if crate::session::is_playing() {
+        return Err("回放进行中，请先停止回放再打开网络接口".into());
+    }
     if state.run_flag.load(Ordering::SeqCst) {
         return Err("网络接口已打开，请先关闭当前连接".into());
     }
@@ -171,19 +175,20 @@ pub fn close_net(app: AppHandle, state: tauri::State<NetManager>) -> Result<(), 
 }
 
 /// 收数批处理：33ms / 16KB 合并后进 ingest（与串口读线程一致）
-struct Batcher {
-    pending: Vec<u8>,
+/// （BLE 通知路径复用，pub(crate)）
+pub(crate) struct Batcher {
+    pub(crate) pending: Vec<u8>,
     last: Instant,
 }
 
 impl Batcher {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             pending: Vec::with_capacity(EMIT_MAX_BYTES),
             last: Instant::now(),
         }
     }
-    fn push(&mut self, ctx: &Arc<IngestCtx>, app: &AppHandle, data: &[u8]) {
+    pub(crate) fn push(&mut self, ctx: &Arc<IngestCtx>, app: &AppHandle, data: &[u8]) {
         self.pending.extend_from_slice(data);
         if self.pending.len() >= EMIT_MAX_BYTES
             || self.last.elapsed() >= Duration::from_millis(EMIT_INTERVAL_MS)
@@ -193,7 +198,7 @@ impl Batcher {
             self.last = Instant::now();
         }
     }
-    fn flush(&mut self, ctx: &Arc<IngestCtx>, app: &AppHandle) {
+    pub(crate) fn flush(&mut self, ctx: &Arc<IngestCtx>, app: &AppHandle) {
         if !self.pending.is_empty() {
             ingest(ctx, app, &self.pending);
             self.pending = Vec::with_capacity(EMIT_MAX_BYTES);

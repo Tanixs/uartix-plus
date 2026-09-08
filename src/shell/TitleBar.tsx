@@ -13,6 +13,7 @@ const IFACE_LABEL: Record<IfaceKind, string> = {
   "tcp-client": t("iface.tcpClient"),
   "tcp-server": t("iface.tcpServer"),
   udp: t("iface.udp"),
+  ble: t("iface.ble"),
 };
 
 const IFACE_ITEMS: { key: IfaceKind; ready: boolean }[] = [
@@ -20,6 +21,7 @@ const IFACE_ITEMS: { key: IfaceKind; ready: boolean }[] = [
   { key: "tcp-client", ready: true },
   { key: "tcp-server", ready: true },
   { key: "udp", ready: true },
+  { key: "ble", ready: true },
 ];
 
 function tbSvg(children: React.ReactNode) {

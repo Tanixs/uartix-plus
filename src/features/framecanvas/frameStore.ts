@@ -1,6 +1,7 @@
 import type { FrameRow } from "../../ipc/types";
 import { onFrames } from "../../ipc/framesBus";
 import * as panelActivity from "../../panels/panelActivity";
+import * as sessionStore from "../session/sessionStore";
 
 const ARCHIVE_BYTES_LIMIT = 4 * 1024 * 1024;
 const ARCHIVE_BYTES_LOW = 3 * 1024 * 1024;
@@ -99,7 +100,9 @@ export function init() {
   onFrames((p) => {
     // 面板关闭 → 归档完全停止（每帧 base64 解码+入库+剪枝是持续开销，
     // 用户红线：关闭了的面板绝不允许后台运行）。重开后归档从当前帧起。
-    if (!panelActivity.isOpen("framecanvas")) return;
+    // 例外：会话回放中始终归档（16.2 详设——回放是一次完整数据流，
+    // 前端面板可全关，回放结束后面板重开要能立即看到全程数据）。
+    if (!panelActivity.isOpen("framecanvas") && !sessionStore.isReplaying()) return;
     if (p.dropped !== undefined && p.dropped !== dropped) {
       dropped = p.dropped;
     }
@@ -153,6 +156,9 @@ export function lastOf(tplId: string): ArchivedRow | null {
 export function lastIndexOf(tplId: string): number {
   return lastIdx.get(tplId) ?? -1;
 }
+
+// （P41 字节热力图统计已于 P47 随「结构发现 X-Ray 独立面板」决议移除——
+//  帧画布熵条对已知协议信息量≈0，见 HANDOFF 十三待办）
 
 export function clearArchive() {
   list.length = 0;

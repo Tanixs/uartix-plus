@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import * as plotStore from "./plotStore";
+import * as sessionStore from "../session/sessionStore";
+import type { AnnOut } from "../../ipc/types";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
 import { invokeAiScene } from "../ai/aiBus";
@@ -14,6 +16,7 @@ import {
   IconAutoY,
   IconFitView,
   IconTrash,
+  IconCamera,
 } from "../../shared/icons";
 
 function fmtVal(v: number | null | undefined): string {
@@ -22,6 +25,18 @@ function fmtVal(v: number | null | undefined): string {
   if (Number.isInteger(v)) return String(v);
   return v.toFixed(3);
 }
+
+/** 会话标注竖线颜色（P3b）：琥珀色，与「起」灰虚线、「最新」主题实线区分 */
+const ANN_COLOR = "#e8a33d";
+
+/** 快照叠加（P46）：冻结当前视野的参考曲线（单快照）。x = 时间源原始 ts，
+ *  y = 捕获时的显示值（非堆叠 = 原始值）；绘制时快照起点对齐当前视野起点平移叠画 */
+type PlotSnap = {
+  xStart: number;
+  channels: { color: string; x: number[]; y: number[] }[];
+};
+/** 快照点数上限：超出按比例隔点取样（视野可长达 1h 全量，防 draw 每帧过载） */
+const SNAP_MAX_PTS = 20000;
 
 function hexA(hex: string, alpha: number): string {
   const m = hex.replace("#", "");
@@ -287,6 +302,40 @@ export function Plot2D() {
   settingsRef.current = plot.settings;
   const xSourceRef = useRef(plot.settings.xSource);
   xSourceRef.current = plot.settings.xSource;
+  /** 会话标注（P3b）：独立低频订阅（引用仅在标注变化时替换，不受 10Hz 进度刷新惊动） */
+  const anns = useSyncExternalStore(sessionStore.subscribe, sessionStore.getAnnotations);
+  const annRef = useRef<AnnOut[]>(anns);
+  annRef.current = anns;
+  /** 快照叠加（P46）：null = 无快照；捕获/清除走按钮，绘制走 draw hook */
+  const [snap, setSnap] = useState<PlotSnap | null>(null);
+  const snapRef = useRef<PlotSnap | null>(null);
+  snapRef.current = snap;
+  /** 冻结当前视野 → 快照（或已有快照时清除）。u.data 即当前视野裁剪数据（feed ±5% margin） */
+  const toggleSnapshot = () => {
+    if (snapRef.current) {
+      setSnap(null);
+      return;
+    }
+    const u = uRef.current;
+    if (!u) return;
+    const xs = u.data[0] as number[];
+    if (!xs || xs.length < 2) return;
+    const st = settingsRef.current;
+    if (st.stack || st.xSource !== "time") return; // 按钮 disabled，兜底
+    const channels: { color: string; x: number[]; y: number[] }[] = [];
+    plot.channels.forEach((ch, i) => {
+      if (!ch.visible) return;
+      const raw = u.data[i + 1] as number[];
+      if (!raw || raw.length !== xs.length) return;
+      const af = affineRef.current[i];
+      const y = Array.from(raw, (v) => (st.stack && af ? af.a * v + af.b : v));
+      channels.push({ color: ch.color, x: Array.from(xs), y });
+    });
+    if (channels.length === 0) return;
+    setSnap({ xStart: xs[0], channels });
+  };
+  /** 快照不可用条件：堆叠（归一化语义不成立）或 X 源为通道（李萨如无时间对齐语义） */
+  const snapBlocked = plot.settings.stack || plot.settings.xSource !== "time";
 
   /**
    * 游标测量面板位置（布局像素，相对 .plot-wrap 左下）。两套面板可各自拖动，
@@ -817,6 +866,48 @@ export function Plot2D() {
               // 「最新」锚定可见通道的真实末点（合并轴末尾/窗口末尾都可能超前）
               const lv = latestDispRef.current;
               if (lv != null) drawV(lv, accent, false, "最新");
+              // 会话标注竖线（P3b）：1px 虚线（无徽标，靠列表悬停查看文本），越界时
+              // drawV 自动画边缘箭头 + 文本。可见性仅当会话有标注时才有成本
+              for (const a of annRef.current) {
+                drawV(a.ts, ANN_COLOR, true, a.text.slice(0, 8));
+              }
+              // 快照叠加（P46）：冻结视野的参考虚线，起点对齐当前视野起点平移；
+              // 通道色 55% 透明虚线，与实线当前曲线区分。clip 防越界值画出绘图区
+              const sn = snapRef.current;
+              if (sn && !settingsRef.current.stack) {
+                const off = (sx.min ?? 0) - sn.xStart;
+                if (Number.isFinite(off)) {
+                  ctx.save();
+                  ctx.beginPath();
+                  ctx.rect(u.bbox.left, u.bbox.top, u.bbox.width, u.bbox.height);
+                  ctx.clip();
+                  ctx.lineWidth = 1;
+                  ctx.setLineDash([3, 3]);
+                  for (const c of sn.channels) {
+                    const n = Math.min(c.x.length, c.y.length);
+                    if (n < 2) continue;
+                    const step = n > SNAP_MAX_PTS ? Math.ceil(n / SNAP_MAX_PTS) : 1;
+                    ctx.strokeStyle = hexA(c.color, 0.55);
+                    ctx.beginPath();
+                    let started = false;
+                    for (let i = 0; i < n; i += step) {
+                      const px = u.valToPos(c.x[i] + off, "x", true);
+                      const py = u.valToPos(c.y[i], "y", true);
+                      if (!Number.isFinite(px) || !Number.isFinite(py)) {
+                        started = false;
+                        continue;
+                      }
+                      if (started) ctx.lineTo(px, py);
+                      else {
+                        ctx.moveTo(px, py);
+                        started = true;
+                      }
+                    }
+                    ctx.stroke();
+                  }
+                  ctx.restore();
+                }
+              }
             }
             const cur = settingsRef.current;
             if (cur.stack) {
@@ -1683,6 +1774,18 @@ export function Plot2D() {
           title="Auto 自适应（执行一次）：X/Y 轴一步适配到全部数据的最佳观察范围（带边距），与 Y 轴连续自动缩放相互独立"
         >
           <IconFitView />
+        </button>
+        <button
+          className={`icon-btn ${snap ? "primary" : ""}`}
+          onClick={toggleSnapshot}
+          disabled={snapBlocked && !snap}
+          title={
+            snap
+              ? "快照叠加：已冻结参考曲线（再点清除）。拖动/缩放视野，虚线起点始终对齐当前视野起点，叠画对比两段波形"
+              : "快照叠加：把当前视野内可见通道冻结为参考虚线，拖到别处叠画对比两段波形（堆叠/通道 X 源下不可用）"
+          }
+        >
+          <IconCamera />
         </button>
         {hasChannels && (
           <button

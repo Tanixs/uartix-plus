@@ -40,6 +40,7 @@ import { SettingsModal } from "./features/settings/SettingsModal";
 import { HelpModal } from "./features/help/HelpModal";
 import type { PanelId } from "./ipc/types";
 import * as serialStore from "./features/serial/serialStore";
+import * as sessionStore from "./features/session/sessionStore";
 import * as templateStore from "./features/protocol/templateStore";
 import * as framesStore from "./features/table/framesStore";
 import * as plotStore from "./features/plot/plotStore";
@@ -305,6 +306,7 @@ export default function App() {
     attitudeStore.init();
     variableStore.init();
     fcStore.init();
+    sessionStore.init();
     void chatStore.init();
     startWidgetHub();
     startExtRuntime();
@@ -608,9 +610,12 @@ export default function App() {
       <header className="toolbar">
         {serial.iface === "serial" ? (
           <SerialToolbar />
+        ) : serial.iface === "ble" ? (
+          <BleIfaceBar />
         ) : (
           <NetIfaceBar kind={serial.iface} />
         )}
+        <SessionBar />
         <div className="toolbar-spacer" />
         <div className="toolbar-group">
           <select
@@ -778,17 +783,29 @@ function NetIfaceBar({ kind }: { kind: IfaceKind }) {
         ? t("iface.tcpServer")
         : t("iface.udp");
   const busy = s.status === "connected" || s.status === "reconnecting";
+  const onToggle = async () => {
+    if (!busy) {
+      await serialStore.openPort();
+      return;
+    }
+    // 录制中禁止断开：录制 tap 在 Rust 侧持续接管帧流，断开会截断会话
+    if (sessionStore.isRecording()) {
+      serialStore.setError(tx("录制中禁止断开连接", "Cannot disconnect while recording"));
+      return;
+    }
+    await serialStore.closePort();
+  };
   return (
     <div className="toolbar-group">
       <button
         className={`btn${busy ? " warn" : ""}`}
         title={busy ? t("tb.disconnect") : t("tb.connect")}
-        onClick={() => (busy ? serialStore.closePort() : serialStore.openPort())}
+        onClick={() => void onToggle()}
       >
         <span className={`dot ${busy ? "connected" : "disconnected"}`} />
         {busy ? t("tb.disconnect") : t("tb.connect")}
       </button>
-      {kind !== "tcp-server" && (
+      {kind !== "tcp-client" && (
         <input
           className="input"
           value={s.net.remoteHost}
@@ -840,6 +857,150 @@ function NetIfaceBar({ kind }: { kind: IfaceKind }) {
         />
       )}
       <span className="iface-soon">{busy && s.portName ? `${label} · ${s.portName}` : label}</span>
+    </div>
+  );
+}
+
+/** BLE 接口栏（P48）：扫描 → 选设备 → 连接；通知流/发送路由在 Rust ble.rs，
+ *  状态与收发事件与串口/网络完全同源（serial:state + binbus），本组件只做选择与触发。 */
+function BleIfaceBar() {
+  const s = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
+  useSettings(); // 语言切换时随设置重渲染
+  const busy = s.status === "connected" || s.status === "reconnecting";
+  const onToggle = async () => {
+    if (!busy) {
+      await serialStore.openPort();
+      return;
+    }
+    // 录制中禁止断开：录制 tap 在 Rust 侧持续接管帧流，断开会截断会话
+    if (sessionStore.isRecording()) {
+      serialStore.setError(tx("录制中禁止断开连接", "Cannot disconnect while recording"));
+      return;
+    }
+    await serialStore.closePort();
+  };
+  const onScan = async () => {
+    try {
+      if (s.bleScanning) {
+        await serialStore.bleScanStop();
+      } else {
+        await serialStore.bleScanStart();
+      }
+    } catch {
+      /* 错误已在状态栏展示 */
+    }
+  };
+  return (
+    <div className="toolbar-group">
+      <button
+        className={`btn${busy ? " warn" : ""}`}
+        title={busy ? t("tb.disconnect") : t("tb.connect")}
+        onClick={() => void onToggle()}
+      >
+        <span className={`dot ${busy ? "connected" : "disconnected"}`} />
+        {busy ? t("tb.disconnect") : t("tb.connect")}
+      </button>
+      <button
+        className={`btn${s.bleScanning ? " warn" : ""}`}
+        disabled={busy}
+        title={
+          s.bleScanning
+            ? tx("停止扫描", "Stop scanning")
+            : tx("扫描附近 BLE 设备（列表按信号强度排序，每秒刷新）", "Scan nearby BLE devices (list sorted by signal strength, refreshed every second)")
+        }
+        onClick={() => void onScan()}
+      >
+        {s.bleScanning ? tx("停止扫描", "Stop scan") : tx("扫描", "Scan")}
+      </button>
+      <select
+        className="input"
+        value={s.bleDeviceId}
+        disabled={busy}
+        title={tx("BLE 设备：需支持透传（Nordic UART 或可写+可通知特征对）", "BLE device: must support transparent transfer (Nordic UART or a writable+notifiable characteristic pair)")}
+        onChange={(e) => serialStore.setBleDevice(e.target.value)}
+      >
+        <option value="">
+          {s.bleDevices.length
+            ? tx("选择设备", "Select device")
+            : tx("先点「扫描」发现设备", "Click “Scan” to discover devices")}
+        </option>
+        {s.bleDevices.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name || tx("(未命名)", "(unnamed)")} — {d.id} · {d.rssi} dBm
+          </option>
+        ))}
+      </select>
+      <span className="iface-soon">{busy && s.portName ? `BLE · ${s.portName}` : "BLE"}</span>
+    </div>
+  );
+}
+
+/** 全局会话录制钮（16.2）：连接条右侧，录制/停止/保存/放弃。
+ *  全局能力不依赖任何面板开合；录制中时长红点脉冲。 */
+function SessionBar() {
+  const s = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot);
+  useSettings(); // 语言切换时随设置重渲染
+  if (s.state === "recording") {
+    return (
+      <div className="toolbar-group">
+        <button
+          className="btn sess-rec on"
+          onClick={() => void sessionStore.stopRecord()}
+          title={tx(
+            "停止录制（内容保留在内存，可保存或放弃）",
+            "Stop recording (kept in memory; save or discard)",
+          )}
+        >
+          <span className="rec-dot" />
+          {sessionStore.fmtDur(s.durationMs)}
+        </button>
+      </div>
+    );
+  }
+  if (s.state === "recorded") {
+    return (
+      <div className="toolbar-group">
+        <button
+          className="btn"
+          onClick={() => void sessionStore.saveSession()}
+          title={tx(
+            "把当前会话保存为 .usess 文件",
+            "Save the current session as a .usess file",
+          )}
+        >
+          {tx("保存会话", "Save session")}
+        </button>
+        <button
+          className="btn"
+          onClick={() => void sessionStore.discardSession()}
+          title={tx(
+            "放弃当前会话（未保存内容将丢失）",
+            "Discard the current session (unsaved content is lost)",
+          )}
+        >
+          {tx("放弃", "Discard")}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="toolbar-group">
+      <button
+        className="btn sess-rec"
+        disabled={s.state === "playing" || s.state === "paused"}
+        onClick={() => void sessionStore.startRecord()}
+        title={
+          s.state === "playing" || s.state === "paused"
+            ? tx("回放中无法录制，请先停止回放", "Cannot record during replay; stop replay first")
+            : tx(
+                "录制会话：记录解析后的帧流，帧画布/2D/表格/3D/变量等全部内容可随时回放；串口/网络/演示源均可录制",
+                "Record session: captures parsed frames — frame canvas/2D/table/3D/variables all replayable; works for serial/net/demo sources",
+              )
+        }
+      >
+        <span className="rec-dot" />
+        {tx("录制", "Rec")}
+      </button>
     </div>
   );
 }

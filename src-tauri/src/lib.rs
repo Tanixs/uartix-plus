@@ -1,4 +1,5 @@
 mod ai;
+mod ble;
 mod b64;
 mod busevt;
 mod demo;
@@ -8,6 +9,7 @@ mod parser;
 mod pipeline;
 mod ring;
 mod serial;
+mod session;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -43,6 +45,7 @@ pub fn run() {
     }
     let serial_mgr = serial::SerialManager::new();
     let net_mgr = net::NetManager::new(serial_mgr.ctx.clone());
+    let ble_mgr = ble::BleManager::new(serial_mgr.ctx.clone());
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -50,8 +53,10 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(serial_mgr)
         .manage(net_mgr)
+        .manage(ble_mgr)
         .manage(busevt::BinBus::default())
         .manage(ai::AiState::default())
+        .manage(session::SessionState::default())
         .invoke_handler(tauri::generate_handler![
             busevt::ipc_subscribe,
             ai::ai_chat,
@@ -65,12 +70,31 @@ pub fn run() {
             serial::stop_record,
             net::open_net,
             net::close_net,
+            ble::ble_scan_start,
+            ble::ble_scan_stop,
+            ble::ble_connect,
+            ble::ble_disconnect,
             pipeline::parser_set_rules,
             pipeline::hex_fetch,
             pipeline::hex_clear,
             demo::demo_start,
             demo::demo_stop,
             demo::demo_running,
+            session::session_start_record,
+            session::session_stop_record,
+            session::session_save,
+            session::session_open,
+            session::session_discard,
+            session::session_play,
+            session::session_seek,
+            session::session_pause,
+            session::session_resume,
+            session::session_stop,
+            session::session_annotate,
+            session::session_annotations,
+            session::session_bridge_start,
+            session::session_bridge_stop,
+            session::session_status,
             files::save_text_file,
             files::read_text_file,
             files::read_binary_file,

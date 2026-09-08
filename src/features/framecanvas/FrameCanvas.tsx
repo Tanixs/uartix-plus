@@ -8,9 +8,12 @@ import {
   useSyncExternalStore,
 } from "react";
 import { clampFlyoutMenu } from "../../shared/Flyout";
+import { invoke } from "@tauri-apps/api/core";
 import type { FieldDef, FieldRole, FieldType, FrameTemplate } from "../../ipc/types";
 import * as fcStore from "./frameStore";
 import * as serialStore from "../serial/serialStore";
+import * as sessionStore from "../session/sessionStore";
+import { toast } from "../ai/extRuntime";
 import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
 import { fieldSize, PALETTE, CHECKSUM_SIZES } from "../protocol/templateStore";
@@ -43,6 +46,269 @@ const IconFollow = ({ on }: { on: boolean }) =>
   fsvg(on ? <><circle cx="12" cy="12" r="3" fill="currentColor" /><circle cx="12" cy="12" r="8" /></> : <><polygon points="6 4 20 12 6 20" /></>);
 const IconCheck = () => fsvg(<polyline points="20 6 9 17 4 12" />);
 const IconAlert = () => fsvg(<><circle cx="12" cy="12" r="9" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></>);
+const IconFolder = () => fsvg(<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />);
+const IconPlay = () => fsvg(<polygon points="6 4 20 12 6 20" />);
+const IconPause = () => fsvg(<><line x1="9" y1="5" x2="9" y2="19" /><line x1="15" y1="5" x2="15" y2="19" /></>);
+const IconStop = () => fsvg(<rect x="6" y="6" width="12" height="12" rx="1" />);
+const IconPlug = () => fsvg(<><path d="M9 7V2M15 7V2" /><path d="M6 7h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6V7z" /><line x1="12" y1="17" x2="12" y2="22" /></>);
+const IconFlag = () => fsvg(<><path d="M5 21V4" /><path d="M5 4h13l-3 4 3 4H5" /></>);
+
+/** 会话回放 transport（16.2 P2）：打开 / 播放-暂停 / 速度档 / 进度条 / 停止 / 时间。
+ *  独立叶子订阅 sessionStore（10Hz 进度只重渲染本组，不惊动画布主组件）。
+ *  进度条 v1 语义：点选比例 → 清空 hex 环与帧归档 → Rust 全速快进到目标点 → 恢复节奏。 */
+function SessionTransport() {
+  const s = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot);
+  const anns = useSyncExternalStore(sessionStore.subscribe, sessionStore.getAnnotations);
+  useLocale();
+  const [spd, setSpd] = useState<number | "max">(1);
+  const [annoOpen, setAnnoOpen] = useState(false);
+  const annoRef = useRef<HTMLDivElement>(null);
+  const loaded = s.state === "recorded" || s.state === "playing" || s.state === "paused";
+  const busy = s.state === "playing" || s.state === "paused";
+  const speedNum = () => (spd === "max" ? 0 : spd);
+  const onPlay = async () => {
+    const st = serialStore.getSnapshot();
+    if (st.status !== "disconnected") {
+      toast(tx("回放前请先断开连接（避免双源混淆）", "Disconnect before replay (avoid mixed sources)"));
+      return;
+    }
+    try {
+      if (await invoke<boolean>("demo_running")) {
+        toast(tx("回放前请先停止演示数据源", "Stop the demo source before replay"));
+        return;
+      }
+    } catch {
+      /* 查询失败不阻塞，Rust 侧仍会把关 */
+    }
+    // 播放前清帧归档：避免回放数据叠在旧时间轴上
+    fcStore.clearArchive();
+    await sessionStore.play(speedNum());
+  };
+  const onSeek = (ratio: number) => {
+    fcStore.clearArchive();
+    void sessionStore.seek(ratio, speedNum());
+  };
+  const promptAnnotate = () => {
+    const text = window.prompt(
+      tx(
+        "标注文本（记录此时刻的事件，如「按键」「数据跳变」）",
+        "Annotation text (record the event at this moment, e.g. \"key press\")",
+      ),
+      "",
+    );
+    if (text === null) return;
+    void sessionStore.annotate(text);
+  };
+  // 快捷键 M：录制/回放中打标注（输入框聚焦时不抢键）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "m" && e.key !== "M") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (s.state !== "recording" && s.state !== "playing" && s.state !== "paused") return;
+      e.preventDefault();
+      promptAnnotate();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.state]);
+  // 标注弹层外点关闭（项目红线：浮层必须可外点关闭）
+  useEffect(() => {
+    if (!annoOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (annoRef.current && !annoRef.current.contains(e.target as Node)) setAnnoOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAnnoOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [annoOpen]);
+  return (
+    <div className="fc-transport">
+      <button
+        className="btn sm icon"
+        disabled={busy}
+        onClick={() => void sessionStore.openSession()}
+        title={tx("打开会话录制文件（.usess）", "Open session recording (.usess)")}
+      >
+        <IconFolder />
+      </button>
+      {loaded ? (
+        <>
+          <button
+            className="btn sm icon primary"
+            onClick={() => {
+              if (s.state === "playing") void sessionStore.pause();
+              else if (s.state === "paused") void sessionStore.resume();
+              else void onPlay();
+            }}
+            title={
+              s.state === "playing"
+                ? tx("暂停回放", "Pause replay")
+                : s.state === "paused"
+                  ? tx("继续回放", "Resume replay")
+                  : tx("从头回放会话", "Replay session from the start")
+            }
+          >
+            {s.state === "playing" ? <IconPause /> : <IconPlay />}
+          </button>
+          <select
+            className="fc-spd"
+            value={String(spd)}
+            onChange={(e) => setSpd(e.target.value === "max" ? "max" : Number(e.target.value))}
+            disabled={!loaded}
+            title={tx("回放速度（MAX=去节奏全速）", "Replay speed (MAX = no pacing)")}
+          >
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1">1×</option>
+            <option value="2">2×</option>
+            <option value="4">4×</option>
+            <option value="max">MAX</option>
+          </select>
+          <input
+            type="range"
+            className="fc-progress"
+            min={0}
+            max={1000}
+            disabled={s.state !== "playing" && s.state !== "paused" && s.durationMs <= 0}
+            value={s.durationMs > 0 ? Math.min(1000, Math.round((s.posMs / s.durationMs) * 1000)) : 0}
+            onPointerUp={(e) => {
+              const v = Number((e.target as HTMLInputElement).value);
+              onSeek(v / 1000);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Home") onSeek(0);
+              else if (e.key === "End") onSeek(1);
+            }}
+            title={tx(
+              "点选跳转：全速快进到目标点后继续回放",
+              "Click to seek: fast-forward to the target, then resume playback",
+            )}
+          />
+          <button
+            className="btn sm icon"
+            onClick={() => void sessionStore.stopPlay()}
+            title={tx("停止回放（可再次播放）", "Stop replay (can play again)")}
+          >
+            <IconStop />
+          </button>
+          <button
+            className={`btn sm icon${s.bridgeListening ? " primary" : ""}`}
+            disabled={!loaded}
+            onClick={() => {
+              if (s.bridgeListening) {
+                void sessionStore.bridgeStop();
+                return;
+              }
+              const raw = window.prompt(
+                tx(
+                  "桥接监听端口（外部工具连入此端口接收数据流）",
+                  "Bridge listen port (external tools connect here to receive the stream)",
+                ),
+                "9001",
+              );
+              if (raw === null) return;
+              const p = Number(raw);
+              if (!Number.isInteger(p) || p < 1 || p > 65535) {
+                toast(tx("端口需为 1~65535 的整数", "Port must be an integer in 1~65535"));
+                return;
+              }
+              void sessionStore.bridgeStart(p);
+            }}
+            title={
+              s.bridgeListening
+                ? tx(
+                    `桥接中 :${s.bridgePort}（${s.bridgeClients} 个客户端），点击关闭桥`,
+                    `Bridging :${s.bridgePort} (${s.bridgeClients} clients), click to close`,
+                  )
+                : tx(
+                    "开桥（虚拟设备）：外部工具经 TCP 连入即收到与真机同节奏的原始数据流；先开桥等客户端连入、再点播放",
+                    "Open bridge (virtual device): external tools receive the raw stream over TCP at real-device pacing; open the bridge, wait for clients, then play",
+                  )
+            }
+          >
+            <IconPlug />
+          </button>
+          {s.bridgeListening && (
+            <span
+              className="fc-playtime"
+              title={tx(
+                "桥接监听端口 / 已连入客户端数",
+                "Bridge listen port / connected clients",
+              )}
+            >
+              {`:${s.bridgePort}·${s.bridgeClients}`}
+            </span>
+          )}
+          <div className="fc-anno-wrap" ref={annoRef}>
+            <button
+              className={`btn sm icon${anns.length > 0 ? " primary" : ""}`}
+              disabled={!loaded && s.state !== "recording"}
+              onClick={() => setAnnoOpen((v) => !v)}
+              title={tx(
+                "时间轴标注列表（录制/回放中按 M 快捷打标）",
+                "Annotation list (press M while recording/replaying to add)",
+              )}
+            >
+              <IconFlag />
+              {anns.length > 0 && <span className="fc-anno-badge">{anns.length > 99 ? "99+" : anns.length}</span>}
+            </button>
+            {annoOpen && (
+              <div className="fc-anno-pop">
+                <div className="fc-anno-head">
+                  {tx("时间轴标注", "Timeline annotations")}
+                  {(s.state === "recording" || s.state === "playing" || s.state === "paused") && (
+                    <button className="fc-anno-add" onClick={promptAnnotate}>
+                      {tx("＋在此刻添加", "＋Add at this moment")}
+                    </button>
+                  )}
+                </div>
+                {anns.length === 0 ? (
+                  <div className="fc-anno-empty">
+                    {tx("暂无标注；录制/回放中按 M 添加", "No annotations yet; press M while recording/replaying")}
+                  </div>
+                ) : (
+                  <div className="fc-anno-list">
+                    {anns.map((a, i) => (
+                      <button
+                        key={`${a.ts}-${i}`}
+                        className="fc-anno-item"
+                        onClick={() => {
+                          onSeek(sessionStore.annotationRatio(a.ts));
+                          setAnnoOpen(false);
+                        }}
+                        title={tx(
+                          "跳转到此标注时刻",
+                          "Seek to this annotation",
+                        )}
+                      >
+                        <span className="fc-anno-ts">{sessionStore.fmtDur(a.ts - s.firstTs)}</span>
+                        <span className="fc-anno-text">{a.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <span
+            className="fc-playtime"
+            title={tx("回放进度 / 会话总时长", "Replay position / session duration")}
+          >
+            {sessionStore.fmtDur(s.posMs)}/{sessionStore.fmtDur(s.durationMs)}
+          </span>
+        </>
+      ) : null}
+    </div>
+  );
+}
 
 function ArchStat() {
   const meta = useSyncExternalStore(fcStore.subscribe, fcStore.getMeta);
@@ -1575,6 +1841,7 @@ function FrameCanvas() {
         <button className="btn sm icon" onClick={doRedo} title={tx("重做 (Ctrl+Y)", "Redo (Ctrl+Y)")}>
           <IconRedo />
         </button>
+        <SessionTransport />
         <div className="fc-toolbar-spacer" />
         <button className="btn sm icon nav" onClick={() => setViewF((f) => f - 1)} title={tx("上一帧 (←)", "Previous frame (←)")}>
           <IconPrev />

@@ -72,7 +72,8 @@ pub struct SerialManager {
     reconnect_flag: Arc<AtomicBool>,
     pub demo_flag: Arc<AtomicBool>,
     epoch: Arc<AtomicU64>,
-    tx_total: Arc<AtomicU64>,
+    /// TX 累计字节数（会话回放回灌时同步推进，状态栏保持一致）
+    pub(crate) tx_total: Arc<AtomicU64>,
 }
 
 impl SerialManager {
@@ -93,6 +94,14 @@ impl SerialManager {
             epoch: Arc::new(AtomicU64::new(0)),
             tx_total: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// 串口是否处于打开状态（会话回放前互斥检查用）
+    pub fn is_open(&self) -> bool {
+        self.shared
+            .lock()
+            .map(|s| s.port.is_some())
+            .unwrap_or(false)
     }
 }
 
@@ -220,6 +229,10 @@ pub async fn open_port(
     app: AppHandle,
     state: State<'_, SerialManager>,
 ) -> Result<(), String> {
+    // 回放与真实连接互斥：回放进行中禁止打开串口（避免双源混淆）
+    if crate::session::is_playing() {
+        return Err("回放进行中，请先停止回放再打开串口".into());
+    }
     {
         let shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
         if shared.port.is_some() {
@@ -282,6 +295,7 @@ pub async fn send_data(
     app: AppHandle,
     state: State<'_, SerialManager>,
     net: State<'_, crate::net::NetManager>,
+    ble: State<'_, crate::ble::BleManager>,
 ) -> Result<(), String> {
     let bytes = match mode.as_str() {
         "hex" => parse_hex(&text)?,
@@ -290,10 +304,18 @@ pub async fn send_data(
     if bytes.is_empty() {
         return Err("发送内容为空".into());
     }
-    // 网络接口已连接则优先走网络（串口路径不受影响）
+    // 接口路由：网络已连接优先走网络，其次 BLE，最后串口
     match crate::net::try_send(&net, &bytes) {
         Ok(true) => {
             crate::net::notify_tx(&app, &net, bytes);
+            return Ok(());
+        }
+        Ok(false) => {}
+        Err(e) => return Err(e),
+    }
+    match crate::ble::try_send(&ble, &bytes).await {
+        Ok(true) => {
+            crate::ble::notify_tx(&app, &bytes);
             return Ok(());
         }
         Ok(false) => {}

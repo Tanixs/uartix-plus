@@ -205,6 +205,10 @@ fn demo_loop(app: AppHandle, ctx: Arc<IngestCtx>, flag: Arc<AtomicBool>) {
 
 #[tauri::command]
 pub fn demo_start(app: AppHandle, state: State<SerialManager>) -> Result<(), String> {
+    // 回放与真实数据源互斥：回放进行中禁止启动演示源（避免双源混淆）
+    if crate::session::is_playing() {
+        return Err("回放进行中，请先停止回放再启动演示数据源".into());
+    }
     if !crate::demo::start_demo(app, state.ctx.clone(), state.demo_flag.clone()) {
         return Err("演示数据源已在运行".into());
     }

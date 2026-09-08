@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ParityMode } from "../../ipc/types";
 import * as store from "./serialStore";
+import * as sessionStore from "../session/sessionStore";
 import { useSettings } from "../settings/settingsStore";
 import { t, tx } from "../../i18n/strings";
 import { IconChevron } from "../../shared/icons";
@@ -43,6 +44,11 @@ export function SerialToolbar() {
         return;
       }
     } else {
+      // 录制中禁止断开：录制 tap 在 Rust 侧持续接管帧流，断开会截断会话
+      if (sessionStore.isRecording()) {
+        store.setError(tx("录制中禁止断开连接", "Cannot disconnect while recording"));
+        return;
+      }
       await store.closePort();
     }
   };

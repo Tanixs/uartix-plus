@@ -9,7 +9,8 @@ export type PanelId =
   | "view3d"
   | "framecanvas"
   | "video"
-  | "ai";
+  | "ai"
+  | "xray";
 
 export interface PanelMeta {
   id: PanelId;
@@ -215,4 +216,52 @@ export interface HexSlice {
   tsFirst: number;
   tsLast: number;
   spans: SpanOut[];
+}
+
+/** 会话录制的端口来源快照（仅展示用） */
+export interface SessionPortInfo {
+  kind: string;
+  portName: string | null;
+  baud: number | null;
+}
+
+/** .usess 文件 meta 段（Rust session.rs SessionMeta 同构） */
+export interface SessionMeta {
+  recordedAt: number;
+  durationMs: number;
+  frameCount: number;
+  rxChunkCount: number;
+  txChunkCount: number;
+  port: SessionPortInfo;
+  /** ParseRules 完整快照（P2 做导入防呆） */
+  tplRules: ParseRules;
+}
+
+export type SessionPhase =
+  | "idle"
+  | "recording"
+  | "recorded"
+  | "playing"
+  | "paused";
+
+export interface SessionStatus {
+  state: SessionPhase;
+  frameCount: number;
+  durationMs: number;
+  posMs: number;
+  frameIdx: number;
+  fileName: string;
+  /** 桥接服务端（P3a 虚拟设备） */
+  bridgeListening: boolean;
+  bridgePort: number;
+  bridgeClients: number;
+  /** 时间线首/末事件 ts（标注跳转 ratio 换算用） */
+  firstTs: number;
+  lastTs: number;
+}
+
+/** 时间轴标注（P3b） */
+export interface AnnOut {
+  ts: number;
+  text: string;
 }

@@ -14,6 +14,7 @@ import { ControlCanvas } from "../features/controls/ControlCanvas";
 import FrameCanvas from "../features/framecanvas/FrameCanvas";
 import { VideoLink } from "../features/video/VideoLink";
 import { AiChat } from "../features/ai/AiChat";
+import { XRayPanel } from "../features/xray/XRayPanel";
 import { ExtPanelHost } from "../features/ai/ExtPanel";
 
 /** 面板页签名（语言感知，P33 i18n）；页签重挂靠 App 的 retitlePanels（locale 变化时 setTitle） */
@@ -32,6 +33,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     framecanvas: pick("帧画布", "Frame Canvas"),
     video: pick("图传", "Video Link"),
     ai: pick("AI 助手", "AI Assistant"),
+    xray: pick("结构发现", "X-Ray"),
   };
 };
 
@@ -55,6 +57,7 @@ const MView3D = memo(View3D);
 const MFrameCanvas = memo(FrameCanvas);
 const MVideo = memo(VideoLink);
 const MAi = memo(AiChat);
+const MXRay = memo(XRayPanel);
 
 export const panelComponents = {
   templates: () => (
@@ -110,6 +113,11 @@ export const panelComponents = {
   ai: () => (
     <ErrorBoundary label={panelTitleOf("ai")}>
       <MAi />
+    </ErrorBoundary>
+  ),
+  xray: () => (
+    <ErrorBoundary label={panelTitleOf("xray")}>
+      <MXRay />
     </ErrorBoundary>
   ),
   aiExtPanel: (props: { params?: { extId?: string } }) => (

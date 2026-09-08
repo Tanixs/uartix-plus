@@ -9,7 +9,7 @@ import type {
 import { onRx, onTx } from "../../ipc/binbus";
 import { recordIpcLatency } from "../../ipc/ipcLatency";
 
-export type IfaceKind = "serial" | "tcp-client" | "tcp-server" | "udp";
+export type IfaceKind = "serial" | "tcp-client" | "tcp-server" | "udp" | "ble";
 
 export interface IfaceNetConfig {
   remoteHost: string;
@@ -17,6 +17,13 @@ export interface IfaceNetConfig {
   localPort: number;
   /** 服务端监听地址（tcp-server 用，默认 0.0.0.0） */
   localHost: string;
+}
+
+/** BLE 扫描到的设备（ble:devices 事件全量推送） */
+export interface BleDeviceInfo {
+  id: string;
+  name: string;
+  rssi: number;
 }
 
 export interface SerialSnapshot {
@@ -33,6 +40,12 @@ export interface SerialSnapshot {
   portName: string | null;
   /** 本机网卡 IPv4 列表（服务端监听地址预设） */
   localAddrs: { name: string; ip: string }[];
+  /** BLE 扫描结果（ble:devices 事件全量替换，按信号强度排序） */
+  bleDevices: BleDeviceInfo[];
+  /** 选中的 BLE 设备地址 */
+  bleDeviceId: string;
+  /** BLE 扫描进行中 */
+  bleScanning: boolean;
 }
 
 const DEFAULT_CONFIG: SerialConfig = {
@@ -62,6 +75,9 @@ let snapshot: SerialSnapshot = {
   net: DEFAULT_NET,
   portName: null,
   localAddrs: [],
+  bleDevices: [],
+  bleDeviceId: "",
+  bleScanning: false,
 };
 
 const listeners = new Set<() => void>();
@@ -125,7 +141,11 @@ export async function init() {
     set({ ports: e.payload });
   });
   await listen<ConnStatePayload>("serial:state", (e) => {
-    set({ status: e.payload.status, error: e.payload.error });
+    // port 事件带连接描述（串口名/网络地址/BLE 设备名），此前丢失导致状态栏描述为空
+    set({ status: e.payload.status, error: e.payload.error, portName: e.payload.port });
+  });
+  await listen<BleDeviceInfo[]>("ble:devices", (e) => {
+    set({ bleDevices: e.payload });
   });
   // rx/tx 走二进制总线（binbus），不再监听 JSON 事件（监听常驻，随进程生命周期）
   onRx((p) => {
@@ -170,7 +190,35 @@ export function setConfig(patch: Partial<SerialConfig>) {
 }
 
 export function setIface(iface: IfaceKind) {
+  // 离开 BLE 接口时停掉扫描（避免后台空转 1Hz 全量推送）
+  if (snapshot.bleScanning && iface !== "ble") {
+    void invoke("ble_scan_stop").catch(() => {});
+    set({ bleScanning: false, bleDevices: [], bleDeviceId: "" });
+  }
   set({ iface });
+}
+
+export function setBleDevice(id: string) {
+  set({ bleDeviceId: id });
+}
+
+export async function bleScanStart() {
+  set({ error: null });
+  try {
+    await invoke("ble_scan_start");
+    set({ bleScanning: true });
+  } catch (e) {
+    set({ error: String(e) });
+    throw e;
+  }
+}
+
+export async function bleScanStop() {
+  try {
+    await invoke("ble_scan_stop");
+  } finally {
+    set({ bleScanning: false });
+  }
 }
 
 export function setNet(patch: Partial<IfaceNetConfig>) {
@@ -193,6 +241,9 @@ export async function openPort() {
     if (snapshot.iface === "serial") {
       if (!snapshot.config.port) throw new Error("请先选择串口");
       await invoke("open_port", { config: snapshot.config });
+    } else if (snapshot.iface === "ble") {
+      if (!snapshot.bleDeviceId) throw new Error("请先扫描并选择 BLE 设备");
+      await invoke("ble_connect", { id: snapshot.bleDeviceId });
     } else {
       await invoke("open_net", {
         config: {
@@ -213,6 +264,8 @@ export async function openPort() {
 export async function closePort() {
   if (snapshot.iface === "serial") {
     await invoke("close_port");
+  } else if (snapshot.iface === "ble") {
+    await invoke("ble_disconnect");
   } else {
     await invoke("close_net");
   }

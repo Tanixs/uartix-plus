@@ -193,6 +193,45 @@ pub fn hex_clear(state: State<SerialManager>) {
     }
 }
 
+/// 会话回放前的 hex 视图复位（seq 从 0 对齐；语义同 hex_clear，回放线程专用）
+pub fn replay_reset(ctx: &IngestCtx) {
+    if let Ok(mut ring) = ctx.pipeline.ring.lock() {
+        ring.clear();
+    }
+    if let Ok(mut spans) = ctx.pipeline.spans.lock() {
+        spans.clear();
+    }
+    if let Ok(mut engine) = ctx.pipeline.engine.lock() {
+        engine.reset_stats();
+    }
+}
+
+/// 会话回放回灌：RX 原始块入 hex 环形缓冲（与 ingest 同序：先入环后发前端）
+pub fn replay_rx(ctx: &IngestCtx, ts: u64, bytes: &[u8]) {
+    let keep = {
+        let mut ring = ctx.pipeline.ring.lock().unwrap();
+        ring.append(bytes, ts);
+        ring.start_seq()
+    };
+    if let Ok(mut spans) = ctx.pipeline.spans.lock() {
+        spans.prune(keep);
+    }
+}
+
+/// 会话回放：把已解析帧的区间作为 span 推入 hex 视图（seq 对齐回放中的 RX 环）
+pub fn replay_spans(ctx: &IngestCtx, rows: &[crate::parser::FrameRow]) {
+    if let Ok(mut spans) = ctx.pipeline.spans.lock() {
+        for r in rows {
+            spans.push(Span {
+                start: r.seq,
+                len: r.len as u32,
+                tpl_id: r.tpl_id.clone(),
+                valid: r.valid,
+            });
+        }
+    }
+}
+
 #[tauri::command]
 pub fn hex_fetch(start: u64, end: u64, state: State<SerialManager>) -> HexSlice {
     let ring = state.ctx.pipeline.ring.lock().unwrap();
