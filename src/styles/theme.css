@@ -1,3 +1,12 @@
+@import "./themes/dark.css";
+@import "./themes/light.css";
+@import "./themes/navy.css";
+@import "./themes/ocean.css";
+@import "./themes/matcha.css";
+@import "./themes/amber.css";
+@import "./themes/begonia.css";
+@import "./themes/glaze.css";
+
 *,
 *::before,
 *::after {
@@ -9,155 +18,13 @@
   --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
-  --bg: #0f1115;
-  --bg-panel: #161a20;
-  --bg-inset: #0b0d10;
-  --bg-titlebar: #101318;
-  --border: #262b33;
-  --border-soft: #1d2229;
-  --text: #e6e9ee;
-  --text-dim: #8b93a1;
-  --accent: #4e9cef;
-  --accent-soft: rgba(78, 156, 239, 0.16);
-  --danger: #e5534b;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  --scrollbar: #2c333d;
-  --scrollbar-hover: #3d4653;
-}
 
-:root[data-theme="light"] {
-  color-scheme: light;
-  --bg: #f5f6f8;
-  --bg-panel: #ffffff;
-  --bg-inset: #eceef1;
-  --bg-titlebar: #eef0f4;
-  --border: #d9dde3;
-  --border-soft: #e6e9ee;
-  --text: #1c2128;
-  --text-dim: #5f6774;
-  --accent: #2f6fce;
-  --accent-soft: rgba(47, 111, 206, 0.12);
-  --danger: #d43a31;
-  --shadow: 0 8px 24px rgba(28, 33, 40, 0.12);
-  --scrollbar: #c9ced6;
-  --scrollbar-hover: #aab1bb;
-}
 
-/* 深蓝（Navy）：暗色系，对标暗色主题的层次与对比度，整体蓝调 */
-:root[data-theme="navy"] {
-  color-scheme: dark;
-  --bg: #0d1322;
-  --bg-panel: #131b2e;
-  --bg-inset: #090e1a;
-  --bg-titlebar: #0f1628;
-  --border: #26334e;
-  --border-soft: #1b2540;
-  --text: #e3e9f5;
-  --text-dim: #8a97b2;
-  --accent: #559df0;
-  --accent-soft: rgba(85, 157, 240, 0.16);
-  --danger: #e5534b;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --scrollbar: #2b3852;
-  --scrollbar-hover: #3c4c6c;
-}
 
-/* 浅蓝（Ocean）：亮色系，对标亮色主题的层次与对比度，整体蓝调 */
-:root[data-theme="ocean"] {
-  color-scheme: light;
-  --bg: #eff4fa;
-  --bg-panel: #ffffff;
-  --bg-inset: #e4edf6;
-  --bg-titlebar: #e8eff7;
-  --border: #ccd9e7;
-  --border-soft: #dee8f1;
-  --text: #16283c;
-  --text-dim: #5a6d82;
-  --accent: #1e6fd9;
-  --accent-soft: rgba(30, 111, 217, 0.12);
-  --danger: #d43a31;
-  --shadow: 0 8px 24px rgba(22, 40, 60, 0.14);
-  --scrollbar: #c2d1e0;
-  --scrollbar-hover: #a5b9ca;
-}
 
-/* 护眼绿（Matcha）：亮色系，低饱和抹茶绿，长时间观看不易疲劳 */
-:root[data-theme="matcha"] {
-  color-scheme: light;
-  --bg: #eef5ea;
-  --bg-panel: #fbfdf9;
-  --bg-inset: #e2eedd;
-  --bg-titlebar: #e7f0e2;
-  --border: #c6d8bd;
-  --border-soft: #d8e6d1;
-  --text: #26331f;
-  --text-dim: #5f7157;
-  --accent: #3e8e52;
-  --accent-soft: rgba(62, 142, 82, 0.13);
-  --danger: #c94a3f;
-  --shadow: 0 8px 24px rgba(38, 51, 31, 0.13);
-  --scrollbar: #bfd3b6;
-  --scrollbar-hover: #a3bc98;
-}
 
-/* 活力橙（Amber）：亮色系，暖橙基调，醒目有活力 */
-:root[data-theme="amber"] {
-  color-scheme: light;
-  --bg: #fdf4ea;
-  --bg-panel: #fffbf6;
-  --bg-inset: #f9e9d6;
-  --bg-titlebar: #faeedd;
-  --border: #ecd0ae;
-  --border-soft: #f3e0c6;
-  --text: #43301b;
-  --text-dim: #8a6f4e;
-  --accent: #e07b1f;
-  --accent-soft: rgba(224, 123, 31, 0.14);
-  --danger: #d43a31;
-  --shadow: 0 8px 24px rgba(67, 48, 27, 0.14);
-  --scrollbar: #e6c9a2;
-  --scrollbar-hover: #d4b184;
-}
 
-/* 海棠（Begonia）：亮色系，淡粉底色 + 海棠红点缀，柔和不刺眼 */
-:root[data-theme="begonia"] {
-  color-scheme: light;
-  --bg: #fbf1f2;
-  --bg-panel: #fffcfc;
-  --bg-inset: #f6e4e6;
-  --bg-titlebar: #f8e9ea;
-  --border: #e7c9cd;
-  --border-soft: #f0dadd;
-  --text: #3d2428;
-  --text-dim: #8a6167;
-  --accent: #c8445c;
-  --accent-soft: rgba(200, 68, 92, 0.12);
-  --danger: #c9372c;
-  --shadow: 0 8px 24px rgba(61, 36, 40, 0.14);
-  --scrollbar: #e3c2c7;
-  --scrollbar-hover: #cfa6ad;
-}
 
-/* 琉璃（Glaze）：暗色系，深蓝琉璃底 + 胭脂色点缀，沉静通透 */
-:root[data-theme="glaze"] {
-  color-scheme: dark;
-  --bg: #0e1420;
-  --bg-panel: #151d2c;
-  --bg-inset: #0a0f19;
-  --bg-titlebar: #111827;
-  --border: #2a3850;
-  --border-soft: #1e2a3e;
-  --text: #e6ecf6;
-  --text-dim: #8898b4;
-  --accent: #d05f6e;
-  --accent-soft: rgba(208, 95, 110, 0.16);
-  --danger: #e5534b;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --scrollbar: #2d3c56;
-  --scrollbar-hover: #3f5170;
-}
 
 html,
 body,

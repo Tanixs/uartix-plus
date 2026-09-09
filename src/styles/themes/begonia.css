@@ -1,0 +1,18 @@
+/* 海棠（Begonia）：亮色系，淡粉底色 + 海棠红点缀，柔和不刺眼 */
+:root[data-theme="begonia"] {
+  color-scheme: light;
+  --bg: #fbf1f2;
+  --bg-panel: #fffcfc;
+  --bg-inset: #f6e4e6;
+  --bg-titlebar: #f8e9ea;
+  --border: #e7c9cd;
+  --border-soft: #f0dadd;
+  --text: #3d2428;
+  --text-dim: #8a6167;
+  --accent: #c8445c;
+  --accent-soft: rgba(200, 68, 92, 0.12);
+  --danger: #c9372c;
+  --shadow: 0 8px 24px rgba(61, 36, 40, 0.14);
+  --scrollbar: #e3c2c7;
+  --scrollbar-hover: #cfa6ad;
+}

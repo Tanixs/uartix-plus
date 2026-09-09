@@ -1,0 +1,18 @@
+/* 琉璃（Glaze）：暗色系，深蓝琉璃底 + 胭脂色点缀，沉静通透 */
+:root[data-theme="glaze"] {
+  color-scheme: dark;
+  --bg: #0e1420;
+  --bg-panel: #151d2c;
+  --bg-inset: #0a0f19;
+  --bg-titlebar: #111827;
+  --border: #2a3850;
+  --border-soft: #1e2a3e;
+  --text: #e6ecf6;
+  --text-dim: #8898b4;
+  --accent: #d05f6e;
+  --accent-soft: rgba(208, 95, 110, 0.16);
+  --danger: #e5534b;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --scrollbar: #2d3c56;
+  --scrollbar-hover: #3f5170;
+}

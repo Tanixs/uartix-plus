@@ -1,0 +1,18 @@
+/* 护眼绿（Matcha）：亮色系，低饱和抹茶绿，长时间观看不易疲劳 */
+:root[data-theme="matcha"] {
+  color-scheme: light;
+  --bg: #eef5ea;
+  --bg-panel: #fbfdf9;
+  --bg-inset: #e2eedd;
+  --bg-titlebar: #e7f0e2;
+  --border: #c6d8bd;
+  --border-soft: #d8e6d1;
+  --text: #26331f;
+  --text-dim: #5f7157;
+  --accent: #3e8e52;
+  --accent-soft: rgba(62, 142, 82, 0.13);
+  --danger: #c94a3f;
+  --shadow: 0 8px 24px rgba(38, 51, 31, 0.13);
+  --scrollbar: #bfd3b6;
+  --scrollbar-hover: #a3bc98;
+}

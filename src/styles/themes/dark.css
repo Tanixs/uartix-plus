@@ -1,0 +1,17 @@
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --bg-panel: #161a20;
+  --bg-inset: #0b0d10;
+  --bg-titlebar: #101318;
+  --border: #262b33;
+  --border-soft: #1d2229;
+  --text: #e6e9ee;
+  --text-dim: #8b93a1;
+  --accent: #4e9cef;
+  --accent-soft: rgba(78, 156, 239, 0.16);
+  --danger: #e5534b;
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --scrollbar: #2c333d;
+  --scrollbar-hover: #3d4653;
+}
