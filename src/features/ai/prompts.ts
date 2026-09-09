@@ -12,22 +12,25 @@ export type AiScene =
   | "qa";
 
 const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 2 + Rust + React）。主要功能与面板：
-- 串口/TCP/UDP 三类数据接口，支持热插拔识别、2 秒无数据断线检测与自动重连。
+- 五类数据接口：串口 / TCP 客户端 / TCP 服务端 / UDP / 蓝牙 BLE；串口支持热插拔识别、2 秒无数据断线检测与自动重连，BLE 可扫描并按信号强度选择设备。
 - 协议模板面板：定义帧边界（固定长度/长度字段/帧尾三种模式）、识别位、校验（sum8/sumadd/xor8/crc16_modbus/crc16_ccitt/crc32）、字段（uint8~float64/ascii/bcd/bits/csv，支持字节序、scale 缩放、单位、识别位）。
 - Hex 数据流面板：实时字节流查看，框选字节后右键可定义帧头/长度/校验/数据字段，自动生成协议模板。
 - 帧画布：拖拽式定义帧结构，格子自动扩展为字段。
 - 数据表格：解析后的帧数据行，支持导出 CSV/Excel。
 - 2D 曲线：多通道实时曲线，时间/幅值双游标测量，Y 轴自适应，相对秒时间轴。
 - 3D 姿态：Roll/Pitch/Yaw 实时三维显示。
+- 结构发现面板（xray）：对未知协议字节流做周期/帧头统计推断（自相关+显著度算法），支持显著度/帧长上限/分析窗口调参；可对候选帧头做协议簇分析（识别同帧头家族下的多种帧型与各自帧长），勾选帧型后一键按簇批量生成协议模板。
+- 会话录制回放：录制数据会话存为 .usess 文件，在帧画布时间机器回放（进度点选跳转、多档倍速、按 M 打时间线标注）。
 - 控制画布：滑条/按钮/开关/LED/蜂鸣器/监视器/摇杆/键盘等卡片，另支持 group 组合控件（一张卡片集成滑条+按钮+开关+监视+LED 等多个子控件），命令模板串支持 %.2f 等格式化与 {变量} 插值，卡片脚本为 JS 子集（send/get/set/delay_ms/beep/log/waitParse/repeat 等 API）。
 - 命令库：分组树结构，命令可带脚本，拖拽排序。
 - 指令工厂：内置 WIT/匿名V7/Modbus RTU 编解码器，也支持自定义协议（分段式：固定字节/变量/长度/校验）。
+- 文件传输：控制台内置 XMODEM（xmodem/xmodem1k）/ YMODEM 协议，可向目标设备发送固件或文件。
 - 图传面板：TCP/UDP 网络视频流接入。
 - 变量系统：变量自动绑定启用模板的字段，帧到达时更新。
-术语：帧头=headerBytes，长度字段=lengthField 模式（lengthOffset/lengthSize/lengthEndian/lengthAdjust），识别位=帧内用于区分帧型的固定字节。`;
+术语：帧头=headerBytes，长度字段=lengthField 模式（lengthOffset/lengthSize/lengthEndian/lengthAdjust），识别位=帧内用于区分帧型的固定字节，协议簇=同一帧头家族下的多种帧型（如 WIT 的 55 59/55 53/55 52…）。`;
 
 /** 专用场景的精简功能清单（只保留面板名与一句话用途，控制 token） */
-const DIGEST_BRIEF = `Uartix+ 是可视化串口协议分析仪（Tauri 2 + Rust + React）。面板速览：协议模板（帧边界/校验/字段）、Hex 数据流（字节流+框选识别）、帧画布（拖拽式帧结构）、数据表格（解析帧行）、2D 曲线（实时多通道+游标）、3D 姿态（Roll/Pitch/Yaw）、控制画布（滑条/按钮/开关/LED/摇杆等卡片+group 组合控件）、命令库（分组树+脚本）、指令工厂（多协议组帧）、图传（网络视频流）、变量系统（绑定模板字段自动更新）。`;
+const DIGEST_BRIEF = `Uartix+ 是可视化串口协议分析仪（Tauri 2 + Rust + React，接口含串口/TCP 客户端/TCP 服务端/UDP/BLE）。面板速览：协议模板（帧边界/校验/字段）、Hex 数据流（字节流+框选识别）、结构发现（未知协议统计推断+协议簇发现，勾选按簇建模板）、帧画布（拖拽式帧结构+会话录制回放时间机器）、数据表格（解析帧行）、2D 曲线（实时多通道+游标）、3D 姿态（Roll/Pitch/Yaw）、控制画布（滑条/按钮/开关/LED/摇杆/键盘遥控等卡片+group 组合控件）、命令库（分组树+脚本）、指令工厂（多协议组帧）、文件传输（XMODEM/YMODEM）、图传（网络视频流）、变量系统（绑定模板字段自动更新）。`;
 
 const BUG_PATROL = `另外，你在回答用户问题的同时，请顺带以资深测试工程师视角审视用户的操作场景与描述中反映的本软件链路是否合理有效、功能是否完善；若发现疑似 BUG、体验问题或功能缺口，在回答末尾用一小节「巡检发现」简明列出（没有就不列）。`;
 
@@ -77,9 +80,9 @@ const NEED_LABEL: Record<NeedKey, string> = {
   script: "uartix-script 行为脚本",
 };
 
-const STYLE_POWER = `视觉能力清单：动效（@keyframes + animation：呼吸、流光扫过、渐变漂移；transition；:hover 微交互；数据区域避免常驻高耗动画）；光效（box-shadow 内外发光、渐变高光描边、color-mix 半透明叠加）；液态玻璃（backdrop-filter: blur() + 半透明面板色 + 1px 内高光边）；贴图（CSS 渐变纹理 repeating/radial/conic-gradient，或 data:image/svg+xml;base64, 内联小图；禁止引用外部 http 图片，离线会失效）；面板级主题（用面板作用域速查表给单个面板做差异化外观）。裁决规则：①缓动匹配设计语言——粘土拟态/弹簧风格可用弹性回弹曲线（如 cubic-bezier(0.34,1.56,0.64,1)），其余场景默认 ease-out/ease-in-out，数据图表区域一律不回弹；②密度伦理——数据密集面板（hexview/table/plot2d/framecanvas）保持小圆角(≤6px)高信息密度，大圆角/内凹阴影只用于装饰性区域；若用户要"紧凑版"，用面板作用域只收紧这些面板的间距圆角。`;
+const STYLE_POWER = `视觉能力清单：动效（@keyframes + animation：呼吸、流光扫过、渐变漂移；transition；:hover 微交互；数据区域避免常驻高耗动画）；光效（box-shadow 内外发光、渐变高光描边、color-mix 半透明叠加）；液态玻璃（backdrop-filter: blur() + 半透明面板色 + 1px 内高光边）；贴图（CSS 渐变纹理 repeating/radial/conic-gradient，或 data:image/svg+xml;base64, 内联小图；禁止引用外部 http 图片，离线会失效）；面板级主题（用面板作用域速查表给单个面板做差异化外观）。裁决规则：①缓动匹配设计语言——粘土拟态/弹簧风格可用弹性回弹曲线（如 cubic-bezier(0.34,1.56,0.64,1)），其余场景默认 ease-out/ease-in-out，数据图表区域一律不回弹；②密度伦理——数据密集面板（hexview/table/plot2d/framecanvas）保持小圆角(≤6px)高信息密度，大圆角/内凹阴影只用于装饰性区域；若用户要"紧凑版"，用面板作用域只收紧这些面板的间距圆角；③宿主已有 design token，覆写全局时优先复用而非另造——间距 --sp-1~--sp-5（4/8/12/16/24px）、字号 --fs-xs/--fs-body/--fs-sm/--fs-md/--fs-lg（10/11/12/14/16px）、圆角 --radius-s/m/l/xl（4/6/8/10px）、动效时长 --dur-snap/--dur-fast/--dur-base（60/120/150ms）、缓动 --ease，数值展示区用 font-variant-numeric:tabular-nums 防抖动；宿主已内置 prefers-reduced-motion 降级，自定义 CSS 中的常驻动画也应遵守该媒体查询。`;
 
-const PANEL_CLASSES = `面板作用域速查（稳定契约，优先使用）：每个面板根 DOM 带 data-panel 属性——[data-panel="templates"|"properties"|"hexview"|"table"|"plot2d"|"view3d"|"controls"|"framecanvas"|"console"|"video"|"ai"]，面板级定制一律以它作前缀（如 [data-panel="plot2d"] .plot-bar）；面板内容容器=[data-panel=x] .dv-content-container。旧类名仍可用：协议模板 .tpl-panel｜属性 .props-panel｜Hex .hexview｜表格 .tbl｜2D 曲线 .plot｜3D 姿态 .view3d｜控制画布 .ctl（命令库在其 .ctl-side）｜帧画布 .fc-root｜控制台 .console（快捷指令条 .qk-*）｜图传 .video-panel。面板内通用子结构：工具条 *-bar、内容区 *-body、状态栏 *-status。注意：AI 扩展面板(aiExtPanel)与小部件/自定义卡片是沙箱 iframe，不吃本页样式层——它们经 uartix 主题桥拿 CSS 变量。`;
+const PANEL_CLASSES = `面板作用域速查（稳定契约，优先使用）：每个面板根 DOM 带 data-panel 属性——[data-panel="templates"|"properties"|"hexview"|"table"|"plot2d"|"view3d"|"controls"|"framecanvas"|"console"|"video"|"xray"|"ai"]，面板级定制一律以它作前缀（如 [data-panel="plot2d"] .plot-bar）；面板内容容器=[data-panel=x] .dv-content-container。旧类名仍可用：协议模板 .tpl-panel｜属性 .props-panel｜Hex .hexview｜表格 .tbl｜2D 曲线 .plot｜3D 姿态 .view3d｜控制画布 .ctl（命令库在其 .ctl-side）｜帧画布 .fc-root｜控制台 .console（快捷指令条 .qk-*）｜图传 .video-panel。面板内通用子结构：工具条 *-bar、内容区 *-body、状态栏 *-status。注意：AI 扩展面板(aiExtPanel)与小部件/自定义卡片是沙箱 iframe，不吃本页样式层——它们经 uartix 主题桥拿 CSS 变量。`;
 
 /** 操作类动词 → 触发 action 注入 */
 const ACTION_ROUTE_RE =
@@ -90,7 +93,7 @@ const ACTION_RULE = `【动作执行硬规则】当用户要求对软件本身�
 
 function schemaAction(): string {
   return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（与脚本 api.app 相同）：
-- openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/ai）
+- openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/xray/ai）
 - applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video）
 - setTheme({"theme":"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
 - listProtocols()/listCommands()/listCards() 查询配置清单
@@ -107,8 +110,10 @@ function schemaAction(): string {
 }
 
 function schemaCard(): string {
-  return `【uartix-card 控制卡片格式】输出一个 \`\`\`uartix-card 代码块，内容为 JSON：{"cards":[...]}（批量）或单个卡片对象。卡片字段：{"type":"slider"|"button"|"switch"|"led"|"buzzer"|"monitor"|"group"|"custom","name":"卡片名","x":0,"y":0,"w":2,"h":1,"template":"发送模板（如 CMD:%.2f，printf 风格占位或 {变量名} 插值）","script":"可选JS脚本","unit":"可选单位","sendMode":"ascii"|"hex"}。
+  return `【uartix-card 控制卡片格式】输出一个 \`\`\`uartix-card 代码块，内容为 JSON：{"cards":[...]}（批量）或单个卡片对象。卡片字段：{"type":"slider"|"button"|"switch"|"led"|"buzzer"|"monitor"|"joystick"|"keypad"|"keymon"|"group"|"custom","name":"卡片名","x":0,"y":0,"w":2,"h":1,"template":"发送模板（如 CMD:%.2f，printf 风格占位或 {变量名} 插值）","script":"可选JS脚本","unit":"可选单位","sendMode":"ascii"|"hex"}（各专有类型字段见下）。
 布局规则：x/y 可省略（自动按行流式排布，从左上角起从左到右、放不下换行）；w/h 建议按内容给出（滑条 2×1、按钮/开关/LED 1×1、监视器 2×2、组合控件 2×3、custom 3×3 起）。批量时把所有卡片放进 cards 数组（如 6 个电机滑条就输出 6 项），每张卡给清晰 name 与正确 template（编号递增 MOTOR1/MOTOR2…）；想要整齐的多列布局时可显式给 x/y（画布默认 12 列，每张卡横向间隔建议 = 前一张 x+w）。
+建议尺寸：监视器 2×2、摇杆/键盘遥控 2×2。
+遥控类卡片：摇杆（type="joystick"）字段 {"template":"J:%x,%y!","range":100,"minIntervalMs":50,"springBack":true}——template 用 %x/%y 占位摇杆坐标（归一化 −range~+range，拖动按 minIntervalMs 节流发送，springBack=松开回中）。键盘遥控（type="keypad"）四方向按键：{"keys":["w","s","a","d"],"labels":["前进","后退","左转","右转"],"templates":["按下时发送×4"],"releaseTemplates":["松开时发送×4，空串=不发"]}，键位取 KeyboardEvent.key 单字符。单键遥控（type="keymon"）一个键：{"key":"w","template":"按下指令","releaseTemplate":"松开指令（可省）"}。三者均可选 useScript+script（JS 脚本覆盖默认发送行为，一般不用）。当用户要「遥控/键盘控制/摇杆控制小车云台」时用这三类。
 组合控件（type="group"）：一张卡片集成多个子控件，用 children 数组描述，每项 {"kind":"slider"|"button"|"switch"|"monitor"|"led","label":"子项名","template":"子项指令（slider/button）","min":0,"max":100,"step":1,"templates":["关指令","开指令"]（switch）,"varName":"变量名"（monitor/led）}，最多 8 项。当用户想要「组合/集合控件」「一个控件里又要滑条又要按钮」时使用 group。
 自定义卡片（type="custom"）：字段 {"type":"custom","name":"卡片名","w":3,"h":3,"html":"完整的自包含 HTML（内联 CSS/JS）"}。HTML 运行在沙箱 iframe（无网络、无法访问主程序 DOM），系统自动注入与小部件相同的 window.uartix API：uartix.onSnap(cb)/uartix.snap() 读实时字段、uartix.send(text,mode?) 发送（受发送权限门控）、uartix.app(kind,args) 软件动作、uartix.onChat(cb) 感知 AI 对话状态（思维链/正文尾部）。禁止手写 postMessage 样板；win 窗口控制对卡片无效（卡片固定在画布格子里）。适合任意风格/功能的控件：仪表盘、圆表盘、自绘方向盘、表格、带动画的控制面板。单页最多 8 个 custom 卡片。当用户想要的外观/功能无法用预置控件拼出来时，用 custom。`;
 }
@@ -127,7 +132,7 @@ function schemaCodec(): string {
 }
 
 function schemaTheme(): string {
-  return `【uartix-theme 主题包格式】输出一个 \`\`\`uartix-theme 代码块，内容为 JSON 对象 {"name":"主题名","desc":"一句话描述","vars":{CSS变量:值},"css":"可选的整页风格CSS"}。vars 键为 --bg/--bg-panel/--bg-inset/--bg-titlebar/--border/--border-soft/--text/--text-dim/--accent/--accent-soft/--danger/--shadow/--scrollbar/--scrollbar-hover，值为合法 CSS 颜色/阴影（可用 color-mix 或渐变）。要求对比度足够、整体和谐。css 字段发挥视觉表现力：${STYLE_POWER}`;
+  return `【uartix-theme 主题包格式】输出一个 \`\`\`uartix-theme 代码块，内容为 JSON 对象 {"name":"主题名","desc":"一句话描述","vars":{CSS变量:值},"css":"可选的整页风格CSS"}。vars 键为 --bg/--bg-panel/--bg-inset/--bg-titlebar/--border/--border-soft/--text/--text-dim/--accent/--accent-soft/--on-accent/--danger/--shadow/--scrollbar/--scrollbar-hover，值为合法 CSS 颜色/阴影（可用 color-mix 或渐变）。硬规则：--on-accent 是按钮/徽标等「accent 底色上的文字色」——accent 与 --on-accent 对比度必须 ≥3.0（亮色 accent 如黄/浅绿/白必须配深色 --on-accent，如 #1c1e22；深色 accent 才可配 #fff），漏给会回退白色，亮 accent 会不可读。要求整体对比度足够、和谐。css 字段发挥视觉表现力：${STYLE_POWER}`;
 }
 
 function schemaStyle(): string {
@@ -167,7 +172,7 @@ function schemaScript(script: boolean): string {
 - api.toast(msg) → 右下角通知；api.getInfo() → {status,port,fields}
 - api.onChat(cb) → 感知 AI 助手对话状态 cb({phase:"thinking"|"streaming"|"idle"|"error",reasoningTail,textTail})，返回取消订阅；api.ask("问题") → 向 AI 助手提问（回答经 onChat 流式回来，受发送权限门控）
 - api.app.动作名({参数}) → 控制软件本身，返回 Promise<{ok,data?,err?}>。可用动作：
-  · openPanel({panel:"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/ai）
+  · openPanel({panel:"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/xray/ai）
   · applyPreset({preset:"attitude"}) 切工作区预设（proto/analyze/attitude/console/video）
   · setTheme({theme:"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
   · listProtocols()/listCommands()/listCards() 获取现有配置清单
