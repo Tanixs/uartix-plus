@@ -727,6 +727,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     className="input"
                     style={{ width: 280 }}
                     value={settings.aiModel}
+                    placeholder={AI_PRESETS[settings.aiPreset].model}
                     onChange={(e) => patch({ aiModel: e.target.value })}
                   />
                 ), t("set.ai.model.tip"))}

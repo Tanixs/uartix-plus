@@ -50,7 +50,7 @@ export interface Settings {
   conWrap: boolean;
 }
 
-export type AiPreset = "openai" | "deepseek" | "qwen" | "ollama" | "anthropic";
+export type AiPreset = "openai" | "deepseek" | "zhipu" | "qwen" | "ollama" | "anthropic";
 
 export type AiFormat = "chat" | "anthropic" | "responses";
 
@@ -60,12 +60,24 @@ export const AI_FORMATS: { key: AiFormat; label: string }[] = [
   { key: "responses", label: "Responses (/responses)" },
 ];
 
+/** AI 服务预设（2026-09 按各家官方文档刷新：默认模型名以官方 API ID 为准） */
 export const AI_PRESETS: Record<AiPreset, { label: string; baseUrl: string; model: string }> = {
-  openai: { label: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat" },
-  qwen: { label: "通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
-  ollama: { label: "本地 Ollama", baseUrl: "http://localhost:11434/v1", model: "qwen2.5:7b" },
-  anthropic: { label: "Anthropic Claude", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-4-5" },
+  openai: { label: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", model: "gpt-5.6-sol" },
+  deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-pro" },
+  zhipu: { label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.3" },
+  qwen: { label: "通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3.8-flash" },
+  ollama: { label: "本地 Ollama", baseUrl: "http://localhost:11434/v1", model: "gemma4:12b" },
+  anthropic: { label: "Anthropic Claude", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5" },
+};
+
+/** 旧预设模型名 → 现行官方 ID 的存量迁移表（如 deepseek-chat 已于 2026-07-24 停服） */
+const LEGACY_MODEL_IDS: Record<string, string> = {
+  "deepseek-chat": "deepseek-v4-flash",
+  "deepseek-reasoner": "deepseek-v4-pro",
+  "gpt-4o-mini": "gpt-5.6-sol",
+  "gpt-4o": "gpt-5.6-sol",
+  "qwen-plus": "qwen3.8-flash",
+  "claude-sonnet-4-5": "claude-sonnet-5",
 };
 
 const KEY = "vs.settings";
@@ -119,7 +131,7 @@ function load(): Settings {
       cellSize: [48, 60, 72, 90, 110].includes(p.cellSize ?? 60)
         ? (p.cellSize as number)
         : 60,
-      aiPreset: (["openai", "deepseek", "qwen", "ollama", "anthropic"] as const).includes(
+      aiPreset: (["openai", "deepseek", "zhipu", "qwen", "ollama", "anthropic"] as const).includes(
         p.aiPreset as AiPreset,
       )
         ? (p.aiPreset as AiPreset)
@@ -129,7 +141,10 @@ function load(): Settings {
         : "chat",
       aiBaseUrl: typeof p.aiBaseUrl === "string" ? p.aiBaseUrl : AI_PRESETS.deepseek.baseUrl,
       aiApiKey: typeof p.aiApiKey === "string" ? p.aiApiKey : "",
-      aiModel: typeof p.aiModel === "string" && p.aiModel ? p.aiModel : AI_PRESETS.deepseek.model,
+      aiModel: (() => {
+        const m = typeof p.aiModel === "string" && p.aiModel ? p.aiModel : AI_PRESETS.deepseek.model;
+        return LEGACY_MODEL_IDS[m] ?? m;
+      })(),
       aiTemperature:
         typeof p.aiTemperature === "number" && p.aiTemperature >= 0 && p.aiTemperature <= 2
           ? p.aiTemperature

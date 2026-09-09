@@ -82,7 +82,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；可停靠为面板（工具栏「+ 面板」）。</li>
                     <li>输入框：<code>Enter</code> 发送；<code>Shift+Enter</code> 或 <code>Ctrl+Enter</code> 换行。</li>
                     <li>发送前在输入框上方勾选「本次发送的上下文」；<b>协议清单</b>（一行式，便宜）默认带，<b>协议完整定义</b>只在需要精确分析时勾。上下文栏实时显示 ≈token 消耗估算。</li>
-                    <li>支持思维链模型（如 deepseek-r1）：思考过程实时流式显示并计时，正文开始后自动折叠，可在设置关闭显示。</li>
+                    <li>支持思维链模型（如 deepseek-v4-pro / glm-5.3）：思考过程实时流式显示并计时，正文开始后自动折叠，可在设置关闭显示。</li>
                     <li>消息悬停出现操作钮：复制 / 编辑重发 / 重新生成 / 删除；会话侧栏支持多会话、搜索、双击重命名。</li>
                   </ol>
                 </Section>
