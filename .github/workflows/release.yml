@@ -16,31 +16,64 @@ permissions:
   contents: write
 
 jobs:
-  # 前置单例 job：先建草稿 Release（读 note 文件）。
-  # 修竞态：此前两个 matrix job 并行各自建同 tag 草稿，GitHub 允许同 tag 存在
-  # 多个草稿 → tauri-action 按 tag 找草稿时资产分裂到两个 release，Publish 其一
-  # 后另一份资产（Linux/固定名副本）永远缺失。现在只有本 job 创建，build 复用。
+  # 前置单例 job：解析出**唯一一个** release 的数字 ID 并向下传递。
+  # 为什么必须用 ID 而不是 tag（两次发版事故的根因）：
+  #   ① GET /releases/tags/{tag} 对**草稿返回 404** → `gh release create` 判存在会漏判，
+  #      于是同一 tag 再建一个草稿；② `gh release upload <tag>` 同样按该端点解析，
+  #      **无法寻址草稿**。两条路径落到不同 release → 版本化包 / 固定名副本 / latest.json
+  #      资产分裂。tauri-action 用 listReleases 过滤 tag（含草稿、新的在前），又不一样。
+  # 现在：本 job 用 listReleases（含草稿）解析 ID，发现同 tag 多份就立即失败，
+  # 后续 tauri-action 与固定名上传全部指向这个 ID，永不歧义。
   create-release:
     runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.rel.outputs.id }}
+      tag: ${{ steps.rel.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve version
-        id: ver
-        shell: bash
-        run: echo "tag=v$(jq -r .version src-tauri/tauri.conf.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Create draft release with notes
+      - name: Resolve or create the one release
+        id: rel
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          # 已存在（重发/补资产场景）则复用：tauri-action 与固定名上传都按 tag 定位
-          gh release create "${{ steps.ver.outputs.tag }}" \
-            --draft \
-            --title "Uartix+ ${{ steps.ver.outputs.tag }}" \
-            --notes-file "docs/RELEASE_NOTES/${{ steps.ver.outputs.tag }}.md" \
-            || echo "::warning::release ${{ steps.ver.outputs.tag }} already exists, reusing it"
+          set -euo pipefail
+          TAG="v$(jq -r .version src-tauri/tauri.conf.json)"
+
+          # listReleases 是唯一能看到草稿的端点（GET /releases/tags/{tag} 对草稿不可靠），
+          # 按 tag 过滤出全部候选 ID。查询失败必须中断：否则会被误判成"不存在"而
+          # 再建一份草稿，正是资产分裂的起点——故用哨兵值显式检测。
+          IDS=()
+          while IFS= read -r line; do
+            if [ -n "$line" ]; then IDS+=("$line"); fi
+          done < <(gh api "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"${TAG}\") | .id" || echo "__API_FAIL__")
+          if [[ "${IDS[0]:-}" == "__API_FAIL__" ]]; then
+            echo "::error::无法列出 releases（API 查询失败），中止以避免误建重复草稿"
+            exit 1
+          fi
+
+          case "${#IDS[@]}" in
+            0)
+              ID=$(gh release create "$TAG" \
+                --draft \
+                --title "Uartix+ ${TAG}" \
+                --notes-file "docs/RELEASE_NOTES/${TAG}.md" \
+                --json id --jq .id)
+              ;;
+            1)
+              ID="${IDS[0]}"
+              echo "reusing existing release ${ID} for ${TAG}"
+              ;;
+            *)
+              echo "::error::tag ${TAG} 下存在 ${#IDS[@]} 个 release（ID: ${IDS[*]}），资产会分裂。请先在 Releases 页删除多余项（含草稿，tag 本身保留）后重跑本 workflow。"
+              exit 1
+              ;;
+          esac
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "id=${ID}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: create-release
@@ -90,6 +123,13 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          # 必须用 releaseId 而非只给 tagName：tauri-action 源码为
+          #   `if (tagName && !releaseId) getOrCreateRelease(...)`
+          # 走 tag 路径时，若 releaseDraft:true 而该 tag 只找到**已发布**那份，
+          # 它会当作"没找到"再建一个新草稿 —— 重复草稿正是这么产生的。
+          # 给了 releaseId 则完全旁路查找/创建，直接往指定 release 传资产。
+          releaseId: ${{ needs.create-release.outputs.id }}
+          # 以下仅作为 releaseId 缺失时的兜底（届时才会按 tag 查找/创建）
           tagName: v__VERSION__
           releaseName: "Uartix+ v__VERSION__"
           releaseBody: "见 docs/RELEASE_NOTES。"
@@ -99,12 +139,14 @@ jobs:
 
       # 固定文件名副本 → releases/latest/download/<固定名> 成为永久下载地址
       # （官网/外链一次配置，发新版后自动指向最新，无需再改）
+      # 按 tag 上传（gh 内部：REST 查已发布 + GraphQL 查草稿，只认 tag 不认 ID）。
+      # 唯一性由 create-release 保证：同 tag 出现多份 release 时该 job 直接失败。
       - name: Upload stable-named assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          TAG="v$(jq -r .version src-tauri/tauri.conf.json)"
+          TAG="${{ needs.create-release.outputs.tag }}"
           VER="${TAG#v}"
           if [ "$RUNNER_OS" = "Windows" ]; then
             SRC="src-tauri/target/release/bundle/nsis/Uartix-Plus_${VER}_x64-setup.exe"
