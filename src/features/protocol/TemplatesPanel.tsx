@@ -437,6 +437,18 @@ export function TemplatesPanel() {
                     {errs ? ` / ${tx("错", "err")}${errs}` : ""}
                   </span>
                 </span>
+                {multi && (
+                  <button
+                    className="tpl-add-type"
+                    title={tx("向此簇添加一条帧型（边界沿用簇内首条，帧头/帧长在帧画布调整）", "Add a frame type to this cluster (boundaries copied from the first; tune header/length in Frame Canvas)")}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      store.addClusterFrame(key);
+                    }}
+                  >
+                    ＋
+                  </button>
+                )}
                 <input
                   type="checkbox"
                   className="chk-box"

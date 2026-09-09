@@ -332,6 +332,65 @@ function newName(base: string): string {
   return `${base} (${i})`;
 }
 
+/** 结构发现「按簇建模板」（P56b）：每个帧型一条模板（帧头+定长+sum8 占位），归入同一簇 */
+export function createClusterFromFrames(
+  name: string,
+  frames: { header: number[]; len: number }[],
+): string {
+  pushHistory();
+  const grpKey = `usr-${Date.now().toString(36)}-${(grpUid++).toString(36)}`;
+  setGroupMeta(grpKey, { name });
+  const hex2 = (v: number) => v.toString(16).toUpperCase().padStart(2, "0");
+  const base = newName(name);
+  const tpls: FrameTemplate[] = frames.map((f, i) => ({
+    id: crypto.randomUUID(),
+    name: `${base}·${f.header.map(hex2).join(" ")}`,
+    color: PALETTE[(snapshot.rules.templates.length + i) % PALETTE.length],
+    enabled: false,
+    boundary: {
+      mode: "fixedLength",
+      headerBytes: f.header,
+      fixedLength: f.len,
+      maxLength: 512,
+    },
+    checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
+    fields: [],
+    groupKey: grpKey,
+  }));
+  set({
+    rules: { templates: [...snapshot.rules.templates, ...tpls] },
+    selection: { kind: "template", templateId: tpls[0].id },
+  });
+  scheduleSync();
+  return tpls[0].id;
+}
+
+/** 向已有簇追加一条帧型（P56b：帧画布/模板面板的「添加帧型」入口），边界沿用簇内首条便于起步 */
+export function addClusterFrame(grpKey: string): string {
+  pushHistory();
+  const inGrp = snapshot.rules.templates.filter((t) => t.groupKey === grpKey);
+  const meta = grpMeta[grpKey];
+  const base = inGrp[0];
+  const tpl: FrameTemplate = {
+    id: crypto.randomUUID(),
+    name: meta ? `${newName(meta.name)}·帧型${inGrp.length + 1}` : `帧型${inGrp.length + 1}`,
+    color: PALETTE[snapshot.rules.templates.length % PALETTE.length],
+    enabled: false,
+    boundary: base
+      ? { ...base.boundary, headerBytes: [...base.boundary.headerBytes] }
+      : { mode: "fixedLength", headerBytes: [], fixedLength: 8, maxLength: 256 },
+    checksum: base?.checksum ? { ...base.checksum } : null,
+    fields: [],
+    groupKey: grpKey,
+  };
+  set({
+    rules: { templates: [...snapshot.rules.templates, tpl] },
+    selection: { kind: "template", templateId: tpl.id },
+  });
+  scheduleSync();
+  return tpl.id;
+}
+
 export function createCsvTemplate(delim: string, elemType: string, lineEnd: string): string {
   pushHistory();
   const footer =

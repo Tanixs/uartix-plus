@@ -4,7 +4,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { onRx, onTx } from "../../ipc/binbus";
 import * as store from "../serial/serialStore";
 import { IconPause, IconPlay, IconTrash } from "../../shared/icons";
-import { useSettings } from "../settings/settingsStore";
+import { patch, useSettings } from "../settings/settingsStore";
 import { t, tx } from "../../i18n/strings";
 import { QuickCommandBar } from "./QuickCommandBar";
 import { XferDialog } from "../xfer/XferDialog";
@@ -50,10 +50,10 @@ function applyNewline(
 }
 
 export function ConsolePanel() {
-  useSettings(); // 语言切换时随设置重渲染
+  const settings = useSettings(); // 语言/换行等设置变化时随设置重渲染
   const [mode, setMode] = useState<"ascii" | "hex">("ascii");
   const [showTs, setShowTs] = useState(true);
-  const [wrap, setWrap] = useState(true);
+  const wrap = settings.conWrap;
   const [showTx, setShowTx] = useState(true);
   const [showRx, setShowRx] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -212,21 +212,29 @@ export function ConsolePanel() {
     return () => clearInterval(timer);
   }, []);
 
-  // 时间戳分色：把 [TX hh:mm:ss.mmm] / [hh:mm:ss.mmm] 前缀包进彩色 span
+  // 时间戳分色：把 [TX hh:mm:ss.mmm] / [hh:mm:ss.mmm] 前缀包进彩色 span。
+  // 块级行布局（P56）：每段一个 .con-line（时间戳固定列 + 内容列），
+  // 时间戳永远行首左对齐，换行后续行与内容列对齐（悬挂缩进，VSCode 控制台式）
   const TS_SPLIT = /(\[(?:TX )?\d{1,2}:\d{2}:\d{2}\.\d{2,3}\] ?)/;
   function appendConsoleText(el: HTMLElement, s: string) {
+    const line = document.createElement("div");
+    line.className = "con-line";
     const parts = s.split(TS_SPLIT);
     for (const p of parts) {
       if (!p) continue;
       if (/^\[(?:TX )?\d{1,2}:\d{2}:\d{2}\.\d{2,3}\] ?$/.test(p)) {
         const span = document.createElement("span");
         span.className = "console-ts";
-        span.textContent = p;
-        el.appendChild(span);
+        span.textContent = p.trimEnd();
+        line.appendChild(span);
       } else {
-        el.appendChild(document.createTextNode(p));
+        const b = document.createElement("span");
+        b.className = "con-line-body";
+        b.textContent = p.replace(/\n$/, "");
+        line.appendChild(b);
       }
     }
+    el.appendChild(line);
   }
 
   const onScroll = () => {
@@ -342,7 +350,7 @@ export function ConsolePanel() {
           <input
             type="checkbox"
             checked={wrap}
-            onChange={(e) => setWrap(e.target.checked)}
+            onChange={(e) => patch({ conWrap: e.target.checked })}
           />
           {t("con.wrap")}
         </label>

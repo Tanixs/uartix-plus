@@ -75,11 +75,13 @@ export function collectContext(sel: ContextSelection): ContextBlock[] {
   if (sel.conn) {
     const s = getSerial();
     const tele = getTelemetry();
-    const iface = s.iface === "serial" ? "串口" : s.iface === "udp" ? "UDP" : s.iface === "tcp-client" ? "TCP 客户端" : "TCP 服务端";
+    const iface = s.iface === "serial" ? "串口" : s.iface === "udp" ? "UDP" : s.iface === "tcp-client" ? "TCP 客户端" : s.iface === "ble" ? "蓝牙 BLE" : "TCP 服务端";
     const cfg =
       s.iface === "serial"
         ? `${s.config.port} @ ${s.config.baud} ${s.config.dataBits}${s.config.parity[0].toUpperCase()}${s.config.stopBits}`
-        : `远端 ${s.net.remoteHost}:${s.net.remotePort} / 本地 ${s.net.localHost}:${s.net.localPort}`;
+        : s.iface === "ble"
+          ? `设备 ${s.bleDevices.find((d) => d.id === s.bleDeviceId)?.name || s.bleDeviceId || "未选择"}`
+          : `远端 ${s.net.remoteHost}:${s.net.remotePort} / 本地 ${s.net.localHost}:${s.net.localPort}`;
     blocks.push({
       key: "conn",
       title: "连接配置",

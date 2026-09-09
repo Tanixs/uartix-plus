@@ -169,6 +169,10 @@ body {
   font-family: var(--font-ui);
   cursor: pointer;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
 }
 
 .btn:hover:not(:disabled) {
@@ -446,6 +450,7 @@ body {
 .console-bar {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
@@ -515,7 +520,21 @@ body {
 
 .console-view.wrap {
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.con-line {
+  display: flex;
+  gap: 6px;
+  width: max-content;
+  min-width: 100%;
+}
+.console-view.wrap .con-line {
+  width: auto;
+  min-width: 0;
+}
+.console-view.wrap .con-line-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .console-send {
@@ -849,6 +868,8 @@ body {
 
 /* 控制台时间戳分色 */
 .console-ts {
+  flex: none;
+  font-variant-numeric: tabular-nums;
   color: var(--accent);
   opacity: 0.8;
   font-family: var(--font-mono);
@@ -1208,6 +1229,21 @@ body {
 
 .tpl-del:hover {
   color: var(--danger);
+}
+
+.tpl-add-type {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 3px;
+  flex: none;
+}
+
+.tpl-add-type:hover {
+  color: var(--accent);
 }
 
 .tpl-empty {
@@ -3737,6 +3773,10 @@ body {
 .xray-sample b{color:var(--text);font-family:var(--mono);}
 .xray-lsel{height:24px;padding:0 4px;font-size:11px;font-weight:600;}
 .xray-hint{font-size:10.5px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.xray-params{display:flex;align-items:center;gap:12px;padding:4px 10px;border-bottom:1px solid var(--border-soft);flex:none;font-size:11px;color:var(--text-dim);flex-wrap:wrap;}
+.xray-param{display:inline-flex;align-items:center;gap:5px;}
+.xray-param .input{height:22px;padding:0 4px;font-size:11px;}
+.xray-ft-chk{flex:none;accent-color:var(--accent);margin:0;}
 .xray-empty{flex:1;display:flex;align-items:center;justify-content:center;padding:20px;font-size:12.5px;color:var(--text-dim);text-align:center;line-height:1.7;}
 .xray-gridwrap{flex:1;overflow:auto;background:var(--bg-panel);position:relative;}
 .xray-canvas{display:block;}

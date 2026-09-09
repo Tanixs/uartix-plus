@@ -47,6 +47,7 @@ export interface Settings {
   aiScript: boolean;
   showThinking: boolean;
   chartPalette: "standard" | "cbSafe";
+  conWrap: boolean;
 }
 
 export type AiPreset = "openai" | "deepseek" | "qwen" | "ollama" | "anthropic";
@@ -96,6 +97,7 @@ function load(): Settings {
     aiScript: false,
     showThinking: true,
     chartPalette: "standard",
+    conWrap: true,
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -139,6 +141,7 @@ function load(): Settings {
       aiScript: Boolean(p.aiScript),
       showThinking: p.showThinking === undefined ? true : Boolean(p.showThinking),
       chartPalette: p.chartPalette === "cbSafe" ? "cbSafe" : "standard",
+      conWrap: p.conWrap === undefined ? true : Boolean(p.conWrap),
     };
   } catch {
     return fallback;

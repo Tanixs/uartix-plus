@@ -657,9 +657,14 @@ export default function App() {
         <DockviewReact
           components={panelComponents}
           onReady={onReady}
-          className={
-            dockBase === "dark" ? "dockview-theme-dark" : "dockview-theme-light"
-          }
+          dndStrategy="pointer"
+          theme={{
+            name: "uartix",
+            className:
+              dockBase === "dark" ? "dockview-theme-dark" : "dockview-theme-light",
+            colorScheme: dockBase === "dark" ? "dark" : "light",
+            dndOverlayMounting: "absolute",
+          }}
         />
         {editLayout &&
           groupBoxes.map((g) => (
