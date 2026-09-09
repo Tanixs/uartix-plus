@@ -223,8 +223,13 @@ pub fn run() {
                 .inner_size(1440.0, 900.0)
                 .min_inner_size(1100.0, 700.0)
                 .decorations(false)
-                .drag_and_drop(false)
                 .background_color(tauri::window::Color(0xF5, 0xF6, 0xF8, 0xFF));
+            // 拖放拦截仅 Windows 有（tauri 的 drag_and_drop 带 #[cfg(windows)]）；
+            // Linux/GTK 无此 API，文件拖入由前端 preventNav（dragover/drop preventDefault）兜底
+            #[cfg(windows)]
+            {
+                wb = wb.drag_and_drop(false);
+            }
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
