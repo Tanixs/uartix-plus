@@ -101,7 +101,7 @@ export function CodecEditorModal(props: {
   };
 
   return (
-    <div className="modal-mask" onMouseDown={props.onClose}>
+    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal qk-editor" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">{props.initial ? "编辑自定义协议" : "新建自定义协议"}</div>
         <div className="qk-ed-grid">
@@ -343,7 +343,7 @@ export function MyCodecsModal(props: {
   };
 
   return (
-    <div className="modal-mask" onMouseDown={props.onClose}>
+    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">管理我的协议</div>
         <div className="qk-manage-list">

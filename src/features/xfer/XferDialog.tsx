@@ -74,7 +74,7 @@ export function XferDialog({
   const running = s.active;
 
   return (
-    <div className="modal-mask" onMouseDown={(e) => e.target === e.currentTarget && running !== true && onClose()}>
+    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={(e) => e.target === e.currentTarget && running !== true && onClose()}>
       <div className="modal xfer-modal">
         <div className="modal-title">{tx("XMODEM / YMODEM 文件传输", "XMODEM / YMODEM file transfer")}</div>
         <div className="xfer-body">

@@ -532,7 +532,7 @@ function ManageModal(props: { onClose: () => void }) {
   const grp = cmds.groups.find((g) => g.id === grpId) ?? cmds.groups[0];
 
   return (
-    <div className="modal-mask" onMouseDown={props.onClose}>
+    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">快捷指令管理</div>
         <div className="form-row">

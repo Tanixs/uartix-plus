@@ -47,6 +47,18 @@ export const PALETTE = [
   "#db61a2",
 ];
 
+/** Okabe-Ito 色觉友好色板（P55）：红绿色盲等类型下仍可区分；末位黑改中性灰以兼容暗色主题 */
+export const OKABE_PALETTE = [
+  "#E69F00",
+  "#56B4E9",
+  "#009E73",
+  "#F0E442",
+  "#0072B2",
+  "#D55E00",
+  "#CC79A7",
+  "#BBBBBB",
+];
+
 export const FIELD_SIZES: Record<FieldType, number | null> = {
   uint8: 1,
   int8: 1,

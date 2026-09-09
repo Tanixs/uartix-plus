@@ -35,6 +35,8 @@ export function Flyout(props: {
     <div
       ref={ref}
       className="ctx-menu ctx-flyout"
+      role="menu"
+      aria-label="menu"
       style={{
         left: -9999,
         top: -9999,

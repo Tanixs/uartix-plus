@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint src",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:theme": "node .tools/check-contrast.cjs",
+    "check:aria": "node .tools/check-aria.cjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

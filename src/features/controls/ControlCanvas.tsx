@@ -1888,7 +1888,7 @@ function CommandModal(props: {
   useLocale();
   const scriptOn = item.scriptEnabled;
   return (
-    <div className="modal-mask" onMouseDown={props.onClose}>
+    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">{`${tx("命令设置", "Command Settings")} · ${item.name}`}</div>
         <div className="form-row">

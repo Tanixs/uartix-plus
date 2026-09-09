@@ -481,7 +481,7 @@ export function VideoLink() {
         </div>
       )}
       {rawOpen && (
-        <div className="modal-mask" onMouseDown={() => setRawOpen(false)}>
+        <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={() => setRawOpen(false)}>
           <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
             <div className="modal-title">图传解析设置</div>
             <div className="form-row">

@@ -462,7 +462,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   );
 
   return (
-    <div className="modal-mask" onMouseDown={onClose}>
+    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={onClose}>
       <div className="modal set-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">{t("title.settings")}</div>
         <div className="set-body">
@@ -663,6 +663,19 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), t("set.perfHud.tip"))}
+                {row(tx("曲线色板", "Curve palette"), (
+                  <select
+                    className="input"
+                    style={{ width: 150 }}
+                    value={settings.chartPalette}
+                    onChange={(e) =>
+                      patch({ chartPalette: e.target.value === "cbSafe" ? "cbSafe" : "standard" })
+                    }
+                  >
+                    <option value="standard">{tx("标准", "Standard")}</option>
+                    <option value="cbSafe">{tx("色觉友好（Okabe-Ito）", "Color-blind safe (Okabe-Ito)")}</option>
+                  </select>
+                ), tx("新加入的 2D 曲线通道自动分配颜色时使用；色觉友好板在各类色觉缺陷下仍可区分（已手动改色的通道不受影响）", "Palette used when new 2D curve channels get auto colors; the safe palette stays distinguishable under common color vision deficiencies (manually recolored channels unaffected)"))}
               </>
             )}
             {tab === "ai" && (

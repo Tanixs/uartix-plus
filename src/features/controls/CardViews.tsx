@@ -1462,7 +1462,7 @@ export function CardModal(props: {
   );
 
   return (
-    <div className="modal-mask" onMouseDown={props.onClose}>
+    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">
         {`${store.panelTypeName(card.type)}${tx("设置", "Settings")} · ${card.name}`}

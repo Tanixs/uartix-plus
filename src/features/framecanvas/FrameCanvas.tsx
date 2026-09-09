@@ -1786,7 +1786,7 @@ function FrameCanvas() {
             );
           })()}
         {pending && (
-          <div className="modal-mask" onMouseDown={() => setPending(null)}>
+          <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={() => setPending(null)}>
             <div className="modal fc-confirm" onMouseDown={(e) => e.stopPropagation()}>
               <div className="modal-title">{tx("字段冲突", "Field conflict")}</div>
               <div className="fc-confirm-body">{pending.msg}</div>

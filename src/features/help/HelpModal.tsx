@@ -13,7 +13,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
     { key: "export", label: "导出文件格式" },
   ];
   return (
-    <div className="modal-mask" onMouseDown={onClose}>
+    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={onClose}>
       <div className="modal set-modal help-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">帮助与入门</div>
         <div className="set-body">

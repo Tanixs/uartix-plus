@@ -1,7 +1,8 @@
 import type { FramesEventPayload } from "../../ipc/types";
 import { onFrames } from "../../ipc/framesBus";
 import * as panelActivity from "../../panels/panelActivity";
-import { PALETTE } from "../protocol/templateStore";
+import { PALETTE, OKABE_PALETTE } from "../protocol/templateStore";
+import { getSnapshot as getSettings } from "../settings/settingsStore";
 
 export interface Channel {
   id: string;
@@ -661,7 +662,8 @@ export function clearChannels() {
 }
 
 export function nextColor(): string {
-  return PALETTE[channels.length % PALETTE.length];
+  const pal = getSettings().chartPalette === "cbSafe" ? OKABE_PALETTE : PALETTE;
+  return pal[channels.length % pal.length];
 }
 
 export function setSetting(patch: Partial<PlotSettings>) {
