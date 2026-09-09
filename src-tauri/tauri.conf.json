@@ -10,18 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Uartix+",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 1100,
-        "minHeight": 700,
-        "decorations": false,
-        "dragDropEnabled": false,
-        "backgroundColor": "#f5f6f8"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

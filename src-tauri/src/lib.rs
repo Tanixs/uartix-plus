@@ -25,29 +25,32 @@ fn glog(msg: &str) {
     }
 }
 
-/// HTTP 判据：TCP 握手可被本地代理假建立，vite 的 HTTP 响应无法伪造
+/// HTTP 判据：TCP 握手可被本地代理假建立，vite 的 HTTP 响应无法伪造。
+/// localhost 在 Windows 同时解析出 ::1 与 127.0.0.1，vite 可能只监听其中一个——全部尝试。
 #[cfg(debug_assertions)]
 fn dev_server_alive(host: &str, port: u16) -> bool {
     use std::io::{Read, Write};
     use std::net::{TcpStream, ToSocketAddrs};
     use std::time::Duration;
-    let Some(addr) = (host, port).to_socket_addrs().ok().and_then(|mut i| i.next()) else {
+    let Ok(addrs) = (host, port).to_socket_addrs() else {
         return false;
     };
-    let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(1200)) else {
-        return false;
-    };
-    let _ = s.set_write_timeout(Some(Duration::from_millis(1200)));
-    let _ = s.set_read_timeout(Some(Duration::from_millis(1800)));
-    let req = format!("GET / HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
-    if s.write_all(req.as_bytes()).is_err() {
-        return false;
-    }
-    let mut buf = [0u8; 16];
-    match s.read(&mut buf) {
-        Ok(n) => String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/"),
-        Err(_) => false,
-    }
+    addrs.into_iter().any(|addr| {
+        let Ok(mut s) = TcpStream::connect_timeout(&addr, Duration::from_millis(1200)) else {
+            return false;
+        };
+        let _ = s.set_write_timeout(Some(Duration::from_millis(1200)));
+        let _ = s.set_read_timeout(Some(Duration::from_millis(1800)));
+        let req = format!("GET / HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n");
+        if s.write_all(req.as_bytes()).is_err() {
+            return false;
+        }
+        let mut buf = [0u8; 16];
+        match s.read(&mut buf) {
+            Ok(n) => String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/"),
+            Err(_) => false,
+        }
+    })
 }
 
 #[cfg(debug_assertions)]
@@ -60,15 +63,18 @@ fn guide_html(host: &str, port: u16) -> String {
          p{{font-size:13px;line-height:1.7;margin:8px 0}}code{{background:#eff2f5;border-radius:4px;\
          padding:2px 6px;font-family:Cascadia Mono,Consolas,monospace;font-size:12.5px}}\
          .tip{{font-size:12px;color:#57606a;border-top:1px solid #d0d7de;margin-top:16px;padding-top:12px}}\
-         .x{{position:fixed;top:12px;right:12px;width:34px;height:34px;border-radius:8px;border:1px solid #d0d7de;\
+         .btns{{position:fixed;top:12px;right:12px;display:flex;gap:8px}}\
+         .x{{width:34px;height:34px;border-radius:8px;border:1px solid #d0d7de;\
          background:#fff;color:#24292f;font-size:18px;line-height:1;cursor:pointer}}\
          .x:hover{{background:#f0f1f3;border-color:#b6bec6}}</style></head>\
-         <body><button class=x title=关闭窗口 \
-         onclick=\"window.__TAURI_INTERNALS__&&window.__TAURI_INTERNALS__.invoke('plugin:window|close')\">×</button>\
+         <body><div class=btns>\
+         <button class=x title=重试加载前端 onclick=\"location.href='http://{host}:{port}'\">↻</button>\
+         <button class=x title=关闭窗口 onclick=\"location.href='uartix://dev-guide-close'\">×</button>\
+         </div>\
          <div class=c><h1>Uartix+ 开发模式：前端未就绪</h1>\
          <p>本窗口是 <b>debug 构建</b>，页面来自开发服务器 <code>{host}:{port}</code>，当前它没有运行——\
          <b>这不是程序卡死</b>。</p>\
-         <p>请在项目目录运行：<code>npm run tauri dev</code></p>\
+         <p>请在项目目录运行：<code>npm run tauri dev</code>，然后点右上角 ↻ 重试。</p>\
          <p class=tip>若需要可双击运行的版本，请执行 npm run tauri build 后到 target\\release 获取。</p>\
          </div></body></html>"
     )
@@ -173,77 +179,71 @@ pub fn run() {
         ])
         .setup(|app| {
             serial::start_hotplug(app.handle().clone());
+            let handle = app.handle().clone();
+            // 主窗口手动创建（config windows 置空）：debug 启动时先探测 dev server——
+            // 存活直载 devUrl；未响应 HTTP 则直接加载引导页（file://），
+            // 引导页 × 关闭按钮经 on_navigation 拦截（Builder 创建才挂得上）。
+            // release 无探测逻辑，恒载 frontendDist。
             #[cfg(debug_assertions)]
-            {
-                // debug 版页面来自 devUrl——vite 未启动时白屏极易被误判为"卡死"，
-                // 后台探测一次端口，不通则把主窗口导航到内嵌引导页（release 编译期整段剔除）
-                let handle = app.handle().clone();
-                let dev_url = app.config().build.dev_url.clone();
-                std::thread::spawn(move || {
-                    use std::time::Duration;
-                    let Some(url) = dev_url else {
-                        glog("dev_url 为空，跳过");
-                        return;
-                    };
-                    let host = url.host_str().unwrap_or("127.0.0.1");
-                    let host = if host == "localhost" { "127.0.0.1" } else { host };
-                    let port = url.port_or_known_default().unwrap_or(1420);
-                    glog(&format!("探测 {host}:{port} …"));
-                    if dev_server_alive(host, port) {
-                        glog("dev server 存活，无需引导");
-                        return;
-                    }
-                    glog("dev server 未响应 HTTP，进入引导流程");
-                    let html_path = std::env::temp_dir().join("uartix-dev-guide.html");
-                    if let Err(e) = std::fs::write(&html_path, guide_html(host, port)) {
-                        glog(&format!("写引导页失败: {e}"));
-                        return;
-                    }
-                    let Some(guide) = tauri::Url::from_file_path(&html_path).ok() else {
-                        glog(&format!("file url 构造失败: {html_path:?}"));
-                        return;
-                    };
-                    use tauri::Manager;
-                    for delay_ms in [0u64, 1500] {
-                        std::thread::sleep(Duration::from_millis(delay_ms));
-                        let Some(w) = handle.get_webview_window("main") else {
-                            glog("找不到 main 窗口");
-                            return;
-                        };
-                        match w.navigate(guide.clone()) {
-                            Ok(()) => glog(&format!("navigate #{delay_ms}ms ok, url={}", w.url().map(|u| u.to_string()).unwrap_or_default())),
-                            Err(e) => glog(&format!("navigate #{delay_ms}ms 失败: {e}")),
+            let (url, guide_hint) = {
+                match app.config().build.dev_url.clone() {
+                    Some(u) => {
+                        let host = u.host_str().unwrap_or("localhost").to_string();
+                        let port = u.port_or_known_default().unwrap_or(1420);
+                        glog(&format!("探测 {host}:{port} …"));
+                        if dev_server_alive(&host, port) {
+                            glog("dev server 存活，加载前端");
+                            (tauri::WebviewUrl::External(u), None)
+                        } else {
+                            glog("dev server 未响应 HTTP，主窗口加载引导页");
+                            let html_path = std::env::temp_dir().join("uartix-dev-guide.html");
+                            let guide = std::fs::write(&html_path, guide_html(&host, port))
+                                .ok()
+                                .and_then(|_| tauri::Url::from_file_path(&html_path).ok());
+                            match guide {
+                                Some(gu) => (
+                                    tauri::WebviewUrl::External(gu),
+                                    Some(format!(
+                                        "开发模式：前端 dev server ({host}:{port}) 未启动。\n\
+                                         窗口已显示引导页（不是卡死），启动 npm run tauri dev 后点 ↻ 重试。"
+                                    )),
+                                ),
+                                None => (tauri::WebviewUrl::External(u), None),
+                            }
                         }
                     }
-                    let h2 = handle.clone();
-                    let u2 = guide.clone();
-                    let _ = handle.run_on_main_thread(move || {
-                        use tauri::WebviewWindowBuilder;
-                        let r = WebviewWindowBuilder::new(
-                            &h2,
-                            "dev-guide",
-                            tauri::WebviewUrl::External(u2),
-                        )
-                        .title("Uartix+ 开发模式：前端未就绪")
-                        .inner_size(580.0, 400.0)
-                        .resizable(false)
-                        .always_on_top(true)
-                        .center()
-                        .build();
-                        glog(&match r {
-                            Ok(_) => "引导小窗已创建".into(),
-                            Err(e) => format!("引导小窗创建失败: {e}"),
-                        });
-                    });
-                    use tauri_plugin_dialog::DialogExt;
-                    handle
-                        .dialog()
-                        .message(format!(
-                            "开发模式：前端 dev server ({host}:{port}) 未启动，页面无法加载。\n\
-                             请在项目目录运行 npm run tauri dev 后再使用本窗口。"
-                        ))
-                        .show(|_| {});
+                    None => (tauri::WebviewUrl::App("index.html".into()), None),
+                }
+            };
+            #[cfg(not(debug_assertions))]
+            let url = tauri::WebviewUrl::App("index.html".into());
+            #[cfg_attr(not(debug_assertions), allow(unused_mut))]
+            let mut wb = tauri::WebviewWindowBuilder::new(&handle, "main", url)
+                .title("Uartix+")
+                .inner_size(1440.0, 900.0)
+                .min_inner_size(1100.0, 700.0)
+                .decorations(false)
+                .drag_and_drop(false)
+                .background_color(tauri::window::Color(0xF5, 0xF6, 0xF8, 0xFF));
+            #[cfg(debug_assertions)]
+            {
+                use tauri::Manager;
+                let h3 = handle.clone();
+                wb = wb.on_navigation(move |u| {
+                    if u.as_str() == "uartix://dev-guide-close" {
+                        if let Some(win) = h3.get_webview_window("main") {
+                            let _ = win.close();
+                        }
+                        return false;
+                    }
+                    true
                 });
+            }
+            wb.build()?;
+            #[cfg(debug_assertions)]
+            if let Some(msg) = guide_hint {
+                use tauri_plugin_dialog::DialogExt;
+                handle.dialog().message(msg).show(|_| {});
             }
             Ok(())
         })
