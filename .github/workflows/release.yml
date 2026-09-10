@@ -56,11 +56,20 @@ jobs:
 
           case "${#IDS[@]}" in
             0)
-              ID=$(gh release create "$TAG" \
+              # 注意：`gh release create` 没有 --json/--jq（会在参数解析阶段直接
+              # 报 unknown flag，什么都不会创建），所以创建与取 ID 分两步，
+              # 取 ID 复用上面已验证可用的 listReleases（含草稿）。
+              gh release create "$TAG" \
                 --draft \
                 --title "Uartix+ ${TAG}" \
-                --notes-file "docs/RELEASE_NOTES/${TAG}.md" \
-                --json id --jq .id)
+                --notes-file "docs/RELEASE_NOTES/${TAG}.md"
+              ID=$(gh api "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+                --jq ".[] | select(.tag_name == \"${TAG}\") | .id" | head -1)
+              if [ -z "${ID:-}" ]; then
+                echo "::error::草稿已创建但取不到 release ID（列表查询异常），中止以避免资产分裂"
+                exit 1
+              fi
+              echo "created draft release ${ID} for ${TAG}"
               ;;
             1)
               ID="${IDS[0]}"
