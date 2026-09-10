@@ -82,6 +82,7 @@ const C_DATA = "#3fb950";
 
 export const ANO_V7 = "ano-v7";
 export const MODBUS_RTU = "modbus-rtu";
+export const MODBUS_TCP = "modbus-tcp";
 export const NMEA_0183 = "nmea-0183";
 export const CSV_DELIM = "csv-delim";
 export const WIT_IMU = "wit-imu";
@@ -124,6 +125,268 @@ function v7Head(): FieldDef[] {
 const C_GYRO = "#db61a2";
 const C_MAG = "#c678dd";
 const C_FG = "#f0883e";
+
+/* ---------------- Modbus RTU 簇 ----------------
+ * 帧头统一写成 [通配从站地址, 功能码]：headerMask 首字节 0x00 = 任意值，
+ * 一条模板即可吃下总线上所有从站（含广播地址 0），不必逐台改帧头。
+ * 注意：帧首被通配时引擎会关闭「帧中途重锚定」，改由长度域 + CRC 定帧。
+ */
+const MB_CRC = { algo: "crc16_modbus", coverageStart: 0, coverageEnd: -2, endian: "little" } as const;
+
+function mbHead(): FieldDef[] {
+  return [
+    f("设备地址", "addr", 0, "uint8", C_ADDR),
+    f("功能码", "id", 1, "uint8", C_ID),
+  ];
+}
+
+/** 读寄存器响应（FC03/04）：长度域 = 字节数，寄存器区展开为 寄存器1..N（大端） */
+function mbResp(fc: number, name: string, color: string, elem: "uint16"): FrameTemplate {
+  return {
+    id: nid("mb"),
+    name: `Modbus·${name}`,
+    color,
+    enabled: true,
+    boundary: {
+      mode: "lengthField",
+      headerBytes: [0x00, fc],
+      headerMask: [0x00, 0xff],
+      lengthOffset: 2,
+      lengthSize: 1,
+      lengthEndian: "big",
+      lengthAdjust: 5,
+      maxLength: 280,
+    },
+    checksum: { ...MB_CRC },
+    fields: [
+      ...mbHead(),
+      f("字节数", "length", 2, "uint8", C_LEN),
+      f("寄存器", "data", 3, elem, C_DATA, { endian: "big", spanTail: true, spanElem: elem }),
+    ],
+  };
+}
+
+/** 读线圈/离散输入响应（FC01/02）：长度域是「位数」→ 倍率 0.125 换算成字节 */
+function mbCoil(fc: number, name: string, color: string): FrameTemplate {
+  return {
+    id: nid("mb"),
+    name: `Modbus·${name}`,
+    color,
+    enabled: true,
+    boundary: {
+      mode: "lengthField",
+      headerBytes: [0x00, fc],
+      headerMask: [0x00, 0xff],
+      lengthOffset: 2,
+      lengthSize: 1,
+      lengthEndian: "big",
+      lengthAdjust: 5,
+      lengthScale: 0.125,
+      maxLength: 280,
+    },
+    checksum: { ...MB_CRC },
+    fields: [
+      ...mbHead(),
+      f("位数", "length", 2, "uint8", C_LEN),
+      f("线圈字节", "data", 3, "uint8", C_DATA, { spanTail: true, spanElem: "uint8" }),
+    ],
+  };
+}
+
+/** 定长 8 字节帧（读请求 / 写单点请求与回显）：地址 FC 量1(2) 量2(2) CRC(2) */
+function mbReq8(
+  fc: number,
+  name: string,
+  color: string,
+  lbl1 = "起始地址",
+  lbl2 = "数量",
+): FrameTemplate {
+  return {
+    id: nid("mb"),
+    name: `Modbus·${name}`,
+    color,
+    enabled: true,
+    boundary: {
+      mode: "fixedLength",
+      headerBytes: [0x00, fc],
+      headerMask: [0x00, 0xff],
+      fixedLength: 8,
+      maxLength: 64,
+    },
+    checksum: { ...MB_CRC },
+    fields: [
+      ...mbHead(),
+      f(lbl1, "data", 2, "uint16", C_LEN, { endian: "big" }),
+      f(lbl2, "data", 4, "uint16", C_LEN, { endian: "big" }),
+    ],
+  };
+}
+
+/** 写多点请求（FC15/16）：长度域 = 数据字节数 @6，总长 = 字节数 + 9 */
+function mbWriteMulti(
+  fc: number,
+  name: string,
+  color: string,
+  elem: "uint8" | "uint16",
+): FrameTemplate {
+  return {
+    id: nid("mb"),
+    name: `Modbus·${name}`,
+    color,
+    enabled: true,
+    boundary: {
+      mode: "lengthField",
+      headerBytes: [0x00, fc],
+      headerMask: [0x00, 0xff],
+      lengthOffset: 6,
+      lengthSize: 1,
+      lengthEndian: "big",
+      lengthAdjust: 9,
+      maxLength: 280,
+    },
+    checksum: { ...MB_CRC },
+    fields: [
+      ...mbHead(),
+      f("起始地址", "data", 2, "uint16", C_LEN, { endian: "big" }),
+      f("数量", "data", 4, "uint16", C_LEN, { endian: "big" }),
+      f("字节数", "length", 6, "uint8", C_LEN),
+      f("写入数据", "data", 7, elem, C_DATA, { endian: "big", spanTail: true, spanElem: elem }),
+    ],
+  };
+}
+
+/** 写多点回显（FC15/16 响应）：定长 8，只有起始与数量 */
+function mbEcho(fc: number, name: string, color: string): FrameTemplate {
+  return mbReq8(fc, name, color, "起始地址", "数量");
+}
+
+/** 异常响应：帧头次字节按位掩码要求 bit7=1 → 一条模板吃下任意功能码的异常 */
+function mbException(): FrameTemplate {
+  return {
+    id: nid("mb"),
+    name: "Modbus·异常响应",
+    color: "#e5534b",
+    enabled: true,
+    boundary: {
+      mode: "fixedLength",
+      headerBytes: [0x00, 0x80],
+      headerMask: [0x00, 0x80],
+      fixedLength: 5,
+      maxLength: 64,
+    },
+    checksum: { ...MB_CRC },
+    fields: [
+      f("设备地址", "addr", 0, "uint8", C_ADDR),
+      f("异常功能码", "id", 1, "uint8", C_ID),
+      f("异常码", "data", 2, "uint8", "#e5534b"),
+    ],
+  };
+}
+
+/* ---------------- Modbus TCP 簇 ----------------
+ * ADU = MBAP(事务2 + 协议2 + 长度2 + 单元1) + PDU。协议标识恒 0x0000 → 用它当帧头锚点
+ * （首两字节是事务号，必须通配）。TCP 没有 CRC，长度域就是唯一自检，因此主站请求与
+ * 从站响应的区分靠 MBAP 长度的奇偶：
+ *   读/写请求 FC01–06、写多回显 → 长度恒 6（偶）
+ *   读响应、写多请求            → 长度 = 3 + 2N（奇）
+ * 用识别位的掩码 0x01 判最低位即可精确分开，避免两条模板同时"有效"地解出错误字段。
+ */
+const MBTCP_LEN_DISC_EVEN = { offset: 5, value: [0x00], mask: [0x01] };
+const MBTCP_LEN_DISC_ODD = { offset: 5, value: [0x01], mask: [0x01] };
+
+function mbTcpHead(): FieldDef[] {
+  return [
+    f("事务标识", "data", 0, "uint16", C_ADDR, { endian: "big" }),
+    f("协议标识", "data", 2, "uint16", C_ADDR, { endian: "big" }),
+    f("报文长度", "length", 4, "uint16", C_LEN, { endian: "big" }),
+    f("单元地址", "addr", 6, "uint8", C_ADDR),
+    f("功能码", "id", 7, "uint8", C_ID),
+  ];
+}
+
+/** TCP 通用帧：MBAP 长度定帧（总长 = 长度值 + 6），功能码用识别位区分 */
+function mbTcp(
+  fc: number,
+  name: string,
+  color: string,
+  extraFields: FieldDef[],
+  lenDisc: { offset: number; value: number[]; mask: number[] } | null,
+): FrameTemplate {
+  const discs = [
+    // 功能码：0x80 是"bit7=1"的位掩码语义（任意功能码的异常响应），其余按精确值匹配
+    fc === 0x80
+      ? { offset: 7, value: [0x80], mask: [0x80] }
+      : { offset: 7, value: [fc], mask: [0xff] },
+  ];
+  if (lenDisc) discs.push(lenDisc);
+  return {
+    id: nid("mbt"),
+    name: `ModbusTCP·${name}`,
+    color,
+    enabled: true,
+    boundary: {
+      mode: "lengthField",
+      headerBytes: [0x00, 0x00, 0x00, 0x00],
+      headerMask: [0x00, 0x00, 0xff, 0xff],
+      lengthOffset: 4,
+      lengthSize: 2,
+      lengthEndian: "big",
+      lengthAdjust: 6,
+      maxLength: 260,
+      discs,
+    },
+    checksum: null,
+    fields: [...mbTcpHead(), ...extraFields],
+  };
+}
+
+function mbTcpCluster(): FrameTemplate[] {
+  const startQty = (a: string, b: string): FieldDef[] => [
+    f(a, "data", 8, "uint16", C_LEN, { endian: "big" }),
+    f(b, "data", 10, "uint16", C_LEN, { endian: "big" }),
+  ];
+  const regs = (lbl: string, elem: "uint16" | "uint8", lenOff: number): FieldDef[] => [
+    f(lbl, "length", lenOff, "uint8", C_LEN),
+    f(elem === "uint16" ? "寄存器" : "线圈字节", "data", lenOff + 1, elem, C_DATA, {
+      endian: "big",
+      spanTail: true,
+      spanElem: elem,
+    }),
+  ];
+  return [
+    // 读请求（长度恒 6）与读响应（长度奇）
+    mbTcp(0x03, "读保持寄存器请求", "#d29922", startQty("起始地址", "数量"), MBTCP_LEN_DISC_EVEN),
+    mbTcp(0x04, "读输入寄存器请求", "#e3b341", startQty("起始地址", "数量"), MBTCP_LEN_DISC_EVEN),
+    mbTcp(0x03, "读保持寄存器响应", "#3fb950", regs("字节数", "uint16", 8), MBTCP_LEN_DISC_ODD),
+    mbTcp(0x04, "读输入寄存器响应", "#39c5cf", regs("字节数", "uint16", 8), MBTCP_LEN_DISC_ODD),
+    mbTcp(0x01, "读线圈请求", "#f0883e", startQty("起始地址", "数量"), MBTCP_LEN_DISC_EVEN),
+    mbTcp(0x02, "读离散输入请求", "#a5d6ff", startQty("起始地址", "数量"), MBTCP_LEN_DISC_EVEN),
+    mbTcp(0x01, "读线圈响应", "#db61a2", regs("位数", "uint8", 8), MBTCP_LEN_DISC_ODD),
+    mbTcp(0x02, "读离散输入响应", "#7ee787", regs("位数", "uint8", 8), MBTCP_LEN_DISC_ODD),
+    // 写单点：请求与响应完全同构（长度 6）
+    mbTcp(0x05, "写单个线圈", "#ffa657", startQty("输出地址", "输出值"), MBTCP_LEN_DISC_EVEN),
+    mbTcp(0x06, "写单个寄存器", "#ff7b72", startQty("寄存器地址", "设定值"), MBTCP_LEN_DISC_EVEN),
+    // 写多点：请求带数据区（长度奇），回显只有起始+数量（长度 6）
+    mbTcp(
+      0x0f,
+      "写多个线圈",
+      "#bc8cff",
+      [...startQty("起始地址", "数量"), ...regs("字节数", "uint8", 12)],
+      MBTCP_LEN_DISC_ODD,
+    ),
+    mbTcp(
+      0x10,
+      "写多个寄存器",
+      "#c678dd",
+      [...startQty("起始地址", "数量"), ...regs("字节数", "uint16", 12)],
+      MBTCP_LEN_DISC_ODD,
+    ),
+    mbTcp(0x0f, "写多个线圈回显", "#8957e5", startQty("起始地址", "数量"), MBTCP_LEN_DISC_EVEN),
+    mbTcp(0x10, "写多个寄存器回显", "#6e40c9", startQty("起始地址", "数量"), MBTCP_LEN_DISC_EVEN),
+    // 异常响应：功能码位掩码 bit7（长度 3，奇偶已被功能码约束覆盖）
+    mbTcp(0x80, "异常响应", "#e5534b", [f("异常码", "data", 8, "uint8", "#e5534b")], null),
+  ];
+}
 
 export const PRESETS: PresetDef[] = [
   {
@@ -308,50 +571,44 @@ export const PRESETS: PresetDef[] = [
     name: "Modbus RTU",
     tag: "工业",
     desc:
-      "地址 + 功能码 + 数据 + CRC16(小端)。读响应帧由 byteCount 定长截帧；" +
-      "请求帧固定 8 字节。设备地址默认 0x01，可在属性面板修改帧头字节。",
+      "Modbus RTU 全簇（FC01–06 / 15 / 16 的请求·响应·回显 + 任意功能码异常响应）：" +
+      "帧头写 `?? FC` —— 首字节通配 = 总线上任意从站（含广播 0）都能解，不必逐台改地址。" +
+      "读响应按 byteCount 定长并把寄存器区展开成 寄存器1..N（大端 uint16，可绘图/脚本引用）；" +
+      "读线圈响应按「位数」换算字节数（倍率 0.125）。CRC16-Modbus 小端已内置，" +
+      "主站请求与从站响应共用功能码，由引擎跨模板互相解释、不再产生噪声坏帧。",
     build: () => [
-      {
-        id: nid("mb"),
-        name: "Modbus·读寄存器响应",
-        color: "#bc8cff",
-        enabled: true,
-        boundary: {
-          mode: "lengthField",
-          headerBytes: [0x01],
-          lengthOffset: 2,
-          lengthSize: 1,
-          lengthEndian: "little",
-          lengthAdjust: 5,
-          maxLength: 280,
-        },
-        checksum: { algo: "crc16_modbus", coverageStart: 0, coverageEnd: -2, endian: "little" },
-        fields: [
-          f("设备地址", "id", 0, "uint8", C_ADDR),
-          f("功能码", "id", 1, "uint8", C_ID),
-          f("字节数", "length", 2, "uint8", C_LEN),
-        ],
-      },
-      {
-        id: nid("mb"),
-        name: "Modbus·标准请求帧",
-        color: "#d29922",
-        enabled: false,
-        boundary: {
-          mode: "fixedLength",
-          headerBytes: [0x01],
-          fixedLength: 8,
-          maxLength: 64,
-        },
-        checksum: { algo: "crc16_modbus", coverageStart: 0, coverageEnd: -2, endian: "little" },
-        fields: [
-          f("设备地址", "id", 0, "uint8", C_ADDR),
-          f("功能码", "id", 1, "uint8", C_ID),
-          f("起始地址", "data", 2, "uint16", C_LEN),
-          f("数量/值", "data", 4, "uint16", C_LEN),
-        ],
-      },
+      // —— 读响应：长度域 = 字节数，总长 = 字节数 + 5（地址+FC+BC+CRC2）——
+      mbResp(0x03, "读保持寄存器响应", "#3fb950", "uint16"),
+      mbResp(0x04, "读输入寄存器响应", "#39c5cf", "uint16"),
+      // —— 读响应：长度域是「位数」，总长 = ⌈位数/8⌉ + 5 ——
+      mbCoil(0x01, "读线圈响应", "#db61a2"),
+      mbCoil(0x02, "读离散输入响应", "#a5d6ff"),
+      // —— 读请求（固定 8 字节：地址 FC 起始(2) 数量(2) CRC2）——
+      mbReq8(0x03, "读保持寄存器请求", "#d29922"),
+      mbReq8(0x04, "读输入寄存器请求", "#e3b341"),
+      // —— 写单点：请求与响应同构（回显），一条模板双向通用 ——
+      mbReq8(0x05, "写单个线圈", "#f0883e", "输出地址", "输出值"),
+      mbReq8(0x06, "写单个寄存器", "#ffa657", "寄存器地址", "设定值"),
+      // —— 写多点：请求带数据区（长度域在字节数 @6），响应只回显起始+数量 ——
+      mbWriteMulti(0x0f, "写多个线圈", "#bc8cff", "uint8"),
+      mbWriteMulti(0x10, "写多个寄存器", "#c678dd", "uint16"),
+      mbEcho(0x0f, "写多个线圈回显", "#8957e5"),
+      mbEcho(0x10, "写多个寄存器回显", "#6e40c9"),
+      // —— 异常响应：帧头次字节按位掩码 bit7，一条吃下所有功能码的异常 ——
+      mbException(),
     ],
+  },
+  {
+    key: MODBUS_TCP,
+    name: "Modbus TCP",
+    tag: "工业",
+    desc:
+      "Modbus TCP（端口 502）全簇：MBAP 帧头用 `?? ?? 00 00` 锚定协议标识，" +
+      "按 MBAP 长度定帧（总长 = 长度值 + 6），事务号/单元地址/功能码全部解出，" +
+      "读响应把寄存器区展开为 寄存器1..N。TCP 没有 CRC，主站请求与从站响应靠" +
+      "「MBAP 长度奇偶」精确区分（请求恒 6、响应为 3+2N），" +
+      "因此嗅探网关、PLC 与上位机对话时不会互相误判；异常响应用功能码 bit7 掩码一条覆盖。",
+    build: () => mbTcpCluster(),
   },
   {
     key: NMEA_0183,

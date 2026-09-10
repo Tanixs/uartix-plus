@@ -2339,4 +2339,114 @@ mod tests {
         let ok: Vec<&FrameRow> = rows.iter().filter(|r| r.valid).collect();
         assert_eq!(ok.len(), 2, "任意分块都不应丢帧: {rows:?}");
     }
+
+    /// Modbus TCP：无 CRC，主站请求与从站响应共用功能码，
+    /// 靠「MBAP 长度奇偶」识别位区分（读请求恒 6、读响应 3+2N 为奇）。
+    #[test]
+    fn modbus_tcp_separates_request_and_response_by_length_parity() {
+        // MBAP: 事务(2) 协议(2)=0 长度(2) 单元(1) FC(1) ...，总长 = 长度值 + 6
+        let mbap = |txn: u16, unit: u8, pdu: &[u8]| -> Vec<u8> {
+            let n = (pdu.len() + 1) as u16; // 长度值含单元地址
+            let mut f = Vec::new();
+            f.extend_from_slice(&txn.to_be_bytes());
+            f.extend_from_slice(&0u16.to_be_bytes());
+            f.extend_from_slice(&n.to_be_bytes());
+            f.push(unit);
+            f.extend_from_slice(pdu);
+            f
+        };
+        let tcp_boundary = |discs: Vec<DiscCfg>| Boundary {
+            mode: "lengthField".into(),
+            header_bytes: vec![0x00, 0x00, 0x00, 0x00],
+            header_mask: Some(vec![0x00, 0x00, 0xff, 0xff]),
+            length_offset: Some(4),
+            length_size: Some(2),
+            length_endian: Some("big".into()),
+            length_adjust: Some(6),
+            max_length: Some(260),
+            discs,
+            ..Default::default()
+        };
+        let mk = |id: &str, name: &str, discs: Vec<DiscCfg>, fields: Vec<FieldDef>| {
+            FrameTemplate {
+                id: id.into(),
+                name: name.into(),
+                color: "#888888".into(),
+                enabled: true,
+                boundary: tcp_boundary(discs),
+                checksum: None,
+                fields,
+            }
+        };
+        let fc = |v: u8| DiscCfg {
+            offset: 7,
+            value: vec![v],
+            mask: None,
+        };
+        let even = DiscCfg {
+            offset: 5,
+            value: vec![0x00],
+            mask: Some(vec![0x01]),
+        };
+        let odd = DiscCfg {
+            offset: 5,
+            value: vec![0x01],
+            mask: Some(vec![0x01]),
+        };
+        let mut regs = field("t-regs", "寄存器", "data", 9, "uint16", "big");
+        regs.span_tail = Some(true);
+        regs.span_elem = Some("uint16".into());
+
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![
+                mk(
+                    "tcpq",
+                    "读请求",
+                    vec![fc(3), even],
+                    vec![
+                        field("t-txn", "事务标识", "data", 0, "uint16", "big"),
+                        field("t-fc", "功能码", "id", 7, "uint8", "big"),
+                        field("t-start", "起始地址", "data", 8, "uint16", "big"),
+                    ],
+                ),
+                mk(
+                    "tcpr",
+                    "读响应",
+                    vec![fc(3), odd],
+                    vec![field("t-txn", "事务标识", "data", 0, "uint16", "big"), regs],
+                ),
+            ],
+        })
+        .unwrap();
+
+        let mut stream = Vec::new();
+        stream.extend(mbap(0x0001, 0x01, &[0x03, 0x00, 0x00, 0x00, 0x02])); // 请求：长度 6
+        stream.extend(mbap(0x0001, 0x01, &[0x03, 0x04, 0x11, 0x22, 0x33, 0x44])); // 响应：长度 7
+        stream.extend(mbap(0x0002, 0x09, &[0x03, 0x00, 0x00, 0x00, 0x01]));
+        stream.extend(mbap(0x0002, 0x09, &[0x03, 0x02, 0xAB, 0xCD]));
+        let rows = eng.feed(&stream, 0, 100);
+
+        let q: Vec<&FrameRow> = rows.iter().filter(|r| r.tpl_id == "tcpq").collect();
+        let p: Vec<&FrameRow> = rows.iter().filter(|r| r.tpl_id == "tcpr").collect();
+        assert_eq!(q.len(), 2, "两条读请求: {rows:?}");
+        assert_eq!(p.len(), 2, "两条读响应: {rows:?}");
+        assert!(rows.iter().all(|r| r.valid), "TCP 按长度成帧，不应有坏帧");
+        let got: Vec<f64> = p[0]
+            .fields
+            .iter()
+            .filter(|f| f.id.starts_with("t-regs#"))
+            .map(|f| f.raw)
+            .collect();
+        assert_eq!(
+            got,
+            vec![0x1122 as f64, 0x3344 as f64],
+            "响应寄存器应大端解出"
+        );
+        assert_eq!(
+            p[1].fields.iter().find(|f| f.id == "t-txn").unwrap().raw,
+            2.0,
+            "事务号应解出（便于人工对齐请求-应答）"
+        );
+    }
 }
