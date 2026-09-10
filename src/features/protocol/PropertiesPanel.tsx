@@ -11,7 +11,14 @@ import * as store from "./templateStore";
 import { fieldSize } from "./templateStore";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
-import { parseHexBytes, formatHexBytes } from "../../shared/hexBytes";
+import {
+  formatHexBytes,
+  formatHexPattern,
+  isExactMask,
+  parseHexBytes,
+  parseHexPattern,
+  HEX_PATTERN_HINT,
+} from "../../shared/hexBytes";
 import { tx, useLocale } from "../../i18n/strings";
 
 export function NumInput({
@@ -80,24 +87,44 @@ function HexBytesInput({
   title,
   allowEmpty,
   placeholder,
+  mask,
+  pattern,
 }: {
   value: number[];
-  onCommit: (v: number[]) => void;
+  /** 精确模式下第二个参数恒为 null；模式（pattern）下通配时给出等长掩码 */
+  onCommit: (v: number[], mask: number[] | null) => void;
   title?: string;
   allowEmpty?: boolean;
   placeholder?: string;
+  /** 现有掩码（仅 pattern 模式使用） */
+  mask?: number[] | null;
+  /** 允许 `??` / `A?` / `80&F0` 等通配写法 */
+  pattern?: boolean;
 }) {
-  const [txt, setTxt] = useState(formatHexBytes(value));
+  const show = () => (pattern ? formatHexPattern(value, mask) : formatHexBytes(value));
+  const [txt, setTxt] = useState(show());
   const [bad, setBad] = useState(false);
   useEffect(() => {
-    setTxt(formatHexBytes(value));
+    setTxt(show());
     setBad(false);
-  }, [value]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, mask, pattern]);
   const commit = () => {
+    if (pattern) {
+      const out = parseHexPattern(txt);
+      if (out !== null && (out.bytes.length || allowEmpty)) {
+        setBad(false);
+        onCommit(out.bytes, isExactMask(out.mask) ? null : out.mask);
+        return;
+      }
+      setBad(out !== null || !allowEmpty);
+      setTxt(show());
+      return;
+    }
     const out = parseHexBytes(txt);
     if (out !== null && (out.length || allowEmpty)) {
       setBad(false);
-      onCommit(out);
+      onCommit(out, null);
     } else {
       setBad(out === null || !allowEmpty);
       setTxt(formatHexBytes(value));
@@ -209,11 +236,15 @@ export function PropertiesPanel() {
           <label>{tx("帧头字节", "Header Bytes")}</label>
           <HexBytesInput
             value={b.headerBytes}
-            onCommit={(v) => store.patchBoundary(tpl.id, { headerBytes: v })}
+            mask={b.headerMask}
+            pattern
+            onCommit={(v, m) =>
+              store.patchBoundary(tpl.id, { headerBytes: v, headerMask: m })
+            }
             allowEmpty
             title={tx(
-              "0~8 字节，作为该模板的路由依据；可为空（从首字节直接收集，如逗号分隔文本流）",
-              "0–8 bytes used to route frames; may be empty (collect from first byte, e.g. comma-separated text)",
+              `0~8 字节，作为该模板的路由依据；可为空（从首字节直接收集，如逗号分隔文本流）。${HEX_PATTERN_HINT}`,
+              `0–8 bytes used to route frames; may be empty (collect from the first byte, e.g. comma-separated text). ${HEX_PATTERN_HINT}`,
             )}
           />
         </div>
@@ -277,6 +308,22 @@ export function PropertiesPanel() {
                   value={b.lengthAdjust ?? 0}
                   width={64}
                   onCommit={(v) => store.patchBoundary(tpl.id, { lengthAdjust: v })}
+                />
+              </div>
+              <div className="form-pair">
+                <label>
+                  {tx("倍率", "Scale")}{" "}
+                  <HelpHint
+                    text={tx(
+                      "总帧长 = ⌈长度域值 × 倍率⌉ + 修正值，默认 1。长度域以「位」计数时填小数：Modbus FC01/02 读线圈响应的字节数 = ⌈位数/8⌉ → 倍率 0.125。",
+                      "Total length = ⌈length value × scale⌉ + adjust; defaults to 1. Use a fraction when the field counts bits: Modbus FC01/02 read-coils response is ⌈bits/8⌉ bytes → scale 0.125.",
+                    )}
+                  />
+                </label>
+                <NumInput
+                  value={b.lengthScale ?? 1}
+                  width={64}
+                  onCommit={(v) => store.patchBoundary(tpl.id, { lengthScale: v === 1 ? null : v })}
                 />
               </div>
             </div>
@@ -736,8 +783,21 @@ export function PropertiesPanel() {
             value={field.endian}
             onChange={(e) => patch({ endian: e.target.value as Endian })}
           >
-            <option value="little">{tx("小端 LE", "Little Endian")}</option>
-            <option value="big">{tx("大端 BE", "Big Endian")}</option>
+            <option value="little">{tx("小端 LE (DCBA)", "Little Endian (DCBA)")}</option>
+            <option value="big">{tx("大端 BE (ABCD)", "Big Endian (ABCD)")}</option>
+            {(field.type === "uint32" ||
+              field.type === "int32" ||
+              field.type === "float32" ||
+              field.type === "float64") && (
+              <>
+                <option value="big-word-swap">
+                  {tx("大端交换字 (CDAB)", "Big-endian word swap (CDAB)")}
+                </option>
+                <option value="little-word-swap">
+                  {tx("小端交换字 (BADC)", "Little-endian word swap (BADC)")}
+                </option>
+              </>
+            )}
           </select>
         </div>
       )}

@@ -68,7 +68,19 @@ export interface TxEventPayload {
 }
 
 export type BoundaryMode = "fixedLength" | "lengthField" | "footer";
-export type Endian = "little" | "big";
+/**
+ * 字节序。后两档为 Modbus 等「32 位量占两个 16 位寄存器」协议的字序变体：
+ * big=ABCD、little=DCBA、big-word-swap=CDAB、little-word-swap=BADC
+ * （仅对 32/64 位类型生效，16 位类型下与 big/little 等价）。
+ */
+export type Endian = "little" | "big" | "big-word-swap" | "little-word-swap";
+/** 字节序的中性简写（ABCD = MSB 在前），供帧画布提示等狭小空间显示 */
+export const ENDIAN_LABEL: Record<Endian, string> = {
+  little: "DCBA",
+  big: "ABCD",
+  "big-word-swap": "CDAB",
+  "little-word-swap": "BADC",
+};
 export type ChecksumAlgo =
   | "none"
   | "sum8"
@@ -105,20 +117,29 @@ export type FieldRole =
 export interface DiscSpec {
   offset: number;
   value: number[];
+  /** 逐字节位掩码（与 value 等长；缺位按 0xFF 精确匹配）。0x00 = 该字节通配 */
+  mask?: number[] | null;
 }
 
 export interface Boundary {
   mode: BoundaryMode;
   headerBytes: number[];
+  /** 帧头逐字节位掩码：`(字节 & m) == (headerBytes & m)`。缺省 = 精确匹配（旧模板不变）。
+   *  用于「任意从站地址」等通配场景；帧首字节被通配时引擎禁用帧中途重锚定。 */
+  headerMask?: number[] | null;
   fixedLength?: number | null;
   lengthOffset?: number | null;
   lengthSize?: number | null;
   lengthEndian?: Endian | null;
   lengthAdjust?: number | null;
+  /** 长度域倍率：总长 = ceil(长度值 × scale) + adjust。缺省 1；
+   *  Modbus FC01/02 响应的长度域是「位数」→ 0.125 */
+  lengthScale?: number | null;
   footerBytes?: number[] | null;
   maxLength: number;
   discOffset?: number | null;
   discValue?: number[] | null;
+  discMask?: number[] | null;
   discs?: DiscSpec[] | null;
 }
 

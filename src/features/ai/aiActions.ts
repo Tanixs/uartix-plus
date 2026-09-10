@@ -83,11 +83,25 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
     return { err: `模板「${name}」：帧头 headerBytes 缺失或非法` };
   }
 
+  // 字节序：四档全部合法（旧代码只认 big/little，会把新字序静默降级成小端）
+  const normEndian = (v: unknown): Endian =>
+    v === "big" || v === "big-word-swap" || v === "little-word-swap" || v === "little"
+      ? (v as Endian)
+      : "little";
+  // 掩码：全 0xFF 视为无掩码（与"旧模板不带掩码"的语义一致）
+  const normMask = (v: unknown): number[] | null => {
+    const m = toBytes(v);
+    if (!m || m.length === 0) return null;
+    return m.every((x) => x === 0xff) ? null : m;
+  };
+  const headerMask = normMask(b.headerMask);
+
   let boundary: Boundary;
   if (mode === "fixedLength") {
     boundary = {
       mode: "fixedLength",
       headerBytes,
+      headerMask,
       fixedLength: toInt(b.fixedLength) ?? headerBytes.length + 8,
       maxLength: toInt(b.maxLength) ?? 512,
     };
@@ -95,16 +109,22 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
     boundary = {
       mode: "lengthField",
       headerBytes,
+      headerMask,
       lengthOffset: toInt(b.lengthOffset) ?? headerBytes.length,
       lengthSize: toInt(b.lengthSize) ?? 1,
-      lengthEndian: (b.lengthEndian === "big" ? "big" : "little") as Endian,
+      lengthEndian: normEndian(b.lengthEndian),
       lengthAdjust: toInt(b.lengthAdjust) ?? 0,
+      lengthScale:
+        typeof b.lengthScale === "number" && Number.isFinite(b.lengthScale) && b.lengthScale > 0
+          ? b.lengthScale
+          : null,
       maxLength: toInt(b.maxLength) ?? 512,
     };
   } else {
     boundary = {
       mode: "footer",
       headerBytes,
+      headerMask,
       footerBytes: toBytes(b.footerBytes) ?? [0x0d, 0x0a],
       maxLength: toInt(b.maxLength) ?? 512,
     };
@@ -139,10 +159,18 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
       role,
       offset,
       type,
-      endian: (f.endian === "big" ? "big" : "little") as Endian,
+      endian: normEndian(f.endian),
       size: toInt(f.size),
       scale: typeof f.scale === "number" && Number.isFinite(f.scale) ? f.scale : null,
+      offsetValue:
+        typeof f.offsetValue === "number" && Number.isFinite(f.offsetValue) ? f.offsetValue : null,
       unit: typeof f.unit === "string" ? f.unit : null,
+      // 数值数组（Modbus 寄存器区等）：跨到帧尾（扣除校验域）按元素步长展开
+      spanTail: f.spanTail === true ? true : null,
+      spanElem:
+        typeof f.spanElem === "string" && FIELD_TYPES.includes(f.spanElem as FieldType)
+          ? (f.spanElem as string)
+          : null,
       color: templateStore.PALETTE[fields.length % templateStore.PALETTE.length],
     });
   }

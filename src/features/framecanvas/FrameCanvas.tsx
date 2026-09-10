@@ -9,7 +9,8 @@ import {
 } from "react";
 import { clampFlyoutMenu } from "../../shared/Flyout";
 import { invoke } from "@tauri-apps/api/core";
-import type { FieldDef, FieldRole, FieldType, FrameTemplate } from "../../ipc/types";
+import type { Endian, FieldDef, FieldRole, FieldType, FrameTemplate } from "../../ipc/types";
+import { ENDIAN_LABEL } from "../../ipc/types";
 import * as fcStore from "./frameStore";
 import * as serialStore from "../serial/serialStore";
 import * as sessionStore from "../session/sessionStore";
@@ -995,7 +996,7 @@ function FrameCanvas() {
       : "";
     const endianTxt =
       field && ["uint16", "int16", "uint32", "int32", "float32", "float64"].includes(field.type)
-        ? ` · ${field.endian === "big" ? "BE" : "LE"}`
+        ? ` · ${ENDIAN_LABEL[field.endian] ?? "LE"}`
         : "";
     const scaleTxt = field?.scale != null ? ` × ${field.scale}` : "";
     const unitTxt = field?.unit ? ` ${field.unit}` : "";
@@ -1010,7 +1011,7 @@ function FrameCanvas() {
       field && field.spanTail && (field.role === "data" || field.role === "payload")
         ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${
             field.spanElem
-              ? `${tx("自适应变长", "Adaptive span")} · ${field.spanElem.toUpperCase()} ${field.endian === "big" ? "BE" : "LE"}`
+              ? `${tx("自适应变长", "Adaptive span")} · ${field.spanElem.toUpperCase()} ${ENDIAN_LABEL[field.endian] ?? "LE"}`
               : tx("自适应变长 · 文本", "Adaptive span · text")
           }</b></div>`
         : "";
@@ -2054,7 +2055,7 @@ function FieldDialog({
   const defName = tx(`字段${init.lo}`, `Field ${init.lo}`);
   const [name, setName] = useState(nameHints(init.size)[0] ?? defName);
   const [type, setType] = useState<FieldType>(defType);
-  const [endian, setEndian] = useState<"little" | "big">("little");
+  const [endian, setEndian] = useState<Endian>("little");
   const [role, setRole] = useState<FieldRole>(init.field?.role ?? "data");
   const [scale, setScale] = useState("");
   const [unit, setUnit] = useState(init.field?.unit ?? "");
@@ -2303,7 +2304,7 @@ function FieldDialog({
                       )
                     : tx(
                         `载荷区按 ${spanElem} ${endian === "big" ? "大端" : "小端"} 逐元素解析（缩放/单位逐元素生效），输出 名称1..N 动态数值变量——可绘图、可脚本引用；随每帧实际长度自适应，上限 64。`,
-                        `Payload is parsed element-by-element as ${spanElem} ${endian === "big" ? "BE" : "LE"} (scale/unit apply per element), emitting dynamic numeric variables Name1..N — plottable and scriptable; adapts per frame, max 64.`,
+                        `Payload is parsed element-by-element as ${spanElem} ${ENDIAN_LABEL[endian] ?? "LE"} (scale/unit apply per element), emitting dynamic numeric variables Name1..N — plottable and scriptable; adapts per frame, max 64.`,
                       )}
                 </div>
               </>
