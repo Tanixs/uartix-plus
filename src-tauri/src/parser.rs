@@ -21,21 +21,28 @@ pub struct FrameTemplate {
     pub fields: Vec<FieldDef>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscCfg {
     #[serde(default)]
     pub offset: usize,
     #[serde(default)]
     pub value: Vec<u8>,
+    /// 逐字节位掩码（与 value 等长或更短，缺位按 0xFF）：`(帧字节 & m) == (value & m)`。
+    /// 用于「任意从站地址」（该位掩码 0x00）与「任意异常响应 FC=FC|0x80」（value 0x80 / mask 0x80）。
+    #[serde(default)]
+    pub mask: Option<Vec<u8>>,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Boundary {
     pub mode: String,
     #[serde(default)]
     pub header_bytes: Vec<u8>,
+    /// 帧头逐字节位掩码，见 DiscCfg::mask。缺省 = 全 0xFF = 精确匹配（旧模板行为不变）。
+    #[serde(default)]
+    pub header_mask: Option<Vec<u8>>,
     #[serde(default)]
     pub fixed_length: Option<usize>,
     #[serde(default)]
@@ -46,6 +53,10 @@ pub struct Boundary {
     pub length_endian: Option<String>,
     #[serde(default)]
     pub length_adjust: Option<i32>,
+    /// 长度域倍率：总长 = ceil(长度值 × scale) + adjust。缺省 1.0。
+    /// Modbus FC01/02 响应的长度域是「位数」而非字节数 → scale = 0.125。
+    #[serde(default)]
+    pub length_scale: Option<f64>,
     #[serde(default)]
     pub footer_bytes: Option<Vec<u8>>,
     #[serde(default)]
@@ -54,6 +65,8 @@ pub struct Boundary {
     pub disc_offset: Option<usize>,
     #[serde(default)]
     pub disc_value: Option<Vec<u8>>,
+    #[serde(default)]
+    pub disc_mask: Option<Vec<u8>>,
     #[serde(default)]
     pub discs: Vec<DiscCfg>,
 }
@@ -184,10 +197,28 @@ impl Machine {
         dropped: &mut u64,
         rows: &mut Vec<FrameRow>,
     ) {
+        self.scan(tpl, data, base_seq, ts, total, errors, dropped, rows, 0);
+    }
+
+    /// `depth` = 校验失败后「后退一字节重找帧头」的递归层数（错位自愈，见 Complete 分支）。
+    #[allow(clippy::too_many_arguments)]
+    fn scan(
+        &mut self,
+        tpl: &FrameTemplate,
+        data: &[u8],
+        base_seq: u64,
+        ts: u64,
+        total: &mut u64,
+        errors: &mut u64,
+        dropped: &mut u64,
+        rows: &mut Vec<FrameRow>,
+        depth: u32,
+    ) {
         if !tpl.enabled {
             return;
         }
         let header = &tpl.boundary.header_bytes;
+        let hmask = tpl.boundary.header_mask.as_deref();
         for (j, &b) in data.iter().enumerate() {
             let abs = base_seq + j as u64;
             if !self.collecting {
@@ -196,7 +227,7 @@ impl Machine {
                     self.collecting = true;
                     self.frame_start = abs;
                 } else if self.buf.len() >= header.len() {
-                    if self.buf.ends_with(header) {
+                    if tail_match(&self.buf, header, hmask) {
                         if self.buf.len() > header.len() {
                             *dropped += (self.buf.len() - header.len()) as u64;
                             self.buf.drain(..self.buf.len() - header.len());
@@ -204,17 +235,25 @@ impl Machine {
                         self.collecting = true;
                         self.frame_start = abs + 1 - header.len() as u64;
                     } else {
-                        *dropped += self.resync(header);
+                        *dropped += self.resync(header.len());
                     }
                 }
             } else {
                 self.buf.push(b);
                 match self.evaluate(tpl) {
                     Eval::Need => {
+                        // 帧中途重锚定：仅当帧首字节是**精确值**时才允许。
+                        // 通配帧首（如 Modbus「任意从站地址」）时，数据区里随便一对
+                        // [任意字节, 功能码] 都会被误认成新帧头，把好帧拦腰截断；
+                        // 这类模板的对齐交给长度+校验，最多损失一帧而不是错帧连出。
+                        let strong_anchor = hmask
+                            .map(|m| m.first().copied().unwrap_or(0xFF) == 0xFF)
+                            .unwrap_or(true);
                         if tpl.boundary.mode != "fixedLength"
+                            && strong_anchor
                             && !header.is_empty()
                             && self.buf.len() > header.len()
-                            && self.buf.ends_with(header)
+                            && tail_match(&self.buf, header, hmask)
                         {
                             *dropped += (self.buf.len() - header.len()) as u64;
                             self.frame_start = abs + 1 - header.len() as u64;
@@ -230,9 +269,42 @@ impl Machine {
                             self.reset();
                             continue;
                         }
-                        let (valid, err) = verify(tpl, &self.buf);
+                        // 先把帧字节取出：后续重扫会改动 self.buf，而行内容必须是本帧原文
+                        let row_bytes = std::mem::take(&mut self.buf);
+                        let row_seq = self.frame_start;
+                        let (valid, err) = verify(tpl, &row_bytes);
+                        let mut keep_state = false;
+                        if !valid && depth < RESCAN_DEPTH && !header.is_empty() {
+                            // 校验不过有两种可能：真是坏帧，或者只是帧起点错位。
+                            // 错位时按旧逻辑整段丢弃，会把紧随其后（甚至交叠）的好帧一起吞掉
+                            // ——Modbus 这类"帧首通配 + 数据区常出现帧头样式"的协议尤其明显。
+                            // 故后退一字节在已收字节里重扫：扫出自洽解就采用它，且不记这条坏帧。
+                            self.collecting = false;
+                            let mut sub_rows: Vec<FrameRow> = Vec::new();
+                            let (mut s_total, mut s_err, mut s_drop) = (0u64, 0u64, 0u64);
+                            self.scan(
+                                tpl,
+                                &row_bytes[1..],
+                                row_seq + 1,
+                                ts,
+                                &mut s_total,
+                                &mut s_err,
+                                &mut s_drop,
+                                &mut sub_rows,
+                                depth + 1,
+                            );
+                            *dropped += s_drop + 1;
+                            if sub_rows.iter().any(|r| r.valid) {
+                                *total += s_total;
+                                *errors += s_err;
+                                rows.extend(sub_rows);
+                                continue; // 状态沿用子扫描结果（对齐更可信）
+                            }
+                            // 无自洽解 → 确属坏帧：仍记本帧原文，但保留子扫描推进的状态
+                            keep_state = true;
+                        }
                         let fields = if valid {
-                            decode_fields(tpl, &self.buf)
+                            decode_fields(tpl, &row_bytes)
                         } else {
                             Vec::new()
                         };
@@ -245,14 +317,16 @@ impl Machine {
                             tpl_name: tpl.name.clone(),
                             color: tpl.color.clone(),
                             ts_ms: ts,
-                            seq: self.frame_start,
-                            len: self.buf.len(),
+                            seq: row_seq,
+                            len: row_bytes.len(),
                             valid,
                             error: err,
                             fields,
-                            bytes: self.buf.clone(),
+                            bytes: row_bytes,
                         });
-                        self.reset();
+                        if !keep_state {
+                            self.reset();
+                        }
                     }
                 }
             }
@@ -262,18 +336,21 @@ impl Machine {
     fn reject_by_disc(&self, tpl: &FrameTemplate) -> bool {
         let b = &tpl.boundary;
         if let (Some(off), Some(val)) = (b.disc_offset, b.disc_value.as_deref()) {
-            if !val.is_empty() && self.matches_disc(off, val) {
+            if !val.is_empty() && self.matches_disc(off, val, b.disc_mask.as_deref()) {
                 return true;
             }
         }
         for d in &b.discs {
-            if !d.value.is_empty() && self.matches_disc(d.offset, &d.value) {
+            if !d.value.is_empty() && self.matches_disc(d.offset, &d.value, d.mask.as_deref()) {
                 return true;
             }
         }
         for f in &tpl.fields {
             if let Some(val) = f.disc.as_deref() {
-                if !val.is_empty() && f.offset >= 0 && self.matches_disc(f.offset as usize, val) {
+                if !val.is_empty()
+                    && f.offset >= 0
+                    && self.matches_disc(f.offset as usize, val, None)
+                {
                     return true;
                 }
             }
@@ -281,32 +358,20 @@ impl Machine {
         false
     }
 
-    fn matches_disc(&self, off: usize, val: &[u8]) -> bool {
-        if self.buf.len() < off + val.len() {
-            return true;
-        }
-        &self.buf[off..off + val.len()] != val
+    fn matches_disc(&self, off: usize, val: &[u8], mask: Option<&[u8]>) -> bool {
+        !byte_match(&self.buf, off, val, mask)
     }
 
-    fn resync(&mut self, header: &[u8]) -> u64 {
-        if header.is_empty() {
-            return 0;
+    /// 帧头尚未凑满时的重同步：任何未来的帧头都必须起始于末尾 header_len-1 字节之内，
+    /// 因此只保留这段候选前缀、丢弃更老的字节即可——既不丢帧也不需要猜测首字节。
+    /// （旧实现按「找下一个首字节」丢弃，会把首字节已入缓冲的那一帧整帧吞掉。）
+    fn resync(&mut self, header_len: usize) -> u64 {
+        let keep = header_len.saturating_sub(1);
+        let drop = self.buf.len().saturating_sub(keep);
+        if drop > 0 {
+            self.buf.drain(..drop);
         }
-        let mut dropped = 0u64;
-        while self.buf.len() > header.len() {
-            match self.buf[1..].iter().position(|&c| c == header[0]) {
-                Some(pos) => {
-                    self.buf.drain(..1 + pos);
-                    dropped += 1 + pos as u64;
-                }
-                None => {
-                    let n = self.buf.len() as u64;
-                    self.buf.clear();
-                    return dropped + n;
-                }
-            }
-        }
-        dropped
+        drop as u64
     }
 
     fn reset(&mut self) {
@@ -342,7 +407,12 @@ impl Machine {
                         &self.buf[off..off + size],
                         b.length_endian.as_deref().unwrap_or("little"),
                     );
-                    let total_i = raw as i64 + b.length_adjust.unwrap_or(0) as i64;
+                    // 总长 = ceil(长度值 × scale) + adjust（scale 缺省 1.0，旧模板不受影响）
+                    let scaled = match b.length_scale {
+                        Some(s) if s > 0.0 => (raw as f64 * s).ceil() as i64,
+                        _ => raw as i64,
+                    };
+                    let total_i = scaled + b.length_adjust.unwrap_or(0) as i64;
                     if total_i < 1 || total_i > max_len as i64 {
                         return Eval::TooBig;
                     }
@@ -443,14 +513,75 @@ impl ParserEngine {
             let tpl = &templates[m.tpl_idx];
             m.feed(tpl, data, base_seq, ts, total, errors, dropped, &mut rows);
         }
+        // 跨模板去噪：多模板并行匹配同一路流时，同一段字节可能被某个模板判为坏帧，
+        // 却被另一个模板完整解释成有效帧——那就不该再产生一条红色噪声行。
+        // Modbus 尤其典型：主站读请求 [addr,03,起始,数量,CRC] 会被「读响应」模板
+        // 当作 byteCount=0 的响应；两个方向共用功能码，结构上无法只靠帧头区分。
+        // 同模板的更晚有效解同样算"更好解释"（错位后退一字节重扫留下的半帧即此类）。
+        if rows.iter().any(|r| !r.valid) {
+            let explained: Vec<(u64, u64)> = rows
+                .iter()
+                .filter(|r| r.valid)
+                .map(|r| (r.seq, r.seq + r.len as u64))
+                .collect();
+            let before = rows.len();
+            rows.retain(|r| {
+                r.valid
+                    || {
+                        let (s, e) = (r.seq, r.seq + r.len as u64);
+                        !explained.iter().any(|(vs, ve)| {
+                            let ov = e.min(*ve).saturating_sub(s.max(*vs));
+                            ov * 2 >= r.len as u64 // 重叠过半即视为"已被更好解释"
+                        })
+                    }
+            });
+            let gone = (before - rows.len()) as u64;
+            *total = total.saturating_sub(gone);
+            *errors = errors.saturating_sub(gone);
+        }
         rows
     }
+}
+
+/// 帧缓冲的 `at` 处是否匹配模式 `val`（可按字节位掩码）。越界视为不匹配。
+/// mask 缺省或短于 val 的位按 0xFF（精确匹配）；mask[i]==0x00 表示该字节通配。
+fn byte_match(buf: &[u8], at: usize, val: &[u8], mask: Option<&[u8]>) -> bool {
+    if val.is_empty() || at + val.len() > buf.len() {
+        return false;
+    }
+    val.iter().enumerate().all(|(i, &p)| {
+        let m = mask.and_then(|m| m.get(i).copied()).unwrap_or(0xFF);
+        (buf[at + i] & m) == (p & m)
+    })
+}
+
+/// 帧缓冲末尾是否正好是一个帧头。
+fn tail_match(buf: &[u8], header: &[u8], mask: Option<&[u8]>) -> bool {
+    buf.len() >= header.len() && byte_match(buf, buf.len() - header.len(), header, mask)
 }
 
 fn validate(tpl: &FrameTemplate) -> Result<(), String> {
     let b = &tpl.boundary;
     if b.header_bytes.len() > 8 {
         return Err(format!("模板[{}]帧头长度不能超过8字节", tpl.name));
+    }
+    if let Some(m) = b.header_mask.as_deref() {
+        if m.len() > b.header_bytes.len() {
+            return Err(format!("模板[{}]帧头掩码不应长于帧头", tpl.name));
+        }
+        // 掩码 0 = 该字节完全忽略；缺位按 0xFF
+        if !b.header_bytes.is_empty()
+            && b.header_bytes
+                .iter()
+                .enumerate()
+                .all(|(i, _)| m.get(i).copied().unwrap_or(0xFF) == 0)
+        {
+            // 全通配帧头 = 无法定界（等同无帧头），显式拒绝，避免用户以为"设了帧头"
+            return Err(format!(
+                "模板[{}]帧头全部为通配（等同无帧头），请至少保留一个字节的确定值用于定帧",
+                tpl.name
+            ));
+        }
     }
     let max_len = b.max_length.unwrap_or(512);
     if max_len < (b.header_bytes.len() + 1).min(2) || max_len > 65536 {
@@ -674,16 +805,43 @@ fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
+/// 字节序模式 → (基础序, 是否交换字序)。
+/// 新增两档是为 Modbus 等「32 位量占两个 16 位寄存器」的协议：现场四种字序
+/// ABCD(大端) / DCBA(小端) / CDAB(大端交换字) / BADC(小端交换字)，
+/// 只给大小端时用户会遇到"数值离谱"的经典坑。
+fn endian_parts(endian: &str) -> (bool, bool) {
+    let swap = endian.ends_with("-word-swap");
+    let big = if swap {
+        endian.starts_with("big")
+    } else {
+        endian == "big"
+    };
+    (big, swap)
+}
+
+/// 把线上字节整理成大端序：需要交换字序时先按 16 位字倒序，再按基础序整理。
+/// CDAB：字倒序后即为大端；BADC：字倒序后需再整体反转（=小端整理）。
+/// 逐字段解码的热路径，故用栈上定长数组零分配（最多 8 字节）。
 fn read_uint(bytes: &[u8], endian: &str) -> u64 {
-    let mut v: u64 = 0;
-    if endian == "big" {
-        for &b in bytes {
-            v = (v << 8) | b as u64;
+    let (big, swap) = endian_parts(endian);
+    let n = bytes.len().min(8);
+    let mut c = [0u8; 8];
+    if swap && n >= 4 && n % 2 == 0 {
+        let mut i = 0;
+        while i + 2 <= n {
+            c[i] = bytes[n - 2 - i];
+            c[i + 1] = bytes[n - 1 - i];
+            i += 2;
         }
     } else {
-        for (i, &b) in bytes.iter().enumerate() {
-            v |= (b as u64) << (8 * i);
-        }
+        c[..n].copy_from_slice(&bytes[..n]);
+    }
+    if !big {
+        c[..n].reverse();
+    }
+    let mut v: u64 = 0;
+    for &b in &c[..n] {
+        v = (v << 8) | b as u64;
     }
     v
 }
@@ -724,6 +882,11 @@ fn parse_csv_num(s: &str, ty: &str) -> Option<f64> {
 }
 
 const CSV_MAX_CH: usize = 64;
+
+/// 校验失败时"后退一字节重找帧头"的最大层数：错位点与真帧头之间可能隔着若干字节
+/// （Modbus 主站请求里就常埋着假的 `[任意,03]` 锚点），层数太小仍会丢帧；
+/// 每层至多重扫一帧长的字节且只在失败路径发生，成本有界。
+const RESCAN_DEPTH: u32 = 12;
 
 fn decode_numeric(f: &FieldDef, bytes: &[u8]) -> f64 {
     match f.field_type.as_str() {
@@ -831,11 +994,10 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
                     if esize > 0 {
                         let scale = f.scale.unwrap_or(1.0);
                         let offv = f.offset_value.unwrap_or(0.0);
-                        let big = f.endian == "big";
                         let mut i: usize = 0;
                         while off + (i + 1) * esize <= end && i < CSV_MAX_CH {
                             let s2 = &buf[off + i * esize..off + (i + 1) * esize];
-                            let raw = decode_span_elem(elem, s2, big);
+                            let raw = decode_span_elem(elem, s2, &f.endian);
                             out.push(FieldOut {
                                 id: format!("{}#{}", f.id, i + 1),
                                 name: format!("{}{}", f.name, i + 1),
@@ -912,8 +1074,7 @@ fn span_elem_size(elem: &str) -> usize {
     }
 }
 
-fn decode_span_elem(elem: &str, sl: &[u8], big: bool) -> f64 {
-    let endian = if big { "big" } else { "little" };
+fn decode_span_elem(elem: &str, sl: &[u8], endian: &str) -> f64 {
     match elem {
         "uint8" => sl[0] as f64,
         "int8" => sl[0] as i8 as f64,
@@ -951,6 +1112,7 @@ mod tests {
                         disc_offset: None,
                         disc_value: None,
                         discs: Vec::new(),
+                        ..Default::default()
                     },
                     checksum: Some(ChecksumCfg {
                         algo: "sum8".into(),
@@ -981,6 +1143,7 @@ mod tests {
                         disc_offset: None,
                         disc_value: None,
                         discs: Vec::new(),
+                        ..Default::default()
                     },
                     checksum: Some(ChecksumCfg {
                         algo: "crc16_modbus".into(),
@@ -1149,6 +1312,7 @@ mod tests {
                 disc_offset: Some(1),
                 disc_value: Some(vec![ty]),
                 discs: Vec::new(),
+                ..Default::default()
             },
             checksum: Some(ChecksumCfg {
                 algo: "sum8".into(),
@@ -1279,6 +1443,7 @@ mod tests {
                     disc_offset: None,
                     disc_value: None,
                     discs: Vec::new(),
+                    ..Default::default()
                 },
                 checksum: Some(ChecksumCfg {
                     algo: "sumadd".into(),
@@ -1381,6 +1546,7 @@ mod tests {
                     disc_offset: None,
                     disc_value: None,
                     discs: Vec::new(),
+                    ..Default::default()
                 },
                 checksum: None,
                 fields: vec![FieldDef {
@@ -1443,6 +1609,7 @@ mod tests {
                 disc_offset: Some(2),
                 disc_value: Some(vec![fid_val]),
                 discs: Vec::new(),
+                ..Default::default()
             },
             checksum: Some(ChecksumCfg {
                 algo: "sumadd".into(),
@@ -1533,6 +1700,7 @@ mod tests {
                     disc_offset: None,
                     disc_value: None,
                     discs: Vec::new(),
+                    ..Default::default()
                 },
                 checksum: None,
                 fields: vec![FieldDef {
@@ -1617,6 +1785,7 @@ mod tests {
                 disc_offset: None,
                 disc_value: None,
                 discs: Vec::new(),
+                ..Default::default()
             },
             checksum: Some(ChecksumCfg {
                 algo: "sum8".into(),
@@ -1688,6 +1857,7 @@ mod tests {
             disc_offset: None,
             disc_value: None,
             discs: Vec::new(),
+            ..Default::default()
         };
         tpl.checksum = None;
         tpl.fields = vec![{
@@ -1771,6 +1941,7 @@ mod tests {
                 disc_offset: None,
                 disc_value: None,
                 discs: Vec::new(),
+                ..Default::default()
             },
             checksum: Some(ChecksumCfg {
                 algo: "sum8".into(),
@@ -1849,5 +2020,323 @@ mod tests {
         };
         assert_eq!(stv(&rows[0]), Some(0x5A as f64), "状态应取自帧尾前1字节");
         assert_eq!(stv(&rows[1]), Some(0x2C as f64), "短帧状态应随帧长自适应");
+    }
+
+    /* ---------------- M1：Modbus 所需的引擎表达力 ---------------- */
+
+    /// 构造一条 Modbus RTU 读保持寄存器响应：[addr][0x03][byteCount][regs...][CRC16 小端]
+    fn rtu_read_resp(addr: u8, regs: &[u16]) -> Vec<u8> {
+        let mut f = vec![addr, 0x03, (regs.len() * 2) as u8];
+        for r in regs {
+            f.extend_from_slice(&r.to_be_bytes());
+        }
+        let crc = crc16_modbus(&f);
+        f.extend_from_slice(&crc.to_le_bytes());
+        f
+    }
+
+    /// 帧头掩码模板：[任意从站地址][FC 0x03]，长度域=字节数+5，寄存器为跨帧尾数组
+    fn masked_rtu_tpl() -> FrameTemplate {
+        let mut regs = field("regs", "寄存器", "data", 3, "uint16", "big");
+        regs.span_tail = Some(true);
+        regs.span_elem = Some("uint16".into());
+        FrameTemplate {
+            id: "mb3".into(),
+            name: "读保持寄存器响应".into(),
+            color: "#bc8cff".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "lengthField".into(),
+                header_bytes: vec![0x00, 0x03],
+                header_mask: Some(vec![0x00, 0xFF]),
+                length_offset: Some(2),
+                length_size: Some(1),
+                length_endian: Some("big".into()),
+                length_adjust: Some(5),
+                max_length: Some(280),
+                ..Default::default()
+            },
+            checksum: Some(ChecksumCfg {
+                algo: "crc16_modbus".into(),
+                coverage_start: 0,
+                coverage_end: -2,
+                endian: "little".into(),
+            }),
+            fields: vec![field("addr", "设备地址", "id", 0, "uint8", "big"), regs],
+        }
+    }
+
+    #[test]
+    fn header_mask_matches_any_slave_address() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![masked_rtu_tpl()],
+        })
+        .unwrap();
+
+        // 总线上三个不同从站（含广播地址 0）都应被同一模板解析
+        let mut stream = vec![0xFF, 0x00]; // 垃圾前导
+        stream.extend(rtu_read_resp(0x01, &[0x1234, 0x5678]));
+        stream.extend(rtu_read_resp(0x07, &[0x000A]));
+        stream.extend(rtu_read_resp(0x00, &[0xFFFF]));
+        let rows = eng.feed(&stream, 0, 100);
+
+        let ok: Vec<&FrameRow> = rows.iter().filter(|r| r.valid).collect();
+        assert_eq!(ok.len(), 3, "三个从站地址都应匹配: {rows:?}");
+        assert_eq!(ok[0].fields.iter().find(|f| f.id == "addr").unwrap().raw, 1.0);
+        assert_eq!(ok[1].fields.iter().find(|f| f.id == "addr").unwrap().raw, 7.0);
+        // 寄存器数组：每条帧展开为 寄存器1..N
+        let r2: Vec<f64> = ok[0]
+            .fields
+            .iter()
+            .filter(|f| f.id.starts_with("regs#"))
+            .map(|f| f.raw)
+            .collect();
+        assert_eq!(r2, vec![0x1234 as f64, 0x5678 as f64], "寄存器数组应按大端解出");
+        assert_eq!(
+            ok[2]
+                .fields
+                .iter()
+                .find(|f| f.id == "regs#1")
+                .unwrap()
+                .raw,
+            0xFFFF as f64
+        );
+    }
+
+    #[test]
+    fn header_mask_still_rejects_other_function_codes() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![masked_rtu_tpl()],
+        })
+        .unwrap();
+        // FC=0x04 不是本模板的 0x03：帧头第二字节被掩码为精确匹配，应不成立帧
+        let mut f = vec![0x01, 0x04, 0x02, 0x11, 0x22];
+        let crc = crc16_modbus(&f);
+        f.extend_from_slice(&crc.to_le_bytes());
+        let rows = eng.feed(&f, 0, 100);
+        assert!(
+            rows.iter().all(|r| r.tpl_id != "mb3"),
+            "FC 不匹配时不得误成帧: {rows:?}"
+        );
+    }
+
+    /// FC01/02 响应的长度域是「位数」：总长 = ceil(位数/8) + 5
+    #[test]
+    fn length_scale_converts_bit_count_to_bytes() {
+        let mut tpl = masked_rtu_tpl();
+        tpl.boundary.header_bytes = vec![0x00, 0x01];
+        tpl.boundary.length_scale = Some(0.125);
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![tpl],
+        })
+        .unwrap();
+
+        // 12 个线圈 → ceil(12/8)=2 字节数据 → 总长 3+2+2=7
+        let mut f = vec![0x05, 0x01, 12u8, 0b10110101, 0b00001011];
+        let crc = crc16_modbus(&f);
+        f.extend_from_slice(&crc.to_le_bytes());
+        let rows = eng.feed(&f, 0, 100);
+        assert_eq!(rows.len(), 1, "位数应换算成字节数完成定帧: {rows:?}");
+        assert!(rows[0].valid, "CRC 应通过: {rows:?}");
+        assert_eq!(rows[0].len, 7);
+    }
+
+    /// 异常响应：帧头用「bit7=1」掩码锚定 → 一条模板吃下任意功能码的异常
+    #[test]
+    fn header_bit_mask_matches_any_exception_response() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![exception_tpl()],
+        })
+        .unwrap();
+
+        let mk = |fc: u8, code: u8| -> Vec<u8> {
+            let mut f = vec![0x03, fc, code];
+            let crc = crc16_modbus(&f);
+            f.extend_from_slice(&crc.to_le_bytes());
+            f
+        };
+        let mut stream = mk(0x83, 0x02); // 读保持寄存器异常
+        stream.extend(mk(0x90, 0x04)); // 其他功能码异常
+        stream.extend(mk(0x03, 0x02)); // 正常响应 → 不应命中异常模板
+        let rows = eng.feed(&stream, 0, 100);
+        let hit: Vec<&FrameRow> = rows.iter().filter(|r| r.valid).collect();
+        assert_eq!(hit.len(), 2, "只应命中两条异常帧: {rows:?}");
+        assert_eq!(hit[0].fields[0].raw, 2.0, "异常码 02");
+        assert_eq!(hit[1].fields[0].raw, 4.0, "异常码 04");
+    }
+
+    fn exception_tpl() -> FrameTemplate {
+        FrameTemplate {
+            id: "mbex".into(),
+            name: "异常响应".into(),
+            color: "#e5534b".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "fixedLength".into(),
+                // 首字节=任意从站；次字节按位掩码要求 bit7=1（= 异常响应 FC）
+                header_bytes: vec![0x00, 0x80],
+                header_mask: Some(vec![0x00, 0x80]),
+                fixed_length: Some(5),
+                max_length: Some(64),
+                ..Default::default()
+            },
+            checksum: Some(ChecksumCfg {
+                algo: "crc16_modbus".into(),
+                coverage_start: 0,
+                coverage_end: -2,
+                endian: "little".into(),
+            }),
+            fields: vec![field("ecode", "异常码", "data", 2, "uint8", "big")],
+        }
+    }
+
+    /// 识别位（discs）同样支持按位掩码：帧首精确 + FC 只要求 bit7
+    #[test]
+    fn disc_bit_mask_narrows_without_enumerating_values() {
+        let mut tpl = exception_tpl();
+        tpl.id = "mbex2".into();
+        tpl.boundary.header_bytes = vec![0x03]; // 只看 3 号从站
+        tpl.boundary.header_mask = Some(vec![0xFF]);
+        tpl.boundary.fixed_length = None;
+        tpl.boundary.mode = "lengthField".into();
+        tpl.boundary.length_offset = Some(2);
+        tpl.boundary.length_size = Some(1);
+        tpl.boundary.length_adjust = Some(4);
+        tpl.boundary.discs = vec![DiscCfg {
+            offset: 1,
+            value: vec![0x80],
+            mask: Some(vec![0x80]),
+        }];
+        // 异常帧数据域长度恒为 1：总长 = 1 + 4 = 5
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![tpl],
+        })
+        .unwrap();
+        let mk = |addr: u8, fc: u8, code: u8| -> Vec<u8> {
+            let mut f = vec![addr, fc, code];
+            let crc = crc16_modbus(&f);
+            f.extend_from_slice(&crc.to_le_bytes());
+            f
+        };
+        let mut stream = mk(0x03, 0x86, 0x01); // 3 号从站异常 → 命中
+        stream.extend(mk(0x04, 0x86, 0x01)); // 4 号从站 → 帧首精确，不命中
+        stream.extend(mk(0x03, 0x06, 0x01)); // 正常写回显 → 识别位不命中
+        let rows = eng.feed(&stream, 0, 100);
+        let hit: Vec<&FrameRow> = rows.iter().filter(|r| r.valid).collect();
+        assert_eq!(hit.len(), 1, "只有 3 号从站的异常帧应命中: {rows:?}");
+        assert_eq!(hit[0].tpl_id, "mbex2");
+    }
+
+    /// 真实轮询流（主站请求 + 从站响应交替、地址与寄存器数都在变）：
+    /// 两个方向的模板同时启用，必须逐帧对齐、且不得产生任何噪声坏帧行
+    #[test]
+    fn rtu_poll_stream_stays_aligned() {
+        let mut req = masked_rtu_tpl();
+        req.id = "mbq".into();
+        req.name = "读请求".into();
+        req.boundary.mode = "fixedLength".into();
+        req.boundary.fixed_length = Some(8);
+        req.boundary.length_offset = None;
+        req.boundary.length_size = None;
+        req.boundary.length_endian = None;
+        req.boundary.length_adjust = None;
+        req.fields = vec![field("qty", "数量", "data", 4, "uint16", "big")];
+
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![masked_rtu_tpl(), req],
+        })
+        .unwrap();
+
+        let rounds = 30usize;
+        let mut stream = Vec::new();
+        let mut expect: Vec<(u8, Vec<u16>)> = Vec::new();
+        for i in 0..rounds {
+            let addr = (i % 5 + 1) as u8;
+            let regs: Vec<u16> = (0..(i % 4) as u16).map(|k| k * 0x111 + i as u16).collect();
+            let mut q = vec![addr, 0x03, 0x00, 0x00, 0x00, regs.len() as u8];
+            let qc = crc16_modbus(&q);
+            q.extend_from_slice(&qc.to_le_bytes());
+            stream.extend(q);
+            stream.extend(rtu_read_resp(addr, &regs));
+            expect.push((addr, regs));
+        }
+        let rows = eng.feed(&stream, 0, 100);
+
+        assert!(
+            rows.iter().all(|r| r.valid),
+            "同一段字节已被另一模板完整解释时不应留下坏帧行（坏帧 {} 条）: {:?}",
+            rows.iter().filter(|r| !r.valid).count(),
+            rows.iter()
+                .filter(|r| !r.valid)
+                .map(|r| (r.tpl_id.as_str(), r.seq, r.len))
+                .collect::<Vec<_>>()
+        );
+        let resp: Vec<&FrameRow> = rows.iter().filter(|r| r.tpl_id == "mb3").collect();
+        let reqs: Vec<&FrameRow> = rows.iter().filter(|r| r.tpl_id == "mbq").collect();
+        assert_eq!(resp.len(), rounds, "每轮响应都应恰好一帧");
+        assert_eq!(reqs.len(), rounds, "每轮请求都应恰好一帧");
+        for (i, r) in resp.iter().enumerate() {
+            let got: Vec<f64> = r
+                .fields
+                .iter()
+                .filter(|f| f.id.starts_with("regs#"))
+                .map(|f| f.raw)
+                .collect();
+            let want: Vec<f64> = expect[i].1.iter().map(|v| *v as f64).collect();
+            assert_eq!(got, want, "第 {i} 轮寄存器值不匹配");
+            assert_eq!(
+                r.fields.iter().find(|f| f.id == "addr").unwrap().raw,
+                expect[i].0 as f64,
+                "第 {i} 轮从站地址不匹配"
+            );
+        }
+    }
+
+    /// 32 位量的四种现场字序（Modbus 两个寄存器拼一个 32 位值）
+    #[test]
+    fn thirtytwo_bit_word_orders() {
+        // 线上字节 [12 34 56 78]，按四种字序解释
+        let raw = [0x12u8, 0x34, 0x56, 0x78];
+        assert_eq!(read_uint(&raw, "big"), 0x1234_5678, "ABCD=大端");
+        assert_eq!(read_uint(&raw, "little"), 0x7856_3412, "DCBA=小端");
+        assert_eq!(read_uint(&raw, "big-word-swap"), 0x5678_1234, "CDAB");
+        assert_eq!(read_uint(&raw, "little-word-swap"), 0x3412_7856, "BADC");
+
+        // 反向自洽：设备以 CDAB 送出 0x12345678，解码应还原
+        let wire = [0x56u8, 0x78, 0x12, 0x34];
+        assert_eq!(read_uint(&wire, "big-word-swap"), 0x1234_5678);
+        let wire2 = [0x34u8, 0x12, 0x78, 0x56];
+        assert_eq!(read_uint(&wire2, "little-word-swap"), 0x1234_5678);
+
+        // 16 位不受字序交换影响（无字可换）
+        let w16 = [0xABu8, 0xCD];
+        assert_eq!(read_uint(&w16, "big-word-swap"), read_uint(&w16, "big"));
+        assert_eq!(read_uint(&w16, "little-word-swap"), read_uint(&w16, "little"));
+    }
+
+    /// 重同步不得吞帧：帧头跨两次 feed 边界到达时仍要成帧
+    #[test]
+    fn resync_does_not_swallow_header_across_chunks() {
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![masked_rtu_tpl()],
+        })
+        .unwrap();
+        let f1 = rtu_read_resp(0x02, &[0x0102]);
+        let f2 = rtu_read_resp(0x09, &[0x0304, 0x0506]);
+        // 逐块喂入：垃圾尾、半帧头、剩余部分、整帧……任意切分都必须解析出 2 帧
+        let mut rows = Vec::new();
+        rows.extend(eng.feed(&[0x77, f2[0]], 0, 1));
+        rows.extend(eng.feed(&f2[1..3], 1, 2));
+        rows.extend(eng.feed(&f2[3..], 3, 3));
+        rows.extend(eng.feed(&f1, 5, 4));
+        let ok: Vec<&FrameRow> = rows.iter().filter(|r| r.valid).collect();
+        assert_eq!(ok.len(), 2, "任意分块都不应丢帧: {rows:?}");
     }
 }
