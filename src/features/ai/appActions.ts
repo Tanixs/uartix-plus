@@ -30,6 +30,9 @@ import {
   type AiExtension,
 } from "./extensionStore";
 import { popWidgetToDesktop } from "./widgetShell";
+import * as mbSlave from "../modbus/slaveStore";
+import * as mbPoll from "../modbus/pollStore";
+import { AREA_LABEL, type MbArea } from "../modbus/mb";
 import {
   writeTemplateFromAiJson,
   writeCommandFromAiJson,
@@ -58,6 +61,8 @@ const HIGH_ONLY = new Set([
   "openPort",
   "closePort",
   "removeWidget",
+  // 从站/轮询会主动占用总线发数据，等同发送权限
+  "modbus",
 ]);
 
 export const APP_ACTION_KINDS = [
@@ -82,6 +87,7 @@ export const APP_ACTION_KINDS = [
   "removeCodec",
   "openPort",
   "closePort",
+  "modbus",
   "xferStart",
   "toast",
   "listWidgets",
@@ -299,6 +305,9 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
       await closePort();
       return "连接已断开";
     }
+    case "modbus": {
+      return runModbusAction(a);
+    }
     case "xferStart": {
       const path = String(a.path ?? "").trim();
       if (!path) throw new Error("缺少文件路径 path");
@@ -362,4 +371,170 @@ function findWidget(a: Record<string, unknown>): AiExtension {
   );
   if (!w) throw new Error(`挂件「${name}」不存在（可先 listWidgets 查询）`);
   return w;
+}
+
+/* ================= Modbus 工作台动作（M2-e） ================= */
+
+const MB_AREAS = ["coil", "disc", "holding", "input"] as const;
+const MB_FAULTS = ["none", "noReply", "exception", "everyOther"] as const;
+
+const mbNum = (v: unknown, label: string): number => {
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) throw new Error(`参数「${label}」需为数字`);
+  return n;
+};
+
+const mbArea = (v: unknown): MbArea => {
+  const s = String(v ?? "") as MbArea;
+  if (!MB_AREAS.includes(s)) {
+    throw new Error(`数据区「${String(v)}」不存在（可选：${MB_AREAS.join("/")}）`);
+  }
+  return s;
+};
+
+/** Modbus 从站 / 主站轮询的受控操作（脚本高权限：会主动占用总线发数据） */
+function runModbusAction(a: Record<string, unknown>): unknown {
+  const op = String(a.op ?? "").trim();
+  const sl = mbSlave.getSnapshot();
+  const pl = mbPoll.getSnapshot();
+  switch (op) {
+    case "status":
+      return {
+        slave: {
+          running: sl.running,
+          address: sl.address,
+          anyAddress: sl.anyAddress,
+          delayMs: sl.delayMs,
+          fault: sl.fault,
+          counters: sl.counters,
+        },
+        poll: {
+          running: pl.running,
+          transport: pl.transport,
+          timeouts: pl.timeouts,
+          errs: pl.errs,
+          lastError: pl.lastError,
+          rows: pl.rows.map((r) => ({
+            slave: r.slave,
+            fn: r.fn,
+            addr: r.addr,
+            qty: r.qty,
+            periodMs: r.periodMs,
+            varName: r.varName,
+            last: r.last,
+            ok: r.ok,
+            timeout: r.timeout,
+          })),
+        },
+      };
+
+    case "slave.start": {
+      const err = mbSlave.start();
+      if (err) throw new Error(err);
+      requestOpenPanel("modbus");
+      return `模拟从站已启动（地址 ${mbSlave.getSnapshot().address}），开始应答总线请求`;
+    }
+    case "slave.stop":
+      mbSlave.stop();
+      return "模拟从站已停止";
+    case "slave.configure": {
+      const p: Parameters<typeof mbSlave.patch>[0] = {};
+      if (a.address !== undefined) p.address = mbNum(a.address, "address");
+      if (a.anyAddress !== undefined) p.anyAddress = !!a.anyAddress;
+      if (a.delayMs !== undefined) p.delayMs = mbNum(a.delayMs, "delayMs");
+      if (a.fault !== undefined) {
+        const f = String(a.fault);
+        if (!(MB_FAULTS as readonly string[]).includes(f)) {
+          throw new Error(`故障注入「${f}」无效（可选：${MB_FAULTS.join("/")}）`);
+        }
+        p.fault = f as mbSlave.FaultMode;
+      }
+      if (a.faultCode !== undefined) p.faultCode = mbNum(a.faultCode, "faultCode");
+      mbSlave.patch(p);
+      const s2 = mbSlave.getSnapshot();
+      return `从站已设置：地址 ${s2.address}，延时 ${s2.delayMs}ms，故障 ${s2.fault}${s2.fault === "none" ? "" : ` 码 ${s2.faultCode}`}`;
+    }
+    case "slave.write": {
+      const area = mbArea(a.area);
+      const index = mbNum(a.index, "index");
+      const value = mbNum(a.value, "value");
+      const ok =
+        area === "coil" || area === "disc"
+          ? mbSlave.setBit(area, index, !!value)
+          : mbSlave.setWord(area, index, value);
+      if (!ok) throw new Error(`${AREA_LABEL[area]} 地址 ${index} 超出数据区范围`);
+      return `${AREA_LABEL[area]}[${index}] = ${value}`;
+    }
+    case "slave.writeMany": {
+      const area = mbArea(a.area);
+      const from = mbNum(a.from, "from");
+      const to = mbNum(a.to, "to");
+      const start = mbNum(a.value ?? a.start ?? 0, "value");
+      const step = a.step === undefined ? 0 : mbNum(a.step, "step");
+      const n = mbSlave.fill(area, from, to, step === 0 ? "same" : "ramp", start, step);
+      return `${AREA_LABEL[area]} ${from}~${to} 共 ${n} 点已填充`;
+    }
+    case "slave.resize": {
+      const bits = a.bits === undefined ? sl.bitSize : mbNum(a.bits, "bits");
+      const words = a.words === undefined ? sl.wordSize : mbNum(a.words, "words");
+      mbSlave.resize(bits / 8, words);
+      const s2 = mbSlave.getSnapshot();
+      return `数据区容量：位区 ${s2.bitSize * 8} 点、字区 ${s2.wordSize} 寄存器`;
+    }
+
+    case "poll.add": {
+      const varName =
+        a.varName === undefined ? "" : String(a.varName).trim().slice(0, 32);
+      mbPoll.addRow({
+        slave: a.slave === undefined ? 1 : mbNum(a.slave, "slave"),
+        fn: a.fn === undefined ? 3 : mbNum(a.fn, "fn"),
+        addr: a.addr === undefined ? 0 : mbNum(a.addr, "addr"),
+        qty: a.qty === undefined ? 1 : mbNum(a.qty, "qty"),
+        periodMs: a.periodMs === undefined ? 500 : mbNum(a.periodMs, "periodMs"),
+        elem: a.elem === undefined ? 0 : mbNum(a.elem, "elem"),
+        scale: a.scale === undefined ? 1 : Number(a.scale) || 1,
+        varName,
+      });
+      const rows = mbPoll.getSnapshot().rows;
+      const row = rows[rows.length - 1];
+      if (!row) throw new Error("轮询项添加失败");
+      return `已加轮询项：从站 ${row.slave} 功能码 ${row.fn} 起始 ${row.addr} 数量 ${row.qty} 周期 ${row.periodMs}ms → 变量「${row.varName}」`;
+    }
+    case "poll.remove": {
+      const name = String(a.varName ?? "").trim();
+      const row = mbPoll.getSnapshot().rows.find((r) => r.varName === name);
+      if (!row) throw new Error(`变量「${name}」不在轮询表里（可先 status 查询）`);
+      mbPoll.removeRow(row.id);
+      return `已删除轮询项「${name}」`;
+    }
+    case "poll.clear":
+      mbPoll.clearRows();
+      return "轮询表已清空";
+    case "poll.configure": {
+      if (a.transport !== undefined) {
+        const tp = String(a.transport);
+        if (tp !== "rtu" && tp !== "tcp") throw new Error('transport 只能是 "rtu" 或 "tcp"');
+        mbPoll.setTransport(tp);
+      }
+      return `轮询帧格式：${mbPoll.transport()}`;
+    }
+    case "poll.start": {
+      const err = mbPoll.start();
+      if (err) throw new Error(err);
+      requestOpenPanel("modbus");
+      const n = mbPoll.getSnapshot().rows.filter((r) => r.enabled).length;
+      return `主站轮询已启动（${n} 项）`;
+    }
+    case "poll.stop":
+      mbPoll.stop();
+      return "主站轮询已停止";
+    case "poll.reset":
+      mbPoll.resetStats();
+      return "轮询统计已清零";
+
+    default:
+      throw new Error(
+        `未知 modbus 动作 op：${op || "（空）"}（可选：status / slave.start / slave.stop / slave.configure / slave.write / slave.writeMany / slave.resize / poll.add / poll.remove / poll.clear / poll.configure / poll.start / poll.stop / poll.reset）`,
+      );
+  }
 }

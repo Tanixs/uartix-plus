@@ -10,7 +10,8 @@ export type PanelId =
   | "framecanvas"
   | "video"
   | "ai"
-  | "xray";
+  | "xray"
+  | "modbus";
 
 export interface PanelMeta {
   id: PanelId;

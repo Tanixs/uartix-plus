@@ -15,6 +15,7 @@ import FrameCanvas from "../features/framecanvas/FrameCanvas";
 import { VideoLink } from "../features/video/VideoLink";
 import { AiChat } from "../features/ai/AiChat";
 import { XRayPanel } from "../features/xray/XRayPanel";
+import { ModbusWorkbench } from "../features/modbus/ModbusWorkbench";
 import { ExtPanelHost } from "../features/ai/ExtPanel";
 
 /** 面板页签名（语言感知，P33 i18n）；页签重挂靠 App 的 retitlePanels（locale 变化时 setTitle） */
@@ -34,6 +35,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     video: pick("图传", "Video Link"),
     ai: pick("AI 助手", "AI Assistant"),
     xray: pick("结构发现", "X-Ray"),
+    modbus: pick("Modbus 工作台", "Modbus Workbench"),
   };
 };
 
@@ -58,6 +60,7 @@ const MFrameCanvas = memo(FrameCanvas);
 const MVideo = memo(VideoLink);
 const MAi = memo(AiChat);
 const MXRay = memo(XRayPanel);
+const MModbus = memo(ModbusWorkbench);
 
 export const panelComponents = {
   templates: () => (
@@ -118,6 +121,11 @@ export const panelComponents = {
   xray: () => (
     <ErrorBoundary label={panelTitleOf("xray")}>
       <MXRay />
+    </ErrorBoundary>
+  ),
+  modbus: () => (
+    <ErrorBoundary label={panelTitleOf("modbus")}>
+      <MModbus />
     </ErrorBoundary>
   ),
   aiExtPanel: (props: { params?: { extId?: string } }) => (

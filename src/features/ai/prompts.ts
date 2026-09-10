@@ -23,10 +23,11 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - 会话录制回放：录制数据会话存为 .usess 文件，在帧画布时间机器回放（进度点选跳转、多档倍速、按 M 打时间线标注）。
 - 控制画布：滑条/按钮/开关/LED/蜂鸣器/监视器/摇杆/键盘等卡片，另支持 group 组合控件（一张卡片集成滑条+按钮+开关+监视+LED 等多个子控件），命令模板串支持 %.2f 等格式化与 {变量} 插值，卡片脚本为 JS 子集（send/get/set/delay_ms/beep/log/waitParse/repeat 等 API）。
 - 命令库：分组树结构，命令可带脚本，拖拽排序。
-- 指令工厂：内置 WIT/匿名V7/Modbus RTU 编解码器，也支持自定义协议（分段式：固定字节/变量/长度/校验）。
+- 指令工厂：内置 WIT / 匿名V7 / Modbus RTU / Modbus TCP 编解码器（Modbus 覆盖 FC01–06 与 15/16 写多点，起始地址可直接抄 40001 这类手册编号自动换算），也支持自定义协议（分段式：固定字节/变量/长度/校验）。
+- Modbus 工作台面板（modbus）：两页——**模拟从站**（本机当从站应答总线：线圈/离散输入/保持寄存器/输入寄存器四张可编辑数据表，可设从站地址、应答延时、故障注入「不回应答 / 一律回异常码 / 隔一次回异常」，用于无硬件自测解码链路或陪跑真实主站）与**主站轮询表**（每行"从站+功能码+起始+数量+周期+变量名+元素序号+倍率"，按周期发读请求，响应值直接写进变量系统供曲线/表格/脚本引用；半双工保护：同一时刻只允许一条在途请求，1 秒无应答记一次超时）。帧格式 RTU/TCP 由用户选（RTU 可以跑在 TCP 隧道上，反过来不成立），TCP 只在网络接口下可用；从站与轮询互斥启动。两项服务都是**关掉面板仍在跑**，工具栏会显示绿色徽标。
 - 文件传输：控制台内置 XMODEM（xmodem/xmodem1k）/ YMODEM 协议，可向目标设备发送固件或文件。
 - 图传面板：TCP/UDP 网络视频流接入。
-- 变量系统：变量自动绑定启用模板的字段，帧到达时更新。
+- 变量系统：变量自动绑定启用模板的字段，帧到达时更新；Modbus 轮询项也按行名写入变量（可与模板字段共存，脚本与曲线统一按名引用）。
 术语：帧头=headerBytes，长度字段=lengthField 模式（lengthOffset/lengthSize/lengthEndian/lengthAdjust/lengthScale），识别位=帧内用于区分帧型的固定字节，协议簇=同一帧头家族下的多种帧型（如 WIT 的 55 59/55 53/55 52…），位掩码=headerMask/discMask（逐字节按位匹配，0xFF 精确、0x00 通配），字序=endian 四档（32 位量占两个 16 位寄存器时的字交换：ABCD/DCBA/CDAB/BADC），数组展开=spanTail+spanElem。`;
 
 /** 专用场景的精简功能清单（只保留面板名与一句话用途，控制 token） */
@@ -47,7 +48,8 @@ interface FieldDef { name: string; role: "header"|"addr"|"id"|"seq"|"length"|"da
 （scale/offsetValue：显示值 = 原始值 × scale + offsetValue，如 0.1℃ 分辨率的寄存器用 scale 0.1。bits 取字段内 bit 段（index 起始位、count 位数）。labels 是枚举注解：把协议手册里的"1=非法功能码 / 2=非法数据地址"照抄成 [{v:1,t:"非法功能码"},…]，表格与提示会显示"数字 + 文字"（数值通道仍是数字）——凡文档里出现取值含义表的状态码/错误码/模式字都要配上。spanTail+spanElem 表达「变长同类数组区」：该字段从 offset 一直跨到帧尾（自动扣除校验字节），按 spanElem 步长逐元素解码并展开成 名称1、名称2… 多个独立数值通道，此时 size 省略——Modbus 读寄存器响应、点阵/波形数据都用它。spanElem 取 "bit" 时按位展开（一位一通道、每字节低位在前，上限 64 位），Modbus FC01/02 读线圈响应与 FC15 写入区就该用 "bit" 而不是 uint8。csv 型用 csvDelim（默认 ","）+ csvType（默认 "float32"）把 ASCII 区拆成多通道）
 interface Template { name: string; boundary: Boundary; checksum: ChecksumCfg|null; fields: FieldDef[]; }
 约束：帧头/校验字节等已知字节不要建 data 字段覆盖；lengthAdjust = 帧总长 − 长度域值 × lengthScale（长度域本身就是字节数时省略 lengthScale，此时 adjust = 帧总长 − 长度域值）；仅依据给出的字节证据推断，不要编造。
-已知协议不要手写模板：判定为维特 WIT、匿名 V7、Modbus RTU/TCP、NMEA 0183、JustFloat 时，直接告诉用户到帧画布/协议模板的「内置预设」一键套用（Modbus RTU 预设已含 13 种帧型：掩码通配从站地址、FC01/02 位数换算、寄存器区自动展开、异常响应位掩码；Modbus TCP 预设已含 MBAP 定帧与主从方向区分），只在用户的设备用了非标准扩展帧型时才补模板。`;
+已知协议不要手写模板：判定为维特 WIT、匿名 V7、Modbus RTU/TCP、NMEA 0183、JustFloat 时，直接告诉用户到帧画布/协议模板的「内置预设」一键套用（Modbus RTU 预设已含 13 种帧型：掩码通配从站地址、FC01/02 位数换算、寄存器区自动展开、异常响应位掩码；Modbus TCP 预设已含 MBAP 定帧与主从方向区分），只在用户的设备用了非标准扩展帧型时才补模板。
+Modbus 没有硬件也能验证：让用户开「Modbus 工作台」面板——模拟从站会把本机变成一个可配数据区的从站（四张表 + 故障注入），主站轮询表则按周期发读请求并把值写成变量；两者互斥（自己问自己答会得出假健康），且关掉面板仍在运行（工具栏有绿色徽标）。用户说"没有 485 设备怎么测""想让软件自己回异常码试试"时用这个，而不是让他找硬件。`;
 
 export interface SceneRequest {
   scene: AiScene;
@@ -97,7 +99,7 @@ const ACTION_RULE = `【动作执行硬规则】当用户要求对软件本身�
 
 function schemaAction(): string {
   return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（与脚本 api.app 相同）：
-- openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/xray/ai）
+- openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/xray/modbus/ai）
 - applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video）
 - setTheme({"theme":"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
 - listProtocols()/listCommands()/listCards() 查询配置清单
@@ -107,6 +109,7 @@ function schemaAction(): string {
 - clearPage() 清空控制画布当前页【破坏性】；addPage({"name":"页名"}) 新建控制页；patchCard({"name":"卡名","patch":{…}}) 改卡片属性
 - removeCard({"name":"卡名"})/removeProtocol({"name":"模板名"})/removeCommand({"name":"命令名"})/removeCodec({"name":"协议名"}) 按名删除【破坏性】
 - openPort()/closePort() 开关连接（需发送权限）
+- modbus({"op":"…"}) Modbus 工作台（需脚本高权限，因为会主动占用总线发数据）：op 可选 status（查两边状态与统计）/ slave.start / slave.stop / slave.configure({address,anyAddress,delayMs,fault:"none"|"noReply"|"exception"|"everyOther",faultCode}) / slave.write({area:"coil"|"disc"|"holding"|"input",index,value}) / slave.writeMany({area,from,to,value,step}) / slave.resize({bits,words}) / poll.add({slave,fn:1|2|3|4,addr,qty,periodMs,varName,elem,scale}) / poll.remove({varName}) / poll.clear() / poll.configure({transport:"rtu"|"tcp"}) / poll.start / poll.stop / poll.reset。用户说"把 40003 设成 1234""每 500ms 读 1 号从站 10 个寄存器""模拟一个从站让它别应答/回异常码"时用这个，别让他手动点
 - toast({"msg":"文字"}) 显示通知
 - listWidgets() 查询已安装挂件（名称/启用/浮窗打开中/形态）；openWidget({"name":"挂件名"})/closeWidget({"name":"…"}) 开关应用内浮窗；popWidget({"name":"…"}) 弹出为独立桌面小窗（置顶常驻）
 - removeWidget({"name":"…"}) 删除挂件【破坏性】
@@ -176,7 +179,7 @@ function schemaScript(script: boolean): string {
 - api.toast(msg) → 右下角通知；api.getInfo() → {status,port,fields}
 - api.onChat(cb) → 感知 AI 助手对话状态 cb({phase:"thinking"|"streaming"|"idle"|"error",reasoningTail,textTail})，返回取消订阅；api.ask("问题") → 向 AI 助手提问（回答经 onChat 流式回来，受发送权限门控）
 - api.app.动作名({参数}) → 控制软件本身，返回 Promise<{ok,data?,err?}>。可用动作：
-  · openPanel({panel:"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/xray/ai）
+  · openPanel({panel:"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/xray/modbus/ai）
   · applyPreset({preset:"attitude"}) 切工作区预设（proto/analyze/attitude/console/video）
   · setTheme({theme:"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
   · listProtocols()/listCommands()/listCards() 获取现有配置清单

@@ -52,6 +52,8 @@ It is far more than a serial terminal that echoes characters. **Protocols need n
 
 ## Capabilities
 
+- **End-to-end industrial Modbus**: full RTU / TCP preset clusters out of the box, read responses expanded into `Register1..N`, coil areas unpacked one channel per bit, and exception codes carry their spec wording. The **Modbus Workbench** panel turns the machine into a virtual slave (editable data banks plus fault injection: never reply / reply a chosen exception code / reply delay) or a master that polls registers and coils on a schedule and writes the values straight into variables — **you can exercise the whole chain with no RS-485 hardware**
+
 ### Protocol parsing engine
 
 Select a run of bytes on the Hex stream, right-click and declare it as header, length field, discriminator, payload or checksum; field width grows with the type you pick. A frame header alone rarely tells frame types apart, so parsing uses two-stage recognition: any field can act as a discriminator matched against a multi-byte function code, and several templates parse the same stream in parallel without interfering. Headers and discriminators also match bit-by-bit through a per-byte mask, so a single template can cover every slave on an RS-485 bus.

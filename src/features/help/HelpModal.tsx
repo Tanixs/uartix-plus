@@ -136,7 +136,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>示例：对 AI 说「做一个无边框透明桌宠，眼睛跟随鼠标，AI 思考时冒问号，回答时气泡打字机，点击它能向 AI 提问，右键菜单里加『闹脾气』『睡觉』，串口断线时沮丧」。</li>
                   </ul>
                 </Section>
-                <Section title="脚本 api.app.*（27 种动作速查）">
+                <Section title="脚本 api.app.*（28 种动作速查）">
                   <table className="help-table">
                     <tbody>
                       <tr><td>界面控制</td><td>openPanel({"{"}panel{"}"}) · applyPreset({"{"}preset{"}"}) · setTheme({"{"}theme{"}"})</td></tr>
@@ -147,15 +147,22 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>删除</td><td>removeCard / removeProtocol / removeCommand / removeCodec / removeWidget（按 name）【破坏性】</td></tr>
                       <tr><td>挂件</td><td>openWidget / closeWidget / popWidget({"{"}name{"}"}) 浮窗管理与弹出桌面</td></tr>
                       <tr><td>连接</td><td>openPort() · closePort()（需开启「小部件可发送数据」）</td></tr>
+                      <tr><td>Modbus</td><td>modbus({"{"}op:"…"{"}"}) 操作工作台：<code>status</code> · <code>slave.start/stop/configure/write/writeMany/resize</code> · <code>poll.add/remove/clear/configure/start/stop/reset</code>（需脚本高权限，会占用总线发数据）</td></tr>
                       <tr><td>通知</td><td>toast({"{"}msg{"}"})</td></tr>
                     </tbody>
                   </table>
-                  <pre>{`// 脚本示例：每天首次收到数据时自动切到分析布局
+                  <pre>{`// 脚本示例：首次收到数据时自动切到分析布局
 api.app.applyPreset({ preset: "analyze" });
 await api.app.openPanel({ panel: "plot2d" });
 const protos = await api.app.listProtocols();
 console.log(protos.length);`}</pre>
-                  <p className="help-tip">小部件/自定义卡片内通过 postMessage 桥 {"{"}type:"aiw:app", action:{"{"}kind,args{"}"}{"}"} 调用同一套动作（不含破坏性动作）。</p>
+                  <pre>{`// 脚本示例：本机当从站（40003=1234），再用主站轮询读回来画曲线
+await api.app.modbus({ op: "slave.configure", address: 1 });
+await api.app.modbus({ op: "slave.write", area: "holding", index: 2, value: 1234 });
+await api.app.modbus({ op: "slave.start" });
+await api.app.modbus({ op: "poll.add", slave: 1, fn: 3, addr: 0, qty: 3, periodMs: 500, varName: "MB温度" });
+await api.app.modbus({ op: "poll.start" });`}</pre>
+                  <p className="help-tip">小部件/自定义卡片内通过 postMessage 桥 {"{"}type:"aiw:app", action:{"{"}kind,args{"}"}{"}"} 调用同一套动作（不含破坏性动作与 modbus）。</p>
                 </Section>
                 <Section title="常用诉求 → 一句话指令">
                   <table className="help-table">
@@ -198,6 +205,8 @@ console.log(protos.length);`}</pre>
                     <tr><td>图传</td><td>把每帧数据渲染为画面：暂停/回看/保存帧、镜像翻转、缩放拖动；「解析设置」定义帧定界方式</td></tr>
                     <tr><td>控制画布</td><td>拖拽部署滑条/按钮/开关/LED/蜂鸣器等控件向下位机发指令；拖动时虚线幽灵框指示落点，松手只会落到空格</td></tr>
                     <tr><td>控制台</td><td>原始收发日志（时间戳彩色），可发 ASCII/Hex、发送文件、录制日志；上方快捷指令栏一键发送，指令工厂可组各协议帧</td></tr>
+                    <tr><td>结构发现</td><td>未知协议考古：对原始字节做周期/帧头统计推断，勾选帧型一键批量生成模板</td></tr>
+                    <tr><td>Modbus 工作台</td><td>模拟从站（本机当从站应答，四张可编辑数据表 + 故障注入）与主站轮询表（按周期读寄存器/线圈，值直接写成变量）；关掉面板仍在运行，工具栏有绿色徽标</td></tr>
                     <tr><td>AI 助手</td><td>AI 调试助手：协议识别、数据解读、曲线分析、指令/卡片生成、诊断排查、调试报告；Ctrl+K 唤起浮窗，可停靠为面板（+面板 可添加）</td></tr>
                   </tbody>
                 </table>
@@ -206,6 +215,15 @@ console.log(protos.length);`}</pre>
             )}
             {tab === "canvas" && (
               <>
+                <Section title="Modbus 工作台：没有硬件也能测">
+                  <p>面板分两页，<b>同一时刻只能开一页的服务</b>（自己问自己答会得出"设备健康"的假象）：</p>
+                  <ul className="help-ol">
+                    <li><b>模拟从站</b>：设本机从站地址（也可"应答所有地址"当多从站），四张数据表就是被读的内容——线圈/离散输入点位格子点击翻转，保持/输入寄存器直接填数（可切 HEX，悬停显示 4x 手册编号）。<b>故障注入</b>可让它不回应答（复现主站超时）、一律回某异常码、或隔一次回一次异常；还能加应答延时模拟慢速从站。主站写进来的值会实时反映在表里。</li>
+                    <li><b>主站轮询</b>：一行 = 问谁、用什么功能码、起始地址、数量、周期、值写进哪个变量（还能指定取第几个元素与倍率）。响应解析在这里完成，<b>不需要再配协议模板</b>，变量直接可画曲线、进表格、被脚本读。半双工保护：一条请求没回应答前不会发下一条，1 秒无应答记一次超时。</li>
+                    <li><b>帧格式</b>：RTU 与 TCP 是<b>帧格式</b>选择而不是接口选择——RTU 完全可以跑在 TCP 串口隧道上，反之不成立，所以 Modbus TCP 只在网络接口下可用。</li>
+                    <li><b>自环演示</b>：两台实例（或一台跑从站、另一台跑轮询）接在同一对串口/网络上即可对打；也可用「指令工厂 → Modbus RTU」手发一条请求看从站应答。</li>
+                  </ul>
+                </Section>
                 <Section title="协议簇">
                   <p>一个协议可含多个帧型（如匿名 V7 的 22 种功能码）：左侧列表一行代表整簇，点行选中，点行首箭头展开帧型；簇内右键可复制/粘贴帧型。画布顶部页签与左侧联动。</p>
                 </Section>

@@ -188,6 +188,17 @@ describe("从站数据区应答", () => {
     expect([0, 1, 2].map((i) => bitGet(b.coils, i))).toEqual([1, 0, 1]);
   });
 
+  it("写单线圈只看 FF00/0000（值在高字节，读错字节位方向就反了）", () => {
+    const b = makeBanks(64, 64);
+    const on = answerPdu(b, 1, [0x05, 0x00, 0x02, 0xff, 0x00]);
+    expect(on.kind).toBe("response");
+    expect(bitGet(b.coils, 2)).toBe(1);
+    expect(answerPdu(b, 1, [0x05, 0x00, 0x03, 0x00, 0x00]).kind).toBe("response");
+    expect(bitGet(b.coils, 3)).toBe(0);
+    // 非法强制值（规范只允许 FF00/0000）→ 异常 02
+    expect(answerPdu(b, 1, [0x05, 0x00, 0x04, 0x12, 0x34])).toEqual({ kind: "exception", code: 2 });
+  });
+
   it("未知功能码回 01、越界回 02、广播读静默、广播写执行不答", () => {
     const b = makeBanks(64, 64);
     expect(answerPdu(b, 1, [0x2b, 0, 0, 0, 1])).toEqual({ kind: "exception", code: 1 });

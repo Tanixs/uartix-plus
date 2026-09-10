@@ -5,6 +5,7 @@ import * as sessionStore from "../session/sessionStore";
 import { useSettings } from "../settings/settingsStore";
 import { t, tx } from "../../i18n/strings";
 import { IconChevron } from "../../shared/icons";
+import { ModbusBadge } from "../modbus/ModbusBadge";
 
 const BAUDS = [
   1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600,
@@ -165,6 +166,8 @@ export function SerialToolbar() {
         <option value={1}>1</option>
         <option value={2}>2</option>
       </select>
+      {/* Modbus 服务在跑就必须看得见（面板可能已关） */}
+      <ModbusBadge />
     </div>
   );
 }

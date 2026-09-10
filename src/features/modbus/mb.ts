@@ -400,9 +400,12 @@ export function answerPdu(banks: MbBanks, slave: number, pdu: number[]): MbOutco
       return { kind: "response", pdu: readResponsePdu(fn, data) };
     }
     case 0x05: {
-      if (pdu[4] !== 0x00 && pdu[4] !== 0xff) return { kind: "exception", code: EX_ILLEGAL_ADDRESS };
+      // 强制值必须是 FF00 / 0000（规范），FF00=闭合
+      if (pdu[3] !== 0xff || pdu[4] !== 0x00) {
+        if (!(pdu[3] === 0x00 && pdu[4] === 0x00)) return { kind: "exception", code: EX_ILLEGAL_ADDRESS };
+      }
       if (!inRange(banks, "coil", addr, 1)) return { kind: "exception", code: EX_ILLEGAL_ADDRESS };
-      bitSet(banks.coils, addr, pdu[4] === 0xff);
+      bitSet(banks.coils, addr, pdu[3] === 0xff);
       return echoOrSilent([fn, pdu[1], pdu[2], pdu[3], pdu[4]]);
     }
     case 0x06: {
