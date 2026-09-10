@@ -139,9 +139,12 @@ jobs:
           # 它会当作"没找到"再建一个新草稿 —— 重复草稿正是这么产生的。
           # 给了 releaseId 则完全旁路查找/创建，直接往指定 release 传资产。
           releaseId: ${{ needs.create-release.outputs.id }}
-          # 以下仅作为 releaseId 缺失时的兜底（届时才会按 tag 查找/创建）
-          tagName: v__VERSION__
-          releaseName: "Uartix+ v__VERSION__"
+          # tagName 必须传**真实 tag**：v0.3.8 事故——传 v__VERSION__ 模板时，
+          # tauri-action（浮动 @v0）在 releaseId 路径下不替换模板，latest.json
+          # 的平台 URL 带着字面量 v__VERSION__ 发布，老版本自动更新 404。
+          # create-release 已从 tauri.conf.json 解析出真实 tag，直接用。
+          tagName: ${{ needs.create-release.outputs.tag }}
+          releaseName: "Uartix+ ${{ needs.create-release.outputs.tag }}"
           releaseBody: "见 docs/RELEASE_NOTES。"
           releaseDraft: true
           prerelease: false

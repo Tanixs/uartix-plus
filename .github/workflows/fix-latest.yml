@@ -1,0 +1,58 @@
+name: Fix latest.json updater URLs
+
+# 一次性修复工具（可重复使用）：v0.3.8 发现 tauri-action（浮动 @v0）在
+# releaseId 路径下不再替换 tagName 模板，latest.json 的平台 URL 带着字面量
+# v__VERSION__ 发布，老版本自动更新会 404。本 workflow 下载该资产、改写、
+# 重传（--clobber 覆盖同名）。无问题时空跑退出，幂等。
+# 根因已在 release.yml 修复（tagName 直接传 create-release 的输出）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rewrite v__VERSION__ in latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="v$(jq -r .version src-tauri/tauri.conf.json)"
+
+          ASSET_ID=$(gh api "/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq '.assets[] | select(.name == "latest.json") | .id')
+          if [ -z "${ASSET_ID:-}" ]; then
+            echo "::error::${TAG} 下没有 latest.json 资产"
+            exit 1
+          fi
+
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+            -H "Accept: application/octet-stream" > latest.orig.json
+
+          if ! grep -q 'v__VERSION__' latest.orig.json; then
+            echo "latest.json 无 v__VERSION__ 残留，无需修复"
+            exit 0
+          fi
+
+          sed "s|v__VERSION__|${TAG}|g" latest.orig.json > latest.fixed.json
+          echo "--- 修复后的平台 URL ---"
+          grep -o '"url": *"[^"]*"' latest.fixed.json | head -8
+
+          gh release upload "$TAG" latest.fixed.json --clobber
+          echo "fixed latest.json uploaded for ${TAG}"
+
+          # 复核：重新下载确认已无残留
+          gh api "/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" \
+            -H "Accept: application/octet-stream" > latest.verify.json
+          if grep -q 'v__VERSION__' latest.verify.json; then
+            echo "::error::修复后仍检测到 v__VERSION__，请人工检查"
+            exit 1
+          fi
+          echo "verified: no v__VERSION__ left"
