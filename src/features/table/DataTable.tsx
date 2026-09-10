@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import type { FrameRow } from "../../ipc/types";
+import type { FrameRow, ValueLabel } from "../../ipc/types";
 import * as framesStore from "./framesStore";
+import { labeledValue } from "../../shared/valueLabels";
 import * as templateStore from "../protocol/templateStore";
 import { presetGroupKey, groupDisplayName } from "../framecanvas/presets";
 import { ColumnTreeMenu, type ColGroup } from "./ColumnTreeMenu";
@@ -123,6 +124,13 @@ export function DataTable() {
     ];
   }, [fieldColsAll, hiddenCols]);
 
+  /** 值标签索引（字段 id → 标签表）：只收录配了标签的字段，单元格按值附注文字 */
+  const labelById = useMemo(() => {
+    const m = new Map<string, ValueLabel[]>();
+    for (const t of templates) for (const f of t.fields) if (f.labels?.length) m.set(f.id, f.labels);
+    return m;
+  }, [templates]);
+
   const toggleCol = (key: string) => {
     setHiddenCols((prev) => {
       const next = new Set(prev);
@@ -223,7 +231,8 @@ export function DataTable() {
     if (key === "valid") return r.valid ? "OK" : "ERR";
     const f = r.fields.find((x) => x.id === key);
     if (!f) return "–";
-    return f.text !== null ? f.text : fmtNum(f.value);
+    if (f.text !== null) return f.text;
+    return labeledValue(labelById.get(key), f.value, fmtNum);
   };
 
   const doExport = async (kind: "csv" | "xlsx") => {
@@ -244,7 +253,12 @@ export function DataTable() {
         ...fieldCols.map((c) => {
           const f = r.fields.find((x) => x.id === c.key);
           if (!f) return "";
-          return f.text !== null ? f.text : Number(f.value.toFixed(6));
+          if (f.text !== null) return f.text;
+          // 导出同样带上值标签（异常码等枚举量在 Excel 里直接可读）
+          const lb = labelById.has(c.key)
+            ? labeledValue(labelById.get(c.key), f.value, (n) => String(n))
+            : "";
+          return lb || Number(f.value.toFixed(6));
         }),
       ]),
     ];

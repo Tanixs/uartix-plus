@@ -1,4 +1,4 @@
-import type { FieldDef, FrameTemplate } from "../../ipc/types";
+import type { FieldDef, FrameTemplate, ValueLabel } from "../../ipc/types";
 import { getGroupMeta, importTemplates } from "../protocol/templateStore";
 
 export interface PresetDef {
@@ -133,6 +133,18 @@ const C_FG = "#f0883e";
  */
 const MB_CRC = { algo: "crc16_modbus", coverageStart: 0, coverageEnd: -2, endian: "little" } as const;
 
+/** Modbus 规范异常码 → 文字（表格/提示/导出直接把码翻译成原因，无需翻手册） */
+const MB_EXCEPTION_LABELS: ValueLabel[] = [
+  { v: 1, t: "非法功能码" },
+  { v: 2, t: "非法数据地址" },
+  { v: 3, t: "从站设备故障" },
+  { v: 4, t: "响应确认（处理中）" },
+  { v: 5, t: "从站设备忙" },
+  { v: 8, t: "存储奇偶校验错误" },
+  { v: 10, t: "网关路径不可用" },
+  { v: 11, t: "网关目标无响应" },
+];
+
 function mbHead(): FieldDef[] {
   return [
     f("设备地址", "addr", 0, "uint8", C_ADDR),
@@ -188,7 +200,8 @@ function mbCoil(fc: number, name: string, color: string): FrameTemplate {
     fields: [
       ...mbHead(),
       f("位数", "length", 2, "uint8", C_LEN),
-      f("线圈字节", "data", 3, "uint8", C_DATA, { spanTail: true, spanElem: "uint8" }),
+      // 线圈/离散输入按位展开：一个位一个通道（低位在前），线圈1..线圈N
+      f("线圈", "data", 3, "uint8", C_DATA, { spanTail: true, spanElem: "bit" }),
     ],
   };
 }
@@ -250,7 +263,19 @@ function mbWriteMulti(
       f("起始地址", "data", 2, "uint16", C_LEN, { endian: "big" }),
       f("数量", "data", 4, "uint16", C_LEN, { endian: "big" }),
       f("字节数", "length", 6, "uint8", C_LEN),
-      f("写入数据", "data", 7, elem, C_DATA, { endian: "big", spanTail: true, spanElem: elem }),
+      f(
+        elem === "uint16" ? "写入寄存器" : "写入线圈",
+        "data",
+        7,
+        elem,
+        C_DATA,
+        {
+          endian: "big",
+          spanTail: true,
+          // FC15 的写入区是位打包的线圈，按位展开；FC16 按 16 位寄存器展开
+          spanElem: elem === "uint16" ? "uint16" : "bit",
+        },
+      ),
     ],
   };
 }
@@ -278,7 +303,7 @@ function mbException(): FrameTemplate {
     fields: [
       f("设备地址", "addr", 0, "uint8", C_ADDR),
       f("异常功能码", "id", 1, "uint8", C_ID),
-      f("异常码", "data", 2, "uint8", "#e5534b"),
+      f("异常码", "data", 2, "uint8", "#e5534b", { labels: MB_EXCEPTION_LABELS }),
     ],
   };
 }
@@ -347,10 +372,11 @@ function mbTcpCluster(): FrameTemplate[] {
   ];
   const regs = (lbl: string, elem: "uint16" | "uint8", lenOff: number): FieldDef[] => [
     f(lbl, "length", lenOff, "uint8", C_LEN),
-    f(elem === "uint16" ? "寄存器" : "线圈字节", "data", lenOff + 1, elem, C_DATA, {
+    f(elem === "uint16" ? "寄存器" : "线圈", "data", lenOff + 1, elem, C_DATA, {
       endian: "big",
       spanTail: true,
-      spanElem: elem,
+      // 线圈区按位展开（一位一通道），寄存器区按 16 位字展开
+      spanElem: elem === "uint16" ? "uint16" : "bit",
     }),
   ];
   return [
@@ -384,7 +410,7 @@ function mbTcpCluster(): FrameTemplate[] {
     mbTcp(0x0f, "写多个线圈回显", "#8957e5", startQty("起始地址", "数量"), MBTCP_LEN_DISC_EVEN),
     mbTcp(0x10, "写多个寄存器回显", "#6e40c9", startQty("起始地址", "数量"), MBTCP_LEN_DISC_EVEN),
     // 异常响应：功能码位掩码 bit7（长度 3，奇偶已被功能码约束覆盖）
-    mbTcp(0x80, "异常响应", "#e5534b", [f("异常码", "data", 8, "uint8", "#e5534b")], null),
+    mbTcp(0x80, "异常响应", "#e5534b", [f("异常码", "data", 8, "uint8", "#e5534b", { labels: MB_EXCEPTION_LABELS })], null),
   ];
 }
 
@@ -574,7 +600,8 @@ export const PRESETS: PresetDef[] = [
       "Modbus RTU 全簇（FC01–06 / 15 / 16 的请求·响应·回显 + 任意功能码异常响应）：" +
       "帧头写 `?? FC` —— 首字节通配 = 总线上任意从站（含广播 0）都能解，不必逐台改地址。" +
       "读响应按 byteCount 定长并把寄存器区展开成 寄存器1..N（大端 uint16，可绘图/脚本引用）；" +
-      "读线圈响应按「位数」换算字节数（倍率 0.125）。CRC16-Modbus 小端已内置，" +
+      "读线圈响应按「位数」换算字节数（倍率 0.125）并把线圈区按位展开成 线圈1..N（0/1 一通道，低位在前）。" +
+      "异常码自带规范文字（如 2 → 非法数据地址）。CRC16-Modbus 小端已内置，" +
       "主站请求与从站响应共用功能码，由引擎跨模板互相解释、不再产生噪声坏帧。",
     build: () => [
       // —— 读响应：长度域 = 字节数，总长 = 字节数 + 5（地址+FC+BC+CRC2）——
@@ -605,7 +632,7 @@ export const PRESETS: PresetDef[] = [
     desc:
       "Modbus TCP（端口 502）全簇：MBAP 帧头用 `?? ?? 00 00` 锚定协议标识，" +
       "按 MBAP 长度定帧（总长 = 长度值 + 6），事务号/单元地址/功能码全部解出，" +
-      "读响应把寄存器区展开为 寄存器1..N。TCP 没有 CRC，主站请求与从站响应靠" +
+      "读响应把寄存器区展开为 寄存器1..N、线圈区按位展开为 线圈1..N。TCP 没有 CRC，主站请求与从站响应靠" +
       "「MBAP 长度奇偶」精确区分（请求恒 6、响应为 3+2N），" +
       "因此嗅探网关、PLC 与上位机对话时不会互相误判；异常响应用功能码 bit7 掩码一条覆盖。",
     build: () => mbTcpCluster(),

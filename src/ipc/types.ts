@@ -155,6 +155,12 @@ export interface BitsCfg {
   count: number;
 }
 
+/** 值标签（枚举注解）：解码值命中 v 时，显示层附一条文字说明 */
+export interface ValueLabel {
+  v: number;
+  t: string;
+}
+
 export interface FieldDef {
   id: string;
   name: string;
@@ -173,7 +179,12 @@ export interface FieldDef {
   csvType?: string | null;
   disc?: number[] | null;
   spanTail?: boolean | null;
+  /** 数组区元素类型（uint8/int8/uint16/int16/uint32/int32/float32/float64）；
+   *  特殊值 "bit" = 按位展开（一位一通道，低位在前），用于 Modbus FC01/02 线圈区 */
   spanElem?: string | null;
+  /** 值标签（枚举注解）：解码值命中 v 时，表格/提示/导出在数字后附文字（如异常码 2 → 非法数据地址）。
+   *  纯显示层能力：数值通道、变量、曲线仍用原始数字 */
+  labels?: ValueLabel[] | null;
 }
 
 export interface FrameTemplate {

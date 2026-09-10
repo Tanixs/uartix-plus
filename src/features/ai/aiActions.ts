@@ -1,11 +1,13 @@
 import type {
   Boundary,
   ChecksumAlgo,
+  DiscSpec,
   Endian,
   FieldDef,
   FieldRole,
   FieldType,
   FrameTemplate,
+  ValueLabel,
 } from "../../ipc/types";
 import * as templateStore from "../protocol/templateStore";
 import * as commandStore from "../controls/commandStore";
@@ -66,6 +68,22 @@ function toInt(v: unknown): number | null {
   return Number.isFinite(n) ? Math.round(n) : null;
 }
 
+/** 值标签数组清洗：[{v,t}] 保留合法条目（上限 64 条），非法输入按"无标签"处理 */
+function normLabels(v: unknown): ValueLabel[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: ValueLabel[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const val = toInt(o.v);
+    const text = typeof o.t === "string" ? o.t.trim() : "";
+    if (val === null || !text) continue;
+    out.push({ v: val, t: text });
+    if (out.length >= 64) break;
+  }
+  return out.length > 0 ? out : null;
+}
+
 export interface WriteResult {
   ok: boolean;
   msg: string;
@@ -96,6 +114,26 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
   };
   const headerMask = normMask(b.headerMask);
 
+  // 识别位：帧内某偏移处的固定字节（可带位掩码），用于同帧头家族内区分帧型
+  const toDisc = (v: unknown): DiscSpec | null => {
+    if (!v || typeof v !== "object") return null;
+    const d = v as Record<string, unknown>;
+    const off = toInt(d.offset);
+    const val = toBytes(d.value);
+    if (off === null || off < 0 || !val || val.length === 0) return null;
+    return { offset: off, value: val, mask: normMask(d.mask) };
+  };
+  const discList: DiscSpec[] = [];
+  if (Array.isArray(b.discs)) {
+    for (const d of b.discs) {
+      const one = toDisc(d);
+      if (one) discList.push(one);
+    }
+  }
+  const single = toDisc({ offset: b.discOffset, value: b.discValue, mask: b.discMask });
+  if (single) discList.unshift(single);
+  const discs = discList.length > 0 ? discList : null;
+
   let boundary: Boundary;
   if (mode === "fixedLength") {
     boundary = {
@@ -104,6 +142,7 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
       headerMask,
       fixedLength: toInt(b.fixedLength) ?? headerBytes.length + 8,
       maxLength: toInt(b.maxLength) ?? 512,
+      discs,
     };
   } else if (mode === "lengthField") {
     boundary = {
@@ -119,6 +158,7 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
           ? b.lengthScale
           : null,
       maxLength: toInt(b.maxLength) ?? 512,
+      discs,
     };
   } else {
     boundary = {
@@ -127,6 +167,7 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
       headerMask,
       footerBytes: toBytes(b.footerBytes) ?? [0x0d, 0x0a],
       maxLength: toInt(b.maxLength) ?? 512,
+      discs,
     };
   }
 
@@ -153,6 +194,9 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
     const role = FIELD_ROLES.includes(f.role as FieldRole) ? (f.role as FieldRole) : "data";
     const offset = toInt(f.offset);
     if (!type || offset === null || offset < 0) continue;
+    const br = (f.bits ?? {}) as Record<string, unknown>;
+    const bitIndex = toInt(br.index);
+    const bitCount = toInt(br.count);
     fields.push({
       id: crypto.randomUUID(),
       name: typeof f.name === "string" && f.name.trim() ? f.name.trim() : `字段${fields.length + 1}`,
@@ -165,10 +209,20 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
       offsetValue:
         typeof f.offsetValue === "number" && Number.isFinite(f.offsetValue) ? f.offsetValue : null,
       unit: typeof f.unit === "string" ? f.unit : null,
+      // 值标签（枚举注解）：AI 读协议手册里的"1=非法功能码"这类表就落到这里
+      labels: normLabels(f.labels),
+      // bits 型取字段内的 bit 段；csv 型拆分文本区为多通道（两者缺省由引擎兜底）
+      bits:
+        bitIndex !== null && bitCount !== null && bitCount > 0
+          ? { index: bitIndex, count: bitCount }
+          : null,
+      csvDelim: typeof f.csvDelim === "string" && f.csvDelim ? f.csvDelim : null,
+      csvType: FIELD_TYPES.includes(f.csvType as FieldType) ? String(f.csvType) : null,
       // 数值数组（Modbus 寄存器区等）：跨到帧尾（扣除校验域）按元素步长展开
       spanTail: f.spanTail === true ? true : null,
       spanElem:
-        typeof f.spanElem === "string" && FIELD_TYPES.includes(f.spanElem as FieldType)
+        typeof f.spanElem === "string" &&
+        (f.spanElem === "bit" || FIELD_TYPES.includes(f.spanElem as FieldType))
           ? (f.spanElem as string)
           : null,
       color: templateStore.PALETTE[fields.length % templateStore.PALETTE.length],

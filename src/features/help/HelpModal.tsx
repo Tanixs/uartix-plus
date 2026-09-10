@@ -31,7 +31,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 <Section title="五步上手">
                   <ol className="help-ol">
                     <li>标题条选择<code>数据接口</code>（串口 / TCP 客户端 / TCP 服务端 / UDP），在工具栏完成参数设置后点击<code>连接</code>。</li>
-                    <li>左侧<code>协议模板</code>面板点<code>＋ 预设</code>，导入一个协议（如 匿名 V7 或 维特 WIT）；也可<code>＋ 新建</code>自己画。</li>
+                    <li>左侧<code>协议模板</code>面板点<code>＋ 预设</code>，导入一个协议（如 匿名 V7、维特 WIT、Modbus RTU / TCP）；也可<code>＋ 新建</code>自己画。</li>
                     <li>没有设备？点左下角<code>启动演示源</code>，软件会生成混合协议数据流。</li>
                     <li>中央<code>帧画布</code>查看每帧的字节结构（绿色=字段、橙=帧头、粉=校验），悬停可看数值。</li>
                     <li>底部<code>2D 曲线</code>点亮字段图例的眼睛即可实时绘图；<code>数据表格</code>查看帧列表。</li>
@@ -223,6 +223,20 @@ console.log(protos.length);`}</pre>
                 <Section title="自适应文本帧（JustFloat 式）">
                   <p><code>＋ 新建 → 自适应文本帧</code>：设分隔符（, \ ;）与元素类型（float/uint8…），按每帧实际段数动态生成 通道1…通道N，各通道可单独绘图、供脚本引用。</p>
                 </Section>
+                <Section title="Modbus RTU / TCP 抓包">
+                  <p><code>＋ 预设 → Modbus RTU / Modbus TCP</code> 一次导入整簇帧型（RTU 13 种 / TCP 15 种），无需自己画：</p>
+                  <ul className="help-ol">
+                    <li><b>整条总线一次收</b>：帧头写成 <code>?? FC</code>——首字节位掩码 0x00 = 通配，任意从站地址（含广播 0）都能解，不必逐台改模板。</li>
+                    <li><b>寄存器区自动展开</b>：读响应按 byteCount 定帧，数据区按大端 uint16 展开为 <code>寄存器1..N</code>，每个都是可绘图、可脚本引用的数值变量。</li>
+                    <li><b>线圈按位展开</b>：FC01/02 的长度域是「位数」，引擎按 0.125 倍率换算字节数，并把线圈区逐位展开为 <code>线圈1..N</code>（0/1 一通道，每字节低位在前）。</li>
+                    <li><b>异常直接可读</b>：异常响应用 <code>FC &amp; 0x80</code> 位掩码一条覆盖所有功能码，异常码自带规范文字（表格显示 <code>2 非法数据地址</code>）。</li>
+                    <li><b>TCP 无 CRC 也能分主从</b>：MBAP 长度域的奇偶就是方向标识（请求恒 6＝偶、响应 3+2N＝奇），嗅探 502 端口时主站请求与从站响应不会互相误判。</li>
+                    <li><b>RS485 注意</b>：抓 485 半双工总线要把 USB 转串口接在<b>总线两端之外</b>（或用带接收的监听头），并注意 A/B 线反接时字节全是垃圾；3.5 字符静默在 USB 转串口上不可靠，因此本软件按<b>长度域 + CRC</b> 定帧，不依赖帧间隔。主站轮询与从站应答共用功能码，两条模板同时命中属正常，引擎会按有效行覆盖关系自动去掉噪声坏帧。</li>
+                  </ul>
+                </Section>
+                <Section title="值标签（枚举注解）">
+                  <p>字段属性里的<code>值标签</code>把状态码翻译成文字：填 <code>0=就绪; 1=运行; 2=故障</code>（支持 <code>0x</code> 十六进制），命中时数据表格、帧画布悬停、图例与 CSV/Excel 导出都会显示「数字 文字」。这是纯显示层能力——数值通道、曲线、变量、脚本仍拿到原始数字。</p>
+                </Section>
                 <Section title="骨架编辑">
                   <p>选中一个模板但还没有收到匹配数据时，画布显示骨架格（按模板定义推算长度）——此时就能框选定义字段；协议完全匹配后格子才切换为真实数据。帧头/帧尾格固定显示模板字节。</p>
                 </Section>
@@ -357,20 +371,24 @@ else send("RGT:" + phase);`}</pre>
                       <tr><td>presetKey / groupKey</td><td>预设协议标识（自建为 null）/ 自建簇的分组 key</td></tr>
                       <tr><td>boundary.mode</td><td>定界方式：fixedLength 定长 / lengthField 长度域 / footer 帧尾</td></tr>
                       <tr><td>boundary.headerBytes</td><td>帧头同步字节数组，如 [170, 85]（即 AA 55）</td></tr>
+                      <tr><td>boundary.headerMask</td><td>帧头逐字节位掩码（与 headerBytes 等长）：按 <code>(字节 &amp; mask) == (值 &amp; mask)</code> 匹配，0xFF 精确 / 0x00 通配。省略即全精确。用于「任意从站地址」「任意异常功能码（bit7=1）」这类通配帧头</td></tr>
                       <tr><td>boundary.fixedLength</td><td>定长模式的帧总长（字节）</td></tr>
-                      <tr><td>boundary.lengthOffset / lengthSize / lengthEndian / lengthAdjust</td><td>长度域模式的：域偏移 / 位宽 / 字节序 / 修正值（总帧长 = 原始值 + 修正）</td></tr>
+                      <tr><td>boundary.lengthOffset / lengthSize / lengthEndian / lengthAdjust</td><td>长度域模式的：域偏移 / 位宽 / 字节序 / 修正值（总帧长 = 原始值 × 倍率 + 修正）</td></tr>
+                      <tr><td>boundary.lengthScale</td><td>长度域倍率（缺省 1）：长度域计的是「位数」等非常规单位时换算，如 Modbus FC01/02 读线圈响应 = ⌈位数/8⌉ 字节 → 0.125</td></tr>
                       <tr><td>boundary.footerBytes</td><td>帧尾模式：帧尾字节序列</td></tr>
                       <tr><td>boundary.maxLength</td><td>安全上限，超长候选帧直接丢弃重新同步</td></tr>
-                      <tr><td>boundary.discs</td><td>帧识别字段列表：{"{ offset, value: number[] }"}，用于同簇多帧型筛选</td></tr>
+                      <tr><td>boundary.discs</td><td>帧识别字段列表：{"{ offset, value: number[], mask?: number[] }"}，用于同簇多帧型筛选；mask 同上可只比较某些 bit</td></tr>
                       <tr><td>checksum.algo</td><td>none / sum8 / sumadd / xor8 / crc16_modbus / crc16_ccitt / crc32</td></tr>
                       <tr><td>checksum.coverageStart / coverageEnd</td><td>校验覆盖区间；正数=帧头偏移，负数=距帧尾（-1 = 不含最后 1 字节）</td></tr>
                       <tr><td>checksum.endian</td><td>校验值存储字节序：little / big</td></tr>
                       <tr><td>fields[].role</td><td>header / addr / id / seq / length / data / payload / checksum / checksum2 / footer</td></tr>
                       <tr><td>fields[].type</td><td>uint8 / int8 / uint16 / int16 / uint32 / int32 / float32 / float64 / ascii / bcd / bits / csv</td></tr>
-                      <tr><td>fields[].offset / endian</td><td>帧内字节偏移 / 解析字节序</td></tr>
+                      <tr><td>fields[].offset / endian</td><td>帧内字节偏移（负数=距帧尾）/ 解析字节序：little(DCBA) / big(ABCD) / big-word-swap(CDAB) / little-word-swap(BADC)，后两档用于 32 位量占两个 16 位寄存器的协议</td></tr>
                       <tr><td>fields[].scale / offsetValue / unit</td><td>物理值 = 原始值 × scale + offsetValue；unit 为显示单位</td></tr>
+                      <tr><td>fields[].labels</td><td>值标签（枚举注解）：{"[{ v: 2, t: \"非法数据地址\" }]"}。命中时表格 / 悬停 / 导出显示「数字 文字」，数值通道与曲线仍用原始数字（属性面板「值标签」框可填 <code>2=非法数据地址</code>，多条用分号或换行分隔）</td></tr>
                       <tr><td>fields[].disc</td><td>帧识别值（本字段偏移处应有的固定字节串）</td></tr>
                       <tr><td>fields[].bits / csvDelim / csvType</td><td>位域：{"{ index, count }"}；文本帧：分隔符 / 元素类型</td></tr>
+                      <tr><td>fields[].spanTail / spanElem</td><td>变长数组区：延伸至载荷尾（自动扣除校验域）+ 元素类型（uint8…float64），输出 <code>名称1..N</code> 数值变量；<code>spanElem: "bit"</code> 表示按位展开（一位一通道、每字节低位在前，如 Modbus 线圈区）</td></tr>
                     </tbody>
                   </table>
                   <pre>{`{

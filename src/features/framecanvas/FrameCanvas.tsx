@@ -20,6 +20,7 @@ import * as telemetryStore from "../protocol/telemetryStore";
 import { fieldSize, PALETTE, CHECKSUM_SIZES } from "../protocol/templateStore";
 import { groupDisplayName, presetGroupKey } from "./presets";
 import { parseHexBytes } from "../../shared/hexBytes";
+import { labeledValue } from "../../shared/valueLabels";
 import { getLocale, tx, useLocale } from "../../i18n/strings";
 import {
   PAD_T,
@@ -844,7 +845,10 @@ function FrameCanvas() {
           ctx.font = `9.5px system-ui,sans-serif`;
           ctx.textAlign = "right";
           if (wRun >= 100) {
-            const valTxt = lv && lv.valid ? lv.text ?? String(round4(lv.value)) : null;
+            const valTxt =
+              lv && lv.valid
+                ? lv.text ?? (fd ? labeledValue(fd.labels, lv.value, (n) => String(round4(n))) : String(round4(lv.value)))
+                : null;
             if (valTxt && ctx.measureText(valTxt).width <= wRun - 10) {
               ctx.fillStyle = hexA(blk.color, dark ? 0.95 : 0.88);
               ctx.fillText(valTxt, x1 - 5, yTop + 9);
@@ -1011,7 +1015,11 @@ function FrameCanvas() {
       field && field.spanTail && (field.role === "data" || field.role === "payload")
         ? `<div class="fc-tip-row"><span>${tx("说明", "Note")}</span><b>${
             field.spanElem
-              ? `${tx("自适应变长", "Adaptive span")} · ${field.spanElem.toUpperCase()} ${ENDIAN_LABEL[field.endian] ?? "LE"}`
+              ? `${tx("自适应变长", "Adaptive span")} · ${field.spanElem.toUpperCase()}${
+                  field.spanElem === "bit"
+                    ? ` ${tx("低位在前", "LSB first")}`
+                    : ` ${ENDIAN_LABEL[field.endian] ?? "LE"}`
+                }`
               : tx("自适应变长 · 文本", "Adaptive span · text")
           }</b></div>`
         : "";
@@ -1019,7 +1027,10 @@ function FrameCanvas() {
     if (field && live && hv.off === field.offset) {
       const lv = teleRef.current.latest[field.id];
       if (lv && lv.valid) {
-        valLine = `<div class="fc-tip-row"><span>${tx("数值", "Value")}</span><b>${lv.text ?? String(round4(lv.value))}${field.unit ? ` ${field.unit}` : ""}</b></div>`;
+        valLine = `<div class="fc-tip-row"><span>${tx("数值", "Value")}</span><b>${
+          lv.text ??
+          labeledValue(field.labels, lv.value, (n) => String(round4(n)))
+        }${field.unit ? ` ${field.unit}` : ""}</b></div>`;
       }
     }
     const ckLine =
@@ -2101,7 +2112,11 @@ function FieldDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, ckAlgo]);
   const spanElemNeedsEndian =
-    spanTail && spanElem !== "text" && spanElem !== "uint8" && spanElem !== "int8";
+    spanTail &&
+    spanElem !== "text" &&
+    spanElem !== "bit" &&
+    spanElem !== "uint8" &&
+    spanElem !== "int8";
   const needsEndian = type === "uint16" || type === "int16" || type === "uint32" || type === "int32" || type === "float32" || type === "float64" || spanElemNeedsEndian;
   const fixedSize = fieldSize({ id: "", name: "", role: "data", offset: 0, type, endian, color: "" });
   const mismatched = init.isAscii ? false : recs.length > 0 && !recs.includes(type);
@@ -2286,6 +2301,7 @@ function FieldDialog({
                   <label>{tx("元素类型", "Element type")}</label>
                   <select value={spanElem} onChange={(e) => setSpanElem(e.target.value)}>
                     <option value="text">{tx("文本（HEX/ASCII 一整串）", "Text (one HEX/ASCII string)")}</option>
+                    <option value="bit">{tx("位（0/1，低位在前）", "Bit (0/1, LSB first)")}</option>
                     <option value="uint8">uint8</option>
                     <option value="int8">int8</option>
                     <option value="uint16">uint16</option>

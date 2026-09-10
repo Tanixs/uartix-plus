@@ -38,6 +38,7 @@ It is far more than a serial terminal that echoes characters. **Protocols need n
 |---|:---:|:---:|:---:|
 | Send and receive raw data | ✅ | partial | ✅ |
 | Custom binary protocol parsing | hard-coded or scripted | fixed format expected | **drag to define, zero code** |
+| Industrial protocols (Modbus RTU / TCP) | eyeballing HEX | ❌ | **full preset cluster + auto register / coil expansion** |
 | Frame structure visualisation | ❌ | ❌ | **byte-level colour canvas** |
 | Send control commands | manual typing | basic widgets | **widgets + frame factory + scripts** |
 | Frame table and export | ❌ | ❌ | ✅ |
@@ -53,17 +54,19 @@ It is far more than a serial terminal that echoes characters. **Protocols need n
 
 ### Protocol parsing engine
 
-Select a run of bytes on the Hex stream, right-click and declare it as header, length field, discriminator, payload or checksum; field width grows with the type you pick. A frame header alone rarely tells frame types apart, so parsing uses two-stage recognition: any field can act as a discriminator matched against a multi-byte function code, and several templates parse the same stream in parallel without interfering.
+Select a run of bytes on the Hex stream, right-click and declare it as header, length field, discriminator, payload or checksum; field width grows with the type you pick. A frame header alone rarely tells frame types apart, so parsing uses two-stage recognition: any field can act as a discriminator matched against a multi-byte function code, and several templates parse the same stream in parallel without interfering. Headers and discriminators also match bit-by-bit through a per-byte mask, so a single template can cover every slave on an RS-485 bus.
 
 <details>
 <summary><b>Technical details</b> (checksums / field types / text streams / presets)</summary>
 
 - **Checksums**: Sum8 / XOR8 / CRC16-Modbus / CRC16-CCITT / CRC32, with negative offsets so trailing checksum bytes can be excluded
-- **Field types**: u8 / i8 / u16 / i16 / u32 / i32 / f32 / f64, plus ASCII / BCD / bit-field; endianness switchable, scale and bias apply instantly
+- **Field types**: u8 / i8 / u16 / i16 / u32 / i32 / f32 / f64, plus ASCII / BCD / bit-field; endianness switchable, with CDAB / BADC word-swap for 32-bit values that span two 16-bit registers; scale and bias apply instantly
+- **Bit-masked headers & discriminators**: header and discriminator bytes match bit-by-bit (`??` wildcard, `A?` half-byte, `80&F0` explicit mask), so a single template covers every slave address on a Modbus bus and any exception function code
+- **Value labels**: annotate enums (`2=Illegal data address`) and tables / tooltips / exports show "number text" while channels and curves keep the raw numbers
 - **Text streams are protocols too**: the header may be empty, channels are split adaptively on the delimiter, and the channel count follows each frame's segment count
-- **Preset templates**: WitMotion JY901, Anonymous V7, Modbus, CSV text stream; any protocol exports to JSON for sharing
+- **Preset templates**: WitMotion JY901, Anonymous V7, Modbus RTU (13 frame types), Modbus TCP (15), NMEA 0183, CSV text stream; any protocol exports to JSON for sharing
 - **Clusters**: one protocol per tab holding many frame types, with right-click copy / paste / rename / export
-- **Variable-length payloads**: spanTail adaptive fields extend to the end of the payload and can expand into `field#1..N` element variables; negative-offset fields anchor to the frame tail
+- **Variable-length payloads**: spanTail adaptive fields extend to the end of the payload and can expand into `field#1..N` element variables — element type `bit` unpacks coils one channel per bit; negative-offset fields anchor to the frame tail; the length field supports a scale (bits → bytes)
 - **Structure discovery**: for unknown protocols, frame length / phase / column entropy are estimated automatically and header candidates turn into a template with one click
 
 </details>

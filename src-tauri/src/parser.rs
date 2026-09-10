@@ -882,6 +882,8 @@ fn parse_csv_num(s: &str, ty: &str) -> Option<f64> {
 }
 
 const CSV_MAX_CH: usize = 64;
+/// 位展开的通道上限（一线圈一通道；64 位 = 8 字节，够常规 FC01/02 读批量）
+const SPAN_BIT_MAX: usize = 64;
 
 /// 校验失败时"后退一字节重找帧头"的最大层数：错位点与真帧头之间可能隔着若干字节
 /// （Modbus 主站请求里就常埋着假的 `[任意,03]` 锚点），层数太小仍会丢帧；
@@ -990,14 +992,14 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
                     text: Some(text),
                 });
                 if let Some(elem) = f.span_elem.as_deref() {
-                    let esize = span_elem_size(elem);
-                    if esize > 0 {
-                        let scale = f.scale.unwrap_or(1.0);
-                        let offv = f.offset_value.unwrap_or(0.0);
+                    let scale = f.scale.unwrap_or(1.0);
+                    let offv = f.offset_value.unwrap_or(0.0);
+                    if elem == "bit" {
+                        // 位展开（Modbus FC01/02 线圈区）：每字节低位在前，一位一通道
+                        let nbits = (end - off) * 8;
                         let mut i: usize = 0;
-                        while off + (i + 1) * esize <= end && i < CSV_MAX_CH {
-                            let s2 = &buf[off + i * esize..off + (i + 1) * esize];
-                            let raw = decode_span_elem(elem, s2, &f.endian);
+                        while i < nbits && i < SPAN_BIT_MAX {
+                            let raw = ((buf[off + i / 8] >> (i % 8)) & 1) as f64;
                             out.push(FieldOut {
                                 id: format!("{}#{}", f.id, i + 1),
                                 name: format!("{}{}", f.name, i + 1),
@@ -1006,6 +1008,23 @@ fn decode_fields(tpl: &FrameTemplate, buf: &[u8]) -> Vec<FieldOut> {
                                 text: None,
                             });
                             i += 1;
+                        }
+                    } else {
+                        let esize = span_elem_size(elem);
+                        if esize > 0 {
+                            let mut i: usize = 0;
+                            while off + (i + 1) * esize <= end && i < CSV_MAX_CH {
+                                let s2 = &buf[off + i * esize..off + (i + 1) * esize];
+                                let raw = decode_span_elem(elem, s2, &f.endian);
+                                out.push(FieldOut {
+                                    id: format!("{}#{}", f.id, i + 1),
+                                    name: format!("{}{}", f.name, i + 1),
+                                    raw,
+                                    value: raw * scale + offv,
+                                    text: None,
+                                });
+                                i += 1;
+                            }
                         }
                     }
                 }
@@ -2142,6 +2161,55 @@ mod tests {
         assert_eq!(rows.len(), 1, "位数应换算成字节数完成定帧: {rows:?}");
         assert!(rows[0].valid, "CRC 应通过: {rows:?}");
         assert_eq!(rows[0].len, 7);
+    }
+
+    /// 线圈区按位展开：一位一个数值通道（低位在前），可直接画曲线/绑变量
+    #[test]
+    fn coil_bits_expand_to_one_channel_per_bit() {
+        let mut tpl = masked_rtu_tpl();
+        tpl.boundary.header_bytes = vec![0x00, 0x01];
+        tpl.boundary.length_scale = Some(0.125);
+        let mut bits = field("coils", "线圈", "data", 3, "uint8", "little");
+        bits.span_tail = Some(true);
+        bits.span_elem = Some("bit".into());
+        tpl.fields = vec![field("addr", "设备地址", "id", 0, "uint8", "big"), bits];
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![tpl],
+        })
+        .unwrap();
+
+        // 2 字节数据 = 16 位：B5=1011_0101（低位在前 → 1,0,1,0,1,1,0,1）、0B=0000_1011
+        let mut f = vec![0x05, 0x01, 12u8, 0b1011_0101, 0b0000_1011];
+        let crc = crc16_modbus(&f);
+        f.extend_from_slice(&crc.to_le_bytes());
+        let rows = eng.feed(&f, 0, 100);
+        assert_eq!(rows.len(), 1, "应解出一帧: {rows:?}");
+        let out = &rows[0].fields;
+        // 线圈字段自身给出原始字节文本，其后按位展开 16 个通道
+        let raw_row = out.iter().find(|x| x.id == "coils").expect("应保留线圈原始字节行");
+        assert_eq!(
+            raw_row.text.as_deref(),
+            Some("B5 0B"),
+            "字节区仍应给出原始十六进制文本"
+        );
+        let ch = |n: usize| -> Option<f64> {
+            out.iter()
+                .find(|x| x.name == format!("线圈{}", n + 1))
+                .map(|x| x.value)
+        };
+        assert_eq!(ch(0), Some(1.0), "线圈1 = B5 的 bit0");
+        assert_eq!(ch(1), Some(0.0), "线圈2 = B5 的 bit1");
+        assert_eq!(ch(7), Some(1.0), "线圈8 = B5 的 bit7");
+        assert_eq!(ch(8), Some(1.0), "线圈9 = 0B 的 bit0（跨字节续位）");
+        assert_eq!(ch(11), Some(1.0), "线圈12 = 0B 的 bit3");
+        assert_eq!(ch(15), Some(0.0), "线圈16 = 0B 的 bit7");
+        assert_eq!(
+            out.len(),
+            18,
+            "设备地址 + 字节文本 + 16 个线圈通道，实际 {} 项: {out:?}",
+            out.len()
+        );
     }
 
     /// 异常响应：帧头用「bit7=1」掩码锚定 → 一条模板吃下任意功能码的异常

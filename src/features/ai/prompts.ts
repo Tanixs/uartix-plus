@@ -13,9 +13,9 @@ export type AiScene =
 
 const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 2 + Rust + React）。主要功能与面板：
 - 五类数据接口：串口 / TCP 客户端 / TCP 服务端 / UDP / 蓝牙 BLE；串口支持热插拔识别、2 秒无数据断线检测与自动重连，BLE 可扫描并按信号强度选择设备。
-- 协议模板面板：定义帧边界（固定长度/长度字段/帧尾三种模式）、识别位、校验（sum8/sumadd/xor8/crc16_modbus/crc16_ccitt/crc32）、字段（uint8~float64/ascii/bcd/bits/csv，支持字节序、scale 缩放、单位、识别位）。
+- 协议模板面板：定义帧边界（固定长度/长度字段/帧尾三种模式）、识别位、校验（sum8/sumadd/xor8/crc16_modbus/crc16_ccitt/crc32）、字段（uint8~float64/ascii/bcd/bits/csv，支持字节序、scale 缩放、offsetValue 偏移、单位、识别位）、值标签（给枚举量配文字：状态码/异常码在表格与导出里直接显示"2 非法数据地址"）。进阶能力：帧头与识别位支持逐字节位掩码通配（任意从站地址、bit7=1 的异常响应都能一条模板吃下）；长度域支持倍率 lengthScale（如 Modbus FC01/02 的「位数」→ 字节）；32/64 位字段支持四种字序（ABCD/DCBA/CDAB/BADC）；变长同类数组区可用 spanTail+spanElem 自动展开为「名称1..名称N」多个数值通道（Modbus 寄存器区、点阵数据等）。界面上的 Hex 输入框可直接写 "??"（整字节通配）、"A?"（高 4 位）、"80&F0"（显式位掩码）。
 - Hex 数据流面板：实时字节流查看，框选字节后右键可定义帧头/长度/校验/数据字段，自动生成协议模板。
-- 帧画布：拖拽式定义帧结构，格子自动扩展为字段。
+- 帧画布：拖拽式定义帧结构，格子自动扩展为字段。内置协议预设可一键套用（匿名 V7 飞控、维特 WIT 陀螺仪、Modbus RTU、Modbus TCP、NMEA 0183、JustFloat 自适应文本帧）——遇到这些标准协议先建议用户用预设，不要重复手写模板。
 - 数据表格：解析后的帧数据行，支持导出 CSV/Excel。
 - 2D 曲线：多通道实时曲线，时间/幅值双游标测量，Y 轴自适应，相对秒时间轴。
 - 3D 姿态：Roll/Pitch/Yaw 实时三维显示。
@@ -27,10 +27,10 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - 文件传输：控制台内置 XMODEM（xmodem/xmodem1k）/ YMODEM 协议，可向目标设备发送固件或文件。
 - 图传面板：TCP/UDP 网络视频流接入。
 - 变量系统：变量自动绑定启用模板的字段，帧到达时更新。
-术语：帧头=headerBytes，长度字段=lengthField 模式（lengthOffset/lengthSize/lengthEndian/lengthAdjust），识别位=帧内用于区分帧型的固定字节，协议簇=同一帧头家族下的多种帧型（如 WIT 的 55 59/55 53/55 52…）。`;
+术语：帧头=headerBytes，长度字段=lengthField 模式（lengthOffset/lengthSize/lengthEndian/lengthAdjust/lengthScale），识别位=帧内用于区分帧型的固定字节，协议簇=同一帧头家族下的多种帧型（如 WIT 的 55 59/55 53/55 52…），位掩码=headerMask/discMask（逐字节按位匹配，0xFF 精确、0x00 通配），字序=endian 四档（32 位量占两个 16 位寄存器时的字交换：ABCD/DCBA/CDAB/BADC），数组展开=spanTail+spanElem。`;
 
 /** 专用场景的精简功能清单（只保留面板名与一句话用途，控制 token） */
-const DIGEST_BRIEF = `Uartix+ 是可视化串口协议分析仪（Tauri 2 + Rust + React，接口含串口/TCP 客户端/TCP 服务端/UDP/BLE）。面板速览：协议模板（帧边界/校验/字段）、Hex 数据流（字节流+框选识别）、结构发现（未知协议统计推断+协议簇发现，勾选按簇建模板）、帧画布（拖拽式帧结构+会话录制回放时间机器）、数据表格（解析帧行）、2D 曲线（实时多通道+游标）、3D 姿态（Roll/Pitch/Yaw）、控制画布（滑条/按钮/开关/LED/摇杆/键盘遥控等卡片+group 组合控件）、命令库（分组树+脚本）、指令工厂（多协议组帧）、文件传输（XMODEM/YMODEM）、图传（网络视频流）、变量系统（绑定模板字段自动更新）。`;
+const DIGEST_BRIEF = `Uartix+ 是可视化串口协议分析仪（Tauri 2 + Rust + React，接口含串口/TCP 客户端/TCP 服务端/UDP/BLE）。面板速览：协议模板（帧边界/位掩码通配/字序/寄存器展开/校验/字段，内置 WIT·匿名V7·Modbus RTU·Modbus TCP·NMEA·JustFloat 预设）、Hex 数据流（字节流+框选识别）、结构发现（未知协议统计推断+协议簇发现，勾选按簇建模板）、帧画布（拖拽式帧结构+会话录制回放时间机器）、数据表格（解析帧行）、2D 曲线（实时多通道+游标）、3D 姿态（Roll/Pitch/Yaw）、控制画布（滑条/按钮/开关/LED/摇杆/键盘遥控等卡片+group 组合控件）、命令库（分组树+脚本）、指令工厂（多协议组帧）、文件传输（XMODEM/YMODEM）、图传（网络视频流）、变量系统（绑定模板字段自动更新）。`;
 
 const BUG_PATROL = `另外，你在回答用户问题的同时，请顺带以资深测试工程师视角审视用户的操作场景与描述中反映的本软件链路是否合理有效、功能是否完善；若发现疑似 BUG、体验问题或功能缺口，在回答末尾用一小节「巡检发现」简明列出（没有就不列）。`;
 
@@ -38,12 +38,16 @@ const TEMPLATE_SPEC = `输出格式要求：
 1. 先用简短文字说明分析思路。
 2. 用 Markdown 表格列出所有候选帧结构，列：编号/帧头/长度方式/字段划分/字节序/校验/置信度。
 3. 对最可信的候选，输出一个 \`\`\`uartix-template 代码块，内容为符合以下 TypeScript 类型的模板 JSON。单帧型输出单个模板对象；多帧型协议（同一帧头内用识别位/命令字节区分多种帧型，如 WIT/匿名 V7）输出协议簇批量 JSON：{"group":"簇名","templates":[Template,...]}（一次写入多个模板并自动建组归档，最多 64 个）：
-interface Boundary { mode: "fixedLength"|"lengthField"|"footer"; headerBytes: number[]; fixedLength?: number|null; lengthOffset?: number|null; lengthSize?: number|null; lengthEndian?: "little"|"big"|null; lengthAdjust?: number|null; footerBytes?: number[]|null; maxLength: number; }
+type Endian = "little" | "big" | "big-word-swap" | "little-word-swap"   // 32/64 位量占两个 16 位寄存器时的字序：big=ABCD、little=DCBA、big-word-swap=CDAB、little-word-swap=BADC；16 位字段下后两档与前两档等价，可只用 little/big
+interface Boundary { mode: "fixedLength"|"lengthField"|"footer"; headerBytes: number[]; headerMask?: number[]|null; fixedLength?: number|null; lengthOffset?: number|null; lengthSize?: number|null; lengthEndian?: Endian|null; lengthAdjust?: number|null; lengthScale?: number|null; footerBytes?: number[]|null; maxLength: number; discOffset?: number|null; discValue?: number[]|null; discMask?: number[]|null; discs?: {offset:number; value:number[]; mask?:number[]|null}[]|null; }
+（headerMask/discMask 与对应字节数组等长，按 (实字节 & mask) == (值 & mask) 匹配：0xFF=精确、0x00=该字节通配、0x80=只看 bit7，省略=全精确。凡是「每帧都变但仍属帧头」的字节（如 Modbus 从站地址、TCP 事务号）一律用掩码通配，禁止逐值枚举模板。discs 用于帧长不靠帧头区分的同族帧型：指定帧内某偏移的字节（可带掩码）作为识别位，比多条通配帧头更精确）
 interface ChecksumCfg { algo: "none"|"sum8"|"sumadd"|"xor8"|"crc16_modbus"|"crc16_ccitt"|"crc32"; coverageStart: number; coverageEnd: number; endian: "little"|"big"; }
-（coverageEnd 为负数表示从帧尾回退，如 -1 表示不含最后 1 字节）
-interface FieldDef { name: string; role: "header"|"addr"|"id"|"seq"|"length"|"data"|"payload"|"checksum"|"footer"; offset: number; type: "uint8"|"int8"|"uint16"|"int32"|"int16"|"uint32"|"float32"|"float64"|"ascii"|"bcd"|"bits"; endian: "little"|"big"; size?: number|null; scale?: number|null; unit?: string|null; }
+（coverageEnd 为负数表示从帧尾回退，如 -1 表示不含最后 1 字节，-2 表示不含最后 2 字节 CRC）
+interface FieldDef { name: string; role: "header"|"addr"|"id"|"seq"|"length"|"data"|"payload"|"checksum"|"footer"; offset: number; type: "uint8"|"int8"|"uint16"|"int16"|"uint32"|"int32"|"float32"|"float64"|"ascii"|"bcd"|"bits"|"csv"; endian: Endian; size?: number|null; scale?: number|null; offsetValue?: number|null; unit?: string|null; bits?: {index:number; count:number}|null; labels?: {v:number; t:string}[]|null; spanTail?: boolean|null; spanElem?: "bit"|"uint8"|"int8"|"uint16"|"int16"|"uint32"|"int32"|"float32"|null; csvDelim?: string|null; csvType?: string|null; }
+（scale/offsetValue：显示值 = 原始值 × scale + offsetValue，如 0.1℃ 分辨率的寄存器用 scale 0.1。bits 取字段内 bit 段（index 起始位、count 位数）。labels 是枚举注解：把协议手册里的"1=非法功能码 / 2=非法数据地址"照抄成 [{v:1,t:"非法功能码"},…]，表格与提示会显示"数字 + 文字"（数值通道仍是数字）——凡文档里出现取值含义表的状态码/错误码/模式字都要配上。spanTail+spanElem 表达「变长同类数组区」：该字段从 offset 一直跨到帧尾（自动扣除校验字节），按 spanElem 步长逐元素解码并展开成 名称1、名称2… 多个独立数值通道，此时 size 省略——Modbus 读寄存器响应、点阵/波形数据都用它。spanElem 取 "bit" 时按位展开（一位一通道、每字节低位在前，上限 64 位），Modbus FC01/02 读线圈响应与 FC15 写入区就该用 "bit" 而不是 uint8。csv 型用 csvDelim（默认 ","）+ csvType（默认 "float32"）把 ASCII 区拆成多通道）
 interface Template { name: string; boundary: Boundary; checksum: ChecksumCfg|null; fields: FieldDef[]; }
-约束：帧头/校验字节等已知字节不要建 data 字段覆盖；lengthAdjust = 帧总长 - 长度字段的值；仅依据给出的字节证据推断，不要编造。`;
+约束：帧头/校验字节等已知字节不要建 data 字段覆盖；lengthAdjust = 帧总长 − 长度域值 × lengthScale（长度域本身就是字节数时省略 lengthScale，此时 adjust = 帧总长 − 长度域值）；仅依据给出的字节证据推断，不要编造。
+已知协议不要手写模板：判定为维特 WIT、匿名 V7、Modbus RTU/TCP、NMEA 0183、JustFloat 时，直接告诉用户到帧画布/协议模板的「内置预设」一键套用（Modbus RTU 预设已含 13 种帧型：掩码通配从站地址、FC01/02 位数换算、寄存器区自动展开、异常响应位掩码；Modbus TCP 预设已含 MBAP 定帧与主从方向区分），只在用户的设备用了非标准扩展帧型时才补模板。`;
 
 export interface SceneRequest {
   scene: AiScene;

@@ -8,6 +8,7 @@ import * as teleStore from "./telemetryStore";
 import * as plotStore from "../plot/plotStore";
 import { EmptyState } from "../../shared/EmptyState";
 import { clampFlyoutMenu } from "../../shared/Flyout";
+import { labelText } from "../../shared/valueLabels";
 import { IconChevron } from "../../shared/icons";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
@@ -690,7 +691,7 @@ export function TemplatesPanel() {
                   </span>
                   <span
                     className="legend-value"
-                    title={lv?.text ?? undefined}
+                    title={lv?.text ?? (lv ? labelText(f.labels, lv.value) ?? undefined : undefined)}
                   >
                     {lv
                       ? seq

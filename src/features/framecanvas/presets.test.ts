@@ -78,6 +78,18 @@ describe("Modbus RTU 预设簇", () => {
     }
   });
 
+  it("线圈区按位展开（一位一通道），寄存器区按字展开——两者不可混用", () => {
+    for (const fc of [0x01, 0x02]) {
+      const arr = byFc(tpls, fc, "lengthField")[0].fields.find((x) => x.spanTail);
+      expect(arr?.spanElem, `FC${fc} 的线圈区应按 bit 展开`).toBe("bit");
+    }
+    // FC15 写多个线圈：数据区同样是位打包 → bit；FC16 写多个寄存器 → uint16
+    const fc15 = byFc(tpls, 0x0f, "lengthField")[0].fields.find((x) => x.spanTail);
+    const fc16 = byFc(tpls, 0x10, "lengthField")[0].fields.find((x) => x.spanTail);
+    expect(fc15?.spanElem, "FC15 写入区是位打包的线圈").toBe("bit");
+    expect(fc16?.spanElem, "FC16 写入区是 16 位寄存器").toBe("uint16");
+  });
+
   it("写多点请求：字节数在 @6，总长 = 字节数 + 9；回显为定长 8", () => {
     for (const fc of [0x0f, 0x10]) {
       const req = byFc(tpls, fc, "lengthField")[0];

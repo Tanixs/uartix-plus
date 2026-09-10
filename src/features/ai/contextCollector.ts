@@ -3,6 +3,8 @@ import { getSnapshot as getProto } from "../protocol/templateStore";
 import { getSnapshot as getFrames } from "../table/framesStore";
 import { getSnapshot as getTelemetry } from "../protocol/telemetryStore";
 import { getSnapshot as getPlot, fullAligned } from "../plot/plotStore";
+import type { ValueLabel } from "../../ipc/types";
+import { labelText } from "../../shared/valueLabels";
 
 export interface ContextSelection {
   conn: boolean;
@@ -37,20 +39,31 @@ export function summaryTemplates(): string {
     .map((t) => {
       const b = t.boundary;
       const hex = (arr: number[]) => arr.map((x) => "0x" + x.toString(16).padStart(2, "0").toUpperCase()).join(" ");
+      // 掩码写成 "??"（该字节通配）让 AI 看懂"任意从站地址"这类帧头
+      const hexMasked = (arr: number[], mask?: number[] | null) =>
+        arr
+          .map((x, i) => {
+            const m = mask?.[i] ?? 0xff;
+            return m === 0 ? "??" : m === 0xff ? "0x" + x.toString(16).padStart(2, "0").toUpperCase() : `(0x${x.toString(16).padStart(2, "0").toUpperCase()} & 0x${m.toString(16).padStart(2, "0").toUpperCase()})`;
+          })
+          .join(" ");
       const bound =
         b.mode === "fixedLength"
-          ? `固定长度 ${b.fixedLength}B，帧头 [${hex(b.headerBytes)}]`
+          ? `固定长度 ${b.fixedLength}B，帧头 [${hexMasked(b.headerBytes, b.headerMask)}]`
           : b.mode === "lengthField"
-            ? `帧头 [${hex(b.headerBytes)}]，长度字段@偏移${b.lengthOffset} ${b.lengthSize}B ${b.lengthEndian === "big" ? "大端" : "小端"}（adjust=${b.lengthAdjust}）`
+            ? `帧头 [${hexMasked(b.headerBytes, b.headerMask)}]，长度字段@偏移${b.lengthOffset} ${b.lengthSize}B ${b.lengthEndian === "big" ? "大端" : "小端"}（adjust=${b.lengthAdjust}${b.lengthScale ? "×倍率" + b.lengthScale : ""}）`
             : `帧尾 [${hex(b.footerBytes ?? [])}]`;
       const ck = t.checksum
         ? `${t.checksum.algo}（覆盖 ${t.checksum.coverageStart}~${t.checksum.coverageEnd}，${t.checksum.endian === "big" ? "大端" : "小端"}）`
         : "无";
       const fs = t.fields
-        .map(
-          (f) =>
-            `${f.name}@${f.offset}:${f.type}${f.endian === "big" ? " BE" : ""}${f.scale ? "×" + f.scale : ""}${f.unit ? "(" + f.unit + ")" : ""}`,
-        )
+        .map((f) => {
+          const span = f.spanTail ? `[数组区${f.spanElem ? ":" + f.spanElem : ""}]` : "";
+          const lb = f.labels?.length
+            ? `{${f.labels.map((l) => `${l.v}=${l.t}`).join(",")}}`
+            : "";
+          return `${f.name}@${f.offset}:${f.type}${f.endian === "big" ? " BE" : ""}${f.scale ? "×" + f.scale : ""}${f.unit ? "(" + f.unit + ")" : ""}${span}${lb}`;
+        })
         .join("，");
       return `【${t.name}】${bound}；校验：${ck}；字段：${fs || "无"}`;
     })
@@ -100,9 +113,19 @@ export function collectContext(sel: ContextSelection): ContextBlock[] {
     if (rows.length === 0) {
       blocks.push({ key: "samples", title: `最近 ${SAMPLE_N} 帧样本`, text: "（暂无解析数据）" });
     } else {
+      const labelById = new Map<string, ValueLabel[]>();
+      for (const t of getProto().rules.templates) {
+        for (const f of t.fields) if (f.labels?.length) labelById.set(f.id, f.labels);
+      }
       const text = rows
         .map((r) => {
-          const fs = r.fields.map((f) => `${f.name}=${f.text ?? f.value}`).join(", ");
+          const fs = r.fields
+            .map((f) => {
+              const base = `${f.name}=${f.text ?? f.value}`;
+              const lb = f.text === null ? labelText(labelById.get(f.id), f.value) : null;
+              return lb ? `${base}（${lb}）` : base;
+            })
+            .join(", ");
           return `[${r.tplName}${r.valid ? "" : " 坏帧"}] ${fs || `len=${r.len}`}`;
         })
         .join("\n");

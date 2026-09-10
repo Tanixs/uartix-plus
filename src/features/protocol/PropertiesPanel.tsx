@@ -19,6 +19,7 @@ import {
   parseHexPattern,
   HEX_PATTERN_HINT,
 } from "../../shared/hexBytes";
+import { formatLabelSpec, parseLabelSpec } from "../../shared/valueLabels";
 import { tx, useLocale } from "../../i18n/strings";
 
 export function NumInput({
@@ -734,6 +735,7 @@ export function PropertiesPanel() {
                 }
               >
                 <option value="text">{tx("文本（HEX/ASCII 一整串）", "Text (one HEX/ASCII string)")}</option>
+                <option value="bit">{tx("位（0/1，低位在前）", "Bit (0/1, LSB first)")}</option>
                 <option value="uint8">uint8</option>
                 <option value="int8">int8</option>
                 <option value="uint16">uint16</option>
@@ -973,6 +975,25 @@ export function PropertiesPanel() {
       <div className="form-row">
         <label>{tx("单位", "Unit")}</label>
         <TextInput value={field.unit ?? ""} onCommit={(v) => patch({ unit: v || null })} placeholder={tx("如 °C", "e.g. °C")} />
+      </div>
+      <div className="form-row">
+        <label>
+          {tx("值标签", "Value labels")}
+          <HelpHint
+            text={tx(
+              "给枚举量配文字，如「2=非法数据地址」（多条用分号或换行分隔，支持 0x 十六进制）。表格/提示/导出会显示「数字 文字」；数值通道与曲线仍用原始数字，不影响画图与脚本。",
+              "Annotate enum values, e.g. \"2=Illegal data address\" (separate entries with ; or newlines; 0x hex allowed). Tables/tooltips/exports show \"number text\"; numeric channels and curves still use the raw value.",
+            )}
+          />
+        </label>
+        <TextInput
+          value={formatLabelSpec(field.labels)}
+          onCommit={(v) => {
+            const ls = parseLabelSpec(v);
+            patch({ labels: ls.length > 0 ? ls : null });
+          }}
+          placeholder={tx("如 1=非法功能码; 2=非法数据地址", "e.g. 1=Illegal function code; 2=Illegal data address")}
+        />
       </div>
       </Section>
       <div className="form-hint">
