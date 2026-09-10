@@ -56,17 +56,18 @@ jobs:
 
           case "${#IDS[@]}" in
             0)
-              # 注意：`gh release create` 没有 --json/--jq（会在参数解析阶段直接
-              # 报 unknown flag，什么都不会创建），所以创建与取 ID 分两步，
-              # 取 ID 复用上面已验证可用的 listReleases（含草稿）。
-              gh release create "$TAG" \
-                --draft \
-                --title "Uartix+ ${TAG}" \
-                --notes-file "docs/RELEASE_NOTES/${TAG}.md"
-              ID=$(gh api "/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-                --jq ".[] | select(.tag_name == \"${TAG}\") | .id" | head -1)
+              # 创建必须走 `gh api -X POST` 并从**响应**里取 ID。两个坑都踩过：
+              #   ① `gh release create` 没有 --json/--jq（参数解析阶段直接报 unknown
+              #      flag，草稿什么都不会创建）；
+              #   ② 创建成功后立刻回查 listReleases 取 ID 也不可靠——该端点有读副本
+              #      延迟，实测草稿已存在（稍后查询可见）但同一 job 内查回空，
+              #      于是误判失败。写响应自带 id，无需再读。
+              ID=$(jq -Rs --arg tag "$TAG" --arg name "Uartix+ ${TAG}" \
+                '{tag_name: $tag, name: $name, draft: true, body: .}' \
+                "docs/RELEASE_NOTES/${TAG}.md" \
+                | gh api -X POST "/repos/${GITHUB_REPOSITORY}/releases" --input - --jq .id)
               if [ -z "${ID:-}" ]; then
-                echo "::error::草稿已创建但取不到 release ID（列表查询异常），中止以避免资产分裂"
+                echo "::error::草稿创建失败（未拿到 release ID），中止以避免资产分裂"
                 exit 1
               fi
               echo "created draft release ${ID} for ${TAG}"
