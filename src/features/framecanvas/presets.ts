@@ -1,4 +1,5 @@
-import type { FieldDef, FrameTemplate, ValueLabel } from "../../ipc/types";
+import type { FieldDef, FrameTemplate } from "../../ipc/types";
+import { MB_EXCEPTION_LABELS as MB_EXCEPTION_LABELS_SRC } from "../modbus/mb";
 import { getGroupMeta, importTemplates } from "../protocol/templateStore";
 
 export interface PresetDef {
@@ -134,16 +135,7 @@ const C_FG = "#f0883e";
 const MB_CRC = { algo: "crc16_modbus", coverageStart: 0, coverageEnd: -2, endian: "little" } as const;
 
 /** Modbus 规范异常码 → 文字（表格/提示/导出直接把码翻译成原因，无需翻手册） */
-const MB_EXCEPTION_LABELS: ValueLabel[] = [
-  { v: 1, t: "非法功能码" },
-  { v: 2, t: "非法数据地址" },
-  { v: 3, t: "从站设备故障" },
-  { v: 4, t: "响应确认（处理中）" },
-  { v: 5, t: "从站设备忙" },
-  { v: 8, t: "存储奇偶校验错误" },
-  { v: 10, t: "网关路径不可用" },
-  { v: 11, t: "网关目标无响应" },
-];
+const MB_EXCEPTION_LABELS = MB_EXCEPTION_LABELS_SRC;
 
 function mbHead(): FieldDef[] {
   return [

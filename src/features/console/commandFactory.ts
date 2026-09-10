@@ -1,8 +1,19 @@
 /**
  * 指令工厂：多协议指令编解码器
  * 每个编解码器负责：动态表单字段定义 → 组帧（含校验自动计算）→ 分段着色帧预览
- * 参考：JY901P-WIT私有协议.md、匿名通信协议V7-20200813.md、Modbus RTU 标准
+ * 参考：JY901P-WIT私有协议.md、匿名通信协议V7-20200813.md、Modbus RTU/TCP 标准
  */
+
+import {
+  FC_LABEL,
+  MB_FNS as MB_KERNEL_FNS,
+  areaOfFn,
+  buildRtuRequest,
+  buildTcpRequest,
+  legacyToAddr,
+  mbCrc,
+  type MbRequest,
+} from "../modbus/mb";
 
 export interface FactoryField {
   key: string;
@@ -42,55 +53,10 @@ export interface Codec {
   group: string;
 }
 
-// ---------------- 校验算法 ----------------
+// ---------------- 校验算法（实现在 shared/checksums.ts，与 Modbus 内核同源） ----------------
 
-export function sum8(bytes: number[]): number {
-  let s = 0;
-  for (const b of bytes) s = (s + b) & 0xff;
-  return s;
-}
-
-export function xor8(bytes: number[]): number {
-  let s = 0;
-  for (const b of bytes) s ^= b;
-  return s;
-}
-
-/** 匿名 V7：SUMCHECK 与 ADDCHECK，从帧头 0xAA 累加到 DATA 区结束 */
-export function anoCheck(bytes: number[]): { sc: number; ac: number } {
-  let sc = 0;
-  let ac = 0;
-  for (const b of bytes) {
-    sc = (sc + b) & 0xff;
-    ac = (ac + sc) & 0xff;
-  }
-  return { sc, ac };
-}
-
-export type Crc16Algo = "modbus" | "ccitt-false" | "x25";
-
-export function crc16(algo: Crc16Algo, bytes: number[]): number {
-  const cfg = {
-    modbus: { poly: 0x8005, init: 0xffff, refin: true, refout: true, xorout: 0x0000 },
-    "ccitt-false": { poly: 0x1021, init: 0xffff, refin: false, refout: false, xorout: 0x0000 },
-    x25: { poly: 0x1021, init: 0xffff, refin: true, refout: true, xorout: 0xffff },
-  }[algo];
-  const reflect = (v: number, w: number) => {
-    let r = 0;
-    for (let i = 0; i < w; i++) if (v & (1 << i)) r |= 1 << (w - 1 - i);
-    return r;
-  };
-  let crc = cfg.init;
-  for (let b of bytes) {
-    if (cfg.refin) b = reflect(b, 8);
-    crc ^= b << 8;
-    for (let i = 0; i < 8; i++) {
-      crc = crc & 0x8000 ? ((crc << 1) ^ cfg.poly) & 0xffff : (crc << 1) & 0xffff;
-    }
-  }
-  if (cfg.refout) crc = reflect(crc, 16);
-  return (crc ^ cfg.xorout) & 0xffff;
-}
+export { sum8, xor8, anoCheck, crc16, type Crc16Algo } from "../../shared/checksums";
+import { sum8, xor8, anoCheck, crc16 } from "../../shared/checksums";
 
 // ---------------- 数值解析 ----------------
 
@@ -336,16 +302,86 @@ function buildAnoFrame(
   return { bytes, parts };
 }
 
-// ---------------- Modbus RTU ----------------
+// ---------------- Modbus（组帧逻辑统一在 features/modbus/mb.ts） ----------------
 
-const MB_FNS = [
-  { v: 0x01, label: "01 读线圈" },
-  { v: 0x02, label: "02 读离散输入" },
-  { v: 0x03, label: "03 读保持寄存器" },
-  { v: 0x04, label: "04 读输入寄存器" },
-  { v: 0x05, label: "05 写单线圈" },
-  { v: 0x06, label: "06 写单寄存器" },
-];
+const MB_FNS = MB_KERNEL_FNS.map((fn) => ({ v: fn, label: FC_LABEL[fn] }));
+
+/** 多个值：空格或逗号分隔，支持 0x；FC15 用 0/1、FC16 用字值 */
+function parseNumList(text: string, label: string): number[] {
+  const t = text.trim();
+  if (!t) throw new Error(`「${label}」不能为空（多个值用空格或逗号分隔）`);
+  return t.split(/[\s,，]+/).filter(Boolean).map((s) => parseIntInput(s, label));
+}
+
+/** 表单第三项：读=数量、写单点=值、写多点=值列表 */
+function mbValueField(fn: number): FactoryField {
+  if (fn === 0x05)
+    return { key: "val", label: "线圈值", kind: "int", def: "1", hint: "0=断开，非 0=闭合（上线自动转 FF00/0000）" };
+  if (fn === 0x06)
+    return { key: "val", label: "写入值", kind: "int", def: "1", hint: "0~65535，可写 0x" };
+  if (fn === 0x0f)
+    return { key: "vals", label: "线圈序列", kind: "text", def: "1 0 1 1", hint: "按位写：0/1 用空格分隔，长度即数量" };
+  if (fn === 0x10)
+    return { key: "vals", label: "寄存器序列", kind: "text", def: "1 2 3", hint: "多个字值用空格分隔，可写 0x" };
+  return { key: "val", label: "数量", kind: "int", def: "1", hint: fn >= 0x05 ? "" : "读取数量（寄存器 1~125、位 1~2000）" };
+}
+
+/** 请求帧 → 分段着色预览（TCP 无 CRC，RTU 尾部两字节是 CRC） */
+function mbParts(bytes: number[], tcp: boolean): FramePart[] {
+  const parts: FramePart[] = [];
+  if (tcp) {
+    parts.push(
+      { text: `${b2(bytes[0])} ${b2(bytes[1])}`, label: "事务号", cls: "addr" },
+      { text: "00 00", label: "协议标识", cls: "head" },
+      { text: `${b2(bytes[4])} ${b2(bytes[5])}`, label: "长度", cls: "len" },
+      { text: b2(bytes[6]), label: "单元", cls: "addr" },
+    );
+  } else {
+    parts.push({ text: b2(bytes[0]), label: "从站", cls: "addr" });
+  }
+  const p = tcp ? bytes.slice(7) : bytes.slice(1, bytes.length - 2);
+  const fn = p[0];
+  parts.push({ text: b2(fn), label: "功能码", cls: "id" });
+  if (fn === 0x0f || fn === 0x10) {
+    const bc = p[5];
+    parts.push(
+      { text: `${b2(p[1])} ${b2(p[2])}`, label: "起始地址", cls: "data" },
+      { text: `${b2(p[3])} ${b2(p[4])}`, label: "数量", cls: "len" },
+      { text: b2(bc), label: "字节数", cls: "len" },
+      { text: hexBytes(p.slice(6, 6 + bc)), label: "写入值", cls: "data" },
+    );
+  } else {
+    const label = fn === 0x05 ? "FF00/0000" : fn === 0x06 ? "写入值" : "数量";
+    parts.push(
+      { text: `${b2(p[1])} ${b2(p[2])}`, label: "起始地址", cls: "data" },
+      { text: `${b2(p[3])} ${b2(p[4])}`, label, cls: "data" },
+    );
+  }
+  if (!tcp) {
+    const crc = mbCrc(bytes.slice(0, bytes.length - 2));
+    parts.push({ text: `${b2(crc & 0xff)} ${b2(crc >> 8)}`, label: "CRC16", cls: "check" });
+  }
+  return parts;
+}
+
+/** 表单值 → MbRequest（RTU 与 TCP 共用同一份参数） */
+function mbRequestFrom(v: Record<string, string>): MbRequest {
+  const slave = parseIntInput(v.addr || "01", "从站地址");
+  const fn = parseIntInput(v.fn || "3", "功能码");
+  const addr = legacyToAddr(parseIntInput(v.reg || "0", "起始地址"), areaOfFn(fn));
+  const req: MbRequest = { slave, fn, addr };
+  if (fn === 0x0f || fn === 0x10) req.values = parseNumList(v.vals ?? "", fn === 0x0f ? "线圈序列" : "寄存器序列");
+  else if (fn === 0x05 || fn === 0x06) req.value = parseIntInput(v.val || "1", "写入值");
+  else req.qty = parseIntInput(v.val || "1", "数量");
+  return req;
+}
+
+/** 手册编号段提示（让用户直接抄 PLC 手册里的地址） */
+function mbAddrHint(fn: number): string {
+  const area = areaOfFn(fn);
+  const base = area === "holding" ? "40001" : area === "input" ? "30001" : area === "disc" ? "10001" : "00001";
+  return `线上 0 基址；也可直接写手册编号（${base} 起，自动换算）`;
+}
 
 // ---------------- 编解码器注册表 ----------------
 
@@ -510,60 +546,57 @@ export const CODECS: Codec[] = [
     id: "modbus",
     name: "Modbus RTU",
     group: "Modbus",
-    guide: "① 从站地址 → ② 功能码 → ③ 寄存器地址与值 → ④ 发送（CRC16-Modbus 自动附加）",
+    guide: "① 从站地址 → ② 功能码 → ③ 起始地址与数量/值 → ④ 发送（CRC16-Modbus 自动附加）",
     fields: (v) => {
       const fn = parseIntInput(v.fn || "3", "功能码");
-      const isWrite = fn === 0x05 || fn === 0x06;
       return [
-        { key: "addr", label: "从站地址", kind: "int", def: "01", hint: "1~247" },
+        { key: "addr", label: "从站地址", kind: "int", def: "01", hint: "0~247（0 = 广播，写命令全员执行不回应答）" },
         { key: "fn", label: "功能码", kind: "select", options: MB_FNS, def: "3" },
-        { key: "reg", label: "寄存器地址", kind: "int", def: "0", hint: "0~65535" },
         {
-          key: "val", label: isWrite ? "写入值" : "数量",
-          kind: "int", def: isWrite ? "1" : "1",
-          hint: isWrite
-            ? fn === 0x05
-              ? "线圈：0=关，1=开（其他值视为开）"
-              : "寄存器值 0~65535"
-            : "读取数量 1~125",
+          key: "reg",
+          label: "起始地址",
+          kind: "int",
+          def: "0",
+          hint: mbAddrHint(fn),
         },
+        mbValueField(fn),
       ];
     },
     build: (v) => {
-      const addr = parseIntInput(v.addr || "01", "从站地址");
-      const fn = parseIntInput(v.fn || "3", "功能码");
-      const reg = parseIntInput(v.reg || "0", "寄存器地址");
-      const val = parseIntInput(v.val || "1", v.fn === "5" || v.fn === "6" ? "写入值" : "数量");
-      if (addr < 1 || addr > 247) throw new Error("「从站地址」需在 1~247");
-      if (reg < 0 || reg > 0xffff) throw new Error("「寄存器地址」超出范围");
-      const body: number[] = [addr, fn];
-      body.push((reg >> 8) & 0xff, reg & 0xff);
-      if (fn === 0x05) {
-        body.push(val ? 0xff : 0x00, 0x00);
-      } else {
-        if (val < 0 || val > 0xffff) throw new Error("「写入值/数量」超出 0~65535");
-        body.push((val >> 8) & 0xff, val & 0xff);
-      }
-      const crc = crc16("modbus", body);
-      body.push(crc & 0xff, (crc >> 8) & 0xff);
-      const parts: FramePart[] = [
-        { text: b2(addr), label: "从站", cls: "addr" },
-        { text: b2(fn), label: "功能码", cls: "id" },
-        { text: `${b2(reg >> 8)} ${b2(reg)}`, label: "寄存器(LE)", cls: "data" },
-        {
-          text: fn === 0x05 ? `${b2(val ? 0xff : 0)} 00` : `${b2(val >> 8)} ${b2(val)}`,
-          label: fn === 0x05 ? "线圈" : (fn === 0x06 ? "值(LE)" : "数量(LE)"),
-          cls: "data",
-        },
-        { text: `${b2(crc & 0xff)} ${b2(crc >> 8)}`, label: "CRC16", cls: "check" },
-      ];
+      const bytes = buildRtuRequest(mbRequestFrom(v));
       return {
-        frames: [hexBytes(body)],
-        parts,
-        note: "CRC16-Modbus（低字节在前）",
+        frames: [hexBytes(bytes)],
+        parts: mbParts(bytes, false),
+        note: "CRC16-Modbus（低字节在前）已附加",
       };
     },
-    summary: (v) => `${v.fn === "5" || v.fn === "6" ? "写" : "读"} ${v.reg}`,
+    summary: (v) => `${FC_LABEL[parseIntInput(v.fn || "3", "功能码")] ?? "Modbus"} ${v.reg ?? ""}`.trim(),
+  },
+  {
+    id: "modbus-tcp",
+    name: "Modbus TCP",
+    group: "Modbus",
+    guide: "① 单元地址 → ② 功能码 → ③ 起始地址与数量/值 → ④ 发送（MBAP 头自动组，无 CRC）",
+    fields: (v) => {
+      const fn = parseIntInput(v.fn || "3", "功能码");
+      return [
+        { key: "addr", label: "单元地址", kind: "int", def: "01", hint: "MBAP 的 Unit ID，即串口网关后端的从站号" },
+        { key: "fn", label: "功能码", kind: "select", options: MB_FNS, def: "3" },
+        { key: "reg", label: "起始地址", kind: "int", def: "0", hint: mbAddrHint(fn) },
+        mbValueField(fn),
+        { key: "txn", label: "事务号", kind: "int", def: "0", hint: "0 = 自动递增；响应按事务号配对请求" },
+      ];
+    },
+    build: (v) => {
+      const req = mbRequestFrom(v);
+      const bytes = buildTcpRequest(req, parseIntInput(v.txn || "0", "事务号"));
+      return {
+        frames: [hexBytes(bytes)],
+        parts: mbParts(bytes, true),
+        note: "TCP 无 CRC：MBAP 长度域（含单元地址）即完整性来源；网关按事务号配对",
+      };
+    },
+    summary: (v) => `ModbusTCP ${FC_LABEL[parseIntInput(v.fn || "3", "功能码")] ?? ""} ${v.reg ?? ""}`.trim(),
   },
   {
     id: "checksum",
