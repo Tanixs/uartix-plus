@@ -147,6 +147,7 @@ pub fn run() {
             ble::ble_connect,
             ble::ble_disconnect,
             xfer::xfer_start,
+            xfer::xfer_receive_start,
             xfer::xfer_abort,
             pipeline::parser_set_rules,
             pipeline::hex_fetch,

@@ -20,6 +20,7 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - 2D 曲线：多通道实时曲线，时间/幅值双游标测量，Y 轴自适应，相对秒时间轴。
 - 3D 姿态：Roll/Pitch/Yaw 实时三维显示。
 - 结构发现面板（xray）：对未知协议字节流做周期/帧头统计推断（自相关+显著度算法），支持显著度/帧长上限/分析窗口调参；可对候选帧头做协议簇分析（识别同帧头家族下的多种帧型与各自帧长），勾选帧型后一键按簇批量生成协议模板。
+- 哨兵面板（sentinel）：静默异常监测——数值通道双 EMA z-score 突变（灵敏度低/中/高三档）、学习期后新帧型出现告警、错误帧率超阈、通信静默（连接中但超 N 秒无帧）。报警带冷却合并（×N）与恢复事件；可最小化成右下角浮球或弹出桌面挂件继续驻留报警（面板与浮球都关闭才停止监测）；提示音为合成音。用户说"帮我盯着""数据有没有异常"时相关。
 - 会话录制回放：录制数据会话存为 .usess 文件，在帧画布时间机器回放（进度点选跳转、多档倍速、按 M 打时间线标注）。
 - 控制画布：滑条/按钮/开关/LED/蜂鸣器/监视器/摇杆/键盘等卡片，另支持 group 组合控件（一张卡片集成滑条+按钮+开关+监视+LED 等多个子控件），命令模板串支持 %.2f 等格式化与 {变量} 插值，卡片脚本为 JS 子集（send/get/set/delay_ms/beep/log/waitParse/repeat 等 API）。
 - 命令库：分组树结构，命令可带脚本，拖拽排序。
@@ -105,7 +106,9 @@ function schemaAction(): string {
 - listProtocols()/listCommands()/listCards() 查询配置清单
 - addChannel({"tpl":"模板名","field":"字段名"}) 加曲线通道；clearChannels() 清空通道
 - writeCard({"json":"…"})/writeCommand({"json":"…"})/writeTemplate({"json":"…"})/writeCodec({"json":"…"}) 写入配置（writeTemplate 支持 {"group":"簇名","templates":[…]} 一次写入协议簇并自动建组）
-- xferStart({"path":"D:/fw.bin","proto":"ymodem"}) 预填文件传输对话框（proto: ymodem/xmodem1k/xmodem，默认 ymodem；打开控制台面板并预填路径，用户在对话框确认后才开始发送）
+- xferStart({"path":"D:/fw.bin","proto":"ymodem"}) 预填文件传输对话框（proto: ymodem/ymodemg/xmodem1k/xmodem，默认 ymodem；path 可传字符串数组一次预填多个文件按顺序传输；打开控制台面板并预填路径，用户在对话框确认后才开始发送）
+- readPlot({"ask":"自定义提问"}) 截取当前 2D 曲线面板画面发给模型分析（面板未开会自动打开；用户说"看看曲线""分析一下当前波形"时用这个）
+- sentinel({"op":"status"}) 哨兵异常监测（需脚本高权限）：op 可选 status（健康分/活跃异常/最近报警）、enable({"on":true|false}) 启停监测、ackAll() 确认全部、mute({"key":"spike:roll"}) 静音某类报警、clear 清空历史。用户问"刚才数据有没有异常""帮我盯着链路"时用 status 查报警；用户说"别报了"用 mute/ackAll
 - clearPage() 清空控制画布当前页【破坏性】；addPage({"name":"页名"}) 新建控制页；patchCard({"name":"卡名","patch":{…}}) 改卡片属性
 - removeCard({"name":"卡名"})/removeProtocol({"name":"模板名"})/removeCommand({"name":"命令名"})/removeCodec({"name":"协议名"}) 按名删除【破坏性】
 - openPort()/closePort() 开关连接（需发送权限）
@@ -185,7 +188,9 @@ function schemaScript(script: boolean): string {
   · listProtocols()/listCommands()/listCards() 获取现有配置清单
   · addChannel({tpl:"模板名",field:"字段名"}) 加曲线通道；clearChannels() 清空通道
   · writeCard({json})/writeCommand({json})/writeTemplate({json})/writeCodec({json}) 写入配置（JSON 字符串，格式同对应输出格式；writeTemplate 支持 {"group":"簇名","templates":[…]} 批量写协议簇）
-  · xferStart({path, proto?}) 预填文件传输对话框（proto: ymodem/xmodem1k/xmodem，默认 ymodem），用户在对话框确认后才开始发送
+  · xferStart({path, proto?}) 预填文件传输对话框（proto: ymodem/ymodemg/xmodem1k/xmodem，默认 ymodem；path 可为字符串或字符串数组，多文件按顺序传输），用户在对话框确认后才开始发送
+  · readPlot({ask?}) 截取当前 2D 曲线面板并发送模型分析（面板未开会自动打开；AI 忙时不可用）
+  · sentinel({op:"status"|"enable"|"ackAll"|"mute"|"clear", on?, key?}) 哨兵异常监测查询与控制（status 返回健康分/活跃异常/最近报警；需高权限）
   · clearPage() 清空控制画布当前页；addPage({name}) 新建控制页；patchCard({name,patch:{…}}) 改卡片属性
   · removeCard({name})/removeProtocol({name})/removeCommand({name})/removeCodec({name}) 按名删除（删除/清空类动作会 toast 告知）
   · openPort()/closePort() 开关连接（需发送权限）

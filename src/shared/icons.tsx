@@ -335,6 +335,28 @@ export const IconCode = () =>
     </>,
   );
 
+/** 哨兵：盾牌（P62） */
+export const IconShield = () =>
+  svg(
+    <>
+      <path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z" />
+      <path d="M9.5 12l2 2 3.5-4" />
+    </>,
+  );
+
+/** 哨兵：铃铛（报警/浮球，P62） */
+export const IconBell = () =>
+  svg(
+    <>
+      <path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6z" />
+      <path d="M10 19a2 2 0 0 0 4 0" />
+    </>,
+  );
+
+/** 哨兵：脉冲波形（通道监测，P62） */
+export const IconPulse = () =>
+  svg(<path d="M3 12h4l2.5-6 4 12 2.5-6h5" />);
+
 export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   slider: IconSlider(),
   button: IconButton(),

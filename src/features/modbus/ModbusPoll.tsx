@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconPlay, IconStop, IconTrash, IconChevron } from "../../shared/icons";
 import * as poll from "./pollStore";
@@ -88,6 +88,7 @@ export function ModbusPoll() {
               <th>{tx("倍率", "Scale")}</th>
               <th>{tx("变量名", "Variable")}</th>
               <th>{tx("最新值", "Value")}</th>
+              <th>{tx("趋势", "Trend")}</th>
               <th>{tx("延迟", "RTT")}</th>
               <th>{tx("成功/超时", "OK/T-O")}</th>
               <th aria-label={tx("删除", "Delete")} />
@@ -96,7 +97,7 @@ export function ModbusPoll() {
           <tbody>
             {s.rows.length === 0 && (
               <tr>
-                <td colSpan={13} className="mb-empty">
+                <td colSpan={14} className="mb-empty">
                   {tx(
                     "还没有轮询项。点「示例」插一条，或自己填：从站 1、功能码 03、起始 0、数量 2、周期 500ms —— 读回来的两个寄存器会成为两个变量，直接就能画曲线。",
                     "No rows yet. Click Example, or fill one in: slave 1, FC 03, start 0, qty 2, period 500 ms — the registers come back as variables you can plot.",
@@ -133,6 +134,9 @@ export function ModbusPoll() {
                   <input className="input mb-cell mb-var" value={r.varName} onChange={(e) => poll.updateRow(r.id, { varName: e.target.value })} title={tx("曲线/表格/脚本按这个名字引用", "Referenced by this name in plots, tables and scripts")} />
                 </td>
                 <td className="mb-val mono">{r.last === null ? "–" : String(Math.round(r.last * 1000) / 1000)}</td>
+                <td>
+                  <Sparkline hist={r.hist} />
+                </td>
                 <td className="mb-val">{r.latencyMs === null ? "–" : `${r.latencyMs}ms`}</td>
                 <td className="mb-val">
                   <b className="ok">{r.ok}</b> / <b className={r.timeout ? "bad" : ""}>{r.timeout}</b>
@@ -196,4 +200,52 @@ function NumCell({
       />
     </td>
   );
+}
+
+/**
+ * 行内趋势 sparkline（纯 canvas，零依赖零订阅）：
+ * hist 引用变化才重绘（pollStore 成功读数时给新数组），超时/异常不重绘。
+ * 颜色走 CSS var：canvas 不认 var()，从 computedStyle 读。
+ */
+function Sparkline({ hist }: { hist: number[] }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = 92;
+    const H = 22;
+    if (cv.width !== Math.round(W * dpr)) {
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+    }
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    if (hist.length < 2) return;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const v of hist) {
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    const span = hi - lo || 1;
+    const color = getComputedStyle(cv).color || "#4a7dff";
+    ctx.beginPath();
+    for (let i = 0; i < hist.length; i++) {
+      const x = 1.5 + (i / (hist.length - 1)) * (W - 3);
+      const y = H - 3 - ((hist[i] - lo) / span) * (H - 6);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // 尾点（当前值位置）
+    const ly = H - 3 - ((hist[hist.length - 1] - lo) / span) * (H - 6);
+    ctx.fillStyle = color;
+    ctx.fillRect(W - 3, ly - 1.5, 3, 3);
+  }, [hist]);
+  return <canvas ref={ref} className="mb-spark" aria-hidden="true" />;
 }

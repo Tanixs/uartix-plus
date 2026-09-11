@@ -49,6 +49,8 @@ export interface PollRow {
   lastTs: number | null;
   latencyMs: number | null;
   nextTs: number;
+  /** 成功读数历史（环形，新值追加；不持久化，编辑该行/清统计时重置） */
+  hist: number[];
 }
 
 export interface PollState {
@@ -68,6 +70,8 @@ export interface PollState {
 const KEY = "vs.modbus.poll";
 /** 在途请求超时（ms）：超过记一次超时并放行下一条 */
 const ACK_TIMEOUT = 1000;
+/** 每行历史曲线点数上限（≈600 点，500ms 周期即 5 分钟；不持久化） */
+export const HIST_CAP = 600;
 /** 接收缓冲上限，防脏数据无限增长 */
 const MAX_BUF = 4096;
 /** 读功能码（轮询只用读） */
@@ -173,6 +177,7 @@ function normalize(r: Partial<PollRow>, idx: number): PollRow {
     lastTs: null,
     latencyMs: null,
     nextTs: 0,
+    hist: [],
   };
 }
 
@@ -233,7 +238,7 @@ export function resetStats() {
     timeouts: 0,
     errs: 0,
     lastError: null,
-    rows: state.rows.map((r) => ({ ...r, ok: 0, timeout: 0, err: 0, last: null, lastTs: null, latencyMs: null })),
+    rows: state.rows.map((r) => ({ ...r, ok: 0, timeout: 0, err: 0, last: null, lastTs: null, latencyMs: null, hist: [] })),
   };
   emit();
 }
@@ -248,6 +253,11 @@ export function addDemoRow() {
 /** 当前帧格式（用户显式选择，持久化） */
 export function transport(): "rtu" | "tcp" {
   return state.transport;
+}
+
+/** 从站侧互斥检查用（自己问自己答的另一半） */
+export function isRunning(): boolean {
+  return state.running;
 }
 
 export function setTransport(t: "rtu" | "tcp") {
@@ -459,6 +469,8 @@ function settle(cur: NonNullable<typeof inflight>, bytesOrPdu: number[], isPdu =
   variableStore.setVar(r.varName, scaled);
   r.last = scaled;
   r.ok++;
+  // 新引用而非原地 push：让行内 Sparkline 的 effect 依赖（hist 引用）稳定触发重绘
+  r.hist = r.hist.length >= HIST_CAP ? [...r.hist.slice(r.hist.length - HIST_CAP + 1), scaled] : [...r.hist, scaled];
   emit();
 }
 

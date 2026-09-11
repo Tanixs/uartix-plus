@@ -32,6 +32,8 @@ import {
 import { popWidgetToDesktop } from "./widgetShell";
 import * as mbSlave from "../modbus/slaveStore";
 import * as mbPoll from "../modbus/pollStore";
+import * as sentinelStore from "../sentinel/sentinelStore";
+import * as chatStore from "./chatStore";
 import { AREA_LABEL, type MbArea } from "../modbus/mb";
 import {
   writeTemplateFromAiJson,
@@ -63,6 +65,8 @@ const HIGH_ONLY = new Set([
   "removeWidget",
   // 从站/轮询会主动占用总线发数据，等同发送权限
   "modbus",
+  // 哨兵可暂停监测/清报警，属全局控制
+  "sentinel",
 ]);
 
 export const APP_ACTION_KINDS = [
@@ -89,6 +93,8 @@ export const APP_ACTION_KINDS = [
   "closePort",
   "modbus",
   "xferStart",
+  "readPlot",
+  "sentinel",
   "toast",
   "listWidgets",
   "openWidget",
@@ -118,8 +124,67 @@ export async function runAppAction(
   }
 }
 
+/** 截取 2D 曲线面板：合成 .plot-chart 内全部 canvas（含坐标轴/覆盖层）。
+ *  坐标换算兼容 DPR 与全局 CSS zoom（以「设备像素/屏幕像素」比统一缩放），
+ *  背景取面板 CSS 背景色（透明则白）。返回 JPEG data URL（0.85，控制请求体积）。 */
+function capturePlotCanvas(): string {
+  const chart = document.querySelector<HTMLElement>(".plot-chart");
+  if (!chart) throw new Error("未找到 2D 曲线面板（可先执行 openPanel plot2d）");
+  const canvases = Array.from(chart.querySelectorAll("canvas"));
+  const visible = canvases.filter((c) => c.width > 0 && c.height > 0);
+  if (!visible.length) throw new Error("2D 曲线面板暂无渲染内容（等收到数据后再试）");
+  const base = chart.getBoundingClientRect();
+  if (base.width < 8 || base.height < 8) throw new Error("2D 曲线面板不可见或尺寸过小");
+  const r0 = visible[0].getBoundingClientRect();
+  const sx = visible[0].width / Math.max(r0.width, 1);
+  const sy = visible[0].height / Math.max(r0.height, 1);
+  const fullW = Math.round(base.width * sx);
+  const fullH = Math.round(base.height * sy);
+  const out = document.createElement("canvas");
+  out.width = Math.min(fullW, 2400);
+  out.height = Math.min(fullH, 1600);
+  const ctx = out.getContext("2d");
+  if (!ctx) throw new Error("无法创建截图画布");
+  const bg = getComputedStyle(chart).backgroundColor;
+  ctx.fillStyle = bg && bg !== "transparent" ? bg : "#ffffff";
+  ctx.fillRect(0, 0, out.width, out.height);
+  const kx = out.width / fullW;
+  const ky = out.height / fullH;
+  for (const c of visible) {
+    const r = c.getBoundingClientRect();
+    ctx.drawImage(
+      c,
+      (r.left - base.left) * sx * kx,
+      (r.top - base.top) * sy * ky,
+      c.width * kx,
+      c.height * ky,
+    );
+  }
+  return out.toDataURL("image/jpeg", 0.85);
+}
+
 async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> {
   switch (kind) {
+    case "readPlot": {
+      // AI 主动读图（P51）：截 2D 曲线面板给模型。面板未开时自动打开并等待渲染。
+      let chart = document.querySelector<HTMLElement>(".plot-chart");
+      if (!chart || chart.querySelectorAll("canvas").length === 0) {
+        requestOpenPanel("plot2d");
+        const deadline = Date.now() + 4000;
+        while (Date.now() < deadline) {
+          await new Promise((r) => window.setTimeout(r, 200));
+          chart = document.querySelector<HTMLElement>(".plot-chart");
+          if (chart && chart.querySelectorAll("canvas").length > 0) break;
+        }
+      }
+      if (chatStore.getSnapshot().streaming) {
+        throw new Error("AI 正在回复中，读图需等本轮结束后再试");
+      }
+      const dataUrl = capturePlotCanvas();
+      const ask = String(a.ask ?? "").trim() || "请分析这张 2D 曲线面板截图：描述趋势、异常点与需要关注的特征。";
+      await chatStore.sendText(`（AI 读图）${ask}`, "qa", undefined, [dataUrl]);
+      return "已截取 2D 曲线面板并发送给模型分析，分析结果在聊天区";
+    }
     case "openPanel": {
       const panel = String(a.panel ?? "");
       const titles = PANEL_TITLES();
@@ -309,16 +374,64 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
       return runModbusAction(a);
     }
     case "xferStart": {
-      const path = String(a.path ?? "").trim();
-      if (!path) throw new Error("缺少文件路径 path");
+      // path 支持字符串或字符串数组（多文件按队列顺序传输）
+      const raw = a.paths ?? a.path;
+      const paths = (Array.isArray(raw) ? raw : [raw])
+        .map((x) => String(x ?? "").trim())
+        .filter(Boolean);
+      if (!paths.length) throw new Error("缺少文件路径 path（可传字符串数组实现多文件顺序传输）");
       const proto = String(a.proto ?? "ymodem").trim();
-      if (!["ymodem", "xmodem1k", "xmodem"].includes(proto)) {
-        throw new Error(`未知传输协议：${proto}（可选：ymodem/xmodem1k/xmodem）`);
+      if (!["ymodem", "ymodemg", "xmodem1k", "xmodem"].includes(proto)) {
+        throw new Error(`未知传输协议：${proto}（可选：ymodem/ymodemg/xmodem1k/xmodem）`);
       }
       requestOpenPanel("console");
-      xferStore.requestAiPrefill(path, proto);
-      const fname = path.split(/[\\/]/).pop() ?? path;
-      return `已打开文件传输对话框并预填「${fname}」（${proto.toUpperCase()}），请在对话框中确认开始发送`;
+      xferStore.requestAiPrefill(paths, proto);
+      const names = paths.map((x) => x.split(/[\\/]/).pop() ?? x);
+      const list = names.length > 3 ? `${names.slice(0, 3).join("、")} 等 ${names.length} 个` : names.join("、");
+      return `已打开文件传输对话框并预填「${list}」（${proto.toUpperCase()}），请在对话框中确认开始发送`;
+    }
+    case "sentinel": {
+      const op = String(a.op ?? "status").trim();
+      const s = sentinelStore.getSnapshot();
+      switch (op) {
+        case "status": {
+          return {
+            enabled: s.cfg.enabled,
+            running: s.running,
+            health: s.health,
+            activeCrit: s.activeCrit,
+            activeWarn: s.activeWarn,
+            unack: s.unack,
+            conn: s.conn,
+            silenceMs: s.silenceMs,
+            sensitivity: s.cfg.sensitivity,
+            mutedKeys: s.cfg.mutedKeys,
+            recent: s.alerts.slice(0, 10).map((x) => ({ ts: x.ts, kind: x.kind, level: x.level, msg: x.msg, count: x.count })),
+          };
+        }
+        case "enable": {
+          const on = a.on !== false;
+          if (s.cfg.enabled === on) return `哨兵已是${on ? "启用" : "停用"}状态`;
+          sentinelStore.setEnabled(on);
+          return on ? "已启用哨兵监测（面板或浮球需在打开状态才会运行，可提示用户打开）" : "已停用哨兵监测";
+        }
+        case "ackAll": {
+          sentinelStore.ackAll();
+          return "已确认全部未读报警";
+        }
+        case "mute": {
+          const key = String(a.key ?? "").trim();
+          if (!key) throw new Error("mute 需要 key（如 spike:<通道名> / silence / errrate / newframe:<帧型>）");
+          sentinelStore.mute(key);
+          return `已静音报警类型「${key}」（可在哨兵面板底栏解除）`;
+        }
+        case "clear": {
+          sentinelStore.clearAlerts();
+          return "已清空报警历史";
+        }
+        default:
+          throw new Error(`未知 op：${op}（可用：status/enable/ackAll/mute/clear）`);
+      }
     }
     case "toast": {
       const msg = String(a.msg ?? "（空通知）");

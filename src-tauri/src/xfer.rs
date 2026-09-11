@@ -19,6 +19,7 @@
 
 use serde::Serialize;
 use std::collections::VecDeque;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -34,6 +35,7 @@ const ACK: u8 = 0x06;
 const NAK: u8 = 0x15;
 const CAN: u8 = 0x18;
 const CHR_C: u8 = 0x43; // 'C'：接收方声明 CRC 模式 / YMODEM 就绪
+const CHR_G: u8 = 0x47; // 'G'：接收方声明 YMODEM-G（流式，不逐块 ACK）
 
 const START_TIMEOUT: Duration = Duration::from_secs(60); // Bootloader 启动可能慢
 const BYTE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -49,6 +51,9 @@ pub enum XferProto {
     Xmodem1k,
     /// YMODEM：块 0 批次头 + STX 1K 数据块 + 全零块 0 收尾
     Ymodem,
+    /// YMODEM-G：批次头仍握手，**数据块流式连发不等 ACK**（吞吐极限，无重试）；
+    /// 接收方出错直接 CAN CAN 取消
+    YmodemG,
 }
 
 #[derive(Serialize, Clone)]
@@ -113,9 +118,14 @@ impl XferManager {
         self.abort.swap(false, Ordering::SeqCst)
     }
 
-    /// 等一个控制字节；deadline 到返回 None
+    /// 等一个控制字节；deadline 到返回 None。
+    /// 取消标志置位时立即返回 None（发送/接收方的循环顶部都有 take_abort 检查，
+    /// 借此把取消延迟从「最长等待窗口」压到毫秒级）
     async fn wait_byte(&self, deadline: Instant) -> Option<u8> {
         loop {
+            if self.abort.load(Ordering::SeqCst) {
+                return None;
+            }
             if let Ok(mut q) = self.rx.lock() {
                 if let Some(b) = q.pop_front() {
                     return Some(b);
@@ -268,7 +278,7 @@ async fn run_sender(
         XferProto::Xmodem => total.div_ceil(128),
         _ => total.div_ceil(1024),
     } as u32
-        + u32::from(proto == XferProto::Ymodem);
+        + u32::from(matches!(proto, XferProto::Ymodem | XferProto::YmodemG));
 
     let finish = |ok: bool, msg: String| {
         XFER_ACTIVE.store(false, Ordering::SeqCst);
@@ -306,7 +316,7 @@ async fn run_sender(
     mgr.drain_rx();
     emit_prog("waiting", 0, 0, 0, "等待设备就绪…", true);
 
-    // 启动：等 NAK（校验和模式）/ 'C'（CRC 模式）；YMODEM 只要 'C'
+    // 启动：等 NAK（校验和模式，仅 XMODEM-128）/ 'C'（CRC）/ 'G'（YMODEM-G）
     let mut crc = true;
     let mut got_start = false;
     let deadline = Instant::now() + START_TIMEOUT;
@@ -316,7 +326,18 @@ async fn run_sender(
             return;
         }
         match mgr.wait_byte(deadline).await {
-            Some(NAK) if proto != XferProto::Ymodem => {
+            Some(CHR_G) if proto == XferProto::YmodemG => {
+                got_start = true;
+                break;
+            }
+            Some(NAK) | Some(CHR_C) if proto == XferProto::YmodemG => {
+                finish(
+                    false,
+                    "设备应答的是普通 YMODEM 握手（'C'/NAK），与 YMODEM-G 不匹配——请把协议改回普通 YMODEM".into(),
+                );
+                return;
+            }
+            Some(NAK) if proto == XferProto::Xmodem => {
                 crc = false;
                 got_start = true;
                 break;
@@ -339,14 +360,23 @@ async fn run_sender(
         }
     }
     if !got_start {
-        finish(false, "设备未就绪（60s 内未收到 NAK/'C'，确认已进入 Bootloader）".into());
+        if mgr.take_abort() {
+            finish(false, "已取消".into());
+            return;
+        }
+        let want = if proto == XferProto::YmodemG { "'G'" } else { "NAK/'C'" };
+        finish(
+            false,
+            format!("设备未就绪（60s 内未收到 {want}，确认设备已进入等待接收状态）"),
+        );
         return;
     }
 
-    // YMODEM 块 0：文件名+大小 → ACK → 'C'
-    if proto == XferProto::Ymodem {
+    // YMODEM/YMODEM-G 块 0：文件名+大小 → ACK → 'C'（G 模式为 'G'）
+    if matches!(proto, XferProto::Ymodem | XferProto::YmodemG) {
         let blk = build_block(0, &ymodem_header0(&file_name, total), true);
         let mut confirmed0 = false;
+        let want_ready = if proto == XferProto::YmodemG { CHR_G } else { CHR_C };
         for _ in 0..MAX_RETRIES {
             if mgr.take_abort() {
                 finish(false, "已取消".into());
@@ -354,8 +384,8 @@ async fn run_sender(
             }
             match send_and_wait_ack(&app, &serial, &net, &ble, &mgr, &blk).await {
                 Ok(true) => {
-                    // ACK 后要等 'C' 才进数据块；没等到 → 重发块 0
-                    if mgr.wait_byte(Instant::now() + BYTE_TIMEOUT).await == Some(CHR_C) {
+                    // ACK 后要等 'C'/'G' 才进数据块；没等到 → 重发块 0
+                    if mgr.wait_byte(Instant::now() + BYTE_TIMEOUT).await == Some(want_ready) {
                         confirmed0 = true;
                         break;
                     }
@@ -369,7 +399,7 @@ async fn run_sender(
             }
         }
         if !confirmed0 {
-            finish(false, "块 0 未被确认（文件名/大小未 ACK+'C'）".into());
+            finish(false, "块 0 未被确认（文件名/大小未 ACK+就绪字节）".into());
             return;
         }
     }
@@ -377,6 +407,42 @@ async fn run_sender(
     // 数据块
     let chunk_len = if proto == XferProto::Xmodem { 128 } else { 1024 };
     let mut idx: u8 = 0;
+    if proto == XferProto::YmodemG {
+        // 流式连发（YMODEM-G 核心）：不等 ACK 不重试；接收方出错会连发 CAN CAN
+        for (ci, chunk) in data.chunks(1024).enumerate() {
+            if mgr.take_abort() {
+                let c = (ci * 1024).min(total as usize) as u64;
+                emit_prog("aborted", ci as u32, c, retries, "已取消", true);
+                finish(false, "已取消".into());
+                return;
+            }
+            idx = idx.wrapping_add(1);
+            if idx == 0 {
+                idx = 1; // 块号 0 保留，回绕跳过
+            }
+            if let Err(e) =
+                crate::serial::route_send(&app, &serial, &net, &ble, &build_block1k(idx, chunk))
+                    .await
+            {
+                let c = (ci * 1024).min(total as usize) as u64;
+                emit_prog("error", ci as u32, c, retries, &e, true);
+                finish(false, e);
+                return;
+            }
+            // 非阻塞嗅探 CAN CAN（接收方取消）；迟到的 ACK/NAK/'C' 一律忽略
+            if mgr.wait_byte(Instant::now()).await == Some(CAN)
+                && mgr.wait_byte(Instant::now() + Duration::from_millis(200)).await == Some(CAN)
+            {
+                let c = (ci * 1024).min(total as usize) as u64;
+                let msg = "设备已取消传输（CAN CAN）".to_string();
+                emit_prog("error", ci as u32, c, retries, &msg, true);
+                finish(false, msg);
+                return;
+            }
+            let c = ((ci + 1) * 1024).min(total as usize) as u64;
+            emit_prog("sending", (ci + 1) as u32, c, retries, "", false);
+        }
+    } else {
     for (ci, chunk) in data.chunks(chunk_len).enumerate() {
         idx = idx.wrapping_add(1);
         if idx == 0 {
@@ -421,16 +487,17 @@ async fn run_sender(
         let c = ((ci + 1) * chunk_len).min(total as usize) as u64;
         emit_prog("sending", (ci + 1) as u32, c, retries, "", false);
     }
+    } // else：非 G（stop-and-wait）分支
 
-    // EOT（XMODEM/YMODEM 同规则）
+    // EOT（XMODEM/YMODEM 同规则；G 模式接收方直接 ACK，无第一次 NAK）
     if let Err(e) = send_eot(&app, &serial, &net, &ble, &mgr).await {
         emit_prog("error", blocks, total, retries, &e, true);
         finish(false, e);
         return;
     }
 
-    // YMODEM 批次收尾：全零块 0 → ACK（未确认不影响文件本身，按成功收尾）
-    if proto == XferProto::Ymodem {
+    // YMODEM/YMODEM-G 批次收尾：全零块 0 → ACK（未确认不影响文件本身，按成功收尾）
+    if matches!(proto, XferProto::Ymodem | XferProto::YmodemG) {
         let blk = build_block(0, &[0u8; 128], true);
         let mut end_ok = false;
         for _ in 0..MAX_RETRIES {
@@ -460,7 +527,401 @@ async fn run_sender(
     finish(true, format!("传输完成：{file_name}（{retries} 次重试）"));
 }
 
+// ---------- 接收方（设备 → PC，P49 遗留补全） ----------
+
+const RECV_HANDSHAKE_GAP: Duration = Duration::from_secs(1);
+const RECV_BLOCK_TIMEOUT: Duration = Duration::from_secs(10);
+const RECV_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const RECV_TAIL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 解析 YMODEM 块 0 批次头：`文件名\0大小\0`（大小缺省 0 = 未知；全零块返回 None）
+fn parse_ymodem_header(data: &[u8]) -> Option<(String, u64)> {
+    let nend = data.iter().position(|&b| b == 0)?;
+    let name = std::str::from_utf8(&data[..nend]).ok()?;
+    if name.is_empty() {
+        return None;
+    }
+    let rest = &data[nend + 1..];
+    let send = rest.iter().position(|&b| b == 0).unwrap_or(rest.len());
+    let size = std::str::from_utf8(&rest[..send]).ok()?.parse().unwrap_or(0);
+    Some((name.to_string(), size))
+}
+
+/// 接收方块校验：SOH/STX + 块号 + ~块号 + 数据 + CRC16（接收方以 'C'/'G' 握手，固定 CRC 模式）。
+/// 返回 (块号, 数据区)。
+fn validate_block(blk: &[u8]) -> Option<(u8, &[u8])> {
+    if blk.len() < 5 || blk[1] ^ blk[2] != 0xFF {
+        return None;
+    }
+    let (data_len, crc_at) = if blk[0] == STX {
+        (1024usize, 1027usize)
+    } else {
+        (128usize, 131usize)
+    };
+    if blk.len() < crc_at + 2 {
+        return None;
+    }
+    let data = &blk[3..3 + data_len];
+    let want = crc16_xmodem(data);
+    let got = ((blk[crc_at] as u16) << 8) | blk[crc_at + 1] as u16;
+    (got == want).then_some((blk[1], data))
+}
+
+/// 收一个完整块。Ok(Some(b))=块 / 单字节 EOT、CAN、噪声；Ok(None)=窗口内无块；
+/// Err=已取消 / CAN CAN（设备取消）
+async fn next_block(mgr: &XferManager, wait: Duration) -> Result<Option<Vec<u8>>, String> {
+    let head = match mgr.wait_byte(Instant::now() + wait).await {
+        Some(b) => b,
+        None => return Ok(None),
+    };
+    let body = match head {
+        SOH => 132usize, // idx+~idx+128B+CRC16
+        STX => 1028usize,
+        _ => return Ok(Some(vec![head])), // EOT / CAN / 噪声单字节
+    };
+    let deadline = Instant::now() + RECV_BLOCK_TIMEOUT;
+    let mut buf = Vec::with_capacity(1 + body);
+    buf.push(head);
+    for _ in 0..body {
+        match mgr.wait_byte(deadline).await {
+            Some(b) => buf.push(b),
+            None => return Ok(None), // 块中途断流——按无块处理（调用方 NAK 重试）
+        }
+    }
+    Ok(Some(buf))
+}
+
+async fn run_receiver(app: AppHandle, proto: XferProto, save_path: String, mgr: Arc<XferManager>) {
+    let started = Instant::now();
+    let g_mode = proto == XferProto::YmodemG;
+    let ymodem = matches!(proto, XferProto::Ymodem | XferProto::YmodemG);
+    let save_name = PathBuf::from(&save_path)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "received.bin".into());
+
+    let finish = |ok: bool, msg: String| {
+        XFER_ACTIVE.store(false, Ordering::SeqCst);
+        let _ = app.emit("xfer:done", XferDone { ok, msg });
+    };
+
+    let serial = app.state::<SerialManager>();
+    let net = app.state::<crate::net::NetManager>();
+    let ble = app.state::<crate::ble::BleManager>();
+
+    let mut last_emit = Instant::now() - PROGRESS_INTERVAL;
+    let mut emit_prog =
+        |phase: &str, got: u64, blocks: u32, retries: u32, total: u64, msg: &str, force: bool| {
+            let now = Instant::now();
+            if !force && now.duration_since(last_emit) < PROGRESS_INTERVAL {
+                return;
+            }
+            last_emit = now;
+            let _ = app.emit(
+                "xfer:progress",
+                XferProgress {
+                    phase: phase.into(),
+                    block: blocks,
+                    blocks: if total > 0 { total.div_ceil(1024) as u32 + 2 } else { 0 },
+                    bytes: got,
+                    total,
+                    retries,
+                    bps: (got as f64 / started.elapsed().as_secs_f64().max(1e-6)) as u64,
+                    msg: msg.into(),
+                },
+            );
+        };
+
+    // 打开保存文件（blocking：磁盘/杀软扫描可能卡几百 ms）
+    let p = PathBuf::from(&save_path);
+    let mut file = match tokio::task::spawn_blocking(move || std::fs::File::create(&p)).await {
+        Ok(Ok(f)) => std::io::BufWriter::new(f),
+        Ok(Err(e)) => {
+            finish(false, format!("无法创建保存文件「{save_path}」: {e}"));
+            return;
+        }
+        Err(e) => {
+            finish(false, format!("无法创建保存文件: {e}"));
+            return;
+        }
+    };
+
+    mgr.drain_rx();
+    emit_prog("waiting", 0, 0, 0, 0, "等待设备开始发送…", true);
+
+    // 就绪握手：每秒重发就绪字节（'C'=CRC / 'G'=流式），直到首个有效块
+    let ready: u8 = if g_mode { CHR_G } else { CHR_C };
+    let hs_deadline = Instant::now() + START_TIMEOUT;
+    let mut cur: Vec<u8> = loop {
+        if mgr.take_abort() {
+            finish(false, "已取消".into());
+            return;
+        }
+        if Instant::now() >= hs_deadline {
+            finish(
+                false,
+                "设备未开始发送（60s 内未收到数据块，确认设备已进入发送模式）".into(),
+            );
+            return;
+        }
+        if let Err(e) = crate::serial::route_send(&app, &serial, &net, &ble, &[ready]).await {
+            finish(false, format!("发送就绪信号失败: {e}"));
+            return;
+        }
+        match next_block(&mgr, RECV_HANDSHAKE_GAP).await {
+            Err(e) => {
+                finish(false, e);
+                return;
+            }
+            Ok(None) => continue, // 1s 无块 → 重发就绪字节
+            Ok(Some(b)) if b.len() == 1 && b[0] == CAN => {
+                if mgr.wait_byte(Instant::now() + Duration::from_millis(200)).await == Some(CAN) {
+                    finish(false, "设备已取消传输（CAN CAN）".into());
+                    return;
+                }
+            }
+            Ok(Some(b)) if b.len() == 1 && b[0] == EOT => {
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[NAK]).await;
+                // 过早 EOT：NAK 后继续等
+            }
+            Ok(Some(b)) if b.len() == 1 => {} // 噪声
+            Ok(Some(b)) => break b,
+        }
+    };
+    emit_prog("receiving", 0, 0, 0, 0, "", true);
+
+    let mut total: u64 = 0; // YMODEM 块 0 给出确切大小；XMODEM 未知（前端只显示字节）
+    let mut got: u64 = 0;
+    let mut blocks: u32 = 0;
+    let mut retries: u32 = 0;
+    let mut tail_1a: usize = 0; // 流末尾连续 0x1A 数（XMODEM 无大小时据此裁填充）
+    let mut expect: u8 = if ymodem { 0 } else { 1 };
+    let mut in_header = ymodem; // 等待 YMODEM 批次头（块 0）
+    let mut eot_seen = false; // 非 G：首个 EOT 已按协议 NAK，等第二个
+    let mut batch_tail = false; // EOT 已 ACK：等收尾批次（全零块 0）
+    let mut tail_deadline = Instant::now();
+    let mut last_rx = Instant::now();
+    let mut rx_name = String::new();
+
+    loop {
+        // ---- 等待新块 ----
+        if cur.is_empty() {
+            if mgr.take_abort() {
+                finish(false, "已取消".into());
+                return;
+            }
+            if batch_tail {
+                if Instant::now() >= tail_deadline {
+                    // 设备迟迟不发收尾批次：按单文件完成收尾
+                    let _ = file.flush();
+                    finish(true, format!("接收完成：{rx_name}（{got} B，设备未发收尾批次头）"));
+                    return;
+                }
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[ready]).await;
+                match next_block(&mgr, RECV_HANDSHAKE_GAP).await {
+                    Err(e) => {
+                        finish(false, e);
+                        return;
+                    }
+                    Ok(None) => continue,
+                    Ok(Some(b)) if b.len() == 1 => continue, // 重复 EOT/噪声：已 ACK 过，忽略
+                    Ok(Some(b)) => {
+                        cur = b;
+                        last_rx = Instant::now();
+                    }
+                }
+            } else {
+                if Instant::now().duration_since(last_rx) > RECV_IDLE_TIMEOUT {
+                    finish(false, "接收超时（30s 未收到数据，设备可能已停止）".into());
+                    return;
+                }
+                let silent = if g_mode { RECV_HANDSHAKE_GAP } else { Duration::from_secs(3) };
+                match next_block(&mgr, silent).await {
+                    Err(e) => {
+                        finish(false, e);
+                        return;
+                    }
+                    Ok(None) => {
+                        // 非流式模式主动 NAK 防双端互等死锁；G 模式无重试语义只能继续等
+                        if !g_mode {
+                            retries += 1;
+                            let _ =
+                                crate::serial::route_send(&app, &serial, &net, &ble, &[NAK]).await;
+                        }
+                        continue;
+                    }
+                    Ok(Some(b)) if b.len() == 1 && b[0] == CAN => {
+                        if mgr.wait_byte(Instant::now() + Duration::from_millis(200)).await
+                            == Some(CAN)
+                        {
+                            finish(false, "设备已取消传输（CAN CAN）".into());
+                            return;
+                        }
+                    }
+                    Ok(Some(b)) if b.len() == 1 && b[0] == EOT => {
+                        cur = b;
+                        last_rx = Instant::now();
+                    }
+                    Ok(Some(b)) if b.len() == 1 => {} // 噪声
+                    Ok(Some(b)) => {
+                        cur = b;
+                        last_rx = Instant::now();
+                    }
+                }
+            }
+        }
+
+        // ---- 处理当前块 ----
+        let blk = std::mem::take(&mut cur);
+        if blk[0] == EOT {
+            if g_mode {
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[ACK]).await;
+            } else if !eot_seen {
+                eot_seen = true;
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[NAK]).await;
+                continue; // 协议规定动作：首个 EOT 回 NAK
+            } else {
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[ACK]).await;
+            }
+            if !ymodem {
+                // XMODEM：EOT ACK 即结束（裁掉末尾 0x1A 填充）
+                let _ = file.flush();
+                if tail_1a > 0 {
+                    let _ = file.get_ref().set_len(got - tail_1a as u64);
+                }
+                finish(true, format!("接收完成：{save_name}（{got} B）"));
+                return;
+            }
+            batch_tail = true;
+            tail_deadline = Instant::now() + RECV_TAIL_TIMEOUT;
+            continue;
+        }
+
+        let Some((idx, data)) = validate_block(&blk) else {
+            if g_mode {
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[CAN, CAN]).await;
+                finish(false, "数据块 CRC 校验失败（YMODEM-G 无重试机制，已通知设备取消）".into());
+                return;
+            }
+            retries += 1;
+            emit_prog("receiving", got, blocks, retries, total, "块校验失败，已请求重发", false);
+            let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[NAK]).await;
+            continue;
+        };
+
+        if batch_tail {
+            // 收尾批次：块 0 全零 = 结束；非零 = 下一文件头（单文件模式，礼貌停批次）
+            let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[ACK]).await;
+            let _ = file.flush();
+            if data.iter().all(|&b| b == 0) {
+                finish(true, format!("接收完成：{rx_name}（{got} B，{blocks} 数据块，{retries} 次重试）"));
+            } else {
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[CAN, CAN]).await;
+                finish(true, format!("接收完成：{rx_name}（{got} B；后续文件批次未支持，已通知设备停止）"));
+            }
+            return;
+        }
+
+        if in_header {
+            match parse_ymodem_header(data) {
+                Some((name, size)) => {
+                    rx_name = name;
+                    total = size;
+                    in_header = false;
+                    expect = 1;
+                    if !g_mode {
+                        let _ =
+                            crate::serial::route_send(&app, &serial, &net, &ble, &[ACK]).await;
+                    }
+                    // ACK 后要就绪字节（'C'/'G'）设备才发数据块
+                    let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[ready]).await;
+                    emit_prog("receiving", 0, 0, retries, total, &format!("接收中：{rx_name}"), true);
+                }
+                None => {
+                    if g_mode {
+                        let _ =
+                            crate::serial::route_send(&app, &serial, &net, &ble, &[CAN, CAN]).await;
+                        finish(false, "批次头解析失败（YMODEM-G 无重试机制）".into());
+                        return;
+                    }
+                    retries += 1;
+                    let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[NAK]).await;
+                }
+            }
+            continue;
+        }
+
+        // 数据块：重复块再 ACK 不重写
+        if idx != expect {
+            if idx == expect.wrapping_sub(1) && idx != 0 {
+                if g_mode {
+                    let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[CAN, CAN]).await;
+                    finish(false, "收到重复数据块（YMODEM-G 流已错乱）".into());
+                    return;
+                }
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[ACK]).await;
+                continue;
+            }
+            if g_mode {
+                let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[CAN, CAN]).await;
+                finish(false, "数据块序号错乱（YMODEM-G 流已错乱）".into());
+                return;
+            }
+            retries += 1;
+            let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[NAK]).await;
+            continue;
+        }
+
+        let take = if total > 0 {
+            (data.len() as u64).min(total - got)
+        } else {
+            data.len() as u64
+        } as usize;
+        if take > 0 {
+            if let Err(e) = file.write_all(&data[..take]) {
+                finish(false, format!("写入文件失败: {e}"));
+                return;
+            }
+            if total == 0 {
+                let trailing = data[..take].iter().rev().take_while(|&&b| b == 0x1A).count();
+                tail_1a = if trailing == take { tail_1a + trailing } else { trailing };
+            }
+        }
+        got += take as u64;
+        blocks += 1;
+        expect = expect.wrapping_add(1);
+        if expect == 0 {
+            expect = 1; // 块号 0 保留，回绕跳过
+        }
+        if !g_mode {
+            let _ = crate::serial::route_send(&app, &serial, &net, &ble, &[ACK]).await;
+        }
+        emit_prog("receiving", got, blocks, retries, total, "", false);
+    }
+}
+
 // ---------- 命令 ----------
+
+/// 连接预检（发送/接收共用）：三个接口都没接管 → 提示先连接
+fn check_connected(app: &AppHandle) -> Result<(), String> {
+    let serial_ok = app.state::<SerialManager>().is_open();
+    let net_ok = crate::net::is_connected(&app.state::<crate::net::NetManager>());
+    let ble_ok = app.state::<crate::ble::BleManager>().is_connected();
+    if !serial_ok && !net_ok && !ble_ok {
+        return Err("请先连接接口（串口 / TCP / UDP / BLE）".into());
+    }
+    Ok(())
+}
+
+fn parse_proto(proto: &str) -> Result<XferProto, String> {
+    match proto {
+        "xmodem" => Ok(XferProto::Xmodem),
+        "xmodem1k" => Ok(XferProto::Xmodem1k),
+        "ymodem" => Ok(XferProto::Ymodem),
+        "ymodemg" => Ok(XferProto::YmodemG),
+        _ => Err(format!("未知传输协议: {proto}")),
+    }
+}
 
 #[tauri::command]
 pub async fn xfer_start(
@@ -475,19 +936,9 @@ pub async fn xfer_start(
     if crate::session::is_playing() {
         return Err("回放进行中，请先停止回放再传输".into());
     }
-    let kind = match proto.as_str() {
-        "xmodem" => XferProto::Xmodem,
-        "xmodem1k" => XferProto::Xmodem1k,
-        "ymodem" => XferProto::Ymodem,
-        _ => return Err(format!("未知传输协议: {proto}")),
-    };
+    let kind = parse_proto(&proto)?;
     // 连接预检：三个接口都没接管 → 提示先连接
-    let serial_ok = app.state::<SerialManager>().is_open();
-    let net_ok = crate::net::is_connected(&app.state::<crate::net::NetManager>());
-    let ble_ok = app.state::<crate::ble::BleManager>().is_connected();
-    if !serial_ok && !net_ok && !ble_ok {
-        return Err("请先连接接口（串口 / TCP / UDP / BLE）".into());
-    }
+    check_connected(&app)?;
     let file_name = PathBuf::from(&path)
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
@@ -507,6 +958,31 @@ pub async fn xfer_start(
     mgr.drain_rx();
     XFER_ACTIVE.store(true, Ordering::SeqCst);
     tauri::async_runtime::spawn(run_sender(app, kind, file_name, bytes, mgr));
+    Ok(())
+}
+
+/// 接收（设备 → PC）：path 为保存目标。就绪握手/块校验/写盘全在 Rust 侧，
+/// RX 数据块经 ingest tap（XFER_ACTIVE 截流）进队列，不污染帧管线/录制。
+#[tauri::command]
+pub async fn xfer_receive_start(
+    proto: String,
+    path: String,
+    app: AppHandle,
+    state: tauri::State<'_, Arc<XferManager>>,
+) -> Result<(), String> {
+    if is_active() {
+        return Err("已有文件传输在进行中".into());
+    }
+    if crate::session::is_playing() {
+        return Err("回放进行中，请先停止回放再传输".into());
+    }
+    let kind = parse_proto(&proto)?;
+    check_connected(&app)?;
+    let mgr = state.inner().clone();
+    mgr.abort.store(false, Ordering::SeqCst);
+    mgr.drain_rx();
+    XFER_ACTIVE.store(true, Ordering::SeqCst);
+    tauri::async_runtime::spawn(run_receiver(app, kind, path, mgr));
     Ok(())
 }
 
@@ -578,5 +1054,40 @@ mod tests {
         assert_eq!(hdr.len(), 128);
         assert!(hdr.starts_with(b"app.bin\01024\0"));
         assert!(hdr[15..].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn ymodem_header_parse_roundtrip() {
+        let blk = build_block(0, &ymodem_header0("fw.bin", 2048), true);
+        let (idx, data) = validate_block(&blk).expect("批次头块应校验通过");
+        assert_eq!(idx, 0);
+        let (name, size) = parse_ymodem_header(data).expect("批次头应可解析");
+        assert_eq!(name, "fw.bin");
+        assert_eq!(size, 2048);
+    }
+
+    #[test]
+    fn parse_ymodem_header_edge_cases() {
+        assert!(parse_ymodem_header(&[0u8; 128]).is_none()); // 全零 = 收尾批次头
+        let (name, size) = parse_ymodem_header(b"onlyname\0").expect("无大小区也应可解析");
+        assert_eq!(name, "onlyname");
+        assert_eq!(size, 0);
+    }
+
+    #[test]
+    fn validate_block_rejects_corruption() {
+        let mut blk = build_block(1, &[0x55; 128], true);
+        blk[132] ^= 0xFF; // 破坏 CRC 高字节
+        assert!(validate_block(&blk).is_none());
+        let mut blk = build_block(2, &[0x55; 128], true);
+        blk[2] = blk[1]; // 破坏 ~idx
+        assert!(validate_block(&blk).is_none());
+        let mut blk = build_block1k(3, &[0xAA; 1024]);
+        blk[1028] ^= 0x01; // 破坏 1K 块 CRC 低字节
+        assert!(validate_block(&blk).is_none());
+        let blk1k = build_block1k(4, &[0xAA; 1024]);
+        let (idx, data) = validate_block(&blk1k).expect("1K 块应通过");
+        assert_eq!(idx, 4);
+        assert_eq!(data.len(), 1024);
     }
 }

@@ -8,6 +8,7 @@ import type {
 } from "../../ipc/types";
 import { onRx, onTx } from "../../ipc/binbus";
 import { recordIpcLatency } from "../../ipc/ipcLatency";
+import { getSnapshot as getSettings } from "../settings/settingsStore";
 
 export type IfaceKind = "serial" | "tcp-client" | "tcp-server" | "udp" | "ble";
 
@@ -143,6 +144,7 @@ export async function init() {
   await listen<ConnStatePayload>("serial:state", (e) => {
     // port 事件带连接描述（串口名/网络地址/BLE 设备名），此前丢失导致状态栏描述为空
     set({ status: e.payload.status, error: e.payload.error, portName: e.payload.port });
+    maybeAutoReconnect(e.payload.status);
   });
   await listen<BleDeviceInfo[]>("ble:devices", (e) => {
     set({ bleDevices: e.payload });
@@ -237,6 +239,8 @@ export function resetRx() {
 
 export async function openPort() {
   set({ error: null });
+  manualClose = false;
+  retryN = 0;
   try {
     if (snapshot.iface === "serial") {
       if (!snapshot.config.port) throw new Error("请先选择串口");
@@ -262,12 +266,54 @@ export async function openPort() {
 }
 
 export async function closePort() {
+  manualClose = true;
+  if (retryTimer) {
+    window.clearTimeout(retryTimer);
+    retryTimer = 0;
+  }
   if (snapshot.iface === "serial") {
     await invoke("close_port");
   } else if (snapshot.iface === "ble") {
     await invoke("ble_disconnect");
   } else {
     await invoke("close_net");
+  }
+}
+
+/* ---- 自动重连（P62b；设置页 autoReconnect，默认关；BLE 需重扫选特征不参与） ---- */
+let manualClose = false;
+let everConnected = false;
+let retryTimer = 0;
+let retryN = 0;
+
+function scheduleReconnect() {
+  if (retryTimer || retryN >= 3) return;
+  retryN += 1;
+  retryTimer = window.setTimeout(() => {
+    retryTimer = 0;
+    if (manualClose || !getSettings().autoReconnect || snapshot.status === "connected") return;
+    void openPort().catch(() => {
+      // 设备仍未接上：openPort 直接 reject（无 state 事件），继续排下一次
+      if (!manualClose && getSettings().autoReconnect && snapshot.status !== "connected") scheduleReconnect();
+    });
+  }, 3000);
+}
+
+/** 供 state 监听调用：意外断开且开启自动重连时安排一次 3s 后重试（最多 3 次） */
+function maybeAutoReconnect(status: SerialStatus) {
+  if (status === "connected") {
+    everConnected = true;
+    retryN = 0;
+    return;
+  }
+  if (
+    status === "disconnected" &&
+    everConnected &&
+    !manualClose &&
+    snapshot.iface !== "ble" &&
+    getSettings().autoReconnect
+  ) {
+    scheduleReconnect();
   }
 }
 

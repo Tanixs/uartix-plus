@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -26,6 +26,8 @@ import {
   type ExtType,
 } from "../ai/extensionStore";
 import { applyStyleExts, startScript, stopScript } from "../ai/extRuntime";
+import * as sentinelStore from "../sentinel/sentinelStore";
+import { imageStoreStats, setImageLimits, clearAllImages } from "../ai/imageStore";
 import { popWidgetToDesktop } from "../ai/widgetShell";
 import { openExtPanel } from "../ai/extBus";
 import { Section } from "../../shared/Section";
@@ -33,6 +35,14 @@ import { HelpHint } from "../../shared/HelpHint";
 import { IconEye, IconEyeOff } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
+
+function fmtBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return "-";
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
 
 const PRESETS: { key: WorkspacePreset; label: string; desc: string }[] = [
   { key: "proto", label: t("set.preset.proto"), desc: "画布 + 属性 + Hex" },
@@ -388,16 +398,44 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
 
 export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayout, onSaveLayout }: { onClose: () => void; onResetLayout: (p: WorkspacePreset) => void; initialTab?: string; onApplyLayout: (id: string) => boolean; onSaveLayout: (name: string) => boolean }) {
   const settings = useSettings();
+  const snt = useSyncExternalStore(sentinelStore.subscribe, sentinelStore.getSnapshot);
   const layouts = useLayouts();
   const [layoutName, setLayoutName] = useState("");
   const [tab, setTab] = useState(initialTab ?? "general");
   const [msg, setMsg] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const [storage, setStorage] = useState<{ local: number; idb: { count: number; bytes: number } | null; quota: { usage: number; quota: number } | null } | null>(null);
   const [updState, setUpdState] = useState<{
     status: "idle" | "checking" | "downloading" | "latest" | "ready" | "error";
     msg: string;
   }>({ status: "idle", msg: "" });
+
+  // 存储占用：进「数据」页时采集（localStorage 全 key + AI 图片 IDB + 浏览器配额）
+  useEffect(() => {
+    if (tab !== "data") return;
+    let alive = true;
+    const collect = async () => {
+      let local = 0;
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k) local += k.length + (localStorage.getItem(k)?.length ?? 0);
+        }
+      } catch {
+        /* 忽略 */
+      }
+      const [idb, est] = await Promise.all([
+        imageStoreStats().catch(() => null),
+        navigator.storage?.estimate?.().catch(() => null) ?? Promise.resolve(null),
+      ]);
+      if (alive) setStorage({ local: local * 2, idb, quota: est ? { usage: est.usage ?? 0, quota: est.quota ?? 0 } : null });
+    };
+    void collect();
+    return () => {
+      alive = false;
+    };
+  }, [tab]);
 
   useEffect(() => {
     getVersion()
@@ -430,6 +468,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     { key: "general", label: t("set.general") },
     { key: "workspace", label: t("set.workspace") },
     { key: "data", label: t("set.data") },
+    { key: "monitor", label: tx("监测", "Monitoring") },
     { key: "ai", label: t("set.ai") },
     { key: "ext", label: t("set.ext") },
     { key: "io", label: t("set.io") },
@@ -524,6 +563,18 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     ))}
                   </div>
                 ), t("set.zoom.tip"))}
+                {row(tx("减弱动效", "Reduce motion"), (
+                  <label className="set-switch">
+                    <input type="checkbox" checked={settings.reduceMotion} onChange={(e) => patch({ reduceMotion: e.target.checked })} />
+                    <span />
+                  </label>
+                ), tx("关闭呼吸灯、闪烁与过渡动画（不依赖系统设置）；低配设备或动画敏感场景可开", "Turn off pulsing, blinking and transitions regardless of the OS setting; useful on weak hardware or motion sensitivity"))}
+                {row(tx("断线自动重连", "Auto reconnect"), (
+                  <label className="set-switch">
+                    <input type="checkbox" checked={settings.autoReconnect} onChange={(e) => patch({ autoReconnect: e.target.checked })} />
+                    <span />
+                  </label>
+                ), tx("串口/TCP/UDP 意外断开后（拔线、对端重启）每 3 秒重试连接，最多 3 次；手动断开不触发，BLE 不参与", "After an unexpected drop (unplug, peer restart) retry serial/TCP/UDP every 3s, up to 3 times; manual close never triggers it; BLE excluded"))}
               </>
             )}
             {tab === "workspace" && (
@@ -676,6 +727,130 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <option value="cbSafe">{tx("色觉友好（Okabe-Ito）", "Color-blind safe (Okabe-Ito)")}</option>
                   </select>
                 ), tx("新加入的 2D 曲线通道自动分配颜色时使用；色觉友好板在各类色觉缺陷下仍可区分（已手动改色的通道不受影响）", "Palette used when new 2D curve channels get auto colors; the safe palette stays distinguishable under common color vision deficiencies (manually recolored channels unaffected)"))}
+                <div className="set-group-title">{tx("存储占用", "Storage usage")}</div>
+                {row(tx("本地数据", "Local data"), (
+                  <span className="set-usage">
+                    {storage
+                      ? tx(
+                          `设置与历史 ${fmtBytes(storage.local)} · AI 图片 ${storage.idb ? `${storage.idb.count} 张 / ${fmtBytes(storage.idb.bytes)}` : tx("不可用", "n/a")}${storage.quota ? ` · 浏览器配额 ${fmtBytes(storage.quota.usage)} / ${fmtBytes(storage.quota.quota)}` : ""}`,
+                          `Settings & history ${fmtBytes(storage.local)} · AI images ${storage.idb ? `${storage.idb.count} / ${fmtBytes(storage.idb.bytes)}` : "n/a"}${storage.quota ? ` · browser quota ${fmtBytes(storage.quota.usage)} / ${fmtBytes(storage.quota.quota)}` : ""}`,
+                        )
+                      : tx("采集中…", "measuring…")}
+                  </span>
+                ), tx("localStorage 存设置/会话/聊天文本（上限约 5MB），AI 聊天图片存 IndexedDB；「+面板」等布局也计入设置", "localStorage holds settings/sessions/chat text (~5MB cap); AI chat images live in IndexedDB; panel layouts count as settings too"))}
+                {row(tx("AI 图片上限", "AI image limits"), (
+                  <span className="set-inline">
+                    <input
+                      type="number"
+                      className="input"
+                      style={{ width: 72 }}
+                      min={10}
+                      max={5000}
+                      defaultValue={Number(localStorage.getItem("vs.aiImages.max")) || 300}
+                      key={`imgc-${tab}`}
+                      onBlur={(e) => {
+                        const c = Math.round(Number(e.target.value));
+                        const m = Math.round(Number(localStorage.getItem("vs.aiImages.mb")) || 64);
+                        if (Number.isFinite(c)) setImageLimits(c, m);
+                      }}
+                    />
+                    <span className="set-usage">{tx("张 ×", "items ×")}</span>
+                    <input
+                      type="number"
+                      className="input"
+                      style={{ width: 72 }}
+                      min={8}
+                      max={512}
+                      defaultValue={Number(localStorage.getItem("vs.aiImages.mb")) || 64}
+                      key={`imgm-${tab}`}
+                      onBlur={(e) => {
+                        const m = Math.round(Number(e.target.value));
+                        const c = Math.round(Number(localStorage.getItem("vs.aiImages.max")) || 300);
+                        if (Number.isFinite(m)) setImageLimits(c, m);
+                      }}
+                    />
+                    <span className="set-usage">MB</span>
+                  </span>
+                ), tx("超出上限按最久未用淘汰（LRU）；修改后立即按新上限整理", "Least-recently-used images are evicted beyond the cap; changes prune immediately"))}
+                {row(tx("清理", "Cleanup"), (
+                  <span className="set-inline">
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        void clearAllImages().then(async () => {
+                          setMsg(tx("AI 图片缓存已清空（聊天里的旧图刷新后不再显示）", "AI image cache cleared (old chat images won't restore after reload)"));
+                          const idb = await imageStoreStats().catch(() => null);
+                          setStorage((prev) => (prev ? { ...prev, idb } : prev));
+                        });
+                      }}
+                    >
+                      {tx("清空 AI 图片", "Clear AI images")}
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        sentinelStore.clearAlerts();
+                        setMsg(tx("哨兵报警历史已清空", "Sentinel alert history cleared"));
+                      }}
+                    >
+                      {tx("清空哨兵报警", "Clear sentinel alerts")}
+                    </button>
+                  </span>
+                ), tx("不影响协议模板/命令/卡片等配置；聊天文字记录也不会被删", "Protocol templates, commands and cards are untouched; chat text history stays too"))}
+              </>
+            )}
+            {tab === "monitor" && (
+              <>
+                <div className="set-group-title">{tx("异常检测", "Anomaly detection")}</div>
+                {row(tx("突变灵敏度", "Spike sensitivity"), (
+                  <select className="input" style={{ width: 150 }} value={snt.cfg.sensitivity} onChange={(e) => sentinelStore.setSensitivity(e.target.value as "low" | "mid" | "high")}>
+                    <option value="low">{tx("低（少误报）", "Low (fewer false alarms)")}</option>
+                    <option value="mid">{tx("中", "Medium")}</option>
+                    <option value="high">{tx("高（快检出）", "High (fast detection)")}</option>
+                  </select>
+                ), tx("数值通道双 EMA z-score 报警阈值；哨兵面板未打开时也可在此预设", "Dual-EMA z-score threshold for channel spikes; preset here even when the panel is closed"))}
+                {row(tx("静默阈值", "Silence threshold"), (
+                  <select className="input" style={{ width: 90 }} value={snt.cfg.silenceSec} onChange={(e) => sentinelStore.setSilenceSec(Number(e.target.value))}>
+                    {[1, 2, 3, 5, 10, 15, 30].map((n) => (
+                      <option key={n} value={n}>{n}s</option>
+                    ))}
+                  </select>
+                ), tx("连接中超过该时长收不到任何帧即报「通信静默」", "Report link silence when connected but no frames for this long"))}
+                {row(tx("错误帧率阈值", "Error-rate threshold"), (
+                  <select className="input" style={{ width: 90 }} value={snt.cfg.errRatePct} onChange={(e) => sentinelStore.setErrRatePct(Number(e.target.value))}>
+                    {[5, 10, 20, 50].map((n) => (
+                      <option key={n} value={n}>{n}%</option>
+                    ))}
+                  </select>
+                ), tx("近 3 秒解码错误帧占比超该值报警", "Alert when the invalid-frame ratio over the last 3s exceeds this"))}
+                <div className="set-group-title">{tx("报警", "Alerts")}</div>
+                {row(tx("报警提示音", "Alert sound"), (
+                  <label className="set-switch">
+                    <input type="checkbox" checked={snt.cfg.sound} onChange={(e) => sentinelStore.setSound(e.target.checked)} />
+                    <span />
+                  </label>
+                ), tx("哨兵新报警的合成提示音：严重三连哔 / 警告单哔 / 恢复柔音", "Synthesized tones for new sentinel alerts: critical triple beep / warning single / recovery soft"))}
+                {snt.cfg.sound && row(tx("提示音音量", "Alert volume"), (
+                  <span className="set-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={snt.cfg.volume}
+                      onChange={(e) => sentinelStore.setVolume(Number(e.target.value))}
+                      onMouseUp={() => void import("../sentinel/sentinelSound").then((m) => m.playAlertTone("warn", false, snt.cfg.volume))}
+                      style={{ width: 140, accentColor: "var(--accent)" }}
+                    />
+                    <span className="set-usage">{snt.cfg.volume}</span>
+                  </span>
+                ), tx("拖动后松开可试听一次", "Release the slider to preview once"))}
+                {row(tx("报警历史容量", "Alert history cap"), (
+                  <select className="input" style={{ width: 90 }} value={snt.cfg.alertCap} onChange={(e) => sentinelStore.setAlertCap(Number(e.target.value))}>
+                    {[100, 200, 500, 1000, 2000].map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                ), tx("哨兵面板保留的报警条数（环形覆盖，最旧被挤掉）", "How many alerts the sentinel keeps (ring buffer, oldest evicted)"))}
               </>
             )}
             {tab === "ai" && (

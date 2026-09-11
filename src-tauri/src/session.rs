@@ -596,6 +596,11 @@ pub fn session_start_record(
     if is_playing() {
         return Err("回放进行中，无法开始录制".into());
     }
+    // 传输激活期间 RX 被截流（只喂协议状态机，见 pipeline ingest tap），
+    // 录制会得到一段"看似安静"的空洞——直接拒绝，比静默产出残缺会话好
+    if crate::xfer::is_active() {
+        return Err("文件传输进行中：传输期间接收数据不会进入录制，请先完成或取消传输".into());
+    }
     if sess.recording.swap(true, Ordering::SeqCst) {
         return Err("已在录制中".into());
     }

@@ -9,6 +9,13 @@ if (location.hash.startsWith("#/aiwidget-desktop/")) {
       <WidgetDesktop />,
     );
   });
+} else if (location.hash === "#/sentinel-widget") {
+  // 哨兵桌面挂件窗（P62-S2）：同样独立轻量根
+  void import("./features/sentinel/SentinelWidget").then(({ SentinelWidget }) => {
+    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+      <SentinelWidget />,
+    );
+  });
 } else {
   void import("./App").then(({ default: App }) => {
     void import("./shared/ErrorBoundary").then(({ ErrorBoundary }) => {

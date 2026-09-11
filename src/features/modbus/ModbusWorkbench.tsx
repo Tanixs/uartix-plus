@@ -2,6 +2,8 @@ import { useState, useSyncExternalStore } from "react";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconPlay, IconStop, IconTrash } from "../../shared/icons";
 import * as slave from "./slaveStore";
+import * as pollStore from "./pollStore";
+import { toast } from "../ai/extRuntime";
 import { MB_EXCEPTION_LABELS, type MbArea } from "./mb";
 import { ModbusPoll } from "./ModbusPoll";
 
@@ -66,7 +68,23 @@ function SlaveTab() {
         <button
           type="button"
           className={`btn sm${s.running ? " warn" : " primary"}`}
-          onClick={() => (s.running ? slave.stop() : slave.start())}
+          onClick={() => {
+            if (s.running) {
+              slave.stop();
+              return;
+            }
+            // 互斥对称：轮询在跑时拒绝启从站（轮询侧同理，见 pollStore.blockReason）
+            if (pollStore.isRunning()) {
+              toast(
+                tx(
+                  "主站轮询正在运行：请先停轮询再开从站——自己问自己答会得出「假健康」",
+                  "Master poller is running: stop it before starting the slave — answering your own requests fakes good health",
+                ),
+              );
+              return;
+            }
+            slave.start();
+          }}
           title={
             s.running
               ? tx("停止应答（从总线退出）", "Stop answering (leave the bus)")

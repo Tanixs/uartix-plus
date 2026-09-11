@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as panelActivity from "../../panels/panelActivity";
 import { updateChatFeed } from "./aiChatFeed";
+import { saveImage, restoreImages, deleteImages } from "./imageStore";
 import {
   getSnapshot as getSettings,
   subscribe as subscribeSettings,
@@ -48,8 +49,11 @@ export interface ChatMsg {
   contextTitles?: string[];
   /** 该消息已自动续写的次数（[[need:xxx]] 机制），上限 2 */
   conts?: number;
-  /** 用户消息附带的图片（data URL，已压缩；不持久化，刷新后历史仅剩文字） */
+  /** 用户消息附带的图片（data URL，已压缩；本体存 IndexedDB（imageStore.ts），
+   *  imgIds 随会话持久化，刷新后经 hydrateImages 恢复） */
   images?: string[];
+  /** IndexedDB 图片记录 id（与 images 一一对应；持久化用） */
+  imgIds?: string[];
 }
 
 export interface UsageCounter {
@@ -177,7 +181,8 @@ function persistSoon() {
 }
 
 function persistNow() {
-  // 图片 data URL 不落盘（localStorage 容量保护）：历史仅保留文字，当前轮内可见
+  // 图片 data URL 不落 localStorage（容量保护）：本体在 IndexedDB（imageStore.ts），
+  // 这里只保留轻量 imgIds，刷新后由 hydrateImages 恢复
   const sessions = snapshot.sessions.slice(0, MAX_SESSIONS).map((s) => ({
     ...s,
     messages: (s.messages.length > MAX_MSGS ? s.messages.slice(-MAX_MSGS) : s.messages).map(
@@ -367,6 +372,25 @@ export async function init() {
   });
   panelActivity.subscribe(recheckLifecycle);
   subscribeSettings(recheckLifecycle);
+  // 历史图片恢复（P51）：刷新后有 imgIds 的消息从 IndexedDB 拉回图片本体
+  void hydrateImages();
+}
+
+/** 为有 imgIds 而 images 缺失的消息恢复图片（模块加载后/刷新后调用一次） */
+async function hydrateImages(): Promise<void> {
+  let changed = false;
+  for (const sess of snapshot.sessions) {
+    for (const m of sess.messages) {
+      if (m.imgIds?.length && !m.images) {
+        const imgs = await restoreImages(m.imgIds);
+        if (imgs.length) {
+          m.images = imgs;
+          changed = true;
+        }
+      }
+    }
+  }
+  if (changed) emit();
 }
 
 /* ---------------- ask 队列（小部件/脚本向 AI 提问，忙时排队） ---------------- */
@@ -452,6 +476,10 @@ export function deleteSession(id: string) {
   const idx = snapshot.sessions.findIndex((s) => s.id === id);
   if (idx < 0) return;
   if (snapshot.streaming && id === snapshot.activeId) abort();
+  // 会话内图片记录一并清理（尽力而为）
+  for (const m of snapshot.sessions[idx].messages) {
+    if (m.imgIds?.length) void deleteImages(m.imgIds);
+  }
   snapshot.sessions.splice(idx, 1);
   if (snapshot.sessions.length === 0) {
     const s = newSessionObj();
@@ -472,7 +500,8 @@ export function deleteMsg(id: string) {
   const idx = s.messages.findIndex((m) => m.id === id);
   if (idx < 0) return;
   if (snapshot.streaming && idx === s.messages.length - 1) abort();
-  s.messages.splice(idx, 1);
+  const [rm] = s.messages.splice(idx, 1);
+  if (rm?.imgIds?.length) void deleteImages(rm.imgIds);
   persistSoon();
   emit();
 }
@@ -505,8 +534,12 @@ export async function editResend(id: string, newText: string): Promise<void> {
   if (idx < 0) return;
   const msg = s.messages[idx];
   if (msg.role !== "user") return;
+  // 被截断的消息图片记录一并清理（尽力而为）
+  for (const m of s.messages.slice(idx)) {
+    if (m.imgIds?.length) void deleteImages(m.imgIds);
+  }
   s.messages = s.messages.slice(0, idx);
-  s.messages.push({ ...msg, id: crypto.randomUUID(), content: text, ts: Date.now() });
+  s.messages.push({ ...msg, id: crypto.randomUUID(), content: text, ts: Date.now(), imgIds: undefined, images: undefined });
   emit();
   await doSend(text, msg.scene ?? "qa", collectContext(snapshot.contextSel));
 }
@@ -681,10 +714,11 @@ export async function sendText(
   const useSel = { ...snapshot.contextSel, ...sel };
   if (sel) snapshot.contextSel = useSel;
   const s = cur();
+  const msgId = crypto.randomUUID();
   s.messages = [
     ...s.messages,
     {
-      id: crypto.randomUUID(),
+      id: msgId,
       role: "user",
       content: trimmed,
       ts: Date.now(),
@@ -693,6 +727,23 @@ export async function sendText(
     },
   ];
   emit();
+  // 图片本体落 IndexedDB（P51）：保存成功后把 imgIds 挂回消息并持久化；
+  // 失败静默降级（该消息图片仅当前轮可见）
+  if (images && images.length) {
+    void (async () => {
+      try {
+        const ids: string[] = [];
+        for (const d of images) ids.push(await saveImage(msgId, d));
+        const m = s.messages.find((x) => x.id === msgId);
+        if (m) {
+          m.imgIds = ids;
+          persistSoon();
+        }
+      } catch {
+        /* IndexedDB 不可用：跳过持久化 */
+      }
+    })();
+  }
   // 普通对话：按用户消息预判需要的格式规范，命中则预注入（省去第二轮续写请求）
   const extra = scene === "qa" ? routeNeeds(trimmed).slice(0, 3) : undefined;
   await doSend(trimmed, scene, collectContext(useSel), extra, images);

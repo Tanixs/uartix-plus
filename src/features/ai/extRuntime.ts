@@ -72,6 +72,8 @@ export const THEME_VAR_KEYS = [
   "--accent",
   "--accent-soft",
   "--danger",
+  "--warn",
+  "--ok",
   "--shadow",
   "--scrollbar",
   "--scrollbar-hover",

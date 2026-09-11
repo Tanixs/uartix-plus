@@ -15,6 +15,8 @@ import type { WorkspacePreset } from "./features/settings/settingsStore";
 import { JsonDropImport } from "./features/settings/JsonDropImport";
 import { AiFloat } from "./features/ai/AiFloat";
 import { WidgetFloats } from "./features/ai/WidgetFloats";
+import { SentinelFloat } from "./features/sentinel/SentinelPanel";
+import * as sentinelStore from "./features/sentinel/sentinelStore";
 import { startWidgetHub } from "./features/ai/widgetHub";
 import { startExtRuntime } from "./features/ai/extRuntime";
 import {
@@ -298,6 +300,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.perfHud]);
 
+  // 减弱动效：html.no-motion 全局禁动画/过渡（CSS 规则见 theme.css）
+  useEffect(() => {
+    document.documentElement.classList.toggle("no-motion", settings.reduceMotion);
+  }, [settings.reduceMotion]);
+
   useEffect(() => {
     serialStore.init();
     templateStore.init();
@@ -309,6 +316,7 @@ export default function App() {
     fcStore.init();
     sessionStore.init();
     xferStore.init();
+    sentinelStore.init();
     void chatStore.init();
     startWidgetHub();
     startExtRuntime();
@@ -323,6 +331,10 @@ export default function App() {
     const unAppBus = subscribeAppBus((msg) => {
       if (msg.kind === "openPanel") {
         addOrFocusPanel(msg.panel);
+      } else if (msg.kind === "closePanel") {
+        const api = apiRef.current;
+        const panel = api?.getPanel(msg.panel);
+        if (api && panel) api.removePanel(panel);
       } else if (msg.kind === "applyPreset") {
         patch({ workspace: msg.preset as WorkspacePreset });
         resetLayout(msg.preset as WorkspacePreset);
@@ -732,6 +744,7 @@ export default function App() {
         />
       )}
       <WidgetFloats />
+      <SentinelFloat />
       <JsonDropImport />
     </div>
   );

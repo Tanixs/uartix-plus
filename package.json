@@ -8,8 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "lint": "eslint src",
+    "lint": "eslint src scripts",
     "test": "vitest run",
+    "build:seq": "node scripts/build-seq-cli.mjs",
     "check:theme": "node .tools/check-contrast.cjs",
     "check:aria": "node .tools/check-aria.cjs"
   },

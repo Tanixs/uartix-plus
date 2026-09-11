@@ -48,6 +48,10 @@ export interface Settings {
   showThinking: boolean;
   chartPalette: "standard" | "cbSafe";
   conWrap: boolean;
+  /** 减弱动效：强制关闭呼吸/过渡动画（独立于系统 prefers-reduced-motion） */
+  reduceMotion: boolean;
+  /** 串口/网络意外断开后自动重连（用户主动断开不触发） */
+  autoReconnect: boolean;
 }
 
 export type AiPreset = "openai" | "deepseek" | "zhipu" | "qwen" | "ollama" | "anthropic";
@@ -110,6 +114,8 @@ function load(): Settings {
     showThinking: true,
     chartPalette: "standard",
     conWrap: true,
+    reduceMotion: false,
+    autoReconnect: false,
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -157,6 +163,8 @@ function load(): Settings {
       showThinking: p.showThinking === undefined ? true : Boolean(p.showThinking),
       chartPalette: p.chartPalette === "cbSafe" ? "cbSafe" : "standard",
       conWrap: p.conWrap === undefined ? true : Boolean(p.conWrap),
+      reduceMotion: Boolean(p.reduceMotion),
+      autoReconnect: Boolean(p.autoReconnect),
     };
   } catch {
     return fallback;

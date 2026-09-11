@@ -12,6 +12,8 @@
   --accent: #d05f6e;
   --accent-soft: rgba(208, 95, 110, 0.16);
   --danger: #e5534b;
+  --warn: #d29922;
+  --ok: #42b063;
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   --scrollbar: #2d3c56;
   --scrollbar-hover: #3f5170;

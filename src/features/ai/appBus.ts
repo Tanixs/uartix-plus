@@ -4,7 +4,8 @@
  */
 export type AppBusMsg =
   | { kind: "openPanel"; panel: string }
-  | { kind: "applyPreset"; preset: string };
+  | { kind: "applyPreset"; preset: string }
+  | { kind: "closePanel"; panel: string };
 
 type Handler = (msg: AppBusMsg) => void;
 
@@ -27,4 +28,9 @@ export function requestOpenPanel(panel: string) {
 
 export function requestApplyPreset(preset: string) {
   emit({ kind: "applyPreset", preset });
+}
+
+/** 请求关闭面板（P62 哨兵最小化到浮球用） */
+export function requestClosePanel(panel: string) {
+  emit({ kind: "closePanel", panel });
 }

@@ -203,3 +203,30 @@ describe("表编辑", () => {
     expect(b.varName).toContain("0");
   });
 });
+
+describe("历史曲线（M2 遗留补齐）", () => {
+  it("成功读数进入 hist，超出 HIST_CAP 只留最新段；清统计时重置", () => {
+    poll.addRow({ enabled: true, slave: 1, fn: 3, addr: 0, qty: 1, periodMs: 20, varName: "H1" });
+    poll.start();
+    vi.advanceTimersByTime(10);
+    for (let i = 0; i < poll.HIST_CAP + 5; i++) {
+      sendMaster(buildRtuResponse(1, [0x03, 2, (i >> 8) & 0xff, i & 0xff]));
+      vi.advanceTimersByTime(30); // 周期 20ms：下一轮到点
+    }
+    const r = poll.getSnapshot().rows[0];
+    expect(r.hist.length).toBe(poll.HIST_CAP);
+    expect(r.hist[r.hist.length - 1]).toBe(poll.HIST_CAP + 4); // 最新值在尾部
+    expect(r.hist[0]).toBe(5); // 最早 5 个被环形挤掉
+    poll.resetStats();
+    expect(poll.getSnapshot().rows[0].hist.length).toBe(0);
+  });
+
+  it("isRunning 供从站侧做对称互斥检查", () => {
+    expect(poll.isRunning()).toBe(false);
+    poll.addRow({ enabled: true });
+    poll.start();
+    expect(poll.isRunning()).toBe(true);
+    poll.stop();
+    expect(poll.isRunning()).toBe(false);
+  });
+});

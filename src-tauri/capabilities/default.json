@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window and AI widget desktop windows",
-  "windows": ["main", "aiwidget-*"],
+  "description": "Capability for the main window, AI widget desktop windows and the sentinel widget window",
+  "windows": ["main", "aiwidget-*", "sentinel-widget"],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",

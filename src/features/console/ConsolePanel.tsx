@@ -73,7 +73,7 @@ export function ConsolePanel() {
   const [xferOpen, setXferOpen] = useState(false);
   const [xferInit, setXferInit] = useState<{
     proto: string;
-    path: string;
+    paths: string[];
     seq: number;
   } | null>(null);
   const xferSnap = useSyncExternalStore(xferStore.subscribe, xferStore.getSnapshot);
@@ -82,7 +82,7 @@ export function ConsolePanel() {
   useEffect(() => {
     const req = xferSnap.aiPrefill;
     if (!req) return;
-    setXferInit({ proto: req.proto, path: req.path, seq: req.seq });
+    setXferInit({ proto: req.proto, paths: req.paths, seq: req.seq });
     setXferOpen(true);
     xferStore.consumeAiPrefill();
   }, [xferSnap.aiPrefill]);
