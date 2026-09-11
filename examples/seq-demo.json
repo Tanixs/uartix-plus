@@ -1,0 +1,60 @@
+{
+  "name": "回环冒烟（CI 演示）",
+  "steps": [
+    {
+      "kind": "note",
+      "id": "n1",
+      "enabled": true,
+      "text": "回环设备收到什么回什么；本套件验证 send → waitForFrame(raw) → 分组循环 断言链路，供 uartix-seq --loopback 无硬件运行"
+    },
+    {
+      "kind": "send",
+      "id": "s1",
+      "enabled": true,
+      "payload": { "type": "hex", "text": "01 03 00 00 00 02 C4 0B" }
+    },
+    {
+      "kind": "waitForFrame",
+      "id": "w1",
+      "enabled": true,
+      "match": { "by": "raw", "hex": "01 03 00 00 00 02" },
+      "timeoutMs": 2000
+    },
+    {
+      "kind": "send",
+      "id": "s2",
+      "enabled": true,
+      "payload": { "type": "hex", "text": "50 49 4E 47" }
+    },
+    {
+      "kind": "waitForFrame",
+      "id": "w2",
+      "enabled": true,
+      "match": { "by": "raw", "hex": "50 49 4E 47" },
+      "timeoutMs": 2000
+    },
+    {
+      "kind": "group",
+      "id": "g1",
+      "enabled": true,
+      "name": "连续 3 轮查询-应答",
+      "repeats": 3,
+      "onFailure": "abort",
+      "children": [
+        {
+          "kind": "send",
+          "id": "g1s",
+          "enabled": true,
+          "payload": { "type": "hex", "text": "AA 55" }
+        },
+        {
+          "kind": "waitForFrame",
+          "id": "g1w",
+          "enabled": true,
+          "match": { "by": "raw", "hex": "AA 55" },
+          "timeoutMs": 1000
+        }
+      ]
+    }
+  ]
+}

@@ -25,8 +25,11 @@ import {
   type AiExtension,
   type ExtType,
 } from "../ai/extensionStore";
-import { applyStyleExts, startScript, stopScript } from "../ai/extRuntime";
+import { applyStyleExts, startScript, stopScript, toast } from "../ai/extRuntime";
 import * as sentinelStore from "../sentinel/sentinelStore";
+import * as mcpServer from "../mcp/mcpServer";
+import { OperatorGenBlock } from "../operator/OperatorGen";
+import { mcpServerConfig } from "../mcp/mcpTools";
 import { imageStoreStats, setImageLimits, clearAllImages } from "../ai/imageStore";
 import { popWidgetToDesktop } from "../ai/widgetShell";
 import { openExtPanel } from "../ai/extBus";
@@ -404,6 +407,8 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const [tab, setTab] = useState(initialTab ?? "general");
   const [msg, setMsg] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const [mcpCliPath, setMcpCliPath] = useState(() => localStorage.getItem("vs.mcpCliPath") ?? "");
+  const mcpSt = useSyncExternalStore(mcpServer.subscribe, mcpServer.getStatus);
   const [appVersion, setAppVersion] = useState("");
   const [storage, setStorage] = useState<{ local: number; idb: { count: number; bytes: number } | null; quota: { usage: number; quota: number } | null } | null>(null);
   const [updState, setUpdState] = useState<{
@@ -471,6 +476,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     { key: "monitor", label: tx("监测", "Monitoring") },
     { key: "ai", label: t("set.ai") },
     { key: "ext", label: t("set.ext") },
+    { key: "mcp", label: tx("集成", "Integration") },
     { key: "io", label: t("set.io") },
     { key: "about", label: t("set.about") },
   ];
@@ -1055,6 +1061,98 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               </>
             )}
             {tab === "ext" && <ExtPage notify={setMsg} />}
+            {tab === "mcp" && (
+              <>
+                <div className="set-group-title">{tx("MCP 服务器（AI IDE 反向集成）", "MCP server (AI IDE integration)")}</div>
+                {row(tx("启用 MCP 桥", "Enable MCP bridge"), (
+                  <label className="set-switch">
+                    <input type="checkbox" checked={settings.mcpEnabled} onChange={(e) => patch({ mcpEnabled: e.target.checked })} />
+                    <span />
+                  </label>
+                ), tx("在本机 127.0.0.1 开一个受 token 保护的本地控制平面，让 Claude Desktop / Cursor 等 AI IDE 经 MCP 直接读取实时遥测、发送指令、跑测试序列。关闭时零开销", "Runs a token-protected localhost control plane so AI IDEs (Claude Desktop / Cursor) can read live telemetry, send commands and run test sequences over MCP. Zero overhead when off"))}
+                {row(tx("端口", "Port"), (
+                  <input
+                    className="input"
+                    style={{ width: 110 }}
+                    inputMode="numeric"
+                    value={settings.mcpPort}
+                    onChange={(e) => {
+                      const n = Math.round(Number(e.target.value));
+                      if (Number.isFinite(n)) patch({ mcpPort: n });
+                    }}
+                    onBlur={(e) => {
+                      const n = Math.round(Number(e.target.value));
+                      if (!Number.isFinite(n) || n < 1024 || n > 65535) patch({ mcpPort: 7731 });
+                    }}
+                  />
+                ), tx("1024~65535；被占用时启动会给出提示，改端口即可。客户端经发现文件自动定位，无需同步修改配置", "1024~65535. Clients auto-locate the app via the discovery file, so changing this needs no config edits"))}
+                {row(tx("握手 Token", "Handshake token"), (
+                  <span className="set-inline">
+                    <input className="input" style={{ width: 260 }} readOnly value={settings.mcpToken} onFocus={(e) => e.currentTarget.select()} />
+                    <button className="btn" onClick={() => patch({ mcpToken: crypto.randomUUID().replace(/-/g, "") })}>
+                      {tx("重新生成", "Regenerate")}
+                    </button>
+                  </span>
+                ), tx("桥接客户端首次连接必须出示此 token；重新生成后旧配置立即失效", "Bridge clients must present this token on connect; regenerating invalidates old ones instantly"))}
+                {row(tx("桥接 CLI 路径", "Bridge CLI path"), (
+                  <input
+                    className="input"
+                    style={{ width: 340 }}
+                    value={mcpCliPath}
+                    placeholder="…\\dist-cli\\uartix-mcp.cjs"
+                    onChange={(e) => {
+                      setMcpCliPath(e.target.value);
+                      localStorage.setItem("vs.mcpCliPath", e.target.value);
+                    }}
+                  />
+                ), tx("uartix-mcp.cjs 的绝对路径（npm run build:mcp 产出）。下面的复制配置会使用它；需要本机装有 Node ≥ 18", "Absolute path to uartix-mcp.cjs (built by npm run build:mcp), used by the copy buttons below; requires Node ≥ 18"))}
+                {row(tx("复制客户端配置", "Copy client config"), (
+                  <span className="set-inline">
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(mcpServerConfig(mcpCliPath)).then(
+                          () => toast("已复制 Claude Desktop / Cursor 通用配置"),
+                          () => toast("复制失败：请手动复制输入框内容"),
+                        );
+                      }}
+                    >
+                      {tx("复制 MCP JSON", "Copy MCP JSON")}
+                    </button>
+                  </span>
+                ), tx("粘贴到 %APPDATA%\\Claude\\claude_desktop_config.json 或 Cursor 的 ~/.cursor/mcp.json，重启客户端即可", "Paste into %APPDATA%\\Claude\\claude_desktop_config.json or Cursor's ~/.cursor/mcp.json and restart the client"))}
+                <div className="set-group-title">{tx("远程权限", "Remote permissions")}</div>
+                {row(tx("允许远程发送", "Allow remote sending"), (
+                  <label className="set-switch">
+                    <input type="checkbox" checked={settings.mcpAllowSend} onChange={(e) => patch({ mcpAllowSend: e.target.checked })} />
+                    <span />
+                  </label>
+                ), tx("关闭时 send / run_sequence 工具直接拒绝；开启后 IDE 智能体可真实向设备发包", "send / run_sequence tools are rejected while off; when on, IDE agents can really send to the device"))}
+                {row(tx("允许高权限动作", "Allow high-privilege actions"), (
+                  <label className="set-switch">
+                    <input type="checkbox" checked={settings.mcpHighPriv} onChange={(e) => patch({ mcpHighPriv: e.target.checked })} />
+                    <span />
+                  </label>
+                ), tx("openPort/closePort、删除模板/命令/卡片等破坏性动作的开关（与 AI 脚本高权限同一集合）", "Gates openPort/closePort and destructive remove actions (same set as AI script high privilege)"))}
+                <div className="set-group-title">{tx("运行状态", "Runtime status")}</div>
+                {row(tx("桥状态", "Bridge status"), (
+                  <span className="set-usage">
+                    {mcpSt.running
+                      ? tx(`运行中 · 端口 ${mcpSt.port} · ${mcpSt.clients} 个客户端`, `running · port ${mcpSt.port} · ${mcpSt.clients} client(s)`)
+                      : tx("未运行", "not running")}
+                  </span>
+                ), tx("启用后此处应显示「运行中」；客户端连接数变化即时刷新", "Shows running after enable; client count refreshes live"))}
+                {mcpSt.audit.length > 0 && row(tx("最近调用", "Recent calls"), (
+                  <span className="set-usage" style={{ display: "inline-block", maxWidth: 380, textAlign: "left" }}>
+                    {mcpSt.audit.slice(-5).reverse().map((a) => (
+                      <div key={`${a.ts}-${a.kind}`}>
+                        {new Date(a.ts).toLocaleTimeString()} · {a.kind} · {a.ok ? "OK" : "ERR"} · {a.ms}ms
+                      </div>
+                    ))}
+                  </span>
+                ), tx("最近 5 次远程工具调用（共保留 50 条审计环形）", "Last 5 remote tool calls (50-entry audit ring)"))}
+              </>
+            )}
             {tab === "io" && (
               <>
                 {ioBlock(
@@ -1114,6 +1212,9 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   },
                 )}
                 <div className="set-io-hint">{t("set.ioHint")}</div>
+                <OperatorGenBlock
+                  notify={(s) => setMsg(s)}
+                />
               </>
             )}
             {tab === "about" && (

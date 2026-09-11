@@ -135,6 +135,45 @@ body {
   user-select: none;
 }
 
+/* Operator 只读模式横幅（P67）：工具栏下方细条，强调色描边提示当前处于受控模式 */
+.op-banner {
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--accent);
+  user-select: none;
+}
+
+.op-banner .op-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.op-banner .op-name {
+  font-weight: 600;
+}
+
+.op-banner .op-desc {
+  opacity: 0.75;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.op-banner .op-hint {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -1981,6 +2020,28 @@ body {
   color: var(--on-accent, #fff);
 }
 
+/* 频谱分析面板（P65）：底部摘要行（fs/分辨率/主峰 或 均值/σ） */
+.spectrum-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+.spectrum-summary .ss-flag {
+  color: var(--warn, #e8a13c);
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 10.5px;
+}
+
 /* 自绘十字线（替代 uPlot DOM 游标：后者在 CSS zoom 下会被二次放大错位）。
    transform 由 JS 按「屏幕像素 ÷ zoom」写入，与指针针尖严格重合 */
 .u-over .plot-cross-v,
@@ -3797,6 +3858,12 @@ body {
 .xray-run.head{background:color-mix(in srgb, var(--accent) 10%, transparent);}
 .xray-run-bytes{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.5px;}
 .xray-run-meta{flex:1;font-size:11px;color:var(--text-dim);}
+.xray-badge{flex:none;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:700;line-height:1.5;}
+.xray-badge.solid{background:color-mix(in srgb, #3fb950 18%, transparent);color:#3fb950;border:1px solid color-mix(in srgb, #3fb950 45%, transparent);}
+.xray-badge.likely{background:color-mix(in srgb, #e0a54e 16%, transparent);color:#e0a54e;border:1px solid color-mix(in srgb, #e0a54e 45%, transparent);}
+.xray-badge.cycle{background:color-mix(in srgb, var(--accent) 16%, transparent);color:var(--accent);border:1px solid color-mix(in srgb, var(--accent) 45%, transparent);}
+.xray-badge.periodic{background:color-mix(in srgb, var(--accent) 10%, transparent);color:var(--accent);border:1px solid color-mix(in srgb, var(--accent) 28%, transparent);}
+.xray-badge.event{background:color-mix(in srgb, var(--text-dim) 12%, transparent);color:var(--text-dim);border:1px solid color-mix(in srgb, var(--text-dim) 32%, transparent);}
 .xray-more{flex:none;padding:4px 10px;font-size:10.5px;color:var(--text-dim);border-top:1px solid var(--border);}
 .fc-body{position:relative;flex:1;min-height:0;overflow:hidden;}
 .fc-body canvas{position:absolute;left:0;top:0;display:block;width:100%;height:100%;}

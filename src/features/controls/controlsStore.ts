@@ -1,6 +1,7 @@
 export type SendMode = "ascii" | "hex";
 
 import { getLocale } from "../../i18n/strings";
+import { guardLocked } from "../operator/lock";
 
 export type ControlType =
   | "slider"
@@ -619,6 +620,7 @@ export function addPage() {
 }
 
 export function removePage(id: string) {
+  if (guardLocked()) return;
   const pages = snapshot.pages.filter((p) => p.id !== id);
   if (!pages.length) return;
   snapshot = {
@@ -671,6 +673,7 @@ export function renamePage(id: string, name: string) {
 }
 
 export function setPageCols(id: string, cols: number) {
+  if (guardLocked()) return;
   const nc = clampGrid(cols, 24);
   snapshot = {
     ...snapshot,
@@ -709,6 +712,7 @@ function clampGrid(v: number, max: number): number {
 }
 
 export function setPageLocked(id: string, locked: boolean) {
+  if (guardLocked()) return;
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) => (p.id === id ? { ...p, locked } : p)),
@@ -985,6 +989,7 @@ export function declumpPage(pageId: string) {
 
 /** 修复重叠：只挪动确实与其他卡片重叠的卡片（就近找空位），不动正常卡片 */
 export function resolveOverlaps(pageId: string) {
+  if (guardLocked()) return;
   const page = snapshot.pages.find((p) => p.id === pageId);
   if (!page) return;
   const cols = page.cols;
@@ -1037,6 +1042,7 @@ export function moveCard(
   x: number,
   y: number,
 ) {
+  if (guardLocked()) return;
   const page = snapshot.pages.find((p) => p.id === pageId);
   if (!page) return;
   const card = page.cards.find((c) => c.id === cardId);

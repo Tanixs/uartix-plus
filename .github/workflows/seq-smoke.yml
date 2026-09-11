@@ -1,0 +1,44 @@
+name: Sequencer CLI smoke
+
+# 视觉测试序列器 CLI 无硬件冒烟（P66-4）：回环"设备"（echo）跑 demo 套件，
+# 验证 send→waitForFrame(raw)→分组 断言链路与 JUnit 输出在真实 Node 环境可用。
+# 手动触发（不占常规 CI）；有真实设备/透传桥场景后再扩展硬件在环。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seq-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build seq CLI
+        run: npm run build:seq
+
+      - name: Run demo suite against loopback device
+        run: |
+          set -euo pipefail
+          node dist-cli/uartix-seq.cjs examples/seq-demo.json \
+            --loopback --max-run-ms 30000 \
+            --report seq-report.html --junit seq-report.xml --quiet
+          echo "--- JUnit 输出抽查 ---"
+          head -5 seq-report.xml
+          grep -q 'failures="0"' seq-report.xml
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: seq-report
+          path: |
+            seq-report.html
+            seq-report.xml
+          if-no-files-found: ignore

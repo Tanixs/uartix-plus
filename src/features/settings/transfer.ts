@@ -3,6 +3,8 @@ import type { FrameTemplate } from "../../ipc/types";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
 import * as settingsStore from "./settingsStore";
+import * as operatorStore from "../operator/operatorStore";
+import { OPERATOR_KIND } from "../operator/operatorPkg";
 
 export const FULL_KIND = "uartix-full";
 
@@ -74,6 +76,9 @@ export async function importDispatch(kind: string, data: unknown): Promise<strin
       if (d.settings) settingsStore.patch(d.settings);
       return `全部配置已恢复（${n} 项）`;
     }
+    case OPERATOR_KIND:
+      // Operator 部署包：进入只读模式运行（布局由 App 消费 payload.layout）
+      return operatorStore.activate(data);
     default:
       throw new Error(`未知文件类型：${kind}`);
   }

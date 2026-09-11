@@ -27,6 +27,13 @@ export interface BleDeviceInfo {
   rssi: number;
 }
 
+/** BLE 可交互特征（ble:chars 事件，连接成功后广播） */
+export interface BleCharInfo {
+  uuid: string;
+  /** 属性摘要，如 "write writeNR notify" */
+  kind: string;
+}
+
 export interface SerialSnapshot {
   ports: PortInfo[];
   config: SerialConfig;
@@ -47,6 +54,14 @@ export interface SerialSnapshot {
   bleDeviceId: string;
   /** BLE 扫描进行中 */
   bleScanning: boolean;
+  /** 最近一次连接的特征列表（ble:chars 事件，手动选择下拉用） */
+  bleChars: BleCharInfo[];
+  /** 手动选择的写/收特征 UUID（"" = 自动） */
+  bleWriteChar: string;
+  bleNotifyChar: string;
+  /** 本次连接实际生效的写/收特征（auto 解析结果或显式指定） */
+  bleActiveWrite: string;
+  bleActiveNotify: string;
 }
 
 const DEFAULT_CONFIG: SerialConfig = {
@@ -79,6 +94,11 @@ let snapshot: SerialSnapshot = {
   bleDevices: [],
   bleDeviceId: "",
   bleScanning: false,
+  bleChars: [],
+  bleWriteChar: "",
+  bleNotifyChar: "",
+  bleActiveWrite: "",
+  bleActiveNotify: "",
 };
 
 const listeners = new Set<() => void>();
@@ -149,6 +169,16 @@ export async function init() {
   await listen<BleDeviceInfo[]>("ble:devices", (e) => {
     set({ bleDevices: e.payload });
   });
+  await listen<{ chars: BleCharInfo[]; write: string | null; notify: string | null }>(
+    "ble:chars",
+    (e) => {
+      set({
+        bleChars: e.payload.chars,
+        bleActiveWrite: e.payload.write ?? "",
+        bleActiveNotify: e.payload.notify ?? "",
+      });
+    },
+  );
   // rx/tx 走二进制总线（binbus），不再监听 JSON 事件（监听常驻，随进程生命周期）
   onRx((p) => {
     recordIpcLatency(p.emitTs);
@@ -201,7 +231,21 @@ export function setIface(iface: IfaceKind) {
 }
 
 export function setBleDevice(id: string) {
-  set({ bleDeviceId: id });
+  // 换设备：旧特征列表/选择全部作废（新设备连接后重新广播）
+  set({ bleDeviceId: id, bleChars: [], bleWriteChar: "", bleNotifyChar: "", bleActiveWrite: "", bleActiveNotify: "" });
+}
+
+export function setBleCharSel(patch: { bleWriteChar?: string; bleNotifyChar?: string }) {
+  set(patch);
+}
+
+/** 连接中改选特征 → 断开重连使选择立即生效（未连接时仅保存，下次连接生效） */
+export async function applyBleChars() {
+  if (snapshot.iface !== "ble") return;
+  if (snapshot.status === "connected" || snapshot.status === "reconnecting") {
+    await closePort();
+    await openPort();
+  }
 }
 
 export async function bleScanStart() {
@@ -247,7 +291,11 @@ export async function openPort() {
       await invoke("open_port", { config: snapshot.config });
     } else if (snapshot.iface === "ble") {
       if (!snapshot.bleDeviceId) throw new Error("请先扫描并选择 BLE 设备");
-      await invoke("ble_connect", { id: snapshot.bleDeviceId });
+      await invoke("ble_connect", {
+        id: snapshot.bleDeviceId,
+        writeChar: snapshot.bleWriteChar || null,
+        notifyChar: snapshot.bleNotifyChar || null,
+      });
     } else {
       await invoke("open_net", {
         config: {
@@ -280,7 +328,7 @@ export async function closePort() {
   }
 }
 
-/* ---- 自动重连（P62b；设置页 autoReconnect，默认关；BLE 需重扫选特征不参与） ---- */
+/* ---- 自动重连（P62b/P66-2；设置页 autoReconnect，默认关；意外断开 3s 重试×3） ---- */
 let manualClose = false;
 let everConnected = false;
 let retryTimer = 0;
@@ -299,7 +347,8 @@ function scheduleReconnect() {
   }, 3000);
 }
 
-/** 供 state 监听调用：意外断开且开启自动重连时安排一次 3s 后重试（最多 3 次） */
+/** 供 state 监听调用：意外断开且开启自动重连时安排一次 3s 后重试（最多 3 次）。
+ *  BLE 依赖常驻 Adapter 的设备缓存直接重连（无需重新扫描），与串口/网络同策略。 */
 function maybeAutoReconnect(status: SerialStatus) {
   if (status === "connected") {
     everConnected = true;
@@ -310,7 +359,6 @@ function maybeAutoReconnect(status: SerialStatus) {
     status === "disconnected" &&
     everConnected &&
     !manualClose &&
-    snapshot.iface !== "ble" &&
     getSettings().autoReconnect
   ) {
     scheduleReconnect();

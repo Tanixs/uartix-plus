@@ -34,6 +34,8 @@ import * as mbSlave from "../modbus/slaveStore";
 import * as mbPoll from "../modbus/pollStore";
 import * as sentinelStore from "../sentinel/sentinelStore";
 import * as chatStore from "./chatStore";
+import { lastXray } from "../xray/xrayShared";
+import { buildEvidence } from "../xray/xrayEvidence";
 import { AREA_LABEL, type MbArea } from "../modbus/mb";
 import {
   writeTemplateFromAiJson,
@@ -51,8 +53,8 @@ export interface AppActionResult {
 
 const PRESETS: WorkspacePreset[] = ["proto", "analyze", "attitude", "console", "video"];
 
-/** 需要脚本高权限的动作 */
-const HIGH_ONLY = new Set([
+/** 需要脚本高权限的动作（MCP 桥 run_action 门控复用同一集合） */
+export const HIGH_ONLY = new Set([
   "clearPage",
   "patchCard",
   "removeCard",
@@ -67,6 +69,8 @@ const HIGH_ONLY = new Set([
   "modbus",
   // 哨兵可暂停监测/清报警，属全局控制
   "sentinel",
+  // 考古报告会驱动模型长输出并代表「分析结论」，限脚本高权限
+  "xrayReport",
 ]);
 
 export const APP_ACTION_KINDS = [
@@ -95,6 +99,9 @@ export const APP_ACTION_KINDS = [
   "xferStart",
   "readPlot",
   "sentinel",
+  "xrayEvidence",
+  "xrayCrack",
+  "xrayReport",
   "toast",
   "listWidgets",
   "openWidget",
@@ -184,6 +191,47 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
       const ask = String(a.ask ?? "").trim() || "请分析这张 2D 曲线面板截图：描述趋势、异常点与需要关注的特征。";
       await chatStore.sendText(`（AI 读图）${ask}`, "qa", undefined, [dataUrl]);
       return "已截取 2D 曲线面板并发送给模型分析，分析结果在聊天区";
+    }
+    case "xrayEvidence":
+    case "xrayCrack": {
+      // 协议考古（P63d）：结构发现冻结快照 → 确定性证据链（含校验爆破/序列分析）。
+      // evidence 全量（含爆破+序列）；crack 只回爆破部分（更小载荷）。
+      const pub = lastXray();
+      if (!pub) {
+        throw new Error("结构发现面板尚无分析结果：请先 openPanel xray，等面板累积样本后点「采样分析」");
+      }
+      const ev = buildEvidence(pub.analysis, pub.cluster);
+      if (kind === "xrayCrack") {
+        return {
+          meta: ev.meta,
+          crack: ev.evidence.filter((e) => e.text.startsWith("校验爆破") || e.text.startsWith("轮询循环")),
+        };
+      }
+      return ev;
+    }
+    case "xrayReport": {
+      // 协议考古报告：证据链 → 聊天区让模型写 Markdown 报告（引用证据编号，禁无证据断言）
+      const pub = lastXray();
+      if (!pub) {
+        throw new Error("结构发现面板尚无分析结果：请先 openPanel xray，等面板累积样本后点「采样分析」");
+      }
+      if (chatStore.getSnapshot().streaming) {
+        throw new Error("AI 正在回复中，报告生成需等本轮结束");
+      }
+      const ev = buildEvidence(pub.analysis, pub.cluster);
+      const ask = [
+        "请基于以下「协议考古学家」证据链 JSON 生成一份 Markdown 推理报告，结构固定为：",
+        "## 结论（当前协议最可能的结构）",
+        "## 证据（逐条引用证据编号 E1、E2…，说明每条证据支持什么结论）",
+        "## 置信度（每个结论标注高/中/低及理由）",
+        "## 建议模板结构（帧头/长度域/字段排布/校验算法，可直接照此在帧画布定义）",
+        "## 下一步（还需要什么样本或操作来提高置信度）",
+        "铁律：每个结论必须引用证据编号；禁止编造证据里不存在的数值；证据不足就明说。",
+        "证据链：",
+        JSON.stringify(ev),
+      ].join("\n");
+      await chatStore.sendText(`（AI 协议考古）${ask}`, "qa");
+      return "协议考古报告已生成在聊天区；可直接按「建议模板结构」让 AI 写模板或手动在帧画布定义";
     }
     case "openPanel": {
       const panel = String(a.panel ?? "");

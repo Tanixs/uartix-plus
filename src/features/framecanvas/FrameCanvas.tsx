@@ -348,20 +348,6 @@ const ROLE_META: Record<FieldRole, { zh: string; en: string; tag: string; chip: 
 };
 const roleLabel = (r: FieldRole) => tx(ROLE_META[r].zh, ROLE_META[r].en);
 
-const TYPE_LABEL: Record<FieldType, string> = {
-  uint8: "uint8",
-  int8: "int8",
-  uint16: "uint16",
-  int16: "int16",
-  uint32: "uint32",
-  int32: "int32",
-  float32: "float32",
-  float64: "float64",
-  ascii: "ascii",
-  bcd: "bcd",
-  bits: "bits",
-  csv: "csv·自适应",
-};
 const typeLabel = (t: FieldType) => (t === "csv" ? tx("csv·自适应", "csv·auto") : t);
 
 const SIZE_TYPES: Record<number, FieldType[]> = {
@@ -2145,7 +2131,7 @@ function FieldDialog({
           </div>
         )}
         {mismatched && (
-          <div className="fc-dlg-warn soft">{tx("智能推荐", "Suggested")}: {recs.map((r) => TYPE_LABEL[r]).join(" / ")}（{init.size}{tx("字节", "bytes")}）</div>
+          <div className="fc-dlg-warn soft">{tx("智能推荐", "Suggested")}: {recs.map((r) => typeLabel(r)).join(" / ")}（{init.size}{tx("字节", "bytes")}）</div>
         )}
         <div className="fc-dlg-row">
           <label>{tx("名称", "Name")}</label>

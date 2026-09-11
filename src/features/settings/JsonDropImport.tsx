@@ -79,7 +79,7 @@ export function JsonDropImport() {
           <div className="drop-mask-box">
             <div className="drop-mask-title">松开导入配置文件</div>
             <div className="drop-mask-hint">
-              支持协议模板 / 控制画布 / 命令库 / 全量备份（{FULL_KIND}）
+              支持协议模板 / 控制画布 / 命令库 / 全量备份（{FULL_KIND}）/ Operator 部署包（.uopk）
             </div>
           </div>
         </div>

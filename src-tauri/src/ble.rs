@@ -48,6 +48,24 @@ pub struct BleDeviceInfo {
     pub rssi: i16,
 }
 
+/// 特征列表项（ble:chars 事件，前端手动选择下拉用）
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BleCharInfo {
+    pub uuid: String,
+    /// 属性摘要，如 "write writeNR notify"（char_kind）
+    pub kind: String,
+}
+
+/// 连接成功后广播：全部可交互特征 + 本次实际生效的写/收特征
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct BleCharsPayload {
+    chars: Vec<BleCharInfo>,
+    write: Option<String>,
+    notify: Option<String>,
+}
+
 struct BleShared {
     peripheral: Option<Peripheral>,
     write_char: Option<btleplug::api::Characteristic>,
@@ -132,6 +150,61 @@ fn pick_chars(
     Some((w.clone(), wt, n.clone()))
 }
 
+/// 通道解析（P66-2，纯函数，可单测）：用户显式指定的特征优先（写/收可独立指定，
+/// 未指定的一侧走 pick_chars 自动选择）。显式 UUID 在设备上不存在或属性不符 → Err。
+fn resolve_chars(
+    chars: &BTreeSet<btleplug::api::Characteristic>,
+    want_w: Option<&Uuid>,
+    want_n: Option<&Uuid>,
+) -> Result<(btleplug::api::Characteristic, WriteType, btleplug::api::Characteristic), String> {
+    let (auto_w, auto_wt, auto_n) = pick_chars(chars)
+        .ok_or("未发现可写+可通知的特征对，设备不支持透传")?;
+    let can_write =
+        |c: &btleplug::api::Characteristic| c.properties.intersects(CharPropFlags::WRITE | CharPropFlags::WRITE_WITHOUT_RESPONSE);
+    let can_notify = |c: &btleplug::api::Characteristic| c.properties.intersects(CharPropFlags::NOTIFY | CharPropFlags::INDICATE);
+    let wchar = match want_w {
+        Some(u) => chars
+            .iter()
+            .find(|c| &c.uuid == u && can_write(c))
+            .ok_or(format!("指定的写特征 {u} 不存在或不可写"))?
+            .clone(),
+        None => auto_w,
+    };
+    let nchar = match want_n {
+        Some(u) => chars
+            .iter()
+            .find(|c| &c.uuid == u && can_notify(c))
+            .ok_or(format!("指定的收特征 {u} 不存在或不可通知"))?
+            .clone(),
+        None => auto_n,
+    };
+    let wt = if c_write_wo_resp(&wchar) {
+        WriteType::WithoutResponse
+    } else {
+        WriteType::WithResponse
+    };
+    Ok((wchar, wt, nchar))
+}
+
+/// 特征属性摘要（连接成功后广播给前端做手动选择列表）
+fn char_kind(c: &btleplug::api::Characteristic) -> String {
+    let p = c.properties;
+    let mut s = String::new();
+    if p.contains(CharPropFlags::WRITE) {
+        s.push_str("write ");
+    }
+    if p.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE) {
+        s.push_str("writeNR ");
+    }
+    if p.contains(CharPropFlags::NOTIFY) {
+        s.push_str("notify ");
+    }
+    if p.contains(CharPropFlags::INDICATE) {
+        s.push_str("indicate");
+    }
+    s.trim_end().to_string()
+}
+
 fn c_write_wo_resp(c: &btleplug::api::Characteristic) -> bool {
     c.properties.contains(CharPropFlags::WRITE_WITHOUT_RESPONSE)
 }
@@ -186,6 +259,8 @@ pub async fn ble_scan_stop(state: tauri::State<'_, BleManager>) -> Result<(), St
 #[tauri::command]
 pub async fn ble_connect(
     id: String,
+    write_char: Option<String>,
+    notify_char: Option<String>,
     app: AppHandle,
     state: tauri::State<'_, BleManager>,
 ) -> Result<(), String> {
@@ -201,6 +276,18 @@ pub async fn ble_connect(
     state.epoch.fetch_add(1, Ordering::SeqCst);
     state.run_flag.store(true, Ordering::SeqCst);
     let my_epoch = state.epoch.load(Ordering::SeqCst);
+
+    // 显式特征 UUID 解析（空串/非法在派发线程先处理，错误信息同步回前端）
+    let parse_opt = |s: &Option<String>| -> Result<Option<Uuid>, String> {
+        match s.as_deref() {
+            None | Some("") => Ok(None),
+            Some(t) => Uuid::parse_str(t.trim())
+                .map(Some)
+                .map_err(|_| format!("特征 UUID 非法：{t}")),
+        }
+    };
+    let want_w = parse_opt(&write_char)?;
+    let want_n = parse_opt(&notify_char)?;
 
     let ctx = state.ctx.clone();
     let shared = state.shared.clone();
@@ -251,22 +338,46 @@ pub async fn ble_connect(
             return;
         }
         let chars = peripheral.characteristics();
-        let picked = match pick_chars(&chars) {
-            Some(p) => p,
-            None => {
+        let (wchar, wtype, nchar) = match resolve_chars(&chars, want_w.as_ref(), want_n.as_ref()) {
+            Ok(p) => p,
+            Err(msg) => {
                 if alive() {
-                    bail(&app, "未发现可写+可通知的特征对，设备不支持透传".into());
+                    bail(&app, msg);
                 }
                 return;
             }
         };
-        let (wchar, wtype, nchar) = picked;
         if let Err(e) = peripheral.subscribe(&nchar).await {
             if alive() {
                 bail(&app, format!("订阅通知失败: {e}"));
             }
             return;
         }
+
+        // 广播特征列表 + 本次生效的写/收特征（前端手动选择下拉用）
+        let char_list: Vec<BleCharInfo> = chars
+            .iter()
+            .filter(|c| {
+                c.properties.intersects(
+                    CharPropFlags::WRITE
+                        | CharPropFlags::WRITE_WITHOUT_RESPONSE
+                        | CharPropFlags::NOTIFY
+                        | CharPropFlags::INDICATE,
+                )
+            })
+            .map(|c| BleCharInfo {
+                uuid: c.uuid.to_string(),
+                kind: char_kind(c),
+            })
+            .collect();
+        let _ = app.emit(
+            "ble:chars",
+            &BleCharsPayload {
+                chars: char_list,
+                write: Some(wchar.uuid.to_string()),
+                notify: Some(nchar.uuid.to_string()),
+            },
+        );
 
         // 就绪：登记发送通道 + 广播 connected
         {
@@ -445,5 +556,36 @@ mod tests {
         let mut chars = BTreeSet::new();
         chars.insert(ch("0000ffe1-0000-1000-8000-00805f9b34fb", CharPropFlags::NOTIFY));
         assert!(pick_chars(&chars).is_none());
+    }
+
+    #[test]
+    fn resolve_chars_explicit_overrides_auto() {
+        let mut chars = BTreeSet::new();
+        chars.insert(ch("0000ffe1-0000-1000-8000-00805f9b34fb", CharPropFlags::NOTIFY));
+        chars.insert(ch("0000ffe2-0000-1000-8000-00805f9b34fb", CharPropFlags::NOTIFY | CharPropFlags::WRITE_WITHOUT_RESPONSE));
+        let u1 = Uuid::parse_str("0000ffe1-0000-1000-8000-00805f9b34fb").unwrap();
+        let u2 = Uuid::parse_str("0000ffe2-0000-1000-8000-00805f9b34fb").unwrap();
+        // 自动：写=ffe2（唯一可写）、收=ffe1（首个可通知）；显式指定收=ffe1 不改变结果
+        let (w, _wt, n) = resolve_chars(&chars, None, Some(&u1)).unwrap();
+        assert_eq!(w.uuid, u2);
+        assert_eq!(n.uuid, u1);
+        // 双侧显式
+        let (w, _wt, n) = resolve_chars(&chars, Some(&u2), Some(&u1)).unwrap();
+        assert_eq!(w.uuid, u2);
+        assert_eq!(n.uuid, u1);
+        // 收侧显式换成 ffe2（也可通知）
+        let (_w, _wt, n) = resolve_chars(&chars, None, Some(&u2)).unwrap();
+        assert_eq!(n.uuid, u2);
+    }
+
+    #[test]
+    fn resolve_chars_rejects_bad_uuid() {
+        let mut chars = BTreeSet::new();
+        chars.insert(ch("0000ffe1-0000-1000-8000-00805f9b34fb", CharPropFlags::NOTIFY | CharPropFlags::WRITE));
+        let missing = Uuid::parse_str("0000ffff-0000-1000-8000-00805f9b34fb").unwrap();
+        let err = resolve_chars(&chars, Some(&missing), None).unwrap_err();
+        assert!(err.contains("不存在或不可写"));
+        let err = resolve_chars(&chars, None, Some(&missing)).unwrap_err();
+        assert!(err.contains("不存在或不可通知"));
     }
 }

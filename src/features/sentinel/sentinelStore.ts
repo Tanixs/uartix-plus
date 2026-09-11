@@ -1,8 +1,11 @@
 import { onFrames } from "../../ipc/framesBus";
 import * as panelActivity from "../../panels/panelActivity";
 import { getSnapshot as getSerial, subscribe as subSerial } from "../serial/serialStore";
+import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { requestClosePanel, requestOpenPanel } from "../ai/appBus";
-import { collectThemeVars } from "../ai/extRuntime";
+import { invokeAiScene } from "../ai/aiBus";
+import { runScene } from "../ai/chatStore";
+import { toast, collectThemeVars } from "../ai/extRuntime";
 import { playAlertTone } from "./sentinelSound";
 import {
   broadcastWidgetState,
@@ -65,6 +68,8 @@ function loadCfg(): SentinelConfig {
       sound: typeof p.sound === "boolean" ? p.sound : true,
       volume: typeof p.volume === "number" ? Math.min(100, Math.max(0, p.volume)) : 70,
       alertCap: typeof p.alertCap === "number" ? Math.min(2000, Math.max(20, Math.round(p.alertCap))) : DEFAULT_CONFIG.alertCap,
+      autoDiag: typeof p.autoDiag === "boolean" ? p.autoDiag : false,
+      diagCooldownMin: typeof p.diagCooldownMin === "number" ? Math.min(60, Math.max(1, Math.round(p.diagCooldownMin))) : 5,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -102,6 +107,8 @@ function emitNow(): void {
   if (head && head.id !== prevHead?.id && cfg.sound && cfg.enabled) {
     playAlertTone(head.level, head.kind === "recover");
   }
+  // 自动 AI 诊断：新 crit 上头 + 开关 + 冷却（P68）
+  maybeAutoDiag(head, prevHead?.id);
   // 挂件广播（频道不存在时 post 内部静默）
   const ws: WidgetState = {
     health: snap.health,
@@ -238,6 +245,100 @@ export function setVolume(n: number): void {
 
 export function setAlertCap(n: number): void {
   patchCfg({ alertCap: Math.min(2000, Math.max(20, Math.round(n))) });
+}
+
+export function setAutoDiag(b: boolean): void {
+  patchCfg({ autoDiag: b });
+}
+
+export function setDiagCooldownMin(n: number): void {
+  patchCfg({ diagCooldownMin: Math.min(60, Math.max(1, Math.round(n))) });
+}
+
+// ---- AI 诊断（P68）----
+
+/** 自动诊断上次发起时刻（冷却用） */
+let lastAutoDiagTs = 0;
+
+const IFACE_LABEL: Record<string, string> = {
+  serial: "串口",
+  "tcp-client": "TCP 客户端",
+  "tcp-server": "TCP 服务端",
+  udp: "UDP",
+  ble: "BLE",
+};
+
+/** 构建结构化诊断证据文本（喂给 AI diagnose 场景；中文——AI 提示词同语种） */
+export function buildEvidence(trigger?: string): string {
+  const s = engine.snapshot();
+  const se = getSerial();
+  const lines: string[] = [];
+  const desc =
+    se.status === "connected"
+      ? `${IFACE_LABEL[se.iface] ?? se.iface} ${se.portName ?? ""} 已连接`
+      : `${IFACE_LABEL[se.iface] ?? se.iface} 未连接`;
+  lines.push(`连接状态：${desc}`);
+  if (trigger) lines.push(`触发原因：${trigger}`);
+  lines.push(
+    `健康度 ${s.health}/100（活跃异常：严重 ${s.activeCrit} · 警告 ${s.activeWarn}）` +
+      (s.learning ? "（学习期，基线建立中）" : ""),
+  );
+  lines.push(
+    `统计：帧 ${s.totals.frames} · 错误帧 ${s.totals.errors}` +
+      (s.totals.frames > 0 ? `（错误率 ${((s.totals.errors / s.totals.frames) * 100).toFixed(1)}%）` : "") +
+      (s.conn && s.silenceMs >= 0 ? ` · 距上一帧 ${(s.silenceMs / 1000).toFixed(1)}s` : ""),
+  );
+  const act = s.alerts.filter((a) => a.kind !== "recover").slice(0, 10);
+  if (act.length) {
+    lines.push("近期报警（新→旧）：");
+    for (const a of act) {
+      lines.push(
+        `  - [${a.level === "crit" ? "严重" : a.level === "warn" ? "警告" : "信息"}] ${a.msg}${a.count > 1 ? `（×${a.count}）` : ""}`,
+      );
+    }
+  } else {
+    lines.push("近期报警：无");
+  }
+  const bad = s.chans.filter((c) => c.level !== "ok").slice(0, 8);
+  if (bad.length) {
+    lines.push("异常通道（评分降序）：");
+    for (const c of bad) {
+      lines.push(`  - ${c.name}：${c.level === "crit" ? "严重" : "警告"} · 当前 ${c.last} · 突变评分 ${c.score.toFixed(1)}σ`);
+    }
+  }
+  if (s.frameTypes.length) {
+    lines.push(
+      `帧型：${s.frameTypes.slice(0, 8).map((t) => `${t.name}×${t.count}${t.isNew ? "（新）" : ""}`).join("、")}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/** 手动诊断：打开 AI 并携带哨兵证据发起 diagnose 场景 */
+export function diagnoseNow(trigger?: string): void {
+  invokeAiScene("diagnose", { text: buildEvidence(trigger) });
+}
+
+/**
+ * 自动诊断（emitNow 内新 crit 上头时调用）：
+ * 开关 + 冷却 + AI 已配置三重门禁；直接写入 AI 会话（不弹浮窗，不抢焦点）。
+ */
+function maybeAutoDiag(head: SentinelAlert | undefined, prevHeadId: string | undefined): void {
+  if (!cfg.autoDiag || !head) return;
+  if (head.level !== "crit" || head.kind === "recover") return;
+  if (head.id === prevHeadId) return;
+  const now = Date.now();
+  if (now - lastAutoDiagTs < cfg.diagCooldownMin * 60_000) return;
+  const st = getSettings();
+  if (!st.aiBaseUrl) {
+    toast("哨兵自动诊断：未配置 AI 服务（设置 → AI 服务）");
+    return;
+  }
+  lastAutoDiagTs = now;
+  void runScene("diagnose", { text: buildEvidence(`严重报警自动触发：${head.msg}`) }).catch(() => {
+    /* 发送失败已在会话内落错误消息 */
+  });
+  toast(`哨兵已自动发起 AI 诊断（${cfg.diagCooldownMin} 分钟内不重复）`);
 }
 
 // ---- 报警操作 ----

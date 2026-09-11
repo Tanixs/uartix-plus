@@ -19,7 +19,7 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - 数据表格：解析后的帧数据行，支持导出 CSV/Excel。
 - 2D 曲线：多通道实时曲线，时间/幅值双游标测量，Y 轴自适应，相对秒时间轴。
 - 3D 姿态：Roll/Pitch/Yaw 实时三维显示。
-- 结构发现面板（xray）：对未知协议字节流做周期/帧头统计推断（自相关+显著度算法），支持显著度/帧长上限/分析窗口调参；可对候选帧头做协议簇分析（识别同帧头家族下的多种帧型与各自帧长），勾选帧型后一键按簇批量生成协议模板。
+- 结构发现面板（xray）：对未知协议字节流做周期/帧头统计推断（自相关+显著度算法），支持显著度/帧长上限/分析窗口调参；可对候选帧头做协议簇分析（识别同帧头家族下的多种帧型与各自帧长），勾选帧型后一键按簇批量生成协议模板。AI 协议考古：面板「采样分析」后可用 xrayEvidence/xrayCrack 动作取确定性证据链、xrayReport 生成引用证据编号的推理报告（结论/置信度/建议模板结构）。
 - 哨兵面板（sentinel）：静默异常监测——数值通道双 EMA z-score 突变（灵敏度低/中/高三档）、学习期后新帧型出现告警、错误帧率超阈、通信静默（连接中但超 N 秒无帧）。报警带冷却合并（×N）与恢复事件；可最小化成右下角浮球或弹出桌面挂件继续驻留报警（面板与浮球都关闭才停止监测）；提示音为合成音。用户说"帮我盯着""数据有没有异常"时相关。
 - 会话录制回放：录制数据会话存为 .usess 文件，在帧画布时间机器回放（进度点选跳转、多档倍速、按 M 打时间线标注）。
 - 控制画布：滑条/按钮/开关/LED/蜂鸣器/监视器/摇杆/键盘等卡片，另支持 group 组合控件（一张卡片集成滑条+按钮+开关+监视+LED 等多个子控件），命令模板串支持 %.2f 等格式化与 {变量} 插值，卡片脚本为 JS 子集（send/get/set/delay_ms/beep/log/waitParse/repeat 等 API）。
@@ -91,16 +91,16 @@ const STYLE_POWER = `视觉能力清单：动效（@keyframes + animation：呼�
 
 const PANEL_CLASSES = `面板作用域速查（稳定契约，优先使用）：每个面板根 DOM 带 data-panel 属性——[data-panel="templates"|"properties"|"hexview"|"table"|"plot2d"|"view3d"|"controls"|"framecanvas"|"console"|"video"|"xray"|"ai"]，面板级定制一律以它作前缀（如 [data-panel="plot2d"] .plot-bar）；面板内容容器=[data-panel=x] .dv-content-container。旧类名仍可用：协议模板 .tpl-panel｜属性 .props-panel｜Hex .hexview｜表格 .tbl｜2D 曲线 .plot｜3D 姿态 .view3d｜控制画布 .ctl（命令库在其 .ctl-side）｜帧画布 .fc-root｜控制台 .console（快捷指令条 .qk-*）｜图传 .video-panel。面板内通用子结构：工具条 *-bar、内容区 *-body、状态栏 *-status。注意：AI 扩展面板(aiExtPanel)与小部件/自定义卡片是沙箱 iframe，不吃本页样式层——它们经 uartix 主题桥拿 CSS 变量。`;
 
-/** 操作类动词 → 触发 action 注入 */
+/** 操作类动词 → 触发 action 注入（含协议考古：让 AI 直接调 xray 动作取证据） */
 const ACTION_ROUTE_RE =
-  /清空|删除|移除|去掉|打开|关闭|关掉|切(换|回|到)|应用|执行|写入|新建|新增.{0,6}(页|面板)|开启|断开|重置布局|另存|保存布局|运行|启动|弹出|收回/;
+  /清空|删除|移除|去掉|打开|关闭|关掉|切(换|回|到)|应用|执行|写入|新建|新增.{0,6}(页|面板)|开启|断开|重置布局|另存|保存布局|运行|启动|弹出|收回|考古|协议.{0,6}结构|什么协议|结构发现/;
 
 /** 硬规则：操作类意图必须输出 action 块执行，禁止只给文字步骤 */
 const ACTION_RULE = `【动作执行硬规则】当用户要求对软件本身做操作（清空/删除/打开面板/切换布局或主题/开关连接/写入配置/管理挂件浮窗等），你必须输出 \`\`\`uartix-action 代码块来执行，禁止只给文字步骤让用户手动操作。输出格式为 JSON：{"actions":[{"kind":"动作名","args":{…}}]}。用户确认后逐个执行。破坏性动作（clearPage/removeCard/removeProtocol/removeCommand/removeCodec/removeWidget）输出前必须在文字里明确告知后果。仅在用户明确要求操作时输出；用户提问"怎么做"时正常解释即可。`;
 
 function schemaAction(): string {
   return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（与脚本 api.app 相同）：
-- openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/xray/modbus/ai）
+- openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/spectrum/view3d/framecanvas/video/xray/modbus/ai）
 - applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video）
 - setTheme({"theme":"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
 - listProtocols()/listCommands()/listCards() 查询配置清单
@@ -108,6 +108,8 @@ function schemaAction(): string {
 - writeCard({"json":"…"})/writeCommand({"json":"…"})/writeTemplate({"json":"…"})/writeCodec({"json":"…"}) 写入配置（writeTemplate 支持 {"group":"簇名","templates":[…]} 一次写入协议簇并自动建组）
 - xferStart({"path":"D:/fw.bin","proto":"ymodem"}) 预填文件传输对话框（proto: ymodem/ymodemg/xmodem1k/xmodem，默认 ymodem；path 可传字符串数组一次预填多个文件按顺序传输；打开控制台面板并预填路径，用户在对话框确认后才开始发送）
 - readPlot({"ask":"自定义提问"}) 截取当前 2D 曲线面板画面发给模型分析（面板未开会自动打开；用户说"看看曲线""分析一下当前波形"时用这个）
+- xrayEvidence() 读「结构发现」面板的协议考古证据链（帧长/相位/帧型簇/恒定列/校验爆破/轮询周期；面板需已「采样分析」）；xrayCrack() 只取校验爆破+轮询循环部分（载荷更小）。用户问"这协议是什么结构/校验是什么算法"时先取证据再推理，禁止脱离证据链编造数值
+- xrayReport() 基于证据链生成协议考古 Markdown 报告（结论/证据/置信度/建议模板结构）到聊天区（需脚本高权限）
 - sentinel({"op":"status"}) 哨兵异常监测（需脚本高权限）：op 可选 status（健康分/活跃异常/最近报警）、enable({"on":true|false}) 启停监测、ackAll() 确认全部、mute({"key":"spike:roll"}) 静音某类报警、clear 清空历史。用户问"刚才数据有没有异常""帮我盯着链路"时用 status 查报警；用户说"别报了"用 mute/ackAll
 - clearPage() 清空控制画布当前页【破坏性】；addPage({"name":"页名"}) 新建控制页；patchCard({"name":"卡名","patch":{…}}) 改卡片属性
 - removeCard({"name":"卡名"})/removeProtocol({"name":"模板名"})/removeCommand({"name":"命令名"})/removeCodec({"name":"协议名"}) 按名删除【破坏性】
@@ -182,7 +184,7 @@ function schemaScript(script: boolean): string {
 - api.toast(msg) → 右下角通知；api.getInfo() → {status,port,fields}
 - api.onChat(cb) → 感知 AI 助手对话状态 cb({phase:"thinking"|"streaming"|"idle"|"error",reasoningTail,textTail})，返回取消订阅；api.ask("问题") → 向 AI 助手提问（回答经 onChat 流式回来，受发送权限门控）
 - api.app.动作名({参数}) → 控制软件本身，返回 Promise<{ok,data?,err?}>。可用动作：
-  · openPanel({panel:"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/view3d/framecanvas/video/xray/modbus/ai）
+  · openPanel({panel:"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/spectrum/view3d/framecanvas/video/xray/modbus/ai）
   · applyPreset({preset:"attitude"}) 切工作区预设（proto/analyze/attitude/console/video）
   · setTheme({theme:"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
   · listProtocols()/listCommands()/listCards() 获取现有配置清单
@@ -190,6 +192,8 @@ function schemaScript(script: boolean): string {
   · writeCard({json})/writeCommand({json})/writeTemplate({json})/writeCodec({json}) 写入配置（JSON 字符串，格式同对应输出格式；writeTemplate 支持 {"group":"簇名","templates":[…]} 批量写协议簇）
   · xferStart({path, proto?}) 预填文件传输对话框（proto: ymodem/ymodemg/xmodem1k/xmodem，默认 ymodem；path 可为字符串或字符串数组，多文件按顺序传输），用户在对话框确认后才开始发送
   · readPlot({ask?}) 截取当前 2D 曲线面板并发送模型分析（面板未开会自动打开；AI 忙时不可用）
+  · xrayEvidence()/xrayCrack() 读「结构发现」面板的协议考古证据链（xrayCrack 只含校验爆破/轮询循环；面板需已「采样分析」）
+  · xrayReport() 基于证据链生成协议考古报告到聊天区（需高权限）
   · sentinel({op:"status"|"enable"|"ackAll"|"mute"|"clear", on?, key?}) 哨兵异常监测查询与控制（status 返回健康分/活跃异常/最近报警；需高权限）
   · clearPage() 清空控制画布当前页；addPage({name}) 新建控制页；patchCard({name,patch:{…}}) 改卡片属性
   · removeCard({name})/removeProtocol({name})/removeCommand({name})/removeCodec({name}) 按名删除（删除/清空类动作会 toast 告知）

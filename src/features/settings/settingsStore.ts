@@ -52,6 +52,15 @@ export interface Settings {
   reduceMotion: boolean;
   /** 串口/网络意外断开后自动重连（用户主动断开不触发） */
   autoReconnect: boolean;
+  /** MCP 桥（P64）：对外暴露给 AI IDE 的本地控制平面 */
+  mcpEnabled: boolean;
+  mcpPort: number;
+  /** 远程发送/跑序列门控（send / run_sequence 工具） */
+  mcpAllowSend: boolean;
+  /** 高权限动作门控（openPort/closePort 等 HIGH_ONLY 动作） */
+  mcpHighPriv: boolean;
+  /** 桥握手 token（首启自动生成，32 hex） */
+  mcpToken: string;
 }
 
 export type AiPreset = "openai" | "deepseek" | "zhipu" | "qwen" | "ollama" | "anthropic";
@@ -86,6 +95,16 @@ const LEGACY_MODEL_IDS: Record<string, string> = {
 
 const KEY = "vs.settings";
 
+/** MCP 桥握手 token：32 hex（crypto.randomUUID 去连字符 ×2 拼接太长，单个 32 位足够） */
+function newToken(): string {
+  try {
+    return crypto.randomUUID().replace(/-/g, "");
+  } catch {
+    // 无 crypto 环境（理论上不会）：时间+随机退化
+    return `${Date.now().toString(16)}${Math.floor(Math.random() * 2 ** 32).toString(16)}`.padEnd(16, "0");
+  }
+}
+
 function clampDecimals(v: unknown, fallback: number): number {
   const n = Math.round(Number(v));
   return Number.isFinite(n) && n >= 0 && n <= 6 ? n : fallback;
@@ -116,6 +135,11 @@ function load(): Settings {
     conWrap: true,
     reduceMotion: false,
     autoReconnect: false,
+    mcpEnabled: false,
+    mcpPort: 7731,
+    mcpAllowSend: false,
+    mcpHighPriv: false,
+    mcpToken: newToken(),
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -165,6 +189,15 @@ function load(): Settings {
       conWrap: p.conWrap === undefined ? true : Boolean(p.conWrap),
       reduceMotion: Boolean(p.reduceMotion),
       autoReconnect: Boolean(p.autoReconnect),
+      mcpEnabled: Boolean(p.mcpEnabled),
+      mcpPort: (() => {
+        const n = Math.round(Number(p.mcpPort));
+        return Number.isFinite(n) && n >= 1024 && n <= 65535 ? n : 7731;
+      })(),
+      mcpAllowSend: Boolean(p.mcpAllowSend),
+      mcpHighPriv: Boolean(p.mcpHighPriv),
+      mcpToken:
+        typeof p.mcpToken === "string" && p.mcpToken.length >= 16 ? p.mcpToken : newToken(),
     };
   } catch {
     return fallback;

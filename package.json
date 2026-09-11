@@ -1,7 +1,7 @@
 {
   "name": "uartix-plus",
   "private": true,
-  "version": "0.3.8",
+  "version": "0.3.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,8 @@
     "lint": "eslint src scripts",
     "test": "vitest run",
     "build:seq": "node scripts/build-seq-cli.mjs",
+    "build:mcp": "node scripts/build-mcp-cli.mjs",
+    "mcp:e2e": "node scripts/mcp-e2e.mjs",
     "check:theme": "node .tools/check-contrast.cjs",
     "check:aria": "node .tools/check-aria.cjs"
   },

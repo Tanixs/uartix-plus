@@ -1,6 +1,7 @@
 mod ai;
 mod ble;
 mod b64;
+mod bridge;
 mod busevt;
 mod demo;
 mod files;
@@ -80,6 +81,23 @@ fn guide_html(host: &str, port: u16) -> String {
     )
 }
 
+/// Operator 部署包双击打开（P67-O3）：argv 里的 .uopk 路径先暂存，
+/// 由前端 operatorStore.init() 经 take_pending_open 取走（避免 webview 未就绪丢事件）
+static PENDING_OPEN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn argv_uopk(argv: &[String]) -> Option<String> {
+    argv.iter()
+        .skip(1)
+        .find(|a| a.to_lowercase().ends_with(".uopk"))
+        .cloned()
+}
+
+/// 前端取走待打开的 .uopk 路径（取走即清除）
+#[tauri::command]
+fn take_pending_open() -> Option<String> {
+    PENDING_OPEN.lock().ok().and_then(|mut g| g.take())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // panic 日志：崩溃排查用（写入系统临时目录，追加模式）
@@ -112,12 +130,36 @@ pub fn run() {
             "--disable-features=msWebView2DragDropGlobalApiEnabled",
         );
     }
+    // 主实例自身带 .uopk 启动（文件关联双击首启）：同样暂存，由前端 init 取走。
+    // （single-instance 回调只覆盖二次启动；主实例 argv 必须在 Builder 前捕获）
+    if let Some(p) = argv_uopk(&std::env::args().collect::<Vec<String>>()) {
+        if let Ok(mut g) = PENDING_OPEN.lock() {
+            *g = Some(p);
+        }
+    }
     let serial_mgr = serial::SerialManager::new();
     let net_mgr = net::NetManager::new(serial_mgr.ctx.clone());
     let ble_mgr = ble::BleManager::new(serial_mgr.ctx.clone());
     // 传输队列与 serial_mgr.ctx.xfer 同一实例（ingest tap / 发送任务共享）
     let xfer_mgr = serial_mgr.ctx.xfer.clone();
     tauri::Builder::default()
+        // 单实例（P67-O3）：二次启动聚焦已有窗口；若带 .uopk 参数则通知前端打开部署包
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(p) = argv_uopk(&argv) {
+                if let Ok(mut g) = PENDING_OPEN.lock() {
+                    *g = Some(p);
+                }
+            }
+            use tauri::{Emitter, Manager};
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+                if let Ok(g) = PENDING_OPEN.lock() {
+                    if g.is_some() {
+                        let _ = w.emit("operator:open", ());
+                    }
+                }
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
@@ -129,6 +171,7 @@ pub fn run() {
         .manage(busevt::BinBus::default())
         .manage(ai::AiState::default())
         .manage(session::SessionState::default())
+        .manage(bridge::BridgeState::new())
         .invoke_handler(tauri::generate_handler![
             busevt::ipc_subscribe,
             ai::ai_chat,
@@ -170,6 +213,10 @@ pub fn run() {
             session::session_bridge_start,
             session::session_bridge_stop,
             session::session_status,
+            bridge::bridge_start,
+            bridge::bridge_stop,
+            bridge::bridge_status,
+            bridge::bridge_respond,
             files::save_text_file,
             files::read_text_file,
             files::read_binary_file,
@@ -246,6 +293,12 @@ pub fn run() {
                 });
             }
             wb.build()?;
+            // 首次启动带 .uopk 参数（文件关联双击）：暂存路径，前端 init 经 take_pending_open 取走
+            if let Some(p) = argv_uopk(&std::env::args().collect::<Vec<_>>()) {
+                if let Ok(mut g) = PENDING_OPEN.lock() {
+                    *g = Some(p);
+                }
+            }
             #[cfg(debug_assertions)]
             if let Some(msg) = guide_hint {
                 use tauri_plugin_dialog::DialogExt;

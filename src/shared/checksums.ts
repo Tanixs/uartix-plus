@@ -26,6 +26,22 @@ export function anoCheck(bytes: number[]): { sc: number; ac: number } {
   return { sc, ac };
 }
 
+/** 16 位累加校验（Rust parser "sumadd"，2 字节 = 低字节 SC 高字节 AC，与匿名 V7 SC+AC 同构） */
+export function sumadd16(bytes: number[]): number {
+  const { sc, ac } = anoCheck(bytes);
+  return sc | (ac << 8);
+}
+
+/** 标准 CRC-32（反射 poly 0xEDB88320，init/xorout 0xFFFFFFFF——与 Rust parser crc32 同参数） */
+export function crc32(bytes: number[]): number {
+  let crc = 0xffffffff;
+  for (const b of bytes) {
+    crc ^= b;
+    for (let i = 0; i < 8; i++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 export type Crc16Algo = "modbus" | "ccitt-false" | "x25";
 
 export function crc16(algo: Crc16Algo, bytes: number[]): number {

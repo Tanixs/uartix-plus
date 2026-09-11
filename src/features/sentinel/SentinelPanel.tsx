@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { tx, useLocale } from "../../i18n/strings";
-import { IconShield, IconBell, IconPulse, IconTrash, IconChevron } from "../../shared/icons";
+import { IconShield, IconBell, IconPulse, IconTrash, IconChevron, IconSparkle } from "../../shared/icons";
 import * as store from "./sentinelStore";
 import { playAlertTone } from "./sentinelSound";
 import type { AlertKind, AlertLevel, SentinelAlert } from "./sentinelEngine";
@@ -106,6 +106,16 @@ export function SentinelPanel() {
           </div>
         </div>
         <div className="snt-head-actions">
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => store.diagnoseNow()}
+            disabled={!s.running}
+            title={tx("携带哨兵证据（健康度/报警/异常通道/统计）打开 AI 助手发起结构化诊断", "Open the AI assistant with sentinel evidence (health/alerts/channels/stats) for a structured diagnosis")}
+          >
+            <IconSparkle />
+            {tx("AI 诊断", "AI Diagnose")}
+          </button>
           <button type="button" className="btn sm" onClick={store.popWidget} title={tx("弹出桌面挂件（独立置顶小窗，跨应用驻留报警）", "Pop out a desktop widget (always-on-top mini window)")}>
             {tx("挂件", "Widget")}
           </button>
@@ -278,6 +288,27 @@ export function SentinelPanel() {
                 ))}
               </select>
             </label>
+            <label
+              className="snt-f"
+              title={tx("出现严重报警时自动携带哨兵证据发起 AI 诊断（受冷却限制）", "Auto-run an AI diagnosis with sentinel evidence when a critical alert appears (cooldown applies)")}
+            >
+              <input
+                type="checkbox"
+                checked={s.cfg.autoDiag}
+                onChange={(e) => store.setAutoDiag(e.target.checked)}
+              />
+              {tx("自动 AI 诊断", "Auto AI diagnose")}
+            </label>
+            {s.cfg.autoDiag && (
+              <label className="snt-f" title={tx("两次自动诊断的最小间隔", "Minimum interval between auto diagnoses")}>
+                {tx("冷却", "Cooldown")}
+                <select className="input" value={s.cfg.diagCooldownMin} onChange={(e) => store.setDiagCooldownMin(Number(e.target.value))}>
+                  {[1, 2, 5, 10, 15, 30, 60].map((n) => (
+                    <option key={n} value={n}>{n} min</option>
+                  ))}
+                </select>
+              </label>
+            )}
             {s.cfg.mutedKeys.length > 0 && (
               <div className="snt-muted">
                 {tx("已静音", "Muted")}:

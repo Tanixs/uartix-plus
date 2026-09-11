@@ -47,7 +47,7 @@ export function NewTplDlg({
   const fire = () =>
     onOk({
       mode,
-      name: name.trim() || "协议簇",
+      name: name.trim() || tx("协议簇", "Protocol cluster"),
       len: l,
       count: c,
       delim,
@@ -159,10 +159,10 @@ export function NewTplDlg({
             <div className="fc-dlg-row">
               <label>{tx("行尾", "Line end")}</label>
               <select value={lineEnd} onChange={(e) => setLineEnd(e.target.value)}>
-                <option value="LF">LF（\\n 0x0A）</option>
-                <option value="CRLF">CRLF（\\r\\n）</option>
-                <option value="CR">CR（\\r）</option>
-                <option value="TAB">TAB（\\t）</option>
+                <option value="LF">{tx("LF（\\n 0x0A）", "LF (\\n 0x0A)")}</option>
+                <option value="CRLF">{tx("CRLF（\\r\\n）", "CRLF (\\r\\n)")}</option>
+                <option value="CR">{tx("CR（\\r）", "CR (\\r)")}</option>
+                <option value="TAB">{tx("TAB（\\t）", "TAB (\\t)")}</option>
               </select>
             </div>
           </>

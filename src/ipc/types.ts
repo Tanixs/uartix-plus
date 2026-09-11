@@ -13,7 +13,8 @@ export type PanelId =
   | "xray"
   | "modbus"
   | "sequencer"
-  | "sentinel";
+  | "sentinel"
+  | "spectrum";
 
 export interface PanelMeta {
   id: PanelId;

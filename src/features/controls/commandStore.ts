@@ -1,4 +1,5 @@
 import type { SendMode } from "./controlsStore";
+import { guardLocked } from "../operator/lock";
 
 export interface CommandItem {
   id: string;
@@ -135,6 +136,7 @@ export function setScriptTrack(v: boolean) {
 }
 
 export function addGroup(name: string, parentId?: string) {
+  if (guardLocked()) return;
   const g: CommandGroup = { id: crypto.randomUUID(), name, items: [] };
   if (!parentId) {
     snapshot = { ...snapshot, groups: [...snapshot.groups, g] };
@@ -152,6 +154,7 @@ export function addGroup(name: string, parentId?: string) {
 }
 
 export function renameNode(id: string, name: string) {
+  if (guardLocked()) return;
   snapshot = {
     ...snapshot,
     groups: mapTree(snapshot.groups, (n) =>
@@ -174,6 +177,7 @@ export function removeNode(id: string) {
 }
 
 export function addCommand(parentId: string) {
+  if (guardLocked()) return;
   snapshot = {
     ...snapshot,
     groups: mapTree(snapshot.groups, (n) =>
@@ -279,6 +283,7 @@ export function moveNode(
   refId?: string | null,
   before?: boolean,
 ): boolean {
+  if (guardLocked()) return false;
   if (id === targetParentId) return false;
   const cur = parentOf(snapshot.groups, id, null);
   if (cur === undefined) return false;
@@ -345,6 +350,7 @@ export function exportGroups(): CommandGroup[] {
 }
 
 export function importGroupsMerge(incoming: CommandGroup[]) {
+  if (guardLocked()) return;
   const taken = new Set(snapshot.groups.map((g) => g.name));
   const cloned = structuredClone(incoming).map((g) => {
     let name = g.name;

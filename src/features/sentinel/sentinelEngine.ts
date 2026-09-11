@@ -39,6 +39,10 @@ export interface SentinelConfig {
   volume: number;
   /** 报警历史容量（20~2000） */
   alertCap: number;
+  /** 严重报警自动发起 AI 诊断（P68，冷却见 diagCooldownMin） */
+  autoDiag: boolean;
+  /** 自动诊断冷却（分钟，1~60） */
+  diagCooldownMin: number;
 }
 
 export const DEFAULT_CONFIG: SentinelConfig = {
@@ -50,6 +54,8 @@ export const DEFAULT_CONFIG: SentinelConfig = {
   sound: true,
   volume: 70,
   alertCap: ALERT_CAP,
+  autoDiag: false,
+  diagCooldownMin: 5,
 };
 
 export type AlertKind = "spike" | "newframe" | "silence" | "errrate" | "recover";

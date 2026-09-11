@@ -18,6 +18,7 @@ import { XRayPanel } from "../features/xray/XRayPanel";
 import { ModbusWorkbench } from "../features/modbus/ModbusWorkbench";
 import { SequencerPanel } from "../features/sequencer/SequencerPanel";
 import { SentinelPanel } from "../features/sentinel/SentinelPanel";
+import { SpectrumPanel } from "../features/plot/SpectrumPanel";
 import { ExtPanelHost } from "../features/ai/ExtPanel";
 
 /** 面板页签名（语言感知，P33 i18n）；页签重挂靠 App 的 retitlePanels（locale 变化时 setTitle） */
@@ -40,6 +41,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     modbus: pick("Modbus 工作台", "Modbus Workbench"),
     sequencer: pick("测试序列器", "Sequencer"),
     sentinel: pick("哨兵", "Sentinel"),
+    spectrum: pick("频谱分析", "Spectrum"),
   };
 };
 
@@ -67,6 +69,7 @@ const MXRay = memo(XRayPanel);
 const MModbus = memo(ModbusWorkbench);
 const MSequencer = memo(SequencerPanel);
 const MSentinel = memo(SentinelPanel);
+const MSpectrum = memo(SpectrumPanel);
 
 export const panelComponents = {
   templates: () => (
@@ -142,6 +145,11 @@ export const panelComponents = {
   sentinel: () => (
     <ErrorBoundary label={panelTitleOf("sentinel")}>
       <MSentinel />
+    </ErrorBoundary>
+  ),
+  spectrum: () => (
+    <ErrorBoundary label={panelTitleOf("spectrum")}>
+      <MSpectrum />
     </ErrorBoundary>
   ),
   aiExtPanel: (props: { params?: { extId?: string } }) => (

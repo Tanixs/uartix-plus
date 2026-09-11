@@ -37,6 +37,8 @@ function cfg(over: Partial<SentinelConfig> = {}): SentinelConfig {
     sound: false,
     volume: 70,
     alertCap: ALERT_CAP,
+    autoDiag: false,
+    diagCooldownMin: 5,
     ...over,
   };
 }

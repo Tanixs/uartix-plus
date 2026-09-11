@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { tx } from "../../i18n/strings";
+import { guardLocked } from "../operator/lock";
 import type {
   ChecksumAlgo,
   FieldDef,
@@ -184,6 +185,8 @@ let locateNonce = 0;
 let grpUid = 0;
 
 function set(patch: Partial<ProtocolSnapshot>) {
+  // Operator 只读（P67）：规则/分组属配置内容，锁定时拒绝变更；选择/悬停等视图态放行
+  if ("rules" in patch && guardLocked()) return;
   snapshot = { ...snapshot, ...patch };
   listeners.forEach((l) => l());
 }

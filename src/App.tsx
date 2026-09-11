@@ -43,6 +43,7 @@ import { HelpModal } from "./features/help/HelpModal";
 import type { PanelId } from "./ipc/types";
 import * as serialStore from "./features/serial/serialStore";
 import * as sessionStore from "./features/session/sessionStore";
+import * as operatorStore from "./features/operator/operatorStore";
 import * as xferStore from "./features/xfer/xferStore";
 import * as templateStore from "./features/protocol/templateStore";
 import * as framesStore from "./features/table/framesStore";
@@ -51,6 +52,7 @@ import * as attitudeStore from "./features/attitude/attitudeStore";
 import * as variableStore from "./features/controls/variableStore";
 import * as fcStore from "./features/framecanvas/frameStore";
 import * as telemetryStore from "./features/protocol/telemetryStore";
+import * as mcpServer from "./features/mcp/mcpServer";
 import { notifyLocale, t, tx, useLocale } from "./i18n/strings";
 import { takeIpcLatency } from "./ipc/ipcLatency";
 
@@ -234,6 +236,7 @@ export default function App() {
   const retitlePanelsRef = useRef<(() => void) | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const serial = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
+  const operator = operatorStore.useOperator(); // P67：只读模式横幅 + 布局应用
   const exts = useExtensions();
   const extPanelOptions = exts.exts.filter((e) => e.type === "panel" && e.enabled);
   renderTick += 1;
@@ -317,6 +320,8 @@ export default function App() {
     sessionStore.init();
     xferStore.init();
     sentinelStore.init();
+    operatorStore.init(); // 持久化的 Operator 部署包 → 恢复只读模式
+    mcpServer.init();
     void chatStore.init();
     startWidgetHub();
     startExtRuntime();
@@ -431,6 +436,23 @@ export default function App() {
     // 兜底：布局恢复/首帧渲染后可见性可能尚未稳定，延迟再同步一次
     window.setTimeout(syncPanels, 200);
   }, []);
+
+  // Operator 部署包布局（P67-O2）：激活时整屏应用；切换前把当前布局快照到自动备份槽
+  useEffect(() => {
+    const lay = operator.pkg?.payload.layout;
+    const api = apiRef.current;
+    if (!lay || !api) return;
+    try {
+      if (!operator.restored && api.panels.length > 0) backupAutoLayout(api.toJSON());
+      api.clear();
+      api.fromJSON(lay as SerializedDockview);
+      retitlePanelsRef.current?.();
+      syncPanelsRef.current?.();
+    } catch {
+      /* 布局不兼容则保持现状 */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operator.pkg]);
 
   useEffect(() => {
     if (!editLayout) {
@@ -665,6 +687,7 @@ export default function App() {
           </button>
         </div>
       </header>
+      <OperatorBanner onExit={() => operatorStore.exit()} />
       <div className="app-shell" ref={shellRef}>
         <DockviewReact
           components={panelComponents}
@@ -881,6 +904,35 @@ function NetIfaceBar({ kind }: { kind: IfaceKind }) {
   );
 }
 
+/** Operator 只读模式横幅（P67-O2）：包名 + 只读说明 + 退出。
+ *  只读范围：协议模板/控制页/命令库（store 门禁）；连接/发送/监视/回放不受限。 */
+function OperatorBanner({ onExit }: { onExit: () => void }) {
+  const op = operatorStore.useOperator();
+  useLocale();
+  if (!op.pkg) return null;
+  return (
+    <div className="op-banner" role="status">
+      <span className="op-badge">Operator</span>
+      <span className="op-name">{op.pkg.meta.name}</span>
+      {op.pkg.meta.description && <span className="op-desc">{op.pkg.meta.description}</span>}
+      <span className="op-hint">
+        {tx("配置只读：可连接设备、发送命令、查看数据", "Read-only: connect devices, send commands, view data")}
+      </span>
+      <span style={{ flex: 1 }} />
+      <button
+        className="btn"
+        onClick={() => {
+          if (confirm(tx("退出 Operator 模式？已导入的配置将解除只读保护", "Exit operator mode? Imported configuration will become editable"))) {
+            onExit();
+          }
+        }}
+      >
+        {tx("退出 Operator 模式", "Exit operator mode")}
+      </button>
+    </div>
+  );
+}
+
 /** BLE 接口栏（P48）：扫描 → 选设备 → 连接；通知流/发送路由在 Rust ble.rs，
  *  状态与收发事件与串口/网络完全同源（serial:state + binbus），本组件只做选择与触发。 */
 function BleIfaceBar() {
@@ -950,6 +1002,52 @@ function BleIfaceBar() {
           </option>
         ))}
       </select>
+      {s.bleChars.length > 0 && (
+        <>
+          <select
+            className="input"
+            value={s.bleWriteChar}
+            title={tx(
+              "写特征（发数据）：默认自动选择；非标准透传设备可手动指定",
+              "Write characteristic (TX): auto-selected by default; pick manually for non-standard devices",
+            )}
+            onChange={(e) => {
+              serialStore.setBleCharSel({ bleWriteChar: e.target.value });
+              void serialStore.applyBleChars();
+            }}
+          >
+            <option value="">{tx("写特征：自动", "Write char: auto")}</option>
+            {s.bleChars
+              .filter((c) => c.kind.includes("write"))
+              .map((c) => (
+                <option key={c.uuid} value={c.uuid}>
+                  {c.uuid.slice(0, 8)}… · {c.kind}
+                </option>
+              ))}
+          </select>
+          <select
+            className="input"
+            value={s.bleNotifyChar}
+            title={tx(
+              "收特征（notify/indicate）：默认自动选择；非标准透传设备可手动指定",
+              "Notify characteristic (RX): auto-selected by default; pick manually for non-standard devices",
+            )}
+            onChange={(e) => {
+              serialStore.setBleCharSel({ bleNotifyChar: e.target.value });
+              void serialStore.applyBleChars();
+            }}
+          >
+            <option value="">{tx("收特征：自动", "Notify char: auto")}</option>
+            {s.bleChars
+              .filter((c) => c.kind.includes("notify") || c.kind.includes("indicate"))
+              .map((c) => (
+                <option key={c.uuid} value={c.uuid}>
+                  {c.uuid.slice(0, 8)}… · {c.kind}
+                </option>
+              ))}
+          </select>
+        </>
+      )}
       <span className="iface-soon">{busy && s.portName ? `BLE · ${s.portName}` : "BLE"}</span>
     </div>
   );

@@ -552,8 +552,9 @@ export async function init() {
   sanitizeXSrc();
   onFrames((p: FramesEventPayload) => {
     // 面板关闭 → 完全停止采集（用户要求：关闭了的面板绝不允许后台运行）；
-    // 重新打开后从当前时刻的新数据继续，已有缓存保留
-    if (!panelActivity.isOpen("plot2d")) return;
+    // 重新打开后从当前时刻的新数据继续，已有缓存保留。
+    // 频谱分析面板（P65）与 2D 曲线共享同一份通道数据，任一打开即采集。
+    if (!panelActivity.isOpen("plot2d") && !panelActivity.isOpen("spectrum")) return;
     if (channels.length === 0) return;
     for (const row of p.rows) {
       if (!row.valid) continue;

@@ -1,21 +1,24 @@
 import { useState } from "react";
 import { Section } from "../../shared/Section";
+import { tx, useLocale } from "../../i18n/strings";
 
 export function HelpModal({ onClose }: { onClose: () => void }) {
+  useLocale();
   const [tab, setTab] = useState("start");
   const tabs: { key: string; label: string }[] = [
-    { key: "start", label: "快速入门" },
-    { key: "panels", label: "面板总览" },
-    { key: "ai", label: "AI 助手详解" },
-    { key: "canvas", label: "协议画布教程" },
-    { key: "script", label: "脚本命令详解" },
-    { key: "keys", label: "快捷键与技巧" },
-    { key: "export", label: "导出文件格式" },
+    { key: "start", label: tx("快速入门", "Quick Start") },
+    { key: "panels", label: tx("面板总览", "Panels Overview") },
+    { key: "ai", label: tx("AI 助手详解", "AI Assistant Guide") },
+    { key: "canvas", label: tx("协议画布教程", "Protocol Canvas Guide") },
+    { key: "script", label: tx("脚本命令详解", "Scripting Guide") },
+    { key: "keys", label: tx("快捷键与技巧", "Shortcuts & Tips") },
+    { key: "export", label: tx("导出文件格式", "Export Formats") },
+    { key: "operator", label: tx("部署与分发", "Deploy & Distribute") },
   ];
   return (
     <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={onClose}>
       <div className="modal set-modal help-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-title">帮助与入门</div>
+        <div className="modal-title">{tx("帮助与入门", "Help & Getting Started")}</div>
         <div className="set-body">
           <div className="set-nav">
             {tabs.map((x) => (
@@ -100,6 +103,13 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     </tbody>
                   </table>
                 </Section>
+                <Section title="哨兵 × AI 诊断">
+                  <ul className="help-ol">
+                    <li><b>手动诊断</b>：哨兵面板顶部点<code>AI 诊断</code>，会自动携带结构化证据（连接状态、健康度、近期报警、异常通道评分、帧型与错误率统计）打开 AI 助手发起诊断，无需手动描述现象。</li>
+                    <li><b>自动诊断</b>：哨兵面板底部参数区开启<code>自动 AI 诊断</code>后，出现<b>严重报警</b>（通信静默、重大突变等）会自动发起诊断并直接写入 AI 会话——不弹窗、不抢焦点，打开 AI 助手即可看到结论。</li>
+                    <li><b>冷却</b>：自动诊断按所选冷却时间（1~60 分钟）去重，避免报警风暴时连环调用；未配置 AI 服务时会提示先到 设置 → AI 服务 配置。</li>
+                  </ul>
+                </Section>
                 <Section title="九种代码块（回复中直接可用）">
                   <table className="help-table">
                     <tbody>
@@ -136,7 +146,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>示例：对 AI 说「做一个无边框透明桌宠，眼睛跟随鼠标，AI 思考时冒问号，回答时气泡打字机，点击它能向 AI 提问，右键菜单里加『闹脾气』『睡觉』，串口断线时沮丧」。</li>
                   </ul>
                 </Section>
-                <Section title="脚本 api.app.*（28 种动作速查）">
+                <Section title="脚本 api.app.*（34 种动作速查）">
                   <table className="help-table">
                     <tbody>
                       <tr><td>界面控制</td><td>openPanel({"{"}panel{"}"}) · applyPreset({"{"}preset{"}"}) · setTheme({"{"}theme{"}"})</td></tr>
@@ -148,6 +158,9 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>挂件</td><td>openWidget / closeWidget / popWidget({"{"}name{"}"}) 浮窗管理与弹出桌面</td></tr>
                       <tr><td>连接</td><td>openPort() · closePort()（需开启「小部件可发送数据」）</td></tr>
                       <tr><td>Modbus</td><td>modbus({"{"}op:"…"{"}"}) 操作工作台：<code>status</code> · <code>slave.start/stop/configure/write/writeMany/resize</code> · <code>poll.add/remove/clear/configure/start/stop/reset</code>（需脚本高权限，会占用总线发数据）</td></tr>
+                      <tr><td>读图</td><td>readPlot({"{"}ask{"}"}) 截取当前 2D 曲线面板画面发给模型分析（面板未开会自动打开）</td></tr>
+                      <tr><td>哨兵</td><td>sentinel({"{"}op:"status/enable/ackAll/mute/clear"{"}"}) 异常监测查询与控制（需脚本高权限）</td></tr>
+                      <tr><td>结构发现</td><td>xrayEvidence() / xrayCrack() 读协议考古证据链（帧长/帧型簇/校验爆破/轮询周期，面板需先「采样分析」）· xrayReport() 生成引用证据编号的考古报告（需脚本高权限）</td></tr>
                       <tr><td>通知</td><td>toast({"{"}msg{"}"})</td></tr>
                     </tbody>
                   </table>
@@ -172,12 +185,42 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                       <tr><td>自定义控件</td><td>「做一个圆表盘电压表卡片，实时显示 VOLT 字段，0~15V」</td></tr>
                       <tr><td>生成命令</td><td>「生成一条归零指令加入命令库」「生成 3 条不同频率的采样指令」</td></tr>
                       <tr><td>做协议</td><td>「做一个指令工厂协议：帧头 AA 55、命令 u8、长度、数据、CRC16-Modbus」</td></tr>
+                      <tr><td>协议考古</td><td>「结构发现面板分析完了吗？分析一下这个协议是什么结构，给我一份考古报告」</td></tr>
                       <tr><td>换主题</td><td>「主题换成琉璃，加一点液态玻璃感」</td></tr>
                       <tr><td>做挂件</td><td>「做一个桌面电压监视挂件，低于 10V 变红闪烁」</td></tr>
                       <tr><td>无边框挂件</td><td>「做一个无边框透明挂件贴在屏幕角落，AI 回答时气泡提示」</td></tr>
                       <tr><td>桌宠（示例）</td><td>「做一个无边框桌宠，AI 思考时冒问号，回答时气泡打字机」</td></tr>
                       <tr><td>挂件管理</td><td>「把 XX 弹出到桌面」「关闭 XX 浮窗」「重新打开 XX」</td></tr>
                       <tr><td>自动化</td><td>「写个脚本：每 100ms 上报一次 roll，越界时蜂鸣」</td></tr>
+                    </tbody>
+                  </table>
+                </Section>
+                <Section title="MCP 服务器（接入 Claude Desktop / Cursor）">
+                  <p className="help-tip">
+                    让写代码的 AI 顺手看板子：IDE 里的智能体经 MCP 直接读 Uartix+ 的实时遥测、发指令、跑测试序列。
+                    三步接入：
+                  </p>
+                  <ol className="help-ol">
+                    <li>设置 → 集成：打开「启用 MCP 桥」（默认端口 7731，token 自动生成）。</li>
+                    <li>
+                      构建桥接 CLI：<code>npm run build:mcp</code>，得到 <code>dist-cli/uartix-mcp.cjs</code>
+                      （需要本机 Node ≥ 18）；把它的绝对路径填进「桥接 CLI 路径」。
+                    </li>
+                    <li>
+                      点「复制 MCP JSON」，粘贴到 Claude Desktop 的{" "}
+                      <code>%APPDATA%\Claude\claude_desktop_config.json</code> 或 Cursor 的{" "}
+                      <code>~/.cursor/mcp.json</code>，重启客户端即可看到 uartix 的 8 个工具。
+                    </li>
+                  </ol>
+                  <p className="help-tip">
+                    安全：服务只绑定 127.0.0.1 + 首行 token 握手 + 单客户端；<b>允许远程发送</b>关闭时 send / run_sequence
+                    直接拒绝；删除/开关连接类动作需另开「允许高权限动作」；每次调用在设置页留审计。改端口无需改客户端配置（客户端经发现文件自动定位）。
+                  </p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>读</td><td>get_status 连接总览 · get_fields 变量快照 · get_frames 最近帧 · get_plot_stats 曲线统计 · get_alerts 哨兵健康</td></tr>
+                      <tr><td>写</td><td>send 发送（ascii 支持 \r \n \t \xNN）· run_action 白名单动作 · run_sequence 跑测试序列并返回逐步结果</td></tr>
+                      <tr><td>调试</td><td><code>node uartix-mcp.cjs --status</code> 检查发现文件与连通性；<code>npm run mcp:e2e</code> 跑协议层冒烟</td></tr>
                     </tbody>
                   </table>
                 </Section>
@@ -201,12 +244,13 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <tr><td>属性</td><td>选中模板/字段后编辑其全部参数</td></tr>
                     <tr><td>数据表格</td><td>逐帧列表，可排序/筛选/导出 CSV·XLSX</td></tr>
                     <tr><td>2D 曲线</td><td>字段图例点眼睛开曲线；支持平移/框选缩放/双击复位</td></tr>
+                    <tr><td>频谱分析</td><td>FFT 频谱（主峰/频率分辨率/线性或 dB）与直方图（均值/σ/分布）双模式；与 2D 曲线共享通道数据，选通道点数窗函数，可冻结谱面观察</td></tr>
                     <tr><td>3D 姿态</td><td>把欧拉角或四元数字段映射到 3D 模型（+面板可添加）</td></tr>
                     <tr><td>图传</td><td>把每帧数据渲染为画面：暂停/回看/保存帧、镜像翻转、缩放拖动；「解析设置」定义帧定界方式</td></tr>
                     <tr><td>控制画布</td><td>拖拽部署滑条/按钮/开关/LED/蜂鸣器等控件向下位机发指令；拖动时虚线幽灵框指示落点，松手只会落到空格</td></tr>
                     <tr><td>控制台</td><td>原始收发日志（时间戳彩色），可发 ASCII/Hex、发送文件、录制日志；上方快捷指令栏一键发送，指令工厂可组各协议帧</td></tr>
-                    <tr><td>结构发现</td><td>未知协议考古：对原始字节做周期/帧头统计推断，勾选帧型一键批量生成模板</td></tr>
-                    <tr><td>哨兵</td><td>静默异常监测：数值通道突变（双 EMA z-score）、新帧型出现、错误帧率超限、通信静默四类报警；报警自动降噪合并，可最小化成右下角浮球或弹出桌面挂件驻留报警（面板与浮球都关闭则停止监测），支持合成提示音</td></tr>
+                    <tr><td>结构发现</td><td>未知协议考古：对原始字节做周期/帧头统计推断、校验算法爆破与帧型序列分析，勾选帧型一键批量生成模板；AI 可引用其证据链生成推理报告</td></tr>
+                    <tr><td>哨兵</td><td>静默异常监测：数值通道突变（双 EMA z-score）、新帧型出现、错误帧率超限、通信静默四类报警；报警自动降噪合并，可最小化成右下角浮球或弹出桌面挂件驻留报警（面板与浮球都关闭则停止监测），支持合成提示音；一键或自动发起 AI 诊断（携带证据，见 AI 助手详解）</td></tr>
                     <tr><td>Modbus 工作台</td><td>模拟从站（本机当从站应答，四张可编辑数据表 + 故障注入）与主站轮询表（按周期读寄存器/线圈，值直接写成变量）；关掉面板仍在运行，工具栏有绿色徽标</td></tr>
                     <tr><td>AI 助手</td><td>AI 调试助手：协议识别、数据解读、曲线分析、指令/卡片生成、诊断排查、调试报告；Ctrl+K 唤起浮窗，可停靠为面板（+面板 可添加）</td></tr>
                   </tbody>
@@ -471,11 +515,46 @@ else send("RGT:" + phase);`}</pre>
                 </Section>
               </>
             )}
+            {tab === "operator" && (
+              <>
+                <Section title="什么是 Operator 部署包（.uopk）">
+                  <p><b>.uopk</b> 是 Uartix+ 的工作区发行物：把工程师在开发机上调好的<b>协议模板、控制页、命令库、面板布局与外观设置</b>打包成一个文件，交给现场操作员。操作员端导入后以<b>只读模式</b>运行——可以连接设备、发命令、看数据，但改不了任何配置，保证现场与调试环境一致、不误触。</p>
+                </Section>
+                <Section title="生成部署包（工程机）">
+                  <ol className="help-ol">
+                    <li>先把工作区调好：协议能解析、控制页与命令库可用、面板布局满意。</li>
+                    <li>打开<code>设置 → 数据</code>，找到 <code>Operator 部署包（.uopk）</code> 块。</li>
+                    <li>填<b>包名</b>与<b>说明</b>（会显示在操作员端横幅），勾选要进包的部件：协议模板 / 控制页 / 命令库 / 面板布局。</li>
+                    <li>点<code>生成部署包</code>，保存为 <code>.uopk</code> 文件。</li>
+                  </ol>
+                  <p className="help-tip">随包的设置只含外观与交互子集（主题、语言、小数位、工作区预设、曲线配色、自动重连等）；AI 密钥、MCP 端口、窗口缩放等本机私有项不会进包。</p>
+                </Section>
+                <Section title="导入与运行（操作员机）">
+                  <ol className="help-ol">
+                    <li><b>方式一</b>：<code>设置 → 数据 → 导入并运行</code>，选择 .uopk 文件。</li>
+                    <li><b>方式二</b>：直接<b>双击</b> .uopk 文件（安装版已注册文件关联）。应用未启动时会自动拉起；已启动时在当前窗口打开并聚焦，同一包不会重复导入。</li>
+                    <li>导入后进入<b>只读模式</b>：标题栏横幅显示包名与退出按钮；协议、控制页、命令库替换为包内容；布局整屏应用。</li>
+                    <li>重启应用会自动恢复该部署包（保持只读），直到点横幅上的<code>退出</code>。</li>
+                  </ol>
+                </Section>
+                <Section title="只读模式：能做什么 / 不能做什么">
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>能做</td><td>连接串口 / 网络 / BLE 设备；用控制页与命令库发指令；看帧画布、数据表格、2D 曲线、频谱等全部观测面板；哨兵监测照常运行</td></tr>
+                      <tr><td>不能做</td><td>编辑/新建协议模板与字段；增删改控制页卡片与命令库；修改设置；导入其它配置文件（改动都会被拦截并提示「Operator 模式：配置只读」）</td></tr>
+                    </tbody>
+                  </table>
+                </Section>
+                <Section title="退出只读模式">
+                  <p>点标题栏横幅上的<code>退出</code>：解锁并清除持久化的部署包。<b>已导入的协议、控制页、命令库会保留在界面中</b>，此时可像普通工程模式一样继续编辑——适合把现场配置拿回来二改。</p>
+                </Section>
+              </>
+            )}
           </div>
         </div>
         <div className="modal-foot">
           <span />
-          <button className="btn primary" onClick={onClose}>开始使用</button>
+          <button className="btn primary" onClick={onClose}>{tx("开始使用", "Get Started")}</button>
         </div>
       </div>
     </div>

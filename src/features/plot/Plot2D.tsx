@@ -29,6 +29,7 @@ import {
   type Measure,
   type PanelPos,
 } from "./plotMeasure";
+import { tx, useLocale } from "../../i18n/strings";
 
 /** 会话标注竖线颜色（P3b）：琥珀色，与「起」灰虚线、「最新」主题实线区分 */
 const ANN_COLOR = "#e8a33d";
@@ -250,16 +251,22 @@ export function Plot2D() {
   };
 
   /** 游标测量面板同步：两套游标各自独立；数据/位置不变则跳过 setState。
-   *  注意：u.data 是视窗裁剪后的数据，游标可能在视野外 → 测量一律基于全量缓存 */
+   *  注意：u.data 是视窗裁剪后的数据，游标可能在视野外 → 测量一律基于全量缓存。
+   *  先算 key（O(1)：全量缓存引用 + 游标位置）再去 buildMeasure——平移 tick
+   *  高频调用本函数时，绝大多数情况 key 未变，避免白跑测量 */
   const syncMeasure = () => {
     const u = uRef.current;
     const st = settingsRef.current;
-    let key = "";
     let mx: Measure | null = null;
     let my: Measure | null = null;
     if (u && (st.cursorX || st.cursorY)) {
       const snap = plotStore.getSnapshot();
       const full = plotStore.fullAligned();
+      const xa = xCurRef.current;
+      const ya = yCurRef.current;
+      const key = `${st.cursorX ? 1 : 0}${st.cursorY ? 1 : 0}|${xa.a?.toFixed(4) ?? "-"}|${xa.b?.toFixed(4) ?? "-"}|${ya.a?.toFixed(4) ?? "-"}|${ya.b?.toFixed(4) ?? "-"}|${full.x.length}`;
+      if (key === measureKeyRef.current) return;
+      measureKeyRef.current = key;
       const data = [full.x, ...full.cols] as uPlot.AlignedData;
       if (st.cursorX) {
         mx = buildMeasure(
@@ -285,14 +292,13 @@ export function Plot2D() {
           stackMetaRef.current,
         );
       }
-      const xa = xCurRef.current;
-      const ya = yCurRef.current;
-      key = `${st.cursorX ? 1 : 0}${st.cursorY ? 1 : 0}|${xa.a?.toFixed(4) ?? "-"}|${xa.b?.toFixed(4) ?? "-"}|${ya.a?.toFixed(4) ?? "-"}|${ya.b?.toFixed(4) ?? "-"}|${full.x.length}`;
-    }
-    if (key !== measureKeyRef.current) {
-      measureKeyRef.current = key;
       setMeasureX(mx);
       setMeasureY(my);
+    } else if (measureKeyRef.current !== "") {
+      // 游标全关：清空测量面板（旧实现靠 key="" 分支兜底）
+      measureKeyRef.current = "";
+      setMeasureX(null);
+      setMeasureY(null);
     }
   };
 
@@ -338,6 +344,13 @@ export function Plot2D() {
     mo.observe(document.documentElement, { attributeFilter: ["data-theme"] });
     return () => mo.disconnect();
   }, []);
+
+  // 语言切换：订阅重渲染（DOM 文案即时更新）；canvas 徽标（起/最新）在 draw hook
+  // 内即时取值，切语言时补一次重绘让画布文本跟随
+  const locale = useLocale();
+  useEffect(() => {
+    uRef.current?.redraw();
+  }, [locale]);
 
   // 右键菜单关闭闭环：外部按下 / Escape / 滚轮 立即关；
   // 指针离开菜单（含级联浮层）超过宽限期自动关——解决"移开鼠标菜单还挂着"
@@ -680,10 +693,10 @@ export function Plot2D() {
               // 起/最新都锚定全量数据的真实端点：视窗裁剪下 xs 只是视野片段，
               // 端点在视野外时 drawV 自动降级为边缘箭头指示
               const sv = startDispRef.current;
-              if (sv != null) drawV(sv, dimColor, true, "起");
+              if (sv != null) drawV(sv, dimColor, true, tx("起", "Start"));
               // 「最新」锚定可见通道的真实末点（合并轴末尾/窗口末尾都可能超前）
               const lv = latestDispRef.current;
-              if (lv != null) drawV(lv, accent, false, "最新");
+              if (lv != null) drawV(lv, accent, false, tx("最新", "Latest"));
               // 会话标注竖线（P3b）：1px 虚线（无徽标，靠列表悬停查看文本），越界时
               // drawV 自动画边缘箭头 + 文本。可见性仅当会话有标注时才有成本
               for (const a of annRef.current) {
@@ -1347,15 +1360,13 @@ export function Plot2D() {
      
   }, [plot.settings.stack]);
 
+  // 喂数 tick（重活：buildAlignedWindow + decimate + setData）抽为 ref 函数——
+  // 120ms interval 与下方 rAF 平移循环（新点出窗时提前喂数）共用
+  const feedTickRef = useRef<() => void>(() => {});
   useEffect(() => {
-    const timer = setInterval(() => {
+    feedTickRef.current = () => {
       const u = uRef.current;
-      const wrap = wrapRef.current;
-      // 面板不可见（宽度为 0，如 dock 标签未激活）或整窗隐藏时才跳过；
-      // 不用 IntersectionObserver——CSS zoom 下其判定不稳定，会把可见面板误判为
-      // 不可见，导致数据停更、跟最新按钮“无反应”
-      if (!u || !wrap || wrap.clientWidth === 0 || document.hidden) return;
-      if (!plotStore.isDirty()) return;
+      if (!u) return;
       plotStore.clearDirty();
       const settings = plotStore.getSnapshot().settings;
       const snap = plotStore.getSnapshot();
@@ -1496,11 +1507,73 @@ export function Plot2D() {
         // 浏览态 / 拖拽中显式重绘：uPlot 的 setData(data,false) 只更新数据引用、不触发绘制
         u.redraw();
       }
+    };
+    const timer = setInterval(() => {
+      const u = uRef.current;
+      const wrap = wrapRef.current;
+      // 面板不可见（宽度为 0，如 dock 标签未激活）或整窗隐藏时才跳过；
+      // 不用 IntersectionObserver——CSS zoom 下其判定不稳定，会把可见面板误判为
+      // 不可见，导致数据停更、跟最新按钮“无反应”
+      if (!u || !wrap || wrap.clientWidth === 0 || document.hidden) return;
+      if (!plotStore.isDirty()) return;
+      feedTickRef.current();
     }, 120);
     return () => {
       clearInterval(timer);
     };
   }, [plot.channels]);
+
+  // 跟随态丝滑平移（P65 修复「一卡一卡」）：固定 120ms 喂数与屏幕刷新不同步，
+  // 曲线实际只有 ~8fps 跳变感。rAF 在两次喂数之间做纯视口平移——O(1) 锚点读取
+  // + setScale（uPlot 重绘视野内点），30fps 节流；数据静止时每帧只做一次引用
+  // 比较，零开销；新点越出喂数窗时提前走完整喂数，末端不露白。浏览态/交互中直接跳过。
+  useEffect(() => {
+    let raf = 0;
+    let lastPan = 0;
+    const loop = (now: number) => {
+      raf = requestAnimationFrame(loop);
+      const u = uRef.current;
+      const wrap = wrapRef.current;
+      if (!u || !wrap || wrap.clientWidth === 0 || document.hidden) return;
+      if (!followXRef.current || panRef.current || boxRef.current || cursorDragRef.current) return;
+      const anchor = plotStore.lastVisibleX();
+      if (anchor == null || anchor === latestDispRef.current) return; // 静止：零开销
+      const fed = fedXRef.current;
+      if (fed.length === 0 || anchor > fed[fed.length - 1]) {
+        // 新点越出喂数窗：重新喂数（feedTick 内部消费 dirty）
+        if (now - lastPan >= 30) {
+          lastPan = now;
+          feedTickRef.current();
+        }
+        return;
+      }
+      if (now - lastPan < 30) return; // 30fps 节流：丝滑与 CPU 占用的平衡
+      lastPan = now;
+      const st = settingsRef.current;
+      const sx = u.scales.x;
+      const span = Math.max((sx.max ?? 0) - (sx.min ?? 0), st.xSource === "time" ? 10 : 200);
+      u.setScale("x", { min: anchor - span * 0.95, max: anchor + span * 0.05 });
+      latestDispRef.current = anchor;
+      // 时间游标骑行：按窗口比例保持相对位置（与喂数 tick 同逻辑）
+      if (st.cursorX && sx.min != null && sx.max != null && sx.max > sx.min) {
+        const c = xCurRef.current;
+        const s0 = sx.max - sx.min;
+        const fa = c.a != null ? (c.a - sx.min) / s0 : null;
+        const fb = c.b != null ? (c.b - sx.min) / s0 : null;
+        if (fa != null || fb != null) {
+          const nmin = anchor - span * 0.95;
+          xCurRef.current = {
+            a: c.a != null && fa != null ? nmin + fa * span : c.a,
+            b: c.b != null && fb != null ? nmin + fb * span : c.b,
+          };
+          u.redraw();
+        }
+      }
+      syncMeasure();
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   /** 一次性把 Y 适配到当前视野（不改变 yAuto 开关） */
   const fitYToView = () => {
@@ -1580,8 +1653,8 @@ export function Plot2D() {
           }}
           title={
             plot.settings.yAuto
-              ? "Y 轴随视野自动缩放：开（波形始终占满面板）"
-              : "Y 轴随视野自动缩放：关（视野固定，波形更稳）"
+              ? tx("Y 轴随视野自动缩放：开（波形始终占满面板）", "Y auto-scale to view: on (waveform always fills the panel)")
+              : tx("Y 轴随视野自动缩放：关（视野固定，波形更稳）", "Y auto-scale to view: off (view fixed, steadier waveform)")
           }
         >
           <IconAutoY />
@@ -1589,7 +1662,7 @@ export function Plot2D() {
         <button
           className="icon-btn"
           onClick={fitView}
-          title="Auto 自适应（执行一次）：X/Y 轴一步适配到全部数据的最佳观察范围（带边距），与 Y 轴连续自动缩放相互独立"
+          title={tx("Auto 自适应（执行一次）：X/Y 轴一步适配到全部数据的最佳观察范围（带边距），与 Y 轴连续自动缩放相互独立", "Auto fit (one-shot): fit X/Y axes to the best view of all data in one step (with margin); independent of continuous Y auto-scale")}
         >
           <IconFitView />
         </button>
@@ -1599,8 +1672,8 @@ export function Plot2D() {
           disabled={snapBlocked && !snap}
           title={
             snap
-              ? "快照叠加：已冻结参考曲线（再点清除）。拖动/缩放视野，虚线起点始终对齐当前视野起点，叠画对比两段波形"
-              : "快照叠加：把当前视野内可见通道冻结为参考虚线，拖到别处叠画对比两段波形（堆叠/通道 X 源下不可用）"
+              ? tx("快照叠加：已冻结参考曲线（再点清除）。拖动/缩放视野，虚线起点始终对齐当前视野起点，叠画对比两段波形", "Snapshot overlay: reference curve frozen (click again to clear). Pan/zoom the view; the dashed line start stays aligned to the current view start for comparing two segments")
+              : tx("快照叠加：把当前视野内可见通道冻结为参考虚线，拖到别处叠画对比两段波形（堆叠/通道 X 源下不可用）", "Snapshot overlay: freeze visible channels in the current view as a dashed reference, then pan elsewhere to overlay-compare two segments (unavailable in stack / channel X-source mode)")
           }
         >
           <IconCamera />
@@ -1609,7 +1682,7 @@ export function Plot2D() {
           <button
             className="icon-btn"
             onClick={() => plotStore.clearChannels()}
-            title="清空所有通道"
+            title={tx("清空所有通道", "Clear all channels")}
           >
             <IconTrash />
           </button>
@@ -1617,21 +1690,21 @@ export function Plot2D() {
         <button
           className={`icon-btn ${plot.settings.stack ? "primary" : ""}`}
           onClick={() => plotStore.setSetting({ stack: !plot.settings.stack })}
-          title="多通道堆叠：每通道独立归一化，垂直均分显示（量纲不同的通道各看各的）"
+          title={tx("多通道堆叠：每通道独立归一化，垂直均分显示（量纲不同的通道各看各的）", "Stack channels: each channel normalized independently and shown in equal vertical bands (mixed units stay readable)")}
         >
           <IconStack />
         </button>
         <button
           className={`icon-btn ${cursorXOn ? "primary" : ""}`}
           onClick={() => plotStore.setSetting({ cursorX: !cursorXOn })}
-          title="时间游标（垂直标尺）：开启后在图上单击依次放置 A、B，测 Δt 与各通道取值差"
+          title={tx("时间游标（垂直标尺）：开启后在图上单击依次放置 A、B，测 Δt 与各通道取值差", "Time cursors (vertical rules): click on the chart to place A then B; measures Δt and per-channel value deltas")}
         >
           <IconCursorX />
         </button>
         <button
           className={`icon-btn ${cursorYOn ? "primary" : ""}`}
           onClick={() => plotStore.setSetting({ cursorY: !cursorYOn })}
-          title="幅值游标（水平标尺）：开启后在图上单击依次放置 A、B，测 ΔV（堆叠模式按聚焦通道原始值）"
+          title={tx("幅值游标（水平标尺）：开启后在图上单击依次放置 A、B，测 ΔV（堆叠模式按聚焦通道原始值）", "Amplitude cursors (horizontal rules): click on the chart to place A then B; measures ΔV (stack mode uses the focused channel's raw values)")}
         >
           <IconCursorY />
         </button>
@@ -1642,7 +1715,7 @@ export function Plot2D() {
             <span
               key={ch.id}
               className="plot-chip"
-              title={`实际采样率约 ${hz.toFixed(0)} Hz（由设备输出率决定）\n点击名称聚焦该通道（再点恢复全部）`}
+              title={tx(`实际采样率约 ${hz.toFixed(0)} Hz（由设备输出率决定）\n点击名称聚焦该通道（再点恢复全部）`, `Actual sample rate ≈ ${hz.toFixed(0)} Hz (determined by the device output rate)\nClick the name to focus this channel (click again to restore all)`)}
             >
               <input
                 type="color"
@@ -1680,25 +1753,27 @@ export function Plot2D() {
         <div ref={chartRef} className="plot-chart" />
         {!hasChannels && (
           <div className="plot-empty">
-            打开左侧「字段图例」的眼睛即可实时绘图
+            {tx("打开左侧「字段图例」的眼睛即可实时绘图", "Toggle the eye icon in the field legend on the left to plot in real time")}
             <br />
-            左键拖动平移 · 中键框选缩放 · 双击保形回实时 ·
-            滚轮缩放（轴区对应轴） · 右键图表更多设置
+            {tx("左键拖动平移 · 中键框选缩放 · 双击保形回实时 · ", "Left-drag to pan · Middle-drag to box-zoom · Double-click to resume live · ")}
+            {tx("滚轮缩放（轴区对应轴） · 右键图表更多设置", "Scroll to zoom (the hovered axis area zooms that axis) · Right-click the chart for more settings")}
           </div>
         )}
         {anyCursor && !hasXCursor && !hasYCursor && (
           <div className="plot-cursor-hint">
-            点击图表依次放置游标 <b>A</b>、<b>B</b>；拖动线条微调，双击线条删除
-            {cursorXOn && cursorYOn ? "（时间游标=竖线，幅值游标=横线，同点铺设）" : ""}
+            {tx("点击图表依次放置游标", "Click the chart to place cursors")} <b>A</b>
+            {tx("、", ", ")}<b>B</b>
+            {tx("；拖动线条微调，双击线条删除", "; drag a line to fine-tune, double-click to remove")}
+            {cursorXOn && cursorYOn ? tx("（时间游标=竖线，幅值游标=横线，同点铺设）", " (time cursor = vertical, amplitude cursor = horizontal, placed at the same point)") : ""}
           </div>
         )}
         {backlog > 0 && (
           <button
             className="plot-follow-chip"
             onClick={() => setFollow(true)}
-            title="回到跟随模式，视野钉住最新数据"
+            title={tx("回到跟随模式，视野钉住最新数据", "Back to follow mode: pin the view to the latest data")}
           >
-            跟最新 · {backlog} 新点 <IconChevron size={11} />
+            {tx("跟最新 · ", "Follow latest · ")}{backlog} {tx("新点", "new")} <IconChevron size={11} />
           </button>
         )}
         <div className="plot-measure-col">
@@ -1708,8 +1783,8 @@ export function Plot2D() {
             style={mpX ? { left: mpX.l, bottom: mpX.b, right: "auto" } : undefined}
           >
             <div className="plot-measure-head pm-drag" {...panelPointerProps("x")}>
-              时间游标
-              <span className="pm-hint">拖动竖线 / 双击删除</span>
+              {tx("时间游标", "Time cursor")}
+              <span className="pm-hint">{tx("拖动竖线 / 双击删除", "Drag the line / double-click to remove")}</span>
               <button
                 className="pm-clear"
                 onClick={() => {
@@ -1719,9 +1794,9 @@ export function Plot2D() {
                   setMeasureX(null);
                   uRef.current?.redraw();
                 }}
-                title="清除时间游标（功能保持开启，在图上单击可重新铺设）"
+                title={tx("清除时间游标（功能保持开启，在图上单击可重新铺设）", "Clear time cursors (feature stays on; click on the chart to place again)")}
               >
-                清除
+                {tx("清除", "Clear")}
               </button>
             </div>
             <div className="pm-pos">
@@ -1729,7 +1804,7 @@ export function Plot2D() {
               <span className="pm-coord">{fmtX(measureX.a)}</span>
               <span className="pm-tag b">B</span>
               <span className="pm-coord">
-                {measureX.b == null ? <i>点击图表放置 B</i> : fmtX(measureX.b)}
+                {measureX.b == null ? <i>{tx("点击图表放置 B", "Click the chart to place B")}</i> : fmtX(measureX.b)}
               </span>
             </div>
             {measureX.b != null && (
@@ -1771,8 +1846,8 @@ export function Plot2D() {
             style={mpY ? { left: mpY.l, bottom: mpY.b, right: "auto" } : undefined}
           >
             <div className="plot-measure-head pm-drag" {...panelPointerProps("y")}>
-              幅值游标
-              <span className="pm-hint">拖动横线 / 双击删除</span>
+              {tx("幅值游标", "Amplitude cursor")}
+              <span className="pm-hint">{tx("拖动横线 / 双击删除", "Drag the line / double-click to remove")}</span>
               <button
                 className="pm-clear"
                 onClick={() => {
@@ -1781,9 +1856,9 @@ export function Plot2D() {
                   setMeasureY(null);
                   uRef.current?.redraw();
                 }}
-                title="清除幅值游标（功能保持开启，在图上单击可重新铺设）"
+                title={tx("清除幅值游标（功能保持开启，在图上单击可重新铺设）", "Clear amplitude cursors (feature stays on; click on the chart to place again)")}
               >
-                清除
+                {tx("清除", "Clear")}
               </button>
             </div>
             <div className="pm-pos">
@@ -1791,7 +1866,7 @@ export function Plot2D() {
               <span className="pm-coord">{fmtVal(measureY.a)}</span>
               <span className="pm-tag b">B</span>
               <span className="pm-coord">
-                {measureY.b == null ? <i>点击图表放置 B</i> : fmtVal(measureY.b)}
+                {measureY.b == null ? <i>{tx("点击图表放置 B", "Click the chart to place B")}</i> : fmtVal(measureY.b)}
               </span>
             </div>
             {measureY.b != null && (
@@ -1820,10 +1895,10 @@ export function Plot2D() {
             onContextMenu={(e) => e.preventDefault()}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="ctx-title">图表设置</div>
-            <div className="ctx-group">视图</div>
+            <div className="ctx-title">{tx("图表设置", "Chart settings")}</div>
+            <div className="ctx-group">{tx("视图", "View")}</div>
             <button className="ctx-item" onClick={fitView}>
-              Auto 自适应（X/Y 一步取景，执行一次）
+              {tx("Auto 自适应（X/Y 一步取景，执行一次）", "Auto fit (one-step framing, one-shot)")}
             </button>
             <button
               className="ctx-item"
@@ -1832,15 +1907,15 @@ export function Plot2D() {
                 setMenu(null);
               }}
             >
-              {followState ? "●" : "○"} X 轴跟随最新
+              {followState ? "●" : "○"} {tx("X 轴跟随最新", "X axis follows latest")}
             </button>
             <button className="ctx-item" onClick={fitYToView}>
-              Y 轴适配视野
+              {tx("Y 轴适配视野", "Fit Y to view")}
             </button>
             <button className="ctx-item" onClick={resetView}>
-              复位视图
+              {tx("复位视图", "Reset view")}
             </button>
-            <div className="ctx-group">设置</div>
+            <div className="ctx-group">{tx("设置", "Settings")}</div>
             <div
               ref={axisRowRef}
               className="ctx-row"
@@ -1859,16 +1934,16 @@ export function Plot2D() {
             >
               <button className="ctx-item">
                 <span className="ctx-item-l">
-                  坐标轴{" "}
+                  {tx("坐标轴", "Axes")}{" "}
                   <span className="ctx-arrow">
                     <IconChevron size={12} />
                   </span>
                 </span>
                 <span className="ctx-cur">
                   {plot.settings.xSource === "time"
-                    ? "X: 时间"
+                    ? tx("X: 时间", "X: time")
                     : plot.settings.xSource === "index"
-                      ? "X: 序号"
+                      ? tx("X: 序号", "X: index")
                       : `X: ${plot.channels.find((c) => `ch:${c.id}` === plot.settings.xSource)?.name ?? ""}`}
                 </span>
               </button>
@@ -1891,14 +1966,14 @@ export function Plot2D() {
             >
               <button className="ctx-item">
                 <span className="ctx-item-l">
-                  曲线样式{" "}
+                  {tx("曲线样式", "Curve style")}{" "}
                   <span className="ctx-arrow">
                     <IconChevron size={12} />
                   </span>
                 </span>
                 <span className="ctx-cur">
-                  {{ linear: "直线", step: "台阶", smooth: "平滑" }[plot.settings.lineStyle]} ·{" "}
-                  {{ line: "连线", points: "仅画点" }[plot.settings.plotMode]}
+                  {{ linear: tx("直线", "Line"), step: tx("台阶", "Step"), smooth: tx("平滑", "Smooth") }[plot.settings.lineStyle]} ·{" "}
+                  {{ line: tx("连线", "Lines"), points: tx("仅画点", "Points only") }[plot.settings.plotMode]}
                 </span>
               </button>
             </div>
@@ -1920,32 +1995,32 @@ export function Plot2D() {
             >
               <button className="ctx-item">
                 <span className="ctx-item-l">
-                  游标与网格{" "}
+                  {tx("游标与网格", "Cursors & grid")}{" "}
                   <span className="ctx-arrow">
                     <IconChevron size={12} />
                   </span>
                 </span>
                 <span className="ctx-cur">
-                  {[plot.settings.cursorX && "时间游标", plot.settings.cursorY && "幅值游标"]
+                  {[plot.settings.cursorX && tx("时间游标", "Time cursor"), plot.settings.cursorY && tx("幅值游标", "Amplitude cursor")]
                     .filter(Boolean)
-                    .join(" + ") || "关"}
+                    .join(" + ") || tx("关", "Off")}
                 </span>
               </button>
             </div>
             <div className="ctx-group">AI</div>
             <button
               className="ctx-item"
-              title="AI 根据各通道统计特征总结趋势、诊断振荡/噪声并给出采样率建议"
+              title={tx("AI 根据各通道统计特征总结趋势、诊断振荡/噪声并给出采样率建议", "AI summarizes trends from per-channel statistics, diagnoses oscillation/noise and suggests a sample rate")}
               onClick={() => invokeAiScene("analyzeCurve")}
             >
-              AI 分析当前曲线
+              {tx("AI 分析当前曲线", "AI analyze current curves")}
             </button>
           </div>,
           document.body,
         )}
       {menu && sub === "axis" && (
         <Flyout anchor={axisRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={180}>
-          <div className="ctx-group">X 轴源</div>
+          <div className="ctx-group">{tx("X 轴源", "X-axis source")}</div>
           <button
             className="ctx-item"
             onClick={() => {
@@ -1953,7 +2028,7 @@ export function Plot2D() {
               setMenu(null);
             }}
           >
-            {plot.settings.xSource === "time" ? "●" : "○"} 时间
+            {plot.settings.xSource === "time" ? "●" : "○"} {tx("时间", "Time")}
           </button>
           <button
             className="ctx-item"
@@ -1962,7 +2037,7 @@ export function Plot2D() {
               setMenu(null);
             }}
           >
-            {plot.settings.xSource === "index" ? "●" : "○"} 序号
+            {plot.settings.xSource === "index" ? "●" : "○"} {tx("序号", "Index")}
           </button>
           {plot.channels.map((ch) => (
             <button
@@ -1976,18 +2051,18 @@ export function Plot2D() {
               {plot.settings.xSource === `ch:${ch.id}` ? "●" : "○"} {ch.name}
             </button>
           ))}
-          <div className="ctx-group">Y 轴范围</div>
+          <div className="ctx-group">{tx("Y 轴范围", "Y-axis range")}</div>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ yMode: "auto" })}
           >
-            {plot.settings.yMode === "auto" ? "●" : "○"} 自动范围
+            {plot.settings.yMode === "auto" ? "●" : "○"} {tx("自动范围", "Auto range")}
           </button>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ yMode: "zero" })}
           >
-            {plot.settings.yMode === "zero" ? "●" : "○"} 包含零点（对称）
+            {plot.settings.yMode === "zero" ? "●" : "○"} {tx("包含零点（对称）", "Include zero (symmetric)")}
           </button>
           <button
             className="ctx-item"
@@ -1997,12 +2072,12 @@ export function Plot2D() {
               if (next) yManualRef.current = false;
             }}
           >
-            {plot.settings.yAuto ? "●" : "○"} Y 轴随视野自动缩放
+            {plot.settings.yAuto ? "●" : "○"} {tx("Y 轴随视野自动缩放", "Y auto-scale to view")}
           </button>
           <div className="ctx-group">
-            通道显隐（{plot.channels.filter((c) => c.visible).length}/{plot.channels.length}）
+            {tx("通道显隐（", "Channels (")}{plot.channels.filter((c) => c.visible).length}/{plot.channels.length}{tx("）", ")")}
           </div>
-          {plot.channels.length === 0 && <div className="ctx-group">暂无通道</div>}
+          {plot.channels.length === 0 && <div className="ctx-group">{tx("暂无通道", "No channels")}</div>}
           {plot.channels.map((ch) => (
             <button
               key={ch.id}
@@ -2024,40 +2099,40 @@ export function Plot2D() {
       )}
       {menu && sub === "style" && (
         <Flyout anchor={styleRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={160}>
-          <div className="ctx-group">线型</div>
+          <div className="ctx-group">{tx("线型", "Line style")}</div>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ lineStyle: "linear" })}
           >
-            {plot.settings.lineStyle === "linear" ? "●" : "○"} 直线连接
+            {plot.settings.lineStyle === "linear" ? "●" : "○"} {tx("直线连接", "Straight lines")}
           </button>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ lineStyle: "step" })}
           >
-            {plot.settings.lineStyle === "step" ? "●" : "○"} 台阶（保持末值）
+            {plot.settings.lineStyle === "step" ? "●" : "○"} {tx("台阶（保持末值）", "Steps (hold last value)")}
           </button>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ lineStyle: "smooth" })}
           >
-            {plot.settings.lineStyle === "smooth" ? "●" : "○"} 平滑样条
+            {plot.settings.lineStyle === "smooth" ? "●" : "○"} {tx("平滑样条", "Smooth spline")}
           </button>
-          <div className="ctx-group">模式</div>
+          <div className="ctx-group">{tx("模式", "Mode")}</div>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ plotMode: "line" })}
           >
-            {plot.settings.plotMode === "line" ? "●" : "○"} 连线
+            {plot.settings.plotMode === "line" ? "●" : "○"} {tx("连线", "Lines")}
           </button>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ plotMode: "points" })}
           >
-            {plot.settings.plotMode === "points" ? "●" : "○"} 仅画点
+            {plot.settings.plotMode === "points" ? "●" : "○"} {tx("仅画点", "Points only")}
           </button>
           <div className="form-row" style={{ padding: "4px 8px" }}>
-            <label>线宽</label>
+            <label>{tx("线宽", "Line width")}</label>
             <select
               className="input"
               value={plot.settings.lineWidth}
@@ -2080,19 +2155,19 @@ export function Plot2D() {
             className="ctx-item"
             onClick={() => plotStore.setSetting({ cursorX: !plot.settings.cursorX })}
           >
-            {plot.settings.cursorX ? "●" : "○"} 时间游标（垂直标尺 Δt）
+            {plot.settings.cursorX ? "●" : "○"} {tx("时间游标（垂直标尺 Δt）", "Time cursor (vertical rule, Δt)")}
           </button>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ cursorY: !plot.settings.cursorY })}
           >
-            {plot.settings.cursorY ? "●" : "○"} 幅值游标（水平标尺 ΔV）
+            {plot.settings.cursorY ? "●" : "○"} {tx("幅值游标（水平标尺 ΔV）", "Amplitude cursor (horizontal rule, ΔV)")}
           </button>
           <button
             className="ctx-item"
             onClick={() => plotStore.setSetting({ grid: !plot.settings.grid })}
           >
-            {plot.settings.grid ? "●" : "○"} 网格线
+            {plot.settings.grid ? "●" : "○"} {tx("网格线", "Grid lines")}
           </button>
         </Flyout>
       )}
