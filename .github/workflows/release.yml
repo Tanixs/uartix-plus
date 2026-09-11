@@ -90,11 +90,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: windows-latest
-            args: ""
-          - platform: ubuntu-22.04
-            args: ""
+          include:
+            # windows 仅 NSIS：tauri.conf version=0.3.9 时 WiX light.exe 在 runner 上
+            # 确定性崩溃（无输出、4 秒内退出；同窗 0.3.8 三次全过、0.3.9 三次全挂）。
+            # Setup.exe 为主交付物，latest.json 走 nsis 条目；MSI 根因待查（P69）。
+            - platform: windows-latest
+              args: "--bundles nsis"
+            - platform: ubuntu-22.04
+              args: ""
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
