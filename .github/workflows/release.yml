@@ -147,6 +147,11 @@ jobs:
           # 的平台 URL 带着字面量 v__VERSION__ 发布，老版本自动更新 404。
           # create-release 已从 tauri.conf.json 解析出真实 tag，直接用。
           tagName: ${{ needs.create-release.outputs.tag }}
+          # matrix.args 必须显式接线到这里：只定义 matrix 字段而不传 action = 静默失效。
+          # v0.3.9 第 4 轮事故：action 日志 running npm ['run','tauri','build'] 无任何参数，
+          # --bundles nsis 没到 CLI，MSI 照打 → WiX light.exe 崩溃复现（本地实测证明
+          # 参数转发与覆盖均正常，纯粹是漏接线）。
+          args: ${{ matrix.args }}
           releaseName: "Uartix+ ${{ needs.create-release.outputs.tag }}"
           releaseBody: "见 docs/RELEASE_NOTES。"
           releaseDraft: true
