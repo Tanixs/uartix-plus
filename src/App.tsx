@@ -6,6 +6,12 @@ import {
   SerializedDockview,
 } from "dockview-react";
 import { panelComponents, PANEL_TITLES, panelTitleOf } from "./panels/panels";
+import {
+  PANEL_GROUPS,
+  getRecentPanels,
+  panelGroupLabel,
+  pushRecentPanel,
+} from "./panels/panelMenu";
 import * as panelActivity from "./panels/panelActivity";
 import { SerialToolbar } from "./features/serial/SerialToolbar";
 import { TitleBar } from "./shell/TitleBar";
@@ -40,6 +46,8 @@ import {
 import * as controlsStore from "./features/controls/controlsStore";
 import { SettingsModal } from "./features/settings/SettingsModal";
 import { HelpModal } from "./features/help/HelpModal";
+import { TourHost } from "./features/tour/TourHost";
+import * as vdevStore from "./features/vdev/vdevStore";
 import type { PanelId } from "./ipc/types";
 import * as serialStore from "./features/serial/serialStore";
 import * as sessionStore from "./features/session/sessionStore";
@@ -239,6 +247,8 @@ export default function App() {
   const operator = operatorStore.useOperator(); // P67：只读模式横幅 + 布局应用
   const exts = useExtensions();
   const extPanelOptions = exts.exts.filter((e) => e.type === "panel" && e.enabled);
+  // B6：「最近使用」置顶（会话内响应式；跨会话持久在 localStorage）
+  const [recentPanels, setRecentPanels] = useState<string[]>(() => getRecentPanels());
   renderTick += 1;
 
   useEffect(() => {
@@ -583,6 +593,8 @@ export default function App() {
   const addOrFocusPanel = (id: string) => {
     const api = apiRef.current;
     if (!api) return;
+    // B6：记录「最近使用」（打开与聚焦都算一次真实使用）
+    setRecentPanels(pushRecentPanel(id));
     const exist = api.getPanel(id);
     if (exist) {
       exist.api.setActive();
@@ -662,11 +674,24 @@ export default function App() {
               if (e.target.value) addOrFocusPanel(e.target.value);
             }}
           >
-            <option value="">{tx("+ 面板", "+ Panel")}</option>
-            {Object.entries(PANEL_TITLES()).map(([id, label]) => (
-              <option key={id} value={id}>
-                {label}
-              </option>
+            <option value="" hidden>{tx("+ 面板", "+ Panel")}</option>
+            {recentPanels.length > 0 && (
+              <optgroup label={tx("最近使用", "Recently used")}>
+                {recentPanels.map((id) => (
+                  <option key={`recent-${id}`} value={id}>
+                    {panelTitleOf(id)}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {PANEL_GROUPS.map((g) => (
+              <optgroup key={g.key} label={panelGroupLabel(g)}>
+                {g.ids.map((id) => (
+                  <option key={id} value={id}>
+                    {PANEL_TITLES()[id]}
+                  </option>
+                ))}
+              </optgroup>
             ))}
             {extPanelOptions.length > 0 && (
               <optgroup label={tx("AI 扩展面板", "AI extension panels")}>
@@ -769,6 +794,7 @@ export default function App() {
       <WidgetFloats />
       <SentinelFloat />
       <JsonDropImport />
+      <TourHost />
     </div>
   );
 }
@@ -788,6 +814,8 @@ function StatusBar({ perfOn }: { perfOn: boolean }) {
   };
   const serial = useSyncExternalStore(subBoth, serialStore.getSnapshot);
   const tele = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
+  const demo = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
+  const vdev = useSyncExternalStore(vdevStore.subscribe, vdevStore.getSnapshot);
   const statusText =
     serial.status === "connected"
       ? serial.iface === "serial"
@@ -805,6 +833,23 @@ function StatusBar({ perfOn }: { perfOn: boolean }) {
       <span className="status-left">
         <span className={`dot ${serial.status}`} />
         {statusText}
+        {/* C17：演示源在跑时状态栏不再误报「未连接」——数据明明在流动 */}
+        {demo.demoRunning && (
+          <span
+            className="status-demo"
+            title={tx("内置演示源运行中（协议面板可停止）", "Built-in demo source running (stop it in the protocol panel)")}
+          >
+            {tx("演示源", "Demo")}
+          </span>
+        )}
+        {vdev.running && (
+          <span
+            className="status-demo"
+            title={tx(`虚拟设备「${vdev.device ?? ""}」运行中（虚拟设备工坊可停止）`, `Virtual device "${vdev.device ?? ""}" running (stop it in the workshop)`)}
+          >
+            {tx("虚拟设备", "VDev")}
+          </span>
+        )}
         {serial.error && <span className="status-error">{serial.error}</span>}
         {perfOn && <PerfHud />}
       </span>

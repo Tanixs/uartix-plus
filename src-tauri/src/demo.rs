@@ -265,6 +265,9 @@ pub fn demo_start(app: AppHandle, state: State<SerialManager>) -> Result<(), Str
     if crate::session::is_playing() {
         return Err("回放进行中，请先停止回放再启动演示数据源".into());
     }
+    if crate::vdev::running() {
+        return Err("虚拟设备运行中：请先停止虚拟设备再使用演示源".into());
+    }
     if !crate::demo::start_demo(app, state.ctx.clone(), state.demo_flag.clone()) {
         return Err("演示数据源已在运行".into());
     }

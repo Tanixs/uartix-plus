@@ -4,10 +4,11 @@ import { IconDownload, IconPlay, IconStop, IconTrash, IconUpload } from "../../s
 import * as sequencerStore from "./sequencerStore";
 import { renderReportHtml } from "./report";
 import * as bind from "./sequencerBind";
-import { LIMITS, type CmpOp, type FrameMatch, type RunProgress, type Step, type StepKind, type StepResult, type Suite } from "./types";
+import { LIMITS, type CmpOp, type FrameMatch, type RunProgress, type RunResult, type Step, type StepKind, type StepResult, type Suite } from "./types";
 import * as templateStore from "../protocol/templateStore";
 import * as commandStore from "../controls/commandStore";
 import * as variableStore from "../controls/variableStore";
+import { useListDrag, type DragPos } from "../../shared/useListDrag";
 
 /**
  * 测试序列器面板（T2 编辑器 + T3 执行视图）。
@@ -25,6 +26,33 @@ const KIND_LABEL: Record<StepKind, { zh: string; en: string; cls: string }> = {
   group: { zh: "分组", en: "Group", cls: "group" },
   note: { zh: "备注", en: "Note", cls: "note" },
 };
+
+/** 步骤一行摘要（拖拽 ghost 副行用） */
+function stepBrief(st: Step): string {
+  switch (st.kind) {
+    case "send":
+      if (st.payload.type === "cmd") return st.payload.cmdId;
+      if (st.payload.type === "factory") return tx("工厂组帧", "factory");
+      return st.payload.text || tx("(空)", "(empty)");
+    case "wait":
+      return `${st.ms}ms`;
+    case "waitForFrame": {
+      const m = st.match;
+      if (m.by === "raw") return tx(`含 ${m.hex}`, `raw ${m.hex}`);
+      if (m.by === "tpl") return tx(`模板 ${m.tplId}`, `tpl ${m.tplId}`);
+      const e = typeof m.expected === "number" ? String(m.expected) : `$${m.expected.var}`;
+      return `${m.fieldName} ${m.op} ${e}`;
+    }
+    case "assertVar": {
+      const e = st.expected === undefined ? "?" : typeof st.expected === "number" ? String(st.expected) : `$${st.expected.var}`;
+      return `${st.varName} ${st.op} ${e}${st.tolerance ? `±${st.tolerance}` : ""}`;
+    }
+    case "group":
+      return st.name || tx("(未命名)", "(unnamed)");
+    case "note":
+      return st.text || tx("(空)", "(empty)");
+  }
+}
 
 const OPS: { v: CmpOp; zh: string; en: string }[] = [
   { v: "eq", zh: "=", en: "=" },
@@ -77,7 +105,11 @@ export function SequencerPanel() {
         progress={progress}
       />
       <StepEditor suite={suite} running={running} />
-      <ResultView progress={progress} mine={progress?.suiteId === suite.id} />
+      <ResultView
+        progress={progress}
+        mine={progress?.suiteId === suite.id}
+        last={store.lastResults[suite.id] ?? null}
+      />
     </div>
   );
 }
@@ -110,8 +142,14 @@ function SuiteBar(props: {
   };
 
   const doImport = async (f: File) => {
-    const n = sequencerStore.importSuites(await f.text());
-    window.alert(n > 0 ? tx(`已导入 ${n} 个序列`, `Imported ${n} sequence(s)`) : tx("导入失败：文件里没有有效序列", "Import failed: no valid sequence in file"));
+    const imported = sequencerStore.importSuites(await f.text());
+    if (imported.length > 0) {
+      // 导入后自动选中新序列（多选时落第一个），不再让用户去下拉里翻
+      onSelect(imported[0].id);
+      window.alert(tx(`已导入 ${imported.length} 个序列`, `Imported ${imported.length} sequence(s)`));
+    } else {
+      window.alert(tx("导入失败：文件里没有有效序列", "Import failed: no valid sequence in file"));
+    }
   };
 
   const doExport = () => {
@@ -276,13 +314,8 @@ const ADD_KINDS: StepKind[] = ["send", "wait", "waitForFrame", "assertVar", "gro
 
 function StepEditor(props: { suite: Suite; running: boolean }) {
   const { suite, running } = props;
-  const dragRef = useRef<{ id: string } | null>(null);
-  const [drop, setDropState] = useState<{ id: string | null; pos: "before" | "after" | "in" } | null>(null);
-  const dropRef = useRef<{ id: string | null; pos: "before" | "after" | "in" } | null>(null);
-  const setDrop = (d: { id: string | null; pos: "before" | "after" | "in" } | null) => {
-    dropRef.current = d;
-    setDropState(d);
-  };
+  /** 拖拽期步骤索引：行 id → 是否分组（每次拖拽构建，替代每帧递归查树） */
+  const stepIdxRef = useRef<Map<string, boolean> | null>(null);
 
   const moveBy = (stepId: string, delta: -1 | 1) => {
     const loc = sequencerStore.locateStep(suite.id, stepId);
@@ -321,60 +354,68 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
     return p && p.kind === "group" ? p.children : [];
   };
 
-  const dropOn = (targetId: string | null, pos: "before" | "after" | "in") => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    if (targetId === null) {
-      sequencerStore.moveStep(suite.id, drag.id, null, suite.steps.length);
-      return;
-    }
-    const loc = sequencerStore.locateStep(suite.id, targetId);
-    if (!loc) return;
-    if (pos === "in") {
-      const t = sequencerStore.findStep(suite.id, targetId);
-      if (t && t.kind === "group") sequencerStore.moveStep(suite.id, drag.id, t.id, t.children.length);
-      return;
-    }
-    sequencerStore.moveStep(suite.id, drag.id, loc.parentId, pos === "before" ? loc.index : loc.index + 1);
-  };
-
-  // pointer 拖拽（替代 HTML5 DnD：Tauri/WebView2 下 draggable 受 user-select 与拖放拦截影响，体验不稳）
-  const startDrag = (e: React.PointerEvent, id: string) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    dragRef.current = { id };
-    const onMove = (ev: PointerEvent) => {
-      const hit = document.elementFromPoint(ev.clientX, ev.clientY);
-      const row = hit?.closest<HTMLElement>("[data-sq-row]");
-      const tid = row?.dataset.sqRow;
-      if (tid && tid !== id) {
-        const r = row.getBoundingClientRect();
-        const y = (ev.clientY - r.top) / Math.max(1, r.height);
-        const t = sequencerStore.findStep(suite.id, tid);
-        const pos: "before" | "after" | "in" = y < 0.28 ? "before" : y > 0.72 ? "after" : t?.kind === "group" ? "in" : "after";
-        setDrop({ id: tid, pos });
+  /* ---------- 拖拽（P75 B3：共享内核 useListDrag） ----------
+     旧 pointer 方案升级：捕获指针 + rAF 合帧 + 矩形缓存 + 直写 DOM 指示/ghost，
+     并补上边缘自动滚动（旧版序列器没有，长树拖到底很费劲）。 */
+  const drag = useListDrag<{ id: string }, { id: string | null; pos: DragPos }>({
+    rowSelector: "[data-sq-row]",
+    rowIdAttr: "sqRow",
+    scrollSelector: ".seq-tree",
+    onFrame: (p, f) => {
+      if (f.hover && f.hover.rowId !== p.id) {
+        const container = stepIdxRef.current?.get(f.hover.rowId) ?? false;
+        const pos: DragPos = f.hover.ratio < 0.28 ? "before" : f.hover.ratio > 0.72 ? "after" : container ? "in" : "after";
+        return { mark: { el: f.hover.el, cls: `sq-drop-${pos}` }, data: { id: f.hover.rowId, pos } };
+      }
+      if (f.hover) return null; // 悬在源行上：无落点
+      const hit = document.elementFromPoint(f.x, f.y);
+      if (!hit?.closest("[data-sq-list]")) return null;
+      return { mark: null, data: { id: null, pos: "after" } }; // 树空白区：追加到顶层末尾
+    },
+    onDrop: (p, data) => {
+      if (data.id === null) {
+        sequencerStore.moveStep(suite.id, p.id, null, suite.steps.length);
         return;
       }
-      setDrop(hit?.closest("[data-sq-list]") ? { id: null, pos: "after" } : null);
+      const loc = sequencerStore.locateStep(suite.id, data.id);
+      if (!loc) return;
+      if (data.pos === "in") {
+        const t = sequencerStore.findStep(suite.id, data.id);
+        if (t && t.kind === "group") sequencerStore.moveStep(suite.id, p.id, t.id, t.children.length);
+        return;
+      }
+      sequencerStore.moveStep(suite.id, p.id, loc.parentId, data.pos === "before" ? loc.index : loc.index + 1);
+    },
+    renderGhost: (p) => {
+      const st = sequencerStore.findStep(suite.id, p.id);
+      if (!st) return null;
+      return (
+        <>
+          <span className="dg-k">{tx(KIND_LABEL[st.kind].zh, KIND_LABEL[st.kind].en)}</span>
+          <span className="dg-s">{stepBrief(st)}</span>
+        </>
+      );
+    },
+  });
+
+  const startDrag = (e: React.PointerEvent, id: string) => {
+    const idx = new Map<string, boolean>();
+    const walk = (steps: Step[]) => {
+      for (const s of steps) {
+        idx.set(s.id, s.kind === "group");
+        if (s.kind === "group") walk(s.children);
+      }
     };
-    const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      const d = dropRef.current;
-      if (dragRef.current && d) dropOn(d.id, d.pos);
-      dragRef.current = null;
-      setDrop(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    walk(suite.steps);
+    stepIdxRef.current = idx;
+    drag.begin(e, { id });
   };
 
   const renderRow = (step: Step, depth: number) => {
-    const dropCls = drop && drop.id === step.id ? ` sq-drop-${drop.pos}` : "";
     return (
       <div key={step.id}>
         <div
-          className={`sq-row d${Math.min(depth, 4)}${dropCls}`}
+          className={`sq-row d${Math.min(depth, 4)}`}
           data-sq-row={step.id}
         >
           <span
@@ -414,6 +455,8 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
 
   return (
     <div className="seq-steps">
+      {/* 拖拽 ghost（portal 到 body；useListDrag 直写 transform 跟手） */}
+      {drag.ghost}
       <div className="seq-row seq-addbar">
         <span className="seq-lab">{tx("添加步骤", "Add step")}</span>
         {ADD_KINDS.map((k) => (
@@ -786,10 +829,27 @@ const STATUS_TEXT: Record<string, { zh: string; en: string }> = {
   aborted: { zh: "中止", en: "aborted" },
 };
 
-function ResultView(props: { progress: RunProgress | null; mine: boolean }) {
-  const { progress, mine } = props;
+function ResultView(props: { progress: RunProgress | null; mine: boolean; last: RunResult | null }) {
+  const { progress, mine, last } = props;
   const [open, setOpen] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // 正在跑本套件 → 实时进度；否则回退本套件最近一次结果（C7：切走再切回不丢视图）
+  const view: RunProgress | null = useMemo(
+    () =>
+      progress && mine
+        ? progress
+        : last
+          ? {
+              status: "finished",
+              runId: -1,
+              suiteId: last.suiteId,
+              currentStepId: null,
+              results: last.steps,
+              result: last,
+            }
+          : null,
+    [progress, mine, last],
+  );
   const stats = useMemo(() => {
     const c = { pass: 0, bad: 0, skip: 0 };
     const walk = (rs: StepResult[]) => {
@@ -800,11 +860,11 @@ function ResultView(props: { progress: RunProgress | null; mine: boolean }) {
         if (r.children) walk(r.children);
       }
     };
-    if (progress?.results) walk(progress.results);
+    if (view?.results) walk(view.results);
     return c;
-  }, [progress]);
+  }, [view]);
 
-  if (!progress || !mine) {
+  if (!view) {
     return (
       <div className="seq-results off">
         <div className="seq-res-head muted">{tx("尚无运行结果", "No run results yet")}</div>
@@ -813,34 +873,34 @@ function ResultView(props: { progress: RunProgress | null; mine: boolean }) {
   }
 
   // 属性路径收窄不保留进闭包：报告导出回调里要用，提为 const
-  const res = progress.status === "finished" && progress.result ? progress.result : null;
-  const headCls = progress.status === "finished" ? (progress.result?.status === "done" ? "ok" : "bad") : "run";
+  const res = view.status === "finished" && view.result ? view.result : null;
+  const headCls = view.status === "finished" ? (view.result?.status === "done" ? "ok" : "bad") : "run";
 
   return (
     <div className="seq-results">
       <div className={`seq-res-head ${headCls}`} onClick={() => setOpen((v) => !v)}>
         <span className="seq-res-title">
-          {progress.status === "running"
+          {view.status === "running"
             ? tx("运行中…", "Running…")
-            : progress.status === "awaitingStep"
+            : view.status === "awaitingStep"
               ? tx("单步挂起", "Paused (step)")
-              : progress.result?.status === "done"
+              : view.result?.status === "done"
                 ? tx("完成", "Done")
-                : progress.result?.status === "aborted"
+                : view.result?.status === "aborted"
                   ? tx("已中止", "Aborted")
                   : tx("失败", "Failed")}
         </span>
         <span className="seq-res-stats">
-          ✓{stats.pass} ✗{stats.bad} ·{(progress.result ? ((progress.result.finishedAt - progress.result.startedAt) / 1000).toFixed(2) : "…")}s
+          ✓{stats.pass} ✗{stats.bad} ·{(view.result ? ((view.result.finishedAt - view.result.startedAt) / 1000).toFixed(2) : "…")}s
         </span>
         <span className="seq-res-toggle">{open ? "▾" : "▸"}</span>
       </div>
       {open && (
         <div className="seq-res-tree">
-          {progress.results.map((r) => (
+          {view.results.map((r) => (
             <ResultNode key={r.stepId} r={r} depth={1} collapsed={collapsed} toggle={(id) => setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }) } />
           ))}
-          {progress.results.length === 0 && <div className="seq-hint">{tx("等待第一个步骤完成…", "Waiting for the first step…")}</div>}
+          {view.results.length === 0 && <div className="seq-hint">{tx("等待第一个步骤完成…", "Waiting for the first step…")}</div>}
         </div>
       )}
       {res && (
@@ -898,7 +958,7 @@ function ResultNode(props: {
         </span>
         <span className="sq-res-detail">{r.detail}</span>
         <span className="sq-res-ms">{r.durationMs > 0 ? `${r.durationMs}ms` : ""}</span>
-        <span className={`sq-res-st st-${r.status}`}>{st.zh}</span>
+        <span className={`sq-res-st st-${r.status}`}>{tx(st.zh, st.en)}</span>
       </div>
       {isGroup && open && r.children!.map((c, i) => <ResultNode key={`${c.stepId}.${i}`} r={c} depth={depth + 1} collapsed={collapsed} toggle={toggle} />)}
     </div>

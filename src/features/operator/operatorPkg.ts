@@ -11,6 +11,7 @@ import type { GroupMeta } from "../protocol/templateStore";
 import type { ControlPage } from "../controls/controlsStore";
 import type { CommandGroup } from "../controls/commandStore";
 import type { Settings } from "../settings/settingsStore";
+import type { Plot3DSettings } from "../plot3d/plot3dStore";
 
 export const OPERATOR_KIND = "uartix-operator";
 export const OPERATOR_VERSION = 1;
@@ -32,6 +33,8 @@ export interface OperatorPayload {
   layout?: unknown;
   /** 已按白名单过滤的设置子集（filterSettings 产出） */
   settings?: Partial<Settings>;
+  /** 3D 轨迹面板设置（P71）：exportSettingsForPkg 产出，已剥离校准操作态 */
+  plot3d?: Plot3DSettings;
 }
 
 export interface OperatorPkg {
@@ -89,6 +92,17 @@ export function validatePkg(raw: unknown): OperatorPkg {
     throw new Error("Operator 包缺少载荷（payload）");
   }
   const p = r.payload as OperatorPayload;
+  // 空载荷拒绝：导入空包会进入「什么都没换却全局只读」的死局
+  const hasPart =
+    p.templates !== undefined ||
+    p.controls !== undefined ||
+    p.commands !== undefined ||
+    p.layout !== undefined ||
+    p.settings !== undefined ||
+    p.plot3d !== undefined;
+  if (!hasPart) {
+    throw new Error("Operator 包没有任何内容：至少应包含一个部件（协议/控制页/命令库/布局/设置/3D 设置）");
+  }
   if (p.templates !== undefined) {
     if (typeof p.templates !== "object" || p.templates === null || !Array.isArray(p.templates.templates)) {
       throw new Error("Operator 包的协议模板数据不正确");
@@ -99,6 +113,9 @@ export function validatePkg(raw: unknown): OperatorPkg {
   }
   if (p.commands !== undefined && !Array.isArray(p.commands)) {
     throw new Error("Operator 包的命令库数据不正确");
+  }
+  if (p.plot3d !== undefined && (typeof p.plot3d !== "object" || p.plot3d === null)) {
+    throw new Error("Operator 包的 3D 面板设置不正确");
   }
   return {
     meta: {

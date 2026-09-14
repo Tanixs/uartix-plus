@@ -11,13 +11,14 @@
  *  - uPlot 游标全关（CSS zoom 下原生游标错位——P23 教训），主峰数值走摘要行。
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import uPlot from "uplot";
 import {
   getSnapshot as getPlotSnapshot,
   getChanData,
   subscribe as subscribePlot,
   isDirty as plotDirty,
+  addChannel,
   type Channel,
 } from "./plotStore";
 import {
@@ -26,7 +27,11 @@ import {
   topPeaks,
   type Peak,
 } from "./spectrum";
+import * as templateStore from "../protocol/templateStore";
+import { requestOpenPanel } from "../ai/appBus";
+import { toast } from "../ai/extRuntime";
 import { tx, useLocale } from "../../i18n/strings";
+import { IconPause, IconPlay } from "../../shared/icons";
 
 const HIST_BINS = 40;
 const HIST_TAKE = 4096; // 直方图统计最近 N 个值（有界）
@@ -91,6 +96,10 @@ const fmtNum = (x: number): string => {
   return a >= 100 ? x.toFixed(1) : x.toFixed(3);
 };
 
+/** 计算失败原因（诊断状态机，P76①）：与 amplitudeSpectrum 的 null 路径一一对应。
+ *  存 kind 而非文本 → 渲染时经 tx() 翻译，语言切换即时生效。 */
+type FailKind = "m2" | "span0" | "generic";
+
 export function SpectrumPanel() {
   // 语言切换订阅：本面板画布无数值以外的文本，DOM 文案随重渲染即时更新
   useLocale();
@@ -98,6 +107,8 @@ export function SpectrumPanel() {
   const [prefs, setPrefs] = useState<ViewPrefs>(loadPrefs);
   const [summary, setSummary] = useState<Summary>(null);
   const [insufficient, setInsufficient] = useState(false);
+  const [lowN, setLowN] = useState(0); // insufficient 时的实际点数（HUD 如实展示）
+  const [failKind, setFailKind] = useState<FailKind | null>(null);
   const [themeTick, setThemeTick] = useState(0);
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -132,22 +143,75 @@ export function SpectrumPanel() {
     chanList.find((c) => c.id === prefs.chanId) ?? chanList[0] ?? null;
   const chanId = chan?.id ?? "";
 
+  /* ---------------- 空态引导：直接从协议字段建通道（免切 2D 面板） ---------------- */
+
+  const templates = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
+  const fieldOpts = useMemo(() => {
+    const NUMERIC = new Set(["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "bcd"]);
+    const out: { key: string; label: string; tplId: string; fieldId: string; name: string; color: string }[] = [];
+    for (const t of templates.rules.templates) {
+      if (!t.enabled) continue;
+      for (const f of t.fields) {
+        // 只列单值数值数据字段（数组区/位域/文本语义复杂，引导去 2D 图例处理）
+        if (!NUMERIC.has(f.type) || f.spanElem) continue;
+        if (f.role !== "data" && f.role !== "payload") continue;
+        out.push({ key: `${t.id}|${f.id}`, label: `${t.name} · ${f.name}`, tplId: t.id, fieldId: f.id, name: f.name, color: f.color });
+      }
+    }
+    return out;
+  }, [templates]);
+
+  const [guidePick, setGuidePick] = useState("");
+  const addFromGuide = () => {
+    const opt = fieldOpts.find((o) => o.key === guidePick);
+    if (!opt) return;
+    const ok = addChannel({ tplId: opt.tplId, fieldId: opt.fieldId, name: opt.name, color: opt.color });
+    if (ok) {
+      // 新通道即选为分析对象（channels 快照同步更新）
+      const ch = getPlotSnapshot().channels.find((c) => c.tplId === opt.tplId && c.fieldId === opt.fieldId);
+      if (ch) patch({ chanId: ch.id });
+      toast(tx(`已添加通道「${opt.name}」（2D 曲线同步点亮）`, `Channel "${opt.name}" added (also lit in the 2D plot)`));
+    } else {
+      toast(tx("该通道已存在，已直接选中", "Channel already exists; selected it"));
+      const ch = getPlotSnapshot().channels.find((c) => c.tplId === opt.tplId && c.fieldId === opt.fieldId);
+      if (ch) patch({ chanId: ch.id });
+    }
+    setGuidePick("");
+  };
+
   /* ---------------- 数据 → uPlot + 摘要 ---------------- */
 
   const sigRef = useRef(""); // 数据签名：末时间戳+点数，变了才重算
-  const compute = () => {
+  const compute = (): boolean => {
     const u = uRef.current;
-    if (!u || !chan) return;
+    if (!u || !chan) return false;
     const d = getChanData(chan.id);
     const p = prefsRef.current;
     if (d.t.length < 8) {
       setInsufficient(true);
-      return;
+      setLowN(d.t.length);
+      setFailKind(null);
+      return true;
     }
     setInsufficient(false);
     if (p.mode === "fft") {
+      // 诊断预检（O(1)）：take 必须与 amplitudeSpectrum 内部的降点窗口一致，
+      // 否则重复时间戳场景会把 span0 误报成「数据异常」
+      const m = Math.min(d.t.length, d.v.length);
+      let take = p.points;
+      if (m < take) {
+        take = 8;
+        while (take * 2 <= m) take <<= 1;
+      }
+      const localSpan = d.t[m - 1] - d.t[m - take];
       const sp = amplitudeSpectrum(d.t, d.v, { points: p.points, window: p.window });
-      if (!sp) return;
+      if (!sp) {
+        setFailKind(
+          m < 2 ? "m2" : !(localSpan > 0) ? "span0" : "generic",
+        );
+        return true;
+      }
+      setFailKind(null);
       const mags = p.yDb
         ? Array.from(sp.mags, (m) => Math.max(DB_FLOOR, 20 * Math.log10(Math.max(m, 1e-9))))
         : Array.from(sp.mags);
@@ -155,13 +219,19 @@ export function SpectrumPanel() {
       u.setData([Array.from(sp.freqs), mags], true);
       const peaks = topPeaks(sp.freqs, sp.mags, 3, Math.max(sp.binHz * 2, 0.5));
       setSummary({ kind: "fft", fs: sp.fs, n: sp.n, binHz: sp.binHz, peaks });
+      return true;
     } else {
       const vs = d.v.length > HIST_TAKE ? d.v.slice(d.v.length - HIST_TAKE) : d.v.slice();
       const h = histogram(vs, HIST_BINS);
-      if (!h) return;
+      if (!h) {
+        setFailKind("generic");
+        return true;
+      }
+      setFailKind(null);
       const centers = h.edges.slice(0, -1).map((e, i) => (e + h.edges[i + 1]) / 2);
       u.setData([centers, h.counts], true);
       setSummary({ kind: "hist", mean: h.mean, std: h.std, min: h.min, max: h.max, n: h.n });
+      return true;
     }
   };
   const computeRef = useRef(compute);
@@ -186,6 +256,8 @@ export function SpectrumPanel() {
     const opts: uPlot.Options = {
       width: Math.max(wrap.clientWidth, 80),
       height: Math.max(wrap.clientHeight, 60),
+      // 频轴是 Hz 数值不是时间：关掉 uPlot 默认的 time 轴（否则 1Hz 显示成 "-0:01.000"）
+      scales: { x: { time: false } },
       // 游标全关：CSS zoom 下 uPlot 原生游标错位（P23 教训）；主峰数值走摘要行
       cursor: { x: false, y: false, drag: { x: false, y: false, setScale: false } },
       series: [
@@ -236,7 +308,6 @@ export function SpectrumPanel() {
       uRef.current = null;
     };
     // 重建条件：模式切换（series 结构不同）、主题变化；yDb 只改数据走重算
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefs.mode, themeTick]);
 
   /* ---------------- 重算触发 ---------------- */
@@ -257,12 +328,11 @@ export function SpectrumPanel() {
       const d = getChanData(chanId);
       const sig = `${d.t.length}|${d.t.length ? d.t[d.t.length - 1] : 0}`;
       if (sig === sigRef.current && !plotDirty()) return;
-      sigRef.current = sig;
-      // dirty 属于整个 plot 管线，只读不消费（2D 面板的 tick 依赖它）
-      computeRef.current();
+      // 终态（出图/点数不足/诊断原因）都推进签名——签名含长度+末戳，任何新数据
+      // 都会产生新签名自然重算；只有图表未就绪（返回 false）才留待下轮重试
+      if (computeRef.current()) sigRef.current = sig;
     }, REFRESH_MS);
     return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chanId]);
 
   const axisLabel =
@@ -278,14 +348,14 @@ export function SpectrumPanel() {
     <div className="plot spectrum">
       <div className="plot-bar">
         <button
-          className={`icon-btn ${prefs.mode === "fft" ? "primary" : ""}`}
+          className={`btn sm${prefs.mode === "fft" ? " primary" : ""}`}
           onClick={() => patch({ mode: "fft" })}
           title={tx("FFT 频谱：看频率成分与主峰", "FFT spectrum: view frequency components and dominant peaks")}
         >
           {tx("频谱", "Spectrum")}
         </button>
         <button
-          className={`icon-btn ${prefs.mode === "hist" ? "primary" : ""}`}
+          className={`btn sm${prefs.mode === "hist" ? " primary" : ""}`}
           onClick={() => patch({ mode: "hist" })}
           title={tx("直方图：看数据分布与离散度", "Histogram: view data distribution and dispersion")}
         >
@@ -329,7 +399,7 @@ export function SpectrumPanel() {
               <option value="rect">{tx("矩形窗", "Rectangle")}</option>
             </select>
             <button
-              className={`icon-btn ${prefs.yDb ? "primary" : ""}`}
+              className={`btn sm${prefs.yDb ? " primary" : ""}`}
               onClick={() => patch({ yDb: !prefs.yDb })}
               title={tx("Y 轴单位：线性幅值 / dB（看噪声底用 dB）", "Y unit: linear amplitude / dB (use dB to inspect the noise floor)")}
             >
@@ -339,28 +409,82 @@ export function SpectrumPanel() {
         )}
         <div className="plot-bar-spacer" />
         <button
-          className={`icon-btn ${prefs.paused ? "primary" : ""}`}
+          className={`btn sm${prefs.paused ? " primary" : ""}`}
           onClick={() => patch({ paused: !prefs.paused })}
           title={prefs.paused
             ? tx("已冻结：点此恢复实时刷新", "Frozen: click to resume live refresh")
             : tx("暂停刷新：冻结当前谱面便于观察", "Pause refresh: freeze the current spectrum for inspection")}
         >
-          {prefs.paused ? tx("▶ 继续", "▶ Resume") : tx("⏸ 冻结", "⏸ Freeze")}
+          {prefs.paused ? (
+            <>
+              <IconPlay />
+              {tx("继续", "Resume")}
+            </>
+          ) : (
+            <>
+              <IconPause />
+              {tx("冻结", "Freeze")}
+            </>
+          )}
         </button>
       </div>
-      <div className="plot-wrap">
+      <div ref={wrapRef} className="plot-wrap">
         <div ref={chartRef} className="plot-chart" />
-        {(chanList.length === 0 || insufficient) && (
+        {chanList.length === 0 && (
           <div className="plot-empty">
-            {chanList.length === 0 ? (
-              <>
-                {tx("先在 2D 曲线面板点亮字段图例的眼睛添加通道", "Toggle the eye icons in the 2D plot's field legend to add channels")}
-                <br />
-                {tx("本面板与 2D 曲线共享通道数据", "This panel shares channel data with the 2D plot")}
-              </>
-            ) : (
-              <>{tx("该通道数据少于 8 个点，连接设备或启动演示源积累数据后再看", "Fewer than 8 points on this channel; connect a device or start the demo source to collect data")}</>
-            )}
+            <div className="spec-guide">
+              <div className="spec-guide-t">{tx("还没有分析通道", "No channels yet")}</div>
+              <div className="spec-guide-d">
+                {tx(
+                  "频谱与 2D 曲线共享通道数据。直接选一个协议字段开始分析（会自动点亮 2D 曲线图例）：",
+                  "The spectrum shares channels with the 2D plot. Pick a protocol field to start (it also lights up the 2D legend):",
+                )}
+              </div>
+              {fieldOpts.length > 0 ? (
+                <div className="spec-guide-row">
+                  <select className="input" value={guidePick} onChange={(e) => setGuidePick(e.target.value)}>
+                    <option value="">{tx("选择字段…", "Pick a field…")}</option>
+                    {fieldOpts.map((o) => (
+                      <option key={o.key} value={o.key}>{o.label}</option>
+                    ))}
+                  </select>
+                  <button className="btn primary sm" disabled={!guidePick} onClick={addFromGuide}>
+                    {tx("添加并分析", "Add & analyze")}
+                  </button>
+                  <button className="btn sm" onClick={() => requestOpenPanel("plot2d")}>
+                    {tx("打开 2D 曲线", "Open 2D plot")}
+                  </button>
+                </div>
+              ) : (
+                <div className="spec-guide-row">
+                  {tx(
+                    "当前没有启用中的协议模板含数值字段——先导入协议预设或在帧画布定义字段。",
+                    "No enabled template has numeric fields — import a preset or define fields in the frame canvas first.",
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {chanList.length > 0 && insufficient && (
+          <div className="plot-empty">
+            <div>
+              {tx(
+                `该通道当前 ${lowN} 个点，频谱分析需要至少 8 点`,
+                `This channel has ${lowN} point(s); the spectrum needs at least 8`,
+              )}
+            </div>
+            <div>
+              {tx("连接设备并让帧流入，或用演示源快速看到效果：", "Connect a device and let frames flow, or use the demo source:")}
+            </div>
+            <div className="plot-empty-ops">
+              <button className="btn sm" onClick={() => void templateStore.toggleDemo()}>
+                {templates.demoRunning ? tx("停止演示源", "Stop demo source") : tx("启动演示源", "Start demo source")}
+              </button>
+              <button className="btn sm" onClick={() => requestOpenPanel("plot2d")}>
+                {tx("打开 2D 曲线", "Open 2D plot")}
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -368,7 +492,15 @@ export function SpectrumPanel() {
         {prefs.paused && <span className="ss-flag">{tx("已冻结", "Frozen")}</span>}
         {summary?.kind === "fft" && (
           <span>
-            fs {fmtHz(summary.fs)} · N {summary.n} · {tx("分辨率", "res")} {summary.binHz.toFixed(2)}Hz
+            fs {fmtHz(summary.fs)} · N {summary.n}
+            {summary.n < prefs.points && (
+              <span className="ss-dim">
+                {" "}
+                {tx(`（数据仅够 ${summary.n} 点，已自动降点）`, `(only ${summary.n} pts available, auto-reduced)`)}
+              </span>
+            )}
+            {" · "}
+            {tx("分辨率", "res")} {summary.binHz.toFixed(2)}Hz
             {summary.peaks.length > 0 && (
               <>
                 {tx(" ｜ 主峰 ", " | peaks ")}
@@ -385,7 +517,17 @@ export function SpectrumPanel() {
             {fmtNum(summary.max)} · N {summary.n}
           </span>
         )}
-        {!summary && !insufficient && chanList.length > 0 && (
+        {failKind && (
+          <span className="ss-fail">
+            {tx("无法计算：", "Cannot compute: ")}
+            {failKind === "m2"
+              ? tx("有效数值点不足", "not enough valid points")
+              : failKind === "span0"
+                ? tx("末段时间跨度为 0（帧共享同一时间戳）", "zero time span (frames share one timestamp)")
+                : tx("数据异常", "unexpected data")}
+          </span>
+        )}
+        {!summary && !insufficient && !failKind && chanList.length > 0 && (
           <span>
             {axisName} / {axisLabel} — {tx("等待数据…", "waiting for data…")}
           </span>

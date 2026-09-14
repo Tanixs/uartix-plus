@@ -12,6 +12,7 @@ import {
   type CmpOp,
   type ExpectVal,
   type FrameMatch,
+  type RunResult,
   type Step,
   type StepKind,
   type Suite,
@@ -22,11 +23,13 @@ const KEY = "vs.sequencer";
 
 export interface SequencerState {
   suites: Suite[];
+  /** 每套件最近一次运行结果（内存态不落盘；切走再切回不丢上一次结果视图） */
+  lastResults: Record<string, RunResult>;
 }
 
 const listeners = new Set<() => void>();
 
-let state: SequencerState = { suites: [] };
+let state: SequencerState = { suites: [], lastResults: {} };
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let idSeq = 0;
@@ -67,7 +70,7 @@ function load() {
     if (!raw) return;
     const s = JSON.parse(raw) as { suites?: unknown };
     if (Array.isArray(s.suites)) {
-      state = { suites: s.suites.flatMap((x) => normalizeSuite(x)).filter(Boolean) as Suite[] };
+      state = { suites: s.suites.flatMap((x) => normalizeSuite(x)).filter(Boolean) as Suite[], lastResults: {} };
     }
   } catch {
     try {
@@ -238,13 +241,14 @@ export function addSuite(name: string): Suite {
     trigger: { mode: "manual" },
     failFast: true,
   };
-  state = { suites: [...state.suites, suite] };
+  state = { suites: [...state.suites, suite], lastResults: state.lastResults };
   emit();
   return suite;
 }
 
 export function renameSuite(id: string, name: string) {
   state = {
+    lastResults: state.lastResults,
     suites: state.suites.map((s) =>
       s.id === id ? { ...s, name: name.trim().slice(0, 80) || s.name } : s,
     ),
@@ -253,23 +257,32 @@ export function renameSuite(id: string, name: string) {
 }
 
 export function removeSuite(id: string) {
-  state = { suites: state.suites.filter((s) => s.id !== id) };
+  state = {
+    suites: state.suites.filter((s) => s.id !== id),
+    lastResults: Object.fromEntries(Object.entries(state.lastResults).filter(([k]) => k !== id)),
+  };
   emit();
+}
+
+/** 记录最近一次运行结果（bind 在 finished 进度时调用；不落盘、不触发持久化） */
+export function recordResult(suiteId: string, result: RunResult) {
+  state = { ...state, lastResults: { ...state.lastResults, [suiteId]: result } };
+  listeners.forEach((l) => l());
 }
 
 /** 整体替换步骤树（编辑器每次结构变更调用；浅层不可变，引擎/报告拿到的引用稳定） */
 export function setSteps(id: string, steps: Step[]) {
-  state = { suites: state.suites.map((s) => (s.id === id ? { ...s, steps } : s)) };
+  state = { suites: state.suites.map((s) => (s.id === id ? { ...s, steps } : s)), lastResults: state.lastResults };
   emit();
 }
 
 export function setTrigger(id: string, trigger: SuiteTrigger) {
-  state = { suites: state.suites.map((s) => (s.id === id ? { ...s, trigger } : s)) };
+  state = { suites: state.suites.map((s) => (s.id === id ? { ...s, trigger } : s)), lastResults: state.lastResults };
   emit();
 }
 
 export function setFailFast(id: string, failFast: boolean) {
-  state = { suites: state.suites.map((s) => (s.id === id ? { ...s, failFast } : s)) };
+  state = { suites: state.suites.map((s) => (s.id === id ? { ...s, failFast } : s)), lastResults: state.lastResults };
   emit();
 }
 
@@ -344,6 +357,7 @@ function patchIn(steps: Step[], id: string, fn: (s: Step) => Step): Step[] {
 /** 行内编辑统一入口：fn 收到旧步骤返回新步骤（不可变替换） */
 export function updateStep(suiteId: string, stepId: string, fn: (s: Step) => Step) {
   state = {
+    lastResults: state.lastResults,
     suites: state.suites.map((su) => (su.id === suiteId ? { ...su, steps: patchIn(su.steps, stepId, fn) } : su)),
   };
   emit();
@@ -359,6 +373,7 @@ function removeFrom(steps: Step[], id: string): Step[] {
 
 export function removeStep(suiteId: string, stepId: string) {
   state = {
+    lastResults: state.lastResults,
     suites: state.suites.map((su) => (su.id === suiteId ? { ...su, steps: removeFrom(su.steps, stepId) } : su)),
   };
   emit();
@@ -374,6 +389,7 @@ export function addStep(suiteId: string, parentId: string | null, kind: StepKind
   }
   const step = newStep(kind);
   state = {
+    lastResults: state.lastResults,
     suites: state.suites.map((su) =>
       su.id === suiteId
         ? {
@@ -455,7 +471,7 @@ export function moveStep(suiteId: string, dragId: string, parentId: string | nul
       return s;
     });
   };
-  state = { suites: state.suites.map((su) => (su.id === suiteId ? { ...su, steps: insert(rest, parentId) } : su)) };
+  state = { suites: state.suites.map((su) => (su.id === suiteId ? { ...su, steps: insert(rest, parentId) } : su)), lastResults: state.lastResults };
   emit();
   return true;
 }
@@ -483,31 +499,33 @@ export function duplicateStep(suiteId: string, stepId: string): boolean {
       return [s];
     });
   state = {
+    lastResults: state.lastResults,
     suites: state.suites.map((su) => (su.id === suiteId ? { ...su, steps: insertAfter(su.steps, stepId) } : su)),
   };
   emit();
   return true;
 }
 
-/** 导入：接受单个 Suite 或数组；返回成功条数 */
-export function importSuites(json: string): number {
+/** 导入：接受单个 Suite 或数组；返回导入的套件（id 冲突已重新生成），面板据此自动选中 */
+export function importSuites(json: string): Suite[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
   } catch {
-    return 0;
+    return [];
   }
   const list = Array.isArray(parsed) ? parsed : [parsed];
   const suites = list.flatMap((x) => normalizeSuite(x) ?? []);
-  if (!suites.length) return 0;
-  // id 冲突让位给现有（重新生成）
+  if (!suites.length) return [];
+  // id 冲突让位给现有（重新生成）；数组内部同名也要查重，否则 React key 冲突
   const existing = new Set(state.suites.map((s) => s.id));
   for (const s of suites) {
     if (existing.has(s.id)) s.id = newId("sq");
+    existing.add(s.id);
   }
-  state = { suites: [...state.suites, ...suites] };
+  state = { suites: [...state.suites, ...suites], lastResults: state.lastResults };
   emit();
-  return suites.length;
+  return suites;
 }
 
 /** 导出单个 Suite 的 JSON 字符串（落盘/剪贴板由 UI 层处理） */

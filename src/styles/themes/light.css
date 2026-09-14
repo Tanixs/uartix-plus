@@ -9,6 +9,7 @@
   --text: #1c2128;
   --text-dim: #5f6774;
   --accent: #2f6fce;
+  --on-accent: #ffffff;
   --accent-soft: rgba(47, 111, 206, 0.12);
   --danger: #d43a31;
   --warn: #b07d19;
@@ -16,4 +17,15 @@
   --shadow: 0 8px 24px rgba(28, 33, 40, 0.12);
   --scrollbar: #c9ced6;
   --scrollbar-hover: #aab1bb;
+
+  /* 语义色（P74c C4）：亮色主题用加深版，保证面板底上对比度 ≥ 4.5（check:theme 校验） */
+  --k-send: #0969da;
+  --k-wait: #9a6700;
+  --k-frame: #8250df;
+  --k-assert: #1a7f37;
+  --k-note: #bc4c00;
+  --k-logic: #5e3d99;
+  --k-group: #0f6f7a;
+  --k-warn-line: #b45309;
+  --warn-fg: #9a6a10;
 }

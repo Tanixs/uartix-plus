@@ -17,4 +17,5 @@
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   --scrollbar: #2c333d;
   --scrollbar-hover: #3d4653;
+  --warn-fg: #d29922;
 }

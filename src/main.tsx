@@ -1,5 +1,8 @@
 import ReactDOM from "react-dom/client";
 import "dockview-react/dist/styles/dockview.css";
+// uPlot 基础样式：全库唯一入口（画布撑开规则全在库内 CSS，缺它则任何 uPlot 面板图区塌缩为空）。
+// 严禁各面板自行局部导入——P75 频谱面板空白即「新面板漏导入」所致。
+import "uplot/dist/uPlot.min.css";
 import "./styles/theme.css";
 
 // AI 挂件桌面窗：独立轻量根，不加载主界面（dockview/串口订阅全家桶）

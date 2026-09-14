@@ -77,8 +77,8 @@ describe("导入规范化", () => {
       failFast: false,
       steps: [{ id: "a", kind: "send", enabled: true, payload: { type: "hex", text: "aa" } }],
     };
-    expect(st.importSuites(JSON.stringify(src))).toBe(1);
-    expect(st.importSuites(JSON.stringify(src))).toBe(1); // 第二次 id 冲突重新生成
+    expect(st.importSuites(JSON.stringify(src))).toHaveLength(1);
+    expect(st.importSuites(JSON.stringify(src))).toHaveLength(1); // 第二次 id 冲突重新生成
     const suites = st.getSnapshot().suites;
     expect(suites).toHaveLength(2);
     expect(suites[0].id).not.toBe(suites[1].id);
@@ -93,7 +93,7 @@ describe("导入规范化", () => {
       { noName: true },
       "not-an-object",
     ];
-    expect(st.importSuites(JSON.stringify(src))).toBe(2);
+    expect(st.importSuites(JSON.stringify(src))).toHaveLength(2);
     const bad = st.getSnapshot().suites.find((s) => s.name === "坏步骤件");
     expect(bad?.steps).toHaveLength(0);
   });
@@ -115,7 +115,7 @@ describe("导入规范化", () => {
         { kind: "send", payload: { type: "factory", spec: { fc: 3 } } },
       ],
     };
-    expect(st.importSuites(JSON.stringify(src))).toBe(1);
+    expect(st.importSuites(JSON.stringify(src))).toHaveLength(1);
     const steps = st.getSnapshot().suites[0].steps;
     expect(steps[0]).toMatchObject({ kind: "wait", ms: 60000 });
     expect(steps[1]).toMatchObject({ kind: "group", repeats: 1 });
@@ -137,7 +137,7 @@ describe("导入规范化", () => {
         { kind: "send", payload: { type: "ascii", text: "" } },
       ],
     };
-    expect(st.importSuites(JSON.stringify(src))).toBe(1);
+    expect(st.importSuites(JSON.stringify(src))).toHaveLength(1);
     const steps = st.getSnapshot().suites[0].steps;
     expect(steps).toHaveLength(2);
     expect(steps[0]).toMatchObject({ kind: "send", payload: { type: "ascii", text: "hello\r\n" } });
@@ -151,7 +151,7 @@ describe("导入规范化", () => {
     const json = st.exportSuite(s.id);
     expect(json).toBeTruthy();
     st.removeSuite(s.id);
-    expect(st.importSuites(json as string)).toBe(1);
+    expect(st.importSuites(json as string)).toHaveLength(1);
     expect(st.getSnapshot().suites[0].steps[0]).toMatchObject({ kind: "note", text: "你好" });
   });
 });

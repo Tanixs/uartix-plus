@@ -268,6 +268,9 @@ pub async fn ble_connect(
     if crate::session::is_playing() {
         return Err("回放进行中，请先停止回放再连接 BLE 设备".into());
     }
+    if crate::vdev::running() {
+        return Err("虚拟设备运行中：请先停止虚拟设备再连接 BLE 设备".into());
+    }
     if state.run_flag.load(Ordering::SeqCst) {
         return Err("BLE 设备已连接，请先断开当前连接".into());
     }

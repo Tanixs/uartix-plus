@@ -28,8 +28,8 @@ import {
  * 哨兵 store（P62）——引擎生命周期门控 + 配置持久化 + React 快照桥。
  *
  * 门控（用户决议：不做全局后台监测）：
- *   面板在布局中 或 最小化浮球激活 → 引擎运行；面板 × 关闭且无浮球 → 引擎停止。
- * emit 门控：面板可见 或 浮球激活（后台标签组不重渲染，恢复可见时补 emit）。
+ *   面板在布局中 / 最小化浮球 / 桌面挂件窗存活 → 引擎运行；三者皆无 → 引擎停止。
+ * emit 门控：面板可见 / 浮球激活 / 挂件存活（后台标签组不重渲染，恢复可见时补 emit）。
  */
 
 const CFG_KEY = "vs.sentinel";
@@ -86,6 +86,7 @@ function loadFloat(): boolean {
 
 let cfg: SentinelConfig = loadCfg();
 let floating = loadFloat();
+let widgetAlive = false;
 let startedAt = 0;
 
 const engine = new SentinelEngine(cfg.alertCap);
@@ -129,11 +130,11 @@ function panelInLayout(): boolean {
 }
 
 function wantRunning(): boolean {
-  return cfg.enabled && (panelInLayout() || floating);
+  return cfg.enabled && (panelInLayout() || floating || widgetAlive);
 }
 
 function shouldEmit(): boolean {
-  return panelActivity.isVisible("sentinel") || floating;
+  return panelActivity.isVisible("sentinel") || floating || widgetAlive;
 }
 
 /** 依据门控重新评估引擎启停 */
@@ -408,6 +409,25 @@ export function dismissFloat(): void {
 }
 
 /** 弹出独立桌面挂件窗（无边框置顶；已存在则唤回；位置持久化） */
+let widgetHooked = false;
+
+/** 挂件窗存活 → 监测驻留（与浮球同权）；销毁/创建失败即重估门控 */
+function hookWidget(win: { once: (event: string, handler: () => void) => Promise<unknown> }): void {
+  if (widgetHooked) return;
+  widgetHooked = true;
+  widgetAlive = true;
+  evaluate();
+  emitNow();
+  const onGone = (): void => {
+    widgetHooked = false;
+    widgetAlive = false;
+    evaluate();
+    emitNow();
+  };
+  void win.once("tauri://destroyed", onGone);
+  void win.once("tauri://error", onGone);
+}
+
 export function popWidget(): void {
   void (async () => {
     const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
@@ -417,6 +437,7 @@ export function popWidget(): void {
       await exist.unminimize().catch(() => undefined);
       await exist.show().catch(() => undefined);
       await exist.setFocus().catch(() => undefined);
+      hookWidget(exist);
       return;
     }
     let pos: { x: number; y: number } | null = null;
@@ -431,7 +452,7 @@ export function popWidget(): void {
     } catch {
       /* 默认居中 */
     }
-    new WebviewWindow(label, {
+    const win = new WebviewWindow(label, {
       url: `${location.origin}${location.pathname}#/sentinel-widget`,
       title: "哨兵",
       width: 236,
@@ -444,5 +465,6 @@ export function popWidget(): void {
       resizable: true,
       ...(pos ? { x: pos.x, y: pos.y } : {}),
     });
+    hookWidget(win);
   })();
 }

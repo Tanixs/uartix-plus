@@ -35,7 +35,7 @@ import { popWidgetToDesktop } from "../ai/widgetShell";
 import { openExtPanel } from "../ai/extBus";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
-import { IconEye, IconEyeOff } from "../../shared/icons";
+import { IconEye, IconEyeOff, IconEdit, IconTrash } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 
@@ -664,7 +664,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                                 if (nn && nn.trim()) renameLayout(s.id, nn);
                               }}
                             >
-                              ✎
+                              <IconEdit />
                             </button>
                             <button
                               className="layout-op-btn danger"
@@ -674,7 +674,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                                 if (confirm(`删除布局「${s.name}」？`)) removeLayout(s.id);
                               }}
                             >
-                              ×
+                              <IconTrash />
                             </button>
                           </span>
                         )}

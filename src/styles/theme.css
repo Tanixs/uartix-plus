@@ -67,6 +67,24 @@ html.no-motion *::after {
 :root {
   --font-ui: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+
+  /* ---------- 语义色（P74c C4）：块类型编码 + 警示线 ----------
+     为什么要令牌化：编排器/序列器的块类型色原先散落成 7 个字面量 + 若干 rgba 副本，
+     同一块类型在「行内色条」与「类型胶囊」上用了两套色，且亮色主题下 #3fb950 这类
+     高亮色贴在白底上对比度不足 2.5:1。现在每个语义色只有一处定义，按主题给值
+     （下面是暗色系默认值，5 个亮色主题在各自主题文件里覆写），
+     并由 `npm run check:theme` 逐主题校验「语义色 / 面板底」对比度 ≥ 4.5。 */
+  --k-send: #4e9cef; /* 发送 */
+  --k-wait: #d29922; /* 等待 */
+  --k-frame: #a371f7; /* 帧命中 */
+  --k-assert: #3fb950; /* 断言 */
+  --k-note: #db6d28; /* 备注 */
+  --k-logic: #bc8cff; /* 逻辑（如果/循环） */
+  --k-group: #39c5cf; /* 子组 */
+  --k-warn-line: #e8a13c; /* 阈值/告警线（图表、六面统计） */
+  /* 只读/受限提示文字色（Operator 只读横幅、上下文锁定条）；暗色系默认值，亮色主题覆写
+     ——此前 .ctx-lock/.orch-ro-bar 引用未定义的 `--warn-fg` 静默回退 accent，失去"警告"语义 */
+  --warn-fg: #e8a13c;
 }
 
 
@@ -390,6 +408,18 @@ body {
   color: var(--danger);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-demo {
+  flex: none;
+  font-size: 10px;
+  line-height: 15px;
+  padding: 0 7px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
   white-space: nowrap;
 }
 
@@ -2019,6 +2049,38 @@ body {
   border-color: var(--accent);
   color: var(--on-accent, #fff);
 }
+/* 绘图工具栏里的「文字型」切换钮（频谱/直方图/线性/冻结…）：
+   B1 起改用显式语义类 `.btn.sm`，不再复用 `.icon-btn`（图标钮是 26×26 方形，塞文字会被压成竖排细条）。
+   这里只补绘图工具的密度与暗色文字，状态高亮沿用全局 `.btn.primary`。
+   **P75 修正**：必须排除 `.primary`——否则本规则 (0,2,1) 特异性压过 `.btn.primary` (0,2,0)，
+   造成「主题色背景 + 灰字」共存（海棠主题实测对比度仅 1.11:1，几乎不可见）。 */
+.plot-bar .btn.sm:not(.primary) {
+  height: 24px;
+  color: var(--text-dim);
+}
+.plot-bar .btn.sm {
+  height: 24px;
+}
+.plot-bar .btn.sm:hover:not(:disabled) {
+  color: var(--accent);
+}
+.plot-bar .btn.sm.primary,
+.plot-bar .btn.sm.primary:hover:not(:disabled) {
+  color: var(--on-accent, #fff);
+}
+.plot-bar .btn.sm svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* 频谱空态引导卡：直接在面板内选协议字段建通道。
+   父层 .plot-empty 是 pointer-events:none 的穿透浮层（P65b 前设计：让点击落到图表），
+   引导卡加入交互控件后必须在此恢复命中，否则下拉/按钮全部点击穿透（P76②） */
+.spec-guide { max-width: 420px; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px 22px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel); pointer-events: auto; user-select: text; }
+.spec-guide-t { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.spec-guide-d { font-size: 11.5px; line-height: 1.7; color: var(--text-dim); text-align: center; }
+.spec-guide-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; font-size: 11.5px; color: var(--text-dim); }
+.spec-guide-row select.input { max-width: 240px; }
 
 /* 频谱分析面板（P65）：底部摘要行（fs/分辨率/主峰 或 均值/σ） */
 .spectrum-summary {
@@ -2040,6 +2102,14 @@ body {
   border-radius: 4px;
   padding: 0 6px;
   font-size: 10.5px;
+}
+.spectrum-summary .ss-fail {
+  color: var(--danger, #e5534b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.spectrum-summary .ss-dim {
+  color: color-mix(in srgb, var(--text-dim) 72%, transparent);
 }
 
 /* 自绘十字线（替代 uPlot DOM 游标：后者在 CSS zoom 下会被二次放大错位）。
@@ -2354,6 +2424,17 @@ body {
   color: var(--text-dim);
   pointer-events: none;
   user-select: none;
+}
+
+/* 空态内嵌操作行（P76①）：父层 .plot-empty 是穿透浮层，按钮行必须恢复命中 */
+.plot-empty-ops {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .u-legend {
@@ -3634,6 +3715,19 @@ body {
   flex: 0 0 auto;
 }
 
+/* 图标钮激活态（P75）：全局兜底。此前只有 `.plot-bar .icon-btn.primary` 存在，
+   导致 HUD 等非 plot-bar 场景（3D 轨迹的跟随/校准钮）加了 primary 却零视觉反馈。 */
+.icon-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent, #fff);
+}
+.icon-btn.primary:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent, #fff);
+}
+
 .modal-section {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -3833,7 +3927,7 @@ body {
 .fc-anno-empty{padding:14px 10px;font-size:11px;color:var(--text-dim);text-align:center;}
 .fc-anno-list{overflow-y:auto;padding:4px;}
 .fc-anno-item{display:flex;align-items:baseline;gap:8px;width:100%;padding:5px 8px;text-align:left;background:none;border:0;border-radius:5px;cursor:pointer;}
-.fc-anno-item:hover{background:var(--bg-hover);}
+.fc-anno-item:hover{background:var(--accent-soft);}
 .fc-anno-ts{flex:none;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--accent);}
 .fc-anno-text{flex:1;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* 结构发现 X-Ray（P47）：批处理快照分析面板 */
@@ -3854,7 +3948,7 @@ body {
 .xray-runs{flex:none;max-height:38%;overflow-y:auto;padding:6px 10px;border-top:1px solid var(--border);}
 .xray-runs-head{font-size:11px;font-weight:700;color:var(--text-dim);margin-bottom:4px;}
 .xray-run{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;}
-.xray-run:hover{background:var(--bg-hover);}
+.xray-run:hover{background:var(--accent-soft);}
 .xray-run.head{background:color-mix(in srgb, var(--accent) 10%, transparent);}
 .xray-run-bytes{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.5px;}
 .xray-run-meta{flex:1;font-size:11px;color:var(--text-dim);}
@@ -3987,6 +4081,7 @@ body {
   text-overflow: ellipsis;
 }
 .input.hexbytes.bad { border-color: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 22%, transparent); }
+.input.bad { border-color: var(--danger); box-shadow: 0 0 0 2px color-mix(in srgb, var(--danger) 22%, transparent); }
 .fc-noframe-badge {
   position: absolute;
   bottom: 8px;
@@ -4405,6 +4500,7 @@ label.set-switch,
   border-radius: 50%; background: #fff; transition: transform .15s;
   box-shadow: 0 1px 2px rgba(0,0,0,.35);
 }
+/* contrast-exempt：开关轨道无文字，白旋钮 14×14 在 accent 上为纯几何对比 */
 .set-switch input:checked + span { background: var(--accent); }
 .set-switch input:checked + span::after { transform: translateX(16px); }
 
@@ -4459,6 +4555,27 @@ label.set-switch,
 .set-io-label { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .set-io-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .set-io-hint { font-size: 11px; color: var(--text-dim); margin-top: 8px; padding: 0 2px; }
+/* 部署包生成块的操作行（P76③）：此前 .set-io-ops/.set-switch-inline 两个类名
+   无任何 CSS 定义，整行靠浏览器默认 inline 流排布 —— 字号继承不一、间距换行不可控 */
+.set-io-ops {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin-top: 10px;
+}
+.set-io-ops .input { flex: none; min-width: 0; }
+.set-switch-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  user-select: none;
+  cursor: pointer;
+}
+.set-switch-inline input { margin: 0; accent-color: var(--accent); }
 .set-mono { font-family: var(--font-mono); font-size: 12px; }
 .props-confirm { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--danger, #e5534b); border-radius: 8px; background: rgba(229,83,75,.08); }
 .props-confirm-msg { font-size: 12px; line-height: 1.6; margin-bottom: 8px; }
@@ -4467,6 +4584,10 @@ label.set-switch,
 .fc-confirm-body { padding: 6px 18px 4px; font-size: 12.5px; line-height: 1.7; }
 .ctx-row { position: relative; }
 .ctx-row > .ctx-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; }
+/* C1：Operator 只读时被锁定的设置行（子菜单不展开、整行降透明度） */
+.ctx-row.dis { opacity: .5; }
+.ctx-lock { display: flex; align-items: center; gap: 5px; padding: 5px 10px; font-size: 10.5px; color: var(--warn-fg, var(--accent)); background: color-mix(in srgb, var(--accent) 12%, transparent); border-bottom: 1px solid var(--border-soft); }
+.ctx-lock svg { flex: none; }
 .ctx-cur { color: var(--text-dim); font-size: 10.5px; }
 .set-about-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
 .set-about-head img { border-radius: 12px; }
@@ -6108,10 +6229,10 @@ html.aiw-transparent-root #root {
 .sq-grip:active { cursor: grabbing; }
 .sq-en { accent-color: var(--accent); flex: none; margin: 0; }
 .sq-kind { flex: none; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; border-radius: 4px; padding: 1px 5px; line-height: 15px; }
-.sq-k-send { color: #4e9cef; border: 1px solid rgba(78,156,239,.4); background: rgba(78,156,239,.1); }
-.sq-k-wait { color: #d29922; border: 1px solid rgba(210,153,34,.4); background: rgba(210,153,34,.1); }
-.sq-k-frame { color: #a371f7; border: 1px solid rgba(163,113,247,.4); background: rgba(163,113,247,.1); }
-.sq-k-assert { color: #3fb950; border: 1px solid rgba(63,185,80,.4); background: rgba(63,185,80,.1); }
+.sq-k-send { color: var(--k-send); border: 1px solid color-mix(in srgb, var(--k-send) 40%, transparent); background: color-mix(in srgb, var(--k-send) 10%, transparent); }
+.sq-k-wait { color: var(--k-wait); border: 1px solid color-mix(in srgb, var(--k-wait) 40%, transparent); background: color-mix(in srgb, var(--k-wait) 10%, transparent); }
+.sq-k-frame { color: var(--k-frame); border: 1px solid color-mix(in srgb, var(--k-frame) 40%, transparent); background: color-mix(in srgb, var(--k-frame) 10%, transparent); }
+.sq-k-assert { color: var(--k-assert); border: 1px solid color-mix(in srgb, var(--k-assert) 40%, transparent); background: color-mix(in srgb, var(--k-assert) 10%, transparent); }
 .sq-k-group { color: var(--text); border: 1px solid var(--border); background: var(--bg-inset); }
 .sq-k-note { color: var(--text-dim); border: 1px solid var(--border-soft); background: transparent; }
 .sq-fields { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; flex-wrap: wrap; }
@@ -6328,3 +6449,1044 @@ html:has(.sw), .sw { background: transparent; }
 .sw-none { color: var(--text-dim); font-size: 10.5px; text-align: center; padding: 10px 0; }
 .sw-foot { flex: none; display: flex; gap: 6px; }
 .sw-foot .btn { flex: 1; font-size: 10.5px; height: 24px; }
+
+/* ================= P69 3D 轨迹面板 ================= */
+/* HUD 全部绝对定位四角布局（防重叠红线）：左上轴绑定 / 右上视角组 /
+   左下测量气泡 / 右下统计小字；hint 居中且 pointer-events:none 不挡交互 */
+.p3d { position: relative; }
+.p3d-host { position: absolute; inset: 0; overflow: hidden; }
+.p3d-host.measuring { cursor: crosshair; }
+.p3d-hud { position: absolute; display: flex; align-items: center; gap: 6px; z-index: 5; }
+.p3d-hud.tl { top: 8px; left: 8px; flex-wrap: wrap; max-width: calc(100% - 230px); }
+.p3d-hud.tr { top: 8px; right: 8px; }
+.p3d-hud.bl { bottom: 24px; left: 8px; }
+.p3d-hud.br {
+  bottom: 22px;
+  right: 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  pointer-events: none;
+  z-index: 4;
+  white-space: nowrap;
+}
+/* P75 B2：配对诊断副行（三轴值域 + 配对/跳过计数），悬挂在统计行上方不挤压布局 */
+.p3d-hud-sub {
+  position: absolute;
+  right: 0;
+  bottom: 15px;
+  font-size: 10px;
+  color: var(--text-dim);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+/* P70 3D 时间条：面板最底独立条（scrub/回放进度），HUD bl/br 已上移避让 */
+.p3d-timebar {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 5;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+/* P74c B5：校准模式下时间条不适用（轨迹层隐藏，拖动无视觉因果）→ 视觉降级 + 摘掉指针事件 */
+.p3d-timebar.off { opacity: 0.35; pointer-events: none; cursor: not-allowed; }
+.p3d-tb-lbl {
+  flex: none;
+  min-width: 26px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+.p3d-tb-lbl:last-child { text-align: right; }
+.p3d-tb-badge {
+  flex: none;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.p3d-tb-badge.on {
+  border-color: var(--warn, #d29922);
+  color: var(--warn, #d29922);
+  cursor: pointer;
+}
+.p3d-tb-badge.on:hover { background: color-mix(in srgb, var(--warn, #d29922) 12%, transparent); }
+.p3d-tb-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-dim) 35%, transparent);
+}
+.p3d-tb-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  pointer-events: none;
+}
+.p3d-tb-cursor {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: var(--accent);
+  border: 1px solid var(--bg-panel);
+  pointer-events: none;
+  z-index: 1;
+}
+.p3d-tb-bubble {
+  position: absolute;
+  bottom: 12px;
+  left: 100%;
+  transform: translateX(-50%);
+  display: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+}
+.p3d-axis { display: inline-flex; align-items: center; gap: 5px; }
+.p3d-axis > b {
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  width: 12px;
+  text-align: center;
+  flex: none;
+}
+.p3d-axis .input { width: 108px; height: 24px; font-size: 11px; padding: 0 6px; }
+.p3d-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 4;
+}
+.p3d-hint > div {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 20px;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.9;
+  color: var(--text-dim);
+  box-shadow: var(--shadow);
+}
+.p3d-hint-sub { font-size: 11px; opacity: 0.8; }
+.p3d-tip {
+  position: absolute;
+  left: -9999px;
+  top: -9999px;
+  z-index: 6;
+  display: none;
+  pointer-events: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--text);
+  font-family: var(--font-mono);
+  white-space: pre-line;
+  box-shadow: var(--shadow);
+}
+.p3d-measure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  max-width: 340px;
+}
+.p3d-measure-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.p3d-measure-head b { color: #e8a13c; font-size: 11.5px; }
+.p3d-measure .p3d-mclose {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+.p3d-measure .p3d-mclose:hover { color: var(--danger, #e5534b); }
+.p3d-measure-row { display: flex; gap: 6px; align-items: baseline; white-space: nowrap; }
+.p3d-measure-row .p3d-mtag { color: #e8a13c; font-weight: 700; width: 10px; flex: 0 0 auto; }
+.p3d-measure-row i { color: var(--text-dim); font-style: normal; }
+.p3d-measure-dt { color: #e8a13c; }
+
+/* ---------- P71 椭球校准 HUD（与 .p3d-measure 同构） ---------- */
+.p3d-calib {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  max-width: 360px;
+}
+
+/* P74c B3：校准 HUD 溢出策略。
+   .p3d-hud.bl 原本只有 bottom 锚点（高度 auto，向上无限生长），矮面板下顶部行被裁且不可滚。
+   给容器一个确定高度（top + bottom 都锚定）+ 内容底部对齐，HUD 就能在剩余空间里内滚。 */
+.p3d-hud.bl { top: 8px; bottom: 24px; align-items: flex-end; }
+.p3d-hud.bl > .p3d-calib { max-height: 100%; overflow-y: auto; }
+.p3d-hud.bl > .p3d-measure { max-height: 100%; overflow-y: auto; }
+/* 窄面板：结果栅格从「标签 | 值」降为单列，避免数值被压成省略号 */
+.p3d-calib-grid { grid-template-columns: auto minmax(0, 1fr); }
+.p3d-calib-mono { overflow-wrap: anywhere; }
+.p3d-calib .p3d-mclose {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+.p3d-calib .p3d-mclose:hover { color: var(--danger, #e5534b); }
+.p3d-calib .p3d-measure-head b { color: var(--accent, #4e9cef); }
+.p3d-calib-hint { color: var(--text-dim); max-width: 300px; white-space: normal; line-height: 1.5; }
+.p3d-calib-row { display: flex; gap: 8px; align-items: center; white-space: nowrap; flex-wrap: wrap; }
+.p3d-calib-count { color: var(--text-dim); }
+.p3d-calib-warn { color: #e8a13c; }
+.p3d-calib-dim { color: var(--text-dim); font-style: normal; }
+.p3d-calib-err { color: var(--danger, #e5534b); white-space: normal; line-height: 1.5; max-width: 300px; }
+.p3d-calib-sec {
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  padding-top: 4px;
+  margin-top: 2px;
+}
+.p3d-calib-stale { color: var(--text-dim); opacity: 0.75; }
+.p3d-calib.stale .p3d-calib-mono { opacity: 0.55; }
+.p3d-calib-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  align-items: baseline;
+}
+.p3d-calib-grid > span:first-child { color: var(--text-dim); }
+.p3d-calib-mono { white-space: pre-wrap; word-break: break-all; }
+.p3d-cbtn {
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+.p3d-cbtn:hover:not(:disabled) { border-color: var(--accent, #4e9cef); color: var(--accent, #4e9cef); }
+.p3d-cbtn:disabled { opacity: 0.45; cursor: not-allowed; }
+.p3d-cbtn.stop { border-color: var(--danger, #e5534b); color: var(--danger, #e5534b); }
+
+/* ---------- P73 校准 T+：子页 tabs / 显示 segmented / 补偿预览迷你图 / 六面向导 ---------- */
+.p3d-calib-tabs { display: flex; gap: 4px; }
+.p3d-calib-tabs button {
+  flex: 1;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.p3d-calib-tabs button:hover { color: var(--text); }
+.p3d-calib-tabs button.on {
+  background: var(--bg-inset);
+  border-color: var(--accent, #4e9cef);
+  color: var(--accent, #4e9cef);
+}
+.p3d-cbtn.on { border-color: var(--accent, #4e9cef); color: var(--accent, #4e9cef); }
+.p3d-seg {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.p3d-seg-l { padding: 2px 7px; color: var(--text-dim); border-right: 1px solid var(--border); }
+.p3d-seg button {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 2px 9px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+.p3d-seg button + button { border-left: 1px solid var(--border); }
+.p3d-seg button.on { background: var(--bg-inset); color: var(--accent, #4e9cef); }
+.p3d-seg button:disabled { opacity: 0.45; cursor: not-allowed; }
+.p3d-spark { position: relative; line-height: 0; }
+.p3d-spark canvas {
+  width: 224px;
+  height: 54px;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-inset);
+}
+.p3d-spark.stale { opacity: 0.45; }
+.p3d-spark-susp {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+  line-height: 1.4;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.p3d-a6-list { display: flex; flex-direction: column; gap: 2px; }
+.p3d-a6-row { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.p3d-a6-row .p3d-cbtn { margin-left: auto; flex: 0 0 auto; }
+.p3d-a6-row.run .p3d-a6-ico,
+.p3d-a6-ico.run { color: #e8a13c; }
+.p3d-a6-ico { width: 12px; flex: 0 0 auto; text-align: center; color: var(--text-dim); }
+.p3d-a6-ico.ok { color: #4caf50; }
+.p3d-a6-lbl { flex: 0 0 auto; min-width: 62px; }
+.p3d-a6-stat {
+  color: var(--text-dim);
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.p3d-a6-stat.run { color: var(--k-warn-line); }
+
+/* ================= P74 自动编排器 ================= */
+/* 布局红线：orch-body 左画布右检查器两栏，互不重叠；画布纵向滚动 +
+   边缘自动滚动；事件槽在组卡头部下方独立一行（不与标题行混排） */
+.orch { display: flex; flex-direction: column; height: 100%; overflow: hidden; background: var(--bg-panel); }
+.orch-top { flex: none; display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.orch-runinfo { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.orch-sp { flex: 1; }
+.orch-sel { max-width: 150px; }
+.orch-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.orch-canvas { flex: 1; min-width: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.orch-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; }
+.orch-empty-t { font-size: 15px; font-weight: 700; color: var(--text); }
+.orch-empty-d { max-width: 460px; font-size: 12px; line-height: 1.8; color: var(--text-dim); }
+
+/* ---------- 组卡片 ---------- */
+.orch-card { flex: none; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-panel); overflow: hidden; }
+.orch-card.off { opacity: 0.55; }
+.orch-card-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--bg-inset); border-bottom: 1px solid var(--border-soft); }
+.orch-fold { all: unset; cursor: pointer; width: 18px; text-align: center; color: var(--text-dim); font-size: 11px; flex: none; }
+.orch-fold:hover { color: var(--accent); }
+.orch-title { font-size: 12.5px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orch-name { width: 150px; height: 22px; font-size: 12px; }
+
+/* ---------- 事件槽 ---------- */
+.orch-slot { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 4px 8px; border-bottom: 1px dashed var(--border-soft); background: color-mix(in srgb, var(--accent) 3%, transparent); }
+.orch-slot.drop-in { outline: 2px solid var(--accent); outline-offset: -2px; }
+.orch-slot-lab { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; color: var(--text-dim); flex: none; }
+.orch-ev { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; font-size: 11px; line-height: 20px; padding: 0 4px 0 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg-panel); color: var(--text); cursor: pointer; user-select: none; }
+.orch-ev:hover { border-color: var(--accent); }
+.orch-ev.sel { border-color: var(--accent); background: var(--accent-soft); }
+.orch-ev.drop-before { box-shadow: -3px 0 0 0 var(--accent); }
+.orch-ev-h { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.orch-ev-h.warn { background: var(--warn, #d29922); }
+.orch-ev-h.bad { background: var(--danger, #e5534b); }
+.orch-ev-x { all: unset; cursor: pointer; width: 14px; height: 14px; line-height: 13px; text-align: center; border-radius: 50%; color: var(--text-dim); font-size: 11px; }
+.orch-ev-x:hover { background: rgba(229, 83, 75, 0.15); color: var(--danger); }
+.orch-evadd-wrap { position: relative; flex: none; }
+.orch-evadd { all: unset; cursor: pointer; width: 20px; height: 20px; line-height: 19px; text-align: center; border: 1px dashed var(--border); border-radius: 999px; color: var(--text-dim); font-size: 12px; }
+.orch-evadd:hover { border-color: var(--accent); color: var(--accent); }
+/* 弹层经 OrchDropdown portal 到 body + fixed（组卡/画布 overflow 裁剪逃逸），坐标由 JS 写入 */
+.orch-pop { display: flex; flex-direction: column; min-width: 150px; padding: 4px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow, 0 6px 24px rgba(0, 0, 0, 0.25)); }
+.orch-pop-fixed { position: fixed; z-index: 999; }
+.orch-pop-i { all: unset; cursor: pointer; padding: 4px 9px; font-size: 11.5px; border-radius: 5px; color: var(--text); white-space: nowrap; }
+.orch-pop-i:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* ---------- 块行 ---------- */
+.orch-children { display: flex; flex-direction: column; padding: 2px 4px 4px; }
+.orch-row { border: 0; border-radius: 6px; margin: 1px 0; }
+.orch-row.sel { background: var(--accent-soft); }
+.orch-summary { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orch-k-logic { color: var(--k-logic); border: 1px solid color-mix(in srgb, var(--k-logic) 40%, transparent); background: color-mix(in srgb, var(--k-logic) 10%, transparent); }
+.orch-failtag { flex: none; font-size: 9.5px; line-height: 15px; padding: 0 5px; border-radius: 4px; cursor: pointer; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); user-select: none; }
+.orch-failtag.c { color: var(--k-wait); border-color: color-mix(in srgb, var(--k-wait) 40%, transparent); background: color-mix(in srgb, var(--k-wait) 8%, transparent); }
+.orch-branch { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--k-logic); padding: 2px 0 1px 14px; }
+.orch-addhere-wrap { display: inline-block; }
+.orch-drop-before::before, .orch-drop-after::before { content: ""; position: absolute; left: 8px; right: 8px; height: 3px; border-radius: 2px; background: var(--accent); z-index: 2; }
+.orch-drop-before::before { top: -2px; }
+.orch-drop-after::before { bottom: -2px; }
+.orch-drop-in { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--accent-soft) !important; }
+
+/* ---------- 拖拽共享内核（useListDrag，P75 B3） ----------
+   ghost 浮层 portal 到 body、直写 transform 跟手（不用 left/top 过渡，跟手零延迟）；
+   drag-active 锁全局光标与文本选中，按下即有"拖起来了"的反馈 */
+.drag-ghost {
+  position: fixed; left: 0; top: 0; z-index: 9999; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 6px; max-width: 360px;
+  padding: 4px 10px; border-radius: 8px;
+  background: var(--bg-panel); border: 1px solid var(--accent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  font-size: var(--fs-body); color: var(--text); opacity: 0.96; white-space: nowrap;
+}
+.drag-ghost .dg-k { flex: none; font-weight: 700; color: var(--accent); }
+.drag-ghost .dg-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.85; }
+html.drag-active, html.drag-active * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
+
+/* ---------- 检查器 / 变量库 ---------- */
+.orch-ins { width: 285px; flex: none; border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-panel); }
+.orch-ins-head { flex: none; display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-bottom: 1px solid var(--border-soft); }
+.orch-ins-t { font-size: 12px; font-weight: 700; color: var(--text); white-space: nowrap; }
+.orch-ins-path { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.orch-ins-body { flex: 1; min-height: 0; overflow-y: auto; padding: 9px; display: flex; flex-direction: column; gap: 9px; }
+/* C1：只读门控用的原生 fieldset —— 中和浏览器默认边框/内边距，并接管「长出滚动区」的 flex 角色 */
+.orch-fs { flex: 1; min-height: 0; min-inline-size: 0; display: flex; flex-direction: column; border: 0; margin: 0; padding: 0; }
+.orch-fs[disabled] :is(input, select, textarea, button) { opacity: .55; cursor: not-allowed; }
+/* 只读横幅：一眼说明「结构锁定、可运行可查看」 */
+.orch-ro-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 11px; color: var(--warn-fg, var(--accent)); background: color-mix(in srgb, var(--accent) 12%, transparent); border-bottom: 1px solid var(--border-soft); }
+.orch-ro-bar svg { flex: none; }
+.orch-fld { display: flex; flex-direction: column; gap: 3px; }
+.orch-fld-l { font-size: 10.5px; color: var(--text-dim); }
+.orch-flex { flex: 1; min-width: 0; width: auto; }
+.orch-flex-wrap { display: flex; flex-direction: column; gap: 2px; }
+.orch-mono { font-family: var(--font-mono, monospace); }
+.orch-unit { font-size: 10.5px; color: var(--text-dim); align-self: center; }
+.orch-err { font-size: 10px; color: var(--danger); line-height: 1.5; }
+.orch-hint { font-size: 10.5px; line-height: 1.7; color: var(--text-dim); }
+/* B4c：emitFlow 附带字段行 / modbus 双列输入 */
+.orch-pair { display: flex; align-items: center; gap: 4px; }
+.orch-row2 { display: flex; gap: 6px; }
+.orch-inline { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-dim); flex: none; white-space: nowrap; }
+.orch-w64 { width: 64px; height: 24px; padding: 0 3px; font-size: 11px; flex: none; }
+.orch-w72 { width: 72px; height: 24px; padding: 0 4px; font-size: 11px; flex: none; }
+.orch-w80 { width: 80px; height: 24px; padding: 0 4px; font-size: 11px; flex: none; }
+.orch-w90 { width: 90px; height: 24px; padding: 0 4px; font-size: 11px; flex: none; }
+.orch-w110 { width: 110px; height: 24px; padding: 0 4px; font-size: 11px; flex: none; }
+.input.bad { border-color: var(--danger); }
+
+/* 条件列表 */
+.orch-conds { display: flex; flex-direction: column; gap: 4px; }
+.orch-cond { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 4px 6px; border: 1px solid var(--border-soft); border-radius: 7px; background: var(--bg-inset); }
+
+/* 变量库 */
+.orch-var-add { display: flex; align-items: center; gap: 5px; }
+.orch-var-row { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 4px 6px; border: 1px solid var(--border-soft); border-radius: 7px; }
+.orch-var-live { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--accent); margin-left: auto; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- P74b：视觉分层与可编辑性反馈 ---------- */
+/* 分层底色：画布(最深) → 组卡(面板色) → 容器子流(微差+引导线)，层级一眼可数 */
+.orch-canvas { background: var(--bg-inset); }
+.orch-card { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14); }
+.orch-card .sq-children { background: color-mix(in srgb, var(--text) 3%, transparent); border-radius: 0 8px 8px 0; margin: 2px 6px 4px 14px; padding: 1px 2px 3px 4px; }
+
+/* 块行类型色左条：与 kind 徽章同色系（同一 --k-* 令牌），扫一眼即知块类别 */
+.orch-row::before { content: ""; position: absolute; left: 2px; top: 4px; bottom: 4px; width: 3px; border-radius: 2px; background: transparent; }
+.orch-row.k-send::before { background: var(--k-send); }
+.orch-row.k-wait::before { background: var(--k-wait); }
+.orch-row.k-frame::before { background: var(--k-frame); }
+.orch-row.k-assert::before { background: var(--k-assert); }
+.orch-row.k-note::before { background: var(--k-note); }
+.orch-row.k-logic::before { background: var(--k-logic); }
+.orch-row.k-group::before { background: var(--k-group); }
+.orch-row.sel { box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* 摘要 chips：说明文字弱、参数胶囊强——「这些能在右边改」一眼可见 */
+.orch-sum-t { color: var(--text-dim); font-size: 11px; margin: 0 2px; }
+.orch-chip { display: inline-block; background: var(--bg-inset); border: 1px solid var(--border-soft); border-radius: 4px; padding: 0 5px; margin: 0 2px; font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--text); line-height: 16px; vertical-align: middle; }
+.orch-row.sel .orch-chip { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* hover 出现「编辑」提示：块行可点→右侧检查器编辑的 affordance */
+.orch-edit-hint { display: none; flex: none; font-size: 9.5px; line-height: 14px; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 6px; }
+.orch-row:hover .orch-edit-hint { display: inline-block; }
+
+/* 添加块：全宽虚线落点条（低调可发现，hover 亮起）；wrap 为弹层定位锚 */
+.orch-addhere-wrap { display: block; position: relative; }
+.orch-addbar { display: block; width: calc(100% - 24px); margin: 3px 12px; padding: 3px 8px; font-size: 10.5px; color: var(--text-dim); background: transparent; border: 1px dashed var(--border); border-radius: 6px; text-align: center; cursor: pointer; }
+.orch-addbar:hover, .orch-addbar.open { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* 添加菜单：执行/逻辑/组织 三栏 + 类型色点 */
+.orch-pop-cols { flex-direction: row; align-items: flex-start; gap: 4px; }
+.orch-pop-g { display: flex; flex-direction: column; min-width: 96px; }
+.orch-pop-h { font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-dim); padding: 3px 8px 2px; }
+.orch-pop-cols .orch-pop-i { display: flex; align-items: center; gap: 5px; }
+.orch-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.orch-dot-send { background: var(--k-send); }
+.orch-dot-wait { background: var(--k-wait); }
+.orch-dot-frame { background: var(--k-frame); }
+.orch-dot-assert { background: var(--k-assert); }
+.orch-dot-note { background: var(--k-note); }
+.orch-dot-logic { background: var(--k-logic); }
+.orch-dot-group { background: var(--k-group); }
+
+/* 组统计徽标（跑 N · 败 M） */
+.orch-stats { flex: none; font-size: 9.5px; line-height: 15px; padding: 0 6px; border: 1px solid var(--border-soft); border-radius: 999px; color: var(--text-dim); cursor: default; }
+.orch-stats.bad { color: #d29922; border-color: rgba(210, 153, 34, 0.4); }
+
+/* 空态三步引导 */
+.orch-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 1.7; color: var(--text-dim); text-align: left; max-width: 480px; }
+.orch-steps li::marker { color: var(--accent); font-weight: 700; }
+/* B4e：空态引导三直达 + 内置模板下拉 */
+.orch-empty-ops { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.orch-preset-list { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 480px; }
+.orch-preset { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); text-align: left; cursor: pointer; transition: border-color var(--dur-fast) var(--ease); }
+.orch-preset:hover:not(:disabled) { border-color: var(--accent); }
+.orch-preset:disabled { opacity: 0.5; cursor: not-allowed; }
+.orch-preset-n { font-size: 12px; font-weight: 700; color: var(--text); }
+.orch-preset-d { font-size: 11px; line-height: 1.6; color: var(--text-dim); }
+
+/* ======================================================================
+   P74c：图标化 / 组级节流入口 / 运行日志抽屉 / 反馈补全
+   ====================================================================== */
+
+/* ---------- SVG 图标化的通用尺寸对齐（新增按钮一律 SVG，不再用字符） ---------- */
+.sq-a { display: inline-flex; align-items: center; justify-content: center; }
+.sq-a svg { display: block; }
+.sq-a:disabled, .sq-a.dis { opacity: 0.32; cursor: not-allowed; }
+.sq-a:disabled:hover, .sq-a.dis:hover { background: transparent; color: var(--text-dim); }
+.orch-fold { display: inline-flex; align-items: center; justify-content: center; }
+.orch-ev-x { display: inline-flex; align-items: center; justify-content: center; }
+.orch-evadd { display: inline-flex; align-items: center; justify-content: center; }
+.orch-addbar { display: flex; align-items: center; justify-content: center; gap: 5px; }
+.orch-addbar svg { display: block; }
+.btn svg { display: block; }
+/* 只在编排器顶栏改布局：图标 + 文字并排；不去动全站 .btn 的既有排版 */
+.orch-top .btn { display: inline-flex; align-items: center; gap: 5px; }
+.orch-runinfo { display: inline-flex; align-items: center; gap: 4px; }
+.orch-runinfo svg { opacity: 0.7; }
+
+/* ---------- 顶栏容量计数（A4：容量红线可见） ---------- */
+.orch-cap { flex: none; font-size: 10.5px; line-height: 17px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-soft); color: var(--text-dim); font-family: var(--font-mono, monospace); }
+.orch-cap.bad { color: var(--danger, #e5534b); border-color: color-mix(in srgb, var(--danger, #e5534b) 45%, transparent); }
+
+/* ---------- 组头标签：事件数 / 手动可用性 / 静默期（B2、A3） ---------- */
+.orch-evcount { flex: none; font-size: 9.5px; line-height: 15px; padding: 0 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); color: var(--accent); background: var(--accent-soft); }
+.orch-evcount.manual { color: var(--text-dim); border-color: var(--border); background: transparent; }
+.orch-cd { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: 9.5px; line-height: 15px; padding: 0 6px; border-radius: 999px; border: 1px solid rgba(210, 153, 34, 0.4); color: #d29922; }
+.orch-cd svg { width: 11px; height: 11px; }
+.orch-note { flex: none; padding: 3px 10px; font-size: 10.5px; line-height: 1.6; color: var(--text-dim); background: color-mix(in srgb, var(--text) 3%, transparent); border-bottom: 1px solid var(--border-soft); white-space: pre-wrap; }
+
+/* 统计徽标改成按钮（点击 → 只看该组日志） */
+.orch-stats { all: unset; flex: none; font-size: 9.5px; line-height: 15px; padding: 0 6px; border: 1px solid var(--border-soft); border-radius: 999px; color: var(--text-dim); cursor: pointer; display: inline-flex; gap: 4px; }
+.orch-stats:hover { border-color: var(--accent); color: var(--accent); }
+.orch-stats.bad { color: #d29922; border-color: rgba(210, 153, 34, 0.4); }
+.orch-stats-fail { font-style: normal; color: var(--danger, #e5534b); }
+
+/* 空事件槽占位：分得清「会自动跑」还是「只能手动跑」 */
+.orch-slot-empty { font-size: 10.5px; color: var(--text-dim); opacity: 0.8; font-style: italic; }
+
+/* 序列导入后的定位高亮 */
+@keyframes orch-flash { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+.orch-card.flash { animation: orch-flash 0.8s ease-out 2; border-color: var(--accent); }
+
+/* ---------- 组设置弹层（A3） ---------- */
+.orch-set-hint { font-size: 10px; line-height: 1.6; color: var(--text-dim); padding: 0 9px 3px; white-space: normal; max-width: 260px; }
+.orch-set-row { display: flex; align-items: center; gap: 5px; padding: 0 9px 4px; flex-wrap: wrap; }
+.orch-set-num { width: 78px; height: 22px; padding: 0 5px; font-size: 11px; }
+.orch-set-unit { font-size: 10px; color: var(--text-dim); }
+.orch-set-note { width: 100%; min-height: 40px; font-size: 11px; padding: 4px 5px; resize: vertical; }
+.orch-pop-radio { display: flex; align-items: center; gap: 7px; }
+.orch-pop-radio svg { width: 12px; height: 12px; flex: none; }
+
+/* 小胶囊按钮：冷却预设 / 日志组筛选 */
+.orch-chip-btn { all: unset; cursor: pointer; font-size: 10px; line-height: 17px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-soft); color: var(--text-dim); }
+.orch-chip-btn:hover { border-color: var(--accent); color: var(--accent); }
+.orch-chip-btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* ---------- 运行日志抽屉（P0-UI：引擎 800 条环形缓冲的消费端） ---------- */
+.orch-log { flex: none; height: 190px; display: flex; flex-direction: column; border-top: 1px solid var(--border); background: var(--bg-inset); }
+.orch-log-head { flex: none; display: flex; align-items: center; gap: 7px; padding: 5px 9px; border-bottom: 1px solid var(--border-soft); background: var(--bg-panel); }
+.orch-log-title { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: var(--text); }
+.orch-log-count { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.orch-log-bad { font-style: normal; color: var(--danger, #e5534b); }
+.orch-log-x { all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; color: var(--text-dim); }
+.orch-log-x:hover { background: var(--accent-soft); color: var(--accent); }
+.orch-log-filters { flex: none; display: flex; align-items: center; gap: 5px; padding: 4px 9px; flex-wrap: wrap; border-bottom: 1px solid var(--border-soft); max-height: 46px; overflow-y: auto; }
+.orch-log-rows { flex: 1; min-height: 0; overflow-y: auto; font-family: var(--font-mono, monospace); }
+.orch-log-empty { padding: 14px 12px; font-size: 11px; color: var(--text-dim); font-family: var(--font-body, inherit); }
+.orch-log-row { display: flex; align-items: baseline; gap: 7px; padding: 2px 9px; font-size: 10.5px; line-height: 1.6; border-left: 2px solid transparent; white-space: nowrap; }
+.orch-log-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.orch-log-row.p-fail { background: rgba(229, 83, 75, 0.07); border-left-color: #e5534b; }
+.orch-log-row.p-fuse { background: rgba(210, 153, 34, 0.09); border-left-color: #d29922; }
+.orch-log-time { flex: none; color: var(--text-dim); opacity: 0.8; }
+.orch-log-tag { flex: none; width: 34px; text-align: center; border-radius: 3px; font-size: 9px; line-height: 14px; border: 1px solid var(--border-soft); color: var(--text-dim); }
+.orch-log-tag.t-trig { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.orch-log-tag.t-blk { color: #3fb950; border-color: rgba(63, 185, 80, 0.4); }
+.orch-log-tag.t-fail { color: #e5534b; border-color: rgba(229, 83, 75, 0.45); }
+.orch-log-tag.t-fuse { color: #d29922; border-color: rgba(210, 153, 34, 0.45); }
+.orch-log-tag.t-abort { color: #db6d28; border-color: rgba(219, 109, 40, 0.45); }
+.orch-log-tag.t-done { color: #39c5cf; border-color: rgba(57, 197, 207, 0.4); }
+.orch-log-g { flex: none; max-width: 130px; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.orch-log-d { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); }
+.orch-log-inst { font-style: normal; color: var(--accent); margin-right: 4px; }
+.orch-log-dur { flex: none; color: var(--text-dim); opacity: 0.75; }
+
+/* ======================================================================
+   P74c：3D 轨迹面板的字符图标 → SVG 后的对齐/尺寸收口
+   （用户强制约定：一律 SVG，禁用 ▶ ■ × ● ○ ⟳ ◎ 等字符图标）
+   ====================================================================== */
+.ctx-item svg { vertical-align: -2px; margin-right: 2px; }
+.p3d-mclose { display: inline-flex !important; align-items: center; justify-content: center; }
+.p3d-mclose svg { display: block; }
+.p3d-a6-ico svg { width: 12px; height: 12px; display: block; margin: 0 auto; }
+.p3d-a6-ico { display: inline-flex; align-items: center; justify-content: center; height: 14px; }
+
+/* ============ P78a 交互式教学引导 ============ */
+.tour-mask {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5000;
+}
+.tour-mask path {
+  fill: color-mix(in srgb, var(--bg-inset) 62%, transparent);
+}
+.tour-ring {
+  position: fixed;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  pointer-events: none;
+  z-index: 5000;
+}
+.tour-pop {
+  position: fixed;
+  z-index: 5001;
+  width: min(340px, calc(100vw - 24px));
+  padding: 14px 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l, 10px);
+  background: var(--bg-panel);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.22);
+}
+.tour-pop.center {
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+}
+.tour-pop-n {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.tour-pop-h {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.tour-pop-b {
+  font-size: 12px;
+  line-height: 1.75;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+.tour-pop-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tour-sp {
+  flex: 1;
+}
+.tour-pop-x {
+  all: unset;
+  cursor: pointer;
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-dim);
+}
+.tour-pop-x:hover {
+  background: var(--bg-inset);
+  color: var(--danger);
+}
+.help-tour-row {
+  display: flex;
+  margin-bottom: 10px;
+}
+
+/* ============ P78c/P79 虚拟设备工坊（网格重设计） ============ */
+.vdev {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+}
+.vdev-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+}
+.vdev-state {
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 9px;
+  white-space: nowrap;
+}
+.vdev-state.on {
+  color: var(--ok, #3fb950);
+  border-color: var(--ok, #3fb950);
+}
+.vdev-sp { flex: 1; }
+.vdev-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.vdev-lib {
+  flex: 0 0 180px;
+  border-right: 1px solid var(--border-soft);
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.vdev-lib-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.vdev-lib-empty { font-size: 11px; color: var(--text-dim); line-height: 1.6; padding: 6px 2px; }
+.vdev-lib-it {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+}
+.vdev-lib-it.sel { border-color: var(--accent); background: var(--accent-soft); }
+.vdev-lib-n {
+  all: unset;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  padding: 6px 4px 6px 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vdev-lib-x {
+  all: unset;
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-dim);
+}
+.vdev-lib-x:hover { background: rgba(229, 83, 75, 0.15); color: var(--danger); }
+.vdev-lib-tip {
+  margin-top: auto;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  padding-top: 10px;
+}
+.vdev-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  padding: 20px;
+}
+.vdev-empty-t { font-size: 16px; font-weight: 700; color: var(--text); }
+.vdev-empty-d { max-width: 560px; font-size: 12px; line-height: 1.8; color: var(--text-dim); }
+.vdev-steps {
+  margin: 4px 0;
+  padding-left: 18px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--text);
+}
+.vdev-empty-ops { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.vdev-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 10px 14px 18px;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vdev-lock {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 5px 10px;
+  border: 1px solid var(--warn, #d29922);
+  border-radius: 8px;
+  color: var(--warn, #d29922);
+  background: var(--bg-panel);
+  font-size: 11.5px;
+}
+.vdev-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vdev-card-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.vdev-card-h.sub { font-size: 11px; font-weight: 600; color: var(--text-dim); margin-top: 6px; }
+.vdev-grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(70px, 110px) 26px; gap: 6px; align-items: center; }
+.vdev-grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 6px; align-items: center; }
+.vdev-grid4 > .vdev-del { justify-self: end; }
+.vdev-grid5 { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: 8px; }
+.vdev-mb6 { margin-bottom: 6px; }
+.vdev-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.vdev-cell > span {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vdev-cell .input { width: 100%; }
+.vdev-cell-check { justify-content: flex-end; }
+.vdev-cell-check input[type="checkbox"] { width: 15px; height: 15px; margin-top: 2px; }
+.vdev-table { overflow-x: auto; }
+.vdev-card > .vdev-grid2 { gap: 8px; }
+.vdev-thead {
+  display: grid;
+  grid-template-columns: 120px 96px minmax(440px, 1fr) 92px 92px 26px;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-dim);
+  padding: 4px 8px;
+  min-width: 470px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+.vdev-thead.cols2 { grid-template-columns: minmax(0, 1fr) 110px 26px; min-width: 0; }
+.vdev-thead.cols4 { grid-template-columns: minmax(90px, 1fr) 110px 84px minmax(80px, 1fr) 26px; min-width: 400px; }
+.vdev-frow {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) 110px 84px minmax(80px, 1fr) 26px;
+  gap: 8px;
+  align-items: center;
+  min-width: 400px;
+  padding: 3px 2px;
+}
+.vdev-srow {
+  display: grid;
+  grid-template-columns: 120px 96px minmax(440px, 1fr) 92px 92px 26px;
+  gap: 8px;
+  align-items: end;
+  min-width: 690px;
+  padding: 3px 2px;
+}
+.vdev-card > .vdev-table { gap: 10px; }
+.vdev-table { display: flex; flex-direction: column; gap: 10px; }
+.vdev-pcell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 82px;
+  min-width: 0;
+}
+.vdev-pcell > span {
+  font-size: 9.5px;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--text-dim) 72%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vdev-pcell .input { width: 100%; padding: 2px 6px; }
+.vdev-pcell.wide { width: 132px; }
+.vdev-checkrow { display: flex; align-items: center; gap: 6px; }
+.vdev-checkrow em { font-style: normal; font-size: 11px; color: var(--text-dim); }
+.vdev-dirty {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: var(--warn, #d29922);
+  vertical-align: 2px;
+}
+.vdev-srow > .input, .vdev-srow > select { width: 100%; min-width: 0; }
+.vdev-params {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.vdev-num { width: 78px !important; min-width: 0; }
+.vdev-w64 { width: 64px; }
+.vdev-w72 { width: 72px; }
+.vdev-w80 { width: 80px; max-width: 100%; }
+.vdev-w88 { width: 88px; max-width: 100%; }
+.vdev-w110 { width: 110px; max-width: 100%; }
+.vdev-w120 { width: 120px; max-width: 100%; }
+.vdev-w160 { width: 160px; max-width: 100%; }
+.vdev-cmdrow .input { min-width: 0; }
+.vdev-mono { font-family: var(--font-mono); }
+.vdev-del {
+  all: unset;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--text-dim);
+  justify-self: center;
+}
+.vdev-del:hover { background: rgba(229, 83, 75, 0.15); color: var(--danger); }
+.vdev-cmdcard {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-x: auto;
+}
+.vdev-cmdrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.vdev-cmdrow .grow { flex: 1 1 120px; min-width: 80px; }
+.vdev-cmdrow.sub { padding-left: 8px; border-left: 2px solid var(--border-soft); }
+
+.vdev-lbl { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.vdev-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vdev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-inset);
+  max-width: 100%;
+  min-width: 0;
+}
+.vdev-chip .input { border: 0; background: transparent; box-shadow: none; padding: 1px 2px; min-width: 0; }
+.vdev-chip .vdev-w80 { flex: 1 1 46px; width: auto; }
+.vdev-chip .vdev-w64 { flex: 0 1 64px; width: auto; }
+.vdev-chip-x {
+  all: unset;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: var(--text-dim);
+}
+.vdev-chip-x:hover { background: rgba(229, 83, 75, 0.15); color: var(--danger); }
+.vdev-none { font-size: 11px; color: var(--text-dim); padding: 2px; }
+.vdev-targets { display: flex; flex-direction: column; gap: 5px; }
+.vdev-netline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 4px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+}
+.vdev-netline .bad { color: var(--danger); }
+.vdev-netcmd {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+}
+.vdev-err { color: var(--danger); font-size: 11.5px; }
+.vdev-hint { font-size: 11px; line-height: 1.7; color: var(--text-dim); }

@@ -11,6 +11,7 @@ mod pipeline;
 mod ring;
 mod serial;
 mod session;
+mod vdev;
 mod xfer;
 
 #[cfg(debug_assertions)]
@@ -198,6 +199,10 @@ pub fn run() {
             demo::demo_start,
             demo::demo_stop,
             demo::demo_running,
+            vdev::vdev_start,
+            vdev::vdev_stop,
+            vdev::vdev_running,
+            vdev::vdev_status,
             session::session_start_record,
             session::session_stop_record,
             session::session_save,

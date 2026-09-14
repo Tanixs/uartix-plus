@@ -44,6 +44,7 @@ import {
   writeCodecFromAiJson,
 } from "./aiActions";
 import { isGroup } from "../controls/commandStore";
+import { ORCH_LIMITS } from "../orchestrator/types";
 
 export interface AppActionResult {
   ok: boolean;
@@ -71,6 +72,12 @@ export const HIGH_ONLY = new Set([
   "sentinel",
   // 考古报告会驱动模型长输出并代表「分析结论」，限脚本高权限
   "xrayReport",
+  // P74c C2：编排器可向设备发数据（等同 send），且写入口会改自动化逻辑
+  "orchestrator",
+  // P74c C2：3D 轴绑定/显示设置决定「数据口径」（看哪三个通道），属配置写入
+  "plot3d",
+  // P78c：虚拟设备占据数据管线（与真实接口互斥、接管发送路由），等同发送权限
+  "vdev",
 ]);
 
 export const APP_ACTION_KINDS = [
@@ -102,6 +109,11 @@ export const APP_ACTION_KINDS = [
   "xrayEvidence",
   "xrayCrack",
   "xrayReport",
+  "orchestratorRead",
+  "orchestrator",
+  "plot3dRead",
+  "plot3d",
+  "vdev",
   "toast",
   "listWidgets",
   "openWidget",
@@ -421,6 +433,18 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
     case "modbus": {
       return runModbusAction(a);
     }
+    case "orchestratorRead": {
+      return orchestratorStatus();
+    }
+    case "orchestrator": {
+      return runOrchestratorAction(a);
+    }
+    case "plot3dRead": {
+      return plot3dStatus();
+    }
+    case "plot3d": {
+      return runPlot3dAction(a);
+    }
     case "xferStart": {
       // path 支持字符串或字符串数组（多文件按队列顺序传输）
       const raw = a.paths ?? a.path;
@@ -437,6 +461,46 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
       const names = paths.map((x) => x.split(/[\\/]/).pop() ?? x);
       const list = names.length > 3 ? `${names.slice(0, 3).join("、")} 等 ${names.length} 个` : names.join("、");
       return `已打开文件传输对话框并预填「${list}」（${proto.toUpperCase()}），请在对话框中确认开始发送`;
+    }
+    case "vdev": {
+      const op = String(a.op ?? "status").trim();
+      const vs = await import("../vdev/vdevStore");
+      switch (op) {
+        case "status": {
+          const snap = vs.getSnapshot();
+          return {
+            running: snap.running,
+            device: snap.device,
+            library: snap.specs.map((x) => ({ name: x.spec.name, desc: x.spec.desc, periodMs: x.spec.periodMs })),
+          };
+        }
+        case "list":
+          return { devices: vs.getSnapshot().specs.map((x) => x.spec.name) };
+        case "create": {
+          // normalizeSpec 抛错由上层执行器统一捕获展示（错误已用户可读中文）
+          const spec = vs.normalizeSpec(a.spec);
+          vs.saveToLibrary(spec);
+          vs.setEditing(spec);
+          void import("../ai/extRuntime").then(({ toast }) => toast(`虚拟设备「${spec.name}」已入库（未运行）`));
+          return { ok: true, name: spec.name, saved: true, hint: "对 AI 说「启动设备」或到虚拟设备工坊点启动" };
+        }
+        case "start": {
+          let spec = a.spec as Record<string, unknown> | undefined;
+          if (!spec && typeof a.name === "string") {
+            const found = vs.getSnapshot().specs.find((x) => x.spec.name === a.name);
+            if (!found) throw new Error(`设备库里没有名为「${a.name}」的设备`);
+            spec = found.spec as unknown as Record<string, unknown>;
+          }
+          if (!spec) throw new Error("start 需要 spec 或 name 参数");
+          const name = await vs.startDevice(spec as never);
+          return name ? { ok: true, running: name } : { ok: false };
+        }
+        case "stop":
+          await vs.stopDevice();
+          return { ok: true };
+        default:
+          throw new Error(`未知 vdev op：${op}（可用 status/list/create/start/stop）`);
+      }
     }
     case "sentinel": {
       const op = String(a.op ?? "status").trim();
@@ -698,4 +762,320 @@ function runModbusAction(a: Record<string, unknown>): unknown {
         `未知 modbus 动作 op：${op || "（空）"}（可选：status / slave.start / slave.stop / slave.configure / slave.write / slave.writeMany / slave.resize / poll.add / poll.remove / poll.clear / poll.configure / poll.start / poll.stop / poll.reset）`,
       );
   }
+}
+
+/* ================= P74c C2：编排器 / 3D 轨迹接入 AI 与 MCP ================= */
+
+/**
+ * 编排器与 3D 的模块延迟加载。
+ * 为什么不静态 import：orchestratorBind 在**模块求值期**就订阅事件源并同步一次 store
+ * （P74 TDZ 白屏的现场）；把它塞进 appActions 的静态图会在既有的
+ * `extRuntime ↔ appActions` 循环上再叠一层求值顺序依赖。动作真被调用时再加载，
+ * 代价只有一次 await，且启动路径零增重（与 mcpServer 延迟加载 appActions 同一策略）。
+ */
+async function orchMods() {
+  const [bind, store, build] = await Promise.all([
+    import("../orchestrator/orchestratorBind"),
+    import("../orchestrator/orchestratorStore"),
+    import("../orchestrator/orchAiBuild"),
+  ]);
+  return { bind, store, build };
+}
+
+/** 块树规模统计（AI 读摘要用；不递归进容器内部细节，只报数量与类型直方图） */
+function orchBlockBrief(nodes: unknown[]): { blocks: number; kinds: Record<string, number> } {
+  let blocks = 0;
+  const kinds: Record<string, number> = {};
+  const walk = (list: unknown[]) => {
+    for (const raw of list) {
+      const n = raw as { kind?: string; then?: unknown[]; els?: unknown[]; body?: unknown[]; children?: unknown[] };
+      if (!n || typeof n.kind !== "string") continue;
+      blocks++;
+      kinds[n.kind] = (kinds[n.kind] ?? 0) + 1;
+      if (Array.isArray(n.then)) walk(n.then);
+      if (Array.isArray(n.els)) walk(n.els);
+      if (Array.isArray(n.body)) walk(n.body);
+      if (Array.isArray(n.children)) walk(n.children);
+    }
+  };
+  walk(nodes);
+  return { blocks, kinds };
+}
+
+/** 编排器只读快照：总开关 / 组（含事件与运行统计）/ 变量现值 / 最近日志 */
+async function orchestratorStatus(): Promise<unknown> {
+  const { bind, store } = await orchMods();
+  const doc = store.getSnapshot().doc;
+  const eng = bind.orchEngine;
+  const events = (g: { events: { kind: string }[] }) => g.events.map((e) => e.kind);
+  return {
+    masterOn: doc.settings.masterOn,
+    runningInstances: eng.runningCount(),
+    groupCount: doc.groups.length,
+    groupCap: ORCH_LIMITS.groupCap,
+    queueCap: ORCH_LIMITS.queueCap,
+    groups: doc.groups.map((g) => {
+      const st = eng.statsOf(g.id);
+      return {
+        id: g.id,
+        name: g.name,
+        enabled: g.enabled,
+        events: events(g),
+        autoTriggers: g.events.length > 0,
+        cooldownMs: g.cooldownMs ?? 0,
+        queuePolicy: g.queuePolicy ?? "dropNew",
+        note: g.note,
+        ...orchBlockBrief(g.children),
+        runs: st.total,
+        fails: st.fail,
+        lastAt: st.lastTs ? new Date(st.lastTs).toISOString() : null,
+        lastDetail: st.lastDetail,
+      };
+    }),
+    vars: eng.listVars().map((v) => ({ name: v.name, type: v.type, value: v.value, default: v.def, persist: v.persist })),
+    recentLogs: eng
+      .getLogs()
+      .slice(-10)
+      .map((l) => ({ at: new Date(l.ts).toISOString(), groupId: l.groupId, phase: l.phase, detail: l.detail })),
+  };
+}
+
+/** 编排器写操作（高权限）：总开关 / 手动跑组 / 组增删改 / 事件与块增删 / 写变量现值 */
+async function runOrchestratorAction(a: Record<string, unknown>): Promise<unknown> {
+  const { bind, store, build } = await orchMods();
+  const eng = bind.orchEngine;
+  const op = String(a.op ?? "").trim();
+  const needLocked = "Operator 只读模式下不能改编排结构（可运行、可查看）";
+  /** groupId 或组名定位（多处复用；找不到就抛，避免静默失败） */
+  const findGroup = () => {
+    const gid = String(a.groupId ?? a.name ?? "").trim();
+    if (!gid) throw new Error("需要 groupId（或组名 name，可用 orchestratorRead 取）");
+    const doc = store.getSnapshot().doc;
+    const g = doc.groups.find((x) => x.id === gid) ?? doc.groups.find((x) => x.name === gid);
+    if (!g) throw new Error(`找不到编排组：${gid}`);
+    return g;
+  };
+  switch (op) {
+    case "enable": {
+      const on = a.on !== false;
+      store.setMasterOn(on);
+      return on
+        ? "编排总开关已打开（组满足事件条件即自动执行）"
+        : "编排总开关已关闭（自动事件与手动运行都停止）";
+    }
+    case "stopAll": {
+      eng.stopAll();
+      return "已停止全部在跑与排队的组实例";
+    }
+    case "run": {
+      const gid = String(a.groupId ?? a.name ?? "").trim();
+      if (!gid) throw new Error("run 需要 groupId（或组名 name）");
+      const doc = store.getSnapshot().doc;
+      const g = doc.groups.find((x) => x.id === gid) ?? doc.groups.find((x) => x.name === gid);
+      if (!g) throw new Error(`找不到编排组：${gid}`);
+      const ok = eng.runManual(g.id);
+      return ok
+        ? `已手动触发「${g.name}」（豁免熔断与静默期；实际执行结果见 recentLogs）`
+        : `触发未生效：组被禁用、不允许手动触发（事件槽非空但未挂「手动」事件块）或队列已满（上限 ${ORCH_LIMITS.queueCap}）`;
+    }
+    case "groupAdd": {
+      const id = store.addGroup(typeof a.name === "string" ? a.name : undefined);
+      if (!id) {
+        throw new Error(
+          store.atGroupCap() ? `编排组已达上限 ${ORCH_LIMITS.groupCap}` : needLocked,
+        );
+      }
+      return { id, msg: "已新建空组（未挂事件 → 只能手动 ▶ 或被其他组调用）" };
+    }
+    case "groupUpdate": {
+      const doc = store.getSnapshot().doc;
+      const g = doc.groups.find((x) => x.id === String(a.groupId ?? "")) ?? doc.groups.find((x) => x.name === String(a.name ?? ""));
+      if (!g) throw new Error("groupUpdate 需要 groupId（可用 orchestratorRead 取）");
+      const patch: Record<string, unknown> = {};
+      if (typeof a.groupName === "string") patch.name = a.groupName;
+      if (typeof a.enabled === "boolean") patch.enabled = a.enabled;
+      if (typeof a.cooldownMs === "number") patch.cooldownMs = a.cooldownMs;
+      if (typeof a.note === "string") patch.note = a.note;
+      if (a.queuePolicy === "dropNew" || a.queuePolicy === "dropOld" || a.queuePolicy === "stopOld") {
+        patch.queuePolicy = a.queuePolicy;
+      }
+      if (!Object.keys(patch).length) throw new Error("没有可更新的字段（groupName/enabled/cooldownMs/note/queuePolicy）");
+      store.updateGroup(g.id, patch as Parameters<typeof store.updateGroup>[1]);
+      return `已更新组「${g.name}」：${Object.keys(patch).join(" / ")}`;
+    }
+    case "groupRemove": {
+      const doc = store.getSnapshot().doc;
+      const g = doc.groups.find((x) => x.id === String(a.groupId ?? ""));
+      if (!g) throw new Error("groupRemove 需要 groupId");
+      store.removeGroup(g.id);
+      toast(`AI 删除编排组「${g.name}」`);
+      return `已删除组「${g.name}」`;
+    }
+    case "eventAdd": {
+      const g = findGroup();
+      if (g.events.length >= 8) throw new Error(`组「${g.name}」事件槽已满（每组事件上限 8 个）`);
+      const { node: ev, applied } = build.buildAiEvent(a.eventKind ?? a.evKind, a);
+      store.addEvent(g.id, ev);
+      const after = store.getSnapshot().doc.groups.find((x) => x.id === g.id);
+      if (!after || after.events.length <= g.events.length) throw new Error(needLocked);
+      const hints = build.pendingHints(ev);
+      return {
+        eventId: ev.id,
+        kind: ev.kind,
+        applied,
+        hints,
+        msg: `已给组「${g.name}」挂上「${ev.kind}」事件${hints.length ? `；注意：${hints.join("、")}` : ""}`,
+      };
+    }
+    case "eventRemove": {
+      const g = findGroup();
+      const evId = String(a.eventId ?? "").trim();
+      if (!evId) throw new Error("eventRemove 需要 eventId（可用 orchestratorRead 取）");
+      const before = g.events.length;
+      store.removeEvent(g.id, evId);
+      const after = store.getSnapshot().doc.groups.find((x) => x.id === g.id);
+      if (!after || after.events.length === before) throw new Error(`未找到事件 ${evId}（或${needLocked}）`);
+      toast(`AI 移除编排事件（组「${g.name}」）`);
+      return `已从组「${g.name}」移除该事件`;
+    }
+    case "blockAdd": {
+      const g = findGroup();
+      const parentId = typeof a.parentId === "string" && a.parentId ? a.parentId : null;
+      const which = a.which === "then" || a.which === "els" ? a.which : undefined;
+      const index = typeof a.index === "number" && Number.isFinite(a.index) ? a.index : null;
+      const { node, applied } = build.buildAiBlock(a.blockKind ?? a.block, a);
+      const id = store.addBlock(g.id, parentId, index, node, which);
+      if (!id) throw new Error(`${needLocked}；或父块不存在/该层已达 200 块上限`);
+      const hints = build.pendingHints(node);
+      return {
+        blockId: id,
+        kind: node.kind,
+        applied,
+        hints,
+        msg: `已在组「${g.name}」${parentId ? "的容器内" : "顶层"}插入「${node.kind}」块${hints.length ? `；注意：${hints.join("、")}` : ""}（未启用——检查后手动启用/挂事件）`,
+      };
+    }
+    case "blockRemove": {
+      const g = findGroup();
+      const blockId = String(a.blockId ?? "").trim();
+      if (!blockId) throw new Error("blockRemove 需要 blockId（可用 orchestratorRead 取）");
+      store.removeBlock(g.id, blockId);
+      toast(`AI 删除编排块（组「${g.name}」）`);
+      return `已从组「${g.name}」删除块 ${blockId}`;
+    }
+    case "varsSet": {
+      const name = String(a.name ?? "").trim();
+      if (!name) throw new Error("varsSet 需要 name 与 value");
+      if (a.value === undefined) throw new Error("varsSet 需要 value");
+      const before = eng.listVars().find((v) => v.name === name);
+      if (!before) throw new Error(`变量不存在：${name}（变量必须先由用户在变量库中声明）`);
+      eng.setVar(name, a.value as number | string | boolean);
+      const after = eng.listVars().find((v) => v.name === name)?.value;
+      return `变量 ${name}：${JSON.stringify(before.value)} → ${JSON.stringify(after)}（注意：会触发 varChanged 事件链）`;
+    }
+    default:
+      throw new Error(
+        `未知 orchestrator 动作 op：${op || "（空）"}（可选：enable / run / stopAll / groupAdd / groupUpdate / groupRemove / eventAdd / eventRemove / blockAdd / blockRemove / varsSet）`,
+      );
+  }
+}
+
+/** 3D 轨迹只读快照：绑定与显示设置 + 校准采样/拟合/六面状态 */
+async function plot3dStatus(): Promise<unknown> {
+  const s3d = await import("../plot3d/plot3dStore");
+  const st = s3d.getSnapshot().settings;
+  const cal = s3d.calibSnapshot();
+  const fit = s3d.getCalibFit();
+  const six = s3d.accel6Snapshot();
+  return {
+    axes: { x: st.axisX, y: st.axisY, z: st.axisZ, bound: !!(st.axisX && st.axisY && st.axisZ) },
+    display: {
+      colorBy: st.colorBy,
+      colorCh: st.colorCh,
+      style: st.style,
+      density: st.density,
+      fadeSec: st.fade,
+      showGrid: st.showGrid,
+      gridDensity: st.gridDensity,
+      follow: st.follow,
+      autoRotate: st.autoRotate,
+      zoomToCursor: st.zoomToCursor,
+      keyFlight: st.keyFlight,
+    },
+    calibMode: st.calibMode,
+    sampling: { capturing: cal.capturing, points: cal.count, cap: s3d.CALIB_CAP, octantCoverage: cal.coverage },
+    fit: fit
+      ? {
+          ok: true,
+          offset: fit.offset,
+          gains: fit.gains,
+          axes: fit.axes,
+          meanR: fit.meanR,
+          /** 半径变异系数（越小越圆；软磁校正效果） */
+          cv: fit.cv,
+          /** 归一化半径残差 RMS（8 参数拟合质量） */
+          rms: fit.rms,
+          samples: fit.n,
+        }
+      : null,
+    accel6: {
+      collecting: six.collecting,
+      currentFace: six.idx,
+      facesDone: six.faces.filter((f) => f !== null).length,
+      minSamples: six.minSamples,
+      result: six.result,
+    },
+  };
+}
+
+/** 3D 写操作（高权限）：轴绑定 / 显示设置 / 校准会话（校准本身是操作态，但入口统一在此） */
+async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
+  const s3d = await import("../plot3d/plot3dStore");
+  const op = String(a.op ?? "").trim();
+  if (op === "bind") {
+    const patch: Record<string, string> = {};
+    for (const k of ["axisX", "axisY", "axisZ", "colorCh"] as const) {
+      if (typeof a[k] === "string") patch[k] = String(a[k]);
+    }
+    if (!Object.keys(patch).length) throw new Error("bind 需要 axisX / axisY / axisZ（通道 id，可用 get_plot_stats 或 listChannels 取）");
+    s3d.setSetting(patch as Parameters<typeof s3d.setSetting>[0]);
+    const st = s3d.getSnapshot().settings;
+    return {
+      axes: { x: st.axisX, y: st.axisY, z: st.axisZ, bound: !!(st.axisX && st.axisY && st.axisZ) },
+      msg: "已更新 3D 轴绑定（换绑定会清空校准采样与拟合结果）",
+    };
+  }
+  if (op === "set") {
+    const allowed = ["colorBy", "style", "density", "fade", "gridDensity", "showGrid", "autoRotate", "follow", "keyFlight", "zoomToCursor"] as const;
+    const patch: Record<string, unknown> = {};
+    for (const k of allowed) if (a[k] !== undefined) patch[k] = a[k];
+    if (!Object.keys(patch).length) throw new Error(`set 需要至少一个字段（${allowed.join(" / ")}）`);
+    s3d.setSetting(patch as Parameters<typeof s3d.setSetting>[0]);
+    return `已更新 3D 显示设置：${Object.keys(patch).join(" / ")}`;
+  }
+  if (op === "calib") {
+    const sub = String(a.calib ?? "").trim();
+    switch (sub) {
+      case "enter":
+        s3d.setSetting({ calibMode: true });
+        return "已进入椭球校准模式（轨迹隐藏、切换为点云采样；需先在画布上操作时用户可见）";
+      case "exit":
+        s3d.setSetting({ calibMode: false });
+        return "已退出椭球校准模式";
+      case "start":
+        s3d.startCalibCapture();
+        return "已开始椭球采样（让设备在八个姿态上缓慢转动，覆盖度越高拟合越准）";
+      case "stop":
+        s3d.stopCalibCapture();
+        return `已停止采样，共 ${s3d.calibSnapshot().count} 点`;
+      case "clear":
+        s3d.clearCalib();
+        return "已清空校准采样与拟合结果";
+      case "solve6":
+        return s3d.accel6Solve(typeof a.gRef === "number" ? a.gRef : 1);
+      default:
+        throw new Error(`未知 calib 子动作：${sub || "（空）"}（可选：enter / exit / start / stop / clear / solve6）`);
+    }
+  }
+  throw new Error(`未知 plot3d 动作 op：${op || "（空）"}（可选：bind / set / calib）`);
 }

@@ -123,6 +123,9 @@ pub fn open_net(
     if crate::session::is_playing() {
         return Err("回放进行中，请先停止回放再打开网络接口".into());
     }
+    if crate::vdev::running() {
+        return Err("虚拟设备运行中：请先停止虚拟设备再打开网络接口".into());
+    }
     if state.run_flag.load(Ordering::SeqCst) {
         return Err("网络接口已打开，请先关闭当前连接".into());
     }

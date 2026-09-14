@@ -87,6 +87,7 @@ export const MODBUS_TCP = "modbus-tcp";
 export const NMEA_0183 = "nmea-0183";
 export const CSV_DELIM = "csv-delim";
 export const WIT_IMU = "wit-imu";
+export const VDEV_FURNACE = "vdev-furnace";
 
 function v7Tpl(
   fidVal: number,
@@ -749,5 +750,32 @@ export const PRESETS: PresetDef[] = [
         ]),
       ];
     },
+  },
+  {
+    key: VDEV_FURNACE,
+    name: "虚拟设备·温控炉",
+    tag: "教学",
+    desc:
+      "配合「虚拟设备工坊」的温控炉设备（或任何按此帧格式发射的源）：TM + 温度 int16 小端×0.1℃ + 加热档 uint8 + sum8，6 字节定长。" +
+      "双机教学：A 机启动温控炉并开 UDP/TCP/串口发射，B 机导入本预设 + 对应接口接入即可复现曲线。",
+    build: () => [
+      {
+        id: nid("vdev"),
+        name: "温控炉·遥测帧",
+        color: "#f0883e",
+        enabled: true,
+        boundary: {
+          mode: "fixedLength",
+          headerBytes: [0x54, 0x4d],
+          fixedLength: 6,
+          maxLength: 16,
+        },
+        checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
+        fields: [
+          f("温度", "data", 2, "int16", C_DATA, { scale: 0.1, unit: "℃" }),
+          f("加热档", "data", 4, "uint8", C_LEN, { unit: "on/off" }),
+        ],
+      },
+    ],
   },
 ];

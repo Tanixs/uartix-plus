@@ -102,6 +102,24 @@ const IfaceMenu = () => {
   );
 };
 
+/** 纯浏览器（npm run dev 直开）没有 Tauri 内核，getCurrentWindow() 构造即抛；降级为 no-op 桩以便浏览器验证 UI。tauri 环境行为不变 */
+function getWinSafe(): ReturnType<typeof getCurrentWindow> {
+  try {
+    return getCurrentWindow();
+  } catch {
+    const p = <T,>(v: T): Promise<T> => Promise.resolve(v);
+    return {
+      onResized: () => p(() => {}),
+      isMaximized: () => p(false),
+      startDragging: () => p(undefined),
+      toggleMaximize: () => p(undefined),
+      setAlwaysOnTop: () => p(undefined),
+      minimize: () => p(undefined),
+      close: () => p(undefined),
+    } as unknown as ReturnType<typeof getCurrentWindow>;
+  }
+}
+
 export function TitleBar({
   onOpenSettings,
   onOpenHelp,
@@ -111,7 +129,7 @@ export function TitleBar({
   onOpenHelp: () => void;
   onOpenAi: () => void;
 }) {
-  const win = getCurrentWindow();
+  const win = getWinSafe();
   const [maxed, setMaxed] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [ver, setVer] = useState<string | null>(null);
@@ -163,7 +181,7 @@ export function TitleBar({
       </div>
       <IfaceMenu />
       <div className="tb-spacer" data-tauri-drag-region />
-      <button className="tb-btn" title="AI 助手 (Ctrl+K)" onClick={onOpenAi}>
+      <button className="tb-btn" title="AI 助手 (Ctrl+K)" data-tour="ai" onClick={onOpenAi}>
         <IconSparkle />
       </button>
       <button className="tb-btn" title="设置" onClick={onOpenSettings}>

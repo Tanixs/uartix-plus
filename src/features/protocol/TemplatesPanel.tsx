@@ -341,7 +341,7 @@ export function TemplatesPanel() {
             {tx("＋ 新建", "+ New")}
           </button>
           <div className="tpl-preset-wrap">
-          <button className="btn tpl-preset-btn" title={tx("从预设导入协议副本（可反复添加，改崩了删除副本再添加）", "Import editable copies from presets (add repeatedly; delete a broken copy and re-import)")} onClick={() => setPMenu((v) => !v)}>
+          <button className="btn tpl-preset-btn" data-tour="preset" title={tx("从预设导入协议副本（可反复添加，改崩了删除副本再添加）", "Import editable copies from presets (add repeatedly; delete a broken copy and re-import)")} onClick={() => setPMenu((v) => !v)}>
             {tx("＋ 预设", "+ Preset")} <IconChevron size={11} dir="down" />
           </button>
           {pMenu && (
@@ -803,6 +803,7 @@ export function TemplatesPanel() {
         <div className="tpl-demo">
           <button
             className={`btn ${s.demoRunning ? "danger" : ""}`}
+            data-tour="demo"
             onClick={toggleDemo}
           >
             {s.demoRunning ? tx("停止演示源", "Stop demo source") : tx("启动演示源", "Start demo source")}

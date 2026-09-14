@@ -130,12 +130,20 @@ export function amplitudeSpectrum(
   v: number[],
   opts: SpectrumOpts,
 ): SpectrumResult | null {
-  const n = opts.points;
-  if (n < 4 || (n & (n - 1)) !== 0) return null;
+  const req = opts.points;
+  if (req < 4 || (req & (req - 1)) !== 0) return null;
   const m = Math.min(t.length, v.length);
   if (m < 2) return null;
-  // 局部平均率：末尾 min(m, n) 个原始点的跨度（突发数据下全跨度平均会失真）
-  const take = Math.min(m, n);
+  // 实际点数不足请求点数时，降到 ≤m 的最大 2 的幂（下限 8）：分析窗永远只覆盖
+  // 真实数据，fs 保持原始采样率量级。此前把 m 个点线性插值到 n 点，fs 被插值率
+  // 虚高数十倍（1Hz 数据报出 64Hz），真实频段被压扁在频轴左侧无法判读。
+  let n = req;
+  if (m < n) {
+    n = 8;
+    while (n * 2 <= m) n <<= 1;
+  }
+  if (m < n) return null;
+  const take = n;
   const localSpan = t[m - 1] - t[m - take];
   if (!(localSpan > 0)) return null;
   const fs = ((take - 1) / localSpan) * 1000;

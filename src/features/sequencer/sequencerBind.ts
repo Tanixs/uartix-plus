@@ -12,7 +12,7 @@
  */
 
 import * as runner from "./runner";
-import type { RunProgress, SendPayload, Suite } from "./types";
+import type { ResolvedSend, RunProgress, SendPayload, Suite } from "./types";
 import { onFrames } from "../../ipc/framesBus";
 import * as panelActivity from "../../panels/panelActivity";
 import * as serialStore from "../serial/serialStore";
@@ -31,8 +31,11 @@ function codecById(id: string): Codec | undefined {
   return def ? userCodecToCodec(def) : undefined;
 }
 
-/** 载荷 → 实际发送内容。null = 解析失败（引擎记 fail） */
-function resolveSend(payload: SendPayload): { mode: "ascii" | "hex"; text: string } | null {
+/** 载荷 → 实际发送内容。null = 解析失败（引擎记 fail）。
+ *  自动编排器（P74）复用同一实现（hex/ascii/factory 分支）；cmd 分支由编排器
+ *  自行处理以接入编排器变量插值。
+ *  B4e：factory 一次组出多帧 → 透传 `{ frames }`（空帧过滤；单帧仍走 text，兼容旧调用方）。 */
+export function resolveSend(payload: SendPayload): ResolvedSend | null {
   if (payload.type === "hex") {
     return payload.text.trim() ? { mode: "hex", text: payload.text } : null;
   }
@@ -46,15 +49,17 @@ function resolveSend(payload: SendPayload): { mode: "ascii" | "hex"; text: strin
     // 变量占位 {var} 与控制画布同语义；脚本命令暂不支持（v2：经 scriptRunner 执行）
     return { mode: item.sendMode, text: variableStore.resolveVars(item.template) };
   }
-  // factory：单帧直接组帧发送；多帧需逐步骤表达（v2 评估 sendFrames 步骤）
+  // factory：单帧走 text（旧语义）；多帧透传（B4e）
   try {
     const spec = payload.spec as { codecId?: string; vals?: Record<string, string> } | undefined;
     if (!spec?.codecId) return null;
     const codec = codecById(spec.codecId);
     if (!codec) return null;
     const r = codec.build(spec.vals ?? {});
-    if (r.frames.length !== 1 || !r.frames[0].trim()) return null;
-    return { mode: "hex", text: r.frames[0] };
+    const frames = r.frames.map((f) => f.trim()).filter(Boolean);
+    if (frames.length === 0) return null;
+    if (frames.length === 1) return { mode: "hex", text: frames[0] };
+    return { mode: "hex", frames };
   } catch {
     return null;
   }
@@ -88,6 +93,8 @@ export function getRunProgress(): RunProgress | null {
 
 function setProgress(p: RunProgress) {
   progress = p;
+  // C7：跑完的套件保留最近一次结果（切走再切回不丢视图；内存态不落盘）
+  if (p.status === "finished" && p.result) sequencerStore.recordResult(p.suiteId, p.result);
   runListeners.forEach((l) => l());
 }
 

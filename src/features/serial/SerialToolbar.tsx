@@ -65,6 +65,7 @@ export function SerialToolbar() {
     <div className="toolbar-group">
       <button
         className={`connect-btn ${s.status}`}
+        data-tour="connect"
         onClick={onConnect}
         title={
           s.status === "connected"

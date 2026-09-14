@@ -19,13 +19,21 @@ describe("mcpServerConfig", () => {
 });
 
 describe("TOOL_DEFS", () => {
-  it("8 个工具且名字唯一、schema 皆为 object", () => {
-    expect(TOOL_DEFS.length).toBe(8);
+  it("10 个工具且名字唯一、schema 皆为 object", () => {
+    expect(TOOL_DEFS.length).toBe(10);
     const names = TOOL_DEFS.map((t) => t.name);
-    expect(new Set(names).size).toBe(8);
+    expect(new Set(names).size).toBe(10);
     for (const t of TOOL_DEFS) {
       expect(t.inputSchema.type).toBe("object");
       expect(t.description.length).toBeGreaterThan(8);
+    }
+  });
+  it("编排器/3D 只读工具无入参且名字在列", () => {
+    for (const n of ["get_orchestrator", "get_plot3d"]) {
+      const t = TOOL_DEFS.find((x) => x.name === n);
+      expect(t).toBeDefined();
+      expect(t?.inputSchema.properties).toEqual({});
+      expect(t?.inputSchema.required).toBeUndefined();
     }
   });
   it("send 必填 text；run_sequence 必填 json", () => {

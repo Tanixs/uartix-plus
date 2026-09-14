@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { tx, useLocale } from "../../i18n/strings";
 import { IconShield, IconBell, IconPulse, IconTrash, IconChevron, IconSparkle } from "../../shared/icons";
 import * as store from "./sentinelStore";
-import { playAlertTone } from "./sentinelSound";
 import type { AlertKind, AlertLevel, SentinelAlert } from "./sentinelEngine";
 import { requestOpenPanel } from "../ai/appBus";
 import * as plotStore from "../plot/plotStore";
@@ -331,20 +330,6 @@ export function SentinelPanel() {
           <IconBell />
           {s.cfg.sound ? tx("提示音", "Sound") : tx("静音", "Muted")}
         </button>
-        {s.cfg.sound && cfgOpen && (
-          <label className="snt-f" title={tx("提示音音量", "Alert volume")}>
-            {tx("音量", "Volume")}
-            <input
-              type="range"
-              min={0}
-              max={100}
-              value={s.cfg.volume}
-              onChange={(e) => store.setVolume(Number(e.target.value))}
-              onMouseUp={() => playAlertTone("warn", false, s.cfg.volume)}
-              style={{ width: 70, accentColor: "var(--accent)" }}
-            />
-          </label>
-        )}
         <span className="snt-foot-info">
           {tx(`帧 ${s.totals.frames} · 错 ${s.totals.errors}`, `frames ${s.totals.frames} · errors ${s.totals.errors}`)}
           {s.conn && s.silenceMs >= 1000 && (
@@ -416,6 +401,7 @@ export function SentinelFloat() {
       const d = dragRef.current;
       dragRef.current = null;
       if (d?.moved) {
+        suppressClick.current = true;
         try {
           localStorage.setItem(FLOAT_POS_KEY, JSON.stringify(posRef.current));
         } catch {
@@ -441,6 +427,7 @@ export function SentinelFloat() {
         style={{ background: s.cfg.enabled ? `conic-gradient(${color} 0 ${s.health}%, var(--bg-inset) ${s.health}% 100%)` : undefined }}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
+          suppressClick.current = false;
           dragRef.current = { sx: e.clientX, sy: e.clientY, or: pos.right, ob: pos.bottom, moved: false };
         }}
         onClick={() => {

@@ -19,6 +19,9 @@ import { ModbusWorkbench } from "../features/modbus/ModbusWorkbench";
 import { SequencerPanel } from "../features/sequencer/SequencerPanel";
 import { SentinelPanel } from "../features/sentinel/SentinelPanel";
 import { SpectrumPanel } from "../features/plot/SpectrumPanel";
+import { Plot3D } from "../features/plot3d/Plot3D";
+import { OrchestratorPanel } from "../features/orchestrator/OrchestratorPanel";
+import { VdevPanel } from "../features/vdev/VdevPanel";
 import { ExtPanelHost } from "../features/ai/ExtPanel";
 
 /** 面板页签名（语言感知，P33 i18n）；页签重挂靠 App 的 retitlePanels（locale 变化时 setTitle） */
@@ -42,6 +45,9 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     sequencer: pick("测试序列器", "Sequencer"),
     sentinel: pick("哨兵", "Sentinel"),
     spectrum: pick("频谱分析", "Spectrum"),
+    plot3d: pick("3D 轨迹", "3D Trajectory"),
+    orchestrator: pick("自动编排器", "Orchestrator"),
+    vdev: pick("虚拟设备工坊", "Virtual Devices"),
   };
 };
 
@@ -70,6 +76,9 @@ const MModbus = memo(ModbusWorkbench);
 const MSequencer = memo(SequencerPanel);
 const MSentinel = memo(SentinelPanel);
 const MSpectrum = memo(SpectrumPanel);
+const MPlot3D = memo(Plot3D);
+const MOrchestrator = memo(OrchestratorPanel);
+const MVdev = memo(VdevPanel);
 
 export const panelComponents = {
   templates: () => (
@@ -150,6 +159,21 @@ export const panelComponents = {
   spectrum: () => (
     <ErrorBoundary label={panelTitleOf("spectrum")}>
       <MSpectrum />
+    </ErrorBoundary>
+  ),
+  plot3d: () => (
+    <ErrorBoundary label={panelTitleOf("plot3d")}>
+      <MPlot3D />
+    </ErrorBoundary>
+  ),
+  orchestrator: () => (
+    <ErrorBoundary label={panelTitleOf("orchestrator")}>
+      <MOrchestrator />
+    </ErrorBoundary>
+  ),
+  vdev: () => (
+    <ErrorBoundary label={panelTitleOf("vdev")}>
+      <MVdev />
     </ErrorBoundary>
   ),
   aiExtPanel: (props: { params?: { extId?: string } }) => (

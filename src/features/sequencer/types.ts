@@ -13,6 +13,15 @@ export type SendPayload =
   | { type: "cmd"; cmdId: string }
   | { type: "factory"; spec: Record<string, unknown> };
 
+/**
+ * resolveSend 的解析结果（B4e 多帧扩展）：
+ * - 单帧 `{ mode, text }`（既有全部路径，行为零变化）；
+ * - 指令工厂一次组出多帧 → `{ mode: "hex", frames }`（空帧已过滤，按序逐帧发送）。
+ */
+export type ResolvedSend =
+  | { mode: "ascii" | "hex"; text: string }
+  | { mode: "hex"; frames: string[] };
+
 /** 断言/字段匹配共用的比较运算符。changed = 与步骤开始前的值不同 */
 export type CmpOp = "eq" | "ne" | "gt" | "lt" | "ge" | "le" | "changed" | "approx";
 
@@ -132,6 +141,12 @@ export interface RunResult {
 /** 引擎运行期的进度快照（UI 订阅用，T3 接 store） */
 export interface RunProgress {
   status: "running" | "awaitingStep" | "finished";
+  /**
+   * 本次运行的单调序号（P74c A7）。每次 startRun 递增，同一次运行的所有
+   * 进度事件共享同一 runId——调用方（如编排器的 runSuite 块）靠它精确认领
+   * 「自己那次运行」的 finished 事件，不再依赖对象身份比较。
+   */
+  runId: number;
   suiteId: string;
   /** 当前步骤 id（awaitingStep 时为刚完成的那步） */
   currentStepId: string | null;

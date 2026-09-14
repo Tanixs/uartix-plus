@@ -77,6 +77,14 @@ pub struct SerialManager {
 }
 
 impl SerialManager {
+    /// 串口是否已连接（vdev 互斥检查等跨模块用）
+    pub fn serial_connected(&self) -> bool {
+        self.shared
+            .lock()
+            .map(|s| s.port.is_some())
+            .unwrap_or(false)
+    }
+
     pub fn new() -> Self {
         Self {
             ctx: Arc::new(IngestCtx {
@@ -234,6 +242,10 @@ pub async fn open_port(
     if crate::session::is_playing() {
         return Err("回放进行中，请先停止回放再打开串口".into());
     }
+    // 虚拟设备与真实接口互斥：命令会被 vdev 拦截，绝不能混流
+    if crate::vdev::running() {
+        return Err("虚拟设备运行中：请先停止虚拟设备再连接真实接口".into());
+    }
     {
         let shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
         if shared.port.is_some() {
@@ -329,6 +341,17 @@ pub(crate) async fn route_send(
     ble: &crate::ble::BleManager,
     bytes: &[u8],
 ) -> Result<(), String> {
+    // 虚拟设备运行时接管发送（像真设备收指令）：命中命令 → 改输入量/排队应答；
+    // 未命中也按已消费处理。TX 照常入计数与日志（控制台/录制可见）。
+    match crate::vdev::try_send(bytes) {
+        Ok(true) => {
+            serial.tx_total.fetch_add(bytes.len() as u64, Ordering::SeqCst);
+            crate::busevt::send_tx(app, now_ms(), bytes);
+            return Ok(());
+        }
+        Ok(false) => {}
+        Err(e) => return Err(e),
+    }
     match crate::net::try_send(net, bytes) {
         Ok(true) => {
             crate::net::notify_tx(app, net, bytes);

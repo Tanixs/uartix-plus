@@ -357,6 +357,115 @@ export const IconBell = () =>
 export const IconPulse = () =>
   svg(<path d="M3 12h4l2.5-6 4 12 2.5-6h5" />);
 
+/* ================= P74c：通用小图标（统一 lucide 风格，替代字符图标） ================= */
+
+/** 拖拽把手：六点网格 */
+export const IconGrip = () =>
+  svg(
+    <>
+      <circle cx="9" cy="6" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="6" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="12" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+/** 复制 */
+export const IconCopy = () =>
+  svg(
+    <>
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </>,
+  );
+
+/** 关闭 / 删除 */
+export const IconClose = () =>
+  svg(<path d="M6 6l12 12M18 6L6 18" />);
+
+/** 新增 */
+export const IconPlus = () =>
+  svg(<path d="M12 5v14M5 12h14" />);
+
+export const IconArrowUp = () =>
+  svg(
+    <>
+      <path d="M12 20V4" />
+      <path d="M6 10l6-6 6 6" />
+    </>,
+  );
+
+export const IconArrowDown = () =>
+  svg(
+    <>
+      <path d="M12 4v16" />
+      <path d="M18 14l-6 6-6-6" />
+    </>,
+  );
+
+/** 计时器 / 时钟（组静默期、时间条用） */
+export const IconClock = () =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5V12l3 2" />
+    </>,
+  );
+
+/** 列表 / 运行日志 */
+export const IconLogs = () =>
+  svg(
+    <>
+      <path d="M4 5h10M4 10h16M4 15h16M4 20h10" />
+    </>,
+  );
+
+/** 队列（运行中实例徽标） */
+export const IconQueue = () =>
+  svg(
+    <>
+      <path d="M4 6h16M4 12h16M4 18h10" />
+      <circle cx="19" cy="18" r="2" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+/** 单选：选中实心点 */
+export const IconDot = () =>
+  svg(<circle cx="12" cy="12" r="4.5" fill="currentColor" stroke="none" />);
+
+/** 单选：未选中空圈（与 IconDot 同尺寸，避免行宽跳动） */
+export const IconCircle = () =>
+  svg(<circle cx="12" cy="12" r="4.5" />);
+
+/** 椭球校准模式标记 */
+export const IconTarget = () =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+    </>,
+  );
+
+/** 重拟合 / 刷新 */
+export const IconRotate = () =>
+  svg(
+    <>
+      <path d="M20 12a8 8 0 1 1-2.4-5.7" />
+      <path d="M20 4v4.5h-4.5" />
+    </>,
+  );
+
+/** 重命名 / 编辑（feather edit-2 造型，lucide pencil 同源） */
+export const IconEdit = () =>
+  svg(<path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />);
+
+/** 完成 / 已采集 */
+export const IconCheck = () =>
+  svg(<path d="M4.5 12.5l5 5 10-11" />);
+
 export const WIDGET_ICONS: Record<ControlType, React.ReactNode> = {
   slider: IconSlider(),
   button: IconButton(),

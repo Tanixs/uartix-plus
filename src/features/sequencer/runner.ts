@@ -22,6 +22,7 @@ import {
   type GroupStep,
   type RunProgress,
   type RunResult,
+  type ResolvedSend,
   type SendPayload,
   type SendStep,
   type Step,
@@ -37,8 +38,8 @@ import {
 export interface SequencerDeps {
   /** 最终发送（与 serialStore.sendData 同参） */
   send(mode: "ascii" | "hex", text: string): void | Promise<void>;
-  /** 把 send 载荷解析成实际发送内容；null = 解析失败（如 cmdId 不存在） */
-  resolveSend(payload: SendPayload): { mode: "ascii" | "hex"; text: string } | null;
+  /** 把 send 载荷解析成实际发送内容；null = 解析失败（如 cmdId 不存在）。B4e：factory 可返回多帧 */
+  resolveSend(payload: SendPayload): ResolvedSend | null;
   /** 订阅解码后帧流；返回取消订阅函数 */
   onFrames(cb: (rows: FrameRow[]) => void): () => void;
   getVar(name: string): number | string | undefined;
@@ -72,6 +73,8 @@ interface FrameArrival {
 
 interface Ctx {
   deps: SequencerDeps;
+  /** 本次运行序号（P74c A7）：进度事件带回，调用方据此认领自己的运行 */
+  runId: number;
   suiteId: string;
   token: { cancelled: boolean };
   failFast: boolean;
@@ -86,6 +89,10 @@ interface Ctx {
   resultCount: number;
   /** changed 断言的基准：每个变量上次被断言到的值 */
   lastAsserted: Map<string, number | string>;
+  /** 正在执行的步骤（进度心跳里展示"当前卡在哪一步"） */
+  currentStepId: string | null;
+  /** 上次进度心跳时刻（200ms 节流，B5：结果树随跑随刷而非全程冻结） */
+  lastPush: number;
   onProgress?: RunOptions["onProgress"];
 }
 
@@ -96,6 +103,9 @@ const capDetail = (s: string) =>
 
 let active: { ctx: Ctx; suiteId: string } | null = null;
 
+/** 运行序号（P74c A7）：同一次运行的 running/finished 进度共享同一 runId */
+let runSeq = 0;
+
 export function isRunning(): boolean {
   return active !== null;
 }
@@ -103,9 +113,11 @@ export function isRunning(): boolean {
 export function startRun(suite: Suite, deps: SequencerDeps, opts: RunOptions = {}): StartResult {
   if (active) return { ok: false, error: "已有序列在运行，先停止当前序列" };
 
+  const runId = ++runSeq;
   const token = { cancelled: false };
   const ctx: Ctx = {
     deps,
+    runId,
     suiteId: suite.id,
     token,
     failFast: opts.failFast ?? suite.failFast,
@@ -116,6 +128,8 @@ export function startRun(suite: Suite, deps: SequencerDeps, opts: RunOptions = {
     stack: [],
     resultCount: 0,
     lastAsserted: new Map(),
+    currentStepId: null,
+    lastPush: 0,
     onProgress: opts.onProgress,
   };
 
@@ -153,6 +167,7 @@ export function startRun(suite: Suite, deps: SequencerDeps, opts: RunOptions = {
     };
     ctx.onProgress?.({
       status: "finished",
+      runId,
       suiteId: suite.id,
       currentStepId: null,
       results: topResults,
@@ -173,7 +188,7 @@ export function startRun(suite: Suite, deps: SequencerDeps, opts: RunOptions = {
     done,
   };
   active = { ctx, suiteId: suite.id };
-  ctx.onProgress?.({ status: "running", suiteId: suite.id, currentStepId: null, results: topResults, result: null });
+  ctx.onProgress?.({ status: "running", runId, suiteId: suite.id, currentStepId: null, results: topResults, result: null });
   return { ok: true, handle };
 }
 
@@ -246,6 +261,8 @@ async function runSteps(steps: Step[], ctx: Ctx, depth: number): Promise<boolean
     }
 
     const startedAt = ctx.deps.now();
+    ctx.currentStepId = step.id;
+    heartbeat(ctx);
     let result: StepResult;
     try {
       result = await execStep(step, ctx, startedAt, depth);
@@ -265,6 +282,7 @@ async function runSteps(steps: Step[], ctx: Ctx, depth: number): Promise<boolean
     if (ctx.stepMode && !ctx.token.cancelled) {
       ctx.onProgress?.({
         status: "awaitingStep",
+        runId: ctx.runId,
         suiteId: ctx.suiteId,
         currentStepId: step.id,
         results: ctx.stack[0],
@@ -305,6 +323,24 @@ function skippedResult(step: Step): StepResult {
   };
 }
 
+/** 进度心跳（B5）：每步开始/结果落树后调用，200ms 节流。
+ *  此前只在 finished/running/awaitingStep 三个节点广播，长序列运行全程
+ *  结果树冻结在「等待第一个步骤完成…」，用户完全看不到跑到哪一步。 */
+function heartbeat(ctx: Ctx): void {
+  if (!ctx.onProgress) return;
+  const now = ctx.deps.now();
+  if (now - ctx.lastPush < 200) return;
+  ctx.lastPush = now;
+  ctx.onProgress({
+    status: "running",
+    runId: ctx.runId,
+    suiteId: ctx.suiteId,
+    currentStepId: ctx.currentStepId,
+    results: ctx.stack[0],
+    result: null,
+  });
+}
+
 function pushResult(ctx: Ctx, r: StepResult) {
   const list = ctx.stack[ctx.stack.length - 1];
   // 结果树节点上限：超大循环只计数不记录，防内存失守
@@ -324,6 +360,7 @@ function pushResult(ctx: Ctx, r: StepResult) {
   }
   ctx.resultCount++;
   list.push(r);
+  heartbeat(ctx);
 }
 
 async function execStep(step: Step, ctx: Ctx, startedAt: number, depth: number): Promise<StepResult> {
@@ -352,6 +389,17 @@ async function execSend(step: SendStep, ctx: Ctx, base: ResultBase): Promise<Ste
     return { ...base, status: "fail", durationMs: 0, detail: "发送内容解析失败（命令不存在或载荷无效）" };
   }
   try {
+    if ("frames" in resolved) {
+      // B4e：factory 多帧按序逐帧发送（序列器 UI 暂不暴露多帧，此路径为兼容预留）
+      for (const f of resolved.frames) await ctx.deps.send("hex", f);
+      const bytes = resolved.frames.reduce((a, f) => a + f.replace(/\s+/g, "").length / 2, 0);
+      return {
+        ...base,
+        status: "pass",
+        durationMs: ctx.deps.now() - base.startedAt,
+        detail: `HEX×${resolved.frames.length} 共 ${bytes} 字节`,
+      };
+    }
     await ctx.deps.send(resolved.mode, resolved.text);
     return {
       ...base,

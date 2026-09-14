@@ -170,6 +170,45 @@ describe("amplitudeSpectrum", () => {
     expect(amplitudeSpectrum([0, 1], [0, 1], { points: 1000, window: "rect" })).toBeNull();
     expect(amplitudeSpectrum([0, 1], [0, 1], { points: 2, window: "rect" })).toBeNull();
   });
+
+  it("实际点数不足时自动降点：fs 保持原始采样率量级（不虚增）", () => {
+    // 17 点 @100Hz（12.5Hz 正弦），请求 1024 点 → 降到 16 点，窗内 fs=100Hz
+    const t: number[] = [];
+    const v: number[] = [];
+    for (let i = 0; i < 17; i++) {
+      t.push(i * 10);
+      v.push(Math.sin((2 * Math.PI * 12.5 * i) / 100));
+    }
+    const sp = amplitudeSpectrum(t, v, { points: 1024, window: "rect" });
+    expect(sp).not.toBeNull();
+    expect(sp!.n).toBe(16);
+    expect(sp!.fs).toBeCloseTo(100, 6);
+    expect(sp!.binHz).toBeCloseTo(100 / 16, 6);
+    let best = 0;
+    for (let k = 1; k < sp!.mags.length; k++) {
+      if (sp!.mags[k] > sp!.mags[best]) best = k;
+    }
+    expect(best).toBe(2); // 12.5Hz / 6.25Hz
+    expect(sp!.mags[2]).toBeCloseTo(1, 2);
+  });
+
+  it("降点下限 8 点：15 个点请求 4096 → 用 8 点", () => {
+    const t: number[] = [];
+    const v: number[] = [];
+    for (let i = 0; i < 15; i++) {
+      t.push(i * 10);
+      v.push(i);
+    }
+    const sp = amplitudeSpectrum(t, v, { points: 4096, window: "rect" });
+    expect(sp).not.toBeNull();
+    expect(sp!.n).toBe(8);
+  });
+
+  it("少于 8 点返回 null（与面板 insufficient 门控一致）", () => {
+    const t = [0, 10, 20, 30, 40];
+    const v = [1, 2, 3, 4, 5];
+    expect(amplitudeSpectrum(t, v, { points: 1024, window: "rect" })).toBeNull();
+  });
 });
 
 describe("histogram", () => {

@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { Section } from "../../shared/Section";
 import { tx, useLocale } from "../../i18n/strings";
+import * as tourStore from "../tour/tourStore";
+import { TOUR_STEPS } from "../tour/tourSteps";
+import { IconPlay } from "../../shared/icons";
 
 export function HelpModal({ onClose }: { onClose: () => void }) {
   useLocale();
@@ -10,6 +13,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
     { key: "panels", label: tx("面板总览", "Panels Overview") },
     { key: "ai", label: tx("AI 助手详解", "AI Assistant Guide") },
     { key: "canvas", label: tx("协议画布教程", "Protocol Canvas Guide") },
+    { key: "plot3d", label: tx("3D 轨迹面板", "3D Trajectory Panel") },
+    { key: "orchestrator", label: tx("自动编排器", "Orchestrator") },
     { key: "script", label: tx("脚本命令详解", "Scripting Guide") },
     { key: "keys", label: tx("快捷键与技巧", "Shortcuts & Tips") },
     { key: "export", label: tx("导出文件格式", "Export Formats") },
@@ -30,12 +35,24 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
           <div className="set-content help-content">
             {tab === "start" && (
               <>
+                <div className="help-tour-row">
+                  <button
+                    className="btn primary"
+                    onClick={() => {
+                      onClose();
+                      tourStore.start(TOUR_STEPS);
+                    }}
+                  >
+                    <IconPlay />
+                    {tx("启动交互式教学（分步带你走通主流程）", "Start the guided tour (walks the main flow step by step)")}
+                  </button>
+                </div>
                 <p><b>Uartix+</b> 是一台跑在电脑上的可视化上位机：定义协议 → 自动筛选有效帧 → 在干净数据上查看、绘图并反向控制设备。</p>
                 <Section title="五步上手">
                   <ol className="help-ol">
-                    <li>标题条选择<code>数据接口</code>（串口 / TCP 客户端 / TCP 服务端 / UDP），在工具栏完成参数设置后点击<code>连接</code>。</li>
+                    <li>标题条选择<code>数据接口</code>（串口 / TCP 客户端 / TCP 服务端 / UDP / 蓝牙 BLE），在工具栏完成参数设置后点击<code>连接</code>。</li>
                     <li>左侧<code>协议模板</code>面板点<code>＋ 预设</code>，导入一个协议（如 匿名 V7、维特 WIT、Modbus RTU / TCP）；也可<code>＋ 新建</code>自己画。</li>
-                    <li>没有设备？点左下角<code>启动演示源</code>，软件会生成混合协议数据流。</li>
+                    <li>没有设备？点左下角<code>启动演示源</code>，软件会生成混合协议数据流；想扮演一台有脾气的具体设备（温漂/丢帧/命令应答，还能 UDP/TCP/串口对外发），开<code>虚拟设备工坊</code>面板。</li>
                     <li>中央<code>帧画布</code>查看每帧的字节结构（绿色=字段、橙=帧头、粉=校验），悬停可看数值。</li>
                     <li>底部<code>2D 曲线</code>点亮字段图例的眼睛即可实时绘图；<code>数据表格</code>查看帧列表。</li>
                   </ol>
@@ -59,7 +76,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 </Section>
                 <Section title="AI 助手">
                   <ol className="help-ol">
-                    <li>先到<code>设置 → AI 服务</code>选服务商预设（DeepSeek / OpenAI 兼容 / 通义 / Claude / 本地 Ollama），选<code>接口格式</code>并填入 API Key；如需代理可填 HTTP 代理地址。</li>
+                    <li>先到<code>设置 → AI 服务</code>选服务商预设（OpenAI 兼容 / DeepSeek / 智谱 GLM / 通义千问 / 本地 Ollama / Claude），选<code>接口格式</code>并填入 API Key；如需代理可填 HTTP 代理地址。</li>
                     <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；浮窗可拖动、缩放、最小化到角落气泡，也可一键<code>停靠为面板</code>（面板内可再弹出为浮窗）。</li>
                     <li><b>识别协议</b>：在 Hex 数据流框选一段字节 → 右键「AI 识别协议」，AI 输出候选帧结构表（帧头/长度/字段/校验+置信度），点「写入协议模板」即可直接解析。</li>
                     <li><b>解读数据 / 分析曲线</b>：一键概括设备状态、诊断振荡与噪声；发现坏帧率偏高、数据停滞、字段突变时面板顶部会主动提示。</li>
@@ -81,7 +98,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
               <>
                 <Section title="基础操作">
                   <ol className="help-ol">
-                    <li>先到<code>设置 → AI 服务</code>：选服务商预设（DeepSeek / OpenAI 兼容 / 通义 / Claude / 本地 Ollama）→ 填 API Key → 需要代理时在「高级连接」里填。</li>
+                    <li>先到<code>设置 → AI 服务</code>：选服务商预设（OpenAI 兼容 / DeepSeek / 智谱 GLM / 通义千问 / 本地 Ollama / Claude）→ 填 API Key → 需要代理时在「高级连接」里填。</li>
                     <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；可停靠为面板（工具栏「+ 面板」）。</li>
                     <li>输入框：<code>Enter</code> 发送；<code>Shift+Enter</code> 或 <code>Ctrl+Enter</code> 换行。</li>
                     <li>发送前在输入框上方勾选「本次发送的上下文」；<b>协议清单</b>（一行式，便宜）默认带，<b>协议完整定义</b>只在需要精确分析时勾。上下文栏实时显示 ≈token 消耗估算。</li>
@@ -110,12 +127,13 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li><b>冷却</b>：自动诊断按所选冷却时间（1~60 分钟）去重，避免报警风暴时连环调用；未配置 AI 服务时会提示先到 设置 → AI 服务 配置。</li>
                   </ul>
                 </Section>
-                <Section title="九种代码块（回复中直接可用）">
+                <Section title="十种代码块（回复中直接可用）">
                   <table className="help-table">
                     <tbody>
-                      <tr><td>动作执行<br /><code>uartix-action</code></td><td>让 AI 直接操作软件：打开面板、切主题/布局、清空画布、删除配置、开关连接等。回复中显示操作卡片，点「执行」逐个运行。<b>对 AI 说「清空控制画布」「打开曲线面板」「主题换成琉璃」即可。</b></td></tr>
+                      <tr><td>动作执行<br /><code>uartix-action</code></td><td>让 AI 直接操作软件：打开面板、切主题/布局、清空画布、删除配置、开关连接、读写编排器与 3D 轨迹、生成并启动虚拟设备等（39 个白名单动作）。回复中显示操作卡片，点「执行」逐个运行。<b>对 AI 说「清空控制画布」「打开曲线面板」「主题换成琉璃」即可。</b></td></tr>
                       <tr><td>控制卡片<br /><code>uartix-card</code></td><td>生成滑条/按钮/开关/LED/摇杆/组合控件，或 <b>custom 自定义卡片</b>（任意 HTML 界面）。批量生成用 {"{"}"cards":[…]{"}"}。</td></tr>
                       <tr><td>命令库命令<br /><code>uartix-command</code></td><td>单条或批量（{"{"}"commands":[…]{"}"}）写入命令库「AI 生成」分组，可带脚本。</td></tr>
+                      <tr><td>协议模板<br /><code>uartix-template</code></td><td>生成帧结构模板（截帧边界/字段/校验），写入协议面板；多帧型协议支持 {"{"}"group":"簇名","templates":[…]{"}"} 一次写入整簇并自动建组归档，默认停用待你启用。</td></tr>
                       <tr><td>指令工厂协议<br /><code>uartix-codec</code></td><td>生成自定义协议（帧头/变量/长度/校验段），写入指令工厂「我的协议」，填参数即组帧。</td></tr>
                       <tr><td>主题包<br /><code>uartix-theme</code></td><td>JSON 配色 + 整页风格 CSS（动效/光效/液态玻璃/贴图/面板级定制）。</td></tr>
                       <tr><td>样式层<br /><code>uartix-style</code></td><td>纯 CSS 精细化定制任意界面元素，可预览再保留。</td></tr>
@@ -146,21 +164,25 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>示例：对 AI 说「做一个无边框透明桌宠，眼睛跟随鼠标，AI 思考时冒问号，回答时气泡打字机，点击它能向 AI 提问，右键菜单里加『闹脾气』『睡觉』，串口断线时沮丧」。</li>
                   </ul>
                 </Section>
-                <Section title="脚本 api.app.*（34 种动作速查）">
+                <Section title="脚本 api.app.*（39 种动作速查）">
                   <table className="help-table">
                     <tbody>
                       <tr><td>界面控制</td><td>openPanel({"{"}panel{"}"}) · applyPreset({"{"}preset{"}"}) · setTheme({"{"}theme{"}"})</td></tr>
                       <tr><td>查询</td><td>listProtocols() · listCommands() · listCards() · listWidgets()</td></tr>
                       <tr><td>曲线</td><td>addChannel({"{"}tpl,field{"}"}) · clearChannels()</td></tr>
-                      <tr><td>写入</td><td>writeCard / writeCommand / writeTemplate / writeCodec（参数 {"{"}json:"…"{"}"}）</td></tr>
+                      <tr><td>写入</td><td>writeCard / writeCommand / writeTemplate / writeCodec（参数 {"{"}json:"…"{"}"}，writeTemplate 支持协议簇批量）</td></tr>
                       <tr><td>控制页</td><td>clearPage()【破坏性】· addPage({"{"}name{"}"}) · patchCard({"{"}name,patch{"}"})</td></tr>
                       <tr><td>删除</td><td>removeCard / removeProtocol / removeCommand / removeCodec / removeWidget（按 name）【破坏性】</td></tr>
                       <tr><td>挂件</td><td>openWidget / closeWidget / popWidget({"{"}name{"}"}) 浮窗管理与弹出桌面</td></tr>
                       <tr><td>连接</td><td>openPort() · closePort()（需开启「小部件可发送数据」）</td></tr>
+                      <tr><td>传输</td><td>xferStart({"{"}path,proto{"}"}) 预填文件传输对话框（path 可数组多文件排队；开始发送仍需用户点击）</td></tr>
                       <tr><td>Modbus</td><td>modbus({"{"}op:"…"{"}"}) 操作工作台：<code>status</code> · <code>slave.start/stop/configure/write/writeMany/resize</code> · <code>poll.add/remove/clear/configure/start/stop/reset</code>（需脚本高权限，会占用总线发数据）</td></tr>
                       <tr><td>读图</td><td>readPlot({"{"}ask{"}"}) 截取当前 2D 曲线面板画面发给模型分析（面板未开会自动打开）</td></tr>
                       <tr><td>哨兵</td><td>sentinel({"{"}op:"status/enable/ackAll/mute/clear"{"}"}) 异常监测查询与控制（需脚本高权限）</td></tr>
                       <tr><td>结构发现</td><td>xrayEvidence() / xrayCrack() 读协议考古证据链（帧长/帧型簇/校验爆破/轮询周期，面板需先「采样分析」）· xrayReport() 生成引用证据编号的考古报告（需脚本高权限）</td></tr>
+                      <tr><td>编排器</td><td>orchestratorRead() 只读快照（总开关/在跑实例/各组统计/变量现值/日志）· orchestrator({"{"}op:"enable/run/stopAll/groupAdd/groupUpdate/groupRemove/eventAdd/eventRemove/blockAdd/blockRemove/varsSet"{"}"}) 写操作（需高权限——发送块会真实发包；eventAdd/blockAdd 能把自动化「说出来即搭」）</td></tr>
+                      <tr><td>3D 轨迹</td><td>plot3dRead() 只读快照（轴绑定/校准采样/拟合结果/六面进度）· plot3d({"{"}op:"bind/set/calib"{"}"}) 写操作（需高权限；calib 子动作 enter/exit/start/stop/clear/solve6）</td></tr>
+                      <tr><td>虚拟设备</td><td>vdev({"{"}op:"status/list/create/start/stop"{"}"}) 虚拟设备工坊（需高权限——设备占据数据管线等同发送）：create/start 带整台设备规格 JSON（信号模型+故障注入+命令应答+可选 net 段），自然语言即可生成虚拟传感器</td></tr>
                       <tr><td>通知</td><td>toast({"{"}msg{"}"})</td></tr>
                     </tbody>
                   </table>
@@ -175,7 +197,7 @@ await api.app.modbus({ op: "slave.write", area: "holding", index: 2, value: 1234
 await api.app.modbus({ op: "slave.start" });
 await api.app.modbus({ op: "poll.add", slave: 1, fn: 3, addr: 0, qty: 3, periodMs: 500, varName: "MB温度" });
 await api.app.modbus({ op: "poll.start" });`}</pre>
-                  <p className="help-tip">小部件/自定义卡片内通过 postMessage 桥 {"{"}type:"aiw:app", action:{"{"}kind,args{"}"}{"}"} 调用同一套动作（不含破坏性动作与 modbus）。</p>
+                  <p className="help-tip">小部件/自定义卡片内通过 postMessage 桥 {"{"}type:"aiw:app", action:{"{"}kind,args{"}"}{"}"} 调用同一套动作（不含高权限动作：破坏性、modbus、sentinel、考古报告、编排器/3D 写入、虚拟设备等——只有脚本且开启高权限才能用）。</p>
                 </Section>
                 <Section title="常用诉求 → 一句话指令">
                   <table className="help-table">
@@ -209,7 +231,8 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <li>
                       点「复制 MCP JSON」，粘贴到 Claude Desktop 的{" "}
                       <code>%APPDATA%\Claude\claude_desktop_config.json</code> 或 Cursor 的{" "}
-                      <code>~/.cursor/mcp.json</code>，重启客户端即可看到 uartix 的 8 个工具。
+                      <code>~/.cursor/mcp.json</code>，重启客户端即可看到 uartix 的 10 个工具
+                      （含编排器 / 3D 轨迹的只读快照）。
                     </li>
                   </ol>
                   <p className="help-tip">
@@ -218,8 +241,8 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                   </p>
                   <table className="help-table">
                     <tbody>
-                      <tr><td>读</td><td>get_status 连接总览 · get_fields 变量快照 · get_frames 最近帧 · get_plot_stats 曲线统计 · get_alerts 哨兵健康</td></tr>
-                      <tr><td>写</td><td>send 发送（ascii 支持 \r \n \t \xNN）· run_action 白名单动作 · run_sequence 跑测试序列并返回逐步结果</td></tr>
+                      <tr><td>读</td><td>get_status 连接总览 · get_fields 变量快照 · get_frames 最近帧 · get_plot_stats 曲线统计 · get_alerts 哨兵健康 · get_orchestrator 编排器快照 · get_plot3d 3D 轨迹与校准快照</td></tr>
+                      <tr><td>写</td><td>send 发送（ascii 支持 \r \n \t \xNN）· run_action 白名单动作（含 orchestrator / plot3d 两组）· run_sequence 跑测试序列并返回逐步结果</td></tr>
                       <tr><td>调试</td><td><code>node uartix-mcp.cjs --status</code> 检查发现文件与连通性；<code>npm run mcp:e2e</code> 跑协议层冒烟</td></tr>
                     </tbody>
                   </table>
@@ -246,16 +269,20 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <tr><td>2D 曲线</td><td>字段图例点眼睛开曲线；支持平移/框选缩放/双击复位</td></tr>
                     <tr><td>频谱分析</td><td>FFT 频谱（主峰/频率分辨率/线性或 dB）与直方图（均值/σ/分布）双模式；与 2D 曲线共享通道数据，选通道点数窗函数，可冻结谱面观察</td></tr>
                     <tr><td>3D 姿态</td><td>把欧拉角或四元数字段映射到 3D 模型（+面板可添加）</td></tr>
+                    <tr><td>3D 轨迹</td><td>三路变量当空间坐标画实时三维轨迹（着色/拖尾/网格/跟随/自动旋转/键盘飞行/光标缩放/底部时间条历史回看与回放联动）；内置椭球校准（八象限点云采样 → 九参数拟合：硬磁偏置×3 + 软磁对称校正矩阵×6，给 CV 与残差 RMS，支持残差着色、校正前后对比、在线补偿预览，一键复制 JSON/C 数组）与六面校准（加计专用，六姿态各静置 2 秒直接解算）</td></tr>
                     <tr><td>图传</td><td>把每帧数据渲染为画面：暂停/回看/保存帧、镜像翻转、缩放拖动；「解析设置」定义帧定界方式</td></tr>
                     <tr><td>控制画布</td><td>拖拽部署滑条/按钮/开关/LED/蜂鸣器等控件向下位机发指令；拖动时虚线幽灵框指示落点，松手只会落到空格</td></tr>
                     <tr><td>控制台</td><td>原始收发日志（时间戳彩色），可发 ASCII/Hex、发送文件、录制日志；上方快捷指令栏一键发送，指令工厂可组各协议帧</td></tr>
                     <tr><td>结构发现</td><td>未知协议考古：对原始字节做周期/帧头统计推断、校验算法爆破与帧型序列分析，勾选帧型一键批量生成模板；AI 可引用其证据链生成推理报告</td></tr>
-                    <tr><td>哨兵</td><td>静默异常监测：数值通道突变（双 EMA z-score）、新帧型出现、错误帧率超限、通信静默四类报警；报警自动降噪合并，可最小化成右下角浮球或弹出桌面挂件驻留报警（面板与浮球都关闭则停止监测），支持合成提示音；一键或自动发起 AI 诊断（携带证据，见 AI 助手详解）</td></tr>
+                    <tr><td>哨兵</td><td>静默异常监测：数值通道突变（双 EMA z-score）、新帧型出现、错误帧率超限、通信静默四类报警；报警自动降噪合并，可最小化成右下角浮球或弹出桌面挂件驻留报警（面板、浮球与桌面挂件全部关闭才停止监测），支持合成提示音；一键或自动发起 AI 诊断（携带证据，见 AI 助手详解）</td></tr>
                     <tr><td>Modbus 工作台</td><td>模拟从站（本机当从站应答，四张可编辑数据表 + 故障注入）与主站轮询表（按周期读寄存器/线圈，值直接写成变量）；关掉面板仍在运行，工具栏有绿色徽标</td></tr>
+                    <tr><td>测试序列器</td><td>拖积木组出自动化测试：发送/等待/等帧/断言/分组/备注六类步骤，帧到达触发自动运行、单步调试、failFast；自包含 HTML 报告一键导出；JSON 导入导出分享套件；配套 CLI（内置回环设备）可进 CI 无硬件跑断言。关面板即停，绝不后台发包</td></tr>
+                    <tr><td>自动编排器</td><td>事件-条件-动作编排：组头部事件槽挂事件块（帧命中/坏帧/新帧型/阈值/通道变化/定时器/会话开断/哨兵/变量变更/自定义事件/通信静默共 12 类）自动触发，组内块流 23 类块——除发送/等待/等帧/跑序列/调用组/变量/通知/提示音与如果/循环/跳出/中止/子组外，还有操作画布控件、写 Modbus、截图/导 CSV/剪贴板、发自定义事件等自动化工具箱；「从模板新建」内置报警通知/看门狗/定时轮询/收发握手/PID 继电反馈整定五套模板（导入默认停用）；总开关 + 冷却 + 熔断多重保护（详见帮助页签）</td></tr>
                     <tr><td>AI 助手</td><td>AI 调试助手：协议识别、数据解读、曲线分析、指令/卡片生成、诊断排查、调试报告；Ctrl+K 唤起浮窗，可停靠为面板（+面板 可添加）</td></tr>
+                    <tr><td>虚拟设备工坊</td><td>可编程虚拟数据源（与真实接口互斥，关面板仍在跑，状态栏有徽标）：信号模型（常量/正弦/方波/三角/一阶对象/镜像）+ 温漂/丢帧/卡死/毛刺故障注入 + 命令应答（匹配前缀可捕获数值写输入量、回应答帧）；可选 net 段走 UDP/TCP 客户端/TCP 服务端/串口对外收发；启动即自动配套协议模板；内置「温控炉」（PID 教学被控对象）与「虚拟 MPU6050」（WIT 兼容帧）；设备库存档/导出 JSON 分享，也可让 AI 按自然语言生成（+面板 可添加）</td></tr>
                   </tbody>
                 </table>
-                <p className="help-tip">推荐流：Hex/帧画布定义协议 → 表格与曲线观察 → 控制画布下发指令闭环调试。</p>
+                <p className="help-tip">推荐流：Hex/帧画布定义协议 → 表格与曲线观察 → 控制画布下发指令闭环调试。没有硬件？「虚拟设备工坊」载入内置设备即可全链路体验；新手推荐先点「快速入门」顶部的「启动交互式教学」。</p>
               </Section>
             )}
             {tab === "canvas" && (
@@ -268,6 +295,11 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <li><b>帧格式</b>：RTU 与 TCP 是<b>帧格式</b>选择而不是接口选择——RTU 完全可以跑在 TCP 串口隧道上，反之不成立，所以 Modbus TCP 只在网络接口下可用。</li>
                     <li><b>自环演示</b>：两台实例（或一台跑从站、另一台跑轮询）接在同一对串口/网络上即可对打；也可用「指令工厂 → Modbus RTU」手发一条请求看从站应答。</li>
                   </ul>
+                </Section>
+                <Section title="虚拟设备工坊：让软件扮演一台设备">
+                  <p>面板在「+ 面板 → 数据接入」。设备 = 一份 JSON 规格：信号模型（常量/正弦/方波/三角/<b>一阶惯性对象</b>/镜像）+ 噪声/温漂 + 丢帧/卡死/毛刺故障 + 帧格式 + 命令匹配。启动即自动配套协议模板；运行中锁定编辑（停机再改）。内置两台：<b>温控炉</b>（HEAT ON/OFF 控温、SET DUTY 45 捕获数值直调加热功率，PID 整定模板的被控对象）与<b>虚拟 MPU6050</b>（维特 WIT 兼容帧 + 温漂 + 丢帧 + 毛刺）。设备库存档管理：载入库条目编辑后点<code>保存</code>原位更新（改名不产生重复；新建/内置/另存副本/导入均为未保存态，脏了按钮亮起）。</p>
+                  <p><b>网络收发（像真设备一样在链路上）</b>：规格里可选 net 段——UDP 把帧逐字节发到指定 host:port（.255 自动广播，可加 ≤4 个额外目标一帧多投，可选监听端口收外部命令）；TCP 客户端拨出、TCP 服务端监听（≤8 客户端广播）；串口独占 COM 口直写（接收端可用 com0com 虚拟串口对）。命令去向：本机控制台/编排器与网络来令走同一匹配器，网络来令的应答原路返回。运行中状态行实时显示发出的帧数/收令数/客户端数与最近命令。</p>
+                  <p><b>双机教学</b>：A 机启动温控炉开 UDP 发射 9010 → B 机数据接口选 UDP 服务端监听 9010 + 「+ 预设 → 虚拟设备·温控炉」→ 两台看到同一条曲线。绑 0.0.0.0 允许局域网接入（首次可能弹防火墙授权）。</p>
                 </Section>
                 <Section title="协议簇">
                   <p>一个协议可含多个帧型（如匿名 V7 的 22 种功能码）：左侧列表一行代表整簇，点行选中，点行首箭头展开帧型；簇内右键可复制/粘贴帧型。画布顶部页签与左侧联动。</p>
@@ -310,6 +342,106 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <li><code>⏸/▶</code> 暂停后可点选历史帧回看，<code>⬇</code> 保存当前显示的帧。</li>
                     <li><code>↔</code> 水平镜像、<code>↕</code> 垂直翻转矫正画面方向；滚轮缩放、拖动平移，双击复位。</li>
                     <li>数据来源与串口/网络完全一致：TCP/UDP 接收图传流同样可用。</li>
+                  </ol>
+                </Section>
+              </>
+            )}
+            {tab === "plot3d" && (
+              <>
+                <p><b>3D 轨迹面板</b>把三个通道画成空间轨迹（航迹/相图/姿态积分），支持大坐标（经纬度）自动重锚、双层 LOD 长跑不卡。工具栏「+ 面板」添加。</p>
+                <Section title="绑定与视角">
+                  <ol className="help-ol">
+                    <li>左上三个下拉把 <b>X / Y / Z</b> 绑到通道（与 2D 图例共享通道；建议同帧打包三轴，时间对齐最准）。三轴来自不同帧/不同采样率时，右键「数据」里可切<b>配对模式</b>（插值/最近点）与容差，HUD 有配对统计行；三轴值域悬殊可切<b>逐轴独立缩放</b>，避免小值域轴被压成直线。</li>
+                    <li>右上视角组：<code>俯/侧/正/等</code>四预设、重置、聚焦最新点；左键拖动旋转、右键拖动平移、滚轮缩放。</li>
+                    <li><code>跟随模式</code>：视角平滑锁定最新点；<code>自动旋转</code>：展台展示（两者互斥）。</li>
+                    <li>右键菜单按「模式 / 视图 / 测量 / 数据 / 设置」分组；悬停任意点显示真实坐标，可一键复制。</li>
+                  </ol>
+                </Section>
+                <Section title="键盘飞行与缩放">
+                  <ol className="help-ol">
+                    <li>右键菜单「视图」开启<code>键盘飞行</code>后，鼠标悬停在画布上即可用键盘漫游（不悬停时不响应，不抢其他面板按键）。</li>
+                    <li><code>W/A/S/D</code> 水平平移（相机朝向为准），<code>Q/E</code> 降/升，<code>方向键</code>绕目标旋转，<code>F</code> 切换跟随，<code>R</code> 重置视角。</li>
+                    <li>飞行速度与视角距离成比例（越近越慢，精细贴近观察）。</li>
+                    <li>右键菜单「视图」可开<code>缩放到光标</code>：滚轮朝指针位置缩放（默认关闭，绕视线中心缩放）。</li>
+                  </ol>
+                </Section>
+                <Section title="时间条与回放">
+                  <ol className="help-ol">
+                    <li>底部时间条拖动即<code>时间游标</code>：轨迹截断显示到该时刻，可与 2D 曲线回放联动。</li>
+                    <li>双击时间条或菜单「数据 → 回到最新」清除游标恢复实时。</li>
+                  </ol>
+                </Section>
+                <Section title="椭球校准（磁力计 / 加计九参数）">
+                  <ol className="help-ol">
+                    <li>用途：评估磁力计/加计的<b>硬磁偏置（offset）</b>与<b>软磁畸变（校正矩阵 W）</b>，输出九参数给固件做补偿。</li>
+                    <li>流程：绑定原始三轴 → 右键「模式 → 椭球校准模式」（或工具栏 ◎ 按钮）→ 点<code>开始采样</code> → 缓慢翻滚传感器覆盖全空间（画 8 字）→ <code>拟合椭球</code>。校准 HUD 顶部可切「<b>椭球拟合</b>（磁/加通用）」与「<b>六面向导</b>（加计专用）」两个子页，切换会清空对方采样。</li>
+                    <li>点云越接近球面越好；<b>象限覆盖 8/8</b> 才允许拟合（只转半圈会被拒绝并提示）；<code>CV</code> 校正后半径变异系数（&lt;3% 为优）、<code>RMS</code> 为球面残差。</li>
+                    <li>拟合成功后点云自动<b>残差着色</b>（绿 = ±3% 内 / 黄 = ±8% 内 / 红 = 出界）；<code>显示：原始 / 校正后</code>一键对比——校正后点云应收缩为均匀球壳（附参考球线框）。</li>
+                    <li><code>补偿预览</code>：拟合成功后实时绘制校正后幅值 r=|W·(x−offset)| 迷你图——转动传感器时曲线贴 1.0 线小幅抖动 = 校准有效，单轴靠近铁磁物会明显抬升/下凹；拟合后继续采样会挂起预览（灰显），重新拟合自动恢复。</li>
+                    <li>结果可<code>复制 JSON</code> 或<code>复制 C 数组</code>（mag_offset[3] + mag_matrix[3][3]，直接贴进固件）。</li>
+                    <li>采样中更换绑定/密度会清空重采；采到 20000 点自动停止；拟合后再采样，结果会标记「基于旧采样」。</li>
+                    <li><b>六面向导（加计专用）</b>：利用重力先验，六个面依次<b>朝上静置</b>点「采集该面」（自动采 2 秒，晃动会被 σ 门拒绝）→ 六面齐后<code>计算参数</code> → 输出 acc_offset / acc_gain（校正后 ≈ 1g），附三轴尺度一致性 CV 与面偏差指标；顺序摆错（两面同轴）会被拒绝并提示。</li>
+                    <li>退出校准模式即恢复原轨迹（数据不清空）；校准属于操作态，不会被打进 Operator 部署包。</li>
+                  </ol>
+                </Section>
+                <Section title="导出">
+                  <ol className="help-ol">
+                    <li><code>导出轨迹 CSV</code>：相对秒 t_s + 三个绑定通道全量数据（UTF-8 BOM，Excel 可直接打开）。</li>
+                    <li><code>快照 PNG</code>：当前视角整帧截图保存。</li>
+                  </ol>
+                </Section>
+              </>
+            )}
+            {tab === "orchestrator" && (
+              <>
+                <p><b>自动编排器</b>＝测试序列器（线性流程）× 触发器（事件驱动）：组是编排单元，头部事件槽挂事件块自动触发，组内块线性执行。工具栏「+ 面板」添加；编辑随时可做，运行中的实例不受影响（下次触发生效）。</p>
+                <Section title="组与事件槽">
+                  <ol className="help-ol">
+                    <li>组头部：<code>☑</code> 启用（禁用后事件不触发、▶ 不运行）、<code>▶</code> 手动跑一次（不受熔断限制）、<code>⧉</code> 复制整组、<code>×</code> 删除；双击标题重命名，<code>▾</code> 折叠。</li>
+                    <li>事件槽在标题下方独立一行：点徽标在右侧检查器编辑参数，<code>＋</code> 添加事件，徽标可拖动排序，<code>×</code> 移除。<b>事件块只能放进事件槽</b>——拖进块流会被拒绝并提示。</li>
+                    <li>事件 12 类：手动 / 帧命中（可设 1/N 抽稀 stride）/ 坏帧命中 / 新帧型出现（逆向现场新固件上线瞬间报警）/ 阈值穿越（进入/回落 + 去抖）/ 通道值变化（可设最小间隔节流）/ 定时器（≥50ms）/ 会话开断 / 哨兵告警（warn/crit）/ 变量变更 / 自定义事件（配「发自定义事件」块做跨组解耦）/ 通信静默（超时无帧触发，数据恢复自动重武装）。</li>
+                    <li>检查器里可为组设<code>触发冷却</code>（上次触发后 N ms 内新事件直接丢弃）与<code>满队列策略</code>（丢新 / 挤掉最旧 / 中止最旧）。</li>
+                  </ol>
+                </Section>
+                <Section title="块：执行与逻辑">
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>发送</td><td>HEX / ASCII / 命令库条目 / 指令工厂<b>多帧</b>（逐帧过令牌桶限速），内容支持 {"{var}"} 取编排变量</td></tr>
+                      <tr><td>等待 / 等待帧</td><td>定时等待；等到匹配帧才继续（超时可填 <code>0</code>=一直等到匹配；失败可「继续」跳过或「中止」本组）</td></tr>
+                      <tr><td>运行序列 / 运行组</td><td>调用测试序列器的套件，或把另一个编排组当子程序调用（均可选等待完成）；「运行组」不等待 = 触发</td></tr>
+                      <tr><td>设置变量 / 通知 / 提示音</td><td>写变量（常量 / 通道值 / 表达式 / 事件字段）；弹提示（支持 $&#123;表达式&#125; 插值）；warn 单音 / crit 三连音</td></tr>
+                      <tr><td>如果</td><td>多条件 AND 分支（通道比较 / 变量比较 / 表达式 / 事件字段 / 会话状态），成立走「那么」否则走「否则」</td></tr>
+                      <tr><td>循环</td><td>按次数或按条件反复执行子流（≤1000 轮，可设轮间隔）；「跳出」结束最近一层循环，「中止」立即结束本组</td></tr>
+                      <tr><td>子组</td><td>纯分组收纳容器（无触发语义），嵌套深度 ≤4</td></tr>
+                      <tr><td>自动化工具箱</td><td>设控件（写控制画布变量）· 切开关（直接翻转开关卡档位）· 写 Modbus（FC05/06 编成 RTU 帧走发送路由）· 日志 · 截取曲线图存图片库 · 导出 CSV · 停止序列 · 发自定义事件（配「自定义事件」事件块跨组解耦）· 写剪贴板 · 复位变量（可静默不触发变量变更链）</td></tr>
+                    </tbody>
+                  </table>
+                  <p className="help-tip">条件与赋值里的表达式在沙箱中求值（纯计算、无系统访问），支持四则/比较/逻辑与白名单函数 abs · floor · ceil · round · min · max · clamp · if · len · fmt，外加 <code>now</code>（当前毫秒，测时间间隔用，如 PID 整定数摆动周期）；「evt.字段」可读触发事件的载荷（如帧号、越限值）。每个块行首 <code>⠿</code> 拖柄按住拖动排序（可拖入容器内、可跨组拖动），勾选框临时停用，块尾「中止/继续」标签点击切换失败策略；<code>⧉</code> 复制含子树。</p>
+                </Section>
+                <Section title="变量库与插值">
+                  <ol className="help-ol">
+                    <li>类型化全局变量（number / string / bool），勾「持久」跨重启保留当前值；上限 64 个。右侧检查器无选中块时即变量库视图。</li>
+                    <li>引用方式：表达式（如果 / 循环条件 / 设置变量）直接写变量名；发送内容用 {"{var}"}；通知文本用 $&#123;表达式&#125;。</li>
+                    <li>「变量变更」事件：变量值<b>实际变化</b>时触发组——可做链式编排（A 组算完写变量 → B 组接手）。检查器里可实时看到当前运行值。</li>
+                  </ol>
+                </Section>
+                <Section title="PID 继电反馈自整定（内置模板）">
+                  <p>「从模板新建」里有两套现成的<strong>继电反馈法（Åström-Hägglund 临界比例度法）</strong>整定模板——串口工具圈少有的自动调参能力，全部用现成块搭成：</p>
+                  <ol className="help-ol">
+                    <li><b>PID 继电反馈整定</b>（2 个组）：被控量高于 SP+hys → 发「关执行器」并记穿越时刻；低于 SP−hys → 发「开执行器」。上穿越间隔即摆动周期 Tu；攒满 6 个周期后自动算 <code>Ku=4d/(πa)</code>、按 Ziegler-Nichols 经典式给 <code>Kp=0.6Ku、Ti=Tu/2、Td=Tu/8</code>，并自动发送 PID 参数帧（<code>{"{Kp}"}</code> 插值）。</li>
+                    <li><b>整定·阶跃验证</b>：整定完成后自动施加一次全量阶跃，配合 2D 曲线观察超调与稳定时间。</li>
+                    <li>导入后按组备注检查 4 处：两个阈值事件的通道与值（SP±hys）、开关命令换成自己设备的指令、变量 <code>d</code>（继电输出步进）与 <code>amp</code>（摆幅，按曲线峰谷修正）。</li>
+                    <li>运行时打开「变量库」可实时看到 Tu/Ku/Kp 的求解过程；跑完对 AI 说「<b>解读整定结果</b>」，AI 会读编排器快照给出参数解读与下一步建议。</li>
+                    <li>无硬件练习：虚拟设备工坊载入「温控炉」（一阶加热对象，HEAT ON/OFF 命令）→ 导入 PID 模板 → 启用 + 总开关，看曲线进入等幅摆动、参数自动算出发送。</li>
+                  </ol>
+                </Section>
+                <Section title="安全红线与互操作">
+                  <ol className="help-ol">
+                    <li>顶部<code>编排总开关</code>关闭后所有自动事件与手动运行都停止；顶部实时显示空闲 / 运行中实例数。</li>
+                    <li>多重熔断：循环 ≤1000 轮、嵌套 ≤4 层、单实例超时自动中止、发送令牌桶限速、触发风暴全局熔断（帧流等高频事件本身不计入，只有实际触发组才计数）。</li>
+                    <li>空画布上有「从模板新建」下拉：内置<b>报警通知 / 看门狗 / 定时轮询 / 收发握手 / PID 继电反馈整定</b>五套组模板，导入后<b>默认未启用</b>（参数是示意值，检查后再手动打开）；也可以点「让 AI 帮我搭」一句话生成整条编排。</li>
+                    <li><code>从序列导入</code>：把测试序列器的套件转成一个编排组（onFrame 触发转成帧事件块、断言转成如果块），<b>导入后默认停用</b>——检查无误后手动勾选启用。</li>
+                    <li>编排文档可<code>导入 / 导出 JSON</code> 备份或分享；条件与表达式在沙箱中求值（纯计算，无系统访问）。</li>
                   </ol>
                 </Section>
               </>
@@ -405,13 +537,15 @@ else send("RGT:" + phase);`}</pre>
               <table className="help-table">
                 <tbody>
                   <tr><td>Ctrl+F</td><td>Hex 数据流搜索（Esc 关闭）</td></tr>
-                  <tr><td>Ctrl+K</td><td>AI 助手浮窗开关</td></tr>
+                  <tr><td>Ctrl+K</td><td>AI 助手浮窗开关；AI 输入框内 <code>Enter</code> 发送、<code>Shift/Ctrl+Enter</code> 换行、<code>Ctrl+V</code> 粘贴截图</td></tr>
+                  <tr><td>M</td><td>录制/回放中给时间轴打标注（2D 曲线显示琥珀虚线，点击标注列表可 seek）</td></tr>
                   <tr><td>Ctrl+Z / Ctrl+Y</td><td>协议编辑撤销 / 重做（全局 50 步）</td></tr>
                   <tr><td>← / →</td><td>帧画布上一帧 / 下一帧</td></tr>
-                  <tr><td>Esc</td><td>取消框选 / 关闭菜单</td></tr>
+                  <tr><td>W/A/S/D · Q/E · 方向键</td><td>3D 轨迹面板键盘飞行（右键菜单「视图」开启，鼠标悬停画布才响应）；F 跟随、R 复位</td></tr>
+                  <tr><td>双击</td><td>帧画布帧头/帧尾直接打开编辑框；2D 曲线图区=保形回实时；3D 时间条=回到最新</td></tr>
+                  <tr><td>Esc</td><td>取消框选 / 关闭菜单 / 退出教学引导</td></tr>
                   <tr><td>左键拖拽</td><td>Hex/帧画布框选定义字段</td></tr>
-                  <tr><td>右键</td><td>帧画布：字段/帧头/帧尾/簇 菜单；曲线区：更多设置</td></tr>
-                  <tr><td>双击</td><td>帧画布帧头/帧尾直接打开编辑框</td></tr>
+                  <tr><td>右键</td><td>帧画布：字段/帧头/帧尾/簇 菜单；曲线区：更多设置；3D：视图/测量/模式/数据/设置</td></tr>
                   <tr><td>拖拽图例</td><td>把字段拖到 2D 曲线区直接开线</td></tr>
                 </tbody>
               </table>
@@ -524,7 +658,7 @@ else send("RGT:" + phase);`}</pre>
                   <ol className="help-ol">
                     <li>先把工作区调好：协议能解析、控制页与命令库可用、面板布局满意。</li>
                     <li>打开<code>设置 → 数据</code>，找到 <code>Operator 部署包（.uopk）</code> 块。</li>
-                    <li>填<b>包名</b>与<b>说明</b>（会显示在操作员端横幅），勾选要进包的部件：协议模板 / 控制页 / 命令库 / 面板布局。</li>
+                    <li>填<b>包名</b>与<b>说明</b>（会显示在操作员端横幅），勾选要进包的部件：协议模板 / 控制页 / 命令库 / 面板布局 / 外观设置 / 3D 面板设置——<b>至少勾一项</b>才能生成（空包等于把对方永久锁进只读）。</li>
                     <li>点<code>生成部署包</code>，保存为 <code>.uopk</code> 文件。</li>
                   </ol>
                   <p className="help-tip">随包的设置只含外观与交互子集（主题、语言、小数位、工作区预设、曲线配色、自动重连等）；AI 密钥、MCP 端口、窗口缩放等本机私有项不会进包。</p>
@@ -540,8 +674,8 @@ else send("RGT:" + phase);`}</pre>
                 <Section title="只读模式：能做什么 / 不能做什么">
                   <table className="help-table">
                     <tbody>
-                      <tr><td>能做</td><td>连接串口 / 网络 / BLE 设备；用控制页与命令库发指令；看帧画布、数据表格、2D 曲线、频谱等全部观测面板；哨兵监测照常运行</td></tr>
-                      <tr><td>不能做</td><td>编辑/新建协议模板与字段；增删改控制页卡片与命令库；修改设置；导入其它配置文件（改动都会被拦截并提示「Operator 模式：配置只读」）</td></tr>
+                      <tr><td>能做</td><td>连接串口 / 网络 / BLE 设备；用控制页与命令库发指令；看帧画布、数据表格、2D 曲线、频谱等全部观测面板；哨兵监测照常运行；编排器<b>可运行</b>（▶ 手动跑、组照常触发，向设备发数据）、3D 校准<b>操作</b>（采样/拟合/六面）放行</td></tr>
+                      <tr><td>不能做</td><td>编辑/新建协议模板与字段；增删改控制页卡片、命令库与编排<b>结构</b>（组/事件/块/变量）；修改 3D 轴绑定与设置；修改设置；导入其它配置文件（改动都会被拦截并提示「Operator 模式：配置只读」——守卫在 store 层，AI/MCP/扩展面板等一切调用方同等受约束）</td></tr>
                     </tbody>
                   </table>
                 </Section>

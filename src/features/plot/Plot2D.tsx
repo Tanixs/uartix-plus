@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import uPlot from "uplot";
-import "uplot/dist/uPlot.min.css";
 import * as plotStore from "./plotStore";
 import * as sessionStore from "../session/sessionStore";
 import type { AnnOut } from "../../ipc/types";

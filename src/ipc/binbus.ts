@@ -161,6 +161,9 @@ function dispatch(buf: ArrayBuffer) {
 async function ensureStarted(): Promise<void> {
   if (started) return;
   started = true;
+  // 纯浏览器（npm run dev 直开）没有 Tauri 内核：静默降级，不刷 unhandled rejection；
+  // 真机 tauri dev 下此守卫恒通过，行为不变。
+  if (!("__TAURI_INTERNALS__" in window)) return;
   try {
     const ch = new Channel<unknown>();
     ch.onmessage = (raw) => {

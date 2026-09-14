@@ -12,7 +12,10 @@ import { listen } from "@tauri-apps/api/event";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
-import { patch as patchSettings } from "../settings/settingsStore";
+import { patch as patchSettings, getSnapshot as getSettings, type Settings } from "../settings/settingsStore";
+import { importSettingsFromPkg, exportSettingsForPkg as exportPlot3dForPkg } from "../plot3d/plot3dStore";
+import { toast } from "../ai/extRuntime";
+import { tx } from "../../i18n/strings";
 import { setOperatorLocked } from "./lock";
 import { validatePkg, OPERATOR_KIND, type OperatorPkg } from "./operatorPkg";
 
@@ -74,13 +77,29 @@ export async function init() {
   const openFromPath = async (path: string) => {
     if (!path || path === lastPath) return;
     lastPath = path;
+    let content: string;
     try {
-      const content = await invoke<string>("read_text_file", { path });
-      const obj = JSON.parse(content) as { kind?: string; data?: unknown };
-      if (obj.kind !== OPERATOR_KIND) return;
-      activate(obj.data);
+      content = await invoke<string>("read_text_file", { path });
     } catch {
-      /* 文件不可读/格式不对：静默（路径可能已失效） */
+      void toast(tx(`无法读取文件：${path}`, `Cannot read file: ${path}`));
+      return;
+    }
+    let data: unknown;
+    try {
+      const obj = JSON.parse(content) as { kind?: string; data?: unknown };
+      if (obj.kind !== OPERATOR_KIND) {
+        void toast(tx("不是 Operator 部署包（kind 不匹配）", "Not an operator package (kind mismatch)"));
+        return;
+      }
+      data = obj.data;
+    } catch {
+      void toast(tx("文件不是有效的 JSON，Operator 包解析失败", "File is not valid JSON; operator package parse failed"));
+      return;
+    }
+    try {
+      activate(data);
+    } catch (e) {
+      void toast(tx(`Operator 包导入失败：${e instanceof Error ? e.message : String(e)}`, `Operator package import failed: ${e instanceof Error ? e.message : String(e)}`));
     }
   };
   try {
@@ -94,10 +113,17 @@ export async function init() {
   }
 }
 
-/** 激活部署包（raw 为文件外壳解包后的 data）。返回用户可读结果。 */
+/** 激活部署包（raw 为文件外壳解包后的 data）。返回用户可读结果；失败抛错且不留半套状态。 */
 export function activate(raw: unknown): string {
   const pkg = validatePkg(raw);
-  // 应用载荷期间临时解锁：替换语义的导入需要写权限；finally 恢复锁定
+  // 应用载荷期间临时解锁：替换语义的导入需要写权限；失败恢复进入前的锁态
+  const wasLocked = isOperatorMode();
+  // 回滚快照：导入是「先删旧再进新」的替换语义，中途抛错必须把旧配置救回来
+  const snapTemplates = templateStore.exportTemplatesWithMeta();
+  const snapPages = controlsStore.exportPages();
+  const snapGroups = commandStore.exportGroups();
+  const snapSettings: Partial<Settings> | null = structuredClone(getSettings());
+  const snapPlot3d = exportPlot3dForPkg();
   setOperatorLocked(false);
   try {
     const p = pkg.payload;
@@ -120,9 +146,30 @@ export function activate(raw: unknown): string {
       commandStore.importGroupsMerge(p.commands);
     }
     if (p.settings) patchSettings(p.settings);
-  } finally {
-    setOperatorLocked(true);
+    if (p.plot3d) importSettingsFromPkg(p.plot3d); // 3D 面板设置回写（P71，calibMode 已在导出侧剥离）
+  } catch (e) {
+    try {
+      templateStore.replaceRules(snapTemplates.templates);
+      templateStore.importGroupsMeta(snapTemplates.groups);
+      for (const id of controlsStore.getSnapshot().pages.map((x) => x.id)) {
+        controlsStore.removePage(id);
+      }
+      for (const page of snapPages) {
+        controlsStore.importPage(page as unknown as { name?: string; cards?: Record<string, unknown>[] });
+      }
+      for (const g of commandStore.getSnapshot().groups) {
+        commandStore.removeNode(g.id);
+      }
+      commandStore.importGroupsMerge(snapGroups);
+      patchSettings(snapSettings ?? {});
+      if (snapPlot3d) importSettingsFromPkg(snapPlot3d);
+    } catch {
+      /* 回滚尽力而为：原始快照本身来自合法运行态，正常不会走到这里 */
+    }
+    setOperatorLocked(wasLocked);
+    throw e;
   }
+  setOperatorLocked(true);
   snapshot = { pkg, restored: false };
   emit();
   try {

@@ -17,7 +17,7 @@ export interface McpToolDef {
   };
 }
 
-/** v1 工具面：8 个（详设 §2.2）。描述里写清权限门控，让 IDE 智能体自己判断 */
+/** 工具面：v1 为 8 个（详设 §2.2）；P74c C2 增 get_orchestrator / get_plot3d 两个只读工具（编排器与 3D 的写通路统一走 run_action）。描述里写清权限门控，让 IDE 智能体自己判断 */
 export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "get_status",
@@ -64,6 +64,18 @@ export const TOOL_DEFS: McpToolDef[] = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_orchestrator",
+    description:
+      "自动编排器只读快照：总开关、在跑实例数、各组（事件种类/冷却 ms/满队列策略 dropNew·dropOld·stopOld/块数与类型直方图/累计运行与失败次数/最近一次结果）、变量现值、最近 10 条运行日志。只读、不需高权限。写操作（增删改组/触发运行/写变量）用 run_action，kind=orchestrator（需「允许高权限动作」）。",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_plot3d",
+    description:
+      "3D 轨迹面板只读快照：轴绑定（x/y/z 通道 id 及是否绑定齐）、显示设置（着色/样式/密度/拖尾/网格/跟随/自动旋转/键盘飞行/光标缩放）、是否椭球校准模式、采样点数与八象限覆盖度、椭球拟合结果（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。只读、不需高权限。写操作（换轴绑定/改显示/校准会话）用 run_action，kind=plot3d（需「允许高权限动作」）。",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "send",
     description:
       "向已连接的串口/TCP/UDP 发送数据。mode=ascii 支持 \\r \\n \\t \\xNN 转义；mode=hex 为空格分隔的十六进制。需要 Uartix+ 设置 → 集成 开启「允许远程发送」。",
@@ -79,7 +91,7 @@ export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "run_action",
     description:
-      "执行 Uartix+ 的 App Action（writeTemplate/writeCommand/openPanel/addChannel/openPort… 完整清单见 tools 说明）。写模板/命令等非破坏动作直接可用；openPort/closePort/删除类属高权限，需在设置 → 集成 开启「允许高权限动作」。",
+      "执行 Uartix+ 的 App Action。kind 常用：writeTemplate/writeCommand/writeCard/writeCodec/openPanel/applyPreset/setTheme/addChannel/clearChannels/openPort/closePort/removeCard/removeProtocol/toast…；编排器与 3D 两组也走这里——kind=orchestrator（args.op=enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet，可据此从零搭出「事件→块树」自动化；只读请改用 get_orchestrator）、kind=plot3d（args.op=bind|set|calib，只读请改用 get_plot3d）。写模板/命令等非破坏动作直接可用；openPort/closePort/删除类与 orchestrator/plot3d 属高权限，需在设置 → 集成 开启「允许高权限动作」。",
     inputSchema: {
       type: "object",
       properties: {

@@ -144,7 +144,12 @@ export function getChanData(id: string): ChanData {
 function appendPoint(chId: string, t: number, v: number) {
   if (timeOriginMs === null) timeOriginMs = t;
   const d = getChanData(chId);
-  d.t.push(t);
+  // 同戳/乱序兜底（P76①）：Rust parser 的 tsMs 是 chunk 级接收时间戳，同块多帧
+  // 共享同一 t → 通道时间轴出现平台，频谱的局部跨度变 0 → amplitudeSpectrum
+  // 返回 null（HUD"等待数据…"死路）。此处强制每通道严格递增：O(1) 一处修复，
+  // 频谱/2D/3D 全链路受益；±1ms 的虚拟步长相对采样间隔可忽略。
+  const last = d.t.length ? d.t[d.t.length - 1] : -Infinity;
+  d.t.push(t > last ? t : last + 1);
   d.v.push(v);
   dirty = true;
   if (d.t.length > MAX_POINTS) {
@@ -306,6 +311,9 @@ function projectX(x: number[], cols: (number | null)[][]): number[] {
 
 export function buildAligned(maxPoints = 0): {
   x: number[];
+  /** 原始毫秒时间轴（严格递增）：显示 X（proj）随 2D xSource 变化，
+   *  3D 轨迹渐隐/测距等需要恒定时间轴的消费方用 raw，不依赖 proj */
+  raw: number[];
   cols: (number | null)[][];
 } {
   const chans = channels;
@@ -370,7 +378,7 @@ export function buildAligned(maxPoints = 0): {
       }
     }
     cache.lastLen = lens;
-    return { x: cache.proj, cols: cache.cols };
+    return { x: cache.proj, raw: cache.x, cols: cache.cols };
   }
 
   const full = buildAlignedFull(maxPoints);
@@ -385,7 +393,14 @@ export function buildAligned(maxPoints = 0): {
     }),
     chanSig: sig,
   };
-  return { x: alignedCache.proj, cols: full.cols };
+  return { x: alignedCache.proj, raw: full.x, cols: full.cols };
+}
+
+/** 3D 轨迹等「原始毫秒时间轴」消费方：proj 会随 2D 面板 xSource 变化（index/ch: 源），
+ *  3D 渐隐/悬停/测距需要恒定的相对秒轴，必须用 raw。 */
+export function fullAlignedRaw(): { x: number[]; cols: (number | null)[][] } {
+  const r = buildAligned(FED_CAP_STORE);
+  return { x: r.raw, cols: r.cols };
 }
 
 /** proj 数组是否严格递增（time/index 源是；ch: 源可能非单调，不能二分） */
@@ -554,7 +569,13 @@ export async function init() {
     // 面板关闭 → 完全停止采集（用户要求：关闭了的面板绝不允许后台运行）；
     // 重新打开后从当前时刻的新数据继续，已有缓存保留。
     // 频谱分析面板（P65）与 2D 曲线共享同一份通道数据，任一打开即采集。
-    if (!panelActivity.isOpen("plot2d") && !panelActivity.isOpen("spectrum")) return;
+    // 3D 轨迹（P69）同为消费方：只开 3D 也有数据入库。
+    if (
+      !panelActivity.isOpen("plot2d") &&
+      !panelActivity.isOpen("spectrum") &&
+      !panelActivity.isOpen("plot3d")
+    )
+      return;
     if (channels.length === 0) return;
     for (const row of p.rows) {
       if (!row.valid) continue;

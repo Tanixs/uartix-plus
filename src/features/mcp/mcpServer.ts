@@ -266,6 +266,18 @@ async function dispatch(kind: string, args: Record<string, unknown>): Promise<un
       await sendData(mode, text);
       return { sent: text, mode };
     }
+    case "get_orchestrator":
+    case "get_plot3d": {
+      // 只读：经 appActions 的 Read 动作取同一份快照（HIGH_ONLY 门控天然不拦，因两 Read 未入该集合）
+      const { runAppAction } = await import("../ai/appActions");
+      const r = await runAppAction(
+        kind === "get_orchestrator" ? "orchestratorRead" : "plot3dRead",
+        {},
+        { highPriv: getSettings().mcpHighPriv },
+      );
+      if (!r.ok) throw new Error(r.err ?? "读取失败");
+      return r.data ?? null;
+    }
     case "run_action": {
       const akind = typeof args.kind === "string" ? args.kind : "";
       const aargs =

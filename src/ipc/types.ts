@@ -14,7 +14,10 @@ export type PanelId =
   | "modbus"
   | "sequencer"
   | "sentinel"
-  | "spectrum";
+  | "spectrum"
+  | "plot3d"
+  | "orchestrator"
+  | "vdev";
 
 export interface PanelMeta {
   id: PanelId;

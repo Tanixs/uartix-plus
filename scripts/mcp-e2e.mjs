@@ -82,10 +82,10 @@ ok(init.result?.serverInfo?.name === "uartix", "serverInfo.name = uartix");
 ok(init.result?.capabilities?.tools !== undefined, "capabilities.tools 已声明");
 notify("notifications/initialized");
 
-/* ---- 2. tools/list：8 工具 ---- */
+/* ---- 2. tools/list：10 工具 ---- */
 const list = await rpc("tools/list");
 const tools = list.result?.tools ?? [];
-ok(tools.length === 8, `tools/list 返回 8 个工具（实际 ${tools.length}）`);
+ok(tools.length === 10, `tools/list 返回 10 个工具（实际 ${tools.length}）`);
 ok(tools.every((t) => t.name && t.description && t.inputSchema?.type === "object"), "每个工具 name/description/inputSchema 齐全");
 
 /* ---- 3. 未知工具 → 协议级 -32602 ---- */

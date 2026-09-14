@@ -29,6 +29,8 @@ export interface SessionSnapshot {
   /** 时间线首/末事件 ts（标注跳转 ratio 换算用） */
   firstTs: number;
   lastTs: number;
+  /** 最近一次 play/seek 使用的回放速度（P70：3D 时间条 seek 恢复节奏用；0=全速） */
+  lastSpeed: number;
 }
 
 let snap: SessionSnapshot = {
@@ -43,6 +45,7 @@ let snap: SessionSnapshot = {
   bridgeClients: 0,
   firstTs: 0,
   lastTs: 0,
+  lastSpeed: 1,
 };
 
 /** 标注独立快照：仅标注变化时替换引用（Plot2D 等叶子订阅不受 10Hz posMs 刷新惊动） */
@@ -315,6 +318,7 @@ export async function play(speed: number) {
     /* 忽略查询失败，Rust 侧仍会把关 */
   }
   try {
+    set({ lastSpeed: speed }); // 记住节奏（P70：3D 时间条 seek 恢复用）
     await invoke("session_play", { speed });
     await refresh();
   } catch (e) {
@@ -404,6 +408,7 @@ export function annotationRatio(ts: number): number {
  */
 export async function seek(ratio: number, speed: number) {
   try {
+    set({ lastSpeed: speed });
     await invoke("session_seek", { ratio, speed });
     await refresh();
   } catch (e) {
