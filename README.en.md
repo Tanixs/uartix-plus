@@ -45,14 +45,22 @@ It is far more than a serial terminal that echoes characters. **Protocols need n
 | Dual-cursor / pointer readout | ❌ | basic | **time ruler + amplitude ruler** |
 | Video link beside telemetry | ❌ | ❌ | ✅ |
 | Session recording and replay | ❌ | CSV export only | **whole-panel rewind + virtual device** |
-| Firmware flashing (XMODEM / YMODEM) | external tools | ❌ | **built-in dialog** |
+| Firmware flashing (XMODEM / YMODEM) | external tools | ❌ | **built-in dialog (both directions)** |
+| Hardware-free debugging | ❌ | ❌ | **scriptable virtual devices (incl. network I/O)** |
+| Automated testing & event orchestration | ❌ | ❌ | **block sequencer + ECA orchestrator + CI-ready CLI** |
+| IMU calibration | separate tools | ❌ | **ellipsoid 9-parameter fit + six-face wizard + live compensation preview** |
 | AI-generated components and actions | ❌ | ❌ | **built in (since v0.3.6)** |
 
 ---
 
 ## Capabilities
 
+- **19 panels**: protocol templates, Hex stream, structure discovery, frame canvas, data table, 2D plot, spectrum analysis, 3D attitude, 3D trajectory, video link, console, control canvas, Modbus workbench, virtual device workshop, test sequencer, auto-orchestrator, sentinel, AI assistant and properties — every one dockable / splittable / **tear-off into its own window**, with the `+ Panel` menu grouped in five sections
 - **End-to-end industrial Modbus**: full RTU / TCP preset clusters out of the box, read responses expanded into `Register1..N`, coil areas unpacked one channel per bit, and exception codes carry their spec wording. The **Modbus Workbench** panel turns the machine into a virtual slave (editable data banks plus fault injection: never reply / reply a chosen exception code / reply delay) or a master that polls registers and coils on a schedule and writes the values straight into variables — **you can exercise the whole chain with no RS-485 hardware**
+- **Hardware-free full-chain debugging**: the **Virtual Device Workshop** plays a real instrument from a JSON spec — six signal models (including a first-order plant), drift, frame drops and command responses (`SET DUTY 45` number capture), and frames streamed out over UDP / TCP / serial; paired with the built-in **PID relay-feedback autotune** orchestration template, the whole connect-tune-verify loop runs with zero hardware
+- **Testing & automation**: the **sequencer** drags blocks into automated regression tests (frame-triggered runs, HTML reports) and its `seq-cli` ships a loopback device plus JUnit output for CI; the **auto-orchestrator** fuses the sequencer with triggers into an ECA engine (12 event kinds × 23 block kinds, typed variables and a sandboxed expression language); the **sentinel** silently watches for spikes, unknown frame types and silence, with one-click AI root-cause diagnosis
+- **Sensor calibration**: the 3D trajectory panel embeds **ellipsoid calibration** (eight-octant point cloud → nine-parameter fit, residual colouring, live compensation preview, copy JSON / C arrays straight into firmware) and a **six-face accelerometer wizard** (2-second rests, σ rejection)
+- **Shipping it out**: the **MCP server** exposes the app to Claude Desktop / Cursor agents (10 tools); **Operator packages** (`.uopk`) freeze a tuned workspace into a read-only runtime for the field
 
 ### Protocol parsing engine
 
@@ -66,7 +74,7 @@ Select a run of bytes on the Hex stream, right-click and declare it as header, l
 - **Bit-masked headers & discriminators**: header and discriminator bytes match bit-by-bit (`??` wildcard, `A?` half-byte, `80&F0` explicit mask), so a single template covers every slave address on a Modbus bus and any exception function code
 - **Value labels**: annotate enums (`2=Illegal data address`) and tables / tooltips / exports show "number text" while channels and curves keep the raw numbers
 - **Text streams are protocols too**: the header may be empty, channels are split adaptively on the delimiter, and the channel count follows each frame's segment count
-- **Preset templates**: WitMotion JY901, Anonymous V7, Modbus RTU (13 frame types), Modbus TCP (15), NMEA 0183, CSV text stream; any protocol exports to JSON for sharing
+- **Preset templates**: WitMotion JY901, Anonymous V7, Modbus RTU (13 frame types), Modbus TCP (15), NMEA 0183, CSV text stream, Virtual device · Temperature furnace; any protocol exports to JSON for sharing
 - **Clusters**: one protocol per tab holding many frame types, with right-click copy / paste / rename / export
 - **Variable-length payloads**: spanTail adaptive fields extend to the end of the payload and can expand into `field#1..N` element variables — element type `bit` unpacks coils one channel per bit; negative-offset fields anchor to the frame tail; the length field supports a scale (bits → bytes)
 - **Structure discovery**: for unknown protocols, frame length / phase / column entropy are estimated automatically and header candidates turn into a template with one click
@@ -78,10 +86,12 @@ Select a run of bytes on the Hex stream, right-click and declare it as header, l
 Parsed fields register as variables automatically — click the eye on a legend entry to plot it. The 2D plot carries two independent cursors (time and amplitude) for A−B delta measurement, and the crosshair snaps to the nearest curve to show raw readings. Peak/valley-preserving decimation keeps long captures smooth while cursors, tables and exports always work on the full dataset.
 
 <details>
-<summary><b>Per-panel details</b> (2D plot / 3D attitude / video link / frame canvas / table / console)</summary>
+<summary><b>Per-panel details</b> (2D plot / spectrum / 3D attitude / 3D trajectory / video link / frame canvas / table / console)</summary>
 
-- **2D plot**: line / step / spline, relative-seconds axis (0s / 60s / 1.2h), newest-value marker anchored to the real curve end, continuous Y auto-fit plus a one-shot Auto button
+- **2D plot**: line / step / spline, relative-seconds axis (0s / 60s / 1.2h), newest-value marker anchored to the real curve end, continuous Y auto-fit plus a one-shot Auto button; rAF-driven follow makes the newest data glide smoothly
+- **Spectrum analysis**: FFT (Hann / rectangular window, linear / dB, Top-3 peaks and frequency resolution) and histogram (mean / σ / distribution) sharing channels with the 2D plot; honest decimation when data is short
 - **3D attitude**: Euler or quaternion input, six rotation orders and per-axis inversion, quadcopter and cube models, fields bindable across protocol templates
+- **3D trajectory**: three channels as a live spatial track (flight path / phase portrait / attitude integration) with two-level LOD for 100k-point sessions, re-anchoring for large coordinates, keyboard fly, a time bar linked to replay — plus built-in ellipsoid and six-face calibration
 - **Video link**: renders frames as pictures in real time from a network source, with pause / rewind / save frame / mirror / flip
 - **Frame canvas**: per-byte colouring, hover for attributes, right-click to insert or delete cells, and a "no valid frame yet" badge with a four-step checklist
 - **Data table**: virtualised list, sorting and filtering, CSV / Excel export
@@ -109,9 +119,19 @@ The control canvas turns debugging panels into a drag-and-drop exercise: a ghost
 
 Record a whole debugging session — parsed frames plus raw RX/TX bytes — into a `.usess` file and replay it any time. The replay engine mirrors the demo source, so the frame canvas / 2D plot / data table / 3D attitude / Hex stream all rewind in sync; speeds from 0.25× to 4×, click-to-seek on the progress bar, and timeline annotations (press M) are saved with the file and drawn on the 2D plot. Replay bridging turns a session into a "virtual device": open a TCP server and any third-party host tool receives the byte stream at the original pacing.
 
+### Testing, automation & virtual devices
+
+No hardware, no colleague to press the reset button? Fine:
+
+- **Virtual Device Workshop** plays a real instrument from a JSON spec: six signal models (const / sine / square / triangle / **first-order plant** / mirror) with noise and thermal drift, frame drops, stuck values and spikes, a frame builder and command matching that mutates inputs and answers (`SET DUTY 45` number capture included). An optional `net` section streams frames over UDP (broadcast, multi-target, command listening) / TCP client / TCP server / dedicated serial port — byte-identical to the local pipeline. Auto-paired protocol templates on start; a temperature furnace and a virtual MPU6050 ship built-in
+- **Test sequencer**: drag blocks into "send → wait for frame → assert → loop" automated regression tests, frame-triggered runs, single-step debugging, self-contained HTML reports; the `seq-cli` companion has a built-in loopback device and JUnit output for CI
+- **Auto-orchestrator**: the sequencer's block streams fused with triggers into an ECA engine — 12 event kinds (frame / bad frame / new frame type / threshold / channel change / timer / session / sentinel / variable / custom event / silence / manual) arm group event slots, 23 block kinds execute, with a typed variable library and a sandboxed expression language (whitelisted functions + `now`), FIFO queues, cooldowns and three-tier circuit breakers
+- **PID autotuning**: the built-in relay-feedback template records oscillation zero-crossings, computes the ultimate gain from six cycles and sends Ziegler-Nichols Kp/Ti/Td back to the device — practice it on the virtual temperature furnace
+- **Sentinel**: silent anomaly detection — dual-EMA z-score spikes, unknown frame types after a learning period, error-rate and silence alarms, desktop-widget residency, one-click or automatic AI root-cause diagnosis with structured evidence
+
 ### Connectivity and performance
 
-Interfaces cover serial / TCP client / TCP server / UDP / Bluetooth BLE — all sharing one parsing pipeline, so network and BLE sources get the full feature set. A unplugged serial port is detected within two seconds and reconnects on replug; network drops reconnect automatically. XMODEM / XMODEM-1K / YMODEM sending is built in for Bootloader / IAP flashing — open a dialog and go, with receiver acknowledgements kept out of the parsing pipeline during transfer.
+Interfaces cover serial / TCP client / TCP server / UDP / Bluetooth BLE, plus the demo source and scriptable virtual devices — everything shares one parsing pipeline, so every source gets the full feature set. An unplugged serial port is detected within two seconds and reconnects on replug; network drops reconnect automatically. XMODEM / XMODEM-1K / YMODEM / YMODEM-G file transfer is built in both directions — flash a Bootloader / IAP, or let the PC act as receiver — with device acknowledgements kept out of the parsing pipeline during transfer.
 
 <details>
 <summary><b>Engineering details</b> (performance / layout / themes / updates)</summary>
@@ -131,24 +151,32 @@ Interfaces cover serial / TCP client / TCP server / UDP / Bluetooth BLE — all 
 Since v0.3.6 the AI is not a chat box but an in-app engine.
 
 - **Create by conversation**: protocol templates / control cards / command library / frame-factory protocols / themes / global styles / dockable panels / sandbox widgets / borderless widgets / direct actions / privileged scripts — ten output kinds, each installed from a confirmation card
-- **Say it, it happens**: requests such as opening a panel, switching layout or connecting a port are executed directly rather than described, through 28 whitelisted actions; destructive ones are flagged red and still need your confirmation
+- **Say it, it happens**: requests such as opening a panel, switching layout, wiring an automation ("event → blocks") or generating and starting a virtual device are executed directly rather than described, through 39 whitelisted actions; destructive ones are flagged red and still need your confirmation
+- **Reads your screen**: paste or attach images (up to 4 per message, auto-compressed); "analyse this waveform" makes the AI screenshot the 2D plot itself; archaeology reports may only reason over numbered deterministic evidence, no invented numbers
 - **Protocol clusters in one shot**: multi-frame protocols are generated as a whole cluster, auto-grouped and archived, disabled until you enable them
-- **Reads your screenshots**: paste or attach images (up to 4 per message, auto-compressed) and the AI answers from the picture
-- **Flashing hand-off**: the AI can pre-fill the transfer dialog (protocol + path); sending still waits for your click
+- **Flashing hand-off**: the AI can pre-fill the transfer dialog (protocol + path, multiple files queued); sending still waits for your click
 - **Everything is an API**: sandbox components receive `window.uartix` — keyboard / cursor listening, AI reasoning awareness, asking the AI, custom context menus, window control, cross-widget broadcast, speech, theme subscription
 - **Borderless mode**: transparent window, drag-to-move while held, snap-and-dock on release, screen-edge clamping — build floating dashboards, notification strips, or a desktop pet (the pet is only an example; the capability is general)
 - **Visible and safe**: multi-stage reasoning streamed as it happens, no install button until generation completes, and sandbox components follow global theme changes live
+
+### Shipping it out
+
+- **MCP server**: expose Uartix+ as a local MCP server so agents inside Claude Desktop / Cursor query live telemetry, send commands and run test sequences (10 tools); token handshake, single client, independent send / high-privilege gates, call audit log
+- **Operator packages**: freeze a tuned workspace (protocols / control pages / command library / layout / appearance / 3D settings) into a `.uopk` for field operators — double-click to import and run read-only, with config writes blocked at the store layer while connecting, commanding, watching and running automations stay available
+- **Guided tour**: a 9-step spotlight tutorial on first launch walks the whole main flow; replay it anytime from Help (ten tabs)
 
 ---
 
 ## Quick start
 
-1. Pick a serial port and baud rate to connect, or switch to TCP / UDP at the top; with no hardware, start the demo source
+> First time? Help (the `?` in the title bar) opens with an **interactive tour** that walks the whole flow below step by step.
+
+1. Pick a serial port and baud rate to connect, or switch to TCP / UDP / BLE at the top; with no hardware, start the demo source — or launch the built-in temperature furnace in the **Virtual Device Workshop**
 2. Drag-select the fixed leading bytes of a frame on the Hex stream, then right-click "Set as header"
 3. Keep selecting the length field, payload and checksum; adjust endianness / type / scale in the properties panel; enable "discriminator" on the function-code field to separate frame types
 4. Parsed fields register as variables — click a legend eye to plot a curve, bind Euler angles in the 3D panel
 5. Open the control canvas and drop widgets in for two-way debugging, or assemble frames in the console's frame factory
-6. Or simply tell the AI assistant: "define this protocol for me", "make a borderless floating thermometer"
+6. Or simply tell the AI assistant: "define this protocol for me", "make a borderless floating thermometer", "simulate an MPU6050 with thermal drift and occasional frame drops"
 
 ---
 
@@ -186,7 +214,7 @@ sudo dnf install libwebkit2gtk-4.1-devel build-essential libxdo-devel \
   openssl-devel libayatana-appindicator3-devel librsvg2-devel
 ```
 
-Before committing, make sure `cargo test` (20 Rust cases) and `npx tsc --noEmit` both pass.
+Before committing, make sure `cargo test` (78 Rust cases), `npm test` (455 vitest cases across 34 files) and `npx tsc --noEmit` all pass.
 
 <details>
 <summary><b>Project layout</b></summary>
@@ -194,19 +222,25 @@ Before committing, make sure `cargo test` (20 Rust cases) and `npx tsc --noEmit`
 ```
 src/
   features/
-    ai/             AI assistant: chat and streaming, ten block installers, uartix bridge, widget host
+    ai/             AI assistant: chat and streaming, ten block installers, uartix bridge, widget host, App Action API
     protocol/       template engine, drag-select definition, properties panel
     framecanvas/    Hex frame canvas (Canvas rendering + virtualisation + archive pool)
     controls/       control canvas, widgets, command library, scripts
     console/        console, quick command bar, frame factory
-    settings/       settings centre, layout slots, import and export
-    serial/         serial and network session state
-    table/ plot/ view3d/ hexview/ video/ help/
+    plot/ plot3d/ attitude/   2D curves and spectrum, 3D trajectory and calibration, 3D attitude
+    xray/ modbus/ video/ table/ hexview/
+    sequencer/      test sequencer (engine / report / CLI share one codebase)
+    orchestrator/   auto-orchestrator (ECA engine, block registry, expression sandbox, presets)
+    vdev/           virtual device workshop (spec model, device library, network I/O)
+    sentinel/       anomaly monitoring (dual-EMA z-score, float, desktop widget)
+    operator/ mcp/ session/ xfer/ settings/ help/ tour/
+    serial/         serial / network / BLE session state
   i18n/             bilingual strings (central keys + inline pairs)
-  panels/           dockview panel registry
+  panels/           dockview panel registry and menu grouping
   shell/            custom title bar, application shell
-  shared/           icons, shared components, byte parsing helpers
-src-tauri/          Rust: serial, TCP / UDP, parallel parsing, checksums, AI streaming, file IO
+  shared/           icons, shared components, byte parsing helpers, drag kernel
+src-tauri/          Rust: serial, TCP / UDP, BLE, parallel parsing, checksums, XMODEM,
+                    session recording, virtual device simulation, AI streaming, MCP bridge, file IO
 ```
 
 </details>
