@@ -307,14 +307,15 @@ export function XRayPanel() {
     const cv = canvasRef.current;
     const wrap = wrapRef.current;
     if (!cv || !wrap || !result || result.L === 0) return;
+    const zf = Number(getComputedStyle(document.documentElement).zoom) || 1;
     const rect = cv.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = (e.clientX - rect.left) / zf;
+    const y = (e.clientY - rect.top) / zf;
     if (y < headH) return;
     const c = Math.floor(x / cellW);
     if (c < 0 || c >= result.L) return;
     const wr = wrap.getBoundingClientRect();
-    setTip({ x: e.clientX - wr.left, y: e.clientY - wr.top, c });
+    setTip({ x: (e.clientX - wr.left) / zf, y: (e.clientY - wr.top) / zf, c });
   };
 
   const tipSt = tip && result && result.L > 0 ? result.cols[tip.c] : null;

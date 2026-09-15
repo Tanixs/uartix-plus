@@ -383,7 +383,7 @@ export function ControlCanvas() {
     const move = (e: MouseEvent) => {
       const d = sideDragRef.current;
       if (!d) return;
-      setSideW(Math.max(140, Math.min(420, d.w0 + (e.clientX - d.startX))));
+      setSideW(Math.max(140, Math.min(420, d.w0 + (e.clientX - d.startX) / (Number(getComputedStyle(document.documentElement).zoom) || 1))));
     };
     const up = () => {
       sideDragRef.current = null;
@@ -662,6 +662,8 @@ export function ControlCanvas() {
 
   const treeRef = useRef<HTMLDivElement | null>(null);
   const gridDropRef = useRef<(d: PdragDetail) => void>(() => {});
+  const gridOverRef = useRef<(d: PdragDetail) => void>(() => {});
+  const [dropPrev, setDropPrev] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const treeOverRef = useRef<(d: PdragDetail) => void>(() => {});
   const treeDropRef = useRef<(d: PdragDetail) => void>(() => {});
   useEffect(() => {
@@ -669,7 +671,12 @@ export function ControlCanvas() {
     if (!el) return;
     return attachPdragZone(el, {
       kinds: "vs-widget vs-cmd vs-field",
-      onDrop: (dd) => gridDropRef.current(dd),
+      onOver: (dd) => gridOverRef.current(dd),
+      onLeave: () => setDropPrev(null),
+      onDrop: (dd) => {
+        setDropPrev(null);
+        gridDropRef.current(dd);
+      },
     });
   }, [page?.id]);
   useEffect(() => {
@@ -1100,6 +1107,30 @@ export function ControlCanvas() {
       }
     }
     placeAt(id, d.x, d.y);
+  };
+  gridOverRef.current = (d) => {
+    const g = gridRef.current;
+    if (!g) return;
+    let type: ControlType = "slider";
+    if (d.kind === "vs-widget") {
+      try {
+        type = (JSON.parse(d.data) as { type: ControlType }).type;
+      } catch {
+        setDropPrev(null);
+        return;
+      }
+    } else if (d.kind === "vs-field") {
+      type = "monitor";
+    }
+    const { w, h } = store.defaultCardSize(type);
+    const r = g.getBoundingClientRect();
+    const zf = zfactor || 1;
+    const tx = Math.max(0, Math.min(page.cols - w, Math.round(((d.x - r.left) / zf - OFFq) / STEPq)));
+    const ty = Math.max(0, Math.min(gridRows - h, Math.round(((d.y - r.top) / zf - OFFq) / STEPq)));
+    const busy = page.cards.some(
+      (c) => !(tx + w <= c.x || c.x + c.w <= tx || ty + h <= c.y || c.y + (c.h || 1) <= ty),
+    );
+    setDropPrev(busy ? null : { x: tx, y: ty, w, h });
   };
   treeOverRef.current = (d) => {
     const row = document
@@ -1720,6 +1751,17 @@ export function ControlCanvas() {
               }}
             >
               {page.cards.map((c) => renderCard(c))}
+              {dropPrev && (
+                <div
+                  className="ctl-drop-prev"
+                  style={{
+                    left: dropPrev.x * STEPq + OFFq,
+                    top: dropPrev.y * STEPq + OFFq,
+                    width: dropPrev.w * STEPq - GAPq,
+                    height: dropPrev.h * STEPq - GAPq,
+                  }}
+                />
+              )}
               <div ref={ghostRef} className="ctl-ghost" />
               {page.cards.length === 0 && (
                 <EmptyState

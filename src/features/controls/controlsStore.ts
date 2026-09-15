@@ -720,6 +720,22 @@ export function setPageLocked(id: string, locked: boolean) {
   emit();
 }
 
+export function defaultCardSize(type: ControlType): { w: number; h: number } {
+  return type === "joystick"
+    ? { w: 2, h: 2 }
+    : type === "keypad"
+      ? { w: 3, h: 3 }
+      : type === "monitor"
+        ? { w: 2, h: 2 }
+        : type === "group"
+          ? { w: 2, h: 3 }
+          : type === "custom"
+            ? { w: 3, h: 3 }
+            : type === "slider"
+              ? { w: 2, h: 1 }
+              : { w: 1, h: 1 };
+}
+
 function defaultCard(type: ControlType, name: string): ControlCard {
   // monitor 默认 2×2（应用图标式正方，此前 2×1 拖入即扁）
   const size =

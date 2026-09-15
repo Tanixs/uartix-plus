@@ -3,6 +3,7 @@ export interface DragSpec {
   data?: string;
   label: string;
   sub?: string;
+  color?: string;
   onEnd?: () => void;
 }
 
@@ -22,6 +23,10 @@ let startY = 0;
 let clickKiller: ((e: MouseEvent) => void) | null = null;
 
 const THRESHOLD = 5;
+
+function zoomF(): number {
+  return Number(getComputedStyle(document.documentElement).zoom) || 1;
+}
 
 function zoneAt(x: number, y: number): Element | null {
   if (!spec) return null;
@@ -67,6 +72,12 @@ function spawnGhost() {
   if (!spec || ghost) return;
   ghost = document.createElement("div");
   ghost.className = "pdrag-ghost";
+  if (spec.color) {
+    const d = document.createElement("i");
+    d.className = "pdrag-dot";
+    d.style.background = spec.color;
+    ghost.appendChild(d);
+  }
   const t = document.createElement("span");
   t.textContent = spec.label;
   ghost.appendChild(t);
@@ -96,8 +107,9 @@ function onMove(e: PointerEvent) {
   }
   e.preventDefault();
   if (ghost) {
-    ghost.style.left = `${e.clientX + 14}px`;
-    ghost.style.top = `${e.clientY + 16}px`;
+    const zf = zoomF();
+    ghost.style.left = `${(e.clientX + 14) / zf}px`;
+    ghost.style.top = `${(e.clientY + 16) / zf}px`;
   }
   setOver(zoneAt(e.clientX, e.clientY), e.clientX, e.clientY);
 }

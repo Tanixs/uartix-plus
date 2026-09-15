@@ -395,8 +395,9 @@ export function VideoLink() {
           const k = Math.exp((e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY) * -0.0012);
           const nz = Math.min(8, Math.max(0.2, zoomRef.current * k));
           const kr = nz / zoomRef.current;
-          const mx = e.clientX - r.left - r.width / 2;
-          const my = e.clientY - r.top - r.height / 2;
+          const zfx = Number(getComputedStyle(document.documentElement).zoom) || 1;
+          const mx = (e.clientX - r.left - r.width / 2) / zfx;
+          const my = (e.clientY - r.top - r.height / 2) / zfx;
           const np = {
             x: mx - (mx - panRef.current.x) * kr,
             y: my - (my - panRef.current.y) * kr,
@@ -414,7 +415,8 @@ export function VideoLink() {
         onPointerMove={(e) => {
           const p = panDragRef.current;
           if (!p) return;
-          const np = { x: p.px + (e.clientX - p.x), y: p.py + (e.clientY - p.y) };
+          const zf = Number(getComputedStyle(document.documentElement).zoom) || 1;
+          const np = { x: p.px + (e.clientX - p.x) / zf, y: p.py + (e.clientY - p.y) / zf };
           panRef.current = np;
           setPan(np);
         }}

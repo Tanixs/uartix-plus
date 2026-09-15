@@ -633,6 +633,7 @@ export function TemplatesPanel() {
                         type: f.type,
                       }),
                       label: `${tpl.name}·${f.name}`,
+                      color: f.color,
                     });
                   }}
                   onClick={() => {
