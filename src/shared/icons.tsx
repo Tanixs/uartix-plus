@@ -450,6 +450,49 @@ export const IconTarget = () =>
   );
 
 /** 重拟合 / 刷新 */
+/** 3D 视角预设四图标（P82②：HUD 文字钮「俯/侧/正/等」SVG 化，红线 24/25） */
+export const IconViewTop = () =>
+  svg(
+    <>
+      <path d="M12 3v5m0 0L9.8 5.8M12 8l2.2-2.2" />
+      <rect x="4" y="11" width="16" height="9" rx="2" />
+    </>,
+  );
+
+export const IconViewSide = () =>
+  svg(
+    <>
+      <path d="M3 12h5m0 0L6.2 9.8M8 12l-1.8 2.2" />
+      <rect x="11" y="4" width="9" height="16" rx="2" />
+    </>,
+  );
+
+export const IconViewFront = () =>
+  svg(
+    <>
+      <path d="M21 12h-5m0 0l1.8-2.2M16 12l1.8 2.2" />
+      <rect x="4" y="4" width="9" height="16" rx="2" />
+    </>,
+  );
+
+export const IconViewIso = () =>
+  svg(
+    <>
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <path d="M3.3 7l8.7 5 8.7-5M12 22V12" />
+    </>,
+  );
+
+/** 自动旋转（环绕箭头 + 中心点，区别于 IconRotate 的单箭头复位） */
+export const IconAutoSpin = () =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="2.4" />
+      <path d="M12 4.5a7.5 7.5 0 0 1 7.4 6.3M19.5 12A7.5 7.5 0 0 1 12 19.5M4.5 12A7.5 7.5 0 0 1 12 4.5" />
+      <path d="M17.2 7.6l2.4.9-.5 2.5" />
+    </>,
+  );
+
 export const IconRotate = () =>
   svg(
     <>

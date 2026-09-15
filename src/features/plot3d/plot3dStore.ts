@@ -592,6 +592,25 @@ export function _resetForTest() {
   clearCalibAll();
 }
 
+/**
+ * 清空轨迹数据（P82② HUD 清空钮）：时间水位推到当前最新点——历史全部跳过、
+ * 新数据从零画起；绑定与显示设置不动；校准采样/拟合/预览缓冲**不受影响**
+ * （独立缓冲，校准 HUD 有自己的「清空重来」）。场景侧由 UI 调 clearTrajectory。
+ */
+export function clearData() {
+  let maxT = -Infinity;
+  for (const id of [settings.axisX, settings.axisY, settings.axisZ]) {
+    if (!id) continue;
+    const s = provider(id);
+    const last = s.t[s.t.length - 1];
+    if (last !== undefined && last > maxT) maxT = last;
+  }
+  st.lastT = maxT;
+  st.valCarry = 0;
+  resetPairStat();
+  emit();
+}
+
 function pumpOnce() {
   if (!sink) return;
   if (!panelActivity.isOpen("plot3d")) return;

@@ -8,6 +8,7 @@ import { THEME_LIST, useSettings, patch, type ThemeMode, type WorkspacePreset, A
 import { useLayouts, removeLayout, renameLayout } from "./layoutsStore";
 import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
 import { t, tx } from "../../i18n/strings";
+import { alertDialog, confirmDialog } from "../../shared/Dialog";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
@@ -49,10 +50,14 @@ function fmtBytes(n: number): string {
 
 const PRESETS: { key: WorkspacePreset; label: string; desc: string }[] = [
   { key: "proto", label: t("set.preset.proto"), desc: "画布 + 属性 + Hex" },
-  { key: "analyze", label: t("set.preset.analyze"), desc: "表格 + 2D 曲线" },
+  { key: "analyze", label: t("set.preset.analyze"), desc: "表格 + 曲线 + 频谱" },
   { key: "attitude", label: t("set.preset.attitude"), desc: "3D 姿态 + 曲线" },
   { key: "console", label: t("set.preset.console"), desc: "仅控制台" },
   { key: "video", label: t("set.preset.video"), desc: "图传 + 控制画板" },
+  { key: "calib", label: t("set.preset.calib"), desc: "3D 轨迹 + 曲线观察" },
+  { key: "auto", label: t("set.preset.auto"), desc: "编排器 + 序列器 + 哨兵" },
+  { key: "modbus", label: t("set.preset.modbus"), desc: "工作台 + Hex + 控制台" },
+  { key: "vdev", label: t("set.preset.vdev"), desc: "工坊 + 曲线 + 画布" },
 ];
 
 /** 主题色板预览：bg=窗口底色 panel=内容区 accent=高亮条（与 theme.css 变量块保持一致） */
@@ -96,18 +101,18 @@ async function loadJson<T>(kinds: string[]): Promise<T | null> {
   try {
     content = await invoke<string>("read_text_file", { path });
   } catch (e) {
-    alert(`读取失败: ${e}`);
+    await alertDialog(`读取失败: ${e}`);
     return null;
   }
   try {
     const obj = JSON.parse(content) as { kind?: string; data?: T };
     if (!obj.kind || !kinds.includes(obj.kind) || obj.data === undefined) {
-      alert("文件格式不正确：kind 不匹配或缺少 data");
+      await alertDialog("文件格式不正确：kind 不匹配或缺少 data");
       return null;
     }
     return obj.data;
   } catch (e) {
-    alert(`JSON 解析失败: ${e}`);
+    await alertDialog(`JSON 解析失败: ${e}`);
     return null;
   }
 }
@@ -137,13 +142,13 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
   const [filter, setFilter] = useState<"all" | ExtType>("all");
   const [sel, setSel] = useState<Set<string>>(() => new Set());
 
-  const applyToggle = (ext: AiExtension, on: boolean) => {
+  const applyToggle = async (ext: AiExtension, on: boolean) => {
     if (ext.type === "script" && on) {
       if (!settings.aiCreativity || !settings.aiScript) {
         notify("启用脚本需要：AI 服务 → 创造模式 + 允许行为脚本");
         return;
       }
-      if (!confirm(`启用脚本「${ext.name}」将在主界面执行其 JS（高权限）。确定？`)) return;
+      if (!(await confirmDialog(`启用脚本「${ext.name}」将在主界面执行其 JS（高权限）。确定？`))) return;
     }
     setEnabled(ext.id, on);
     if (ext.type === "script") {
@@ -309,7 +314,7 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
                 <input
                   type="checkbox"
                   checked={e.enabled}
-                  onChange={(ev) => applyToggle(e, ev.target.checked)}
+                  onChange={(ev) => void applyToggle(e, ev.target.checked)}
                 />
                 <span />
               </label>
@@ -357,15 +362,17 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
                 <button
                   className="btn sm danger-btn"
                   onClick={() => {
-                    if (!confirm(`删除扩展「${e.name}」？不可恢复。`)) return;
-                    if (e.type === "script") stopScript(e.id);
-                    removeExt(e.id);
-                    setSel((prev) => {
-                      const n = new Set(prev);
-                      n.delete(e.id);
-                      return n;
-                    });
-                    if (e.type === "theme" || e.type === "style") applyStyleExts();
+                    void (async () => {
+                      if (!(await confirmDialog({ message: `删除扩展「${e.name}」？不可恢复。`, danger: true, okLabel: "删除" }))) return;
+                      if (e.type === "script") stopScript(e.id);
+                      removeExt(e.id);
+                      setSel((prev) => {
+                        const n = new Set(prev);
+                        n.delete(e.id);
+                        return n;
+                      });
+                      if (e.type === "theme" || e.type === "style") applyStyleExts();
+                    })();
                   }}
                 >
                   删除
@@ -381,11 +388,13 @@ function ExtPage({ notify }: { notify: (s: string) => void }) {
           <button
             className="btn danger-btn"
             onClick={() => {
-              if (!confirm("清空全部扩展？（主题/样式/挂件/面板/脚本；协议/画布/命令不受影响）")) return;
-              for (const e of es.exts) if (e.type === "script") stopScript(e.id);
-              clearAll();
-              applyStyleExts();
-              notify("已清空全部扩展");
+              void (async () => {
+                if (!(await confirmDialog({ message: "清空全部扩展？（主题/样式/挂件/面板/脚本；协议/画布/命令不受影响）", danger: true }))) return;
+                for (const e of es.exts) if (e.type === "script") stopScript(e.id);
+                clearAll();
+                applyStyleExts();
+                notify("已清空全部扩展");
+              })();
             }}
           >
             清空全部扩展
@@ -671,7 +680,16 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                               title="删除"
                               onClick={(ev) => {
                                 ev.stopPropagation();
-                                if (confirm(`删除布局「${s.name}」？`)) removeLayout(s.id);
+                                void (async () => {
+                                  if (
+                                    await confirmDialog({
+                                      message: `删除布局「${s.name}」？`,
+                                      danger: true,
+                                      okLabel: "删除",
+                                    })
+                                  )
+                                    removeLayout(s.id);
+                                })();
                               }}
                             >
                               <IconTrash />
@@ -1031,10 +1049,12 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <button
                       className="btn danger-btn"
                       onClick={() => {
-                        if (!confirm("清除全部 AI 扩展？（主题/样式/小部件/面板/脚本；协议/画布/命令不受影响）")) return;
-                        clearAll();
-                        applyStyleExts();
-                        setMsg("已重置 AI 扩展");
+                        void (async () => {
+                          if (!(await confirmDialog({ message: "清除全部 AI 扩展？（主题/样式/小部件/面板/脚本；协议/画布/命令不受影响）", danger: true }))) return;
+                          clearAll();
+                          applyStyleExts();
+                          setMsg("已重置 AI 扩展");
+                        })();
                       }}
                     >
                       {t("set.ai.reset")}
@@ -1042,14 +1062,16 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <button
                       className="btn danger-btn"
                       onClick={() => {
-                        if (!confirm("恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与 AI 扩展，且不可恢复。确定继续？")) return;
-                        const kill: string[] = [];
-                        for (let i = 0; i < localStorage.length; i++) {
-                          const k = localStorage.key(i);
-                          if (k?.startsWith("vs.")) kill.push(k);
-                        }
-                        kill.forEach((k) => localStorage.removeItem(k));
-                        location.reload();
+                        void (async () => {
+                          if (!(await confirmDialog({ message: "恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与 AI 扩展，且不可恢复。确定继续？", danger: true, okLabel: "清除并重启准备" }))) return;
+                          const kill: string[] = [];
+                          for (let i = 0; i < localStorage.length; i++) {
+                            const k = localStorage.key(i);
+                            if (k?.startsWith("vs.")) kill.push(k);
+                          }
+                          kill.forEach((k) => localStorage.removeItem(k));
+                          location.reload();
+                        })();
                       }}
                     >
                       {t("set.ai.factory")}

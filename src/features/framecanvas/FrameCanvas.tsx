@@ -274,7 +274,7 @@ function SessionTransport() {
                   {tx("时间轴标注", "Timeline annotations")}
                   {(s.state === "recording" || s.state === "playing" || s.state === "paused") && (
                     <button className="fc-anno-add" onClick={promptAnnotate}>
-                      {tx("＋在此刻添加", "＋Add at this moment")}
+                      {tx("在此刻添加", "Add at this moment")}
                     </button>
                   )}
                 </div>
@@ -1663,7 +1663,7 @@ function FrameCanvas() {
                   {m.kind === "sel" && (
                     <>
                       <button className="fc-menu-item primary" onClick={defineFromMenu}>
-                        {tx("✎ 定义为字段…", "✎ Define as field…")}
+                        {tx("定义为字段…", "Define as field…")}
                       </button>
                       {(() => {
                         const tpl0 = curRef.current;
@@ -1700,7 +1700,7 @@ function FrameCanvas() {
                                 dirtyRef.current = true;
                               }}
                             >
-                              {tx("✕ 删除此格（帧长 −1）", "✕ Delete this cell (length −1)")}
+                              {tx("删除此格（帧长 −1）", "Delete this cell (length −1)")}
                             </button>
                           </>
                         );
@@ -1719,7 +1719,7 @@ function FrameCanvas() {
                           editField(m.tplId, m.fid);
                         }}
                       >
-                        {tx("✎ 编辑字段…", "✎ Edit field…")}
+                        {tx("编辑字段…", "Edit field…")}
                       </button>
                       <button
                         className="fc-menu-item danger"
@@ -1745,7 +1745,7 @@ function FrameCanvas() {
                   {m.kind === "hdr" && (
                     <>
                       <button className="fc-menu-item primary" onClick={() => openHdrDlg(m.tplId)}>
-                        {tx("✎ 编辑帧头…", "✎ Edit header…")}<span className="fc-menu-sub">{tx(`当前 ${m.nbytes} 字节`, `${m.nbytes} bytes now`)}</span>
+                        {tx("编辑帧头…", "Edit header…")}<span className="fc-menu-sub">{tx(`当前 ${m.nbytes} 字节`, `${m.nbytes} bytes now`)}</span>
                       </button>
                       <button className="fc-menu-item" onClick={() => { selRef.current = null; closeMenu(); dirtyRef.current = true; }}>
                         {tx("取消选择 (Esc)", "Clear selection (Esc)")}
@@ -1756,7 +1756,7 @@ function FrameCanvas() {
                     <>
                       {m.hasFB ? (
                         <button className="fc-menu-item primary" onClick={() => openFtrDlg(m.tplId)}>
-                          {tx("✎ 编辑帧尾字节…", "✎ Edit footer bytes…")}<span className="fc-menu-sub">{tx("双击亦可", "or double-click")}</span>
+                          {tx("编辑帧尾字节…", "Edit footer bytes…")}<span className="fc-menu-sub">{tx("双击亦可", "or double-click")}</span>
                         </button>
                       ) : (
                         <button className="fc-menu-item" disabled>
@@ -1772,7 +1772,7 @@ function FrameCanvas() {
                           dirtyRef.current = true;
                         }}
                       >
-                        ⚙ {tx("查看校验配置", "View checksum config")}<span className="fc-menu-sub">{tx("右侧属性面板", "properties panel on the right")}</span>
+                        {tx("查看校验配置", "View checksum config")}<span className="fc-menu-sub">{tx("右侧属性面板", "properties panel on the right")}</span>
                       </button>
                       <button className="fc-menu-item" onClick={() => { selRef.current = null; closeMenu(); dirtyRef.current = true; }}>
                         {tx("取消选择 (Esc)", "Clear selection (Esc)")}
@@ -2248,7 +2248,7 @@ function FieldDialog({
             ).map((t) => (
               <option key={t} value={t}>
                 {typeLabel(t)}
-                {!lenRestricted && recs.includes(t) ? ` ${tx("✓推荐", "✓ suggested")}` : ""}
+                {!lenRestricted && recs.includes(t) ? ` ${tx("推荐", "suggested")}` : ""}
               </option>
             ))}
           </select>

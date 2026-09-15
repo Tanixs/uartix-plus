@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import * as ucStore from "./userCodecStore";
+import { IconArrowDown, IconArrowUp, IconClose } from "../../shared/icons";
 import {
   buildUserFrame,
   validateUserCodec,
@@ -224,7 +225,7 @@ export function CodecEditorModal(props: {
               )}
               <span className="qk-ed-ops">
                 <button className="btn" disabled={i === 0} onClick={() => move(i, -1)} title="上移">
-                  ↑
+                  <IconArrowUp />
                 </button>
                 <button
                   className="btn"
@@ -232,10 +233,10 @@ export function CodecEditorModal(props: {
                   onClick={() => move(i, 1)}
                   title="下移"
                 >
-                  ↓
+                  <IconArrowDown />
                 </button>
                 <button className="btn" onClick={() => remove(i)} title="删除该段">
-                  ✕
+                  <IconClose />
                 </button>
               </span>
             </div>

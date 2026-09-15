@@ -16,6 +16,7 @@ import * as panelActivity from "./panels/panelActivity";
 import { SerialToolbar } from "./features/serial/SerialToolbar";
 import { TitleBar } from "./shell/TitleBar";
 import { IconColumns } from "./shared/icons";
+import { confirmDialog } from "./shared/Dialog";
 import type { IfaceKind } from "./features/serial/serialStore";
 import type { WorkspacePreset } from "./features/settings/settingsStore";
 import { JsonDropImport } from "./features/settings/JsonDropImport";
@@ -146,6 +147,153 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     return;
   }
 
+  if (preset === "calib") {
+    // 3D 校准（P82③）：3D 轨迹主视 + 帧画布堆叠，右侧 2D 曲线看原始通道，底部控制台
+    api.addPanel({
+      id: "plot3d",
+      component: "plot3d",
+      title: panelTitleOf("plot3d"),
+      initialWidth: midW + rightW,
+      position: { referencePanel: "templates", direction: "right" },
+    });
+    api.addPanel({
+      id: "framecanvas",
+      component: "framecanvas",
+      title: panelTitleOf("framecanvas"),
+      position: { referencePanel: "plot3d", direction: "within" },
+    });
+    api.addPanel({
+      id: "plot2d",
+      component: "plot2d",
+      title: panelTitleOf("plot2d"),
+      initialWidth: rightW,
+      minimumWidth: 240,
+      position: { referencePanel: "plot3d", direction: "right" },
+    });
+    api.addPanel({
+      id: "console",
+      component: "console",
+      title: panelTitleOf("console"),
+      initialHeight: bottomH,
+      minimumHeight: 120,
+      position: { referencePanel: "plot3d", direction: "below" },
+    });
+    api.getPanel("plot3d")?.api.setActive();
+    return;
+  }
+
+  if (preset === "auto") {
+    // 自动化（P82③）：编排器居中，序列器左、哨兵右，底部曲线+控制台——无模板锚点（自动化场景协议已就绪）
+    api.addPanel({
+      id: "sequencer",
+      component: "sequencer",
+      title: panelTitleOf("sequencer"),
+      initialWidth: leftW,
+      minimumWidth: 260,
+    });
+    api.addPanel({
+      id: "orchestrator",
+      component: "orchestrator",
+      title: panelTitleOf("orchestrator"),
+      initialWidth: midW,
+      position: { referencePanel: "sequencer", direction: "right" },
+    });
+    api.addPanel({
+      id: "sentinel",
+      component: "sentinel",
+      title: panelTitleOf("sentinel"),
+      initialWidth: rightW,
+      minimumWidth: 240,
+      position: { referencePanel: "orchestrator", direction: "right" },
+    });
+    api.addPanel({
+      id: "plot2d",
+      component: "plot2d",
+      title: panelTitleOf("plot2d"),
+      initialHeight: bottomH,
+      minimumHeight: 140,
+      position: { referencePanel: "orchestrator", direction: "below" },
+    });
+    api.addPanel({
+      id: "console",
+      component: "console",
+      title: panelTitleOf("console"),
+      position: { referencePanel: "plot2d", direction: "within" },
+    });
+    api.getPanel("orchestrator")?.api.setActive();
+    return;
+  }
+
+  if (preset === "modbus") {
+    // 工业 Modbus（P82③）：工作台居中，右侧指令工厂所在控制台，底部 Hex + 表格
+    api.addPanel({
+      id: "modbus",
+      component: "modbus",
+      title: panelTitleOf("modbus"),
+      initialWidth: midW + rightW,
+      position: { referencePanel: "templates", direction: "right" },
+    });
+    api.addPanel({
+      id: "console",
+      component: "console",
+      title: panelTitleOf("console"),
+      initialWidth: rightW,
+      minimumWidth: 260,
+      position: { referencePanel: "modbus", direction: "right" },
+    });
+    api.addPanel({
+      id: "hexview",
+      component: "hexview",
+      title: panelTitleOf("hexview"),
+      initialHeight: bottomH,
+      minimumHeight: 120,
+      position: { referencePanel: "modbus", direction: "below" },
+    });
+    api.addPanel({
+      id: "table",
+      component: "table",
+      title: panelTitleOf("table"),
+      position: { referencePanel: "hexview", direction: "right" },
+    });
+    api.getPanel("modbus")?.api.setActive();
+    return;
+  }
+
+  if (preset === "vdev") {
+    // 虚拟设备（P82③）：工坊居中，右侧曲线即时观察，底部帧画布 + 控制台
+    api.addPanel({
+      id: "vdev",
+      component: "vdev",
+      title: panelTitleOf("vdev"),
+      initialWidth: midW,
+      position: { referencePanel: "templates", direction: "right" },
+    });
+    api.addPanel({
+      id: "plot2d",
+      component: "plot2d",
+      title: panelTitleOf("plot2d"),
+      initialWidth: rightW,
+      minimumWidth: 240,
+      position: { referencePanel: "vdev", direction: "right" },
+    });
+    api.addPanel({
+      id: "framecanvas",
+      component: "framecanvas",
+      title: panelTitleOf("framecanvas"),
+      initialHeight: bottomH,
+      minimumHeight: 120,
+      position: { referencePanel: "vdev", direction: "below" },
+    });
+    api.addPanel({
+      id: "console",
+      component: "console",
+      title: panelTitleOf("console"),
+      position: { referencePanel: "framecanvas", direction: "right" },
+    });
+    api.getPanel("vdev")?.api.setActive();
+    return;
+  }
+
   const centerPanels =
     preset === "analyze"
       ? (["plot2d", "hexview", "console"] as const)
@@ -184,11 +332,10 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     minimumHeight: 260,
     position: { referencePanel: first, direction: "right" },
   });
-  const bottomMain = preset === "attitude" ? "table" : "table";
   api.addPanel({
-    id: bottomMain,
-    component: bottomMain,
-    title: panelTitleOf(bottomMain),
+    id: "table",
+    component: "table",
+    title: panelTitleOf("table"),
     initialHeight: bottomH,
     minimumHeight: 140,
     position: { referencePanel: first, direction: "below" },
@@ -204,10 +351,11 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
     });
   }
   if (preset === "analyze") {
+    // P82③：分析预设右下从 3D 姿态换成频谱——与 2D 共享通道，"分析"主题更聚焦
     api.addPanel({
-      id: "view3d",
-      component: "view3d",
-      title: panelTitleOf("view3d"),
+      id: "spectrum",
+      component: "spectrum",
+      title: panelTitleOf("spectrum"),
       initialWidth: bottomColW,
       minimumWidth: 240,
       position: { referencePanel: "plot2d", direction: "right" },
@@ -967,9 +1115,11 @@ function OperatorBanner({ onExit }: { onExit: () => void }) {
       <button
         className="btn"
         onClick={() => {
-          if (confirm(tx("退出 Operator 模式？已导入的配置将解除只读保护", "Exit operator mode? Imported configuration will become editable"))) {
-            onExit();
-          }
+          void (async () => {
+            if (await confirmDialog(tx("退出 Operator 模式？已导入的配置将解除只读保护", "Exit operator mode? Imported configuration will become editable"))) {
+              onExit();
+            }
+          })();
         }}
       >
         {tx("退出 Operator 模式", "Exit operator mode")}

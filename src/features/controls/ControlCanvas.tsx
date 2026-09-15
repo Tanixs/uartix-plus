@@ -21,6 +21,7 @@ import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
 import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
+import { alertDialog } from "../../shared/Dialog";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -304,14 +305,14 @@ export function ControlCanvas() {
         data?: unknown;
       };
       if (obj.kind !== "uartix-controls" || !obj.data) {
-        alert("不是控制画布文件（kind 不匹配）");
+        await alertDialog("不是控制画布文件（kind 不匹配）");
         return;
       }
       const d = obj.data as { name?: string; cols?: number; cards?: Record<string, unknown>[] };
       const arr = Array.isArray(d) ? d[0] : d;
       store.importPage(arr);
     } catch (e) {
-      alert(`导入失败: ${e}`);
+      await alertDialog(`导入失败: ${e}`);
     }
   };
   const [editingCmd, setEditingCmd] = useState<string | null>(null);

@@ -172,6 +172,37 @@ describe("plot3dStore 泵", () => {
     expect(batches[2].b.x).toEqual([9, 10]);
   });
 
+  it("clearData（P82②）：历史跳过、新数据从零画；绑定与校准保留", () => {
+    h.setSeries(makeSeries());
+    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
+    const batches = collect();
+    pump(1);
+    expect(batches).toHaveLength(1);
+
+    store.clearData();
+    // 清空后源未追加 → 不重放旧数据
+    pump(1);
+    expect(batches).toHaveLength(1);
+
+    // 追加 60/70ms 两点 → 只消费新点，reloaded=false（非重灌）
+    h.setSeries(
+      ser(
+        [0, 10, 20, 30, 40, 50, 60, 70],
+        [1, 2, 3, 4, 5, 6, 7, 8],
+        [11, 12, 13, 14, 15, 16, 17, 18],
+        [21, 22, 23, 24, 25, 26, 27, 28],
+        [null, 100, 101, 102, 103, 104, 105, 106],
+      ),
+    );
+    pump(1);
+    expect(batches).toHaveLength(2);
+    expect(batches[1].reloaded).toBe(false);
+    expect(batches[1].b.t).toEqual([0.06, 0.07]);
+    expect(batches[1].b.x).toEqual([7, 8]);
+    // 绑定保留（clearData 不动设置）
+    expect(store.getSnapshot().settings.axisX).toBe("ax");
+  });
+
   it("density 抽稀：mid=1:2 / low=1:4（对消费序号取模）", () => {
     h.setSeries(makeSeries());
     store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", density: "mid" });

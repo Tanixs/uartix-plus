@@ -52,7 +52,7 @@ export interface AppActionResult {
   err?: string;
 }
 
-const PRESETS: WorkspacePreset[] = ["proto", "analyze", "attitude", "console", "video"];
+const PRESETS: WorkspacePreset[] = ["proto", "analyze", "attitude", "console", "video", "calib", "auto", "modbus", "vdev"];
 
 /** 需要脚本高权限的动作（MCP 桥 run_action 门控复用同一集合） */
 export const HIGH_ONLY = new Set([
@@ -885,7 +885,7 @@ async function runOrchestratorAction(a: Record<string, unknown>): Promise<unknow
           store.atGroupCap() ? `编排组已达上限 ${ORCH_LIMITS.groupCap}` : needLocked,
         );
       }
-      return { id, msg: "已新建空组（未挂事件 → 只能手动 ▶ 或被其他组调用）" };
+      return { id, msg: "已新建空组（未挂事件 → 只能手动运行或被其他组调用）" };
     }
     case "groupUpdate": {
       const doc = store.getSnapshot().doc;

@@ -139,7 +139,7 @@ Interfaces cover serial / TCP client / TCP server / UDP / Bluetooth BLE, plus th
 - **Binary IPC**: frames travel over a Tauri Channel as ArrayBuffer, skipping base64 and JSON overhead
 - **Panel lifecycle gating**: closed panels stop moving data; background tabs in a stack buffer without rendering
 - **Watermark-reclaimed archive pool**: hundreds of thousands of frames without slowdown
-- **Layouts**: four preset workspaces plus custom slots (save as / switch / delete)
+- **Layouts**: nine preset workspaces (protocol debug / data analysis / attitude tuning / serial only / video link / 3D calibration / automation / industrial Modbus / virtual device) plus custom slots (save as / switch / delete)
 - **Themes**: nine colour schemes, Begonia by default, full light and dark coverage
 - **Language**: bilingual interface reaching into every panel, switching instantly (your protocol and field names stay untouched)
 - **Portability**: protocols, canvas and command library all exchange as JSON; built-in auto-update

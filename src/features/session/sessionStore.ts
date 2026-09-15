@@ -6,6 +6,7 @@ import * as templateStore from "../protocol/templateStore";
 import * as serialStore from "../serial/serialStore";
 import { toast } from "../ai/extRuntime";
 import { tx } from "../../i18n/strings";
+import { confirmDialog } from "../../shared/Dialog";
 
 /**
  * 会话录制回放（HANDOFF 十六 16.2 / P1）前端状态机：
@@ -236,12 +237,12 @@ export async function openSession(): Promise<boolean> {
   // 防呆：有未保存的内存录制时打开新文件会丢弃它
   if (snap.state === "recorded" && !snap.fileName) {
     if (
-      !window.confirm(
+      !(await confirmDialog(
         tx(
           "有未保存的录制，打开新会话将丢弃它，继续？",
           "Unsaved recording will be discarded. Continue?",
         ),
-      )
+      ))
     ) {
       return false;
     }
@@ -269,7 +270,7 @@ export async function openSession(): Promise<boolean> {
     const missing = (meta.tplRules?.templates ?? []).filter((t) => !names.has(t.name));
     if (missing.length > 0) {
       if (
-        window.confirm(
+        await confirmDialog(
           tx(
             `会话内含 ${missing.length} 个当前缺失的模板，导入副本？（不覆盖现有协议）`,
             `Session contains ${missing.length} templates missing locally. Import as copies? (existing protocols are never overwritten)`,

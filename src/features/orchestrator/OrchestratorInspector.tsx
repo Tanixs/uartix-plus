@@ -60,6 +60,8 @@ function Field(props: { label: string; tip?: string; children: ReactNode }) {
 function ChanSelect(props: { value: string; onChange: (v: string) => void }) {
   useSyncExternalStore(plotStore.subscribe, plotStore.getSnapshot);
   const chans = plotStore.getSnapshot().channels;
+  // 选中的通道被删时补一条回退项——否则 select 显示空白，用户不知道"选没选"（P82④）
+  const gone = props.value !== "" && !chans.some((c) => c.id === props.value);
   return (
     <select
       className="input orch-flex"
@@ -68,6 +70,9 @@ function ChanSelect(props: { value: string; onChange: (v: string) => void }) {
       onChange={(e) => props.onChange(e.target.value)}
     >
       <option value="">{chans.length ? tx("选择通道…", "Pick a channel…") : tx("（无通道）", "(no channels)")}</option>
+      {gone && (
+        <option value={props.value}>{tx(`已删除通道 ${props.value.slice(0, 8)}…`, `deleted channel ${props.value.slice(0, 8)}…`)}</option>
+      )}
       {chans.map((c) => (
         <option key={c.id} value={c.id}>{c.name}</option>
       ))}
@@ -76,6 +81,7 @@ function ChanSelect(props: { value: string; onChange: (v: string) => void }) {
 }
 
 function VarSelect(props: { doc: FlowDoc; value: string; onChange: (v: string) => void }) {
+  const gone = props.value !== "" && !props.doc.vars.some((v) => v.name === props.value);
   return (
     <select
       className="input orch-flex"
@@ -84,6 +90,7 @@ function VarSelect(props: { doc: FlowDoc; value: string; onChange: (v: string) =
       onChange={(e) => props.onChange(e.target.value)}
     >
       <option value="">{props.doc.vars.length ? tx("选择变量…", "Pick a var…") : tx("（无变量）", "(no vars)")}</option>
+      {gone && <option value={props.value}>{tx(`已删除变量 ${props.value}`, `deleted var ${props.value}`)}</option>}
       {props.doc.vars.map((v) => (
         <option key={v.name} value={v.name}>{v.name}</option>
       ))}
@@ -466,7 +473,7 @@ function EventFields(props: { g: GroupNode; ev: EventBlock; doc: FlowDoc }) {
     case "manual":
       return (
         <div className="orch-hint">
-          {tx("手动事件：仅由组头部的 ▶ 触发，也可被别的组「运行组」调用。", "Manual: fired only by ▶, or invoked by other groups' RunGroup.")}
+          {tx("手动事件：仅由组头部的「运行」按钮触发，也可被别的组「运行组」调用。", "Manual: fired only by the Run button, or invoked by other groups' RunGroup.")}
         </div>
       );
     case "session":

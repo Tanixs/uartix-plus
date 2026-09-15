@@ -9,9 +9,11 @@ import * as bind from "./orchestratorBind";
 import * as sequencerStore from "../sequencer/sequencerStore";
 import * as commandStore from "../controls/commandStore";
 import * as plotStore from "../plot/plotStore";
+import * as templateStore from "../protocol/templateStore";
 import { Inspector, VarsEditor, type Sel } from "./OrchestratorInspector";
 import { toast } from "../ai/extRuntime";
 import { useListDrag, type DragPos } from "../../shared/useListDrag";
+import { alertDialog, confirmDialog } from "../../shared/Dialog";
 import { useOperator } from "../operator/operatorStore";
 import {
   IconArrowDown,
@@ -169,7 +171,7 @@ function manualBlockReason(g: GroupNode, masterOn: boolean): string | null {
   if (!masterOn) return tx("总开关关闭：先打开左上角「编排中」", "Master switch is off — turn it on first");
   if (!g.enabled) return tx("本组已禁用（勾选左侧复选框启用）", "This group is disabled");
   if (!isManuallyTriggerable(g))
-    return tx("本组只响应自动事件。如需手动 ▶，请在事件槽里挂一个「手动」事件块", "This group only responds to auto events. Attach a Manual event block to enable ▶");
+    return tx("本组只响应自动事件。如需手动运行，请在事件槽里挂一个「手动」事件块", "This group only responds to auto events. Attach a Manual event block to enable the Run button");
   return null;
 }
 
@@ -180,9 +182,24 @@ function matchDesc(m: FrameMatch): string {
   return `${m.fieldName} ${m.op} ${e}`;
 }
 
+/** id→名称解析（P82④：摘要不再裸显 UUID——通道来自 2D 图例，模板来自协议面板；
+ *  通道/模板被删时回退「已删除 · 前8位」，摘要仍可读可定位 */
+function chanName(id: string): string {
+  if (!id) return "?";
+  const ch = plotStore.getSnapshot().channels.find((c) => c.id === id);
+  if (ch) return ch.name;
+  return tx(`已删除通道 ${id.slice(0, 8)}…`, `deleted channel ${id.slice(0, 8)}…`);
+}
+
+function tplName(id: string): string {
+  if (!id) return "?";
+  const t = templateStore.getSnapshot().rules.templates.find((x) => x.id === id);
+  return t ? t.name : tx(`已删除模板 ${id.slice(0, 8)}…`, `deleted template ${id.slice(0, 8)}…`);
+}
+
 function condDesc(c: Cond): string {
   switch (c.k) {
-    case "chan": return `通道 ${c.chId} ${c.op} ${c.value}${c.tol ? `±${c.tol}` : ""}`;
+    case "chan": return `通道 ${chanName(c.chId)} ${c.op} ${c.value}${c.tol ? `±${c.tol}` : ""}`;
     case "var": return `${c.name} ${c.op} ${String(c.value)}${c.tol ? `±${c.tol}` : ""}`;
     case "expr": return c.src || "(空)";
     case "evtField": return `evt.${c.field} ${c.op} ${String(c.value)}`;
@@ -193,7 +210,7 @@ function condDesc(c: Cond): string {
 function varFromDesc(f: VarFrom): string {
   switch (f.k) {
     case "const": return String(f.value);
-    case "chan": return `通道 ${f.chId}`;
+    case "chan": return `通道 ${chanName(f.chId)}`;
     case "expr": return f.src || "(空)";
     case "evtField": return `evt.${f.field}`;
   }
@@ -256,7 +273,7 @@ function summaryParts(n: FlowNode): SummaryParts {
       return S(tx("Modbus写", "Mb write"), [`FC0${n.fn}`, `#${n.slave}`, `@${n.addr}`, String(n.value)]);
     case "log": return S(tx("日志", "Log"), [`[${n.level}]`, n.text || tx("(空)", "(empty)")]);
     case "snapshot": return S(tx("截图", "Snap"), [n.panel, n.note || ""]);
-    case "exportCsv": return S(tx("导CSV", "CSV"), [n.chanId || tx("(未选)", "(none)"), tx(`最近 ${n.lastN} 点`, `last ${n.lastN}`)]);
+    case "exportCsv": return S(tx("导CSV", "CSV"), [n.chanId ? chanName(n.chanId) : tx("(未选)", "(none)"), tx(`最近 ${n.lastN} 点`, `last ${n.lastN}`)]);
     case "stopSuite": return S(tx("停序列", "Stop suite"));
     case "emitFlow": return S(tx("发事件", "Emit"), [n.name || tx("(未命名)", "(unnamed)"), ...n.data.map((d) => d.k)]);
     case "clip": return S(tx("剪贴板", "Clip"), [n.text || tx("(空)", "(empty)")]);
@@ -297,14 +314,14 @@ function eventSummary(ev: EventBlock): string {
     case "manual": return tx("手动", "Manual");
     case "session": return `会话${ev.phase === "start" ? tx("开始", "start") : tx("停止", "stop")}`;
     case "frame": return `帧 ${matchDesc(ev.match)}${ev.stride > 1 ? ` ×1/${ev.stride}` : ""}`;
-    case "threshold": return `通道 ${ev.chId || "?"} ${ev.op === "above" ? ">" : "<"} ${ev.value} ${ev.edge === "enter" ? tx("进入", "enter") : tx("回落", "exit")}`;
+    case "threshold": return `通道 ${ev.chId ? chanName(ev.chId) : "?"} ${ev.op === "above" ? ">" : "<"} ${ev.value} ${ev.edge === "enter" ? tx("进入", "enter") : tx("回落", "exit")}`;
     case "timer": return `每 ${ev.intervalMs}ms`;
     case "sentinel": return `哨兵 ${ev.level}`;
     case "varChanged": return `${ev.varName || "?"} 变更`;
     /* ---------- B4d 新增 ---------- */
     case "frameError": return `坏帧${ev.stride > 1 ? ` ×1/${ev.stride}` : ""}`;
-    case "chanChanged": return `通道 ${ev.chId || "?"} 变化>${ev.tol}${ev.minIntervalMs > 50 ? ` 节流${ev.minIntervalMs}ms` : ""}`;
-    case "newTpl": return ev.tplId ? `新帧型 ${ev.tplId}` : tx("任意新帧型", "any new type");
+    case "chanChanged": return `通道 ${ev.chId ? chanName(ev.chId) : "?"} 变化>${ev.tol}${ev.minIntervalMs > 50 ? ` 节流${ev.minIntervalMs}ms` : ""}`;
+    case "newTpl": return ev.tplId ? `新帧型 ${tplName(ev.tplId)}` : tx("任意新帧型", "any new type");
     case "flowEvt": return `事件 ${ev.name || "?"}`;
     case "idle": return tx(`空闲 ≥${ev.idleMs}ms`, `idle ≥${ev.idleMs}ms`);
   }
@@ -575,14 +592,14 @@ export function OrchestratorPanel() {
 
   /* ---------- 从序列导入（B7：二次确认 + 定位新组） ---------- */
 
-  const importFromSuite = (s: Suite) => {
+  const importFromSuite = async (s: Suite) => {
     const blocks = countBlocks(s.steps);
-    if (!window.confirm(
+    if (!(await confirmDialog(
       tx(
-        `将追加一个「未启用」的编排组：\n\n名称：${s.name || "导入的序列"}\n块数：${blocks}\n\n导入后不会自动运行；请在画布上核对块流，再勾选启用、挂事件或手动 ▶。`,
+        `将追加一个「未启用」的编排组：\n\n名称：${s.name || "导入的序列"}\n块数：${blocks}\n\n导入后不会自动运行；请在画布上核对块流，再勾选启用、挂事件或手动运行。`,
         `Append a DISABLED group:\n\nName: ${s.name || "imported suite"}\nBlocks: ${blocks}\n\nNothing runs until you review it and enable it.`,
       ),
-    )) return;
+    ))) return;
     const id = orchestratorStore.importSuite(s);
     if (!id) {
       toast(tx(`导入失败：编排组已达上限 ${ORCH_LIMITS.groupCap} 或套件为空`, `Import failed: group limit (${ORCH_LIMITS.groupCap}) reached or the suite is empty`));
@@ -624,7 +641,7 @@ export function OrchestratorPanel() {
       {/* 拖拽 ghost（portal 到 body；useListDrag 直写 transform 跟手） */}
       {drag.ghost}
       {readOnly && (
-        <div className="orch-ro-bar" title={tx("Operator 只读模式：编排配置与结构只读，测试运行（总开关 / ▶ / 日志 / 导出）可用", "Operator read-only: orchestration config is locked; test running (master switch / ▶ / log / export) still works")}>
+        <div className="orch-ro-bar" title={tx("Operator 只读模式：编排配置与结构只读，测试运行（总开关 / 运行按钮 / 日志 / 导出）可用", "Operator read-only: orchestration config is locked; test running (master switch / Run / log / export) still works")}>
           <IconLock />
           {tx("Operator 只读：编排结构锁定，可运行与查看", "Operator read-only: structure locked, running and viewing allowed")}
         </div>
@@ -693,7 +710,7 @@ export function OrchestratorPanel() {
           }
           onChange={(e) => {
             const s = suites.suites.find((x) => x.id === e.target.value);
-            if (s) importFromSuite(s);
+            if (s) void importFromSuite(s);
           }}
         >
           <option value="">{tx("从序列导入", "Import from sequencer")}</option>
@@ -724,7 +741,7 @@ export function OrchestratorPanel() {
             if (!f) return;
             const err = orchestratorStore.importJSON(await f.text());
             if (err) {
-              window.alert(err);
+              await alertDialog(err);
               return;
             }
             setSel(null);
@@ -748,13 +765,13 @@ export function OrchestratorPanel() {
               <div className="orch-empty-t">{tx("自动编排器", "Orchestrator")}</div>
               <div className="orch-empty-d">
                 {tx(
-                  "组 = 编排单元：头部事件槽挂事件块（帧命中/阈值/定时器/哨兵…）自动触发，组内块线性执行；支持如果/循环逻辑块、变量库与调用测试序列。不挂事件的组由 ▶ 手动跑或被别的组调用。",
+                  "组 = 编排单元：头部事件槽挂事件块（帧命中/阈值/定时器/哨兵…）自动触发，组内块线性执行；支持如果/循环逻辑块、变量库与调用测试序列。不挂事件的组由运行按钮手动跑或被别的组调用。",
                   "A group is an orchestration unit: event blocks at the head auto-trigger it; blocks inside run linearly. Supports if/loop logic, flow vars and sequencer calls.",
                 )}
               </div>
               <ol className="orch-steps">
                 <li>{tx("新建组，往里添加动作块（发送 / 等待 / 如果 / 循环…）", "Create a group, add action blocks (send / wait / if / loop…)")}</li>
-                <li>{tx("给组挂事件（阈值 / 帧命中 / 定时器…），或直接用 ▶ 手动跑", "Attach events (threshold / frame / timer…), or run it with ▶")}</li>
+                <li>{tx("给组挂事件（阈值 / 帧命中 / 定时器…），或直接用运行按钮手动跑", "Attach events (threshold / frame / timer…), or run it with the Run button")}</li>
                 <li>{tx("打开左上「编排中」总开关——条件一满足就自动执行", "Flip the master switch — actions run the moment conditions hit")}</li>
               </ol>
               <div className="orch-empty-ops">
@@ -940,7 +957,7 @@ function LogDrawer(props: {
         {rows.length === 0 && (
           <div className="orch-log-empty">
             {all.length === 0
-              ? tx("还没有运行记录：挂好事件后打开总开关，或点组上的 ▶ 手动跑一次", "No runs yet — arm the master switch, or hit ▶ on a group")
+              ? tx("还没有运行记录：挂好事件后打开总开关，或点组上的运行按钮手动跑一次", "No runs yet — arm the master switch, or hit Run on a group")
               : tx("当前筛选下没有记录", "No entries match the current filter")}
           </div>
         )}
@@ -1064,7 +1081,7 @@ function GroupCard(props: {
           className={`orch-evcount${g.events.length === 0 ? " manual" : ""}`}
           title={
             g.events.length === 0
-              ? tx("事件槽为空：本组不会自动触发，只能手动 ▶ 或被其他组调用", "Empty event slot: never auto-triggers — manual ▶ or called by another group")
+              ? tx("事件槽为空：本组不会自动触发，只能手动运行或被其他组调用", "Empty event slot: never auto-triggers — run it manually or call it from another group")
               : tx(`挂了 ${g.events.length} 个事件块`, `${g.events.length} event block(s)`)
           }
         >
@@ -1086,7 +1103,7 @@ function GroupCard(props: {
           className="sq-en"
           checked={g.enabled}
           disabled={readOnly}
-          title={roTitle(tx("启用/禁用该组（禁用后事件不触发、▶ 不运行）", "Enable/disable the group"))}
+          title={roTitle(tx("启用/禁用该组（禁用后事件不触发、运行按钮也不跑）", "Enable/disable the group"))}
           onChange={(e) => orchestratorStore.updateGroup(g.id, { enabled: e.target.checked })}
         />
         <button
@@ -1123,8 +1140,17 @@ function GroupCard(props: {
           disabled={readOnly}
           title={roTitle(tx("删除该组", "Delete the group"))}
           onClick={() => {
-            if (!window.confirm(tx(`确定删除组「${g.name}」？整棵块流与事件槽一并删除，不可撤销。`, `Delete group "${g.name}"? Its whole block flow and events will be removed. This cannot be undone.`))) return;
-            orchestratorStore.removeGroup(g.id);
+            void (async () => {
+              if (
+                !(await confirmDialog({
+                  message: tx(`确定删除组「${g.name}」？整棵块流与事件槽一并删除，不可撤销。`, `Delete group "${g.name}"? Its whole block flow and events will be removed. This cannot be undone.`),
+                  danger: true,
+                  okLabel: tx("删除", "Delete"),
+                }))
+              )
+                return;
+              orchestratorStore.removeGroup(g.id);
+            })();
           }}
         >
           <IconClose />
@@ -1143,8 +1169,8 @@ function GroupCard(props: {
       >
         <span className="orch-slot-lab">{tx("事件", "Events")}</span>
         {g.events.length === 0 && (
-          <span className="orch-slot-empty" title={tx("挂上事件块后本组会自动触发；也可以只手动 ▶ 或被其他组调用", "Attach an event block to auto-trigger; otherwise it stays manual/callable")}>
-            {tx("未挂事件 · 仅可手动 ▶ 或被其他组调用", "No events · manual ▶ or called only")}
+          <span className="orch-slot-empty" title={tx("挂上事件块后本组会自动触发；也可以只手动运行或被其他组调用", "Attach an event block to auto-trigger; otherwise it stays manual/callable")}>
+            {tx("未挂事件 · 仅可手动运行或被其他组调用", "No events · run manually or via other groups only")}
           </span>
         )}
         {g.events.map((ev) => {

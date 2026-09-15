@@ -30,7 +30,8 @@ import { useSettings } from "../settings/settingsStore";
 import { useOperator } from "../operator/operatorStore";
 import { toast } from "../ai/extRuntime";
 import { Flyout } from "../../shared/Flyout";
-import { IconCheck, IconChevron, IconCircle, IconClose, IconCrosshair, IconDot, IconLock, IconPlay, IconRotate, IconTarget } from "../../shared/icons";
+import { IconAutoSpin, IconCheck, IconChevron, IconCircle, IconClose, IconCrosshair, IconDot, IconLock, IconPlay, IconRotate, IconTarget, IconTrash, IconViewFront, IconViewIso, IconViewSide, IconViewTop } from "../../shared/icons";
+import { confirmDialog } from "../../shared/Dialog";
 import { fmtVal } from "../plot/plotMeasure";
 import { tx, useLocale } from "../../i18n/strings";
 
@@ -791,7 +792,7 @@ export function Plot3D() {
 
   /** 子页切换（P73 §4.2）：椭球 ↔ 六面互清对方缓冲（数据语义不同，混采无意义）。
    *  对侧已有可观工作量（采样达标或已有拟合/已采面）时先确认，误点不再瞬间清空 */
-  const switchCalibTab = (t: "ellipsoid" | "six") => {
+  const switchCalibTab = async (t: "ellipsoid" | "six") => {
     if (t === calibTab) return;
     const snap = plot3dStore.calibSnapshot();
     const a6s = plot3dStore.accel6Snapshot();
@@ -799,12 +800,13 @@ export function Plot3D() {
     const dropSix = t === "ellipsoid" && a6s.faces.some(Boolean);
     if (dropEllipsoid || dropSix) {
       if (
-        !window.confirm(
-          tx(
+        !(await confirmDialog({
+          message: tx(
             "切换子页会清空另一侧已采集的数据与结果（椭球点云 / 六面清单互不兼容），确定继续？",
             "Switching clears the other side's samples and results (ellipsoid cloud vs six-face data are incompatible). Continue?",
           ),
-        )
+          danger: true,
+        }))
       )
         return;
     }
@@ -1176,8 +1178,9 @@ export function Plot3D() {
           </label>
         </div>
 
-        {/* 视角组（右上） */}
-        <div className="p3d-hud tr">
+        {/* 视角组（右上，P82②）：毛玻璃胶囊三段式——视角预设｜聚焦·跟随·自旋｜校准·清空。
+            文字钮 SVG 化（红线 24/25），自动旋转从右键菜单升为一级按钮，新增清空数据 */}
+        <div className="p3d-hud tr p3d-tray">
           {presets.map((it) => (
             <button
               key={it.p}
@@ -1185,9 +1188,10 @@ export function Plot3D() {
               onClick={() => sceneRef.current?.setViewPreset(it.p)}
               title={tx(it.tipZh, it.tipEn)}
             >
-              {tx(it.zh, it.en)}
+              {it.p === "top" ? <IconViewTop /> : it.p === "side" ? <IconViewSide /> : it.p === "front" ? <IconViewFront /> : <IconViewIso />}
             </button>
           ))}
+          <span className="p3d-tray-sep" />
           <button
             className="icon-btn"
             onClick={() => sceneRef.current?.resetView()}
@@ -1213,6 +1217,14 @@ export function Plot3D() {
             <IconLock />
           </button>
           <button
+            className={`icon-btn${s3d.autoRotate ? " primary" : ""}`}
+            onClick={() => plot3dStore.setSetting({ autoRotate: !s3d.autoRotate })}
+            title={tx("自动旋转：绕中心缓慢转动展示（与跟随互斥）", "Auto rotate: slow turntable showcase (exclusive with follow)")}
+          >
+            <IconAutoSpin />
+          </button>
+          <span className="p3d-tray-sep" />
+          <button
             className={`icon-btn${s3d.calibMode ? " primary" : ""}`}
             disabled={!allBound}
             onClick={() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true }))}
@@ -1222,6 +1234,33 @@ export function Plot3D() {
             )}
           >
             <IconTarget />
+          </button>
+          <button
+            className="icon-btn p3d-tray-danger"
+            onClick={() => {
+              void (async () => {
+                const ok = await confirmDialog({
+                  title: tx("清空轨迹数据", "Clear trajectory data"),
+                  message: tx(
+                    "清空已积累的轨迹：历史全部跳过，新数据从零画起。\n绑定、显示设置与校准采样不受影响。",
+                    "Clear accumulated trajectory: history is skipped and new data draws from zero.\nBindings, display settings and calibration sampling are untouched.",
+                  ),
+                  danger: true,
+                  okLabel: tx("清空", "Clear"),
+                });
+                if (!ok) return;
+                // 运行/视图类操作：Operator 只读模式放行（红线 27——不改配置，数据可重新积累）
+                plot3dStore.clearData();
+                sceneRef.current?.clearTrajectory();
+                toast(tx("轨迹数据已清空，等待新数据", "Trajectory cleared, waiting for new data"));
+              })();
+            }}
+            title={tx(
+              "清空轨迹数据：历史清零、新数据从零画（校准采样不动；与右键菜单「清空轨迹显示」不同）",
+              "Clear trajectory data: drop history, draw new data from zero (calibration sampling untouched; differs from menu Clear-trajectory-display)",
+            )}
+          >
+            <IconTrash />
           </button>
         </div>
 
@@ -1320,7 +1359,7 @@ export function Plot3D() {
               <div className="p3d-calib-tabs">
                 <button
                   className={calibTab === "ellipsoid" ? "on" : ""}
-                  onClick={() => switchCalibTab("ellipsoid")}
+                  onClick={() => void switchCalibTab("ellipsoid")}
                   title={tx(
                     "连续翻滚采样 + 九参数椭球拟合（磁力计/加计通用）",
                     "Continuous tumble sampling + 9-param ellipsoid fit (mag/acc)",
@@ -1330,7 +1369,7 @@ export function Plot3D() {
                 </button>
                 <button
                   className={calibTab === "six" ? "on" : ""}
-                  onClick={() => switchCalibTab("six")}
+                  onClick={() => void switchCalibTab("six")}
                   title={tx(
                     "六面静止采样分步向导（加计专用，切换清空椭球采样）",
                     "Step-by-step six-face wizard (acc only; switching clears ellipsoid samples)",

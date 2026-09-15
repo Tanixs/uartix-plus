@@ -8,6 +8,7 @@ import { save, open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { tx, useLocale } from "../../i18n/strings";
+import { alertDialog } from "../../shared/Dialog";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
@@ -47,18 +48,18 @@ async function loadUopk(): Promise<unknown | null> {
   try {
     content = await invoke<string>("read_text_file", { path });
   } catch (e) {
-    alert(tx(`读取失败: ${e}`, `Failed to read: ${e}`));
+    await alertDialog(tx(`读取失败: ${e}`, `Failed to read: ${e}`));
     return null;
   }
   try {
     const obj = JSON.parse(content) as { kind?: string; data?: unknown };
     if (obj.kind !== OPERATOR_KIND || obj.data === undefined) {
-      alert(tx("不是 Operator 部署包（kind 不匹配）", "Not an operator package (kind mismatch)"));
+      await alertDialog(tx("不是 Operator 部署包（kind 不匹配）", "Not an operator package (kind mismatch)"));
       return null;
     }
     return obj.data;
   } catch (e) {
-    alert(tx(`JSON 解析失败: ${e}`, `JSON parse failed: ${e}`));
+    await alertDialog(tx(`JSON 解析失败: ${e}`, `JSON parse failed: ${e}`));
     return null;
   }
 }
@@ -154,32 +155,34 @@ export function OperatorGenBlock({ notify }: { notify: (s: string) => void }) {
         </div>
       </div>
       <div className="set-io-ops">
-        <input
-          className="input"
-          style={{ width: 170 }}
-          value={name}
-          maxLength={60}
-          placeholder={tx("包名", "Package name")}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <input
-          className="input"
-          style={{ width: 200, flex: 1 }}
-          value={desc}
-          maxLength={200}
-          placeholder={tx("说明（可选）", "Description (optional)")}
-          onChange={(e) => setDesc(e.target.value)}
-        />
-        {PARTS.map((p) => (
-          <label key={p.key} className="set-switch-inline">
-            <input
-              type="checkbox"
-              checked={inc[p.key]}
-              onChange={(e) => setInc((s) => ({ ...s, [p.key]: e.target.checked }))}
-            />
-            {tx(p.zh, p.en)}
-          </label>
-        ))}
+        <div className="set-io-names">
+          <input
+            className="input set-io-name"
+            value={name}
+            maxLength={60}
+            placeholder={tx("包名", "Package name")}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <input
+            className="input set-io-desc"
+            value={desc}
+            maxLength={200}
+            placeholder={tx("说明（可选，显示在操作员端横幅）", "Description (optional, shown on the operator banner)")}
+            onChange={(e) => setDesc(e.target.value)}
+          />
+        </div>
+        <div className="set-io-parts">
+          {PARTS.map((p) => (
+            <label key={p.key} className="set-switch-inline">
+              <input
+                type="checkbox"
+                checked={inc[p.key]}
+                onChange={(e) => setInc((s) => ({ ...s, [p.key]: e.target.checked }))}
+              />
+              {tx(p.zh, p.en)}
+            </label>
+          ))}
+        </div>
       </div>
     </div>
   );

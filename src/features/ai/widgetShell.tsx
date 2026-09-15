@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { setOpen } from "./extensionStore";
+import { IconCheck, IconChevron } from "../../shared/icons";
 
 /**
  * 小部件宿主公共层：
@@ -122,10 +123,10 @@ export function WidgetMenu({
             }}
           >
             {it.checked !== undefined && (
-              <span className="aiw-menu-check">{it.checked ? "✓" : ""}</span>
+              <span className="aiw-menu-check">{it.checked ? <IconCheck /> : null}</span>
             )}
             <span className="aiw-menu-label">{it.label}</span>
-            {it.children?.length ? <span className="aiw-menu-arrow">▸</span> : null}
+            {it.children?.length ? <span className="aiw-menu-arrow"><IconChevron dir="right" /></span> : null}
             {openSub === i && it.children?.length ? (
               <WidgetMenu
                 nested

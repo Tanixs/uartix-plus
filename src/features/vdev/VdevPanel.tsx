@@ -15,6 +15,7 @@ import * as vdevStore from "./vdevStore";
 import type { VDevCommand, VDevField, VDevFrameCfg, VDevNet, VDevNetTransport, VDevSignal, VDevSpec } from "./vdevStore";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconClose, IconPlay, IconPlus } from "../../shared/icons";
+import { confirmDialog } from "../../shared/Dialog";
 import { requestAsk } from "../ai/chatStore";
 import { toast } from "../ai/extRuntime";
 
@@ -67,12 +68,12 @@ export function VdevPanel() {
     if (!spec) return;
     vdevStore.setEditing({ ...spec, ...p });
   };
-  const patchNet = (p: Partial<VDevNet>) => {
+  const patchNet = async (p: Partial<VDevNet>) => {
     if (!spec) return;
     const base = spec.net ?? emptyNet();
     const next = { ...base, ...p };
     if (next.bind === "0.0.0.0" && base.bind !== "0.0.0.0") {
-      if (!window.confirm(tx("绑定 0.0.0.0 将允许局域网内任意主机连接/发令，确定？", "Binding 0.0.0.0 lets any LAN host connect and send commands. Continue?"))) {
+      if (!(await confirmDialog(tx("绑定 0.0.0.0 将允许局域网内任意主机连接/发令，确定？", "Binding 0.0.0.0 lets any LAN host connect and send commands. Continue?")))) {
         return;
       }
     }
@@ -220,8 +221,14 @@ export function VdevPanel() {
                 disabled={s.running}
                 title={tx("从设备库删除", "Remove from library")}
                 onClick={() => {
-                  if (!window.confirm(tx(`从设备库删除「${it.spec.name}」？（正在运行的设备不受影响）`, `Remove "${it.spec.name}" from the library? (a running device is unaffected)`))) return;
-                  vdevStore.removeFromLibrary(it.id);
+                  void (async () => {
+                    if (!(await confirmDialog({
+                      message: tx(`从设备库删除「${it.spec.name}」？（正在运行的设备不受影响）`, `Remove "${it.spec.name}" from the library? (a running device is unaffected)`),
+                      danger: true,
+                      okLabel: tx("删除", "Delete"),
+                    }))) return;
+                    vdevStore.removeFromLibrary(it.id);
+                  })();
                 }}
               >
                 <IconClose />

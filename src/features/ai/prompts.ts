@@ -121,7 +121,7 @@ const ACTION_RULE = `【动作执行硬规则】当用户要求对软件本身�
 function schemaAction(): string {
   return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（与脚本 api.app 相同）：
 - openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/spectrum/view3d/framecanvas/video/xray/modbus/sequencer/sentinel/plot3d/orchestrator/ai/vdev）
-- applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video）
+- applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video/calib/auto/modbus/vdev）
 - setTheme({"theme":"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
 - listProtocols()/listCommands()/listCards() 查询配置清单
 - addChannel({"tpl":"模板名","field":"字段名"}) 加曲线通道；clearChannels() 清空通道
@@ -222,7 +222,7 @@ function schemaScript(script: boolean): string {
 - api.onChat(cb) → 感知 AI 助手对话状态 cb({phase:"thinking"|"streaming"|"idle"|"error",reasoningTail,textTail})，返回取消订阅；api.ask("问题") → 向 AI 助手提问（回答经 onChat 流式回来，受发送权限门控）
 - api.app.动作名({参数}) → 控制软件本身，返回 Promise<{ok,data?,err?}>。可用动作：
   · openPanel({panel:"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/spectrum/view3d/framecanvas/video/xray/modbus/sequencer/sentinel/plot3d/orchestrator/ai/vdev）
-  · applyPreset({preset:"attitude"}) 切工作区预设（proto/analyze/attitude/console/video）
+  · applyPreset({preset:"attitude"}) 切工作区预设（proto/analyze/attitude/console/video/calib/auto/modbus/vdev）
   · setTheme({theme:"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
   · listProtocols()/listCommands()/listCards() 获取现有配置清单
   · addChannel({tpl:"模板名",field:"字段名"}) 加曲线通道；clearChannels() 清空通道

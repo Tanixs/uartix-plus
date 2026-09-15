@@ -1,6 +1,15 @@
 import { useSyncExternalStore } from "react";
 
-export type WorkspacePreset = "proto" | "analyze" | "attitude" | "console" | "video";
+export type WorkspacePreset =
+  | "proto"
+  | "analyze"
+  | "attitude"
+  | "console"
+  | "video"
+  | "calib"
+  | "auto"
+  | "modbus"
+  | "vdev";
 
 export type ThemeMode =
   | "light"
@@ -153,9 +162,9 @@ function load(): Settings {
       zoom: [90, 100, 110, 125].includes(p.zoom ?? 100) ? (p.zoom as number) : 100,
       decimals: clampDecimals(p.decimals ?? 2, 2),
       perfHud: Boolean(p.perfHud),
-      workspace: (["proto", "analyze", "attitude", "console", "video"] as const).includes(
-        p.workspace as WorkspacePreset,
-      )
+      workspace: (
+        ["proto", "analyze", "attitude", "console", "video", "calib", "auto", "modbus", "vdev"] as const
+      ).includes(p.workspace as WorkspacePreset)
         ? (p.workspace as WorkspacePreset)
         : "proto",
       cellSize: [48, 60, 72, 90, 110].includes(p.cellSize ?? 60)

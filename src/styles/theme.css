@@ -4555,16 +4555,22 @@ label.set-switch,
 .set-io-label { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
 .set-io-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .set-io-hint { font-size: 11px; color: var(--text-dim); margin-top: 8px; padding: 0 2px; }
-/* 部署包生成块的操作行（P76③）：此前 .set-io-ops/.set-switch-inline 两个类名
-   无任何 CSS 定义，整行靠浏览器默认 inline 流排布 —— 字号继承不一、间距换行不可控 */
+/* 部署包生成块的操作行（P76③，P82 重排）：两行——名称/说明一行（说明吃满剩余宽），部件勾选一行 */
 .set-io-ops {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
   margin-top: 10px;
 }
-.set-io-ops .input { flex: none; min-width: 0; }
+.set-io-names { display: flex; gap: 8px; }
+.set-io-name { width: 170px; flex: none; }
+.set-io-desc { flex: 1; min-width: 180px; }
+.set-io-parts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+/* 主题跟随确认/提示弹窗（P82⑤，shared/Dialog）：复用 .modal 体系，小号单列 */
+.app-dlg { width: min(400px, 86vw); height: auto; padding: 0 0 14px; }
+.app-dlg-msg { font-size: 12.5px; line-height: 1.7; color: var(--text); padding: 12px 18px 14px; white-space: pre-wrap; word-break: break-word; user-select: text; }
+.app-dlg-actions { display: flex; gap: 8px; justify-content: flex-end; padding: 0 18px; }
 .set-switch-inline {
   display: inline-flex;
   align-items: center;
@@ -6459,6 +6465,19 @@ html:has(.sw), .sw { background: transparent; }
 .p3d-hud { position: absolute; display: flex; align-items: center; gap: 6px; z-index: 5; }
 .p3d-hud.tl { top: 8px; left: 8px; flex-wrap: wrap; max-width: calc(100% - 230px); }
 .p3d-hud.tr { top: 8px; right: 8px; }
+/* P82②：右上视角托盘——毛玻璃胶囊 + 分组分隔线，9 个一级操作不再裸排 */
+.p3d-tray {
+  padding: 4px 6px;
+  gap: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+.p3d-tray-sep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; flex: none; }
+.p3d-tray .icon-btn.p3d-tray-danger:hover { color: var(--danger); border-color: var(--danger); }
 .p3d-hud.bl { bottom: 24px; left: 8px; }
 .p3d-hud.br {
   bottom: 22px;

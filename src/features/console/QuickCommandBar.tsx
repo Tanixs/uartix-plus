@@ -4,7 +4,7 @@ import type { CommandItem } from "../controls/commandStore";
 import * as serialStore from "../serial/serialStore";
 import * as variableStore from "../controls/variableStore";
 import { beep, runScript } from "../controls/scriptRunner";
-import { IconChevron } from "../../shared/icons";
+import { IconChevron, IconClose } from "../../shared/icons";
 import { useSettings } from "../settings/settingsStore";
 import { CODECS, userCodecToCodec, type Codec, type FactoryField } from "./commandFactory";
 import * as userCodecStore from "./userCodecStore";
@@ -598,7 +598,7 @@ function ManageModal(props: { onClose: () => void }) {
                   title={n.scriptEnabled ? "脚本命令，请在控制画布的命令树中编辑" : n.note}
                 />
                 <button className="btn" onClick={() => cmdStore.removeNode(n.id)} title="删除">
-                  ✕
+                  <IconClose />
                 </button>
               </div>
             ),

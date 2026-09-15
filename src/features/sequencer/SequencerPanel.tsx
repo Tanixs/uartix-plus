@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { tx, useLocale } from "../../i18n/strings";
-import { IconDownload, IconPlay, IconStop, IconTrash, IconUpload } from "../../shared/icons";
+import { IconDownload, IconPlay, IconPlus, IconStop, IconTrash, IconUpload } from "../../shared/icons";
+import { alertDialog, confirmDialog } from "../../shared/Dialog";
 import * as sequencerStore from "./sequencerStore";
 import { renderReportHtml } from "./report";
 import * as bind from "./sequencerBind";
@@ -134,11 +135,11 @@ function SuiteBar(props: {
 
   const run = () => {
     const err = bind.startSuite(suite, { stepMode: false });
-    if (err) window.alert(err);
+    if (err) void alertDialog(err);
   };
   const runStep = () => {
     const err = bind.startSuite(suite, { stepMode: true });
-    if (err) window.alert(err);
+    if (err) void alertDialog(err);
   };
 
   const doImport = async (f: File) => {
@@ -146,9 +147,9 @@ function SuiteBar(props: {
     if (imported.length > 0) {
       // 导入后自动选中新序列（多选时落第一个），不再让用户去下拉里翻
       onSelect(imported[0].id);
-      window.alert(tx(`已导入 ${imported.length} 个序列`, `Imported ${imported.length} sequence(s)`));
+      await alertDialog(tx(`已导入 ${imported.length} 个序列`, `Imported ${imported.length} sequence(s)`));
     } else {
-      window.alert(tx("导入失败：文件里没有有效序列", "Import failed: no valid sequence in file"));
+      await alertDialog(tx("导入失败：文件里没有有效序列", "Import failed: no valid sequence in file"));
     }
   };
 
@@ -190,14 +191,22 @@ function SuiteBar(props: {
           onClick={() => onSelect(sequencerStore.addSuite("").id)}
           title={tx("新建序列", "New sequence")}
         >
-          ＋
+          <IconPlus />
         </button>
         <button
           className="btn sm"
           onClick={() => {
-            if (window.confirm(tx(`删除序列「${suite.name}」？`, `Delete "${suite.name}"?`))) {
-              sequencerStore.removeSuite(suite.id);
-            }
+            void (async () => {
+              if (
+                await confirmDialog({
+                  message: tx(`删除序列「${suite.name}」？`, `Delete "${suite.name}"?`),
+                  danger: true,
+                  okLabel: tx("删除", "Delete"),
+                })
+              ) {
+                sequencerStore.removeSuite(suite.id);
+              }
+            })();
           }}
           title={tx("删除当前序列", "Delete current sequence")}
         >
@@ -241,7 +250,7 @@ function SuiteBar(props: {
         )}
         {awaiting && (
           <button className="btn sm primary" onClick={() => bind.resumeSuite()} title={tx("放行下一步", "Resume next step")}>
-            {tx("▶ 继续", "▶ Resume")}
+            {tx("继续", "Resume")}
           </button>
         )}
         <label className="mb-chk" title={tx("任何一步失败立刻停止（关闭后记录失败继续跑完）", "Stop on first failure (off: record failures and keep going)")}>

@@ -9,7 +9,7 @@ import type { BindKey, EulerOrder, FieldRef } from "./attitudeStore";
 import * as templateStore from "../protocol/templateStore";
 import type { FieldDef, FieldType } from "../../ipc/types";
 import { Flyout } from "../../shared/Flyout";
-import { IconChevron } from "../../shared/icons";
+import { IconChevron, IconCircle, IconDot } from "../../shared/icons";
 import { useSettings } from "../settings/settingsStore";
 
 const ORDERS: EulerOrder[] = ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"];
@@ -790,7 +790,7 @@ export function View3D() {
                   setPick(null);
                 }}
               >
-                {attitude.config[pick.key] ? "○" : "●"} 清除绑定
+                {attitude.config[pick.key] ? <IconCircle /> : <IconDot />} 清除绑定
               </button>
               <div className="ctx-group">已启用模板</div>
               {enabledTpls.length === 0 && (
@@ -859,7 +859,7 @@ export function View3D() {
                       }}
                     >
                       <span className="ctx-item-l">
-                        {active ? "●" : "○"} {f.name}
+                        {active ? <IconDot /> : <IconCircle />} {f.name}
                       </span>
                       <span className="ctx-cur">{TYPE_LABEL[f.type]}</span>
                     </button>

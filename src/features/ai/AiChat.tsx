@@ -47,11 +47,13 @@ import {
   IconSparkle,
   IconTrash,
   IconChevron,
+  IconClose,
   IconDock,
   IconUpload,
   IconPop,
   IconPuzzle,
 } from "../../shared/icons";
+import { confirmDialog } from "../../shared/Dialog";
 
 const BUG_ENDPOINT = "https://larix.teuioe.cn/api/bugreport.php";
 
@@ -552,14 +554,17 @@ function ScriptExtBlock({ code }: { code: string }) {
                 : "安装为停用状态，在扩展管理中启用时还需确认"
           }
           onClick={() => {
-            if (
-              !confirm(
-                `安装脚本「${name}」？\n\n该脚本将在主界面执行 JS，可读取数据快照、发送数据（受全局发送权限限制）。\n安装后默认停用，启用时还会再次确认。`,
+            void (async () => {
+              if (
+                !(await confirmDialog({
+                  message: `安装脚本「${name}」？\n\n该脚本将在主界面执行 JS，可读取数据快照、发送数据（受全局发送权限限制）。\n安装后默认停用，启用时还会再次确认。`,
+                  okLabel: "确认安装",
+                }))
               )
-            )
-              return;
-            addExt({ type: "script", name, code });
-            setResult({ ok: true, msg: "脚本已安装（停用）；到扩展管理中启用" });
+                return;
+              addExt({ type: "script", name, code });
+              setResult({ ok: true, msg: "脚本已安装（停用）；到扩展管理中启用" });
+            })();
           }}
         >
           确认安装
@@ -634,7 +639,7 @@ function ThinkBox({
   ) : (
     <details className="ai-think done">
       <summary>
-        <span className="ai-think-chev">▸</span> 已深度思考（{fmtThink(secs)}）
+        <span className="ai-think-chev"><IconChevron dir="right" /></span> 已深度思考（{fmtThink(secs)}）
       </summary>
       <div className="ai-reasoning-body">{text}</div>
     </details>
@@ -939,13 +944,21 @@ function SessionSidebar({
                   title="删除会话"
                   onClick={(ev) => {
                     ev.stopPropagation();
-                    if (confirm(`删除会话「${s.title || "新对话"}」？不可恢复。`)) {
-                      chatStore.deleteSession(s.id);
-                      notify("会话已删除");
-                    }
+                    void (async () => {
+                      if (
+                        await confirmDialog({
+                          message: `删除会话「${s.title || "新对话"}」？不可恢复。`,
+                          danger: true,
+                          okLabel: "删除",
+                        })
+                      ) {
+                        chatStore.deleteSession(s.id);
+                        notify("会话已删除");
+                      }
+                    })();
                   }}
                 >
-                  ×
+                  <IconClose />
                 </button>
               </div>
             ),
@@ -1535,7 +1548,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                   title="移除图片"
                   onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
                 >
-                  ×
+                  <IconClose />
                 </button>
               </div>
             ))}

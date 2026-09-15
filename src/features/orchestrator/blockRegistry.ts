@@ -212,8 +212,8 @@ export const EVENT_REGISTRY = {
   manual: {
     label: { zh: "手动", en: "Manual" },
     tip: {
-      zh: "手动触发源：挂上后本组才会响应 ▶（摘掉即不可手动跑）；仅手动组（事件槽为空）无需挂",
-      en: "Manual trigger source: the group answers ▶ only while this block is attached",
+      zh: "手动触发源：挂上后本组才会响应运行按钮（摘掉即不可手动跑）；仅手动组（事件槽为空）无需挂",
+      en: "Manual trigger source: the group answers the Run button only while this block is attached",
     },
     ai: "无参数",
   },
