@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { onRx } from "../../ipc/binbus";
 import * as templateStore from "../protocol/templateStore";
 import { toast } from "../ai/extRuntime";
+import { requestOpenPanel } from "../ai/appBus";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconPause, IconPlay, IconTrash } from "../../shared/icons";
 import {
@@ -135,10 +136,11 @@ export function XRayPanel() {
 
   const buildTemplate = (r: Run) => {
     templateStore.addTemplate(r.bytes);
+    requestOpenPanel("framecanvas");
     toast(
       tx(
-        `已创建模板并预填帧头 ${r.bytes.map(hex2).join(" ")}（帧长建议 ${result?.L ?? "?"}），可在协议模板/帧画布继续调整`,
-        `Template created with header ${r.bytes.map(hex2).join(" ")} (suggested length ${result?.L ?? "?"}); refine it in Templates / Frame Canvas`,
+        `已创建模板并预填帧头 ${r.bytes.map(hex2).join(" ")}（帧长建议 ${result?.L ?? "?"}），可在帧画布继续调整`,
+        `Template created with header ${r.bytes.map(hex2).join(" ")} (suggested length ${result?.L ?? "?"}); refine it in Frame Canvas`,
       ),
     );
   };
@@ -151,6 +153,7 @@ export function XRayPanel() {
   const buildOneFrame = (t: FrameType) => {
     if (t.frameLen === null) return;
     templateStore.createClusterFromFrames(tx("发现协议", "Discovered"), [{ header: t.header, len: t.frameLen }]);
+    requestOpenPanel("framecanvas");
     toast(
       tx(
         `已创建模板 ${t.header.map(hex2).join(" ")}（帧长 ${t.frameLen}B，sum8 校验为占位），可在帧画布继续调整`,
@@ -163,6 +166,7 @@ export function XRayPanel() {
     const frames = usableFrames();
     if (!frames.length) return;
     templateStore.createClusterFromFrames(tx("发现协议簇", "Discovered cluster"), frames);
+    requestOpenPanel("framecanvas");
     toast(
       tx(
         `已按簇创建 ${frames.length} 条帧型模板（帧头+定长+sum8 占位校验，默认停用），可在协议模板/帧画布逐条调整`,
@@ -195,6 +199,7 @@ export function XRayPanel() {
       coverageEnd: h.ckStart - result.L,
       endian: h.endian,
     });
+    requestOpenPanel("framecanvas");
     toast(
       tx(
         `已创建模板（帧长 ${result.L}B、${describeHit(h, result.L)}、${(h.passRate * 100).toFixed(0)}% 通过），可在帧画布继续拖字段`,

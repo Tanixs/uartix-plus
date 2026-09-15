@@ -58,6 +58,37 @@ export function getSnapshot() {
   return snapshot;
 }
 
+export function dropFieldValues(fieldIds: string[], tplId?: string) {
+  const latest = { ...snapshot.latest };
+  const seqLen = { ...snapshot.seqLen };
+  const tplStats = { ...snapshot.tplStats };
+  let changed = false;
+  for (const id of fieldIds) {
+    if (id in latest) {
+      delete latest[id];
+      changed = true;
+    }
+    const p = `${id}#`;
+    for (const k of Object.keys(latest)) {
+      if (k.startsWith(p)) {
+        delete latest[k];
+        changed = true;
+      }
+    }
+    if (id in seqLen) {
+      delete seqLen[id];
+      changed = true;
+    }
+  }
+  if (tplId && tplId in tplStats) {
+    delete tplStats[tplId];
+    changed = true;
+  }
+  if (!changed) return;
+  set({ latest, seqLen, tplStats });
+  listeners.forEach((l) => l());
+}
+
 export async function init() {
   if (initialized) return;
   initialized = true;

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { tx } from "../../i18n/strings";
 import { guardLocked } from "../operator/lock";
+import { dropFieldValues } from "./telemetryStore";
 import type {
   ChecksumAlgo,
   FieldDef,
@@ -665,8 +666,10 @@ export function importTemplates(tpls: FrameTemplate[], presetKey?: string | null
 export function removeTemplate(id: string) {
   pushHistory();
   plotCleanup(id, null);
+  const t = snapshot.rules.templates.find((x) => x.id === id);
+  dropFieldValues(t ? t.fields.map((f) => f.id) : [], id);
   set({
-    rules: { templates: snapshot.rules.templates.filter((t) => t.id !== id) },
+    rules: { templates: snapshot.rules.templates.filter((tpl) => tpl.id !== id) },
     selection: null,
   });
   scheduleSync();
@@ -679,6 +682,10 @@ export function replaceRules(templates: FrameTemplate[]) {
 }
 
 export function patchTemplate(id: string, patch: Partial<FrameTemplate>) {
+  const old = snapshot.rules.templates.find((t) => t.id === id);
+  if (old && patch.name !== undefined && patch.name !== old.name) {
+    plotRename(id, null, `${old.name}·`, `${patch.name}·`);
+  }
   pushHistory();
   set({
     rules: {
@@ -841,6 +848,11 @@ export function patchField(
   fieldId: string,
   patch: Partial<FieldDef>,
 ) {
+  const tpl = snapshot.rules.templates.find((t) => t.id === templateId);
+  const oldF = tpl?.fields.find((f) => f.id === fieldId);
+  if (oldF && patch.name !== undefined && patch.name !== oldF.name) {
+    plotRename(templateId, fieldId, `${tpl!.name}·${oldF.name}`, `${tpl!.name}·${patch.name}`);
+  }
   pushHistory();
   set({
     rules: {
@@ -874,6 +886,11 @@ export function upsertFieldLinked(
   editId: string | null,
   ckAlgo?: string | null,
 ) {
+  const tplOld = snapshot.rules.templates.find((t) => t.id === templateId);
+  const oldF = editId ? tplOld?.fields.find((f) => f.id === editId) : null;
+  if (tplOld && oldF && field.name && field.name !== oldF.name) {
+    plotRename(templateId, editId, `${tplOld.name}·${oldF.name}`, `${tplOld.name}·${field.name}`);
+  }
   pushHistory();
   set({
     rules: {
@@ -972,6 +989,7 @@ export function setLengthDomain(
 export function removeField(templateId: string, fieldId: string) {
   pushHistory();
   plotCleanup(templateId, fieldId);
+  dropFieldValues([fieldId]);
   set({
     rules: {
       templates: snapshot.rules.templates.map((t) =>
@@ -1000,6 +1018,26 @@ function plotCleanup(tplId: string, fieldId: string | null) {
   try {
     const plot = (window as unknown as { uartixPlot?: { removeByTpl: (a: string, b: string | null) => void } }).uartixPlot;
     plot?.removeByTpl(tplId, fieldId);
+  } catch {
+    return;
+  }
+}
+
+function plotRename(
+  tplId: string,
+  fieldId: string | null,
+  oldLabel: string,
+  newLabel: string,
+) {
+  try {
+    const plot = (
+      window as unknown as {
+        uartixPlot?: {
+          renameChannels?: (a: string, b: string | null, c: string, d: string) => number;
+        };
+      }
+    ).uartixPlot;
+    plot?.renameChannels?.(tplId, fieldId, oldLabel, newLabel);
   } catch {
     return;
   }

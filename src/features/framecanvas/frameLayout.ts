@@ -50,6 +50,31 @@ export function checksumLen(algo: string | null): number {
   return 2;
 }
 
+export interface CovRun {
+  lo: number;
+  len: number;
+  kind: "fld" | "gap";
+}
+
+export function coverageRuns(tpl: FrameTemplate, frameLen: number): CovRun[] {
+  const covered = new Uint8Array(Math.max(0, frameLen));
+  for (const f of tpl.fields) {
+    if (f.offset < 0) continue;
+    const sz = f.spanTail ? Math.max(0, frameLen - f.offset) : fieldSize(f);
+    for (let i = f.offset; i < Math.min(frameLen, f.offset + sz); i++) covered[i] = 1;
+  }
+  const runs: CovRun[] = [];
+  let i = 0;
+  while (i < frameLen) {
+    const isGap = covered[i] === 0;
+    let j = i;
+    while (j < frameLen && (covered[j] === 0) === isGap) j++;
+    runs.push({ lo: i, len: j - i, kind: isGap ? "gap" : "fld" });
+    i = j;
+  }
+  return runs;
+}
+
 export function checksumTail(tpl: FrameTemplate): number {
   return tpl.checksum && tpl.checksum.algo !== "none"
     ? checksumLen(tpl.checksum.algo)

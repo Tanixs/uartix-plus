@@ -2,8 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import { createPortal } from "react-dom";
 import uPlot from "uplot";
 import * as plotStore from "./plotStore";
+import * as templateStore from "../protocol/templateStore";
 import * as sessionStore from "../session/sessionStore";
 import type { AnnOut } from "../../ipc/types";
+import { toast } from "../ai/extRuntime";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
 import { invokeAiScene } from "../ai/aiBus";
@@ -1640,6 +1642,37 @@ export function Plot2D() {
   const hasXCursor = cursorXOn && !!(measureX || xCurRef.current.a != null || xCurRef.current.b != null);
   const hasYCursor = cursorYOn && !!(measureY || yCurRef.current.a != null || yCurRef.current.b != null);
 
+  const isFieldDrag = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types).includes("text/vs-field");
+
+  const onFieldDrop = (e: React.DragEvent) => {
+    const raw = e.dataTransfer.getData("text/vs-field");
+    if (!raw) return;
+    e.preventDefault();
+    try {
+      const p = JSON.parse(raw) as { tplId: string; fieldId: string; name: string; type: string };
+      const tpl = templateStore.getSnapshot().rules.templates.find((t) => t.id === p.tplId);
+      const f = tpl?.fields.find((x) => x.id === p.fieldId);
+      if (!tpl || !f) {
+        toast(tx("字段已不存在，无法加入曲线", "Field no longer exists — cannot add curve"));
+        return;
+      }
+      const added = plotStore.addChannel({
+        tplId: p.tplId,
+        fieldId: p.fieldId,
+        name: `${tpl.name}·${f.name}`,
+        color: f.color,
+      });
+      toast(
+        added
+          ? tx(`已加入曲线「${f.name}」`, `Curve added: ${f.name}`)
+          : tx("该字段已在曲线通道中", "Field already has a curve channel"),
+      );
+    } catch {
+      return;
+    }
+  };
+
   return (
     <div className="plot">
       <div className="plot-bar">
@@ -1740,19 +1773,21 @@ export function Plot2D() {
         ref={wrapRef}
         className={`plot-wrap ${dragOver ? "dropping" : ""}`}
         onDragOver={(e) => {
+          if (!isFieldDrag(e)) return;
           e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
           setDragOver(true);
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
-          e.preventDefault();
           setDragOver(false);
+          onFieldDrop(e);
         }}
       >
         <div ref={chartRef} className="plot-chart" />
         {!hasChannels && (
           <div className="plot-empty">
-            {tx("打开左侧「字段图例」的眼睛即可实时绘图", "Toggle the eye icon in the field legend on the left to plot in real time")}
+            {tx("打开左侧「字段图例」的眼睛即可实时绘图，或把字段直接拖进来", "Toggle the eye icon in the field legend on the left to plot in real time — or drag a field here")}
             <br />
             {tx("左键拖动平移 · 中键框选缩放 · 双击保形回实时 · ", "Left-drag to pan · Middle-drag to box-zoom · Double-click to resume live · ")}
             {tx("滚轮缩放（轴区对应轴） · 右键图表更多设置", "Scroll to zoom (the hovered axis area zooms that axis) · Right-click the chart for more settings")}

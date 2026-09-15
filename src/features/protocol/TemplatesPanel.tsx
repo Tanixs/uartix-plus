@@ -13,6 +13,7 @@ import { IconChevron } from "../../shared/icons";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
 import { patch as patchSettings, useSettings } from "../settings/settingsStore";
+import { requestOpenPanel } from "../ai/appBus";
 import { tx, useLocale } from "../../i18n/strings";
 
 function EyeIcon({ open }: { open: boolean }) {
@@ -822,6 +823,7 @@ export function TemplatesPanel() {
             } else {
               store.createBlankTemplate(r.len);
             }
+            requestOpenPanel("framecanvas");
           }}
           onCancel={() => setNewOpen(false)}
         />

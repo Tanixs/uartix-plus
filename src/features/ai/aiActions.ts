@@ -14,6 +14,7 @@ import * as commandStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
 import { validateUserCodec, buildUserFrame, type UserSeg } from "../console/commandFactory";
 import * as ucStore from "../console/userCodecStore";
+import { requestOpenPanel } from "./appBus";
 
 const BOUNDARY_MODES = ["fixedLength", "lengthField", "footer"];
 const CHECKSUM_ALGOS: ChecksumAlgo[] = [
@@ -278,11 +279,12 @@ export function writeTemplateFromAiJson(raw: string): WriteResult {
     for (const t of tpls) t.groupKey = grpKey;
   }
   templateStore.importTemplates(tpls);
+  requestOpenPanel("framecanvas");
   return {
     ok: true,
     msg: groupName
-      ? `协议簇「${groupName}」已写入（${tpls.length} 个模板，默认停用，请在协议模板面板启用）`
-      : `模板「${tpls[0].name}」已写入协议模板（默认停用，请在协议模板面板启用）`,
+      ? `协议簇「${groupName}」已写入（${tpls.length} 个模板，默认停用，在帧画布点灰色页签即可启用）`
+      : `模板「${tpls[0].name}」已写入（默认停用，在帧画布点灰色页签即可启用）`,
     tplId: tpls[0].id,
   };
 }

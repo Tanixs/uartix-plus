@@ -616,6 +616,27 @@ export function removeByTpl(tplId: string, fieldId: string | null) {
   for (const ch of doomed) removeChannel(ch.id);
 }
 
+export function renameChannels(
+  tplId: string,
+  fieldId: string | null,
+  oldLabel: string,
+  newLabel: string,
+): number {
+  let n = 0;
+  channels = channels.map((c) => {
+    if (c.tplId !== tplId) return c;
+    if (fieldId && !(c.fieldId === fieldId || c.fieldId.startsWith(`${fieldId}#`)))
+      return c;
+    if (!c.name.startsWith(oldLabel)) return c;
+    const rest = c.name.slice(oldLabel.length);
+    if (rest !== "" && !/^\d+$/.test(rest)) return c;
+    n++;
+    return { ...c, name: newLabel + rest };
+  });
+  if (n) emit();
+  return n;
+}
+
 export function groupChannelState(
   tplId: string,
   baseId: string,
@@ -740,8 +761,14 @@ export function channelState(tplId: string, fieldId: string): "off" | "hidden" |
 
 (() => {
   try {
-    (window as unknown as { uartixPlot: { removeByTpl: (a: string, b: string | null) => void } }).uartixPlot = {
+    (window as unknown as {
+      uartixPlot: {
+        removeByTpl: (a: string, b: string | null) => void;
+        renameChannels: (a: string, b: string | null, c: string, d: string) => number;
+      };
+    }).uartixPlot = {
       removeByTpl,
+      renameChannels,
     };
   } catch {
     return;

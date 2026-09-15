@@ -411,6 +411,7 @@ export function OrchestratorPanel() {
   const [addAt, setAddAt] = useState<AddAt | null>(null);
   /** B4e：空态引导「从模板新建」下拉展开 */
   const [presetOpen, setPresetOpen] = useState(false);
+  const [fieldDrag, setFieldDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const doc = store.doc;
 
@@ -468,6 +469,54 @@ export function OrchestratorPanel() {
     if (!id && !readOnly)
       toast(tx(`编排组已达上限 ${ORCH_LIMITS.groupCap}，请先删除或合并后再新建`, `Group limit reached (${ORCH_LIMITS.groupCap}) — delete or merge first`));
     return id;
+  };
+
+  const onFieldDrop = (e: React.DragEvent) => {
+    const raw = e.dataTransfer.getData("text/vs-field");
+    if (!raw) return;
+    e.preventDefault();
+    if (readOnly) {
+      toast(tx("Operator 只读模式：不能创建编排组", "Operator read-only: cannot create groups"));
+      return;
+    }
+    try {
+      const p = JSON.parse(raw) as { tplId: string; fieldId: string };
+      const tpl = templateStore.getSnapshot().rules.templates.find((t) => t.id === p.tplId);
+      const f = tpl?.fields.find((x) => x.id === p.fieldId);
+      if (!tpl || !f) {
+        toast(tx("字段已不存在，无法挂事件", "Field no longer exists — cannot attach event"));
+        return;
+      }
+      let ch = plotStore
+        .getSnapshot()
+        .channels.find((c) => c.tplId === p.tplId && c.fieldId === p.fieldId);
+      if (!ch) {
+        plotStore.addChannel({
+          tplId: p.tplId,
+          fieldId: p.fieldId,
+          name: `${tpl.name}·${f.name}`,
+          color: f.color,
+        });
+        ch = plotStore
+          .getSnapshot()
+          .channels.find((c) => c.tplId === p.tplId && c.fieldId === p.fieldId);
+      }
+      if (!ch) return;
+      const gid = doc.groups[0]?.id ?? createGroup(tx("阈值联动", "Threshold flow"));
+      if (!gid) return;
+      const ev = orchestratorStore.makeEvent("threshold");
+      if (ev.kind === "threshold") ev.chId = ch.id;
+      orchestratorStore.addEvent(gid, ev);
+      flashNewGroup(gid);
+      toast(
+        tx(
+          `已挂阈值触发：「${f.name}」跨越设定值即运行该组，点事件块调条件`,
+          `Threshold event attached: "${f.name}" crossing its limit runs this group — tune it in the event block`,
+        ),
+      );
+    } catch {
+      return;
+    }
   };
 
   const openLogsFor = (gid: string | null) => {
@@ -759,7 +808,21 @@ export function OrchestratorPanel() {
         </button>
       </div>
       <div className="orch-body">
-        <div className="orch-canvas" data-orch-list>
+        <div
+          className={`orch-canvas${fieldDrag ? " dropping" : ""}`}
+          data-orch-list
+          onDragOver={(e) => {
+            if (!Array.from(e.dataTransfer.types).includes("text/vs-field")) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setFieldDrag(true);
+          }}
+          onDragLeave={() => setFieldDrag(false)}
+          onDrop={(e) => {
+            setFieldDrag(false);
+            onFieldDrop(e);
+          }}
+        >
           {doc.groups.length === 0 && (
             <div className="orch-empty">
               <div className="orch-empty-t">{tx("自动编排器", "Orchestrator")}</div>
@@ -773,6 +836,7 @@ export function OrchestratorPanel() {
                 <li>{tx("新建组，往里添加动作块（发送 / 等待 / 如果 / 循环…）", "Create a group, add action blocks (send / wait / if / loop…)")}</li>
                 <li>{tx("给组挂事件（阈值 / 帧命中 / 定时器…），或直接用运行按钮手动跑", "Attach events (threshold / frame / timer…), or run it with the Run button")}</li>
                 <li>{tx("打开左上「编排中」总开关——条件一满足就自动执行", "Flip the master switch — actions run the moment conditions hit")}</li>
+                <li>{tx("也可以把「协议模板」面板里的字段图例直接拖进来，秒挂一个阈值事件", "Or drag a field legend from the Templates panel to attach a threshold event instantly")}</li>
               </ol>
               <div className="orch-empty-ops">
                 <button className="btn primary" disabled={readOnly} title={readOnly ? tx("Operator 只读模式：不能新建组", "Operator read-only: cannot create groups") : undefined} onClick={() => createGroup()}>

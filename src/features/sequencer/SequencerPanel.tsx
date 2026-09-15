@@ -776,7 +776,12 @@ export function MatchEditor(props: { match: FrameMatch; onChange: (m: FrameMatch
               );
             }}
           >
-            {!tpl && <option value="">({tx("无模板", "no template")})</option>}
+            {!tpl && match.tplId && (
+              <option value={match.tplId}>
+                {tx(`已删除模板 ${match.tplId.slice(0, 8)}…`, `Deleted template ${match.tplId.slice(0, 8)}…`)}
+              </option>
+            )}
+            {!tpl && !match.tplId && <option value="">({tx("无模板", "no template")})</option>}
             {templates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
@@ -790,6 +795,11 @@ export function MatchEditor(props: { match: FrameMatch; onChange: (m: FrameMatch
                 value={match.fieldName}
                 onChange={(e) => onChange({ ...match, fieldName: e.target.value })}
               >
+                {tpl && match.fieldName && !tpl.fields.some((f) => f.name === match.fieldName) && (
+                  <option value={match.fieldName}>
+                    {tx(`${match.fieldName}（已失效）`, `${match.fieldName} (gone)`)}
+                  </option>
+                )}
                 {tpl?.fields.map((f) => (
                   <option key={f.id} value={f.name}>
                     {f.name}

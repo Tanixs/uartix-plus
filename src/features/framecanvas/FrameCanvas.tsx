@@ -30,6 +30,7 @@ import {
   skeletonLen,
   buildBlocks,
   layoutBlocks,
+  coverageRuns,
   type Blk,
   type Layout,
 } from "./frameLayout";
@@ -60,6 +61,7 @@ const IconPause = () => fsvg(<><line x1="9" y1="5" x2="9" y2="19" /><line x1="15
 const IconStop = () => fsvg(<rect x="6" y="6" width="12" height="12" rx="1" />);
 const IconPlug = () => fsvg(<><path d="M9 7V2M15 7V2" /><path d="M6 7h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6V7z" /><line x1="12" y1="17" x2="12" y2="22" /></>);
 const IconFlag = () => fsvg(<><path d="M5 21V4" /><path d="M5 4h13l-3 4 3 4H5" /></>);
+const IconDiff = () => fsvg(<><polyline points="8 7 3 12 8 17" /><polyline points="16 7 21 12 16 17" /><line x1="3" y1="12" x2="21" y2="12" /></>);
 
 /** 会话回放 transport（16.2 P2）：打开 / 播放-暂停 / 速度档 / 进度条 / 停止 / 时间。
  *  独立叶子订阅 sessionStore（10Hz 进度只重渲染本组，不惊动画布主组件）。
@@ -334,6 +336,47 @@ function ArchEmptyGate({ children }: { children: React.ReactNode }) {
   return <>{meta.frames === 0 ? children : null}</>;
 }
 
+function CoverageStrip({
+  tpl,
+  frameLen,
+  onPick,
+}: {
+  tpl: FrameTemplate | null;
+  frameLen: number;
+  onPick: (lo: number, size: number) => void;
+}) {
+  useLocale();
+  if (!tpl || frameLen <= 0) return null;
+  const runs = coverageRuns(tpl, frameLen);
+  const gaps = runs.filter((r) => r.kind === "gap");
+  const gapBytes = gaps.reduce((a, g) => a + g.len, 0);
+  return (
+    <div className="fc-covbar" title={tx("字段未覆盖的字节缺口 — 点击段直接定义字段", "Gaps not covered by fields — click a segment to define it")}>
+      {runs.map((r, i) =>
+        r.kind === "gap" ? (
+          <button
+            key={i}
+            className="fc-cov-gap"
+            style={{ width: `${(r.len / frameLen) * 100}%` }}
+            title={tx(
+              `缺口：字节 ${r.lo}~${r.lo + r.len - 1}（${r.len}B）· 点击定义字段`,
+              `Gap ${r.lo}~${r.lo + r.len - 1} (${r.len}B) — click to define`,
+            )}
+            onClick={() => onPick(r.lo, r.len)}
+          />
+        ) : (
+          <span key={i} className="fc-cov-seg" style={{ width: `${(r.len / frameLen) * 100}%` }} />
+        ),
+      )}
+      <span className="fc-cov-info">
+        {gapBytes > 0
+          ? tx(`未覆盖 ${gapBytes}B`, `${gapBytes}B undefined`)
+          : tx("结构完整", "fully covered")}
+      </span>
+    </div>
+  );
+}
+
 const ROLE_META: Record<FieldRole, { zh: string; en: string; tag: string; chip: string }> = {
   header: { zh: "帧头", en: "Header", tag: "HDR", chip: "#e8a33d" },
   addr: { zh: "目标地址", en: "Address", tag: "ADR", chip: "#39c5cf" },
@@ -484,6 +527,8 @@ function FrameCanvas() {
     | null
   >(null);
   const [cellSize, setCellSize] = useState(28);
+  const diffBaseRef = useRef<{ seq: number; tplId: string; fi: number; bytes: Uint8Array } | null>(null);
+  const [diffOn, setDiffOn] = useState(false);
   const [dlg, setDlg] = useState<DlgInit | null>(null);
   const [menuState, setMenuState] = useState<{ x: number; y: number } | null>(null);
   const [tabRev, setTabRev] = useState(0);
@@ -511,7 +556,7 @@ function FrameCanvas() {
   cellRef.current = cellSize;
 
   const fcds = useMemo(
-    () => proto.rules.templates.filter((t) => t.enabled),
+    () => proto.rules.templates,
     [proto.rules.templates],
   );
   const tabCounts = useMemo(
@@ -533,6 +578,7 @@ function FrameCanvas() {
         label: groupDisplayName(key, tpls[0]),
         color: tpls[0].color,
         tpls,
+        on: tpls.some((t) => t.enabled),
         cnt: tpls.reduce((a, t) => a + (tabCounts.get(t.id) ?? 0), 0),
       };
     });
@@ -541,8 +587,9 @@ function FrameCanvas() {
   const curTpl = useMemo(() => {
     const id = tplSelRef.current;
     if (id) return proto.rules.templates.find((t) => t.id === id) ?? null;
-    return groups[0]?.tpls[0] ?? fcds[0] ?? null;
-  }, [proto.rules.templates, groups, fcds, tabRev]);
+    const g0 = groups[0]?.tpls ?? [];
+    return g0.find((t) => t.enabled) ?? g0[0] ?? null;
+  }, [proto.rules.templates, groups, tabRev]);
   tplSelRef.current = curTpl?.id ?? null;
 
   const resolved = useMemo(() => {
@@ -654,9 +701,26 @@ function FrameCanvas() {
       }
     }
     const tplD = curRef.current;
+    const db = diffBaseRef.current;
+    let diffBytes: Uint8Array | null = null;
+    let diffCount = 0;
+    if (db && real && tplD && db.tplId === tplD.id) {
+      diffBytes = db.bytes;
+      const cur = real.bytes;
+      const L = Math.max(real.len, cur ? cur.length : 0, db.bytes.length);
+      for (let i = 0; i < L; i++) {
+        const a = cur && i < cur.length ? cur[i] : -1;
+        const b = i < db.bytes.length ? db.bytes[i] : -1;
+        if (a !== b) diffCount++;
+      }
+    }
     if (navRef.current) {
       navRef.current.textContent = real
-        ? `#${viewRef.current.fi} · ${real.len}B · ${real.tplName}`
+        ? `#${viewRef.current.fi} · ${real.len}B · ${real.tplName}${
+            diffBytes
+              ? ` · ${tx(`对比基线 #${db!.fi}`, `base #${db!.fi}`)} Δ${diffCount}`
+              : ""
+          }`
         : tplD
           ? tx("骨架编辑 · 未收流", "Skeleton edit · no stream")
           : "";
@@ -814,6 +878,19 @@ function FrameCanvas() {
                 : blk.kind === "fld"
                   ? (dark ? mixC(cFg, blk.color, 0.68) : mixC("#000000", blk.color, 0.6))
                   : dark ? mixC(cFg, blk.color, 0.78) : mixC("#000000", blk.color, 0.6);
+            if (
+              diffBytes &&
+              bb !== undefined &&
+              bb !== (g < diffBytes.length ? diffBytes[g] : -1)
+            ) {
+              ctx.fillStyle = "#e5534b";
+              ctx.beginPath();
+              ctx.moveTo(x0 + (g - it.g0) * s + 1, yTop + 1);
+              ctx.lineTo(x0 + (g - it.g0) * s + 6, yTop + 1);
+              ctx.lineTo(x0 + (g - it.g0) * s + 1, yTop + 6);
+              ctx.closePath();
+              ctx.fill();
+            }
             ctx.fillStyle = txtC;
             ctx.fillText(bb === undefined ? "--" : bb.toString(16).toUpperCase().padStart(2, "0"), cx, yTop + s / 2 + 1);
           }
@@ -823,6 +900,21 @@ function FrameCanvas() {
             const cx = x0 + (g - it.g0) * s + s / 2;
             ctx.fillStyle = dark ? "#5b6371" : "#9aa2ad";
             ctx.fillText(bb === undefined ? "··" : bb.toString(16).toUpperCase().padStart(2, "0"), cx, yTop + s / 2 + 1);
+            if (
+              diffBytes &&
+              bb !== undefined &&
+              bb !== (g < diffBytes.length ? diffBytes[g] : -1)
+            ) {
+              ctx.fillStyle = "#e5534b";
+              ctx.beginPath();
+              ctx.moveTo(x0 + (g - it.g0) * s + 1, yTop + 1);
+              ctx.lineTo(x0 + (g - it.g0) * s + 6, yTop + 1);
+              ctx.lineTo(x0 + (g - it.g0) * s + 1, yTop + 6);
+              ctx.closePath();
+              ctx.fill();
+              ctx.fillStyle = dark ? "#5b6371" : "#9aa2ad";
+              ctx.fillText(bb.toString(16).toUpperCase().padStart(2, "0"), cx, yTop + s / 2 + 1);
+            }
           }
         }
         if (it.ax && blk.kind === "fld" && blk.label) {
@@ -1311,7 +1403,20 @@ function FrameCanvas() {
           t.enabled,
           t.boundary,
           t.checksum,
-          t.fields,
+          t.fields.map((f) => [
+            f.id,
+            f.offset,
+            f.role,
+            f.type,
+            f.endian,
+            f.size ?? null,
+            f.bits ?? null,
+            f.disc ?? null,
+            f.spanTail ?? null,
+            f.spanElem ?? null,
+            f.csvDelim ?? null,
+            f.csvType ?? null,
+          ]),
         ]),
       );
       if (rulesSigRef.current && rulesSigRef.current !== sig) {
@@ -1359,6 +1464,48 @@ function FrameCanvas() {
 
   const doRedo = () => {
     templateStore.redo();
+  };
+
+  const toggleDiff = () => {
+    if (diffBaseRef.current) {
+      diffBaseRef.current = null;
+      setDiffOn(false);
+    } else {
+      const fr = resolvedRef.current.fr;
+      if (!fr || !fr.bytes || fr.bytes.length === 0) {
+        toast(tx("当前视图没有实际帧可作基线（骨架态无字节）", "No real frame in view to use as baseline (skeleton has no bytes)"));
+        return;
+      }
+      diffBaseRef.current = { seq: fr.seq, tplId: fr.tplId, fi: viewRef.current.fi, bytes: fr.bytes };
+      setDiffOn(true);
+      toast(
+        tx(
+          `基线 = #${viewRef.current.fi}，←/→ 翻帧看差异角标`,
+          `Baseline = #${viewRef.current.fi}; step frames with ←/→ to see diff corners`,
+        ),
+      );
+    }
+    dirtyRef.current = true;
+  };
+
+  const defineGap = (lo: number, size: number) => {
+    const tplD = curRef.current;
+    if (!tplD) return;
+    selRef.current = { lo, hi: lo + size - 1 };
+    const t = protoRef.current.rules.templates.find((x) => x.id === tplD.id);
+    dlgRef.current = {
+      kind: "field",
+      tplId: tplD.id,
+      tplName: t?.name ?? "",
+      mode: t?.boundary.mode ?? "fixedLength",
+      ckAlgo: t?.checksum?.algo ?? null,
+      frLen: resolvedRef.current.fr?.len ?? skeletonLen(tplD),
+      lo,
+      size,
+      isAscii: false,
+    };
+    setDlg(dlgRef.current);
+    dirtyRef.current = true;
   };
 
   const fireAnim = (key: string) => {
@@ -1503,21 +1650,39 @@ function FrameCanvas() {
   };
 
 
+  const enableGroup = (g: { key: string; label: string; tpls: FrameTemplate[] }) => {
+    templateStore.setGroupEnabled(g.key, true, (t) => presetGroupKey(t) ?? t.id);
+    toast(
+      tx(
+        `已启用「${g.label}」（${g.tpls.length} 帧型），开始按该协议筛选数据流`,
+        `Enabled "${g.label}" (${g.tpls.length} frame type(s)) — filtering the stream now`,
+      ),
+    );
+  };
+
   const renderTabs = () => (
     <div className="fc-tabs">
       <div className="fc-tabs-label">{tx("协议", "Protocol")}</div>
       {groups.map((g) => {
         const on = !!curTpl && g.tpls.some((t) => t.id === curTpl!.id);
         return (
-          <div className={`fc-tabgrp${on ? " on" : ""}`} key={g.key}>
+          <div className={`fc-tabgrp${on ? " on" : ""}${g.on ? "" : " off"}`} key={g.key}>
             <button
               className="fc-tab"
-              onClick={() => selectTab(g.tpls.some((t) => t.id === curTpl?.id) ? curTpl!.id : g.tpls[0].id)}
-              title={tx("点击切换到该协议", "Click to switch to this protocol")}
+              onClick={() => {
+                if (!g.on) enableGroup(g);
+                selectTab(g.tpls.some((t) => t.id === curTpl?.id) ? curTpl!.id : g.tpls[0].id);
+              }}
+              title={
+                g.on
+                  ? tx("点击切换到该协议", "Click to switch to this protocol")
+                  : tx("未启用 · 点击启用并开始筛选数据流", "Disabled — click to enable and start filtering")
+              }
             >
               <i style={{ background: g.color }} />
               {g.label}
-              <span className="fc-tab-cnt">{g.cnt}</span>
+              {!g.on && <em className="fc-tab-off">{tx("未启用", "off")}</em>}
+              {g.on && <span className="fc-tab-cnt">{g.cnt}</span>}
             </button>
             {g.tpls.length > 1 && (
               <select
@@ -1528,7 +1693,9 @@ function FrameCanvas() {
               >
                 {g.tpls.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name}（{tabCounts.get(t.id) ?? 0}）
+                    {t.name}
+                    {t.enabled ? "" : ` ${tx("(停用)", "(off)")}`}
+                    （{tabCounts.get(t.id) ?? 0}）
                   </option>
                 ))}
               </select>
@@ -1620,11 +1787,19 @@ function FrameCanvas() {
         <button className="btn sm icon nav" onClick={() => setViewF((f) => f + 1)} title={tx("下一帧 (→)", "Next frame (→)")}>
           <IconNext />
         </button>
-        <button className="btn sm icon" onClick={() => { fcStore.clearArchive(); viewRef.current = { live: true, fi: 0 }; dirtyRef.current = true; }} title={tx("清空帧归档字节池", "Clear frame archive")}>
+        <button className="btn sm icon" onClick={() => { fcStore.clearArchive(); diffBaseRef.current = null; setDiffOn(false); viewRef.current = { live: true, fi: 0 }; dirtyRef.current = true; }} title={tx("清空帧归档字节池", "Clear frame archive")}>
           <IconTrash />
+        </button>
+        <button className={`btn sm icon${diffOn ? " primary" : ""}`} onClick={toggleDiff} title={diffOn ? tx("退出帧对比（清除基线）", "Exit frame diff (clear baseline)") : tx("帧对比：把当前帧设为基线，翻帧看逐字节差异", "Frame diff: set current frame as baseline, then step frames to spot byte differences")}>
+          <IconDiff />
         </button>
       </div>
       {renderTabs()}
+      <CoverageStrip
+        tpl={curTpl}
+        frameLen={resolved.fr?.len ?? (curTpl ? skeletonLen(curTpl) : 0)}
+        onPick={defineGap}
+      />
       <div className="fc-body" ref={wrapRef}>
         <canvas
           ref={canvasRef}

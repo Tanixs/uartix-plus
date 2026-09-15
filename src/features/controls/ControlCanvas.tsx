@@ -22,6 +22,7 @@ import { Flyout } from "../../shared/Flyout";
 import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
 import { alertDialog } from "../../shared/Dialog";
+import { toast } from "../ai/extRuntime";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -1613,7 +1614,8 @@ export function ControlCanvas() {
             onDragOver={(e) => {
               if (
                 e.dataTransfer.types.includes("text/vs-cmd") ||
-                e.dataTransfer.types.includes("text/vs-widget")
+                e.dataTransfer.types.includes("text/vs-widget") ||
+                e.dataTransfer.types.includes("text/vs-field")
               ) {
                 e.preventDefault();
               }
@@ -1621,6 +1623,30 @@ export function ControlCanvas() {
             onDrop={(e) => {
               const cmdRaw = e.dataTransfer.getData("text/vs-cmd");
               const widgetRaw = e.dataTransfer.getData("text/vs-widget");
+              const fieldRaw = e.dataTransfer.getData("text/vs-field");
+              if (fieldRaw) {
+                e.preventDefault();
+                try {
+                  const p = JSON.parse(fieldRaw) as { tplId: string; fieldId: string; name: string };
+                  const vd = variableStore
+                    .listVars()
+                    .find((v) => v.tplId === p.tplId && v.fieldId === p.fieldId);
+                  if (!vd) {
+                    toast(
+                      tx(
+                        "该字段暂无对应变量（模板未启用或为帧头），先在协议模板面板启用",
+                        "No variable for this field yet (template disabled or header role) — enable it first",
+                      ),
+                    );
+                    return;
+                  }
+                  const id = store.addCard(page.id, "monitor");
+                  store.patchCard(page.id, id, { varName: vd.name, name: vd.name });
+                } catch {
+                  return;
+                }
+                return;
+              }
               if (!widgetRaw && !cmdRaw) return;
               e.preventDefault();
               let type: ControlType = "slider";

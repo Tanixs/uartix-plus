@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { FieldDef, FrameTemplate } from "../../ipc/types";
-import { buildBlocks, layoutBlocks, reservedTail, skeletonLen } from "./frameLayout";
+import { buildBlocks, coverageRuns, layoutBlocks, reservedTail, skeletonLen } from "./frameLayout";
 
 beforeAll(() => {
   const store: Record<string, string> = {};
@@ -207,5 +207,41 @@ describe("layoutBlocks", () => {
       expect_g = i.g1 + 1;
     }
     expect(expect_g).toBe(16);
+  });
+});
+
+describe("coverageRuns（覆盖率条缺口）", () => {
+  it("空字段：整帧一条 gap 段", () => {
+    const runs = coverageRuns(fixed(8), 8);
+    expect(runs).toEqual([{ lo: 0, len: 8, kind: "gap" }]);
+  });
+
+  it("字段与重叠合并、缺口分段", () => {
+    const t = fixed(10, {
+      fields: [
+        fld({ id: "a", offset: 2, type: "uint16" }),
+        fld({ id: "b", offset: 3, type: "uint16" }),
+        fld({ id: "c", offset: 8, type: "uint16" }),
+      ],
+    });
+    const runs = coverageRuns(t, 10);
+    expect(runs).toEqual([
+      { lo: 0, len: 2, kind: "gap" },
+      { lo: 2, len: 3, kind: "fld" },
+      { lo: 5, len: 3, kind: "gap" },
+      { lo: 8, len: 2, kind: "fld" },
+    ]);
+  });
+
+  it("spanTail 延伸到帧尾；负偏移字段不参与", () => {
+    const t = fixed(8, {
+      fields: [fld({ id: "s", offset: 4, type: "uint8", spanTail: true })],
+    });
+    expect(coverageRuns(t, 8)).toEqual([
+      { lo: 0, len: 4, kind: "gap" },
+      { lo: 4, len: 4, kind: "fld" },
+    ]);
+    const t2 = fixed(8, { fields: [fld({ id: "n", offset: -2, type: "uint16" })] });
+    expect(coverageRuns(t2, 8)).toEqual([{ lo: 0, len: 8, kind: "gap" }]);
   });
 });

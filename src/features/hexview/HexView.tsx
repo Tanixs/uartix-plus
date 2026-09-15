@@ -9,6 +9,7 @@ import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
 import * as fcStore from "../framecanvas/frameStore";
 import { invokeAiScene } from "../ai/aiBus";
+import { requestOpenPanel } from "../ai/appBus";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
@@ -805,6 +806,7 @@ export function HexView() {
           onClick={() => {
             if (disabled) return;
             addFieldFor(tpl.id, role, tpl.name, tpl.fields.length);
+            requestOpenPanel("framecanvas");
             closeMenu();
           }}
         >
@@ -852,6 +854,7 @@ export function HexView() {
           }
           onClick={() => {
             templateStore.addTemplate(sel.bytes);
+            requestOpenPanel("framecanvas");
             closeMenu();
           }}
         >

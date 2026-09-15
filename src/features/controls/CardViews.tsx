@@ -642,9 +642,12 @@ export function MonitorCardView(props: {
   const { card } = props;
   useSyncExternalStore(variableStore.subscribe, variableStore.getSnapshot);
   const val = variableStore.getVar(card.varName);
+  const noData = card.varName !== "" && val === undefined;
   const text =
     val === undefined
-      ? "--"
+      ? noData
+        ? tx("无数据", "no data")
+        : "--"
       : typeof val === "number"
         ? val.toFixed(card.decimals)
         : val;
@@ -665,7 +668,17 @@ export function MonitorCardView(props: {
       resizable={props.resizable}
       onResizeStart={props.onResizeStart}
     >
-      <div className="ctl-val">
+      <div
+        className="ctl-val"
+        title={
+          noData
+            ? tx(
+                `暂无「${card.varName}」的数据：字段可能已被删除/改名，或设备还没发出该变量，可在设置中重新选择`,
+                `No data for "${card.varName}": field deleted/renamed, or it hasn't arrived yet — re-select it in settings`,
+              )
+            : undefined
+        }
+      >
         {text}
         {card.unit ? <span className="ctl-unit">{card.unit}</span> : null}
       </div>
@@ -1453,6 +1466,11 @@ export function CardModal(props: {
       onChange={(e) => onCommit(e.target.value)}
     >
       <option value="">{tx("— 选择变量 —", "— Select variable —")}</option>
+      {value && !vars.some((v) => v.name === value) && (
+        <option value={value}>
+          {tx(`${value}（当前无此变量，可重新选择）`, `${value} (no such variable now — pick again)`)}
+        </option>
+      )}
       {vars.map((v) => (
         <option key={v.name + v.fieldId} value={v.name}>
           {v.name}
