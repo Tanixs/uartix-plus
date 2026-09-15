@@ -279,6 +279,9 @@ pub fn run() {
                 .background_color(tauri::window::Color(0xF5, 0xF6, 0xF8, 0xFF));
             // 拖放拦截仅 Windows 有（tauri 的 drag_and_drop 带 #[cfg(windows)]）；
             // Linux/GTK 无此 API，文件拖入由前端 preventNav（dragover/drop preventDefault）兜底
+            // 2026-09-15 定论：false 保留（OS 文件拖入导入依赖它）；页内拖拽已全面改
+            // 指针式 shared/pointerDrag——WebView2 Runtime 152 起 true/false 两值都吞
+            // HTML5 拖拽（dragstart 后无 dragover），不再依赖其拖拽管道
             #[cfg(windows)]
             {
                 wb = wb.drag_and_drop(false);

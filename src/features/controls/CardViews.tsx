@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as store from "./controlsStore";
+import { attachPdragZone } from "../../shared/pointerDrag";
 import { getLocale, tx, useLocale } from "../../i18n/strings";
 import type {
   BuzzerCard,
@@ -81,8 +82,34 @@ export interface CardFrameProps {
 
 function CardFrame(props: CardFrameProps) {
   const { card } = props;
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const dropRef = useRef(props.onDropTemplate);
+  dropRef.current = props.onDropTemplate;
+  const cardRef = useRef(card);
+  cardRef.current = card;
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    return attachPdragZone(el, {
+      kinds: "vs-cmd",
+      onDrop: (d) => {
+        try {
+          const cmd = JSON.parse(d.data) as {
+            template: string;
+            sendMode: SendMode;
+            script: string;
+            scriptEnabled: boolean;
+          };
+          dropRef.current(cardRef.current, cmd);
+        } catch {
+          return;
+        }
+      },
+    });
+  }, []);
   return (
     <div
+      ref={rootRef}
       className={`ctl-card ${props.cont ? "cont" : ""}`}
       data-id={card.id}
       style={{
@@ -96,30 +123,6 @@ function CardFrame(props: CardFrameProps) {
         e.preventDefault();
         e.stopPropagation();
         props.onMenu(card, e.clientX, e.clientY);
-      }}
-      onDragOver={(e) => {
-        if (e.dataTransfer.types.includes("text/vs-cmd")) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      }}
-      onDrop={(e) => {
-        if (!e.dataTransfer.types.includes("text/vs-cmd")) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const raw = e.dataTransfer.getData("text/vs-cmd");
-        if (!raw) return;
-        try {
-          const cmd = JSON.parse(raw) as {
-            template: string;
-            sendMode: SendMode;
-            script: string;
-            scriptEnabled: boolean;
-          };
-          props.onDropTemplate(card, cmd);
-        } catch {
-          return;
-        }
       }}
     >
       {props.renaming && (

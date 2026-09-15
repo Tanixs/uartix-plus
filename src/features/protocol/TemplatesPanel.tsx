@@ -14,6 +14,7 @@ import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../frame
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
 import { patch as patchSettings, useSettings } from "../settings/settingsStore";
 import { requestOpenPanel } from "../ai/appBus";
+import { beginPointerDrag } from "../../shared/pointerDrag";
 import { tx, useLocale } from "../../i18n/strings";
 
 function EyeIcon({ open }: { open: boolean }) {
@@ -620,19 +621,19 @@ export function TemplatesPanel() {
               const row = (
                 <div
                   key={f.id}
-                  className={`legend-item ${selected ? "selected" : ""}`}
-                  draggable={numeric}
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData(
-                      "text/vs-field",
-                      JSON.stringify({
+                  className={`legend-item ${selected ? "selected" : ""} pdrag-src`}
+                  onPointerDown={(e) => {
+                    if (!numeric || e.button !== 0) return;
+                    beginPointerDrag(e, {
+                      kind: "vs-field",
+                      data: JSON.stringify({
                         tplId: tpl.id,
                         fieldId: f.id,
                         name: `${tpl.name}·${f.name}`,
                         type: f.type,
                       }),
-                    );
-                    e.dataTransfer.effectAllowed = "copy";
+                      label: `${tpl.name}·${f.name}`,
+                    });
                   }}
                   onClick={() => {
                     store.setSelection({

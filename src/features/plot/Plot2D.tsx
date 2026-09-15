@@ -9,6 +9,7 @@ import { toast } from "../ai/extRuntime";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
 import { invokeAiScene } from "../ai/aiBus";
+import { attachPdragZone } from "../../shared/pointerDrag";
 import {
   IconChevron,
   IconCursorX,
@@ -1642,13 +1643,9 @@ export function Plot2D() {
   const hasXCursor = cursorXOn && !!(measureX || xCurRef.current.a != null || xCurRef.current.b != null);
   const hasYCursor = cursorYOn && !!(measureY || yCurRef.current.a != null || yCurRef.current.b != null);
 
-  const isFieldDrag = (e: React.DragEvent) =>
-    Array.from(e.dataTransfer.types).includes("text/vs-field");
-
-  const onFieldDrop = (e: React.DragEvent) => {
-    const raw = e.dataTransfer.getData("text/vs-field");
+  const fieldDropRef = useRef<(raw: string) => void>(() => {});
+  fieldDropRef.current = (raw: string) => {
     if (!raw) return;
-    e.preventDefault();
     try {
       const p = JSON.parse(raw) as { tplId: string; fieldId: string; name: string; type: string };
       const tpl = templateStore.getSnapshot().rules.templates.find((t) => t.id === p.tplId);
@@ -1672,6 +1669,16 @@ export function Plot2D() {
       return;
     }
   };
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    return attachPdragZone(el, {
+      kinds: "vs-field",
+      onOver: () => setDragOver(true),
+      onLeave: () => setDragOver(false),
+      onDrop: (d) => fieldDropRef.current(d.data),
+    });
+  }, []);
 
   return (
     <div className="plot">
@@ -1772,17 +1779,6 @@ export function Plot2D() {
       <div
         ref={wrapRef}
         className={`plot-wrap ${dragOver ? "dropping" : ""}`}
-        onDragOver={(e) => {
-          if (!isFieldDrag(e)) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          setDragOver(false);
-          onFieldDrop(e);
-        }}
       >
         <div ref={chartRef} className="plot-chart" />
         {!hasChannels && (

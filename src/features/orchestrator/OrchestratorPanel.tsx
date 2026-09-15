@@ -13,6 +13,7 @@ import * as templateStore from "../protocol/templateStore";
 import { Inspector, VarsEditor, type Sel } from "./OrchestratorInspector";
 import { toast } from "../ai/extRuntime";
 import { useListDrag, type DragPos } from "../../shared/useListDrag";
+import { attachPdragZone } from "../../shared/pointerDrag";
 import { alertDialog, confirmDialog } from "../../shared/Dialog";
 import { useOperator } from "../operator/operatorStore";
 import {
@@ -471,10 +472,9 @@ export function OrchestratorPanel() {
     return id;
   };
 
-  const onFieldDrop = (e: React.DragEvent) => {
-    const raw = e.dataTransfer.getData("text/vs-field");
+  const fieldDropRef = useRef<(raw: string) => void>(() => {});
+  fieldDropRef.current = (raw: string) => {
     if (!raw) return;
-    e.preventDefault();
     if (readOnly) {
       toast(tx("Operator 只读模式：不能创建编排组", "Operator read-only: cannot create groups"));
       return;
@@ -518,6 +518,17 @@ export function OrchestratorPanel() {
       return;
     }
   };
+  const orchListRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = orchListRef.current;
+    if (!el) return;
+    return attachPdragZone(el, {
+      kinds: "vs-field",
+      onOver: () => setFieldDrag(true),
+      onLeave: () => setFieldDrag(false),
+      onDrop: (d) => fieldDropRef.current(d.data),
+    });
+  }, []);
 
   const openLogsFor = (gid: string | null) => {
     setLogGroup(gid);
@@ -811,17 +822,7 @@ export function OrchestratorPanel() {
         <div
           className={`orch-canvas${fieldDrag ? " dropping" : ""}`}
           data-orch-list
-          onDragOver={(e) => {
-            if (!Array.from(e.dataTransfer.types).includes("text/vs-field")) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
-            setFieldDrag(true);
-          }}
-          onDragLeave={() => setFieldDrag(false)}
-          onDrop={(e) => {
-            setFieldDrag(false);
-            onFieldDrop(e);
-          }}
+          ref={orchListRef}
         >
           {doc.groups.length === 0 && (
             <div className="orch-empty">

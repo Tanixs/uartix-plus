@@ -23,6 +23,7 @@ import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
 import { alertDialog } from "../../shared/Dialog";
 import { toast } from "../ai/extRuntime";
+import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -659,6 +660,32 @@ export function ControlCanvas() {
     return () => window.removeEventListener("vs-control-trigger", onCtl);
   });
 
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const gridDropRef = useRef<(d: PdragDetail) => void>(() => {});
+  const treeOverRef = useRef<(d: PdragDetail) => void>(() => {});
+  const treeDropRef = useRef<(d: PdragDetail) => void>(() => {});
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    return attachPdragZone(el, {
+      kinds: "vs-widget vs-cmd vs-field",
+      onDrop: (dd) => gridDropRef.current(dd),
+    });
+  }, [page?.id]);
+  useEffect(() => {
+    const el = treeRef.current;
+    if (!el) return;
+    return attachPdragZone(el, {
+      kinds: "vs-cmd vs-group",
+      onOver: (dd) => treeOverRef.current(dd),
+      onLeave: () => {
+        dropPosRef.current = null;
+        setDropTarget(null);
+      },
+      onDrop: (dd) => treeDropRef.current(dd),
+    });
+  }, [sideTab, page?.id]);
+
   if (!page) {
     return <div className="ctl"><div className="ctl-empty">{tx("无控制页", "No control pages")}</div></div>;
   }
@@ -982,6 +1009,135 @@ export function ControlCanvas() {
 
   const usedRows = page.cards.reduce((m, c) => Math.max(m, c.y + (c.h || 1)), 1);
   const gridRows = Math.max(page.rows || 8, usedRows);
+
+  const dragEnd = () => {
+    dragNodeRef.current = null;
+    dropPosRef.current = null;
+    setDropTarget(null);
+  };
+  gridDropRef.current = (d) => {
+    const placeAt = (id: string, x: number, y: number) => {
+      const g = gridRef.current;
+      const card = store.activePage()?.cards.find((c) => c.id === id);
+      if (!g || !card) return;
+      const r = g.getBoundingClientRect();
+      const zf = zfactor || 1;
+      const w = card.w || 1;
+      const h = card.h || 1;
+      const tx = Math.max(0, Math.min(page.cols - w, Math.round(((x - r.left) / zf - OFFq) / STEPq)));
+      const ty = Math.max(0, Math.min(gridRows - h, Math.round(((y - r.top) / zf - OFFq) / STEPq)));
+      const busy = page.cards.some(
+        (c) =>
+          c.id !== id &&
+          !(tx + w <= c.x || c.x + c.w <= tx || ty + h <= c.y || c.y + (c.h || 1) <= ty),
+      );
+      if (!busy) store.patchCard(page.id, id, { x: tx, y: ty });
+    };
+    if (d.kind === "vs-field") {
+      try {
+        const p = JSON.parse(d.data) as { tplId: string; fieldId: string };
+        const vd = variableStore
+          .listVars()
+          .find((v) => v.tplId === p.tplId && v.fieldId === p.fieldId);
+        if (!vd) {
+          toast(
+            tx(
+              "该字段暂无对应变量（模板未启用或为帧头），先在协议模板面板启用",
+              "No variable for this field yet (template disabled or header role) — enable it first",
+            ),
+          );
+          return;
+        }
+        const id = store.addCard(page.id, "monitor");
+        store.patchCard(page.id, id, { varName: vd.name, name: vd.name });
+        placeAt(id, d.x, d.y);
+      } catch {
+        return;
+      }
+      return;
+    }
+    let type: ControlType = "slider";
+    let cmd: {
+      template: string;
+      sendMode: SendMode;
+      script: string;
+      scriptEnabled: boolean;
+      name: string;
+    } | null = null;
+    if (d.kind === "vs-widget") {
+      try {
+        type = (JSON.parse(d.data) as { type: ControlType }).type;
+      } catch {
+        return;
+      }
+    } else if (d.kind === "vs-cmd") {
+      try {
+        cmd = JSON.parse(d.data) as {
+          template: string;
+          sendMode: SendMode;
+          script: string;
+          scriptEnabled: boolean;
+          name: string;
+        };
+      } catch {
+        return;
+      }
+    } else {
+      return;
+    }
+    const id = store.addCard(page.id, type);
+    if (cmd) {
+      const card = store.activePage()?.cards.find((c) => c.id === id);
+      if (card) mountCommand(card, cmd);
+      else {
+        store.patchCard(page.id, id, {
+          template: cmd.template,
+          sendMode: cmd.sendMode,
+          useScript: !!cmd.scriptEnabled && !!cmd.script,
+          script: cmd.script,
+          ...(cmd.name ? { name: cmd.name } : {}),
+        });
+      }
+    }
+    placeAt(id, d.x, d.y);
+  };
+  treeOverRef.current = (d) => {
+    const row = document
+      .elementFromPoint(d.x, d.y)
+      ?.closest(".cmd-group-head,.cmd-item") as HTMLElement | null;
+    const src = dragNodeRef.current;
+    const nodeId = row?.getAttribute("data-node-id") ?? null;
+    if (!row || !src || !nodeId || nodeId === src.id) {
+      if (dropPosRef.current) {
+        dropPosRef.current = null;
+        setDropTarget(null);
+      }
+      return;
+    }
+    const r = row.getBoundingClientRect();
+    let pos: "before" | "after" | "into";
+    if (row.classList.contains("cmd-group-head")) {
+      const t = (d.y - r.top) / Math.max(1, r.height);
+      pos = t < 0.33 ? "before" : t > 0.67 ? "after" : "into";
+    } else {
+      pos = d.y > r.top + r.height / 2 ? "after" : "before";
+    }
+    dropPosRef.current = { id: nodeId, pos };
+    setDropTarget((p) => (p && p.id === nodeId && p.pos === pos ? p : { id: nodeId, pos }));
+  };
+  treeDropRef.current = () => {
+    const dt = dropPosRef.current;
+    const src = dragNodeRef.current;
+    dragEnd();
+    if (!src) return;
+    if (dt && src.id !== dt.id) {
+      doMove(src.id, dt.id, dt.pos);
+      return;
+    }
+    if (!dt) {
+      if (!commandStore.moveNode(src.id, null)) setErr(tx("无法移动", "Cannot move"));
+    }
+  };
   const menuCard = menu ? page.cards.find((c) => c.id === menu.cardId) : null;
   const editCard = editing ? page.cards.find((c) => c.id === editing) : null;
   const ctxFor = (c: ControlCard): Record<string, number | string> => {
@@ -1113,47 +1269,17 @@ export function ControlCanvas() {
                         : " drop-after"
                     : ""
                 }`}
-                draggable={renamingNode !== n.id}
-                onDragStart={(e) => {
+                data-node-id={n.id}
+                onPointerDown={(e) => {
+                  if (renamingNode === n.id || e.button !== 0) return;
                   dragNodeRef.current = { id: n.id, kind: "group" };
-                  e.dataTransfer.setData("application/x-vs-node", n.id);
-                  e.dataTransfer.effectAllowed = "copyMove";
-                }}
-                onDragEnd={() => {
-                  dragNodeRef.current = null;
-                  setDropTarget(null);
-                }}
-                onDragOver={(e) => {
-                  const d = dragNodeRef.current;
-                  if (!d || d.id === n.id) return;
-                  e.preventDefault();
-                  e.stopPropagation();
-                  e.dataTransfer.dropEffect = "move";
-                  const r = e.currentTarget.getBoundingClientRect();
-                  const t = (e.clientY - r.top) / Math.max(1, r.height);
-                  const pos = t < 0.33 ? "before" : t > 0.67 ? "after" : "into";
-                  dropPosRef.current = { id: n.id, pos };
-                  setDropTarget((p) =>
-                    p && p.id === n.id && p.pos === pos
-                      ? p
-                      : { id: n.id, pos },
-                  );
-                }}
-                onDragLeave={() => {
-                  if (dropPosRef.current?.id === n.id) dropPosRef.current = null;
-                  setDropTarget((p) => (p && p.id === n.id ? null : p));
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  const d = dragNodeRef.current;
-                  const dt = dropPosRef.current;
-                  dropPosRef.current = null;
-                  setDropTarget(null);
-                  dragNodeRef.current = null;
-                  if (!d || d.id === n.id) return;
-                  const pos = dt && dt.id === n.id ? dt.pos : "into";
-                  doMove(d.id, n.id, pos);
+                  beginPointerDrag(e, {
+                    kind: "vs-group",
+                    data: n.id,
+                    label: n.name,
+                    sub: tx("分组", "group"),
+                    onEnd: dragEnd,
+                  });
                 }}
               >
                 <button
@@ -1248,51 +1374,24 @@ export function ControlCanvas() {
                     : " drop-after"
                   : ""
               }`}
-              draggable
-              onDragStart={(e) => {
+              data-node-id={n.id}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return;
                 dragNodeRef.current = { id: n.id, kind: "cmd" };
-                e.dataTransfer.setData(
-                  "text/vs-cmd",
-                  JSON.stringify({
+                beginPointerDrag(e, {
+                  kind: "vs-cmd",
+                  data: JSON.stringify({
+                    nodeId: n.id,
                     template: n.template,
                     sendMode: n.sendMode,
                     script: n.script,
                     scriptEnabled: n.scriptEnabled,
                     name: n.name,
                   }),
-                );
-                e.dataTransfer.setData("application/x-vs-node", n.id);
-                e.dataTransfer.effectAllowed = "copyMove";
-              }}
-              onDragEnd={() => {
-                dragNodeRef.current = null;
-                setDropTarget(null);
-              }}
-              onDragOver={(e) => {
-                const d = dragNodeRef.current;
-                if (!d || d.id === n.id) return;
-                e.preventDefault();
-                e.stopPropagation();
-                e.dataTransfer.dropEffect = "move";
-                const r = e.currentTarget.getBoundingClientRect();
-                const after = e.clientY > r.top + r.height / 2;
-                const pos = after ? "after" : "before";
-                dropPosRef.current = { id: n.id, pos };
-                setDropTarget((p) =>
-                  p && p.id === n.id && p.pos === pos ? p : { id: n.id, pos },
-                );
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const d = dragNodeRef.current;
-                const dt = dropPosRef.current;
-                dropPosRef.current = null;
-                setDropTarget(null);
-                dragNodeRef.current = null;
-                if (!d || d.id === n.id) return;
-                const pos = dt && dt.id === n.id ? dt.pos : "after";
-                doMove(d.id, n.id, pos);
+                  label: n.name,
+                  sub: tx("命令", "command"),
+                  onEnd: dragEnd,
+                });
               }}
               onClick={() => {
                 if (n.scriptEnabled && n.script) {
@@ -1531,15 +1630,14 @@ export function ControlCanvas() {
                   {WIDGET_TYPES.map((w) => (
                     <div
                       key={w.type}
-                      className="widget-item"
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData(
-                          "text/vs-widget",
-                          JSON.stringify({ type: w.type }),
-                        );
-                        e.dataTransfer.effectAllowed = "copy";
-                      }}
+                      className="widget-item pdrag-src"
+                      onPointerDown={(e) =>
+                        beginPointerDrag(e, {
+                          kind: "vs-widget",
+                          data: JSON.stringify({ type: w.type }),
+                          label: w.label,
+                        })
+                      }
                       title="拖到右侧画布创建"
                     >
                       <span className="widget-icon">
@@ -1557,25 +1655,7 @@ export function ControlCanvas() {
               {sideTab === "commands" && (
                 <div
                   className="cmd-tree"
-                  onDragOver={(e) => {
-                    if (dragNodeRef.current) e.preventDefault();
-                  }}
-              onDrop={(e) => {
-                const d = dragNodeRef.current;
-                if (!d) return;
-                e.preventDefault();
-                // 若行上的 drop 未触发（拖到行间隙/边缘），使用最后记录的行落点自愈
-                const dt = dropPosRef.current;
-                dropPosRef.current = null;
-                setDropTarget(null);
-                dragNodeRef.current = null;
-                if (dt && dt.id !== d.id) {
-                  doMove(d.id, dt.id, dt.pos);
-                  return;
-                }
-                // 落到空白处：按树末尾移动（命令/分组均可放顶层，自由拖拽）
-                if (!commandStore.moveNode(d.id, null)) setErr(tx("无法移动", "Cannot move"));
-              }}
+                  ref={treeRef}
                 >
                   <div className="cmd-toolbar">
                     <button
@@ -1611,80 +1691,6 @@ export function ControlCanvas() {
           <div
             className="ctl-grid"
             ref={wrapRef}
-            onDragOver={(e) => {
-              if (
-                e.dataTransfer.types.includes("text/vs-cmd") ||
-                e.dataTransfer.types.includes("text/vs-widget") ||
-                e.dataTransfer.types.includes("text/vs-field")
-              ) {
-                e.preventDefault();
-              }
-            }}
-            onDrop={(e) => {
-              const cmdRaw = e.dataTransfer.getData("text/vs-cmd");
-              const widgetRaw = e.dataTransfer.getData("text/vs-widget");
-              const fieldRaw = e.dataTransfer.getData("text/vs-field");
-              if (fieldRaw) {
-                e.preventDefault();
-                try {
-                  const p = JSON.parse(fieldRaw) as { tplId: string; fieldId: string; name: string };
-                  const vd = variableStore
-                    .listVars()
-                    .find((v) => v.tplId === p.tplId && v.fieldId === p.fieldId);
-                  if (!vd) {
-                    toast(
-                      tx(
-                        "该字段暂无对应变量（模板未启用或为帧头），先在协议模板面板启用",
-                        "No variable for this field yet (template disabled or header role) — enable it first",
-                      ),
-                    );
-                    return;
-                  }
-                  const id = store.addCard(page.id, "monitor");
-                  store.patchCard(page.id, id, { varName: vd.name, name: vd.name });
-                } catch {
-                  return;
-                }
-                return;
-              }
-              if (!widgetRaw && !cmdRaw) return;
-              e.preventDefault();
-              let type: ControlType = "slider";
-              if (widgetRaw) {
-                try {
-                  type = (JSON.parse(widgetRaw) as { type: ControlType }).type;
-                } catch {
-                  return;
-                }
-              }
-              const id = store.addCard(page.id, type);
-              if (cmdRaw) {
-                try {
-                  const cmd = JSON.parse(cmdRaw) as {
-                    template: string;
-                    sendMode: SendMode;
-                    script: string;
-                    scriptEnabled: boolean;
-                    name: string;
-                  };
-                  const card = store
-                    .activePage()
-?.cards.find((c) => c.id === id);
-                  if (card) mountCommand(card, cmd);
-                  else {
-                    store.patchCard(page.id, id, {
-                      template: cmd.template,
-                      sendMode: cmd.sendMode,
-                      useScript: !!cmd.scriptEnabled && !!cmd.script,
-                      script: cmd.script,
-                      ...(cmd.name ? { name: cmd.name } : {}),
-                    });
-                  }
-                } catch {
-                  return;
-                }
-              }
-            }}
           >
             <div
               ref={gridRef}
