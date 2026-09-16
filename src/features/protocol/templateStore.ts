@@ -71,6 +71,7 @@ export interface ConflictInfo {
   overlapName?: string;
   overlapBytes?: number;
   overTail?: { kind: "checksum" | "footer"; bytes: number };
+  overHeader?: number;
 }
 
 /** 字段/选区冲突统一检测（P85a）：按有效区间比较——负偏移按帧尾锚定解析、
@@ -97,6 +98,15 @@ export function fieldConflictInfo(
       `字段将延伸到 ${ce} B，超出帧长 ${cap} B`,
       `Field extends to ${ce} B, beyond frame length ${cap} B`,
     );
+  }
+  const hbLen = b.headerBytes.length;
+  if (cs >= 0 && cs < ce && cs < hbLen) {
+    let ovH = Math.min(ce, hbLen) - cs;
+    const exH = t.fields.find((f) => f.id === fieldId);
+    if (exH && exH.offset >= 0) {
+      ovH = Math.max(0, ovH - Math.max(0, Math.min(exH.offset + fieldSize(exH), hbLen) - exH.offset));
+    }
+    if (ovH > 0) res.overHeader = ovH;
   }
   const hits: { name: string; start: number; end: number; bits: boolean }[] = [];
   for (const f of t.fields) {

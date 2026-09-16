@@ -2171,6 +2171,16 @@ function FrameCanvas() {
                   });
                   return;
                 }
+                if (c.overHeader) {
+                  setPending({
+                    title: tx("与帧头冲突", "Header conflict"),
+                    msg: tx(
+                      `选区与帧头字节重叠 ${c.overHeader} B——帧头是同步字，不能被字段占用。请右移选区，或在「编辑帧头」中增减帧头长度（字段会自动平移）。`,
+                      `The selection overlaps ${c.overHeader} B of header bytes — sync bytes cannot be occupied. Move the selection right, or change header length in the header editor (fields auto-shift).`,
+                    ),
+                  });
+                  return;
+                }
                 if (c.overTail) {
                   if (c.overTail.kind === "checksum") {
                     setPending({
@@ -2524,6 +2534,8 @@ function FieldDialog({
         )}
         {conflictLive.overFrame ? (
           <div className="fc-dlg-warn">{tx(`超出帧长——${conflictLive.overFrame}`, `Beyond frame length — ${conflictLive.overFrame}`)}</div>
+        ) : conflictLive.overHeader ? (
+          <div className="fc-dlg-warn">{tx(`与帧头字节重叠 ${conflictLive.overHeader} B——帧头不能被字段占用`, `Overlaps ${conflictLive.overHeader} B of header bytes — headers cannot be occupied`)}</div>
         ) : conflictLive.overTail ? (
           <div className="fc-dlg-warn">
             {conflictLive.overTail.kind === "checksum"

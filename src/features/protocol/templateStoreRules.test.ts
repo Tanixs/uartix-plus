@@ -118,6 +118,17 @@ describe("fieldConflictInfo（P85a 有效区间冲突）", () => {
     expect(mixed.overlapName).toBe("位1");
   });
 
+  it("帧头区新建字段：overHeader；存量重叠字段原样编辑豁免（P85a 补洞）", () => {
+    makeTpl({
+      boundary: { mode: "fixedLength", headerBytes: [0xaa, 0xbb], maxLength: 16, fixedLength: 12 },
+      fields: [fld({ id: "h0", name: "掩码位", offset: 1, type: "uint8" })],
+    });
+    const c = templateStore.fieldConflictInfo("t1", "new", 0, 2, { frameLen: 12 });
+    expect(c.overHeader).toBe(2);
+    const edit = templateStore.fieldConflictInfo("t1", "h0", 1, 1, { frameLen: 12 });
+    expect(edit.overHeader).toBeUndefined();
+  });
+
   it("overFrame 用总帧长（定长）", () => {
     makeTpl({});
     const c = templateStore.fieldConflictInfo("t1", "new", 6, 4, { frameLen: 8 });

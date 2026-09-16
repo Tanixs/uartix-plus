@@ -112,6 +112,12 @@ export function effRange(
 
 export function coverageRuns(tpl: FrameTemplate, frameLen: number): CovRun[] {
   const covered = new Uint8Array(Math.max(0, frameLen));
+  // P85a：帧头与尾部保护区是结构占位，计入「已覆盖」——否则覆盖条把
+  // 保护区标成缺口，点缺口定义的字段必然被冲突检测拦下，徒增困惑
+  const hb = tpl.boundary.headerBytes.length;
+  for (let i = 0; i < Math.min(frameLen, hb); i++) covered[i] = 1;
+  const rt = checksumTail(tpl) + footerTail(tpl);
+  if (rt > 0) for (let i = Math.max(hb, frameLen - rt); i < frameLen; i++) covered[i] = 1;
   for (const f of tpl.fields) {
     const er = effRange(tpl, f, frameLen);
     if (!er || er.len <= 0) continue;

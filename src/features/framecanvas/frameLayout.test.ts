@@ -1,13 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { FieldDef, FrameTemplate } from "../../ipc/types";
-import {
-  buildBlocks,
-  coverageRuns,
-  effRange,
-  layoutBlocks,
-  reservedTail,
-  skeletonLen,
-} from "./frameLayout";
+import { buildBlocks, coverageRuns, effRange, layoutBlocks, reservedTail, skeletonLen } from "./frameLayout";
 
 beforeAll(() => {
   const store: Record<string, string> = {};
@@ -218,9 +211,17 @@ describe("layoutBlocks", () => {
 });
 
 describe("coverageRuns（覆盖率条缺口）", () => {
-  it("空字段：整帧一条 gap 段", () => {
-    const runs = coverageRuns(fixed(8), 8);
-    expect(runs).toEqual([{ lo: 0, len: 8, kind: "gap" }]);
+  it("空字段：帧头/保护区外的字节仍是缺口", () => {
+    expect(coverageRuns(fixed(8), 8)).toEqual([{ lo: 0, len: 8, kind: "gap" }]);
+    const t = fixed(8, {
+      boundary: { mode: "fixedLength", headerBytes: [0x55], maxLength: 8, fixedLength: 8 },
+      checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
+    });
+    expect(coverageRuns(t, 8)).toEqual([
+      { lo: 0, len: 1, kind: "fld" },
+      { lo: 1, len: 6, kind: "gap" },
+      { lo: 7, len: 1, kind: "fld" },
+    ]);
   });
 
   it("字段与重叠合并、缺口分段", () => {
@@ -264,6 +265,22 @@ describe("coverageRuns（覆盖率条缺口）", () => {
     expect(coverageRuns(t, 18)).toEqual([
       { lo: 0, len: 17, kind: "gap" },
       { lo: 17, len: 1, kind: "fld" },
+    ]);
+  });
+
+  it("帧头与尾部保护区计入已覆盖（P85a 补洞：缺口不再邀请非法字段）", () => {
+    const t = tpl({
+      boundary: { mode: "fixedLength", headerBytes: [0x51], maxLength: 10, fixedLength: 10 },
+      checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
+      fields: [fld({ id: "x", offset: 4, type: "float32" })],
+    });
+    const runs = coverageRuns(t, 10);
+    expect(runs).toEqual([
+      { lo: 0, len: 1, kind: "fld" },
+      { lo: 1, len: 3, kind: "gap" },
+      { lo: 4, len: 4, kind: "fld" },
+      { lo: 8, len: 1, kind: "gap" },
+      { lo: 9, len: 1, kind: "fld" },
     ]);
   });
 });

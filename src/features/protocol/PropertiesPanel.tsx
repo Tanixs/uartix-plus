@@ -620,6 +620,16 @@ export function PropertiesPanel() {
       setConfirm({ fid: field.id, msg: tx(`无法修改：${c.overFrame}。请先增大「总帧长/最大帧长」或缩小字段。`, `Cannot apply: ${c.overFrame}. Increase total/max frame length or shrink the field first.`) });
       return;
     }
+    if (c.overHeader) {
+      setConfirm({
+        fid: field.id,
+        msg: tx(
+          `此位置与帧头字节重叠 ${c.overHeader} B——帧头是同步字，不能被字段占用；请改偏移，或在「帧边界」区增减帧头（字段会自动平移）。`,
+          `This overlaps ${c.overHeader} B of header bytes — sync bytes cannot be occupied; change the offset or edit the header in "Frame Boundary" (fields auto-shift).`,
+        ),
+      });
+      return;
+    }
     if (c.overTail) {
       if (c.overTail.kind === "checksum") {
         setConfirm({
