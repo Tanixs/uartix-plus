@@ -1,5 +1,5 @@
-import type { FieldRole, FrameTemplate } from "../../ipc/types";
-import { fieldSize } from "../protocol/templateStore";
+import type { FieldDef, FieldRole, FrameTemplate } from "../../ipc/types";
+import { fieldSize } from "../protocol/fieldTypes";
 import { tx } from "../../i18n/strings";
 
 export const PAD_L = 10;
@@ -56,12 +56,68 @@ export interface CovRun {
   kind: "fld" | "gap";
 }
 
+/** 字段在某一帧长下的有效区间（P85a）：负偏移→距帧尾解析；
+ *  变长帧校验字段→引擎强制锚尾（parser.rs verify 同构）；
+ *  spanTail→伸到保留区/后继字段前。与 parser.rs、buildBlocks 三方共享的唯一真相。 */
+export interface EffRange {
+  start: number;
+  len: number;
+  span: boolean;
+}
+
+export function effStartRaw(f: FieldDef, frameLen: number): number {
+  return f.offset < 0 && frameLen > 0 ? frameLen + f.offset : f.offset;
+}
+
+export function effRange(
+  tpl: FrameTemplate,
+  f: FieldDef,
+  frameLen: number,
+  sorted?: FieldDef[],
+): EffRange | null {
+  const hb = tpl.boundary.headerBytes.length;
+  const sz0 = fieldSize(f);
+  const ckVar = tpl.boundary.mode !== "fixedLength";
+  const spanT =
+    !!f.spanTail &&
+    f.offset >= 0 &&
+    (f.role === "data" || f.role === "payload") &&
+    f.type !== "csv";
+  if (f.offset < 0) {
+    if (frameLen <= 0) return null;
+    const start = Math.max(hb, frameLen + f.offset);
+    const len = Math.min(sz0, frameLen - start);
+    if (len <= 0 || start < 0 || start >= frameLen) return null;
+    return { start, len, span: false };
+  }
+  if (f.role === "checksum" && ckVar && frameLen > 0) {
+    const start = Math.max(hb, frameLen - footerTail(tpl) - sz0);
+    const len = Math.min(sz0, frameLen - start);
+    if (len <= 0) return { start, len: 0, span: false };
+    return { start, len, span: false };
+  }
+  if (spanT && frameLen > 0) {
+    const end = Math.max(f.offset, frameLen - (checksumTail(tpl) + footerTail(tpl)));
+    const list = sorted ?? [...tpl.fields].sort(
+      (a, b) => effStartRaw(a, frameLen) - effStartRaw(b, frameLen),
+    );
+    const nf = list[list.indexOf(f) + 1];
+    const nextEff = nf ? effStartRaw(nf, frameLen) : end;
+    const nextOff = nf && nextEff > f.offset ? nextEff : end;
+    const len = Math.min(end, nextOff) - f.offset;
+    return { start: f.offset, len, span: true };
+  }
+  return { start: f.offset, len: sz0, span: false };
+}
+
 export function coverageRuns(tpl: FrameTemplate, frameLen: number): CovRun[] {
   const covered = new Uint8Array(Math.max(0, frameLen));
   for (const f of tpl.fields) {
-    if (f.offset < 0) continue;
-    const sz = f.spanTail ? Math.max(0, frameLen - f.offset) : fieldSize(f);
-    for (let i = f.offset; i < Math.min(frameLen, f.offset + sz); i++) covered[i] = 1;
+    const er = effRange(tpl, f, frameLen);
+    if (!er || er.len <= 0) continue;
+    for (let i = er.start; i < Math.min(frameLen, er.start + er.len); i++) {
+      if (i >= 0) covered[i] = 1;
+    }
   }
   const runs: CovRun[] = [];
   let i = 0;
@@ -122,31 +178,13 @@ export function buildBlocks(tpl: FrameTemplate | null, frLen: number): Blk[] {  
     const eb = b.offset < 0 ? frLen + b.offset : b.offset;
     return ea - eb;
   });
-  const tailReserved = checksumTail(tpl) + footerTail(tpl);
-  const ckVar = tpl.boundary.mode !== "fixedLength";
   let pos = hb.length;
   for (let fi = 0; fi < fields.length; fi++) {
     const f = fields[fi];
-    const spanT =
-      !!f.spanTail &&
-      f.offset >= 0 &&
-      (f.role === "data" || f.role === "payload") &&
-      f.type !== "csv";
-    let sz = fieldSize(f);
-    let blkStart = f.offset;
-    if (f.offset < 0 && frLen > 0) {
-      blkStart = Math.max(hb.length, frLen + f.offset);
-      if (blkStart + sz > frLen) sz = frLen - blkStart;
-    } else if (f.role === "checksum" && ckVar && frLen > 0) {
-      blkStart = Math.max(hb.length, frLen - footerTail(tpl) - sz);
-      sz = Math.min(sz, frLen - blkStart);
-    } else if (spanT && frLen > 0) {
-      const end = Math.max(f.offset, frLen - tailReserved);
-      const nf = fields[fi + 1];
-      const nextEff = nf ? (nf.offset < 0 ? frLen + nf.offset : nf.offset) : end;
-      const nextOff = nf && nextEff > f.offset ? nextEff : end;
-      sz = Math.min(end, nextOff) - f.offset;
-    }
+    const er = effRange(tpl, f, frLen, fields);
+    const sz = er ? er.len : fieldSize(f);
+    const blkStart = er ? er.start : f.offset;
+    const spanT = er?.span ?? false;
     if (hb.length > 0 && blkStart >= 0 && blkStart + sz <= hb.length) continue;
     if (blkStart > pos) {
       pieces.push({ start: pos, len: blkStart - pos, key: `g${pos}`, kind: "gap", fid: null, color: "", label: null, role: null, locked: false });

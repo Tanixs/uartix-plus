@@ -2,13 +2,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { tx } from "../../i18n/strings";
 import { guardLocked } from "../operator/lock";
 import { dropFieldValues } from "./telemetryStore";
+import { fieldSize } from "./fieldTypes";
+import { checksumTail, effRange, footerTail } from "../framecanvas/frameLayout";
 import type {
   ChecksumAlgo,
   FieldDef,
+  FieldRole,
   FieldType,
   FrameTemplate,
   ParseRules,
 } from "../../ipc/types";
+export { FIELD_SIZES, fieldSize } from "./fieldTypes";
 
 export interface HexSelection {
   start: number;
@@ -31,6 +35,7 @@ export interface ProtocolSnapshot {
   undoStack: string[];
   redoStack: string[];
   grpRev: number;
+  revealReq: { tplId: string; fieldId: string; nonce: number } | null;
 }
 
 export interface GroupMeta {
@@ -61,61 +66,82 @@ export const OKABE_PALETTE = [
   "#BBBBBB",
 ];
 
-export const FIELD_SIZES: Record<FieldType, number | null> = {
-  uint8: 1,
-  int8: 1,
-  uint16: 2,
-  int16: 2,
-  uint32: 4,
-  int32: 4,
-  float32: 4,
-  float64: 8,
-  ascii: null,
-  bcd: null,
-  bits: 1,
-  csv: null,
-};
-
-export function fieldSize(f: FieldDef): number {
-  const base =
-    f.type === "csv"
-      ? 1
-      : (FIELD_SIZES[f.type] ?? f.size ?? (f.type === "bcd" ? 2 : 4));
-  return Math.max(base, f.disc?.length ?? 0);
+export interface ConflictInfo {
+  overFrame?: string;
+  overlapName?: string;
+  overlapBytes?: number;
+  overTail?: { kind: "checksum" | "footer"; bytes: number };
 }
 
+/** 字段/选区冲突统一检测（P85a）：按有效区间比较——负偏移按帧尾锚定解析、
+ *  变长帧校验字段按引擎重锚定；帧头之后的 reservedTail 为保护区。
+ *  frameLen：当前视图帧长（变长模式用于解析负偏移/尾部区；未知传 0 则跳过相应判定）。
+ *  selfType：候选字段类型——双方都是 bits 的同字节重叠是位段分解的合法用法，免确认。 */
 export function fieldConflictInfo(
   tplId: string,
   fieldId: string,
   nextOffset: number,
   nextSize: number,
-): { overFrame?: string; overlapName?: string; overlapBytes?: number } {
+  opts?: { frameLen?: number; selfType?: FieldType; selfRole?: FieldRole },
+): ConflictInfo {
   const t = snapshot.rules.templates.find((x) => x.id === tplId);
   if (!t) return {};
   const b = t.boundary;
-  const frameLen = b.mode === "fixedLength" ? (b.fixedLength ?? 0) : (b.maxLength ?? 512);
-  const res: { overFrame?: string; overlapName?: string; overlapBytes?: number } = {};
-  if (nextOffset < 0) {
-    const others = t.fields
-      .filter((f) => f.id !== fieldId && f.offset < 0 && f.offset > nextOffset)
-      .sort((a, b2) => a.offset - b2.offset);
-    const nf = others[0];
-    if (nf && nextOffset + nextSize > nf.offset) {
-      res.overlapName = nf.name;
-      res.overlapBytes = nextOffset + nextSize - nf.offset;
+  const fl = b.mode === "fixedLength" ? (b.fixedLength ?? 0) : (opts?.frameLen ?? 0);
+  const cap = b.mode === "fixedLength" ? (b.fixedLength ?? 0) : (b.maxLength ?? 512);
+  const res: ConflictInfo = {};
+  const cs = nextOffset < 0 && fl > 0 ? fl + nextOffset : nextOffset;
+  const ce = cs + nextSize;
+  if (cap > 0 && cs >= 0 && ce > cap) {
+    res.overFrame = tx(
+      `字段将延伸到 ${ce} B，超出帧长 ${cap} B`,
+      `Field extends to ${ce} B, beyond frame length ${cap} B`,
+    );
+  }
+  const hits: { name: string; start: number; end: number; bits: boolean }[] = [];
+  for (const f of t.fields) {
+    if (f.id === fieldId) continue;
+    if (f.offset < 0 && fl <= 0) {
+      if (nextOffset < 0) {
+        const s = f.offset;
+        const e = f.offset + fieldSize(f);
+        if (Math.min(ce, e) > Math.max(cs, s))
+          hits.push({ name: f.name, start: s, end: e, bits: f.type === "bits" });
+      }
+      continue;
     }
-    return res;
+    const er = effRange(t, f, fl);
+    if (!er || er.len <= 0) continue;
+    const s = er.start;
+    const e = er.start + er.len;
+    if (Math.min(ce, e) > Math.max(cs, s))
+      hits.push({ name: f.name, start: s, end: e, bits: f.type === "bits" });
   }
-  if (frameLen > 0 && nextOffset + nextSize > frameLen) {
-    res.overFrame = `字段将延伸到 ${nextOffset + nextSize} B，超出帧长 ${frameLen} B`;
+  const rt = checksumTail(t) + footerTail(t);
+  const existing = t.fields.find((f) => f.id === fieldId);
+  const selfIsTail =
+    opts?.selfRole === "checksum" ||
+    opts?.selfRole === "checksum2" ||
+    opts?.selfRole === "footer" ||
+    existing?.role === "checksum" ||
+    existing?.role === "checksum2" ||
+    existing?.role === "footer";
+  if (rt > 0 && fl > 0 && cs < fl && !selfIsTail) {
+    const ts = fl - rt;
+    const ov = Math.min(ce, fl) - Math.max(cs, ts);
+    let ovEx = 0;
+    if (existing) {
+      const er = effRange(t, existing, fl);
+      if (er) ovEx = Math.max(0, Math.min(er.start + er.len, fl) - Math.max(er.start, ts));
+    }
+    if (ov > ovEx) {
+      res.overTail = { kind: footerTail(t) > 0 ? "footer" : "checksum", bytes: ov };
+    }
   }
-  const others = t.fields
-    .filter((f) => f.id !== fieldId && f.offset > nextOffset)
-    .sort((a, b2) => a.offset - b2.offset);
-  const nf = others[0];
-  if (nf && nextOffset + nextSize > nf.offset) {
+  if (hits.length > 0 && !(opts?.selfType === "bits" && hits.every((x) => x.bits))) {
+    const nf = [...hits].sort((a, x) => a.start - x.start)[0];
     res.overlapName = nf.name;
-    res.overlapBytes = nextOffset + nextSize - nf.offset;
+    res.overlapBytes = Math.min(ce, nf.end) - Math.max(cs, nf.start);
   }
   return res;
 }
@@ -177,6 +203,7 @@ let snapshot: ProtocolSnapshot = {
   undoStack: [],
   redoStack: [],
   grpRev: 0,
+  revealReq: null,
 };
 
 const listeners = new Set<() => void>();
@@ -592,6 +619,13 @@ export function locate(seq: number) {
   set({ locateReq: { seq, nonce: locateNonce } });
 }
 
+let revealNonce = 0;
+/** 属性面板/表 → 画布反向定位请求（P85b 消费；单调 nonce 去重） */
+export function revealField(tplId: string, fieldId: string) {
+  revealNonce += 1;
+  set({ revealReq: { tplId, fieldId, nonce: revealNonce } });
+}
+
 export function addTemplate(headerBytes: number[]): string {
   pushHistory();
   const tpl: FrameTemplate = {
@@ -744,18 +778,31 @@ export function setFieldDisc(
 export function insertFrameCell(tplId: string, g: number): string | null {
   const t = snapshot.rules.templates.find((x) => x.id === tplId);
   if (!t) return tx("模板不存在", "Template not found");
-  if (t.boundary.mode !== "fixedLength") return tx("仅「固定长度」模式支持插入格", "Only fixed-length mode supports inserting cells");
+  if (t.boundary.mode !== "fixedLength")
+    return tx(
+      "变长帧帧长由长度域/帧尾决定，请到属性面板改截帧配置",
+      "Variable frames size by length field/footer — edit the framing config in properties",
+    );
   const hb = t.boundary.headerBytes.length;
   const fl = t.boundary.fixedLength ?? 0;
   if (g < hb) return tx("不能插入到帧头内部", "Cannot insert inside the frame header");
-  if (g >= fl) return tx("插入位置超出帧长", "Insert position exceeds the frame length");
+  if (g > fl) return tx("插入位置超出帧长", "Insert position exceeds the frame length");
   for (const f of t.fields) {
     if (f.offset < 0) continue;
     const sz = fieldSize(f);
     if (g > f.offset && g < f.offset + sz) {
-      return tx("位置被字段「", "Position is occupied by field \"") + f.name + tx("」占用，请先取消该字段", "\" — undefine it first");
+      return tx(
+        `位置被字段「${f.name}」占用，请先取消该字段`,
+        `Position is occupied by field "${f.name}" — undefine it first`,
+      );
     }
   }
+  const lk = t.fields.find((f) => f.locked && f.offset >= g);
+  if (lk)
+    return tx(
+      `字段「${lk.name}」已锁定，插入会使其右移——请先解锁`,
+      `Field "${lk.name}" is locked and would shift right — unlock it first`,
+    );
   pushHistory();
   set({
     rules: {
@@ -778,20 +825,39 @@ export function insertFrameCell(tplId: string, g: number): string | null {
 
 export function deleteFrameCell(tplId: string, g: number): string | null {
   const t = snapshot.rules.templates.find((x) => x.id === tplId);
-  if (!t) return "模板不存在";
-  if (t.boundary.mode !== "fixedLength") return "仅「固定长度」模式支持删除格";
+  if (!t) return tx("模板不存在", "Template not found");
+  if (t.boundary.mode !== "fixedLength")
+    return tx(
+      "变长帧帧长由长度域/帧尾决定，请到属性面板改截帧配置",
+      "Variable frames size by length field/footer — edit the framing config in properties",
+    );
   const hb = t.boundary.headerBytes.length;
   const fl = t.boundary.fixedLength ?? 0;
-  if (g < hb) return "不能删除帧头字节（请用帧头编辑）";
-  if (g >= fl) return "位置超出帧长";
-  if (fl - 1 < hb + 1) return "删除后帧长不能小于帧头 + 1 字节";
+  if (g < hb) return tx("不能删除帧头字节（请用帧头编辑）", "Cannot delete header bytes (use the header editor)");
+  if (g >= fl) return tx("位置超出帧长", "Position exceeds the frame length");
+  if (fl - 1 < hb + 1) return tx("删除后帧长不能小于帧头 + 1 字节", "Frame length cannot drop below header + 1 byte");
+  const rt = checksumTail(t);
+  if (rt > 0 && g >= fl - rt)
+    return tx(
+      "帧尾校验域不可删除——先停用校验，或删校验区之前的格",
+      "The checksum tail is protected — disable the checksum first, or delete cells before it",
+    );
   for (const f of t.fields) {
     if (f.offset < 0) continue;
     const sz = fieldSize(f);
-    if (g > f.offset && g < f.offset + sz) {
-      return `位置被字段「${f.name}」占用，请先取消该字段`;
+    if (g >= f.offset && g < f.offset + sz) {
+      return tx(
+        `位置被字段「${f.name}」占用，请先取消该字段`,
+        `Position is occupied by field "${f.name}" — undefine it first`,
+      );
     }
   }
+  const lk = t.fields.find((f) => f.locked && f.offset > g);
+  if (lk)
+    return tx(
+      `字段「${lk.name}」已锁定，删除会使其左移——请先解锁`,
+      `Field "${lk.name}" is locked and would shift left — unlock it first`,
+    );
   pushHistory();
   set({
     rules: {
@@ -1005,6 +1071,87 @@ export function removeField(templateId: string, fieldId: string) {
         : snapshot.selection,
   });
   scheduleSync();
+}
+
+/** 删除校验字段并同步停用校验（P85a：避免「无算法的 CK1 僵尸字段」与「无字段的启用校验」脱节） */
+export function removeChecksumField(templateId: string, fieldId: string) {
+  pushHistory();
+  plotCleanup(templateId, fieldId);
+  dropFieldValues([fieldId]);
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((t) =>
+        t.id === templateId
+          ? {
+              ...t,
+              fields: t.fields.filter((f) => f.id !== fieldId),
+              checksum: t.checksum
+                ? { ...t.checksum, algo: "none" as ChecksumAlgo }
+                : null,
+            }
+          : t,
+      ),
+    },
+    selection:
+      snapshot.selection?.kind === "field" &&
+      snapshot.selection.fieldId === fieldId
+        ? { kind: "template", templateId }
+        : snapshot.selection,
+  });
+  scheduleSync();
+}
+
+/** 帧头字节整体替换 + 联动平移（P85a：帧头 ±1 不再是「只改内容不动结构」的半吊子）：
+ *  正偏移≥旧帧头长的字段、长度域偏移、识别位偏移全部按差值平移；负偏移字段天然锚尾不动。 */
+export function setHeaderBytes(tplId: string, bytes: number[]): string | null {
+  const t = snapshot.rules.templates.find((x) => x.id === tplId);
+  if (!t) return tx("模板不存在", "Template not found");
+  const oldHb = t.boundary.headerBytes.length;
+  const newHb = bytes.length;
+  if (newHb > 8)
+    return tx("帧头最多 8 字节", "Header supports up to 8 bytes");
+  const fl =
+    t.boundary.mode === "fixedLength" ? (t.boundary.fixedLength ?? 0) : 0;
+  if (fl > 0 && newHb + 1 > fl)
+    return tx(
+      "帧头过长：总帧长至少需为帧头 + 1 字节，请先调大总帧长",
+      "Header too long: total frame length must be at least header + 1 byte — raise it first",
+    );
+  const delta = newHb - oldHb;
+  pushHistory();
+  set({
+    rules: {
+      templates: snapshot.rules.templates.map((x) => {
+        if (x.id !== tplId) return x;
+        const boundary = {
+          ...x.boundary,
+          headerBytes: bytes,
+          lengthOffset:
+            delta !== 0 && x.boundary.lengthOffset != null && x.boundary.lengthOffset >= oldHb
+              ? x.boundary.lengthOffset + delta
+              : x.boundary.lengthOffset,
+          discOffset:
+            delta !== 0 && x.boundary.discOffset != null && x.boundary.discOffset >= oldHb
+              ? x.boundary.discOffset + delta
+              : x.boundary.discOffset,
+          discs: (x.boundary.discs ?? []).map((d) =>
+            delta !== 0 && d.offset >= oldHb ? { ...d, offset: d.offset + delta } : d,
+          ),
+        };
+        const fields =
+          delta === 0
+            ? x.fields
+            : x.fields.map((f) =>
+                f.offset >= 0 && f.offset >= oldHb
+                  ? { ...f, offset: f.offset + delta }
+                  : f,
+              );
+        return { ...x, boundary, fields };
+      }),
+    },
+  });
+  scheduleSync();
+  return null;
 }
 
 export function loadDemoRules() {

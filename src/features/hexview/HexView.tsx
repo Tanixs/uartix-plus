@@ -795,6 +795,42 @@ export function HexView() {
           disabled = true;
           why = "校验字段最多 4 字节";
         }
+        if (!disabled) {
+          // P85a：与画布同一套冲突检测（帧头/既有字段/帧尾保护区），不再静默覆盖
+          const sizeGuess =
+            role === "length"
+              ? selLen === 2
+                ? 2
+                : 1
+              : role === "checksum"
+                ? selLen >= 4
+                  ? 4
+                  : selLen === 2
+                    ? 2
+                    : 1
+                : selLen;
+          if (off < tpl.boundary.headerBytes.length) {
+            disabled = true;
+            why = "选区与帧头重叠";
+          } else {
+            const c = templateStore.fieldConflictInfo(tpl.id, "", off, sizeGuess, {
+              frameLen: selSpan?.len ?? 0,
+            });
+            if (c.overTail) {
+              disabled = true;
+              why =
+                c.overTail.kind === "checksum"
+                  ? "选区压在帧尾校验域"
+                  : "选区压在帧尾定界字节";
+            } else if (c.overFrame) {
+              disabled = true;
+              why = c.overFrame;
+            } else if (c.overlapName) {
+              disabled = true;
+              why = `与已有字段「${c.overlapName}」重叠`;
+            }
+          }
+        }
       }
       const label = role === "length" ? "长度字段" : role === "checksum" ? "校验字段" : "数据字段";
       return (

@@ -31,6 +31,7 @@ import {
   buildBlocks,
   layoutBlocks,
   coverageRuns,
+  effRange,
   type Blk,
   type Layout,
 } from "./frameLayout";
@@ -533,7 +534,12 @@ function FrameCanvas() {
   const [menuState, setMenuState] = useState<{ x: number; y: number } | null>(null);
   const [tabRev, setTabRev] = useState(0);
   const [errOpen, setErrOpen] = useState(false);
-  const [pending, setPending] = useState<{ msg: string; apply?: () => void } | null>(null);
+  const [pending, setPending] = useState<{
+    msg: string;
+    apply?: () => void;
+    applyLabel?: string;
+    title?: string;
+  } | null>(null);
   const [saveSt, setSaveSt] = useState<"idle" | "saving" | "ok" | "err">("idle");
   const locale = useLocale();
   useEffect(() => {
@@ -784,12 +790,9 @@ function FrameCanvas() {
 
     const sel = selRef.current;
     const hv = hoverRef.current;
+    // P85a：高亮环走渲染块本身——负偏移/锚定字段 findFieldAt 旧实现命不中环
     let hoverFldKey: string | null = null;
-    if (hv) {
-      const tpl0 = curRef.current;
-      const fld0 = tpl0 ? findFieldAt(tpl0, hv.off) : null;
-      if (fld0) hoverFldKey = `f${fld0.id}`;
-    }
+    if (hv && hv.blk?.kind === "fld") hoverFldKey = hv.blk.key;
     const now = Date.now();
     const rowsTotal = rows.length;
     const visRows = Math.max(1, Math.floor((h - PAD_T - 6) / rowH));
@@ -1053,9 +1056,10 @@ function FrameCanvas() {
       field = tpl.fields.find((f) => f.id === blkFid) ?? null;
     }
     if (tpl && !field) {
+      const fl0 = fr?.len ?? 0;
       for (const f of tpl.fields) {
-        const sz = fieldSize(f);
-        if (hv.off >= f.offset && hv.off < f.offset + sz) {
+        const er = effRange(tpl, f, fl0);
+        if (er && er.len > 0 && hv.off >= er.start && hv.off < er.start + er.len) {
           field = f;
           break;
         }
@@ -1319,9 +1323,11 @@ function FrameCanvas() {
   };
 
   const findFieldAt = (tpl: FrameTemplate, off: number): FieldDef | null => {
+    // P85a：按有效区间命中——负偏移/变长锚定校验字段同样可右键/可选中
+    const fl = resolvedRef.current.fr?.len ?? 0;
     for (const f of tpl.fields) {
-      const sz = fieldSize(f);
-      if (off >= f.offset && off < f.offset + sz) return f;
+      const er = effRange(tpl, f, fl);
+      if (er && er.len > 0 && off >= er.start && off < er.start + er.len) return f;
     }
     return null;
   };
@@ -1337,7 +1343,7 @@ function FrameCanvas() {
     const tpl = curRef.current;
     if (!tpl) return;
     const sel = selRef.current;
-    if (sel && sel.lo <= sel.hi && p.off >= sel.lo && p.off <= sel.hi) {
+    if (sel && sel.lo <= sel.hi && sel.hi > sel.lo && p.off >= sel.lo && p.off <= sel.hi) {
       menuRef.current = {
         kind: "sel",
         tplId: tpl.id,
@@ -1349,33 +1355,30 @@ function FrameCanvas() {
     }
     selRef.current = { lo: p.off, hi: p.off };
     dirtyRef.current = true;
-    const fld = findFieldAt(tpl, p.off);
-    if (fld) {
-      menuRef.current = {
-        kind: "field",
-        tplId: tpl.id,
-        fid: fld.id,
-        locked: !!fld.locked,
-      };
+    const blk = p.blk;
+    if (blk.kind === "fld" && blk.fid) {
+      const fld = tpl.fields.find((f) => f.id === blk.fid) ?? null;
+      if (fld) {
+        menuRef.current = {
+          kind: "field",
+          tplId: tpl.id,
+          fid: fld.id,
+          locked: !!fld.locked,
+        };
+        openMenuAt(ev.clientX, ev.clientY);
+        return;
+      }
+    }
+    if (blk.kind === "hdr") {
+      menuRef.current = { kind: "hdr", tplId: tpl.id, nbytes: tpl.boundary.headerBytes.length };
       openMenuAt(ev.clientX, ev.clientY);
       return;
     }
-    const fr = resolvedRef.current.fr;
-    if (fr && fr.len > 0) {
-      const hb = tpl.boundary.headerBytes;
-      const rt = reservedTail(tpl);
-      const tailStart = fr.len - rt;
-      if (p.off < hb.length) {
-        menuRef.current = { kind: "hdr", tplId: tpl.id, nbytes: hb.length };
-        openMenuAt(ev.clientX, ev.clientY);
-        return;
-      }
-      if (rt > 0 && p.off >= tailStart && p.off < fr.len) {
-        const hasFB = tpl.boundary.mode === "footer";
-        menuRef.current = { kind: "ftr", tplId: tpl.id, hasFB };
-        openMenuAt(ev.clientX, ev.clientY);
-        return;
-      }
+    if (blk.kind === "ftr") {
+      const hasFB = tpl.boundary.mode === "footer";
+      menuRef.current = { kind: "ftr", tplId: tpl.id, hasFB };
+      openMenuAt(ev.clientX, ev.clientY);
+      return;
     }
     menuRef.current = { kind: "sel", tplId: tpl.id, lo: p.off, size: 1 };
     openMenuAt(ev.clientX, ev.clientY);
@@ -1572,6 +1575,22 @@ function FrameCanvas() {
     const fd = tpl?.fields.find((f) => f.id === fid);
     if (!tpl || !fd) return;
     if (fd.locked) return;
+    if (fd.role === "checksum" && tpl.checksum && tpl.checksum.algo !== "none") {
+      setPending({
+        title: tx("取消校验字段", "Remove checksum field"),
+        msg: tx(
+          `「${fd.name}」是校验字段：取消定义将同时停用校验（${tpl.checksum.algo}），此后该帧型的所有帧不再验证、直接放行。`,
+          `"${fd.name}" is the checksum field: undefining it also disables the ${tpl.checksum.algo} check — frames will pass unverified.`,
+        ),
+        applyLabel: tx("取消定义并停用校验", "Remove & disable check"),
+        apply: () => {
+          templateStore.removeChecksumField(tplId, fid);
+          fireAnim(`un:${fid}`);
+          dirtyRef.current = true;
+        },
+      });
+      return;
+    }
     templateStore.removeField(tplId, fid);
     fireAnim(`un:${fid}`);
     dirtyRef.current = true;
@@ -1961,7 +1980,7 @@ function FrameCanvas() {
         {pending && (
           <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={() => setPending(null)}>
             <div className="modal fc-confirm" onMouseDown={(e) => e.stopPropagation()}>
-              <div className="modal-title">{tx("字段冲突", "Field conflict")}</div>
+              <div className="modal-title">{pending.title ?? tx("字段冲突", "Field conflict")}</div>
               <div className="fc-confirm-body">{pending.msg}</div>
               <div className="modal-foot">
                 <span />
@@ -1974,7 +1993,7 @@ function FrameCanvas() {
                       setPending(null);
                     }}
                   >
-                    {tx("覆盖并继续", "Overwrite & continue")}
+                    {pending.applyLabel ?? tx("覆盖并继续", "Overwrite & continue")}
                   </button>
                 )}
               </div>
@@ -2005,6 +2024,7 @@ function FrameCanvas() {
                   base.id,
                   f.offset,
                   fieldSize({ ...base, ...f }),
+                  { frameLen: dlg.frLen || 0, selfType: f.type, selfRole: f.role },
                 );
                 if (c.overFrame) {
                   setPending({
@@ -2013,6 +2033,31 @@ function FrameCanvas() {
                       `Cannot save: ${c.overFrame}. Increase "total/max frame length" or shrink the field first.`,
                     ),
                   });
+                  return;
+                }
+                if (c.overTail) {
+                  if (c.overTail.kind === "checksum") {
+                    setPending({
+                      title: tx("与校验域冲突", "Checksum-area conflict"),
+                      msg: tx(
+                        `选区与帧尾校验域重叠 ${c.overTail.bytes} 字节——校验字节被字段占用后仍按原位置验证，但该区域将同时显示为字段。可直接取消校验后在此定义，或缩小选区避开帧尾。`,
+                        `The selection overlaps the checksum tail by ${c.overTail.bytes} byte(s). You can remove the checksum and define here, or shrink the selection away from the tail.`,
+                      ),
+                      applyLabel: tx("取消校验并定义", "Drop checksum & define"),
+                      apply: () => {
+                        templateStore.setChecksumAlgo(dlg.tplId, "none");
+                        applyIt();
+                      },
+                    });
+                  } else {
+                    setPending({
+                      title: tx("与帧尾字节冲突", "Footer-area conflict"),
+                      msg: tx(
+                        `选区压住帧尾定界字节 ${c.overTail.bytes} B——帧尾是成帧符号，不能被字段占用。请左移选区，或在属性面板修改帧尾字节。`,
+                        `The selection overlaps ${c.overTail.bytes} B of footer delimiter bytes — footers cannot be occupied by fields. Move the selection left or edit the footer bytes in properties.`,
+                      ),
+                    });
+                  }
                   return;
                 }
                 if (c.overlapName) {
@@ -2037,13 +2082,21 @@ function FrameCanvas() {
               onCancel={() => setDlg(null)}
               onSave={(bytes) => {
                 if (dlg.kind === "hdr") {
-                  templateStore.patchBoundary(dlg.tplId, { headerBytes: bytes });
+                  const err2 = templateStore.setHeaderBytes(dlg.tplId, bytes);
+                  setDlg(null);
+                  selRef.current = null;
+                  dirtyRef.current = true;
+                  if (err2)
+                    setPending({
+                      title: tx("帧头未能修改", "Header not changed"),
+                      msg: err2,
+                    });
                 } else {
                   templateStore.patchBoundary(dlg.tplId, { footerBytes: bytes });
+                  setDlg(null);
+                  selRef.current = null;
+                  dirtyRef.current = true;
                 }
-                setDlg(null);
-                selRef.current = null;
-                dirtyRef.current = true;
               }}
             />
           ))}
@@ -2187,7 +2240,10 @@ function HeadTailDialog({
         </div>
         {isHdr ? (
           <div className="fc-dlg-warn soft">
-            {tx("帧头可为空（从首字节直接收集）；无需帧头的帧请在属性面板将模式改为「固定帧尾」。", "The header may be empty (bytes collected from the first byte). For header-less frames, switch the mode to \"fixed footer\" in the properties panel.")}
+            {tx(
+              "帧头可为空（从首字节直接收集）；无需帧头的帧请在属性面板将模式改为「固定帧尾」。增减帧头长度时，其后的字段、长度域与识别位会自动平移。",
+              "The header may be empty (bytes collected from the first byte). For header-less frames, switch the mode to \"fixed footer\" in properties. Changing header length auto-shifts the fields, length domain and discriminators behind it.",
+            )}
           </div>
         ) : (
           <div className="fc-dlg-warn soft">

@@ -9,6 +9,7 @@ import type {
 } from "../../ipc/types";
 import * as store from "./templateStore";
 import { fieldSize } from "./templateStore";
+import { toast } from "../ai/extRuntime";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import {
@@ -169,7 +170,12 @@ export function PropertiesPanel() {
   useLocale();
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const sel = s.selection;
-  const [confirm, setConfirm] = useState<{ fid: string; msg: string; apply?: () => void } | null>(null);
+  const [confirm, setConfirm] = useState<{
+    fid: string;
+    msg: string;
+    apply?: () => void;
+    applyLabel?: string;
+  } | null>(null);
 
   if (!sel) {
     return (
@@ -561,6 +567,16 @@ export function PropertiesPanel() {
                   className="tpl-del"
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (f.role === "checksum" && tpl.checksum && tpl.checksum.algo !== "none") {
+                      store.removeChecksumField(tpl.id, f.id);
+                      toast(
+                        tx(
+                          `校验字段「${f.name}」已取消定义，校验同时停用（Ctrl+Z 可撤销）`,
+                          `Checksum field "${f.name}" removed and the check disabled (Ctrl+Z to undo)`,
+                        ),
+                      );
+                      return;
+                    }
                     store.removeField(tpl.id, f.id);
                   }}
                 >
@@ -586,9 +602,39 @@ export function PropertiesPanel() {
   const patch = (p: Partial<FieldDef>) => store.patchField(tpl.id, field.id, p);
   const commitSized = (p: Partial<FieldDef>) => {
     const next = { ...field, ...p };
-    const c = store.fieldConflictInfo(tpl.id, field.id, next.offset, fieldSize(next));
+    const fl0 = tpl.boundary.mode === "fixedLength" ? tpl.boundary.fixedLength ?? 0 : 0;
+    const c = store.fieldConflictInfo(tpl.id, field.id, next.offset, fieldSize(next), {
+      frameLen: fl0,
+      selfType: next.type,
+      selfRole: next.role,
+    });
     if (c.overFrame) {
       setConfirm({ fid: field.id, msg: tx(`无法修改：${c.overFrame}。请先增大「总帧长/最大帧长」或缩小字段。`, `Cannot apply: ${c.overFrame}. Increase total/max frame length or shrink the field first.`) });
+      return;
+    }
+    if (c.overTail) {
+      if (c.overTail.kind === "checksum") {
+        setConfirm({
+          fid: field.id,
+          msg: tx(
+            `此位置压在帧尾校验域（重叠 ${c.overTail.bytes} B）。可停用校验后继续，或改偏移避开帧尾。`,
+            `This overlaps the checksum tail (${c.overTail.bytes} B). Disable the checksum to continue, or move off the tail.`,
+          ),
+          applyLabel: tx("停用校验并继续", "Disable check & continue"),
+          apply: () => {
+            store.setChecksumAlgo(tpl.id, "none");
+            patch(p);
+          },
+        });
+      } else {
+        setConfirm({
+          fid: field.id,
+          msg: tx(
+            `此位置压在帧尾定界字节（${c.overTail.bytes} B），不能被字段占用；请在「帧边界」区修改帧尾或改偏移避开。`,
+            `This overlaps footer delimiter bytes (${c.overTail.bytes} B) and cannot be occupied; edit the footer in "Frame Boundary" or move off the tail.`,
+          ),
+        });
+      }
       return;
     }
     if (c.overlapName) {
@@ -1015,13 +1061,30 @@ export function PropertiesPanel() {
                   setConfirm(null);
                 }}
               >
-                {tx("覆盖并继续", "Overwrite & continue")}
+                {confirm.applyLabel ?? tx("覆盖并继续", "Overwrite & continue")}
               </button>
             )}
           </div>
         </div>
       )}
-      <button className="btn danger-btn" onClick={() => store.removeField(tpl.id, field.id)}>
+      <button
+        className="btn danger-btn"
+        onClick={() => {
+          if (field.role === "checksum" && tpl.checksum && tpl.checksum.algo !== "none") {
+            setConfirm({
+              fid: field.id,
+              msg: tx(
+                `「${field.name}」是校验字段：取消定义将同时停用校验（${tpl.checksum.algo}），此后该帧型的所有帧不再验证、直接放行。`,
+                `"${field.name}" is the checksum field: removing it also disables ${tpl.checksum.algo} — frames will pass unverified.`,
+              ),
+              applyLabel: tx("取消定义并停用校验", "Remove & disable check"),
+              apply: () => store.removeChecksumField(tpl.id, field.id),
+            });
+            return;
+          }
+          store.removeField(tpl.id, field.id);
+        }}
+      >
         {tx("删除该字段", "Delete Field")}
       </button>
     </div>

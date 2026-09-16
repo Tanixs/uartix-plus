@@ -1,6 +1,13 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { FieldDef, FrameTemplate } from "../../ipc/types";
-import { buildBlocks, coverageRuns, layoutBlocks, reservedTail, skeletonLen } from "./frameLayout";
+import {
+  buildBlocks,
+  coverageRuns,
+  effRange,
+  layoutBlocks,
+  reservedTail,
+  skeletonLen,
+} from "./frameLayout";
 
 beforeAll(() => {
   const store: Record<string, string> = {};
@@ -233,7 +240,7 @@ describe("coverageRuns（覆盖率条缺口）", () => {
     ]);
   });
 
-  it("spanTail 延伸到帧尾；负偏移字段不参与", () => {
+  it("spanTail 延伸到保留区/后继字段前；负偏移字段按有效位置计入（P85a）", () => {
     const t = fixed(8, {
       fields: [fld({ id: "s", offset: 4, type: "uint8", spanTail: true })],
     });
@@ -242,6 +249,87 @@ describe("coverageRuns（覆盖率条缺口）", () => {
       { lo: 4, len: 4, kind: "fld" },
     ]);
     const t2 = fixed(8, { fields: [fld({ id: "n", offset: -2, type: "uint16" })] });
-    expect(coverageRuns(t2, 8)).toEqual([{ lo: 0, len: 8, kind: "gap" }]);
+    expect(coverageRuns(t2, 8)).toEqual([
+      { lo: 0, len: 6, kind: "gap" },
+      { lo: 6, len: 2, kind: "fld" },
+    ]);
+  });
+
+  it("变长帧锚尾校验字段计入覆盖（P85a 与 buildBlocks 对齐）", () => {
+    const t = tpl({
+      boundary: { mode: "lengthField", headerBytes: [], maxLength: 30 },
+      checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
+      fields: [fld({ id: "ck", offset: 0, role: "checksum", type: "uint8" })],
+    });
+    expect(coverageRuns(t, 18)).toEqual([
+      { lo: 0, len: 17, kind: "gap" },
+      { lo: 17, len: 1, kind: "fld" },
+    ]);
+  });
+});
+
+describe("effRange（P85a 唯一有效区间真相）", () => {
+  it("负偏移按帧尾锚定；帧长未知返回 null", () => {
+    const t = tpl({
+      boundary: { mode: "lengthField", headerBytes: [], maxLength: 20 },
+      fields: [fld({ id: "tail", offset: -4, type: "uint32" })],
+    });
+    expect(effRange(t, t.fields[0], 16)).toMatchObject({ start: 12, len: 4 });
+    expect(effRange(t, t.fields[0], 0)).toBeNull();
+  });
+
+  it("变长帧校验字段强制重锚帧尾（与 parser.rs verify 同构）", () => {
+    const t = tpl({
+      boundary: { mode: "lengthField", headerBytes: [], maxLength: 30 },
+      checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
+      fields: [fld({ id: "ck", offset: 0, role: "checksum", type: "uint8" })],
+    });
+    expect(effRange(t, t.fields[0], 18)).toMatchObject({ start: 17, len: 1 });
+    const fixedT = tpl({
+      boundary: { mode: "fixedLength", headerBytes: [], maxLength: 12, fixedLength: 12 },
+      checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
+      fields: [fld({ id: "ck", offset: 3, role: "checksum", type: "uint8" })],
+    });
+    expect(effRange(fixedT, fixedT.fields[0], 12)).toMatchObject({ start: 3, len: 1 });
+  });
+
+  it("定长帧普通字段按原偏移返回", () => {
+    const t = tpl({
+      boundary: { mode: "fixedLength", headerBytes: [], maxLength: 12, fixedLength: 12 },
+      fields: [fld({ id: "k", offset: 2, type: "uint16" })],
+    });
+    expect(effRange(t, t.fields[0], 12)).toEqual({ start: 2, len: 2, span: false });
+  });
+
+  it("spanTail 伸到保留区前且在后继字段处止步", () => {
+    const t = tpl({
+      boundary: {
+        mode: "lengthField",
+        headerBytes: [],
+        maxLength: 30,
+      },
+      checksum: { algo: "sum8", coverageStart: 0, coverageEnd: -1, endian: "little" },
+      fields: [
+        fld({ id: "pl", offset: 2, role: "payload", type: "ascii", spanTail: true }),
+        fld({ id: "b", offset: 10, type: "uint16" }),
+      ],
+    });
+    const pl = effRange(t, t.fields[0], 20)!;
+    expect(pl.start).toBe(2);
+    expect(pl.len).toBe(8);
+    expect(pl.span).toBe(true);
+  });
+
+  it("buildBlocks 与 effRange 一致：尾部字段成块（旧缺陷回归）", () => {
+    const t = tpl({
+      boundary: { mode: "lengthField", headerBytes: [], maxLength: 20 },
+      fields: [fld({ id: "tail", name: "尾", offset: -2, type: "uint16" })],
+    });
+    const bs = buildBlocks(t, 16);
+    const blk = bs.find((b) => b.fid === "tail")!;
+    expect(blk.kind).toBe("fld");
+    const er = effRange(t, t.fields[0], 16)!;
+    expect(blk.start).toBe(er.start);
+    expect(blk.len).toBe(er.len);
   });
 });
