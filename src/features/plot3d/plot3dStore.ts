@@ -27,6 +27,14 @@ import * as sessionStore from "../session/sessionStore";
 import { guardLocked } from "../operator/lock";
 import { octantCoverage, correctedRadius, fitAccelSix, ACCEL6_MIN_SAMPLES, type Accel6Face, type Accel6Result, type FitOk } from "./ellipsoidFit";
 import { buildPairedTriples, ffillAt, sampleAt, type PairMode, type Series } from "./pairTriples";
+import {
+  IDENTITY_TRANSFORM,
+  makeTransform,
+  normalizeTransform,
+  smoothSub as clampSub,
+  smoothTension as clampTension,
+  type GroupTransform,
+} from "./smoothing";
 
 // ---------- 三组轨迹模型（P87a） ----------
 
@@ -35,8 +43,37 @@ export const GROUP_IDS: readonly GroupId[] = ["g1", "g2", "g3"];
 
 /** 每组显示模式：point=实时定位（只刷最新点）/ points=点集 / line=连线（详设 §7） */
 export type TrajMode = "point" | "points" | "line";
-/** 连线平滑（P87a 先上滑动平均；CR/贝塞尔/样条/自定义 = P87b 平滑内核批） */
-export type TrajSmooth = "none" | "movingAvg";
+/** 连线平滑：none=折线 / movingAvg=1:1 滑窗（收缩边界）/ catmullRom=向心 CR 细分（曲线过数据点）/
+ *  spline=natural 三次样条（整窗 Thomas）。贝塞尔/自定义 expr 按 R3.1 延后。 */
+export type TrajSmooth = "none" | "movingAvg" | "catmullRom" | "spline";
+
+/** P87b 头部朝向源：xAxis=模型默认朝 +X；ch=航向角通道（度）；quat=四通道四元数；velocity=轨迹差分 */
+export interface GroupHeading {
+  src: "xAxis" | "ch" | "quat" | "velocity";
+  chYaw: string;
+  qX: string;
+  qY: string;
+  qZ: string;
+  qW: string;
+  /** 安装/参考系修正（度）与航向符号（北=+1 顺时针约定可翻） */
+  yawOff: number;
+  pitchOff: number;
+  rollOff: number;
+  yawSign: 1 | -1;
+}
+
+/** P87b 显示模型：内置程序化几何（X=车头约定）+ 本地 GLTF/GLB */
+export interface GroupModel {
+  kind: "point" | "sphere" | "arrow" | "car" | "cone" | "axes" | "gltf";
+  /** gltf 文件绝对路径（本地；失效回退箭头+提示——P87b 不做远程 URL） */
+  src: string;
+  scale: number;
+  rotX: number;
+  rotY: number;
+  rotZ: number;
+  /** 高度偏移（真实单位，沿世界 Y） */
+  heightOff: number;
+}
 
 export interface TrajGroup {
   id: GroupId;
@@ -45,7 +82,7 @@ export interface TrajGroup {
   color: string;
   /** 可见性 = 视图类（Operator 放行、不入撤销栈） */
   visible: boolean;
-  /** 三轴绑定通道 id；"" = 未绑定（三轴绑齐该组才消费） */
+  /** 三轴绑定通道 id；"" = 未绑定（X/Y 绑齐该组才消费；Z="" = 平面轨迹，P87b） */
   chX: string;
   chY: string;
   chZ: string;
@@ -66,8 +103,19 @@ export interface TrajGroup {
   /** 点密度：追加期 stride 抽稀（高=1:1 / 中=1:2 / 低=1:4）；变更触发该组重灌 */
   density: "high" | "mid" | "low";
   smooth: TrajSmooth;
-  /** 滑动平均窗口（奇数 3~51） */
+  /** 滑动平均窗口（奇数 3~51；movingAvg 用） */
   smoothWin: number;
+  /** 细分段顶点数（2~10；catmullRom/spline 用） */
+  smoothSub: number;
+  /** CR 张力（0=直线 1=全曲率） */
+  smoothTension: number;
+  /** 方向箭头：每 N 个尾窗点一支（0=关；line 模式） */
+  arrowEvery: number;
+  /** 起点标记（line/points） */
+  showStartEnd: boolean;
+  heading: GroupHeading;
+  model: GroupModel;
+  transform: GroupTransform;
   pairMode: PairMode;
   pairTolMs: number;
   /** AI 结论/人工备注回填处（P87c 分析包 meta.json 收录） */
@@ -120,6 +168,13 @@ function defaultGroup(idx: number): TrajGroup {
     density: "high",
     smooth: "none",
     smoothWin: 5,
+    smoothSub: 4,
+    smoothTension: 0.5,
+    arrowEvery: 0,
+    showStartEnd: false,
+    heading: { src: "xAxis", chYaw: "", qX: "", qY: "", qZ: "", qW: "", yawOff: 0, pitchOff: 0, rollOff: 0, yawSign: 1 },
+    model: { kind: "point", src: "", scale: 1, rotX: 0, rotY: 0, rotZ: 0, heightOff: 0 },
+    transform: { ...IDENTITY_TRANSFORM },
     pairMode: "interp",
     pairTolMs: 0,
     notes: "",
@@ -141,6 +196,45 @@ export const DEFAULT_PLOT3D_SETTINGS: Plot3DSettings = {
 
 const clampNum = (v: unknown, lo: number, hi: number, fb: number): number =>
   typeof v === "number" && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fb;
+
+const fin = (v: unknown, fb: number) =>
+  typeof v === "number" && isFinite(v) ? v : fb;
+
+function normalizeHeading(q: unknown): GroupHeading {
+  const p = (typeof q === "object" && q !== null ? q : {}) as Partial<GroupHeading>;
+  return {
+    src:
+      p.src === "ch" || p.src === "quat" || p.src === "velocity" || p.src === "xAxis"
+        ? p.src
+        : "xAxis",
+    chYaw: typeof p.chYaw === "string" ? p.chYaw : "",
+    qX: typeof p.qX === "string" ? p.qX : "",
+    qY: typeof p.qY === "string" ? p.qY : "",
+    qZ: typeof p.qZ === "string" ? p.qZ : "",
+    qW: typeof p.qW === "string" ? p.qW : "",
+    yawOff: fin(p.yawOff, 0) % 360,
+    pitchOff: Math.max(-90, Math.min(90, fin(p.pitchOff, 0))),
+    rollOff: Math.max(-180, Math.min(180, fin(p.rollOff, 0))),
+    yawSign: p.yawSign === -1 ? -1 : 1,
+  };
+}
+
+function normalizeModel(q: unknown): GroupModel {
+  const p = (typeof q === "object" && q !== null ? q : {}) as Partial<GroupModel>;
+  return {
+    kind:
+      p.kind === "sphere" || p.kind === "arrow" || p.kind === "car" || p.kind === "cone" ||
+      p.kind === "axes" || p.kind === "gltf" || p.kind === "point"
+        ? p.kind
+        : "point",
+    src: typeof p.src === "string" ? p.src.slice(0, 500) : "",
+    scale: clampNum(p.scale, 0.02, 100, 1),
+    rotX: fin(p.rotX, 0) % 360,
+    rotY: fin(p.rotY, 0) % 360,
+    rotZ: fin(p.rotZ, 0) % 360,
+    heightOff: clampNum(p.heightOff, -1e9, 1e9, 0),
+  };
+}
 
 /** 单组归一化（字段级容错，非法回退默认） */
 function normalizeGroup(q: unknown, idx: number): TrajGroup {
@@ -169,11 +263,24 @@ function normalizeGroup(q: unknown, idx: number): TrajGroup {
       ? p.fade
       : d.fade) as TrajGroup["fade"],
     density: p.density === "mid" || p.density === "low" ? p.density : "high",
-    smooth: p.smooth === "movingAvg" ? "movingAvg" : "none",
+    smooth:
+      p.smooth === "movingAvg" || p.smooth === "catmullRom" || p.smooth === "spline"
+        ? p.smooth
+        : "none",
     smoothWin: (() => {
       const w = Math.round(clampNum(p.smoothWin, 3, 51, d.smoothWin));
       return w % 2 === 0 ? Math.min(51, w + 1) : w;
     })(),
+    smoothSub: clampSub(p.smoothSub),
+    smoothTension: clampTension(p.smoothTension),
+    arrowEvery:
+      typeof p.arrowEvery === "number" && isFinite(p.arrowEvery) && p.arrowEvery >= 10
+        ? Math.min(5000, Math.round(p.arrowEvery))
+        : 0,
+    showStartEnd: p.showStartEnd === true,
+    heading: normalizeHeading(p.heading),
+    model: normalizeModel(p.model),
+    transform: normalizeTransform(p.transform),
     pairMode:
       p.pairMode === "nearest" || p.pairMode === "union" || p.pairMode === "interp"
         ? p.pairMode
@@ -462,7 +569,7 @@ function sanitizeBinds(chans: Channel[]): boolean {
   return true;
 }
 
-/** 单帧增量批次：真实工程值（未归一化）。t 为相对秒（timeOrigin 起）。 */
+/** 单帧增量批次：真实工程值（已组变换、未归一化）。t 为相对秒（timeOrigin 起）。 */
 export interface Plot3DBatch {
   t: number[];
   x: number[];
@@ -470,6 +577,17 @@ export interface Plot3DBatch {
   z: number[];
   /** 着色值（colorBy=ch 时为该通道原始值；其余模式无意义） */
   val: number[];
+  /** P87b 最新点（模型标记/朝向用）：hd=航向角通道原始值(度)；q=四元数 [x,y,z,w]；
+   *  pv=上一变换点（velocity 朝向差分源）。仅 point 模式携带 hd/q。 */
+  latest?: {
+    t: number;
+    x: number;
+    y: number;
+    z: number;
+    pv?: [number, number, number];
+    hd?: number;
+    q?: number[];
+  };
 }
 
 /** P87a：批次按组分发；reloaded=true 时 scene 清空该组缓冲重灌 */
@@ -876,12 +994,78 @@ export function requestClearData(gid?: GroupId) {
   clearReq = gid ? [gid] : [...GROUP_IDS];
 }
 
+/** 全量配对（导出/对齐共用，sinceT=-Infinity 与泵严格同口径）；未绑/无源 → null */
+function pairFull(g: TrajGroup) {
+  if (!g.chX || !g.chY) return null;
+  const xs = provider(g.chX);
+  const ys = provider(g.chY);
+  if (xs.t.length === 0) return null;
+  const zs = g.chZ ? provider(g.chZ) : { t: xs.t, v: new Array<number>(xs.t.length).fill(0) };
+  return buildPairedTriples(xs, ys, zs, {
+    mode: g.pairMode,
+    tolMs: g.pairTolMs,
+    sinceT: -Infinity,
+  });
+}
+
+/**
+ * 导出一组的完整轨迹（t=相对秒；x/y/z=**经组变换**——与显示严格同源，P87b）。
+ * UI 组级 CSV 导出与分析包（P87c）共用此单点真相。
+ */
+export function exportTriples(
+  gid: GroupId,
+): { t: number[]; x: number[]; y: number[]; z: number[] } | null {
+  const g = getGroup(gid);
+  const pair = pairFull(g);
+  if (!pair) return null;
+  const org = timeOrigin();
+  const xf = makeTransform(g.transform);
+  const tp: [number, number, number] = [0, 0, 0];
+  const out = { t: [] as number[], x: [] as number[], y: [] as number[], z: [] as number[] };
+  for (let i = 0; i < pair.t.length; i++) {
+    xf(pair.x[i], pair.y[i], pair.z[i], tp);
+    out.t.push((pair.t[i] - org) / 1000);
+    out.x.push(tp[0]);
+    out.y.push(tp[1]);
+    out.z.push(tp[2]);
+  }
+  return out;
+}
+
+/**
+ * 「以各组首点为共同原点」（P87b 坐标对齐快捷键）：把每组 transform 的平移量
+ * 设为 −R·(scale·first)，使全部已绑组的第一个轨迹点落回世界原点——惯导
+ * 「推算 vs 实际 vs 目标」起点不同的对比场景一键对齐。配置写入：单事务一步撤销。
+ */
+export function alignToOrigin(): boolean {
+  if (guardLocked()) return false;
+  pushHistory();
+  const groups = settings.groups.map((g) => {
+    const pair = pairFull(g);
+    if (!pair || pair.t.length === 0) return g;
+    const xfNoOff = makeTransform({ ...g.transform, offX: 0, offY: 0, offZ: 0 });
+    const p: [number, number, number] = [0, 0, 0];
+    xfNoOff(pair.x[0], pair.y[0], pair.z[0], p);
+    return { ...g, transform: { ...g.transform, offX: -p[0], offY: -p[1], offZ: -p[2] } };
+  });
+  settings = { ...settings, groups: groups as Plot3DSettings["groups"] };
+  emit();
+  persist();
+  return true;
+}
+
 const emptyBatch = (): Plot3DBatch => ({ t: [], x: [], y: [], z: [], val: [] });
 
-/** 组1 是否三轴绑齐（校准入口/六面/清空的门控语义沿用 P69~P75 的「三轴绑齐」） */
+/** 组是否可绘制（X/Y 绑齐即可；Z="" = 平面轨迹，P87b） */
 export function groupBound(gid: GroupId): boolean {
   const g = settings.groups.find((x) => x.id === gid);
-  return !!g && !!g.chX && !!g.chY && !!g.chZ;
+  return !!g && !!g.chX && !!g.chY;
+}
+
+/** 校准源就绪（组1 三轴绑齐——平面数据校准点云无意义，沿用严格口径） */
+export function calibSourceReady(): boolean {
+  const g = settings.groups[0];
+  return !!g.chX && !!g.chY && !!g.chZ;
 }
 
 function pumpOnce() {
@@ -907,7 +1091,8 @@ function pumpOnce() {
 
   for (const g of s.groups) {
     const gs = gst.get(g.id)!;
-    const sig = `${g.chX}|${g.chY}|${g.chZ}|${g.colorBy}|${g.colorCh}|${g.density}|${g.pairMode}|${g.pairTolMs}|${g.mode}|${g.smooth}|${g.smoothWin}|${chans.map((c) => c.id).join(",")}`;
+    const tf = g.transform;
+    const sig = `${g.chX}|${g.chY}|${g.chZ}|${g.colorBy}|${g.colorCh}|${g.density}|${g.pairMode}|${g.pairTolMs}|${g.mode}|${g.smooth}|${g.smoothWin}|${tf.rotX}|${tf.rotY}|${tf.rotZ}|${tf.offX}|${tf.offY}|${tf.offZ}|${tf.scale}|${chans.map((c) => c.id).join(",")}`;
     const reloaded = sig !== gs.sig || (req !== null && req.includes(g.id));
     if (reloaded) {
       gs.sig = sig;
@@ -915,12 +1100,12 @@ function pumpOnce() {
       gs.valCarry = 0;
       resetPairStat(g.id);
       if (g.id === "g1" && (calib.pts.x.length > 0 || calibFit || accel6.faces.some((f) => f !== null))) {
-        // 组1 数据源/绑定/密度/模式变化：混采无意义 → 校准全套清空重来（P71 §5 / P73 §6）
+        // 组1 数据源/绑定/密度/模式/变换变化：混采无意义 → 校准全套清空重来（P71 §5 / P73 §6）
         clearCalibAll();
       }
     }
-    if (!g.chX || !g.chY || !g.chZ) {
-      // 三轴未绑齐 → 该组不消费（HUD 提示）；曾有数据的组签名变化时通知场景清空旧轨迹
+    if (!g.chX || !g.chY) {
+      // X/Y 未绑齐 → 该组不消费（HUD 提示；Z 可空=平面）；曾有数据的组签名变化时通知场景清空旧轨迹
       if (reloaded && gs.ever) {
         gs.ever = false;
         entries.push({ gid: g.id, b: emptyBatch(), reloaded: true });
@@ -929,7 +1114,8 @@ function pumpOnce() {
     }
     const xs = provider(g.chX);
     const ys = provider(g.chY);
-    const zs = provider(g.chZ);
+    // P87b 平面轨迹：Z 未绑 = 恒 0 合成序列（与 X 同锚，配对恒命中）
+    const zs = g.chZ ? provider(g.chZ) : { t: xs.t, v: new Array<number>(xs.t.length).fill(0) };
     if (xs.t.length === 0) {
       if (reloaded && gs.ever) {
         gs.ever = false;
@@ -960,8 +1146,13 @@ function pumpOnce() {
     const stride = g.density === "high" ? 1 : g.density === "mid" ? 2 : 4;
     const sampleMode = g.pairMode === "union" ? null : g.pairMode;
     const b: Plot3DBatch = { t: [], x: [], y: [], z: [], val: [] };
+    // 组坐标变换（P87b 单点真相）：泵内应用 → 轨迹/场景/导出全同（校准旁路原始值）
+    const xf = makeTransform(g.transform);
+    const tp: [number, number, number] = [0, 0, 0];
+    let lastMs = -Infinity;
 
-    // 校准（P71/P73）：仅组1 源；stride=1 不抽稀（与轨迹密度无关）；采满 CAP 自动停止
+    // 校准（P71/P73）：仅组1 源；stride=1 不抽稀（与轨迹密度无关）；采满 CAP 自动停止；
+    // **旁路组变换**——校准的对象是传感器本身，点云必须是原始值
     const g1src = g.id === "g1";
     const wantCalib = s.calibMode && g1src && calib.capturing;
     const wantPreview = s.calibMode && g1src && calibFit !== null;
@@ -978,11 +1169,13 @@ function pumpOnce() {
         if (v != null) gs.valCarry = v;
       }
       if (i % stride === 0) {
+        xf(pair.x[i], pair.y[i], pair.z[i], tp);
         b.t.push((tMs - t0) / 1000);
-        b.x.push(pair.x[i]);
-        b.y.push(pair.y[i]);
-        b.z.push(pair.z[i]);
+        b.x.push(tp[0]);
+        b.y.push(tp[1]);
+        b.z.push(tp[2]);
         b.val.push(gs.valCarry);
+        lastMs = tMs;
       }
       if ((wantCalib || wantPreview || wantA6) && !calibFull) {
         const vx = pair.x[i];
@@ -1020,6 +1213,37 @@ function pumpOnce() {
           }
         }
       }
+    }
+    // P87b：latest 标记与朝向源采样（仅 point 模式需要 hd/q——零缓冲模式没有尾窗可差分）
+    if (b.t.length > 0) {
+      const li = b.t.length - 1;
+      const latest: NonNullable<Plot3DBatch["latest"]> = {
+        t: b.t[li],
+        x: b.x[li],
+        y: b.y[li],
+        z: b.z[li],
+      };
+      if (li > 0) latest.pv = [b.x[li - 1], b.y[li - 1], b.z[li - 1]];
+      if (g.mode === "point") {
+        const h = g.heading;
+        if (h.src === "ch" && h.chYaw) {
+          const hs = provider(h.chYaw);
+          const v = sampleMode
+            ? sampleAt(hs, lastMs, sampleMode, pair.tolMs)
+            : ffillAt(hs, lastMs);
+          if (v != null) latest.hd = v;
+        } else if (h.src === "quat" && h.qX && h.qY && h.qZ && h.qW) {
+          const comps: (number | null)[] = [];
+          for (const qid of [h.qX, h.qY, h.qZ, h.qW]) {
+            const qs = provider(qid);
+            comps.push(
+              sampleMode ? sampleAt(qs, lastMs, sampleMode, pair.tolMs) : ffillAt(qs, lastMs),
+            );
+          }
+          if (comps.every((v) => v != null)) latest.q = comps as number[];
+        }
+      }
+      b.latest = latest;
     }
     if (b.t.length > 0 || reloaded) {
       if (b.t.length > 0) gs.ever = true;

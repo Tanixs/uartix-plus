@@ -240,20 +240,25 @@ describe("P87a 三组独立泵", () => {
     expect(q2b[1].b.x).toEqual([12, 16]); // 组2 全量重灌 1:4（5 点 → 序号 0,4）
   });
 
-  it("三轴未绑齐 → 不消费；从未消费的组挂载首拍无批次噪声", () => {
+  it("X/Y 未绑齐 → 不消费；从未消费的组挂载首拍无批次噪声（P87b：Z 可空=平面）", () => {
     h.setSeries(makeSeries());
     const calls = collect();
     pump(2);
     expect(calls).toHaveLength(0); // 三组全空绑定 → 不发空 reloaded 噪声
-    store.updateGroup("g1", { chX: "ax", chY: "ay" });
+    store.updateGroup("g1", { chX: "ax" });
     pump(1);
-    expect(gseq(calls, "g1")).toHaveLength(0); // 缺 Z → 不消费
-    store.updateGroup("g1", { chZ: "az" });
+    expect(gseq(calls, "g1")).toHaveLength(0); // 缺 Y → 不消费
+    store.updateGroup("g1", { chY: "ay" });
     pump(1);
     const q = gseq(calls, "g1");
-    expect(q).toHaveLength(1);
+    expect(q).toHaveLength(1); // P87b：X/Y 绑齐即消费（平面）
     expect(q[0].reloaded).toBe(true);
     expect(q[0].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+    expect(q[0].b.z).toEqual([0, 0, 0, 0, 0, 0]);
+    store.updateGroup("g1", { chZ: "az" });
+    pump(1);
+    const q2 = gseq(calls, "g1");
+    expect(q2[q2.length - 1].b.z).toEqual([21, 22, 23, 24, 25, 26]); // 补 Z 重灌立体
   });
 
   it("mode 入签名：切 point 触发重灌；曾有数据的组解绑 → 下发空重灌批次清场景", () => {
@@ -994,5 +999,130 @@ describe("plot3dStore 三轴时间戳配对（P75 B2，P87a 逐组统计）", ()
     expect(q.length).toBeGreaterThanOrEqual(2);
     expect(q[q.length - 1].reloaded).toBe(true);
     expect(q[q.length - 1].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+  });
+});
+
+describe("P87b 组变换 / 平面轨迹 / 朝向采样 / 导出同源", () => {
+  it("平面轨迹：只绑 X/Y（Z 空）→ z 恒 0 照常消费", () => {
+    h.setSeries(makeSeries());
+    store.updateGroup("g1", { chX: "ax", chY: "ay" }); // 不绑 Z
+    const calls = collect();
+    pump(1);
+    const q = gseq(calls, "g1");
+    expect(q).toHaveLength(1);
+    expect(q[0].b.x).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(q[0].b.y).toEqual([11, 12, 13, 14, 15, 16]);
+    expect(q[0].b.z).toEqual([0, 0, 0, 0, 0, 0]);
+  });
+
+  it("组变换泵内应用：旋转 90°Z + scale2 + 平移（显示与统计同源）", () => {
+    h.setSeries(makeSeries());
+    store.updateGroup("g1", {
+      chX: "ax", chY: "ay", chZ: "az",
+      transform: { rotX: 0, rotY: 0, rotZ: 90, offX: 10, offY: 0, offZ: 0, scale: 2 },
+    });
+    const calls = collect();
+    pump(1);
+    const b = gseq(calls, "g1")[0].b;
+    // (x,y)→Rz90·2·(x,y)+off → x' = -2y+10, y' = 2x
+    expect(b.x[0]).toBeCloseTo(10 - 2 * 11, 9);
+    expect(b.y[0]).toBeCloseTo(2 * 1, 9);
+    expect(b.z[0]).toBeCloseTo(2 * 21, 9);
+  });
+
+  it("变换入组签名：改变换只重灌该组；exportTriples 与泵输出逐点同值（显示=导出）", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    const calls = collect();
+    pump(1);
+    expect(gseq(calls, "g1")).toHaveLength(1);
+    store.updateGroup("g1", { transform: { rotX: 0, rotY: 0, rotZ: 0, offX: 1, offY: 2, offZ: 3, scale: 1 } });
+    pump(1);
+    const q = gseq(calls, "g1");
+    expect(q[q.length - 1].reloaded).toBe(true);
+    const exp = store.exportTriples("g1")!;
+    expect(exp.t.length).toBe(q[q.length - 1].b.t.length);
+    for (let i = 0; i < exp.t.length; i++) {
+      // 泵与导出同一变换 → 逐点同值（显示=导出）
+      expect(exp.x[i]).toBeCloseTo(q[q.length - 1].b.x[i], 6);
+      expect(exp.y[i]).toBeCloseTo(q[q.length - 1].b.y[i], 6);
+    }
+  });
+
+  it("校准缓冲旁路组变换（恒原始传感器值）", () => {
+    h.setSeries(makeSeries());
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", transform: { rotX: 0, rotY: 0, rotZ: 0, offX: 100, offY: 0, offZ: 0, scale: 1 } });
+    store.setSetting({ calibMode: true });
+    store.setSink(vi.fn());
+    store.startCalibCapture();
+    pump(1);
+    expect(store.calibPoints().x[0]).toBe(1); // +100 平移不进校准云
+  });
+
+  it("point 模式 latest 携带 hd（航向角通道，含容差外回退）与 pv", () => {
+    h.setSeries({
+      ax: { t: [0, 10, 20], v: [1, 2, 3] },
+      ay: { t: [0, 10, 20], v: [4, 5, 6] },
+      az: { t: [0, 10, 20], v: [7, 8, 9] },
+      mag: { t: [0, 10, 20], v: [90, 180, 270] },
+    });
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", mode: "point", heading: { src: "ch", chYaw: "mag", qX: "", qY: "", qZ: "", qW: "", yawOff: 0, pitchOff: 0, rollOff: 0, yawSign: 1 } });
+    const calls: { e: store.GroupBatch[]; cursor: number | null }[] = [];
+    store.setSink((entries, cursor) => calls.push({ e: entries, cursor }));
+    pump(1);
+    const b = calls[0].e.find((x) => x.gid === "g1")!.b;
+    expect(b.latest?.hd).toBe(270);
+    expect(b.latest?.x).toBe(3);
+    expect(b.latest?.pv).toEqual([2, 5, 8]);
+    expect(b.t).toEqual([0, 0.01, 0.02]);
+  });
+
+  it("quat 源四通道采样；缺任一通道 → 无 q（不编造）", () => {
+    h.setSeries({
+      ax: { t: [0, 10], v: [1, 2] },
+      ay: { t: [0, 10], v: [3, 4] },
+      az: { t: [0, 10], v: [5, 6] },
+      mag: { t: [0, 10], v: [0, 0.1] },
+    });
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", mode: "point", heading: { src: "quat", chYaw: "", qX: "ax", qY: "ay", qZ: "az", qW: "mag", yawOff: 0, pitchOff: 0, rollOff: 0, yawSign: 1 } });
+    const calls: { e: store.GroupBatch[]; cursor: number | null }[] = [];
+    store.setSink((entries, cursor) => calls.push({ e: entries, cursor }));
+    pump(1);
+    const b = calls[0].e.find((x) => x.gid === "g1")!.b;
+    expect(b.latest?.q).toEqual([2, 4, 6, 0.1]);
+  });
+
+  it("alignToOrigin：各绑齐组首点平移落原点；一步撤销还原", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    store.updateGroup("g2", { chX: "ay", chY: "az" });
+    expect(store.alignToOrigin()).toBe(true);
+    const g1 = store.getGroup("g1");
+    const g2 = store.getGroup("g2");
+    expect(g1.transform.offX).toBeCloseTo(-1, 9);
+    expect(g1.transform.offY).toBeCloseTo(-11, 9);
+    expect(g1.transform.offZ).toBeCloseTo(-21, 9);
+    expect(g2.transform.offX).toBeCloseTo(-11, 9);
+    expect(store.getSnapshot().canUndo).toBe(true);
+    store.undo();
+    expect(store.getGroup("g1").transform.offX).toBe(0);
+  });
+
+  it("heading/model/transform 非法值归一化（updateGroup 深清洗）", () => {
+    store.updateGroup(
+      "g1",
+      {
+        heading: { src: "bogus", yawSign: 3 },
+        model: { kind: "wat", scale: 1e12 },
+        transform: { rotZ: 45, scale: -1 },
+      } as unknown as Parameters<typeof store.updateGroup>[1],
+    );
+    const g = store.getGroup("g1");
+    expect(g.heading.src).toBe("xAxis");
+    expect(g.heading.yawSign).toBe(1);
+    expect(g.model.kind).toBe("point");
+    expect(g.model.scale).toBe(100);
+    expect(g.transform.rotZ).toBe(45);
+    expect(g.transform.scale).toBe(1e-6); // 负→钳下限
   });
 });

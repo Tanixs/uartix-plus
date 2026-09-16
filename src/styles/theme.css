@@ -7172,6 +7172,32 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
 .p3d-gdlg-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
 .p3d-gdlg textarea.input { resize: vertical; font-size: 12px; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-inset); color: var(--text); outline: none; width: 100%; }
 .p3d-gdlg textarea.input:focus { border-color: var(--accent); }
+/* ---- P87b：弹层分区 / 变换行 / 模型行 / 时间轴标注刻度 ---- */
+.p3d-gdlg-sec {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: .04em;
+  margin: 12px 0 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.p3d-gdlg-tf6 { flex-wrap: nowrap; }
+.p3d-gdlg-tf6 input[type="number"] { flex: 1 1 0; min-width: 44px; }
+.p3d-gdlg-tf-note { margin: -4px 0 8px; line-height: 1.45; white-space: normal; }
+.p3d-gdlg-path { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }
+.p3d-gdlg-quat select { flex: 1 1 90px; min-width: 70px; }
+.p3d-tb-ann {
+  position: absolute;
+  top: -1px;
+  width: 2px;
+  height: 9px;
+  margin-left: -1px;
+  background: var(--k-warn-line);
+  cursor: pointer;
+  opacity: .85;
+}
+.p3d-tb-ann:hover { opacity: 1; }
 
 /* ============ P78a 交互式教学引导 ============ */
 .tour-mask {

@@ -1073,7 +1073,7 @@ async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
   }
   if (op === "set") {
     const gid = plot3dGidOf(a);
-    const groupKeys = ["colorBy", "colorCh", "fade", "density", "mode", "pointSize", "opacity", "showDots", "maxPoints", "smooth", "smoothWin", "pairMode", "pairTolMs", "name", "color", "notes"] as const;
+    const groupKeys = ["colorBy", "colorCh", "fade", "density", "mode", "pointSize", "opacity", "showDots", "maxPoints", "smooth", "smoothWin", "smoothSub", "smoothTension", "arrowEvery", "showStartEnd", "heading", "model", "transform", "pairMode", "pairTolMs", "name", "color", "notes"] as const;
     const viewKeys = ["axisScale", "showGrid", "gridDensity", "autoRotate", "follow", "keyFlight", "zoomToCursor"] as const;
     const gpatch: Record<string, unknown> = {};
     for (const k of groupKeys) if (a[k] !== undefined) gpatch[k] = a[k];

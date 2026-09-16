@@ -386,3 +386,45 @@ R1 的权限默认档（全托管+三硬线）、面板拆分三件套、P87a~d/
 - **候选③（数值后端外采）**：贝叶斯优化不自研？scikit-optimize/BoTorch 皆 Python；JS 生态（simple-statistics 无 GP-EI）不达标。**维持自研 ≤6 维 GP-EI 纯函数**（~200 行 + 合成面 30 轮收敛用例，R2-T18 不变）。
 - 综上：**loop 骨架「事件溯源结构」直接照抄 OpenHands/12-factor 形状；provider 循环抄 AI SDK 语义；数值算法只有 BO 必须自研**——与用户「能移植就移植」的令一致，且 P88a 的 jobs/wait_event 原语本来就是给外部 harness 留的通用接口（外部 Claude/Cursor 即成自带 loop 的宿主，见 R2-3）。
 - 本批新发现随批记录：`sanitizeBinds` 自动解绑不压撤销栈（撤销回旧绑定→再被解绑，自愈语义已测试钉死）；泵首拍对从未消费的组**不再下发空 reloaded 噪声批次**（ever 门），场景挂载更干净。
+
+---
+
+## 执行记录 R3.1（2026-09-17，P87b 显示与物理层批）
+
+### 已交付（commit 见 §16 HANDOFF 记录）
+
+- **平滑内核** `smoothing.ts`（纯函数 + 12 测试）：向心参数化 Catmull-Rom（tension 0~1 与线性 lerp = 退化锚，曲线**穿过数据点**）+ natural 三次样条（Thomas 追赶法，直线数据退化精确、过点）；`none|movingAvg` 保持 1:1 几何列路径（movingAvg 已有，从 f64 真值副列重算）。**scene 派生层**：subdiv 平滑走独立窗口几何（≤20k 段×细分、批尾增量重建、压实/重锚/参数变化全量重建、游标 sT 二分截断零重建），尾窗原始点继续承担 pick/测量/导出——「平滑只改视觉不篡改数据」有测试面。
+- **泵单点真相**：组变换（rot Z·Y·X + scale + offset）在**泵内应用**——轨迹批次、exportTriples、组签名同用 `makeTransform`，改变换=该组重灌；**校准缓冲旁路变换恒原始传感器值**（测试钉死：校准的对象是传感器，不是虚拟世界）。`exportTriples(gid)` 上收 store 层（显示=导出同源）。
+- **平面轨迹**：Z 空槽 → 恒 0 合成序列照常配对（旧「三轴绑齐」门降为 X/Y；校准源就绪仍严格三轴）。`groupBound`(X/Y) 与 `calibSourceReady()`(三轴) 两语义分立。
+- **朝向与模型**：heading 四源（xAxis/velocity 差分/ch 航向角+符号翻转/quat 四通道），latest 附 `pv` 供差分、`hd`/`q` 由泵按配对容差采样（缺源不编造）；内置模型 球/箭头/车/锥/坐标轴（程序化 X=车头）+ **本地 GLTF/GLB**（UI 读字节→scene 解析缓存归一化包裹；context-lost 重建后 src 水位重置自动重注入）；逐轴缩放模式模型反向补偿形变；模型旋转修正+高度偏移。
+- **场景要素**：方向箭头 InstancedMesh（≤600，从可见末端排布、随游标截断消隐）、起点标记、br **网格步长比例尺**读数；会话标注旗标三处联动：顶栏**打点钮**（录制中可用）→ annotate → 时间轴刻度（点刻度=跳游标）+ 3D 旗标（主组=首个可见有数据组）。
+- **导入**：`plotStore.addVirtualChannel`（虚拟通道与真实通道同一消费面，池 A 校准虚拟通道一并解套）；行右键「导入轨迹 CSV → 本组」（t,x,y[,z] 自动秒/毫秒、首行表头、重复导入回收本组旧虚拟通道、t 平移对齐当前时间原点）。
+- **外部面**：`updateGroup` 深清洗嵌套（非法 heading/model/transform 逐项回退，AI 直传嵌套 JSON 安全）；appActions set 键表扩；prompts 三处 + HelpModal 3D 页新增「惯导物理层」节。
+
+### 偏差与决策（对 R2/R3 计划）
+
+| # | 偏差 | 理由 |
+|---|---|---|
+| D7 | **「贝塞尔圆角」并入 CR/spline 之外不再单列；「自定义 expr 平滑」→ P87b2/P2 评估** | CR(tension)+样条已覆盖「直→顺」全谱；expr 逐点求值的性能预算与沙箱 API 面需要单独设计（观测面脚本工具 R2-2 是更合适的容器） |
+| D8 | 细分平滑=**窗口化**（最近 20k 段），窗外落暗线全景 | 全尾窗×细分的 GPU/重建成本不可控；「亮线平滑+暗线全程」与既有 LOD 语义自洽 |
+| D9 | GLTF 仅本地文件+字节注入+按 src 缓存；模型前向约定 +X，不符用旋转修正 | 离线工具属性；远程 URL 留 P2 |
+| D10 | 打点复用 `sessionStore.annotate`（需录制态），不做第二条标注存储 | 红线「严禁私开第二通道」；2D 琥珀虚线/回放条免费联动 |
+
+### 评审自查修复（本批内）
+
+1. `rewriteNorm` 跳过 point 零缓冲组 → 重锚后模型标记停在旧 norm 位；补 point 组走 `updateDecorations`。
+2. WebGL 重建后 scene 的 gltf 缓存清空，UI src 水位未重置 → 模型不再注入；gen-effect 中重置 `modelSrcRef`。
+3. 旗标落位改 src/si 单出口（消 lint no-useless-assignment，行为不变）。
+4. 校准缓冲旁路组变换补测试（若随变换，拟合矩阵进固件即错——语义钉死）。
+
+### 测试增量
+
+`smoothing.test.ts` 12 例（CR 线性退化/过点/首末段外推/点序单调、样条直线精确/过点/小数据回退、核工厂、变换合成序 Rz·Ry·Rx、normalize 钳位、yawQuat/quatMul/velocityYawDeg）；泵层 +8 例（平面/变换泵应用/变换入签名+exportTriples 同值/校准旁路/hd/pv/quat 缺源/alignToOrigin+撤销/嵌套清洗）；P87a 旧「三轴绑齐」用例改写为平面新契约。**525/525（37 文件）**、tsc 0、eslint 19w 基线、build/aria/theme ✓、Rust 零改动。
+
+### 真机验收追加（P87b 重点）
+
+①CR 平滑回放拖时间条：亮线平滑+游标截断无闪重建、暗线为原始全程 ②悬停/测量/导出在平滑开启时数值仍=原始点 ③速度朝向：倒车段车头翻 180°；航向角通道翻转钮生效 ④GLTF 车模：选文件即挂、context-lost（拖动窗口到 GPU 切换）后自动恢复 ⑤打点→时间轴刻度+3D 旗标+2D 虚线三处同 t；点刻度跳游标 ⑥导入含 Z 列 CSV=立体、无 Z 列=平面；重复导入不堆通道 ⑦首点对齐后三组起点重合，Ctrl+Z 一步还原 ⑧逐轴缩放下模型不歪斜。
+
+### 下一批
+
+**P87c 联动与分析包**：Plot2D 游标上收 setter（3D 时间条↔2D 游标↔回放三方联动）、「指标分析」独立面板（metrics.ts 单一真源+结果回流虚拟通道）、全局「分析包导出」对话框（目录多文件+meta.json+AI 提示词）、`inertial` AI 场景与组备注回填。开工前若有新发现按惯例记 R3.2。

@@ -11,6 +11,9 @@ export interface Channel {
   name: string;
   color: string;
   visible: boolean;
+  /** P87b 虚拟通道（导入轨迹等无协议字段来源的数据）：tplId="virtual"，
+   *  不经 onFrames 采集、不随模板删除、只经 removeChannel 显式回收 */
+  virtual?: boolean;
 }
 
 export interface PlotSettings {
@@ -598,6 +601,31 @@ export function addChannel(ch: Omit<Channel, "id" | "visible">): boolean {
   channels = [...channels, channel];
   emit();
   return true;
+}
+
+/**
+ * P87b：注入虚拟通道（轨迹 CSV 导入 / 校准虚拟通道 / 派生指标通道共用）。
+ * ts=绝对毫秒（调用方换算好，含单调性责任），与真实通道同一消费面：
+ * 2D/3D/频谱/游标/导出零特判。返回通道 id；删除走 removeChannel。
+ */
+export function addVirtualChannel(name: string, ts: number[], vs: number[]): string {
+  const id = crypto.randomUUID();
+  const channel: Channel = {
+    id,
+    tplId: "virtual",
+    fieldId: id,
+    name,
+    color: "#4e9cef",
+    visible: true,
+    virtual: true,
+  };
+  const d = getChanData(id);
+  d.t = ts;
+  d.v = vs;
+  channels = [...channels, channel];
+  alignedCache = null;
+  emit();
+  return id;
 }
 
 export function removeChannel(id: string) {

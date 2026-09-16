@@ -19,6 +19,7 @@ import type * as THREE_NS from "three";
 import type { Channel } from "../plot/plotStore";
 import type { GroupBatch, Plot3DBatch, Plot3DSettings, TrajGroup, GroupId } from "./plot3dStore";
 import { correctedRadius, type FitOk } from "./ellipsoidFit";
+import { kernelFor } from "./smoothing";
 
 /** 全精度尾窗容量（点/组） */
 const TAIL_CAP = 120000;
@@ -26,6 +27,10 @@ const TAIL_CAP = 120000;
 const OVERVIEW_CAP = 100000;
 /** 归一化视界半宽：norm 坐标映射到 ±VIEW_HALF */
 const VIEW_HALF = 0.8;
+/** P87b：细分平滑层窗口（原始段数上限，超出滑窗重算；暗线全景始终原始） */
+const SMOOTH_W = 20000;
+const SMOOTH_SUB_MAX = 10;
+const SMOOTH_CAP = SMOOTH_W * SMOOTH_SUB_MAX + 16;
 
 export interface PickResult {
   tSec: number;
@@ -85,12 +90,17 @@ export interface Plot3DScene {
   setCalibDisplay(mode: "raw" | "corrected"): void;
   /** 键盘飞行（P72）：WASD/QE 平移升降、方向键旋转、F 跟随、R 重置（悬停画布时生效） */
   setKeyFlight(on: boolean): void;
+  /** P87b：注入组模型的二进制（GLTF/GLB bytes；null=失败，scene 回退箭头）。
+   *  bytes 由 UI 侧读文件（scene 不碰 IPC），按 cfg.model.src 缓存解析结果 */
+  setModelBytes(gid: GroupId, bytes: ArrayBuffer | null): void;
+  /** P87b：时间标注（会话 annotate 相对秒列表）→ 主组轨迹立旗标（≤48，超出取最近 48） */
+  setAnnots(relSecs: number[]): void;
   /** 强制渲染一帧并返回 PNG dataURL（快照导出用） */
   snapshotPng(): string;
   /** 清空某组（或全部）场景缓冲（store 水位由 UI 先行推进） */
   clearTrajectory(gid?: GroupId): void;
   pick(px: number, py: number): PickResult | null;
-  stats(): { groups: Record<GroupId, GroupStats>; fps: number };
+  stats(): { groups: Record<GroupId, GroupStats>; fps: number; gridStep: number };
   dispose(): void;
 }
 
@@ -102,7 +112,12 @@ function cssVar(name: string, fb: string): string {
 
 export async function createScene(
   host: HTMLElement,
-  cbs: { onContextLost: () => void; onToggleFollow?: () => void },
+  cbs: {
+    onContextLost: () => void;
+    onToggleFollow?: () => void;
+    /** P87b：gltf 文件读/解析失败回调（UI toast + 场景回退箭头占位） */
+    onModelError?: (gid: GroupId, src: string) => void;
+  },
 ): Promise<Plot3DScene> {
   const T3 = await import("three");
   const { OrbitControls } = await import(
@@ -198,7 +213,28 @@ export async function createScene(
     bbMax: [number, number, number];
     /** 最新点真实值（point 模式唯一存储；所有模式都跟踪） */
     latest: { t: number; x: number; y: number; z: number } | null;
+    /** P87b：批内透传的最新点（含朝向源采样） */
+    latestRaw: Plot3DBatch["latest"] | null;
     dot: THREE_NS.Sprite;
+    // ---------- P87b 显示层 ----------
+    /** 细分平滑层（catmullRom/spline 时启用；movingAvg 走 1:1 尾窗列） */
+    smPos: Float32Array | null;
+    smT: Float64Array | null;
+    smVal: Float32Array | null;
+    smCount: number;
+    smGeo: THREE_NS.BufferGeometry | null;
+    smLine: THREE_NS.Line | null;
+    smPosAttr: THREE_NS.BufferAttribute | null;
+    smTimeAttr: THREE_NS.BufferAttribute | null;
+    smValAttr: THREE_NS.BufferAttribute | null;
+    /** 模型标记（kind!=="point" 时替代 dot 显示在最新点） */
+    markerObj: THREE_NS.Object3D | null;
+    markerKind: string;
+    markerSrc: string;
+    /** 起点标记 */
+    startMark: THREE_NS.Sprite | null;
+    /** 方向箭头（InstancedMesh 预分配 600） */
+    arrows: THREE_NS.InstancedMesh | null;
     uniforms: {
       uBg: { value: THREE_NS.Color };
       uMode: { value: number };
@@ -277,7 +313,22 @@ export async function createScene(
         bbMin: [Infinity, Infinity, Infinity],
         bbMax: [-Infinity, -Infinity, -Infinity],
         latest: null,
+        latestRaw: null,
         dot: null as unknown as THREE_NS.Sprite,
+        smPos: null,
+        smT: null,
+        smVal: null,
+        smCount: 0,
+        smGeo: null,
+        smLine: null,
+        smPosAttr: null,
+        smTimeAttr: null,
+        smValAttr: null,
+        markerObj: null,
+        markerKind: "point",
+        markerSrc: "",
+        startMark: null,
+        arrows: null,
         uniforms: {
           uBg: { value: bgColor.clone() },
           uMode: { value: 0 },
@@ -425,6 +476,319 @@ export async function createScene(
     applyOneVis(g);
   }
 
+  // ---------- P87b：细分平滑层（catmullRom / spline）----------
+  // 从尾窗 f64 真值列派生独立几何（窗口 ≤SMOOTH_W 段）；尾窗原始点仍负责
+  // pick/测量/导出/游标截断——「平滑只影响视觉不篡改数据」红线的几何层落实。
+  const isSubSmooth = (g: GState): boolean =>
+    g.cfg.smooth === "catmullRom" || g.cfg.smooth === "spline";
+
+  // 跨组复用窗口提取 scratch（单线程安全；每次 rebuild 覆写使用区）
+  const wPx = new Float64Array(SMOOTH_W + 2);
+  const wPy = new Float64Array(SMOOTH_W + 2);
+  const wPz = new Float64Array(SMOOTH_W + 2);
+  const wT = new Float64Array(SMOOTH_W + 2);
+
+  function ensureSm(g: GState) {
+    if (g.smGeo) return;
+    g.smPos = new Float32Array(SMOOTH_CAP * 3);
+    g.smT = new Float64Array(SMOOTH_CAP);
+    g.smVal = new Float32Array(SMOOTH_CAP);
+    g.smGeo = new T3.BufferGeometry();
+    g.smPosAttr = new T3.BufferAttribute(g.smPos, 3).setUsage(T3.DynamicDrawUsage);
+    g.smTimeAttr = new T3.BufferAttribute(new Float32Array(SMOOTH_CAP), 1).setUsage(
+      T3.DynamicDrawUsage,
+    );
+    g.smValAttr = new T3.BufferAttribute(g.smVal, 1).setUsage(T3.DynamicDrawUsage);
+    g.smGeo.setAttribute("position", g.smPosAttr);
+    g.smGeo.setAttribute("aTime", g.smTimeAttr);
+    g.smGeo.setAttribute("aVal", g.smValAttr);
+    g.smGeo.setDrawRange(0, 0);
+    g.smGeo.boundingSphere = new T3.Sphere(new T3.Vector3(), 10);
+    g.smLine = new T3.Line(
+      g.smGeo,
+      new T3.ShaderMaterial({
+        uniforms: g.uniforms as unknown as Record<string, THREE_NS.IUniform>,
+        vertexShader: VERT,
+        fragmentShader: FRAG,
+      }),
+    );
+    g.smLine.frustumCulled = false;
+    scene.add(g.smLine);
+    applyOneVis(g);
+  }
+
+  function hideSm(g: GState) {
+    g.smCount = 0;
+    if (g.smGeo) g.smGeo.setDrawRange(0, 0);
+    if (g.smLine) g.smLine.visible = false;
+  }
+
+  /** 整窗重建细分平滑几何（数据批/参数变化/压实/重锚时；O(窗口×sub)） */
+  function rebuildSmoothed(g: GState) {
+    if (!isSubSmooth(g) || !g.tReal || !g.tT || !g.tVal || g.tCount < 2) {
+      hideSm(g);
+      return;
+    }
+    ensureSm(g);
+    const sub = Math.max(2, Math.min(SMOOTH_SUB_MAX, Math.round(g.cfg.smoothSub)));
+    const start = Math.max(0, g.tCount - 1 - SMOOTH_W); // 窗口起始原始下标
+    const n = g.tCount - start; // 窗口内点数
+    const segs = n - 1;
+    for (let i = 0; i < n; i++) {
+      wPx[i] = g.tReal[(start + i) * 3];
+      wPy[i] = g.tReal[(start + i) * 3 + 1];
+      wPz[i] = g.tReal[(start + i) * 3 + 2];
+      wT[i] = g.tT[start + i];
+    }
+    const kernel = kernelFor(g.cfg.smooth, g.cfg.smoothTension);
+    if (!kernel) {
+      hideSm(g);
+      return;
+    }
+    const out: { pos: number[]; t: number[] } = { pos: [], t: [] };
+    kernel.emit(wPx, wPy, wPz, wT, 0, segs, sub, out);
+    const vc = Math.min(SMOOTH_CAP - 1, Math.floor(out.pos.length / 3));
+    // 首顶点 = 窗口起点原值（曲线穿过数据点）
+    g.smPos![0] = toN(wPx[0], 0);
+    g.smPos![1] = toN(wPy[0], 1);
+    g.smPos![2] = toN(wPz[0], 2);
+    g.smT![0] = wT[0];
+    (g.smTimeAttr!.array as Float32Array)[0] = wT[0];
+    g.smVal![0] = g.tVal[start];
+    for (let j = 0; j < vc; j++) {
+      const kRaw = j * 3;
+      const seg = Math.floor(j / sub);
+      const frac = (j % sub + 1) / sub;
+      const i3 = (j + 1) * 3;
+      g.smPos![i3] = toN(out.pos[kRaw], 0);
+      g.smPos![i3 + 1] = toN(out.pos[kRaw + 1], 1);
+      g.smPos![i3 + 2] = toN(out.pos[kRaw + 2], 2);
+      g.smT![j + 1] = out.t[j];
+      (g.smTimeAttr!.array as Float32Array)[j + 1] = out.t[j];
+      g.smVal![j + 1] = g.tVal[start + seg] + (g.tVal[start + seg + 1] - g.tVal[start + seg]) * frac;
+    }
+    g.smCount = vc + 1;
+    g.smPosAttr!.clearUpdateRanges();
+    g.smPosAttr!.addUpdateRange(0, g.smCount * 3);
+    g.smPosAttr!.needsUpdate = true;
+    g.smTimeAttr!.clearUpdateRanges();
+    g.smTimeAttr!.addUpdateRange(0, g.smCount);
+    g.smTimeAttr!.needsUpdate = true;
+    g.smValAttr!.clearUpdateRanges();
+    g.smValAttr!.addUpdateRange(0, g.smCount);
+    g.smValAttr!.needsUpdate = true;
+    applyOneVis(g);
+    needsRender = true;
+  }
+
+  // ---------- P87b：模型标记（内置程序化几何 + GLTF）与朝向 ----------
+  const gltfCache = new Map<string, THREE_NS.Object3D>();
+
+  function modelMat(color: string): THREE_NS.MeshBasicMaterial {
+    return new T3.MeshBasicMaterial({ color: new T3.Color(color) });
+  }
+
+  function buildProcModel(kind: string, color: string): THREE_NS.Object3D | null {
+    const grp = new T3.Group();
+    if (kind === "sphere") {
+      grp.add(new T3.Mesh(new T3.SphereGeometry(0.022, 18, 12), modelMat(color)));
+      return grp;
+    }
+    if (kind === "arrow") {
+      const shaft = new T3.Mesh(new T3.CylinderGeometry(0.004, 0.004, 0.028, 8), modelMat(color));
+      shaft.rotation.z = -Math.PI / 2;
+      shaft.position.x = 0.016;
+      const head = new T3.Mesh(new T3.ConeGeometry(0.010, 0.018, 10), modelMat(color));
+      head.rotation.z = -Math.PI / 2;
+      head.position.x = 0.040;
+      grp.add(shaft, head);
+      return grp;
+    }
+    if (kind === "car") {
+      const body = new T3.Mesh(new T3.BoxGeometry(0.070, 0.018, 0.038), modelMat(color));
+      const cabin = new T3.Mesh(new T3.BoxGeometry(0.030, 0.015, 0.032), modelMat(color));
+      cabin.position.set(-0.004, 0.016, 0);
+      const nose = new T3.Mesh(new T3.ConeGeometry(0.016, 0.014, 4), modelMat(color));
+      nose.rotation.z = -Math.PI / 2;
+      nose.rotation.x = Math.PI / 4;
+      nose.position.x = 0.040;
+      nose.scale.y = 0.55;
+      grp.add(body, cabin, nose);
+      return grp;
+    }
+    if (kind === "cone") {
+      const c = new T3.Mesh(new T3.ConeGeometry(0.016, 0.042, 14), modelMat(color));
+      c.rotation.z = -Math.PI / 2; // 尖朝 +X（车头约定）
+      return c;
+    }
+    if (kind === "axes") {
+      const mk = (
+        dir: [number, number, number],
+        col: string,
+      ) => {
+        const len = 0.03;
+        const g2 = new T3.BufferGeometry().setFromPoints([
+          new T3.Vector3(0, 0, 0),
+          new T3.Vector3(dir[0] * len, dir[1] * len, dir[2] * len),
+        ]);
+        return new T3.Line(g2, new T3.LineBasicMaterial({ color: col }));
+      };
+      grp.add(mk([1, 0, 0], "#e05252"), mk([0, 1, 0], "#4caf50"), mk([0, 0, 1], "#4e9cef"));
+      grp.add(new T3.Mesh(new T3.SphereGeometry(0.005, 8, 6), modelMat("#ffffff")));
+      return grp;
+    }
+    return null; // point / gltf 走别的路径
+  }
+
+  function disposeProc(obj: THREE_NS.Object3D) {
+    obj.traverse((o) => {
+      const m = o as THREE_NS.Mesh;
+      m.geometry?.dispose();
+      const mat = m.material as THREE_NS.Material | undefined;
+      if (mat && !Array.isArray(mat)) mat.dispose();
+    });
+  }
+
+  /** 挂载/换模型：kind 或 gltf src 变化才重建（procedural 换掉即 dispose；
+   *  gltf 实例与缓存模板共享资源，不 dispose——泄漏上限=每次换模一小份共享引用，会话内可控） */
+  function attachMarker(g: GState) {
+    const kind = g.cfg.model.kind;
+    const src = g.cfg.model.src;
+    if (g.markerKind === kind && (kind !== "gltf" || g.markerSrc === src) && (g.markerObj || kind !== "gltf")) {
+      orientMarker(g);
+      return;
+    }
+    if (g.markerObj) {
+      scene.remove(g.markerObj);
+      if (g.markerKind !== "gltf") disposeProc(g.markerObj);
+      g.markerObj = null;
+    }
+    g.markerKind = kind;
+    g.markerSrc = src;
+    if (kind === "gltf" && src) {
+      const tpl = gltfCache.get(src);
+      if (tpl) {
+        g.markerObj = tpl.clone(true);
+        scene.add(g.markerObj);
+      } // 未就绪：等 setModelBytes 回调挂载；期间无标记（dot 已由 applyOneVis 隐藏）
+    } else if (kind !== "point" && kind !== "gltf") {
+      g.markerObj = buildProcModel(kind, g.cfg.color);
+      if (g.markerObj) scene.add(g.markerObj);
+    }
+    orientMarker(g);
+  }
+
+  const EUL = new T3.Euler();
+  /** 朝向合成：heading(Y)→pitch(X)→roll(Z)（Euler "YXZ"）∘ 模型自校正旋转 */
+  function orientMarker(g: GState) {
+    const m = g.markerObj;
+    if (!m) return;
+    const h = g.cfg.heading;
+    const hdg = g.cfg.model;
+    let yawDeg = h.yawOff;
+    if (h.src === "ch" && g.latestRaw?.hd != null) yawDeg = g.latestRaw.hd * h.yawSign + h.yawOff;
+    else if (h.src === "velocity" && g.latest && g.latestRaw?.pv) {
+      const dx = g.latest.x - g.latestRaw.pv[0];
+      const dz = g.latest.z - g.latestRaw.pv[2];
+      if (dx * dx + dz * dz > 1e-18)
+        yawDeg = (Math.atan2(-dz, dx) * 180) / Math.PI + h.yawOff;
+    }
+    if (h.src === "quat" && g.latestRaw?.q && g.latestRaw.q.length === 4) {
+      const [q0, q1, q2, q3] = g.latestRaw.q;
+      m.quaternion.set(q0, q1, q2, q3).normalize();
+    } else {
+      EUL.set((h.pitchOff * Math.PI) / 180, (yawDeg * Math.PI) / 180, (h.rollOff * Math.PI) / 180, "YXZ");
+      m.quaternion.setFromEuler(EUL);
+    }
+    EUL.set((hdg.rotX * Math.PI) / 180, (hdg.rotY * Math.PI) / 180, (hdg.rotZ * Math.PI) / 180, "XYZ");
+    m.quaternion.multiply(new T3.Quaternion().setFromEuler(EUL));
+    m.position.set(
+      g.latest ? toN(g.latest.x, 0) : 0,
+      g.latest ? toN(g.latest.y, 1) + hdg.heightOff * scaleVec[1] : 0,
+      g.latest ? toN(g.latest.z, 2) : 0,
+    );
+    const s = hdg.scale;
+    m.scale.set(s / scaleVec[0], s / scaleVec[1], s / scaleVec[2]); // 逐轴模式反向补偿形变
+    needsRender = true;
+  }
+
+  // ---------- P87b：方向箭头 / 起点标记 / 装饰统一刷新 ----------
+  const UPV = new T3.Vector3(0, 1, 0);
+  const DV = new T3.Vector3();
+  const PV = new T3.Vector3();
+  const QV = new T3.Quaternion();
+  const MV = new T3.Matrix4();
+
+  function rebuildArrows(g: GState) {
+    const every = g.cfg.arrowEvery;
+    // 游标截断后只数可见段（拖时间条箭头跟着消失，与 drawRange 同一因果）
+    const n =
+      curCursorSec === null || !g.tT || !g.tPos
+        ? g.tCount
+        : lowerBoundLe(g.tT, g.tCount, curCursorSec);
+    if (!every || g.cfg.mode !== "line" || n < 3 || !g.tPos) {
+      if (g.arrows) g.arrows.count = 0;
+      return;
+    }
+    const spacing = Math.max(10, every);
+    const count = Math.min(600, Math.floor((n - 1) / spacing));
+    if (!g.arrows) {
+      g.arrows = new T3.InstancedMesh(
+        new T3.ConeGeometry(0.007, 0.02, 8),
+        new T3.MeshBasicMaterial({
+          color: new T3.Color(g.cfg.color),
+          transparent: true,
+          opacity: 0.9,
+        }),
+        600,
+      );
+      g.arrows.frustumCulled = false;
+      scene.add(g.arrows);
+    } else {
+      (g.arrows.material as THREE_NS.MeshBasicMaterial).color.set(g.cfg.color);
+    }
+    for (let k = 0; k < count; k++) {
+      const i = n - 1 - k * spacing; // 从可见末端向老排布
+      PV.set(g.tPos[i * 3], g.tPos[i * 3 + 1], g.tPos[i * 3 + 2]);
+      DV.set(
+        g.tPos[(i + 1) * 3] - g.tPos[i * 3],
+        g.tPos[(i + 1) * 3 + 1] - g.tPos[i * 3 + 1],
+        g.tPos[(i + 1) * 3 + 2] - g.tPos[i * 3 + 2],
+      );
+      if (DV.lengthSq() < 1e-16) DV.set(1, 0, 0);
+      DV.normalize();
+      QV.setFromUnitVectors(UPV, DV);
+      MV.compose(PV, QV, new T3.Vector3(1, 1, 1));
+      g.arrows.setMatrixAt(k, MV);
+    }
+    g.arrows.count = count;
+    g.arrows.instanceMatrix.needsUpdate = true;
+    applyOneVis(g);
+  }
+
+  /** 数据批/游标/设置变化后的组装饰刷新（marker 位姿 + 起点标记 + 箭头） */
+  function updateDecorations(g: GState) {
+    if (g.cfg.model.kind !== "point") orientMarker(g);
+    if (g.cfg.showStartEnd && (g.tCount > 0 || g.oCount > 0)) {
+      if (!g.startMark) {
+        g.startMark = new T3.Sprite(
+          new T3.SpriteMaterial({ map: dotTex, transparent: true, depthTest: false }),
+        );
+        g.startMark.scale.setScalar(0.04);
+        g.startMark.renderOrder = 9;
+        g.startMark.material.color.set(g.cfg.color);
+        scene.add(g.startMark);
+      }
+      const src = g.oCount > 0 ? g.oPos! : g.tPos!;
+      if (src) g.startMark.position.set(src[0], src[1], src[2]);
+    } else if (g.startMark) {
+      g.startMark.visible = false;
+    }
+    if (g.cfg.arrowEvery && g.cfg.mode === "line") rebuildArrows(g);
+    else if (g.arrows) g.arrows.count = 0;
+    applyOneVis(g);
+  }
+
   // ---------- 网格 / 轴 / 标签（可整体重建） ----------
   const gridGroup = new T3.Group();
   scene.add(gridGroup);
@@ -482,6 +846,7 @@ export async function createScene(
     // 密度倍率（设置：网格 疏/标准/密）；步长仍走 nice 刻度保证整数感
     const dens = curSettings?.gridDensity ?? "std";
     const step = niceStep(span / 8) * (dens === "fine" ? 0.5 : dens === "coarse" ? 2 : 1);
+    curGridStep = step;
     const yGround =
       anchor[1] -
       Math.max(bbMax[1] - anchor[1], bbMin[1] >= -Infinity ? anchor[1] - bbMin[1] : 0) -
@@ -608,22 +973,29 @@ export async function createScene(
         const { ct, co, marker } = cursorCut(g);
         g.tailGeo.setDrawRange(0, ct);
         g.ovGeo.setDrawRange(0, co);
+        if (g.smGeo) g.smGeo.setDrawRange(0, sec === null ? g.smCount : lowerBoundLe(g.smT!, g.smCount, sec));
         if (marker) {
           g.dot.position.set(marker[0], marker[1], marker[2]);
         }
-        g.dot.visible = !calibOn && g.cfg.visible && marker !== null;
+        g.dot.visible =
+          !calibOn && g.cfg.visible && marker !== null && g.cfg.model.kind === "point";
         g.uniforms.uNow.value = sec === null ? g.lastT : sec;
+        if (g.cfg.arrowEvery > 0 && g.cfg.mode === "line") rebuildArrows(g);
       } else if (g.cfg.mode === "point" && g.latest) {
         const live = sec === null;
         if (live) {
           g.dot.position.set(toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2));
         }
-        g.dot.visible = !calibOn && g.cfg.visible && live;
+        g.dot.visible = !calibOn && g.cfg.visible && live && g.cfg.model.kind === "point";
         g.uniforms.uNow.value = sec === null ? g.lastT : sec;
       } else {
         g.dot.visible = false;
       }
+      if (g.markerObj)
+        g.markerObj.visible =
+          !calibOn && g.cfg.visible && g.latest != null && g.cfg.model.kind !== "point";
     }
+    refreshFlags();
     needsRender = true;
   }
 
@@ -677,6 +1049,78 @@ export async function createScene(
     label.position.copy(pa).add(pb).multiplyScalar(0.5);
     measureGroup.add(label);
     measureGroup.visible = !calibOn; // 校准模式隐藏测量层
+    needsRender = true;
+  }
+
+  // ---------- P87b：会话标注旗标（主组轨迹立旗；≤48 面） ----------
+  const flagGroup = new T3.Group();
+  flagGroup.renderOrder = 12;
+  scene.add(flagGroup);
+  const flagPool: THREE_NS.Sprite[] = [];
+  let flagTex: THREE_NS.CanvasTexture | null = null;
+  let flagRels: number[] = [];
+
+  function ensureFlagTex(): THREE_NS.CanvasTexture {
+    if (flagTex) return flagTex;
+    const cv = document.createElement("canvas");
+    cv.width = 32;
+    cv.height = 40;
+    const c = cv.getContext("2d")!;
+    c.fillStyle = "#e8a13c";
+    c.beginPath();
+    c.moveTo(6, 2);
+    c.lineTo(28, 9);
+    c.lineTo(6, 18);
+    c.closePath();
+    c.fill();
+    c.fillStyle = "rgba(232,161,60,.85)";
+    c.fillRect(5, 2, 2.5, 38);
+    flagTex = new T3.CanvasTexture(cv);
+    flagTex.colorSpace = T3.SRGBColorSpace;
+    return flagTex;
+  }
+
+  /** 旗标落位：第一个可见且有缓冲的组（GROUP_IDS 序 = g1 优先） */
+  function refreshFlags() {
+    const hostOrder = GROUP_ID_LIST;
+    let host: GState | null = null;
+    for (const id of hostOrder) {
+      const g = gstates.get(id);
+      if (g && g.cfg.visible && (g.tCount > 0 || g.oCount > 0)) {
+        host = g;
+        break;
+      }
+    }
+    const hideAll = calibOn || !host || flagRels.length === 0;
+    for (let k = 0; k < flagPool.length; k++) {
+      const sp = flagPool[k];
+      if (hideAll || k >= flagRels.length || !host) {
+        sp.visible = false;
+        continue;
+      }
+      const rel = flagRels[k];
+      const ct = lowerBoundLe(host.tT!, host.tCount, rel);
+      const co = host.oT ? lowerBoundLe(host.oT, host.oCount, rel) : 0;
+      let src: Float32Array | null = null;
+      let si = 0;
+      if (ct > 0 && host.tPos) {
+        src = host.tPos;
+        si = (ct - 1) * 3;
+      } else if (co > 0 && host.oPos) {
+        src = host.oPos;
+        si = (co - 1) * 3;
+      } else if (host.tPos && host.tCount > 0) {
+        src = host.tPos;
+      } else if (host.oPos && host.oCount > 0) {
+        src = host.oPos;
+      }
+      if (!src) {
+        sp.visible = false;
+        continue;
+      }
+      sp.position.set(src[si], src[si + 1] + 0.035, src[si + 2]);
+      sp.visible = true;
+    }
     needsRender = true;
   }
 
@@ -929,15 +1373,21 @@ export async function createScene(
     out.copy(d <= 0.03 ? RESID_OK : d <= 0.08 ? RESID_WARN : RESID_BAD);
   }
 
-  /** 单组四层可见性（模式/组可见/校准门控统一裁决；applySettings 与 setCalibMode 共用） */
+  /** 单组全层可见性（模式/组可见/校准门控统一裁决；applySettings 与 setCalibMode 共用） */
   function applyOneVis(g: GState) {
     const hide = calibOn || !g.cfg.visible;
     const lineOn = g.cfg.mode === "line";
     const ptsOn = g.cfg.mode === "points";
-    if (g.tailLine) g.tailLine.visible = !hide && lineOn;
+    const sub = isSubSmooth(g);
+    if (g.tailLine) g.tailLine.visible = !hide && lineOn && !sub;
     if (g.tailPoints) g.tailPoints.visible = !hide && (ptsOn || (lineOn && g.cfg.showDots));
     if (g.ovLine) g.ovLine.visible = !hide && lineOn;
     if (g.ovPoints) g.ovPoints.visible = !hide && ptsOn;
+    if (g.smLine) g.smLine.visible = !hide && lineOn && sub && g.smCount > 0;
+    if (g.markerObj) g.markerObj.visible = !hide && g.cfg.model.kind !== "point" && g.latest != null;
+    if (g.arrows) g.arrows.visible = !hide && g.cfg.arrowEvery > 0 && lineOn && g.cfg.mode === "line";
+    if (g.startMark) g.startMark.visible = !hide && g.cfg.showStartEnd;
+    if (g.cfg.model.kind !== "point") g.dot.visible = false;
     needsRender = true;
   }
 
@@ -1218,6 +1668,8 @@ export async function createScene(
   // ---------- 组缓冲追加 / 压实 / 平滑 / 重锚 ----------
   let lastGridBuild = 0;
   let gridSig = "";
+  /** P87b：最近一次网格步长（真实单位/格），br HUD 比例尺读数用 */
+  let curGridStep = 0;
 
   function uploadTail(g: GState, from: number) {
     if (g.dirtyFrom < 0 || from < g.dirtyFrom) g.dirtyFrom = from;
@@ -1398,7 +1850,11 @@ export async function createScene(
 
   function rewriteNorm() {
     for (const g of gstates.values()) {
-      if (!g.tReal || !g.oReal) continue;
+      if (!g.tReal || !g.oReal) {
+        // P87b：point 组零缓冲也要随重锚刷新标记位姿（latest 的 norm 位置变了）
+        if (g.latest) updateDecorations(g);
+        continue;
+      }
       for (let i = 0; i < g.oCount; i++) {
         const j = i * 3;
         g.oPos![j] = (g.oReal[j] - anchor[0]) * scaleVec[0];
@@ -1413,6 +1869,10 @@ export async function createScene(
         g.ovPosAttr.needsUpdate = true;
       }
       flushTail(g);
+      // P87b：派生层随归一化重写（细分平滑/箭头在 norm 空间重建，标记位姿重算）
+      if (isSubSmooth(g)) rebuildSmoothed(g);
+      if (g.cfg.arrowEvery) rebuildArrows(g);
+      updateDecorations(g);
     }
     rewriteCalibNorm();
     if (measureA && measureB) drawMeasure(); // 重锚后按新归一化重画测量线
@@ -1509,9 +1969,14 @@ export async function createScene(
     g.ovGeo?.setDrawRange(0, 0);
     g.dirtyFrom = -1;
     g.latest = null;
+    g.latestRaw = null;
     g.dot.visible = false;
     g.bbMin = [Infinity, Infinity, Infinity];
     g.bbMax = [-Infinity, -Infinity, -Infinity];
+    hideSm(g);
+    if (g.arrows) g.arrows.count = 0;
+    if (g.startMark) g.startMark.visible = false;
+    if (g.markerObj) g.markerObj.visible = false;
     if (measureA && measureA.gid === g.gid) measureA = null;
     if (measureB && measureB.gid === g.gid) measureB = null;
     drawMeasure();
@@ -1534,7 +1999,8 @@ export async function createScene(
         if (b.t.length === 0) continue;
         const g = getG(gid);
         const li = b.t.length - 1;
-        g.latest = { t: b.t[li], x: b.x[li], y: b.y[li], z: b.z[li] };
+        g.latestRaw = b.latest ?? { t: b.t[li], x: b.x[li], y: b.y[li], z: b.z[li] };
+        g.latest = { t: g.latestRaw.t, x: g.latestRaw.x, y: g.latestRaw.y, z: g.latestRaw.z };
         g.lastT = b.t[li];
         anyData = true;
         if (firstData) {
@@ -1550,6 +2016,7 @@ export async function createScene(
             if (v > g.bbMax[a]) g.bbMax[a] = v;
           }
           unionBBox();
+          updateDecorations(g);
           continue;
         }
         ensureLayers(g);
@@ -1581,6 +2048,8 @@ export async function createScene(
         recomputeTailPos(g, from);
         trimGroupMax(g);
         unionBBox();
+        if (isSubSmooth(g)) rebuildSmoothed(g);
+        updateDecorations(g);
       }
       if (!anyReloaded && !anyData) {
         // 空批次 + 游标变化（如回放 seek 向后：重灌点全 ≤ 水位）→ 仅更新游标
@@ -1637,6 +2106,11 @@ export async function createScene(
           trimGroupMax(g);
           unionBBox();
         }
+        // P87b：模型/朝向/装饰与派生层随设置刷新（attachMarker 内部幂等）
+        attachMarker(g);
+        updateDecorations(g);
+        if (isSubSmooth(g)) rebuildSmoothed(g);
+        else if (g.smGeo) hideSm(g);
         applyOneVis(g);
       }
       // P75 B2：等比/逐轴切换 → 重算逐轴缩放并全量重写归一化坐标
@@ -1861,6 +2335,62 @@ export async function createScene(
       if (!on) flightKeys.clear();
     },
 
+    // ---------- P87b：GLTF 模型注入 / 会话标注旗标 ----------
+    setModelBytes(gid, bytes) {
+      const g = getG(gid);
+      const src = g.cfg.model.src;
+      if (g.cfg.model.kind !== "gltf" || !src) return;
+      if (gltfCache.has(src)) {
+        attachMarker(g);
+        updateDecorations(g);
+        return;
+      }
+      if (!bytes) {
+        cbs.onModelError?.(gid, src);
+        return;
+      }
+      void (async () => {
+        try {
+          const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
+          const loader = new GLTFLoader();
+          const gltf = (await new Promise((res, rej) =>
+            loader.parse(bytes, "", res as (r: unknown) => void, rej),
+          )) as { scene: THREE_NS.Object3D };
+          // 归一化包裹：包围盒最大边 → 0.09 世界单位并居中（模型前向默认 +X，
+          // 轴向不符用组设置「模型旋转修正」调）
+          const box = new T3.Box3().setFromObject(gltf.scene);
+          const sz = box.getSize(new T3.Vector3());
+          const ctr = box.getCenter(new T3.Vector3());
+          const s = 0.09 / Math.max(sz.x, sz.y, sz.z, 1e-6);
+          const wrap = new T3.Group();
+          gltf.scene.scale.setScalar(s);
+          gltf.scene.position.set(-ctr.x * s, -ctr.y * s, -ctr.z * s);
+          wrap.add(gltf.scene);
+          gltfCache.set(src, wrap);
+          if (g.cfg.model.kind === "gltf" && g.cfg.model.src === src) {
+            attachMarker(g);
+            updateDecorations(g);
+          }
+        } catch {
+          cbs.onModelError?.(gid, src);
+        }
+      })();
+    },
+
+    setAnnots(relSecs) {
+      flagRels = relSecs.length > 48 ? relSecs.slice(-48) : relSecs;
+      while (flagPool.length < flagRels.length) {
+        const sp = new T3.Sprite(
+          new T3.SpriteMaterial({ map: ensureFlagTex(), transparent: true, depthTest: false }),
+        );
+        sp.scale.set(0.03, 0.037, 1);
+        flagGroup.add(sp);
+        flagPool.push(sp);
+      }
+      refreshFlags();
+      needsRender = true;
+    },
+
     snapshotPng() {
       renderer.render(scene, camera); // 同步渲染一帧后再取像素（无需 preserveDrawingBuffer）
       needsRender = false;
@@ -1984,7 +2514,7 @@ export async function createScene(
         const g = gstates.get(id);
         out[id] = g ? { tail: g.tCount, overview: g.oCount } : { tail: 0, overview: 0 };
       }
-      return { groups: out, fps };
+      return { groups: out, fps, gridStep: curGridStep };
     },
 
     dispose() {

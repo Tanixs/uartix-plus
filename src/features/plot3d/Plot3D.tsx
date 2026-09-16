@@ -20,15 +20,15 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import * as plotStore from "../plot/plotStore";
 import * as plot3dStore from "./plot3dStore";
-import type { GroupId, TrajGroup } from "./plot3dStore";
+import type { GroupId, GroupHeading, GroupModel, TrajGroup } from "./plot3dStore";
+import type { GroupTransform } from "./smoothing";
 import * as sessionStore from "../session/sessionStore";
 import type { GroupStats, PickResult, Plot3DScene, ViewPreset } from "./scene";
 import { createScene } from "./scene";
 import { fitEllipsoid, grade, FIT_MIN_POINTS, type FitOk } from "./ellipsoidFit";
-import { buildPairedTriples } from "./pairTriples";
 import { attachPdragZone } from "../../shared/pointerDrag";
 import { useSettings } from "../settings/settingsStore";
 import { useOperator } from "../operator/operatorStore";
@@ -70,6 +70,13 @@ const fsvg = (children: React.ReactNode) => (
 );
 const IconUndo = () => fsvg(<><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></>);
 const IconRedo = () => fsvg(<><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></>);
+const IconFlag = () =>
+  fsvg(
+    <>
+      <path d="M4 21V4" />
+      <path d="M4 4c4-2.2 8 2.2 12 0v9c-4 2.2-8-2.2-12 0" />
+    </>,
+  );
 
 /** 相对秒短标签（34s / 5m / 1.2h）——与 2D fmtTickSec 同款语义，本地小函数不做跨文件抽象 */
 const fmtTickSec = (v: number): string => {
@@ -141,6 +148,9 @@ function GroupDialog(props: {
     nameRef.current?.select();
   }, []);
   const set = (patch: Partial<TrajGroup>) => setDraft((d) => ({ ...d, ...patch }));
+  const hSet = (patch: Partial<GroupHeading>) => set({ heading: { ...draft.heading, ...patch } });
+  const mSet = (patch: Partial<GroupModel>) => set({ model: { ...draft.model, ...patch } });
+  const tSet = (patch: Partial<GroupTransform>) => set({ transform: { ...draft.transform, ...patch } });
   const chanOpts = (
     <>
       <option value="">
@@ -246,16 +256,16 @@ function GroupDialog(props: {
               </select>
             </span>
             <span className="p3d-gdlg-ax ax-z">
-              <b style={{ color: AX_COLOR.z }}>Z</b>
+              <b style={{ color: AX_COLOR.z }} title={tx("Z（留空 = 平面轨迹）", "Z (empty = planar trajectory)")}>Z</b>
               <select className="input" value={draft.chZ} disabled={opLocked} onChange={(e) => set({ chZ: e.target.value })}>
                 {chanOpts}
               </select>
             </span>
           </div>
         </div>
-        {boundCnt > 0 && boundCnt < 3 && (
+        {boundCnt > 0 && boundCnt < 2 && (
           <div className="fc-dlg-warn soft">
-            {tx("三轴未绑齐：该组暂不绘制", "Not all axes bound: this group is not drawn")}
+            {tx("X/Y 未绑齐：该组暂不绘制（Z 可留空=平面轨迹）", "X/Y not bound: this group is not drawn (empty Z = planar)")}
           </div>
         )}
         <div className="fc-dlg-row">
@@ -351,11 +361,13 @@ function GroupDialog(props: {
                   disabled={opLocked}
                   onChange={(e) => set({ smooth: e.target.value as TrajGroup["smooth"] })}
                 >
-                  <option value="none">{tx("无", "None")}</option>
+                  <option value="none">{tx("无（折线）", "None (polyline)")}</option>
                   <option value="movingAvg">{tx("滑动平均", "Moving average")}</option>
+                  <option value="catmullRom">{tx("Catmull-Rom 样条", "Catmull-Rom")}</option>
+                  <option value="spline">{tx("三次样条", "Cubic spline")}</option>
                 </select>
                 <span className="fc-dlg-hint">
-                  {tx("样条/贝塞尔 = P87b", "spline/Bezier = P87b")}
+                  {tx("曲线层只改视觉；悬停/测量/导出仍是原始点", "visual layer only; hover/measure/export stay raw")}
                 </span>
               </div>
             </div>
@@ -377,6 +389,40 @@ function GroupDialog(props: {
                 </div>
               </div>
             )}
+            {(draft.smooth === "catmullRom" || draft.smooth === "spline") && (
+              <div className="fc-dlg-row">
+                <label>{tx("细分", "Subdivision")}</label>
+                <div className="p3d-gdlg-inline2">
+                  <input
+                    type="range"
+                    min={2}
+                    max={10}
+                    step={1}
+                    value={draft.smoothSub}
+                    disabled={opLocked}
+                    onChange={(e) => set({ smoothSub: Number(e.target.value) })}
+                    title={tx("每段细分顶点数（越大越圆润、开销越高）", "vertices per segment (higher = rounder & costlier)")}
+                  />
+                  <b className="p3d-gdlg-num">×{draft.smoothSub}</b>
+                  {draft.smooth === "catmullRom" && (
+                    <>
+                      <span className="fc-dlg-hint">{tx("张力", "tension")}</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={draft.smoothTension}
+                        disabled={opLocked}
+                        onChange={(e) => set({ smoothTension: Number(e.target.value) })}
+                        title={tx("0=直线 1=全曲率", "0 = straight, 1 = full curvature")}
+                      />
+                      <b className="p3d-gdlg-num">{draft.smoothTension.toFixed(2)}</b>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="fc-dlg-row">
               <label>{tx("叠画点", "Show dots")}</label>
               <label className="p3d-gdlg-check">
@@ -388,6 +434,20 @@ function GroupDialog(props: {
                 />
                 {tx("线上叠画轨迹点", "draw vertices over the line")}
               </label>
+            </div>
+            <div className="fc-dlg-row">
+              <label>{tx("方向箭头", "Arrows")}</label>
+              <div className="p3d-gdlg-inline2">
+                <input
+                  type="number"
+                  min={0}
+                  step={50}
+                  value={draft.arrowEvery}
+                  disabled={opLocked}
+                  onChange={(e) => set({ arrowEvery: Math.max(0, Math.round(Number(e.target.value) || 0)) })}
+                />
+                <span className="fc-dlg-hint">{tx("每 N 点一支（0=关；最少间隔 10）", "one per N points (0=off; min 10)")}</span>
+              </div>
             </div>
           </>
         )}
@@ -434,6 +494,18 @@ function GroupDialog(props: {
                 <span className="fc-dlg-hint">{tx("0 = 不限（22 万双层 LOD）；超限从最老端丢弃", "0 = uncapped (220k dual LOD); oldest dropped beyond")}</span>
               </div>
             </div>
+            <div className="fc-dlg-row">
+              <label>{tx("起点标记", "Start flag")}</label>
+              <label className="p3d-gdlg-check">
+                <input
+                  type="checkbox"
+                  checked={draft.showStartEnd}
+                  disabled={opLocked}
+                  onChange={(e) => set({ showStartEnd: e.target.checked })}
+                />
+                {tx("在最老轨迹点立起点光点（终点=最新点标记常显）", "mark the oldest trajectory point (end = live dot)")}
+              </label>
+            </div>
           </>
         )}
         <div className="fc-dlg-row">
@@ -470,6 +542,208 @@ function GroupDialog(props: {
               </select>
             )}
           </div>
+        </div>
+        <div className="p3d-gdlg-sec">{tx("朝向与模型", "Heading & model")}</div>
+        <div className="fc-dlg-row">
+          <label>{tx("车头朝向", "Heading")}</label>
+          <div className="p3d-gdlg-inline2">
+            <select
+              className="input"
+              value={draft.heading.src}
+              disabled={opLocked}
+              onChange={(e) => hSet({ src: e.target.value as GroupHeading["src"] })}
+            >
+              <option value="xAxis">{tx("默认 +X", "Default +X")}</option>
+              <option value="velocity">{tx("速度方向（差分）", "Velocity (differenced)")}</option>
+              <option value="ch">{tx("航向角通道", "Heading channel")}</option>
+              <option value="quat">{tx("四元数（4 通道）", "Quaternion (4 chs)")}</option>
+            </select>
+            {draft.heading.src === "ch" && (
+              <select className="input" value={draft.heading.chYaw} disabled={opLocked} onChange={(e) => hSet({ chYaw: e.target.value })} title={tx("角度单位：度", "unit: degrees")}>
+                {chanOpts}
+              </select>
+            )}
+            <input
+              type="number"
+              step={5}
+              value={draft.heading.yawOff}
+              disabled={opLocked}
+              onChange={(e) => hSet({ yawOff: Number(e.target.value) })}
+              title={tx("航向修正角（度）：如北=0 或 90 系约定", "yaw offset (deg)")}
+            />
+            <button
+              type="button"
+              className={`p3d-cbtn${draft.heading.yawSign === -1 ? " on" : ""}`}
+              disabled={opLocked || draft.heading.src !== "ch"}
+              onClick={() => hSet({ yawSign: draft.heading.yawSign === 1 ? -1 : 1 })}
+              title={tx("航向增减方向翻转（顺/逆时针约定）", "flip yaw direction (CW/CCW convention)")}
+            >
+              {tx("翻转", "Flip")}
+            </button>
+          </div>
+        </div>
+        {draft.heading.src === "quat" && (
+          <div className="fc-dlg-row">
+            <label>{tx("四元数通道", "Quat channels")}</label>
+            <div className="p3d-gdlg-inline2 p3d-gdlg-quat">
+              {([["qX", "X"], ["qY", "Y"], ["qZ", "Z"], ["qW", "W"]] as const).map(([k, lab]) => (
+                <select
+                  key={k}
+                  className="input"
+                  value={draft.heading[k]}
+                  disabled={opLocked}
+                  onChange={(e) => hSet({ [k]: e.target.value } as Partial<GroupHeading>)}
+                  title={`q${lab}`}
+                >
+                  {chanOpts}
+                </select>
+              ))}
+              <span className="fc-dlg-hint">{tx("顺序若不符用「模型旋转」修正", "fix axis order via model rotation below")}</span>
+            </div>
+          </div>
+        )}
+        <div className="fc-dlg-row">
+          <label>{tx("俯仰/滚修", "Pitch/Roll")}</label>
+          <div className="p3d-gdlg-inline2">
+            <input type="number" step={5} value={draft.heading.pitchOff} disabled={opLocked} onChange={(e) => hSet({ pitchOff: Number(e.target.value) })} title={tx("俯仰修正（度）", "pitch offset (deg)")} />
+            <input type="number" step={5} value={draft.heading.rollOff} disabled={opLocked} onChange={(e) => hSet({ rollOff: Number(e.target.value) })} title={tx("滚转修正（度）", "roll offset (deg)")} />
+          </div>
+        </div>
+        <div className="fc-dlg-row">
+          <label>{tx("模型", "Model")}</label>
+          <div className="p3d-gdlg-inline2">
+            <select
+              className="input"
+              value={draft.model.kind}
+              disabled={opLocked}
+              onChange={(e) => mSet({ kind: e.target.value as GroupModel["kind"] })}
+              title={tx("替换实时定位的光点，显示在最新点并随朝向转动", "replaces the live dot at the latest point, rotates with heading")}
+            >
+              <option value="point">{tx("光点（默认）", "Dot (default)")}</option>
+              <option value="sphere">{tx("球", "Sphere")}</option>
+              <option value="arrow">{tx("箭头", "Arrow")}</option>
+              <option value="car">{tx("车", "Car")}</option>
+              <option value="cone">{tx("锥体", "Cone")}</option>
+              <option value="axes">{tx("坐标轴", "Axes")}</option>
+              <option value="gltf">GLTF / GLB</option>
+            </select>
+            {draft.model.kind !== "point" && (
+              <>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={5}
+                  step={0.1}
+                  value={draft.model.scale}
+                  disabled={opLocked}
+                  onChange={(e) => mSet({ scale: Number(e.target.value) })}
+                  title={tx("模型缩放", "model scale")}
+                />
+                <b className="p3d-gdlg-num">×{draft.model.scale.toFixed(1)}</b>
+                <input
+                  type="number"
+                  step={0.5}
+                  value={draft.model.heightOff}
+                  disabled={opLocked}
+                  onChange={(e) => mSet({ heightOff: Number(e.target.value) })}
+                  title={tx("高度偏移（真实单位，沿 Y）", "height offset (real units, along Y)")}
+                />
+              </>
+            )}
+          </div>
+        </div>
+        {draft.model.kind === "gltf" && (
+          <div className="fc-dlg-row">
+            <label>{tx("模型文件", "Model file")}</label>
+            <div className="p3d-gdlg-inline2">
+              <button
+                type="button"
+                className="p3d-cbtn"
+                disabled={opLocked}
+                onClick={() => {
+                  void (async () => {
+                    const p = await open({
+                      multiple: false,
+                      filters: [{ name: "GLTF/GLB", extensions: ["glb", "gltf"] }],
+                    });
+                    if (typeof p === "string") mSet({ src: p });
+                  })();
+                }}
+              >
+                {tx("选择文件…", "Choose file…")}
+              </button>
+              <span className="fc-dlg-hint p3d-gdlg-path" title={draft.model.src}>
+                {draft.model.src || tx("未选择（本地文件，不加载远程 URL）", "none (local file; no remote URLs)")}
+              </span>
+            </div>
+          </div>
+        )}
+        <div className="fc-dlg-row">
+          <label>{tx("模型旋转修正", "Model rot fix")}</label>
+          <div className="p3d-gdlg-inline2">
+            {(["rotX", "rotY", "rotZ"] as const).map((k) => (
+              <input
+                key={k}
+                type="number"
+                step={15}
+                value={draft.model[k]}
+                disabled={opLocked}
+                onChange={(e) => mSet({ [k]: Number(e.target.value) } as Partial<GroupModel>)}
+                title={`${k.slice(3)}°`}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="p3d-gdlg-sec">{tx("坐标变换与对齐", "Transform & align")}</div>
+        <div className="fc-dlg-row">
+          <label>{tx("旋转（度）", "Rotation")}</label>
+          <div className="p3d-gdlg-inline2">
+            {(["rotX", "rotY", "rotZ"] as const).map((k) => (
+              <input
+                key={k}
+                type="number"
+                step={15}
+                value={draft.transform[k]}
+                disabled={opLocked}
+                onChange={(e) => tSet({ [k]: Number(e.target.value) } as Partial<GroupTransform>)}
+                title={`${k.slice(3)}°（Z·Y·X 序，装歪/换系修正）`}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="fc-dlg-row">
+          <label>{tx("平移/缩放", "Offset/scale")}</label>
+          <div className="p3d-gdlg-inline2 p3d-gdlg-tf6">
+            {(["offX", "offY", "offZ", "scale"] as const).map((k) => (
+              <input
+                key={k}
+                type="number"
+                step={k === "scale" ? 0.1 : 1}
+                value={draft.transform[k]}
+                disabled={opLocked}
+                onChange={(e) => tSet({ [k]: Number(e.target.value) } as Partial<GroupTransform>)}
+                title={k === "scale" ? tx("比例（1=原始）", "scale (1=raw)") : `${k.slice(3)} offset`}
+              />
+            ))}
+            <button
+              type="button"
+              className="p3d-cbtn"
+              disabled={opLocked}
+              title={tx("把三组各自的第一个轨迹点平移到世界原点（起点不同的路径对比）", "translate each group's first point to the origin")}
+              onClick={() => {
+                plot3dStore.alignToOrigin();
+                onClose();
+              }}
+            >
+              {tx("首点对齐原点", "Align starts")}
+            </button>
+          </div>
+        </div>
+        <div className="fc-dlg-hint p3d-gdlg-tf-note">
+          {tx(
+            "变换作用于轨迹几何（显示/导出/测量同源）；校准采样恒用原始传感器值",
+            "Transform applies to trajectory geometry (display/export/measure share it); calibration always samples raw sensor values",
+          )}
         </div>
         <div className="fc-dlg-row">
           <label>{tx("备注", "Notes")}</label>
@@ -527,10 +801,15 @@ export function Plot3D() {
 
   const [ready, setReady] = useState(false);
   const [gen, setGen] = useState(0); // WebGL context lost → +1 重建
-  const [stats, setStats] = useState<{ groups: Record<GroupId, GroupStats>; fps: number }>({
+  const [stats, setStats] = useState<{ groups: Record<GroupId, GroupStats>; fps: number; gridStep: number }>({
     groups: { g1: { tail: 0, overview: 0 }, g2: { tail: 0, overview: 0 }, g3: { tail: 0, overview: 0 } },
     fps: 0,
+    gridStep: 0,
   });
+  // P87b：录制态（打点钮门控）与标注旗标相对秒列表
+  const [recording, setRecording] = useState(false);
+  const [annRels, setAnnRels] = useState<number[]>([]);
+  const modelSrcRef = useRef<Record<string, string>>({});
   // P75 B2 → P87a 逐组：配对诊断（三轴值域 + 配对/跳过计数），1Hz 低频刷新
   const [pairInfo, setPairInfo] = useState<Record<GroupId, plot3dStore.PairStatSnapshot> | null>(null);
   const [themeTick, setThemeTick] = useState(0);
@@ -616,6 +895,13 @@ export function Plot3D() {
         onContextLost: () => setGen((g) => g + 1), // 触发整场景重建
         onToggleFollow: () =>
           plot3dStore.setSetting({ follow: !plot3dStore.getSnapshot().settings.follow }), // 键盘飞行 F 键（P72）
+        onModelError: (gid, src) =>
+          toast(
+            tx(
+              `组 ${gid.toUpperCase()} 的 GLTF 读取/解析失败：${src.slice(0, 60)}（回退为无模型标记，可重选文件或改回内置形状）`,
+              `Group ${gid.toUpperCase()} GLTF failed to read/parse: ${src.slice(0, 60)} (no marker until fixed)`,
+            ),
+          ),
       });
       if (disposed) {
         s.dispose();
@@ -630,6 +916,7 @@ export function Plot3D() {
       // 出现「UI 有拟合结果、画布空点云」的假象。
       calSentRef.current = 0;
       calReplayRef.current = true;
+      modelSrcRef.current = {}; // 新场景 gltf 缓存是空的 → 标记 src 水位重置，下一拍重注入
       // 游标同理：静态/回放暂停时没有新批次，pump 不会重发 → 强制下一拍重发一次
       plot3dStore.invalidateCursor();
       setReady(true);
@@ -715,8 +1002,8 @@ export function Plot3D() {
                 `Bound "${ch.name}" to ${g.name}'s ${hit.toUpperCase()} axis (Ctrl+Z to undo)`,
               )
             : tx(
-                `${g.name} 三轴已齐——打开组设置手动改轴`,
-                `${g.name} already has all three axes — open its settings to rebind`,
+                `${g.name} 三个绑定槽已满——打开组设置手动替换`,
+                `${g.name} has all three slots filled — open its settings to replace one`,
               ),
         );
         if (!hit) setDlg(gid);
@@ -757,6 +1044,52 @@ export function Plot3D() {
     if (!ready) return;
     sceneRef.current?.setKeyFlight(s3d.keyFlight);
   }, [ready, s3d.keyFlight]);
+
+  // P87b 标注旗标 + 打点门控：订阅 sessionStore（标注低频、进 state 可接受）
+  useEffect(() => {
+    const sync = () => {
+      const snap = sessionStore.getSnapshot();
+      setRecording(snap.state === "recording");
+      const org = plotStore.timeOrigin();
+      const rel: number[] = [];
+      for (const a of sessionStore.getAnnotations()) {
+        const r = (a.ts - org) / 1000;
+        if (isFinite(r) && r >= 0) rel.push(r);
+      }
+      rel.sort((a, b) => a - b);
+      setAnnRels(rel);
+      sceneRef.current?.setAnnots(rel);
+    };
+    sync();
+    // sessionStore 的标注推送只在会话事件里通知；500ms 低频兜底（打点后 ≤0.5s 上旗）
+    const t = window.setInterval(sync, 500);
+    const unsub = sessionStore.subscribe(sync);
+    return () => {
+      window.clearInterval(t);
+      unsub();
+    };
+  }, [ready]);
+
+  // P87b GLTF 字节加载：kind=gltf 且 src 变化时读盘注入（scene 内按 src 缓存解析结果）
+  useEffect(() => {
+    if (!ready) return;
+    for (const g of s3d.groups) {
+      const key = g.model.kind === "gltf" ? g.model.src : "";
+      if (modelSrcRef.current[g.id] === key) continue;
+      modelSrcRef.current[g.id] = key;
+      if (!key) continue;
+      void (async () => {
+        try {
+          const bytes = await invoke<number[]>("read_binary_file", { path: key });
+          const buf = new Uint8Array(bytes).buffer;
+          if (s3dRef.current.groups.find((x) => x.id === g.id)?.model.src === key)
+            sceneRef.current?.setModelBytes(g.id, buf);
+        } catch {
+          sceneRef.current?.setModelBytes(g.id, null);
+        }
+      })();
+    }
+  }, [ready, s3d]);
 
   // 校准采样轮询（500ms 低频）：store 缓冲 → scene 点云增量推送；
   // 缓冲缩水（重灌签名变化/清空）→ 场景点云与拟合结果同步重置；
@@ -1474,31 +1807,25 @@ export function Plot3D() {
     );
   };
 
-  // ---------- 导出（P72 → P87a 逐组）：轨迹 CSV / 快照 PNG ----------
+  // ---------- 导出（P72 → P87a 逐组 → P87b 同源 store 层）：轨迹 CSV / 快照 PNG ----------
   const exportCsv = async (gid: GroupId) => {
     const g = plot3dStore.getGroup(gid);
-    if (!g.chX || !g.chY || !g.chZ) return;
+    // P87b：exportTriples 单点真相——与显示严格同源（配对 + **组变换**）
+    const data = plot3dStore.exportTriples(gid);
+    if (!data) return;
     const chans = plotRef.current.channels;
     const nameOf = (id: string) => chans.find((c) => c.id === id)?.name ?? id;
-    // P75 B2：与轨迹严格同源——按该组配对方式/容差从原始序列构建
-    // （旧实现走联合对齐源，配对修复后两者不再一致）
-    const pair = buildPairedTriples(
-      plotStore.getChanData(g.chX),
-      plotStore.getChanData(g.chY),
-      plotStore.getChanData(g.chZ),
-      { mode: g.pairMode, tolMs: g.pairTolMs, sinceT: -Infinity },
-    );
-    const org = plotStore.timeOrigin();
     const esc = (v: string | number) => {
       const str = String(v);
       return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
     };
+    const zName = g.chZ ? nameOf(g.chZ) : "z0";
     const rows: string[] = [
-      ["t_s", nameOf(g.chX), nameOf(g.chY), nameOf(g.chZ)].map(esc).join(","),
+      ["t_s", nameOf(g.chX), nameOf(g.chY), zName].map(esc).join(","),
     ];
-    for (let i = 0; i < pair.t.length; i++) {
+    for (let i = 0; i < data.t.length; i++) {
       rows.push(
-        `${((pair.t[i] - org) / 1000).toFixed(3)},${pair.x[i]},${pair.y[i]},${pair.z[i]}`,
+        `${data.t[i].toFixed(3)},${data.x[i]},${data.y[i]},${data.z[i]}`,
       );
     }
     if (rows.length <= 1) return; // 无轨迹点
@@ -1517,6 +1844,73 @@ export function Plot3D() {
     } catch (e) {
       toast(tx(`轨迹 CSV 写盘失败：${String(e).slice(0, 80)}`, `Failed to write trajectory CSV: ${String(e).slice(0, 80)}`));
     }
+  };
+
+  /**
+   * P87b：导入轨迹 CSV → 本组（虚拟通道）。列格式 t,x,y[,z]（t 为秒或毫秒，
+   * 自动识别；首行非数值视为表头跳过）。t 平移对齐到当前时间原点（离线文件
+   * 与在线流不共时钟——对齐形状不猜绝对时刻）。重复导入先回收本组旧虚拟通道。
+   */
+  const importCsvTo = async (gid: GroupId) => {
+    if (opLocked) return;
+    const path = await open({
+      multiple: false,
+      filters: [{ name: "CSV", extensions: ["csv", "txt"] }],
+    });
+    if (typeof path !== "string") return;
+    let text: string;
+    try {
+      text = await invoke<string>("read_text_file", { path });
+    } catch (e) {
+      toast(tx(`读取失败：${String(e).slice(0, 80)}`, `Read failed: ${String(e).slice(0, 80)}`));
+      return;
+    }
+    const ts: number[] = [];
+    const xs: number[] = [];
+    const ys: number[] = [];
+    const zs: number[] = [];
+    let hasZ = false;
+    for (const lineRaw of text.split(/\r?\n/)) {
+      const line = lineRaw.trim();
+      if (!line) continue;
+      const cells = line.split(/[,;\t]/).map((c) => Number(c.trim()));
+      if (cells.length < 3 || cells.slice(0, 3).some((v) => !isFinite(v))) continue;
+      ts.push(cells[0]);
+      xs.push(cells[1]);
+      ys.push(cells[2]);
+      if (cells.length >= 4 && isFinite(cells[3])) {
+        hasZ = true;
+        zs.push(cells[3]);
+      } else {
+        zs.push(0);
+      }
+    }
+    if (ts.length < 2) {
+      toast(tx("未解析到 ≥2 行数值数据（列格式：t,x,y[,z]，逗号/分号/Tab 分隔）", "Need ≥2 numeric rows (columns: t,x,y[,z])"));
+      return;
+    }
+    const secScale = Math.abs(ts[ts.length - 1] - ts[0]) < 1e7 ? 1000 : 1;
+    const base = plotStore.timeOrigin();
+    const t0 = Math.min(...ts);
+    const tsMs = ts.map((v) => base + (v - t0) * secScale);
+    // 回收本组旧的虚拟绑定（导入过一次再导不堆垃圾通道）
+    const g = plot3dStore.getGroup(gid);
+    const chans = plotRef.current.channels;
+    for (const id of [g.chX, g.chY, g.chZ]) {
+      const ch = id ? chans.find((c) => c.id === id) : null;
+      if (ch?.virtual) plotStore.removeChannel(ch.id);
+    }
+    const nm = (s: string) => `${g.name}·${s}`;
+    const ix = plotStore.addVirtualChannel(nm("X"), tsMs, xs);
+    const iy = plotStore.addVirtualChannel(nm("Y"), tsMs, ys);
+    const iz = hasZ ? plotStore.addVirtualChannel(nm("Z"), tsMs, zs) : "";
+    plot3dStore.updateGroup(gid, { chX: ix, chY: iy, chZ: iz });
+    toast(
+      tx(
+        `已导入 ${tsMs.length} 点到 ${g.name}（虚拟通道，t 已平移对齐）`,
+        `Imported ${tsMs.length} points into ${g.name} (virtual channels, t rebased)`,
+      ),
+    );
   };
   const exportPng = async () => {
     const scene = sceneRef.current;
@@ -1548,8 +1942,8 @@ export function Plot3D() {
     { p: "iso", zh: "等", en: "I", tipZh: "等轴：立体全貌（默认）", tipEn: "Isometric: full 3D view (default)" },
   ];
 
-  const g1Bound = plot3dStore.groupBound("g1");
-  const anyBound = s3d.groups.some((g) => g.chX && g.chY && g.chZ);
+  const g1Bound = plot3dStore.calibSourceReady();
+  const anyBound = s3d.groups.some((g) => g.chX && g.chY);
   const ascaleCur =
     s3d.axisScale === "perAxis" ? tx("逐轴归一化", "Per-axis") : tx("等比（真实比例）", "Uniform");
 
@@ -1559,13 +1953,13 @@ export function Plot3D() {
   );
   ptsRef.current = totalPts;
   const groupPtsLine = s3d.groups
-    .filter((g) => (stats.groups[g.id].tail + stats.groups[g.id].overview) > 0 || (g.chX && g.chY && g.chZ))
+    .filter((g) => (stats.groups[g.id].tail + stats.groups[g.id].overview) > 0 || (g.chX && g.chY))
     .map((g) => `${g.name} ${(stats.groups[g.id].tail + stats.groups[g.id].overview).toLocaleString()}`)
     .join(" · ");
 
   // P75 B2：配对诊断副行（P87a 主组 = 第一个绑齐且有消费的组；三轴值域 + 配对/跳过计数）
   const primaryGid = s3d.groups.find(
-    (g) => g.chX && g.chY && g.chZ && pairInfo && pairInfo[g.id].paired + pairInfo[g.id].skipped > 0,
+    (g) => g.chX && g.chY && pairInfo && pairInfo[g.id].paired + pairInfo[g.id].skipped > 0,
   )?.id;
   const fmtRange = (mn: number, mx: number) =>
     isFinite(mn) && isFinite(mx) ? `${fmtVal(mn)}~${fmtVal(mx)}` : "—";
@@ -1624,7 +2018,7 @@ export function Plot3D() {
         {/* P87a 组托盘（左上）：三行独立轨迹；通道与 2D 图例共享；拖 vs-field 落行=智能绑定 */}
         <div className="p3d-hud tl p3d-groups" ref={trayRef}>
           {s3d.groups.map((g) => {
-            const bound = !!(g.chX && g.chY && g.chZ);
+            const bound = !!(g.chX && g.chY);
             return (
               <div
                 key={g.id}
@@ -1742,6 +2136,23 @@ export function Plot3D() {
           </button>
           <span className="p3d-tray-sep" />
           <button
+            className="icon-btn"
+            disabled={!recording || s3d.calibMode}
+            onClick={() => {
+              const stamp = new Date().toISOString().slice(11, 19);
+              void sessionStore.annotate(`3D ${stamp}`);
+              toast(tx("已打点（时间轴/2D/3D 旗标同步浮现）", "Marker placed (synced on timeline / 2D / 3D flags)"));
+            }}
+            title={
+              recording
+                ? tx("打点：在当前时刻记一条标注（需录制中）", "Drop a marker at current time (requires recording)")
+                : tx("打点需要先在顶栏开始录制会话", "Marking requires an active recording session")
+            }
+          >
+            <IconFlag />
+          </button>
+          <span className="p3d-tray-sep" />
+          <button
             className={`icon-btn${s3d.calibMode ? " primary" : ""}`}
             disabled={!g1Bound}
             onClick={() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true }))}
@@ -1780,6 +2191,12 @@ export function Plot3D() {
             )}
             {groupPtsLine || (totalPts > 0 ? totalPts.toLocaleString() : "")}
             {settings.perfHud && totalPts > 0 ? ` · ${stats.fps} FPS` : ""}
+            {stats.gridStep > 0 && isFinite(stats.gridStep) && (
+              <span title={tx("网格步长（真实单位/格）＝比例尺", "grid step (real units per cell) = scale")}>
+                {" "}
+                · {tx("格", "grid")} {fmtVal(stats.gridStep)}
+              </span>
+            )}
             <span ref={tbTRef} />
           </div>
         )}
@@ -2117,7 +2534,7 @@ export function Plot3D() {
         {ready && !anyBound && (
           <div className="p3d-hint">
             <div>
-              {tx("每组绑定 X / Y / Z 三个通道后开始绘制（最多三组叠加）", "Bind X / Y / Z channels per group to draw (up to three overlaid trajectories)")}
+              {tx("每组绑 X / Y（Z 可留空=平面）开始绘制，最多三组叠加", "Bind X / Y per group (Z optional = planar), up to three overlaid trajectories")}
               <br />
               <span className="p3d-hint-sub">
                 {tx(
@@ -2149,6 +2566,21 @@ export function Plot3D() {
             <span className="p3d-tb-lbl">0s</span>
             <div className="p3d-tb-track" ref={tbTrackRef}>
               <div className="p3d-tb-fill" ref={tbFillRef} />
+              {annRels.map((r, k) => {
+                const pct = endRel > 0 ? Math.min(100, Math.max(0, (r / endRel) * 100)) : 0;
+                return (
+                  <i
+                    key={k}
+                    className="p3d-tb-ann"
+                    style={{ left: `${pct}%` }}
+                    title={tx(`${fmtTickSec(r)} 标注`, `marker ${fmtTickSec(r)}`)}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      applyScrub(pct / 100);
+                    }}
+                  />
+                );
+              })}
               <div className="p3d-tb-cursor" ref={tbCurRef} />
               <div className="p3d-tb-bubble" ref={tbBubbleRef} />
             </div>
@@ -2211,7 +2643,7 @@ export function Plot3D() {
             {menu.kind === "row" && menu.gid ? (
               (() => {
                 const g = s3d.groups.find((x) => x.id === menu.gid)!;
-                const bound = !!(g.chX && g.chY && g.chZ);
+                const bound = !!(g.chX && g.chY);
                 return (
                   <>
                     <div className="ctx-title">
@@ -2248,6 +2680,17 @@ export function Plot3D() {
                       {tx("导出本组 CSV", "Export CSV")}
                     </button>
                     <button
+                      className="ctx-item"
+                      disabled={opLocked}
+                      title={tx(
+                        "导入轨迹 CSV（列 t,x,y[,z]）→ 本组虚拟通道；重复导入替换旧通道",
+                        "Import trajectory CSV (t,x,y[,z]) → this group's virtual channels; re-import replaces",
+                      )}
+                      onClick={closeAnd(() => void importCsvTo(g.id))}
+                    >
+                      {tx("导入轨迹 CSV → 本组", "Import CSV → group")}
+                    </button>
+                    <button
                       className="ctx-item danger"
                       onClick={closeAnd(() => void clearGroupData(g.id))}
                     >
@@ -2268,7 +2711,7 @@ export function Plot3D() {
 
                 <div className="ctx-group">{tx("组", "Groups")}</div>
                 {s3d.groups.map((g) => {
-                  const bound = !!(g.chX && g.chY && g.chZ);
+                  const bound = !!(g.chX && g.chY);
                   return (
                     <button key={g.id} className="ctx-item" onClick={closeAnd(() => setDlg(g.id))}>
                       <span className="p3d-mi-dot" style={{ background: g.color }} />
@@ -2386,7 +2829,7 @@ export function Plot3D() {
                   <button
                     key={g.id}
                     className="ctx-item"
-                    disabled={!(g.chX && g.chY && g.chZ)}
+                    disabled={!(g.chX && g.chY)}
                     onClick={closeAnd(() => void exportCsv(g.id))}
                   >
                     <span className="p3d-mi-dot" style={{ background: g.color }} />
