@@ -10,6 +10,7 @@ import type {
 import * as store from "./templateStore";
 import { fieldSize } from "./templateStore";
 import { toast } from "../ai/extRuntime";
+import { requestOpenPanel } from "../ai/appBus";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import {
@@ -439,13 +440,15 @@ export function PropertiesPanel() {
                   </span>
                   <button
                     className="btn sm"
-                    onClick={() =>
+                    onClick={() => {
                       store.setSelection({
                         kind: "field",
                         templateId: tpl.id,
                         fieldId: lookalike.id,
-                      })
-                    }
+                      });
+                      requestOpenPanel("framecanvas");
+                      store.revealField(tpl.id, lookalike.id);
+                    }}
                   >
                     {tx("去修改该字段", "Edit this field")}
                   </button>
@@ -550,18 +553,23 @@ export function PropertiesPanel() {
               <div
                 key={f.id}
                 className={`field-row ${selected ? "selected" : ""}`}
-                onClick={() =>
+                onClick={() => {
                   store.setSelection({
                     kind: "field",
                     templateId: tpl.id,
                     fieldId: f.id,
-                  })
-                }
+                  });
+                  requestOpenPanel("framecanvas");
+                  store.revealField(tpl.id, f.id);
+                }}
               >
                 <span className="tpl-dot" style={{ background: f.color }} />
                 <span className="field-row-name">{f.name}</span>
                 <span className="field-row-meta">
-                  @{f.offset} · {f.type}
+                  {f.offset < 0
+                    ? tx(`距尾${-f.offset}B`, `${-f.offset}B from tail`)
+                    : `@${f.offset}`}{" "}
+                  · {f.type}
                 </span>
                 <button
                   className="tpl-del"

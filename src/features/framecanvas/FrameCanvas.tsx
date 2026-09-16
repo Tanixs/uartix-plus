@@ -63,6 +63,11 @@ const IconStop = () => fsvg(<rect x="6" y="6" width="12" height="12" rx="1" />);
 const IconPlug = () => fsvg(<><path d="M9 7V2M15 7V2" /><path d="M6 7h12v4a6 6 0 0 1-6 6 6 6 0 0 1-6-6V7z" /><line x1="12" y1="17" x2="12" y2="22" /></>);
 const IconFlag = () => fsvg(<><path d="M5 21V4" /><path d="M5 4h13l-3 4 3 4H5" /></>);
 const IconDiff = () => fsvg(<><polyline points="8 7 3 12 8 17" /><polyline points="16 7 21 12 16 17" /><line x1="3" y1="12" x2="21" y2="12" /></>);
+const IconX = () => fsvg(<><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>);
+const IconLock = () => fsvg(<><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>);
+const IconUnlock = () => fsvg(<><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></>);
+const IconInsBefore = () => fsvg(<><rect x="3" y="4" width="4" height="16" rx="1" /><path d="M21 12H11" /><path d="m15 8-4 4 4 4" /></>);
+const IconInsAfter = () => fsvg(<><rect x="17" y="4" width="4" height="16" rx="1" /><path d="M3 12h10" /><path d="m7 8 4 4-4 4" /></>);
 
 /** 会话回放 transport（16.2 P2）：打开 / 播放-暂停 / 速度档 / 进度条 / 停止 / 时间。
  *  独立叶子订阅 sessionStore（10Hz 进度只重渲染本组，不惊动画布主组件）。
@@ -1074,7 +1079,7 @@ function FrameCanvas() {
         : `${tx("校验域", "Checksum area")}${tpl?.checksum ? ` · ${tpl.checksum.algo}` : ""}`;
     } else if (field) {
       const rm = roleOf(field);
-      cat = `${roleLabel(rm)}${field.locked ? " 🔒" : ""}`;
+      cat = `${roleLabel(rm)}${field.locked ? ` ${tx("（已锁定）", "(locked)")}` : ""}`;
     } else cat = tx("未定义字节（帧长未被子字段覆盖）", "Undefined bytes (not covered by sub-fields)");
     const roleChip = field ? ROLE_META[roleOf(field)].tag : "";
     const fieldLine = field
@@ -1529,6 +1534,10 @@ function FrameCanvas() {
     } else if (ev.key === "Escape") {
       selRef.current = null;
       closeMenu();
+      const sc = protoRef.current.selection;
+      if (sc?.kind === "field") {
+        templateStore.setSelection({ kind: "template", templateId: sc.templateId });
+      }
       dirtyRef.current = true;
     } else if (ev.key === "ArrowLeft") {
       setViewF((f) => Math.max(0, f - 1));
@@ -1751,6 +1760,43 @@ function FrameCanvas() {
     setTabRev((v) => v + 1);
   }, [proto.selection]);
 
+  // P85b：属性面板/表 → 画布反向定位（滚动到字段所在行 + 选区 + 脉冲）
+  useEffect(() => {
+    const req = proto.revealReq;
+    if (!req) return;
+    if (tplSelRef.current !== req.tplId) selectTab(req.tplId);
+    const t0 = setTimeout(() => {
+      const lay = layoutRef.current;
+      const tpl0 = curRef.current;
+      if (!lay || !tpl0 || tpl0.id !== req.tplId) return;
+      const fl = resolvedRef.current.fr?.len ?? 0;
+      const f = tpl0.fields.find((x) => x.id === req.fieldId);
+      if (!f) return;
+      const er = effRange(tpl0, f, fl);
+      if (!er || er.len <= 0) return;
+      let rowIdx = -1;
+      for (let r = 0; r < lay.rows.length && rowIdx < 0; r++) {
+        for (const it of lay.rows[r].items) {
+          if (it.blk.kind === "fld" && it.blk.fid === f.id) {
+            rowIdx = r;
+            break;
+          }
+        }
+      }
+      if (rowIdx < 0) return;
+      const visRows = Math.max(1, Math.floor((sizeRef.current.h - PAD_T - 6) / lay.rowH));
+      scrollRef.current = Math.max(0, Math.min(rowIdx - 1, lay.rows.length - visRows));
+      selRef.current = { lo: er.start, hi: er.start + er.len - 1 };
+      fireAnim(`${tpl0.id}:${f.id}`);
+      dirtyRef.current = true;
+      setTimeout(() => {
+        selRef.current = null;
+        dirtyRef.current = true;
+      }, 900);
+    }, 80);
+    return () => clearTimeout(t0);
+  }, [proto.revealReq]);
+
   return (
     <div className="fc-root" tabIndex={0} onKeyDown={onKeyDown}>
       <div className="fc-toolbar">
@@ -1778,6 +1824,18 @@ function FrameCanvas() {
         ) : null}
         <ArchStat />
         <span className="fc-navinfo" ref={navRef} />
+        {(() => {
+          const sc = proto.selection;
+          if (sc?.kind !== "field") return null;
+          const t0 = proto.rules.templates.find((x) => x.id === sc.templateId);
+          const f0 = t0?.fields.find((x) => x.id === sc.fieldId);
+          if (!t0 || !f0) return null;
+          return (
+            <span className="fc-crumb" title={tx("Esc 返回模板属性", "Esc to go back to template properties")}>
+              {t0.name} <i>›</i> {f0.name} <em>Esc</em>
+            </span>
+          );
+        })()}
         <label className="fc-cellsz" title={tx("单元格尺寸", "Cell size")}>
           <input
             type="range"
@@ -1858,23 +1916,27 @@ function FrameCanvas() {
                     <>
                       <button className="fc-menu-item primary" onClick={defineFromMenu}>
                         {tx("定义为字段…", "Define as field…")}
+                        <span className="fc-menu-sub">{tx(`${m.size} 字节`, `${m.size} B`)}</span>
                       </button>
                       {(() => {
                         const tpl0 = curRef.current;
-                        if (
-                          !tpl0 ||
-                          tpl0.boundary.mode !== "fixedLength" ||
-                          m.size !== 1
-                        )
-                          return null;
-                        const fld0 = findFieldAt(tpl0, m.lo);
-                        if (fld0) return null;
-                        if (m.lo < tpl0.boundary.headerBytes.length) return null;
-                        if (m.lo >= (tpl0.boundary.fixedLength ?? 0)) return null;
+                        if (!tpl0) return null;
+                        const fixed = tpl0.boundary.mode === "fixedLength";
+                        const gEnd = m.lo + m.size - 1;
+                        const why = !fixed
+                          ? tx(
+                              "变长帧帧长由长度域/帧尾决定——请到属性面板改截帧配置",
+                              "Variable frames size by the length field/footer — edit framing in properties",
+                            )
+                          : m.size !== 1
+                            ? tx("格操作仅支持单字节选区", "Cell ops work on a single-byte selection")
+                            : null;
                         return (
                           <>
                             <button
                               className="fc-menu-item"
+                              disabled={!!why}
+                              title={why ?? tx("在此字节前插入 1 字节，其后字段自动右移（Ctrl+Z 撤销）", "Insert 1 byte before this cell; fields shift right (Ctrl+Z to undo)")}
                               onClick={() => {
                                 const e2 = templateStore.insertFrameCell(m.tplId, m.lo);
                                 closeMenu();
@@ -1882,10 +1944,29 @@ function FrameCanvas() {
                                 dirtyRef.current = true;
                               }}
                             >
-                              ⤒ {tx("在此格前插入格（帧长 +1）", "Insert cell here (length +1)")}
+                              <IconInsBefore />
+                              {tx("在此格前插入（帧长 +1）", "Insert cell before (length +1)")}
                             </button>
                             <button
                               className="fc-menu-item"
+                              disabled={!!why}
+                              title={why ?? (m.lo === gEnd && tpl0.boundary.fixedLength != null && gEnd + 1 === tpl0.boundary.fixedLength
+                                ? tx("在帧尾追加 1 字节（字段不动）", "Append 1 byte at the tail (fields unchanged)")
+                                : tx("在此字节后插入 1 字节，其后字段自动右移（Ctrl+Z 撤销）", "Insert 1 byte after this cell; fields shift right (Ctrl+Z to undo)"))}
+                              onClick={() => {
+                                const e2 = templateStore.insertFrameCell(m.tplId, gEnd + 1);
+                                closeMenu();
+                                if (e2) setPending({ msg: e2 });
+                                dirtyRef.current = true;
+                              }}
+                            >
+                              <IconInsAfter />
+                              {tx("在此格后插入（帧长 +1）", "Insert cell after (length +1)")}
+                            </button>
+                            <button
+                              className="fc-menu-item danger"
+                              disabled={!!why}
+                              title={why ?? tx("删除此字节，其后字段自动左移（校验/帧尾区与字段占用会被拦截，Ctrl+Z 撤销）", "Delete this byte; following fields shift left (checksum/footer and field areas are blocked; Ctrl+Z to undo)")}
                               onClick={() => {
                                 const e2 = templateStore.deleteFrameCell(m.tplId, m.lo);
                                 closeMenu();
@@ -1894,6 +1975,7 @@ function FrameCanvas() {
                                 dirtyRef.current = true;
                               }}
                             >
+                              <IconTrash />
                               {tx("删除此格（帧长 −1）", "Delete this cell (length −1)")}
                             </button>
                           </>
@@ -1915,6 +1997,28 @@ function FrameCanvas() {
                       >
                         {tx("编辑字段…", "Edit field…")}
                       </button>
+                      {(() => {
+                        const tpl0 = curRef.current;
+                        const fld0 = tpl0?.fields.find((f) => f.id === m.fid);
+                        if (!tpl0 || !fld0) return null;
+                        if (tpl0.boundary.mode !== "fixedLength" || fld0.offset < 0) return null;
+                        if (fld0.offset < tpl0.boundary.headerBytes.length) return null;
+                        return (
+                          <button
+                            className="fc-menu-item"
+                            title={tx("在本字段前插入 1 字节，本字段及其后右移（Ctrl+Z 撤销）", "Insert 1 byte before this field; it and later fields shift right (Ctrl+Z to undo)")}
+                            onClick={() => {
+                              const e2 = templateStore.insertFrameCell(m.tplId, fld0.offset);
+                              closeMenu();
+                              if (e2) setPending({ msg: e2 });
+                              dirtyRef.current = true;
+                            }}
+                          >
+                            <IconInsBefore />
+                            {tx("在此字段前插入格（帧长 +1）", "Insert cell before field (length +1)")}
+                          </button>
+                        );
+                      })()}
                       <button
                         className="fc-menu-item danger"
                         disabled={m.locked}
@@ -1923,7 +2027,8 @@ function FrameCanvas() {
                           undefine(m.tplId, m.fid);
                         }}
                       >
-                        {tx("⨯ 取消字段定义", "⨯ Undefine field")}{m.locked ? tx("（已锁定）", " (locked)") : ""}
+                        <IconX />
+                        {tx("取消字段定义", "Undefine field")}{m.locked ? tx("（已锁定）", " (locked)") : ""}
                       </button>
                       <button
                         className="fc-menu-item"
@@ -1932,7 +2037,8 @@ function FrameCanvas() {
                           toggleLock(m.tplId, m.fid);
                         }}
                       >
-                        {m.locked ? tx("🔓 解锁字段", "🔓 Unlock field") : tx("🔒 锁定字段", "🔒 Lock field")}
+                        {m.locked ? <IconUnlock /> : <IconLock />}
+                        {m.locked ? tx("解锁字段", "Unlock field") : tx("锁定字段", "Lock field")}
                       </button>
                     </>
                   )}
@@ -1953,10 +2059,39 @@ function FrameCanvas() {
                           {tx("编辑帧尾字节…", "Edit footer bytes…")}<span className="fc-menu-sub">{tx("双击亦可", "or double-click")}</span>
                         </button>
                       ) : (
-                        <button className="fc-menu-item" disabled>
+                        <button
+                          className="fc-menu-item"
+                          disabled
+                          title={tx("校验域宽度由算法决定（sum8=1B、CRC16=2B、CRC32=4B），在属性面板切换算法即可调整", "Checksum width follows the algorithm (1/2/4 B) — switch algorithms in properties")}
+                        >
                           {tx("校验尾（长度由校验算法决定）", "Checksum tail (length set by algorithm)")}
                         </button>
                       )}
+                      {(() => {
+                        const t0 = protoRef.current.rules.templates.find((x) => x.id === m.tplId);
+                        if (!t0 || !t0.checksum || t0.checksum.algo === "none") return null;
+                        return (
+                          <button
+                            className="fc-menu-item danger"
+                            title={tx("停用后该帧型的所有帧不再验证、直接放行（Ctrl+Z 撤销）", "All frames then pass unverified (Ctrl+Z to undo)")}
+                            onClick={() => {
+                              templateStore.setChecksumAlgo(m.tplId, "none");
+                              closeMenu();
+                              selRef.current = null;
+                              dirtyRef.current = true;
+                              toast(
+                                tx(
+                                  `校验已停用（${t0.checksum!.algo} → 无）——帧将全部放行`,
+                                  `Checksum disabled (${t0.checksum!.algo} → none) — frames pass unverified`,
+                                ),
+                              );
+                            }}
+                          >
+                            <IconX />
+                            {tx("停用本帧型校验", "Disable checksum")}<span className="fc-menu-sub">{t0.checksum.algo}</span>
+                          </button>
+                        );
+                      })()}
                       <button
                         className="fc-menu-item"
                         onClick={() => {
@@ -1966,7 +2101,7 @@ function FrameCanvas() {
                           dirtyRef.current = true;
                         }}
                       >
-                        {tx("查看校验配置", "View checksum config")}<span className="fc-menu-sub">{tx("右侧属性面板", "properties panel on the right")}</span>
+                        {tx("配置校验…", "Configure checksum…")}<span className="fc-menu-sub">{tx("右侧属性面板「校验」区", "Checksum section in properties")}</span>
                       </button>
                       <button className="fc-menu-item" onClick={() => { selRef.current = null; closeMenu(); dirtyRef.current = true; }}>
                         {tx("取消选择 (Esc)", "Clear selection (Esc)")}
@@ -2337,6 +2472,22 @@ function FieldDialog({
   const needsEndian = type === "uint16" || type === "int16" || type === "uint32" || type === "int32" || type === "float32" || type === "float64" || spanElemNeedsEndian;
   const fixedSize = fieldSize({ id: "", name: "", role: "data", offset: 0, type, endian, color: "" });
   const mismatched = init.isAscii ? false : recs.length > 0 && !recs.includes(type);
+  // P85b：冲突实时预览——打开即算，随类型/角色/锚点变更即时刷新（保存仍是权威闸口）
+  const protoLive = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
+  const candOff = init.edit && init.field ? init.field.offset : tail ? init.lo - init.frLen : init.lo;
+  const candSize = type === "ascii" || type === "bcd" ? init.size : fixedSize;
+  const conflictLive = useMemo(
+    () =>
+      templateStore.fieldConflictInfo(
+        init.tplId,
+        init.edit && init.field ? init.field.id : "preview-new",
+        candOff,
+        candSize,
+        { frameLen: init.frLen || 0, selfType: type, selfRole: role },
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [protoLive, init.tplId, init.edit, init.field, candOff, candSize, type, role],
+  );
 
   return (
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
@@ -2364,6 +2515,28 @@ function FieldDialog({
         {mismatched && (
           <div className="fc-dlg-warn soft">{tx("智能推荐", "Suggested")}: {recs.map((r) => typeLabel(r)).join(" / ")}（{init.size}{tx("字节", "bytes")}）</div>
         )}
+        {conflictLive.overFrame ? (
+          <div className="fc-dlg-warn">{tx(`超出帧长——${conflictLive.overFrame}`, `Beyond frame length — ${conflictLive.overFrame}`)}</div>
+        ) : conflictLive.overTail ? (
+          <div className="fc-dlg-warn">
+            {conflictLive.overTail.kind === "checksum"
+              ? tx(
+                  `选区与帧尾校验域重叠 ${conflictLive.overTail.bytes} B——保存时可一键「取消校验并定义」`,
+                  `Overlaps the checksum tail by ${conflictLive.overTail.bytes} B — on save you can drop the checksum and define`,
+                )
+              : tx(
+                  `选区与帧尾定界字节重叠 ${conflictLive.overTail.bytes} B——帧尾不能被字段占用`,
+                  `Overlaps footer delimiter bytes by ${conflictLive.overTail.bytes} B — footers cannot be occupied`,
+                )}
+          </div>
+        ) : conflictLive.overlapName ? (
+          <div className="fc-dlg-warn soft">
+            {tx(
+              `将与字段「${conflictLive.overlapName}」重叠 ${conflictLive.overlapBytes} B——保存时二次确认`,
+              `Will overlap "${conflictLive.overlapName}" by ${conflictLive.overlapBytes} B — confirmed on save`,
+            )}
+          </div>
+        ) : null}
         <div className="fc-dlg-row">
           <label>{tx("名称", "Name")}</label>
           <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={tx("如 温度值", "e.g. Temperature")} />
