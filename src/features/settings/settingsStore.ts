@@ -43,6 +43,8 @@ export interface Settings {
   perfHud: boolean;
   workspace: WorkspacePreset;
   cellSize: number;
+  /** 帧画布字节格边长（px，20~96；P86b，与控制画布 cellSize 无关） */
+  fcCellSize: number;
   aiPreset: AiPreset;
   aiFormat: AiFormat;
   aiBaseUrl: string;
@@ -128,6 +130,7 @@ function load(): Settings {
     perfHud: false,
     workspace: "proto",
     cellSize: 60,
+    fcCellSize: 42,
     aiPreset: "deepseek",
     aiFormat: "chat",
     aiBaseUrl: AI_PRESETS.deepseek.baseUrl,
@@ -170,6 +173,9 @@ function load(): Settings {
       cellSize: [48, 60, 72, 90, 110].includes(p.cellSize ?? 60)
         ? (p.cellSize as number)
         : 60,
+      fcCellSize: Number.isFinite(p.fcCellSize)
+        ? Math.max(20, Math.min(96, Math.round(p.fcCellSize as number)))
+        : 42,
       aiPreset: (["openai", "deepseek", "zhipu", "qwen", "ollama", "anthropic"] as const).includes(
         p.aiPreset as AiPreset,
       )

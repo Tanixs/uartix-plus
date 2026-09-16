@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Endian, FieldDef, FieldRole, FieldType, FrameTemplate } from "../../ipc/types";
 import { ENDIAN_LABEL } from "../../ipc/types";
 import * as fcStore from "./frameStore";
+import * as settingsStore from "../settings/settingsStore";
 import * as serialStore from "../serial/serialStore";
 import * as sessionStore from "../session/sessionStore";
 import { toast } from "../ai/extRuntime";
@@ -535,7 +536,10 @@ function FrameCanvas() {
     | { kind: "ftr"; tplId: string; hasFB: boolean }
     | null
   >(null);
-  const [cellSize, setCellSize] = useState(28);
+  const settingsSnap = useSyncExternalStore(settingsStore.subscribe, settingsStore.getSnapshot);
+  const cellSize = settingsSnap.fcCellSize;
+  const setCellSize = (v: number) => settingsStore.patch({ fcCellSize: v });
+  const anchorByteRef = useRef<number | null>(null);
   const diffBaseRef = useRef<{ seq: number; tplId: string; fi: number; bytes: Uint8Array } | null>(null);
   const [diffOn, setDiffOn] = useState(false);
   const [dlg, setDlg] = useState<DlgInit | null>(null);
@@ -659,6 +663,30 @@ function FrameCanvas() {
   useEffect(() => {
     dirtyRef.current = true;
   }, [proto, cellSize]);
+
+  // P86b：格尺寸变化时锚定「顶部可见行首字节」——重排后视觉不跳字节
+  useEffect(() => {
+    const lay = layoutRef.current;
+    if (lay) {
+      const row = lay.rows[Math.floor(scrollRef.current)];
+      if (row && row.items.length > 0) anchorByteRef.current = row.items[0].g0;
+    }
+    dirtyRef.current = true;
+  }, [cellSize]);
+
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const onW = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const cur = settingsStore.getSnapshot().fcCellSize;
+      const next = Math.max(20, Math.min(96, cur + (e.deltaY < 0 ? 2 : -2)));
+      if (next !== cur) settingsStore.patch({ fcCellSize: next });
+    };
+    cv.addEventListener("wheel", onW, { passive: false });
+    return () => cv.removeEventListener("wheel", onW);
+  }, []);
 
   useEffect(() => {
     const unsub = fcStore.subscribe(() => {
@@ -795,6 +823,16 @@ function FrameCanvas() {
     const sbReserve = first0.rows.length > Math.max(1, Math.floor((h - PAD_T - 6) / first0.rowH)) ? sbW : 0;
     const { rows, rowH } = layoutBlocks(pieces, s, w - sbReserve);
     layoutRef.current = { rows, rowH, s, frLen };
+    if (anchorByteRef.current != null) {
+      const ab = anchorByteRef.current;
+      anchorByteRef.current = null;
+      for (let r = 0; r < rows.length; r++) {
+        if (rows[r].items.some((it) => ab >= it.g0 && ab <= it.g1)) {
+          scrollRef.current = r;
+          break;
+        }
+      }
+    }
 
     const sel = selRef.current;
     const hv = hoverRef.current;
@@ -1460,6 +1498,7 @@ function FrameCanvas() {
   }, []);
 
   const onWheel = (ev: React.WheelEvent) => {
+    if (ev.ctrlKey) return;
     const lay = layoutRef.current;
     if (!lay) return;
     const rowsTotal = lay.rows.length;
@@ -1839,11 +1878,11 @@ function FrameCanvas() {
             </span>
           );
         })()}
-        <label className="fc-cellsz" title={tx("单元格尺寸", "Cell size")}>
+        <label className="fc-cellsz" title={tx("单元格尺寸（20~96，画布上 Ctrl+滚轮缩放，自动保存）", "Cell size (20–96; Ctrl+wheel on canvas zooms; saved automatically)")}>
           <input
             type="range"
-            min={18}
-            max={48}
+            min={20}
+            max={96}
             value={cellSize}
             onKeyDown={(e) => e.stopPropagation()}
             onChange={(e) => setCellSize(Number(e.target.value))}
