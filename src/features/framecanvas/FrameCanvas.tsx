@@ -8,6 +8,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { clampFlyoutMenu } from "../../shared/Flyout";
+import { HelpHint } from "../../shared/HelpHint";
 import { invoke } from "@tauri-apps/api/core";
 import type { Endian, FieldDef, FieldRole, FieldType, FrameTemplate } from "../../ipc/types";
 import { ENDIAN_LABEL } from "../../ipc/types";
@@ -2335,6 +2336,9 @@ function HeadTailDialog({
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
       <div
         className="fc-dlg"
+        role="dialog"
+        aria-modal="true"
+        aria-label={tx("帧画布编辑对话框", "Frame canvas dialog")}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
@@ -2493,6 +2497,9 @@ function FieldDialog({
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
       <div
         className="fc-dlg"
+        role="dialog"
+        aria-modal="true"
+        aria-label={tx("帧画布编辑对话框", "Frame canvas dialog")}
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
@@ -2543,17 +2550,31 @@ function FieldDialog({
         </div>
         <div className="fc-dlg-row">
           <label>{tx("位置锚点", "Anchor")}</label>
-          <div className="fc-dlg-roles">
+          <div
+            className={`fc-seg${init.edit ? " dis" : ""}`}
+            role="radiogroup"
+            aria-label={tx("位置锚点", "Anchor")}
+          >
             <button
-              className={`btn sm ${!tail ? "primary" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={!tail}
+              className={tail ? "" : "on"}
               disabled={init.edit}
-              title={init.edit ? tx("编辑时不改变锚点", "Anchor cannot change while editing") : undefined}
+              title={
+                init.edit
+                  ? tx("编辑时不改变锚点", "Anchor cannot change while editing")
+                  : tx("偏移自帧首起算（正数），定长帧最直观", "Offset counted from the frame start (positive)")
+              }
               onClick={() => setTail(false)}
             >
               {tx("帧头起算", "From head")}
             </button>
             <button
-              className={`btn sm ${tail ? "primary" : ""}`}
+              type="button"
+              role="radio"
+              aria-checked={tail}
+              className={tail ? "on" : ""}
               disabled={init.edit}
               title={
                 init.edit
@@ -2676,14 +2697,22 @@ function FieldDialog({
           <>
             <div className="fc-dlg-row">
               <label>{tx("变长载荷", "Variable span")}</label>
-              <label className="chk">
-                <input
-                  type="checkbox"
-                  checked={spanTail}
-                  onChange={(e) => setSpanTail(e.target.checked)}
+              <div className="fc-dlg-inline">
+                <label className="chk">
+                  <input
+                    type="checkbox"
+                    checked={spanTail}
+                    onChange={(e) => setSpanTail(e.target.checked)}
+                  />
+                  <span>{tx("延伸至载荷尾（自适应变长）", "Extend to payload end (adaptive)")}</span>
+                </label>
+                <HelpHint
+                  text={tx(
+                    "本字段从自身偏移一直覆盖到校验/帧尾之前，随每帧实际长度自适应。元素类型为文本时输出一个文本变量（ASCII 输出文本、其余输出 HEX）；为数值类型时按字节序逐元素解析（缩放/单位逐元素生效），输出 名称1…名称N 动态数值变量——可绘图、可脚本引用，上限 64 元素。",
+                    "This field stretches from its offset to just before the checksum/footer, adapting per frame. Text emits one text variable; numeric element types parse element by element (scale/unit per element) and emit Name1…NameN dynamic numeric variables — plottable and scriptable, max 64.",
+                  )}
                 />
-                {tx("延伸至载荷尾（自适应变长）", "Extend to payload end (adaptive)")}
-              </label>
+              </div>
             </div>
             {spanTail && (
               <>
@@ -2704,13 +2733,10 @@ function FieldDialog({
                 </div>
                 <div className="fc-dlg-warn soft">
                   {spanElem === "text"
-                    ? tx(
-                        "本字段从其偏移一直覆盖到校验/帧尾之前，随每帧实际长度自适应；输出一个文本变量（ASCII 类型输出文本，其余输出 HEX）。",
-                        "This field stretches from its offset to just before the checksum/footer, adapting to each frame's real length; it emits one text variable (ASCII type as text, others as HEX).",
-                      )
+                    ? tx("输出 1 个文本变量，随每帧实际长度自适应。", "Emits one text variable, adapting to each frame's length.")
                     : tx(
-                        `载荷区按 ${spanElem} ${endian === "big" ? "大端" : "小端"} 逐元素解析（缩放/单位逐元素生效），输出 名称1..N 动态数值变量——可绘图、可脚本引用；随每帧实际长度自适应，上限 64。`,
-                        `Payload is parsed element-by-element as ${spanElem} ${ENDIAN_LABEL[endian] ?? "LE"} (scale/unit apply per element), emitting dynamic numeric variables Name1..N — plottable and scriptable; adapts per frame, max 64.`,
+                        `按 ${spanElem} ${endian === "big" ? "大端" : "小端"} 逐元素解析，输出 名称1…N 动态数值变量（上限 64），随帧长自适应。`,
+                        `Parsed element-wise as ${spanElem} (${endian === "big" ? "BE" : "LE"}), emitting Name1…N numeric variables (max 64), adapting per frame.`,
                       )}
                 </div>
               </>
