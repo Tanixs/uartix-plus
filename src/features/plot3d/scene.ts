@@ -1,29 +1,28 @@
 /**
- * P69 3D 轨迹面板渲染核心（纯 three.js，无 React 依赖）。
+ * P69 3D 轨迹面板渲染核心（纯 three.js，无 React 依赖）· P87a 三组轨迹升级。
  *
- * 性能架构（对照详设 §10 + 评审优化）：
- * - 双层 LOD：全精度尾窗（12 万点，追加式 + 满时最老一半压入全景）+
- *   抽稀全景（10 万点上限，满时 2:1 对数减半）——全程轨迹形状永不丢失，
- *   内存有界（~13MB 含真实值副列），GPU 两条 Line 合计 <2ms。
- * - 缓冲一次性预分配 Float32/Float64；追加 O(k)；压实/减半均为单次
- *   copyWithin/批量搬移（摊销 O(1)/点），绝无逐点 shift。
- * - 着色全部在顶点着色器完成（turbo/viridis × 按时间/按通道值域 × 渐隐），
- *   CPU 每点只写 aTime/aVal 两个标量，主题/色带切换只改 uniform，零重算。
+ * 性能架构（对照详设 §10 + 评审优化，P87a §7）：
+ * - 逐组双层 LOD：每组「全精度尾窗（12 万点，追加式 + 满时最老一半压入全景）+
+ *   抽稀全景（10 万点上限，满时 2:1 对数减半）」，缓冲按组懒建——point 模式
+ *   只留最新点零缓冲（内存 O(1) 红线）；组 maxPoints>0 时超限从最老端丢弃。
+ * - 重锚/包围盒 = 全组并集（三组共享世界坐标语义；组1 大坐标经纬度与组3 米级
+ *   小坐标共存不炸精度）；真实值 f64 副列 + 归一化 f32 主列不变。
+ * - 着色全部在顶点着色器完成（turbo/viridis × 时间/通道/固定组色 × 渐隐 ×
+ *   透明度），CPU 每点只写 aTime/aVal 两个标量；逐组 uniform，切主题只改副本。
+ * - 连线平滑（P87a = 滑动平均）：几何列从真实值副列重算（recomputeTailPos），
+ *   pick/测量/导出仍读原始真实值——平滑只影响视觉不篡改数据。
  * - needsRender 脏标记：数据追加 / controls change / 相机动画 / resize 才渲染，
  *   相机静止且无新数据时 GPU 0 负载；dpr 上限 2。
- * - 位置缓冲存「去均值归一化」坐标（f32 精度足够），真实值存 f64 副列——
- *   大坐标（经纬度 120.xxx）不丢精度，重锚定只需 O(n) 重写归一化列。
- * - 面板生命周期：IntersectionObserver 不可见即跳渲染（数据由 store 泵喫，
- *   与 rAF 解耦，后台页签不丢段）；dispose 全量释放。
+ * - 面板生命周期：IntersectionObserver 不可见即跳渲染；dispose 全量释放。
  */
 import type * as THREE_NS from "three";
 import type { Channel } from "../plot/plotStore";
-import type { Plot3DBatch, Plot3DSettings } from "./plot3dStore";
+import type { GroupBatch, Plot3DBatch, Plot3DSettings, TrajGroup, GroupId } from "./plot3dStore";
 import { correctedRadius, type FitOk } from "./ellipsoidFit";
 
-/** 全精度尾窗容量（点） */
+/** 全精度尾窗容量（点/组） */
 const TAIL_CAP = 120000;
-/** 抽稀全景容量（点） */
+/** 抽稀全景容量（点/组） */
 const OVERVIEW_CAP = 100000;
 /** 归一化视界半宽：norm 坐标映射到 ±VIEW_HALF */
 const VIEW_HALF = 0.8;
@@ -35,12 +34,20 @@ export interface PickResult {
   /** 画布 CSS 像素 */
   screen: [number, number];
   distPx: number;
+  /** P87a：命中的组（tooltip 归属 + 复制来源） */
+  gid: GroupId;
 }
 
 export type ViewPreset = "top" | "side" | "front" | "iso";
 
+export interface GroupStats {
+  tail: number;
+  overview: number;
+}
+
 export interface Plot3DScene {
-  applyBatch(b: Plot3DBatch, reloaded: boolean, cursorSec: number | null): void;
+  /** P87a：批次按组分发；空数组 + cursorSec 变化 = 仅更新游标 */
+  applyBatch(entries: GroupBatch[], cursorSec: number | null): void;
   applySettings(
     s: Plot3DSettings,
     chans: Channel[],
@@ -51,6 +58,8 @@ export interface Plot3DScene {
   setViewPreset(p: ViewPreset): void;
   resetView(): void;
   focusLatest(): void;
+  /** 聚焦某组轨迹包围盒（组行双击/定位菜单） */
+  focusGroup(gid: GroupId): void;
   setAutoRotate(on: boolean): void;
   /** 跟随模式：target 平滑锁定最新点（游标时锁定截断点），保持视角偏移向量 */
   setFollow(on: boolean): void;
@@ -78,9 +87,10 @@ export interface Plot3DScene {
   setKeyFlight(on: boolean): void;
   /** 强制渲染一帧并返回 PNG dataURL（快照导出用） */
   snapshotPng(): string;
-  clearTrajectory(): void;
+  /** 清空某组（或全部）场景缓冲（store 水位由 UI 先行推进） */
+  clearTrajectory(gid?: GroupId): void;
   pick(px: number, py: number): PickResult | null;
-  stats(): { tail: number; overview: number; fps: number };
+  stats(): { groups: Record<GroupId, GroupStats>; fps: number };
   dispose(): void;
 }
 
@@ -127,29 +137,23 @@ export async function createScene(
   camera.position.set(1.9, 1.5, 2.1);
   camera.lookAt(0, 0, 0);
 
-  // ---------- 双层 LOD 缓冲 ----------
-  // 尾窗：posN(f32×3) + real(f64×3) + tSec(f64) + aVal(f32)
-  const tPos = new Float32Array(TAIL_CAP * 3);
-  const tReal = new Float64Array(TAIL_CAP * 3);
-  const tT = new Float64Array(TAIL_CAP);
-  const tVal = new Float32Array(TAIL_CAP);
-  let tCount = 0;
-  // 全景：posN(f32×3) + real(f64×3) + tSec(f64) + aVal(f32)
-  const oPos = new Float32Array(OVERVIEW_CAP * 3);
-  const oReal = new Float64Array(OVERVIEW_CAP * 3);
-  const oT = new Float64Array(OVERVIEW_CAP);
-  const oVal = new Float32Array(OVERVIEW_CAP);
-  let oCount = 0;
-
-  // 归一化锚定：norm = (real - anchor) * scaleVec[axis]
+  // ---------- 归一化锚定（全局，跨组并集） ----------
+  // norm = (real - anchor) * scaleVec[axis]
   // P75 B2：scale 为等比基准；scaleVec 为实际生效的逐轴缩放——
-  // uniform 模式三值恒等于 scale（与旧版完全一致）；perAxis 模式各轴独立
-  // 撑满视锥（扁平数据查看用；退化轴/无数据轴回退 scale）。
+  // uniform 模式三值恒等于 scale；perAxis 各轴独立撑满视锥（退化/无数据轴回退 scale）。
   const anchor = [0, 0, 0];
   let scale = 1;
   const scaleVec: [number, number, number] = [1, 1, 1];
   const toN = (v: number, i: 0 | 1 | 2) => (v - anchor[i]) * scaleVec[i];
-  /** 按当前设置与包围盒重算逐轴缩放（重锚/首批数据/切换 axisScale 时调用） */
+  let baseExtent = 1; // 建立 scale 时的包围盒跨度
+  let curSettings: Plot3DSettings | null = null;
+  let curChans: Channel[] = [];
+  let curAccent = "#4e9cef";
+
+  const toModeVal = (g: TrajGroup): number =>
+    g.colorBy === "time" ? 0 : g.colorBy === "ch" ? 1 : 2;
+
+  /** 按当前设置与并集包围盒重算逐轴缩放（重锚/首批数据/切换 axisScale 时调用） */
   function updateScaleVec() {
     if (curSettings?.axisScale !== "perAxis") {
       scaleVec[0] = scaleVec[1] = scaleVec[2] = scale;
@@ -160,44 +164,152 @@ export async function createScene(
       scaleVec[a] = isFinite(ext) && ext > 1e-9 ? (VIEW_HALF * 2) / ext : scale;
     }
   }
-  // 真实值包围盒（增量维护 + 压实/重锚时重算）
+
+  // ---------- 逐组状态与图层 ----------
+  interface GState {
+    gid: GroupId;
+    cfg: TrajGroup;
+    // 缓冲（懒建：首帧非空批次才分配）
+    tPos: Float32Array | null;
+    tReal: Float64Array | null;
+    tT: Float64Array | null;
+    tVal: Float32Array | null;
+    tCount: number;
+    oPos: Float32Array | null;
+    oReal: Float64Array | null;
+    oT: Float64Array | null;
+    oVal: Float32Array | null;
+    oCount: number;
+    tailGeo: THREE_NS.BufferGeometry | null;
+    tailLine: THREE_NS.Line | null;
+    tailPoints: THREE_NS.Points | null;
+    posAttr: THREE_NS.BufferAttribute | null;
+    aTimeAttr: THREE_NS.BufferAttribute | null;
+    valAttr: THREE_NS.BufferAttribute | null;
+    dirtyFrom: number;
+    ovGeo: THREE_NS.BufferGeometry | null;
+    ovLine: THREE_NS.Line | null;
+    ovPoints: THREE_NS.Points | null;
+    ovPosAttr: THREE_NS.BufferAttribute | null;
+    lastT: number;
+    valMin: number;
+    valMax: number;
+    bbMin: [number, number, number];
+    bbMax: [number, number, number];
+    /** 最新点真实值（point 模式唯一存储；所有模式都跟踪） */
+    latest: { t: number; x: number; y: number; z: number } | null;
+    dot: THREE_NS.Sprite;
+    uniforms: {
+      uBg: { value: THREE_NS.Color };
+      uMode: { value: number };
+      uSpan: { value: number };
+      uValMin: { value: number };
+      uValMax: { value: number };
+      uNow: { value: number };
+      uW: { value: number };
+      uPalette: { value: number };
+      uColor: { value: THREE_NS.Color };
+      uPtSize: { value: number };
+      uOpacity: { value: number };
+    };
+  }
+
+  const GROUP_ID_LIST: GroupId[] = ["g1", "g2", "g3"];
+  const gstates = new Map<GroupId, GState>();
+
+  // 真实值并集包围盒（重锚/网格/perAxis 缩放共用）——由各组 bbMin/bbMax 合成
   const bbMin = [Infinity, Infinity, Infinity];
   const bbMax = [-Infinity, -Infinity, -Infinity];
-  let baseExtent = 1; // 建立 scale 时的包围盒跨度
+  function unionBBox() {
+    bbMin[0] = bbMin[1] = bbMin[2] = Infinity;
+    bbMax[0] = bbMax[1] = bbMax[2] = -Infinity;
+    for (const g of gstates.values()) {
+      for (let a = 0; a < 3; a++) {
+        if (g.bbMin[a] < bbMin[a]) bbMin[a] = g.bbMin[a];
+        if (g.bbMax[a] > bbMax[a]) bbMax[a] = g.bbMax[a];
+      }
+    }
+  }
 
-  // ---------- 尾窗几何与材质 ----------
-  const aTimeArr = new Float32Array(TAIL_CAP);
-  const tailGeo = new T3.BufferGeometry();
-  const posAttr = new T3.BufferAttribute(tPos, 3).setUsage(
-    T3.DynamicDrawUsage,
-  );
-  const aTimeAttr = new T3.BufferAttribute(aTimeArr, 1).setUsage(
-    T3.DynamicDrawUsage,
-  );
-  const valAttr = new T3.BufferAttribute(tVal, 1).setUsage(
-    T3.DynamicDrawUsage,
-  );
-  tailGeo.setAttribute("position", posAttr);
-  tailGeo.setAttribute("aTime", aTimeAttr);
-  tailGeo.setAttribute("aVal", valAttr);
-  tailGeo.setDrawRange(0, 0);
-  tailGeo.boundingSphere = new T3.Sphere(new T3.Vector3(), 10);
-
-  const uniforms = {
-    uBg: { value: bgColor.clone() },
-    uMode: { value: 0 }, // 0=按时间 1=按通道
-    uSpan: { value: 1 }, // 会话时间跨度（秒）
-    uValMin: { value: 0 },
-    uValMax: { value: 1 },
-    uNow: { value: 0 },
-    uW: { value: 60 }, // 渐隐窗口秒；0=全程
-    uPalette: { value: 0 }, // 0=turbo 1=viridis（色弱）
-  };
+  function getG(gid: GroupId): GState {
+    let g = gstates.get(gid);
+    if (!g) {
+      const cfg =
+        curSettings?.groups.find((x) => x.id === gid) ??
+        ({
+          id: gid,
+          colorBy: "time",
+          fade: 60,
+          color: "#4e9cef",
+          pointSize: 3,
+          opacity: 1,
+          mode: "line",
+          showDots: true,
+          visible: true,
+        } as TrajGroup);
+      g = {
+        gid,
+        cfg: { ...cfg },
+        tPos: null,
+        tReal: null,
+        tT: null,
+        tVal: null,
+        tCount: 0,
+        oPos: null,
+        oReal: null,
+        oT: null,
+        oVal: null,
+        oCount: 0,
+        tailGeo: null,
+        tailLine: null,
+        tailPoints: null,
+        posAttr: null,
+        aTimeAttr: null,
+        valAttr: null,
+        dirtyFrom: -1,
+        ovGeo: null,
+        ovLine: null,
+        ovPoints: null,
+        ovPosAttr: null,
+        lastT: 0,
+        valMin: Infinity,
+        valMax: -Infinity,
+        bbMin: [Infinity, Infinity, Infinity],
+        bbMax: [-Infinity, -Infinity, -Infinity],
+        latest: null,
+        dot: null as unknown as THREE_NS.Sprite,
+        uniforms: {
+          uBg: { value: bgColor.clone() },
+          uMode: { value: 0 },
+          uSpan: { value: 1 },
+          uValMin: { value: 0 },
+          uValMax: { value: 1 },
+          uNow: { value: 0 },
+          uW: { value: 60 },
+          uPalette: { value: 0 },
+          uColor: { value: new T3.Color(cfg.color || "#4e9cef") },
+          uPtSize: { value: 3 },
+          uOpacity: { value: 1 },
+        },
+      };
+      g.dot = new T3.Sprite(
+        new T3.SpriteMaterial({ map: dotTex, transparent: true, depthTest: false }),
+      );
+      g.dot.scale.setScalar(0.06);
+      g.dot.visible = false;
+      g.dot.renderOrder = 10;
+      g.dot.material.color.set(cfg.color || "#ffffff");
+      scene.add(g.dot);
+      gstates.set(gid, g);
+    }
+    return g;
+  }
 
   const VERT = /* glsl */ `
     attribute float aTime;
     attribute float aVal;
-    uniform float uMode, uSpan, uValMin, uValMax, uNow, uW, uPalette;
+    uniform float uMode, uSpan, uValMin, uValMax, uNow, uW, uPalette, uPtSize, uOpacity;
+    uniform vec3 uColor;
     varying vec3 vBase;
     varying float vFade;
     vec3 turbo(float x) {
@@ -221,15 +333,16 @@ export async function createScene(
     void main() {
       float kTime = clamp(aTime / max(uSpan, 1e-3), 0.0, 1.0);
       float kVal = clamp((aVal - uValMin) / max(uValMax - uValMin, 1e-9), 0.0, 1.0);
-      float k = uMode < 0.5 ? kTime : kVal;
-      vBase = uPalette < 0.5 ? turbo(k) : viridis(k);
+      vec3 pal = uPalette < 0.5 ? turbo(kTime) : viridis(kTime);
+      vec3 palV = uPalette < 0.5 ? turbo(kVal) : viridis(kVal);
+      vBase = uMode < 0.5 ? pal : uMode < 1.5 ? palV : uColor;
       float age = uNow - aTime;
       float f = uW > 0.0
         ? clamp(1.0 - age / uW, 0.0, 1.0)
         : clamp(1.0 - age / max(uSpan, 1e-3), 0.0, 1.0);
-      vFade = mix(0.18, 1.0, f);
+      vFade = mix(0.18, 1.0, f) * uOpacity;
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      gl_PointSize = 3.0;
+      gl_PointSize = uPtSize;
     }
   `;
   const FRAG = /* glsl */ `
@@ -241,39 +354,76 @@ export async function createScene(
       gl_FragColor = vec4(mix(uBg, vBase, vFade), 1.0);
     }
   `;
-  const tailMatLine = new T3.ShaderMaterial({
-    uniforms,
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-  });
-  const tailMatPoints = new T3.ShaderMaterial({
-    uniforms,
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-  });
-  const tailLine = new T3.Line(tailGeo, tailMatLine);
-  const tailPoints = new T3.Points(tailGeo, tailMatPoints);
-  tailLine.frustumCulled = false;
-  tailPoints.frustumCulled = false;
-  scene.add(tailLine);
-  scene.add(tailPoints);
 
-  // ---------- 全景层（单色暗线，形状保留） ----------
-  const ovGeo = new T3.BufferGeometry();
-  const ovPosAttr = new T3.BufferAttribute(oPos, 3).setUsage(
-    T3.DynamicDrawUsage,
-  );
-  ovGeo.setAttribute("position", ovPosAttr);
-  ovGeo.setDrawRange(0, 0);
-  ovGeo.boundingSphere = new T3.Sphere(new T3.Vector3(), 10);
-  const ovMat = new T3.LineBasicMaterial({
-    color: 0x888888,
-    transparent: true,
-    opacity: 0.35,
-  });
-  const ovLine = new T3.Line(ovGeo, ovMat);
-  ovLine.frustumCulled = false;
-  scene.add(ovLine);
+  /** 首次非空批次：建该组双层缓冲与网格对象（point 模式永不调用） */
+  function ensureLayers(g: GState) {
+    if (g.tailGeo) return;
+    g.tPos = new Float32Array(TAIL_CAP * 3);
+    g.tReal = new Float64Array(TAIL_CAP * 3);
+    g.tT = new Float64Array(TAIL_CAP);
+    g.tVal = new Float32Array(TAIL_CAP);
+    g.tailGeo = new T3.BufferGeometry();
+    g.posAttr = new T3.BufferAttribute(g.tPos, 3).setUsage(T3.DynamicDrawUsage);
+    g.aTimeAttr = new T3.BufferAttribute(new Float32Array(TAIL_CAP), 1).setUsage(
+      T3.DynamicDrawUsage,
+    );
+    g.valAttr = new T3.BufferAttribute(g.tVal, 1).setUsage(T3.DynamicDrawUsage);
+    g.tailGeo.setAttribute("position", g.posAttr);
+    g.tailGeo.setAttribute("aTime", g.aTimeAttr);
+    g.tailGeo.setAttribute("aVal", g.valAttr);
+    g.tailGeo.setDrawRange(0, 0);
+    g.tailGeo.boundingSphere = new T3.Sphere(new T3.Vector3(), 10);
+    const matLine = new T3.ShaderMaterial({
+      uniforms: g.uniforms as unknown as Record<string, THREE_NS.IUniform>,
+      vertexShader: VERT,
+      fragmentShader: FRAG,
+    });
+    const matPts = new T3.ShaderMaterial({
+      uniforms: g.uniforms as unknown as Record<string, THREE_NS.IUniform>,
+      vertexShader: VERT,
+      fragmentShader: FRAG,
+    });
+    g.tailLine = new T3.Line(g.tailGeo, matLine);
+    g.tailPoints = new T3.Points(g.tailGeo, matPts);
+    g.tailLine.frustumCulled = false;
+    g.tailPoints.frustumCulled = false;
+    scene.add(g.tailLine);
+    scene.add(g.tailPoints);
+
+    g.oPos = new Float32Array(OVERVIEW_CAP * 3);
+    g.oReal = new Float64Array(OVERVIEW_CAP * 3);
+    g.oT = new Float64Array(OVERVIEW_CAP);
+    g.oVal = new Float32Array(OVERVIEW_CAP);
+    g.ovGeo = new T3.BufferGeometry();
+    g.ovPosAttr = new T3.BufferAttribute(g.oPos, 3).setUsage(T3.DynamicDrawUsage);
+    g.ovGeo.setAttribute("position", g.ovPosAttr);
+    g.ovGeo.setDrawRange(0, 0);
+    g.ovGeo.boundingSphere = new T3.Sphere(new T3.Vector3(), 10);
+    const ovColor = new T3.Color(g.cfg.color || "#888888");
+    g.ovLine = new T3.Line(
+      g.ovGeo,
+      new T3.LineBasicMaterial({
+        color: ovColor,
+        transparent: true,
+        opacity: 0.35,
+      }),
+    );
+    g.ovPoints = new T3.Points(
+      g.ovGeo,
+      new T3.PointsMaterial({
+        color: ovColor.clone(),
+        size: 1.6,
+        sizeAttenuation: false,
+        transparent: true,
+        opacity: 0.3,
+      }),
+    );
+    g.ovLine.frustumCulled = false;
+    g.ovPoints.frustumCulled = false;
+    scene.add(g.ovLine);
+    scene.add(g.ovPoints);
+    applyOneVis(g);
+  }
 
   // ---------- 网格 / 轴 / 标签（可整体重建） ----------
   const gridGroup = new T3.Group();
@@ -308,7 +458,7 @@ export async function createScene(
     return (r >= 5 ? 5 : r >= 2 ? 2 : 1) * p;
   }
 
-  /** 重建网格：真实值 nice 刻度 → 归一化空间画线；轴标签带字段名 */
+  /** 重建网格：真实值 nice 刻度 → 归一化空间画线；轴标签带组1 通道名 */
   function rebuildGrid(axN: [string, string, string], accent: string) {
     for (const c of gridGroup.children) {
       const l = c as THREE_NS.Line;
@@ -353,14 +503,18 @@ export async function createScene(
       pts.push(toN(cx - (nx / 2) * step, 0), toN(yGround, 1), toN(z, 2));
       pts.push(toN(cx + (nx / 2) * step, 0), toN(yGround, 1), toN(z, 2));
     }
-    const g = new T3.BufferGeometry();
-    g.setAttribute("position", new T3.Float32BufferAttribute(pts, 3));
-    const gm = new T3.LineBasicMaterial({
-      color: new T3.Color(gx),
-      transparent: true,
-      opacity: 0.5,
-    });
-    gridGroup.add(new T3.LineSegments(g, gm));
+    const gm = new T3.BufferGeometry();
+    gm.setAttribute("position", new T3.Float32BufferAttribute(pts, 3));
+    gridGroup.add(
+      new T3.LineSegments(
+        gm,
+        new T3.LineBasicMaterial({
+          color: new T3.Color(gx),
+          transparent: true,
+          opacity: 0.5,
+        }),
+      ),
+    );
 
     // 三轴短线 + 标签（X 红 Y 绿 Z 蓝，RViz 惯例）
     const axisLen = (span * scale) / 2;
@@ -394,7 +548,7 @@ export async function createScene(
       );
       const sp = makeTextSprite(
         field ? `${letter} ${field}` : letter,
-        col === "#e05252" ? gxc : gxc,
+        gxc,
         0.09,
       );
       sp.position.copy(b);
@@ -403,10 +557,11 @@ export async function createScene(
       gridGroup.add(sp);
     }
     void accent;
+    void gxc;
     needsRender = true;
   }
 
-  // ---------- 最新点标记 ----------
+  // ---------- 最新点标记底图（各组 Sprite 复用同一纹理，颜色按组） ----------
   const dotCv = document.createElement("canvas");
   {
     const c = dotCv.getContext("2d")!;
@@ -422,59 +577,52 @@ export async function createScene(
     c.fill();
   }
   const dotTex = new T3.CanvasTexture(dotCv);
-  const latestDot = new T3.Sprite(
-    new T3.SpriteMaterial({ map: dotTex, transparent: true, depthTest: false }),
-  );
-  latestDot.scale.setScalar(0.06);
-  latestDot.visible = false;
-  latestDot.renderOrder = 10;
-  scene.add(latestDot);
 
-  // ---------- 时间游标（P70 T2）----------
+  // ---------- 时间游标（P70 T2 → P87a 逐组截断）----------
   // null = 跟随最新；数值 = drawRange 二分截断 + uNow 锚定。回放 seek 向后
-  // 不重建：场景缓冲 append-only 有序，截断即可"倒带"（详设 §1）。
+  // 不重建：各组缓冲 append-only 有序，截断即可"倒带"（详设 §1）。
   let curCursorSec: number | null = null;
+  let calibOn = false;
+
+  /** 游标/最新 → 该组截断点数 + 标记位置；返回 marker 归一化坐标或 null */
+  function cursorCut(g: GState): { ct: number; co: number; marker: [number, number, number] | null } {
+    const cut = (arr: Float64Array | null, n: number) =>
+      curCursorSec === null || !arr ? n : lowerBoundLe(arr, n, curCursorSec);
+    const ct = cut(g.tT, g.tCount);
+    const co = cut(g.oT, g.oCount);
+    let marker: [number, number, number] | null = null;
+    if (ct > 0 && g.tPos) {
+      marker = [g.tPos[(ct - 1) * 3], g.tPos[(ct - 1) * 3 + 1], g.tPos[(ct - 1) * 3 + 2]];
+    } else if (co > 0 && g.oPos) {
+      marker = [g.oPos[(co - 1) * 3], g.oPos[(co - 1) * 3 + 1], g.oPos[(co - 1) * 3 + 2]];
+    } else if (g.cfg.mode === "point" && g.latest && curCursorSec === null) {
+      marker = [toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2)];
+    }
+    return { ct, co, marker };
+  }
 
   function applyCursor(sec: number | null) {
     curCursorSec = sec;
-    if (sec === null || tCount + oCount === 0) {
-      tailGeo.setDrawRange(0, tCount);
-      ovGeo.setDrawRange(0, oCount);
-      uniforms.uNow.value = lastT;
-      if (tCount > 0) {
-        latestDot.position.set(
-          tPos[(tCount - 1) * 3],
-          tPos[(tCount - 1) * 3 + 1],
-          tPos[(tCount - 1) * 3 + 2],
-        );
-        latestDot.visible = !calibOn; // 校准模式下批次仍在泵入（轨迹隐身），最新点标记不出现
+    for (const g of gstates.values()) {
+      if (g.tailGeo && g.ovGeo) {
+        const { ct, co, marker } = cursorCut(g);
+        g.tailGeo.setDrawRange(0, ct);
+        g.ovGeo.setDrawRange(0, co);
+        if (marker) {
+          g.dot.position.set(marker[0], marker[1], marker[2]);
+        }
+        g.dot.visible = !calibOn && g.cfg.visible && marker !== null;
+        g.uniforms.uNow.value = sec === null ? g.lastT : sec;
+      } else if (g.cfg.mode === "point" && g.latest) {
+        const live = sec === null;
+        if (live) {
+          g.dot.position.set(toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2));
+        }
+        g.dot.visible = !calibOn && g.cfg.visible && live;
+        g.uniforms.uNow.value = sec === null ? g.lastT : sec;
       } else {
-        latestDot.visible = false;
+        g.dot.visible = false;
       }
-      needsRender = true;
-      return;
-    }
-    const co = lowerBoundLe(oT, oCount, sec);
-    const ct = lowerBoundLe(tT, tCount, sec);
-    tailGeo.setDrawRange(0, ct);
-    ovGeo.setDrawRange(0, co);
-    uniforms.uNow.value = sec; // 渐隐窗口锚定游标：轨迹头部亮、尾部暗随游标移动
-    if (ct > 0) {
-      latestDot.position.set(
-        tPos[(ct - 1) * 3],
-        tPos[(ct - 1) * 3 + 1],
-        tPos[(ct - 1) * 3 + 2],
-      );
-      latestDot.visible = !calibOn;
-    } else if (co > 0) {
-      latestDot.position.set(
-        oPos[(co - 1) * 3],
-        oPos[(co - 1) * 3 + 1],
-        oPos[(co - 1) * 3 + 2],
-      );
-      latestDot.visible = !calibOn;
-    } else {
-      latestDot.visible = false;
     }
     needsRender = true;
   }
@@ -557,8 +705,24 @@ export async function createScene(
   let frames = 0;
   let fpsT = performance.now();
   // 跟随模式（P70 T2）：target 每帧向锚点 lerp（指数平滑），camera 加同款
-  // delta 保持视角偏移向量（Foxglove Position 档语义）；tween 进行时让路
+  // delta 保持视角偏移向量（Foxglove Position 档语义）；tween 进行时让路。
+  // P87a：锚点 = 主组（g1 优先，其次任一有数据的可见组）游标截断点/最新点
   let follow = false;
+  function followAnchor(): THREE_NS.Vector3 | null {
+    const order: GState[] = [];
+    const g1 = gstates.get("g1");
+    if (g1) order.push(g1);
+    for (const g of gstates.values()) if (g !== g1) order.push(g);
+    for (const g of order) {
+      if (g.tailGeo && g.tCount + g.oCount > 0) {
+        const { marker } = cursorCut(g);
+        if (marker) return new T3.Vector3(marker[0], marker[1], marker[2]);
+      } else if (g.latest && g.cfg.mode === "point" && curCursorSec === null) {
+        return new T3.Vector3(toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2));
+      }
+    }
+    return null;
+  }
   const loop = (now: number) => {
     raf = requestAnimationFrame(loop);
     if (!visible) return;
@@ -576,25 +740,10 @@ export async function createScene(
     const flying = keyFlight && flightKeys.size > 0;
     // 键盘飞行进行时跟随让路（否则 target 被拉回最新点，飞行无效）
     if (follow && !tween && !flying) {
-      const n =
-        curCursorSec === null
-          ? tCount
-          : lowerBoundLe(tT, tCount, curCursorSec);
-      let px = 0;
-      let py = 0;
-      let pz = 0;
-      if (n > 0) {
-        px = tPos[(n - 1) * 3];
-        py = tPos[(n - 1) * 3 + 1];
-        pz = tPos[(n - 1) * 3 + 2];
-      } else if (oCount > 0) {
-        px = oPos[(oCount - 1) * 3];
-        py = oPos[(oCount - 1) * 3 + 1];
-        pz = oPos[(oCount - 1) * 3 + 2];
-      }
-      const dx = (px - controls.target.x) * 0.15;
-      const dy = (py - controls.target.y) * 0.15;
-      const dz = (pz - controls.target.z) * 0.15;
+      const p = followAnchor();
+      const dx = p ? (p.x - controls.target.x) * 0.15 : 0;
+      const dy = p ? (p.y - controls.target.y) * 0.15 : 0;
+      const dz = p ? (p.z - controls.target.z) * 0.15 : 0;
       if (dx * dx + dy * dy + dz * dz > 1e-12) {
         controls.target.x += dx;
         controls.target.y += dy;
@@ -700,22 +849,10 @@ export async function createScene(
   };
   renderer.domElement.addEventListener("webglcontextlost", onCtxLost);
 
-  // ---------- 追加 / 压实 / 重锚 ----------
-  let dirtyFrom = -1; // 本轮脏区起点（上传优化）
-  let lastT = 0;
-  let valMin = Infinity;
-  let valMax = -Infinity;
-  let lastGridBuild = 0;
-  let gridSig = "";
-  let curSettings: Plot3DSettings | null = null;
-  let curChans: Channel[] = [];
-  let curAccent = "#4e9cef";
-
   // ---------- 校准层（P71/P73）：点云 + 线框 + 中心标记 + 残差着色 + 显示切换 ----------
   // raw 模式：归一化沿用轨迹 anchor/scale 流水线（同一数据源，量级一致；重锚时随 rewriteNorm 重写）
   // corrected 模式（P73）：W(x−offset) 校正后空间独立归一化（质心平移 + ā 缩放），与轨迹锚互不影响
   const CALIB_CAP_SCENE = 20000; // 与 plot3dStore.CALIB_CAP 一致（store 自动停止，此处防御）
-  let calibOn = false;
   let calFit: FitOk | null = null;
   let calDisplay: "raw" | "corrected" = "raw";
   let calCValid = false; // corrected 归一化基准（calCenN/calScaleC）是否就绪
@@ -792,16 +929,26 @@ export async function createScene(
     out.copy(d <= 0.03 ? RESID_OK : d <= 0.08 ? RESID_WARN : RESID_BAD);
   }
 
-  /** 轨迹层/网格/校准层可见性统一裁决（applySettings 与 setCalibMode 共用，退出零重建） */
+  /** 单组四层可见性（模式/组可见/校准门控统一裁决；applySettings 与 setCalibMode 共用） */
+  function applyOneVis(g: GState) {
+    const hide = calibOn || !g.cfg.visible;
+    const lineOn = g.cfg.mode === "line";
+    const ptsOn = g.cfg.mode === "points";
+    if (g.tailLine) g.tailLine.visible = !hide && lineOn;
+    if (g.tailPoints) g.tailPoints.visible = !hide && (ptsOn || (lineOn && g.cfg.showDots));
+    if (g.ovLine) g.ovLine.visible = !hide && lineOn;
+    if (g.ovPoints) g.ovPoints.visible = !hide && ptsOn;
+    needsRender = true;
+  }
+
+  /** 全层可见性统一裁决（含网格/校准；退出零重建） */
   function applyModeVis() {
     const s = curSettings;
     calGroup.visible = calibOn;
-    tailLine.visible = !calibOn && (!s || s.style !== "points");
-    tailPoints.visible = !calibOn && (!s || s.style !== "line");
-    ovLine.visible = !calibOn;
     gridGroup.visible = !calibOn && (!s || s.showGrid);
+    for (const g of gstates.values()) applyOneVis(g);
     if (calibOn) {
-      latestDot.visible = false;
+      for (const g of gstates.values()) g.dot.visible = false;
       measureGroup.visible = false;
     }
     needsRender = true;
@@ -1068,128 +1215,226 @@ export async function createScene(
   window.addEventListener("keyup", onFlightKeyUp);
   window.addEventListener("blur", onFlightBlur);
 
-  function uploadTail(from: number) {
-    if (dirtyFrom < 0 || from < dirtyFrom) dirtyFrom = from;
+  // ---------- 组缓冲追加 / 压实 / 平滑 / 重锚 ----------
+  let lastGridBuild = 0;
+  let gridSig = "";
+
+  function uploadTail(g: GState, from: number) {
+    if (g.dirtyFrom < 0 || from < g.dirtyFrom) g.dirtyFrom = from;
   }
-  function flushTail() {
-    if (dirtyFrom < 0) return;
-    const n = tCount - dirtyFrom;
+  function flushTail(g: GState) {
+    if (g.dirtyFrom < 0 || !g.posAttr || !g.aTimeAttr || !g.valAttr) return;
+    const n = g.tCount - g.dirtyFrom;
     if (n > 0) {
-      posAttr.clearUpdateRanges();
-      posAttr.addUpdateRange(dirtyFrom * 3, n * 3);
-      posAttr.needsUpdate = true;
-      aTimeAttr.clearUpdateRanges();
-      aTimeAttr.addUpdateRange(dirtyFrom, n);
-      aTimeAttr.needsUpdate = true;
-      valAttr.clearUpdateRanges();
-      valAttr.addUpdateRange(dirtyFrom, n);
-      valAttr.needsUpdate = true;
+      g.posAttr.clearUpdateRanges();
+      g.posAttr.addUpdateRange(g.dirtyFrom * 3, n * 3);
+      g.posAttr.needsUpdate = true;
+      g.aTimeAttr.clearUpdateRanges();
+      g.aTimeAttr.addUpdateRange(g.dirtyFrom, n);
+      g.aTimeAttr.needsUpdate = true;
+      g.valAttr.clearUpdateRanges();
+      g.valAttr.addUpdateRange(g.dirtyFrom, n);
+      g.valAttr.needsUpdate = true;
     }
-    dirtyFrom = -1;
+    g.dirtyFrom = -1;
   }
 
-  function ovAppendChunk(real: Float64Array, t: Float64Array, val: Float32Array, s: number, e: number) {
-    for (let i = s; i < e; i++) {
-      if (oCount >= OVERVIEW_CAP) ovHalve();
-      const j = oCount * 3;
-      oPos[j] = (real[i * 3] - anchor[0]) * scaleVec[0];
-      oPos[j + 1] = (real[i * 3 + 1] - anchor[1]) * scaleVec[1];
-      oPos[j + 2] = (real[i * 3 + 2] - anchor[2]) * scaleVec[2];
-      oReal[j] = real[i * 3];
-      oReal[j + 1] = real[i * 3 + 1];
-      oReal[j + 2] = real[i * 3 + 2];
-      oT[oCount] = t[i];
-      oVal[oCount] = val[i];
-      oCount++;
+  /** 滑动平均几何重写（P87a）：从真实值副列算平滑位置写入归一化主列。
+   *  pick/测量/导出读副列原始值——平滑只影响视觉。win≤1 或 smooth=none = 直接归一化。
+   *  尾部半窗处的点因右侧数据未到暂用收缩窗（后续批次到达时经重写区间修正） */
+  function recomputeTailPos(g: GState, from: number) {
+    if (!g.tPos || !g.tReal) return;
+    const h = g.cfg.mode === "line" && g.cfg.smooth === "movingAvg" ? (g.cfg.smoothWin - 1) / 2 : 0;
+    const n = g.tCount;
+    const lo = Math.max(0, from);
+    for (let i = lo; i < n; i++) {
+      let sx = 0;
+      let sy = 0;
+      let sz = 0;
+      let cnt = 0;
+      const a0 = Math.max(0, i - h);
+      const a1 = Math.min(n - 1, i + h);
+      for (let k = a0; k <= a1; k++) {
+        sx += g.tReal[k * 3];
+        sy += g.tReal[k * 3 + 1];
+        sz += g.tReal[k * 3 + 2];
+        cnt++;
+      }
+      const j = i * 3;
+      g.tPos[j] = (sx / cnt - anchor[0]) * scaleVec[0];
+      g.tPos[j + 1] = (sy / cnt - anchor[1]) * scaleVec[1];
+      g.tPos[j + 2] = (sz / cnt - anchor[2]) * scaleVec[2];
     }
-    ovPosAttr.clearUpdateRanges();
-    ovPosAttr.addUpdateRange(0, oCount * 3);
-    ovPosAttr.needsUpdate = true;
-    ovGeo.setDrawRange(0, oCount);
+    if (n > lo) uploadTail(g, lo);
+  }
+
+  /** 尾窗满 → 最老一半压入全景（含逐组 maxPoints 上限判定），剩余前移。
+   *  注意 posAttr/valAttr 与 tPos/tVal 共享同一底层数组，只搬一次 */
+  function compactTail(g: GState) {
+    if (!g.tReal || !g.tT || !g.tVal || !g.tPos || !g.aTimeAttr) return;
+    const half = TAIL_CAP >> 1;
+    ovPushChunk(g, 0, half);
+    g.tPos.copyWithin(0, half * 3, g.tCount * 3);
+    g.tReal.copyWithin(0, half * 3, g.tCount * 3);
+    (g.aTimeAttr.array as Float32Array).copyWithin(0, half, g.tCount);
+    g.tT.copyWithin(0, half, g.tCount);
+    g.tVal.copyWithin(0, half, g.tCount);
+    g.tCount -= half;
+    g.dirtyFrom = 0;
+    scanGroupBB(g);
+    unionBBox();
+    recomputeTailPos(g, 0); // 平移后几何位置全重算（窗口边界改变；O(tail) 半窗均摊）
+  }
+
+  function ovPushChunk(g: GState, s: number, e: number) {
+    if (!g.oPos || !g.oReal || !g.oT || !g.oVal || !g.tReal || !g.tT || !g.tVal) return;
+    for (let i = s; i < e; i++) {
+      if (g.oCount >= OVERVIEW_CAP) ovHalve(g);
+      const j = g.oCount * 3;
+      g.oPos[j] = (g.tReal[i * 3] - anchor[0]) * scaleVec[0];
+      g.oPos[j + 1] = (g.tReal[i * 3 + 1] - anchor[1]) * scaleVec[1];
+      g.oPos[j + 2] = (g.tReal[i * 3 + 2] - anchor[2]) * scaleVec[2];
+      g.oReal[j] = g.tReal[i * 3];
+      g.oReal[j + 1] = g.tReal[i * 3 + 1];
+      g.oReal[j + 2] = g.tReal[i * 3 + 2];
+      g.oT[g.oCount] = g.tT[i];
+      g.oVal[g.oCount] = g.tVal[i];
+      g.oCount++;
+    }
+    if (g.ovPosAttr) {
+      g.ovPosAttr.clearUpdateRanges();
+      g.ovPosAttr.addUpdateRange(0, g.oCount * 3);
+      g.ovPosAttr.needsUpdate = true;
+    }
+    g.ovGeo?.setDrawRange(0, g.oCount);
   }
 
   /** 全景满 → 2:1 对数减半（保留末点），全程形状不丢 */
-  function ovHalve() {
+  function ovHalve(g: GState) {
+    if (!g.oPos || !g.oReal || !g.oT || !g.oVal) return;
     let j = 0;
-    for (let i = 0; i < oCount; i += 2) {
-      if (i !== oCount - 1 || oCount % 2 === 1) {
+    for (let i = 0; i < g.oCount; i += 2) {
+      if (i !== g.oCount - 1 || g.oCount % 2 === 1) {
         const s3 = i * 3;
         const d3 = j * 3;
-        oPos[d3] = oPos[s3];
-        oPos[d3 + 1] = oPos[s3 + 1];
-        oPos[d3 + 2] = oPos[s3 + 2];
-        oReal[d3] = oReal[s3];
-        oReal[d3 + 1] = oReal[s3 + 1];
-        oReal[d3 + 2] = oReal[s3 + 2];
-        oT[j] = oT[i];
-        oVal[j] = oVal[i];
+        g.oPos[d3] = g.oPos[s3];
+        g.oPos[d3 + 1] = g.oPos[s3 + 1];
+        g.oPos[d3 + 2] = g.oPos[s3 + 2];
+        g.oReal[d3] = g.oReal[s3];
+        g.oReal[d3 + 1] = g.oReal[s3 + 1];
+        g.oReal[d3 + 2] = g.oReal[s3 + 2];
+        g.oT[j] = g.oT[i];
+        g.oVal[j] = g.oVal[i];
         j++;
       }
     }
     // 强制保留末点（连续性）
-    if (oT[j - 1] !== oT[oCount - 1]) {
-      const s3 = (oCount - 1) * 3;
+    if (g.oT[j - 1] !== g.oT[g.oCount - 1]) {
+      const s3 = (g.oCount - 1) * 3;
       const d3 = j * 3;
-      oPos[d3] = oPos[s3];
-      oPos[d3 + 1] = oPos[s3 + 1];
-      oPos[d3 + 2] = oPos[s3 + 2];
-      oReal[d3] = oReal[s3];
-      oReal[d3 + 1] = oReal[s3 + 1];
-      oReal[d3 + 2] = oReal[s3 + 2];
-      oT[j] = oT[oCount - 1];
-      oVal[j] = oVal[oCount - 1];
+      g.oPos[d3] = g.oPos[s3];
+      g.oPos[d3 + 1] = g.oPos[s3 + 1];
+      g.oPos[d3 + 2] = g.oPos[s3 + 2];
+      g.oReal[d3] = g.oReal[s3];
+      g.oReal[d3 + 1] = g.oReal[s3 + 1];
+      g.oReal[d3 + 2] = g.oReal[s3 + 2];
+      g.oT[j] = g.oT[g.oCount - 1];
+      g.oVal[j] = g.oVal[g.oCount - 1];
       j++;
     }
-    oCount = j;
+    g.oCount = j;
   }
 
-  function recomputeBBox(fromTail: number, fromOv: number) {
-    bbMin[0] = bbMin[1] = bbMin[2] = Infinity;
-    bbMax[0] = bbMax[1] = bbMax[2] = -Infinity;
-    const scan = (real: Float64Array, s: number, e: number) => {
-      for (let i = s; i < e; i++) {
+  /** 组 maxPoints 上限（P87a 弹窗「最大点数」）：先弃全景最老段，再弃尾窗最老段。
+   *  全景数组前移 O(n) 仅在越限瞬间发生（每批最多一次），非逐点 shift */
+  function trimGroupMax(g: GState) {
+    const cap = g.cfg.maxPoints;
+    if (!cap || !g.oPos || !g.oReal || !g.oT || !g.oVal) return;
+    let over = g.tCount + g.oCount - cap;
+    while (over > 0 && g.oCount > 0) {
+      const drop = Math.min(over, Math.max(1, g.oCount >> 1));
+      g.oPos.copyWithin(0, drop * 3, g.oCount * 3);
+      g.oReal.copyWithin(0, drop * 3, g.oCount * 3);
+      g.oT.copyWithin(0, drop, g.oCount);
+      g.oVal.copyWithin(0, drop, g.oCount);
+      g.oCount -= drop;
+      over -= drop;
+    }
+    if (over > 0 && g.tPos && g.tReal && g.tT && g.tVal) {
+      const drop = Math.min(over, g.tCount);
+      g.tPos.copyWithin(0, drop * 3, g.tCount * 3);
+      g.tReal.copyWithin(0, drop * 3, g.tCount * 3);
+      (g.aTimeAttr!.array as Float32Array).copyWithin(0, drop, g.tCount);
+      g.tT.copyWithin(0, drop, g.tCount);
+      g.tVal.copyWithin(0, drop, g.tCount);
+      g.tCount -= drop;
+      g.dirtyFrom = 0;
+      scanGroupBB(g);
+    }
+    if (g.ovPosAttr && g.oCount >= 0) {
+      g.ovPosAttr.clearUpdateRanges();
+      g.ovPosAttr.addUpdateRange(0, g.oCount * 3);
+      g.ovPosAttr.needsUpdate = true;
+    }
+    g.ovGeo?.setDrawRange(0, g.oCount);
+  }
+
+  function scanGroupBB(g: GState) {
+    g.bbMin = [Infinity, Infinity, Infinity];
+    g.bbMax = [-Infinity, -Infinity, -Infinity];
+    const scan = (real: Float64Array | null, e: number) => {
+      if (!real) return;
+      for (let i = 0; i < e; i++) {
         for (let a = 0; a < 3; a++) {
           const v = real[i * 3 + a];
-          if (v < bbMin[a]) bbMin[a] = v;
-          if (v > bbMax[a]) bbMax[a] = v;
+          if (v < g.bbMin[a]) g.bbMin[a] = v;
+          if (v > g.bbMax[a]) g.bbMax[a] = v;
         }
       }
     };
-    scan(oReal, fromOv, oCount);
-    scan(tReal, fromTail, tCount);
+    scan(g.oReal, g.oCount);
+    scan(g.tReal, g.tCount);
   }
 
   function rewriteNorm() {
-    for (let i = 0; i < oCount; i++) {
-      const j = i * 3;
-      oPos[j] = (oReal[j] - anchor[0]) * scaleVec[0];
-      oPos[j + 1] = (oReal[j + 1] - anchor[1]) * scaleVec[1];
-      oPos[j + 2] = (oReal[j + 2] - anchor[2]) * scaleVec[2];
-    }
-    for (let i = 0; i < tCount; i++) {
-      const j = i * 3;
-      tPos[j] = (tReal[j] - anchor[0]) * scaleVec[0];
-      tPos[j + 1] = (tReal[j + 1] - anchor[1]) * scaleVec[1];
-      tPos[j + 2] = (tReal[j + 2] - anchor[2]) * scaleVec[2];
+    for (const g of gstates.values()) {
+      if (!g.tReal || !g.oReal) continue;
+      for (let i = 0; i < g.oCount; i++) {
+        const j = i * 3;
+        g.oPos![j] = (g.oReal[j] - anchor[0]) * scaleVec[0];
+        g.oPos![j + 1] = (g.oReal[j + 1] - anchor[1]) * scaleVec[1];
+        g.oPos![j + 2] = (g.oReal[j + 2] - anchor[2]) * scaleVec[2];
+      }
+      recomputeTailPos(g, 0);
+      // 立即上传：静态数据下切设置（逐轴缩放/平滑）不能等下一批数据才刷 GPU
+      if (g.ovPosAttr) {
+        g.ovPosAttr.clearUpdateRanges();
+        g.ovPosAttr.addUpdateRange(0, g.oCount * 3);
+        g.ovPosAttr.needsUpdate = true;
+      }
+      flushTail(g);
     }
     rewriteCalibNorm();
-    ovPosAttr.clearUpdateRanges();
-    ovPosAttr.addUpdateRange(0, oCount * 3);
-    ovPosAttr.needsUpdate = true;
-    posAttr.clearUpdateRanges();
-    posAttr.addUpdateRange(0, tCount * 3);
-    posAttr.needsUpdate = true;
     if (measureA && measureB) drawMeasure(); // 重锚后按新归一化重画测量线
   }
 
+  function totalPoints(): number {
+    let n = 0;
+    for (const g of gstates.values()) n += g.tCount + g.oCount;
+    return n;
+  }
+
   function maybeReanchor(forceGrid: boolean) {
-    if (tCount + oCount === 0) return;
+    if (totalPoints() === 0 && !hasLiveMarker()) return;
     const ext = Math.max(
       bbMax[0] - bbMin[0],
       bbMax[1] - bbMin[1],
       bbMax[2] - bbMin[2],
     );
-    if (!isFinite(ext)) return;
+    if (!isFinite(ext)) {
+      // 只有 point 模式无缓冲时包围盒为空：用 latest 并集维持锚定（首点即锚）
+      return;
+    }
     const cx = (bbMin[0] + bbMax[0]) / 2;
     const cy = (bbMin[1] + bbMax[1]) / 2;
     const cz = (bbMin[2] + bbMax[2]) / 2;
@@ -1225,117 +1470,135 @@ export async function createScene(
     needsRender = true;
   }
 
+  function hasLiveMarker(): boolean {
+    for (const g of gstates.values()) if (g.latest) return true;
+    return false;
+  }
+
   function axisFieldNames(): [string, string, string] {
     const find = (id: string) => curChans.find((c) => c.id === id)?.name ?? "";
-    return [
-      find(curSettings?.axisX ?? ""),
-      find(curSettings?.axisY ?? ""),
-      find(curSettings?.axisZ ?? ""),
-    ];
+    const g1 = curSettings?.groups[0];
+    return [find(g1?.chX ?? ""), find(g1?.chY ?? ""), find(g1?.chZ ?? "")];
+  }
+
+  /** 首批数据（任意组首次）→ 建立锚定；后续批次增量维护并集 */
+  function firstAnchorFromBatch(b: Plot3DBatch) {
+    const mn = [Infinity, Infinity, Infinity];
+    const mx = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < b.t.length; i++) {
+      const vs = [b.x[i], b.y[i], b.z[i]];
+      for (let a = 0; a < 3; a++) {
+        if (vs[a] < mn[a]) mn[a] = vs[a];
+        if (vs[a] > mx[a]) mx[a] = vs[a];
+      }
+    }
+    for (let a = 0; a < 3; a++) {
+      anchor[a] = (mn[a] + mx[a]) / 2;
+    }
+    baseExtent = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], 1e-9);
+    scale = (VIEW_HALF * 2) / baseExtent;
+    updateScaleVec(); // perAxis：首批即按三轴各自跨度撑满（uniform 下三值 = scale）
+  }
+
+  function clearGroup(g: GState) {
+    g.tCount = 0;
+    g.oCount = 0;
+    g.valMin = Infinity;
+    g.valMax = -Infinity;
+    g.tailGeo?.setDrawRange(0, 0);
+    g.ovGeo?.setDrawRange(0, 0);
+    g.dirtyFrom = -1;
+    g.latest = null;
+    g.dot.visible = false;
+    g.bbMin = [Infinity, Infinity, Infinity];
+    g.bbMax = [-Infinity, -Infinity, -Infinity];
+    if (measureA && measureA.gid === g.gid) measureA = null;
+    if (measureB && measureB.gid === g.gid) measureB = null;
+    drawMeasure();
   }
 
   // ---------- 对外接口 ----------
   const api: Plot3DScene = {
-    applyBatch(b, reloaded, cursorSec) {
-      if (reloaded) {
-        tCount = 0;
-        oCount = 0;
-        valMin = Infinity;
-        valMax = -Infinity;
-        tailGeo.setDrawRange(0, 0);
-        ovGeo.setDrawRange(0, 0);
-        latestDot.visible = false;
-        measureA = null;
-        measureB = null;
-        measureGroup.visible = false;
-        dirtyFrom = 0;
-        curCursorSec = null;
-        if (b.t.length === 0) {
-          applyCursor(cursorSec);
-          return;
-        }
+    applyBatch(entries, cursorSec) {
+      // 两遍处理：先清重灌组（firstData 判定必须在清空之后，与 P86 前单体行为
+      // 「清空后首批重建锚」严格等价），再逐组追加
+      let anyReloaded = false;
+      for (const { gid, reloaded } of entries) {
+        if (!reloaded) continue;
+        clearGroup(getG(gid));
+        anyReloaded = true;
       }
-      if (b.t.length === 0) {
+      let firstData = totalPoints() === 0 && !hasLiveMarker();
+      let anyData = false;
+      for (const { gid, b } of entries) {
+        if (b.t.length === 0) continue;
+        const g = getG(gid);
+        const li = b.t.length - 1;
+        g.latest = { t: b.t[li], x: b.x[li], y: b.y[li], z: b.z[li] };
+        g.lastT = b.t[li];
+        anyData = true;
+        if (firstData) {
+          firstAnchorFromBatch(b);
+          firstData = false;
+          rewriteCalibNorm(); // 清空轨迹后重锚：校准点云随新锚重写，避免滞留旧坐标系
+        }
+        // point 模式：零缓冲红线——只留 latest 标记 + 单点包围盒（详设 §7）
+        if (g.cfg.mode === "point") {
+          for (let a = 0; a < 3; a++) {
+            const v = a === 0 ? b.x[li] : a === 1 ? b.y[li] : b.z[li];
+            if (v < g.bbMin[a]) g.bbMin[a] = v;
+            if (v > g.bbMax[a]) g.bbMax[a] = v;
+          }
+          unionBBox();
+          continue;
+        }
+        ensureLayers(g);
+        if (!g.tReal || !g.tPos || !g.tT || !g.tVal || !g.aTimeAttr) continue;
+        for (let i = 0; i < b.t.length; i++) {
+          if (g.tCount >= TAIL_CAP) compactTail(g);
+          const j = g.tCount * 3;
+          const rx = b.x[i];
+          const ry = b.y[i];
+          const rz = b.z[i];
+          g.tReal[j] = rx;
+          g.tReal[j + 1] = ry;
+          g.tReal[j + 2] = rz;
+          g.tT[g.tCount] = b.t[i];
+          (g.aTimeAttr.array as Float32Array)[g.tCount] = b.t[i];
+          g.tVal[g.tCount] = b.val[i];
+          if (b.val[i] < g.valMin) g.valMin = b.val[i];
+          if (b.val[i] > g.valMax) g.valMax = b.val[i];
+          for (let a = 0; a < 3; a++) {
+            const v = a === 0 ? rx : a === 1 ? ry : rz;
+            if (v < g.bbMin[a]) g.bbMin[a] = v;
+            if (v > g.bbMax[a]) g.bbMax[a] = v;
+          }
+          g.tCount++;
+        }
+        unionBBox();
+        const half = g.cfg.smooth === "movingAvg" ? (g.cfg.smoothWin - 1) / 2 : 0;
+        const from = Math.max(0, g.tCount - b.t.length - half - 1);
+        recomputeTailPos(g, from);
+        trimGroupMax(g);
+        unionBBox();
+      }
+      if (!anyReloaded && !anyData) {
         // 空批次 + 游标变化（如回放 seek 向后：重灌点全 ≤ 水位）→ 仅更新游标
         applyCursor(cursorSec);
         return;
       }
-
-      const firstData = tCount === 0 && oCount === 0;
-      // 首批数据 → 建立锚定
-      if (firstData) {
-        const mn = [Infinity, Infinity, Infinity];
-        const mx = [-Infinity, -Infinity, -Infinity];
-        for (let i = 0; i < b.t.length; i++) {
-          const vs = [b.x[i], b.y[i], b.z[i]];
-          for (let a = 0; a < 3; a++) {
-            if (vs[a] < mn[a]) mn[a] = vs[a];
-            if (vs[a] > mx[a]) mx[a] = vs[a];
-          }
+      // 全局时钟：uSpan 用各组最新末点的最大相对秒（游标截断在 applyCursor 处理 uNow）
+      let globalLastT = 0;
+      for (const g of gstates.values()) if (g.lastT > globalLastT) globalLastT = g.lastT;
+      for (const g of gstates.values()) {
+        g.uniforms.uSpan.value = Math.max(globalLastT, 1e-3);
+        if (isFinite(g.valMin) && isFinite(g.valMax)) {
+          g.uniforms.uValMin.value = g.valMin;
+          g.uniforms.uValMax.value = g.valMax;
         }
-        for (let a = 0; a < 3; a++) {
-          anchor[a] = (mn[a] + mx[a]) / 2;
-          bbMin[a] = mn[a];
-          bbMax[a] = mx[a];
-        }
-        baseExtent = Math.max(
-          mx[0] - mn[0],
-          mx[1] - mn[1],
-          mx[2] - mn[2],
-          1e-9,
-        );
-        scale = (VIEW_HALF * 2) / baseExtent;
-        updateScaleVec(); // perAxis：首批即按三轴各自跨度撑满（uniform 下三值 = scale）
-        rewriteCalibNorm(); // 清空轨迹后重锚：校准点云随新锚重写，避免滞留旧坐标系
       }
-
-      for (let i = 0; i < b.t.length; i++) {
-        if (tCount >= TAIL_CAP) {
-          // 尾窗满：最老一半压入全景，剩余前移（单次 copyWithin，非逐点 shift）
-          const half = TAIL_CAP >> 1;
-          ovAppendChunk(tReal, tT, tVal, 0, half);
-          tPos.copyWithin(0, half * 3, tCount * 3);
-          tReal.copyWithin(0, half * 3, tCount * 3);
-          aTimeArr.copyWithin(0, half, tCount);
-          tT.copyWithin(0, half, tCount);
-          tVal.copyWithin(0, half, tCount);
-          tCount -= half;
-          dirtyFrom = 0;
-          recomputeBBox(0, 0);
-        }
-        const j = tCount * 3;
-        const rx = b.x[i];
-        const ry = b.y[i];
-        const rz = b.z[i];
-        tReal[j] = rx;
-        tReal[j + 1] = ry;
-        tReal[j + 2] = rz;
-        tPos[j] = (rx - anchor[0]) * scaleVec[0];
-        tPos[j + 1] = (ry - anchor[1]) * scaleVec[1];
-        tPos[j + 2] = (rz - anchor[2]) * scaleVec[2];
-        tT[tCount] = b.t[i];
-        aTimeArr[tCount] = b.t[i];
-        tVal[tCount] = b.val[i];
-        if (b.val[i] < valMin) valMin = b.val[i];
-        if (b.val[i] > valMax) valMax = b.val[i];
-        for (let a = 0; a < 3; a++) {
-          const v = a === 0 ? rx : a === 1 ? ry : rz;
-          if (v < bbMin[a]) bbMin[a] = v;
-          if (v > bbMax[a]) bbMax[a] = v;
-        }
-        tCount++;
-        uploadTail(tCount - 1);
-      }
-
-      lastT = b.t[b.t.length - 1];
-      uniforms.uNow.value = lastT;
-      uniforms.uSpan.value = Math.max(lastT, 1e-3);
-      if (isFinite(valMin) && isFinite(valMax)) {
-        uniforms.uValMin.value = valMin;
-        uniforms.uValMax.value = valMax;
-      }
-      maybeReanchor(firstData);
-      flushTail();
+      maybeReanchor(anyReloaded);
+      for (const g of gstates.values()) flushTail(g);
       // 游标收尾：null = 恢复全量（与上面 uNow/drawRange 一致）；数值 = 覆盖截断
       applyCursor(cursorSec);
     },
@@ -1345,17 +1608,45 @@ export async function createScene(
       curSettings = s;
       curChans = chans;
       curAccent = accent;
+      for (const cfg of s.groups) {
+        const g = getG(cfg.id);
+        const prevMode = g.cfg.mode;
+        g.cfg = { ...cfg };
+        g.uniforms.uMode.value = toModeVal(cfg);
+        g.uniforms.uW.value = cfg.fade;
+        g.uniforms.uPtSize.value = cfg.pointSize;
+        g.uniforms.uOpacity.value = cfg.opacity;
+        g.uniforms.uColor.value.set(cfg.color);
+        g.uniforms.uPalette.value = cbSafe ? 1 : 0;
+        g.uniforms.uBg.value.copy(bgColor);
+        (g.dot.material as THREE_NS.SpriteMaterial).color.set(cfg.color);
+        (g.dot.material as THREE_NS.SpriteMaterial).opacity =
+          cfg.mode === "point" ? cfg.opacity : 1;
+        g.dot.scale.setScalar(cfg.mode === "point" ? 0.045 + cfg.pointSize * 0.012 : 0.06);
+        if (g.ovLine) {
+          (g.ovLine.material as THREE_NS.LineBasicMaterial).color.set(cfg.color);
+        }
+        if (g.ovPoints) {
+          (g.ovPoints.material as THREE_NS.PointsMaterial).color.set(cfg.color);
+        }
+        if (cfg.mode === "point" && prevMode !== "point") {
+          // 组切换到实时定位：清空该组缓冲（零历史内存语义）
+          clearGroup(g);
+        } else if (cfg.maxPoints > 0 && g.tCount + g.oCount > cfg.maxPoints) {
+          // 静态数据下调小「最大点数」也要立即生效（不等下一批追加）
+          trimGroupMax(g);
+          unionBBox();
+        }
+        applyOneVis(g);
+      }
       // P75 B2：等比/逐轴切换 → 重算逐轴缩放并全量重写归一化坐标
       // （updateScaleVec 须先于 rebuildGrid：网格线端点同样经 toN 映射）
-      if (prevAxisScale !== s.axisScale && (tCount > 0 || oCount > 0)) {
+      if (prevAxisScale !== s.axisScale && (totalPoints() > 0 || hasLiveMarker())) {
         updateScaleVec();
         rewriteNorm();
       }
       calMat.color.set(accent); // 校准点云/线框随主题 accent
       (calWire.material as THREE_NS.LineBasicMaterial).color.set(accent);
-      uniforms.uW.value = s.fade;
-      uniforms.uMode.value = s.colorBy === "ch" ? 1 : 0;
-      uniforms.uPalette.value = cbSafe ? 1 : 0;
       controls.autoRotate = s.autoRotate;
       controls.autoRotateSpeed = 1.2;
       controls.zoomToCursor = s.zoomToCursor; // P72：滚轮缩放到光标（three r151+ 原生支持）
@@ -1366,10 +1657,9 @@ export async function createScene(
 
     applyTheme() {
       const bg = new T3.Color(cssVar("--bg-inset", "#0b0d10"));
-      uniforms.uBg.value.copy(bg);
+      bgColor.copy(bg);
       scene.background = bg;
-      const ovCol = new T3.Color(cssVar("--text-dim", "#8b93a1"));
-      ovMat.color.copy(ovCol);
+      for (const g of gstates.values()) g.uniforms.uBg.value.copy(bg);
       if (curChans.length) {
         rebuildGrid(axisFieldNames(), curAccent);
       }
@@ -1411,12 +1701,8 @@ export async function createScene(
     },
 
     focusLatest() {
-      if (tCount === 0) return;
-      const p = new T3.Vector3(
-        tPos[(tCount - 1) * 3],
-        tPos[(tCount - 1) * 3 + 1],
-        tPos[(tCount - 1) * 3 + 2],
-      );
+      const p = followAnchor();
+      if (!p) return;
       tween = {
         p0: camera.position.clone(),
         p1: camera.position.clone(),
@@ -1438,6 +1724,32 @@ export async function createScene(
         p1: camera.position.clone(),
         t0v: controls.target.clone(),
         t1v: p,
+        start: performance.now(),
+        dur: 400,
+      };
+    },
+
+    focusGroup(gid) {
+      const g = gstates.get(gid);
+      if (!g) return;
+      const hasBuf = g.tCount + g.oCount > 0;
+      const c = hasBuf
+        ? [
+            (g.bbMin[0] + g.bbMax[0]) / 2,
+            (g.bbMin[1] + g.bbMax[1]) / 2,
+            (g.bbMin[2] + g.bbMax[2]) / 2,
+          ]
+        : g.latest
+          ? [g.latest.x, g.latest.y, g.latest.z]
+          : null;
+      if (!c) return;
+      const tgt = new T3.Vector3(toN(c[0], 0), toN(c[1], 1), toN(c[2], 2));
+      const off = camera.position.clone().sub(controls.target);
+      tween = {
+        p0: camera.position.clone(),
+        p1: tgt.clone().add(off),
+        t0v: controls.target.clone(),
+        t1v: tgt,
         start: performance.now(),
         dur: 400,
       };
@@ -1555,26 +1867,30 @@ export async function createScene(
       return renderer.domElement.toDataURL("image/png");
     },
 
-    clearTrajectory() {
-      tCount = 0;
-      oCount = 0;
-      valMin = Infinity;
-      valMax = -Infinity;
-      tailGeo.setDrawRange(0, 0);
-      ovGeo.setDrawRange(0, 0);
-      latestDot.visible = false;
-      measureA = null;
-      measureB = null;
-      measureGroup.visible = false;
-      bbMin[0] = bbMin[1] = bbMin[2] = Infinity;
-      bbMax[0] = bbMax[1] = bbMax[2] = -Infinity;
-      uniforms.uNow.value = 0;
-      uniforms.uSpan.value = 1;
+    clearTrajectory(gid) {
+      if (gid) {
+        const g = gstates.get(gid);
+        if (g) {
+          clearGroup(g);
+          scanGroupBB(g);
+        }
+      } else {
+        for (const g of gstates.values()) clearGroup(g);
+        for (let a = 0; a < 3; a++) {
+          bbMin[a] = Infinity;
+          bbMax[a] = -Infinity;
+        }
+      }
+      unionBBox();
+      for (const g of gstates.values()) {
+        g.uniforms.uNow.value = 0;
+        g.uniforms.uSpan.value = 1;
+      }
       needsRender = true;
     },
 
     pick(px, py) {
-      if (tCount + oCount === 0) return null;
+      if (totalPoints() === 0) return null;
       camera.updateMatrixWorld();
       const rect = renderer.domElement.getBoundingClientRect();
       const vp = new T3.Matrix4().multiplyMatrices(
@@ -1582,76 +1898,93 @@ export async function createScene(
         camera.matrixWorldInverse,
       );
       const v = new T3.Vector4();
-      const search = (
-        pos: Float32Array,
-        count: number,
-      ): { idx: number; d: number } | null => {
-        if (count === 0) return null;
-        const stride = Math.max(1, Math.floor(count / 1200));
-        let best = -1;
-        let bd = Infinity;
-        for (let i = 0; i < count; i += stride) {
-          v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 1).applyMatrix4(vp);
-          if (v.w <= 0) continue;
-          const sx = ((v.x / v.w + 1) / 2) * rect.width + rect.left;
-          const sy = ((1 - (v.y / v.w + 1) / 2) * rect.height) + rect.top;
-          const dx = sx - px;
-          const dy = sy - py;
-          const d = dx * dx + dy * dy;
-          if (d < bd) {
-            bd = d;
-            best = i;
+      let best: { g: GState; inOv: boolean; idx: number; d: number } | null = null;
+      for (const g of gstates.values()) {
+        if (!g.cfg.visible || g.cfg.mode === "point") continue;
+        const search = (
+          pos: Float32Array | null,
+          count: number,
+          inOv: boolean,
+        ) => {
+          if (!pos || count === 0) return;
+          // 游标截断范围内才可命中（与 drawRange 一致）
+          const n =
+            curCursorSec === null
+              ? count
+              : lowerBoundLe(inOv ? g.oT! : g.tT!, count, curCursorSec);
+          if (n === 0) return;
+          const stride = Math.max(1, Math.floor(n / 1200));
+          let local = -1;
+          let bd = Infinity;
+          for (let i = 0; i < n; i += stride) {
+            v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 1).applyMatrix4(vp);
+            if (v.w <= 0) continue;
+            const sx = ((v.x / v.w + 1) / 2) * rect.width + rect.left;
+            const sy = ((1 - (v.y / v.w + 1) / 2) * rect.height) + rect.top;
+            const dx = sx - px;
+            const dy = sy - py;
+            const d = dx * dx + dy * dy;
+            if (d < bd) {
+              bd = d;
+              local = i;
+            }
           }
-        }
-        if (best < 0) return null;
-        // 邻域精化
-        const lo = Math.max(0, best - stride);
-        const hi = Math.min(count - 1, best + stride);
-        for (let i = lo; i <= hi; i++) {
-          v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 1).applyMatrix4(vp);
-          if (v.w <= 0) continue;
-          const sx = ((v.x / v.w + 1) / 2) * rect.width + rect.left;
-          const sy = ((1 - (v.y / v.w + 1) / 2) * rect.height) + rect.top;
-          const dx = sx - px;
-          const dy = sy - py;
-          const d = dx * dx + dy * dy;
-          if (d < bd) {
-            bd = d;
-            best = i;
+          if (local < 0) return;
+          // 邻域精化
+          const lo = Math.max(0, local - stride);
+          const hi = Math.min(n - 1, local + stride);
+          for (let i = lo; i <= hi; i++) {
+            v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], 1).applyMatrix4(vp);
+            if (v.w <= 0) continue;
+            const sx = ((v.x / v.w + 1) / 2) * rect.width + rect.left;
+            const sy = ((1 - (v.y / v.w + 1) / 2) * rect.height) + rect.top;
+            const dx = sx - px;
+            const dy = sy - py;
+            const d = dx * dx + dy * dy;
+            if (d < bd) {
+              bd = d;
+              local = i;
+            }
           }
+          const d = Math.sqrt(bd);
+          if (d > 14) return;
+          if (!best || d < best.d) best = { g, inOv, idx: local, d };
+        };
+        if (best) {
+          const b0 = best as { g: GState; inOv: boolean; idx: number; d: number };
+          if (b0.d <= 2) continue; // 已近中：其余层只做同层竞争，省一半投影
         }
-        return { idx: best, d: Math.sqrt(bd) };
-      };
-      const tHit = search(tPos, tCount);
-      const oHit = search(oPos, oCount);
-      const useOv =
-        oHit !== null && (tHit === null || oHit.d < tHit.d) && oHit.d <= 14;
-      const hit = useOv ? oHit : tHit;
-      if (!hit || hit.d > 14) return null;
-      const inOv = useOv;
-      const i = hit.idx;
-      const real: [number, number, number] = inOv
-        ? [oReal[i * 3], oReal[i * 3 + 1], oReal[i * 3 + 2]]
-        : [tReal[i * 3], tReal[i * 3 + 1], tReal[i * 3 + 2]];
-      v.set(
-        inOv ? oPos[i * 3] : tPos[i * 3],
-        inOv ? oPos[i * 3 + 1] : tPos[i * 3 + 1],
-        inOv ? oPos[i * 3 + 2] : tPos[i * 3 + 2],
-        1,
-      ).applyMatrix4(vp);
+        search(g.tPos, g.tCount, false);
+        search(g.oPos, g.oCount, true);
+      }
+      const hit = best as { g: GState; inOv: boolean; idx: number; d: number } | null;
+      if (!hit) return null;
+      const { g, inOv, idx: i } = hit;
+      const realSrc = inOv ? g.oReal! : g.tReal!;
+      const posSrc = inOv ? g.oPos! : g.tPos!;
+      const tSrc = inOv ? g.oT! : g.tT!;
+      const valSrc = inOv ? g.oVal! : g.tVal!;
+      const real: [number, number, number] = [realSrc[i * 3], realSrc[i * 3 + 1], realSrc[i * 3 + 2]];
+      v.set(posSrc[i * 3], posSrc[i * 3 + 1], posSrc[i * 3 + 2], 1).applyMatrix4(vp);
       const sx = ((v.x / v.w + 1) / 2) * rect.width + rect.left;
       const sy = (1 - (v.y / v.w + 1) / 2) * rect.height + rect.top;
       return {
-        tSec: inOv ? oT[i] : tT[i],
+        tSec: tSrc[i],
         real,
-        val: inOv ? oVal[i] : tVal[i],
+        val: valSrc[i],
         screen: [sx, sy],
         distPx: hit.d,
+        gid: g.gid,
       };
     },
 
     stats() {
-      return { tail: tCount, overview: oCount, fps };
+      const out = {} as Record<GroupId, GroupStats>;
+      for (const id of GROUP_ID_LIST) {
+        const g = gstates.get(id);
+        out[id] = g ? { tail: g.tCount, overview: g.oCount } : { tail: 0, overview: 0 };
+      }
+      return { groups: out, fps };
     },
 
     dispose() {

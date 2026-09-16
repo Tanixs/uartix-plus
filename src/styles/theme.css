@@ -7115,6 +7115,64 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
 .p3d-a6-ico svg { width: 12px; height: 12px; display: block; margin: 0 auto; }
 .p3d-a6-ico { display: inline-flex; align-items: center; justify-content: center; height: 14px; }
 
+/* ======================================================================
+   P87a：三组轨迹托盘 + 组设置弹层（.fc-dlg 骨架复用，p3d 专属件在此）
+   ====================================================================== */
+.p3d-groups { flex-direction: column; align-items: stretch; gap: 3px; max-width: min(380px, calc(100% - 240px)); }
+.p3d-grp-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+}
+.p3d-grp-row:hover { border-color: var(--border); }
+.p3d-grp-row.off .p3d-grp-name, .p3d-grp-row.off .p3d-grp-mode, .p3d-grp-row.off .p3d-grp-dot { opacity: 0.4; }
+.p3d-grp-row.unbound .p3d-grp-dot { outline: 1px dashed var(--border); outline-offset: 2px; }
+.p3d-grp-eye {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; flex: none;
+  border: none; background: none; cursor: pointer; padding: 0;
+  color: var(--text-dim); border-radius: 4px;
+}
+.p3d-grp-eye:hover { color: var(--text); background: var(--bg-inset); }
+.p3d-grp-eye.on { color: var(--accent, #4e9cef); }
+.p3d-grp-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.p3d-grp-name { font-size: 11px; color: var(--text); max-width: 60px; overflow: hidden; text-overflow: ellipsis; }
+.p3d-grp-mode { font-size: 10px; color: var(--text-dim); flex: none; }
+.p3d-grp-ax { width: 64px; height: 22px; font-size: 10.5px; padding: 0 3px; }
+.p3d-grp-ax.ax-x { border-left: 2px solid #e05252; }
+.p3d-grp-ax.ax-y { border-left: 2px solid #4caf50; }
+.p3d-grp-ax.ax-z { border-left: 2px solid #4e9cef; }
+.p3d-grp-ax.bound { color: var(--text); }
+.p3d-grp-gear {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex: none; margin-left: auto;
+  border: 1px solid var(--border); background: var(--bg-inset);
+  color: var(--text-dim); border-radius: 5px; cursor: pointer; padding: 0;
+}
+.p3d-grp-gear:hover { color: var(--accent, #4e9cef); border-color: var(--accent, #4e9cef); }
+.p3d-mi-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+.p3d-mi-note { margin-top: 6px; line-height: 1.45; white-space: normal; }
+.p3d-calib-src { font-size: 10.5px; font-weight: 400; color: var(--text-dim); }
+/* 组设置弹层（骨架复用 .fc-dlg/.fc-dlg-row/.fc-dlg-colors/.fc-dlg-foot） */
+.p3d-gdlg { width: min(560px, calc(100% - 32px)); }
+.p3d-gdlg-axes { display: flex; gap: 6px; flex-wrap: wrap; }
+.p3d-gdlg-ax { display: inline-flex; align-items: center; gap: 4px; }
+.p3d-gdlg-ax b { font-size: 11px; width: 12px; text-align: center; }
+.p3d-gdlg-ax .input { width: 128px; }
+.p3d-gdlg-inline2 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.p3d-gdlg-inline2 .input { flex: 1 1 120px; min-width: 90px; }
+.p3d-gdlg-inline2 input[type="range"] { flex: 0 1 120px; min-width: 70px; accent-color: var(--accent, #4e9cef); }
+.p3d-gdlg-num { font-family: var(--font-mono); font-size: 11px; color: var(--text); min-width: 34px; }
+.p3d-gdlg-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
+.p3d-gdlg textarea.input { resize: vertical; font-size: 12px; padding: 6px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-inset); color: var(--text); outline: none; width: 100%; }
+.p3d-gdlg textarea.input:focus { border-color: var(--accent); }
+
 /* ============ P78a 交互式教学引导 ============ */
 .tour-mask {
   position: fixed;

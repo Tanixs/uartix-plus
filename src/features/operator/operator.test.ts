@@ -76,16 +76,80 @@ describe("buildPkgFile / validatePkg", () => {
   });
 });
 
-describe("Operator 包 3D 面板设置（P71）", () => {
+describe("Operator 包 3D 面板设置（P71 → P87a v2 三组结构）", () => {
   const plot3d: Plot3DSettings = {
-    axisX: "ax",
-    axisY: "ay",
-    axisZ: "az",
-    colorBy: "time",
-    colorCh: "",
-    fade: 60,
-    style: "line+points",
-    density: "high",
+    v: 2,
+    groups: [
+      {
+        id: "g1",
+        name: "G1",
+        color: "#4e9cef",
+        visible: true,
+        chX: "ax",
+        chY: "ay",
+        chZ: "az",
+        mode: "line",
+        pointSize: 3,
+        opacity: 1,
+        showDots: true, // P87a：旧 style:"line+points" 的迁移归宿
+        maxPoints: 0,
+        colorBy: "time",
+        colorCh: "",
+        fade: 60,
+        density: "high",
+        smooth: "none",
+        smoothWin: 5,
+        pairMode: "interp", // P75 B2
+        pairTolMs: 0,
+        notes: "",
+      },
+      {
+        id: "g2",
+        name: "G2",
+        color: "#4caf50",
+        visible: true,
+        chX: "",
+        chY: "",
+        chZ: "",
+        mode: "points",
+        pointSize: 3,
+        opacity: 1,
+        showDots: true,
+        maxPoints: 100000,
+        colorBy: "ch",
+        colorCh: "spd",
+        fade: 10,
+        density: "mid",
+        smooth: "none",
+        smoothWin: 5,
+        pairMode: "nearest",
+        pairTolMs: 25,
+        notes: "编码器速度着色",
+      },
+      {
+        id: "g3",
+        name: "G3",
+        color: "#e8a13c",
+        visible: false,
+        chX: "",
+        chY: "",
+        chZ: "",
+        mode: "point",
+        pointSize: 8,
+        opacity: 0.8,
+        showDots: false,
+        maxPoints: 0,
+        colorBy: "fixed",
+        colorCh: "",
+        fade: 0,
+        density: "low",
+        smooth: "movingAvg",
+        smoothWin: 11,
+        pairMode: "union",
+        pairTolMs: 0,
+        notes: "",
+      },
+    ],
     autoRotate: false,
     follow: false,
     showGrid: true,
@@ -93,8 +157,6 @@ describe("Operator 包 3D 面板设置（P71）", () => {
     keyFlight: false,
     zoomToCursor: false,
     calibMode: false, // 校准操作态在导出侧（exportSettingsForPkg）已剥离
-    pairMode: "interp", // P75 B2
-    pairTolMs: 0,
     axisScale: "uniform",
   };
 
@@ -113,7 +175,7 @@ describe("Operator 包 3D 面板设置（P71）", () => {
       meta: { name: "x", description: "", createdAt: 0, appVersion: "" },
       payload: { plot3d },
     });
-    file.data.payload.plot3d!.axisX = "changed";
-    expect(plot3d.axisX).toBe("ax");
+    file.data.payload.plot3d!.groups[0].chX = "changed";
+    expect(plot3d.groups[0].chX).toBe("ax");
   });
 });

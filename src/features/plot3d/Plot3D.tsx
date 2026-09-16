@@ -1,13 +1,15 @@
 /**
- * P69 3D 轨迹面板组件（T1）。
+ * P69 3D 轨迹面板组件（T1）· P87a 三组轨迹升级。
  *
  * 职责边界：本组件只做 UI 编排——
- * - 数据在 plot3dStore（120ms 泵 + 时间水位续传），渲染在 scene.ts（双层 LOD）；
- * - HUD：左上三轴绑定（与 2D 共享图例通道）、右上视角组、右下统计、左下测量气泡；
- * - 右键菜单：视图 / 测量 / 数据 / 设置 四组（Flyout 级联，复用全站 ctx-* 规范）；
- * - 长按测距：400ms + 位移 6px 双阈值防误触；Esc 退出；双击聚焦悬停点/重置视角；
- * - 高频路径（悬停 tooltip、长按判定）直写 DOM/ref，绝不走 React state——
- *   拾取/移动 60Hz 进 state 会把 HUD 拖进重渲染风暴。
+ * - 数据在 plot3dStore（120ms 泵 + 逐组时间水位续传），渲染在 scene.ts（逐组双层 LOD）；
+ * - HUD：左上组托盘（G1/G2/G3 三行：可见性/色点/名称/模式/X·Y·Z 绑定/设置）、
+ *   右上视角组 + 撤销/重做 + 清空、右下统计、左下测量气泡；
+ * - 组设置弹层（P87a）：绑定/模式/平滑/着色/密度/渐隐/配对/上限/备注，
+ *   确认一次 = updateGroup 一步撤销；行右键 = 该组快捷（设置/定位/导出/清空）；
+ * - 拖 vs-field（协议模板图例行）落组行 = 智能绑定（X→Y→Z 空槽优先）；
+ * - 右键菜单：组 / 模式 / 视图 / 测量 / 数据 / 设置（组级显示设置已入弹层）；
+ * - 高频路径（悬停 tooltip、长按判定、时间条）直写 DOM/ref，绝不走 React state。
  */
 import {
   useEffect,
@@ -21,16 +23,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import * as plotStore from "../plot/plotStore";
 import * as plot3dStore from "./plot3dStore";
+import type { GroupId, TrajGroup } from "./plot3dStore";
 import * as sessionStore from "../session/sessionStore";
-import type { PickResult, Plot3DScene, ViewPreset } from "./scene";
+import type { GroupStats, PickResult, Plot3DScene, ViewPreset } from "./scene";
 import { createScene } from "./scene";
 import { fitEllipsoid, grade, FIT_MIN_POINTS, type FitOk } from "./ellipsoidFit";
 import { buildPairedTriples } from "./pairTriples";
+import { attachPdragZone } from "../../shared/pointerDrag";
 import { useSettings } from "../settings/settingsStore";
 import { useOperator } from "../operator/operatorStore";
 import { toast } from "../ai/extRuntime";
 import { Flyout } from "../../shared/Flyout";
-import { IconAutoSpin, IconCheck, IconChevron, IconCircle, IconClose, IconCrosshair, IconDot, IconLock, IconPlay, IconRotate, IconTarget, IconTrash, IconViewFront, IconViewIso, IconViewSide, IconViewTop } from "../../shared/icons";
+import { IconAutoSpin, IconCheck, IconChevron, IconCircle, IconClose, IconCrosshair, IconDot, IconEye, IconEyeOff, IconGear, IconLock, IconPlay, IconRotate, IconTarget, IconTrash, IconViewFront, IconViewIso, IconViewSide, IconViewTop } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";
 import { fmtVal } from "../plot/plotMeasure";
 import { tx, useLocale } from "../../i18n/strings";
@@ -39,6 +43,8 @@ import { tx, useLocale } from "../../i18n/strings";
 const AX_COLOR = { x: "#e05252", y: "#4caf50", z: "#4e9cef" } as const;
 /** 测量强调色：与 scene 测量线一致 */
 const MEASURE_COLOR = "#e8a13c";
+/** 组色预设板（弹层 swatch） */
+const PALETTE = ["#4e9cef", "#4caf50", "#e8a13c", "#e05252", "#b48ae8", "#36b3a6"];
 
 /** 补偿预览迷你图逻辑尺寸（CSS px；canvas 属性固定 2×，P73 §2.2） */
 const SPARK_W = 224;
@@ -54,7 +60,16 @@ const A6_FACES = [
   { zh: "−Z 朝上", en: "−Z up" },
 ] as const;
 
-type MenuSub = "style" | "fade" | "color" | "density" | "pair" | "tol" | "ascale" | null;
+type MenuSub = "ascale" | null;
+type MenuState = { x: number; y: number; kind: "canvas" | "row"; gid?: GroupId };
+
+const fsvg = (children: React.ReactNode) => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    {children}
+  </svg>
+);
+const IconUndo = () => fsvg(<><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></>);
+const IconRedo = () => fsvg(<><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></>);
 
 /** 相对秒短标签（34s / 5m / 1.2h）——与 2D fmtTickSec 同款语义，本地小函数不做跨文件抽象 */
 const fmtTickSec = (v: number): string => {
@@ -63,6 +78,13 @@ const fmtTickSec = (v: number): string => {
   if (a >= 150) return `${Math.round(v / 60)}m`;
   return `${Math.round(v * 10) / 10}s`;
 };
+
+const modeLabel = (m: TrajGroup["mode"]): string =>
+  m === "point"
+    ? tx("实时定位", "Live")
+    : m === "points"
+      ? tx("点集", "Cloud")
+      : tx("连线", "Line");
 
 /** 拟合失败原因（按错误码出双语；无码的历史文案回退中文 reason） */
 function fitErrText(r: { reason: string; code?: string; p?: (number | string)[] }): string {
@@ -100,6 +122,380 @@ function fitErrText(r: { reason: string; code?: string; p?: (number | string)[] 
   }
 }
 
+// ---------- 组设置弹层（P87a；确认一次 = 一步撤销） ----------
+
+function GroupDialog(props: {
+  gid: GroupId;
+  channels: plotStore.Channel[];
+  opLocked: boolean;
+  roTip: string;
+  onClose: () => void;
+}) {
+  useLocale();
+  const { gid, channels, opLocked, roTip, onClose } = props;
+  const src = plot3dStore.getGroup(gid);
+  const [draft, setDraft] = useState<TrajGroup>({ ...src });
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    nameRef.current?.focus();
+    nameRef.current?.select();
+  }, []);
+  const set = (patch: Partial<TrajGroup>) => setDraft((d) => ({ ...d, ...patch }));
+  const chanOpts = (
+    <>
+      <option value="">
+        {channels.length === 0 ? tx("无通道", "No channels") : tx("未绑定", "Unbound")}
+      </option>
+      {channels.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name}
+        </option>
+      ))}
+    </>
+  );
+  const boundCnt = (draft.chX ? 1 : 0) + (draft.chY ? 1 : 0) + (draft.chZ ? 1 : 0);
+  const dirty = JSON.stringify({ ...draft, visible: src.visible }) !== JSON.stringify(src);
+  const ok = () => {
+    plot3dStore.updateGroup(gid, draft);
+    onClose();
+  };
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      onClose();
+    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && dirty && !opLocked) {
+      ok();
+    }
+  };
+  return (
+    <div
+      className="fc-dlg-mask"
+      onPointerDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        className="fc-dlg p3d-gdlg"
+        role="dialog"
+        aria-modal="true"
+        aria-label={tx(`组设置 ${src.name}`, `Group settings ${src.name}`)}
+        onKeyDown={onKey}
+      >
+        <div className="fc-dlg-title">
+          {tx("组设置", "Group settings")}
+          <span className="fc-dlg-sub">
+            {tx(
+              "确认一次 = 一步可撤销；绑定/模式/密度/配对变更会重灌该组轨迹",
+              "Apply = one undo step; binding / mode / density / pairing reloads the group",
+            )}
+          </span>
+        </div>
+        {opLocked && (
+          <div className="fc-dlg-warn">
+            {tx("Operator 只读模式：配置已锁定，仅可查看", "Operator read-only: settings are view-only")}
+          </div>
+        )}
+        <div className="fc-dlg-row">
+          <label>{tx("名称", "Name")}</label>
+          <input
+            ref={nameRef}
+            type="text"
+            value={draft.name}
+            maxLength={40}
+            disabled={opLocked}
+            onChange={(e) => set({ name: e.target.value })}
+          />
+        </div>
+        <div className="fc-dlg-row">
+          <label>{tx("颜色", "Color")}</label>
+          <div className="fc-dlg-colors">
+            <input
+              type="color"
+              value={draft.color}
+              disabled={opLocked}
+              onChange={(e) => set({ color: e.target.value })}
+              className="fc-color-picker"
+              title={tx("自由取色", "Custom color")}
+            />
+            {PALETTE.map((c) => (
+              <button
+                key={c}
+                type="button"
+                className={`fc-color-chip${draft.color === c ? " on" : ""}`}
+                style={{ background: c }}
+                disabled={opLocked}
+                onClick={() => set({ color: c })}
+                title={c}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="fc-dlg-row">
+          <label>{tx("绑定", "Binding")}</label>
+          <div className="p3d-gdlg-axes">
+            <span className={`p3d-gdlg-ax ax-x`}>
+              <b style={{ color: AX_COLOR.x }}>X</b>
+              <select className="input" value={draft.chX} disabled={opLocked} onChange={(e) => set({ chX: e.target.value })}>
+                {chanOpts}
+              </select>
+            </span>
+            <span className="p3d-gdlg-ax ax-y">
+              <b style={{ color: AX_COLOR.y }}>Y</b>
+              <select className="input" value={draft.chY} disabled={opLocked} onChange={(e) => set({ chY: e.target.value })}>
+                {chanOpts}
+              </select>
+            </span>
+            <span className="p3d-gdlg-ax ax-z">
+              <b style={{ color: AX_COLOR.z }}>Z</b>
+              <select className="input" value={draft.chZ} disabled={opLocked} onChange={(e) => set({ chZ: e.target.value })}>
+                {chanOpts}
+              </select>
+            </span>
+          </div>
+        </div>
+        {boundCnt > 0 && boundCnt < 3 && (
+          <div className="fc-dlg-warn soft">
+            {tx("三轴未绑齐：该组暂不绘制", "Not all axes bound: this group is not drawn")}
+          </div>
+        )}
+        <div className="fc-dlg-row">
+          <label>{tx("显示模式", "Mode")}</label>
+          <div className="p3d-seg" role="group" aria-label={tx("显示模式", "Display mode")}>
+            {(["point", "points", "line"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                className={draft.mode === m ? "on" : ""}
+                disabled={opLocked}
+                title={
+                  m === "point"
+                    ? tx("实时定位：只显示最新点，不留历史", "Live: only the latest point, no history")
+                    : m === "points"
+                      ? tx("点集：显示全部历史点，不连线", "Cloud: all points, no lines")
+                      : tx("连线：按时间顺序连线（可加平滑）", "Line: time-ordered polyline (smoothable)")
+                }
+                onClick={() => set({ mode: m })}
+              >
+                {modeLabel(m)}
+              </button>
+            ))}
+          </div>
+        </div>
+        {draft.mode !== "point" && (
+          <div className="fc-dlg-row">
+            <label>{tx("着色", "Color by")}</label>
+            <div className="p3d-gdlg-inline2">
+              <div className="p3d-seg" role="group" aria-label={tx("着色方式", "Coloring")}>
+                {([
+                  ["time", tx("按时间", "Time")],
+                  ["ch", tx("按通道", "Channel")],
+                  ["fixed", tx("组色", "Group")],
+                ] as const).map(([v, lab]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    className={draft.colorBy === v ? "on" : ""}
+                    disabled={opLocked}
+                    onClick={() => set({ colorBy: v })}
+                  >
+                    {lab}
+                  </button>
+                ))}
+              </div>
+              {draft.colorBy === "ch" && (
+                <select
+                  className="input"
+                  value={draft.colorCh}
+                  disabled={opLocked}
+                  onChange={(e) => set({ colorCh: e.target.value })}
+                >
+                  {chanOpts}
+                </select>
+              )}
+            </div>
+          </div>
+        )}
+        <div className="fc-dlg-row">
+          <label>{tx(draft.mode === "point" ? "点大小" : "大小/透明", draft.mode === "point" ? "Size" : "Size / alpha")}</label>
+          <div className="p3d-gdlg-inline2">
+            <input
+              type="range"
+              min={1}
+              max={draft.mode === "point" ? 32 : 24}
+              step={1}
+              value={draft.pointSize}
+              disabled={opLocked}
+              onChange={(e) => set({ pointSize: Number(e.target.value) })}
+            />
+            <b className="p3d-gdlg-num">{draft.pointSize}px</b>
+            <input
+              type="range"
+              min={0.05}
+              max={1}
+              step={0.05}
+              value={draft.opacity}
+              disabled={opLocked}
+              onChange={(e) => set({ opacity: Number(e.target.value) })}
+            />
+            <b className="p3d-gdlg-num">{Math.round(draft.opacity * 100)}%</b>
+          </div>
+        </div>
+        {draft.mode === "line" && (
+          <>
+            <div className="fc-dlg-row">
+              <label>{tx("平滑", "Smoothing")}</label>
+              <div className="p3d-gdlg-inline2">
+                <select
+                  className="input"
+                  value={draft.smooth}
+                  disabled={opLocked}
+                  onChange={(e) => set({ smooth: e.target.value as TrajGroup["smooth"] })}
+                >
+                  <option value="none">{tx("无", "None")}</option>
+                  <option value="movingAvg">{tx("滑动平均", "Moving average")}</option>
+                </select>
+                <span className="fc-dlg-hint">
+                  {tx("样条/贝塞尔 = P87b", "spline/Bezier = P87b")}
+                </span>
+              </div>
+            </div>
+            {draft.smooth === "movingAvg" && (
+              <div className="fc-dlg-row">
+                <label>{tx("窗口", "Window")}</label>
+                <div className="p3d-gdlg-inline2">
+                  <input
+                    type="range"
+                    min={3}
+                    max={51}
+                    step={2}
+                    value={draft.smoothWin}
+                    disabled={opLocked}
+                    onChange={(e) => set({ smoothWin: Number(e.target.value) | 1 })}
+                  />
+                  <b className="p3d-gdlg-num">{draft.smoothWin}</b>
+                  <span className="fc-dlg-hint">{tx("点（奇数）", "pts (odd)")}</span>
+                </div>
+              </div>
+            )}
+            <div className="fc-dlg-row">
+              <label>{tx("叠画点", "Show dots")}</label>
+              <label className="p3d-gdlg-check">
+                <input
+                  type="checkbox"
+                  checked={draft.showDots}
+                  disabled={opLocked}
+                  onChange={(e) => set({ showDots: e.target.checked })}
+                />
+                {tx("线上叠画轨迹点", "draw vertices over the line")}
+              </label>
+            </div>
+          </>
+        )}
+        {draft.mode !== "point" && (
+          <>
+            <div className="fc-dlg-row">
+              <label>{tx("渐隐", "Fade")}</label>
+              <select
+                className="input"
+                value={draft.fade}
+                disabled={opLocked}
+                onChange={(e) => set({ fade: Number(e.target.value) as TrajGroup["fade"] })}
+              >
+                <option value={10}>{tx("最近 10 秒", "last 10 s")}</option>
+                <option value={60}>{tx("最近 60 秒", "last 60 s")}</option>
+                <option value={300}>{tx("最近 5 分钟", "last 5 min")}</option>
+                <option value={0}>{tx("全程渐变", "full span")}</option>
+              </select>
+            </div>
+            <div className="fc-dlg-row">
+              <label>{tx("点密度", "Density")}</label>
+              <select
+                className="input"
+                value={draft.density}
+                disabled={opLocked}
+                onChange={(e) => set({ density: e.target.value as TrajGroup["density"] })}
+              >
+                <option value="high">{tx("高（1:1 全点）", "High (1:1)")}</option>
+                <option value="mid">{tx("中（1:2 抽稀）", "Mid (1:2)")}</option>
+                <option value="low">{tx("低（1:4 抽稀）", "Low (1:4)")}</option>
+              </select>
+            </div>
+            <div className="fc-dlg-row">
+              <label>{tx("最大点数", "Max points")}</label>
+              <div className="p3d-gdlg-inline2">
+                <input
+                  type="number"
+                  min={0}
+                  step={10000}
+                  value={draft.maxPoints}
+                  disabled={opLocked}
+                  onChange={(e) => set({ maxPoints: Math.max(0, Math.round(Number(e.target.value) || 0)) })}
+                />
+                <span className="fc-dlg-hint">{tx("0 = 不限（22 万双层 LOD）；超限从最老端丢弃", "0 = uncapped (220k dual LOD); oldest dropped beyond")}</span>
+              </div>
+            </div>
+          </>
+        )}
+        <div className="fc-dlg-row">
+          <label>{tx("数据配对", "Pairing")}</label>
+          <div className="p3d-gdlg-inline2">
+            <select
+              className="input"
+              value={draft.pairMode}
+              disabled={opLocked}
+              onChange={(e) => set({ pairMode: e.target.value as TrajGroup["pairMode"] })}
+              title={tx(
+                "插值=平滑消除阶梯（推荐）；最近邻=保持原始采样节奏；旧版前向填充=兼容口径",
+                "Interp = smooth ladder removal (recommended); nearest = raw cadence; union = legacy fill",
+              )}
+            >
+              <option value="interp">{tx("插值配对", "Interpolated")}</option>
+              <option value="nearest">{tx("最近邻配对", "Nearest")}</option>
+              <option value="union">{tx("旧版前向填充", "Legacy fill")}</option>
+            </select>
+            {draft.pairMode !== "union" && (
+              <select
+                className="input"
+                value={draft.pairTolMs}
+                disabled={opLocked}
+                onChange={(e) => set({ pairTolMs: Number(e.target.value) })}
+                title={tx("Y/Z 样本距锚点超过容差即丢弃（3D 不编造坐标）", "Y/Z samples beyond tolerance are dropped (no invented coords)")}
+              >
+                <option value={0}>{tx("自动容差", "Auto")}</option>
+                {[5, 10, 25, 50, 100].map((v) => (
+                  <option key={v} value={v}>
+                    {v} ms
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </div>
+        <div className="fc-dlg-row">
+          <label>{tx("备注", "Notes")}</label>
+          <textarea
+            className="input"
+            rows={2}
+            maxLength={2000}
+            value={draft.notes}
+            disabled={opLocked}
+            placeholder={tx("本组用途/结论（进分析包 meta.json）", "purpose / conclusions (exported to meta.json)")}
+            onChange={(e) => set({ notes: e.target.value })}
+          />
+        </div>
+        <div className="fc-dlg-foot">
+          <button className="btn sm" onClick={onClose}>
+            {tx("取消", "Cancel")}
+          </button>
+          <button className="btn sm primary" disabled={!dirty || opLocked} onClick={ok} title={tx(`确认并保存${roTip}`, `Apply & save${roTip}`)}>
+            {tx("确认", "Apply")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Plot3D() {
   useLocale(); // 语言切换重渲染（文案即时更新）
   const settings = useSettings();
@@ -107,7 +503,9 @@ export function Plot3D() {
   const cbSafe = settings.chartPalette === "cbSafe";
 
   const hostRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const tipRef = useRef<HTMLDivElement>(null);
+  const trayRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<Plot3DScene | null>(null);
   const plotRef = useRef(plotStore.getSnapshot());
   const s3dRef = useRef(plot3dStore.getSnapshot().settings);
@@ -120,31 +518,30 @@ export function Plot3D() {
   s3dRef.current = p3d.settings;
   const s3d = p3d.settings;
 
-  /* C1：Operator 只读边界 —— 「配置类」设置（轴绑定/样式/密度/渐隐/着色/网格/键盘飞行…）锁定，
-     视图与操作态（视角预设、自动旋转、跟随、缩放、测距、时间游标、清空轨迹、导出、椭球校准/六面）
-     全部放行：只读不允许改部署口径，但必须允许看和测。store 层另有同等守卫兜底。 */
+  /* C1：Operator 只读边界 —— 「配置类」设置（组绑定/模式/显示/密度/渐隐/着色/网格/
+     键盘飞行/三轴缩放…）锁定（store 层 updateGroup/setSetting 同等守卫兜底），
+     视图与操作态（视角预设、自动旋转、跟随、缩放、测距、时间游标、组可见性、
+     清空轨迹、导出、椭球校准/六面）全部放行：只读不允许改部署口径，但必须允许看和测。 */
   const opLocked = useOperator().pkg !== null;
   const roTip = opLocked ? tx("（Operator 只读：设置已锁定）", " (operator read-only: settings locked)") : "";
 
   const [ready, setReady] = useState(false);
   const [gen, setGen] = useState(0); // WebGL context lost → +1 重建
-  const [stats, setStats] = useState({ tail: 0, overview: 0, fps: 0 });
-  // P75 B2：配对诊断（三轴值域 + 配对/跳过计数），1Hz 低频刷新
-  const [pairInfo, setPairInfo] = useState<plot3dStore.PairStatSnapshot | null>(null);
+  const [stats, setStats] = useState<{ groups: Record<GroupId, GroupStats>; fps: number }>({
+    groups: { g1: { tail: 0, overview: 0 }, g2: { tail: 0, overview: 0 }, g3: { tail: 0, overview: 0 } },
+    fps: 0,
+  });
+  // P75 B2 → P87a 逐组：配对诊断（三轴值域 + 配对/跳过计数），1Hz 低频刷新
+  const [pairInfo, setPairInfo] = useState<Record<GroupId, plot3dStore.PairStatSnapshot> | null>(null);
   const [themeTick, setThemeTick] = useState(0);
+  const [dlg, setDlg] = useState<GroupId | null>(null);
 
-  // ---------- 右键菜单 ----------
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  // ---------- 右键菜单（画布 / 组行两态） ----------
+  const [menu, setMenu] = useState<MenuState | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [sub, setSub] = useState<MenuSub>(null);
   const [subPinned, setSubPinned] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const styleRowRef = useRef<HTMLDivElement | null>(null);
-  const fadeRowRef = useRef<HTMLDivElement | null>(null);
-  const colorRowRef = useRef<HTMLDivElement | null>(null);
-  const densityRowRef = useRef<HTMLDivElement | null>(null);
-  const pairRowRef = useRef<HTMLDivElement | null>(null);
-  const tolRowRef = useRef<HTMLDivElement | null>(null);
   const ascaleRowRef = useRef<HTMLDivElement | null>(null);
   const subTimer = useRef<number | null>(null);
   const menuOpenRef = useRef(false);
@@ -226,7 +623,8 @@ export function Plot3D() {
       }
       scene = s;
       sceneRef.current = s;
-      plot3dStore.setSink((b, reloaded, cursorSec) => s.applyBatch(b, reloaded, cursorSec));
+      // P87a：批次按组分发（entries 含逐组 reloaded 标记）
+      plot3dStore.setSink((entries, cursorSec) => s.applyBatch(entries, cursorSec));
       // P74c A5：新场景是空的 → 点云推送水位归零 + 挂上「校准态重放」标记。
       // 否则重建后 snap.count 与水位相等，增量判定两个分支都不命中，
       // 出现「UI 有拟合结果、画布空点云」的假象。
@@ -279,18 +677,69 @@ export function Plot3D() {
     );
   }, [ready, s3d, chansSig, cbSafe, themeTick]);
 
-  // 1Hz 统计（点数/FPS/配对诊断）：低频 state，可接受
+  // P87a 拖放绑定：图例行 vs-field 落到组行 = 智能绑进该组第一个空槽（X→Y→Z）；
+  // 三槽已满时弹设置让用户手动改（引导而非静默覆盖——防「拖一下就丢绑定」）
+  useEffect(() => {
+    const el = trayRef.current;
+    if (!el) return;
+    return attachPdragZone(el, {
+      kinds: "vs-field",
+      onDrop: (d) => {
+        if (opLocked) return;
+        let f: { tplId: string; fieldId: string; name: string } | null = null;
+        try {
+          f = JSON.parse(d.data);
+        } catch {
+          f = null;
+        }
+        if (!f) return;
+        const rowEl = document.elementFromPoint(d.x, d.y)?.closest(".p3d-grp-row");
+        const gid = (rowEl as HTMLElement | null)?.dataset.gid as GroupId | undefined;
+        if (!gid || !plot3dStore.GROUP_IDS.includes(gid)) return;
+        const chans = plotRef.current.channels;
+        let ch = chans.find((c) => c.tplId === f!.tplId && c.fieldId === f!.fieldId);
+        if (!ch) {
+          if (!plotStore.addChannel({ tplId: f.tplId, fieldId: f.fieldId, name: f.name, color: "#4e9cef" }))
+            return;
+          ch = plotStore.getSnapshot().channels.find(
+            (c) => c.tplId === f!.tplId && c.fieldId === f!.fieldId,
+          );
+        }
+        if (!ch) return;
+        const hit = plot3dStore.bindGroupFirstFree(gid, ch.id);
+        const g = plot3dStore.getGroup(gid);
+        toast(
+          hit
+            ? tx(
+                `已把「${ch.name}」绑到 ${g.name} 的 ${hit.toUpperCase()} 轴（Ctrl+Z 撤销）`,
+                `Bound "${ch.name}" to ${g.name}'s ${hit.toUpperCase()} axis (Ctrl+Z to undo)`,
+              )
+            : tx(
+                `${g.name} 三轴已齐——打开组设置手动改轴`,
+                `${g.name} already has all three axes — open its settings to rebind`,
+              ),
+        );
+        if (!hit) setDlg(gid);
+      },
+    });
+  }, [opLocked, ready]);
+
+  // 1Hz 统计（按组点数/FPS/逐组配对诊断）：低频 state，可接受
   useEffect(() => {
     if (!ready) return;
     const t = window.setInterval(() => {
       const st = sceneRef.current?.stats();
       if (st) setStats(st);
-      setPairInfo(plot3dStore.pairSnapshot());
+      setPairInfo({
+        g1: plot3dStore.pairSnapshot("g1"),
+        g2: plot3dStore.pairSnapshot("g2"),
+        g3: plot3dStore.pairSnapshot("g3"),
+      });
     }, 1000);
     return () => window.clearInterval(t);
   }, [ready]);
 
-  // 跟随模式开关（P70 T2）：scene 侧 target 平滑锁定锚点；与 autoRotate 互斥已在 store 层联动
+  // 跟随模式开关（P70 T2）：scene 侧 target 平滑锁定主组锚点；与 autoRotate 互斥已在 store 层联动
   useEffect(() => {
     if (!ready) return;
     sceneRef.current?.setFollow(s3d.follow);
@@ -371,9 +820,35 @@ export function Plot3D() {
     sceneRef.current?.setMeasure(null, null);
   };
 
+  // P87a A7：撤销/重做快捷键（焦点在本面板时生效；输入框内不劫持）
+  const doUndo = () => {
+    if (plot3dStore.undo()) toast(tx("已撤销组配置", "Group config change undone"));
+  };
+  const doRedo = () => {
+    if (plot3dStore.redo()) toast(tx("已重做组配置", "Group config change redone"));
+  };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && measureModeRef.current) exitMeasure();
+      if (e.key === "Escape") {
+        if (measureModeRef.current) exitMeasure();
+        return;
+      }
+      const root = rootRef.current;
+      if (!root || !root.contains(document.activeElement)) return;
+      const tgt = e.target as HTMLElement | null;
+      if (
+        tgt &&
+        (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.isContentEditable)
+      )
+        return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) doRedo();
+        else doUndo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        doRedo();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -393,11 +868,12 @@ export function Plot3D() {
     const s = s3dRef.current;
     const chans = plotRef.current.channels;
     const nameOf = (id: string) => chans.find((c) => c.id === id)?.name ?? id;
+    const grp = s.groups.find((g) => g.id === pr.gid);
     const lines = [
-      `t = ${pr.tSec.toFixed(2)} s`,
+      `${grp?.name ?? pr.gid} · t = ${pr.tSec.toFixed(2)} s`,
       `X ${fmtVal(pr.real[0])}   Y ${fmtVal(pr.real[1])}   Z ${fmtVal(pr.real[2])}`,
     ];
-    if (s.colorBy === "ch") lines.push(`${nameOf(s.colorCh)} = ${fmtVal(pr.val)}`);
+    if (grp?.colorBy === "ch" && grp.colorCh) lines.push(`${nameOf(grp.colorCh)} = ${fmtVal(pr.val)}`);
     tip.textContent = lines.join("\n");
     tip.style.display = "block";
     const vx = pr.screen[0] - hr.left;
@@ -414,8 +890,10 @@ export function Plot3D() {
 
   // ---------- 指针交互（长按测距 / 右键菜单 / 悬停拾取） ----------
   const onPointerDown = (e: React.PointerEvent) => {
-    // HUD 控件（轴绑定下拉/按钮）不冒泡进画布：长按会误触测距、按住下拉 400ms 直接进测距模式
+    // HUD 控件（组行绑定下拉/按钮）不冒泡进画布：长按会误触测距、按住下拉 400ms 直接进测距模式
     if ((e.target as HTMLElement).closest(".p3d-hud")) return;
+    // P87a A7：点画布即把焦点收进面板根（Ctrl+Z/Y 撤销路由的前置）
+    rootRef.current?.focus({ preventScroll: true });
     hideTip();
     if (e.button === 0) {
       ldownRef.current = { x: e.clientX, y: e.clientY, moved: false, menuOpen: menuOpenRef.current };
@@ -501,8 +979,17 @@ export function Plot3D() {
     if (rd && Math.hypot(e.clientX - rd.x, e.clientY - rd.y) < 6) {
       setSub(null);
       setSubPinned(false);
-      setMenu({ x: e.clientX, y: e.clientY });
+      setMenu({ x: e.clientX, y: e.clientY, kind: "canvas" });
     }
+  };
+
+  /** P87a：组行右键 = 该组快捷菜单（设置/定位/导出/清空） */
+  const onRowContextMenu = (e: React.MouseEvent, gid: GroupId) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSub(null);
+    setSubPinned(false);
+    setMenu({ x: e.clientX, y: e.clientY, kind: "row", gid });
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
@@ -741,14 +1228,40 @@ export function Plot3D() {
     const pr = hoverRef.current;
     if (!pr) return;
     const s = s3dRef.current;
+    const grp = s.groups.find((g) => g.id === pr.gid);
     const parts = [
+      `g=${pr.gid}`,
       `t=${pr.tSec.toFixed(3)}s`,
       `X=${fmtVal(pr.real[0])}`,
       `Y=${fmtVal(pr.real[1])}`,
       `Z=${fmtVal(pr.real[2])}`,
     ];
-    if (s.colorBy === "ch") parts.push(`${chanName(s.colorCh)}=${fmtVal(pr.val)}`);
+    if (grp?.colorBy === "ch" && grp.colorCh) parts.push(`${chanName(grp.colorCh)}=${fmtVal(pr.val)}`);
     void navigator.clipboard?.writeText(parts.join("  "));
+  };
+
+  /** 组数据清空（P87a 组化）：水位推进 + 场景缓冲清零；不可撤销——确认弹窗如实说明 */
+  const clearGroupData = async (gid?: GroupId) => {
+    const g = gid ? plot3dStore.getGroup(gid) : null;
+    const ok = await confirmDialog({
+      title: gid ? tx(`清空 ${g?.name} 轨迹数据`, `Clear ${g?.name} data`) : tx("清空轨迹数据", "Clear trajectory data"),
+      message: gid
+        ? tx(
+            "清空该组已积累的轨迹：历史全部跳过，新数据从零画起。\n该操作不可撤销。绑定、显示设置与校准采样不受影响。",
+            "Clear this group's trajectory: history is skipped, new data draws from zero.\nThis cannot be undone. Bindings, display settings and calibration sampling are untouched.",
+          )
+        : tx(
+            "清空三组全部已积累的轨迹：历史全部跳过，新数据从零画起。\n该操作不可撤销。绑定、显示设置与校准采样不受影响。",
+            "Clear all three groups' trajectories: history is skipped, new data draws from zero.\nThis cannot be undone. Bindings, display settings and calibration sampling are untouched.",
+          ),
+      danger: true,
+      okLabel: tx("清空", "Clear"),
+    });
+    if (!ok) return;
+    // 运行/视图类操作：Operator 只读模式放行（红线 27——不改配置，数据可重新积累）
+    plot3dStore.clearData(gid);
+    sceneRef.current?.clearTrajectory(gid);
+    toast(tx("轨迹数据已清空，等待新数据", "Trajectory cleared, waiting for new data"));
   };
 
   // ---------- 椭球校准动作（P71 / P73 T+）----------
@@ -961,19 +1474,19 @@ export function Plot3D() {
     );
   };
 
-  // ---------- 导出（P72）：轨迹 CSV / 快照 PNG ----------
-  const exportCsv = async () => {
-    const s = s3dRef.current;
-    if (!s.axisX || !s.axisY || !s.axisZ) return;
+  // ---------- 导出（P72 → P87a 逐组）：轨迹 CSV / 快照 PNG ----------
+  const exportCsv = async (gid: GroupId) => {
+    const g = plot3dStore.getGroup(gid);
+    if (!g.chX || !g.chY || !g.chZ) return;
     const chans = plotRef.current.channels;
     const nameOf = (id: string) => chans.find((c) => c.id === id)?.name ?? id;
-    // P75 B2：与轨迹严格同源——按当前配对方式/容差从原始序列构建
+    // P75 B2：与轨迹严格同源——按该组配对方式/容差从原始序列构建
     // （旧实现走联合对齐源，配对修复后两者不再一致）
     const pair = buildPairedTriples(
-      plotStore.getChanData(s.axisX),
-      plotStore.getChanData(s.axisY),
-      plotStore.getChanData(s.axisZ),
-      { mode: s.pairMode, tolMs: s.pairTolMs, sinceT: -Infinity },
+      plotStore.getChanData(g.chX),
+      plotStore.getChanData(g.chY),
+      plotStore.getChanData(g.chZ),
+      { mode: g.pairMode, tolMs: g.pairTolMs, sinceT: -Infinity },
     );
     const org = plotStore.timeOrigin();
     const esc = (v: string | number) => {
@@ -981,7 +1494,7 @@ export function Plot3D() {
       return /[",\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
     };
     const rows: string[] = [
-      ["t_s", nameOf(s.axisX), nameOf(s.axisY), nameOf(s.axisZ)].map(esc).join(","),
+      ["t_s", nameOf(g.chX), nameOf(g.chY), nameOf(g.chZ)].map(esc).join(","),
     ];
     for (let i = 0; i < pair.t.length; i++) {
       rows.push(
@@ -990,8 +1503,8 @@ export function Plot3D() {
     }
     if (rows.length <= 1) return; // 无轨迹点
     const path = await save({
-      title: tx("导出轨迹 CSV", "Export trajectory CSV"),
-      defaultPath: `trajectory-${new Date()
+      title: tx(`导出 ${g.name} 轨迹 CSV`, `Export ${g.name} trajectory CSV`),
+      defaultPath: `trajectory-${g.name}-${new Date()
         .toISOString()
         .slice(0, 19)
         .replace(/[:T]/g, "-")}.csv`,
@@ -1000,6 +1513,7 @@ export function Plot3D() {
     if (typeof path !== "string") return;
     try {
       await invoke("save_text_file", { path, content: "\uFEFF" + rows.join("\r\n") });
+      toast(tx(`已导出 ${rows.length - 1} 个点`, `Exported ${rows.length - 1} points`));
     } catch (e) {
       toast(tx(`轨迹 CSV 写盘失败：${String(e).slice(0, 80)}`, `Failed to write trajectory CSV: ${String(e).slice(0, 80)}`));
     }
@@ -1034,70 +1548,60 @@ export function Plot3D() {
     { p: "iso", zh: "等", en: "I", tipZh: "等轴：立体全貌（默认）", tipEn: "Isometric: full 3D view (default)" },
   ];
 
-  const allBound = !!(s3d.axisX && s3d.axisY && s3d.axisZ);
-  const styleCur =
-    s3d.style === "line+points"
-      ? tx("线+点", "Line+points")
-      : s3d.style === "line"
-        ? tx("仅线", "Line")
-        : tx("仅点", "Points");
-  const fadeCur =
-    s3d.fade === 0
-      ? tx("全程", "Full span")
-      : s3d.fade === 300
-        ? tx("最近 5 分钟", "Last 5 min")
-        : tx(`最近 ${s3d.fade}s`, `Last ${s3d.fade}s`);
-  const colorCur =
-    s3d.colorBy === "time" ? tx("按时间", "By time") : chanName(s3d.colorCh);
-  const densityCur =
-    s3d.density === "high" ? tx("高 1:1", "High 1:1") : s3d.density === "mid" ? tx("中 1:2", "Mid 1:2") : tx("低 1:4", "Low 1:4");
-  // P75 B2：数据配对 / 三轴缩放
-  const pairCur =
-    s3d.pairMode === "interp"
-      ? tx("插值配对", "Interpolated")
-      : s3d.pairMode === "nearest"
-        ? tx("最近邻配对", "Nearest")
-        : tx("旧版前向填充", "Legacy fill");
-  const tolCur = s3d.pairTolMs > 0 ? `${s3d.pairTolMs} ms` : tx("自动", "Auto");
+  const g1Bound = plot3dStore.groupBound("g1");
+  const anyBound = s3d.groups.some((g) => g.chX && g.chY && g.chZ);
   const ascaleCur =
     s3d.axisScale === "perAxis" ? tx("逐轴归一化", "Per-axis") : tx("等比（真实比例）", "Uniform");
 
-  const totalPts = stats.tail + stats.overview;
+  const totalPts = plot3dStore.GROUP_IDS.reduce(
+    (n, id) => n + stats.groups[id].tail + stats.groups[id].overview,
+    0,
+  );
   ptsRef.current = totalPts;
+  const groupPtsLine = s3d.groups
+    .filter((g) => (stats.groups[g.id].tail + stats.groups[g.id].overview) > 0 || (g.chX && g.chY && g.chZ))
+    .map((g) => `${g.name} ${(stats.groups[g.id].tail + stats.groups[g.id].overview).toLocaleString()}`)
+    .join(" · ");
 
-  // P75 B2：配对诊断副行（三轴值域 + 配对/跳过计数；union 模式额外提示阶梯口径）
+  // P75 B2：配对诊断副行（P87a 主组 = 第一个绑齐且有消费的组；三轴值域 + 配对/跳过计数）
+  const primaryGid = s3d.groups.find(
+    (g) => g.chX && g.chY && g.chZ && pairInfo && pairInfo[g.id].paired + pairInfo[g.id].skipped > 0,
+  )?.id;
   const fmtRange = (mn: number, mx: number) =>
     isFinite(mn) && isFinite(mx) ? `${fmtVal(mn)}~${fmtVal(mx)}` : "—";
-  const pairLine =
-    allBound && pairInfo && pairInfo.paired + pairInfo.skipped > 0
-      ? [
-          `X ${fmtRange(pairInfo.min[0], pairInfo.max[0])}`,
-          `Y ${fmtRange(pairInfo.min[1], pairInfo.max[1])}`,
-          `Z ${fmtRange(pairInfo.min[2], pairInfo.max[2])}`,
-          tx(
-            `配对 ${pairInfo.paired.toLocaleString()} · 跳过 ${pairInfo.skipped.toLocaleString()}`,
-            `paired ${pairInfo.paired.toLocaleString()} · skipped ${pairInfo.skipped.toLocaleString()}`,
-          ),
-          s3d.pairMode === "union"
-            ? tx("前向填充（旧版）", "forward-fill (legacy)")
-            : s3d.pairTolMs > 0
-              ? `±${s3d.pairTolMs}ms`
-              : tx("自动容差", "auto tol"),
-        ].join(" · ")
-      : null;
+  const pairLine = (() => {
+    if (!primaryGid || !pairInfo) return null;
+    const g = s3d.groups.find((x) => x.id === primaryGid)!;
+    const pi = pairInfo[primaryGid];
+    return [
+      g.name,
+      `X ${fmtRange(pi.min[0], pi.max[0])}`,
+      `Y ${fmtRange(pi.min[1], pi.max[1])}`,
+      `Z ${fmtRange(pi.min[2], pi.max[2])}`,
+      tx(
+        `配对 ${pi.paired.toLocaleString()} · 跳过 ${pi.skipped.toLocaleString()}`,
+        `paired ${pi.paired.toLocaleString()} · skipped ${pi.skipped.toLocaleString()}`,
+      ),
+      g.pairMode === "union"
+        ? tx("前向填充（旧版）", "forward-fill (legacy)")
+        : g.pairTolMs > 0
+          ? `±${g.pairTolMs}ms`
+          : tx("自动容差", "auto tol"),
+    ].join(" · ");
+  })();
 
-  // 时间条数据范围：P75 B2 起与泵游标同口径——三轴绑定时的原始序列末端
-  // （未绑齐时回退联合轴末端）；plot 10Hz 快照驱动重渲染，O(1) 读缓存首末
+  // 时间条数据范围：P87a = 全部已绑组的原始序列末端最大值（未绑齐时回退联合轴末端）
   const endRel = (() => {
     const org = plotStore.timeOrigin();
-    if (s3d.axisX && s3d.axisY && s3d.axisZ) {
-      let end = -Infinity;
-      for (const id of [s3d.axisX, s3d.axisY, s3d.axisZ]) {
+    let end = -Infinity;
+    for (const g of s3d.groups) {
+      if (!g.chX || !g.chY || !g.chZ) continue;
+      for (const id of [g.chX, g.chY, g.chZ]) {
         const d = plotStore.getChanData(id);
         if (d.t.length > 0 && d.t[d.t.length - 1] > end) end = d.t[d.t.length - 1];
       }
-      if (isFinite(end)) return Math.max(0, (end - org) / 1000);
     }
+    if (isFinite(end)) return Math.max(0, (end - org) / 1000);
     const rawAll = plotStore.fullAlignedRaw();
     return rawAll.x.length > 0
       ? Math.max(0, (rawAll.x[rawAll.x.length - 1] - org) / 1000)
@@ -1106,7 +1610,7 @@ export function Plot3D() {
   endRelRef.current = endRel;
 
   return (
-    <div className="plot p3d">
+    <div className="plot p3d" ref={rootRef} tabIndex={-1}>
       <div
         ref={hostRef}
         className={`p3d-host${measureMode ? " measuring" : ""}`}
@@ -1117,69 +1621,65 @@ export function Plot3D() {
         onContextMenu={onContextMenu}
         onDoubleClick={onDoubleClick}
       >
-        {/* 三轴绑定（左上）：通道与 2D 图例共享 */}
-        <div className="p3d-hud tl">
-          <label
-            className="p3d-axis"
-            title={tx("X 轴绑定通道（红 · 横向）", "Bind X axis (red · lateral)") + roTip}
-          >
-            <b style={{ color: AX_COLOR.x }}>X</b>
-            <select
-              className="input"
-              value={s3d.axisX}
-              onChange={(e) => plot3dStore.setSetting({ axisX: e.target.value })}
-              disabled={plot.channels.length === 0 || opLocked}
-            >
-              <option value="">{plot.channels.length === 0 ? tx("无通道", "No channels") : tx("未绑定", "Unbound")}</option>
-              {plot.channels.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label
-            className="p3d-axis"
-            title={tx("Y 轴绑定通道（绿 · 垂直/高度）", "Bind Y axis (green · vertical/height)") + roTip}
-          >
-            <b style={{ color: AX_COLOR.y }}>Y</b>
-            <select
-              className="input"
-              value={s3d.axisY}
-              onChange={(e) => plot3dStore.setSetting({ axisY: e.target.value })}
-              disabled={plot.channels.length === 0 || opLocked}
-            >
-              <option value="">{plot.channels.length === 0 ? tx("无通道", "No channels") : tx("未绑定", "Unbound")}</option>
-              {plot.channels.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label
-            className="p3d-axis"
-            title={tx("Z 轴绑定通道（蓝 · 深度）", "Bind Z axis (blue · depth)") + roTip}
-          >
-            <b style={{ color: AX_COLOR.z }}>Z</b>
-            <select
-              className="input"
-              value={s3d.axisZ}
-              onChange={(e) => plot3dStore.setSetting({ axisZ: e.target.value })}
-              disabled={plot.channels.length === 0 || opLocked}
-            >
-              <option value="">{plot.channels.length === 0 ? tx("无通道", "No channels") : tx("未绑定", "Unbound")}</option>
-              {plot.channels.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        {/* P87a 组托盘（左上）：三行独立轨迹；通道与 2D 图例共享；拖 vs-field 落行=智能绑定 */}
+        <div className="p3d-hud tl p3d-groups" ref={trayRef}>
+          {s3d.groups.map((g) => {
+            const bound = !!(g.chX && g.chY && g.chZ);
+            return (
+              <div
+                key={g.id}
+                className={`p3d-grp-row${g.visible ? "" : " off"}${bound ? "" : " unbound"}`}
+                data-gid={g.id}
+                title={tx(
+                  `${g.name}：双击聚焦该组 · 右键更多操作 · 拖协议图例字段到本行绑定`,
+                  `${g.name}: double-click to focus · right-click for more · drag a legend field onto this row to bind`,
+                )}
+                onDoubleClick={() => bound && sceneRef.current?.focusGroup(g.id)}
+                onContextMenu={(e) => onRowContextMenu(e, g.id)}
+              >
+                <button
+                  className={`p3d-grp-eye${g.visible ? " on" : ""}`}
+                  onClick={() => plot3dStore.setGroupVisible(g.id, !g.visible)}
+                  title={g.visible ? tx("隐藏此组", "Hide group") : tx("显示此组", "Show group")}
+                >
+                  {g.visible ? <IconEye /> : <IconEyeOff />}
+                </button>
+                <span className="p3d-grp-dot" style={{ background: g.color }} />
+                <span className="p3d-grp-name">{g.name}</span>
+                <span className="p3d-grp-mode">{modeLabel(g.mode)}</span>
+                {(["x", "y", "z"] as const).map((ax) => {
+                  const id = ax === "x" ? g.chX : ax === "y" ? g.chY : g.chZ;
+                  return (
+                    <select
+                      key={ax}
+                      className={`input p3d-grp-ax ax-${ax}${id ? " bound" : ""}`}
+                      value={id}
+                      disabled={plot.channels.length === 0 || opLocked}
+                      title={`${ax.toUpperCase()} → ${id ? chanName(id) : tx("未绑定（可直接拖字段进来）", "unbound (drop a field here)")}${roTip}`}
+                      onChange={(e) => plot3dStore.bindGroup(g.id, ax, e.target.value)}
+                    >
+                      <option value="">{ax.toUpperCase()}</option>
+                      {plot.channels.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })}
+                <button
+                  className="p3d-grp-gear"
+                  onClick={() => setDlg(g.id)}
+                  title={tx(`组设置 ${g.name}${roTip}`, `Group settings ${g.name}${roTip}`)}
+                >
+                  <IconGear />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
-        {/* 视角组（右上，P82②）：毛玻璃胶囊三段式——视角预设｜聚焦·跟随·自旋｜校准·清空。
-            文字钮 SVG 化（红线 24/25），自动旋转从右键菜单升为一级按钮，新增清空数据 */}
+        {/* 视角组（右上，P82② → P87a +撤销/重做）：毛玻璃胶囊——视角预设｜聚焦·跟随·自旋｜撤销重做｜校准·清空 */}
         <div className="p3d-hud tr p3d-tray">
           {presets.map((it) => (
             <button
@@ -1225,63 +1725,61 @@ export function Plot3D() {
           </button>
           <span className="p3d-tray-sep" />
           <button
+            className="icon-btn"
+            disabled={!p3d.canUndo}
+            onClick={doUndo}
+            title={tx("撤销组配置 (Ctrl+Z)", "Undo group settings (Ctrl+Z)")}
+          >
+            <IconUndo />
+          </button>
+          <button
+            className="icon-btn"
+            disabled={!p3d.canRedo}
+            onClick={doRedo}
+            title={tx("重做组配置 (Ctrl+Y)", "Redo group settings (Ctrl+Y)")}
+          >
+            <IconRedo />
+          </button>
+          <span className="p3d-tray-sep" />
+          <button
             className={`icon-btn${s3d.calibMode ? " primary" : ""}`}
-            disabled={!allBound}
+            disabled={!g1Bound}
             onClick={() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true }))}
             title={tx(
-              "椭球校准模式：点云采样 + 九参数拟合（磁力计/加计）",
-              "Ellipsoid calibration: point-cloud sampling + 9-parameter fit (mag/acc)",
+              "椭球校准模式：点云采样 + 九参数拟合（磁力计/加计；采样源=组1）",
+              "Ellipsoid calibration: point-cloud sampling + 9-parameter fit (mag/acc; source = group 1)",
             )}
           >
             <IconTarget />
           </button>
           <button
             className="icon-btn p3d-tray-danger"
-            onClick={() => {
-              void (async () => {
-                const ok = await confirmDialog({
-                  title: tx("清空轨迹数据", "Clear trajectory data"),
-                  message: tx(
-                    "清空已积累的轨迹：历史全部跳过，新数据从零画起。\n绑定、显示设置与校准采样不受影响。",
-                    "Clear accumulated trajectory: history is skipped and new data draws from zero.\nBindings, display settings and calibration sampling are untouched.",
-                  ),
-                  danger: true,
-                  okLabel: tx("清空", "Clear"),
-                });
-                if (!ok) return;
-                // 运行/视图类操作：Operator 只读模式放行（红线 27——不改配置，数据可重新积累）
-                plot3dStore.clearData();
-                sceneRef.current?.clearTrajectory();
-                toast(tx("轨迹数据已清空，等待新数据", "Trajectory cleared, waiting for new data"));
-              })();
-            }}
+            onClick={() => void clearGroupData()}
             title={tx(
-              "清空轨迹数据：历史清零、新数据从零画（校准采样不动；与右键菜单「清空轨迹显示」不同）",
-              "Clear trajectory data: drop history, draw new data from zero (calibration sampling untouched; differs from menu Clear-trajectory-display)",
+              "清空三组轨迹数据：历史清零、新数据从零画（校准采样不动；不可撤销）",
+              "Clear all groups' trajectory data: drop history, new data from zero (calibration untouched; not undoable)",
             )}
           >
             <IconTrash />
           </button>
         </div>
 
-        {/* 统计（右下）：scrub/回放时追加游标相对秒（tbTRef 直写 DOM）；
-            配对诊断副行（P75 B2）：三轴值域 + 配对/跳过计数 */}
+        {/* 统计（右下）：按组点数 + 游标秒数 + 主组配对诊断副行 */}
         {ready && (
           <div className="p3d-hud br">
             {pairLine && (
               <div
                 className="p3d-hud-sub"
                 title={tx(
-                  "三轴值域与时间戳配对情况：配对=成功生成轨迹点，跳过=容差外/无数据被丢弃（3D 不编造坐标）",
-                  "Per-axis range and timestamp pairing: paired = points emitted, skipped = dropped (out-of-tolerance / no data)",
+                  "三轴值域与时间戳配对情况（主组）：配对=成功生成轨迹点，跳过=容差外/无数据被丢弃（3D 不编造坐标）",
+                  "Per-axis range and timestamp pairing (primary group): paired = points emitted, skipped = dropped (out-of-tolerance / no data)",
                 )}
               >
                 {pairLine}
               </div>
             )}
-            {totalPts > 0
-              ? `${totalPts.toLocaleString()} ${tx("点", "pts")}${settings.perfHud ? ` · ${stats.fps} FPS` : ""}`
-              : ""}
+            {groupPtsLine || (totalPts > 0 ? totalPts.toLocaleString() : "")}
+            {settings.perfHud && totalPts > 0 ? ` · ${stats.fps} FPS` : ""}
             <span ref={tbTRef} />
           </div>
         )}
@@ -1347,7 +1845,12 @@ export function Plot3D() {
           <div className="p3d-hud bl">
             <div className={`p3d-calib${fitStale ? " stale" : ""}`}>
               <div className="p3d-measure-head">
-                <b>{tx("椭球校准", "Calibration")}</b>
+                <b>
+                  {tx("椭球校准", "Calibration")}{" "}
+                  <span className="p3d-calib-src">
+                    {tx("采样源：组1", "source: G1")} {s3d.groups[0].name}
+                  </span>
+                </b>
                 <button
                   className="p3d-mclose"
                   onClick={exitCalibMode}
@@ -1611,13 +2114,16 @@ export function Plot3D() {
         )}
 
         {/* 未绑定提示（居中，不挡交互） */}
-        {ready && !allBound && (
+        {ready && !anyBound && (
           <div className="p3d-hint">
             <div>
-              {tx("绑定 X / Y / Z 三个通道后开始绘制 3D 轨迹", "Bind X / Y / Z channels to draw the 3D trajectory")}
+              {tx("每组绑定 X / Y / Z 三个通道后开始绘制（最多三组叠加）", "Bind X / Y / Z channels per group to draw (up to three overlaid trajectories)")}
               <br />
               <span className="p3d-hint-sub">
-                {tx("通道在 2D 曲线图例或帧画布中添加，此处直接共享", "Channels are shared from the 2D plot legend / frame canvas")}
+                {tx(
+                  "通道在 2D 曲线图例或帧画布中添加；也可直接拖图例字段到左上组行智能绑定",
+                  "Channels are shared from the 2D legend / frame canvas — or drag a legend field onto a group row",
+                )}
               </span>
             </div>
           </div>
@@ -1676,7 +2182,19 @@ export function Plot3D() {
         <div ref={tipRef} className="p3d-tip" />
       </div>
 
-      {/* 右键菜单：视图 / 测量 / 数据 / 设置 */}
+      {/* 组设置弹层（P87a） */}
+      {dlg && (
+        <GroupDialog
+          key={dlg}
+          gid={dlg}
+          channels={plot.channels}
+          opLocked={opLocked}
+          roTip={roTip}
+          onClose={() => setDlg(null)}
+        />
+      )}
+
+      {/* 右键菜单：画布态（组/模式/视图/测量/数据/设置） + 组行态（快捷操作） */}
       {menu &&
         createPortal(
           <div
@@ -1690,522 +2208,286 @@ export function Plot3D() {
             onContextMenu={(e) => e.preventDefault()}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="ctx-title">{tx("3D 轨迹", "3D Trajectory")}</div>
-            {opLocked && (
-              <div className="ctx-lock" title={tx("Operator 只读模式：设置项已锁定，视角/测量/校准仍可用", "Operator read-only: settings locked; view, measure and calibration remain available")}>
-                <IconLock />
-                {tx("Operator 只读：设置已锁定", "Operator read-only: settings locked")}
-              </div>
-            )}
+            {menu.kind === "row" && menu.gid ? (
+              (() => {
+                const g = s3d.groups.find((x) => x.id === menu.gid)!;
+                const bound = !!(g.chX && g.chY && g.chZ);
+                return (
+                  <>
+                    <div className="ctx-title">
+                      {tx("组", "Group")} {g.name}
+                    </div>
+                    {opLocked && (
+                      <div className="ctx-lock">
+                        <IconLock />
+                        {tx("Operator 只读：设置已锁定", "Operator read-only: settings locked")}
+                      </div>
+                    )}
+                    <button className="ctx-item" onClick={closeAnd(() => setDlg(g.id))}>
+                      {tx("组设置…", "Group settings…")}
+                    </button>
+                    <button
+                      className="ctx-item"
+                      onClick={closeAnd(() => plot3dStore.setGroupVisible(g.id, !g.visible))}
+                    >
+                      {g.visible ? <IconEye /> : <IconEyeOff />}{" "}
+                      {g.visible ? tx("隐藏此组", "Hide group") : tx("显示此组", "Show group")}
+                    </button>
+                    <button
+                      className="ctx-item"
+                      disabled={!bound}
+                      onClick={closeAnd(() => sceneRef.current?.focusGroup(g.id))}
+                    >
+                      {tx("聚焦此组", "Focus group")}
+                    </button>
+                    <button
+                      className="ctx-item"
+                      disabled={!bound}
+                      onClick={closeAnd(() => void exportCsv(g.id))}
+                    >
+                      {tx("导出本组 CSV", "Export CSV")}
+                    </button>
+                    <button
+                      className="ctx-item danger"
+                      onClick={closeAnd(() => void clearGroupData(g.id))}
+                    >
+                      {tx("清空本组数据（不可撤销）", "Clear data (not undoable)")}
+                    </button>
+                  </>
+                );
+              })()
+            ) : (
+              <>
+                <div className="ctx-title">{tx("3D 轨迹", "3D Trajectory")}</div>
+                {opLocked && (
+                  <div className="ctx-lock" title={tx("Operator 只读模式：设置项已锁定，视角/测量/校准仍可用", "Operator read-only: settings locked; view, measure and calibration remain available")}>
+                    <IconLock />
+                    {tx("Operator 只读：设置已锁定", "Operator read-only: settings locked")}
+                  </div>
+                )}
 
-            <div className="ctx-group">{tx("模式", "Mode")}</div>
-            <button
-              className="ctx-item"
-              disabled={!allBound}
-              title={!allBound ? tx("需先绑定 X / Y / Z 三轴", "Bind X / Y / Z axes first") : undefined}
-              onClick={closeAnd(() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true })))}
-            >
-              {s3d.calibMode ? <IconDot /> : <IconCircle />} {tx("椭球校准模式", "Ellipsoid calibration")}
-            </button>
+                <div className="ctx-group">{tx("组", "Groups")}</div>
+                {s3d.groups.map((g) => {
+                  const bound = !!(g.chX && g.chY && g.chZ);
+                  return (
+                    <button key={g.id} className="ctx-item" onClick={closeAnd(() => setDlg(g.id))}>
+                      <span className="p3d-mi-dot" style={{ background: g.color }} />
+                      {g.name}
+                      <span className="ctx-cur">
+                        {bound ? modeLabel(g.mode) : tx("未绑齐", "unbound")}
+                      </span>
+                    </button>
+                  );
+                })}
 
-            <div className="ctx-group">{tx("视图", "View")}</div>
-            <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.setViewPreset("top"))}>
-              {tx("俯视", "Top view")}
-            </button>
-            <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.setViewPreset("side"))}>
-              {tx("侧视", "Side view")}
-            </button>
-            <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.setViewPreset("front"))}>
-              {tx("正视", "Front view")}
-            </button>
-            <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.setViewPreset("iso"))}>
-              {tx("等轴", "Isometric")}
-            </button>
-            <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.resetView())}>
-              {tx("重置视角", "Reset view")}
-            </button>
-            <button
-              className="ctx-item"
-              onClick={closeAnd(() => plot3dStore.setSetting({ autoRotate: !s3d.autoRotate }))}
-            >
-              {s3d.autoRotate ? <IconDot /> : <IconCircle />} {tx("自动旋转", "Auto rotate")}
-            </button>
-            <button
-              className="ctx-item"
-              onClick={closeAnd(() => plot3dStore.setSetting({ follow: !s3d.follow }))}
-            >
-              {s3d.follow ? <IconDot /> : <IconCircle />} {tx("跟随模式（锁定最新点）", "Follow mode (lock to latest point)")}
-            </button>
-            <button
-              className="ctx-item"
-              disabled={opLocked}
-              title={opLocked ? tx("键盘飞行", "Keyboard flight") + roTip : undefined}
-              onClick={closeAnd(() => plot3dStore.setSetting({ keyFlight: !s3d.keyFlight }))}
-            >
-              {s3d.keyFlight ? <IconDot /> : <IconCircle />} {tx("键盘飞行（WASD/QE/方向键，悬停生效）", "Keyboard flight (WASD/QE/arrows, while hovered)")}
-            </button>
-            <button
-              className="ctx-item"
-              disabled={opLocked}
-              title={opLocked ? tx("缩放到光标", "Zoom to cursor") + roTip : undefined}
-              onClick={closeAnd(() => plot3dStore.setSetting({ zoomToCursor: !s3d.zoomToCursor }))}
-            >
-              {s3d.zoomToCursor ? <IconDot /> : <IconCircle />} {tx("缩放到光标", "Zoom to cursor")}
-            </button>
-            <button
-              className="ctx-item"
-              disabled={opLocked}
-              title={opLocked ? tx("网格与坐标轴", "Grid & axes") + roTip : undefined}
-              onClick={closeAnd(() => plot3dStore.setSetting({ showGrid: !s3d.showGrid }))}
-            >
-              {s3d.showGrid ? <IconDot /> : <IconCircle />} {tx("网格与坐标轴", "Grid & axes")}
-            </button>
-            {s3d.showGrid &&
-              (
-                [
-                  ["coarse", tx("网格：疏（步长×2）", "Grid: coarse (step ×2)")],
-                  ["std", tx("网格：标准（自适应）", "Grid: standard (auto)")],
-                  ["fine", tx("网格：密（步长×0.5）", "Grid: fine (step ×0.5)")],
-                ] as const
-              ).map(([v, lab]) => (
+                <div className="ctx-group">{tx("模式", "Mode")}</div>
                 <button
-                  key={v}
+                  className="ctx-item"
+                  disabled={!g1Bound}
+                  title={!g1Bound ? tx("需先给组1 绑定 X / Y / Z 三轴", "Bind group 1's X / Y / Z axes first") : undefined}
+                  onClick={closeAnd(() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true })))}
+                >
+                  {s3d.calibMode ? <IconDot /> : <IconCircle />} {tx("椭球校准模式（采样源：组1）", "Ellipsoid calibration (source: G1)")}
+                </button>
+
+                <div className="ctx-group">{tx("视图", "View")}</div>
+                <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.setViewPreset("top"))}>
+                  {tx("俯视", "Top view")}
+                </button>
+                <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.setViewPreset("side"))}>
+                  {tx("侧视", "Side view")}
+                </button>
+                <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.setViewPreset("front"))}>
+                  {tx("正视", "Front view")}
+                </button>
+                <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.setViewPreset("iso"))}>
+                  {tx("等轴", "Isometric")}
+                </button>
+                <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.resetView())}>
+                  {tx("重置视角", "Reset view")}
+                </button>
+                <button
+                  className="ctx-item"
+                  onClick={closeAnd(() => plot3dStore.setSetting({ autoRotate: !s3d.autoRotate }))}
+                >
+                  {s3d.autoRotate ? <IconDot /> : <IconCircle />} {tx("自动旋转", "Auto rotate")}
+                </button>
+                <button
+                  className="ctx-item"
+                  onClick={closeAnd(() => plot3dStore.setSetting({ follow: !s3d.follow }))}
+                >
+                  {s3d.follow ? <IconDot /> : <IconCircle />} {tx("跟随模式（锁定最新点）", "Follow mode (lock to latest point)")}
+                </button>
+                <button
                   className="ctx-item"
                   disabled={opLocked}
-                  onClick={closeAnd(() => plot3dStore.setSetting({ gridDensity: v }))}
+                  title={opLocked ? tx("键盘飞行", "Keyboard flight") + roTip : undefined}
+                  onClick={closeAnd(() => plot3dStore.setSetting({ keyFlight: !s3d.keyFlight }))}
                 >
-                  {s3d.gridDensity === v ? <IconDot /> : <IconCircle />} {lab}
-                </button>
-              ))}
-            <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.focusLatest())}>
-              {tx("聚焦最新点", "Focus latest point")}
-            </button>
-
-            <div className="ctx-group">{tx("测量", "Measure")}</div>
-            <button
-              className="ctx-item"
-              onClick={closeAnd(() => (measureModeRef.current ? exitMeasure() : enterMeasure()))}
-            >
-              {measureMode ? <IconDot /> : <IconCircle />} {tx("测距模式（同长按）", "Measure mode (same as long-press)")}
-            </button>
-            <button
-              className="ctx-item"
-              disabled={!measureInfo}
-              onClick={closeAnd(() => sceneRef.current?.setMeasure(null, null))}
-            >
-              {tx("清除测量", "Clear measurement")}
-            </button>
-
-            <div className="ctx-group">{tx("数据", "Data")}</div>
-            <button className="ctx-item" disabled={!hoverRef.current} onClick={closeAnd(copyHover)}>
-              {tx("复制悬停点坐标", "Copy hovered point")}
-            </button>
-            <button
-              className="ctx-item"
-              disabled={!allBound}
-              onClick={closeAnd(() => void exportCsv())}
-            >
-              {tx("导出轨迹 CSV", "Export trajectory CSV")}
-            </button>
-            <button className="ctx-item" onClick={closeAnd(() => void exportPng())}>
-              {tx("快照 PNG", "Snapshot PNG")}
-            </button>
-            <button
-              className="ctx-item"
-              disabled={endRel <= 0}
-              onClick={closeAnd(() => clearScrub())}
-            >
-              {tx("回到最新（清除时间游标）", "Back to latest (clear time cursor)")}
-            </button>
-            <button
-              className="ctx-item danger"
-              onClick={closeAnd(() => sceneRef.current?.clearTrajectory())}
-            >
-              {tx("清空轨迹（不影响采集）", "Clear trajectory (keeps capture)")}
-            </button>
-
-            <div className="ctx-group">{tx("设置", "Settings")}</div>
-            <div
-              ref={styleRowRef}
-              className={`ctx-row${opLocked ? " dis" : ""}`}
-              onMouseEnter={() => {
-                if (opLocked) return;
-                disarmSub();
-                setSub("style");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                if (opLocked) return;
-                setSub((s) => (s === "style" ? null : "style"));
-                setSubPinned(sub !== "style");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item" disabled={opLocked}>
-                <span className="ctx-item-l">
-                  {tx("轨迹样式", "Trajectory style")}{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">{styleCur}</span>
-              </button>
-            </div>
-            <div
-              ref={fadeRowRef}
-              className={`ctx-row${opLocked ? " dis" : ""}`}
-              onMouseEnter={() => {
-                if (opLocked) return;
-                disarmSub();
-                setSub("fade");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                if (opLocked) return;
-                setSub((s) => (s === "fade" ? null : "fade"));
-                setSubPinned(sub !== "fade");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item" disabled={opLocked}>
-                <span className="ctx-item-l">
-                  {tx("渐隐窗口", "Fade window")}{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">{fadeCur}</span>
-              </button>
-            </div>
-            <div
-              ref={colorRowRef}
-              className={`ctx-row${opLocked ? " dis" : ""}`}
-              onMouseEnter={() => {
-                if (opLocked) return;
-                disarmSub();
-                setSub("color");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                if (opLocked) return;
-                setSub((s) => (s === "color" ? null : "color"));
-                setSubPinned(sub !== "color");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item" disabled={opLocked}>
-                <span className="ctx-item-l">
-                  {tx("着色", "Color by")}{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">{colorCur}</span>
-              </button>
-            </div>
-            <div
-              ref={densityRowRef}
-              className={`ctx-row${opLocked ? " dis" : ""}`}
-              onMouseEnter={() => {
-                if (opLocked) return;
-                disarmSub();
-                setSub("density");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                if (opLocked) return;
-                setSub((s) => (s === "density" ? null : "density"));
-                setSubPinned(sub !== "density");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item" disabled={opLocked}>
-                <span className="ctx-item-l">
-                  {tx("点密度", "Point density")}{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">{densityCur}</span>
-              </button>
-            </div>
-            <div
-              ref={pairRowRef}
-              className={`ctx-row${opLocked ? " dis" : ""}`}
-              onMouseEnter={() => {
-                if (opLocked) return;
-                disarmSub();
-                setSub("pair");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                if (opLocked) return;
-                setSub((s) => (s === "pair" ? null : "pair"));
-                setSubPinned(sub !== "pair");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item" disabled={opLocked}>
-                <span className="ctx-item-l">
-                  {tx("数据配对", "Data pairing")}{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">{pairCur}</span>
-              </button>
-            </div>
-            <div
-              ref={tolRowRef}
-              className={`ctx-row${opLocked || s3d.pairMode === "union" ? " dis" : ""}`}
-              onMouseEnter={() => {
-                if (opLocked || s3d.pairMode === "union") return;
-                disarmSub();
-                setSub("tol");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                if (opLocked || s3d.pairMode === "union") return;
-                setSub((s) => (s === "tol" ? null : "tol"));
-                setSubPinned(sub !== "tol");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item" disabled={opLocked || s3d.pairMode === "union"}>
-                <span className="ctx-item-l">
-                  {tx("配对容差", "Pair tolerance")}{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">{tolCur}</span>
-              </button>
-            </div>
-            <div
-              ref={ascaleRowRef}
-              className={`ctx-row${opLocked ? " dis" : ""}`}
-              onMouseEnter={() => {
-                if (opLocked) return;
-                disarmSub();
-                setSub("ascale");
-              }}
-              onMouseLeave={() => {
-                if (!subPinned) armSub();
-              }}
-              onClick={() => {
-                if (opLocked) return;
-                setSub((s) => (s === "ascale" ? null : "ascale"));
-                setSubPinned(sub !== "ascale");
-                disarmSub();
-              }}
-            >
-              <button className="ctx-item" disabled={opLocked}>
-                <span className="ctx-item-l">
-                  {tx("三轴缩放", "Axis scaling")}{" "}
-                  <span className="ctx-arrow">
-                    <IconChevron size={12} />
-                  </span>
-                </span>
-                <span className="ctx-cur">{ascaleCur}</span>
-              </button>
-            </div>
-            <button className="ctx-item" disabled={opLocked} onClick={closeAnd(() => plot3dStore.resetSettings())}>
-              {tx("恢复默认", "Reset to defaults")}
-            </button>
-
-            {/* 样式子菜单 */}
-            {sub === "style" && (
-              <Flyout anchor={styleRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={150}>
-                <button
-                  className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ style: "line+points" }))}
-                >
-                  {s3d.style === "line+points" ? <IconDot /> : <IconCircle />} {tx("线 + 点", "Line + points")}
+                  {s3d.keyFlight ? <IconDot /> : <IconCircle />} {tx("键盘飞行（WASD/QE/方向键，悬停生效）", "Keyboard flight (WASD/QE/arrows, while hovered)")}
                 </button>
                 <button
                   className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ style: "line" }))}
+                  disabled={opLocked}
+                  title={opLocked ? tx("缩放到光标", "Zoom to cursor") + roTip : undefined}
+                  onClick={closeAnd(() => plot3dStore.setSetting({ zoomToCursor: !s3d.zoomToCursor }))}
                 >
-                  {s3d.style === "line" ? <IconDot /> : <IconCircle />} {tx("仅线", "Line only")}
+                  {s3d.zoomToCursor ? <IconDot /> : <IconCircle />} {tx("缩放到光标", "Zoom to cursor")}
                 </button>
                 <button
                   className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ style: "points" }))}
+                  disabled={opLocked}
+                  title={opLocked ? tx("网格与坐标轴", "Grid & axes") + roTip : undefined}
+                  onClick={closeAnd(() => plot3dStore.setSetting({ showGrid: !s3d.showGrid }))}
                 >
-                  {s3d.style === "points" ? <IconDot /> : <IconCircle />} {tx("仅点", "Points only")}
+                  {s3d.showGrid ? <IconDot /> : <IconCircle />} {tx("网格与坐标轴", "Grid & axes")}
                 </button>
-              </Flyout>
-            )}
-
-            {/* 渐隐子菜单 */}
-            {sub === "fade" && (
-              <Flyout anchor={fadeRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={150}>
-                {([10, 60, 300, 0] as const).map((f) => (
-                  <button
-                    key={f}
-                    className="ctx-item"
-                    onClick={closeAnd(() => plot3dStore.setSetting({ fade: f }))}
-                  >
-                    {s3d.fade === f ? <IconDot /> : <IconCircle />}{" "}
-                    {f === 0
-                      ? tx("全程渐变", "Full span")
-                      : f === 300
-                        ? tx("最近 5 分钟", "Last 5 min")
-                        : tx(`最近 ${f} 秒`, `Last ${f}s`)}
-                  </button>
-                ))}
-              </Flyout>
-            )}
-
-            {/* 着色子菜单：按时间 / 按通道（通道列表） */}
-            {sub === "color" && (
-              <Flyout anchor={colorRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={170}>
-                <button
-                  className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ colorBy: "time" }))}
-                >
-                  {s3d.colorBy === "time" ? <IconDot /> : <IconCircle />} {tx("按时间", "By time")}
-                </button>
-                {plot.channels.length > 0 && <div className="ctx-group">{tx("按通道", "By channel")}</div>}
-                {plot.channels.map((c) => (
-                  <button
-                    key={c.id}
-                    className="ctx-item"
-                    onClick={closeAnd(() =>
-                      plot3dStore.setSetting({ colorBy: "ch", colorCh: c.id }),
-                    )}
-                  >
-                    {s3d.colorBy === "ch" && s3d.colorCh === c.id ? <IconDot /> : <IconCircle />} {c.name}
-                  </button>
-                ))}
-              </Flyout>
-            )}
-
-            {/* 密度子菜单 */}
-            {sub === "density" && (
-              <Flyout anchor={densityRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={160}>
-                <button
-                  className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ density: "high" }))}
-                >
-                  {s3d.density === "high" ? <IconDot /> : <IconCircle />} {tx("高（1:1 全点）", "High (1:1)")}
-                </button>
-                <button
-                  className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ density: "mid" }))}
-                >
-                  {s3d.density === "mid" ? <IconDot /> : <IconCircle />} {tx("中（1:2 抽稀）", "Mid (1:2)")}
-                </button>
-                <button
-                  className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ density: "low" }))}
-                >
-                  {s3d.density === "low" ? <IconDot /> : <IconCircle />} {tx("低（1:4 抽稀）", "Low (1:4)")}
-                </button>
-              </Flyout>
-            )}
-
-            {/* 数据配对子菜单（P75 B2）：同帧三轴的阶梯轨迹请用插值配对 */}
-            {sub === "pair" && (
-              <Flyout anchor={pairRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={210}>
-                <button
-                  className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ pairMode: "interp" }))}
-                  title={tx(
-                    "按 X 时间轴对 Y/Z 做带容差线性插值：轨迹平滑（推荐）",
-                    "Tolerance-checked linear interp of Y/Z on the X timeline: smooth trajectory (recommended)",
-                  )}
-                >
-                  {s3d.pairMode === "interp" ? <IconDot /> : <IconCircle />}{" "}
-                  {tx("插值配对（推荐）", "Interpolated (recommended)")}
-                </button>
-                <button
-                  className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ pairMode: "nearest" }))}
-                  title={tx(
-                    "按 X 时间轴取 Y/Z 最近样本：保持原始采样节奏（阶梯感）",
-                    "Nearest Y/Z sample per X timestamp: keeps raw cadence (stepped)",
-                  )}
-                >
-                  {s3d.pairMode === "nearest" ? <IconDot /> : <IconCircle />}{" "}
-                  {tx("最近邻配对", "Nearest neighbor")}
-                </button>
-                <button
-                  className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ pairMode: "union" }))}
-                  title={tx(
-                    "旧版联合前向填充口径：与 P75 之前行为一致（横平竖直阶梯）",
-                    "Legacy union forward-fill: same as before P75 (right-angle staircase)",
-                  )}
-                >
-                  {s3d.pairMode === "union" ? <IconDot /> : <IconCircle />}{" "}
-                  {tx("旧版前向填充", "Legacy forward-fill")}
-                </button>
-              </Flyout>
-            )}
-
-            {/* 配对容差子菜单（P75 B2）：Y/Z 样本距锚点超过容差即丢弃（不编造坐标）；0=自动 */}
-            {sub === "tol" && s3d.pairMode !== "union" && (
-              <Flyout anchor={tolRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={200}>
-                {([0, 5, 10, 25, 50, 100] as const).map((v) => (
+                {s3d.showGrid &&
+                  (
+                    [
+                      ["coarse", tx("网格：疏（步长×2）", "Grid: coarse (step ×2)")],
+                      ["std", tx("网格：标准（自适应）", "Grid: standard (auto)")],
+                      ["fine", tx("网格：密（步长×0.5）", "Grid: fine (step ×0.5)")],
+                    ] as const
+                  ).map(([v, lab]) => (
                     <button
                       key={v}
                       className="ctx-item"
-                      onClick={closeAnd(() => plot3dStore.setSetting({ pairTolMs: v }))}
-                      title={
-                        v === 0
-                          ? tx(
-                              "按三轴采样节奏自动推算（1.5×锚点间隔）",
-                              "Derived from the axes' sampling cadence (1.5× anchor interval)",
-                            )
-                          : undefined
-                      }
+                      disabled={opLocked}
+                      onClick={closeAnd(() => plot3dStore.setSetting({ gridDensity: v }))}
                     >
-                      {s3d.pairTolMs === v ? <IconDot /> : <IconCircle />}{" "}
-                      {v === 0 ? tx("自动", "Auto") : `${v} ms`}
+                      {s3d.gridDensity === v ? <IconDot /> : <IconCircle />} {lab}
                     </button>
                   ))}
-              </Flyout>
-            )}
+                <button className="ctx-item" onClick={closeAnd(() => sceneRef.current?.focusLatest())}>
+                  {tx("聚焦最新点", "Focus latest point")}
+                </button>
 
-            {/* 三轴缩放子菜单（P75 B2）：等比=真实比例；逐轴=各轴独立撑满（扁平数据查看） */}
-            {sub === "ascale" && (
-              <Flyout anchor={ascaleRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={220}>
+                <div className="ctx-group">{tx("测量", "Measure")}</div>
                 <button
                   className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ axisScale: "uniform" }))}
-                  title={tx(
-                    "三轴同一比例尺：反映真实几何形状（默认）",
-                    "One scale for all axes: true geometry (default)",
-                  )}
+                  onClick={closeAnd(() => (measureModeRef.current ? exitMeasure() : enterMeasure()))}
                 >
-                  {s3d.axisScale === "uniform" ? <IconDot /> : <IconCircle />}{" "}
-                  {tx("等比（真实比例）", "Uniform (true scale)")}
+                  {measureMode ? <IconDot /> : <IconCircle />} {tx("测距模式（同长按）", "Measure mode (same as long-press)")}
                 </button>
                 <button
                   className="ctx-item"
-                  onClick={closeAnd(() => plot3dStore.setSetting({ axisScale: "perAxis" }))}
-                  title={tx(
-                    "各轴独立归一化撑满视锥：查看扁平/量级悬殊的数据",
-                    "Normalize each axis to fill the view: for flat / mixed-magnitude data",
-                  )}
+                  disabled={!measureInfo}
+                  onClick={closeAnd(() => sceneRef.current?.setMeasure(null, null))}
                 >
-                  {s3d.axisScale === "perAxis" ? <IconDot /> : <IconCircle />}{" "}
-                  {tx("逐轴归一化", "Per-axis normalize")}
+                  {tx("清除测量", "Clear measurement")}
                 </button>
-              </Flyout>
+
+                <div className="ctx-group">{tx("数据", "Data")}</div>
+                <button className="ctx-item" disabled={!hoverRef.current} onClick={closeAnd(copyHover)}>
+                  {tx("复制悬停点坐标", "Copy hovered point")}
+                </button>
+                {s3d.groups.map((g) => (
+                  <button
+                    key={g.id}
+                    className="ctx-item"
+                    disabled={!(g.chX && g.chY && g.chZ)}
+                    onClick={closeAnd(() => void exportCsv(g.id))}
+                  >
+                    <span className="p3d-mi-dot" style={{ background: g.color }} />
+                    {tx(`导出 ${g.name} CSV`, `Export ${g.name} CSV`)}
+                  </button>
+                ))}
+                <button className="ctx-item" onClick={closeAnd(() => void exportPng())}>
+                  {tx("快照 PNG", "Snapshot PNG")}
+                </button>
+                <button
+                  className="ctx-item"
+                  disabled={endRel <= 0}
+                  onClick={closeAnd(() => clearScrub())}
+                >
+                  {tx("回到最新（清除时间游标）", "Back to latest (clear time cursor)")}
+                </button>
+                <button
+                  className="ctx-item"
+                  disabled={!p3d.canUndo}
+                  onClick={closeAnd(doUndo)}
+                >
+                  {tx("撤销组配置（Ctrl+Z）", "Undo group settings (Ctrl+Z)")}
+                </button>
+                <button
+                  className="ctx-item"
+                  disabled={!p3d.canRedo}
+                  onClick={closeAnd(doRedo)}
+                >
+                  {tx("重做组配置（Ctrl+Y）", "Redo group settings (Ctrl+Y)")}
+                </button>
+                <button
+                  className="ctx-item danger"
+                  onClick={closeAnd(() => void clearGroupData())}
+                >
+                  {tx("清空全部轨迹数据（不可撤销）", "Clear all trajectory data (not undoable)")}
+                </button>
+
+                <div className="ctx-group">{tx("设置", "Settings")}</div>
+                <div
+                  ref={ascaleRowRef}
+                  className={`ctx-row${opLocked ? " dis" : ""}`}
+                  onMouseEnter={() => {
+                    if (opLocked) return;
+                    disarmSub();
+                    setSub("ascale");
+                  }}
+                  onMouseLeave={() => {
+                    if (!subPinned) armSub();
+                  }}
+                  onClick={() => {
+                    if (opLocked) return;
+                    setSub((s) => (s === "ascale" ? null : "ascale"));
+                    setSubPinned(sub !== "ascale");
+                    disarmSub();
+                  }}
+                >
+                  <button className="ctx-item" disabled={opLocked}>
+                    <span className="ctx-item-l">
+                      {tx("三轴缩放", "Axis scaling")}{" "}
+                      <span className="ctx-arrow">
+                        <IconChevron size={12} />
+                      </span>
+                    </span>
+                    <span className="ctx-cur">{ascaleCur}</span>
+                  </button>
+                </div>
+                <button className="ctx-item" disabled={opLocked} onClick={closeAnd(() => plot3dStore.resetSettings())}>
+                  {tx("恢复默认（可撤销）", "Reset to defaults (undoable)")}
+                </button>
+                <div className="fc-dlg-hint p3d-mi-note">
+                  {tx("组级显示设置（模式/平滑/着色/密度/配对）已移入组行设置弹层", "per-group display settings now live in the group dialog")}
+                </div>
+
+                {/* 三轴缩放子菜单（P75 B2）：等比=真实比例；逐轴=各轴独立撑满（扁平数据查看） */}
+                {sub === "ascale" && (
+                  <Flyout anchor={ascaleRowRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={220}>
+                    <button
+                      className="ctx-item"
+                      onClick={closeAnd(() => plot3dStore.setSetting({ axisScale: "uniform" }))}
+                      title={tx(
+                        "三轴同一比例尺：反映真实几何形状（默认）",
+                        "One scale for all axes: true geometry (default)",
+                      )}
+                    >
+                      {s3d.axisScale === "uniform" ? <IconDot /> : <IconCircle />}{" "}
+                      {tx("等比（真实比例）", "Uniform (true scale)")}
+                    </button>
+                    <button
+                      className="ctx-item"
+                      onClick={closeAnd(() => plot3dStore.setSetting({ axisScale: "perAxis" }))}
+                      title={tx(
+                        "各轴独立归一化撑满视锥：查看扁平/量级悬殊的数据",
+                        "Normalize each axis to fill the view: for flat / mixed-magnitude data",
+                      )}
+                    >
+                      {s3d.axisScale === "perAxis" ? <IconDot /> : <IconCircle />}{" "}
+                      {tx("逐轴归一化", "Per-axis normalize")}
+                    </button>
+                  </Flyout>
+                )}
+              </>
             )}
           </div>,
           document.body,

@@ -1,14 +1,17 @@
 /**
- * P69 plot3dStore 数据泵测试。
+ * P69 plot3dStore 数据泵测试 · P87a 三组升级。
  *
  * 覆盖核心红线逻辑：
+ * - v1→v2 设置迁移等价（单轨迹 → 组1；style→mode/showDots 映射；旧 Operator 包兼容）
+ * - 逐组独立：一组签名变化只重灌该组；水位续传逐组互不干扰
  * - 时间水位 lastT 续传：源重建/裁剪后不重复消费、不漏段
- * - 绑定/通道/密度/配对签名变化 → reloaded 全量重灌
+ * - 绑定/通道/密度/配对/模式/平滑签名变化 → 该组 reloaded 全量重灌
  * - 密度 stride 抽稀（高 1:1 / 中 1:2 / 低 1:4）
  * - 三轴时间戳配对（P75 B2）：同帧同 ts → 每帧 1 点（阶梯根因回归）；
- *   插值/最近邻/union 前向填充；容差外跳过计入 pairSnapshot
- * - 着色通道 valCarry 前向填充；绑定通道被删除 → 自动解绑（悬空纠正语义）
- * - 三轴未绑齐不消费；setSink(null) 停泵（面板关闭零开销）
+ *   插值/最近邻/union 前向填充；容差外跳过计入 pairSnapshot(组)
+ * - 着色通道 valCarry 前向填充；绑定通道被删除 → 逐组自动解绑（悬空纠正语义）
+ * - 三轴未绑齐不消费；从未消费的组不发噪声重灌批次；setSink(null) 停泵
+ * - P87a A7 撤销/重做栈：配置入栈一步还原；重复值不压栈；清空不入栈；上限 50
  * - P70 时间游标：回放跟随 > 手动 scrub > null；seek 向后空批次回退、向前水位跳重；
  *   回放结束恢复 null；lowerBoundLe 二分边界
  */
@@ -88,11 +91,29 @@ function ser(
 }
 
 type Batch = { t: number[]; x: number[]; y: number[]; z: number[]; val: number[] };
+type Call = { entries: store.GroupBatch[]; cursor: number | null };
 
-function collect() {
-  const batches: { b: Batch; reloaded: boolean }[] = [];
-  store.setSink((b, reloaded) => batches.push({ b, reloaded }));
-  return batches;
+function collect(): Call[] {
+  const calls: Call[] = [];
+  store.setSink((entries, cursor) => calls.push({ entries, cursor }));
+  return calls;
+}
+
+/** 组批次序列（过滤出某组的 {b, reloaded}） */
+function gseq(calls: Call[], gid: store.GroupId) {
+  const out: { b: Batch; reloaded: boolean }[] = [];
+  for (const c of calls)
+    for (const e of c.entries) if (e.gid === gid) out.push({ b: e.b, reloaded: e.reloaded });
+  return out;
+}
+
+/** 组1 绑基准三轴：走 import 路径（normalize 全量替换，不压撤销栈——
+ *  撤销栈测试需要「起点栈空」的可控前置） */
+function bindG1() {
+  store.importSettingsFromPkg({
+    v: 2,
+    groups: [{ id: "g1", chX: "ax", chY: "ay", chZ: "az" }],
+  });
 }
 
 beforeEach(() => {
@@ -116,31 +137,228 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("plot3dStore 泵", () => {
-  it("三轴未绑齐 → 不消费；绑齐后首个 batch reloaded=true", () => {
-    h.setSeries(makeSeries());
-    const batches = collect();
-    pump(2);
-    expect(batches).toHaveLength(0);
-
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    pump(1);
-    expect(batches).toHaveLength(1);
-    expect(batches[0].reloaded).toBe(true);
-    expect(batches[0].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
-    expect(batches[0].b.x).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(batches[0].b.y).toEqual([11, 12, 13, 14, 15, 16]);
-    expect(batches[0].b.z).toEqual([21, 22, 23, 24, 25, 26]);
+describe("P87a v1→v2 迁移等价", () => {
+  it("旧单轨迹设置 → 组1 完整还原；G2/G3 空；视图字段原位保留", () => {
+    const v1 = {
+      axisX: "ax",
+      axisY: "ay",
+      axisZ: "az",
+      colorBy: "ch" as const,
+      colorCh: "mag",
+      fade: 300 as const,
+      style: "line+points" as const,
+      density: "mid" as const,
+      autoRotate: true,
+      follow: false,
+      showGrid: false,
+      gridDensity: "fine" as const,
+      keyFlight: true,
+      zoomToCursor: true,
+      pairMode: "nearest" as const,
+      pairTolMs: 25,
+      axisScale: "perAxis" as const,
+    };
+    expect(store.importSettingsFromPkg(v1)).toBe(true);
+    const s = store.getSnapshot().settings;
+    expect(s.groups[0]).toMatchObject({
+      chX: "ax",
+      chY: "ay",
+      chZ: "az",
+      colorBy: "ch",
+      colorCh: "mag",
+      fade: 300,
+      density: "mid",
+      mode: "line", // style line+points → line + 叠画点
+      showDots: true,
+      pairMode: "nearest",
+      pairTolMs: 25,
+    });
+    expect(s.groups[1].chX).toBe("");
+    expect(s.groups[2].chX).toBe("");
+    expect(s).toMatchObject({
+      autoRotate: true,
+      showGrid: false,
+      gridDensity: "fine",
+      keyFlight: true,
+      zoomToCursor: true,
+      axisScale: "perAxis",
+      calibMode: false,
+    });
   });
 
+  it("style 枚举映射：points→点集；line→不叠画点；缺省→line+叠画", () => {
+    store.importSettingsFromPkg({ axisX: "ax", style: "points" });
+    expect(store.getGroup("g1")).toMatchObject({ mode: "points" });
+    store.importSettingsFromPkg({ axisX: "ax", style: "line" });
+    expect(store.getGroup("g1")).toMatchObject({ mode: "line", showDots: false });
+    store.importSettingsFromPkg({ axisX: "ax" });
+    expect(store.getGroup("g1")).toMatchObject({ mode: "line", showDots: true });
+  });
+
+  it("v2 对象非法字段逐项回退默认；groups 缺失视为 v1", () => {
+    store.importSettingsFromPkg({
+      v: 2,
+      groups: [
+        { name: "  ", color: "red", pointSize: 999, opacity: 3, smoothWin: 4, mode: "bogus", density: "high" },
+      ],
+      fade: 7,
+    });
+    const g = store.getGroup("g1");
+    expect(g.name).toBe("G1"); // 空白名 → 默认
+    expect(g.color).toBe("#4e9cef"); // 非 hex → 默认组色
+    expect(g.pointSize).toBe(32); // 越界钳位
+    expect(g.opacity).toBe(1);
+    expect(g.smoothWin % 2).toBe(1); // 强制奇数窗
+    expect(g.mode).toBe("line");
+    expect(store.getSnapshot().settings.groups[2].id).toBe("g3"); // 缺补齐
+  });
+});
+
+describe("P87a 三组独立泵", () => {
+  it("两组绑不同通道各自消费；改组2 密度只重灌组2", () => {
+    h.setSeries(makeSeries());
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az" });
+    store.updateGroup("g2", { chX: "ay", chY: "az", chZ: "mag" });
+    const calls = collect();
+    pump(1);
+    const q1 = gseq(calls, "g1");
+    const q2 = gseq(calls, "g2");
+    expect(q1).toHaveLength(1);
+    expect(q1[0].b.x).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(q2).toHaveLength(1);
+    // 组2 X=ay、Y=az、Z=mag：mag 从 10ms 才有样本 → t=0 锚点头部无数据被跳过（不编造）
+    expect(q2[0].b.x).toEqual([12, 13, 14, 15, 16]);
+    expect(q2[0].b.t).toEqual([0.01, 0.02, 0.03, 0.04, 0.05]);
+
+    store.updateGroup("g2", { density: "low" });
+    pump(1);
+    const q1b = gseq(calls, "g1");
+    const q2b = gseq(calls, "g2");
+    expect(q1b).toHaveLength(1); // 组1 无签名变化且无新数据 → 不再下发
+    expect(q2b).toHaveLength(2);
+    expect(q2b[1].reloaded).toBe(true);
+    expect(q2b[1].b.x).toEqual([12, 16]); // 组2 全量重灌 1:4（5 点 → 序号 0,4）
+  });
+
+  it("三轴未绑齐 → 不消费；从未消费的组挂载首拍无批次噪声", () => {
+    h.setSeries(makeSeries());
+    const calls = collect();
+    pump(2);
+    expect(calls).toHaveLength(0); // 三组全空绑定 → 不发空 reloaded 噪声
+    store.updateGroup("g1", { chX: "ax", chY: "ay" });
+    pump(1);
+    expect(gseq(calls, "g1")).toHaveLength(0); // 缺 Z → 不消费
+    store.updateGroup("g1", { chZ: "az" });
+    pump(1);
+    const q = gseq(calls, "g1");
+    expect(q).toHaveLength(1);
+    expect(q[0].reloaded).toBe(true);
+    expect(q[0].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+  });
+
+  it("mode 入签名：切 point 触发重灌；曾有数据的组解绑 → 下发空重灌批次清场景", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    const calls = collect();
+    pump(1);
+    expect(gseq(calls, "g1")).toHaveLength(1);
+    store.updateGroup("g1", { mode: "point" });
+    pump(1);
+    const q = gseq(calls, "g1");
+    expect(q[1].reloaded).toBe(true); // 模式变化重灌
+    store.updateGroup("g1", { chX: "" }); // 解绑 X
+    pump(1);
+    const q2 = gseq(calls, "g1");
+    const last = q2[q2.length - 1];
+    expect(last.reloaded).toBe(true);
+    expect(last.b.t).toEqual([]); // 空批次通知场景清零
+  });
+
+  it("bindGroupFirstFree：按 X→Y→Z 填空槽；三槽已满返回 null 不动绑定", () => {
+    expect(store.bindGroupFirstFree("g1", "ax")).toBe("x");
+    expect(store.bindGroupFirstFree("g1", "ay")).toBe("y");
+    expect(store.bindGroupFirstFree("g1", "az")).toBe("z");
+    expect(store.bindGroupFirstFree("g1", "mag")).toBeNull();
+    expect(store.getGroup("g1")).toMatchObject({ chX: "ax", chY: "ay", chZ: "az" });
+  });
+});
+
+describe("P87a 撤销/重做栈", () => {
+  it("配置变更一步撤销/重做；绑定/模式/备注均入栈", () => {
+    bindG1();
+    expect(store.getSnapshot().canUndo).toBe(false); // 栈空起步
+    store.updateGroup("g1", { name: "惯导" });
+    expect(store.getSnapshot().canUndo).toBe(true);
+    expect(store.getSnapshot().settings.groups[0].name).toBe("惯导");
+    expect(store.undo()).toBe(true);
+    expect(store.getSnapshot().settings.groups[0].name).toBe("G1");
+    expect(store.getSnapshot().canRedo).toBe(true);
+    expect(store.redo()).toBe(true);
+    expect(store.getSnapshot().settings.groups[0].name).toBe("惯导");
+  });
+
+  it("重复值不压栈；绑定通道撤销还原（重灌由签名驱动）", () => {
+    bindG1();
+    const canBefore = store.getSnapshot().canUndo;
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az" }); // 与当前完全相同
+    expect(store.getSnapshot().canUndo).toBe(canBefore);
+    store.updateGroup("g1", { chX: "mag" });
+    store.undo();
+    expect(store.getGroup("g1").chX).toBe("ax");
+  });
+
+  it("clearData 不入栈（不可撤销语义）；requestClearData 下一拍驱动场景清组", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    const calls = collect();
+    pump(1);
+    store.clearData("g1");
+    expect(store.getSnapshot().canUndo).toBe(false);
+    store.requestClearData("g1");
+    pump(1);
+    const q = gseq(calls, "g1");
+    const last = q[q.length - 1];
+    expect(last.reloaded).toBe(true); // 场景清空信号
+    // 清空后新数据从零画（水位已推到末端，历史不回放）
+    h.setSeries(
+      ser(
+        [0, 10, 20, 30, 40, 50, 60, 70],
+        [1, 2, 3, 4, 5, 6, 7, 8],
+        [11, 12, 13, 14, 15, 16, 17, 18],
+        [21, 22, 23, 24, 25, 26, 27, 28],
+        [null, 100, 101, 102, 103, 104, 105, 106],
+      ),
+    );
+    pump(1);
+    const q2 = gseq(calls, "g1");
+    expect(q2[q2.length - 1].b.t).toEqual([0.06, 0.07]);
+    expect(q2[q2.length - 1].reloaded).toBe(false);
+  });
+
+  it("栈上限 50：60 次变更只保最近 50 层", () => {
+    for (let i = 0; i < 60; i++) store.updateGroup("g1", { pointSize: (i % 30) + 1 });
+    let n = 0;
+    while (store.undo()) n++;
+    expect(n).toBe(50);
+  });
+
+  it("resetSettings 可撤销（误点恢复）；恢复默认后组绑定清空", () => {
+    bindG1();
+    store.resetSettings();
+    expect(store.getGroup("g1").chX).toBe("");
+    store.undo();
+    expect(store.getGroup("g1").chX).toBe("ax");
+  });
+});
+
+describe("plot3dStore 泵（P69/P75 回归组化）", () => {
   it("时间水位续传：源追加只推新增段；源重建不重灌不重复", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collect();
+    bindG1();
+    const calls = collect();
     pump(1);
-    expect(batches).toHaveLength(1);
+    expect(gseq(calls, "g1")).toHaveLength(1);
 
-    // 追加 2 点（60/70ms）
     h.setSeries(
       ser(
         [0, 10, 20, 30, 40, 50, 60, 70],
@@ -151,163 +369,148 @@ describe("plot3dStore 泵", () => {
       ),
     );
     pump(1);
-    expect(batches).toHaveLength(2);
-    expect(batches[1].reloaded).toBe(false);
-    expect(batches[1].b.t).toEqual([0.06, 0.07]);
-    expect(batches[1].b.x).toEqual([7, 8]);
+    const q = gseq(calls, "g1");
+    expect(q).toHaveLength(2);
+    expect(q[1].reloaded).toBe(false);
+    expect(q[1].b.t).toEqual([0.06, 0.07]);
 
-    // 源裁剪重建（时间水位之前的点全部丢掉）→ 仍不重复、不补旧点
     h.setSeries(
-      ser(
-        [70, 80, 90],
-        [8, 9, 10],
-        [18, 19, 20],
-        [28, 29, 30],
-        [106, 107, 108],
-      ),
+      ser([70, 80, 90], [8, 9, 10], [18, 19, 20], [28, 29, 30], [106, 107, 108]),
     );
     pump(1);
-    expect(batches).toHaveLength(3);
-    expect(batches[2].b.t).toEqual([0.08, 0.09]);
-    expect(batches[2].b.x).toEqual([9, 10]);
-  });
-
-  it("clearData（P82②）：历史跳过、新数据从零画；绑定与校准保留", () => {
-    h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collect();
-    pump(1);
-    expect(batches).toHaveLength(1);
-
-    store.clearData();
-    // 清空后源未追加 → 不重放旧数据
-    pump(1);
-    expect(batches).toHaveLength(1);
-
-    // 追加 60/70ms 两点 → 只消费新点，reloaded=false（非重灌）
-    h.setSeries(
-      ser(
-        [0, 10, 20, 30, 40, 50, 60, 70],
-        [1, 2, 3, 4, 5, 6, 7, 8],
-        [11, 12, 13, 14, 15, 16, 17, 18],
-        [21, 22, 23, 24, 25, 26, 27, 28],
-        [null, 100, 101, 102, 103, 104, 105, 106],
-      ),
-    );
-    pump(1);
-    expect(batches).toHaveLength(2);
-    expect(batches[1].reloaded).toBe(false);
-    expect(batches[1].b.t).toEqual([0.06, 0.07]);
-    expect(batches[1].b.x).toEqual([7, 8]);
-    // 绑定保留（clearData 不动设置）
-    expect(store.getSnapshot().settings.axisX).toBe("ax");
+    const q2 = gseq(calls, "g1");
+    expect(q2[2].b.t).toEqual([0.08, 0.09]);
+    expect(q2[2].b.x).toEqual([9, 10]);
   });
 
   it("density 抽稀：mid=1:2 / low=1:4（对消费序号取模）", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", density: "mid" });
-    const batches = collect();
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", density: "mid" });
+    const calls = collect();
     pump(1);
-    expect(batches[0].b.x).toEqual([1, 3, 5]); // 序号 0,2,4
+    expect(gseq(calls, "g1")[0].b.x).toEqual([1, 3, 5]);
 
     store._resetForTest();
     store.setSink(null);
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", density: "low" });
-    const b2 = collect();
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", density: "low" });
+    const c2 = collect();
     pump(1);
-    expect(b2[0].b.x).toEqual([1, 5]); // 序号 0,4
+    expect(gseq(c2, "g1")[0].b.x).toEqual([1, 5]);
   });
 
-  it("着色通道：valCarry 前向填充首 null；colorBy=time 时 val 恒 0", () => {
+  it("着色通道：valCarry 前向填充首 null；colorBy=time/fixed 时 val 恒 0", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", colorBy: "ch", colorCh: "mag" });
-    const batches = collect();
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", colorBy: "ch", colorCh: "mag" });
+    const calls = collect();
     pump(1);
-    expect(batches[0].b.val).toEqual([0, 100, 101, 102, 103, 104]);
+    expect(gseq(calls, "g1")[0].b.val).toEqual([0, 100, 101, 102, 103, 104]);
 
     store._resetForTest();
     store.setSink(null);
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" }); // colorBy=time
-    const b2 = collect();
+    bindG1(); // colorBy=time
+    const c2 = collect();
     pump(1);
-    expect(b2[0].b.val).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(gseq(c2, "g1")[0].b.val).toEqual([0, 0, 0, 0, 0, 0]);
+
+    store._resetForTest();
+    store.setSink(null);
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", colorBy: "fixed" });
+    const c3 = collect();
+    pump(1);
+    expect(gseq(c3, "g1")[0].b.val).toEqual([0, 0, 0, 0, 0, 0]);
   });
 
-  it("着色通道被删 → 回退按时间着色（自动纠正，不阻塞消费）", () => {
+  it("着色通道被删 → 回退按时间着色（逐组自动纠正，不阻塞消费）", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", colorBy: "ch", colorCh: "mag" });
-    const batches = collect();
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", colorBy: "ch", colorCh: "mag" });
+    const calls = collect();
     pump(1);
-    expect(batches).toHaveLength(1);
+    expect(gseq(calls, "g1")).toHaveLength(1);
 
     h.chans.splice(3, 1); // 删除 mag 通道
     pump(1);
-    expect(batches.length).toBeGreaterThanOrEqual(2);
-    expect(batches[1].reloaded).toBe(true);
-    expect(batches[1].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]); // 重灌
-    expect(store.getSnapshot().settings.colorBy).toBe("time");
+    const q = gseq(calls, "g1");
+    expect(q.length).toBeGreaterThanOrEqual(2);
+    expect(q[1].reloaded).toBe(true);
+    expect(q[1].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+    expect(store.getGroup("g1").colorBy).toBe("time");
     h.chans.push({ id: "mag", tplId: "t", fieldId: "f4", name: "磁场", color: "#ffff00", visible: true });
   });
 
-  it("轴绑定通道被删 → 自动解绑并停消费", () => {
+  it("轴绑定通道被删 → 逐组自动解绑并停消费（只影响受影响组）", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collect();
+    bindG1();
+    store.updateGroup("g2", { chX: "mag", chY: "az", chZ: "ax" });
+    const calls = collect();
     pump(1);
-    expect(batches).toHaveLength(1);
+    expect(gseq(calls, "g1")).toHaveLength(1);
+    expect(gseq(calls, "g2")).toHaveLength(1);
 
-    h.chans.splice(0, 1); // 删除 ax
+    h.chans.splice(0, 1); // 删除 ax（两组都引用）
     pump(1);
-    expect(store.getSnapshot().settings.axisX).toBe("");
+    expect(store.getGroup("g1").chX).toBe("");
+    expect(store.getGroup("g2").chZ).toBe("");
+    expect(store.getGroup("g2").chX).toBe("mag"); // 其余绑定不动
     h.chans.unshift({ id: "ax", tplId: "t", fieldId: "f1", name: "加计X", color: "#ff0000", visible: true });
   });
 
   it("面板关闭（panelActivity 不含 plot3d）→ 泵空转不喂数", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collect();
+    bindG1();
+    const calls = collect();
     panelActivity.syncPanels([]);
     pump(2);
-    expect(batches).toHaveLength(0);
+    expect(calls).toHaveLength(0);
     panelActivity.syncPanels([{ id: "plot3d", visible: true }]);
     pump(1);
-    expect(batches).toHaveLength(1);
+    expect(gseq(calls, "g1")).toHaveLength(1);
   });
 
-  it("设置持久化：setSetting 写 localStorage，_resetForTest 后重读生效", () => {
-    store.setSetting({ axisX: "ax", fade: 300, style: "points" });
+  it("设置持久化：updateGroup 写 v2 localStorage；绑定/模式/渐隐落盘", () => {
+    store.updateGroup("g1", { chX: "ax", fade: 300, mode: "points" });
     const raw = localStorage.getItem("vs.plot3d.settings");
     expect(raw).toBeTruthy();
-    const parsed = JSON.parse(raw!) as { axisX: string; fade: number; style: string };
-    expect(parsed).toMatchObject({ axisX: "ax", fade: 300, style: "points" });
+    const parsed = JSON.parse(raw!) as { v: number; groups: { chX: string; fade: number; mode: string }[] };
+    expect(parsed.v).toBe(2);
+    expect(parsed.groups[0]).toMatchObject({ chX: "ax", fade: 300, mode: "points" });
+  });
+
+  it("组可见性 = 视图类：落盘、不过锁、不压撤销栈", () => {
+    bindG1();
+    store.setGroupVisible("g1", false);
+    expect(store.getGroup("g1").visible).toBe(false);
+    expect(store.getSnapshot().canUndo).toBe(false);
+    expect(JSON.parse(localStorage.getItem("vs.plot3d.settings")!).groups[0]).toMatchObject({
+      visible: false,
+    });
+    setOperatorLocked(true);
+    store.setGroupVisible("g1", true); // 锁定仍放行
+    setOperatorLocked(false);
+    expect(store.getGroup("g1").visible).toBe(true);
   });
 });
 
-describe("P74c C1：Operator 只读边界", () => {
+describe("P74c C1：Operator 只读边界（P87a 组化）", () => {
   afterEach(() => setOperatorLocked(false));
 
-  it("锁定时：配置类设置被拒（绑定/着色/密度/网格/默认值）", () => {
+  it("锁定时：组配置/全局配置写入全拒（含默认值恢复与包导入）", () => {
     setOperatorLocked(true);
-    store.setSetting({ axisX: "ax" });
-    store.setSetting({ colorBy: "ch", colorCh: "mag" });
-    store.setSetting({ style: "points", density: "low", showGrid: false, gridDensity: "coarse" });
-    store.setSetting({ fade: 300, keyFlight: true, zoomToCursor: true });
+    store.bindGroup("g1", "x", "ax");
+    store.updateGroup("g1", { colorBy: "ch", colorCh: "mag" });
+    store.updateGroup("g2", { mode: "point", density: "low" });
+    store.setSetting({ showGrid: false, gridDensity: "coarse" });
+    store.setSetting({ keyFlight: true, zoomToCursor: true, axisScale: "perAxis" });
     const s = store.getSnapshot().settings;
-    expect(s).toMatchObject({
-      axisX: "",
-      colorBy: "time",
-      style: "line+points",
-      density: "high",
-      showGrid: true,
-      gridDensity: "std",
-      fade: 60,
-      keyFlight: false,
-      zoomToCursor: false,
-    });
-    // 配置类整体写入也拒（含默认值恢复）
+    expect(store.getGroup("g1").chX).toBe("");
+    expect(store.getGroup("g2").mode).toBe("line");
+    expect(s.showGrid).toBe(true);
+    expect(s.gridDensity).toBe("std");
+    expect(s.keyFlight).toBe(false);
+    expect(s.axisScale).toBe("uniform");
     expect(store.importSettingsFromPkg({ axisX: "ax", style: "points" })).toBe(false);
     store.resetSettings();
-    expect(store.getSnapshot().settings.axisX).toBe("");
+    expect(store.getGroup("g1").chX).toBe("");
+    expect(s.groups[0].notes).toBe("");
   });
 
   it("锁定时：视图/操作态放行（跟随 / 自动旋转 / 校准）+ 互斥联动仍生效", () => {
@@ -325,149 +528,133 @@ describe("P74c C1：Operator 只读边界", () => {
 
   it("锁定前后的持久化口径一致：视图态照常落盘、混合补丁整包拒绝", () => {
     setOperatorLocked(true);
-    // 混合补丁（含配置字段）→ 整包拒绝，连视图字段也不生效、不落盘
-    store.setSetting({ follow: true, axisX: "ax" });
-    expect(store.getSnapshot().settings).toMatchObject({ follow: false, axisX: "" });
+    store.setSetting({ follow: true, showGrid: false }); // 混合补丁
+    expect(store.getSnapshot().settings).toMatchObject({ follow: false, showGrid: true });
     expect(localStorage.getItem("vs.plot3d.settings")).toBeNull();
 
     store.setSetting({ follow: true }); // 纯视图态 → 放行并落盘
-    expect(JSON.parse(localStorage.getItem("vs.plot3d.settings")!)).toMatchObject({
-      follow: true,
-      axisX: "",
-    });
+    const saved = JSON.parse(localStorage.getItem("vs.plot3d.settings")!);
+    expect(saved).toMatchObject({ follow: true });
+    expect(saved.groups[0]).toMatchObject({ chX: "" });
   });
 });
 
-/** P70 游标批次收集器（带第三参 cursorSec） */
-function collectCur() {
-  const batches: { b: Batch; reloaded: boolean; cursor: number | null }[] = [];
-  store.setSink((b, reloaded, cursor) => batches.push({ b, reloaded, cursor }));
-  return batches;
+/** P70 游标批次收集器（游标随每次下发记录） */
+function collectCur(): Call[] {
+  return collect();
 }
 
-describe("plot3dStore 时间游标（P70）", () => {
-  it("回放态：泵下发 cursor=回放相对秒（clamp 到源范围）", () => {
+describe("plot3dStore 时间游标（P70，全局共享一条时间轴）", () => {
+  it("回放态：泵下发 cursor=回放相对秒（clamp 到源范围·跨组）", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collectCur();
+    bindG1();
+    const calls = collectCur();
     store._setSessionForTest(() => ({ playing: true, replayTsMs: 25 }));
     pump(1);
-    expect(batches).toHaveLength(1);
-    expect(batches[0].cursor).toBeCloseTo(0.025);
-    // 超出源末端 → clamp 到末端 0.05
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cursor).toBeCloseTo(0.025);
     store._setSessionForTest(() => ({ playing: true, replayTsMs: 9999 }));
     pump(1);
-    expect(batches[1].cursor).toBeCloseTo(0.05);
+    expect(calls[1].cursor).toBeCloseTo(0.05);
   });
 
   it("seek 向后：空批次仍下发、cursor 回退、不重灌不重复", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collectCur();
+    bindG1();
+    const calls = collectCur();
     let ts = 45;
     store._setSessionForTest(() => ({ playing: true, replayTsMs: ts }));
     pump(1);
-    expect(batches[0].reloaded).toBe(true);
-    expect(batches[0].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]); // 泵消费整个源
-    expect(batches[0].cursor).toBeCloseTo(0.045); // 游标=回放位置，与水位无关
+    expect(gseq(calls, "g1")[0].reloaded).toBe(true);
+    expect(gseq(calls, "g1")[0].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+    expect(calls[0].cursor).toBeCloseTo(0.045);
 
-    ts = 15; // seek 向后：重灌点全 ≤ 水位 → 批次空，仅游标回退
+    ts = 15;
     pump(1);
-    expect(batches).toHaveLength(2);
-    expect(batches[1].b.t).toEqual([]);
-    expect(batches[1].reloaded).toBe(false);
-    expect(batches[1].cursor).toBeCloseTo(0.015);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].entries).toHaveLength(0);
+    expect(calls[1].cursor).toBeCloseTo(0.015);
 
     pump(1); // 游标未变 + 无新数据 → 不重复下发
-    expect(batches).toHaveLength(2);
+    expect(calls).toHaveLength(2);
   });
 
   it("seek 向前越段：水位跳过重复重灌段、只推新增", () => {
-    // 回放推进到 20ms：plotStore 仅含已重灌段 [0..20]
-    h.setSeries(
-      ser(
-        [0, 10, 20],
-        [1, 2, 3],
-        [11, 12, 13],
-        [21, 22, 23],
-        [null, 100, 101],
-      ),
-    );
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collectCur();
+    h.setSeries(ser([0, 10, 20], [1, 2, 3], [11, 12, 13], [21, 22, 23], [null, 100, 101]));
+    bindG1();
+    const calls = collectCur();
     let ts = 20;
     store._setSessionForTest(() => ({ playing: true, replayTsMs: ts }));
     pump(1);
-    expect(batches[0].b.t).toEqual([0, 0.01, 0.02]);
-    expect(batches[0].cursor).toBeCloseTo(0.02);
+    expect(gseq(calls, "g1")[0].b.t).toEqual([0, 0.01, 0.02]);
+    expect(calls[0].cursor).toBeCloseTo(0.02);
 
-    // seek 到 50ms：重灌段 [0..50]，其中 [0..20] 为重复（ts ≤ 水位自动跳过），仅新增 [30..50]
     h.setSeries(makeSeries());
     ts = 50;
     pump(1);
-    expect(batches[1].b.t).toEqual([0.03, 0.04, 0.05]);
-    expect(batches[1].cursor).toBeCloseTo(0.05);
+    expect(gseq(calls, "g1")[1].b.t).toEqual([0.03, 0.04, 0.05]);
+    expect(calls[1].cursor).toBeCloseTo(0.05);
   });
 
   it("回放结束：cursor=null 恢复跟随最新", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collectCur();
+    bindG1();
+    const calls = collectCur();
     const probe = { playing: true, replayTsMs: 30 };
     store._setSessionForTest(() => probe);
     pump(1);
-    expect(batches[0].cursor).toBeCloseTo(0.03);
+    expect(calls[0].cursor).toBeCloseTo(0.03);
 
-    probe.playing = false; // 回放结束
+    probe.playing = false;
     pump(1);
-    expect(batches).toHaveLength(2);
-    expect(batches[1].b.t).toEqual([]);
-    expect(batches[1].cursor).toBeNull();
+    expect(calls).toHaveLength(2);
+    expect(calls[1].entries).toHaveLength(0);
+    expect(calls[1].cursor).toBeNull();
   });
 
-  it("scrub 态：批次第三参=scrub 值（clamp 到源范围）；setScrub(null) 恢复；回放优先于 scrub", () => {
+  it("scrub 态：cursor=scrub 值（clamp）；setScrub(null) 恢复；回放优先于 scrub；跨组源末端合并", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collectCur();
-    store._setSessionForTest(null); // 恢复默认探针（sessionStore 未回放 → playing=false）
+    bindG1();
+    store.updateGroup("g2", { chX: "ay", chY: "az", chZ: "mag" }); // g2 数据延伸到相同 50ms
+    const calls = collectCur();
+    store._setSessionForTest(null);
     pump(1);
-    expect(batches[0].cursor).toBeNull();
+    expect(calls[0].cursor).toBeNull();
 
     store.setScrub(0.032);
     pump(1);
-    expect(batches[1].cursor).toBeCloseTo(0.032);
+    expect(calls[1].cursor).toBeCloseTo(0.032);
 
-    store.setScrub(999); // 超末端 → clamp
+    store.setScrub(999);
     pump(1);
-    expect(batches[2].cursor).toBeCloseTo(0.05);
+    expect(calls[2].cursor).toBeCloseTo(0.05);
 
     store.setScrub(null);
     pump(1);
-    expect(batches[3].cursor).toBeNull();
+    expect(calls[3].cursor).toBeNull();
 
-    // 回放优先：scrub 残留也不覆盖回放游标
     const probe2 = { playing: true, replayTsMs: 40 };
     store._setSessionForTest(() => probe2);
     store.setScrub(0.01);
     pump(1);
-    expect(batches[4].cursor).toBeCloseTo(0.04);
+    expect(calls[4].cursor).toBeCloseTo(0.04);
   });
 
   it("lowerBoundLe：空/首/尾/重复 ts 边界（= drawRange 截断数）", () => {
     const arr = new Float64Array([1, 2, 2, 3, 5]);
-    expect(lowerBoundLe(arr, 0, 10)).toBe(0); // 空
-    expect(lowerBoundLe(arr, arr.length, 0)).toBe(0); // 小于全部
-    expect(lowerBoundLe(arr, arr.length, 1)).toBe(1); // 首
-    expect(lowerBoundLe(arr, arr.length, 2)).toBe(3); // 重复 ts：取末个 ≤
-    expect(lowerBoundLe(arr, arr.length, 4)).toBe(4); // 间隙
-    expect(lowerBoundLe(arr, arr.length, 5)).toBe(5); // 尾
-    expect(lowerBoundLe(arr, arr.length, 99)).toBe(5); // 超尾 clamp
-    expect(lowerBoundLe(arr, 3, 99)).toBe(3); // n 截断
+    expect(lowerBoundLe(arr, 0, 10)).toBe(0);
+    expect(lowerBoundLe(arr, arr.length, 0)).toBe(0);
+    expect(lowerBoundLe(arr, arr.length, 1)).toBe(1);
+    expect(lowerBoundLe(arr, arr.length, 2)).toBe(3);
+    expect(lowerBoundLe(arr, arr.length, 4)).toBe(4);
+    expect(lowerBoundLe(arr, arr.length, 5)).toBe(5);
+    expect(lowerBoundLe(arr, arr.length, 99)).toBe(5);
+    expect(lowerBoundLe(arr, 3, 99)).toBe(3);
   });
 });
 
-describe("plot3dStore 椭球校准采样（P71）", () => {
-  it("calibMode + 采样中：泵 stride=1 追加原始点（与密度抽稀无关）；null 轴跳过", () => {
+describe("plot3dStore 椭球校准采样（P71 → P87a：采样源=组1）", () => {
+  it("calibMode + 采样中：组1 泵 stride=1 追加原始点；组2 数据不进校准缓冲", () => {
     h.setSeries(
       ser(
         [0, 10, 20, 30],
@@ -477,26 +664,27 @@ describe("plot3dStore 椭球校准采样（P71）", () => {
         [null, 100, 101, 102],
       ),
     );
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true, density: "low" });
-    const sink = vi.fn();
-    store.setSink(sink);
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", density: "low" });
+    store.updateGroup("g2", { chX: "az", chY: "ay", chZ: "ax" }); // 干扰组
+    store.setSetting({ calibMode: true });
+    store.setSink(vi.fn());
     store.startCalibCapture();
     pump(1);
     const pts = store.calibPoints();
-    expect(pts.x).toEqual([1, 2, 4]); // null 轴跳过；density=low 不影响校准采样
+    expect(pts.x).toEqual([1, 2, 4]); // 组1 源；null 轴跳过；密度不影响校准采样
     expect(pts.y).toEqual([11, 12, 14]);
     expect(store.calibSnapshot()).toMatchObject({ capturing: true, count: 3 });
     expect(store.calibSnapshot().coverage).toBeGreaterThan(0);
   });
 
-  it("未开采样 → 不追加；开启后只采水位新增；满 CAP 自动停止", () => {
+  it("未开采样 → 不追加；开启后只采水位新增", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
+    bindG1();
+    store.setSetting({ calibMode: true });
     store.setSink(vi.fn());
     pump(1);
-    expect(store.calibPoints().x).toHaveLength(0); // capturing=false，且消费水位已到末端
+    expect(store.calibPoints().x).toHaveLength(0);
     store.startCalibCapture();
-    // 源追加 2 点（水位续传，只采新增）
     h.setSeries(
       ser(
         [0, 10, 20, 30, 40, 50, 60, 70],
@@ -508,58 +696,24 @@ describe("plot3dStore 椭球校准采样（P71）", () => {
     );
     pump(1);
     expect(store.calibPoints().x).toEqual([7, 8]);
-    // 关闭校准模式（仍 capturing=true）→ 停止追加
-    store.setSetting({ calibMode: false });
-    h.setSeries(
-      ser(
-        [0, 10, 20, 30, 40, 50, 60, 70, 80],
-        [1, 2, 3, 4, 5, 6, 7, 8, 9],
-        [11, 12, 13, 14, 15, 16, 17, 18, 19],
-        [21, 22, 23, 24, 25, 26, 27, 28, 29],
-        [null, 100, 101, 102, 103, 104, 105, 106, 107],
-      ),
-    );
-    pump(1);
-    expect(store.calibPoints().x).toEqual([7, 8]);
-    // 超量自动停止：清空后重采，源 20050 点 → 采满 20000 停
-    store.clearCalib();
-    store.setSetting({ calibMode: true });
-    store.startCalibCapture();
-    const bigTs = Array.from({ length: 20050 }, (_, i) => i * 10);
-    h.setSeries({
-      ax: { t: bigTs, v: Array.from({ length: 20050 }, (_, i) => i) },
-      ay: { t: bigTs, v: Array.from({ length: 20050 }, (_, i) => i + 1) },
-      az: { t: bigTs, v: Array.from({ length: 20050 }, (_, i) => i + 2) },
-      mag: { t: bigTs, v: Array.from({ length: 20050 }, () => 0) },
-    });
-    pump(1);
-    const snap = store.calibSnapshot();
-    expect(snap.count).toBe(store.CALIB_CAP);
-    expect(snap.capturing).toBe(false); // 自动停止
   });
 
-  it("重灌（绑定变化）清空校准缓冲；setSink(null)（面板关闭）清空", () => {
+  it("组1 重灌（换绑定）清空校准缓冲；组2 变化不波及校准；setSink(null) 清空", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
+    bindG1();
+    store.setSetting({ calibMode: true });
     store.setSink(vi.fn());
-    store.startCalibCapture(); // 先开采样再首次泵 → 全量入缓冲
+    store.startCalibCapture();
     pump(1);
     expect(store.calibPoints().x).toHaveLength(6);
-    // 换绑定 → sig 变化 → 重灌 → 缓冲清空
-    store.setSetting({ axisX: "az", axisY: "ay", axisZ: "ax" });
+    store.updateGroup("g2", { chX: "ax", chY: "ay", chZ: "az" }); // 只动组2
+    pump(1);
+    expect(store.calibPoints().x).toHaveLength(6);
+    store.updateGroup("g1", { chX: "az", chY: "ay", chZ: "ax" }); // 组1 换绑 → 清
     pump(1);
     expect(store.calibPoints().x).toHaveLength(0);
-    // 重新采样后关闭面板 → 清空
     store.startCalibCapture();
-    h.setSeries(
-      ser(
-        [60, 70, 80, 90], // ts 须 > 水位 50ms，否则视为 seek 回退不采
-        [1, 2, 3, 4],
-        [11, 12, 13, 14],
-        [21, 22, 23, 24],
-        [null, 100, 101, 102],
-      ),
-    );
+    h.setSeries(ser([60, 70, 80, 90], [1, 2, 3, 4], [11, 12, 13, 14], [21, 22, 23, 24], [null, 100, 101, 102]));
     pump(1);
     expect(store.calibPoints().x.length).toBeGreaterThan(0);
     store.setSink(null);
@@ -567,61 +721,60 @@ describe("plot3dStore 椭球校准采样（P71）", () => {
     expect(store.calibSnapshot().capturing).toBe(false);
   });
 
-  it("包导入导出：export 剥离 calibMode；import 归一化非法字段", () => {
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true, fade: 10 });
+  it("包导入导出：export 剥离 calibMode（含组数据深拷贝隔离）；import 归一化非法字段", () => {
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", fade: 10 });
+    store.setSetting({ calibMode: true });
     const exported = store.exportSettingsForPkg();
-    expect(exported.calibMode).toBe(false); // 操作态剥离
-    expect(exported.axisX).toBe("ax");
-    expect(exported.fade).toBe(10);
+    expect(exported.calibMode).toBe(false);
+    expect(exported.groups[0].chX).toBe("ax");
+    expect(exported.groups[0].fade).toBe(10);
+    exported.groups[0].name = "改过了"; // 深拷贝：改导出不影响内存态
+    expect(store.getGroup("g1").name).toBe("G1");
     // 导入：非法字段回退默认（归一化）
     expect(store.importSettingsFromPkg({ axisX: "p", fade: 999, style: "bogus" })).toBe(true);
-    const snap = store.getSnapshot().settings;
-    expect(snap.axisX).toBe("p");
-    expect(snap.fade).toBe(60);
-    expect(snap.style).toBe("line+points");
-    expect(snap.calibMode).toBe(false);
+    const g = store.getGroup("g1");
+    expect(g.chX).toBe("p");
+    expect(g.fade).toBe(60);
+    expect(g.mode).toBe("line");
+    expect(g.colorBy).toBe("time");
+    expect(store.getSnapshot().settings.calibMode).toBe(false);
     expect(store.importSettingsFromPkg(null)).toBe(false);
     expect(store.importSettingsFromPkg("x")).toBe(false);
   });
 
   it("P74c B4：calibMode 是会话级操作态——包导入不恢复、endCalibSession 关闭即退出", () => {
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
+    bindG1();
+    store.setSetting({ calibMode: true });
     expect(store.getSnapshot().settings.calibMode).toBe(true);
-    // 导入包（即使原样回灌当前设置快照，calibMode 也被归一化为 false）
     expect(store.importSettingsFromPkg(store.getSnapshot().settings)).toBe(true);
     expect(store.getSnapshot().settings.calibMode).toBe(false);
-    // resetSettings 同样不复活
     store.setSetting({ calibMode: true });
     store.resetSettings();
     expect(store.getSnapshot().settings.calibMode).toBe(false);
-    // 面板关闭语义
     store.setSetting({ calibMode: true });
     store.endCalibSession();
     expect(store.getSnapshot().settings.calibMode).toBe(false);
-    store.endCalibSession(); // 幂等：已退出时不再 emit
+    store.endCalibSession();
     expect(store.getSnapshot().settings.calibMode).toBe(false);
   });
 
   it("P74c A5：invalidateCursor 强制下一拍重发游标（场景重建后游标不消失）", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const calls: { cursorSec: number | null }[] = [];
-    store.setSink((_b, _r, cursorSec) => calls.push({ cursorSec }));
+    bindG1();
+    const calls = collectCur();
     store.setScrub(0.03);
     pump(1);
     expect(calls.length).toBeGreaterThan(0);
-    expect(calls[calls.length - 1].cursorSec).toBeCloseTo(0.03);
+    expect(calls[calls.length - 1].cursor).toBeCloseTo(0.03);
 
-    // 无新批次且游标未变 → 不重发（原行为：静态时零下发）
     const n = calls.length;
     pump(1);
     expect(calls.length).toBe(n);
 
-    // 场景重建 → 强制重发同一游标，否则新场景的时间游标线凭空消失
     store.invalidateCursor();
     pump(1);
     expect(calls.length).toBe(n + 1);
-    expect(calls[calls.length - 1].cursorSec).toBeCloseTo(0.03);
+    expect(calls[calls.length - 1].cursor).toBeCloseTo(0.03);
   });
 });
 
@@ -652,12 +805,12 @@ function makeFit(): FitOk {
 describe("plot3dStore 在线补偿预览（P73）", () => {
   it("有 fit 即缓冲（无需采样中）：r=‖W(x−offset)‖、meanR 透传；无 fit 不缓冲", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
+    bindG1();
+    store.setSetting({ calibMode: true });
     store.setSink(vi.fn());
     pump(1);
-    expect(store.previewSnapshot()).toBeNull(); // 无 fit 不缓冲
+    expect(store.previewSnapshot()).toBeNull();
     store.setCalibFit(makeFit());
-    // 源追加 2 点（水位续传只算新增）
     h.setSeries(
       ser(
         [0, 10, 20, 30, 40, 50, 60, 70],
@@ -671,47 +824,23 @@ describe("plot3dStore 在线补偿预览（P73）", () => {
     const pv = store.previewSnapshot();
     if (!pv) throw new Error("previewSnapshot 应非 null");
     expect(pv.len).toBe(2);
-    expect(pv.head).toBe(2); // 写入 2 点后推进
+    expect(pv.head).toBe(2);
     expect(pv.meanR).toBe(100);
-    expect(pv.r[0]).toBeCloseTo(Math.hypot(7, 17, 27)); // identity W + offset 0
+    expect(pv.r[0]).toBeCloseTo(Math.hypot(7, 17, 27));
     expect(pv.t[0]).toBeCloseTo(0.06);
     expect(pv.t[1]).toBeCloseTo(0.07);
   });
 
-  it("环形覆写：一次灌入超 CAP → len 恒 1200、head 循环推进、无异常", () => {
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
-    store.setSink(vi.fn());
-    pump(1); // 空源先建立签名（运行时语义：先挂面板后拟合）
-    store.setCalibFit(makeFit());
-    const n = 2500;
-    const ts = Array.from({ length: n }, (_, i) => i);
-    h.setSeries({
-      ax: { t: ts, v: Array.from({ length: n }, (_, i) => 3 * i) },
-      ay: { t: ts, v: Array.from({ length: n }, (_, i) => 4 * i) },
-      az: { t: ts, v: Array.from({ length: n }, (_, i) => 5 * i) },
-      mag: { t: ts, v: Array.from({ length: n }, () => 0) },
-    });
-    pump(1);
-    const pv = store.previewSnapshot();
-    if (!pv) throw new Error("previewSnapshot 应非 null");
-    expect(pv.len).toBe(store.PREVIEW_CAP);
-    expect(pv.head).toBe(n % store.PREVIEW_CAP); // 2500 % 1200 = 100
-    // 最老被覆写：head-1 位置 = 最后一点 r=hypot(3·2499,4·2499,5·2499)
-    const last = pv.r[(pv.head + store.PREVIEW_CAP - 1) % store.PREVIEW_CAP];
-    expect(last).toBeCloseTo(Math.hypot(3 * 2499, 4 * 2499, 5 * 2499), 1); // f32 精度 1 位小数
-  });
-
-  it("setCalibFit 重置缓冲；clearCalib 清 fit；重灌（换绑定）清 fit+六面", () => {
+  it("setCalibFit 重置缓冲；clearCalib 清 fit；组1 重灌清 fit+六面", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
+    bindG1();
+    store.setSetting({ calibMode: true });
     store.setSink(vi.fn());
     store.setCalibFit(makeFit());
-    // 换绑定 → 重灌 → fit 清空
-    store.setSetting({ axisX: "az", axisY: "ay", axisZ: "ax" });
+    store.updateGroup("g1", { chX: "az", chY: "ay", chZ: "ax" }); // 换绑定 → 重灌
     pump(1);
     expect(store.getCalibFit()).toBeNull();
     expect(store.previewSnapshot()).toBeNull();
-    // 重新拟合后 clearCalib → fit/预览清
     store.setCalibFit(makeFit());
     store.clearCalib();
     expect(store.getCalibFit()).toBeNull();
@@ -720,7 +849,6 @@ describe("plot3dStore 在线补偿预览（P73）", () => {
 });
 
 describe("plot3dStore 加计六面（P73）", () => {
-  /** 追加一段恒值源并采集面 idx（窗锚定源时间，2s 自动结算） */
   let base = 0;
   function capFace(idx: number, v: [number, number, number], n = 2100) {
     const ts = Array.from({ length: n }, (_, i) => base + i);
@@ -740,7 +868,8 @@ describe("plot3dStore 加计六面（P73）", () => {
   });
 
   it("2s 窗自动结算：mean/std 正确、collecting 复位、窗锚定源时间（不依赖系统时钟）", () => {
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
+    bindG1();
+    store.setSetting({ calibMode: true });
     store.setSink(vi.fn());
     capFace(0, [100, 0, 0]);
     const snap = store.accel6Snapshot();
@@ -748,38 +877,38 @@ describe("plot3dStore 加计六面（P73）", () => {
     expect(snap.idx).toBe(-1);
     const f = snap.faces[0];
     if (!f) throw new Error("face 0 应已结算");
-    expect(f.n).toBe(2001); // t0..t0+2000ms 含首尾
+    expect(f.n).toBe(2001);
     expect(f.mean[0]).toBeCloseTo(100);
     expect(f.mean[1]).toBeCloseTo(0);
     expect(f.std[0]).toBeCloseTo(0);
   });
 
   it("互斥：六面采集停椭球采样；椭球采样停六面", () => {
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
+    bindG1();
+    store.setSetting({ calibMode: true });
     store.setSink(vi.fn());
     store.startCalibCapture();
     expect(store.calibSnapshot().capturing).toBe(true);
     store.accel6StartFace(2);
-    expect(store.calibSnapshot().capturing).toBe(false); // 六面让椭球停
+    expect(store.calibSnapshot().capturing).toBe(false);
     expect(store.accel6Snapshot().collecting).toBe(true);
     store.startCalibCapture();
-    expect(store.accel6Snapshot().collecting).toBe(false); // 椭球让六面停
+    expect(store.accel6Snapshot().collecting).toBe(false);
     expect(store.calibSnapshot().capturing).toBe(true);
   });
 
   it("六面齐 → accel6Solve 解算 offset/scale（合成真值回收）；缺面拒绝", () => {
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", calibMode: true });
+    bindG1();
+    store.setSetting({ calibMode: true });
     store.setSink(vi.fn());
-    // 真值：offset=[10,-20,5]，scale=[100,102,98]（原始单位/g，gRef=1）
-    capFace(0, [110, -20, 5]); // +X
-    capFace(1, [-90, -20, 5]); // −X
-    capFace(2, [10, 82, 5]); // +Y
-    capFace(3, [10, -122, 5]); // −Y
-    capFace(4, [10, -20, 103]); // +Z
-    // 缺 −Z → 拒绝
+    capFace(0, [110, -20, 5]);
+    capFace(1, [-90, -20, 5]);
+    capFace(2, [10, 82, 5]);
+    capFace(3, [10, -122, 5]);
+    capFace(4, [10, -20, 103]);
     const miss = store.accel6Solve();
     expect(miss.ok).toBe(false);
-    capFace(5, [10, -20, -93]); // −Z
+    capFace(5, [10, -20, -93]);
     const r = store.accel6Solve();
     if (!r.ok) throw new Error(`解算失败: ${r.reason}`);
     expect(r.offset[0]).toBeCloseTo(10, 4);
@@ -792,20 +921,21 @@ describe("plot3dStore 加计六面（P73）", () => {
   });
 });
 
-describe("plot3dStore 三轴时间戳配对（P75 B2）", () => {
-  it("回归：同帧三轴（相同时间戳）→ 每帧恰 1 点（旧联合轴拆 3 行的阶梯根因）", () => {
+describe("plot3dStore 三轴时间戳配对（P75 B2，P87a 逐组统计）", () => {
+  it("回归：同帧三轴（相同时间戳）→ 每帧恰 1 点；pairSnapshot 逐组", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collect();
+    bindG1();
+    const calls = collect();
     pump(1);
-    expect(batches[0].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]); // 6 帧 6 点
-    expect(batches[0].b.x).toEqual([1, 2, 3, 4, 5, 6]);
-    const ps = store.pairSnapshot();
+    expect(gseq(calls, "g1")[0].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+    expect(gseq(calls, "g1")[0].b.x).toEqual([1, 2, 3, 4, 5, 6]);
+    const ps = store.pairSnapshot("g1");
     expect(ps.paired).toBe(6);
     expect(ps.skipped).toBe(0);
     expect(ps.min).toEqual([1, 11, 21]);
     expect(ps.max).toEqual([6, 16, 26]);
-    expect(ps.tolMs).toBeGreaterThan(0); // 自动容差已解析
+    expect(ps.tolMs).toBeGreaterThan(0);
+    expect(store.pairSnapshot("g2").paired).toBe(0); // 未绑组统计独立
   });
 
   it("Y 半频：插值模式平滑（中间锚点线性、尾沿保持）", () => {
@@ -814,12 +944,12 @@ describe("plot3dStore 三轴时间戳配对（P75 B2）", () => {
       ay: { t: [0, 20], v: [0, 2] },
       az: { t: [0, 10, 20, 30], v: [0, 1, 2, 3] },
     });
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collect();
+    bindG1();
+    const calls = collect();
     pump(1);
-    expect(batches[0].b.y).toEqual([0, 1, 2, 2]);
-    expect(batches[0].b.x).toEqual([0, 1, 2, 3]);
-    expect(store.pairSnapshot().skipped).toBe(0);
+    expect(gseq(calls, "g1")[0].b.y).toEqual([0, 1, 2, 2]);
+    expect(gseq(calls, "g1")[0].b.x).toEqual([0, 1, 2, 3]);
+    expect(store.pairSnapshot("g1").skipped).toBe(0);
   });
 
   it("nearest + 手动小容差：稀疏 Y 容差外全部跳过并计入统计", () => {
@@ -828,11 +958,11 @@ describe("plot3dStore 三轴时间戳配对（P75 B2）", () => {
       ay: { t: [0, 100], v: [0, 1] },
       az: { t: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90], v: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] },
     });
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", pairMode: "nearest", pairTolMs: 5 });
-    const batches = collect();
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", pairMode: "nearest", pairTolMs: 5 });
+    const calls = collect();
     pump(1);
-    expect(batches[0].b.t).toEqual([0]); // 仅 t=0 精确命中；无尾沿（锚点未及 100）
-    const ps = store.pairSnapshot();
+    expect(gseq(calls, "g1")[0].b.t).toEqual([0]);
+    const ps = store.pairSnapshot("g1");
     expect(ps.paired).toBe(1);
     expect(ps.skipped).toBe(9);
     expect(ps.tolMs).toBe(5);
@@ -844,24 +974,25 @@ describe("plot3dStore 三轴时间戳配对（P75 B2）", () => {
       ay: { t: [0, 100], v: [0, 1] },
       az: { t: [0, 10, 20, 30, 40, 50, 60, 70, 80, 90], v: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] },
     });
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az", pairMode: "union" });
-    const batches = collect();
+    store.updateGroup("g1", { chX: "ax", chY: "ay", chZ: "az", pairMode: "union" });
+    const calls = collect();
     pump(1);
-    expect(batches[0].b.t).toHaveLength(11); // 并集 [0,10..90,100]
-    expect(batches[0].b.y).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]); // Y 前向填充 = 阶梯来源
-    expect(store.pairSnapshot().tolMs).toBe(0); // union 无容差概念
+    expect(gseq(calls, "g1")[0].b.t).toHaveLength(11);
+    expect(gseq(calls, "g1")[0].b.y).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    expect(store.pairSnapshot("g1").tolMs).toBe(0);
   });
 
-  it("配对方式/容差变更 → 签名变化 → 全量重灌", () => {
+  it("配对方式/容差变更 → 该组签名变化 → 全量重灌", () => {
     h.setSeries(makeSeries());
-    store.setSetting({ axisX: "ax", axisY: "ay", axisZ: "az" });
-    const batches = collect();
+    bindG1();
+    const calls = collect();
     pump(1);
-    expect(batches).toHaveLength(1);
-    store.setSetting({ pairTolMs: 25 });
+    expect(gseq(calls, "g1")).toHaveLength(1);
+    store.updateGroup("g1", { pairTolMs: 25 });
     pump(1);
-    expect(batches.length).toBeGreaterThanOrEqual(2);
-    expect(batches[batches.length - 1].reloaded).toBe(true);
-    expect(batches[batches.length - 1].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
+    const q = gseq(calls, "g1");
+    expect(q.length).toBeGreaterThanOrEqual(2);
+    expect(q[q.length - 1].reloaded).toBe(true);
+    expect(q[q.length - 1].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
   });
 });

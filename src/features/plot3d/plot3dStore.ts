@@ -1,16 +1,20 @@
 /**
- * P69 3D 轨迹面板数据泵（plot3dStore）。
+ * P69 3D 轨迹面板数据泵（plot3dStore）· P87a 三组轨迹升级。
  *
  * 职责边界：
  * - 通道与数据完全复用 plotStore（共享图例通道；采集门控见 plotStore.init 的 plot3d 分支）
  * - 本模块是「消费泵」：定时取各绑定通道的**原始序列**（getChanData，未经联合
- *   对齐），交给 pairTriples.buildPairedTriples 做三轴时间戳配对（P75 B2，
- *   消除同帧三轴被联合轴拆行导致的 L 形阶梯），再按点密度抽稀推给 scene（sink）。
- *   不持有大缓冲——双层 LOD（全精度尾窗 + 抽稀全景）在 scene 侧。
- * - 源裁剪/重建（下标语义失效）用「时间水位 lastT」续传：只消费时间戳 > lastT
- *   的锚点/并集行，绝不重灌、绝不重复——这是尾窗精度不被源端抽稀污染的关键。
+ *   对齐），交给 pairTriples.buildPairedTriples 做三轴时间戳配对（P75 B2），
+ *   按组/按点密度抽稀推给 scene（sink）。不持有大缓冲——双层 LOD 在 scene 侧。
+ * - P87a：轨迹从「一条」升级为「三组独立轨迹」（g1 惯导 / g2 实际 / g3 目标）。
+ *   每组独立 绑定/显示模式/配对/着色/密度/撤销；组间共享通道自动去重（同通道
+ *   两组件只消费一次）。校准（P71/P73）源固定 = 组1 三通道（详设 R1 O7）。
+ * - 源裁剪/重建（下标语义失效）用「时间水位 lastT」逐组续传：只消费时间戳
+ *   > lastT 的锚点，绝不重灌、绝不重复。
  * - 面板关闭 = setSink(null) = 停泵（用户红线：关闭了的面板绝不允许后台运行）；
  *   后台页签（浏览器把 interval 节流到 ~1Hz）仍继续喂数，切回不丢段。
+ * - P87a A7：组配置撤销/重做栈（50 层，独立于模板撤销栈）；视图类
+ *   （相机/跟随/网格/可见性）不入栈；清空不可撤销（数据已丢弃，如实处理）。
  */
 import * as panelActivity from "../../panels/panelActivity";
 import {
@@ -24,20 +28,55 @@ import { guardLocked } from "../operator/lock";
 import { octantCoverage, correctedRadius, fitAccelSix, ACCEL6_MIN_SAMPLES, type Accel6Face, type Accel6Result, type FitOk } from "./ellipsoidFit";
 import { buildPairedTriples, ffillAt, sampleAt, type PairMode, type Series } from "./pairTriples";
 
-export interface Plot3DSettings {
-  /** 三轴绑定的通道 id；"" = 未绑定 */
-  axisX: string;
-  axisY: string;
-  axisZ: string;
-  /** 着色：time = turbo 色带按会话时间；ch = turbo 按指定通道值域 */
-  colorBy: "time" | "ch";
+// ---------- 三组轨迹模型（P87a） ----------
+
+export type GroupId = "g1" | "g2" | "g3";
+export const GROUP_IDS: readonly GroupId[] = ["g1", "g2", "g3"];
+
+/** 每组显示模式：point=实时定位（只刷最新点）/ points=点集 / line=连线（详设 §7） */
+export type TrajMode = "point" | "points" | "line";
+/** 连线平滑（P87a 先上滑动平均；CR/贝塞尔/样条/自定义 = P87b 平滑内核批） */
+export type TrajSmooth = "none" | "movingAvg";
+
+export interface TrajGroup {
+  id: GroupId;
+  name: string;
+  /** 组色（fixed 着色/全景/标记/图例共用同一身份色） */
+  color: string;
+  /** 可见性 = 视图类（Operator 放行、不入撤销栈） */
+  visible: boolean;
+  /** 三轴绑定通道 id；"" = 未绑定（三轴绑齐该组才消费） */
+  chX: string;
+  chY: string;
+  chZ: string;
+  mode: TrajMode;
+  /** 点径（gl_PointSize px；points/point 模式与 line.showDots 用） */
+  pointSize: number;
+  /** 透明度（作用于渐隐混合权重：0.05~1） */
+  opacity: number;
+  /** 连线模式叠画顶点（旧 style="line+points" 的迁移归宿） */
+  showDots: boolean;
+  /** 保留点数上限（0 = 不限，走 LOD 内建 22 万）；超限从最老端丢弃 */
+  maxPoints: number;
+  /** 着色：time=turbo 按会话时间 / ch=turbo 按指定通道值域 / fixed=组色实色 */
+  colorBy: "time" | "ch" | "fixed";
   colorCh: string;
-  /** 渐隐窗口（秒）：最近 N 秒内由亮到暗，窗外保持最暗；0 = 全程渐变 */
+  /** 渐隐窗口（秒）；0 = 全程渐变 */
   fade: 10 | 60 | 300 | 0;
-  /** 轨迹样式 */
-  style: "line+points" | "line" | "points";
-  /** 点密度：追加期 stride 抽稀（高=1:1 / 中=1:2 / 低=1:4）；变更触发重灌 */
+  /** 点密度：追加期 stride 抽稀（高=1:1 / 中=1:2 / 低=1:4）；变更触发该组重灌 */
   density: "high" | "mid" | "low";
+  smooth: TrajSmooth;
+  /** 滑动平均窗口（奇数 3~51） */
+  smoothWin: number;
+  pairMode: PairMode;
+  pairTolMs: number;
+  /** AI 结论/人工备注回填处（P87c 分析包 meta.json 收录） */
+  notes: string;
+}
+
+export interface Plot3DSettings {
+  v: 2;
+  groups: [TrajGroup, TrajGroup, TrajGroup];
   /** 展示用自动旋转 */
   autoRotate: boolean;
   /** 跟随模式：target 平滑锁定最新点（与 autoRotate 互斥，开关联动） */
@@ -50,29 +89,46 @@ export interface Plot3DSettings {
   keyFlight: boolean;
   /** 滚轮缩放到光标（P72）：关闭时绕视线中心缩放（OrbitControls 默认） */
   zoomToCursor: boolean;
-  /** 椭球校准模式（P71）：轨迹隐藏，切换为点云采样+拟合；与 autoRotate/follow 互斥。
-   *  **操作态**（P74c B4）：不落盘、不进 Operator 包、面板关闭即退出——重启回到轨迹模式。 */
+  /** 椭球校准模式（P71，操作态）：轨迹隐藏，切换为点云采样+拟合；与 autoRotate/follow 互斥。
+   *  **操作态**（P74c B4）：不落盘、不进 Operator 包、面板关闭即退出。采样源=组1。 */
   calibMode: boolean;
-  /** 三轴时间戳配对方式（P75 B2）：interp=带容差插值（默认，消除阶梯）/
-   *  nearest=带容差最近邻 / union=旧版联合前向填充（逃生舱，阶梯会回来） */
-  pairMode: PairMode;
-  /** 配对容差（毫秒）：Y/Z 样本距锚点超过该值视为不可信；0 = 自动（按三轴采样节奏推算） */
-  pairTolMs: number;
   /** 三轴缩放（scene 归一化）：uniform=等比（真实比例，默认）/ perAxis=逐轴撑满视锥（扁平数据查看用） */
   axisScale: "uniform" | "perAxis";
 }
 
 const SETTINGS_KEY = "vs.plot3d.settings";
+const UNDO_CAP = 50;
+
+function defaultGroup(idx: number): TrajGroup {
+  const color = ["#4e9cef", "#4caf50", "#e8a13c"][idx] ?? "#4e9cef";
+  return {
+    id: GROUP_IDS[idx] ?? "g1",
+    name: `G${idx + 1}`,
+    color,
+    visible: true,
+    chX: "",
+    chY: "",
+    chZ: "",
+    mode: "line",
+    pointSize: 3,
+    opacity: 1,
+    showDots: true,
+    maxPoints: 0,
+    colorBy: "time",
+    colorCh: "",
+    fade: 60,
+    density: "high",
+    smooth: "none",
+    smoothWin: 5,
+    pairMode: "interp",
+    pairTolMs: 0,
+    notes: "",
+  };
+}
 
 export const DEFAULT_PLOT3D_SETTINGS: Plot3DSettings = {
-  axisX: "",
-  axisY: "",
-  axisZ: "",
-  colorBy: "time",
-  colorCh: "",
-  fade: 60,
-  style: "line+points",
-  density: "high",
+  v: 2,
+  groups: [defaultGroup(0), defaultGroup(1), defaultGroup(2)],
   autoRotate: false,
   follow: false,
   showGrid: true,
@@ -80,61 +136,158 @@ export const DEFAULT_PLOT3D_SETTINGS: Plot3DSettings = {
   keyFlight: false,
   zoomToCursor: false,
   calibMode: false,
-  pairMode: "interp",
-  pairTolMs: 0,
   axisScale: "uniform",
 };
 
-/** 部分输入 → 全量设置（容错归一化）；loadSettings 与 Operator 包导入共用 */
-function normalizeSettings(p: Partial<Plot3DSettings> | null | undefined): Plot3DSettings {
-  const q = p ?? {};
+const clampNum = (v: unknown, lo: number, hi: number, fb: number): number =>
+  typeof v === "number" && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fb;
+
+/** 单组归一化（字段级容错，非法回退默认） */
+function normalizeGroup(q: unknown, idx: number): TrajGroup {
+  const d = defaultGroup(idx);
+  if (typeof q !== "object" || q === null) return d;
+  const p = q as Partial<TrajGroup>;
+  const g: TrajGroup = {
+    ...d,
+    name: typeof p.name === "string" && p.name.trim() ? p.name.slice(0, 40) : d.name,
+    color: typeof p.color === "string" && /^#[0-9a-f]{3,8}$/i.test(p.color) ? p.color : d.color,
+    visible: p.visible !== false,
+    chX: typeof p.chX === "string" ? p.chX : "",
+    chY: typeof p.chY === "string" ? p.chY : "",
+    chZ: typeof p.chZ === "string" ? p.chZ : "",
+    mode: p.mode === "point" || p.mode === "points" || p.mode === "line" ? p.mode : d.mode,
+    pointSize: clampNum(p.pointSize, 1, 32, d.pointSize),
+    opacity: clampNum(p.opacity, 0.05, 1, d.opacity),
+    showDots: p.showDots !== false,
+    maxPoints:
+      typeof p.maxPoints === "number" && isFinite(p.maxPoints) && p.maxPoints > 0
+        ? Math.min(2_000_000, Math.round(p.maxPoints))
+        : 0,
+    colorBy: p.colorBy === "ch" ? "ch" : p.colorBy === "fixed" ? "fixed" : "time",
+    colorCh: typeof p.colorCh === "string" ? p.colorCh : "",
+    fade: (p.fade === 10 || p.fade === 60 || p.fade === 300 || p.fade === 0
+      ? p.fade
+      : d.fade) as TrajGroup["fade"],
+    density: p.density === "mid" || p.density === "low" ? p.density : "high",
+    smooth: p.smooth === "movingAvg" ? "movingAvg" : "none",
+    smoothWin: (() => {
+      const w = Math.round(clampNum(p.smoothWin, 3, 51, d.smoothWin));
+      return w % 2 === 0 ? Math.min(51, w + 1) : w;
+    })(),
+    pairMode:
+      p.pairMode === "nearest" || p.pairMode === "union" || p.pairMode === "interp"
+        ? p.pairMode
+        : "interp",
+    pairTolMs: typeof p.pairTolMs === "number" && isFinite(p.pairTolMs) && p.pairTolMs > 0 ? p.pairTolMs : 0,
+    notes: typeof p.notes === "string" ? p.notes.slice(0, 2000) : "",
+  };
+  return g;
+}
+
+/** v1（单轨迹时代）→ v2 组1 迁移：三轴绑定/样式/着色/渐隐/密度/配对整体入组1，
+ *  G2/G3 空；视图全局字段原位保留。style:"line+points" → line + showDots。 */
+function migrateV1(q: Record<string, unknown>): Plot3DSettings {
+  const g1 = defaultGroup(0);
+  if (typeof q.axisX === "string") g1.chX = q.axisX;
+  if (typeof q.axisY === "string") g1.chY = q.axisY;
+  if (typeof q.axisZ === "string") g1.chZ = q.axisZ;
+  g1.colorBy = q.colorBy === "ch" ? "ch" : "time";
+  if (typeof q.colorCh === "string") g1.colorCh = q.colorCh;
+  g1.fade = (q.fade === 10 || q.fade === 300 || q.fade === 0 ? q.fade : 60) as TrajGroup["fade"];
+  g1.density = q.density === "mid" || q.density === "low" ? q.density : "high";
+  g1.mode = q.style === "points" ? "points" : "line";
+  g1.showDots = q.style !== "line" && q.style !== "points";
+  if (q.pairMode === "nearest" || q.pairMode === "union" || q.pairMode === "interp")
+    g1.pairMode = q.pairMode as PairMode;
+  if (typeof q.pairTolMs === "number" && isFinite(q.pairTolMs) && q.pairTolMs > 0)
+    g1.pairTolMs = q.pairTolMs;
+  const base = normalizeSettings({ v: 2, groups: [g1] });
   return {
-    axisX: typeof q.axisX === "string" ? q.axisX : "",
-    axisY: typeof q.axisY === "string" ? q.axisY : "",
-    axisZ: typeof q.axisZ === "string" ? q.axisZ : "",
-    colorBy: q.colorBy === "ch" ? "ch" : "time",
-    colorCh: typeof q.colorCh === "string" ? q.colorCh : "",
-    fade: (q.fade === 10 || q.fade === 60 || q.fade === 300 || q.fade === 0
-      ? q.fade
-      : 60) as Plot3DSettings["fade"],
-    style:
-      q.style === "line" || q.style === "points" || q.style === "line+points"
-        ? q.style
-        : "line+points",
-    density: q.density === "mid" || q.density === "low" ? q.density : "high",
+    ...base,
     autoRotate: q.autoRotate === true,
     follow: q.follow === true,
     showGrid: q.showGrid !== false,
-    gridDensity: q.gridDensity === "fine" || q.gridDensity === "coarse" ? q.gridDensity : "std",
+    gridDensity: q.gridDensity === "fine" || q.gridDensity === "coarse" ? (q.gridDensity as "fine" | "coarse") : "std",
     keyFlight: q.keyFlight === true,
     zoomToCursor: q.zoomToCursor === true,
-    pairMode:
-      q.pairMode === "nearest" || q.pairMode === "union" || q.pairMode === "interp"
-        ? q.pairMode
-        : "interp",
-    pairTolMs:
-      typeof q.pairTolMs === "number" && isFinite(q.pairTolMs) && q.pairTolMs > 0
-        ? q.pairTolMs
-        : 0,
     axisScale: q.axisScale === "perAxis" ? "perAxis" : "uniform",
+  };
+}
+
+/** 部分输入 → 全量设置（容错归一化）；loadSettings 与 Operator 包导入共用。
+ *  接受 v2 对象与 v1 旧对象（自动迁移）；calibMode 恒 false（操作态永不恢复，P74c B4）。 */
+function normalizeSettings(p: Partial<Plot3DSettings> | Record<string, unknown> | null | undefined): Plot3DSettings {
+  const q = (p ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(q.groups)) {
+    // v2 缺 groups = 视为 v1 时代输入（旧 localStorage / 旧 Operator 包）
+    if (q.v === 2 && typeof q.axisX !== "string") {
+      // 显式 v2 但数组缺失：仅归一化全局，组走默认
+      const g = normalizeGroup(undefined, 0);
+      return {
+        v: 2,
+        groups: [g, defaultGroup(1), defaultGroup(2)],
+        autoRotate: q.autoRotate === true,
+        follow: q.follow === true,
+        showGrid: q.showGrid !== false,
+        gridDensity: q.gridDensity === "fine" || q.gridDensity === "coarse" ? (q.gridDensity as "fine" | "coarse") : "std",
+        keyFlight: q.keyFlight === true,
+        zoomToCursor: q.zoomToCursor === true,
+        calibMode: false,
+        axisScale: q.axisScale === "perAxis" ? "perAxis" : "uniform",
+      };
+    }
+    return migrateV1(q);
+  }
+  const gs = (q.groups as unknown[]).slice(0, 3).map((g, i) => normalizeGroup(g, i));
+  while (gs.length < 3) gs.push(defaultGroup(gs.length));
+  const view = (q.follow === true) && (q.autoRotate === false);
+  return {
+    v: 2,
+    groups: [gs[0], gs[1], gs[2]],
+    autoRotate: view ? false : q.autoRotate === true,
+    follow: view,
+    showGrid: q.showGrid !== false,
+    gridDensity: q.gridDensity === "fine" || q.gridDensity === "coarse" ? (q.gridDensity as "fine" | "coarse") : "std",
+    keyFlight: q.keyFlight === true,
+    zoomToCursor: q.zoomToCursor === true,
     // 操作态：永不从存储/Operator 包恢复（P74c B4）。进入校准必须由用户显式动作触发。
     calibMode: false,
+    axisScale: q.axisScale === "perAxis" ? "perAxis" : "uniform",
   };
 }
 
 function loadSettings(): Plot3DSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { ...DEFAULT_PLOT3D_SETTINGS };
-    return normalizeSettings(JSON.parse(raw) as Partial<Plot3DSettings>);
+    if (!raw) return normalizeSettings(null);
+    return normalizeSettings(JSON.parse(raw) as Record<string, unknown>);
   } catch {
-    return { ...DEFAULT_PLOT3D_SETTINGS };
+    return normalizeSettings(null);
   }
 }
 
-let settings = loadSettings();
+let settings: Plot3DSettings = loadSettings();
 const listeners = new Set<() => void>();
-let snapshot = { settings };
+let snapshot: { settings: Plot3DSettings; canUndo: boolean; canRedo: boolean } = {
+  settings,
+  canUndo: false,
+  canRedo: false,
+};
+
+/** 组配置快照（撤销栈单元）：groups + axisScale（数据口径类）；视图/操作态不入栈 */
+type CfgSnap = { groups: [TrajGroup, TrajGroup, TrajGroup]; axisScale: "uniform" | "perAxis" };
+const cloneCfg = (): CfgSnap => ({
+  groups: settings.groups.map((g) => ({ ...g })) as [TrajGroup, TrajGroup, TrajGroup],
+  axisScale: settings.axisScale,
+});
+let undoStack: CfgSnap[] = [];
+let redoStack: CfgSnap[] = [];
+
+function pushHistory() {
+  undoStack.push(cloneCfg());
+  if (undoStack.length > UNDO_CAP) undoStack.shift();
+  redoStack.length = 0;
+}
 
 function persist() {
   try {
@@ -156,7 +309,7 @@ export function endCalibSession() {
 }
 
 function emit() {
-  snapshot = { settings };
+  snapshot = { settings, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 };
   listeners.forEach((l) => l());
 }
 
@@ -171,70 +324,139 @@ export function getSnapshot() {
   return snapshot;
 }
 
-/**
- * Operator 只读模式下仍放行的「视图 / 操作态」字段（P74c C1）。
- * 判定依据：只影响「怎么看 / 怎么测」，不改变部署包承诺的数据口径，
- * 操作员在现场必须能旋转、跟随、以及进入椭球校准；其余字段属配置，锁定时拒绝改动。
- */
-const VIEW_KEYS: readonly (keyof Plot3DSettings)[] = ["autoRotate", "follow", "calibMode"];
-
-export function setSetting(patch: Partial<Plot3DSettings>) {
-  // C1：配置类改动过 Operator 只读锁；视图类（自动旋转/跟随/校准）放行
-  const touchesConfig = Object.keys(patch).some(
-    (k) => !VIEW_KEYS.includes(k as keyof Plot3DSettings),
-  );
-  if (touchesConfig && guardLocked()) return;
-  if (patch.follow === true) patch = { ...patch, autoRotate: false };
-  if (patch.autoRotate === true) patch = { ...patch, follow: false };
-  if (patch.calibMode === true) {
-    // 校准模式锁定视角无意义：强制全关（详设 §5）
-    patch = { ...patch, autoRotate: false, follow: false };
-  }
-  settings = { ...settings, ...patch };
+/** 撤销/重做（P87a A7）：仅组配置与三轴缩放；成功返回 true */
+export function undo(): boolean {
+  const s = undoStack.pop();
+  if (!s) return false;
+  redoStack.push(cloneCfg());
+  settings = { ...settings, ...s };
   emit();
   persist();
+  return true;
 }
-
-/**
- * Operator 包导出（P71）：当前设置快照，剥离校准操作态
- * （校准模式是操作态，操作员端进包后默认轨迹模式）
- */
-export function exportSettingsForPkg(): Plot3DSettings {
-  return { ...settings, calibMode: false };
-}
-
-/** Operator 包导入（P71）：全量归一化后应用+持久化；返回是否接受。
- *  C1：属配置写入 → 过只读锁；operatorStore.activate() 在**临时解锁窗口**内调用，故不受影响。 */
-export function importSettingsFromPkg(raw: unknown): boolean {
-  if (guardLocked()) return false;
-  if (typeof raw !== "object" || raw === null) return false;
-  settings = normalizeSettings(raw as Partial<Plot3DSettings>);
+export function redo(): boolean {
+  const s = redoStack.pop();
+  if (!s) return false;
+  undoStack.push(cloneCfg());
+  settings = { ...settings, ...s };
   emit();
   persist();
   return true;
 }
 
-/** 恢复默认（配置类 → 过只读锁） */
-export function resetSettings() {
-  if (guardLocked()) return;
-  settings = { ...DEFAULT_PLOT3D_SETTINGS };
+/**
+ * Operator 只读模式下仍放行的「视图 / 操作态」全局字段（P74c C1）。
+ * 判定依据：只影响「怎么看 / 怎么测」，不改变部署包承诺的数据口径；
+ * 其余字段属配置，锁定时拒绝改动。组级放行项只有 visible（setGroupVisible）。
+ */
+const VIEW_KEYS: readonly (keyof Plot3DSettings)[] = ["autoRotate", "follow", "calibMode"];
+
+export function setSetting(patch: Partial<Plot3DSettings>) {
+  // C1：配置类改动过 Operator 只读锁；视图类（自动旋转/跟随/校准）放行。
+  // P87a：patch 只允许全局字段——组配置一律走 updateGroup（撤销语义集中在组层）
+  const touchesConfig = Object.keys(patch).some(
+    (k) => k !== "groups" && k !== "v" && !VIEW_KEYS.includes(k as keyof Plot3DSettings),
+  );
+  if (touchesConfig && guardLocked()) return;
+  const { groups: _ng, v: _nv, ...rest } = patch;
+  void _ng;
+  void _nv;
+  let p: Partial<Plot3DSettings> = rest;
+  if (p.follow === true) p = { ...p, autoRotate: false };
+  if (p.autoRotate === true) p = { ...p, follow: false };
+  if (p.calibMode === true) {
+    // 校准模式锁定视角无意义：强制全关（详设 §5）
+    p = { ...p, autoRotate: false, follow: false };
+  }
+  // 三轴缩放影响归一化口径 → 入撤销栈（组层数据口径类）
+  if (p.axisScale !== undefined && p.axisScale !== settings.axisScale) pushHistory();
+  settings = { ...settings, ...p };
   emit();
   persist();
 }
 
-/** 绑定通道被删除时自动解绑（同 2D 的 X 源悬空纠正语义） */
+// ---------- 组配置（P87a） ----------
+
+/** 可见性 = 视图类：不过锁、不入栈、不触签名（scene 侧只翻 visible） */
+export function setGroupVisible(gid: GroupId, visible: boolean) {
+  const groups = settings.groups.map((g) => (g.id === gid ? { ...g, visible } : g));
+  settings = { ...settings, groups: groups as Plot3DSettings["groups"] };
+  emit();
+  persist();
+}
+
+/**
+ * 组配置更新（绑定/模式/显示/配对/备注）：配置类 → 过只读锁 + 一步可撤销。
+ * 绑定/密度/配对/模式/平滑变化 → 泵签名变 → 该组自动重灌（plotStore 源缓冲内可回看历史）。
+ */
+export function updateGroup(gid: GroupId, patch: Partial<TrajGroup>) {
+  if (guardLocked()) return;
+  const idx = GROUP_IDS.indexOf(gid);
+  if (idx < 0) return;
+  const clean = normalizeGroup({ ...settings.groups[idx], ...patch, visible: undefined }, idx);
+  clean.visible = settings.groups[idx].visible;
+  clean.id = gid;
+  const prev = settings.groups[idx];
+  if (JSON.stringify(prev) === JSON.stringify(clean)) return;
+  pushHistory();
+  const groups = settings.groups.map((g) => (g.id === gid ? clean : g));
+  settings = { ...settings, groups: groups as Plot3DSettings["groups"] };
+  emit();
+  persist();
+}
+
+/** 拖放/下拉绑定入口：axis="color" 绑着色通道并同时把 colorBy 切到 "ch" */
+export function bindGroup(
+  gid: GroupId,
+  axis: "x" | "y" | "z" | "color",
+  chanId: string,
+) {
+  if (axis === "color") {
+    updateGroup(gid, chanId ? { colorCh: chanId, colorBy: "ch" } : { colorBy: "fixed" });
+    return;
+  }
+  updateGroup(gid, axis === "x" ? { chX: chanId } : axis === "y" ? { chY: chanId } : { chZ: chanId });
+}
+
+/**
+ * 智能落点绑定（拖 vs-field 到组行）：优先填 X→Y→Z 空槽；三轴已齐时落点
+ * 由 UI 传入 axis 精确覆盖——本函数只在「无落点列信息」时用。返回命中的轴。
+ */
+export function bindGroupFirstFree(gid: GroupId, chanId: string): "x" | "y" | "z" | null {
+  const g = settings.groups.find((x) => x.id === gid);
+  if (!g) return null;
+  if (!g.chX) return (bindGroup(gid, "x", chanId), "x");
+  if (!g.chY) return (bindGroup(gid, "y", chanId), "y");
+  if (!g.chZ) return (bindGroup(gid, "z", chanId), "z");
+  return null;
+}
+
+/** 恢复默认（配置类 → 过只读锁；P87a：入撤销栈，误点可一步回退） */
+export function resetSettings() {
+  if (guardLocked()) return;
+  pushHistory();
+  settings = normalizeSettings(null);
+  emit();
+  persist();
+}
+
+/** 绑定通道被删除时自动解绑（同 2D 的 X 源悬空纠正语义；跨三组扫描） */
 function sanitizeBinds(chans: Channel[]): boolean {
   const ok = (id: string) => id === "" || chans.some((c) => c.id === id);
-  const patch: Partial<Plot3DSettings> = {};
-  if (!ok(settings.axisX)) patch.axisX = "";
-  if (!ok(settings.axisY)) patch.axisY = "";
-  if (!ok(settings.axisZ)) patch.axisZ = "";
-  if (settings.colorBy === "ch" && !ok(settings.colorCh)) {
-    patch.colorBy = "time";
-    patch.colorCh = "";
-  }
-  if (Object.keys(patch).length === 0) return false;
-  settings = { ...settings, ...patch };
+  let dirty = false;
+  const groups = settings.groups.map((g) => {
+    let patch: Partial<TrajGroup> | null = null;
+    if (!ok(g.chX)) patch = { ...(patch ?? {}), chX: "" };
+    if (!ok(g.chY)) patch = { ...(patch ?? {}), chY: "" };
+    if (!ok(g.chZ)) patch = { ...(patch ?? {}), chZ: "" };
+    if (g.colorBy === "ch" && !ok(g.colorCh))
+      patch = { ...(patch ?? {}), colorBy: "time", colorCh: "" };
+    if (!patch) return g;
+    dirty = true;
+    return { ...g, ...patch };
+  });
+  if (!dirty) return false;
+  settings = { ...settings, groups: groups as Plot3DSettings["groups"] };
   emit();
   persist();
   return true;
@@ -246,19 +468,25 @@ export interface Plot3DBatch {
   x: number[];
   y: number[];
   z: number[];
-  /** 着色值（colorBy=ch 时为该通道原始值；time 模式无意义） */
+  /** 着色值（colorBy=ch 时为该通道原始值；其余模式无意义） */
   val: number[];
 }
 
-type Sink = (b: Plot3DBatch, reloaded: boolean, cursorSec: number | null) => void;
+/** P87a：批次按组分发；reloaded=true 时 scene 清空该组缓冲重灌 */
+export interface GroupBatch {
+  gid: GroupId;
+  b: Plot3DBatch;
+  reloaded: boolean;
+}
+
+type Sink = (entries: GroupBatch[], cursorSec: number | null) => void;
 let sink: Sink | null = null;
 let pumpTimer: number | null = null;
 
 /**
- * 时间游标（P70 T2）：null = 跟随最新；数值 = 截断显示到该相对秒。
- * 来源优先级（泵每 tick 裁决，单入口下发）：回放跟随 > 手动 scrub > null。
- * 回放联动零重建的关键：重灌点 ts ≤ 水位自动跳过，seek 向后只需场景侧
- * drawRange 截断（见详设 §1）。
+ * 时间游标（P70 T2）：null = 跟随最新；数值 = 截断显示到该相对秒。全局共享
+ * （三组同一条时间轴）。来源优先级（泵每 tick 裁决，单入口下发）：
+ * 回放跟随 > 手动 scrub > null。
  */
 let scrubSec: number | null = null;
 
@@ -281,7 +509,7 @@ export function invalidateCursor(): void {
   st.lastCursor = null;
 }
 
-// ---------- 椭球校准采样（P71）----------
+// ---------- 椭球校准采样（P71；P87a：采样源=组1）----------
 // 采样缓冲与泵同源（时间水位续传）；面板关闭随 setSink(null) 丢弃（红线：关了不后台跑）
 
 export const CALIB_CAP = 20000;
@@ -313,7 +541,7 @@ export function clearCalib() {
   calib.pts.z.length = 0;
   setCalibFit(null);
 }
-/** 全清（换签名/面板关闭）：椭球采样+拟合+预览+六面全部复位 */
+/** 全清（组1 签名/面板关闭）：椭球采样+拟合+预览+六面全部复位 */
 function clearCalibAll() {
   clearCalib();
   accel6Reset();
@@ -501,20 +729,27 @@ export function setSink(cb: Sink | null, opts?: { keepCalib?: boolean }) {
   if (cb === null && !opts?.keepCalib) clearCalibAll();
 }
 
-/** 消费状态（不进 snapshot）：sig = 绑定/通道/密度签名；lastT = 已消费时间水位（原始 ms）；
- *  lastCursor = 上次下发的游标（游标去抖，变动 ≤5ms 不重复下发） */
+/** 全局消费状态：lastCursor = 上次下发的游标（游标去抖，变动 ≤5ms 不重复下发） */
 const st = {
-  sig: "",
-  lastT: -Infinity,
-  valCarry: 0,
   lastCursor: null as number | null,
 };
+
+/** 逐组消费状态（不进 snapshot）：sig = 该组绑定/通道/密度/模式/平滑签名；
+ *  lastT = 已消费时间水位（原始 ms）；ever = 该组曾有过数据（首次挂载时
+ *  从未消费的组不发空 reloaded 批次——场景无物可清，纯噪声） */
+interface GroupPumpState {
+  sig: string;
+  lastT: number;
+  valCarry: number;
+  ever: boolean;
+}
+const gst = new Map<GroupId, GroupPumpState>(
+  GROUP_IDS.map((id) => [id, { sig: "", lastT: -Infinity, valCarry: 0, ever: false }]),
+);
 
 /**
  * 数据源注入口（P75 B2 改版）：按通道 id 取「原始序列」（各通道自己的时间戳，
  * 未做联合对齐/前向填充）。默认 plotStore.getChanData。
- * 配对在 pairTriples.buildPairedTriples 内完成——阶梯根因（同帧三轴被联合轴
- * 拆成 3 行）从源头绕开。
  */
 let provider: (id: string) => Series = (id) => getChanData(id);
 export function _setProviderForTest(p: (id: string) => Series) {
@@ -522,8 +757,8 @@ export function _setProviderForTest(p: (id: string) => Series) {
 }
 
 /**
- * 配对诊断统计（P75 B2）：自上次重灌以来累计的配对成功/跳过数、生效容差、
- * 三轴值域。HUD 低频读取（内部引用只读约定，同 previewSnapshot）。
+ * 配对诊断统计（P75 B2，P87a 逐组）：自上次重灌以来累计的配对成功/跳过数、
+ * 生效容差、三轴值域。HUD 低频读取（内部引用只读约定，同 previewSnapshot）。
  */
 export interface PairStatSnapshot {
   paired: number;
@@ -535,39 +770,44 @@ export interface PairStatSnapshot {
   max: [number, number, number];
 }
 
-const pairStat: PairStatSnapshot = {
-  paired: 0,
-  skipped: 0,
-  tolMs: 0,
-  min: [Infinity, Infinity, Infinity],
-  max: [-Infinity, -Infinity, -Infinity],
-};
+const pairStats = new Map<GroupId, PairStatSnapshot>(
+  GROUP_IDS.map((id) => [
+    id,
+    {
+      paired: 0,
+      skipped: 0,
+      tolMs: 0,
+      min: [Infinity, Infinity, Infinity],
+      max: [-Infinity, -Infinity, -Infinity],
+    },
+  ]),
+);
 
-export function pairSnapshot(): PairStatSnapshot {
-  return pairStat;
+export function pairSnapshot(gid: GroupId): PairStatSnapshot {
+  return pairStats.get(gid)!;
 }
 
-function resetPairStat() {
-  pairStat.paired = 0;
-  pairStat.skipped = 0;
-  pairStat.tolMs = 0;
-  pairStat.min = [Infinity, Infinity, Infinity];
-  pairStat.max = [-Infinity, -Infinity, -Infinity];
+function resetPairStat(gid?: GroupId) {
+  for (const [id, p] of pairStats) {
+    if (gid && id !== gid) continue;
+    p.paired = 0;
+    p.skipped = 0;
+    p.tolMs = 0;
+    p.min = [Infinity, Infinity, Infinity];
+    p.max = [-Infinity, -Infinity, -Infinity];
+  }
 }
 
-function accumulatePairStat(r: {
-  t: number[];
-  x: number[];
-  y: number[];
-  z: number[];
-  skipped: number;
-  tolMs: number;
-}) {
-  pairStat.paired += r.t.length;
-  pairStat.skipped += r.skipped;
-  if (r.tolMs > 0) pairStat.tolMs = r.tolMs;
-  const mins = [pairStat.min[0], pairStat.min[1], pairStat.min[2]];
-  const maxs = [pairStat.max[0], pairStat.max[1], pairStat.max[2]];
+function accumulatePairStat(
+  gid: GroupId,
+  r: { t: number[]; x: number[]; y: number[]; z: number[]; skipped: number; tolMs: number },
+) {
+  const p = pairStats.get(gid)!;
+  p.paired += r.t.length;
+  p.skipped += r.skipped;
+  if (r.tolMs > 0) p.tolMs = r.tolMs;
+  const mins = [p.min[0], p.min[1], p.min[2]];
+  const maxs = [p.max[0], p.max[1], p.max[2]];
   for (let i = 0; i < r.t.length; i++) {
     const vs = [r.x[i], r.y[i], r.z[i]];
     for (let a = 0; a < 3; a++) {
@@ -575,166 +815,223 @@ function accumulatePairStat(r: {
       if (vs[a] > maxs[a]) maxs[a] = vs[a];
     }
   }
-  pairStat.min = [mins[0], mins[1], mins[2]];
-  pairStat.max = [maxs[0], maxs[1], maxs[2]];
+  p.min = [mins[0], mins[1], mins[2]];
+  p.max = [maxs[0], maxs[1], maxs[2]];
 }
 
 export function _resetForTest() {
-  st.sig = "";
-  st.lastT = -Infinity;
-  st.valCarry = 0;
+  for (const g of gst.values()) {
+    g.sig = "";
+    g.lastT = -Infinity;
+    g.valCarry = 0;
+    g.ever = false;
+  }
   st.lastCursor = null;
   scrubSec = null;
   sessionProbe = defaultSessionProbe;
-  settings = { ...DEFAULT_PLOT3D_SETTINGS };
-  snapshot = { settings };
+  settings = normalizeSettings(null);
+  undoStack = [];
+  redoStack = [];
+  snapshot = { settings, canUndo: false, canRedo: false };
   resetPairStat();
   clearCalibAll();
+  try {
+    localStorage.removeItem(SETTINGS_KEY);
+  } catch {
+    /* 测试环境存储异常忽略 */
+  }
 }
 
 /**
- * 清空轨迹数据（P82② HUD 清空钮）：时间水位推到当前最新点——历史全部跳过、
+ * 清空轨迹数据（P82② → P87a 组化）：时间水位推到当前最新点——历史全部跳过、
  * 新数据从零画起；绑定与显示设置不动；校准采样/拟合/预览缓冲**不受影响**
- * （独立缓冲，校准 HUD 有自己的「清空重来」）。场景侧由 UI 调 clearTrajectory。
+ * （独立缓冲，校准 HUD 有自己的「清空重来」）。不传 gid = 全组。
+ * 属运行类操作：不过只读锁、不入撤销栈（数据已丢弃，不可撤销——如实处理）。
+ * 只推水位不清场景缓冲——调用方（UI）负责 scene.clearTrajectory；
+ * 无 UI 直连的通路（AI/MCP）用 requestClearData。
  */
-export function clearData() {
-  let maxT = -Infinity;
-  for (const id of [settings.axisX, settings.axisY, settings.axisZ]) {
-    if (!id) continue;
-    const s = provider(id);
-    const last = s.t[s.t.length - 1];
-    if (last !== undefined && last > maxT) maxT = last;
+export function clearData(gid?: GroupId) {
+  for (const g of settings.groups) {
+    if (gid && g.id !== gid) continue;
+    let maxT = -Infinity;
+    for (const id of [g.chX, g.chY, g.chZ]) {
+      if (!id) continue;
+      const s = provider(id);
+      const last = s.t[s.t.length - 1];
+      if (last !== undefined && last > maxT) maxT = last;
+    }
+    const gs = gst.get(g.id)!;
+    gs.lastT = maxT;
+    gs.valCarry = 0;
+    resetPairStat(g.id);
   }
-  st.lastT = maxT;
-  st.valCarry = 0;
-  resetPairStat();
   emit();
+}
+
+/** AI/MCP 清空通路：下一拍泵以 reloaded 空批次下发（驱动 scene 清组缓冲），
+ *  与 UI 路径同一语义（水位推进 + 场景清零 + 不可撤销） */
+let clearReq: GroupId[] | null = null;
+export function requestClearData(gid?: GroupId) {
+  clearData(gid);
+  clearReq = gid ? [gid] : [...GROUP_IDS];
+}
+
+const emptyBatch = (): Plot3DBatch => ({ t: [], x: [], y: [], z: [], val: [] });
+
+/** 组1 是否三轴绑齐（校准入口/六面/清空的门控语义沿用 P69~P75 的「三轴绑齐」） */
+export function groupBound(gid: GroupId): boolean {
+  const g = settings.groups.find((x) => x.id === gid);
+  return !!g && !!g.chX && !!g.chY && !!g.chZ;
 }
 
 function pumpOnce() {
   if (!sink) return;
   if (!panelActivity.isOpen("plot3d")) return;
   const chans = getPlotSnapshot().channels;
-  const rebind = sanitizeBinds(chans);
+  sanitizeBinds(chans);
   const s = settings;
-  const sig = `${s.axisX}|${s.axisY}|${s.axisZ}|${s.colorBy}|${s.colorCh}|${s.density}|${s.pairMode}|${s.pairTolMs}|${chans.map((c) => c.id).join(",")}`;
-  const reloaded = sig !== st.sig || rebind;
-  if (reloaded) {
-    st.sig = sig;
-    st.lastT = -Infinity;
-    st.valCarry = 0;
-    resetPairStat();
-    if (calib.pts.x.length > 0 || calibFit || accel6.faces.some((f) => f !== null)) {
-      // 数据源/绑定/密度/配对方式变化：混采无意义 → 校准全套清空重来（P71 §5 / P73 §6）
-      clearCalibAll();
-    }
-  }
 
   // 六面采集停滞门（C9）：数据流中断时退出采集，UI 显示原因而不是永久「采集中」。
-  // 必须排在三轴绑齐检查之前——采集途中解绑任一轴时该门是唯一出口
+  // 必须排在各组消费之前——采集途中解绑组1 任一轴时该门是唯一出口
   if (accel6.collecting && Date.now() > accel6.deadline) {
     accel6.collecting = false;
     accel6.idx = -1;
     accel6.stalled = true;
   }
-  if (!s.axisX || !s.axisY || !s.axisZ) return; // 三轴未绑齐 → 不消费（HUD 提示）
-  const xi = chans.findIndex((c) => c.id === s.axisX);
-  const yi = chans.findIndex((c) => c.id === s.axisY);
-  const zi = chans.findIndex((c) => c.id === s.axisZ);
-  const vi = s.colorBy === "ch" ? chans.findIndex((c) => c.id === s.colorCh) : -1;
-  if (xi < 0 || yi < 0 || zi < 0) return;
-  const xs = provider(s.axisX);
-  const ys = provider(s.axisY);
-  const zs = provider(s.axisZ);
-  const vs = vi >= 0 ? provider(s.colorCh) : null;
-  if (xs.t.length === 0) return;
 
-  // 三轴配对（P75 B2）：X 原始时间轴为锚，Y/Z 按容差插值/最近邻；
-  // union 模式 = 旧版联合前向填充逃生舱。水位 sinceT 在函数内按原始 ts 过滤。
-  const pair = buildPairedTriples(xs, ys, zs, {
-    mode: s.pairMode,
-    tolMs: s.pairTolMs,
-    sinceT: st.lastT,
-  });
-  // 时间水位续传：interp/nearest 消费到 X 末锚点；union 消费到三序列原始末点。
-  // 永不回退（源重建缩小防御；重灌时已置 -Infinity）。
-  if (pair.endT > st.lastT) st.lastT = pair.endT;
-  accumulatePairStat(pair);
-
-  const stride = s.density === "high" ? 1 : s.density === "mid" ? 2 : 4;
   const t0 = timeOrigin();
-  const sampleMode = s.pairMode === "union" ? null : s.pairMode;
-  const b: Plot3DBatch = { t: [], x: [], y: [], z: [], val: [] };
+  const entries: GroupBatch[] = [];
+  let endSrc = -Infinity;
+  const req = clearReq;
+  clearReq = null;
 
-  // 校准（P71/P73）：stride=1 不抽稀（与轨迹密度无关）；采满 CAP 自动停止
-  const wantCalib = s.calibMode && calib.capturing;
-  const wantPreview = s.calibMode && calibFit !== null;
-  const wantA6 = s.calibMode && accel6.collecting;
-  let calibFull = false;
+  for (const g of s.groups) {
+    const gs = gst.get(g.id)!;
+    const sig = `${g.chX}|${g.chY}|${g.chZ}|${g.colorBy}|${g.colorCh}|${g.density}|${g.pairMode}|${g.pairTolMs}|${g.mode}|${g.smooth}|${g.smoothWin}|${chans.map((c) => c.id).join(",")}`;
+    const reloaded = sig !== gs.sig || (req !== null && req.includes(g.id));
+    if (reloaded) {
+      gs.sig = sig;
+      gs.lastT = -Infinity;
+      gs.valCarry = 0;
+      resetPairStat(g.id);
+      if (g.id === "g1" && (calib.pts.x.length > 0 || calibFit || accel6.faces.some((f) => f !== null))) {
+        // 组1 数据源/绑定/密度/模式变化：混采无意义 → 校准全套清空重来（P71 §5 / P73 §6）
+        clearCalibAll();
+      }
+    }
+    if (!g.chX || !g.chY || !g.chZ) {
+      // 三轴未绑齐 → 该组不消费（HUD 提示）；曾有数据的组签名变化时通知场景清空旧轨迹
+      if (reloaded && gs.ever) {
+        gs.ever = false;
+        entries.push({ gid: g.id, b: emptyBatch(), reloaded: true });
+      }
+      continue;
+    }
+    const xs = provider(g.chX);
+    const ys = provider(g.chY);
+    const zs = provider(g.chZ);
+    if (xs.t.length === 0) {
+      if (reloaded && gs.ever) {
+        gs.ever = false;
+        entries.push({ gid: g.id, b: emptyBatch(), reloaded: true });
+      }
+      continue;
+    }
+    const vi = g.colorBy === "ch" ? chans.findIndex((c) => c.id === g.colorCh) : -1;
+    const vs = vi >= 0 ? provider(g.colorCh) : null;
 
-  for (let i = 0; i < pair.t.length; i++) {
-    const tMs = pair.t[i];
-    if (vs) {
-      // 着色值与轨迹同一配对口径；不可信时刻保持上一有效值（valCarry 前向填充）
-      const v = sampleMode
-        ? sampleAt(vs, tMs, sampleMode, pair.tolMs)
-        : ffillAt(vs, tMs);
-      if (v != null) st.valCarry = v;
-    }
-    if (i % stride === 0) {
-      b.t.push((tMs - t0) / 1000);
-      b.x.push(pair.x[i]);
-      b.y.push(pair.y[i]);
-      b.z.push(pair.z[i]);
-      b.val.push(st.valCarry);
-    }
-    if ((wantCalib || wantPreview || wantA6) && !calibFull) {
-      const vx = pair.x[i];
-      const vy = pair.y[i];
-      const vz = pair.z[i];
-      if (wantCalib) {
-        calib.pts.x.push(vx);
-        calib.pts.y.push(vy);
-        calib.pts.z.push(vz);
-        if (calib.pts.x.length >= CALIB_CAP) {
-          calib.capturing = false; // 自动停止；UI 读 calibSnapshot().capturing 感知
-          calibFull = true;
+    // 三轴配对（P75 B2）：X 原始时间轴为锚，Y/Z 按容差插值/最近邻；
+    // union 模式 = 旧版联合前向填充逃生舱。水位 sinceT 在函数内按原始 ts 过滤。
+    const pair = buildPairedTriples(xs, ys, zs, {
+      mode: g.pairMode,
+      tolMs: g.pairTolMs,
+      sinceT: gs.lastT,
+    });
+    // 时间水位续传：interp/nearest 消费到 X 末锚点；union 消费到三序列原始末点。
+    // 永不回退（源重建缩小防御；重灌时已置 -Infinity）。
+    if (pair.endT > gs.lastT) gs.lastT = pair.endT;
+    accumulatePairStat(g.id, pair);
+
+    // 源末端（游标/时间条覆盖的数据整体范围）：各组绑定通道原始末点最大值
+    if (xs.t.length > 0 && xs.t[xs.t.length - 1] > endSrc) endSrc = xs.t[xs.t.length - 1];
+    if (ys.t.length > 0 && ys.t[ys.t.length - 1] > endSrc) endSrc = ys.t[ys.t.length - 1];
+    if (zs.t.length > 0 && zs.t[zs.t.length - 1] > endSrc) endSrc = zs.t[zs.t.length - 1];
+
+    const stride = g.density === "high" ? 1 : g.density === "mid" ? 2 : 4;
+    const sampleMode = g.pairMode === "union" ? null : g.pairMode;
+    const b: Plot3DBatch = { t: [], x: [], y: [], z: [], val: [] };
+
+    // 校准（P71/P73）：仅组1 源；stride=1 不抽稀（与轨迹密度无关）；采满 CAP 自动停止
+    const g1src = g.id === "g1";
+    const wantCalib = s.calibMode && g1src && calib.capturing;
+    const wantPreview = s.calibMode && g1src && calibFit !== null;
+    const wantA6 = s.calibMode && g1src && accel6.collecting;
+    let calibFull = false;
+
+    for (let i = 0; i < pair.t.length; i++) {
+      const tMs = pair.t[i];
+      if (vs) {
+        // 着色值与轨迹同一配对口径；不可信时刻保持上一有效值（valCarry 前向填充）
+        const v = sampleMode
+          ? sampleAt(vs, tMs, sampleMode, pair.tolMs)
+          : ffillAt(vs, tMs);
+        if (v != null) gs.valCarry = v;
+      }
+      if (i % stride === 0) {
+        b.t.push((tMs - t0) / 1000);
+        b.x.push(pair.x[i]);
+        b.y.push(pair.y[i]);
+        b.z.push(pair.z[i]);
+        b.val.push(gs.valCarry);
+      }
+      if ((wantCalib || wantPreview || wantA6) && !calibFull) {
+        const vx = pair.x[i];
+        const vy = pair.y[i];
+        const vz = pair.z[i];
+        if (wantCalib) {
+          calib.pts.x.push(vx);
+          calib.pts.y.push(vy);
+          calib.pts.z.push(vz);
+          if (calib.pts.x.length >= CALIB_CAP) {
+            calib.capturing = false; // 自动停止；UI 读 calibSnapshot().capturing 感知
+            calibFull = true;
+          }
+        }
+        if (calibFit) {
+          const r = correctedRadius(vx, vy, vz, calibFit);
+          preview.r[preview.head] = r;
+          preview.t[preview.head] = (tMs - t0) / 1000;
+          preview.head = (preview.head + 1) % PREVIEW_CAP;
+          if (preview.len < PREVIEW_CAP) preview.len++;
+        }
+        if (accel6.collecting) {
+          accel6.deadline = Date.now() + ACCEL6_STALL_GRACE_MS; // 有样本顺延停滞门
+          if (accel6.n === 0) accel6.t0Src = tMs; // 窗锚定源时间
+          if (tMs - accel6.t0Src <= ACCEL6_WINDOW_MS) {
+            accel6.sum[0] += vx;
+            accel6.sum[1] += vy;
+            accel6.sum[2] += vz;
+            accel6.sumSq[0] += vx * vx;
+            accel6.sumSq[1] += vy * vy;
+            accel6.sumSq[2] += vz * vz;
+            accel6.n++;
+          } else {
+            finalizeAccel6Face(); // 2s 窗到 → 自动结算（后续点不再累积）
+          }
         }
       }
-      if (calibFit) {
-        const r = correctedRadius(vx, vy, vz, calibFit);
-        preview.r[preview.head] = r;
-        preview.t[preview.head] = (tMs - t0) / 1000;
-        preview.head = (preview.head + 1) % PREVIEW_CAP;
-        if (preview.len < PREVIEW_CAP) preview.len++;
-      }
-      if (accel6.collecting) {
-        accel6.deadline = Date.now() + ACCEL6_STALL_GRACE_MS; // 有样本顺延停滞门
-        if (accel6.n === 0) accel6.t0Src = tMs; // 窗锚定源时间
-        if (tMs - accel6.t0Src <= ACCEL6_WINDOW_MS) {
-          accel6.sum[0] += vx;
-          accel6.sum[1] += vy;
-          accel6.sum[2] += vz;
-          accel6.sumSq[0] += vx * vx;
-          accel6.sumSq[1] += vy * vy;
-          accel6.sumSq[2] += vz * vz;
-          accel6.n++;
-        } else {
-          finalizeAccel6Face(); // 2s 窗到 → 自动结算（后续点不再累积）
-        }
-      }
+    }
+    if (b.t.length > 0 || reloaded) {
+      if (b.t.length > 0) gs.ever = true;
+      else gs.ever = false;
+      entries.push({ gid: g.id, b, reloaded });
     }
   }
 
   // ---------- 游标裁决（P70 T2）：回放跟随 > 手动 scrub > 跟随最新 ----------
   let cursorSec: number | null = null;
   const sess = sessionProbe();
-  // 源末端 = 三序列原始末点最大值（配对后轨迹时间轴由 X 锚定，但游标/
-  // 时间条覆盖的是数据整体范围）
-  let endSrc = xs.t[xs.t.length - 1];
-  if (ys.t.length > 0 && ys.t[ys.t.length - 1] > endSrc) endSrc = ys.t[ys.t.length - 1];
-  if (zs.t.length > 0 && zs.t[zs.t.length - 1] > endSrc) endSrc = zs.t[zs.t.length - 1];
-  const endRel = (endSrc - t0) / 1000;
+  const endRel = endSrc > -Infinity ? (endSrc - t0) / 1000 : 0;
   if (sess.playing) {
     // 回放时钟 → 相对秒，clamp 到源范围（防御时钟错位）
     const rel = (sess.replayTsMs - t0) / 1000;
@@ -748,7 +1045,33 @@ function pumpOnce() {
       Math.abs(cursorSec - (st.lastCursor ?? 0)) > 0.005);
   if (cursorChanged) st.lastCursor = cursorSec;
   // 游标变化时即使无新数据也要下发（如 seek 向后：重灌点全 ≤ 水位，批次为空）
-  if (b.t.length > 0 || reloaded || cursorChanged) {
-    sink(b, reloaded, cursorSec);
+  if (entries.length > 0 || cursorChanged) {
+    sink(entries, cursorSec);
   }
+}
+
+// ---------- 旧 API 兼容出口（appActions/AI 提示词的 bind axisX 语义映射到组1） ----------
+
+/** 读取某组（UI/AI 快照用） */
+export function getGroup(gid: GroupId): TrajGroup {
+  return settings.groups.find((g) => g.id === gid) ?? settings.groups[0];
+}
+
+/**
+ * Operator 包导出（P71 → P87a v2）：当前设置快照，剥离校准操作态
+ * （校准模式是操作态，操作员端进包后默认轨迹模式）
+ */
+export function exportSettingsForPkg(): Plot3DSettings {
+  return { ...settings, calibMode: false, groups: settings.groups.map((g) => ({ ...g })) as Plot3DSettings["groups"] };
+}
+
+/** Operator 包导入（P71）：全量归一化（含 v1 旧包迁移）后应用+持久化；返回是否接受。
+ *  C1：属配置写入 → 过只读锁；operatorStore.activate() 在**临时解锁窗口**内调用，故不受影响。 */
+export function importSettingsFromPkg(raw: unknown): boolean {
+  if (guardLocked()) return false;
+  if (typeof raw !== "object" || raw === null) return false;
+  settings = normalizeSettings(raw as Record<string, unknown>);
+  emit();
+  persist();
+  return true;
 }

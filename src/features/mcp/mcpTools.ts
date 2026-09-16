@@ -72,7 +72,7 @@ export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "get_plot3d",
     description:
-      "3D 轨迹面板只读快照：轴绑定（x/y/z 通道 id 及是否绑定齐）、显示设置（着色/样式/密度/拖尾/网格/跟随/自动旋转/键盘飞行/光标缩放）、是否椭球校准模式、采样点数与八象限覆盖度、椭球拟合结果（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。只读、不需高权限。写操作（换轴绑定/改显示/校准会话）用 run_action，kind=plot3d（需「允许高权限动作」）。",
+      "3D 轨迹面板只读快照（P87a 三组化）：groups 数组（每组 name/color/visible、axes x/y/z 通道 id 与是否绑齐、mode=point|points|line、colorBy、fade、density、smooth、maxPoints、配对与备注）、view 全局视图设置（三轴缩放/网格/跟随/自动旋转/键盘飞行/光标缩放）、是否椭球校准模式（采样源=组1）、采样点数与八象限覆盖度、椭球拟合结果（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。只读、不需高权限。写操作（组绑定/显示设置/清空/撤销/校准会话）用 run_action，kind=plot3d（需「允许高权限动作」）。",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -91,7 +91,7 @@ export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "run_action",
     description:
-      "执行 Uartix+ 的 App Action。kind 常用：writeTemplate/writeCommand/writeCard/writeCodec/openPanel/applyPreset/setTheme/addChannel/clearChannels/openPort/closePort/removeCard/removeProtocol/toast…；编排器与 3D 两组也走这里——kind=orchestrator（args.op=enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet，可据此从零搭出「事件→块树」自动化；只读请改用 get_orchestrator）、kind=plot3d（args.op=bind|set|calib，只读请改用 get_plot3d）。写模板/命令等非破坏动作直接可用；openPort/closePort/删除类与 orchestrator/plot3d 属高权限，需在设置 → 集成 开启「允许高权限动作」。",
+      "执行 Uartix+ 的 App Action。kind 常用：writeTemplate/writeCommand/writeCard/writeCodec/openPanel/applyPreset/setTheme/addChannel/clearChannels/openPort/closePort/removeCard/removeProtocol/toast…；编排器与 3D 两组也走这里——kind=orchestrator（args.op=enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet，可据此从零搭出「事件→块树」自动化；只读请改用 get_orchestrator）、kind=plot3d（args.op=bind|set|clear|undo|redo|calib；三组化：args.gid=g1|g2|g3 缺省 g1，bind 传 axisX/axisY/axisZ 通道 id，set 传组级 colorBy/mode/density/fade/smooth/pointSize… 或全局 axisScale/showGrid/autoRotate/follow…，calib 子动作 args.calib=enter|exit|start|stop|clear|solve6；只读请改用 get_plot3d）。写模板/命令等非破坏动作直接可用；openPort/closePort/删除类与 orchestrator/plot3d 属高权限，需在设置 → 集成 开启「允许高权限动作」。",
     inputSchema: {
       type: "object",
       properties: {

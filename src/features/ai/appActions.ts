@@ -980,7 +980,7 @@ async function runOrchestratorAction(a: Record<string, unknown>): Promise<unknow
   }
 }
 
-/** 3D 轨迹只读快照：绑定与显示设置 + 校准采样/拟合/六面状态 */
+/** 3D 轨迹只读快照（P87a 三组化）：各组绑定/显示 + 全局视图设置 + 校准采样/拟合/六面状态 */
 async function plot3dStatus(): Promise<unknown> {
   const s3d = await import("../plot3d/plot3dStore");
   const st = s3d.getSnapshot().settings;
@@ -988,13 +988,26 @@ async function plot3dStatus(): Promise<unknown> {
   const fit = s3d.getCalibFit();
   const six = s3d.accel6Snapshot();
   return {
-    axes: { x: st.axisX, y: st.axisY, z: st.axisZ, bound: !!(st.axisX && st.axisY && st.axisZ) },
-    display: {
-      colorBy: st.colorBy,
-      colorCh: st.colorCh,
-      style: st.style,
-      density: st.density,
-      fadeSec: st.fade,
+    groups: st.groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      color: g.color,
+      visible: g.visible,
+      axes: { x: g.chX, y: g.chY, z: g.chZ, bound: !!(g.chX && g.chY && g.chZ) },
+      mode: g.mode,
+      colorBy: g.colorBy,
+      colorCh: g.colorCh,
+      fadeSec: g.fade,
+      density: g.density,
+      smooth: g.smooth,
+      smoothWin: g.smoothWin,
+      maxPoints: g.maxPoints,
+      pairMode: g.pairMode,
+      pairTolMs: g.pairTolMs,
+      notes: g.notes,
+    })),
+    view: {
+      axisScale: st.axisScale,
       showGrid: st.showGrid,
       gridDensity: st.gridDensity,
       follow: st.follow,
@@ -1003,6 +1016,8 @@ async function plot3dStatus(): Promise<unknown> {
       keyFlight: st.keyFlight,
     },
     calibMode: st.calibMode,
+    /** P87a：校准采样源固定 = 组1 三通道 */
+    calibSource: "g1",
     sampling: { capturing: cal.capturing, points: cal.count, cap: s3d.CALIB_CAP, octantCoverage: cal.coverage },
     fit: fit
       ? {
@@ -1028,37 +1043,68 @@ async function plot3dStatus(): Promise<unknown> {
   };
 }
 
-/** 3D 写操作（高权限）：轴绑定 / 显示设置 / 校准会话（校准本身是操作态，但入口统一在此） */
+/** P87a：AI 侧组参数（缺省组 = g1，与 v0.4.1 时代单轨迹语义一致） */
+function plot3dGidOf(a: Record<string, unknown>): "g1" | "g2" | "g3" {
+  return a.gid === "g2" || a.gid === "g3" ? a.gid : "g1";
+}
+
+/** 3D 写操作（高权限）：组绑定 / 显示设置（组级或全局）/ 清空 / 撤销重做 / 校准会话 */
 async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
   const s3d = await import("../plot3d/plot3dStore");
   const op = String(a.op ?? "").trim();
   if (op === "bind") {
+    const gid = plot3dGidOf(a);
     const patch: Record<string, string> = {};
-    for (const k of ["axisX", "axisY", "axisZ", "colorCh"] as const) {
-      if (typeof a[k] === "string") patch[k] = String(a[k]);
-    }
-    if (!Object.keys(patch).length) throw new Error("bind 需要 axisX / axisY / axisZ（通道 id，可用 get_plot_stats 或 listChannels 取）");
-    s3d.setSetting(patch as Parameters<typeof s3d.setSetting>[0]);
-    const st = s3d.getSnapshot().settings;
+    if (typeof a.axisX === "string" || typeof a.chX === "string")
+      patch.chX = String((a.chX ?? a.axisX) as string);
+    if (typeof a.axisY === "string" || typeof a.chY === "string")
+      patch.chY = String((a.chY ?? a.axisY) as string);
+    if (typeof a.axisZ === "string" || typeof a.chZ === "string")
+      patch.chZ = String((a.chZ ?? a.axisZ) as string);
+    if (typeof a.colorCh === "string") patch.colorCh = String(a.colorCh);
+    if (!Object.keys(patch).length) throw new Error("bind 需要 axisX / axisY / axisZ（通道 id，可用 get_plot_stats 或 listChannels 取；gid 可选 g1/g2/g3，缺省 g1）");
+    s3d.updateGroup(gid, patch as Parameters<typeof s3d.updateGroup>[1]);
+    const g = s3d.getGroup(gid);
     return {
-      axes: { x: st.axisX, y: st.axisY, z: st.axisZ, bound: !!(st.axisX && st.axisY && st.axisZ) },
-      msg: "已更新 3D 轴绑定（换绑定会清空校准采样与拟合结果）",
+      gid,
+      axes: { x: g.chX, y: g.chY, z: g.chZ, bound: !!(g.chX && g.chY && g.chZ) },
+      msg: `已更新 ${g.name} 轴绑定（换绑定会清空该组历史并重灌；组1 换绑连带清空校准采样与拟合）`,
     };
   }
   if (op === "set") {
-    const allowed = ["colorBy", "style", "density", "fade", "gridDensity", "showGrid", "autoRotate", "follow", "keyFlight", "zoomToCursor"] as const;
-    const patch: Record<string, unknown> = {};
-    for (const k of allowed) if (a[k] !== undefined) patch[k] = a[k];
-    if (!Object.keys(patch).length) throw new Error(`set 需要至少一个字段（${allowed.join(" / ")}）`);
-    s3d.setSetting(patch as Parameters<typeof s3d.setSetting>[0]);
-    return `已更新 3D 显示设置：${Object.keys(patch).join(" / ")}`;
+    const gid = plot3dGidOf(a);
+    const groupKeys = ["colorBy", "colorCh", "fade", "density", "mode", "pointSize", "opacity", "showDots", "maxPoints", "smooth", "smoothWin", "pairMode", "pairTolMs", "name", "color", "notes"] as const;
+    const viewKeys = ["axisScale", "showGrid", "gridDensity", "autoRotate", "follow", "keyFlight", "zoomToCursor"] as const;
+    const gpatch: Record<string, unknown> = {};
+    for (const k of groupKeys) if (a[k] !== undefined) gpatch[k] = a[k];
+    // 旧 style 键兼容：line+points/line/points → mode + showDots（落 gid 组）
+    if (typeof a.style === "string") {
+      gpatch.mode = a.style === "points" ? "points" : "line";
+      gpatch.showDots = a.style === "line+points";
+    }
+    const vpatch: Record<string, unknown> = {};
+    for (const k of viewKeys) if (a[k] !== undefined) vpatch[k] = a[k];
+    if (!Object.keys(gpatch).length && !Object.keys(vpatch).length)
+      throw new Error(`set 需要至少一个字段（组级 ${groupKeys.join(" / ")}；全局 ${viewKeys.join(" / ")}；gid 可选 g1/g2/g3）`);
+    if (Object.keys(vpatch).length) s3d.setSetting(vpatch as Parameters<typeof s3d.setSetting>[0]);
+    if (Object.keys(gpatch).length) s3d.updateGroup(gid, gpatch as Parameters<typeof s3d.updateGroup>[1]);
+    return `已更新 3D 设置：${[...Object.keys(vpatch), ...Object.keys(gpatch)].join(" / ")}（组级写入 gid=${gid}）`;
+  }
+  if (op === "clear") {
+    const gid = a.gid === undefined ? undefined : plot3dGidOf(a);
+    s3d.requestClearData(gid);
+    return gid ? `已清空 ${gid} 组轨迹（不可撤销；校准采样不受影响）` : "已清空三组轨迹（不可撤销；校准采样不受影响）";
+  }
+  if (op === "undo" || op === "redo") {
+    const ok = op === "undo" ? s3d.undo() : s3d.redo();
+    return ok ? `已${op === "undo" ? "撤销" : "重做"}一步 3D 组配置` : "3D 撤销/重做栈为空";
   }
   if (op === "calib") {
     const sub = String(a.calib ?? "").trim();
     switch (sub) {
       case "enter":
         s3d.setSetting({ calibMode: true });
-        return "已进入椭球校准模式（轨迹隐藏、切换为点云采样；需先在画布上操作时用户可见）";
+        return "已进入椭球校准模式（轨迹隐藏、切换为点云采样；采样源=组1；需先在画布上操作时用户可见）";
       case "exit":
         s3d.setSetting({ calibMode: false });
         return "已退出椭球校准模式";
@@ -1077,5 +1123,5 @@ async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
         throw new Error(`未知 calib 子动作：${sub || "（空）"}（可选：enter / exit / start / stop / clear / solve6）`);
     }
   }
-  throw new Error(`未知 plot3d 动作 op：${op || "（空）"}（可选：bind / set / calib）`);
+  throw new Error(`未知 plot3d 动作 op：${op || "（空）"}（可选：bind / set / clear / undo / redo / calib）`);
 }
