@@ -956,11 +956,20 @@ export const CHECKSUM_SIZES: Record<string, number> = {
   crc32: 4,
 };
 
+export interface UpsertOpts {
+  /** 高级：定长帧保留校验字段在选区位置（中间校验），coverageEnd 同步为绝对偏移（引擎按字段位置验证，语义自洽） */
+  keepMiddle?: boolean;
+  /** 单事务切截帧模式（P86a：帧尾/长度字段与模式联动，一步可撤销） */
+  switchMode?: "footer" | "lengthField";
+  footerBytes?: number[];
+}
+
 export function upsertFieldLinked(
   templateId: string,
   field: FieldDef,
   editId: string | null,
   ckAlgo?: string | null,
+  opts?: UpsertOpts,
 ) {
   const tplOld = snapshot.rules.templates.find((t) => t.id === templateId);
   const oldF = editId ? tplOld?.fields.find((f) => f.id === editId) : null;
@@ -972,30 +981,81 @@ export function upsertFieldLinked(
     rules: {
       templates: snapshot.rules.templates.map((t) => {
         if (t.id !== templateId) return t;
-        const fields = editId
-          ? t.fields.map((f) => (f.id === editId ? { ...f, ...field, id: editId } : f))
-          : [...t.fields, field];
-        const link =
-          field.role === "length" &&
-          field.offset >= 0 &&
-          t.boundary.mode === "lengthField" &&
-          (field.type === "uint8" || field.type === "uint16");
-        const boundary = link
-          ? {
-              ...t.boundary,
-              lengthOffset: field.offset,
-              lengthSize: field.type === "uint16" ? 2 : 1,
+        let f = { ...field };
+        const fbOf = (b: FrameTemplate["boundary"]) =>
+          b.mode === "footer" ? (b.footerBytes?.length ?? 0) : 0;
+        if (f.role === "checksum" && ckAlgo && ckAlgo !== "none") {
+          const size = CHECKSUM_SIZES[ckAlgo] ?? fieldSize(f);
+          if (t.boundary.mode === "fixedLength") {
+            const fl = t.boundary.fixedLength ?? 0;
+            const target = fl - size;
+            if (
+              !opts?.keepMiddle &&
+              fl > 0 &&
+              f.offset >= 0 &&
+              f.offset !== target &&
+              target >= t.boundary.headerBytes.length
+            ) {
+              f = { ...f, offset: target };
             }
-          : t.boundary;
-        const checksum =
-          field.role === "checksum" && ckAlgo && ckAlgo !== "none"
-            ? {
-                algo: ckAlgo as ChecksumAlgo,
-                coverageStart: t.checksum?.coverageStart ?? 0,
-                coverageEnd: -(fieldSize(field) || 1),
-                endian: (t.checksum?.endian ?? "little") as "little" | "big",
-              }
-            : t.checksum;
+          } else if (f.offset >= 0) {
+            f = { ...f, offset: -(size + fbOf(t.boundary)) };
+          }
+        }
+        if (f.role === "footer" && opts?.switchMode === "footer" && f.offset >= 0) {
+          const fr = opts.footerBytes?.length ?? fieldSize(f);
+          f = { ...f, offset: -fr };
+        }
+        const fields = editId
+          ? t.fields.map((x) => (x.id === editId ? { ...x, ...f, id: editId } : x))
+          : [...t.fields, f];
+        let boundary = t.boundary;
+        if (opts?.switchMode === "footer") {
+          boundary = {
+            ...boundary,
+            mode: "footer",
+            footerBytes: opts.footerBytes?.length
+              ? opts.footerBytes
+              : boundary.footerBytes?.length
+                ? boundary.footerBytes
+                : [0x0d, 0x0a],
+          };
+        } else if (opts?.switchMode === "lengthField") {
+          boundary = {
+            ...boundary,
+            mode: "lengthField",
+            lengthOffset:
+              f.offset >= 0 ? f.offset : boundary.lengthOffset ?? boundary.headerBytes.length,
+            lengthSize: boundary.lengthSize ?? (f.type === "uint16" ? 2 : 1),
+          };
+        }
+        const link =
+          f.role === "length" &&
+          f.offset >= 0 &&
+          boundary.mode === "lengthField" &&
+          (f.type === "uint8" || f.type === "uint16");
+        if (link) {
+          boundary = {
+            ...boundary,
+            lengthOffset: f.offset,
+            lengthSize: f.type === "uint16" ? 2 : 1,
+          };
+        }
+        let checksum = t.checksum;
+        if (f.role === "checksum" && ckAlgo && ckAlgo !== "none") {
+          const size = CHECKSUM_SIZES[ckAlgo] ?? fieldSize(f);
+          const middle =
+            boundary.mode === "fixedLength" &&
+            opts?.keepMiddle &&
+            f.offset >= 0 &&
+            f.offset + size < (boundary.fixedLength ?? 0);
+          checksum = {
+            algo: ckAlgo as ChecksumAlgo,
+            coverageStart: t.checksum?.coverageStart ?? 0,
+            coverageEnd: middle ? f.offset : -(size + fbOf(boundary)),
+            endian: (t.checksum?.endian ?? "little") as "little" | "big",
+          };
+        }
         return { ...t, fields, boundary, checksum };
       }),
     },
@@ -1012,10 +1072,12 @@ export function setChecksumAlgo(templateId: string, algo: ChecksumAlgo) {
         if (t.id !== templateId) return t;
         const oldSize = t.checksum ? (CHECKSUM_SIZES[t.checksum.algo] ?? 1) : 1;
         const oldEnd = t.checksum?.coverageEnd ?? -oldSize;
+        const fb =
+          t.boundary.mode === "footer" ? (t.boundary.footerBytes?.length ?? 0) : 0;
         const checksum: NonNullable<FrameTemplate["checksum"]> = {
           algo,
           coverageStart: t.checksum?.coverageStart ?? 0,
-          coverageEnd: oldEnd === -oldSize ? -size : oldEnd,
+          coverageEnd: oldEnd === -oldSize ? -(size + fb) : oldEnd,
           endian: t.checksum?.endian ?? "little",
         };
         const fields =
@@ -1025,7 +1087,22 @@ export function setChecksumAlgo(templateId: string, algo: ChecksumAlgo) {
                 if (f.role !== "checksum") return f;
                 const want: FieldType =
                   size === 1 ? "uint8" : size === 2 ? "uint16" : "uint32";
-                return f.type === want ? f : { ...f, type: want };
+                let nf = f.type === want ? f : { ...f, type: want };
+                // P86a：算法宽度变化时，原本贴尾的定长校验字段跟着贴尾
+                if (
+                  t.boundary.mode === "fixedLength" &&
+                  oldEnd === -oldSize &&
+                  nf.offset >= 0
+                ) {
+                  const target = (t.boundary.fixedLength ?? 0) - size;
+                  if (
+                    target >= t.boundary.headerBytes.length &&
+                    target !== nf.offset
+                  ) {
+                    nf = { ...nf, offset: target };
+                  }
+                }
+                return nf;
               });
         return { ...t, checksum, fields };
       }),

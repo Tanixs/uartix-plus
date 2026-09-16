@@ -359,22 +359,24 @@ function CoverageStrip({
   const gapBytes = gaps.reduce((a, g) => a + g.len, 0);
   return (
     <div className="fc-covbar" title={tx("字段未覆盖的字节缺口 — 点击段直接定义字段", "Gaps not covered by fields — click a segment to define it")}>
-      {runs.map((r, i) =>
-        r.kind === "gap" ? (
-          <button
-            key={i}
-            className="fc-cov-gap"
-            style={{ width: `${(r.len / frameLen) * 100}%` }}
-            title={tx(
-              `缺口：字节 ${r.lo}~${r.lo + r.len - 1}（${r.len}B）· 点击定义字段`,
-              `Gap ${r.lo}~${r.lo + r.len - 1} (${r.len}B) — click to define`,
-            )}
-            onClick={() => onPick(r.lo, r.len)}
-          />
-        ) : (
-          <span key={i} className="fc-cov-seg" style={{ width: `${(r.len / frameLen) * 100}%` }} />
-        ),
-      )}
+      <div className="fc-cov-track">
+        {runs.map((r, i) =>
+          r.kind === "gap" ? (
+            <button
+              key={i}
+              className="fc-cov-gap"
+              style={{ flexGrow: r.len, flexBasis: 0 }}
+              title={tx(
+                `缺口：字节 ${r.lo}~${r.lo + r.len - 1}（${r.len}B）· 点击定义字段`,
+                `Gap ${r.lo}~${r.lo + r.len - 1} (${r.len}B) — click to define`,
+              )}
+              onClick={() => onPick(r.lo, r.len)}
+            />
+          ) : (
+            <span key={i} className="fc-cov-seg" style={{ flexGrow: r.len, flexBasis: 0 }} />
+          ),
+        )}
+      </div>
       <span className="fc-cov-info">
         {gapBytes > 0
           ? tx(`未覆盖 ${gapBytes}B`, `${gapBytes}B undefined`)
@@ -2141,13 +2143,14 @@ function FrameCanvas() {
             <FieldDialog
               init={dlg}
               onCancel={() => setDlg(null)}
-              onOk={(f, ckAlgo) => {
-                const applyIt = () => {
+              onOk={(f, ckAlgo, opts) => {
+                const applyIt = (extra?: { switchMode?: "footer" | "lengthField"; footerBytes?: number[] }) => {
                   templateStore.upsertFieldLinked(
                     dlg.tplId,
                     f,
                     dlg.edit && dlg.field ? dlg.field.id : null,
                     ckAlgo,
+                    { ...opts, ...extra },
                   );
                   fireAnim(`${dlg.tplId}:${dlg.field?.id ?? f.id}`);
                   setDlg(null);
@@ -2215,7 +2218,43 @@ function FrameCanvas() {
                       tx("，与字段「", " of the field \"") +
                       c.overlapName +
                       tx("」重叠。是否继续？", "\". Continue?"),
-                    apply: applyIt,
+                    apply: () => applyIt(),
+                  });
+                  return;
+                }
+                // P86a：帧尾/长度字段与截帧模式联动——确认切换，单事务一步可撤销
+                const tplT = protoRef.current.rules.templates.find((x) => x.id === dlg.tplId);
+                if (f.role === "footer" && tplT && tplT.boundary.mode !== "footer") {
+                  const fr = resolvedRef.current.fr;
+                  const fsz = fieldSize(f);
+                  let fb: number[] | undefined;
+                  if (fr?.bytes && f.offset >= 0 && f.offset + fsz <= fr.bytes.length) {
+                    fb = Array.from(fr.bytes.slice(f.offset, f.offset + fsz));
+                  } else if (f.disc?.length) {
+                    fb = f.disc;
+                  }
+                  const hex = (v: number[]) =>
+                    v.map((x) => x.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+                  setPending({
+                    title: tx("切换截帧模式", "Switch framing mode"),
+                    msg: tx(
+                      `「帧尾」字段需在「固定帧头 + 帧尾」模式下才参与截帧——切换？帧尾字节 = ${fb ? hex(fb) : "0D 0A（稍后可在属性面板改）"}。`,
+                      `A footer field only frames in "header + fixed footer" mode — switch? Footer bytes = ${fb ? hex(fb) : "0D 0A (editable in properties)"}.`,
+                    ),
+                    applyLabel: tx("切换并保存", "Switch & save"),
+                    apply: () => applyIt({ switchMode: "footer", footerBytes: fb }),
+                  });
+                  return;
+                }
+                if (f.role === "length" && tplT && tplT.boundary.mode !== "lengthField" && f.offset >= 0) {
+                  setPending({
+                    title: tx("切换截帧模式", "Switch framing mode"),
+                    msg: tx(
+                      `长度字段需在「固定帧头 + 长度字段」模式下才参与截帧——切换？长度域偏移=${f.offset}、宽度=${f.type === "uint16" ? 2 : 1}B 将同步到截帧配置。`,
+                      `A length field only frames in "header + length field" mode — switch? lengthOffset=${f.offset}, width=${f.type === "uint16" ? 2 : 1}B will sync to the framing config.`,
+                    ),
+                    applyLabel: tx("切换并保存", "Switch & save"),
+                    apply: () => applyIt({ switchMode: "lengthField" }),
                   });
                   return;
                 }
@@ -2423,7 +2462,7 @@ function FieldDialog({
   onCancel,
 }: {
   init: Extract<DlgInit, { kind: "field" }>;
-  onOk: (f: FieldDef, ckAlgo: string | null) => void;
+  onOk: (f: FieldDef, ckAlgo: string | null, opts?: { keepMiddle?: boolean }) => void;
   onCancel: () => void;
 }) {
   const recs = SIZE_TYPES[init.size] ?? [];
@@ -2502,6 +2541,45 @@ function FieldDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [protoLive, init.tplId, init.edit, init.field, candOff, candSize, type, role],
   );
+  // P86a：校验字段锚尾归一化预览 + 唯一性/帧长守卫 + 中间校验高级开关
+  const [keepMiddle, setKeepMiddle] = useState(false);
+  const tplNow = protoLive.rules.templates.find((x) => x.id === init.tplId) ?? null;
+  const ckSize = CHECKSUM_SIZES[ckAlgo] ?? 1;
+  const otherCk =
+    role === "checksum"
+      ? (tplNow?.fields.find((x) => x.role === "checksum" && x.id !== (init.field?.id ?? "")) ?? null)
+      : null;
+  const flNow = tplNow?.boundary.mode === "fixedLength" ? (tplNow?.boundary.fixedLength ?? 0) : 0;
+  const ckTarget = flNow - ckSize;
+  const ckTooShort =
+    role === "checksum" && ckAlgo !== "none" && flNow > 0 && !keepMiddle && ckTarget < (tplNow?.boundary.headerBytes.length ?? 0);
+  const ckMiddleAllowed =
+    role === "checksum" && ckAlgo !== "none" && flNow > 0 && !ckTooShort && candOff !== ckTarget;
+  let pOff = candOff;
+  if (role === "checksum" && ckAlgo !== "none" && tplNow) {
+    if (tplNow.boundary.mode === "fixedLength") {
+      if (!keepMiddle) pOff = ckTarget;
+    } else {
+      pOff = -(ckSize + (tplNow.boundary.mode === "footer" ? (tplNow.boundary.footerBytes?.length ?? 0) : 0));
+    }
+  }
+  const posEr = tplNow
+    ? effRange(
+        tplNow,
+        {
+          id: "preview",
+          name: "",
+          role,
+          offset: pOff,
+          type,
+          endian,
+          color: "",
+          size: type === "ascii" || type === "bcd" ? init.size : null,
+          spanTail: (role === "data" || role === "payload") && type !== "csv" ? (spanTail || null) : null,
+        },
+        init.frLen || 0,
+      )
+    : null;
 
   return (
     <div className="fc-dlg-mask" onMouseDown={onCancel}>
@@ -2607,6 +2685,24 @@ function FieldDialog({
             )}
           </div>
         )}
+        {posEr && posEr.len > 0 ? (
+          <div className="fc-dlg-pos">
+            {tx(
+              `实际位置：帧内 ${posEr.start} ~ ${posEr.start + posEr.len - 1} · 长 ${posEr.len} B`,
+              `Effective: frame ${posEr.start}~${posEr.start + posEr.len - 1} · ${posEr.len} B`,
+            )}
+            {tplNow?.boundary.mode !== "fixedLength"
+              ? ` ${tx("（随帧长浮动，当前帧长 ", "(floats with frame length, now ")}${init.frLen}${tx("）", ")")}`
+              : ""}
+          </div>
+        ) : pOff < 0 ? (
+          <div className="fc-dlg-pos">
+            {tx(
+              `距帧尾 ${-pOff} B · 长 ${candSize} B（随帧长浮动）`,
+              `${-pOff} B from tail · ${candSize} B (floats per frame)`,
+            )}
+          </div>
+        ) : null}
         <div className="fc-dlg-row">
           <label>{tx("协议角色", "Role")}</label>
           <div className="fc-dlg-roles">
@@ -2653,15 +2749,60 @@ function FieldDialog({
                     `Saves with ${ckAlgo} enabled: coverage = frame start to before this field (editable in properties); failing frames are filtered. Field width auto-matches the algorithm (${CHECKSUM_SIZES[ckAlgo] ?? 1} B).`,
                   )}
             </div>
+            {otherCk && (
+              <div className="fc-dlg-warn">
+                {tx(
+                  `每个模板仅一个和校验域（CK1）参与验证——「${otherCk.name}」已是校验字段。`,
+                  `Only one checksum field (CK1) per template — "${otherCk.name}" already is it.`,
+                )}
+                <button className="btn sm" style={{ marginLeft: 8 }} onClick={() => setRole("checksum2")}>
+                  {tx("改为本字段的附加校验 CK2", "Make this CK2 instead")}
+                </button>
+              </div>
+            )}
+            {ckTooShort && (
+              <div className="fc-dlg-warn">
+                {tx(
+                  `帧长太短：校验域（${ckSize} B）无法贴尾（帧头 ${tplNow?.boundary.headerBytes.length ?? 0} B 之后放不下）——请先在属性面板增大总帧长。`,
+                  `Frame too short: the ${ckSize} B checksum cannot sit at the tail — raise the total frame length in properties first.`,
+                )}
+              </div>
+            )}
+            {ckMiddleAllowed && (
+              <div className="fc-dlg-row">
+                <label>{tx("中间校验", "Mid-checksum")}</label>
+                <div className="fc-dlg-inline">
+                  <label className="chk">
+                    <input
+                      type="checkbox"
+                      checked={keepMiddle}
+                      onChange={(e) => setKeepMiddle(e.target.checked)}
+                    />
+                    <span>{tx("保留在选区位置（高级）", "Keep at selection (advanced)")}</span>
+                  </label>
+                  <HelpHint
+                    text={tx(
+                      "默认保存时自动把校验域锚到帧尾。勾选后字段留在选区位置，同时把校验覆盖终点（coverageEnd）同步为该字段的绝对偏移——引擎按字段位置验证，语义自洽，仅适用于定长帧。奇葩协议（校验在帧中间）用这个。",
+                      "By default the checksum snaps to the frame tail on save. Check this to keep the field where selected and sync coverageEnd to its absolute offset — the engine verifies at the field position (self-consistent, fixed-length frames only). For protocols with a mid-frame checksum.",
+                    )}
+                  />
+                </div>
+              </div>
+            )}
             <div className="fc-dlg-hint">
               {init.mode === "fixedLength"
-                ? tx(
-                    `当前偏移 ${init.lo}（帧内第 ${init.lo + 1} 字节）。校验域通常紧贴帧尾（偏移 = 帧长 − 校验宽度）；拖到哪个字节就固定在哪个字节，改位置请在属性面板改偏移或重新框选。`,
-                    `Current offset ${init.lo} (byte ${init.lo + 1} of the frame). Checksums normally sit at the tail; wherever you dragged is where it stays — adjust via properties or re-select.`,
-                  )
+                ? keepMiddle
+                  ? tx(
+                      `保留在偏移 ${candOff}（帧内第 ${candOff + 1} 字节），覆盖终点同步为该绝对偏移。`,
+                      `Kept at offset ${candOff}; coverage end synced to this absolute offset.`,
+                    )
+                  : tx(
+                      `保存时自动锚定帧尾（偏移 ${ckTarget} = 帧长 ${flNow} − 校验宽度 ${ckSize}）。`,
+                      `On save, auto-anchored to the tail (offset ${ckTarget} = length ${flNow} − checksum width ${ckSize}).`,
+                    )
                 : tx(
-                    `变长帧的校验域自动锚定帧尾（帧长 − 宽度 − 帧尾字），固定偏移 ${init.lo} 仅作画布标注，无需修改。`,
-                    `Variable-length frames anchor the checksum to the tail automatically; the fixed offset ${init.lo} is a canvas marker only.`,
+                    `变长帧的校验域自动锚定帧尾（帧长 − 宽度 − 帧尾字），将存为距帧尾 ${ckSize + (tplNow?.boundary.mode === "footer" ? (tplNow?.boundary.footerBytes?.length ?? 0) : 0)} B。`,
+                    `Variable frames anchor the checksum to the tail; stored as ${ckSize + (tplNow?.boundary.mode === "footer" ? (tplNow?.boundary.footerBytes?.length ?? 0) : 0)} B from the tail.`,
                   )}
             </div>
           </>
@@ -2816,6 +2957,7 @@ function FieldDialog({
           <button className="btn" onClick={onCancel}>{tx("取消", "Cancel")}</button>
           <button
             className="btn primary"
+            disabled={!!otherCk || ckTooShort}
             onClick={() =>
               onOk({
                 id: init.field?.id ?? crypto.randomUUID(),
@@ -2848,7 +2990,8 @@ function FieldDialog({
                   spanElem !== "text"
                     ? spanElem
                     : null,
-              }, role === "checksum" ? ckAlgo : null)
+              }, role === "checksum" ? ckAlgo : null,
+                role === "checksum" && keepMiddle ? { keepMiddle: true } : undefined)
             }
           >
             {init.edit ? tx("保存修改", "Save changes") : tx("确认定义", "Confirm definition")}

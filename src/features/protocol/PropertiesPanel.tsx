@@ -227,9 +227,34 @@ export function PropertiesPanel() {
           <select
             className="input"
             value={b.mode}
-            onChange={(e) =>
-              store.patchBoundary(tpl.id, { mode: e.target.value as BoundaryMode })
-            }
+            onChange={(e) => {
+              const v = e.target.value as BoundaryMode;
+              if (v === "footer" && !(b.footerBytes?.length)) {
+                store.patchBoundary(tpl.id, { mode: v, footerBytes: [0x0d, 0x0a] });
+                toast(
+                  tx(
+                    "已切换为「帧头 + 帧尾」：帧尾字节预填 0D 0A，请按设备实际输出修改",
+                    "Switched to header + footer: footer bytes pre-filled 0D 0A — set them to the device's real bytes",
+                  ),
+                );
+                return;
+              }
+              if (v === "lengthField" && b.lengthOffset == null) {
+                store.patchBoundary(tpl.id, {
+                  mode: v,
+                  lengthOffset: b.headerBytes.length,
+                  lengthSize: 1,
+                });
+                toast(
+                  tx(
+                    "已切换为「帧头 + 长度字段」：长度域默认取帧头后第 1 字节（u8），可在下方调整",
+                    "Switched to header + length field: length domain defaults to the first byte after the header (u8); adjust below",
+                  ),
+                );
+                return;
+              }
+              store.patchBoundary(tpl.id, { mode: v });
+            }}
           >
             <option value="fixedLength">{tx("固定帧头 + 固定长度", "Header + Fixed Length")}</option>
             <option value="lengthField">{tx("固定帧头 + 长度字段", "Header + Length Field")}</option>
@@ -466,6 +491,16 @@ export function PropertiesPanel() {
             const w = store.CHECKSUM_SIZES[tpl.checksum.algo] ?? 1;
             const end = ck.offset + fieldSize(ck);
             if (end === fl) return null;
+            if (ck.offset >= 0 && tpl.checksum.coverageEnd === ck.offset) {
+              return (
+                <div className="form-hint">
+                  {tx(
+                    "中间校验（高级）：覆盖终点已同步为该字段的绝对偏移，引擎按字段位置验证——配置自洽。",
+                    "Mid-frame checksum (advanced): coverage end synced to this field's absolute offset — the engine verifies at the field position; config is self-consistent.",
+                  )}
+                </div>
+              );
+            }
             const target = fl - w;
             const okTarget = target >= tpl.boundary.headerBytes.length;
             return (
@@ -703,7 +738,23 @@ export function PropertiesPanel() {
           <select
             className="input"
             value={field.role}
-            onChange={(e) => patch({ role: e.target.value as FieldRole })}
+            onChange={(e) => {
+              const r = e.target.value as FieldRole;
+              if (r === "checksum" && tpl.fields.some((x) => x.role === "checksum" && x.id !== field.id)) {
+                const other = tpl.fields.find((x) => x.role === "checksum" && x.id !== field.id)!;
+                setConfirm({
+                  fid: field.id,
+                  msg: tx(
+                    `每个模板仅一个和校验域（CK1）参与验证——「${other.name}」已是校验字段。要把本字段改为附加校验 CK2（视觉标注，与 CK1 一并验证）吗？`,
+                    `Only one CK1 checksum field per template — "${other.name}" already is it. Make this field CK2 instead (visual marker, verified together with CK1)?`,
+                  ),
+                  applyLabel: tx("改为本字段 CK2", "Make this CK2"),
+                  apply: () => patch({ role: "checksum2" }),
+                });
+                return;
+              }
+              patch({ role: r });
+            }}
           >
             {ROLES.map((r) => (
               <option key={r} value={r}>
@@ -926,6 +977,16 @@ export function PropertiesPanel() {
                   {tx(
                     `位置正确：偏移 ${field.offset} + 宽度 ${w} = 帧长 ${fl}（紧贴帧尾）。`,
                     `Position OK: offset ${field.offset} + width ${w} = frame length ${fl} (at the tail).`,
+                  )}
+                </div>
+              );
+            }
+            if (field.offset >= 0 && tpl.checksum?.coverageEnd === field.offset) {
+              return (
+                <div className="form-hint">
+                  {tx(
+                    "中间校验（高级）：覆盖终点已同步为该字段的绝对偏移，引擎按字段位置验证——配置自洽。",
+                    "Mid-frame checksum (advanced): coverage end synced to this field's absolute offset — the engine verifies at the field position; config is self-consistent.",
                   )}
                 </div>
               );
