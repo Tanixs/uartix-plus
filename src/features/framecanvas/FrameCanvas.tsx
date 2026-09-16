@@ -859,7 +859,7 @@ function FrameCanvas() {
         const rv = it.p1 ? 0 : 4;
         const itemSel = sel && sel.lo <= it.g1 && sel.hi >= it.g0;
         let hoverHit = false;
-        if (hv && blk.kind === "fld" && hv.off >= blk.start && hv.off < blk.start + blk.len) {
+        if (hv && blk.kind !== "gap" && hv.off >= blk.start && hv.off < blk.start + blk.len) {
           hoverHit = true;
         }
         if (blk.kind === "hdr") {
@@ -990,6 +990,13 @@ function FrameCanvas() {
           }
           ctx.textAlign = "center";
           ctx.font = `${Math.max(8, Math.min(Math.round(s * 0.36), 13))}px ${MONO}`;
+        }
+        if (hoverHit && blk.kind !== "fld" && blk.kind !== "gap") {
+          ctx.strokeStyle = cAcc;
+          ctx.lineWidth = 2;
+          rrLR(ctx, x0 - 2, yTop - 2, wRun + 4, s + 4, Math.max(0, rl - 2), Math.max(0, rv - 2));
+          ctx.stroke();
+          ctx.lineWidth = 1;
         }
         if (it.p1 && blk.kind !== "gap") {
           ctx.strokeStyle = hoverHit ? cAcc : hexA(blk.kind === "hdr" ? "#e8a33d" : blk.color, 0.32);
@@ -1889,10 +1896,10 @@ function FrameCanvas() {
           />
           <b>{cellSize}</b>
         </label>
-        <button className="btn sm icon" onClick={doUndo} title={tx("撤销 (Ctrl+Z)", "Undo (Ctrl+Z)")}>
+        <button className="btn sm icon" onClick={doUndo} disabled={proto.undoStack.length === 0} title={tx("撤销 (Ctrl+Z)", "Undo (Ctrl+Z)")}>
           <IconUndo />
         </button>
-        <button className="btn sm icon" onClick={doRedo} title={tx("重做 (Ctrl+Y)", "Redo (Ctrl+Y)")}>
+        <button className="btn sm icon" onClick={doRedo} disabled={proto.redoStack.length === 0} title={tx("重做 (Ctrl+Y)", "Redo (Ctrl+Y)")}>
           <IconRedo />
         </button>
         <SessionTransport />
@@ -2362,6 +2369,28 @@ function parseHex(text: string): number[] | null {
   return parseHexBytes(text);
 }
 
+/** 弹窗焦点圈定：Tab 在可聚焦元素内循环，不外逃到画布（P86c） */
+function trapTab(e: React.KeyboardEvent) {
+  if (e.key !== "Tab") return;
+  const root = e.currentTarget as HTMLElement;
+  const els = [
+    ...root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ),
+  ].filter((el) => el.offsetParent !== null);
+  if (els.length === 0) return;
+  const first = els[0];
+  const last = els[els.length - 1];
+  const a = document.activeElement;
+  if (e.shiftKey && (a === first || !root.contains(a))) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && a === last) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
 function HeadTailDialog({
   init,
   onSave,
@@ -2430,6 +2459,7 @@ function HeadTailDialog({
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
+          trapTab(e);
         }}
       >
         <div className="fc-dlg-title">
@@ -2630,6 +2660,7 @@ function FieldDialog({
         onMouseDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
+          trapTab(e);
         }}
       >
         <div className="fc-dlg-title">
