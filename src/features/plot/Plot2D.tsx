@@ -4,6 +4,8 @@ import uPlot from "uplot";
 import * as plotStore from "./plotStore";
 import * as templateStore from "../protocol/templateStore";
 import * as sessionStore from "../session/sessionStore";
+import * as timeCursor from "../analysis/timeCursorStore";
+import { cancelPreview, navigateTime, previewTime, returnLatest, subscribeReplayClock } from "../analysis/timeNavigation";
 import type { AnnOut } from "../../ipc/types";
 import { toast } from "../ai/extRuntime";
 import { useSettings } from "../settings/settingsStore";
@@ -259,6 +261,9 @@ export function Plot2D() {
   const syncMeasure = () => {
     const u = uRef.current;
     const st = settingsRef.current;
+    const { a, b } = xCurRef.current;
+    const origin = plotStore.timeOrigin();
+    timeCursor.publishDisplayRange(a, b, origin, st.cursorX && st.xSource === "time");
     let mx: Measure | null = null;
     let my: Measure | null = null;
     if (u && (st.cursorX || st.cursorY)) {
@@ -303,6 +308,70 @@ export function Plot2D() {
       setMeasureY(null);
     }
   };
+
+  const clearTimeCursors = () => {
+    xCurRef.current = { a: null, b: null };
+    cursorDragRef.current = null;
+    measureKeyRef.current = "";
+    setMeasureX(null);
+    timeCursor.setRange(null);
+    uRef.current?.redraw();
+  };
+
+  // The event accepts a computed snapshot, not channel/range options. Open the
+  // global dialog without a snapshot; the user selects its cache scope there.
+  const openAnalysisPackage = () => {
+    syncMeasure();
+    setMenu(null);
+    setSub(null);
+    setSubPinned(false);
+    window.dispatchEvent(new Event("vs-analysis-export"));
+  };
+
+  const applySharedCursorRef = useRef(() => {});
+  applySharedCursorRef.current = () => {
+    const cursor = timeCursor.getSnapshot();
+    const u = uRef.current;
+    if (cursor.tsMs === null) {
+      // Session/reset invalidation applies even while unlinked or without a chart.
+      clearTimeCursors();
+      setFollow(true);
+      return;
+    }
+    if (!cursor.linked || cursor.source === "plot2d" || settingsRef.current.xSource !== "time" || !u) return;
+    const x = timeCursor.toDisplaySeconds(cursor.tsMs, plotStore.timeOrigin());
+    setFollow(false);
+    xCurRef.current = { ...xCurRef.current, a: x };
+    if (!settingsRef.current.cursorX) plotStore.setSetting({ cursorX: true });
+    const min = u.scales.x.min;
+    const max = u.scales.x.max;
+    if (min != null && max != null && (x < min || x > max)) {
+      const half = Math.max((max - min) / 2, 0.001);
+      u.setScale("x", { min: x - half, max: x + half });
+    }
+    u.redraw();
+    syncMeasure();
+  };
+  useEffect(() => {
+    let previous = timeCursor.getSnapshot();
+    const off = timeCursor.subscribe(() => {
+      const next = timeCursor.getSnapshot();
+      const playheadChanged = next.tsMs !== previous.tsMs || next.source !== previous.source || next.linked !== previous.linked;
+      // Save before applying: syncMeasure may synchronously publish a range.
+      previous = next;
+      if (playheadChanged) applySharedCursorRef.current();
+    });
+    return () => {
+      off();
+      cancelPreview("plot2d");
+      timeCursor.setRange(null);
+    };
+  }, []);
+  // 挂载即对账一次 + 单例订阅回放时钟（卸载注销；预览拖动中不被 10Hz 进度覆盖）
+  useEffect(() => {
+    applySharedCursorRef.current();
+    return subscribeReplayClock();
+  }, []);
 
   const armSub = () => {
     if (subTimer.current !== null) window.clearTimeout(subTimer.current);
@@ -701,8 +770,10 @@ export function Plot2D() {
               if (lv != null) drawV(lv, accent, false, tx("最新", "Latest"));
               // 会话标注竖线（P3b）：1px 虚线（无徽标，靠列表悬停查看文本），越界时
               // drawV 自动画边缘箭头 + 文本。可见性仅当会话有标注时才有成本
-              for (const a of annRef.current) {
-                drawV(a.ts, ANN_COLOR, true, a.text.slice(0, 8));
+              if (settingsRef.current.xSource === "time") {
+                for (const a of annRef.current) {
+                  drawV(timeCursor.toDisplaySeconds(a.ts, plotStore.timeOrigin()), ANN_COLOR, true, a.text.slice(0, 8));
+                }
               }
               // 快照叠加（P46）：冻结视野的参考虚线，起点对齐当前视野起点平移；
               // 通道色 55% 透明虚线，与实线当前曲线区分。clip 防越界值画出绘图区
@@ -942,7 +1013,8 @@ export function Plot2D() {
                   return;
                 }
               }
-              // 双击空白 = 保形回实时：保持当前窗宽，仅平移到最新数据
+              // 双击空白 = 保形回最新，并释放共享历史游标。
+              returnLatest("plot2d");
               setFollow(true);
               yManualRef.current = false;
               const last = latestDispRef.current;
@@ -1059,6 +1131,10 @@ export function Plot2D() {
                 if (nv != null) {
                   const ref = cd.mode === "x" ? xCurRef : yCurRef;
                   ref.current = { ...ref.current, [cd.which]: nv };
+                  if (cd.mode === "x" && cd.which === "a" && settingsRef.current.xSource === "time") {
+                    // 拖动预览：发布到共享游标（3D/回放联动），提交在 pointerup seek
+                    previewTime(timeCursor.fromDisplaySeconds(nv, plotStore.timeOrigin()), "plot2d");
+                  }
                   u.redraw();
                   syncMeasure();
                 }
@@ -1096,6 +1172,14 @@ export function Plot2D() {
               const cd = cursorDragRef.current;
               if (cd && e.button === 0) {
                 cursorDragRef.current = null;
+                if (cd.mode === "x" && cd.which === "a" && settingsRef.current.xSource === "time") {
+                  if (xCurRef.current.a !== null) {
+                    // 提交：单 pointerup seek；暂停回放保留 0 速
+                    void navigateTime(timeCursor.fromDisplaySeconds(xCurRef.current.a, plotStore.timeOrigin()), "plot2d");
+                  } else {
+                    cancelPreview("plot2d");
+                  }
+                }
                 // 单击（无位移）落在游标线上不放置新游标，直接结束
                 return;
               }
@@ -1110,8 +1194,12 @@ export function Plot2D() {
                   if (nx != null && ny != null && (st.cursorX || st.cursorY)) {
                     if (st.cursorX) {
                       const c = xCurRef.current;
-                      if (c.a == null || c.b == null)
+                      if (c.a == null || c.b == null) {
                         xCurRef.current = { ...c, [c.a == null ? "a" : "b"]: nx };
+                        if (c.a == null && st.xSource === "time") {
+                          void navigateTime(timeCursor.fromDisplaySeconds(nx, plotStore.timeOrigin()), "plot2d");
+                        }
+                      }
                     }
                     if (st.cursorY) {
                       const c = yCurRef.current;
@@ -1838,7 +1926,16 @@ export function Plot2D() {
               </span>
             </div>
             {measureX.b != null && (
-              <div className="plot-measure-dt">Δt = {fmtX(measureX.d)}</div>
+              <div className="plot-measure-dt">
+                Δt = {fmtX(measureX.d)}
+                <button
+                  className="pm-clear"
+                  onClick={openAnalysisPackage}
+                  title={tx("打开分析包并选择缓存窗口；如需沿用 A/B 范围，请先在指标面板使用该范围并刷新", "Open analysis package and choose a cache window; to reuse A/B, apply that range and refresh in the metrics panel first")}
+                >
+                  {tx("分析包…", "Analysis package…")}
+                </button>
+              </div>
             )}
             {measureX.rows.length > 0 && (
               <>
@@ -2037,6 +2134,14 @@ export function Plot2D() {
                 </span>
               </button>
             </div>
+            <div className="ctx-group">{tx("分析", "Analysis")}</div>
+            <button
+              className="ctx-item"
+              title={tx("打开全局分析包对话框（可选时间范围、通道与模块）", "Open the global analysis package dialog (choose time range, channels and modules)")}
+              onClick={openAnalysisPackage}
+            >
+              {tx("分析包…", "Analysis package…")}
+            </button>
             <div className="ctx-group">AI</div>
             <button
               className="ctx-item"

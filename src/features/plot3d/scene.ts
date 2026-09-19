@@ -92,7 +92,9 @@ export interface Plot3DScene {
   setKeyFlight(on: boolean): void;
   /** P87b：注入组模型的二进制（GLTF/GLB bytes；null=失败，scene 回退箭头）。
    *  bytes 由 UI 侧读文件（scene 不碰 IPC），按 cfg.model.src 缓存解析结果 */
-  setModelBytes(gid: GroupId, bytes: ArrayBuffer | null): void;
+  beginModelRequest(gid: GroupId): symbol | null;
+  /** Pass the token captured before disk I/O; omitted only for synchronous injection. */
+  setModelBytes(gid: GroupId, bytes: ArrayBuffer | null, request?: symbol): void;
   /** P87b：时间标注（会话 annotate 相对秒列表）→ 主组轨迹立旗标（≤48，超出取最近 48） */
   setAnnots(relSecs: number[]): void;
   /** 强制渲染一帧并返回 PNG dataURL（快照导出用） */
@@ -250,8 +252,8 @@ export async function createScene(
     };
   }
 
-  const GROUP_ID_LIST: GroupId[] = ["g1", "g2", "g3"];
   const gstates = new Map<GroupId, GState>();
+  let disposed = false;
 
   // 真实值并集包围盒（重锚/网格/perAxis 缩放共用）——由各组 bbMin/bbMax 合成
   const bbMin = [Infinity, Infinity, Infinity];
@@ -267,22 +269,11 @@ export async function createScene(
     }
   }
 
-  function getG(gid: GroupId): GState {
+  /** Creation is private to applySettings; batches and async results only look up members. */
+  function ensureGroup(cfg: TrajGroup): GState {
+    const gid = cfg.id;
     let g = gstates.get(gid);
     if (!g) {
-      const cfg =
-        curSettings?.groups.find((x) => x.id === gid) ??
-        ({
-          id: gid,
-          colorBy: "time",
-          fade: 60,
-          color: "#4e9cef",
-          pointSize: 3,
-          opacity: 1,
-          mode: "line",
-          showDots: true,
-          visible: true,
-        } as TrajGroup);
       g = {
         gid,
         cfg: { ...cfg },
@@ -405,6 +396,38 @@ export async function createScene(
       gl_FragColor = vec4(mix(uBg, vBase, vFade), 1.0);
     }
   `;
+  // Points 层专用：gl_PointCoord 圆形裁剪+软边（无裁剪时点渲染成黑灰方片）
+  const FRAG_POINTS = /* glsl */ `
+    precision highp float;
+    uniform vec3 uBg;
+    varying vec3 vBase;
+    varying float vFade;
+    void main() {
+      float d = length(gl_PointCoord - vec2(0.5));
+      if (d > 0.5) discard;
+      float a = 1.0 - smoothstep(0.42, 0.5, d);
+      gl_FragColor = vec4(mix(uBg, vBase, vFade * a), 1.0);
+    }
+  `;
+  // 全景抽稀层专用：圆形裁剪 + 屏幕像素尺寸（PointsMaterial 方片且不随 pointSize 更新）
+  const FRAG_OV = /* glsl */ `
+    precision highp float;
+    uniform vec3 uColor;
+    uniform float uOpacity;
+    void main() {
+      float d = length(gl_PointCoord - vec2(0.5));
+      if (d > 0.5) discard;
+      float a = 1.0 - smoothstep(0.42, 0.5, d);
+      gl_FragColor = vec4(uColor, uOpacity * a);
+    }
+  `;
+  const VERT_OV = /* glsl */ `
+    uniform float uPtSize;
+    void main() {
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = uPtSize;
+    }
+  `;
 
   /** 首次非空批次：建该组双层缓冲与网格对象（point 模式永不调用） */
   function ensureLayers(g: GState) {
@@ -432,7 +455,7 @@ export async function createScene(
     const matPts = new T3.ShaderMaterial({
       uniforms: g.uniforms as unknown as Record<string, THREE_NS.IUniform>,
       vertexShader: VERT,
-      fragmentShader: FRAG,
+      fragmentShader: FRAG_POINTS,
     });
     g.tailLine = new T3.Line(g.tailGeo, matLine);
     g.tailPoints = new T3.Points(g.tailGeo, matPts);
@@ -461,12 +484,15 @@ export async function createScene(
     );
     g.ovPoints = new T3.Points(
       g.ovGeo,
-      new T3.PointsMaterial({
-        color: ovColor.clone(),
-        size: 1.6,
-        sizeAttenuation: false,
+      new T3.ShaderMaterial({
+        uniforms: {
+          uColor: { value: ovColor.clone() },
+          uOpacity: { value: 0.3 },
+          uPtSize: { value: Math.max(2, g.cfg.pointSize * 0.7) },
+        },
+        vertexShader: VERT_OV,
+        fragmentShader: FRAG_OV,
         transparent: true,
-        opacity: 0.3,
       }),
     );
     g.ovLine.frustumCulled = false;
@@ -582,7 +608,40 @@ export async function createScene(
   }
 
   // ---------- P87b：模型标记（内置程序化几何 + GLTF）与朝向 ----------
-  const gltfCache = new Map<string, THREE_NS.Object3D>();
+  interface ModelCacheEntry {
+    users: Set<GState>;
+    template: THREE_NS.Object3D | null;
+    pending: Promise<THREE_NS.Object3D | null> | null;
+  }
+  const gltfCache = new Map<string, ModelCacheEntry>();
+  const modelRequests = new Map<GState, symbol>();
+
+  function beginModelRequest(gid: GroupId): symbol | null {
+    const g = gstates.get(gid);
+    if (disposed || !g || g.cfg.model.kind !== "gltf" || !g.cfg.model.src) return null;
+    const token = Symbol(g.cfg.model.src);
+    modelRequests.set(g, token);
+    return token;
+  }
+
+  function releaseMarker(g: GState) {
+    modelRequests.delete(g);
+    if (g.markerObj) {
+      scene.remove(g.markerObj);
+      if (g.markerKind !== "gltf") disposeProc(g.markerObj);
+      g.markerObj = null;
+    }
+    if (g.markerKind === "gltf") {
+      const entry = gltfCache.get(g.markerSrc);
+      if (entry) {
+        entry.users.delete(g);
+        if (entry.users.size === 0) {
+          gltfCache.delete(g.markerSrc);
+          if (entry.template) disposeOwned([entry.template], true);
+        }
+      }
+    }
+  }
 
   function modelMat(color: string): THREE_NS.MeshBasicMaterial {
     return new T3.MeshBasicMaterial({ color: new T3.Color(color) });
@@ -640,13 +699,31 @@ export async function createScene(
     return null; // point / gltf 走别的路径
   }
 
-  function disposeProc(obj: THREE_NS.Object3D) {
-    obj.traverse((o) => {
+  /** Dispose unique owned resources; Sprite geometry belongs to three, not the group. */
+  function disposeOwned(objects: THREE_NS.Object3D[], textures = false) {
+    const geos = new Set<THREE_NS.BufferGeometry>();
+    const mats = new Set<THREE_NS.Material>();
+    const texs = new Set<THREE_NS.Texture>();
+    const skeletons = new Set<THREE_NS.Skeleton>();
+    for (const obj of objects) obj.traverse((o) => {
       const m = o as THREE_NS.Mesh;
-      m.geometry?.dispose();
-      const mat = m.material as THREE_NS.Material | undefined;
-      if (mat && !Array.isArray(mat)) mat.dispose();
+      if (m.geometry && !(o as THREE_NS.Sprite).isSprite) geos.add(m.geometry);
+      if (m.material) for (const mat of Array.isArray(m.material) ? m.material : [m.material]) mats.add(mat);
+      const sk = (o as THREE_NS.SkinnedMesh).skeleton;
+      if (sk) skeletons.add(sk);
+      if ((o as THREE_NS.InstancedMesh).isInstancedMesh) (o as THREE_NS.InstancedMesh).dispose();
     });
+    if (textures) for (const mat of mats) for (const v of Object.values(mat)) {
+      if (v && typeof v === "object" && (v as THREE_NS.Texture).isTexture) texs.add(v as THREE_NS.Texture);
+    }
+    geos.forEach((g) => g.dispose());
+    mats.forEach((m) => m.dispose());
+    texs.forEach((t) => t.dispose());
+    skeletons.forEach((s) => s.dispose());
+  }
+
+  function disposeProc(obj: THREE_NS.Object3D) {
+    disposeOwned([obj]);
   }
 
   /** 挂载/换模型：kind 或 gltf src 变化才重建（procedural 换掉即 dispose；
@@ -658,17 +735,18 @@ export async function createScene(
       orientMarker(g);
       return;
     }
-    if (g.markerObj) {
-      scene.remove(g.markerObj);
-      if (g.markerKind !== "gltf") disposeProc(g.markerObj);
-      g.markerObj = null;
-    }
+    if (g.markerKind !== kind || g.markerSrc !== src) releaseMarker(g);
     g.markerKind = kind;
     g.markerSrc = src;
     if (kind === "gltf" && src) {
-      const tpl = gltfCache.get(src);
-      if (tpl) {
-        g.markerObj = tpl.clone(true);
+      let entry = gltfCache.get(src);
+      if (!entry) {
+        entry = { users: new Set(), template: null, pending: null };
+        gltfCache.set(src, entry);
+      }
+      entry.users.add(g);
+      if (entry.template) {
+        g.markerObj = entry.template.clone(true);
         scene.add(g.markerObj);
       } // 未就绪：等 setModelBytes 回调挂载；期间无标记（dot 已由 applyOneVis 隐藏）
     } else if (kind !== "point" && kind !== "gltf") {
@@ -704,11 +782,13 @@ export async function createScene(
     m.quaternion.multiply(new T3.Quaternion().setFromEuler(EUL));
     m.position.set(
       g.latest ? toN(g.latest.x, 0) : 0,
-      g.latest ? toN(g.latest.y, 1) + hdg.heightOff * scaleVec[1] : 0,
+      g.latest ? toN(g.latest.y + hdg.heightOff, 1) : hdg.heightOff * scaleVec[1],
       g.latest ? toN(g.latest.z, 2) : 0,
     );
-    const s = hdg.scale;
-    m.scale.set(s / scaleVec[0], s / scaleVec[1], s / scaleVec[2]); // 逐轴模式反向补偿形变
+    // 模型几何建在归一化空间（球 r=0.022 等），scale 直接是相对视口的视觉系数；
+    // 旧实现除以数据尺度 scaleVec 会把模型放大数百倍（"模型特别大"根因）。
+    // heightOff 为真实单位，经 toN 随数据尺度换算（物理正确，修"高度无反应"）。
+    m.scale.setScalar(hdg.scale);
     needsRender = true;
   }
 
@@ -960,7 +1040,7 @@ export async function createScene(
       marker = [g.tPos[(ct - 1) * 3], g.tPos[(ct - 1) * 3 + 1], g.tPos[(ct - 1) * 3 + 2]];
     } else if (co > 0 && g.oPos) {
       marker = [g.oPos[(co - 1) * 3], g.oPos[(co - 1) * 3 + 1], g.oPos[(co - 1) * 3 + 2]];
-    } else if (g.cfg.mode === "point" && g.latest && curCursorSec === null) {
+    } else if (g.cfg.mode === "point" && g.latest && (curCursorSec === null || g.latest.t <= curCursorSec)) {
       marker = [toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2)];
     }
     return { ct, co, marker };
@@ -982,7 +1062,7 @@ export async function createScene(
         g.uniforms.uNow.value = sec === null ? g.lastT : sec;
         if (g.cfg.arrowEvery > 0 && g.cfg.mode === "line") rebuildArrows(g);
       } else if (g.cfg.mode === "point" && g.latest) {
-        const live = sec === null;
+        const live = sec === null || g.latest.t <= sec;
         if (live) {
           g.dot.position.set(toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2));
         }
@@ -1080,12 +1160,12 @@ export async function createScene(
     return flagTex;
   }
 
-  /** 旗标落位：第一个可见且有缓冲的组（GROUP_IDS 序 = g1 优先） */
+  /** 旗标落位：第一个可见且有缓冲的组（按设置数组序，P87e 弹性组） */
   function refreshFlags() {
-    const hostOrder = GROUP_ID_LIST;
+    const hostOrder = curSettings?.groups ?? [];
     let host: GState | null = null;
-    for (const id of hostOrder) {
-      const g = gstates.get(id);
+    for (const cfg of hostOrder) {
+      const g = gstates.get(cfg.id);
       if (g && g.cfg.visible && (g.tCount > 0 || g.oCount > 0)) {
         host = g;
         break;
@@ -1153,20 +1233,39 @@ export async function createScene(
   // P87a：锚点 = 主组（g1 优先，其次任一有数据的可见组）游标截断点/最新点
   let follow = false;
   function followAnchor(): THREE_NS.Vector3 | null {
-    const order: GState[] = [];
-    const g1 = gstates.get("g1");
-    if (g1) order.push(g1);
-    for (const g of gstates.values()) if (g !== g1) order.push(g);
-    for (const g of order) {
-      if (g.tailGeo && g.tCount + g.oCount > 0) {
-        const { marker } = cursorCut(g);
-        if (marker) return new T3.Vector3(marker[0], marker[1], marker[2]);
-      } else if (g.latest && g.cfg.mode === "point" && curCursorSec === null) {
-        return new T3.Vector3(toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2));
-      }
+    for (const cfg of curSettings?.groups ?? []) {
+      const g = gstates.get(cfg.id);
+      if (!g || !g.cfg.visible) continue;
+      const { marker } = cursorCut(g);
+      if (marker) return new T3.Vector3(...marker);
     }
     return null;
   }
+  // 光点恒定像素：Sprite 处于世界空间会随远近缩放，每帧按相机距离补偿
+  // 使 point 模式的最新点光点在屏幕上保持 pointSize 设定的像素大小。
+  const _dotV = new T3.Vector3();
+  let dotSizeWarned = false;
+  function updateDotPixelSize() {
+    const halfH = Math.tan(((camera.fov * Math.PI) / 180) / 2);
+    const pxH = Math.max(host.clientHeight, 60);
+    for (const g of gstates.values()) {
+      // 仅 point 模式的最新点光点恒定像素；起点标记 startMark 是固定装饰不参与
+      if (g.cfg.model.kind !== "point" || !g.dot.visible) continue;
+      const dist = camera.position.distanceTo(g.dot.getWorldPosition(_dotV));
+      // NaN 防护（P88d）：位置/距离异常时保持现尺寸并告警一次，
+      // 绝不让 NaN 写进 scale 污染整条渲染链（曾致 computeBoundingSphere NaN 刷屏）
+      if (!isFinite(dist) || dist <= 0 || !isFinite(halfH)) {
+        if (!dotSizeWarned) {
+          dotSizeWarned = true;
+          console.warn(`[P3D诊断] 组 ${g.gid} 光点距离异常 dist=${dist}，已保持原尺寸`);
+        }
+        continue;
+      }
+      const worldPerPx = (2 * halfH * dist) / pxH;
+      g.dot.scale.setScalar(Math.max(2, g.cfg.pointSize) * worldPerPx);
+    }
+  }
+
   const loop = (now: number) => {
     raf = requestAnimationFrame(loop);
     if (!visible) return;
@@ -1265,6 +1364,16 @@ export async function createScene(
       }
     }
     if (needsRender) {
+      // 异常隔离（P88d）：单组尺寸补偿异常绝不允许中断整个 rAF 循环
+      //（循环一断=点线全消失的"面板空白"观感）
+      try {
+        updateDotPixelSize();
+      } catch (e) {
+        if (!dotSizeWarned) {
+          dotSizeWarned = true;
+          console.warn("[P3D诊断] 光点尺寸补偿异常，已跳过", e);
+        }
+      }
       renderer.render(scene, camera);
       needsRender = false;
     }
@@ -1982,6 +2091,62 @@ export async function createScene(
     drawMeasure();
   }
 
+  /** Drop all lazy buffers + layers so the next non-point batch reallocates fresh
+   *  (mode switch line/points -> point, or removal + later re-add of the same id). */
+  function releaseLayers(g: GState) {
+    const layers = [g.tailLine, g.tailPoints, g.ovLine, g.ovPoints, g.smLine, g.arrows]
+      .filter((o): o is THREE_NS.Line | THREE_NS.Points | THREE_NS.LineSegments | THREE_NS.InstancedMesh => o !== null);
+    disposeOwned(layers);
+    for (const obj of layers) scene.remove(obj);
+    g.tailGeo = null;
+    g.tailLine = null;
+    g.tailPoints = null;
+    g.posAttr = null;
+    g.aTimeAttr = null;
+    g.valAttr = null;
+    g.tPos = null;
+    g.tReal = null;
+    g.tT = null;
+    g.tVal = null;
+    g.ovGeo = null;
+    g.ovLine = null;
+    g.ovPoints = null;
+    g.ovPosAttr = null;
+    g.oPos = null;
+    g.oReal = null;
+    g.oT = null;
+    g.oVal = null;
+    g.smGeo = null;
+    g.smLine = null;
+    g.smPosAttr = null;
+    g.smTimeAttr = null;
+    g.smValAttr = null;
+    g.smPos = null;
+    g.smT = null;
+    g.smVal = null;
+    g.smCount = 0;
+    g.arrows = null;
+    g.dirtyFrom = -1;
+  }
+
+  /** Remove a group entirely (settings membership diff): clear data + dispose every
+   *  owned resource. dot Sprite is owned per-group (shared dotTex is NOT disposed);
+   *  GLTF marker instances share cached template resources and are only detached,
+   *  not disposed (cache template release happens on scene dispose). */
+  function disposeGroup(g: GState) {
+    clearGroup(g);
+    releaseLayers(g);
+    scene.remove(g.dot);
+    (g.dot.material as THREE_NS.SpriteMaterial).dispose();
+    if (g.startMark) {
+      scene.remove(g.startMark);
+      (g.startMark.material as THREE_NS.SpriteMaterial).dispose();
+      g.startMark = null;
+    }
+    releaseMarker(g);
+    gstates.delete(g.gid);
+  }
+
   // ---------- 对外接口 ----------
   const api: Plot3DScene = {
     applyBatch(entries, cursorSec) {
@@ -1990,14 +2155,24 @@ export async function createScene(
       let anyReloaded = false;
       for (const { gid, reloaded } of entries) {
         if (!reloaded) continue;
-        clearGroup(getG(gid));
+        const g = gstates.get(gid);
+        if (!g) {
+          // unknown/removed gid: never resurrect（P88d 诊断：静默丢弃=面板空白的头号嫌疑）
+          console.warn(`[P3D诊断] 丢弃 reloaded 批次：组 ${gid} 不存在于场景`);
+          continue;
+        }
+        clearGroup(g);
         anyReloaded = true;
       }
       let firstData = totalPoints() === 0 && !hasLiveMarker();
       let anyData = false;
       for (const { gid, b } of entries) {
         if (b.t.length === 0) continue;
-        const g = getG(gid);
+        const g = gstates.get(gid);
+        if (!g) {
+          console.warn(`[P3D诊断] 丢弃数据批次：组 ${gid}（${b.t.length} 点）不存在于场景`);
+          continue; // unknown/removed gid: drop, no resurrection
+        }
         const li = b.t.length - 1;
         g.latestRaw = b.latest ?? { t: b.t[li], x: b.x[li], y: b.y[li], z: b.z[li] };
         g.latest = { t: g.latestRaw.t, x: g.latestRaw.x, y: g.latestRaw.y, z: g.latestRaw.z };
@@ -2073,12 +2248,24 @@ export async function createScene(
     },
 
     applySettings(s, chans, cbSafe, accent) {
+      if (disposed) return;
       const prevAxisScale = curSettings?.axisScale;
       curSettings = s;
       curChans = chans;
       curAccent = accent;
+      const members = new Set(s.groups.map((g) => g.id));
+      let removed = false;
+      for (const g of gstates.values()) if (!members.has(g.gid)) {
+        disposeGroup(g);
+        removed = true;
+      }
+      if (removed) {
+        tween = null;
+        unionBBox();
+        maybeReanchor(true);
+      }
       for (const cfg of s.groups) {
-        const g = getG(cfg.id);
+        const g = ensureGroup(cfg);
         const prevMode = g.cfg.mode;
         g.cfg = { ...cfg };
         g.uniforms.uMode.value = toModeVal(cfg);
@@ -2096,11 +2283,14 @@ export async function createScene(
           (g.ovLine.material as THREE_NS.LineBasicMaterial).color.set(cfg.color);
         }
         if (g.ovPoints) {
-          (g.ovPoints.material as THREE_NS.PointsMaterial).color.set(cfg.color);
+          const ou = (g.ovPoints.material as THREE_NS.ShaderMaterial).uniforms;
+          ou.uColor.value.set(cfg.color);
+          ou.uPtSize.value = Math.max(2, cfg.pointSize * 0.7);
         }
         if (cfg.mode === "point" && prevMode !== "point") {
-          // 组切换到实时定位：清空该组缓冲（零历史内存语义）
+          // 实时定位不保留历史层的数组与几何。
           clearGroup(g);
+          releaseLayers(g);
         } else if (cfg.maxPoints > 0 && g.tCount + g.oCount > cfg.maxPoints) {
           // 静态数据下调小「最大点数」也要立即生效（不等下一批追加）
           trimGroupMax(g);
@@ -2125,6 +2315,7 @@ export async function createScene(
       controls.autoRotateSpeed = 1.2;
       controls.zoomToCursor = s.zoomToCursor; // P72：滚轮缩放到光标（three r151+ 原生支持）
       applyModeVis(); // 轨迹/网格/校准层可见性统一裁决（含 calibOn 门控）
+      applyCursor(curCursorSec);
       rebuildGrid(axisFieldNames(), accent);
       needsRender = true;
     },
@@ -2336,12 +2527,19 @@ export async function createScene(
     },
 
     // ---------- P87b：GLTF 模型注入 / 会话标注旗标 ----------
-    setModelBytes(gid, bytes) {
-      const g = getG(gid);
+    beginModelRequest,
+
+    setModelBytes(gid, bytes, request) {
+      const g = gstates.get(gid);
+      if (disposed || !g || g.cfg.model.kind !== "gltf" || !g.cfg.model.src) return;
       const src = g.cfg.model.src;
-      if (g.cfg.model.kind !== "gltf" || !src) return;
-      if (gltfCache.has(src)) {
-        attachMarker(g);
+      const token = request ?? beginModelRequest(gid);
+      const valid = () => !disposed && gstates.get(gid) === g &&
+        g.cfg.model.kind === "gltf" && g.cfg.model.src === src && modelRequests.get(g) === token;
+      if (!valid()) return;
+      attachMarker(g);
+      const entry = gltfCache.get(src)!;
+      if (entry.template) {
         updateDecorations(g);
         return;
       }
@@ -2349,32 +2547,39 @@ export async function createScene(
         cbs.onModelError?.(gid, src);
         return;
       }
-      void (async () => {
-        try {
+      if (!entry.pending) {
+        entry.pending = (async () => {
           const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
-          const loader = new GLTFLoader();
-          const gltf = (await new Promise((res, rej) =>
-            loader.parse(bytes, "", res as (r: unknown) => void, rej),
-          )) as { scene: THREE_NS.Object3D };
-          // 归一化包裹：包围盒最大边 → 0.09 世界单位并居中（模型前向默认 +X，
-          // 轴向不符用组设置「模型旋转修正」调）
+          if (disposed || gltfCache.get(src) !== entry) return null;
+          const gltf = await new Promise<{ scene: THREE_NS.Group }>((resolve, reject) =>
+            new GLTFLoader().parse(bytes, "", resolve, reject));
+          if (disposed || gltfCache.get(src) !== entry) {
+            disposeOwned([gltf.scene], true);
+            return null;
+          }
           const box = new T3.Box3().setFromObject(gltf.scene);
           const sz = box.getSize(new T3.Vector3());
           const ctr = box.getCenter(new T3.Vector3());
-          const s = 0.09 / Math.max(sz.x, sz.y, sz.z, 1e-6);
+          const scale = 0.09 / Math.max(sz.x, sz.y, sz.z, 1e-6);
           const wrap = new T3.Group();
-          gltf.scene.scale.setScalar(s);
-          gltf.scene.position.set(-ctr.x * s, -ctr.y * s, -ctr.z * s);
+          gltf.scene.scale.setScalar(scale);
+          gltf.scene.position.copy(ctr).multiplyScalar(-scale);
           wrap.add(gltf.scene);
-          gltfCache.set(src, wrap);
-          if (g.cfg.model.kind === "gltf" && g.cfg.model.src === src) {
-            attachMarker(g);
-            updateDecorations(g);
-          }
-        } catch {
-          cbs.onModelError?.(gid, src);
+          entry.template = wrap;
+          return wrap;
+        })();
+      }
+      const pending = entry.pending;
+      void pending.then((template) => {
+        if (template && valid()) {
+          attachMarker(g);
+          updateDecorations(g);
         }
-      })();
+      }, () => {
+        if (valid()) cbs.onModelError?.(gid, src);
+      }).finally(() => {
+        if (entry.pending === pending) entry.pending = null;
+      });
     },
 
     setAnnots(relSecs) {
@@ -2509,15 +2714,14 @@ export async function createScene(
     },
 
     stats() {
-      const out = {} as Record<GroupId, GroupStats>;
-      for (const id of GROUP_ID_LIST) {
-        const g = gstates.get(id);
-        out[id] = g ? { tail: g.tCount, overview: g.oCount } : { tail: 0, overview: 0 };
-      }
-      return { groups: out, fps, gridStep: curGridStep };
+      const out: Record<string, GroupStats> = {};
+      for (const g of gstates.values()) out[g.gid] = { tail: g.tCount, overview: g.oCount };
+      return { groups: out as Record<GroupId, GroupStats>, fps, gridStep: curGridStep };
     },
 
     dispose() {
+      if (disposed) return;
+      disposed = true;
       cancelAnimationFrame(raf);
       io.disconnect();
       ro.disconnect();
@@ -2528,18 +2732,10 @@ export async function createScene(
       window.removeEventListener("keyup", onFlightKeyUp);
       window.removeEventListener("blur", onFlightBlur);
       controls.dispose();
-      scene.traverse((obj) => {
-        const l = obj as THREE_NS.Line & THREE_NS.Sprite;
-        if (l.geometry) l.geometry.dispose();
-        const m = (l as unknown as { material?: THREE_NS.Material | THREE_NS.Material[] })
-          .material;
-        if (Array.isArray(m)) m.forEach((x) => x.dispose());
-        else if (m) m.dispose();
-        const sp = obj as THREE_NS.Sprite;
-        if (sp.material && (sp.material as THREE_NS.SpriteMaterial).map) {
-          (sp.material as THREE_NS.SpriteMaterial).map?.dispose();
-        }
-      });
+      for (const g of [...gstates.values()]) disposeGroup(g);
+      disposeOwned([scene], true);
+      modelRequests.clear();
+      gltfCache.clear();
       dotTex.dispose();
       renderer.dispose();
       if (renderer.domElement.parentElement === host) {

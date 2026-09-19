@@ -14,7 +14,7 @@ export interface PanelGroup {
 export const PANEL_GROUPS = [
   { key: "ingest", zh: "数据接入", en: "Data input", ids: ["hexview", "console", "video", "modbus", "vdev"] },
   { key: "parse", zh: "解析与画布", en: "Parse & canvas", ids: ["templates", "properties", "controls", "framecanvas"] },
-  { key: "visual", zh: "可视化", en: "Visualization", ids: ["table", "plot2d", "spectrum", "view3d", "plot3d"] },
+  { key: "visual", zh: "可视化", en: "Visualization", ids: ["table", "plot2d", "spectrum", "view3d", "plot3d", "metrics"] },
   { key: "auto", zh: "测试与自动化", en: "Test & automation", ids: ["sequencer", "sentinel", "orchestrator"] },
   { key: "ai", zh: "AI 与探索", en: "AI & discovery", ids: ["ai", "xray"] },
 ] as const satisfies readonly PanelGroup[];

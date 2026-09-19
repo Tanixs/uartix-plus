@@ -20,6 +20,7 @@ import { SequencerPanel } from "../features/sequencer/SequencerPanel";
 import { SentinelPanel } from "../features/sentinel/SentinelPanel";
 import { SpectrumPanel } from "../features/plot/SpectrumPanel";
 import { Plot3D } from "../features/plot3d/Plot3D";
+import MetricsPanel from "../features/analysis/MetricsPanel";
 import { OrchestratorPanel } from "../features/orchestrator/OrchestratorPanel";
 import { VdevPanel } from "../features/vdev/VdevPanel";
 import { ExtPanelHost } from "../features/ai/ExtPanel";
@@ -46,6 +47,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     sentinel: pick("哨兵", "Sentinel"),
     spectrum: pick("频谱分析", "Spectrum"),
     plot3d: pick("3D 轨迹", "3D Trajectory"),
+    metrics: pick("指标面板", "Metrics"),
     orchestrator: pick("自动编排器", "Orchestrator"),
     vdev: pick("虚拟设备工坊", "Virtual Devices"),
   };
@@ -77,6 +79,7 @@ const MSequencer = memo(SequencerPanel);
 const MSentinel = memo(SentinelPanel);
 const MSpectrum = memo(SpectrumPanel);
 const MPlot3D = memo(Plot3D);
+const MMetrics = memo(MetricsPanel);
 const MOrchestrator = memo(OrchestratorPanel);
 const MVdev = memo(VdevPanel);
 
@@ -164,6 +167,11 @@ export const panelComponents = {
   plot3d: () => (
     <ErrorBoundary label={panelTitleOf("plot3d")}>
       <MPlot3D />
+    </ErrorBoundary>
+  ),
+  metrics: () => (
+    <ErrorBoundary label={panelTitleOf("metrics")}>
+      <MMetrics />
     </ErrorBoundary>
   ),
   orchestrator: () => (

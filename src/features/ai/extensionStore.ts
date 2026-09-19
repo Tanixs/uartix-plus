@@ -21,6 +21,8 @@ export interface AiExtension {
   code?: string; // script
   /** widget：外观形态。"none" = 无边框透明（无标题栏、窗口背景透明，内容完全自定义） */
   chrome?: "none";
+  /** P88b-3：插件库投影的影子扩展（来源插件包 ID）；本 store 现仅承载投影记录 */
+  pluginRef?: string;
 }
 
 export interface ExtSnapshot {
@@ -33,111 +35,45 @@ const KEY = "vs.aiExts";
 const LEGACY_WIDGETS = "vs.aiWidgets";
 const LEGACY_THEME = "vs.aiTheme";
 
-export const EXT_TYPE_LABEL: Record<ExtType, string> = {
-  theme: "主题",
-  style: "样式",
-  widget: "小部件",
-  panel: "面板",
-  script: "脚本",
-};
-
-export const PERM_LABEL: Record<ExtPerm, string> = {
-  css: "修改界面样式（CSS）",
-  read: "读取数据快照",
-  send: "发送串口数据（另受全局发送权限限制）",
-  script: "在主界面执行 JS 脚本（高权限）",
-};
-
-/** 按类型推导默认权限清单 */
-export function permsForType(type: ExtType): ExtPerm[] {
-  switch (type) {
-    case "theme":
-    case "style":
-      return ["css"];
-    case "widget":
-    case "panel":
-      return ["read", "send"];
-    case "script":
-      return ["read", "send", "script"];
-  }
-}
-
-/** 旧数据迁移：vs.aiWidgets / vs.aiTheme → 统一扩展库 */
-function migrate(): AiExtension[] | null {
-  const out: AiExtension[] = [];
-  try {
-    const raw = localStorage.getItem(LEGACY_WIDGETS);
-    if (raw) {
-      const p = JSON.parse(raw) as { widgets?: { id: string; name: string; html: string; createdAt: number }[] };
-      for (const w of p.widgets ?? []) {
-        out.push({
-          id: w.id,
-          type: "widget",
-          name: w.name,
-          desc: "由旧版小部件迁移",
-          version: "0.1.0",
-          perms: permsForType("widget"),
-          enabled: true,
-          createdAt: w.createdAt || Date.now(),
-          html: w.html,
-        });
-      }
-    }
-  } catch {
-    /* 忽略损坏的旧数据 */
-  }
-  try {
-    const raw = localStorage.getItem(LEGACY_THEME);
-    if (raw) {
-      const vars = JSON.parse(raw) as Record<string, string>;
-      if (vars && Object.keys(vars).length > 0) {
-        out.push({
-          id: crypto.randomUUID(),
-          type: "theme",
-          name: "AI 自定义主题",
-          desc: "由旧版主题迁移",
-          version: "0.1.0",
-          perms: permsForType("theme"),
-          enabled: true,
-          createdAt: Date.now(),
-          vars,
-        });
-      }
-    }
-  } catch {
-    /* 忽略损坏的旧数据 */
-  }
-  return out.length ? out : null;
-}
-
+/**
+ * 读取持久化快照：旧扩展（用户/AI 直接创建的独立扩展）已废弃，
+ * 只保留带 pluginRef 的插件库投影记录；openIds 中指向已丢弃记录的同步过滤。
+ * 顺带清理更早的 vs.aiWidgets / vs.aiTheme 遗留键。
+ */
 function load(): ExtSnapshot {
+  let exts: AiExtension[] = [];
+  let openIds: string[] = [];
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const p = JSON.parse(raw) as Partial<ExtSnapshot>;
-      return {
-        exts: Array.isArray(p.exts) ? (p.exts as AiExtension[]) : [],
-        openIds: Array.isArray(p.openIds) ? p.openIds : [],
-      };
-    }
-    const migrated = migrate();
-    if (migrated) {
-      // 迁移后清理旧存储
-      localStorage.removeItem(LEGACY_WIDGETS);
-      localStorage.removeItem(LEGACY_THEME);
-      return { exts: migrated, openIds: [] };
+      exts = Array.isArray(p.exts)
+        ? (p.exts as AiExtension[]).filter((e) => !!e && typeof e === "object" && !!e.pluginRef)
+        : [];
+      const ids = new Set(exts.map((e) => e.id));
+      openIds = Array.isArray(p.openIds) ? p.openIds.filter((x) => ids.has(x)) : [];
     }
   } catch {
     localStorage.removeItem(KEY);
   }
-  return { exts: [], openIds: [] };
+  try {
+    localStorage.removeItem(LEGACY_WIDGETS);
+    localStorage.removeItem(LEGACY_THEME);
+  } catch {
+    /* 忽略 */
+  }
+  return { exts, openIds };
 }
 
 let snapshot: ExtSnapshot = load();
 const listeners = new Set<() => void>();
 
+/** 持久化时同样只写带 pluginRef 的投影记录（防旧扩展数据回写） */
 function persist() {
-  localStorage.setItem(KEY, JSON.stringify(snapshot));
+  localStorage.setItem(
+    KEY,
+    JSON.stringify({ exts: snapshot.exts.filter((e) => e.pluginRef), openIds: snapshot.openIds }),
+  );
 }
 
 function emit() {
@@ -165,48 +101,25 @@ export function getExt(id: string): AiExtension | undefined {
   return snapshot.exts.find((e) => e.id === id);
 }
 
-export interface ExtDraft {
-  type: ExtType;
-  name: string;
-  desc?: string;
-  vars?: Record<string, string>;
-  css?: string;
-  html?: string;
-  code?: string;
-  chrome?: "none";
-}
+/* —— P88b-3 插件库投影（影子扩展）：由 pluginStore 维护，UI 只读展示 —— */
 
-/** 从 widget HTML 解析形态声明：<meta name="uartix:chrome" content="none"> → 无边框透明形态 */
-export function widgetChromeFromHtml(html: string): "none" | undefined {
-  return /<meta\s+name=["']uartix:chrome["']\s+content=["']none["']/i.test(html)
-    ? "none"
-    : undefined;
-}
-
-/** 安装扩展（调用方需先完成权限确认） */
-export function addExt(draft: ExtDraft, enabled = true): string {
-  const id = crypto.randomUUID();
-  const ext: AiExtension = {
-    id,
-    type: draft.type,
-    name: draft.name || EXT_TYPE_LABEL[draft.type],
-    desc: draft.desc ?? "",
-    version: "0.1.0",
-    perms: permsForType(draft.type),
-    enabled,
-    createdAt: Date.now(),
-    vars: draft.vars,
-    css: draft.css,
-    html: draft.html,
-    code: draft.code,
-    chrome: draft.chrome,
-  };
-  snapshot = { ...snapshot, exts: [...snapshot.exts, ext] };
+/** 插件启用：创建/替换影子扩展（保留 openIds 状态）。 */
+export function upsertProjection(ext: AiExtension) {
+  const idx = snapshot.exts.findIndex((e) => e.id === ext.id);
+  if (idx >= 0) {
+    const exts = [...snapshot.exts];
+    exts[idx] = { ...ext, createdAt: exts[idx].createdAt };
+    snapshot = { ...snapshot, exts };
+  } else {
+    snapshot = { ...snapshot, exts: [...snapshot.exts, ext] };
+  }
   emit();
-  return id;
 }
 
-export function removeExt(id: string) {
+/** 插件停用/卸载：移除影子扩展（含浮窗打开状态）。 */
+export function removeProjection(id: string) {
+  const has = snapshot.exts.some((e) => e.id === id);
+  if (!has) return;
   snapshot = {
     ...snapshot,
     exts: snapshot.exts.filter((e) => e.id !== id),
@@ -237,50 +150,4 @@ export function setOpen(id: string, open: boolean) {
 
 export function isOpen(id: string): boolean {
   return snapshot.openIds.includes(id);
-}
-
-/** 导出全部扩展为分享包 */
-export function exportAll(): string {
-  return JSON.stringify({ kind: "uartix-extensions", version: 1, data: snapshot.exts }, null, 2);
-}
-
-/** 导出指定扩展（按 id 集合）为分享包 */
-export function exportSome(ids: string[]): string {
-  const keep = new Set(ids);
-  return JSON.stringify(
-    { kind: "uartix-extensions", version: 1, data: snapshot.exts.filter((e) => keep.has(e.id)) },
-    null,
-    2,
-  );
-}
-
-/** 从分享包导入（跳过重复 id） */
-export function importAll(json: string): { ok: boolean; msg: string } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(json);
-  } catch {
-    return { ok: false, msg: "JSON 解析失败" };
-  }
-  const obj = parsed as { kind?: string; data?: unknown };
-  if (obj.kind !== "uartix-extensions" || !Array.isArray(obj.data)) {
-    return { ok: false, msg: "文件格式不正确（需要 uartix-extensions 分享包）" };
-  }
-  let n = 0;
-  const have = new Set(snapshot.exts.map((e) => e.id));
-  for (const item of obj.data as AiExtension[]) {
-    if (!item || typeof item !== "object" || !item.id || have.has(item.id)) continue;
-    if (!["theme", "style", "widget", "panel", "script"].includes(item.type)) continue;
-    snapshot.exts.push({ ...item, enabled: false });
-    n++;
-  }
-  if (n === 0) return { ok: false, msg: "没有可导入的扩展（为空或全部重复）" };
-  emit();
-  return { ok: true, msg: `已导入 ${n} 个扩展（默认停用，请在列表中启用）` };
-}
-
-/** 清空全部扩展（重置 AI 创造内容） */
-export function clearAll() {
-  snapshot = { exts: [], openIds: [] };
-  emit();
 }

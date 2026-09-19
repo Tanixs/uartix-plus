@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as panelActivity from "../../panels/panelActivity";
 import { updateChatFeed } from "./aiChatFeed";
+import { occupiedSessionIds } from "../agent/agentRun";
 import { saveImage, restoreImages, deleteImages } from "./imageStore";
 import {
   getSnapshot as getSettings,
@@ -442,7 +443,13 @@ export function clearChat() {
 
 export function newSession() {
   if (snapshot.streaming) abort();
-  const exist = snapshot.sessions.find((x) => x.messages.length === 0);
+  // P88e A2：复用排除两个坑——① 当前正看的会话（点"新建"必须真正换新，不能原样还回）；
+  // ② 被 Agent 任务占用的会话（任务不写聊天消息、messages 为空，但 AgentInline 有过程记录）。
+  // 只有"非当前 + 无消息 + 无 run 关联"的会话才可复用；否则新建。
+  const occupied = occupiedSessionIds();
+  const exist = snapshot.sessions.find(
+    (x) => x.id !== snapshot.activeId && x.messages.length === 0 && !occupied.has(x.id),
+  );
   if (exist) {
     snapshot.activeId = exist.id;
     persistNow();
@@ -587,7 +594,7 @@ function buildRequestMessages(
       role: "system",
       content: buildSystemPrompt(
         scene,
-        summaryTemplates(),
+        scene === "inertial" ? "" : summaryTemplates(),
         {
           enabled: st.aiCreativity,
           send: st.aiWidgetSend,
@@ -600,13 +607,13 @@ function buildRequestMessages(
   const s = cur();
   // userText 非空时，会话最后一条就是刚压入的用户消息，稍后会以 userText+上下文 追加，
   // 从历史中排除避免同一文本重复计费
-  const hist = userText ? s.messages.slice(-21, -1) : s.messages.slice(-20);
+  const hist = scene === "inertial" ? [] : userText ? s.messages.slice(-21, -1) : s.messages.slice(-20);
   for (const m of hist) {
     if (m.error) continue;
     messages.push({ role: m.role, content: m.images?.length ? userContent(m.content, m.images) : m.content });
   }
-  const contextText = contextToText(blocks);
-  messages.push({ role: "user", content: userContent(userText + contextText, images) });
+  const contextText = scene === "inertial" ? "" : contextToText(blocks);
+  messages.push({ role: "user", content: userContent(userText + contextText, scene === "inertial" ? undefined : images) });
   return messages;
 }
 
@@ -633,6 +640,7 @@ async function requestChat(
       proxy: st.aiProxy,
       noProxy: st.aiNoProxy,
       messages,
+      thinking: st.showThinking,
     });
   } catch (e) {
     if (snapshot.reqId === reqId) {
@@ -789,7 +797,7 @@ export async function runScene(
     },
   ];
   emit();
-  await doSend(text, scene, collectContext({ ...snapshot.contextSel, ...sel }));
+  await doSend(text, scene, scene === "inertial" ? [] : collectContext({ ...snapshot.contextSel, ...sel }));
 }
 
 /** 导出当前会话为 Markdown 文本 */

@@ -189,8 +189,10 @@ export async function startRecord() {
       port,
     });
     await refresh();
+    return snap.state === "recording";
   } catch (e) {
     toast(String(e));
+    return false;
   }
 }
 
@@ -198,8 +200,10 @@ export async function stopRecord() {
   try {
     await invoke("session_stop_record");
     await refresh();
+    return snap.state === "recorded";
   } catch (e) {
     toast(String(e));
+    return false;
   }
 }
 
@@ -331,8 +335,10 @@ export async function pause() {
   try {
     await invoke("session_pause");
     await refresh();
+    return true;
   } catch (e) {
     toast(String(e));
+    return false;
   }
 }
 
@@ -387,11 +393,13 @@ export async function bridgeStop() {
  * 空文本直接忽略；成功后列表由 session:annotations 事件全量推送更新。
  */
 export async function annotate(text: string) {
-  if (!text.trim()) return;
+  if (!text.trim()) return false;
   try {
     await invoke("session_annotate", { text });
+    return true;
   } catch (e) {
     toast(String(e));
+    return false;
   }
 }
 
@@ -412,7 +420,9 @@ export async function seek(ratio: number, speed: number) {
     set({ lastSpeed: speed });
     await invoke("session_seek", { ratio, speed });
     await refresh();
+    return true;
   } catch (e) {
     toast(String(e));
+    return false;
   }
 }

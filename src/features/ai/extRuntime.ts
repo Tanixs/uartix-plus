@@ -213,7 +213,7 @@ export function startExtRuntime() {
   if (started) return;
   started = true;
   applyStyleExts();
-  // 启动时运行所有已启用的脚本扩展
+  // 启动时运行所有已启用的脚本扩展（旧扩展已废弃，运行时仅承载插件库投影）
   for (const e of getExts().exts) {
     if (e.type === "script" && e.enabled) startScript(e);
   }

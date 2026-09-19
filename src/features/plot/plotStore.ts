@@ -1,6 +1,7 @@
 import type { FramesEventPayload } from "../../ipc/types";
 import { onFrames } from "../../ipc/framesBus";
 import * as panelActivity from "../../panels/panelActivity";
+import { leaseCount } from "./dataLease";
 import { PALETTE, OKABE_PALETTE } from "../protocol/templateStore";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 
@@ -576,7 +577,8 @@ export async function init() {
     if (
       !panelActivity.isOpen("plot2d") &&
       !panelActivity.isOpen("spectrum") &&
-      !panelActivity.isOpen("plot3d")
+      !panelActivity.isOpen("plot3d") &&
+      leaseCount() === 0
     )
       return;
     if (channels.length === 0) return;

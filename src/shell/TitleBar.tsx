@@ -5,7 +5,7 @@ import * as serialStore from "../features/serial/serialStore";
 import { useSyncExternalStore } from "react";
 import type { IfaceKind } from "../features/serial/serialStore";
 import { t } from "../i18n/strings";
-import { IconChevron, IconSparkle } from "../shared/icons";
+import { IconChevron, IconSparkle, IconCheck } from "../shared/icons";
 import iconPlain from "../assets/icon-plain.svg";
 
 const IFACE_LABEL: Record<IfaceKind, string> = {
@@ -93,7 +93,7 @@ const IfaceMenu = () => {
               }}
             >
               {IFACE_LABEL[it.key]}
-              {s.iface === it.key ? <em className="tb-menu-check">✓</em> : null}
+              {s.iface === it.key ? <em className="tb-menu-check"><IconCheck /></em> : null}
             </button>
           ))}
         </div>

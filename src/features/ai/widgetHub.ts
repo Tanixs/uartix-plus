@@ -5,6 +5,7 @@ import { listVars, getVar } from "../controls/variableStore";
 import { getSnapshot as getSettings, subscribe as subSettings } from "../settings/settingsStore";
 import { subscribe as subExts } from "./extensionStore";
 import { collectThemeVars } from "./extRuntime";
+import { setOverlayChangeCb } from "../agent/appearanceStore";
 import * as serialStore from "../serial/serialStore";
 import { getChatFeed, broadcastChatFeed } from "./aiChatFeed";
 
@@ -211,6 +212,8 @@ export function startWidgetHub() {
   // 主题桥：换肤/主题扩展变化 → 广播变量给所有沙箱组件
   unTheme = subSettings(broadcastTheme);
   unExts = subExts(broadcastTheme);
+  // P88b-4：Agent 外观覆盖层变更 → 同步广播（appearanceStore 不反向依赖 ai/ 模块，经回调解耦）
+  setOverlayChangeCb(broadcastTheme);
 }
 
 export function stopWidgetHub() {
@@ -222,6 +225,7 @@ export function stopWidgetHub() {
   unTheme = null;
   unExts?.();
   unExts = null;
+  setOverlayChangeCb(null);
   channel?.close();
   channel = null;
   started = false;

@@ -6,6 +6,8 @@
  * - 破坏性动作（清空/删除）每次调用都会 toast 告知。
  */
 import { PANEL_TITLES } from "../../panels/panels";
+import { resolvePlot3dGroup, plot3dRemovalReceipt } from "./plot3dActionPolicy";
+import { isOperatorLocked } from "../operator/lock";
 import type { PanelId } from "../../ipc/types";
 import {
   THEME_LIST,
@@ -25,7 +27,6 @@ import { requestOpenPanel, requestApplyPreset } from "./appBus";
 import { toast } from "./extRuntime";
 import {
   getSnapshot as getExts,
-  removeExt,
   setOpen as setWidgetOpen,
   type AiExtension,
 } from "./extensionStore";
@@ -52,77 +53,21 @@ export interface AppActionResult {
   err?: string;
 }
 
+/** 把动作 data（人读字符串或 {msg,…} 结构化回执）归一为界面可显示的文本 */
+export function actionDataText(data: unknown): string {
+  if (typeof data === "string") return data;
+  if (data && typeof data === "object" && "msg" in data) {
+    const m = (data as { msg?: unknown }).msg;
+    if (typeof m === "string") return m;
+  }
+  return "完成";
+}
+
 const PRESETS: WorkspacePreset[] = ["proto", "analyze", "attitude", "console", "video", "calib", "auto", "modbus", "vdev"];
 
-/** 需要脚本高权限的动作（MCP 桥 run_action 门控复用同一集合） */
-export const HIGH_ONLY = new Set([
-  "clearPage",
-  "patchCard",
-  "removeCard",
-  "removeProtocol",
-  "removeCommand",
-  "removeCodec",
-  "addPage",
-  "openPort",
-  "closePort",
-  "removeWidget",
-  // 从站/轮询会主动占用总线发数据，等同发送权限
-  "modbus",
-  // 哨兵可暂停监测/清报警，属全局控制
-  "sentinel",
-  // 考古报告会驱动模型长输出并代表「分析结论」，限脚本高权限
-  "xrayReport",
-  // P74c C2：编排器可向设备发数据（等同 send），且写入口会改自动化逻辑
-  "orchestrator",
-  // P74c C2：3D 轴绑定/显示设置决定「数据口径」（看哪三个通道），属配置写入
-  "plot3d",
-  // P78c：虚拟设备占据数据管线（与真实接口互斥、接管发送路由），等同发送权限
-  "vdev",
-]);
-
-export const APP_ACTION_KINDS = [
-  "openPanel",
-  "applyPreset",
-  "setTheme",
-  "listProtocols",
-  "listCommands",
-  "listCards",
-  "addChannel",
-  "clearChannels",
-  "writeCard",
-  "writeCommand",
-  "writeTemplate",
-  "writeCodec",
-  "clearPage",
-  "patchCard",
-  "addPage",
-  "removeCard",
-  "removeProtocol",
-  "removeCommand",
-  "removeCodec",
-  "openPort",
-  "closePort",
-  "modbus",
-  "xferStart",
-  "readPlot",
-  "sentinel",
-  "xrayEvidence",
-  "xrayCrack",
-  "xrayReport",
-  "orchestratorRead",
-  "orchestrator",
-  "plot3dRead",
-  "plot3d",
-  "vdev",
-  "toast",
-  "listWidgets",
-  "openWidget",
-  "closeWidget",
-  "popWidget",
-  "removeWidget",
-] as const;
-
-export type AppActionKind = (typeof APP_ACTION_KINDS)[number];
+/** 名单常量单源在 appActionKinds（轻量模块，供工具目录/测试无 UI 依赖导入） */
+export { HIGH_ONLY, APP_ACTION_KINDS, type AppActionKind } from "./appActionKinds";
+import { HIGH_ONLY, APP_ACTION_KINDS } from "./appActionKinds";
 
 export async function runAppAction(
   kind: string,
@@ -318,31 +263,32 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
           `字段「${fieldName}」不存在（可用：${tpl.fields.map((f) => f.name).join("、") || "无"}）`,
         );
       }
-      const ok = plotStore.addChannel({
+      const added = plotStore.addChannel({
         tplId: tpl.id,
         fieldId: field.id,
         name: field.name,
         color: plotStore.nextColor(),
       });
-      if (!ok) return "该通道已存在";
+      // 结构化回执：重复添加不是成功写入，agent 需要真实状态而非仅文案
+      if (!added) return { added: false, msg: "该通道已存在" };
       requestOpenPanel("plot2d");
-      return `通道「${field.name}」已加入 2D 曲线（面板已打开）`;
+      return { added: true, msg: `通道「${field.name}」已加入 2D 曲线（面板已打开）` };
     }
     case "clearChannels": {
       plotStore.clearChannels();
       return "2D 曲线通道已清空";
     }
-    case "writeCard": {
-      return writeCardFromAiJson(String(a.json ?? "{}")).msg;
-    }
-    case "writeCommand": {
-      return writeCommandFromAiJson(String(a.json ?? "{}")).msg;
-    }
-    case "writeTemplate": {
-      return writeTemplateFromAiJson(String(a.json ?? "{}")).msg;
-    }
+    case "writeCard":
+    case "writeCommand":
+    case "writeTemplate":
     case "writeCodec": {
-      return writeCodecFromAiJson(String(a.json ?? "{}")).msg;
+      const helper = { writeCard: writeCardFromAiJson, writeCommand: writeCommandFromAiJson,
+        writeTemplate: writeTemplateFromAiJson, writeCodec: writeCodecFromAiJson }[kind];
+      const result = helper(String(a.json ?? "{}"));
+      // 真实结构化回执（P88b §3.2-1）：helper 的 ok 决定动作成败，
+      // 旧实现在 HEAD 上直接 `.msg` 返回，验证失败会被当成成功上送给 loop。
+      if (!result.ok) throw new Error(result.msg);
+      return { msg: result.msg, ...(result.tplId ? { tplId: result.tplId } : {}) };
     }
     case "clearPage": {
       const page = controlsStore.activePage();
@@ -563,7 +509,7 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
     }
     case "openWidget": {
       const w = findWidget(a);
-      if (!w.enabled) throw new Error(`挂件「${w.name}」未启用（请在设置→扩展管理启用）`);
+      if (!w.enabled) throw new Error(`挂件「${w.name}」未启用（请在设置→插件管理启用其来源插件）`);
       setWidgetOpen(w.id, true);
       return `挂件「${w.name}」浮窗已打开`;
     }
@@ -579,9 +525,13 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
     }
     case "removeWidget": {
       const w = findWidget(a);
-      removeExt(w.id);
-      toast(`AI 挂件「${w.name}」已删除`);
-      return `挂件「${w.name}」已删除`;
+      // 旧独立扩展已废弃：挂件一律来自插件库投影，删除 = 停用整个来源插件
+      if (!w.pluginRef) throw new Error(`not_an_extension：挂件「${w.name}」不是插件投影，无法删除`);
+      const { setEnabled: setPluginEnabled } = await import("../plugins/pluginStore");
+      const res = setPluginEnabled(w.pluginRef, false);
+      if (!res.ok) throw new Error(res.msg);
+      toast(`挂件「${w.name}」来自插件，已停用整个插件`);
+      return `该挂件来自插件 ${w.pluginRef}，已停用整个插件（可在设置→插件管理重新启用或卸载）`;
     }
     default:
       throw new Error(`未知动作：${kind}`);
@@ -1016,8 +966,7 @@ async function plot3dStatus(): Promise<unknown> {
       keyFlight: st.keyFlight,
     },
     calibMode: st.calibMode,
-    /** P87a：校准采样源固定 = 组1 三通道 */
-    calibSource: "g1",
+    calibSource: st.calibSrc,
     sampling: { capturing: cal.capturing, points: cal.count, cap: s3d.CALIB_CAP, octantCoverage: cal.coverage },
     fit: fit
       ? {
@@ -1044,16 +993,29 @@ async function plot3dStatus(): Promise<unknown> {
 }
 
 /** P87a：AI 侧组参数（缺省组 = g1，与 v0.4.1 时代单轨迹语义一致） */
-function plot3dGidOf(a: Record<string, unknown>): "g1" | "g2" | "g3" {
-  return a.gid === "g2" || a.gid === "g3" ? a.gid : "g1";
+function plot3dGidOf(a: Record<string, unknown>, groups: readonly { id: string }[]): string {
+  return resolvePlot3dGroup(a, groups);
 }
 
 /** 3D 写操作（高权限）：组绑定 / 显示设置（组级或全局）/ 清空 / 撤销重做 / 校准会话 */
 async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
   const s3d = await import("../plot3d/plot3dStore");
   const op = String(a.op ?? "").trim();
+  if (op === "groupRemove") {
+    const gid = resolvePlot3dGroup(a, s3d.getSnapshot().settings.groups, true);
+    return plot3dRemovalReceipt(gid);
+  }
+  if (["bind", "set", "groupAdd", "undo", "redo"].includes(op) && isOperatorLocked()) {
+    throw new Error("Operator 只读锁定：3D 配置未修改");
+  }
+  if (op === "groupAdd") {
+    const gid = s3d.addGroup();
+    if (!gid) throw new Error("新增轨迹组被拒绝");
+    if (typeof a.name === "string") s3d.updateGroup(gid, { name: a.name });
+    return { gid, message: "已新增轨迹组，请绑定 X/Y（Z 可留空）" };
+  }
   if (op === "bind") {
-    const gid = plot3dGidOf(a);
+    const gid = plot3dGidOf(a, s3d.getSnapshot().settings.groups);
     const patch: Record<string, string> = {};
     if (typeof a.axisX === "string" || typeof a.chX === "string")
       patch.chX = String((a.chX ?? a.axisX) as string);
@@ -1062,17 +1024,17 @@ async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
     if (typeof a.axisZ === "string" || typeof a.chZ === "string")
       patch.chZ = String((a.chZ ?? a.axisZ) as string);
     if (typeof a.colorCh === "string") patch.colorCh = String(a.colorCh);
-    if (!Object.keys(patch).length) throw new Error("bind 需要 axisX / axisY / axisZ（通道 id，可用 get_plot_stats 或 listChannels 取；gid 可选 g1/g2/g3，缺省 g1）");
+    if (!Object.keys(patch).length) throw new Error("bind 需要 axisX / axisY / axisZ（通道 id，可用 get_plot_stats 或 listChannels 取；gid 必须为现存组 ID，缺省 g1）");
     s3d.updateGroup(gid, patch as Parameters<typeof s3d.updateGroup>[1]);
     const g = s3d.getGroup(gid);
+    if (!g) throw new Error("轨迹组已被删除");
     return {
       gid,
       axes: { x: g.chX, y: g.chY, z: g.chZ, bound: !!(g.chX && g.chY && g.chZ) },
-      msg: `已更新 ${g.name} 轴绑定（换绑定会清空该组历史并重灌；组1 换绑连带清空校准采样与拟合）`,
+      msg: `已更新 ${g.name} 轴绑定（换绑定会清空该组历史并重灌；校准源换绑连带清空校准采样与拟合）`,
     };
   }
   if (op === "set") {
-    const gid = plot3dGidOf(a);
     const groupKeys = ["colorBy", "colorCh", "fade", "density", "mode", "pointSize", "opacity", "showDots", "maxPoints", "smooth", "smoothWin", "smoothSub", "smoothTension", "arrowEvery", "showStartEnd", "heading", "model", "transform", "pairMode", "pairTolMs", "name", "color", "notes"] as const;
     const viewKeys = ["axisScale", "showGrid", "gridDensity", "autoRotate", "follow", "keyFlight", "zoomToCursor"] as const;
     const gpatch: Record<string, unknown> = {};
@@ -1085,15 +1047,17 @@ async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
     const vpatch: Record<string, unknown> = {};
     for (const k of viewKeys) if (a[k] !== undefined) vpatch[k] = a[k];
     if (!Object.keys(gpatch).length && !Object.keys(vpatch).length)
-      throw new Error(`set 需要至少一个字段（组级 ${groupKeys.join(" / ")}；全局 ${viewKeys.join(" / ")}；gid 可选 g1/g2/g3）`);
+      throw new Error(`set 需要至少一个字段（组级 ${groupKeys.join(" / ")}；全局 ${viewKeys.join(" / ")}；gid 必须为现存组 ID）`);
+    const gid = Object.keys(gpatch).length || a.gid !== undefined
+      ? plot3dGidOf(a, s3d.getSnapshot().settings.groups) : null;
     if (Object.keys(vpatch).length) s3d.setSetting(vpatch as Parameters<typeof s3d.setSetting>[0]);
-    if (Object.keys(gpatch).length) s3d.updateGroup(gid, gpatch as Parameters<typeof s3d.updateGroup>[1]);
+    if (gid && Object.keys(gpatch).length) s3d.updateGroup(gid, gpatch as Parameters<typeof s3d.updateGroup>[1]);
     return `已更新 3D 设置：${[...Object.keys(vpatch), ...Object.keys(gpatch)].join(" / ")}（组级写入 gid=${gid}）`;
   }
   if (op === "clear") {
-    const gid = a.gid === undefined ? undefined : plot3dGidOf(a);
+    const gid = a.gid === undefined ? undefined : plot3dGidOf(a, s3d.getSnapshot().settings.groups);
     s3d.requestClearData(gid);
-    return gid ? `已清空 ${gid} 组轨迹（不可撤销；校准采样不受影响）` : "已清空三组轨迹（不可撤销；校准采样不受影响）";
+    return gid ? `已清空 ${gid} 组轨迹（不可撤销；校准采样不受影响）` : "已清空全部轨迹组（不可撤销；校准采样不受影响）";
   }
   if (op === "undo" || op === "redo") {
     const ok = op === "undo" ? s3d.undo() : s3d.redo();
@@ -1104,7 +1068,7 @@ async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
     switch (sub) {
       case "enter":
         s3d.setSetting({ calibMode: true });
-        return "已进入椭球校准模式（轨迹隐藏、切换为点云采样；采样源=组1；需先在画布上操作时用户可见）";
+        return "已进入椭球校准模式（轨迹隐藏、切换为点云采样；采样源由 calibSource 指定；需先在画布上操作时用户可见）";
       case "exit":
         s3d.setSetting({ calibMode: false });
         return "已退出椭球校准模式";
@@ -1123,5 +1087,5 @@ async function runPlot3dAction(a: Record<string, unknown>): Promise<unknown> {
         throw new Error(`未知 calib 子动作：${sub || "（空）"}（可选：enter / exit / start / stop / clear / solve6）`);
     }
   }
-  throw new Error(`未知 plot3d 动作 op：${op || "（空）"}（可选：bind / set / clear / undo / redo / calib）`);
+  throw new Error(`未知 plot3d 动作 op：${op || "（空）"}（可选：bind / set / groupAdd / groupRemove / clear / undo / redo / calib）`);
 }

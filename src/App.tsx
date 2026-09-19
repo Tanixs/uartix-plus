@@ -64,6 +64,11 @@ import * as telemetryStore from "./features/protocol/telemetryStore";
 import * as mcpServer from "./features/mcp/mcpServer";
 import { notifyLocale, t, tx, useLocale } from "./i18n/strings";
 import { takeIpcLatency } from "./ipc/ipcLatency";
+import { subscribeReplayClock } from "./features/analysis/timeNavigation";
+import { subscribeAnalysisAi } from "./features/analysis/analysisAi";
+import AnalysisExportDialog from "./features/analysis/AnalysisExportDialog";
+import type { AnalysisSnapshot } from "./features/analysis/analysisSnapshot";
+import { subscribeAnalysisExport } from "./features/analysis/analysisExportEvents";
 
 const LAYOUT_KEY = "vs.layout.v2";
 
@@ -373,6 +378,8 @@ function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto")
 }
 
 export default function App() {
+  useEffect(subscribeReplayClock, []);
+  useEffect(subscribeAnalysisAi, []);
   const settings = useSettings();
   const theme = settings.theme;
   const [editLayout, setEditLayout] = useState(false);
@@ -380,6 +387,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [analysisExport, setAnalysisExport] = useState<{ snapshot?: AnalysisSnapshot } | null>(null);
+  useEffect(() => subscribeAnalysisExport((snapshot) => setAnalysisExport({ snapshot })), []);
   const [aiOpen, setAiOpen] = useState(false);
   const [sysDark, setSysDark] = useState(
     () => window.matchMedia("(prefers-color-scheme: dark)").matches,
@@ -788,6 +797,18 @@ export default function App() {
     });
   };
 
+  // P88b-3：插件库「加入工作区」→ 打开对应影子扩展面板（ext-panel-<影子ID>）
+  const openExtPanelRef = useRef<(id: string) => void>(null);
+  openExtPanelRef.current = addOrFocusPanel;
+  useEffect(() => {
+    const h = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (detail) openExtPanelRef.current?.(`ext-panel-${detail}`);
+    };
+    window.addEventListener("ux:open-ext-panel", h);
+    return () => window.removeEventListener("ux:open-ext-panel", h);
+  }, []);
+
   return (
     <div
       className="app"
@@ -930,6 +951,7 @@ export default function App() {
         />
       )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      {analysisExport && <AnalysisExportDialog snapshot={analysisExport.snapshot} onClose={() => setAnalysisExport(null)} />}
       {aiOpen && (
         <AiFloat
           onDock={() => {

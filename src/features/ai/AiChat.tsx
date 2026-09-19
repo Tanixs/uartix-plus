@@ -16,26 +16,15 @@ import * as templateStore from "../protocol/templateStore";
 import { collectContext, estimateTokens, type ContextSelection } from "./contextCollector";
 import type { AiScene } from "./prompts";
 import { invokeOpenSettings, invokePop } from "./aiBus";
-import { openExtPanel } from "./extBus";
 import {
   writeTemplateFromAiJson,
   writeCommandFromAiJson,
   writeCardFromAiJson,
   writeCodecFromAiJson,
 } from "./aiActions";
-import {
-  addExt,
-  setEnabled,
-  setOpen,
-  useExtensions,
-  EXT_TYPE_LABEL,
-  PERM_LABEL,
-  permsForType,
-  widgetChromeFromHtml,
-  importAll,
-  type ExtType,
-} from "./extensionStore";
-import { applyStyleExts, previewCss } from "./extRuntime";
+import { AgentInline, AgentFloat } from "../agent/AgentInline";
+import * as agentRun from "../agent/agentRun";
+import { PluginLibraryDialog } from "../plugins/PluginLibraryDialog";
 import { resolveVars } from "../controls/variableStore";
 import * as serialStore from "../serial/serialStore";
 import { detectAnomalies, anomaliesToText, type Anomaly } from "./anomaly";
@@ -51,16 +40,41 @@ import {
   IconDock,
   IconUpload,
   IconPop,
-  IconPuzzle,
+  IconPlus,
 } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";
+import { ErrorBoundary } from "../../shared/ErrorBoundary";
 
 const BUG_ENDPOINT = "https://larix.teuioe.cn/api/bugreport.php";
+
+/** P88b-4 B：常用任务快捷入口（Agent 模式面板内，点击填入输入框；覆盖外观/诊断/插件典型场景） */
+const QUICK_TASKS: { label: string; goal: string; tip: string }[] = [
+  {
+    label: "大字号+减少动效",
+    goal: "把界面字号调大一档、动效放缓，完成后告诉我怎么一步撤销",
+    tip: "字号与动效配方，会话级预览、一次撤销恢复",
+  },
+  {
+    label: "玻璃质感主题",
+    goal: "用玻璃质感调整面板外观，我看过效果满意后保存为「我的玻璃主题」",
+    tip: "玻璃配方按当前主题色派生，可保存为主题扩展",
+  },
+  {
+    label: "只读诊断面板",
+    goal: "分析当前曲线数据的异常区间，生成一个只读的诊断面板",
+    tip: "读取通道统计后生成卡片面板，不改数据",
+  },
+  {
+    label: "面板另存紧凑版",
+    goal: "把当前面板的标题单位改成中文，另存一个紧凑版副本，不覆盖原版",
+    tip: "修改后另存新插件，原版保持不变",
+  },
+];
 
 const SCENE_HINT: Partial<Record<AiScene, string>> = {
   genCommand: "生成指令：描述你要发送的指令，如「把 roll 归零并每 100ms 上报一次」",
   genCard: "生成卡片：描述你要的控制卡片，如「一个控制电机转速的滑条，0-100」",
-  create: "创造扩展：描述你想要的主题/样式/小部件/面板/脚本，如「做一个电池电压仪表盘面板」",
+  create: "创造：描述你想要的主题/小部件/面板，我会引导你用 Agent 任务把它保存为插件并自动启用",
   diagnose: "诊断问题：描述你遇到的问题，如「收不到数据」",
 };
 
@@ -71,6 +85,28 @@ const CONTEXT_LABELS: Record<keyof ContextSelection, string> = {
   samples: "数据样本",
   hex: "Hex 选区",
 };
+
+/** P88e C1：可附加的文本类文件后缀（随消息以代码块形式发给模型） */
+const TEXT_FILE_RE = /\.(txt|md|markdown|csv|tsv|json|log|ini|cfg|conf|xml|yaml|yml|toml|ts|tsx|js|jsx|py|c|h|cpp|hpp|rs|go|java|html|css|sql|bat|ps1|sh)$/i;
+
+/** P88e C1：Agent 档位中文名（模式 pill 与发送方式面板共用） */
+const SCOPE_ZH: Record<"preview" | "create" | "custom", string> = {
+  preview: "仅预览",
+  create: "常规创造",
+  custom: "自定义",
+};
+
+/** P88e C1：顶部工具栏收拢后「场景 ▾」下拉的场景项（与 quickPick 对接） */
+const SCENE_MENU: { scene: AiScene; label: string; tip: string }[] = [
+  { scene: "protocol", label: "识别协议", tip: "框选 Hex 字节后点击，AI 推断帧结构并生成模板" },
+  { scene: "interpret", label: "解读数据", tip: "根据最近帧数据概括设备状态与异常" },
+  { scene: "analyzeCurve", label: "分析曲线", tip: "分析当前 2D 曲线各通道的统计特征与周期" },
+  { scene: "genCommand", label: "生成指令", tip: "描述需求，AI 生成命令模板或脚本" },
+  { scene: "genCard", label: "生成卡片", tip: "描述需求，AI 生成控制卡片并写入控制画布" },
+  { scene: "create", label: "创造", tip: "主题 / 小部件 / 面板（经 Agent 任务保存为插件并自动启用）" },
+  { scene: "diagnose", label: "诊断", tip: "描述问题，结合连接状态给出排查清单" },
+  { scene: "report", label: "调试报告", tip: "汇总本次会话生成 Markdown 调试报告" },
+];
 
 function ResultLine({ result }: { result: { ok: boolean; msg: string } }) {
   return <span className={result.ok ? "ai-tpl-ok" : "ai-tpl-err"}>{result.msg}</span>;
@@ -221,12 +257,12 @@ function ActionBlock({ code }: { code: string }) {
   const runAll = async () => {
     if (!actions || running) return;
     setRunning(true);
-    const { runAppAction } = await import("./appActions");
+    const { runAppAction, actionDataText } = await import("./appActions");
     const out: (string | null)[] = [];
     for (const a of actions) {
       try {
         const r = await runAppAction(a.kind, a.args ?? {}, { highPriv: true });
-        out.push(r.ok ? String(r.data ?? "完成") : `失败：${r.err}`);
+        out.push(r.ok ? actionDataText(r.data) : `失败：${r.err}`);
       } catch (e) {
         out.push(`失败：${String(e).slice(0, 100)}`);
       }
@@ -275,316 +311,6 @@ function ActionBlock({ code }: { code: string }) {
   );
 }
 
-/* ---------------- 扩展安装块 ---------------- */
-
-function widgetName(code: string): string {
-  const t = code.match(/<title>([^<]{1,40})<\/title>/i);
-  if (t) return t[1].trim();
-  const c = code.match(/(?:^|\n)\s*(?:<!--|\/\/|\/\*)\s*([^\n*/]{2,40})/);
-  if (c) return c[1].trim();
-  return "AI 小部件";
-}
-
-function styleName(css: string): string {
-  const m = css.match(/^\s*(?:\/\*+\s*([^\n*/]{2,40})\s*\*+\/|\/\/\s*([^\n]{2,40}))/);
-  return (m?.[1] ?? m?.[2] ?? "AI 样式").trim();
-}
-
-function scriptName(code: string): string {
-  const m = code.match(/^\s*\/\/\s*([^\n]{2,40})/);
-  return (m?.[1] ?? "AI 脚本").trim();
-}
-
-function PermList({ type }: { type: ExtType }) {
-  return (
-    <ul className="ai-ext-perms">
-      {permsForType(type).map((p) => (
-        <li key={p}>{PERM_LABEL[p]}</li>
-      ))}
-    </ul>
-  );
-}
-
-/** 沙箱小部件 / 自定义面板安装块（同格式 HTML） */
-function ExtInstallBlock({ code, type }: { code: string; type: "widget" | "panel" }) {
-  const settings = useSettings();
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [installedId, setInstalledId] = useState<string>("");
-  const name = widgetName(code);
-  const chrome = type === "widget" ? widgetChromeFromHtml(code) : undefined;
-  const disabled = !settings.aiCreativity;
-  const typeLabel = type === "widget" ? "沙箱小部件" : "自定义面板";
-  return (
-    <div className="ai-tpl-block">
-      <div className="ai-ext-head">
-        <span>
-          {typeLabel} · {name}
-        </span>
-        {chrome === "none" && <span className="ai-ext-badge bare">无边框形态</span>}
-        <span className="ai-ext-badge">{EXT_TYPE_LABEL[type]}扩展</span>
-      </div>
-      <ul className="ai-ext-perms">
-        {permsForType(type).map((p) => (
-          <li key={p}>{PERM_LABEL[p]}</li>
-        ))}
-      </ul>
-      <pre className="ai-tpl-pre">{code.length > 600 ? code.slice(0, 600) + "\n…" : code}</pre>
-      <div className="ai-tpl-actions">
-        <button
-          className="btn primary"
-          disabled={disabled}
-          title={
-            disabled
-              ? "请先到 设置 → AI 服务 开启创造模式"
-              : type === "widget"
-                ? "安装到沙箱运行（安装后自动打开浮窗，可弹出为桌面挂件）"
-                : "安装后可在扩展管理中「加入工作区」"
-          }
-          onClick={() => {
-            const id = addExt({ type, name, html: code, chrome });
-            setInstalledId(id);
-            if (type === "widget") setOpen(id, true);
-            setResult({
-              ok: true,
-              msg:
-                type === "widget"
-                  ? chrome === "none"
-                    ? "已安装并打开无边框浮窗：按住任意处拖动，右键唤出菜单，可弹出为独立桌面小窗"
-                    : "已安装并打开浮窗；可在扩展管理中弹出为桌面挂件"
-                  : "已安装；可在扩展管理中「加入工作区」",
-            });
-          }}
-        >
-          确认安装
-        </button>
-        {installedId && type === "panel" && (
-          <button className="btn" onClick={() => openExtPanel(installedId)}>
-            加入工作区
-          </button>
-        )}
-        {disabled && (
-          <button className="btn" onClick={() => invokeOpenSettings()}>
-            去开启创造模式
-          </button>
-        )}
-        {result && <ResultLine result={result} />}
-      </div>
-    </div>
-  );
-}
-
-/** 主题包安装块：兼容旧版纯 vars 格式与新版 {name,desc,vars,css} */
-function ThemeExtBlock({ code }: { code: string }) {
-  const settings = useSettings();
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  let parsed: { name?: string; desc?: string; vars?: Record<string, string>; css?: string } | null =
-    null;
-  let parseErr = "";
-  try {
-    const obj = JSON.parse(code) as Record<string, unknown>;
-    const looksNew = "vars" in obj || "css" in obj || "name" in obj;
-    if (looksNew) {
-      parsed = {
-        name: typeof obj.name === "string" ? obj.name : undefined,
-        desc: typeof obj.desc === "string" ? obj.desc : undefined,
-        vars:
-          obj.vars && typeof obj.vars === "object"
-            ? (obj.vars as Record<string, string>)
-            : undefined,
-        css: typeof obj.css === "string" ? obj.css : undefined,
-      };
-    } else {
-      parsed = { vars: obj as Record<string, string> };
-    }
-  } catch {
-    parseErr = "JSON 解析失败";
-  }
-  const disabled = !settings.aiCreativity;
-  const name = parsed?.name ?? "AI 主题";
-  return (
-    <div className="ai-tpl-block">
-      <div className="ai-ext-head">
-        <span>主题包 · {name}</span>
-        <span className="ai-ext-badge">主题扩展</span>
-      </div>
-      {parsed?.desc && <div className="ai-tpl-preview">{parsed.desc}</div>}
-      <PermList type="theme" />
-      <pre className="ai-tpl-pre">{code.length > 600 ? code.slice(0, 600) + "\n…" : code}</pre>
-      <div className="ai-tpl-actions">
-        <button
-          className="btn primary"
-          disabled={disabled || !parsed}
-          title={disabled ? "请先到 设置 → AI 服务 开启创造模式" : "应用配色与整页样式（可在扩展管理停用）"}
-          onClick={() => {
-            if (!parsed?.vars && !parsed?.css) return;
-            const id = addExt({
-              type: "theme",
-              name,
-              desc: parsed.desc,
-              vars: parsed.vars,
-              css: parsed.css,
-            });
-            setEnabled(id, true);
-            applyStyleExts();
-            setResult({ ok: true, msg: "主题已启用并生效；可在扩展管理中停用或删除" });
-          }}
-        >
-          确认安装
-        </button>
-        {disabled && (
-          <button className="btn" onClick={() => invokeOpenSettings()}>
-            去开启创造模式
-          </button>
-        )}
-        {result && <ResultLine result={result} />}
-        {!result && parseErr && <ResultLine result={{ ok: false, msg: parseErr }} />}
-      </div>
-    </div>
-  );
-}
-
-/** 样式层安装块：纯 CSS，支持先预览再安装 */
-function StyleExtBlock({ code }: { code: string }) {
-  const settings = useSettings();
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [previewing, setPreviewing] = useState(false);
-  const name = styleName(code);
-  const disabled = !settings.aiCreativity;
-  useEffect(() => {
-    return () => {
-      if (previewing) previewCss(null);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return (
-    <div className="ai-tpl-block">
-      <div className="ai-ext-head">
-        <span>样式层 · {name}</span>
-        <span className="ai-ext-badge">样式扩展</span>
-      </div>
-      <PermList type="style" />
-      <pre className="ai-tpl-pre">{code.length > 600 ? code.slice(0, 600) + "\n…" : code}</pre>
-      <div className="ai-tpl-actions">
-        {!previewing ? (
-          <button
-            className="btn"
-            disabled={disabled}
-            title="临时应用样式（不安装），不满意可撤销"
-            onClick={() => {
-              previewCss(code);
-              setPreviewing(true);
-            }}
-          >
-            预览
-          </button>
-        ) : (
-          <>
-            <button
-              className="btn primary"
-              onClick={() => {
-                const id = addExt({ type: "style", name, css: code });
-                setEnabled(id, true);
-                previewCss(null);
-                setPreviewing(false);
-                applyStyleExts();
-                setResult({ ok: true, msg: "样式已保留并生效" });
-              }}
-            >
-              保留
-            </button>
-            <button
-              className="btn"
-              onClick={() => {
-                previewCss(null);
-                setPreviewing(false);
-              }}
-            >
-              撤销预览
-            </button>
-          </>
-        )}
-        <button
-          className="btn primary"
-          disabled={disabled}
-          title="直接安装并应用（可在扩展管理停用）"
-          onClick={() => {
-            const id = addExt({ type: "style", name, css: code });
-            setEnabled(id, true);
-            applyStyleExts();
-            setResult({ ok: true, msg: "样式已安装并生效" });
-          }}
-        >
-          确认安装
-        </button>
-        {disabled && (
-          <button className="btn" onClick={() => invokeOpenSettings()}>
-            去开启创造模式
-          </button>
-        )}
-        {result && <ResultLine result={result} />}
-      </div>
-    </div>
-  );
-}
-
-/** 行为脚本安装块：高权限，需双重确认 */
-function ScriptExtBlock({ code }: { code: string }) {
-  const settings = useSettings();
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const name = scriptName(code);
-  const off = !settings.aiCreativity;
-  const needScriptPerm = settings.aiCreativity && !settings.aiScript;
-  return (
-    <div className="ai-tpl-block">
-      <div className="ai-ext-head">
-        <span>行为脚本 · {name}</span>
-        <span className="ai-ext-badge warn">高权限</span>
-      </div>
-      <PermList type="script" />
-      <pre className="ai-tpl-pre">{code.length > 600 ? code.slice(0, 600) + "\n…" : code}</pre>
-      <div className="ai-tpl-actions">
-        <button
-          className="btn primary"
-          disabled={off || needScriptPerm}
-          title={
-            off
-              ? "请先到 设置 → AI 服务 开启创造模式"
-              : needScriptPerm
-                ? "请先到 设置 → AI 服务 → 创造模式 开启「允许行为脚本」"
-                : "安装为停用状态，在扩展管理中启用时还需确认"
-          }
-          onClick={() => {
-            void (async () => {
-              if (
-                !(await confirmDialog({
-                  message: `安装脚本「${name}」？\n\n该脚本将在主界面执行 JS，可读取数据快照、发送数据（受全局发送权限限制）。\n安装后默认停用，启用时还会再次确认。`,
-                  okLabel: "确认安装",
-                }))
-              )
-                return;
-              addExt({ type: "script", name, code });
-              setResult({ ok: true, msg: "脚本已安装（停用）；到扩展管理中启用" });
-            })();
-          }}
-        >
-          确认安装
-        </button>
-        {off && (
-          <button className="btn" onClick={() => invokeOpenSettings()}>
-            去开启创造模式
-          </button>
-        )}
-        {needScriptPerm && (
-          <button className="btn" onClick={() => invokeOpenSettings()}>
-            去开启脚本权限
-          </button>
-        )}
-        {result && <ResultLine result={result} />}
-      </div>
-    </div>
-  );
-}
-
 /* ---------------- 消息渲染 ---------------- */
 
 /** 思考耗时（秒）显示文本 */
@@ -613,10 +339,20 @@ function ThinkBox({
     const t = window.setInterval(() => tick((n) => n + 1), 500);
     return () => window.clearInterval(t);
   }, [live]);
-  if (!text) return null;
   const secs = live
     ? Math.max(1, Math.floor((Date.now() - (startAt ?? mountRef.current)) / 1000))
     : Math.max(1, ms);
+  if (!text) {
+    // 无思维链内容：流式进行中显示等待占位；流式结束仍无内容则不渲染
+    return live && show ? (
+      <div className="ai-think live collapsed">
+        <div className="ai-think-head">
+          <span className="ai-think-dot" />
+          等待思维链…
+        </div>
+      </div>
+    ) : null;
+  }
   if (!show) {
     return live ? (
       <div className="ai-think live collapsed">
@@ -639,7 +375,7 @@ function ThinkBox({
   ) : (
     <details className="ai-think done">
       <summary>
-        <span className="ai-think-chev"><IconChevron dir="right" /></span> 已深度思考（{fmtThink(secs)}）
+        <span className="think-caret"><IconChevron dir="right" /></span> 已深度思考（{fmtThink(secs)}）
       </summary>
       <div className="ai-reasoning-body">{text}</div>
     </details>
@@ -722,38 +458,6 @@ function PendingBlock({ code }: { code: string }) {
   );
 }
 
-/** AI 扩展分享包（uartix-extensions JSON）→ 一键导入卡 */
-function ExtPackImportBlock({ code }: { code: string }) {
-  const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  let count = 0;
-  let bad = "";
-  try {
-    const p = JSON.parse(code) as { kind?: string; data?: unknown[] };
-    if (p.kind !== "uartix-extensions" || !Array.isArray(p.data)) bad = "不是有效的扩展分享包（缺 kind/data 字段）";
-    else count = p.data.length;
-  } catch {
-    bad = "JSON 解析失败";
-  }
-  return (
-    <div className="ai-tpl-block">
-      <div className="ai-ext-head">
-        <span>AI 扩展分享包</span>
-        <span className="ai-ext-badge">{bad ? "无效" : `${count} 个扩展`}</span>
-      </div>
-      {bad ? (
-        <div className="ai-error">{bad}</div>
-      ) : (
-        <div className="ai-tpl-actions">
-          <button className="btn primary" onClick={() => setResult(importAll(code))}>
-            导入分享包
-          </button>
-          {result && <ResultLine result={result} />}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MessageBody({
   content,
   scene,
@@ -788,22 +492,12 @@ function MessageBody({
         s.kind === "code" ? (
           s.closed === false && s.lang?.startsWith("uartix-") && live ? (
             <PendingBlock key={i} code={s.code ?? ""} />
-          ) : (s.lang === "json" || !s.lang) && s.closed !== false && (s.code ?? "").includes('"uartix-extensions"') ? (
-            <ExtPackImportBlock key={i} code={s.code ?? ""} />
           ) : s.lang === "uartix-template" ? (
             <TemplateWriteBlock key={i} code={s.code ?? ""} />
           ) : s.lang === "uartix-command" ? (
             <CommandWriteBlock key={i} code={s.code ?? ""} />
           ) : s.lang === "uartix-card" ? (
             <CardWriteBlock key={i} code={s.code ?? ""} />
-          ) : s.lang === "uartix-widget" || s.lang === "uartix-panel" ? (
-            <ExtInstallBlock key={i} code={s.code ?? ""} type={s.lang === "uartix-panel" ? "panel" : "widget"} />
-          ) : s.lang === "uartix-theme" ? (
-            <ThemeExtBlock key={i} code={s.code ?? ""} />
-          ) : s.lang === "uartix-style" ? (
-            <StyleExtBlock key={i} code={s.code ?? ""} />
-          ) : s.lang === "uartix-script" ? (
-            <ScriptExtBlock key={i} code={s.code ?? ""} />
           ) : s.lang === "uartix-codec" ? (
             <CodecWriteBlock key={i} code={s.code ?? ""} />
           ) : s.lang === "uartix-action" ? (
@@ -987,16 +681,31 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const [mode, setMode] = useState<AiScene>("qa");
   const [notice, setNotice] = useState("");
   const [ctxOpen, setCtxOpen] = useState(false);
+  // P88e C1：输入区 Zcode 化——＋附件菜单 / 任务模式面板 / 场景下拉，全部默认收起
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [modePanelOpen, setModePanelOpen] = useState(false);
+  const [sceneMenuOpen, setSceneMenuOpen] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<{ name: string; text: string }[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [anoms, setAnoms] = useState<Anomaly[]>([]);
   const [anomOpen, setAnomOpen] = useState(false);
   const [uploadState, setUploadState] = useState("");
   const [sideOpen, setSideOpen] = useState(false);
+  // P88d ③：Agent 集成进对话——agentMode=输入框走 Agent 任务而非问答；档位/授权域内联选择
+  const [agentMode, setAgentMode] = useState(false);
+  const [agentScope, setAgentScope] = useState<"preview" | "create" | "custom">("create");
+  const [agentAllowed, setAgentAllowed] = useState<string[]>(["config", "plugins"]);
+  const agentSnap = useSyncExternalStore(agentRun.subscribe, agentRun.getSnapshot);
+  const agentActive = agentSnap.runs.find((r) => r.runId === agentSnap.activeRunId) ?? null;
+  const agentPending = Boolean(agentActive?.pending);
+  const agentRunning = agentActive?.status === "running";
+  const agentBadge = agentPending ? "待批准" : agentRunning ? "运行中" : null;
+  const [plgLibOpen, setPlgLibOpen] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [editingId, setEditingId] = useState("");
   const [editText, setEditText] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const imgInputRef = useRef<HTMLInputElement>(null);
-  const ws = useExtensions();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1086,16 +795,70 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     }
   };
 
+  /** P88e C1：附加文本文件（≤256KB、最多 4 个），内容以代码块形式随消息发给模型。
+   *  用途示例：把文本日志/配置/导出的 JSON 直接喂给 AI 分析。 */
+  const addFiles = (files: FileList | File[] | null) => {
+    if (!files || files.length === 0) return;
+    const room = 4 - pendingFiles.length;
+    const list = Array.from(files).slice(0, Math.max(0, room));
+    if (list.length === 0) {
+      setNotice("每条消息最多附带 4 个文件");
+      return;
+    }
+    for (const f of list) {
+      if (!TEXT_FILE_RE.test(f.name)) {
+        setNotice(`暂不支持的文件类型：${f.name}（支持文本类：.txt/.md/.csv/.json/.log 等）`);
+        continue;
+      }
+      if (f.size > 256 * 1024) {
+        setNotice(`文件过大（${f.name} 超过 256KB），请截取关键部分`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () =>
+        setPendingFiles((prev) =>
+          prev.length >= 4 || prev.some((p) => p.name === f.name)
+            ? prev
+            : [...prev, { name: f.name, text: String(reader.result ?? "") }],
+        );
+      reader.readAsText(f);
+    }
+  };
+
   const doSend = () => {
     const text = input.trim();
+    const fileBlock =
+      pendingFiles.length > 0
+        ? pendingFiles.map((f) => `【附加文件：${f.name}】\n\`\`\`\n${f.text}\n\`\`\``).join("\n\n") + "\n\n"
+        : "";
     if ((!text && pendingImages.length === 0) || chat.streaming) return;
+    // P88d ③：Agent 模式——目标文本直接启动任务（归属当前会话），不走问答链路
+    if (agentMode) {
+      if (agentRunning) {
+        setNotice("已有 Agent 任务在运行，请先停止或等待完成");
+        return;
+      }
+      if (!text) return;
+      setInput("");
+      setPendingFiles([]);
+      void agentRun
+        .startRun({
+          goal: fileBlock + text,
+          scope: agentScope,
+          sessionId: chat.activeId,
+          ...(agentScope === "custom" ? { allowed: agentAllowed } : {}),
+        })
+        .catch((e: unknown) => setNotice(e instanceof Error ? e.message : String(e)));
+      return;
+    }
     const scene = mode;
     const imgs = pendingImages.length ? pendingImages : undefined;
     setMode("qa");
     setInput("");
     setPendingImages([]);
+    setPendingFiles([]);
     stickRef.current = true;
-    void chatStore.sendText(text, scene, undefined, imgs);
+    void chatStore.sendText(fileBlock + text, scene, undefined, imgs);
   };
 
   const runScene = (scene: AiScene, payload?: Record<string, unknown>) => {
@@ -1213,75 +976,60 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     <div className="ai-chat">
       <div className="ai-toolbar">
         <button
+          className={`ai-scene-btn${agentMode ? " on" : ""}`}
+          title="Agent 任务模式：输入一句话目标，AI 连续调用工具完成主题/协议/分析等多步任务（成果可保存为插件）"
+          onClick={() => {
+            setAgentMode((v) => !v);
+            inputRef.current?.focus();
+          }}
+        >
+          Agent 任务
+          {agentBadge && <span className={`agent-badge${agentPending ? " warn" : ""}`}>{agentBadge}</span>}
+        </button>
+        <button
           className={`ai-icon-btn${sideOpen ? " on" : ""}`}
           title="会话列表：多会话切换、搜索历史、双击重命名"
           onClick={() => setSideOpen((v) => !v)}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="14" y2="12" /><line x1="4" y1="18" x2="17" y2="18" /></svg>
         </button>
+        {/* P88e C1：8 个场景按钮收进「场景 ▾」下拉，工具栏只留高频入口 */}
         <button
-          className="ai-scene-btn"
-          title="框选 Hex 字节后点击，AI 推断帧结构并生成模板"
-          onClick={() => quickPick("protocol")}
+          className={`ai-scene-btn${sceneMenuOpen ? " on" : ""}`}
+          title="分析 / 生成 / 报告等场景入口"
+          onClick={() => setSceneMenuOpen((v) => !v)}
         >
-          识别协议
+          场景 ▾
         </button>
-        <button
-          className="ai-scene-btn"
-          title="根据最近帧数据概括设备状态与异常"
-          onClick={() => quickPick("interpret")}
-        >
-          解读数据
-        </button>
-        <button
-          className="ai-scene-btn"
-          title="分析当前 2D 曲线各通道的统计特征与周期"
-          onClick={() => quickPick("analyzeCurve")}
-        >
-          分析曲线
-        </button>
-        <button
-          className="ai-scene-btn"
-          title="描述需求，AI 生成命令模板或脚本"
-          onClick={() => quickPick("genCommand")}
-        >
-          生成指令
-        </button>
-        <button
-          className="ai-scene-btn"
-          title="描述需求，AI 生成控制卡片并写入控制画布"
-          onClick={() => quickPick("genCard")}
-        >
-          生成卡片
-        </button>
-        <button
-          className="ai-scene-btn"
-          title="引导式创造：主题 / 样式 / 小部件 / 面板 / 脚本"
-          onClick={() => quickPick("create")}
-        >
-          创造扩展
-        </button>
-        <button
-          className="ai-scene-btn"
-          title="描述问题，结合连接状态给出排查清单"
-          onClick={() => quickPick("diagnose")}
-        >
-          诊断
-        </button>
-        <button
-          className="ai-scene-btn"
-          title="汇总本次会话生成 Markdown 调试报告"
-          onClick={() => quickPick("report")}
-        >
-          调试报告
-        </button>
+        {sceneMenuOpen && (
+          <div className="ai-scene-menu" role="menu">
+            {SCENE_MENU.map((s) => (
+              <button
+                key={s.scene}
+                className="ai-scene-menu-item"
+                title={s.tip}
+                role="menuitem"
+                onClick={() => {
+                  setSceneMenuOpen(false);
+                  if (s.scene === "protocol") {
+                    quickPick("protocol");
+                    return;
+                  }
+                  quickPick(s.scene);
+                }}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="ai-toolbar-spacer" />
         <button
-          className={`ai-icon-btn${ws.exts.length ? " ai-patrol" : ""}`}
-          title={settings.aiCreativity ? "扩展管理：启停/删除/导入导出" : "扩展管理（开启创造模式后可用）"}
-          onClick={() => invokeOpenSettings("ext")}
+          className="ai-icon-btn"
+          title="本地插件库：启停/配置/版本/回滚/导入导出"
+          onClick={() => setPlgLibOpen(true)}
         >
-          <IconPuzzle />
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z" /><path d="M9 8h6" /><path d="M9 12h6" /></svg>
         </button>
         <button
           className="ai-icon-btn"
@@ -1357,7 +1105,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 AI 调试助手
               </div>
               <div className="ai-welcome-desc">
-                框选 Hex 字节右键「AI 识别协议」；或用上方快捷按钮解读数据、分析曲线、生成指令、诊断问题。开启创造模式后可用「创造扩展」让 AI 生成主题、样式、小部件、面板与脚本。发送前可勾选随消息附带的软件内上下文。
+                框选 Hex 字节右键「AI 识别协议」；或用上方快捷按钮解读数据、分析曲线、生成指令、诊断问题。想做主题、小部件、面板？用「Agent 任务」让 AI 直接保存为插件并自动启用。发送前可勾选随消息附带的软件内上下文。
               </div>
             </div>
           )}
@@ -1478,6 +1226,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               </div>
             </div>
           )}
+          {/* P88d ③：本会话的 Agent 任务内联活动流（目标/时间线/审批/终态） */}
+          <AgentInline sessionId={chat.activeId} />
         </div>
         {!atBottom && messages.length > 0 && (
           <button className="ai-scroll-btn" title="回到底部" onClick={scrollToBottom}>
@@ -1490,43 +1240,127 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
       {uploadState && <div className="ai-notice">{uploadState}</div>}
 
       <div className="ai-input-wrap">
-        <div className="ai-ctx-bar">
-          <button
-            className="ai-ctx-toggle"
-            title="勾选数与实际附加数可能不同：Hex 未框选字节、样本无数据时不产生附加块"
-            onClick={() => setCtxOpen((v) => !v)}
-          >
-            <IconChevron dir={ctxOpen ? "down" : "right"} size={11} />
-            本次发送的上下文（勾选 {checkedCtxCount} · 实际附加 {ctxBlocks.length}
-            {ctxBlocks.length > 0
-              ? ` · ≈${estimateTokens(ctxBlocks.map((b) => b.text).join("\n")) + estimateTokens(input)} tok`
-              : ""}
-            ）
-          </button>
-          {(Object.keys(CONTEXT_LABELS) as (keyof ContextSelection)[]).map((k) => (
-            <label key={k} className="ai-ctx-check" title={`随下一条消息附带${CONTEXT_LABELS[k]}`}>
-              <input
-                type="checkbox"
-                checked={chat.contextSel[k]}
-                onChange={(e) =>
-                  chatStore.setContextSel({ ...chat.contextSel, [k]: e.target.checked })
-                }
-              />
-              {CONTEXT_LABELS[k]}
-            </label>
-          ))}
-        </div>
+        {/* P88e C1：附加内容 chips——仅有附加内容时出现，默认不见；点上下文 chip 展开勾选面板 */}
+        {(pendingFiles.length > 0 || checkedCtxCount > 0 || ctxOpen) && (
+          <div className="ai-attach-row">
+            {pendingFiles.map((f, i) => (
+              <span key={`${f.name}:${i}`} className="ai-attach-chip" title={`附加文件 ${f.name}`}>
+                {f.name}
+                <button
+                  className="ai-attach-del"
+                  title="移除文件"
+                  onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
+                >
+                  <IconClose />
+                </button>
+              </span>
+            ))}
+            <button
+              className={`ai-attach-chip as-btn${ctxOpen ? " on" : ""}`}
+              title="勾选随消息发送的上下文（连接配置 / 协议 / 数据样本 / Hex 选区）"
+              onClick={() => setCtxOpen((v) => !v)}
+            >
+              上下文 · 勾选 {checkedCtxCount} · 附加 {ctxBlocks.length}
+              {ctxBlocks.length > 0
+                ? ` · ≈${estimateTokens(ctxBlocks.map((b) => b.text).join("\n")) + estimateTokens(input)} tok`
+                : ""}
+            </button>
+          </div>
+        )}
         {ctxOpen && (
-          <div className="ai-ctx-preview">
-            {ctxBlocks.length === 0 ? (
-              <div className="ai-ctx-empty">未勾选任何上下文项</div>
-            ) : (
-              ctxBlocks.map((b) => (
-                <div key={b.key} className="ai-ctx-block">
-                  <div className="ai-ctx-block-title">{b.title}</div>
-                  <pre>{b.text}</pre>
-                </div>
-              ))
+          <div className="ai-ctx-panel">
+            <div className="ai-ctx-checks">
+              {(Object.keys(CONTEXT_LABELS) as (keyof ContextSelection)[]).map((k) => (
+                <label key={k} className="ai-ctx-check" title={`随下一条消息附带${CONTEXT_LABELS[k]}`}>
+                  <input
+                    type="checkbox"
+                    checked={chat.contextSel[k]}
+                    onChange={(e) =>
+                      chatStore.setContextSel({ ...chat.contextSel, [k]: e.target.checked })
+                    }
+                  />
+                  {CONTEXT_LABELS[k]}
+                </label>
+              ))}
+              <span className="ai-ctx-note" title="Hex 未框选字节、样本无数据时不产生附加块">
+                勾选数与实际附加数可能不同
+              </span>
+            </div>
+            {ctxBlocks.length > 0 && (
+              <div className="ai-ctx-preview">
+                {ctxBlocks.map((b) => (
+                  <div key={b.key} className="ai-ctx-block">
+                    <div className="ai-ctx-block-title">{b.title}</div>
+                    <pre>{b.text}</pre>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {/* P88e C1：「发送方式」面板——普通对话与三档 Agent 档位统一在此选择，默认收起 */}
+        {modePanelOpen && (
+          <div className="ai-agent-panel" role="group" aria-label="发送方式设置">
+            <div className="ai-agent-modes" role="radiogroup" aria-label="发送方式">
+              {([
+                ["chat", "普通对话", "一问一答；不执行任何应用操作"],
+                ["preview", "Agent · 仅预览", "读上下文、生成草稿、验证，不改动当前工作区"],
+                ["create", "Agent · 常规创造", "新建草稿与可撤销修改自动执行；删除/覆盖/设备下发仍需批准"],
+                ["custom", "Agent · 自定义", "按勾选的授权域自动执行；未勾选域逐项批准"],
+              ] as const).map(([k, label, tip]) => (
+                <button
+                  key={k}
+                  className={`ai-agent-mode${(k === "chat" ? !agentMode : agentMode && agentScope === k) ? " on" : ""}`}
+                  title={tip}
+                  disabled={agentRunning}
+                  onClick={() => {
+                    if (k === "chat") setAgentMode(false);
+                    else {
+                      setAgentMode(true);
+                      setAgentScope(k);
+                    }
+                    setModePanelOpen(false);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {agentMode && agentScope === "custom" && (
+              <div className="ai-agent-domains">
+                {([
+                  ["config", "配置写入", "设置与工作区配置的新建/修改（删除/覆盖仍需批准）"],
+                  ["plugins", "插件库", "保存新插件并启用纯 UI 插件"],
+                  ["device", "设备发送", "仿真环境自动发送；实车/未知设备仍逐次批准"],
+                  ["files", "文件读取", "读取/列出「Agent 文件白名单」内的本地文件（设置 → AI 服务）"],
+                  ["network", "网络访问", "抓取公网网页与搜索（自动拒绝内网地址）"],
+                  ["shell", "命令行", "执行 shell 命令：需设置页总开关 + 每次逐条批准"],
+                ] as const).map(([k, label, tip]) => (
+                  <label key={k} className="ai-agent-domain" title={tip}>
+                    <input
+                      type="checkbox"
+                      disabled={agentRunning}
+                      checked={agentAllowed.includes(k)}
+                      onChange={(e) =>
+                        setAgentAllowed(e.target.checked ? [...agentAllowed, k] : agentAllowed.filter((x) => x !== k))
+                      }
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            )}
+            {agentMode && !agentRunning && (
+              <div className="ai-agent-quick" role="group" aria-label="常用任务">
+                {QUICK_TASKS.map((t) => (
+                  <button key={t.label} className="ai-agent-quick-chip" title={t.tip} onClick={() => setInput(t.goal)}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {agentMode && (
+              <span className="ai-agent-budget">预算 24 轮 / 64 次工具 / 10 分钟{agentRunning ? "（运行中，设置已锁定）" : ""}</span>
             )}
           </div>
         )}
@@ -1565,18 +1399,73 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             e.target.value = "";
           }}
         />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        {/* P88e C1：＋菜单——图片 / 文件 / 上下文三入口，默认收起 */}
+        {plusOpen && (
+          <div className="ai-plus-menu" role="menu">
+            <button
+              className="ai-plus-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setPlusOpen(false);
+                imgInputRef.current?.click();
+              }}
+            >
+              附加图片
+              <span className="ai-plus-menu-note">截图 / 图片文件，最多 4 张</span>
+            </button>
+            <button
+              className="ai-plus-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setPlusOpen(false);
+                fileInputRef.current?.click();
+              }}
+            >
+              附加文件
+              <span className="ai-plus-menu-note">文本类 ≤256KB，最多 4 个（.txt/.md/.csv/.json/.log 等）</span>
+            </button>
+            <button
+              className="ai-plus-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setPlusOpen(false);
+                setCtxOpen(true);
+              }}
+            >
+              发送上下文
+              <span className="ai-plus-menu-note">连接配置 / 协议 / 数据样本 / Hex 选区</span>
+            </button>
+          </div>
+        )}
         <div className="ai-input-row">
+          <button className="ai-plus" title="附加图片、文件或上下文" onClick={() => setPlusOpen((v) => !v)} aria-haspopup="menu" aria-expanded={plusOpen}>
+            <IconPlus />
+          </button>
           <textarea
             ref={inputRef}
             className="ai-input"
             placeholder={
-              chat.streaming
-                ? "AI 正在回复…"
-                : "输入问题，Enter 发送，Shift+Enter 换行；可粘贴/附加图片"
+              agentMode
+                ? agentRunning
+                  ? "Agent 任务运行中…可停止后继续"
+                  : "用一句话描述目标，Enter 启动 Agent 任务（AI 连续调用工具完成）"
+                : chat.streaming
+                  ? "AI 正在回复…"
+                  : "输入问题，Enter 发送，Shift+Enter 换行；可粘贴/附加图片"
             }
             rows={1}
             value={input}
-            disabled={chat.streaming}
+            disabled={chat.streaming || (agentMode && agentRunning)}
             onChange={(e) => {
               setInput(e.target.value);
               const el = e.target;
@@ -1608,26 +1497,41 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               <IconStop />
             </button>
           ) : (
-            <>
-              <button
-                className="ai-send attach"
-                title="附加图片（也可直接粘贴截图）"
-                onClick={() => imgInputRef.current?.click()}
-              >
-                <IconUpload />
-              </button>
-              <button
-                className="ai-send"
-                title="发送（Enter）"
-                disabled={!input.trim() && pendingImages.length === 0}
-                onClick={doSend}
-              >
-                <IconSend />
-              </button>
-            </>
+            <button
+              className="ai-send"
+              title="发送（Enter）"
+              disabled={!input.trim() && pendingImages.length === 0 && pendingFiles.length === 0}
+              onClick={doSend}
+            >
+              <IconSend />
+            </button>
+          )}
+        </div>
+        {/* P88e C1：工具条行——发送方式 pill（默认收起，点开面板）+ Agent 运行进度 */}
+        <div className="ai-tools-row">
+          <button
+            className={`ai-mode-pill${agentMode ? " on" : ""}`}
+            title="选择发送方式：普通对话，或 Agent 任务的执行档位"
+            onClick={() => setModePanelOpen((v) => !v)}
+            aria-expanded={modePanelOpen}
+          >
+            {agentMode ? `Agent 任务 · ${SCOPE_ZH[agentScope]}` : "普通对话"}
+            <IconChevron dir="down" size={12} />
+          </button>
+          {agentMode && agentRunning && (
+            <span className="ai-agent-prog">
+              第 {agentActive?.rounds ?? 0} 轮 · {agentActive?.calls ?? 0} 次工具{agentPending ? " · 待批准" : ""}
+            </span>
           )}
         </div>
       </div>
+      {/* P88d ③：活动任务不在当前会话视图时，右下角悬浮条一键切回 */}
+      <AgentFloat sessionId={chat.activeId} onOpen={(id) => chatStore.switchSession(id)} />
+      {plgLibOpen && (
+        <ErrorBoundary label="本地插件库">
+          <PluginLibraryDialog onClose={() => setPlgLibOpen(false)} />
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

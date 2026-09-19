@@ -116,7 +116,8 @@ fn classify_error(status: u16, body: &str) -> String {
     }
 }
 
-fn build_client(
+/// P88e B1：pub(crate) 供 agent_tools::agent_http_get 复用（同一代理/超时策略）。
+pub(crate) fn build_client(
     proxy: Option<&str>,
     no_proxy: Option<&str>,
     timeout: Option<Duration>,
@@ -276,6 +277,7 @@ pub async fn ai_chat(
     proxy: Option<String>,
     no_proxy: Option<String>,
     messages: Vec<AiMessage>,
+    thinking: Option<bool>,
 ) -> Result<(), String> {
     let fmt = format.as_str();
     let url = endpoint_url(&base_url, fmt);
@@ -307,6 +309,12 @@ pub async fn ai_chat(
             });
             if let Some(s) = system {
                 b["system"] = serde_json::Value::String(s);
+            }
+            // 扩展思考（思维链）：开启后响应含 thinking_delta 事件，前端思考区才有内容
+            if thinking.unwrap_or(false) {
+                b["thinking"] = serde_json::json!({ "type": "enabled", "budget_tokens": 4096 });
+                // anthropic 约束：thinking 开启时 temperature 必须为 1
+                b["temperature"] = serde_json::Value::from(1.0);
             }
             b
         }
@@ -521,6 +529,163 @@ pub fn ai_abort(state: State<'_, AiState>, req_id: String) {
     }
 }
 
+// P88b: bounded, structured turns use complete native protocol responses; never parse Markdown.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCall { call_id: String, name: String, arguments: String }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMessage {
+    role: String, content: String,
+    #[serde(default)] calls: Vec<AgentCall>,
+    call_id: Option<String>,
+}
+#[derive(Deserialize)]
+pub struct AgentTool { name: String, description: String, parameters: serde_json::Value }
+
+fn agent_body(format: &str, model: &str, messages: &[AgentMessage], tools: &[AgentTool]) -> serde_json::Value {
+    use serde_json::json;
+    let mut converted = Vec::new();
+    let mut system = String::new();
+    for m in messages {
+        if m.role == "system" && format != "chat" { system.push_str(&m.content); continue; }
+        match format {
+            "anthropic" => {
+                let mut content = Vec::new();
+                if m.role == "tool" { content.push(json!({"type":"tool_result", "tool_use_id":m.call_id, "content":m.content})); }
+                else {
+                    if !m.content.is_empty() { content.push(json!({"type":"text", "text":m.content})); }
+                    for c in &m.calls { content.push(json!({"type":"tool_use", "id":c.call_id, "name":c.name, "input":serde_json::from_str::<serde_json::Value>(&c.arguments).unwrap_or(json!({}))})); }
+                }
+                converted.push(json!({"role":if m.role == "tool" {"user"} else {&m.role}, "content":content}));
+            }
+            "responses" => {
+                if m.role == "tool" { converted.push(json!({"type":"function_call_output", "call_id":m.call_id, "output":m.content})); }
+                else {
+                    if !m.content.is_empty() { converted.push(json!({"role":m.role, "content":m.content})); }
+                    for c in &m.calls { converted.push(json!({"type":"function_call", "call_id":c.call_id, "name":c.name, "arguments":c.arguments})); }
+                }
+            }
+            _ => {
+                let mut msg = json!({"role":m.role, "content":m.content});
+                if m.role == "tool" { msg["tool_call_id"] = json!(m.call_id); }
+                if !m.calls.is_empty() { msg["tool_calls"] = json!(m.calls.iter().map(|c| json!({"id":c.call_id, "type":"function", "function":{"name":c.name,"arguments":c.arguments}})).collect::<Vec<_>>()); }
+                converted.push(msg);
+            }
+        }
+    }
+    let definitions: Vec<_> = tools.iter().map(|t| match format {
+        "anthropic" => json!({"name":t.name,"description":t.description,"input_schema":t.parameters}),
+        "responses" => json!({"type":"function","name":t.name,"description":t.description,"parameters":t.parameters,"strict":false}),
+        _ => json!({"type":"function","function":{"name":t.name,"description":t.description,"parameters":t.parameters}}),
+    }).collect();
+    // max_tokens 给足：推理型模型思维链占用输出预算，4096 会被吃光导致
+    // finish_reason=length → 误判"回复未完整结束"→ Agent 任务必败（P88d 根因）。
+    match format {
+        "anthropic" => json!({"model":model,"system":system,"messages":converted,"tools":definitions,"max_tokens":16384,"stream":false}),
+        "responses" => json!({"model":model,"instructions":system,"input":converted,"tools":definitions,"max_output_tokens":16384,"stream":false,"store":false}),
+        _ => json!({"model":model,"messages":converted,"tools":definitions,"max_tokens":16384,"stream":false}),
+    }
+}
+
+fn agent_result(format: &str, value: &serde_json::Value) -> Result<serde_json::Value, String> {
+    use serde_json::json;
+    // 截断细分：finish_reason=length 类错误单独报因（推理模型思维链吃光输出预算），
+    // 用户才能区分"模型没说完"与"网络/协议错误"（P88d 失败原因可见性）。
+    let trunc = |r: &str| format!("模型输出达长度上限被截断（{r}）；未执行工具");
+    let mut text = String::new();
+    let mut calls = Vec::new();
+    match format {
+        "anthropic" => {
+            match value["stop_reason"].as_str() {
+                Some("end_turn") | Some("tool_use") => {}
+                Some("max_tokens") => return Err(trunc("max_tokens")),
+                other => return Err(format!("模型回复未完整结束（{other:?}）；未执行工具")),
+            }
+            for block in value["content"].as_array().ok_or("无模型输出")? {
+                if block["type"] == "text" { text.push_str(block["text"].as_str().unwrap_or("")); }
+                if block["type"] == "tool_use" { calls.push(json!({"callId":block["id"],"name":block["name"],"arguments":block["input"].to_string()})); }
+            }
+        }
+        "responses" => {
+            match value["status"].as_str() {
+                Some("completed") => {}
+                Some("incomplete") => return Err(trunc("incomplete")),
+                other => return Err(format!("模型回复未完整结束（{other:?}）；未执行工具")),
+            }
+            for item in value["output"].as_array().ok_or("无模型输出")? {
+                if item["type"] == "function_call" { calls.push(json!({"callId":item["call_id"],"name":item["name"],"arguments":item["arguments"]})); }
+                if let Some(content) = item["content"].as_array() { for block in content { if block["type"] == "output_text" { text.push_str(block["text"].as_str().unwrap_or("")); } } }
+            }
+        }
+        _ => {
+            let choice = &value["choices"][0];
+            match choice["finish_reason"].as_str() {
+                Some("stop") | Some("tool_calls") => {}
+                Some("length") => return Err(trunc("length")),
+                other => return Err(format!("模型回复未完整结束（{other:?}）；未执行工具")),
+            }
+            let msg = &choice["message"];
+            text.push_str(msg["content"].as_str().unwrap_or(""));
+            if let Some(items) = msg["tool_calls"].as_array() { for c in items { calls.push(json!({"callId":c["id"],"name":c["function"]["name"],"arguments":c["function"]["arguments"]})); } }
+        }
+    }
+    if calls.len() > 64 { return Err("工具调用超限".into()); }
+    for call in &calls {
+        if call["callId"].as_str().filter(|s| !s.is_empty() && s.len() <= 256).is_none()
+            || call["name"].as_str().filter(|s| !s.is_empty() && s.len() <= 128).is_none()
+            || call["arguments"].as_str().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).filter(|v| v.is_object()).is_none() { return Err("工具参数无效；未执行".into()); }
+    }
+    Ok(json!({"content":text,"calls":calls}))
+}
+
+#[tauri::command]
+pub async fn ai_agent_turn(
+    state: State<'_, AiState>, req_id: String, base_url: String, api_key: String,
+    model: String, format: String, proxy: Option<String>, no_proxy: Option<String>,
+    messages: Vec<AgentMessage>, tools: Vec<AgentTool>,
+) -> Result<serde_json::Value, String> {
+    if !["chat", "anthropic", "responses"].contains(&format.as_str()) { return Err("不支持执行模式协议".into()); }
+    let body = agent_body(&format, &model, &messages, &tools);
+    if body.to_string().len() > 2 * 1024 * 1024 { return Err("任务上下文超限".into()); }
+    // P88e：120s→300s——推理模型单轮生成（max_tokens 16384）常超 2 分钟，120s 必撞超时报"模型响应中断"。
+    // 仅 Agent 通道放宽；ai_chat 流式有心跳不受影响。与前端 loop 总预算 10min 的关系：单轮 300s × ≥2 轮。
+    let client = build_client(proxy.as_deref(), no_proxy.as_deref(), Some(Duration::from_secs(300)))?;
+    let mut req = client.post(endpoint_url(&base_url, &format)).json(&body);
+    if format == "anthropic" { req = req.header("x-api-key", api_key).header("anthropic-version", "2023-06-01"); }
+    else if !api_key.is_empty() { req = req.bearer_auth(api_key); }
+    let flag = Arc::new(AtomicBool::new(false));
+    state.aborts.lock().map_err(|_| "取消服务不可用")?.insert(req_id.clone(), flag.clone());
+    let operation = async {
+        // P88e：超时与连接失败分类——超时给用户可行动的建议（降档位/换模型），不再笼统"中断"
+        let response = req.send().await.map_err(|e| {
+            if e.is_timeout() { "模型推理超时（300s）；可在设置降低思考档位或更换更快的模型后重试".to_string() }
+            else { "模型连接失败；请检查本机 AI 服务设置".to_string() }
+        })?;
+        if !response.status().is_success() { return Err(format!("模型服务 HTTP {}；未执行工具", response.status().as_u16())); }
+        let mut stream = response.bytes_stream();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| if e.is_timeout() {
+                "模型推理超时（300s）；可在设置降低思考档位或更换更快的模型后重试".to_string()
+            } else { "模型响应中断".to_string() })?;
+            if bytes.len() + chunk.len() > 2 * 1024 * 1024 { return Err("模型响应超限".into()); }
+            bytes.extend_from_slice(&chunk);
+        }
+        let value = serde_json::from_slice(&bytes).map_err(|_| "模型未返回有效 JSON")?;
+        agent_result(&format, &value)
+    };
+    let cancelled = async {
+        loop { if flag.load(Ordering::Relaxed) { break; } tokio::time::sleep(Duration::from_millis(25)).await; }
+        Err("已停止；未派发后续工具".to_string())
+    };
+    let result = match futures_util::future::select(Box::pin(operation), Box::pin(cancelled)).await {
+        futures_util::future::Either::Left((r, _)) | futures_util::future::Either::Right((r, _)) => r,
+    };
+    if let Ok(mut map) = state.aborts.lock() { map.remove(&req_id); }
+    result
+}
+
 #[tauri::command]
 pub async fn ai_upload_report(
     endpoint: String,
@@ -607,5 +772,213 @@ mod tests {
         ]);
         assert_eq!(content_text(&v), "ab");
         assert_eq!(content_text(&serde_json::json!("直接")), "直接");
+    }
+
+    /* ============ P88b：agent 轮次请求/响应转换 ============ */
+
+    fn amsg(role: &str, content: &str) -> AgentMessage {
+        AgentMessage { role: role.into(), content: content.into(), calls: vec![], call_id: None }
+    }
+    fn acall(id: &str, name: &str, args: &str) -> AgentCall {
+        AgentCall { call_id: id.into(), name: name.into(), arguments: args.into() }
+    }
+    fn atool() -> Vec<AgentTool> {
+        vec![AgentTool {
+            name: "settings_apply".into(),
+            description: "d".into(),
+            parameters: serde_json::json!({ "type": "object" }),
+        }]
+    }
+    fn agent_turn_messages() -> Vec<AgentMessage> {
+        vec![
+            amsg("system", "sys"),
+            amsg("user", "把字号调大"),
+            AgentMessage {
+                role: "assistant".into(),
+                content: String::new(),
+                calls: vec![acall("c1", "settings_apply", "{\"zoom\":110}")],
+                call_id: None,
+            },
+            AgentMessage {
+                role: "tool".into(),
+                content: "{\"ok\":true}".into(),
+                calls: vec![],
+                call_id: Some("c1".into()),
+            },
+        ]
+    }
+
+    #[test]
+    fn agent_body_chat_keeps_system_message_and_tool_calls_shape() {
+        let body = agent_body("chat", "m1", &agent_turn_messages(), &atool());
+        assert_eq!(body["model"], "m1");
+        assert_eq!(body["stream"], false);
+        assert_eq!(body["max_tokens"], 16384);
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs[0]["role"], "system"); // chat 保留 system 消息原位
+        assert_eq!(msgs[2]["tool_calls"][0]["id"], "c1");
+        assert_eq!(msgs[2]["tool_calls"][0]["function"]["name"], "settings_apply");
+        assert_eq!(msgs[2]["tool_calls"][0]["function"]["arguments"], "{\"zoom\":110}");
+        assert_eq!(msgs[3]["tool_call_id"], "c1");
+        assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["tools"][0]["function"]["name"], "settings_apply");
+        assert_eq!(body["tools"][0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn agent_body_anthropic_extracts_system_and_maps_tool_blocks() {
+        let body = agent_body("anthropic", "m2", &agent_turn_messages(), &atool());
+        assert_eq!(body["system"], "sys"); // system 抽离到顶层字段
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 3); // system 不再出现在 messages 里
+        // user 轮次只有 text 块；assistant 轮次只有 tool_use 块（content 空不产 text）
+        let user_text = msgs.iter().find(|m| m["role"] == "user" && m["content"][0]["type"] == "text").unwrap();
+        assert_eq!(user_text["content"][0]["text"], "把字号调大");
+        let with_use = msgs.iter().find(|m| m["content"][0]["type"] == "tool_use").unwrap();
+        assert_eq!(with_use["role"], "assistant");
+        assert_eq!(with_use["content"][0]["id"], "c1");
+        assert_eq!(with_use["content"][0]["name"], "settings_apply");
+        assert_eq!(with_use["content"][0]["input"]["zoom"], 110);
+        // tool 消息 → user 角色的 tool_result 块
+        let result_block = msgs.iter().find(|m| m["content"][0]["type"] == "tool_result").unwrap();
+        assert_eq!(result_block["role"], "user");
+        assert_eq!(result_block["content"][0]["tool_use_id"], "c1");
+        assert_eq!(result_block["content"][0]["content"], "{\"ok\":true}");
+        assert_eq!(body["tools"][0]["input_schema"]["type"], "object");
+        assert!(body["tools"][0].get("function").is_none());
+    }
+
+    #[test]
+    fn agent_body_anthropic_bad_arguments_json_degrades_to_empty_input() {
+        // 出站：参数不是合法 JSON 时按 {} 上送；接收侧（agent_result）仍拒绝非法回填
+        let messages = vec![AgentMessage {
+            role: "assistant".into(),
+            content: String::new(),
+            calls: vec![acall("c1", "n", "{not json")],
+            call_id: None,
+        }];
+        let body = agent_body("anthropic", "m", &messages, &[]);
+        assert_eq!(body["messages"][0]["content"][0]["input"], serde_json::json!({}));
+    }
+
+    #[test]
+    fn agent_body_responses_maps_items_and_instructions() {
+        let body = agent_body("responses", "m3", &agent_turn_messages(), &atool());
+        assert_eq!(body["instructions"], "sys");
+        assert_eq!(body["stream"], false);
+        assert_eq!(body["store"], false);
+        assert_eq!(body["max_output_tokens"], 16384);
+        let items = body["input"].as_array().unwrap();
+        // 空 content 的 assistant 只产生 function_call 项
+        assert_eq!(items[1]["type"], "function_call");
+        assert_eq!(items[1]["call_id"], "c1");
+        assert_eq!(items[1]["arguments"], "{\"zoom\":110}");
+        assert_eq!(items[2]["type"], "function_call_output");
+        assert_eq!(items[2]["call_id"], "c1");
+        assert_eq!(items[2]["output"], "{\"ok\":true}");
+        assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["tools"][0]["name"], "settings_apply");
+        assert_eq!(body["tools"][0]["strict"], false);
+    }
+
+    #[test]
+    fn agent_body_context_grows_beyond_command_limit_for_oversized_payloads() {
+        // ai_agent_turn 用 body.to_string().len() > 2MiB 拒绝；钉住该判定对本构造生效
+        let big = "x".repeat(2 * 1024 * 1024 + 8);
+        let messages = vec![amsg("user", &big)];
+        let body = agent_body("chat", "m", &messages, &[]);
+        assert!(body.to_string().len() > 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn agent_result_chat_stop_and_tool_calls() {
+        let v = serde_json::json!({"choices":[{"finish_reason":"tool_calls","message":{
+            "content":"执行中",
+            "tool_calls":[{"id":"c1","function":{"name":"n","arguments":"{\"k\":1}"}}]
+        }}]});
+        let r = agent_result("chat", &v).unwrap();
+        assert_eq!(r["content"], "执行中");
+        assert_eq!(r["calls"][0]["callId"], "c1");
+        assert_eq!(r["calls"][0]["name"], "n");
+        assert_eq!(r["calls"][0]["arguments"], "{\"k\":1}");
+        // 纯文本回答（无调用）合法
+        let plain = serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content":"好了"}}]});
+        let r = agent_result("chat", &plain).unwrap();
+        assert!(r["calls"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn agent_result_chat_rejects_truncated_and_malformed() {
+        // 截断（length）→ 单独报因（P88d：区分"模型没说完"与其他未完整结束）
+        let trunc = serde_json::json!({"choices":[{"finish_reason":"length","message":{"content":"半句"}}]});
+        assert_eq!(agent_result("chat", &trunc).unwrap_err(), "模型输出达长度上限被截断（length）；未执行工具");
+        // 其他非 stop/tool_calls → 通用未完整结束
+        let cf = serde_json::json!({"choices":[{"finish_reason":"content_filter","message":{"content":"x"}}]});
+        assert!(agent_result("chat", &cf).unwrap_err().starts_with("模型回复未完整结束"));
+        // 无 choices
+        assert!(agent_result("chat", &serde_json::json!({})).is_err());
+        // 参数 JSON 未闭合 → 拒绝（分片/半截参数不允许执行）
+        let bad = serde_json::json!({"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":[
+            {"id":"c1","function":{"name":"n","arguments":"{\"zoom\":1"}}]}}]});
+        assert_eq!(agent_result("chat", &bad).unwrap_err(), "工具参数无效；未执行");
+        let arr = serde_json::json!({"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":[
+            {"id":"c1","function":{"name":"n","arguments":"[1,2]"}}]}}]});
+        assert!(agent_result("chat", &arr).is_err());
+        // 空调用名
+        let anon = serde_json::json!({"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":[
+            {"id":"c1","function":{"name":"","arguments":"{}"}}]}}]});
+        assert!(agent_result("chat", &anon).is_err());
+    }
+
+    #[test]
+    fn agent_result_anthropic_blocks_and_stop_reasons() {
+        let v = serde_json::json!({"stop_reason":"tool_use","content":[
+            {"type":"text","text":"先看"},
+            {"type":"tool_use","id":"t1","name":"n","input":{"x":1}}
+        ]});
+        let r = agent_result("anthropic", &v).unwrap();
+        assert_eq!(r["content"], "先看");
+        assert_eq!(r["calls"][0]["callId"], "t1");
+        assert!(serde_json::from_str::<serde_json::Value>(r["calls"][0]["arguments"].as_str().unwrap())
+            .unwrap()
+            .is_object());
+        let done = serde_json::json!({"stop_reason":"end_turn","content":[{"type":"text","text":"完成"}]});
+        let r = agent_result("anthropic", &done).unwrap();
+        assert!(r["calls"].as_array().unwrap().is_empty());
+        // max_tokens 截断 → 拒绝
+        let trunc = serde_json::json!({"stop_reason":"max_tokens","content":[]});
+        assert!(agent_result("anthropic", &trunc).is_err());
+        // stop_reason 合法但缺 content 数组 → 无模型输出
+        let empty = serde_json::json!({"stop_reason":"tool_use"});
+        assert_eq!(agent_result("anthropic", &empty).unwrap_err(), "无模型输出");
+    }
+
+    #[test]
+    fn agent_result_responses_status_gate() {
+        let v = serde_json::json!({"status":"completed","output":[
+            {"type":"function_call","call_id":"c9","name":"n","arguments":"{}"},
+            {"type":"message","content":[{"type":"output_text","text":"hi"}]}
+        ]});
+        let r = agent_result("responses", &v).unwrap();
+        assert_eq!(r["content"], "hi");
+        assert_eq!(r["calls"][0]["callId"], "c9");
+        // incomplete → 拒绝执行工具
+        let inc = serde_json::json!({"status":"incomplete","output":[]});
+        assert!(agent_result("responses", &inc).is_err());
+        // arguments 非字符串同样被拒
+        let obj = serde_json::json!({"status":"completed","output":[
+            {"type":"function_call","call_id":"c9","name":"n","arguments":{"a":1}}
+        ]});
+        assert!(agent_result("responses", &obj).is_err());
+    }
+
+    #[test]
+    fn agent_result_bounds_call_count() {
+        // 64 次上限：65 个调用 → 工具调用超限
+        let calls: Vec<_> = (0..65)
+            .map(|i| serde_json::json!({"id":format!("c{i}"),"function":{"name":"n","arguments":"{}"}}))
+            .collect();
+        let v = serde_json::json!({"choices":[{"finish_reason":"tool_calls","message":{"content":"","tool_calls":calls}}]});
+        assert_eq!(agent_result("chat", &v).unwrap_err(), "工具调用超限");
     }
 }

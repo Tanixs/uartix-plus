@@ -15,7 +15,7 @@ import {
 } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
 import { useSettings } from "../settings/settingsStore";
-import { t } from "../../i18n/strings";
+import { t, tx } from "../../i18n/strings";
 
 const ROW_H = 26;
 const HEADER_H = 26;
@@ -344,6 +344,15 @@ export function DataTable() {
             {t("tbl.truncated")}
           </span>
         )}
+        <button
+          className="btn"
+          // The event accepts a computed snapshot, not a row selection. Open the
+          // global dialog without a snapshot; the user picks its cache scope there.
+          onClick={() => window.dispatchEvent(new Event("vs-analysis-export"))}
+          title={tx("打开分析包；在对话框中选择缓存范围", "Open analysis package; choose the cache scope in the dialog")}
+        >
+          {tx("分析包…", "Analysis package…")}
+        </button>
         <button className="btn" onClick={() => doExport("csv")} title={t("tbl.exportCsv")}>
           CSV
         </button>

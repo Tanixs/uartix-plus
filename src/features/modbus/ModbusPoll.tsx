@@ -1,6 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { tx, useLocale } from "../../i18n/strings";
-import { IconPlay, IconStop, IconTrash, IconChevron } from "../../shared/icons";
+import { IconPlay, IconStop, IconTrash, IconChevron, IconPlus } from "../../shared/icons";
 import * as poll from "./pollStore";
 import { FC_LABEL } from "./mb";
 import { toast } from "../ai/extRuntime";
@@ -48,7 +48,7 @@ export function ModbusPoll() {
           onClick={() => poll.addRow({})}
           title={tx("新增一行轮询项", "Add a poll row")}
         >
-          <span aria-hidden="true">＋</span>
+          <IconPlus />
           {tx("新增", "Add")}
         </button>
         <button type="button" className="btn sm" onClick={poll.addDemoRow} title={tx("插入一条示例：读 1 号从站 40001 起 2 个寄存器", "Insert an example row")}>

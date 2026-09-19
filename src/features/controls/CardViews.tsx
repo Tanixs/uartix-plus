@@ -80,7 +80,7 @@ export interface CardFrameProps {
   children: React.ReactNode;
 }
 
-function CardFrame(props: CardFrameProps) {
+export function CardFrame(props: CardFrameProps) {
   const { card } = props;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dropRef = useRef(props.onDropTemplate);
@@ -190,6 +190,12 @@ export function SliderCardView(props: {
   const current = (): number =>
     parseFloat(sliderRef.current?.value ?? String(props.initial));
 
+  const release = (value: number) => {
+    // Managed values are drafts until a device contract is configured.
+    if (card.managed !== undefined) props.onValue(card, value);
+    else props.onRelease(card, value);
+  };
+
   const commit = (
     raw: number,
     fire: "none" | "value" | "release",
@@ -207,7 +213,7 @@ export function SliderCardView(props: {
       stepRef.current.value = String(v);
     }
     if (fire === "value") props.onValue(card, v);
-    else if (fire === "release") props.onRelease(card, v);
+    else if (fire === "release") release(v);
     return v;
   };
 
@@ -249,10 +255,10 @@ export function SliderCardView(props: {
           commit(parseFloat((e.target as HTMLInputElement).value), "value")
         }
         onPointerUp={() => {
-          if (card.sendTrigger === "onRelease") props.onRelease(card, current());
+          if (card.sendTrigger === "onRelease") release(current());
         }}
         onKeyUp={() => {
-          if (card.sendTrigger === "onRelease") props.onRelease(card, current());
+          if (card.sendTrigger === "onRelease") release(current());
         }}
       />
       <div className="ctl-foot">
@@ -275,7 +281,7 @@ export function SliderCardView(props: {
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && card.sendTrigger === "onRelease") {
-                props.onRelease(card, current());
+                release(current());
               }
             }}
           />
@@ -309,6 +315,8 @@ export function SliderCardView(props: {
 
 export function ButtonCardView(props: {
   card: ButtonCard;
+  disabled?: boolean;
+  disabledReason?: string;
   left: number;
   top: number;
   width: number;
@@ -363,10 +371,15 @@ export function ButtonCardView(props: {
     >
       <button
         className="ctl-btn"
+        disabled={props.disabled}
+        aria-describedby={props.disabledReason ? `${card.id}-action-reason` : undefined}
+        onClick={event => { if (event.detail === 0 && !props.disabled) props.onSend(card, {}); }}
         onMouseDown={(e) => e.stopPropagation()}
         onPointerDown={() => {
+          if (props.disabled) return;
           props.onSend(card, {});
-          if (card.holdRepeat) {
+          // 受管动作不重复触发：录制/打点是状态性动作，连发会叠加 annotate 行
+          if (card.holdRepeat && card.managed === undefined) {
             stopHold();
             holdRef.current = window.setInterval(
               () => props.onSend(card, {}),
@@ -376,10 +389,12 @@ export function ButtonCardView(props: {
         }}
         onPointerUp={stopHold}
         onPointerLeave={stopHold}
+        onPointerCancel={stopHold}
       >
         {card.name}
-        {card.useScript ? " ⚡" : ""}
+        {card.managed === undefined && card.useScript ? " ⚡" : ""}
       </button>
+      {props.disabledReason && <p id={`${card.id}-action-reason`} className="ctl-managed-hint">{props.disabledReason}</p>}
     </CardFrame>
   );
 }

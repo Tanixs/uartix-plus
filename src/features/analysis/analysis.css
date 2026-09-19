@@ -1,0 +1,26 @@
+.analysis-export { container-type: inline-size; }
+.analysis-export-layout { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 12px; align-items: start; }
+.analysis-export-main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.analysis-export-modules { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 6px; }
+.analysis-export-module { display: flex; align-items: flex-start; gap: 7px; padding: 8px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--bg-inset); cursor: pointer; min-width: 0; }
+.analysis-export-module:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.analysis-export-module-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.analysis-export-module-name { font-weight: 600; }
+.analysis-export-module-desc { font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; }
+.analysis-export-options { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.analysis-export-options label, .analysis-export-selection label { display: flex; align-items: center; gap: 6px; overflow-wrap: anywhere; min-width: 0; }
+.analysis-export-selection { display: grid; gap: 6px; max-height: 150px; overflow: auto; background: var(--bg-inset); border: 1px solid var(--border-soft); border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+.analysis-export small, .analysis-export-limits { color: var(--text-dim); }
+.analysis-export input[type="number"] { width: 135px; min-width: 0; }
+.analysis-export input[type="checkbox"] { accent-color: var(--accent); flex-shrink: 0; }
+.analysis-export-advanced > summary { padding: 8px 10px; background: var(--bg-inset); border-radius: 6px; color: var(--text-dim); font-weight: 600; cursor: pointer; }
+.analysis-export-advanced > summary:hover { color: var(--text); }
+.analysis-export-advanced-body { padding-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.analysis-export-summary { align-self: start; }
+.analysis-export-summary p { overflow-wrap: anywhere; }
+.analysis-export-status { flex-basis: 100%; max-height: 6em; overflow-y: auto; overflow-wrap: anywhere; }
+.analysis-export-actions { margin-left: auto; }
+@container (max-width: 660px) {
+  .analysis-export-layout { grid-template-columns: 1fr; }
+  .analysis-export-options { align-items: stretch; }
+}

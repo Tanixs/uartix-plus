@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import * as extStore from "./extensionStore";
 import { WidgetFrame } from "./WidgetFrame";
+import { pluginCtxForExt } from "../plugins/pluginStore";
 
 /** dockview 动态面板宿主：渲染 panel 类型的 AI 扩展（沙箱 iframe） */
 export function ExtPanelHost({ extId }: { extId: string }) {
@@ -16,13 +17,17 @@ export function ExtPanelHost({ extId }: { extId: string }) {
   if (!ext.enabled) {
     return (
       <div className="ext-panel-host ext-panel-miss">
-        扩展「{ext.name}」当前已停用，可在 AI 助手的扩展管理中启用。
+        扩展「{ext.name}」当前已停用，可在 设置 → 插件管理 中启用其来源插件。
       </div>
     );
   }
   return (
     <div className="ext-panel-host">
-      <WidgetFrame widget={{ id: ext.id, name: ext.name, html: ext.html ?? "" }} isDesktop={false} />
+      <WidgetFrame
+        widget={{ id: ext.id, name: ext.name, html: ext.html ?? "" }}
+        isDesktop={false}
+        pluginCtx={pluginCtxForExt(ext.pluginRef)}
+      />
     </div>
   );
 }

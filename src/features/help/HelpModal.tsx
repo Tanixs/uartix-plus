@@ -117,7 +117,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>分析曲线</td><td>统计各通道均值/极值/周期/趋势斜率，诊断振荡与噪声</td></tr>
                       <tr><td>生成指令</td><td>描述需求 → 生成命令模板（写入命令库或临时发送）</td></tr>
                       <tr><td>生成卡片</td><td>描述需求 → 生成控制卡片（直接写入控制画布）</td></tr>
-                      <tr><td>创造扩展</td><td>主题 / 样式 / 挂件 / 面板 / 脚本（需开启创造模式）</td></tr>
+                      <tr><td>创造</td><td>主题 / 小部件 / 面板——经「Agent 任务」保存为插件并自动启用</td></tr>
                       <tr><td>诊断</td><td>结合连接状态与异常巡检给出结构化排查清单</td></tr>
                       <tr><td>调试报告</td><td>汇总本次会话生成 Markdown 报告，可存档</td></tr>
                     </tbody>
@@ -130,7 +130,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li><b>冷却</b>：自动诊断按所选冷却时间（1~60 分钟）去重，避免报警风暴时连环调用；未配置 AI 服务时会提示先到 设置 → AI 服务 配置。</li>
                   </ul>
                 </Section>
-                <Section title="十种代码块（回复中直接可用）">
+                <Section title="代码块与 UI 创造（回复中直接可用）">
                   <table className="help-table">
                     <tbody>
                       <tr><td>动作执行<br /><code>uartix-action</code></td><td>让 AI 直接操作软件：打开面板、切主题/布局、清空画布、删除配置、开关连接、读写编排器与 3D 轨迹、生成并启动虚拟设备等（39 个白名单动作）。回复中显示操作卡片，点「执行」逐个运行。<b>对 AI 说「清空控制画布」「打开曲线面板」「主题换成琉璃」即可。</b></td></tr>
@@ -138,14 +138,10 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>命令库命令<br /><code>uartix-command</code></td><td>单条或批量（{"{"}"commands":[…]{"}"}）写入命令库「AI 生成」分组，可带脚本。</td></tr>
                       <tr><td>协议模板<br /><code>uartix-template</code></td><td>生成帧结构模板（截帧边界/字段/校验），写入协议面板；多帧型协议支持 {"{"}"group":"簇名","templates":[…]{"}"} 一次写入整簇并自动建组归档，默认停用待你启用。</td></tr>
                       <tr><td>指令工厂协议<br /><code>uartix-codec</code></td><td>生成自定义协议（帧头/变量/长度/校验段），写入指令工厂「我的协议」，填参数即组帧。</td></tr>
-                      <tr><td>主题包<br /><code>uartix-theme</code></td><td>JSON 配色 + 整页风格 CSS（动效/光效/液态玻璃/贴图/面板级定制）。</td></tr>
-                      <tr><td>样式层<br /><code>uartix-style</code></td><td>纯 CSS 精细化定制任意界面元素，可预览再保留。</td></tr>
-                      <tr><td>沙箱小部件<br /><code>uartix-widget</code></td><td>自包含 HTML 浮窗，自动注入 <code>window.uartix</code> API：数据快照、AI 对话状态（思维链）、提问 AI、键盘/鼠标、串口发送、软件动作、窗口控制全套可用；支持无边框透明形态。</td></tr>
-                      <tr><td>自定义面板<br /><code>uartix-panel</code></td><td>与小部件同格式，安装为可停靠面板，适合大面积常驻可视化。</td></tr>
-                      <tr><td>行为脚本<br /><code>uartix-script</code></td><td>主窗口 JS（高权限）：读字段/发指令/联动控件/<b>api.app.* 控制软件</b>。</td></tr>
+                      <tr><td>UI 创造<br /><code>主题 / 小部件 / 面板</code></td><td>对 AI 描述你想要的主题、浮窗小部件或常驻面板，AI 会引导你打开工具栏的<b>「Agent 任务」</b>：任务里用 <code>save_plugin</code> 把成果保存为插件并自动启用，无需手动安装。插件在 设置 → 插件管理 启停、配置、导入导出。</td></tr>
                     </tbody>
                   </table>
-                  <p className="help-tip">主题/样式/挂件/面板/脚本需在 设置 → AI 服务 开启「创造模式」；安装均需你点击确认，可在扩展管理启停/删除/导出。</p>
+                  <p className="help-tip">插件里的沙箱小部件 / 自定义面板 / 自定义卡片自动注入 <code>window.uartix</code> API（见下）；含发送能力的插件启用时需你点击批准。</p>
                 </Section>
                 <Section title="动作执行（uartix-action）示例">
                   <p>对 AI 说「清空控制画布，然后打开 2D 曲线」，AI 输出：</p>
@@ -184,7 +180,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>哨兵</td><td>sentinel({"{"}op:"status/enable/ackAll/mute/clear"{"}"}) 异常监测查询与控制（需脚本高权限）</td></tr>
                       <tr><td>结构发现</td><td>xrayEvidence() / xrayCrack() 读协议考古证据链（帧长/帧型簇/校验爆破/轮询周期，面板需先「采样分析」）· xrayReport() 生成引用证据编号的考古报告（需脚本高权限）</td></tr>
                       <tr><td>编排器</td><td>orchestratorRead() 只读快照（总开关/在跑实例/各组统计/变量现值/日志）· orchestrator({"{"}op:"enable/run/stopAll/groupAdd/groupUpdate/groupRemove/eventAdd/eventRemove/blockAdd/blockRemove/varsSet"{"}"}) 写操作（需高权限——发送块会真实发包；eventAdd/blockAdd 能把自动化「说出来即搭」）</td></tr>
-                      <tr><td>3D 轨迹</td><td>plot3dRead() 只读快照（三组 groups：各组 axes/mode/显示与配对配置/校准采样/拟合结果/六面进度）· plot3d({"{"}op:"bind/set/clear/undo/redo/calib"{"}"}) 写操作（需高权限；gid=g1|g2|g3 选组缺省 g1；calib 子动作 enter/exit/start/stop/clear/solve6；校准采样源=组1）</td></tr>
+                      <tr><td>3D 轨迹</td><td>plot3dRead() 只读快照（全部 groups：各组 axes/mode/显示与配对配置/校准采样/拟合结果/六面进度）· plot3d({"{"}op:"bind/set/groupAdd/groupRemove/clear/undo/redo/calib"{"}"}) 写操作（需高权限；gid 为现存组 ID，缺省 g1（已删则拒绝）；groupRemove 需用户在本机确认；calib 子动作 enter/exit/start/stop/clear/solve6；校准采样源由 calibSource 指定）</td></tr>
                       <tr><td>虚拟设备</td><td>vdev({"{"}op:"status/list/create/start/stop"{"}"}) 虚拟设备工坊（需高权限——设备占据数据管线等同发送）：create/start 带整台设备规格 JSON（信号模型+故障注入+命令应答+可选 net 段），自然语言即可生成虚拟传感器</td></tr>
                       <tr><td>通知</td><td>toast({"{"}msg{"}"})</td></tr>
                     </tbody>
@@ -234,18 +230,28 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <li>
                       点「复制 MCP JSON」，粘贴到 Claude Desktop 的{" "}
                       <code>%APPDATA%\Claude\claude_desktop_config.json</code> 或 Cursor 的{" "}
-                      <code>~/.cursor/mcp.json</code>，重启客户端即可看到 uartix 的 10 个工具
-                      （含编排器 / 3D 轨迹的只读快照）。
+                      <code>~/.cursor/mcp.json</code>，支持 jobs v1 的应用协商后显示 14 个工具
+                      （含 4 个异步任务工具）；旧应用或离线时仅显示原 10 个短工具，不模拟长任务。
                     </li>
                   </ol>
                   <p className="help-tip">
                     安全：服务只绑定 127.0.0.1 + 首行 token 握手 + 单客户端；<b>允许远程发送</b>关闭时 send / run_sequence
                     直接拒绝；删除/开关连接类动作需另开「允许高权限动作」；每次调用在设置页留审计。改端口无需改客户端配置（客户端经发现文件自动定位）。
                   </p>
+                  <p className="help-tip">
+                    <b>长任务（P88a）</b>：run_sequence 已改为执行前返回 <code>async_required</code>（不执行任何步骤）。耗时超过
+                    短调用上限的任务请用 <code>create_job</code> 提交，立即拿到 jobId，再用 <code>get_job</code> 查询、
+                    <code>wait_event</code> 短等待、<code>cancel_job</code> 停止。边界如实告知：仅受理可证明无设备副作用的序列
+                    （sequence.validate、仅 wait/note/waitForFrame/assertVar 的 sequence.run）；含发送步骤的序列一律立即返回
+                    <code>needs_manual_confirmation</code>，不入队、不等待、之后也不执行——<b>highPriv/confirmed 参数不是人工批准</b>。
+                    幂等键重试同一任务不会重复执行；应用重启后旧任务返回 instance_changed（不自动补发）；
+                    任务状态以 Rust 登记表为准（停止中≠已停止，取消不撤销已发生效果）。设置 → 集成 → 「任务」区可本机查看与取消。
+                  </p>
                   <table className="help-table">
                     <tbody>
                       <tr><td>读</td><td>get_status 连接总览 · get_fields 变量快照 · get_frames 最近帧 · get_plot_stats 曲线统计 · get_alerts 哨兵健康 · get_orchestrator 编排器快照 · get_plot3d 3D 轨迹与校准快照</td></tr>
-                      <tr><td>写</td><td>send 发送（ascii 支持 \r \n \t \xNN）· run_action 白名单动作（含 orchestrator / plot3d 两组）· run_sequence 跑测试序列并返回逐步结果</td></tr>
+                      <tr><td>写</td><td>send 发送（ascii 支持 \r \n \t \xNN）· run_action 白名单动作（含 orchestrator / plot3d 两组）· run_sequence 已停用（async_required → 用 create_job）</td></tr>
+                      <tr><td>任务</td><td>create_job 提交（taskType=sequence.validate|sequence.run）· get_job 查询/结果分页 · wait_event ≤1s 短等待 · cancel_job 协作停止；同一幂等键重复提交返回同一 jobId</td></tr>
                       <tr><td>调试</td><td><code>node uartix-mcp.cjs --status</code> 检查发现文件与连通性；<code>npm run mcp:e2e</code> 跑协议层冒烟</td></tr>
                     </tbody>
                   </table>
@@ -274,7 +280,7 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <tr><td>3D 姿态</td><td>把欧拉角或四元数字段映射到 3D 模型（+面板可添加）</td></tr>
                     <tr><td>3D 轨迹</td><td>三路变量当空间坐标画实时三维轨迹（着色/拖尾/网格/跟随/自动旋转/键盘飞行/光标缩放/底部时间条历史回看与回放联动）；内置椭球校准（八象限点云采样 → 九参数拟合：硬磁偏置×3 + 软磁对称校正矩阵×6，给 CV 与残差 RMS，支持残差着色、校正前后对比、在线补偿预览，一键复制 JSON/C 数组）与六面校准（加计专用，六姿态各静置 2 秒直接解算）</td></tr>
                     <tr><td>图传</td><td>把每帧数据渲染为画面：暂停/回看/保存帧、镜像翻转、缩放拖动；「解析设置」定义帧定界方式</td></tr>
-                    <tr><td>控制画布</td><td>拖拽部署滑条/按钮/开关/LED/蜂鸣器等控件向下位机发指令；拖动时虚线幽灵框指示落点，松手只会落到空格</td></tr>
+                    <tr><td>控制画布</td><td>拖拽部署滑条/按钮/开关/LED/蜂鸣器等控件向下位机发指令；拖动时虚线幽灵框指示落点，松手只会落到空格。「更多」菜单可从预设生成<b>惯导调试页</b>（1–12 个受管参数滑条 + 录制/停止/打点等会话动作卡）并用<b>参数集</b>保存/载入本地草稿值；受管设备的发送/急停/校准/读回需配置设备契约后可用，生成与载入均不发送指令</td></tr>
                     <tr><td>控制台</td><td>原始收发日志（时间戳彩色），可发 ASCII/Hex、发送文件、录制日志；上方快捷指令栏一键发送，指令工厂可组各协议帧</td></tr>
                     <tr><td>结构发现</td><td>未知协议考古：对原始字节做周期/帧头统计推断、校验算法爆破与帧型序列分析，勾选帧型一键批量生成模板；AI 可引用其证据链生成推理报告</td></tr>
                     <tr><td>哨兵</td><td>静默异常监测：数值通道突变（双 EMA z-score）、新帧型出现、错误帧率超限、通信静默四类报警；报警自动降噪合并，可最小化成右下角浮球或弹出桌面挂件驻留报警（面板、浮球与桌面挂件全部关闭才停止监测），支持合成提示音；一键或自动发起 AI 诊断（携带证据，见 AI 助手详解）</td></tr>
@@ -351,24 +357,24 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
             )}
             {tab === "plot3d" && (
               <>
-                <p><b>3D 轨迹面板</b>支持<b>三组独立轨迹</b>（如惯导推算 / 实际导航 / 目标路径）叠加显示：每组各绑 X / Y（Z 可留空=平面轨迹）并独立选显示模式（实时定位 / 点集 / 连线），支持大坐标（经纬度）自动重锚（跨组并集）、双层 LOD 长跑不卡。工具栏「+ 面板」添加。</p>
-                <Section title="三组轨迹与显示模式">
+                <p><b>3D 轨迹面板</b>支持<b>多组独立轨迹（默认三组）</b>（如惯导推算 / 实际导航 / 目标路径）叠加显示：每组各绑 X / Y（Z 可留空=平面轨迹）并独立选显示模式（实时定位 / 点集 / 连线），支持大坐标（经纬度）自动重锚（跨组并集）、双层 LOD 长跑不卡。工具栏「+ 面板」添加。</p>
+                <Section title="轨迹组增删与显示模式">
                   <ol className="help-ol">
-                    <li>左上<b>组托盘</b>三行（G1 / G2 / G3）：每行 = 可见性眼睛、组色点、名称、模式徽标、<b>X / Y / Z 三个绑定下拉</b>（红绿蓝侧条区分轴，Z 留空=平面轨迹）、<b>设置齿轮</b>。X/Y 绑齐该组才开始绘制；未绑齐的行置灰。</li>
+                    <li>左上<b>组托盘</b>默认三行（G1 / G2 / G3），底部可新增、行按钮可删除（本机确认）；组多时滚动：每行 = 可见性眼睛、组色点、名称、模式徽标、<b>X / Y / Z 三个绑定下拉</b>（红绿蓝侧条区分轴，Z 留空=平面轨迹）、<b>设置齿轮</b>。X/Y 绑齐该组才开始绘制；未绑齐的行置灰。</li>
                     <li>每组独立选择显示模式（<b>不提供混合模式</b>——不同组各选各的天然叠加）：<code>实时定位</code>=只显示最新点、零历史内存（看当前车位置）；<code>点集</code>=全部历史点不连线（看打点分布）；<code>连线</code>=按时间连线。</li>
                     <li>连线<b>平滑四档</b>：无（折线）/ <b>滑动平均</b>（奇数窗）/ <b>Catmull-Rom</b>（曲线穿过数据点，张力 0~1 + 细分 2~10 可调）/ <b>三次样条</b>（曲率连续）。平滑只作用于视觉几何——悬停读数、测距、CSV 导出、游标截断全部仍读原始数据点。</li>
                     <li>组设置弹层（齿轮 / 行右键菜单）：名称、颜色、模式、着色（按时间 / 按通道 / 组色实底）、渐隐窗口、点大小 / 透明度、最大点数（超限从最老端丢弃，0=不限）、点密度、数据配对与容差、备注。<b>确认一次 = 一步可撤销</b>（Ctrl+Z；面板右上也有撤销/重做钮）。</li>
                     <li>拖拽：把协议模板面板的<b>图例字段行直接拖到组行</b>=智能绑定（按 X→Y→Z 填第一个空槽；三槽已满会打开组设置让你手动改）。</li>
                     <li>行操作：双击组行 = 相机聚焦该组；行右键 = 设置 / 隐藏 / 聚焦 / 单组导出 CSV / <b>导入轨迹 CSV → 本组</b>（t,x,y[,z] 列→虚拟通道，重复导入替换旧的）/ 单组清空（<b>清空不可撤销</b>，有确认）。</li>
-                    <li>三轴来自不同帧/不同采样率时，组设置里可切<b>配对模式</b>（插值/最近点）与容差，右下 HUD 有主组配对统计行；三组量级悬殊可切全局<b>逐轴独立缩放</b>（右键「设置」），避免小跨度组被压扁。</li>
-                    <li>右上视角托盘（毛玻璃胶囊）：<b>俯视 / 侧视 / 正视 / 等轴</b>四预设、重置视角、聚焦最新点、跟随模式、自动旋转、<b>撤销/重做</b>、<b>打点</b>（录制中在当前时刻记标注：时间轴刻度+2D 虚线+3D 旗标三处同步，点旗标即跳游标）、椭球校准、<b>清空数据</b>（三组全清，带确认）。左键拖动旋转、右键拖动平移、滚轮缩放。</li>
-                    <li><code>跟随模式</code>：视角平滑锁定主组（组1 优先）最新点；<code>自动旋转</code>：展台展示（两者互斥）。右键菜单按「组 / 模式 / 视图 / 测量 / 数据 / 设置」分组；悬停任意点显示所属组与真实坐标，可一键复制；右下 HUD 带<b>网格步长比例尺</b>读数。</li>
+                    <li>三轴来自不同帧/不同采样率时，组设置里可切<b>配对模式</b>（插值/最近点）与容差，右下 HUD 有主组配对统计行；各组量级悬殊可切全局<b>逐轴独立缩放</b>（右键「设置」），避免小跨度组被压扁。</li>
+                    <li>右上视角托盘（毛玻璃胶囊）：<b>俯视 / 侧视 / 正视 / 等轴</b>四预设、重置视角、聚焦最新点、跟随模式、自动旋转、<b>撤销/重做</b>、<b>打点</b>（录制中在当前时刻记标注：时间轴刻度+2D 虚线+3D 旗标三处同步，点旗标即跳游标）、椭球校准、<b>清空数据</b>（全部组清空，带确认）。左键拖动旋转、右键拖动平移、滚轮缩放。</li>
+                    <li><code>跟随模式</code>：视角平滑锁定主组（按组顺序取首个可见且有数据的组）最新点；<code>自动旋转</code>：展台展示（两者互斥）。右键菜单按「组 / 模式 / 视图 / 测量 / 数据 / 设置」分组；悬停任意点显示所属组与真实坐标，可一键复制；右下 HUD 带<b>网格步长比例尺</b>读数。</li>
                   </ol>
                 </Section>
                 <Section title="惯导物理层（朝向 / 模型 / 坐标变换）">
                   <ol className="help-ol">
                     <li><b>车头朝向</b>四源：默认 +X / <b>速度方向</b>（轨迹差分自动转头）/ <b>航向角通道</b>（度，带修正角与顺逆翻转钮）/ <b>四元数</b>（qX/qY/qZ/qW 四通道绑定）。配合非「光点」的<b>显示模型</b>（球 / 箭头 / 车 / 锥 / 坐标轴 / <b>本地 GLTF·GLB</b>），一辆「车」就沿轨迹实时转向行驶；模型有缩放、旋转修正与高度偏移。</li>
-                    <li><b>组坐标变换</b>（旋转 Z·Y·X + 平移 + 缩放）：解决 NED↔ENU 换系、传感器装歪、单位比例差异——三组不同来源的数据能拉进同一世界坐标对比。变换作用于显示/导出/测量全链同源；<b>校准采样恒用原始传感器值</b>，不受变换影响。</li>
+                    <li><b>组坐标变换</b>（旋转 Z·Y·X + 平移 + 缩放）：解决 NED↔ENU 换系、传感器装歪、单位比例差异——各组不同来源的数据能拉进同一世界坐标对比。变换作用于显示/导出/测量全链同源；<b>校准采样恒用原始传感器值</b>，不受变换影响。</li>
                     <li><b>首点对齐原点</b>（组设置内一键）：把每个已绑组的第一个轨迹点平移到世界原点——惯导「推算 vs 实际 vs 目标」起点不同也能直接叠图看发散。</li>
                     <li><b>方向箭头</b>（连线模式每 N 点一支，0=关）沿前进方向指示；<b>起点标记</b>在最老点立光点，终点=最新点标记常显。</li>
                   </ol>
@@ -384,13 +390,14 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                 <Section title="时间条与回放">
                   <ol className="help-ol">
                     <li>底部时间条拖动即<code>时间游标</code>：轨迹截断显示到该时刻，可与 2D 曲线回放联动。</li>
-                    <li>双击时间条或菜单「数据 → 回到最新」清除游标恢复实时。</li>
+                    <li>实时模式下双击时间条或使用菜单「数据 → 回到最新」清除定位游标；这不是把回放跳到末尾。</li>
+                    <li><code>设置 → 通用 → 跨面板时间联动</code>控制 2D 时间横轴与 3D 的游标同步，本次运行有效。关闭后仍会跟随真实回放进度；回放定位会移动播放位置。</li>
                   </ol>
                 </Section>
                 <Section title="椭球校准（磁力计 / 加计九参数）">
                   <ol className="help-ol">
                     <li>用途：评估磁力计/加计的<b>硬磁偏置（offset）</b>与<b>软磁畸变（校正矩阵 W）</b>，输出九参数给固件做补偿。</li>
-                    <li>流程：给<b>组1</b> 绑定原始三轴（校准采样源=组1，HUD 顶部有标注）→ 右键「模式 → 椭球校准模式」（或工具栏 ◎ 按钮）→ 点<code>开始采样</code> → 缓慢翻滚传感器覆盖全空间（画 8 字）→ <code>拟合椭球</code>。校准 HUD 顶部可切「<b>椭球拟合</b>（磁/加通用）」与「<b>六面向导</b>（加计专用）」两个子页，切换会清空对方采样。</li>
+                    <li>流程：给<b>所选校准源组</b>绑定原始三轴（行右键可设为校准源；默认 g1，删源后不自动换源；切源清空临时校准状态）→ 右键「模式 → 椭球校准模式」（或工具栏 ◎ 按钮）→ 点<code>开始采样</code> → 缓慢翻滚传感器覆盖全空间（画 8 字）→ <code>拟合椭球</code>。校准 HUD 顶部可切「<b>椭球拟合</b>（磁/加通用）」与「<b>六面向导</b>（加计专用）」两个子页，切换会清空对方采样。</li>
                     <li>点云越接近球面越好；<b>象限覆盖 8/8</b> 才允许拟合（只转半圈会被拒绝并提示）；<code>CV</code> 校正后半径变异系数（&lt;3% 为优）、<code>RMS</code> 为球面残差。</li>
                     <li>拟合成功后点云自动<b>残差着色</b>（绿 = ±3% 内 / 黄 = ±8% 内 / 红 = 出界）；<code>显示：原始 / 校正后</code>一键对比——校正后点云应收缩为均匀球壳（附参考球线框）。</li>
                     <li><code>补偿预览</code>：拟合成功后实时绘制校正后幅值 r=|W·(x−offset)| 迷你图——转动传感器时曲线贴 1.0 线小幅抖动 = 校准有效，单轴靠近铁磁物会明显抬升/下凹；拟合后继续采样会挂起预览（灰显），重新拟合自动恢复。</li>
@@ -398,6 +405,14 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <li>采样中更换绑定/密度会清空重采；采到 20000 点自动停止；拟合后再采样，结果会标记「基于旧采样」。</li>
                     <li><b>六面向导（加计专用）</b>：利用重力先验，六个面依次<b>朝上静置</b>点「采集该面」（自动采 2 秒，晃动会被 σ 门拒绝）→ 六面齐后<code>计算参数</code> → 输出 acc_offset / acc_gain（校正后 ≈ 1g），附三轴尺度一致性 CV 与面偏差指标；顺序摆错（两面同轴）会被拒绝并提示。</li>
                     <li>退出校准模式即恢复原轨迹（数据不清空）；校准属于操作态，不会被打进 Operator 部署包。</li>
+                  </ol>
+                </Section>
+                <Section title="指标分析与分析包">
+                  <ol className="help-ol">
+                    <li>通过「添加面板」打开指标面板，选择通道、轨迹组和窗口后手动刷新。可复制 2D 的 A/B 范围；改变选项不会自动重算已有结果。</li>
+                    <li><code>设置 → 通用 → 分析包</code>提供全局入口，2D、3D 和数据表格保留局部入口。指标面板入口会带入已有结果的选区；普通入口需在对话框内选择缓存窗口。</li>
+                    <li>分析包仅写入本地新目录，不上传、不覆盖已有包；指标基于原始缓存，不以显示平滑或 LOD 几何作为分析真值。已淘汰数据不能恢复。</li>
+                    <li>AI 分析需显式发送摘要；组备注先预览再写入，期间备注若有变化会报告冲突，不覆盖新内容。</li>
                   </ol>
                 </Section>
                 <Section title="导出">

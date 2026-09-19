@@ -26,6 +26,8 @@ import * as plot3dStore from "./plot3dStore";
 import type { GroupId, GroupHeading, GroupModel, TrajGroup } from "./plot3dStore";
 import type { GroupTransform } from "./smoothing";
 import * as sessionStore from "../session/sessionStore";
+import * as timeCursor from "../analysis/timeCursorStore";
+import { cancelPreview, navigateTime, previewTime, returnLatest, subscribeReplayClock } from "../analysis/timeNavigation";
 import type { GroupStats, PickResult, Plot3DScene, ViewPreset } from "./scene";
 import { createScene } from "./scene";
 import { fitEllipsoid, grade, FIT_MIN_POINTS, type FitOk } from "./ellipsoidFit";
@@ -140,14 +142,43 @@ function GroupDialog(props: {
 }) {
   useLocale();
   const { gid, channels, opLocked, roTip, onClose } = props;
+  // P87e：组可能在弹层打开期间被删（另一入口/撤销）→ getGroup 返回 undefined。
+  // 原快照进 draft；目标失效时仅提供关闭入口，绝不回退或保存到其他组。
   const src = plot3dStore.getGroup(gid);
-  const [draft, setDraft] = useState<TrajGroup>({ ...src });
+  const [draft, setDraft] = useState<TrajGroup | undefined>(src ? { ...src } : undefined);
   const nameRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     nameRef.current?.focus();
     nameRef.current?.select();
   }, []);
-  const set = (patch: Partial<TrajGroup>) => setDraft((d) => ({ ...d, ...patch }));
+  if (!draft || !src) {
+    // P87e：目标组已删除（弹层打开期间被删）→ 缺失态：仅提示 + 关闭，不崩溃不误写
+    return (
+      <div className="fc-dlg-mask" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <div
+          className="fc-dlg p3d-gdlg"
+          role="dialog"
+          aria-modal="true"
+          aria-label={tx("组设置（组已删除）", "Group settings (group deleted)")}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}
+        >
+          <div className="fc-dlg-title">{tx("组设置", "Group settings")}</div>
+          <div className="fc-dlg-warn">
+            {tx(
+              "该轨迹组已被删除（撤销或另一入口移除）。本弹层没有可编辑目标，未做任何修改。",
+              "This trajectory group has been deleted. Nothing was modified.",
+            )}
+          </div>
+          <div className="fc-dlg-foot">
+            <button className="btn sm" onClick={onClose} autoFocus>
+              {tx("关闭", "Close")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  const set = (patch: Partial<TrajGroup>) => setDraft((d) => (d ? { ...d, ...patch } : d));
   const hSet = (patch: Partial<GroupHeading>) => set({ heading: { ...draft.heading, ...patch } });
   const mSet = (patch: Partial<GroupModel>) => set({ model: { ...draft.model, ...patch } });
   const tSet = (patch: Partial<GroupTransform>) => set({ transform: { ...draft.transform, ...patch } });
@@ -164,8 +195,9 @@ function GroupDialog(props: {
     </>
   );
   const boundCnt = (draft.chX ? 1 : 0) + (draft.chY ? 1 : 0) + (draft.chZ ? 1 : 0);
-  const dirty = JSON.stringify({ ...draft, visible: src.visible }) !== JSON.stringify(src);
+  const dirty = src ? JSON.stringify({ ...draft, visible: src.visible }) !== JSON.stringify(src) : true;
   const ok = () => {
+    if (opLocked || !plot3dStore.getGroup(gid)) return;
     plot3dStore.updateGroup(gid, draft);
     onClose();
   };
@@ -348,6 +380,18 @@ function GroupDialog(props: {
               onChange={(e) => set({ opacity: Number(e.target.value) })}
             />
             <b className="p3d-gdlg-num">{Math.round(draft.opacity * 100)}%</b>
+            <button
+              type="button"
+              className="p3d-cbtn"
+              disabled={opLocked}
+              title={tx("按视口比例恢复推荐大小（模型×1.0、光点 3px），此后滚轮缩放视图不再影响", "reset to viewport-relative default; unaffected by later zoom")}
+              onClick={() => {
+                mSet({ scale: 1 });
+                set({ pointSize: 3 });
+              }}
+            >
+              {tx("自适应大小", "Fit size")}
+            </button>
           </div>
         </div>
         {draft.mode === "line" && (
@@ -563,6 +607,7 @@ function GroupDialog(props: {
                 {chanOpts}
               </select>
             )}
+            <label className="p3d-gdlg-field"><span>{tx("航向 (°)", "Yaw (°)")}</span>
             <input
               type="number"
               step={5}
@@ -570,7 +615,7 @@ function GroupDialog(props: {
               disabled={opLocked}
               onChange={(e) => hSet({ yawOff: Number(e.target.value) })}
               title={tx("航向修正角（度）：如北=0 或 90 系约定", "yaw offset (deg)")}
-            />
+            /></label>
             <button
               type="button"
               className={`p3d-cbtn${draft.heading.yawSign === -1 ? " on" : ""}`}
@@ -605,8 +650,12 @@ function GroupDialog(props: {
         <div className="fc-dlg-row">
           <label>{tx("俯仰/滚修", "Pitch/Roll")}</label>
           <div className="p3d-gdlg-inline2">
-            <input type="number" step={5} value={draft.heading.pitchOff} disabled={opLocked} onChange={(e) => hSet({ pitchOff: Number(e.target.value) })} title={tx("俯仰修正（度）", "pitch offset (deg)")} />
-            <input type="number" step={5} value={draft.heading.rollOff} disabled={opLocked} onChange={(e) => hSet({ rollOff: Number(e.target.value) })} title={tx("滚转修正（度）", "roll offset (deg)")} />
+            <label className="p3d-gdlg-field"><span>{tx("俯仰 (°)", "Pitch (°)")}</span>
+              <input type="number" step={5} value={draft.heading.pitchOff} disabled={opLocked} onChange={(e) => hSet({ pitchOff: Number(e.target.value) })} />
+            </label>
+            <label className="p3d-gdlg-field"><span>{tx("滚转 (°)", "Roll (°)")}</span>
+              <input type="number" step={5} value={draft.heading.rollOff} disabled={opLocked} onChange={(e) => hSet({ rollOff: Number(e.target.value) })} />
+            </label>
           </div>
         </div>
         <div className="fc-dlg-row">
@@ -640,6 +689,7 @@ function GroupDialog(props: {
                   title={tx("模型缩放", "model scale")}
                 />
                 <b className="p3d-gdlg-num">×{draft.model.scale.toFixed(1)}</b>
+                <label className="p3d-gdlg-field"><span>{tx("高度 Y（工程单位）", "Height Y (units)")}</span>
                 <input
                   type="number"
                   step={0.5}
@@ -647,7 +697,7 @@ function GroupDialog(props: {
                   disabled={opLocked}
                   onChange={(e) => mSet({ heightOff: Number(e.target.value) })}
                   title={tx("高度偏移（真实单位，沿 Y）", "height offset (real units, along Y)")}
-                />
+                /></label>
               </>
             )}
           </div>
@@ -682,15 +732,11 @@ function GroupDialog(props: {
           <label>{tx("模型旋转修正", "Model rot fix")}</label>
           <div className="p3d-gdlg-inline2">
             {(["rotX", "rotY", "rotZ"] as const).map((k) => (
-              <input
-                key={k}
-                type="number"
-                step={15}
-                value={draft.model[k]}
-                disabled={opLocked}
-                onChange={(e) => mSet({ [k]: Number(e.target.value) } as Partial<GroupModel>)}
-                title={`${k.slice(3)}°`}
-              />
+              <label key={k} className="p3d-gdlg-field">
+                <span>{k.slice(3)} (°)</span>
+                <input type="number" step={15} value={draft.model[k]} disabled={opLocked}
+                  onChange={(e) => mSet({ [k]: Number(e.target.value) } as Partial<GroupModel>)} />
+              </label>
             ))}
           </div>
         </div>
@@ -699,15 +745,11 @@ function GroupDialog(props: {
           <label>{tx("旋转（度）", "Rotation")}</label>
           <div className="p3d-gdlg-inline2">
             {(["rotX", "rotY", "rotZ"] as const).map((k) => (
-              <input
-                key={k}
-                type="number"
-                step={15}
-                value={draft.transform[k]}
-                disabled={opLocked}
-                onChange={(e) => tSet({ [k]: Number(e.target.value) } as Partial<GroupTransform>)}
-                title={`${k.slice(3)}°（Z·Y·X 序，装歪/换系修正）`}
-              />
+              <label key={k} className="p3d-gdlg-field">
+                <span>{k.slice(3)} (°)</span>
+                <input type="number" step={15} value={draft.transform[k]} disabled={opLocked}
+                  onChange={(e) => tSet({ [k]: Number(e.target.value) } as Partial<GroupTransform>)} />
+              </label>
             ))}
           </div>
         </div>
@@ -715,28 +757,31 @@ function GroupDialog(props: {
           <label>{tx("平移/缩放", "Offset/scale")}</label>
           <div className="p3d-gdlg-inline2 p3d-gdlg-tf6">
             {(["offX", "offY", "offZ", "scale"] as const).map((k) => (
-              <input
-                key={k}
-                type="number"
-                step={k === "scale" ? 0.1 : 1}
-                value={draft.transform[k]}
-                disabled={opLocked}
-                onChange={(e) => tSet({ [k]: Number(e.target.value) } as Partial<GroupTransform>)}
-                title={k === "scale" ? tx("比例（1=原始）", "scale (1=raw)") : `${k.slice(3)} offset`}
-              />
+              <label key={k} className="p3d-gdlg-field">
+                <span>{k === "scale" ? tx("比例 (×)", "Scale (×)") : `${k.slice(3)} (${tx("工程单位", "units")})`}</span>
+                <input type="number" step={k === "scale" ? 0.1 : 1} value={draft.transform[k]} disabled={opLocked}
+                  onChange={(e) => tSet({ [k]: Number(e.target.value) } as Partial<GroupTransform>)} />
+              </label>
             ))}
-            <button
-              type="button"
-              className="p3d-cbtn"
-              disabled={opLocked}
-              title={tx("把三组各自的第一个轨迹点平移到世界原点（起点不同的路径对比）", "translate each group's first point to the origin")}
+          </div>
+        </div>
+        <div className="fc-dlg-row">
+          <label>{tx("全部组对齐", "Align all groups")}</label>
+          <div className="p3d-gdlg-inline2">
+            <button type="button" className="p3d-cbtn" disabled={opLocked || dirty}
+              title={tx("独立操作；请先确认或取消当前草稿，再对齐所有已绑定组", "Separate action: apply or cancel this draft before aligning all bound groups")}
               onClick={() => {
-                plot3dStore.alignToOrigin();
-                onClose();
-              }}
-            >
-              {tx("首点对齐原点", "Align starts")}
+                if (dirty || opLocked || !plot3dStore.getGroup(gid)) return;
+                if (plot3dStore.alignToOrigin()) {
+                  const next = plot3dStore.getGroup(gid);
+                  if (next) setDraft({ ...next });
+                }
+              }}>
+              {tx("首点对齐原点", "Align starts to origin")}
             </button>
+            <span className="fc-dlg-hint">{dirty
+              ? tx("草稿尚未确认，对齐已禁用", "Unapplied draft: alignment disabled")
+              : tx("独立的一步撤销；作用于全部已绑定组", "Separate undo step; affects all bound groups")}</span>
           </div>
         </div>
         <div className="fc-dlg-hint p3d-gdlg-tf-note">
@@ -775,6 +820,8 @@ export function Plot3D() {
   const settings = useSettings();
   const zf = (settings.zoom || 100) / 100;
   const cbSafe = settings.chartPalette === "cbSafe";
+  const cbSafeRef = useRef(cbSafe);
+  cbSafeRef.current = cbSafe;
 
   const hostRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -797,12 +844,14 @@ export function Plot3D() {
      视图与操作态（视角预设、自动旋转、跟随、缩放、测距、时间游标、组可见性、
      清空轨迹、导出、椭球校准/六面）全部放行：只读不允许改部署口径，但必须允许看和测。 */
   const opLocked = useOperator().pkg !== null;
+  const opLockedRef = useRef(opLocked);
+  opLockedRef.current = opLocked;
   const roTip = opLocked ? tx("（Operator 只读：设置已锁定）", " (operator read-only: settings locked)") : "";
 
   const [ready, setReady] = useState(false);
   const [gen, setGen] = useState(0); // WebGL context lost → +1 重建
   const [stats, setStats] = useState<{ groups: Record<GroupId, GroupStats>; fps: number; gridStep: number }>({
-    groups: { g1: { tail: 0, overview: 0 }, g2: { tail: 0, overview: 0 }, g3: { tail: 0, overview: 0 } },
+    groups: {},
     fps: 0,
     gridStep: 0,
   });
@@ -869,8 +918,7 @@ export function Plot3D() {
   const tbBubbleRef = useRef<HTMLDivElement>(null);
   const tbTRef = useRef<HTMLSpanElement>(null);
   const tbDragRef = useRef(false); // 非回放 scrub 拖动中
-  const tbReplayDragRef = useRef(false); // 回放中拖动（节流 seek）
-  const tbSeekT = useRef(0);
+  const tbReplayDragRef = useRef(false);
   const endRelRef = useRef(0); // 数据末端相对秒（渲染时刷新）
   const ptsRef = useRef(0); // br 行点数（DOM 写入时判断分隔符）
 
@@ -910,6 +958,12 @@ export function Plot3D() {
       scene = s;
       sceneRef.current = s;
       // P87a：批次按组分发（entries 含逐组 reloaded 标记）
+      s.applySettings(
+        s3dRef.current,
+        plotRef.current.channels,
+        cbSafeRef.current,
+        getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#4e9cef",
+      );
       plot3dStore.setSink((entries, cursorSec) => s.applyBatch(entries, cursorSec));
       // P74c A5：新场景是空的 → 点云推送水位归零 + 挂上「校准态重放」标记。
       // 否则重建后 snap.count 与水位相等，增量判定两个分支都不命中，
@@ -982,7 +1036,7 @@ export function Plot3D() {
         if (!f) return;
         const rowEl = document.elementFromPoint(d.x, d.y)?.closest(".p3d-grp-row");
         const gid = (rowEl as HTMLElement | null)?.dataset.gid as GroupId | undefined;
-        if (!gid || !plot3dStore.GROUP_IDS.includes(gid)) return;
+        if (!gid || !plot3dStore.getGroup(gid) || !(rowEl instanceof Element && el.contains(rowEl))) return;
         const chans = plotRef.current.channels;
         let ch = chans.find((c) => c.tplId === f!.tplId && c.fieldId === f!.fieldId);
         if (!ch) {
@@ -995,6 +1049,7 @@ export function Plot3D() {
         if (!ch) return;
         const hit = plot3dStore.bindGroupFirstFree(gid, ch.id);
         const g = plot3dStore.getGroup(gid);
+        if (!g) return;
         toast(
           hit
             ? tx(
@@ -1017,11 +1072,9 @@ export function Plot3D() {
     const t = window.setInterval(() => {
       const st = sceneRef.current?.stats();
       if (st) setStats(st);
-      setPairInfo({
-        g1: plot3dStore.pairSnapshot("g1"),
-        g2: plot3dStore.pairSnapshot("g2"),
-        g3: plot3dStore.pairSnapshot("g3"),
-      });
+      setPairInfo(Object.fromEntries(plot3dStore.getSnapshot().settings.groups.map(
+        (g) => [g.id, plot3dStore.pairSnapshot(g.id)],
+      )));
     }, 1000);
     return () => window.clearInterval(t);
   }, [ready]);
@@ -1070,22 +1123,31 @@ export function Plot3D() {
     };
   }, [ready]);
 
-  // P87b GLTF 字节加载：kind=gltf 且 src 变化时读盘注入（scene 内按 src 缓存解析结果）
+  // P87b GLTF 字节加载（P87e：请求令牌化）：src 变化时**先**在当前场景实例上取
+  // beginModelRequest(gid) 令牌（组未在册/非 gltf/重建中 → null，直接放弃），
+  // 再 await 读盘——await 期间删组/重建/换 src 都会令牌失效，setModelBytes 内按
+  // {场景代际, 组实例, src, token} 校验，过期产物直接丢弃，绝不复活已删组。
   useEffect(() => {
     if (!ready) return;
+    for (const id of Object.keys(modelSrcRef.current)) {
+      if (!s3d.groups.some((g) => g.id === id)) delete modelSrcRef.current[id];
+    }
     for (const g of s3d.groups) {
       const key = g.model.kind === "gltf" ? g.model.src : "";
       if (modelSrcRef.current[g.id] === key) continue;
       modelSrcRef.current[g.id] = key;
       if (!key) continue;
+      const scene = sceneRef.current; // 捕获实例：重建后旧 scene 已 dispose，不许把字节喂给新场景
+      if (!scene) continue;
+      const token = scene.beginModelRequest(g.id);
+      if (token === null) continue; // 组不在册/非 gltf/空 src → 不读盘
       void (async () => {
         try {
           const bytes = await invoke<number[]>("read_binary_file", { path: key });
           const buf = new Uint8Array(bytes).buffer;
-          if (s3dRef.current.groups.find((x) => x.id === g.id)?.model.src === key)
-            sceneRef.current?.setModelBytes(g.id, buf);
+          scene.setModelBytes(g.id, buf, token); // 过期令牌 scene 侧静默丢弃
         } catch {
-          sceneRef.current?.setModelBytes(g.id, null);
+          scene.setModelBytes(g.id, null, token);
         }
       })();
     }
@@ -1100,7 +1162,7 @@ export function Plot3D() {
       const scene = sceneRef.current;
       if (!scene) return;
       const snap = plot3dStore.calibSnapshot();
-      if (snap.count < calSentRef.current) {
+      if (snap.count < calSentRef.current || (fitRef.current && !plot3dStore.getCalibFit())) {
         scene.resetCalibView();
         scene.setCalibEllipsoid(null);
         calSentRef.current = 0;
@@ -1136,6 +1198,33 @@ export function Plot3D() {
     const t = window.setInterval(poll, 500);
     return () => window.clearInterval(t);
   }, [ready, s3d.calibMode]);
+
+  // 源身份变化（含删除、撤销、导入）同步清理本地视图，不能展示旧传感器结果。
+  useEffect(() => {
+    sceneRef.current?.resetCalibView();
+    sceneRef.current?.setCalibEllipsoid(null);
+    sceneRef.current?.setCalibDisplay("raw");
+    calSentRef.current = 0;
+    calReplayRef.current = false;
+    fitRef.current = null;
+    setFit(null);
+    setFitErr(null);
+    setFitStale(false);
+    setPreviewOn(false);
+    setCalibDisp("raw");
+    setCalibUi(plot3dStore.calibSnapshot());
+    setA6(plot3dStore.accel6Snapshot());
+  }, [s3d.calibSrc]);
+
+  useEffect(() => {
+    const exists = (p: PickResult | null | undefined) => !p || s3d.groups.some((g) => g.id === p.gid);
+    if (!exists(hoverRef.current)) { hoverRef.current = null; if (tipRef.current) tipRef.current.style.display = "none"; }
+    if (!exists(mPts.current.a) || !exists(measureInfo?.a) || !exists(measureInfo?.b)) {
+      mPts.current = { a: null, b: null };
+      setMeasureInfo(null);
+      sceneRef.current?.setMeasure(null, null);
+    }
+  }, [s3d.groups, measureInfo]);
 
   // ---------- 测距模式 ----------
   const enterMeasure = () => {
@@ -1365,6 +1454,7 @@ export function Plot3D() {
         : "";
   };
   const clearScrub = () => {
+    returnLatest("plot3d"); // 清预览/挂起 seek，发布空游标（回放中不 seek 到结尾）
     plot3dStore.setScrub(null);
     sceneRef.current?.setTimeCursor(null);
     writeTb(1, false);
@@ -1380,16 +1470,38 @@ export function Plot3D() {
   };
   const applyScrub = (ratio: number) => {
     const rel = ratio * endRelRef.current;
+    // 拖拽中=预览：不抢回放时钟、不落真 seek，松手才提交（navigateTime）
+    previewTime(timeCursor.fromDisplaySeconds(rel, plotStore.timeOrigin()), "plot3d");
     sceneRef.current?.setTimeCursor(rel);
     plot3dStore.setScrub(rel);
     writeTb(ratio, true);
     writeBrT(rel);
   };
   const tbSeek = (ratio: number) => {
-    const s = sessionStore.getSnapshot();
-    const sp = typeof s.lastSpeed === "number" && s.lastSpeed >= 0 ? s.lastSpeed : 1; // 0=MAX 全速，不能 || 吞掉
-    void sessionStore.seek(ratio, sp);
+    void navigateTime(timeCursor.fromDisplaySeconds(ratio * endRelRef.current, plotStore.timeOrigin()), "plot3d");
   };
+  const sharedCursorRef = useRef(() => {});
+  sharedCursorRef.current = () => {
+    const c = timeCursor.getSnapshot();
+    if (c.tsMs !== null && c.source !== "session" && (!c.linked || c.source === "plot3d")) return;
+    const sec = c.tsMs === null ? null : timeCursor.toDisplaySeconds(c.tsMs, plotStore.timeOrigin());
+    plot3dStore.setScrub(sec);
+    sceneRef.current?.setTimeCursor(sec);
+    writeTb(sec === null || endRelRef.current <= 0 ? 1 : sec / endRelRef.current, false);
+    writeBrT(sec);
+  };
+  useEffect(() => {
+    const unsub = timeCursor.subscribe(() => sharedCursorRef.current());
+    const stopClock = subscribeReplayClock();
+    sharedCursorRef.current();
+    return () => {
+      unsub();
+      cancelPreview("plot3d");
+      plot3dStore.setScrub(null);
+      stopClock();
+    };
+  }, []);
+
   const onTbPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation(); // 不触发画布长按/拾取/右键
     if (e.button !== 0) return;
@@ -1402,8 +1514,7 @@ export function Plot3D() {
       // 回放中：真时间机器 seek（hex 环复位 + 全面板同步倒带，3D 经重灌+游标自动跟随）
       track.setPointerCapture(e.pointerId);
       tbReplayDragRef.current = true;
-      tbSeekT.current = performance.now();
-      tbSeek(ratio);
+      applyScrub(ratio);
       return;
     }
     track.setPointerCapture(e.pointerId);
@@ -1418,24 +1529,32 @@ export function Plot3D() {
     }
     if (tbReplayDragRef.current) {
       e.stopPropagation();
-      const now = performance.now();
-      if (now - tbSeekT.current > 150) {
-        tbSeekT.current = now;
-        tbSeek(tbRatio(e.clientX));
-      }
+      applyScrub(tbRatio(e.clientX));
     }
   };
   const onTbPointerUp = (e: React.PointerEvent) => {
     if (tbDragRef.current) {
       e.stopPropagation();
       tbDragRef.current = false;
+      cancelPreview("plot3d"); // 释放手势；游标已落位，保留查看（实况无 seek 语义）
       const bub = tbBubbleRef.current;
       if (bub) bub.style.display = "none"; // 松手游标保留（查看历史意图明确）
     } else if (tbReplayDragRef.current) {
       e.stopPropagation();
       tbReplayDragRef.current = false;
-      tbSeek(tbRatio(e.clientX)); // 收尾 seek 到最终位置
+      tbSeek(tbRatio(e.clientX)); // 收尾 seek 到最终位置（navigateTime 自清预览）
     }
+  };
+  /** pointercancel（拖出窗口/设备打断）：释放手势不提交；回放侧不 seek，预览随取消回退 */
+  const onTbPointerCancel = (e: React.PointerEvent) => {
+    if (!tbDragRef.current && !tbReplayDragRef.current) return;
+    e.stopPropagation();
+    tbDragRef.current = false;
+    tbReplayDragRef.current = false;
+    cancelPreview("plot3d");
+    const bub = tbBubbleRef.current;
+    if (bub) bub.style.display = "none";
+    sharedCursorRef.current();
   };
   const onTbDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1447,9 +1566,13 @@ export function Plot3D() {
   // 回放进度 / scrub 游标 → 直写 DOM（sessionStore 10Hz posMs 推送，绝不进 React state）
   useEffect(() => {
     const update = () => {
+      if (tbDragRef.current || tbReplayDragRef.current) return; // 拖拽预览优先，不被 10Hz 推送覆盖
       const endRel = endRelRef.current;
       if (endRel <= 0 || !tbFillRef.current) return;
-      const rel = sessionRelSec();
+      const shared = timeCursor.getSnapshot();
+      const rel = shared.tsMs !== null && shared.linked
+        ? timeCursor.toDisplaySeconds(shared.tsMs, plotStore.timeOrigin())
+        : sessionRelSec();
       if (rel !== null) {
         writeTb(rel / endRel, false);
         writeBrT(rel);
@@ -1576,6 +1699,7 @@ export function Plot3D() {
   /** 组数据清空（P87a 组化）：水位推进 + 场景缓冲清零；不可撤销——确认弹窗如实说明 */
   const clearGroupData = async (gid?: GroupId) => {
     const g = gid ? plot3dStore.getGroup(gid) : null;
+    if (gid && !g) return;
     const ok = await confirmDialog({
       title: gid ? tx(`清空 ${g?.name} 轨迹数据`, `Clear ${g?.name} data`) : tx("清空轨迹数据", "Clear trajectory data"),
       message: gid
@@ -1584,19 +1708,91 @@ export function Plot3D() {
             "Clear this group's trajectory: history is skipped, new data draws from zero.\nThis cannot be undone. Bindings, display settings and calibration sampling are untouched.",
           )
         : tx(
-            "清空三组全部已积累的轨迹：历史全部跳过，新数据从零画起。\n该操作不可撤销。绑定、显示设置与校准采样不受影响。",
-            "Clear all three groups' trajectories: history is skipped, new data draws from zero.\nThis cannot be undone. Bindings, display settings and calibration sampling are untouched.",
+            "清空全部组已积累的轨迹：历史全部跳过，新数据从零画起。\n该操作不可撤销。绑定、显示设置与校准采样不受影响。",
+            "Clear all groups' trajectories: history is skipped, new data draws from zero.\nThis cannot be undone. Bindings, display settings and calibration sampling are untouched.",
           ),
       danger: true,
       okLabel: tx("清空", "Clear"),
     });
-    if (!ok) return;
+    if (!ok || !aliveRef.current || (gid && !plot3dStore.getGroup(gid))) return;
     // 运行/视图类操作：Operator 只读模式放行（红线 27——不改配置，数据可重新积累）
     plot3dStore.clearData(gid);
     sceneRef.current?.clearTrajectory(gid);
     toast(tx("轨迹数据已清空，等待新数据", "Trajectory cleared, waiting for new data"));
   };
 
+  /** 删除轨迹组（P87e）：本地人工确认——说明只移除组配置与显示资源、不动源通道、可撤销 */
+  const removeGroupUi = async (gid: GroupId) => {
+    if (opLocked) return;
+    const g = plot3dStore.getGroup(gid);
+    if (!g) return; // 已删：入口自动失效
+    const ok = await confirmDialog({
+      title: tx(`删除轨迹组 ${g.name}`, `Delete trajectory group ${g.name}`),
+      message: tx(
+        `移除该组的配置与 3D 显示资源，不删除源通道；撤销可恢复配置并从仍可用的源数据重建；不保证恢复源端已裁掉的历史。
+若此组是校准源，采样将停止，拟合/预览/六面临时态将清空，且不会自动选择另一组。
+确定删除？`,
+        `Removes the group's config and 3D display resources; source channels are kept. Undo restores the config and rebuilds from still-available sources, not history already trimmed at the source.
+If this is the calibration source, capture stops and fit/preview/six-face state clears; no other source is selected automatically.
+Delete?`,
+      ),
+      danger: true,
+      okLabel: tx("删除组", "Delete group"),
+    });
+    if (!ok || !aliveRef.current) return;
+    if (!plot3dStore.getGroup(gid)) return; // 弹窗期间已被删：幂等退出
+    if (plot3dStore.removeGroup(gid)) {
+      if (dlg === gid) setDlg(null);
+      if (menu?.gid === gid) setMenu(null);
+      toast(tx(`已删除 ${g.name}（可撤销）`, `Deleted ${g.name} (undoable)`));
+    }
+  };
+  /** 设为校准源（P87e）：显式选择 + 人工确认——切换即停采样并清全部校准临时态（不自动换源） */
+  const setCalibSrcUi = async (gid: GroupId) => {
+    if (opLocked) return;
+    const g = plot3dStore.getGroup(gid);
+    if (!g) return; // 已删：入口自动失效
+    const cur = s3dRef.current.calibSrc;
+    if (cur === gid) return;
+    const curName = cur ? plot3dStore.getGroup(cur)?.name : null;
+    const ready = !!g.chX && !!g.chY && !!g.chZ;
+    const ok = await confirmDialog({
+      title: tx(`校准源 → ${g.name}`, `Calibration source → ${g.name}`),
+      message: tx(
+        `切换校准采样源为 ${g.name}${curName ? `（当前：${curName}）` : cur === null ? "（当前：未选择）" : "（当前源已删除）"}。
+将停止进行中的采样，并清空椭球采样/拟合/补偿预览/六面临时态（不可恢复，不随撤销恢复）。`,
+        `Switch the calibration sampling source to ${g.name}${curName ? ` (current: ${curName})` : cur === null ? " (current: none)" : " (current source deleted)"}.
+Any running capture stops; ellipsoid samples / fit / preview / six-face temp state are cleared (not restored by undo).`,
+      ),
+      danger: true,
+      okLabel: tx("切换校准源", "Switch source"),
+    });
+    if (!ok || !aliveRef.current || opLockedRef.current || plot3dStore.getSnapshot().settings.calibSrc !== cur) return;
+    if (!plot3dStore.getGroup(gid)) return; // 弹窗期间被删：幂等退出
+    if (!plot3dStore.setCalibSrc(gid)) {
+      toast(tx("切换校准源失败（组已删除或配置被锁定）", "Failed to switch source (group deleted or config locked)"));
+      return;
+    }
+    // 换源后点云/拟合 UI 全清（store 已清缓冲）；若新源三轴未绑齐，提示先补绑定
+    clearCalibAll();
+    if (!ready) toast(tx("新校准源尚未绑齐 X/Y/Z，请先在组行补齐绑定", "New source lacks X/Y/Z binding — bind them first"));
+  };
+  /** 校准源置空（P87e）：显式取消选择 → 校准禁用；确认语义同切源（临时态清空） */
+  const switchCalibSrcUiNone = async () => {
+    if (opLocked) return;
+    const ok = await confirmDialog({
+      title: tx("取消校准源", "Clear calibration source"),
+      message: tx(
+        "取消后校准禁用（不自动换源）；进行中的采样停止，椭球采样/拟合/预览/六面临时态清空。确定？",
+        "Calibration will be disabled (no auto fallback); running capture stops and samples/fit/preview/six-face state clear. Continue?",
+      ),
+      danger: true,
+      okLabel: tx("取消选择", "Clear"),
+    });
+    if (!ok || !aliveRef.current) return;
+    if (!plot3dStore.setCalibSrc(null)) return;
+    clearCalibAll();
+  };
   // ---------- 椭球校准动作（P71 / P73 T+）----------
   const doFit = () => {
     const r = fitEllipsoid(plot3dStore.calibPoints());
@@ -1810,6 +2006,7 @@ export function Plot3D() {
   // ---------- 导出（P72 → P87a 逐组 → P87b 同源 store 层）：轨迹 CSV / 快照 PNG ----------
   const exportCsv = async (gid: GroupId) => {
     const g = plot3dStore.getGroup(gid);
+    if (!g) return;
     // P87b：exportTriples 单点真相——与显示严格同源（配对 + **组变换**）
     const data = plot3dStore.exportTriples(gid);
     if (!data) return;
@@ -1895,10 +2092,14 @@ export function Plot3D() {
     const tsMs = ts.map((v) => base + (v - t0) * secScale);
     // 回收本组旧的虚拟绑定（导入过一次再导不堆垃圾通道）
     const g = plot3dStore.getGroup(gid);
+    if (!g || !aliveRef.current || opLockedRef.current) return;
     const chans = plotRef.current.channels;
     for (const id of [g.chX, g.chY, g.chZ]) {
       const ch = id ? chans.find((c) => c.id === id) : null;
-      if (ch?.virtual) plotStore.removeChannel(ch.id);
+      if (ch?.virtual && !plot3dStore.getSnapshot().settings.groups.some((other) =>
+        other.id !== gid && [other.chX, other.chY, other.chZ, other.colorCh,
+          other.heading.chYaw, other.heading.qX, other.heading.qY, other.heading.qZ, other.heading.qW].includes(ch.id)))
+        plotStore.removeChannel(ch.id);
     }
     const nm = (s: string) => `${g.name}·${s}`;
     const ix = plotStore.addVirtualChannel(nm("X"), tsMs, xs);
@@ -1942,31 +2143,32 @@ export function Plot3D() {
     { p: "iso", zh: "等", en: "I", tipZh: "等轴：立体全貌（默认）", tipEn: "Isometric: full 3D view (default)" },
   ];
 
-  const g1Bound = plot3dStore.calibSourceReady();
+  const calibSrcG = s3d.calibSrc ? s3d.groups.find((g) => g.id === s3d.calibSrc) : undefined;
+  const calibSrcMissing = !!s3d.calibSrc && !calibSrcG;
+  const g1Bound = plot3dStore.calibSourceReady(); // P87e：按 calibSrc 判定（不再固定组1）
   const anyBound = s3d.groups.some((g) => g.chX && g.chY);
   const ascaleCur =
     s3d.axisScale === "perAxis" ? tx("逐轴归一化", "Per-axis") : tx("等比（真实比例）", "Uniform");
 
-  const totalPts = plot3dStore.GROUP_IDS.reduce(
-    (n, id) => n + stats.groups[id].tail + stats.groups[id].overview,
-    0,
-  );
+  const pointCount = (gid: GroupId) => (stats.groups[gid]?.tail ?? 0) + (stats.groups[gid]?.overview ?? 0);
+  const totalPts = s3d.groups.reduce((n, g) => n + pointCount(g.id), 0);
   ptsRef.current = totalPts;
   const groupPtsLine = s3d.groups
-    .filter((g) => (stats.groups[g.id].tail + stats.groups[g.id].overview) > 0 || (g.chX && g.chY))
-    .map((g) => `${g.name} ${(stats.groups[g.id].tail + stats.groups[g.id].overview).toLocaleString()}`)
+    .filter((g) => pointCount(g.id) > 0 || (g.chX && g.chY))
+    .map((g) => `${g.name} ${pointCount(g.id).toLocaleString()}`)
     .join(" · ");
 
   // P75 B2：配对诊断副行（P87a 主组 = 第一个绑齐且有消费的组；三轴值域 + 配对/跳过计数）
   const primaryGid = s3d.groups.find(
-    (g) => g.chX && g.chY && pairInfo && pairInfo[g.id].paired + pairInfo[g.id].skipped > 0,
+    (g) => g.chX && g.chY && ((pairInfo?.[g.id]?.paired ?? 0) + (pairInfo?.[g.id]?.skipped ?? 0)) > 0,
   )?.id;
   const fmtRange = (mn: number, mx: number) =>
     isFinite(mn) && isFinite(mx) ? `${fmtVal(mn)}~${fmtVal(mx)}` : "—";
   const pairLine = (() => {
     if (!primaryGid || !pairInfo) return null;
-    const g = s3d.groups.find((x) => x.id === primaryGid)!;
+    const g = s3d.groups.find((x) => x.id === primaryGid);
     const pi = pairInfo[primaryGid];
+    if (!g || !pi) return null;
     return [
       g.name,
       `X ${fmtRange(pi.min[0], pi.max[0])}`,
@@ -1989,8 +2191,9 @@ export function Plot3D() {
     const org = plotStore.timeOrigin();
     let end = -Infinity;
     for (const g of s3d.groups) {
-      if (!g.chX || !g.chY || !g.chZ) continue;
+      if (!g.chX || !g.chY) continue;
       for (const id of [g.chX, g.chY, g.chZ]) {
+        if (!id) continue;
         const d = plotStore.getChanData(id);
         if (d.t.length > 0 && d.t[d.t.length - 1] > end) end = d.t[d.t.length - 1];
       }
@@ -2002,6 +2205,8 @@ export function Plot3D() {
       : 0;
   })();
   endRelRef.current = endRel;
+
+  useEffect(() => { sharedCursorRef.current(); }, [ready, endRel]);
 
   return (
     <div className="plot p3d" ref={rootRef} tabIndex={-1}>
@@ -2068,9 +2273,28 @@ export function Plot3D() {
                 >
                   <IconGear />
                 </button>
+                <button
+                  className="p3d-grp-del"
+                  disabled={opLocked}
+                  onClick={() => void removeGroupUi(g.id)}
+                  title={tx(`删除轨迹组 ${g.name}（配置可撤销；源通道保留）`, `Delete group ${g.name} (config undoable; source channels kept)`)}
+                >
+                  <IconTrash />
+                </button>
               </div>
             );
           })}
+          <button
+            className="p3d-grp-add"
+            disabled={opLocked}
+            onClick={() => {
+              const gid = plot3dStore.addGroup();
+              if (gid) toast(tx("已新增轨迹组（一步撤销；拖字段到行上绑定）", "Group added (one undo step; drag fields onto its row to bind)"));
+            }}
+            title={tx("新增轨迹组：追加到列表尾，默认未绑定", "Add trajectory group: appended at the end, unbound by default")}
+          >
+            {fsvg(<path d="M12 5v14M5 12h14" />)} {tx("新增轨迹组", "Add group")}
+          </button>
         </div>
 
         {/* 视角组（右上，P82② → P87a +撤销/重做）：毛玻璃胶囊——视角预设｜聚焦·跟随·自旋｜撤销重做｜校准·清空 */}
@@ -2120,7 +2344,7 @@ export function Plot3D() {
           <span className="p3d-tray-sep" />
           <button
             className="icon-btn"
-            disabled={!p3d.canUndo}
+            disabled={!p3d.canUndo || opLocked}
             onClick={doUndo}
             title={tx("撤销组配置 (Ctrl+Z)", "Undo group settings (Ctrl+Z)")}
           >
@@ -2128,7 +2352,7 @@ export function Plot3D() {
           </button>
           <button
             className="icon-btn"
-            disabled={!p3d.canRedo}
+            disabled={!p3d.canRedo || opLocked}
             onClick={doRedo}
             title={tx("重做组配置 (Ctrl+Y)", "Redo group settings (Ctrl+Y)")}
           >
@@ -2154,12 +2378,18 @@ export function Plot3D() {
           <span className="p3d-tray-sep" />
           <button
             className={`icon-btn${s3d.calibMode ? " primary" : ""}`}
-            disabled={!g1Bound}
+            disabled={!s3d.calibMode && (!g1Bound || !s3d.calibSrc)}
             onClick={() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true }))}
-            title={tx(
-              "椭球校准模式：点云采样 + 九参数拟合（磁力计/加计；采样源=组1）",
-              "Ellipsoid calibration: point-cloud sampling + 9-parameter fit (mag/acc; source = group 1)",
-            )}
+            title={
+              !s3d.calibSrc
+                ? tx("未选择校准源：在组行右键「设为校准源」", "No calibration source: right-click a group row → set as source")
+                : calibSrcMissing
+                  ? tx("校准源已被删除：请重新选择校准源", "Calibration source deleted — pick another source")
+                  : tx(
+                      "椭球校准模式：点云采样 + 九参数拟合（磁力计/加计）",
+                      "Ellipsoid calibration: point-cloud sampling + 9-parameter fit (mag/acc)",
+                    )
+            }
           >
             <IconTarget />
           </button>
@@ -2167,7 +2397,7 @@ export function Plot3D() {
             className="icon-btn p3d-tray-danger"
             onClick={() => void clearGroupData()}
             title={tx(
-              "清空三组轨迹数据：历史清零、新数据从零画（校准采样不动；不可撤销）",
+              "清空全部轨迹组数据：历史清零、新数据从零画（校准采样不动；不可撤销）",
               "Clear all groups' trajectory data: drop history, new data from zero (calibration untouched; not undoable)",
             )}
           >
@@ -2265,7 +2495,40 @@ export function Plot3D() {
                 <b>
                   {tx("椭球校准", "Calibration")}{" "}
                   <span className="p3d-calib-src">
-                    {tx("采样源：组1", "source: G1")} {s3d.groups[0].name}
+                    {(() => {
+                      const src = plot3dStore.getGroup(s3d.calibSrc ?? "");
+                      const label = src
+                        ? tx(`采样源：${src.name}`, `source: ${src.name}`)
+                        : s3d.calibSrc
+                          ? tx("采样源：（已删除）", "source: (deleted)")
+                          : tx("采样源：未选择", "source: none");
+                      return (
+                        <select
+                          className="input p3d-calib-srcsel"
+                          aria-label={label}
+                          disabled={opLocked}
+                          value={s3d.calibSrc ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === (s3d.calibSrc ?? "")) return;
+                            if (v) void setCalibSrcUi(v);
+                            else void switchCalibSrcUiNone();
+                          }}
+                          title={tx(
+                            "校准采样源（显式选择；切换清空采样/拟合/预览临时态）",
+                            "Calibration sampling source (switching clears samples/fit/preview)",
+                          )}
+                        >
+                          <option value="">{tx("未选择（校准禁用）", "none (calibration off)")}</option>
+                          {s3d.groups.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.name}</option>
+                          ))}
+                          {s3d.calibSrc && !s3d.groups.some((o) => o.id === s3d.calibSrc) && (
+                            <option value={s3d.calibSrc}>{tx("（已删除）", "(deleted)")}</option>
+                          )}
+                        </select>
+                      );
+                    })()}
                   </span>
                 </b>
                 <button
@@ -2310,6 +2573,7 @@ export function Plot3D() {
                   <div className="p3d-calib-row">
                     <button
                       className={`p3d-cbtn${calibUi.capturing ? " stop" : ""}`}
+                      disabled={!g1Bound && !calibUi.capturing}
                       onClick={() =>
                         calibUi.capturing
                           ? plot3dStore.stopCalibCapture()
@@ -2331,7 +2595,7 @@ export function Plot3D() {
                     )}
                   </div>
                   <div className="p3d-calib-row">
-                    <button className="p3d-cbtn" disabled={calibUi.count < 500} onClick={doFit}>
+                    <button className="p3d-cbtn" disabled={!g1Bound || calibUi.count < 500} onClick={doFit}>
                       {tx("拟合椭球", "Fit ellipsoid")}
                     </button>
                     {!fit && calibUi.count < 500 && (
@@ -2464,6 +2728,7 @@ export function Plot3D() {
                           ) : null}
                           <button
                             className={`p3d-cbtn${col ? " stop" : ""}`}
+                            disabled={!g1Bound && !col}
                             onClick={() => (col ? plot3dStore.accel6Abort() : plot3dStore.accel6StartFace(i))}
                           >
                             {col ? tx("中止", "Abort") : face ? tx("重采", "Redo") : tx("采集该面", "Capture")}
@@ -2483,7 +2748,7 @@ export function Plot3D() {
                   <div className="p3d-calib-row">
                     <button
                       className="p3d-cbtn"
-                      disabled={!a6 || a6.faces.some((f) => f === null)}
+                      disabled={!g1Bound || !a6 || a6.faces.some((f) => f === null)}
                       onClick={a6Solve}
                     >
                       {tx("计算参数", "Solve")}
@@ -2534,7 +2799,7 @@ export function Plot3D() {
         {ready && !anyBound && (
           <div className="p3d-hint">
             <div>
-              {tx("每组绑 X / Y（Z 可留空=平面）开始绘制，最多三组叠加", "Bind X / Y per group (Z optional = planar), up to three overlaid trajectories")}
+              {tx("每组绑 X / Y（Z 可留空=平面）开始绘制；可新增或删除轨迹组", "Bind X / Y per group (Z optional = planar); add or remove groups as needed")}
               <br />
               <span className="p3d-hint-sub">
                 {tx(
@@ -2561,6 +2826,7 @@ export function Plot3D() {
             onPointerDown={onTbPointerDown}
             onPointerMove={onTbPointerMove}
             onPointerUp={onTbPointerUp}
+            onPointerCancel={onTbPointerCancel}
             onDoubleClick={onTbDoubleClick}
           >
             <span className="p3d-tb-lbl">0s</span>
@@ -2576,7 +2842,7 @@ export function Plot3D() {
                     title={tx(`${fmtTickSec(r)} 标注`, `marker ${fmtTickSec(r)}`)}
                     onPointerDown={(e) => {
                       e.stopPropagation();
-                      applyScrub(pct / 100);
+                      void navigateTime(timeCursor.fromDisplaySeconds(r, plotStore.timeOrigin()), "annotation");
                     }}
                   />
                 );
@@ -2642,7 +2908,8 @@ export function Plot3D() {
           >
             {menu.kind === "row" && menu.gid ? (
               (() => {
-                const g = s3d.groups.find((x) => x.id === menu.gid)!;
+                const g = s3d.groups.find((x) => x.id === menu.gid);
+                if (!g) return <div className="ctx-title">{tx("该组已删除", "Group deleted")}</div>;
                 const bound = !!(g.chX && g.chY);
                 return (
                   <>
@@ -2691,6 +2958,24 @@ export function Plot3D() {
                       {tx("导入轨迹 CSV → 本组", "Import CSV → group")}
                     </button>
                     <button
+                      className="ctx-item"
+                      disabled={opLocked || s3d.calibSrc === g.id}
+                      title={s3d.calibSrc === g.id ? tx("当前已是校准源", "Already the calibration source") : tx(
+                        "设为校准采样源（切换会清空校准采样/拟合/预览/六面临时态）",
+                        "Set as calibration source (switching clears calibration samples/fit/preview/six-face temp state)",
+                      )}
+                      onClick={closeAnd(() => void setCalibSrcUi(g.id))}
+                    >
+                      {s3d.calibSrc === g.id ? <IconDot /> : <IconCircle />} {tx("设为校准源", "Set as calibration source")}
+                    </button>
+                    <button
+                      className="ctx-item danger"
+                      disabled={opLocked}
+                      onClick={closeAnd(() => void removeGroupUi(g.id))}
+                    >
+                      <IconTrash /> {tx("删除组…（源通道保留，可撤销）", "Delete group… (channels kept, undoable)")}
+                    </button>
+                    <button
                       className="ctx-item danger"
                       onClick={closeAnd(() => void clearGroupData(g.id))}
                     >
@@ -2726,11 +3011,25 @@ export function Plot3D() {
                 <div className="ctx-group">{tx("模式", "Mode")}</div>
                 <button
                   className="ctx-item"
-                  disabled={!g1Bound}
-                  title={!g1Bound ? tx("需先给组1 绑定 X / Y / Z 三轴", "Bind group 1's X / Y / Z axes first") : undefined}
+                  disabled={!s3d.calibMode && (!g1Bound || !s3d.calibSrc)}
+                  title={
+                    !s3d.calibSrc
+                      ? tx("未选择校准源：在组行右键「设为校准源」", "No calibration source — right-click a group row → set as source")
+                      : calibSrcMissing
+                        ? tx("所选校准源已被删除：请重新选择", "Selected calibration source was deleted — pick another")
+                        : !g1Bound
+                          ? tx("校准源需绑定 X / Y / Z 三轴", "Bind the source group's X / Y / Z axes first")
+                          : undefined
+                  }
                   onClick={closeAnd(() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true })))}
                 >
-                  {s3d.calibMode ? <IconDot /> : <IconCircle />} {tx("椭球校准模式（采样源：组1）", "Ellipsoid calibration (source: G1)")}
+                  {s3d.calibMode ? <IconDot /> : <IconCircle />}{" "}
+                  {s3d.calibMode
+                    ? tx("退出椭球校准模式", "Exit ellipsoid calibration")
+                    : tx(
+                        `椭球校准模式（采样源：${calibSrcG?.name ?? (calibSrcMissing ? tx("已删除", "deleted") : tx("未选择", "none"))}）`,
+                        `Ellipsoid calibration (source: ${calibSrcG?.name ?? (calibSrcMissing ? "deleted" : "none")})`,
+                      )}
                 </button>
 
                 <div className="ctx-group">{tx("视图", "View")}</div>
@@ -2836,6 +3135,9 @@ export function Plot3D() {
                     {tx(`导出 ${g.name} CSV`, `Export ${g.name} CSV`)}
                   </button>
                 ))}
+                <button className="ctx-item" onClick={closeAnd(() => window.dispatchEvent(new Event("vs-analysis-export")))}>
+                  {tx("分析包…", "Analysis package…")}
+                </button>
                 <button className="ctx-item" onClick={closeAnd(() => void exportPng())}>
                   {tx("快照 PNG", "Snapshot PNG")}
                 </button>
@@ -2848,14 +3150,14 @@ export function Plot3D() {
                 </button>
                 <button
                   className="ctx-item"
-                  disabled={!p3d.canUndo}
+                  disabled={!p3d.canUndo || opLocked}
                   onClick={closeAnd(doUndo)}
                 >
                   {tx("撤销组配置（Ctrl+Z）", "Undo group settings (Ctrl+Z)")}
                 </button>
                 <button
                   className="ctx-item"
-                  disabled={!p3d.canRedo}
+                  disabled={!p3d.canRedo || opLocked}
                   onClick={closeAnd(doRedo)}
                 >
                   {tx("重做组配置（Ctrl+Y）", "Redo group settings (Ctrl+Y)")}

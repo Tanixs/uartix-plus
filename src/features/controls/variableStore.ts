@@ -9,8 +9,35 @@ export interface VarDef {
   kind: "num" | "str";
 }
 
+export interface VariableObservation {
+  tplId: string;
+  fieldId: string;
+  value: number;
+  /** Local arrival order, independent of parser sequence resets. */
+  sequence: number;
+  /** Monotonic acquisition time in the performance.now() clock domain. */
+  receivedAt: number;
+  generation: number;
+}
+
+const observationListeners = new Set<(event: VariableObservation) => void>();
+let observationSequence = 0;
+let observationGeneration = 0;
+
+/** Fresh frame arrivals only: no cached replay and no manual setVar writes. */
+export function subscribeObservations(cb: (event: VariableObservation) => void) {
+  observationListeners.add(cb);
+  return () => {
+    observationListeners.delete(cb);
+  };
+}
+
+export function getObservationGeneration(): number {
+  return observationGeneration;
+}
+
 let registry: VarDef[] = [];
-const byField = new Map<string, VarDef>();
+const byField = new Map<string, Map<string, VarDef>>();
 const values = new Map<string, number | string>();
 const listeners = new Set<() => void>();
 let initialized = false;
@@ -64,6 +91,7 @@ export function setVar(name: string, value: number | string): void {
 }
 
 function rebuild() {
+  observationGeneration++;
   const used = new Set<string>();
   registry = [];
   byField.clear();
@@ -88,7 +116,12 @@ function rebuild() {
         kind: f.type === "ascii" ? "str" : "num",
       };
       registry.push(def);
-      byField.set(f.id, def);
+      let fields = byField.get(t.id);
+      if (!fields) {
+        fields = new Map<string, VarDef>();
+        byField.set(t.id, fields);
+      }
+      fields.set(f.id, def);
     }
   }
   notify();
@@ -104,18 +137,20 @@ export async function init() {
     let changed = false;
     for (const row of p.rows) {
       if (!row.valid) continue;
+      const fields = byField.get(row.tplId);
+      if (!fields) continue;
+      const receivedAt = performance.now();
+      const generation = observationGeneration;
       for (const f of row.fields) {
-        let def = byField.get(f.id);
+        let def = fields.get(f.id);
         if (!def && f.id.includes("#") && f.text === null) {
           const baseId = f.id.split("#")[0];
-          const base = byField.get(baseId);
-          if (base && !byField.has(f.id)) {
+          const base = fields.get(baseId);
+          if (base) {
             def = { ...base, fieldId: f.id, name: f.name, kind: "num" };
-            byField.set(f.id, def);
+            fields.set(f.id, def);
             registry.push(def);
             changed = true;
-          } else {
-            def = byField.get(f.id);
           }
         }
         if (!def) continue;
@@ -123,6 +158,23 @@ export async function init() {
         if (values.get(def.name) !== val) {
           values.set(def.name, val);
           changed = true;
+        }
+        if (def.kind === "num" && Number.isFinite(f.value)) {
+          const event: VariableObservation = {
+            tplId: row.tplId,
+            fieldId: f.id,
+            value: f.value,
+            sequence: ++observationSequence,
+            receivedAt,
+            generation,
+          };
+          for (const listener of Array.from(observationListeners)) {
+            try {
+              listener(event);
+            } catch {
+              // A consumer failure must not interrupt acquisition or other listeners.
+            }
+          }
         }
       }
     }

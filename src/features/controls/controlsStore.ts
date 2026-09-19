@@ -2,6 +2,7 @@ export type SendMode = "ascii" | "hex";
 
 import { getLocale } from "../../i18n/strings";
 import { guardLocked } from "../operator/lock";
+  import { DEBUG_SCHEMA, sanitizeManaged, sanitizeDebugProfile, buildDebugPreset, type ManagedControl, type DebugProfile, type DebugParameter } from "./debugPreset";
 
 export type ControlType =
   | "slider"
@@ -17,6 +18,7 @@ export type ControlType =
   | "custom";
 
 export interface BaseCard {
+  managed?: ManagedControl;
   id: string;
   type: ControlType;
   name: string;
@@ -215,6 +217,7 @@ const PANEL_TYPE_NAMES_EN: Record<ControlType, string> = {
 };
 
 export interface ControlPage {
+  debugProfile?: DebugProfile;
   id: string;
   name: string;
   cols: number;
@@ -308,6 +311,7 @@ export function newGroupChild(kind: GroupChildKind): GroupChild {
 
 function migrateCard(raw: Record<string, unknown>): ControlCard {
   const base = {
+    managed: sanitizeManaged(raw.managed),
     id: String(raw.id ?? crypto.randomUUID()),
     name: String(raw.name ?? "卡片"),
     x: Math.max(0, Math.round(Number(raw.x) || 0)),
@@ -547,6 +551,7 @@ function load(): ControlsSnapshot {
               cols,
               rows,
               locked: Boolean(p.locked),
+              debugProfile: sanitizeDebugProfile((p as ControlPage).debugProfile),
               cards: declumpCards(cards, cols, rows),
             };
           }),
@@ -603,6 +608,31 @@ export function setActivePage(id: string) {
   emit();
 }
 
+export function createDebugPage(name: string, parameters: DebugParameter[]): string {
+  if (guardLocked()) throw new Error("Operator 配置已锁定 / Operator configuration is locked");
+  const preset = buildDebugPreset(name, parameters);
+  const names = new Set(snapshot.pages.map(p => p.name));
+  let pageName = preset.name;
+  for (let n = 2; names.has(pageName); n++) {
+    const suffix = ` (${n})`;
+    pageName = preset.name.slice(0, 24 - suffix.length) + suffix;
+  }
+  const page: ControlPage = {
+    ...preset, id: crypto.randomUUID(), name: pageName, locked: false,
+    debugProfile: { schema: DEBUG_SCHEMA, version: 1 },
+  };
+  const next = { pages: [...snapshot.pages, page], activePageId: page.id };
+  // Persist before publishing so a failed write never exposes a partial creation.
+  localStorage.setItem("vs.controls", JSON.stringify(next));
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = null;
+  snapshot = next;
+  for (const listener of listeners) {
+    try { listener(); } catch { /* A committed page must still reach other subscribers. */ }
+  }
+  return page.id;
+}
+
 export function addPage() {
   const page: ControlPage = {
     id: crypto.randomUUID(),
@@ -637,6 +667,7 @@ export function importPage(raw: {
   rows?: number;
   cards?: Record<string, unknown>[];
 }): string {
+  if (guardLocked()) throw new Error("Operator 配置已锁定 / Operator configuration is locked");
   pushHistoryLike();
   const page: ControlPage = {
     id: crypto.randomUUID(),
@@ -644,6 +675,7 @@ export function importPage(raw: {
     cols: clampGrid(raw.cols ?? 8, 24),
     rows: clampGrid(raw.rows ?? 8, 48),
     locked: false,
+    debugProfile: sanitizeDebugProfile((raw as { debugProfile?: unknown }).debugProfile),
     cards: (raw.cards ?? []).map((r) =>
       r.type === "script" ? migrateLegacyScript(r) : migrateCard(r),
     ),
@@ -967,6 +999,23 @@ export function patchCard(
             ...p,
             cards: p.cards.map((c) => {
               if (c.id !== cardId) return c;
+              // managed 元数据 fail-closed：现有标记不可被 patch 清除/伪造，
+              // role/paramId/schema/type 一律锁定，防止被改成普通可执行控件。
+              if (c.managed) {
+                if ("managed" in patch) {
+                  const raw = patch.managed as Record<string, unknown> | null | undefined;
+                  const next = sanitizeManaged(patch.managed);
+                  if (
+                    !next ||
+                    next.role !== c.managed.role ||
+                    next.paramId !== c.managed.paramId ||
+                    (raw && typeof raw === "object" ? raw.schema : DEBUG_SCHEMA) !== c.managed.schema
+                  )
+                    throw new Error("managed 元数据不可通过 patchCard 修改 / Managed metadata cannot be patched");
+                }
+                if ("type" in patch && patch.type !== c.type)
+                  throw new Error("managed 卡片类型不可修改 / Managed card type cannot be changed");
+              }
               const merged = migrateCard({ ...c, ...patch }) as ControlCard;
               return normalizeGeometry(merged, p.cols, p.rows || 48);
             }),

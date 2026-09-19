@@ -41,8 +41,8 @@ describe("PANEL_GROUPS", () => {
     expect(panelGroupOf("nope")).toBeUndefined();
   });
 
-  it("面板总数与清单一致（19 个内置面板）", () => {
-    expect(PANEL_GROUPS.flatMap((g) => g.ids as readonly string[])).toHaveLength(19);
+  it("面板总数与清单一致（20 个内置面板）", () => {
+    expect(PANEL_GROUPS.flatMap((g) => g.ids as readonly string[])).toHaveLength(20);
   });
 
   it("分组名随语言切换", () => {

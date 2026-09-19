@@ -165,5 +165,52 @@ if (accentProblems.length) {
   console.log("OK: accent backgrounds all pair with a color declaration");
 }
 
+/* ---- P88b-4：外观覆盖层白名单 token 齐全性 ----
+   Agent 外观工具只能覆盖白名单 token（appearanceStore.ts APPEARANCE_TOKENS）；
+   每个白名单 token 必须在「theme.css :root 基线 ∪ 8 主题文件」中有定义，
+   否则覆盖后有键无值（覆盖层不做完整性校验，依赖内置值兜底——缺失即破功）。 */
+function cssVarKeys(src) {
+  const out = new Set();
+  for (const m of src.matchAll(/(--[\w-]+)\s*:/g)) out.add(m[1]);
+  return out;
+}
+function appearanceOverlayTokens() {
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "features", "agent", "appearanceStore.ts"), "utf8");
+  const m = /APPEARANCE_TOKENS = \[([\s\S]*?)\] as const/.exec(src);
+  return m ? [...m[1].matchAll(/"(--[\w-]+)"/g)].map((x) => x[1]) : [];
+}
+const overlayTokens = appearanceOverlayTokens();
+if (!overlayTokens.length) {
+  console.log("FAIL: cannot parse APPEARANCE_TOKENS from appearanceStore.ts");
+  fails++;
+} else {
+  const defined = cssVarKeys(fs.readFileSync(baseCss, "utf8"));
+  for (const f of files) cssVarKeys(fs.readFileSync(path.join(dir, f), "utf8")).forEach((k) => defined.add(k));
+  const missOverlay = overlayTokens.filter((k) => !defined.has(k));
+  if (missOverlay.length) {
+    console.log(`FAIL: appearance overlay tokens missing from themes: ${missOverlay.join(", ")}`);
+    fails++;
+  } else {
+    console.log(`OK: ${overlayTokens.length} appearance overlay tokens all defined across themes`);
+  }
+  /* iframe 主题桥一致性：广播采集键（extRuntime.THEME_VAR_KEYS）必须是覆盖白名单子集，
+     否则 Agent 改了某个广播键、iframe 收到的却是旧值（跨主界面/iframe 不一致）。 */
+  const extSrc = fs.readFileSync(path.join(__dirname, "..", "src", "features", "ai", "extRuntime.ts"), "utf8");
+  const tvk = /THEME_VAR_KEYS = \[([\s\S]*?)\];/.exec(extSrc);
+  const themeVarKeys = tvk ? [...tvk[1].matchAll(/"(--[\w-]+)"/g)].map((x) => x[1]) : [];
+  if (!themeVarKeys.length) {
+    console.log("FAIL: cannot parse THEME_VAR_KEYS from extRuntime.ts");
+    fails++;
+  } else {
+    const notCovered = themeVarKeys.filter((k) => !overlayTokens.includes(k));
+    if (notCovered.length) {
+      console.log(`FAIL: iframe broadcast keys not coverable by appearance overlay: ${notCovered.join(", ")}`);
+      fails++;
+    } else {
+      console.log(`OK: all ${themeVarKeys.length} iframe theme-bridge keys are overlay-coverable`);
+    }
+  }
+}
+
 console.log(fails === 0 ? "OK: all theme contrast checks passed" : `FAIL: ${fails} problem(s)`);
 process.exit(fails === 0 ? 0 : 1);

@@ -20,6 +20,8 @@ import { collectThemeVars } from "./extRuntime";
 import { getChatFeed } from "./aiChatFeed";
 import { injectBridge } from "./widgetBridge";
 import { WidgetMenu, type WidgetMenuItem } from "./widgetShell";
+import { verdictPluginMessage, verdictPassivePush } from "../plugins/pluginIsolation";
+import { reportViolation, type PluginFrameCtx } from "../plugins/pluginStore";
 
 interface Props {
   widget: { id: string; name: string; html: string };
@@ -33,6 +35,8 @@ interface Props {
   ) => Promise<{ data?: unknown } | void> | { data?: unknown } | void;
   /** 系统菜单项（置顶/穿透/弹出桌面/关闭…），由宿主提供；自定义菜单默认拼接在其后 */
   sysMenu?: () => WidgetMenuItem[];
+  /** P88b-3 §11 插件隔离上下文：仅插件库影子扩展携带；legacy 迁移件保持旧行为 */
+  pluginCtx?: PluginFrameCtx;
 }
 
 export interface WidgetFrameHandle {
@@ -81,7 +85,7 @@ function toItems(
 }
 
 export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetFrame(
-  { widget, isDesktop, bare, onHeight, onWin, sysMenu },
+  { widget, isDesktop, bare, onHeight, onWin, sysMenu, pluginCtx },
   ref,
 ) {
   const frameRef = useRef<HTMLIFrameElement>(null);
@@ -91,7 +95,12 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
   const cursorCleanup = useRef<(() => void) | null>(null);
   const menusRef = useRef<MenuState>(EMPTY_MENUS);
   const [menu, setMenu] = useState<{ name: string; x: number; y: number } | null>(null);
-  const srcDoc = useMemo(() => injectBridge(widget.html, !!bare), [widget.html, bare]);
+  // 新插件（非 legacy 迁移件）：注入 CSP + nonce 握手；迁移件与普通扩展保持原行为（M1 旁路）
+  const enforced = !!pluginCtx && !pluginCtx.legacy;
+  const srcDoc = useMemo(
+    () => injectBridge(widget.html, !!bare, enforced ? { csp: true, nonce: pluginCtx!.nonce } : undefined),
+    [widget.html, bare, enforced, pluginCtx],
+  );
 
   useImperativeHandle(ref, () => ({
     showMenu: (vx: number, vy: number) =>
@@ -112,6 +121,14 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
       if (!frame || e.source !== frame.contentWindow) return;
       const d = e.data as { type?: string } & Record<string, unknown>;
       if (!d || typeof d.type !== "string" || !d.type.startsWith("aiw:")) return;
+      // P88b-3 §11：新插件消息必须携带实例 nonce 且具备对应能力；违规忽略并上报（累计隔离）
+      if (pluginCtx) {
+        const verdict = verdictPluginMessage(d.type, d.n, pluginCtx);
+        if (verdict === "reject_nonce" || verdict === "reject_cap") {
+          reportViolation(pluginCtx.pkgId, `${d.type}:${verdict}`);
+          return;
+        }
+      }
       const target = frame.contentWindow;
       switch (d.type) {
         case "aiw:ready": {
@@ -127,8 +144,12 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
             "*",
           );
           const snap = lastSnap.current ?? buildSnap();
-          target?.postMessage({ type: "aiw:snap", snap }, "*");
-          target?.postMessage({ type: "aiw:chat", feed: getChatFeed() }, "*");
+          // 无 telemetry.read 能力的新插件不接收数据流（主题/屏幕等握手照常）
+          const pushData = !pluginCtx || pluginCtx.legacy || pluginCtx.caps.includes("telemetry.read");
+          if (pushData) {
+            target?.postMessage({ type: "aiw:snap", snap }, "*");
+            target?.postMessage({ type: "aiw:chat", feed: getChatFeed() }, "*");
+          }
           if (isDesktop) {
             // 桌面窗：向主窗口索取主题变量 + 上报显示器逻辑尺寸（边界感知）
             requestThemeViaHub();
@@ -334,7 +355,7 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
       cursorCleanup.current?.();
       cursorCleanup.current = null;
     };
-  }, [isDesktop, bare, onHeight, onWin, widget.id]);
+  }, [isDesktop, bare, onHeight, onWin, widget.id, pluginCtx]);
 
   // 按键转发：桌面窗聚焦即全收；应用内浮窗仅指针悬停在组件上时转发，
   // 且主窗口焦点在输入控件时不转发（保护聊天输入框）
@@ -409,10 +430,14 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
       if (!d || typeof d.type !== "string") return;
       if (d.type === "aiw:snap" && d.snap) {
         lastSnap.current = d.snap;
-        frameRef.current?.contentWindow?.postMessage({ type: "aiw:snap", snap: d.snap }, "*");
+        if (!pluginCtx || verdictPassivePush("aiw:snap", pluginCtx)) {
+          frameRef.current?.contentWindow?.postMessage({ type: "aiw:snap", snap: d.snap }, "*");
+        }
       } else if (d.type === "aiw:chat") {
         // AI 对话状态（思考中/输出中/完成 + 思维链/正文尾部）→ 小部件感知 AI
-        frameRef.current?.contentWindow?.postMessage(d, "*");
+        if (!pluginCtx || verdictPassivePush("aiw:chat", pluginCtx)) {
+          frameRef.current?.contentWindow?.postMessage(d, "*");
+        }
       } else if (d.type === "aiw:theme") {
         // 主题桥：换肤实时跟随（hub 在主窗口广播）
         frameRef.current?.contentWindow?.postMessage(d, "*");
@@ -429,7 +454,7 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
       chan.close();
       if (chanRef.current === chan) chanRef.current = null;
     };
-  }, [widget.id]);
+  }, [widget.id, pluginCtx]);
 
   // 组装菜单：自定义项（注册表）+ 系统项（宿主提供，system:false 可隐藏）
   let menuItems: WidgetMenuItem[] = [];

@@ -1,130 +1,92 @@
-/**
- * MCP 桥 E2E 冒烟（P64c-2）：spawn dist-cli/uartix-mcp.cjs，对其 stdio 说 MCP 协议。
- *
- * 两级断言：
- *   1. 协议层（无需 Uartix+ 在跑）：initialize 版本回显 → tools/list 8 工具 →
- *      tools/call 未知工具协议错误 → tools/call get_status 在 app 缺席时返回
- *      isError 结果（spec：工具执行错误走 result.isError，不走协议错误）。
- *   2. 全链路（app 在跑且「启用 MCP 桥」）：get_status 返回 ok 数据。
- *
- * 运行：npm run build:mcp && npm run mcp:e2e   （协议级断言不过 → 退出码 1）
- */
+/** Isolated MCP stdio + fake loopback bridge regression. Never reads a real endpoint or sends to devices. */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { createServer } from "node:net";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import assert from "node:assert/strict";
 
-const CLI = "dist-cli/uartix-mcp.cjs";
-if (!existsSync(CLI)) {
-  console.error(`缺少 ${CLI}，先运行 npm run build:mcp`);
-  process.exit(2);
-}
-
-const child = spawn(process.execPath, [CLI], { stdio: ["pipe", "pipe", "pipe"] });
-let buf = "";
-const pending = [];
-let reqId = 0;
-
+const dir = mkdtempSync(join(tmpdir(), "uartix-mcp-test-"));
+const endpoint = join(dir, "endpoint.json");
+const sockets = new Set();
+let jobsSupported = true;
+let callCount = 0;
+const server = createServer((socket) => {
+  sockets.add(socket); socket.on("close", () => sockets.delete(socket));
+  let buf = "";
+  socket.setEncoding("utf8");
+  socket.on("data", (chunk) => {
+    buf += chunk;
+    for (;;) {
+      const i = buf.indexOf("\n"); if (i < 0) break;
+      const req = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+      if (req.op === "auth") {
+        socket.write(JSON.stringify({ ok: true, data: { proto: 1, capabilities: jobsSupported ? { jobs: { version: 1 } } : {} } }) + "\n");
+      } else if (req.op === "call") {
+        callCount++;
+        if (req.kind === "get_status") {
+          // Regression: connect timer must NOT linger as a two-second socket idle timer.
+          const timer = setTimeout(() => socket.write(JSON.stringify({ ok: true, data: { status: "test", delayedMs: 2300 } }) + "\n"), 2300);
+          socket.once("close", () => clearTimeout(timer));
+        } else if (req.kind === "run_sequence") socket.write(JSON.stringify({ ok: false, err: "async_required: no execution" }) + "\n");
+        else if (req.kind === "create_job") socket.write(JSON.stringify({ ok: true, data: { accepted: true, jobId: "fake:one", state: "queued" } }) + "\n");
+        else if (req.kind === "wait_event") setTimeout(() => {
+          if (!socket.destroyed) socket.write(JSON.stringify({ ok: true, data: { events: [], eventSeq: 1 } }) + "\n");
+        }, 1000);
+        else socket.write(JSON.stringify({ ok: true, data: { jobId: "fake:one", state: "succeeded" } }) + "\n");
+      }
+    }
+  });
+});
+await new Promise((r) => server.listen(0, "127.0.0.1", r));
+writeFileSync(endpoint, JSON.stringify({ port: server.address().port, token: "synthetic-test-token-only", pid: process.pid }));
+const child = spawn(process.execPath, [resolve("dist-cli/uartix-mcp.cjs")], {
+  stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, UARTIX_ENDPOINT: endpoint },
+});
+let buf = ""; let id = 0; const pending = new Map();
 child.stdout.setEncoding("utf8");
 child.stdout.on("data", (chunk) => {
   buf += chunk;
   for (;;) {
-    const i = buf.indexOf("\n");
-    if (i < 0) break;
-    const line = buf.slice(0, i).trim();
-    buf = buf.slice(i + 1);
-    if (!line) continue;
-    const p = pending.shift();
-    if (!p) continue;
-    try {
-      p.resolve(JSON.parse(line));
-    } catch (e) {
-      p.reject(e);
-    }
+    const i = buf.indexOf("\n"); if (i < 0) break;
+    const res = JSON.parse(buf.slice(0, i)); buf = buf.slice(i + 1);
+    const p = pending.get(res.id); if (p) { pending.delete(res.id); clearTimeout(p.timer); p.resolve(res); }
   }
 });
-child.stderr.setEncoding("utf8");
-child.stderr.on("data", (d) => process.stderr.write(`  [cli] ${d}`));
-
-function rpc(method, params = undefined) {
-  const id = ++reqId;
-  const msg = { jsonrpc: "2.0", id, method };
-  if (params !== undefined) msg.params = params;
-  return new Promise((resolve, reject) => {
-    pending.push({ resolve, reject });
-    child.stdin.write(JSON.stringify(msg) + "\n");
-    setTimeout(() => {
-      const idx = pending.findIndex((x) => x._id === id);
-      if (idx >= 0) {
-        pending.splice(idx, 1);
-        reject(new Error(`rpc 超时：${method}`));
-      }
-    }, 5000)._id = id;
-  });
-}
-function notify(method, params = undefined) {
-  const msg = { jsonrpc: "2.0", method };
-  if (params !== undefined) msg.params = params;
-  child.stdin.write(JSON.stringify(msg) + "\n");
-}
-
-let failed = 0;
-const ok = (cond, label) => {
-  console.log(`  ${cond ? "PASS" : "FAIL"}  ${label}`);
-  if (!cond) failed++;
-};
-
-/* ---- 1. initialize：协议版本回显 + serverInfo ---- */
-const VER = "2025-06-18";
-const init = await rpc("initialize", { protocolVersion: VER, capabilities: {}, clientInfo: { name: "mcp-e2e", version: "0" } });
-ok(init.result?.protocolVersion === VER, `initialize 回显协议版本 ${VER}`);
-ok(init.result?.serverInfo?.name === "uartix", "serverInfo.name = uartix");
-ok(init.result?.capabilities?.tools !== undefined, "capabilities.tools 已声明");
-notify("notifications/initialized");
-
-/* ---- 2. tools/list：10 工具 ---- */
-const list = await rpc("tools/list");
-const tools = list.result?.tools ?? [];
-ok(tools.length === 10, `tools/list 返回 10 个工具（实际 ${tools.length}）`);
-ok(tools.every((t) => t.name && t.description && t.inputSchema?.type === "object"), "每个工具 name/description/inputSchema 齐全");
-
-/* ---- 3. 未知工具 → 协议级 -32602 ---- */
-const bad = await rpc("tools/call", { name: "no_such_tool", arguments: {} });
-ok(bad.error?.code === -32602, "未知工具返回协议错误 -32602");
-
-/* ---- 4. get_status：app 缺席 → isError 工具结果；app 在跑 → 真数据 ---- */
-function endpointPath() {
-  const name = join("com.uartix.plus", "mcp-endpoint.json");
-  if (platform() === "win32") return join(process.env.APPDATA ?? "", name);
-  if (platform() === "darwin") return join(homedir(), "Library", "Application Support", name);
-  return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), name);
-}
-const status = await rpc("tools/call", { name: "get_status", arguments: {} });
-const appLive = existsSync(endpointPath());
-if (appLive) {
-  let data = null;
-  try {
-    data = JSON.parse(status.result?.content?.[0]?.text ?? "null");
-  } catch {
-    /* 非 JSON */
-  }
-  const live = data && typeof data === "object" && "status" in data;
-  ok(live && !status.result?.isError, "全链路 get_status 返回真实状态（app 在跑）");
-  if (live) console.log("  └─", JSON.stringify(data));
-} else {
-  ok(status.result?.isError === true, "app 缺席时 get_status 返回 isError 工具结果（协议层正确）");
-  ok(String(status.result?.content?.[0]?.text ?? "").includes("MCP 发现文件"), "错误文案引导用户到 设置 → 集成");
-}
-
-child.stdin.end();
-setTimeout(() => {
-  child.kill();
-  console.log(failed === 0 ? "\nE2E 全部通过" : `\n${failed} 项失败`);
-  process.exit(failed === 0 ? 0 : 1);
-}, 300);
-
-process.on("unhandledRejection", (e) => {
-  console.error("E2E 异常：", e);
-  child.kill();
-  process.exit(1);
+child.stderr.resume();
+const rpc = (method, params = {}) => new Promise((resolve, reject) => {
+  const reqId = ++id;
+  const timer = setTimeout(() => { pending.delete(reqId); reject(new Error(`RPC timeout: ${method}`)); }, 8000);
+  pending.set(reqId, { resolve, reject, timer });
+  child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: reqId, method, params }) + "\n");
 });
+const call = (name, args = {}) => rpc("tools/call", { name, arguments: args });
+const data = (r) => JSON.parse(r.result.content[0].text);
+let checks = 0;
+function check(cond, label) { assert.ok(cond, label); checks++; console.log(`PASS ${label}`); }
+try {
+  const init = await rpc("initialize", { protocolVersion: "2025-06-18" });
+  check(init.result.protocolVersion === "2025-06-18", "initialize version echo");
+  const list = await rpc("tools/list");
+  check(list.result.tools.length === 14, "jobs v1 publishes 14 tools");
+  check(["create_job", "get_job", "wait_event", "cancel_job"].every((n) => list.result.tools.some((t) => t.name === n)), "four job tools negotiated");
+  check((await rpc("tools/call", { name: "unknown" })).error.code === -32602, "unknown tool is protocol error");
+  check(data(await call("get_status")).delayedMs === 2300, "connected RPC survives more than two seconds idle");
+  check(data(await call("create_job", { taskType: "sequence.validate", idempotencyKey: "test" })).accepted, "create receipt forwarded without final wait");
+  check(data(await call("wait_event", { jobId: "fake:one", afterSeq: 1, waitMs: 1000 })).events.length === 0, "one-second empty event wait succeeds");
+  check((await call("run_sequence")).result.isError, "legacy async_required remains an error, not a queued success");
+  jobsSupported = false;
+  check((await rpc("tools/list")).result.tools.length === 10, "old app hides job tools on renegotiation");
+  const before = callCount;
+  const unsupported = await call("create_job");
+  check(unsupported.result.isError && unsupported.result.content[0].text.includes("jobs_not_supported") && callCount === before, "old app rejects job call before dispatch and never falls back");
+  jobsSupported = true;
+  check((await rpc("tools/list")).result.tools.length === 14, "capabilities are not stale after app change");
+  console.log(`MCP isolated integration: ${checks} checks passed; no native app/device exercised.`);
+} finally {
+  child.stdin.end(); child.kill();
+  for (const p of pending.values()) clearTimeout(p.timer);
+  for (const s of sockets) s.destroy();
+  await new Promise((r) => server.close(r));
+  rmSync(dir, { recursive: true, force: true });
+}

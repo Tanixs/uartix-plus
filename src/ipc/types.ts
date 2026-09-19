@@ -16,6 +16,7 @@ export type PanelId =
   | "sentinel"
   | "spectrum"
   | "plot3d"
+  | "metrics"
   | "orchestrator"
   | "vdev";
 

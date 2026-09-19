@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useExtensions, setOpen, type AiExtension } from "./extensionStore";
 import { WidgetFrame, type WidgetFrameHandle } from "./WidgetFrame";
 import { popWidgetToDesktop, type WidgetMenuItem } from "./widgetShell";
+import { pluginCtxForExt, type PluginFrameCtx } from "../plugins/pluginStore";
 
 function zoomFactor(): number {
   const z = parseFloat(document.documentElement.style.zoom || "100");
@@ -17,12 +18,14 @@ function SingleFloat({
   html,
   chrome,
   index,
+  pluginCtx,
 }: {
   id: string;
   name: string;
   html: string;
   chrome?: "none";
   index: number;
+  pluginCtx?: PluginFrameCtx;
 }) {
   const bare = chrome === "none";
   const [pos, setPos] = useState({ x: window.innerWidth - 320, y: 80 + index * 40 });
@@ -157,6 +160,7 @@ function SingleFloat({
           onHeight={(h) => setSize((s) => ({ ...s, h }))}
           onWin={onWin}
           sysMenu={sysMenu}
+          pluginCtx={pluginCtx}
         />
       </div>
     </div>,
@@ -180,6 +184,7 @@ export function WidgetFloats() {
           html={w.html ?? ""}
           chrome={w.chrome}
           index={i}
+          pluginCtx={pluginCtxForExt(w.pluginRef)}
         />
       ))}
     </>

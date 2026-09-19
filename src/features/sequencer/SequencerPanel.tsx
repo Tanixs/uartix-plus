@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { tx, useLocale } from "../../i18n/strings";
-import { IconDownload, IconPlay, IconPlus, IconStop, IconTrash, IconUpload } from "../../shared/icons";
+import { IconDownload, IconPlay, IconPlus, IconStop, IconTrash, IconUpload, IconArrowUp, IconArrowDown, IconChevron, IconCopy, IconClose } from "../../shared/icons";
 import { alertDialog, confirmDialog } from "../../shared/Dialog";
 import * as sequencerStore from "./sequencerStore";
 import { renderReportHtml } from "./report";
@@ -444,12 +444,12 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
           <span className={`sq-kind sq-k-${KIND_LABEL[step.kind].cls}`}>{tx(KIND_LABEL[step.kind].zh, KIND_LABEL[step.kind].en)}</span>
           <StepFields suite={suite} step={step} />
           <span className="sq-acts">
-            <button className="sq-a" onClick={() => moveBy(step.id, -1)} title={tx("上移", "Move up")}>↑</button>
-            <button className="sq-a" onClick={() => moveBy(step.id, 1)} title={tx("下移", "Move down")}>↓</button>
-            <button className="sq-a" onClick={() => indent(step.id)} title={tx("缩进：移入上一个分组", "Indent: move into previous group")}>→</button>
-            <button className="sq-a" onClick={() => outdent(step.id)} title={tx("外移：移出所在分组", "Outdent: move out of the group")}>←</button>
-            <button className="sq-a" onClick={() => sequencerStore.duplicateStep(suite.id, step.id)} title={tx("复制该步（含子树）", "Duplicate (with subtree)")}>⧉</button>
-            <button className="sq-a bad" onClick={() => sequencerStore.removeStep(suite.id, step.id)} title={tx("删除", "Delete")}>×</button>
+            <button className="sq-a" onClick={() => moveBy(step.id, -1)} title={tx("上移", "Move up")}><IconArrowUp /></button>
+            <button className="sq-a" onClick={() => moveBy(step.id, 1)} title={tx("下移", "Move down")}><IconArrowDown /></button>
+            <button className="sq-a" onClick={() => indent(step.id)} title={tx("缩进：移入上一个分组", "Indent: move into previous group")}><IconChevron dir="right" /></button>
+            <button className="sq-a" onClick={() => outdent(step.id)} title={tx("外移：移出所在分组", "Outdent: move out of the group")}><span style={{ display: "inline-block", transform: "rotate(180deg)" }}><IconChevron dir="right" /></span></button>
+            <button className="sq-a" onClick={() => sequencerStore.duplicateStep(suite.id, step.id)} title={tx("复制该步（含子树）", "Duplicate (with subtree)")}><IconCopy /></button>
+            <button className="sq-a bad" onClick={() => sequencerStore.removeStep(suite.id, step.id)} title={tx("删除", "Delete")}><IconClose /></button>
           </span>
         </div>
         {step.kind === "group" && (

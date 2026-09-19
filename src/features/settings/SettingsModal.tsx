@@ -12,28 +12,17 @@ import { alertDialog, confirmDialog } from "../../shared/Dialog";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
-import {
-  clearAll,
-  removeExt,
-  setEnabled,
-  setOpen,
-  useExtensions,
-  importAll,
-  exportAll,
-  exportSome,
-  EXT_TYPE_LABEL,
-  PERM_LABEL,
-  type AiExtension,
-  type ExtType,
-} from "../ai/extensionStore";
-import { applyStyleExts, startScript, stopScript, toast } from "../ai/extRuntime";
+import { PluginManagerBody } from "../plugins/PluginLibraryDialog";
 import * as sentinelStore from "../sentinel/sentinelStore";
+import * as timeCursor from "../analysis/timeCursorStore";
 import * as mcpServer from "../mcp/mcpServer";
+import { jobCenter } from "../mcp/jobExecutor";
+import { JobDetails } from "../mcp/JobDetails";
 import { OperatorGenBlock } from "../operator/OperatorGen";
 import { mcpServerConfig } from "../mcp/mcpTools";
 import { imageStoreStats, setImageLimits, clearAllImages } from "../ai/imageStore";
-import { popWidgetToDesktop } from "../ai/widgetShell";
-import { openExtPanel } from "../ai/extBus";
+import { toast } from "../ai/extRuntime";
+import { cleanBaseUrl } from "../agent/provider";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { IconEye, IconEyeOff, IconEdit, IconTrash } from "../../shared/icons";
@@ -117,299 +106,80 @@ async function loadJson<T>(kinds: string[]): Promise<T | null> {
   }
 }
 
-/** 权限短标签（行内展示；完整描述见 PERM_LABEL，hover 行可见） */
-const PERM_SHORT: Record<string, string> = {
-  css: "CSS",
-  read: "读",
-  send: "发",
-  script: "JS",
-};
+/* ---------------- 插件管理页（旧扩展管理已废弃，内嵌插件库主体） ---------------- */
 
-const EXT_FILTERS: { key: "all" | ExtType; label: string }[] = [
-  { key: "all", label: "全部" },
-  { key: "theme", label: EXT_TYPE_LABEL.theme },
-  { key: "style", label: EXT_TYPE_LABEL.style },
-  { key: "widget", label: EXT_TYPE_LABEL.widget },
-  { key: "panel", label: EXT_TYPE_LABEL.panel },
-  { key: "script", label: EXT_TYPE_LABEL.script },
-];
-
-/* ---------------- 扩展管理页 ---------------- */
-
-function ExtPage({ notify }: { notify: (s: string) => void }) {
-  const settings = useSettings();
-  const es = useExtensions();
-  const [filter, setFilter] = useState<"all" | ExtType>("all");
-  const [sel, setSel] = useState<Set<string>>(() => new Set());
-
-  const applyToggle = async (ext: AiExtension, on: boolean) => {
-    if (ext.type === "script" && on) {
-      if (!settings.aiCreativity || !settings.aiScript) {
-        notify("启用脚本需要：AI 服务 → 创造模式 + 允许行为脚本");
-        return;
-      }
-      if (!(await confirmDialog(`启用脚本「${ext.name}」将在主界面执行其 JS（高权限）。确定？`))) return;
-    }
-    setEnabled(ext.id, on);
-    if (ext.type === "script") {
-      if (on) startScript(ext);
-      else stopScript(ext.id);
-    } else if (ext.type === "theme" || ext.type === "style") {
-      applyStyleExts();
-    }
-  };
-
-  /** 批量启停：脚本不参与批量启用（需逐个确认），批量停用包含脚本 */
-  const bulk = (on: boolean) => {
-    for (const e of es.exts) {
-      if (e.enabled === on) continue;
-      if (e.type === "script" && on) continue;
-      setEnabled(e.id, on);
-    }
-    if (es.exts.some((e) => e.type === "theme" || e.type === "style")) applyStyleExts();
-    notify(on ? "已启用全部非脚本扩展" : "已停用全部扩展");
-  };
-
-  const popToDesktop = (ext: AiExtension) => {
-    popWidgetToDesktop({ id: ext.id, name: ext.name, chrome: ext.chrome });
-  };
-
-  const doExport = async () => {
-    const path = await save({
-      title: "导出 AI 扩展",
-      defaultPath: "uartix-extensions.json",
-      filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
-    });
-    if (typeof path !== "string") return;
-    try {
-      await invoke("save_text_file", { path, content: exportAll() });
-      notify("扩展已导出");
-    } catch (e) {
-      notify(`导出失败：${String(e).slice(0, 80)}`);
-    }
-  };
-
-  const doExportSelected = async () => {
-    const ids = es.exts.filter((e) => sel.has(e.id)).map((e) => e.id);
-    if (!ids.length) return;
-    const path = await save({
-      title: "导出所选扩展",
-      defaultPath: `uartix-extensions-${ids.length}.json`,
-      filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
-    });
-    if (typeof path !== "string") return;
-    try {
-      await invoke("save_text_file", { path, content: exportSome(ids) });
-      notify(`已导出 ${ids.length} 个扩展`);
-    } catch (e) {
-      notify(`导出失败：${String(e).slice(0, 80)}`);
-    }
-  };
-
-  const doImport = async () => {
-    const path = await open({
-      title: "导入 AI 扩展",
-      multiple: false,
-      filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
-    });
-    if (typeof path !== "string") return;
-    try {
-      const content = await invoke<string>("read_text_file", { path });
-      notify(importAll(content).msg);
-    } catch (e) {
-      notify(`导入失败：${String(e).slice(0, 80)}`);
-    }
-  };
-
-  const list = filter === "all" ? es.exts : es.exts.filter((e) => e.type === filter);
-  const countOf = (k: "all" | ExtType) =>
-    k === "all" ? es.exts.length : es.exts.filter((x) => x.type === k).length;
-
+function ExtPage() {
   return (
-    <>
-      <div className="ext-toolbar">
-        <div className="ext-chips">
-          {EXT_FILTERS.map((f) => (
-            <button
-              key={f.key}
-              className={filter === f.key ? "on" : ""}
-              onClick={() => setFilter(f.key)}
-            >
-              {f.label}
-              <em>{countOf(f.key)}</em>
-            </button>
-          ))}
-        </div>
-        <div className="ext-ops">
-          <label className="ext-selall">
-            <input
-              type="checkbox"
-              ref={(el) => {
-                if (el) el.indeterminate = sel.size > 0 && sel.size < list.length;
-              }}
-              checked={list.length > 0 && list.every((e) => sel.has(e.id))}
-              onChange={() => {
-                setSel((prev) => {
-                  const next = new Set(prev);
-                  if (list.length > 0 && list.every((e) => next.has(e.id))) {
-                    list.forEach((e) => next.delete(e.id));
-                  } else {
-                    list.forEach((e) => next.add(e.id));
-                  }
-                  return next;
-                });
-              }}
-            />
-            {tx("全选", "All")}
-          </label>
-          <button
-            className="btn"
-            disabled={!sel.size}
-            title={tx("将勾选的扩展打包为一个分享包", "Pack the checked extensions into one share file")}
-            onClick={() => void doExportSelected()}
-          >
-            {tx("导出所选", "Export selected")}
-            {sel.size ? `（${sel.size}）` : ""}
-          </button>
-          <button className="btn" onClick={() => bulk(true)} disabled={!es.exts.length}>
-            全部启用
-          </button>
-          <button className="btn" onClick={() => bulk(false)} disabled={!es.exts.length}>
-            全部停用
-          </button>
-          <button className="btn" onClick={() => void doImport()}>导入</button>
-          <button className="btn" onClick={() => void doExport()}>导出全部</button>
-        </div>
+    <div className="set-plg-embed">
+      <PluginManagerBody />
+    </div>
+  );
+}
+
+/* ---------------- AI 服务：测试连接（E2） ---------------- */
+
+/** 按 Rust ai_agent_turn 的错误文本分类：密钥 / 网络 / 其他 */
+function classifyConnError(e: string): string {
+  if (/HTTP 401|HTTP 403|Unauthorized|Forbidden/i.test(e)) return "密钥无效";
+  if (/连接失败|中断|超时|timeout|timed out|Could not connect|dns|error sending request|invalid URL/i.test(e))
+    return "无法连接服务端";
+  return e.slice(0, 80);
+}
+
+function AiConnTestRow() {
+  const settings = useSettings();
+  const [st, setSt] = useState<{ status: "idle" | "testing" | "ok" | "err"; msg: string }>({
+    status: "idle",
+    msg: "",
+  });
+  const configured =
+    settings.aiPreset === "ollama" ? settings.aiBaseUrl.trim().length > 0 : settings.aiApiKey.trim().length > 0 && settings.aiBaseUrl.trim().length > 0;
+  const run = async () => {
+    setSt({ status: "testing", msg: "" });
+    const t0 = Date.now();
+    try {
+      await invoke("ai_agent_turn", {
+        reqId: crypto.randomUUID(),
+        baseUrl: cleanBaseUrl(settings.aiBaseUrl),
+        apiKey: settings.aiApiKey,
+        model: settings.aiModel,
+        format: settings.aiFormat,
+        proxy: settings.aiProxy || null,
+        noProxy: settings.aiNoProxy || null,
+        messages: [{ role: "user", content: "ping" }],
+        tools: [],
+      });
+      setSt({ status: "ok", msg: `连接正常 · ${Date.now() - t0}ms` });
+    } catch (e) {
+      setSt({ status: "err", msg: classifyConnError(String(e)) });
+    }
+  };
+  return (
+    <div className="set-row">
+      <label>
+        {tx("测试连接", "Test connection")}
+        <HelpHint text={tx("向当前配置的模型服务发一条最小请求（ping），验证地址/密钥/网络是否可用；不消耗多少额度", "Sends one minimal request (ping) to the configured model endpoint to verify URL / key / network; costs almost no quota")} />
+      </label>
+      <div className="set-ctl set-conn-test">
+        <button
+          className="btn"
+          disabled={!configured || st.status === "testing"}
+          title={configured ? tx("发一条 ping 请求验证配置", "Send a ping request to verify the config") : tx("请先填写 Base URL 与 API Key", "Fill in Base URL and API Key first")}
+          onClick={() => void run()}
+        >
+          {tx("测试连接", "Test connection")}
+        </button>
+        {st.status === "testing" && <span className="set-conn-note">{tx("测试中…", "Testing…")}</span>}
+        {st.status === "ok" && <span className="set-conn-note ok">{st.msg}</span>}
+        {st.status === "err" && <span className="set-conn-note err">{st.msg}</span>}
       </div>
-      {!settings.aiCreativity && (
-        <div className="ext-warn">
-          创造模式未开启：无法安装新扩展（已装扩展仍可使用）。到「AI 服务」页开启创造模式。
-        </div>
-      )}
-      {list.length === 0 ? (
-        <div className="ext-empty">
-          {es.exts.length === 0
-            ? "暂无扩展。开启创造模式后，在 AI 助手输入「做一个 XX 挂件/主题/面板」即可安装；也可在此导入他人分享的扩展包（uartix-extensions.json）。"
-            : "该类型下暂无扩展"}
-        </div>
-      ) : (
-        <div className="ext-list">
-          {list.map((e) => (
-            <div key={e.id} className={`ext-row${e.enabled ? " on" : ""}`} title={e.desc || e.name}>
-              <input
-                type="checkbox"
-                className="ext-check"
-                title={tx("选中以便打包导出", "Check to include in export")}
-                checked={sel.has(e.id)}
-                onChange={() =>
-                  setSel((prev) => {
-                    const n = new Set(prev);
-                    if (n.has(e.id)) n.delete(e.id);
-                    else n.add(e.id);
-                    return n;
-                  })
-                }
-              />
-              <label className="set-switch" title={e.enabled ? "停用" : "启用"}>
-                <input
-                  type="checkbox"
-                  checked={e.enabled}
-                  onChange={(ev) => void applyToggle(e, ev.target.checked)}
-                />
-                <span />
-              </label>
-              <div className="ext-info">
-                <div className="ext-name-line">
-                  <span className="ai-ext-badge">{EXT_TYPE_LABEL[e.type]}</span>
-                  <span className="ext-name">{e.name}</span>
-                  <span className="ext-ver">v{e.version}</span>
-                  {e.type === "script" && <span className="ext-risk">高权限</span>}
-                  {e.type === "script" && e.enabled && (
-                    <span className="ai-ext-running">运行中</span>
-                  )}
-                </div>
-                {e.desc && <div className="ext-desc">{e.desc}</div>}
-                <div
-                  className="ext-perms"
-                  title={`权限：${e.perms.map((p) => PERM_LABEL[p]).join("；")}`}
-                >
-                  {e.perms.map((p) => (
-                    <span key={p} className="ext-perm">
-                      {PERM_SHORT[p]}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div className="ai-widget-ops">
-                {e.type === "widget" && (
-                  <>
-                    <button
-                      className="btn"
-                      onClick={() => setOpen(e.id, !es.openIds.includes(e.id))}
-                    >
-                      {es.openIds.includes(e.id) ? "收起" : "打开"}
-                    </button>
-                    <button className="btn" onClick={() => void popToDesktop(e)}>
-                      桌面
-                    </button>
-                  </>
-                )}
-                {e.type === "panel" && (
-                  <button className="btn" onClick={() => openExtPanel(e.id)}>
-                    加入工作区
-                  </button>
-                )}
-                <button
-                  className="btn sm danger-btn"
-                  onClick={() => {
-                    void (async () => {
-                      if (!(await confirmDialog({ message: `删除扩展「${e.name}」？不可恢复。`, danger: true, okLabel: "删除" }))) return;
-                      if (e.type === "script") stopScript(e.id);
-                      removeExt(e.id);
-                      setSel((prev) => {
-                        const n = new Set(prev);
-                        n.delete(e.id);
-                        return n;
-                      });
-                      if (e.type === "theme" || e.type === "style") applyStyleExts();
-                    })();
-                  }}
-                >
-                  删除
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="set-danger">
-        <div className="set-danger-head">危险操作</div>
-        <div className="set-danger-body">
-          <button
-            className="btn danger-btn"
-            onClick={() => {
-              void (async () => {
-                if (!(await confirmDialog({ message: "清空全部扩展？（主题/样式/挂件/面板/脚本；协议/画布/命令不受影响）", danger: true }))) return;
-                for (const e of es.exts) if (e.type === "script") stopScript(e.id);
-                clearAll();
-                applyStyleExts();
-                notify("已清空全部扩展");
-              })();
-            }}
-          >
-            清空全部扩展
-          </button>
-          <span className="set-danger-note">
-            移除全部扩展并停用其效果；协议模板、控制画布、命令库不受影响。
-          </span>
-        </div>
-      </div>
-    </>
+    </div>
   );
 }
 
 export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayout, onSaveLayout }: { onClose: () => void; onResetLayout: (p: WorkspacePreset) => void; initialTab?: string; onApplyLayout: (id: string) => boolean; onSaveLayout: (name: string) => boolean }) {
   const settings = useSettings();
+  const timeLinked = useSyncExternalStore(timeCursor.subscribe, () => timeCursor.getSnapshot().linked);
   const snt = useSyncExternalStore(sentinelStore.subscribe, sentinelStore.getSnapshot);
   const layouts = useLayouts();
   const [layoutName, setLayoutName] = useState("");
@@ -418,6 +188,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const [showKey, setShowKey] = useState(false);
   const [mcpCliPath, setMcpCliPath] = useState(() => localStorage.getItem("vs.mcpCliPath") ?? "");
   const mcpSt = useSyncExternalStore(mcpServer.subscribe, mcpServer.getStatus);
+  const jobSt = useSyncExternalStore(jobCenter.subscribe, jobCenter.getSnapshot);
   const [appVersion, setAppVersion] = useState("");
   const [storage, setStorage] = useState<{ local: number; idb: { count: number; bytes: number } | null; quota: { usage: number; quota: number } | null } | null>(null);
   const [updState, setUpdState] = useState<{
@@ -485,7 +256,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     { key: "monitor", label: tx("监测", "Monitoring") },
     { key: "ai", label: t("set.ai") },
     { key: "ext", label: t("set.ext") },
-    { key: "mcp", label: tx("集成", "Integration") },
+    { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}` },
     { key: "io", label: t("set.io") },
     { key: "about", label: t("set.about") },
   ];
@@ -584,6 +355,18 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), tx("关闭呼吸灯、闪烁与过渡动画（不依赖系统设置）；低配设备或动画敏感场景可开", "Turn off pulsing, blinking and transitions regardless of the OS setting; useful on weak hardware or motion sensitivity"))}
+                {row(tx("跨面板时间联动", "Link panel time cursors"), (
+                  <label className="set-switch">
+                    <input type="checkbox" aria-label={tx("跨面板时间联动", "Link panel time cursors")} checked={timeLinked} onChange={(e) => timeCursor.setLinked(e.target.checked)} />
+                    <span />
+                  </label>
+                ), tx("同步 2D 时间横轴与 3D 的定位游标；关闭后不互相定位，但回放跳转仍会移动实际播放位置。本次运行有效。", "Synchronize 2D time-axis and 3D cursors. Disabling this stops cross-panel positioning, not actual replay seeks. Applies to this run."))}
+                {row(tx("分析包", "Analysis package"), (
+                  <button className="btn" onClick={() => {
+                    onClose();
+                    window.setTimeout(() => window.dispatchEvent(new Event("vs-analysis-export")), 0);
+                  }}>{tx("导出分析包…", "Export analysis package…")}</button>
+                ), tx("选择缓存窗口与模块，导出到本地新目录；不会自动上传。面板内也保留相关入口。", "Choose a cache window and modules, then export to a new local directory. Nothing is uploaded automatically. Panel shortcuts remain available."))}
                 {row(tx("断线自动重连", "Auto reconnect"), (
                   <label className="set-switch">
                     <input type="checkbox" checked={settings.autoReconnect} onChange={(e) => patch({ autoReconnect: e.target.checked })} />
@@ -990,6 +773,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), t("set.ai.thinking.tip"))}
+                <AiConnTestRow />
                 <details className="set-coll">
                   <summary>{t("set.ai.grp.net")}</summary>
                   <div className="set-coll-body">
@@ -1044,6 +828,39 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), t("set.ai.script.tip"))}
+                {/* P88e B2：Agent 通用工具权限（fs 白名单 + shell 总开关） */}
+                <div className="set-group-title">{tx("Agent 工具权限", "Agent tool permissions")}</div>
+                <div className="set-danger-note">
+                  {tx(
+                    "Agent 默认只能读写本应用数据。以下权限默认全部关闭，按需开启。",
+                    "The Agent can only touch app-internal data by default. The permissions below are all off until you enable them.",
+                  )}
+                </div>
+                {row(tx("Agent 文件白名单", "Agent file whitelist"), (
+                  <input
+                    className="input"
+                    style={{ width: 280 }}
+                    value={settings.agentFsRoots}
+                    placeholder={tx("如 D:\\Projects;D:\\data（留空=关闭）", "e.g. D:\\Projects;D:\\data (empty = off)")}
+                    onChange={(e) => patch({ agentFsRoots: e.target.value })}
+                  />
+                ), tx(
+                  "Agent 的 fs_read/fs_list 只能访问白名单内的路径；多个目录用分号分隔，留空表示文件工具关闭",
+                  "fs_read/fs_list can only access whitelisted paths; separate folders with semicolons; empty disables file tools",
+                ))}
+                {row(tx("Agent 允许执行命令", "Agent may run commands"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.agentShellEnabled}
+                      onChange={(e) => patch({ agentShellEnabled: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), tx(
+                  "命令执行总开关，默认关闭。开启后 Agent 仍需在「自定义」档位勾选命令行域，且每条命令都弹出批准卡逐条确认；单条命令 10s 超时自动终止、输出截断 64KB",
+                  "Master switch for shell_exec, off by default. Even when on, the Agent must pick the shell domain in custom scope and every command shows an approval card; 10s timeout and 64KB output cap per command",
+                ))}
                 <div className="set-row">
                   <label>
                     {t("set.ai.manage")}
@@ -1062,20 +879,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       className="btn danger-btn"
                       onClick={() => {
                         void (async () => {
-                          if (!(await confirmDialog({ message: "清除全部 AI 扩展？（主题/样式/小部件/面板/脚本；协议/画布/命令不受影响）", danger: true }))) return;
-                          clearAll();
-                          applyStyleExts();
-                          setMsg("已重置 AI 扩展");
-                        })();
-                      }}
-                    >
-                      {t("set.ai.reset")}
-                    </button>
-                    <button
-                      className="btn danger-btn"
-                      onClick={() => {
-                        void (async () => {
-                          if (!(await confirmDialog({ message: "恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与 AI 扩展，且不可恢复。确定继续？", danger: true, okLabel: "清除并重启准备" }))) return;
+                          if (!(await confirmDialog({ message: "恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与插件库，且不可恢复。确定继续？", danger: true, okLabel: "清除并重启准备" }))) return;
                           const kill: string[] = [];
                           for (let i = 0; i < localStorage.length; i++) {
                             const k = localStorage.key(i);
@@ -1094,7 +898,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 <div className="set-io-hint">{t("set.ai.privacy")}</div>
               </>
             )}
-            {tab === "ext" && <ExtPage notify={setMsg} />}
+            {tab === "ext" && <ExtPage />}
             {tab === "mcp" && (
               <>
                 <div className="set-group-title">{tx("MCP 服务器（AI IDE 反向集成）", "MCP server (AI IDE integration)")}</div>
@@ -1168,6 +972,40 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), tx("openPort/closePort、删除模板/命令/卡片等破坏性动作的开关（与 AI 脚本高权限同一集合）", "Gates openPort/closePort and destructive remove actions (same set as AI script high privilege)"))}
+                <div className="set-group-title">{tx("任务（P88a 异步任务）", "Jobs (async tasks)")}</div>
+                <div className="set-danger-note">{tx("收到≠成功；停止中≠已停止。取消不会撤销已发生的设备操作。", "Accepted is not success. Stopping is not stopped. Cancelling never undoes effects already sent.")}</div>
+                {jobSt.jobs.length === 0 ? (
+                  <div className="set-io-hint">
+                    {tx("暂无任务。异步任务经 MCP create_job 提交（sequence.validate / 仅无副作用步骤的 sequence.run），用 get_job 查询、cancel_job 停止；与短调用不同，提交后立刻返回任务号。", "No jobs. Submit async jobs via MCP create_job (sequence.validate / sequence.run with side-effect-free steps only), poll get_job and stop via cancel_job. Unlike short calls, submission returns a jobId immediately.")}
+                  </div>
+                ) : (
+                  <div className="set-usage" style={{ display: "inline-block", maxWidth: 460, textAlign: "left" }}>
+                    {jobSt.jobs.map((jobRow) => (
+                      <div key={jobRow.jobId} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
+                        <code style={{ fontSize: 11 }}>{jobRow.jobId.slice(-10)}</code>
+                        <span>{jobRow.taskType} · MCP · {Math.max(0, Math.round(((jobRow.finishedAt ?? Date.now()) - jobRow.createdAt) / 1000))}s</span>
+                        <JobDetails jobId={jobRow.jobId} />
+                        <span className={jobRow.state === "succeeded" ? "set-ok-note" : jobRow.state === "cancel_requested" || jobRow.state === "running" ? "set-danger-note" : ""}>
+                          {jobRow.state === "cancel_requested" ? tx("停止中", "stopping") : jobRow.state}
+                        </span>
+                        <span style={{ opacity: 0.7 }}>{jobRow.phase}</span>
+                        {jobRow.effectStatus !== "none" && <span>· effect={jobRow.effectStatus}</span>}
+                        {jobRow.resultAvailability === "result_evicted" && <span>· {tx("结果已淘汰", "result evicted")}</span>}
+                        {jobRow.error?.code === "needs_manual_confirmation" && <span>· {tx("需本机人工确认（不会自动执行）", "needs on-device manual confirmation (never auto-runs)")}</span>}
+                        {["queued", "running", "cancel_requested"].includes(jobRow.state) && (
+                          <button
+                            className="btn"
+                            style={{ padding: "0 8px", fontSize: 11 }}
+                            disabled={jobRow.state === "cancel_requested"}
+                            onClick={() => { void jobCenter.cancel(jobRow.jobId, "ui"); }}
+                          >
+                            {jobRow.state === "cancel_requested" ? tx("停止中…", "stopping…") : tx("取消", "Cancel")}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="set-group-title">{tx("运行状态", "Runtime status")}</div>
                 {row(tx("桥状态", "Bridge status"), (
                   <span className="set-usage">

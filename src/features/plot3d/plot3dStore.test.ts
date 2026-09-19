@@ -12,7 +12,7 @@
  * - 着色通道 valCarry 前向填充；绑定通道被删除 → 逐组自动解绑（悬空纠正语义）
  * - 三轴未绑齐不消费；从未消费的组不发噪声重灌批次；setSink(null) 停泵
  * - P87a A7 撤销/重做栈：配置入栈一步还原；重复值不压栈；清空不入栈；上限 50
- * - P70 时间游标：回放跟随 > 手动 scrub > null；seek 向后空批次回退、向前水位跳重；
+ * - P70 时间游标：显式 scrub（含共享预览）> 回放跟随 > null；seek 向后空批次回退、向前水位跳重；
  *   回放结束恢复 null；lowerBoundLe 二分边界
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
@@ -203,7 +203,7 @@ describe("P87a v1→v2 迁移等价", () => {
       ],
       fade: 7,
     });
-    const g = store.getGroup("g1");
+    const g = store.getGroup("g1")!;
     expect(g.name).toBe("G1"); // 空白名 → 默认
     expect(g.color).toBe("#4e9cef"); // 非 hex → 默认组色
     expect(g.pointSize).toBe(32); // 越界钳位
@@ -309,7 +309,7 @@ describe("P87a 撤销/重做栈", () => {
     expect(store.getSnapshot().canUndo).toBe(canBefore);
     store.updateGroup("g1", { chX: "mag" });
     store.undo();
-    expect(store.getGroup("g1").chX).toBe("ax");
+    expect(store.getGroup("g1")!.chX).toBe("ax");
   });
 
   it("clearData 不入栈（不可撤销语义）；requestClearData 下一拍驱动场景清组", () => {
@@ -324,6 +324,7 @@ describe("P87a 撤销/重做栈", () => {
     const q = gseq(calls, "g1");
     const last = q[q.length - 1];
     expect(last.reloaded).toBe(true); // 场景清空信号
+    expect(last.b).toEqual({ t: [], x: [], y: [], z: [], val: [] });
     // 清空后新数据从零画（水位已推到末端，历史不回放）
     h.setSeries(
       ser(
@@ -350,9 +351,9 @@ describe("P87a 撤销/重做栈", () => {
   it("resetSettings 可撤销（误点恢复）；恢复默认后组绑定清空", () => {
     bindG1();
     store.resetSettings();
-    expect(store.getGroup("g1").chX).toBe("");
+    expect(store.getGroup("g1")!.chX).toBe("");
     store.undo();
-    expect(store.getGroup("g1").chX).toBe("ax");
+    expect(store.getGroup("g1")!.chX).toBe("ax");
   });
 });
 
@@ -438,7 +439,7 @@ describe("plot3dStore 泵（P69/P75 回归组化）", () => {
     expect(q.length).toBeGreaterThanOrEqual(2);
     expect(q[1].reloaded).toBe(true);
     expect(q[1].b.t).toEqual([0, 0.01, 0.02, 0.03, 0.04, 0.05]);
-    expect(store.getGroup("g1").colorBy).toBe("time");
+    expect(store.getGroup("g1")!.colorBy).toBe("time");
     h.chans.push({ id: "mag", tplId: "t", fieldId: "f4", name: "磁场", color: "#ffff00", visible: true });
   });
 
@@ -453,9 +454,9 @@ describe("plot3dStore 泵（P69/P75 回归组化）", () => {
 
     h.chans.splice(0, 1); // 删除 ax（两组都引用）
     pump(1);
-    expect(store.getGroup("g1").chX).toBe("");
-    expect(store.getGroup("g2").chZ).toBe("");
-    expect(store.getGroup("g2").chX).toBe("mag"); // 其余绑定不动
+    expect(store.getGroup("g1")!.chX).toBe("");
+    expect(store.getGroup("g2")!.chZ).toBe("");
+    expect(store.getGroup("g2")!.chX).toBe("mag"); // 其余绑定不动
     h.chans.unshift({ id: "ax", tplId: "t", fieldId: "f1", name: "加计X", color: "#ff0000", visible: true });
   });
 
@@ -471,19 +472,19 @@ describe("plot3dStore 泵（P69/P75 回归组化）", () => {
     expect(gseq(calls, "g1")).toHaveLength(1);
   });
 
-  it("设置持久化：updateGroup 写 v2 localStorage；绑定/模式/渐隐落盘", () => {
+  it("设置持久化：updateGroup 写 v3 localStorage；绑定/模式/渐隐落盘", () => {
     store.updateGroup("g1", { chX: "ax", fade: 300, mode: "points" });
     const raw = localStorage.getItem("vs.plot3d.settings");
     expect(raw).toBeTruthy();
-    const parsed = JSON.parse(raw!) as { v: number; groups: { chX: string; fade: number; mode: string }[] };
-    expect(parsed.v).toBe(2);
-    expect(parsed.groups[0]).toMatchObject({ chX: "ax", fade: 300, mode: "points" });
+    const parsed = JSON.parse(raw!) as { v: number; groups: { id: string; chX: string; fade: number; mode: string }[] };
+    expect(parsed.v).toBe(3);
+    expect(parsed.groups[0]).toMatchObject({ id: "g1", chX: "ax", fade: 300, mode: "points" });
   });
 
   it("组可见性 = 视图类：落盘、不过锁、不压撤销栈", () => {
     bindG1();
     store.setGroupVisible("g1", false);
-    expect(store.getGroup("g1").visible).toBe(false);
+    expect(store.getGroup("g1")!.visible).toBe(false);
     expect(store.getSnapshot().canUndo).toBe(false);
     expect(JSON.parse(localStorage.getItem("vs.plot3d.settings")!).groups[0]).toMatchObject({
       visible: false,
@@ -491,7 +492,7 @@ describe("plot3dStore 泵（P69/P75 回归组化）", () => {
     setOperatorLocked(true);
     store.setGroupVisible("g1", true); // 锁定仍放行
     setOperatorLocked(false);
-    expect(store.getGroup("g1").visible).toBe(true);
+    expect(store.getGroup("g1")!.visible).toBe(true);
   });
 });
 
@@ -506,15 +507,15 @@ describe("P74c C1：Operator 只读边界（P87a 组化）", () => {
     store.setSetting({ showGrid: false, gridDensity: "coarse" });
     store.setSetting({ keyFlight: true, zoomToCursor: true, axisScale: "perAxis" });
     const s = store.getSnapshot().settings;
-    expect(store.getGroup("g1").chX).toBe("");
-    expect(store.getGroup("g2").mode).toBe("line");
+    expect(store.getGroup("g1")!.chX).toBe("");
+    expect(store.getGroup("g2")!.mode).toBe("line");
     expect(s.showGrid).toBe(true);
     expect(s.gridDensity).toBe("std");
     expect(s.keyFlight).toBe(false);
     expect(s.axisScale).toBe("uniform");
     expect(store.importSettingsFromPkg({ axisX: "ax", style: "points" })).toBe(false);
     store.resetSettings();
-    expect(store.getGroup("g1").chX).toBe("");
+    expect(store.getGroup("g1")!.chX).toBe("");
     expect(s.groups[0].notes).toBe("");
   });
 
@@ -642,7 +643,7 @@ describe("plot3dStore 时间游标（P70，全局共享一条时间轴）", () =
     store._setSessionForTest(() => probe2);
     store.setScrub(0.01);
     pump(1);
-    expect(calls[4].cursor).toBeCloseTo(0.04);
+    expect(calls[4].cursor).toBeCloseTo(0.01); // 显式 scrub 保持优先于回放时钟
   });
 
   it("lowerBoundLe：空/首/尾/重复 ts 边界（= drawRange 截断数）", () => {
@@ -734,10 +735,10 @@ describe("plot3dStore 椭球校准采样（P71 → P87a：采样源=组1）", ()
     expect(exported.groups[0].chX).toBe("ax");
     expect(exported.groups[0].fade).toBe(10);
     exported.groups[0].name = "改过了"; // 深拷贝：改导出不影响内存态
-    expect(store.getGroup("g1").name).toBe("G1");
+    expect(store.getGroup("g1")!.name).toBe("G1");
     // 导入：非法字段回退默认（归一化）
     expect(store.importSettingsFromPkg({ axisX: "p", fade: 999, style: "bogus" })).toBe(true);
-    const g = store.getGroup("g1");
+    const g = store.getGroup("g1")!;
     expect(g.chX).toBe("p");
     expect(g.fade).toBe(60);
     expect(g.mode).toBe("line");
@@ -1097,15 +1098,15 @@ describe("P87b 组变换 / 平面轨迹 / 朝向采样 / 导出同源", () => {
     bindG1();
     store.updateGroup("g2", { chX: "ay", chY: "az" });
     expect(store.alignToOrigin()).toBe(true);
-    const g1 = store.getGroup("g1");
-    const g2 = store.getGroup("g2");
+    const g1 = store.getGroup("g1")!;
+    const g2 = store.getGroup("g2")!;
     expect(g1.transform.offX).toBeCloseTo(-1, 9);
     expect(g1.transform.offY).toBeCloseTo(-11, 9);
     expect(g1.transform.offZ).toBeCloseTo(-21, 9);
     expect(g2.transform.offX).toBeCloseTo(-11, 9);
     expect(store.getSnapshot().canUndo).toBe(true);
     store.undo();
-    expect(store.getGroup("g1").transform.offX).toBe(0);
+    expect(store.getGroup("g1")!.transform.offX).toBe(0);
   });
 
   it("heading/model/transform 非法值归一化（updateGroup 深清洗）", () => {
@@ -1117,12 +1118,262 @@ describe("P87b 组变换 / 平面轨迹 / 朝向采样 / 导出同源", () => {
         transform: { rotZ: 45, scale: -1 },
       } as unknown as Parameters<typeof store.updateGroup>[1],
     );
-    const g = store.getGroup("g1");
+    const g = store.getGroup("g1")!;
     expect(g.heading.src).toBe("xAxis");
     expect(g.heading.yawSign).toBe(1);
     expect(g.model.kind).toBe("point");
     expect(g.model.scale).toBe(100);
     expect(g.transform.rotZ).toBe(45);
     expect(g.transform.scale).toBe(1e-6); // 负→钳下限
+  });
+});
+
+describe("P87e 弹性组数", () => {
+  it("v3 数字开头 UUID 第四组往返保持身份和绑定，非法 ID 不降级", () => {
+    const id = "12345678-1234-4234-8234-123456789abc";
+    const groups = [...store.getSnapshot().settings.groups, { id, chX: "ax", chY: "ay" }];
+    expect(store.importSettingsFromPkg({ v: 3, groups, calibSrc: null })).toBe(true);
+    const saved = JSON.parse(localStorage.getItem("vs.plot3d.settings")!);
+    expect(saved.groups).toHaveLength(4);
+    expect(store.importSettingsFromPkg(saved)).toBe(true);
+    expect(store.getGroup(id)).toMatchObject({ id, chX: "ax", chY: "ay" });
+    const before = store.getSnapshot();
+    for (const invalid of [[{ id: "bad id" }], [{ id }, { id }], [{}]]) {
+      expect(() => store.importSettingsFromPkg({ v: 3, groups: invalid })).toThrow();
+      expect(store.getSnapshot()).toBe(before);
+    }
+  });
+
+  it("v3 校准源显式 null 保持未选择，不回退 g1", () => {
+    store.importSettingsFromPkg({ v: 3, groups: [{ id: "g1" }], calibSrc: null });
+    expect(store.getSnapshot().settings.calibSrc).toBeNull();
+  });
+
+  it("v3 校准源 g1 不在组列表中时清除悬空引用", () => {
+    store.importSettingsFromPkg({ v: 3, groups: [{ id: "g2" }], calibSrc: "g1" });
+    expect(store.getSnapshot().settings.calibSrc).toBeNull();
+  });
+
+  it("删除 g2 后新增：恰好三组、新组 ID 不復用旧 g2、两步撤销完整还原", () => {
+    store.updateGroup("g2", { chX: "ax", chY: "ay" }); // 让 g2 有可辨识状态
+    expect(store.getSnapshot().settings.groups.map((g) => g.id)).toEqual(["g1", "g2", "g3"]);
+
+    expect(store.removeGroup("g2")).toBe(true);
+    expect(store.getSnapshot().settings.groups.map((g) => g.id)).toEqual(["g1", "g3"]); // 无幻影组
+
+    const added = store.addGroup();
+    expect(added).toBeTruthy();
+    expect(store.getSnapshot().settings.groups.map((g) => g.id)).toEqual(["g1", "g3", added]);
+    expect(added).not.toBe("g2"); // 新组不复用已删除 ID（防旧引用指错组）
+
+    store.undo(); // 撤销「新增」→ 回到删除后
+    expect(store.getSnapshot().settings.groups.map((g) => g.id)).toEqual(["g1", "g3"]);
+    store.undo(); // 撤销「删除」→ 三组原样（g2 原 ID 恢复）
+    expect(store.getSnapshot().settings.groups.map((g) => g.id)).toEqual(["g1", "g2", "g3"]);
+    expect(store.getGroup("g2")?.chX).toBe("ax");
+  });
+
+  it("删除组的泵状态与统计一并移除；新增组独立消费不继承水位（无幻影批次）", () => {
+    h.setSeries(makeSeries());
+    store.updateGroup("g2", { chX: "ax", chY: "ay", chZ: "az" });
+    const calls = collect();
+    pump(1);
+    expect(gseq(calls, "g2")).toHaveLength(1);
+    expect(store.removeGroup("g2")).toBe(true);
+    pump(1); // 删除后泵不再为 g2 产批次
+    const nBefore = gseq(calls, "g2").length;
+
+    const added = store.addGroup();
+    store.updateGroup(added, { chX: "ay", chY: "az" });
+    pump(1);
+    // 新组从头消费（ay 全 6 点），不继承 g2 的水位/统计
+    const q = gseq(calls, added);
+    expect(q).toHaveLength(1);
+    expect(q[0].b.x).toEqual([11, 12, 13, 14, 15, 16]);
+    expect(gseq(calls, "g2").length).toBe(nBefore); // 无幻影组批次
+  });
+});
+
+
+describe("P87e lifecycle closure", () => {
+  afterEach(() => setOperatorLocked(false));
+
+  it.each([0, 32])("v3 explicit %i groups survives disk reload", async (count) => {
+    store.importSettingsFromPkg({ v: 3, groups: Array.from({ length: count }, (_, i) => ({ id: `9-group-${i}`, chX: "ax", chY: "ay" })), calibSrc: null });
+    const saved = localStorage.getItem("vs.plot3d.settings");
+    vi.resetModules();
+    const reloaded = await import("./plot3dStore");
+    expect(reloaded.getSnapshot().settings.groups).toHaveLength(count);
+    expect(reloaded.getSnapshot().settings.calibSrc).toBeNull();
+    expect(reloaded.getSnapshot().settings.groups.map((g) => g.id)).toEqual(store.getSnapshot().settings.groups.map((g) => g.id));
+    expect(localStorage.getItem("vs.plot3d.settings")).toBe(saved);
+  });
+
+  it("backs up exact legacy disk payload before load migration and later persist", async () => {
+    const old = '{"v":2,"groups":[{"chX":"ax"}]}';
+    localStorage.setItem("vs.plot3d.settings", old);
+    vi.resetModules();
+    const reloaded = await import("./plot3dStore");
+    expect(localStorage.getItem("vs.plot3d.settings.pre-v3")).toBe(old);
+    reloaded.updateGroup("g1", { name: "migrated" });
+    expect(JSON.parse(localStorage.getItem("vs.plot3d.settings")!).v).toBe(3);
+    expect(localStorage.getItem("vs.plot3d.settings.pre-v3")).toBe(old);
+  });
+
+  it("fresh sink reconstructs static retained history without calibration duplication", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    store.setSetting({ calibMode: true });
+    collect();
+    store.startCalibCapture();
+    pump();
+    store.setCalibFit(makeFit());
+    const pts = [...store.calibPoints().x];
+    store.setSink(null, { keepCalib: true });
+    const next = collect();
+    store.setScrub(0.03);
+    pump();
+    const q = gseq(next, "g1");
+    expect(q).toHaveLength(1);
+    expect(q[0]).toMatchObject({ reloaded: true, b: { x: [1, 2, 3, 4, 5, 6] } });
+    expect(next[0].cursor).toBeCloseTo(0.03);
+    expect(store.calibPoints().x).toEqual(pts);
+    expect(store.calibSnapshot().capturing).toBe(true);
+    expect(store.getCalibFit()).not.toBeNull();
+    expect(store.previewSnapshot()!.len).toBe(0);
+    expect(store.pairSnapshot("g1").paired).toBe(6);
+    store.updateGroup("g1", { density: "low", smooth: "movingAvg" });
+    pump();
+    expect(store.calibPoints().x).toEqual(pts);
+    expect(store.getCalibFit()).not.toBeNull();
+  });
+
+  it("clear before/after first pump then rebuild never resurrects history", () => {
+    for (const first of [false, true]) {
+      store._resetForTest();
+      h.setSeries(makeSeries());
+      bindG1();
+      collect();
+      if (first) pump();
+      store.requestClearData("g1");
+      const rebuilt = collect();
+      pump();
+      expect(gseq(rebuilt, "g1")[0].b.t).toEqual([]);
+      h.setSeries(ser([60, 70], [7, 8], [17, 18], [27, 28]));
+      pump();
+      const q = gseq(rebuilt, "g1");
+      expect(q[q.length - 1].b.x).toEqual([7, 8]);
+      store.updateGroup("g1", { smooth: "spline" });
+      const rebuiltAgain = collect();
+      pump();
+      expect(gseq(rebuiltAgain, "g1")[0].b.x).toEqual([7, 8]);
+    }
+  });
+
+  it("source change undo/redo/reset/import clears temporary calibration immediately, never restores old captures", () => {
+    bindG1();
+    h.setSeries(makeSeries());
+    store.setSetting({ calibMode: true });
+    collect();
+    store.startCalibCapture();
+    pump();
+    store.setCalibFit(makeFit());
+    store.setSetting({ calibSrc: "g2", axisScale: "perAxis" });
+    expect(store.calibSnapshot()).toMatchObject({ count: 0, capturing: false });
+    expect(store.getCalibFit()).toBeNull();
+    expect(store.undo()).toBe(true);
+    expect(store.getSnapshot().settings).toMatchObject({ calibSrc: "g1", axisScale: "uniform" });
+    expect(store.calibSnapshot()).toMatchObject({ count: 0, capturing: false });
+    store.accel6StartFace(0);
+    expect(store.redo()).toBe(true);
+    expect(store.accel6Snapshot()).toMatchObject({ collecting: false, n: 0 });
+    store.undo();
+    store.setCalibFit(makeFit());
+    store.resetSettings();
+    expect(store.getCalibFit()).toBeNull();
+    store.undo();
+    store.setCalibFit(makeFit());
+    store.importSettingsFromPkg(store.exportSettingsForPkg());
+    expect(store.getCalibFit()).toBeNull();
+    expect(store.getSnapshot()).toMatchObject({ canUndo: false, canRedo: false });
+  });
+
+  it("membership reconciliation removes stats and pending clears through delete, undo, redo, and import", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    const calls = collect();
+    pump();
+    store.requestClearData("g1");
+    store.removeGroup("g1");
+    expect(store.pairSnapshot("g1").paired).toBe(0);
+    store.undo();
+    pump();
+    const q1 = gseq(calls, "g1");
+    expect(q1[q1.length - 1]!.b.x).toHaveLength(6);
+    store.redo();
+    expect(store.pairSnapshot("g1").paired).toBe(0);
+    store.undo();
+    store.requestClearData("g1");
+    store.importSettingsFromPkg({ v: 3, groups: [] });
+    expect(store.pairSnapshot("g1").paired).toBe(0);
+    expect(store.undo()).toBe(false);
+    expect(store.redo()).toBe(false);
+    pump();
+    expect(store.getSnapshot().settings.groups).toEqual([]);
+  });
+
+  it("unknown operations are inert and Operator locks cover lifecycle and history", () => {
+    const before = store.getSnapshot();
+    const disk = localStorage.getItem("vs.plot3d.settings");
+    expect(store.getGroup("missing")).toBeUndefined();
+    expect(store.exportTriples("missing")).toBeNull();
+    expect(store.bindGroupFirstFree("missing", "ax")).toBeNull();
+    store.bindGroup("missing", "x", "ax");
+    store.setGroupVisible("missing", false);
+    store.clearData("");
+    store.requestClearData("missing");
+    store.setSetting({ calibSrc: "missing", axisScale: "perAxis" });
+    expect(store.removeGroup("missing")).toBe(false);
+    expect(store.getSnapshot()).toBe(before);
+    expect(localStorage.getItem("vs.plot3d.settings")).toBe(disk);
+    store.addGroup();
+    store.undo();
+    const locked = store.getSnapshot();
+    setOperatorLocked(true);
+    expect(store.addGroup()).toBe("");
+    expect(store.removeGroup("g1")).toBe(false);
+    expect(store.undo()).toBe(false);
+    expect(store.redo()).toBe(false);
+    expect(store.setCalibSrc(null)).toBe(false);
+    expect(store.bindGroupFirstFree("g1", "ax")).toBeNull();
+    store.setSetting({ calibSrc: null });
+    store.resetSettings();
+    expect(store.importSettingsFromPkg({ v: 3, groups: [] })).toBe(false);
+    expect(store.getSnapshot()).toBe(locked);
+  });
+
+  it("generated UUID never reuses deleted or undone identity", () => {
+    const id = "12345678-1234-4234-8234-123456789abc";
+    const next = "22345678-1234-4234-8234-123456789abc";
+    vi.stubGlobal("crypto", { randomUUID: vi.fn().mockReturnValueOnce(id).mockReturnValueOnce(id).mockReturnValue(next) });
+    expect(store.addGroup()).toBe(id);
+    store.removeGroup(id);
+    expect(store.addGroup()).toBe(next);
+    expect(store.getGroup(id)).toBeUndefined();
+  });
+
+  it("delayed Y preserves existing X-anchor/tolerance contract; explicit rebuild uses current raw history", () => {
+    bindG1();
+    const data = makeSeries();
+    h.setSeries({ ...data, ay: { t: [], v: [] } });
+    const calls = collect();
+    pump();
+    expect(gseq(calls, "g1")[0].b.t).toEqual([]);
+    h.setSeries(data);
+    pump();
+    expect(gseq(calls, "g1")).toHaveLength(1); // Existing contract: consumed X anchors are not retried.
+    const rebuilt = collect();
+    pump();
+    expect(gseq(rebuilt, "g1")[0].b.x).toEqual(store.exportTriples("g1")!.x);
   });
 });

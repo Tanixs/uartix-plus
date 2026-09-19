@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   TOOL_DEFS,
+  JOB_TOOL_DEFS,
+  ALL_TOOL_DEFS,
   compactFrame,
   countStatuses,
   flattenResults,
@@ -15,6 +17,20 @@ describe("mcpServerConfig", () => {
     expect(s).toContain('"uartix"');
     expect(s).toContain("D:\\\\x\\\\uartix-mcp.cjs");
     expect(mcpServerConfig(" ")).toContain("<uartix-mcp.cjs");
+  });
+});
+
+describe("JOB_TOOL_DEFS（P88a）", () => {
+  it("4 个 job 工具且必填项正确；短工具列表保持不变", () => {
+    expect(JOB_TOOL_DEFS.map((t) => t.name)).toEqual(["create_job", "get_job", "wait_event", "cancel_job"]);
+    expect(TOOL_DEFS.length).toBe(10);
+    expect(ALL_TOOL_DEFS.length).toBe(14);
+    expect(JOB_TOOL_DEFS.find((t) => t.name === "create_job")?.inputSchema.required).toEqual(["taskType", "input", "idempotencyKey"]);
+    expect(JOB_TOOL_DEFS.find((t) => t.name === "wait_event")?.inputSchema.properties?.waitMs).toMatchObject({ maximum: 1000 });
+    for (const t of JOB_TOOL_DEFS) {
+      expect(t.inputSchema.type).toBe("object");
+      expect(t.description).toContain("job");
+    }
   });
 });
 

@@ -20,12 +20,14 @@ import { connect, type Socket } from "node:net";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { TOOL_DEFS, type McpToolDef } from "../src/features/mcp/mcpTools";
+import { TOOL_DEFS, JOB_TOOL_DEFS, ALL_TOOL_DEFS, type McpToolDef } from "../src/features/mcp/mcpTools";
 
 const VERSION = "0.1.0";
 const FALLBACK_PROTOCOL_VERSION = "2025-03-26";
 const CONNECT_TIMEOUT_MS = 2000;
-const CALL_TIMEOUT_MS = 10_000; // 前端 3s 超时 + 余量
+const CALL_TIMEOUT_MS = 5000;
+const AUTH_TIMEOUT_MS = 2000;
+interface AuthData { capabilities?: { jobs?: { version?: number } } }
 const MAX_LINE = 1024 * 1024;
 
 /* ================= stderr 日志 ================= */
@@ -87,24 +89,31 @@ function bridgeCall<T = unknown>(
     const socket: Socket = connect({ host: "127.0.0.1", port: ep.port });
     let buf = "";
     let step: "auth" | "call" = "auth";
-    const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error(`Uartix+ 内控桥响应超时（${CALL_TIMEOUT_MS}ms）`));
-    }, CALL_TIMEOUT_MS);
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout>;
     const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       socket.destroy();
       reject(err);
     };
-    socket.setTimeout(CONNECT_TIMEOUT_MS, () => fail(new Error("连接 Uartix+ 超时")));
+    const arm = (ms: number, phase: string) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fail(new Error(`${phase} timeout; query the same jobId / idempotency key, do not silently rerun`)), ms);
+    };
+    arm(CONNECT_TIMEOUT_MS, "connect");
+    socket.on("close", () => { if (!settled) fail(new Error("bridge disconnected before receipt; no automatic retry")); });
     socket.on("error", (e) =>
       fail(new Error(`连不上 Uartix+（127.0.0.1:${ep.port}）：${e.message}`)),
     );
     socket.on("connect", () => {
+      arm(AUTH_TIMEOUT_MS, "authentication");
       socket.write(JSON.stringify({ op: "auth", token: ep.token }) + "\n");
     });
     socket.on("data", (chunk: Buffer) => {
       buf += chunk.toString("utf8");
+      if (Buffer.byteLength(buf) > MAX_LINE) return fail(new Error("bridge response exceeds line limit"));
       for (;;) {
         const i = buf.indexOf("\n");
         if (i < 0) break;
@@ -121,10 +130,19 @@ function bridgeCall<T = unknown>(
           if (msg.ok !== true) {
             return fail(new Error(msg.err === "busy" ? "已有另一个 MCP 会话在线" : "token 校验失败（应用端重新生成过？）"));
           }
+          const auth = msg.data as AuthData;
+          if (kind === "__capabilities") {
+            settled = true; clearTimeout(timer); socket.destroy(); resolve(msg.data as T); return;
+          }
+          if (JOB_TOOL_DEFS.some((t) => t.name === kind) && auth?.capabilities?.jobs?.version !== 1) {
+            return fail(new Error("jobs_not_supported: upgrade Uartix+; no legacy execution fallback"));
+          }
           step = "call";
+          arm(CALL_TIMEOUT_MS, "RPC");
           socket.write(JSON.stringify({ op: "call", reqId: 1, kind, args }) + "\n");
           continue;
         }
+        settled = true;
         clearTimeout(timer);
         socket.destroy();
         if (msg.ok === true) resolve(msg.data as T);
@@ -169,19 +187,32 @@ function toolsList(): Record<string, unknown> {
   return { tools: TOOL_DEFS.map((t: McpToolDef) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) };
 }
 
+/** capability gate: legacy apps expose no jobs namespace; short tools stay usable. */
+function publishableTools(caps: AuthData | null): McpToolDef[] {
+  return caps?.capabilities?.jobs?.version === 1 ? ALL_TOOL_DEFS : TOOL_DEFS;
+}
+
+async function toolCapabilities(ep: Endpoint): Promise<AuthData> {
+  return bridgeCall<AuthData>(ep, "__capabilities", {});
+}
+
 async function toolsCall(params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const name = typeof params.name === "string" ? params.name : "";
-  if (!TOOL_DEFS.some((t) => t.name === name)) {
+  if (!ALL_TOOL_DEFS.some((t) => t.name === name)) {
     throw new RpcClientError(-32602, `未知工具：${name}`);
   }
   const ep = readEndpoint();
-  const args =
-    params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments)
-      ? (params.arguments as Record<string, unknown>)
-      : {};
   try {
-    const data = await bridgeCall(ep, name, args);
-    return toolText(data);
+    const args =
+      params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments)
+        ? (params.arguments as Record<string, unknown>)
+        : {};
+    try {
+      const data = await bridgeCall(ep, name, args);
+      return toolText(data);
+    } catch (e) {
+      return toolFail(String(e instanceof Error ? e.message : e));
+    }
   } catch (e) {
     return toolFail(String(e instanceof Error ? e.message : e));
   }
@@ -216,7 +247,14 @@ async function handle(req: RpcReq): Promise<void> {
       if (!isNotify) rpcResult(req.id, {});
       return;
     case "tools/list":
-      if (!isNotify) rpcResult(req.id, toolsList());
+      if (!isNotify) {
+        try {
+          const caps = await toolCapabilities(readEndpoint()).catch(() => null);
+          rpcResult(req.id, { tools: publishableTools(caps).map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })) });
+        } catch {
+          rpcResult(req.id, toolsList());
+        }
+      }
       return;
     case "tools/call": {
       if (isNotify) return;

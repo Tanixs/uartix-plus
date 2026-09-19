@@ -72,7 +72,7 @@ export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "get_plot3d",
     description:
-      "3D 轨迹面板只读快照（P87a 三组化）：groups 数组（每组 name/color/visible、axes x/y/z 通道 id 与是否绑齐、mode=point|points|line、colorBy、fade、density、smooth、maxPoints、配对与备注）、view 全局视图设置（三轴缩放/网格/跟随/自动旋转/键盘飞行/光标缩放）、是否椭球校准模式（采样源=组1）、采样点数与八象限覆盖度、椭球拟合结果（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。只读、不需高权限。写操作（组绑定/显示设置/清空/撤销/校准会话）用 run_action，kind=plot3d（需「允许高权限动作」）。",
+      "3D 轨迹面板只读快照（P87e 弹性组数）：groups 数组（每组 name/color/visible、axes x/y/z 通道 id 与是否绑齐、mode=point|points|line、colorBy、fade、density、smooth、maxPoints、配对与备注）、view 全局视图设置（三轴缩放/网格/跟随/自动旋转/键盘飞行/光标缩放）、是否椭球校准模式（采样源=calibSource，可为 null）、采样点数与八象限覆盖度、椭球拟合结果（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。只读、不需高权限。写操作（组绑定/显示设置/清空/撤销/校准会话）用 run_action，kind=plot3d（需「允许高权限动作」）。",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -91,7 +91,7 @@ export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "run_action",
     description:
-      "执行 Uartix+ 的 App Action。kind 常用：writeTemplate/writeCommand/writeCard/writeCodec/openPanel/applyPreset/setTheme/addChannel/clearChannels/openPort/closePort/removeCard/removeProtocol/toast…；编排器与 3D 两组也走这里——kind=orchestrator（args.op=enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet，可据此从零搭出「事件→块树」自动化；只读请改用 get_orchestrator）、kind=plot3d（args.op=bind|set|clear|undo|redo|calib；三组化：args.gid=g1|g2|g3 缺省 g1，bind 传 axisX/axisY/axisZ 通道 id，set 传组级 colorBy/mode/density/fade/smooth/pointSize… 或全局 axisScale/showGrid/autoRotate/follow…，calib 子动作 args.calib=enter|exit|start|stop|clear|solve6；只读请改用 get_plot3d）。写模板/命令等非破坏动作直接可用；openPort/closePort/删除类与 orchestrator/plot3d 属高权限，需在设置 → 集成 开启「允许高权限动作」。",
+      "执行 Uartix+ 的 App Action。kind 常用：writeTemplate/writeCommand/writeCard/writeCodec/openPanel/applyPreset/setTheme/addChannel/clearChannels/openPort/closePort/removeCard/removeProtocol/toast…；编排器与 3D 两组也走这里——kind=orchestrator（args.op=enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet，可据此从零搭出「事件→块树」自动化；只读请改用 get_orchestrator）、kind=plot3d（args.op=bind|set|groupAdd|groupRemove|clear|undo|redo|calib；动态组：args.gid 必须是快照中的有效组 ID，缺省 g1（已删则报错）；groupAdd 返回新 gid；groupRemove 需本机人工确认，无确认通路时直接返回 needs_manual_confirmation，未执行；高权限或 confirmed 参数不能绕过，bind 传 axisX/axisY/axisZ 通道 id，set 传组级 colorBy/mode/density/fade/smooth/pointSize… 或全局 axisScale/showGrid/autoRotate/follow…，calib 子动作 args.calib=enter|exit|start|stop|clear|solve6；只读请改用 get_plot3d）。写模板/命令等非破坏动作直接可用；openPort/closePort/删除类与 orchestrator/plot3d 属高权限，需在设置 → 集成 开启「允许高权限动作」。",
     inputSchema: {
       type: "object",
       properties: {
@@ -104,7 +104,7 @@ export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "run_sequence",
     description:
-      "在 Uartix+ 内执行一个测试序列套件（JSON，与「测试序列器」导出格式一致），返回逐步结果摘要。会真实向设备发包，需要开启「允许远程发送」。",
+      "旧同步入口已停用：执行前返回 async_required，不执行任何步骤。改用 create_job(sequence.run)，只允许可证无设备副作用的序列；发送需本机人工确认，highPriv/confirmed 不构成批准。",
     inputSchema: {
       type: "object",
       properties: {
@@ -115,6 +115,25 @@ export const TOOL_DEFS: McpToolDef[] = [
     },
   },
 ];
+
+export const JOB_TOOL_DEFS: McpToolDef[] = [
+  { name: "create_job", description: "Create an async job (accepted means registered, not completed). sequence.validate is local validation; sequence.run permits only side-effect-free steps. Sends/unknown steps return needs_manual_confirmation immediately, without queueing. highPriv/confirmed are not approval. Retry only with the identical jobId idempotency key within the same instance/auth epoch; never auto-replace an expired or old-instance task.", inputSchema: { type: "object", properties: {
+    taskType: { type: "string", enum: ["sequence.validate", "sequence.run"] },
+    input: { type: "object", description: "{suite: exportedSuite} or {json: exportedSuiteJson}" },
+    idempotencyKey: { type: "string", minLength: 1, maxLength: 128 },
+    deadlineMs: { type: "integer", minimum: 1000, maximum: 600000, default: 120000 },
+  }, required: ["taskType", "input", "idempotencyKey"] } },
+  { name: "get_job", description: "Read the authoritative job snapshot by jobId without waiting for the WebView. Optional result pages are JSON UTF-8 text chunks; concatenate all pages before parsing. interrupted/instance_changed means effects cannot be confirmed; do not resubmit automatically.", inputSchema: { type: "object", properties: {
+    jobId: { type: "string" }, includeResult: { type: "boolean" }, offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 4, maximum: 16384 },
+  }, required: ["jobId"] } },
+  { name: "wait_event", description: "Read bounded job events by jobId, optionally wait up to 1000ms. Empty events are normal, not failure. gap=true requires resynchronizing from the returned snapshot; event order never regresses.", inputSchema: { type: "object", properties: {
+    jobId: { type: "string" }, afterSeq: { type: "integer", minimum: 0 }, waitMs: { type: "integer", minimum: 0, maximum: 1000 },
+  }, required: ["jobId", "afterSeq"] } },
+  { name: "cancel_job", description: "Request cooperative stop of the job by jobId. cancel_requested is not stop confirmation; cancellation does not undo previous effects. Idempotent, still available after permission withdrawal.", inputSchema: { type: "object", properties: {
+    jobId: { type: "string" }, reason: { type: "string", maxLength: 120 },
+  }, required: ["jobId"] } },
+];
+export const ALL_TOOL_DEFS = [...TOOL_DEFS, ...JOB_TOOL_DEFS];
 
 /** 生成 MCP 客户端配置 JSON（claude_desktop_config.json / Cursor mcp.json 同构）。
  *  cliPath 由用户在设置页填（repo 场景为 dist-cli/uartix-mcp.cjs 的绝对路径）。 */

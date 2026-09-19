@@ -14,7 +14,9 @@
     "build:mcp": "node scripts/build-mcp-cli.mjs",
     "mcp:e2e": "node scripts/mcp-e2e.mjs",
     "check:theme": "node .tools/check-contrast.cjs",
-    "check:aria": "node .tools/check-aria.cjs"
+    "check:aria": "node .tools/check-aria.cjs",
+    "check:motion": "node .tools/check-motion.cjs",
+    "check:all": "node .tools/check-contrast.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

@@ -20,7 +20,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -47,6 +47,8 @@ pub struct BridgeState {
     clients: Arc<AtomicUsize>,
     /// reqId → 回传通道（bridge_respond 命令投递，accept 线程 recv_timeout）
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
+    generation: Arc<AtomicUsize>,
+    worker: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 #[derive(Clone)]
@@ -62,6 +64,8 @@ impl BridgeState {
             cfg: Mutex::new(None),
             clients: Arc::new(AtomicUsize::new(0)),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            generation: Arc::new(AtomicUsize::new(0)),
+            worker: Mutex::new(None),
         }
     }
 }
@@ -140,16 +144,20 @@ pub fn bridge_start(
     state.run_flag.store(true, Ordering::SeqCst);
 
     write_discover(&app, port, &token)?;
+    app.state::<crate::bridge_jobs::JobsState>().registry.lock().map_err(|_| "registry unavailable")?.start();
+    let generation = state.generation.clone();
+    let epoch = generation.load(Ordering::SeqCst);
 
     let run_flag = state.run_flag.clone();
     let cfg = Arc::new(Mutex::new(BridgeCfg { port, token }));
     let clients = state.clients.clone();
     let pending = state.pending.clone();
     let app2 = app.clone();
-    std::thread::Builder::new()
+    let worker = std::thread::Builder::new()
         .name("mcp-bridge".into())
-        .spawn(move || accept_loop(listener, run_flag, cfg, clients, pending, app2))
+        .spawn(move || accept_loop(listener, run_flag, cfg, clients, pending, app2, generation, epoch))
         .map_err(|e| format!("启动 MCP 桥线程失败：{e}"))?;
+    *state.worker.lock().map_err(|_| "worker unavailable")? = Some(worker);
 
     Ok(BridgeInfo {
         running: true,
@@ -212,7 +220,11 @@ pub fn bridge_respond(
 }
 
 fn stop_inner(app: &AppHandle, state: &BridgeState) {
+    state.generation.fetch_add(1, Ordering::SeqCst);
+    if let Ok(mut jobs) = app.state::<crate::bridge_jobs::JobsState>().registry.lock() { jobs.quiesce("bridge_stopped"); }
     let was = state.run_flag.swap(false, Ordering::SeqCst);
+    let worker = state.worker.lock().ok().and_then(|mut w| w.take());
+    if let Some(worker) = worker { let _ = worker.join(); }
     if let Ok(mut c) = state.cfg.lock() {
         *c = None;
     }
@@ -258,8 +270,10 @@ fn accept_loop(
     clients: Arc<AtomicUsize>,
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
     app: AppHandle,
+    generation: Arc<AtomicUsize>,
+    epoch: usize,
 ) {
-    while run_flag.load(Ordering::SeqCst) {
+    while run_flag.load(Ordering::SeqCst) && generation.load(Ordering::SeqCst) == epoch {
         // 非阻塞轮询：150ms 粒度即可及时响应 stop（空闲时 CPU 占用可忽略）
         match listener.accept() {
             Ok((stream, _)) => {
@@ -268,9 +282,10 @@ fn accept_loop(
                 let cl2 = clients.clone();
                 let pd2 = pending.clone();
                 let app2 = app.clone();
+                let gen2 = generation.clone();
                 let _ = std::thread::Builder::new()
                     .name("mcp-conn".into())
-                    .spawn(move || handle_client(stream, run2, cfg2, cl2, pd2, app2));
+                    .spawn(move || handle_client(stream, run2, cfg2, cl2, pd2, app2, gen2, epoch));
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(150));
@@ -289,7 +304,10 @@ fn handle_client(
     clients: Arc<AtomicUsize>,
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
     app: AppHandle,
+    generation: Arc<AtomicUsize>,
+    epoch: usize,
 ) {
+    let _ = stream.set_write_timeout(Some(CALL_TIMEOUT));
     let _ = stream.set_read_timeout(Some(READ_POLL));
     let _ = stream.set_nodelay(true);
     let mut writer = match stream.try_clone() {
@@ -319,7 +337,9 @@ fn handle_client(
         return;
     }
     let _ = app.emit("mcp://clients", clients.load(Ordering::SeqCst));
-    let _ = writeln!(writer, "{}", resp_line(true, None, json!({ "proto": 1 })));
+    if generation.load(Ordering::SeqCst) != epoch { return; }
+    let capabilities = app.state::<crate::bridge_jobs::JobsState>().registry.lock().map(|r| r.capabilities()).unwrap_or(Value::Null);
+    let _ = writeln!(writer, "{}", resp_line(true, None, json!({ "proto": 1, "capabilities": capabilities })));
 
     // ---- 请求循环 ----
     loop {
@@ -328,6 +348,7 @@ fn handle_client(
             Ok(true) => {}
             _ => break,
         }
+        if generation.load(Ordering::SeqCst) != epoch { break; }
         match parse_req(line.trim_end()) {
             Some(Req::Ping) => {
                 let _ = writeln!(
@@ -340,7 +361,30 @@ fn handle_client(
                 let _ = writeln!(writer, "{}", resp_line(true, None, rust_state(&app)));
             }
             Some(Req::Call { req_id, kind, args }) => {
-                let out = forward_call(&app, &pending, req_id, &kind, args);
+                let out = if matches!(kind.as_str(), "create_job" | "get_job" | "wait_event" | "cancel_job") {
+                    let jobs = app.state::<crate::bridge_jobs::JobsState>();
+                    let wait = if kind == "wait_event" { args["waitMs"].as_u64().unwrap_or(0).min(1000) } else { 0 };
+                    let until = std::time::Instant::now() + Duration::from_millis(wait);
+                    let data = loop {
+                        if generation.load(Ordering::SeqCst) != epoch { break crate::bridge_jobs::error("permission_denied"); }
+                        let data = {
+                            let mut r = jobs.registry.lock().unwrap();
+                            let now = r.now(); let wall = crate::bridge_jobs::wall_ms(); r.tick(now, wall);
+                            match kind.as_str() {
+                                "create_job" => r.create("mcp", &args, now, wall),
+                                "cancel_job" => r.cancel(&args),
+                                _ => r.query(&args, kind == "wait_event"),
+                            }
+                        };
+                        if wait == 0 || data.get("error").is_some_and(|e| !e.is_null()) || data["gap"] == true || data["events"].as_array().is_some_and(|a| !a.is_empty()) || std::time::Instant::now() >= until { break data; }
+                        std::thread::sleep(Duration::from_millis(20));
+                    };
+                    resp_line(true, None, data)
+                } else if kind == "run_sequence" {
+                    resp_line(false, Some("async_required: use create_job with sequence.run; nothing executed"), Value::Null)
+                } else if kind == "ping" {
+                    resp_line(true, None, json!({"pong":true}))
+                } else { forward_call(&app, &pending, req_id, &kind, args) };
                 let _ = writeln!(writer, "{out}");
             }
             _ => {
@@ -354,9 +398,9 @@ fn handle_client(
         }
     }
 
-    let n = clients.fetch_sub(1, Ordering::SeqCst);
-    if n <= 1 {
-        let _ = app.emit("mcp://clients", 0);
+    if generation.load(Ordering::SeqCst) == epoch {
+        let _ = clients.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(1)));
+        let _ = app.emit("mcp://clients", clients.load(Ordering::SeqCst));
     }
 }
 

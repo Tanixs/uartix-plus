@@ -36,9 +36,11 @@ import {
   type GroupTransform,
 } from "./smoothing";
 
-// ---------- 三组轨迹模型（P87a） ----------
+// ---------- 弹性组数模型（P87e） ----------
 
-export type GroupId = "g1" | "g2" | "g3";
+/** P87e：组 ID 放开为字符串——旧 g1/g2/g3 保留，新组用 UUID */
+export type GroupId = string;
+/** 旧固定三组 ID（迁移与默认三组身份保留用；不再是类型约束） */
 export const GROUP_IDS: readonly GroupId[] = ["g1", "g2", "g3"];
 
 /** 每组显示模式：point=实时定位（只刷最新点）/ points=点集 / line=连线（详设 §7） */
@@ -123,8 +125,10 @@ export interface TrajGroup {
 }
 
 export interface Plot3DSettings {
-  v: 2;
-  groups: [TrajGroup, TrajGroup, TrajGroup];
+  v: 3;
+  groups: TrajGroup[];
+  /** 校准采样源（P87e：不再绑死 g1；null = 未选源——校准禁用，不自动换源） */
+  calibSrc: GroupId | null;
   /** 展示用自动旋转 */
   autoRotate: boolean;
   /** 跟随模式：target 平滑锁定最新点（与 autoRotate 互斥，开关联动） */
@@ -147,10 +151,10 @@ export interface Plot3DSettings {
 const SETTINGS_KEY = "vs.plot3d.settings";
 const UNDO_CAP = 50;
 
-function defaultGroup(idx: number): TrajGroup {
+function defaultGroup(idx: number, id?: GroupId): TrajGroup {
   const color = ["#4e9cef", "#4caf50", "#e8a13c"][idx] ?? "#4e9cef";
   return {
-    id: GROUP_IDS[idx] ?? "g1",
+    id: id ?? GROUP_IDS[idx] ?? "g1",
     name: `G${idx + 1}`,
     color,
     visible: true,
@@ -182,8 +186,9 @@ function defaultGroup(idx: number): TrajGroup {
 }
 
 export const DEFAULT_PLOT3D_SETTINGS: Plot3DSettings = {
-  v: 2,
+  v: 3,
   groups: [defaultGroup(0), defaultGroup(1), defaultGroup(2)],
+  calibSrc: "g1",
   autoRotate: false,
   follow: false,
   showGrid: true,
@@ -236,13 +241,16 @@ function normalizeModel(q: unknown): GroupModel {
   };
 }
 
-/** 单组归一化（字段级容错，非法回退默认） */
-function normalizeGroup(q: unknown, idx: number): TrajGroup {
+/** 单组归一化（字段级容错，非法回退默认）；v3 输入的合法字符串 ID 原样保留 */
+const GROUP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+function normalizeGroup(q: unknown, idx: number, keepId = false): TrajGroup {
   const d = defaultGroup(idx);
   if (typeof q !== "object" || q === null) return d;
   const p = q as Partial<TrajGroup>;
   const g: TrajGroup = {
     ...d,
+    // P87e：v3 输入携带合法 ID 则保留（UUID 身份）；v2 时代输入一律按位置分配
+    id: keepId && typeof p.id === "string" && GROUP_ID_RE.test(p.id) ? p.id : d.id,
     name: typeof p.name === "string" && p.name.trim() ? p.name.slice(0, 40) : d.name,
     color: typeof p.color === "string" && /^#[0-9a-f]{3,8}$/i.test(p.color) ? p.color : d.color,
     visible: p.visible !== false,
@@ -291,8 +299,8 @@ function normalizeGroup(q: unknown, idx: number): TrajGroup {
   return g;
 }
 
-/** v1（单轨迹时代）→ v2 组1 迁移：三轴绑定/样式/着色/渐隐/密度/配对整体入组1，
- *  G2/G3 空；视图全局字段原位保留。style:"line+points" → line + showDots。 */
+/** v1（单轨迹时代）→ v3 组1 迁移：三轴绑定/样式/着色/渐隐/密度/配对整体入组1，
+ *  G2/G3 走默认空组（迁移=默认三组）；视图全局字段原位保留。style:"line+points" → line + showDots。 */
 function migrateV1(q: Record<string, unknown>): Plot3DSettings {
   const g1 = defaultGroup(0);
   if (typeof q.axisX === "string") g1.chX = q.axisX;
@@ -308,7 +316,7 @@ function migrateV1(q: Record<string, unknown>): Plot3DSettings {
     g1.pairMode = q.pairMode as PairMode;
   if (typeof q.pairTolMs === "number" && isFinite(q.pairTolMs) && q.pairTolMs > 0)
     g1.pairTolMs = q.pairTolMs;
-  const base = normalizeSettings({ v: 2, groups: [g1] });
+  const base = normalizeSettings({ v: 3, groups: [g1, defaultGroup(1), defaultGroup(2)] });
   return {
     ...base,
     autoRotate: q.autoRotate === true,
@@ -322,17 +330,20 @@ function migrateV1(q: Record<string, unknown>): Plot3DSettings {
 }
 
 /** 部分输入 → 全量设置（容错归一化）；loadSettings 与 Operator 包导入共用。
- *  接受 v2 对象与 v1 旧对象（自动迁移）；calibMode 恒 false（操作态永不恢复，P74c B4）。 */
+ *  接受 v3/v2 对象与 v1 旧对象（自动迁移）；calibMode 恒 false（操作态永不恢复，P74c B4）。
+ *  P87e：v3 groups 为合法数组——**不补三、不截三，显式空数组保持零组**；
+ *  重复/非法组 ID 在写入前报错（不静默丢组）。 */
 function normalizeSettings(p: Partial<Plot3DSettings> | Record<string, unknown> | null | undefined): Plot3DSettings {
   const q = (p ?? {}) as Record<string, unknown>;
   if (!Array.isArray(q.groups)) {
-    // v2 缺 groups = 视为 v1 时代输入（旧 localStorage / 旧 Operator 包）
-    if (q.v === 2 && typeof q.axisX !== "string") {
-      // 显式 v2 但数组缺失：仅归一化全局，组走默认
+    // v2/v3 缺 groups = 视为 v1 时代输入（旧 localStorage / 旧 Operator 包）
+    if ((q.v === 2 || q.v === 3) && typeof q.axisX !== "string") {
+      // 显式 v2/v3 但数组缺失：仅归一化全局，组走默认三组
       const g = normalizeGroup(undefined, 0);
       return {
-        v: 2,
+        v: 3,
         groups: [g, defaultGroup(1), defaultGroup(2)],
+        calibSrc: "g1",
         autoRotate: q.autoRotate === true,
         follow: q.follow === true,
         showGrid: q.showGrid !== false,
@@ -345,12 +356,51 @@ function normalizeSettings(p: Partial<Plot3DSettings> | Record<string, unknown> 
     }
     return migrateV1(q);
   }
-  const gs = (q.groups as unknown[]).slice(0, 3).map((g, i) => normalizeGroup(g, i));
-  while (gs.length < 3) gs.push(defaultGroup(gs.length));
+  // P87e：v3 数组保 ID 原样（UUID 身份）；v2 时代（v=2 或组缺 id）按旧语义补齐三组
+  const rawList = q.groups as unknown[];
+  const rawIds = rawList.map((g) =>
+    typeof g === "object" && g !== null && typeof (g as { id?: unknown }).id === "string"
+      ? (g as { id: unknown }).id : null);
+  const isV3 = q.v === 3;
+  if (!isV3) {
+    // v2 输入：不校验 ID（旧包按位置命名），截三补三保持迁移等价
+    const gs2 = rawList.slice(0, 3).map((g, i) => normalizeGroup(g, i));
+    while (gs2.length < 3) gs2.push(defaultGroup(gs2.length));
+    const view2 = (q.follow === true) && (q.autoRotate === false);
+    return {
+      v: 3,
+      groups: gs2,
+      calibSrc: "g1",
+      autoRotate: view2 ? false : q.autoRotate === true,
+      follow: view2,
+      showGrid: q.showGrid !== false,
+      gridDensity: q.gridDensity === "fine" || q.gridDensity === "coarse" ? (q.gridDensity as "fine" | "coarse") : "std",
+      keyFlight: q.keyFlight === true,
+      zoomToCursor: q.zoomToCursor === true,
+      calibMode: false,
+      axisScale: q.axisScale === "perAxis" ? "perAxis" : "uniform",
+    };
+  }
+  const seen = new Set<string>();
+  for (const id of rawIds) {
+    if (typeof id !== "string" || !GROUP_ID_RE.test(id)) throw new Error("plot3d: invalid group id");
+    if (seen.has(id)) throw new Error(`plot3d: duplicate group id ${JSON.stringify(id)}`);
+    seen.add(id);
+  }
+  const gs = rawList.map((g, i) => normalizeGroup(g, i, true));
   const view = (q.follow === true) && (q.autoRotate === false);
+  // 校准源：组内 ID 生效；显式 null = 已取消选择（不回退）；字段缺失（v2 旧包）→ 默认 g1（若组内存在）
+  const calibGiven = "calibSrc" in q;
+  const calibSrcIn = typeof q.calibSrc === "string" ? q.calibSrc : null;
+  const calibSrc = calibSrcIn !== null
+    ? gs.some((g) => g.id === calibSrcIn) ? calibSrcIn : null
+    : calibGiven
+      ? null
+      : gs.some((g) => g.id === "g1") ? "g1" : null;
   return {
-    v: 2,
-    groups: [gs[0], gs[1], gs[2]],
+    v: 3,
+    groups: gs,
+    calibSrc,
     autoRotate: view ? false : q.autoRotate === true,
     follow: view,
     showGrid: q.showGrid !== false,
@@ -367,8 +417,14 @@ function loadSettings(): Plot3DSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return normalizeSettings(null);
-    return normalizeSettings(JSON.parse(raw) as Record<string, unknown>);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Preserve the exact legacy payload before any later persist upgrades it to v3.
+    if (parsed?.v !== 3 && localStorage.getItem(`${SETTINGS_KEY}.pre-v3`) === null)
+      localStorage.setItem(`${SETTINGS_KEY}.pre-v3`, raw);
+    return normalizeSettings(parsed);
   } catch {
+    // P87e：损坏存储（含 v3 非法组 ID）→ 不静默丢数据，落默认并保留原串排障
+    try { localStorage.setItem(`${SETTINGS_KEY}.corrupt`, localStorage.getItem(SETTINGS_KEY) ?? ""); } catch { /* ignore */ }
     return normalizeSettings(null);
   }
 }
@@ -381,11 +437,18 @@ let snapshot: { settings: Plot3DSettings; canUndo: boolean; canRedo: boolean } =
   canRedo: false,
 };
 
-/** 组配置快照（撤销栈单元）：groups + axisScale（数据口径类）；视图/操作态不入栈 */
-type CfgSnap = { groups: [TrajGroup, TrajGroup, TrajGroup]; axisScale: "uniform" | "perAxis" };
+/** 组配置快照（撤销栈单元）：groups + axisScale + calibSrc（数据口径类）；视图/操作态不入栈 */
+type CfgSnap = { groups: TrajGroup[]; axisScale: "uniform" | "perAxis"; calibSrc: GroupId | null };
 const cloneCfg = (): CfgSnap => ({
-  groups: settings.groups.map((g) => ({ ...g })) as [TrajGroup, TrajGroup, TrajGroup],
+  // 深拷贝嵌套对象（heading/model/transform），P87e 数组化后撤销恢复原 ID 必须独立于当前引用
+  groups: settings.groups.map((g) => ({
+    ...g,
+    heading: { ...g.heading },
+    model: { ...g.model },
+    transform: { ...g.transform },
+  })),
   axisScale: settings.axisScale,
+  calibSrc: settings.calibSrc,
 });
 let undoStack: CfgSnap[] = [];
 let redoStack: CfgSnap[] = [];
@@ -402,6 +465,12 @@ function persist() {
     // 否则重启/重开面板回来会直接落在空点云的校准模式里（与 exportSettingsForPkg 的剥离口径一致）
     const { calibMode: _operational, ...rest } = settings;
     void _operational;
+    const old = localStorage.getItem(SETTINGS_KEY);
+    if (old && localStorage.getItem(`${SETTINGS_KEY}.pre-v3`) === null) {
+      try {
+        if (JSON.parse(old)?.v !== 3) localStorage.setItem(`${SETTINGS_KEY}.pre-v3`, old);
+      } catch { /* Invalid old storage is handled by loadSettings. */ }
+    }
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(rest));
   } catch {
     /* 存储不可用时仅内存生效 */
@@ -415,7 +484,36 @@ export function endCalibSession() {
   emit();
 }
 
+// One reconciliation path for edits, import, undo/redo, and reset (also while closed).
+const usedGroupIds = new Set(settings.groups.map((g) => g.id));
+let reconciledSettings = settings;
+function sourceSignature(g: TrajGroup | undefined): string {
+  return g ? JSON.stringify([g.chX, g.chY, g.chZ, g.pairMode, g.pairTolMs]) : "";
+}
+function calibrationSignature(s: Plot3DSettings): string {
+  return JSON.stringify([s.calibSrc, sourceSignature(s.groups.find((g) => g.id === s.calibSrc))]);
+}
 function emit() {
+  const ids = new Set(settings.groups.map((g) => g.id));
+  for (const id of ids) usedGroupIds.add(id);
+  for (const id of gst.keys()) if (!ids.has(id)) gst.delete(id);
+  for (const id of pairStats.keys()) if (!ids.has(id)) pairStats.delete(id);
+  for (const g of settings.groups) {
+    const prev = reconciledSettings.groups.find((old) => old.id === g.id);
+    if (prev && sourceSignature(prev) !== sourceSignature(g)) {
+      pairStats.delete(g.id);
+      const gs = gst.get(g.id);
+      if (gs) {
+        gs.clearT = -Infinity;
+        gs.sampledT = -Infinity;
+        gs.sourceSig = sourceSignature(g);
+        gs.replay = true;
+      }
+    }
+  }
+  if (clearReq) clearReq = clearReq.filter((id) => ids.has(id));
+  if (calibrationSignature(reconciledSettings) !== calibrationSignature(settings)) clearCalibAll();
+  reconciledSettings = settings;
   snapshot = { settings, canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 };
   listeners.forEach((l) => l());
 }
@@ -431,8 +529,9 @@ export function getSnapshot() {
   return snapshot;
 }
 
-/** 撤销/重做（P87a A7）：仅组配置与三轴缩放；成功返回 true */
+/** 撤销/重做（P87a A7）：仅组配置/三轴缩放/校准源；P87e：过 Operator 锁（锁定态撤销=越界写入）。成功返回 true */
 export function undo(): boolean {
+  if (guardLocked()) return false;
   const s = undoStack.pop();
   if (!s) return false;
   redoStack.push(cloneCfg());
@@ -442,6 +541,7 @@ export function undo(): boolean {
   return true;
 }
 export function redo(): boolean {
+  if (guardLocked()) return false;
   const s = redoStack.pop();
   if (!s) return false;
   undoStack.push(cloneCfg());
@@ -465,6 +565,8 @@ export function setSetting(patch: Partial<Plot3DSettings>) {
     (k) => k !== "groups" && k !== "v" && !VIEW_KEYS.includes(k as keyof Plot3DSettings),
   );
   if (touchesConfig && guardLocked()) return;
+  // Same validation/history/reconciliation path as setCalibSrc, including mixed patches.
+  if (patch.calibSrc !== undefined && !validCalibSrc(patch.calibSrc)) return;
   const { groups: _ng, v: _nv, ...rest } = patch;
   void _ng;
   void _nv;
@@ -476,7 +578,8 @@ export function setSetting(patch: Partial<Plot3DSettings>) {
     p = { ...p, autoRotate: false, follow: false };
   }
   // 三轴缩放影响归一化口径 → 入撤销栈（组层数据口径类）
-  if (p.axisScale !== undefined && p.axisScale !== settings.axisScale) pushHistory();
+  if ((p.axisScale !== undefined && p.axisScale !== settings.axisScale) ||
+      (p.calibSrc !== undefined && p.calibSrc !== settings.calibSrc)) pushHistory();
   settings = { ...settings, ...p };
   emit();
   persist();
@@ -486,6 +589,7 @@ export function setSetting(patch: Partial<Plot3DSettings>) {
 
 /** 可见性 = 视图类：不过锁、不入栈、不触签名（scene 侧只翻 visible） */
 export function setGroupVisible(gid: GroupId, visible: boolean) {
+  if (!getGroup(gid)) return;
   const groups = settings.groups.map((g) => (g.id === gid ? { ...g, visible } : g));
   settings = { ...settings, groups: groups as Plot3DSettings["groups"] };
   emit();
@@ -498,16 +602,15 @@ export function setGroupVisible(gid: GroupId, visible: boolean) {
  */
 export function updateGroup(gid: GroupId, patch: Partial<TrajGroup>) {
   if (guardLocked()) return;
-  const idx = GROUP_IDS.indexOf(gid);
-  if (idx < 0) return;
-  const clean = normalizeGroup({ ...settings.groups[idx], ...patch, visible: undefined }, idx);
-  clean.visible = settings.groups[idx].visible;
+  const prev = settings.groups.find((g) => g.id === gid);
+  if (!prev) return; // P87e：未知/已删组直接拒绝，不回退第一组
+  const idx = settings.groups.indexOf(prev);
+  const clean = normalizeGroup({ ...prev, ...patch, visible: undefined }, idx);
+  clean.visible = prev.visible;
   clean.id = gid;
-  const prev = settings.groups[idx];
   if (JSON.stringify(prev) === JSON.stringify(clean)) return;
   pushHistory();
-  const groups = settings.groups.map((g) => (g.id === gid ? clean : g));
-  settings = { ...settings, groups: groups as Plot3DSettings["groups"] };
+  settings = { ...settings, groups: settings.groups.map((g) => (g.id === gid ? clean : g)) };
   emit();
   persist();
 }
@@ -530,6 +633,7 @@ export function bindGroup(
  * 由 UI 传入 axis 精确覆盖——本函数只在「无落点列信息」时用。返回命中的轴。
  */
 export function bindGroupFirstFree(gid: GroupId, chanId: string): "x" | "y" | "z" | null {
+  if (guardLocked()) return null;
   const g = settings.groups.find((x) => x.id === gid);
   if (!g) return null;
   if (!g.chX) return (bindGroup(gid, "x", chanId), "x");
@@ -543,8 +647,62 @@ export function resetSettings() {
   if (guardLocked()) return;
   pushHistory();
   settings = normalizeSettings(null);
+  clearCalibAll();
+  clearReq = null;
   emit();
   persist();
+}
+
+// ---------- 弹性组数生命周期（P87e） ----------
+
+const freshGroupId = (): GroupId =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+      const r = Math.floor(Math.random() * 16);
+      return (c === "x" ? r : (r & 3) | 8).toString(16);
+    });
+
+/** 新增组（配置类 → 过锁 + 一步撤销）：追加数组尾，默认未绑定；返回稳定 gid（UUID，不复用已删 ID） */
+export function addGroup(): GroupId {
+  if (guardLocked()) return "";
+  let gid = freshGroupId();
+  // P87e：ID 永不复用（含撤销栈里已删组与历史上出现过的所有 ID）
+  while (usedGroupIds.has(gid) || settings.groups.some((g) => g.id === gid)) gid = freshGroupId();
+  pushHistory();
+  const g = defaultGroup(settings.groups.length, gid);
+  // 新组颜色避开已有组色（取默认盘未用色，用尽则回退默认盘首色）
+  const used = new Set(settings.groups.map((x) => x.color));
+  const free = ["#4e9cef", "#4caf50", "#e8a13c", "#b56cd6", "#42b0c8"].find((c) => !used.has(c));
+  settings = { ...settings, groups: [...settings.groups, free ? { ...g, color: free } : g] };
+  emit();
+  persist();
+  return gid;
+}
+
+/** 删除组（配置类 → 过锁 + 一步撤销；撤销恢复原 ID 与配置）。不删源通道、不回收共享虚拟通道 */
+export function removeGroup(gid: GroupId): boolean {
+  if (guardLocked()) return false;
+  if (!settings.groups.some((g) => g.id === gid)) return false;
+  pushHistory();
+  const groups = settings.groups.filter((g) => g.id !== gid);
+  // 校准源被删 → 置 null（不自动换源），并清采样/拟合/预览/六面全部临时态
+  const srcRemoved = settings.calibSrc === gid;
+  settings = { ...settings, groups, calibSrc: srcRemoved ? null : settings.calibSrc };
+  // 泵状态/配对统计/待清请求由 emit() 统一清，撤销恢复配置但不恢复临时态
+  emit();
+  persist();
+  return true;
+}
+
+/** 显式设置校准源（配置类 → 过锁 + 一步撤销）；切源清采样/拟合/预览/六面临时态 */
+function validCalibSrc(gid: GroupId | null): boolean {
+  return gid === null || settings.groups.some((g) => g.id === gid);
+}
+export function setCalibSrc(gid: GroupId | null): boolean {
+  if (guardLocked() || !validCalibSrc(gid)) return false;
+  if (settings.calibSrc !== gid) setSetting({ calibSrc: gid });
+  return true;
 }
 
 /** 绑定通道被删除时自动解绑（同 2D 的 X 源悬空纠正语义；跨三组扫描） */
@@ -604,11 +762,11 @@ let pumpTimer: number | null = null;
 /**
  * 时间游标（P70 T2）：null = 跟随最新；数值 = 截断显示到该相对秒。全局共享
  * （三组同一条时间轴）。来源优先级（泵每 tick 裁决，单入口下发）：
- * 回放跟随 > 手动 scrub > null。
+ * 显式 scrub（含共享预览）> 回放时钟 > null。
  */
 let scrubSec: number | null = null;
 
-/** 手动拖时间条（非回放）：UI 拖动直调，松手保留游标；null = 回到最新 */
+/** 显式时间预览/定位；null = 释放覆盖，恢复回放时钟或最新数据。 */
 export function setScrub(sec: number | null) {
   scrubSec = sec;
 }
@@ -645,6 +803,7 @@ const calib = {
 };
 
 export function startCalibCapture() {
+  if (!calibSourceReady()) return;
   accel6Abort(); // 椭球采样与六面采集互斥（六面侧让路）
   calib.capturing = true;
 }
@@ -738,7 +897,7 @@ const accel6 = {
 
 /** 开始采集某面（2s 窗自动停）；与椭球连续采样互斥（椭球侧让路） */
 export function accel6StartFace(idx: number) {
-  if (idx < 0 || idx > 5) return;
+  if (!Number.isInteger(idx) || idx < 0 || idx > 5 || !calibSourceReady()) return;
   calib.capturing = false;
   accel6.collecting = true;
   accel6.idx = idx;
@@ -757,6 +916,11 @@ export function accel6Abort() {
 }
 export function accel6Reset() {
   accel6Abort();
+  accel6.t0Src = 0;
+  accel6.sum = [0, 0, 0];
+  accel6.sumSq = [0, 0, 0];
+  accel6.n = 0;
+  accel6.deadline = 0;
   accel6.faces = [null, null, null, null, null, null];
   accel6.result = null;
 }
@@ -834,6 +998,10 @@ export function _setSessionForTest(p: (() => SessionProbe) | null) {
  *  opts.keepCalib：WebGL 重建（context lost）路径用——停泵到旧场景但保留校准
  *  采样/拟合（那是几分钟的工作量），新场景挂上后经重放标记恢复显示 */
 export function setSink(cb: Sink | null, opts?: { keepCalib?: boolean }) {
+  if (cb !== null && cb !== sink) {
+    for (const gs of gst.values()) gs.replay = true;
+    invalidateCursor();
+  }
   sink = cb;
   if (cb !== null && pumpTimer === null) {
     // 与 2D/频谱同节奏：120ms 消费一次；后台页签浏览器节流到 ~1Hz 仍不丢段
@@ -860,10 +1028,25 @@ interface GroupPumpState {
   lastT: number;
   valCarry: number;
   ever: boolean;
+  /** User clear boundary is independent of the scene's consumed watermark. */
+  clearT: number;
+  /** Raw source watermark: rebuilding geometry must not resample calibration. */
+  sampledT: number;
+  sourceSig: string;
+  replay: boolean;
 }
-const gst = new Map<GroupId, GroupPumpState>(
-  GROUP_IDS.map((id) => [id, { sig: "", lastT: -Infinity, valCarry: 0, ever: false }]),
-);
+const mkPumpState = (): GroupPumpState => ({ sig: "", lastT: -Infinity, valCarry: 0, ever: false, clearT: -Infinity, sampledT: -Infinity, sourceSig: "", replay: false });
+/** P87e：随组数组懒建（不在固定三上预建）；删除组即移除 */
+const gst = new Map<GroupId, GroupPumpState>();
+/** 幂等取组泵状态（新增组首拍/重置后懒建） */
+function pumpState(gid: GroupId): GroupPumpState {
+  let s = gst.get(gid);
+  if (!s) {
+    s = mkPumpState();
+    gst.set(gid, s);
+  }
+  return s;
+}
 
 /**
  * 数据源注入口（P75 B2 改版）：按通道 id 取「原始序列」（各通道自己的时间戳，
@@ -888,21 +1071,30 @@ export interface PairStatSnapshot {
   max: [number, number, number];
 }
 
-const pairStats = new Map<GroupId, PairStatSnapshot>(
-  GROUP_IDS.map((id) => [
-    id,
-    {
+const pairStats = new Map<GroupId, PairStatSnapshot>();
+/** 幂等取组配对统计（懒建，P87e） */
+function statOf(gid: GroupId): PairStatSnapshot {
+  let p = pairStats.get(gid);
+  if (!p) {
+    p = {
       paired: 0,
       skipped: 0,
       tolMs: 0,
       min: [Infinity, Infinity, Infinity],
       max: [-Infinity, -Infinity, -Infinity],
-    },
-  ]),
-);
+    };
+    pairStats.set(gid, p);
+  }
+  return p;
+}
 
 export function pairSnapshot(gid: GroupId): PairStatSnapshot {
-  return pairStats.get(gid)!;
+  // 已删除/未知组：返回零值快照，不复活状态（HUD 缺失统计按零显示）
+  return pairStats.get(gid) ?? {
+    paired: 0, skipped: 0, tolMs: 0,
+    min: [Infinity, Infinity, Infinity],
+    max: [-Infinity, -Infinity, -Infinity],
+  };
 }
 
 function resetPairStat(gid?: GroupId) {
@@ -920,7 +1112,7 @@ function accumulatePairStat(
   gid: GroupId,
   r: { t: number[]; x: number[]; y: number[]; z: number[]; skipped: number; tolMs: number },
 ) {
-  const p = pairStats.get(gid)!;
+  const p = statOf(gid);
   p.paired += r.t.length;
   p.skipped += r.skipped;
   if (r.tolMs > 0) p.tolMs = r.tolMs;
@@ -938,23 +1130,25 @@ function accumulatePairStat(
 }
 
 export function _resetForTest() {
-  for (const g of gst.values()) {
-    g.sig = "";
-    g.lastT = -Infinity;
-    g.valCarry = 0;
-    g.ever = false;
-  }
+  gst.clear();
+  pairStats.clear();
   st.lastCursor = null;
   scrubSec = null;
   sessionProbe = defaultSessionProbe;
   settings = normalizeSettings(null);
   undoStack = [];
   redoStack = [];
+  usedGroupIds.clear();
+  for (const g of settings.groups) usedGroupIds.add(g.id);
+  reconciledSettings = settings;
+  clearReq = null;
   snapshot = { settings, canUndo: false, canRedo: false };
   resetPairStat();
   clearCalibAll();
   try {
     localStorage.removeItem(SETTINGS_KEY);
+    localStorage.removeItem(`${SETTINGS_KEY}.corrupt`);
+    localStorage.removeItem(`${SETTINGS_KEY}.pre-v3`);
   } catch {
     /* 测试环境存储异常忽略 */
   }
@@ -969,8 +1163,9 @@ export function _resetForTest() {
  * 无 UI 直连的通路（AI/MCP）用 requestClearData。
  */
 export function clearData(gid?: GroupId) {
+  if (gid !== undefined && !getGroup(gid)) return;
   for (const g of settings.groups) {
-    if (gid && g.id !== gid) continue;
+    if (gid !== undefined && g.id !== gid) continue;
     let maxT = -Infinity;
     for (const id of [g.chX, g.chY, g.chZ]) {
       if (!id) continue;
@@ -978,8 +1173,11 @@ export function clearData(gid?: GroupId) {
       const last = s.t[s.t.length - 1];
       if (last !== undefined && last > maxT) maxT = last;
     }
-    const gs = gst.get(g.id)!;
-    gs.lastT = maxT;
+    // P87e 修复：清空推水位，但**不低于**现水位——绑定通道无数据（全 -Infinity）时
+    // 保持原水位，不再把 -Infinity 写回（那会让刚清掉的历史被重灌）
+    const gs = pumpState(g.id);
+    gs.clearT = Math.max(gs.clearT, gs.lastT, maxT);
+    gs.lastT = gs.clearT;
     gs.valCarry = 0;
     resetPairStat(g.id);
   }
@@ -987,11 +1185,14 @@ export function clearData(gid?: GroupId) {
 }
 
 /** AI/MCP 清空通路：下一拍泵以 reloaded 空批次下发（驱动 scene 清组缓冲），
- *  与 UI 路径同一语义（水位推进 + 场景清零 + 不可撤销） */
+ *  与 UI 路径同一语义（水位推进 + 场景清零 + 不可撤销）。
+ *  P87e：按请求对象累积（并发多次 clear 不互相覆盖）；随组数组取当前组集 */
 let clearReq: GroupId[] | null = null;
 export function requestClearData(gid?: GroupId) {
+  if (gid !== undefined && !getGroup(gid)) return;
   clearData(gid);
-  clearReq = gid ? [gid] : [...GROUP_IDS];
+  const ids = gid ? [gid] : settings.groups.map((g) => g.id);
+  clearReq = clearReq === null ? ids : [...new Set([...clearReq, ...ids])];
 }
 
 /** 全量配对（导出/对齐共用，sinceT=-Infinity 与泵严格同口径）；未绑/无源 → null */
@@ -1016,6 +1217,7 @@ export function exportTriples(
   gid: GroupId,
 ): { t: number[]; x: number[]; y: number[]; z: number[] } | null {
   const g = getGroup(gid);
+  if (!g) return null;
   const pair = pairFull(g);
   if (!pair) return null;
   const org = timeOrigin();
@@ -1062,15 +1264,14 @@ export function groupBound(gid: GroupId): boolean {
   return !!g && !!g.chX && !!g.chY;
 }
 
-/** 校准源就绪（组1 三轴绑齐——平面数据校准点云无意义，沿用严格口径） */
+/** 校准源三轴绑齐才就绪；平面轨迹不能作为校准点云。 */
 export function calibSourceReady(): boolean {
-  const g = settings.groups[0];
-  return !!g.chX && !!g.chY && !!g.chZ;
+  const g = settings.groups.find((g) => g.id === settings.calibSrc);
+  return !!g && !!g.chX && !!g.chY && !!g.chZ;
 }
 
 function pumpOnce() {
-  if (!sink) return;
-  if (!panelActivity.isOpen("plot3d")) return;
+  if (!sink || !panelActivity.isOpen("plot3d")) return;
   const chans = getPlotSnapshot().channels;
   sanitizeBinds(chans);
   const s = settings;
@@ -1089,21 +1290,28 @@ function pumpOnce() {
   const req = clearReq;
   clearReq = null;
 
+
   for (const g of s.groups) {
-    const gs = gst.get(g.id)!;
+    const gs = pumpState(g.id);
     const tf = g.transform;
     const sig = `${g.chX}|${g.chY}|${g.chZ}|${g.colorBy}|${g.colorCh}|${g.density}|${g.pairMode}|${g.pairTolMs}|${g.mode}|${g.smooth}|${g.smoothWin}|${tf.rotX}|${tf.rotY}|${tf.rotZ}|${tf.offX}|${tf.offY}|${tf.offZ}|${tf.scale}|${chans.map((c) => c.id).join(",")}`;
-    const reloaded = sig !== gs.sig || (req !== null && req.includes(g.id));
-    if (reloaded) {
+    const signatureChanged = sig !== gs.sig;
+    const reloaded = signatureChanged || gs.replay || (req !== null && req.includes(g.id));
+    const sourceSig = sourceSignature(g);
+    if (gs.sourceSig && sourceSig !== gs.sourceSig) {
+      gs.clearT = -Infinity;
+      gs.sampledT = -Infinity;
+    }
+    gs.sourceSig = sourceSig;
+    // Reconstruction replays only retained source history after the user-clear boundary.
+    // A clear request alone must NOT reset the consumed watermark.
+    if (signatureChanged || gs.replay) {
       gs.sig = sig;
-      gs.lastT = -Infinity;
+      gs.lastT = gs.clearT;
       gs.valCarry = 0;
       resetPairStat(g.id);
-      if (g.id === "g1" && (calib.pts.x.length > 0 || calibFit || accel6.faces.some((f) => f !== null))) {
-        // 组1 数据源/绑定/密度/模式/变换变化：混采无意义 → 校准全套清空重来（P71 §5 / P73 §6）
-        clearCalibAll();
-      }
     }
+    gs.replay = false;
     if (!g.chX || !g.chY) {
       // X/Y 未绑齐 → 该组不消费（HUD 提示；Z 可空=平面）；曾有数据的组签名变化时通知场景清空旧轨迹
       if (reloaded && gs.ever) {
@@ -1135,7 +1343,9 @@ function pumpOnce() {
     });
     // 时间水位续传：interp/nearest 消费到 X 末锚点；union 消费到三序列原始末点。
     // 永不回退（源重建缩小防御；重灌时已置 -Infinity）。
+    const sampledBefore = gs.sampledT;
     if (pair.endT > gs.lastT) gs.lastT = pair.endT;
+    gs.sampledT = Math.max(gs.sampledT, pair.endT);
     accumulatePairStat(g.id, pair);
 
     // 源末端（游标/时间条覆盖的数据整体范围）：各组绑定通道原始末点最大值
@@ -1151,9 +1361,9 @@ function pumpOnce() {
     const tp: [number, number, number] = [0, 0, 0];
     let lastMs = -Infinity;
 
-    // 校准（P71/P73）：仅组1 源；stride=1 不抽稀（与轨迹密度无关）；采满 CAP 自动停止；
+    // 校准（P71/P73）：仅校准源组；stride=1 不抽稀（与轨迹密度无关）；采满 CAP 自动停止；
     // **旁路组变换**——校准的对象是传感器本身，点云必须是原始值
-    const g1src = g.id === "g1";
+    const g1src = g.id === s.calibSrc && calibSourceReady();
     const wantCalib = s.calibMode && g1src && calib.capturing;
     const wantPreview = s.calibMode && g1src && calibFit !== null;
     const wantA6 = s.calibMode && g1src && accel6.collecting;
@@ -1177,7 +1387,7 @@ function pumpOnce() {
         b.val.push(gs.valCarry);
         lastMs = tMs;
       }
-      if ((wantCalib || wantPreview || wantA6) && !calibFull) {
+      if (tMs > sampledBefore && (wantCalib || wantPreview || wantA6) && !calibFull) {
         const vx = pair.x[i];
         const vy = pair.y[i];
         const vz = pair.z[i];
@@ -1252,16 +1462,16 @@ function pumpOnce() {
     }
   }
 
-  // ---------- 游标裁决（P70 T2）：回放跟随 > 手动 scrub > 跟随最新 ----------
+  // ---------- 游标裁决：显式预览 > 回放时钟 > 跟随最新 ----------
   let cursorSec: number | null = null;
   const sess = sessionProbe();
   const endRel = endSrc > -Infinity ? (endSrc - t0) / 1000 : 0;
-  if (sess.playing) {
+  if (scrubSec !== null) {
+    cursorSec = Math.min(Math.max(scrubSec, 0), endRel);
+  } else if (sess.playing) {
     // 回放时钟 → 相对秒，clamp 到源范围（防御时钟错位）
     const rel = (sess.replayTsMs - t0) / 1000;
     cursorSec = Math.min(Math.max(rel, 0), endRel);
-  } else if (scrubSec !== null) {
-    cursorSec = Math.min(Math.max(scrubSec, 0), endRel);
   }
   const cursorChanged =
     (cursorSec === null) !== (st.lastCursor === null) ||
@@ -1277,8 +1487,8 @@ function pumpOnce() {
 // ---------- 旧 API 兼容出口（appActions/AI 提示词的 bind axisX 语义映射到组1） ----------
 
 /** 读取某组（UI/AI 快照用） */
-export function getGroup(gid: GroupId): TrajGroup {
-  return settings.groups.find((g) => g.id === gid) ?? settings.groups[0];
+export function getGroup(gid: GroupId): TrajGroup | undefined {
+  return settings.groups.find((g) => g.id === gid);
 }
 
 /**
@@ -1286,7 +1496,7 @@ export function getGroup(gid: GroupId): TrajGroup {
  * （校准模式是操作态，操作员端进包后默认轨迹模式）
  */
 export function exportSettingsForPkg(): Plot3DSettings {
-  return { ...settings, calibMode: false, groups: settings.groups.map((g) => ({ ...g })) as Plot3DSettings["groups"] };
+  return { ...settings, ...cloneCfg(), calibMode: false };
 }
 
 /** Operator 包导入（P71）：全量归一化（含 v1 旧包迁移）后应用+持久化；返回是否接受。
@@ -1294,7 +1504,14 @@ export function exportSettingsForPkg(): Plot3DSettings {
 export function importSettingsFromPkg(raw: unknown): boolean {
   if (guardLocked()) return false;
   if (typeof raw !== "object" || raw === null) return false;
-  settings = normalizeSettings(raw as Record<string, unknown>);
+  const next = normalizeSettings(raw as Record<string, unknown>); // Validate before any mutation.
+  settings = next;
+  undoStack = [];
+  redoStack = [];
+  clearReq = null;
+  clearCalibAll();
+  pairStats.clear();
+  for (const gs of gst.values()) gs.replay = true;
   emit();
   persist();
   return true;

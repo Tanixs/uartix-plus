@@ -6,6 +6,7 @@ export type AiScene =
   | "docTemplate"
   | "interpret"
   | "analyzeCurve"
+  | "inertial"
   | "genCommand"
   | "genCard"
   | "diagnose"
@@ -23,12 +24,12 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - 2D 曲线：多通道实时曲线，时间/幅值双游标测量，Y 轴自适应，相对秒时间轴；跟随刷新 rAF 驱动；支持把协议模板面板的字段行直接拖入图区开通道。
 - 频谱分析面板（spectrum）：FFT 频谱（Hann/矩形窗、线性/dB、1024~32768 点、Top3 主峰与频率分辨率）与直方图（均值/σ/分布）双模式；与 2D 曲线共享通道，空态可在面板内直接选协议字段建通道；数据不足时自动诚实降点并在摘要行提示。
 - 3D 姿态：Roll/Pitch/Yaw 实时三维显示。
-- 3D 轨迹面板（plot3d）：**三组独立轨迹**（惯导推算/实际导航/目标等场景），每组各绑 X/Y（Z 可留空=平面）并**独立选显示模式**——point 实时定位（只留最新点零历史内存）/ points 点集 / line 连线；平滑四档：无/滑动平均/**Catmull-Rom 样条**（张力+细分）/**三次样条**——曲线层只改视觉，悬停/测量/导出仍读原始点；组级还有着色（时间/通道/组色）、渐隐、密度、最大点数、配对方式与容差、备注；**P87b 物理层**：头部朝向（默认 +X/速度差分/航向角通道/四元数 4 通道 + 偏航/俯仰/滚转修正与翻转）、显示模型（光点/球/箭头/车/锥/坐标轴/本地 GLTF+缩放/旋转修正/高度偏移）、**组坐标变换**（旋转/平移/缩放——NED↔ENU 装歪修正；「首点对齐原点」一键把三组起点对齐做路径对比）、方向箭头（每 N 点）、起点标记、**会话打点旗标**（时间轴刻度+3D 旗标联动）、**轨迹 CSV 导入**（t,x,y[,z] → 组虚拟通道，与真实通道同消费面）；组行可拖协议图例字段智能绑定、双击聚焦、右键单组导出/导入/清空；不再有「混合模式」——不同组各选各的模式天然叠加。全局视图：三轴缩放（等比/逐轴）、网格疏密+比例尺读数、跟随、自动旋转、键盘飞行、光标缩放（Operator 只读模式下配置锁定，但校准与查看操作仍可进行）；底部时间条支持历史 scrub 与回放联动 seek、组配置一步 Ctrl+Z 撤销（清空数据不可撤销）。校准能力两套（**采样源=组1，校准恒用原始传感器值不受组变换影响**）：**椭球校准**（进校准模式后八象限点云采样，累积上限 20000 点 → 九参数最小二乘拟合：硬磁偏置 offset×3 + 软磁对称校正矩阵 W×6，并给半径变异系数 cv 与残差 RMS 判质量，结果可复制 JSON/C 数组直接进固件；支持残差着色、原始/校正后显示对比与在线补偿预览）与**六面校准**（加计专用：六个静态姿态各静置 2 秒采集，σ 拒绝晃动，解 offset/gain）。拿到原始磁力计/加速度计时用它把歪掉的球校正成正圆。
+- 3D 轨迹面板（plot3d）：**多组独立轨迹（默认三组，可增删）**（惯导推算/实际导航/目标等场景），每组各绑 X/Y（Z 可留空=平面）并**独立选显示模式**——point 实时定位（只留最新点零历史内存）/ points 点集 / line 连线；平滑四档：无/滑动平均/**Catmull-Rom 样条**（张力+细分）/**三次样条**——曲线层只改视觉，悬停/测量/导出仍读原始点；组级还有着色（时间/通道/组色）、渐隐、密度、最大点数、配对方式与容差、备注；**P87b 物理层**：头部朝向（默认 +X/速度差分/航向角通道/四元数 4 通道 + 偏航/俯仰/滚转修正与翻转）、显示模型（光点/球/箭头/车/锥/坐标轴/本地 GLTF+缩放/旋转修正/高度偏移）、**组坐标变换**（旋转/平移/缩放——NED↔ENU 装歪修正；「首点对齐原点」一键把各组起点对齐做路径对比）、方向箭头（每 N 点）、起点标记、**会话打点旗标**（时间轴刻度+3D 旗标联动）、**轨迹 CSV 导入**（t,x,y[,z] → 组虚拟通道，与真实通道同消费面）；组行可拖协议图例字段智能绑定、双击聚焦、右键单组导出/导入/清空；不再有「混合模式」——不同组各选各的模式天然叠加。全局视图：三轴缩放（等比/逐轴）、网格疏密+比例尺读数、跟随、自动旋转、键盘飞行、光标缩放（Operator 只读模式下配置锁定，但校准与查看操作仍可进行）；底部时间条支持历史 scrub 与回放联动 seek、组配置一步 Ctrl+Z 撤销（清空数据不可撤销）。校准能力两套（**采样源=显式选择的 calibSource（默认 g1，可为 null），校准恒用原始传感器值不受组变换影响**）：**椭球校准**（进校准模式后八象限点云采样，累积上限 20000 点 → 九参数最小二乘拟合：硬磁偏置 offset×3 + 软磁对称校正矩阵 W×6，并给半径变异系数 cv 与残差 RMS 判质量，结果可复制 JSON/C 数组直接进固件；支持残差着色、原始/校正后显示对比与在线补偿预览）与**六面校准**（加计专用：六个静态姿态各静置 2 秒采集，σ 拒绝晃动，解 offset/gain）。拿到原始磁力计/加速度计时用它把歪掉的球校正成正圆。
 - 结构发现面板（xray）：对未知协议字节流做周期/帧头统计推断（自相关+显著度算法），支持显著度/帧长上限/分析窗口调参；可对候选帧头做协议簇分析（识别同帧头家族下的多种帧型与各自帧长），勾选帧型后一键按簇批量生成协议模板。AI 协议考古：面板「采样分析」后可用 xrayEvidence/xrayCrack 动作取确定性证据链、xrayReport 生成引用证据编号的推理报告（结论/置信度/建议模板结构）。
 - 哨兵面板（sentinel）：静默异常监测——数值通道双 EMA z-score 突变（灵敏度低/中/高三档）、学习期后新帧型出现告警、错误帧率超阈、通信静默（连接中但超 N 秒无帧）。报警带冷却合并（×N）与恢复事件；可最小化成右下角浮球或弹出桌面挂件继续驻留报警（面板、浮球与桌面挂件全部关闭才停止监测）；提示音为合成音。用户说"帮我盯着""数据有没有异常"时相关。
 - 自动编排器（orchestrator）：可视化流程编排——「事件 → 块树」的自动化引擎。事件 12 类：手动・会话开始/结束・解码帧命中（可设 stride 抽样防洪泛）・坏帧命中（frameError）・新帧型出现（newTpl）・通道阈值穿越（去抖）・通道值变化（chanChanged）・定时器・哨兵告警（warn/crit）・变量变化・自定义事件（flow，配 emitFlow 块跨组解耦）・通信静默（idle，帧流恢复自动重武装）。块 23 类：基础执行 发送（可多帧逐发）/ 延时 / 等帧(waitFrame) / 跑序列(runSuite) / 调用组(runGroup) / 变量赋值(setVar，来源可为常量/通道/表达式/事件字段) / toast / 声音；自动化工具箱 setControl(写画布变量)/setSwitch(切开关卡)/modbusWrite(FC05/06 编码成 RTU 帧发送)/log/snapshot(截 2D 曲线入库)/exportCsv/stopSuite/emitFlow/clip(写剪贴板)/resetVars(变量复位默认)；逻辑容器 if / loop(count|while) / break / abort / group。表达式沙箱白名单函数 abs/floor/ceil/round/min/max/clamp/if/len/fmt（if 惰性求值），另有 now（当前毫秒，测周期用）。每组一条 FIFO 队列，深度 8（= 1 在跑 + 7 排队），满队列策略 dropNew（丢新，默认）/ dropOld（挤掉最旧排队项）/ stopOld（全部中止让新的上位）；另有冷却静默期 cooldownMs、连续失败熔断自停、持久化变量镜像（重启保留）。「从模板新建」内置五套组模板：报警通知 / 看门狗 / 定时轮询 / 收发握手 / PID 继电反馈整定（含阶跃验证组与 12 个配套变量），导入默认未启用待用户检查。红线常量：顶层组 ≤32、变量 ≤64（字符串值 ≤1024）、单循环 ≤1000 轮、单实例累计 ≤10000 块。把协议模板面板的字段行拖进编排器组列表可秒挂阈值事件。用户说"自动执行""按条件触发""编个测试流程/自动化流程""PID 整定"时相关。
 - 测试序列器（sequencer）：拖积木组线性自动化测试——发送/等待/等帧/断言/分组/备注六类步骤，嵌套 ≤4 层、组循环 repeats；帧到达触发自动运行（冷却+防重入）、单步调试、failFast；跑完出自包含 HTML 报告（桌面导出与 CLI 同一生成器）；配套 seq-cli 命令行（回环设备无硬件跑断言、JUnit 输出进 CI）。红线：关面板即停，绝不后台发包。与编排器互操作：编排器可 runSuite 调用序列套件，序列可导入编排器成组。用户说"跑个测试""验证一下设备响应""回归测试"时相关。
-- AI 与外部集成：你能通过动作直接读写这两块——只读用 orchestratorRead / plot3dRead 取快照；写入用 orchestrator({op:enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet}) 与 plot3d({op:bind|set|clear|undo|redo|calib}，三组化：args.gid=g1|g2|g3 缺省 g1)（均需高权限）。**编排结构可由你说出来即搭**：groupAdd 建组 → eventAdd 挂事件（eventKind=上面 12 类事件之一 + 该事件的参数平铺在同一 args）→ blockAdd 插块（blockKind=上面 23 类块之一 + 该块的参数平铺，可用 parentId 插进 if/loop/子组内部、which=then|els 选分支）→ enable({on:true}) 开总开关。全部块/事件种类与参数以 uartix-action 规范中的自动字典为准。新块默认启用（enabled:true）但**空事件槽的组不会自动跑**；返回值里的 hints 会告诉你还缺什么（如"发送内容为空"）。外部 IDE 侧同源：MCP 工具 get_orchestrator / get_plot3d 只读，run_action 的 kind=orchestrator/plot3d 写入。
+- AI 与外部集成：你能通过动作直接读写这两块——只读用 orchestratorRead / plot3dRead 取快照；写入用 orchestrator({op:enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet}) 与 plot3d({op:bind|set|groupAdd|groupRemove|clear|undo|redo|calib}，动态组：args.gid 为快照中现存 ID，缺省 g1，已删则报错)（均需高权限）。**编排结构可由你说出来即搭**：groupAdd 建组 → eventAdd 挂事件（eventKind=上面 12 类事件之一 + 该事件的参数平铺在同一 args）→ blockAdd 插块（blockKind=上面 23 类块之一 + 该块的参数平铺，可用 parentId 插进 if/loop/子组内部、which=then|els 选分支）→ enable({on:true}) 开总开关。全部块/事件种类与参数以 uartix-action 规范中的自动字典为准。新块默认启用（enabled:true）但**空事件槽的组不会自动跑**；返回值里的 hints 会告诉你还缺什么（如"发送内容为空"）。外部 IDE 侧同源：MCP 工具 get_orchestrator / get_plot3d 只读，run_action 的 kind=orchestrator/plot3d 写入。MCP 长任务（P88a）用 create_job 提交、get_job 查询结果分页、wait_event ≤1s 短等待、cancel_job 协作停止。首批 sequence.validate 与无设备副作用的 sequence.run；含发送或未知步骤立即 needs_manual_confirmation，不入队不等待，highPriv/confirmed 不是人工批准。accepted≠成功，停止中≠已停止；应用换实例禁止自动重放；旧 run_sequence 执行前 async_required，不能用 run_action 绕过。
 - 会话录制回放：录制数据会话存为 .usess 文件，在帧画布时间机器回放（进度点选跳转、多档倍速、按 M 打时间线标注）。
 - 控制画布：滑条/按钮/开关/LED/蜂鸣器/监视器/摇杆/键盘等卡片，另支持 group 组合控件（一张卡片集成滑条+按钮+开关+监视+LED 等多个子控件），命令模板串支持 %.2f 等格式化与 {变量} 插值，卡片脚本为 JS 子集（send/get/set/delay_ms/beep/log/waitParse/repeat 等 API）。
 - 命令库：分组树结构，命令可带脚本，拖拽排序。
@@ -74,11 +75,6 @@ export type NeedKey =
   | "card"
   | "command"
   | "codec"
-  | "theme"
-  | "style"
-  | "widget"
-  | "panel"
-  | "script"
   | "action";
 
 export interface CreativePerms {
@@ -91,11 +87,6 @@ const NEED_LABEL: Record<NeedKey, string> = {
   card: "uartix-card 控制卡片",
   command: "uartix-command 命令库命令",
   codec: "uartix-codec 指令工厂自定义协议",
-  theme: "uartix-theme 主题包",
-  style: "uartix-style 样式层",
-  widget: "uartix-widget 沙箱小部件",
-  panel: "uartix-panel 自定义面板",
-  script: "uartix-script 行为脚本",
 };
 
 /* B4a：编排块/事件参数字典从 blockRegistry 拼接（单一真源，消除手写漂移）；
@@ -107,10 +98,6 @@ const ORCH_BLOCK_DICT = Object.entries(BLOCK_REGISTRY)
 const ORCH_EVENT_DICT = Object.entries(EVENT_REGISTRY)
   .map(([k, m]) => `${k}(${m.ai})`)
   .join("；");
-
-const STYLE_POWER = `视觉能力清单：动效（@keyframes + animation：呼吸、流光扫过、渐变漂移；transition；:hover 微交互；数据区域避免常驻高耗动画）；光效（box-shadow 内外发光、渐变高光描边、color-mix 半透明叠加）；液态玻璃（backdrop-filter: blur() + 半透明面板色 + 1px 内高光边）；贴图（CSS 渐变纹理 repeating/radial/conic-gradient，或 data:image/svg+xml;base64, 内联小图；禁止引用外部 http 图片，离线会失效）；面板级主题（用面板作用域速查表给单个面板做差异化外观）。裁决规则：①缓动匹配设计语言——粘土拟态/弹簧风格可用弹性回弹曲线（如 cubic-bezier(0.34,1.56,0.64,1)），其余场景默认 ease-out/ease-in-out，数据图表区域一律不回弹；②密度伦理——数据密集面板（hexview/table/plot2d/framecanvas）保持小圆角(≤6px)高信息密度，大圆角/内凹阴影只用于装饰性区域；若用户要"紧凑版"，用面板作用域只收紧这些面板的间距圆角；③宿主已有 design token，覆写全局时优先复用而非另造——间距 --sp-1~--sp-5（4/8/12/16/24px）、字号 --fs-xs/--fs-body/--fs-sm/--fs-md/--fs-lg（10/11/12/14/16px）、圆角 --radius-s/m/l/xl（4/6/8/10px）、动效时长 --dur-snap/--dur-fast/--dur-base（60/120/150ms）、缓动 --ease，数值展示区用 font-variant-numeric:tabular-nums 防抖动；宿主已内置 prefers-reduced-motion 降级，自定义 CSS 中的常驻动画也应遵守该媒体查询。`;
-
-const PANEL_CLASSES = `面板作用域速查（稳定契约，优先使用）：每个面板根 DOM 带 data-panel 属性——[data-panel="templates"|"properties"|"hexview"|"table"|"plot2d"|"spectrum"|"view3d"|"plot3d"|"controls"|"framecanvas"|"console"|"video"|"xray"|"modbus"|"sequencer"|"sentinel"|"orchestrator"|"ai"|"vdev"]，面板级定制一律以它作前缀（如 [data-panel="plot2d"] .plot-bar）；面板内容容器=[data-panel=x] .dv-content-container。旧类名仍可用：协议模板 .tpl-panel｜属性 .props-panel｜Hex .hexview｜表格 .tbl｜2D 曲线 .plot｜3D 姿态 .view3d｜控制画布 .ctl（命令库在其 .ctl-side）｜帧画布 .fc-root｜控制台 .console（快捷指令条 .qk-*）｜图传 .video-panel。面板内通用子结构：工具条 *-bar、内容区 *-body、状态栏 *-status。注意：AI 扩展面板(aiExtPanel)与小部件/自定义卡片是沙箱 iframe，不吃本页样式层——它们经 uartix 主题桥拿 CSS 变量。`;
 
 /** 操作类动词 → 触发 action 注入（含协议考古：让 AI 直接调 xray 动作取证据） */
 const ACTION_ROUTE_RE =
@@ -146,8 +133,8 @@ function schemaAction(): string {
 - sentinel({"op":"status"}) 哨兵异常监测（需脚本高权限）：op 可选 status（健康分/活跃异常/最近报警）、enable({"on":true|false}) 启停监测、ackAll() 确认全部、mute({"key":"spike:roll"}) 静音某类报警、clear 清空历史。用户问"刚才数据有没有异常""帮我盯着链路"时用 status 查报警；用户说"别报了"用 mute/ackAll
 - orchestratorRead() 编排器只读快照：总开关 / 在跑实例数 / 各组（事件种类、冷却、满队列策略、块数、运行次数、失败数、最近一次结果）/ 变量现值 / 最近 10 条日志。用户问"自动化跑到哪了""哪组在跑"先读它
 - orchestrator({"op":"…"}) 编排器写操作（需高权限）：op 可选 enable({"on":true|false}) 总开关、run({"groupId"|"name"}) 手动触发某组、stopAll() 停全部在跑与排队、groupAdd({"name"?}) 新建空组、groupUpdate({"groupId","groupName"?,"enabled"?,"cooldownMs"?,"note"?,"queuePolicy"?}) 改组设置、groupRemove({"groupId"}) 删组【破坏性】、eventAdd({"groupId","eventKind",…该事件参数}) 挂事件（eventKind 及参数：${ORCH_EVENT_DICT}）、eventRemove({"groupId","eventId"}) 移除事件【破坏性】、blockAdd({"groupId","blockKind",…该块参数,"parentId"?,"which"?:"then"|"els","index"?}) 插执行/逻辑块（blockKind 及参数：${ORCH_BLOCK_DICT}）、blockRemove({"groupId","blockId"}) 删块【破坏性】、varsSet({"name","value"}) 写变量现值（变量须先在变量库声明；会触发 varChanged 事件链）。**搭一条自动化的完整链路**：groupAdd → eventAdd（如 {"eventKind":"timer","intervalMs":5000}）→ blockAdd（如 {"blockKind":"send","sendMode":"hex","text":"AA 55"}、{"blockKind":"waitFrame","hex":"55 59","timeoutMs":500}、{"blockKind":"setVar","name":"x","value":1}、{"blockKind":"toast","level":"warn","text":"超时"}）→ enable({"on":true})。eventAdd/blockAdd 的返回里 applied=实际采纳的参数、hints=还缺什么（如"发送内容为空"），照 hints 补一次即可。注意：if/loop 只造骨架（条件与循环体请在面板里编）；ORCH 红线：每组事件 ≤8、单层块 ≤200、组 ≤32、变量 ≤64。用户说"帮我自动跑这个流程""定时触发""编个自动化""停掉自动化"时用
-- plot3dRead() 3D 轨迹只读快照（P87a 三组化）：groups 数组（每组 name/color/visible/axes 与是否绑齐/mode=point|points|line/着色/渐隐/密度/平滑/最大点数/配对/备注）、view 全局视图、是否校准模式（采样源=组1）、采样点数与八象限覆盖、椭球拟合（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。用户问"3D 转得对不对""校准准不准""三条轨迹叠一下"时读它
-- plot3d({"op":"…"}) 3D 轨迹写操作（需高权限；**gid:"g1"|"g2"|"g3" 选组，缺省 g1**）：op 可选 bind({"gid"?,"axisX"?,"axisY"?,"axisZ"?,"colorCh"?}) 换轴绑定（该组重灌；组1 换绑清空校准；Z 传 "" 或省略轴=平面/未绑）、set({"gid"?,"colorBy"?,"mode"?,"density"?,"fade"?,"pointSize"?,"opacity"?,"showDots"?,"maxPoints"?,"smooth"?:"none"|"movingAvg"|"catmullRom"|"spline","smoothWin"?,"smoothSub"?,"smoothTension"?,"arrowEvery"?,"showStartEnd"?,"heading"?{src:"xAxis"|"velocity"|"ch"|"quat",chYaw?,qX?,qY?,qZ?,qW?,yawOff?,pitchOff?,rollOff?,yawSign?},"model"?{kind:"point"|"sphere"|"arrow"|"car"|"cone"|"axes"|"gltf",src?,scale?,rotX?,rotY?,rotZ?,heightOff?},"transform"?{rotX?,rotY?,rotZ?,offX?,offY?,offZ?,scale?},"pairMode"?,"pairTolMs"?,"name"?,"color"?,"notes"?} 或全局 {"axisScale"?,"showGrid"?,"gridDensity"?,"autoRotate"?,"follow"?,"keyFlight"?,"zoomToCursor"?}；旧 style 键仍兼容）显示设置、clear({"gid"?}) 清空轨迹数据（不可撤销）、undo()/redo() 组配置撤销重做、calib({"calib":"enter"|"exit"|"start"|"stop"|"clear"|"solve6","gRef"?}) 校准（采样源=组1）。用户说"开始校准""组2 画实际轨迹""车头跟航向角转""把目标轨迹对齐到起点""导入这个 CSV 到组3（让用户配合面板导入）"时用
+- plot3dRead() 3D 轨迹只读快照（P87e 弹性组数）：groups 数组（每组 name/color/visible/axes 与是否绑齐/mode=point|points|line/着色/渐隐/密度/平滑/最大点数/配对/备注）、view 全局视图、是否校准模式（采样源=显式选择的 calibSource（默认 g1，可为 null））、采样点数与八象限覆盖、椭球拟合（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。用户问"3D 转得对不对""校准准不准""三条轨迹叠一下"时读它
+- plot3d({"op":"…"}) 3D 轨迹写操作（需高权限；**gid 为现存组 ID，缺省 g1（已删则报错）**）：op 可选 groupAdd({name?}) 返回稳定 gid；groupRemove({gid}) 仅返回需人工确认，必须用户在本机组菜单删除（highPriv/confirmed 不代表本次批准）；bind({"gid"?,"axisX"?,"axisY"?,"axisZ"?,"colorCh"?}) 换轴绑定（该组重灌；校准源换绑清空校准；Z 传 "" 或省略轴=平面/未绑）、set({"gid"?,"colorBy"?,"mode"?,"density"?,"fade"?,"pointSize"?,"opacity"?,"showDots"?,"maxPoints"?,"smooth"?:"none"|"movingAvg"|"catmullRom"|"spline","smoothWin"?,"smoothSub"?,"smoothTension"?,"arrowEvery"?,"showStartEnd"?,"heading"?{src:"xAxis"|"velocity"|"ch"|"quat",chYaw?,qX?,qY?,qZ?,qW?,yawOff?,pitchOff?,rollOff?,yawSign?},"model"?{kind:"point"|"sphere"|"arrow"|"car"|"cone"|"axes"|"gltf",src?,scale?,rotX?,rotY?,rotZ?,heightOff?},"transform"?{rotX?,rotY?,rotZ?,offX?,offY?,offZ?,scale?},"pairMode"?,"pairTolMs"?,"name"?,"color"?,"notes"?} 或全局 {"axisScale"?,"showGrid"?,"gridDensity"?,"autoRotate"?,"follow"?,"keyFlight"?,"zoomToCursor"?}；旧 style 键仍兼容）显示设置、clear({"gid"?}) 清空轨迹数据（不可撤销）、undo()/redo() 组配置撤销重做、calib({"calib":"enter"|"exit"|"start"|"stop"|"clear"|"solve6","gRef"?}) 校准（采样源=显式选择的 calibSource（默认 g1，可为 null））。用户说"开始校准""组2 画实际轨迹""车头跟航向角转""把目标轨迹对齐到起点""导入这个 CSV 到组3（让用户配合面板导入）"时用
 - 注意：Operator 只读模式（已加载 Operator 包）下，编排器与 3D 的**配置类**写操作会被拒绝（toast 提示），但运行类（orchestrator enable/run/stopAll）与校准操作仍可用；此边界由 store 层强制，不是 UI 假禁用。
 - clearPage() 清空控制画布当前页【破坏性】；addPage({"name":"页名"}) 新建控制页；patchCard({"name":"卡名","patch":{…}}) 改卡片属性
 - removeCard({"name":"卡名"})/removeProtocol({"name":"模板名"})/removeCommand({"name":"命令名"})/removeCodec({"name":"协议名"}) 按名删除【破坏性】
@@ -181,69 +168,8 @@ function schemaCodec(): string {
 规则：至少 2 段；校验段最多 1 个且不能在首位；变量名不重复；帧头用 fixed 段。安装后出现在指令工厂「自定义协议」中，填参数即可自动组帧（含校验）。`;
 }
 
-function schemaTheme(): string {
-  return `【uartix-theme 主题包格式】输出一个 \`\`\`uartix-theme 代码块，内容为 JSON 对象 {"name":"主题名","desc":"一句话描述","vars":{CSS变量:值},"css":"可选的整页风格CSS"}。vars 键为 --bg/--bg-panel/--bg-inset/--bg-titlebar/--border/--border-soft/--text/--text-dim/--accent/--accent-soft/--on-accent/--danger/--shadow/--scrollbar/--scrollbar-hover，值为合法 CSS 颜色/阴影（可用 color-mix 或渐变）。硬规则：--on-accent 是按钮/徽标等「accent 底色上的文字色」——accent 与 --on-accent 对比度必须 ≥3.0（亮色 accent 如黄/浅绿/白必须配深色 --on-accent，如 #1c1e22；深色 accent 才可配 #fff），漏给会回退白色，亮 accent 会不可读。要求整体对比度足够、和谐。css 字段发挥视觉表现力：${STYLE_POWER}`;
-}
-
-function schemaStyle(): string {
-  return `【uartix-style 样式层格式】输出一个 \`\`\`uartix-style 代码块，内容为纯 CSS 文本（不是 JSON），可基于任意既有类名精细定制，能力：${STYLE_POWER}
-${PANEL_CLASSES}约束：只作用于既有类名；不得 position:fixed 全屏覆盖、不得隐藏关闭按钮、canvas 绘制内容（曲线内部）不受 CSS 控制。`;
-}
-
-function schemaWidget(send: boolean): string {
-  return `【uartix-widget 沙箱小部件格式】输出一个 \`\`\`uartix-widget 代码块，内容为单个自包含 HTML（内联 CSS/JS），运行在沙箱 iframe（无网络、无法访问主程序 DOM）。
-系统会自动注入全局 window.uartix API——直接用，禁止手写 postMessage 样板。小部件/自定义面板/自定义卡片通用：
-- uartix.onSnap(cb)→取消订阅；cb({status,port,fields:{字段名:最新值}}) 订阅即回最新值；uartix.snap() 同步读
-- uartix.onChat(cb)→cb({phase,reasoningTail,textTail,ts,error})：AI 助手实时状态。phase："thinking" 思考中 / "streaming" 正文输出中 / "idle" 完成 / "error" 出错；reasoningTail=思维链尾部（≤600字）、textTail=正文尾部。任何组件都能感知 AI 在想什么、答什么（气泡、角标、表情、提示音…）；uartix.chat() 同步读
-- uartix.ask("问题")→向 AI 助手提交一条提问，回答通过 onChat 流式回来${send ? "（当前已授权）" : "（当前发送权限未开启，ask/send 会失败并提示用户到设置开启）"}
-- uartix.send(text,mode?)→串口发送（Promise，受权限门控）；uartix.app(kind,args)→调用软件动作（openPanel/setTheme/writeCommand/listWidgets 等，Promise）；uartix.toast(msg)
-- uartix.onKey(cb)→键盘事件 {kind:"keydown"|"keyup",key,code,ctrlKey,shiftKey,altKey}。桌面独立窗聚焦时全窗按键可收；应用内浮窗鼠标悬停在组件上即收（主界面输入框聚焦时不转发）
-- uartix.onCursor(cb)→cb({x,y}) 鼠标相对组件坐标（做眼睛跟随、悬停互动）；uartix.screen()→{w,h} 屏幕/视口尺寸（做边界游走、贴角）
-- uartix.resize(h)→调整高度；uartix.perms()→{send}
-- **挂件互感**：uartix.broadcast(topic, data) 发给其它所有沙箱组件（跨窗口，≤60KB）；uartix.onBroadcast((topic,data,fromId)=>…) 接收——如"电压挂件报警→桌宠沮丧"联动
-- **语音**：uartix.speak(text,{rate?,pitch?,lang?})→Promise（系统 TTS 播报，回答完成时念摘要等）；uartix.speechStop()
-- **主题桥**：宿主已把当前主题 14 个 CSS 变量（--bg/--bg-panel/--bg-inset/--bg-titlebar/--border/--border-soft/--text/--text-dim/--accent/--accent-soft/--danger/--shadow/--scrollbar/--scrollbar-hover）与 data-theme 注入组件根节点，换肤实时自动跟随——配色一律用 var(--accent) 等，禁止硬编码颜色；uartix.onTheme(cb)→cb({vars,theme}) 监听换肤（如 canvas 重绘取新色）
-- uartix.win.*：menu() 弹出菜单 / close() 关闭本挂件 / popOut() 弹出为独立桌面窗 / moveTo(x,y) / moveBy(dx,dy) / resizeTo(w,h) / top(on) 置顶 / through(on) 点击穿透（60 秒自动恢复）/ get()→Promise<{x,y,w,h}>。移动类接口宿主会自动钳制屏幕边界，不会拖丢
-- 右键菜单自定义：uartix.menu.define([{id,label,danger?,checked?,disabled?,sep?,children?}]) 替换默认菜单（children=子菜单，可多组）；uartix.menu.define("名字", items, {system:false}) 注册多个命名菜单，uartix.menu.show("名字",x,y) 主动弹出、menu.setDefault("名字") 换右键默认；uartix.onMenu((id,menu)=>…) 接收点击；uartix.menu.off() 完全关闭自动右键菜单（自己监听 contextmenu 做专属交互）
-【无边框形态】在 <head> 加 <meta name="uartix:chrome" content="none">：无标题栏、窗口背景透明，内容完全自定义（悬浮通知条、贴角信息窗、计时器、桌面宠物等任意形态）。要求 html,body{background:transparent}，只画内容本体。此形态宿主已内置：按住空白处即拖动窗口（按住跟随、松开即停、自动限制出屏幕边界，自动跳过 button/input/[data-nodrag]）、右键自动弹宿主菜单。约束：拖拽严禁自己实现（会与内置冲突）；右键交互一律走 uartix.menu（define 定制内容 / off 后自己接管），不要在未 off 时监听 contextmenu 抢事件；菜单弹层不要画在 iframe 内（会被窗口裁切，宿主菜单无此限制）。
-高互动组件玩法清单（自由组合）：onChat 思考冒问号+回答打字机；ask 让用户通过组件直接与 AI 对话（组件内 input 收集文字）；onSnap 数据情绪/报警；onCursor 眼睛跟随鼠标；onKey 快捷键互动；win.moveTo/moveBy+定时器 缓慢游走（宿主自动钳边）；screen()+win.get() 贴角/停靠计算；menu.define+onMenu 右键专属动作（闹脾气/睡觉…）；CSS 帧动画呼吸/眨眼。
-其余要求：自适应该数据流（fields 是动态的），样式内联、深浅色都能看。典型用途：状态面板、虚拟摇杆、快捷指令盘、报警灯、无边框悬浮通知、互动桌宠。`;
-}
-
-function schemaPanel(send: boolean): string {
-  return `【uartix-panel 自定义面板格式】与小部件完全相同的 HTML 格式与 window.uartix API（onSnap/onChat/ask/send/app/onKey/onCursor/resize 全套可用${send ? "，发送已授权" : "，发送未授权"}），但代码块标记为 \`\`\`uartix-panel，安装后注册为可停靠面板（出现在工具栏「+ 面板」中，可拖入工作区、随布局持久化）。适合大面积、常驻的可视化（仪表盘、多参监视器）。面板同样能用 onChat 感知 AI 对话状态。`;
-}
-
-function schemaScript(script: boolean): string {
-  return `【uartix-script 行为脚本格式（高权限）】输出一个 \`\`\`uartix-script 代码块，内容为纯 JS 文本（不是 HTML），在主窗口执行，首行注释 // 名称。可用注入的 api 对象：
-- api.getField(字段名) → 最新值；api.listFields() → 字段名数组
-- api.onFrame(cb) → 每帧回调 cb({字段:值})，返回取消订阅函数
-- api.send(mode,text) → 发送数据（受全局发送权限限制，失败会 reject）${script ? "" : "（当前未开启脚本权限，若用户需求需要脚本，提示用户到设置开启）"}
-- api.toast(msg) → 右下角通知；api.getInfo() → {status,port,fields}
-- api.onChat(cb) → 感知 AI 助手对话状态 cb({phase:"thinking"|"streaming"|"idle"|"error",reasoningTail,textTail})，返回取消订阅；api.ask("问题") → 向 AI 助手提问（回答经 onChat 流式回来，受发送权限门控）
-- api.app.动作名({参数}) → 控制软件本身，返回 Promise<{ok,data?,err?}>。可用动作：
-  · openPanel({panel:"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/spectrum/view3d/framecanvas/video/xray/modbus/sequencer/sentinel/plot3d/orchestrator/ai/vdev）
-  · applyPreset({preset:"attitude"}) 切工作区预设（proto/analyze/attitude/console/video/calib/auto/modbus/vdev）
-  · setTheme({theme:"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
-  · listProtocols()/listCommands()/listCards() 获取现有配置清单
-  · addChannel({tpl:"模板名",field:"字段名"}) 加曲线通道；clearChannels() 清空通道
-  · writeCard({json})/writeCommand({json})/writeTemplate({json})/writeCodec({json}) 写入配置（JSON 字符串，格式同对应输出格式；writeTemplate 支持 {"group":"簇名","templates":[…]} 批量写协议簇）
-  · xferStart({path, proto?}) 预填文件传输对话框（proto: ymodem/ymodemg/xmodem1k/xmodem，默认 ymodem；path 可为字符串或字符串数组，多文件按顺序传输），用户在对话框确认后才开始发送
-  · readPlot({ask?}) 截取当前 2D 曲线面板并发送模型分析（面板未开会自动打开；AI 忙时不可用）
-  · xrayEvidence()/xrayCrack() 读「结构发现」面板的协议考古证据链（xrayCrack 只含校验爆破/轮询循环；面板需已「采样分析」）
-  · xrayReport() 基于证据链生成协议考古报告到聊天区（需高权限）
-  · sentinel({op:"status"|"enable"|"ackAll"|"mute"|"clear", on?, key?}) 哨兵异常监测查询与控制（status 返回健康分/活跃异常/最近报警；需高权限）
-  · orchestratorRead() 编排器只读快照（总开关/在跑实例/各组运行统计与块数/变量现值/最近日志）；orchestrator({op:"enable"|"run"|"stopAll"|"groupAdd"|"groupUpdate"|"groupRemove"|"eventAdd"|"eventRemove"|"blockAdd"|"blockRemove"|"varsSet", …}) 编排器写操作（需高权限，自动执行会真实发包；run 豁免熔断与静默期；blockAdd 可用 parentId/which 插进容器内部）
-  · plot3dRead() 3D 轨迹只读快照（三组 groups：axes/mode/着色/密度/平滑/配对/朝向/模型/变换/备注 + view 全局 + 校准模式/采样覆盖/椭球拟合 cv·rms/六面进度）；plot3d({op:"bind"|"set"|"clear"|"undo"|"redo"|"calib", gid?:"g1"|"g2"|"g3", …}) 3D 写操作（需高权限；gid 缺省 g1；set 支持 heading/model/transform/smooth:"catmullRom"|"spline" 等 P87b 字段；组1 三轴为校准采样源；calib 子动作 enter/exit/start/stop/clear/solve6）
-  · vdev({op:"status"|"list"|"create"|"start"|"stop", …}) 虚拟设备工坊（需高权限：设备占据数据管线等同发送）——start({"name"}) 启动库中设备，create/start 可带 {"spec":{…}} 整台设备规格（含可选 net 段对外收发），规格格式同 uartix-action 规范内 VDEV 说明
-  · clearPage() 清空控制画布当前页；addPage({name}) 新建控制页；patchCard({name,patch:{…}}) 改卡片属性
-  · removeCard({name})/removeProtocol({name})/removeCommand({name})/removeCodec({name}) 按名删除（删除/清空类动作会 toast 告知）
-  · openPort()/closePort() 开关连接（需发送权限）
-  · listWidgets()/openWidget({name})/closeWidget({name})/popWidget({name}) 挂件浮窗管理与弹出桌面；removeWidget({name}) 删除挂件【破坏性】
-约束：不使用 fetch/XMLHttpRequest/localStorage/window.location；监听器要在返回的清理函数中释放（脚本停止时会调用）；异常会被捕获并提示。`;
-}
-
 export function schemaFor(key: NeedKey, perms: CreativePerms): string {
+  void perms;
   switch (key) {
     case "action":
       return schemaAction();
@@ -253,16 +179,6 @@ export function schemaFor(key: NeedKey, perms: CreativePerms): string {
       return schemaCommand();
     case "codec":
       return schemaCodec();
-    case "theme":
-      return schemaTheme();
-    case "style":
-      return schemaStyle();
-    case "widget":
-      return schemaWidget(perms.send);
-    case "panel":
-      return schemaPanel(perms.send);
-    case "script":
-      return schemaScript(perms.script);
   }
 }
 
@@ -274,11 +190,6 @@ const ROUTE_TABLE: { key: NeedKey; re: RegExp }[] = [
   { key: "card", re: /滑条|滑块|按钮|开关|控件|卡片|控制画布|控制面板|LED|蜂鸣|摇杆|键盘|监视器|仪表盘|一键/ },
   { key: "command", re: /指令|命令|发(一|这|那)?[条帧]|模板串|命令库|上报|归零|置位/ },
   { key: "codec", re: /指令工厂|自定义协议|组帧|编解码|构造协议|协议构造/ },
-  { key: "theme", re: /主题|配色|换肤|皮肤|深色模式|浅色模式/ },
-  { key: "style", re: /样式|动效|光效|流光|玻璃|圆角|字体|美化|界面风格|外观/ },
-  { key: "widget", re: /挂件|小部件|浮窗|悬浮窗|widget|桌面挂|桌宠|宠物/ },
-  { key: "panel", re: /自定义面板|新面板|做一个.{0,8}面板|添加.{0,8}面板/ },
-  { key: "script", re: /脚本|自动化|自动发送|联动|定时/ },
 ];
 
 /** 从用户消息预判需要注入的 schema（qa 场景用） */
@@ -290,36 +201,20 @@ export function routeNeeds(text: string): NeedKey[] {
   return out;
 }
 
-/* ================= 轻量底座（qa 场景常驻，替代全量 CREATIVE_PROMPT） ================= */
+/* ================= 轻量底座（qa 场景常驻） ================= */
 
 const NEED_HINT = (keys: NeedKey[]) =>
   keys.map((k) => `[[need:${k}]]=${NEED_LABEL[k]}`).join("；");
 
-/** 创造模式关闭：只有 card/command/codec 三个输出工具（无需创造模式权限） */
-const TOOLBOX_LIGHT = `\n\n${ACTION_RULE}\n\n【输出工具箱】你可以直接输出可写入软件的代码块（用户确认后写入，无需创造模式）：${NEED_HINT(["card", "command", "codec"])}。
+/**
+ * UI 创造统一路径（旧 uartix-theme/style/widget/panel/script 独立扩展安装已废弃）：
+ * 无论创造模式开关，UI 创造需求一律引导到 Agent 任务，由 save_plugin 工具落库并自动启用。
+ */
+const UI_CREATIVITY_ROUTE = `【UI 创造引导】UI 创造类需求（主题/小部件/面板/脚本）：引导用户打开 AI 助手工具栏的『Agent 任务』，在任务中你会用 save_plugin 工具把成果保存为插件并自动启用，用户无需手动安装。`;
+
+/** 输出工具箱：card/command/codec 三个代码块工具（无需创造模式权限） */
+const TOOLBOX_LIGHT = `\n\n${ACTION_RULE}\n\n${UI_CREATIVITY_ROUTE}\n\n【输出工具箱】你可以直接输出可写入软件的代码块（用户确认后写入）：${NEED_HINT(["card", "command", "codec"])}。
 规则：需要输出某格式前，在回复中单独一行输出对应的 [[need:格式名]] 标记并停止输出，系统会自动补充该格式的完整规范，然后你继续完成代码块。不要凭记忆猜测格式细节。用户只是提问/闲聊时不要输出任何标记。`;
-
-/** 创造模式开启：五类扩展一句话清单 + 标记机制 */
-const CREATIVE_BRIEF = (send: boolean, script: boolean) =>
-  `\n\n${ACTION_RULE}\n\n【创造模式已开启】你可以创造五类扩展：${NEED_HINT(["theme", "style", "widget", "panel", "script"])}${send ? "" : "（发送权限未开启）"}${script ? "" : "（脚本权限未开启）"}。另有无需创造模式的 ${NEED_HINT(["card", "command", "codec"])}。
-创作流程：理解需求 → 必要时用一句话澄清 → 输出 [[need:格式名]] 标记并停止输出 → 系统自动补充该格式完整规范 → 你继续完成代码块 → 简述安装与使用方法。不要凭记忆猜测格式细节。用户确认权限后才会安装；同类可组合输出（如 theme+widget）。`;
-
-/* ================= 全量创造提示（仅 create 场景使用） ================= */
-
-function CREATIVE_PROMPT(perms: CreativePerms): string {
-  return `\n\n【创造模式已开启 · 完整规范已加载】你可以为用户创造扩展（回复中用代码块输出，用户确认权限后才会安装）。引导式创作流程：理解需求 → 必要时用一句话澄清 → 输出扩展代码块 → 简述安装与使用方法 → 邀请用户反馈迭代。全部格式规范如下：
-${schemaTheme()}
-
-${schemaStyle()}
-
-${schemaWidget(perms.send)}
-
-${schemaPanel(perms.send)}
-
-${schemaScript(perms.script)}
-
-选择指引：改配色→theme；改风格/动效→style；小浮窗→widget；大面积常驻→panel；需要逻辑联动/自动化→script。同类可组合（如 theme+widget 一起输出）。`;
-}
 
 /* ================= 系统提示组装 ================= */
 
@@ -337,15 +232,14 @@ export function buildSystemPrompt(
   const digest = scene === "qa" || scene === "create" ? CAPABILITY_DIGEST : DIGEST_BRIEF;
   let base = `你是 Uartix+（嵌入式可视化上位机）内置的 AI 调试助手，面向嵌入式、机器人、航模方向的开发者。用简体中文回答，专业、简练。\n\n软件功能速览（回答用法问题时引用对应面板名）：\n${digest}\n\n当前用户的协议模板：\n${tplSummary}\n\n${BUG_PATROL}`;
 
-  if (scene === "create" && creative?.enabled) {
-    // 创造工作台：全量规范一次到位（用户明确来创作的场景）
-    return `${base}${CREATIVE_PROMPT(perms)}`;
+  if (scene === "create") {
+    // 创造工作台：UI 创造统一走 Agent 任务 + save_plugin（不再输出独立扩展安装块）
+    return `${base}\n\n${UI_CREATIVITY_ROUTE}\n\n${ACTION_RULE}\n\n无需创造模式即可输出的代码块：${NEED_HINT(["card", "command", "codec"])}。创作流程：理解需求 → 必要时用一句话澄清 → 输出 [[need:格式名]] 标记并停止（系统自动补规范）→ 继续完成代码块 → 邀请用户反馈迭代。`;
   }
 
   if (scene === "qa") {
     // 普通对话：轻底座 + 路由预注入
-    if (creative?.enabled) base += CREATIVE_BRIEF(perms.send, perms.script);
-    else base += TOOLBOX_LIGHT;
+    base += TOOLBOX_LIGHT;
     const extras = extraSchemas ?? [];
     if (extras.length > 0) {
       base += `\n\n【已预载的格式规范（可直接输出代码块，无需再输出 [[need:xxx]] 标记）】`;
@@ -366,6 +260,8 @@ export function buildSystemPrompt(
       return `${base}\n\n当前任务：根据提供的最近帧字段值样本，用自然语言概括设备状态与数据特征（数值范围、趋势、抖动），发现异常（越界、突变、周期异常）要指出。不要复述原始数据。`;
     case "analyzeCurve":
       return `${base}\n\n当前任务：根据提供的各通道统计特征（均值/极值/趋势斜率/周期估计），总结信号特征，诊断振荡/噪声/漂移，并给出采样率与滤波建议。`;
+    case "inertial":
+      return `${base}\n\n当前任务：根据提供的轨迹统计 JSON 概括运动特征并指出异常。统计内容包括：各组（组 ID/点数/路径长/位移/比较偏差）以及组间比较偏差、覆盖率与时间容差。重点检查：路径长与位移之比（较大也可能是正常闭环或折返，位移接近零时比值不稳定，不能据此诊断漂移）、匹配覆盖率是否偏低、距离阈值内比例是否偏低（不是时间容差匹配比例）、位移与路径长是否与预期量级不符。约束：只依据提供的统计 JSON 推理，不得编造未提供的数据；某项数据缺失或来源未提供时明确说明"该数据未提供"，不要臆测。背景：分析快照由用户手动刷新触发生成，没有后台持续采集。`;
     case "genCommand":
       return `${base}\n\n当前任务：把用户的自然语言指令转成命令模板串或卡片脚本。\n\n${schemaCommand()}`;
     case "genCard":
@@ -405,6 +301,10 @@ export function sceneUserText(scene: AiScene, payload?: Record<string, unknown>)
       return payload?.text
         ? String(payload.text)
         : "请解读当前数据：概括设备状态与数据特征（数值范围、趋势、抖动），指出异常。";
+    case "inertial":
+      return payload?.text
+        ? String(payload.text)
+        : "请根据随附轨迹统计 JSON 概括各组运动特征，指出异常（路径长与位移比异常、匹配覆盖率低、距离阈值内比例低等）；未提供的数据明确说明，不要编造。";
     case "report":
       return payload?.text
         ? String(payload.text)

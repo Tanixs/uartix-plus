@@ -78,7 +78,8 @@ describe("buildPkgFile / validatePkg", () => {
 
 describe("Operator 包 3D 面板设置（P71 → P87a v2 三组结构）", () => {
   const plot3d: Plot3DSettings = {
-    v: 2,
+    v: 3,
+    calibSrc: "g1",
     groups: [
       {
         id: "g1",

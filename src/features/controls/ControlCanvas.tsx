@@ -1,6 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import * as store from "./controlsStore";
+import { DebugPresetDialog } from "./DebugPresetDialog";
+import { ParameterSetDialog } from "./ParameterSetDialog";
+import { executeManagedControl, managedActionReady, routeSliderValue } from "./controlExecution";
+import { requireCurrentParameterPage } from "./parameterPageValidation";
+import * as sessionStore from "../session/sessionStore";
+import { guardLocked } from "../operator/lock";
 import type {
   ControlCard,
   ControlType,
@@ -16,7 +22,7 @@ import { isGroup } from "./commandStore";
 import { useSettings } from "../settings/settingsStore";
 import { beep, runScript } from "./scriptRunner";
 import { TextInput } from "../protocol/PropertiesPanel";
-import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider, IconChevron } from "../../shared/icons";
+import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider, IconChevron, IconClose } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
 import { HelpHint } from "../../shared/HelpHint";
@@ -28,6 +34,7 @@ import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
   ButtonCardView,
+  CardFrame,
   CardModal,
   GroupCardView,
   JoystickCardView,
@@ -244,6 +251,14 @@ export function ControlCanvas() {
   const [renamingPage, setRenamingPage] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<"widgets" | "commands" | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [debugDialog, setDebugDialog] = useState<"preset" | "sets" | null>(null);
+  const [draftRevision, setDraftRevision] = useState(0);
+  const managedBusy = useRef(false);
+  const [managedPending, setManagedPending] = useState(false);
+  const session = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot);
+  const [managedReceipt, setManagedReceipt] = useState<{
+    pageId: string; cardId: string; name: string; result: Awaited<ReturnType<typeof executeManagedControl>>;
+  } | null>(null);
   const moreBtnRef = useRef<HTMLButtonElement | null>(null);
   const moreMenuRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -734,6 +749,24 @@ export function ControlCanvas() {
     ctx: Record<string, number | string>,
     force = false,
   ) => {
+    if (card.managed !== undefined) {
+      if (managedBusy.current) return;
+      if (card.type === "slider") valuesRef.current.set(card.id, Number(ctx.value ?? getVal(card)));
+      managedBusy.current = true;
+      setManagedPending(true);
+      const request = { pageId: page.id, cardId: card.id, name: card.name };
+      setManagedReceipt(null);
+      try {
+        const result = await executeManagedControl(card, {
+          phase: () => sessionStore.getSnapshot().state,
+          start: sessionStore.startRecord,
+          stop: sessionStore.stopRecord,
+          annotate: sessionStore.annotate,
+        });
+        setManagedReceipt({ ...request, result });
+      } finally { managedBusy.current = false; setManagedPending(false); }
+      return;
+    }
     if (
       card.type !== "led" &&
       card.type !== "buzzer" &&
@@ -817,6 +850,7 @@ export function ControlCanvas() {
     child: GroupChild,
     ctx: Record<string, number | string>,
   ) => {
+    if (card.managed !== undefined) return;
     const mode = card.sendMode;
     try {
       switch (child.kind) {
@@ -847,6 +881,7 @@ export function ControlCanvas() {
   };
 
   const doSend = async (card: SliderCard, value: number) => {
+    if (card.managed !== undefined) return;
     const text = store.formatTemplate(
       variableStore.resolveVars(card.template),
       value,
@@ -896,14 +931,12 @@ export function ControlCanvas() {
   };
 
   const onValue = (card: SliderCard, v: number) => {
-    valuesRef.current.set(card.id, v);
-    if (card.sendTrigger === "continuous") {
-      if (card.useScript) {
-        void sendControl(card, { value: v });
-      } else {
-        throttledSend(card, v);
+    routeSliderValue(card, v, value => valuesRef.current.set(card.id, value), () => {
+      if (card.sendTrigger === "continuous") {
+        if (card.useScript) void sendControl(card, { value: v });
+        else throttledSend(card, v);
       }
-    }
+    });
   };
 
   const onRelease = (card: SliderCard, v: number) => {
@@ -1239,11 +1272,16 @@ export function ControlCanvas() {
       resizable: !page.locked,
       onResizeStart,
     };
+    if (c.managed !== undefined && c.type !== "slider" && c.type !== "button" && c.type !== "monitor") {
+      return <CardFrame key={c.id} {...common}>
+        <p className="ctl-managed-hint">{tx("受管设备动作未配置；未启用发送、脚本或键盘监听。", "Managed device action unconfigured; sending, scripts and keyboard listeners are disabled.")}</p>
+      </CardFrame>;
+    }
     switch (c.type) {
       case "slider":
         return (
           <SliderCardView
-            key={c.id}
+            key={c.managed !== undefined ? `${c.id}:${draftRevision}` : c.id}
             {...common}
             card={c}
             initial={getVal(c)}
@@ -1252,7 +1290,13 @@ export function ControlCanvas() {
           />
         );
       case "button":
-        return <ButtonCardView key={c.id} {...common} card={c} onSend={sendControl} />;
+        return <ButtonCardView key={c.id} {...common} card={c} onSend={sendControl}
+          disabled={c.managed !== undefined && (managedPending || !managedActionReady(c, session.state))}
+          disabledReason={c.managed !== undefined ? managedPending
+            ? tx("应用动作处理中…", "Application action in progress…")
+            : !managedActionReady(c, session.state)
+              ? tx("未配置或当前会话状态不允许", "Unconfigured or unavailable in the current session state")
+              : undefined : undefined} />;
       case "switch":
         return <SwitchCardView key={c.id} {...common} card={c} onSend={sendControl} />;
       case "led":
@@ -1387,7 +1431,7 @@ export function ControlCanvas() {
                     </button>
                   </div>
                 )}
-                <button title={tx("删除分组", "Delete group")} onClick={() => commandStore.removeNode(n.id)}>×</button>
+                <button title={tx("删除分组", "Delete group")} onClick={() => commandStore.removeNode(n.id)}><IconClose /></button>
               </div>
               {!collapsed &&
                 (renamingNode === n.id ? null : renderCmdTree(n.items, depth + 1))}
@@ -1555,7 +1599,7 @@ export function ControlCanvas() {
           ref={moreBtnRef}
           className={`btn icon-btn ${moreOpen ? "warn" : ""}`}
           onClick={() => setMoreOpen((v) => !v)}
-          title={tx("更多：网格、整理与导入导出", "More: grid, tidy, import/export")}
+          title={tx("更多：调试、布局与导入导出", "More: debug, layout, import/export")}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <circle cx="5" cy="12" r="1.8" />
@@ -1579,7 +1623,16 @@ export function ControlCanvas() {
                 ref={moreMenuRef}
                 style={{ left: -9999, top: -9999, visibility: "hidden" }}
               >
-              <div className="ctl-more-title">{tx("网格", "Grid")}</div>
+              <div className="ctl-more-title">{tx("调试", "Debug")}</div>
+              <button className="ctl-more-item" onClick={() => {
+                if (guardLocked()) return;
+                setMoreOpen(false); setDebugDialog("preset");
+              }}>{tx("从预设生成惯导调试页…", "Create inertial debug preset…")}</button>
+              {page.debugProfile && <button className="ctl-more-item" onClick={() => {
+                setMoreOpen(false); setDebugDialog("sets");
+              }}>{tx("参数集…", "Parameter sets…")}</button>}
+              <div className="ctl-more-sep" />
+              <div className="ctl-more-title">{tx("布局", "Layout")}</div>
               <div className="ctl-more-row">
                 <select
                   className="input"
@@ -1614,6 +1667,7 @@ export function ControlCanvas() {
                 </button>
               </div>
               <div className="ctl-more-sep" />
+              <div className="ctl-more-title">{tx("文件", "File")}</div>
               <button
                 className="ctl-more-item"
                 onClick={() => {
@@ -1774,6 +1828,12 @@ export function ControlCanvas() {
               )}
             </div>
           </div>
+          {managedReceipt?.pageId === page.id && <div className="ctl-err" role={managedReceipt.result.status === "failed" ? "alert" : "status"}>
+            {managedReceipt.name}: {managedReceipt.result.status === "completed"
+              ? tx("应用动作完成（非设备回执）", "Application action completed (not device feedback)")
+              : managedReceipt.result.status === "failed" ? tx("应用动作失败", "Application action failed")
+                : tx("未配置或会话状态不允许；未发送", "Unconfigured or session state disallows action; not sent")}
+          </div>}
           {err && <div className="ctl-err">{err}</div>}
         </div>
       </div>
@@ -1925,6 +1985,31 @@ export function ControlCanvas() {
           </div>,
           document.body,
         )}
+
+      {debugDialog === "preset" && <DebugPresetDialog onClose={() => setDebugDialog(null)} />}
+      {debugDialog === "sets" && page.debugProfile && (
+        <ParameterSetDialog
+          key={page.id}
+          page={page}
+          drafts={Object.fromEntries(page.cards.flatMap(c =>
+            c.type === "slider" && c.managed?.role === "parameter"
+              ? [[c.managed.paramId, getVal(c)]] : []))}
+          onLoad={(values, captured) => {
+            if (guardLocked()) throw new Error(tx("Operator 配置已锁定", "Operator configuration is locked"));
+            // 以发起时捕获的定义签名为准：切页/定义变化在此拒绝，不部分回填。
+            const currentPage = requireCurrentParameterPage(store.getSnapshot(), captured);
+            const updates = Object.entries(values).map(([paramId, value]) => {
+              const cards = currentPage.cards.filter((c): c is SliderCard =>
+                c.type === "slider" && c.managed?.role === "parameter" && c.managed.paramId === paramId);
+              if (cards.length !== 1 || !Number.isFinite(value)) throw new Error(tx("参数无效", "Invalid parameter"));
+              return [cards[0].id, value] as const;
+            });
+            for (const [id, value] of updates) valuesRef.current.set(id, value);
+            setDraftRevision(v => v + 1);
+          }}
+          onClose={() => setDebugDialog(null)}
+        />
+      )}
 
       {editCard && (
         <CardModal

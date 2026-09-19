@@ -56,6 +56,10 @@ export interface Settings {
   aiCreativity: boolean;
   aiWidgetSend: boolean;
   aiScript: boolean;
+  /** P88e B2：Agent 通用工具——文件白名单（分号/换行分隔的绝对路径；空=fs_read/fs_list 关闭） */
+  agentFsRoots: string;
+  /** P88e B2：Agent 通用工具——命令执行总开关（默认关；开启后 shell_exec 仍需逐次审批） */
+  agentShellEnabled: boolean;
   showThinking: boolean;
   chartPalette: "standard" | "cbSafe";
   conWrap: boolean;
@@ -142,6 +146,8 @@ function load(): Settings {
     aiCreativity: false,
     aiWidgetSend: false,
     aiScript: false,
+    agentFsRoots: "",
+    agentShellEnabled: false,
     showThinking: true,
     chartPalette: "standard",
     conWrap: true,
@@ -199,6 +205,8 @@ function load(): Settings {
       aiCreativity: Boolean(p.aiCreativity),
       aiWidgetSend: Boolean(p.aiWidgetSend),
       aiScript: Boolean(p.aiScript),
+      agentFsRoots: typeof p.agentFsRoots === "string" ? p.agentFsRoots.slice(0, 4096) : "",
+      agentShellEnabled: Boolean(p.agentShellEnabled),
       showThinking: p.showThinking === undefined ? true : Boolean(p.showThinking),
       chartPalette: p.chartPalette === "cbSafe" ? "cbSafe" : "standard",
       conWrap: p.conWrap === undefined ? true : Boolean(p.conWrap),

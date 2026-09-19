@@ -1,7 +1,9 @@
+mod agent_tools;
 mod ai;
 mod ble;
 mod b64;
 mod bridge;
+mod bridge_jobs;
 mod busevt;
 mod demo;
 mod files;
@@ -173,9 +175,11 @@ pub fn run() {
         .manage(ai::AiState::default())
         .manage(session::SessionState::default())
         .manage(bridge::BridgeState::new())
+        .manage(bridge_jobs::JobsState::new())
         .invoke_handler(tauri::generate_handler![
             busevt::ipc_subscribe,
             ai::ai_chat,
+            ai::ai_agent_turn,
             ai::ai_abort,
             ai::ai_upload_report,
             serial::list_ports,
@@ -222,13 +226,22 @@ pub fn run() {
             bridge::bridge_stop,
             bridge::bridge_status,
             bridge::bridge_respond,
+            bridge_jobs::bridge_jobs_register,
+            bridge_jobs::bridge_jobs_poll,
+            bridge_jobs::bridge_jobs_report,
+            bridge_jobs::bridge_jobs_control,
             files::save_text_file,
             files::read_text_file,
             files::read_binary_file,
             files::list_local_addrs,
             files::save_binary_file,
             files::export_xlsx,
-            files::hex_search
+            files::save_analysis_package,
+            files::hex_search,
+            agent_tools::agent_fs_list,
+            agent_tools::agent_fs_read_b64,
+            agent_tools::agent_shell_exec,
+            agent_tools::agent_http_get
         ])
         .setup(|app| {
             serial::start_hotplug(app.handle().clone());

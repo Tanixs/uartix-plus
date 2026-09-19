@@ -8,13 +8,19 @@
  * 原始 aiw:* postMessage 协议仍然可用（与本桥共存）。
  */
 
-function buildScript(bare: boolean): string {
+import { PLUGIN_IFRAME_CSP } from "../plugins/pluginIsolation";
+
+function buildScript(bare: boolean, nonce?: string): string {
+  // 新插件实例 nonce：桥为每条外发消息附加 n 字段，宿主按其裁决（P88b-3 §11）
+  const nonceDecl = nonce ? `var NONCE=${JSON.stringify(nonce)};` : "var NONCE=null;";
+  const nonceAttach = nonce ? `if(NONCE)m.n=NONCE;` : "";
   return `(function(){
 if(window.uartix)return;
+${nonceDecl}
 var pending={},seq=0,perms={},screen=null,lastSnap=null,lastChat=null,themeVars=null,themeName="";
 var subs={snap:[],chat:[],key:[],cursor:[],menu:[],theme:[],bc:[]};
 var menus={},menuOff=false,menuDefault="default";
-function post(m){try{parent.postMessage(m,"*")}catch(e){}}
+function post(m){${nonceAttach}try{parent.postMessage(m,"*")}catch(e){}}
 function applyTheme(vars,theme){
 if(vars){themeVars=vars;for(var k in vars){try{document.documentElement.style.setProperty(k,vars[k])}catch(e){}}}
 if(theme){themeName=theme;document.documentElement.dataset.theme=theme;document.documentElement.style.colorScheme=theme==="dark"||theme==="navy"||theme==="glaze"?"dark":"light"}
@@ -118,19 +124,27 @@ api.menu.show(menuDefault,e.clientX,e.clientY);
 })();`;
 }
 
-/** 把桥脚本注入到 HTML 的 <head>（或 <html> 之后，或最前） */
-export function injectBridge(html: string, bare: boolean): string {
+/** 把桥脚本注入到 HTML 的 <head>（或 <html> 之后，或最前）；opts.csp 时前置 CSP meta，opts.nonce 时桥携带实例 nonce */
+export function injectBridge(
+  html: string,
+  bare: boolean,
+  opts?: { nonce?: string; csp?: boolean },
+): string {
   // eslint-disable-next-line no-useless-escape -- 转义防源码被内联进 HTML 时提前终止 script 标签
-  const script = `<script>${buildScript(bare)}<\/script>`;
+  const script = `<script>${buildScript(bare, opts?.nonce)}<\/script>`;
+  const csp = opts?.csp
+    ? `<meta http-equiv="Content-Security-Policy" content="${PLUGIN_IFRAME_CSP}">
+`
+    : "";
   const head = html.match(/<head[^>]*>/i);
   if (head && head.index !== undefined) {
     const at = head.index + head[0].length;
-    return html.slice(0, at) + "\n" + script + html.slice(at);
+    return html.slice(0, at) + "\n" + csp + script + html.slice(at);
   }
   const h = html.match(/<html[^>]*>/i);
   if (h && h.index !== undefined) {
     const at = h.index + h[0].length;
-    return html.slice(0, at) + "\n" + script + html.slice(at);
+    return html.slice(0, at) + "\n" + csp + script + html.slice(at);
   }
-  return script + "\n" + html;
+  return csp + script + "\n" + html;
 }

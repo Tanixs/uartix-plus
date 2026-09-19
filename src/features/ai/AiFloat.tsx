@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { AiChat } from "./AiChat";
 import { IconSparkle } from "../../shared/icons";
 
-/** v2：以「右下角锚点」持久化，窗口尺寸变化时始终贴边不漂移 */
-const POS_KEY = "vs.aiFloat.v2";
+/** v3：P88d 默认展宽——升键让新默认生效（仅浮窗位置/尺寸，旧值作废） */
+const POS_KEY = "vs.aiFloat.v3";
 
 interface FloatState {
   /** 距窗口右缘的偏移（px，逻辑坐标） */
@@ -27,9 +27,10 @@ function vwvh(): { vw: number; vh: number } {
 }
 
 function fallbackState(): FloatState {
-  const { vh } = vwvh();
-  const w = 400;
-  const h = Math.min(560, vh - 120);
+  const { vw, vh } = vwvh();
+  // P88d：默认展宽（400→560，上限视口 46%），贴近 harness 单栏阅读宽度
+  const w = Math.min(560, Math.round(vw * 0.46));
+  const h = Math.min(620, vh - 120);
   return { right: 24, bottom: 24, w, h, min: false };
 }
 

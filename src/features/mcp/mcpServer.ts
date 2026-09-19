@@ -28,7 +28,7 @@ import { sendData } from "../serial/serialStore";
 import { getSnapshot as getTelemetry } from "../protocol/telemetryStore";
 import { curveStatsText } from "../ai/contextCollector";
 import { getSnapshot as getSentinel } from "../sentinel/sentinelStore";
-import { TOOL_DEFS, compactFrame, pageFrames, summarizeRun, type McpToolDef } from "./mcpTools";
+import { TOOL_DEFS, compactFrame, pageFrames, type McpToolDef } from "./mcpTools";
 
 const RING_CAP = 1024; // P66-1：256→1024，配合 beforeSeq 游标分页回看更深历史（compactFrame 已限单帧体积）
 const AUDIT_CAP = 50;
@@ -86,6 +86,7 @@ export function toolDefs(): McpToolDef[] {
 export function init() {
   if (initialized) return;
   initialized = true;
+  void import("./jobExecutor").then((m) => m.initJobExecutor());
   // 帧环形：单订阅，关闭时 handler 一行 gate（每批一次布尔判断，开销可忽略）
   onFrames((p) => {
     if (!running || p.rows.length === 0) return;
@@ -127,8 +128,9 @@ function sync() {
     if (running) void stop();
     return;
   }
-  const key = `${s.mcpPort}@${s.mcpToken}`;
+  const key = `${s.mcpPort}@${s.mcpToken}@${s.mcpAllowSend}@${s.mcpHighPriv}`;
   if (running && key === startKey) return;
+  if (running) void invoke("bridge_jobs_control", { kind: "quiesce", args: {} });
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     syncTimer = null;
@@ -284,6 +286,11 @@ async function dispatch(kind: string, args: Record<string, unknown>): Promise<un
         args.args && typeof args.args === "object" && !Array.isArray(args.args)
           ? (args.args as Record<string, unknown>)
           : {};
+      // Background automation cannot be used as a legacy bypass for task admission.
+      if ((akind === "orchestrator" && (aargs.op === "run" || (aargs.op === "enable" && aargs.on !== false))) ||
+          (akind === "vdev" && aargs.op === "start")) {
+        throw new Error("needs_manual_confirmation: background execution must be started locally; highPriv/confirmed are not approval");
+      }
       // 重模块延迟加载：首个远程动作才 import（appActions 拖全 store 家族）
       const { runAppAction, HIGH_ONLY } = await import("../ai/appActions");
       if (HIGH_ONLY.has(akind) && !getSettings().mcpHighPriv) {
@@ -295,37 +302,8 @@ async function dispatch(kind: string, args: Record<string, unknown>): Promise<un
       if (!r.ok) throw new Error(r.err ?? "动作执行失败");
       return r.data ?? null;
     }
-    case "run_sequence": {
-      needSend();
-      const raw = typeof args.json === "string" ? args.json : "";
-      if (!raw.trim()) throw new Error("json 不能为空（测试序列器导出格式）");
-      const maxRunMs = Math.min(
-        600_000,
-        Math.max(1000, Math.round(Number(args.maxRunMs) || 120_000)),
-      );
-      const [{ normalizeSuite }, seqBind, runner] = await Promise.all([
-        import("../sequencer/sequencerStore"),
-        import("../sequencer/sequencerBind"),
-        import("../sequencer/runner"),
-      ]);
-      const suite = normalizeSuite(JSON.parse(raw));
-      if (!suite) throw new Error("套件 JSON 不合法（normalizeSuite 校验未通过）");
-      // deps 复用 sequencerBind 的发送/变量/帧流实现；不经面板生命周期
-      //（面板关闭即停的红线约束的是面板，远程运行以 maxRunMs 兜底 + 引擎互斥防重入）
-      const r = runner.startRun(suite, seqBind.deps, {});
-      if (!r.ok) throw new Error(r.error ?? "启动失败");
-      // handle.done：引擎直接给最终 RunResult 的 Promise，零轮询
-      const timer = new Promise<never>((_, rej) =>
-        setTimeout(() => rej(new Error(`序列运行超时（${maxRunMs}ms）已中止`)), maxRunMs),
-      );
-      try {
-        const result = await Promise.race([r.handle.done, timer]);
-        return summarizeRun(result);
-      } catch (e) {
-        r.handle.stop();
-        throw e;
-      }
-    }
+    case "run_sequence":
+      throw new Error("async_required: use create_job({taskType:'sequence.run', input:{json}, idempotencyKey}). No sequence was executed.");
     default:
       throw new Error(`未知工具：${kind}`);
   }
