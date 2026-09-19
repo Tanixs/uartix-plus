@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/logo.svg" alt="Uartix+" width="88" />
+<img src="public/images/logo.svg" alt="Uartix+" width="88" />
 
 # Uartix+
 
@@ -24,7 +24,7 @@ Define protocols by drag-and-drop · Parse and visualise in real time · Debug i
 
 </div>
 
-![Uartix+ main window: templates, frame canvas, properties, 2D plot, data table and control canvas](docs/images/overview-en.png)
+![Uartix+ main window: templates, frame canvas, properties, 2D plot, data table and control canvas](public/images/overview-en.png)
 
 ---
 

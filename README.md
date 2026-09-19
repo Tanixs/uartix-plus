@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/images/logo.svg" alt="Uartix+" width="88" />
+<img src="public/images/logo.svg" alt="Uartix+" width="88" />
 
 # Uartix+
 
@@ -24,7 +24,7 @@
 
 </div>
 
-![Uartix+ 主界面：协议模板、帧画布、属性面板、2D 曲线、数据表格与控制画布](docs/images/overview.png)
+![Uartix+ 主界面：协议模板、帧画布、属性面板、2D 曲线、数据表格与控制画布](public/images/overview.png)
 
 ---
 
