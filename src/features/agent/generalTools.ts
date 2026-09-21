@@ -1,10 +1,15 @@
 /**
- * P88e B1：Agent 通用工具——fs_read / fs_list / web_fetch / web_search / shell_exec。
- * - 授权模型（详设 §B1，宿主可信层校验，Rust 只负责隔离执行）：
- *   · fs_read / fs_list / web_fetch / web_search：仅「自定义」档位勾选 files / network 域后可用；
- *   · fs 路径必须落在设置页「Agent 文件白名单」内（默认空=功能关闭），只有读文本与列目录，
- *     绝不暴露写/删/移动；
+ * P88e B1：Agent 通用工具——fs_read / fs_list / fs_write / web_fetch / web_search / shell_exec。
+ * P99a-A2/A3：迁入注册表。**授权域与审批不再由本文件自行裁决**——域门与批准卡由
+ * `toolRegistry.runToolCall` 统一执行，本文件只声明"这支工具要什么域、这一 call 有多危险"。
+ *
+ * 授权模型（宿主可信层校验，Rust 只负责隔离执行）：
+ *   · fs_read / fs_list / web_fetch / web_search：勾选 files / network 域后可用；
+ *   · fs 路径必须落在设置页「Agent 文件白名单」内（默认空=功能关闭），读侧绝不暴露写/删/移动；
  *   · shell_exec 三重门：设置总开关（默认关）+ 勾选 shell 域 + 每次逐条审批，缺一不可。
+ *     总开关关着时**不弹批准卡**（白要一次人工确认＝把用户训练成橡皮图章），这条走 assess。
+ *   · fs_write：新建直接写，**覆盖已有文件逐条批准**（应用不提供撤销）——风险由 stat 才知道，
+ *     所以它的 effect 也在 assess 里定，而不是写死在 entry 上。
  * - 网络出口复用 Rust agent_http_get（SSRF 基础防护：拒内网/本机地址、15s 超时、1MB 限量读流），
  *   代理沿用 AI 服务的 aiProxy/aiNoProxy 设置；
  * - web_search 用 DuckDuckGo HTML 端点（免 API Key），正则解析，最多 8 条；
@@ -12,76 +17,19 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
-import { argsHash, APPROVAL_TTL_MS, type ApprovalGate } from "./agentAdapter";
-import type { ToolCall, ToolDefinition, ToolReceipt, TaskContext } from "./types";
+import { DOMAIN_ZH, type Domain } from "./scopeTiers";
+import { defineTool, notExecuted, type AgentToolEntry, type Assessment, type ToolCtx, type ToolResultBody } from "./toolRegistry";
 
-export const GENERAL_TOOLS = ["fs_read", "fs_list", "web_fetch", "web_search", "shell_exec"] as const;
-export type GeneralToolName = (typeof GENERAL_TOOLS)[number];
+/**
+ * 工具 → 所需授权域（P93-A6）。P99a 起这条映射**只有一处**：写在 entry.domain 上，
+ * 定义下发裁剪与实际调用拒绝都从它派生（旧实现另有一份 GENERAL_TOOL_DOMAIN 供适配器过滤，
+ * 于是"外观与内联九支根本不进裁剪"——看得见却调不动的老毛病就是这么来的）。
+ */
+export const GENERAL_DOMAINS: Domain[] = ["files", "network", "write", "shell"];
 
-/** 授权域 → 中文（设置提示与拒绝文案共用） */
-export const GENERAL_DOMAIN: Record<"files" | "network" | "shell", string> = {
-  files: "文件",
-  network: "网络",
-  shell: "命令行",
-};
-
-export const generalToolDefs: ToolDefinition[] = [
-  {
-    name: "fs_read",
-    description:
-      "Read a UTF-8 text file inside the user-approved whitelist roots (settings 'Agent 文件白名单', empty = disabled). Args: { path: string }. Read-only; requires custom scope with the files domain.",
-    parameters: {
-      type: "object",
-      properties: { path: { type: "string" } },
-      required: ["path"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "fs_list",
-    description:
-      "List a directory tree inside the whitelist roots. Args: { path: string, depth?: number (1-3, default 2) }. Max 500 entries; files report size. Read-only; requires custom scope with the files domain.",
-    parameters: {
-      type: "object",
-      properties: { path: { type: "string" }, depth: { type: "number" } },
-      required: ["path"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "web_fetch",
-    description:
-      "HTTP GET a public http(s) URL: returns status/contentType/body (1MB cap; localhost/private-network addresses blocked). Args: { url: string }. Read-only; requires custom scope with the network domain.",
-    parameters: {
-      type: "object",
-      properties: { url: { type: "string" } },
-      required: ["url"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "web_search",
-    description:
-      "Web search via DuckDuckGo HTML endpoint (no API key): returns top results {title,url,snippet} (max 8). Args: { query: string }. Read-only; requires custom scope with the network domain.",
-    parameters: {
-      type: "object",
-      properties: { query: { type: "string" } },
-      required: ["query"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "shell_exec",
-    description:
-      "Run a short shell command (Windows: cmd /C; 10s hard timeout then kill; 64KB output cap). Every call requires explicit per-call user approval and the shell master switch in settings. Args: { command: string }.",
-    parameters: {
-      type: "object",
-      properties: { command: { type: "string" } },
-      required: ["command"],
-      additionalProperties: false,
-    },
-  },
-];
+function failed(callId: string, err: unknown): ToolResultBody {
+  return { callId, ok: false, status: "error", code: "tool_failed", data: { err: String(err).slice(0, 300) } };
+}
 
 /* ================= 路径白名单 ================= */
 
@@ -105,6 +53,9 @@ function normPath(p: string): string {
 export function inWhitelist(path: string): boolean {
   const roots = parseFsRoots(getSettings().agentFsRoots);
   if (roots.length === 0) return false;
+  // P99a-A6：`..` 段必须在匹配之前先拒。归一化不折叠 `..`，旧写法下
+  // `D:\w\..\..\Windows\x` 以 `D:\w\` 开头照样通过——Rust 侧同一条规则，两边一起补。
+  if (path.split(/[/\\]/).some((seg) => seg === ".." || seg === ".")) return false;
   const np = normPath(path);
   if (!np) return false;
   return roots.some((r) => {
@@ -113,26 +64,9 @@ export function inWhitelist(path: string): boolean {
   });
 }
 
-/* ================= 通用小件 ================= */
-
-function notExecuted(callId: string, code: string, data?: unknown): ToolReceipt {
-  return { callId, ok: false, status: "not_executed", code, ...(data !== undefined ? { data } : {}) };
-}
-
-/** 域门：仅自定义档位 + 勾选对应域；其余一律拒绝（preview/create 均不给）。 */
-function domainDenied(callId: string, ctx: TaskContext, domain: "files" | "network" | "shell"): ToolReceipt | null {
-  if (ctx.scope !== "custom") {
-    return notExecuted(callId, "general_tool_requires_custom", {
-      hint: `${GENERAL_DOMAIN[domain]}工具仅在「Agent · 自定义」档位可用（当前档位 ${ctx.scope}）`,
-    });
-  }
-  if (!(ctx.allowed ?? []).includes(domain)) {
-    return notExecuted(callId, "unauthorized_scope", {
-      hint: `自定义档位未勾选「${GENERAL_DOMAIN[domain]}」授权域`,
-    });
-  }
-  return null;
-}
+const NOT_IN_WL = (callId: string): ToolResultBody => notExecuted(callId, "path_outside_whitelist", {
+  hint: "路径不在「Agent 文件白名单」内（设置 → AI 服务）；白名单为空表示文件工具关闭",
+});
 
 interface HttpResult {
   url: string;
@@ -154,41 +88,57 @@ async function httpGet(url: string): Promise<HttpResult> {
 
 /* ================= 各工具实现 ================= */
 
-async function fsRead(callId: string, parsed: Record<string, unknown>): Promise<ToolReceipt> {
+/** fs_read 单页字节上限（P94-G4）。旧实现整份文件进回执，一份大日志就能撞爆请求体积。 */
+export const FS_READ_PAGE_MAX = 64 * 1024;
+
+async function fsRead(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const path = String(parsed.path ?? "").trim();
   if (!path) return notExecuted(callId, "invalid_args", { hint: "path 必须是非空字符串" });
-  if (!inWhitelist(path)) {
-    return notExecuted(callId, "path_outside_whitelist", {
-      hint: "路径不在「Agent 文件白名单」内（设置 → AI 服务）；白名单为空表示文件工具关闭",
-    });
-  }
+  if (!inWhitelist(path)) return NOT_IN_WL(callId);
+  const from = Math.max(0, Math.floor(Number(parsed.from)) || 0);
+  const maxBytes = Math.min(Math.max(1, Math.floor(Number(parsed.maxBytes)) || FS_READ_PAGE_MAX), FS_READ_PAGE_MAX);
   try {
-    const text = await invoke<string>("read_text_file", { path });
-    return { callId, ok: true, status: "read", data: { path, bytes: text.length, content: text } };
+    const r = await invoke<{
+      text: string; from: number; totalBytes: number; hasMore: boolean; nextFrom: number;
+    }>("agent_fs_read_text", { path, from, maxBytes });
+    return {
+      callId,
+      ok: true,
+      status: "read",
+      data: {
+        path,
+        from: r.from,
+        bytes: r.totalBytes,
+        returned: r.text.length,
+        truncated: r.hasMore,
+        content: r.text,
+        // 偏移恒回传（末页 = 文件末尾）：只在新页才给会让翻页循环退回头一页
+        nextFrom: r.nextFrom,
+        ...(r.hasMore
+          ? { hint: `文件共 ${r.totalBytes} 字节，本次只返回 ${r.text.length} 字节；用 fs_read { path, from: ${r.nextFrom} } 继续读` }
+          : {}),
+      },
+    };
   } catch (e) {
-    return { callId, ok: false, status: "error", code: "tool_failed", data: { err: String(e).slice(0, 300) } };
+    return failed(callId, e);
   }
 }
 
-async function fsList(callId: string, parsed: Record<string, unknown>): Promise<ToolReceipt> {
+async function fsList(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const path = String(parsed.path ?? "").trim();
   if (!path) return notExecuted(callId, "invalid_args", { hint: "path 必须是非空字符串" });
-  if (!inWhitelist(path)) {
-    return notExecuted(callId, "path_outside_whitelist", {
-      hint: "路径不在「Agent 文件白名单」内（设置 → AI 服务）；白名单为空表示文件工具关闭",
-    });
-  }
+  if (!inWhitelist(path)) return NOT_IN_WL(callId);
   const depthRaw = Number(parsed.depth);
   const depth = Number.isFinite(depthRaw) ? Math.min(Math.max(Math.round(depthRaw), 1), 3) : 2;
   try {
     const r = await invoke<{ path: string; truncated: boolean; entries: unknown }>("agent_fs_list", { path, depth });
     return { callId, ok: true, status: "read", data: r };
   } catch (e) {
-    return { callId, ok: false, status: "error", code: "tool_failed", data: { err: String(e).slice(0, 300) } };
+    return failed(callId, e);
   }
 }
 
-async function webFetch(callId: string, parsed: Record<string, unknown>): Promise<ToolReceipt> {
+async function webFetch(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const url = String(parsed.url ?? "").trim();
   if (!/^https?:\/\//i.test(url)) {
     return notExecuted(callId, "invalid_args", { hint: "url 必须是 http/https 地址" });
@@ -197,7 +147,7 @@ async function webFetch(callId: string, parsed: Record<string, unknown>): Promis
     const r = await httpGet(url);
     return { callId, ok: true, status: "read", data: r };
   } catch (e) {
-    return { callId, ok: false, status: "error", code: "tool_failed", data: { err: String(e).slice(0, 300) } };
+    return failed(callId, e);
   }
 }
 
@@ -246,7 +196,7 @@ export function parseDdgResults(html: string): { title: string; url: string; sni
     .slice(0, 8);
 }
 
-async function webSearch(callId: string, parsed: Record<string, unknown>): Promise<ToolReceipt> {
+async function webSearch(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const query = String(parsed.query ?? "").trim();
   if (!query) return notExecuted(callId, "invalid_args", { hint: "query 必须是非空字符串" });
   try {
@@ -263,102 +213,192 @@ async function webSearch(callId: string, parsed: Record<string, unknown>): Promi
       },
     };
   } catch (e) {
-    return { callId, ok: false, status: "error", code: "tool_failed", data: { err: String(e).slice(0, 300) } };
+    return failed(callId, e);
   }
 }
 
-async function shellExec(
-  call: ToolCall,
-  ctx: TaskContext,
-  runId: string,
-  gate: ApprovalGate,
-  parsed: Record<string, unknown>,
-): Promise<ToolReceipt> {
+async function shellExec(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const command = String(parsed.command ?? "").trim();
-  if (!command) return notExecuted(call.callId, "invalid_args", { hint: "command 必须是非空字符串" });
-  // 三重门 ①②：档位 + shell 域
-  const denied = domainDenied(call.callId, ctx, "shell");
-  if (denied) return denied;
-  // 三重门 ③：设置总开关（默认关）
-  if (!getSettings().agentShellEnabled) {
-    return notExecuted(call.callId, "shell_disabled", {
-      hint: "设置页「Agent 允许执行命令」总开关未开启",
-    });
-  }
-  // 三重门 ④：每次逐条审批（批准令牌绑定命令内容，参数变化即失效）
-  const hash = argsHash({ tool: "shell_exec", command });
-  const now = Date.now();
-  const token = gate.takeToken(runId, "shell_exec", hash, now);
-  if (!token) {
-    gate.request({
-      id: crypto.randomUUID(),
-      runId,
-      callId: call.callId,
-      tool: "shell_exec",
-      argsSummary: command.slice(0, 600),
-      argsHash: hash,
-      effect: "irreversible",
-      plan: `在系统 Shell 执行命令：\n${command}\n\n超时 10s 自动终止；输出截断 64KB。请确认命令来源与影响后批准。`,
-      createdAt: now,
-      expiresAt: now + APPROVAL_TTL_MS,
-    });
-    return notExecuted(call.callId, "needs_local_approval", {
-      hint: "等待用户在任务卡批准；批准后用相同命令重试",
-    });
-  }
   try {
-    const r = await invoke<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }>(
-      "agent_shell_exec",
-      { command },
-    );
+    const r = await invoke<{
+      exitCode: number; stdout: string; stderr: string; timedOut: boolean;
+      stdoutBytes: number; stdoutTruncated: boolean; stderrBytes: number; stderrTruncated: boolean;
+    }>("agent_shell_exec", { command });
     // 命令执行本身是成功回执（退出码/超时交给模型判断），避免把合法观察误判为故障
-    return { callId: call.callId, ok: true, status: "read", data: { command, ...r } };
+    return { callId, ok: true, status: "read", data: { command, ...r } };
   } catch (e) {
-    return { callId: call.callId, ok: false, status: "error", code: "tool_failed", data: { err: String(e).slice(0, 300) } };
+    return failed(callId, e);
   }
 }
 
-/* ================= 分发 ================= */
+/** P97-I4：单次写入上限（字符）。超过就该"分几次写"或改生成模板，而不是把巨块塞进一次工具调用。 */
+const FS_WRITE_MAX_CHARS = 1_000_000;
 
-export async function executeGeneralTool(
-  call: ToolCall,
-  ctx: TaskContext,
-  runId: string,
-  gate: ApprovalGate,
-): Promise<ToolReceipt> {
-  if (ctx.signal.aborted) return notExecuted(call.callId, "cancelled");
-  let parsed: Record<string, unknown> = {};
-  if (call.arguments && call.arguments.trim()) {
-    try {
-      parsed = JSON.parse(call.arguments) as Record<string, unknown>;
-    } catch {
-      return notExecuted(call.callId, "invalid_json");
-    }
+interface FileStat { exists?: boolean; bytes?: number; isDir?: boolean }
+
+/** fs_write 的前置校验与风险判定：新建=draft_write，覆盖=irreversible（逐条批准）。 */
+async function assessFsWrite(
+  args: Record<string, unknown>, ctx: ToolCtx,
+): Promise<Assessment> {
+  const callId = ctx.callId;
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  const content = typeof args.content === "string" ? args.content : "";
+  if (!path || !content.trim()) {
+    return { refuse: notExecuted(callId, "invalid_args", { hint: "path 与 content 都必填（content 不接受纯空白）" }) };
   }
-  switch (call.name) {
-    case "fs_read": {
-      const d = domainDenied(call.callId, ctx, "files");
-      if (d) return d;
-      return fsRead(call.callId, parsed);
-    }
-    case "fs_list": {
-      const d = domainDenied(call.callId, ctx, "files");
-      if (d) return d;
-      return fsList(call.callId, parsed);
-    }
-    case "web_fetch": {
-      const d = domainDenied(call.callId, ctx, "network");
-      if (d) return d;
-      return webFetch(call.callId, parsed);
-    }
-    case "web_search": {
-      const d = domainDenied(call.callId, ctx, "network");
-      if (d) return d;
-      return webSearch(call.callId, parsed);
-    }
-    case "shell_exec":
-      return shellExec(call, ctx, runId, gate, parsed);
-    default:
-      return notExecuted(call.callId, "unknown_tool");
+  if (content.length > FS_WRITE_MAX_CHARS) {
+    return { refuse: notExecuted(callId, "too_large", { chars: content.length, max: FS_WRITE_MAX_CHARS, hint: "分几次写，或先写模板再补数据" }) };
   }
+  if (!inWhitelist(path)) {
+    return { refuse: notExecuted(callId, "path_outside_whitelist", { path, hint: `把目标目录加入 设置 → AI 服务 → 「${DOMAIN_ZH.files}」白名单` }) };
+  }
+  let st: FileStat;
+  try {
+    st = await invoke<FileStat>("agent_fs_stat", { path });
+  } catch (e) {
+    return { refuse: failed(callId, `stat 失败：${String(e).slice(0, 200)}`) };
+  }
+  if (st.isDir) return { refuse: notExecuted(callId, "is_dir", { path, hint: "目标是目录，请给完整文件名" }) };
+  if (!st.exists) {
+    return { meta: { effect: "draft_write", idempotent: false, reversible: false, mayTouchDevice: false } };
+  }
+  // 批准卡要把"会被替换掉多少字节"说清楚——这个事实只有这里的 stat 知道
+  return {
+    meta: { effect: "irreversible", idempotent: false, reversible: false, mayTouchDevice: false },
+    plan: `覆盖已有文件：\n${path}\n\n现有 ${st.bytes ?? 0} 字节会被替换成新写的 ${content.length} 字符，应用不提供撤销。确认路径与内容后再批准。`,
+  };
 }
+
+async function fsWrite(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
+  const path = String(parsed.path ?? "").trim();
+  const content = typeof parsed.content === "string" ? parsed.content : "";
+  let st: FileStat;
+  try {
+    // 再 stat 一次只为回执说清"覆盖了多少字节"；放行判定已在 assess 里做完，这里不重复设门
+    st = await invoke<FileStat>("agent_fs_stat", { path });
+    // P99a-A6：写文件走专属命令，白名单根由宿主传入并在 **Rust 侧**判定——
+    // 旧实现调通用的 save_text_file（界面导出也在用、不带根判定），门只存在于渲染层。
+    await invoke("agent_fs_write", { path, content, roots: parseFsRoots(getSettings().agentFsRoots) });
+  } catch (e) {
+    return failed(callId, e);
+  }
+  return {
+    callId,
+    ok: true,
+    status: "applied",
+    data: {
+      path,
+      chars: content.length,
+      ...(st.exists ? { overwroteBytes: st.bytes ?? 0 } : { created: true }),
+      hint: st.exists
+        ? "已覆盖旧文件（不可撤销）。把写入路径告诉用户；下轮再改同一文件仍需再次批准"
+        : "已新建文件。把写入路径告诉用户",
+    },
+  };
+}
+
+const HOST = { kind: "host" } as const;
+
+export const generalToolEntries: AgentToolEntry[] = [
+  defineTool({
+    name: "fs_read",
+    labelZh: "读取文件",
+    effect: "read",
+    domain: "files",
+    provenance: HOST,
+    description:
+      "Read a UTF-8 text file inside the user-approved whitelist roots (settings 'Agent 文件白名单', empty = disabled). Args: { path: string, from?: number (byte offset, default 0), maxBytes?: number (default and cap 65536) }. Returns { content, from, bytes, returned, truncated, nextFrom } and pages through big files with from=nextFrom until truncated is false; never assume a truncated file was read completely. Read-only; requires the files authorization domain.",
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" }, from: { type: "number" }, maxBytes: { type: "number" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `读取 ${String(a.path ?? "")}`,
+    execute: (a, ctx) => fsRead(ctx.callId, a),
+  }),
+  defineTool({
+    name: "fs_list",
+    labelZh: "列出目录",
+    effect: "read",
+    domain: "files",
+    provenance: HOST,
+    description:
+      "List a directory tree inside the whitelist roots. Args: { path: string, depth?: number (1-3, default 2) }. Max 500 entries; files report size. Read-only; requires custom scope with the files domain.",
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" }, depth: { type: "number" } },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `列出 ${String(a.path ?? "")}${a.depth ? ` · ${a.depth} 层` : ""}`,
+    execute: (a, ctx) => fsList(ctx.callId, a),
+  }),
+  defineTool({
+    name: "fs_write",
+    labelZh: "写入文件",
+    // 真实风险由 assessFsWrite 按"新建 / 覆盖"逐 call 判定；这里声明的是**下界**（写类，非只读）
+    effect: "draft_write",
+    domain: "write",
+    provenance: HOST,
+    description:
+      `Write a UTF-8 text file inside the Agent file whitelist (设置 → AI 服务 → Agent 文件白名单): reports {path, bytes, created|overwroteBytes}. **Creating a new file applies immediately; overwriting an existing one needs a per-call user approval** (irreversible). Use it for generated artifacts (configs, scripts, reports, plugin sources) — not for the app's own settings (use settings_apply) or plugins (use save_plugin). Args: { path: string, content: string }. Needs the ${DOMAIN_ZH.write} authorization.`,
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `写入 ${String(a.path ?? "")}`,
+    assess: assessFsWrite,
+    approvalBinding: (a) => ({ path: a.path, bytes: String(a.content ?? "").length }),
+    execute: (a, ctx) => fsWrite(ctx.callId, a),
+  }),
+  defineTool({
+    name: "web_fetch",
+    labelZh: "抓取网页",
+    effect: "read",
+    domain: "network",
+    provenance: HOST,
+    description:
+      "HTTP GET a public http(s) URL: returns status/contentType/body (1MB cap; localhost/private-network addresses blocked). Args: { url: string }. Read-only; requires custom scope with the network domain.",
+    parameters: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
+    summarize: (a) => `抓取 ${String(a.url ?? "").slice(0, 60)}`,
+    execute: (a, ctx) => webFetch(ctx.callId, a),
+  }),
+  defineTool({
+    name: "web_search",
+    labelZh: "搜索网页",
+    effect: "read",
+    domain: "network",
+    provenance: HOST,
+    description:
+      "Web search via DuckDuckGo HTML endpoint (no API key): returns top results {title,url,snippet} (max 8). Args: { query: string }. Read-only; requires custom scope with the network domain.",
+    parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"], additionalProperties: false },
+    summarize: (a) => `搜索「${String(a.query ?? "").slice(0, 40)}」`,
+    execute: (a, ctx) => webSearch(ctx.callId, a),
+  }),
+  defineTool({
+    name: "shell_exec",
+    labelZh: "执行命令",
+    effect: "irreversible",
+    domain: "shell",
+    provenance: HOST,
+    description:
+      "Run a short shell command (Windows: cmd /C; 10s hard timeout then kill; output beyond 64 KiB is clipped keeping BOTH ends, with stdoutBytes/stdoutTruncated stating the original size). Read the tail for failure causes. Every call requires explicit per-call user approval and the shell master switch in settings. Args: { command: string }.",
+    parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"], additionalProperties: false },
+    summarize: (a) => `执行 ${String(a.command ?? "").slice(0, 60)}`,
+    /** 三重门之一：总开关关着就地拒，**不弹批准卡**（旧实现同序，别把无意义的确认要回来） */
+    assess: (a, ctx) => {
+      const command = String(a.command ?? "").trim();
+      if (!command) return { refuse: notExecuted(ctx.callId, "invalid_args", { hint: "command 必须是非空字符串" }) };
+      if (!getSettings().agentShellEnabled) {
+        return { refuse: notExecuted(ctx.callId, "shell_disabled", { hint: "设置页「Agent 允许执行命令」总开关未开启" }) };
+      }
+      return { meta: { effect: "irreversible", idempotent: false, reversible: false, mayTouchDevice: false } };
+    },
+    approvalBinding: (a) => ({ tool: "shell_exec", command: String(a.command ?? "").trim() }),
+    planFor: (a) => `在系统 Shell 执行命令：\n${String(a.command ?? "")}\n\n超时 10s 自动终止；输出截断 64KB。请确认命令来源与影响后批准。`,
+    execute: (a, ctx) => shellExec(ctx.callId, a),
+  }),
+];

@@ -33,6 +33,10 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "cellSize", type: "enum", values: [48, 60, 72, 90, 110], def: 60, group: "appearance", label: "控制画布格尺寸", sensitivity: "safe", reversible: true },
   { key: "fcCellSize", type: "int", min: 20, max: 96, def: 42, group: "appearance", label: "帧画布格尺寸", sensitivity: "safe", reversible: true },
   { key: "showThinking", type: "boolean", def: true, group: "appearance", label: "显示思考过程", sensitivity: "safe", reversible: true },
+  // P96-K4：以前"显示思考过程"一个开关同时管着"界面上看不看得到思维链"和"要不要让模型先想后说"。
+  // 后者会显著拉长静默时间，正是网关按空闲掐断的直接来源 ⇒ 拆开，显示归显示、模型行为归模型行为。
+  { key: "deepThink", type: "boolean", def: true, group: "ai", label: "深度思考（先想后答）", sensitivity: "safe", reversible: true },
+  { key: "streamIdleSecs", type: "int", min: 30, max: 600, def: 120, group: "ai", label: "流式读空闲超时（秒）", sensitivity: "safe", reversible: true },
   { key: "chartPalette", type: "enum", values: ["standard", "cbSafe"], def: "standard", group: "appearance", label: "图表配色", sensitivity: "safe", reversible: true },
   { key: "conWrap", type: "boolean", def: true, group: "appearance", label: "控制台自动换行", sensitivity: "safe", reversible: true },
   { key: "reduceMotion", type: "boolean", def: false, group: "appearance", label: "减弱动效", sensitivity: "safe", reversible: true },
@@ -44,9 +48,9 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "aiTemperature", type: "number", min: 0, max: 2, def: 0.3, group: "ai", label: "AI 温度", sensitivity: "protected", reversible: true },
   { key: "aiProxy", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 代理", sensitivity: "protected", reversible: true },
   { key: "aiNoProxy", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 免代理", sensitivity: "protected", reversible: true },
-  { key: "aiCreativity", type: "boolean", def: false, group: "ai", label: "AI 创造模式", sensitivity: "protected", reversible: true },
-  { key: "aiWidgetSend", type: "boolean", def: false, group: "ai", label: "小部件可发送", sensitivity: "protected", reversible: false },
-  { key: "aiScript", type: "boolean", def: false, group: "ai", label: "脚本高权限", sensitivity: "protected", reversible: false },
+  // P98-M2：aiCreativity / aiScript 已删（前者 prompts 从不读；后者是"假装生效"的安全控件）。
+  // aiWidgetSend 留：它是全机发送总闸，改名并搬到「权限与安全」组
+  { key: "aiWidgetSend", type: "boolean", def: false, group: "ai", label: "允许向设备发送", sensitivity: "protected", reversible: false },
   { key: "agentFsRoots", type: "string", maxLen: 4096, def: "", group: "ai", label: "Agent 文件白名单", sensitivity: "protected", reversible: false },
   { key: "agentShellEnabled", type: "boolean", def: false, group: "ai", label: "Agent 允许执行命令", sensitivity: "protected", reversible: false },
   { key: "autoReconnect", type: "boolean", def: false, group: "behavior", label: "断线自动重连", sensitivity: "protected", reversible: true },
@@ -66,6 +70,50 @@ export function schemaEntry(key: string): SettingEntry | undefined {
 /** Agent 可直接应用的键：safe 且可撤销 */
 export function agentWritableKeys(): (keyof Settings)[] {
   return SETTINGS_SCHEMA.filter((e) => e.sensitivity === "safe" && e.reversible).map((e) => e.key);
+}
+
+/**
+ * 「恢复外观默认」的范围（P98-M1）。
+ * 取 appearance 组里**真正属于视觉样式**的键，刻意排除两个同名不同类的：
+ * - `locale`：语言不是外观偏好，且误触代价高（整界面换语言），不该被"恢复外观"顺带带走；
+ * - `showThinking`：那是 AI 助手的显示偏好，归 AI 页管（P96-K4 还专门为它拆过开关）。
+ * 名单只在这里声明一次——恢复动作、确认文案、测试都从它派生，不再各抄一份（§8-36）。
+ */
+export const APPEARANCE_RESET_KEYS: readonly (keyof Settings)[] = [
+  "theme", "zoom", "decimals", "perfHud", "cellSize", "fcCellSize", "chartPalette", "conWrap", "reduceMotion",
+];
+
+/** 这些键的默认值（从 schema 的 `def` 取，不另立第二份数字） */
+export function appearanceDefaults(): Partial<Settings> {
+  const out: Record<string, unknown> = {};
+  for (const k of APPEARANCE_RESET_KEYS) {
+    const e = SETTINGS_SCHEMA.find((x) => x.key === k);
+    if (e) out[k] = e.def;
+  }
+  return out as Partial<Settings>;
+}
+
+/** 中文标签清单（确认对话框要逐项列出会改什么，不能只说"恢复默认"） */
+export function appearanceDefaultLabels(): string[] {
+  return APPEARANCE_RESET_KEYS
+    .map((k) => SETTINGS_SCHEMA.find((x) => x.key === k)?.label)
+    .filter((x): x is string => !!x);
+}
+
+/**
+ * Agent 可写键的紧凑清单（工具描述用），**从 schema 派生**。
+ * 旧实现把这份清单手抄在 `settingsTools` 的描述字符串里——P96-K4 新增 deepThink/streamIdleSecs
+ * 时它就悄悄漂了一次，而描述与实现分叉会让模型反复试错（P92-C 的同款教训）。
+ */
+export function agentWritableHint(): string {
+  return SETTINGS_SCHEMA
+    .filter((e) => e.sensitivity === "safe" && e.reversible)
+    .map((e) => {
+      if (e.type === "enum") return `${e.key}=${e.values.join("|")}`;
+      if (e.type === "int" || e.type === "number") return `${e.key}[${e.min}..${e.max}]`;
+      return String(e.key);
+    })
+    .join(", ");
 }
 
 /** 逐值校验（与 settingsStore.load 的钳制语义一致，但作为拒绝而非静默修正） */

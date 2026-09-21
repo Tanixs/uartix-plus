@@ -69,6 +69,7 @@ import { subscribeAnalysisAi } from "./features/analysis/analysisAi";
 import AnalysisExportDialog from "./features/analysis/AnalysisExportDialog";
 import type { AnalysisSnapshot } from "./features/analysis/analysisSnapshot";
 import { subscribeAnalysisExport } from "./features/analysis/analysisExportEvents";
+import { installFxStylesheet } from "./features/agent/fxRecipes";
 
 const LAYOUT_KEY = "vs.layout.v2";
 
@@ -446,6 +447,11 @@ export default function App() {
     // 通知浮窗类组件重算逻辑坐标（zoom 改变 vw/vh 语义但不触发 resize）
     window.dispatchEvent(new Event("vs-zoom-change"));
   }, [settings.zoom]);
+
+  // P97-I3：动效配方表（CSS 由 fxRecipes.ts 生成，theme.css 里不留平行清单；显式调用，不做求值期副作用）
+  useEffect(() => {
+    installFxStylesheet();
+  }, []);
 
   // 语言切换 → 驱动订阅 useLocale 的深度面板重渲染（P33 i18n）；页签名同步重挂
   useEffect(() => {

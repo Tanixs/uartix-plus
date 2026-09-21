@@ -1,9 +1,10 @@
 /**
  * P88b-4 A：外观覆盖层（借鉴 DeepSeek Harness ui-theme「快照 + ctx.theme 别名覆盖」模型）。
- * - overrides 是唯一真源（token→值）；applyOverlay 是唯一 DOM 出口（documentElement inline 变量），
- *   与 extRuntime 主题扩展同模式、各层只管自己的键，层叠天然成立：内置主题 css < 覆盖层 inline；
+ * - overrides 是唯一真源（token→值）；DOM 落地在 P98-M0 交给 `styles/rootVars` 合成器（本层只提交源，
+ *   不再自己 removeProperty）。**旧注释写的"各层只管自己的键、层叠天然成立"是错的前提**——
+ *   插件主题层与本层会写同一个 `--radius-md`，各自删自己的键就会互相抹掉；
  * - 白名单之外的 token 一律拒绝；部分覆盖合法，未覆盖键回退内置主题（Harness 无完整性校验语义）；
- * - 撤销/清层 = 移除本层键后按剩余覆盖重放，绝不触碰 8 个内置主题文件
+ * - 撤销/清层 = 本层提交更小的集合后由合成器重算，绝不触碰 8 个内置主题文件
  *   （Harness「移除第三方主题绝不覆盖内置持久偏好」）；
  * - data-theme 切换只改样式表、不清 inline，覆盖层天然存续（等效 Harness Theme Watchdog）；
  *   保存为主题扩展后清层，由扩展层接管——保存即持久化边界，此后撤销令牌失效。
@@ -11,13 +12,31 @@
  *
  * 依赖方向：本模块不 import 任何 ai/ 模块（extRuntime/widgetHub 均引 chatStore，静态引入会与
  * chatStore→agentRun→agentAdapter→本模块构成循环）；iframe 广播经 setOverlayChangeCb 由 widgetHub 注册。
+ * `styles/rootVars` 是零 import 叶子，两侧都可静态引，不构成环（§8-33）。
  */
+import { ROOT_LAYER, setRootVarsChangeCb, submitRootVars } from "../../styles/rootVars";
 
-/** 覆盖层变更回调（widgetHub 注册 broadcastTheme；避免循环 import 的解耦点）。 */
-let changeCb: (() => void) | null = null;
+/** 覆盖层在合成器里的身份（面板按这个 id 报告"谁改了外观"） */
+export const OVERLAY_LAYER_ID = "agent-overlay";
+
+/**
+ * 覆盖层变更回调（widgetHub 注册 broadcastTheme；避免循环 import 的解耦点）。
+ * P98-M1 改成监听器集合：外观来源面板也要订阅"AI 到底改了几项"，
+ * 而单一槽位会被 widgetHub 占掉 ⇒ 谁后注册谁把前者挤掉，面板就再也不更新。
+ */
+const changeCbs = new Set<() => void>();
 export function setOverlayChangeCb(cb: (() => void) | null) {
-  changeCb = cb;
+  changeCbs.clear();
+  if (cb) changeCbs.add(cb);
 }
+/** 订阅覆盖层变更，返回退订（面板 useSyncExternalStore 用） */
+export function subscribeOverlayChange(cb: () => void): () => void {
+  changeCbs.add(cb);
+  return () => changeCbs.delete(cb);
+}
+
+// 插件主题层变更也要广播给 iframe/小部件：合成器是唯一公共出口，把它的通知转发到本层回调上
+setRootVarsChangeCb(() => changeCbs.forEach((f) => f()));
 
 /** 可覆盖 token 白名单：色板（8 主题共有）+ 语义色 + 字号/圆角/动效（theme.css :root P55 token）。间距不开放（布局安全）。 */
 export const APPEARANCE_TOKENS = [
@@ -84,10 +103,6 @@ const overrides = new Map<string, string>();
 /** 撤销历史：undoToken → 受影响 token 的前值（null = 原本无 inline 覆盖）。仅本次运行内有效。 */
 const undoHistory = new Map<string, Record<string, string | null>>();
 
-/** 本层实际写在 inline 上的键集——applyOverlay 只清这些键，绝不越权清除扩展主题层的同名覆盖。 */
-const appliedKeys = new Set<string>();
-let applied = false;
-
 /** 读取某 token 当前计算值（含覆盖层效果后的最终呈现值）。 */
 export function readToken(name: string): string {
   if (typeof document === "undefined") return "";
@@ -108,26 +123,19 @@ export function getOverrides(): Record<string, string> {
   return Object.fromEntries(overrides);
 }
 
-/** 唯一 DOM 出口：按 overrides 重放覆盖层（先清本层失效键，再写全集）。 */
+/**
+ * 唯一 DOM 出口：把本层整份提交给根变量合成器（P98-M0）。
+ * 这里**不再自己 removeProperty**——清层＝提交更小的集合，由合成器重算，
+ * 因此撤掉覆盖层不会连带抹掉插件主题层写在同名键上的值。
+ * 广播也不在这里发：合成器只在"有效值真的变了"时通知（见文件顶部的 setRootVarsChangeCb），
+ * 自己再补一次就是双重广播——P88b-4 C2 那条"每次变更恰好广播一次"的测试当场红给我看。
+ */
 function applyOverlay() {
-  if (typeof document === "undefined") return;
-  const root = document.documentElement;
-  for (const k of [...appliedKeys]) {
-    if (!overrides.has(k)) {
-      root.style.removeProperty(k);
-      appliedKeys.delete(k);
-    }
-  }
-  for (const [k, v] of overrides) {
-    root.style.setProperty(k, v);
-    appliedKeys.add(k);
-  }
-  applied = appliedKeys.size > 0;
-  changeCb?.(); // widgetHub 注册的广播（rAF 去抖：样式落地后采集并同步全部 iframe/小部件）
+  submitRootVars(OVERLAY_LAYER_ID, ROOT_LAYER.agentOverlay, Object.fromEntries(overrides));
 }
 
 export function overlayActive(): boolean {
-  return applied;
+  return overrides.size > 0;
 }
 
 export interface PatchResult {

@@ -33,6 +33,18 @@ it("rust turn: missing fields normalize to empty strings", () => {
   expect(turn.calls[1].callId).toBe("c"); // callId 优先于 id
 });
 
+it("P90 B1/B6：reasoning 透传且空值不落字段；images 仅在该条带图时下发", () => {
+  expect(fromRustTurn({ content: "c", calls: [], reasoning: "先看现状" }).reasoning).toBe("先看现状");
+  expect(fromRustTurn({ content: "c", calls: [] })).not.toHaveProperty("reasoning");
+  expect(fromRustTurn({ content: "c", calls: [], reasoning: "" })).not.toHaveProperty("reasoning");
+  const wire = toWireMessages([
+    { role: "user", content: "u", images: ["data:image/png;base64,AA"] },
+    { role: "user", content: "v" },
+  ]);
+  expect(wire[0].images).toEqual(["data:image/png;base64,AA"]);
+  expect(wire[1]).not.toHaveProperty("images");
+});
+
 it("provider sends settings and structured tools to ai_agent_turn", async () => {
   invoke.mockResolvedValue({ content: "ok", calls: [] });
   const turn = await invokeAgentProvider([{ role: "user", content: "go" }], [{ name: "x", description: "d", parameters: { type: "object" } }], new AbortController().signal);
@@ -43,6 +55,7 @@ it("provider sends settings and structured tools to ai_agent_turn", async () => 
   expect(args.messages).toEqual([{ role: "user", content: "go" }]);
   expect(args.tools[0].name).toBe("x");
   expect(typeof args.reqId).toBe("string");
+  expect(typeof args.thinking).toBe("boolean"); // P90 B1：思维链开关沿用设置项下发
 });
 
 it("abort before invoke: no request sent", async () => {

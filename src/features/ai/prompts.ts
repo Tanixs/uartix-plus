@@ -14,6 +14,20 @@ export type AiScene =
   | "create"
   | "qa";
 
+/** B4a：编排块/事件参数字典从 blockRegistry 拼接（单一真源，消除手写漂移）。
+ *  registry 为纯常量（零 React/IPC），不拖启动图。
+ *  P97-I5：此前只有 action 规范（ORCH_OPS_SPEC）用派生串，`CAPABILITY_DIGEST` 里另写了一份
+ *  「事件 12 类 / 块 23 类」的手写清单——**加一个块种就要改两处**，且那份清单已经把
+ *  `flowEvt` 写成了 `flow`（模型照抄就调不通）。现在两处共用同一份派生串。
+ *  必须定义在 CAPABILITY_DIGEST 之前：同一模块求值期，`const` 后置会让前面的模板引用踩 TDZ。 */
+const ORCH_BLOCK_DICT = Object.entries(BLOCK_REGISTRY)
+  .map(([k, m]) => `${k}(${m.label.zh}：${m.ai})`)
+  .join("、");
+
+const ORCH_EVENT_DICT = Object.entries(EVENT_REGISTRY)
+  .map(([k, m]) => `${k}(${m.label.zh}：${m.ai})`)
+  .join("、");
+
 const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 2 + Rust + React）。主要功能与面板：
 - 五类数据接口：串口 / TCP 客户端 / TCP 服务端 / UDP / 蓝牙 BLE；串口支持热插拔识别、2 秒无数据断线检测与自动重连，BLE 可扫描并按信号强度选择设备。
 - 协议模板面板：定义帧边界（固定长度/长度字段/帧尾三种模式）、识别位、校验（sum8/sumadd/xor8/crc16_modbus/crc16_ccitt/crc32）、字段（uint8~float64/ascii/bcd/bits/csv，支持字节序、scale 缩放、offsetValue 偏移、单位、识别位）、值标签（给枚举量配文字：状态码/异常码在表格与导出里直接显示"2 非法数据地址"）。进阶能力：帧头与识别位支持逐字节位掩码通配（任意从站地址、bit7=1 的异常响应都能一条模板吃下）；长度域支持倍率 lengthScale（如 Modbus FC01/02 的「位数」→ 字节）；32/64 位字段支持四种字序（ABCD/DCBA/CDAB/BADC）；变长同类数组区可用 spanTail+spanElem 自动展开为「名称1..名称N」多个数值通道（Modbus 寄存器区、点阵数据等）。界面上的 Hex 输入框可直接写 "??"（整字节通配）、"A?"（高 4 位）、"80&F0"（显式位掩码）。
@@ -27,9 +41,9 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - 3D 轨迹面板（plot3d）：**多组独立轨迹（默认三组，可增删）**（惯导推算/实际导航/目标等场景），每组各绑 X/Y（Z 可留空=平面）并**独立选显示模式**——point 实时定位（只留最新点零历史内存）/ points 点集 / line 连线；平滑四档：无/滑动平均/**Catmull-Rom 样条**（张力+细分）/**三次样条**——曲线层只改视觉，悬停/测量/导出仍读原始点；组级还有着色（时间/通道/组色）、渐隐、密度、最大点数、配对方式与容差、备注；**P87b 物理层**：头部朝向（默认 +X/速度差分/航向角通道/四元数 4 通道 + 偏航/俯仰/滚转修正与翻转）、显示模型（光点/球/箭头/车/锥/坐标轴/本地 GLTF+缩放/旋转修正/高度偏移）、**组坐标变换**（旋转/平移/缩放——NED↔ENU 装歪修正；「首点对齐原点」一键把各组起点对齐做路径对比）、方向箭头（每 N 点）、起点标记、**会话打点旗标**（时间轴刻度+3D 旗标联动）、**轨迹 CSV 导入**（t,x,y[,z] → 组虚拟通道，与真实通道同消费面）；组行可拖协议图例字段智能绑定、双击聚焦、右键单组导出/导入/清空；不再有「混合模式」——不同组各选各的模式天然叠加。全局视图：三轴缩放（等比/逐轴）、网格疏密+比例尺读数、跟随、自动旋转、键盘飞行、光标缩放（Operator 只读模式下配置锁定，但校准与查看操作仍可进行）；底部时间条支持历史 scrub 与回放联动 seek、组配置一步 Ctrl+Z 撤销（清空数据不可撤销）。校准能力两套（**采样源=显式选择的 calibSource（默认 g1，可为 null），校准恒用原始传感器值不受组变换影响**）：**椭球校准**（进校准模式后八象限点云采样，累积上限 20000 点 → 九参数最小二乘拟合：硬磁偏置 offset×3 + 软磁对称校正矩阵 W×6，并给半径变异系数 cv 与残差 RMS 判质量，结果可复制 JSON/C 数组直接进固件；支持残差着色、原始/校正后显示对比与在线补偿预览）与**六面校准**（加计专用：六个静态姿态各静置 2 秒采集，σ 拒绝晃动，解 offset/gain）。拿到原始磁力计/加速度计时用它把歪掉的球校正成正圆。
 - 结构发现面板（xray）：对未知协议字节流做周期/帧头统计推断（自相关+显著度算法），支持显著度/帧长上限/分析窗口调参；可对候选帧头做协议簇分析（识别同帧头家族下的多种帧型与各自帧长），勾选帧型后一键按簇批量生成协议模板。AI 协议考古：面板「采样分析」后可用 xrayEvidence/xrayCrack 动作取确定性证据链、xrayReport 生成引用证据编号的推理报告（结论/置信度/建议模板结构）。
 - 哨兵面板（sentinel）：静默异常监测——数值通道双 EMA z-score 突变（灵敏度低/中/高三档）、学习期后新帧型出现告警、错误帧率超阈、通信静默（连接中但超 N 秒无帧）。报警带冷却合并（×N）与恢复事件；可最小化成右下角浮球或弹出桌面挂件继续驻留报警（面板、浮球与桌面挂件全部关闭才停止监测）；提示音为合成音。用户说"帮我盯着""数据有没有异常"时相关。
-- 自动编排器（orchestrator）：可视化流程编排——「事件 → 块树」的自动化引擎。事件 12 类：手动・会话开始/结束・解码帧命中（可设 stride 抽样防洪泛）・坏帧命中（frameError）・新帧型出现（newTpl）・通道阈值穿越（去抖）・通道值变化（chanChanged）・定时器・哨兵告警（warn/crit）・变量变化・自定义事件（flow，配 emitFlow 块跨组解耦）・通信静默（idle，帧流恢复自动重武装）。块 23 类：基础执行 发送（可多帧逐发）/ 延时 / 等帧(waitFrame) / 跑序列(runSuite) / 调用组(runGroup) / 变量赋值(setVar，来源可为常量/通道/表达式/事件字段) / toast / 声音；自动化工具箱 setControl(写画布变量)/setSwitch(切开关卡)/modbusWrite(FC05/06 编码成 RTU 帧发送)/log/snapshot(截 2D 曲线入库)/exportCsv/stopSuite/emitFlow/clip(写剪贴板)/resetVars(变量复位默认)；逻辑容器 if / loop(count|while) / break / abort / group。表达式沙箱白名单函数 abs/floor/ceil/round/min/max/clamp/if/len/fmt（if 惰性求值），另有 now（当前毫秒，测周期用）。每组一条 FIFO 队列，深度 8（= 1 在跑 + 7 排队），满队列策略 dropNew（丢新，默认）/ dropOld（挤掉最旧排队项）/ stopOld（全部中止让新的上位）；另有冷却静默期 cooldownMs、连续失败熔断自停、持久化变量镜像（重启保留）。「从模板新建」内置五套组模板：报警通知 / 看门狗 / 定时轮询 / 收发握手 / PID 继电反馈整定（含阶跃验证组与 12 个配套变量），导入默认未启用待用户检查。红线常量：顶层组 ≤32、变量 ≤64（字符串值 ≤1024）、单循环 ≤1000 轮、单实例累计 ≤10000 块。把协议模板面板的字段行拖进编排器组列表可秒挂阈值事件。用户说"自动执行""按条件触发""编个测试流程/自动化流程""PID 整定"时相关。
+- 自动编排器（orchestrator）：可视化流程编排——「事件 → 块树」的自动化引擎。事件 ${Object.keys(EVENT_REGISTRY).length} 类（kind 与参数）：${ORCH_EVENT_DICT}。块 ${Object.keys(BLOCK_REGISTRY).length} 类（kind 与参数）：${ORCH_BLOCK_DICT}。表达式沙箱白名单函数 abs/floor/ceil/round/min/max/clamp/if/len/fmt（if 惰性求值），另有 now（当前毫秒，测周期用）。每组一条 FIFO 队列，深度 8（= 1 在跑 + 7 排队），满队列策略 dropNew（丢新，默认）/ dropOld（挤掉最旧排队项）/ stopOld（全部中止让新的上位）；另有冷却静默期 cooldownMs、连续失败熔断自停、持久化变量镜像（重启保留）。「从模板新建」内置五套组模板：报警通知 / 看门狗 / 定时轮询 / 收发握手 / PID 继电反馈整定（含阶跃验证组与 12 个配套变量），导入默认未启用待用户检查。红线常量：顶层组 ≤32、变量 ≤64（字符串值 ≤1024）、单循环 ≤1000 轮、单实例累计 ≤10000 块。把协议模板面板的字段行拖进编排器组列表可秒挂阈值事件。用户说"自动执行""按条件触发""编个测试流程/自动化流程""PID 整定"时相关。
 - 测试序列器（sequencer）：拖积木组线性自动化测试——发送/等待/等帧/断言/分组/备注六类步骤，嵌套 ≤4 层、组循环 repeats；帧到达触发自动运行（冷却+防重入）、单步调试、failFast；跑完出自包含 HTML 报告（桌面导出与 CLI 同一生成器）；配套 seq-cli 命令行（回环设备无硬件跑断言、JUnit 输出进 CI）。红线：关面板即停，绝不后台发包。与编排器互操作：编排器可 runSuite 调用序列套件，序列可导入编排器成组。用户说"跑个测试""验证一下设备响应""回归测试"时相关。
-- AI 与外部集成：你能通过动作直接读写这两块——只读用 orchestratorRead / plot3dRead 取快照；写入用 orchestrator({op:enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet}) 与 plot3d({op:bind|set|groupAdd|groupRemove|clear|undo|redo|calib}，动态组：args.gid 为快照中现存 ID，缺省 g1，已删则报错)（均需高权限）。**编排结构可由你说出来即搭**：groupAdd 建组 → eventAdd 挂事件（eventKind=上面 12 类事件之一 + 该事件的参数平铺在同一 args）→ blockAdd 插块（blockKind=上面 23 类块之一 + 该块的参数平铺，可用 parentId 插进 if/loop/子组内部、which=then|els 选分支）→ enable({on:true}) 开总开关。全部块/事件种类与参数以 uartix-action 规范中的自动字典为准。新块默认启用（enabled:true）但**空事件槽的组不会自动跑**；返回值里的 hints 会告诉你还缺什么（如"发送内容为空"）。外部 IDE 侧同源：MCP 工具 get_orchestrator / get_plot3d 只读，run_action 的 kind=orchestrator/plot3d 写入。MCP 长任务（P88a）用 create_job 提交、get_job 查询结果分页、wait_event ≤1s 短等待、cancel_job 协作停止。首批 sequence.validate 与无设备副作用的 sequence.run；含发送或未知步骤立即 needs_manual_confirmation，不入队不等待，highPriv/confirmed 不是人工批准。accepted≠成功，停止中≠已停止；应用换实例禁止自动重放；旧 run_sequence 执行前 async_required，不能用 run_action 绕过。
+- AI 与外部集成：你能通过动作直接读写这两块——只读用 orchestratorRead / plot3dRead 取快照；写入用 orchestrator({op:enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet}) 与 plot3d({op:bind|set|groupAdd|groupRemove|clear|undo|redo|calib}，动态组：args.gid 为快照中现存 ID，缺省 g1，已删则报错)（均需高权限）。**编排结构可由你说出来即搭**：groupAdd 建组 → eventAdd 挂事件（eventKind=上面 ${Object.keys(EVENT_REGISTRY).length} 类事件之一 + 该事件的参数平铺在同一 args）→ blockAdd 插块（blockKind=上面 ${Object.keys(BLOCK_REGISTRY).length} 类块之一 + 该块的参数平铺，可用 parentId 插进 if/loop/子组内部、which=then|els 选分支）→ enable({on:true}) 开总开关。全部块/事件种类与参数以 uartix-action 规范中的自动字典为准。新块默认启用（enabled:true）但**空事件槽的组不会自动跑**；返回值里的 hints 会告诉你还缺什么（如"发送内容为空"）。外部 IDE 侧同源：MCP 工具 get_orchestrator / get_plot3d 只读，run_action 的 kind=orchestrator/plot3d 写入。MCP 长任务（P88a）用 create_job 提交、get_job 查询结果分页、wait_event ≤1s 短等待、cancel_job 协作停止。首批 sequence.validate 与无设备副作用的 sequence.run；含发送或未知步骤立即 needs_manual_confirmation，不入队不等待，highPriv/confirmed 不是人工批准。accepted≠成功，停止中≠已停止；应用换实例禁止自动重放；旧 run_sequence 执行前 async_required，不能用 run_action 绕过。
 - 会话录制回放：录制数据会话存为 .usess 文件，在帧画布时间机器回放（进度点选跳转、多档倍速、按 M 打时间线标注）。
 - 控制画布：滑条/按钮/开关/LED/蜂鸣器/监视器/摇杆/键盘等卡片，另支持 group 组合控件（一张卡片集成滑条+按钮+开关+监视+LED 等多个子控件），命令模板串支持 %.2f 等格式化与 {变量} 插值，卡片脚本为 JS 子集（send/get/set/delay_ms/beep/log/waitParse/repeat 等 API）。
 - 命令库：分组树结构，命令可带脚本，拖拽排序。
@@ -44,7 +58,7 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 术语：帧头=headerBytes，长度字段=lengthField 模式（lengthOffset/lengthSize/lengthEndian/lengthAdjust/lengthScale），识别位=帧内用于区分帧型的固定字节，协议簇=同一帧头家族下的多种帧型（如 WIT 的 55 59/55 53/55 52…），位掩码=headerMask/discMask（逐字节按位匹配，0xFF 精确、0x00 通配），字序=endian 四档（32 位量占两个 16 位寄存器时的字交换：ABCD/DCBA/CDAB/BADC），数组展开=spanTail+spanElem。`;
 
 /** 专用场景的精简功能清单（只保留面板名与一句话用途，控制 token） */
-const DIGEST_BRIEF = `Uartix+ 是可视化串口协议分析仪（Tauri 2 + Rust + React，接口含串口/TCP 客户端/TCP 服务端/UDP/BLE，另有演示源与可编程虚拟设备工坊两类内置数据源）。面板速览：协议模板（帧边界/位掩码通配/字序/寄存器展开/校验/字段，内置 WIT·匿名V7·Modbus RTU·Modbus TCP·NMEA·JustFloat·虚拟设备·温控炉 预设）、Hex 数据流（字节流+框选识别）、结构发现（未知协议统计推断+协议簇发现，勾选按簇建模板）、帧画布（拖拽式帧结构+会话录制回放时间机器）、数据表格（解析帧行）、2D 曲线（实时多通道+游标）、频谱分析（FFT/直方图，与 2D 共享通道）、3D 姿态（Roll/Pitch/Yaw）、3D 轨迹（实时三维轨迹+椭球/六面校准+时间条）、测试序列器（积木测试+HTML 报告+CI）、自动编排器（12 类事件→23 类块的自动化引擎，可被 AI 读写，内置 PID 继电反馈整定模板）、虚拟设备工坊（可编程仿真设备+网络收发）、控制画布（滑条/按钮/开关/LED/摇杆/键盘遥控等卡片+group 组合控件）、命令库（分组树+脚本）、指令工厂（多协议组帧）、文件传输（XMODEM/YMODEM 双向）、图传（网络视频流）、Modbus 工作台（模拟从站+主站轮询）、哨兵（静默异常监测报警）、Operator 部署包（.uopk 只读发行）、变量系统（绑定模板字段自动更新）。`;
+const DIGEST_BRIEF = `Uartix+ 是可视化串口协议分析仪（Tauri 2 + Rust + React，接口含串口/TCP 客户端/TCP 服务端/UDP/BLE，另有演示源与可编程虚拟设备工坊两类内置数据源）。面板速览：协议模板（帧边界/位掩码通配/字序/寄存器展开/校验/字段，内置 WIT·匿名V7·Modbus RTU·Modbus TCP·NMEA·JustFloat·虚拟设备·温控炉 预设）、Hex 数据流（字节流+框选识别）、结构发现（未知协议统计推断+协议簇发现，勾选按簇建模板）、帧画布（拖拽式帧结构+会话录制回放时间机器）、数据表格（解析帧行）、2D 曲线（实时多通道+游标）、频谱分析（FFT/直方图，与 2D 共享通道）、3D 姿态（Roll/Pitch/Yaw）、3D 轨迹（实时三维轨迹+椭球/六面校准+时间条）、测试序列器（积木测试+HTML 报告+CI）、自动编排器（${Object.keys(EVENT_REGISTRY).length} 类事件→${Object.keys(BLOCK_REGISTRY).length} 类块的自动化引擎，可被 AI 读写，内置 PID 继电反馈整定模板）、虚拟设备工坊（可编程仿真设备+网络收发）、控制画布（滑条/按钮/开关/LED/摇杆/键盘遥控等卡片+group 组合控件）、命令库（分组树+脚本）、指令工厂（多协议组帧）、文件传输（XMODEM/YMODEM 双向）、图传（网络视频流）、Modbus 工作台（模拟从站+主站轮询）、哨兵（静默异常监测报警）、Operator 部署包（.uopk 只读发行）、变量系统（绑定模板字段自动更新）。`;
 
 const BUG_PATROL = `另外，你在回答用户问题的同时，请顺带以资深测试工程师视角审视用户的操作场景与描述中反映的本软件链路是否合理有效、功能是否完善；若发现疑似 BUG、体验问题或功能缺口，在回答末尾用一小节「巡检发现」简明列出（没有就不列）。`;
 
@@ -77,27 +91,12 @@ export type NeedKey =
   | "codec"
   | "action";
 
-export interface CreativePerms {
-  send: boolean;
-  script: boolean;
-}
-
 const NEED_LABEL: Record<NeedKey, string> = {
   action: "uartix-action 动作执行",
   card: "uartix-card 控制卡片",
   command: "uartix-command 命令库命令",
   codec: "uartix-codec 指令工厂自定义协议",
 };
-
-/* B4a：编排块/事件参数字典从 blockRegistry 拼接（单一真源，消除手写漂移）；
- * registry 为纯常量（零 React/IPC），不拖启动图 */
-const ORCH_BLOCK_DICT = Object.entries(BLOCK_REGISTRY)
-  .map(([k, m]) => `${k}(${m.ai})`)
-  .join("；");
-
-const ORCH_EVENT_DICT = Object.entries(EVENT_REGISTRY)
-  .map(([k, m]) => `${k}(${m.ai})`)
-  .join("；");
 
 /** 操作类动词 → 触发 action 注入（含协议考古：让 AI 直接调 xray 动作取证据） */
 const ACTION_ROUTE_RE =
@@ -117,7 +116,7 @@ function schemaAction(): string {
 - xferStart({"path":"D:/fw.bin","proto":"ymodem"}) 预填文件传输对话框（proto: ymodem/ymodemg/xmodem1k/xmodem，默认 ymodem；path 可传字符串数组一次预填多个文件按顺序传输；打开控制台面板并预填路径，用户在对话框确认后才开始发送）
 - readPlot({"ask":"自定义提问"}) 截取当前 2D 曲线面板画面发给模型分析（面板未开会自动打开；用户说"看看曲线""分析一下当前波形"时用这个）
 - xrayEvidence() 读「结构发现」面板的协议考古证据链（帧长/相位/帧型簇/恒定列/校验爆破/轮询周期；面板需已「采样分析」）；xrayCrack() 只取校验爆破+轮询循环部分（载荷更小）。用户问"这协议是什么结构/校验是什么算法"时先取证据再推理，禁止脱离证据链编造数值
-- xrayReport() 基于证据链生成协议考古 Markdown 报告（结论/证据/置信度/建议模板结构）到聊天区（需脚本高权限）
+- xrayReport() 基于证据链生成协议考古 Markdown 报告（结论/证据/置信度/建议模板结构）到聊天区（高权限动作，需逐次批准）
  - vdev({"op":"…"}) 虚拟设备工坊（需高权限）：op 可选 status（运行中设备/设备库）、list、create({"spec":{…}})（规格入库不运行）、start({"name"} 或 {"spec":{…}})、stop。**自然语言生成虚拟传感器**：用户说"模拟一个有温漂、偶尔丢帧的 MPU6050"时，按下面的规格格式输出 create 动作。规格格式（uartix-vdev v1，全字段 camelCase）：
   {"name":"设备名","desc":"一句话","periodMs":100,"skipAutoTpl":false,
    "frame":{"header":"55 51","footer":"","checksum":"sum8","fields":[{"signal":"ax","type":"int16","endian":"little","scale":1},…]},
@@ -130,7 +129,7 @@ function schemaAction(): string {
               {"match":{"type":"ascii","prefix":"SET DUTY ","captureNumber":true,"setInput":"duty"},"set":{},"reply":{"type":"ascii","text":"OK\\n"}}]}
   信号模型六种：const{value}/sine{amp,freqHz,offset,phaseDeg}/square{amp,freqHz,offset,duty}/triangle{amp,freqHz,offset}/firstOrder{from,gain,tau,ambient,init}（一阶惯性对象，输入量驱动，温控/PID 教学用）/mirror{of}（镜像信号或输入量）；每个信号可带 noise（噪声幅度）与 driftPerMin（每分钟漂移）。字段类型 int8/uint8/int16/uint16/int32/uint32/float32/float64，scale=物理值/原始值。faults：dropPct 丢帧%、stuckPct 卡死%（重发上一帧）、spikePct+spikeAmp+spikeSignal 毛刺。checksum：none/sum8/xor8/crc16_modbus。命令可加 captureNumber:true+setInput:"输入量"——捕获前缀后的数值写入该输入量（如 SET DUTY 45 → duty=45；畸形数值按未命中拒收），set 与捕获可共存。mirror 与 firstOrder.from 可引用输入量或更早声明的信号。设计原则：字段命名/换算系数贴近真实器件手册；带一点噪声与漂移更像真设备；需要 PID 调参练习就给 firstOrder 被控对象 + 开关量命令；WIT 0x51 兼容帧（55 51 + 4×int16 LE + sum8）可声明 skipAutoTpl:true 用现成「维特 WIT」预设解码。
   网络收发（可选 net 段，缺省=纯本地）：{"net":{"transport":"udp"|"tcp-client"|"tcp-server"|"serial", "host":"127.0.0.1","port":9010, "bind":"127.0.0.1"|"0.0.0.0"(仅 tcp-server), "listenPort":9011(仅 udp 收令), "path":"COM5","baud":115200, "extraTargets":[{"host":"...","port":...}](仅 udp，≤4 一帧多投)}}——udp 每拍把与本地管线逐字节相同的帧 send_to host:port（目标 .255 自动广播）；tcp-client 拨出（双向：对端可发命令，应答原路返回）；tcp-server 监听 bind:port 多客户端广播（≤8）；serial 独占 COM 口直写。用户说"模拟一个向 X 发数据的设备""让别的软件也能收到"时输出带 net 的 create；双机教学接收侧：UDP/TCP 用对应接口连接，串口配 com0com 虚拟对，再导入同名预设（温控炉）或维特 WIT（MPU6050）。
-- sentinel({"op":"status"}) 哨兵异常监测（需脚本高权限）：op 可选 status（健康分/活跃异常/最近报警）、enable({"on":true|false}) 启停监测、ackAll() 确认全部、mute({"key":"spike:roll"}) 静音某类报警、clear 清空历史。用户问"刚才数据有没有异常""帮我盯着链路"时用 status 查报警；用户说"别报了"用 mute/ackAll
+- sentinel({"op":"status"}) 哨兵异常监测（高权限动作，需逐次批准）：op 可选 status（健康分/活跃异常/最近报警）、enable({"on":true|false}) 启停监测、ackAll() 确认全部、mute({"key":"spike:roll"}) 静音某类报警、clear 清空历史。用户问"刚才数据有没有异常""帮我盯着链路"时用 status 查报警；用户说"别报了"用 mute/ackAll
 - orchestratorRead() 编排器只读快照：总开关 / 在跑实例数 / 各组（事件种类、冷却、满队列策略、块数、运行次数、失败数、最近一次结果）/ 变量现值 / 最近 10 条日志。用户问"自动化跑到哪了""哪组在跑"先读它
 - orchestrator({"op":"…"}) 编排器写操作（需高权限）：op 可选 enable({"on":true|false}) 总开关、run({"groupId"|"name"}) 手动触发某组、stopAll() 停全部在跑与排队、groupAdd({"name"?}) 新建空组、groupUpdate({"groupId","groupName"?,"enabled"?,"cooldownMs"?,"note"?,"queuePolicy"?}) 改组设置、groupRemove({"groupId"}) 删组【破坏性】、eventAdd({"groupId","eventKind",…该事件参数}) 挂事件（eventKind 及参数：${ORCH_EVENT_DICT}）、eventRemove({"groupId","eventId"}) 移除事件【破坏性】、blockAdd({"groupId","blockKind",…该块参数,"parentId"?,"which"?:"then"|"els","index"?}) 插执行/逻辑块（blockKind 及参数：${ORCH_BLOCK_DICT}）、blockRemove({"groupId","blockId"}) 删块【破坏性】、varsSet({"name","value"}) 写变量现值（变量须先在变量库声明；会触发 varChanged 事件链）。**搭一条自动化的完整链路**：groupAdd → eventAdd（如 {"eventKind":"timer","intervalMs":5000}）→ blockAdd（如 {"blockKind":"send","sendMode":"hex","text":"AA 55"}、{"blockKind":"waitFrame","hex":"55 59","timeoutMs":500}、{"blockKind":"setVar","name":"x","value":1}、{"blockKind":"toast","level":"warn","text":"超时"}）→ enable({"on":true})。eventAdd/blockAdd 的返回里 applied=实际采纳的参数、hints=还缺什么（如"发送内容为空"），照 hints 补一次即可。注意：if/loop 只造骨架（条件与循环体请在面板里编）；ORCH 红线：每组事件 ≤8、单层块 ≤200、组 ≤32、变量 ≤64。用户说"帮我自动跑这个流程""定时触发""编个自动化""停掉自动化"时用
 - plot3dRead() 3D 轨迹只读快照（P87e 弹性组数）：groups 数组（每组 name/color/visible/axes 与是否绑齐/mode=point|points|line/着色/渐隐/密度/平滑/最大点数/配对/备注）、view 全局视图、是否校准模式（采样源=显式选择的 calibSource（默认 g1，可为 null））、采样点数与八象限覆盖、椭球拟合（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。用户问"3D 转得对不对""校准准不准""三条轨迹叠一下"时读它
@@ -139,7 +138,7 @@ function schemaAction(): string {
 - clearPage() 清空控制画布当前页【破坏性】；addPage({"name":"页名"}) 新建控制页；patchCard({"name":"卡名","patch":{…}}) 改卡片属性
 - removeCard({"name":"卡名"})/removeProtocol({"name":"模板名"})/removeCommand({"name":"命令名"})/removeCodec({"name":"协议名"}) 按名删除【破坏性】
 - openPort()/closePort() 开关连接（需发送权限）
-- modbus({"op":"…"}) Modbus 工作台（需脚本高权限，因为会主动占用总线发数据）：op 可选 status（查两边状态与统计）/ slave.start / slave.stop / slave.configure({address,anyAddress,delayMs,fault:"none"|"noReply"|"exception"|"everyOther",faultCode}) / slave.write({area:"coil"|"disc"|"holding"|"input",index,value}) / slave.writeMany({area,from,to,value,step}) / slave.resize({bits,words}) / poll.add({slave,fn:1|2|3|4,addr,qty,periodMs,varName,elem,scale}) / poll.remove({varName}) / poll.clear() / poll.configure({transport:"rtu"|"tcp"}) / poll.start / poll.stop / poll.reset。用户说"把 40003 设成 1234""每 500ms 读 1 号从站 10 个寄存器""模拟一个从站让它别应答/回异常码"时用这个，别让他手动点
+- modbus({"op":"…"}) Modbus 工作台（高权限动作，会主动占用总线发数据，需逐次批准）：op 可选 status（查两边状态与统计）/ slave.start / slave.stop / slave.configure({address,anyAddress,delayMs,fault:"none"|"noReply"|"exception"|"everyOther",faultCode}) / slave.write({area:"coil"|"disc"|"holding"|"input",index,value}) / slave.writeMany({area,from,to,value,step}) / slave.resize({bits,words}) / poll.add({slave,fn:1|2|3|4,addr,qty,periodMs,varName,elem,scale}) / poll.remove({varName}) / poll.clear() / poll.configure({transport:"rtu"|"tcp"}) / poll.start / poll.stop / poll.reset。用户说"把 40003 设成 1234""每 500ms 读 1 号从站 10 个寄存器""模拟一个从站让它别应答/回异常码"时用这个，别让他手动点
 - toast({"msg":"文字"}) 显示通知
 - listWidgets() 查询已安装挂件（名称/启用/浮窗打开中/形态）；openWidget({"name":"挂件名"})/closeWidget({"name":"…"}) 开关应用内浮窗；popWidget({"name":"…"}) 弹出为独立桌面小窗（置顶常驻）
 - removeWidget({"name":"…"}) 删除挂件【破坏性】
@@ -168,8 +167,14 @@ function schemaCodec(): string {
 规则：至少 2 段；校验段最多 1 个且不能在首位；变量名不重复；帧头用 fixed 段。安装后出现在指令工厂「自定义协议」中，填参数即可自动组帧（含校验）。`;
 }
 
-export function schemaFor(key: NeedKey, perms: CreativePerms): string {
-  void perms;
+/**
+ * P98-M2：`CreativePerms` 已删除。
+ * 它曾是"AI 能输出哪类代码块"的权限位，但三个字段没有一个真的在拦东西：
+ * `enabled` 从未被读；`script` 走到 `schemaFor` 只有一句 `void perms`；`send` 只在
+ * 早退分支之后才用得上。设置项 `aiCreativity`/`aiScript` 因此是"假装生效的安全控件"，
+ * 一并清退——真实的权限面只有 Agent 授权档（`scopeTiers.hasDomain`）与逐次审批门。
+ */
+export function schemaFor(key: NeedKey): string {
   switch (key) {
     case "action":
       return schemaAction();
@@ -208,11 +213,11 @@ const NEED_HINT = (keys: NeedKey[]) =>
 
 /**
  * UI 创造统一路径（旧 uartix-theme/style/widget/panel/script 独立扩展安装已废弃）：
- * 无论创造模式开关，UI 创造需求一律引导到 Agent 任务，由 save_plugin 工具落库并自动启用。
+ * 界面创造需求一律走 Agent 任务，由 save_plugin 工具落库并自动启用。
  */
 const UI_CREATIVITY_ROUTE = `【UI 创造引导】UI 创造类需求（主题/小部件/面板/脚本）：引导用户打开 AI 助手工具栏的『Agent 任务』，在任务中你会用 save_plugin 工具把成果保存为插件并自动启用，用户无需手动安装。`;
 
-/** 输出工具箱：card/command/codec 三个代码块工具（无需创造模式权限） */
+/** 输出工具箱：card/command/codec 三个代码块工具（直接可用） */
 const TOOLBOX_LIGHT = `\n\n${ACTION_RULE}\n\n${UI_CREATIVITY_ROUTE}\n\n【输出工具箱】你可以直接输出可写入软件的代码块（用户确认后写入）：${NEED_HINT(["card", "command", "codec"])}。
 规则：需要输出某格式前，在回复中单独一行输出对应的 [[need:格式名]] 标记并停止输出，系统会自动补充该格式的完整规范，然后你继续完成代码块。不要凭记忆猜测格式细节。用户只是提问/闲聊时不要输出任何标记。`;
 
@@ -221,20 +226,15 @@ const TOOLBOX_LIGHT = `\n\n${ACTION_RULE}\n\n${UI_CREATIVITY_ROUTE}\n\n【输出
 export function buildSystemPrompt(
   scene: AiScene,
   tplSummary: string,
-  creative?: { enabled: boolean; send: boolean; script: boolean },
   extraSchemas?: NeedKey[],
 ): string {
-  const perms: CreativePerms = {
-    send: creative?.send ?? false,
-    script: creative?.script ?? false,
-  };
   // 专用输出场景 digest 用全量（回答"怎么用"需要细节）；其余用精简版控 token
   const digest = scene === "qa" || scene === "create" ? CAPABILITY_DIGEST : DIGEST_BRIEF;
   let base = `你是 Uartix+（嵌入式可视化上位机）内置的 AI 调试助手，面向嵌入式、机器人、航模方向的开发者。用简体中文回答，专业、简练。\n\n软件功能速览（回答用法问题时引用对应面板名）：\n${digest}\n\n当前用户的协议模板：\n${tplSummary}\n\n${BUG_PATROL}`;
 
   if (scene === "create") {
     // 创造工作台：UI 创造统一走 Agent 任务 + save_plugin（不再输出独立扩展安装块）
-    return `${base}\n\n${UI_CREATIVITY_ROUTE}\n\n${ACTION_RULE}\n\n无需创造模式即可输出的代码块：${NEED_HINT(["card", "command", "codec"])}。创作流程：理解需求 → 必要时用一句话澄清 → 输出 [[need:格式名]] 标记并停止（系统自动补规范）→ 继续完成代码块 → 邀请用户反馈迭代。`;
+    return `${base}\n\n${UI_CREATIVITY_ROUTE}\n\n${ACTION_RULE}\n\n可直接输出的代码块：${NEED_HINT(["card", "command", "codec"])}。创作流程：理解需求 → 必要时用一句话澄清 → 输出 [[need:格式名]] 标记并停止（系统自动补规范）→ 继续完成代码块 → 邀请用户反馈迭代。`;
   }
 
   if (scene === "qa") {
@@ -243,7 +243,7 @@ export function buildSystemPrompt(
     const extras = extraSchemas ?? [];
     if (extras.length > 0) {
       base += `\n\n【已预载的格式规范（可直接输出代码块，无需再输出 [[need:xxx]] 标记）】`;
-      for (const k of extras) base += `\n\n${schemaFor(k, perms)}`;
+      for (const k of extras) base += `\n\n${schemaFor(k)}`;
     }
     return base;
   }

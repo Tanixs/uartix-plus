@@ -24,12 +24,13 @@ vi.mock("../plot/plotStore", () => ({
   timeOrigin: vi.fn(() => 1000),
   sampleRate: vi.fn(() => 50),
 }));
-vi.mock("../ai/extRuntime", () => ({ applyStyleExts: vi.fn(), previewCss: vi.fn(() => "") }));
+vi.mock("../ai/extRuntime", () => ({ applyStyleExts: vi.fn() }));
 
-const { createLocalAgentAdapter, argsHash } = await import("./agentAdapter");
+const { createLocalAgentAdapter } = await import("./agentAdapter");
+const { argsHash } = await import("./toolRegistry");
 const store = await import("../plugins/pluginStore");
 const extStore = await import("../ai/extensionStore");
-import type { ApprovalGate, ApprovalRequest } from "./agentAdapter";
+import type { ApprovalGate, ApprovalRequest } from "./toolRegistry";
 import type { TaskContext, ToolCall } from "./types";
 
 function ctx(scope: TaskContext["scope"], allowed?: string[]): TaskContext {
@@ -89,7 +90,42 @@ describe("save_plugin 档位与落库", () => {
     expect((await a.execute(call("save_plugin", { kind: "panel", name: "x", payload: { format: "html", html: "y" }, id: "Bad ID" }), ctx("create"))).code).toBe("invalid_id");
   });
 
-  it("包校验失败回传 errors；同 ID 自动加序号后缀，绝不覆盖", async () => {
+  /**
+   * P99a-B1：`module` 让插件第一次能带 JS。这两张卡钉的是同一句话——
+   * **能带逻辑 ≠ 能自动生效**（详设 §11"不给 module 自动启用"）。
+   */
+  it("module 包：enable:true 也不自动启用（logic.run 不在纯 UI 能力集）", async () => {
+    const a = createLocalAgentAdapter({ runId: "r1", gate: fakeGate() });
+    const r = await a.execute(
+      call("save_plugin", { kind: "module", name: "计算器", payload: { format: "js", code: "uartix.host.post({type:'ping'})" }, enable: true }),
+      ctx("create"),
+    );
+    const data = r.data as { pluginId: string; enabled: boolean; state: string; caps: string[] };
+    expect(r.ok).toBe(true);
+    expect(data.caps).toEqual(["logic.run"]);
+    expect(data.enabled).toBe(false);
+    expect(data.state).toBe("installed_disabled");
+  });
+
+  it("module 包：封网自证不通过就保持停用，原因照实回传", async () => {
+    const a = createLocalAgentAdapter({ runId: "r1", gate: fakeGate() });
+    const saved = await a.execute(
+      call("save_plugin", { kind: "module", name: "探针包", payload: { format: "js", code: "var ok = 1;" } }),
+      ctx("create"),
+    );
+    const id = (saved.data as { pluginId: string }).pluginId;
+    const gate = fakeGate();
+    gate.takeToken = vi.fn(() => "tok");
+    const b = createLocalAgentAdapter({ runId: "r2", gate });
+    const r = await b.execute(call("enable_plugin", { id }), ctx("create"));
+    expect(r.ok).toBe(false);
+    // node 环境没有 Worker：证明不了封网 ⇒ fail-closed，不是"测不了算通过"
+    expect(r.code).toBe("module_probe_failed");
+    expect(String((r.data as { msg?: string }).msg)).toContain("no-worker");
+    expect(store.getPlugin(id)?.state).not.toBe("enabled");
+  });
+
+  it("包校验失败回传 errors；显式同 ID＝升版本，撞名但没指 ID＝另起一份绝不覆盖", async () => {
     const a = createLocalAgentAdapter({ runId: "r1", gate: fakeGate() });
     const bad = await a.execute(call("save_plugin", { kind: "theme", name: "坏主题", payload: {} }), ctx("create"));
     expect(bad.code).toBe("invalid_package");
@@ -97,10 +133,19 @@ describe("save_plugin 档位与落库", () => {
     const first = await a.execute(call("save_plugin", { kind: "panel", name: "面板", id: "user.agent.panel", payload: { format: "html", html: "p" } }), ctx("create"));
     const second = await a.execute(call("save_plugin", { kind: "panel", name: "面板", id: "user.agent.panel", payload: { format: "html", html: "p" } }), ctx("create"));
     const id1 = (first.data as { pluginId: string }).pluginId;
-    const id2 = (second.data as { pluginId: string }).pluginId;
     expect(id1).toBe("user.agent.panel");
-    expect(id2).toBe("user.agent.panel-2");
-    expect(store.getPlugin("user.agent.panel")).toBeTruthy();
+    // P97-I6 改了这一半的语义：模型**指名**往同一个 id 再存一次，读作"改这个插件"，
+    // 升版本 + 旧版进栈（库内仍只有一条），而不是悄悄多出 user.agent.panel-2 那种近似副本。
+    const d2 = second.data as { pluginId: string; updated?: boolean; version?: string; history?: number };
+    expect(d2).toMatchObject({ pluginId: "user.agent.panel", updated: true, version: "0.1.1", history: 1 });
+    expect(store.getSnapshot().plugins.filter((p) => p.pkg.id === "user.agent.panel")).toHaveLength(1);
+    // 没给 id 时按名字派生 id，撞车仍是"再来一份"：没有指名就不该覆盖别人的东西
+    const dupA = await a.execute(call("save_plugin", { kind: "panel", name: "同名面板", payload: { format: "html", html: "a" } }), ctx("create"));
+    const dupB = await a.execute(call("save_plugin", { kind: "panel", name: "同名面板", payload: { format: "html", html: "b" } }), ctx("create"));
+    const idA = (dupA.data as { pluginId: string }).pluginId;
+    const idB = (dupB.data as { pluginId: string }).pluginId;
+    expect(idB).not.toBe(idA);
+    expect((dupB.data as { updated?: boolean }).updated).toBeUndefined();
   });
 });
 

@@ -20,7 +20,7 @@ import { collectThemeVars } from "./extRuntime";
 import { getChatFeed } from "./aiChatFeed";
 import { injectBridge } from "./widgetBridge";
 import { WidgetMenu, type WidgetMenuItem } from "./widgetShell";
-import { verdictPluginMessage, verdictPassivePush } from "../plugins/pluginIsolation";
+import { verdictPluginMessage, verdictPassivePush, verdictWinAction } from "../plugins/pluginIsolation";
 import { reportViolation, type PluginFrameCtx } from "../plugins/pluginStore";
 
 interface Props {
@@ -35,7 +35,7 @@ interface Props {
   ) => Promise<{ data?: unknown } | void> | { data?: unknown } | void;
   /** 系统菜单项（置顶/穿透/弹出桌面/关闭…），由宿主提供；自定义菜单默认拼接在其后 */
   sysMenu?: () => WidgetMenuItem[];
-  /** P88b-3 §11 插件隔离上下文：仅插件库影子扩展携带；legacy 迁移件保持旧行为 */
+  /** P88b-3 §11 插件隔离上下文：仅插件库影子扩展携带（P99a-B1a 起不再有迁移件旁路） */
   pluginCtx?: PluginFrameCtx;
 }
 
@@ -95,11 +95,11 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
   const cursorCleanup = useRef<(() => void) | null>(null);
   const menusRef = useRef<MenuState>(EMPTY_MENUS);
   const [menu, setMenu] = useState<{ name: string; x: number; y: number } | null>(null);
-  // 新插件（非 legacy 迁移件）：注入 CSP + nonce 握手；迁移件与普通扩展保持原行为（M1 旁路）
-  const enforced = !!pluginCtx && !pluginCtx.legacy;
+  // 插件库件：注入 CSP + nonce 握手（P99a-B1a 起这是插件 iframe 的唯一形态，旁路已删）
   const srcDoc = useMemo(
-    () => injectBridge(widget.html, !!bare, enforced ? { csp: true, nonce: pluginCtx!.nonce } : undefined),
-    [widget.html, bare, enforced, pluginCtx],
+    () =>
+      injectBridge(widget.html, !!bare, pluginCtx ? { csp: true, nonce: pluginCtx.nonce } : undefined),
+    [widget.html, bare, pluginCtx],
   );
 
   useImperativeHandle(ref, () => ({
@@ -124,7 +124,8 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
       // P88b-3 §11：新插件消息必须携带实例 nonce 且具备对应能力；违规忽略并上报（累计隔离）
       if (pluginCtx) {
         const verdict = verdictPluginMessage(d.type, d.n, pluginCtx);
-        if (verdict === "reject_nonce" || verdict === "reject_cap") {
+        // 按前缀判而不是枚举三个码：以后再加一种 reject_*，漏列就等于"静默放行"
+        if (verdict.startsWith("reject")) {
           reportViolation(pluginCtx.pkgId, `${d.type}:${verdict}`);
           return;
         }
@@ -145,7 +146,7 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
           );
           const snap = lastSnap.current ?? buildSnap();
           // 无 telemetry.read 能力的新插件不接收数据流（主题/屏幕等握手照常）
-          const pushData = !pluginCtx || pluginCtx.legacy || pluginCtx.caps.includes("telemetry.read");
+          const pushData = !pluginCtx || pluginCtx.caps.includes("telemetry.read");
           if (pushData) {
             target?.postMessage({ type: "aiw:snap", snap }, "*");
             target?.postMessage({ type: "aiw:chat", feed: getChatFeed() }, "*");
@@ -258,6 +259,26 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
         }
         case "aiw:win": {
           const action = String(d.action ?? "");
+          const reqId = String(d.reqId ?? "");
+          // 动作级裁决（详设 §13.2）：置顶/穿透/弹出/关窗要 win.control，挪动缩放自己免检，
+          // **未知动作同样默认关**——新增 action 忘记进表不等于免检。
+          if (pluginCtx) {
+            const wv = verdictWinAction(action, pluginCtx.caps);
+            if (wv !== "allow") {
+              reportViolation(pluginCtx.pkgId, `aiw:win:${action || "empty"}:${wv}`);
+              if (reqId)
+                target?.postMessage(
+                  {
+                    type: "aiw:win-res",
+                    reqId,
+                    ok: false,
+                    err: wv === "reject_cap" ? `窗口动作「${action}」需要 win.control 能力` : `未知窗口动作：${action}`,
+                  },
+                  "*",
+                );
+              break;
+            }
+          }
           // menu：由本组件直接渲染（自定义菜单注册表在这里）
           if (action === "menu") {
             const rect = frame.getBoundingClientRect();
@@ -270,7 +291,6 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
             });
             break;
           }
-          const reqId = String(d.reqId ?? "");
           if (!action || !onWin) {
             if (reqId)
               target?.postMessage(

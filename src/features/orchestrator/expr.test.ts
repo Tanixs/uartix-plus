@@ -94,7 +94,9 @@ describe("expr 沙箱红线", () => {
     const long = Array.from({ length: 20_000 }, (_, i) => (i === 0 ? "0" : "+1")).join("");
     let threw = false;
     try {
-      evalExpr(long, scope(), 0); // deadline=0 → 一进求值即超时
+      // 用 -1 而不是 0：deadline 判定是 `elapsed > deadlineMs`，给 0 时"同一毫秒内跑完"
+      // 就永远不超时（全量跑在快机上偶发假失败）。-1 表示"一进求值即超时"。
+      evalExpr(long, scope(), -1); // deadline 已过 → 应立刻掐断
     } catch (e) {
       threw = e instanceof ExprError;
     }

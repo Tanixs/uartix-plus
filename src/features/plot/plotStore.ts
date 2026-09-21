@@ -587,7 +587,9 @@ export async function init() {
       for (const ch of channels) {
         if (ch.tplId !== row.tplId) continue;
         const f = row.fields.find((x) => x.id === ch.fieldId);
-        if (f && f.text === null) {
+        // P90 D4：NaN/±Infinity 一旦入库会经插值污染 3D 全局锚点（锚变 NaN → 之后
+        // 所有归一化坐标都是 NaN，画面永久全黑且 three 因预置 boundingSphere 连告警都不打）
+        if (f && f.text === null && Number.isFinite(f.value)) {
           appendPoint(ch.id, row.tsMs, f.value);
         }
       }

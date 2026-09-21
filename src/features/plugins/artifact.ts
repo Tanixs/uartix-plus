@@ -2,7 +2,9 @@
  * P88b-3 §9.1：统一 Artifact 类型与校验器。
  * 产物优先声明式 schema；高级 HTML 以隔离插件形式渲染（§11），不生成主进程 React 源码。
  * 校验只做结构与限额判定，跨 store 的语义校验（通道存在性、工具注册表）在安装时进行。
+ * CSS 文本一律过 `styles/styleSanitize` 那个无依赖叶子净化器（P99a-A6 起与 AI 工具同一条门）。
  */
+import { guardStyleText } from "../styles/styleSanitize";
 
 export type ArtifactKind =
   | "theme"
@@ -11,7 +13,8 @@ export type ArtifactKind =
   | "panel"
   | "workspacePreset"
   | "workflow"
-  | "reportView";
+  | "reportView"
+  | "module";
 
 export const ARTIFACT_KINDS: readonly ArtifactKind[] = [
   "theme",
@@ -21,6 +24,7 @@ export const ARTIFACT_KINDS: readonly ArtifactKind[] = [
   "workspacePreset",
   "workflow",
   "reportView",
+  "module",
 ];
 
 export const ARTIFACT_KIND_LABEL: Record<ArtifactKind, string> = {
@@ -31,10 +35,25 @@ export const ARTIFACT_KIND_LABEL: Record<ArtifactKind, string> = {
   workspacePreset: "工作区预设",
   workflow: "工作流",
   reportView: "报告视图",
+  module: "逻辑模块",
 };
+
+/**
+ * 按字符串取产物中文名（模型给的 kind 可能不在枚举里，原样回显而不是编一个）。
+ * 单点来源（§8-36①）：插件库标签、`save_plugin` 参数摘要都走这里，
+ * 此前 toolDisplay 里还手抄过两份同名表，改一处漂两处。
+ */
+export function artifactKindLabel(kind: string): string {
+  return (ARTIFACT_KIND_LABEL as Record<string, string>)[kind] ?? kind;
+}
 
 /** 单个产物 JSON 字节上限（详设 §11 建议初值：单配置 JSON 1MiB）。 */
 export const MAX_ARTIFACT_BYTES = 1024 * 1024;
+/**
+ * 主题 `css` 的上限。这个名字就是它的**唯一**说法：`validateTheme` 的长度判定与净化器
+ * 都读它，`style_commit` 判定"能不能固化成主题"也读它（原来同文件里写了两个 `64*1024` 字面量）。
+ */
+export const THEME_CSS_MAX_BYTES = 64 * 1024;
 
 /** 声明式块：指标卡 / 迷你图 / 富文本 / 自定义 HTML（受限）。 */
 export type DeclarativeBlock =
@@ -75,6 +94,33 @@ export interface ReportViewArtifact {
   blocks: DeclarativeBlock[];
 }
 
+/**
+ * `module` = 一段跑在专用 Worker 里的 JS（P99a-B1，详设 §5.2）。
+ * 结构校验**故意不做任何"看起来危险就拒"的正则**：字符串匹配挡不住逃逸，
+ * 只会给人"已经防住了"的错觉（§8-37）。真正的门是 realm 封网 + 桥裁决 + 启用前自证。
+ */
+export interface ModuleArtifact {
+  format: "js";
+  code: string;
+}
+
+/** 模块源码上限（比单产物 1MiB 更严：它要整个塞进 blob 并在每次启用时求值）。 */
+export const MAX_MODULE_BYTES = 256 * 1024;
+
+function validateModule(a: Record<string, unknown>, out: ValidationIssue) {
+  if (a.format !== "js") out.errors.push('module.format 目前只支持 "js"');
+  const code = a.code;
+  if (typeof code !== "string" || !code.trim()) {
+    out.errors.push("module.code 必须是非空字符串");
+    return;
+  }
+  if (code.length > MAX_MODULE_BYTES) {
+    out.errors.push(`module.code 超过 ${MAX_MODULE_BYTES} 字节上限（实际 ${code.length}）`);
+  }
+  // NUL 会截断一些文本处理链路（导出/预览/编辑器）；结构性语法这里不判，交给 worker 求值回报
+  if (code.includes("\0")) out.errors.push("module.code 含空字节");
+}
+
 export type PluginArtifact =
   | ({ kind: ArtifactKind } & Record<string, unknown>);
 
@@ -104,14 +150,19 @@ function validateTheme(a: Record<string, unknown>, out: ValidationIssue) {
     if (typeof v !== "string" || v.length > 200) out.errors.push(`主题变量值必须是 ≤200 字符字符串：${k}`);
   }
   if (a.css !== undefined) {
-    if (typeof a.css !== "string" || a.css.length > 64 * 1024) {
-      out.errors.push("theme.css 必须是 ≤64KiB 字符串");
-    } else if (/@import|url\(\s*['"]?https?:/i.test(a.css)) {
-      // §11：默认禁外部资源；http(s) 引用一律拒绝，data: 由 CSP 兜底
-      out.errors.push("theme.css 不允许 @import 或外部 url() 引用");
-    } else if (/position\s*:\s*fixed/i.test(a.css)) {
-      // §10：主题不得遮挡批准组件/安全提示，fixed 覆盖层给出警告（由预览人工确认）
-      out.warnings.push("theme.css 含 position:fixed 覆盖层，请确认不遮挡安全提示与停止入口");
+    if (typeof a.css !== "string" || a.css.length > THEME_CSS_MAX_BYTES) {
+      out.errors.push(`theme.css 必须是 ≤${THEME_CSS_MAX_BYTES} 字节字符串`);
+    } else {
+      /**
+       * P99a-A6：走与 AI `style_patch` / `save_theme_extension` **同一个净化器**。
+       * 旧写法在这里只正则挡 `@import` 与 `url(http`，`position:fixed` 只给警告——
+       * 于是同一个"第三方 CSS 能不能进宿主"的问题有两条门：松的这条恰好是插件/市场要用的，
+       * 一条 `body{display:none}` 或一层 fixed 就能盖掉批准弹层与停止入口（§8-37 的"共享槽位/
+       * 同一能力两个门"）。净化器是无依赖叶子模块，两边共用不成环。
+       */
+      const g = guardStyleText(a.css, THEME_CSS_MAX_BYTES, []);
+      if (!g.ok) out.errors.push(...g.problems.slice(0, 8).map((p) => `theme.css 未通过净化：${p}`));
+      else if (g.problems.length) out.warnings.push(...g.problems.slice(0, 8));
     }
   }
 }
@@ -257,6 +308,9 @@ export function validateArtifactPayload(kind: ArtifactKind, payload: unknown): V
       break;
     case "reportView":
       validateReportView(payload, out);
+      break;
+    case "module":
+      validateModule(payload, out);
       break;
   }
   out.ok = out.errors.length === 0;

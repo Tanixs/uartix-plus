@@ -22,7 +22,10 @@ import { OperatorGenBlock } from "../operator/OperatorGen";
 import { mcpServerConfig } from "../mcp/mcpTools";
 import { imageStoreStats, setImageLimits, clearAllImages } from "../ai/imageStore";
 import { toast } from "../ai/extRuntime";
+import { subscribe as subExts, getSnapshot as getExtSnap } from "../ai/extensionStore";
 import { cleanBaseUrl } from "../agent/provider";
+import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
+import { appearanceDefaults, appearanceDefaultLabels } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { IconEye, IconEyeOff, IconEdit, IconTrash } from "../../shared/icons";
@@ -181,6 +184,67 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const settings = useSettings();
   const timeLinked = useSyncExternalStore(timeCursor.subscribe, () => timeCursor.getSnapshot().linked);
   const snt = useSyncExternalStore(sentinelStore.subscribe, sentinelStore.getSnapshot);
+  // P91 D5：插件主题与内置主题的互认——内联层恒压过样式表，过去选择器显示"自己选中"
+  // 而界面其实被插件覆盖，且切内置主题不会重跑样式层。现在把覆盖态显出来并给一键停用。
+  const extSnap = useSyncExternalStore(subExts, getExtSnap);
+  const themeLayers = extSnap.exts.filter((e) => e.enabled && e.type === "theme");
+  const disableThemeLayers = async () => {
+    const { setEnabled } = await import("../plugins/pluginStore");
+    const refs = [...new Set(themeLayers.map((e) => e.pluginRef).filter(Boolean))] as string[];
+    if (!refs.length) {
+      toast("这些主题层不是插件提供的，请到 AI 助手 → 插件库处理");
+      return;
+    }
+    const failed: string[] = [];
+    for (const id of refs) {
+      const r = setEnabled(id, false);
+      if (!r.ok) failed.push(`${id}：${r.msg}`);
+    }
+    toast(failed.length ? `部分停用失败：${failed.join("；")}` : `已停用 ${refs.length} 个插件主题，界面回到内置主题`);
+  };
+  /**
+   * P98-M1 外观来源面板。
+   * 用户报的"AI 改了圆角，停用和卸载都撤不回去"真因在这里：AI 的 token 覆盖层与组件样式层
+   * **都不归插件生命周期管**（`removeProjections` 只清扩展投影），而旧 UI 那一行的显示条件是
+   * `themeLayers.length > 0`——只数插件主题层 ⇒ 罪魁祸首是 AI 层时，那一行按定义不会出现。
+   */
+  const [aiStyle, setAiStyle] = useState(() => aiStyleFootprint());
+  useEffect(() => {
+    const off = subscribeAiStyle(() => setAiStyle(aiStyleFootprint()));
+    return off;
+  }, []);
+  const clearAi = () => {
+    const r = clearAiStyleLayers();
+    setAiStyle(aiStyleFootprint());
+    toast(r.tokens || r.layers
+      ? `已清除 AI 的外观改动：${r.tokens} 项 token 覆盖 + ${r.layers} 层组件样式。你的设置与已存插件不受影响`
+      : "AI 当前没有留下临时外观改动");
+  };
+  const restoreAppearanceDefaults = async () => {
+    const pluginThemeCount = new Set(themeLayers.map((e) => e.pluginRef).filter(Boolean)).size;
+    const willDo = [
+      aiStyle.tokens ? `清除 AI 的 ${aiStyle.tokens} 项 token 覆盖` : "",
+      aiStyle.layers.length ? `清除 AI 的 ${aiStyle.layers.length} 层组件样式` : "",
+      pluginThemeCount ? `停用 ${pluginThemeCount} 个插件主题` : "",
+      `外观设置回默认（${appearanceDefaultLabels().join("、")}）`,
+    ].filter(Boolean);
+    const ok = await confirmDialog({
+      message: `恢复外观默认将执行：\n· ${willDo.join("\n· ")}\n\n注意：这一项**会把你自己在设置里选的主题/缩放/精度等一并回默认**。\n只想撤掉 AI 动过的，请用上面的「清除 AI 的全部临时改动」。\n协议模板、命令库、插件库等其他数据不受影响。`,
+      danger: true,
+      okLabel: "恢复外观默认",
+    });
+    if (!ok) return;
+    clearAiStyleLayers();
+    if (pluginThemeCount) {
+      const { setEnabled } = await import("../plugins/pluginStore");
+      for (const id of [...new Set(themeLayers.map((e) => e.pluginRef).filter(Boolean))] as string[]) {
+        void setEnabled(id, false);
+      }
+    }
+    patch(appearanceDefaults());
+    setAiStyle(aiStyleFootprint());
+    toast("外观已恢复默认（其他数据未动）");
+  };
   const layouts = useLayouts();
   const [layoutName, setLayoutName] = useState("");
   const [tab, setTab] = useState(initialTab ?? "general");
@@ -340,6 +404,50 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     })}
                   </div>
                 ), t("set.theme.tip"))}
+                {row("当前外观被谁改了", (
+                  <div className="set-apr">
+                    <ul className="set-apr-list">
+                      <li>
+                        <span className="set-apr-name">内置主题</span>
+                        <span className="set-apr-val">{t(`set.theme.${settings.theme}`)}</span>
+                        <span className="set-apr-note">样式表，切换只改它</span>
+                      </li>
+                      <li className={themeLayers.length ? "on" : ""}>
+                        <span className="set-apr-name">插件主题层</span>
+                        <span className="set-apr-val">{themeLayers.length ? `${themeLayers.length} 个生效` : "无"}</span>
+                        {themeLayers.length > 0 && (
+                          <button className="btn sm" onClick={() => void disableThemeLayers()}>停用</button>
+                        )}
+                      </li>
+                      <li className={aiStyle.tokens ? "on ai" : ""}>
+                        <span className="set-apr-name">AI 临时 token 覆盖</span>
+                        <span className="set-apr-val">{aiStyle.tokens ? `${aiStyle.tokens} 项` : "无"}</span>
+                        {aiStyle.tokens > 0 && (
+                          <span className="set-apr-note">{aiStyle.tokenNames.slice(0, 4).join(" ")}{aiStyle.tokenNames.length > 4 ? " …" : ""}</span>
+                        )}
+                      </li>
+                      <li className={aiStyle.layers.length ? "on ai" : ""}>
+                        <span className="set-apr-name">AI 组件样式层</span>
+                        <span className="set-apr-val">{aiStyle.layers.length ? `${aiStyle.layers.length} 层` : "无"}</span>
+                        {aiStyle.layers.length > 0 && (
+                          <span className="set-apr-note">{aiStyle.layers.map((l) => l.name).slice(0, 3).join("、")}{aiStyle.layers.length > 3 ? " …" : ""}</span>
+                        )}
+                      </li>
+                    </ul>
+                    <div className="set-apr-ops">
+                      <button className="btn sm primary" disabled={aiStyle.clean} onClick={clearAi}>
+                        清除 AI 的全部临时改动
+                      </button>
+                      <button className="btn sm danger" onClick={() => void restoreAppearanceDefaults()}>
+                        恢复外观默认
+                      </button>
+                    </div>
+                    <p className="set-apr-hint">
+                      后两层是 AI 本次会话改的（圆角/尺寸/阴影/临时主题都在这里），<b>不落盘、也不归插件停用管</b>——
+                      所以停用或卸载插件撤不掉它们，用上面第一个按钮。第二个会连你自己选的主题与缩放一起回默认。
+                    </p>
+                  </div>
+                ), "从上到下层层覆盖：内置主题 < 插件主题 < AI 临时层。哪一层有内容，就说明当前界面是被它改的")}
                 {row(t("set.zoom"), (
                   <div className="set-seg">
                     {[90, 100, 110, 125].map((z) => (
@@ -773,6 +881,34 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), t("set.ai.thinking.tip"))}
+                {/* P96-K4：模型行为与界面显示拆成两项（以前一个 showThinking 管两件事，
+                    想关掉长静默只能连思维链显示一起关） */}
+                {row(t("set.ai.deepThink"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.deepThink !== false}
+                      onChange={(e) => patch({ deepThink: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), t("set.ai.deepThink.tip"))}
+                {row(t("set.ai.idle"), (
+                  <input
+                    className="input"
+                    style={{ width: 76 }}
+                    type="number"
+                    min={30}
+                    max={600}
+                    step={10}
+                    value={settings.streamIdleSecs}
+                    onChange={(e) => {
+                      const v = Math.round(Number(e.target.value));
+                      if (!Number.isFinite(v)) return;
+                      patch({ streamIdleSecs: Math.max(30, Math.min(600, v)) });
+                    }}
+                  />
+                ), t("set.ai.idle.tip"))}
                 <AiConnTestRow />
                 <details className="set-coll">
                   <summary>{t("set.ai.grp.net")}</summary>
@@ -797,18 +933,23 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     ), t("set.ai.noProxy.tip"))}
                   </div>
                 </details>
-                <div className="set-group-title">{t("set.ai.grp.creative")}</div>
-                {row(t("set.ai.creative"), (
-                  <label className="set-switch">
-                    <input
-                      type="checkbox"
-                      checked={settings.aiCreativity}
-                      onChange={(e) => patch({ aiCreativity: e.target.checked })}
-                    />
-                    <span />
-                  </label>
-                ), t("set.ai.creative.tip"))}
-                {settings.aiCreativity && row(t("set.ai.widgetSend"), (
+                {/*
+                  P98-M2：原「创造模式（AI 插件）」三项已清退两项。
+                  `aiCreativity` 是死码（prompts 从不读 `enabled`，只当过另两行的显示条件）；
+                  `aiScript` 更糟——说明写着"允许调用高权限动作"，实际 `prompts.ts` 一句 `void perms`
+                  什么都不拦，真实高权限判定走硬编码的 highPriv。**留着一个假装生效的安全控件，
+                  比没有控件更危险**（用户会以为关掉它就安全了）。
+                  `aiWidgetSend` 是真门（appActions 的 openPort/closePort + 小部件 send/ask + 脚本 api.send），
+                  它是**全机发送总闸**而不是"AI 插件的子功能"，所以搬到这里并改名。
+                */}
+                <div className="set-group-title">{tx("权限与安全", "Permissions & safety")}</div>
+                <div className="set-danger-note">
+                  {tx(
+                    "以下是本机能力总闸：关掉后即使 Agent 档位给了授权域也调不动。默认全部关闭，按需开启。",
+                    "Machine-wide capability switches. Turning one off blocks the capability even when the Agent tier grants that domain. All off by default.",
+                  )}
+                </div>
+                {row(t("set.ai.widgetSend"), (
                   <label className="set-switch">
                     <input
                       type="checkbox"
@@ -818,24 +959,6 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), t("set.ai.widgetSend.tip"))}
-                {settings.aiCreativity && row(t("set.ai.script"), (
-                  <label className="set-switch">
-                    <input
-                      type="checkbox"
-                      checked={settings.aiScript}
-                      onChange={(e) => patch({ aiScript: e.target.checked })}
-                    />
-                    <span />
-                  </label>
-                ), t("set.ai.script.tip"))}
-                {/* P88e B2：Agent 通用工具权限（fs 白名单 + shell 总开关） */}
-                <div className="set-group-title">{tx("Agent 工具权限", "Agent tool permissions")}</div>
-                <div className="set-danger-note">
-                  {tx(
-                    "Agent 默认只能读写本应用数据。以下权限默认全部关闭，按需开启。",
-                    "The Agent can only touch app-internal data by default. The permissions below are all off until you enable them.",
-                  )}
-                </div>
                 {row(tx("Agent 文件白名单", "Agent file whitelist"), (
                   <input
                     className="input"
@@ -858,8 +981,8 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), tx(
-                  "命令执行总开关，默认关闭。开启后 Agent 仍需在「自定义」档位勾选命令行域，且每条命令都弹出批准卡逐条确认；单条命令 10s 超时自动终止、输出截断 64KB",
-                  "Master switch for shell_exec, off by default. Even when on, the Agent must pick the shell domain in custom scope and every command shows an approval card; 10s timeout and 64KB output cap per command",
+                  "命令执行总开关，默认关闭。开启后 Agent 仍需在「自定义」档位勾选命令行域，且每条命令都弹出批准卡逐条确认；单条命令 10s 超时自动终止、输出窗口 64KB（超出时首尾都保留并标明中间省略量，原文仍可分页取回）",
+                  "Master switch for shell_exec, off by default. Even when on, the Agent must pick the shell domain in custom scope and every command shows an approval card; 10s timeout and a 64 KiB output window per command (beyond it both ends are kept and the omitted span is stated, full text stays pageable)",
                 ))}
                 <div className="set-row">
                   <label>

@@ -240,6 +240,9 @@ pub fn run() {
             files::hex_search,
             agent_tools::agent_fs_list,
             agent_tools::agent_fs_read_b64,
+            agent_tools::agent_fs_read_text,
+            agent_tools::agent_fs_stat,
+            agent_tools::agent_fs_write,
             agent_tools::agent_shell_exec,
             agent_tools::agent_http_get
         ])

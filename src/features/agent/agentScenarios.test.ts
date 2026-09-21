@@ -109,22 +109,46 @@ describe("P88b-2 三跨工具场景", () => {
   });
 
   it("场景③ 数据分析：租约采样 → 读窗口 → 指标 → 报告回填", async () => {
-    // 100 点正弦窗口：模型侧计算 min/max 并写报告卡
+    // 600 点正弦窗口（>8KiB 才走压缩这条道）：模型侧计算 min/max 并写报告卡
     plot.getChanData.mockReturnValue({
-      t: Array.from({ length: 100 }, (_, i) => i * 10),
-      v: Array.from({ length: 100 }, (_, i) => Math.sin(i / 10)),
+      t: Array.from({ length: 600 }, (_, i) => i * 10),
+      v: Array.from({ length: 600 }, (_, i) => Math.sin(i / 10)),
     });
     const script: AgentProvider = async (messages) => {
       const step = doneCount(messages);
       const turn = (name: string, args: unknown): ModelTurn =>
         ({ content: "", calls: [{ callId: `c${step + 1}`, name, arguments: JSON.stringify(args) }] });
+      const toolData = () => messages
+        .filter((m) => m.role === "tool")
+        .map((m) => JSON.parse(m.content).data as Record<string, unknown> | undefined);
       if (step === 0) return { content: "订阅并枚举通道", calls: [{ callId: "c1", name: "plot_channels", arguments: "{}" }] };
-      if (step === 1) return turn("plot_window", { channelIds: ["c1"], maxPoints: 100 });
+      if (step === 1) return turn("plot_window", { channelIds: ["c1"], maxPoints: 600 });
       if (step === 2) {
-        // 基于真实窗口数据算指标（正弦峰值 ≈ 0.999）
-        const last = JSON.parse([...messages].reverse().find((m) => m.role === "tool")!.content) as { data?: { series: { v: number[] }[] } };
-        expect(last.data?.series[0].v).toHaveLength(100);
-        const max = Math.max(...last.data!.series[0].v);
+        // P95-H3：模型看到的是形态压缩后的摘要（分位数 + 首尾），全量仍可分页取回
+        const pw = toolData()[1] as { series?: { points: number }[]; artifactRef?: string };
+        expect(pw.series?.[0].points).toBe(600);
+        expect(pw.artifactRef, "压缩过的收据必须带可取回的 artifactRef").toBeTruthy();
+        return turn("read_artifact", { ref: pw.artifactRef });
+      }
+      if (step === 3) {
+        // 一页只有 8KiB：hasMore 就得用 nextFrom 续要（这就是模型侧的真实循环）
+        const page = toolData()[2] as { hasMore?: boolean; nextFrom?: number; from?: number };
+        expect(page.from).toBe(0);
+        expect(page.hasMore).toBe(true);
+        const pw = toolData()[1] as { artifactRef?: string };
+        return turn("read_artifact", { ref: pw.artifactRef, from: page.nextFrom });
+      }
+      if (step === 4) {
+        // 拼回全量后算指标（正弦峰值 ≈ 0.999）
+        const pages = toolData()
+          .filter((d): d is { text: string; from: number } =>
+            typeof d?.text === "string" && typeof d?.from === "number")
+          .sort((a, b) => a.from - b.from)
+          .map((d) => d.text)
+          .join("");
+        const full = JSON.parse(pages) as { series: { v: number[] }[] };
+        expect(full.series[0].v).toHaveLength(600);
+        const max = Math.max(...full.series[0].v);
         return turn("run_app_action", { kind: "writeCard", args: { id: "rpt-1", title: "振动分析", kind: "report", summary: { max } } });
       }
       return { content: "诊断报告已回填", calls: [] };
@@ -133,7 +157,7 @@ describe("P88b-2 三跨工具场景", () => {
     const runId = await agentRun.startRun({ goal: "场景3：读取曲线做诊断报告", scope: "create" });
     const view = agentRun.getSnapshot().runs.find((r) => r.runId === runId)!;
     expect(view.status).toBe("succeeded");
-    expect(view.calls).toBe(3);
+    expect(view.calls).toBe(5);
     // 报告卡拿到的是真实窗口算出的指标
     const reportCall = runAppAction.mock.calls.find((c) => c[0] === "writeCard");
     expect((reportCall?.[1] as { summary?: { max?: number } }).summary?.max).toBeGreaterThan(0.99);

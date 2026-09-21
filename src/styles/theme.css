@@ -1,4 +1,4 @@
-﻿@import "./themes/dark.css";
+@import "./themes/dark.css";
 @import "./themes/light.css";
 @import "./themes/navy.css";
 @import "./themes/ocean.css";
@@ -4456,7 +4456,30 @@ body {
   color: #e5534b;
 }
 
-/* 主题色板卡片网格 */
+/* P98-M1：外观来源面板（逐层摊开"谁在改界面" + 两个不同名次的恢复动作）。
+   取代 P91 D5 的 .set-theme-override——那一行只在"有插件主题"时才渲染，
+   而 AI 临时层作乱时它按定义不出现，正是用户说的"撤不回去也找不到按钮"。 */
+.set-apr { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.set-apr-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.set-apr-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-s);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.set-apr-list li.on { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.set-apr-list li.ai.on { background: color-mix(in srgb, var(--warn-fg, #d29922) 12%, transparent); }
+.set-apr-name { flex: 0 0 130px; color: var(--text); }
+.set-apr-val { flex: 0 0 auto; min-width: 62px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.set-apr-list li.on .set-apr-val { color: var(--text); }
+.set-apr-note { flex: 1 1 auto; min-width: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-apr-ops { display: flex; gap: 8px; flex-wrap: wrap; }
+.set-apr-hint { margin: 0; font-size: 11px; line-height: 1.6; color: var(--text-dim); }
+.set-apr-hint b { color: var(--text); font-weight: 600; }
+
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
@@ -5061,6 +5084,9 @@ label.set-switch,
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* P90 C4：作为 AgentFloat 的定位祖先——停靠态下 dockview 容器没有 relative，
+     悬浮条会贴到整个工作区右下角而不是 AI 面板右下角 */
+  position: relative;
   background: var(--bg-panel);
   color: var(--text);
   font-size: 12.5px;
@@ -5077,6 +5103,23 @@ label.set-switch,
 }
 .ai-empty-wrap .empty-state { position: static; pointer-events: auto; }
 
+/* P90 C2：通用下拉浮层容器（portal 到 body + fixed 定位，见 shared/Dropdown.tsx） */
+.ui-dropdown {
+  position: fixed;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 150px;
+  max-width: min(340px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+}
 .ai-toolbar {
   flex: none;
   position: relative; /* P88e C1：场景下拉 .ai-scene-menu 的定位锚 */
@@ -5164,6 +5207,25 @@ label.set-switch,
 }
 .ai-msg-text { white-space: pre-wrap; }
 .ai-msg-ctx { margin-top: 3px; font-size: 10px; color: var(--text-dim); padding-left: 3px; }
+/* P95-H4：系统替用户做过的取舍（丢历史图等），说清楚比安静省略好 */
+.ai-msg-notice { margin-top: 3px; font-size: 10px; color: var(--warn-fg, #d29922); padding-left: 3px; }
+/* P91 B3：长回复默认限高收拢（底部渐隐提示还有内容，操作行给「展开 N 字」） */
+.ai-msg-bubble.clipped {
+  max-height: 240px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 72%, transparent 100%);
+}
+
+/* P96-K2：用户自己发的长文走气泡内滚动（不是渐隐）——写的人要能立刻看到自己写的全文，
+   滚动比"再点一次展开"少一步。附图在限高容器之外，所以只有文本块收。 */
+.ai-msg-text.scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+  scrollbar-width: thin;
+}
 
 /* 消息操作按钮：ghost 文字钮，悬停消息时浮现 */
 .ai-msg-ops {
@@ -5289,14 +5351,27 @@ label.set-switch,
   font-size: 11.5px;
 }
 
-.ai-input-wrap { flex: none; border-top: 1px solid var(--border); background: var(--bg-panel); }
+/* P90 C3：输入区高度上限——上下文面板等展开时不再把消息区压到 0 后被浮窗裁掉 */
+/* P98-M5：发送区收拢成**一张卡片**。旧结构是"顶栏一条横线 + 五行各自带 margin/边框"，
+   附件条、上下文面板、输入框、工具行各说各话，读起来像一叠控件而不是一个输入区。
+   现在卡片边界由 .ai-input-wrap 一处承担，内部各行去掉自己的外框、统一左右内边距。 */
+.ai-input-wrap {
+  flex: none;
+  max-height: 55%;
+  overflow-y: auto;
+  margin: 0 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m, 10px);
+  background: var(--bg-panel);
+}
+.ai-input-wrap:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
 /* P88e C1：附加 chips 行（仅在有附加内容时出现，默认不见）与上下文面板 */
 .ai-attach-row {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  padding: 6px 12px 0;
+  padding: 8px 9px 0;
 }
 .ai-attach-chip {
   display: inline-flex;
@@ -5324,7 +5399,7 @@ label.set-switch,
 }
 .ai-attach-del:hover { color: var(--danger, #e5534b); }
 .ai-ctx-panel {
-  margin: 6px 12px 0;
+  margin: 8px 9px 0;
   padding: 7px 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -5364,7 +5439,7 @@ label.set-switch,
   color: var(--text-dim);
 }
 .ai-mode-chip {
-  margin: 6px 12px 0;
+  margin: 8px 9px 0;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -5400,15 +5475,9 @@ label.set-switch,
 }
 .ai-plus:hover { color: var(--accent); background: var(--accent-soft); }
 .ai-plus-menu {
-  margin: 4px 10px 0;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--bg-panel);
-  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
-  z-index: 30;
+  gap: 2px;
 }
 .ai-plus-menu-item {
   all: unset;
@@ -5427,8 +5496,12 @@ label.set-switch,
 .ai-tools-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 4px 12px 7px;
+  /* P90 C3：窄浮窗（最小 320px）下 pill + 进度可换行，不再被浮窗 overflow 裁掉 */
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  /* P98-M5：工具行贴卡片底缘，用一条发丝线与输入区分隔（旧版靠外层 border-top 撑，行本身无边） */
+  border-top: 1px solid var(--border-soft);
+  padding: 5px 8px;
 }
 .ai-mode-pill {
   all: unset;
@@ -5451,33 +5524,133 @@ label.set-switch,
   background: var(--accent-soft);
 }
 .ai-agent-prog { font-size: 11px; color: var(--text-dim); }
-/* P88e C1：「发送方式」面板（原常驻 agent-bar 收拢为按需展开） */
-.ai-agent-panel {
-  margin: 6px 12px 0;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
+/* P98-M4：输入区常驻的上下文用量条（带分母与百分比 + 手动压缩出口）。
+   数字是"下一次发送真正会带上的那份投影"，所以按压缩立刻看得见它变小。 */
+.ai-ctx-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 0;
+}
+.ai-ctx-bar {
+  flex: 0 0 54px;
+  width: 54px;
+  height: 4px;
+  border-radius: 2px;
   background: var(--bg-inset);
-  font-size: 11px;
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+.ai-ctx-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--text-dim);
+  transition: width var(--dur-fast, 120ms) var(--ease, ease);
+}
+.ai-ctx-meter.warn .ai-ctx-bar-fill { background: var(--warn-fg, #d29922); }
+.ai-ctx-meter.danger .ai-ctx-bar-fill { background: var(--danger); }
+.ai-ctx-num {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ai-ctx-meter.warn .ai-ctx-num { color: var(--warn-fg, #d29922); }
+.ai-ctx-meter.danger .ai-ctx-num { color: var(--danger); }
+.ai-ctx-shadowed { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+.ai-ctx-btn {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill, 999px);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ai-ctx-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.ai-ctx-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-ctx-btn.ghost { border-color: var(--border-soft); }
+/* P88e C1：「发送方式」面板（原常驻 agent-bar 收拢为按需展开） */
+/* P90 C3：面板已是 .ui-dropdown 的 child，容器外观（边框/底色/阴影）由浮层承担，这里只管内部排版 */
+/* P92-B：发送方式面板——分组带小标题与分隔线，档位一行一项且说明常驻可见
+ *（旧版四组内容同级并列、说明只挂 title，模式与快捷 chip 视觉同权，读不出层级） */
+.ai-agent-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-.ai-agent-modes { display: flex; flex-wrap: wrap; gap: 5px; }
-.ai-agent-mode {
-  padding: 3px 10px;
+  gap: 10px;
   font-size: 11px;
+}
+.ai-agent-group { display: flex; flex-direction: column; gap: 5px; }
+.ai-agent-group + .ai-agent-group {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 9px;
+}
+.ai-agent-group-title {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  text-transform: none;
+}
+.ui-dropdown.ai-agent-panel-drop { min-width: 320px; max-width: 380px; }
+.ui-dropdown.ai-plus-drop { min-width: 240px; }
+.ai-agent-modes { display: flex; flex-direction: column; gap: 3px; }
+.ai-agent-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 5px 9px;
+  text-align: left;
   color: var(--text-dim);
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 7px;
   cursor: pointer;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
 }
-.ai-agent-mode:hover { color: var(--text); border-color: var(--accent); }
-.ai-agent-mode.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.ai-agent-mode-name { font-size: 11.5px; color: var(--text); }
+.ai-agent-mode-desc { font-size: 10.5px; line-height: 1.4; color: var(--text-dim); }
+.ai-agent-mode:hover { background: var(--bg-panel); border-color: var(--border); }
+.ai-agent-mode.on { background: var(--accent-soft); border-color: var(--accent); }
+.ai-agent-mode.on .ai-agent-mode-name { color: var(--accent); font-weight: 600; }
 .ai-agent-mode:disabled { opacity: 0.55; cursor: not-allowed; }
 .ai-agent-domains { display: inline-flex; flex-wrap: wrap; gap: 8px; }
+.ai-agent-domains-empty { font-size: 10.5px; line-height: 1.45; color: var(--text-dim); }
+/* P98-M3：两轴面板的「高级」折叠区头 + 预设 chip（原三条扩展档降级到这里） */
+.ai-agent-adv-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-s);
+  background: var(--bg-inset);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.ai-agent-adv-head:hover { border-color: var(--border); background: var(--bg-panel); }
+.ai-agent-adv-title { font-size: 11px; font-weight: 600; color: var(--text); }
+.ai-agent-adv-sum { flex: 1 1 auto; min-width: 0; font-size: 10.5px; color: var(--text-dim); }
+.ai-agent-adv-caret { flex: 0 0 auto; font-size: 10.5px; color: var(--accent); }
+.ai-agent-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-agent-preset {
+  padding: 3px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill, 999px);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.ai-agent-preset:hover { border-color: var(--accent); color: var(--text); }
+.ai-agent-preset.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.ai-agent-preset:disabled { opacity: 0.55; cursor: not-allowed; }
 /* ---- P88b-4 B：常用任务快捷 chips（Agent 模式面板内） ---- */
 .ai-agent-quick { display: flex; flex-wrap: wrap; gap: 5px; }
 .ai-agent-quick-chip {
@@ -5494,22 +5667,9 @@ label.set-switch,
 .ai-agent-quick-chip:hover { border-color: var(--accent); color: var(--accent); }
 .ai-agent-domain { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; color: var(--text); }
 .ai-agent-domain input { margin: 0; accent-color: var(--accent); }
+.ai-agent-group-meta { gap: 2px; }
 .ai-agent-budget { color: var(--text-dim); }
-/* P88e C1：顶部工具栏「场景 ▾」下拉 */
-.ai-scene-menu {
-  position: absolute;
-  top: 34px;
-  left: 8px;
-  min-width: 150px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--bg-panel);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  z-index: 40;
-}
+/* P90 C2：菜单容器改由 .ui-dropdown（portal + fixed）承担，这里只留分隔线与状态变体 */
 .ai-scene-menu-item {
   all: unset;
   padding: 6px 10px;
@@ -5519,8 +5679,12 @@ label.set-switch,
   cursor: pointer;
 }
 .ai-scene-menu-item:hover { background: var(--accent-soft); color: var(--accent); }
-/* P88e D1：多 run 容器与旧任务摘要行（最新 run 完整渲染，更早的折叠为一行） */
-.ai-agent-runs { display: flex; flex-direction: column; }
+.ai-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-soft); }
+.ai-scene-menu-item.danger { color: var(--danger); }
+.ai-scene-menu-item.danger:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.ai-scene-menu-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.ai-scene-menu-item:disabled:hover { background: transparent; color: var(--text); }
+/* P91 B1：任务折行由时间线直接排布（旧 .ai-agent-runs 页脚容器与 .ai-agent-more 已废弃） */
 .ai-agent-oldrun {
   display: flex;
   align-items: center;
@@ -5544,6 +5708,52 @@ label.set-switch,
   opacity: 0.8;
 }
 .ai-agent-oldrun-time { flex: 0 0 auto; }
+/* P89 A1/A2：终态任务折叠为一行摘要——整行可点展开时间线，行尾删除记录钮 */
+.ai-agent-oldrun-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  font-size: 11px;
+  text-align: left;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.ai-agent-oldrun-toggle:hover { color: var(--text); }
+.ai-agent-del {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.ai-agent-del:hover { color: var(--danger); background: var(--bg-panel); }
+/* P90 A2：完整目标（含附件上下文）就地折叠查看——长文本不再交给原生 tooltip */
+.ai-agent-fullgoal { margin: 0 0 6px; font-size: 11px; color: var(--text-dim); }
+.ai-agent-fullgoal summary { cursor: pointer; }
+.ai-agent-fullgoal summary:hover { color: var(--text); }
+.ai-agent-fullgoal-body {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: var(--radius-s);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 /* P88e C2：复制日志按钮（事件台账 → 剪贴板） */
 .ai-agent-copylog {
   all: unset;
@@ -5569,19 +5779,36 @@ label.set-switch,
 }
 .ai-agent-resume-hint .btn { flex: none; }
 .ai-agent-resume-err { color: var(--err, #d4574e); }
+/* P91 B2：任务卡重做——去掉用户点名的"左边一条蓝边"，改整圈描边卡；
+ * 状态用色点表达（与折叠行同一口径），操作按钮收在头部右侧按状态出现。 */
 .ai-agent-block {
   margin: 8px 12px;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
   border-radius: 8px;
   background: var(--bg-inset);
 }
+.ai-agent-block.live { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.ai-agent-block.bad { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
 .ai-agent-head { display: flex; align-items: center; gap: 8px; }
 .ai-agent-status { font-size: 12px; font-weight: 600; white-space: nowrap; }
 .ai-agent-status.run { color: var(--accent); }
 .ai-agent-status.ok { color: var(--k-assert); }
 .ai-agent-status.bad { color: var(--danger); }
+.ai-agent-acts { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.ai-agent-act { flex: none; padding: 1px 8px; font-size: 11px; }
+.ai-agent-applied { color: var(--warn-fg, #d29922); }
+.ai-agent-round {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+  padding: 2px 0 0;
+  border-top: 1px dashed var(--border-soft);
+  margin-top: 4px;
+}
+.ai-agent-note { font-size: 11px; color: var(--warn-fg, #d29922); line-height: 1.5; }
+.ai-agent-turn-live { color: var(--text-dim); }
+.ai-agent-retry { flex: none; padding: 1px 8px; font-size: 11px; }
 .ai-agent-goal { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-agent-meta { display: flex; align-items: center; gap: 8px; margin: 4px 0 6px; font-size: 11px; color: var(--text-dim); }
 .ai-agent-lease {
@@ -5590,6 +5817,24 @@ label.set-switch,
   color: var(--k-group);
   border: 1px solid var(--border);
   border-radius: 999px;
+}
+/* P95-H2：上下文用量（meta 行的小胶囊 + 逼近软顶时转 warn；细线是过程流水，不抢正文） */
+.ai-agent-ctx {
+  padding: 0 7px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: default;
+}
+.ai-agent-ctx.warn { color: var(--warn-fg, #d29922); border-color: var(--warn-fg, #d29922); }
+.ai-agent-ctx-line {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  padding-left: 8px;
+  border-left: 2px solid var(--border-soft);
+  margin: 2px 0;
 }
 /* P88e C2：时间线竖向连接线——事件行沿左线串联，强化"过程感" */
 .ai-agent-timeline {
@@ -5616,11 +5861,60 @@ label.set-switch,
   line-height: 1.55;
   color: var(--text);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   user-select: text;
 }
+/* P90 B3/B4：思维链与超长叙述折叠块——收起态一行高（自动滚到最新），点击展开全量 */
+.ai-agent-fold {
+  margin: 2px 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.ai-agent-fold.italic .ai-agent-fold-body { font-style: italic; }
+.ai-agent-fold-head {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  cursor: pointer;
+  color: var(--text-dim);
+}
+.ai-agent-fold-head:hover { color: var(--accent); }
+.ai-agent-fold-label { flex: 1 1 auto; min-width: 0; }
+.ai-agent-fold-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: agent-pulse 1.6s ease-in-out infinite;
+}
+.ai-agent-fold-body {
+  margin-top: 2px;
+  max-height: 1.35em;
+  overflow: hidden;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.ai-agent-fold.open .ai-agent-fold-body { max-height: 200px; overflow-y: auto; }
 .ai-agent-final { font-size: 11px; color: var(--text-dim); padding: 3px 0; }
 .ai-agent-final.ok { color: var(--k-assert); }
 .ai-agent-wait { font-size: 11px; color: var(--text-dim); animation: agent-pulse 1.6s ease-in-out infinite; }
+/* P96-K4：静默超 20s 的"为什么 + 怎么办"。不参与上面的呼吸（长文闪烁读不了） */
+.ai-agent-wait-hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  padding: 5px 8px;
+  border-left: 2px solid var(--border);
+  background: var(--bg-inset);
+  border-radius: 0 var(--radius-s) var(--radius-s) 0;
+}
 .ai-agent-tool { border-radius: var(--radius-s); }
 .ai-agent-tool.bad .ai-agent-tool-name { color: var(--danger); }
 .ai-agent-tool-head {
@@ -5641,6 +5935,8 @@ label.set-switch,
 .ai-agent-dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
 .ai-agent-dot.ok { background: var(--k-assert); }
 .ai-agent-dot.err { background: var(--danger); }
+.ai-agent-dot.warn { background: var(--warn-fg, #d29922); }
+.ai-agent-dot.run { background: var(--accent); animation: agent-pulse 1.6s ease-in-out infinite; }
 .ai-agent-tool-name { flex: 0 0 auto; font-family: var(--font-mono); font-size: 11px; color: var(--text); }
 .ai-agent-tool-sum { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-agent-tool-time { flex: 0 0 auto; font-size: 10px; color: var(--text-dim); }
@@ -5688,31 +5984,31 @@ label.set-switch,
 .ai-input-row {
   display: flex;
   align-items: flex-end;
-  gap: 8px;
-  padding: 8px 12px 10px;
+  gap: 6px;
+  padding: 4px 6px 4px 4px;
 }
+/* P98-M5：输入框自身不再画边框 —— 卡片边界已经在了，再画一层就是"框里有框" */
 .ai-input {
   flex: 1;
   min-width: 0;
   resize: none;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-inset);
+  padding: 7px 8px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: var(--text);
   font-size: 12.5px;
   font-family: var(--font-ui);
   line-height: 1.5;
   outline: none;
 }
-.ai-input:focus { border-color: var(--accent); }
 .ai-input:disabled { opacity: 0.6; }
 .ai-send {
   all: unset;
   flex: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-s, 6px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -5723,7 +6019,7 @@ label.set-switch,
 .ai-send:hover:not(:disabled) { filter: brightness(1.1); }
 .ai-send:disabled { opacity: 0.45; cursor: not-allowed; }
 .ai-send.stop { background: var(--danger, #e5534b); }
-.ai-img-strip { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 12px 6px; }
+.ai-img-strip { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 9px 0; }
 .ai-img-thumb {
   position: relative;
   width: 64px;
@@ -6171,13 +6467,26 @@ html.aiw-transparent-root #root {
   min-width: 0;
   display: flex;
 }
+/* P90 C5：会话列表改抽屉（占 80%，右侧留一条消息区，切换时看得见当前会话） */
 .ai-side {
   position: absolute;
-  inset: 0;
+  inset: 0 auto 0 0;
+  width: min(80%, 360px);
   z-index: 30;
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+.ai-side-cur {
+  flex: none;
+  padding: 0 12px 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ai-side-head {
   flex: none;
@@ -6993,27 +7302,76 @@ html:has(.sw), .sw { background: transparent; }
   flex: none;
 }
 .p3d-axis .input { width: 108px; height: 24px; font-size: 11px; padding: 0 6px; }
-.p3d-hint {
+/* P96-K1：3D 空态引导卡。与底部诊断条同源（whyEmpty 的 stage 裁决），并沿用
+   .plot-empty 的"父层穿透 + ops 行恢复命中"约定——旧 .p3d-hint 是 inset:0 的大浮卡，
+   和底部条同屏说同一句话，且底部条没做穿透会吞掉画布的滚轮与拖拽。 */
+.p3d-guide {
   position: absolute;
   inset: 0;
+  z-index: 4;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
-  z-index: 4;
-}
-.p3d-hint > div {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 20px;
+  gap: 2px;
+  padding: 0 22px;
   text-align: center;
-  font-size: 12.5px;
-  line-height: 1.9;
-  color: var(--text-dim);
-  box-shadow: var(--shadow);
+  pointer-events: none;
+  user-select: none;
 }
-.p3d-hint-sub { font-size: 11px; opacity: 0.8; }
+.p3d-guide-t { font-size: 14px; font-weight: 700; color: var(--text); letter-spacing: 0.01em; }
+.p3d-guide-d { max-width: 440px; margin-top: 5px; font-size: 12px; line-height: 1.75; color: var(--text-dim); }
+.p3d-guide-steps {
+  margin: 12px 0 0;
+  padding: 9px 14px 9px 30px;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
+  font-size: 11.5px;
+  line-height: 1.8;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-l);
+}
+.p3d-guide-steps li::marker { color: var(--accent); font-weight: 700; }
+.p3d-guide-ops {
+  pointer-events: auto;
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+/* P91 C1：空态自解释条——"什么都不显示"从此必须带原因和出口 */
+.p3d-empty {
+  position: absolute;
+  left: 50%;
+  bottom: 46px;
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(86%, 620px);
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  box-shadow: var(--shadow);
+  /* 整条穿透：画布上的浮层不能吞滚轮/拖拽；只有操作行恢复命中 */
+  pointer-events: none;
+}
+.p3d-empty-text {
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.p3d-empty-ops { pointer-events: auto; display: inline-flex; align-items: center; flex: none; }
+
 .p3d-tip {
   position: absolute;
   left: -9999px;
@@ -8550,3 +8908,17 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-actions .btn.danger { color: var(--warn-fg); border-color: var(--warn); }
 .plg-meta { font-size: 11px; color: var(--text-dim); }
 .plg-foot { flex: 0 0 auto; padding: 8px 14px; font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border); }
+
+/* ── P99a-B：插件逻辑模块与插件工具来源 ───────────────────────────────
+   工具由插件提供时，时间线上要一眼分得开"宿主内置能力"与"用户自己装的包"——
+   台账里已经有 src 字段，界面不说就等于没说。 */
+.ai-agent-src {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1.6;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  color: var(--text-dim);
+  background: var(--bg-inset);
+}

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import * as serialStore from "../features/serial/serialStore";
 import { useSyncExternalStore } from "react";
@@ -139,12 +139,46 @@ export function TitleBar({
   }, []);
   useEffect(() => {
     let un1: () => void = () => {};
+    /**
+     * P96-K3：窗口几何自诊断。无边框（decorations:false）窗口的最大化矩形是最容易出事的
+     * 一处（真机反馈：双击标题栏后"中间放大、四边被裁"），而它出错时前端完全无感。
+     * 读数常驻 `window.__tbLast`（与 `window.__p3d()` 同族，CDP/控制台可直接取），
+     * 只有"内容比工作区还大"这种异常才打日志——那正是边缘被裁的形状。
+     */
+    const probe = () => {
+      void Promise.all([
+        win.innerSize(), win.outerSize(), win.innerPosition(), win.outerPosition(), win.isMaximized(),
+        currentMonitor(),
+      ]).then(([iw, ow, ip, op, mx, mon]) => {
+        const info = {
+          t: Date.now(),
+          inner: [iw.width, iw.height],
+          outer: [ow.width, ow.height],
+          innerPos: [ip.x, ip.y],
+          outerPos: [op.x, op.y],
+          maximized: mx,
+          monitor: mon ? [mon.position.x, mon.position.y, mon.size.width, mon.size.height] : null,
+          workArea: mon
+            ? [mon.workArea.position.x, mon.workArea.position.y, mon.workArea.size.width, mon.workArea.size.height]
+            : null,
+          scale: mon?.scaleFactor ?? null,
+          css: [window.innerWidth, window.innerHeight],
+          dpr: window.devicePixelRatio,
+        };
+        (window as unknown as { __tbLast?: unknown }).__tbLast = info;
+        if (mon && (iw.width > mon.workArea.size.width || iw.height > mon.workArea.size.height)) {
+          console.warn("[TB诊断] 窗口内容大于工作区，边缘会被裁：", JSON.stringify(info));
+        }
+      }).catch(() => undefined);
+    };
     const unP = win.onResized(() => {
       void win.isMaximized().then((v) => setMaxed(v));
+      probe();
     }).then((u) => {
       un1 = u;
     });
     void win.isMaximized().then((v) => setMaxed(v));
+    probe();
     return () => {
       un1();
       void unP;
@@ -167,7 +201,15 @@ export function TitleBar({
         void win.toggleMaximize();
       }}
     >
-      <div className="tb-brand" data-tauri-drag-region>
+      {/* P96-K3：图标不再当最大化把手。旧实现它带 data-tauri-drag-region，而根节点的
+          onDoubleClick 白名单只排除了 .tb-btn/.tb-iface/.tb-menu ⇒ 双击图标 ≡ 双击标题栏，
+          直接落进无边框窗口那条最容易出事的最大化路径。拖动仍然可用（根节点 onMouseDown
+          的 startDragging 会收到冒泡）。 */}
+      <div
+        className="tb-brand"
+        onDoubleClick={(e) => { e.stopPropagation(); }}
+        title="Uartix+"
+      >
         <img
           src={iconPlain}
           alt=""

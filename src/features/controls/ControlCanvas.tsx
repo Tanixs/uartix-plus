@@ -51,19 +51,25 @@ const GAP = 8;
 const OFF = GAP / 2;
 
 
-const WIDGET_TYPES: { type: ControlType; label: string }[] = [
-  { type: "slider", label: "滑条" },
-  { type: "button", label: "按钮" },
-  { type: "switch", label: "开关" },
-  { type: "led", label: "LED 灯" },
-  { type: "buzzer", label: "蜂鸣器" },
-  { type: "monitor", label: "数值监视" },
-  { type: "joystick", label: "摇杆" },
-  { type: "keypad", label: "键盘遥控" },
-  { type: "keymon", label: "单键监控" },
-  { type: "group", label: "组合控件" },
-  { type: "custom", label: "自定义卡片" },
-];
+/**
+ * 调色板从 `CONTROL_TYPES` 派生（P97-I5）：`satisfies Record<ControlType, string>` 让
+ * "加一种控件忘了配标签"变成编译错误——旧写法是一份手抄数组，漏项只会静默少一个按钮。
+ */
+const WIDGET_LABELS = {
+  slider: "滑条",
+  button: "按钮",
+  switch: "开关",
+  led: "LED 灯",
+  buzzer: "蜂鸣器",
+  monitor: "数值监视",
+  joystick: "摇杆",
+  keypad: "键盘遥控",
+  keymon: "单键监控",
+  group: "组合控件",
+  custom: "自定义卡片",
+} as const satisfies Record<ControlType, string>;
+const WIDGET_TYPES: { type: ControlType; label: string }[] =
+  store.CONTROL_TYPES.map((type) => ({ type, label: WIDGET_LABELS[type] }));
 
 function MountCascade(props: {
   anchorEl: HTMLElement | null;

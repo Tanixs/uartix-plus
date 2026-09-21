@@ -20,9 +20,13 @@ import {
   approveUpdate,
   rejectUpdate,
   shadowExtId,
+  armModulePackage,
   PLUGIN_STATE_LABEL,
   type PluginRecord,
 } from "./pluginStore";
+import { moduleArtifactsOf } from "./moduleHost";
+import { moduleDiagnostics, type ModuleStatus } from "./moduleBus";
+import { pluginToolDefsOf } from "./pluginToolDefs";
 import { PLUGIN_CAPS, type PluginCap } from "./pluginManifest";
 import { setOpen } from "../ai/extensionStore";
 
@@ -31,6 +35,9 @@ const CAP_LABEL: Record<PluginCap, string> = {
   "ui.panel": "自定义面板",
   "ui.widget": "小部件",
   "ui.action": "界面动作",
+  "win.control": "窗口控制（置顶/点击穿透/弹出独立窗口，含此能力的包不会自动启用）",
+  "logic.run": "在本机 Worker 里运行本包的 JS（含此能力的包不会自动启用）",
+  "agent.tool": "向 AI 助手注册自定义工具（含此能力的包不会自动启用）",
   "motion.preset": "动效预设",
   "workspace.preset": "工作区预设",
   "workflow.compose": "工作流组合",
@@ -38,6 +45,15 @@ const CAP_LABEL: Record<PluginCap, string> = {
   "telemetry.read": "读取数据快照",
   "serial.send": "发送串口数据（另受全局发送权限限制）",
   "ai.ask": "向 AI 助手提问",
+};
+
+/** 逻辑模块运行态的说法（穷举 Record：加一种状态忘了配说法，编译期就红） */
+const MODULE_STATUS_ZH: Record<ModuleStatus | "none", string> = {
+  none: "未运行",
+  probing: "自证中",
+  live: "在线",
+  blocked: "封网自证未通过（已拦停）",
+  dead: "已失控终止（停用再启用可重来）",
 };
 
 const KIND_FILTERS = ["all", "theme", "widget", "panel", "other"] as const;
@@ -103,7 +119,13 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
           (r.pkg.desc ?? "").toLowerCase().includes(q)
         );
       })
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+      // P91 D6：Agent 生成的插件聚到列表尾部（同名系列原地升版 + 成簇排列，
+      // 不再和用户手装的插件交错成一摞"看起来重复"的条目）
+      .sort((a, b) => {
+        const ag = a.pkg.provenance?.createdBy === "agent" ? 1 : 0;
+        const bg = b.pkg.provenance?.createdBy === "agent" ? 1 : 0;
+        return ag - bg || b.updatedAt - a.updatedAt;
+      });
   }, [plugins, query, filter]);
 
   const doExport = (r: PluginRecord) => {
@@ -314,17 +336,37 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   <span className="plg-item-name">{r.pkg.name}</span>
                   <span className="plg-item-id">{r.pkg.id}</span>
                   <span className={`plg-state s-${r.state}`}>{PLUGIN_STATE_LABEL[r.state]}</span>
-                  {r.legacy && <span className="plg-chip">迁移件</span>}
                   {r.candidate && <span className="plg-chip warn">有候选 v{r.candidate.version}</span>}
                 </button>
-                <label className="plg-switch" title={r.legacy?.requiresReview ? "迁移件需人工处理，不可启用" : enabled ? "停用" : "启用"}>
+                <label className="plg-switch" title={enabled ? "停用" : "启用"}>
                   <input
                     type="checkbox"
                     checked={enabled}
-                    disabled={!!r.legacy?.requiresReview || r.state === "quarantined"}
+                    disabled={r.state === "quarantined"}
                     onChange={(e) => {
-                      const res = setEnabled(r.pkg.id, e.target.checked);
-                      setNotice({ ok: res.ok, msg: res.msg });
+                      const want = e.target.checked;
+                      if (!want) {
+                        const res = setEnabled(r.pkg.id, false);
+                        setNotice({ ok: res.ok, msg: res.msg });
+                        return;
+                      }
+                      /**
+                       * P99a-B1：带逻辑模块的包，启用前先等 realm 封网自证回来。
+                       * 红了就不启用（开关跟着 store 里的状态自然回落，不做"先亮起来再标灰"）。
+                       */
+                      if (!moduleArtifactsOf(r.pkg).length) {
+                        const res = setEnabled(r.pkg.id, true);
+                        setNotice({ ok: res.ok, msg: res.msg });
+                        return;
+                      }
+                      void armModulePackage(r.pkg.id).then((probe) => {
+                        if (!probe.ok) {
+                          setNotice({ ok: false, msg: probe.msg });
+                          return;
+                        }
+                        const res = setEnabled(r.pkg.id, true);
+                        setNotice({ ok: res.ok, msg: `${res.msg}｜${probe.msg}` });
+                      });
                     }}
                   />
                   <span className="plg-switch-ui" aria-hidden="true" />
@@ -337,8 +379,6 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   {r.state === "quarantined" && (
                     <div className="plg-notice err">已隔离：多次违反 iframe 隔离约束（伪造消息/越权），卸载后重新安装可解除。</div>
                   )}
-                  {r.legacy?.note && <div className="plg-notice">{r.legacy.note}</div>}
-
                   <div className="plg-sec">能力与权限</div>
                   <div className="plg-caps">
                     {r.pkg.capabilities.map((c) => (
@@ -347,6 +387,35 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                       </span>
                     ))}
                   </div>
+
+                  {/* P99a-B3：含逻辑模块的包要看得见"跑没跑起来、注册了哪几支工具"，
+                      否则用户只知道"启用了"，却不知道 Agent 面为什么少了/多了东西。 */}
+                  {moduleArtifactsOf(r.pkg).length > 0 && (
+                    <>
+                      <div className="plg-sec">逻辑模块</div>
+                      <div className="plg-notice">
+                        运行状态：{MODULE_STATUS_ZH[moduleDiagnostics(r.pkg.id).status]}
+                        {moduleDiagnostics(r.pkg.id).probeFailed.length
+                          ? ` · 未通过项：${moduleDiagnostics(r.pkg.id).probeFailed.join("、")}`
+                          : ""}
+                        {moduleDiagnostics(r.pkg.id).rebuilds
+                          ? ` · 因失控重建 ${moduleDiagnostics(r.pkg.id).rebuilds} 次`
+                          : ""}
+                      </div>
+                      {pluginToolDefsOf(r.pkg.id).length > 0 && (
+                        <>
+                          <div className="plg-sec">为 AI 助手提供的工具</div>
+                          <div className="plg-caps">
+                            {pluginToolDefsOf(r.pkg.id).map((t) => (
+                              <span key={t.baseName} className="plg-chip" title={t.description}>
+                                {t.baseName}
+                              </span>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
 
                   <div className="plg-sec">产物与操作</div>
                   {Object.entries(r.pkg.contributions).length === 0 && <div className="plg-detail-dim">无可挂载产物</div>}
@@ -463,7 +532,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   </div>
 
                   <div className="plg-meta">
-                    {r.pkg.provenance.createdBy === "agent" ? "AI 生成" : r.pkg.provenance.createdBy === "legacy" ? "旧扩展迁移" : "本地创建"}
+                    {r.pkg.provenance.createdBy === "agent" ? "AI 生成" : r.pkg.provenance.createdBy === "import" ? "导入" : "本地创建"}
                     {" · "}hostApi {r.pkg.hostApi}
                     {r.pkg.provenance.sourceExtId ? ` · 来源扩展 ${r.pkg.provenance.sourceExtId.slice(0, 8)}` : ""}
                   </div>

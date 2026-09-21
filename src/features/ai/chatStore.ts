@@ -2,7 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import * as panelActivity from "../../panels/panelActivity";
 import { updateChatFeed } from "./aiChatFeed";
-import { occupiedSessionIds } from "../agent/agentRun";
+import { occupiedSessionIds, setRunConclusionCb, setSessionTitleCb } from "../agent/agentRun";
+// 半截话标记与 Agent 投影共用一份常量（sessionLog 零运行时依赖，不会成环；P94-G5）
+import { INCOMPLETE_MARK } from "../agent/sessionLog";
+// 体积口径与 Agent 侧共用同一常量与同一个 utf8 估算（context.ts 只依赖类型，不成环；P95-H4）
+import { REQUEST_SOFT_LIMIT, utf8Bytes } from "../agent/context";
 import { saveImage, restoreImages, deleteImages } from "./imageStore";
 import {
   getSnapshot as getSettings,
@@ -55,6 +59,12 @@ export interface ChatMsg {
   images?: string[];
   /** IndexedDB 图片记录 id（与 images 一一对应；持久化用） */
   imgIds?: string[];
+  /** P95-H4：这一轮系统替用户做的取舍（如"未重发 N 张历史图片"）；纯展示，不进请求 */
+  notice?: string;
+  /** P90 A1：这条用户消息是 Agent 任务目标（重发时按 Agent 走，不当问答重发） */
+  via?: "agent";
+  /** P92 A4：这条助手气泡是某个 Agent 任务的结论回写（按 runId 幂等覆盖，卡片只留过程） */
+  fromRunId?: string;
 }
 
 export interface UsageCounter {
@@ -162,16 +172,22 @@ function cleanBaseUrl(url: string): string {
   return url.replace(/[`"'\s]/g, "").replace(/\/+$/, "");
 }
 
-/** 当前活动会话（保证存在） */
+/** P89 A5：activeId 失效自愈——失效成因：localStorage 写满时 persistNow 丢旧会话、
+ *  外部清空存储、持久化数据被手改。写入路径（cur）直接补建，读取路径（getSnapshot）延迟一拍通知。 */
 function cur(): ChatSession {
-  let s = snapshot.sessions.find((x) => x.id === snapshot.activeId);
-  if (!s) {
-    s = newSessionObj();
-    snapshot.sessions = [s, ...snapshot.sessions];
-    snapshot.activeId = s.id;
-  }
+  const found = snapshot.sessions.find((x) => x.id === snapshot.activeId);
+  if (found) return found;
+  const s = newSessionObj();
+  snapshot.sessions = [s, ...snapshot.sessions];
+  snapshot.activeId = s.id;
   return s;
 }
+
+function activeValid(): boolean {
+  return snapshot.sessions.some((s) => s.id === snapshot.activeId);
+}
+
+let healQueued = false;
 
 function persistSoon() {
   if (persistTimer) return;
@@ -204,6 +220,7 @@ function persistNow() {
         JSON.stringify({ sessions: half, activeId: snapshot.activeId }),
       );
       snapshot.sessions = half;
+      if (!activeValid()) cur(); // activeId 指向被丢弃的旧会话 → 就地自愈（P89 A5）
     } catch {
       /* 放弃 */
     }
@@ -231,6 +248,18 @@ export function subscribe(cb: () => void) {
 }
 
 export function getSnapshot() {
+  // P89 A5：读到失效 activeId 时排队自愈（微任务里补建+通知）。渲染期不 emit，
+  // 否则 React 报「render 中更新别的组件」；UI 层不再自备 sessions[0] 兜底。
+  if (!healQueued && !activeValid()) {
+    healQueued = true;
+    queueMicrotask(() => {
+      healQueued = false;
+      if (activeValid()) return;
+      cur();
+      persistNow();
+      emit();
+    });
+  }
   return snapshot;
 }
 
@@ -303,6 +332,10 @@ function recheckLifecycle() {
 export async function init() {
   if (initialized) return;
   initialized = true;
+  pruneEmptySessions(); // P89 A3：启动即清掉历史攒下的空会话
+  setSessionTitleCb(setTitleIfEmpty); // P89 A4：Agent 任务会话有标题可分辨
+  // P92 A4：Agent 任务结论回写会话 → 普通聊天与 Agent 共享同一份记忆
+  setRunConclusionCb(upsertRunConclusion);
   await listen<{ reqId: string; delta?: string; reasoning?: string }>("ai:chunk", (e) => {
     if (e.payload.reqId !== snapshot.reqId) return;
     pendingDelta += e.payload.delta ?? "";
@@ -443,22 +476,41 @@ export function clearChat() {
 
 export function newSession() {
   if (snapshot.streaming) abort();
-  // P88e A2：复用排除两个坑——① 当前正看的会话（点"新建"必须真正换新，不能原样还回）；
-  // ② 被 Agent 任务占用的会话（任务不写聊天消息、messages 为空，但 AgentInline 有过程记录）。
-  // 只有"非当前 + 无消息 + 无 run 关联"的会话才可复用；否则新建。
-  const occupied = occupiedSessionIds();
-  const exist = snapshot.sessions.find(
-    (x) => x.id !== snapshot.activeId && x.messages.length === 0 && !occupied.has(x.id),
-  );
-  if (exist) {
-    snapshot.activeId = exist.id;
-    persistNow();
-    emit();
-    return;
-  }
+  // P89 A3：永远新建。旧「复用空会话」逻辑是"点新建没用"的根因——历史上攒下的空会话
+  // （尤其 Agent 任务会话 messages 恒空）被反复复用，用户切进的是不知何时留下的旧会话。
   const s = newSessionObj();
   snapshot.sessions = [s, ...snapshot.sessions];
   snapshot.activeId = s.id;
+  persistNow();
+  emit();
+}
+
+/** P89 A3：一次性清理历史遗留的空会话（无消息且无 Agent run 关联；有标题的手动重命名保留）。 */
+function pruneEmptySessions(): void {
+  const occupied = occupiedSessionIds();
+  const kept = snapshot.sessions.filter(
+    (s) => s.messages.length > 0 || s.title || occupied.has(s.id),
+  );
+  if (kept.length === snapshot.sessions.length) return;
+  if (kept.length === 0) {
+    const s = newSessionObj();
+    snapshot.sessions = [s];
+    snapshot.activeId = s.id;
+  } else {
+    snapshot.sessions = kept;
+    if (!activeValid()) snapshot.activeId = kept[0].id;
+  }
+  persistNow();
+  emit();
+}
+
+/** P89 A4：仅当会话无标题时写入（用户手动重命名/已有首条消息命名的优先）。 */
+export function setTitleIfEmpty(id: string, text: string): void {
+  const s = snapshot.sessions.find((x) => x.id === id);
+  if (!s || s.title) return;
+  const t = text.replace(/\s+/g, " ").trim().slice(0, 22);
+  if (!t) return;
+  s.title = t;
   persistNow();
   emit();
 }
@@ -526,29 +578,52 @@ export async function regenerate(): Promise<void> {
   }
   if (lastUserIdx < 0) return;
   const user = s.messages[lastUserIdx];
+  // P94-G5：Agent 任务目标不能当普通问答重发（旧实现会 slice 掉那之后的全部消息，
+  // 并把目标当一句话问模型）。重跑任务走 AiChat 的「重跑任务」按钮（按 via 分流）。
+  if (resendKindOf(user) === "agent") return;
   s.messages = s.messages.slice(0, lastUserIdx + 1);
   emit();
-  await doSend(user.content, user.scene ?? "qa", collectContext(snapshot.contextSel));
+  await doSend(user.content, user.scene ?? "qa", collectContext(snapshot.contextSel), undefined, user.images);
 }
 
-/** 编辑用户消息并重发（截断该消息之后的所有内容） */
-export async function editResend(id: string, newText: string): Promise<void> {
-  if (snapshot.streaming) return;
+/** P90 A1：该消息当初怎么发的就怎么重发——Agent 目标重发为任务，普通消息重发为问答。 */
+export function resendKindOf(m: Pick<ChatMsg, "via">): "agent" | "chat" {
+  return m.via === "agent" ? "agent" : "chat";
+}
+
+/** 截断到该用户消息并用新文本替换（不发请求）；返回新消息供调用方决定走哪条链路。 */
+export function rewriteForResend(id: string, newText: string): ChatMsg | null {
   const text = newText.trim();
-  if (!text) return;
+  if (!text) return null;
   const s = cur();
   const idx = s.messages.findIndex((m) => m.id === id);
-  if (idx < 0) return;
+  if (idx < 0) return null;
   const msg = s.messages[idx];
-  if (msg.role !== "user") return;
+  if (msg.role !== "user") return null;
   // 被截断的消息图片记录一并清理（尽力而为）
   for (const m of s.messages.slice(idx)) {
     if (m.imgIds?.length) void deleteImages(m.imgIds);
   }
-  s.messages = s.messages.slice(0, idx);
-  s.messages.push({ ...msg, id: crypto.randomUUID(), content: text, ts: Date.now(), imgIds: undefined, images: undefined });
+  const next: ChatMsg = {
+    ...msg,
+    id: crypto.randomUUID(),
+    content: text,
+    ts: Date.now(),
+    imgIds: undefined,
+    images: undefined,
+  };
+  s.messages = [...s.messages.slice(0, idx), next];
+  s.updatedAt = Date.now();
+  persistNow();
   emit();
-  await doSend(text, msg.scene ?? "qa", collectContext(snapshot.contextSel));
+  return next;
+}
+
+export async function editResend(id: string, newText: string): Promise<void> {
+  if (snapshot.streaming) return;
+  const msg = rewriteForResend(id, newText);
+  if (!msg) return;
+  await doSend(msg.content, msg.scene ?? "qa", collectContext(snapshot.contextSel));
 }
 
 /* ---------------- 发送链路 ---------------- */
@@ -581,25 +656,37 @@ function userContent(text: string, images?: string[]): ReqContent {
   ];
 }
 
+/** P95-H4：估算发往 `ai_chat` 的 body 体积（Rust 侧对这条通道**没有**体积守卫，
+ *  只有 Agent 通道有 2 MiB 熔断——所以聊天侧至少不能盲发）。 */
+function wireBytes(msgs: { role: string; content: ReqContent }[]): number {
+  let n = 0;
+  for (const m of msgs) {
+    if (typeof m.content === "string") {
+      n += utf8Bytes(m.content);
+      continue;
+    }
+    for (const p of m.content) {
+      n += utf8Bytes(String(p.text ?? ""));
+      const url = (p.image_url as { url?: string } | undefined)?.url;
+      if (url) n += url.length; // data URL 已是 base64 文本
+    }
+  }
+  return n + 256;
+}
+
 function buildRequestMessages(
   userText: string,
   scene: AiScene,
   blocks: ContextBlock[],
   extraSchemas?: NeedKey[],
   images?: string[],
-): { role: string; content: ReqContent }[] {
-  const st = getSettings();
+): { messages: { role: string; content: ReqContent }[]; droppedImages: number } {
   const messages: { role: string; content: ReqContent }[] = [
     {
       role: "system",
       content: buildSystemPrompt(
         scene,
         scene === "inertial" ? "" : summaryTemplates(),
-        {
-          enabled: st.aiCreativity,
-          send: st.aiWidgetSend,
-          script: st.aiScript,
-        },
         extraSchemas,
       ),
     },
@@ -608,13 +695,32 @@ function buildRequestMessages(
   // userText 非空时，会话最后一条就是刚压入的用户消息，稍后会以 userText+上下文 追加，
   // 从历史中排除避免同一文本重复计费
   const hist = scene === "inertial" ? [] : userText ? s.messages.slice(-21, -1) : s.messages.slice(-20);
+  const histPlain: { role: string; body: string; images?: string[] }[] = [];
+  let historyImages = 0;
   for (const m of hist) {
-    if (m.error) continue;
-    messages.push({ role: m.role, content: m.images?.length ? userContent(m.content, m.images) : m.content });
+    // P94-G5：与 Agent 投影同一口径——被中止/出错的轮次不再整条丢弃，也不裸着当完整回答，
+    // 而是带统一前缀（旧实现丢 error、对 aborted 完全不管，模型会把半截话当作自己说过的结论）。
+    if (m.error && !m.content) continue;
+    const mark = m.aborted ? INCOMPLETE_MARK.aborted : m.error ? INCOMPLETE_MARK.error : "";
+    const body = mark && m.content ? `${mark}\n${m.content}` : m.content;
+    histPlain.push({ role: m.role, body, ...(m.images?.length ? { images: m.images } : {}) });
+    historyImages += m.images?.length ?? 0;
   }
   const contextText = scene === "inertial" ? "" : contextToText(blocks);
-  messages.push({ role: "user", content: userContent(userText + contextText, scene === "inertial" ? undefined : images) });
-  return messages;
+  const tailMsg = { role: "user", content: userContent(userText + contextText, scene === "inertial" ? undefined : images) };
+  const withHistory = histPlain.map((h) => ({
+    role: h.role,
+    content: h.images?.length ? userContent(h.body, h.images) : h.body,
+  }));
+  let droppedImages = 0;
+  let history = withHistory;
+  // P95-H4：请求过大就先丢**历史**附图（本轮附图保留），并在返回里报出来——
+  // 聊天通道在 Rust 侧没有体积守卫，不主动收就只能等上游报错。
+  if (historyImages && wireBytes([...messages, ...history, tailMsg]) > REQUEST_SOFT_LIMIT) {
+    droppedImages = historyImages;
+    history = histPlain.map((h) => ({ role: h.role, content: h.body }));
+  }
+  return { messages: [...messages, ...history, tailMsg], droppedImages };
 }
 
 /** 底层请求：流式写回到 targetRef 指向的消息 */
@@ -640,7 +746,8 @@ async function requestChat(
       proxy: st.aiProxy,
       noProxy: st.aiNoProxy,
       messages,
-      thinking: st.showThinking,
+      // P96-K4：模型是否先想后答 = deepThink（原先借用界面开关 showThinking，一个开关管两件事）
+      thinking: st.deepThink,
     });
   } catch (e) {
     if (snapshot.reqId === reqId) {
@@ -661,13 +768,15 @@ async function doSend(
   extraSchemas?: NeedKey[],
   images?: string[],
 ): Promise<void> {
-  const messages = buildRequestMessages(userText, scene, blocks, extraSchemas, images);
+  const { messages, droppedImages } = buildRequestMessages(userText, scene, blocks, extraSchemas, images);
   const assistant: ChatMsg = {
     id: crypto.randomUUID(),
     role: "assistant",
     content: "",
     ts: Date.now(),
     scene,
+    // P95-H4：丢过的东西必须说给用户听（不说就等于"AI 莫名其妙忘了我发的图"）
+    ...(droppedImages ? { notice: `本轮请求过大，未重发较早的 ${droppedImages} 张历史图片（本轮附图保留）` } : {}),
   };
   assistant.contextTitles = blocks.map((b) => b.title);
   const s = cur();
@@ -694,33 +803,23 @@ async function maybeContinueNeeds(): Promise<void> {
   // 标记之后已经输出了代码块 → 不需要续写
   const lastMarker = m.content.lastIndexOf("[[");
   if (m.content.slice(lastMarker).includes("```")) return;
-  const st = getSettings();
-  const perms = { enabled: st.aiCreativity, send: st.aiWidgetSend, script: st.aiScript };
   let injection = "【系统自动补充】以下是你用 [[need:xxx]] 标记请求的输出格式规范：";
-  for (const k of needs) injection += `\n\n${schemaFor(k, perms)}`;
+  for (const k of needs) injection += `\n\n${schemaFor(k)}`;
   injection += "\n\n请基于以上规范立即继续输出完整代码块（不要再输出 [[need:xxx]] 标记）。";
   // 从展示内容中移除技术标记
   m.content = m.content.replace(/\[\[\s*need\s*:\s*[a-z]+\s*\]\]/gi, "").trimEnd();
   m.conts = (m.conts ?? 0) + 1;
   // 续写请求：隐藏 user 消息注入 schema（不写入会话）
-  const messages = buildRequestMessages("", m.scene ?? "qa", []);
-  messages.pop(); // 去掉 buildRequestMessages 追加的空 user
-  messages.push({ role: "user", content: injection });
+  const built = buildRequestMessages("", m.scene ?? "qa", []).messages;
+  built.pop(); // 去掉 buildRequestMessages 追加的空 user
+  built.push({ role: "user", content: injection });
   streamingTargetRef.current = m;
   persistSoon();
-  await requestChat(messages, streamingTargetRef);
+  await requestChat(built, streamingTargetRef);
 }
 
-export async function sendText(
-  text: string,
-  scene: AiScene = "qa",
-  sel?: Partial<ContextSelection>,
-  images?: string[],
-): Promise<void> {
-  const trimmed = text.trim();
-  if (!trimmed || snapshot.streaming) return;
-  const useSel = { ...snapshot.contextSel, ...sel };
-  if (sel) snapshot.contextSel = useSel;
+/** 落一条用户消息（含图片本体入 IndexedDB 的尽力而为）；标题为空时按首条原话命名。 */
+function pushUserMsg(text: string, scene: AiScene, images?: string[], via?: "agent"): void {
   const s = cur();
   const msgId = crypto.randomUUID();
   s.messages = [
@@ -728,15 +827,17 @@ export async function sendText(
     {
       id: msgId,
       role: "user",
-      content: trimmed,
+      content: text,
       ts: Date.now(),
       scene,
       ...(images && images.length ? { images } : {}),
+      ...(via ? { via } : {}),
     },
   ];
+  if (!s.title) s.title = text.replace(/\s+/g, " ").slice(0, 22) || "新对话";
+  s.updatedAt = Date.now();
+  persistNow();
   emit();
-  // 图片本体落 IndexedDB（P51）：保存成功后把 imgIds 挂回消息并持久化；
-  // 失败静默降级（该消息图片仅当前轮可见）
   if (images && images.length) {
     void (async () => {
       try {
@@ -752,6 +853,54 @@ export async function sendText(
       }
     })();
   }
+}
+
+/** P90 A1：Agent 任务目标也留一条用户气泡——只写用户原话，附件全文进 goal 给模型、不进气泡。 */
+export function appendUserMessage(text: string, opts?: { via?: "agent"; images?: string[] }): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  pushUserMsg(trimmed, "qa", opts?.images, opts?.via);
+}
+
+/**
+ * P92 A4：Agent 任务结论回写会话（分工从此明确：**气泡=结论、卡片=过程**）。
+ * 这是"Agent 与普通聊天共享同一份记忆"的关键一步——旧实现里任务答复只在事件台账，
+ * 切回普通对话模型就看不见自己刚说过什么，用户照抄上一轮的选项回复会被当成新需求。
+ * 按 runId 幂等（续跑/重试再次终态覆盖同一条，不堆重复气泡）；目标会话可能不是当前
+ * 会话（任务跑着用户切走了），所以按 sessionId 定位而非 cur()。
+ */
+export function upsertRunConclusion(sessionId: string, runId: string, text: string): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const s = snapshot.sessions.find((x) => x.id === sessionId);
+  if (!s) return;
+  const at = s.messages.findIndex((m) => m.fromRunId === runId);
+  if (at >= 0) {
+    if (s.messages[at].content === trimmed) return;
+    s.messages = s.messages.map((m, i) => (i === at ? { ...m, content: trimmed, ts: Date.now() } : m));
+  } else {
+    s.messages = [
+      ...s.messages,
+      { id: crypto.randomUUID(), role: "assistant", content: trimmed, ts: Date.now(), fromRunId: runId },
+    ];
+    if (!s.title) s.title = trimmed.replace(/\s+/g, " ").slice(0, 22) || "新对话";
+  }
+  s.updatedAt = Date.now();
+  persistNow();
+  emit();
+}
+
+export async function sendText(
+  text: string,
+  scene: AiScene = "qa",
+  sel?: Partial<ContextSelection>,
+  images?: string[],
+): Promise<void> {
+  const trimmed = text.trim();
+  if (!trimmed || snapshot.streaming) return;
+  const useSel = { ...snapshot.contextSel, ...sel };
+  if (sel) snapshot.contextSel = useSel;
+  pushUserMsg(trimmed, scene, images);
   // 普通对话：按用户消息预判需要的格式规范，命中则预注入（省去第二轮续写请求）
   const extra = scene === "qa" ? routeNeeds(trimmed).slice(0, 3) : undefined;
   await doSend(trimmed, scene, collectContext(useSel), extra, images);

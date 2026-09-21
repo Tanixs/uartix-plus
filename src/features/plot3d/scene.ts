@@ -103,7 +103,36 @@ export interface Plot3DScene {
   clearTrajectory(gid?: GroupId): void;
   pick(px: number, py: number): PickResult | null;
   stats(): { groups: Record<GroupId, GroupStats>; fps: number; gridStep: number };
+  /** P91 C1：注册/清除"游标把画面截空"回调（边沿触发，非每帧） */
+  setOnCursorEmpty(cb: ((gid: GroupId) => void) | null): void;
+  /** P91 C1/C5：空态归因与 window.__p3d 探针共用的只读快照 */
+  probe(): SceneProbe;
   dispose(): void;
+}
+
+/** 场景侧的可见性事实（与 store 侧 diagFacts() 合成 DiagnoseInput） */
+export interface SceneProbeGroup {
+  gid: GroupId;
+  mode: string;
+  visible: boolean;
+  tailCount: number;
+  /** 游标截断后真正送进 GPU 的点数 */
+  tailDraw: number;
+  windowStartSec: number | null;
+  overviewCount: number;
+  cursorSec: number | null;
+  maxPoints: number;
+  markerKind: string;
+  markerVisible: boolean;
+  hasLatest: boolean;
+  latestT: number | null;
+}
+export interface SceneProbe {
+  cursorSec: number | null;
+  calibOn: boolean;
+  visible: boolean;
+  totalPoints: number;
+  groups: SceneProbeGroup[];
 }
 
 /** CSS 变量 → 实色（含回退） */
@@ -224,6 +253,9 @@ export async function createScene(
     smT: Float64Array | null;
     smVal: Float32Array | null;
     smCount: number;
+    /** P90 D1：平滑窗口起点（尾窗原始下标）；-1=未启用细分平滑。
+     *  窗口之前那段仍由尾线画，避免"尾线隐藏 + 平滑只盖末段"造成的中段空洞。 */
+    smStart: number;
     smGeo: THREE_NS.BufferGeometry | null;
     smLine: THREE_NS.Line | null;
     smPosAttr: THREE_NS.BufferAttribute | null;
@@ -310,6 +342,7 @@ export async function createScene(
         smT: null,
         smVal: null,
         smCount: 0,
+        smStart: -1,
         smGeo: null,
         smLine: null,
         smPosAttr: null,
@@ -488,7 +521,7 @@ export async function createScene(
         uniforms: {
           uColor: { value: ovColor.clone() },
           uOpacity: { value: 0.3 },
-          uPtSize: { value: Math.max(2, g.cfg.pointSize * 0.7) },
+          uPtSize: { value: Math.max(2, g.cfg.pointSize) },
         },
         vertexShader: VERT_OV,
         fragmentShader: FRAG_OV,
@@ -545,8 +578,10 @@ export async function createScene(
 
   function hideSm(g: GState) {
     g.smCount = 0;
+    g.smStart = -1;
     if (g.smGeo) g.smGeo.setDrawRange(0, 0);
     if (g.smLine) g.smLine.visible = false;
+    syncTailRange(g); // 退回全尾线接管，别留空洞
   }
 
   /** 整窗重建细分平滑几何（数据批/参数变化/压实/重锚时；O(窗口×sub)） */
@@ -558,6 +593,7 @@ export async function createScene(
     ensureSm(g);
     const sub = Math.max(2, Math.min(SMOOTH_SUB_MAX, Math.round(g.cfg.smoothSub)));
     const start = Math.max(0, g.tCount - 1 - SMOOTH_W); // 窗口起始原始下标
+    g.smStart = start;
     const n = g.tCount - start; // 窗口内点数
     const segs = n - 1;
     for (let i = 0; i < n; i++) {
@@ -604,6 +640,7 @@ export async function createScene(
     g.smValAttr!.addUpdateRange(0, g.smCount);
     g.smValAttr!.needsUpdate = true;
     applyOneVis(g);
+    syncTailRange(g);
     needsRender = true;
   }
 
@@ -830,11 +867,23 @@ export async function createScene(
     for (let k = 0; k < count; k++) {
       const i = n - 1 - k * spacing; // 从可见末端向老排布
       PV.set(g.tPos[i * 3], g.tPos[i * 3 + 1], g.tPos[i * 3 + 2]);
-      DV.set(
-        g.tPos[(i + 1) * 3] - g.tPos[i * 3],
-        g.tPos[(i + 1) * 3 + 1] - g.tPos[i * 3 + 1],
-        g.tPos[(i + 1) * 3 + 2] - g.tPos[i * 3 + 2],
-      );
+      // P90 D6：末端那支箭头 i=n-1，旧实现读 tPos[n] 这个从未写入的槽位当方向
+      // → 最显眼的箭头乱指；改为无后继时用前向差分（P[i]-P[i-1]）
+      if (i + 1 < n) {
+        DV.set(
+          g.tPos[(i + 1) * 3] - g.tPos[i * 3],
+          g.tPos[(i + 1) * 3 + 1] - g.tPos[i * 3 + 1],
+          g.tPos[(i + 1) * 3 + 2] - g.tPos[i * 3 + 2],
+        );
+      } else if (i - 1 >= 0) {
+        DV.set(
+          g.tPos[i * 3] - g.tPos[(i - 1) * 3],
+          g.tPos[i * 3 + 1] - g.tPos[(i - 1) * 3 + 1],
+          g.tPos[i * 3 + 2] - g.tPos[(i - 1) * 3 + 2],
+        );
+      } else {
+        DV.set(0, 0, 0);
+      }
       if (DV.lengthSq() < 1e-16) DV.set(1, 0, 0);
       DV.normalize();
       QV.setFromUnitVectors(UPV, DV);
@@ -919,9 +968,13 @@ export async function createScene(
 
     const gx = cssVar("--border", "#262b33");
     const gxc = cssVar("--text-dim", "#8b93a1");
-    const ext = (bbMax[0] - bbMin[0]) || baseExtent;
-    const ey = (bbMax[1] - bbMin[1]) || baseExtent;
-    const ez = (bbMax[2] - bbMin[2]) || baseExtent;
+    // P90 D6：空包围盒时 bbMax-bbMin = -Infinity，而 `-Infinity || baseExtent` 仍取
+    // -Infinity（truthy），旧写法据此算出 yGround=+Infinity 写进顶点 → three
+    // computeBoundingSphere NaN 告警 + 坐标轴短线/标签整体不可见（P88c 记录的同源真因）
+    const fin = (v: number) => (Number.isFinite(v) ? v : baseExtent);
+    const ext = fin(bbMax[0] - bbMin[0]) || baseExtent;
+    const ey = fin(bbMax[1] - bbMin[1]) || baseExtent;
+    const ez = fin(bbMax[2] - bbMin[2]) || baseExtent;
     const span = Math.max(ext, ey, ez, baseExtent * 0.5, 1e-9);
     // 密度倍率（设置：网格 疏/标准/密）；步长仍走 nice 刻度保证整数感
     const dens = curSettings?.gridDensity ?? "std";
@@ -929,7 +982,10 @@ export async function createScene(
     curGridStep = step;
     const yGround =
       anchor[1] -
-      Math.max(bbMax[1] - anchor[1], bbMin[1] >= -Infinity ? anchor[1] - bbMin[1] : 0) -
+      Math.max(
+        Number.isFinite(bbMax[1]) ? bbMax[1] - anchor[1] : 0,
+        Number.isFinite(bbMin[1]) ? anchor[1] - bbMin[1] : 0,
+      ) -
       step * 0.5;
     const nx = Math.ceil((ext + step) / (2 * step)) * 2; // 步数
     const nz = Math.ceil((ez + step) / (2 * step)) * 2;
@@ -1046,13 +1102,51 @@ export async function createScene(
     return { ct, co, marker };
   }
 
+  /** P90 D1：启用细分平滑时尾线只画窗口之前的部分（窗口内交给平滑线）。
+   *  旧实现是"平滑开→尾线整层隐藏"，而平滑只覆盖尾窗末 2 万段，
+   *  于是 2 万~12 万点之间既不画尾线也不画平滑线 → 中段整块空洞。 */
+  function tailCutFor(g: GState, ct: number): number {
+    return isSubSmooth(g) && g.smStart > 0 ? Math.min(ct, g.smStart + 1) : ct;
+  }
+
+  /** 平滑开关/窗口变化后立即同步尾线覆盖范围（不等下一批数据下发） */
+  function syncTailRange(g: GState) {
+    if (!g.tailGeo) return;
+    const { ct } = cursorCut(g);
+    g.tailGeo.setDrawRange(0, tailCutFor(g, ct));
+  }
+
+  /** P91 C1/C4：截空回调（UI 据此自动回到最新或显示补救按钮）。按"进入截空态"的边沿触发，
+   *  不是每帧——10Hz 的泵会把回调打成风暴。 */
+  let cursorEmptyCb: ((gid: GroupId) => void) | null = null;
+  const cursorEmptySeen = new Set<string>();
+
+  /** P91 C4：游标截零的节流告警。这是"画面全黑"的头号静默路径，过去一条日志都没有。 */
+  const cursorWarnAt = new Map<string, number>();
+  function warnCursorCut(g: GState, sec: number | null) {
+    if (!cursorEmptySeen.has(g.gid)) {
+      cursorEmptySeen.add(g.gid);
+      cursorEmptyCb?.(g.gid);
+    }
+    const now = Date.now();
+    if (now - (cursorWarnAt.get(g.gid) ?? 0) < 30000) return;
+    cursorWarnAt.set(g.gid, now);
+    console.warn(
+      `[P3D诊断] 组${g.gid} 游标 t=${sec === null ? "null" : sec.toFixed(2)}s 把 ${g.tCount} 个点截到 0（尾缓冲起点 t=${g.tT && g.tCount ? g.tT[0].toFixed(2) : "—"}s）；双击画布空白可回到最新`,
+    );
+  }
+
   function applyCursor(sec: number | null) {
     curCursorSec = sec;
     for (const g of gstates.values()) {
+      let marker: [number, number, number] | null = null;
+      let live = true;
       if (g.tailGeo && g.ovGeo) {
-        const { ct, co, marker } = cursorCut(g);
-        g.tailGeo.setDrawRange(0, ct);
-        g.ovGeo.setDrawRange(0, co);
+        const c = cursorCut(g);
+        marker = c.marker;
+        const tailDraw = tailCutFor(g, c.ct);
+        g.tailGeo.setDrawRange(0, tailDraw);
+        g.ovGeo.setDrawRange(0, c.co);
         if (g.smGeo) g.smGeo.setDrawRange(0, sec === null ? g.smCount : lowerBoundLe(g.smT!, g.smCount, sec));
         if (marker) {
           g.dot.position.set(marker[0], marker[1], marker[2]);
@@ -1061,19 +1155,28 @@ export async function createScene(
           !calibOn && g.cfg.visible && marker !== null && g.cfg.model.kind === "point";
         g.uniforms.uNow.value = sec === null ? g.lastT : sec;
         if (g.cfg.arrowEvery > 0 && g.cfg.mode === "line") rebuildArrows(g);
+        // P91 C4：缓冲有点却截到 0 = 画面全黑的主因之一，过去零日志（"什么都不显示且无日志"）
+        if (c.ct === 0 && g.tCount > 0 && g.cfg.visible && !calibOn) warnCursorCut(g, sec);
+        else cursorEmptySeen.delete(g.gid);
       } else if (g.cfg.mode === "point" && g.latest) {
-        const live = sec === null || g.latest.t <= sec;
+        live = sec === null || g.latest.t <= sec;
         if (live) {
           g.dot.position.set(toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2));
+          marker = [toN(g.latest.x, 0), toN(g.latest.y, 1), toN(g.latest.z, 2)];
         }
         g.dot.visible = !calibOn && g.cfg.visible && live && g.cfg.model.kind === "point";
         g.uniforms.uNow.value = sec === null ? g.lastT : sec;
       } else {
         g.dot.visible = false;
       }
-      if (g.markerObj)
-        g.markerObj.visible =
-          !calibOn && g.cfg.visible && g.latest != null && g.cfg.model.kind !== "point";
+      // P91 C3：模型标记与光点**同一游标裁决、同一位置来源**。旧实现 markerObj.visible 完全
+      // 不看游标（只看 latest），于是"游标把轨迹截到 0"时只剩锥体在动——把整层不可见
+      // 伪装成"只有模型能显示"，这条不对称是 3D 点线问题误诊五个月的直接来源。
+      if (g.markerObj) {
+        const show = !calibOn && g.cfg.visible && g.latest != null && g.cfg.model.kind !== "point" && (sec === null || live) && marker !== null;
+        g.markerObj.visible = show;
+        if (show && marker) g.markerObj.position.set(marker[0], marker[1], marker[2]);
+      }
     }
     refreshFlags();
     needsRender = true;
@@ -1209,7 +1312,12 @@ export async function createScene(
   let raf = 0;
   let visible = true;
   const io = new IntersectionObserver((es) => {
-    visible = es[0]?.isIntersecting ?? true;
+    const now = es[0]?.isIntersecting ?? true;
+    // P90 D2：按需渲染 + 未开 preserveDrawingBuffer → 面板离屏期间合成层被回收，
+    // 回到可视区时 backbuffer 已空而 needsRender 仍为 false，画面一片空白且永不自愈
+    //（静态/暂停无新批次时更不会触发）。回到可视区强制补一帧。
+    if (now && !visible) needsRender = true;
+    visible = now;
   });
   io.observe(host);
 
@@ -1241,28 +1349,34 @@ export async function createScene(
     }
     return null;
   }
-  // 光点恒定像素：Sprite 处于世界空间会随远近缩放，每帧按相机距离补偿
-  // 使 point 模式的最新点光点在屏幕上保持 pointSize 设定的像素大小。
+  // Sprite 处于世界空间会随远近缩放，每帧按相机距离补偿，使屏幕尺寸恒等于 pointSize 像素。
+  // P90 D5：起点标记纳入同一口径（此前固定 norm 0.04，缩放/推拉时忽大忽小，与最新点不成体系）
   const _dotV = new T3.Vector3();
   let dotSizeWarned = false;
   function updateDotPixelSize() {
     const halfH = Math.tan(((camera.fov * Math.PI) / 180) / 2);
     const pxH = Math.max(host.clientHeight, 60);
     for (const g of gstates.values()) {
-      // 仅 point 模式的最新点光点恒定像素；起点标记 startMark 是固定装饰不参与
-      if (g.cfg.model.kind !== "point" || !g.dot.visible) continue;
-      const dist = camera.position.distanceTo(g.dot.getWorldPosition(_dotV));
-      // NaN 防护（P88d）：位置/距离异常时保持现尺寸并告警一次，
-      // 绝不让 NaN 写进 scale 污染整条渲染链（曾致 computeBoundingSphere NaN 刷屏）
-      if (!isFinite(dist) || dist <= 0 || !isFinite(halfH)) {
-        if (!dotSizeWarned) {
-          dotSizeWarned = true;
-          console.warn(`[P3D诊断] 组 ${g.gid} 光点距离异常 dist=${dist}，已保持原尺寸`);
+      const px = Math.max(2, g.cfg.pointSize);
+      if (g.cfg.model.kind === "point" && g.dot.visible) {
+        const dist = camera.position.distanceTo(g.dot.getWorldPosition(_dotV));
+        // NaN 防护（P88d）：位置/距离异常时保持现尺寸并告警一次，
+        // 绝不让 NaN 写进 scale 污染整条渲染链（曾致 computeBoundingSphere NaN 刷屏）
+        if (!isFinite(dist) || dist <= 0 || !isFinite(halfH)) {
+          if (!dotSizeWarned) {
+            dotSizeWarned = true;
+            console.warn(`[P3D诊断] 组 ${g.gid} 光点距离异常 dist=${dist}，已保持原尺寸`);
+          }
+        } else {
+          g.dot.scale.setScalar(px * ((2 * halfH * dist) / pxH));
         }
-        continue;
       }
-      const worldPerPx = (2 * halfH * dist) / pxH;
-      g.dot.scale.setScalar(Math.max(2, g.cfg.pointSize) * worldPerPx);
+      if (g.startMark?.visible) {
+        const dist = camera.position.distanceTo(g.startMark.getWorldPosition(_dotV));
+        if (isFinite(dist) && dist > 0 && isFinite(halfH)) {
+          g.startMark.scale.setScalar(px * 2.2 * ((2 * halfH * dist) / pxH));
+        }
+      }
     }
   }
 
@@ -1488,7 +1602,8 @@ export async function createScene(
     const lineOn = g.cfg.mode === "line";
     const ptsOn = g.cfg.mode === "points";
     const sub = isSubSmooth(g);
-    if (g.tailLine) g.tailLine.visible = !hide && lineOn && !sub;
+    // P90 D1：尾线不再因"开了细分平滑"整层隐藏——窗口内由平滑线接管（见 tailCutFor）
+    if (g.tailLine) g.tailLine.visible = !hide && lineOn;
     if (g.tailPoints) g.tailPoints.visible = !hide && (ptsOn || (lineOn && g.cfg.showDots));
     if (g.ovLine) g.ovLine.visible = !hide && lineOn;
     if (g.ovPoints) g.ovPoints.visible = !hide && ptsOn;
@@ -1993,8 +2108,36 @@ export async function createScene(
     return n;
   }
 
+  /** P90 D4：锚/尺度一旦被脏数据污染成 NaN，此后每帧 toN() 都是 NaN 且 isFinite(ext)
+   *  的早退会把它永久卡死——用最新点重定锚自愈，画面至少能恢复。 */
+  let anchorWarnAt = 0;
+  function rescueAnchorIfPoisoned(): boolean {
+    if (anchor.every(Number.isFinite) && isFinite(scale) && scaleVec.every(Number.isFinite)) return false;
+    const now = performance.now();
+    if (now - anchorWarnAt > 30000) {
+      anchorWarnAt = now;
+      console.warn(
+        `[P3D诊断] 锚点/尺度被非有限值污染（anchor=${anchor.join(",")} scale=${scale}），已用最新点重定锚自愈`,
+      );
+    }
+    for (const g of gstates.values()) {
+      const l = g.latest;
+      if (!l || !Number.isFinite(l.x) || !Number.isFinite(l.y) || !Number.isFinite(l.z)) continue;
+      anchor[0] = l.x;
+      anchor[1] = l.y;
+      anchor[2] = l.z;
+      if (!isFinite(scale) || scale <= 0) scale = (VIEW_HALF * 2) / 1e-9;
+      if (!isFinite(baseExtent) || baseExtent <= 0) baseExtent = 1e-9;
+      updateScaleVec();
+      rewriteNorm();
+      return true;
+    }
+    return false;
+  }
+
   function maybeReanchor(forceGrid: boolean) {
     if (totalPoints() === 0 && !hasLiveMarker()) return;
+    if (rescueAnchorIfPoisoned()) return;
     const ext = Math.max(
       bbMax[0] - bbMin[0],
       bbMax[1] - bbMin[1],
@@ -2057,14 +2200,23 @@ export async function createScene(
     for (let i = 0; i < b.t.length; i++) {
       const vs = [b.x[i], b.y[i], b.z[i]];
       for (let a = 0; a < 3; a++) {
+        // P90 D4：非有限值参与比较恒 false，会让该轴停在 ±Infinity →
+        // anchor=(Inf+-Inf)/2=NaN，此后所有 toN() 全 NaN（画面永久全黑且无告警）
+        if (!Number.isFinite(vs[a])) continue;
         if (vs[a] < mn[a]) mn[a] = vs[a];
         if (vs[a] > mx[a]) mx[a] = vs[a];
       }
     }
     for (let a = 0; a < 3; a++) {
-      anchor[a] = (mn[a] + mx[a]) / 2;
+      const ok = Number.isFinite(mn[a]) && Number.isFinite(mx[a]);
+      anchor[a] = ok ? (mn[a] + mx[a]) / 2 : 0;
+      if (!ok) {
+        mn[a] = 0;
+        mx[a] = 0;
+      }
     }
-    baseExtent = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2], 1e-9);
+    const ext = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]);
+    baseExtent = Number.isFinite(ext) && ext > 0 ? ext : 1e-9;
     scale = (VIEW_HALF * 2) / baseExtent;
     updateScaleVec(); // perAxis：首批即按三轴各自跨度撑满（uniform 下三值 = scale）
   }
@@ -2270,7 +2422,7 @@ export async function createScene(
         g.cfg = { ...cfg };
         g.uniforms.uMode.value = toModeVal(cfg);
         g.uniforms.uW.value = cfg.fade;
-        g.uniforms.uPtSize.value = cfg.pointSize;
+        g.uniforms.uPtSize.value = Math.max(2, cfg.pointSize);
         g.uniforms.uOpacity.value = cfg.opacity;
         g.uniforms.uColor.value.set(cfg.color);
         g.uniforms.uPalette.value = cbSafe ? 1 : 0;
@@ -2278,14 +2430,16 @@ export async function createScene(
         (g.dot.material as THREE_NS.SpriteMaterial).color.set(cfg.color);
         (g.dot.material as THREE_NS.SpriteMaterial).opacity =
           cfg.mode === "point" ? cfg.opacity : 1;
-        g.dot.scale.setScalar(cfg.mode === "point" ? 0.045 + cfg.pointSize * 0.012 : 0.06);
+        // P90 D5：光点尺寸由 updateDotPixelSize 每帧按像素恒定补偿，这里不再写 norm 尺寸
+        //（旧值 0.045+pointSize*0.012 下一帧即被覆盖，是死分支且与补偿口径打架）
         if (g.ovLine) {
           (g.ovLine.material as THREE_NS.LineBasicMaterial).color.set(cfg.color);
         }
         if (g.ovPoints) {
           const ou = (g.ovPoints.material as THREE_NS.ShaderMaterial).uniforms;
           ou.uColor.value.set(cfg.color);
-          ou.uPtSize.value = Math.max(2, cfg.pointSize * 0.7);
+          // P90 D5：全景层与尾层同一像素口径，避免点被压实进全景那一刻尺寸突变 30%
+          ou.uPtSize.value = Math.max(2, cfg.pointSize);
         }
         if (cfg.mode === "point" && prevMode !== "point") {
           // 实时定位不保留历史层的数组与几何。
@@ -2717,6 +2871,35 @@ export async function createScene(
       const out: Record<string, GroupStats> = {};
       for (const g of gstates.values()) out[g.gid] = { tail: g.tCount, overview: g.oCount };
       return { groups: out as Record<GroupId, GroupStats>, fps, gridStep: curGridStep };
+    },
+
+    /** P91 C1：注册/清除截空回调（面板卸载必须清，否则旧闭包会吃掉新场景的回调） */
+    setOnCursorEmpty(cb: ((gid: GroupId) => void) | null) {
+      cursorEmptyCb = cb;
+    },
+
+    /** P91 C1/C5：空态归因器与 window.__p3d 探针共用的只读快照（不触发任何重建）。 */
+    probe() {
+      const groups: SceneProbeGroup[] = [];
+      for (const g of gstates.values()) {
+        const { ct } = cursorCut(g);
+        groups.push({
+          gid: g.gid,
+          mode: g.cfg.mode,
+          visible: g.cfg.visible,
+          tailCount: g.tCount,
+          tailDraw: g.tailGeo ? Math.min(ct, tailCutFor(g, ct)) : 0,
+          windowStartSec: g.tCount > 0 && g.tT ? g.tT[0] : null,
+          overviewCount: g.oCount,
+          cursorSec: curCursorSec,
+          maxPoints: g.cfg.maxPoints,
+          markerKind: g.cfg.model.kind,
+          markerVisible: !!g.markerObj?.visible,
+          hasLatest: g.latest != null,
+          latestT: g.latest?.t ?? null,
+        });
+      }
+      return { cursorSec: curCursorSec, calibOn, visible, groups, totalPoints: totalPoints() };
     },
 
     dispose() {

@@ -104,12 +104,106 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>先到<code>设置 → AI 服务</code>：选服务商预设（OpenAI 兼容 / DeepSeek / 智谱 GLM / 通义千问 / 本地 Ollama / Claude）→ 填 API Key → 需要代理时在「高级连接」里填。</li>
                     <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；可停靠为面板（工具栏「+ 面板」）。</li>
                     <li>输入框：<code>Enter</code> 发送；<code>Shift+Enter</code> 或 <code>Ctrl+Enter</code> 换行。</li>
-                    <li>发送前在输入框上方勾选「本次发送的上下文」；<b>协议清单</b>（一行式，便宜）默认带，<b>协议完整定义</b>只在需要精确分析时勾。上下文栏实时显示 ≈token 消耗估算。</li>
-                    <li>支持思维链模型（如 deepseek-v4-pro / glm-5.3）：思考过程实时流式显示并计时，正文开始后自动折叠，可在设置关闭显示。</li>
+                    <li>要带哪些上下文，点输入框左侧的 <code>＋</code> → <b>发送上下文</b> 勾选；<b>协议清单</b>（一行式，便宜）默认带，<b>协议完整定义</b>只在需要精确分析时勾。面板上实时显示本次发送的估算体积。</li>
+                    <li>支持思维链模型（如 deepseek-v4-pro / glm-5.3）：思考过程实时流式显示并计时，正文开始后自动折叠。<b>「显示思维链」与「让模型先想后答」是两个独立开关</b>（设置 → AI 服务）：只想看过程就开前者，长任务反复超时就把后者关掉，别为了看过程而背上等待。</li>
                     <li>消息悬停出现操作钮：复制 / 编辑重发 / 重新生成 / 删除；会话侧栏支持多会话、搜索、双击重命名。</li>
                   </ol>
                 </Section>
-                <Section title="快捷按钮（顶部工具条）">
+                <Section title="工作方式与授权档（发送方式 pill）">
+                  <p>输入框下方那颗 pill 是 Agent 的唯一入口，点开是<b>两个各自独立的选择</b>——先选「工作方式」，再选「授权档」：</p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>普通对话</td><td>一问一答，不执行任何应用操作。适合问用法、解读数据、要一段代码。</td></tr>
+                      <tr><td>Agent 任务</td><td>多轮自主执行：想 → 调工具 → 看回执 → 再想，直到完成或触达预算。下面三档决定它有多大权。</td></tr>
+                    </tbody>
+                  </table>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>仅预览</td><td>只读数据与状态。任何写入都只给预览，<b>不落一行改动</b>——想先看 AI 打算怎么做，就用这一档。</td></tr>
+                      <tr><td>放手改界面</td><td>默认档。改应用设置、保存主题/控件/面板插件，可逆的自动做；<b>不碰设备与本机</b>。</td></tr>
+                      <tr><td>全面放手</td><td>软件目录内八个能力域全开（含界面深改、读白名单文件、写目录内文件、网络、命令行）。<b>但覆盖已有文件、删除、实车发送、命令行仍然逐条弹批准卡</b>——这一档放开的是能力面，不是撤掉人工确认。</td></tr>
+                    </tbody>
+                  </table>
+                  <p className="help-tip">
+                    需要中间态（比如"能读文件但别碰命令行"）就展开 pill 里的<b>「高级 · 具体授权域」</b>：
+                    八项勾选逐一决定，另有 <code>工作区写入</code> / <code>设备收发</code> / <code>本机全能力</code> 三个一键预设。
+                    勾了任何一项与预设不同的组合，pill 会如实显示「自定义 · N 项授权」，不猜你授了什么。
+                  </p>
+                  <p className="help-tip">
+                    档位会被记住，<b>但「全面放手」与自定义勾选不跨重启恢复</b>——开机后回落到「放手改界面」并提示你，
+                    避免某天带着满权限启动而没察觉。一项都不勾时按「放手改界面」同权执行，不会出现"选了自定义却什么都改不动"。
+                  </p>
+                  <p className="help-tip">
+                    预算（轮数 / 工具调用数 / 时长）显示在 pill 面板底部；任务运行中档位与预算锁定，防止中途换权限。
+                  </p>
+                  <p><b>八个授权域分别放开什么</b>（高级区里逐项勾选的就是它们）：</p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>配置写入</td><td>改应用设置（可撤销项）与外观 token。仅预览档不给。</td></tr>
+                      <tr><td>插件库</td><td>保存/启用插件、保存主题、<b>升版与退回上一版</b>。这是"AI 造的东西能不能落地"的那道门。</td></tr>
+                      <tr><td>设备发送</td><td>向仿真/虚拟设备自动发送。<b>实车连接或无法判定时一律逐次人工批准</b>，这一档授权也不例外。</td></tr>
+                      <tr><td>文件读取</td><td>读 设置 → Agent 文件白名单 里的路径（含从图片取色）。白名单为空则整个文件能力关闭。</td></tr>
+                      <tr><td>文件写入</td><td>在软件目录/工作区内<b>新建</b>文件。<b>覆盖已存在的文件仍要逐条批准</b>。</td></tr>
+                      <tr><td>网络访问</td><td>抓取网页与搜索。内网/回环地址按私有网段规则另行把关。</td></tr>
+                      <tr><td>命令行</td><td>执行 shell。三重门：本授权域 + 设置页总开关 + <b>每条命令逐次批准</b>。</td></tr>
+                      <tr><td>界面深改</td><td>对具体组件/面板注入受校验的样式与动效。全局选择器、fixed 遮罩、外链资源、超高 z-index 一律拒。</td></tr>
+                    </tbody>
+                  </table>
+                </Section>
+                <Section title="上下文用量与手动压缩">
+                  <ul className="help-ol">
+                    <li>Agent 模式下，输入区右下角常驻一条 <code>上下文 240 KB / 1.6 MB · 15%</code> 的用量条。
+                      它显示的是<b>下一次发送真正会带上的那份内容</b>，不是历史累计——所以压缩之后数字立刻就会动。</li>
+                    <li>超过 70% 转黄、超过 90% 转红。撞线时模型会报"上下文过大"，任务卡上会写明当前用量。</li>
+                    <li><b>压缩</b>：把较早的工具回执收得更紧（只发摘要，不发全文）。<b>台账事件一条都不删</b>，
+                      所以这是"少发给模型"，不是"忘掉"——展开任务卡仍能看到完整过程。
+                      连压到下限后按钮会禁用并说明原因；要彻底清空请新建会话。</li>
+                    <li>超预算时系统本来就会<b>自动</b>走同一套阶梯（先丢较早历史的附图 → 再折叠 → 仍超才报错），
+                      手动压缩只是让你不必等到撞线。</li>
+                  </ul>
+                </Section>
+                <Section title="让 AI 改界面：正确姿势">
+                  <p>界面类需求（改某个按钮/面板/标题栏的样子、加动效）请走 <b>Agent 任务 + 「全面放手」档</b>，它的工作顺序是：</p>
+                  <ol className="help-ol">
+                    <li><code>ui_inventory</code> 读软件的真实构成：面板清单、控件类型、可改的外观 token、内置动效配方——全部从注册表现取，不是它凭印象说的。</li>
+                    <li><code>ui_inspect</code> 读<b>活界面</b>：给一个选择器，它回给你这一带真实存在的类名与各自命中多少个元素、节点树、当前计算样式。<b>先 inspect 再改</b>，选择器才不会打空。</li>
+                    <li><code>style_patch</code> 按组件下样式（结构化规则，不是一整段 CSS 文本）。回执逐条报：<b>命中几个元素、哪个属性从什么变成什么</b>；命中 0 的会直接把真实类名递给你（打偏了不会静默）。</li>
+                    <li>想加发光/流光/粒子这类动效，先 <code>ui_inventory &#123;section:"fx"&#125;</code> 取内置配方与旋钮，别从零写关键帧。</li>
+                    <li>这些改动是<b>会话临时层</b>：重启就没了，也不归插件管。满意了要显式说"保存为主题/固化下来"才会持久化——
+                      让它报个名字就行，它会用 <code>style_commit</code> 把<b>当前真正生效的那几层</b>读出来存成已启用的主题插件
+                      （不是凭记忆重抄一遍规则，重抄在多轮改动后一定走样）。想撤就 <code>style_revert</code>、卡片上的「撤销」，
+                      或直接 设置 → 外观 → <b>清除 AI 的全部临时改动</b>；固化之后恢复路径变成 停用插件 或 <code>rollback_plugin</code>。</li>
+                    <li>改坏了的插件版本可以 <code>rollback_plugin</code> 退回上一版——Agent 自己改自己存的东西会升版本号并留下旧版，不会堆出一堆近似副本。</li>
+                  </ol>
+                  <p className="help-tip">
+                    全局选择器（<code>html</code>/<code>body</code>/<code>#root</code>/<code>*</code>）、<code>position:fixed</code> 遮罩、
+                    外链资源、超高 z-index 都会被逐条拒绝并给出原因——一条写歪不会废掉整批改动，也不会让界面再也点不动。
+                  </p>
+                </Section>
+                <Section title="外观是怎么叠起来的（撤不回去时看这里）">
+                  <p>最终界面是这几层叠出来的，<b>越靠下越优先</b>。哪一层有内容，就说明当前样子是它改的：</p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>内置主题</td><td>8 套内置配色，走样式表；设置里选哪个就是哪个。<b>落盘。</b></td></tr>
+                      <tr><td>外观设置</td><td>界面缩放、显示精度、减弱动效等。<b>落盘。</b></td></tr>
+                      <tr><td>插件主题层</td><td>已启用主题插件的变量与 CSS。<b>落盘在插件库</b>；停用/卸载插件就是撤掉这一层。</td></tr>
+                      <tr><td>AI 临时 token 覆盖</td><td>AI 改主题色/字号/圆角时的会话层。<b>不落盘。</b></td></tr>
+                      <tr><td>AI 组件样式层</td><td>AI 按组件下的样式（一层一个名字）。<b>不落盘。</b></td></tr>
+                    </tbody>
+                  </table>
+                  <p className="help-tip">
+                    常见困惑：「AI 把按钮改圆了，我把那个主题插件停用甚至卸载了，怎么还在？」
+                    —— 因为那是<b>AI 临时层</b>改的，插件停用管不到它。
+                    去 设置 → 外观 → <b>「当前外观被谁改了」</b>，那里逐层显示谁在生效，
+                    点<b>「清除 AI 的全部临时改动」</b>就干净了（你自己的设置与已存插件不受影响）。
+                  </p>
+                  <p className="help-tip">
+                    旁边那颗<b>「恢复外观默认」</b>是另一回事：它连你自己选的主题、缩放、精度一起回默认，会先弹确认。
+                    两者都不是「恢复出厂」——那个在 设置 → AI 服务 底部，会清空<b>全部</b>本地数据，不可恢复。
+                  </p>
+                </Section>
+                <Section title="场景菜单（顶部「场景 ▾」）">
+                  <p>八个常用场景收在 AI 助手顶栏的<code>场景 ▾</code>下拉里（旧版是八个并排按钮，窄浮窗下会被裁掉）。点一下即按该场景发起，也可自己打字。</p>
                   <table className="help-table">
                     <tbody>
                       <tr><td>识别协议</td><td>先在 Hex 数据流框选字节 → 点击 → AI 推断帧结构并输出「写入协议模板」按钮</td></tr>
@@ -138,10 +232,37 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>命令库命令<br /><code>uartix-command</code></td><td>单条或批量（{"{"}"commands":[…]{"}"}）写入命令库「AI 生成」分组，可带脚本。</td></tr>
                       <tr><td>协议模板<br /><code>uartix-template</code></td><td>生成帧结构模板（截帧边界/字段/校验），写入协议面板；多帧型协议支持 {"{"}"group":"簇名","templates":[…]{"}"} 一次写入整簇并自动建组归档，默认停用待你启用。</td></tr>
                       <tr><td>指令工厂协议<br /><code>uartix-codec</code></td><td>生成自定义协议（帧头/变量/长度/校验段），写入指令工厂「我的协议」，填参数即组帧。</td></tr>
-                      <tr><td>UI 创造<br /><code>主题 / 小部件 / 面板</code></td><td>对 AI 描述你想要的主题、浮窗小部件或常驻面板，AI 会引导你打开工具栏的<b>「Agent 任务」</b>：任务里用 <code>save_plugin</code> 把成果保存为插件并自动启用，无需手动安装。插件在 设置 → 插件管理 启停、配置、导入导出。</td></tr>
+                      <tr><td>UI 创造<br /><code>主题 / 小部件 / 面板</code></td><td>对 AI 描述你想要的主题、浮窗小部件或常驻面板，AI 会引导你打开输入框下方的<b>「Agent 任务」pill</b>：任务里用 <code>save_plugin</code> 把成果保存为插件并自动启用，无需手动安装。插件在 设置 → 插件管理 启停、配置、导入导出；<b>Agent 再改同一个插件会升版本号并保留旧版</b>，可在插件库里退回上一版。</td></tr>
                     </tbody>
                   </table>
                   <p className="help-tip">插件里的沙箱小部件 / 自定义面板 / 自定义卡片自动注入 <code>window.uartix</code> API（见下）；含发送能力的插件启用时需你点击批准。</p>
+                </Section>
+                <Section title="Agent 能调用的工具（展开看它做了什么）">
+                  <p>Agent 任务卡展开后每一步都是一个工具。按能力分组，<b>括号里是它需要的授权域</b>：</p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>读</td><td><code>settings_read</code> · <code>app_state</code>（一次看全局，省得逐个探）· <code>app_catalog</code> / <code>app_read</code>（宿主信息目录：先看有哪些可读视图，再按路径取，列表可翻页）· <code>list_plugins</code> · <code>ui_inventory</code> / <code>ui_inspect</code>（看界面到底有什么）· <code>plot_channels</code> / <code>plot_window</code> · <code>theme_read</code> · <code>fs_read</code> / <code>fs_list</code> · <code>read_artifact</code>（回执太大时分页取回原文）</td></tr>
+                      <tr><td>写配置</td><td><code>settings_apply</code>（配置写入）· <code>run_app_action</code>（39 个白名单动作，协议/指令/卡片都走它）· <code>save_plugin</code> · <code>theme_patch</code> / <code>theme_preset</code> / <code>save_theme_extension</code> · <code>style_patch</code> · <code>fs_write</code> · <code>shell_exec</code></td></tr>
+                      <tr><td>外观</td><td><code>theme_read</code> / <code>theme_patch</code> / <code>theme_preset</code>（配置写入）· <code>image_swatch</code> 从图片取色（文件读取）· <code>save_theme_extension</code> / <code>style_commit</code> / <code>save_plugin</code> / <code>enable_plugin</code> / <code>rollback_plugin</code>（插件库）</td></tr>
+                      <tr><td>界面深改</td><td><code>ui_inventory</code> / <code>ui_inspect</code> 只读自省 · <code>style_patch</code> / <code>style_revert</code> 按组件下样式与撤回（界面深改）</td></tr>
+                      <tr><td>本机</td><td><code>fs_read</code> / <code>fs_list</code>（文件读取，限白名单）· <code>fs_write</code>（软件目录内写文件；<b>覆盖已有文件逐条批准</b>）· <code>web_fetch</code> / <code>web_search</code>（网络）· <code>shell_exec</code>（命令行；另需设置页总开关 + 每条批准）</td></tr>
+                    </tbody>
+                  </table>
+                  <p>
+                    <b>它是怎么「看见」这个软件的</b>：可读的东西集中在一张<b>宿主自省目录</b>里——连接现状、协议模板与完整字段表、
+                    指令库、控件面板、帧与解析统计、会话录制、曲线通道、插件库。<code>app_catalog</code> 列菜单，
+                    <code>app_read</code> 按路径取内容。目录里没有的东西是<b>不存在</b>，不是"藏在哪儿没告诉它"：
+                    它反射不到任意内部状态，也读不到设置里的密钥那一类。列表视图的回执带 <code>total / returned / nextCursor</code>，
+                    它照着翻页，而不是自己猜偏移。
+                  </p>
+                  <p>
+                    每轮开始它还会重读一次<b>现状</b>（授权档与勾选域、可见工具数、串口连没连、有没有被操纵者锁住、软件版本），
+                    所以任务中途你把串口插上、开始录制，下一轮它就知道了。台账里那行<b>「运行现状变化」</b>就是它读到数值变了的痕迹。
+                  </p>
+                  <p className="help-tip">
+                    没授权的工具<b>根本不会发给模型</b>——看得见却调不动只会白烧一轮再报一句莫名失败。
+                    所以 pill 上显示授了几项，就是在如实告诉你它现在能动什么。
+                  </p>
                 </Section>
                 <Section title="动作执行（uartix-action）示例">
                   <p>对 AI 说「清空控制画布，然后打开 2D 曲线」，AI 输出：</p>
@@ -173,12 +294,12 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>控制页</td><td>clearPage()【破坏性】· addPage({"{"}name{"}"}) · patchCard({"{"}name,patch{"}"})</td></tr>
                       <tr><td>删除</td><td>removeCard / removeProtocol / removeCommand / removeCodec / removeWidget（按 name）【破坏性】</td></tr>
                       <tr><td>挂件</td><td>openWidget / closeWidget / popWidget({"{"}name{"}"}) 浮窗管理与弹出桌面</td></tr>
-                      <tr><td>连接</td><td>openPort() · closePort()（需开启「小部件可发送数据」）</td></tr>
+                      <tr><td>连接</td><td>openPort() · closePort()（需开启「允许向设备发送」总闸）</td></tr>
                       <tr><td>传输</td><td>xferStart({"{"}path,proto{"}"}) 预填文件传输对话框（path 可数组多文件排队；开始发送仍需用户点击）</td></tr>
-                      <tr><td>Modbus</td><td>modbus({"{"}op:"…"{"}"}) 操作工作台：<code>status</code> · <code>slave.start/stop/configure/write/writeMany/resize</code> · <code>poll.add/remove/clear/configure/start/stop/reset</code>（需脚本高权限，会占用总线发数据）</td></tr>
+                      <tr><td>Modbus</td><td>modbus({"{"}op:"…"{"}"}) 操作工作台：<code>status</code> · <code>slave.start/stop/configure/write/writeMany/resize</code> · <code>poll.add/remove/clear/configure/start/stop/reset</code>（高权限动作，会占用总线发数据，需逐次批准）</td></tr>
                       <tr><td>读图</td><td>readPlot({"{"}ask{"}"}) 截取当前 2D 曲线面板画面发给模型分析（面板未开会自动打开）</td></tr>
-                      <tr><td>哨兵</td><td>sentinel({"{"}op:"status/enable/ackAll/mute/clear"{"}"}) 异常监测查询与控制（需脚本高权限）</td></tr>
-                      <tr><td>结构发现</td><td>xrayEvidence() / xrayCrack() 读协议考古证据链（帧长/帧型簇/校验爆破/轮询周期，面板需先「采样分析」）· xrayReport() 生成引用证据编号的考古报告（需脚本高权限）</td></tr>
+                      <tr><td>哨兵</td><td>sentinel({"{"}op:"status/enable/ackAll/mute/clear"{"}"}) 异常监测查询与控制（高权限动作，需逐次批准）</td></tr>
+                      <tr><td>结构发现</td><td>xrayEvidence() / xrayCrack() 读协议考古证据链（帧长/帧型簇/校验爆破/轮询周期，面板需先「采样分析」）· xrayReport() 生成引用证据编号的考古报告（高权限动作，需逐次批准）</td></tr>
                       <tr><td>编排器</td><td>orchestratorRead() 只读快照（总开关/在跑实例/各组统计/变量现值/日志）· orchestrator({"{"}op:"enable/run/stopAll/groupAdd/groupUpdate/groupRemove/eventAdd/eventRemove/blockAdd/blockRemove/varsSet"{"}"}) 写操作（需高权限——发送块会真实发包；eventAdd/blockAdd 能把自动化「说出来即搭」）</td></tr>
                       <tr><td>3D 轨迹</td><td>plot3dRead() 只读快照（全部 groups：各组 axes/mode/显示与配对配置/校准采样/拟合结果/六面进度）· plot3d({"{"}op:"bind/set/groupAdd/groupRemove/clear/undo/redo/calib"{"}"}) 写操作（需高权限；gid 为现存组 ID，缺省 g1（已删则拒绝）；groupRemove 需用户在本机确认；calib 子动作 enter/exit/start/stop/clear/solve6；校准采样源由 calibSource 指定）</td></tr>
                       <tr><td>虚拟设备</td><td>vdev({"{"}op:"status/list/create/start/stop"{"}"}) 虚拟设备工坊（需高权限——设备占据数据管线等同发送）：create/start 带整台设备规格 JSON（信号模型+故障注入+命令应答+可选 net 段），自然语言即可生成虚拟传感器</td></tr>
@@ -196,7 +317,7 @@ await api.app.modbus({ op: "slave.write", area: "holding", index: 2, value: 1234
 await api.app.modbus({ op: "slave.start" });
 await api.app.modbus({ op: "poll.add", slave: 1, fn: 3, addr: 0, qty: 3, periodMs: 500, varName: "MB温度" });
 await api.app.modbus({ op: "poll.start" });`}</pre>
-                  <p className="help-tip">小部件/自定义卡片内通过 postMessage 桥 {"{"}type:"aiw:app", action:{"{"}kind,args{"}"}{"}"} 调用同一套动作（不含高权限动作：破坏性、modbus、sentinel、考古报告、编排器/3D 写入、虚拟设备等——只有脚本且开启高权限才能用）。</p>
+                  <p className="help-tip">小部件/自定义卡片内通过 postMessage 桥 {"{"}type:"aiw:app", action:{"{"}kind,args{"}"}{"}"} 调用同一套动作。高权限动作（破坏性、modbus、sentinel、考古报告、编排器/3D 写入、虚拟设备等）在挂件侧一律不可调用——这是硬限制，不随设置变化；要执行请走 AI 助手的 Agent 任务，由你在批准卡上逐次确认。</p>
                 </Section>
                 <Section title="常用诉求 → 一句话指令">
                   <table className="help-table">
@@ -569,8 +690,10 @@ else send("RGT:" + phase);`}</pre>
                 <tbody>
                   <tr><td>Ctrl+F</td><td>Hex 数据流搜索（Esc 关闭）</td></tr>
                   <tr><td>Ctrl+K</td><td>AI 助手浮窗开关；AI 输入框内 <code>Enter</code> 发送、<code>Shift/Ctrl+Enter</code> 换行、<code>Ctrl+V</code> 粘贴截图</td></tr>
+                  <tr><td>Agent 任务</td><td>输入框下方 pill 切换工作方式与授权档；任务运行中可「停止」，暂停后可「继续任务」就地续跑（已生效的步骤不重做）</td></tr>
+                  <tr><td>Agent 审批卡</td><td>破坏性/覆盖/实车/命令行操作会就地弹批准卡：<b>批准只对同样参数这一次有效</b>，改了参数要重新批准</td></tr>
+                  <tr><td>Ctrl+Z / Ctrl+Y</td><td>协议编辑撤销 / 重做（全局 50 步）；3D 轨迹面板内同样撤销/重做组配置（清空数据不可撤销）</td></tr>
                   <tr><td>M</td><td>录制/回放中给时间轴打标注（2D 曲线显示琥珀虚线，点击标注列表可 seek）</td></tr>
-                  <tr><td>Ctrl+Z / Ctrl+Y</td><td>协议编辑撤销 / 重做（全局 50 步）</td></tr>
                   <tr><td>← / →</td><td>帧画布上一帧 / 下一帧</td></tr>
                   <tr><td>W/A/S/D · Q/E · 方向键</td><td>3D 轨迹面板键盘飞行（右键菜单「视图」开启，鼠标悬停画布才响应）；F 跟随、R 复位</td></tr>
                   <tr><td>双击</td><td>帧画布帧头/帧尾直接打开编辑框；2D 曲线图区=保形回实时；3D 时间条=回到最新</td></tr>

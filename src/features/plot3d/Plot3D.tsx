@@ -26,10 +26,13 @@ import * as plot3dStore from "./plot3dStore";
 import type { GroupId, GroupHeading, GroupModel, TrajGroup } from "./plot3dStore";
 import type { GroupTransform } from "./smoothing";
 import * as sessionStore from "../session/sessionStore";
+import * as templateStore from "../protocol/templateStore";
+import { requestOpenPanel } from "../ai/appBus";
 import * as timeCursor from "../analysis/timeCursorStore";
 import { cancelPreview, navigateTime, previewTime, returnLatest, subscribeReplayClock } from "../analysis/timeNavigation";
 import type { GroupStats, PickResult, Plot3DScene, ViewPreset } from "./scene";
 import { createScene } from "./scene";
+import { whyEmpty, dispatchRemedy, diagStage, REMEDY_LABEL, type DiagnoseInput, type EmptyDiagnosis } from "./diagnose";
 import { fitEllipsoid, grade, FIT_MIN_POINTS, type FitOk } from "./ellipsoidFit";
 import { attachPdragZone } from "../../shared/pointerDrag";
 import { useSettings } from "../settings/settingsStore";
@@ -973,11 +976,45 @@ export function Plot3D() {
       modelSrcRef.current = {}; // 新场景 gltf 缓存是空的 → 标记 src 水位重置，下一拍重注入
       // 游标同理：静态/回放暂停时没有新批次，pump 不会重发 → 强制下一拍重发一次
       plot3dStore.invalidateCursor();
+      // P91 C1/C2：截空即处置——外部来源（联动/打点回灌）的游标把画面截到 0 点时
+      // 自动回到最新并告知；用户在 3D 时间条上亲手拖的位置只弹提示条、不擅自改动。
+      s.setOnCursorEmpty(() => {
+        if (plot3dStore.scrubSource() !== "local") {
+          plot3dStore.setScrub(null);
+          s.setTimeCursor(null);
+          toast(
+            tx(
+              "外部联动游标落在保留窗口之前，画面被截成空；已自动回到最新",
+              "External cursor fell before the retained window; jumped back to latest",
+            ),
+          );
+        }
+        diagRef.current();
+      });
+      // P91 C5：只读探针——验收时贴回这一行输出即可定案，不再靠截图猜（真机取证成本归零）
+      (window as unknown as { __p3d?: () => unknown }).__p3d = () => {
+        const p = s.probe();
+        return {
+          cursorSec: p.cursorSec,
+          calibOn: p.calibOn,
+          visible: p.visible,
+          totalPoints: p.totalPoints,
+          groups: p.groups,
+          scrubSource: plot3dStore.scrubSource(),
+          cfg: plot3dStore.getSnapshot().settings.groups.map((g) => ({
+            id: g.id, mode: g.mode, visible: g.visible, maxPoints: g.maxPoints,
+            density: g.density, smooth: g.smooth, bind: [g.chX, g.chY, g.chZ], model: g.model.kind,
+          })),
+        };
+      };
       setReady(true);
     })();
     return () => {
       disposed = true;
-      // scrub 是 store 模块级视图态：不清掉，重开面板会落回上次的历史位置
+      scene?.setOnCursorEmpty(null);
+      delete (window as unknown as { __p3d?: unknown }).__p3d;
+      // P90 D3（裁决点4）：面板卸载/重建一律回到「跟随最新」——scrub 是 store 模块级
+      // 视图态，留着会让重开的面板落回上次拖到的历史位置甚至截成空白（旧注释写反了）。
       plot3dStore.setScrub(null);
       plot3dStore.invalidateCursor();
       // C8：重建只停泵保留校准（采样是几分钟的工作量，显卡抖一下不该全灭）；
@@ -1313,7 +1350,8 @@ export function Plot3D() {
   // ---------- 指针交互（长按测距 / 右键菜单 / 悬停拾取） ----------
   const onPointerDown = (e: React.PointerEvent) => {
     // HUD 控件（组行绑定下拉/按钮）不冒泡进画布：长按会误触测距、按住下拉 400ms 直接进测距模式
-    if ((e.target as HTMLElement).closest(".p3d-hud")) return;
+    // P96-K1：空态引导卡与诊断条上的按钮同理——它们 DOM 上在 host 之内，不摘出来点一下就会起长按测距
+    if ((e.target as HTMLElement).closest(".p3d-hud, .p3d-empty, .p3d-guide")) return;
     // P87a A7：点画布即把焦点收进面板根（Ctrl+Z/Y 撤销路由的前置）
     rootRef.current?.focus({ preventScroll: true });
     hideTip();
@@ -1485,7 +1523,9 @@ export function Plot3D() {
     const c = timeCursor.getSnapshot();
     if (c.tsMs !== null && c.source !== "session" && (!c.linked || c.source === "plot3d")) return;
     const sec = c.tsMs === null ? null : timeCursor.toDisplaySeconds(c.tsMs, plotStore.timeOrigin());
-    plot3dStore.setScrub(sec);
+    // P91 C2：标来源——3D 内亲手拖的（local）一律尊重；别的面板/打点回灌的（linked/
+    // session）越界或截空时可自动放弃并说明，不再把画面永久钉死在空白位。
+    plot3dStore.setScrub(sec, c.source === "session" ? "session" : "linked");
     sceneRef.current?.setTimeCursor(sec);
     writeTb(sec === null || endRelRef.current <= 0 ? 1 : sec / endRelRef.current, false);
     writeBrT(sec);
@@ -1501,6 +1541,64 @@ export function Plot3D() {
       stopClock();
     };
   }, []);
+
+  /* ===== P91 C1：空态自诊断 =====
+   * 六次几何层修复都没命中，因为真因在可见性门控而门控是静默的。从此"画面为空"
+   * 必须当场说清是哪一条（缺绑定 / 无数据 / 配对跳过 / 游标截断 / 上限挤空 / 校准接管），
+   * 能给按钮的直接给按钮。 */
+  const [diag, setDiag] = useState<EmptyDiagnosis | null>(null);
+  const diagRef = useRef<() => void>(() => {});
+  diagRef.current = () => {
+    const s = sceneRef.current;
+    if (!s) {
+      setDiag(null);
+      return;
+    }
+    const p = s.probe();
+    const byId = new Map(p.groups.map((g) => [String(g.gid), g]));
+    const input: DiagnoseInput = {
+      calibOn: p.calibOn,
+      panelVisible: p.visible,
+      groups: plot3dStore.diagFacts().map((f) => {
+        const g = byId.get(f.id);
+        return {
+          ...f,
+          tailCount: g?.tailCount ?? 0,
+          tailVisible: g?.tailDraw ?? 0,
+          windowStartSec: g?.windowStartSec ?? null,
+          overviewCount: g?.overviewCount ?? 0,
+          cursorSec: g?.cursorSec ?? null,
+          maxPoints: g?.maxPoints ?? 0,
+          markerKind: g?.markerKind ?? "point",
+          hasLatest: (g?.hasLatest ?? false) || (g?.tailCount ?? 0) > 0,
+        };
+      }),
+    };
+    const next = whyEmpty(input);
+    // 同因同文不重设 state（避免 10Hz 泵把诊断条变成重渲染风暴）
+    setDiag((prev) => (prev?.code === next.code && prev?.text === next.text ? prev : next));
+  };
+
+  useEffect(() => {
+    if (!ready) return;
+    diagRef.current();
+    const t = window.setInterval(() => diagRef.current(), 700);
+    return () => window.clearInterval(t);
+  }, [ready, s3d]);
+
+  /** 空态上的一键补救：分发逻辑在 diagnose.ts（纯函数 + Record 守卫），这里只注入落地依赖 */
+  const runRemedy = (d: EmptyDiagnosis) => {
+    const done = dispatchRemedy(d, {
+      clearScrub: () => clearScrub(),
+      showAllGroups: () => plot3dStore.diagFacts().forEach((f) => { if (!f.visible) plot3dStore.setGroupVisible(f.id, true); }),
+      exitCalib: () => plot3dStore.setSetting({ calibMode: false }),
+      raiseMaxPoints: (gid) => plot3dStore.updateGroup(gid as GroupId, { maxPoints: 0 }),
+      openGroupDialog: (gid) => setDlg(gid as GroupId),
+      startDemo: () => void templateStore.toggleDemo(),
+      unknown: (what) => console.warn(`[P3D诊断] 空态补救未接的动作：${what}`),
+    });
+    if (done) window.setTimeout(() => diagRef.current(), 60);
+  };
 
   const onTbPointerDown = (e: React.PointerEvent) => {
     e.stopPropagation(); // 不触发画布长按/拾取/右键
@@ -2146,7 +2244,6 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
   const calibSrcG = s3d.calibSrc ? s3d.groups.find((g) => g.id === s3d.calibSrc) : undefined;
   const calibSrcMissing = !!s3d.calibSrc && !calibSrcG;
   const g1Bound = plot3dStore.calibSourceReady(); // P87e：按 calibSrc 判定（不再固定组1）
-  const anyBound = s3d.groups.some((g) => g.chX && g.chY);
   const ascaleCur =
     s3d.axisScale === "perAxis" ? tx("逐轴归一化", "Per-axis") : tx("等比（真实比例）", "Uniform");
 
@@ -2795,18 +2892,27 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
           </div>
         )}
 
-        {/* 未绑定提示（居中，不挡交互） */}
-        {ready && !anyBound && (
-          <div className="p3d-hint">
-            <div>
-              {tx("每组绑 X / Y（Z 可留空=平面）开始绘制；可新增或删除轨迹组", "Bind X / Y per group (Z optional = planar); add or remove groups as needed")}
-              <br />
-              <span className="p3d-hint-sub">
-                {tx(
-                  "通道在 2D 曲线图例或帧画布中添加；也可直接拖图例字段到左上组行智能绑定",
-                  "Channels are shared from the 2D legend / frame canvas — or drag a legend field onto a group row",
-                )}
-              </span>
+        {/* 空态引导卡（P96-K1）：与底部诊断条**同源**——只有 stage=start（还没开始画）才居中给引导。
+            旧实现中央卡看 anyBound（只查 X/Y）、底部条看 whyEmpty（还查 Z/数据/游标），两条件不等价
+            ⇒ 未绑齐时两张卡同时出现、说的是同一句话。 */}
+        {ready && diag && diagStage(diag.code) === "start" && (
+          <div className="p3d-guide" role="status">
+            <div className="p3d-guide-t">{tx("还没有轨迹", "No trajectory yet")}</div>
+            <div className="p3d-guide-d">{diag.text}</div>
+            <ol className="p3d-guide-steps">
+              <li>{tx("在 2D 曲线图例或帧画布里点亮通道（3D 与它们共用同一批通道）", "Enable a channel in the 2D legend or frame canvas — 3D shares the same channels")}</li>
+              <li>{tx("把字段拖到左上的组行 X / Y（Z 可留空 = 平面轨迹）", "Drag a field onto a group row's X / Y (Z optional = planar)")}</li>
+              <li>{tx("或点「选通道」，在组设置里直接挑", "…or pick channels in group settings")}</li>
+            </ol>
+            <div className="p3d-guide-ops">
+              {diag.action && (
+                <button className="btn sm primary" onClick={() => runRemedy(diag)}>
+                  {tx(...REMEDY_LABEL[diag.action])}
+                </button>
+              )}
+              <button className="btn sm" onClick={() => requestOpenPanel("plot2d")}>
+                {tx("打开 2D 曲线", "Open 2D plot")}
+              </button>
             </div>
           </div>
         )}
@@ -2874,6 +2980,20 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
               }
               return null;
             })()}
+          </div>
+        )}
+
+        {/* 底部一行条：只给"已经在画但被挡住"的态（stage=blocked），与中央引导卡互斥 */}
+        {ready && diag && diagStage(diag.code) === "blocked" && (
+          <div className="p3d-empty" role="status">
+            <span className="p3d-empty-text">{diag.text}</span>
+            {diag.action && (
+              <span className="p3d-empty-ops">
+                <button className="p3d-cbtn" onClick={() => runRemedy(diag)}>
+                  {tx(...REMEDY_LABEL[diag.action])}
+                </button>
+              </span>
+            )}
           </div>
         )}
 

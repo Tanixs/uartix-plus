@@ -161,3 +161,40 @@ describe("朝向小工具", () => {
     expect(velocityYawDeg(2, 2, 2, 2)).toBeNull();
   });
 });
+
+describe("P90 D1 有效点数边界（scene 复用 scratch 数组的场景）", () => {
+  const scratch = (valid: number, cap: number) => {
+    const px = new Float64Array(cap);
+    const py = new Float64Array(cap);
+    const pz = new Float64Array(cap);
+    const t = new Float64Array(cap);
+    for (let i = 0; i < cap; i++) {
+      // 有效区之外全是上一轮留下的陈旧大值（真实调用方就是这种数组）
+      px[i] = i < valid ? i : 1e9;
+      py[i] = i < valid ? 0 : 1e9;
+      pz[i] = i < valid ? 0 : 1e9;
+      t[i] = i < valid ? i * 0.1 : 1e9 + i;
+    }
+    return { px, py, pz, t };
+  };
+  const emitValid = (kernel: NonNullable<ReturnType<typeof kernelFor>>, s: ReturnType<typeof scratch>, valid: number) => {
+    const out = { pos: [] as number[], t: [] as number[] };
+    kernel.emit(s.px, s.py, s.pz, s.t, 0, valid - 1, 2, out);
+    return out;
+  };
+
+  it("CR：末段不外推到 scratch 尾巴（曲线仍落在数据范围内）", () => {
+    const s = scratch(5, 16);
+    const out = emitValid(kernelFor("catmullRom", 1)!, s, 5);
+    expect(Math.max(...out.pos)).toBeLessThan(4.5);
+    expect(Math.max(...out.pos)).toBeGreaterThan(3.9);
+    expect(Math.max(...out.t)).toBeLessThanOrEqual(0.4 + 1e-9);
+  });
+
+  it("三次样条：natural 边界落在真末端，脏尾巴不污染整窗解", () => {
+    const s = scratch(5, 16);
+    const out = emitValid(splineKernel, s, 5);
+    expect(Math.max(...out.pos)).toBeLessThan(4.5);
+    expect(out.pos.every(Number.isFinite)).toBe(true);
+  });
+});

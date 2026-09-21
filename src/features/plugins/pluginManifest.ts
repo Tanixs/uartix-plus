@@ -11,6 +11,7 @@ import {
   validateArtifact,
   type ArtifactKind,
 } from "./artifact";
+import { MAX_MODULES_PER_PKG } from "./pluginLimits";
 
 export const PLUGIN_FORMAT = "uartix-plugin";
 export const PLUGIN_SCHEMA_VERSION = 2;
@@ -30,6 +31,13 @@ export const PLUGIN_CAPS = [
   "ui.panel",
   "ui.widget",
   "ui.action",
+  /** 窗口控制危险子集：置顶 / 点击穿透 / 弹出系统窗口（详设 §13.2） */
+  "win.control",
+  /** 本包的 JS 允许被放进专用 Worker 执行（P99a-B1）。刻意**不**与 `agent.tool` 合并：
+   * "能跑代码"和"能往 Agent 工具面里加东西"是两件事，混成一支就再也拆不开裁决。 */
+  "logic.run",
+  /** 本包可向 Agent 注册工具（P99a-B2）。与 `logic.run` 分列：能跑代码 ≠ 能扩工具面 */
+  "agent.tool",
   "motion.preset",
   "workspace.preset",
   "workflow.compose",
@@ -40,7 +48,15 @@ export const PLUGIN_CAPS = [
 ] as const;
 export type PluginCap = (typeof PLUGIN_CAPS)[number];
 
-/** 纯 UI 能力集：仅含这些能力的插件启用可自动应用（§9.3）。 */
+/**
+ * 纯 UI 能力集：仅含这些能力的插件启用可自动应用（§9.3）。
+ *
+ * `win.control` **刻意不在这里** —— 自动启用侧放进来就等于"Agent 生成一个置顶且点击穿透
+ * 的挂件并自己启用它"，那正是点击劫持的形态。含它的包只能人工启用一次。
+ * `logic.run` 同理：会跑 JS 的包不得被自动启用（详设 §11"不给 module 自动启用"）。
+ * `agent.tool` 也是同一条规矩：**特权不进自动放行集** —— 否则 Agent 存一个带工具的包、
+ * 自己启用、下一步就多了一支自己能调的工具，那是自扩展顺手变成自提权。
+ */
 export const PURE_UI_CAPS: readonly PluginCap[] = [
   "theme.tokens",
   "ui.panel",
@@ -62,6 +78,7 @@ export const KIND_REQUIRED_CAP: Record<ArtifactKind, PluginCap> = {
   workspacePreset: "workspace.preset",
   workflow: "workflow.compose",
   reportView: "report.view",
+  module: "logic.run",
 };
 
 /** 产物类型 → contributions 里的列表键。 */
@@ -73,6 +90,7 @@ export const KIND_CONTRIB_KEY: Record<ArtifactKind, string> = {
   workspacePreset: "workspacePresets",
   workflow: "workflows",
   reportView: "reportViews",
+  module: "modules",
 };
 
 export interface ContribEntry {
@@ -104,7 +122,8 @@ export interface PluginManifest {
   /** entry 路径 → 产物（{ kind, …内容 }） */
   artifacts: Record<string, Record<string, unknown>>;
   settingsSchema?: PluginConfigField[];
-  provenance: { createdBy: "agent" | "user" | "import" | "legacy"; reviewed: boolean; sourceExtId?: string };
+  /** `legacy` 已随 P99a-B1a 零兼容裁决移除（没有任何活代码写入它，它能做的只是免检用桥） */
+  provenance: { createdBy: "agent" | "user" | "import"; reviewed: boolean; sourceExtId?: string };
 }
 
 export interface ManifestValidation {
@@ -200,6 +219,7 @@ export function validateManifest(raw: unknown): ManifestValidation {
     return out;
   }
   const artifacts: Record<string, Record<string, unknown>> = {};
+  let moduleCount = 0;
   const entries = Object.entries(artifactsRaw ?? {});
   if (entries.length > MAX_PACKAGE_FILES) {
     out.errors.push(`包内文件数超过上限（${entries.length} > ${MAX_PACKAGE_FILES}）`);
@@ -223,6 +243,14 @@ export function validateManifest(raw: unknown): ManifestValidation {
     if (v.warnings.length) out.warnings.push(`产物 ${norm}：${v.warnings.join("；")}`);
     const rec = payload as Record<string, unknown>;
     const kind = rec.kind as ArtifactKind;
+    if (kind === "module") {
+      moduleCount += 1;
+      // 首版按包键控 worker：多模块要各自的键控与生命周期，别"收下了但只跑第一个"（§8-37）
+      if (moduleCount > MAX_MODULES_PER_PKG) {
+        out.errors.push(`一个包最多 ${MAX_MODULES_PER_PKG} 个逻辑模块（多余的请另存为一个包）：${norm}`);
+        continue;
+      }
+    }
     const need = KIND_REQUIRED_CAP[kind];
     if (!caps.includes(need)) {
       out.errors.push(`产物 ${norm} 类型 ${kind} 需要能力 ${need}，manifest 未声明`);
@@ -336,7 +364,7 @@ export function validateManifest(raw: unknown): ManifestValidation {
   const provRaw = isPlainObject(raw.provenance) ? raw.provenance : {};
   const createdBy = provRaw.createdBy;
   const provenance = {
-    createdBy: (["agent", "user", "import", "legacy"].includes(createdBy as string) ? createdBy : "import") as PluginManifest["provenance"]["createdBy"],
+    createdBy: (["agent", "user", "import"].includes(createdBy as string) ? createdBy : "import") as PluginManifest["provenance"]["createdBy"],
     reviewed: false,
     ...(typeof provRaw.sourceExtId === "string" ? { sourceExtId: provRaw.sourceExtId } : {}),
   };

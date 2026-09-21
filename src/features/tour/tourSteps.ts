@@ -92,8 +92,8 @@ export const TOUR_STEPS: tourStore.TourStep[] = [
     id: "ai",
     title: { zh: "第 7 步 · AI 助手：说出即发生", en: "Step 7 · AI assistant" },
     body: {
-      zh: "配置好 API Key 后，AI 能识别协议、生成指令/卡片/编排，还能直接操作本软件（打开面板、写入配置）。标题栏星形按钮或 Ctrl+K 唤起。",
-      en: "With an API key, the AI recognizes protocols, generates commands/cards/flows, and operates the app directly. Star button or Ctrl+K.",
+      zh: "配置好 API Key 后，AI 能识别协议、生成指令/卡片/编排，还能直接操作本软件（打开面板、写入配置）。标题栏星形按钮或 Ctrl+K 唤起。\n输入框下方的 pill 有两层选择：先用「普通对话 / Agent 任务」决定要不要让它动手，再用「仅预览 / 放手改界面 / 全面放手」授权。不确定就先选「仅预览」，看它打算怎么做再放开。",
+      en: "With an API key, the AI recognizes protocols, generates commands/cards/flows, and operates the app directly. Star button or Ctrl+K.\nThe pill under the input has two choices: first 普通对话 / Agent 任务 (should it act at all), then 仅预览 / 放手改界面 / 全面放手 (how much power). Unsure? Pick 仅预览 first and watch what it plans.",
     },
     selector: '[data-tour="ai"]',
   },

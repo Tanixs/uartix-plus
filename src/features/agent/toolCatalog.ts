@@ -72,6 +72,30 @@ export function untaggedActions(): string[] {
   return APP_ACTION_KINDS.filter((k) => !META[k]);
 }
 
+/**
+ * 动作 kind → 中文。**放在动作目录里而不是显示层**，并且是 `Record<AppActionKind,…>`：
+ * 新增一个动作忘了配中文名，tsc 直接报错（旧表在 toolDisplay 里是 `Record<string,string>`，
+ * 漏配只会静默回显 snake_case——§8-36① 说的就是这类"看得见的漂移"）。
+ */
+export const ACTION_LABEL_ZH: Record<AppActionKind, string> = {
+  openPanel: "打开面板", applyPreset: "应用预设", setTheme: "切换主题",
+  listProtocols: "列出协议模板", listCommands: "列出指令", listCards: "列出卡片", listWidgets: "列出小部件",
+  addChannel: "新增通道", clearChannels: "清空通道",
+  writeCard: "新建控制卡片", writeCommand: "新建指令", writeTemplate: "写入协议模板", writeCodec: "写入编码配置",
+  patchCard: "修改卡片", addPage: "新增页", clearPage: "清空页",
+  removeCard: "删除卡片", removeProtocol: "删除协议模板", removeCommand: "删除指令", removeCodec: "删除编码配置", removeWidget: "删除小部件",
+  openPort: "打开串口", closePort: "关闭串口", modbus: "Modbus 工作台", xferStart: "启动文件传输",
+  readPlot: "读取曲线图", sentinel: "哨兵", xrayEvidence: "结构证据", xrayCrack: "校验爆破", xrayReport: "协议考古报告",
+  orchestratorRead: "读取编排", orchestrator: "编排器操作", plot3dRead: "读取 3D 轨迹", plot3d: "3D 轨迹操作", vdev: "虚拟设备",
+  toast: "弹提示", openWidget: "打开小部件", closeWidget: "关闭小部件", popWidget: "弹出小部件",
+};
+
+/** 动作 kind 的中文（未登记时同样可读化，绝不显示裸常量） */
+export function actionKindLabel(kind: string): string {
+  const hit = (ACTION_LABEL_ZH as Record<string, string>)[kind];
+  return hit ?? kind.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();
+}
+
 export function actionMeta(kind: string): ToolPolicyMeta | undefined {
   return META[kind as AppActionKind];
 }

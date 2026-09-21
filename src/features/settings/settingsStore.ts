@@ -53,14 +53,18 @@ export interface Settings {
   aiTemperature: number;
   aiProxy: string;
   aiNoProxy: string;
-  aiCreativity: boolean;
+  /** P98-M2：aiCreativity / aiScript 已删（死码与假装生效的安全控件） */
   aiWidgetSend: boolean;
-  aiScript: boolean;
   /** P88e B2：Agent 通用工具——文件白名单（分号/换行分隔的绝对路径；空=fs_read/fs_list 关闭） */
   agentFsRoots: string;
   /** P88e B2：Agent 通用工具——命令执行总开关（默认关；开启后 shell_exec 仍需逐次审批） */
   agentShellEnabled: boolean;
   showThinking: boolean;
+  /** P96-K4：是否让模型进入"先想后答"模式（与 showThinking 的界面显示解耦）。
+   *  思考模式会显著拉长首字节前的静默，是网关按空闲掐断的主要来源，所以单独成项。 */
+  deepThink: boolean;
+  /** P96-K4：流式相邻两 chunk 之间的读空闲上限（秒）；只约束我们这一侧，管不到上游网关 */
+  streamIdleSecs: number;
   chartPalette: "standard" | "cbSafe";
   conWrap: boolean;
   /** 减弱动效：强制关闭呼吸/过渡动画（独立于系统 prefers-reduced-motion） */
@@ -143,12 +147,12 @@ function load(): Settings {
     aiTemperature: 0.3,
     aiProxy: "",
     aiNoProxy: "",
-    aiCreativity: false,
     aiWidgetSend: false,
-    aiScript: false,
     agentFsRoots: "",
     agentShellEnabled: false,
     showThinking: true,
+    deepThink: true,
+    streamIdleSecs: 120,
     chartPalette: "standard",
     conWrap: true,
     reduceMotion: false,
@@ -202,12 +206,15 @@ function load(): Settings {
           : 0.3,
       aiProxy: typeof p.aiProxy === "string" ? p.aiProxy : "",
       aiNoProxy: typeof p.aiNoProxy === "string" ? p.aiNoProxy : "",
-      aiCreativity: Boolean(p.aiCreativity),
       aiWidgetSend: Boolean(p.aiWidgetSend),
-      aiScript: Boolean(p.aiScript),
       agentFsRoots: typeof p.agentFsRoots === "string" ? p.agentFsRoots.slice(0, 4096) : "",
       agentShellEnabled: Boolean(p.agentShellEnabled),
       showThinking: p.showThinking === undefined ? true : Boolean(p.showThinking),
+      deepThink: p.deepThink === undefined ? true : Boolean(p.deepThink),
+      streamIdleSecs: (() => {
+        const n = Math.round(Number(p.streamIdleSecs));
+        return Number.isFinite(n) && n >= 30 && n <= 600 ? n : 120;
+      })(),
       chartPalette: p.chartPalette === "cbSafe" ? "cbSafe" : "standard",
       conWrap: p.conWrap === undefined ? true : Boolean(p.conWrap),
       reduceMotion: Boolean(p.reduceMotion),

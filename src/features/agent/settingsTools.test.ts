@@ -85,7 +85,31 @@ it("undo is three-state: ok / revision_conflict / token_expired", async () => {
 it("validatePatch and readSettings are pure exports for host policy reuse", () => {
   expect(validatePatch({ theme: "dark" }).ok).toBe(true);
   expect(validatePatch([]).ok).toBe(false);
-  expect(validatePatch({ aiScript: true })).toEqual({ ok: false, reason: "protected_or_secret_setting:aiScript" });
+  // 从 schema 现取一个"确实存在的 protected 布尔键"来验拒绝路径。
+  // 以前这里手抄 `aiScript` —— P98-M2 把它删掉后，那行会悄悄退化成"断言一个不存在的键被拒"，
+  // 看着是绿的，其实什么都没测（§8-36 的又一处第二份真相）。
+  const protectedKey = SETTINGS_SCHEMA.find((e) => e.sensitivity === "protected" && e.type === "boolean");
+  expect(protectedKey, "schema 里必须还有 protected 布尔键，否则这条断言没有对象").toBeTruthy();
+  expect(validatePatch({ [protectedKey!.key]: true })).toEqual({
+    ok: false, reason: `protected_or_secret_setting:${protectedKey!.key}`,
+  });
   expect(readSettings().aiApiKey).toEqual({ configured: false });
   expect(agentWritableKeys().length).toBeGreaterThan(5);
+});
+
+it("P92 C：settings_apply 按授权域裁决，扩展档不比「界面创造」低", async () => {
+  const rev = () => settingsRevision();
+  const ok = await settingsAdapter.execute(
+    call("settings_apply", { patch: { zoom: 110 }, revision: rev() }),
+    { ...ctx, scope: "custom" as const, allowed: ["config", "plugins", "files"] },
+  );
+  expect(ok.ok).toBe(true);
+  expect(settings.getSnapshot().zoom).toBe(110);
+  const noDom = await settingsAdapter.execute(
+    call("settings_apply", { patch: { zoom: 125 }, revision: rev() }),
+    { ...ctx, scope: "custom" as const, allowed: ["files"] },
+  );
+  expect(noDom.code).toBe("unauthorized_scope");
+  expect((noDom.data as { hint: string }).hint).toContain("配置写入");
+  expect(settings.getSnapshot().zoom).toBe(110);
 });

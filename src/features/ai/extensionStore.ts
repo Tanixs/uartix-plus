@@ -38,8 +38,14 @@ const LEGACY_THEME = "vs.aiTheme";
 /**
  * 读取持久化快照：旧扩展（用户/AI 直接创建的独立扩展）已废弃，
  * 只保留带 pluginRef 的插件库投影记录；openIds 中指向已丢弃记录的同步过滤。
+ *
+ * P91 D1：**theme 投影不再持久化**——主题的唯一真相是插件库里的 artifact
+ * （vs.pluginLib.v1），投影由 pluginStore 启动时重建。旧实现把 vars 同时写进
+ * 两边，任一持久化失败就出现"库里显示已启用、界面却没生效"的分裂状态。
  * 顺带清理更早的 vs.aiWidgets / vs.aiTheme 遗留键。
  */
+const isDerivedOnly = (e: AiExtension) => e.type === "theme";
+
 function load(): ExtSnapshot {
   let exts: AiExtension[] = [];
   let openIds: string[] = [];
@@ -48,7 +54,9 @@ function load(): ExtSnapshot {
     if (raw) {
       const p = JSON.parse(raw) as Partial<ExtSnapshot>;
       exts = Array.isArray(p.exts)
-        ? (p.exts as AiExtension[]).filter((e) => !!e && typeof e === "object" && !!e.pluginRef)
+        ? (p.exts as AiExtension[]).filter(
+            (e) => !!e && typeof e === "object" && !!e.pluginRef && !isDerivedOnly(e),
+          )
         : [];
       const ids = new Set(exts.map((e) => e.id));
       openIds = Array.isArray(p.openIds) ? p.openIds.filter((x) => ids.has(x)) : [];
@@ -68,11 +76,14 @@ function load(): ExtSnapshot {
 let snapshot: ExtSnapshot = load();
 const listeners = new Set<() => void>();
 
-/** 持久化时同样只写带 pluginRef 的投影记录（防旧扩展数据回写） */
+/** 持久化只写非派生类投影（theme 由插件库重建，写两份就是两份真相） */
 function persist() {
   localStorage.setItem(
     KEY,
-    JSON.stringify({ exts: snapshot.exts.filter((e) => e.pluginRef), openIds: snapshot.openIds }),
+    JSON.stringify({
+      exts: snapshot.exts.filter((e) => e.pluginRef && !isDerivedOnly(e)),
+      openIds: snapshot.openIds,
+    }),
   );
 }
 

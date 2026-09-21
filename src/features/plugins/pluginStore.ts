@@ -11,7 +11,6 @@
  */
 import { useSyncExternalStore } from "react";
 import * as extStore from "../ai/extensionStore";
-import { applyStyleExts } from "../ai/extRuntime";
 import {
   HOST_API,
   PLUGIN_FORMAT,
@@ -23,6 +22,37 @@ import {
   type PluginManifest,
 } from "./pluginManifest";
 import { renderDeclarativeHtml } from "./declarativePanel";
+import { moduleArtifactsOf } from "./moduleHost";
+import { closeModule, moduleDiagnostics, moduleIsReady, openModule, waitModuleReady } from "./moduleBus";
+
+/* ---------------- 样式层回调（P92-F：禁止在此静态 import extRuntime） ----------------
+ * 曾经的写法是 `import { applyStyleExts } from "../ai/extRuntime"` + 模块加载即
+ * `restoreProjections()`。那会成环：
+ *   extRuntime → chatStore → agentRun → agentAdapter → pluginStore → extRuntime
+ * 环里 pluginStore 的模块体在 extRuntime **自身求值完成之前**执行，于是它调进
+ * extRuntime 的 `let appliedVars` 命中 TDZ —— `ReferenceError: Cannot access
+ * 'appliedVars' before initialization`，React 从未挂载，`#root` 空节点 = **整窗白屏**，
+ * 而 tsc/vitest/build/cargo 当时全绿（构建期 rollup 把环拉平了，只有 dev 的 ESM
+ * 求值顺序会炸）。
+ * 改成注册式 + 脏标记：谁先求值都不丢样式层、也不靠 App 启动顺序。 */
+let applyStyleFn: (() => void) | null = null;
+let stylesDirty = false;
+
+/** 投影变了，请重贴样式层；applier 尚未注册（模块求值期）就先记账，注册时补一次。 */
+function scheduleStyles(): void {
+  if (!applyStyleFn) {
+    stylesDirty = true;
+    return;
+  }
+  stylesDirty = false;
+  applyStyleFn();
+}
+
+/** 由 extRuntime 在自身求值时注册；带脏标记则立刻补跑一次。 */
+export function setStyleApplier(fn: () => void): void {
+  applyStyleFn = fn;
+  if (stylesDirty) scheduleStyles();
+}
 
 export type PluginState =
   | "draft"
@@ -54,9 +84,7 @@ export interface PluginVersionEntry {
 export interface PluginRecord {
   pkg: PluginManifest;
   state: PluginState;
-  /** 旧扩展迁移来源；requiresReview 的记录不可启用（script 迁移） */
-  legacy?: { fromExtType: string; requiresReview?: boolean; note?: string; code?: string };
-  /** 新插件 iframe 握手 nonce（legacy 迁移件不强制） */
+  /** 新插件 iframe 握手 nonce */
   nonce: string;
   config: Record<string, unknown>;
   versions: PluginVersionEntry[];
@@ -79,7 +107,18 @@ function load(): PluginSnapshot {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const p = JSON.parse(raw) as Partial<PluginSnapshot>;
-      return { plugins: Array.isArray(p.plugins) ? (p.plugins as PluginRecord[]) : [] };
+      const all = Array.isArray(p.plugins) ? (p.plugins as PluginRecord[]) : [];
+      // P99a-B1a 零兼容（用户裁决：软件未发布、旧形态不适配）：带 `legacy` 的迁移记录直接丢弃，
+      // 但**不静默**——留一行读数，否则用户只会看到"我装的插件不见了"。
+      const dropped = all.filter((r) => (r as { legacy?: unknown }).legacy);
+      if (dropped.length)
+        console.warn(`[pluginStore] 已丢弃 ${dropped.length} 条旧扩展迁移记录（legacy 形态已废弃，请在插件库重新保存）`);
+      // nonce 是桥握手的不变量，缺了它这个包永远过不了裁决 ⇒ 就地补，而不是留一个哑插件
+      return {
+        plugins: all
+          .filter((r) => !(r as { legacy?: unknown }).legacy)
+          .map((r) => (typeof r.nonce === "string" && r.nonce ? r : { ...r, nonce: crypto.randomUUID() })),
+      };
     }
   } catch {
     localStorage.removeItem(KEY);
@@ -186,12 +225,6 @@ export function defaultConfig(manifest: PluginManifest): Record<string, unknown>
   return cfg;
 }
 
-/** legacy 迁移件直接落库（不走 staging：记录本身即为待审状态，§9.4）。 */
-export function upsertLegacyRecord(record: PluginRecord) {
-  upsert(record);
-  emit();
-}
-
 /* ---------------- 启停与投影 ---------------- */
 
 export function shadowExtId(pkgId: string, contribId: string): string {
@@ -263,7 +296,12 @@ function buildProjections(record: PluginRecord): string | null {
   return null;
 }
 
+/**
+ * 把这个包从运行时里摘掉：影子扩展 + 逻辑模块 worker + 它注册的工具，一次摘干净。
+ * 停用/卸载/隔离/换版本都走这一个出口（分开摘会留"扩展没了但工具还在"的半死态）。
+ */
 function removeProjections(pkgId: string) {
+  closeModule(pkgId);
   const prefix = `plg:${pkgId}:`;
   for (const e of extStore.getSnapshot().exts) {
     if (e.pluginRef === pkgId || e.id.startsWith(prefix)) extStore.removeProjection(e.id);
@@ -273,27 +311,103 @@ function removeProjections(pkgId: string) {
 export function setEnabled(id: string, enabled: boolean): { ok: boolean; msg: string } {
   const record = getPlugin(id);
   if (!record) return { ok: false, msg: "插件不存在" };
-  if (record.legacy?.requiresReview) {
-    return { ok: false, msg: "该迁移件包含脚本等无法安全转换的内容，保持停用等待人工处理" };
-  }
   if (record.state === "quarantined" && enabled) {
     return { ok: false, msg: "插件已被隔离（多次违反隔离约束），请先卸载后重新安装" };
   }
   if (enabled) {
-    if (record.state === "enabled") return { ok: true, msg: "已启用" };
+    // P91 D2：**已启用也要重建投影**。旧实现在这里早退"已启用"，而 theme 投影
+    // 已不再持久化（P91 D1）——早退等于"库里说已启用、界面什么都没应用"。
     const err = buildProjections(record);
     if (err) return { ok: false, msg: err };
     record.state = "enabled";
-    applyStyleExts();
+    scheduleStyles();
   } else {
     removeProjections(id);
     record.state = record.state === "enabled" ? "disabled" : "installed_disabled";
-    applyStyleExts();
+    scheduleStyles();
   }
   record.updatedAt = Date.now();
   upsert(record);
   emit();
   return { ok: true, msg: enabled ? `已启用「${record.pkg.name}」` : `已停用「${record.pkg.name}」` };
+}
+
+/**
+ * P91 D1：启动时从插件库重建全部启用件的投影（theme 的唯一真相在这里，不在 vs.aiExts）。
+ * 模块加载即执行，因此不依赖 App 的启动顺序；样式层走 `scheduleStyles()`（本文件顶部
+ * P92-F 注释），求值期未注册就记脏、由 extRuntime 注册时补跑，**不会再在求值期调进
+ * 尚未初始化的 extRuntime**。
+ */
+function restoreProjections() {
+  let changed = false;
+  for (const record of snapshot.plugins) {
+    if (record.state !== "enabled") continue;
+    if (buildProjections(record) === null) changed = true;
+  }
+  if (changed) scheduleStyles();
+}
+
+restoreProjections();
+
+/**
+ * P99a-B1/B2：把一个包的逻辑模块臂起来（起 Worker + 等封网自证）。
+ *
+ * 通不过就**保持停用**，并把逐 entry 的失败原因原样回给调用方（插件库开关 / `enable_plugin`）。
+ * 幂等：已经在线的直接返回——run 起点会遍历已启用包臂一次，不能每次任务都把 worker 重启。
+ *
+ * 为什么不做进 `setEnabled`：它是同步的，而探针要等 worker 回报。把异步门做成"先启用、
+ * 回头再标红"就是 §8-37 说的"假装生效的安全控件"。
+ */
+export async function armModulePackage(id: string): Promise<{ ok: boolean; msg: string; modules: number }> {
+  const record = getPlugin(id);
+  if (!record) return { ok: false, msg: "插件不存在", modules: 0 };
+  const mods = moduleArtifactsOf(record.pkg);
+  if (!mods.length) return { ok: true, msg: "本包没有逻辑模块", modules: 0 };
+  if (moduleIsReady(id)) return { ok: true, msg: "逻辑模块已在线", modules: 1 };
+  const failed = (why: string) => ({ ok: false, msg: `逻辑模块未通过封网自证，保持停用——${why}`, modules: 1 });
+  openModule({
+    pkgId: record.pkg.id,
+    pkgName: record.pkg.name,
+    version: record.pkg.version,
+    code: mods[0].code,
+    nonce: record.nonce,
+    caps: record.pkg.capabilities,
+    onViolation: (pkgId, why) => reportViolation(pkgId, why),
+  });
+  /**
+   * 等的是 **ready**（封网过了 **且** 插件代码求值完），不是只等探针：
+   * `uartix.tools.register()` 在求值里同步发出，探针回报与 tool-def 是两条消息两个任务——
+   * 只等探针就去取工具快照，会得到"这次任务没工具、下次才有"的鬼现象。
+   */
+  const outcome = await waitModuleReady(id);
+  if (outcome.status !== "live") {
+    const diag = moduleDiagnostics(id);
+    closeModule(id);
+    return failed(diag.probeFailed.join("/") || `状态 ${outcome.status}`);
+  }
+  return { ok: true, msg: "逻辑模块已通过封网自证并在线", modules: 1 };
+}
+
+/** 收掉一个包的逻辑模块（停用/卸载/隔离/换版本都走它）：worker 终止、它的工具当场注销。 */
+export function disarmModulePackage(id: string): void {
+  closeModule(id);
+}
+
+/**
+ * run 起点臂一遍所有"已启用且带逻辑模块"的包。
+ * 臂失败的包**不注册工具**，但一定要出声：静默少了工具，下一次排查只会去怀疑模型。
+ */
+export async function armEnabledModules(): Promise<{ live: string[]; blocked: { id: string; msg: string }[] }> {
+  const live: string[] = [];
+  const blocked: { id: string; msg: string }[] = [];
+  for (const record of snapshot.plugins) {
+    if (record.state !== "enabled") continue;
+    if (!moduleArtifactsOf(record.pkg).length) continue;
+    const r = await armModulePackage(record.pkg.id);
+    if (r.ok) live.push(record.pkg.id);
+    else blocked.push({ id: record.pkg.id, msg: r.msg });
+  }
+  return { live, blocked };
 }
 
 /** 标记已预览（状态机 draft/validated → previewed）。 */
@@ -346,7 +460,6 @@ export function setConfigValues(id: string, values: Record<string, unknown>): { 
 export function proposeUpdate(id: string, manifest: unknown): { ok: boolean; msg: string; warnings?: string[] } {
   const record = getPlugin(id);
   if (!record) return { ok: false, msg: "插件不存在" };
-  if (record.legacy) return { ok: false, msg: "迁移件不支持在线更新（请在插件库另存新版本）" };
   const v = validateManifest(manifest);
   if (!v.ok || !v.manifest) return { ok: false, msg: v.errors.join("；") };
   if (v.manifest.id !== id) return { ok: false, msg: `候选包 ID（${v.manifest.id}）与现有插件（${id}）不一致` };
@@ -393,10 +506,10 @@ export function approveUpdate(id: string): { ok: boolean; msg: string } {
       }
       upsert(record);
       emit();
-      applyStyleExts();
+      scheduleStyles();
       return { ok: false, msg: `更新失败已回退：${err}` };
     }
-    applyStyleExts();
+    scheduleStyles();
   }
   upsert(record);
   emit();
@@ -437,7 +550,7 @@ export function rollback(id: string): { ok: boolean; msg: string } {
   if (wasEnabled) buildProjections(record);
   upsert(record);
   emit();
-  applyStyleExts();
+  scheduleStyles();
   return { ok: true, msg: `已回滚到 v${record.pkg.version}` };
 }
 
@@ -475,7 +588,7 @@ export function uninstall(id: string): { ok: boolean; msg: string } {
   removeProjections(id);
   snapshot.plugins = snapshot.plugins.filter((p) => p.pkg.id !== id);
   emit();
-  applyStyleExts();
+  scheduleStyles();
   return { ok: true, msg: `已卸载「${record.pkg.name}」（历史版本一并删除）` };
 }
 
@@ -499,7 +612,7 @@ export function reportViolation(pkgId: string, code: string): void {
   record.updatedAt = now;
   upsert(record);
   emit();
-  applyStyleExts();
+  scheduleStyles();
   console.warn(`[插件隔离] ${pkgId} 已隔离（60 秒内违规 ${VIOLATION_THRESHOLD} 次，最近：${code}）`);
 }
 
@@ -584,8 +697,6 @@ export interface PluginFrameCtx {
   pkgId: string;
   caps: PluginCap[];
   nonce: string;
-  /** 迁移件保持旧行为（M1 存量旁路）：不强制 nonce/能力校验 */
-  legacy: boolean;
 }
 
 /** 由影子扩展的 pluginRef 解析插件隔离上下文；非插件扩展返回 undefined。 */
@@ -593,17 +704,7 @@ export function pluginCtxForExt(pluginRef: string | undefined): PluginFrameCtx |
   if (!pluginRef) return undefined;
   const record = getPlugin(pluginRef);
   if (!record) return undefined;
-  return { pkgId: record.pkg.id, caps: record.pkg.capabilities, nonce: record.nonce, legacy: !!record.legacy };
-}
-
-/** 插件库统计（供入口徽标/诊断）。 */
-export function stats(): { total: number; enabled: number; quarantined: number; legacy: number } {
-  return {
-    total: snapshot.plugins.length,
-    enabled: snapshot.plugins.filter((p) => p.state === "enabled").length,
-    quarantined: snapshot.plugins.filter((p) => p.state === "quarantined").length,
-    legacy: snapshot.plugins.filter((p) => p.legacy).length,
-  };
+  return { pkgId: record.pkg.id, caps: record.pkg.capabilities, nonce: record.nonce };
 }
 
 /** 常量复出口（供 UI/测试单一来源）。 */

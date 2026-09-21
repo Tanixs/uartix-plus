@@ -597,18 +597,59 @@ export function setGroupVisible(gid: GroupId, visible: boolean) {
 }
 
 /**
+ * P91 C4：设置提交链埋点。"改了没反应"必须能归因到 只读锁 / 未知组 / 归一化后等价
+ * 三种静默退出之一——过去这三条一个日志都没有，模型切换失效无从定位。
+ */
+let diagAt = 0;
+function diagInfo(msg: string, gid?: GroupId) {
+  const now = Date.now();
+  if (now - diagAt < 3000) return;
+  diagAt = now;
+  console.info(`[P3D诊断] ${msg}${gid ? `（组 ${gid}）` : ""}`);
+}
+
+/**
+ * P91 C1：空态归因所需的 store 侧事实（绑定缺哪根轴 / 通道有没有数据 / 配对统计）。
+ * 场景侧的缓冲与游标事实由 scene.probe() 提供，两者在 UI 里合成 DiagnoseInput。
+ */
+export function diagFacts(): {
+  id: GroupId; name: string; visible: boolean; mode: TrajGroup["mode"];
+  missingAxis: "x" | "y" | "z" | null; hasSource: boolean; paired: number; skipped: number;
+}[] {
+  return settings.groups.map((g) => {
+    const missingAxis: "x" | "y" | "z" | null = !g.chX ? "x" : !g.chY ? "y" : !g.chZ ? "z" : null;
+    const bound = [g.chX, g.chY, g.chZ].filter(Boolean) as string[];
+    const hasSource = bound.length > 0 && bound.every((id) => getChanData(id).t.length > 0);
+    const p = pairStats.get(g.id);
+    return {
+      id: g.id, name: g.name, visible: g.visible, mode: g.mode,
+      missingAxis, hasSource, paired: p?.paired ?? 0, skipped: p?.skipped ?? 0,
+    };
+  });
+}
+
+/**
  * 组配置更新（绑定/模式/显示/配对/备注）：配置类 → 过只读锁 + 一步可撤销。
  * 绑定/密度/配对/模式/平滑变化 → 泵签名变 → 该组自动重灌（plotStore 源缓冲内可回看历史）。
  */
 export function updateGroup(gid: GroupId, patch: Partial<TrajGroup>) {
-  if (guardLocked()) return;
+  if (guardLocked()) {
+    diagInfo("updateGroup 被「只读锁」忽略（回放/锁定态不可改设置）", gid);
+    return;
+  }
   const prev = settings.groups.find((g) => g.id === gid);
-  if (!prev) return; // P87e：未知/已删组直接拒绝，不回退第一组
+  if (!prev) {
+    diagInfo("updateGroup 命中未知/已删组，未回退到第一组", gid);
+    return;
+  }
   const idx = settings.groups.indexOf(prev);
   const clean = normalizeGroup({ ...prev, ...patch, visible: undefined }, idx);
   clean.visible = prev.visible;
   clean.id = gid;
-  if (JSON.stringify(prev) === JSON.stringify(clean)) return;
+  if (JSON.stringify(prev) === JSON.stringify(clean)) {
+    diagInfo(`updateGroup 归一化后与当前等价，未下发：${JSON.stringify(patch).slice(0, 160)}`, gid);
+    return;
+  }
   pushHistory();
   settings = { ...settings, groups: settings.groups.map((g) => (g.id === gid ? clean : g)) };
   emit();
@@ -765,10 +806,19 @@ let pumpTimer: number | null = null;
  * 显式 scrub（含共享预览）> 回放时钟 > null。
  */
 let scrubSec: number | null = null;
+/** P91 C2：游标来源。"local"=用户在 3D 时间条上亲手拖的（一律尊重）；
+ *  "linked"/"session"=别的面板或打点标记回灌的（越界或截空时可自动放弃并说明）。 */
+let scrubSrc: "local" | "linked" | "session" = "local";
 
 /** 显式时间预览/定位；null = 释放覆盖，恢复回放时钟或最新数据。 */
-export function setScrub(sec: number | null) {
+export function setScrub(sec: number | null, source: "local" | "linked" | "session" = "local") {
   scrubSec = sec;
+  scrubSrc = sec === null ? "local" : source;
+}
+
+/** 当前 scrub 来源（场景回调判定"能不能自动回到最新"用） */
+export function scrubSource(): "local" | "linked" | "session" {
+  return scrubSrc;
 }
 
 /** 最近一次下发的游标（UI 低频读取显示用；非实时） */
@@ -1270,6 +1320,9 @@ export function calibSourceReady(): boolean {
   return !!g && !!g.chX && !!g.chY && !!g.chZ;
 }
 
+/** P90 D 埋点节流：同一类诊断 30s 内最多一条，避免 8.3Hz 的泵刷屏 */
+const pumpWarnAt: { skipped?: number; scrub?: number } = {};
+
 function pumpOnce() {
   if (!sink || !panelActivity.isOpen("plot3d")) return;
   const chans = getPlotSnapshot().channels;
@@ -1287,6 +1340,7 @@ function pumpOnce() {
   const t0 = timeOrigin();
   const entries: GroupBatch[] = [];
   let endSrc = -Infinity;
+  let startSrc = Infinity; // P90 D3：游标下界=数据实际起点（保留窗口被裁过时时 0 会截没全部点）
   const req = clearReq;
   clearReq = null;
 
@@ -1341,6 +1395,16 @@ function pumpOnce() {
       tolMs: g.pairTolMs,
       sinceT: gs.lastT,
     });
+    // P90 D 埋点：数据在、水位在推进，却一个点都没配出来——这是"面板全黑且零日志"的盲区
+    if (pair.t.length === 0 && pair.skipped > 0) {
+      const now = Date.now();
+      if (now - (pumpWarnAt.skipped ?? 0) > 30000) {
+        pumpWarnAt.skipped = now;
+        console.warn(
+          `[P3D诊断] 组 ${g.id.toUpperCase()} 配对跳过 ${pair.skipped} 点、产出 0（三轴时间基不齐或容差过窄；水位 ${gs.lastT}）`,
+        );
+      }
+    }
     // 时间水位续传：interp/nearest 消费到 X 末锚点；union 消费到三序列原始末点。
     // 永不回退（源重建缩小防御；重灌时已置 -Infinity）。
     const sampledBefore = gs.sampledT;
@@ -1352,6 +1416,9 @@ function pumpOnce() {
     if (xs.t.length > 0 && xs.t[xs.t.length - 1] > endSrc) endSrc = xs.t[xs.t.length - 1];
     if (ys.t.length > 0 && ys.t[ys.t.length - 1] > endSrc) endSrc = ys.t[ys.t.length - 1];
     if (zs.t.length > 0 && zs.t[zs.t.length - 1] > endSrc) endSrc = zs.t[zs.t.length - 1];
+    if (xs.t.length > 0 && xs.t[0] < startSrc) startSrc = xs.t[0];
+    if (ys.t.length > 0 && ys.t[0] < startSrc) startSrc = ys.t[0];
+    if (zs.t.length > 0 && zs.t[0] < startSrc) startSrc = zs.t[0];
 
     const stride = g.density === "high" ? 1 : g.density === "mid" ? 2 : 4;
     const sampleMode = g.pairMode === "union" ? null : g.pairMode;
@@ -1465,18 +1532,49 @@ function pumpOnce() {
   // ---------- 游标裁决：显式预览 > 回放时钟 > 跟随最新 ----------
   let cursorSec: number | null = null;
   const sess = sessionProbe();
-  const endRel = endSrc > -Infinity ? (endSrc - t0) / 1000 : 0;
-  if (scrubSec !== null) {
-    cursorSec = Math.min(Math.max(scrubSec, 0), endRel);
+  const hasData = endSrc > -Infinity;
+  const endRel = hasData ? (endSrc - t0) / 1000 : 0;
+  // P90 D3：无数据时绝不应用 scrub（旧实现把 endRel 当 0 下界，陈旧游标会把 drawRange
+  // 截到 0~1 点 → 面板全黑且零日志）；有数据时下界用数据真起点，保留窗口被裁过后
+  // 也不会把整条轨迹截没。
+  const startRel = startSrc < Infinity ? Math.max(0, (startSrc - t0) / 1000) : 0;
+  // P91 C2：外部来源（联动/打点回灌）的游标若落在数据范围之外（陈旧绝对时间、跨会话
+  // 残留、timeOrigin 错位），**忽略并保持跟随最新**——旧实现把它钳到起点，等于
+  // 每 120ms 重下一次"画 0 个点"，面板全黑且告警因钳制幅度不足 1s 从不触发。
+  if (scrubSec !== null && scrubSrc !== "local" && hasData && (scrubSec < startRel - 0.25 || scrubSec > endRel + 0.25)) {
+    const now = Date.now();
+    if (now - (pumpWarnAt.scrub ?? 0) > 30000) {
+      pumpWarnAt.scrub = now;
+      console.warn(
+        `[P3D诊断] 外部游标 t=${scrubSec.toFixed(2)}s 在数据范围 ${startRel.toFixed(2)}~${endRel.toFixed(2)}s 之外，已忽略并保持跟随最新（可在 3D 时间条上重新定位）`,
+      );
+    }
+    scrubSec = null;
+    scrubSrc = "local";
+  }
+  if (scrubSec !== null && hasData) {
+    cursorSec = Math.min(Math.max(scrubSec, startRel), endRel);
+  } else if (scrubSec !== null) {
+    cursorSec = null; // 无数据：绝不应用 scrub（否则回到有数据那一刻仍是陈旧截断位）
   } else if (sess.playing) {
     // 回放时钟 → 相对秒，clamp 到源范围（防御时钟错位）
     const rel = (sess.replayTsMs - t0) / 1000;
-    cursorSec = Math.min(Math.max(rel, 0), endRel);
+    cursorSec = Math.min(Math.max(rel, startRel), endRel);
   }
   const cursorChanged =
     (cursorSec === null) !== (st.lastCursor === null) ||
     (cursorSec !== null &&
       Math.abs(cursorSec - (st.lastCursor ?? 0)) > 0.005);
+  // P90 D 埋点：scrub 被钳制（陈旧游标 / 别的面板回灌的绝对时间 / 无数据）→ 画面可能整条不见
+  if (scrubSec !== null && cursorSec !== null && Math.abs(cursorSec - scrubSec) > 1) {
+    const now = Date.now();
+    if (now - (pumpWarnAt.scrub ?? 0) > 30000) {
+      pumpWarnAt.scrub = now;
+      console.warn(
+        `[P3D诊断] 游标 scrub=${scrubSec.toFixed(2)}s 被钳制为 ${cursorSec.toFixed(2)}s（数据范围 ${startRel.toFixed(2)}~${endRel.toFixed(2)}s；双击画布空白可回到最新）`,
+      );
+    }
+  }
   if (cursorChanged) st.lastCursor = cursorSec;
   // 游标变化时即使无新数据也要下发（如 seek 向后：重灌点全 ≤ 水位，批次为空）
   if (entries.length > 0 || cursorChanged) {

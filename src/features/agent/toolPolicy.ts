@@ -5,6 +5,7 @@
  * 四类人工确认例外（HANDOVER §6.3）：实车下发、删除/覆盖用户已定义对象、不可逆操作、安全边界（急停/校准）。
  */
 import type { Sensitivity } from "../settings/settingsSchema";
+import type { RunScope } from "./types";
 
 export type EffectClass =
   | "read" // 零副作用观察
@@ -31,8 +32,8 @@ export interface ToolPolicyMeta {
 export type PolicyDecision = "allow" | "preview_only" | "require_local_approval" | "deny";
 
 export interface PolicyContext {
-  /** 自动执行档位（详设 §4.3）：preview=仅预览 create=常规创造 custom=自定义范围 */
-  scope: "preview" | "create" | "custom";
+  /** 自动执行档位（详设 §4.3）：preview=仅预览 create=常规创造 custom=自定义范围；字面量单源于 types.RunScope */
+  scope: RunScope;
   /** 本任务授权范围内的键/对象；null 表示未做细粒度授权 */
   authorized: (key: string) => boolean;
   /** 当前应用锁（Operator 锁等） */

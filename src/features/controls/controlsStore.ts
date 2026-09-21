@@ -4,18 +4,24 @@ import { getLocale } from "../../i18n/strings";
 import { guardLocked } from "../operator/lock";
   import { DEBUG_SCHEMA, sanitizeManaged, sanitizeDebugProfile, buildDebugPreset, type ManagedControl, type DebugProfile, type DebugParameter } from "./debugPreset";
 
-export type ControlType =
-  | "slider"
-  | "button"
-  | "switch"
-  | "led"
-  | "buzzer"
-  | "monitor"
-  | "joystick"
-  | "keypad"
-  | "keymon"
-  | "group"
-  | "custom";
+/**
+ * 控件类型的**唯一运行时真相**（P97-I5）：以前只有 TS 联合，于是 ControlCanvas 的调色板
+ * 自己手抄了一份 `WIDGET_TYPES`，加一种控件就会静默漏一项；`ui_inventory` 也需要能运行时枚举的清单。
+ */
+export const CONTROL_TYPES = [
+  "slider",
+  "button",
+  "switch",
+  "led",
+  "buzzer",
+  "monitor",
+  "joystick",
+  "keypad",
+  "keymon",
+  "group",
+  "custom",
+] as const;
+export type ControlType = (typeof CONTROL_TYPES)[number];
 
 export interface BaseCard {
   managed?: ManagedControl;

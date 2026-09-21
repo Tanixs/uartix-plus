@@ -57,7 +57,8 @@ function crAt(
 /** Catmull-Rom：逐段 sub 细分（不含段起点——起点=上段终点，首点由调用方写入） */
 export const crKernel = (tension: number): SmoothKernel => ({
   emit(px, py, pz, t, from, to, sub, out) {
-    const n = px.length;
+    // 有效点数=段上界+1；调用方复用 scratch 数组，px.length 会读到上一轮的陈旧尾巴（P90 D1）
+    const n = to + 1;
     for (let i = from; i < to && i + 1 < n; i++) {
       const i0 = Math.max(0, i - 1);
       const i3 = Math.min(n - 1, i + 2);
@@ -78,7 +79,7 @@ export const crKernel = (tension: number): SmoothKernel => ({
  *  与 CR 的差异：曲率连续（无 CR 在密集转折处的轻微鼓包），成本 O(窗)。 */
 export const splineKernel: SmoothKernel = {
   emit(px, py, pz, t, from, to, sub, out) {
-    const n = px.length;
+    const n = to + 1; // 同上：只认窗口内有效点，natural 边界条件才落在真末端
     if (n < 3) {
       crKernel(1).emit(px, py, pz, t, from, to, sub, out);
       return;

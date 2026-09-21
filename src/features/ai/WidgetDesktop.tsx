@@ -124,6 +124,29 @@ export function WidgetDesktop() {
     });
   };
 
+  /**
+   * 逻辑坐标钳到屏内（至少留 24px 可抓）。`move` 以前直接 `setPosition(x,y)` 不设界，
+   * 于是挂件可以把自己推到屏幕外——现象是"我的挂件不见了"，而拖拽路径一直是有钳制的，
+   * 两边本该一致（详设 §13.2）。取不到显示器信息时原样返回，不因此拒绝移动。
+   */
+  const clampToScreen = async (x: number, y: number): Promise<[number, number]> => {
+    try {
+      const win = getCurrentWindow();
+      const mon = (await currentMonitor()) ?? (await primaryMonitor());
+      if (!mon) return [x, y];
+      const s = (await win.scaleFactor()) || 1;
+      const sz = await win.innerSize();
+      const ms = mon.scaleFactor || 1;
+      const w = sz.width / s;
+      return [
+        Math.min(Math.max(x, 24 - w), mon.size.width / ms - 24),
+        Math.min(Math.max(y, 0), mon.size.height / ms - 24),
+      ];
+    } catch {
+      return [x, y];
+    }
+  };
+
   const onWin = async (req: { action: string } & Record<string, unknown>) => {
     const win = getCurrentWindow();
     switch (req.action) {
@@ -137,7 +160,8 @@ export function WidgetDesktop() {
         const x = Number(req.x);
         const y = Number(req.y);
         if (Number.isFinite(x) && Number.isFinite(y)) {
-          await win.setPosition(new LogicalPosition(x, y));
+          const [nx, ny] = await clampToScreen(x, y);
+          await win.setPosition(new LogicalPosition(nx, ny));
           dragState.current.base = null;
         }
         break;

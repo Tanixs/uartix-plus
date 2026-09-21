@@ -16,7 +16,8 @@
     "check:theme": "node .tools/check-contrast.cjs",
     "check:aria": "node .tools/check-aria.cjs",
     "check:motion": "node .tools/check-motion.cjs",
-    "check:all": "node .tools/check-contrast.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs"
+    "check:cycles": "node .tools/check-import-cycles.cjs",
+    "check:all": "node .tools/check-contrast.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-import-cycles.cjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

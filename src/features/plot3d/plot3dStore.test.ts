@@ -646,6 +646,32 @@ describe("plot3dStore 时间游标（P70，全局共享一条时间轴）", () =
     expect(calls[4].cursor).toBeCloseTo(0.01); // 显式 scrub 保持优先于回放时钟
   });
 
+  it("P91 C2：外部来源游标越界即忽略并保持跟随最新；3D 内 local 拖拽仍按 clamp 尊重", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    const calls = collectCur();
+    store._setSessionForTest(null);
+    pump(1);
+    expect(calls[0].cursor).toBeNull();
+
+    // 范围内的外部游标照常生效（联动是用户开着的特性，不能一刀切）
+    store.setScrub(0.03, "session");
+    expect(store.scrubSource()).toBe("session");
+    pump(1);
+    expect(calls[1].cursor).toBeCloseTo(0.03);
+
+    // 联动来的越界游标：忽略并回到跟随最新（旧实现钳到起点 = 每 120ms 重下一次"画 0 点"）
+    store.setScrub(999, "linked");
+    pump(1);
+    expect(calls[2].cursor).toBeNull();
+    expect(store.scrubSource()).toBe("local"); // 放弃后复位来源，不残留外部接管态
+
+    // 用户在 3D 时间条上拖出界 → 钳到末端；这是明确意图，不擅自回到最新
+    store.setScrub(999, "local");
+    pump(1);
+    expect(calls[3].cursor).toBeCloseTo(0.05);
+  });
+
   it("lowerBoundLe：空/首/尾/重复 ts 边界（= drawRange 截断数）", () => {
     const arr = new Float64Array([1, 2, 2, 3, 5]);
     expect(lowerBoundLe(arr, 0, 10)).toBe(0);
@@ -1375,5 +1401,32 @@ describe("P87e lifecycle closure", () => {
     const rebuilt = collect();
     pump();
     expect(gseq(rebuilt, "g1")[0].b.x).toEqual(store.exportTriples("g1")!.x);
+  });
+});
+
+describe("P90 D3 游标裁决（陈旧 scrub 不再把画面截成空白）", () => {
+  it("无数据时绝不应用 scrub：cursor 保持 null（跟随最新）", () => {
+    h.setSeries({ ax: { t: [], v: [] }, ay: { t: [], v: [] }, az: { t: [], v: [] }, mag: { t: [], v: [] } });
+    bindG1();
+    const calls = collect();
+    store.setScrub(5);
+    pump(1);
+    expect(calls.every((c) => c.cursor === null)).toBe(true);
+  });
+
+  it("scrub 下界钳到数据真起点，不再用 0 截没全部点", () => {
+    h.setSeries(
+      ser([20, 30, 40, 50], [1, 2, 3, 4], [11, 12, 13, 14], [21, 22, 23, 24], [100, 101, 102, 103]),
+    );
+    bindG1();
+    const calls = collect();
+    pump(1);
+    store.setScrub(0.005); // 早于数据起点 0.02s
+    pump(1);
+    const last = calls[calls.length - 1];
+    expect(last.cursor).toBeCloseTo(0.02, 6);
+    store.setScrub(9); // 晚于末端 → 仍钳到末端
+    pump(1);
+    expect(calls[calls.length - 1].cursor).toBeCloseTo(0.05, 6);
   });
 });

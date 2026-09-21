@@ -2,7 +2,7 @@
  * App Action API：给 AI 扩展（脚本/小部件/面板/自定义卡片）的受控操作接口。
  * - 每个动作做白名单枚举校验；非法值直接报错。
  * - highPriv=false（小部件/面板/自定义卡片）只允许非破坏性动作。
- * - openPort/closePort 额外受「小部件可发送数据」权限门控。
+ * - openPort/closePort 额外受「允许向设备发送」权限门控。
  * - 破坏性动作（清空/删除）每次调用都会 toast 告知。
  */
 import { PANEL_TITLES } from "../../panels/panels";
@@ -364,14 +364,14 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
     }
     case "openPort": {
       if (!getSettings().aiWidgetSend) {
-        throw new Error("连接操作需要「小部件可发送数据」权限");
+        throw new Error("连接操作需要「允许向设备发送」权限");
       }
       await openPort();
       return "连接已建立";
     }
     case "closePort": {
       if (!getSettings().aiWidgetSend) {
-        throw new Error("连接操作需要「小部件可发送数据」权限");
+        throw new Error("连接操作需要「允许向设备发送」权限");
       }
       await closePort();
       return "连接已断开";
