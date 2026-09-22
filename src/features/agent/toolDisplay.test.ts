@@ -45,6 +45,36 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
     expect(receiptStatusText(false, "error", "weird_code")).toBe("weird_code");
   });
 
+  it("P99a-F3：代码里回出去的每个失败码都必须有中文徽章（不许再出现裸 snake_case）", async () => {
+    /**
+     * `receiptStatusText` 的兜底是"未知码原样回显"——对调试方便，对人是裸码。
+     * 所以"有没有漏配徽章"这件事不能靠自觉：从**源码**里把所有 `notExecuted(id, "码")` 抓出来，
+     * 逐个要求它渲染成非 ASCII。P99a 前这类漏配是静默的（`TOOL_LABEL` 同族的形状）。
+     */
+    const fsSpec = "node:fs";
+    const pathSpec = "node:path";
+    const { readdirSync, readFileSync } = (await import(fsSpec)) as unknown as {
+      readdirSync: (d: string) => string[];
+      readFileSync: (p: string, enc?: string) => string;
+    };
+    const { join } = (await import(pathSpec)) as unknown as { join: (...p: string[]) => string };
+    const root = new URL(".", import.meta.url).pathname.replace(/^\//, "");
+    const dirs = [join(root, ""), join(root, "..", "plugins", "")];
+    const codes = new Set<string>();
+    for (const dir of dirs) {
+      for (const f of readdirSync(dir)) {
+        if (!/\.ts$/.test(f) || /\.test\.ts$/.test(f)) continue;
+        const src = readFileSync(join(dir, f), "utf8");
+        for (const m of src.matchAll(/notExecuted\(\s*[^,]+,\s*"([a-z0-9_]+)"/g)) codes.add(m[1]);
+      }
+    }
+    // 探针自证：抽不到码就说明正则瞎了，那这条测试是绿的也没用（§8-43②）
+    expect(codes.size).toBeGreaterThan(10);
+    expect([...codes]).toContain("unknown_tool");
+    const bare = [...codes].filter((c) => receiptStatusText(false, "not_executed", c) === c);
+    expect(bare).toEqual([]);
+  });
+
   it("receiptRows：标量直列、嵌套对象折叠键名、数组限量、绝不抛错", () => {
     expect(receiptRows(null)).toEqual([]);
     expect(receiptRows(42)).toEqual([{ k: "结果", v: "42" }]);

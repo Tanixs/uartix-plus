@@ -35,3 +35,15 @@ JY901P-WIT私有协议.md
 .keys/
 
 models-test/
+
+# P99a-E4：仓库清账——历史上调试/试跑掉在根目录的一次性产物（**不删文件，只停止跟踪**）。
+# 它们既不是源码也不是资料，留在 git 视角里只会让"哪些改动属于本批"看不清。
+# 要真删是另一个动作（这些文件不是我造的，按可逆优先处理）。
+/test*.txt
+/run_*.txt
+/result.txt
+/from_project.txt
+/arx.xml
+/opencode.json
+# 收口时补的第一条漏项：本地助手工具留下的记忆目录，不是源码也不是资料
+/.workbuddy/

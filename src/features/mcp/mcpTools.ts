@@ -1,10 +1,15 @@
 /**
  * MCP 工具定义与纯变换（P64）——前端执行端与 Node CLI 桥共用的唯一来源。
  *
- * 本文件必须保持零依赖（不 import Tauri / store / DOM）：Node 桥经 esbuild
+ * 本文件必须保持**只依赖纯数据模块**（不 import Tauri / store / DOM）：Node 桥经 esbuild
  * 打包时直接引用 TOOL_DEFS 生成 tools/list，前端执行端引用它做分发校验。
  * 纯变换（compactFrame / summarizeRun / flattenResults）配 vitest 单测。
+ *
+ * P99a-E1 放宽了一条：允许引 `ai/appActionKinds`（纯常量表，零副作用）。理由是这里曾把
+ * "有哪些动作、哪些属高权限"**手抄第二份**进描述文本——清单会过期，而外部 IDE 照着过期清单
+ * 调用的失败现象是"未知动作"，看起来像我们坏了（§8-36① 的又一同源病灶）。
  */
+import { APP_ACTION_KINDS, HIGH_ONLY } from "../ai/appActionKinds";
 
 /** MCP tools/list 工具描述（inputSchema 为 JSON Schema 子集：object） */
 export interface McpToolDef {
@@ -16,6 +21,26 @@ export interface McpToolDef {
     required?: string[];
   };
 }
+
+/**
+ * P99a-E1：门控与状态码话术**只写一份**。
+ *
+ * 改之前的实情：`允许高权限动作` 这句话在 4 条工具描述里各抄一遍、在 `mcpServer.ts` 里再抄一遍；
+ * `async_required` 那句在 `mcpTools`（描述）、`mcpServer`（抛错）与 `bridge.rs`（Rust 侧）各有一份。
+ * 措辞要改就得同时动六处，漏一处的结果是"IDE 读到的说明"和"实际拿到的错误"对不上——
+ * 外部调用方只能靠猜。Rust 那一份跨语言，只能靠注释与测试钉住同文，这里先把 TS 侧收成一处。
+ */
+/** 设置项的中文名只写一次：描述里、抛错里、设置页 `row(tx(...))` 三处必须同字（不同字用户找不到） */
+export const SETTING_SEND = "允许远程发送";
+export const SETTING_HIGH = "允许高权限动作";
+export const GATE_SEND = `需要 Uartix+ 设置 → 集成 开启「${SETTING_SEND}」`;
+export const GATE_HIGH_KIND = SETTING_HIGH;
+export const gateHighPriv = (kind: string): string =>
+  `动作「${kind}」属高权限：请到 Uartix+ 设置 → 集成 开启「${SETTING_HIGH}」`;
+export const ASYNC_REQUIRED =
+  "async_required: use create_job({taskType:'sequence.run', input:{json}, idempotencyKey}). No sequence was executed.";
+export const NEEDS_MANUAL =
+  "needs_manual_confirmation: background execution must be started locally; highPriv/confirmed are not approval";
 
 /** 工具面：v1 为 8 个（详设 §2.2）；P74c C2 增 get_orchestrator / get_plot3d 两个只读工具（编排器与 3D 的写通路统一走 run_action）。描述里写清权限门控，让 IDE 智能体自己判断 */
 export const TOOL_DEFS: McpToolDef[] = [
@@ -66,19 +91,19 @@ export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "get_orchestrator",
     description:
-      "自动编排器只读快照：总开关、在跑实例数、各组（事件种类/冷却 ms/满队列策略 dropNew·dropOld·stopOld/块数与类型直方图/累计运行与失败次数/最近一次结果）、变量现值、最近 10 条运行日志。只读、不需高权限。写操作（增删改组/触发运行/写变量）用 run_action，kind=orchestrator（需「允许高权限动作」）。",
+      "自动编排器只读快照：总开关、在跑实例数、各组（事件种类/冷却 ms/满队列策略 dropNew·dropOld·stopOld/块数与类型直方图/累计运行与失败次数/最近一次结果）、变量现值、最近 10 条运行日志。只读、不需高权限。写操作（增删改组/触发运行/写变量）用 run_action，kind=orchestrator（属高权限，清单见 run_action 描述）。",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "get_plot3d",
     description:
-      "3D 轨迹面板只读快照（P87e 弹性组数）：groups 数组（每组 name/color/visible、axes x/y/z 通道 id 与是否绑齐、mode=point|points|line、colorBy、fade、density、smooth、maxPoints、配对与备注）、view 全局视图设置（三轴缩放/网格/跟随/自动旋转/键盘飞行/光标缩放）、是否椭球校准模式（采样源=calibSource，可为 null）、采样点数与八象限覆盖度、椭球拟合结果（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。只读、不需高权限。写操作（组绑定/显示设置/清空/撤销/校准会话）用 run_action，kind=plot3d（需「允许高权限动作」）。",
+      "3D 轨迹面板只读快照（P87e 弹性组数）：groups 数组（每组 name/color/visible、axes x/y/z 通道 id 与是否绑齐、mode=point|points|line、colorBy、fade、density、smooth、maxPoints、配对与备注）、view 全局视图设置（三轴缩放/网格/跟随/自动旋转/键盘飞行/光标缩放）、是否椭球校准模式（采样源=calibSource，可为 null）、采样点数与八象限覆盖度、椭球拟合结果（offset/gains/半径变异系数 cv/残差 RMS）、六面校准进度。只读、不需高权限。写操作（组绑定/显示设置/清空/撤销/校准会话）用 run_action，kind=plot3d（属高权限，清单见 run_action 描述）。",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "send",
     description:
-      "向已连接的串口/TCP/UDP 发送数据。mode=ascii 支持 \\r \\n \\t \\xNN 转义；mode=hex 为空格分隔的十六进制。需要 Uartix+ 设置 → 集成 开启「允许远程发送」。",
+      "向已连接的串口/TCP/UDP 发送数据。mode=ascii 支持 \\r \\n \\t \\xNN 转义；mode=hex 为空格分隔的十六进制。" + GATE_SEND + "。",
     inputSchema: {
       type: "object",
       properties: {
@@ -91,7 +116,12 @@ export const TOOL_DEFS: McpToolDef[] = [
   {
     name: "run_action",
     description:
-      "执行 Uartix+ 的 App Action。kind 常用：writeTemplate/writeCommand/writeCard/writeCodec/openPanel/applyPreset/setTheme/addChannel/clearChannels/openPort/closePort/removeCard/removeProtocol/toast…；编排器与 3D 两组也走这里——kind=orchestrator（args.op=enable|run|stopAll|groupAdd|groupUpdate|groupRemove|eventAdd|eventRemove|blockAdd|blockRemove|varsSet，可据此从零搭出「事件→块树」自动化；只读请改用 get_orchestrator）、kind=plot3d（args.op=bind|set|groupAdd|groupRemove|clear|undo|redo|calib；动态组：args.gid 必须是快照中的有效组 ID，缺省 g1（已删则报错）；groupAdd 返回新 gid；groupRemove 需本机人工确认，无确认通路时直接返回 needs_manual_confirmation，未执行；高权限或 confirmed 参数不能绕过，bind 传 axisX/axisY/axisZ 通道 id，set 传组级 colorBy/mode/density/fade/smooth/pointSize… 或全局 axisScale/showGrid/autoRotate/follow…，calib 子动作 args.calib=enter|exit|start|stop|clear|solve6；只读请改用 get_plot3d）。写模板/命令等非破坏动作直接可用；openPort/closePort/删除类与 orchestrator/plot3d 属高权限，需在设置 → 集成 开启「允许高权限动作」。",
+      // 动作清单与高权限子集**从常量表派生**：原先这里是手抄的"常用 kind"，
+      // 新增动作忘了抄，外部 IDE 就拿到一个永远"未知动作"的名字。
+      `执行 Uartix+ 的 App Action。kind ∈ ${APP_ACTION_KINDS.join(" | ")}。` +
+      `其中需要「${GATE_HIGH_KIND}」的一组：${[...HIGH_ONLY].join(" | ")}。` +
+      "编排器与 3D 的读写也都走这里：kind=orchestrator（只读请改用 get_orchestrator）、kind=plot3d（只读改用 get_plot3d）。" +
+      "写模板/命令等非破坏动作直接可用；groupRemove/覆盖已有文件一类无确认通路时直接返回 needs_manual_confirmation，未执行——highPriv 或 confirmed 参数不构成批准。",
     inputSchema: {
       type: "object",
       properties: {

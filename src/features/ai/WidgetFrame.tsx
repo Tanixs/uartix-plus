@@ -176,10 +176,9 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
           if (Number.isFinite(h) && h > 0 && h <= 2000) onHeight?.(Math.round(h));
           break;
         }
-        case "aiw:getSnap": {
-          target?.postMessage({ type: "aiw:snap", snap: lastSnap.current ?? buildSnap() }, "*");
-          break;
-        }
+        // 没有 "aiw:getSnap" 这一支了（P99a-D1c 判死）：桥侧 `uartix.snap()` 读的是宿主推来的缓存，
+        // 缓存为空时订阅即会拿到一次 fresh 快照（下面的 aiw:snap 推送），拉取通道从来没被任何调用方用过。
+        // 留一个"没人发、发了也有权限门"的入站类型＝多一处要被人记住的例外，删。
         case "aiw:menu-def": {
           const menus = (d.menus ?? {}) as Record<string, MenuReg>;
           menusRef.current = {

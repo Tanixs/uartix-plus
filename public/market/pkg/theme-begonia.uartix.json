@@ -1,0 +1,37 @@
+{
+  "format": "uartix-plugin",
+  "schemaVersion": 2,
+  "id": "uartix.theme.begonia",
+  "version": "1.1.0",
+  "name": "秋海棠",
+  "desc": "",
+  "hostApi": "^1.0",
+  "capabilities": [
+    "theme.tokens"
+  ],
+  "contributions": {
+    "themes": [
+      {
+        "id": "main",
+        "entry": "main.json"
+      }
+    ]
+  },
+  "artifacts": {
+    "main.json": {
+      "kind": "theme",
+      "vars": {
+        "--bg": "#f7f2f0",
+        "--panel": "#fffaf8",
+        "--text": "#3a2f2c",
+        "--text-dim": "#8a7a75",
+        "--accent": "#c76a7a",
+        "--accent-contrast": "#ffffff"
+      }
+    }
+  },
+  "provenance": {
+    "createdBy": "user",
+    "reviewed": false
+  }
+}

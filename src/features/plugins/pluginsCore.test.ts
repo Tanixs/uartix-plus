@@ -5,6 +5,8 @@
  * node 环境：extRuntime（触 DOM）mock 掉，localStorage 打桩。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+// P99a-E2：差异算法与 UI 都要用它，测试直接静态引（pluginManifest 是纯模块，node 环境安全）
+import { describeDiff, manifestDiff } from "./pluginManifest";
 
 vi.resetModules();
 const storage = new Map<string, string>();
@@ -15,7 +17,15 @@ vi.stubGlobal("localStorage", {
 });
 vi.mock("../ai/extRuntime", () => ({ applyStyleExts: vi.fn() }));
 
-import { validateArtifactPayload, validateArtifact } from "./artifact";
+import {
+  validateArtifactPayload,
+  validateArtifact,
+  ARTIFACT_KINDS,
+  artifactKindLabel,
+  artifactKindMeta,
+  contribKeyLabel,
+  kindOfContribKey,
+} from "./artifact";
 import {
   normalizeEntryPath,
   validateManifest,
@@ -90,6 +100,32 @@ describe("artifact 校验", () => {
     expect(unknown.ok).toBe(false);
     expect(unknown.errors.join()).toContain("未知块类型");
   });
+
+  /**
+   * P99a-D1a：元表就是"种类"的唯一真相，这条测试是它的封口。
+   * 旧写法是 `validateArtifactPayload` 里一个**没有 default 的 switch**——加一种产物忘了配校验，
+   * 运行时表现是"直接通过"，tsc 不红、测试不红、装进来才发现没校验。
+   */
+  it("每一种产物都必须真的校验空载荷（不存在通过但没人看过）；能力/键/名同源", () => {
+    for (const kind of ARTIFACT_KINDS) {
+      const r = validateArtifactPayload(kind, {});
+      expect(r.ok, `产物 ${kind} 的空载荷竟然通过了＝它没配校验器`).toBe(false);
+      expect(r.errors.length, `产物 ${kind} 拒了但没给出原因`).toBeGreaterThan(0);
+      const meta = artifactKindMeta(kind);
+      expect(meta.label, `产物 ${kind} 缺中文名`).toBe(artifactKindLabel(kind));
+      expect(contribKeyLabel(meta.contribKey)).toBe(meta.label);
+      expect(PLUGIN_CAPS).toContain(meta.requiredCap);
+      expect(meta.caps).toContain(meta.requiredCap);
+      // 详设 §9.3：Agent 自己造的包永不含设备发送，也不含特权能力
+      for (const never of ["serial.send", "agent.tool", "win.control", "ui.action"] as const) {
+        expect(meta.caps, `产物 ${kind} 的能力集里出现了 ${never}`).not.toContain(never);
+      }
+    }
+    // contributions 键互不相同（两个 kind 抢同一个键＝装一个丢一个）
+    const keys = ARTIFACT_KINDS.map((k) => artifactKindMeta(k).contribKey);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(kindOfContribKey("no-such-key")).toBeUndefined();
+  });
 });
 
 describe("manifest 校验与路径规范化", () => {
@@ -140,8 +176,8 @@ describe("隔离裁决（§11）", () => {
 
   it("nonce 不匹配拒绝；匹配放行", () => {
     // 用真实存在的入站类型（旧用例写的 "aiw:getSnap" 当年代码里根本没有，正好落在旧表的
-    // "未列出即免检"缝上——那条缝 P99a-A4 已反成 fail-closed；而 getSnap 确实是 WidgetFrame
-    // 在处理的分支，B1a 起它登记为需要 telemetry.read）
+    // "未列出即免检"缝上——那条缝 P99a-A4 已反成 fail-closed；而 getSnap 后来确实登记过，
+    // P99a-D1c 判死删掉了：桥侧没人发它，宿主也就没留 handler）
     expect(iso.verdictPluginMessage("aiw:cursor", "wrong", ctx)).toBe("reject_nonce");
     expect(iso.verdictPluginMessage("aiw:cursor", "n-1", ctx)).toBe("allow");
     expect(iso.verdictPluginMessage("aiw:cursor", undefined, ctx)).toBe("reject_nonce");
@@ -190,21 +226,25 @@ describe("隔离裁决（§11）", () => {
      * 守卫自己的正则也是探针。上一版这里是 `aiw:[a-z-]+`：不匹配数字（`aiw:x2w`）、
      * 不匹配驼峰（`aiw:getSnap`），于是这两支"WidgetFrame 在处理、裁决表里却没有"的消息
      * 让守卫一路绿着过关——插件库里的挂件只要用广播/取快照就是 reject_unknown + 计违规，
-     * 三次即被隔离。这两条断言就是防那只瞎探针自己再退化。
+     * 三次即被隔离。下面这三条样本（数字 / 连字符 / 驼峰位）就是防那只瞎探针再退化。
      */
-    expect(handled).toEqual(expect.arrayContaining(["aiw:x2w", "aiw:getSnap"]));
+    expect(handled).toEqual(expect.arrayContaining(["aiw:x2w", "aiw:menu-def", "aiw:cursor"]));
     for (const t of handled) {
       expect(iso.MSG_CAP_REQUIREMENT, `WidgetFrame 处理了 ${t} 但裁决表没登记`).toHaveProperty(t);
     }
     expect(Object.keys(iso.MSG_CAP_REQUIREMENT).sort()).toEqual([...new Set(handled)].sort());
+    /**
+     * P99a-D1c 判死的类型：**不许只在一边复活**。
+     * 只加 handler 不加表 ⇒ 挂件一发就 reject_unknown + 计违规；只加表不加 handler ⇒ 表与真实
+     * 消息面漂移（"登记了但没人发"）。两边都不在，才叫一致。
+     */
+    expect(handled, "aiw:getSnap 已判死，不许只加回 handler").not.toContain("aiw:getSnap");
+    expect(iso.MSG_CAP_REQUIREMENT).not.toHaveProperty("aiw:getSnap");
   });
 
-  it("能力门：send/ask/app/menu-def/getSnap 按包能力裁决", () => {
+  it("能力门：send/ask/app/menu-def 按包能力裁决", () => {
     expect(iso.verdictPluginMessage("aiw:send", "n-1", ctx)).toBe("reject_cap");
     expect(iso.verdictPluginMessage("aiw:app", "n-1", ctx)).toBe("reject_cap");
-    // 索取一次快照＝数据流出，不给它走 telemetry.read 之外的后门
-    expect(iso.verdictPluginMessage("aiw:getSnap", "n-1", { ...ctx, caps: ["ui.widget"] })).toBe("reject_cap");
-    expect(iso.verdictPluginMessage("aiw:getSnap", "n-1", ctx)).toBe("allow");
     // 挂件间广播只中继发送方自己的数据，显式免检
     expect(iso.verdictPluginMessage("aiw:x2w", "n-1", { ...ctx, caps: [] })).toBe("allow");
     const full = { ...ctx, caps: ["serial.send", "ai.ask", "ui.action"] };
@@ -473,5 +513,173 @@ describe("P99a-B0/B1 闸的接线（不只裁决对，还要真的在门后）",
     const after = src.slice(src.indexOf("armModulePackage("));
     expect(after.indexOf("if (!probe.ok)")).toBeGreaterThan(-1);
     expect(after.indexOf("if (!probe.ok)")).toBeLessThan(after.indexOf("setEnabled(r.pkg.id, true)"));
+  });
+});
+
+/* ======================= P99a-D1b/D1c：创造面诚实化 ======================= */
+
+describe("P99a-D1b：两种惰性产物从创造面消失（而不是留着骗模型）", () => {
+  it("motionPreset / reportView 不再是合法种类，能力面同步收缩，没人认领的键不编中文名", () => {
+    expect(validateArtifact({ kind: "motionPreset", presets: [{ name: "n", durationMs: 200, easing: "ease", trigger: "open" }] }).ok).toBe(false);
+    expect(validateArtifact({ kind: "reportView", blocks: [{ type: "text", text: "x" }] }).ok).toBe(false);
+    expect(ARTIFACT_KINDS).not.toContain("motionPreset");
+    expect(ARTIFACT_KINDS).not.toContain("reportView");
+    // 留着 capability 却没有对应产物＝一个没人检查的形容词（§8-36①）
+    expect(PLUGIN_CAPS).not.toContain("motion.preset");
+    expect(PLUGIN_CAPS).not.toContain("report.view");
+    expect(PURE_UI_CAPS).not.toContain("motion.preset");
+    expect(kindOfContribKey("motionPresets")).toBeUndefined();
+    expect(contribKeyLabel("motionPresets")).toBe("motionPresets");
+  });
+
+  it("库里存量包不静默：已下架的产物键要被点得出来（零兼容也要说实话）", () => {
+    const forged = {
+      id: "user.legacy.motion", name: "旧动效", version: "1.0.0",
+      contributions: { motionPresets: [{ id: "m1", entry: "m1.json", name: "旧动效" }] },
+      artifacts: { "m1.json": { kind: "motionPreset", presets: [] } },
+    };
+    expect(store.deprecatedContribKeys(forged as never)).toEqual(["motionPresets"]);
+    const ok = {
+      id: "user.ok.panel", name: "面板", version: "1.0.0",
+      contributions: { panels: [{ id: "p1", entry: "p1.json" }] },
+      artifacts: { "p1.json": { kind: "panel", format: "html", html: "<i></i>" } },
+    };
+    expect(store.deprecatedContribKeys(ok as never)).toEqual([]);
+  });
+
+  it("任务模板：goal 必填、步数与工具名式样受限；工具**存在性**由 save_plugin 查", () => {
+    expect(validateArtifactPayload("workflow", { steps: [{ tool: "plot_channels" }] }).ok).toBe(false); // 缺 goal
+    expect(validateArtifactPayload("workflow", { goal: "巡检", steps: [] }).ok).toBe(false);
+    expect(validateArtifactPayload("workflow", { goal: "巡检", steps: [{ tool: "Plot-Channels" }] }).ok).toBe(false);
+    expect(validateArtifactPayload("workflow", { goal: "巡检", steps: [{ tool: "plot_channels", note: "看通道" }] }).ok).toBe(true);
+    // 旧形状（没有 goal）现在会被明确拒并说清缺什么——不是"存下了但什么也不会发生"
+    const legacy = validateArtifactPayload("workflow", { steps: [{ tool: "plot_channels" }] });
+    expect(legacy.errors.join()).toContain("goal");
+  });
+
+  it("插件投影不再带 perms 徽章：能力只在 manifest.caps 说一次", () => {
+    const s = store.stagePackage({
+      format: "uartix-plugin", schemaVersion: 2, id: "user.d1.panel", version: "0.1.0",
+      name: "面板包", hostApi: "^1.0", capabilities: ["ui.panel", "telemetry.read"],
+      contributions: { panels: [{ id: "p1", entry: "p1.json" }] },
+      artifacts: { "p1.json": { kind: "panel", format: "html", html: "<b>x</b>" } },
+    });
+    expect(s.ok).toBe(true);
+    const inst = store.installStaged(s.stagingId!);
+    expect(store.setEnabled(inst.id!, true).ok).toBe(true);
+    const shadows = extStore.getSnapshot().exts.filter((e) => e.pluginRef === inst.id);
+    expect(shadows).toHaveLength(1);
+    // ExtPerm 那套词汇删干净了：它全仓零读取者，留着就是"看着像门、其实没人查"（M2 同一条）
+    expect("perms" in shadows[0]).toBe(false);
+    expect(shadows[0].type).toBe("panel");
+  });
+});
+
+describe("P99a-D1c：主世界 JS 通道与 getSnap 死分支", () => {
+  /**
+   * 只断言**代码**，不断言注释：extRuntime 里那段"为什么删"的说明本来就要写清
+   * `new Function` 是什么，否则下一个想加回来的人读不到理由。先剥注释再查，
+   * 既不因文档误红，也不会被注释绕过（红的是代码里的攻击面）。
+   */
+  const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  const readSrc = async (rel: string) => {
+    const { readFileSync } = (await import("node:" + "fs")) as { readFileSync: (p: string, enc: string) => string };
+    const { fileURLToPath } = (await import("node:" + "url")) as { fileURLToPath: (u: URL | string) => string };
+    return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+  };
+
+  it("extRuntime 的代码里不再有 new Function / startScript / ScriptApi（删的是攻击面，不是功能）", async () => {
+    const src = stripComments(await readSrc("../ai/extRuntime.ts"));
+    for (const dead of ["new Function", "startScript", "makeApi", "ScriptApi", "eval("]) {
+      expect(src, `extRuntime 不该再有 ${dead}`).not.toContain(dead);
+    }
+    // 样式层还在（它才是这个模块现在的唯一职责）
+    expect(src).toContain("applyStyleExts");
+    const storeSrc = stripComments(await readSrc("../ai/extensionStore.ts"));
+    expect(storeSrc).not.toContain("ExtPerm");
+    expect(storeSrc).not.toContain('"script"');
+  });
+
+  it("插件库给两类新产物留了真实行动点（源码钉：按钮与一次性投递都要在）", async () => {
+    const dlg = await readSrc("./PluginLibraryDialog.tsx");
+    expect(dlg).toContain("应用此布局");
+    expect(dlg).toContain("载入 AI 助手");
+    // 整屏覆盖必须先确认（这条项目里是硬约定：破坏性动作不裸执行）
+    expect(dlg).toMatch(/window\.confirm\([\s\S]{0,80}应用/);
+    const chat = await readSrc("../ai/AiChat.tsx");
+    expect(chat).toContain("consumeDraft");
+    expect(chat).toMatch(/consumeDraft\(\)[\s\S]{0,120}setInput\(d\)/);
+  });
+});
+
+/* ================= P99a-E2 / B3：更新差异 =================
+ * 病灶：`proposeUpdate` 自己算了一遍 `addedCaps` 只拼成一句话（还用的是 cap id，用户看不懂），
+ * `approveUpdate` 再算一遍 `nextCaps` 然后 `void` 掉——**两份半成品检查，谁也没生效**。
+ * 现在差异只有一个算法（`manifestDiff`），三处消费：回执、批准后的消息、候选面板。
+ * 按用户裁决（P99a-E 详设 §10），这批**不加任何新审批**：下面钉的是"话说得全"，不是"多点一次"。
+ */
+describe("P99a-E2：更新差异说真话", () => {
+  const here = new URL("./", import.meta.url);
+  const readSrc = async (rel: string): Promise<string> => {
+    const fsSpec = "node:fs";
+    const { readFileSync } = (await import(fsSpec)) as {
+      readFileSync: (p: string | URL, enc?: string) => string;
+    };
+    return readFileSync(new URL(rel, here), "utf8");
+  };
+
+  it("manifestDiff 算出能力增减与产物数量变化，提权子集只认「不会自动启用」那一组", () => {
+    const cur = themePkg("user.t.d1") as never;
+    const cand = themePkg("user.t.d1", {
+      version: "0.2.0",
+      capabilities: ["theme.tokens", "serial.send"],
+      contributions: { themes: [{ id: "main", entry: "main.json" }, { id: "alt", entry: "alt.json" }] },
+      artifacts: { "main.json": { kind: "theme", ...THEME_PAYLOAD }, "alt.json": { kind: "theme", ...THEME_PAYLOAD } },
+    }) as never;
+    const d = manifestDiff(cur, cand);
+    expect(d.capsAdded).toEqual(["serial.send"]);
+    expect(d.capsRemoved).toEqual([]);
+    expect(d.kindChanges).toEqual([{ label: "主题", delta: 1 }]);
+    expect(d.capsAddedBlocking).toEqual(["serial.send"]); // 属于补集 → 提权提示要有
+    expect(describeDiff(d)).toContain("发送串口数据"); // 中文短名，不是 cap id
+    // 反向：少了能力也要说，不能只报"多了什么"
+    expect(describeDiff(manifestDiff(cand, cur))).toContain("能力 -发送串口数据");
+    expect(manifestDiff(cur, cur).kindChanges).toEqual([]);
+  });
+
+  it("候选回执与批准消息都带差异（用户点的还是那一次批准）", () => {
+    const inst = store.installStaged(store.stagePackage(themePkg("user.t.diff")).stagingId!);
+    const prop = store.proposeUpdate(inst.id!, themePkg("user.t.diff", {
+      version: "0.2.0",
+      capabilities: ["theme.tokens", "logic.run"],
+    }));
+    expect(prop.ok).toBe(true);
+    expect(prop.msg, "候选回执没说出这是提权更新").toContain("运行 JS");
+    const ok = store.approveUpdate(inst.id!);
+    expect(ok.ok).toBe(true);
+    expect(ok.msg).toContain("运行 JS"); // 批准后也把差异写进消息，而不是只报"已更新到 v"
+    expect(store.getPlugin(inst.id!)?.pkg.version).toBe("0.2.0");
+  });
+
+  it("无差异时如实说无差异（不硬编一句「新增能力」）", () => {
+    const inst = store.installStaged(store.stagePackage(themePkg("user.t.same")).stagingId!);
+    const prop = store.proposeUpdate(inst.id!, themePkg("user.t.same", { version: "0.9.0" }));
+    expect(prop.ok).toBe(true);
+    expect(prop.msg).toContain("无能力/产物差异");
+    expect(prop.msg).not.toContain("新增能力"); // 无差异时不硬编一句提权话术
+  });
+
+  it("死码不复活：pluginStore 里不许再有 `void nextCaps` 这类算了不用的检查", async () => {
+    const ps = await readSrc("./pluginStore.ts");
+    expect(ps, "假装生效的检查比没有检查更坏（§8-37②）").not.toContain("void nextCaps");
+  });
+
+  it("候选面板如实交代「工具清单批准前不可知」，并指出启用后去哪儿看（P99a-F2 后仍不许编差异）", async () => {
+    const dlg = await readSrc("./PluginLibraryDialog.tsx");
+    expect(dlg).toContain("批准并启用后才由模块报上来");
+    // F2 补的那半：差异不是编的，是启用后在详情里给（所以话术要指路，不能停在"不知道"）
+    expect(dlg).toContain("多了哪几支");
+    expect(dlg).toContain("与上一版报上来的清单相比");
+    expect(dlg).toContain("<CandidateDiff");
   });
 });

@@ -381,7 +381,13 @@ fn handle_client(
                     };
                     resp_line(true, None, data)
                 } else if kind == "run_sequence" {
-                    resp_line(false, Some("async_required: use create_job with sequence.run; nothing executed"), Value::Null)
+                    // P99a-F4：这句与 TS 侧 `mcpTools.ASYNC_REQUIRED` **逐字同串**（以前各写一份，
+                    // 外部 IDE 从两条路径拿到的解释不一样）。同文由 mcpTools.test 的源码钉守着。
+                    resp_line(
+                        false,
+                        Some("async_required: use create_job({taskType:'sequence.run', input:{json}, idempotencyKey}). No sequence was executed."),
+                        Value::Null,
+                    )
                 } else if kind == "ping" {
                     resp_line(true, None, json!({"pong":true}))
                 } else { forward_call(&app, &pending, req_id, &kind, args) };

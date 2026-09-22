@@ -1,0 +1,35 @@
+{
+  "format": "uartix-plugin",
+  "schemaVersion": 2,
+  "id": "uartix.widget.rig",
+  "version": "1.0.0",
+  "name": "台架三读数",
+  "desc": "",
+  "hostApi": "^1.0",
+  "capabilities": [
+    "ui.widget",
+    "telemetry.read"
+  ],
+  "contributions": {
+    "widgets": [
+      {
+        "id": "rig",
+        "entry": "rig.json",
+        "name": "台架三读数",
+        "w": 2,
+        "h": 2
+      }
+    ]
+  },
+  "artifacts": {
+    "rig.json": {
+      "kind": "widget",
+      "format": "html",
+      "htmlFile": "rig.html"
+    }
+  },
+  "provenance": {
+    "createdBy": "user",
+    "reviewed": false
+  }
+}

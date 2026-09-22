@@ -1,0 +1,19 @@
+{
+  "id": "uartix.widget.rig",
+  "name": "台架三读数",
+  "author": "uartix",
+  "category": "widget",
+  "description": {
+    "zh": "桌面小部件：把变量 yaw/pitch/roll 做成三个大字；这三个变量不存在时照实显示 --。",
+    "en": "Desktop widget showing yaw/pitch/roll as three big digits."
+  },
+  "version": "1.0.0",
+  "minAppVersion": "0.4.1",
+  "updated": "2026-09-19",
+  "packageFile": "widget-rig/",
+  "publicUrl": "/market/pkg/widget-rig.uartix.json",
+  "capabilities": [
+    "ui.widget",
+    "telemetry.read"
+  ]
+}

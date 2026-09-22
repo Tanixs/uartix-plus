@@ -80,6 +80,10 @@ export interface Settings {
   mcpHighPriv: boolean;
   /** 桥握手 token（首启自动生成，32 hex） */
   mcpToken: string;
+  /** 插件市场（P99b-N1）：索引地址。默认是应用自带的示例货架（同源，不联网） */
+  marketIndexUrl: string;
+  /** 国内可达性兜底：直连失败后才试的 https 前缀，域同样要过市场白名单（空＝不用） */
+  marketMirrorPrefix: string;
 }
 
 export type AiPreset = "openai" | "deepseek" | "zhipu" | "qwen" | "ollama" | "anthropic";
@@ -162,6 +166,8 @@ function load(): Settings {
     mcpAllowSend: false,
     mcpHighPriv: false,
     mcpToken: newToken(),
+    marketIndexUrl: "/market/index.json",
+    marketMirrorPrefix: "",
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -228,6 +234,11 @@ function load(): Settings {
       mcpHighPriv: Boolean(p.mcpHighPriv),
       mcpToken:
         typeof p.mcpToken === "string" && p.mcpToken.length >= 16 ? p.mcpToken : newToken(),
+      marketIndexUrl:
+        typeof p.marketIndexUrl === "string" && p.marketIndexUrl.trim()
+          ? p.marketIndexUrl.trim().slice(0, 300)
+          : "/market/index.json",
+      marketMirrorPrefix: typeof p.marketMirrorPrefix === "string" ? p.marketMirrorPrefix.trim().slice(0, 300) : "",
     };
   } catch {
     return fallback;

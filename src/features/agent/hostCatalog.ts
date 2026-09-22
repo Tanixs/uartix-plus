@@ -36,7 +36,15 @@ export type CatalogGroup =
   | "frames"
   | "session"
   | "channels"
-  | "plugins";
+  | "plugins"
+  // P99a-C1b：另七面（组名＝帮助与详设里叫的那七个名字，反向钉靠字面对应）
+  | "plot3d"
+  | "orchestrator"
+  | "sequencer"
+  | "analysis"
+  | "modbus"
+  | "vdev"
+  | "sentinel";
 
 export const CATALOG_GROUP_ZH: Record<CatalogGroup, string> = {
   runtime: "运行现状",
@@ -47,6 +55,13 @@ export const CATALOG_GROUP_ZH: Record<CatalogGroup, string> = {
   session: "会话录制",
   channels: "曲线通道",
   plugins: "插件库",
+  plot3d: "3D 轨迹",
+  orchestrator: "自动编排器",
+  sequencer: "测试序列器",
+  analysis: "分析面板",
+  modbus: "Modbus 工作台",
+  vdev: "虚拟设备工坊",
+  sentinel: "哨兵",
 };
 
 export interface CatalogArgs {
@@ -230,7 +245,17 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
         return null;
       };
       const hit = find(getSnapshot().groups);
-      if (!hit) return { error: "unknown_id", id, hint: "先读 commands 列表拿 id" };
+      /** 每条 byId 路都回 `want`（可用 id 前 40 个）：模型拿着 hint 只会再猜一次，
+       *  递上真 id 才能一步走通。测试也靠这份 `want` 取 id，不再手写第二份 id 清单。 */
+      if (!hit) {
+        const all: string[] = [];
+        const collect = (nodes: CommandNode[]) => {
+          for (const n of nodes) if ("items" in n) collect(n.items);
+          else all.push(n.id);
+        };
+        collect(getSnapshot().groups);
+        return { error: "unknown_id", id, want: all.slice(0, 40), total: all.length };
+      }
       return hit;
     },
   },
@@ -273,7 +298,10 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
           return out;
         }
       }
-      return { error: "unknown_id", id, hint: "先读 controls 拿 id" };
+      return {
+        error: "unknown_id", id,
+        want: getSnapshot().pages.flatMap((p) => p.cards.map((c) => c.id)).slice(0, 40),
+      };
     },
   },
   {
@@ -416,7 +444,403 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
       };
     },
   },
+
+  /* ---------------- P99a-C1b：另七面 ---------------- */
+  {
+    path: "plot3d.groups",
+    group: "plot3d",
+    zh: "3D 轨迹组清单（绑定与显示配置 + 配对事实）",
+    gives:
+      "view{axisScale,showGrid,gridDensity,follow,autoRotate,keyFlight,zoomToCursor,calibMode,calibSrcId,canUndo,canRedo} · items[{id,name,color,visible,mode,boundX/boundY/boundZ,colorBy,fadeSec,density,smooth,maxPoints,pairMode,pairTolMs,arrowEvery,showStartEnd,headingSrc,modelKind,hasModelFile,notesLen,paired,skipped,missingAxis,hasSource}]（备注只给长度，模型文件路径不外带）",
+    listKey: "items",
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxBytes: 8192,
+    async read() {
+      const m = await import("../plot3d/plot3dStore");
+      const { settings, canUndo, canRedo } = m.getSnapshot();
+      const facts = new Map(m.diagFacts().map((d) => [d.id, d]));
+      return {
+        total: settings.groups.length,
+        view: {
+          axisScale: settings.axisScale, showGrid: settings.showGrid, gridDensity: settings.gridDensity,
+          follow: settings.follow, autoRotate: settings.autoRotate, keyFlight: settings.keyFlight,
+          zoomToCursor: settings.zoomToCursor, calibMode: settings.calibMode, calibSrcId: settings.calibSrc ?? null,
+          canUndo, canRedo,
+        },
+        items: settings.groups.map((g) => {
+          const f = facts.get(g.id);
+          return {
+            id: g.id, name: g.name, color: g.color, visible: g.visible, mode: g.mode,
+            boundX: Boolean(g.chX), boundY: Boolean(g.chY), boundZ: Boolean(g.chZ),
+            colorBy: g.colorBy, fadeSec: g.fade, density: g.density, smooth: g.smooth,
+            maxPoints: g.maxPoints, pairMode: g.pairMode, pairTolMs: g.pairTolMs,
+            arrowEvery: g.arrowEvery, showStartEnd: g.showStartEnd, notesLen: len(g.notes),
+            headingSrc: g.heading?.src ?? null,
+            modelKind: g.model?.kind ?? null, hasModelFile: Boolean(g.model?.src),
+            paired: f?.paired ?? 0, skipped: f?.skipped ?? 0,
+            missingAxis: f?.missingAxis ?? null, hasSource: f?.hasSource ?? false,
+          };
+        }),
+      };
+    },
+  },
+  {
+    path: "plot3d.groups/<id>",
+    group: "plot3d",
+    zh: "单个轨迹组的完整配置与校准进度",
+    gives:
+      "三轴绑定通道 id + 平滑/着色/配对/变换/朝向 + 椭球校准{capturing,sampleCount,cap,octants[]} + 六面校准{collecting,idx,n,minSamples,stalled}（`modelFile` 只给有无与缩放，路径不外带）",
+    byId: true,
+    maxBytes: 6144,
+    async read({ id }) {
+      const m = await import("../plot3d/plot3dStore");
+      const { settings } = m.getSnapshot();
+      const g = settings.groups.find((x) => x.id === id);
+      if (!g) return { error: "unknown_id", id, want: settings.groups.map((x) => x.id) };
+      const calib = m.calibSnapshot();
+      const a6 = m.accel6Snapshot();
+      const f = m.diagFacts().find((d) => d.id === id);
+      return {
+        id: g.id, name: g.name, color: g.color, visible: g.visible, mode: g.mode,
+        chX: g.chX, chY: g.chY, chZ: g.chZ,
+        pointSize: g.pointSize, opacity: g.opacity, showDots: g.showDots, maxPoints: g.maxPoints,
+        colorBy: g.colorBy, colorCh: g.colorCh, fadeSec: g.fade, density: g.density,
+        smooth: g.smooth, smoothWin: g.smoothWin, smoothSub: g.smoothSub, smoothTension: g.smoothTension,
+        arrowEvery: g.arrowEvery, showStartEnd: g.showStartEnd,
+        heading: {
+          // 键名不叫 `src`：目录侧的字段黑名单（测试钉）把 `src` 划成"路径/端点"这一类，
+          // 而这里的语义是"朝向取哪个源"——换成说人话的 `source`，也让模型不会误以为它是文件。
+          source: g.heading?.src ?? null, chYaw: g.heading?.chYaw || null,
+          quat: g.heading?.src === "quat" ? [g.heading.qX, g.heading.qY, g.heading.qZ, g.heading.qW] : null,
+          yawOff: g.heading?.yawOff ?? 0, pitchOff: g.heading?.pitchOff ?? 0, rollOff: g.heading?.rollOff ?? 0,
+          yawSign: g.heading?.yawSign ?? 1,
+        },
+        model: { kind: g.model?.kind ?? null, scale: g.model?.scale ?? 1, hasFile: Boolean(g.model?.src) },
+        transform: g.transform ?? null, pairMode: g.pairMode, pairTolMs: g.pairTolMs, notesLen: len(g.notes),
+        paired: f?.paired ?? 0, skipped: f?.skipped ?? 0, missingAxis: f?.missingAxis ?? null, hasSource: f?.hasSource ?? false,
+        calib: { capturing: calib.capturing, sampleCount: calib.count, cap: m.CALIB_CAP, octants: calib.coverage },
+        accel6: { collecting: a6.collecting, idx: a6.idx, n: a6.n, minSamples: a6.minSamples, stalled: a6.stalled },
+      };
+    },
+  },
+  {
+    path: "orchestrator.groups",
+    group: "orchestrator",
+    zh: "编排器组清单（结构与开关）",
+    gives:
+      "masterOn · varCount · cap{groupCap,varCap,queueCap} · items[{id,name,enabled,eventKinds[],blockCount,depth,cooldownMs,queuePolicy,noteLen}]（**运行统计不在这里**：在跑几条/哪组失败属活值，请用动作 orchestratorRead）",
+    listKey: "items",
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxBytes: 8192,
+    async read() {
+      const [{ getSnapshot }, { ORCH_LIMITS }] = await Promise.all([
+        import("../orchestrator/orchestratorStore"),
+        import("../orchestrator/types"),
+      ]);
+      const doc = getSnapshot().doc;
+      return {
+        total: doc.groups.length,
+        masterOn: doc.settings.masterOn,
+        varCount: doc.vars.length,
+        docTitleLen: len(doc.title),
+        cap: { groupCap: ORCH_LIMITS.groupCap, varCap: ORCH_LIMITS.varCap, queueCap: ORCH_LIMITS.queueCap },
+        items: byId(doc.groups).map((g) => ({
+          id: g.id, name: g.name, enabled: g.enabled,
+          eventKinds: g.events.map((e) => e.kind),
+          blockCount: countBlocks(g.children), depth: 1 + (g.children.some((c) => "children" in c) ? 1 : 0),
+          cooldownMs: g.cooldownMs ?? 0, queuePolicy: g.queuePolicy ?? "dropNew", noteLen: len(g.note),
+        })),
+      };
+    },
+  },
+  {
+    path: "orchestrator.groups/<id>",
+    group: "orchestrator",
+    zh: "单个编排组的块树与事件参数",
+    gives:
+      "events[{id,kind,intervalMs?,stride?,level?,varName?,idleMs?,name?}] + blocks[{id,kind,enabled,parentId,depth}]（发送块只给 payloadMode，**不给字节**；文本块只给长度）",
+    byId: true,
+    listKey: "blocks",
+    defaultLimit: 120,
+    maxBytes: 8192,
+    async read({ id }) {
+      const { getSnapshot } = await import("../orchestrator/orchestratorStore");
+      const groups = getSnapshot().doc.groups;
+      const g = groups.find((x) => x.id === id);
+      if (!g) return { error: "unknown_id", id, want: groups.map((x) => x.id) };
+      const blocks: { id: string; kind: string; enabled: boolean; parentId: string | null; depth: number; payloadMode?: string; textLen?: number }[] = [];
+      const walk = (nodes: { id: string; kind: string; enabled?: boolean; children?: unknown[] }[], parent: string | null, depth: number) => {
+        for (const n of nodes) {
+          const rec = n as Record<string, unknown>;
+          blocks.push({
+            id: n.id, kind: n.kind, enabled: n.enabled !== false, parentId: parent, depth,
+            ...(n.kind === "send" ? { payloadMode: String(rec.sendMode ?? "ascii") } : {}),
+            ...("text" in rec ? { textLen: len(rec.text) } : {}),
+          });
+          if (Array.isArray(n.children)) walk(n.children as { id: string; kind: string; enabled?: boolean; children?: unknown[] }[], n.id, depth + 1);
+        }
+      };
+      walk(g.children as { id: string; kind: string; enabled?: boolean; children?: unknown[] }[], null, 0);
+      return {
+        id: g.id, name: g.name, enabled: g.enabled, cooldownMs: g.cooldownMs ?? 0,
+        queuePolicy: g.queuePolicy ?? "dropNew", noteLen: len(g.note),
+        totalEvents: g.events.length,
+        events: g.events.map((e) => {
+          const rec = e as unknown as Record<string, unknown>;
+          return {
+            id: e.id, kind: e.kind,
+            ...(typeof rec.intervalMs === "number" ? { intervalMs: rec.intervalMs } : {}),
+            ...(typeof rec.idleMs === "number" ? { idleMs: rec.idleMs } : {}),
+            ...(typeof rec.stride === "number" ? { stride: rec.stride } : {}),
+            ...(typeof rec.level === "string" ? { level: rec.level } : {}),
+            ...(typeof rec.varName === "string" ? { varName: rec.varName } : {}),
+            ...(typeof rec.name === "string" && e.kind === "flowEvt" ? { name: rec.name } : {}),
+            ...(rec.match && typeof rec.match === "object" ? { matchKind: String((rec.match as { kind?: string }).kind ?? "any") } : {}),
+          };
+        }),
+        blocks,
+      };
+    },
+  },
+  {
+    path: "orchestrator.vars",
+    group: "orchestrator",
+    zh: "编排器变量库（声明与默认值）",
+    gives: "每项 {name,type,def,persist}（`def` 是声明里的默认值；现值属活值，走 orchestratorRead）",
+    listKey: "items",
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxBytes: 6144,
+    async read() {
+      const { getSnapshot } = await import("../orchestrator/orchestratorStore");
+      const vars = getSnapshot().doc.vars;
+      return {
+        total: vars.length,
+        items: vars.map((v) => ({
+          name: v.name, type: v.type,
+          def: typeof v.def === "string" && v.def.length > 120 ? `${v.def.slice(0, 120)}…` : v.def,
+          persist: v.persist,
+        })),
+      };
+    },
+  },
+  {
+    path: "sequencer.suites",
+    group: "sequencer",
+    zh: "测试序列套件清单与最近一次结果",
+    gives:
+      "items[{id,name,stepCount,triggerMode,cooldownMs,failFast,lastRun{status,startedAt,finishedAt,durationMs,total,pass,fail,other}}]（lastRun 缺＝本机还没跑过；步骤正文与发送内容在 sequencer.suites/<id>）",
+    listKey: "items",
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxBytes: 6144,
+    async read() {
+      const { getSnapshot } = await import("../sequencer/sequencerStore");
+      const s = getSnapshot();
+      return {
+        total: s.suites.length,
+        items: byId(s.suites).map((x) => {
+          const r = s.lastResults[x.id];
+          const sum = r ? sumSteps(r.steps) : null;
+          return {
+            id: x.id, name: x.name, stepCount: countBlocks(x.steps), triggerMode: x.trigger.mode,
+            cooldownMs: x.trigger.mode === "onFrame" ? x.trigger.cooldownMs : 0, failFast: x.failFast,
+            ...(r && sum ? { lastRun: { status: r.status, startedAt: r.startedAt, finishedAt: r.finishedAt, durationMs: r.finishedAt - r.startedAt, ...sum } } : {}),
+          };
+        }),
+      };
+    },
+  },
+  {
+    path: "sequencer.suites/<id>",
+    group: "sequencer",
+    zh: "单个序列套件的步骤树",
+    gives:
+      "{id,name,failFast,triggerMode,steps[{id,kind,enabled,parentId,depth,payloadMode?,matchKind?,noteLen?}]}（发送内容/匹配字节一律不外带，只给形态）",
+    byId: true,
+    listKey: "steps",
+    defaultLimit: 120,
+    maxBytes: 8192,
+    async read({ id }) {
+      const { getSnapshot } = await import("../sequencer/sequencerStore");
+      const s = getSnapshot();
+      const suite = s.suites.find((x) => x.id === id);
+      if (!suite) return { error: "unknown_id", id, want: s.suites.map((x) => x.id) };
+      const flat: { id: string; kind: string; enabled: boolean; parentId: string | null; depth: number; payloadMode?: string; matchKind?: string; noteLen?: number }[] = [];
+      const walk = (steps: { id: string; kind: string; enabled?: boolean; children?: unknown[] }[], parent: string | null, depth: number) => {
+        for (const st of steps) {
+          const rec = st as unknown as Record<string, unknown>;
+          flat.push({
+            id: st.id, kind: st.kind, enabled: st.enabled !== false, parentId: parent, depth,
+            ...(rec.payload && typeof rec.payload === "object" ? { payloadMode: String((rec.payload as { mode?: string }).mode ?? "ascii") } : {}),
+            ...(rec.match && typeof rec.match === "object" ? { matchKind: String((rec.match as { kind?: string }).kind ?? "any") } : {}),
+            ...("note" in rec ? { noteLen: len(rec.note) } : {}),
+          });
+          if (Array.isArray(st.children)) walk(st.children as { id: string; kind: string; enabled?: boolean; children?: unknown[] }[], st.id, depth + 1);
+        }
+      };
+      walk(suite.steps as unknown as { id: string; kind: string; enabled?: boolean; children?: unknown[] }[], null, 0);
+      return {
+        id: suite.id, name: suite.name, failFast: suite.failFast, triggerMode: suite.trigger.mode,
+        totalSteps: flat.length, steps: flat,
+      };
+    },
+  },
+  {
+    path: "analysis.last",
+    group: "analysis",
+    zh: "分析面板最近一次分析包",
+    gives:
+      "safeAnalysisSnapshot 的那一份白名单结果：{algorithmVersion,generatedAt,provenance,request,groups,limits,channels[{id,stats}],trajectories[{id,pairing,stats}]}（路径/标题/备注这类自由文本已经被白名单剔掉）",
+    maxBytes: 8192,
+    async read() {
+      const [{ getSnapshot }, { safeAnalysisSnapshot }] = await Promise.all([
+        import("../analysis/analysisStore"),
+        import("../analysis/analysisSnapshot"),
+      ]);
+      const st = getSnapshot();
+      if (!st.result) return { available: false, reason: st.error ? String(st.error).slice(0, 160) : "本机还没有算过分析：让用户在分析面板点一次「开始分析」" };
+      return { available: true, ...safeAnalysisSnapshot(st.result) };
+    },
+  },
+  {
+    path: "modbus.slave",
+    group: "modbus",
+    zh: "Modbus 模拟从站配置与计数",
+    gives:
+      "{running,address,anyAddress,delayMs,fault,faultCode,bitSize,wordSize,counters{requests,replies,exceptions,silents,ignored,noise},eventsRecent[{ts,dir}],eventsTotal,eventsOmitted}（原始请求/响应文本不外带；数据区内容不在目录面）",
+    maxBytes: 4096,
+    async read() {
+      const { getSnapshot } = await import("../modbus/slaveStore");
+      const s = getSnapshot();
+      return {
+        running: s.running, address: s.address, anyAddress: s.anyAddress, delayMs: s.delayMs,
+        fault: s.fault, faultCode: s.faultCode, bitSize: s.bitSize, wordSize: s.wordSize,
+        counters: s.counters,
+        eventsRecent: s.events.slice(0, 5).map((e) => ({ ts: e.ts, dir: e.dir })),
+        eventsTotal: s.events.length, eventsOmitted: Math.max(0, s.events.length - 5),
+      };
+    },
+  },
+  {
+    path: "modbus.poll",
+    group: "modbus",
+    zh: "Modbus 主站轮询表",
+    gives:
+      "{running,transport,txns,timeouts,errs,items[{id,slave,fn,addr,qty,periodMs,varName,elem,scale,enabled,ok,timeout,err,last,lastTs,latencyMs}]}（每行读数历史数组不外带）",
+    listKey: "items",
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxBytes: 8192,
+    async read() {
+      const { getSnapshot } = await import("../modbus/pollStore");
+      const p = getSnapshot();
+      return {
+        total: p.rows.length, running: p.running, transport: p.transport,
+        txns: p.txns, timeouts: p.timeouts, errs: p.errs,
+        items: byId(p.rows).map((r) => ({
+          id: r.id, slave: r.slave, fn: r.fn, addr: r.addr, qty: r.qty, periodMs: r.periodMs,
+          varName: r.varName, elem: r.elem, scale: r.scale, enabled: r.enabled,
+          ok: r.ok, timeout: r.timeout, err: r.err, last: r.last, lastTs: r.lastTs, latencyMs: r.latencyMs,
+        })),
+      };
+    },
+  },
+  {
+    path: "vdev.devices",
+    group: "vdev",
+    zh: "虚拟设备清单与运行链路",
+    gives:
+      "{running,device,dirty,net{transport,outSent,outBytes,inRecv,clients,fault},items[{id,name,periodMs,frameFieldCount,inputCount,signalCount,commandCount,faults{dropPct,stuckPct,spikePct},netConfigured,netTransport,descLen}]}（设备 JSON 全文、网络地址与串口路径不外带，只回有无）",
+    listKey: "items",
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxBytes: 6144,
+    async read() {
+      const { getSnapshot } = await import("../vdev/vdevStore");
+      const v = getSnapshot();
+      const ns = v.netStatus;
+      return {
+        total: v.specs.length, running: v.running, device: v.device, dirty: v.dirty,
+        ...(ns ? { net: { transport: ns.transport, outSent: ns.outSent, outBytes: ns.outBytes, inRecv: ns.inRecv, clients: ns.clients, fault: ns.outErrs > 0 } } : {}),
+        items: byId(v.specs).map((x) => ({
+          id: x.id, name: x.spec.name, periodMs: x.spec.periodMs,
+          frameFieldCount: x.spec.frame.fields.length, inputCount: x.spec.inputs.length,
+          signalCount: x.spec.signals.length, commandCount: x.spec.commands.length,
+          faults: { dropPct: x.spec.faults.dropPct, stuckPct: x.spec.faults.stuckPct, spikePct: x.spec.faults.spikePct },
+          netConfigured: Boolean(x.spec.net), netTransport: x.spec.net?.transport ?? null,
+          descLen: len(x.spec.desc),
+        })),
+      };
+    },
+  },
+  {
+    path: "sentinel.health",
+    group: "sentinel",
+    zh: "哨兵健康度、通道评分与报警",
+    gives:
+      "{running,learning,health,unack,activeCrit,activeWarn,conn,silenceMs,totals{frames,errors},cfg{sensitivity,silenceSec,errRatePct,sound,alertCap,autoDiag,mutedCount},chans[{name,score,level,last,tplId,fieldId}],frameTypes[{id,name,count,isNew}],alertsTotal,items[{id,ts,kind,level,key,count,acked}]}（报警正文与详情数值不外带，只给级别/键/计数；静音列表只给数量）",
+    listKey: "items",
+    defaultLimit: 20,
+    maxBytes: 8192,
+    async read() {
+      const { getSnapshot } = await import("../sentinel/sentinelStore");
+      const s = getSnapshot();
+      return {
+        running: s.running, learning: s.learning, health: s.health, unack: s.unack,
+        activeCrit: s.activeCrit, activeWarn: s.activeWarn, conn: s.conn,
+        silenceMs: s.silenceMs, totals: s.totals,
+        cfg: {
+          sensitivity: s.cfg.sensitivity, silenceSec: s.cfg.silenceSec, errRatePct: s.cfg.errRatePct,
+          sound: s.cfg.sound, alertCap: s.cfg.alertCap, autoDiag: s.cfg.autoDiag, mutedCount: s.cfg.mutedKeys.length,
+        },
+        chans: s.chans, chanTotal: s.chanTotal, frameTypes: s.frameTypes,
+        alertsTotal: s.alerts.length,
+        items: s.alerts.map((a) => ({ id: a.id, ts: a.ts, kind: a.kind, level: a.level, key: a.key, count: a.count, acked: a.acked })),
+      };
+    },
+  },
 ];
+
+/* ============================ C1b 七面：读者侧的收敛助手 ============================
+ * 这七面的 `getSnapshot()` 都是**整包**（点云 220k、校准点 20k、寄存器 hist 环、原始 hex、
+ * GLTF 绝对路径、串口号、自由文本备注全在里面）。目录给出去的必须是摘要，所以收敛写在读者侧：
+ * 逐字段挑、自由文本只给长度、端点与路径一概不外带。`hostCatalog.test.ts` 的"键名黑名单 +
+ * 毒值扫描"两条钉看着这里写的每一个键（详设 §5.1）。
+ */
+
+/** 编排块是递归的（if/loop/组里还有块）：数块走这一条。参数收 `unknown[]` 是因为块是**判别联合**，
+ *  联合成员各有各的字段，只有 `children` 这条递归边是共有的——按共有面收，不给联合加壳。 */
+function countBlocks(nodes: readonly unknown[]): number {
+  return nodes.reduce<number>((n, x) => {
+    const kids = (x as { children?: unknown }).children;
+    return n + 1 + (Array.isArray(kids) ? countBlocks(kids) : 0);
+  }, 0);
+}
+
+/** 序列运行结果树：数总数 + 按状态给计数 */
+function sumSteps<T extends { children?: T[]; status?: string }>(steps: readonly T[]): { total: number; pass: number; fail: number; other: number } {
+  let total = 0;
+  let pass = 0;
+  let fail = 0;
+  let other = 0;
+  const walk = (list: readonly T[]) => {
+    for (const s of list) {
+      total++;
+      if (s.status === "pass") pass++;
+      else if (s.status === "fail" || s.status === "timeout") fail++;
+      else other++;
+      if (Array.isArray(s.children)) walk(s.children);
+    }
+  };
+  walk(steps);
+  return { total, pass, fail, other };
+}
+
+function len(s: unknown): number {
+  return typeof s === "string" ? s.length : 0;
+}
+
+/** 按 id 稳定排序（§3-1：列表次序必须可复现，别让模型把"第 3 行"当稳定引用） */
+function byId<T extends { id: string }>(list: readonly T[]): T[] {
+  return [...list].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
 
 /* ============================ 目录查询与读取 ============================ */
 
@@ -452,12 +876,15 @@ function matchView(path: string): { view: CatalogView; id?: string } | null {
   if (direct) return { view: direct };
   for (const v of CATALOG_VIEWS) {
     if (!v.byId || !v.path.endsWith("/<id>")) continue;
-    const head = v.path.slice(0, -"/<id>".length).toLowerCase(); // "protocols"
-    if (!norm.startsWith(`${head}/`) && !norm.startsWith(`${head}.`)) continue;
     /**
-     * id 取**未归一**的原样尾段：模板/控件 id 可以带点、也可以有大写，
-     * 一起归一会把 `protocols/my.tpl` 读成三段、把 `MyTpl` 变成 `mytpl`——那就永远对不上号。
+     * 前缀也要**归一后再比**（C1b 修的潜伏 bug）：C1 那三支 byId（`protocols/<id>` 等）恰好
+     * 都不带点，所以"拿未归一的声明前缀去比归一后的输入"一直没露馅；本批的组名带点
+     * （`orchestrator.groups/<id>`），`orchestrator/groups/og1` 就永远配不上，读者只能靠
+     * `args.id` 才读得通——菜单里那条"点号与斜杠两种写法等价"的承诺当场成了假话。
+     * 归一是 1:1 字符映射（前导 `/` 已在 raw 上剥掉），所以按长度切原样尾段仍然成立。
      */
+    const head = normPath(v.path.slice(0, -"/<id>".length)); // "orchestrator/groups"
+    if (!norm.startsWith(`${head}/`) && !norm.startsWith(`${head}.`)) continue;
     const rest = raw.slice(head.length + 1);
     if (!rest || rest.includes("/")) continue;
     return { view: v, id: decodeURIComponent(rest) };

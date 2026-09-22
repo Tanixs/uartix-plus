@@ -34,7 +34,8 @@ vi.mock("../plot/dataLease", () => ({ acquireDataLease: vi.fn(async () => true),
 const { createToolRegistry } = await import("./toolRegistry");
 const { pluginToolEntries } = await import("./pluginTools");
 const { createLocalAgentAdapter } = await import("./agentAdapter");
-const { clearAllPluginTools, addPluginToolDefs } = await import("../plugins/pluginToolDefs");
+const { clearAllPluginTools, addPluginToolDefs, clearPluginTools, commitToolSnapshot, describeToolChange, pluginToolChangeOf } =
+  await import("../plugins/pluginToolDefs");
 import type { TaskContext, ToolCall } from "./types";
 
 const PKG = { pkgId: "user.agent.demo", pkgName: "求和插件", version: "0.1.0" };
@@ -135,5 +136,72 @@ describe("插件工具投影", () => {
     const entries = pluginToolEntries();
     expect(entries).toHaveLength(2);
     expect(() => createToolRegistry(entries)).not.toThrow();
+  });
+});
+
+/* ======================= P99a-F2：批准并启用之后的工具差异 ======================= */
+
+describe("P99a-F2：启用后的工具差异（B3 剩下的那半）", () => {
+  it("差异只在 ready 那一刻算：登记过程中不产生任何变化记录", () => {
+    register("a");
+    register("b");
+    expect(pluginToolChangeOf(PKG.pkgId)).toBeUndefined();
+  });
+
+  it("首报全部算新增，话说得出口", () => {
+    register("a");
+    register("b");
+    expect(commitToolSnapshot(PKG.pkgId)).toMatchObject({ added: ["a", "b"], removed: [] });
+    expect(describeToolChange(pluginToolChangeOf(PKG.pkgId))).toBe("工具 +2（a、b）");
+  });
+
+  it("同一版重启（清空后又报回同一批）不许谎报变化，也不擦掉上一次的真变化", () => {
+    register("a");
+    register("b");
+    expect(commitToolSnapshot(PKG.pkgId)).toMatchObject({ added: ["a", "b"] });
+    clearPluginTools(PKG.pkgId);
+    register("a");
+    register("b");
+    expect(commitToolSnapshot(PKG.pkgId)).toBeUndefined();
+    expect(pluginToolChangeOf(PKG.pkgId)).toMatchObject({ added: ["a", "b"], removed: [] });
+  });
+
+  it("换版：加的新名与掉的旧名都要报（只报增不报减是半个谎）", () => {
+    register("a");
+    register("b");
+    commitToolSnapshot(PKG.pkgId);
+    clearPluginTools(PKG.pkgId);
+    register("b");
+    register("c");
+    const ch = commitToolSnapshot(PKG.pkgId);
+    expect(ch).toMatchObject({ added: ["c"], removed: ["a"] });
+    expect(describeToolChange(ch)).toBe("工具 +1（c），−1（a）");
+  });
+
+  it("一支都没收下（全被拒）算清空，不是「没变」", () => {
+    register("a");
+    commitToolSnapshot(PKG.pkgId);
+    clearPluginTools(PKG.pkgId);
+    expect(commitToolSnapshot(PKG.pkgId)).toMatchObject({ added: [], removed: ["a"] });
+    expect(describeToolChange(pluginToolChangeOf(PKG.pkgId))).toBe("工具 −1（a）");
+  });
+
+  it("全清之后账本一起归零（陈旧变化不能一直挂在包里）", () => {
+    register("a");
+    commitToolSnapshot(PKG.pkgId);
+    clearAllPluginTools();
+    expect(pluginToolChangeOf(PKG.pkgId)).toBeUndefined();
+    register("a");
+    expect(commitToolSnapshot(PKG.pkgId)).toMatchObject({ added: ["a"], removed: [] });
+  });
+
+  it("启用回执里那句差异只在 ready 之后取一次（不在别处再算一遍）", async () => {
+    const fsSpec = "node:fs";
+    const { readFileSync } = (await import(fsSpec)) as unknown as {
+      readFileSync: (p: string | URL, enc?: string) => string;
+    };
+    const src = readFileSync(new URL("../plugins/pluginStore.ts", import.meta.url), "utf8");
+    expect((src.match(/commitToolSnapshot\(/g) || []).length).toBe(1);
+    expect(src).toContain("describeToolChange(commitToolSnapshot(id))");
   });
 });

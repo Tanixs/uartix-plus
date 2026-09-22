@@ -939,7 +939,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   `aiScript` 更糟——说明写着"允许调用高权限动作"，实际 `prompts.ts` 一句 `void perms`
                   什么都不拦，真实高权限判定走硬编码的 highPriv。**留着一个假装生效的安全控件，
                   比没有控件更危险**（用户会以为关掉它就安全了）。
-                  `aiWidgetSend` 是真门（appActions 的 openPort/closePort + 小部件 send/ask + 脚本 api.send），
+                  `aiWidgetSend` 是真门（appActions 的 openPort/closePort + 小部件 send/ask），
                   它是**全机发送总闸**而不是"AI 插件的子功能"，所以搬到这里并改名。
                 */}
                 <div className="set-group-title">{tx("权限与安全", "Permissions & safety")}</div>
@@ -1094,7 +1094,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <input type="checkbox" checked={settings.mcpHighPriv} onChange={(e) => patch({ mcpHighPriv: e.target.checked })} />
                     <span />
                   </label>
-                ), tx("openPort/closePort、删除模板/命令/卡片等破坏性动作的开关（与 AI 脚本高权限同一集合）", "Gates openPort/closePort and destructive remove actions (same set as AI script high privilege)"))}
+                ), tx("openPort/closePort、删除模板/命令/卡片等破坏性动作的开关（与高权限动作同一集合）", "Gates openPort/closePort and destructive remove actions (same set as high-privilege actions)"))}
                 <div className="set-group-title">{tx("任务（P88a 异步任务）", "Jobs (async tasks)")}</div>
                 <div className="set-danger-note">{tx("收到≠成功；停止中≠已停止。取消不会撤销已发生的设备操作。", "Accepted is not success. Stopping is not stopped. Cancelling never undoes effects already sent.")}</div>
                 {jobSt.jobs.length === 0 ? (

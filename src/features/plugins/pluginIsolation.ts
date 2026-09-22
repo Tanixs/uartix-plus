@@ -34,6 +34,10 @@ export const PLUGIN_IFRAME_CSP = [
  * 而我上一批写的那条"两边集合相等"的守卫当时仍然绿，因为它的正则是
  * `case "(aiw:[a-z-]+)"`：不匹配数字（`x2w`）、不匹配驼峰（`getSnap`）。
  * 教训进 §8-36②：守卫自己的正则也是探针，探针漏看的字符集就是它永远查不到的缺陷。
+ *
+ * P99a-D1c 又反着走了一遍：`aiw:getSnap` 整支删掉（宿主侧有 handler，桥侧 `uartix.snap()`
+ * 却只读缓存、从不发这支消息）。**"登记在表上却没人发"和"有人发却没登记"是同一种病的两面**——
+ * 都让这张表与真实消息面不一致；判死删掉之后，两边才是真的严格相等。
  */
 export type AiwInboundType =
   | "aiw:ready"
@@ -44,7 +48,6 @@ export type AiwInboundType =
   | "aiw:resize"
   | "aiw:cursor"
   | "aiw:win"
-  | "aiw:getSnap"
   | "aiw:x2w";
 
 /**
@@ -67,8 +70,6 @@ export const MSG_CAP_REQUIREMENT: Record<AiwInboundType, PluginCap | null> = {
   "aiw:resize": null,
   "aiw:cursor": null,
   "aiw:win": null,
-  /** 索取一次数据快照＝数据流出，与被动推送同一能力，否则 telemetry.read 的门形同虚设 */
-  "aiw:getSnap": "telemetry.read",
   /** 只中继发送方自己给的 data 给其它沙箱组件，不经宿主数据、60KB 上限在桥侧 */
   "aiw:x2w": null,
 };

@@ -1,0 +1,19 @@
+{
+  "id": "uartix.panel.link",
+  "name": "链路体检",
+  "author": "uartix",
+  "category": "panel",
+  "description": {
+    "zh": "面板：把连接状态、端口与当前可读字段数摆在一条线上，先确认链路通不通。",
+    "en": "Panel: link status, port name and how many fields are readable right now."
+  },
+  "version": "1.0.0",
+  "minAppVersion": "0.4.1",
+  "updated": "2026-09-18",
+  "packageFile": "panel-link/",
+  "publicUrl": "/market/pkg/panel-link.uartix.json",
+  "capabilities": [
+    "ui.panel",
+    "telemetry.read"
+  ]
+}

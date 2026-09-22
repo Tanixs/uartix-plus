@@ -62,6 +62,21 @@ async function loadChat(sessions: unknown[], activeId: string, opts?: { failFirs
 }
 
 describe("chatStore 会话管理（P89 A）", () => {
+  it("P99a-D1b 任务模板草稿：只填输入框的一次性投递，不代发也不留第二份", async () => {
+    const chat = await loadChat([sess("a", 2)], "a");
+    expect(chat.getSnapshot().pendingDraft).toBeNull();
+    chat.pushDraft("按这个任务模板来做：巡检");
+    expect(chat.getSnapshot().pendingDraft).toBe("按这个任务模板来做：巡检");
+    // 消费即清：第二次必须拿到 null，否则输入框会被同一段模板反复回填
+    expect(chat.consumeDraft()).toBe("按这个任务模板来做：巡检");
+    expect(chat.consumeDraft()).toBeNull();
+    expect(chat.getSnapshot().pendingDraft).toBeNull();
+    // 空串也是一次性投递（用户可能就想填一段空白重来），不能因为 falsy 被吞掉
+    chat.pushDraft("");
+    expect(chat.consumeDraft()).toBe("");
+    expect(chat.consumeDraft()).toBeNull();
+  });
+
   it("A3 启动清理：只删「无消息且无 run 关联且无标题」的会话", async () => {
     h.occupied = new Set(["c"]);
     const chat = await loadChat([sess("a", 2), sess("b", 0), sess("c", 0), sess("d", 0, "手动命名")], "a");

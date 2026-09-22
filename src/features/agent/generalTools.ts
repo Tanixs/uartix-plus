@@ -250,7 +250,7 @@ async function assessFsWrite(
     return { refuse: notExecuted(callId, "too_large", { chars: content.length, max: FS_WRITE_MAX_CHARS, hint: "分几次写，或先写模板再补数据" }) };
   }
   if (!inWhitelist(path)) {
-    return { refuse: notExecuted(callId, "path_outside_whitelist", { path, hint: `把目标目录加入 设置 → AI 服务 → 「${DOMAIN_ZH.files}」白名单` }) };
+    return { refuse: notExecuted(callId, "path_outside_whitelist", { path, hint: "把目标目录加入 设置 → AI 服务 → 「Agent 文件白名单」" }) };
   }
   let st: FileStat;
   try {

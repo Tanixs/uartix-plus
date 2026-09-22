@@ -807,6 +807,15 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     void chatStore.runScene(p.scene, p.payload);
   }, [chat.pendingScene]);
 
+  // P99a-D1b：任务模板「载入 AI 助手」——只填输入框，不代发（发不发、哪个授权档由用户决定）
+  useEffect(() => {
+    const d = chat.pendingDraft;
+    if (d === null) return;
+    chatStore.consumeDraft();
+    setInput(d);
+    inputRef.current?.focus();
+  }, [chat.pendingDraft]);
+
   useEffect(() => {
     if (!notice && !uploadState) return;
     const t = window.setTimeout(() => {
@@ -1545,8 +1554,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 </div>
                 {tierRestore.downgraded && agentMode && (
                   <span className="ai-agent-domains-empty">
-                    上次这里是「全面放手 / 自定义勾选」。高危档不跨重启记忆（避免开机就带着满权限），
-                    已回落到「放手改界面」——需要的话在上面的高级区重新勾上。
+                    上次这里是「全权执行 / 自定义勾选」。高危档不跨重启记忆（避免开机就带着满权限），
+                    已回落到「界面创造」——需要的话在上面的高级区重新勾上。
                   </span>
                 )}
               </div>
@@ -1614,7 +1623,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                       ))}
                     </div>
                     <span className="ai-agent-domains-empty">
-                      一项都不勾时按「放手改界面」同权执行（配置 + 插件库），不会出现"选了自定义却什么都改不动"。
+                      一项都不勾时按「界面创造」同权执行（配置 + 插件库），不会出现"选了自定义却什么都改不动"。
                     </span>
                   </>
                 )}

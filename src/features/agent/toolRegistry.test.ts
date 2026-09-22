@@ -155,6 +155,20 @@ describe("管线：abort / 参数 / 策略 / 批准", () => {
     expect(r).toMatchObject({ ok: false, status: "not_executed", code: "unknown_tool", data: { tool: "typo_tool" } });
   });
 
+  it("P99a-F3：plg_ 前缀查不到回专属码并说清「下一任务才可见」，非前缀仍是 unknown_tool", async () => {
+    const reg = createToolRegistry([entry({ name: "known_tool" })]);
+    const late = pluginToolName("user.echo-1", "echo");
+    expect(late.startsWith("plg_")).toBe(true); // 前提：前缀规则没改，否则这条钉的是空气
+    const r = await runToolCall(reg, call(late), ctx(), hooks());
+    expect(r).toMatchObject({ ok: false, status: "not_executed", code: "tool_frozen_for_this_run" });
+    expect((r.data as { tool: string }).tool).toBe(late);
+    // 话术必须给出路（只说"不存在"会把模型推去反复改名重试）
+    expect(String((r.data as { hint: string }).hint)).toContain("下一个任务");
+    // 拼错的主机工具名不该被这条误伤
+    expect((await runToolCall(reg, call("plg"), ctx(), hooks())).code).toBe("unknown_tool");
+    expect((await runToolCall(reg, call("known_tooll"), ctx(), hooks())).code).toBe("unknown_tool");
+  });
+
   it("require_local_approval：先要批准、不执行；给令牌后同参数才执行", async () => {
     const exec = vi.fn(() => ({ ok: true, status: "applied" as const }));
     const reg = createToolRegistry([entry({ name: "clear_page", effect: "destructive_write", execute: exec })]);

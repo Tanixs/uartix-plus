@@ -315,7 +315,21 @@ async function dispatchToolCall(
 ): Promise<ToolReceipt> {
   if (ctx.signal.aborted) return notExecuted(call.callId, "cancelled");
   const entry = registry.byName(call.name);
-  if (!entry) return notExecuted(call.callId, "unknown_tool", { tool: call.name });
+  if (!entry) {
+    /**
+     * P99a-F3：`plg_` 开头的名字查不到，绝大多数情况不是"名字打错"，而是**这条规则**的现场——
+     * 工具面在任务开始时冻结，中途启用的插件包这一轮看不见（详设 §4.5-2「自扩展不等于自提权」）。
+     * 以前这里一律回裸 `unknown_tool`，等于把"设计如此"误诊成"这工具不存在"，模型于是去重命名重试、
+     * 用户于是以为注册没生效。名字带前缀就给这一条专属码，其余仍走 `unknown_tool`。
+     */
+    if (call.name.startsWith(PLUGIN_TOOL_PREFIX)) {
+      return notExecuted(call.callId, "tool_frozen_for_this_run", {
+        tool: call.name,
+        hint: "本任务的工具清单在任务开始时冻结：中途启用的插件包要到下一个任务才看得见；中途停用/卸载的包，它的工具仍在本轮清单里但会回「插件模块未在线」。",
+      });
+    }
+    return notExecuted(call.callId, "unknown_tool", { tool: call.name });
+  }
 
   if (!permitted(entry, ctx.scope, ctx.allowed ?? [])) {
     return deniedDomain(entry, ctx.scope, call.callId);

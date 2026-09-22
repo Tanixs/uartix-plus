@@ -1,0 +1,33 @@
+{
+  "format": "uartix-plugin",
+  "schemaVersion": 2,
+  "id": "uartix.panel.link",
+  "version": "1.0.0",
+  "name": "链路体检",
+  "desc": "",
+  "hostApi": "^1.0",
+  "capabilities": [
+    "ui.panel",
+    "telemetry.read"
+  ],
+  "contributions": {
+    "panels": [
+      {
+        "id": "link",
+        "entry": "link.json",
+        "name": "链路体检"
+      }
+    ]
+  },
+  "artifacts": {
+    "link.json": {
+      "kind": "panel",
+      "format": "html",
+      "htmlFile": "link.html"
+    }
+  },
+  "provenance": {
+    "createdBy": "user",
+    "reviewed": false
+  }
+}

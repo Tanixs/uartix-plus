@@ -62,7 +62,7 @@ fn read_page(text: &str, from: usize, cap: usize) -> serde_json::Value {
 }
 
 /// SSRF 基础防护：host 为 localhost 或私网/链路本地地址时返回 true。
-fn is_private_host(host: &str) -> bool {
+pub(crate) fn is_private_host(host: &str) -> bool {
     let h = host.trim().trim_start_matches('[').trim_end_matches(']').to_lowercase();
     if h.is_empty() || h == "localhost" || h.ends_with(".localhost") || h.ends_with(".local") || h == "0.0.0.0" {
         return true;
@@ -86,7 +86,7 @@ fn is_private_host(host: &str) -> bool {
 }
 
 /// 从 URL 提取 host（scheme://host[:port]/…）。非法返回 None。
-fn url_host(url: &str) -> Option<String> {
+pub(crate) fn url_host(url: &str) -> Option<String> {
     let rest = url.split("://").nth(1)?;
     let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..end];

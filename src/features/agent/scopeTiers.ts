@@ -38,7 +38,7 @@ export const DOMAIN_TIP: Record<Domain, string> = {
   write: "在软件目录/工作区内新建与修改文件；覆盖已有文件与删除仍逐次批准",
 };
 
-/** custom 的兜底授权集＝与「放手改界面」同权。**空数组绝不允许落盘**：
+/** custom 的兜底授权集＝与「界面创造」同权。**空数组绝不允许落盘**：
  *  旧实现 custom + 空 allowed ⇒ authorized() 恒 false ⇒ "自定义几乎什么都干不了"。 */
 export const DEFAULT_DOMAINS: Domain[] = ["config", "plugins"];
 
@@ -46,11 +46,11 @@ export const DEFAULT_DOMAINS: Domain[] = ["config", "plugins"];
  * 档位选择的跨重启恢复（P98-M3，用户裁决 Q3 的折中方案）。
  *
  * 旧行为是**完全不持久化**（P92 当时裁决"授权默认不静默恢复更安全"），代价是用户反映的
- * "重开就回默认、没法形成稳定预期"。但把「全面放手」静默带回开机状态更糟——
+ * "重开就回默认、没法形成稳定预期"。但把「全权执行」静默带回开机状态更糟——
  * 用户会以为"我没授权过它怎么什么都能干"。
  *
- * 所以这里记住选择，**但高危档不自动恢复**：`custom`（含「全面放手」与手工勾选）
- * 一律回落到「放手改界面」，并把 `downgraded` 报给 UI 明说，绝不静默改用户上次选的东西。
+ * 所以这里记住选择，**但高危档不自动恢复**：`custom`（含「全权执行」与手工勾选）
+ * 一律回落到「界面创造」，并把 `downgraded` 报给 UI 明说，绝不静默改用户上次选的东西。
  * 存的是 `(scope, allowed)` 二元组而不是档位 id —— 与任务台账同一口径，档位改名不会让记录失效。
  */
 const TIER_KEY = "vs.agentTier.v1";
@@ -115,11 +115,11 @@ export interface ScopeTier {
 /** 全部定义（主档 + 预设）：`resolveTier`/`tierIdOf` 按 id 在这里查，id 一个都没改 ⇒ 台账无需迁移 */
 export const TIERS: ScopeTier[] = [
   { id: "read", label: "仅预览", desc: "只读数据与状态；任何写入只给预览，不落一行改动", scope: "preview", domains: [], primary: true },
-  { id: "create", label: "放手改界面", desc: "改应用设置、保存主题/控件/面板插件，可逆的自动做；不碰设备与本机", scope: "create", domains: ["config", "plugins"], primary: true },
-  { id: "full", label: "全面放手", desc: "软件目录内八个能力域全开（含界面深改、读白名单文件、写目录内文件、网络、命令行）；覆盖已有文件、删除、实车发送与命令行仍逐次批准", scope: "custom", domains: ["config", "plugins", "device", "files", "network", "shell", "ui", "write"], primary: true },
+  { id: "create", label: "界面创造", desc: "改应用设置、保存主题/控件/面板插件，可逆的自动做；不碰设备与本机", scope: "create", domains: ["config", "plugins"], primary: true },
+  { id: "full", label: "全权执行", desc: "软件目录内八个能力域全开（含界面深改、读白名单文件、写目录内文件、网络、命令行）；覆盖已有文件、删除、实车发送与命令行仍逐次批准", scope: "custom", domains: ["config", "plugins", "device", "files", "network", "shell", "ui", "write"], primary: true },
   // ↓ 高级区预设：不是"更低一档"，是"某一组勾选的一键填法"
-  { id: "workspace", label: "工作区写入", desc: "放手改界面的全部 + 读取白名单内文件", scope: "custom", domains: ["config", "plugins", "files"], primary: false },
-  { id: "device", label: "设备收发", desc: "放手改界面的全部 + 向仿真/虚拟设备发送；实车连接时仍逐次人工批准", scope: "custom", domains: ["config", "plugins", "device"], primary: false },
+  { id: "workspace", label: "工作区写入", desc: "界面创造的全部 + 读取白名单内文件", scope: "custom", domains: ["config", "plugins", "files"], primary: false },
+  { id: "device", label: "设备收发", desc: "界面创造的全部 + 向仿真/虚拟设备发送；实车连接时仍逐次人工批准", scope: "custom", domains: ["config", "plugins", "device"], primary: false },
   { id: "host", label: "本机全能力", desc: "工作区/设备两组的全部 + 网络 + 命令行 + 界面深改（七个域）", scope: "custom", domains: ["config", "plugins", "device", "files", "network", "shell", "ui"], primary: false },
 ];
 
@@ -135,7 +135,7 @@ export const CUSTOM_TIER: ScopeTier = {
 const sameSet = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((x) => b.includes(x));
 
-/** 「放手改界面」预设域＝scope=create 的隐含授权集 */
+/** 「界面创造」预设域＝scope=create 的隐含授权集 */
 const CREATE_DOMAINS = TIERS.find((t) => t.id === "create")!.domains;
 
 /**
@@ -163,7 +163,7 @@ export function resolveTier(id: string, handPicked: Domain[]): { scope: RunScope
   }
   const t = TIERS.find((x) => x.id === id) ?? PRIMARY_TIERS.find((x) => x.id === "create")!;
   if (t.scope !== "custom") return { scope: t.scope, allowed: [...t.domains] };
-  // 预设档：域集写死在表里；空集兜底成与「放手改界面」同权，
+  // 预设档：域集写死在表里；空集兜底成与「界面创造」同权，
   // 绝不产出"看似已授权其实全禁"的任务（P93-A6）
   return { scope: "custom", allowed: t.domains.length ? [...t.domains] : [...DEFAULT_DOMAINS] };
 }

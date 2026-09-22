@@ -24,28 +24,18 @@ import {
   PLUGIN_STATE_LABEL,
   type PluginRecord,
 } from "./pluginStore";
+import { contribKeyLabel, artifactKindLabel, type WorkflowArtifact } from "./artifact";
+import { deprecatedContribKeys } from "./pluginStore";
+import { requestApplyLayout } from "../ai/appBus";
+import { pushDraft } from "../ai/chatStore";
+import { looksLikeLayoutJson } from "../settings/applyLayout";
+import { unknownTemplateTools, templateToPrompt } from "../agent/taskTemplate";
 import { moduleArtifactsOf } from "./moduleHost";
 import { moduleDiagnostics, type ModuleStatus } from "./moduleBus";
-import { pluginToolDefsOf } from "./pluginToolDefs";
-import { PLUGIN_CAPS, type PluginCap } from "./pluginManifest";
+import { describeToolChange, pluginToolChangeOf, pluginToolDefsOf } from "./pluginToolDefs";
+import { CAP_LABEL, PLUGIN_CAPS, describeDiff, manifestDiff, type PluginManifest } from "./pluginManifest";
 import { setOpen } from "../ai/extensionStore";
-
-const CAP_LABEL: Record<PluginCap, string> = {
-  "theme.tokens": "主题 token",
-  "ui.panel": "自定义面板",
-  "ui.widget": "小部件",
-  "ui.action": "界面动作",
-  "win.control": "窗口控制（置顶/点击穿透/弹出独立窗口，含此能力的包不会自动启用）",
-  "logic.run": "在本机 Worker 里运行本包的 JS（含此能力的包不会自动启用）",
-  "agent.tool": "向 AI 助手注册自定义工具（含此能力的包不会自动启用）",
-  "motion.preset": "动效预设",
-  "workspace.preset": "工作区预设",
-  "workflow.compose": "工作流组合",
-  "report.view": "报告视图",
-  "telemetry.read": "读取数据快照",
-  "serial.send": "发送串口数据（另受全局发送权限限制）",
-  "ai.ask": "向 AI 助手提问",
-};
+import { MarketDialog } from "../market/MarketDialog";
 
 /** 逻辑模块运行态的说法（穷举 Record：加一种状态忘了配说法，编译期就红） */
 const MODULE_STATUS_ZH: Record<ModuleStatus | "none", string> = {
@@ -56,12 +46,18 @@ const MODULE_STATUS_ZH: Record<ModuleStatus | "none", string> = {
   dead: "已失控终止（停用再启用可重来）",
 };
 
-const KIND_FILTERS = ["all", "theme", "widget", "panel", "other"] as const;
-const KIND_FILTER_LABEL: Record<string, string> = {
+/**
+ * 种类筛选：只有这几类各占一个按钮，其余一律进「其他」。
+ * 中文名取自产物元表（P99a-D1a：以前这里手抄过一份"主题/小部件/面板"，元表改名就漂）；
+ * 下面那句过滤判定与按钮清单共用同一个 `FILTERED_KINDS`，不再是两处手抄的同一件事。
+ */
+const FILTERED_KINDS = ["theme", "widget", "panel"] as const;
+const KIND_FILTERS = ["all", ...FILTERED_KINDS, "other"] as const;
+const KIND_FILTER_LABEL: Record<(typeof KIND_FILTERS)[number], string> = {
   all: "全部",
-  theme: "主题",
-  widget: "小部件",
-  panel: "面板",
+  theme: artifactKindLabel("theme"),
+  widget: artifactKindLabel("widget"),
+  panel: artifactKindLabel("panel"),
   other: "其他",
 };
 
@@ -69,31 +65,39 @@ function recordKinds(r: PluginRecord): string[] {
   return [...new Set(Object.values(r.pkg.artifacts).map((a) => String(a.kind ?? "")))];
 }
 
-/** 插件市场占位视图（纯 UI，不接网络；复用既有 .plg-* 样式，避免新增 CSS 与并行会话冲突） */
-function PluginMarketPlaceholder({ onBack }: { onBack: () => void }) {
+/**
+ * 候选 vs 现役的差异（P99a-E2 / B3）。
+ *
+ * 三行都是**信息**，不是新增审批：批准仍然是原来那一次点击，不额外要勾选、不额外展开。
+ * 刻意**不假装**能列出"工具变化"——工具是模块在 Worker 里跑起来才自报的（`moduleBus` 每次启动
+ * 先 `clearPluginTools`），批准前根本不知道；编一个看起来完整的差异，比直说"这一项目前还不知道"更坏。
+ */
+function CandidateDiff({ cur, cand }: { cur: PluginManifest; cand: PluginManifest }) {
+  const d = manifestDiff(cur, cand);
+  const text = describeDiff(d);
   return (
     <>
-      <div className="plg-toolbar">
-        <button className="btn" onClick={onBack}>
-          ← 返回插件列表
-        </button>
-        <input
-          className="input plg-search"
-          placeholder="搜索 GitHub 话题插件（即将上线）"
-          disabled
-          aria-label="搜索插件市场"
-        />
-      </div>
-      <div className="plg-list">
-        <div className="plg-empty">
-          插件市场建设中：未来可在此按 uartix-plugin 话题搜索社区插件，导入后默认停用并经校验后启用。
+      <div className="plg-detail-dim">{text || "与当前版本没有能力或产物数量的变化（可能只改了内容本身）"}</div>
+      {d.capsAddedBlocking.length > 0 && (
+        <div className="plg-notice">
+          新要的能力里有「{d.capsAddedBlocking.map((c) => CAP_LABEL[c].name).join("、")}」——这类能力不属于自动放行集，
+          批准后也不会自己生效，要看效果请把这个包再启用一次。
         </div>
+      )}
+      {d.capsRemoved.length > 0 && (
+        <div className="plg-notice">
+          这一版会收回「{d.capsRemoved.map((c) => CAP_LABEL[c].name).join("、")}」，用到它的那部分功能会开始不调。
+        </div>
+      )}
+      <div className="plg-detail-dim">
+        工具清单要批准并启用后才由模块报上来（所以批准卡上给不出它）；启用后在本包详情的
+        「为 AI 助手提供的工具」一节里能看全，那里还会写明这一版比上一版多了哪几支。
       </div>
     </>
   );
 }
 
-/** 插件管理主体（列表+详情+启停+配置+导入导出+更新回滚+市场占位）。
+/** 插件管理主体（列表+详情+启停+配置+导入导出+更新回滚+市场入口）。
  *  onClose 可选：设置页内嵌时不渲染关闭按钮。 */
 export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   const { plugins } = usePlugins();
@@ -110,7 +114,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       .filter((r) => {
         if (filter !== "all") {
           const kinds = recordKinds(r);
-          if (filter === "other" ? kinds.some((k) => !["theme", "widget", "panel"].includes(k)) : !kinds.includes(filter)) return false;
+          if (filter === "other" ? kinds.some((k) => !(FILTERED_KINDS as readonly string[]).includes(k)) : !kinds.includes(filter)) return false;
         }
         if (!q) return true;
         return (
@@ -161,6 +165,51 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
     setOpen(shadowExtId(r.pkg.id, contribId), true);
   };
 
+  /**
+   * 应用插件带来的工作区布局（P99a-D1b：这是 `workspacePreset` 从"能存不能用"变成有投影的那一步）。
+   * 整屏覆盖 ⇒ 先确认；执行前自动把当前布局快照进"自动备份槽"，所以点错了回得去。
+   */
+  const applyWorkspaceLayout = (r: PluginRecord, entry: string) => {
+    const art = r.pkg.artifacts[entry] as { layout?: unknown } | undefined;
+    if (!looksLikeLayoutJson(art?.layout)) {
+      setNotice({ ok: false, msg: "这份内容看着不像布局 JSON，已拒绝应用（别让 clear() 先清空界面再撞异常）" });
+      return;
+    }
+    if (!window.confirm(`应用「${r.pkg.name}」的工作区布局？\n当前排列会被替换，并自动存进 设置 → 布局 的自动备份槽。`)) return;
+    requestApplyLayout(art?.layout, (err) =>
+      setNotice(err
+        ? { ok: false, msg: err }
+        : { ok: true, msg: `已应用「${r.pkg.name}」的布局；想换回去用 设置 → 布局 的自动备份槽` }),
+    );
+  };
+
+  /**
+   * 把任务模板填进 AI 助手的输入框（**只填不发**：发不发、用哪个授权档都是用户的决定）。
+   * 工具存在性在这里再查一次：模板是"当初存的"，工具面是"现在这些"，中间可能已经变了；
+   * 查不到不拦载入，但必须点名说清哪几步会撞 unknown_tool（静默填一段跑不动的话等于骗人）。
+   */
+  const loadTemplate = async (r: PluginRecord, entry: string) => {
+    const art = r.pkg.artifacts[entry] as unknown as WorkflowArtifact | undefined;
+    if (!art || typeof art.goal !== "string" || !Array.isArray(art.steps)) {
+      setNotice({ ok: false, msg: "这个模板读不出目标与步骤（可能是已下架的旧形态），请在 AI 助手里重新生成一份" });
+      return;
+    }
+    const [{ hostEntryNames }, { pluginToolName }, { allPluginToolDefs }] = await Promise.all([
+      import("../agent/hostEntries"),
+      import("../agent/toolRegistry"),
+      import("./pluginToolDefs"),
+    ]);
+    const known = [
+      ...hostEntryNames(),
+      ...allPluginToolDefs().map((d) => pluginToolName(d.pkgId, d.baseName)),
+    ];
+    const unknown = unknownTemplateTools(art, known);
+    pushDraft(templateToPrompt(art, { name: r.pkg.name, version: r.pkg.version }));
+    setNotice(unknown.length
+      ? { ok: false, msg: `已填入输入框（未发送）。但这几步本机没有对应工具：${unknown.join("、")}——先改掉或删掉，否则 Agent 会在这几步上撞 unknown_tool` }
+      : { ok: true, msg: "任务模板已填入 AI 助手输入框（还没有发送）" });
+  };
+
   /* —— P88d ⑤：批量多选（导出/启停/卸载） —— */
   const [selMode, setSelMode] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -206,10 +255,6 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
     setSel(new Set());
   };
 
-  if (market) {
-    return <PluginMarketPlaceholder onBack={() => setMarket(false)} />;
-  }
-
   return (
     <>
       <div className="plg-head">
@@ -218,8 +263,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
           {plugins.length ? `${plugins.length} 个插件` : "暂无插件；由 AI 助手「保存为插件」或导入插件包"}
         </span>
         <div className="plg-head-actions">
-          <button className="btn" onClick={() => setMarket(true)} title="浏览社区插件（即将上线）">
-            插件市场
+          <button className="btn" onClick={() => setMarket(true)} title="浏览社区插件货架：实时拉取索引，看得见来源、能力与哈希">
+            浏览市场
           </button>
           <button className="btn" onClick={() => fileRef.current?.click()} title="导入 uartix-plugin 包（默认停用，校验后才可启用）">
             导入
@@ -382,8 +427,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   <div className="plg-sec">能力与权限</div>
                   <div className="plg-caps">
                     {r.pkg.capabilities.map((c) => (
-                      <span key={c} className="plg-chip" title={CAP_LABEL[c]}>
-                        {CAP_LABEL[c] ?? c}
+                      <span key={c} className="plg-chip" title={CAP_LABEL[c].note}>
+                        {CAP_LABEL[c].name}
                       </span>
                     ))}
                   </div>
@@ -412,6 +457,13 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                               </span>
                             ))}
                           </div>
+                          {/* P99a-F2（B3 剩余那半）：批准更新时说不清"多了哪几支工具"，
+                              但模块报齐的那一刻起，这一条就有了真实答案。 */}
+                          {pluginToolChangeOf(r.pkg.id) && (
+                            <div className="plg-detail-dim">
+                              与上一版报上来的清单相比：{describeToolChange(pluginToolChangeOf(r.pkg.id))}
+                            </div>
+                          )}
                         </>
                       )}
                     </>
@@ -421,8 +473,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   {Object.entries(r.pkg.contributions).length === 0 && <div className="plg-detail-dim">无可挂载产物</div>}
                   {Object.entries(r.pkg.contributions).map(([key, entries]) =>
                     (entries ?? []).map((it) => {
-                      const kindZh =
-                        key === "themes" ? "主题" : key === "widgets" ? "小部件" : key === "panels" ? "面板" : key;
+                      const kindZh = contribKeyLabel(key);
                       return (
                         <div key={it.id} className="plg-contrib-row">
                           <span className="plg-chip">{kindZh}</span>
@@ -438,9 +489,25 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                             </button>
                           )}
                           {key === "themes" && <span className="plg-detail-dim">启用后自动应用</span>}
+                          {key === "workspacePresets" && (
+                            <button className="btn" onClick={() => applyWorkspaceLayout(r, it.entry)}>
+                              应用此布局
+                            </button>
+                          )}
+                          {key === "workflows" && (
+                            <button className="btn" onClick={() => void loadTemplate(r, it.entry)}>
+                              载入 AI 助手
+                            </button>
+                          )}
                         </div>
                       );
                     }),
+                  )}
+                  {deprecatedContribKeys(r.pkg).length > 0 && (
+                    <div className="plg-detail-dim" role="status">
+                      这个包里还有已下架的产物形态（{deprecatedContribKeys(r.pkg).join("、")}）：
+                      它不会出现在任何运行时里，请在 AI 助手里重新生成（动效预设已并入主题、报告视图已并入面板）
+                    </div>
                   )}
 
                   {r.pkg.settingsSchema && r.pkg.settingsSchema.length > 0 && (
@@ -493,6 +560,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                       <div>
                         候选 v{r.candidate.version}：批准后原子切换，当前版本入历史；失败自动回退。
                       </div>
+                      <CandidateDiff cur={r.pkg} cand={r.candidate} />
                       <div className="plg-candidate-actions">
                         <button className="btn primary" onClick={() => setNotice(approveUpdate(r.pkg.id))}>
                           批准更新
@@ -546,6 +614,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       <div className="plg-foot">
         能力白名单（{PLUGIN_CAPS.length} 项）之外的声明一律拒绝；导入的插件一律默认停用；作者自报的可信标记不构成信任。
       </div>
+
+      {market && <MarketDialog onClose={() => setMarket(false)} />}
     </>
   );
 }

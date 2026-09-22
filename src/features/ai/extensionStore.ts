@@ -1,24 +1,32 @@
 import { useSyncExternalStore } from "react";
 
-/** 扩展类型：主题包 / 样式层 / 沙箱小部件 / 自定义面板 / 行为脚本 */
-export type ExtType = "theme" | "style" | "widget" | "panel" | "script";
+/**
+ * 扩展类型：主题包 / 样式层 / 沙箱小部件 / 自定义面板。
+ *
+ * **没有 `"script"`**（P99a-D1c）：那条通道是主世界里的 `new Function`——无超时、不可中断、
+ * `perms` 从不生效，而 `api.app.*` 一律带 `highPriv:true`；同时**没有任何生产者会写它**
+ * （插件投影只产下面这三种）。零兼容裁决（详设 §13.1）下直接删，主世界不留第二个 JS 口子：
+ * 能跑代码的合法形态只有专用 Worker 那一条（`logic.run` + realm 封网 + 启用前自证）。
+ */
+export type ExtType = "theme" | "style" | "widget" | "panel";
 
-/** 权限声明：css=修改界面样式 read=读取数据快照 send=发送数据 script=执行 JS */
-export type ExtPerm = "css" | "read" | "send" | "script";
-
+/**
+ * 权限声明词汇也一起删了（旧 `ExtPerm = css|read|send|script`）：它全仓**零读取者**，
+ * 只在投影写入时填个字面值——留着一个"看着像门、其实没人查"的字段，比没有字段更危险
+ * （M2 清退 `aiScript` 时立的同一条规矩：假装生效的安全控件＝骗用户）。
+ * 真正的权限面只有一个：插件 manifest 的 `caps`（`PLUGIN_CAPS`）+ 桥侧 `MSG_CAP_REQUIREMENT` 裁决。
+ */
 export interface AiExtension {
   id: string;
   type: ExtType;
   name: string;
   desc: string;
   version: string;
-  perms: ExtPerm[];
   enabled: boolean;
   createdAt: number;
   vars?: Record<string, string>; // theme
   css?: string; // theme / style
   html?: string; // widget / panel
-  code?: string; // script
   /** widget：外观形态。"none" = 无边框透明（无标题栏、窗口背景透明，内容完全自定义） */
   chrome?: "none";
   /** P88b-3：插件库投影的影子扩展（来源插件包 ID）；本 store 现仅承载投影记录 */

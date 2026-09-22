@@ -16,142 +16,25 @@
  * 日志一律走 stderr（stdout 是协议通道）。
  */
 
-import { connect, type Socket } from "node:net";
-import { existsSync, readFileSync } from "node:fs";
-import { homedir, platform } from "node:os";
-import { join } from "node:path";
+import { bridgeCall, readEndpoint, type Capabilities, type Endpoint } from "./bridge-client";
 import { TOOL_DEFS, JOB_TOOL_DEFS, ALL_TOOL_DEFS, type McpToolDef } from "../src/features/mcp/mcpTools";
 
 const VERSION = "0.1.0";
 const FALLBACK_PROTOCOL_VERSION = "2025-03-26";
-const CONNECT_TIMEOUT_MS = 2000;
-const CALL_TIMEOUT_MS = 5000;
-const AUTH_TIMEOUT_MS = 2000;
-interface AuthData { capabilities?: { jobs?: { version?: number } } }
-const MAX_LINE = 1024 * 1024;
+/** stdio 进来的单行上限（与桥的 `MAX_LINE` 是两回事：这里管外部 IDE 写进来的行） */
+const MAX_STDIO_LINE = 1024 * 1024;
+
+/** jobs 能力门（从桥客户端里搬出来放这儿：这是 MCP 面自己的策略，不是连接协议的一部分） */
+function jobGate(kind: string) {
+  return (auth: Capabilities): string | undefined =>
+    JOB_TOOL_DEFS.some((t) => t.name === kind) && auth?.capabilities?.jobs?.version !== 1
+      ? "jobs_not_supported: upgrade Uartix+; no legacy execution fallback"
+      : undefined;
+}
 
 /* ================= stderr 日志 ================= */
 
 const log = (...a: unknown[]) => console.error("[uartix-mcp]", ...a);
-
-/* ================= 发现文件 ================= */
-
-interface Endpoint {
-  port: number;
-  token: string;
-  pid: number;
-  version: string;
-}
-
-function discoverPaths(): string[] {
-  const name = join("com.uartix.plus", "mcp-endpoint.json");
-  const out: string[] = [];
-  const override = process.env.UARTIX_ENDPOINT;
-  if (override) out.push(override);
-  if (platform() === "win32") {
-    out.push(join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), name));
-  } else if (platform() === "darwin") {
-    out.push(join(homedir(), "Library", "Application Support", name));
-  } else {
-    out.push(join(process.env.XDG_CONFIG_HOME ?? join(homedir(), ".config"), name));
-  }
-  return out;
-}
-
-function readEndpoint(): Endpoint {
-  const paths = discoverPaths();
-  for (const p of paths) {
-    if (!existsSync(p)) continue;
-    try {
-      const e = JSON.parse(readFileSync(p, "utf8")) as Partial<Endpoint>;
-      if (typeof e.port === "number" && typeof e.token === "string" && e.token.length >= 16) {
-        return { port: e.port, token: e.token, pid: e.pid ?? 0, version: e.version ?? "?" };
-      }
-    } catch (err) {
-      log(`发现文件损坏（${p}）：`, err);
-    }
-  }
-  throw new Error(
-    `找不到 Uartix+ 的 MCP 发现文件（已查找：${paths.join("、")}）。请先启动 Uartix+，并在 设置 → 集成 打开「启用 MCP 桥」`,
-  );
-}
-
-/* ================= 内控平面客户端 ================= */
-
-/** 一次工具调用 = 一次短连接（connect → auth → call → response → close）。
- *  开销 ~1ms 级，换取零状态：断线/重启/改端口天然免疫。 */
-function bridgeCall<T = unknown>(
-  ep: Endpoint,
-  kind: string,
-  args: Record<string, unknown>,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const socket: Socket = connect({ host: "127.0.0.1", port: ep.port });
-    let buf = "";
-    let step: "auth" | "call" = "auth";
-    let settled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const fail = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket.destroy();
-      reject(err);
-    };
-    const arm = (ms: number, phase: string) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => fail(new Error(`${phase} timeout; query the same jobId / idempotency key, do not silently rerun`)), ms);
-    };
-    arm(CONNECT_TIMEOUT_MS, "connect");
-    socket.on("close", () => { if (!settled) fail(new Error("bridge disconnected before receipt; no automatic retry")); });
-    socket.on("error", (e) =>
-      fail(new Error(`连不上 Uartix+（127.0.0.1:${ep.port}）：${e.message}`)),
-    );
-    socket.on("connect", () => {
-      arm(AUTH_TIMEOUT_MS, "authentication");
-      socket.write(JSON.stringify({ op: "auth", token: ep.token }) + "\n");
-    });
-    socket.on("data", (chunk: Buffer) => {
-      buf += chunk.toString("utf8");
-      if (Buffer.byteLength(buf) > MAX_LINE) return fail(new Error("bridge response exceeds line limit"));
-      for (;;) {
-        const i = buf.indexOf("\n");
-        if (i < 0) break;
-        const line = buf.slice(0, i).trim();
-        buf = buf.slice(i + 1);
-        if (!line) continue;
-        let msg: { ok?: boolean; err?: string; data?: T };
-        try {
-          msg = JSON.parse(line);
-        } catch {
-          continue; // 半行/脏数据：忽略等下一行
-        }
-        if (step === "auth") {
-          if (msg.ok !== true) {
-            return fail(new Error(msg.err === "busy" ? "已有另一个 MCP 会话在线" : "token 校验失败（应用端重新生成过？）"));
-          }
-          const auth = msg.data as AuthData;
-          if (kind === "__capabilities") {
-            settled = true; clearTimeout(timer); socket.destroy(); resolve(msg.data as T); return;
-          }
-          if (JOB_TOOL_DEFS.some((t) => t.name === kind) && auth?.capabilities?.jobs?.version !== 1) {
-            return fail(new Error("jobs_not_supported: upgrade Uartix+; no legacy execution fallback"));
-          }
-          step = "call";
-          arm(CALL_TIMEOUT_MS, "RPC");
-          socket.write(JSON.stringify({ op: "call", reqId: 1, kind, args }) + "\n");
-          continue;
-        }
-        settled = true;
-        clearTimeout(timer);
-        socket.destroy();
-        if (msg.ok === true) resolve(msg.data as T);
-        else reject(new Error(msg.err ?? "Uartix+ 返回未知错误"));
-        return;
-      }
-    });
-  });
-}
 
 /* ================= MCP stdio 服务器 ================= */
 
@@ -188,17 +71,22 @@ function toolsList(): Record<string, unknown> {
 }
 
 /** capability gate: legacy apps expose no jobs namespace; short tools stay usable. */
-function publishableTools(caps: AuthData | null): McpToolDef[] {
+function publishableTools(caps: Capabilities | null): McpToolDef[] {
   return caps?.capabilities?.jobs?.version === 1 ? ALL_TOOL_DEFS : TOOL_DEFS;
 }
 
-async function toolCapabilities(ep: Endpoint): Promise<AuthData> {
-  return bridgeCall<AuthData>(ep, "__capabilities", {});
+/** 只转发工具清单里有的名字（`cli.` 前缀的命令行专用动作从来不在清单里 ⇒ 模型这条路够不到装包） */
+function forwardableTool(name: string): boolean {
+  return ALL_TOOL_DEFS.some((t) => t.name === name);
+}
+
+async function toolCapabilities(ep: Endpoint): Promise<Capabilities> {
+  return bridgeCall<Capabilities>(ep, "__capabilities", {}, { stopAfterAuth: true, log });
 }
 
 async function toolsCall(params: Record<string, unknown>): Promise<Record<string, unknown>> {
   const name = typeof params.name === "string" ? params.name : "";
-  if (!ALL_TOOL_DEFS.some((t) => t.name === name)) {
+  if (!forwardableTool(name)) {
     throw new RpcClientError(-32602, `未知工具：${name}`);
   }
   const ep = readEndpoint();
@@ -208,7 +96,7 @@ async function toolsCall(params: Record<string, unknown>): Promise<Record<string
         ? (params.arguments as Record<string, unknown>)
         : {};
     try {
-      const data = await bridgeCall(ep, name, args);
+      const data = await bridgeCall(ep, name, args, { afterAuth: jobGate(name), log });
       return toolText(data);
     } catch (e) {
       return toolFail(String(e instanceof Error ? e.message : e));
@@ -322,7 +210,7 @@ async function main(): Promise<number> {
       const line = buf.slice(0, i).trim();
       buf = buf.slice(i + 1);
       if (!line) continue;
-      if (line.length > MAX_LINE) {
+      if (line.length > MAX_STDIO_LINE) {
         log("超长请求行已丢弃");
         continue;
       }

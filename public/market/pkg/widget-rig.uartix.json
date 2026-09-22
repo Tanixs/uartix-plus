@@ -1,0 +1,35 @@
+{
+  "format": "uartix-plugin",
+  "schemaVersion": 2,
+  "id": "uartix.widget.rig",
+  "version": "1.0.0",
+  "name": "台架三读数",
+  "desc": "",
+  "hostApi": "^1.0",
+  "capabilities": [
+    "ui.widget",
+    "telemetry.read"
+  ],
+  "contributions": {
+    "widgets": [
+      {
+        "id": "rig",
+        "entry": "rig.json",
+        "name": "台架三读数",
+        "w": 2,
+        "h": 2
+      }
+    ]
+  },
+  "artifacts": {
+    "rig.json": {
+      "kind": "widget",
+      "format": "html",
+      "html": "<style>\n  .rig { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; text-align: center; font-variant-numeric: tabular-nums; }\n  .rig i { font-style: normal; opacity: .6; font-size: 11px; }\n  .rig b { display: block; font-size: 22px; font-weight: 600; }\n</style>\n<div class=\"rig\">\n  <span><i>yaw</i><b id=\"yaw\">--</b></span>\n  <span><i>pitch</i><b id=\"pitch\">--</b></span>\n  <span><i>roll</i><b id=\"roll\">--</b></span>\n</div>\n<script>\n  // 读宿主推来的快照：变量没有就是 --，不编数\n  uartix.onSnap(function (s) {\n    var f = (s && s.fields) || {};\n    [\"yaw\", \"pitch\", \"roll\"].forEach(function (k) {\n      var el = document.getElementById(k);\n      if (el) el.textContent = typeof f[k] === \"number\" ? f[k].toFixed(1) : \"--\";\n    });\n  });\n</script>\n"
+    }
+  },
+  "provenance": {
+    "createdBy": "user",
+    "reviewed": false
+  }
+}

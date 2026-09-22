@@ -24,6 +24,58 @@ export interface PluginToolDef {
 let store = new Map<string, PluginToolDef[]>();
 const listeners = new Set<() => void>();
 
+/**
+ * P99a-F2（B3 的剩余那半）：每个包**上一次"工具面变了什么"**的记录。
+ * 批准更新时用户问的就是"这一版到底多了哪几支工具"，而那份清单只有模块在 Worker 里报上来之后
+ * 才知道——所以差异不能凭空编，只能在"报齐了"的那一刻跟上一版比出来。
+ *
+ * 两个内存表都**刻意不落盘**：落盘就成了"当前有哪些工具"的第二个真相（§8-36①）。
+ * `reported` 留着不清（停用→再启用是同一版，本来就不该报"变了"）；`clearAllPluginTools` 一起清。
+ */
+export interface PluginToolChange {
+  added: string[];
+  removed: string[];
+  at: number;
+}
+const reported = new Map<string, string[]>();
+const lastChange = new Map<string, PluginToolChange>();
+
+function namesOf(pkgId: string): string[] {
+  return (store.get(pkgId) ?? []).map((d) => d.baseName);
+}
+
+/**
+ * 在"模块 ready、工具面报齐了"那一刻调用（唯一调用点是 `pluginStore.armModulePackage`）。
+ * 与这个包上一次报上来的那批比，记下变化并回给调用方——没有变化就回 `undefined`，
+ * 让上层能区分"这次确实没变"和"还不知道"（后者才是需要明说的）。
+ */
+export function commitToolSnapshot(pkgId: string): PluginToolChange | undefined {
+  const before = reported.get(pkgId) ?? [];
+  const after = namesOf(pkgId);
+  reported.set(pkgId, after);
+  const had = new Set(before);
+  const has = new Set(after);
+  const added = after.filter((n) => !had.has(n));
+  const removed = before.filter((n) => !has.has(n));
+  if (!added.length && !removed.length) return undefined;
+  const change: PluginToolChange = { added, removed, at: Date.now() };
+  lastChange.set(pkgId, change);
+  return change;
+}
+
+export function pluginToolChangeOf(pkgId: string): PluginToolChange | undefined {
+  return lastChange.get(pkgId);
+}
+
+/** 一句话说清变化（启用回执与插件库详情共用，免得两处各写一套说法）；没有变化回空串。 */
+export function describeToolChange(c: PluginToolChange | undefined): string {
+  if (!c) return "";
+  const parts: string[] = [];
+  if (c.added.length) parts.push(`+${c.added.length}（${c.added.join("、")}）`);
+  if (c.removed.length) parts.push(`−${c.removed.length}（${c.removed.join("、")}）`);
+  return parts.length ? `工具 ${parts.join("，")}` : "";
+}
+
 function emit(): void {
   store = new Map(store);
   for (const fn of listeners) fn();
@@ -122,6 +174,8 @@ export function clearPluginTools(pkgId: string): void {
 
 /** 全清（测试与"关掉整个插件逻辑面"的应急出口用）。 */
 export function clearAllPluginTools(): void {
+  lastChange.clear();
+  reported.clear(); // 面都清了，"上次报了什么"再留着就是假账
   if (store.size) {
     store = new Map();
     emit();

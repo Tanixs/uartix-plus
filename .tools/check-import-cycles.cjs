@@ -28,12 +28,15 @@ const BANNED_EDGES = [
 ];
 
 /* ============ ② 短环基线（长度 2/3）：新增即红，消除请同步删条目 ============ */
-const ALLOWED_SHORT_CYCLES = [
-  ["features/ai/appActions.ts", "features/ai/extRuntime.ts"],
-  ["features/ai/extRuntime.ts", "features/ai/widgetHub.ts"],
-  ["features/ai/appActions.ts", "features/xfer/xferStore.ts", "features/ai/extRuntime.ts"],
-  ["features/ai/appActions.ts", "features/sentinel/sentinelStore.ts", "features/ai/extRuntime.ts"],
-].map((cyc) => cyc.slice().sort().join("|"));
+/* ============ ② 短环允许清单（**P99a-D1c 起为空**）============
+ * 原来登记的 4 条全部是 extRuntime 那圈历史边：
+ *   appActions ↔ extRuntime、extRuntime ↔ widgetHub、
+ *   appActions ↔ xferStore ↔ extRuntime、appActions ↔ sentinelStore ↔ extRuntime
+ * P99a-D1c 删掉主世界脚本通道后，extRuntime 不再 import appActions / widgetHub / chatStore /
+ * framesBus / variableStore / serialStore / settingsStore（那些 import 只为喂 ScriptApi），
+ * 四条环当场一起消失——**删对代码会把环守卫变成空清单**，这比给清单再加一条好得多。
+ * 现在任何一条短环都是新增，直接红。 */
+const ALLOWED_SHORT_CYCLES = [];
 
 /* ============ ③ 模块求值期顶层调用基线：file::调用文本 ============
  * 这一层才是 P92-F 的真正形态：**顶层调用别的模块的函数 = 把执行顺序写死进模块体**，
@@ -115,12 +118,16 @@ for (const f of files) {
   dynamicCount[r] = (code.match(/\bimport\s*\(/g) || []).length;
   // 求值期顶层调用：第 0 列的 `foo(...)`（非声明/控制语句）。
   // 必须先剥掉注释与字符串——帮助页里嵌的示例代码（`send("AA 01 02","hex")`）会被误判成顶层调用。
-  const stripped = code
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|\n)\s*\/\/[^\n]*/g, "$1")
-    .replace(/`(?:\\.|[^`\\])*`/g, "``")
-    .replace(/"(?:\\.|[^"\\\n])*"/g, '""')
-    .replace(/'(?:\\.|[^'\\\n])*'/g, "''");
+  //
+  // **一趟扫完、按出现位置裁决**（P99a-D2 修正）：旧写法是"先剥注释再剥字符串"的多次全量替换，
+  // 于是模板字符串里一行以 `//` 开头的示例（且收尾反引号就在该行末尾）会被注释剥离连尾巴一起吃掉，
+  // 反引号就此落单、后面所有字符串/模板配对整体错位——本批改帮助时它把一段无关的老示例
+  // 报成了"新增求值期顶层调用"，行号还因为模板被折叠而指到别处（守卫自己的探针也是探针，§8-39）。
+  // 现在注释/字符串/模板在同一次扫描里按先后顺序各归各位，且**保留换行数**，报告的行号就是真行号。
+  const stripped = code.replace(
+    /\/\*[\s\S]*?\*\/|`(?:\\[\s\S]|[^`\\])*`|"(?:\\[\s\S]|[^"\\\n])*"|'(?:\\[\s\S]|[^'\\\n])*'|[ \t]*\/\/[^\n]*/g,
+    (m) => "\n".repeat((m.match(/\n/g) || []).length),
+  );
   const lines = stripped.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -251,7 +258,10 @@ for (const cyc of shortCycles) {
 const removed = ALLOWED_SHORT_CYCLES.filter((k) => !seen.has(k));
 if (removed.length)
   console.log(`提示：${removed.length} 条已登记短环已被消除，可从允许清单删掉（收紧）：\n  - ${removed.join("\n  - ")}`);
-console.log(`OK: 短环允许清单 ${ALLOWED_SHORT_CYCLES.length} 条，实际命中 ${seen.size - removed.length} 条`);
+// seen 只可能包含"在清单里且实际存在"的键（不在清单的早就 fail 了），所以命中数就是 seen.size。
+// 这里以前写 `seen.size - removed.length`，清单全部命中时看着对，一旦有登记项被消除就直接印出负数
+// （P99a-D1c 当场撞上"实际命中 -4 条"）——守卫自己把异常数字印给用户看，就是§8-36②说的第二种取证失误。
+console.log(`OK: 短环允许清单 ${ALLOWED_SHORT_CYCLES.length} 条，实际命中 ${seen.size} 条`);
 
 const evalSeen = new Set(evalCalls.map((c) => `${c.file}::${c.text}`));
 for (const c of evalCalls) {

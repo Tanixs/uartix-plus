@@ -23,6 +23,10 @@ vi.stubGlobal("localStorage", {
 // 与 uiTools.test / toolDisplay.test 同一手法只挡这一层。
 vi.mock("../../panels/panels", () => ({ panelTitleOf: (id: string) => `标题:${id}` }));
 import { DOMAINS, DOMAIN_PRESETS, DOMAIN_ZH, PRIMARY_TIERS } from "../agent/scopeTiers";
+// P99a-D2：帮助要覆盖的两张新清单一律从代码取——产物种类元表与能力白名单。
+// （`artifact.ts:26` 的注释早就写着"中文名……帮助文本共用这一份"，这一批让那句话真的成立。）
+import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
+import { PLUGIN_CAPS, CAP_LABEL, autoEnableBlockedCaps } from "../plugins/pluginManifest";
 // P99a-A5：工具名清单从注册表取（`TOOL_LABEL` 那张手抄表已删）——
 // 帮助覆盖检查因此跟着真实工具面走，不再跟着"有人记得抄的那份"走
 const { hostEntryByName, hostEntryNames } = await import("../agent/hostEntries");
@@ -35,6 +39,12 @@ const { fileURLToPath } = (await import(urlSpec)) as { fileURLToPath: (u: string
 // fileURLToPath 直接给平台路径（win 下带盘符），不需要再剥 URL 的前导斜杠
 const here = fileURLToPath(import.meta.url);
 const helpSrc = readFileSync(here.replace(/[/\\]features[/\\]help[/\\].*$/, "/features/help/HelpModal.tsx"), "utf8");
+/**
+ * P99a-D2：扫描面从"帮助"一份扩到两份。`prompts.ts` 是**发给模型的话**，它同样在对用户做承诺
+ * ——实例：它写着"引导用户打开 AI 助手工具栏的『Agent 任务』"，而那个按钮 P90-C1 就删了
+ * （`AiChat.tsx:1129`），于是模型照着教用户，用户找不到按钮。§8-41：对模型的承诺文案也要守卫。
+ */
+const promptsSrc = readFileSync(here.replace(/[/\\]features[/\\]help[/\\].*$/, "/features/ai/prompts.ts"), "utf8");
 
 /**
  * 有意**不**写进帮助的工具，以及理由。
@@ -57,6 +67,8 @@ const DOCUMENTED_OK_NON_TOOL: Record<string, string> = {
   cancel_job: "MCP 任务工具",
   async_required: "MCP 长任务的回执要求，不是工具名",
   needs_manual_confirmation: "MCP 回执状态，不是工具名",
+  run_action: "MCP 侧的动作入口（对应本机 run_app_action），不是本机工具名",
+  update_needs_user: "save_plugin 的回执码：用户导入过的包不许 AI 静默覆盖",
 };
 
 describe("帮助文档不得落后于实现", () => {
@@ -106,20 +118,73 @@ describe("帮助文档不得落后于实现", () => {
     }
   });
 
-  it("已删除的设置项不得再被帮助教用户去找（反向钉）", () => {
+  it("已删除的设置项/入口/API 不得再被帮助或提示词教用户去找（反向钉，扫两份源）", () => {
+    const hits: string[] = [];
     for (const gone of [
       "小部件可发送数据", // P98-M2 改名并搬家
       "允许行为脚本", // P98-M2 删除（它原本什么都不拦）
       "需脚本高权限", // 同上，真实语义是"高权限动作需逐次批准"
       "创造模式", // P98-M2 删除：prompts 从不读它
       "顶部工具条", // P90-C 起场景收进「场景 ▾」下拉
+      // —— 以下为 P99a-D2 新增 ——
+      "工具栏的『Agent 任务』", // 按钮 P90-C1 已删，唯一入口是输入区下方的 pill
+      "api.app", // 主世界脚本通道随 P99a-D1c 删除；今天能调它的是小部件 uartix.app / 动作块 / MCP
+      "reportView", // P99a-D1b 下架（与 panel 同构）
+      "motionPreset", // 同上：并入主题层
+      "motion.preset",
+      "report.view",
+      "脚本扩展", // 同上：能带 JS 的形态只剩插件的「逻辑模块」
     ]) {
-      expect(helpSrc, `帮助仍在提一个已不存在的开关/入口：${gone}`).not.toContain(gone);
+      // 先把命中项收成一行清单再断言：直接把整份源文本喂给 not.toContain，
+      // 失败信息会把 100KB 的组件源码整段喷出来，等于没有信息。
+      if (helpSrc.includes(gone)) hits.push(`帮助→${gone}`);
+      if (promptsSrc.includes(gone)) hits.push(`提示词→${gone}`);
     }
+    expect(hits, `这些开关/入口/API 已经不存在，却还在教用户去找：${hits.join("、")}`).toEqual([]);
+  });
+
+  it("P99a-D2：六种产物种类的中文名都在帮助里（元表派生，加一类不写文档就红）", () => {
+    const missing = ARTIFACT_KINDS.filter((k) => !helpSrc.includes(artifactKindMeta(k).label));
+    expect(missing, `这些产物种类没写进帮助：${missing.join(", ")}`).toEqual([]);
+  });
+
+  it("P99a-D2：12 项插件能力的短名都在帮助里（能力名册不许只活在插件库 tooltip 里）", () => {
+    const missing = PLUGIN_CAPS.filter((c) => !helpSrc.includes(CAP_LABEL[c].name));
+    expect(missing, `这些能力没写进帮助：${missing.map((c) => CAP_LABEL[c].name).join("、")}`).toEqual([]);
+  });
+
+  it("P99a-D2：「哪些包不会自动启用」这句安全话术逐个点名补集（漏一个就是假安全感）", () => {
+    // 按 Section 切：整篇帮助里出现过名字不算数——那可能是别处的顺带一提。
+    const sections = helpSrc.split("<Section");
+    const withNote = sections.filter((s) => s.includes("不会自动启用"));
+    expect(withNote.length, "帮助里没有「不会自动启用」这句安全说明").toBeGreaterThan(0);
+    const missing = autoEnableBlockedCaps().filter(
+      (c) => !withNote.some((s) => s.includes(CAP_LABEL[c].name)),
+    );
+    expect(missing, `这些能力不会自动启用，帮助却没说：${missing.map((c) => CAP_LABEL[c].name).join("、")}`).toEqual([]);
+  });
+
+  it("帮助里那句「目录不含哪些面」必须与真实目录一致（补完一面，这句就得把它划掉）", async () => {
+    // P99a-C1b：这条钉子专还 D2 留下的账——帮助把"当前不含七面"写成了一句公开欠款，
+    // 补完却忘了改口的话，用户会以为 AI 读不到 3D 轨迹，而它其实读得到。
+    const { CATALOG_VIEWS, CATALOG_GROUP_ZH } = await import("../agent/hostCatalog");
+    const implemented = new Set(CATALOG_VIEWS.map((v) => CATALOG_GROUP_ZH[v.group]));
+    // 宽松一点：「目录当前不含」「这张目录还不含」都得被抓到；抓不到就当作"这句已经划掉"
+    const m = /目录[^<]{0,16}不含[\s\S]{0,60}?：([^。<]+)。/.exec(helpSrc);
+    if (!m) {
+      // 没有这句了——但也不能靠"删句子"糊弄过去：如果帮助在别处把已实现的面写成读不到，这里也要炸
+      const stray = [...implemented].filter((n) => new RegExp(`${n}[^。]{0,24}(读不到|没接|不含|不支持)`).test(helpSrc));
+      expect(stray, `这些面已进目录，帮助仍在说它读不到：${stray.join("、")}`).toEqual([]);
+      return;
+    }
+    const claimed = m[1].split(/[、·]/).map((s) => s.trim()).filter(Boolean);
+    expect(claimed.length, "抓到了「不含」句式却没抽出清单——正则自己得修").toBeGreaterThan(0);
+    const wrong = claimed.filter((n) => implemented.has(n));
+    expect(wrong, `这些面已经进目录了，帮助还写着「不含」：${wrong.join("、")}`).toEqual([]);
   });
 
   it("档位语义的边界写清楚了，不是只报喜", () => {
-    // 「全面放手」最容易被读成"什么都不再问"——帮助必须明说四类例外仍然逐次批准
+    // 「全权执行」最容易被读成"什么都不再问"——帮助必须明说四类例外仍然逐次批准
     expect(helpSrc).toContain("仍然逐条弹批准卡");
     // 高危档不跨重启恢复这件事，不说清楚就是埋雷
     expect(helpSrc).toContain("不跨重启恢复");

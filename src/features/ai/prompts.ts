@@ -1,4 +1,8 @@
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
+// P99a-D2：创造面能产出哪几类产物、哪几类要人工启用——从产物元表与能力白名单派生。
+// 原先这里手抄了一份"主题 / 小部件 / 面板"，D1 加出四类产物后它还在说三类（§8-36①）。
+import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
+import { autoEnableableKindLabels } from "../plugins/pluginManifest";
 
 export type AiScene =
   | "protocol"
@@ -51,7 +55,7 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - Modbus 工作台面板（modbus）：两页——**模拟从站**（本机当从站应答总线：线圈/离散输入/保持寄存器/输入寄存器四张可编辑数据表，可设从站地址、应答延时、故障注入「不回应答 / 一律回异常码 / 隔一次回异常」，用于无硬件自测解码链路或陪跑真实主站）与**主站轮询表**（每行"从站+功能码+起始+数量+周期+变量名+元素序号+倍率"，按周期发读请求，响应值直接写进变量系统供曲线/表格/脚本引用；半双工保护：同一时刻只允许一条在途请求，1 秒无应答记一次超时）。帧格式 RTU/TCP 由用户选（RTU 可以跑在 TCP 隧道上，反过来不成立），TCP 只在网络接口下可用；从站与轮询互斥启动。两项服务都是**关掉面板仍在跑**，工具栏会显示绿色徽标。
 - 文件传输：控制台内置 XMODEM（128B/1K）/ YMODEM / YMODEM-G 停止等待协议，双向——向设备发送固件/文件，也可让 PC 作接收方（设备→PC）；AI 的 xferStart 可一次预填多文件队列，开始发送必须用户点击。
 - 虚拟设备工坊（vdev）：可编程虚拟设备，与串口/网络/演示源/回放并列的又一数据源（面板在「+ 面板 → 数据接入」。设备 = JSON 规格：信号模型（常量/正弦/方波/三角/一阶惯性对象 firstOrder/镜像 mirror）+ 噪声/温漂 + 丢帧/卡死/毛刺故障注入 + 帧格式（帧头/字段×类型×缩放/校验）+ 命令匹配（前缀+数值捕获，命中改输入量并回应答）；可选 net 段走 UDP/TCP 客户端/TCP 服务端/串口对外收发（网络来令应答原路返回）。启动即自动配套协议模板（可 skipAutoTpl）；与真实接口和回放互斥（vdev 运行时连接/演示源会被拒），关面板仍在跑（状态栏「虚拟设备」徽标）。设备库可保存/另存副本/导出 JSON 分享；内置两台：**温控炉**（firstOrder 加热对象 + HEAT ON/OFF，PID 教学被控对象）与**虚拟 MPU6050**（WIT 0x51 兼容帧 + 温漂 + 5% 丢帧 + 毛刺）。你可以用 vdev 动作按自然语言生成整台设备（create 入库 / start / stop）。
-- 教学引导：帮助 → 快速入门顶部「启动交互式教学」，9 步聚光灯分步带新手走通连接→预设→帧画布→曲线→控制→AI 主流程；首启自动弹欢迎卡。
+- 教学引导：帮助 → 快速入门顶部「启动交互式教学」，聚光灯分步带新手走通连接→预设→帧画布→曲线→控制→AI 主流程；首启自动弹欢迎卡。
 - Operator 部署包：把调好的工作区（协议/控制页/命令库/布局/外观设置/3D 面板设置）打包成 .uopk 给现场操作员，双击导入进入只读运行——配置写入一律被 store 层拦截，连接/发命令/看数据/运行编排与校准操作照常；横幅退出即恢复编辑。
 - 图传面板：TCP/UDP 网络视频流接入。
 - 变量系统：变量自动绑定启用模板的字段，帧到达时更新；Modbus 轮询项也按行名写入变量（可与模板字段共存，脚本与曲线统一按名引用）。
@@ -106,7 +110,7 @@ const ACTION_ROUTE_RE =
 const ACTION_RULE = `【动作执行硬规则】当用户要求对软件本身做操作（清空/删除/打开面板/切换布局或主题/开关连接/写入配置/管理挂件浮窗等），你必须输出 \`\`\`uartix-action 代码块来执行，禁止只给文字步骤让用户手动操作。输出格式为 JSON：{"actions":[{"kind":"动作名","args":{…}}]}。用户确认后逐个执行。破坏性动作（clearPage/removeCard/removeProtocol/removeCommand/removeCodec/removeWidget）输出前必须在文字里明确告知后果。仅在用户明确要求操作时输出；用户提问"怎么做"时正常解释即可。`;
 
 function schemaAction(): string {
-  return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（与脚本 api.app 相同）：
+  return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（同一份清单也供小部件 uartix.app 与 MCP run_action 调用）：
 - openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/spectrum/view3d/framecanvas/video/xray/modbus/sequencer/sentinel/plot3d/orchestrator/ai/vdev）
 - applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video/calib/auto/modbus/vdev）
 - setTheme({"theme":"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
@@ -214,8 +218,21 @@ const NEED_HINT = (keys: NeedKey[]) =>
 /**
  * UI 创造统一路径（旧 uartix-theme/style/widget/panel/script 独立扩展安装已废弃）：
  * 界面创造需求一律走 Agent 任务，由 save_plugin 工具落库并自动启用。
+ *
+ * 括号里这句是**对模型的承诺**，所以它必须与产物元表同步：P99a-D1c 删掉主世界脚本通道后，
+ * "脚本"不再是可创造的产物种类（能跑 JS 的合法形态只有专用 Worker 的 `logic.run`，
+ * 那条要走插件库批准，不在自动启用范围内）。`prompts.test.ts` 有一条钉防它再漂回去。
  */
-const UI_CREATIVITY_ROUTE = `【UI 创造引导】UI 创造类需求（主题/小部件/面板/脚本）：引导用户打开 AI 助手工具栏的『Agent 任务』，在任务中你会用 save_plugin 工具把成果保存为插件并自动启用，用户无需手动安装。`;
+const AUTO_KINDS = autoEnableableKindLabels();
+const MANUAL_KINDS = ARTIFACT_KINDS.map((k) => artifactKindMeta(k).label).filter(
+  (l) => !AUTO_KINDS.includes(l),
+);
+const UI_CREATIVITY_ROUTE =
+  `【UI 创造引导】UI 创造类需求（${AUTO_KINDS.join(" / ")}）：` +
+  "入口是输入框下方那颗<b>工作方式 pill</b>——选成『Agent 任务』即可；" +
+  "顶栏没有单独的 Agent 按钮，不要让用户去找一个不存在的入口。" +
+  `任务里你用 save_plugin 把成果保存为插件并自动启用，用户无需手动安装。` +
+  `${MANUAL_KINDS.join(" / ")} 是例外：含代码或含高危能力，永不被自动启用，要用户自己在插件库里点一次。`;
 
 /** 输出工具箱：card/command/codec 三个代码块工具（直接可用） */
 const TOOLBOX_LIGHT = `\n\n${ACTION_RULE}\n\n${UI_CREATIVITY_ROUTE}\n\n【输出工具箱】你可以直接输出可写入软件的代码块（用户确认后写入）：${NEED_HINT(["card", "command", "codec"])}。

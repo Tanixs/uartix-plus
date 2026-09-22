@@ -28,7 +28,10 @@ import { sendData } from "../serial/serialStore";
 import { getSnapshot as getTelemetry } from "../protocol/telemetryStore";
 import { curveStatsText } from "../ai/contextCollector";
 import { getSnapshot as getSentinel } from "../sentinel/sentinelStore";
-import { TOOL_DEFS, compactFrame, pageFrames, type McpToolDef } from "./mcpTools";
+import {
+  ASYNC_REQUIRED, NEEDS_MANUAL, SETTING_SEND, TOOL_DEFS, compactFrame, gateHighPriv, pageFrames, type McpToolDef,
+} from "./mcpTools";
+import { handleCli, isCliKind } from "../market/marketCli";
 
 const RING_CAP = 1024; // P66-1：256→1024，配合 beforeSeq 游标分页回看更深历史（compactFrame 已限单帧体积）
 const AUDIT_CAP = 50;
@@ -194,11 +197,31 @@ async function handleCall(p: { reqId: number; kind: string; args: Record<string,
 
 function needSend(): void {
   if (!getSettings().mcpAllowSend) {
-    throw new Error("此工具需要远程发送权限：请到 Uartix+ 设置 → 集成 开启「允许远程发送」");
+    // 设置项名与 `send` 的工具描述同源（mcpTools.SETTING_SEND）：外部调用方读到的说明和实际错误不能是两句话
+    throw new Error(`此工具需要远程发送权限：请到 Uartix+ 设置 → 集成 开启「${SETTING_SEND}」`);
   }
 }
 
+/**
+ * 执行核的失败码 → **MCP 这一侧的话术**（P99a-F1）。判定在 `appActionSurface` 里只做一次，
+ * 这里决定"远程调用方该看到哪句"：高权限那条要说清去设置里开哪个开关（`gateHighPriv`），
+ * 后台起势那条要说"得本地起"（`NEEDS_MANUAL`），未知动作沿用与 Agent 面同一写法。
+ */
+function surfaceError(r: {
+  code: "unknown_action" | "needs_high_priv" | "needs_manual" | "action_failed";
+  msg: string;
+}): string {
+  if (r.code === "needs_high_priv") return gateHighPriv(r.msg);
+  if (r.code === "needs_manual") return NEEDS_MANUAL;
+  if (r.code === "unknown_action") return `未知动作：${r.msg}`;
+  return r.msg || "动作执行失败";
+}
+
 async function dispatch(kind: string, args: Record<string, unknown>): Promise<unknown> {
+  // `cli.` 前缀＝命令行专用面（Q7「AI 只读不装」）：这些名字从来不在 TOOL_DEFS 里，
+  // `mcp-cli` 也只转发清单内的名字，所以模型那条路够不到；路由放在工具名检查之前，
+  // 否则命令行请求会被"未知工具"挡掉，两边的话术就对不上了。
+  if (isCliKind(kind)) return handleCli(kind, args);
   if (!TOOL_DEFS.some((t) => t.name === kind)) {
     throw new Error(`未知工具：${kind}`);
   }
@@ -263,7 +286,9 @@ async function dispatch(kind: string, args: Record<string, unknown>): Promise<un
     case "send": {
       needSend();
       const text = typeof args.text === "string" ? args.text : "";
-      if (!text) throw new Error("text 不能为空");
+      // 只判 `!text` 的话，`send("   ")` 会真的往总线上发三个空格：外部调用方的手滑
+      // 不该变成设备侧的一次收发。内容本身不 trim（十六进制串里空格是分隔符）。
+      if (!text.trim()) throw new Error("text 不能为空");
       const mode = args.mode === "hex" ? "hex" : "ascii";
       await sendData(mode, text);
       return { sent: text, mode };
@@ -271,14 +296,14 @@ async function dispatch(kind: string, args: Record<string, unknown>): Promise<un
     case "get_orchestrator":
     case "get_plot3d": {
       // 只读：经 appActions 的 Read 动作取同一份快照（HIGH_ONLY 门控天然不拦，因两 Read 未入该集合）
-      const { runAppAction } = await import("../ai/appActions");
-      const r = await runAppAction(
+      const { runAppActionSurface } = await import("../agent/appActionSurface");
+      const r = await runAppActionSurface(
         kind === "get_orchestrator" ? "orchestratorRead" : "plot3dRead",
         {},
-        { highPriv: getSettings().mcpHighPriv },
+        { highPriv: getSettings().mcpHighPriv, background: true },
       );
-      if (!r.ok) throw new Error(r.err ?? "读取失败");
-      return r.data ?? null;
+      if (!r.ok) throw new Error(surfaceError(r));
+      return r.data;
     }
     case "run_action": {
       const akind = typeof args.kind === "string" ? args.kind : "";
@@ -286,24 +311,20 @@ async function dispatch(kind: string, args: Record<string, unknown>): Promise<un
         args.args && typeof args.args === "object" && !Array.isArray(args.args)
           ? (args.args as Record<string, unknown>)
           : {};
-      // Background automation cannot be used as a legacy bypass for task admission.
-      if ((akind === "orchestrator" && (aargs.op === "run" || (aargs.op === "enable" && aargs.on !== false))) ||
-          (akind === "vdev" && aargs.op === "start")) {
-        throw new Error("needs_manual_confirmation: background execution must be started locally; highPriv/confirmed are not approval");
-      }
-      // 重模块延迟加载：首个远程动作才 import（appActions 拖全 store 家族）
-      const { runAppAction, HIGH_ONLY } = await import("../ai/appActions");
-      if (HIGH_ONLY.has(akind) && !getSettings().mcpHighPriv) {
-        throw new Error(
-          `动作「${akind}」属高权限：请到 Uartix+ 设置 → 集成 开启「允许高权限动作」`,
-        );
-      }
-      const r = await runAppAction(akind, aargs, { highPriv: getSettings().mcpHighPriv });
-      if (!r.ok) throw new Error(r.err ?? "动作执行失败");
-      return r.data ?? null;
+      // P99a-F1：名单校验、"后台不得代为启动"那条规则、高权限判定与执行形状全在
+      // `appActionSurface` 里，与 Agent 的 `run_app_action` 同一份核；MCP 只负责**自己的**话术
+      // （去设置里开哪个闸），闸门语义仍是"设置里各拨一次"，不逐条弹卡（§8-44）。
+      const { runAppActionSurface } = await import("../agent/appActionSurface");
+      const r = await runAppActionSurface(akind, aargs, {
+        highPriv: getSettings().mcpHighPriv,
+        background: true,
+      });
+      if (!r.ok) throw new Error(surfaceError(r));
+      return r.data;
     }
     case "run_sequence":
-      throw new Error("async_required: use create_job({taskType:'sequence.run', input:{json}, idempotencyKey}). No sequence was executed.");
+      // 与 `run_sequence` 的工具描述同一句（TS 侧只有一份；Rust 侧那份靠 mcpTools.test 钉同文）
+      throw new Error(ASYNC_REQUIRED);
     default:
       throw new Error(`未知工具：${kind}`);
   }

@@ -119,7 +119,9 @@ async function runStepDo(idx: number): Promise<void> {
   if (!step?.do) return;
   try {
     await step.do();
-  } catch {
-    /* 动作失败不阻塞引导（如非 Tauri 环境启动演示源失败） */
+  } catch (e) {
+    // 不阻塞引导（如非 Tauri 环境启动演示源失败），但不能静默：
+    // 这一步到底有没有真的把界面动起来，出问题时只有这一条线索（§8-32 同一口径）。
+    console.warn(`[tour] 步骤「${step.id}」的 do() 失败，引导继续但界面未随之变化`, e);
   }
 }

@@ -88,6 +88,8 @@ export interface ChatSnapshot {
   reqId: string | null;
   contextSel: ContextSelection;
   pendingScene: { scene: AiScene; payload?: Record<string, unknown> } | null;
+  /** 外部入口填进输入框的一次性草稿（P99a-D1b 任务模板；只填不发） */
+  pendingDraft: string | null;
 }
 
 const SESSIONS_KEY = "vs.aiSessions";
@@ -153,6 +155,7 @@ let snapshot: ChatSnapshot = {
   reqId: null,
   contextSel: { ...DEFAULT_CONTEXT },
   pendingScene: null,
+  pendingDraft: null,
 };
 if (snapshot.sessions.length === 0) {
   const s = newSessionObj();
@@ -631,6 +634,27 @@ export async function editResend(id: string, newText: string): Promise<void> {
 export function pushScene(scene: AiScene, payload?: Record<string, unknown>) {
   snapshot.pendingScene = { scene, payload };
   emit();
+}
+
+/**
+ * P99a-D1b：外部入口（插件库的「载入 AI 助手」）往输入框里放一段话。
+ *
+ * 只做**填充，不做发送**：模板是一组建议步骤，发不发、用哪个授权档，都还是用户的决定。
+ * 自动发一次 Agent 任务＝跨面板触发一次付费调用，那不是我该替用户做的选择。
+ * 与 `pushScene` 同一套一次性投递：面板当时没开着，草稿就留着，打开时被消费掉。
+ */
+export function pushDraft(text: string) {
+  snapshot.pendingDraft = text;
+  emit();
+}
+
+export function consumeDraft(): string | null {
+  const d = snapshot.pendingDraft;
+  if (d !== null) {
+    snapshot.pendingDraft = null;
+    emit();
+  }
+  return d;
 }
 
 export function consumeScene():

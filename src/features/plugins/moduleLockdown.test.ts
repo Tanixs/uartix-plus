@@ -18,9 +18,9 @@ import {
   lockdownSource,
   moduleWorkerSource,
 } from "./moduleLockdown";
-import { MAX_MODULE_BYTES, validateArtifactPayload } from "./artifact";
+import { MAX_MODULE_BYTES, validateArtifactPayload, artifactKindMeta } from "./artifact";
 import { moduleArtifactsOf, probeModuleCode } from "./moduleHost";
-import { KIND_REQUIRED_CAP, PLUGIN_CAPS, PURE_UI_CAPS, validateManifest } from "./pluginManifest";
+import { PLUGIN_CAPS, PURE_UI_CAPS, validateManifest } from "./pluginManifest";
 
 const { createContext, runInContext } = (await import("node:" + "vm")) as unknown as {
   createContext: (obj: Record<string, unknown>) => object;
@@ -214,7 +214,7 @@ describe("module 产物与包校验", () => {
   });
 
   it("module 需要 logic.run，而 logic.run 不在自动放行集（会跑 JS 的包不得自动启用）", () => {
-    expect(KIND_REQUIRED_CAP.module).toBe("logic.run");
+    expect(artifactKindMeta("module").requiredCap).toBe("logic.run");
     expect(PLUGIN_CAPS).toContain("logic.run");
     expect(PURE_UI_CAPS).not.toContain("logic.run");
     expect(PURE_UI_CAPS).not.toContain("win.control");

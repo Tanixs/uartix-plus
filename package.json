@@ -12,12 +12,16 @@
     "test": "vitest run",
     "build:seq": "node scripts/build-seq-cli.mjs",
     "build:mcp": "node scripts/build-mcp-cli.mjs",
+    "build:plugin-cli": "node scripts/build-plugin-cli.mjs",
+    "plugin": "node dist-cli/uartix-plugin.cjs",
     "mcp:e2e": "node scripts/mcp-e2e.mjs",
     "check:theme": "node .tools/check-contrast.cjs",
     "check:aria": "node .tools/check-aria.cjs",
     "check:motion": "node .tools/check-motion.cjs",
     "check:cycles": "node .tools/check-import-cycles.cjs",
-    "check:all": "node .tools/check-contrast.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-import-cycles.cjs"
+    "check:all": "node .tools/check-contrast.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-import-cycles.cjs && node .tools/check-commands-registered.cjs",
+    "market:gen": "node scripts/gen-market-index.mjs",
+    "check:commands": "node .tools/check-commands-registered.cjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

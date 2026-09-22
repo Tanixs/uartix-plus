@@ -4980,6 +4980,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serialport",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

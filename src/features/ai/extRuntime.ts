@@ -1,12 +1,6 @@
-import { onFrames } from "../../ipc/framesBus";
-import { getVar, listVars } from "../controls/variableStore";
-import { getSnapshot as getSettings } from "../settings/settingsStore";
-import * as serialStore from "../serial/serialStore";
-import { buildSnap } from "./widgetHub";
-import { getChatFeed, type AiChatFeed } from "./aiChatFeed";
-import { subscribe as subChatStore } from "./chatStore";
-import { runAppAction, APP_ACTION_KINDS, type AppActionKind } from "./appActions";
-import type { AiExtension } from "./extensionStore";
+// P99a-D1c：这里曾经 import 了 framesBus / variableStore / serialStore / widgetHub / aiChatFeed /
+// appActions 六组模块，只为喂给主世界 `new Function` 的 ScriptApi。脚本通道删掉后它们全部无用了——
+// 少一批静态边也意味着 extRuntime 这条曾经的环边更薄（§8-33）。
 import { getSnapshot as getExts } from "./extensionStore";
 import { setStyleApplier } from "../plugins/pluginStore";
 import { ROOT_LAYER, submitRootVars } from "../../styles/rootVars";
@@ -95,27 +89,15 @@ export function collectThemeVars(keys: readonly string[] = THEME_VAR_KEYS): { va
   return { vars, theme: document.documentElement.dataset.theme || "dark" };
 }
 
-/* ---------------- 行为脚本运行时 ---------------- */
-
-export interface ScriptApi {
-  getField(name: string): number | string | undefined;
-  listFields(): string[];
-  onFrame(cb: (fields: Record<string, number | string>) => void): () => void;
-  send(mode: "ascii" | "hex", text: string): Promise<void>;
-  toast(msg: string): void;
-  getInfo(): ReturnType<typeof buildSnap>;
-  /** 感知 AI 助手对话状态（phase/思维链尾部/正文尾部），订阅即回当前值 */
-  onChat(cb: (feed: AiChatFeed) => void): () => void;
-  /** 向 AI 助手提问（回答经 onChat 流式回来） */
-  ask(text: string): Promise<void>;
-  /** 应用控制 API：openPanel/applyPreset/setTheme/writeCard/clearPage/removeXxx 等 */
-  app: Record<
-    AppActionKind,
-    (args?: Record<string, unknown>) => Promise<{ ok: boolean; data?: unknown; err?: string }>
-  >;
-}
-
-const runningScripts = new Map<string, () => void>();
+/* ---------------- 扩展 toast（小部件/面板/脚本共用） ----------------
+ *
+ * P99a-D1c 删除了此处的"行为脚本运行时"：`ScriptApi` + `makeApi()` + `new Function("api", code)`。
+ * 那条通道是主世界里的无超时、不可中断 eval，且 `api.app.*` 一律带 `highPriv:true`——
+ * 它是全仓最高的一块攻击面，而**没有任何生产者会写它**：`pluginStore` 的投影只产
+ * theme/widget/panel 三种，`perms` 字段更是全仓零读取者（M2 清退的那类"假安全控件"）。
+ * 零兼容裁决（详设 §13.1）下直接删通道，而不是给它补沙箱：能跑 JS 的合法形态只有
+ * 专用 Worker 那一条（`logic.run` + realm 封网 + 探针自证），主世界不留第二个口子。
+ */
 
 let toastHost: HTMLDivElement | null = null;
 export function toast(msg: string) {
@@ -131,86 +113,6 @@ export function toast(msg: string) {
   window.setTimeout(() => el.remove(), 2600);
 }
 
-function makeApi(): ScriptApi {
-  const app = {} as ScriptApi["app"];
-  for (const kind of APP_ACTION_KINDS) {
-    app[kind] = (args?: Record<string, unknown>) =>
-      runAppAction(kind, args ?? {}, { highPriv: true });
-  }
-  return {
-    getField: (name) => getVar(name),
-    listFields: () => listVars().map((v) => v.name),
-    onFrame: (cb) =>
-      onFrames((p) => {
-        const fields: Record<string, number | string> = {};
-        for (const r of p.rows) {
-          for (const f of r.fields) fields[f.name] = f.text ?? f.value;
-        }
-        cb(fields);
-      }),
-    send: async (mode, text) => {
-      if (!getSettings().aiWidgetSend) {
-        throw new Error("发送权限未开启（设置 → AI 服务 → 权限与安全 → 允许向设备发送）");
-      }
-      await serialStore.sendData(mode, text);
-    },
-    toast,
-    getInfo: () => buildSnap(),
-    onChat: (cb) => {
-      let lastKey = "";
-      const fire = () => {
-        const f = getChatFeed();
-        const key = `${f.phase}|${f.reasoningTail}|${f.textTail}`;
-        if (key !== lastKey) {
-          lastKey = key;
-          cb(f);
-        }
-      };
-      fire();
-      return subChatStore(fire);
-    },
-    ask: async (text) => {
-      if (!getSettings().aiWidgetSend) {
-        throw new Error("发送权限未开启（设置 → AI 服务 → 权限与安全 → 允许向设备发送）");
-      }
-      const m = await import("./chatStore");
-      const r = m.requestAsk(text);
-      if (!r.ok) throw new Error(r.err ?? "提交失败");
-    },
-    app,
-  };
-}
-
-/** 启用单个行为脚本扩展（重复启用先停止旧实例） */
-export function startScript(ext: AiExtension) {
-  stopScript(ext.id);
-  try {
-    const api = makeApi();
-    const fn = new Function("api", `"use strict";\n${ext.code ?? ""}`);
-    const ret = fn(api);
-    const cleanup = typeof ret === "function" ? ret : undefined;
-    runningScripts.set(ext.id, () => cleanup?.());
-  } catch (e) {
-    toast(`脚本「${ext.name}」启动失败：${String(e).slice(0, 120)}`);
-  }
-}
-
-export function stopScript(id: string) {
-  const stop = runningScripts.get(id);
-  if (stop) {
-    try {
-      stop();
-    } catch {
-      /* 忽略清理异常 */
-    }
-    runningScripts.delete(id);
-  }
-}
-
-export function isScriptRunning(id: string): boolean {
-  return runningScripts.has(id);
-}
-
 /* ---------------- 总控：随扩展启停同步运行时 ---------------- */
 
 let started = false;
@@ -219,11 +121,7 @@ export function startExtRuntime() {
   if (started) return;
   started = true;
   applyStyleExts();
-  // 启动时运行所有已启用的脚本扩展（旧扩展已废弃，运行时仅承载插件库投影）
-  for (const e of getExts().exts) {
-    if (e.type === "script" && e.enabled) startScript(e);
-  }
-  // 面板扩展无需常驻运行时（挂载时按需渲染）
+  // 只剩样式层：面板扩展挂载时按需渲染，脚本通道已随 P99a-D1c 删除
 }
 
 /* P92-F：把样式层应用者交给 pluginStore（单向 extRuntime → pluginStore，**不再有反向静态边**）。

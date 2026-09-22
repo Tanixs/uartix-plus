@@ -1,0 +1,37 @@
+{
+  "format": "uartix-plugin",
+  "schemaVersion": 2,
+  "id": "uartix.theme.ink",
+  "version": "1.0.0",
+  "name": "墨夜",
+  "desc": "",
+  "hostApi": "^1.0",
+  "capabilities": [
+    "theme.tokens"
+  ],
+  "contributions": {
+    "themes": [
+      {
+        "id": "main",
+        "entry": "main.json"
+      }
+    ]
+  },
+  "artifacts": {
+    "main.json": {
+      "kind": "theme",
+      "vars": {
+        "--bg": "#0e1116",
+        "--panel": "#151a21",
+        "--text": "#e6edf3",
+        "--text-dim": "#9fb0c0",
+        "--accent": "#4c8dff",
+        "--accent-contrast": "#ffffff"
+      }
+    }
+  },
+  "provenance": {
+    "createdBy": "user",
+    "reviewed": false
+  }
+}

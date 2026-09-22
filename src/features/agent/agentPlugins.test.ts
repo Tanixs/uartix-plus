@@ -32,6 +32,8 @@ const store = await import("../plugins/pluginStore");
 const extStore = await import("../ai/extensionStore");
 import type { ApprovalGate, ApprovalRequest } from "./toolRegistry";
 import type { TaskContext, ToolCall } from "./types";
+import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
+import { autoEnableBlockedCaps } from "../plugins/pluginManifest";
 
 function ctx(scope: TaskContext["scope"], allowed?: string[]): TaskContext {
   return { source: "local_agent", runId: "r1", signal: new AbortController().signal, scope, ...(allowed ? { allowed } : {}) };
@@ -193,5 +195,36 @@ describe("enable_plugin 与 list_plugins", () => {
     expect(list.ok).toBe(true);
     const plugins = (list.data as { plugins: { id: string; state: string }[] }).plugins;
     expect(plugins.some((p) => p.id === id && p.state === "installed_disabled")).toBe(true);
+  });
+});
+
+/**
+ * P99a-D2：`save_plugin` 的**模型侧**能力边界必须真的发给模型。
+ * 病根：Agent 造的包只能声明该类产物的能力（小部件包没有 `ui.action` / `serial.send`），
+ * 桥侧对这些调用是硬拒——模型不知道这一点，就会存一个"点了没反应"的挂件并告诉用户能用
+ * （§8-41①"能存不能落地是创造面头号谎言"）。这里钉的是"这句话在 definitions 里"，
+ * 不是注释里写了就算。
+ */
+describe("save_plugin 描述里的能力边界（P99a-D2）", () => {
+  const desc = () =>
+    createLocalAgentAdapter({ runId: "d2", gate: fakeGate() }).definitions.find(
+      (d) => d.name === "save_plugin",
+    )!.description;
+
+  it("每种产物的能力按元表逐项列出（派生，不是手抄）", () => {
+    const d = desc();
+    for (const k of ARTIFACT_KINDS) {
+      expect(d, `模型侧没说清 ${k} 能声明哪些能力`).toContain(`${k}=[${artifactKindMeta(k).caps.join("+")}]`);
+    }
+  });
+
+  it("「不会自动启用」那句列的恰好是纯 UI 能力集的补集，不多不少", () => {
+    const m = desc().match(/Packages declaring (.+?) are never auto-enabled/);
+    expect(m, "模型侧少了「哪些包不会自动启用」这句").toBeTruthy();
+    expect(m![1].split(" / ").sort()).toEqual([...autoEnableBlockedCaps()].sort());
+  });
+
+  it("明说小部件/面板包里的 uartix.app、send、ask 不生效", () => {
+    expect(desc()).toContain("inside a saved widget or panel package do nothing");
   });
 });

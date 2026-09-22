@@ -1,0 +1,19 @@
+<style>
+  .link { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; font-size: 12px; }
+  .link b { font-size: 15px; }
+  .link span { opacity: .65; }
+</style>
+<div class="link">
+  <span>状态</span><b id="st">--</b>
+  <span>端口</span><b id="pt">--</b>
+  <span>可读字段</span><b id="n">--</b>
+</div>
+<script>
+  // 面板与小部件共用同一套注入桥：读宿主推来的快照，缺什么就显示 --
+  uartix.onSnap(function (s) {
+    var f = (s && s.fields) || {};
+    document.getElementById("st").textContent = s && s.status ? s.status : "未连接";
+    document.getElementById("pt").textContent = (s && s.port) || "—";
+    document.getElementById("n").textContent = String(Object.keys(f).length);
+  });
+</script>

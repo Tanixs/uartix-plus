@@ -12,6 +12,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
     { key: "start", label: tx("快速入门", "Quick Start") },
     { key: "panels", label: tx("面板总览", "Panels Overview") },
     { key: "ai", label: tx("AI 助手详解", "AI Assistant Guide") },
+    { key: "plugins", label: tx("插件与创造", "Plugins & Creation") },
     { key: "canvas", label: tx("协议画布教程", "Protocol Canvas Guide") },
     { key: "plot3d", label: tx("3D 轨迹面板", "3D Trajectory Panel") },
     { key: "orchestrator", label: tx("自动编排器", "Orchestrator") },
@@ -85,6 +86,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li><b>解读数据 / 分析曲线</b>：一键概括设备状态、诊断振荡与噪声；发现坏帧率偏高、数据停滞、字段突变时面板顶部会主动提示。</li>
                     <li><b>生成指令 / 生成卡片</b>：自然语言生成命令模板或控制卡片，回复内直接点「加入命令库」「临时发送」「写入控制画布」，生成即可用。</li>
                     <li>发送前可在输入框上方勾选「本次发送的上下文」（协议摘要/数据样本/Hex 选区等），AI 只看你授权的内容。</li>
+                    <li>它还能<b>读这个软件本身</b>（连接现状、协议字段、控件、帧统计…见「AI 助手详解」里的自省目录一节），
+                      以及<b>把成果存成插件留在你机器上</b>（主题 / 小部件 / 面板 / 工作区预设 / 任务模板 / 逻辑模块，见「插件与创造」页）。</li>
                   </ol>
                 </Section>
                 <Section title="控制台与快捷指令">
@@ -105,8 +108,12 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；可停靠为面板（工具栏「+ 面板」）。</li>
                     <li>输入框：<code>Enter</code> 发送；<code>Shift+Enter</code> 或 <code>Ctrl+Enter</code> 换行。</li>
                     <li>要带哪些上下文，点输入框左侧的 <code>＋</code> → <b>发送上下文</b> 勾选；<b>协议清单</b>（一行式，便宜）默认带，<b>协议完整定义</b>只在需要精确分析时勾。面板上实时显示本次发送的估算体积。</li>
-                    <li>支持思维链模型（如 deepseek-v4-pro / glm-5.3）：思考过程实时流式显示并计时，正文开始后自动折叠。<b>「显示思维链」与「让模型先想后答」是两个独立开关</b>（设置 → AI 服务）：只想看过程就开前者，长任务反复超时就把后者关掉，别为了看过程而背上等待。</li>
+                    <li>支持思维链模型（如 deepseek-v4-pro / glm-5.3）：思考过程实时流式显示并计时，正文开始后自动折叠。<b>「显示思考过程」与「深度思考（先想后答）」是两个独立开关</b>（设置 → AI 服务）：只想看过程就开前者，长任务反复超时就把后者关掉，别为了看过程而背上等待。同处的<b>「流式读空闲超时」</b>只管本机这一侧：连续多少秒收不到任何字节才判定卡住并重试（默认 120 秒）——上游网关自己返回的超时错误调它没用，那种情况关深度思考或换更快的模型。</li>
                     <li>消息悬停出现操作钮：复制 / 编辑重发 / 重新生成 / 删除；会话侧栏支持多会话、搜索、双击重命名。</li>
+                    <li>顶栏「更多 ▾」四件事：<b>本地插件库</b>、<b>导出对话为 Markdown</b>（纯本地写文件）、
+                      <b>上传巡检报告</b>、<b>清空当前对话</b>。
+                      其中「上传巡检报告」是<b>真的往外发</b>：它把最近那条含「巡检发现」的回复正文（末尾最多 8000 字）连同软件版本与时间戳发到一个固定收报地址。
+                      报告里写到的字段名、数值、端口、文件路径会<b>一起出去</b>——涉及客户设备或内部编号时先自己看一眼正文再点。</li>
                   </ol>
                 </Section>
                 <Section title="工作方式与授权档（发送方式 pill）">
@@ -120,8 +127,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <table className="help-table">
                     <tbody>
                       <tr><td>仅预览</td><td>只读数据与状态。任何写入都只给预览，<b>不落一行改动</b>——想先看 AI 打算怎么做，就用这一档。</td></tr>
-                      <tr><td>放手改界面</td><td>默认档。改应用设置、保存主题/控件/面板插件，可逆的自动做；<b>不碰设备与本机</b>。</td></tr>
-                      <tr><td>全面放手</td><td>软件目录内八个能力域全开（含界面深改、读白名单文件、写目录内文件、网络、命令行）。<b>但覆盖已有文件、删除、实车发送、命令行仍然逐条弹批准卡</b>——这一档放开的是能力面，不是撤掉人工确认。</td></tr>
+                      <tr><td>界面创造</td><td>默认档。改应用设置、保存主题/控件/面板插件，可逆的自动做；<b>不碰设备与本机</b>。</td></tr>
+                      <tr><td>全权执行</td><td>软件目录内八个能力域全开（含界面深改、读白名单文件、写目录内文件、网络、命令行）。<b>但覆盖已有文件、删除、实车发送、命令行仍然逐条弹批准卡</b>——这一档放开的是能力面，不是撤掉人工确认。</td></tr>
                     </tbody>
                   </table>
                   <p className="help-tip">
@@ -130,8 +137,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     勾了任何一项与预设不同的组合，pill 会如实显示「自定义 · N 项授权」，不猜你授了什么。
                   </p>
                   <p className="help-tip">
-                    档位会被记住，<b>但「全面放手」与自定义勾选不跨重启恢复</b>——开机后回落到「放手改界面」并提示你，
-                    避免某天带着满权限启动而没察觉。一项都不勾时按「放手改界面」同权执行，不会出现"选了自定义却什么都改不动"。
+                    档位会被记住，<b>但「全权执行」与自定义勾选不跨重启恢复</b>——开机后回落到「界面创造」并提示你，
+                    避免某天带着满权限启动而没察觉。一项都不勾时按「界面创造」同权执行，不会出现"选了自定义却什么都改不动"。
                   </p>
                   <p className="help-tip">
                     预算（轮数 / 工具调用数 / 时长）显示在 pill 面板底部；任务运行中档位与预算锁定，防止中途换权限。
@@ -142,7 +149,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>配置写入</td><td>改应用设置（可撤销项）与外观 token。仅预览档不给。</td></tr>
                       <tr><td>插件库</td><td>保存/启用插件、保存主题、<b>升版与退回上一版</b>。这是"AI 造的东西能不能落地"的那道门。</td></tr>
                       <tr><td>设备发送</td><td>向仿真/虚拟设备自动发送。<b>实车连接或无法判定时一律逐次人工批准</b>，这一档授权也不例外。</td></tr>
-                      <tr><td>文件读取</td><td>读 设置 → Agent 文件白名单 里的路径（含从图片取色）。白名单为空则整个文件能力关闭。</td></tr>
+                      <tr><td>文件读取</td><td>读<b>设置 → AI 服务 → 「Agent 文件白名单」</b>里列出的路径（含从图片取色）。白名单留空＝这条能力等于关掉：工具还在，但每次调用都被拒并回执「路径不在白名单」。</td></tr>
                       <tr><td>文件写入</td><td>在软件目录/工作区内<b>新建</b>文件。<b>覆盖已存在的文件仍要逐条批准</b>。</td></tr>
                       <tr><td>网络访问</td><td>抓取网页与搜索。内网/回环地址按私有网段规则另行把关。</td></tr>
                       <tr><td>命令行</td><td>执行 shell。三重门：本授权域 + 设置页总开关 + <b>每条命令逐次批准</b>。</td></tr>
@@ -163,7 +170,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   </ul>
                 </Section>
                 <Section title="让 AI 改界面：正确姿势">
-                  <p>界面类需求（改某个按钮/面板/标题栏的样子、加动效）请走 <b>Agent 任务 + 「全面放手」档</b>，它的工作顺序是：</p>
+                  <p>界面类需求（改某个按钮/面板/标题栏的样子、加动效）请走 <b>Agent 任务 + 「全权执行」档</b>，它的工作顺序是：</p>
                   <ol className="help-ol">
                     <li><code>ui_inventory</code> 读软件的真实构成：面板清单、控件类型、可改的外观 token、内置动效配方——全部从注册表现取，不是它凭印象说的。</li>
                     <li><code>ui_inspect</code> 读<b>活界面</b>：给一个选择器，它回给你这一带真实存在的类名与各自命中多少个元素、节点树、当前计算样式。<b>先 inspect 再改</b>，选择器才不会打空。</li>
@@ -172,7 +179,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>这些改动是<b>会话临时层</b>：重启就没了，也不归插件管。满意了要显式说"保存为主题/固化下来"才会持久化——
                       让它报个名字就行，它会用 <code>style_commit</code> 把<b>当前真正生效的那几层</b>读出来存成已启用的主题插件
                       （不是凭记忆重抄一遍规则，重抄在多轮改动后一定走样）。想撤就 <code>style_revert</code>、卡片上的「撤销」，
-                      或直接 设置 → 外观 → <b>清除 AI 的全部临时改动</b>；固化之后恢复路径变成 停用插件 或 <code>rollback_plugin</code>。</li>
+                      或直接 设置 → 通用 → <b>清除 AI 的全部临时改动</b>；固化之后恢复路径变成 停用插件 或 <code>rollback_plugin</code>。</li>
                     <li>改坏了的插件版本可以 <code>rollback_plugin</code> 退回上一版——Agent 自己改自己存的东西会升版本号并留下旧版，不会堆出一堆近似副本。</li>
                   </ol>
                   <p className="help-tip">
@@ -194,7 +201,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <p className="help-tip">
                     常见困惑：「AI 把按钮改圆了，我把那个主题插件停用甚至卸载了，怎么还在？」
                     —— 因为那是<b>AI 临时层</b>改的，插件停用管不到它。
-                    去 设置 → 外观 → <b>「当前外观被谁改了」</b>，那里逐层显示谁在生效，
+                    去 设置 → 通用 → <b>「当前外观被谁改了」</b>，那里逐层显示谁在生效，
                     点<b>「清除 AI 的全部临时改动」</b>就干净了（你自己的设置与已存插件不受影响）。
                   </p>
                   <p className="help-tip">
@@ -211,7 +218,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>分析曲线</td><td>统计各通道均值/极值/周期/趋势斜率，诊断振荡与噪声</td></tr>
                       <tr><td>生成指令</td><td>描述需求 → 生成命令模板（写入命令库或临时发送）</td></tr>
                       <tr><td>生成卡片</td><td>描述需求 → 生成控制卡片（直接写入控制画布）</td></tr>
-                      <tr><td>创造</td><td>主题 / 小部件 / 面板——经「Agent 任务」保存为插件并自动启用</td></tr>
+                      <tr><td>创造</td><td>主题 / 小部件 / 面板 / 工作区预设 / 任务模板——经「Agent 任务」保存为插件并自动启用；<b>逻辑模块</b>（能带 JS 的那类）不会自动启用，要你在插件库里点一次。详见「插件与创造」页。</td></tr>
                       <tr><td>诊断</td><td>结合连接状态与异常巡检给出结构化排查清单</td></tr>
                       <tr><td>调试报告</td><td>汇总本次会话生成 Markdown 报告，可存档</td></tr>
                     </tbody>
@@ -232,10 +239,10 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>命令库命令<br /><code>uartix-command</code></td><td>单条或批量（{"{"}"commands":[…]{"}"}）写入命令库「AI 生成」分组，可带脚本。</td></tr>
                       <tr><td>协议模板<br /><code>uartix-template</code></td><td>生成帧结构模板（截帧边界/字段/校验），写入协议面板；多帧型协议支持 {"{"}"group":"簇名","templates":[…]{"}"} 一次写入整簇并自动建组归档，默认停用待你启用。</td></tr>
                       <tr><td>指令工厂协议<br /><code>uartix-codec</code></td><td>生成自定义协议（帧头/变量/长度/校验段），写入指令工厂「我的协议」，填参数即组帧。</td></tr>
-                      <tr><td>UI 创造<br /><code>主题 / 小部件 / 面板</code></td><td>对 AI 描述你想要的主题、浮窗小部件或常驻面板，AI 会引导你打开输入框下方的<b>「Agent 任务」pill</b>：任务里用 <code>save_plugin</code> 把成果保存为插件并自动启用，无需手动安装。插件在 设置 → 插件管理 启停、配置、导入导出；<b>Agent 再改同一个插件会升版本号并保留旧版</b>，可在插件库里退回上一版。</td></tr>
+                      <tr><td>UI 创造<br /><code>主题 / 小部件 / 面板 / 工作区预设 / 任务模板 / 逻辑模块</code></td><td>对 AI 描述你想要的主题、浮窗小部件或常驻面板，AI 会引导你打开输入框下方的<b>「Agent 任务」pill</b>：任务里用 <code>save_plugin</code> 把成果保存为插件并自动启用，无需手动安装。插件在 设置 → 插件管理 启停、配置、导入导出；<b>Agent 再改同一个插件会升版本号并保留旧版</b>，可在插件库里退回上一版。<br />另外两类是能真正落地的产物：<b>工作区预设</b>（一套面板排布）在插件库那条产物上点<b>「应用此布局」</b>——整屏排列会被替换，动手前当前布局自动存进 设置 → 工作区 的自动备份槽，随时回得去；<b>任务模板</b>（一段目标 + 建议步骤）点<b>「载入 AI 助手」</b>只把话填进输入框，<b>不会替你发送</b>，发不发、用哪个授权档还是你说了算。AI 想存一个引用了不存在工具的模板会被直接拒绝，不会留下一个跑不动的模板。</td></tr>
                     </tbody>
                   </table>
-                  <p className="help-tip">插件里的沙箱小部件 / 自定义面板 / 自定义卡片自动注入 <code>window.uartix</code> API（见下）；含发送能力的插件启用时需你点击批准。</p>
+                  <p className="help-tip">插件里的沙箱小部件 / 自定义面板 / 自定义卡片自动注入 <code>window.uartix</code> API（见上）；<b>能不能调某一支，看那个包声明了哪几项能力</b>——完整名册与"哪些包不会自动启用"在「插件与创造」页。</p>
                 </Section>
                 <Section title="Agent 能调用的工具（展开看它做了什么）">
                   <p>Agent 任务卡展开后每一步都是一个工具。按能力分组，<b>括号里是它需要的授权域</b>：</p>
@@ -249,11 +256,19 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     </tbody>
                   </table>
                   <p>
-                    <b>它是怎么「看见」这个软件的</b>：可读的东西集中在一张<b>宿主自省目录</b>里——连接现状、协议模板与完整字段表、
-                    指令库、控件面板、帧与解析统计、会话录制、曲线通道、插件库。<code>app_catalog</code> 列菜单，
-                    <code>app_read</code> 按路径取内容。目录里没有的东西是<b>不存在</b>，不是"藏在哪儿没告诉它"：
+                    <b>它是怎么「看见」这个软件的</b>：可读的东西集中在一张<b>宿主自省目录</b>里，覆盖这些面——运行现状、协议模板与完整字段表、
+                    指令库、控件面板、帧与解析统计、会话录制、曲线通道、插件库、<b>3D 轨迹</b>、<b>自动编排器</b>、<b>测试序列器</b>、
+                    <b>分析面板</b>、<b>Modbus 工作台</b>、<b>虚拟设备工坊</b>、<b>哨兵</b>。<code>app_catalog</code> 列菜单（有哪些视图以它当场返回为准，
+                    这里不抄一份数字给你过期），<code>app_read</code> 按路径取内容。目录里没有的东西是<b>不存在</b>，不是"藏在哪儿没告诉它"：
                     它反射不到任意内部状态，也读不到设置里的密钥那一类。列表视图的回执带 <code>total / returned / nextCursor</code>，
                     它照着翻页，而不是自己猜偏移。
+                  </p>
+                  <p className="help-tip">
+                    新接的七面给的是<b>配置与事实的摘要</b>，不是整包数据：轨迹点数上限、校准采样进度、编排块树、序列步骤与上次结果计数、
+                    Modbus 从站配置与轮询行统计、虚拟设备规格规模、哨兵健康度与报警清单都在；
+                    但<b>点云本体、寄存器历史数组、原始收发字节、GLTF 路径、串口与网络端点、备注正文</b>这类不外带（只给长度或有无）。
+                    <b>"现在在跑几条、哪组失败"这类每秒变的活值也不在这里</b>——那些走各自的动作（<code>run_app_action</code> 的 orchestratorRead / plot3dRead），
+                    需要高权限且逐次批准。
                   </p>
                   <p>
                     每轮开始它还会重读一次<b>现状</b>（授权档与勾选域、可见工具数、串口连没连、有没有被操纵者锁住、软件版本），
@@ -262,6 +277,12 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <p className="help-tip">
                     没授权的工具<b>根本不会发给模型</b>——看得见却调不动只会白烧一轮再报一句莫名失败。
                     所以 pill 上显示授了几项，就是在如实告诉你它现在能动什么。
+                  </p>
+                  <p>
+                    <b>每个任务一张工具面</b>：任务开始时按你当时那一档（工作方式 + 授权档 + 高级区勾选）现算一份清单发给模型，
+                    任务跑起来就锁定，中途改设置不会让一个正在跑的任务突然多出手来。副作用（发送、删除、覆盖、命令行、动实车）
+                    <b>不是模型自报的，是宿主按工具自己的登记判的</b>——批准卡上写的动词与参数就是它真正要做的动作，
+                    你批的是"删除卡片"，不是"执行应用动作"这一句含糊话。
                   </p>
                 </Section>
                 <Section title="动作执行（uartix-action）示例">
@@ -276,6 +297,10 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 <Section title="小部件 uartix API 与无边框形态">
                   <ul className="help-ol">
                     <li>所有沙箱组件（小部件 / 自定义面板 / 自定义卡片）自动注入全局 <code>window.uartix</code>，AI 生成的代码直接调用：onSnap 数据快照、<b>onChat 感知 AI 对话（phase + 思维链/正文尾部）</b>、ask 向 AI 提问、send 串口发送、app 软件动作、onKey 键盘（浮窗悬停即收）、onCursor 鼠标跟随、screen 屏幕尺寸、resize 高度。</li>
+                    <li><b>能调哪几支，取决于它是"谁装的"</b>：你在扩展区自己建的小部件、以及控制画布里的自定义卡片，上面这套 API 全给（<code>send</code> 仍受全局「允许向设备发送」总闸）。
+                      而<b>插件包里</b>的小部件/面板只能调它那个包声明过的能力，缺就<b>静默不生效</b>（调用不报错，只是什么都不发生）：
+                      <code>uartix.app</code> 要<b>界面动作</b>、<code>uartix.send</code> 要<b>发送串口数据</b>、<code>uartix.ask</code> 与 onChat/数据快照推送要<b>向 AI 助手提问</b> / <b>读取数据快照</b>。
+                      所以"AI 用 save_plugin 存的小部件包"里点按钮发不出数据是<b>设计如此</b>——它那个包只有小部件 + 读数据两项能力；要能发或能操作软件，得你自己去装带对应能力的包。</li>
                     <li>窗口控制 <code>uartix.win.*</code>：menu 弹菜单、close、popOut 弹出独立桌面窗、moveTo/moveBy/resizeTo/get、top 置顶、through 点击穿透（60 秒自动恢复）；移动类自动钳制屏幕边界，不会拖丢。</li>
                     <li>右键菜单可完全自定义：<code>uartix.menu.define(items)</code> 换掉默认菜单（支持子菜单/分隔线/勾选/多组命名菜单），<code>uartix.onMenu(cb)</code> 接收点击，<code>uartix.menu.off()</code> 关闭自动菜单改由组件自己处理右键。</li>
                     <li>无边框形态：AI 声明 <code>{"<meta name=\"uartix:chrome\" content=\"none\">"}</code>（卡片带「无边框形态」角标）——无标题栏、窗口透明，内容完全自绘：悬浮通知条、贴角信息窗、计时器、互动桌宠等任意形态。</li>
@@ -284,7 +309,13 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>示例：对 AI 说「做一个无边框透明桌宠，眼睛跟随鼠标，AI 思考时冒问号，回答时气泡打字机，点击它能向 AI 提问，右键菜单里加『闹脾气』『睡觉』，串口断线时沮丧」。</li>
                   </ul>
                 </Section>
-                <Section title="脚本 api.app.*（39 种动作速查）">
+                <Section title="软件动作（app action）：39 种，三个入口">
+                  <p>
+                    这张表是<b>软件动作清单</b>——一处登记、三个入口共用：聊天回复里的 <code>uartix-action</code> 代码块（你点「执行」）、
+                    MCP 的 <code>run_action</code>、小部件/自定义卡片里的 <code>uartix.app(kind, args)</code>。
+                    除这三个入口外<b>没有</b>第四种调法：能跑 JS 的形态只剩插件里的<b>逻辑模块</b>（见「插件与创造」页），
+                    软件不再对用户开放"手写脚本调动作"的 API。
+                  </p>
                   <table className="help-table">
                     <tbody>
                       <tr><td>界面控制</td><td>openPanel({"{"}panel{"}"}) · applyPreset({"{"}preset{"}"}) · setTheme({"{"}theme{"}"})</td></tr>
@@ -306,18 +337,19 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>通知</td><td>toast({"{"}msg{"}"})</td></tr>
                     </tbody>
                   </table>
-                  <pre>{`// 脚本示例：首次收到数据时自动切到分析布局
-api.app.applyPreset({ preset: "analyze" });
-await api.app.openPanel({ panel: "plot2d" });
-const protos = await api.app.listProtocols();
-console.log(protos.length);`}</pre>
-                  <pre>{`// 脚本示例：本机当从站（40003=1234），再用主站轮询读回来画曲线
-await api.app.modbus({ op: "slave.configure", address: 1 });
-await api.app.modbus({ op: "slave.write", area: "holding", index: 2, value: 1234 });
-await api.app.modbus({ op: "slave.start" });
-await api.app.modbus({ op: "poll.add", slave: 1, fn: 3, addr: 0, qty: 3, periodMs: 500, varName: "MB温度" });
-await api.app.modbus({ op: "poll.start" });`}</pre>
-                  <p className="help-tip">小部件/自定义卡片内通过 postMessage 桥 {"{"}type:"aiw:app", action:{"{"}kind,args{"}"}{"}"} 调用同一套动作。高权限动作（破坏性、modbus、sentinel、考古报告、编排器/3D 写入、虚拟设备等）在挂件侧一律不可调用——这是硬限制，不随设置变化；要执行请走 AI 助手的 Agent 任务，由你在批准卡上逐次确认。</p>
+                  <pre>{`// 小部件 / 自定义卡片里（window.uartix 由宿主自动注入，不用自己写 postMessage）：
+uartix.app("applyPreset", { preset: "analyze" });
+uartix.app("openPanel", { panel: "plot2d" });`}</pre>
+                  <pre>{`// 聊天里对 AI 说"本机当从站，40003 写 1234，再开主站轮询读回来画曲线"，它输出的动作块：
+{"actions":[
+  {"kind":"modbus","args":{"op":"slave.configure","address":1}},
+  {"kind":"modbus","args":{"op":"slave.write","area":"holding","index":2,"value":1234}},
+  {"kind":"modbus","args":{"op":"slave.start"}},
+  {"kind":"modbus","args":{"op":"poll.add","slave":1,"fn":3,"addr":0,"qty":3,"periodMs":500,"varName":"MB温度"}},
+  {"kind":"modbus","args":{"op":"poll.start"}}
+]}
+// 点「执行」逐条跑；modbus 会真的占总线发数据，所以每条都要你在批准卡上确认。`}</pre>
+                  <p className="help-tip">高权限动作（破坏性、modbus、sentinel、考古报告、编排器/3D 写入、虚拟设备等）在挂件侧一律不可调用——这是硬限制，不随设置变化；要执行请走 AI 助手的 Agent 任务，由你在批准卡上逐次确认。<b>插件包里的小部件还要另过一道能力门</b>：包没声明 <code>ui.action</code> 时 <code>uartix.app</code> 根本不通（详见「插件与创造」页）。</p>
                 </Section>
                 <Section title="常用诉求 → 一句话指令">
                   <table className="help-table">
@@ -383,6 +415,84 @@ await api.app.modbus({ op: "poll.start" });`}</pre>
                     <li>系统提示按需注入：AI 只在需要某格式时自动加载对应规范，普通问答不带全量提示词。</li>
                     <li>多轮长对话定期「新对话」；历史只带最近 20 条。</li>
                     <li>协议识别建议温度 ≤0.3；本地 Ollama 零成本。</li>
+                  </ul>
+                </Section>
+              </>
+            )}
+            {tab === "plugins" && (
+              <>
+                <p>
+                  这一页讲<b>软件能装什么、装完归谁管</b>。入口有两个：<code>设置 → 插件管理</code>，
+                  以及 AI 助手顶栏「更多 ▾ → 本地插件库」（同一个东西，少跳一步）。
+                  包格式是 <code>uartix-plugin</code>，本地 JSON 存储；「插件市场」那一栏目前只是占位，<b>不联网、不自动下载任何东西</b>。
+                </p>
+                <Section title="六种产物：分别是什么、装上会不会自己生效">
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>主题</td><td>一套外观变量（+可选受限 CSS）。<b>会</b>自动启用；停用/卸载就是撤掉这一层外观。</td></tr>
+                      <tr><td>小部件</td><td>浮窗 / 桌面挂件（HTML 沙箱 iframe）。<b>会</b>自动启用。</td></tr>
+                      <tr><td>面板</td><td>一块常驻面板，可以是声明式积木，也可以是 HTML。<b>会</b>自动启用。</td></tr>
+                      <tr><td>工作区预设</td><td>一套面板排布（dockview 布局 JSON）。<b>启用 ≠ 生效</b>：它只是出现在库里，你要在那条产物上点<b>「应用此布局」</b>，整屏排列才会被替换；点之前当前布局自动存进 设置 → 工作区 的备份槽，随时回得去。</td></tr>
+                      <tr><td>任务模板</td><td>一段目标 + 给 AI 的建议步骤。点<b>「载入 AI 助手」</b>只是把话填进输入框，<b>不替你发送</b>；步骤是建议，不是硬指令。存的时候引用了不存在的工具会被直接拒绝。</td></tr>
+                      <tr><td>逻辑模块</td><td>本包自带的 JS，跑在<b>专用 Worker</b> 里（见下）。<b>不会</b>自动启用，永远要你在插件库里点一次。</td></tr>
+                    </tbody>
+                  </table>
+                  <p className="help-tip">
+                    只有前四类是"存下来就能自己生效"的。<b>逻辑模块不会自动启用</b>——会跑 JS 的包不得被自动放行，
+                    这是硬规矩：否则"AI 存一个包 → 自己启用 → 下一步多出一支自己能调的工具"就是自提权的正门。
+                  </p>
+                </Section>
+                <Section title="能力名册（12 项）：包能声明什么">
+                  <p>manifest 里写在这 12 项之外的能力，一律拒绝入库。名字与插件库详情里的标签是同一份：</p>
+                  <table className="help-table">
+                    <tbody>
+                      <tr><td>主题 token</td><td>改外观变量</td></tr>
+                      <tr><td>自定义面板</td><td>加一块常驻面板</td></tr>
+                      <tr><td>小部件</td><td>加浮窗 / 桌面挂件</td></tr>
+                      <tr><td>界面动作</td><td>调 39 个软件动作（<code>uartix.app</code>）；缺它那些调用静默不生效</td></tr>
+                      <tr><td>窗口控制</td><td>置顶 / 点击穿透 / 弹出独立窗口。<b>不会自动启用</b></td></tr>
+                      <tr><td>运行 JS</td><td>本包 JS 进专用 Worker。<b>不会自动启用</b></td></tr>
+                      <tr><td>注册 AI 工具</td><td>往 AI 助手的工具面里加自定义工具。<b>不会自动启用</b></td></tr>
+                      <tr><td>工作区布局预设</td><td>带一套面板排布（生效仍要你点「应用此布局」）</td></tr>
+                      <tr><td>任务模板</td><td>存一段可复用的目标 + 建议步骤</td></tr>
+                      <tr><td>读取数据快照</td><td>接收实时字段与 AI 对话状态推送</td></tr>
+                      <tr><td>发送串口数据</td><td>向设备发字节。<b>不会自动启用</b>，且另受全局「允许向设备发送」总闸限制</td></tr>
+                      <tr><td>向 AI 助手提问</td><td>组件反向问 AI。<b>不会自动启用</b></td></tr>
+                    </tbody>
+                  </table>
+                  <p className="help-tip">
+                    <b>不会自动启用</b>的那五项（窗口控制、运行 JS、注册 AI 工具、发送串口数据、向 AI 助手提问）是<b>按能力类别整类挡</b>的，
+                    不是按"作者看起来可不可信"挡的；作者自报的可信标记不构成信任。
+                  </p>
+                </Section>
+                <Section title="导入、启停、批量管理">
+                  <ul className="help-ol">
+                    <li><b>导入一律先停用</b>：选文件 / 粘贴包 JSON → 先跑校验（超限字段带截断标记报给你），通过了也还是停用状态，启用是你另一次动作。超 4 MiB 直接拒。</li>
+                    <li>导出：单个包或批量导成 JSON，可以直接发给别人；<b>没有</b>任何"导出即签名"的含义。</li>
+                    <li>批量：顶部多选后可批量启用 / 停用 / 卸载 / 导出，装多了不用一个个点。</li>
+                    <li>详情里能看见这个包声明了哪几项能力、带了哪几类产物、以及它有没有触发过<b>隔离违规</b>（伪造消息 / 越权调用）。多次违规会被隔离，卸载重装才解。</li>
+                    <li>版本链：同一个包被反复保存会升版本号并保留旧版，可<b>退回上一版</b>；更新候选要你先批准或拒绝，不会静默替换你在用的东西。</li>
+                  </ul>
+                </Section>
+                <Section title="逻辑模块：JS 跑在哪、封了什么、怎么算失控">
+                  <ul className="help-ol">
+                    <li>每包最多 1 个模块、代码上限 256 KiB；<b>不联网</b>（Worker 内取回原引用的路数被逐条封掉，出网通道不存在）。</li>
+                    <li>启用后先做<b>封网自证</b>：模块自己按宿主要求逐项验证"我确实拿不到 fetch / import / 主世界对象"，4 秒内自证不通过就标为<b>封网未通过（已拦停）</b>，工具不注册、代码不再跑。</li>
+                    <li>每次调用 10 秒超时；超时或崩掉会被终止并标<b>已失控终止（停用再启用可重来）</b>，重建最多 3 次。</li>
+                    <li>带工具的模块可注册自定义工具：每包 ≤8 支、全局 ≤64 支，名字强制 <code>plg_</code> 前缀 + 包名 + 稳定短哈希，<b>宿主同名工具永远不被接管</b>。</li>
+                    <li>新注册的工具<b>下一个任务才生效</b>——正在跑的任务不会中途多出手来。</li>
+                  </ul>
+                  <p className="help-tip">
+                    如实说一句边界：realm 内封网是"同一条路走不通"，不是"引擎层面不可能"。所以信任边界仍然是<b>安装前你自己看一眼能力与产物 + 含 JS 的包必须人工启用</b>，
+                    Worker 加固是第二层，不是第一层。
+                  </p>
+                </Section>
+                <Section title="AI 造的插件 vs 你装的插件：能力从哪来">
+                  <ul className="help-ol">
+                    <li>AI 用 <code>save_plugin</code> 存的包，能力<b>由产物种类决定</b>，它没有加码的余地：小部件包只有小部件 + 读取数据快照两项，所以那种包里的发送 / 界面动作 / 提问调用都不会生效。要那些能力得你自己装带相应能力的包。</li>
+                    <li>AI 自己造的包<b>碰不到设备发送</b>——这是产物表里写死的，不是一个可以被设置翻掉的开关。</li>
+                    <li>只有 AI 自己创建的包能被它静默升版；你导入的包它改不动，回执是 <code>update_needs_user</code>，绝不覆盖。</li>
+                    <li>插件带来的工具在台账里标着来源包，你能看出这一步是宿主动的还是某个包动的。</li>
                   </ul>
                 </Section>
               </>

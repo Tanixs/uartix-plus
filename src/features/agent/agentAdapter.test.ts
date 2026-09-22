@@ -342,6 +342,17 @@ describe("P99a-C1：宿主自省目录的两个前端", () => {
     expect(d.usage).toContain("反射"); // 诚实声明边界：读不到的东西是不存在，不是藏起来了
   });
 
+  it("P99a-C1b：app_read 的描述里，路径清单与目录一一对齐（不再手抄第二份）", () => {
+    // 病根：这句描述曾手写 13 条路径。本批接进七面 12 条新路径后，模型看描述仍只会点老几样，
+    // 而它其实读得到 3D 轨迹与编排器——一份写死的清单就是第二真相（§8-36①）。
+    const desc = createLocalAgentAdapter({ runId: "r-c1b", gate: fakeGate() }).definitions
+      .find((d) => d.name === "app_read")!.description;
+    for (const v of CATALOG_VIEWS) {
+      expect(desc, `app_read 描述里没有 ${v.path}`).toContain(v.path);
+    }
+    expect(desc.match(/app_catalog \(([^)]+)\)/)?.[1].split("|").length).toBe(CATALOG_VIEWS.length);
+  });
+
   it("app_read：路径必填、未声明即拒并回全部可用路径；分页字段原样透传并教怎么翻", async () => {
     const a = createLocalAgentAdapter({ runId: "r-read", gate: fakeGate() });
     expect((await a.execute(call("app_read", {}), ctx("create"))).code).toBe("invalid_args");
@@ -386,5 +397,37 @@ describe("P99a-C1：宿主自省目录的两个前端", () => {
     // runtime 一遍（counts.channels）+ channels 段一遍 = 2。旧写法 serial 与 session 各读一次
     // runtime，两次 getSnapshot 之间用户加/解锁就会产出一条自相矛盾的回执。
     expect(plot.getSnapshot).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("P99a-D1b：任务模板（workflow）在写入期就查工具存在性", () => {
+  const tpl = (steps: unknown[]) => ({ kind: "workflow", name: "巡检台", payload: { goal: "先看通道再调采样率", steps } });
+
+  it("引用不存在的工具 → unknown_tool_ref（而不是存下来等运行时撞 unknown_tool）", async () => {
+    const a = createLocalAgentAdapter({ runId: "r-tpl", gate: fakeGate() });
+    const bad = await a.execute(call("save_plugin", tpl([{ tool: "plot_channels" }, { tool: "no_such_tool" }])), ctx("create"));
+    expect(bad.ok).toBe(false);
+    expect(bad.code).toBe("unknown_tool_ref");
+    expect((bad.data as { unknown: string[] }).unknown).toEqual(["no_such_tool"]);
+    // 回执必须教它下一步：模型自己工具列表里的名字就是合法名字
+    expect(String((bad.data as { hint: string }).hint)).toContain("工具列表");
+    // 只存了一支工具都没查过的坏包：库里不该多出一条僵尸模板
+    const store = await import("../plugins/pluginStore");
+    expect(store.getSnapshot().plugins.some((p) => p.pkg.name === "巡检台")).toBe(false);
+  });
+
+  it("全部步骤都存在 → 装成 workflows 产物，且 capabilities 由元表派生（不含 serial.send）", async () => {
+    const a = createLocalAgentAdapter({ runId: "r-tpl2", gate: fakeGate() });
+    const r = await a.execute(call("save_plugin", tpl([{ tool: "plot_channels", note: "看现有通道" }])), ctx("create"));
+    expect(r.ok).toBe(true);
+    const store = await import("../plugins/pluginStore");
+    const id = (r.data as { pluginId: string }).pluginId;
+    const rec = store.getPlugin(id);
+    expect(rec?.pkg.contributions.workflows).toHaveLength(1);
+    expect(rec?.pkg.capabilities).toEqual(["workflow.compose"]);
+    expect(rec?.pkg.capabilities).not.toContain("serial.send");
+    // 模板不会被自动应用成任何运行态：它只是库里一份可载入的说明
+    const extStore = await import("../ai/extensionStore");
+    expect(extStore.getSnapshot().exts.filter((e) => e.pluginRef === id)).toHaveLength(0);
   });
 });

@@ -9,6 +9,9 @@
  */
 import {
   validateArtifact,
+  artifactKindMeta,
+  kindOfContribKey,
+  ARTIFACT_KINDS,
   type ArtifactKind,
 } from "./artifact";
 import { MAX_MODULES_PER_PKG } from "./pluginLimits";
@@ -38,10 +41,10 @@ export const PLUGIN_CAPS = [
   "logic.run",
   /** 本包可向 Agent 注册工具（P99a-B2）。与 `logic.run` 分列：能跑代码 ≠ 能扩工具面 */
   "agent.tool",
-  "motion.preset",
+  /** `motion.preset` / `report.view` 已随产物种类下架（P99a-D1b，详设 §7.1）：动效旋钮的写入者是主题层，
+   *  报告视图与 panel 同构。留着能力却没有产物＝一个没人检查的形容词（§8-36①）。 */
   "workspace.preset",
   "workflow.compose",
-  "report.view",
   "telemetry.read",
   "serial.send",
   "ai.ask",
@@ -62,36 +65,130 @@ export const PURE_UI_CAPS: readonly PluginCap[] = [
   "ui.panel",
   "ui.widget",
   "ui.action",
-  "motion.preset",
   "workspace.preset",
   "workflow.compose",
-  "report.view",
   "telemetry.read",
 ];
 
-/** 产物类型 → 需要的能力（安装时双向校验：声明了贡献却缺能力即拒绝）。 */
-export const KIND_REQUIRED_CAP: Record<ArtifactKind, PluginCap> = {
-  theme: "theme.tokens",
-  motionPreset: "motion.preset",
-  widget: "ui.widget",
-  panel: "ui.panel",
-  workspacePreset: "workspace.preset",
-  workflow: "workflow.compose",
-  reportView: "report.view",
-  module: "logic.run",
+/**
+ * 能力的中文说法（P99a-D2 从 `PluginLibraryDialog.tsx` 上收到这里）。
+ *
+ * 为什么搬家：帮助要写"能力名册"，而这份名字原先是插件库面板的组件私有常量——帮助要么抄第二份
+ * （§8-36①），要么写不出（现实是写不出，于是 12 项能力在帮助里一个都没出现）。上收后插件库与
+ * 帮助同一份名字，`helpCoverage` 才有东西可派生。
+ *
+ * 为什么拆 `name` / `note`：门禁比对的是**短名**。若拿整串长文案去比，改一个标点就红，
+ * 那是脆不是严；`note`（"含此能力的包不会自动启用"这类安全解释）只在面板 tooltip 里显示。
+ */
+export const CAP_LABEL: Record<PluginCap, { name: string; note: string }> = {
+  "theme.tokens": { name: "主题 token", note: "改写应用主题变量（外观层）" },
+  "ui.panel": { name: "自定义面板", note: "在界面里加一块常驻面板" },
+  "ui.widget": { name: "小部件", note: "加浮窗 / 桌面小部件" },
+  "ui.action": {
+    name: "界面动作",
+    note: "调用软件动作（打开面板、改主题等）。缺它时 uartix.app 静默不生效",
+  },
+  "win.control": {
+    name: "窗口控制",
+    note: "置顶 / 点击穿透 / 弹出独立窗口——含此能力的包不会自动启用",
+  },
+  "logic.run": {
+    name: "运行 JS",
+    note: "本包的 JS 进专用 Worker 执行——含此能力的包不会自动启用，启用时还要先过封网自证",
+  },
+  "agent.tool": {
+    name: "注册 AI 工具",
+    note: "向 AI 助手注册自定义工具——含此能力的包不会自动启用",
+  },
+  "workspace.preset": { name: "工作区布局预设", note: "带一套面板排布，你在插件库里点「应用此布局」才生效" },
+  "workflow.compose": { name: "任务模板", note: "一段目标 + 给 AI 的建议步骤，载入后仍由你决定发不发" },
+  "telemetry.read": { name: "读取数据快照", note: "接收实时字段与 AI 对话状态推送" },
+  "serial.send": {
+    name: "发送串口数据",
+    note: "含此能力的包不会自动启用，且另受全局「允许向设备发送」总闸限制",
+  },
+  "ai.ask": { name: "向 AI 助手提问", note: "含此能力的包不会自动启用" },
 };
 
-/** 产物类型 → contributions 里的列表键。 */
-export const KIND_CONTRIB_KEY: Record<ArtifactKind, string> = {
-  theme: "themes",
-  motionPreset: "motionPresets",
-  widget: "widgets",
-  panel: "panels",
-  workspacePreset: "workspacePresets",
-  workflow: "workflows",
-  reportView: "reportViews",
-  module: "modules",
-};
+/**
+ * 「哪些能力的包不会被自动启用」——**派生**自纯 UI 能力集的补集，不手抄第二份名单。
+ * 帮助与门禁都用它：安全话术漏一项就是让用户以为包会自己生效。
+ */
+export function autoEnableBlockedCaps(): PluginCap[] {
+  return PLUGIN_CAPS.filter((c) => !PURE_UI_CAPS.includes(c));
+}
+
+/** 两个包清单之间的差异（P99a-E2 / B3）。**只在需要时现算**——落盘一份 diff 就是第二真相。 */
+export interface ManifestDiff {
+  capsAdded: PluginCap[];
+  capsRemoved: PluginCap[];
+  /** 各类产物的数量变化（只列有变化的），如 `小部件 +2 / 主题 -1` */
+  kindChanges: { label: string; delta: number }[];
+  /** 新增能力里属于"不会自动启用"的那几项——提权提示 */
+  capsAddedBlocking: PluginCap[];
+}
+
+/**
+ * 算差异这件事只有这一处（对话框、批准回执、Agent 回执都从这里取）。
+ * 旧实现里 `proposeUpdate` 自己算了一遍 `addedCaps` 又只拼成一句话丢掉，
+ * `approveUpdate` 再算一遍 `nextCaps` 然后 `void` 掉——两份半成品检查，谁也没生效。
+ */
+export function manifestDiff(cur: PluginManifest, cand: PluginManifest): ManifestDiff {
+  const capsAdded = cand.capabilities.filter((c) => !cur.capabilities.includes(c));
+  const capsRemoved = cur.capabilities.filter((c) => !cand.capabilities.includes(c));
+  const countKinds = (m: PluginManifest): Map<ArtifactKind, number> => {
+    const out = new Map<ArtifactKind, number>();
+    for (const [key, list] of Object.entries(m.contributions)) {
+      const kind = kindOfContribKey(key);
+      if (!kind || !list?.length) continue;
+      out.set(kind, (out.get(kind) ?? 0) + list.length);
+    }
+    return out;
+  };
+  const a = countKinds(cur);
+  const b = countKinds(cand);
+  const kindChanges: ManifestDiff["kindChanges"] = [];
+  for (const kind of new Set([...a.keys(), ...b.keys()])) {
+    const delta = (b.get(kind) ?? 0) - (a.get(kind) ?? 0);
+    if (delta !== 0) kindChanges.push({ label: artifactKindMeta(kind).label, delta });
+  }
+  const blocking = new Set<PluginCap>(autoEnableBlockedCaps());
+  return {
+    capsAdded,
+    capsRemoved,
+    kindChanges,
+    capsAddedBlocking: capsAdded.filter((c) => blocking.has(c)),
+  };
+}
+
+/** 给人看的一句差异摘要（无差异时返回空串，调用方据此决定要不要拼括号）。 */
+export function describeDiff(d: ManifestDiff): string {
+  const bits: string[] = [];
+  if (d.capsAdded.length) bits.push(`能力 +${d.capsAdded.map((c) => CAP_LABEL[c].name).join("、")}`);
+  if (d.capsRemoved.length) bits.push(`能力 -${d.capsRemoved.map((c) => CAP_LABEL[c].name).join("、")}`);
+  for (const k of d.kindChanges) bits.push(`${k.label} ${k.delta > 0 ? "+" : ""}${k.delta}`);
+  return bits.join("；");
+}
+
+/**
+ * 「哪几类产物能被 Agent 存完就自动启用」——同样派生（能力落在纯 UI 集内才算）。
+ * 逻辑模块要 `logic.run`，所以它天然落在外面，不需要谁记得把它划出去。
+ *
+ * 是**函数**不是顶层常量：它要调 `artifactKindMeta()`，而 `artifact.ts` 反过来只 import 本文件的
+ * 类型——顶层算一次就等于在模块求值期跨环调用（§8-33/§8-38）。
+ */
+export function autoEnableableKindLabels(): string[] {
+  return ARTIFACT_KINDS.filter((k) =>
+    artifactKindMeta(k).caps.every((c) => (PURE_UI_CAPS as readonly PluginCap[]).includes(c)),
+  ).map((k) => artifactKindMeta(k).label);
+}
+
+/**
+ * 「产物类型 → 需要什么能力 / 占哪个 contributions 键」这两件事**不在这里**（P99a-D1a）：
+ * 它们与中文名、载荷校验器同为 `artifact.ts` 的产物元表 `KIND_TABLE` 的一行，
+ * 各处一律经 `artifactKindMeta()` / `kindOfContribKey()` 取。此前这里是第三、第四份手抄，
+ * 加一种产物要同时改五张表、漏一张就是"能存不能装"或"能装不能存"（§8-36①）。
+ */
 
 export interface ContribEntry {
   id: string;
@@ -251,7 +348,7 @@ export function validateManifest(raw: unknown): ManifestValidation {
         continue;
       }
     }
-    const need = KIND_REQUIRED_CAP[kind];
+    const need = artifactKindMeta(kind).requiredCap;
     if (!caps.includes(need)) {
       out.errors.push(`产物 ${norm} 类型 ${kind} 需要能力 ${need}，manifest 未声明`);
       continue;
@@ -263,7 +360,7 @@ export function validateManifest(raw: unknown): ManifestValidation {
   const usedEntries = new Set<string>();
   if (contribRaw) {
     for (const [key, list] of Object.entries(contribRaw)) {
-      const kind = (Object.keys(KIND_CONTRIB_KEY) as ArtifactKind[]).find((k) => KIND_CONTRIB_KEY[k] === key);
+      const kind = kindOfContribKey(key);
       if (!kind) {
         out.errors.push(`未知 contributions 键：${key}`);
         continue;

@@ -1,0 +1,22 @@
+{
+  "id": "uartix.theme.ink",
+  "name": "墨夜",
+  "author": "uartix",
+  "category": "theme",
+  "description": {
+    "zh": "低饱和深蓝夜视主题，覆盖全部面板与曲线底色；曲线网格在暗底上单独调过对比度。",
+    "en": "Low-saturation dark theme covering every panel and plot surface."
+  },
+  "version": "1.0.0",
+  "minAppVersion": "0.4.1",
+  "updated": "2026-09-20",
+  "packageFile": "theme-ink.uartix.json",
+  "publicUrl": "/market/pkg/theme-ink.uartix.json",
+  "capabilities": [
+    "theme.tokens"
+  ],
+  "screenshots": [
+    "/market/img/ink-night.png"
+  ],
+  "verified": true
+}

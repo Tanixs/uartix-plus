@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "name": "Uartix+ 社区插件库（示例）",
+  "generatedAt": "2026-09-21T00:00:00Z",
+  "source": "https://github.com/Tanixs/uartix-plus/tree/main/market",
+  "docsUrl": "https://github.com/Tanixs/uartix-plus/tree/main/market#readme",
+  "categories": {
+    "theme": "外观与主题",
+    "widget": "桌面小部件",
+    "panel": "面板与视图",
+    "layout": "布局预设",
+    "template": "任务模板",
+    "protocol": "协议与解析",
+    "module": "逻辑模块与工具"
+  },
+  "entries": [
+    {
+      "id": "uartix.panel.link",
+      "name": "链路体检",
+      "author": "uartix",
+      "category": "panel",
+      "description": {
+        "zh": "面板：把连接状态、端口与当前可读字段数摆在一条线上，先确认链路通不通。",
+        "en": "Panel: link status, port name and how many fields are readable right now."
+      },
+      "version": "1.0.0",
+      "packageUrl": "/market/pkg/panel-link.uartix.json",
+      "sha256": "33f27e3036fe559b5a8ec1d744bb48718dcd27aa9d22bb0a39a845689f77f22f",
+      "bytes": 1343,
+      "capabilities": [
+        "ui.panel",
+        "telemetry.read"
+      ],
+      "screenshots": [],
+      "minAppVersion": "0.4.1",
+      "updated": "2026-09-18"
+    },
+    {
+      "id": "uartix.theme.begonia",
+      "name": "秋海棠",
+      "author": "uartix",
+      "category": "theme",
+      "description": {
+        "zh": "默认主题海棠的暖色变体，适合长时间盯曲线的浅色环境。",
+        "en": "A warm light variant of the default Begonia theme."
+      },
+      "version": "1.1.0",
+      "packageUrl": "/market/pkg/theme-begonia.uartix.json",
+      "sha256": "816d597da18d0b0a9b2171f283529009c99a5a016562ba3e9a72f84a36f3a2f4",
+      "bytes": 678,
+      "capabilities": [
+        "theme.tokens"
+      ],
+      "screenshots": [],
+      "minAppVersion": "0.4.1",
+      "updated": "2026-09-21",
+      "verified": true
+    },
+    {
+      "id": "uartix.theme.ink",
+      "name": "墨夜",
+      "author": "uartix",
+      "category": "theme",
+      "description": {
+        "zh": "低饱和深蓝夜视主题，覆盖全部面板与曲线底色；曲线网格在暗底上单独调过对比度。",
+        "en": "Low-saturation dark theme covering every panel and plot surface."
+      },
+      "version": "1.0.0",
+      "packageUrl": "/market/pkg/theme-ink.uartix.json",
+      "sha256": "632b382feb352f81c99795b0c251164fc6b60243b6fa506ab6da369acb09b2e3",
+      "bytes": 671,
+      "capabilities": [
+        "theme.tokens"
+      ],
+      "screenshots": [
+        "/market/img/ink-night.png"
+      ],
+      "minAppVersion": "0.4.1",
+      "updated": "2026-09-20",
+      "verified": true
+    },
+    {
+      "id": "uartix.widget.rig",
+      "name": "台架三读数",
+      "author": "uartix",
+      "category": "widget",
+      "description": {
+        "zh": "桌面小部件：把变量 yaw/pitch/roll 做成三个大字；这三个变量不存在时照实显示 --。",
+        "en": "Desktop widget showing yaw/pitch/roll as three big digits."
+      },
+      "version": "1.0.0",
+      "packageUrl": "/market/pkg/widget-rig.uartix.json",
+      "sha256": "46edf9850a2036183c7b52b747eab8feaaa436e191742e7808bc7d29e4840192",
+      "bytes": 1412,
+      "capabilities": [
+        "ui.widget",
+        "telemetry.read"
+      ],
+      "screenshots": [],
+      "minAppVersion": "0.4.1",
+      "updated": "2026-09-19"
+    }
+  ]
+}

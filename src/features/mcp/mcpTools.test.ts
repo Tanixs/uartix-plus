@@ -174,3 +174,48 @@ describe("flattenResults / countStatuses / summarizeRun", () => {
     expect((s.steps as unknown[]).length).toBe(4);
   });
 });
+
+/* ================= P99a-E1：描述里的清单与话术只有一份 =================
+ * 改之前的病灶：`run_action` 的描述手抄了一份「常用 kind」（新增动作忘了抄，外部 IDE 就永远
+ * 拿到一个"未知动作"）；门控话术在 4 条描述 + 1 处抛错里各写一遍；设置项名与设置页行标签
+ * 也各叫各的。下面三条把"只有一份"钉成事实。 */
+describe("P99a-E1：MCP 描述与门控话术的单源", () => {
+  const readSrc = async (rel: string): Promise<string> => {
+    const fsSpec = "node:fs";
+    const urlSpec = "node:url";
+    const { readFileSync } = (await import(fsSpec)) as { readFileSync: (p: string, enc?: string) => string };
+    const { fileURLToPath } = (await import(urlSpec)) as { fileURLToPath: (u: string | URL) => string };
+    return readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+  };
+
+  it("run_action 描述里的动作清单就是 APP_ACTION_KINDS 全量（含高权限子集）", async () => {
+    const { APP_ACTION_KINDS, HIGH_ONLY } = await import("../ai/appActionKinds");
+    const desc = TOOL_DEFS.find((t) => t.name === "run_action")!.description;
+    expect(desc, "动作清单整串必须来自常量表").toContain(APP_ACTION_KINDS.join(" | "));
+    expect(desc).toContain([...HIGH_ONLY].join(" | "));
+    for (const k of APP_ACTION_KINDS) expect(desc).toContain(k);
+  });
+
+  it("设置项名与设置页行标签同字（描述、抛错、界面不能各叫一个名字）", async () => {
+    const { SETTING_SEND, SETTING_HIGH } = await import("./mcpTools");
+    const modal = await readSrc("../settings/SettingsModal.tsx");
+    expect(modal, `设置页没有叫「${SETTING_SEND}」的开关`).toContain(`tx("${SETTING_SEND}"`);
+    expect(modal, `设置页没有叫「${SETTING_HIGH}」的开关`).toContain(`tx("${SETTING_HIGH}"`);
+  });
+
+  it("状态码在 TS 与 Rust 两侧同码，async_required 更是整句同文", async () => {
+    const { ASYNC_REQUIRED, NEEDS_MANUAL } = await import("./mcpTools");
+    const bridge = await readSrc("../../../src-tauri/src/bridge.rs");
+    expect(ASYNC_REQUIRED.startsWith("async_required:")).toBe(true);
+    expect(NEEDS_MANUAL.startsWith("needs_manual_confirmation:")).toBe(true);
+    /**
+     * P99a-F4 把这条从「只钉前缀」提到「整句相等」。以前 Rust 那句是
+     * `async_required: use create_job with sequence.run; nothing executed`，
+     * 与 TS 侧的写法各说各话——外部 IDE 从两条路径拿到两份解释，就会有一份是错的。
+     * 断言抽不到就说明写法变了，那更要人来看这条钉还在不在（§8-43②）。
+     */
+    const rust = /Some\("(async_required:[^"]*)"\)/.exec(bridge);
+    expect(rust, "bridge.rs 里没抽到 async_required 整句").not.toBeNull();
+    expect(rust![1]).toBe(ASYNC_REQUIRED);
+  });
+});

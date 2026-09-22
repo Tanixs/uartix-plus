@@ -11,10 +11,9 @@ import { getSnapshot as getSerial } from "../serial/serialStore";
 import { getSnapshot as getOperator } from "../operator/operatorStore";
 import * as plot from "../plot/plotStore";
 import { acquireDataLease, hasDataLease } from "../plot/dataLease";
-import { catalogMenu, readCatalog } from "./hostCatalog";
+import { CATALOG_VIEWS, catalogMenu, readCatalog } from "./hostCatalog";
 import type { CatalogReadResult } from "./hostCatalog";
-import { runAppAction } from "../ai/appActions";
-import { APP_ACTION_KINDS } from "../ai/appActionKinds";
+import { isKnownActionKind, runAppActionSurface } from "./appActionSurface";
 import { actionKindLabel } from "./toolCatalog";
 import { actionMeta } from "./toolCatalog";
 import {
@@ -22,8 +21,8 @@ import {
   proposeUpdate, approveUpdate, rollback as rollbackPlugin,
   armModulePackage,
 } from "../plugins/pluginStore";
-import { PURE_UI_CAPS, KIND_CONTRIB_KEY, type PluginCap } from "../plugins/pluginManifest";
-import { ARTIFACT_KINDS, artifactKindLabel, type ArtifactKind } from "../plugins/artifact";
+import { PURE_UI_CAPS, autoEnableBlockedCaps } from "../plugins/pluginManifest";
+import { ARTIFACT_KINDS, artifactKindLabel, artifactKindMeta, type ArtifactKind } from "../plugins/artifact";
 import { agentPluginId, freeAgentId } from "../plugins/pluginId";
 import { RECEIPT_DATA_LIMIT } from "./context";
 import { channelStats, decimate } from "./runMath";
@@ -31,32 +30,29 @@ import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolRe
 
 /** 按引用取回时的单页字节上限（P94-G3）。等于回执裁剪线，保证"取回来的这一页"不会再被裁。 */
 export const ARTIFACT_PAGE_BYTES = RECEIPT_DATA_LIMIT;
+/**
+ * `save_plugin` 的能力边界（P99a-D2）：包能声明什么**由产物元表决定**，模型没有加码的余地。
+ * 不写清就会出现"存下来却静默不生效"的产物——小部件包没有 `ui.action`，它里面的 `uartix.app`
+ * 就是不会动（`pluginIsolation.ts` 按能力硬拒），而模型会告诉用户"点一下就能发"。
+ * §8-41①：能存不能落地是创造面头号谎言。这句话从表里派生，不手抄第二份清单。
+ */
+const PLUGIN_CAP_BOUNDARY =
+  "Capability boundary (derived from the artifact table, not negotiable): a package's capabilities are exactly its kind's — " +
+  ARTIFACT_KINDS.map((k) => `${k}=[${artifactKindMeta(k).caps.join("+")}]`).join(" ") +
+  ". You cannot add any. So uartix.app / uartix.send / uartix.ask inside a saved widget or panel package do nothing " +
+  "(no ui.action / serial.send / ai.ask); those calls only work in user-created widgets and custom cards — " +
+  "say so instead of shipping a dead button. Packages declaring " +
+  `${autoEnableBlockedCaps().join(" / ")} are never auto-enabled: the user enables those once in the plugin library.`;
 /** plot_window 每通道抽稀点数硬顶。 */
 export const PLOT_WINDOW_MAX_POINTS = 2000;
-/** P90 F：app_state 聚合回执上限——超限逐段瘦身并如实标注，不静默截半 JSON。
- *  P94-G3：留出余量低于 RECEIPT_DATA_LIMIT(8KB)，否则聚合结果永远"刚好卡在裁剪线上"，
- *  每次都要再多一轮 read_artifact 才看得全。 */
 /**
  * `app_state` 每段只给前 N 项（它是"概览"，明细归 `app_read`）。
- * P99a-C1 起不再需要"整包 6KiB 折半瘦身"那套：分段上限就是唯一的瘦身规则，
- * 折半循环会把"我给了多少"这件事再次变成隐式事实（A7 的反面）。
+ * P90 F 的聚合上限就是这个"每段几项"：P99a-C1 起不再需要"整包 6KiB 折半瘦身"那套，
+ * 分段上限就是唯一的瘦身规则，折半循环会把"我给了多少"再次变成隐式事实（A7 的反面）。
  */
 export const OVERVIEW_LIMIT = 8;
 /** P94-G4：清单类回执的统一封顶（超出必带 count/truncated，让模型知道"只看到一部分"）。 */
 export const LIST_CAP = { channels: 40, plugins: 60 } as const;
-
-/** save_plugin 派生能力：按产物类型最小授权，默认不含 serial.send（§9.3）。 */
-export const KIND_CAPS: Record<ArtifactKind, PluginCap[]> = {
-  theme: ["theme.tokens"],
-  widget: ["ui.widget", "telemetry.read"],
-  panel: ["ui.panel", "telemetry.read"],
-  motionPreset: ["motion.preset"],
-  workspacePreset: ["workspace.preset"],
-  workflow: ["workflow.compose"],
-  reportView: ["report.view"],
-  // 逻辑模块：只给"能跑"，不给"能加工具"（agent.tool 归 B2 的注册门）
-  module: ["logic.run"],
-};
 
 /** save_plugin 默认 id：名称稳定哈希 + user.agent 前缀（P92 D2，中文名不再退化成单字母）。 */
 function slugPluginId(name: string): string {
@@ -236,7 +232,7 @@ export const localToolEntries: AgentToolEntry[] = [
     },
     assess: (a, ctx) => {
       const kind = String(a.kind ?? "");
-      if (!(APP_ACTION_KINDS as readonly string[]).includes(kind)) return { refuse: notExecuted(ctx.callId, "unknown_action", { kind }) };
+      if (!isKnownActionKind(kind)) return { refuse: notExecuted(ctx.callId, "unknown_action", { kind }) };
       const meta = actionMeta(kind);
       if (!meta) return { refuse: notExecuted(ctx.callId, "unknown_action", { kind }) };
       return { meta };
@@ -247,11 +243,11 @@ export const localToolEntries: AgentToolEntry[] = [
     execute: async (a, ctx) => {
       const kind = String(a.kind ?? "");
       const actionArgs = (a.args && typeof a.args === "object" && !Array.isArray(a.args) ? a.args : {}) as Record<string, unknown>;
-      const r = await runAppAction(kind, actionArgs, { highPriv: true });
-      if (!r.ok) return { callId: ctx.callId, ok: false, status: "error", code: "action_failed", data: { err: r.err ?? "动作执行失败" } };
-      const meta = actionMeta(kind);
-      const readOnly = meta?.effect === "read" || meta?.effect === "analysis";
-      return { callId: ctx.callId, ok: true, status: readOnly ? "read" : "applied", data: r.data ?? null };
+      // P99a-F1：执行核与 MCP 面共用（appActionSurface）。Agent 侧的高权限**判定**在这里恒成立——
+      // 不是因为这里是"高权限"，而是因为档位/授权域与批准卡已经在这条管线前面拦过了。
+      const r = await runAppActionSurface(kind, actionArgs, { highPriv: true });
+      if (!r.ok) return { callId: ctx.callId, ok: false, status: "error", code: r.code, data: { err: r.msg } };
+      return { callId: ctx.callId, ok: true, status: r.readOnly ? "read" : "applied", data: r.data };
     },
   }),
   defineTool({
@@ -304,7 +300,12 @@ export const localToolEntries: AgentToolEntry[] = [
     domain: null,
     provenance: HOST,
     description:
-      "Read one view from the host catalog. Args: { path: string, id?: string, cursor?: number, limit?: number }. Paths come ONLY from app_catalog (runtime | protocols | protocols/<id> for the FULL field table incl. offset/type/endian/scale/unit/bits/discrete maps | commands | commands/<id> | controls | controls/<id> | frames.recent | frames.stats | frames.latest | session | channels | plugins). List views paginate: the receipt carries total/returned/nextCursor/truncated — follow nextCursor rather than guessing a bigger limit. Unknown paths are refused with suggestions; there is no reflection into stores the catalog does not expose. Read-only.",
+      // 路径清单**从目录派生**（C1b）：这里原先手抄了 13 条路径，本批接进七面之后
+      // 模型看这句仍只会去点老几样——一份写死的清单就是第二真相（§8-36①）。
+      `Read one view from the host catalog. Args: { path: string, id?: string, cursor?: number, limit?: number }. ` +
+      `Paths come ONLY from app_catalog (${CATALOG_VIEWS.map((v) => v.path).join(" | ")}). ` +
+      "List views paginate: the receipt carries total/returned/nextCursor/truncated — follow nextCursor rather than guessing a bigger limit. " +
+      "Unknown paths are refused with suggestions; there is no reflection into stores the catalog does not expose. Read-only.",
     parameters: {
       type: "object",
       properties: {
@@ -408,9 +409,11 @@ export const localToolEntries: AgentToolEntry[] = [
     domain: "plugins",
     provenance: HOST,
     description:
-      `Save an artifact as a reusable local plugin package (uartix-plugin). Args: { kind: one of ${ARTIFACT_KINDS.join("|")}, name: string, payload: object (artifact content per kind; widget/panel payload = {format:'html',html} | {format:'declarative',blocks}; module payload = {format:'js',code}); id?: string (dotted lowercase, default user.agent.*), desc?: string, enable?: boolean (auto-enable pure-UI plugin), update?: string (existing plugin id to revise), version?: string }. ` +
+      `Save an artifact as a reusable local plugin package (uartix-plugin). Args: { kind: one of ${ARTIFACT_KINDS.join("|")}, name: string, payload: object (artifact content per kind; widget/panel payload = {format:'html',html} | {format:'declarative',blocks}; workspacePreset payload = {layout:<dockview JSON>, note?}; workflow payload = {goal:string, steps:[{tool,args?,note?}]} where every tool must be one you can actually call; module payload = {format:'js',code}); id?: string (dotted lowercase, default user.agent.*), desc?: string, enable?: boolean (auto-enable pure-UI plugin), update?: string (existing plugin id to revise), version?: string }. ` +
+      "A workflow artifact is a reusable task template, NOT a macro runner: the user loads it into the Agent composer and it still goes through the current scope and approval rules. " +
       "Iterating on your own work: pass update (or just the same id) — it bumps the version and pushes the previous package onto the rollback stack instead of creating a near-duplicate plugin. " +
-      "Only plugins you (the agent) created can be revised silently; user/imported plugins return update_needs_user and are never overwritten. Plugins carry no device-send capability by default.",
+      "Only plugins you (the agent) created can be revised silently; user/imported plugins return update_needs_user and are never overwritten. " +
+      PLUGIN_CAP_BOUNDARY,
     parameters: {
       type: "object",
       properties: {
@@ -432,7 +435,7 @@ export const localToolEntries: AgentToolEntry[] = [
       const verb = String(a.update ?? "") ? "更新插件" : `保存${k}插件`;
       return `${verb}「${nm}」${a.enable === true ? "并启用" : ""}`;
     },
-    execute: (a, ctx) => {
+    execute: async (a, ctx) => {
       const callId = ctx.callId;
       const kind = String(a.kind ?? "") as ArtifactKind;
       if (!(ARTIFACT_KINDS as readonly string[]).includes(kind)) {
@@ -443,6 +446,35 @@ export const localToolEntries: AgentToolEntry[] = [
       const payload = a.payload;
       if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
         return notExecuted(callId, "invalid_payload", { hint: "payload 必须是对象（widget/panel 用 {format:'html'|'declarative',…}）" });
+      }
+      /** 能力与 contributions 键都取自产物元表：这里不再有第四份手抄（P99a-D1a） */
+      const meta = artifactKindMeta(kind);
+      /**
+       * 任务模板（P99a-D1b）的**存在性**检查：结构在元表校验器里，"这几步到底有没有这支工具"只能在这里查
+       * ——`artifact.ts` 是叶子模块，反过来 import 注册表就把插件层焊进 agent 图了（§8-33）。
+       * 不查就会产出一个"看着能跑、每步都撞 unknown_tool"的模板，而那正是这批要清掉的假承诺。
+       */
+      if (kind === "workflow") {
+        const t = payload as { steps?: { tool: string }[] };
+        const names = Array.isArray(t.steps) ? t.steps.map((s) => String(s?.tool ?? "")) : [];
+        if (names.length) {
+          const [{ hostEntryNames }, { allPluginToolDefs }, { pluginToolName }] = await Promise.all([
+            import("./hostEntries"),
+            import("../plugins/pluginToolDefs"),
+            import("./toolRegistry"),
+          ]);
+          const known = new Set([
+            ...hostEntryNames(),
+            ...allPluginToolDefs().map((d) => pluginToolName(d.pkgId, d.baseName)),
+          ]);
+          const unknown = [...new Set(names)].filter((n) => !known.has(n));
+          if (unknown.length) {
+            return notExecuted(callId, "unknown_tool_ref", {
+              unknown,
+              hint: "任务模板只能引用本机已有的工具。你自己工具列表里的名字就是合法名字：请改用其中存在的，或把这几步从模板里去掉（插件注册的工具有 plg_ 前缀）",
+            });
+          }
+        }
       }
       // id：用户指定或按名称 slug 化。给的 id 若已存在 ⇒ 走下面的版本链更新；
       // 只有"名字撞车但没显式指向它"才加序号后缀，绝不静默覆盖别人的插件
@@ -460,9 +492,9 @@ export const localToolEntries: AgentToolEntry[] = [
         name,
         ...(desc ? { desc } : {}),
         hostApi: "^1.0",
-        // 能力恒由 kind 派生且 KIND_CAPS 永不含 serial.send ⇒ 更新路径同样无法提权
-        capabilities: [...KIND_CAPS[kind]],
-        contributions: { [KIND_CONTRIB_KEY[kind]]: [{ id: "main", entry: "main.json", name }] },
+        // 能力恒由元表派生且 `caps` 永不含 serial.send ⇒ 更新路径同样无法提权
+        capabilities: [...meta.caps],
+        contributions: { [meta.contribKey]: [{ id: "main", entry: "main.json", name }] },
         artifacts: { "main.json": { ...payload, kind } },
         provenance: { createdBy: "agent", reviewed: false },
       });
@@ -492,7 +524,7 @@ export const localToolEntries: AgentToolEntry[] = [
         const ap = approveUpdate(targetId);
         if (!ap.ok) return notExecuted(callId, "update_failed", { id: targetId, msg: ap.msg });
         const after = getPlugin(targetId);
-        const pureUi = isPureUiCaps(KIND_CAPS[kind]);
+        const pureUi = isPureUiCaps(meta.caps);
         const enabled = a.enable === true && pureUi ? setEnabled(targetId, true).ok : after?.state === "enabled";
         return {
           callId,
@@ -517,7 +549,7 @@ export const localToolEntries: AgentToolEntry[] = [
         return notExecuted(callId, "install_failed", { msg: installed.msg });
       }
       // enable=true 且纯 UI 能力 → 自动启用；含 serial.send / agent.tool 的包保持停用（走 enable_plugin 批准）
-      const pureUi = isPureUiCaps(KIND_CAPS[kind]);
+      const pureUi = isPureUiCaps(meta.caps);
       let enabled = false;
       if (a.enable === true && pureUi) {
         enabled = setEnabled(installed.id, true).ok;
@@ -528,7 +560,7 @@ export const localToolEntries: AgentToolEntry[] = [
         status: "applied",
         data: {
           pluginId: installed.id, version: "0.1.0", state: enabled ? "enabled" : "installed_disabled",
-          caps: KIND_CAPS[kind], enabled, warnings: stagedResult.warnings,
+          caps: meta.caps, enabled, warnings: stagedResult.warnings,
           // 让模型知道下次该带 update 而不是再存一份副本
           hint: `要改这个插件请带 update="${installed.id}"，会升版本而不是另建一个`,
         },

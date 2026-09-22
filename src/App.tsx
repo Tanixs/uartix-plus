@@ -39,6 +39,7 @@ import {
   getLayout,
   saveLayout,
 } from "./features/settings/layoutsStore";
+import { applyLayoutJson } from "./features/settings/applyLayout";
 import {
   getSnapshot as getSettingsSnapshot,
   patch,
@@ -516,6 +517,16 @@ export default function App() {
       } else if (msg.kind === "applyPreset") {
         patch({ workspace: msg.preset as WorkspacePreset });
         resetLayout(msg.preset as WorkspacePreset);
+      } else if (msg.kind === "applyLayout") {
+        // P99a-D1b：插件库「应用此布局」。布局 JSON 由包带来，执行权仍只在这里（dockview api 不出 App）
+        const api = apiRef.current;
+        localStorage.removeItem(LAYOUT_KEY);
+        msg.done(applyLayoutJson(api, msg.layout, {
+          before: () => {
+            if (api) backupAutoLayout(api.toJSON());
+          },
+          after: afterLayoutChange,
+        }));
       }
     });
     const unSettings = onOpenSettings((tab) => {
@@ -724,21 +735,25 @@ export default function App() {
     }
   };
 
+  /** 布局换了之后的统一收尾：面板标题按语言重挂 + 可见性同步（三处应用点共用，别再各写一遍） */
+  const afterLayoutChange = () => {
+    retitlePanelsRef.current?.();
+    syncPanelsRef.current?.();
+  };
+
   /** 应用自定义布局槽位 */
   const applyLayoutSlot = (slotId: string) => {
-    const api = apiRef.current;
-    if (!api) return false;
     const slot = getLayout(slotId);
     if (!slot) return false;
-    try {
-      localStorage.removeItem(LAYOUT_KEY);
-      api.clear();
-      api.fromJSON(slot.layout as SerializedDockview);
-      syncPanelsRef.current?.();
-      return true;
-    } catch {
-      return false;
-    }
+    // 命名槽与插件布局都是"整屏覆盖"，动手前先把当前布局快照进自动备份槽：点错了有地方回
+    const api = apiRef.current;
+    localStorage.removeItem(LAYOUT_KEY);
+    return applyLayoutJson(api, slot.layout, {
+      before: () => {
+        if (api) backupAutoLayout(api.toJSON());
+      },
+      after: afterLayoutChange,
+    }) === null;
   };
 
   /** 另存当前布局为命名槽位 */

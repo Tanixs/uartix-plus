@@ -18,12 +18,17 @@ import {
   MAX_PACKAGE_FILES,
   containsSecretLike,
   validateManifest,
+  describeDiff,
+  manifestDiff,
   type PluginCap,
   type PluginManifest,
 } from "./pluginManifest";
 import { renderDeclarativeHtml } from "./declarativePanel";
+import { kindOfContribKey } from "./artifact";
 import { moduleArtifactsOf } from "./moduleHost";
 import { closeModule, moduleDiagnostics, moduleIsReady, openModule, waitModuleReady } from "./moduleBus";
+// P99a-F2：工具面变化的账本（`pluginToolDefs` 只依赖 pluginLimits，是叶子，不构成环）
+import { commitToolSnapshot, describeToolChange } from "./pluginToolDefs";
 
 /* ---------------- 样式层回调（P92-F：禁止在此静态 import extRuntime） ----------------
  * 曾经的写法是 `import { applyStyleExts } from "../ai/extRuntime"` + 模块加载即
@@ -243,7 +248,13 @@ function artifactHtml(payload: Record<string, unknown>): string {
 /** 启用：为每个贡献条目创建影子扩展；返回错误消息（可启用为 null）。 */
 function buildProjections(record: PluginRecord): string | null {
   const { pkg } = record;
+  /** 没人认领的 contributions 键（＝产物形态已下架）：不静默跳过，库里与控制台都要看得见（§13.1 零兼容） */
+  const orphan: string[] = [];
   for (const [key, list] of Object.entries(pkg.contributions)) {
+    if (!kindOfContribKey(key)) {
+      if (list?.length && !orphan.includes(key)) orphan.push(key);
+      continue;
+    }
     for (const it of list ?? []) {
       const artifact = pkg.artifacts[it.entry];
       if (!artifact) continue;
@@ -255,7 +266,6 @@ function buildProjections(record: PluginRecord): string | null {
           name: it.name ?? pkg.name,
           desc: `插件 ${pkg.name} v${pkg.version}`,
           version: pkg.version,
-          perms: ["css"],
           enabled: true,
           createdAt: Date.now(),
           pluginRef: pkg.id,
@@ -269,7 +279,6 @@ function buildProjections(record: PluginRecord): string | null {
           name: it.name ?? pkg.name,
           desc: `插件 ${pkg.name} v${pkg.version}`,
           version: pkg.version,
-          perms: ["read", "send"],
           enabled: true,
           createdAt: Date.now(),
           pluginRef: pkg.id,
@@ -283,17 +292,27 @@ function buildProjections(record: PluginRecord): string | null {
           name: it.name ?? pkg.name,
           desc: `插件 ${pkg.name} v${pkg.version}`,
           version: pkg.version,
-          perms: ["read", "send"],
           enabled: true,
           createdAt: Date.now(),
           pluginRef: pkg.id,
           html: artifactHtml(artifact),
         });
       }
-      // 其余产物类型（motionPreset/workspacePreset/workflow/reportView）首版仅库内保存/导出
+      // workspacePresets / workflows 的"投影"是插件库里的一次用户动作（应用布局 / 载入 AI 助手），
+      // 不在启用时自动发生：布局会改用户的工作台，模板会指向输入框，两者都不该静默生效
     }
   }
+  if (orphan.length) {
+    console.warn(`[pluginStore] 包 ${pkg.id} 带着已下架的产物形态（${orphan.join("、")}）：它不会出现在任何运行时里，请在 AI 助手里重新生成`);
+  }
   return null;
+}
+
+/** 这个包里"已下架但还躺在库中"的产物键（插件库据此显式说明，而不是让它看着像一个正常插件）。 */
+export function deprecatedContribKeys(pkg: PluginManifest): string[] {
+  return Object.entries(pkg.contributions)
+    .filter(([key, list]) => !!list?.length && !kindOfContribKey(key))
+    .map(([key]) => key);
 }
 
 /**
@@ -385,7 +404,12 @@ export async function armModulePackage(id: string): Promise<{ ok: boolean; msg: 
     closeModule(id);
     return failed(diag.probeFailed.join("/") || `状态 ${outcome.status}`);
   }
-  return { ok: true, msg: "逻辑模块已通过封网自证并在线", modules: 1 };
+  /**
+   * P99a-F2：这一刻才是"这一版的工具面报齐了"的时刻，所以差异也只能在这里算
+   * （批准卡上说不清"多了哪几支工具"是结构性的，不是偷懒——E2 已把这句话写进面板）。
+   */
+  const note = describeToolChange(commitToolSnapshot(id));
+  return { ok: true, msg: `逻辑模块已通过封网自证并在线${note ? `；${note}` : ""}`, modules: 1 };
 }
 
 /** 收掉一个包的逻辑模块（停用/卸载/隔离/换版本都走它）：worker 终止、它的工具当场注销。 */
@@ -464,16 +488,17 @@ export function proposeUpdate(id: string, manifest: unknown): { ok: boolean; msg
   if (!v.ok || !v.manifest) return { ok: false, msg: v.errors.join("；") };
   if (v.manifest.id !== id) return { ok: false, msg: `候选包 ID（${v.manifest.id}）与现有插件（${id}）不一致` };
   if (v.manifest.version === record.pkg.version) return { ok: false, msg: "候选版本号与当前版本相同" };
-  // 新增能力需要用户在批准时看到
-  const addedCaps = v.manifest.capabilities.filter((c) => !record.pkg.capabilities.includes(c));
+  // 差异**现算不落盘**（E2）：候选包与现役包都在 record 里，落一份 diff 就是第二真相。
+  const diff = manifestDiff(record.pkg, v.manifest);
   record.candidate = v.manifest;
   record.state = "update_pending";
   record.updatedAt = Date.now();
   upsert(record);
   emit();
+  const d = describeDiff(diff);
   return {
     ok: true,
-    msg: addedCaps.length ? `候选已就绪；新增能力：${addedCaps.join("、")}` : "候选已就绪",
+    msg: d ? `候选已就绪；${d}` : "候选已就绪（与当前版本无能力/产物差异）",
     warnings: v.warnings,
   };
 }
@@ -487,7 +512,8 @@ export function approveUpdate(id: string): { ok: boolean; msg: string } {
     ...record.versions.slice(-(MAX_VERSIONS - 1)),
     { version: record.pkg.version, createdAt: record.updatedAt, pkg: record.pkg },
   ];
-  const nextCaps = record.candidate.capabilities;
+  // 切换前先算差异：这句要出现在回执里（E2 的"说真话"，不是新增审批——批准本来就是那一次点击）
+  const diffText = describeDiff(manifestDiff(record.pkg, record.candidate));
   record.pkg = record.candidate;
   record.candidate = undefined;
   record.config = { ...defaultConfig(record.pkg), ...record.config };
@@ -513,8 +539,7 @@ export function approveUpdate(id: string): { ok: boolean; msg: string } {
   }
   upsert(record);
   emit();
-  void nextCaps;
-  return { ok: true, msg: `已更新到 v${record.pkg.version}` };
+  return { ok: true, msg: `已更新到 v${record.pkg.version}${diffText ? `（${diffText}）` : ""}` };
 }
 
 function removeProjectionsCheck(pkgId: string): boolean {

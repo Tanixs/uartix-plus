@@ -23,7 +23,7 @@ beforeEach(() => storage.clear());
 describe("scopeTiers 结构", () => {
   it("第一层只有三档；预设降级到高级区（用户数的「8 个发送方式」就是这两层混在一列）", () => {
     expect(PRIMARY_TIERS.map((t) => t.id)).toEqual(["read", "create", "full"]);
-    expect(PRIMARY_TIERS.map((t) => t.label)).toEqual(["仅预览", "放手改界面", "全面放手"]);
+    expect(PRIMARY_TIERS.map((t) => t.label)).toEqual(["仅预览", "界面创造", "全权执行"]);
     expect(DOMAIN_PRESETS.map((t) => t.id)).toEqual(["workspace", "device", "host"]);
     // custom 不再是 TIERS 里的一条预设，它是"勾选不等于任何预设"的落点
     expect(TIERS.some((t) => t.id === CUSTOM_TIER.id)).toBe(false);
@@ -53,7 +53,7 @@ describe("scopeTiers 结构", () => {
     for (const state of before) expect(reachable, `收档前的状态 ${state} 现在不可达了`).toContain(state);
   });
 
-  it("预设与最高档都必须是「放手改界面」的严格超集（防「扩展档反而更低」复发）", () => {
+  it("预设与最高档都必须是「界面创造」的严格超集（防「扩展档反而更低」复发）", () => {
     const base = TIERS.find((t) => t.id === "create")!;
     for (const ext of [...DOMAIN_PRESETS, TIERS.find((t) => t.id === "full")!]) {
       expect(ext.domains.length).toBeGreaterThan(base.domains.length);
@@ -110,13 +110,13 @@ describe("resolveTier / tierIdOf / tierBadge", () => {
     expect(tierIdOf("custom", ["files"])).toBe("custom");
     expect(tierIdOf("custom", ["config", "plugins"])).toBe("custom"); // 域集同 create 但 scope=custom → 仍是手工
     expect(tierOf("custom", ["files"]).id).toBe("custom");
-    expect(tierOf("custom", [...DOMAINS]).label).toBe("全面放手");
+    expect(tierOf("custom", [...DOMAINS]).label).toBe("全权执行");
   });
 
   it("tierBadge 把授权量说在明面上", () => {
     expect(tierBadge("preview", [])).toBe("仅预览");
-    expect(tierBadge("create", [])).toBe("放手改界面");
-    expect(tierBadge("custom", [...DOMAINS])).toBe("全面放手");
+    expect(tierBadge("create", [])).toBe("界面创造");
+    expect(tierBadge("custom", [...DOMAINS])).toBe("全权执行");
     expect(tierBadge("custom", ["config", "plugins", "files"])).toBe("工作区写入");
     expect(tierBadge("custom", ["files"])).toBe("自定义 · 1 项授权");
     expect(tierBadge("custom", [])).toBe("自定义 · 2 项授权"); // 空集按兜底 2 项显示，不说"0 项"
@@ -124,7 +124,7 @@ describe("resolveTier / tierIdOf / tierBadge", () => {
 });
 
 describe("restoreTier（Q3 折中：记住选择，但高危档不自动恢复）", () => {
-  it("没存过 → 默认「放手改界面」，且不算降级（不该弹提示）", () => {
+  it("没存过 → 默认「界面创造」，且不算降级（不该弹提示）", () => {
     expect(restoreTier()).toEqual({ scope: "create", allowed: ["config", "plugins"], downgraded: false });
   });
 
@@ -136,12 +136,12 @@ describe("restoreTier（Q3 折中：记住选择，但高危档不自动恢复�
     expect(restoreTier().downgraded).toBe(false);
   });
 
-  it("上次是全面放手或手工勾选 → 回落 create 并如实报 downgraded，让 UI 明说而不是静默改", () => {
+  it("上次是全权执行或手工勾选 → 回落 create 并如实报 downgraded，让 UI 明说而不是静默改", () => {
     rememberTier("custom", [...DOMAINS] as Domain[]);
     const r = restoreTier();
     expect(r.scope).toBe("create");
     expect(r.downgraded).toBe(true);
-    // 回落后的档位必须是"低危"的：全面放手绝不跨重启回来
+    // 回落后的档位必须是"低危"的：全权执行绝不跨重启回来
     expect(hasDomain(r.scope, r.allowed, "shell")).toBe(false);
     expect(hasDomain(r.scope, r.allowed, "write")).toBe(false);
   });

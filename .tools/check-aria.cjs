@@ -12,6 +12,8 @@ const files = [
   "src/features/xray/XRayPanel.tsx",
   "src/features/settings/SettingsModal.tsx",
   "src/features/serial/SerialToolbar.tsx",
+  "src/features/market/MarketDialog.tsx",
+  "src/features/market/MarketDetail.tsx",
 ];
 function findButtons(src) {
   const out = [];

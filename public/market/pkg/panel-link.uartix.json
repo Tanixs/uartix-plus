@@ -1,0 +1,33 @@
+{
+  "format": "uartix-plugin",
+  "schemaVersion": 2,
+  "id": "uartix.panel.link",
+  "version": "1.0.0",
+  "name": "链路体检",
+  "desc": "",
+  "hostApi": "^1.0",
+  "capabilities": [
+    "ui.panel",
+    "telemetry.read"
+  ],
+  "contributions": {
+    "panels": [
+      {
+        "id": "link",
+        "entry": "link.json",
+        "name": "链路体检"
+      }
+    ]
+  },
+  "artifacts": {
+    "link.json": {
+      "kind": "panel",
+      "format": "html",
+      "html": "<style>\n  .link { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; font-size: 12px; }\n  .link b { font-size: 15px; }\n  .link span { opacity: .65; }\n</style>\n<div class=\"link\">\n  <span>状态</span><b id=\"st\">--</b>\n  <span>端口</span><b id=\"pt\">--</b>\n  <span>可读字段</span><b id=\"n\">--</b>\n</div>\n<script>\n  // 面板与小部件共用同一套注入桥：读宿主推来的快照，缺什么就显示 --\n  uartix.onSnap(function (s) {\n    var f = (s && s.fields) || {};\n    document.getElementById(\"st\").textContent = s && s.status ? s.status : \"未连接\";\n    document.getElementById(\"pt\").textContent = (s && s.port) || \"—\";\n    document.getElementById(\"n\").textContent = String(Object.keys(f).length);\n  });\n</script>\n"
+    }
+  },
+  "provenance": {
+    "createdBy": "user",
+    "reviewed": false
+  }
+}

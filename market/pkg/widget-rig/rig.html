@@ -1,0 +1,20 @@
+<style>
+  .rig { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; text-align: center; font-variant-numeric: tabular-nums; }
+  .rig i { font-style: normal; opacity: .6; font-size: 11px; }
+  .rig b { display: block; font-size: 22px; font-weight: 600; }
+</style>
+<div class="rig">
+  <span><i>yaw</i><b id="yaw">--</b></span>
+  <span><i>pitch</i><b id="pitch">--</b></span>
+  <span><i>roll</i><b id="roll">--</b></span>
+</div>
+<script>
+  // 读宿主推来的快照：变量没有就是 --，不编数
+  uartix.onSnap(function (s) {
+    var f = (s && s.fields) || {};
+    ["yaw", "pitch", "roll"].forEach(function (k) {
+      var el = document.getElementById(k);
+      if (el) el.textContent = typeof f[k] === "number" ? f[k].toFixed(1) : "--";
+    });
+  });
+</script>
