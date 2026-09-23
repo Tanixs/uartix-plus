@@ -30,6 +30,8 @@ type RawStep = {
   title: { zh: string; en: string };
   body: { zh: string; en: string };
   selector?: string;
+  /** 环扩到目标那组面板的停靠框外框（面板类步骤用；见 `tourStore.TourStep.frame`） */
+  frame?: boolean;
   do?: () => void | Promise<void>;
   settleMs?: number;
 };
@@ -72,6 +74,7 @@ const CONTENT: RawStep[] = [
       en: "The core interaction: drag over byte cells, right-click → define field. Zero-code private protocols. Green = data, orange = header, pink = checksum.",
     },
     selector: '[data-panel="framecanvas"]',
+    frame: true,
     do: openPanel("framecanvas"),
     settleMs: 800,
   },
@@ -83,6 +86,7 @@ const CONTENT: RawStep[] = [
       en: "Toggle the eye icon on a field to plot it live. Drag to pan, double-click to follow, cursors to measure. Spectrum panel does FFT on any channel.",
     },
     selector: '[data-panel="plot2d"]',
+    frame: true,
     do: openPanel("plot2d"),
     settleMs: 800,
   },
@@ -94,6 +98,7 @@ const CONTENT: RawStep[] = [
       en: "Sliders/buttons/switches reference parsed variables and send formatted commands — the downstream half of the closed loop.",
     },
     selector: '[data-panel="controls"]',
+    frame: true,
     do: openPanel("controls"),
     settleMs: 800,
   },
@@ -119,6 +124,18 @@ const CONTENT: RawStep[] = [
     },
     selector: '[data-tour="ai"]',
   },
+  {
+    // P99b-N6：这一条指的是标题栏那颗，不是 AI 那颗——"别人的东西进我的机器"与"AI 造的东西"是两条信任链
+    id: "market",
+    title: { zh: "装东西的地方", en: "Where packages come from" },
+    body: {
+      zh:
+        "标题栏这颗开「插件管理」，里面那颗「插件市场」是货架：只在你打开那一页时才联网，平时一次外发都没有。装进来的包一律是停用态，还要你去启用才会生效；覆盖本机已有版本的那种会停在右下角那张确认卡上等你点「装入」。想换成自己的货架，点市场页顶上那颗齿轮——索引地址与镜像前缀两行旁边会当场告诉你填的这条会不会被用上。",
+      en:
+        "This title-bar button opens 插件管理; its 插件市场 tab is the shelf, and it only goes online when you open that page. Installed packages land disabled — you enable them; anything overwriting a local version stops on the confirm card in the corner. The gear at the top of the market page holds the index URL and mirror prefix, and it says right there whether what you typed will actually be used.",
+    },
+    selector: '[data-tour="plugins"]',
+  },
 ];
 
 const WELCOME: RawStep = {
@@ -134,8 +151,8 @@ const DONE: RawStep = {
   id: DONE_ID,
   title: { zh: "完成 · 去哪继续", en: "Done · Where to go next" },
   body: {
-    zh: "进阶玩法：自动编排器搭自动化、3D 轨迹看姿态、虚拟设备工坊无硬件仿真、录制定整场会话随时回放。帮助（? ）里可随时重看本引导，AI 与插件的细节在「AI 助手详解」「插件与创造」两页。",
-    en: "Next: orchestrator for automation, 3D trajectory, the virtual device workshop for hardware-free testing, and session recording/replay. Replay this tour from Help (?); the AI and plugin pages go deeper.",
+    zh: "进阶玩法：自动编排器搭自动化、3D 轨迹看姿态、虚拟设备工坊无硬件仿真、录制定整场会话随时回放；标题栏那颗还能开「插件市场」，看别人做好的主题与面板（打开那一页才联网）。帮助（? ）里可随时重看本引导，AI 与插件的细节在「AI 助手详解」「插件与创造」「插件市场」三页。",
+    en: "Next: orchestrator for automation, 3D trajectory, the virtual device workshop for hardware-free testing, session recording/replay — and the title-bar button opens the plugin market (it only goes online when that page is open). Replay this tour from Help (?); deeper dives live on the AI, plugins and market pages.",
   },
 };
 

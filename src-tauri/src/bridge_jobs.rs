@@ -341,6 +341,27 @@ mod tests {
         let out = r.report(&json!({"envelope":e,"kind":"started"}));
         assert_eq!(out["applied"], true); (a, out["envelope"].clone())
     }
+    #[test] fn job_plane_never_admits_plugin_installs() {
+        // P99c-C1c / Q7：`create_job` 是 MCP 工具清单里的名字（模型直接够得到），所以这个
+        // 任务面**永远不许**出现"取回外部代码"的类型。装包走 `cli.` 那条模型进不来的路。
+        // 谁要把 plugin.* 加进 prepare()，这条先红，然后去重读一遍 Q7。
+        // 注意 input 故意用**序列那副形状**：换成 `{entryId}` 的话，光是"suite 缺失"就会
+        // 回 validation_error，探针看着红不了——那等于没测（同 §8-39② 那条"正则也是探针"）。
+        let mut r = registry();
+        for task in ["plugin.stage", "plugin.install", "plugin.update", "market.fetch"] {
+            let mut a = args("no-plugin-tasks");
+            a["taskType"] = json!(task);
+            assert_eq!(r.create("mcp", &a, 0, wall_ms())["error"]["code"], "validation_error", "{task} 不该被准入");
+        }
+        assert_eq!(r.jobs.len(), 0, "有一条被收下了");
+        // 对照：同一副 input 换个合法类型就该被收下（证明上面那条不是因为夹具坏了才全红）
+        assert_eq!(r.create("mcp", &args("baseline-ok"), 0, wall_ms())["accepted"], true);
+        let types = r.capabilities()["jobs"]["taskTypes"].as_array().unwrap().clone();
+        for t in types {
+            let s = t.as_str().unwrap_or("");
+            assert!(!s.starts_with("plugin.") && !s.starts_with("market."), "能力清单里漏出了 {s}");
+        }
+    }
     #[test] fn admission_idempotency_and_policy() {
         let mut r = registry(); let a = r.create("mcp", &args("one"), 0, wall_ms());
         assert_eq!(a["accepted"], true);

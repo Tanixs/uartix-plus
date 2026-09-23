@@ -4,6 +4,7 @@ import {
   DockviewReact,
   DockviewReadyEvent,
   SerializedDockview,
+  type IDockviewPanel,
 } from "dockview-react";
 import { panelComponents, PANEL_TITLES, panelTitleOf } from "./panels/panels";
 import {
@@ -18,14 +19,15 @@ import { TitleBar } from "./shell/TitleBar";
 import { IconColumns } from "./shared/icons";
 import { confirmDialog } from "./shared/Dialog";
 import type { IfaceKind } from "./features/serial/serialStore";
-import type { WorkspacePreset } from "./features/settings/settingsStore";
+import { SETTINGS_TAB_PLUGINS, type WorkspacePreset } from "./features/settings/settingsStore";
 import { JsonDropImport } from "./features/settings/JsonDropImport";
 import { AiFloat } from "./features/ai/AiFloat";
 import { WidgetFloats } from "./features/ai/WidgetFloats";
 import { SentinelFloat } from "./features/sentinel/SentinelPanel";
 import * as sentinelStore from "./features/sentinel/sentinelStore";
 import { startWidgetHub } from "./features/ai/widgetHub";
-import { startExtRuntime } from "./features/ai/extRuntime";
+import { applyStyleExts, startExtRuntime } from "./features/ai/extRuntime";
+import { activeThemeFacts, subscribeStyleApply } from "./styles/themeFacts";
 import {
   getExt as getExtSnapshot,
   useExtensions,
@@ -34,6 +36,8 @@ import * as chatStore from "./features/ai/chatStore";
 import { onAiScene, onOpenSettings, onPop } from "./features/ai/aiBus";
 import { onRequestOpenExtPanel } from "./features/ai/extBus";
 import { subscribeAppBus } from "./features/ai/appBus";
+import { MarketDialog } from "./features/market/MarketDialog";
+import { InstallConfirm } from "./features/market/InstallConfirm";
 import {
   backupAutoLayout,
   getLayout,
@@ -389,12 +393,11 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const [helpOpen, setHelpOpen] = useState(false);
+  /** 插件市场只在这里渲染一份：插件库与标题栏两颗按钮都只发 `openMarket` 信号 */
+  const [marketOpen, setMarketOpen] = useState(false);
   const [analysisExport, setAnalysisExport] = useState<{ snapshot?: AnalysisSnapshot } | null>(null);
   useEffect(() => subscribeAnalysisExport((snapshot) => setAnalysisExport({ snapshot })), []);
   const [aiOpen, setAiOpen] = useState(false);
-  const [sysDark, setSysDark] = useState(
-    () => window.matchMedia("(prefers-color-scheme: dark)").matches,
-  );
   const [groupBoxes, setGroupBoxes] = useState<
     { id: string; left: number; top: number; width: number; height: number }[]
   >([]);
@@ -411,37 +414,25 @@ export default function App() {
   renderTick += 1;
 
   useEffect(() => {
-    // 跟随系统时监听系统配色变化；navy 归暗色系、ocean 归亮色系（dockview 基础主题）
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => {
-      const base =
-        theme === "system"
-          ? mq.matches
-            ? "dark"
-            : "light"
-          : theme === "navy" || theme === "dark" || theme === "glaze"
-            ? "dark"
-            : "light"; // light / ocean / matcha / amber / begonia 均归亮色系（dockview 基础主题）
-      document.documentElement.dataset.theme =
-        theme === "system" ? base : theme;
-    };
+    /**
+     * P99b-N5：主题落地只有 `extRuntime.applyStyleExts()` 一个出口（详设 R7）。
+     * 这里以前自己写 `documentElement.dataset.theme`，并且**自己判 `system` 解析成 light 还是 dark**——
+     * 同一段判断在 `SettingsModal` 与 `appActions.setTheme` 里还各有一份副本（三份里任何一份
+     * 改了内置归类，另外两份就悄悄错）。现在三个触发点都只是"东西变了，重算一遍"。
+     */
+    const apply = () => applyStyleExts();
     apply();
-    const onChange = () => {
-      setSysDark(mq.matches);
-      apply();
-    };
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => apply();
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [theme]);
 
-  const dockBase =
-    theme === "system"
-      ? sysDark
-        ? "dark"
-        : "light"
-      : theme === "navy" || theme === "dark" || theme === "glaze"
-        ? "dark"
-        : "light"; // light / ocean / matcha / amber / begonia 均归亮色系
+  /**
+   * dockview 基础类跟的是**当前在画那一枚**的明暗归属，不是 `settings.theme`——
+   * 同级之后插件主题也可能是在画的那枚（内置那一枚只是"停用插件后回到的那个"）。
+   */
+  const dockBase = useSyncExternalStore(subscribeStyleApply, () => activeThemeFacts().scheme);
 
   useEffect(() => {
     document.documentElement.style.zoom = `${settings.zoom}%`;
@@ -517,6 +508,8 @@ export default function App() {
       } else if (msg.kind === "applyPreset") {
         patch({ workspace: msg.preset as WorkspacePreset });
         resetLayout(msg.preset as WorkspacePreset);
+      } else if (msg.kind === "openMarket") {
+        setMarketOpen(true);
       } else if (msg.kind === "applyLayout") {
         // P99a-D1b：插件库「应用此布局」。布局 JSON 由包带来，执行权仍只在这里（dockview api 不出 App）
         const api = apiRef.current;
@@ -589,12 +582,15 @@ export default function App() {
       }
     };
     retitlePanelsRef.current = retitlePanels;
-    // 稳定主题作用域：面板根 DOM 挂 data-panel=<组件名>，主题/样式层不再依赖易变类名
-    const tagPanel = (p: { type?: string; window?: HTMLElement | null }) => {
-      if (p.window && p.type) p.window.setAttribute("data-panel", p.type);
+    // 稳定主题作用域：面板内容根挂 data-panel=<组件名>，主题/样式层不再依赖易变类名。
+    // 成员名要以 dockview 8 的声明为准：`panel.window` / `panel.type` 在 IDockviewPanel 上
+    // 根本不存在（旧写法靠一对 as unknown as 按住 tsc，于是这行属性从来没写过——
+    // 引导的面板步与编排器面板截图都静默死了）。
+    const tagPanel = (p: IDockviewPanel) => {
+      p.view.content.element.setAttribute("data-panel", p.view.contentComponent);
     };
     api.onDidAddPanel((e) => {
-      tagPanel(e as unknown as { type?: string; window?: HTMLElement | null });
+      tagPanel(e);
       retitlePanels();
       syncPanels();
     });
@@ -843,6 +839,11 @@ export default function App() {
       <TitleBar
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
+        onOpenLibrary={() => {
+          /* 标题栏那颗开的是设置页的插件管理栏——复用现成页，不再造第三个插件库窗口 */
+          setSettingsTab(SETTINGS_TAB_PLUGINS);
+          setSettingsOpen(true);
+        }}
         onOpenAi={() => setAiOpen((v) => !v)}
       />
       <header className="toolbar">
@@ -972,6 +973,7 @@ export default function App() {
         />
       )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      {marketOpen && <MarketDialog onClose={() => setMarketOpen(false)} />}
       {analysisExport && <AnalysisExportDialog snapshot={analysisExport.snapshot} onClose={() => setAnalysisExport(null)} />}
       {aiOpen && (
         <AiFloat
@@ -982,6 +984,9 @@ export default function App() {
           onClose={() => setAiOpen(false)}
         />
       )}
+      {/* 装包确认卡：全局只这一份。以前挂在插件库弹窗里，关掉弹窗就没人看得见它——
+          而命令行那句"请在应用里点装入"指的就是这里（N4 收的那笔账） */}
+      <InstallConfirm />
       <WidgetFloats />
       <SentinelFloat />
       <JsonDropImport />

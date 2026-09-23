@@ -12,6 +12,8 @@
  * 校验器、能力、contributions 键、中文名都挂在同一条目上：漏一项就编译不过，不存在"通过但没人看过"。
  */
 import { guardStyleText } from "../styles/styleSanitize";
+// P99b-N5：主题产物的键白名单与"相近真名"建议，住在零 import 的 `styles/themeCore`（详设 R5）
+import { APPEARANCE_TOKENS, checkThemeVars } from "../../styles/themeCore";
 // 只 import 类型：产物元表要说清"这类产物要什么能力"，而 PluginCap 的权威定义在 manifest 那边
 import type { PluginCap } from "./pluginManifest";
 
@@ -128,7 +130,13 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** 主题变量键：必须是 CSS 自定义属性（--xxx），值限长防注入巨型字符串。 */
+/**
+ * 主题产物校验。
+ *
+ * P99b-N5（详设 R5）：键必须落在白名单里，**并且报错时给相近的真名**。旧写法只查"以 `--` 开头"，
+ * 于是两份市场示例写着应用里根本不存在的 `--panel` / `--accent-contrast`——那份"秋海棠主题"
+ * 实际只落地 4 项，而没有任何一处说出来（详设 §1-4）。键名写错不是小事，是静默失效。
+ */
 function validateTheme(a: Record<string, unknown>, out: ValidationIssue) {
   const vars = a.vars;
   if (!isPlainObject(vars)) {
@@ -142,6 +150,16 @@ function validateTheme(a: Record<string, unknown>, out: ValidationIssue) {
   for (const [k, v] of Object.entries(vars)) {
     if (!k.startsWith("--")) out.errors.push(`主题变量键必须以 -- 开头：${k}`);
     if (typeof v !== "string" || v.length > 200) out.errors.push(`主题变量值必须是 ≤200 字符字符串：${k}`);
+  }
+  /**
+   * 白名单之外的键**拒收**。允许差量（只改几项是合法写法，详设 Q2 已裁），
+   * 但"差量"不等于"可以写错名字"：未登记的键既不报错也不生效，那正是要消灭的静默。
+   */
+  const g = checkThemeVars(vars as Record<string, string>, APPEARANCE_TOKENS);
+  out.errors.push(...g.errors);
+  /** 明暗归属是**可选**声明：不给就由 `--bg` 亮度算（详设 S4）；给了就必须是 dark/light */
+  if (a.scheme !== undefined && a.scheme !== "dark" && a.scheme !== "light") {
+    out.errors.push(`theme.scheme 只认 dark / light，实际「${String(a.scheme)}」`);
   }
   if (a.css !== undefined) {
     if (typeof a.css !== "string" || a.css.length > THEME_CSS_MAX_BYTES) {

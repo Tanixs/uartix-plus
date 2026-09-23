@@ -47,7 +47,11 @@ export function TourOverlay() {
     let raf = 0;
     let last: Rect | null = null;
     const tick = () => {
-      const el = document.querySelector(step.selector!);
+      const found = document.querySelector(step.selector!);
+      // 面板类步骤：环盖住整组停靠框（页签条 + 内容）。只框内容根的话，高亮看着在内容区里，
+      // 外框没反应。`.dv-groupview` 是 dockview 的公开样式面（theme.css 已在用 .dv-* 一族）；
+      // 它哪天改名，这里退回内容根——仍是高亮，只是不含页签条，不会框到别的东西上。
+      const el = step.frame ? (found?.closest(".dv-groupview") ?? found) : found;
       if (el) {
         const r = el.getBoundingClientRect();
         const zf = zoomFactor();
@@ -68,7 +72,7 @@ export function TourOverlay() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [s.active, s.idx, step?.selector, step?.settleMs]);
+  }, [s.active, s.idx, step?.selector, step?.frame, step?.settleMs]);
 
   // 键盘闭环：Enter/→ 下一步，Esc 退出（输入框聚焦时忽略）
   useEffect(() => {

@@ -141,6 +141,8 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
               screen: isDesktop ? null : { w: window.innerWidth, h: window.innerHeight },
               vars: th?.vars ?? null,
               theme: th?.theme ?? null,
+              // scheme 由宿主算好后下发：桥里不许再按主题名猜明暗（详设 S4）
+              scheme: th?.scheme ?? null,
             },
             "*",
           );

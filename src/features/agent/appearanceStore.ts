@@ -38,50 +38,14 @@ export function subscribeOverlayChange(cb: () => void): () => void {
 // 插件主题层变更也要广播给 iframe/小部件：合成器是唯一公共出口，把它的通知转发到本层回调上
 setRootVarsChangeCb(() => changeCbs.forEach((f) => f()));
 
-/** 可覆盖 token 白名单：色板（8 主题共有）+ 语义色 + 字号/圆角/动效（theme.css :root P55 token）。间距不开放（布局安全）。 */
-export const APPEARANCE_TOKENS = [
-  "--bg",
-  "--bg-panel",
-  "--bg-inset",
-  "--bg-titlebar",
-  "--border",
-  "--border-soft",
-  "--text",
-  "--text-dim",
-  "--accent",
-  "--on-accent",
-  "--accent-soft",
-  "--danger",
-  "--warn",
-  "--ok",
-  "--shadow",
-  "--scrollbar",
-  "--scrollbar-hover",
-  "--warn-fg",
-  "--k-send",
-  "--k-wait",
-  "--k-frame",
-  "--k-assert",
-  "--k-note",
-  "--k-logic",
-  "--k-group",
-  "--k-warn-line",
-  "--fs-xs",
-  "--fs-body",
-  "--fs-sm",
-  "--fs-md",
-  "--fs-lg",
-  "--radius-s",
-  "--radius-m",
-  "--radius-l",
-  "--radius-xl",
-  "--dur-snap",
-  "--dur-fast",
-  "--dur-base",
-  "--ease",
-] as const;
+/**
+ * P99b-N5：白名单本体搬到 `styles/themeCore`（零 import 叶子）。
+ * 为什么要搬：这批开始"哪些键算合法"同时管着三件事——AI 覆盖层、插件主题产物、样式表引用；
+ * 留在 features/agent 里，features/plugins/artifact.ts 校验一个主题包就得反向 import agent。
+ */
+export { APPEARANCE_TOKENS, type AppearanceToken } from "../../styles/themeCore";
+import { APPEARANCE_TOKENS } from "../../styles/themeCore";
 
-export type AppearanceToken = (typeof APPEARANCE_TOKENS)[number];
 const TOKEN_SET = new Set<string>(APPEARANCE_TOKENS);
 
 /** 单位类 token（字号/圆角/时长）值格式；--ease 另有曲线白名单 */

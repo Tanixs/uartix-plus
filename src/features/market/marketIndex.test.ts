@@ -6,8 +6,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  MARKET_PKG_MAX_BYTES, MARKET_SCHEMA_VERSION, categoryLabel, compat, compareInstall, compareVersions,
-  hostAllowed, parseEntry, parseMarketIndex, urlHost, type MarketIndex,
+  MARKET_ALLOW_HOSTS, MARKET_PKG_MAX_BYTES, MARKET_SCHEMA_VERSION, NPM_REGISTRY_HOST,
+  categoryLabel, compat, compareInstall, compareVersions, hostAllowed, npmTarballUrl, packageOrigin,
+  parseEntry, parseMarketIndex, urlHost, type MarketIndex,
 } from "./marketIndex";
 
 const HOSTS = ["raw.githubusercontent.com", "github.com", "localhost"];
@@ -208,5 +209,76 @@ describe("compareInstall：与本机库的对照只有一份映射", () => {
   it("徽章与装链共用它（同一输入不可能一个说 same 一个说 install）", () => {
     // 空串本机版本＝没装：走 absent，不当"同版本"处理
     expect(compareInstall(e, "")).toBe("absent");
+  });
+});
+
+/* ================= P99c-R2：索引契约 v2 与 npm 那一节 =================
+ * 抬版这件事本身有一条后果要先钉住：**v1 的索引现在读不了**，而且报的是"过旧"，
+ * 不是"这是一份空货架"——那份清单里没有可对照的字段定义，猜不得（契约文件顶上第二条）。
+ * npm 那一节的四条判定每条都对应一种"装了才知道"的坏法，所以四条都要有反例。
+ */
+describe("P99c-R2 · 索引契约 v2 与 npm 那一节", () => {
+  const env = (entries: unknown[], schemaVersion: number) => ({
+    schemaVersion, name: "货架", generatedAt: "2026-09-23T00:00:00Z", source: "s",
+    categories: { theme: "外观" }, entries,
+  });
+  const NPM_URL = npmTarballUrl("probe", "1.2.3");
+  const npmEntry = (over: Record<string, unknown> = {}) =>
+    goodEntry({ version: "1.2.3", packageUrl: NPM_URL, npm: { name: "probe", version: "1.2.3" }, ...over });
+
+  it("默认白名单里现在真的有官方 registry（加域这件事得在断言里看得见）", () => {
+    expect(MARKET_ALLOW_HOSTS).toContain(NPM_REGISTRY_HOST);
+    expect(MARKET_ALLOW_HOSTS).toEqual(["raw.githubusercontent.com", "github.com", "registry.npmjs.org"]);
+  });
+
+  it("v1 信封拒得出口：说的是「过旧」，不是「这条货架没东西」", () => {
+    const r = parseMarketIndex(env([npmEntry()], MARKET_SCHEMA_VERSION - 1), MARKET_ALLOW_HOSTS);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors.join("；")).toContain("过旧");
+  });
+
+  it("npm 条目按默认白名单解得通，且 npm 那一节活着出来", () => {
+    const r = parseEntry(npmEntry(), MARKET_ALLOW_HOSTS);
+    expect(r.error, r.error ?? "").toBeUndefined();
+    expect(r.entry?.npm).toEqual({ name: "probe", version: "1.2.3" });
+    expect(r.entry?.version).toBe("1.2.3");
+  });
+
+  it("镜像与第三方源一个都不放行：换成 npmmirror 就拒（用户裁「只官方源」）", () => {
+    const mirror = parseEntry(npmEntry({ packageUrl: "https://registry.npmmirror.com/probe/-/probe-1.2.3.tgz" }), [...MARKET_ALLOW_HOSTS, "registry.npmmirror.com"]);
+    expect(mirror.error).toContain("官方 registry");
+    // 子域也不行：allowHosts 那条按 `.` 边界放行子域，npm 这一节要的是**精确**匹配
+    const sub = parseEntry(npmEntry({ packageUrl: "https://evil.registry.npmjs.org/probe/-/probe-1.2.3.tgz" }), MARKET_ALLOW_HOSTS);
+    expect(sub.error, "子域混进来了：npm 那条判定用的是允许子域的白名单，得自己再卡一次精确匹配").toContain("官方 registry");
+    expect(hostAllowed("evil.registry.npmjs.org", MARKET_ALLOW_HOSTS), "前提不成立：allowHosts 其实不放子域，那这条反例没测到东西").toBe(true);
+  });
+
+  it("npm.version 与条目 version 不是一个数就拒；同源相对路径也不给 npm 条目", () => {
+    expect(parseEntry(npmEntry({ npm: { name: "probe", version: "9.9.9" } }), MARKET_ALLOW_HOSTS).error).toContain("npm.version");
+    expect(parseEntry(npmEntry({ packageUrl: "/market/pkg/probe.tgz" }), MARKET_ALLOW_HOSTS).error).toBeTruthy();
+  });
+
+  it("包名形状：大写、空格、缺 scope 尾巴都拒；带 scope 的正常通过", () => {
+    for (const bad of ["Probe", "a b", "-lead", "@scope", ""]) {
+      expect(parseEntry(npmEntry({ npm: { name: bad, version: "1.2.3" } }), MARKET_ALLOW_HOSTS).error, `「${bad}」本该被拒`).toContain("npm.name");
+    }
+    const scoped = npmTarballUrl("@s.probe/name-x", "1.2.3");
+    expect(parseEntry(npmEntry({ npm: { name: "@s.probe/name-x", version: "1.2.3" }, packageUrl: scoped }), MARKET_ALLOW_HOSTS).error).toBeUndefined();
+  });
+
+  it("npm 不是对象、少字段或版本为空，一律拒（不给半个 npm 条目上路的机会）", () => {
+    for (const bad of ["probe", [], { name: "probe" }, { name: "probe", version: "" }]) {
+      expect(parseEntry(npmEntry({ npm: bad }), MARKET_ALLOW_HOSTS).error).toContain("npm");
+    }
+  });
+
+  it("出处判定只有一条：packageOrigin 与 npmTarballUrl 的形状", () => {
+    expect(packageOrigin({})).toBe("shelf");
+    expect(packageOrigin({ npm: { name: "probe", version: "1.2.3" } })).toBe("npm");
+    expect(npmTarballUrl("probe", "1.2.3")).toBe("https://registry.npmjs.org/probe/-/probe-1.2.3.tgz");
+    // scope 留在路径里、文件名里去掉——这条形状是现场对着 registry 核过的，不是推的
+    expect(npmTarballUrl("@s.probe/name-x", "0.4.1")).toBe("https://registry.npmjs.org/@s.probe/name-x/-/name-x-0.4.1.tgz");
+    expect(urlHost(NPM_URL)).toBe(NPM_REGISTRY_HOST);
   });
 });

@@ -6,8 +6,9 @@
  *  1. 货架说了什么 ≠ 包里是什么 —— 包多出一项索引没写的能力 ⇒ **拒**（提权必须先在货架露出来）；
  *  2. 装完**不自动启用**（`setEnabled` 一次都不许调，P99a-B 的红线不因有市场而松动）；
  *  3. 审批成本按 §8-44 分：**装新包不弹卡**（停用态、可卸载、一次性），
- *     **覆盖已有版本要人点头** ⇒ 内核只 `proposeUpdate` 存候选，批准权在调用方；
- *  4. 上游任一环报错（哈希/JSON/校验器）就**绝不落到 stagePackage**。
+ *     **覆盖已有版本要人点头** ⇒ C1c 起 `stage` 阶段**一次都不叫 `proposeUpdate`**
+ *     （那会把状态翻成 `update_pending`，等于批准前先把在跑的版本摘下来），候选只握在调用方手里；
+ *  4. 上游任一环报错（哈希/JSON/校验器/id 对不上）就**绝不落到 stagePackage**。
  * 每条都是"摘掉必红"的候选，收口前逐条证伪。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,7 +41,10 @@ vi.mock("../plugins/pluginStore", () => ({
   },
   installStaged: (sid: string) => {
     calls.install.push(sid);
-    return { ok: true, msg: "已装入", id: "uartix.theme.a" };
+    // 与真实现同形：句柄不在就是"不存在或已过期"，别一律回成功（那样测不出 stale 那条路）
+    return sid === "st-1"
+      ? { ok: true, msg: "已装入", id: "uartix.theme.a" }
+      : { ok: false, msg: "暂存不存在或已过期" };
   },
   proposeUpdate: (id: string, m: unknown) => {
     calls.propose.push({ id, manifest: m });
@@ -56,7 +60,22 @@ vi.mock("../plugins/pluginStore", () => ({
   },
 }));
 
-const { planMarketInstall, installMarketPackage, describePlan } = await import("./marketInstall");
+const { planMarketInstall, stageMarketPlan, applyMarketStage, describePlan } = await import("./marketInstall");
+
+/**
+ * 把三段拼成"一次装包"，形状与 `marketPending` 里的编排一致：
+ * plan（取回+校验+定动作）→ stage（内存暂存/握住候选）→ apply（人点过之后才落地）。
+ * `approve=false` 就是"人还没点"，覆盖路径因此不许落地。
+ */
+async function runInstall(entry: MarketEntry, approve = false) {
+  const plan = await planMarketInstall(entry);
+  const staged = stageMarketPlan(plan);
+  if (!staged.ok || !staged.handle) return { ok: false, code: staged.code, msg: staged.msg };
+  if (staged.handle.action === "update" && !approve) {
+    return { ok: true, code: "ok" as const, msg: "候选握在调用方手里，本机没动" };
+  }
+  return applyMarketStage(staged.handle, describePlan(plan));
+}
 
 function mkPkg(over: Record<string, unknown> = {}) {
   return JSON.stringify({
@@ -133,7 +152,7 @@ describe("P99c-C1a · 计划：先看清会碰到什么", () => {
 describe("P99c-C1a · 包与货架说的是同一件事", () => {
   it("包里多出索引没声明的能力 ⇒ 拒，且 stagePackage 一次都不叫", async () => {
     calls.fetchResult = { ok: true, text: mkPkg({ capabilities: ["theme.tokens", "serial.send"] }) };
-    const r = await installMarketPackage(mkEntry());
+    const r = await runInstall(mkEntry());
     expect(r.ok).toBe(false);
     expect(r.code).toBe("undeclared_capability");
     expect(r.msg).toContain("serial.send");
@@ -153,7 +172,7 @@ describe("P99c-C1a · 包与货架说的是同一件事", () => {
 
 describe("P99c-C1a · 落地的形状", () => {
   it("新装：stage→installStaged 各一次、setEnabled 零次、回执说清是停用态", async () => {
-    const r = await installMarketPackage(mkEntry());
+    const r = await runInstall(mkEntry());
     expect(r.ok).toBe(true);
     expect(calls.stage.length).toBe(1);
     expect(calls.install).toEqual(["st-1"]);
@@ -161,23 +180,31 @@ describe("P99c-C1a · 落地的形状", () => {
     expect(r.msg).toContain("停用");
   });
 
-  it("更新：只存候选；批准权在调用方（传 approveUpdate 才批）", async () => {
+  it("覆盖：stage 阶段 proposeUpdate 与 installStaged 都零次（候选只握着），人点过才各一次", async () => {
     calls.existing.set("uartix.theme.a", { version: "1.0.0" });
-    const staged = await installMarketPackage(mkEntry());
-    expect(staged.ok).toBe(true);
-    expect(calls.propose.length).toBe(1);
-    expect(calls.approve.length, "默认不许自己覆盖已有版本").toBe(0);
-    await installMarketPackage(mkEntry(), { approveUpdate: true });
+    const held = await runInstall(mkEntry());
+    expect(held.ok).toBe(true);
+    expect(calls.propose.length, "提前 proposeUpdate 会把状态翻成 update_pending，等于批准前先把在跑的版本摘下来").toBe(0);
+    expect(calls.approve.length).toBe(0);
+    expect(calls.install.length, "覆盖绝不走 installStaged（同 ID 会被 stagePackage 拒）").toBe(0);
+    await runInstall(mkEntry(), true);
+    expect(calls.propose).toEqual([{ id: "uartix.theme.a", manifest: expect.objectContaining({ version: "1.1.0" }) }]);
     expect(calls.approve).toEqual(["uartix.theme.a"]);
+  });
+
+  it("apply 时暂存句柄已经没了 ⇒ stale_staging，不是「安装失败」那种含糊话", () => {
+    const out = applyMarketStage({ action: "install", entryId: "uartix.theme.a", stagingId: "gone" }, "");
+    expect(out.ok).toBe(false);
+    expect(out.code).toBe("stale_staging");
   });
 
   it("同版本与降级都不许动本机", async () => {
     calls.existing.set("uartix.theme.a", { version: "1.1.0" });
-    const same = await installMarketPackage(mkEntry());
+    const same = await runInstall(mkEntry());
     expect(same.ok).toBe(false);
     expect(same.code).toBe("already_same");
     calls.existing.set("uartix.theme.a", { version: "9.0.0" });
-    expect((await installMarketPackage(mkEntry())).code).toBe("downgrade");
+    expect((await runInstall(mkEntry())).code).toBe("downgrade");
     expect(calls.stage.length).toBe(0);
     expect(calls.propose.length).toBe(0);
   });
@@ -186,7 +213,7 @@ describe("P99c-C1a · 落地的形状", () => {
 describe("P99c-C1a · 上游一报错就绝不落地", () => {
   it("取回失败（含哈希不符）⇒ 原样带出原因，不 stage", async () => {
     calls.fetchResult = { ok: false, msg: "包哈希与索引声明不符（期望 aaaaaa…）" };
-    const r = await installMarketPackage(mkEntry());
+    const r = await runInstall(mkEntry());
     expect(r.ok).toBe(false);
     expect(r.code).toBe("fetch_failed");
     expect(r.msg).toContain("哈希");
@@ -195,13 +222,13 @@ describe("P99c-C1a · 上游一报错就绝不落地", () => {
 
   it("包体不是合法 JSON ⇒ code=json_bad，不 stage", async () => {
     calls.fetchResult = { ok: true, text: "{ 这不是 JSON" };
-    expect((await installMarketPackage(mkEntry())).code).toBe("json_bad");
+    expect((await runInstall(mkEntry())).code).toBe("json_bad");
     expect(calls.stage.length).toBe(0);
   });
 
   it("过不了生产校验器 ⇒ 带出错误原文，不 stage", async () => {
     calls.fetchResult = { ok: true, text: mkPkg({ schemaVersion: 1 }) };
-    const r = await installMarketPackage(mkEntry());
+    const r = await runInstall(mkEntry());
     expect(r.ok).toBe(false);
     expect(r.code).toBe("invalid_manifest");
     expect(r.msg.length).toBeGreaterThan(0);
@@ -210,9 +237,26 @@ describe("P99c-C1a · 上游一报错就绝不落地", () => {
 
   it("包里的 id 与索引条目不是一个 ⇒ 拒（不然会装到别人头上）", async () => {
     calls.fetchResult = { ok: true, text: mkPkg({ id: "uartix.theme.other" }) };
-    const r = await installMarketPackage(mkEntry());
+    const r = await runInstall(mkEntry());
     expect(r.ok).toBe(false);
     expect(r.code).toBe("id_mismatch");
     expect(calls.stage.length).toBe(0);
+  });
+
+  it("货架写的版本与包体里的不是一个 ⇒ 拒，一次都不 stage", async () => {
+    // 数字对不上时「要不要覆盖」这件事本身就没定义：界面按索引说"更新到 v9.9.9"，包却是另一份
+    calls.fetchResult = { ok: true, text: mkPkg({ version: "9.9.9" }) };
+    const r = await runInstall(mkEntry());
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe("version_mismatch");
+    expect(r.msg).toContain("9.9.9");
+    expect(calls.stage.length).toBe(0);
+    expect(calls.install.length).toBe(0);
+  });
+
+  it("正对照：数字一致时这道门必须放行（否则上面那条测的是整条链坏了）", async () => {
+    calls.fetchResult = { ok: true, text: mkPkg() };
+    const r = await runInstall(mkEntry());
+    expect(r.ok, `被拦住了：${r.code} ${r.msg}`).toBe(true);
   });
 });

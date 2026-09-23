@@ -21,17 +21,19 @@ var pending={},seq=0,perms={},screen=null,lastSnap=null,lastChat=null,themeVars=
 var subs={snap:[],chat:[],key:[],cursor:[],menu:[],theme:[],bc:[]};
 var menus={},menuOff=false,menuDefault="default";
 function post(m){${nonceAttach}try{parent.postMessage(m,"*")}catch(e){}}
-function applyTheme(vars,theme){
+function applyTheme(vars,theme,scheme){
 if(vars){themeVars=vars;for(var k in vars){try{document.documentElement.style.setProperty(k,vars[k])}catch(e){}}}
-if(theme){themeName=theme;document.documentElement.dataset.theme=theme;document.documentElement.style.colorScheme=theme==="dark"||theme==="navy"||theme==="glaze"?"dark":"light"}
-subs.theme.forEach(function(f){try{f({vars:themeVars,theme:themeName})}catch(e){}});
+if(theme){themeName=theme;document.documentElement.dataset.theme=theme}
+if(scheme){document.documentElement.dataset.scheme=scheme;document.documentElement.style.colorScheme=scheme}
+subs.theme.forEach(function(f){try{f({vars:themeVars,theme:themeName,scheme:scheme||""})}catch(e){}});
 }
 function rpc(m){return new Promise(function(res){var id="q"+(++seq);m.reqId=id;pending[id]=res;post(m)})}
 function sub(arr,f,data){arr.push(f);if(data!==undefined&&data!==null){try{f(data)}catch(e){}}return function(){var i=arr.indexOf(f);if(i>=0)arr.splice(i,1)}}
 function syncMenus(){post({type:"aiw:menu-def",menus:menus,off:menuOff,def:menuDefault})}
 window.addEventListener("message",function(e){
 var d=e.data;if(!d||typeof d.type!="string")return;
-if(d.type==="aiw:init"){perms=(d.perms)||{};if(d.screen)screen=d.screen}
+if(d.type==="aiw:init"){perms=(d.perms)||{};if(d.screen)screen=d.screen;applyTheme(d.vars,d.theme,d.scheme)}
+else if(d.type==="aiw:theme"){applyTheme(d.vars,d.theme,d.scheme)}
 else if(d.type==="aiw:screen"){screen=d.screen}
 else if(d.type==="aiw:snap"){lastSnap=d.snap;subs.snap.forEach(function(f){try{f(d.snap)}catch(x){}})}
 else if(d.type==="aiw:chat"){lastChat=d.feed;subs.chat.forEach(function(f){try{f(d.feed)}catch(x){}})}

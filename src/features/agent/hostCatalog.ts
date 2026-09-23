@@ -44,7 +44,9 @@ export type CatalogGroup =
   | "analysis"
   | "modbus"
   | "vdev"
-  | "sentinel";
+  | "sentinel"
+  // P99b-N6：插件市场（C2「AI 提名装」的只读半边；写侧仍不在这条路上）
+  | "market";
 
 export const CATALOG_GROUP_ZH: Record<CatalogGroup, string> = {
   runtime: "运行现状",
@@ -62,6 +64,7 @@ export const CATALOG_GROUP_ZH: Record<CatalogGroup, string> = {
   modbus: "Modbus 工作台",
   vdev: "虚拟设备工坊",
   sentinel: "哨兵",
+  market: "插件市场",
 };
 
 export interface CatalogArgs {
@@ -528,7 +531,7 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
     group: "orchestrator",
     zh: "编排器组清单（结构与开关）",
     gives:
-      "masterOn · varCount · cap{groupCap,varCap,queueCap} · items[{id,name,enabled,eventKinds[],blockCount,depth,cooldownMs,queuePolicy,noteLen}]（**运行统计不在这里**：在跑几条/哪组失败属活值，请用动作 orchestratorRead）",
+      "masterOn · varCount · cap{groupCap,varCap,queueCap} · items[{id,name,enabled,eventKinds[],blockCount,depth,cooldownMs,queuePolicy,noteLen}]（这一条只给**结构与开关**；在跑几条、哪组失败过是活值，在 `orchestrator.runtime`——同一份判定，两个视图）",
     listKey: "items",
     defaultLimit: DEFAULT_LIST_LIMIT,
     maxBytes: 8192,
@@ -606,7 +609,7 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
     path: "orchestrator.vars",
     group: "orchestrator",
     zh: "编排器变量库（声明与默认值）",
-    gives: "每项 {name,type,def,persist}（`def` 是声明里的默认值；现值属活值，走 orchestratorRead）",
+    gives: "每项 {name,type,def,persist}（`def` 是声明里的默认值；**现值**在 `orchestrator.runtime` 的 `vars` 里）",
     listKey: "items",
     defaultLimit: DEFAULT_LIST_LIMIT,
     maxBytes: 6144,
@@ -621,6 +624,60 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
           persist: v.persist,
         })),
       };
+    },
+  },
+  {
+    /**
+     * P99c-O1（C1b Q2 的**反向**落地）：活值进目录。
+     *
+     * 当初"本批不接"的理由是别去装载 `orchestratorBind`（求值期 new 引擎 + 起 tick + 接事件源）。
+     * 今天这条路**动作 `orchestratorRead` 早就在走**，而它在动作元表里是 `effect:"read"`、免批准
+     * ——所以把它接进目录不多放一格权限，只是让"看一眼现在在跑几条"不再需要模型想起有支动作。
+     * 代价照实在 `gives` 里说清楚，不藏。
+     *
+     * 两处边界：① 数字全部来自 `readOrchestratorRuntime` 那**一次**读取（与动作同一份判定，§8-48）；
+     * ② 日志只给阶段、不给原文，备注正文与上次失败详情不外带（与其余视图同一口径，也是 `FORBIDDEN_KEYS` 那一条）。
+     */
+    path: "orchestrator.runtime",
+    group: "orchestrator",
+    zh: "编排器活值：现在在跑什么、跑成怎样",
+    gives:
+      "{available:true,masterOn,runningInstances,groupCount,groupCap,queueCap,logCap,logCount} + groups[{id,name,enabled,runs,fails,lastAt}] + vars[{name,type,value,persist}] + events[{at,groupId,phase}]（字符串值超 120 字截断带省略号；**日志只有阶段，没有原文**）· 读这一条会装载编排器引擎与事件源——与动作 orchestratorRead 走同一条装载路，本视图不新造第二条",
+    listKey: "groups",
+    defaultLimit: 20,
+    maxBytes: 8192,
+    async read() {
+      try {
+        const { readOrchestratorRuntime } = await import("../orchestrator/orchRuntimeRead");
+        const r = await readOrchestratorRuntime();
+        return {
+          available: true,
+          masterOn: r.masterOn,
+          runningInstances: r.runningInstances,
+          groupCount: r.groupCount,
+          groupCap: r.groupCap,
+          queueCap: r.queueCap,
+          logCap: r.logCap,
+          logCount: r.logCount,
+          groups: r.groups.map((g) => ({
+            id: g.id, name: g.name, enabled: g.enabled, runs: g.runs, fails: g.fails, lastAt: g.lastAt,
+          })),
+          vars: r.vars.map((v) => ({
+            name: v.name,
+            type: v.type,
+            value: typeof v.value === "string" && v.value.length > 120 ? `${v.value.slice(0, 120)}…` : v.value,
+            persist: v.persist,
+          })),
+          events: r.recentLogs.map((l) => ({ at: l.at, groupId: l.groupId, phase: l.phase })),
+        };
+      } catch (err) {
+        // 不抛：装载失败要说清"读不到"与"下一步怎么办"（顶层带 error 键会被 `readCatalog` 判成视图自毁）
+        return {
+          available: false,
+          why: `装载编排器引擎失败：${String((err as Error)?.message ?? err)}`,
+          next: "在应用里打开一次「编排器」那一页再读；或用动作 orchestratorRead 试同一条装载路",
+        };
+      }
     },
   },
   {
@@ -793,6 +850,107 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
         chans: s.chans, chanTotal: s.chanTotal, frameTypes: s.frameTypes,
         alertsTotal: s.alerts.length,
         items: s.alerts.map((a) => ({ id: a.id, ts: a.ts, kind: a.kind, level: a.level, key: a.key, count: a.count, acked: a.acked })),
+      };
+    },
+  },
+
+  /* ---------------- P99b-N6：插件市场（两支都不联网） ----------------
+   *
+   * R3 是这批在这里的全部难度：**视图绝不能顺手刷新**。市场的第一条口径是"只有打开那一页才联网"，
+   * 模型问一句"货架上有什么"就把人推出这个承诺，那是拿自省面当后门。所以两支读 `getMarketSnapshot()`，
+   * 没取过就照实回"没取过 + 该怎么办"（与 `analysis.last` 同一形状），也不回用户配的地址原值——
+   * 目录一向不接 settings 这个源（`hostCatalog.test` 那条敏感源封闭的白名单就是为它设的）。
+   *
+   * 还有一条本批踩到的：`readCatalog` 把**顶层带 `error` 键**的回执当作"视图自己报失败"（→ ok:false），
+   * 所以失败原因放在未取回那一支的 `why` 里，ready 那一支不再挂错误字段（成功时 `error` 恒为空串）。
+   */
+  {
+    path: "market.status",
+    group: "market",
+    zh: "插件市场：上一次取回索引的现状",
+    gives:
+      "{available:true,status,indexName,source,generatedAt,entryCount,droppedCount,viaMirror,elapsedMs,fetchedAt,appVersion,why?} · 未取回时 {available:false,status,why,next}（货架页那句状态行读的就是这几个数；`why`＝上次取回失败的原因；用户配的索引地址与镜像前缀不外带——目录一向不接 settings 这个源）",
+    maxBytes: 4096,
+    async read() {
+      const { getMarketSnapshot } = await import("../market/marketStore");
+      const s = getMarketSnapshot();
+      if (!s.index) {
+        return {
+          available: false,
+          status: s.status,
+          why:
+            s.status === "loading"
+              ? "索引正在取回中（只可能在有人打开市场页时发生）"
+              : s.error || "本机还没取过这份索引",
+          next: "在应用里打开一次「插件市场」那一页；本视图不替你联网刷新",
+        };
+      }
+      return {
+        available: true,
+        status: s.status,
+        indexName: s.index.name,
+        source: s.index.source,
+        generatedAt: s.index.generatedAt,
+        entryCount: s.index.entries.length,
+        // 被剔除几条：货架页显示得、AI 读不到就是不对称（详设 §4-5）
+        droppedCount: s.index.dropped.length,
+        viaMirror: s.viaMirror,
+        elapsedMs: s.elapsedMs,
+        fetchedAt: s.fetchedAt,
+        appVersion: s.appVersion,
+        // 键名不能叫 `error`：readCatalog 把"顶层带 error 键"当作视图自己报失败（`runtime` 那支也是嵌在 serial 里给的）
+        ...(s.error ? { why: s.error } : {}),
+      };
+    },
+  },
+  {
+    path: "market.entries",
+    group: "market",
+    zh: "插件市场：货架上的条目（含与本机库的对照）",
+    gives:
+      "每项 {id,name,author,version,category,caps,verified,bytes,shots,descLen,compat,install,via,pending?}（`install`＝absent/same/update/newer-than-shelf，与货架徽章同一个 `compareInstall` 判定；`via`＝shelf/npm，即字节来自自建货架直链还是 npm 官方 registry；`pending` 只在有一条在飞的请求时出现；描述只给长度）",
+    listKey: "items",
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxBytes: 8192,
+    async read() {
+      const [{ getMarketSnapshot }, { getSnapshot: local }, { marketPendingSnapshot }, { compat, compareInstall, packageOrigin }] =
+        await Promise.all([
+          import("../market/marketStore"),
+          import("../plugins/pluginStore"),
+          import("../market/marketPending"),
+          import("../market/marketIndex"),
+        ]);
+      const s = getMarketSnapshot();
+      if (!s.index) {
+        return {
+          available: false,
+          total: 0,
+          items: [],
+          why: s.error || "本机还没取过这份索引",
+          next: "在应用里打开一次「插件市场」那一页；本视图不替你联网刷新",
+        };
+      }
+      const versions = new Map(local().plugins.map((r) => [r.pkg.id, r.pkg.version]));
+      const live = new Map(marketPendingSnapshot().map((p) => [p.entryId, p.phase]));
+      return {
+        available: true,
+        total: s.index.entries.length,
+        items: byId(s.index.entries).map((e) => ({
+          id: e.id,
+          name: e.name,
+          author: e.author,
+          version: e.version,
+          category: e.category,
+          caps: e.capabilities,
+          verified: e.verified === true,
+          bytes: e.bytes,
+          shots: e.screenshots.length,
+          descLen: len(e.description.zh),
+          compat: compat(e, s.appVersion),
+          install: compareInstall(e, versions.get(e.id)),
+          via: packageOrigin(e),
+          ...(live.has(e.id) ? { pending: live.get(e.id) } : {}),
+        })),
       };
     },
   },

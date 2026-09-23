@@ -5,7 +5,9 @@ import * as serialStore from "../features/serial/serialStore";
 import { useSyncExternalStore } from "react";
 import type { IfaceKind } from "../features/serial/serialStore";
 import { t } from "../i18n/strings";
-import { IconChevron, IconSparkle, IconCheck } from "../shared/icons";
+import { IconChevron, IconSparkle, IconCheck, IconPuzzle, IconSettings } from "../shared/icons";
+import { pendingBadge } from "../features/market/marketBrowse";
+import { useAwaitingCount } from "../features/market/useMarketPending";
 import iconPlain from "../assets/icon-plain.svg";
 
 const IFACE_LABEL: Record<IfaceKind, string> = {
@@ -31,14 +33,6 @@ function tbSvg(children: React.ReactNode) {
     </svg>
   );
 }
-
-const IconSettings = () =>
-  tbSvg(
-    <>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </>,
-  );
 
 const IconHelp = () =>
   tbSvg(
@@ -102,17 +96,33 @@ const IfaceMenu = () => {
   );
 };
 
-/** 纯浏览器（npm run dev 直开）没有 Tauri 内核，getCurrentWindow() 构造即抛；降级为 no-op 桩以便浏览器验证 UI。tauri 环境行为不变 */
+/**
+ * 纯浏览器（npm run dev 直开）没有 Tauri 内核，getCurrentWindow() 构造即抛；降级为 no-op 桩以便浏览器验证 UI。
+ * tauri 环境行为不变。
+ * 桩里**列全被调到的方法**：少一个就是整页被错误边界接管（`innerSize` 漏掉时就是这样，
+ * 于是"纯浏览器验证通道"这条我们自己依赖的路直接废掉——见 §8-46：兜底要兜得住实际调用面）。
+ */
 function getWinSafe(): ReturnType<typeof getCurrentWindow> {
   try {
     return getCurrentWindow();
   } catch {
     const p = <T,>(v: T): Promise<T> => Promise.resolve(v);
+    const size = () => p({ width: 0, height: 0 });
+    const pos = () => p({ x: 0, y: 0 });
     return {
       onResized: () => p(() => {}),
+      onMoved: () => p(() => {}),
       isMaximized: () => p(false),
+      isFocused: () => p(true),
+      innerSize: size,
+      outerSize: size,
+      innerPosition: pos,
+      outerPosition: pos,
+      scaleFactor: () => p(1),
       startDragging: () => p(undefined),
       toggleMaximize: () => p(undefined),
+      maximize: () => p(undefined),
+      unmaximize: () => p(undefined),
       setAlwaysOnTop: () => p(undefined),
       minimize: () => p(undefined),
       close: () => p(undefined),
@@ -124,15 +134,20 @@ export function TitleBar({
   onOpenSettings,
   onOpenHelp,
   onOpenAi,
+  onOpenLibrary,
 }: {
   onOpenSettings: () => void;
   onOpenHelp: () => void;
   onOpenAi: () => void;
+  /** 打开设置页的「插件管理」那一栏（标题栏那颗的去向） */
+  onOpenLibrary: () => void;
 }) {
   const win = getWinSafe();
   const [maxed, setMaxed] = useState(false);
   const [pinned, setPinned] = useState(false);
   const [ver, setVer] = useState<string | null>(null);
+  /** 装包请求里"等你点"的那几条：正在跑的不算（催你做不了的事比不催更坏） */
+  const awaitingBadge = pendingBadge(useAwaitingCount());
   useEffect(() => {
     // 版本号动态读取（tauri.conf.json 单一来源），硬编码会随发版遗忘
     void getVersion().then((v) => setVer(v)).catch(() => setVer(null));
@@ -225,6 +240,19 @@ export function TitleBar({
       <div className="tb-spacer" data-tauri-drag-region />
       <button className="tb-btn" title="AI 助手 (Ctrl+K)" data-tour="ai" onClick={onOpenAi}>
         <IconSparkle />
+      </button>
+      {/* 直达插件管理：开的是设置页那一栏，不另写一个插件库窗口；市场在里面的那颗按钮后面。
+          data-tour 是入门引导第 9 步的高亮锚点（`tourSteps.test.ts` 钉它必须在源码里存在——
+          锚点写错不会报错，只会让引导悄悄退化成漂浮卡片，所以宁可用一条守卫来核）。 */}
+      <button
+        className={`tb-btn${awaitingBadge ? " tb-attn" : ""}`}
+        title="插件管理"
+        aria-label={awaitingBadge ? `插件管理，${awaitingBadge} 条装包请求等你确认` : "插件管理"}
+        data-tour="plugins"
+        onClick={onOpenLibrary}
+      >
+        <IconPuzzle size={16} />
+        {awaitingBadge ? <span className="tb-badge">{awaitingBadge}</span> : null}
       </button>
       <button className="tb-btn" title="设置" onClick={onOpenSettings}>
         <IconSettings />

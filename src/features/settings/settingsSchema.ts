@@ -10,6 +10,7 @@
  * - secret：API key、桥 token，任何工具输出只返回“是否已配置”，值永不回显。
  */
 import { THEME_LIST, AI_PRESETS, type Settings, type ThemeMode, type WorkspacePreset, type AiPreset, type AiFormat } from "./settingsStore";
+import { MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
 
 export type Sensitivity = "safe" | "protected" | "secret";
 
@@ -59,6 +60,14 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "mcpAllowSend", type: "boolean", def: false, group: "mcp", label: "MCP 允许远程发送", sensitivity: "protected", reversible: false },
   { key: "mcpHighPriv", type: "boolean", def: false, group: "mcp", label: "MCP 允许高权限动作", sensitivity: "protected", reversible: false },
   { key: "mcpToken", type: "string", maxLen: 128, def: "", group: "mcp", label: "MCP 握手 token", sensitivity: "secret", reversible: true },
+  // P99b-N6：这两键从 N1 起就存在于 store，但一直没进 schema、也没进界面——
+  // 那句「全量声明：每个 Settings 键恰好一条」因此是假的（双向守卫现在钉着它）。
+  // **为什么是 protected 而不是 safe**：`marketIndexUrl` 决定"从哪台机器取包的元数据"。
+  // 让模型能改它，等于给它一条换货架的通道——即便仍有域白名单与 sha256 兜底，这是**信任面**
+  // 而不是技术面（详设 §3-R2）。本批既不新增也不放松任何审批，只是把两个此前只有人能改的键
+  // 放进了 UI，同时声明模型不可改。
+  { key: "marketIndexUrl", type: "string", maxLen: 300, def: MARKET_BUNDLED_INDEX_URL, group: "market", label: "插件市场索引地址", sensitivity: "protected", reversible: true },
+  { key: "marketMirrorPrefix", type: "string", maxLen: 300, def: "", group: "market", label: "插件市场镜像前缀", sensitivity: "protected", reversible: true },
 ] as const satisfies readonly SettingEntry[];
 
 const byKey = new Map(SETTINGS_SCHEMA.map((e) => [e.key as string, e]));

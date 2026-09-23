@@ -15,5 +15,9 @@
   "capabilities": [
     "theme.tokens"
   ],
+  "screenshots": [
+    "/market/img/theme-begonia-palette.png",
+    "/market/img/theme-begonia-ui-sketch.png"
+  ],
   "verified": true
 }

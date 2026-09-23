@@ -6,6 +6,8 @@
  * 每条都配了反向断言（例如失败后 index 必须是 null，而不是"还是上一次的内容"）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+// 夹具的信封版本跟着契约层走（写死数字的话，抬版时这一批会集体变红却没人知道为什么）
+import { MARKET_SCHEMA_VERSION } from "./marketIndex";
 
 // 读源文本走变量说明符的动态导入（同时绕开 vite 的字面量解析与 tsc 缺 @types/node）
 const fsSpec = "node:fs/promises";
@@ -32,6 +34,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 // 单实例：这个模块有模块级状态，并发 dynamic import 会拿到两份（vitest 的脾气，§8-43③）
 const store = await import("./marketStore");
+const browse = await import("./marketBrowse");
+const { MARKET_ALLOW_HOSTS } = await import("./marketIndex");
 
 const enc = new TextEncoder();
 
@@ -66,7 +70,7 @@ describe("P99b-N1：不自动联网", () => {
 
   it("同源索引用 webview fetch，绝不走远程白名单通道", async () => {
     st.fetchImpl = await okJson({
-      schemaVersion: 1, name: "货架", generatedAt: "2026-09-22T00:00:00Z", source: "s",
+      schemaVersion: MARKET_SCHEMA_VERSION, name: "货架", generatedAt: "2026-09-22T00:00:00Z", source: "s",
       categories: { theme: "外观" },
       entries: [{
         id: "uartix.theme.a", name: "甲", author: "uartix", category: "theme",
@@ -83,19 +87,20 @@ describe("P99b-N1：不自动联网", () => {
 
   it("外部索引必须走 Rust 通道，并把白名单与字节上限一起带下去", async () => {
     st.settings.marketIndexUrl = "https://raw.githubusercontent.com/Tanixs/uartix-market/main/index.json";
-    const payload = enc.encode(JSON.stringify({ schemaVersion: 1, categories: { theme: "外观" }, entries: [] }));
+    const payload = enc.encode(JSON.stringify({ schemaVersion: MARKET_SCHEMA_VERSION, categories: { theme: "外观" }, entries: [] }));
     st.invokeImpl = async () => ({ data: Buffer2b64(payload), sha256: "a".repeat(64), bytes: payload.length, contentType: "application/json" });
     const s = await store.refreshIndex();
     expect(s.status).toBe("ready");
     const call = st.invokes.find((i) => i.cmd === "market_fetch");
-    expect(call?.args.allowHosts).toEqual(["raw.githubusercontent.com", "github.com"]);
+    // 这条按**字面清单**对：多一个域就是多一个信任面，改白名单必须在这里显式过一次手（P99c-R2 加的就是 registry）
+    expect(call?.args.allowHosts).toEqual(["raw.githubusercontent.com", "github.com", "registry.npmjs.org"]);
     expect(Number(call?.args.maxBytes)).toBeGreaterThan(1024 * 100);
   });
 });
 
 describe("P99b-N1：拉不到就说拉不到", () => {
   it("失败时 index 归 null、原因与耗时可显示（不许把旧清单当现状）", async () => {
-    st.fetchImpl = await okJson({ schemaVersion: 1, categories: { theme: "外观" }, entries: [] });
+    st.fetchImpl = await okJson({ schemaVersion: MARKET_SCHEMA_VERSION, categories: { theme: "外观" }, entries: [] });
     expect((await store.refreshIndex()).status).toBe("ready");
     st.fetchImpl = async () => {
       throw new Error("连接被重置");
@@ -125,7 +130,7 @@ describe("P99b-N1：镜像只兜底，不绕闸", () => {
   it("直连失败才试镜像，且把两条原因都留在日志里", async () => {
     st.settings.marketMirrorPrefix = "https://github.com/";
     st.settings.marketIndexUrl = "https://raw.githubusercontent.com/Tanixs/uartix-market/main/index.json";
-    const payload = enc.encode(JSON.stringify({ schemaVersion: 1, categories: { theme: "外观" }, entries: [] }));
+    const payload = enc.encode(JSON.stringify({ schemaVersion: MARKET_SCHEMA_VERSION, categories: { theme: "外观" }, entries: [] }));
     st.invokeImpl = async (_cmd, args) => {
       if (String(args.url).startsWith("https://github.com/")) {
         return { data: Buffer2b64(payload), sha256: "a".repeat(64), bytes: payload.length, contentType: "application/json" };
@@ -156,6 +161,15 @@ describe("P99b-N1：镜像只兜底，不绕闸", () => {
   it("前缀不是 https 也忽略", () => {
     st.settings.marketMirrorPrefix = "http://github.com/";
     expect(store.applyMirror("https://raw.githubusercontent.com/a/b")).toBeNull();
+  });
+
+  it("设置页那句回显与 applyMirror 同一支判定：说「会被用上」的，装包时就得真的用上（详设 R5）", () => {
+    for (const p of ["", "https://github.com/m/", "https://github.com/m", "http://github.com/", "https://mirror.evil.example/", "not a url"]) {
+      st.settings.marketMirrorPrefix = p;
+      const used = store.applyMirror("https://raw.githubusercontent.com/x/y") !== null;
+      const talk = browse.mirrorEndpointTalk(p, MARKET_ALLOW_HOSTS);
+      expect(talk.ok, `前缀「${p}」：回显说${talk.ok ? "会被用上" : "用不上"}，applyMirror 却判${used ? "用上了" : "没用"}`).toBe(used);
+    }
   });
 });
 
@@ -196,7 +210,7 @@ describe("P99b-N1：包体与截图", () => {
 describe("P99b-N1：收藏（与本机库的对照已挪到契约层 compareInstall）", () => {
   it("下架条目一键清除：只清不在架上的，收藏里的在架条目留着", async () => {
     st.fetchImpl = await okJson({
-      schemaVersion: 1, categories: { theme: "外观" }, entries: [{
+      schemaVersion: MARKET_SCHEMA_VERSION, categories: { theme: "外观" }, entries: [{
         id: "uartix.theme.keep", name: "留", author: "x", category: "theme", description: { zh: "留" },
         version: "1.0.0", minAppVersion: "0.4.1", updated: "2026-09-20",
         packageUrl: "/market/pkg/k.json", sha256: "c".repeat(64), bytes: 1, capabilities: [], screenshots: [],
@@ -236,3 +250,81 @@ function Buffer2b64(bytes: Uint8Array): string {
   for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s);
 }
+
+/* ================= P99c-R2：npm 条目这条取回半边 =================
+ * 这里测的不是"能不能解 tar"（那是 `npmUnpack.test` 的活），而是三条**取回口径**：
+ *  ① 哈希与字节数比的是 tarball 那枚对象，解出来的清单文本另算；
+ *  ② 任一条不过就拒，且拒在解包**之前**（没对过账的字节不许先进内存再挑内容）；
+ *  ③ npm 条目不退镜像——这条要有对照组，否则"只调了一次"可能只是因为镜像根本没配。
+ */
+const cryptoSpec = "node:crypto";
+const { createHash } = (await import(cryptoSpec)) as unknown as {
+  createHash: (alg: string) => { update(b: Uint8Array): { digest(enc: string): string } };
+};
+const tgzB64 = await readFile(fileURLToPath(new URL("__fixtures__/probe-1.0.0.tgz", import.meta.url)), "base64");
+const tgzBytes = Uint8Array.from(atob(tgzB64), (c) => c.charCodeAt(0));
+const REAL_SHA = createHash("sha256").update(tgzBytes).digest("hex");
+const NPM_URL = "https://registry.npmjs.org/probe/-/probe-1.0.0.tgz";
+
+describe("P99c-R2：npm 条目这条取回半边", () => {
+  function npmE(over: Record<string, unknown> = {}) {
+    return {
+      id: "uartix.probe.theme", name: "探针", author: "a", category: "theme",
+      description: { zh: "只用于测试" }, version: "1.0.0", packageUrl: NPM_URL,
+      sha256: REAL_SHA, bytes: tgzBytes.length, capabilities: ["theme.tokens"], screenshots: [],
+      minAppVersion: "0.4.1", updated: "2026-09-20", npm: { name: "probe", version: "1.0.0" }, ...over,
+    } as unknown as import("./marketIndex").MarketEntry;
+  }
+  const shelfE = (over: Record<string, unknown> = {}) =>
+    ({ ...npmE(over), npm: undefined, packageUrl: "https://raw.githubusercontent.com/o/r/a.uartix.json" }) as unknown as import("./marketIndex").MarketEntry;
+
+  it("夹具是真东西：583 上下的 tarball，不是空字节（§8-54）", () => {
+    expect(tgzBytes.length).toBeGreaterThan(300);
+    expect(REAL_SHA).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("成功路径：取回 tarball、按声明比完才解包，bytes 报的是 tarball 那个数", async () => {
+    st.invokeImpl = async () => ({ data: tgzB64, sha256: REAL_SHA, bytes: tgzBytes.length });
+    const r = await store.fetchPackage(npmE());
+    expect(r.ok, r.ok ? "" : r.msg).toBe(true);
+    if (!r.ok) return;
+    expect(JSON.parse(r.text).id).toBe("uartix.probe.theme");
+    expect(r.bytes, "确认框要显示「实际到手多少字节」，报成清单文本的长度就是骗人").toBe(tgzBytes.length);
+    expect(r.bytes, "两个数必须是两个不同的数，否则这条测不出语义").not.toBe(enc.encode(r.text).length);
+  });
+
+  it("哈希不符就拒，而且拒在解包之前", async () => {
+    // 送回去的既不是那枚 tarball、哈希也不是声明的那个：先对账就该先在这里停下
+    st.invokeImpl = async () => ({ data: btoa("not-a-tarball"), sha256: "f".repeat(64), bytes: 12 });
+    const r = await store.fetchPackage(npmE());
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.msg).toContain("包哈希");
+    expect(r.msg, "走到了取清单那一步＝顺序反了，没对过账的字节先进了内存").not.toContain("取不出清单");
+  });
+
+  it("字节数不符也拒（npm 条目比的是 tarball 的字节）", async () => {
+    st.invokeImpl = async () => ({ data: tgzB64, sha256: REAL_SHA, bytes: tgzBytes.length });
+    const r = await store.fetchPackage(npmE({ bytes: tgzBytes.length - 1 }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.msg).toContain("字节数");
+  });
+
+  it("npm 条目配了镜像也只打一次：对照组（自建货架条目）会退镜像", async () => {
+    st.settings.marketMirrorPrefix = "https://github.com/";
+    st.invokeImpl = async () => {
+      throw new Error("直连超时");
+    };
+    const npm = await store.fetchPackage(npmE());
+    expect(npm.ok).toBe(false);
+    expect(st.invokes.map((i) => String(i.args.url))).toEqual([NPM_URL]);
+    if (npm.ok) return;
+    expect(npm.msg, "npm 那条不该出现「镜像：…」这句——它根本没退镜像").not.toContain("镜像");
+
+    st.invokes.length = 0;
+    const shelf = await store.fetchPackage(shelfE());
+    expect(shelf.ok).toBe(false);
+    expect(st.invokes.length, "对照组没退镜像：镜像那半条坏了，上面的 npm 断言也就没测到东西").toBe(2);
+  });
+});

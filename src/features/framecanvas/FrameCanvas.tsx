@@ -1,3 +1,5 @@
+// P99b-N5：明暗归属只有一个可读口径（dataset.scheme），别再按主题名判（详设 S4）
+import { isDarkScheme } from "../../styles/themeCore";
 import {
   useCallback,
   useEffect,
@@ -722,7 +724,7 @@ function FrameCanvas() {
     const ctx = cv.getContext("2d");
     if (!ctx) return;
     const cs = getComputedStyle(document.documentElement);
-    const dark = document.documentElement.dataset.theme !== "light";
+    const dark = isDarkScheme(document.documentElement.dataset.scheme);
     const cPanel = cs.getPropertyValue("--bg-panel").trim() || "#161a20";
     const cFg = cs.getPropertyValue("--text").trim() || "#d7dde7";
     const cAcc = cs.getPropertyValue("--accent").trim() || "#4e9cef";

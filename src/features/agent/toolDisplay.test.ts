@@ -75,6 +75,52 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
     expect(bare).toEqual([]);
   });
 
+  it("P99c-C2：目录那批码走的是**变量**，F3 那条扫字面量的钉看不见——单独钉一次", async () => {
+    /**
+     * `readCatalog` 把失败码放在 `code` 字段里，调用方 `notExecuted(ctx.callId, r.code, …)` 原样透传，
+     * 所以 P99a-F 那套"扫源码里的字符串字面量"对它整条失灵（`unknown_id` 因此裸挂在时间线上过）。
+     * 钉法照旧：从**目录源码**里把所有 `code:` 那几行能出现的码全抓出来，逐个要求渲染成非 ASCII。
+     */
+    const fsSpec = "node:fs";
+    const { readFileSync } = (await import(fsSpec)) as unknown as { readFileSync: (p: string, enc?: string) => string };
+    const src = readFileSync(new URL("./hostCatalog.ts", import.meta.url).pathname.replace(/^\//, ""), "utf8");
+    const codes = new Set<string>();
+    for (const line of src.split(/\r?\n/)) {
+      if (!/(^|[^.\w])code:/.test(line)) continue;
+      for (const m of line.matchAll(/"([a-z0-9_]+)"/g)) codes.add(m[1]);
+    }
+    // 探针自证：抓不到＝正则瞎了，绿的也没用（§8-43②）
+    expect(codes.size, "一行都没抓到，说明抓取式与目录源码脱钩了").toBeGreaterThan(2);
+    expect([...codes]).toContain("unknown_id");
+    const bare = [...codes].filter((c) => receiptStatusText(false, "not_executed", c) === c);
+    expect(bare, `这些码在时间线上是裸 snake_case：${bare.join("、")}`).toEqual([]);
+  });
+
+  it("P99c-C2：市场装链的码由契约层穷举表供给，这里只合表（重抄一份就会漂）", async () => {
+    const { INSTALL_CODE_ZH } = (await import("../market/marketIndex")) as typeof import("../market/marketIndex");
+    const codes = Object.keys(INSTALL_CODE_ZH);
+    expect(codes.length, "契约表空了＝合表这件事根本没发生").toBeGreaterThan(6);
+    for (const c of codes) {
+      if (c === "ok") continue; // 成功码不走徽章兜底那条路
+      expect(receiptStatusText(false, "not_executed", c), `${c} 没跟着渲染成中文`).not.toBe(c);
+    }
+    // 反向半边：装链源码里**回出去**的每个码都必须在这张表里。
+    // 只扫 `code: "x"` 是不够的——内核的失败走 `bad("undeclared_capability", …)`，
+    // 那样从表里删一个码，运行时这条钉一声不响（证伪实测过）。
+    const fsSpec = "node:fs";
+    const { readFileSync } = (await import(fsSpec)) as unknown as { readFileSync: (p: string, enc?: string) => string };
+    const src = readFileSync(new URL("../market/marketInstall.ts", import.meta.url).pathname.replace(/^\//, ""), "utf8");
+    const used = new Set<string>([
+      ...[...src.matchAll(/code:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),
+      ...[...src.matchAll(/\bbad\(\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),
+    ]);
+    expect(used.size, "一个码都没扫到＝抓取式与源码脱钩了（§8-43②）").toBeGreaterThan(4);
+    const orphans = [...used].filter((c) => !codes.includes(c));
+    expect(orphans, `这些码在装链里回出去却没有中文：${orphans.join("、")}`).toEqual([]);
+    const bare = [...codes].filter((c) => c !== "ok" && receiptStatusText(false, "not_executed", c) === c);
+    expect(bare, `表在但没接到徽章上：${bare.join("、")}`).toEqual([]);
+  });
+
   it("receiptRows：标量直列、嵌套对象折叠键名、数组限量、绝不抛错", () => {
     expect(receiptRows(null)).toEqual([]);
     expect(receiptRows(42)).toEqual([{ k: "结果", v: "42" }]);
@@ -92,7 +138,7 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
       "fs_read", "fs_list", "fs_write", "web_fetch", "web_search", "shell_exec",
       "theme_read", "theme_patch", "theme_preset", "image_swatch", "save_theme_extension", "style_commit",
       "ui_inventory", "ui_inspect", "style_patch", "style_revert", "app_state",
-      "app_catalog", "app_read",
+      "app_catalog", "app_read", "propose_market_install",
     ];
     // 清单本身也要跟注册表对齐：两边谁漂了都红
     expect(hostEntryNames().sort()).toEqual([...real].sort());

@@ -3,6 +3,8 @@ import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 // 原先这里手抄了一份"主题 / 小部件 / 面板"，D1 加出四类产物后它还在说三类（§8-36①）。
 import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
 import { autoEnableableKindLabels } from "../plugins/pluginManifest";
+// P99b-N5：主题清单从装载层取（内置那八枚的唯一出处），不在这儿手抄第二份
+import { BUILTIN_THEME_IDS } from "../../styles/builtinThemes";
 
 export type AiScene =
   | "protocol"
@@ -113,7 +115,7 @@ function schemaAction(): string {
   return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（同一份清单也供小部件 uartix.app 与 MCP run_action 调用）：
 - openPanel({"panel":"plot2d"}) 打开面板（templates/hexview/properties/controls/console/table/plot2d/spectrum/view3d/framecanvas/video/xray/modbus/sequencer/sentinel/plot3d/orchestrator/ai/vdev）
 - applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video/calib/auto/modbus/vdev）
-- setTheme({"theme":"glaze"}) 切主题（light/dark/navy/ocean/matcha/amber/begonia/glaze/system）
+- setTheme({"theme":"glaze"}) 切主题：内置 ${BUILTIN_THEME_IDS.join("/")} 或 system；**已装的主题插件也可以**（传设置页外观格里那枚的 id，或直接传它的包 id）。内置与插件主题同级，同时只有一枚在画——启用一枚会把在画那枚挤掉，回执里点名。
 - listProtocols()/listCommands()/listCards() 查询配置清单
 - addChannel({"tpl":"模板名","field":"字段名"}) 加曲线通道；clearChannels() 清空通道
 - writeCard({"json":"…"})/writeCommand({"json":"…"})/writeTemplate({"json":"…"})/writeCodec({"json":"…"}) 写入配置（writeTemplate 支持 {"group":"簇名","templates":[…]} 一次写入协议簇并自动建组）

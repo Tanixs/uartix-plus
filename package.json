@@ -1,7 +1,7 @@
 {
   "name": "uartix-plus",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,11 +16,15 @@
     "plugin": "node dist-cli/uartix-plugin.cjs",
     "mcp:e2e": "node scripts/mcp-e2e.mjs",
     "check:theme": "node .tools/check-contrast.cjs",
+    "check:vars": "node .tools/check-undeclared-vars.cjs",
     "check:aria": "node .tools/check-aria.cjs",
     "check:motion": "node .tools/check-motion.cjs",
     "check:cycles": "node .tools/check-import-cycles.cjs",
-    "check:all": "node .tools/check-contrast.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-import-cycles.cjs && node .tools/check-commands-registered.cjs",
-    "market:gen": "node scripts/gen-market-index.mjs",
+    "check:all": "node .tools/check-contrast.cjs && node .tools/check-undeclared-vars.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-import-cycles.cjs && node .tools/check-commands-registered.cjs",
+    "market:img": "node scripts/gen-market-img.mjs",
+    "market:gen": "node scripts/gen-market-img.mjs && node scripts/gen-market-index.mjs",
+    "market:check": "node scripts/gen-market-img.mjs --check",
+    "market:validate": "node dist-cli/uartix-plugin.cjs validate",
     "check:commands": "node .tools/check-commands-registered.cjs"
   },
   "dependencies": {
@@ -28,7 +32,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-updater": "^2.10.1",
+    "@tauri-apps/plugin-updater": "~2.11.0",
     "dockview": "^8.2.0",
     "dockview-react": "^8.2.0",
     "react": "^19.1.0",

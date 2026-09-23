@@ -1,19 +1,21 @@
 /**
- * P99c-C1b：命令行专用动作（`cli.*`）的**只读半边**。
+ * P99c-C1b/C1c：命令行专用动作（`cli.*`）——四条只读 + 装包的**异步写侧**。
  *
- * 为什么单独一个命名空间而不加进 MCP 工具清单：Q7 定的是「AI 只读不装」——
- * 装第三方代码是"做了收不回"的动作，批准权必须留在人手里。
+ * 为什么单独一个命名空间而不加进 MCP 工具清单：Q7 的口径是**陌生人的代码进本机由人批准**
+ * （模型能装自己生成的包，那条链在 `localEntries` 里；但货架这条链它够不到）——
+ * 装第三方代码是"做了收不回"的动作，而模型能读到的判断材料（描述/manifest/作者名）都是投稿人写的。
  * `scripts/mcp-cli.ts` 只转发 `ALL_TOOL_DEFS` 里有的名字，所以 `cli.` 从模型那条路**够不到**；
  * 反过来 `scripts/plugin-cli.ts` 只发 `cli.`。两条通道各自收窄，各有一条测试钉着。
  *
  * 一条硬约束决定了形态：**桥在 Rust 侧只等 3 秒**（`bridge.rs: CALL_TIMEOUT`）。
- * 所以这里不等一次可能很慢的网络往返——索引没拉过时"起一次拉取、最多等 1.5 秒、
- * 拿不到就说还在拉"，让 CLI 明确知道"现在没有、稍后再问"，而不是等到超时留下
- * "到底成没成"的悬案（写侧要走任务面，那是下一批）。
+ * 所以：索引没拉过时"起一次拉取、最多等 1.5 秒、拿不到就说还在拉"；装包这种可能几十秒的活
+ * **绝不在一次调用里等**——`cli.plugin_install` 只起一张异步请求并立刻回 token，
+ * CLI 拿 token 去轮 `cli.plugin_status`（详设 §8.1；为什么不借道 jobs 任务面见 `marketPending.ts` 头注释）。
  */
-import { getSnapshot as getPlugins } from "../plugins/pluginStore";
-import { browseEntries, cardFacts, emptyTalk, facetCategories, missingFavorites, type BrowseContext } from "./marketBrowse";
+import { PLUGIN_STATE_LABEL, getSnapshot as getPlugins } from "../plugins/pluginStore";
+import { browseEntries, cardFacts, emptyTalk, facetCategories, missingFavorites, offShelfOf, type BrowseContext } from "./marketBrowse";
 import { compareInstall } from "./marketIndex";
+import { awaitingMarketInstalls, readMarketPending, requestMarketInstall } from "./marketPending";
 import { getMarketSnapshot, refreshIndex } from "./marketStore";
 
 /** 一次最多列这么多：截断必须说"还有几条"，不能静默少给（A7） */
@@ -25,14 +27,18 @@ export type CliKind =
   | "cli.market_status"
   | "cli.market_list"
   | "cli.market_info"
-  | "cli.plugins_installed";
+  | "cli.plugins_installed"
+  | "cli.plugin_install"
+  | "cli.plugin_status";
 
-/** 只读半边开放的 kinds；其余 `cli.` 一律拒绝（写侧下一批加，届时有门与确认） */
+/** 命令行开放的全部 kinds。装包这条是**异步的**：`plugin_install` 只起一次请求并立刻回 token。 */
 export const CLI_KINDS: readonly CliKind[] = [
   "cli.market_status",
   "cli.market_list",
   "cli.market_info",
   "cli.plugins_installed",
+  "cli.plugin_install",
+  "cli.plugin_status",
 ];
 
 /** 命令行通道的命名空间前缀（`mcpServer` 用它决定路由，`plugin-cli` 用它自检只发这一族） */
@@ -65,7 +71,7 @@ async function indexReady(): Promise<{ index: ReturnType<typeof getMarketSnapsho
     index: after.index,
     note: after.index
       ? ""
-      : `索引还没拿到（桥只等 3 秒，我不挂着）：稍后再问一次，或在应用里打开 设置 → 插件管理 → 浏览市场。${after.error ? `上次失败原因：${after.error}` : "正在拉取中。"}`,
+      : `索引还没拿到（桥只等 3 秒，我不挂着）：稍后再问一次，或在应用里打开 设置 → 插件管理 → 插件市场，或直接点标题栏那颗拼图图标。${after.error ? `上次失败原因：${after.error}` : "正在拉取中。"}`,
   };
 }
 
@@ -81,7 +87,7 @@ function numArg(args: Record<string, unknown>, key: string, fallback: number): n
 export async function handleCli(kind: string, args: Record<string, unknown>): Promise<unknown> {
   if (!(CLI_KINDS as readonly string[]).includes(kind)) {
     throw new Error(
-      `命令行动作未开放：${kind}。只读半边只有 ${CLI_KINDS.join(" / ")}；装包/更新要走任务面（尚未落地），请在应用里操作`,
+      `命令行动作未开放：${kind}。这一族只有 ${CLI_KINDS.join(" / ")}；卸载/启停还没做（删除是本机动作，单独一批），AI 那条路永远到不了这里`,
     );
   }
   const ctx = browseCtx();
@@ -100,6 +106,43 @@ export async function handleCli(kind: string, args: Record<string, unknown>): Pr
       error: snap.error,
       favorites: snap.favorites.length,
       appVersion: snap.appVersion,
+    };
+  }
+
+  // 这两条**不排在索引门后面**：status 问的是本机那张队列，索引有没有拉来与它无关
+  if (kind === "cli.plugin_status") {
+    const v = readMarketPending(strArg(args, "token"));
+    if ("phase" in v) {
+      return {
+        ok: v.phase === "done",
+        token: v.token,
+        entryId: v.entryId,
+        phase: v.phase,
+        phaseText: v.phaseText,
+        code: v.code,
+        text: v.text,
+        /** 还有几条停在"等你确认"：CLI 顺手说一句，省得人在两个地方数 */
+        awaiting: awaitingMarketInstalls().length,
+      };
+    }
+    return { ok: false, phase: "gone", code: v.code, msg: v.msg, text: "" };
+  }
+
+  if (kind === "cli.plugin_install") {
+    // 只起一次请求并**立刻**回 token：慢的一半（取回/校验/暂存）在应用里后台跑。
+    // 在这里等它就是那条 3 秒超时的悬案——CLI 收到超时、应用还在装，两边各有事实。
+    const ready = await indexReady();
+    if (!ready.index) {
+      return { ok: false, token: "", msg: ready.note || "索引还没拿到", note: "没有开始任何取回" };
+    }
+    const r = requestMarketInstall(strArg(args, "id"));
+    return {
+      ok: r.ok,
+      token: r.token,
+      msg: r.msg,
+      note: r.ok
+        ? "受理不等于装好：用 status <token> 问下一步。覆盖已有版本会停在「等你确认」，要在应用里点"
+        : "没有开始任何取回",
     };
   }
 
@@ -155,16 +198,19 @@ export async function handleCli(kind: string, args: Record<string, unknown>): Pr
     };
   }
 
-  // cli.plugins_installed：本机库 + 与货架的对照（只按 id，不猜哪个对应哪个）
+  // cli.plugins_installed：本机库 + 与货架的对照（只按 id，不猜哪个对应哪个）。
+  // "哪些是本机多出来的"这条判定只有一份：货架页那句「本机另有 N 个包不在这份索引里」用的是同一个 `offShelfOf`。
   const local = getPlugins().plugins;
+  const offShelf = offShelfOf(index, local.map((r) => ({
+    id: r.pkg.id,
+    name: r.pkg.name,
+    version: r.pkg.version,
+    state: PLUGIN_STATE_LABEL[r.state],
+  })));
   const onShelf: unknown[] = [];
-  const offShelf: unknown[] = [];
   for (const r of local) {
     const e = index.entries.find((x) => x.id === r.pkg.id);
-    if (!e) {
-      offShelf.push({ id: r.pkg.id, name: r.pkg.name, version: r.pkg.version });
-      continue;
-    }
+    if (!e) continue; // 多出来的那些已由 offShelfOf 收走，不在这里重复列一遍
     const c = cardFacts(index, e, ctx);
     onShelf.push({ id: r.pkg.id, name: r.pkg.name, local: r.pkg.version, shelf: e.version, state: c.installText });
   }

@@ -1,4 +1,7 @@
 import { useSyncExternalStore } from "react";
+// P99b-N6：示例货架的地址只有一处定义（市场契约叶子，不拉 store、不碰 Tauri）——
+// 默认值、读不到时的回落、设置页那句回显都引它，省掉"设置页说的默认值 ≠ 实际取的那条"。
+import { MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
 
 export type WorkspacePreset =
   | "proto"
@@ -86,6 +89,9 @@ export interface Settings {
   marketMirrorPrefix: string;
 }
 
+/** 设置页「插件管理」那一栏的键——标题栏那颗、页签表、渲染分支都引它，别各处再写一遍 "ext" */
+export const SETTINGS_TAB_PLUGINS = "ext";
+
 export type AiPreset = "openai" | "deepseek" | "zhipu" | "qwen" | "ollama" | "anthropic";
 
 export type AiFormat = "chat" | "anthropic" | "responses";
@@ -166,7 +172,7 @@ function load(): Settings {
     mcpAllowSend: false,
     mcpHighPriv: false,
     mcpToken: newToken(),
-    marketIndexUrl: "/market/index.json",
+    marketIndexUrl: MARKET_BUNDLED_INDEX_URL,
     marketMirrorPrefix: "",
   };
   try {
@@ -237,7 +243,7 @@ function load(): Settings {
       marketIndexUrl:
         typeof p.marketIndexUrl === "string" && p.marketIndexUrl.trim()
           ? p.marketIndexUrl.trim().slice(0, 300)
-          : "/market/index.json",
+          : MARKET_BUNDLED_INDEX_URL,
       marketMirrorPrefix: typeof p.marketMirrorPrefix === "string" ? p.marketMirrorPrefix.trim().slice(0, 300) : "",
     };
   } catch {

@@ -270,6 +270,7 @@ function buildProjections(record: PluginRecord): string | null {
           createdAt: Date.now(),
           pluginRef: pkg.id,
           vars: (artifact.vars as Record<string, string>) ?? {},
+          ...(artifact.scheme === "dark" || artifact.scheme === "light" ? { scheme: artifact.scheme } : {}),
           ...(typeof artifact.css === "string" && artifact.css ? { css: artifact.css } : {}),
         });
       } else if (key === "widgets") {
@@ -316,6 +317,61 @@ export function deprecatedContribKeys(pkg: PluginManifest): string[] {
 }
 
 /**
+ * 一个包里可用的 theme 产物（选择器、互斥判定、投影三处共用同一份枚举）。
+ * 放在这里而不是各算一遍：什么叫"带主题产物的包"只能有一处答案（§8-48）。
+ */
+export interface ThemeArt {
+  entryId: string;
+  name: string;
+  artifact: Record<string, unknown>;
+  extId: string;
+}
+
+export function themeArtsOf(pkg: PluginManifest): ThemeArt[] {
+  const out: ThemeArt[] = [];
+  for (const it of pkg.contributions?.themes ?? []) {
+    const artifact = pkg.artifacts?.[it.entry] as Record<string, unknown> | undefined;
+    if (!artifact) continue;
+    out.push({
+      entryId: it.id,
+      name: it.name ?? pkg.name,
+      artifact,
+      extId: shadowExtId(pkg.id, it.id),
+    });
+  }
+  return out;
+}
+
+const hasThemeArt = (pkg: PluginManifest) => themeArtsOf(pkg).length > 0;
+
+/**
+ * 主题互斥的**唯一执行点**：把除 `selfId` 以外所有"启用中的带 theme 包"停掉，返回被挤掉的名字。
+ * 叫它的地方只有一处：`setEnabled`——那是唯一能把包置为 enabled 的入口。
+ * `approveUpdate`/`rollback` 都不叫：前者那一步只可能在本包**原本就 enabled** 时重新上屏，
+ * 而那意味着互斥早在启用它时就把别的主题停掉了（详见 `approveUpdate` 里那段注释——
+ * 这条是证伪时实测出来的：加了再摘掉，测试全绿，说明它永远不生效）；后者换的是同一个包的版本。
+ */
+function enforceThemeMutex(selfId: string): string[] {
+  const record = getPlugin(selfId);
+  if (!record || !hasThemeArt(record.pkg)) return [];
+  const pushed: string[] = [];
+  for (const other of snapshot.plugins) {
+    if (other.pkg.id === selfId || other.state !== "enabled" || !hasThemeArt(other.pkg)) continue;
+    removeProjections(other.pkg.id);
+    other.state = "disabled";
+    other.updatedAt = Date.now();
+    upsert(other);
+    pushed.push(other.pkg.name);
+  }
+  return pushed;
+}
+
+/** 库里所有"带 theme 产物"的包（互斥入口收敛与选择器都读它，不许各自 filter） */
+export function themeBearingPackages(): PluginRecord[] {
+  return snapshot.plugins.filter((r) => hasThemeArt(r.pkg));
+}
+
+/**
  * 把这个包从运行时里摘掉：影子扩展 + 逻辑模块 worker + 它注册的工具，一次摘干净。
  * 停用/卸载/隔离/换版本都走这一个出口（分开摘会留"扩展没了但工具还在"的半死态）。
  */
@@ -339,16 +395,33 @@ export function setEnabled(id: string, enabled: boolean): { ok: boolean; msg: st
     const err = buildProjections(record);
     if (err) return { ok: false, msg: err };
     record.state = "enabled";
+    /**
+     * P99b-N5 R2①：**主题互斥在入口收敛**。启用一个带 theme 产物的包 ⇒ 把其它启用中的
+     * 带 theme 包一并停掉（走既有 `removeProjections`，不加状态位、不另记一份"谁是当前主题"）。
+     *
+     * 为什么不在渲染层"挑一枚"就算了：那会留下"库里三个开关都亮着、只有一枚在画"的分裂态，
+     * 而这正是这一路在灭的东西（详设 §1-9）。渲染侧仍留一层兜底挑选 + 点名，
+     * 因为存量数据与 `restoreProjections()` 重启重建都可能带着多枚（②那半）。
+     */
+    const pushed = enforceThemeMutex(id);
     scheduleStyles();
-  } else {
-    removeProjections(id);
-    record.state = record.state === "enabled" ? "disabled" : "installed_disabled";
-    scheduleStyles();
+    record.updatedAt = Date.now();
+    upsert(record);
+    emit();
+    return {
+      ok: true,
+      msg: pushed.length
+        ? `已启用「${record.pkg.name}」；主题互斥，同时停用了 ${pushed.length} 枚：${pushed.join("、")}`
+        : `已启用「${record.pkg.name}」`,
+    };
   }
+  removeProjections(id);
+  record.state = record.state === "enabled" ? "disabled" : "installed_disabled";
+  scheduleStyles();
   record.updatedAt = Date.now();
   upsert(record);
   emit();
-  return { ok: true, msg: enabled ? `已启用「${record.pkg.name}」` : `已停用「${record.pkg.name}」` };
+  return { ok: true, msg: `已停用「${record.pkg.name}」` };
 }
 
 /**
@@ -520,6 +593,14 @@ export function approveUpdate(id: string): { ok: boolean; msg: string } {
   record.updatedAt = Date.now();
   record.state = wasEnabled ? "enabled" : "disabled";
   if (wasEnabled) {
+    /**
+     * 这里**不叫** `enforceThemeMutex`（我先加了，证伪时摘掉它测试全绿 —— 那条路不可达，
+     * 留着就是一段"看着像门、其实永远不生效"的代码，正是 M2 清退的那类假控件）。不可达的理由：
+     * 走到这一支要求本包原先是 enabled，而任何其它包被启用时都经过 `setEnabled` 的收敛，
+     * 那一刻本包已被置为 disabled —— 于是"本包 enabled 且另有第二枚主题 enabled"只剩
+     * **存量数据（升级前就两枚都亮着）** 这一个来源，而那一份的处理方式是"点名 + 一键收敛"，
+     * 不该由一次批准更新顺手替用户改掉（详设 §0-1 Q1）。
+     */
     const err = buildProjections(record);
     if (err) {
       // 投影重建失败：回退到旧包（§9.3 失败自动回退）

@@ -32,7 +32,7 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   clearOverlay();
   revertAll();
-  dropRootVars("plugin-theme");
+  dropRootVars("active-theme");
   dropRootVars("agent-overlay");
 });
 
@@ -52,7 +52,7 @@ describe("aiStyleLayers", () => {
   it("清除 AI 的全部临时改动：两层归零，但插件主题层写在同名键上的值必须原样留着", () => {
     const inline = stubDom();
     // 插件主题层先写 --radius-m（模拟"装了个圆角主题"）
-    submitRootVars("plugin-theme", ROOT_LAYER.pluginTheme, { "--radius-m": "6px", "--bg": "#111" });
+    submitRootVars("active-theme", ROOT_LAYER.activeTheme, { "--radius-m": "6px", "--bg": "#111" });
     patchTokens({ "--radius-m": "14px" });
     applyLayer("a", ".x{color:red}");
     applyLayer("b", ".y{color:blue}");

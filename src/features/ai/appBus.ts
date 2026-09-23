@@ -6,6 +6,9 @@ export type AppBusMsg =
   | { kind: "openPanel"; panel: string }
   | { kind: "applyPreset"; preset: string }
   | { kind: "closePanel"; panel: string }
+  /** 打开插件市场。渲染点**只有 App 一处**（两颗入口按钮都发这条），
+   *  否则同一支弹窗有两个实例，Esc/滚动/收藏状态会各说一套。 */
+  | { kind: "openMarket" }
   /** 整屏换布局（P99a-D1b：插件库里的「工作区预设」产物）。dockview api 只在 App 里，
    *  所以这条也只能由 App 执行；`done` 是回执通道——总线是单向广播，没有它点完按钮什么都不发生 */
   | { kind: "applyLayout"; layout: unknown; done: (err: string | null) => void };
@@ -36,6 +39,11 @@ export function requestApplyPreset(preset: string) {
 /** 请求关闭面板（P62 哨兵最小化到浮球用） */
 export function requestClosePanel(panel: string) {
   emit({ kind: "closePanel", panel });
+}
+
+/** 请求打开插件市场（插件库按钮与标题栏按钮都走这里，弹窗本身只在 App 渲染一次） */
+export function requestOpenMarket() {
+  emit({ kind: "openMarket" });
 }
 
 /**

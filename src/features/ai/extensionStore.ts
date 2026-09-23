@@ -26,6 +26,8 @@ export interface AiExtension {
   createdAt: number;
   vars?: Record<string, string>; // theme
   css?: string; // theme / style
+  /** theme：作者声明的明暗归属。缺省＝没声明，由 `--bg` 亮度算（详设 S4） */
+  scheme?: "dark" | "light"; // theme
   html?: string; // widget / panel
   /** widget：外观形态。"none" = 无边框透明（无标题栏、窗口背景透明，内容完全自定义） */
   chrome?: "none";

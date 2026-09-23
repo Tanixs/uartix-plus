@@ -166,7 +166,8 @@ if (accentProblems.length) {
 }
 
 /* ---- P88b-4：外观覆盖层白名单 token 齐全性 ----
-   Agent 外观工具只能覆盖白名单 token（appearanceStore.ts APPEARANCE_TOKENS）；
+   Agent 外观工具只能覆盖白名单 token（P99b-N5 起住在 `src/styles/themeCore.ts` 的 APPEARANCE_TOKENS，
+   因为它现在同时管着 AI 覆盖层、插件主题产物与样式表引用三件事）；
    每个白名单 token 必须在「theme.css :root 基线 ∪ 8 主题文件」中有定义，
    否则覆盖后有键无值（覆盖层不做完整性校验，依赖内置值兜底——缺失即破功）。 */
 function cssVarKeys(src) {
@@ -175,7 +176,7 @@ function cssVarKeys(src) {
   return out;
 }
 function appearanceOverlayTokens() {
-  const src = fs.readFileSync(path.join(__dirname, "..", "src", "features", "agent", "appearanceStore.ts"), "utf8");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "styles", "themeCore.ts"), "utf8");
   const m = /APPEARANCE_TOKENS = \[([\s\S]*?)\] as const/.exec(src);
   return m ? [...m[1].matchAll(/"(--[\w-]+)"/g)].map((x) => x[1]) : [];
 }

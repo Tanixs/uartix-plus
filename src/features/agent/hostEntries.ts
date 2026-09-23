@@ -19,12 +19,14 @@ import { generalToolEntries } from "./generalTools";
 import { appearanceToolEntries } from "./appearanceTools";
 import { uiToolEntries } from "./uiTools";
 import { localToolEntries } from "./localEntries";
+import { marketToolEntries } from "./marketTools";
 import { PLUGIN_TOOL_PREFIX, type AgentToolEntry } from "./toolRegistry";
 import type { UndoResult } from "./settingsTools";
 
 /** 惰性求一次（工具面在运行期不变，缓存无失效路径） */
 let cached: readonly AgentToolEntry[] | null = null;
 
+/** 六组宿主工具：设置 / 通用 / 外观 / 界面 / 本机数据与插件 / 市场提名（P99c-C2）。 */
 export function hostToolEntries(): readonly AgentToolEntry[] {
   if (!cached) {
     cached = Object.freeze([
@@ -33,6 +35,7 @@ export function hostToolEntries(): readonly AgentToolEntry[] {
       ...appearanceToolEntries,
       ...uiToolEntries,
       ...localToolEntries,
+      ...marketToolEntries,
     ]);
   }
   return cached;

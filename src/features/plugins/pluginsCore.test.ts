@@ -320,6 +320,37 @@ describe("插件库状态机（§9.3）", () => {
     expect(store.stagePackage(themePkg("user.t.one")).ok).toBe(false);
   });
 
+  it("P99b-N5 · 主题键写错名字要**拒收**并给出相近真名（R5：差量合法，写错名不合法）", () => {
+    // 两份市场示例当初就是这一类：`--panel` / `--accent-contrast` 在应用里根本不存在，
+    // 旧校验只查"以 -- 开头"，于是那份主题只落地一半而没有任何一处说出来（详设 §1-4）。
+    const bad = store.stagePackage(
+      themePkg("user.t.typo", {
+        artifacts: { "main.json": { kind: "theme", vars: { "--bg": "#101418", "--panel": "#111111", "--accent-contrast": "#fff" } } },
+      }),
+    );
+    expect(bad.ok, "写错键名的主题包被放行了").toBe(false);
+    const joined = bad.errors.join("；");
+    expect(joined).toContain("--panel");
+    expect(joined).toContain("可能是 --bg-panel");
+    // --accent-contrast 的答复是前缀最近的那条（--accent），不是 --on-accent：
+    // 建议只是"你可能想写这个"，别把它当成语义纠正
+    expect(joined).toContain("可能是 --accent");
+    // 只改一两项的合法差量不许被误伤（那是 Q2 裁过的写法）
+    const ok = store.stagePackage(
+      themePkg("user.t.diff", { artifacts: { "main.json": { kind: "theme", vars: { "--accent": "#c76a7a" } } } }),
+    );
+    expect(ok.ok, "合法差量被白名单误伤").toBe(true);
+  });
+
+  it("P99b-N5 · theme.scheme 只认 dark/light（声明是可选的，但写了就得对）", () => {
+    const r = store.stagePackage(
+      themePkg("user.t.scheme", {
+        artifacts: { "main.json": { kind: "theme", vars: { "--bg": "#101418" }, scheme: "midnight" } },
+      }),
+    );
+    expect(r.errors.join("；")).toContain("只认 dark / light");
+  });
+
   it("启用建投影、停用移投影（影子扩展 pluginRef 标记）", () => {
     const s = store.stagePackage(themePkg("user.t.two"));
     const inst = store.installStaged(s.stagingId!);

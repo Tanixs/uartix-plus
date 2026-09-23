@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "Uartix+ 社区插件库（示例）",
   "generatedAt": "2026-09-21T00:00:00Z",
   "source": "https://github.com/Tanixs/uartix-plus/tree/main/market",
@@ -46,12 +46,15 @@
       },
       "version": "1.1.0",
       "packageUrl": "/market/pkg/theme-begonia.uartix.json",
-      "sha256": "816d597da18d0b0a9b2171f283529009c99a5a016562ba3e9a72f84a36f3a2f4",
-      "bytes": 678,
+      "sha256": "6853b374c3df771864901cd6f6ecc594269b110bdab088edb33aef7bc1bac061",
+      "bytes": 675,
       "capabilities": [
         "theme.tokens"
       ],
-      "screenshots": [],
+      "screenshots": [
+        "/market/img/theme-begonia-palette.png",
+        "/market/img/theme-begonia-ui-sketch.png"
+      ],
       "minAppVersion": "0.4.1",
       "updated": "2026-09-21",
       "verified": true
@@ -67,13 +70,14 @@
       },
       "version": "1.0.0",
       "packageUrl": "/market/pkg/theme-ink.uartix.json",
-      "sha256": "632b382feb352f81c99795b0c251164fc6b60243b6fa506ab6da369acb09b2e3",
-      "bytes": 671,
+      "sha256": "335e0bf73916fbb7724a6bad8aba760ce13f7938ae4156902f6920f0d28b6b02",
+      "bytes": 668,
       "capabilities": [
         "theme.tokens"
       ],
       "screenshots": [
-        "/market/img/ink-night.png"
+        "/market/img/theme-ink-palette.png",
+        "/market/img/theme-ink-ui-sketch.png"
       ],
       "minAppVersion": "0.4.1",
       "updated": "2026-09-20",

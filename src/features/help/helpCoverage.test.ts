@@ -69,6 +69,9 @@ const DOCUMENTED_OK_NON_TOOL: Record<string, string> = {
   needs_manual_confirmation: "MCP 回执状态，不是工具名",
   run_action: "MCP 侧的动作入口（对应本机 run_app_action），不是本机工具名",
   update_needs_user: "save_plugin 的回执码：用户导入过的包不许 AI 静默覆盖",
+  // P99b-N6：市场那一页提到的两个"像工具名"的名字
+  setEnabled: "插件库的启停动作（三处入口共用它），不是发给模型的工具",
+  version_mismatch: "装包的拒绝码之一：货架声明的版本与包内不一致，不是工具名",
 };
 
 describe("帮助文档不得落后于实现", () => {
@@ -116,6 +119,22 @@ describe("帮助文档不得落后于实现", () => {
     ]) {
       expect(helpSrc, `帮助里找不到「${phrase}」的说明`).toContain(phrase);
     }
+  });
+
+  it("P99b-N5：主题同级与两条落地路径都要说清（旧那句「主题会自动启用」是错话）", () => {
+    for (const phrase of [
+      "同时只有一枚在画", // 互斥这条规则本身
+      "内置与插件主题同级", // 改判后的模型
+      "兜底层（暗/亮两张）", // 层表里那一行：差量主题缺的键从哪来
+      "从插件市场装的是一枚停用态的包", // 市场路径
+      "AI 保存/固化出来的主题", // 另一条路径（当场已启用）
+    ]) {
+      expect(helpSrc, `帮助里找不到「${phrase}」的说明`).toContain(phrase);
+    }
+    // 反向钉：那句一刀切的"会自动启用"正是本批要清的错账，不许以原样回来
+    expect(helpSrc).not.toMatch(/一套外观变量[^<]{0,20}<b>会<\/b>自动启用/);
+    // 提示词也不能承诺"装完就生效"
+    expect(promptsSrc, "发给模型的话术又在替用户保证装完自动生效").not.toContain("装完自动启用");
   });
 
   it("已删除的设置项/入口/API 不得再被帮助或提示词教用户去找（反向钉，扫两份源）", () => {
@@ -188,5 +207,45 @@ describe("帮助文档不得落后于实现", () => {
     expect(helpSrc).toContain("仍然逐条弹批准卡");
     // 高危档不跨重启恢复这件事，不说清楚就是埋雷
     expect(helpSrc).toContain("不跨重启恢复");
+  });
+
+  /* ================= P99b-N6 · 帮助第 12 页「插件市场」 =================
+   * 这一组钉子专治两种病：① 加了页签忘了写内容（点了是空白）；
+   * ② 页签写了内容、内容却说的不是实现做的事（用户照着做发现对不上）。
+   */
+  it("P99b-N6：每个页签都有对应的内容块（加了 tab 忘了写＝当场红）", () => {
+    const labels = [...helpSrc.matchAll(/\{ key: "([a-z0-9]+)", label: /g)].map((m) => m[1]);
+    const bodies = [...helpSrc.matchAll(/\{tab === "([a-z0-9]+)" && \(/g)].map((m) => m[1]);
+    expect(labels.length, "页签清单没抓到：HelpModal 的 tabs 写法变了，这条守卫要跟着改").toBeGreaterThanOrEqual(12);
+    const empty = labels.filter((k) => !bodies.includes(k));
+    expect(empty, `这些页签只有名字没有内容：${empty.join("、")}`).toEqual([]);
+    const orphan = bodies.filter((k) => !labels.includes(k));
+    expect(orphan, `这些内容块没有对应页签（写了没人看得见）：${orphan.join("、")}`).toEqual([]);
+  });
+
+  it("P99b-N6：市场那一页四节齐，而且三句承诺各自钉住", () => {
+    const at = helpSrc.indexOf('{tab === "market"');
+    expect(at, "没有市场那一页").toBeGreaterThan(-1);
+    const page = helpSrc.slice(at, helpSrc.indexOf("{tab === ", at + 30) < 0 ? helpSrc.length : helpSrc.indexOf("{tab === ", at + 30));
+    for (const t of ["市场从哪来、什么时候联网", "装进来归谁管", "它替你做了什么、没做什么", "怎么把你做的东西上架"]) {
+      expect(page, `市场那一页缺节「${t}」`).toContain(t);
+    }
+    // 联网时机 / 装前比版本：这两句是最容易被"顺手优化"掉的承诺
+    expect(page).toContain("才会去取");
+    expect(page).toContain("不缓存当现状");
+    expect(page).toContain("version_mismatch");
+    // 放行域与两句原话都从代码取，帮助里不许长出抄本（R4）
+    expect(page).toContain("MARKET_ALLOW_HOSTS.join");
+    expect(page).toContain("MARKET_NO_ENDORSE");
+    expect(page).toContain("MARKET_INSTALL_NOTE");
+    expect(page, "帮助里抄了一份域名清单＝等着过期").not.toContain("raw.githubusercontent.com");
+  });
+
+  it("P99b-N6：帮助里那条「离线一条命令」真存在（写进帮助就得跑得动）", () => {
+    expect(helpSrc).toContain("validate market/pkg/");
+    const cliSrc = readFileSync(here.replace(/[/\\]features[/\\]help[/\\].*$/, "/../scripts/plugin-cli-core.ts"), "utf8");
+    // 它得是**本地**命令：一旦哪天改成"要开着应用才能自检"，帮助那句"离线"就成了假话
+    expect(cliSrc, "validate 不再是本地命令了 ⇒ 帮助里那句「离线一条命令」要改口").toMatch(/LOCAL_COMMANDS\s*=\s*\[[^\]]*"validate"/);
+    expect(cliSrc).toContain("除 validate 外的前提");
   });
 });

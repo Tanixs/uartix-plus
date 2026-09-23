@@ -20,7 +20,13 @@
 
 /** 层的固定优先级：**数值大的赢**。新增层只准在这里加，不准靠调用顺序抢赢。 */
 export const ROOT_LAYER = {
-  pluginTheme: 10,
+  /**
+   * P99b-N5：兜底层（暗/亮两张表二选一，由 `extRuntime` 按明暗归属提交）。
+   * 它必须在"在画那枚主题"之下：那枚主题没写的键由它补，写了的键不能被它倒压。
+   */
+  baseline: 0,
+  /** 在画的那枚一枚（内置与插件同级；旧名 `pluginTheme` 指的是"插件叠出来的那一层"，已指错东西） */
+  activeTheme: 10,
   agentOverlay: 20,
 } as const;
 

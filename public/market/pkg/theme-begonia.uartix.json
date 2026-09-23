@@ -22,11 +22,11 @@
       "kind": "theme",
       "vars": {
         "--bg": "#f7f2f0",
-        "--panel": "#fffaf8",
+        "--bg-panel": "#fffaf8",
         "--text": "#3a2f2c",
         "--text-dim": "#8a7a75",
         "--accent": "#c76a7a",
-        "--accent-contrast": "#ffffff"
+        "--on-accent": "#ffffff"
       }
     }
   },

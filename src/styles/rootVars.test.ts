@@ -12,7 +12,7 @@ import { ROOT_LAYER, composeRootVars, dropRootVars, effectiveRootVars, rootVarLa
 
 describe("composeRootVars（纯函数）", () => {
   it("层序高的赢，与提交顺序无关", () => {
-    const low = { id: "a", order: ROOT_LAYER.pluginTheme, vars: { "--x": "low" } };
+    const low = { id: "a", order: ROOT_LAYER.activeTheme, vars: { "--x": "low" } };
     const high = { id: "b", order: ROOT_LAYER.agentOverlay, vars: { "--x": "high" } };
     expect(composeRootVars([low, high]).get("--x")).toBe("high");
     expect(composeRootVars([high, low]).get("--x")).toBe("high"); // 反过来传也一样
@@ -34,14 +34,14 @@ describe("composeRootVars（纯函数）", () => {
 
 describe("submitRootVars / dropRootVars（状态与广播）", () => {
   beforeEach(() => {
-    dropRootVars("plugin-theme");
+    dropRootVars("active-theme");
     dropRootVars("agent-overlay");
     setRootVarsChangeCb(null);
   });
 
   /** 本测试跑在 node 环境（无 document）：合成器只更新内部状态，不碰 DOM 也不抛错 */
   it("撤掉高层，低层的同名值必须原样回来——旧实现就是在这里把它抹掉的", () => {
-    submitRootVars("plugin-theme", ROOT_LAYER.pluginTheme, { "--radius-md": "6px", "--bg": "#111" });
+    submitRootVars("active-theme", ROOT_LAYER.activeTheme, { "--radius-md": "6px", "--bg": "#111" });
     submitRootVars("agent-overlay", ROOT_LAYER.agentOverlay, { "--radius-md": "14px" });
     expect(effectiveRootVars()["--radius-md"]).toBe("14px");
 
@@ -52,7 +52,7 @@ describe("submitRootVars / dropRootVars（状态与广播）", () => {
   });
 
   it("整量替换层内容时，本层不再声明的键退出有效值，但别的层不受影响", () => {
-    submitRootVars("plugin-theme", ROOT_LAYER.pluginTheme, { "--a": "p-a", "--b": "p-b" });
+    submitRootVars("active-theme", ROOT_LAYER.activeTheme, { "--a": "p-a", "--b": "p-b" });
     submitRootVars("agent-overlay", ROOT_LAYER.agentOverlay, { "--a": "o-a", "--c": "o-c" });
     expect(effectiveRootVars()).toEqual({ "--a": "o-a", "--b": "p-b", "--c": "o-c" });
     // 覆盖层"缩小到只剩 --a"＝撤掉 --c，不该顺手带走 --b（那是插件层的）
@@ -63,21 +63,21 @@ describe("submitRootVars / dropRootVars（状态与广播）", () => {
   it("有效值没变就不广播：广播＝真的换装了，而不是「有人调了一下」", () => {
     const cb = vi.fn();
     setRootVarsChangeCb(cb);
-    submitRootVars("plugin-theme", ROOT_LAYER.pluginTheme, { "--bg": "#111" });
+    submitRootVars("active-theme", ROOT_LAYER.activeTheme, { "--bg": "#111" });
     expect(cb).toHaveBeenCalledTimes(1);
-    submitRootVars("plugin-theme", ROOT_LAYER.pluginTheme, { "--bg": "#111" }); // 同值重提
+    submitRootVars("active-theme", ROOT_LAYER.activeTheme, { "--bg": "#111" }); // 同值重提
     expect(cb).toHaveBeenCalledTimes(1);
     dropRootVars("no-such-layer"); // 不存在的层：无事发生
     expect(cb).toHaveBeenCalledTimes(1);
-    dropRootVars("plugin-theme");
+    dropRootVars("active-theme");
     expect(cb).toHaveBeenCalledTimes(2);
   });
 
   it("rootVarLayers 按优先级升序报出在供值的层（外观来源面板用它）", () => {
     submitRootVars("agent-overlay", ROOT_LAYER.agentOverlay, { "--x": "1" });
-    submitRootVars("plugin-theme", ROOT_LAYER.pluginTheme, { "--y": "2", "--z": "3" });
+    submitRootVars("active-theme", ROOT_LAYER.activeTheme, { "--y": "2", "--z": "3" });
     expect(rootVarLayers()).toEqual([
-      { id: "plugin-theme", order: ROOT_LAYER.pluginTheme, count: 2 },
+      { id: "active-theme", order: ROOT_LAYER.activeTheme, count: 2 },
       { id: "agent-overlay", order: ROOT_LAYER.agentOverlay, count: 1 },
     ]);
   });

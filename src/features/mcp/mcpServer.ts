@@ -218,7 +218,7 @@ function surfaceError(r: {
 }
 
 async function dispatch(kind: string, args: Record<string, unknown>): Promise<unknown> {
-  // `cli.` 前缀＝命令行专用面（Q7「AI 只读不装」）：这些名字从来不在 TOOL_DEFS 里，
+  // `cli.` 前缀＝命令行专用面（Q7：陌生人的代码进本机由人批准，所以这条链不给模型）：这些名字从来不在 TOOL_DEFS 里，
   // `mcp-cli` 也只转发清单内的名字，所以模型那条路够不到；路由放在工具名检查之前，
   // 否则命令行请求会被"未知工具"挡掉，两边的话术就对不上了。
   if (isCliKind(kind)) return handleCli(kind, args);

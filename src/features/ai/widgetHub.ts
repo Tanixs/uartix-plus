@@ -127,8 +127,9 @@ export function broadcastTheme() {
   if (themeRaf) return;
   themeRaf = requestAnimationFrame(() => {
     themeRaf = 0;
-    const { vars, theme } = collectThemeVars();
-    broadcast({ type: "aiw:theme", vars, theme });
+    const { vars, theme, scheme } = collectThemeVars();
+    // scheme 由宿主算好后下发：桥里再按主题名判一次就是第四份明暗判断（详设 S4）
+    broadcast({ type: "aiw:theme", vars, theme, scheme });
   });
 }
 

@@ -18,6 +18,11 @@ export interface TourStep {
   selector?: string;
   /** 步骤激活时执行的动作（开面板/启动演示源…）；失败不阻塞引导 */
   do?: () => void | Promise<void>;
+  /**
+   * 环扩到目标所在的**停靠框外框**（页签条 + 内容）。
+   * 面板类目标默认只框内容根 `data-panel`，看着像"高亮跑到内容区里"，外框没反应。
+   */
+  frame?: boolean;
   /** do() 之后等目标出现/面板渲染的宽限（ms，默认 600） */
   settleMs?: number;
 }

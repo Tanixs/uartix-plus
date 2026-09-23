@@ -312,7 +312,7 @@ describe("P99c-C1b · cli. 通道与 MCP 工具面互不打扰", () => {
     expect(r.err).toBeNull();
   });
 
-  it("工具清单里永不含 cli.*：模型那条路够不到命令行动作面（Q7「AI 只读不装」的前提）", async () => {
+  it("工具清单里永不含 cli.*：模型那条路够不到命令行动作面（Q7 的前提：外来代码进本机由人批准）", async () => {
     const { ALL_TOOL_DEFS } = await import("./mcpTools");
     expect(ALL_TOOL_DEFS.length).toBeGreaterThan(0); // 反空断言：清单读空了这条就是假绿
     expect(ALL_TOOL_DEFS.some((t) => t.name.startsWith("cli."))).toBe(false);

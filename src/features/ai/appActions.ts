@@ -9,13 +9,7 @@ import { PANEL_TITLES } from "../../panels/panels";
 import { resolvePlot3dGroup, plot3dRemovalReceipt } from "./plot3dActionPolicy";
 import { isOperatorLocked } from "../operator/lock";
 import type { PanelId } from "../../ipc/types";
-import {
-  THEME_LIST,
-  patch as patchSettings,
-  getSnapshot as getSettings,
-  type ThemeMode,
-  type WorkspacePreset,
-} from "../settings/settingsStore";
+import { getSnapshot as getSettings, type WorkspacePreset } from "../settings/settingsStore";
 import * as templateStore from "../protocol/templateStore";
 import * as commandStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
@@ -46,6 +40,7 @@ import {
 } from "./aiActions";
 import { isGroup } from "../controls/commandStore";
 import { ORCH_LIMITS } from "../orchestrator/types";
+import { readOrchestratorRuntime } from "../orchestrator/orchRuntimeRead";
 
 export interface AppActionResult {
   ok: boolean;
@@ -209,17 +204,29 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
     }
     case "setTheme": {
       const theme = String(a.theme ?? "");
-      if (!THEME_LIST.includes(theme as ThemeMode)) {
-        throw new Error(`未知主题：${theme}（可选：${THEME_LIST.join("/")}）`);
+      /**
+       * P99b-N5：取值域随"内置与插件主题同级"扩大——内置 id ∪ 库里带 theme 产物的包。
+       * 审批档位没动（仍是 `config` 域 `config_write`），变的只是"能被切到的东西"（详设 §5 记了这条账）。
+       * 落地也只走 `selectTheme` 一个出口：以前这里自己复制了一份"system 怎么解析 + 写 dataset.theme"。
+       */
+      const { selectTheme, themeCards } = await import("../settings/themePicker");
+      const { activeThemeFacts } = await import("../../styles/themeFacts");
+      const facts = activeThemeFacts();
+      const cards = themeCards({
+        settingsTheme: getSettings().theme,
+        sysDark: typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches,
+        drawnId: facts.id || null,
+        drawnName: facts.name || null,
+        drawnPluginId: facts.pluginId,
+        records: (await import("../plugins/pluginStore")).getSnapshot().plugins,
+      });
+      const card = cards.find((c) => c.key === theme || c.pluginId === theme);
+      if (!card) {
+        throw new Error(`未知主题：${theme}（可选：${cards.map((c) => c.key).join("/")}）`);
       }
-      patchSettings({ theme: theme as ThemeMode });
-      document.documentElement.dataset.theme =
-        theme === "system"
-          ? window.matchMedia("(prefers-color-scheme: dark)").matches
-            ? "dark"
-            : "light"
-          : theme;
-      return `主题已切换为「${theme}」`;
+      const r = await selectTheme(card, { pluginPkgId: facts.pluginId, name: facts.name });
+      if (!r.ok) throw new Error(r.msg);
+      return r.msg;
     }
     case "listProtocols": {
       const proto = templateStore.getSnapshot();
@@ -732,62 +739,14 @@ async function orchMods() {
   return { bind, store, build };
 }
 
-/** 块树规模统计（AI 读摘要用；不递归进容器内部细节，只报数量与类型直方图） */
-function orchBlockBrief(nodes: unknown[]): { blocks: number; kinds: Record<string, number> } {
-  let blocks = 0;
-  const kinds: Record<string, number> = {};
-  const walk = (list: unknown[]) => {
-    for (const raw of list) {
-      const n = raw as { kind?: string; then?: unknown[]; els?: unknown[]; body?: unknown[]; children?: unknown[] };
-      if (!n || typeof n.kind !== "string") continue;
-      blocks++;
-      kinds[n.kind] = (kinds[n.kind] ?? 0) + 1;
-      if (Array.isArray(n.then)) walk(n.then);
-      if (Array.isArray(n.els)) walk(n.els);
-      if (Array.isArray(n.body)) walk(n.body);
-      if (Array.isArray(n.children)) walk(n.children);
-    }
-  };
-  walk(nodes);
-  return { blocks, kinds };
-}
-
-/** 编排器只读快照：总开关 / 组（含事件与运行统计）/ 变量现值 / 最近日志 */
+/**
+ * 编排器只读快照：总开关 / 组（含事件与运行统计）/ 变量现值 / 最近日志。
+ *
+ * 判定不在这里：活值那份算法上收成了 `orchRuntimeRead`，自省目录的 `orchestrator.runtime`
+ * 读的是**同一份**（§8-48：一处判定两处投影）。块树统计（旧 `orchBlockBrief`）也一起过去了。
+ */
 async function orchestratorStatus(): Promise<unknown> {
-  const { bind, store } = await orchMods();
-  const doc = store.getSnapshot().doc;
-  const eng = bind.orchEngine;
-  const events = (g: { events: { kind: string }[] }) => g.events.map((e) => e.kind);
-  return {
-    masterOn: doc.settings.masterOn,
-    runningInstances: eng.runningCount(),
-    groupCount: doc.groups.length,
-    groupCap: ORCH_LIMITS.groupCap,
-    queueCap: ORCH_LIMITS.queueCap,
-    groups: doc.groups.map((g) => {
-      const st = eng.statsOf(g.id);
-      return {
-        id: g.id,
-        name: g.name,
-        enabled: g.enabled,
-        events: events(g),
-        autoTriggers: g.events.length > 0,
-        cooldownMs: g.cooldownMs ?? 0,
-        queuePolicy: g.queuePolicy ?? "dropNew",
-        note: g.note,
-        ...orchBlockBrief(g.children),
-        runs: st.total,
-        fails: st.fail,
-        lastAt: st.lastTs ? new Date(st.lastTs).toISOString() : null,
-        lastDetail: st.lastDetail,
-      };
-    }),
-    vars: eng.listVars().map((v) => ({ name: v.name, type: v.type, value: v.value, default: v.def, persist: v.persist })),
-    recentLogs: eng
-      .getLogs()
-      .slice(-10)
-      .map((l) => ({ at: new Date(l.ts).toISOString(), groupId: l.groupId, phase: l.phase, detail: l.detail })),
-  };
+  return await readOrchestratorRuntime();
 }
 
 /** 编排器写操作（高权限）：总开关 / 手动跑组 / 组增删改 / 事件与块增删 / 写变量现值 */

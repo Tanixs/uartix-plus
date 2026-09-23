@@ -79,7 +79,7 @@ describe("入门引导的结构事实不得手写", () => {
   it("带选择器的步骤：选择器必须真的能指到界面上的东西", () => {
     for (const s of TOUR_STEPS) {
       if (!s.selector) continue;
-      // data-tour 是组件手写的锚点；data-panel 是 dockview 的页签 id，它必须注册过
+      // data-tour 是组件手写的锚点；data-panel 由 App 挂在面板内容根上（挂没挂上另有守卫，见文件末）
       const m = /^\[([^\]=]+)="([^"]+)"\]$/.exec(s.selector);
       expect(m, `步骤 ${s.id} 的选择器写法不认识：${s.selector}`).toBeTruthy();
       const [, attr, value] = m!;
@@ -108,5 +108,73 @@ describe("入门引导的结构事实不得手写", () => {
       expect(s.body.zh, `步骤 ${s.id} 正文里有 HTML 标记，浮层会原样显示`).not.toMatch(/<\/?[a-z]/);
       expect(s.body.zh, `步骤 ${s.id} 正文里有换行，浮层会把它折成空格`).not.toContain("\n");
     }
+  });
+});
+
+/* ================= P99b-N6 · 第 9 步（装东西的地方）专属 =================
+ * 上面那条通用守卫只管"选择器在源码里存在"；这里要管的是**它存在在哪颗上**——
+ * `data-tour="plugins"` 写在随便哪个别的按钮上，那条通用守卫照样绿，而高亮会框错东西。
+ */
+describe("P99b-N6 · 入门引导里市场那一步", () => {
+  const ids = numbered.map((s) => s.id);
+
+  it("排在「让它造东西」之后：先讲 AI 造的，再讲别人造的（两条信任链不要混着讲）", () => {
+    expect(ids).toContain("market");
+    expect(ids.indexOf("market"), "市场那一步的位置变了").toBe(ids.indexOf("create") + 1);
+  });
+
+  it("锚点确实挂在标题栏那颗「插件管理」上", () => {
+    const m = numbered.find((s) => s.id === "market");
+    expect(m?.selector).toBe('[data-tour="plugins"]');
+    const tb = readFileSync(fileURLToPath(new URL("../../shell/TitleBar.tsx", import.meta.url)), "utf8");
+    expect(/title="插件管理"[\s\S]{0,220}data-tour="plugins"/.test(tb), "锚点不在「插件管理」那颗按钮上").toBe(true);
+  });
+
+  it("这一步要说清两件用户会撞上的事：装来是停用态、覆盖要人确认", () => {
+    const zh = numbered.find((s) => s.id === "market")!.body.zh;
+    expect(zh).toContain("停用态");
+    expect(zh).toContain("确认卡");
+    // 「打开那一页才联网」是市场的招牌承诺，引导里说了就得在这儿钉住
+    expect(zh).toMatch(/打开那一页时才?联网/);
+  });
+});
+
+/* ================= P102 · 面板锚点必须真的挂在 DOM 上 =================
+ * 上面那条通用守卫查的是"这个 key 在面板注册表里存在"，它**替运行时作了保**：
+ * dockview 升到 8 之后 `panel.window` / `panel.type` 两个成员都不存在了，
+ * `App.tsx` 里那句 `if (p.window && p.type)` 从此恒假 ⇒ `data-panel` 一次都没写过，
+ * 三个面板步全部静默降级成漂浮卡片，而这条守卫一直是绿的（用户看到的正是这个现象）。
+ * 所以这里钉的是**赋值那一行本身**：属性有没有写、写到哪个元素上。
+ */
+describe("P102 · data-panel 锚点真的挂得上（不是「注册过」就算数）", () => {
+  const app = readFileSync(fileURLToPath(new URL("../../App.tsx", import.meta.url)), "utf8");
+  const overlay = readFileSync(
+    fileURLToPath(new URL("./TourOverlay.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  it("App.tsx 里挂锚点的那行走的是 dockview 真的有的成员", () => {
+    expect(app, "data-panel 又不挂了 ⇒ 引导的面板步会静默降级成漂浮卡片").toMatch(
+      /setAttribute\(\s*"data-panel"\s*,/,
+    );
+    expect(app, "锚点没挂在面板内容根上（主题作用域会连页签条一起框进去）").toContain(
+      "view.content.element",
+    );
+    expect(app, "又回去读那个不存在的 p.window 了").not.toMatch(/\.window\s*&&/);
+    // 恒假取值的另一半：`p.type` 也不在 IDockviewPanel 上，靠 as unknown as 按住 tsc
+    expect(app, "as unknown as 那对强转回来了，它正是把这条死路按住的东西").not.toMatch(
+      /as unknown as \{[^}]*window/,
+    );
+  });
+
+  it("面板类步骤把聚光灯扩到停靠框外框（只框内容区看着像没高亮）", () => {
+    const panelSteps = TOUR_STEPS.filter((s) => s.selector?.startsWith("[data-panel="));
+    expect(panelSteps.length, "引导里没有面板步了？那这条守卫要跟着删").toBeGreaterThan(0);
+    for (const s of panelSteps) {
+      expect(s.frame, `步骤 ${s.id} 没声明 frame：环只会框内容区`).toBe(true);
+    }
+    expect(overlay, "TourOverlay 没实现 frame，声明了也没用").toMatch(
+      /closest\(["']\.dv-groupview["']\)/,
+    );
   });
 });

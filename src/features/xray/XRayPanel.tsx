@@ -1,3 +1,5 @@
+// P99b-N5：明暗归属只有一个可读口径（dataset.scheme），别再按主题名判（详设 S4）
+import { isDarkScheme } from "../../styles/themeCore";
 import { useEffect, useRef, useState } from "react";
 import { onRx } from "../../ipc/binbus";
 import * as templateStore from "../protocol/templateStore";
@@ -243,7 +245,7 @@ export function XRayPanel() {
     const ctx = cv.getContext("2d");
     if (!ctx) return;
     ctx.scale(dpr, dpr);
-    const dark = document.documentElement.dataset.theme === "dark";
+    const dark = isDarkScheme(document.documentElement.dataset.scheme);
     const fg = dark ? "#c8cfda" : "#2c313a";
     const dim = dark ? "#5b6371" : "#9aa2ad";
     const acc = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#4a90d9";

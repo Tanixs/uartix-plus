@@ -1,9 +1,9 @@
 import type { ControlType } from "../features/controls/controlsStore";
 
-const svg = (children: React.ReactNode) => (
+const svg = (children: React.ReactNode, size = 14) => (
   <svg
-    width="14"
-    height="14"
+    width={size}
+    height={size}
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
@@ -15,7 +15,9 @@ const svg = (children: React.ReactNode) => (
   </svg>
 );
 
-export const IconChevron = (props: { dir?: "right" | "down"; size?: number }) => (
+/** 四向箭头（轮播/折叠都用它）。SVG 而不是 ‹ › 字符：§8-25 禁字符图标。 */
+const CHEVRON_ROT = { right: 0, down: 90, left: 180, up: 270 } as const;
+export const IconChevron = (props: { dir?: keyof typeof CHEVRON_ROT; size?: number }) => (
   <svg
     width={props.size ?? 14}
     height={props.size ?? 14}
@@ -26,7 +28,7 @@ export const IconChevron = (props: { dir?: "right" | "down"; size?: number }) =>
     strokeLinecap="round"
     strokeLinejoin="round"
     style={{
-      transform: props.dir === "down" ? "rotate(90deg)" : undefined,
+      transform: props.dir && props.dir !== "right" ? `rotate(${CHEVRON_ROT[props.dir]}deg)` : undefined,
       transition: "transform 0.15s",
       flex: "none",
     }}
@@ -320,11 +322,37 @@ export const IconEyeOff = () =>
     </>,
   );
 
-export const IconPuzzle = () =>
+/**
+ * 拼图（插件）。两件事都是量出来的，不是估的：
+ * ① 未加变换时墨盒中心在 **(12,9)**（标题栏那颗实测偏上 1px、偏左 1px）；
+ * ② 墨盒只占 viewBox 的六成，跟旁边几颗比就"看着小"。
+ * 这一串变换＝把墨盒中心搬回 (12,12) 并整体放大（1.3 是量出来的：占比 0.58→0.76，与旁边齿轮的 0.92 同档）；改它要在浏览器里重测
+ * `path.getBoundingClientRect()` 与 svg 中心的差（本批实测 dx/dy 从 0.67/-0.67 → 0/0）。
+ *
+ * **描边要跟着反向补偿**：`scale(1.3)` 把 `strokeWidth="2"` 一起放大了（2.6），
+ * 叠上这颗用 16px 而邻居用 14px，屏上就是 1.73px vs 1.17px——用户看到的"边缘太粗"是这 48%。
+ * 除以同一个系数，墨盒尺寸不动、重量回到同一档。
+ */
+export const IconPuzzle = (props?: { size?: number }) =>
   svg(
     <>
-      <path d="M9 4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H5v-4a2 2 0 1 0 0-4V4h4z" />
+      <path
+        transform="translate(12 12) scale(1.3) translate(-12 -9)"
+        strokeWidth={2 / 1.3}
+        d="M9 4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H5v-4a2 2 0 1 0 0-4V4h4z"
+      />
     </>,
+    props?.size,
+  );
+
+/** 齿轮（设置）。P102 从 TitleBar 的本地 const 上收：市场页那颗「货架来源」也要同一颗，抄一份就会漂。 */
+export const IconSettings = (props?: { size?: number }) =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </>,
+    props?.size,
   );
 
 export const IconCode = () =>

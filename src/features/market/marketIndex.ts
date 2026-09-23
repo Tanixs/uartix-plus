@@ -12,14 +12,31 @@
  */
 import { PLUGIN_CAPS } from "../plugins/pluginManifest";
 
-export const MARKET_SCHEMA_VERSION = 1;
+export const MARKET_SCHEMA_VERSION = 2;
+
+/**
+ * npm 通路的**唯一**允许域（P99c-R2，用户裁「只官方源」）。
+ * 刻意不与 `MARKET_ALLOW_HOSTS` 共用一条判定：那条允许 `.` 边界子域，而 registry 的子域
+ * （`install.npmjs.org` 之类）不是包地址的形状；镜像域也**一个都不放**——换了域就等于换了信任来源，
+ * 那是另一次裁决，不是设置里填一行前缀的事（所以 npm 条目也不走 `marketMirrorPrefix`，见 `marketStore.applyMirror`）。
+ */
+export const NPM_REGISTRY_HOST = "registry.npmjs.org";
 
 /**
  * 远程取回的域白名单（索引里出现的每个 URL 与镜像前缀的域都要过它）。
  * 放在契约文件而不是 store 里：它是**契约的一部分**（解析与校验都要用），
  * 而 store 会拉起 settings/plugins，测试与生成器都不该为了拿这张表去背那些副作用。
+ * `registry.npmjs.org` 是 P99c-R2 加的（用户裁决：进白名单，只官方源）——
+ * 门没有因此少一道：装的授权依据仍是"这条在索引里 + 哈希逐字节对得上"。
  */
-export const MARKET_ALLOW_HOSTS = ["raw.githubusercontent.com", "github.com"];
+export const MARKET_ALLOW_HOSTS = ["raw.githubusercontent.com", "github.com", NPM_REGISTRY_HOST];
+
+/**
+ * 应用自带那份示例货架的地址（同源相对路径）。
+ * 只此一份：`settingsStore` 的默认值与回落、`refreshIndex` 的空值兜底、设置页那句回显都引它——
+ * 之前它散在四处字面量里（详设 §1-1 顺出来的），改一处就会让"设置页说的默认值"与"实际取的那条"分叉。
+ */
+export const MARKET_BUNDLED_INDEX_URL = "/market/index.json";
 
 /** 与既有校验器同量级：包 4 MiB、单条截图 4 MiB、索引本身 2 MiB。超限不是"太大"，是"这不是货架该给的东西"。 */
 export const MARKET_PKG_MAX_BYTES = 4 * 1024 * 1024;
@@ -40,9 +57,15 @@ export interface MarketEntry {
   category: string;
   description: MarketDescription;
   version: string;
+  /** 自建货架＝那枚 `.uartix.json`；npm 条目＝**registry 的 tarball 地址**（`packageUrl` 只有一个，装链因此不分叉） */
   packageUrl: string;
-  /** 索引声明的包哈希；下载后**必比**，不符就拒（§6-2） */
+  /**
+   * 索引声明的包哈希；下载后**必比**，不符就拒（§6-2）。
+   * **它指的是 `packageUrl` 那个对象**：npm 条目下就是整枚 `.tgz`，不是解出来的清单文本
+   * （清单文本另由生产校验器与 id/version 对账把关）。混过一次的后果是"哈希看着对，包却是别的"。
+   */
   sha256: string;
+  /** 同 `sha256`：npm 条目下是 tarball 的字节数 */
   bytes: number;
   /** 索引声明的能力，用于"提权在货架上就露出来"；与包内实际能力比对，多出来即拒装 */
   capabilities: string[];
@@ -53,6 +76,11 @@ export interface MarketEntry {
   verified?: boolean;
   minAppVersion: string;
   updated: string;
+  /**
+   * 有这一节＝字节来自 npm（P99c-R2）。**身份仍是 `id`**（版本链、回滚、互斥都按它），
+   * `npm.name` 只是"字节住在哪儿"——与 P92-D2「中文名可撞，身份不能撞」同一条裁决（详设 Q4）。
+   */
+  npm?: { name: string; version: string };
 }
 
 export interface MarketIndex {
@@ -79,12 +107,18 @@ const SHA_RE = /^[0-9a-f]{64}$/;
 /** `1.2.3` / `0.4.1`；带 pre-release 后缀的我们不猜 */
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * npm 包名（含可选 scope）：小写起头，允许 `. - _`，不许空格、大写或以 `.`/`_` 开头。
+ * 比 registry 的口径略严（我们只放行自己拼得出地址的那一批）——严一点的代价是拒掉一条好投稿，
+ * 松一点的代价是装的时候拿到一句 404。
+ */
+const NPM_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 
 function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
-function isHttpUrl(u: string): boolean {
+export function isHttpUrl(u: string): boolean {
   return /^https:\/\//i.test(u);
 }
 
@@ -192,6 +226,31 @@ export function parseEntry(raw: unknown, allowHosts: readonly string[]): { entry
   if (typeof bytes !== "number" || !Number.isInteger(bytes) || bytes <= 0) reasons.push("bytes 需为正整数");
   else if (bytes > MARKET_PKG_MAX_BYTES) reasons.push(`bytes 超过上限 ${MARKET_PKG_MAX_BYTES}`);
 
+  /**
+   * npm 那一节（P99c-R2）。三条判定都不是洁癖，每一条都对应一种"装了才知道"的坏法：
+   *  - 域名不对 ⇒ 那条地址根本不是 registry 的 tarball（镜像/私有源都得另一次裁决，不是填个 URL）；
+   *  - `npm.version ≠ version` ⇒ 装下去算哪个版本没人说得清（与 `version_mismatch` 同族）；
+   *  - 包名不合法 ⇒ registry 上取不到东西，报错会是一句"远端返回 404"，作者查半天。
+   */
+  let npm: { name: string; version: string } | undefined;
+  if (o.npm !== undefined) {
+    const npmRaw = o.npm;
+    if (!npmRaw || typeof npmRaw !== "object" || Array.isArray(npmRaw)) {
+      reasons.push("npm 必须是 {name,version} 对象");
+    } else {
+      const nn = str((npmRaw as Record<string, unknown>).name);
+      const nv = str((npmRaw as Record<string, unknown>).version);
+      if (!NPM_NAME_RE.test(nn) || nn.length > 214) reasons.push(`npm.name 不是合法包名（${nn.slice(0, 60) || "空"}）`);
+      if (nv !== version) reasons.push(`npm.version（${nv || "空"}）与条目 version（${version || "空"}）不是一个数：装下去算哪个版本没人说得清`);
+      const problem = urlProblem(packageUrl, allowHosts, "npm 条目的包地址", false);
+      if (problem) reasons.push(problem);
+      else if (urlHost(packageUrl) !== NPM_REGISTRY_HOST) {
+        reasons.push(`npm 条目的包地址必须在官方 registry（${NPM_REGISTRY_HOST}），实际是 ${urlHost(packageUrl) || "解析不出主机"}`);
+      }
+      if (NPM_NAME_RE.test(nn) && nv === version && version) npm = { name: nn, version: nv };
+    }
+  }
+
   const capsRaw = o.capabilities;
   const caps = Array.isArray(capsRaw) ? capsRaw.filter((c): c is string => typeof c === "string" && c.length > 0) : [];
   if (!Array.isArray(capsRaw)) reasons.push("capabilities 必须是数组");
@@ -238,6 +297,7 @@ export function parseEntry(raw: unknown, allowHosts: readonly string[]): { entry
     updated,
   };
   if (typeof o.verified === "boolean") entry.verified = o.verified;
+  if (npm) entry.npm = npm;
   const hp = str(o.homepage);
   if (hp) entry.homepage = hp;
   const ds = str(o.discussion);
@@ -258,7 +318,7 @@ export function parseMarketIndex(raw: unknown, allowHosts: readonly string[]): P
   const want = Number(o.schemaVersion);
   if (!Number.isInteger(want)) return fail("索引缺少 schemaVersion");
   if (want > MARKET_SCHEMA_VERSION) {
-    return fail(`索引版本比应用新（schemaVersion ${want} > ${MARKET_SCHEMA_VERSION}）：请升级 Uartix+ 后再浏览市场`);
+    return fail(`索引版本比应用新（schemaVersion ${want} > ${MARKET_SCHEMA_VERSION}）：请升级 Uartix+ 后再打开插件市场`);
   }
   if (want < MARKET_SCHEMA_VERSION) {
     return fail(`索引版本过旧（schemaVersion ${want} < ${MARKET_SCHEMA_VERSION}）：这份清单没有可对照的字段定义，不猜`);
@@ -329,3 +389,60 @@ export function compareInstall(entry: Pick<MarketEntry, "id" | "version">, local
   if (localVersion === entry.version) return "same";
   return (compareVersions(localVersion, entry.version) ?? 0) < 0 ? "update" : "newer-than-shelf";
 }
+
+/**
+ * 这一条的字节从哪儿来。**判定只在这儿**：取回分支、卡片那句出处、目录视图的 `via`、
+ * 镜像那一条要不要跳过——四处各自 `if (e.npm)` 就是四套答案（§8-48）。
+ */
+export function packageOrigin(entry: Pick<MarketEntry, "npm">): "shelf" | "npm" {
+  return entry.npm ? "npm" : "shelf";
+}
+
+/**
+ * 一枚 npm 包的 tarball 地址（registry 的形状：**scope 留在路径里，文件名里去掉**）。
+ * 生成器与解析两侧共用这一份规则；形状按 R2 详设 §0 现场核过（非凭印象）。
+ */
+export function npmTarballUrl(name: string, version: string): string {
+  const scoped = name.startsWith("@") ? name.slice(1) : "";
+  const bare = scoped ? scoped.slice(scoped.indexOf("/") + 1) : name;
+  return `https://${NPM_REGISTRY_HOST}/${name}/-/${bare}-${version}.tgz`;
+}
+
+/**
+ * 装链的失败码。与 `InstallState` 同一个道理放在契约层（C1a as-built ①）：
+ * **时间线徽章也要用它**（P99c-C2 起 `propose_market_install` 会把计划失败原样回给模型），
+ * 而 `toolDisplay` 不能为了拿一张表去背装链与插件库——放在这里，两侧都只是读契约。
+ */
+export type InstallCode =
+  | "ok"
+  | "fetch_failed"
+  | "json_bad"
+  | "invalid_manifest"
+  | "id_mismatch"
+  /** 货架写的版本与包体里的版本不是一个：装下去到底算哪个数没人说得清 */
+  | "version_mismatch"
+  | "undeclared_capability"
+  | "already_same"
+  | "downgrade"
+  /** 暂存句柄没了（前端重载或超出 staging 上限被淘汰）——不是"安装失败"，是"那次请求已经作废" */
+  | "stale_staging"
+  | "update_failed";
+
+/**
+ * 每个码都得有一句中文（§8-46：兜底回显就是漏配的静默通道）。
+ * `Record<InstallCode,…>` 是穷举的：加码忘配徽章，编译期就红。
+ */
+export const INSTALL_CODE_ZH: Record<InstallCode, string> = {
+  ok: "已完成",
+  fetch_failed: "包取不回来",
+  json_bad: "包体不是合法 JSON",
+  invalid_manifest: "包未通过校验器",
+  id_mismatch: "包内标识与货架条目不符",
+  version_mismatch: "包内版本与货架声明不符",
+  undeclared_capability: "包带了指望外的能力",
+  already_same: "本机已是同版本",
+  downgrade: "本机比货架新（拒绝降级）",
+  stale_staging: "那次暂存已作废",
+  update_failed: "更新失败（已回退）",
+};
+

@@ -1,7 +1,7 @@
 /**
  * P88b-3 §9.3：本地插件库 UI。
  * 提供：搜索、分类、启停、配置、版本历史/回滚、权限查看、复制、导出、导入、
- * 卸载、更新候选批准/拒绝、插件市场（占位）、面板/小部件打开入口。
+ * 卸载、更新候选批准/拒绝、插件市场入口（弹窗由 App 渲染，这里只发信号）、面板/小部件打开入口。
  * PluginManagerBody 为可复用主体（插件库弹窗与设置→插件管理共用），
  * PluginLibraryDialog 仅保留 overlay/portal 壳。
  * 样式全部使用主题变量（8 主题兼容），无字面量颜色。
@@ -25,8 +25,11 @@ import {
   type PluginRecord,
 } from "./pluginStore";
 import { contribKeyLabel, artifactKindLabel, type WorkflowArtifact } from "./artifact";
-import { deprecatedContribKeys } from "./pluginStore";
-import { requestApplyLayout } from "../ai/appBus";
+import { deprecatedContribKeys, themeArtsOf } from "./pluginStore";
+// P99b-N5：主题那颗开关的话术与设置页/市场同一处（三处各写一遍就会互相打架）
+import { themeButtonTalk } from "../settings/themePicker";
+import { activeThemeFacts } from "../../styles/themeFacts";
+import { requestApplyLayout, requestOpenMarket } from "../ai/appBus";
 import { pushDraft } from "../ai/chatStore";
 import { looksLikeLayoutJson } from "../settings/applyLayout";
 import { unknownTemplateTools, templateToPrompt } from "../agent/taskTemplate";
@@ -35,7 +38,17 @@ import { moduleDiagnostics, type ModuleStatus } from "./moduleBus";
 import { describeToolChange, pluginToolChangeOf, pluginToolDefsOf } from "./pluginToolDefs";
 import { CAP_LABEL, PLUGIN_CAPS, describeDiff, manifestDiff, type PluginManifest } from "./pluginManifest";
 import { setOpen } from "../ai/extensionStore";
-import { MarketDialog } from "../market/MarketDialog";
+
+/**
+ * 那颗开关的 tooltip。带主题产物的包要说清"会挤掉谁"（P99b-N5 同级互斥），
+ * 其余包沿用"启用/停用"两个字——话术本身在 `settings/themePicker` 里，与设置页、市场同源。
+ */
+function switchTalk(r: PluginRecord): string {
+  const on = r.state === "enabled";
+  if (!themeArtsOf(r.pkg).length) return on ? "停用" : "启用";
+  const f = activeThemeFacts();
+  return themeButtonTalk(f.pluginId === r.pkg.id ? "drawn" : "other", r.pkg.name);
+}
 
 /** 逻辑模块运行态的说法（穷举 Record：加一种状态忘了配说法，编译期就红） */
 const MODULE_STATUS_ZH: Record<ModuleStatus | "none", string> = {
@@ -105,7 +118,6 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   const [filter, setFilter] = useState<(typeof KIND_FILTERS)[number]>("all");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [market, setMarket] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const list = useMemo(() => {
@@ -263,8 +275,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
           {plugins.length ? `${plugins.length} 个插件` : "暂无插件；由 AI 助手「保存为插件」或导入插件包"}
         </span>
         <div className="plg-head-actions">
-          <button className="btn" onClick={() => setMarket(true)} title="浏览社区插件货架：实时拉取索引，看得见来源、能力与哈希">
-            浏览市场
+          <button className="btn" onClick={requestOpenMarket} title="打开社区插件货架：实时拉取索引，看得见来源、能力与哈希">
+            插件市场
           </button>
           <button className="btn" onClick={() => fileRef.current?.click()} title="导入 uartix-plugin 包（默认停用，校验后才可启用）">
             导入
@@ -329,6 +341,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
         </button>
       </div>
 
+      {/* 确认卡搬到 App 顶层一份了：插件库关掉也要看得见命令行发起的那条请求 */}
+
       {selMode && (
         <div className="plg-batch" role="group" aria-label="批量操作">
           <button className="btn" onClick={() => setSel(new Set(allVisibleIds))}>
@@ -383,7 +397,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   <span className={`plg-state s-${r.state}`}>{PLUGIN_STATE_LABEL[r.state]}</span>
                   {r.candidate && <span className="plg-chip warn">有候选 v{r.candidate.version}</span>}
                 </button>
-                <label className="plg-switch" title={enabled ? "停用" : "启用"}>
+                <label className="plg-switch" title={switchTalk(r)}>
                   <input
                     type="checkbox"
                     checked={enabled}
@@ -488,7 +502,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                               打开浮窗
                             </button>
                           )}
-                          {key === "themes" && <span className="plg-detail-dim">启用后自动应用</span>}
+                          {key === "themes" && <span className="plg-detail-dim" title="内置与插件主题同级：启用它就把它换上，原来在画那枚会被停用">在画那一枚由它顶替</span>}
                           {key === "workspacePresets" && (
                             <button className="btn" onClick={() => applyWorkspaceLayout(r, it.entry)}>
                               应用此布局
@@ -615,7 +629,6 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
         能力白名单（{PLUGIN_CAPS.length} 项）之外的声明一律拒绝；导入的插件一律默认停用；作者自报的可信标记不构成信任。
       </div>
 
-      {market && <MarketDialog onClose={() => setMarket(false)} />}
     </>
   );
 }

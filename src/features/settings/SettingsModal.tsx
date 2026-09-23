@@ -1,10 +1,10 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { Fragment, useEffect, useState, useSyncExternalStore } from "react";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { THEME_LIST, useSettings, patch, type ThemeMode, type WorkspacePreset, AI_PRESETS, AI_FORMATS, type AiPreset, type AiFormat } from "./settingsStore";
+import { useSettings, patch, SETTINGS_TAB_PLUGINS, type WorkspacePreset, AI_PRESETS, AI_FORMATS, type AiPreset, type AiFormat } from "./settingsStore";
 import { useLayouts, removeLayout, renameLayout } from "./layoutsStore";
 import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
 import { t, tx } from "../../i18n/strings";
@@ -22,12 +22,15 @@ import { OperatorGenBlock } from "../operator/OperatorGen";
 import { mcpServerConfig } from "../mcp/mcpTools";
 import { imageStoreStats, setImageLimits, clearAllImages } from "../ai/imageStore";
 import { toast } from "../ai/extRuntime";
-import { subscribe as subExts, getSnapshot as getExtSnap } from "../ai/extensionStore";
+import { activeThemeFacts, subscribeStyleApply } from "../../styles/themeFacts";
+import { drawnTalk, pluginSectionStart, selectTheme, themeCards } from "./themePicker";
+import { themeBearingPackages, usePlugins } from "../plugins/pluginStore";
 import { cleanBaseUrl } from "../agent/provider";
 import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
 import { appearanceDefaults, appearanceDefaultLabels } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
+import { SetRow } from "../../shared/SetRow";
 import { IconEye, IconEyeOff, IconEdit, IconTrash } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
@@ -52,22 +55,11 @@ const PRESETS: { key: WorkspacePreset; label: string; desc: string }[] = [
   { key: "vdev", label: t("set.preset.vdev"), desc: "工坊 + 曲线 + 画布" },
 ];
 
-/** 主题色板预览：bg=窗口底色 panel=内容区 accent=高亮条（与 theme.css 变量块保持一致） */
-const THEME_SWATCH: Record<ThemeMode, { bg: string; panel: string; accent: string }> = {
-  light: { bg: "#f5f6f8", panel: "#ffffff", accent: "#2f6fce" },
-  dark: { bg: "#0f1115", panel: "#161a20", accent: "#4e9cef" },
-  navy: { bg: "#0d1322", panel: "#131b2e", accent: "#559df0" },
-  ocean: { bg: "#eff4fa", panel: "#ffffff", accent: "#1e6fd9" },
-  matcha: { bg: "#eef5ea", panel: "#fbfdf9", accent: "#3e8e52" },
-  amber: { bg: "#fdf4ea", panel: "#fffbf6", accent: "#e07b1f" },
-  begonia: { bg: "#fbf1f2", panel: "#fffcfc", accent: "#c8445c" },
-  glaze: { bg: "#0e1420", panel: "#151d2c", accent: "#d05f6e" },
-  system: {
-    bg: "linear-gradient(135deg,#f5f6f8 49%,#0f1115 51%)",
-    panel: "rgba(128,128,128,0.35)",
-    accent: "#4e9cef",
-  },
-};
+/**
+ * P99b-N5：这里以前是一张手抄的 `THEME_SWATCH`（九行 bg/panel/accent 字面量，注释写着
+ * "与 theme.css 变量块保持一致"）。色值从此只有一份出处——主题 token 表本身，
+ * 预览格由 `themePicker` 按那张表算出来（缺键按兜底层补，详设 §1-8）。
+ */
 
 async function saveJson(kind: string, data: unknown): Promise<void> {
   const path = await save({
@@ -111,10 +103,18 @@ async function loadJson<T>(kinds: string[]): Promise<T | null> {
 
 /* ---------------- 插件管理页（旧扩展管理已废弃，内嵌插件库主体） ---------------- */
 
+/**
+ * P102：这里原先还有「插件市场」那两行（索引地址 / 镜像前缀）+ 一行取回状态。
+ * 用户裁决：这一栏只留本地插件库。两行搬进市场弹窗自己里面（`market/MarketSourceRows.tsx`，
+ * 顶上那颗齿轮展开）——它们服务的正是"这一页从哪儿取清单"，与货架状态是同一条信息，
+ * 而且失败页原本就叫人回设置页改，绕一圈才回到用户站着的地方。
+ */
 function ExtPage() {
   return (
-    <div className="set-plg-embed">
-      <PluginManagerBody />
+    <div className="set-ext-page">
+      <div className="set-plg-embed">
+        <PluginManagerBody />
+      </div>
     </div>
   );
 }
@@ -184,23 +184,49 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const settings = useSettings();
   const timeLinked = useSyncExternalStore(timeCursor.subscribe, () => timeCursor.getSnapshot().linked);
   const snt = useSyncExternalStore(sentinelStore.subscribe, sentinelStore.getSnapshot);
-  // P91 D5：插件主题与内置主题的互认——内联层恒压过样式表，过去选择器显示"自己选中"
-  // 而界面其实被插件覆盖，且切内置主题不会重跑样式层。现在把覆盖态显出来并给一键停用。
-  const extSnap = useSyncExternalStore(subExts, getExtSnap);
-  const themeLayers = extSnap.exts.filter((e) => e.enabled && e.type === "theme");
+  /**
+   * P99b-N5：外观选择器的数据全在 `themePicker`（内置与插件同级的几张卡，含"谁在画"）。
+   * 旧实现在这里自己 `exts.filter(enabled && type==="theme")` 再数一遍——那是"哪枚主题在画"
+   * 的第二处判定（详设 §1-8 说的那句谎就长在这种地方），现在只读一个出口。
+   */
+  const plugins = usePlugins();
+  const [sysDark] = useState(() =>
+    typeof window === "undefined" ? false : window.matchMedia("(prefers-color-scheme: dark)").matches,
+  );
+  const drawn = useSyncExternalStore(subscribeStyleApply, () => activeThemeFacts());
+  const cards = themeCards({
+    settingsTheme: settings.theme,
+    sysDark,
+    drawnId: drawn.id || null,
+    drawnName: drawn.name || null,
+    drawnPluginId: drawn.pluginId,
+    records: plugins.plugins,
+    labelOf: (id) => t(`set.theme.${id}`),
+  });
+  /** 内置与插件之间那道横线插在哪（-1＝一枚插件主题都没装，不出现横线） */
+  const themeSep = pluginSectionStart(cards);
+  const pickTheme = async (key: string) => {
+    const card = cards.find((c) => c.key === key);
+    if (!card) return;
+    const r = await selectTheme(card, { pluginPkgId: drawn.pluginId, name: drawn.name });
+    toast(r.ok ? r.msg : `没换成：${r.msg}`);
+  };
+  /** 启用中的插件主题包（互斥之后至多一枚，但存量数据可能不止——两处按钮都读这一个列表） */
+  const enabledThemePkgIds = () =>
+    [...new Set(themeBearingPackages().filter((r) => r.state === "enabled").map((r) => r.pkg.id))];
   const disableThemeLayers = async () => {
-    const { setEnabled } = await import("../plugins/pluginStore");
-    const refs = [...new Set(themeLayers.map((e) => e.pluginRef).filter(Boolean))] as string[];
+    const refs = enabledThemePkgIds();
     if (!refs.length) {
-      toast("这些主题层不是插件提供的，请到 AI 助手 → 插件库处理");
+      toast("现在没有插件主题在画，界面用的就是内置主题");
       return;
     }
+    const { setEnabled } = await import("../plugins/pluginStore");
     const failed: string[] = [];
     for (const id of refs) {
       const r = setEnabled(id, false);
       if (!r.ok) failed.push(`${id}：${r.msg}`);
     }
-    toast(failed.length ? `部分停用失败：${failed.join("；")}` : `已停用 ${refs.length} 个插件主题，界面回到内置主题`);
+    toast(failed.length ? `部分停用失败：${failed.join("；")}` : `已停用 ${refs.length} 枚插件主题，界面回到内置主题`);
   };
   /**
    * P98-M1 外观来源面板。
@@ -221,7 +247,8 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
       : "AI 当前没有留下临时外观改动");
   };
   const restoreAppearanceDefaults = async () => {
-    const pluginThemeCount = new Set(themeLayers.map((e) => e.pluginRef).filter(Boolean)).size;
+    const refs = enabledThemePkgIds();
+    const pluginThemeCount = refs.length;
     const willDo = [
       aiStyle.tokens ? `清除 AI 的 ${aiStyle.tokens} 项 token 覆盖` : "",
       aiStyle.layers.length ? `清除 AI 的 ${aiStyle.layers.length} 层组件样式` : "",
@@ -237,7 +264,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     clearAiStyleLayers();
     if (pluginThemeCount) {
       const { setEnabled } = await import("../plugins/pluginStore");
-      for (const id of [...new Set(themeLayers.map((e) => e.pluginRef).filter(Boolean))] as string[]) {
+      for (const id of refs) {
         void setEnabled(id, false);
       }
     }
@@ -319,20 +346,16 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     { key: "data", label: t("set.data") },
     { key: "monitor", label: tx("监测", "Monitoring") },
     { key: "ai", label: t("set.ai") },
-    { key: "ext", label: t("set.ext") },
+    { key: SETTINGS_TAB_PLUGINS, label: t("set.ext") },
     { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}` },
     { key: "io", label: t("set.io") },
     { key: "about", label: t("set.about") },
   ];
 
   const row = (label: string, node: React.ReactNode, tip?: string) => (
-    <div className="set-row">
-      <label>
-        {label}
-        {tip && <HelpHint text={tip} />}
-      </label>
-      <div className="set-ctl">{node}</div>
-    </div>
+    <SetRow label={label} tip={tip}>
+      {node}
+    </SetRow>
   );
 
   const ioBlock = (label: string, tip: string, onExport: () => Promise<void>, onImport: () => Promise<void>) => (
@@ -373,50 +396,62 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 ))}
                 {row(t("set.theme"), (
                   <div className="theme-grid">
-                    {THEME_LIST.map((th) => {
-                      const sw = THEME_SWATCH[th];
-                      return (
+                    {cards.map((c, i) => (
+                      <Fragment key={c.key}>
+                        {/* 内置与插件同级，但中间要有根线：横线插在哪由派生层算（themePicker） */}
+                        {i === themeSep && (
+                          <div className="theme-grid-sep">
+                            <span>{tx("插件主题", "Plugin themes")}</span>
+                          </div>
+                        )}
+                        {/*
+                          P102 卡面减负：只留预览格与名字。"在画"看环、"没启用"看淡，
+                          沿用兜底几项/还会带来什么/实际是哪枚供值——全在 title 里（派生层拼好）。
+                        */}
                         <button
-                          key={th}
-                          className={`theme-card ${settings.theme === th ? "on" : ""}`}
-                          title={t(`set.theme.${th}`)}
-                          onClick={() => {
-                            patch({ theme: th });
-                            // 即时同步 DOM（不等 effect 时序）；system 立即解析一次
-                            document.documentElement.dataset.theme =
-                              th === "system"
-                                ? window.matchMedia("(prefers-color-scheme: dark)").matches
-                                  ? "dark"
-                                  : "light"
-                                : th;
-                          }}
+                          className={`theme-card${c.drawn ? " on" : ""}${c.builtin ? "" : " from-plugin"}${!c.builtin && !c.drawn ? " off" : ""}`}
+                          title={c.talk}
+                          aria-pressed={c.drawn}
+                          onClick={() => void pickTheme(c.key)}
                         >
-                          <span
-                            className="theme-swatch"
-                            style={{ background: sw.bg }}
-                          >
-                            <span className="theme-bar" style={{ background: sw.accent }} />
-                            <span className="theme-panel" style={{ background: sw.panel }} />
+                          <span className="theme-swatch" style={{ background: c.swatch.bg }}>
+                            <span className="theme-bar" style={{ background: c.swatch.accent }} />
+                            <span className="theme-panel" style={{ background: c.swatch.panel }} />
                           </span>
-                          <span className="theme-name">{t(`set.theme.${th}`)}</span>
+                          <span className="theme-name">{c.name}</span>
                         </button>
-                      );
-                    })}
+                      </Fragment>
+                    ))}
                   </div>
                 ), t("set.theme.tip"))}
                 {row("当前外观被谁改了", (
                   <div className="set-apr">
+                    <div className="set-apr-ops">
+                      <button className="btn sm primary" disabled={aiStyle.clean} onClick={clearAi}>
+                        清除 AI 的全部临时改动
+                      </button>
+                      <button className="btn sm danger" onClick={() => void restoreAppearanceDefaults()}>
+                        恢复外观默认
+                      </button>
+                    </div>
+                    {/* 行序＝它自己宣布的那条覆盖栈（兜底 < 在画 < AI 临时）；以前前两行是反的 */}
                     <ul className="set-apr-list">
                       <li>
-                        <span className="set-apr-name">内置主题</span>
-                        <span className="set-apr-val">{t(`set.theme.${settings.theme}`)}</span>
-                        <span className="set-apr-note">样式表，切换只改它</span>
+                        <span className="set-apr-name">
+                          兜底层
+                          <HelpHint text="内置与插件主题同级，缺的键按明暗归属垫一张表（不是第三份配色抄本）" />
+                        </span>
+                        <span className="set-apr-val">
+                          {drawn.inherited ? `${drawn.inherited} 项由「内置 ${drawn.baseline}」供值` : "本次没有派上用场"}
+                        </span>
                       </li>
-                      <li className={themeLayers.length ? "on" : ""}>
-                        <span className="set-apr-name">插件主题层</span>
-                        <span className="set-apr-val">{themeLayers.length ? `${themeLayers.length} 个生效` : "无"}</span>
-                        {themeLayers.length > 0 && (
-                          <button className="btn sm" onClick={() => void disableThemeLayers()}>停用</button>
+                      <li className={drawn.overrides ? "on" : ""}>
+                        <span className="set-apr-name">在画的这枚主题</span>
+                        <span className="set-apr-val">{drawnTalk({ ...drawn, name: drawn.builtin ? t(`set.theme.${drawn.id}`) : drawn.name })}</span>
+                        {!drawn.builtin && (
+                          <button className="btn sm" onClick={() => void disableThemeLayers()}>
+                            停用
+                          </button>
                         )}
                       </li>
                       <li className={aiStyle.tokens ? "on ai" : ""}>
@@ -434,20 +469,12 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                         )}
                       </li>
                     </ul>
-                    <div className="set-apr-ops">
-                      <button className="btn sm primary" disabled={aiStyle.clean} onClick={clearAi}>
-                        清除 AI 的全部临时改动
-                      </button>
-                      <button className="btn sm danger" onClick={() => void restoreAppearanceDefaults()}>
-                        恢复外观默认
-                      </button>
-                    </div>
                     <p className="set-apr-hint">
-                      后两层是 AI 本次会话改的（圆角/尺寸/阴影/临时主题都在这里），<b>不落盘、也不归插件停用管</b>——
-                      所以停用或卸载插件撤不掉它们，用上面第一个按钮。第二个会连你自己选的主题与缩放一起回默认。
+                      后两层不落盘、也不归插件停用管——停用或卸载插件撤不掉它们
+                      <HelpHint text="后两层是 AI 本次会话改的（圆角/尺寸/阴影/临时主题都在这里）：要撤它们用上面第一颗按钮。第二颗「恢复外观默认」会连你自己选的主题与缩放一起回默认，其他数据不动。" />
                     </p>
                   </div>
-                ), "从上到下层层覆盖：内置主题 < 插件主题 < AI 临时层。哪一层有内容，就说明当前界面是被它改的")}
+                ), "从上到下层层覆盖：兜底层 < 在画的这枚主题（内置与插件同级，只有一枚）< AI 临时层。哪一层有内容，就说明当前界面是被它改的")}
                 {row(t("set.zoom"), (
                   <div className="set-seg">
                     {[90, 100, 110, 125].map((z) => (
@@ -990,7 +1017,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <HelpHint text={t("set.ai.manage.tip")} />
                   </label>
                   <div className="set-ctl">
-                    <button className="btn primary" onClick={() => setTab("ext")}>
+                    <button className="btn primary" onClick={() => setTab(SETTINGS_TAB_PLUGINS)}>
                       {t("set.ai.manageBtn")}
                     </button>
                   </div>
@@ -1021,7 +1048,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 <div className="set-io-hint">{t("set.ai.privacy")}</div>
               </>
             )}
-            {tab === "ext" && <ExtPage />}
+            {tab === SETTINGS_TAB_PLUGINS && <ExtPage />}
             {tab === "mcp" && (
               <>
                 <div className="set-group-title">{tx("MCP 服务器（AI IDE 反向集成）", "MCP server (AI IDE integration)")}</div>
