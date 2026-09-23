@@ -1,6 +1,6 @@
 [package]
 name = "uartix-plus"
-version = "0.4.1"
+version = "0.5.0"
 description = "Uartix+ - visual serial protocol analyzer"
 authors = ["Tanix"]
 edition = "2021"
@@ -26,7 +26,10 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-updater = "2"
+# 下限钉到 2.11 **这一条线**（`~`＝>=2.11 <2.12）：npm 侧 `@tauri-apps/plugin-updater` 也锁在同一线，
+# 两边不一致时 tauri CLI 每次启动都报 `Error Found version mismatched`（P90 起挂账，P99c-M 结掉）。
+# 为什么不用 `"2.11"`：caret 语义会放行 2.12（本次实测真的解析成了 2.12.0），漂移只是换了个方向。
+tauri-plugin-updater = "~2.11"
 tauri-plugin-process = "2"
 tauri-plugin-single-instance = "2"
 serialport = "4"
