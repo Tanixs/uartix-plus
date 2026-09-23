@@ -54,6 +54,23 @@ jobs:
             exit 1
           fi
 
+          # 发版说明**只有一个出处：仓库根 CHANGELOG.md 里这一版的那一节**。
+          # 原先读 `docs/RELEASE_NOTES/<tag>.md`，而 docs/ 自 `539034e` 起按用户裁决
+          # 不再入库（设计与交接文档仅本地保留）⇒ v0.5.0 的 CI 就断在
+          # `jq: error: Could not open file docs/RELEASE_NOTES/v0.5.0.md`。
+          # 为什么不改成"再开一个入库的 release-notes 目录"：那等于给同一句话养第二个家，
+          # 忘了写就是发版失败；CHANGELOG 这一节本来就要写，且它和版本号同源同提交。
+          BODY=$(awk -v tag="## ${TAG} " '
+            index($0, tag) == 1 { in1 = 1; next }
+            in1 && /^## /       { in1 = 0 }
+            in1                 { print }
+          ' CHANGELOG.md)
+          if [ -z "${BODY//[[:space:]]/}" ]; then
+            echo "::error::CHANGELOG.md 里找不到 ${TAG} 那一节（形如「## ${TAG} (YYYY-MM-DD)」）⇒ 先补这一版的条目再发版"
+            exit 1
+          fi
+          echo "release body: $(printf '%s' "$BODY" | wc -l) 行，来自 CHANGELOG.md 的 ${TAG} 一节"
+
           case "${#IDS[@]}" in
             0)
               # 创建必须走 `gh api -X POST` 并从**响应**里取 ID。两个坑都踩过：
@@ -62,9 +79,8 @@ jobs:
               #   ② 创建成功后立刻回查 listReleases 取 ID 也不可靠——该端点有读副本
               #      延迟，实测草稿已存在（稍后查询可见）但同一 job 内查回空，
               #      于是误判失败。写响应自带 id，无需再读。
-              ID=$(jq -Rs --arg tag "$TAG" --arg name "Uartix+ ${TAG}" \
-                '{tag_name: $tag, name: $name, draft: true, body: .}' \
-                "docs/RELEASE_NOTES/${TAG}.md" \
+              ID=$(jq -n --arg tag "$TAG" --arg name "Uartix+ ${TAG}" --arg body "$BODY" \
+                '{tag_name: $tag, name: $name, draft: true, body: $body}' \
                 | gh api -X POST "/repos/${GITHUB_REPOSITORY}/releases" --input - --jq .id)
               if [ -z "${ID:-}" ]; then
                 echo "::error::草稿创建失败（未拿到 release ID），中止以避免资产分裂"
@@ -75,6 +91,14 @@ jobs:
             1)
               ID="${IDS[0]}"
               echo "reusing existing release ${ID} for ${TAG}"
+              # 复用那一支也要补正文：v0.5.0 那次 jq 读不到文件（见上），但 `gh api --input -`
+              # 仍拿着空 stdin 建出了一份**空正文草稿**——于是"复用"会把空正文一路带到发布。
+              # 只在正文确实是空的时候补，不覆盖手工写过的说明。
+              CUR=$(gh api "/repos/${GITHUB_REPOSITORY}/releases/${ID}" --jq .body)
+              if [ -z "${CUR//[[:space:]]/}" ]; then
+                gh api -X PATCH "/repos/${GITHUB_REPOSITORY}/releases/${ID}" --field body="$BODY" >/dev/null
+                echo "empty body patched from CHANGELOG"
+              fi
               ;;
             *)
               echo "::error::tag ${TAG} 下存在 ${#IDS[@]} 个 release（ID: ${IDS[*]}），资产会分裂。请先在 Releases 页删除多余项（含草稿，tag 本身保留）后重跑本 workflow。"
@@ -153,7 +177,7 @@ jobs:
           # 参数转发与覆盖均正常，纯粹是漏接线）。
           args: ${{ matrix.args }}
           releaseName: "Uartix+ ${{ needs.create-release.outputs.tag }}"
-          releaseBody: "见 docs/RELEASE_NOTES。"
+          releaseBody: "见仓库根 CHANGELOG.md。"
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
