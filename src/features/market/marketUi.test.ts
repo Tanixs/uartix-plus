@@ -219,7 +219,7 @@ describe("P99b-N2 · 入口只有一个（Q8）", () => {
     // P102：同一个 scale 把 strokeWidth="2" 也放大成 2.6，叠上 16px（邻居 14px）就是用户说的"边缘太粗"。
     // 钉的是那个具体的除法形状——写回 strokeWidth="2" 也算"写了个描边"，所以不能只钉属性存在。
     expect(
-      /strokeWidth=\{2 \/ 1\.3\}/.test(read("../../shared/icons.tsx")),
+      /strokeWidth=\{ICON_STROKE \/ 1\.3\}/.test(read("../../shared/icons.tsx")),
       "拼图那颗的描边补偿没了：scale(1.3) 会把描边放大 30%，比旁边几颗粗出四成半",
     ).toBe(true);
     const app = read("../../App.tsx");

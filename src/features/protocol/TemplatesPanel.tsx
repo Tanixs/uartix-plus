@@ -337,7 +337,7 @@ export function TemplatesPanel() {
   return (
     <div className="tpl-panel" ref={tplRootRef}>
       <div className="tpl-header">
-        <span>{tx("协议模板", "Protocol Templates")}</span>
+        {/* P103 批2（1-21）：页签条已显示「协议模板」，面板内不再重复；头部只剩动作行（右对齐） */}
         <div className="tpl-header-actions">
           <button className="btn" title={tx("新建空白协议或协议簇（多帧型分组，可复制/粘贴帧型）", "New blank protocol or cluster (multi frame-type group, copy/paste supported)")} onClick={() => setNewOpen(true)}>
             {tx("＋ 新建", "+ New")}

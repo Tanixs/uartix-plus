@@ -1,23 +1,29 @@
-/* 海棠（Begonia）：亮色系，淡粉底色 + 海棠红点缀，柔和不刺眼 */
+/* 海棠（Begonia）：亮色系，中性纸面 + 海棠红点缀。
+   P103-VIS2 重调（实测病根）：原表把"粉"画在每一档表面上——bg #fbf1f2 / panel #fffcfc /
+   inset #f6e4e6 / titlebar #f8e9ea，四档明度差不足 2% 而色相全红，于是工具栏、面板、状态栏
+   计算值同为 #fffcfc、页签条与输入框同为 #f6e4e6，整屏读作"一张粉纸"，`--raise-*` 再怎么调
+   也拉不出层级。Primer 的分工不是这样：层级由**中性明度档**承担，主题色只做点缀。
+   所以这里把底色全部降饱和、按 chrome < canvas < inset < panel 拉开四档，海棠红退到
+   accent / 描边 / 徽标上——名字仍是海棠，只是不再是一整张粉纸。 */
 :root[data-theme="begonia"] {
   color-scheme: light;
-  --bg: #fbf1f2;
-  --bg-panel: #fffcfc;
-  --bg-inset: #f6e4e6;
-  --bg-titlebar: #f8e9ea;
-  --border: #e7c9cd;
-  --border-soft: #f0dadd;
-  --text: #3d2428;
-  --text-dim: #8a6167;
+  --bg: #f2edef; /* 画布：面板之下的那层 */
+  --bg-panel: #ffffff; /* 面板 / 工具栏：抬到纯白，浮起才有空间（状态栏不占这档，它归壳） */
+  --bg-inset: #f3ecee; /* 页签条 / 输入框：凹下档，降饱和后不再抢页签条那块"粉带" */
+  --bg-titlebar: #ece5e8; /* 壳：比画布再深一档，标题栏读作 chrome */
+  --border: #dcd2d5;
+  --border-soft: #eae2e4;
+  --text: #2b2225;
+  --text-dim: #7b6a6e;
   --accent: #c8445c;
   --on-accent: #ffffff;
-  --accent-soft: rgba(200, 68, 92, 0.12);
+  --accent-soft: rgba(200, 68, 92, 0.10);
   --danger: #c9372c;
   --warn: #a8681c;
   --ok: #2e8b57;
-  --shadow: 0 8px 24px rgba(61, 36, 40, 0.14);
-  --scrollbar: #e3c2c7;
-  --scrollbar-hover: #cfa6ad;
+  --shadow: 0 8px 24px rgba(61, 36, 40, 0.13);
+  --scrollbar: #d6c8cc;
+  --scrollbar-hover: #bda9ae;
 
   /* 语义色（P74c C4）：亮色主题用加深版，保证面板底上对比度 ≥ 4.5（check:theme 校验） */
   --k-send: #0969da;

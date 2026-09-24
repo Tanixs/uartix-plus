@@ -52,12 +52,40 @@ const TOKEN_SET = new Set<string>(APPEARANCE_TOKENS);
 const UNIT_RE = /^\d+(\.\d+)?(ms|px)$/;
 const EASE_RE = /^(cubic-bezier\([^;{}]{1,60}\)|linear|ease|ease-in|ease-out|ease-in-out)$/;
 
-/** 值合法性：拒绝 CSS 结构字符防注入；单位类 token 校验格式；其余放宽（颜色/阴影/颜色函数均合法）。 */
+/**
+ * P103：布局类 token 的**值域**（前缀 → 允许区间）。
+ *
+ * 为什么要收窄：`--ctl-h-2` 这类键落在白名单的"其余放宽"分支里，模型把面板头写成
+ * `200px` 也照样通过——布局类旋钮一旦能写崩，"AI 能改布局"就等于不能用。
+ * 这不是限制能力，是让能力可用（写崩的界面谁也改不回来）。
+ * 证伪：`isValidTokenValue("--ctl-h-2","200px")` 必须为 false。
+ */
+const PX_RANGE_BY_PREFIX: [RegExp, number, number][] = [
+  [/^--ctl-h-/, 18, 40],
+  [/^--sp-/, 0, 48],
+];
+/** 行高无单位（1 ~ 2.4）；`26px` 这种必须被拒 */
+const LH_RANGE: [number, number] = [1, 2.4];
+
+/** 值合法性：拒绝 CSS 结构字符防注入；单位类 token 校验格式；布局类校验区间；其余放宽。 */
 export function isValidTokenValue(name: string, value: string): boolean {
   const v = value.trim();
   if (!v || v.length > 120 || /[;{}]/.test(v)) return false;
   if (/^--(fs-|radius-|dur-)/.test(name)) return UNIT_RE.test(v);
   if (name === "--ease") return EASE_RE.test(v);
+  for (const [re, min, max] of PX_RANGE_BY_PREFIX) {
+    if (!re.test(name)) continue;
+    const m = /^(\d+(?:\.\d+)?)(px)$/.exec(v);
+    if (!m) return false; // 必须带单位：无单位的 24 会让 `height: var(--ctl-h-2)` 变成非法值
+    const n = Number(m[1]);
+    return n >= min && n <= max;
+  }
+  if (/^--lh-/.test(name)) {
+    const m = /^(\d+(?:\.\d+)?)$/.exec(v);
+    if (!m) return false;
+    const n = Number(m[1]);
+    return n >= LH_RANGE[0] && n <= LH_RANGE[1];
+  }
   return true;
 }
 

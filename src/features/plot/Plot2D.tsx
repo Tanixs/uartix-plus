@@ -509,8 +509,10 @@ export function Plot2D() {
     const gridColor = cs.getPropertyValue("--border-soft").trim() || "#1d2229";
     const accent = cs.getPropertyValue("--accent").trim() || "#4e9cef";
     const dimColor = axisColor;
-    const CUR_A = "#18b893";
-    const CUR_B = "#e8a13c";
+    // 与 .pm-tag.a/.b 同源：此前这里写死 #18b893/#e8a13c，CSS 侧 B 却用 --warn-fg（海棠里是深棕），
+    // 于是徽标和它标注的那条线不同色。现在两侧都读 --cursor-a/--cursor-b（兜底值同 :root 定义）
+    const CUR_A = cs.getPropertyValue("--cursor-a").trim() || "#18b893";
+    const CUR_B = cs.getPropertyValue("--cursor-b").trim() || "#e8a13c";
     const rawM = rawMRef.current;
 
     const opts: uPlot.Options = {

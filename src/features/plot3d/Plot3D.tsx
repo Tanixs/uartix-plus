@@ -2897,22 +2897,24 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
             ⇒ 未绑齐时两张卡同时出现、说的是同一句话。 */}
         {ready && diag && diagStage(diag.code) === "start" && (
           <div className="p3d-guide" role="status">
-            <div className="p3d-guide-t">{tx("还没有轨迹", "No trajectory yet")}</div>
-            <div className="p3d-guide-d">{diag.text}</div>
-            <ol className="p3d-guide-steps">
-              <li>{tx("在 2D 曲线图例或帧画布里点亮通道（3D 与它们共用同一批通道）", "Enable a channel in the 2D legend or frame canvas — 3D shares the same channels")}</li>
-              <li>{tx("把字段拖到左上的组行 X / Y（Z 可留空 = 平面轨迹）", "Drag a field onto a group row's X / Y (Z optional = planar)")}</li>
-              <li>{tx("或点「选通道」，在组设置里直接挑", "…or pick channels in group settings")}</li>
-            </ol>
-            <div className="p3d-guide-ops">
-              {diag.action && (
-                <button className="btn sm primary" onClick={() => runRemedy(diag)}>
-                  {tx(...REMEDY_LABEL[diag.action])}
+            <div className="p3d-guide-card">
+              <div className="p3d-guide-t">{tx("还没有轨迹", "No trajectory yet")}</div>
+              <div className="p3d-guide-d">{diag.text}</div>
+              <ol className="p3d-guide-steps">
+                <li>{tx("在 2D 曲线图例或帧画布里点亮通道（3D 与它们共用同一批通道）", "Enable a channel in the 2D legend or frame canvas — 3D shares the same channels")}</li>
+                <li>{tx("把字段拖到左上的组行 X / Y（Z 可留空 = 平面轨迹）", "Drag a field onto a group row's X / Y (Z optional = planar)")}</li>
+                <li>{tx("或点「选通道」，在组设置里直接挑", "…or pick channels in group settings")}</li>
+              </ol>
+              <div className="p3d-guide-ops">
+                {diag.action && (
+                  <button className="btn sm primary" onClick={() => runRemedy(diag)}>
+                    {tx(...REMEDY_LABEL[diag.action])}
+                  </button>
+                )}
+                <button className="btn sm" onClick={() => requestOpenPanel("plot2d")}>
+                  {tx("打开 2D 曲线", "Open 2D plot")}
                 </button>
-              )}
-              <button className="btn sm" onClick={() => requestOpenPanel("plot2d")}>
-                {tx("打开 2D 曲线", "Open 2D plot")}
-              </button>
+              </div>
             </div>
           </div>
         )}

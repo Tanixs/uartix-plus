@@ -223,7 +223,9 @@ export function DataTable() {
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - 4);
   const end = Math.min(total, start + Math.ceil(viewH / ROW_H) + 8);
   const slice = shown.slice(start, end);
-  const gridCols = `92px 108px repeat(${Math.max(cols.length - 3, 0)}, minmax(96px, 1fr)) 76px`;
+  // 时间列 104px：ts 是 12px 等宽体的 "00:00:01.204"（12 字符 × 约 7.2px ≈ 86px）加 .tbl-cell 左右各 8px 内距
+  // ≈ 102px；此前给 92px，实测列里显示成 "00:00:01.…"（夹具截图实锤）。表头与行共用这一个串，不会错位。
+  const gridCols = `104px 108px repeat(${Math.max(cols.length - 3, 0)}, minmax(96px, 1fr)) 76px`;
 
   const cellText = (r: FrameRow, key: string): string => {
     if (key === "ts") return fmtTime(r.tsMs);

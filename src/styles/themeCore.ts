@@ -89,6 +89,26 @@ export const APPEARANCE_TOKENS = [
   "--dur-fast",
   "--dur-base",
   "--ease",
+  /* P103 批 1：表面层级（派生自 --bg-panel/--text/--border，见 theme.css 的派生块）。
+     加进白名单不是"顺手放宽"——是**关掉一条重复写入通道**：白名单外的 --* 可以被
+     `style_patch`/`save_theme_extension` 的 `:root` 规则写（styleSanitize 的 :root 特例
+     只拒白名单键），而那种写入会被主题/基线的专属选择器压住 ⇒ 模型以为改了、界面没动
+     （§8-37② 那族）。进白名单＝唯一写入者仍是合成器，且撤销语义跟着走。 */
+  "--raise-1",
+  "--raise-2",
+  "--line-strong",
+  "--scrim",
+  "--ring",
+  /* P103：布局类旋钮（控件高三档 / 间距 / 行高）。它们让"AI 改布局节奏"这件事第一次可达，
+     值域在 appearanceStore.isValidTokenValue 里收窄（写崩等于不能用）。 */
+  "--ctl-h-1",
+  "--ctl-h-2",
+  "--ctl-h-3",
+  "--sp-0",
+  "--sp-1h",
+  "--sp-6",
+  "--lh-ui",
+  "--lh-read",
 ] as const;
 
 export type AppearanceToken = (typeof APPEARANCE_TOKENS)[number];

@@ -9,7 +9,7 @@ import { PANEL_TITLES } from "../../panels/panels";
 import { resolvePlot3dGroup, plot3dRemovalReceipt } from "./plot3dActionPolicy";
 import { isOperatorLocked } from "../operator/lock";
 import type { PanelId } from "../../ipc/types";
-import { getSnapshot as getSettings, type WorkspacePreset } from "../settings/settingsStore";
+import { getSnapshot as getSettings, WORKSPACE_PRESETS } from "../settings/settingsStore";
 import * as templateStore from "../protocol/templateStore";
 import * as commandStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
@@ -58,7 +58,7 @@ export function actionDataText(data: unknown): string {
   return "完成";
 }
 
-const PRESETS: WorkspacePreset[] = ["proto", "analyze", "attitude", "console", "video", "calib", "auto", "modbus", "vdev"];
+/* 预设名单唯一事实源 = settingsStore.WORKSPACE_PRESETS（settings normalize 与 layout_apply 工具同引一份） */
 
 /** 名单常量单源在 appActionKinds（轻量模块，供工具目录/测试无 UI 依赖导入） */
 export { HIGH_ONLY, APP_ACTION_KINDS, type AppActionKind } from "./appActionKinds";
@@ -196,8 +196,8 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
     }
     case "applyPreset": {
       const preset = String(a.preset ?? "");
-      if (!PRESETS.includes(preset as WorkspacePreset)) {
-        throw new Error(`未知预设：${preset}（可选：${PRESETS.join("/")}）`);
+      if (!(WORKSPACE_PRESETS as readonly string[]).includes(preset)) {
+        throw new Error(`未知预设：${preset}（可选：${WORKSPACE_PRESETS.join("/")}）`);
       }
       requestApplyPreset(preset);
       return `已切换工作区预设「${preset}」`;

@@ -15,6 +15,12 @@ import { buildStyleText, sanitizeStyleRules, STYLE_CAPS } from "../styles/styleS
 import { applyLayer, listLayers, revertAll, revertByToken, revertLayer } from "./styleScratch";
 import { defineTool, notExecuted as bad, type AgentToolEntry } from "./toolRegistry";
 import type { ToolReceipt } from "./types";
+// P103 批2：版式与工具栏两支新工具的落点——全部走现成管道（appBus / layoutsStore / chromeStore），
+// dockview api 不出 App.tsx，这里只发请求与改 store，不直接摸布局。
+import { requestApplyLayout, requestApplyPreset } from "../ai/appBus";
+import { CHROME_SEGS, getChrome, patchChrome, resetChrome, type ChromeSegId } from "../settings/chromeStore";
+import { getLayout, getSnapshot as getLayouts } from "../settings/layoutsStore";
+import { WORKSPACE_PRESETS } from "../settings/settingsStore";
 
 /** 回执 callId 由管线覆盖；handler 用 ctx.callId 只是为了拼得出对象，不指望它当身份 */
 const read = (callId: string, data: unknown): ToolReceipt => ({ callId, ok: true, status: "read", data });
@@ -199,6 +205,152 @@ export const uiToolEntries: AgentToolEntry[] = [
         status: had ? "applied" : "not_executed",
         ...(!had ? { code: "no_such_layer" } : {}),
         data: { name, removed: had, layers: listLayers(), note: had ? "已撤回该层，原样式自动回落" : "没有这一层；现存层见 layers" },
+      };
+    },
+  }),
+  defineTool({
+    name: "layout_apply",
+    labelZh: "切换工作区版式",
+    effect: "config_write",
+    domain: "ui",
+    provenance: HOST,
+    description:
+      `Switch the workbench panel layout (the docked areas). Three forms: { preset: "${WORKSPACE_PRESETS.join("|")}" } applies a built-in preset; { slot: "name-or-id" } applies one of the user's saved layout slots; { rollback: true } restores the automatic snapshot taken before the last switch. Every apply snapshots the current layout first, so rollback always undoes the most recent switch. Needs the ${DOMAIN_ZH.ui} authorization.`,
+    parameters: {
+      type: "object",
+      properties: {
+        preset: { type: "string" },
+        slot: { type: "string" },
+        rollback: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    summarize: (a) =>
+      a.rollback === true
+        ? "回滚到切换前的版式"
+        : typeof a.preset === "string" && a.preset
+          ? `切换内置版式 ${a.preset}`
+          : typeof a.slot === "string" && a.slot
+            ? `应用布局槽 ${a.slot}`
+            : "切换工作区版式",
+    async execute(args, ctx) {
+      const callId = ctx.callId;
+      // dockview api 只在 App.tsx 里：布局 JSON 经 appBus 单向总线送过去，done 是它的回执通道（同步判定，不会石沉大海）
+      const applyJson = (layout: unknown) =>
+        new Promise<string | null>((resolve) => requestApplyLayout(layout, resolve));
+      if (args.rollback === true) {
+        const backup = getLayout("auto-backup");
+        if (!backup) {
+          return bad(callId, "no_backup", {
+            hint: "还没有可回滚的快照——每次切换版式前都会自动快照，切换过一次之后再回滚",
+          });
+        }
+        const err = await applyJson(backup.layout);
+        if (err) return bad(callId, "apply_failed", { error: err });
+        return {
+          callId,
+          ok: true,
+          status: "applied",
+          data: { rolledBack: true, note: "已回滚到上一次切换前的版式（本次回滚前也自动快照了一次，想反悔就再 rollback 一次）" },
+        };
+      }
+      const preset = typeof args.preset === "string" ? args.preset.trim() : "";
+      if (preset) {
+        if (!(WORKSPACE_PRESETS as readonly string[]).includes(preset)) {
+          return bad(callId, "invalid_args", { hint: `未知预设：${preset}（可选：${WORKSPACE_PRESETS.join("/")}）` });
+        }
+        requestApplyPreset(preset);
+        return {
+          callId,
+          ok: true,
+          status: "applied",
+          data: { preset, note: `已切换内置版式「${preset}」；切换前的布局已自动快照，rollback:true 可回滚` },
+        };
+      }
+      const slot = typeof args.slot === "string" ? args.slot.trim() : "";
+      if (slot) {
+        const slots = getLayouts().slots;
+        const hit = slots.find((s) => s.id === slot || s.name === slot);
+        if (!hit) {
+          return bad(callId, "no_such_slot", {
+            hint: slots.length
+              ? `没有名为「${slot}」的布局槽；现有：${slots.map((s) => s.name).join("、")}`
+              : "还没有保存过布局槽（用户可在 设置 → 工作区 里另存；也可以先切内置预设）",
+          });
+        }
+        const err = await applyJson(hit.layout);
+        if (err) return bad(callId, "apply_failed", { error: err });
+        return {
+          callId,
+          ok: true,
+          status: "applied",
+          data: { slot: hit.name, note: `已应用布局槽「${hit.name}」；之前的布局已自动快照，rollback:true 可回滚` },
+        };
+      }
+      return bad(callId, "invalid_args", { hint: "三选一：preset（内置预设）/ slot（用户布局槽名或 id）/ rollback:true（回滚到上一版式）" });
+    },
+  }),
+  defineTool({
+    name: "chrome_set",
+    labelZh: "调整工具栏分区",
+    effect: "config_write",
+    domain: "ui",
+    provenance: HOST,
+    description:
+      `Reorder or hide the three toolbar segments: "connect" (interface params + connect button), "session" (record/replay), "layout" (+Panel picker / edit-layout button). Args: { order?: string[] — subset allowed, missing segments keep default order appended at the end (segments can never be lost); hide?: string[]; show?: string[]; reset?: true }. Refuses to hide every segment (an empty toolbar has no way back). Persisted across restarts. Needs the ${DOMAIN_ZH.ui} authorization.`,
+    parameters: {
+      type: "object",
+      properties: {
+        order: { type: "array", items: { type: "string" } },
+        hide: { type: "array", items: { type: "string" } },
+        show: { type: "array", items: { type: "string" } },
+        reset: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    summarize: (a) => (a.reset === true ? "恢复工具栏默认分区" : "调整工具栏分区（排序/显隐）"),
+    execute(args, ctx) {
+      const callId = ctx.callId;
+      if (args.reset === true) {
+        resetChrome();
+        return {
+          callId,
+          ok: true,
+          status: "applied",
+          data: { state: getChrome(), note: "已恢复默认三段：接口参数 ｜ 会话 ｜ 面板与布局" },
+        };
+      }
+      const order = Array.isArray(args.order) ? args.order.map(String) : undefined;
+      const hide = Array.isArray(args.hide) ? args.hide.map(String) : undefined;
+      const show = Array.isArray(args.show) ? args.show.map(String) : undefined;
+      if (!order && !hide && !show) {
+        return bad(callId, "invalid_args", {
+          hint: "至少给一个参数：order / hide / show / reset:true",
+          state: getChrome(),
+        });
+      }
+      const invalid = [...(order ?? []), ...(hide ?? []), ...(show ?? [])].filter(
+        (v) => !(CHROME_SEGS as readonly string[]).includes(v),
+      );
+      if (invalid.length) {
+        return bad(callId, "invalid_args", { hint: `合法段名只有：${CHROME_SEGS.join("/")}`, invalid });
+      }
+      const cur = getChrome();
+      const hidden = cur.hidden
+        .filter((s) => !(show ?? []).includes(s))
+        .concat(((hide ?? []) as ChromeSegId[]).filter((s) => !cur.hidden.includes(s)));
+      patchChrome({ order: order as ChromeSegId[] | undefined, hidden });
+      const state = getChrome();
+      const visible = state.order.filter((s) => !state.hidden.includes(s));
+      return {
+        callId,
+        ok: true,
+        status: "applied",
+        data: {
+          state,
+          visible,
+          note: `工具栏现为：${visible.join(" ｜ ")}${state.hidden.length ? `（已隐藏：${state.hidden.join("、")}）` : ""}；reset:true 恢复默认`,
+        },
       };
     },
   }),

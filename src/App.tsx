@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   DockviewApi,
   DockviewReact,
@@ -43,6 +43,7 @@ import {
   getLayout,
   saveLayout,
 } from "./features/settings/layoutsStore";
+import { useChrome } from "./features/settings/chromeStore";
 import { applyLayoutJson } from "./features/settings/applyLayout";
 import {
   getSnapshot as getSettingsSnapshot,
@@ -826,6 +827,85 @@ export default function App() {
     return () => window.removeEventListener("ux:open-ext-panel", h);
   }, []);
 
+  // P103 批2：工具栏三段分区（接口参数 ｜ 会话 ｜ 面板与布局）。顺序与显隐由 chromeStore 驱动
+  // （chrome_set 工具的落点）；段间竖线分隔，spacer 永远垫在最后一段之前（默认序 = 布局段贴右，同旧版）。
+  const chrome = useChrome();
+  const chromeSegs = chrome.order.filter((s) => !chrome.hidden.includes(s));
+  const chromeSegNodes: ReactNode[] = [];
+  chromeSegs.forEach((seg, i) => {
+    if (i > 0) {
+      chromeSegNodes.push(
+        i === chromeSegs.length - 1 && chromeSegs.length > 1 ? (
+          <div key="__spacer" className="toolbar-spacer" />
+        ) : (
+          <div key={`__sep-${seg}`} className="toolbar-sep" />
+        ),
+      );
+    }
+    chromeSegNodes.push(
+      <div key={seg} className={`toolbar-seg toolbar-seg-${seg}`}>
+        {seg === "connect" ? (
+          serial.iface === "serial" ? (
+            <SerialToolbar />
+          ) : serial.iface === "ble" ? (
+            <BleIfaceBar />
+          ) : (
+            <NetIfaceBar kind={serial.iface} />
+          )
+        ) : seg === "session" ? (
+          <SessionBar />
+        ) : (
+          <div className="toolbar-group">
+            <select
+              className="input"
+              value=""
+              title={tx("重新添加显示区：选择面板名即加入当前活动分组；全部关闭时将新建满屏显示区", "Re-add a display area: picking a panel joins the active group; when all are closed a full-screen area is created")}
+              onChange={(e) => {
+                if (e.target.value) addOrFocusPanel(e.target.value);
+              }}
+            >
+              <option value="" hidden>{tx("+ 面板", "+ Panel")}</option>
+              {recentPanels.length > 0 && (
+                <optgroup label={tx("最近使用", "Recently used")}>
+                  {recentPanels.map((id) => (
+                    <option key={`recent-${id}`} value={id}>
+                      {panelTitleOf(id)}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {PANEL_GROUPS.map((g) => (
+                <optgroup key={g.key} label={panelGroupLabel(g)}>
+                  {g.ids.map((id) => (
+                    <option key={id} value={id}>
+                      {PANEL_TITLES()[id]}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+              {extPanelOptions.length > 0 && (
+                <optgroup label={tx("AI 扩展面板", "AI extension panels")}>
+                  {extPanelOptions.map((e) => (
+                    <option key={`ext-panel-${e.id}`} value={`ext-panel-${e.id}`}>
+                      {e.name}（AI）
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <button
+              className={`btn icon-btn${editLayout ? " warn" : ""}`}
+              onClick={() => setEditLayout((v) => !v)}
+              title={tx("编辑显示区布局：沿显示区边缘的 + 号向对应方向新建空显示区", "Edit layout: use the + buttons on area edges to add empty areas in that direction")}
+            >
+              <IconColumns />
+            </button>
+          </div>
+        )}
+      </div>,
+    );
+  });
+
   return (
     <div
       className="app"
@@ -846,63 +926,8 @@ export default function App() {
         }}
         onOpenAi={() => setAiOpen((v) => !v)}
       />
-      <header className="toolbar">
-        {serial.iface === "serial" ? (
-          <SerialToolbar />
-        ) : serial.iface === "ble" ? (
-          <BleIfaceBar />
-        ) : (
-          <NetIfaceBar kind={serial.iface} />
-        )}
-        <SessionBar />
-        <div className="toolbar-spacer" />
-        <div className="toolbar-group">
-          <select
-            className="input"
-            value=""
-            title={tx("重新添加显示区：选择面板名即加入当前活动分组；全部关闭时将新建满屏显示区", "Re-add a display area: picking a panel joins the active group; when all are closed a full-screen area is created")}
-            onChange={(e) => {
-              if (e.target.value) addOrFocusPanel(e.target.value);
-            }}
-          >
-            <option value="" hidden>{tx("+ 面板", "+ Panel")}</option>
-            {recentPanels.length > 0 && (
-              <optgroup label={tx("最近使用", "Recently used")}>
-                {recentPanels.map((id) => (
-                  <option key={`recent-${id}`} value={id}>
-                    {panelTitleOf(id)}
-                  </option>
-                ))}
-              </optgroup>
-            )}
-            {PANEL_GROUPS.map((g) => (
-              <optgroup key={g.key} label={panelGroupLabel(g)}>
-                {g.ids.map((id) => (
-                  <option key={id} value={id}>
-                    {PANEL_TITLES()[id]}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-            {extPanelOptions.length > 0 && (
-              <optgroup label={tx("AI 扩展面板", "AI extension panels")}>
-                {extPanelOptions.map((e) => (
-                  <option key={`ext-panel-${e.id}`} value={`ext-panel-${e.id}`}>
-                    {e.name}（AI）
-                  </option>
-                ))}
-              </optgroup>
-            )}
-          </select>
-          <button
-            className={`btn icon-btn${editLayout ? " warn" : ""}`}
-            onClick={() => setEditLayout((v) => !v)}
-            title={tx("编辑显示区布局：沿显示区边缘的 + 号向对应方向新建空显示区", "Edit layout: use the + buttons on area edges to add empty areas in that direction")}
-          >
-            <IconColumns />
-          </button>
-        </div>
-      </header>
+      {/* P103 批2：三段内容在上方按 chromeStore 顺序拼好（data-tour 锚点全在各段组件内部，未动） */}
+      <header className="toolbar">{chromeSegNodes}</header>
       <OperatorBanner onExit={() => operatorStore.exit()} />
       <div className="app-shell" ref={shellRef}>
         <DockviewReact

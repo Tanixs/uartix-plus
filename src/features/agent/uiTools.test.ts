@@ -245,3 +245,92 @@ describe("uiTools", () => {
     expect(d.caps.maxRules).toBeGreaterThan(0);
   });
 });
+
+/* ================= P103 批2：layout_apply / chrome_set =================
+ * 两支新写工具的验收口径：回执要把「发生了什么/为什么没有」说清；授权门沿用 ui 域；
+ * dockview 行为不在这里演（App 侧管道已有 applyLayout.test.ts 钉住），这里钉参数校验与总线出口。 */
+describe("P103 批2 · 版式与工具栏", () => {
+  beforeEach(installDom);
+
+  it("chrome_set：非法段名拒发并递合法清单；排序/显隐落进 chromeStore；reset 回默认", async () => {
+    const { executeUiTool } = await load();
+    const badR = await executeUiTool(call("chrome_set", { order: ["nope"] }), ctxFor("custom", ["ui"]));
+    expect(badR.ok).toBe(false);
+    expect(badR.code).toBe("invalid_args");
+    expect(String((badR.data as { hint: string }).hint)).toContain("connect");
+
+    const ok = await executeUiTool(
+      call("chrome_set", { order: ["layout", "connect"], hide: ["session"] }),
+      ctxFor("custom", ["ui"]),
+    );
+    expect(ok.ok).toBe(true);
+    const chrome = (await import("../settings/chromeStore")).getChrome();
+    expect(chrome.order, "缺的段按默认序补尾，不许丢段").toEqual(["layout", "connect", "session"]);
+    expect(chrome.hidden).toEqual(["session"]);
+    expect(String((ok.data as { note: string }).note)).toContain("layout ｜ connect");
+
+    const back = await executeUiTool(call("chrome_set", { reset: true }), ctxFor("custom", ["ui"]));
+    expect(back.ok).toBe(true);
+    expect((await import("../settings/chromeStore")).getChrome()).toEqual({
+      order: ["connect", "session", "layout"],
+      hidden: [],
+    });
+  });
+
+  it("chrome_set 授权门：没 ui 域就拒（create 档也不行），仅预览档说 preview_only", async () => {
+    const { executeUiTool } = await load();
+    const denied = await executeUiTool(call("chrome_set", { hide: ["session"] }), ctxFor("create"));
+    expect(denied.ok).toBe(false);
+    expect(denied.code).toBe("unauthorized_scope");
+    const prev = await executeUiTool(call("chrome_set", { hide: ["session"] }), ctxFor("preview", ["ui"]));
+    expect(prev.code).toBe("preview_only");
+  });
+
+  it("layout_apply：未知预设 / 无此槽 / 无备份各说各话；合法预设经 appBus 发出", async () => {
+    const { executeUiTool } = await load();
+    const badPreset = await executeUiTool(call("layout_apply", { preset: "nope" }), ctxFor("custom", ["ui"]));
+    expect(badPreset.code).toBe("invalid_args");
+    expect(String((badPreset.data as { hint: string }).hint)).toContain("analyze");
+
+    const noSlot = await executeUiTool(call("layout_apply", { slot: "不存在" }), ctxFor("custom", ["ui"]));
+    expect(noSlot.code).toBe("no_such_slot");
+
+    const noBack = await executeUiTool(call("layout_apply", { rollback: true }), ctxFor("custom", ["ui"]));
+    expect(noBack.code).toBe("no_backup");
+
+    const { subscribeAppBus } = await import("../ai/appBus");
+    const seen: string[] = [];
+    const un = subscribeAppBus((m) => {
+      if (m.kind === "applyPreset") seen.push(m.preset);
+    });
+    const okPreset = await executeUiTool(call("layout_apply", { preset: "analyze" }), ctxFor("custom", ["ui"]));
+    un();
+    expect(okPreset.ok).toBe(true);
+    expect(seen, "合法预设必须真的从 appBus 发出去（App 侧消费）").toEqual(["analyze"]);
+    expect(String((okPreset.data as { note: string }).note)).toContain("rollback");
+  });
+
+  it("layout_apply 走布局槽：applyLayout 回执成功才算 applied，失败要带回错误", async () => {
+    const { executeUiTool } = await load();
+    const { saveLayout } = await import("../settings/layoutsStore");
+    const { subscribeAppBus } = await import("../ai/appBus");
+    saveLayout("我的布局", { panels: ["a"] });
+
+    const unOk = subscribeAppBus((m) => {
+      if (m.kind === "applyLayout") m.done(null);
+    });
+    const okR = await executeUiTool(call("layout_apply", { slot: "我的布局" }), ctxFor("custom", ["ui"]));
+    unOk();
+    expect(okR.ok).toBe(true);
+    expect(String((okR.data as { note: string }).note)).toContain("我的布局");
+
+    const unFail = subscribeAppBus((m) => {
+      if (m.kind === "applyLayout") m.done("应用布局失败：模拟");
+    });
+    const failR = await executeUiTool(call("layout_apply", { slot: "我的布局" }), ctxFor("custom", ["ui"]));
+    unFail();
+    expect(failR.ok).toBe(false);
+    expect(failR.code).toBe("apply_failed");
+    expect(String((failR.data as { error: string }).error)).toContain("模拟");
+  });
+});

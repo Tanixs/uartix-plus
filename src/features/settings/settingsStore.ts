@@ -3,16 +3,20 @@ import { useSyncExternalStore } from "react";
 // 默认值、读不到时的回落、设置页那句回显都引它，省掉"设置页说的默认值 ≠ 实际取的那条"。
 import { MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
 
-export type WorkspacePreset =
-  | "proto"
-  | "analyze"
-  | "attitude"
-  | "console"
-  | "video"
-  | "calib"
-  | "auto"
-  | "modbus"
-  | "vdev";
+/** 九套内置工作区预设：运行时唯一事实源（normalize、appActions 白名单、layout_apply 工具同引这一份） */
+export const WORKSPACE_PRESETS = [
+  "proto",
+  "analyze",
+  "attitude",
+  "console",
+  "video",
+  "calib",
+  "auto",
+  "modbus",
+  "vdev",
+] as const;
+
+export type WorkspacePreset = (typeof WORKSPACE_PRESETS)[number];
 
 export type ThemeMode =
   | "light"
@@ -187,9 +191,7 @@ function load(): Settings {
       zoom: [90, 100, 110, 125].includes(p.zoom ?? 100) ? (p.zoom as number) : 100,
       decimals: clampDecimals(p.decimals ?? 2, 2),
       perfHud: Boolean(p.perfHud),
-      workspace: (
-        ["proto", "analyze", "attitude", "console", "video", "calib", "auto", "modbus", "vdev"] as const
-      ).includes(p.workspace as WorkspacePreset)
+      workspace: (WORKSPACE_PRESETS as readonly string[]).includes(p.workspace as string)
         ? (p.workspace as WorkspacePreset)
         : "proto",
       cellSize: [48, 60, 72, 90, 110].includes(p.cellSize ?? 60)

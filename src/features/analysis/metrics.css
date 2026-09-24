@@ -7,7 +7,9 @@
   overflow: auto;
   background: var(--bg-panel);
   color: var(--text);
-  font-size: 13px;
+  /* 13px 不在字阶刻度上（刻度是 10/11/12/14/16），且比帧表格的 12px 大一号 ⇒
+     两个数据表读起来不像一个产品。收到 --fs-sm */
+  font-size: var(--fs-sm);
   line-height: 1.5;
   container-type: inline-size;
 }
@@ -36,12 +38,12 @@
   max-width: 100%;
   padding: 5px 8px;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-s);
   background: var(--bg-inset);
   color: var(--text);
   font: inherit;
 }
-.analysis-panel .btn { white-space: normal; height: auto; min-height: 30px; }
+.analysis-panel .btn { white-space: normal; height: auto; min-height: var(--ctl-h-3); }
 .analysis-panel :disabled { opacity: 0.6; cursor: not-allowed; }
 .analysis-panel :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .analysis-panel .analysis-results { min-width: 0; padding: 0 12px 12px; }
@@ -52,11 +54,13 @@
   border-left: 3px solid var(--accent);
   background: var(--bg-inset);
 }
-.analysis-panel .metrics-table-scroll { max-width: 100%; overflow: auto; border: 1px solid var(--border); border-radius: 4px; }
+.analysis-panel .metrics-table-scroll { max-width: 100%; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-s); }
 .analysis-panel .analysis-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .analysis-panel .analysis-table th,
 .analysis-panel .analysis-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; overflow-wrap: anywhere; }
-.analysis-panel .analysis-table th { background: var(--bg-inset); font-weight: 600; }
+/* 表头与帧表格（.tbl-hcell）同一条语言：白底 + dim 600 + 下沿实线。
+   此前是灰底（--bg-inset），于是同一屏里两张表两种表头 */
+.analysis-panel .analysis-table th { background: var(--bg-panel); color: var(--text-dim); font-weight: 600; }
 .analysis-panel .analysis-table td:nth-child(3) { text-align: right; white-space: nowrap; }
 .analysis-panel .analysis-table tbody tr:last-child td { border-bottom: 0; }
 .analysis-panel .metrics-notes { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }

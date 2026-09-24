@@ -1823,17 +1823,20 @@ export function ControlCanvas() {
                 />
               )}
               <div ref={ghostRef} className="ctl-ghost" />
-              {page.cards.length === 0 && (
-                <EmptyState
-                  title="画布为空"
-                  hint={[
-                    "从左侧控件库拖入控件，或点击右上「＋滑条」",
-                    "右键卡片可切换模板串 / 脚本，脚本内可用全部解析变量",
-                  ]}
-                />
-              )}
             </div>
           </div>
+          {/* 空态挪出滚动内容：.ctl-grid-inner 的行内宽度是整张画布（cols×STEP，约 800px）且
+              它自己 position:relative，空态铺满它 ⇒ 居中文字落在看不见的右半边。
+              改挂到 .ctl-main（面板视口，非滚动）上，才真的居中在眼前。 */}
+          {page.cards.length === 0 && (
+            <EmptyState
+              title="画布为空"
+              hint={[
+                "从左侧控件库拖入控件，或点击右上「＋滑条」",
+                "右键卡片可切换模板串 / 脚本，脚本内可用全部解析变量",
+              ]}
+            />
+          )}
           {managedReceipt?.pageId === page.id && <div className="ctl-err" role={managedReceipt.result.status === "failed" ? "alert" : "status"}>
             {managedReceipt.name}: {managedReceipt.result.status === "completed"
               ? tx("应用动作完成（非设备回执）", "Application action completed (not device feedback)")

@@ -1,15 +1,28 @@
 import type { ControlType } from "../features/controls/controlsStore";
 
-const svg = (children: React.ReactNode, size = 14) => (
+/**
+ * P103 批 1：图标基准（全套共用两个数，只有一处出处）。
+ *
+ * 为什么从 2 收到 1.75：14px 图标配 2.0 描边，墨色偏重——一屏十几颗时整块工具栏会"发黑"，
+ * 而 1.75 是这一档尺寸的常用重量，也是大厂桌面端工具栏观感的来源。
+ */
+export const ICON_STROKE = 1.75;
+/** 折角类（chevron）笔画短，与 1.75 同档会显虚 ⇒ 单独留重一档 */
+export const ICON_STROKE_BOLD = 2.4;
+export const ICON_SIZE = 14;
+
+/** 装饰性 SVG 一律 aria-hidden：可读名字由承载它的按钮给（check:aria 钉的正是那一边） */
+const svg = (children: React.ReactNode, size: number = ICON_SIZE) => (
   <svg
     width={size}
     height={size}
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    strokeWidth="2"
+    strokeWidth={ICON_STROKE}
     strokeLinecap="round"
     strokeLinejoin="round"
+    aria-hidden="true"
   >
     {children}
   </svg>
@@ -19,14 +32,15 @@ const svg = (children: React.ReactNode, size = 14) => (
 const CHEVRON_ROT = { right: 0, down: 90, left: 180, up: 270 } as const;
 export const IconChevron = (props: { dir?: keyof typeof CHEVRON_ROT; size?: number }) => (
   <svg
-    width={props.size ?? 14}
-    height={props.size ?? 14}
+    width={props.size ?? ICON_SIZE}
+    height={props.size ?? ICON_SIZE}
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    strokeWidth="2.4"
+    strokeWidth={ICON_STROKE_BOLD}
     strokeLinecap="round"
     strokeLinejoin="round"
+    aria-hidden="true"
     style={{
       transform: props.dir && props.dir !== "right" ? `rotate(${CHEVRON_ROT[props.dir]}deg)` : undefined,
       transition: "transform 0.15s",
@@ -338,7 +352,7 @@ export const IconPuzzle = (props?: { size?: number }) =>
     <>
       <path
         transform="translate(12 12) scale(1.3) translate(-12 -9)"
-        strokeWidth={2 / 1.3}
+        strokeWidth={ICON_STROKE / 1.3}
         d="M9 4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H5v-4a2 2 0 1 0 0-4V4h4z"
       />
     </>,

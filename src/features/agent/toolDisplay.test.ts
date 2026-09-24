@@ -138,7 +138,7 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
       "fs_read", "fs_list", "fs_write", "web_fetch", "web_search", "shell_exec",
       "theme_read", "theme_patch", "theme_preset", "image_swatch", "save_theme_extension", "style_commit",
       "ui_inventory", "ui_inspect", "style_patch", "style_revert", "app_state",
-      "app_catalog", "app_read", "propose_market_install",
+      "app_catalog", "app_read", "propose_market_install", "layout_apply", "chrome_set",
     ];
     // 清单本身也要跟注册表对齐：两边谁漂了都红
     expect(hostEntryNames().sort()).toEqual([...real].sort());

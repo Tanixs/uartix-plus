@@ -251,7 +251,9 @@ export function HexView() {
     const { w, h, dpr } = sizeRef.current;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const cs = getComputedStyle(document.documentElement);
-    const bg = cs.getPropertyValue("--bg-inset").trim() || "#0b0d10";
+    // 画布底走纸面档 --bg-panel：此前读 --bg-inset（凹下档），于是同一屏里
+    // 表格/控制台正文是白、Hex 正文是灰，三个数据面两种层级。兜底值同步成 dark 主题的 panel 色。
+    const bg = cs.getPropertyValue("--bg-panel").trim() || "#161a20";
     const textCol = cs.getPropertyValue("--text").trim() || "#e6e9ee";
     const dimCol = cs.getPropertyValue("--text-dim").trim() || "#8b93a1";
     const accent = cs.getPropertyValue("--accent").trim() || "#4e9cef";

@@ -183,6 +183,14 @@ export const THEME_VAR_KEYS = [
   "--shadow",
   "--scrollbar",
   "--scrollbar-hover",
+  /* P103：表面层级也要过桥。否则 AI 造的小部件/自定义面板永远停在"旧观感"上——
+     宿主换了抬升面，iframe 里还是裸 --bg-panel 一层平铺（readComputed 拿到的是
+     已代入 var() 的 color-mix 文本，iframe 直接可用）。 */
+  "--raise-1",
+  "--raise-2",
+  "--line-strong",
+  "--scrim",
+  "--ring",
 ];
 
 /**
