@@ -69,8 +69,19 @@ describe("P99b-N2 · 界面不抄货架数据", () => {
     expect(DIALOG).toContain("offShelfOf"); // 判定在派生层，组件不自己 filter 一遍
     expect(DIALOG).toContain("aria-expanded=");
     expect(DIALOG, "那句「等」就是答不上『那到底还有谁』的形状，不许回来").not.toMatch(/offShelf[^\n]*slice\(0, 3\)/);
-    // 每条四样：名字 / id / 版本 / 状态——状态名来自插件库那份表，市场不另立一套中文
-    expect(DIALOG).toContain("PLUGIN_STATE_LABEL");
+    // 每条四样：名字 / id / 版本 / 状态——状态名只有一处定义，市场不另立一套
+    // P105-F T3a 改了指向：界面拿的是 `pluginUiNames.stateName()`（按语言挑），
+    // 而不是直接读插件库那张中文表 —— 那张表现在是**出口用的**（CLI 回话 / 模型清单）。
+    // 这条断言的性质没变、也没放松：仍是"界面不许自己抄一份状态名"，而且多钉了两面：
+    //   ① 状态名表在整个 src 里只能定义一次（两张表都在 pluginStore，一中一英，穷举 Record）；
+    //   ② 市场那几个组件里不许出现任何一份中文状态名字面量。
+    expect(DIALOG, "状态名又回到直接读出口表了（出口表不随界面语言变）").toContain("stateName(");
+    expect(
+      filesMentioning("export const PLUGIN_STATE_LABEL:"),
+      "状态名表长出第二处定义",
+    ).toEqual(["features/plugins/pluginStore.ts"]);
+    for (const [label, src] of [["MarketDialog", DIALOG], ["MarketDetail", DETAIL], ["InstallConfirm", CONFIRM]] as const)
+      expect(src, `${label} 里自己抄了一份中文状态名`).not.toMatch(/"(已启用|已停用|待批准更新|已隔离|已校验|已预览|草稿)"/);
     expect(DIALOG).toMatch(/mkt-offshelf-list[\s\S]{0,240}p\.version/);
     // 这条判定（本机多出来哪些包）只准有一份算法：界面与命令行都调同一个派生函数
     expect(filesMentioning("offShelfOf(").sort(), "「本机多出来哪些包」又长出第二处算法").toEqual([
@@ -78,9 +89,9 @@ describe("P99b-N2 · 界面不抄货架数据", () => {
     ]);
   });
 
-  it("「列表不等于背书」这句只有一份，两处都引同一个常量", () => {
-    expect(DIALOG).toContain("MARKET_NO_ENDORSE");
-    expect(DETAIL).toContain("MARKET_NO_ENDORSE");
+  it("「列表不等于背书」这句只有一份，两处都引同一个源", () => {
+    expect(DIALOG).toContain("marketNoEndorse()"); // P105-F：从常量改成取值才翻的函数，"只此一份"这条性质不变
+    expect(DETAIL).toContain("marketNoEndorse()");
     expect(DIALOG).not.toMatch(/const NO_ENDORSE|列表不等于背书：/);
     expect(DETAIL).not.toMatch(/const NO_ENDORSE|列表不等于背书：/);
   });
@@ -201,14 +212,15 @@ describe("P99b-N2 · 入口只有一个（Q8）", () => {
     expect(read("../plugins/PluginLibraryDialog.tsx")).toContain("requestOpenMarket");
     expect(read("../../App.tsx")).toContain("msg.kind === \"openMarket\"");
     // 旧名字不许在源码里复活（改名批漏扫抄本的老账，§8-45）
-    for (const f of ["../plugins/PluginLibraryDialog.tsx", "../../shell/TitleBar.tsx"]) {
+    for (const f of ["../plugins/PluginLibraryDialog.tsx", "../../shell/TopBars.tsx"]) {
       expect(read(f), `${f} 还写着旧名「浏览市场」`).not.toContain("浏览市场");
     }
   });
 
   it("标题栏那颗开的是「插件管理」，而且开的是**现成的设置页那一栏**（不再造第三个插件库窗口）", () => {
-    const tb = read("../../shell/TitleBar.tsx");
-    expect(/title="插件管理"/.test(tb), "标题栏那颗的名字不是「插件管理」").toBe(true);
+    const tb = read("../../shell/TopBars.tsx");
+    // P105-F T5 之后这颗的名字走 tx()，钉的仍是"中文叫插件管理"这一条，顺带钉住它已双语
+    expect(/title=\{tx\("插件管理", "Plugin library"\)\}/.test(tb), "标题栏那颗的名字不是「插件管理」").toBe(true);
     expect(/onClick=\{onOpenLibrary\}/.test(tb), "标题栏那颗没接 onOpenLibrary（点了没反应的老形状）").toBe(true);
     // 用户嫌"小、不居中"→ 尺寸与居中都钉住，别悄悄用回默认 14 的原点偏移路径
     expect(/IconPuzzle size=\{16\}/.test(tb), "标题栏那颗又用回默认 14").toBe(true);
@@ -303,7 +315,7 @@ describe("P99b-N4 · 那颗按钮与那张卡：一处渲染、一份状态、�
     expect(hook, "整表自己数＝第二份判定").not.toContain("listMarketPending(");
     // 钉到函数体：光看"文件里出现过 awaitingMarketInstalls"挡不住把徽标换成整表长度（实测形状）
     expect(/function awaitingCount\(\)[\s\S]{0,120}?awaitingMarketInstalls\(\)\.length/.test(hook), "awaitingCount 自己不算等你确认那几条了").toBe(true);
-    expect(read("../../shell/TitleBar.tsx")).toContain("pendingBadge(");
+    expect(read("../../shell/TopBars.tsx")).toContain("pendingBadge(");
   });
 
   it("点完「装入」那张回执得留在页面上，不能整张卡跟着一起消失", () => {

@@ -13,8 +13,8 @@ import { requestOpenPanel } from "../ai/appBus";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
-import { IconChevron } from "../../shared/icons";
-import { t } from "../../i18n/strings";
+import { IconChevron, IconPause, IconPlay, IconTrash } from "../../shared/icons";
+import { t, tx } from "../../i18n/strings";
 
 const ROW_H = 20;
 const COLS = 16;
@@ -272,7 +272,8 @@ export function HexView() {
       ctx.fillStyle = dimCol;
       ctx.font = `13px "Segoe UI", "Microsoft YaHei", sans-serif`;
       ctx.fillText(
-        "等待数据… 连接串口，或在左侧「协议模板」面板启动演示数据源",
+        tx("等待数据… 连接串口，或在左侧「协议模板」面板启动演示数据源",
+          "Waiting for data… open a port, or start the demo source in the Protocol templates panel on the left"),
         PAD_L + 8,
         h / 2,
       );
@@ -561,7 +562,7 @@ export function HexView() {
   const doSearch = async () => {
     const bytes = parsePattern(searchPattern);
     if (!bytes) {
-      setSearchErr("格式无效");
+      setSearchErr(tx("格式无效", "Invalid pattern"));
       return;
     }
     setSearchErr(null);
@@ -574,7 +575,7 @@ export function HexView() {
       setSearchHits(seqs);
       setSearchIdx(0);
       if (seqs.length) templateStore.locate(seqs[0]);
-      else setSearchErr("无匹配");
+      else setSearchErr(tx("无匹配", "No match"));
     } catch (e) {
       setSearchErr(String(e));
     }
@@ -761,12 +762,13 @@ export function HexView() {
                 ? "uint16"
                 : "uint8"
             : defType();
+      // 字段名会写进用户的协议模板（是数据）：按当下语言播种，之后跟着用户走
       const name =
         role === "length"
-          ? "长度"
+          ? tx("长度", "Length")
           : role === "checksum"
-            ? "校验"
-            : `数据${fieldCount + 1}`;
+            ? tx("校验", "Checksum")
+            : tx(`数据${fieldCount + 1}`, `Data${fieldCount + 1}`);
       templateStore.addField(tplId, {
         id: crypto.randomUUID(),
         name,
@@ -783,19 +785,19 @@ export function HexView() {
       const off = Math.max(offset, 0);
       const notIn = !inSpan(tpl.id);
       let disabled = notIn;
-      let why = notIn ? "选区不在该模板已解析出的帧内" : "";
+      let why = notIn ? tx("选区不在该模板已解析出的帧内", "The selection is not inside a frame this template parsed") : "";
       if (!notIn) {
         if (role === "length") {
           if (selLen > 2) {
             disabled = true;
-            why = "长度字段最多 2 字节";
+            why = tx("长度字段最多 2 字节", "A length field is at most 2 bytes");
           } else if (offset < tpl.boundary.headerBytes.length) {
             disabled = true;
-            why = "选区与帧头重叠";
+            why = tx("选区与帧头重叠", "The selection overlaps the frame header");
           }
         } else if (role === "checksum" && selLen > 4) {
           disabled = true;
-          why = "校验字段最多 4 字节";
+          why = tx("校验字段最多 4 字节", "A checksum field is at most 4 bytes");
         }
         if (!disabled) {
           // P85a：与画布同一套冲突检测（帧头/既有字段/帧尾保护区），不再静默覆盖
@@ -813,7 +815,7 @@ export function HexView() {
                 : selLen;
           if (off < tpl.boundary.headerBytes.length) {
             disabled = true;
-            why = "选区与帧头重叠";
+            why = tx("选区与帧头重叠", "The selection overlaps the frame header");
           } else {
             const c = templateStore.fieldConflictInfo(tpl.id, "", off, sizeGuess, {
               frameLen: selSpan?.len ?? 0,
@@ -822,25 +824,26 @@ export function HexView() {
               disabled = true;
               why =
                 c.overTail.kind === "checksum"
-                  ? "选区压在帧尾校验域"
-                  : "选区压在帧尾定界字节";
+                  ? tx("选区压在帧尾校验域", "The selection lands on the frame-tail checksum")
+                  : tx("选区压在帧尾定界字节", "The selection lands on the frame-tail delimiter");
             } else if (c.overFrame) {
               disabled = true;
               why = c.overFrame;
             } else if (c.overlapName) {
               disabled = true;
-              why = `与已有字段「${c.overlapName}」重叠`;
+              why = tx(`与已有字段「${c.overlapName}」重叠`, `It overlaps the existing field “${c.overlapName}”`);
             }
           }
         }
       }
-      const label = role === "length" ? "长度字段" : role === "checksum" ? "校验字段" : "数据字段";
+      const label =
+        role === "length" ? tx("长度字段", "Length field") : role === "checksum" ? tx("校验字段", "Checksum field") : tx("数据字段", "Data field");
       return (
         <button
           key={role}
           className="ctx-item"
           aria-disabled={disabled}
-          title={why || `帧内偏移 ${off}`}
+          title={why || tx(`帧内偏移 ${off}`, `offset ${off} in frame`)}
           onClick={() => {
             if (disabled) return;
             addFieldFor(tpl.id, role, tpl.name, tpl.fields.length);
@@ -849,7 +852,7 @@ export function HexView() {
           }}
         >
           {label}
-          <span className="ctx-cur">{disabled && why ? why : `偏移 ${off}`}</span>
+          <span className="ctx-cur">{disabled && why ? why : tx(`偏移 ${off}`, `offset ${off}`)}</span>
         </button>
       );
     };
@@ -859,36 +862,38 @@ export function HexView() {
     return (
       <>
         <div className="ctx-title">
-          选区 0x{sel.start.toString(16)} ~ 0x{sel.end.toString(16)} ·{" "}
-          {selLen} 字节 · {selHex}
+          {tx(`选区 0x${sel.start.toString(16)} ~ 0x${sel.end.toString(16)} · ${selLen} 字节 · ${selHex}`,
+            `Selection 0x${sel.start.toString(16)} ~ 0x${sel.end.toString(16)} · ${selLen} bytes · ${selHex}`)}
         </div>
         <button
           className="ctx-item"
-          title="AI 分析选中字节流，推断帧结构（帧头/长度/字段/校验）并生成候选模板"
+          title={tx("AI 分析选中字节流，推断帧结构（帧头/长度/字段/校验）并生成候选模板",
+            "Let the AI read the selected bytes, infer the frame layout (header / length / fields / checksum) and draft a template")}
           onClick={() => {
             invokeAiScene("protocol", { hex: fullHex });
             closeMenu();
           }}
         >
-          AI 识别协议
+          {tx("AI 识别协议", "AI: detect protocol")}
         </button>
         <button
           className="ctx-item"
-          title="按当前模板逐字节解释这段选区的含义"
+          title={tx("按当前模板逐字节解释这段选区的含义", "Explain what these bytes mean under the current template")}
           onClick={() => {
             invokeAiScene("explainBytes", { hex: fullHex });
             closeMenu();
           }}
         >
-          AI 解释这段字节
+          {tx("AI 解释这段字节", "AI: explain these bytes")}
         </button>
         <button
           className="ctx-item"
           disabled={selLen > 8}
           title={
             selLen > 8
-              ? "帧头最多 8 字节"
-              : "以选区字节为帧头新建模板：帧长 = 帧头 + 8、默认 sum8 校验；创建后默认停用，配置好再启用"
+              ? tx("帧头最多 8 字节", "A frame header is at most 8 bytes")
+              : tx("以选区字节为帧头新建模板：帧长 = 帧头 + 8、默认 sum8 校验；创建后默认停用，配置好再启用",
+                  "New template using these bytes as the header: frame length = header + 8, sum8 checksum by default; created disabled — enable it once configured")
           }
           onClick={() => {
             templateStore.addTemplate(sel.bytes);
@@ -896,7 +901,7 @@ export function HexView() {
             closeMenu();
           }}
         >
-          新建模板（帧头 = 选区字节）
+          {tx("新建模板（帧头 = 选区字节）", "New template (header = selection)")}
         </button>
         <div
           ref={defAnchorRef}
@@ -910,9 +915,9 @@ export function HexView() {
             setDefOpen(true);
           }}
         >
-          定义为字段 <span className="ctx-arrow"><IconChevron size={12} /></span>
+          {tx("定义为字段", "Define as field")} <span className="ctx-arrow"><IconChevron size={12} /></span>
         </div>
-        <div className="ctx-group">复制</div>
+        <div className="ctx-group">{t("c.copy")}</div>
         <button
           className="ctx-item"
           onClick={() => {
@@ -920,7 +925,7 @@ export function HexView() {
             closeMenu();
           }}
         >
-          复制为 Hex
+          {tx("复制为 Hex", "Copy as Hex")}
         </button>
         <button
           className="ctx-item"
@@ -937,12 +942,12 @@ export function HexView() {
             closeMenu();
           }}
         >
-          复制为 ASCII
+          {tx("复制为 ASCII", "Copy as ASCII")}
         </button>
         {defOpen && (
           <Flyout anchor={defAnchorRef.current} zf={zf} onArm={armSub} onDisarm={disarmSub} minWidth={170}>
             {templates.length === 0 && (
-              <div className="ctx-group">暂无模板（帧画布「＋ 新建」创建）</div>
+              <div className="ctx-group">{tx("暂无模板（帧画布「＋ 新建」创建）", "No templates yet — create one in the frame canvas (+ New)")}</div>
             )}
             {templates.map((tpl) => (
               <div
@@ -1010,25 +1015,14 @@ export function HexView() {
           title={paused ? t("hx.resume") : t("hx.pause")}
           onClick={togglePause}
         >
-          {paused ? (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-              <polygon points="7 4 20 12 7 20" />
-            </svg>
-          ) : (
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-              <rect x="6" y="5" width="4" height="14" rx="1" />
-              <rect x="14" y="5" width="4" height="14" rx="1" />
-            </svg>
-          )}
+          {paused ? <IconPlay /> : <IconPause />}
         </button>
         <button
           className="btn hex-clear-btn"
           title={t("hx.clear")}
           onClick={() => void clearData()}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-          </svg>
+          <IconTrash />
         </button>
         {searchOpen && (
           <div className="hex-search">

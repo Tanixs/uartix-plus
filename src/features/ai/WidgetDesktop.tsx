@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t, tx, useLocale } from "../../i18n/strings";
 import {
   getCurrentWindow,
   currentMonitor,
@@ -11,11 +12,13 @@ import { getSnapshot, type AiExtension } from "./extensionStore";
 import { WidgetFrame, type WidgetFrameHandle } from "./WidgetFrame";
 import type { WidgetMenuItem } from "./widgetShell";
 import { pluginCtxForExt } from "../plugins/pluginStore";
+import { Glyph } from "../../shared/icons";
 
 /** 桌面挂件头部高度（px，与 .aiw-desktop-head 的 26px 对应；无边框形态为 0） */
 const HEAD_H = 26;
 
 export function WidgetDesktop() {
+  useLocale();
   const [widget, setWidget] = useState<AiExtension | null>(null);
   const [miss, setMiss] = useState(false);
   const [pinned, setPinned] = useState(true);
@@ -210,10 +213,10 @@ export function WidgetDesktop() {
   };
 
   const sysMenu = (): WidgetMenuItem[] => [
-    { label: "窗口置顶", checked: pinned, onClick: togglePin },
-    { label: "点击穿透（60 秒后恢复）", checked: through, onClick: toggleThrough },
-    { label: "重新加载", onClick: () => window.location.reload() },
-    { label: "关闭挂件", danger: true, onClick: () => void close() },
+    { label: tx("窗口置顶", "Keep on top"), checked: pinned, onClick: togglePin },
+    { label: tx("点击穿透（60 秒后恢复）", "Click-through (restores after 60 s)"), checked: through, onClick: toggleThrough },
+    { label: tx("重新加载", "Reload"), onClick: () => window.location.reload() },
+    { label: tx("关闭挂件", "Close the widget"), danger: true, onClick: () => void close() },
   ];
 
   return (
@@ -238,9 +241,9 @@ export function WidgetDesktop() {
             void close();
           }}
         >
-          <span className="aiw-float-title">{widget?.name ?? "AI 挂件"}</span>
-          <button className="ai-float-btn" title="关闭" onClick={() => void close()}>
-            <svg width="12" height="12" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+          <span className="aiw-float-title">{widget?.name ?? tx("AI 挂件", "AI widget")}</span>
+          <button className="ai-float-btn" title={t("c.close")} onClick={() => void close()}>
+            <Glyph><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></Glyph>
           </button>
         </div>
       )}
@@ -258,9 +261,9 @@ export function WidgetDesktop() {
           />
         ) : miss ? (
           <div className="aiw-desktop-miss">
-            挂件不存在或已被删除
+            {tx("挂件不存在或已被删除", "This widget no longer exists")}
             <button className="btn" onClick={() => void close()}>
-              关闭窗口
+              {tx("关闭窗口", "Close the window")}
             </button>
           </div>
         ) : null}

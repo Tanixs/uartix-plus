@@ -23,6 +23,7 @@ import {
 } from "../../shared/hexBytes";
 import { formatLabelSpec, parseLabelSpec } from "../../shared/valueLabels";
 import { tx, useLocale } from "../../i18n/strings";
+import { Glyph } from "../../shared/icons";
 
 export function NumInput({
   value,
@@ -713,9 +714,9 @@ export function PropertiesPanel() {
           onClick={() => store.setSelection({ kind: "template", templateId: tpl.id })}
           title={tx("返回模板属性", "Back to template properties")}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <Glyph>
             <polyline points="15 6 9 12 15 18" />
-          </svg>
+          </Glyph>
           {tx("返回模板", "Back")}
         </button>
         <span className="tpl-dot" style={{ background: field.color }} />

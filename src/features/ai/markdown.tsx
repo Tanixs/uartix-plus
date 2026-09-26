@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { t, tx, useLocale } from "../../i18n/strings";
 
 export interface MdSegment {
   kind: "code" | "text";
@@ -204,6 +205,7 @@ function TextBlock({ text }: { text: string }) {
 }
 
 export function CodeBlock({ lang, code }: { lang?: string; code: string }) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const [copied, setCopied] = useState(false);
   const copy = () => {
     void navigator.clipboard.writeText(code).then(() => {
@@ -214,9 +216,9 @@ export function CodeBlock({ lang, code }: { lang?: string; code: string }) {
   return (
     <div className="md-codeblock">
       <div className="md-code-head">
-        <span>{lang || "代码"}</span>
+        <span>{lang || tx("代码", "Code")}</span>
         <button className="md-copy" onClick={copy}>
-          {copied ? "已复制" : "复制"}
+          {copied ? tx("已复制", "Copied") : t("c.copy")}
         </button>
       </div>
       <pre>

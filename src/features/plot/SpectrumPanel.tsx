@@ -346,16 +346,16 @@ export function SpectrumPanel() {
 
   return (
     <div className="plot spectrum">
-      <div className="plot-bar">
+      <div className="plot-bar p-bar">
         <button
-          className={`btn sm${prefs.mode === "fft" ? " primary" : ""}`}
+          className={`btn sm${prefs.mode === "fft" ? " on" : ""}`}
           onClick={() => patch({ mode: "fft" })}
           title={tx("FFT 频谱：看频率成分与主峰", "FFT spectrum: view frequency components and dominant peaks")}
         >
           {tx("频谱", "Spectrum")}
         </button>
         <button
-          className={`btn sm${prefs.mode === "hist" ? " primary" : ""}`}
+          className={`btn sm${prefs.mode === "hist" ? " on" : ""}`}
           onClick={() => patch({ mode: "hist" })}
           title={tx("直方图：看数据分布与离散度", "Histogram: view data distribution and dispersion")}
         >
@@ -399,7 +399,7 @@ export function SpectrumPanel() {
               <option value="rect">{tx("矩形窗", "Rectangle")}</option>
             </select>
             <button
-              className={`btn sm${prefs.yDb ? " primary" : ""}`}
+              className={`btn sm${prefs.yDb ? " on" : ""}`}
               onClick={() => patch({ yDb: !prefs.yDb })}
               title={tx("Y 轴单位：线性幅值 / dB（看噪声底用 dB）", "Y unit: linear amplitude / dB (use dB to inspect the noise floor)")}
             >
@@ -409,7 +409,7 @@ export function SpectrumPanel() {
         )}
         <div className="plot-bar-spacer" />
         <button
-          className={`btn sm${prefs.paused ? " primary" : ""}`}
+          className={`btn sm${prefs.paused ? " on" : ""}`}
           onClick={() => patch({ paused: !prefs.paused })}
           title={prefs.paused
             ? tx("已冻结：点此恢复实时刷新", "Frozen: click to resume live refresh")

@@ -82,7 +82,7 @@ function match(root: FakeEl, sel: string): boolean {
 
 const tree: FakeEl[] = [
   el("div", { cls: ["app-shell"], kids: [
-    el("div", { cls: ["titlebar"], text: "Uartix+", kids: [
+    el("div", { cls: ["cmdbar"], text: "Uartix+", kids: [
       el("span", { cls: ["tb-brand"], text: "Uartix+" }),
       el("button", { cls: ["tb-btn"], text: "设置" }),
     ] }),
@@ -171,11 +171,11 @@ describe("uiTools", () => {
 
   it("ui_inspect 给出真实类名与可粘选择器（模型不再靠猜）", async () => {
     const { executeUiTool } = await load();
-    const r = await executeUiTool(call("ui_inspect", { root: ".titlebar" }), ctxFor("preview"));
+    const r = await executeUiTool(call("ui_inspect", { root: ".cmdbar" }), ctxFor("preview"));
     const d = r.data as { matched: number; classes: { name: string; hits: number }[]; nodes: { selector: string; children?: unknown[] }[] };
     expect(d.matched).toBe(1);
     expect(d.classes.map((c) => c.name)).toContain("tb-btn");
-    expect(d.nodes[0].selector).toBe(".titlebar");
+    expect(d.nodes[0].selector).toBe(".cmdbar");
     expect(d.nodes[0].children).toBeTruthy();
     const miss = await executeUiTool(call("ui_inspect", { root: ".no-such-class" }), ctxFor("preview"));
     expect((miss.data as { matched: number; note: string }).matched).toBe(0);
@@ -265,7 +265,13 @@ describe("P103 批2 · 版式与工具栏", () => {
     );
     expect(ok.ok).toBe(true);
     const chrome = (await import("../settings/chromeStore")).getChrome();
-    expect(chrome.order, "缺的段按默认序补尾，不许丢段").toEqual(["layout", "connect", "session"]);
+    // P104-R2：段名单退回三段（`system` 那四颗搬去身份栏，不再参与工具栏排序）。
+    // 补尾的判定没变——缺的段一律按默认序补回来，只是"全部段"变小了。
+    expect(chrome.order, "缺的段按默认序补尾，不许丢段").toEqual([
+      "layout",
+      "connect",
+      "session",
+    ]);
     expect(chrome.hidden).toEqual(["session"]);
     expect(String((ok.data as { note: string }).note)).toContain("layout ｜ connect");
 

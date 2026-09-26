@@ -5,7 +5,7 @@ import * as serialStore from "../serial/serialStore";
 import { isRecording } from "../session/sessionStore";
 import { toast } from "../ai/extRuntime";
 import { useSettings } from "../settings/settingsStore";
-import { t, tx } from "../../i18n/strings";
+import { t, tx, useLocale } from "../../i18n/strings";
 
 /**
  * XMODEM/YMODEM 文件传输对话框（P49）。
@@ -13,7 +13,7 @@ import { t, tx } from "../../i18n/strings";
  * 只做参数选择与进度展示：协议状态机、RX 截流、接口路由全在 Rust xfer.rs。
  */
 
-const PROTO_ITEMS: { key: string; label: string; hint: string }[] = [
+const protoItems = (): { key: string; label: string; hint: string }[] => [
   {
     key: "ymodem",
     label: "YMODEM",
@@ -44,6 +44,7 @@ export function XferDialog({
   /** AI xferStart 动作预填：初始协议与文件路径列表（多文件顺序传输） */
   initial?: { proto: string; paths: string[] } | null;
 }) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   useSettings();
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const serial = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
@@ -117,7 +118,7 @@ export function XferDialog({
             <div className="xfer-dir" role="radiogroup" aria-label={tx("传输方向", "Transfer direction")}>
               <button
                 type="button"
-                className={`btn ${!receiving ? "primary" : ""}`}
+                className={`btn ${!receiving ? "on" : ""}`}
                 disabled={running}
                 aria-pressed={!receiving}
                 onClick={() => setDir("send")}
@@ -126,7 +127,7 @@ export function XferDialog({
               </button>
               <button
                 type="button"
-                className={`btn ${receiving ? "primary" : ""}`}
+                className={`btn ${receiving ? "on" : ""}`}
                 disabled={running}
                 aria-pressed={receiving}
                 onClick={() => setDir("receive")}
@@ -142,15 +143,15 @@ export function XferDialog({
               value={proto}
               disabled={running}
               onChange={(e) => setProto(e.target.value)}
-              title={PROTO_ITEMS.find((x) => x.key === proto)?.hint}
+              title={protoItems().find((x) => x.key === proto)?.hint}
             >
-              {PROTO_ITEMS.map((x) => (
+              {protoItems().map((x) => (
                 <option key={x.key} value={x.key}>
                   {x.label}
                 </option>
               ))}
             </select>
-            <span className="xfer-hint">{PROTO_ITEMS.find((x) => x.key === proto)?.hint}</span>
+            <span className="xfer-hint">{protoItems().find((x) => x.key === proto)?.hint}</span>
           </div>
           <div className="xfer-row">
             <label>{tx("文件", "File")}</label>

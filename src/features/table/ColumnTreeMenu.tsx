@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Flyout } from "../../shared/Flyout";
 import { IconChevron } from "../../shared/icons";
 import { useSettings } from "../settings/settingsStore";
-import { t, tx } from "../../i18n/strings";
+import { t, tx, useLocale } from "../../i18n/strings";
 
 export interface ColLeaf {
   id: string;
@@ -47,6 +47,7 @@ export function ColumnTreeMenu(props: {
   onToggleField: (id: string) => void;
   onClose: () => void;
 }) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const settings = useSettings();
   const zf = (settings.zoom || 100) / 100;
   const rootRef = useRef<HTMLDivElement | null>(null);

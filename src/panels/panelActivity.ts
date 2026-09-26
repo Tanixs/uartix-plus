@@ -52,3 +52,21 @@ export function subscribe(cb: () => void): () => void {
     listeners.delete(cb);
   };
 }
+
+/**
+ * `useSyncExternalStore` 的快照函数。**必须返回不可变比较得出的稳定值**，
+ * 所以这里返回排序后的 id 串，而不是 Set 本身（Set 每次比较都不相等 ⇒ 无限重渲染）。
+ *
+ * 放这里而不是各消费方自己拼：RailPanel 原先有一份本地 `activityVersion()`，
+ * B9 的命令面板也要读同一件事——再抄一份就是"哪些面板开着"的第二个真值。
+ */
+let cachedKeys = "";
+let cachedSnapshot = "";
+export function getSnapshot(): string {
+  const keys = [...openPanels].sort().join(",");
+  if (keys !== cachedKeys) {
+    cachedKeys = keys;
+    cachedSnapshot = keys + "|" + [...visiblePanels].sort().join(",");
+  }
+  return cachedSnapshot;
+}

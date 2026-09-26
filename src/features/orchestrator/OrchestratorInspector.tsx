@@ -6,7 +6,7 @@
  * evt.* 属运行期上下文不标错）。
  */
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { tx } from "../../i18n/strings";
+import { tx, useLocale } from "../../i18n/strings";
 import * as orchestratorStore from "./orchestratorStore";
 import * as bind from "./orchestratorBind";
 import { MatchEditor } from "../sequencer/SequencerPanel";
@@ -216,21 +216,22 @@ const mkCond = (k: Cond["k"]): Cond => {
   }
 };
 
-const COND_OPS: { v: OrchOp; zh: string; en: string }[] = [
-  { v: "eq", zh: "=", en: "=" },
-  { v: "ne", zh: "≠", en: "≠" },
-  { v: "gt", zh: ">", en: ">" },
-  { v: "lt", zh: "<", en: "<" },
-  { v: "ge", zh: "≥", en: "≥" },
-  { v: "le", zh: "≤", en: "≤" },
-  { v: "approx", zh: "≈±容差", en: "≈±tol" },
+/** 比较符：符号与语言无关，只有"≈±容差"这一格要翻。`label` 是取值函数（表在模块级求值，语言不能冻在那儿） */
+const COND_OPS: { v: OrchOp; label: () => string }[] = [
+  { v: "eq", label: () => "=" },
+  { v: "ne", label: () => "≠" },
+  { v: "gt", label: () => ">" },
+  { v: "lt", label: () => "<" },
+  { v: "ge", label: () => "≥" },
+  { v: "le", label: () => "≤" },
+  { v: "approx", label: () => tx("≈±容差", "≈±tol") },
 ];
 
 function OpSelect(props: { value: OrchOp; onChange: (v: OrchOp) => void }) {
   return (
     <select className="input orch-w64" value={props.value} onChange={(e) => props.onChange(e.target.value as OrchOp)}>
       {COND_OPS.map((o) => (
-        <option key={o.v} value={o.v}>{tx(o.zh, o.en)}</option>
+        <option key={o.v} value={o.v}>{o.label()}</option>
       ))}
     </select>
   );
@@ -431,6 +432,7 @@ function findNode(nodes: FlowNode[], id: string): FlowNode | undefined {
 }
 
 export function Inspector(props: { sel: Sel; doc: FlowDoc; onSel: (s: Sel | null) => void }) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const { sel, doc, onSel } = props;
   const g = doc.groups.find((x) => x.id === sel.groupId);
   if (!g) return null;
@@ -959,11 +961,11 @@ function BlockFields(props: { groupId: string; node: FlowNode; doc: FlowDoc }) {
         <>
           <Field label={tx("功能码", "Function")} tip={tx("FC05=写单线圈（0/1）；FC06=写单寄存器", "FC05=coil (0/1); FC06=register")}>
             <select className="input orch-flex" value={node.fn} onChange={(e) => upd({ fn: Number(e.target.value) === 5 ? 5 : 6 })}>
-              <option value={5}>FC05 线圈</option>
-              <option value={6}>FC06 寄存器</option>
+              <option value={5}>{tx("FC05 线圈", "FC05 coil")}</option>
+              <option value={6}>{tx("FC06 寄存器", "FC06 register")}</option>
             </select>
           </Field>
-          <Field label={tx("从站 / 地址", "Slave / Addr")} tip="1~247 / 0~65535（0 基址）">
+          <Field label={tx("从站 / 地址", "Slave / Addr")} tip={tx("1~247 / 0~65535（0 基址）", "1~247 / 0~65535 (zero-based)")}>
             <div className="orch-row2">
               <input className="input orch-flex" type="number" min={0} max={247} value={node.slave} onChange={(e) => upd({ slave: clampN(e.target.value, 0, 247, 1) })} />
               <input className="input orch-flex" type="number" min={0} max={65535} value={node.addr} onChange={(e) => upd({ addr: clampN(e.target.value, 0, 65535, 0) })} />
@@ -995,9 +997,9 @@ function BlockFields(props: { groupId: string; node: FlowNode; doc: FlowDoc }) {
         <>
           <Field label={tx("面板", "Panel")} tip={tx("抓取哪个面板的画面", "Which panel to capture")}>
             <select className="input orch-flex" value={node.panel} onChange={(e) => upd({ panel: e.target.value })}>
-              <option value="plot2d">2D 曲线</option>
-              <option value="plot3d">3D 轨迹</option>
-              <option value="spectrum">频谱</option>
+              <option value="plot2d">{tx("2D 曲线", "2D chart")}</option>
+              <option value="plot3d">{tx("3D 轨迹", "3D trajectory")}</option>
+              <option value="spectrum">{tx("频谱", "Spectrum")}</option>
             </select>
           </Field>
           <Field label={tx("备注", "Note")}>
@@ -1097,7 +1099,7 @@ function BlockFields(props: { groupId: string; node: FlowNode; doc: FlowDoc }) {
             </select>
           </Field>
           {node.mode === "count" ? (
-            <Field label={tx("次数", "Count")} tip={`1 ~ ${ORCH_LIMITS.loopIterCap} 轮`}>
+            <Field label={tx("次数", "Count")} tip={tx(`1 ~ ${ORCH_LIMITS.loopIterCap} 轮`, `1 ~ ${ORCH_LIMITS.loopIterCap} iterations`)}>
               <input
                 className="input orch-w110"
                 type="number"
@@ -1234,6 +1236,7 @@ function VarRow(props: { v: FlowVar; liveVal: string; siblings: FlowVar[] }) {
 }
 
 export function VarsEditor() {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const store = useSyncExternalStore(orchestratorStore.subscribe, orchestratorStore.getSnapshot);
   const vars = store.doc.vars;
   // 引擎持有运行值；父组件 500ms 轮询驱动刷新

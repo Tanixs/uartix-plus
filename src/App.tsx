@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import {
   DockviewApi,
   DockviewReact,
@@ -7,18 +7,31 @@ import {
   type IDockviewPanel,
 } from "dockview-react";
 import { panelComponents, PANEL_TITLES, panelTitleOf } from "./panels/panels";
+import { applyDefaultLayout, gridSize } from "./shell/defaultLayout";
 import {
-  PANEL_GROUPS,
+  panelGroupsAddable,
   getRecentPanels,
+  isRetiredPanel,
   panelGroupLabel,
   pushRecentPanel,
 } from "./panels/panelMenu";
 import * as panelActivity from "./panels/panelActivity";
-import { SerialToolbar } from "./features/serial/SerialToolbar";
-import { TitleBar } from "./shell/TitleBar";
-import { IconColumns } from "./shared/icons";
+import { IdentityBar, ToolBar, LinkCapsule } from "./shell/TopBars";
+import { InfoBar } from "./shell/InfoBar";
+import { SideRail } from "./shell/SideRail";
+import { PanelChromeActions } from "./shell/PanelChromeActions";
+import { railWidth, subscribeRail, toggleRailPanel, openRailPanel, type RailKey } from "./shell/railState";
+import { CommandPalette } from "./shell/CommandPalette";
+import { buildCommands, type PaletteDeps } from "./shell/commandRegistry";
+import { Welcome } from "./shell/Welcome";
+import { markWelcomeSeen, welcomeSeen } from "./shell/welcomeSlides";
+import { devWelcomeAt } from "./dev/bootOverrides";
+import { type RailActions } from "./shell/RailPanel";
+import { IfaceAction } from "./features/serial/ifaces";
+import { ModbusBadge } from "./features/modbus/ModbusBadge";
+import { IconLayoutEdit } from "./shared/icons";
 import { confirmDialog } from "./shared/Dialog";
-import type { IfaceKind } from "./features/serial/serialStore";
+import { applyUiZoom } from "./shared/zoom";
 import { SETTINGS_TAB_PLUGINS, type WorkspacePreset } from "./features/settings/settingsStore";
 import { JsonDropImport } from "./features/settings/JsonDropImport";
 import { AiFloat } from "./features/ai/AiFloat";
@@ -41,10 +54,22 @@ import { InstallConfirm } from "./features/market/InstallConfirm";
 import {
   backupAutoLayout,
   getLayout,
+  clearStoredLayout,
   saveLayout,
+  getSnapshot as getLayoutsSnapshot,
+  subscribe as subscribeLayouts,
 } from "./features/settings/layoutsStore";
+import * as tourStore from "./features/tour/tourStore";
+import { TOUR_STEPS } from "./features/tour/tourSteps";
 import { useChrome } from "./features/settings/chromeStore";
-import { applyLayoutJson } from "./features/settings/applyLayout";
+import { applyLayoutJson, looksLikeLayoutJson } from "./features/settings/applyLayout";
+import {
+  LAYOUT_KEY_CORRUPT,
+  LAYOUT_KEY_V2,
+  LAYOUT_KEY_V3,
+  packEnvelope,
+  unwrapEnvelope,
+} from "./features/settings/layoutEnvelope";
 import {
   getSnapshot as getSettingsSnapshot,
   patch,
@@ -54,7 +79,6 @@ import * as controlsStore from "./features/controls/controlsStore";
 import { SettingsModal } from "./features/settings/SettingsModal";
 import { HelpModal } from "./features/help/HelpModal";
 import { TourHost } from "./features/tour/TourHost";
-import * as vdevStore from "./features/vdev/vdevStore";
 import type { PanelId } from "./ipc/types";
 import * as serialStore from "./features/serial/serialStore";
 import * as sessionStore from "./features/session/sessionStore";
@@ -68,7 +92,7 @@ import * as variableStore from "./features/controls/variableStore";
 import * as fcStore from "./features/framecanvas/frameStore";
 import * as telemetryStore from "./features/protocol/telemetryStore";
 import * as mcpServer from "./features/mcp/mcpServer";
-import { notifyLocale, t, tx, useLocale } from "./i18n/strings";
+import { notifyLocale, tx, useLocale } from "./i18n/strings";
 import { takeIpcLatency } from "./ipc/ipcLatency";
 import { subscribeReplayClock } from "./features/analysis/timeNavigation";
 import { subscribeAnalysisAi } from "./features/analysis/analysisAi";
@@ -77,312 +101,14 @@ import type { AnalysisSnapshot } from "./features/analysis/analysisSnapshot";
 import { subscribeAnalysisExport } from "./features/analysis/analysisExportEvents";
 import { installFxStylesheet } from "./features/agent/fxRecipes";
 
-const LAYOUT_KEY = "vs.layout.v2";
+// P104-B1：键名收敛到 layoutsStore 单处导出（OperatorGen 曾硬编码同一字面量，是第二真值）
 
-function applyDefaultLayout(api: DockviewApi, preset: WorkspacePreset = "proto") {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  const leftW = Math.max(240, Math.round(w * 0.25));
-  const rightW = Math.max(260, Math.round(w * 0.25));
-  const midW = Math.max(480, w - leftW - rightW);
-  const bottomH = Math.round(h * 0.5);
-  const bottomColW = Math.max(280, Math.round(midW / 2));
+/** 导出仅为可测性：它此前零覆盖，两个算术 bug（templates 被挤到最小宽、分母未除缩放）因此长期存活。
+ *  B13 会重写拓扑，届时连同一组不变量测试一起搬进独立模块。 */
 
-  api.addPanel({
-    id: "templates",
-    component: "templates",
-    title: panelTitleOf("templates"),
-    minimumWidth: 200,
-  });
-
-  if (preset === "console") {
-    api.addPanel({
-      id: "hexview",
-      component: "hexview",
-      title: panelTitleOf("hexview"),
-      initialWidth: midW,
-      position: { referencePanel: "templates", direction: "right" },
-    });
-    api.addPanel({
-      id: "console",
-      component: "console",
-      title: panelTitleOf("console"),
-      initialHeight: Math.round(h * 0.4),
-      minimumHeight: 140,
-      position: { referencePanel: "hexview", direction: "below" },
-    });
-    api.addPanel({
-      id: "controls",
-      component: "controls",
-      title: panelTitleOf("controls"),
-      initialWidth: rightW,
-      minimumWidth: 230,
-      position: { referencePanel: "hexview", direction: "right" },
-    });
-    api.getPanel("hexview")?.api.setActive();
-    return;
-  }
-
-  if (preset === "video") {
-    api.addPanel({
-      id: "video",
-      component: "video",
-      title: panelTitleOf("video"),
-      initialWidth: midW + rightW,
-      position: { referencePanel: "templates", direction: "right" },
-    });
-    api.addPanel({
-      id: "hexview",
-      component: "hexview",
-      title: panelTitleOf("hexview"),
-      initialHeight: Math.round(h * 0.35),
-      minimumHeight: 140,
-      position: { referencePanel: "video", direction: "below" },
-    });
-    api.addPanel({
-      id: "properties",
-      component: "properties",
-      title: panelTitleOf("properties"),
-      initialWidth: rightW,
-      minimumWidth: 230,
-      position: { referencePanel: "video", direction: "right" },
-    });
-    api.addPanel({
-      id: "console",
-      component: "console",
-      title: panelTitleOf("console"),
-      initialHeight: Math.round(h * 0.3),
-      minimumHeight: 120,
-      position: { referencePanel: "properties", direction: "below" },
-    });
-    api.getPanel("video")?.api.setActive();
-    return;
-  }
-
-  if (preset === "calib") {
-    // 3D 校准（P82③）：3D 轨迹主视 + 帧画布堆叠，右侧 2D 曲线看原始通道，底部控制台
-    api.addPanel({
-      id: "plot3d",
-      component: "plot3d",
-      title: panelTitleOf("plot3d"),
-      initialWidth: midW + rightW,
-      position: { referencePanel: "templates", direction: "right" },
-    });
-    api.addPanel({
-      id: "framecanvas",
-      component: "framecanvas",
-      title: panelTitleOf("framecanvas"),
-      position: { referencePanel: "plot3d", direction: "within" },
-    });
-    api.addPanel({
-      id: "plot2d",
-      component: "plot2d",
-      title: panelTitleOf("plot2d"),
-      initialWidth: rightW,
-      minimumWidth: 240,
-      position: { referencePanel: "plot3d", direction: "right" },
-    });
-    api.addPanel({
-      id: "console",
-      component: "console",
-      title: panelTitleOf("console"),
-      initialHeight: bottomH,
-      minimumHeight: 120,
-      position: { referencePanel: "plot3d", direction: "below" },
-    });
-    api.getPanel("plot3d")?.api.setActive();
-    return;
-  }
-
-  if (preset === "auto") {
-    // 自动化（P82③）：编排器居中，序列器左、哨兵右，底部曲线+控制台——无模板锚点（自动化场景协议已就绪）
-    api.addPanel({
-      id: "sequencer",
-      component: "sequencer",
-      title: panelTitleOf("sequencer"),
-      initialWidth: leftW,
-      minimumWidth: 260,
-    });
-    api.addPanel({
-      id: "orchestrator",
-      component: "orchestrator",
-      title: panelTitleOf("orchestrator"),
-      initialWidth: midW,
-      position: { referencePanel: "sequencer", direction: "right" },
-    });
-    api.addPanel({
-      id: "sentinel",
-      component: "sentinel",
-      title: panelTitleOf("sentinel"),
-      initialWidth: rightW,
-      minimumWidth: 240,
-      position: { referencePanel: "orchestrator", direction: "right" },
-    });
-    api.addPanel({
-      id: "plot2d",
-      component: "plot2d",
-      title: panelTitleOf("plot2d"),
-      initialHeight: bottomH,
-      minimumHeight: 140,
-      position: { referencePanel: "orchestrator", direction: "below" },
-    });
-    api.addPanel({
-      id: "console",
-      component: "console",
-      title: panelTitleOf("console"),
-      position: { referencePanel: "plot2d", direction: "within" },
-    });
-    api.getPanel("orchestrator")?.api.setActive();
-    return;
-  }
-
-  if (preset === "modbus") {
-    // 工业 Modbus（P82③）：工作台居中，右侧指令工厂所在控制台，底部 Hex + 表格
-    api.addPanel({
-      id: "modbus",
-      component: "modbus",
-      title: panelTitleOf("modbus"),
-      initialWidth: midW + rightW,
-      position: { referencePanel: "templates", direction: "right" },
-    });
-    api.addPanel({
-      id: "console",
-      component: "console",
-      title: panelTitleOf("console"),
-      initialWidth: rightW,
-      minimumWidth: 260,
-      position: { referencePanel: "modbus", direction: "right" },
-    });
-    api.addPanel({
-      id: "hexview",
-      component: "hexview",
-      title: panelTitleOf("hexview"),
-      initialHeight: bottomH,
-      minimumHeight: 120,
-      position: { referencePanel: "modbus", direction: "below" },
-    });
-    api.addPanel({
-      id: "table",
-      component: "table",
-      title: panelTitleOf("table"),
-      position: { referencePanel: "hexview", direction: "right" },
-    });
-    api.getPanel("modbus")?.api.setActive();
-    return;
-  }
-
-  if (preset === "vdev") {
-    // 虚拟设备（P82③）：工坊居中，右侧曲线即时观察，底部帧画布 + 控制台
-    api.addPanel({
-      id: "vdev",
-      component: "vdev",
-      title: panelTitleOf("vdev"),
-      initialWidth: midW,
-      position: { referencePanel: "templates", direction: "right" },
-    });
-    api.addPanel({
-      id: "plot2d",
-      component: "plot2d",
-      title: panelTitleOf("plot2d"),
-      initialWidth: rightW,
-      minimumWidth: 240,
-      position: { referencePanel: "vdev", direction: "right" },
-    });
-    api.addPanel({
-      id: "framecanvas",
-      component: "framecanvas",
-      title: panelTitleOf("framecanvas"),
-      initialHeight: bottomH,
-      minimumHeight: 120,
-      position: { referencePanel: "vdev", direction: "below" },
-    });
-    api.addPanel({
-      id: "console",
-      component: "console",
-      title: panelTitleOf("console"),
-      position: { referencePanel: "framecanvas", direction: "right" },
-    });
-    api.getPanel("vdev")?.api.setActive();
-    return;
-  }
-
-  const centerPanels =
-    preset === "analyze"
-      ? (["plot2d", "hexview", "console"] as const)
-      : (["framecanvas", "hexview", "console"] as const);
-
-  const first = centerPanels[0];
-  api.addPanel({
-    id: first,
-    component: first,
-    title: panelTitleOf(first),
-    initialWidth: midW + rightW,
-    position: { referencePanel: "templates", direction: "right" },
-  });
-  for (let i = 1; i < centerPanels.length; i++) {
-    api.addPanel({
-      id: centerPanels[i],
-      component: centerPanels[i],
-      title: panelTitleOf(centerPanels[i]),
-      position: { referencePanel: first, direction: "within" },
-    });
-  }
-  if (preset === "attitude") {
-    api.addPanel({
-      id: "view3d",
-      component: "view3d",
-      title: panelTitleOf("view3d"),
-      position: { referencePanel: first, direction: "within" },
-    });
-  }
-  api.addPanel({
-    id: "properties",
-    component: "properties",
-    title: panelTitleOf("properties"),
-    initialWidth: rightW,
-    minimumWidth: 230,
-    minimumHeight: 260,
-    position: { referencePanel: first, direction: "right" },
-  });
-  api.addPanel({
-    id: "table",
-    component: "table",
-    title: panelTitleOf("table"),
-    initialHeight: bottomH,
-    minimumHeight: 140,
-    position: { referencePanel: first, direction: "below" },
-  });
-  if (preset !== "analyze") {
-    api.addPanel({
-      id: "plot2d",
-      component: "plot2d",
-      title: panelTitleOf("plot2d"),
-      initialWidth: bottomColW,
-      minimumWidth: 240,
-      position: { referencePanel: "table", direction: "right" },
-    });
-  }
-  if (preset === "analyze") {
-    // P82③：分析预设右下从 3D 姿态换成频谱——与 2D 共享通道，"分析"主题更聚焦
-    api.addPanel({
-      id: "spectrum",
-      component: "spectrum",
-      title: panelTitleOf("spectrum"),
-      initialWidth: bottomColW,
-      minimumWidth: 240,
-      position: { referencePanel: "plot2d", direction: "right" },
-    });
-  }
-  api.addPanel({
-    id: "controls",
-    component: "controls",
-    title: panelTitleOf("controls"),
-    initialHeight: bottomH,
-    minimumHeight: 120,
-    position: { referencePanel: "properties", direction: "below" },
-  });
-  api.getPanel(first)?.api.setActive();
-}
+/** 退役面板的"打开"意图改派给谁：面板没了，需求还在。
+ *  App 是唯一同时知道 `PanelId` 与导轨项的装配层，所以映射写在这、不写进 `panelMenu`。 */
+const RAIL_OF_RETIRED: Record<string, RailKey> = { templates: "templates" };
 
 export default function App() {
   useEffect(subscribeReplayClock, []);
@@ -394,6 +120,14 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  /** P104-B7：一次性首启欢迎轮播。`?welcome=0|1` 在 React 挂载前就改好这个键（bootOverrides）。 */
+  const [welcomeOpen, setWelcomeOpen] = useState(() => !welcomeSeen());
+  const tourSnap = useSyncExternalStore(tourStore.subscribe, tourStore.getSnapshot);
+  const closeWelcome = () => {
+    markWelcomeSeen();
+    setWelcomeOpen(false);
+  };
   /** 插件市场只在这里渲染一份：插件库与标题栏两颗按钮都只发 `openMarket` 信号 */
   const [marketOpen, setMarketOpen] = useState(false);
   const [analysisExport, setAnalysisExport] = useState<{ snapshot?: AnalysisSnapshot } | null>(null);
@@ -436,9 +170,9 @@ export default function App() {
   const dockBase = useSyncExternalStore(subscribeStyleApply, () => activeThemeFacts().scheme);
 
   useEffect(() => {
-    document.documentElement.style.zoom = `${settings.zoom}%`;
-    // 通知浮窗类组件重算逻辑坐标（zoom 改变 vw/vh 语义但不触发 resize）
-    window.dispatchEvent(new Event("vs-zoom-change"));
+    // P104-B1：缩放统一走 shared/zoom —— 它同时写 style.zoom 与 --zoom 根变量，
+    // 并派发 vs-zoom-change（zoom 改变 vw/vh 语义但不触发 resize，浮窗要靠它重钳制）。
+    applyUiZoom(settings.zoom);
   }, [settings.zoom]);
 
   // P97-I3：动效配方表（CSS 由 fxRecipes.ts 生成，theme.css 里不留平行清单；显式调用，不做求值期副作用）
@@ -514,7 +248,7 @@ export default function App() {
       } else if (msg.kind === "applyLayout") {
         // P99a-D1b：插件库「应用此布局」。布局 JSON 由包带来，执行权仍只在这里（dockview api 不出 App）
         const api = apiRef.current;
-        localStorage.removeItem(LAYOUT_KEY);
+        clearStoredLayout();
         msg.done(applyLayoutJson(api, msg.layout, {
           before: () => {
             if (api) backupAutoLayout(api.toJSON());
@@ -538,6 +272,20 @@ export default function App() {
       if (e.ctrlKey && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
         setAiOpen((v) => !v);
+        return;
+      }
+      /* P104-B9：命令面板。刻意**不抢 Ctrl+K** —— 那是 AI 的既有开关，
+         抢它等于让一批人的肌肉记忆静默失效，而这类失效不会报错、只会"手感不对"。
+         用户 2026-09-25 判定：AI 保留 Ctrl+K，面板走 Ctrl+Shift+P。
+         （`metaKey` 那半是给 macOS 的；本仓目前只在 Windows 上验过，
+         没验过的键位不该装作可用 —— 但绑定本身无害，先一起挂上。） */
+      if (
+        (e.ctrlKey || e.metaKey) &&
+        e.shiftKey &&
+        (e.key === "p" || e.key === "P")
+      ) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -590,28 +338,70 @@ export default function App() {
     const tagPanel = (p: IDockviewPanel) => {
       p.view.content.element.setAttribute("data-panel", p.view.contentComponent);
     };
+    /* P104-R 遗留：老 v2 存档与命名布局槽里残留的 `templates` 面板，恢复后不要摆出来。
+       注册表与 `PanelId` 都留着（B13 才正式退役），所以旧存档照常反序列化、
+       用户存的布局文件一个字不改；但内容已搬进导轨「协议」，画布上再摆一份
+       就是同一事实的第二个落点。
+
+       "隐藏"在这里只能落成 close()：dockview 8.2 的 `DockviewPanelApi` 声明是
+       `Omit<GridviewPanelApi, "setVisible" | ...>`——面板级 setVisible 被显式摘掉了，
+       也没有 hidden-container 之类的概念。关的是**这个实例**，不是那个面板：
+       组件仍注册，`addOrFocusPanel("templates")` 随时能再开回来。
+
+       挂在 onDidAddPanel 上而不是三条 fromJSON 路径各补一次：启动恢复、布局槽、
+       Operator 部署包都走这里，写三处就是三个真值。
+       关闭延到微任务——`onDidAddPanel` 还在 dockview 自己的派发栈上，
+       当场 removePanel 是重入。 */
+    const retireOnAdd = (p: IDockviewPanel) => {
+      if (!isRetiredPanel(p.id)) return;
+      queueMicrotask(() => {
+        if (api.getPanel(p.id)) p.api.close();
+      });
+    };
     api.onDidAddPanel((e) => {
       tagPanel(e);
       retitlePanels();
       syncPanels();
+      retireOnAdd(e);
     });
     api.onDidRemovePanel(syncPanels);
     api.onDidActivePanelChange(syncPanels);
-    api.onDidLayoutChange(() => {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(api.toJSON()));
-    });
-    const saved = localStorage.getItem(LAYOUT_KEY);
-    if (saved) {
+    /* P104-B13①：存档读写走版本信封。
+       旧写法在 `fromJSON` 抛异常时 `localStorage.removeItem(LAYOUT_KEY)` ——
+       那是**静默删掉用户自己摆的布局**。布局不像主题，改坏了没有"撤销"，
+       用户看到的直接是"我摆好的东西没了"。现在改成：坏档挪进 `vs.layout.corrupt` 留着，
+       界面退回默认拓扑，取证时那份原样档还在。 */
+    const persistLayout = () => {
       try {
-        api.fromJSON(JSON.parse(saved) as SerializedDockview);
+        localStorage.setItem(LAYOUT_KEY_V3, packEnvelope(api.toJSON()));
+      } catch {
+        /* 存档写不进去（配额 / 隐私模式）不该让工作台崩掉 */
+      }
+    };
+    api.onDidLayoutChange(persistLayout);
+    const raw = localStorage.getItem(LAYOUT_KEY_V3) ?? localStorage.getItem(LAYOUT_KEY_V2);
+    const unwrapped = unwrapEnvelope(raw, looksLikeLayoutJson);
+    if (unwrapped && unwrapped.kind !== "bad") {
+      try {
+        api.fromJSON(unwrapped.layout as SerializedDockview);
+        // 读到的是裸的 v2 档 ⇒ 就地升级成 v3 信封。v2 键**故意留着**当后悔药，
+        // 所以下面 persist 之后仍会同时存在两份；清理的时机不是这次。
+        persistLayout();
         retitlePanels();
         syncPanels();
         return;
       } catch {
-        localStorage.removeItem(LAYOUT_KEY);
+        /* 装不上：留着原档，落到默认布局 */
       }
     }
-    applyDefaultLayout(api, getSettingsSnapshot().workspace);
+    if (unwrapped?.kind === "bad") {
+      try {
+        localStorage.setItem(LAYOUT_KEY_CORRUPT, unwrapped.raw);
+      } catch {
+        /* 连备份都写不下就算了，至少别白屏 */
+      }
+    }
+    applyDefaultLayout(api, getSettingsSnapshot().workspace, panelTitleOf, railWidth());
     retitlePanels();
     syncPanels();
     // 兜底：布局恢复/首帧渲染后可见性可能尚未稳定，延迟再同步一次
@@ -635,11 +425,26 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operator.pkg]);
 
+  /* P104-B13③：编辑布局时的组框覆盖层。
+     原先是 `setInterval(compute, 400)` —— 每 400ms 重排一次 React，且**永远滞后半秒**：
+     拖完分隔条要等一下框才跟上，快速连续操作时看到的是旧位置。
+
+     换成"观察我们真正要画的那些元素"：组元素本身在拖分栏时会改尺寸，
+     所以 ResizeObserver 直接盯 `g.element` 就是最准的信号，
+     不需要猜 dockview 的哪个事件覆盖了哪种改动。
+     组的增删走 onDidAddGroup / onDidRemoveGroup 重新挂观察器；
+     onDidLayoutChange 兜住"尺寸没变但位置变了"（如面板移动）；
+     window resize 兜住整格外部尺寸变化。
+
+     已知边界：ResizeObserver 在页面被遮挡时不发（B8、R 遗留都撞过这一刀）。
+     这里可以接受——编辑布局时用户必然看着窗口；自动化取证要验的是"初始一致"，
+     不是"拖拽实时性"。 */
   useEffect(() => {
     if (!editLayout) {
       setGroupBoxes([]);
       return;
     }
+    let raf = 0;
     const compute = () => {
       const api = apiRef.current;
       const shell = shellRef.current;
@@ -658,12 +463,40 @@ export default function App() {
         }),
       );
     };
+    /** 一帧只算一次：拖分栏时 RO 会以指针频率连发，不去抖就是每帧一次 setState */
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        compute();
+      });
+    };
+
+    const ro = new ResizeObserver(schedule);
+    const rewatch = () => {
+      const api = apiRef.current;
+      if (!api) return;
+      ro.disconnect();
+      for (const g of api.groups) ro.observe(g.element);
+    };
+
     compute();
-    const timer = window.setInterval(compute, 400);
-    window.addEventListener("resize", compute);
+    rewatch();
+    const subs = [
+      apiRef.current?.onDidAddGroup(schedule),
+      apiRef.current?.onDidRemoveGroup(schedule),
+      apiRef.current?.onDidLayoutChange(schedule),
+    ];
+    const onResize = () => {
+      schedule();
+      rewatch();
+    };
+    window.addEventListener("resize", onResize);
     return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("resize", compute);
+      if (raf) cancelAnimationFrame(raf);
+      ro.disconnect();
+      window.removeEventListener("resize", onResize);
+      for (const s of subs) (s as { dispose?: () => void })?.dispose?.();
     };
   }, [editLayout]);
 
@@ -707,9 +540,9 @@ export default function App() {
     } catch {
       /* 快照失败不阻塞切换 */
     }
-    localStorage.removeItem(LAYOUT_KEY);
+    clearStoredLayout();
     api.clear();
-    applyDefaultLayout(api, preset);
+    applyDefaultLayout(api, preset, panelTitleOf, railWidth());
     if (preset === "attitude") {
       const exists = controlsStore
         .getSnapshot()
@@ -744,7 +577,7 @@ export default function App() {
     if (!slot) return false;
     // 命名槽与插件布局都是"整屏覆盖"，动手前先把当前布局快照进自动备份槽：点错了有地方回
     const api = apiRef.current;
-    localStorage.removeItem(LAYOUT_KEY);
+    clearStoredLayout();
     return applyLayoutJson(api, slot.layout, {
       before: () => {
         if (api) backupAutoLayout(api.toJSON());
@@ -765,11 +598,96 @@ export default function App() {
     }
   };
 
+  /* P104-B9：命令面板的条目。
+     `openPanels` 不另立状态——读 `panelActivity`（导轨「视图」也读它），
+     并把它的版本串塞进 useMemo 依赖，这样"哪些面板开着"仍然是**一个**真值。 */
+  const paletteActivity = useSyncExternalStore(panelActivity.subscribe, panelActivity.getSnapshot);
+  const layoutsSnapshot = useSyncExternalStore(subscribeLayouts, getLayoutsSnapshot);
+  const sessionSnap = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot);
+  const protoSnap = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
+  const paletteCommands = useMemo(() => {
+    const api = apiRef.current;
+    const slots = layoutsSnapshot.slots.map((s) => ({ id: s.id, name: s.name }));
+    const deps: PaletteDeps = {
+      panelTitleOf,
+      openPanel: (id) => addOrFocusPanel(id),
+      openPanels: api ? api.panels.map((p) => p.id) : [],
+      applyPreset: (p) => resetLayout(p),
+      resetLayout: () => resetLayout(getSettingsSnapshot().workspace),
+      editLayout: () => setEditLayout((v) => !v),
+      slots,
+      applySlot: (id) => applyLayoutSlot(id),
+      openRail: (key) => openRailPanel(key),
+      toggleConnect: () => {
+        // 与工具栏那颗「连接」同一支 store 调用，不另开一条路
+        if (serialStore.getSnapshot().status === "connected" || serialStore.getSnapshot().status === "reconnecting") void serialStore.closePort();
+        else void serialStore.openPort();
+      },
+      connected: serial.status === "connected" || serial.status === "reconnecting",
+      toggleRecord: () => {
+        const st = sessionStore.getSnapshot().state;
+        if (st === "recording") void sessionStore.stopRecord();
+        else void sessionStore.startRecord();
+      },
+      recording: sessionSnap.state === "recording",
+      toggleDemo: () => void templateStore.toggleDemo(),
+      demoOn: protoSnap.demoRunning,
+      openAi: () => setAiOpen(true),
+      openMarket: () => setMarketOpen(true),
+      openSettings: (tab) => {
+        setSettingsTab(tab);
+        setSettingsOpen(true);
+      },
+      openHelp: () => setHelpOpen(true),
+      restartTour: () => tourStore.start(TOUR_STEPS),
+      setTheme: (mode) => patch({ theme: mode as typeof settings.theme }),
+      setLocale: (loc) => patch({ locale: loc }),
+      setZoom: (pct) => patch({ zoom: pct as 90 | 100 | 110 | 125 }),
+      locale: settings.locale,
+      zoom: settings.zoom,
+    };
+    return buildCommands(deps);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paletteActivity, layoutsSnapshot, serial.status, sessionSnap.state, protoSnap.demoRunning, settings.locale, settings.zoom, settings.theme]);
+
+  const railActions: RailActions = {
+    editLayout,
+    onToggleEditLayout: () => setEditLayout((v) => !v),
+    onApplyLayoutSlot: (id) => {
+      applyLayoutSlot(id);
+    },
+    onSaveLayout: saveCurrentLayout,
+  };
+
+  /**
+   * 导轨二级面板开合会改画布宽。dockview 靠 ResizeObserver 自己重排，但那条通知
+   * 绑在渲染帧上（页面被遮挡时不发，B8 实测撞到过：面板组仍按旧宽度排着、右边整条压在导轨底下）。
+   * 所以这里不赌它——开合后直接拿公开出口 api.layout() 按新的网格尺寸重排一次。
+   */
+  useEffect(
+    () =>
+      subscribeRail(() => {
+        const api = apiRef.current;
+        if (!api) return;
+        const g = gridSize(railWidth());
+        api.layout(g.w, g.h);
+      }),
+    [],
+  );
+
   const addOrFocusPanel = (id: string) => {
     const api = apiRef.current;
     if (!api) return;
     // B6：记录「最近使用」（打开与聚焦都算一次真实使用）
     setRecentPanels(pushRecentPanel(id));
+    /* R 遗留：已退役的面板不再往画布上摆——内容搬进导轨了，摆出来就是同一事实的
+       第二个落点。但"打开协议模板"这个**意图**是真实的（AI 的 openPanel、老代码里
+       可能还留着的调用都走这条路），所以把它改派到导轨对应那一项，而不是静默什么都不做。
+       B13 从 `PanelId` 里正式摘掉 templates 时，这条分支连同 `RETIRED_PANELS` 一起删。 */
+    if (isRetiredPanel(id)) {
+      toggleRailPanel(RAIL_OF_RETIRED[id]);
+      return;
+    }
     const exist = api.getPanel(id);
     if (exist) {
       exist.api.setActive();
@@ -845,13 +763,16 @@ export default function App() {
     chromeSegNodes.push(
       <div key={seg} className={`toolbar-seg toolbar-seg-${seg}`}>
         {seg === "connect" ? (
-          serial.iface === "serial" ? (
-            <SerialToolbar />
-          ) : serial.iface === "ble" ? (
-            <BleIfaceBar />
-          ) : (
-            <NetIfaceBar kind={serial.iface} />
-          )
+          /* P104-B5 起链路段就瘦成"看一眼 + 按一下"；R4 再走一步：
+             接口切换器也搬进导轨「接入」，这里只剩只读胶囊 + 连接动作 + Modbus 徽标。
+             参数编辑（串口的 8N1、网络的地址端口、蓝牙的扫描与特征）是配置一次
+             用一天的东西，不该常年占着顶栏。 */
+          <div className="toolbar-group">
+            <IfaceAction kind={serial.iface} />
+            <LinkCapsule />
+            {/* Modbus 服务在跑就必须看得见（面板可能已关）⇒ 常驻条，不跟参数进面板 */}
+            <ModbusBadge />
+          </div>
         ) : seg === "session" ? (
           <SessionBar />
         ) : (
@@ -874,7 +795,7 @@ export default function App() {
                   ))}
                 </optgroup>
               )}
-              {PANEL_GROUPS.map((g) => (
+              {panelGroupsAddable().map((g) => (
                 <optgroup key={g.key} label={panelGroupLabel(g)}>
                   {g.ids.map((id) => (
                     <option key={id} value={id}>
@@ -894,11 +815,11 @@ export default function App() {
               )}
             </select>
             <button
-              className={`btn icon-btn${editLayout ? " warn" : ""}`}
+              className={`btn icon-btn${editLayout ? " on" : ""}`}
               onClick={() => setEditLayout((v) => !v)}
               title={tx("编辑显示区布局：沿显示区边缘的 + 号向对应方向新建空显示区", "Edit layout: use the + buttons on area edges to add empty areas in that direction")}
             >
-              <IconColumns />
+              <IconLayoutEdit />
             </button>
           </div>
         )}
@@ -916,78 +837,92 @@ export default function App() {
         e.preventDefault();
       }}
     >
-      <TitleBar
+      {/* P104-R2：顶部两条横栏。身份栏 38（品牌 / AI·插件·设置·帮助 / 窗口，零表单控件）
+          + 工具栏 34（工作区预设 + chromeStore 装配好的三段）。
+          B5 的合成条把这两件事糊在一行，读起来就是"标题栏很乱"。 */}
+      <IdentityBar
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
+        onOpenAi={() => setAiOpen((v) => !v)}
         onOpenLibrary={() => {
-          /* 标题栏那颗开的是设置页的插件管理栏——复用现成页，不再造第三个插件库窗口 */
+          /* 这颗开的是设置页的插件管理栏——复用现成页，不再造第三个插件库窗口 */
           setSettingsTab(SETTINGS_TAB_PLUGINS);
           setSettingsOpen(true);
         }}
-        onOpenAi={() => setAiOpen((v) => !v)}
       />
-      {/* P103 批2：三段内容在上方按 chromeStore 顺序拼好（data-tour 锚点全在各段组件内部，未动） */}
-      <header className="toolbar">{chromeSegNodes}</header>
+      <ToolBar segs={chromeSegNodes} onApplyPreset={(p) => resetLayout(p)} />
       <OperatorBanner onExit={() => operatorStore.exit()} />
-      <div className="app-shell" ref={shellRef}>
-        <DockviewReact
-          components={panelComponents}
-          onReady={onReady}
-          dndStrategy="pointer"
-          theme={{
-            name: "uartix",
-            className:
-              dockBase === "dark" ? "dockview-theme-dark" : "dockview-theme-light",
-            colorScheme: dockBase === "dark" ? "dark" : "light",
-            dndOverlayMounting: "absolute",
-          }}
-        />
-        {editLayout &&
-          groupBoxes.map((g) => (
-            <div
-              key={g.id}
-              className="layout-edit-group"
-              style={{ left: g.left, top: g.top, width: g.width, height: g.height }}
-            >
-              <button
-                className="le-btn le-left"
-                title={tx("向左新建显示区", "Add area to the left")}
-                onClick={() => addGroupInDirection(g.id, "left")}
+      {/* R1：左侧只有**一条**导轨。B5 的活动导轨（.rail）砍掉了——它按 PANEL_GROUPS
+          分组，但用户要的是按"库"分（接入/协议/通道/控件/命令/视图），
+          而"组内有面板开着"这个信息本身没有可操作价值。开面板的入口搬进「视图」项。
+          导轨与它的二级面板都住在 dockview 外面：不占面板槽、不进序列化、不加 PanelId。
+          必须在 .app-shell **之前**——二级面板要往右长，dockview 被往右挤。 */}
+      <div className="app-body">
+        <SideRail actions={railActions} />
+        <div className="app-shell" ref={shellRef}>
+          <DockviewReact
+            components={panelComponents}
+            onReady={onReady}
+            dndStrategy="pointer"
+            /* P104-B10：页签条右侧的动作区。没登记动作的面板这里什么都不画，
+               所以铺开可以一个一个来；回退只要摘掉这一行。 */
+            rightHeaderActionsComponent={PanelChromeActions}
+            theme={{
+              name: "uartix",
+              className:
+                dockBase === "dark" ? "dockview-theme-dark" : "dockview-theme-light",
+              colorScheme: dockBase === "dark" ? "dark" : "light",
+              dndOverlayMounting: "absolute",
+            }}
+          />
+          {editLayout &&
+            groupBoxes.map((g) => (
+              <div
+                key={g.id}
+                className="layout-edit-group"
+                style={{ left: g.left, top: g.top, width: g.width, height: g.height }}
               >
-                +
-              </button>
-              <button
-                className="le-btn le-right"
-                title={tx("向右新建显示区", "Add area to the right")}
-                onClick={() => addGroupInDirection(g.id, "right")}
-              >
-                +
-              </button>
-              <button
-                className="le-btn le-top"
-                title={tx("向上新建显示区", "Add area above")}
-                onClick={() => addGroupInDirection(g.id, "above")}
-              >
-                +
-              </button>
-              <button
-                className="le-btn le-bottom"
-                title={tx("向下新建显示区", "Add area below")}
-                onClick={() => addGroupInDirection(g.id, "below")}
-              >
-                +
-              </button>
-              <button
-                className="le-clear"
-                title={tx("清空该显示区内所有面板（显示区随之消失）", "Close all panels in this area (the area disappears with them)")}
-                onClick={() => clearGroup(g.id)}
-              >
-                {tx("清空", "Clear")}
-              </button>
-            </div>
-          ))}
+                <button
+                  className="le-btn le-left"
+                  title={tx("向左新建显示区", "Add area to the left")}
+                  onClick={() => addGroupInDirection(g.id, "left")}
+                >
+                  +
+                </button>
+                <button
+                  className="le-btn le-right"
+                  title={tx("向右新建显示区", "Add area to the right")}
+                  onClick={() => addGroupInDirection(g.id, "right")}
+                >
+                  +
+                </button>
+                <button
+                  className="le-btn le-top"
+                  title={tx("向上新建显示区", "Add area above")}
+                  onClick={() => addGroupInDirection(g.id, "above")}
+                >
+                  +
+                </button>
+                <button
+                  className="le-btn le-bottom"
+                  title={tx("向下新建显示区", "Add area below")}
+                  onClick={() => addGroupInDirection(g.id, "below")}
+                >
+                  +
+                </button>
+                <button
+                  className="le-clear"
+                  title={tx("清空该显示区内所有面板（显示区随之消失）", "Close all panels in this area (the area disappears with them)")}
+                  onClick={() => clearGroup(g.id)}
+                >
+                  {tx("清空", "Clear")}
+                </button>
+              </div>
+            ))}
+        </div>
       </div>
-      <StatusBar perfOn={perfOn} />
+      {/* P104-B5：信息栏——计数从一整块不可点的字符串变成通往各自主人的入口 */}
+      <InfoBar perfNode={perfOn ? <PerfHud /> : null} onOpenPanel={addOrFocusPanel} />
       {settingsOpen && (
         <SettingsModal
           initialTab={settingsTab}
@@ -998,6 +933,26 @@ export default function App() {
         />
       )}
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+      {/* P104-B7：引导一激活本卡就让位——TourOverlay 量的是真实控件的矩形，
+          卡片盖在上面时高亮环会套到浮层自己身上，引导当场失真。 */}
+      {welcomeOpen && !tourSnap.active && (
+        <Welcome
+          dark={dockBase === "dark"}
+          initial={devWelcomeAt() ?? 0}
+          onStartTour={() => {
+            closeWelcome();
+            tourStore.start(TOUR_STEPS);
+          }}
+          onRunDemo={() => {
+            closeWelcome();
+            void templateStore.toggleDemo();
+          }}
+          onDismiss={closeWelcome}
+        />
+      )}
+      {paletteOpen && (
+        <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
+      )}
       {marketOpen && <MarketDialog onClose={() => setMarketOpen(false)} />}
       {analysisExport && <AnalysisExportDialog snapshot={analysisExport.snapshot} onClose={() => setAnalysisExport(null)} />}
       {aiOpen && (
@@ -1022,153 +977,6 @@ export default function App() {
 
 let renderTick = 0;
 
-/** 状态栏叶子组件：独立订阅串口状态+计数器与遥测统计。
- *  收流期间计数器 5Hz 变化只重渲染这个小叶子，不再拖着整个 App 重渲染 */
-function StatusBar({ perfOn }: { perfOn: boolean }) {
-  const subBoth = (cb: () => void) => {
-    const u1 = serialStore.subscribe(cb);
-    const u2 = serialStore.subscribeCounters(cb);
-    return () => {
-      u1();
-      u2();
-    };
-  };
-  const serial = useSyncExternalStore(subBoth, serialStore.getSnapshot);
-  const tele = useSyncExternalStore(telemetryStore.subscribe, telemetryStore.getSnapshot);
-  const demo = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
-  const vdev = useSyncExternalStore(vdevStore.subscribe, vdevStore.getSnapshot);
-  const statusText =
-    serial.status === "connected"
-      ? serial.iface === "serial"
-        ? `${t("st.connected")} ${serial.config.port} @ ${serial.config.baud}`
-        : `${t("st.connected")} ${serial.portName ?? ""}`
-      : serial.status === "reconnecting"
-        ? t("st.reconnecting")
-        : t("st.disconnected");
-  const bpsText =
-    serial.bps >= 1024
-      ? `${(serial.bps / 1024).toFixed(1)} KB/s`
-      : `${serial.bps} B/s`;
-  return (
-    <footer className="statusbar">
-      <span className="status-left">
-        <span className={`dot ${serial.status}`} />
-        {statusText}
-        {/* C17：演示源在跑时状态栏不再误报「未连接」——数据明明在流动 */}
-        {demo.demoRunning && (
-          <span
-            className="status-demo"
-            title={tx("内置演示源运行中（协议面板可停止）", "Built-in demo source running (stop it in the protocol panel)")}
-          >
-            {tx("演示源", "Demo")}
-          </span>
-        )}
-        {vdev.running && (
-          <span
-            className="status-demo"
-            title={tx(`虚拟设备「${vdev.device ?? ""}」运行中（虚拟设备工坊可停止）`, `Virtual device "${vdev.device ?? ""}" running (stop it in the workshop)`)}
-          >
-            {tx("虚拟设备", "VDev")}
-          </span>
-        )}
-        {serial.error && <span className="status-error">{serial.error}</span>}
-        {perfOn && <PerfHud />}
-      </span>
-      <span className="status-right">
-        RX {serial.rxTotal} B · TX {serial.txTotal} B · {bpsText} · {tx("帧", "fr")}{" "}
-        {tele.stats.total}/{tx("错", "err")} {tele.stats.errors}
-      </span>
-    </footer>
-  );
-}
-
-function NetIfaceBar({ kind }: { kind: IfaceKind }) {
-  const s = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
-  useSettings(); // 语言切换时随设置重渲染
-  const label =
-    kind === "tcp-client"
-      ? t("iface.tcpClient")
-      : kind === "tcp-server"
-        ? t("iface.tcpServer")
-        : t("iface.udp");
-  const busy = s.status === "connected" || s.status === "reconnecting";
-  const onToggle = async () => {
-    if (!busy) {
-      await serialStore.openPort();
-      return;
-    }
-    // 录制中禁止断开：录制 tap 在 Rust 侧持续接管帧流，断开会截断会话
-    if (sessionStore.isRecording()) {
-      serialStore.setError(tx("录制中禁止断开连接", "Cannot disconnect while recording"));
-      return;
-    }
-    await serialStore.closePort();
-  };
-  return (
-    <div className="toolbar-group">
-      <button
-        className={`btn${busy ? " warn" : ""}`}
-        title={busy ? t("tb.disconnect") : t("tb.connect")}
-        onClick={() => void onToggle()}
-      >
-        <span className={`dot ${busy ? "connected" : "disconnected"}`} />
-        {busy ? t("tb.disconnect") : t("tb.connect")}
-      </button>
-      {kind !== "tcp-client" && (
-        <input
-          className="input"
-          value={s.net.remoteHost}
-          disabled={busy}
-          title={t("tb.remoteHost")}
-          placeholder={t("tb.remoteHost")}
-          onChange={(e) => serialStore.setNet({ remoteHost: e.target.value })}
-        />
-      )}
-      {kind !== "tcp-server" && (
-        <input
-          className="input baud"
-          value={String(s.net.remotePort)}
-          disabled={busy}
-          title={t("tb.remotePort")}
-          onChange={(e) => serialStore.setNet({ remotePort: Number(e.target.value) || 0 })}
-        />
-      )}
-      {kind === "tcp-server" && (
-        <select
-          className="input"
-          value={s.net.localHost}
-          disabled={busy}
-          title={tx("服务端监听地址：0.0.0.0 接受所有网卡连接，指定网卡则只接受发往该地址的连接", "Listen address: 0.0.0.0 accepts connections on all NICs; a specific address only accepts connections sent to it")}
-          onChange={(e) => serialStore.setNet({ localHost: e.target.value })}
-        >
-          <option value="0.0.0.0">0.0.0.0 ({tx("所有地址都将开启侦听", "listen on all addresses")})</option>
-          <option value="127.0.0.1">127.0.0.1 ({tx("本地回环地址", "loopback only")})</option>
-          {s.localAddrs.map((a) => (
-            <option key={a.ip} value={a.ip}>
-              {a.ip} ({a.name})
-            </option>
-          ))}
-          {s.net.localHost &&
-            s.net.localHost !== "0.0.0.0" &&
-            s.net.localHost !== "127.0.0.1" &&
-            !s.localAddrs.some((a) => a.ip === s.net.localHost) && (
-              <option value={s.net.localHost}>{s.net.localHost} ({tx("自定义", "custom")})</option>
-            )}
-        </select>
-      )}
-      {kind !== "tcp-client" && (
-        <input
-          className="input baud"
-          value={String(s.net.localPort)}
-          disabled={busy}
-          title={kind === "tcp-server" ? t("tb.localPort") : t("tb.localPortUdp")}
-          onChange={(e) => serialStore.setNet({ localPort: Number(e.target.value) || 0 })}
-        />
-      )}
-      <span className="iface-soon">{busy && s.portName ? `${label} · ${s.portName}` : label}</span>
-    </div>
-  );
-}
 
 /** Operator 只读模式横幅（P67-O2）：包名 + 只读说明 + 退出。
  *  只读范围：协议模板/控制页/命令库（store 门禁）；连接/发送/监视/回放不受限。 */
@@ -1197,126 +1005,6 @@ function OperatorBanner({ onExit }: { onExit: () => void }) {
       >
         {tx("退出 Operator 模式", "Exit operator mode")}
       </button>
-    </div>
-  );
-}
-
-/** BLE 接口栏（P48）：扫描 → 选设备 → 连接；通知流/发送路由在 Rust ble.rs，
- *  状态与收发事件与串口/网络完全同源（serial:state + binbus），本组件只做选择与触发。 */
-function BleIfaceBar() {
-  const s = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
-  useSettings(); // 语言切换时随设置重渲染
-  const busy = s.status === "connected" || s.status === "reconnecting";
-  const onToggle = async () => {
-    if (!busy) {
-      await serialStore.openPort();
-      return;
-    }
-    // 录制中禁止断开：录制 tap 在 Rust 侧持续接管帧流，断开会截断会话
-    if (sessionStore.isRecording()) {
-      serialStore.setError(tx("录制中禁止断开连接", "Cannot disconnect while recording"));
-      return;
-    }
-    await serialStore.closePort();
-  };
-  const onScan = async () => {
-    try {
-      if (s.bleScanning) {
-        await serialStore.bleScanStop();
-      } else {
-        await serialStore.bleScanStart();
-      }
-    } catch {
-      /* 错误已在状态栏展示 */
-    }
-  };
-  return (
-    <div className="toolbar-group">
-      <button
-        className={`btn${busy ? " warn" : ""}`}
-        title={busy ? t("tb.disconnect") : t("tb.connect")}
-        onClick={() => void onToggle()}
-      >
-        <span className={`dot ${busy ? "connected" : "disconnected"}`} />
-        {busy ? t("tb.disconnect") : t("tb.connect")}
-      </button>
-      <button
-        className={`btn${s.bleScanning ? " warn" : ""}`}
-        disabled={busy}
-        title={
-          s.bleScanning
-            ? tx("停止扫描", "Stop scanning")
-            : tx("扫描附近 BLE 设备（列表按信号强度排序，每秒刷新）", "Scan nearby BLE devices (list sorted by signal strength, refreshed every second)")
-        }
-        onClick={() => void onScan()}
-      >
-        {s.bleScanning ? tx("停止扫描", "Stop scan") : tx("扫描", "Scan")}
-      </button>
-      <select
-        className="input"
-        value={s.bleDeviceId}
-        disabled={busy}
-        title={tx("BLE 设备：需支持透传（Nordic UART 或可写+可通知特征对）", "BLE device: must support transparent transfer (Nordic UART or a writable+notifiable characteristic pair)")}
-        onChange={(e) => serialStore.setBleDevice(e.target.value)}
-      >
-        <option value="">
-          {s.bleDevices.length
-            ? tx("选择设备", "Select device")
-            : tx("先点「扫描」发现设备", "Click “Scan” to discover devices")}
-        </option>
-        {s.bleDevices.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.name || tx("(未命名)", "(unnamed)")} — {d.id} · {d.rssi} dBm
-          </option>
-        ))}
-      </select>
-      {s.bleChars.length > 0 && (
-        <>
-          <select
-            className="input"
-            value={s.bleWriteChar}
-            title={tx(
-              "写特征（发数据）：默认自动选择；非标准透传设备可手动指定",
-              "Write characteristic (TX): auto-selected by default; pick manually for non-standard devices",
-            )}
-            onChange={(e) => {
-              serialStore.setBleCharSel({ bleWriteChar: e.target.value });
-              void serialStore.applyBleChars();
-            }}
-          >
-            <option value="">{tx("写特征：自动", "Write char: auto")}</option>
-            {s.bleChars
-              .filter((c) => c.kind.includes("write"))
-              .map((c) => (
-                <option key={c.uuid} value={c.uuid}>
-                  {c.uuid.slice(0, 8)}… · {c.kind}
-                </option>
-              ))}
-          </select>
-          <select
-            className="input"
-            value={s.bleNotifyChar}
-            title={tx(
-              "收特征（notify/indicate）：默认自动选择；非标准透传设备可手动指定",
-              "Notify characteristic (RX): auto-selected by default; pick manually for non-standard devices",
-            )}
-            onChange={(e) => {
-              serialStore.setBleCharSel({ bleNotifyChar: e.target.value });
-              void serialStore.applyBleChars();
-            }}
-          >
-            <option value="">{tx("收特征：自动", "Notify char: auto")}</option>
-            {s.bleChars
-              .filter((c) => c.kind.includes("notify") || c.kind.includes("indicate"))
-              .map((c) => (
-                <option key={c.uuid} value={c.uuid}>
-                  {c.uuid.slice(0, 8)}… · {c.kind}
-                </option>
-              ))}
-          </select>
-        </>
-      )}
-      <span className="iface-soon">{busy && s.portName ? `BLE · ${s.portName}` : "BLE"}</span>
     </div>
   );
 }
@@ -1379,13 +1067,13 @@ function SessionBar() {
           s.state === "playing" || s.state === "paused"
             ? tx("回放中无法录制，请先停止回放", "Cannot record during replay; stop replay first")
             : tx(
-                "录制会话：记录解析后的帧流，帧画布/2D/表格/3D/变量等全部内容可随时回放；串口/网络/演示源均可录制",
-                "Record session: captures parsed frames — frame canvas/2D/table/3D/variables all replayable; works for serial/net/demo sources",
+                "录制回放：记录解析后的帧流，帧画布/2D/表格/3D/变量等全部内容可随时回放；串口/网络/演示源均可录制。与控制台的「记录日志」是两件事（那只写文件，不可回放）",
+                "Record for replay: captures parsed frames — frame canvas/2D/table/3D/variables all replayable; works for serial/net/demo sources. Different from Console’s log recording, which only writes a file",
               )
         }
       >
         <span className="rec-dot" />
-        {tx("录制", "Rec")}
+        {tx("录制回放", "Record")}
       </button>
     </div>
   );

@@ -12,12 +12,13 @@
  * 同一个数在同一个窗口里出现两次不是双保险，是两处投影。
  */
 import { useSettings, patch } from "../settings/settingsStore";
-import { tx } from "../../i18n/strings";
+import { tx, useLocale } from "../../i18n/strings";
 import { SetRow } from "../../shared/SetRow";
 import { MARKET_ALLOW_HOSTS, MARKET_BUNDLED_INDEX_URL } from "./marketIndex";
 import { marketEndpointTalk } from "./marketBrowse";
 
 export function MarketSourceRows() {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const settings = useSettings();
   const talk = marketEndpointTalk(settings.marketIndexUrl, settings.marketMirrorPrefix, MARKET_ALLOW_HOSTS);
   return (

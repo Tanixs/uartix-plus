@@ -186,7 +186,8 @@ describe("P99c-C1b · 四条读命令", () => {
     expect(r.cards[0].name).toBe("墨夜");
     expect(r.cards[0].category).toBe("外观与主题");
     expect(r.cards[0].size).toBe("671 B");
-    expect(r.cards[0].install).toBe("未安装");
+    // P105-F：`--json` 带的是枚举，不是某个语言的显示名（终端那面自己拼话术，见 pluginCliCore.test.mjs）
+    expect(r.cards[0].install).toBe("absent");
     expect(r.categories.join("|")).toContain("外观与主题 1");
   });
 
@@ -236,11 +237,12 @@ describe("P99c-C1b · 四条读命令", () => {
       offShelf: { id: string; name: string; version: string; state: string }[]; offShelfNote: string;
     };
     expect(r.total).toBe(2);
-    expect(r.onShelf[0].state).toBe("有更新");
+    expect(r.onShelf[0].state).toBe("update");
     expect(r.onShelf[0]).toMatchObject({ local: "0.9.0", shelf: "1.0.0" });
     expect(r.offShelf.map((x) => x.id)).toEqual(["user.local.thing"]);
     // P99b-N6：多出来那批也带齐四样（界面点开的那张清单与这条 --json 同一个出处）
-    expect(r.offShelf[0]).toEqual({ id: "user.local.thing", name: "自己的包", version: "1.0.0", state: "已启用" });
+    // P105-F：`state` 两条都是枚举 —— 机器契约里不放本地化散文，名字归各面渲染
+    expect(r.offShelf[0]).toEqual({ id: "user.local.thing", name: "自己的包", version: "1.0.0", state: "enabled" });
     expect(r.offShelfNote).toContain("只按 id 对照");
   });
 });

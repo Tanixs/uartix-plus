@@ -6,9 +6,14 @@
  * 步骤定义在 tourSteps.ts（纯数据 + 动作回调），store 与具体步骤解耦。
  *
  * 持久化：
- *  - vs.tour.seen —— 首启欢迎卡只自动弹一次的标记（start() 即置位）
  *  - vs.tour.done —— 走完或跳过过引导（用于文案微差，不拦截重看）
+ *
+ * P104-B7：`vs.tour.seen`（"首启自动弹过没有"）已删。首启现在弹的是欢迎轮播，
+ * 引导改从欢迎卡或帮助里进——自动弹没了，这个键就只剩写没有读，留着是假象。
+ * 首启标记收敛成一个：`vs.welcome.seen`（见 `shell/welcomeSlides.ts`）。
  */
+
+import type { RailKey } from "../../shell/railState";
 
 export interface TourStep {
   id: string;
@@ -16,6 +21,13 @@ export interface TourStep {
   body: { zh: string; en: string };
   /** 聚光灯目标（CSS 选择器）；缺省 = 居中卡片（欢迎/完成页） */
   selector?: string;
+  /**
+   * 目标住在左侧导轨的二级面板里（R1~R5 把控件库/命令库/协议/接入搬进去了）。
+   * 导轨收起时锚点根本不在 DOM 里，`selector` 找不到只会静默退化成居中卡片
+   * ——那是引导最坏的坏法（教的东西还在，高亮没了，谁也看不出来）。
+   * 所以这类步骤必须同时声明 `rail`，TourOverlay 会先把它展开再量。
+   */
+  rail?: RailKey;
   /** 步骤激活时执行的动作（开面板/启动演示源…）；失败不阻塞引导 */
   do?: () => void | Promise<void>;
   /**
@@ -34,7 +46,6 @@ export interface TourState {
   total: number;
 }
 
-const SEEN_KEY = "vs.tour.seen";
 const DONE_KEY = "vs.tour.done";
 
 let state: TourState = { active: false, idx: 0, steps: [], total: 0 };
@@ -56,14 +67,6 @@ export function getSnapshot(): TourState {
   return state;
 }
 
-export function hasSeen(): boolean {
-  try {
-    return localStorage.getItem(SEEN_KEY) === "1";
-  } catch {
-    return true;
-  }
-}
-
 export function isDone(): boolean {
   try {
     return localStorage.getItem(DONE_KEY) === "1";
@@ -72,17 +75,14 @@ export function isDone(): boolean {
   }
 }
 
-/** 启动引导（重复调用 = 重新开始）。首次调用落 seen 标记。 */
-export function start(steps: TourStep[]): void {
+/** 启动引导（重复调用 = 重新开始）。 */
+export function start(steps: TourStep[], at = 0): void {
   if (!steps.length) return;
-  try {
-    localStorage.setItem(SEEN_KEY, "1");
-  } catch {
-    /* 无痕模式：仅内存生效 */
-  }
-  state = { active: true, idx: 0, steps, total: steps.length };
+  // 越界夹回两端：取证入口允许 ?tour=7 直接跳到第 7 步，写错数字不该让引导白屏
+  const idx = Math.min(Math.max(0, Math.trunc(at)), steps.length - 1);
+  state = { active: true, idx, steps, total: steps.length };
   emit();
-  void runStepDo(0);
+  void runStepDo(idx);
 }
 
 export function next(): void {

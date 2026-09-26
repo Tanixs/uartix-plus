@@ -21,10 +21,11 @@ import {
   rejectUpdate,
   shadowExtId,
   armModulePackage,
-  PLUGIN_STATE_LABEL,
   type PluginRecord,
 } from "./pluginStore";
-import { contribKeyLabel, artifactKindLabel, type WorkflowArtifact } from "./artifact";
+// 界面上屏的种类名/状态名走 `pluginUiNames`（按语言挑）；元表里那份中文是 CLI 与模型摘要用的原文，别拿到这里
+import { contribName, kindName, stateName } from "./pluginUiNames";
+import type { WorkflowArtifact } from "./artifact";
 import { deprecatedContribKeys, themeArtsOf } from "./pluginStore";
 // P99b-N5：主题那颗开关的话术与设置页/市场同一处（三处各写一遍就会互相打架）
 import { themeButtonTalk } from "../settings/themePicker";
@@ -38,6 +39,8 @@ import { moduleDiagnostics, type ModuleStatus } from "./moduleBus";
 import { describeToolChange, pluginToolChangeOf, pluginToolDefsOf } from "./pluginToolDefs";
 import { CAP_LABEL, PLUGIN_CAPS, describeDiff, manifestDiff, type PluginManifest } from "./pluginManifest";
 import { setOpen } from "../ai/extensionStore";
+import { Glyph } from "../../shared/icons";
+import { t, tx, useLocale } from "../../i18n/strings";
 
 /**
  * 那颗开关的 tooltip。带主题产物的包要说清"会挤掉谁"（P99b-N5 同级互斥），
@@ -45,34 +48,65 @@ import { setOpen } from "../ai/extensionStore";
  */
 function switchTalk(r: PluginRecord): string {
   const on = r.state === "enabled";
-  if (!themeArtsOf(r.pkg).length) return on ? "停用" : "启用";
+  if (!themeArtsOf(r.pkg).length) return on ? tx("停用", "Disable") : tx("启用", "Enable");
   const f = activeThemeFacts();
   return themeButtonTalk(f.pluginId === r.pkg.id ? "drawn" : "other", r.pkg.name);
 }
 
-/** 逻辑模块运行态的说法（穷举 Record：加一种状态忘了配说法，编译期就红） */
-const MODULE_STATUS_ZH: Record<ModuleStatus | "none", string> = {
-  none: "未运行",
-  probing: "自证中",
-  live: "在线",
-  blocked: "封网自证未通过（已拦停）",
-  dead: "已失控终止（停用再启用可重来）",
-};
+/**
+ * 逻辑模块运行态的说法。
+ * 原来是一张穷举 `Record`（加一种状态忘了配说法，编译期就红）——那个性质要留住，
+ * 所以改成 `switch` 但**不写 default**：`strict`（strictNullChecks）下少一种取值就报
+ * "Function lacks ending return statement"。表里的中文不能直接双语化（扫描器认不出表那个形状，
+ * 会把已翻好的记成债），所以每个分支各调一次 `tx()`。
+ */
+function moduleStatusText(s: ModuleStatus | "none"): string {
+  switch (s) {
+    case "none":
+      return tx("未运行", "Not running");
+    case "probing":
+      return tx("自证中", "Self-checking");
+    case "live":
+      return tx("在线", "Online");
+    case "blocked":
+      return tx("封网自证未通过（已拦停）", "Sandboxed self-check failed (held back)");
+    case "dead":
+      return tx("已失控终止（停用再启用可重来）", "Killed after runaway (disable and re-enable to retry)");
+  }
+}
+
+/**
+ * 逻辑模块那一格：运行状态 + 未通过项 + 因失控重建次数。
+ * 三段各自 `tx()` 再拼，不写成一句套着 `${x ? \`…\` : ""}` 的大模板 ——
+ * 嵌套模板里的引号会让整句难读，而分成片段后每一段都是一个能独立核对的双语串。
+ */
+function moduleBlock(pkgId: string): string {
+  const d = moduleDiagnostics(pkgId);
+  const parts = [tx(`运行状态：${moduleStatusText(d.status)}`, `Running: ${moduleStatusText(d.status)}`)];
+  if (d.probeFailed.length) parts.push(tx(`未通过项：${d.probeFailed.join("、")}`, `Failed checks: ${d.probeFailed.join(", ")}`));
+  if (d.rebuilds) parts.push(tx(`因失控重建 ${d.rebuilds} 次`, `${d.rebuilds} rebuild(s) after runaway`));
+  return parts.join(" · ");
+}
 
 /**
  * 种类筛选：只有这几类各占一个按钮，其余一律进「其他」。
  * 中文名取自产物元表（P99a-D1a：以前这里手抄过一份"主题/小部件/面板"，元表改名就漂）；
  * 下面那句过滤判定与按钮清单共用同一个 `FILTERED_KINDS`，不再是两处手抄的同一件事。
+ * 原来这张表是模块级 const，求值期就把语言钉死了 ⇒ 改成取值时才拼。
  */
 const FILTERED_KINDS = ["theme", "widget", "panel"] as const;
 const KIND_FILTERS = ["all", ...FILTERED_KINDS, "other"] as const;
-const KIND_FILTER_LABEL: Record<(typeof KIND_FILTERS)[number], string> = {
-  all: "全部",
-  theme: artifactKindLabel("theme"),
-  widget: artifactKindLabel("widget"),
-  panel: artifactKindLabel("panel"),
-  other: "其他",
-};
+
+function kindFilterLabel(k: (typeof KIND_FILTERS)[number]): string {
+  switch (k) {
+    case "all":
+      return tx("全部", "All");
+    case "other":
+      return tx("其他", "Other");
+    default:
+      return kindName(k);
+  }
+}
 
 function recordKinds(r: PluginRecord): string[] {
   return [...new Set(Object.values(r.pkg.artifacts).map((a) => String(a.kind ?? "")))];
@@ -90,21 +124,30 @@ function CandidateDiff({ cur, cand }: { cur: PluginManifest; cand: PluginManifes
   const text = describeDiff(d);
   return (
     <>
-      <div className="plg-detail-dim">{text || "与当前版本没有能力或产物数量的变化（可能只改了内容本身）"}</div>
+      <div className="plg-detail-dim">
+        {text || tx("与当前版本没有能力或产物数量的变化（可能只改了内容本身）", "No change in capabilities or artifact counts vs the current version (maybe only its content changed)")}
+      </div>
       {d.capsAddedBlocking.length > 0 && (
         <div className="plg-notice">
-          新要的能力里有「{d.capsAddedBlocking.map((c) => CAP_LABEL[c].name).join("、")}」——这类能力不属于自动放行集，
-          批准后也不会自己生效，要看效果请把这个包再启用一次。
+          {tx(
+            `新要的能力里有「${d.capsAddedBlocking.map((c) => CAP_LABEL[c].name).join("、")}」——这类能力不属于自动放行集，批准后也不会自己生效，要看效果请把这个包再启用一次。`,
+            `This version asks for “${d.capsAddedBlocking.map((c) => CAP_LABEL[c].name).join(", ")}” — those are not auto-granted, and approving won't activate them either; re-enable this package to see the effect.`,
+          )}
         </div>
       )}
       {d.capsRemoved.length > 0 && (
         <div className="plg-notice">
-          这一版会收回「{d.capsRemoved.map((c) => CAP_LABEL[c].name).join("、")}」，用到它的那部分功能会开始不调。
+          {tx(
+            `这一版会收回「${d.capsRemoved.map((c) => CAP_LABEL[c].name).join("、")}」，用到它的那部分功能会开始不调。`,
+            `This version takes back “${d.capsRemoved.map((c) => CAP_LABEL[c].name).join(", ")}”; whatever used it will stop being callable.`,
+          )}
         </div>
       )}
       <div className="plg-detail-dim">
-        工具清单要批准并启用后才由模块报上来（所以批准卡上给不出它）；启用后在本包详情的
-        「为 AI 助手提供的工具」一节里能看全，那里还会写明这一版比上一版多了哪几支。
+        {tx(
+          "工具清单要批准并启用后才由模块报上来（所以批准卡上给不出它）；启用后在本包详情的「为 AI 助手提供的工具」一节里能看全，那里还会写明这一版比上一版多了哪几支。",
+          "The tool list is only reported by the module after you approve and enable it (so the approval card can't show it). Once enabled, the “Tools provided to the AI assistant” section in this package's details lists every one, plus what this version added.",
+        )}
       </div>
     </>
   );
@@ -113,6 +156,7 @@ function CandidateDiff({ cur, cand }: { cur: PluginManifest; cand: PluginManifes
 /** 插件管理主体（列表+详情+启停+配置+导入导出+更新回滚+市场入口）。
  *  onClose 可选：设置页内嵌时不渲染关闭按钮。 */
 export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
+  useLocale(); // 这一面的话术全是 tx() 出来的，切语言要有人重渲染
   const { plugins } = usePlugins();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof KIND_FILTERS)[number]>("all");
@@ -152,15 +196,15 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
     }
     void navigator.clipboard
       ?.writeText(res.json)
-      .then(() => setNotice({ ok: true, msg: `${res.msg}（包 JSON 已复制到剪贴板）` }))
-      .catch(() => setNotice({ ok: true, msg: `${res.msg}（剪贴板不可用，详见控制台）` }));
-    console.info("[插件导出]", res.json);
+      .then(() => setNotice({ ok: true, msg: tx(`${res.msg}（包 JSON 已复制到剪贴板）`, `${res.msg} (package JSON copied to the clipboard)` ) }))
+      .catch(() => setNotice({ ok: true, msg: tx(`${res.msg}（剪贴板不可用，详见控制台）`, `${res.msg} (clipboard unavailable — see the console)` ) }));
+    console.info("[plugin export]", res.json);
   };
 
   const onImportFile = async (f: File | undefined) => {
     if (!f) return;
     if (f.size > 4 * 1024 * 1024) {
-      setNotice({ ok: false, msg: "文件超过 4MiB 上限" });
+      setNotice({ ok: false, msg: tx("文件超过 4MiB 上限", "The file is over the 4MiB limit") });
       return;
     }
     const text = await f.text();
@@ -184,14 +228,17 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   const applyWorkspaceLayout = (r: PluginRecord, entry: string) => {
     const art = r.pkg.artifacts[entry] as { layout?: unknown } | undefined;
     if (!looksLikeLayoutJson(art?.layout)) {
-      setNotice({ ok: false, msg: "这份内容看着不像布局 JSON，已拒绝应用（别让 clear() 先清空界面再撞异常）" });
+      setNotice({ ok: false, msg: tx("这份内容看着不像布局 JSON，已拒绝应用（别让 clear() 先清空界面再撞异常）", "That doesn't look like layout JSON, so it was rejected (clear() would wipe the UI before the exception)" ) });
       return;
     }
-    if (!window.confirm(`应用「${r.pkg.name}」的工作区布局？\n当前排列会被替换，并自动存进 设置 → 布局 的自动备份槽。`)) return;
+    if (!window.confirm(tx(
+      `应用「${r.pkg.name}」的工作区布局？\n当前排列会被替换，并自动存进 设置 → 布局 的自动备份槽。`,
+      `Apply the workspace layout from “${r.pkg.name}”?\nThe current arrangement is replaced, and snapshotted first into the auto-backup slot under Settings → Layout.`,
+    ))) return;
     requestApplyLayout(art?.layout, (err) =>
       setNotice(err
         ? { ok: false, msg: err }
-        : { ok: true, msg: `已应用「${r.pkg.name}」的布局；想换回去用 设置 → 布局 的自动备份槽` }),
+        : { ok: true, msg: tx(`已应用「${r.pkg.name}」的布局；想换回去用 设置 → 布局 的自动备份槽`, `Layout from “${r.pkg.name}” applied; to switch back use the auto-backup slot under Settings → Layout`) }),
     );
   };
 
@@ -203,7 +250,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   const loadTemplate = async (r: PluginRecord, entry: string) => {
     const art = r.pkg.artifacts[entry] as unknown as WorkflowArtifact | undefined;
     if (!art || typeof art.goal !== "string" || !Array.isArray(art.steps)) {
-      setNotice({ ok: false, msg: "这个模板读不出目标与步骤（可能是已下架的旧形态），请在 AI 助手里重新生成一份" });
+      setNotice({ ok: false, msg: tx("这个模板读不出目标与步骤（可能是已下架的旧形态），请在 AI 助手里重新生成一份", "This template has no readable goal or steps (likely a retired older shape) — regenerate one in the AI assistant") });
       return;
     }
     const [{ hostEntryNames }, { pluginToolName }, { allPluginToolDefs }] = await Promise.all([
@@ -218,8 +265,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
     const unknown = unknownTemplateTools(art, known);
     pushDraft(templateToPrompt(art, { name: r.pkg.name, version: r.pkg.version }));
     setNotice(unknown.length
-      ? { ok: false, msg: `已填入输入框（未发送）。但这几步本机没有对应工具：${unknown.join("、")}——先改掉或删掉，否则 Agent 会在这几步上撞 unknown_tool` }
-      : { ok: true, msg: "任务模板已填入 AI 助手输入框（还没有发送）" });
+      ? { ok: false, msg: tx(`已填入输入框（未发送）。但这几步本机没有对应工具：${unknown.join("、")}——先改掉或删掉，否则 Agent 会在这几步上撞 unknown_tool`, `Filled into the input box (not sent). But these steps have no local tool: ${unknown.join(", ")} — edit or drop them first, or the Agent will hit unknown_tool there`) }
+      : { ok: true, msg: tx("任务模板已填入 AI 助手输入框（还没有发送）", "Task template filled into the AI assistant's input box (not sent yet)") });
   };
 
   /* —— P88d ⑤：批量多选（导出/启停/卸载） —— */
@@ -240,8 +287,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       return;
     }
     void navigator.clipboard?.writeText(res.json).catch(() => undefined);
-    console.info("[插件批量导出]", res.json);
-    setNotice({ ok: true, msg: `${res.msg}（JSON 已复制到剪贴板/控制台）` });
+    console.info("[plugin batch export]", res.json);
+    setNotice({ ok: true, msg: tx(`${res.msg}（JSON 已复制到剪贴板/控制台）`, `${res.msg} (JSON copied to the clipboard / console)`) });
   };
   const doBatchEnable = (on: boolean) => {
     let ok = 0;
@@ -255,31 +302,40 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
     }
     setNotice({
       ok: skipped.length === 0,
-      msg: `批量${on ? "启用" : "停用"}完成 ${ok} 个${skipped.length ? `；跳过 ${skipped.length} 个（${skipped[0]}）` : ""}`,
+      msg: on
+        ? tx(`批量启用完成 ${ok} 个${skipped.length ? `；跳过 ${skipped.length} 个（${skipped[0]}）` : ""}`, `Batch enable done for ${ok}${skipped.length ? `; skipped ${skipped.length} (${skipped[0]})` : ""}`)
+        : tx(`批量停用完成 ${ok} 个${skipped.length ? `；跳过 ${skipped.length} 个（${skipped[0]}）` : ""}`, `Batch disable done for ${ok}${skipped.length ? `; skipped ${skipped.length} (${skipped[0]})` : ""}`),
     });
   };
   const doBatchUninstall = () => {
     const names = [...sel].map((id) => plugins.find((x) => x.pkg.id === id)?.pkg.name ?? id);
-    if (!window.confirm(`卸载选中的 ${names.length} 个插件？历史版本将一并删除。\n${names.join("、")}`)) return;
+    if (!window.confirm(tx(
+      `卸载选中的 ${names.length} 个插件？历史版本将一并删除。\n${names.join("、")}`,
+      `Uninstall the ${names.length} selected plugins? Their history versions go too.\n${names.join(", ")}`,
+    ))) return;
     let ok = 0;
     for (const id of sel) if (uninstall(id).ok) ok++;
-    setNotice({ ok: true, msg: `已卸载 ${ok} 个插件` });
+    setNotice({ ok: true, msg: tx(`已卸载 ${ok} 个插件`, `Uninstalled ${ok} plugin(s)`) });
     setSel(new Set());
   };
 
   return (
     <>
       <div className="plg-head">
-        <span className="plg-title">本地插件库</span>
+        <span className="plg-title">{tx("本地插件库", "Local plugin library")}</span>
         <span className="plg-sub">
-          {plugins.length ? `${plugins.length} 个插件` : "暂无插件；由 AI 助手「保存为插件」或导入插件包"}
+          {plugins.length ? tx(`${plugins.length} 个插件`, `${plugins.length} plugin(s)`) : tx("暂无插件；由 AI 助手「保存为插件」或导入插件包", "No plugins yet — save one from the AI assistant or import a package")}
         </span>
         <div className="plg-head-actions">
-          <button className="btn" onClick={requestOpenMarket} title="打开社区插件货架：实时拉取索引，看得见来源、能力与哈希">
-            插件市场
+          <button
+            className="btn"
+            onClick={requestOpenMarket}
+            title={tx("打开社区插件货架：实时拉取索引，看得见来源、能力与哈希", "Open the community shelf: live index, with origin, capabilities and hashes")}
+          >
+            {tx("插件市场", "Plugin market")}
           </button>
-          <button className="btn" onClick={() => fileRef.current?.click()} title="导入 uartix-plugin 包（默认停用，校验后才可启用）">
-            导入
+          <button className="btn" onClick={() => fileRef.current?.click()} title={tx("导入 uartix-plugin 包（默认停用，校验后才可启用）", "Import a uartix-plugin package (installed disabled; enable it after validation)")}>
+            {tx("导入", "Import")}
           </button>
           <input
             ref={fileRef}
@@ -292,8 +348,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
             }}
           />
           {onClose && (
-            <button className="btn" onClick={onClose} aria-label="关闭插件库">
-              关闭
+            <button className="btn" onClick={onClose} aria-label={tx("关闭插件库", "Close the plugin library")}>
+              {t("c.close")}
             </button>
           )}
         </div>
@@ -302,8 +358,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       {notice && (
         <div className={notice.ok ? "plg-notice ok" : "plg-notice err"} role="status">
           {notice.msg}
-          <button className="plg-notice-x" aria-label="关闭提示" onClick={() => setNotice(null)}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          <button className="plg-notice-x" aria-label={tx("关闭提示", "Dismiss")} onClick={() => setNotice(null)}>
+            <Glyph><path d="M18 6L6 18M6 6l12 12" /></Glyph>
           </button>
         </div>
       )}
@@ -311,12 +367,12 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       <div className="plg-toolbar">
         <input
           className="input plg-search"
-          placeholder="搜索名称 / ID / 描述"
+          placeholder={tx("搜索名称 / ID / 描述", "Search name / ID / description")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          aria-label="搜索插件"
+          aria-label={tx("搜索插件", "Search plugins")}
         />
-        <div className="plg-filters" role="tablist" aria-label="按类型筛选">
+        <div className="plg-filters" role="tablist" aria-label={tx("按类型筛选", "Filter by kind")}>
           {KIND_FILTERS.map((k) => (
             <button
               key={k}
@@ -325,54 +381,54 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
               role="tab"
               aria-selected={filter === k}
             >
-              {KIND_FILTER_LABEL[k]}
+              {kindFilterLabel(k)}
             </button>
           ))}
         </div>
         <button
           className={`plg-fchip${selMode ? " on" : ""}`}
-          title="多选插件进行批量导出/启停/卸载"
+          title={tx("多选插件进行批量导出/启停/卸载", "Multi-select plugins to export / enable / disable / uninstall in batch")}
           onClick={() => {
             setSelMode((v) => !v);
             setSel(new Set());
           }}
         >
-          {selMode ? "退出选择" : "选择"}
+          {selMode ? tx("退出选择", "Exit selection") : tx("选择", "Select")}
         </button>
       </div>
 
       {/* 确认卡搬到 App 顶层一份了：插件库关掉也要看得见命令行发起的那条请求 */}
 
       {selMode && (
-        <div className="plg-batch" role="group" aria-label="批量操作">
+        <div className="plg-batch" role="group" aria-label={tx("批量操作", "Batch actions")}>
           <button className="btn" onClick={() => setSel(new Set(allVisibleIds))}>
-            全选
+            {tx("全选", "Select all")}
           </button>
           <button
             className="btn"
             onClick={() => setSel(new Set(allVisibleIds.filter((id) => !sel.has(id))))}
           >
-            反选
+            {tx("反选", "Invert")}
           </button>
-          <span className="plg-batch-n">已选 {sel.size}</span>
+          <span className="plg-batch-n">{tx(`已选 ${sel.size}`, `${sel.size} selected`)}</span>
           <span className="plg-batch-spacer" />
           <button className="btn" disabled={sel.size === 0} onClick={doBatchExport}>
-            导出
+            {tx("导出", "Export")}
           </button>
           <button className="btn" disabled={sel.size === 0} onClick={() => doBatchEnable(true)}>
-            启用
+            {tx("启用", "Enable")}
           </button>
           <button className="btn" disabled={sel.size === 0} onClick={() => doBatchEnable(false)}>
-            停用
+            {tx("停用", "Disable")}
           </button>
           <button className="btn danger" disabled={sel.size === 0} onClick={doBatchUninstall}>
-            卸载
+            {tx("卸载", "Uninstall")}
           </button>
         </div>
       )}
 
       <div className="plg-list">
-        {list.length === 0 && <div className="plg-empty">没有匹配的插件</div>}
+        {list.length === 0 && <div className="plg-empty">{tx("没有匹配的插件", "No plugins match")}</div>}
         {list.map((r) => {
           const enabled = r.state === "enabled";
           return (
@@ -384,18 +440,18 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     className="plg-item-check"
                     checked={sel.has(r.pkg.id)}
                     onChange={() => toggleSel(r.pkg.id)}
-                    aria-label={`选择插件 ${r.pkg.name}`}
+                    aria-label={tx(`选择插件 ${r.pkg.name}`, `Select ${r.pkg.name}`)}
                   />
                 )}
                 <button
                   className="plg-item-main"
                   onClick={() => (selMode ? toggleSel(r.pkg.id) : setDetailId(detailId === r.pkg.id ? null : r.pkg.id))}
-                  title={selMode ? "选中/取消" : "展开详情"}
+                  title={selMode ? tx("选中/取消", "Check / uncheck") : tx("展开详情", "Expand details")}
                 >
                   <span className="plg-item-name">{r.pkg.name}</span>
                   <span className="plg-item-id">{r.pkg.id}</span>
-                  <span className={`plg-state s-${r.state}`}>{PLUGIN_STATE_LABEL[r.state]}</span>
-                  {r.candidate && <span className="plg-chip warn">有候选 v{r.candidate.version}</span>}
+                  <span className={`plg-state s-${r.state}`}>{stateName(r.state)}</span>
+                  {r.candidate && <span className="plg-chip warn">{tx(`有候选 v${r.candidate.version}`, `Update candidate v${r.candidate.version}`)}</span>}
                 </button>
                 <label className="plg-switch" title={switchTalk(r)}>
                   <input
@@ -436,9 +492,14 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                 <div className="plg-detail">
                   {r.pkg.desc && <div className="plg-detail-desc">{r.pkg.desc}</div>}
                   {r.state === "quarantined" && (
-                    <div className="plg-notice err">已隔离：多次违反 iframe 隔离约束（伪造消息/越权），卸载后重新安装可解除。</div>
+                    <div className="plg-notice err">
+                      {tx(
+                        "已隔离：多次违反 iframe 隔离约束（伪造消息/越权），卸载后重新安装可解除。",
+                        "Quarantined: repeated iframe-isolation violations (spoofed messages / overreach). Uninstall and reinstall to clear it.",
+                      )}
+                    </div>
                   )}
-                  <div className="plg-sec">能力与权限</div>
+                  <div className="plg-sec">{tx("能力与权限", "Capabilities and permissions")}</div>
                   <div className="plg-caps">
                     {r.pkg.capabilities.map((c) => (
                       <span key={c} className="plg-chip" title={CAP_LABEL[c].note}>
@@ -451,23 +512,17 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                       否则用户只知道"启用了"，却不知道 Agent 面为什么少了/多了东西。 */}
                   {moduleArtifactsOf(r.pkg).length > 0 && (
                     <>
-                      <div className="plg-sec">逻辑模块</div>
+                      <div className="plg-sec">{tx("逻辑模块", "Logic modules")}</div>
                       <div className="plg-notice">
-                        运行状态：{MODULE_STATUS_ZH[moduleDiagnostics(r.pkg.id).status]}
-                        {moduleDiagnostics(r.pkg.id).probeFailed.length
-                          ? ` · 未通过项：${moduleDiagnostics(r.pkg.id).probeFailed.join("、")}`
-                          : ""}
-                        {moduleDiagnostics(r.pkg.id).rebuilds
-                          ? ` · 因失控重建 ${moduleDiagnostics(r.pkg.id).rebuilds} 次`
-                          : ""}
+                        {moduleBlock(r.pkg.id)}
                       </div>
                       {pluginToolDefsOf(r.pkg.id).length > 0 && (
                         <>
-                          <div className="plg-sec">为 AI 助手提供的工具</div>
+                          <div className="plg-sec">{tx("为 AI 助手提供的工具", "Tools provided to the AI assistant")}</div>
                           <div className="plg-caps">
-                            {pluginToolDefsOf(r.pkg.id).map((t) => (
-                              <span key={t.baseName} className="plg-chip" title={t.description}>
-                                {t.baseName}
+                            {pluginToolDefsOf(r.pkg.id).map((d) => (
+                              <span key={d.baseName} className="plg-chip" title={d.description}>
+                                {d.baseName}
                               </span>
                             ))}
                           </div>
@@ -475,7 +530,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                               但模块报齐的那一刻起，这一条就有了真实答案。 */}
                           {pluginToolChangeOf(r.pkg.id) && (
                             <div className="plg-detail-dim">
-                              与上一版报上来的清单相比：{describeToolChange(pluginToolChangeOf(r.pkg.id))}
+                              {tx(`与上一版报上来的清单相比：${describeToolChange(pluginToolChangeOf(r.pkg.id))}`, `Compared with what the previous version reported: ${describeToolChange(pluginToolChangeOf(r.pkg.id))}`)}
                             </div>
                           )}
                         </>
@@ -483,34 +538,38 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     </>
                   )}
 
-                  <div className="plg-sec">产物与操作</div>
-                  {Object.entries(r.pkg.contributions).length === 0 && <div className="plg-detail-dim">无可挂载产物</div>}
+                  <div className="plg-sec">{tx("产物与操作", "Artifacts and actions")}</div>
+                  {Object.entries(r.pkg.contributions).length === 0 && <div className="plg-detail-dim">{tx("无可挂载产物", "No mountable artifacts")}</div>}
                   {Object.entries(r.pkg.contributions).map(([key, entries]) =>
                     (entries ?? []).map((it) => {
-                      const kindZh = contribKeyLabel(key);
+                      const kindLabel = contribName(key);
                       return (
                         <div key={it.id} className="plg-contrib-row">
-                          <span className="plg-chip">{kindZh}</span>
+                          <span className="plg-chip">{kindLabel}</span>
                           <span className="plg-ellipsis">{it.name ?? it.id}</span>
                           {key === "panels" && (
                             <button className="btn" onClick={() => openPanel(r, it.id)}>
-                              加入工作区
+                              {tx("加入工作区", "Add to workspace")}
                             </button>
                           )}
                           {key === "widgets" && (
                             <button className="btn" onClick={() => openWidgetFloat(r, it.id)}>
-                              打开浮窗
+                              {tx("打开浮窗", "Open as float")}
                             </button>
                           )}
-                          {key === "themes" && <span className="plg-detail-dim" title="内置与插件主题同级：启用它就把它换上，原来在画那枚会被停用">在画那一枚由它顶替</span>}
+                          {key === "themes" && (
+                            <span className="plg-detail-dim" title={tx("内置与插件主题同级：启用它就把它换上，原来在画那枚会被停用", "Built-in and plugin themes are peers: enabling this one replaces what's on screen and disables the previous one")}>
+                              {tx("在画那一枚由它顶替", "takes over the theme on screen")}
+                            </span>
+                          )}
                           {key === "workspacePresets" && (
                             <button className="btn" onClick={() => applyWorkspaceLayout(r, it.entry)}>
-                              应用此布局
+                              {tx("应用此布局", "Apply this layout")}
                             </button>
                           )}
                           {key === "workflows" && (
                             <button className="btn" onClick={() => void loadTemplate(r, it.entry)}>
-                              载入 AI 助手
+                              {tx("载入 AI 助手", "Load into the AI assistant")}
                             </button>
                           )}
                         </div>
@@ -519,14 +578,16 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   )}
                   {deprecatedContribKeys(r.pkg).length > 0 && (
                     <div className="plg-detail-dim" role="status">
-                      这个包里还有已下架的产物形态（{deprecatedContribKeys(r.pkg).join("、")}）：
-                      它不会出现在任何运行时里，请在 AI 助手里重新生成（动效预设已并入主题、报告视图已并入面板）
+                      {tx(
+                        `这个包里还有已下架的产物形态（${deprecatedContribKeys(r.pkg).join("、")}）：它不会出现在任何运行时里，请在 AI 助手里重新生成（动效预设已并入主题、报告视图已并入面板）`,
+                        `This package still carries retired artifact kinds (${deprecatedContribKeys(r.pkg).join(", ")}): they never load, so regenerate them in the AI assistant (motion presets folded into themes, report views folded into panels)`,
+                      )}
                     </div>
                   )}
 
                   {r.pkg.settingsSchema && r.pkg.settingsSchema.length > 0 && (
                     <>
-                      <div className="plg-sec">配置</div>
+                      <div className="plg-sec">{tx("配置", "Configuration")}</div>
                       {r.pkg.settingsSchema.map((f) => (
                         <label key={f.key} className="plg-cfg-row">
                           <span className="plg-cfg-label">{f.label}</span>
@@ -561,62 +622,71 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     </>
                   )}
 
-                  <div className="plg-sec">版本</div>
+                  <div className="plg-sec">{tx("版本", "Versions")}</div>
                   <div className="plg-detail-dim">
-                    当前 v{r.pkg.version}；历史 {r.versions.length} 个
+                    {tx(`当前 v${r.pkg.version}；历史 ${r.versions.length} 个`, `Current v${r.pkg.version}; ${r.versions.length} in history`)}
                     {r.versions.length > 0 && r.versions[r.versions.length - 1] && (
-                      <>（可回滚到 v{r.versions[r.versions.length - 1].version}）</>
+                      <>{tx(`（可回滚到 v${r.versions[r.versions.length - 1].version}）`, `(can roll back to v${r.versions[r.versions.length - 1].version})`)}</>
                     )}
                   </div>
 
                   {r.candidate && (
                     <div className="plg-candidate">
                       <div>
-                        候选 v{r.candidate.version}：批准后原子切换，当前版本入历史；失败自动回退。
+                        {tx(
+                          `候选 v${r.candidate.version}：批准后原子切换，当前版本入历史；失败自动回退。`,
+                          `Candidate v${r.candidate.version}: approving swaps atomically and moves the current version into history; a failure rolls back on its own.`,
+                        )}
                       </div>
                       <CandidateDiff cur={r.pkg} cand={r.candidate} />
                       <div className="plg-candidate-actions">
                         <button className="btn primary" onClick={() => setNotice(approveUpdate(r.pkg.id))}>
-                          批准更新
+                          {tx("批准更新", "Approve update")}
                         </button>
                         <button className="btn" onClick={() => setNotice(rejectUpdate(r.pkg.id))}>
-                          拒绝
+                          {tx("拒绝", "Reject")}
                         </button>
                       </div>
                     </div>
                   )}
 
                   <div className="plg-actions">
-                    <button className="btn" onClick={() => doExport(r)} title="导出为 uartix-plugin 包 JSON（不含配置值与秘密）">
-                      导出
+                    <button className="btn" onClick={() => doExport(r)} title={tx("导出为 uartix-plugin 包 JSON（不含配置值与秘密）", "Export as a uartix-plugin package JSON (no config values or secrets)")}>
+                      {tx("导出", "Export")}
                     </button>
-                    <button className="btn" onClick={() => setNotice(duplicate(r.pkg.id))} title="另存副本（避开覆盖批准）">
-                      复制
+                    <button className="btn" onClick={() => setNotice(duplicate(r.pkg.id))} title={tx("另存副本（避开覆盖批准）", "Save a copy (so the approval isn't overwritten)")}>
+                      {t("c.copy")}
                     </button>
                     <button
                       className="btn"
                       disabled={r.versions.length === 0}
                       onClick={() => setNotice(rollback(r.pkg.id))}
-                      title="回滚到上一版本（不承诺撤销设备效果）"
+                      title={tx("回滚到上一版本（不承诺撤销设备效果）", "Roll back to the previous version (device side effects are not undone)")}
                     >
-                      回滚
+                      {tx("回滚", "Roll back")}
                     </button>
                     <button
                       className="btn danger"
                       onClick={() => {
-                        if (!window.confirm(`卸载「${r.pkg.name}」？历史版本将一并删除。`)) return;
+                        if (!window.confirm(tx(`卸载「${r.pkg.name}」？历史版本将一并删除。`, `Uninstall “${r.pkg.name}”? Its history versions go too.`))) return;
                         setNotice(uninstall(r.pkg.id));
                         setDetailId(null);
                       }}
                     >
-                      卸载
+                      {tx("卸载", "Uninstall")}
                     </button>
                   </div>
 
                   <div className="plg-meta">
-                    {r.pkg.provenance.createdBy === "agent" ? "AI 生成" : r.pkg.provenance.createdBy === "import" ? "导入" : "本地创建"}
+                    {r.pkg.provenance.createdBy === "agent"
+                      ? tx("AI 生成", "AI-generated")
+                      : r.pkg.provenance.createdBy === "import"
+                        ? tx("导入", "Imported")
+                        : tx("本地创建", "Created locally")}
                     {" · "}hostApi {r.pkg.hostApi}
-                    {r.pkg.provenance.sourceExtId ? ` · 来源扩展 ${r.pkg.provenance.sourceExtId.slice(0, 8)}` : ""}
+                    {r.pkg.provenance.sourceExtId
+                      ? tx(` · 来源扩展 ${r.pkg.provenance.sourceExtId.slice(0, 8)}`, ` · from extension ${r.pkg.provenance.sourceExtId.slice(0, 8)}`)
+                      : ""}
                   </div>
                 </div>
               )}
@@ -626,7 +696,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       </div>
 
       <div className="plg-foot">
-        能力白名单（{PLUGIN_CAPS.length} 项）之外的声明一律拒绝；导入的插件一律默认停用；作者自报的可信标记不构成信任。
+        {tx(`能力白名单（${PLUGIN_CAPS.length} 项）之外的声明一律拒绝；导入的插件一律默认停用；作者自报的可信标记不构成信任。`, `Anything outside the capability allowlist (${PLUGIN_CAPS.length} entries) is rejected; imported plugins start disabled; an author's own trust claims earn no trust.`)}
       </div>
 
     </>
@@ -641,7 +711,7 @@ export function PluginLibraryDialog({ onClose }: { onClose: () => void }) {
         className="plg-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="本地插件库"
+        aria-label={tx("本地插件库", "Local plugin library")}
         onClick={(e) => e.stopPropagation()}
       >
         <PluginManagerBody onClose={onClose} />

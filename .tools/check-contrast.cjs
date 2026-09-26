@@ -28,6 +28,11 @@ function ratio(a, b) {
   const l2 = Math.min(lum(a), lum(b));
   return (l1 + 0.05) / (l2 + 0.05);
 }
+/** CIE L*（0~100，感知均匀）。表面档差用它，文字对比度仍用上面的 ratio()。 */
+function lstar(hex) {
+  const y = lum(hex);
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+}
 
 /** 抓取源码里所有 `--name: #hex;` 声明（只认十六进制，便于对比度计算） */
 function hexVars(src) {
@@ -106,6 +111,38 @@ for (const f of files) {
   }
   // 只打印失败项，避免 8×17 列把终端刷满；全绿时给一行汇总
   line.push(worst.length ? worst.join("  ") : `ok (${checks.length} checks)`);
+
+  /* ---- P104-B2 I 门：表面档序与档差（用 CIE L*，不用 WCAG 比） ----
+     P104 的外壳（标题行 / 活动导轨 / 信息栏）统一压在「壳档」上，靠档差读出一条外骨骼。
+     此前没有任何地方算过这件事，于是 dark/glaze/navy 三套的壳比画布**还亮** 0.8~2.0 L*——
+     外壳向前浮而不是向后退，B5 做出来就是三条没有边界的灰带。
+
+     为什么是 L* 而不是对比度比：对比度比为文字可读性设计，在近黑区饱和。
+     第一版我拿 1.05/1.06 的比当地板，解算器把 dark 的凹档直接算成了 #000000 纯黑——
+     指标错了会逼出错误的修法。表面档差要用感知均匀的 L*。
+     地板只卡 P104 真正依赖的两条：壳要退得下画布、面板要浮得起。 */
+  const tiers = {
+    inset: vars["--bg-inset"],
+    shell: vars["--bg-titlebar"],
+    canvas: vars["--bg"],
+    panel: vars["--bg-panel"],
+  };
+  const sorted = Object.entries(tiers)
+    .sort((a, b) => lstar(a[1]) - lstar(b[1]))
+    .map(([k]) => k)
+    .join("<");
+  const seqOk = sorted === "inset<shell<canvas<panel";
+  const surf = [
+    ["壳→画布", lstar(tiers.canvas) - lstar(tiers.shell), 1.0],
+    ["画布→面板", lstar(tiers.panel) - lstar(tiers.canvas), 1.5],
+  ];
+  const surfBad = surf.filter(([, v, min]) => v < min).map(([n, v, min]) => `${n}=${v.toFixed(1)}<${min}`);
+  if (!seqOk || surfBad.length) {
+    fails++;
+    line.push(`SURFACE ${seqOk ? "" : `序错(${sorted}) `}${surfBad.join(" ")}`);
+  } else {
+    line.push(`surface ${surf.map(([n, v]) => `${n}=${v.toFixed(1)}`).join(" ")}`);
+  }
   rows.push(line.join("  "));
 }
 console.log(rows.join("\n"));

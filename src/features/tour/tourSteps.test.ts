@@ -91,6 +91,48 @@ describe("入门引导的结构事实不得手写", () => {
     }
   });
 
+  /* R1~R5 开出来的新缺口：上一条只能证明"锚点还在源码里"，证明不了"锚点此刻在 DOM 里"。
+     控件库/命令库/协议/接入搬进导轨之后，它们的全屏时永远在、收起时根本不存在——
+     于是引导会静默退化成漂浮卡片，而这条退化**上面那条守卫完全看不见**。
+     所以这里从"导轨到底渲染哪些组件"反推：那些文件里写的 data-tour，
+     对应步骤必须声明 rail，且 TourOverlay 必须真的读它。 */
+  it("锚点住在导轨二级面板里的步骤：必须声明 rail，且 TourOverlay 真的会展开它", () => {
+    const shellDir = fileURLToPath(new URL("../../shell/", import.meta.url));
+    const railSrc = readFileSync(`${shellDir}RailPanel.tsx`, "utf8") as string;
+    const overlay = readFileSync(
+      fileURLToPath(new URL("./TourOverlay.tsx", import.meta.url)),
+      "utf8",
+    ) as string;
+    // RailPanel 直接 import 的那些文件 = 它渲染的组件；再往里引的（如 LinkPanel→ifaces.tsx）
+    // 这层扫不到，所以 connect 那个锚点靠下面的显式名单兜。
+    // 也就是说这条守卫是"能发现新增的导轨锚点漏声明"，不是"证明名单完整"。
+    const hosted: string[] = [];
+    for (const m of railSrc.matchAll(/from "(\.[^"]+)"/g)) {
+      for (const ext of [".tsx", ".ts"]) {
+        try {
+          const txt = readFileSync(`${shellDir}${m[1]}${ext}`, "utf8") as string;
+          if (/data-tour="/.test(txt)) hosted.push(txt);
+        } catch {
+          /* 该路径不是文件（目录/无扩展名/不存在） */
+        }
+      }
+    }
+    expect(hosted.length, "RailPanel 里一个带锚点的组件都扫不到——路径解析写错了").toBeGreaterThan(0);
+
+    const railAnchors = new Set<string>();
+    for (const txt of hosted) {
+      for (const m of txt.matchAll(/data-tour="([^"]+)"/g)) railAnchors.add(m[1]);
+    }
+    expect([...railAnchors].sort(), "导轨里带锚点的组件变了，这条要跟着核").toEqual(["demo", "preset"]);
+
+    for (const id of ["connect", "demo", "preset"]) {
+      const s = TOUR_STEPS.find((x) => x.id === id);
+      expect(s, `引导里没有「${id}」这一步了`).toBeTruthy();
+      expect(s!.rail, `步骤 ${id} 的目标在导轨面板里却没声明 rail（高亮会静默消失）`).toBeTruthy();
+    }
+    expect(overlay, "TourOverlay 不再消费 step.rail 了——声明全成空话").toContain("openRailPanel(");
+  });
+
   it("AI 那一步要把三个授权档都说全（改名不收文案＝骗新手）", () => {
     const ai = TOUR_STEPS.find((s) => s.id === "ai");
     expect(ai, "引导里没有 AI 这一步了").toBeTruthy();
@@ -126,8 +168,10 @@ describe("P99b-N6 · 入门引导里市场那一步", () => {
   it("锚点确实挂在标题栏那颗「插件管理」上", () => {
     const m = numbered.find((s) => s.id === "market");
     expect(m?.selector).toBe('[data-tour="plugins"]');
-    const tb = readFileSync(fileURLToPath(new URL("../../shell/TitleBar.tsx", import.meta.url)), "utf8");
-    expect(/title="插件管理"[\s\S]{0,220}data-tour="plugins"/.test(tb), "锚点不在「插件管理」那颗按钮上").toBe(true);
+    const tb = readFileSync(fileURLToPath(new URL("../../shell/TopBars.tsx", import.meta.url)), "utf8");
+    // 窗口从 220 放宽到 400：P105-F T5 给 aria-label 补了英文，那颗按钮的头几行变长了
+    // （钉的还是同一条：data-tour="plugins" 必须挂在中文名为「插件管理」的那颗上）。
+    expect(/title=\{tx\("插件管理", "Plugin library"\)\}[\s\S]{0,400}data-tour="plugins"/.test(tb), "锚点不在「插件管理」那颗按钮上").toBe(true);
   });
 
   it("这一步要说清两件用户会撞上的事：装来是停用态、覆盖要人确认", () => {

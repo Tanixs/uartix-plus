@@ -6,6 +6,7 @@ import type { AlertKind, AlertLevel, SentinelAlert } from "./sentinelEngine";
 import { requestOpenPanel } from "../ai/appBus";
 import * as plotStore from "../plot/plotStore";
 import { toast } from "../ai/extRuntime";
+import { zoomFactor } from "../../shared/zoom";
 
 /**
  * 哨兵面板（P62）：静默异常监测的观测台。
@@ -13,19 +14,29 @@ import { toast } from "../ai/extRuntime";
  * 「最小化」→ 面板从布局移除、右下角浮球驻留继续监测（引擎门控见 store）。
  */
 
-const KIND_LABEL: Record<AlertKind, [string, string]> = {
-  spike: ["通道突变", "Spike"],
-  newframe: ["新帧型", "New frame type"],
-  silence: ["通信静默", "Silence"],
-  errrate: ["错误帧率", "Error rate"],
-  recover: ["恢复", "Recovered"],
-};
+/**
+ * 报警种类与等级名。写成 switch 而不是 `{中, 英}` 成对表：两种写法行为一样（都在渲染时挑），
+ * 但只有 `tx("中文", "English")` 这种**双语落在同一行**的形状能被 i18n 门看见 ——
+ * 表里的中文它数成债，于是这张表会从"已翻"退回"没人再去看"。
+ * 不写 default：`AlertKind` 加一种而这里漏一行，就是 TS2366。
+ */
+function alertKindLabel(k: AlertKind): string {
+  switch (k) {
+    case "spike": return tx("通道突变", "Spike");
+    case "newframe": return tx("新帧型", "New frame type");
+    case "silence": return tx("通信静默", "Silence");
+    case "errrate": return tx("错误帧率", "Error rate");
+    case "recover": return tx("恢复", "Recovered");
+  }
+}
 
-const LEVEL_LABEL: Record<AlertLevel, [string, string]> = {
-  crit: ["严重", "critical"],
-  warn: ["警告", "warning"],
-  info: ["信息", "info"],
-};
+function alertLevelLabel(l: AlertLevel): string {
+  switch (l) {
+    case "crit": return tx("严重", "critical");
+    case "warn": return tx("警告", "warning");
+    case "info": return tx("信息", "info");
+  }
+}
 
 function fmtTs(ts: number): string {
   if (!ts) return "--:--:--";
@@ -142,7 +153,7 @@ export function SentinelPanel() {
               </div>
               <div className="snt-empty-hint">
                 {s.cfg.enabled
-                  ? tx("通道突变 / 新帧型 / 通信静默出现时，会在此列出并可在浮球上一眼看到", "Spikes, new frame types or link silence will appear here and on the floating ball")
+                  ? tx("突变 / 新帧型 / 静默都会列在这里，浮球同步提示", "Spikes, new frame types and link silence land here — the floating ball mirrors them")
                   : tx("在下方重新启用后开始监测", "Re-enable below to start monitoring")}
               </div>
             </div>
@@ -150,8 +161,8 @@ export function SentinelPanel() {
             s.alerts.map((a) => (
               <div key={a.id} className={`snt-card ${a.level}${a.acked ? " acked" : ""}${a.kind === "recover" ? " recover" : ""}`}>
                 <div className="snt-card-top">
-                  <span className="snt-card-kind">{tx(...KIND_LABEL[a.kind])}</span>
-                  <span className={`snt-card-level ${a.level}`}>{tx(...LEVEL_LABEL[a.level])}</span>
+                  <span className="snt-card-kind">{alertKindLabel(a.kind)}</span>
+                  <span className={`snt-card-level ${a.level}`}>{alertLevelLabel(a.level)}</span>
                   {a.count > 1 && <span className="snt-card-x">×{a.count}</span>}
                   <span className="snt-card-ts">{fmtTs(a.ts)}</span>
                 </div>
@@ -249,7 +260,7 @@ export function SentinelPanel() {
       <div className="snt-foot">
         <button
           type="button"
-          className={`btn sm${s.cfg.enabled ? " primary" : ""}`}
+          className={`btn sm${s.cfg.enabled ? " on" : ""}`}
           onClick={() => store.setEnabled(!s.cfg.enabled)}
           aria-pressed={s.cfg.enabled}
           title={s.cfg.enabled ? tx("停用哨兵（停止全部检测）", "Pause the sentinel (all detection stops)") : tx("启用哨兵", "Enable the sentinel")}
@@ -352,11 +363,6 @@ export function SentinelPanel() {
 
 const FLOAT_POS_KEY = "vs.sentinel.float.pos";
 const BALL = 44;
-
-function zoomFactor(): number {
-  const z = parseFloat(document.documentElement.style.zoom || "100");
-  return Number.isFinite(z) && z > 0 ? z / 100 : 1;
-}
 
 function loadFloatPos(): { right: number; bottom: number } {
   try {

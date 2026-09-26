@@ -90,13 +90,15 @@ describe("plugin-cli · 输出说实话", () => {
     const text = render({
       parsed: parsed(["list"]),
       data: {
-        cards: [{ id: "a", name: "甲", category: "外观与主题", version: "1.0.0", install: "未安装", caps: ["主题 token"] }],
+        // P105-F：数据面带的是枚举（`--json` 的读者要稳定代码），中文话术由本文件自己拼
+        cards: [{ id: "a", name: "甲", category: "外观与主题", version: "1.0.0", install: "absent", caps: ["主题 token"] }],
         total: 7, shown: 1, truncated: "还有 6 条没列出（--limit 或 --query 收窄）",
       },
     });
     expect(text).toContain("货架 7 条，这里列 1 条");
     expect(text).toContain("还有 6 条");
     expect(text).toContain("甲〈外观与主题〉");
+    expect(text).toContain("未安装");
   });
 
   it("status 只在真走了镜像时说走镜像；失败原因原文带出来", () => {
@@ -110,8 +112,8 @@ describe("plugin-cli · 输出说实话", () => {
     const text = render({
       parsed: parsed(["info", "uartix.theme.ink"]),
       data: {
-        name: "墨夜", category: "外观与主题", version: "1.0.0", install: "未安装", author: "uartix",
-        updated: "2026-09-20", size: "671 B", sha256_12: "b".repeat(12), screenshots: 1, compat: "与本机版本兼容",
+        name: "墨夜", category: "外观与主题", version: "1.0.0", install: "absent", author: "uartix",
+        updated: "2026-09-20", size: "671 B", sha256_12: "b".repeat(12), screenshots: 1, compat: "yes",
         descZh: "深蓝夜视",
         caps: [{ name: "运行 JS", note: "在沙箱里跑作者写的脚本", blocked: true }],
         note: "列表不等于背书：条目来自当前索引，不代表内容安全。",
@@ -120,6 +122,11 @@ describe("plugin-cli · 输出说实话", () => {
     expect(text).toContain("〔不放行〕运行 JS");
     expect(text).toContain("1 张图");
     expect(text).toContain("不代表内容安全");
+    // 代码进数据、话术在本面拼：这两句钉的是"换了契约形状，终端读起来跟原来一模一样"
+    expect(text).toContain("未安装");
+    expect(text).toContain("与本机版本兼容");
+    expect(text).not.toContain("absent");
+    expect(text).not.toContain("yes");
   });
 
   it("installed 两组都要出现，且说清只按 id 对照", () => {
@@ -127,13 +134,15 @@ describe("plugin-cli · 输出说实话", () => {
       parsed: parsed(["installed"]),
       data: {
         total: 2,
-        onShelf: [{ name: "墨夜", local: "0.9.0", shelf: "1.0.0", state: "有更新" }],
-        offShelf: [{ id: "user.local.thing", name: "自己的包", version: "1.0.0" }],
+        onShelf: [{ name: "墨夜", local: "0.9.0", shelf: "1.0.0", state: "update" }],
+        offShelf: [{ id: "user.local.thing", name: "自己的包", version: "1.0.0", state: "enabled" }],
         offShelfNote: "不在货架上的 1 个只按 id 对照，不猜哪个对应哪个；启停与卸载去插件库看。",
       },
     });
     expect(text).toContain("本机 2 个包");
     expect(text).toContain("本机 v0.9.0");
+    expect(text).toContain("有更新");
+    expect(text).toContain("自己的包 v1.0.0（已启用）");
     expect(text).toContain("不在货架上的 1 个");
     expect(text).toContain("只按 id 对照");
   });

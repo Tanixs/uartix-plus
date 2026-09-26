@@ -1,18 +1,33 @@
 import type { ControlType } from "../features/controls/controlsStore";
 
 /**
- * P103 批 1：图标基准（全套共用两个数，只有一处出处）。
+ * P103 批 1 曾把描边从 2.0 收到 1.75，理由是"14px 配 2.0 墨色偏重"。这个理由是错的，
+ * 因为它对的是 **CSS 像素里的名义宽度**，而屏幕上真正决定糊不糊的是**设备像素**：
  *
- * 为什么从 2 收到 1.75：14px 图标配 2.0 描边，墨色偏重——一屏十几颗时整块工具栏会"发黑"，
- * 而 1.75 是这一档尺寸的常用重量，也是大厂桌面端工具栏观感的来源。
+ *     strokeDev = strokeWidth × (size / 24) × dpr × zoom
+ *
+ * viewBox 是 24，所以在 14px 上 1.75 折到 1.02 CSS px；1.02 的描边落在像素网格中间时
+ * 必然被抗锯齿摊到相邻两行，每行约 0.6 的墨——这就是用户实拍里那句"变小就糊了"。
+ * 也就是说 P103 那一批并没有把图标调轻，只是把它调虚了。
+ *
+ * 现在按设备像素反推：基准 16px、描边 2.0 ⇒ 1.33 CSS px，与 Lucide/Feather 在 16px
+ * 上的默认档一致（它们的宽度也是按 24 viewBox 给 2）；dpr 1.25 时 1.67 设备像素，
+ * 站得住 1.5 的清晰底线。**再要调轻必须先在这条算式上重算，不能只看 CSS 像素。**
  */
-export const ICON_STROKE = 1.75;
-/** 折角类（chevron）笔画短，与 1.75 同档会显虚 ⇒ 单独留重一档 */
+export const ICON_STROKE = 2;
+/** 折角类（chevron）笔画短，同档会显虚 ⇒ 单独留重一档 */
 export const ICON_STROKE_BOLD = 2.4;
-export const ICON_SIZE = 14;
+/**
+ * 图标基准尺寸。**12px 是底线**：低于这个数折到设备像素就跌破 1.5，
+ * 曲线与斜角先糊、再在深色主题上散成灰。比它小的写法一律要否掉。
+ */
+export const ICON_SIZE = 16;
 
-/** 装饰性 SVG 一律 aria-hidden：可读名字由承载它的按钮给（check:aria 钉的正是那一边） */
-const svg = (children: React.ReactNode, size: number = ICON_SIZE) => (
+/**
+ * 唯一的图标渲染器：尺寸、viewBox、描边、圆头、`aria-hidden` 都只在这里钉一次。
+ * 装饰性 SVG 一律 aria-hidden：可读名字由承载它的按钮给（check:aria 钉的正是那一边）。
+ */
+const render = (children: React.ReactNode, size: number, className?: string) => (
   <svg
     width={size}
     height={size}
@@ -23,10 +38,27 @@ const svg = (children: React.ReactNode, size: number = ICON_SIZE) => (
     strokeLinecap="round"
     strokeLinejoin="round"
     aria-hidden="true"
+    className={className}
   >
     {children}
   </svg>
 );
+
+const svg = (children: React.ReactNode, size: number = ICON_SIZE) => render(children, size);
+
+/**
+ * 给"只在这一颗"的一次性图标用同一个出口。
+ *
+ * 存在的理由是被量出来的，不是设计的偏好：这套基准原先只管得到屏幕上一小半图标 ——
+ * 15 个文件里抄了二十多份 `<svg viewBox="0 0 24 24" width="13|14|15" strokeWidth="2|2.2|2.4">`，
+ * 每份各自决定尺寸和重量，所以改基准改不动用户看到的那几颗。
+ * 抄一份 = 多一处出处。**新的一次性图标一律走这里。**
+ *
+ * 只收 24 viewBox 的描边图标。数据可视化（InfoBar 迷你折线、FieldLegend 色块、
+ * EmptyState 大插画）不是图标，它们该有自己的尺寸。
+ */
+export const Glyph = ({ children, className }: { children: React.ReactNode; className?: string }) =>
+  render(children, ICON_SIZE, className);
 
 /** 四向箭头（轮播/折叠都用它）。SVG 而不是 ‹ › 字符：§8-25 禁字符图标。 */
 const CHEVRON_ROT = { right: 0, down: 90, left: 180, up: 270 } as const;
@@ -343,8 +375,8 @@ export const IconEyeOff = () =>
  * 这一串变换＝把墨盒中心搬回 (12,12) 并整体放大（1.3 是量出来的：占比 0.58→0.76，与旁边齿轮的 0.92 同档）；改它要在浏览器里重测
  * `path.getBoundingClientRect()` 与 svg 中心的差（本批实测 dx/dy 从 0.67/-0.67 → 0/0）。
  *
- * **描边要跟着反向补偿**：`scale(1.3)` 把 `strokeWidth="2"` 一起放大了（2.6），
- * 叠上这颗用 16px 而邻居用 14px，屏上就是 1.73px vs 1.17px——用户看到的"边缘太粗"是这 48%。
+ * **描边要跟着反向补偿**：`scale(1.3)` 把描边一起放大了（2 → 2.6）。基准统一到 16px 之后
+ * 邻居尺寸差这一项已经没有了，但系数补偿仍然必须留着——留它的是 `scale`，不是尺寸。
  * 除以同一个系数，墨盒尺寸不动、重量回到同一档。
  */
 export const IconPuzzle = (props?: { size?: number }) =>
@@ -411,6 +443,83 @@ export const IconGrip = () =>
       <circle cx="15" cy="12" r="1.3" fill="currentColor" stroke="none" />
       <circle cx="9" cy="18" r="1.3" fill="currentColor" stroke="none" />
       <circle cx="15" cy="18" r="1.3" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+/** 更多（横向三点）。实心点不走描边，所以不受 `strokeDev` 那条算式影响，只吃面积。 */
+export const IconMore = () =>
+  svg(
+    <>
+      <circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+/**
+ * P104-B12：导轨四枚 + 版式一枚。
+ *
+ * 语义盘点（`.tools/icon-semantics.mjs`，见 `docs/P104-B12-详设.md` §B）之后，
+ * "约 60 枚整套重画"缩成了这几枚 —— 因为扫出来发现**跨域复用绝大多数是对的**
+ * （IconChevron 20 个文件、IconPlay 14 个文件，那是共享词汇表该有的样子，不是缺陷）。
+ * 真正的碰撞只有：`IconColumns` 四义、`IconTrash` 混了两种后果不同的动作。
+ *
+ * 画的时候守两条：都在 24 viewBox 网格上、都只吃 `currentColor` 描边，
+ * 所以基准（16 字形 / 2.0 描边）一改它们跟着改，不用逐枚调。
+ */
+
+/** 接入：插头（两芯 + 座体 + 线缆）。原先借 IconMonitor，那个读作"屏幕"不读作"链路"。 */
+export const IconPlug = () =>
+  svg(
+    <>
+      <path d="M9 3v5" />
+      <path d="M15 3v5" />
+      <path d="M6 8h12v3a6 6 0 0 1-12 0z" />
+      <path d="M12 17v4" />
+    </>,
+  );
+
+/** 协议：分格字节条，首格实心＝帧头。原先借 IconCode（`</>`），那个读作"代码"不读作"帧结构"。 */
+export const IconFrameSpec = () =>
+  svg(
+    <>
+      <rect x="2" y="7" width="20" height="10" rx="2" />
+      <path d="M7 7v10M12 7v10M17 7v10" />
+      <rect x="3" y="8" width="4" height="8" rx="1" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+/** 通道：三条车道各带一个游标点。原先借 IconPulse，那个与"数据/波形"撞、不特指通道。 */
+export const IconLanes = () =>
+  svg(
+    <>
+      <path d="M3 7h18M3 12h18M3 17h18" />
+      <circle cx="8" cy="7" r="1.8" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="12" r="1.8" fill="currentColor" stroke="none" />
+      <circle cx="10" cy="17" r="1.8" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+/** 命令：终端提示符 `>_`。原先借 IconLogs（横线列表），那个读作"日志"不读作"可发送的指令"。 */
+export const IconTerminal = () =>
+  svg(
+    <>
+      <path d="M4 6l5 5-5 5" />
+      <path d="M12 16h8" />
+    </>,
+  );
+
+/**
+ * 编辑版式：左大右上下两格的分栏框。
+ * 专门用来把 `IconColumns` 解放回"表格列"一个意思 ——
+ * 三根等宽竖线在表格里读作"列"，在壳层读作"版式"，是两件事（B12 盘点的四义碰撞）。
+ */
+export const IconLayoutEdit = () =>
+  svg(
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M14 4v16" />
+      <path d="M14 12h7" />
     </>,
   );
 

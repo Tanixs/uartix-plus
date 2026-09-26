@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
 import * as orchestratorStore from "./orchestratorStore";
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "./blockRegistry";
@@ -143,11 +144,14 @@ function OrchDropdown(props: { anchor: HTMLElement | null; onClose: () => void; 
 
 type BlockGrp = "exec" | "logic" | "org";
 
-const BLOCK_GRP_TITLE: Record<BlockGrp, { zh: string; en: string }> = {
-  exec: { zh: "执行", en: "Actions" },
-  logic: { zh: "逻辑", en: "Logic" },
-  org: { zh: "组织", en: "Organize" },
-};
+/** 分组标题写成 switch：双语落在同一行才数得进 i18n 门（`{zh,en}` 成对表里的中文它看不见） */
+function blockGrpTitle(g: BlockGrp): string {
+  switch (g) {
+    case "exec": return tx("执行", "Actions");
+    case "logic": return tx("逻辑", "Logic");
+    case "org": return tx("组织", "Organize");
+  }
+}
 
 /* B4a：菜单 = registry 的直接投影（声明顺序即展示顺序），文案/分组/色类单一真源 */
 const BLOCK_MENU = (Object.keys(BLOCK_REGISTRY) as (keyof typeof BLOCK_REGISTRY)[]).map((k) => ({
@@ -161,11 +165,15 @@ const EVENT_MENU = (Object.keys(EVENT_REGISTRY) as (keyof typeof EVENT_REGISTRY)
 }));
 
 /** 满队列策略的人话说明（A3：与 Grafana/n8n 用语对齐，工程师零学习成本） */
-const QUEUE_POLICY: { k: NonNullable<GroupNode["queuePolicy"]>; zh: string; en: string; tipZh: string; tipEn: string }[] = [
-  { k: "dropNew", zh: "丢弃新触发", en: "Drop new", tipZh: "队列满（8 个）时丢弃新来的触发——宁可漏触发也不堆积（默认）", tipEn: "Drop the new trigger when the queue is full (8)" },
-  { k: "dropOld", zh: "挤掉最旧排队", en: "Drop oldest queued", tipZh: "队列满时挤掉最旧的**排队项**（在跑的实例不受影响）", tipEn: "Evict the oldest queued instance when full" },
-  { k: "stopOld", zh: "中止在跑的", en: "Stop running", tipZh: "只要有实例在跑就全部中止，新触发立即上位（永远只跑到最新一次）", tipEn: "Abort everything running; the newest trigger takes over" },
-];
+/** 满队列策略的人话说明（A3：与 Grafana/n8n 用语对齐，工程师零学习成本）。
+ *  写成函数而不是表：`k` 是存进图数据的码，名字与提示是话术，必须在渲染时取。 */
+function queuePolicies(): { k: NonNullable<GroupNode["queuePolicy"]>; label: string; tip: string }[] {
+  return [
+    { k: "dropNew", label: tx("丢弃新触发", "Drop new"), tip: tx("队列满（8 个）时丢弃新来的触发——宁可漏触发也不堆积（默认）", "Drop the new trigger when the queue is full (8) - better a missed trigger than a backlog (default)") },
+    { k: "dropOld", label: tx("挤掉最旧排队", "Drop oldest queued"), tip: tx("队列满时挤掉最旧的**排队项**（在跑的实例不受影响）", "Evict the oldest **queued** instance when the queue is full (whatever is running is left alone)") },
+    { k: "stopOld", label: tx("中止在跑的", "Stop running"), tip: tx("只要有实例在跑就全部中止，新触发立即上位（永远只跑到最新一次）", "Abort everything running; the newest trigger takes over immediately (only the latest run ever finishes)") },
+  ];
+}
 
 /** ▶ 不可用的原因（用于置灰 + tooltip；返回 null = 可用） */
 function manualBlockReason(g: GroupNode, masterOn: boolean): string | null {
@@ -177,8 +185,8 @@ function manualBlockReason(g: GroupNode, masterOn: boolean): string | null {
 }
 
 function matchDesc(m: FrameMatch): string {
-  if (m.by === "raw") return `含 ${m.hex || "?"}`;
-  if (m.by === "tpl") return `模板 ${m.tplId}`;
+  if (m.by === "raw") return tx(`含 ${m.hex || "?"}`, `raw ${m.hex || "?"}`);
+  if (m.by === "tpl") return tx(`模板 ${m.tplId}`, `tpl ${m.tplId}`);
   const e = typeof m.expected === "number" ? String(m.expected) : `$${m.expected.var}`;
   return `${m.fieldName} ${m.op} ${e}`;
 }
@@ -200,19 +208,19 @@ function tplName(id: string): string {
 
 function condDesc(c: Cond): string {
   switch (c.k) {
-    case "chan": return `通道 ${chanName(c.chId)} ${c.op} ${c.value}${c.tol ? `±${c.tol}` : ""}`;
+    case "chan": return tx(`通道 ${chanName(c.chId)} ${c.op} ${c.value}${c.tol ? `±${c.tol}` : ""}`, `channel ${chanName(c.chId)} ${c.op} ${c.value}${c.tol ? `±${c.tol}` : ""}`);
     case "var": return `${c.name} ${c.op} ${String(c.value)}${c.tol ? `±${c.tol}` : ""}`;
-    case "expr": return c.src || "(空)";
+    case "expr": return c.src || tx("(空)", "(empty)");
     case "evtField": return `evt.${c.field} ${c.op} ${String(c.value)}`;
-    case "session": return `会话=${c.state}`;
+    case "session": return tx(`会话=${c.state}`, `session=${c.state}`);
   }
 }
 
 function varFromDesc(f: VarFrom): string {
   switch (f.k) {
     case "const": return String(f.value);
-    case "chan": return `通道 ${chanName(f.chId)}`;
-    case "expr": return f.src || "(空)";
+    case "chan": return tx(`通道 ${chanName(f.chId)}`, `channel ${chanName(f.chId)}`);
+    case "expr": return f.src || tx("(空)", "(empty)");
     case "evtField": return `evt.${f.field}`;
   }
 }
@@ -250,7 +258,7 @@ function summaryParts(n: FlowNode): SummaryParts {
         [groupName(n.groupId) || tx("(未选)", "(none)")],
       );
     case "setVar": return S("", [n.name || "?", varFromDesc(n.from)], "", " = ");
-    case "toast": return S(`通知[${n.level}]`, [n.text || tx("(空)", "(empty)")]);
+    case "toast": return S(tx(`通知[${n.level}]`, `toast[${n.level}]`), [n.text || tx("(空)", "(empty)")]);
     case "sound": return S(tx("提示音", "Sound"), [n.level]);
     case "if":
       return S(tx("如果", "If"), n.conds.length ? n.conds.map(condDesc) : [tx("(无条件=恒真)", "(no cond = true)")], "", tx(" 且 ", " AND "));
@@ -313,17 +321,17 @@ function Summary({ n }: { n: FlowNode }) {
 function eventSummary(ev: EventBlock): string {
   switch (ev.kind) {
     case "manual": return tx("手动", "Manual");
-    case "session": return `会话${ev.phase === "start" ? tx("开始", "start") : tx("停止", "stop")}`;
-    case "frame": return `帧 ${matchDesc(ev.match)}${ev.stride > 1 ? ` ×1/${ev.stride}` : ""}`;
-    case "threshold": return `通道 ${ev.chId ? chanName(ev.chId) : "?"} ${ev.op === "above" ? ">" : "<"} ${ev.value} ${ev.edge === "enter" ? tx("进入", "enter") : tx("回落", "exit")}`;
-    case "timer": return `每 ${ev.intervalMs}ms`;
-    case "sentinel": return `哨兵 ${ev.level}`;
-    case "varChanged": return `${ev.varName || "?"} 变更`;
+    case "session": return tx(`会话${ev.phase === "start" ? "开始" : "停止"}`, `session ${ev.phase === "start" ? "start" : "stop"}`);
+    case "frame": return tx(`帧 ${matchDesc(ev.match)}${ev.stride > 1 ? ` ×1/${ev.stride}` : ""}`, `frame ${matchDesc(ev.match)}${ev.stride > 1 ? ` ×1/${ev.stride}` : ""}`);
+    case "threshold": return tx(`通道 ${ev.chId ? chanName(ev.chId) : "?"} ${ev.op === "above" ? ">" : "<"} ${ev.value} ${ev.edge === "enter" ? "进入" : "回落"}`, `channel ${ev.chId ? chanName(ev.chId) : "?"} ${ev.op === "above" ? ">" : "<"} ${ev.value} ${ev.edge === "enter" ? "enter" : "exit"}`);
+    case "timer": return tx(`每 ${ev.intervalMs}ms`, `every ${ev.intervalMs}ms`);
+    case "sentinel": return tx(`哨兵 ${ev.level}`, `sentinel ${ev.level}`);
+    case "varChanged": return tx(`${ev.varName || "?"} 变更`, `${ev.varName || "?"} changed`);
     /* ---------- B4d 新增 ---------- */
-    case "frameError": return `坏帧${ev.stride > 1 ? ` ×1/${ev.stride}` : ""}`;
-    case "chanChanged": return `通道 ${ev.chId ? chanName(ev.chId) : "?"} 变化>${ev.tol}${ev.minIntervalMs > 50 ? ` 节流${ev.minIntervalMs}ms` : ""}`;
-    case "newTpl": return ev.tplId ? `新帧型 ${tplName(ev.tplId)}` : tx("任意新帧型", "any new type");
-    case "flowEvt": return `事件 ${ev.name || "?"}`;
+    case "frameError": return tx(`坏帧${ev.stride > 1 ? ` ×1/${ev.stride}` : ""}`, `bad frame${ev.stride > 1 ? ` ×1/${ev.stride}` : ""}`);
+    case "chanChanged": return tx(`通道 ${ev.chId ? chanName(ev.chId) : "?"} 变化>${ev.tol}${ev.minIntervalMs > 50 ? ` 节流${ev.minIntervalMs}ms` : ""}`, `channel ${ev.chId ? chanName(ev.chId) : "?"} moved>${ev.tol}${ev.minIntervalMs > 50 ? ` throttle ${ev.minIntervalMs}ms` : ""}`);
+    case "newTpl": return ev.tplId ? tx(`新帧型 ${tplName(ev.tplId)}`, `new frame type ${tplName(ev.tplId)}`) : tx("任意新帧型", "any new type");
+    case "flowEvt": return tx(`事件 ${ev.name || "?"}`, `event ${ev.name || "?"}`);
     case "idle": return tx(`空闲 ≥${ev.idleMs}ms`, `idle ≥${ev.idleMs}ms`);
   }
 }
@@ -708,7 +716,7 @@ export function OrchestratorPanel() {
       )}
       <div className="orch-top">
         <button
-          className={`btn sm${doc.settings.masterOn ? " primary" : ""}`}
+          className={`btn sm${doc.settings.masterOn ? " on" : ""}`}
           title={tx("编排总开关：关闭后所有自动事件与手动运行都停止", "Master switch: stops all auto events and manual runs")}
           onClick={() => orchestratorStore.setMasterOn(!doc.settings.masterOn)}
         >
@@ -726,7 +734,7 @@ export function OrchestratorPanel() {
         </span>
         <span className="orch-sp" />
         <button
-          className={`btn sm${logOpen ? " primary" : ""}`}
+          className={`btn sm${logOpen ? " on" : ""}`}
           title={tx("运行日志：触发/跳过/失败/熔断全过程（编辑文档导致实例中止也记在这里）", "Run log: triggers, skips, failures, fuses — including instances stopped by doc edits")}
           onClick={() => setLogOpen((v) => !v)}
         >
@@ -826,19 +834,19 @@ export function OrchestratorPanel() {
         >
           {doc.groups.length === 0 && (
             <div className="orch-empty">
-              <div className="orch-empty-t">{tx("自动编排器", "Orchestrator")}</div>
+              {/* B11 样片：原来这里是一行标题（页签已经写过「自动编排器」）+ 一段 90 字的
+                  定义 + 一条 4 步列表，共 165 汉字。三层模型下只留一行 hint + 动作行，
+                  定义与步骤整体搬进 `?`——一个字都没丢，只是不再挡在第一次打开的人面前。
+                  那条"把字段拖进来"是指认位置的句子，按 R-a 也只能进 tooltip。 */}
               <div className="orch-empty-d">
-                {tx(
-                  "组 = 编排单元：头部事件槽挂事件块（帧命中/阈值/定时器/哨兵…）自动触发，组内块线性执行；支持如果/循环逻辑块、变量库与调用测试序列。不挂事件的组由运行按钮手动跑或被别的组调用。",
-                  "A group is an orchestration unit: event blocks at the head auto-trigger it; blocks inside run linearly. Supports if/loop logic, flow vars and sequencer calls.",
-                )}
+                {tx("条件一满足，就自动跑一串动作", "Actions run automatically the moment a condition hits")}
+                <HelpHint
+                  text={tx(
+                    "组 = 编排单元：头部事件槽挂事件块（帧命中 / 阈值 / 定时器 / 哨兵…）自动触发，组内块线性执行；支持如果 / 循环逻辑块、变量库与调用测试序列。不挂事件的组由运行按钮手动跑、或被别的组调用。也可以把「协议」面板里的字段直接拖进来，秒挂一个阈值事件。",
+                    "A group is an orchestration unit: event blocks on its head (frame / threshold / timer / sentinel…) trigger it and its blocks run in order. Supports if/loop blocks, the variable library and sequencer calls. A group with no events can be run manually or called by another group. You can also drag a field in from Channels to attach a threshold event in one go.",
+                  )}
+                />
               </div>
-              <ol className="orch-steps">
-                <li>{tx("新建组，往里添加动作块（发送 / 等待 / 如果 / 循环…）", "Create a group, add action blocks (send / wait / if / loop…)")}</li>
-                <li>{tx("给组挂事件（阈值 / 帧命中 / 定时器…），或直接用运行按钮手动跑", "Attach events (threshold / frame / timer…), or run it with the Run button")}</li>
-                <li>{tx("打开左上「编排中」总开关——条件一满足就自动执行", "Flip the master switch — actions run the moment conditions hit")}</li>
-                <li>{tx("也可以把「协议模板」面板里的字段图例直接拖进来，秒挂一个阈值事件", "Or drag a field legend from the Templates panel to attach a threshold event instantly")}</li>
-              </ol>
               <div className="orch-empty-ops">
                 <button className="btn primary" disabled={readOnly} title={readOnly ? tx("Operator 只读模式：不能新建组", "Operator read-only: cannot create groups") : undefined} onClick={() => createGroup()}>
                   <IconPlus />
@@ -946,15 +954,21 @@ export function OrchestratorPanel() {
 
 /* ================= 运行日志抽屉（P74c P0-UI） ================= */
 
-const PHASE_META: Record<LogPhase, { zh: string; en: string; cls: string }> = {
-  trigger: { zh: "触发", en: "TRIG", cls: "trig" },
-  skip: { zh: "跳过", en: "SKIP", cls: "skip" },
-  block: { zh: "块", en: "BLK", cls: "blk" },
-  fail: { zh: "失败", en: "FAIL", cls: "fail" },
-  abort: { zh: "中止", en: "ABRT", cls: "abort" },
-  fuse: { zh: "熔断", en: "FUSE", cls: "fuse" },
-  done: { zh: "完成", en: "DONE", cls: "done" },
+/** 日志行的小标签：`cls` 是 CSS 类（与语言无关的码），字面上的标签渲染时挑 */
+const PHASE_CLS: Record<LogPhase, string> = {
+  trigger: "trig", skip: "skip", block: "blk", fail: "fail", abort: "abort", fuse: "fuse", done: "done",
 };
+function phaseLabel(phase: LogPhase): string {
+  switch (phase) {
+    case "trigger": return tx("触发", "TRIG");
+    case "skip": return tx("跳过", "SKIP");
+    case "block": return tx("块", "BLK");
+    case "fail": return tx("失败", "FAIL");
+    case "abort": return tx("中止", "ABRT");
+    case "fuse": return tx("熔断", "FUSE");
+    case "done": return tx("完成", "DONE");
+  }
+}
 
 /** 抽屉一次最多渲染的行数（引擎缓冲 800 条，DOM 只画最近的，避免长面板卡顿） */
 const LOG_ROWS = 300;
@@ -995,7 +1009,7 @@ function LogDrawer(props: {
         </span>
         <span className="orch-sp" />
         <button
-          className={`btn sm${onlyFail ? " primary" : ""}`}
+          className={`btn sm${onlyFail ? " on" : ""}`}
           title={tx("只看失败/熔断", "Failures & fuses only")}
           onClick={() => onOnlyFail(!onlyFail)}
         >
@@ -1022,7 +1036,7 @@ function LogDrawer(props: {
         {rows.length === 0 && (
           <div className="orch-log-empty">
             {all.length === 0
-              ? tx("还没有运行记录：挂好事件后打开总开关，或点组上的运行按钮手动跑一次", "No runs yet — arm the master switch, or hit Run on a group")
+              ? tx("还没有运行记录", "No runs yet")
               : tx("当前筛选下没有记录", "No entries match the current filter")}
           </div>
         )}
@@ -1035,12 +1049,12 @@ function LogDrawer(props: {
 }
 
 function LogRow({ l, groupName }: { l: LogEntry; groupName: string }) {
-  const m = PHASE_META[l.phase];
+  const cls = PHASE_CLS[l.phase];
   const time = new Date(l.ts).toLocaleTimeString();
   return (
-    <div className={`orch-log-row p-${m.cls}`} title={`${time} · ${groupName} · ${l.detail}`}>
+    <div className={`orch-log-row p-${cls}`} title={`${time} · ${groupName} · ${l.detail}`}>
       <span className="orch-log-time">{time}</span>
-      <span className={`orch-log-tag t-${m.cls}`}>{tx(m.zh, m.en)}</span>
+      <span className={`orch-log-tag t-${cls}`}>{phaseLabel(l.phase)}</span>
       <span className="orch-log-g">{groupName}</span>
       <span className="orch-log-d">
         {l.instId > 0 && <i className="orch-log-inst">#{l.instId}</i>}
@@ -1235,7 +1249,7 @@ function GroupCard(props: {
         <span className="orch-slot-lab">{tx("事件", "Events")}</span>
         {g.events.length === 0 && (
           <span className="orch-slot-empty" title={tx("挂上事件块后本组会自动触发；也可以只手动运行或被其他组调用", "Attach an event block to auto-trigger; otherwise it stays manual/callable")}>
-            {tx("未挂事件 · 仅可手动运行或被其他组调用", "No events · run manually or via other groups only")}
+            {tx("未挂事件", "No events")}
           </span>
         )}
         {g.events.map((ev) => {
@@ -1348,15 +1362,15 @@ function GroupSettings({ g, anchor, onClose }: { g: GroupNode; anchor: HTMLEleme
       </div>
 
       <span className="orch-pop-h">{tx("满队列策略（队列深度 8）", "On full queue (depth 8)")}</span>
-      {QUEUE_POLICY.map((p) => (
+      {queuePolicies().map((p) => (
         <button
           key={p.k}
           className="orch-pop-i orch-pop-radio"
-          title={tx(p.tipZh, p.tipEn)}
+          title={p.tip}
           onClick={() => orchestratorStore.updateGroup(g.id, { queuePolicy: p.k })}
         >
           {policy === p.k ? <IconDot /> : <IconCircle />}
-          {tx(p.zh, p.en)}
+          {p.label}
         </button>
       ))}
       <div className="orch-set-hint">
@@ -1606,7 +1620,7 @@ function AddHere(props: {
         <OrchDropdown anchor={addAt.anchor ?? null} onClose={() => setAddAt(null)} cols>
           {(["exec", "logic", "org"] as BlockGrp[]).map((grp) => (
             <span key={grp} className="orch-pop-g">
-              <span className="orch-pop-h">{tx(BLOCK_GRP_TITLE[grp].zh, BLOCK_GRP_TITLE[grp].en)}</span>
+              <span className="orch-pop-h">{blockGrpTitle(grp)}</span>
               {BLOCK_MENU.filter((m) => m.cat === grp).map((m) => (
                 <button
                   key={m.k}

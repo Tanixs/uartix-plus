@@ -4,6 +4,7 @@ import { IconPlay, IconStop, IconTrash, IconChevron, IconPlus } from "../../shar
 import * as poll from "./pollStore";
 import { FC_LABEL } from "./mb";
 import { toast } from "../ai/extRuntime";
+import { HelpHint } from "../../shared/HelpHint";
 
 /**
  * 主站轮询表（M2-d）：Modbus 工作台的第二页。
@@ -28,10 +29,10 @@ export function ModbusPoll() {
 
   return (
     <div className="mb-pane">
-      <div className="mb-bar">
+      <div className="mb-bar p-bar">
         <button
           type="button"
-          className={`btn sm${s.running ? " warn" : " primary"}`}
+          className={`btn sm${s.running ? " danger" : " primary"}`}
           onClick={toggle}
           title={
             s.running
@@ -98,10 +99,13 @@ export function ModbusPoll() {
             {s.rows.length === 0 && (
               <tr>
                 <td colSpan={14} className="mb-empty">
-                  {tx(
-                    "还没有轮询项。点「示例」插一条，或自己填：从站 1、功能码 03、起始 0、数量 2、周期 500ms —— 读回来的两个寄存器会成为两个变量，直接就能画曲线。",
-                    "No rows yet. Click Example, or fill one in: slave 1, FC 03, start 0, qty 2, period 500 ms — the registers come back as variables you can plot.",
-                  )}
+                  {tx("还没有轮询项，点「示例」插一条", "No rows yet — hit Example to insert one")}
+                  <HelpHint
+                    text={tx(
+                      "也可以自己填：从站 1、功能码 03、起始 0、数量 2、周期 500ms —— 读回来的两个寄存器会成为两个变量，直接就能画曲线。",
+                      "Or fill one in yourself: slave 1, FC 03, start 0, qty 2, period 500 ms — the two registers come back as variables you can plot straight away.",
+                    )}
+                  />
                 </td>
               </tr>
             )}

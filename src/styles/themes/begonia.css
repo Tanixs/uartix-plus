@@ -9,7 +9,9 @@
   color-scheme: light;
   --bg: #f2edef; /* 画布：面板之下的那层 */
   --bg-panel: #ffffff; /* 面板 / 工具栏：抬到纯白，浮起才有空间（状态栏不占这档，它归壳） */
-  --bg-inset: #f3ecee; /* 页签条 / 输入框：凹下档，降饱和后不再抢页签条那块"粉带" */
+  --bg-inset: #e8e2e4; /* 页签条 / 输入框：凹下档。P104-B2 从 #f3ecee 下压一档——
+             原来它比壳档(#ece5e8)还亮 2.4 L*，是八套里唯一表面序反的，
+             凹/壳/画布三档挤在 1% 亮度内读不出层级（I 门现在钉着这件事） */
   --bg-titlebar: #ece5e8; /* 壳：比画布再深一档，标题栏读作 chrome */
   --border: #dcd2d5;
   --border-soft: #eae2e4;

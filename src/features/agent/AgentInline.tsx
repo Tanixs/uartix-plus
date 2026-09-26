@@ -12,12 +12,13 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as agentRun from "./agentRun";
 import type { AgentRunView } from "./agentRun";
-import { isLiveRun, type RunEvent, type ToolProvenance } from "./types";
+import { isLiveRun, type ContextStat, type RunEvent, type ToolProvenance } from "./types";
 import { ctxGauge, fmtKb } from "./context";
 import { hasDataLease } from "../plot/dataLease";
 import { confirmDialog } from "../../shared/Dialog";
-import { IconTrash } from "../../shared/icons";
+import { IconChevron, IconTrash } from "../../shared/icons";
 import { parseArgs, receiptRows, receiptStatusText, summarizeArgs, toolLabel } from "./toolDisplay";
+import { tx, useLocale } from "../../i18n/strings";
 // 插件库真值（停用按钮态）：AgentInline 是 UI 叶子，静态引入不成环
 // （pluginStore→extRuntime→chatStore→agentRun 链上没有任何一环回头引本文件）
 import { getSnapshot as getPluginSnapshot, subscribe as subscribePlugins } from "../plugins/pluginStore";
@@ -37,60 +38,122 @@ function fmtElapsed(ms: number): string {
 
 /** P98-M4：体积可读化与用量档位统一收在 `context.ts`（运行卡与输入区用量条共用一份口径） */
 
-const STATUS_ZH: Record<string, string> = {
-  running: "运行中",
-  succeeded: "已完成",
-  paused: "已暂停（预算耗尽或连续失败）",
-  cancelled: "已取消",
-  failed: "失败",
-  // P91 A4：failed/interrupted 现在都能「继续任务」（从台账续跑，不重做已生效步骤），
-  // 但批准令牌与撤销令牌仍不跨重启（§5.4）——文案必须同时说清这两件事
-  interrupted: "已中断（应用重启）· 可继续任务",
+/**
+ * 任务状态的人话。原来是 `STATUS_ZH: Record<string, string>`（值只有中文，名字也写着"只会出中文"）。
+ * 用 switch 而不是"中英成对存在一张表里"：表里的字面量扫描器认不出来（它只认 `tx("…", "…")` 这个形状），
+ * 债会被原样记在预算上 —— 表好看，数却是假的。
+ */
+const statusLabel = (status: string): string => {
+  switch (status) {
+    case "running":
+      return tx("运行中", "Running");
+    case "succeeded":
+      return tx("已完成", "Done");
+    // P91 A4：failed/interrupted 现在都能「继续任务」（从台账续跑，不重做已生效步骤），
+    // 但批准令牌与撤销令牌仍不跨重启（§5.4）——文案必须同时说清这两件事
+    case "paused":
+      return tx("已暂停（预算耗尽或连续失败）", "Paused (budget spent or repeated failures)");
+    case "cancelled":
+      return tx("已取消", "Cancelled");
+    case "failed":
+      return tx("失败", "Failed");
+    case "interrupted":
+      return tx("已中断（应用重启）· 可继续任务", "Interrupted (app restarted) · the task can be resumed");
+    default:
+      return status;
+  }
 };
+
+/**
+ * 上下文那格的短标签与 tooltip。写成**片段数组再 join**，不是一整句模板：
+ * i18n 扫描器在 `tx()` 第一个参数里碰到嵌套引号就断在半路，整句写法会把已经翻好的字
+ * 再数一遍债（`SettingsModal` 剩的那 12 就是这个形状）。片段各自干净，表上的数才是真数。
+ */
+function ctxParts(last: ContextStat): string[] {
+  const bits = [tx(`上下文 ${ctxGauge(last.bytes).text}`, `Context ${ctxGauge(last.bytes).text}`)];
+  if (last.droppedImages) bits.push(tx(`弃图 ${last.droppedImages}`, `${last.droppedImages} dropped`));
+  if (last.folded) bits.push(tx(`折叠 ${last.folded}`, `${last.folded} folded`));
+  return bits;
+}
+
+function ctxTalk(ctx: { last?: ContextStat; peakBytes: number }): string {
+  const last = ctx.last;
+  if (!last) return "";
+  const bits = [
+    tx(`末轮送入 ${ctxGauge(last.bytes).text}`, `Last turn sent ${ctxGauge(last.bytes).text}`),
+    tx(`峰值 ${fmtKb(ctx.peakBytes)}`, `peak ${fmtKb(ctx.peakBytes)}`),
+    tx(`${last.msgs} 条消息`, `${last.msgs} messages`),
+  ];
+  if (last.images) bits.push(tx(`附图 ${last.images} 张`, `${last.images} image(s)`));
+  if (last.shadowed) bits.push(tx(`会话历史遮蔽 ${last.shadowed} 条`, `${last.shadowed} session turns shadowed`));
+  return bits.join(" · ");
+}
 
 /** P88e C2：事件台账 → 纯文本日志（剪贴板用）。含起止/预算/每事件时间戳与回执码，
  *  让用户拿到一份可离线排查的完整现场，而不是对着界面猜。 */
 function serializeLog(r: AgentRunView): string {
   const lines: string[] = [];
-  lines.push("# Uartix Agent 任务日志");
+  lines.push(tx("# Uartix Agent 任务日志", "# Uartix+ Agent task log"));
   lines.push(`runId: ${r.runId}`);
-  lines.push(`目标: ${r.goal}`);
-  lines.push(`档位: ${r.scope}`);
-  lines.push(`状态: ${STATUS_ZH[r.status] ?? r.status}`);
+  lines.push(tx(`目标: ${r.goal}`, `Goal: ${r.goal}`));
+  lines.push(tx(`档位: ${r.scope}`, `Tier: ${r.scope}`));
+  lines.push(tx(`状态: ${statusLabel(r.status)}`, `Status: ${statusLabel(r.status)}`));
+  const startedAt = new Date(r.createdAt).toLocaleString();
+  const endedAt = r.finishedAt ? new Date(r.finishedAt).toLocaleString() : "";
   lines.push(
-    `起止: ${new Date(r.createdAt).toLocaleString()} → ${r.finishedAt ? new Date(r.finishedAt).toLocaleString() : "进行中"}`,
+    endedAt
+      ? tx(`起止: ${startedAt} → ${endedAt}`, `Span: ${startedAt} → ${endedAt}`)
+      : tx(`起止: ${startedAt} → 进行中`, `Span: ${startedAt} → running`),
   );
-  lines.push(`预算: ${r.rounds}/${r.caps.maxRounds} 轮 · ${r.calls}/${r.caps.maxCalls} 次工具调用`);
+  lines.push(
+    tx(
+      `预算: ${r.rounds}/${r.caps.maxRounds} 轮 · ${r.calls}/${r.caps.maxCalls} 次工具调用`,
+      `Budget: ${r.rounds}/${r.caps.maxRounds} rounds · ${r.calls}/${r.caps.maxCalls} tool calls`,
+    ),
+  );
   // P95-H2：日志里带上下文用量（离线复盘"为什么这轮被截/超限"时的第一手数据）
   if (r.ctx) {
-    lines.push(
-      `上下文: 末轮 ${((r.ctx.last?.bytes ?? 0) / 1024).toFixed(0)} KB · 峰值 ${(r.ctx.peakBytes / 1024).toFixed(0)} KB` +
-        `${r.ctx.last?.droppedImages ? ` · 已弃历史图 ${r.ctx.last.droppedImages} 张` : ""}` +
-        `${r.ctx.last?.folded ? ` · 折叠 ${r.ctx.last.folded} 条` : ""}` +
-        `${r.ctx.last?.shadowed ? ` · 会话遮蔽 ${r.ctx.last.shadowed} 条` : ""}`,
-    );
+    const last = r.ctx.last;
+    const bits = [
+      tx(`上下文: 末轮 ${((last?.bytes ?? 0) / 1024).toFixed(0)} KB`, `Context: last ${((last?.bytes ?? 0) / 1024).toFixed(0)} KB`),
+      tx(`峰值 ${(r.ctx.peakBytes / 1024).toFixed(0)} KB`, `peak ${(r.ctx.peakBytes / 1024).toFixed(0)} KB`),
+    ];
+    if (last?.droppedImages) bits.push(tx(`已弃历史图 ${last.droppedImages} 张`, `${last.droppedImages} history images dropped`));
+    if (last?.folded) bits.push(tx(`折叠 ${last.folded} 条`, `${last.folded} folded`));
+    if (last?.shadowed) bits.push(tx(`会话遮蔽 ${last.shadowed} 条`, `${last.shadowed} session turns shadowed`));
+    lines.push(bits.join(" · "));
   }
-  lines.push("--- 事件台账 ---");
+  lines.push(tx("--- 事件台账 ---", "--- Event ledger ---"));
   for (const e of r.events) {
     const t = e.ts ? `[${new Date(e.ts).toLocaleTimeString()}]` : "";
     if (e.kind === "turn") {
-      lines.push(`${t} #${e.seq} 模型叙述: ${e.text ?? ""}`);
+      lines.push(tx(`${t} #${e.seq} 模型叙述: ${e.text ?? ""}`, `${t} #${e.seq} Narration: ${e.text ?? ""}`));
     } else if (e.kind === "context") {
-      lines.push(`${t} #${e.seq} 上下文: ${e.text ?? ""}`);
+      lines.push(tx(`${t} #${e.seq} 上下文: ${e.text ?? ""}`, `${t} #${e.seq} Context: ${e.text ?? ""}`));
     } else if (e.kind === "reasoning") {
-      lines.push(`${t} #${e.seq} 思维链: ${e.text ?? ""}`);
+      lines.push(tx(`${t} #${e.seq} 思维链: ${e.text ?? ""}`, `${t} #${e.seq} Reasoning: ${e.text ?? ""}`));
     } else if (e.kind === "status") {
-      lines.push(`${t} #${e.seq} 状态: ${e.text ?? ""}`);
+      lines.push(tx(`${t} #${e.seq} 状态: ${e.text ?? ""}`, `${t} #${e.seq} Status: ${e.text ?? ""}`));
     } else if (e.kind === "receipt") {
-      lines.push(`${t} #${e.seq} 工具: ${e.tool ?? ""} 参数: ${(e.args ?? "").slice(0, 400)}`);
+      lines.push(
+        tx(
+          `${t} #${e.seq} 工具: ${e.tool ?? ""} 参数: ${(e.args ?? "").slice(0, 400)}`,
+          `${t} #${e.seq} Tool: ${e.tool ?? ""} Args: ${(e.args ?? "").slice(0, 400)}`,
+        ),
+      );
       const rec = e.receipt;
       if (rec) {
-        lines.push(`    回执: ok=${rec.ok} status=${rec.status}${rec.code ? ` code=${rec.code}` : ""}`);
+        lines.push(
+          tx(
+            `    回执: ok=${rec.ok} status=${rec.status}${rec.code ? ` code=${rec.code}` : ""}`,
+            `    Receipt: ok=${rec.ok} status=${rec.status}${rec.code ? ` code=${rec.code}` : ""}`,
+          ),
+        );
         if (rec.data !== undefined) {
           try {
-            lines.push(`    数据: ${JSON.stringify(rec.data).slice(0, 1200)}`);
+            lines.push(tx(`    数据: ${JSON.stringify(rec.data).slice(0, 1200)}`, `    Data: ${JSON.stringify(rec.data).slice(0, 1200)}`));
           } catch {
-            lines.push("    数据: <不可序列化>");
+            lines.push(tx("    数据: <不可序列化>", "    Data: <not serializable>"));
           }
         }
       }
@@ -148,7 +211,7 @@ function Foldable({
       <button className="ai-agent-fold-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         {live && <span className="ai-agent-fold-dot" aria-hidden="true" />}
         <span className="ai-agent-fold-label">{label}</span>
-        <svg className={`ai-agent-caret${open ? " open" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+        <IconChevron dir={open ? "down" : "right"} />
       </button>
       <div className="ai-agent-fold-body" ref={bodyRef}>{text}</div>
     </div>
@@ -192,25 +255,31 @@ function ToolCard({
     const r = setEnabled(pluginId, false);
     if (!r.ok) {
       const { toast } = await import("../ai/extRuntime");
-      toast(`停用失败：${r.msg}`);
+      toast(tx(`停用失败：${r.msg}`, `Disabling failed: ${r.msg}`));
     }
   };
   const parsed = parseArgs(args);
-  const zh = toolLabel(tool);
-  const sum = summarizeArgs(tool, parsed, truncated) || (truncated ? "参数过长（见日志）" : "");
+  /** 卡上的话术是 `tx()` 出来的，切换语言时得有人重渲染（这几个渲染文案的小组件各按一次同一个钩子） */
+  useLocale();
+  /** 本地变量原来叫 `zh`（"中文名"），现在这张卡两种语言都出，名字跟着改，不留在原地骗人 */
+  const shown = toolLabel(tool);
+  const sum = summarizeArgs(tool, parsed, truncated) || (truncated ? tx("参数过长（见日志）", "arguments too long (see log)") : "");
   const stat = receiptStatusText(receipt.ok, receipt.status, receipt.code);
   const rows = open ? receiptRows(receipt.data) : [];
   return (
     <div className={`ai-agent-tool${receipt.ok ? "" : " bad"}`}>
       <button className="ai-agent-tool-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className={`ai-agent-dot${receipt.ok ? " ok" : " err"}`} aria-hidden="true" />
-        <span className="ai-agent-tool-name">{zh}</span>
+        <span className="ai-agent-tool-name">{shown}</span>
         {receipt.src?.kind === "plugin" && (
           <span
             className="ai-agent-src"
-            title={`这支工具由插件提供：${receipt.src.pkgId} v${receipt.src.version}（不是宿主内置能力）`}
+            title={tx(
+              `这支工具由插件提供：${receipt.src.pkgId} v${receipt.src.version}（不是宿主内置能力）`,
+              `This tool comes from a plugin: ${receipt.src.pkgId} v${receipt.src.version} (not a built-in host capability)`,
+            )}
           >
-            插件提供
+            {tx("插件提供", "from plugin")}
           </span>
         )}
         <span className="ai-agent-tool-sum">{sum ? `${sum} · ${stat}` : stat}</span>
@@ -218,7 +287,7 @@ function ToolCard({
           {ts ? fmtClock(ts) : ""}
           {dur != null && dur >= 1000 ? ` · ${fmtElapsed(dur)}` : ""}
         </span>
-        <svg className={`ai-agent-caret${open ? " open" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+        <IconChevron dir={open ? "down" : "right"} />
       </button>
       {open && (
         <div className="ai-agent-tool-detail">
@@ -236,35 +305,38 @@ function ToolCard({
           ))}
           {pluginId && (
             <div className="ai-agent-kv">
-              <span className="ai-agent-k">持久化</span>
+              <span className="ai-agent-k">{tx("持久化", "Persistence")}</span>
               {!plugin ? (
-                <span className="ai-agent-v dim">插件已不在库中（记录保留）</span>
+                <span className="ai-agent-v dim">{tx("插件已不在库中（记录保留）", "the plugin is no longer in the library (record kept)")}</span>
               ) : plugin.state !== "enabled" ? (
-                <span className="ai-agent-v dim">已停用（插件库可重新启用）</span>
+                <span className="ai-agent-v dim">{tx("已停用（插件库可重新启用）", "disabled (re-enable it in the plugin library)")}</span>
               ) : (
                 <button
                   className="ai-agent-undo"
-                  title={`停用插件「${plugin.pkg.name}」，界面立即恢复；也可到 设置 → 插件管理 处理`}
+                  title={tx(
+                    `停用插件「${plugin.pkg.name}」，界面立即恢复；也可到 设置 → 插件管理 处理`,
+                    `Disable plugin “${plugin.pkg.name}” and the UI reverts at once; also under Settings → Plugins`,
+                  )}
                   onClick={() => void disablePlugin()}
                 >
-                  在插件库停用
+                  {tx("在插件库停用", "Disable in plugin library")}
                 </button>
               )}
             </div>
           )}
           {receipt.undoToken && (
             <div className="ai-agent-kv">
-              <span className="ai-agent-k">撤销</span>
+              <span className="ai-agent-k">{tx("撤销", "Undo")}</span>
               {undoState === "undone" ? (
-                <span className="ai-agent-v dim">已撤销</span>
+                <span className="ai-agent-v dim">{tx("已撤销", "Undone")}</span>
               ) : (
                 <button
                   className="ai-agent-undo"
-                  title={undoState ? agentRun.UNDO_STATE_UI[undoState].tip : "撤销本次应用"}
+                  title={undoState ? agentRun.UNDO_STATE_UI[undoState].tip : tx("撤销本次应用", "Undo this change")}
                   disabled={!!undoState}
                   onClick={onUndo}
                 >
-                  {undoState ? agentRun.UNDO_STATE_UI[undoState].label : "撤销"}
+                  {undoState ? agentRun.UNDO_STATE_UI[undoState].label : tx("撤销", "Undo")}
                 </button>
               )}
             </div>
@@ -277,17 +349,25 @@ function ToolCard({
 
 /** 审批卡（内联在消息流位置） */
 function ApprovalCard({ view }: { view: AgentRunView }) {
+  useLocale();
   const req = view.pending;
   if (!req) return null;
   return (
     <div className="ai-agent-approval" role="alert">
-      <div className="ai-agent-approval-title">需要你的批准：{toolLabel(req.tool)}</div>
+      <div className="ai-agent-approval-title">
+        {tx(`需要你的批准：${toolLabel(req.tool)}`, `Approval needed: ${toolLabel(req.tool)}`)}
+      </div>
       <div className="ai-agent-approval-plan">{req.plan}</div>
       <div className="ai-agent-approval-row">
-        <span className="ai-agent-approval-exp">有效期至 {new Date(req.expiresAt).toLocaleTimeString()}；批准只对当前参数有效</span>
+        <span className="ai-agent-approval-exp">
+          {tx(
+            `有效期至 ${new Date(req.expiresAt).toLocaleTimeString()}；批准只对当前参数有效`,
+            `Valid until ${new Date(req.expiresAt).toLocaleTimeString()}; approval covers these arguments only`,
+          )}
+        </span>
         <div className="ai-agent-approval-btns">
-          <button className="btn" onClick={() => agentRun.reject(view.runId, req.id)}>拒绝</button>
-          <button className="btn primary" onClick={() => agentRun.approve(view.runId, req.id)}>批准执行</button>
+          <button className="btn" onClick={() => agentRun.reject(view.runId, req.id)}>{tx("拒绝", "Reject")}</button>
+          <button className="btn primary" onClick={() => agentRun.approve(view.runId, req.id)}>{tx("批准执行", "Approve")}</button>
         </div>
       </div>
     </div>
@@ -296,6 +376,7 @@ function ApprovalCard({ view }: { view: AgentRunView }) {
 
 /** P88e B3：暂停续跑提示——用原 goal/授权域发起新 run；忙碌或失败原因就地展示。 */
 function ResumeHint({ view, inline }: { view: AgentRunView; inline?: boolean }) {
+  useLocale();
   const [err, setErr] = useState("");
   const resume = () => {
     setErr("");
@@ -306,8 +387,12 @@ function ResumeHint({ view, inline }: { view: AgentRunView; inline?: boolean }) 
   if (inline) {
     return (
       <>
-        <button className="btn primary ai-agent-act" title="以原目标与授权范围发起新任务（本记录保留）" onClick={resume}>
-          继续任务
+        <button
+          className="btn primary ai-agent-act"
+          title={tx("以原目标与授权范围发起新任务（本记录保留）", "Start a new task with the same goal and scope (this record is kept)")}
+          onClick={resume}
+        >
+          {tx("继续任务", "Resume task")}
         </button>
         {err && <span className="ai-agent-resume-err">{err}</span>}
       </>
@@ -315,9 +400,14 @@ function ResumeHint({ view, inline }: { view: AgentRunView; inline?: boolean }) 
   }
   return (
     <div className="ai-agent-resume-hint">
-      <span>任务因预算耗尽或连续失败而暂停；继续将以原目标与授权范围发起新任务（本记录保留）。</span>
+      <span>
+        {tx(
+          "任务因预算耗尽或连续失败而暂停；继续将以原目标与授权范围发起新任务（本记录保留）。",
+          "The task paused because the budget ran out or steps kept failing. Resuming starts a new task with the same goal and scope (this record is kept).",
+        )}
+      </span>
       <button className="btn sm" onClick={resume}>
-        继续任务
+        {tx("继续任务", "Resume task")}
       </button>
       {err && <span className="ai-agent-resume-err">{err}</span>}
     </div>
@@ -326,6 +416,7 @@ function ResumeHint({ view, inline }: { view: AgentRunView; inline?: boolean }) 
 
 /** 单个任务块的完整活动流（头部状态/目标/复制日志/停止 + meta + 时间线） */
 function RunBlock({ view }: { view: AgentRunView }) {
+  useLocale();
   // 订阅宿主变更以吃到 live 增量（≤10Hz）；快照引用在 notify 里整体替换（R2）
   useSyncExternalStore(agentRun.subscribe, agentRun.getSnapshot);
   const [now, setNow] = useState(Date.now());
@@ -360,11 +451,13 @@ function RunBlock({ view }: { view: AgentRunView }) {
       .then(fn)
       .catch(async (e: unknown) => {
         const { toast } = await import("../ai/extRuntime");
-        toast(`任务操作失败：${e instanceof Error ? e.message : String(e)}`);
+        const reason = e instanceof Error ? e.message : String(e);
+        toast(tx(`任务操作失败：${reason}`, `Task action failed: ${reason}`));
       })
       .finally(() => setBusy(""));
   };
-  const headStatus = interrupted && applied > 0 ? `已完成 ${applied} 步后中断` : STATUS_ZH[view.status] ?? view.status;
+  const headStatus =
+    interrupted && applied > 0 ? tx(`已完成 ${applied} 步后中断`, `interrupted after ${applied} applied step(s)`) : statusLabel(view.status);
   return (
     <div className={`ai-agent-block${running ? " live" : ""}${interrupted ? " bad" : ""}`}>
       <div className="ai-agent-head">
@@ -376,46 +469,55 @@ function RunBlock({ view }: { view: AgentRunView }) {
         <span className="ai-agent-goal" title={view.goalBrief}>{view.goalBrief}</span>
         <span className="ai-agent-acts">
           {running && (
-            <button className="btn ai-agent-act" onClick={() => agentRun.stopRun(view.runId)}>停止</button>
+            <button className="btn ai-agent-act" onClick={() => agentRun.stopRun(view.runId)}>{tx("停止", "Stop")}</button>
           )}
           {canRetry && (
             <button
               className="btn primary ai-agent-act"
-              disabled={busy === "继续"}
-              title="从事件台账重建历史并续跑：已生效的步骤不重做"
-              onClick={() => run("继续", () => agentRun.retryRun(view.runId))}
+              disabled={busy === "resume"}
+              title={tx("从事件台账重建历史并续跑：已生效的步骤不重做", "Rebuild history from the event ledger and continue: applied steps are not repeated")}
+              onClick={() => run("resume", () => agentRun.retryRun(view.runId))}
             >
-              {busy === "继续" ? "续跑中…" : "继续任务"}
+              {busy === "resume" ? tx("续跑中…", "Resuming…") : tx("继续任务", "Resume task")}
             </button>
           )}
           {view.status === "paused" && <ResumeHint view={view} inline />}
-          <button className="btn ai-agent-act" title="复制完整事件台账（含时间戳与回执码），便于离线排查" onClick={copyLog}>
-            {copied ? "已复制" : "复制日志"}
+          <button
+            className="btn ai-agent-act"
+            title={tx("复制完整事件台账（含时间戳与回执码），便于离线排查", "Copy the full event ledger (timestamps and receipt codes) for offline debugging")}
+            onClick={copyLog}
+          >
+            {copied ? tx("已复制", "Copied") : tx("复制日志", "Copy log")}
           </button>
         </span>
       </div>
       <div className="ai-agent-meta">
-        第 {view.rounds}/{view.caps.maxRounds} 轮 · 工具 {view.calls}/{view.caps.maxCalls} 次 · 已用 {fmtElapsed(elapsedBase - view.createdAt)}
+        {tx(
+          `第 ${view.rounds}/${view.caps.maxRounds} 轮 · 工具 ${view.calls}/${view.caps.maxCalls} 次 · 已用 ${fmtElapsed(elapsedBase - view.createdAt)}`,
+          `Round ${view.rounds}/${view.caps.maxRounds} · ${view.calls}/${view.caps.maxCalls} tool calls · ${fmtElapsed(elapsedBase - view.createdAt)} elapsed`,
+        )}
         {/* P95-H2：这一轮到底送了多少东西进去（旧实现完全没有这个数） */}
         {view.ctx?.last && (
           <span
             className={`ai-agent-ctx${ctxGauge(view.ctx.last.bytes).level !== "ok" ? " warn" : ""}`}
             // P98-M4：带上分母与百分比。旧版只报「上下文 N KB」，用户看得见数字却判断不了还剩多少
-            title={`末轮送入 ${ctxGauge(view.ctx.last.bytes).text}（峰值 ${fmtKb(view.ctx.peakBytes)}）· ${view.ctx.last.msgs} 条消息${view.ctx.last.images ? ` · 附图 ${view.ctx.last.images} 张` : ""}${view.ctx.last.shadowed ? ` · 会话历史遮蔽 ${view.ctx.last.shadowed} 条` : ""}`}
+            title={ctxTalk(view.ctx)}
           >
-            上下文 {ctxGauge(view.ctx.last.bytes).text}
-            {view.ctx.last.droppedImages ? ` · 弃图 ${view.ctx.last.droppedImages}` : ""}
-            {view.ctx.last.folded ? ` · 折叠 ${view.ctx.last.folded}` : ""}
+            {ctxParts(view.ctx.last).join(" · ")}
           </span>
         )}
-        {leaseOn && <span className="ai-agent-lease">正在采集数据</span>}
+        {leaseOn && <span className="ai-agent-lease">{tx("正在采集数据", "collecting data")}</span>}
         {interrupted && applied > 0 && (
-          <span className="ai-agent-applied">已生效 {applied} 项改动（展开可逐项撤销）</span>
+          <span className="ai-agent-applied">
+            {tx(`已生效 ${applied} 项改动（展开可逐项撤销）`, `${applied} change(s) applied (expand to undo one by one)`)}
+          </span>
         )}
       </div>
       {view.goal !== view.goalBrief && (
         <details className="ai-agent-fullgoal">
-          <summary>完整目标（含附加上下文 · {view.goal.length} 字）</summary>
+          <summary>
+            {tx(`完整目标（含附加上下文 · ${view.goal.length} 字）`, `Full goal (with extra context · ${view.goal.length} chars)`)}
+          </summary>
           <pre className="ai-agent-fullgoal-body">
             {view.goal.slice(0, 2000)}
             {view.goal.length > 2000 ? "\n…" : ""}
@@ -434,7 +536,19 @@ function RunBlock({ view }: { view: AgentRunView }) {
             // P91 A1：优先用 loop 记下的真实思考时长（旧实现靠事件时间差，非流式恒 0s）
             const ms = e.ms ?? dur ?? 0;
             const live = running && isLast;
-            return <Foldable key={e.seq} italic live={live} label={live ? `思考中 · ${fmtElapsed(now - (e.ts ?? now))}` : `已思考 · ${fmtElapsed(ms)}`} text={t} />;
+            return (
+              <Foldable
+                key={e.seq}
+                italic
+                live={live}
+                label={
+                  live
+                    ? tx(`思考中 · ${fmtElapsed(now - (e.ts ?? now))}`, `Thinking · ${fmtElapsed(now - (e.ts ?? now))}`)
+                    : tx(`已思考 · ${fmtElapsed(ms)}`, `Thought for ${fmtElapsed(ms)}`)
+                }
+                text={t}
+              />
+            );
           }
           if (e.kind === "context") {
             // P95-H2：用量/收缩过程收成一条淡色细线（不抢正文视线，但可复盘"为什么这轮砍了图"）
@@ -449,7 +563,8 @@ function RunBlock({ view }: { view: AgentRunView }) {
               return <div key={e.seq} className="ai-agent-round">{t}</div>;
             }
             // P90 B4：超长叙述折叠，不再一条块体撑爆整屏（收起态一行滚动）
-            if (t.length > 1200) return <Foldable key={e.seq} label={`模型叙述 · ${t.length} 字`} text={t} />;
+            if (t.length > 1200)
+              return <Foldable key={e.seq} label={tx(`模型叙述 · ${t.length} 字`, `Narration · ${t.length} chars`)} text={t} />;
             return (
               <div key={e.seq} className="ai-agent-turn">
                 <Typewriter text={t} instant={!running || t.length > 2000} />
@@ -461,7 +576,7 @@ function RunBlock({ view }: { view: AgentRunView }) {
             if (!isEnd) return <div key={e.seq} className="ai-agent-note">{e.text}</div>;
             return (
               <div key={e.seq} className={`ai-agent-final${e.text === "succeeded" ? " ok" : ""}`}>
-                任务结束：{STATUS_ZH[e.text ?? ""] ?? e.text}
+                {tx(`任务结束：${statusLabel(e.text ?? "")}`, `Task finished: ${statusLabel(e.text ?? "")}`)}
               </div>
             );
           }
@@ -489,7 +604,14 @@ function RunBlock({ view }: { view: AgentRunView }) {
             key="live-reasoning"
             italic
             live
-            label={`本轮思考 · ${fmtElapsed(now - live.startedAt)}${now - view.createdAt > 90_000 ? ` · 累计 ${fmtElapsed(now - view.createdAt)}` : ""}`}
+            label={
+              now - view.createdAt > 90_000
+                ? tx(
+                    `本轮思考 ${fmtElapsed(now - live.startedAt)} · 累计 ${fmtElapsed(now - view.createdAt)}`,
+                    `This round thinking ${fmtElapsed(now - live.startedAt)} · total ${fmtElapsed(now - view.createdAt)}`,
+                  )
+                : tx(`本轮思考 · ${fmtElapsed(now - live.startedAt)}`, `This round thinking · ${fmtElapsed(now - live.startedAt)}`)
+            }
             text={live.reasoning}
           />
         )}
@@ -498,14 +620,17 @@ function RunBlock({ view }: { view: AgentRunView }) {
         )}
         {running && <ApprovalCard view={view} />}
         {running && !live?.text && !live?.reasoning && (
-          <div className="ai-agent-wait">{`模型思考中… ${fmtElapsed(now - view.updatedAt)}`}</div>
+          <div className="ai-agent-wait">{tx(`模型思考中… ${fmtElapsed(now - view.updatedAt)}`, `Model is thinking… ${fmtElapsed(now - view.updatedAt)}`)}</div>
         )}
         {/* 静默 20s 以上必须说清"为什么"和"怎么办"：旧实现只有一个跳秒的数字，
             用户只能在"卡死了"和"还在想"之间猜。做成兄弟节点而不是嵌进上面那行，
             是为了不跟着它的 agent-pulse 呼吸一起闪（长文闪烁没法读）。 */}
         {running && !live?.text && !live?.reasoning && now - view.updatedAt > 20_000 && (
           <div className="ai-agent-wait-hint">
-            上游一直没有吐字。若反复停在这一轮：设置 → AI 服务 里关掉「深度思考」或调大「流式读空闲超时」；右侧红色按钮可停止并保留已完成步骤。
+            {tx(
+              "上游一直没有吐字。若反复停在这一轮：设置 → AI 服务 里关掉「深度思考」或调大「流式读空闲超时」；右侧红色按钮可停止并保留已完成步骤。",
+              "The upstream keeps returning nothing. If it stalls on this round again: turn off “Deep thinking” or raise “Stream idle timeout” under Settings → AI service; the red button on the right stops the task and keeps the applied steps.",
+            )}
           </div>
         )}
         {view.status === "paused" && <ResumeHint view={view} />}
@@ -520,6 +645,7 @@ function RunBlock({ view }: { view: AgentRunView }) {
  * 页脚永远沉底 → 已由 buildTimeline 取代，AgentInline 组件随之删除。
  */
 export const RunEntry = memo(function RunEntry({ view }: { view: AgentRunView }) {
+  useLocale(); // memo 住的行不会随语言切换重渲染，得自己订
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState("");
   if (isLiveRun(view.status)) return <RunBlock view={view} />;
@@ -528,9 +654,9 @@ export const RunEntry = memo(function RunEntry({ view }: { view: AgentRunView })
   const remove = async () => {
     if (
       await confirmDialog({
-        message: `删除任务记录「${view.goalBrief}」？仅删本机台账，不可恢复。`,
+        message: tx(`删除任务记录「${view.goalBrief}」？仅删本机台账，不可恢复。`, `Delete the task record “${view.goalBrief}”? This only removes the local ledger and cannot be undone.`),
         danger: true,
-        okLabel: "删除",
+        okLabel: tx("删除", "Delete"),
       })
     ) {
       agentRun.removeRun(view.runId);
@@ -542,7 +668,7 @@ export const RunEntry = memo(function RunEntry({ view }: { view: AgentRunView })
       .then(() => agentRun.retryRun(view.runId))
       .catch(async (e: unknown) => {
         const { toast } = await import("../ai/extRuntime");
-        toast(`续跑失败：${e instanceof Error ? e.message : String(e)}`);
+        toast(tx(`续跑失败：${e instanceof Error ? e.message : String(e)}`, `Resume failed: ${e instanceof Error ? e.message : String(e)}`));
       })
       .finally(() => setBusy(""));
   };
@@ -560,25 +686,25 @@ export const RunEntry = memo(function RunEntry({ view }: { view: AgentRunView })
             aria-hidden="true"
           />
           <span className="ai-agent-oldrun-status">
-            {interrupted && applied > 0 ? `已完成 ${applied} 步后中断` : STATUS_ZH[view.status] ?? view.status}
+            {interrupted && applied > 0 ? tx(`已完成 ${applied} 步后中断`, `interrupted after ${applied} applied step(s)`) : statusLabel(view.status)}
           </span>
           <span className="ai-agent-oldrun-goal">{view.goalBrief}</span>
           <span className="ai-agent-oldrun-time">
             {fmtElapsed((view.finishedAt ?? view.updatedAt ?? view.createdAt) - view.createdAt)}
           </span>
-          <svg className={`ai-agent-caret${open ? " open" : ""}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+          <IconChevron dir={open ? "down" : "right"} />
         </button>
         {agentRun.canRetry(view.runId) && (
           <button
             className="btn sm ai-agent-retry"
-            title="从事件台账重建历史并续跑：已生效的步骤不重做"
+            title={tx("从事件台账重建历史并续跑：已生效的步骤不重做", "Rebuild history from the event ledger and continue: applied steps are not repeated")}
             disabled={busy === "retry"}
             onClick={retry}
           >
-            {busy === "retry" ? "续跑中…" : "继续任务"}
+            {busy === "retry" ? tx("续跑中…", "Resuming…") : tx("继续任务", "Resume task")}
           </button>
         )}
-        <button className="ai-agent-del" title="删除这条任务记录" onClick={() => void remove()}>
+        <button className="ai-agent-del" title={tx("删除这条任务记录", "Delete this task record")} onClick={() => void remove()}>
           <IconTrash />
         </button>
       </div>
@@ -596,6 +722,7 @@ export const AgentFloat = memo(function AgentFloat({
   sessionId: string;
   onOpen: (sessionId: string) => void;
 }) {
+  useLocale();
   const snap = useSyncExternalStore(agentRun.subscribe, agentRun.getSnapshot);
   const active = snap.runs.find((r) => r.runId === snap.activeRunId) ?? null;
   const isMine = active != null && active.sessionId === sessionId;
@@ -622,10 +749,14 @@ export const AgentFloat = memo(function AgentFloat({
     <button
       className={`ai-agent-float${done ? " done" : ""}`}
       onClick={() => active.sessionId && onOpen(active.sessionId)}
-      title="回到任务所在会话查看结果"
+      title={tx("回到任务所在会话查看结果", "Back to the session this task belongs to")}
     >
       <span className={`ai-agent-dot${active.pending ? " err" : done && active.status === "succeeded" ? " ok" : done ? " err" : " ok"}`} aria-hidden="true" />
-      {active.pending ? "Agent 待批准" : done ? `任务${STATUS_ZH[active.status] ?? active.status}` : "Agent 运行中"}
+      {active.pending
+        ? tx("Agent 待批准", "Agent awaiting approval")
+        : done
+          ? tx(`任务${statusLabel(active.status)}`, `Task ${statusLabel(active.status)}`)
+          : tx("Agent 运行中", "Agent running")}
     </button>
   );
 });

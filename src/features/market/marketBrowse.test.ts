@@ -9,12 +9,14 @@
 import { describe, expect, it } from "vitest";
 import { autoEnableBlockedCaps, CAP_LABEL } from "../plugins/pluginManifest";
 import { MARKET_ALLOW_HOSTS, MARKET_SCHEMA_VERSION, type InstallState, type MarketEntry, type MarketIndex } from "./marketIndex";
+// 只引类型：pluginStore 在求值期就读 localStorage，值引进来这个 node 测试当场就挂
+import type { PluginState } from "../plugins/pluginStore";
 import type { PendingPhase, PendingView } from "./marketPending";
 import {
   browseEntries, cardAction, cardFacts, compatLabel, emptyTalk, facetCategories, formatBytes, indexEndpointTalk,
   installLabel, MARKET_SORTS, MARKET_TABS, missingFavorites, mirrorEndpointTalk, mirrorEndpointVerdict, offShelfOf,
   pendingBadge, pickDescription, planQueueAllUpdates, shelfLine,
-  SORT_LABEL, TAB_LABEL, tabEntries, themeEnableFacts, themeStateOf, versionHistoryText, type BrowseInput,
+  sortLabel, tabLabel, tabEntries, themeEnableFacts, themeStateOf, versionHistoryText, type BrowseInput,
 } from "./marketBrowse";
 
 const fsSpec = "node:fs";
@@ -196,8 +198,8 @@ describe("marketBrowse · 页签、搜索、分类、排序", () => {
   });
 
   it("页签与排序常量各自配齐名字，一个都不漏", () => {
-    expect(MARKET_TABS.map((t) => TAB_LABEL[t])).toEqual(["发现", "收藏", "已装", "外观"]);
-    expect(MARKET_SORTS.map((s) => SORT_LABEL[s])).toEqual(["最新更新", "名称", "分类"]);
+    expect(MARKET_TABS.map((t) => tabLabel(t))).toEqual(["发现", "收藏", "已装", "外观"]);
+    expect(MARKET_SORTS.map((s) => sortLabel(s))).toEqual(["最新更新", "名称", "分类"]);
   });
 });
 
@@ -414,10 +416,15 @@ describe("P99b-N5 · 「外观」页签那颗启停（三态三种说法）", ()
 
 /* ================= P99b-N6 · 本机多出来的那批包（详设 §4-4 / §5-Q3） ================= */
 describe("P99b-N6 · offShelfOf：只按 id 对照，不猜哪个对应哪个", () => {
-  const local = [
-    { id: "uartix.theme.alpha", name: "名称甲", version: "1.2.0", state: "已启用" },
-    { id: "user.local.two", name: "乙本地包", version: "0.2.0", state: "已停用" },
-    { id: "user.local.one", name: "甲本地包", version: "0.1.0", state: "已安装（停用）" },
+  /**
+   * `state` 带的是**枚举本身**（P105-F T3b 纠正）：这份数据原样进 CLI 的 `--json`，
+   * 机器契约里放本地化散文，用户一切语言脚本就碎。
+   * 标成 `PluginState[]` 而不是裸数组，是为了让"塞显示名进去"在编译期就过不去。
+   */
+  const local: { id: string; name: string; version: string; state: PluginState }[] = [
+    { id: "uartix.theme.alpha", name: "名称甲", version: "1.2.0", state: "enabled" },
+    { id: "user.local.two", name: "乙本地包", version: "0.2.0", state: "disabled" },
+    { id: "user.local.one", name: "甲本地包", version: "0.1.0", state: "installed_disabled" },
   ];
 
   it("架上的那条不算多出来；其余全留，并按 id 稳定排序", () => {
@@ -431,7 +438,23 @@ describe("P99b-N6 · offShelfOf：只按 id 对照，不猜哪个对应哪个", 
   });
 
   it("每条带齐名字 / id / 版本 / 状态四样（界面那句「等」就是缺了这些才写的）", () => {
-    expect(offShelfOf(IDX, local)[0]).toEqual({ id: "user.local.one", name: "甲本地包", version: "0.1.0", state: "已安装（停用）" });
+    expect(offShelfOf(IDX, local)[0]).toEqual({ id: "user.local.one", name: "甲本地包", version: "0.1.0", state: "installed_disabled" });
+  });
+
+  it("state 只能是枚举，不能是某个语言的显示名（同一份数据要喂 --json）", () => {
+    for (const s of offShelfOf(IDX, local).map((x) => x.state)) expect(s).toMatch(/^[a-z][a-z_]*$/);
+    expect(offShelfOf(null, local).map((x) => x.state).join(" ")).not.toMatch(/[一-鿿]/);
+  });
+
+  /**
+   * 上面那两条其实验不出类型：把 `state` 放宽成 `string`，它们照样绿（反证做过了）。
+   * 真正守住这条契约的是编译期 —— 所以这里留一句"必须报错"的调用：
+   * 谁把类型松回 `string`，`@ts-expect-error` 就会因为"预期的错误没有发生"而让 tsc 红。
+   */
+  it("类型层面：把显示名当状态传进来，编译不过", () => {
+    // @ts-expect-error state 是 PluginState 枚举，不是某个语言的显示名
+    offShelfOf(IDX, [{ id: "a", name: "n", version: "1.0.0", state: "已启用" }]);
+    expect(true).toBe(true);
   });
 });
 

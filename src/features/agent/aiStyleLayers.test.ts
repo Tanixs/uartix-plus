@@ -3,7 +3,7 @@
  *
  * 钉的是用户这次真正踩到的那件事：**停用/卸载插件撤不掉 AI 的改动**，因为
  * `theme_patch`（token 覆盖层）与 `style_patch`（组件样式层）都不归插件生命周期管。
- * 所以"清除 AI 的全部临时改动"必须：① 两层一起清干净；② **不碰**插件主题层写在
+ * 所以"清除 AI 临时覆盖"必须：① 两层一起清干净；② **不碰**插件主题层写在
  * 同一个键上的值（那是 M0 合成器的合同，在这里做端到端复核）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -49,7 +49,7 @@ describe("aiStyleLayers", () => {
     expect(f.clean).toBe(false);
   });
 
-  it("清除 AI 的全部临时改动：两层归零，但插件主题层写在同名键上的值必须原样留着", () => {
+  it("清除 AI 临时覆盖：两层归零，但插件主题层写在同名键上的值必须原样留着", () => {
     const inline = stubDom();
     // 插件主题层先写 --radius-m（模拟"装了个圆角主题"）
     submitRootVars("active-theme", ROOT_LAYER.activeTheme, { "--radius-m": "6px", "--bg": "#111" });

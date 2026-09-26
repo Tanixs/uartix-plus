@@ -32,7 +32,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
   return {
     hexview: pick("Hex 数据流", "Hex Stream"),
     console: pick("控制台", "Console"),
-    templates: pick("协议模板", "Templates"),
+    templates: pick("协议模板", "Protocol Templates"),
     properties: pick("属性", "Properties"),
     controls: pick("控制画布", "Controls"),
     table: pick("数据表格", "Data Table"),
@@ -57,7 +57,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
 export function panelTitleOf(id: string): string {
   if (id.startsWith("ext-panel-")) {
     const ext = getExt(id.slice("ext-panel-".length));
-    return ext?.name ?? (getLocale() === "en" ? "AI Panel" : "AI 面板");
+    return ext?.name ?? tx("AI 面板", "AI panel");
   }
   return PANEL_TITLES()[id as PanelId] ?? id;
 }

@@ -15,7 +15,7 @@ import {
 } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
 import { useSettings } from "../settings/settingsStore";
-import { t, tx } from "../../i18n/strings";
+import { t, tx, useLocale } from "../../i18n/strings";
 
 const ROW_H = 26;
 const HEADER_H = 26;
@@ -48,6 +48,8 @@ interface Col {
 
 export function DataTable() {
   useSettings(); // 语言切换时随设置重渲染
+  /** 表头是 tx() 出来的，而 `cols` 是 memo 的 —— 不按住语言，切完语言表头会停在旧文案 */
+  const loc = useLocale();
   const frames = useSyncExternalStore(framesStore.subscribe, framesStore.getSnapshot);
   const proto = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
@@ -117,12 +119,12 @@ export function DataTable() {
 
   const cols: Col[] = useMemo(() => {
     return [
-      { key: "ts", label: "时间" },
-      { key: "tpl", label: "模板" },
+      { key: "ts", label: tx("时间", "Time") },
+      { key: "tpl", label: tx("模板", "Template") },
       ...fieldColsAll.filter((c) => !hiddenCols.has(c.key)),
-      { key: "valid", label: "状态" },
+      { key: "valid", label: tx("状态", "Status") },
     ];
-  }, [fieldColsAll, hiddenCols]);
+  }, [fieldColsAll, hiddenCols, loc]);
 
   /** 值标签索引（字段 id → 标签表）：只收录配了标签的字段，单元格按值附注文字 */
   const labelById = useMemo(() => {
@@ -242,12 +244,18 @@ export function DataTable() {
       title: t("tbl.exportTitle"),
       defaultPath: `vs-data-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${kind}`,
       filters: [
-        { name: kind === "csv" ? "CSV 文件" : "Excel 工作簿", extensions: [kind] },
+        {
+          name: kind === "csv" ? tx("CSV 文件", "CSV file") : tx("Excel 工作簿", "Excel workbook"),
+          extensions: [kind],
+        },
       ],
     });
     if (!path) return;
-    const fieldCols = cols.slice(2, -1);    const aoa: (string | number)[][] = [
-      ["时间", "模板", "状态", ...fieldCols.map((c) => c.label)],
+    const fieldCols = cols.slice(2, -1);
+    /** 导出表头从 `cols` 取，不在这三个词再抄一遍 —— 抄了就会有"界面英文、文件表头中文"那天 */
+    const head = (k: string) => cols.find((c) => c.key === k)?.label ?? k;
+    const aoa: (string | number)[][] = [
+      [head("ts"), head("tpl"), head("valid"), ...fieldCols.map((c) => c.label)],
       ...shown.map((r) => [
         fmtTime(r.tsMs),
         r.tplName,
@@ -276,7 +284,7 @@ export function DataTable() {
         await invoke("export_xlsx", { path, rows: aoa });
       }
     } catch (e) {
-      console.error("导出失败", e);
+      console.error("export failed", e);
     }
   };
 
@@ -293,9 +301,9 @@ export function DataTable() {
 
   return (
     <div className="tbl">
-      <div className="tbl-bar">
+      <div className="tbl-bar p-bar">
         <button
-          className={`btn icon-btn ${frames.paused ? "warn" : ""}`}
+          className={`btn icon-btn ${frames.paused ? "on" : ""}`}
           onClick={() => framesStore.setPaused(!frames.paused)}
           title={frames.paused ? t("tbl.resume") : t("tbl.pause")}
         >
@@ -324,7 +332,7 @@ export function DataTable() {
         />
         <button
           ref={colBtnRef}
-          className={`btn icon-btn ${menuOpen ? "primary" : ""}`}
+          className={`btn icon-btn ${menuOpen ? "on" : ""}`}
           title={t("tbl.columns")}
           onClick={() => setMenuOpen((v) => !v)}
         >
@@ -411,10 +419,7 @@ export function DataTable() {
             <div className="tbl-empty-slot">
               <EmptyState
                 title={t("tbl.empty")}
-                hint={[
-                  "启动演示源或连接串口并定义协议模板后",
-                  "解析帧将逐行显示在此",
-                ]}
+                hint={[tx("启动演示源或连接串口后，解析出的帧会逐行显示在这里", "Once the demo source or the serial port is running, parsed frames fill in row by row")]}
               />
             </div>
           )}

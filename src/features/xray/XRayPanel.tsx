@@ -326,7 +326,7 @@ export function XRayPanel() {
 
   return (
     <div className="xray">
-      <div className="xray-bar">
+      <div className="xray-bar p-bar">
         <span className="xray-sample" title={tx("面板打开期间累积的原始 RX 样本（64KB 环形，新样本挤掉旧样本）", "Raw RX samples accumulated while the panel is open (64KB ring, newest replaces oldest)")}>
           {tx("样本", "Samples")} <b>{fmtKB(sampled)}</b>
         </span>
@@ -334,7 +334,7 @@ export function XRayPanel() {
           {busy ? tx("分析中…", "Analyzing…") : tx("采样分析", "Analyze")}
         </button>
         <button
-          className={`btn sm${paused ? " warn" : ""}`}
+          className={`btn sm${paused ? " on" : ""}`}
           onClick={togglePause}
           title={paused ? tx("继续累积样本", "Resume sampling") : tx("暂停累积（新数据到达但不写入样本环）", "Pause sampling (incoming data ignored)")
           }
@@ -402,8 +402,8 @@ export function XRayPanel() {
       {sampled === 0 ? (
         <div className="xray-empty">
           {tx(
-            "等待数据：连接设备、开演示源或回放会话，本面板打开期间会自动累积原始字节样本。",
-            "Waiting for data: connect a device, start the demo source or replay a session — raw bytes accumulate while this panel is open.",
+            "等待数据：连接设备或开演示源，本面板会自动累积原始字节",
+            "Waiting for data: connect a device or start the demo source — raw bytes accumulate while this panel is open",
           )}
         </div>
       ) : lowSamples ? (
@@ -418,8 +418,8 @@ export function XRayPanel() {
       ) : noPeriod ? (
         <div className="xray-empty">
           {tx(
-            "未检测到显著重复周期：设备可能是不定长/ASCII 协议，或帧间存在空闲间隙。本功能不适用。",
-            "No significant repetition period detected: the device may use variable-length/ASCII frames, or has inter-frame gaps. This tool does not apply.",
+            "未检测到显著重复周期——可能是不定长 / ASCII 协议，或帧间有空隙",
+            "No significant repetition period — the device may use variable-length / ASCII frames, or has inter-frame gaps",
           )}
         </div>
       ) : result && result.L > 0 ? (

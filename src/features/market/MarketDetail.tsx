@@ -14,12 +14,17 @@ import { ShotStrip } from "./MarketImage";
 import type { MarketEntry, MarketIndex } from "./marketIndex";
 import { packageOrigin } from "./marketIndex";
 import {
-  cardFacts, compatLabel, MARKET_NO_ENDORSE, type MarketAction, type MarketCard, versionHistoryText,
+  cardFacts, compatLabel, marketNoEndorse, type MarketAction, type MarketCard, versionHistoryText,
 } from "./marketBrowse";
 import type { BrowseContext } from "./marketBrowse";
+import { tx, useLocale } from "../../i18n/strings";
 
 /** 点外链＝离开应用到系统浏览器，这句要写在链接旁边，不能等点了才说 */
-const EXTERNAL_NOTE = "以下链接会用系统浏览器打开外部站点，应用内不加载第三方页面。";
+const externalNote = () =>
+  tx(
+    "以下链接会用系统浏览器打开外部站点，应用内不加载第三方页面。",
+    "The links below open external sites in your system browser; no third-party page is ever loaded inside the app.",
+  );
 
 function urlHostOf(u: string): string {
   try {
@@ -33,11 +38,11 @@ function ExternalLink({ label, url }: { label: string; url: string }) {
   return (
     <button
       className="btn mkt-link"
-      title={`用系统浏览器打开 ${urlHostOf(url)}`}
+      title={tx(`用系统浏览器打开 ${urlHostOf(url)}`, `Open ${urlHostOf(url)} in your system browser`)}
       onClick={() => {
         void import("@tauri-apps/plugin-opener")
           .then((m) => m.openUrl(url))
-          .catch((e: unknown) => console.warn("[market] 外链打不开", url, e));
+          .catch((e: unknown) => console.warn("[market] external link failed", url, e));
       }}
     >
       {label}
@@ -57,6 +62,7 @@ export interface MarketDetailProps {
 }
 
 export function MarketDetail({ entry, index, ctx, action, onClose, onToggleFavorite, onInstall }: MarketDetailProps) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const card: MarketCard = cardFacts(index, entry, ctx);
   const blocked = card.caps.filter((c) => c.blocked);
   const offShelfUrl = urlHostOf(entry.packageUrl);
@@ -66,7 +72,7 @@ export function MarketDetail({ entry, index, ctx, action, onClose, onToggleFavor
         className="mkt-sheet-body"
         role="dialog"
         aria-modal="true"
-        aria-label={`${card.name} 详情`}
+        aria-label={tx(`${card.name} 详情`, `${card.name} details`)}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="mkt-sheet-head">
@@ -77,16 +83,21 @@ export function MarketDetail({ entry, index, ctx, action, onClose, onToggleFavor
           <button
             className={`btn mkt-act mkt-act-${action.tone}`}
             disabled={!action.enabled}
-            title={action.hint || `${action.label} ${card.name}`}
+            title={action.hint || tx(`${action.label} ${card.name}`, `${action.label} ${card.name}`)}
             onClick={() => onInstall(card.id)}
           >
             {action.label}
           </button>
-          <button className="btn mkt-fav" aria-pressed={card.favorite} onClick={() => onToggleFavorite(card.id)} title={card.favorite ? "取消收藏" : "收藏"}>
-            {card.favorite ? "已收藏" : "收藏"}
+          <button
+            className="btn mkt-fav"
+            aria-pressed={card.favorite}
+            onClick={() => onToggleFavorite(card.id)}
+            title={card.favorite ? tx("取消收藏", "Remove from favourites") : tx("收藏", "Add to favourites")}
+          >
+            {card.favorite ? tx("已收藏", "Favourited") : tx("收藏", "Favourite")}
           </button>
-          <button className="btn" onClick={onClose} aria-label="关闭详情">
-            返回
+          <button className="btn" onClick={onClose} aria-label={tx("关闭详情", "Close details")}>
+            {tx("返回", "Back")}
           </button>
         </div>
 
@@ -94,15 +105,23 @@ export function MarketDetail({ entry, index, ctx, action, onClose, onToggleFavor
           {/* 顶部大图：给几张排几张，箭头叠在图上；这一层不产生任何判定（策略在 marketImages） */}
           <ShotStrip urls={entry.screenshots} name={card.name} />
           {entry.screenshots.length > 0 && (
-            <div className="mkt-dim mkt-shots-tip">预览图由投稿人提供，只作参考；本机装完长什么样，取决于包里的声明。</div>
+            <div className="mkt-dim mkt-shots-tip">
+              {tx("预览图由投稿人提供，只作参考；本机装完长什么样，取决于包里的声明。", "Screenshots come from the submitter and are indicative only; what it looks like here depends on what the package declares.")}
+            </div>
           )}
 
           <div className="mkt-meta">
             <span className="plg-chip">{card.category}</span>
             <span className="plg-chip">v{card.version}</span>
             <span className={`plg-chip${card.installWarn ? " warn" : ""}`}>{card.installText}</span>
-            {card.verified && <span className="plg-chip" title="这条只表示它出现在当前索引里，不代表内容经过审核">货架标记</span>}
-            <span className="mkt-dim">作者 {card.author} · 更新于 {card.updated}</span>
+            {card.verified && (
+              <span className="plg-chip" title={tx("这条只表示它出现在当前索引里，不代表内容经过审核", "It only says the entry is in the current index — the content is not reviewed")}>
+                {tx("货架标记", "listed")}
+              </span>
+            )}
+            <span className="mkt-dim">
+              {tx(`作者 ${card.author} · 更新于 ${card.updated}`, `By ${card.author} · updated ${card.updated}`)}
+            </span>
           </div>
           {/* 详情地方大，这一格的解释一直贴着（要不要贴由状态表说了算的是卡片） */}
           {action.hint && <div className={`mkt-act-hint tone-${action.tone}`}>{action.hint}</div>}
@@ -112,8 +131,8 @@ export function MarketDetail({ entry, index, ctx, action, onClose, onToggleFavor
               <p className="mkt-desc">{card.description}</p>
               {card.otherLangDescription && <p className="mkt-dim">{card.otherLangDescription}</p>}
 
-              <div className="plg-sec">它会用到的能力</div>
-              {card.caps.length === 0 && <div className="mkt-dim">这个包不声明任何能力。</div>}
+              <div className="plg-sec">{tx("它会用到的能力", "Capabilities it asks for")}</div>
+              {card.caps.length === 0 && <div className="mkt-dim">{tx("这个包不声明任何能力。", "This package declares no capabilities.")}</div>}
               <ul className="mkt-caps">
                 {card.caps.map((c) => (
                   <li key={c.id}>
@@ -124,43 +143,63 @@ export function MarketDetail({ entry, index, ctx, action, onClose, onToggleFavor
               </ul>
               {blocked.length > 0 && (
                 <div className="plg-notice">
-                  标了警示的这几项（{blocked.map((c) => c.name).join("、")}）不属于自动放行集：装上之后不会自己生效，要看得见效果得再去插件库启用一次。
+                  {tx(
+                    `标了警示的这几项（${blocked.map((c) => c.name).join("、")}）不属于自动放行集：装上之后不会自己生效，要看得见效果得再去插件库启用一次。`,
+                    `The warned ones (${blocked.map((c) => c.name).join(", ")}) are not auto-granted: installing won't activate them — re-enable the package in the plugin library to see the effect.`,
+                  )}
                 </div>
               )}
             </div>
 
             <aside className="mkt-detail-side">
-              <div className="plg-sec">来源与校验</div>
-              <div className="mkt-side-line">包体来自 <code>{offShelfUrl}</code></div>
-              <div className="mkt-side-line">出处：{card.origin}</div>
-              <div className="mkt-side-line">{card.sizeText} · sha256 前 12 位 <code>{card.sha12}</code></div>
-              <div className="mkt-side-line">下载后先算哈希，与索引声明不符就拒绝入库（显示期望与实际两个前缀），不会「差不多就用」。</div>
+              <div className="plg-sec">{tx("来源与校验", "Origin and verification")}</div>
+              <div className="mkt-side-line">
+                {tx("包体来自 ", "Package comes from ")}<code>{offShelfUrl}</code>
+              </div>
+              <div className="mkt-side-line">{tx(`出处：${card.origin}`, `Origin: ${card.origin}`)}</div>
+              <div className="mkt-side-line">
+                {card.sizeText} · {tx("sha256 前 12 位 ", "first 12 of sha256 ")}<code>{card.sha12}</code>
+              </div>
+              <div className="mkt-side-line">
+                {tx(
+                  "下载后先算哈希，与索引声明不符就拒绝入库（显示期望与实际两个前缀），不会「差不多就用」。",
+                  "The hash is computed before anything else; if it disagrees with the index the package is rejected (both prefixes are shown) — never “close enough”.",
+                )}
+              </div>
               {/* 上面那句出处来自派生层（`cardFacts.origin`）；这里"要不要多说一段"用的必须是契约层同一条判定，不许自己比字符串 */}
               {packageOrigin(entry) === "npm" && (
-                <div className="mkt-side-line">这一条取回的是 npm 官方 registry 的那枚 tarball，我们只从里面取出<b>那一枚插件清单</b>——<b>不装依赖、不跑任何包内脚本</b>，取出来照样过生产校验器。</div>
+                <div className="mkt-side-line">
+                  {tx(
+                    "这一条取回的是 npm 官方 registry 的那枚 tarball，我们只从里面取出",
+                    "This entry fetches the tarball from the official npm registry and takes only",
+                  )}
+                  <b>{tx("那一枚插件清单", "the plugin manifest inside it")}</b>——
+                  <b>{tx("不装依赖、不跑任何包内脚本", "no dependencies installed, no package scripts run")}</b>
+                  {tx("，取出来照样过生产校验器。", ", and what we extract still goes through the production validator.")}
+                </div>
               )}
 
-              <div className="plg-sec">适配</div>
+              <div className="plg-sec">{tx("适配", "Compatibility")}</div>
               <div className="mkt-side-line">{compatLabel(card.compatible)}</div>
-              <div className="mkt-side-line">条目要求 minAppVersion {entry.minAppVersion}</div>
+              <div className="mkt-side-line">{tx(`条目要求 minAppVersion ${entry.minAppVersion}`, `Entry requires minAppVersion ${entry.minAppVersion}`)}</div>
               <div className="mkt-side-line">{versionHistoryText(entry, ctx)}</div>
               <div className="mkt-side-line">{card.screenshotHint}</div>
 
-              <div className="plg-sec">外部链接</div>
-              <div className="mkt-dim">{EXTERNAL_NOTE}</div>
+              <div className="plg-sec">{tx("外部链接", "External links")}</div>
+              <div className="mkt-dim">{externalNote()}</div>
               <div className="mkt-links">
-                {entry.homepage && <ExternalLink label="主页" url={entry.homepage} />}
-                {entry.discussion && <ExternalLink label="讨论" url={entry.discussion} />}
-                {entry.changelogUrl && <ExternalLink label="更新记录" url={entry.changelogUrl} />}
+                {entry.homepage && <ExternalLink label={tx("主页", "Homepage")} url={entry.homepage} />}
+                {entry.discussion && <ExternalLink label={tx("讨论", "Discussion")} url={entry.discussion} />}
+                {entry.changelogUrl && <ExternalLink label={tx("更新记录", "Changelog")} url={entry.changelogUrl} />}
                 {!entry.homepage && !entry.discussion && !entry.changelogUrl && (
-                  <span className="mkt-dim">作者没留任何链接。</span>
+                  <span className="mkt-dim">{tx("作者没留任何链接。", "The author left no links.")}</span>
                 )}
               </div>
             </aside>
           </div>
         </div>
 
-        <div className="mkt-sheet-foot">{MARKET_NO_ENDORSE}</div>
+        <div className="mkt-sheet-foot">{marketNoEndorse()}</div>
       </div>
     </div>,
     document.body,

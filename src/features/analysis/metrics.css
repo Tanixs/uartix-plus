@@ -64,7 +64,7 @@
 .analysis-panel .analysis-table td:nth-child(3) { text-align: right; white-space: nowrap; }
 .analysis-panel .analysis-table tbody tr:last-child td { border-bottom: 0; }
 .analysis-panel .metrics-notes { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
-.analysis-panel .metrics-notes h3 { margin: 0; font-size: 14px; }
+.analysis-panel .metrics-notes h3 { margin: 0; font-size: var(--fs-md); }
 .analysis-panel .metrics-note-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
 .analysis-panel .metrics-note-field { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; overflow-wrap: anywhere; }
 .analysis-panel textarea.input { resize: vertical; min-height: 70px; line-height: 1.5; white-space: pre-wrap; }

@@ -13,6 +13,8 @@ import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
 import * as settingsStore from "../settings/settingsStore";
+import { looksLikeLayoutJson } from "../settings/applyLayout";
+import { LAYOUT_KEY_V2, LAYOUT_KEY_V3, unwrapEnvelope } from "../settings/layoutEnvelope";
 import * as plot3dStore from "../plot3d/plot3dStore";
 import * as operatorStore from "./operatorStore";
 import {
@@ -27,7 +29,7 @@ async function saveUopk(pkg: OperatorPkg, fallbackName: string): Promise<boolean
   const path = await save({
     title: tx("导出 Operator 部署包", "Export operator package"),
     defaultPath: `${fallbackName || "operator"}.uopk`,
-    filters: [{ name: "Uartix Operator 包", extensions: ["uopk"] }],
+    filters: [{ name: tx("Uartix Operator 包", "Uartix operator package"), extensions: ["uopk"] }],
   });
   if (!path) return false;
   await invoke("save_text_file", {
@@ -41,7 +43,7 @@ async function loadUopk(): Promise<unknown | null> {
   const path = await open({
     title: tx("导入 Operator 部署包", "Import operator package"),
     multiple: false,
-    filters: [{ name: "Uartix 包", extensions: ["json", "uopk"] }],
+    filters: [{ name: tx("Uartix 包", "Uartix package"), extensions: ["json", "uopk"] }],
   });
   if (typeof path !== "string") return null;
   let content: string;
@@ -64,13 +66,14 @@ async function loadUopk(): Promise<unknown | null> {
   }
 }
 
-const PARTS: { key: keyof OperatorPayload & string; zh: string; en: string }[] = [
-  { key: "templates", zh: "协议模板", en: "Protocols" },
-  { key: "controls", zh: "控制页", en: "Control pages" },
-  { key: "commands", zh: "命令库", en: "Commands" },
-  { key: "layout", zh: "面板布局", en: "Panel layout" },
-  { key: "settings", zh: "外观设置", en: "Appearance" },
-  { key: "plot3d", zh: "3D 面板设置", en: "3D panel settings" },
+/** 打包清单里的每一项：`key` 是存档里的字段码（不动），名字渲染时挑 */
+const PARTS: { key: keyof OperatorPayload & string; label: () => string }[] = [
+  { key: "templates", label: () => tx("协议模板", "Protocols") },
+  { key: "controls", label: () => tx("控制页", "Control pages") },
+  { key: "commands", label: () => tx("命令库", "Commands") },
+  { key: "layout", label: () => tx("面板布局", "Panel layout") },
+  { key: "settings", label: () => tx("外观设置", "Appearance") },
+  { key: "plot3d", label: () => tx("3D 面板设置", "3D panel settings") },
 ];
 
 export function OperatorGenBlock({ notify }: { notify: (s: string) => void }) {
@@ -99,8 +102,14 @@ export function OperatorGenBlock({ notify }: { notify: (s: string) => void }) {
       if (inc.settings) payload.settings = filterSettings(settingsStore.getSnapshot());
       if (inc.plot3d) payload.plot3d = plot3dStore.exportSettingsForPkg();
       if (inc.layout) {
-        const raw = localStorage.getItem("vs.layout.v2");
-        payload.layout = raw ? JSON.parse(raw) : undefined;
+        // 存档从 B13① 起是版本信封 `{v:3, layout}`。这里必须**剥壳**再打进包：
+        // 直接把信封塞进 payload.layout，装载端 `applyLayoutJson` 会把整个信封喂给
+        // `fromJSON` —— 装不上，而且报的是一句看不懂的 dockview 异常。
+        // 包里的布局因此恒为"裸 dockview JSON"，与信封版本无关（对外格式稳定）。
+        const raw =
+          localStorage.getItem(LAYOUT_KEY_V3) ?? localStorage.getItem(LAYOUT_KEY_V2);
+        const u = unwrapEnvelope(raw, looksLikeLayoutJson);
+        payload.layout = u && u.kind !== "bad" ? u.layout : undefined;
       }
       let ver = "";
       try {
@@ -179,7 +188,7 @@ export function OperatorGenBlock({ notify }: { notify: (s: string) => void }) {
                 checked={inc[p.key]}
                 onChange={(e) => setInc((s) => ({ ...s, [p.key]: e.target.checked }))}
               />
-              {tx(p.zh, p.en)}
+              {p.label()}
             </label>
           ))}
         </div>

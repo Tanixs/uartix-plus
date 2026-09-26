@@ -5,7 +5,7 @@
  */
 import { useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { tx } from "../i18n/strings";
+import { tx, useLocale } from "../i18n/strings";
 
 export interface DialogOpts {
   title?: string;
@@ -60,6 +60,7 @@ export function alertDialog(o: string | DialogOpts): Promise<void> {
 // 命令式弹窗 = 非组件导出 + 内部组件的固有形态（同 icons.tsx），fast refresh 对本文件不适用
 // eslint-disable-next-line react-refresh/only-export-components
 function DialogBox(o: DialogOpts & { onDone: (ok: boolean) => void }) {
+  useLocale(); // 守卫三：没显式给 label 的那几颗钮（确认/取消/知道了）是 tx() 出来的
   const okRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     okRef.current?.focus();

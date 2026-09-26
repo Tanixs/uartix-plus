@@ -22,6 +22,8 @@ import {
   IconTrash,
   IconCamera,
 } from "../../shared/icons";
+import { zoomFactor } from "../../shared/zoom";
+import { HelpHint } from "../../shared/HelpHint";
 import {
   fmtVal,
   hexA,
@@ -34,6 +36,7 @@ import {
   type PanelPos,
 } from "./plotMeasure";
 import { tx, useLocale } from "../../i18n/strings";
+import { usePanelChrome, type ChromeAction } from "../../panels/panelChrome";
 
 /** 会话标注竖线颜色（P3b）：琥珀色，与「起」灰虚线、「最新」主题实线区分 */
 const ANN_COLOR = "#e8a33d";
@@ -200,7 +203,7 @@ export function Plot2D() {
   const movePanelDrag = (e: React.PointerEvent) => {
     const d = panelDragRef.current;
     if (!d) return;
-    const z = parseFloat(document.documentElement.style.zoom) / 100 || 1;
+    const z = zoomFactor();
     const wrap = wrapRef.current;
     const dl = (e.clientX - d.startX) / z;
     const db = -(e.clientY - d.startY) / z;
@@ -531,7 +534,7 @@ export function Plot2D() {
         // 必须从 rawM（原始屏幕像素）换算而非对入参除 z：updateCursor 会被
         // commit 路径反复调用并原地改写 mouseLeft1，对入参再除会累积漂移
         move: () => {
-          const z = parseFloat(document.documentElement.style.zoom) / 100 || 1;
+          const z = zoomFactor();
           return [rawM.l / z, rawM.t / z];
         },
       },
@@ -1299,7 +1302,7 @@ export function Plot2D() {
               const r = overRect();
               if (r.width === 0 || r.height === 0) return;
               // 全局 CSS zoom：屏幕像素 ÷ zoom = 布局像素（transform 走布局像素空间）
-              const z = parseFloat(document.documentElement.style.zoom) / 100 || 1;
+              const z = zoomFactor();
               rawM.l = e.clientX - r.left;
               rawM.t = e.clientY - r.top;
               crossV.style.transform = `translateX(${rawM.l / z}px)`;
@@ -1733,6 +1736,80 @@ export function Plot2D() {
   const hasXCursor = cursorXOn && !!(measureX || xCurRef.current.a != null || xCurRef.current.b != null);
   const hasYCursor = cursorYOn && !!(measureY || yCurRef.current.a != null || yCurRef.current.b != null);
 
+  /* P104-B10 样片：这七颗是"这块视图怎么看"，属于页签条；下面的通道图例是数据，留在内容里。
+     顺序就是页签上的优先级：一级只放 5 颗（合同 §8 B10），所以把最冷门的「快照叠加」
+     让给 `⋯` —— 而不是照数组顺序切，那会把「时间 / 幅值游标」这一对拆散。 */
+  const chromeItems: ChromeAction[] = [
+    {
+      id: "yAuto",
+      label: tx("Y 轴自动缩放", "Y auto-scale"),
+      title: plot.settings.yAuto
+        ? tx("Y 轴随视野自动缩放：开（波形始终占满面板）", "Y auto-scale to view: on (waveform always fills the panel)")
+        : tx("Y 轴随视野自动缩放：关（视野固定，波形更稳）", "Y auto-scale to view: off (view fixed, steadier waveform)"),
+      Icon: IconAutoY,
+      on: plot.settings.yAuto,
+      run: () => {
+        const next = !plotStore.getSnapshot().settings.yAuto;
+        plotStore.setSetting({ yAuto: next });
+        if (next) yManualRef.current = false;
+      },
+    },
+    {
+      id: "fit",
+      label: tx("Auto 适配", "Auto fit"),
+      title: tx("Auto 自适应（执行一次）：X/Y 轴一步适配到全部数据的最佳观察范围（带边距），与 Y 轴连续自动缩放相互独立", "Auto fit (one-shot): fit X/Y axes to the best view of all data in one step (with margin); independent of continuous Y auto-scale"),
+      Icon: IconFitView,
+      run: () => fitView(),
+    },
+    {
+      id: "stack",
+      label: tx("通道堆叠", "Stack channels"),
+      title: tx("多通道堆叠：每通道独立归一化，垂直均分显示（量纲不同的通道各看各的）", "Stack channels: each channel normalized independently and shown in equal vertical bands (mixed units stay readable)"),
+      Icon: IconStack,
+      on: plot.settings.stack,
+      run: () => plotStore.setSetting({ stack: !plotStore.getSnapshot().settings.stack }),
+    },
+    {
+      id: "cursorX",
+      label: tx("时间游标", "Time cursors"),
+      title: tx("时间游标（垂直标尺）：开启后在图上单击依次放置 A、B，测 Δt 与各通道取值差", "Time cursors (vertical rules): click on the chart to place A then B; measures Δt and per-channel value deltas"),
+      Icon: IconCursorX,
+      on: cursorXOn,
+      disabled: !hasChannels,
+      run: () => plotStore.setSetting({ cursorX: !plotStore.getSnapshot().settings.cursorX }),
+    },
+    {
+      id: "cursorY",
+      label: tx("幅值游标", "Amplitude cursors"),
+      title: tx("幅值游标（水平标尺）：开启后在图上单击依次放置 A、B，测 ΔV（堆叠模式按聚焦通道原始值）", "Amplitude cursors (horizontal rules): click on the chart to place A then B; measures ΔV (stack mode uses the focused channel's raw values)"),
+      Icon: IconCursorY,
+      on: cursorYOn,
+      disabled: !hasChannels,
+      run: () => plotStore.setSetting({ cursorY: !plotStore.getSnapshot().settings.cursorY }),
+    },
+    {
+      id: "snap",
+      label: tx("快照叠加", "Snapshot overlay"),
+      title: snap
+        ? tx("快照叠加：已冻结参考曲线（再点清除）。拖动/缩放视野，虚线起点始终对齐当前视野起点，叠画对比两段波形", "Snapshot overlay: reference curve frozen (click again to clear). Pan/zoom the view; the dashed line start stays aligned to the current view start for comparing two segments")
+        : tx("快照叠加：把当前视野内可见通道冻结为参考虚线，拖到别处叠画对比两段波形（堆叠/通道 X 源下不可用）", "Snapshot overlay: freeze visible channels in the current view as a dashed reference, then pan elsewhere to overlay-compare two segments (unavailable in stack / channel X-source mode)"),
+      Icon: IconCamera,
+      on: !!snap,
+      disabled: snapBlocked && !snap,
+      run: () => toggleSnapshot(),
+    },
+    {
+      id: "clearChannels",
+      label: tx("清空所有通道", "Clear all channels"),
+      title: tx("清空所有通道", "Clear all channels"),
+      Icon: IconTrash,
+      danger: true,
+      disabled: !hasChannels,
+      run: () => plotStore.clearChannels(),
+    },
+  ];
+  usePanelChrome("plot2d", chromeItems);
+
   const fieldDropRef = useRef<(raw: string) => void>(() => {});
   fieldDropRef.current = (raw: string) => {
     if (!raw) return;
@@ -1772,71 +1849,9 @@ export function Plot2D() {
 
   return (
     <div className="plot">
-      <div className="plot-bar">
-        <button
-          className={`icon-btn ${plot.settings.yAuto ? "primary" : ""}`}
-          onClick={() => {
-            const next = !plot.settings.yAuto;
-            plotStore.setSetting({ yAuto: next });
-            if (next) yManualRef.current = false;
-          }}
-          title={
-            plot.settings.yAuto
-              ? tx("Y 轴随视野自动缩放：开（波形始终占满面板）", "Y auto-scale to view: on (waveform always fills the panel)")
-              : tx("Y 轴随视野自动缩放：关（视野固定，波形更稳）", "Y auto-scale to view: off (view fixed, steadier waveform)")
-          }
-        >
-          <IconAutoY />
-        </button>
-        <button
-          className="icon-btn"
-          onClick={fitView}
-          title={tx("Auto 自适应（执行一次）：X/Y 轴一步适配到全部数据的最佳观察范围（带边距），与 Y 轴连续自动缩放相互独立", "Auto fit (one-shot): fit X/Y axes to the best view of all data in one step (with margin); independent of continuous Y auto-scale")}
-        >
-          <IconFitView />
-        </button>
-        <button
-          className={`icon-btn ${snap ? "primary" : ""}`}
-          onClick={toggleSnapshot}
-          disabled={snapBlocked && !snap}
-          title={
-            snap
-              ? tx("快照叠加：已冻结参考曲线（再点清除）。拖动/缩放视野，虚线起点始终对齐当前视野起点，叠画对比两段波形", "Snapshot overlay: reference curve frozen (click again to clear). Pan/zoom the view; the dashed line start stays aligned to the current view start for comparing two segments")
-              : tx("快照叠加：把当前视野内可见通道冻结为参考虚线，拖到别处叠画对比两段波形（堆叠/通道 X 源下不可用）", "Snapshot overlay: freeze visible channels in the current view as a dashed reference, then pan elsewhere to overlay-compare two segments (unavailable in stack / channel X-source mode)")
-          }
-        >
-          <IconCamera />
-        </button>
-        {hasChannels && (
-          <button
-            className="icon-btn"
-            onClick={() => plotStore.clearChannels()}
-            title={tx("清空所有通道", "Clear all channels")}
-          >
-            <IconTrash />
-          </button>
-        )}
-        <button
-          className={`icon-btn ${plot.settings.stack ? "primary" : ""}`}
-          onClick={() => plotStore.setSetting({ stack: !plot.settings.stack })}
-          title={tx("多通道堆叠：每通道独立归一化，垂直均分显示（量纲不同的通道各看各的）", "Stack channels: each channel normalized independently and shown in equal vertical bands (mixed units stay readable)")}
-        >
-          <IconStack />
-        </button>
-        <button
-          className={`icon-btn ${cursorXOn ? "primary" : ""}`}
-          onClick={() => plotStore.setSetting({ cursorX: !cursorXOn })}
-          title={tx("时间游标（垂直标尺）：开启后在图上单击依次放置 A、B，测 Δt 与各通道取值差", "Time cursors (vertical rules): click on the chart to place A then B; measures Δt and per-channel value deltas")}
-        >
-          <IconCursorX />
-        </button>
-        <button
-          className={`icon-btn ${cursorYOn ? "primary" : ""}`}
-          onClick={() => plotStore.setSetting({ cursorY: !cursorYOn })}
-          title={tx("幅值游标（水平标尺）：开启后在图上单击依次放置 A、B，测 ΔV（堆叠模式按聚焦通道原始值）", "Amplitude cursors (horizontal rules): click on the chart to place A then B; measures ΔV (stack mode uses the focused channel's raw values)")}
-        >
-          <IconCursorY />
-        </button>
+      <div className="plot-bar p-bar">
+        {/* P104-B10 样片：七颗视图动作已登记到页签条（见上面 chromeItems），
+          这一条只剩通道图例 —— 数据留在内容里，动作交给 chrome。 */}
         <div className="plot-bar-spacer" />
         {plot.channels.map((ch) => {
           const hz = plotStore.sampleRate(ch.id);
@@ -1873,10 +1888,14 @@ export function Plot2D() {
         <div ref={chartRef} className="plot-chart" />
         {!hasChannels && (
           <div className="plot-empty">
-            {tx("打开左侧「字段图例」的眼睛即可实时绘图，或把字段直接拖进来", "Toggle the eye icon in the field legend on the left to plot in real time — or drag a field here")}
-            <br />
-            {tx("左键拖动平移 · 中键框选缩放 · 双击保形回实时 · ", "Left-drag to pan · Middle-drag to box-zoom · Double-click to resume live · ")}
-            {tx("滚轮缩放（轴区对应轴） · 右键图表更多设置", "Scroll to zoom (the hovered axis area zooms that axis) · Right-click the chart for more settings")}
+            {tx("点亮「协议」里的字段图例即可实时绘图，或把字段直接拖进来", "Toggle an eye in the legend under Protocol to plot live — or drag a field here")}
+            {/* B11：四条鼠标手势不是"这块能干什么"，是操作手册，按口径进 `?` */}
+            <HelpHint
+              text={tx(
+                "左键拖动平移 · 中键框选缩放 · 双击保形回实时 · 滚轮缩放（悬停在哪根轴上就缩放那根）· 右键图表更多设置。",
+                "Left-drag to pan · middle-drag to box-zoom · double-click to resume live · scroll to zoom the axis you hover · right-click the chart for more settings.",
+              )}
+            />
           </div>
         )}
         {anyCursor && !hasXCursor && !hasYCursor && (
@@ -1893,7 +1912,7 @@ export function Plot2D() {
             onClick={() => setFollow(true)}
             title={tx("回到跟随模式，视野钉住最新数据", "Back to follow mode: pin the view to the latest data")}
           >
-            {tx("跟最新 · ", "Follow latest · ")}{backlog} {tx("新点", "new")} <IconChevron size={11} />
+            {tx("跟最新 · ", "Follow latest · ")}{backlog} {tx("新点", "new")} <IconChevron size={12} />
           </button>
         )}
         <div className="plot-measure-col">

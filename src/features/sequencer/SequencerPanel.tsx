@@ -5,11 +5,12 @@ import { alertDialog, confirmDialog } from "../../shared/Dialog";
 import * as sequencerStore from "./sequencerStore";
 import { renderReportHtml } from "./report";
 import * as bind from "./sequencerBind";
-import { LIMITS, type CmpOp, type FrameMatch, type RunProgress, type RunResult, type Step, type StepKind, type StepResult, type Suite } from "./types";
+import { LIMITS, type CmpOp, type FrameMatch, type RunProgress, type RunResult, type Step, type StepKind, type StepResult, type StepStatus, type Suite } from "./types";
 import * as templateStore from "../protocol/templateStore";
 import * as commandStore from "../controls/commandStore";
 import * as variableStore from "../controls/variableStore";
 import { useListDrag, type DragPos } from "../../shared/useListDrag";
+import { HelpHint } from "../../shared/HelpHint";
 
 /**
  * 测试序列器面板（T2 编辑器 + T3 执行视图）。
@@ -19,14 +20,27 @@ import { useListDrag, type DragPos } from "../../shared/useListDrag";
  * 编辑不影响本次运行，下次运行生效。
  */
 
-const KIND_LABEL: Record<StepKind, { zh: string; en: string; cls: string }> = {
-  send: { zh: "发送", en: "Send", cls: "send" },
-  wait: { zh: "等待", en: "Wait", cls: "wait" },
-  waitForFrame: { zh: "等帧", en: "WaitFrame", cls: "frame" },
-  assertVar: { zh: "断言", en: "Assert", cls: "assert" },
-  group: { zh: "分组", en: "Group", cls: "group" },
-  note: { zh: "备注", en: "Note", cls: "note" },
+/** 步骤种类的样式类（码 → 类名，与语言无关；名字见下面 stepKindLabel） */
+const STEP_KIND_CLS: Record<StepKind, string> = {
+  send: "send",
+  wait: "wait",
+  waitForFrame: "frame",
+  assertVar: "assert",
+  group: "group",
+  note: "note",
 };
+
+/** 种类名写成 switch（不是 `{zh,en}` 成对表）：只有双语落在同一行才数得进 i18n 门，见 T5 记录 */
+function stepKindLabel(k: StepKind): string {
+  switch (k) {
+    case "send": return tx("发送", "Send");
+    case "wait": return tx("等待", "Wait");
+    case "waitForFrame": return tx("等帧", "WaitFrame");
+    case "assertVar": return tx("断言", "Assert");
+    case "group": return tx("分组", "Group");
+    case "note": return tx("备注", "Note");
+  }
+}
 
 /** 步骤一行摘要（拖拽 ghost 副行用） */
 function stepBrief(st: Step): string {
@@ -55,15 +69,16 @@ function stepBrief(st: Step): string {
   }
 }
 
-const OPS: { v: CmpOp; zh: string; en: string }[] = [
-  { v: "eq", zh: "=", en: "=" },
-  { v: "ne", zh: "≠", en: "≠" },
-  { v: "gt", zh: ">", en: ">" },
-  { v: "lt", zh: "<", en: "<" },
-  { v: "ge", zh: "≥", en: "≥" },
-  { v: "le", zh: "≤", en: "≤" },
-  { v: "approx", zh: "≈±容差", en: "≈±tol" },
-  { v: "changed", zh: "有变化", en: "changed" },
+/** 比较符：符号本身与语言无关，只有两个词要翻。`label` 是取值函数 —— 表在模块级求值，语言不能冻在那里 */
+const OPS: { v: CmpOp; label: () => string }[] = [
+  { v: "eq", label: () => "=" },
+  { v: "ne", label: () => "≠" },
+  { v: "gt", label: () => ">" },
+  { v: "lt", label: () => "<" },
+  { v: "ge", label: () => "≥" },
+  { v: "le", label: () => "≤" },
+  { v: "approx", label: () => tx("≈±容差", "≈±tol") },
+  { v: "changed", label: () => tx("有变化", "changed") },
 ];
 
 export function SequencerPanel() {
@@ -79,12 +94,14 @@ export function SequencerPanel() {
     return (
       <div className="seq">
         <div className="seq-empty">
-          <div className="seq-empty-title">{tx("测试序列器", "Test Sequencer")}</div>
           <div className="seq-empty-desc">
-            {tx(
-              "把「发送 → 等帧 → 断言」串成可重复执行的测试序列，支持分组循环、单步调试与帧触发。所有数据保存在本机。",
-              "Chain send → wait-frame → assert into repeatable test sequences with groups, step-debug and frame triggers. All data stays local.",
-            )}
+            {tx("把「发送 → 等帧 → 断言」串成可重复跑的测试序列", "Chain send → wait-frame → assert into a sequence you can run again")}
+            <HelpHint
+              text={tx(
+                "支持分组循环、单步调试与帧触发；序列可被自动编排器调用。所有数据保存在本机。",
+                "Groups and loops, step debugging and frame triggers; a sequence can also be called by the orchestrator. All data stays on this machine.",
+              )}
+            />
           </div>
           <button className="btn primary" onClick={() => setSelectedId(sequencerStore.addSuite("").id)}>
             {tx("＋ 新建序列", "＋ New sequence")}
@@ -233,7 +250,7 @@ function SuiteBar(props: {
 
       <div className="seq-row">
         {running ? (
-          <button className="btn sm warn" onClick={() => bind.stopSuite()} title={tx("停止运行", "Stop run")}>
+          <button className="btn sm danger" onClick={() => bind.stopSuite()} title={tx("停止运行", "Stop run")}>
             <IconStop />
             {tx("停止", "Stop")}
           </button>
@@ -400,7 +417,7 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
       if (!st) return null;
       return (
         <>
-          <span className="dg-k">{tx(KIND_LABEL[st.kind].zh, KIND_LABEL[st.kind].en)}</span>
+          <span className="dg-k">{stepKindLabel(st.kind)}</span>
           <span className="dg-s">{stepBrief(st)}</span>
         </>
       );
@@ -441,7 +458,7 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
             title={tx("启用/禁用该步（禁用后跳过执行，报告中保留）", "Enable/disable step (disabled steps are skipped but kept in the report)")}
             onChange={(e) => sequencerStore.updateStep(suite.id, step.id, (s) => ({ ...s, enabled: e.target.checked }) as Step)}
           />
-          <span className={`sq-kind sq-k-${KIND_LABEL[step.kind].cls}`}>{tx(KIND_LABEL[step.kind].zh, KIND_LABEL[step.kind].en)}</span>
+          <span className={`sq-kind sq-k-${STEP_KIND_CLS[step.kind]}`}>{stepKindLabel(step.kind)}</span>
           <StepFields suite={suite} step={step} />
           <span className="sq-acts">
             <button className="sq-a" onClick={() => moveBy(step.id, -1)} title={tx("上移", "Move up")}><IconArrowUp /></button>
@@ -470,7 +487,7 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
         <span className="seq-lab">{tx("添加步骤", "Add step")}</span>
         {ADD_KINDS.map((k) => (
           <button key={k} className="btn sm" onClick={() => sequencerStore.addStep(suite.id, null, k)}>
-            ＋{tx(KIND_LABEL[k].zh, KIND_LABEL[k].en)}
+            ＋{stepKindLabel(k)}
           </button>
         ))}
         {suite.steps.length === 0 && (
@@ -505,7 +522,7 @@ function GroupAdd(props: { suite: Suite; group: Extract<Step, { kind: "group" }>
       <option value="">＋ {tx("子步骤", "Child step")}</option>
       {ADD_KINDS.map((k) => (
         <option key={k} value={k}>
-          ＋{tx(KIND_LABEL[k].zh, KIND_LABEL[k].en)}
+          ＋{stepKindLabel(k)}
         </option>
       ))}
     </select>
@@ -612,7 +629,7 @@ function StepFields(props: { suite: Suite; step: Step }) {
           >
             {OPS.map((o) => (
               <option key={o.v} value={o.v}>
-                {o.zh}
+                {o.label()}
               </option>
             ))}
           </select>
@@ -813,7 +830,7 @@ export function MatchEditor(props: { match: FrameMatch; onChange: (m: FrameMatch
               >
                 {OPS.filter((o) => o.v !== "changed").map((o) => (
                   <option key={o.v} value={o.v}>
-                    {o.zh}
+                    {o.label()}
                   </option>
                 ))}
               </select>
@@ -840,13 +857,15 @@ function clampInt(raw: string, lo: number, hi: number, def: number): number {
 
 /* ================= 结果视图 ================= */
 
-const STATUS_TEXT: Record<string, { zh: string; en: string }> = {
-  pass: { zh: "通过", en: "pass" },
-  fail: { zh: "失败", en: "fail" },
-  timeout: { zh: "超时", en: "timeout" },
-  skipped: { zh: "跳过", en: "skip" },
-  aborted: { zh: "中止", en: "aborted" },
-};
+function stepStatusText(s: StepStatus): string {
+  switch (s) {
+    case "pass": return tx("通过", "pass");
+    case "fail": return tx("失败", "fail");
+    case "timeout": return tx("超时", "timeout");
+    case "skipped": return tx("跳过", "skip");
+    case "aborted": return tx("中止", "aborted");
+  }
+}
 
 function ResultView(props: { progress: RunProgress | null; mine: boolean; last: RunResult | null }) {
   const { progress, mine, last } = props;
@@ -960,7 +979,6 @@ function ResultNode(props: {
   // ≤50 子节点默认展开；更大的组默认折叠（点开仍可看），防大循环渲染爆炸
   const autoOpen = (r.children?.length ?? 0) <= 50;
   const open = isGroup && (autoOpen ? !collapsed.has(r.stepId) : collapsed.has(r.stepId));
-  const st = STATUS_TEXT[r.status] ?? STATUS_TEXT.skipped;
 
   return (
     <div>
@@ -977,7 +995,7 @@ function ResultNode(props: {
         </span>
         <span className="sq-res-detail">{r.detail}</span>
         <span className="sq-res-ms">{r.durationMs > 0 ? `${r.durationMs}ms` : ""}</span>
-        <span className={`sq-res-st st-${r.status}`}>{tx(st.zh, st.en)}</span>
+        <span className={`sq-res-st st-${r.status}`}>{stepStatusText(r.status)}</span>
       </div>
       {isGroup && open && r.children!.map((c, i) => <ResultNode key={`${c.stepId}.${i}`} r={c} depth={depth + 1} collapsed={collapsed} toggle={toggle} />)}
     </div>

@@ -5,7 +5,7 @@ import { onRx, onTx } from "../../ipc/binbus";
 import * as store from "../serial/serialStore";
 import { IconPause, IconPlay, IconTrash } from "../../shared/icons";
 import { patch, useSettings } from "../settings/settingsStore";
-import { t, tx } from "../../i18n/strings";
+import { t, tx, useLocale } from "../../i18n/strings";
 import { QuickCommandBar } from "./QuickCommandBar";
 import { XferDialog } from "../xfer/XferDialog";
 import * as xferStore from "../xfer/xferStore";
@@ -50,6 +50,7 @@ function applyNewline(
 }
 
 export function ConsolePanel() {
+  useLocale();
   const settings = useSettings(); // 语言/换行等设置变化时随设置重渲染
   const [mode, setMode] = useState<"ascii" | "hex">("ascii");
   const [showTs, setShowTs] = useState(true);
@@ -149,7 +150,7 @@ export function ConsolePanel() {
     listen<{ text: unknown }>("script:log", (e) => {
       pushChunk({
         kind: "rx",
-        bytes: new TextEncoder().encode(`[脚本] ${String(e.payload.text)}`),
+        bytes: new TextEncoder().encode(tx(`[脚本] ${String(e.payload.text)}`, `[script] ${String(e.payload.text)}`)),
         ts: Date.now(),
       });
     }).then((u) => unsubs.push(u));
@@ -179,7 +180,7 @@ export function ConsolePanel() {
       chunksRef.current = [];
       let appended = false;
       if (droppedRef.current > 0) {
-        appendConsoleText(el, `… 已省略 ${droppedRef.current} 段（面板暂停/隐藏中）…\n`);
+        appendConsoleText(el, tx(`… 已省略 ${droppedRef.current} 段（面板暂停/隐藏中）…\n`, `… skipped ${droppedRef.current} chunks while the panel was paused/hidden …\n`));
         droppedRef.current = 0;
         appended = true;
       }
@@ -188,13 +189,14 @@ export function ConsolePanel() {
         if (c.kind === "tx") {
           if (!showTxRef.current) continue;
           const head = c.summary
-            ? ` ⇥ 二进制 ${c.summary} B（头部 ${renderBytes(c.bytes)}… 详情见 Hex 数据流）`
+            ? tx(` ⇥ 二进制 ${c.summary} B（头部 ${renderBytes(c.bytes)}… 详情见 Hex 数据流）`,
+                ` ⇥ binary ${c.summary} B (head ${renderBytes(c.bytes)}\u2026 see the Hex stream)`)
             : ` ${renderBytes(c.bytes)}`;
           s = showTsRef.current ? `[TX ${fmtTime(c.ts)}]${head}\n` : `[TX]${head}\n`;
         } else {
           if (!showRxRef.current) continue;
           const body = c.summary
-            ? `⇥ 二进制 ${c.summary} B（头部 ${renderBytes(c.bytes)}… 详情见 Hex 数据流）`
+            ? tx(`⇥ 二进制 ${c.summary} B（头部 ${renderBytes(c.bytes)}… 详情见 Hex 数据流）`, `⇥ binary ${c.summary} B (head ${renderBytes(c.bytes)}… see the Hex stream)`)
             : renderBytes(c.bytes);
           if (!body) continue;
           s = (showTsRef.current ? `[${fmtTime(c.ts)}] ` : "") + body;
@@ -260,8 +262,8 @@ export function ConsolePanel() {
           title: t("con.saveLogTitle"),
           defaultPath: `vs-log-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.log`,
           filters: [
-            { name: "日志文件", extensions: ["log", "txt"] },
-            { name: "所有文件", extensions: ["*"] },
+            { name: tx("日志文件", "Log files"), extensions: ["log", "txt"] },
+            { name: tx("所有文件", "All files"), extensions: ["*"] },
           ],
         });
         if (!path) return;
@@ -306,7 +308,8 @@ export function ConsolePanel() {
       if (viewRef.current) {
         viewRef.current.appendChild(
           document.createTextNode(
-            `[TX ${fmtTime(Date.now())}] 文件 ${f.name}（${buf.length} 字节）\n`,
+            tx(`[TX ${fmtTime(Date.now())}] 文件 ${f.name}（${buf.length} 字节）\n`,
+              `[TX ${fmtTime(Date.now())}] file ${f.name} (${buf.length} bytes)\n`),
           ),
         );
         viewRef.current.scrollTop = viewRef.current.scrollHeight;
@@ -325,7 +328,7 @@ export function ConsolePanel() {
 
   return (
     <div className="console">
-      <div className="console-bar">
+      <div className="console-bar p-bar">
         <select
           className="input"
           value={mode}
@@ -371,7 +374,7 @@ export function ConsolePanel() {
           {t("con.showTx")}
         </label>
         <button
-          className={`btn icon-btn ${effectivePaused ? "warn" : ""}`}
+          className={`btn icon-btn ${effectivePaused ? "on" : ""}`}
           onClick={() => {
             const next = !paused;
             setPaused(next);

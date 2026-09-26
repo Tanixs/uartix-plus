@@ -1,5 +1,8 @@
 import { readFileSync } from "node:fs";
-import { defineConfig, type Plugin } from "vite";
+// defineConfig 换到 vitest/config：它是 vite 那份的超集，只为让下面的 `test` 有类型。
+type ViteUserConfig = import("vite").UserConfig;
+import type { Plugin } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 // P99b-N5 自检锚点：本文件必须能被 vitest 的 esbuild 解析（BOM 会让它整份配置静默失效）
 
@@ -38,6 +41,16 @@ export default defineConfig(async () => ({
     // @ts-expect-error process is a nodejs global
     ...(process.env.VITEST ? [rawCssInTests()] : []),
   ],
+  /**
+   * P105-F 尾：`agent/*` 与 `ai/chatStore.{inertial,sessions}` 那几条长期在 5000ms 上抖
+   * （满载红、单独拎出来跑全绿，红的从来不是断言而是钟）。根因是 vitest 每轮重算 transform
+   * （它自己提示"146s / 每次重来"），满载时默认 5s 不够用。
+   * `fsModuleCache` 故意不开：跨进程缓存一旦过期，给出的是"错的编译结果"，那种假绿比假红难查得多。
+   */
+  test: {
+    testTimeout: 20000,
+    hookTimeout: 20000,
+  },
   build: {
     rollupOptions: {
       output: {

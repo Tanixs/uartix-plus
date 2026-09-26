@@ -1,14 +1,20 @@
 /**
- * P103 批2：顶部工具栏三段（connect 接口参数 / session 会话 / layout 面板与布局）的排序与显隐。
+ * P103 批2 / P104-B5 / R2：工具栏各段（connect 链路 · session 会话 · layout 面板与布局）
+ * 的排序与显隐。
  * 这是 `chrome_set` 工具与 App 工具栏渲染之间唯一的事实源；持久化到 localStorage（vs.chrome）。
- * 两条防线全在 normalizeChrome 里：段名白名单 + 缺段按默认序补齐（永不丢段）；不许三段全藏
- * （工具栏整排空掉就没有任何入口摸得回来）。node 测试环境没有 localStorage：读写全程 try/catch（P33 求值期纪律）。
+ * 两条防线全在 normalizeChrome 里：段名白名单 + 缺段按默认序补齐（永不丢段）；不许全段皆藏
+ * （整排空掉就没有任何入口摸得回来）。node 测试环境没有 localStorage：读写全程 try/catch（P33 求值期纪律）。
  */
 import { useSyncExternalStore } from "react";
 
 export type ChromeSegId = "connect" | "session" | "layout";
 
-/** 段的法定名单与默认顺序；将来加新段只动这里，旧存档由 normalize 自动补齐 */
+/** 段的法定名单与默认顺序；将来加新段只动这里，旧存档由 normalize 自动补齐。
+ *  P104-R2：B5 曾扩到 4 段（加 `system` = AI/插件/设置/帮助），R2 拆回两条横栏后
+ *  那四颗住进**身份栏**、不再参与工具栏排序——留着它们只会让 chrome_set
+ *  能"把 system 排到第 2 位"而画面上毫无反应（静默无效＝第二真值）。
+ *  名单退回 3 段是**兼容**的：normalize 剔除未知段名，老存档里
+ *  `order:[..., "system"]` / `hidden:["system"]` 加载即被清掉，其余三段照旧。 */
 export const CHROME_SEGS: readonly ChromeSegId[] = ["connect", "session", "layout"];
 
 export interface ChromeState {

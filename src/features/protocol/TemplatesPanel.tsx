@@ -1,83 +1,32 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import type { FrameTemplate } from "../../ipc/types";
 import * as store from "./templateStore";
 import * as teleStore from "./telemetryStore";
-import * as plotStore from "../plot/plotStore";
 import { EmptyState } from "../../shared/EmptyState";
 import { clampFlyoutMenu } from "../../shared/Flyout";
-import { labelText } from "../../shared/valueLabels";
-import { IconChevron } from "../../shared/icons";
+import { Glyph, IconChevron } from "../../shared/icons";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
-import { patch as patchSettings, useSettings } from "../settings/settingsStore";
 import { requestOpenPanel } from "../ai/appBus";
-import { beginPointerDrag } from "../../shared/pointerDrag";
+import { FieldLegend } from "../plot/FieldLegend";
 import { tx, useLocale } from "../../i18n/strings";
 
-function EyeIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      className="legend-eye-icon"
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {open ? (
-        <>
-          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" />
-          <circle cx="12" cy="12" r="3" />
-        </>
-      ) : (
-        <>
-          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-          <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-          <line x1="1" y1="1" x2="23" y2="23" />
-        </>
-      )}
-    </svg>
-  );
-}
 
-function toggleEye(
-  tplId: string,
-  fieldId: string,
-  name: string,
-  color: string,
-  groupIndices?: number[],
-): void {
-  if (groupIndices) {
-    const st = plotStore.groupChannelState(tplId, fieldId);
-    if (st === "off") {
-      plotStore.addChannelGroup(tplId, fieldId, groupIndices, name, color);
-    } else {
-      plotStore.removeChannelGroup(tplId, fieldId);
-    }
-    return;
-  }
-  const st = plotStore.channelState(tplId, fieldId);
-  if (st === "off") {
-    plotStore.addChannel({
-      tplId,
-      fieldId,
-      name,
-      color,
-    });
-  } else {
-    const ch = plotStore.getSnapshot().channels.find(
-      (c) => c.tplId === tplId && c.fieldId === fieldId,
-    );
-    if (ch) plotStore.toggleVisible(ch.id);
-  }
-}
+
+/**
+ * P105 反馈①：上下分割的边界。
+ * `SPLIT_MIN/MAX` 是**比例**兜底（防极端值），真正让拖动 1:1 的是 `splitMaxPct()`
+ * 里按当下页脚高度算出来的那条上限；`LEGEND_MIN` 与 theme.css 的
+ * `.tpl-legend{min-height:min(140px,26%)}` 是同一个意图的两处写法
+ * （CSS 那份只在窗口矮到比例兜不住时兜底）。
+ */
+const SPLIT_MIN = 0.12;
+const SPLIT_MAX = 0.85;
+const SPLITTER_H = 12;
+const LEGEND_MIN = 140;
 
 interface CtxItem {
   label: string;
@@ -126,13 +75,11 @@ export function TemplatesPanel() {
   useLocale();
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const tele = useSyncExternalStore(teleStore.subscribe, teleStore.getSnapshot);
-  const plot = useSyncExternalStore(plotStore.subscribe, plotStore.getSnapshot);
   const [newOpen, setNewOpen] = useState(false);
   const [pMenu, setPMenu] = useState(false);
   const [note, setNote] = useState("");
   const [expGrp, setExpGrp] = useState<Set<string>>(() => new Set());
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
-  const [hiddenSubs, setHiddenSubs] = useState<Map<string, number>>(() => new Map());
   const tplRootRef = useRef<HTMLDivElement | null>(null);
   const ctxMenuRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
@@ -144,12 +91,10 @@ export function TemplatesPanel() {
     clampFlyoutMenu(el, root, ctx.x - cr.left, ctx.y - cr.top);
   }, [ctx]);
   const [rename, setRename] = useState<{ kind: "grp" | "tpl"; key: string; id: string; init: string } | null>(null);
-  const settings = useSettings();
-  const decimals = settings.decimals;
   const [splitPct, setSplitPct] = useState<number | null>(() => {
     try {
       const v = Number(localStorage.getItem("vs.tplSplitPct"));
-      return Number.isFinite(v) && v >= 0.12 && v <= 0.85 ? v : null;
+      return Number.isFinite(v) && v >= SPLIT_MIN && v <= SPLIT_MAX ? v : null;
     } catch {
       return null;
     }
@@ -162,12 +107,38 @@ export function TemplatesPanel() {
     }
   }, [splitPct]);
   const dragRef = useRef<{ y: number; pct: number; panelH: number } | null>(null);
+  /**
+   * P105 反馈①（第二轮）：分割条往下拖的**最低限制就是页脚的上边缘**。
+   *
+   * 上一版我只给图例加了 `min-height`，没同步收这条下限，于是两件事同时坏：
+   *  - 列表被 flex 收缩，鼠标前半段在"空走"——用户看到的就是"拖动这么缓慢、范围这么小"；
+   *  - 窗口矮一档、或页脚多出一条会换行的同步错误时，最小值之和仍然超过面板，
+   *    页脚（含那块半透明红的错误底）就画到图例上面去——用户说的"覆盖"就是这个。
+   *
+   * 所以这里**量着算**而不是写着猜：页脚高度随错误文本变，写死一个数就又漂了。
+   */
+  const listRef = useRef<HTMLDivElement>(null);
+  const metaRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const splitMaxPct = useCallback(() => {
+    const pr = tplRootRef.current, l = listRef.current, m = metaRef.current, f = footerRef.current;
+    if (!pr || !l) return SPLIT_MAX;
+    const prr = pr.getBoundingClientRect(), lr = l.getBoundingClientRect();
+    const footerH = f ? f.getBoundingClientRect().height : 0;
+    // 页脚高度是量的不是写死的：它会多出一条会换行的同步错误。
+    // meta 也在列表与分割条之间（帧头/帧长/校验那两行），漏了它页脚就会溢出面板底——实测错过一次。
+    const metaH = m ? m.getBoundingClientRect().height : 0;
+    const avail = prr.bottom - lr.top - (metaH + SPLITTER_H + LEGEND_MIN + footerH);
+    const pct = avail / (prr.height || 1);
+    // 下限不许高于上限，否则窗口极矮时上下限互换、拖动直接失灵
+    return Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, pct));
+  }, []);
   useEffect(() => {
     const mv = (e: MouseEvent) => {
       const d = dragRef.current;
       if (!d || d.panelH <= 0) return;
       const next = d.pct + (e.clientY - d.y) / d.panelH;
-      setSplitPct(Math.min(0.85, Math.max(0.12, next)));
+      setSplitPct(Math.min(splitMaxPct(), Math.max(SPLIT_MIN, next)));
     };
     const up = () => {
       dragRef.current = null;
@@ -180,7 +151,28 @@ export function TemplatesPanel() {
       window.removeEventListener("mousemove", mv);
       window.removeEventListener("mouseup", up);
     };
-  }, []);
+  }, [splitMaxPct]);
+  /** 存档里的比例是在**别的窗口高度**下拖出来的；换窗口/换缩放后要先按当下重夹一次，
+   *  否则第一次渲染就会重叠（拖动时才夹太晚了）。 */
+  useLayoutEffect(() => {
+    setSplitPct((cur) => (cur == null ? cur : Math.min(cur, splitMaxPct())));
+  }, [splitMaxPct]);
+  /**
+   * 上一次的夹还不够：页脚里那条同步错误是**异步**出现的，挂载时它还不存在，
+   * 于是按"矮页脚"算出的上限偏大，错误一出来页脚就溢到面板底外面（实测溢出 76.8px）。
+   * 所以上限要跟着页脚与面板的实际尺寸重算 —— 只往下夹、不回弹：
+   * 边界在用户眼皮底下自己变回去，比让它停在偏小的位置更糟。
+   */
+  useEffect(() => {
+    const f = footerRef.current, p = tplRootRef.current;
+    if (!f || !p || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      setSplitPct((cur) => (cur == null ? cur : Math.min(cur, splitMaxPct())));
+    });
+    ro.observe(f);
+    ro.observe(p);
+    return () => ro.disconnect();
+  }, [splitMaxPct]);
 
   const groups = useMemo(() => {
     const map = new Map<string, FrameTemplate[]>();
@@ -336,6 +328,8 @@ export function TemplatesPanel() {
 
   return (
     <div className="tpl-panel" ref={tplRootRef}>
+      {/* P104-R4：链路节搬去导轨「接入」了——接口切换与参数在那里一处看完，
+          这一栏重新只做"协议模板与帧型树"那一件事。 */}
       <div className="tpl-header">
         {/* P103 批2（1-21）：页签条已显示「协议模板」，面板内不再重复；头部只剩动作行（右对齐） */}
         <div className="tpl-header-actions">
@@ -344,7 +338,7 @@ export function TemplatesPanel() {
           </button>
           <div className="tpl-preset-wrap">
           <button className="btn tpl-preset-btn" data-tour="preset" title={tx("从预设导入协议副本（可反复添加，改崩了删除副本再添加）", "Import editable copies from presets (add repeatedly; delete a broken copy and re-import)")} onClick={() => setPMenu((v) => !v)}>
-            {tx("＋ 预设", "+ Preset")} <IconChevron size={11} dir="down" />
+            {tx("＋ 预设", "+ Preset")} <IconChevron size={12} dir="down" />
           </button>
           {pMenu && (
             <>
@@ -373,6 +367,7 @@ export function TemplatesPanel() {
       {note && <div className="tpl-note">{note}</div>}
 
       <div
+        ref={listRef}
         className="tpl-list"
         style={splitPct != null ? { flex: "none", height: `${splitPct * 100}%`, maxHeight: "none" } : undefined}
       >
@@ -418,9 +413,9 @@ export function TemplatesPanel() {
                       });
                     }}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <Glyph>
                       <polyline points="9 6 15 12 9 18" />
-                    </svg>
+                    </Glyph>
                   </button>
                 ) : (
                   <span className="tpl-chev" />
@@ -530,7 +525,7 @@ export function TemplatesPanel() {
       </div>
 
       {currentTpl && (
-        <div className="tpl-meta">
+        <div className="tpl-meta" ref={metaRef}>
           {tx("帧头", "Header")}{" "}
           {currentTpl.boundary.headerBytes
             .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
@@ -555,9 +550,8 @@ export function TemplatesPanel() {
 
       <div
         className="tpl-splitter"
-        title={tx("上下拖动调整列表高度（双击复位）", "Drag vertically to resize the list (double-click to reset)")}
-        onMouseDown={(e) => {
-          const panelEl = document.querySelector(".tpl-panel") as HTMLElement | null;
+        title={tx("上下拖动调整列表高度（双击复位）", "Drag vertically to resize the list (double-click to reset)")}        onMouseDown={(e) => {
+          const panelEl = tplRootRef.current;
           dragRef.current = {
             y: e.clientY,
             pct: splitPct ?? 0.4,
@@ -571,237 +565,15 @@ export function TemplatesPanel() {
         <span />
       </div>
 
-      <div className="legend-header">
-        {tx("字段图例（实时值）", "Field legend (live values)")}
-        <button
-          className="legend-dec"
-          title={tx("图例小数位数（点击 0→6 循环；也可在设置页自由填写 0~6）", "Legend decimals (click cycles 0→6; settings page accepts any 0~6)")}
-          onClick={() => patchSettings({ decimals: (decimals + 1) % 7 })}
-        >
-          {decimals}{tx("位", "dp")}
-        </button>
-      </div>
-      <div className="legend-list">
-        {s.rules.templates
-          .filter((tpl) => tpl.enabled)
-          .flatMap((tpl) =>
-            tpl.fields
-              .filter((f) => f.role !== "header")
-              .flatMap((f) => {
-              const lv = tele.latest[f.id];
-              const selected =
-                s.selection?.kind === "field" && s.selection.fieldId === f.id;
-              const seq = !!f.spanTail && !!f.spanElem;
-              const adaptive = f.type === "csv" || seq;
-              const seqIndices: number[] = [];
-              if (adaptive) {
-                const n = Math.min(64, tele.seqLen[f.id] ?? 0);
-                if (n > 0) {
-                  for (let i = 1; i <= n; i++) {
-                    if (tele.latest[`${f.id}#${i}`]) seqIndices.push(i);
-                  }
-                } else {
-                  for (let i = 1; i <= 64; i++) {
-                    if (!tele.latest[`${f.id}#${i}`]) break;
-                    seqIndices.push(i);
-                  }
-                }
-              }
-              const numeric = f.type !== "ascii" || seq;
-              const eye = numeric
-                ? seq
-                  ? plotStore.groupChannelState(tpl.id, f.id)
-                  : plotStore.channelState(tpl.id, f.id)
-                : "off";
-              const eyeOpen = plot.channels.some(
-                (c) =>
-                  c.tplId === tpl.id &&
-                  (c.fieldId === f.id || c.fieldId.startsWith(`${f.id}#`)),
-              );
-              const row = (
-                <div
-                  key={f.id}
-                  className={`legend-item ${selected ? "selected" : ""} pdrag-src`}
-                  onPointerDown={(e) => {
-                    if (!numeric || e.button !== 0) return;
-                    beginPointerDrag(e, {
-                      kind: "vs-field",
-                      data: JSON.stringify({
-                        tplId: tpl.id,
-                        fieldId: f.id,
-                        name: `${tpl.name}·${f.name}`,
-                        type: f.type,
-                      }),
-                      label: `${tpl.name}·${f.name}`,
-                      color: f.color,
-                    });
-                  }}
-                  onClick={() => {
-                    store.setSelection({
-                      kind: "field",
-                      templateId: tpl.id,
-                      fieldId: f.id,
-                    });
-                    if (lv) store.locate(lv.seq);
-                  }}
-                  title={
-                    adaptive
-                      ? tx("自适应序列：展开行显示各元素实时值，眼睛开/关整组曲线", "Adaptive sequence: expanded rows show per-element live values; the eye toggles the whole group")
-                      : numeric
-                        ? tx("眼睛开关 2D 曲线；拖到曲线区也可添加；点击定位到 Hex 区", "Eye toggles the 2D curve; drag onto the plot to add; click locates it in the Hex view")
-                        : tx("点击定位到 Hex 区 0x", "Click to locate in the Hex view at 0x") + (lv ? lv.seq.toString(16) : "")
-                  }
-                >
-                  {numeric && (
-                    <button
-                      className={`legend-eye ${eye === "on" ? "on" : ""} ${eye === "hidden" || eye === "half" ? "half" : ""}`}
-                      title={
-                        eye === "off"
-                          ? adaptive
-                            ? tx("开启整组 2D 曲线", "Show group curves")
-                            : tx("开启 2D 曲线", "Show 2D curve")
-                          : eye === "on"
-                            ? adaptive
-                              ? tx("移除整组曲线", "Remove group curves")
-                              : tx("隐藏曲线", "Hide curve")
-                            : adaptive
-                              ? tx("移除整组曲线（部分已隐藏）", "Remove group curves (some hidden)")
-                              : tx("显示曲线（当前隐藏）", "Reveal curve (currently hidden)")
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleEye(
-                          tpl.id,
-                          f.id,
-                          `${tpl.name}·${f.name}`,
-                          f.color,
-                          seq ? seqIndices : undefined,
-                        );
-                      }}
-                    >
-                      <EyeIcon open={eyeOpen} />
-                    </button>
-                  )}
-                  <span
-                    className="tpl-dot"
-                    style={{ background: f.color }}
-                  />
-                  <span className="legend-name">
-                    {tpl.name}·{f.name}
-                    {adaptive ? (
-                      <em className="tpl-src">{tx("自适应", "auto")}</em>
-                    ) : null}
-                  </span>
-                  <span
-                    className="legend-value"
-                    title={lv?.text ?? (lv ? labelText(f.labels, lv.value) ?? undefined : undefined)}
-                  >
-                    {lv
-                      ? seq
-                        ? `×${seqIndices.length}`
-                        : lv.text !== null
-                          ? lv.text
-                          : formatValue(lv.value, decimals)
-                      : "--"}
-                    {lv && f.unit && f.unit !== "ascii" && !seq ? ` ${f.unit}` : ""}
-                  </span>
-                </div>
-              );
-              if (!adaptive) return [row];
-              const chans: React.ReactNode[] = [];
-              for (let i = 1; i <= 64; i++) {
-                const subId = `${f.id}#${i}`;
-                const cl = tele.latest[subId];
-                if (!cl) break;
-                const hidAt = hiddenSubs.get(subId);
-                if (hidAt !== undefined && cl.seq === hidAt) continue;
-                const st = plotStore.channelState(tpl.id, subId);
-                chans.push(
-                  <div
-                    key={subId}
-                    className="legend-item legend-sub"
-                    onClick={() => {
-                      store.setSelection({
-                        kind: "field",
-                        templateId: tpl.id,
-                        fieldId: f.id,
-                      });
-                    }}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const items: CtxItem[] = [
-                        {
-                          label: tx("删除该变量（新帧出现时恢复）", "Delete variable (returns when new frames arrive)"),
-                          onClick: () => {
-                            const ch = plotStore
-                              .getSnapshot()
-                              .channels.find(
-                                (c) => c.tplId === tpl.id && c.fieldId === subId,
-                              );
-                            if (ch) plotStore.removeChannel(ch.id);
-                            setHiddenSubs((prev) => {
-                              const next = new Map(prev);
-                              next.set(subId, tele.latest[subId]?.seq ?? 0);
-                              return next;
-                            });
-                            setCtx(null);
-                          },
-                        },
-                      ];
-                      setCtx({ x: e.nativeEvent.clientX, y: e.nativeEvent.clientY, items });
-                    }}
-                    title={`${f.name}${i}${tx("（点击选中该字段编辑 · 右键删除该变量）", " (click to edit this field · right-click to delete this variable)")}`}
-                  >
-                    <button
-                      className={`legend-eye ${st === "on" ? "on" : ""} ${st === "hidden" ? "half" : ""}`}
-                      title={
-                        st === "off"
-                          ? tx("开启该元素 2D 曲线", "Show this element's curve")
-                          : st === "hidden"
-                            ? tx("移除该曲线（当前隐藏）", "Remove this curve (hidden)")
-                            : tx("移除该曲线", "Remove this curve")
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const ch = plotStore
-                          .getSnapshot()
-                          .channels.find(
-                            (c) => c.tplId === tpl.id && c.fieldId === subId,
-                          );
-                        if (!ch) {
-                          plotStore.addChannel({
-                            tplId: tpl.id,
-                            fieldId: subId,
-                            name: `${f.name}${i}`,
-                            color: f.color,
-                          });
-                        } else {
-                          plotStore.removeChannel(ch.id);
-                        }
-                      }}
-                    >
-                      <EyeIcon open={st !== "off"} />
-                    </button>
-                    <span className="tpl-dot" style={{ background: f.color, opacity: 0.55 }} />
-                    <span className="legend-name">
-                      {f.name}{i}
-                    </span>
-                    <span className="legend-value">{formatValue(cl.value, decimals)}</span>
-                  </div>,
-                );
-              }
-              return [row, ...chans];
-            }),
-          )}
-        {s.rules.templates.filter((t) => t.enabled && t.fields.length > 0).length === 0 && (
-          <div className="tpl-empty">
-            {tx("在协议画布框选字节 → 右键「定义为数据字段」", 'Drag-select bytes on the frame canvas → right-click "Define as field"')}
-          </div>
-        )}
+      {/* P105-C：字段图例回到「协议」下面的这一格。导轨是**单槽**，
+          原来「协议」与「通道」永远不能同屏 —— 而字段本来就是协议解析出来的产物，
+          拆成两格是这轮改动自己造出来的人为割裂。
+          上面那根分割条现在分的就是"模板列表 ↔ 字段图例"，机制没新造一个。 */}
+      <div className="tpl-legend">
+        <FieldLegend />
       </div>
 
-      <div className="tpl-footer">
+      <div className="tpl-footer" ref={footerRef}>
         {s.syncError && <div className="tpl-sync-error">{s.syncError}</div>}
         <div className="tpl-demo">
           <button
@@ -868,12 +640,4 @@ export function TemplatesPanel() {
 
 function stripF(n: string): string {
   return n.replace(/\s*\(副本\)\s*$/, "");
-}
-
-function formatValue(v: number, d: number): string {
-  if (!Number.isFinite(v)) return "--";
-  if (v !== 0 && (Math.abs(v) >= 1e12 || Math.abs(v) < 1e-6)) {
-    return v.toExponential(Math.max(0, Math.min(d, 4)));
-  }
-  return v.toFixed(d);
 }

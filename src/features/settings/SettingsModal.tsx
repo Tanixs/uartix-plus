@@ -5,9 +5,10 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { useSettings, patch, SETTINGS_TAB_PLUGINS, type WorkspacePreset, AI_PRESETS, AI_FORMATS, type AiPreset, type AiFormat } from "./settingsStore";
+import { WORKSPACE_META } from "../../shell/workspaceMeta";
 import { useLayouts, removeLayout, renameLayout } from "./layoutsStore";
 import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
-import { t, tx } from "../../i18n/strings";
+import { t, tx, useLocale } from "../../i18n/strings";
 import { alertDialog, confirmDialog } from "../../shared/Dialog";
 import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
@@ -27,7 +28,7 @@ import { drawnTalk, pluginSectionStart, selectTheme, themeCards } from "./themeP
 import { themeBearingPackages, usePlugins } from "../plugins/pluginStore";
 import { cleanBaseUrl } from "../agent/provider";
 import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
-import { appearanceDefaults, appearanceDefaultLabels } from "./settingsSchema";
+import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { SetRow } from "../../shared/SetRow";
@@ -43,17 +44,9 @@ function fmtBytes(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-const PRESETS: { key: WorkspacePreset; label: string; desc: string }[] = [
-  { key: "proto", label: t("set.preset.proto"), desc: "画布 + 属性 + Hex" },
-  { key: "analyze", label: t("set.preset.analyze"), desc: "表格 + 曲线 + 频谱" },
-  { key: "attitude", label: t("set.preset.attitude"), desc: "3D 姿态 + 曲线" },
-  { key: "console", label: t("set.preset.console"), desc: "仅控制台" },
-  { key: "video", label: t("set.preset.video"), desc: "图传 + 控制画板" },
-  { key: "calib", label: t("set.preset.calib"), desc: "3D 轨迹 + 曲线观察" },
-  { key: "auto", label: t("set.preset.auto"), desc: "编排器 + 序列器 + 哨兵" },
-  { key: "modbus", label: t("set.preset.modbus"), desc: "工作台 + Hex + 控制台" },
-  { key: "vdev", label: t("set.preset.vdev"), desc: "工坊 + 曲线 + 画布" },
-];
+/* P104-B5：这张表搬到 shell/workspaceMeta.ts。两个原因：
+   ① 命令条的工作区药丸要用同一组名字，抄一份就是第二真值；
+   ② 它原本是模块级 const 里调 t()，切语言不重开窗口这九张卡的字不跟着变——搬过去改成渲染期取值。 */
 
 /**
  * P99b-N5：这里以前是一张手抄的 `THEME_SWATCH`（九行 bg/panel/accent 字面量，注释写着
@@ -85,20 +78,29 @@ async function loadJson<T>(kinds: string[]): Promise<T | null> {
   try {
     content = await invoke<string>("read_text_file", { path });
   } catch (e) {
-    await alertDialog(`读取失败: ${e}`);
+    await alertDialog(tx(`读取失败: ${e}`, `Read failed: ${e}`));
     return null;
   }
   try {
     const obj = JSON.parse(content) as { kind?: string; data?: T };
     if (!obj.kind || !kinds.includes(obj.kind) || obj.data === undefined) {
-      await alertDialog("文件格式不正确：kind 不匹配或缺少 data");
+      await alertDialog(tx("文件格式不正确：kind 不匹配或缺少 data", "Bad file: `kind` does not match or `data` is missing"));
       return null;
     }
     return obj.data;
   } catch (e) {
-    await alertDialog(`JSON 解析失败: ${e}`);
+    await alertDialog(tx(`JSON 解析失败: ${e}`, `JSON parse failed: ${e}`));
     return null;
   }
+}
+
+/**
+ * 「恢复默认外观」要点名会改哪几项设置。名字一律走中心键 `set.*` ——
+ * 与设置页每一行同一个来源。schema 里那份 `label` 是给 Agent 工具描述用的中文，
+ * 界面要是去抄它，就又多出一处"这项设置叫什么"的真值（而且永远是中文）。
+ */
+function appearanceResetNames(): string[] {
+  return APPEARANCE_RESET_KEYS.map((k) => t(`set.${String(k)}`));
 }
 
 /* ---------------- 插件管理页（旧扩展管理已废弃，内嵌插件库主体） ---------------- */
@@ -123,9 +125,9 @@ function ExtPage() {
 
 /** 按 Rust ai_agent_turn 的错误文本分类：密钥 / 网络 / 其他 */
 function classifyConnError(e: string): string {
-  if (/HTTP 401|HTTP 403|Unauthorized|Forbidden/i.test(e)) return "密钥无效";
+  if (/HTTP 401|HTTP 403|Unauthorized|Forbidden/i.test(e)) return tx("密钥无效", "Invalid key");
   if (/连接失败|中断|超时|timeout|timed out|Could not connect|dns|error sending request|invalid URL/i.test(e))
-    return "无法连接服务端";
+    return tx("无法连接服务端", "Cannot reach the server");
   return e.slice(0, 80);
 }
 
@@ -152,7 +154,7 @@ function AiConnTestRow() {
         messages: [{ role: "user", content: "ping" }],
         tools: [],
       });
-      setSt({ status: "ok", msg: `连接正常 · ${Date.now() - t0}ms` });
+      setSt({ status: "ok", msg: tx(`连接正常 · ${Date.now() - t0}ms`, `Connected · ${Date.now() - t0}ms`) });
     } catch (e) {
       setSt({ status: "err", msg: classifyConnError(String(e)) });
     }
@@ -181,6 +183,7 @@ function AiConnTestRow() {
 }
 
 export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayout, onSaveLayout }: { onClose: () => void; onResetLayout: (p: WorkspacePreset) => void; initialTab?: string; onApplyLayout: (id: string) => boolean; onSaveLayout: (name: string) => boolean }) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const settings = useSettings();
   const timeLinked = useSyncExternalStore(timeCursor.subscribe, () => timeCursor.getSnapshot().linked);
   const snt = useSyncExternalStore(sentinelStore.subscribe, sentinelStore.getSnapshot);
@@ -209,7 +212,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     const card = cards.find((c) => c.key === key);
     if (!card) return;
     const r = await selectTheme(card, { pluginPkgId: drawn.pluginId, name: drawn.name });
-    toast(r.ok ? r.msg : `没换成：${r.msg}`);
+    toast(r.ok ? r.msg : tx(`没换成：${r.msg}`, `Not switched: ${r.msg}`));
   };
   /** 启用中的插件主题包（互斥之后至多一枚，但存量数据可能不止——两处按钮都读这一个列表） */
   const enabledThemePkgIds = () =>
@@ -217,7 +220,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const disableThemeLayers = async () => {
     const refs = enabledThemePkgIds();
     if (!refs.length) {
-      toast("现在没有插件主题在画，界面用的就是内置主题");
+      toast(tx("现在没有插件主题在画，界面用的就是内置主题", "No plugin theme is driving the UI right now — a built-in one is"));
       return;
     }
     const { setEnabled } = await import("../plugins/pluginStore");
@@ -226,7 +229,11 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
       const r = setEnabled(id, false);
       if (!r.ok) failed.push(`${id}：${r.msg}`);
     }
-    toast(failed.length ? `部分停用失败：${failed.join("；")}` : `已停用 ${refs.length} 枚插件主题，界面回到内置主题`);
+    toast(
+      failed.length
+        ? tx(`部分停用失败：${failed.join("；")}`, `Some could not be disabled: ${failed.join("; ")}`)
+        : tx(`已停用 ${refs.length} 枚插件主题，界面回到内置主题`, `Disabled ${refs.length} plugin theme(s); the UI is back on a built-in theme`),
+    );
   };
   /**
    * P98-M1 外观来源面板。
@@ -243,22 +250,31 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     const r = clearAiStyleLayers();
     setAiStyle(aiStyleFootprint());
     toast(r.tokens || r.layers
-      ? `已清除 AI 的外观改动：${r.tokens} 项 token 覆盖 + ${r.layers} 层组件样式。你的设置与已存插件不受影响`
-      : "AI 当前没有留下临时外观改动");
+      ? tx(
+          `已清除 AI 的外观改动：${r.tokens} 项 token 覆盖 + ${r.layers} 层组件样式。你的设置与已存插件不受影响`,
+          `Cleared the AI's appearance changes: ${r.tokens} token overrides + ${r.layers} component style layers. Your settings and installed plugins are untouched`,
+        )
+      : tx("AI 当前没有留下临时外观改动", "The AI left no temporary appearance changes"));
   };
   const restoreAppearanceDefaults = async () => {
     const refs = enabledThemePkgIds();
     const pluginThemeCount = refs.length;
     const willDo = [
-      aiStyle.tokens ? `清除 AI 的 ${aiStyle.tokens} 项 token 覆盖` : "",
-      aiStyle.layers.length ? `清除 AI 的 ${aiStyle.layers.length} 层组件样式` : "",
-      pluginThemeCount ? `停用 ${pluginThemeCount} 个插件主题` : "",
-      `外观设置回默认（${appearanceDefaultLabels().join("、")}）`,
+      aiStyle.tokens ? tx(`清除 AI 的 ${aiStyle.tokens} 项 token 覆盖`, `Clear ${aiStyle.tokens} AI token overrides`) : "",
+      aiStyle.layers.length ? tx(`清除 AI 的 ${aiStyle.layers.length} 层组件样式`, `Clear ${aiStyle.layers.length} AI component style layers`) : "",
+      pluginThemeCount ? tx(`停用 ${pluginThemeCount} 个插件主题`, `Disable ${pluginThemeCount} plugin themes`) : "",
+      tx(
+        `外观设置回默认（${appearanceResetNames().join("、")}）`,
+        `Reset appearance settings to default (${appearanceResetNames().join(", ")})`,
+      ),
     ].filter(Boolean);
     const ok = await confirmDialog({
-      message: `恢复外观默认将执行：\n· ${willDo.join("\n· ")}\n\n注意：这一项**会把你自己在设置里选的主题/缩放/精度等一并回默认**。\n只想撤掉 AI 动过的，请用上面的「清除 AI 的全部临时改动」。\n协议模板、命令库、插件库等其他数据不受影响。`,
+      message: tx(
+        `恢复默认外观将执行：\n· ${willDo.join("\n· ")}\n\n注意：这一项**会把你自己在设置里选的主题/缩放/精度等一并回默认**。\n只想撤掉 AI 动过的，请用上面的「清除 AI 临时覆盖」。\n协议模板、命令库、插件库等其他数据不受影响。`,
+        `Restoring the default appearance will:\n· ${willDo.join("\n· ")}\n\nNote: this **also resets the theme / zoom / precision you picked in Settings**.\nTo undo only what the AI changed, use “Clear AI overrides” above.\nProtocol templates, the command library, the plugin library and other data are untouched.`,
+      ),
       danger: true,
-      okLabel: "恢复外观默认",
+      okLabel: tx("恢复默认外观", "Restore default appearance"),
     });
     if (!ok) return;
     clearAiStyleLayers();
@@ -270,7 +286,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     }
     patch(appearanceDefaults());
     setAiStyle(aiStyleFootprint());
-    toast("外观已恢复默认（其他数据未动）");
+    toast(tx("外观已恢复默认（其他数据未动）", "Appearance reset to default (nothing else touched)"));
   };
   const layouts = useLayouts();
   const [layoutName, setLayoutName] = useState("");
@@ -320,22 +336,22 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   }, []);
 
   const runUpdateCheck = async () => {
-    setUpdState({ status: "checking", msg: "正在检查更新…" });
+    setUpdState({ status: "checking", msg: tx("正在检查更新…", "Checking for updates…") });
     try {
       const upd = await check();
       if (!upd) {
-        setUpdState({ status: "latest", msg: "当前已是最新版本" });
+        setUpdState({ status: "latest", msg: tx("当前已是最新版本", "Already on the latest version") });
         return;
       }
-      setUpdState({ status: "downloading", msg: `发现新版本 ${upd.version}，正在下载安装…` });
+      setUpdState({ status: "downloading", msg: tx(`发现新版本 ${upd.version}，正在下载安装…`, `Update ${upd.version} found — downloading…`) });
       await upd.downloadAndInstall();
-      setUpdState({ status: "ready", msg: `已更新到 ${upd.version}，即将重启应用…` });
+      setUpdState({ status: "ready", msg: tx(`已更新到 ${upd.version}，即将重启应用…`, `Updated to ${upd.version} — restarting…`) });
       setTimeout(() => void relaunch(), 1200);
     } catch (e) {
       const raw = String(e).replace(/^Error:\s*/i, "").replace(/^updater\s*/i, "");
       setUpdState({
         status: "error",
-        msg: `检查更新失败：${raw}（若提示未配置更新源，说明更新服务尚未发布）`,
+        msg: tx(`检查更新失败：${raw}（若提示未配置更新源，说明更新服务尚未发布）`, `Update check failed: ${raw} ("no update source configured" means no update has been published yet)`),
       });
     }
   };
@@ -390,7 +406,9 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               <>
                 {row(t("set.language"), (
                   <select className="input" value={settings.locale} onChange={(e) => patch({ locale: e.target.value as "zh" | "en" })}>
-                    <option value="zh">中文</option>
+                    {/* 语言选择器里每种语言**用自己的文字写自己**是惯例（改成 "Chinese" 反而让
+                        正在找中文的人更难认）——所以两路都给同一个词，不是漏翻。 */}
+                      <option value="zh">{t("set.localeZh")}</option>
                     <option value="en">English</option>
                   </select>
                 ))}
@@ -424,57 +442,59 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     ))}
                   </div>
                 ), t("set.theme.tip"))}
-                {row("当前外观被谁改了", (
+                {row(tx("外观覆盖层", "Appearance layers"), (
                   <div className="set-apr">
                     <div className="set-apr-ops">
                       <button className="btn sm primary" disabled={aiStyle.clean} onClick={clearAi}>
-                        清除 AI 的全部临时改动
+                        {tx("清除 AI 临时覆盖", "Clear AI overrides")}
                       </button>
                       <button className="btn sm danger" onClick={() => void restoreAppearanceDefaults()}>
-                        恢复外观默认
+                        {tx("恢复默认外观", "Restore default appearance")}
                       </button>
                     </div>
                     {/* 行序＝它自己宣布的那条覆盖栈（兜底 < 在画 < AI 临时）；以前前两行是反的 */}
                     <ul className="set-apr-list">
                       <li>
                         <span className="set-apr-name">
-                          兜底层
-                          <HelpHint text="内置与插件主题同级，缺的键按明暗归属垫一张表（不是第三份配色抄本）" />
+                          {tx("兜底层", "Baseline")}
+                          <HelpHint text={tx("内置与插件主题同级，缺的键按明暗归属垫一张表（不是第三份配色抄本）", "Built-in and plugin themes are peers; missing keys are back-filled by light/dark membership — not a third copy of the palette")} />
                         </span>
                         <span className="set-apr-val">
-                          {drawn.inherited ? `${drawn.inherited} 项由「内置 ${drawn.baseline}」供值` : "本次没有派上用场"}
+                          {drawn.inherited
+                            ? tx(`${drawn.inherited} 项由「内置 ${drawn.baseline}」供值`, `built-in ${drawn.baseline} supplies ${drawn.inherited} keys`)
+                            : tx("本次没有派上用场", "Not used this time")}
                         </span>
                       </li>
                       <li className={drawn.overrides ? "on" : ""}>
-                        <span className="set-apr-name">在画的这枚主题</span>
+                        <span className="set-apr-name">{tx("当前主题", "Active theme")}</span>
                         <span className="set-apr-val">{drawnTalk({ ...drawn, name: drawn.builtin ? t(`set.theme.${drawn.id}`) : drawn.name })}</span>
                         {!drawn.builtin && (
                           <button className="btn sm" onClick={() => void disableThemeLayers()}>
-                            停用
+                            {tx("停用", "Disable")}
                           </button>
                         )}
                       </li>
                       <li className={aiStyle.tokens ? "on ai" : ""}>
-                        <span className="set-apr-name">AI 临时 token 覆盖</span>
-                        <span className="set-apr-val">{aiStyle.tokens ? `${aiStyle.tokens} 项` : "无"}</span>
+                        <span className="set-apr-name">{tx("AI 临时 token 覆盖", "AI token overrides")}</span>
+                        <span className="set-apr-val">{aiStyle.tokens ? tx(`${aiStyle.tokens} 项`, `${aiStyle.tokens} keys`) : tx("无", "none")}</span>
                         {aiStyle.tokens > 0 && (
                           <span className="set-apr-note">{aiStyle.tokenNames.slice(0, 4).join(" ")}{aiStyle.tokenNames.length > 4 ? " …" : ""}</span>
                         )}
                       </li>
                       <li className={aiStyle.layers.length ? "on ai" : ""}>
-                        <span className="set-apr-name">AI 组件样式层</span>
-                        <span className="set-apr-val">{aiStyle.layers.length ? `${aiStyle.layers.length} 层` : "无"}</span>
+                        <span className="set-apr-name">{tx("AI 组件样式层", "AI component styles")}</span>
+                        <span className="set-apr-val">{aiStyle.layers.length ? tx(`${aiStyle.layers.length} 层`, `${aiStyle.layers.length} layers`) : tx("无", "none")}</span>
                         {aiStyle.layers.length > 0 && (
                           <span className="set-apr-note">{aiStyle.layers.map((l) => l.name).slice(0, 3).join("、")}{aiStyle.layers.length > 3 ? " …" : ""}</span>
                         )}
                       </li>
                     </ul>
                     <p className="set-apr-hint">
-                      后两层不落盘、也不归插件停用管——停用或卸载插件撤不掉它们
-                      <HelpHint text="后两层是 AI 本次会话改的（圆角/尺寸/阴影/临时主题都在这里）：要撤它们用上面第一颗按钮。第二颗「恢复外观默认」会连你自己选的主题与缩放一起回默认，其他数据不动。" />
+                      {tx("后两层不落盘、也不归插件停用管——停用或卸载插件撤不掉它们", "The last two layers are never persisted and are not covered by plugin disable — uninstalling a plugin won't remove them")}
+                      <HelpHint text={tx("后两层是 AI 本次会话改的（圆角/尺寸/阴影/临时主题都在这里）：要撤它们用上面第一颗按钮。第二颗「恢复默认外观」会连你自己选的主题与缩放一起回默认，其他数据不动。", "The last two layers are what the AI changed in this session (radius, sizing, shadows, the temporary theme all live here) — use the first button above. The second one also resets your own theme and zoom; nothing else.")} />
                     </p>
                   </div>
-                ), "从上到下层层覆盖：兜底层 < 在画的这枚主题（内置与插件同级，只有一枚）< AI 临时层。哪一层有内容，就说明当前界面是被它改的")}
+                ), tx("从上到下层层覆盖：兜底层 < 当前主题（内置与插件同级，只有一枚）< AI 临时层。哪一层有内容，就说明当前界面是被它改的", "Layers stack top-down: baseline < active theme (built-in and plugin are peers; exactly one) < AI temporary. Whichever layer has content is whichever one is driving the UI"))}
                 {row(t("set.zoom"), (
                   <div className="set-seg">
                     {[90, 100, 110, 125].map((z) => (
@@ -514,7 +534,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               <>
                 {row(t("set.preset"), (
                   <div className="preset-grid">
-                    {PRESETS.map((p) => (
+                    {WORKSPACE_META().map((p) => (
                       <button
                         key={p.key}
                         className={`preset-card${settings.workspace === p.key ? " on" : ""}`}
@@ -584,10 +604,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                           <span className="layout-slot-ops">
                             <button
                               className="layout-op-btn"
-                              title="重命名"
+                              title={t("c.rename")}
                               onClick={(ev) => {
                                 ev.stopPropagation();
-                                const nn = prompt("新名称", s.name);
+                                const nn = prompt(tx("新名称", "New name"), s.name);
                                 if (nn && nn.trim()) renameLayout(s.id, nn);
                               }}
                             >
@@ -595,15 +615,15 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                             </button>
                             <button
                               className="layout-op-btn danger"
-                              title="删除"
+                              title={t("c.delete")}
                               onClick={(ev) => {
                                 ev.stopPropagation();
                                 void (async () => {
                                   if (
                                     await confirmDialog({
-                                      message: `删除布局「${s.name}」？`,
+                                      message: tx(`删除布局「${s.name}」？`, `Delete layout “${s.name}”?`),
                                       danger: true,
-                                      okLabel: "删除",
+                                      okLabel: t("c.delete"),
                                     })
                                   )
                                     removeLayout(s.id);
@@ -622,7 +642,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   <div className="set-seg">
                     {([48, 60, 72, 90, 110] as const).map((c) => (
                       <button key={c} className={settings.cellSize === c ? "on" : ""} onClick={() => patch({ cellSize: c })}>
-                        {c === 48 ? "48 紧凑" : c === 60 ? "60 标准" : c === 72 ? "72 宽松" : c === 90 ? "90 更宽松" : "110 超宽松"}
+                        {c === 48 ? tx("48 紧凑", "48 tight") : c === 60 ? tx("60 标准", "60 normal") : c === 72 ? tx("72 宽松", "72 roomy") : c === 90 ? tx("90 更宽松", "90 roomier") : tx("110 超宽松", "110 widest")}
                       </button>
                     ))}
                   </div>
@@ -839,12 +859,12 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       style={{ width: 280 }}
                       type={showKey ? "text" : "password"}
                       value={settings.aiApiKey}
-                      placeholder={settings.aiPreset === "ollama" ? "本地 Ollama 无需 Key" : "sk-…"}
+                      placeholder={settings.aiPreset === "ollama" ? tx("本地 Ollama 无需 Key", "Local Ollama needs no key") : "sk-…"}
                       onChange={(e) => patch({ aiApiKey: e.target.value })}
                     />
                     <button
                       className="ai-key-eye"
-                      title={showKey ? "隐藏 API Key" : "显示 API Key"}
+                      title={showKey ? tx("隐藏 API Key", "Hide the API key") : tx("显示 API Key", "Show the API key")}
                       onClick={() => setShowKey((v) => !v)}
                     >
                       {showKey ? <IconEyeOff /> : <IconEye />}
@@ -945,7 +965,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                         className="input"
                         style={{ width: 280 }}
                         value={settings.aiProxy}
-                        placeholder="http://127.0.0.1:7890（留空 = 跟随系统）"
+                        placeholder={tx("http://127.0.0.1:7890（留空 = 跟随系统）", "http://127.0.0.1:7890 (empty = follow the system proxy)")}
                         onChange={(e) => patch({ aiProxy: e.target.value })}
                       />
                     ), t("set.ai.proxy.tip"))}
@@ -1029,7 +1049,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       className="btn danger-btn"
                       onClick={() => {
                         void (async () => {
-                          if (!(await confirmDialog({ message: "恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与插件库，且不可恢复。确定继续？", danger: true, okLabel: "清除并重启准备" }))) return;
+                          if (!(await confirmDialog({ message: tx("恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与插件库，且不可恢复。确定继续？", "Factory reset clears: protocol templates, the control canvas, the command library, variables, every setting and the plugin library. This cannot be undone. Continue?"), danger: true, okLabel: tx("清除并重启准备", "Wipe and prepare restart") }))) return;
                           const kill: string[] = [];
                           for (let i = 0; i < localStorage.length; i++) {
                             const k = localStorage.key(i);
@@ -1100,8 +1120,8 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       className="btn"
                       onClick={() => {
                         void navigator.clipboard.writeText(mcpServerConfig(mcpCliPath)).then(
-                          () => toast("已复制 Claude Desktop / Cursor 通用配置"),
-                          () => toast("复制失败：请手动复制输入框内容"),
+                          () => toast(tx("已复制 Claude Desktop / Cursor 通用配置", "Copied the Claude Desktop / Cursor config")),
+                          () => toast(tx("复制失败：请手动复制输入框内容", "Copy failed — select the field and copy it by hand")),
                         );
                       }}
                     >
@@ -1182,7 +1202,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   t("set.io.full.tip"),
                   async () => {
                     await saveJson(FULL_KIND, exportFullBackup());
-                    setMsg("全部配置已导出");
+                    setMsg(tx("全部配置已导出", "All settings exported"));
                   },
                   async () => {
                     const d = await loadJson<unknown>([FULL_KIND]);
@@ -1196,7 +1216,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   async () => {
                     const d = templateStore.exportTemplatesWithMeta();
                     await saveJson("uartix-templates", d);
-                    setMsg("模板已导出");
+                    setMsg(tx("模板已导出", "Templates exported"));
                   },
                   async () => {
                     const d = await loadJson<unknown>(["uartix-templates"]);
@@ -1210,7 +1230,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   t("set.io.controls.tip"),
                   async () => {
                     await saveJson("uartix-controls", controlsStore.exportPages());
-                    setMsg("控制画布已导出");
+                    setMsg(tx("控制画布已导出", "Control canvas exported"));
                   },
                   async () => {
                     const d = await loadJson<unknown>(["uartix-controls"]);
@@ -1224,7 +1244,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   t("set.io.commands.tip"),
                   async () => {
                     await saveJson("uartix-commands", commandStore.exportGroups());
-                    setMsg("命令库已导出");
+                    setMsg(tx("命令库已导出", "Command library exported"));
                   },
                   async () => {
                     const d = await loadJson<unknown>(["uartix-commands"]);
@@ -1269,17 +1289,17 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   )}
                 </p>
                 {row(t("set.version"), <span className="set-mono">{appVersion}</span>)}
-                {row("作者", (
+                {row(t("set.author"), (
                   <button
                     className="author-link"
                     onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl("http://larix.teuioe.cn/"))}
-                    title="访问作者主页"
+                    title={tx("访问作者主页", "Visit the author's page")}
                   >
                     <img src={avatarUrl} alt="Tanix" width={22} height={22} className="author-avatar" />
                     <span className="author-name">Tanix</span>
                   </button>
                 ))}
-                {row("官网", (
+                {row(t("set.website"), (
                   <button className="btn" onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl("https://larix.teuioe.cn/uartix-plus"))}>
                     larix.teuioe.cn/uartix-plus
                   </button>
@@ -1297,7 +1317,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       disabled={updState.status === "checking" || updState.status === "downloading"}
                       onClick={() => void runUpdateCheck()}
                     >
-                      {updState.status === "checking" || updState.status === "downloading" ? "检查中…" : t("set.checkUpdate")}
+                      {updState.status === "checking" || updState.status === "downloading" ? tx("检查中…", "Checking…") : t("set.checkUpdate")}
                     </button>
                     {updState.msg && <span className="qk-fhint">{updState.msg}</span>}
                   </div>
@@ -1309,7 +1329,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
         </div>
         <div className="modal-foot">
           <span />
-          <button className="btn primary" onClick={onClose}>完成</button>
+          <button className="btn primary" onClick={onClose}>{t("c.done")}</button>
         </div>
       </div>
     </div>

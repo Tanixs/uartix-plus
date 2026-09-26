@@ -20,16 +20,14 @@ import * as variableStore from "./variableStore";
 import * as commandStore from "./commandStore";
 import { isGroup } from "./commandStore";
 import { useSettings } from "../settings/settingsStore";
-import { beep, runScript } from "./scriptRunner";
-import { TextInput } from "../protocol/PropertiesPanel";
-import { WIDGET_ICONS, IconLock, IconUnlock, IconSidebar, IconSlider, IconChevron, IconClose } from "../../shared/icons";
+import { sendCmd, runCmdScript } from "./cmdExec";
+import { IconLock, IconMore, IconUnlock, IconSlider, IconChevron } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
-import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
 import { alertDialog } from "../../shared/Dialog";
 import { toast } from "../ai/extRuntime";
-import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
+import { attachPdragZone, type PdragDetail } from "../../shared/pointerDrag";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -51,26 +49,6 @@ const GAP = 8;
 const OFF = GAP / 2;
 
 
-/**
- * 调色板从 `CONTROL_TYPES` 派生（P97-I5）：`satisfies Record<ControlType, string>` 让
- * "加一种控件忘了配标签"变成编译错误——旧写法是一份手抄数组，漏项只会静默少一个按钮。
- */
-const WIDGET_LABELS = {
-  slider: "滑条",
-  button: "按钮",
-  switch: "开关",
-  led: "LED 灯",
-  buzzer: "蜂鸣器",
-  monitor: "数值监视",
-  joystick: "摇杆",
-  keypad: "键盘遥控",
-  keymon: "单键监控",
-  group: "组合控件",
-  custom: "自定义卡片",
-} as const satisfies Record<ControlType, string>;
-const WIDGET_TYPES: { type: ControlType; label: string }[] =
-  store.CONTROL_TYPES.map((type) => ({ type, label: WIDGET_LABELS[type] }));
-
 function MountCascade(props: {
   anchorEl: HTMLElement | null;
   zf: number;
@@ -78,8 +56,8 @@ function MountCascade(props: {
   onDisarm: () => void;
   onPick: (item: CommandItem) => void;
 }) {
-  const cmds = useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   useLocale();
+  const cmds = useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   const [path, setPath] = useState<string[]>([]);
   const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
 
@@ -114,7 +92,7 @@ function MountCascade(props: {
           {nodes.length === 0 && (
             <div className="ctx-group">
               {i === 0
-                ? tx("命令库为空（左侧「命令」Tab 添加）", "Command library is empty (add in the Commands tab)")
+                ? tx("命令库为空（左侧「命令」导轨里添加）", "Command library is empty (add it in the Commands rail on the left)")
                 : tx("空分组", "Empty group")}
             </div>
           )}
@@ -138,7 +116,7 @@ function MountCascade(props: {
               <button
                 key={n.id}
                 className="ctx-item"
-                title={n.scriptEnabled && n.script ? "脚本命令" : n.template}
+                title={n.scriptEnabled && n.script ? tx("脚本命令", "Script command") : n.template}
                 onClick={() => props.onPick(n)}
                 onMouseEnter={() => {
                   props.onDisarm();
@@ -157,6 +135,7 @@ function MountCascade(props: {
 }
 
 export function ControlCanvas() {
+  useLocale(); // 面板根组件的口径（strings.ts 头注）：这一面的话术是 tx() 出来的，切语言要有人重渲染
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const settings = useSettings();
   const CELL = [48, 60, 72, 90, 110].includes(settings.cellSize) ? settings.cellSize : 60;
@@ -189,7 +168,6 @@ export function ControlCanvas() {
     const g = ghostRef.current;
     if (g) g.style.display = "none";
   };
-  const cmds = useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   const page = store.activePage();
   const gridRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -255,7 +233,6 @@ export function ControlCanvas() {
   const [editing, setEditing] = useState<string | null>(null);
   const [renamingCard, setRenamingCard] = useState<string | null>(null);
   const [renamingPage, setRenamingPage] = useState<string | null>(null);
-  const [sideTab, setSideTab] = useState<"widgets" | "commands" | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [debugDialog, setDebugDialog] = useState<"preset" | "sets" | null>(null);
   const [draftRevision, setDraftRevision] = useState(0);
@@ -299,7 +276,7 @@ export function ControlCanvas() {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const { invoke } = await import("@tauri-apps/api/core");
     const path = await save({
-      title: "导出控制画布",
+      title: tx("导出控制画布", "Export control canvas"),
       defaultPath: `uartix-controls-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`,
       filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
     });
@@ -328,94 +305,16 @@ export function ControlCanvas() {
         data?: unknown;
       };
       if (obj.kind !== "uartix-controls" || !obj.data) {
-        await alertDialog("不是控制画布文件（kind 不匹配）");
+        await alertDialog(tx("不是控制画布文件（kind 不匹配）", "This is not a control-canvas file (kind does not match)"));
         return;
       }
       const d = obj.data as { name?: string; cols?: number; cards?: Record<string, unknown>[] };
       const arr = Array.isArray(d) ? d[0] : d;
       store.importPage(arr);
     } catch (e) {
-      await alertDialog(`导入失败: ${e}`);
+      await alertDialog(tx(`导入失败: ${e}`, `Import failed: ${e}`));
     }
   };
-  const [editingCmd, setEditingCmd] = useState<string | null>(null);
-  const [renamingNode, setRenamingNode] = useState<string | null>(null);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [flashCmd, setFlashCmd] = useState<string | null>(null);
-  const [cmdMenu, setCmdMenu] = useState<{ id: string; x: number; y: number } | null>(null);
-  const [cmdMenuPos, setCmdMenuPos] = useState<{ left: number; top: number } | null>(null);
-  const cmdMenuRef = useRef<HTMLDivElement | null>(null);
-  const [groupMenuId, setGroupMenuId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{
-    id: string;
-    pos: "before" | "after" | "into";
-  } | null>(null);
-  const dragNodeRef = useRef<{ id: string; kind: "cmd" | "group" } | null>(null);
-  const dropPosRef = useRef<{ id: string; pos: "before" | "after" | "into" } | null>(null);
-
-  const doMove = (
-    dragId: string,
-    refId: string,
-    pos: "before" | "after" | "into",
-  ): boolean => {
-    if (pos === "into") {
-      if (commandStore.moveNode(dragId, refId)) return true;
-      setErr(tx("不能移动到自己的子分组内", "Cannot move a group into itself"));
-      return false;
-    }
-    const parent = commandStore.parentOfId(refId) ?? null;
-    if (commandStore.moveNode(dragId, parent, refId, pos === "before"))
-      return true;
-    if (parent !== null && commandStore.moveNode(dragId, parent)) return true;
-    return false;
-  };
-  const [sideW, setSideW] = useState(190);
-  const sideDragRef = useRef<null | { startX: number; w0: number }>(null);
-
-  useEffect(() => {
-    if (!groupMenuId) return;
-    const close = () => setGroupMenuId(null);
-    window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, [groupMenuId]);
-
-  useEffect(() => {
-    if (!cmdMenu) return;
-    const close = () => setCmdMenu(null);
-    window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, [cmdMenu]);
-
-  useLayoutEffect(() => {
-    if (!cmdMenu || !cmdMenuRef.current) return;
-    const r = cmdMenuRef.current.getBoundingClientRect();
-    const zf = zfactor || 1;
-    const w = r.width / zf;
-    const h = r.height / zf;
-    const vw = window.innerWidth / zf;
-    const vh = window.innerHeight / zf;
-    const left = Math.max(8, Math.min(cmdMenu.x / zf, vw - w - 8));
-    let top = cmdMenu.y / zf;
-    if (top + h > vh - 8) top = Math.max(8, vh - h - 8);
-    setCmdMenuPos({ left, top });
-  }, [cmdMenu, zfactor]);
-
-  useEffect(() => {
-    const move = (e: MouseEvent) => {
-      const d = sideDragRef.current;
-      if (!d) return;
-      setSideW(Math.max(140, Math.min(420, d.w0 + (e.clientX - d.startX) / (Number(getComputedStyle(document.documentElement).zoom) || 1))));
-    };
-    const up = () => {
-      sideDragRef.current = null;
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
-    return () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-  }, []);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -681,12 +580,9 @@ export function ControlCanvas() {
     return () => window.removeEventListener("vs-control-trigger", onCtl);
   });
 
-  const treeRef = useRef<HTMLDivElement | null>(null);
   const gridDropRef = useRef<(d: PdragDetail) => void>(() => {});
   const gridOverRef = useRef<(d: PdragDetail) => void>(() => {});
   const [dropPrev, setDropPrev] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const treeOverRef = useRef<(d: PdragDetail) => void>(() => {});
-  const treeDropRef = useRef<(d: PdragDetail) => void>(() => {});
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -700,19 +596,6 @@ export function ControlCanvas() {
       },
     });
   }, [page?.id]);
-  useEffect(() => {
-    const el = treeRef.current;
-    if (!el) return;
-    return attachPdragZone(el, {
-      kinds: "vs-cmd vs-group",
-      onOver: (dd) => treeOverRef.current(dd),
-      onLeave: () => {
-        dropPosRef.current = null;
-        setDropTarget(null);
-      },
-      onDrop: (dd) => treeDropRef.current(dd),
-    });
-  }, [sideTab, page?.id]);
 
   if (!page) {
     return <div className="ctl"><div className="ctl-empty">{tx("无控制页", "No control pages")}</div></div>;
@@ -721,34 +604,22 @@ export function ControlCanvas() {
   const getVal = (c: SliderCard): number =>
     valuesRef.current.get(c.id) ?? c.defaultValue;
 
+  /* P104-R3：发送与脚本执行的实现搬进 `cmdExec`——命令库现在住在左侧导轨，
+     和这里的卡片是两个调用方，同一份发送逻辑不该再有两份。
+     错误面仍留在本地：画布报的错不该往导轨那边喊。 */
   const sendRaw = async (mode: SendMode, text: string) => {
     try {
-      await serialStore.sendData(mode, text);
+      await sendCmd(mode, text);
       setErr(null);
     } catch (e) {
       setErr(String(e));
     }
   };
 
-  const runCardScript = async (
+  const runCardScript = (
     script: string,
     ctx: Record<string, number | string>,
-  ) => {
-    const vars = variableStore
-      .listVars()
-      .map((vd) => ({
-        name: vd.name,
-        value: variableStore.getVar(vd.name) ?? (vd.kind === "str" ? "" : 0),
-      }));
-    for (const [k, v] of Object.entries(ctx)) vars.push({ name: k, value: v });
-    await runScript(script, {
-      send: (text, mode) => sendRaw(mode ?? "ascii", String(text)),
-      beep,
-      delay_ms: (ms: number) =>
-        new Promise<void>((r) => setTimeout(r, Math.max(0, ms))),
-      get: (name: string) => variableStore.getVar(name),
-    }, vars);
-  };
+  ): Promise<void> => runCmdScript(script, ctx);
 
   const sendControl = async (
     card: ControlCard,
@@ -782,9 +653,8 @@ export function ControlCanvas() {
       card.useScript
     ) {
       if (!card.script.trim()) {
-        setErr(
-          `「${card.name}」已选择脚本模式但脚本为空，请在卡片设置中填写脚本或切回模板串`,
-        );
+        setErr(tx(`「${card.name}」已选择脚本模式但脚本为空，请在卡片设置中填写脚本或切回模板串`,
+          `"${card.name}" is in script mode but the script is empty — fill it in under card Settings, or switch back to template`));
         return;
       }
       try {
@@ -1056,11 +926,6 @@ export function ControlCanvas() {
   const usedRows = page.cards.reduce((m, c) => Math.max(m, c.y + (c.h || 1)), 1);
   const gridRows = Math.max(page.rows || 8, usedRows);
 
-  const dragEnd = () => {
-    dragNodeRef.current = null;
-    dropPosRef.current = null;
-    setDropTarget(null);
-  };
   gridDropRef.current = (d) => {
     const placeAt = (id: string, x: number, y: number) => {
       const g = gridRef.current;
@@ -1171,43 +1036,7 @@ export function ControlCanvas() {
     );
     setDropPrev(busy ? null : { x: tx, y: ty, w, h });
   };
-  treeOverRef.current = (d) => {
-    const row = document
-      .elementFromPoint(d.x, d.y)
-      ?.closest(".cmd-group-head,.cmd-item") as HTMLElement | null;
-    const src = dragNodeRef.current;
-    const nodeId = row?.getAttribute("data-node-id") ?? null;
-    if (!row || !src || !nodeId || nodeId === src.id) {
-      if (dropPosRef.current) {
-        dropPosRef.current = null;
-        setDropTarget(null);
-      }
-      return;
-    }
-    const r = row.getBoundingClientRect();
-    let pos: "before" | "after" | "into";
-    if (row.classList.contains("cmd-group-head")) {
-      const t = (d.y - r.top) / Math.max(1, r.height);
-      pos = t < 0.33 ? "before" : t > 0.67 ? "after" : "into";
-    } else {
-      pos = d.y > r.top + r.height / 2 ? "after" : "before";
-    }
-    dropPosRef.current = { id: nodeId, pos };
-    setDropTarget((p) => (p && p.id === nodeId && p.pos === pos ? p : { id: nodeId, pos }));
-  };
-  treeDropRef.current = () => {
-    const dt = dropPosRef.current;
-    const src = dragNodeRef.current;
-    dragEnd();
-    if (!src) return;
-    if (dt && src.id !== dt.id) {
-      doMove(src.id, dt.id, dt.pos);
-      return;
-    }
-    if (!dt) {
-      if (!commandStore.moveNode(src.id, null)) setErr(tx("无法移动", "Cannot move"));
-    }
-  };
+
   const menuCard = menu ? page.cards.find((c) => c.id === menu.cardId) : null;
   const editCard = editing ? page.cards.find((c) => c.id === editing) : null;
   const ctxFor = (c: ControlCard): Record<string, number | string> => {
@@ -1223,9 +1052,6 @@ export function ControlCanvas() {
     }
   };
 
-  const editCmdItem = editingCmd
-    ? commandStore.getCommand(editingCmd)
-    : null;
   const canSend = (c: ControlCard) =>
     c.type === "slider" ||
     c.type === "button" ||
@@ -1333,192 +1159,6 @@ export function ControlCanvas() {
     }
   };
 
-  const renderCmdTree = (items: commandStore.CommandNode[], depth: number) => (
-    <>
-      {items.map((n) => {
-        if (isGroup(n)) {
-          const collapsed = collapsedGroups.has(n.id);
-          return (
-            <div key={n.id} className="cmd-group" style={{ marginLeft: depth ? 10 : 0 }}>
-              <div
-                className={`cmd-group-head${
-                  dropTarget && dropTarget.id === n.id
-                    ? dropTarget.pos === "into"
-                      ? " drop-into"
-                      : dropTarget.pos === "before"
-                        ? " drop-before"
-                        : " drop-after"
-                    : ""
-                }`}
-                data-node-id={n.id}
-                onPointerDown={(e) => {
-                  if (renamingNode === n.id || e.button !== 0) return;
-                  dragNodeRef.current = { id: n.id, kind: "group" };
-                  beginPointerDrag(e, {
-                    kind: "vs-group",
-                    data: n.id,
-                    label: n.name,
-                    sub: tx("分组", "group"),
-                    onEnd: dragEnd,
-                  });
-                }}
-              >
-                <button
-                  className="cmd-fold"
-                  title={collapsed ? tx("展开", "Expand") : tx("折叠", "Collapse")}
-                  onClick={() => {
-                    const next = new Set(collapsedGroups);
-                    if (collapsed) next.delete(n.id);
-                    else next.add(n.id);
-                    setCollapsedGroups(next);
-                  }}
-                >
-                  <IconChevron size={13} dir={collapsed ? "right" : "down"} />
-                </button>
-                <span
-                  className="cmd-group-name"
-                  onDoubleClick={() => setRenamingNode(n.id)}
-                >
-                  {renamingNode === n.id ? (
-                    <input
-                      className="input ctl-tab-rename"
-                      autoFocus
-                      defaultValue={n.name}
-                      onClick={(e) => e.stopPropagation()}
-                      onBlur={(e) => {
-                        commandStore.renameNode(n.id, e.target.value.trim() || n.name);
-                        setRenamingNode(null);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          commandStore.renameNode(
-                            n.id,
-                            (e.target as HTMLInputElement).value.trim() || n.name,
-                          );
-                          setRenamingNode(null);
-                        }
-                        if (e.key === "Escape") setRenamingNode(null);
-                      }}
-                    />
-                  ) : (
-                    n.name
-                  )}
-                </span>
-                <button
-                  className="cmd-add-toggle"
-                  title={tx("添加命令 / 子分组", "Add command / subgroup")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setGroupMenuId(groupMenuId === n.id ? null : n.id);
-                  }}
-                >
-                  ＋<IconChevron size={11} dir="down" />
-                </button>
-                {groupMenuId === n.id && (
-                  <div
-                    className="cmd-group-menu"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      onClick={() => {
-                        commandStore.addCommand(n.id);
-                        setGroupMenuId(null);
-                      }}
-                    >
-                      {tx("＋ 添加命令", "＋ Add command")}
-                    </button>
-                    <button
-                      onClick={() => {
-                        commandStore.addGroup(tx("子分组", "Subgroup"), n.id);
-                        setGroupMenuId(null);
-                      }}
-                    >
-                      {tx("＋ 添加子分组", "＋ Add subgroup")}
-                    </button>
-                  </div>
-                )}
-                <button title={tx("删除分组", "Delete group")} onClick={() => commandStore.removeNode(n.id)}><IconClose /></button>
-              </div>
-              {!collapsed &&
-                (renamingNode === n.id ? null : renderCmdTree(n.items, depth + 1))}
-            </div>
-          );
-        }
-        const editing = editingCmd === n.id;
-        return (
-          <div key={n.id} className="cmd-item-wrap" style={{ marginLeft: depth ? 10 : 0 }}>
-            <div
-              className={`cmd-item ${n.scriptEnabled && n.script ? "script" : ""} ${flashCmd === n.id ? "flash" : ""} ${
-                dropTarget && dropTarget.id === n.id
-                  ? dropTarget.pos === "before"
-                    ? " drop-before"
-                    : " drop-after"
-                  : ""
-              }`}
-              data-node-id={n.id}
-              onPointerDown={(e) => {
-                if (e.button !== 0) return;
-                dragNodeRef.current = { id: n.id, kind: "cmd" };
-                beginPointerDrag(e, {
-                  kind: "vs-cmd",
-                  data: JSON.stringify({
-                    nodeId: n.id,
-                    template: n.template,
-                    sendMode: n.sendMode,
-                    script: n.script,
-                    scriptEnabled: n.scriptEnabled,
-                    name: n.name,
-                  }),
-                  label: n.name,
-                  sub: tx("命令", "command"),
-                  onEnd: dragEnd,
-                });
-              }}
-              onClick={() => {
-                if (n.scriptEnabled && n.script) {
-                  runCardScript(n.script, {})
-                    .then(() => setErr(null))
-                    .catch((er) => setErr(String(er)));
-                } else {
-                  sendRaw(
-                    n.sendMode,
-                    variableStore.resolveVars(n.template),
-                  ).catch((er) => setErr(String(er)));
-                }
-                setFlashCmd(n.id);
-                window.setTimeout(() => setFlashCmd(null), 500);
-              }}
-              onDoubleClick={() => setEditingCmd(editing ? null : n.id)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setCmdMenuPos(null);
-                setCmdMenu({ id: n.id, x: e.clientX, y: e.clientY });
-              }}
-              title="单击发送 · 双击编辑 · 右键更多 · 可拖到画布部署"
-            >
-              <span className="cmd-item-name">{n.name}</span>
-              <span className="cmd-item-tpl">
-                {n.scriptEnabled && n.script ? "⚡脚本" : n.template}
-              </span>
-              <button
-                className="cmd-edit"
-                title="编辑命令"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEditingCmd(editing ? null : n.id);
-                }}
-              >
-                ✎
-              </button>
-            </div>
-            {editing && <div className="cmd-edit-hint">编辑中…（右侧弹窗）</div>}
-          </div>
-        );
-      })}
-    </>
-  );
-
   return (
     <div className="ctl">
       <div className="ctl-tabs">
@@ -1557,7 +1197,7 @@ export function ControlCanvas() {
             {s.pages.length > 1 && (
               <button
                 className="ctl-tab-x"
-                title="删除控制页"
+                title={tx("删除控制页", "Delete control page")}
                 onClick={(e) => {
                   e.stopPropagation();
                   store.removePage(p.id);
@@ -1571,7 +1211,7 @@ export function ControlCanvas() {
         <button
           className="ctl-tab-add"
           onClick={() => store.addPage()}
-          title="新建控制页"
+          title={tx("新建控制页", "New control page")}
         >
           ＋
         </button>
@@ -1584,7 +1224,7 @@ export function ControlCanvas() {
           <IconSlider />
         </button>
         <button
-          className={`btn icon-btn ${page.locked ? "warn" : ""}`}
+          className={`btn icon-btn ${page.locked ? "on" : ""}`}
           onClick={() => store.setPageLocked(page.id, !page.locked)}
           title={
             page.locked
@@ -1595,23 +1235,12 @@ export function ControlCanvas() {
           {page.locked ? <IconLock /> : <IconUnlock />}
         </button>
         <button
-          className={`btn icon-btn ${sideTab ? "warn" : ""}`}
-          onClick={() => setSideTab((t) => (t ? null : "commands"))}
-          title={tx("打开/收起控件与命令侧栏", "Toggle widgets & commands sidebar")}
-        >
-          <IconSidebar />
-        </button>
-        <button
           ref={moreBtnRef}
-          className={`btn icon-btn ${moreOpen ? "warn" : ""}`}
+          className={`btn icon-btn ${moreOpen ? "on" : ""}`}
           onClick={() => setMoreOpen((v) => !v)}
           title={tx("更多：调试、布局与导入导出", "More: debug, layout, import/export")}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <circle cx="5" cy="12" r="1.8" />
-            <circle cx="12" cy="12" r="1.8" />
-            <circle cx="19" cy="12" r="1.8" />
-          </svg>
+          <IconMore />
         </button>
         {moreOpen &&
           createPortal(
@@ -1699,85 +1328,6 @@ export function ControlCanvas() {
       </div>
 
       <div className="ctl-body">
-        {sideTab && (
-          <div className="ctl-side" style={{ width: sideW }}>
-            <div className="ctl-side-tabs">
-              <button
-                className={sideTab === "widgets" ? "active" : ""}
-                onClick={() => setSideTab("widgets")}
-              >
-                {tx("控件", "Widgets")}
-              </button>
-              <button
-                className={sideTab === "commands" ? "active" : ""}
-                onClick={() => setSideTab("commands")}
-              >
-                {tx("命令", "Commands")}
-              </button>
-            </div>
-            <div className="ctl-side-content">
-              {sideTab === "widgets" && (
-                <div className="widget-list">
-                  {WIDGET_TYPES.map((w) => (
-                    <div
-                      key={w.type}
-                      className="widget-item pdrag-src"
-                      onPointerDown={(e) =>
-                        beginPointerDrag(e, {
-                          kind: "vs-widget",
-                          data: JSON.stringify({ type: w.type }),
-                          label: w.label,
-                        })
-                      }
-                      title="拖到右侧画布创建"
-                    >
-                      <span className="widget-icon">
-                        {WIDGET_ICONS[w.type]}
-                      </span>{" "}
-                      {w.label}
-                    </div>
-                  ))}
-                <div className="widget-hint">
-                  拖控件到右侧画布创建
-                  <HelpHint text="右键卡片「设置」可切换模板串 / 脚本模式，脚本内可用全部解析变量；键盘遥控与单键监控会全局监听键位（焦点在输入框时不触发）。" />
-                </div>
-                </div>
-              )}
-              {sideTab === "commands" && (
-                <div
-                  className="cmd-tree"
-                  ref={treeRef}
-                >
-                  <div className="cmd-toolbar">
-                    <button
-                      className="btn"
-                      onClick={() => commandStore.addGroup(tx(`分组${cmds.groups.length + 1}`, `Group ${cmds.groups.length + 1}`))}
-                    >
-                      {tx("＋ 分组", "＋ Group")}
-                    </button>
-  </div>
-                  {renderCmdTree(cmds.groups, 0)}
-                  <div className="widget-hint">
-                    {tx("单击发送 · 双击编辑 · 拖到画布部署", "Click to send · double-click to edit · drag onto canvas")}
-                    <HelpHint text={tx(
-                      "命令支持 {变量} 插值与解析变量；脚本 API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(“变量”) · set(“变量”, 值) · await waitParse(“字段”, ms?) · setControl(“控件名”, 值) 联动触发其他控件 · await repeat(n, i => …) · log(text)。完整 JS 语法可用，详见 帮助 → 脚本命令详解。",
-                      "Commands support {var} interpolation and parsed variables; script API: await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(name) · set(name, value) · await waitParse(field, ms?) · setControl(cardName, value) to trigger other controls · await repeat(n, i => …) · log(text). Full JS syntax available — see Help → Script Commands.",
-                    )} />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-        {sideTab && (
-          <div
-            className="ctl-side-resize"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              sideDragRef.current = { startX: e.clientX, w0: sideW };
-            }}
-          />
-        )}
         <div className="ctl-main">
           <div
             className="ctl-grid"
@@ -1830,10 +1380,14 @@ export function ControlCanvas() {
               改挂到 .ctl-main（面板视口，非滚动）上，才真的居中在眼前。 */}
           {page.cards.length === 0 && (
             <EmptyState
-              title="画布为空"
-              hint={[
-                "从左侧控件库拖入控件，或点击右上「＋滑条」",
-                "右键卡片可切换模板串 / 脚本，脚本内可用全部解析变量",
+              title={tx("画布为空", "Canvas is empty")}
+              hint={[tx("从左侧「控件」把控件拖进来", "Drag a widget in from Widgets on the left")]}
+              actions={[
+                {
+                  label: tx("＋ 滑条", "＋ Slider"),
+                  primary: true,
+                  onClick: () => store.addCard(page.id, "slider"),
+                },
               ]}
             />
           )}
@@ -1929,7 +1483,7 @@ export function ControlCanvas() {
             onContextMenu={(e) => e.preventDefault()}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="ctx-title">控制画布</div>
+            <div className="ctx-title">{tx("控制画布", "Control canvas")}</div>
             <button
               className="ctx-item"
               disabled={!store.hasClipboard()}
@@ -1937,60 +1491,16 @@ export function ControlCanvas() {
                 store.pasteCard(page.id, gridMenu.gx, gridMenu.gy);
                 setGridMenu(null);
               }}
-              title={store.hasClipboard() ? "粘贴已复制的控件到此处" : "先右键控件选「复制」"}
+              title={store.hasClipboard() ? tx("粘贴已复制的控件到此处", "Paste the copied control here") : tx("先右键控件选「复制」", "Right-click a control and choose Copy first")}
             >
-              粘贴
+              {tx("粘贴", "Paste")}
             </button>
             <button
               className="ctx-item"
               onClick={() => { store.declumpPage(page.id); setGridMenu(null); }}
             >
-              整理布局
+              {tx("整理布局", "Tidy layout")}
             </button>
-          </div>,
-          document.body,
-        )}
-
-      {cmdMenu &&
-        createPortal(
-          <div
-            ref={cmdMenuRef}
-            className="ctx-menu"
-            style={{
-              left: cmdMenuPos?.left ?? -9999,
-              top: cmdMenuPos?.top ?? -9999,
-              visibility: cmdMenuPos ? "visible" : "hidden",
-            }}
-            onContextMenu={(e) => e.preventDefault()}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {(() => {
-              const node = commandStore.getCommand(cmdMenu.id);
-              if (!node) return null;
-              return (
-                <>
-                  <div className="ctx-title">{node.name}</div>
-                  <button
-                    className="ctx-item"
-                    onClick={() => {
-                      setEditingCmd(cmdMenu.id);
-                      setCmdMenu(null);
-                    }}
-                  >
-                    {tx("编辑…", "Edit…")}
-                  </button>
-                  <button
-                    className="ctx-item danger"
-                    onClick={() => {
-                      commandStore.removeNode(cmdMenu.id);
-                      setCmdMenu(null);
-                    }}
-                  >
-                    {tx("删除命令", "Delete command")}
-                  </button>
-                </>
-              );
-            })()}
           </div>,
           document.body,
         )}
@@ -2032,139 +1542,6 @@ export function ControlCanvas() {
           }}
         />
       )}
-
-      {editCmdItem && (
-        <CommandModal
-          key={editCmdItem.id}
-          item={editCmdItem}
-          onClose={() => setEditingCmd(null)}
-          onDelete={() => {
-            commandStore.removeNode(editCmdItem.id);
-            setEditingCmd(null);
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function CommandModal(props: {
-  item: CommandItem;
-  onClose: () => void;
-  onDelete: () => void;
-}) {
-  const { item } = props;
-  useLocale();
-  const scriptOn = item.scriptEnabled;
-  return (
-    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-title">{`${tx("命令设置", "Command Settings")} · ${item.name}`}</div>
-        <div className="form-row">
-          <label>{tx("名称", "Name")}</label>
-          <TextInput
-            value={item.name}
-            onCommit={(v) => commandStore.patchCommand(item.id, { name: v })}
-          />
-          <label>{tx("模式", "Mode")}</label>
-          <select
-            className="input"
-            value={item.sendMode}
-            onChange={(e) =>
-              commandStore.patchCommand(item.id, {
-                sendMode: e.target.value as SendMode,
-              })
-            }
-          >
-            <option value="ascii">ASCII</option>
-            <option value="hex">Hex</option>
-          </select>
-        </div>
-        <div className="form-row">
-          <label>{tx("脚本指令", "Script Command")}</label>
-          <label className="chk">
-            <input
-              type="checkbox"
-              className="chk-box"
-              checked={scriptOn}
-              onChange={(e) =>
-                commandStore.patchCommand(item.id, {
-                  scriptEnabled: e.target.checked,
-                })
-              }
-            />
-            {tx("优先执行脚本（隐藏指令模板）", "Run script first (hide template)")}
-          </label>
-        </div>
-        {!scriptOn && (
-          <>
-            <div className="form-row">
-              <label>{tx("指令模板", "Template")}</label>
-              <textarea
-                className="input ctl-tpl-input cmd-ta"
-                rows={5}
-                value={item.template}
-                placeholder={"VRp=%.2f!"}
-                onChange={(e) =>
-                  commandStore.patchCommand(item.id, { template: e.target.value })
-                }
-              />
-            </div>
-            <div className="cmd-hint">
-                {tx(
-                  "语法：%f %.2f %d，支持 {变量} 引用解析数据",
-                  "Syntax: %f %.2f %d; {var} references parsed data",
-                )}
-              </div>
-          </>
-        )}
-        {scriptOn && (
-          <>
-            <div className="form-row">
-              <label>{tx("脚本", "Script")}</label>
-              <textarea
-                className="input ctl-tpl-input ctl-script-input cmd-ta"
-                rows={5}
-                spellCheck={false}
-                value={item.script}
-                placeholder={
-                  'if (Roll > 45) {\n  await send("ALARM:high!");\n  beep(880, 200);\n}'
-                }
-                onChange={(e) =>
-                  commandStore.patchCommand(item.id, { script: e.target.value })
-                }
-              />
-            </div>
-            <div className="cmd-hint">
-              {tx(
-                "API：await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(变量) · await waitParse(字段, ms) · set(变量, 值) · setControl(控件, 值) · await repeat(n, i=>…) · log(文本)；完整 JS 语法可用（for/while/if）；解析字段名可直接当变量使用",
-                "API: await send(text, mode?) · beep(freq, ms) · await delay_ms(ms) · get(name) · await waitParse(field, ms) · set(name, value) · setControl(card, value) · await repeat(n, i=>…) · log(text); full JS syntax (for/while/if); parsed field names work as variables",
-              )}
-            </div>
-          </>
-        )}
-        <div className="form-row">
-          <label>{tx("备注", "Note")}</label>
-          <TextInput
-            value={item.note}
-            onCommit={(v) => commandStore.patchCommand(item.id, { note: v })}
-          />
-        </div>
-        <div className="modal-foot">
-          <button
-            className="btn danger-btn"
-            onClick={() => {
-              commandStore.removeNode(item.id);
-              props.onClose();
-            }}
-          >
-            {tx("删除命令", "Delete command")}
-          </button>
-          <button className="btn primary" onClick={props.onClose}>
-            {tx("完成", "Done")}
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

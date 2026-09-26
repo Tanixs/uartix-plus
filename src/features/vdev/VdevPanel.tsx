@@ -14,18 +14,20 @@ import { useEffect, useState } from "react";
 import * as vdevStore from "./vdevStore";
 import type { VDevCommand, VDevField, VDevFrameCfg, VDevNet, VDevNetTransport, VDevSignal, VDevSpec } from "./vdevStore";
 import { tx, useLocale } from "../../i18n/strings";
-import { IconClose, IconPlay, IconPlus } from "../../shared/icons";
+import { IconClose, IconPlay, IconPlus, IconStop } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";
 import { requestAsk } from "../ai/chatStore";
 import { toast } from "../ai/extRuntime";
+import { HelpHint } from "../../shared/HelpHint";
 
-const MODELS: { k: VDevSignal["model"]; zh: string; en: string }[] = [
-  { k: "sine", zh: "正弦", en: "sine" },
-  { k: "square", zh: "方波", en: "square" },
-  { k: "triangle", zh: "三角波", en: "triangle" },
-  { k: "const", zh: "常量", en: "const" },
-  { k: "firstOrder", zh: "一阶对象", en: "1st-order" },
-  { k: "mirror", zh: "镜像", en: "mirror" },
+/** 信号模型：`k` 是存档里的码，名字渲染时挑 */
+const MODELS: { k: VDevSignal["model"]; label: () => string }[] = [
+  { k: "sine", label: () => tx("正弦", "sine") },
+  { k: "square", label: () => tx("方波", "square") },
+  { k: "triangle", label: () => tx("三角波", "triangle") },
+  { k: "const", label: () => tx("常量", "const") },
+  { k: "firstOrder", label: () => tx("一阶对象", "1st-order") },
+  { k: "mirror", label: () => tx("镜像", "mirror") },
 ];
 
 const FIELD_TYPES: VDevField["type"][] = ["int16", "uint16", "int8", "uint8", "int32", "uint32", "float32", "float64"];
@@ -49,6 +51,8 @@ function emptySpec(): VDevSpec {
   };
 }
 
+/** 「温控炉」「虚拟 MPU6050」是内置设备规格的**查表键**，不是文案：换语言就读不到那份 spec。
+ *  i18n 门给这个文件留的 5 个汉字就是它们；按钮上给人看的话早就是双语了。 */
 export function VdevPanel() {
   useLocale();
   const s = vdevStore.useVdev();
@@ -127,7 +131,7 @@ export function VdevPanel() {
       const { invoke } = await import("@tauri-apps/api/core");
       const path = await save({
         defaultPath: `${spec.name || "vdev"}.vdev.json`,
-        filters: [{ name: "Uartix 虚拟设备", extensions: ["json"] }],
+        filters: [{ name: tx("Uartix 虚拟设备", "Uartix virtual device"), extensions: ["json"] }],
       });
       if (typeof path !== "string") return;
       await invoke("save_text_file", { path, content: JSON.stringify(spec, null, 2) });
@@ -154,13 +158,18 @@ export function VdevPanel() {
 
   return (
     <div className="vdev">
-      <div className="vdev-bar">
+      <div className="vdev-bar p-bar">
         <button
           className={`btn sm${s.running ? " danger" : " primary"}`}
           onClick={() => void toggleRun()}
           title={s.running ? tx("停止仿真（数据流随之中断）", "Stop the simulation") : tx("启动仿真：经 ingest 单点进入全管线", "Start the simulation")}
         >
-          {s.running ? <IconClose /> : <IconPlay />}
+          {/* 停止用 ■ 不用 ×：这是"启动/停止"的一对，另一半就是 <IconPlay />。
+              × 在别处一律是"关掉/取消"（本文件 235/338/373 那三颗就是），
+              拿它当"停止仿真"会把"关掉这块面板"和"让设备停下来"混成一个动作——
+              而后者会**中断数据流**，是不可逆地丢正在收的数据。
+              全仓其余 run/stop 也都是 IconStop（framecanvas / modbus / sequencer）。 */}
+          {s.running ? <IconStop /> : <IconPlay />}
           {s.running ? tx("停止设备", "Stop device") : tx("启动设备", "Start device")}
         </button>
         <button
@@ -210,7 +219,7 @@ export function VdevPanel() {
               <IconPlus />
             </button>
           </div>
-          {s.specs.length === 0 && <div className="vdev-lib-empty">{tx("还没有保存的设备。用内置设备或 AI 生成一个。", "No saved devices yet — load a built-in or ask AI.")}</div>}
+          {s.specs.length === 0 && <div className="vdev-lib-empty">{tx("还没有保存的设备", "No saved devices")}</div>}
           {s.specs.map((it) => (
             <div key={it.id} className={`vdev-lib-it${spec?.name === it.spec.name ? " sel" : ""}`}>
               <button className="vdev-lib-n" onClick={() => !s.running && vdevStore.loadEditing(structuredClone(it.spec), it.id)} title={tx("载入编辑", "Load into editor")}>
@@ -241,18 +250,18 @@ export function VdevPanel() {
         </div>
         {!spec ? (
           <div className="vdev-empty">
-            <div className="vdev-empty-t">{tx("虚拟设备工坊", "Virtual Device Workshop")}</div>
+            {/* B11 样片（第二个）：与自动编排器同一形状——标题与页签重复、
+                一段 100 字定义、一条 3 步列表，共 123 汉字。
+                留一行 hint + 两颗载入按钮，定义与步骤整体进 `?`。 */}
             <div className="vdev-empty-d">
-              {tx(
-                "用自然语言让 AI 生成虚拟传感器（有温漂、偶尔丢帧的 MPU6050…），或载入内置设备；设备像真的一样输出数据帧、接收指令并反应，还能经 UDP/TCP/串口对外收发。与时间机器互补：回放的是过去，虚拟设备生成的是现在。",
-                "Describe a sensor in natural language and let AI build it, or load a built-in. Devices stream frames, react to commands, and can emit/receive over UDP/TCP/serial.",
-              )}
+              {tx("让软件扮演一台会反应的设备：输出数据帧、收指令并回应", "A device the software plays: it streams frames, takes commands and answers back")}
+              <HelpHint
+                text={tx(
+                  "用自然语言让 AI 生成虚拟传感器（有温漂、偶尔丢帧的 MPU6050…），或载入内置设备；设备像真的一样输出数据帧、接收指令并反应，还能经 UDP / TCP / 串口对外收发。与时间机器互补：回放的是过去，虚拟设备生成的是现在。步骤：载入内置或 AI 生成 → 检查规格 → 点「启动设备」（协议模板自动配套、2D 曲线点亮）→ 从控制台 / 编排器发命令，设备会反应。",
+                  "Describe a sensor in natural language and let AI build it (an MPU6050 with thermal drift and the odd dropped frame…), or load a built-in. The device streams frames, takes commands and reacts — and can emit/receive over UDP / TCP / serial. It complements the time machine: replay gives you the past, a virtual device gives you the now. Load or generate → review the spec → Start (the protocol template is imported for you and the curves light up) → send commands from the console or orchestrator and the device answers.",
+                )}
+              />
             </div>
-            <ol className="vdev-steps">
-              <li>{tx("载入内置设备或 AI 生成 → 检查规格", "Load a built-in or ask AI → review the spec")}</li>
-              <li>{tx("点「启动设备」：协议模板自动配套，2D 曲线点亮", "Start: the protocol template is auto-imported, curves light up")}</li>
-              <li>{tx("从控制台/编排器发命令，设备会反应（HEAT ON…）", "Send commands from console/orchestrator — the device reacts")}</li>
-            </ol>
             <div className="vdev-empty-ops">
               <button className="btn primary" onClick={() => loadBuiltin("温控炉")}>
                 {tx("载入「温控炉」（PID 教学被控对象）", "Load \"Furnace\" (PID plant)")}
@@ -627,7 +636,7 @@ function SignalRow(props: {
       <input className="input" value={sig.name} title={tx("信号名", "Signal name")} onChange={(e) => patch(idx, { name: e.target.value.trim() } as Partial<VDevSignal>)} />
       <select className="input" value={sig.model} onChange={(e) => patch(idx, switchModel(e.target.value as VDevSignal["model"]))}>
         {MODELS.map((m) => (
-          <option key={m.k} value={m.k}>{tx(m.zh, m.en)}</option>
+          <option key={m.k} value={m.k}>{m.label()}</option>
         ))}
       </select>
       <div className="vdev-params">

@@ -69,6 +69,13 @@ export type PluginState =
   | "update_pending"
   | "quarantined";
 
+/**
+ * 状态名。上屏的一律走 `plugins/pluginUiNames.stateName()`（按语言挑）。
+ * 这两张表**不是**"一份给人、一份冻结给出口" —— 那个说法我最初写错了：出口要么走 `--json` 里的
+ * `PluginState` 枚举本身，要么像 `scripts/plugin-cli-core.ts` 那样自己写终端话术，
+ * 没有一处依赖这里的中文。并列两张（而不是每条写成一个 `tx()`）的真实理由只有一个：
+ * 这是数据层，拿不到组件，而穷举 `Record` 能逼着"加一个状态就把两份名字都填上"。
+ */
 export const PLUGIN_STATE_LABEL: Record<PluginState, string> = {
   draft: "草稿",
   validated: "已校验",
@@ -78,6 +85,18 @@ export const PLUGIN_STATE_LABEL: Record<PluginState, string> = {
   disabled: "已停用",
   update_pending: "待批准更新",
   quarantined: "已隔离",
+};
+
+/** 与上面穷举同一组键（`Record<PluginState,…>` 少一个就编译不过） */
+export const PLUGIN_STATE_LABEL_EN: Record<PluginState, string> = {
+  draft: "Draft",
+  validated: "Validated",
+  previewed: "Previewed",
+  installed_disabled: "Installed (disabled)",
+  enabled: "Enabled",
+  disabled: "Disabled",
+  update_pending: "Update awaiting approval",
+  quarantined: "Quarantined",
 };
 
 export interface PluginVersionEntry {

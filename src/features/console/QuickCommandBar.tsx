@@ -10,6 +10,7 @@ import { CODECS, userCodecToCodec, type Codec, type FactoryField } from "./comma
 import * as userCodecStore from "./userCodecStore";
 import { CodecEditorModal, MyCodecsModal } from "./CodecEditorModal";
 import type { UserCodecDef } from "./commandFactory";
+import { t, tx, useLocale } from "../../i18n/strings";
 
 const b2 = (v: number) => (v & 0xff).toString(16).padStart(2, "0").toUpperCase();
 
@@ -35,7 +36,7 @@ interface TipState {
 function ChipTooltip({ tip }: { tip: TipState }) {
   const { item } = tip;
   const isScript = Boolean(item.scriptEnabled && item.script.trim());
-  const badge = isScript ? "脚本" : item.sendMode === "hex" ? "HEX" : "ASCII";
+  const badge = isScript ? tx("脚本", "Script") : item.sendMode === "hex" ? "HEX" : "ASCII";
   let body: React.ReactNode;
   if (isScript) {
     body = <pre className="qk-tip-pre">{item.script}</pre>;
@@ -44,15 +45,15 @@ function ChipTooltip({ tip }: { tip: TipState }) {
     const count = shown ? shown.split(" ").length : 0;
     body = (
       <>
-        <div className="qk-tip-mono">{shown || "（空）"}</div>
-        <div className="qk-tip-sub">{count} 字节</div>
+        <div className="qk-tip-mono">{shown || tx("（空）", "(empty)")}</div>
+        <div className="qk-tip-sub">{tx(`${count} 字节`, `${count} bytes`)}</div>
       </>
     );
   } else {
     body = (
       <>
-        <div className="qk-tip-mono">{item.template || "（空）"}</div>
-        <div className="qk-tip-sub">{new TextEncoder().encode(item.template).length} 字节</div>
+        <div className="qk-tip-mono">{item.template || tx("（空）", "(empty)")}</div>
+        <div className="qk-tip-sub">{tx(`${new TextEncoder().encode(item.template).length} 字节`, `${new TextEncoder().encode(item.template).length} bytes`)}</div>
       </>
     );
   }
@@ -68,12 +69,13 @@ function ChipTooltip({ tip }: { tip: TipState }) {
       </div>
       {body}
       {item.note && <div className="qk-tip-note">{item.note}</div>}
-      <div className="qk-tip-foot">点击立即发送</div>
+      <div className="qk-tip-foot">{tx("点击立即发送", "Click to send now")}</div>
     </div>
   );
 }
 
 export function QuickCommandBar() {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const cmds = useSyncExternalStore(cmdStore.subscribe, cmdStore.getSnapshot);
   const settings = useSettings();
   const [open, setOpen] = useState(() => localStorage.getItem("vs.qkbar.open") !== "0");
@@ -169,7 +171,7 @@ export function QuickCommandBar() {
           get: (name: string) => variableStore.getVar(name),
         }, vars);
       } else {
-        if (!item.template.trim()) throw new Error("指令内容为空，请先在「管理」中填写");
+        if (!item.template.trim()) throw new Error(tx("指令内容为空，请先在「管理」中填写", "Command is empty — fill it in under Manage first"));
         await serialStore.sendData(item.sendMode, item.template);
       }
       setErr(null);
@@ -200,7 +202,7 @@ export function QuickCommandBar() {
         await serialStore.sendData("hex", r.frames[i]);
       }
       setErr(null);
-      showMsg(`已发送 ${r.frames.length} 帧`);
+      showMsg(tx(`已发送 ${r.frames.length} 帧`, `Sent ${r.frames.length} frame(s)`));
     } catch (e) {
       setErr(String(e).replace(/^Error:\s*/, ""));
     }
@@ -234,7 +236,7 @@ export function QuickCommandBar() {
           .join("\n");
         cmdStore.patchCommand(item.id, { ...base, template: "", script, scriptEnabled: true });
       }
-      showMsg("已存入命令库，可在控制画布拖挂到卡片");
+      showMsg(tx("已存入命令库，可在控制画布拖挂到卡片", "Saved to the command library — drag it onto a card in the control canvas"));
     } catch (e) {
       setErr(String(e).replace(/^Error:\s*/, ""));
     }
@@ -250,6 +252,12 @@ export function QuickCommandBar() {
         `await delay_ms(100);`,
         `await send("FF AA 00 00 00","hex");`,
       ].join("\n");
+    /**
+     * 这一块的中文**故意不套 tx()**（i18n 预算里那 100 字就是它）：指令名与备注是要写进
+     * 用户命令库的**数据**，不是渲染给人的界面文字 —— 同 B11 把"出厂预设模板名"划在门外。
+     * 套上 tx() 等于让"预置出来的指令叫什么"取决于按按钮那一刻的语言，
+     * 用户之后改名/导出/换语言再导入都会撞上"同一个东西两个名字"。
+     */
     const presets: { name: string; template?: string; script?: string; note: string }[] = [
       { name: "解锁", template: "FF AA 69 88 B5", note: "解锁寄存器，10s 内有效" },
       { name: "保存配置", template: "FF AA 00 00 00", note: "保存当前配置" },
@@ -277,7 +285,7 @@ export function QuickCommandBar() {
         scriptEnabled: Boolean(p.script),
       });
     }
-    showMsg("已预置 WIT 常用指令");
+    showMsg(tx("已预置 WIT 常用指令", "WIT common commands seeded"));
   };
 
   const renderFactoryField = (f: FactoryField) => {
@@ -344,9 +352,9 @@ export function QuickCommandBar() {
               onChange={(e) => {
                 if (e.target.value !== "") setVal(f.key, e.target.value);
               }}
-              title="常用值"
+              title={tx("常用值", "Common values")}
             >
-              <option value="">常用值…</option>
+              <option value="">{tx("常用值…", "Common values…")}</option>
               {f.options.map((o) => (
                 <option key={o.v} value={String(o.v)}>
                   {o.label}
@@ -371,8 +379,8 @@ export function QuickCommandBar() {
   return (
     <div className="qk-bar">
       <div className="qk-head">
-        <button className="qk-fold" onClick={toggleOpen} title={open ? "收起快捷指令栏" : "展开快捷指令栏"}>
-          <IconChevron size={13} dir={open ? "down" : "right"} /> 快捷指令
+        <button className="qk-fold" onClick={toggleOpen} title={open ? tx("收起快捷指令栏", "Collapse the quick bar") : tx("展开快捷指令栏", "Expand the quick bar")}>
+          <IconChevron size={13} dir={open ? "down" : "right"} /> {tx("快捷指令", "Quick commands")}
         </button>
         {open && (
           <>
@@ -390,35 +398,35 @@ export function QuickCommandBar() {
                 </button>
               ))}
               {!flat.length && (
-                <span className="qk-empty">暂无指令，点右侧「管理」添加，或用「指令工厂」构造</span>
+                <span className="qk-empty">{tx("暂无指令", "No commands yet")}</span>
               )}
             </div>
             <button
-              className={`btn ${factoryOpen ? "primary" : ""}`}
+              className={`btn ${factoryOpen ? "on" : ""}`}
               style={{ flex: "0 0 auto" }}
               onClick={() => setFactoryOpen((v) => !v)}
-              title="多协议指令构造器：WIT / 匿名V7 / Modbus / 校验工具"
+              title={tx("多协议指令构造器：WIT / 匿名V7 / Modbus / 校验工具", "Multi-protocol command builder: WIT / V7 / Modbus / checksum tools")}
             >
-              指令工厂
+              {tx("指令工厂", "Command builder")}
             </button>
           </>
         )}
         <button className="btn" style={{ flex: "0 0 auto" }} onClick={() => setManageOpen(true)}>
-          管理
+          {tx("管理", "Manage")}
         </button>
       </div>
       {open && factoryOpen && (
         <div className="qk-factory">
           <div className="qk-factory-row">
             <div className="qk-fgroup">
-              <label className="qk-flabel">协议</label>
+              <label className="qk-flabel">{tx("协议", "Protocol")}</label>
               <select
                 className="input"
                 value={codec.id}
                 onChange={(e) => switchCodec(e.target.value)}
-                title="选择协议编解码器"
+                title={tx("选择协议编解码器", "Pick a protocol codec")}
               >
-                <optgroup label="内置协议">
+                <optgroup label={tx("内置协议", "Built-in protocols")}>
                   {CODECS.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
@@ -426,7 +434,7 @@ export function QuickCommandBar() {
                   ))}
                 </optgroup>
                 {uc.codecs.length > 0 && (
-                  <optgroup label="我的协议">
+                  <optgroup label={tx("我的协议", "My protocols")}>
                     {allCodecs
                       .filter((c) => c.id.startsWith("user:"))
                       .map((c) => (
@@ -441,13 +449,13 @@ export function QuickCommandBar() {
             <button
               className="btn"
               onClick={() => setEditorOpen({ def: null })}
-              title="可视化编辑自己的帧模板：固定字节 + 变量字段 + 长度段 + 校验段"
+              title={tx("可视化编辑自己的帧模板：固定字节 + 变量字段 + 长度段 + 校验段", "Visually edit your own frame templates: fixed bytes + variable fields + length + checksum")}
             >
-              ＋新建自定义协议
+              {tx("＋新建自定义协议", "+ New custom protocol")}
             </button>
             {uc.codecs.length > 0 && (
-              <button className="btn" onClick={() => setMyOpen(true)} title="编辑/删除/导入/导出我的协议">
-                管理我的协议
+              <button className="btn" onClick={() => setMyOpen(true)} title={tx("编辑/删除/导入/导出我的协议", "Edit / delete / import / export my protocols")}>
+                {tx("管理我的协议", "Manage my protocols")}
               </button>
             )}
           </div>
@@ -455,14 +463,14 @@ export function QuickCommandBar() {
           <div className="qk-factory-form">{factoryFields.map(renderFactoryField)}</div>
           <div className="qk-factory-actions">
             <button className="btn primary" onClick={() => void sendFactory()}>
-              发送
+              {tx("发送", "Send")}
             </button>
-            <button className="btn" onClick={saveFactory} title={`存入命令库「${codec.group}」分组，可拖挂到控制画布卡片`}>
-              存为指令
+            <button className="btn" onClick={saveFactory} title={tx(`存入命令库「${codec.group}」分组，可拖挂到控制画布卡片`, `Save into the “${codec.group}” group — draggable onto control-canvas cards`)}>
+              {tx("存为指令", "Save as command")}
             </button>
             {codec.group === "WIT" && !hasWitGroup && (
-              <button className="btn" onClick={addPresetGroup} title="一键添加解锁/保存/校准等常用指令">
-                预置常用指令
+              <button className="btn" onClick={addPresetGroup} title={tx("一键添加解锁/保存/校准等常用指令", "One click adds the usual unlock / save / calibrate commands")}>
+                {tx("预置常用指令", "Seed common commands")}
               </button>
             )}
           </div>
@@ -505,7 +513,7 @@ export function QuickCommandBar() {
           onSaved={(id) => {
             setEditorOpen(null);
             switchCodec(`user:${id}`);
-            showMsg("已保存，可在协议下拉中选用");
+            showMsg(tx("已保存，可在协议下拉中选用", "Saved — pick it from the protocol dropdown"));
           }}
         />
       )}
@@ -534,9 +542,9 @@ function ManageModal(props: { onClose: () => void }) {
   return (
     <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-title">快捷指令管理</div>
+        <div className="modal-title">{tx("快捷指令管理", "Quick command manager")}</div>
         <div className="form-row">
-          <label>分组</label>
+          <label>{tx("分组", "Group")}</label>
           <select
             className="input"
             value={grp?.id ?? ""}
@@ -550,9 +558,9 @@ function ManageModal(props: { onClose: () => void }) {
           </select>
           <button
             className="btn"
-            onClick={() => cmdStore.addGroup(`分组${cmds.groups.length + 1}`)}
+            onClick={() => cmdStore.addGroup(tx(`分组${cmds.groups.length + 1}`, `Group ${cmds.groups.length + 1}`))}
           >
-            新增分组
+            {tx("新增分组", "New group")}
           </button>
           {grp && cmds.groups.length > 1 && (
             <button
@@ -562,7 +570,7 @@ function ManageModal(props: { onClose: () => void }) {
                 setGrpId(cmdStore.getSnapshot().groups[0]?.id ?? "");
               }}
             >
-              删除该组
+              {tx("删除该组", "Delete group")}
             </button>
           )}
         </div>
@@ -575,7 +583,7 @@ function ManageModal(props: { onClose: () => void }) {
                   style={{ width: 110 }}
                   value={n.name}
                   onChange={(e) => cmdStore.patchCommand(n.id, { name: e.target.value })}
-                  placeholder="名称"
+                  placeholder={tx("名称", "Name")}
                 />
                 <select
                   className="input"
@@ -593,17 +601,17 @@ function ManageModal(props: { onClose: () => void }) {
                   style={{ flex: 1, fontFamily: "var(--font-mono)" }}
                   value={n.template}
                   onChange={(e) => cmdStore.patchCommand(n.id, { template: e.target.value })}
-                  placeholder={n.scriptEnabled ? "（脚本命令）" : "发送内容，如 FF AA 69 88 B5 或 RST!"}
+                  placeholder={n.scriptEnabled ? tx("（脚本命令）", "(script command)") : tx("发送内容，如 FF AA 69 88 B5 或 RST!", "Payload, e.g. FF AA 69 88 B5 or RST!")}
                   disabled={Boolean(n.scriptEnabled && n.script)}
-                  title={n.scriptEnabled ? "脚本命令，请在控制画布的命令树中编辑" : n.note}
+                  title={n.scriptEnabled ? tx("脚本命令，请在控制画布的命令树中编辑", "Script command — edit it in the control canvas command tree") : n.note}
                 />
-                <button className="btn" onClick={() => cmdStore.removeNode(n.id)} title="删除">
+                <button className="btn" onClick={() => cmdStore.removeNode(n.id)} title={t("c.delete")}>
                   <IconClose />
                 </button>
               </div>
             ),
           )}
-          {!grp?.items.length && <div className="qk-empty">该分组暂无指令</div>}
+          {!grp?.items.length && <div className="qk-empty">{tx("该分组暂无指令", "No commands in this group")}</div>}
         </div>
         <div className="form-row" style={{ marginTop: 8 }}>
           <button
@@ -611,10 +619,10 @@ function ManageModal(props: { onClose: () => void }) {
             disabled={!grp}
             onClick={() => grp && cmdStore.addCommand(grp.id)}
           >
-            新增命令
+            {tx("新增命令", "New command")}
           </button>
           <span className="form-hint">
-            ⚡脚本命令与分组重命名请在控制画布右侧「命令」面板中编辑；此处改动与控制画布实时互通
+            {tx("⚡脚本命令与分组重命名请在左侧「命令」导轨里编辑；此处改动与命令库实时互通", "⚡ Script commands and group renaming are edited in the Commands rail on the left; changes here sync with the command library live")}
           </span>
         </div>
       </div>

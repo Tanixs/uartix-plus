@@ -15,6 +15,7 @@ import {
   type WidgetSnap,
 } from "./widgetHub";
 import { runAppAction } from "./appActions";
+import { tx, useLocale } from "../../i18n/strings";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { collectThemeVars } from "./extRuntime";
 import { getChatFeed } from "./aiChatFeed";
@@ -88,6 +89,7 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
   { widget, isDesktop, bare, onHeight, onWin, sysMenu, pluginCtx },
   ref,
 ) {
+  useLocale(); // 守卫三：挂件壳上的标题、菜单与错误条都是 tx() 出来的，切语言得有人重渲染
   const frameRef = useRef<HTMLIFrameElement>(null);
   const chanRef = useRef<BroadcastChannel | null>(null);
   const lastSnap = useRef<WidgetSnap | null>(null);
@@ -194,7 +196,7 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
           const mode = d.mode === "hex" ? "hex" : "ascii";
           const text = String(d.text ?? "");
           if (!sendAllowed) {
-            target?.postMessage({ type: "aiw:send-res", reqId: d.reqId, ok: false, err: "小部件发送权限未开启" }, "*");
+            target?.postMessage({ type: "aiw:send-res", reqId: d.reqId, ok: false, err: tx("小部件发送权限未开启", "Widget sending is not allowed") }, "*");
             break;
           }
           const run = isDesktop
@@ -217,11 +219,11 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
           const res = (ok: boolean, err?: string) =>
             target?.postMessage({ type: "aiw:ask-res", reqId, ok, err }, "*");
           if (!sendAllowed) {
-            res(false, "小部件发送权限未开启（uartix.ask 需要该权限）");
+            res(false, tx("小部件发送权限未开启（uartix.ask 需要该权限）", "Widget sending is not allowed (uartix.ask needs that capability)"));
             break;
           }
           if (!text.trim()) {
-            res(false, "提问内容为空");
+            res(false, tx("提问内容为空", "The question is empty"));
             break;
           }
           if (isDesktop) {
@@ -273,7 +275,9 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
                     type: "aiw:win-res",
                     reqId,
                     ok: false,
-                    err: wv === "reject_cap" ? `窗口动作「${action}」需要 win.control 能力` : `未知窗口动作：${action}`,
+                    err: wv === "reject_cap"
+                    ? tx(`窗口动作「${action}」需要 win.control 能力`, `The window action "${action}" needs the win.control capability`)
+                    : tx(`未知窗口动作：${action}`, `Unknown window action: ${action}`),
                   },
                   "*",
                 );
@@ -295,7 +299,7 @@ export const WidgetFrame = forwardRef<WidgetFrameHandle, Props>(function WidgetF
           if (!action || !onWin) {
             if (reqId)
               target?.postMessage(
-                { type: "aiw:win-res", reqId, ok: false, err: "当前形态不支持窗口控制" },
+                { type: "aiw:win-res", reqId, ok: false, err: tx("当前形态不支持窗口控制", "Window control is not available in this form") },
                 "*",
               );
             break;

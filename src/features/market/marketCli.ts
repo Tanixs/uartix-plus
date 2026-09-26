@@ -12,7 +12,7 @@
  * **绝不在一次调用里等**——`cli.plugin_install` 只起一张异步请求并立刻回 token，
  * CLI 拿 token 去轮 `cli.plugin_status`（详设 §8.1；为什么不借道 jobs 任务面见 `marketPending.ts` 头注释）。
  */
-import { PLUGIN_STATE_LABEL, getSnapshot as getPlugins } from "../plugins/pluginStore";
+import { getSnapshot as getPlugins } from "../plugins/pluginStore";
 import { browseEntries, cardFacts, emptyTalk, facetCategories, missingFavorites, offShelfOf, type BrowseContext } from "./marketBrowse";
 import { compareInstall } from "./marketIndex";
 import { awaitingMarketInstalls, readMarketPending, requestMarketInstall } from "./marketPending";
@@ -170,7 +170,7 @@ export async function handleCli(kind: string, args: Record<string, unknown>): Pr
         const c = cardFacts(index, e, ctx);
         return {
           id: c.id, name: c.name, author: c.author, category: c.category, version: c.version,
-          updated: c.updated, install: c.installText, grayed: c.grayed, size: c.sizeText,
+          updated: c.updated, install: c.install, grayed: c.grayed, size: c.sizeText,
           caps: c.caps.map((x) => x.name), desc: c.description,
         };
       }),
@@ -191,7 +191,7 @@ export async function handleCli(kind: string, args: Record<string, unknown>): Pr
     return {
       id: c.id, name: c.name, author: c.author, category: c.category, version: c.version,
       updated: c.updated, descZh: e.description.zh, descEn: e.description.en ?? "",
-      install: c.installText, compat: c.compatText, grayed: c.grayed,
+      install: c.install, compat: c.compatible, grayed: c.grayed,
       size: c.sizeText, sha256_12: c.sha12, screenshots: c.screenshotCount,
       caps: c.caps, homepage: e.homepage ?? "", discussion: e.discussion ?? "",
       note: "列表不等于背书：条目来自当前索引，不代表内容安全。",
@@ -205,14 +205,15 @@ export async function handleCli(kind: string, args: Record<string, unknown>): Pr
     id: r.pkg.id,
     name: r.pkg.name,
     version: r.pkg.version,
-    state: PLUGIN_STATE_LABEL[r.state],
+    // 枚举本身：这份数据会原样进 `--json`，机器契约里不放本地化散文（名字由两面各自渲染）
+    state: r.state,
   })));
   const onShelf: unknown[] = [];
   for (const r of local) {
     const e = index.entries.find((x) => x.id === r.pkg.id);
     if (!e) continue; // 多出来的那些已由 offShelfOf 收走，不在这里重复列一遍
     const c = cardFacts(index, e, ctx);
-    onShelf.push({ id: r.pkg.id, name: r.pkg.name, local: r.pkg.version, shelf: e.version, state: c.installText });
+    onShelf.push({ id: r.pkg.id, name: r.pkg.name, local: r.pkg.version, shelf: e.version, state: c.install });
   }
   return {
     total: local.length,

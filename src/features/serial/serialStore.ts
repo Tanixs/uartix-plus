@@ -62,6 +62,19 @@ export interface SerialSnapshot {
   /** 本次连接实际生效的写/收特征（auto 解析结果或显式指定） */
   bleActiveWrite: string;
   bleActiveNotify: string;
+  /** P106 控制线：用户**显式**点过的电平。`null` = 从没碰过 —— 与 Rust 侧那份是同一件事的两面，
+   *  施加/重连后复施加都由 Rust 负责，这里只负责"界面别再撒谎说现在是高电平"。 */
+  ctrl: { dtr: boolean | null; rts: boolean | null };
+  /** 四条只读 modem 线；整块 `null` = 还没读过，单条 `null` = 驱动读不到（界面画"未知"） */
+  modem: ModemLines | null;
+}
+
+/** 与 Rust `ModemLines` 同形状（camelCase）。读不到的一律 null，不拿 false 糊过去。 */
+export interface ModemLines {
+  cts: boolean | null;
+  dsr: boolean | null;
+  ri: boolean | null;
+  dcd: boolean | null;
 }
 
 const DEFAULT_CONFIG: SerialConfig = {
@@ -99,6 +112,8 @@ let snapshot: SerialSnapshot = {
   bleNotifyChar: "",
   bleActiveWrite: "",
   bleActiveNotify: "",
+  ctrl: { dtr: null, rts: null },
+  modem: null,
 };
 
 const listeners = new Set<() => void>();
@@ -163,7 +178,14 @@ export async function init() {
   });
   await listen<ConnStatePayload>("serial:state", (e) => {
     // port 事件带连接描述（串口名/网络地址/BLE 设备名），此前丢失导致状态栏描述为空
-    set({ status: e.payload.status, error: e.payload.error, portName: e.payload.port });
+    // 断开就把 modem 线读数清掉（留着上一次的高电平读数是在撒谎）；
+    // `ctrl` 故意不清：那是用户显式要过的电平，Rust 侧也记着，重连/重开由它复施加。
+    set({
+      status: e.payload.status,
+      error: e.payload.error,
+      portName: e.payload.port,
+      modem: e.payload.status === "connected" ? snapshot.modem : null,
+    });
     maybeAutoReconnect(e.payload.status);
   });
   await listen<BleDeviceInfo[]>("ble:devices", (e) => {
@@ -375,4 +397,31 @@ export function startRecord(path: string) {
 
 export function stopRecord() {
   return invoke("stop_record");
+}
+
+/* ---------------- P106 串口控制线（详设 docs/P106-串口控制线-详设.md） ---------------- */
+
+/** 置 DTR / RTS：只发用户点过的那条（两条都不发就是空操作，Rust 侧直接返回 Ok）。 */
+export async function setControlLines(patch: { dtr?: boolean; rts?: boolean }) {
+  await invoke("set_control_lines", { dtr: patch.dtr ?? null, rts: patch.rts ?? null });
+  set({
+    ctrl: {
+      dtr: patch.dtr ?? snapshot.ctrl.dtr,
+      rts: patch.rts ?? snapshot.ctrl.rts,
+    },
+  });
+}
+
+/** 一次读四条（Rust 侧也是一次锁内读完）；调用方负责把失败画成"未知" */
+export function readModemLines() {
+  return invoke<ModemLines>("read_modem_lines");
+}
+
+export function setModemLines(m: ModemLines | null) {
+  set({ modem: m });
+}
+
+/** 发 Break。省略 ms 用 Rust 侧的默认值（默认值只住一处，前端不抄） */
+export function sendBreak(ms?: number) {
+  return invoke("send_break", { ms: ms ?? null });
 }

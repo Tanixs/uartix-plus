@@ -39,7 +39,7 @@ import { useSettings } from "../settings/settingsStore";
 import { useOperator } from "../operator/operatorStore";
 import { toast } from "../ai/extRuntime";
 import { Flyout } from "../../shared/Flyout";
-import { IconAutoSpin, IconCheck, IconChevron, IconCircle, IconClose, IconCrosshair, IconDot, IconEye, IconEyeOff, IconGear, IconLock, IconPlay, IconRotate, IconTarget, IconTrash, IconViewFront, IconViewIso, IconViewSide, IconViewTop } from "../../shared/icons";
+import { Glyph, IconAutoSpin, IconCheck, IconChevron, IconCircle, IconClose, IconCrosshair, IconDot, IconEye, IconEyeOff, IconGear, IconLock, IconPlay, IconRotate, IconTarget, IconTrash, IconViewFront, IconViewIso, IconViewSide, IconViewTop } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";
 import { fmtVal } from "../plot/plotMeasure";
 import { tx, useLocale } from "../../i18n/strings";
@@ -55,23 +55,29 @@ const PALETTE = ["#4e9cef", "#4caf50", "#e8a13c", "#e05252", "#b48ae8", "#36b3a6
 const SPARK_W = 224;
 const SPARK_H = 54;
 
-/** 加计六面采集顺序（详设 §4.1 固定）：该面朝上静止 2s */
-const A6_FACES = [
-  { zh: "+X 朝上", en: "+X up" },
-  { zh: "−X 朝上", en: "−X up" },
-  { zh: "+Y 朝上", en: "+Y up" },
-  { zh: "−Y 朝上", en: "−Y up" },
-  { zh: "+Z 朝上", en: "+Z up" },
-  { zh: "−Z 朝上", en: "−Z up" },
-] as const;
+/** 加计六面采集顺序（详设 §4.1 固定）：该面朝上静止 2s。
+ *  面的身份是**下标**（引擎按 [+X,−X,+Y,−Y,+Z,−Z] 走），这里只出名字，所以写成取值函数。 */
+function a6FaceLabel(i: number): string {
+  switch (i) {
+    case 0: return tx("+X 朝上", "+X up");
+    case 1: return tx("−X 朝上", "−X up");
+    case 2: return tx("+Y 朝上", "+Y up");
+    case 3: return tx("−Y 朝上", "−Y up");
+    case 4: return tx("+Z 朝上", "+Z up") ;
+    case 5: return tx("−Z 朝上", "−Z up");
+    default: return `#${i + 1}`;
+  }
+}
+/** 六面法的槽位（面序在引擎里固定，下标即身份） */
+const A6_FACE_SLOTS = [0, 1, 2, 3, 4, 5] as const;
 
 type MenuSub = "ascale" | null;
 type MenuState = { x: number; y: number; kind: "canvas" | "row"; gid?: GroupId };
 
 const fsvg = (children: React.ReactNode) => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <Glyph>
     {children}
-  </svg>
+  </Glyph>
 );
 const IconUndo = () => fsvg(<><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></>);
 const IconRedo = () => fsvg(<><path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" /></>);
@@ -361,7 +367,7 @@ function GroupDialog(props: {
           </div>
         )}
         <div className="fc-dlg-row">
-          <label>{tx(draft.mode === "point" ? "点大小" : "大小/透明", draft.mode === "point" ? "Size" : "Size / alpha")}</label>
+          <label>{draft.mode === "point" ? tx("点大小", "Size") : tx("大小/透明", "Size / alpha")}</label>
           <div className="p3d-gdlg-inline2">
             <input
               type="range"
@@ -1595,7 +1601,7 @@ export function Plot3D() {
       raiseMaxPoints: (gid) => plot3dStore.updateGroup(gid as GroupId, { maxPoints: 0 }),
       openGroupDialog: (gid) => setDlg(gid as GroupId),
       startDemo: () => void templateStore.toggleDemo(),
-      unknown: (what) => console.warn(`[P3D诊断] 空态补救未接的动作：${what}`),
+      unknown: (what) => console.warn(`[P3D diag] empty-state remedy got no handler for: ${what}`),
     });
     if (done) window.setTimeout(() => diagRef.current(), 60);
   };
@@ -2130,7 +2136,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
         .toISOString()
         .slice(0, 19)
         .replace(/[:T]/g, "-")}.csv`,
-      filters: [{ name: "CSV 文件", extensions: ["csv"] }],
+      filters: [{ name: tx("CSV 文件", "CSV file"), extensions: ["csv"] }],
     });
     if (typeof path !== "string") return;
     try {
@@ -2221,7 +2227,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
         .toISOString()
         .slice(0, 19)
         .replace(/[:T]/g, "-")}.png`,
-      filters: [{ name: "PNG 图片", extensions: ["png"] }],
+      filters: [{ name: tx("PNG 图片", "PNG image"), extensions: ["png"] }],
     });
     if (typeof path !== "string") return;
     try {
@@ -2234,11 +2240,12 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
     }
   };
 
-  const presets: { p: ViewPreset; zh: string; en: string; tipZh: string; tipEn: string }[] = [
-    { p: "top", zh: "俯", en: "T", tipZh: "俯视：看航迹/路径平面形状", tipEn: "Top view: plan-form shape" },
-    { p: "side", zh: "侧", en: "S", tipZh: "侧视", tipEn: "Side view" },
-    { p: "front", zh: "正", en: "F", tipZh: "正视", tipEn: "Front view" },
-    { p: "iso", zh: "等", en: "I", tipZh: "等轴：立体全貌（默认）", tipEn: "Isometric: full 3D view (default)" },
+  /** 视角预设：钮上是图标，所以这里只有码与悬停提示（原先那份 zh/en 名字没人读过，删了） */
+  const presets: { p: ViewPreset; tip: string }[] = [
+    { p: "top", tip: tx("俯视：看航迹/路径平面形状", "Top view: the plan-form shape of the track") },
+    { p: "side", tip: tx("侧视", "Side view") },
+    { p: "front", tip: tx("正视", "Front view") },
+    { p: "iso", tip: tx("等轴：立体全貌（默认）", "Isometric: the whole 3D shape (default)") },
   ];
 
   const calibSrcG = s3d.calibSrc ? s3d.groups.find((g) => g.id === s3d.calibSrc) : undefined;
@@ -2401,7 +2408,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
               key={it.p}
               className="icon-btn"
               onClick={() => sceneRef.current?.setViewPreset(it.p)}
-              title={tx(it.tipZh, it.tipEn)}
+              title={it.tip}
             >
               {it.p === "top" ? <IconViewTop /> : it.p === "side" ? <IconViewSide /> : it.p === "front" ? <IconViewFront /> : <IconViewIso />}
             </button>
@@ -2422,7 +2429,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
             <IconCrosshair />
           </button>
           <button
-            className={`icon-btn${s3d.follow ? " primary" : ""}`}
+            className={`icon-btn${s3d.follow ? " on" : ""}`}
             onClick={() => plot3dStore.setSetting({ follow: !s3d.follow })}
             title={tx(
               "跟随模式：视角平滑锁定最新点（与自动旋转互斥；开启时平移暂失效）",
@@ -2432,7 +2439,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
             <IconLock />
           </button>
           <button
-            className={`icon-btn${s3d.autoRotate ? " primary" : ""}`}
+            className={`icon-btn${s3d.autoRotate ? " on" : ""}`}
             onClick={() => plot3dStore.setSetting({ autoRotate: !s3d.autoRotate })}
             title={tx("自动旋转：绕中心缓慢转动展示（与跟随互斥）", "Auto rotate: slow turntable showcase (exclusive with follow)")}
           >
@@ -2474,7 +2481,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
           </button>
           <span className="p3d-tray-sep" />
           <button
-            className={`icon-btn${s3d.calibMode ? " primary" : ""}`}
+            className={`icon-btn${s3d.calibMode ? " on" : ""}`}
             disabled={!s3d.calibMode && (!g1Bound || !s3d.calibSrc)}
             onClick={() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true }))}
             title={
@@ -2796,7 +2803,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
                     )}
                   </div>
                   <div className="p3d-a6-list">
-                    {A6_FACES.map((f, i) => {
+                    {A6_FACE_SLOTS.map((i) => {
                       const face = a6?.faces[i] ?? null;
                       const col = !!a6?.collecting && a6.idx === i;
                       const dom = i >> 1; // 该面的主轴下标（+X/−X → 轴 0 …）
@@ -2805,7 +2812,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
                           <span className={`p3d-a6-ico${face ? " ok" : col ? " run" : ""}`}>
                             {face ? <IconCheck /> : col ? <IconPlay /> : <IconCircle />}
                           </span>
-                          <span className="p3d-a6-lbl">{tx(f.zh, f.en)}</span>
+                          <span className="p3d-a6-lbl">{a6FaceLabel(i)}</span>
                           {face ? (
                             <span className="p3d-a6-stat" title={tx("主轴均值 ± 标准差（原始单位）", "Dominant-axis mean ± std (raw units)")}>
                               μ {fmtVal(face.mean[dom])} · σ {fmtVal(face.std[dom])}

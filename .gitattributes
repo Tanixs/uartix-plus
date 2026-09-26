@@ -1,0 +1,31 @@
+# 仓库里一律以 LF 存、以 LF 出。
+# 为什么现在补这条：门禁脚本都靠 "\n" 分行，而 Windows 上 core.autocrlf=true 会把工作副本
+# 换成 CRLF —— P105-F 实测过两种坏法：① check-style 的 H 规则把没动过的文件判成"私抄图标"
+# （虚报，当场红）；② 更坏的是正则里 `…$` 因为行尾多了个 \r 而不再匹配（静默漏判）。
+# 与其让每个工具各自去容忍 \r，不如把工作副本钉成一种。
+* text=auto eol=lf
+
+# Windows 侧脚本按 Windows 习惯出
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制不参与换行 normalize（当文本处理会把文件本身改坏）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
+*.uopk binary
+*.vdev binary
+*.exe binary
+*.dll binary
+*.lib binary
+*.sys binary

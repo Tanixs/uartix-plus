@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as store from "./controlsStore";
 import { attachPdragZone } from "../../shared/pointerDrag";
-import { getLocale, tx, useLocale } from "../../i18n/strings";
+import { tx, useLocale } from "../../i18n/strings";
 import type {
   BuzzerCard,
   ButtonCard,
@@ -1095,9 +1095,15 @@ function editableTarget(t: EventTarget | null): boolean {
   );
 }
 
-const DIR_LABELS = ["上", "下", "左", "右"];
-const dirLabels = (): string[] =>
-  getLocale() === "en" ? ["Up", "Down", "Left", "Right"] : DIR_LABELS;
+/**
+ * 方向名在这里有**两份**，别合成一份：
+ *  - `DIR_VALUES` 是脚本变量 `dirName` 的**值**，也会被模板 `{dirName}` 插进真正发出去的指令里。
+ *    让它跟界面语言走 = 同一张卡在中/英下发不同字节、`if (dirName === "上")` 之类的脚本当场失效，
+ *    所以它钉死中文（用户自填的 `card.labels[i]` 优先）。i18n 门里登记的那 4 个汉字就是这一行。
+ *  - 下面 `dirLabels()` 才是界面看的（方向徽标、悬停标题），按当前语言挑。
+ */
+const DIR_VALUES = ["上", "下", "左", "右"];
+const dirLabels = (): string[] => [tx("上", "Up"), tx("下", "Down"), tx("左", "Left"), tx("右", "Right")];
 
 /** 键盘遥控：四方向键位监听，按下/松开各可发指令，触发时边缘光晕+键位徽标渐隐 */
 export function KeypadCardView(props: {
@@ -1146,7 +1152,7 @@ export function KeypadCardView(props: {
       setFlash({ dir: i, n: Date.now() });
       sendRef.current(c, {
         dir: i,
-        dirName: c.labels[i] ?? DIR_LABELS[i],
+        dirName: c.labels[i] ?? DIR_VALUES[i],
         phase: "press",
         key: keyLabel(e.key),
       });
@@ -1159,7 +1165,7 @@ export function KeypadCardView(props: {
       setHeld((h) => h.filter((x) => x !== i));
       sendRef.current(c, {
         dir: i,
-        dirName: c.labels[i] ?? DIR_LABELS[i],
+        dirName: c.labels[i] ?? DIR_VALUES[i],
         phase: "release",
         key: keyLabel(e.key),
       });
@@ -1175,7 +1181,7 @@ export function KeypadCardView(props: {
   const trig = (i: number, phase: "press" | "release") => {
     props.onSend(card, {
       dir: i,
-      dirName: card.labels[i] ?? DIR_LABELS[i],
+      dirName: card.labels[i] ?? DIR_VALUES[i],
       phase,
       key: keyLabel(card.keys[i]),
     });
@@ -1196,7 +1202,7 @@ export function KeypadCardView(props: {
         trig(i, "release");
       }}
       onMouseLeave={() => setHeld((h) => h.filter((x) => x !== i))}
-      title={`${card.labels[i] ?? DIR_LABELS[i]}（${keyLabel(card.keys[i])}）`}
+      title={`${card.labels[i] ?? dirLabels()[i]}（${keyLabel(card.keys[i])}）`}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
         <polygon
@@ -1415,17 +1421,22 @@ export function CustomCardView(props: {
   );
 }
 
-const SCRIPT_API_HINT =
-  "脚本 API：await send(text, mode?) 发送指令（mode 省略按卡片 ASCII/Hex 设置）· beep(freq, ms) 蜂鸣 · await delay_ms(ms) 延时 · get(\"变量\") 读取 · set(\"变量\", 值) 写入 · await waitParse(\"字段\", ms?) 等待解析帧 · setControl(\"控件名\", 值) 联动触发其他控件（按钮发送/开关切档/滑条设值/键盘遥控方向）· await repeat(n, i => …) 循环 · log(text) 输出控制台。完整 JS 语法可用（for/while/if/function/Math…）；解析字段名可直接当变量使用（重名自动 _1/_2）；模板串支持 {字段名:.2f} 格式化插值。";
+/** 脚本文档气泡：渲染时取语言（写成两条模块级常量再三元挑，门把它当债，而且一旦有人在模块级缓存就冻语言） */
+function scriptApiHint(): string {
+  return tx(
+    "脚本 API：await send(text, mode?) 发送指令（mode 省略按卡片 ASCII/Hex 设置）· beep(freq, ms) 蜂鸣 · await delay_ms(ms) 延时 · get(\"变量\") 读取 · set(\"变量\", 值) 写入 · await waitParse(\"字段\", ms?) 等待解析帧 · setControl(\"控件名\", 值) 联动触发其他控件（按钮发送/开关切档/滑条设值/键盘遥控方向）· await repeat(n, i => …) 循环 · log(text) 输出控制台。完整 JS 语法可用（for/while/if/function/Math…）；解析字段名可直接当变量使用（重名自动 _1/_2）；模板串支持 {字段名:.2f} 格式化插值。",
+    "Script API: await send(text, mode?) — mode defaults to the card's ASCII/Hex setting · beep(freq, ms) · await delay_ms(ms) · get(name) · set(name, value) · await waitParse(field, ms?) · setControl(cardName, value) to trigger other controls (button send / switch position / slider value / keypad direction) · await repeat(n, i => …) · log(text) to console. Full JS syntax (for/while/if/function/Math…); parsed field names work as variables (duplicates get _1/_2); templates support {field:.2f} formatting.",
+  );
+}
 
-const SCRIPT_API_HINT_EN =
-  "Script API: await send(text, mode?) — mode defaults to the card's ASCII/Hex setting · beep(freq, ms) · await delay_ms(ms) · get(name) · set(name, value) · await waitParse(field, ms?) · setControl(cardName, value) to trigger other controls (button send / switch position / slider value / keypad direction) · await repeat(n, i => …) · log(text) to console. Full JS syntax (for/while/if/function/Math…); parsed field names work as variables (duplicates get _1/_2); templates support {field:.2f} formatting.";
-
-const DEFAULT_KEYPAD_SCRIPT = `// dir: 0上 1下 2左 3右；phase: press/release
+/** 键盘遥控首次切到脚本时填入的示例：注释行是**给用户看的代码文本**，按当下语言播种，之后随卡片持久化 */
+function defaultKeypadScript(): string {
+  return `${tx("// dir: 0上 1下 2左 3右；phase: press/release", "// dir: 0 up, 1 down, 2 left, 3 right; phase: press/release")}
 if (dir === 0) send("FWD:" + phase);
 else if (dir === 1) send("BAK:" + phase);
 else if (dir === 2) send("LFT:" + phase);
 else send("RGT:" + phase);`;
+}
 
 function ScriptFields({
   value,
@@ -1440,7 +1451,7 @@ function ScriptFields({
     <div className="form-col">
       <label>
         {hint}
-        <HelpHint text={getLocale() === "en" ? SCRIPT_API_HINT_EN : SCRIPT_API_HINT} />
+        <HelpHint text={scriptApiHint()} />
       </label>
       <textarea
         className="input ctl-tpl-input ctl-script-input"
@@ -1720,7 +1731,7 @@ export function CardModal(props: {
                 )}
                 <button
                   className="btn danger-btn"
-                  title="删除该子控件"
+                  title={tx("删除该子控件", "Delete this child control")}
                   onClick={() =>
                     patch({ children: card.children.filter((x) => x.id !== ch.id) })
                   }
@@ -1730,7 +1741,7 @@ export function CardModal(props: {
               </div>
               {(ch.kind === "slider" || ch.kind === "button") && (
                 <div className="form-row">
-                  <label>指令</label>
+                  <label>{tx("指令", "Command")}</label>
                   <TextInput
                     value={ch.template}
                     onCommit={(v) => {
@@ -1760,7 +1771,7 @@ export function CardModal(props: {
                           patch({ children });
                         }}
                       />
-                      <label>步进</label>
+                      <label>{tx("步进", "Step")}</label>
                       <NumInput
                         value={ch.step}
                         width={56}
@@ -1776,7 +1787,7 @@ export function CardModal(props: {
               )}
               {ch.kind === "switch" && (
                 <div className="form-row">
-                  <label>关/开指令</label>
+                  <label>{tx("关/开指令", "Off/on commands")}</label>
                   <TextInput
                     value={ch.templates[0] ?? ""}
                     onCommit={(v) => {
@@ -1919,7 +1930,7 @@ export function CardModal(props: {
                 ) {
                   patch({
                     useScript: true,
-                    script: DEFAULT_KEYPAD_SCRIPT,
+                    script: defaultKeypadScript(),
                   });
                   return;
                 }

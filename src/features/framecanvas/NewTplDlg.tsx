@@ -12,15 +12,16 @@ export interface NewTplResult {
   lineEnd: string;
 }
 
+/** `label` 是取值函数：表在模块级求值，语言不能冻在那里（只有中文写进 `tx()` 第一参数才数得进门） */
 const CSV_TYPES = [
-  { v: "float32", zh: "float（小数）", en: "float (decimal)" },
-  { v: "uint8", zh: "uint8", en: "uint8" },
-  { v: "int8", zh: "int8", en: "int8" },
-  { v: "uint16", zh: "uint16", en: "uint16" },
-  { v: "int16", zh: "int16", en: "int16" },
-  { v: "uint32", zh: "uint32", en: "uint32" },
-  { v: "int32", zh: "int32", en: "int32" },
-  { v: "float64", zh: "float64", en: "float64" },
+  { v: "float32", label: () => tx("float（小数）", "float (decimal)") },
+  { v: "uint8", label: () => "uint8" },
+  { v: "int8", label: () => "int8" },
+  { v: "uint16", label: () => "uint16" },
+  { v: "int16", label: () => "int16" },
+  { v: "uint32", label: () => "uint32" },
+  { v: "int32", label: () => "int32" },
+  { v: "float64", label: () => "float64" },
 ];
 
 export function NewTplDlg({
@@ -151,7 +152,7 @@ export function NewTplDlg({
               <select value={elemType} onChange={(e) => setElemType(e.target.value)}>
                 {CSV_TYPES.map((t) => (
                   <option key={t.v} value={t.v}>
-                    {tx(t.zh, t.en)}
+                    {t.label()}
                   </option>
                 ))}
               </select>

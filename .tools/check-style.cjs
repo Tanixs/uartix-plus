@@ -18,6 +18,8 @@
  *  C. 基元层规范：`P103-BASE` 标记区内的规则必须单/双类、零 `!important` —— 这是给 AI 留的
  *     **覆写台阶**：模型写一条单类规则就该能压过基元，而不是要靠 `!important` 军备竞赛。
  *
+ *  H. 图标单一出处 + 基准清晰底线（P104-P2 加，见文件末尾那条的注释）。
+ *
  * 用法：node .tools/check-style.cjs
  */
 const fs = require("fs");
@@ -219,6 +221,217 @@ if (dChecked === 0) {
   fails++;
 } else {
   console.log(`OK(D): ${dChecked} 份样式大括号配平`);
+}
+
+/* ---- P104-B2 E 门：字号必须走刻度 ----
+ * 病根：全站曾有 14 档字号（含 9.5/10.5/11.5/12.5/13.5 五档半像素）、673 处字面量，
+ * 而 token 只有 33 处。**在连续谱里挪值等于没挪**——人眼读不出层级，只觉得"差不多"。
+ * 现在刻度只有 5 档文字 + 2 档展示，字面量一律禁止。
+ * 豁免：规则块内含 `glyph-exempt` 注释的（如数字框 ▲▼，那是字形尺寸不是文字尺寸），
+ * 与 check-contrast 的 `contrast-exempt` 同一套惯例——豁免必须就地写明理由，且清单只能变短。
+ */
+const FS_ALLOWED = new Set(["var(--fs-xs)", "var(--fs-body)", "var(--fs-sm)", "var(--fs-md)", "var(--fs-lg)", "var(--fs-xl)", "var(--fs-2xl)"]);
+function scanTypeScale() {
+  const bad = [];
+  let exempt = 0;
+  for (const f of cssFiles) {
+    const rel = path.relative(ROOT, f).replace(/\\/g, "/");
+    const src = fs.readFileSync(f, "utf8");
+    for (const m of src.matchAll(/font-size:\s*([^;]+);/g)) {
+      const val = m[1].trim();
+      if (FS_ALLOWED.has(val)) continue;
+      if (/^var\(--fs-/.test(val)) continue; // 主题自定义档位（如挂件内）留给 token 前缀判定
+      // 找本条规则的块，看有没有就地豁免注释
+      const open = src.lastIndexOf("{", m.index);
+      const close = src.indexOf("}", m.index);
+      const block = open >= 0 && close > open ? src.slice(open, close) : "";
+      if (/glyph-exempt/.test(block)) {
+        exempt++;
+        continue;
+      }
+      if (/^calc\(/.test(val)) continue; // 由 token 派生的计算值（缩放不变命中区用）
+      const line = src.slice(0, m.index).split(/\r?\n/).length;
+      bad.push(`${rel}:${line} font-size: ${val}`);
+    }
+  }
+  if (bad.length) {
+    console.error(`FAIL(E): ${bad.length} 处 font-size 不在刻度上（只许 var(--fs-*)）：`);
+    for (const b of bad.slice(0, 12)) console.error("  - " + b);
+    if (bad.length > 12) console.error(`  … 另有 ${bad.length - 12} 处`);
+    fails++;
+  } else {
+    console.log(`OK(E): font-size 全部走刻度（就地豁免 ${exempt} 处，均为字形尺寸；豁免清单只许变短）`);
+  }
+}
+scanTypeScale();
+
+/* ---- P104-B2 F 门：圆角必须走刻度 ----
+ * 同样本批先警告跑一轮：圆角还有 217 处字面量、13 档，归并动作在下一步做。
+ * 转红条件：等归并完成后把下面这行的 warn 改成 fails++。
+ */
+const RADIUS_ALLOWED = new Set(["var(--radius-s)", "var(--radius-m)", "var(--radius-l)", "var(--radius-xl)", "var(--radius-pill)", "0", "50%", "inherit"]);
+function scanRadiusScale() {
+  const bad = [];
+  for (const f of cssFiles) {
+    const rel = path.relative(ROOT, f).replace(/\\/g, "/");
+    const src = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of src.matchAll(/border-radius:\s*([^;]+);/g)) {
+      const val = m[1].trim();
+      if (RADIUS_ALLOWED.has(val)) continue;
+      // 不对称圆角（0 var(--radius-m) var(--radius-m) 0 这类）：逐分量判，
+      // 每个分量都必须是 token 或字面 0，否则算违规。
+      const parts = val.split(/\s+/);
+      if (parts.length > 1 && parts.every((x) => /^var\(--radius-/.test(x) || x === "0")) continue;
+      if (/^var\(--radius-/.test(val)) continue;
+      if (!/\d/.test(val)) continue;
+      const line = src.slice(0, m.index).split(/\r?\n/).length;
+      bad.push(`${rel}:${line} border-radius: ${val}`);
+    }
+  }
+  if (bad.length) {
+    console.error(`FAIL(F): ${bad.length} 处 border-radius 不在刻度上（只许 var(--radius-*) 或 0）：`);
+    for (const b of bad.slice(0, 8)) console.error("  - " + b);
+    fails++;
+  } else {
+    console.log("OK(F): border-radius 全部走刻度");
+  }
+}
+scanRadiusScale();
+
+/* ---- P104-B2 G 门：边框声明总量只降不升 ----
+ * Linear 那条"层级靠字重和透明度、不靠分割线"要能证伪，就得先有基线。
+ * B2 实测基线 = 398 条带宽度边框声明（其中 100 条 --border-soft），
+ * 口径 = cssFiles 全部 3 份（theme.css / metrics.css / analysis.css）。
+ * 第一版我拿"两份文件"的 396 当基线，门禁扫 3 份，于是自己把自己判红了——
+ * 基线必须与判据同一口径，否则门的第一个发现就是它自己的错。
+ * 本批**不承诺下降**——削减来自 B4（48 条面板工具栏规则不再铺色也不再画框）与 B5/B6（外壳靠档差）。
+ * 这条门的作用是把天花板钉住：后面每批要么持平要么更少，不许用新边框解决新层级问题。
+ */
+const BORDER_CEILING = 398;
+{
+  let borders = 0;
+  let soft = 0;
+  for (const f of cssFiles) {
+    const src = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    borders += (src.match(/border(?:-(?:top|bottom|left|right))?:\s*[0-9.]+px/g) || []).length;
+    soft += (src.match(/border(?:-(?:top|bottom|left|right))?:\s*[^;]*--border-soft/g) || []).length;
+  }
+  if (borders > BORDER_CEILING) {
+    console.error(`FAIL(G): 带宽度边框声明 ${borders} 条 > 基线 ${BORDER_CEILING}——层级请用字重/透明度/间距，不要再加线`);
+    fails++;
+  } else {
+    console.log(`OK(G): 边框 ${borders} 条 ≤ 基线 ${BORDER_CEILING}（其中 --border-soft ${soft} 条；天花板只许降）`);
+  }
+}
+
+/* ---- P104-P2 H 门：图标只许一处出处、基准不许跌破清晰底线 ----
+ * 这条是被实拍逼出来的：`shared/icons.tsx` 里定了基准，屏幕上也**确实**只有一半图标
+ * 听它的——另一半散在 15 个文件里，各自抄了一份 `<svg viewBox="0 0 24 24"
+ * width="13|14|15" strokeWidth="2|2.2|2.4">`。于是"把基准调到 16/2.0"改不动用户
+ * 看到的那几颗，改完还是糊的。抄一份 = 多一处出处，基准就少管一处。
+ *
+ * 判据两条：
+ *  ① 24 viewBox 的描边图标必须走 `Glyph`（`shared/icons.tsx` 自己是唯一豁免）。
+ *     只卡"描边图标"这个形态：数据可视化（InfoBar 折线、FieldLegend 色块、
+ *     EmptyState 大插画、卡片里的 buzzer/LED）不是图标，本该有自己的尺寸。
+ *  ② 基准本身留在清晰底线之上。糊不糊看设备像素：
+ *        strokeDev = strokeWidth × (size / 24) × dpr × zoom
+ *     所以尺寸与描边是**乘积**关系，动任何一边都要重算另一边——P103 就是只动了
+ *     描边（2.0→1.75）没动尺寸，结果名义变轻、实际变虚。
+ *     底线取 dpr=1 时 ≥1.0 设备像素：2.0 × 16/24 = 1.333 ⇒ 乘积 ≥ 32。
+ */
+const ICON_STROKE_AREA_FLOOR = 32; // size × strokeWidth
+{
+  const ICON_BASE = path.join(ROOT, "src", "shared", "icons.tsx");
+  const walk = (dir) =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) return e.name === "node_modules" ? [] : walk(p);
+      return /\.tsx$/.test(e.name) ? [p] : [];
+    });
+  const inline = [];
+  const linesOf = (f) => fs.readFileSync(f, "utf8").split(/\r?\n/);
+  for (const f of walk(path.join(ROOT, "src"))) {
+    if (path.resolve(f) === path.resolve(ICON_BASE)) continue;
+    const lines = linesOf(f);
+    const rel = path.relative(ROOT, f).replace(/\\/g, "/");
+    lines.forEach((line, i) => {
+      if (!/^\s*<svg[\s>]/.test(line)) return;
+      // 起始标签可能跨行：取到第一个 `>` 为止
+      const block = lines.slice(i, i + 14).join(" ");
+      const tagEnd = block.indexOf(">");
+      const tag = tagEnd < 0 ? block : block.slice(0, tagEnd + 1);
+      if (!/viewBox="0 0 24 24"/.test(tag)) return;
+      if (!/\b(width|strokeWidth)=/.test(tag)) return;
+      inline.push(`${rel}:${i + 1}`);
+    });
+  }
+  if (inline.length) {
+    console.error(`FAIL(H): ${inline.length} 处私抄的 24 viewBox 描边图标——请改走 shared/icons.tsx 的 <Glyph>：`);
+    for (const b of inline.slice(0, 12)) console.error("  - " + b);
+    fails++;
+  } else {
+    console.log("OK(H): 24 viewBox 描边图标全部走 Glyph，尺寸/描边只有一处出处");
+  }
+
+  const baseSrc = fs.readFileSync(ICON_BASE, "utf8");
+  const num = (name) => {
+    const m = baseSrc.match(new RegExp(`export const ${name} = ([0-9.]+)`));
+    return m ? parseFloat(m[1]) : NaN;
+  };
+  const size = num("ICON_SIZE");
+  const stroke = num("ICON_STROKE");
+  if (!(size > 0 && stroke > 0)) {
+    console.error("FAIL(H): 读不到 ICON_SIZE / ICON_STROKE —— 基准换了写法，门要一起换");
+    fails++;
+  } else if (size * stroke < ICON_STROKE_AREA_FLOOR) {
+    console.error(
+      `FAIL(H): 基准 ${size}px × 描边 ${stroke} = ${(size * stroke).toFixed(1)} < ${ICON_STROKE_AREA_FLOOR}` +
+        ` —— dpr 1 下描边只剩 ${((size * stroke) / 24).toFixed(2)} 设备像素，会被抗锯齿摊到两行（"变小就糊"）`,
+    );
+    fails++;
+  } else {
+    console.log(`OK(H): 图标基准 ${size}px / 描边 ${stroke} ⇒ dpr 1 下 ${((size * stroke) / 24).toFixed(2)} 设备像素，站得住底线`);
+  }
+}
+
+/* ---- P104-P3 I 门：条不许用 overflow:hidden 裁控件 ----
+ * `.fc-toolbar` 当年写 `overflow:hidden` 是为了"条比面板宽时别漏出去"。
+ * 代价有两层，都是 P3 实测撞上的：窄面板里 3 颗控件被裁到盒外**点不到**；
+ * 而条内 `.fc-anno-wrap`（relative）挂的弹层在 `top:30px`，正好落在 28px 高的条盒
+ * 外面，于是时间轴标注那个弹层**根本展不开**。
+ * 一个创可贴按住两个 bug，所以这条门只钉一件事：别再用裁切去掩盖溢出。
+ *
+ * 这里曾经还有第二条（`defaultLayout.ts` 不许手抄 `minimumWidth:`），配套的是
+ * "面板最小宽 = 工具条固有宽"那套派生机制。用户 2026-09-25 判定撤掉，理由是
+ * 抬最小宽**本质上是拿邻居换自己的空间**——实测代价：modbus 预设里工作台从 712
+ * 掉到 580、2D 曲线被挤到页签点不到。代价比它修掉的缺陷大，机制已回退，判据随之删。
+ */
+{
+  /* 判据要认"工具条"而不是"名字里带 bar"：第一版就是没分清，
+     把 `.ai-ctx-bar` / `.xfer-bar` 两条**进度条**判红了 —— 它们的 overflow:hidden
+     是用来裁圆角里的 fill 的，完全正确。工具条的形态特征是 `display:flex` 的一行控件，
+     进度条是带 `*-fill` 子块的轨道，所以按"是 flex 且裁横向"来认。 */
+  const isToolbarClip = (block) => {
+    const sel = (block.split("{")[0] || "").trim();
+    if (!/\.[a-z0-9-]*(?:bar|toolbar)\b/i.test(sel)) return false;
+    if (!/display:\s*(?:inline-)?flex/.test(block)) return false;
+    return /overflow(?:-x)?:\s*hidden/.test(block);
+  };
+  const clipped = [];
+  for (const f of cssFiles) {
+    const src = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const block of src.match(/[^{}]+\{[^{}]*\}/g) || []) {
+      if (isToolbarClip(block)) clipped.push((block.split("{")[0] || "").trim().slice(0, 46));
+    }
+  }
+  if (clipped.length) {
+    console.error(`FAIL(I): ${clipped.length} 处工具条用 overflow:hidden 裁控件 —— 窄面板里控件会点不到，条内弹层会被裁掉：`);
+    for (const c of clipped.slice(0, 8)) console.error("  - " + c);
+    fails++;
+  } else {
+    console.log("OK(I): 没有一条 flex 工具栏用 overflow:hidden 裁控件");
+  }
 }
 
 console.log(fails === 0 ? "OK: 样式契约通过" : `FAIL: ${fails} 类问题`);

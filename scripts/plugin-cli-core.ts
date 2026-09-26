@@ -206,6 +206,41 @@ function line(...cells: (string | number)[]): string {
   return cells.map((c) => String(c)).join("  ");
 }
 
+/**
+ * 代码 → 终端话术。**这一份映射归本文件自己所有，是有意的**：
+ * 数据面（`--json` 的读者）拿到的是稳定枚举 —— 把某个语言的显示名塞进 JSON，
+ * 用户一切语言、脚本一解析就碎（P105-F 纠正的一处：`install`/`state`/`compat` 原来带的都是中文标签）。
+ * 而本文件刻意零依赖（它能被单测，见头注），所以它不去 import 应用里那几张表，
+ * 自己认领一份终端措辞 —— 两个面各自的措辞，不是同一件事的第二个真相。
+ * 未知代码原样回显：宁可生疏，不要编一句"看起来对"的中文。
+ */
+const INSTALL_ZH: Record<string, string> = {
+  absent: "未安装",
+  same: "已装同名版本",
+  update: "有更新",
+  "newer-than-shelf": "本机比货架新",
+};
+const COMPAT_ZH: Record<string, string> = {
+  yes: "与本机版本兼容",
+  no: "要求更高版本",
+  unknown: "未标明适配版本",
+};
+const STATE_ZH: Record<string, string> = {
+  draft: "草稿",
+  validated: "已校验",
+  previewed: "已预览",
+  installed_disabled: "已安装（停用）",
+  enabled: "已启用",
+  disabled: "已停用",
+  update_pending: "待批准更新",
+  quarantined: "已隔离",
+};
+
+function zh(map: Record<string, string>, code: unknown): string {
+  const k = String(code ?? "");
+  return map[k] ?? k;
+}
+
 export interface RenderInput {
   parsed: Parsed;
   data: unknown;
@@ -235,7 +270,7 @@ export function render({ parsed, data }: RenderInput): string {
       line(
         `${String(c.name)}〈${String(c.category)}〉`,
         `v${String(c.version)}`,
-        String(c.install ?? ""),
+        zh(INSTALL_ZH, c.install),
         ((c.caps ?? []) as string[]).join("、"),
       ),
     );
@@ -249,9 +284,9 @@ export function render({ parsed, data }: RenderInput): string {
   if (parsed.command === "info") {
     const caps = (d.caps ?? []) as { name: string; note: string; blocked: boolean }[];
     return [
-      line(`${String(d.name)}〈${String(d.category)}〉`, `v${String(d.version)}`, String(d.install ?? "")),
+      line(`${String(d.name)}〈${String(d.category)}〉`, `v${String(d.version)}`, zh(INSTALL_ZH, d.install)),
       `作者 ${String(d.author ?? "?")} · 更新于 ${String(d.updated ?? "?")} · ${String(d.size ?? "")} · sha256 ${String(d.sha256_12 ?? "")}… · ${String(d.screenshots ?? 0)} 张图`,
-      `${String(d.compat ?? "")}`,
+      `${zh(COMPAT_ZH, d.compat)}`,
       `${String(d.descZh ?? "")}`,
       ...caps.map((c) => `  ${c.blocked ? "〔不放行〕" : ""}${c.name}：${c.note}`),
       String(d.note ?? ""),
@@ -274,8 +309,8 @@ export function render({ parsed, data }: RenderInput): string {
   const off = (d.offShelf ?? []) as Record<string, unknown>[];
   return [
     `本机 ${String(d.total ?? 0)} 个包`,
-    ...on.map((r) => line(`${String(r.name)}`, `本机 v${String(r.local)}`, `货架 v${String(r.shelf)}`, String(r.state ?? ""))),
-    off.length ? `不在货架上的 ${off.length} 个：${off.map((r) => `${String(r.name)} v${String(r.version)}（${String(r.state)}）`).join("、")}` : "",
+    ...on.map((r) => line(`${String(r.name)}`, `本机 v${String(r.local)}`, `货架 v${String(r.shelf)}`, zh(INSTALL_ZH, r.state))),
+    off.length ? `不在货架上的 ${off.length} 个：${off.map((r) => `${String(r.name)} v${String(r.version)}（${zh(STATE_ZH, r.state)}）`).join("、")}` : "",
     off.length ? String(d.offShelfNote ?? "") : "",
   ]
     .filter(Boolean)

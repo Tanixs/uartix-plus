@@ -59,7 +59,7 @@ for (const f of files) {
     if (!/icon/.test(tag)) continue;
     iconButtons++;
     if (/title=|aria-label=/.test(tag)) continue;
-    const lineNo = src.slice(0, idx).split("\n").length;
+    const lineNo = src.slice(0, idx).split(/\r?\n/).length;
     console.log(`${path.relative(process.cwd(), f)}:${lineNo}  ${tag.replace(/\s+/g, " ").slice(0, 120)}`);
     missing++;
   }

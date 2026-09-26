@@ -4,7 +4,8 @@
   --bg: #0e1420;
   --bg-panel: #151d2c;
   --bg-inset: #0a0f19;
-  --bg-titlebar: #111827;
+  /* P104-B2 I 门：壳档退到画布之后。原 #111827 比画布(#0e1420)亮 2.0 L*，外壳向前浮。 */
+  --bg-titlebar: #0c101a;
   --border: #2a3850;
   --border-soft: #1e2a3e;
   --text: #e6ecf6;

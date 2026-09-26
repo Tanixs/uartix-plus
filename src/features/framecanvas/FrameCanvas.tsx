@@ -25,7 +25,8 @@ import { fieldSize, PALETTE, CHECKSUM_SIZES } from "../protocol/templateStore";
 import { groupDisplayName, presetGroupKey } from "./presets";
 import { parseHexBytes } from "../../shared/hexBytes";
 import { labeledValue } from "../../shared/valueLabels";
-import { getLocale, tx, useLocale } from "../../i18n/strings";
+import { tx, useLocale } from "../../i18n/strings";
+import { Glyph } from "../../shared/icons";
 import {
   PAD_T,
   BLOK_PAD,
@@ -46,9 +47,9 @@ const ANIM_MS = 220;
 const SCROLL_W = 14;
 
 const fsvg = (children: React.ReactNode) => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <Glyph>
     {children}
-  </svg>
+  </Glyph>
 );
 const IconSave = () => fsvg(<><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></>);
 const IconUndo = () => fsvg(<><path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" /></>);
@@ -220,7 +221,7 @@ function SessionTransport() {
             <IconStop />
           </button>
           <button
-            className={`btn sm icon${s.bridgeListening ? " primary" : ""}`}
+            className={`btn sm icon${s.bridgeListening ? " on" : ""}`}
             disabled={!loaded}
             onClick={() => {
               if (s.bridgeListening) {
@@ -269,7 +270,7 @@ function SessionTransport() {
           )}
           <div className="fc-anno-wrap" ref={annoRef}>
             <button
-              className={`btn sm icon${anns.length > 0 ? " primary" : ""}`}
+              className={`btn sm icon${anns.length > 0 ? " on" : ""}`}
               disabled={!loaded && s.state !== "recording"}
               onClick={() => setAnnoOpen((v) => !v)}
               title={tx(
@@ -389,19 +390,33 @@ function CoverageStrip({
   );
 }
 
-const ROLE_META: Record<FieldRole, { zh: string; en: string; tag: string; chip: string }> = {
-  header: { zh: "帧头", en: "Header", tag: "HDR", chip: "#e8a33d" },
-  addr: { zh: "目标地址", en: "Address", tag: "ADR", chip: "#39c5cf" },
-  id: { zh: "功能码", en: "Command ID", tag: "ID", chip: "#4e9cef" },
-  seq: { zh: "序号", en: "Seq", tag: "SEQ", chip: "#f0883e" },
-  length: { zh: "数据长度", en: "Length", tag: "LEN", chip: "#3fb950" },
-  data: { zh: "数据内容", en: "Data", tag: "DATA", chip: "#bc8cff" },
-  payload: { zh: "数据载荷", en: "Payload", tag: "PLD", chip: "#bc8cff" },
-  checksum: { zh: "和校验", en: "Checksum", tag: "CK1", chip: "#d29922" },
-  checksum2: { zh: "附加校验", en: "Checksum2", tag: "CK2", chip: "#e5534b" },
-  footer: { zh: "帧尾", en: "Footer", tag: "FTR", chip: "#db61a2" },
+/** 角色 → 短标签与色卡（与语言无关的码）；名字在 roleLabel() 里渲染时挑 */
+const ROLE_META: Record<FieldRole, { tag: string; chip: string }> = {
+  header: { tag: "HDR", chip: "#e8a33d" },
+  addr: { tag: "ADR", chip: "#39c5cf" },
+  id: { tag: "ID", chip: "#4e9cef" },
+  seq: { tag: "SEQ", chip: "#f0883e" },
+  length: { tag: "LEN", chip: "#3fb950" },
+  data: { tag: "DATA", chip: "#bc8cff" },
+  payload: { tag: "PLD", chip: "#bc8cff" },
+  checksum: { tag: "CK1", chip: "#d29922" },
+  checksum2: { tag: "CK2", chip: "#e5534b" },
+  footer: { tag: "FTR", chip: "#db61a2" },
 };
-const roleLabel = (r: FieldRole) => tx(ROLE_META[r].zh, ROLE_META[r].en);
+function roleLabel(r: FieldRole): string {
+  switch (r) {
+    case "header": return tx("帧头", "Header");
+    case "addr": return tx("目标地址", "Address");
+    case "id": return tx("功能码", "Command ID");
+    case "seq": return tx("序号", "Seq");
+    case "length": return tx("数据长度", "Length");
+    case "data": return tx("数据内容", "Data");
+    case "payload": return tx("数据载荷", "Payload");
+    case "checksum": return tx("和校验", "Checksum");
+    case "checksum2": return tx("附加校验", "Checksum2");
+    case "footer": return tx("帧尾", "Footer");
+  }
+}
 
 const typeLabel = (t: FieldType) => (t === "csv" ? tx("csv·自适应", "csv·auto") : t);
 
@@ -414,20 +429,17 @@ const SIZE_TYPES: Record<number, FieldType[]> = {
   8: ["float64"],
 };
 
-const NAME_HINTS: Record<number, string[]> = {
-  1: ["温度", "电压", "状态", "信号"],
-  2: ["温度", "俯仰", "横滚", "偏航", "电流"],
-  3: ["保留", "填充", "签名"],
-  4: ["四元数W", "经度", "纬度", "速度"],
-};
-const NAME_HINTS_EN: Record<number, string[]> = {
-  1: ["Temp", "Voltage", "Status", "Signal"],
-  2: ["Temp", "Pitch", "Roll", "Yaw", "Current"],
-  3: ["Reserved", "Padding", "Signature"],
-  4: ["QuatW", "Longitude", "Latitude", "Speed"],
-};
-const nameHints = (size: number): string[] =>
-  (getLocale() === "en" ? NAME_HINTS_EN[size] : NAME_HINTS[size]) ?? [];
+/** 自动命名的候选：挑中的那个会写进协议模板成为字段名（是数据），所以按**当下语言**播种，
+ *  建好后不再随语言变化。写成函数 + switch：中文只有落在 `tx()` 第一参数上才数得进 i18n 门。 */
+function nameHints(size: number): string[] {
+  switch (size) {
+    case 1: return [tx("温度", "Temp"), tx("电压", "Voltage"), tx("状态", "Status"), tx("信号", "Signal")];
+    case 2: return [tx("温度", "Temp"), tx("俯仰", "Pitch"), tx("横滚", "Roll"), tx("偏航", "Yaw"), tx("电流", "Current")];
+    case 3: return [tx("保留", "Reserved"), tx("填充", "Padding"), tx("签名", "Signature")];
+    case 4: return [tx("四元数W", "QuatW"), tx("经度", "Longitude"), tx("纬度", "Latitude"), tx("速度", "Speed")];
+    default: return [];
+  }
+}
 
 const TYPE_ORDER: FieldType[] = [
   "uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "ascii", "bcd", "bits", "csv",
@@ -1850,7 +1862,7 @@ function FrameCanvas() {
 
   return (
     <div className="fc-root" tabIndex={0} onKeyDown={onKeyDown}>
-      <div className="fc-toolbar">
+      <div className="fc-toolbar p-bar">
         <button
           className={`btn sm icon${saveSt === "ok" ? " saved-ok" : ""}${saveSt === "err" ? " saved-err" : ""}${saveSt === "saving" ? " saving" : ""}`}
           onClick={doSave}
@@ -1909,7 +1921,7 @@ function FrameCanvas() {
         <button className="btn sm icon nav" onClick={() => setViewF((f) => f - 1)} title={tx("上一帧 (←)", "Previous frame (←)")}>
           <IconPrev />
         </button>
-        <button className={`btn sm icon${liveUI ? " primary" : ""}`} onClick={setViewLive} title={tx("跟随最新有效帧（页签切换即跟随该类型）", "Follow latest valid frame (tab switch follows that type)")}>
+        <button className={`btn sm icon${liveUI ? " on" : ""}`} onClick={setViewLive} title={tx("跟随最新有效帧（页签切换即跟随该类型）", "Follow latest valid frame (tab switch follows that type)")}>
           <IconFollow on={liveUI} />
         </button>
         <button className="btn sm icon nav" onClick={() => setViewF((f) => f + 1)} title={tx("下一帧 (→)", "Next frame (→)")}>
@@ -1918,7 +1930,7 @@ function FrameCanvas() {
         <button className="btn sm icon" onClick={() => { fcStore.clearArchive(); diffBaseRef.current = null; setDiffOn(false); viewRef.current = { live: true, fi: 0 }; dirtyRef.current = true; }} title={tx("清空帧归档字节池", "Clear frame archive")}>
           <IconTrash />
         </button>
-        <button className={`btn sm icon${diffOn ? " primary" : ""}`} onClick={toggleDiff} title={diffOn ? tx("退出帧对比（清除基线）", "Exit frame diff (clear baseline)") : tx("帧对比：把当前帧设为基线，翻帧看逐字节差异", "Frame diff: set current frame as baseline, then step frames to spot byte differences")}>
+        <button className={`btn sm icon${diffOn ? " on" : ""}`} onClick={toggleDiff} title={diffOn ? tx("退出帧对比（清除基线）", "Exit frame diff (clear baseline)") : tx("帧对比：把当前帧设为基线，翻帧看逐字节差异", "Frame diff: set current frame as baseline, then step frames to spot byte differences")}>
           <IconDiff />
         </button>
       </div>
@@ -2338,9 +2350,14 @@ function FrameCanvas() {
             <div className="fc-empty">
               <div className="fc-empty-title">{tx("等待有效帧…", "Waiting for a valid frame…")}</div>
               <div className="fc-empty-desc">
-                {tx("这里只呈现通过「协议模板」校验的完整数据帧。", "Only complete frames that pass the protocol-template validation are shown here.")}
-                {serial.status !== "connected" ? tx("可先连接设备或启动演示源；", "Connect a device or start the demo source;") : ""}
-                {tx("添加预设协议请用左侧「＋ 预设」。", 'Add preset protocols with "+ Preset" on the left.')}
+                {tx("只显示通过协议模板校验的完整帧。", "Only complete frames that pass the protocol template are shown.")}
+                {serial.status !== "connected" ? tx("可先连接设备，或启动演示源。", "Connect a device, or start the demo source.") : ""}
+                <HelpHint
+                  text={tx(
+                    "还没有模板：在左侧「协议」里点「＋ 预设」导入一个（维特 WIT / 匿名 V7 / Modbus RTU 都有现成的），或点「＋ 新建」自己画。",
+                    "No template yet: in Protocol on the left, hit \"+ Preset\" to import one (WIT / anonymous V7 / Modbus RTU all ship ready-made), or \"+ New\" to draw your own.",
+                  )}
+                />
               </div>
             </div>
           )}
@@ -2520,12 +2537,15 @@ function HeadTailDialog({
   );
 }
 
-const ROLE_GROUPS: { zh: string; en: string; roles: FieldRole[] }[] = [
-  { zh: "帧结构", en: "Frame", roles: ["header", "footer"] },
-  { zh: "控制", en: "Control", roles: ["addr", "id", "seq", "length"] },
-  { zh: "数据", en: "Data", roles: ["data", "payload"] },
-  { zh: "校验", en: "Checksum", roles: ["checksum", "checksum2"] },
-];
+/** 字段角色的分组（角色码不动，组名渲染时挑） */
+function roleGroups(): { label: string; roles: FieldRole[] }[] {
+  return [
+    { label: tx("帧结构", "Frame"), roles: ["header", "footer"] },
+    { label: tx("控制", "Control"), roles: ["addr", "id", "seq", "length"] },
+    { label: tx("数据", "Data"), roles: ["data", "payload"] },
+    { label: tx("校验", "Checksum"), roles: ["checksum", "checksum2"] },
+  ];
+}
 
 function FieldDialog({
   init,
@@ -2778,9 +2798,9 @@ function FieldDialog({
         <div className="fc-dlg-row">
           <label>{tx("协议角色", "Role")}</label>
           <div className="fc-dlg-roles">
-            {ROLE_GROUPS.map((grp) => (
-              <div className="fc-dlg-roles-g" key={grp.zh}>
-                <span className="fc-dlg-roles-l">{tx(grp.zh, grp.en)}</span>
+            {roleGroups().map((grp) => (
+              <div className="fc-dlg-roles-g" key={grp.label}>
+                <span className="fc-dlg-roles-l">{grp.label}</span>
                 {grp.roles.map((rl) => (
                   <button
                     key={rl}

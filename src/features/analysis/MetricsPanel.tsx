@@ -112,7 +112,7 @@ export default function MetricsPanel() {
   };
   const result = state.result;
   return <div className="plot analysis-panel">
-    <div className="plot-bar analysis-controls">
+    <div className="plot-bar analysis-controls p-bar">
       <label>{tx("通道", "Channel")} <select className="input" value={channelId} onChange={(e) => setChannel(e.target.value)}>
         <option value="">{tx("不选", "None")}</option>
         {plot.channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}

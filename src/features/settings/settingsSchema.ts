@@ -10,6 +10,7 @@
  * - secret：API key、桥 token，任何工具输出只返回“是否已配置”，值永不回显。
  */
 import { THEME_LIST, AI_PRESETS, type Settings, type ThemeMode, type WorkspacePreset, type AiPreset, type AiFormat } from "./settingsStore";
+import { LOCALE_LIST } from "../../i18n/strings";
 import { MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
 
 export type Sensitivity = "safe" | "protected" | "secret";
@@ -25,8 +26,8 @@ const PRESET_KEYS = Object.keys(AI_PRESETS) as AiPreset[];
 
 /** 全量声明：每个 Settings 键恰好一条。 */
 export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
-  { key: "theme", type: "enum", values: THEME_LIST, def: "begonia", group: "appearance", label: "主题", sensitivity: "safe", reversible: true },
-  { key: "locale", type: "enum", values: ["zh", "en"], def: "zh", group: "appearance", label: "语言", sensitivity: "safe", reversible: true },
+  { key: "theme", type: "enum", values: THEME_LIST, def: "light", group: "appearance", label: "主题", sensitivity: "safe", reversible: true },
+  { key: "locale", type: "enum", values: LOCALE_LIST, def: "zh", group: "appearance", label: "语言", sensitivity: "safe", reversible: true },
   { key: "zoom", type: "enum", values: [90, 100, 110, 125], def: 100, group: "appearance", label: "界面缩放", sensitivity: "safe", reversible: true },
   { key: "decimals", type: "int", min: 0, max: 6, def: 2, group: "appearance", label: "显示精度", sensitivity: "safe", reversible: true },
   { key: "perfHud", type: "boolean", def: false, group: "appearance", label: "性能浮窗", sensitivity: "safe", reversible: true },
@@ -102,7 +103,11 @@ export function appearanceDefaults(): Partial<Settings> {
   return out as Partial<Settings>;
 }
 
-/** 中文标签清单（确认对话框要逐项列出会改什么，不能只说"恢复默认"） */
+/**
+ * 这些键的中文名 —— 只给**不看语言的消费方**（Agent 工具描述里点名要改哪几项）。
+ * 界面上一律别用它：设置项的名字住在中心键 `set.*`（`SettingsModal` 就从那里取），
+ * 这里再出一份就是第二处名字真值，两边迟早对不上。
+ */
 export function appearanceDefaultLabels(): string[] {
   return APPEARANCE_RESET_KEYS
     .map((k) => SETTINGS_SCHEMA.find((x) => x.key === k)?.label)

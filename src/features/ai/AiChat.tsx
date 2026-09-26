@@ -41,75 +41,122 @@ import * as serialStore from "../serial/serialStore";
 import { detectAnomalies, anomaliesToText, type Anomaly } from "./anomaly";
 import { Markdown, CodeBlock, parseSegments } from "./markdown";
 import { EmptyState } from "../../shared/EmptyState";
-import {
-  IconSend,
-  IconStop,
-  IconSparkle,
-  IconChevron,
-  IconClose,
-  IconDock,
-  IconPop,
-  IconPlus,
-} from "../../shared/icons";
+import { Glyph, IconChevron, IconClose, IconDock, IconPlus, IconPop, IconSend, IconSparkle, IconStop } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";
 import { ErrorBoundary } from "../../shared/ErrorBoundary";
+import { t, tx, useLocale } from "../../i18n/strings";
+import { HelpHint } from "../../shared/HelpHint";
 
 const BUG_ENDPOINT = "https://larix.teuioe.cn/api/bugreport.php";
 
-/** P88b-4 B：常用任务快捷入口（Agent 模式面板内，点击填入输入框；覆盖外观/诊断/插件典型场景） */
-const QUICK_TASKS: { label: string; goal: string; tip: string }[] = [
+/**
+ * 「巡检发现」那一节的小节标题。**这不是界面文案，是提示词与回执之间的暗号**：
+ * `prompts.ts` 要求模型在回答末尾用这一节列出发现的问题，本文件靠它判断"这次有没有可上报的东西"。
+ * 换语言要两边一起换，而且换了之后**旧会话的历史回复**还是老标题，判据会漏 ——
+ * 所以它留在这里不动，本批只翻它周围的句子。
+ */
+const PATROL_MARKER = "巡检发现";
+
+/**
+ * P88b-4 B：常用任务快捷入口（Agent 模式面板内，点击填入输入框；覆盖外观/诊断/插件典型场景）。
+ *
+ * 这几张表原来是**模块级常量**，现在改成"取的时候才拼"的函数：`goal` 会被填进输入框、
+ * 成为任务气泡上那行字，`label / tip` 直接上屏 —— 在模块求值期翻一次就把语言钉死在那一刻了。
+ * 翻的是**用户自己选的那条示例目标**（他打英文就会是英文），系统提示词那套在 `prompts.ts`，本批不动。
+ */
+const quickTasks = () => [
   {
-    label: "大字号+减少动效",
-    goal: "把界面字号调大一档、动效放缓，满意后保存为插件并启用，告诉我怎么停用",
-    tip: "字号与动效配方：先预览，再自动保存为已启用插件（本卡或插件库可停用）",
+    label: tx("大字号+减少动效", "Bigger text, less motion"),
+    goal: tx(
+      "把界面字号调大一档、动效放缓，满意后保存为插件并启用，告诉我怎么停用",
+      "Raise the UI font one step and slow the motion down; once I like it, save it as a plugin and enable it, and tell me how to turn it off",
+    ),
+    tip: tx(
+      "字号与动效配方：先预览，再自动保存为已启用插件（本卡或插件库可停用）",
+      "Font and motion recipe: preview first, then auto-save as an enabled plugin (disable from this card or the plugin library)",
+    ),
   },
   {
-    label: "玻璃质感主题",
-    goal:
-      "先用 theme_preset 的玻璃配方（glass）按当前主题派生整套外观：面板、嵌底、边框、文字、主色一起调，" +
-      "不要只改两三个 token；我看过效果后保存为「我的玻璃主题」并启用",
-    tip: "走内置玻璃配方（跟随当前主题色派生一组 token），保存后是一份完整主题插件，可随时停用",
+    label: tx("玻璃质感主题", "Glass theme"),
+    goal: tx(
+      "先用 theme_preset 的玻璃配方（glass）按当前主题派生整套外观：面板、嵌底、边框、文字、主色一起调，不要只改两三个 token；我看过效果后保存为「我的玻璃主题」并启用",
+      "Start from the theme_preset glass recipe and derive the whole look from the current theme: panels, insets, borders, text and accent together, not just two or three tokens; after I see it, save it as “My Glass Theme” and enable it",
+    ),
+    tip: tx(
+      "走内置玻璃配方（跟随当前主题色派生一组 token），保存后是一份完整主题插件，可随时停用",
+      "Uses the built-in glass recipe (a token set derived from the current theme colors); saving yields a complete theme plugin you can disable any time",
+    ),
   },
   {
-    label: "只读诊断面板",
-    goal: "分析当前曲线数据的异常区间，生成一个只读的诊断面板",
-    tip: "读取通道统计后生成卡片面板，不改数据",
+    label: tx("只读诊断面板", "Read-only diagnostic panel"),
+    goal: tx("分析当前曲线数据的异常区间，生成一个只读的诊断面板", "Analyse the current curve data for abnormal ranges and build a read-only diagnostic panel"),
+    tip: tx("读取通道统计后生成卡片面板，不改数据", "Reads channel statistics, then builds a card panel; changes no data"),
   },
   {
-    label: "面板另存紧凑版",
-    goal: "把当前面板的标题单位改成中文，另存一个紧凑版副本，不覆盖原版",
-    tip: "修改后另存新插件，原版保持不变",
+    label: tx("面板另存紧凑版", "Save a compact copy"),
+    goal: tx(
+      "把当前面板的标题单位改成中文，另存一个紧凑版副本，不覆盖原版",
+      "Change the current panel’s title units to Chinese, then save a compact copy without overwriting the original",
+    ),
+    tip: tx("修改后另存新插件，原版保持不变", "Saves the change as a new plugin; the original stays untouched"),
   },
 ];
 
-const SCENE_HINT: Partial<Record<AiScene, string>> = {
-  genCommand: "生成指令：描述你要发送的指令，如「把 roll 归零并每 100ms 上报一次」",
-  genCard: "生成卡片：描述你要的控制卡片，如「一个控制电机转速的滑条，0-100」",
-  create: "创造：描述你想要的主题/小部件/面板，我会引导你用 Agent 任务把它保存为插件并自动启用",
-  diagnose: "诊断问题：描述你遇到的问题，如「收不到数据」",
+const sceneHint = (scene: AiScene): string | undefined => {
+  switch (scene) {
+    case "genCommand":
+      return tx(
+        "生成指令：描述你要发送的指令，如「把 roll 归零并每 100ms 上报一次」",
+        "Generate command: describe what to send, e.g. “zero the roll and report every 100ms”",
+      );
+    case "genCard":
+      return tx(
+        "生成卡片：描述你要的控制卡片，如「一个控制电机转速的滑条，0-100」",
+        "Generate card: describe the control card you want, e.g. “a 0-100 slider for motor speed”",
+      );
+    case "create":
+      return tx(
+        "创造：描述你想要的主题/小部件/面板，我会引导你用 Agent 任务把它保存为插件并自动启用",
+        "Create: describe the theme, widget or panel you want — I’ll walk you through saving it as a plugin via an Agent task, enabled automatically",
+      );
+    case "diagnose":
+      return tx("诊断问题：描述你遇到的问题，如「收不到数据」", "Diagnose: describe what’s wrong, e.g. “no data coming in”");
+    default:
+      return undefined;
+  }
 };
 
-const CONTEXT_LABELS: Record<keyof ContextSelection, string> = {
-  conn: "连接配置",
-  protocol: "协议清单",
-  protoFull: "协议完整定义",
-  samples: "数据样本",
-  hex: "Hex 选区",
+/** 上下文那五格：键序是一件事（结构），标签是另一件事（文案），所以清单与 switch 分开放 */
+const CONTEXT_KEYS: (keyof ContextSelection)[] = ["conn", "protocol", "protoFull", "samples", "hex"];
+
+const contextLabel = (k: keyof ContextSelection): string => {
+  switch (k) {
+    case "conn":
+      return tx("连接配置", "Connection config");
+    case "protocol":
+      return tx("协议清单", "Protocol list");
+    case "protoFull":
+      return tx("协议完整定义", "Full protocol definition");
+    case "samples":
+      return tx("数据样本", "Data samples");
+    case "hex":
+      return tx("Hex 选区", "Hex selection");
+  }
 };
 
 /** P88e C1：可附加的文本类文件后缀（随消息以代码块形式发给模型） */
 const TEXT_FILE_RE = /\.(txt|md|markdown|csv|tsv|json|log|ini|cfg|conf|xml|yaml|yml|toml|ts|tsx|js|jsx|py|c|h|cpp|hpp|rs|go|java|html|css|sql|bat|ps1|sh)$/i;
 
-/** P88e C1：顶部工具栏收拢后「场景 ▾」下拉的场景项（与 quickPick 对接） */
-const SCENE_MENU: { scene: AiScene; label: string; tip: string }[] = [
-  { scene: "protocol", label: "识别协议", tip: "框选 Hex 字节后点击，AI 推断帧结构并生成模板" },
-  { scene: "interpret", label: "解读数据", tip: "根据最近帧数据概括设备状态与异常" },
-  { scene: "analyzeCurve", label: "分析曲线", tip: "分析当前 2D 曲线各通道的统计特征与周期" },
-  { scene: "genCommand", label: "生成指令", tip: "描述需求，AI 生成命令模板或脚本" },
-  { scene: "genCard", label: "生成卡片", tip: "描述需求，AI 生成控制卡片并写入控制画布" },
-  { scene: "create", label: "创造", tip: "主题 / 小部件 / 面板（经 Agent 任务保存为插件并自动启用）" },
-  { scene: "diagnose", label: "诊断", tip: "描述问题，结合连接状态给出排查清单" },
-  { scene: "report", label: "调试报告", tip: "汇总本次会话生成 Markdown 调试报告" },
+/** P88e C1：顶部工具栏收拢后「场景 ▾」下拉的场景项（与 quickPick 对接）。同样是取的时候才拼。 */
+const sceneMenu = () => [
+  { scene: "protocol" as const, label: tx("识别协议", "Detect protocol"), tip: tx("框选 Hex 字节后点击，AI 推断帧结构并生成模板", "Select Hex bytes first; the AI infers the frame layout and builds a template") },
+  { scene: "interpret" as const, label: tx("解读数据", "Interpret data"), tip: tx("根据最近帧数据概括设备状态与异常", "Summarise device state and anomalies from recent frames") },
+  { scene: "analyzeCurve" as const, label: tx("分析曲线", "Analyse curves"), tip: tx("分析当前 2D 曲线各通道的统计特征与周期", "Statistics and periodicity per channel of the current 2D curve") },
+  { scene: "genCommand" as const, label: tx("生成指令", "Generate command"), tip: tx("描述需求，AI 生成命令模板或脚本", "Describe the need; the AI writes a command template or script") },
+  { scene: "genCard" as const, label: tx("生成卡片", "Generate card"), tip: tx("描述需求，AI 生成控制卡片并写入控制画布", "Describe the need; the AI builds a control card on the control canvas") },
+  { scene: "create" as const, label: tx("创造", "Create"), tip: tx("主题 / 小部件 / 面板（经 Agent 任务保存为插件并自动启用）", "Theme / widget / panel (saved as a plugin via an Agent task, auto-enabled)") },
+  { scene: "diagnose" as const, label: tx("诊断", "Diagnose"), tip: tx("描述问题，结合连接状态给出排查清单", "Describe the problem; get a checklist against the current link state") },
+  { scene: "report" as const, label: tx("调试报告", "Debug report"), tip: tx("汇总本次会话生成 Markdown 调试报告", "Sum up this session into a Markdown debug report") },
 ];
 
 function ResultLine({ result }: { result: { ok: boolean; msg: string } }) {
@@ -120,14 +167,14 @@ function TemplateWriteBlock({ code }: { code: string }) {
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   return (
     <div className="ai-tpl-block">
-      <div className="ai-tpl-head">候选协议模板</div>
+      <div className="ai-tpl-head">{tx("候选协议模板", "Candidate protocol template")}</div>
       <pre className="ai-tpl-pre">{code.length > 600 ? code.slice(0, 600) + "\n…" : code}</pre>
       <div className="ai-tpl-actions">
         <button
           className="btn primary"
           onClick={() => setResult(writeTemplateFromAiJson(code))}
         >
-          写入协议模板
+          {tx("写入协议模板", "Save as protocol template")}
         </button>
         {result && <ResultLine result={result} />}
       </div>
@@ -154,37 +201,44 @@ function CommandWriteBlock({ code }: { code: string }) {
     template.length > 0 && !hasFormatPlaceholder(template) && !script;
   return (
     <div className="ai-tpl-block">
-      <div className="ai-tpl-head">生成的命令</div>
+      <div className="ai-tpl-head">{tx("生成的命令", "Generated command")}</div>
       <pre className="ai-tpl-pre">{code.length > 600 ? code.slice(0, 600) + "\n…" : code}</pre>
       {resolved && (
         <div className="ai-tpl-preview">
-          预览发送内容：<code>{resolved}</code>
+          {tx("预览发送内容：", "Preview of what will be sent:")}
+          <code>{resolved}</code>
           {hasFormatPlaceholder(template) && (
             <span className="ai-tpl-note">
-              （含 %d/%.2f 占位符，需在命令库/控制画布中配合输入值发送）
+              {tx(
+                "（含 %d/%.2f 占位符，需在命令库/控制画布中配合输入值发送）",
+                "(contains %d/%.2f placeholders — send it from the command library or a control card so values can be filled in)",
+              )}
             </span>
           )}
         </div>
       )}
       <div className="ai-tpl-actions">
         <button className="btn primary" onClick={() => setResult(writeCommandFromAiJson(code))}>
-          加入命令库
+          {tx("加入命令库", "Add to command library")}
         </button>
         <button
           className="btn"
           disabled={!directOk}
           title={
             directOk
-              ? "不经命令库直接发送一次"
-              : "模板含格式化占位符或脚本，需在命令库/控制画布中配合输入值发送"
+              ? tx("不经命令库直接发送一次", "Send once without going through the command library")
+              : tx(
+                  "模板含格式化占位符或脚本，需在命令库/控制画布中配合输入值发送",
+                  "The template has format placeholders or a script; send it from the command library or a control card so values can be filled in",
+                )
           }
           onClick={() => {
             if (!directOk || !parsed) return;
             void serialStore.sendData(parsed.sendMode === "hex" ? "hex" : "ascii", template);
-            setResult({ ok: true, msg: "已临时发送" });
+            setResult({ ok: true, msg: tx("已临时发送", "Sent once") });
           }}
         >
-          临时发送
+          {tx("临时发送", "Send once")}
         </button>
         {result && <ResultLine result={result} />}
       </div>
@@ -196,11 +250,11 @@ function CardWriteBlock({ code }: { code: string }) {
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   return (
     <div className="ai-tpl-block">
-      <div className="ai-tpl-head">生成的控制卡片</div>
+      <div className="ai-tpl-head">{tx("生成的控制卡片", "Generated control card")}</div>
       <pre className="ai-tpl-pre">{code.length > 600 ? code.slice(0, 600) + "\n…" : code}</pre>
       <div className="ai-tpl-actions">
         <button className="btn primary" onClick={() => setResult(writeCardFromAiJson(code))}>
-          写入控制画布
+          {tx("写入控制画布", "Place on the control canvas")}
         </button>
         {result && <ResultLine result={result} />}
       </div>
@@ -213,11 +267,11 @@ function CodecWriteBlock({ code }: { code: string }) {
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null);
   return (
     <div className="ai-tpl-block">
-      <div className="ai-tpl-head">自定义协议（指令工厂）</div>
+      <div className="ai-tpl-head">{tx("自定义协议（指令工厂）", "Custom protocol (command factory)")}</div>
       <pre className="ai-tpl-pre">{code.length > 600 ? code.slice(0, 600) + "\n…" : code}</pre>
       <div className="ai-tpl-actions">
         <button className="btn primary" onClick={() => setResult(writeCodecFromAiJson(code))}>
-          写入指令工厂
+          {tx("写入指令工厂", "Install into the command factory")}
         </button>
         {result && <ResultLine result={result} />}
       </div>
@@ -252,9 +306,14 @@ function ActionBlock({ code }: { code: string }) {
         .slice(0, 16);
     }
   } catch {
-    parseErr = "JSON 解析失败";
+    parseErr = tx("JSON 解析失败", "JSON parse failed");
   }
-  const [results, setResults] = useState<(string | null)[]>([]);
+  /**
+   * 回执原来是"一条字符串，靠 `startsWith("失败")` 判成败"。翻译之后那个判别就断了 ——
+   * 英文界面下 `Failed: …` 不以"失败"开头，错的动作会被染成绿色当成成功。
+   * 所以把成败存成结构，不藏在前缀里。
+   */
+  const [results, setResults] = useState<{ ok: boolean; text: string }[]>([]);
   const [running, setRunning] = useState(false);
   const destructive = actions?.some((a) => DESTRUCTIVE_ACTIONS.has(a.kind)) ?? false;
 
@@ -262,13 +321,14 @@ function ActionBlock({ code }: { code: string }) {
     if (!actions || running) return;
     setRunning(true);
     const { runAppAction, actionDataText } = await import("./appActions");
-    const out: (string | null)[] = [];
+    const out: { ok: boolean; text: string }[] = [];
     for (const a of actions) {
       try {
         const r = await runAppAction(a.kind, a.args ?? {}, { highPriv: true });
-        out.push(r.ok ? actionDataText(r.data) : `失败：${r.err}`);
+        out.push(r.ok ? { ok: true, text: actionDataText(r.data) } : { ok: false, text: tx(`失败：${r.err}`, `Failed: ${r.err}`) });
       } catch (e) {
-        out.push(`失败：${String(e).slice(0, 100)}`);
+        const why = String(e).slice(0, 100);
+        out.push({ ok: false, text: tx(`失败：${why}`, `Failed: ${why}`) });
       }
     }
     setResults(out);
@@ -278,16 +338,16 @@ function ActionBlock({ code }: { code: string }) {
   if (!actions || actions.length === 0) {
     return (
       <div className="ai-tpl-block">
-        <div className="ai-tpl-head">动作执行</div>
-        <div className="ai-tpl-err">{parseErr || "没有可执行的动作"}</div>
+        <div className="ai-tpl-head">{tx("动作执行", "Action run")}</div>
+        <div className="ai-tpl-err">{parseErr || tx("没有可执行的动作", "No actions to run")}</div>
       </div>
     );
   }
   return (
     <div className={`ai-tpl-block${destructive ? " ai-action-danger" : ""}`}>
       <div className="ai-ext-head">
-        <span>动作执行 · {actions.length} 步</span>
-        {destructive && <span className="ai-ext-badge warn">含破坏性操作</span>}
+        <span>{tx(`动作执行 · ${actions.length} 步`, `Action run · ${actions.length} step(s)`)}</span>
+        {destructive && <span className="ai-ext-badge warn">{tx("含破坏性操作", "includes destructive actions")}</span>}
       </div>
       <ul className="ai-action-list">
         {actions.map((a, i) => (
@@ -299,8 +359,8 @@ function ActionBlock({ code }: { code: string }) {
               {a.args && Object.keys(a.args).length > 0 ? JSON.stringify(a.args) : ""}
             </span>
             {results[i] && (
-              <span className={results[i]!.startsWith("失败") ? "ai-tpl-err" : "ai-tpl-ok"}>
-                {results[i]}
+              <span className={results[i]!.ok ? "ai-tpl-ok" : "ai-tpl-err"}>
+                {results[i]!.text}
               </span>
             )}
           </li>
@@ -308,7 +368,7 @@ function ActionBlock({ code }: { code: string }) {
       </ul>
       <div className="ai-tpl-actions">
         <button className="btn primary" disabled={running} onClick={() => void runAll()}>
-          {running ? "执行中…" : "执行"}
+          {running ? tx("执行中…", "Running…") : tx("执行", "Run")}
         </button>
       </div>
     </div>
@@ -319,7 +379,8 @@ function ActionBlock({ code }: { code: string }) {
 
 /** 思考耗时（秒）显示文本 */
 function fmtThink(secs: number): string {
-  return secs >= 60 ? `${Math.floor(secs / 60)} 分 ${secs % 60} 秒` : `${secs} 秒`;
+  const m = Math.floor(secs / 60);
+  return secs >= 60 ? tx(`${m} 分 ${secs % 60} 秒`, `${m}m ${secs % 60}s`) : tx(`${secs} 秒`, `${secs}s`);
 }
 
 /** DeepSeek 风格思维链：每轮思考独立成框、按序排列；当前活跃框流式直显 + 计时，正文开始后自动折叠 */
@@ -352,7 +413,7 @@ function ThinkBox({
       <div className="ai-think live collapsed">
         <div className="ai-think-head">
           <span className="ai-think-dot" />
-          等待思维链…
+          {tx("等待思维链…", "Waiting for the chain of thought…")}
         </div>
       </div>
     ) : null;
@@ -362,7 +423,7 @@ function ThinkBox({
       <div className="ai-think live collapsed">
         <div className="ai-think-head">
           <span className="ai-think-dot" />
-          思考中 · {fmtThink(secs)}
+          {tx(`思考中 · ${fmtThink(secs)}`, `Thinking · ${fmtThink(secs)}`)}
         </div>
       </div>
     ) : null;
@@ -371,7 +432,7 @@ function ThinkBox({
     <div className="ai-think live">
       <div className="ai-think-head">
         <span className="ai-think-dot" />
-        思考中 · {fmtThink(secs)}
+        {tx(`思考中 · ${fmtThink(secs)}`, `Thinking · ${fmtThink(secs)}`)}
       </div>
       <div className="ai-reasoning-body">{text}</div>
       <span className="ai-caret" />
@@ -379,7 +440,7 @@ function ThinkBox({
   ) : (
     <details className="ai-think done">
       <summary>
-        <span className="think-caret"><IconChevron dir="right" /></span> 已深度思考（{fmtThink(secs)}）
+        <span className="think-caret"><IconChevron dir="right" /></span> {tx(`已深度思考（${fmtThink(secs)}）`, `Thought for ${fmtThink(secs)}`)}
       </summary>
       <div className="ai-reasoning-body">{text}</div>
     </details>
@@ -451,12 +512,12 @@ function PendingBlock({ code }: { code: string }) {
   return (
     <div className="ai-tpl-block ai-tpl-pending">
       <div className="ai-ext-head">
-        <span>内容生成中…</span>
-        <span className="ai-ext-badge">流式</span>
+        <span>{tx("内容生成中…", "Generating…")}</span>
+        <span className="ai-ext-badge">{tx("流式", "streaming")}</span>
       </div>
       <pre className="ai-tpl-pre">{code.length > 300 ? "…" + code.slice(-300) : code}</pre>
       <div className="ai-tpl-actions">
-        <span className="ai-tpl-ok">已生成 {lines} 行，输出完成后自动出现安装/执行按钮</span>
+        <span className="ai-tpl-ok">{tx(`已生成 ${lines} 行，输出完成后自动出现安装/执行按钮`, `Generated ${lines} line(s); the install/run buttons appear when the output finishes`)}</span>
       </div>
     </div>
   );
@@ -477,16 +538,16 @@ function MessageBody({
   const segs = parseSegments(clean);
   const saveReport = async () => {
     const path = await save({
-      title: "保存调试报告",
+      title: tx("保存调试报告", "Save debug report"),
       defaultPath: `uartix-report-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.md`,
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (typeof path !== "string") return;
     try {
       await invoke("save_text_file", { path, content });
-      setSaved("已保存");
+      setSaved(tx("已保存", "Saved"));
     } catch (e) {
-      setSaved(`保存失败：${e}`);
+      setSaved(tx(`保存失败：${e}`, `Save failed: ${e}`));
     }
     window.setTimeout(() => setSaved(""), 2600);
   };
@@ -516,7 +577,7 @@ function MessageBody({
       {scene === "report" && (
         <div className="ai-tpl-actions" style={{ marginTop: 6 }}>
           <button className="btn" onClick={() => void saveReport()}>
-            保存为 Markdown
+            {tx("保存为 Markdown", "Save as Markdown")}
           </button>
           {saved && <span className="ai-tpl-ok">{saved}</span>}
         </div>
@@ -555,6 +616,8 @@ function SessionSidebar({
   const active = chat.sessions.find((s) => s.id === chat.activeId);
 
   const hits = chatStore.searchSessions(q);
+  /** 会话没有标题时的那个兜底名，两处都要用（也为了 `tx()` 的参数里不套引号，见 .tools/check-i18n.cjs 头部） */
+  const fallbackTitle = tx("新对话", "New chat");
 
   return (
     <div className="ai-side">
@@ -566,24 +629,26 @@ function SessionSidebar({
             onClose();
           }}
         >
-          新对话
+          {tx("新对话", "New chat")}
         </button>
         <button className="ai-mode-close" onClick={onClose}>
-          收起
+          {tx("收起", "Collapse")}
         </button>
       </div>
       {/* P90 C5：抽屉顶部说明当前看的是哪个会话（切换后所见即所写） */}
-      <div className="ai-side-cur">当前会话：{active?.title || "新对话"}</div>
+      <div className="ai-side-cur">
+        {tx(`当前会话：${active?.title || fallbackTitle}`, `Current session: ${active?.title || fallbackTitle}`)}
+      </div>
       <input
         className="input ai-side-search"
-        placeholder="搜索历史消息…"
+        placeholder={tx("搜索历史消息…", "Search past messages…")}
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
       <div className="ai-side-list">
         {q.trim() ? (
           hits.length === 0 ? (
-            <div className="ai-ctx-empty">没有匹配的消息</div>
+            <div className="ai-ctx-empty">{tx("没有匹配的消息", "No matching messages")}</div>
           ) : (
             hits.map((h) => (
               <button
@@ -633,27 +698,28 @@ function SessionSidebar({
                   setEditingId(s.id);
                   setEditTitle(s.title);
                 }}
-                title="单击切换 · 双击重命名"
+                title={tx("单击切换 · 双击重命名", "Click to switch · double-click to rename")}
               >
-                <span className="ai-side-title">{s.title || "新对话"}</span>
+                <span className="ai-side-title">{s.title || fallbackTitle}</span>
                 <span className="ai-side-meta">
-                  {fmtSessionTime(s.updatedAt)} · {s.messages.length} 条
+                  {fmtSessionTime(s.updatedAt)} · {tx(`${s.messages.length} 条`, `${s.messages.length} message(s)`)}
                 </span>
                 <button
                   className="ai-side-del"
-                  title="删除会话"
+                  title={tx("删除会话", "Delete session")}
                   onClick={(ev) => {
                     ev.stopPropagation();
                     void (async () => {
+                      const name = s.title || fallbackTitle;
                       if (
                         await confirmDialog({
-                          message: `删除会话「${s.title || "新对话"}」？不可恢复。`,
+                          message: tx(`删除会话「${name}」？不可恢复。`, `Delete session “${name}”? This cannot be undone.`),
                           danger: true,
-                          okLabel: "删除",
+                          okLabel: tx("删除", "Delete"),
                         })
                       ) {
                         chatStore.deleteSession(s.id);
-                        notify("会话已删除");
+                        notify(tx("会话已删除", "Session deleted"));
                       }
                     })();
                   }}
@@ -667,10 +733,10 @@ function SessionSidebar({
       </div>
       <div className="ai-side-foot">
         <div className="ai-usage-line">
-          本会话 {active?.usage.prompt ?? 0}/{active?.usage.completion ?? 0} tok
+          {tx(`本会话 ${active?.usage.prompt ?? 0}/${active?.usage.completion ?? 0} tok`, `This session ${active?.usage.prompt ?? 0}/${active?.usage.completion ?? 0} tok`)}
         </div>
         <div className="ai-usage-line dim">
-          累计 {totals.prompt}/{totals.completion} tok（输入/输出）
+          {tx(`累计 ${totals.prompt}/${totals.completion} tok（输入/输出）`, `Total ${totals.prompt}/${totals.completion} tok (in/out)`)}
         </div>
       </div>
     </div>
@@ -680,6 +746,7 @@ function SessionSidebar({
 /* ---------------- 主组件 ---------------- */
 
 export function AiChat({ onDock }: { onDock?: () => void }) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const settings = useSettings();
   const chat = useSyncExternalStore(chatStore.subscribe, chatStore.getSnapshot);
   const proto = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
@@ -723,10 +790,10 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     agentSnap.runs.find((r) => r.sessionId === chat.activeId && isLiveRun(r.status)) ?? null;
   const sessionBadge = sessionRun
     ? sessionRun.pending
-      ? "待批准"
+      ? tx("待批准", "awaiting approval")
       : sessionRun.status === "paused"
-        ? "已暂停"
-        : "运行中"
+        ? tx("已暂停", "paused")
+        : tx("运行中", "running")
     : null;
   const [plgLibOpen, setPlgLibOpen] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
@@ -782,11 +849,11 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     const next = tightenHistoryBudget(ctxBudget);
     if (next === ctxBudget) return; // 已到下限：按钮此时是禁用的，这里只是双保险不静默空转
     setCtxBudget(next);
-    setNotice(`已压缩：会话历史预算 ${ctxBudget} → ${next} 字，更早的工具回执只以摘要下发（台账一条不删，本会话内不可还原）`);
+    setNotice(tx(`已压缩：会话历史预算 ${ctxBudget} → ${next} 字，更早的工具回执只以摘要下发（台账一条不删，本会话内不可还原）`, `Compressed: session history budget ${ctxBudget} → ${next} chars; older tool receipts now go as summaries (the ledger keeps every entry; not reversible within this session)`));
   };
   const resetContextBudget = () => {
     setCtxBudget(HISTORY_CHAR_BUDGET);
-    setNotice("已恢复完整的会话历史预算");
+    setNotice(tx("已恢复完整的会话历史预算", "Full session history budget restored"));
   };
 
   useEffect(() => {
@@ -855,7 +922,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     const room = 4 - pendingImages.length;
     const list = Array.from(files).slice(0, Math.max(0, room));
     if (list.length === 0) {
-      setNotice("每条消息最多附带 4 张图片");
+      setNotice(tx("每条消息最多附带 4 张图片", "Up to 4 images per message"));
       return;
     }
     for (const f of list) {
@@ -885,16 +952,16 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     const room = 4 - pendingFiles.length;
     const list = Array.from(files).slice(0, Math.max(0, room));
     if (list.length === 0) {
-      setNotice("每条消息最多附带 4 个文件");
+      setNotice(tx("每条消息最多附带 4 个文件", "Up to 4 files per message"));
       return;
     }
     for (const f of list) {
       if (!TEXT_FILE_RE.test(f.name)) {
-        setNotice(`暂不支持的文件类型：${f.name}（支持文本类：.txt/.md/.csv/.json/.log 等）`);
+        setNotice(tx(`暂不支持的文件类型：${f.name}（支持文本类：.txt/.md/.csv/.json/.log 等）`, `Unsupported file type: ${f.name} (text files work: .txt/.md/.csv/.json/.log and similar)`));
         continue;
       }
       if (f.size > 256 * 1024) {
-        setNotice(`文件过大（${f.name} 超过 256KB），请截取关键部分`);
+        setNotice(tx(`文件过大（${f.name} 超过 256KB），请截取关键部分`, `${f.name} is over 256KB — trim it down to the relevant part`));
         continue;
       }
       const reader = new FileReader();
@@ -918,7 +985,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     const brief = text.trim();
     if (!brief) return;
     if (agentRunning) {
-      setNotice("已有 Agent 任务在运行，请先停止或等待完成");
+      setNotice(tx("已有 Agent 任务在运行，请先停止或等待完成", "An Agent task is already running — stop it or wait for it first"));
       return;
     }
     stickRef.current = true;
@@ -966,9 +1033,12 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const clearChatWithConfirm = async () => {
     if (
       !(await confirmDialog({
-        message: "清空当前对话的全部消息？不可恢复（Agent 任务台账在卡片上单独删除）。",
+        message: tx(
+          "清空当前对话的全部消息？不可恢复（Agent 任务台账在卡片上单独删除）。",
+          "Clear every message in this conversation? This cannot be undone (Agent task ledgers are deleted from their own cards).",
+        ),
         danger: true,
-        okLabel: "清空",
+        okLabel: tx("清空", "Clear"),
       }))
     ) {
       return;
@@ -980,7 +1050,11 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     const text = input.trim();
     const fileBlock =
       pendingFiles.length > 0
-        ? pendingFiles.map((f) => `【附加文件：${f.name}】\n\`\`\`\n${f.text}\n\`\`\``).join("\n\n") + "\n\n"
+        ? pendingFiles
+            .map((f) =>
+              tx(`【附加文件：${f.name}】\n\`\`\`\n${f.text}\n\`\`\``, `[Attached file: ${f.name}]\n\`\`\`\n${f.text}\n\`\`\``),
+            )
+            .join("\n\n") + "\n\n"
         : "";
     if (!canSend || chat.streaming) return;
     // P88d ③：Agent 模式——目标文本启动任务（归属当前会话），不走问答链路
@@ -1012,7 +1086,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     if (!configured) return;
     if (scene === "protocol") {
       if (!proto.hexSelection || proto.hexSelection.bytes.length === 0) {
-        setNotice("请先在 Hex 数据流中框选一段字节，再点「识别协议」");
+        setNotice(tx("请先在 Hex 数据流中框选一段字节，再点「识别协议」", "Select a byte range in the Hex stream first, then choose “Detect protocol”"));
         return;
       }
       const h = proto.hexSelection;
@@ -1033,28 +1107,28 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   };
 
   const copyText = (text: string) => {
-    void navigator.clipboard.writeText(text).then(() => setNotice("已复制"));
+    void navigator.clipboard.writeText(text).then(() => setNotice(tx("已复制", "Copied")));
   };
 
   const exportConversation = async () => {
     const path = await save({
-      title: "导出对话",
+      title: tx("导出对话", "Export conversation"),
       defaultPath: `uartix-chat-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.md`,
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (typeof path !== "string") return;
     try {
       await invoke("save_text_file", { path, content: chatStore.exportSessionMd() });
-      setNotice("对话已导出");
+      setNotice(tx("对话已导出", "Conversation exported"));
     } catch (e) {
-      setNotice(`导出失败：${String(e).slice(0, 80)}`);
+      setNotice(tx(`导出失败：${String(e).slice(0, 80)}`, `Export failed: ${String(e).slice(0, 80)}`));
     }
   };
 
   const uploadPatrol = async () => {
     const last = [...messages].reverse().find((m) => m.role === "assistant");
-    if (!last || !last.content.includes("巡检发现")) {
-      setUploadState("最近回复中没有巡检发现");
+    if (!last || !last.content.includes(PATROL_MARKER)) {
+      setUploadState(tx("最近回复中没有巡检发现", "No patrol findings in the last reply"));
       return;
     }
     let ver: string;
@@ -1075,16 +1149,20 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           report: last.content.slice(-8000),
         }),
       });
-      setUploadState(resp.includes("OK") ? "已上报，感谢反馈" : `服务器响应：${resp.slice(0, 80)}`);
+      setUploadState(
+        resp.includes("OK")
+          ? tx("已上报，感谢反馈", "Uploaded — thanks for the feedback")
+          : tx(`服务器响应：${resp.slice(0, 80)}`, `Server response: ${resp.slice(0, 80)}`),
+      );
     } catch (e) {
-      setUploadState(`上报失败：${String(e).slice(0, 100)}`);
+      setUploadState(tx(`上报失败：${String(e).slice(0, 100)}`, `Upload failed: ${String(e).slice(0, 100)}`));
     }
   };
 
   const lastHasPatrol = [...messages]
     .reverse()
     .find((m) => m.role === "assistant")
-    ?.content.includes("巡检发现");
+    ?.content.includes(PATROL_MARKER);
 
   const lastAssistantId = [...messages]
     .reverse()
@@ -1094,6 +1172,10 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const lastAgentGoal = [...messages].reverse().find((m) => m.role === "user" && m.via === "agent");
 
   const ctxBlocks = collectContext(chat.contextSel);
+  /** 「≈N tok」那个尾巴：单位是语言中性的，不套 tx()（套了反而要把表达式嵌进 tx 的参数里） */
+  const ctxTokNote = ctxBlocks.length
+    ? ` · ≈${estimateTokens(ctxBlocks.map((b) => b.text).join("\n")) + estimateTokens(input)} tok`
+    : "";
   const checkedCtxCount = Object.values(chat.contextSel).filter(Boolean).length;
 
   if (!configured) {
@@ -1101,15 +1183,20 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
       <div className="ai-chat">
         <div className="ai-empty-wrap">
           <EmptyState
-            title="AI 助手尚未配置"
+            title={tx("AI 助手尚未配置", "The AI assistant isn't configured yet")}
             hint={[
-              "打开 设置 → AI 服务，选择服务商预设并填入 API Key",
-              "支持 OpenAI 兼容 / DeepSeek / 通义千问 / 本地 Ollama",
-              "Key 仅保存在本机，请求经本机程序转发，不经过第三方",
+              tx("选一个服务商预设、填入 API Key 就能用", "Pick a provider preset and drop in an API key"),
+              tx("Key 只存在本机，请求由本机程序转发", "The key stays on this machine; requests are relayed by the app itself"),
             ]}
           />
+          <HelpHint
+            text={tx(
+              "支持 OpenAI 兼容 / DeepSeek / 通义千问 / 本地 Ollama。",
+              "Works with OpenAI-compatible / DeepSeek / Qwen / a local Ollama.",
+            )}
+          />
           <button className="btn primary" onClick={() => invokeOpenSettings()}>
-            打开设置
+            {tx("打开设置", "Open Settings")}
           </button>
         </div>
       </div>
@@ -1118,32 +1205,32 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
 
   return (
     <div className="ai-chat">
-      <div className="ai-toolbar">
+      <div className="ai-toolbar p-bar">
         <button
           className={`ai-icon-btn${sideOpen ? " on" : ""}`}
-          title="会话列表：多会话切换、搜索历史、双击重命名"
+          title={tx("会话列表：多会话切换、搜索历史、双击重命名", "Session list: switch sessions, search history, double-click to rename")}
           onClick={() => setSideOpen((v) => !v)}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="14" y2="12" /><line x1="4" y1="18" x2="17" y2="18" /></svg>
+          <Glyph><line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="14" y2="12" /><line x1="4" y1="18" x2="17" y2="18" /></Glyph>
         </button>
         {/* P90 C1：顶栏删「Agent 任务」钮——发送方式唯一入口在输入区 pill；
             P90 C2：场景下拉改浮层（portal + fixed），不再被工具栏 overflow-x 裁到只剩几像素 */}
         <button
           ref={sceneBtnRef}
           className={`ai-scene-btn${sceneMenuOpen ? " on" : ""}`}
-          title="分析 / 生成 / 报告等场景入口"
+          title={tx("分析 / 生成 / 报告等场景入口", "Scene shortcuts: analyse / generate / report")}
           aria-haspopup="menu"
           aria-expanded={sceneMenuOpen}
           onClick={() => setSceneMenuOpen((v) => !v)}
         >
-          场景 ▾
+          {tx("场景 ▾", "Scenes ▾")}
         </button>
         <Dropdown
           anchor={sceneBtnRef.current}
           open={sceneMenuOpen}
           onClose={() => setSceneMenuOpen(false)}
         >
-          {SCENE_MENU.map((s) => (
+          {sceneMenu().map((s) => (
             <button
               key={s.scene}
               className="ai-scene-menu-item"
@@ -1162,12 +1249,12 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
         <button
           ref={moreBtnRef}
           className={`ai-scene-btn${moreOpen ? " on" : ""}`}
-          title="更多：插件库 / 导出对话 / 巡检上报 / 清空"
+          title={tx("更多：插件库 / 导出对话 / 巡检上报 / 清空", "More: plugin library / export chat / patrol report / clear")}
           aria-haspopup="menu"
           aria-expanded={moreOpen}
           onClick={() => setMoreOpen((v) => !v)}
         >
-          更多 ▾
+          {tx("更多 ▾", "More ▾")}
         </button>
         <Dropdown
           anchor={moreBtnRef.current}
@@ -1176,19 +1263,23 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           align="end"
         >
           <button className="ai-scene-menu-item" role="menuitem" onClick={() => { setMoreOpen(false); setPlgLibOpen(true); }}>
-            本地插件库
+            {tx("本地插件库", "Local plugin library")}
           </button>
           <button className="ai-scene-menu-item" role="menuitem" onClick={() => { setMoreOpen(false); void exportConversation(); }}>
-            导出对话为 Markdown
+            {tx("导出对话为 Markdown", "Export conversation as Markdown")}
           </button>
           <button
             className="ai-scene-menu-item"
             role="menuitem"
             disabled={!lastHasPatrol}
-            title={lastHasPatrol ? "将最近回复中的「巡检发现」匿名上报，帮助改进软件" : "最近回复中没有巡检发现"}
+            title={
+              lastHasPatrol
+                ? tx("将最近回复中的「巡检发现」匿名上报，帮助改进软件", "Anonymously upload the “patrol findings” from the last reply to help improve the app")
+                : tx("最近回复中没有巡检发现", "No patrol findings in the last reply")
+            }
             onClick={() => { setMoreOpen(false); void uploadPatrol(); }}
           >
-            上传巡检报告
+            {tx("上传巡检报告", "Upload patrol report")}
           </button>
           <div className="ai-menu-sep" />
           <button
@@ -1196,15 +1287,15 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             role="menuitem"
             onClick={() => { setMoreOpen(false); void clearChatWithConfirm(); }}
           >
-            清空当前对话
+            {tx("清空当前对话", "Clear this conversation")}
           </button>
         </Dropdown>
         {onDock ? (
-          <button className="ai-icon-btn" title="停靠为面板：转为常规可停靠面板，适合大屏双栏" onClick={onDock}>
+          <button className="ai-icon-btn" title={tx("停靠为面板：转为常规可停靠面板，适合大屏双栏", "Dock as panel: becomes a regular dockable panel — good for wide two-column layouts")} onClick={onDock}>
             <IconDock />
           </button>
         ) : (
-          <button className="ai-icon-btn" title="弹出为浮窗（Ctrl+K 也可开关）" onClick={invokePop}>
+          <button className="ai-icon-btn" title={tx("弹出为浮窗（Ctrl+K 也可开关）", "Pop out as a floating window (Ctrl+K toggles it too)")} onClick={invokePop}>
             <IconPop />
           </button>
         )}
@@ -1214,9 +1305,9 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
         <div className="ai-anom">
           <button className="ai-anom-bar" onClick={() => setAnomOpen((v) => !v)}>
             <span className="ai-anom-dot" />
-            发现 {anoms.length} 项异常
+            {tx(`发现 ${anoms.length} 项异常`, `Found ${anoms.length} anomalies`)}
             <span className="ai-anom-chev">
-              <IconChevron dir={anomOpen ? "down" : "right"} size={11} />
+              <IconChevron dir={anomOpen ? "down" : "right"} size={12} />
             </span>
           </button>
           {anomOpen && (
@@ -1232,11 +1323,14 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 disabled={chat.streaming}
                 onClick={() =>
                   runScene("diagnose", {
-                    text: `数据巡检发现以下异常，请结合当前连接与协议状态给出排查建议：\n${anomaliesToText(anoms)}`,
+                    text: tx(
+                      `数据巡检发现以下异常，请结合当前连接与协议状态给出排查建议：\n${anomaliesToText(anoms)}`,
+                      `The data patrol found these anomalies — give a troubleshooting plan based on the current link and protocol state:\n${anomaliesToText(anoms)}`,
+                    ),
                   })
                 }
               >
-                让 AI 排查
+                {tx("让 AI 排查", "Ask the AI to investigate")}
               </button>
             </div>
           )}
@@ -1252,10 +1346,13 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             <div className="ai-welcome">
               <div className="ai-welcome-title">
                 <IconSparkle />
-                AI 调试助手
+                {tx("AI 调试助手", "AI debugging assistant")}
               </div>
               <div className="ai-welcome-desc">
-                框选 Hex 字节右键「AI 识别协议」；或用上方快捷按钮解读数据、分析曲线、生成指令、诊断问题。想做主题、小部件、面板？用「Agent 任务」让 AI 直接保存为插件并自动启用。发送前可勾选随消息附带的软件内上下文。
+                {tx(
+                  "框选 Hex 字节右键「AI 识别协议」；或用上方快捷按钮解读数据、分析曲线、生成指令、诊断问题。想做主题、小部件、面板？用「Agent 任务」让 AI 直接保存为插件并自动启用。发送前可勾选随消息附带的软件内上下文。",
+                  "Select Hex bytes and choose “AI: detect protocol” from the context menu, or use the scene buttons above to interpret data, analyse curves, generate commands and diagnose problems. Want a theme, widget or panel? Start an “Agent task” and the AI saves it as a plugin and enables it. Before sending you can tick which in-app context travels with the message.",
+                )}
               </div>
             </div>
           )}
@@ -1296,10 +1393,10 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                           className="btn primary"
                           onClick={() => commitResend(m, editText)}
                         >
-                          {chatStore.resendKindOf(m) === "agent" ? "保存并重发任务" : "保存并重发"}
+                          {chatStore.resendKindOf(m) === "agent" ? tx("保存并重发任务", "Save and resend task") : tx("保存并重发", "Save and resend")}
                         </button>
                         <button className="btn" onClick={() => setEditingId("")}>
-                          取消
+                          {t("c.cancel")}
                         </button>
                       </div>
                     </div>
@@ -1333,7 +1430,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                         scene={m.scene}
                         streaming={false}
                       />
-                      {m.aborted && <div className="ai-aborted">已停止生成</div>}
+                      {m.aborted && <div className="ai-aborted">{tx("已停止生成", "Generation stopped")}</div>}
                       {m.error && <div className="ai-error">{m.error}</div>}
                     </>
                   )}
@@ -1341,58 +1438,60 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 {!chat.streaming && editingId !== m.id && (
                   <div className="ai-msg-ops">
                     {m.role === "assistant" && !m.error && (
-                      <button onClick={() => copyText(m.content)}>复制</button>
+                      <button onClick={() => copyText(m.content)}>{t("c.copy")}</button>
                     )}
                     {canClip && (
                       <button
                         onClick={() => setExpanded((v) => ({ ...v, [m.id]: !v[m.id] }))}
-                        title={expanded[m.id] ? "收拢这条长回复" : "展开查看完整内容"}
+                        title={expanded[m.id] ? tx("收拢这条长回复", "Collapse this long reply") : tx("展开查看完整内容", "Expand to read the full reply")}
                       >
-                        {expanded[m.id] ? "收拢" : `展开 ${m.content.length} 字`}
+                        {expanded[m.id] ? tx("收拢", "Collapse") : tx(`展开 ${m.content.length} 字`, `Expand ${m.content.length} chars`)}
                       </button>
                     )}
                     {m.role === "assistant" && m.id === lastAssistantId && m.fromRunId && lastAgentGoal && (
                       <button
                         onClick={() => commitResend(lastAgentGoal, lastAgentGoal.content)}
-                        title="按原目标重跑这个 Agent 任务（就地重发目标气泡，不重复堆一条）"
+                        title={tx("按原目标重跑这个 Agent 任务（就地重发目标气泡，不重复堆一条）", "Re-run this Agent task with the same goal (the goal bubble is resent in place, not stacked again)")}
                       >
-                        重跑任务
+                        {tx("重跑任务", "Re-run task")}
                       </button>
                     )}
                     {m.role === "assistant" && m.id === lastAssistantId && !m.fromRunId && (
                       <button
                         onClick={() => void chatStore.regenerate()}
-                        title={m.error ? "重试本次请求" : "重新生成回复"}
+                        title={m.error ? tx("重试本次请求", "Retry this request") : tx("重新生成回复", "Regenerate the reply")}
                       >
-                        {m.error ? "重试" : "重新生成"}
+                        {m.error ? tx("重试", "Retry") : tx("重新生成", "Regenerate")}
                       </button>
                     )}
                     {m.role === "user" && (
                       <>
-                        <button onClick={() => copyText(m.content)}>复制</button>
+                        <button onClick={() => copyText(m.content)}>{t("c.copy")}</button>
                         <button
                           onClick={() => {
                             setEditingId(m.id);
                             setEditText(m.content);
                           }}
                         >
-                          编辑
+                          {tx("编辑", "Edit")}
                         </button>
                         {chatStore.resendKindOf(m) === "agent" && (
                           <button
                             onClick={() => startAgentRun(m.content, { replaceMsgId: m.id })}
-                            title="截断此条之后的内容，以 Agent 任务重新发起"
+                            title={tx("截断此条之后的内容，以 Agent 任务重新发起", "Truncate everything after this message and start it again as an Agent task")}
                           >
-                            重发任务
+                            {tx("重发任务", "Resend as task")}
                           </button>
                         )}
                       </>
                     )}
-                    <button onClick={() => chatStore.deleteMsg(m.id)}>删除</button>
+                    <button onClick={() => chatStore.deleteMsg(m.id)}>{t("c.delete")}</button>
                   </div>
                 )}
                 {m.role === "assistant" && m.contextTitles && m.contextTitles.length > 0 && (
-                  <div className="ai-msg-ctx">附加上下文：{m.contextTitles.join(" · ")}</div>
+                  <div className="ai-msg-ctx">
+                    {tx(`附加上下文：${m.contextTitles.join(" · ")}`, `Attached context: ${m.contextTitles.join(" · ")}`)}
+                  </div>
                 )}
                 {/* P95-H4：系统替用户做过的取舍要说出来（不然就是"AI 怎么看不见我上一张图"） */}
                 {m.role === "assistant" && m.notice && (
@@ -1411,7 +1510,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           {/* P91 B1：Agent 任务卡已按时间插进上面的时间线，页脚位不再渲染任务流 */}
         </div>
         {!atBottom && messages.length > 0 && (
-          <button className="ai-scroll-btn" title="回到底部" onClick={scrollToBottom}>
+          <button className="ai-scroll-btn" title={tx("回到底部", "Back to the bottom")} onClick={scrollToBottom}>
             <IconChevron dir="down" size={14} />
           </button>
         )}
@@ -1425,11 +1524,11 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
         {(pendingFiles.length > 0 || checkedCtxCount > 0 || ctxOpen) && (
           <div className="ai-attach-row">
             {pendingFiles.map((f, i) => (
-              <span key={`${f.name}:${i}`} className="ai-attach-chip" title={`附加文件 ${f.name}`}>
+              <span key={`${f.name}:${i}`} className="ai-attach-chip" title={tx(`附加文件 ${f.name}`, `Attached file ${f.name}`)}>
                 {f.name}
                 <button
                   className="ai-attach-del"
-                  title="移除文件"
+                  title={tx("移除文件", "Remove file")}
                   onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
                 >
                   <IconClose />
@@ -1438,21 +1537,19 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             ))}
             <button
               className={`ai-attach-chip as-btn${ctxOpen ? " on" : ""}`}
-              title="勾选随消息发送的上下文（连接配置 / 协议 / 数据样本 / Hex 选区）"
+              title={tx("勾选随消息发送的上下文（连接配置 / 协议 / 数据样本 / Hex 选区）", "Tick what travels with the next message (connection config / protocols / data samples / Hex selection)")}
               onClick={() => setCtxOpen((v) => !v)}
             >
-              上下文 · 勾选 {checkedCtxCount} · 附加 {ctxBlocks.length}
-              {ctxBlocks.length > 0
-                ? ` · ≈${estimateTokens(ctxBlocks.map((b) => b.text).join("\n")) + estimateTokens(input)} tok`
-                : ""}
+              {tx(`上下文 · 勾选 ${checkedCtxCount} · 附加 ${ctxBlocks.length}`, `Context · ${checkedCtxCount} ticked · ${ctxBlocks.length} attached`)}
+              {ctxTokNote}
             </button>
           </div>
         )}
         {ctxOpen && (
           <div className="ai-ctx-panel">
             <div className="ai-ctx-checks">
-              {(Object.keys(CONTEXT_LABELS) as (keyof ContextSelection)[]).map((k) => (
-                <label key={k} className="ai-ctx-check" title={`随下一条消息附带${CONTEXT_LABELS[k]}`}>
+              {CONTEXT_KEYS.map((k) => (
+                <label key={k} className="ai-ctx-check" title={tx(`随下一条消息附带${contextLabel(k)}`, `Attach ${contextLabel(k)} to the next message`)}>
                   <input
                     type="checkbox"
                     checked={chat.contextSel[k]}
@@ -1460,11 +1557,11 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                       chatStore.setContextSel({ ...chat.contextSel, [k]: e.target.checked })
                     }
                   />
-                  {CONTEXT_LABELS[k]}
+                  {contextLabel(k)}
                 </label>
               ))}
-              <span className="ai-ctx-note" title="Hex 未框选字节、样本无数据时不产生附加块">
-                勾选数与实际附加数可能不同
+              <span className="ai-ctx-note" title={tx("Hex 未框选字节、样本无数据时不产生附加块", "No block is attached when the Hex range is empty or there are no samples")}>
+                {tx("勾选数与实际附加数可能不同", "Ticked count may differ from what actually attaches")}
               </span>
             </div>
             {ctxBlocks.length > 0 && (
@@ -1487,7 +1584,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             onClose={() => setModePanelOpen(false)}
             className="ai-agent-panel-drop"
           >
-          <div className="ai-agent-panel" role="group" aria-label="Agent 工作方式与授权">
+          <div className="ai-agent-panel" role="group" aria-label={tx("Agent 工作方式与授权", "Agent mode and permissions")}>
             {/*
               P98-M3：面板拆成**两个轴**。旧版把「普通对话」和 7 个档位塞进同一个 radiogroup，
               于是"用不用 Agent"和"Agent 有多大权"这两件可以自由组合的事被排成了互斥单选，
@@ -1496,8 +1593,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               原来的工作区写入/设备收发/本机全能力 降级为该区里的一键预设 chip（能力一个没少）。
             */}
             <div className="ai-agent-group">
-              <div className="ai-agent-group-title">工作方式</div>
-              <div className="ai-agent-modes" role="radiogroup" aria-label="工作方式">
+              <div className="ai-agent-group-title">{tx("工作方式", "Mode")}</div>
+              <div className="ai-agent-modes" role="radiogroup" aria-label={tx("工作方式", "Mode")}>
                 <button
                   className={`ai-agent-mode${!agentMode ? " on" : ""}`}
                   role="radio"
@@ -1508,8 +1605,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                     setModePanelOpen(false);
                   }}
                 >
-                  <span className="ai-agent-mode-name">普通对话</span>
-                  <span className="ai-agent-mode-desc">一问一答；不执行任何应用操作</span>
+                  <span className="ai-agent-mode-name">{tx("普通对话", "Plain chat")}</span>
+                  <span className="ai-agent-mode-desc">{tx("一问一答；不执行任何应用操作", "One question, one answer; runs no app actions")}</span>
                 </button>
                 <button
                   className={`ai-agent-mode${agentMode ? " on" : ""}`}
@@ -1521,15 +1618,15 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                     // 留在面板里：下一步就要选授权档，关掉等于逼用户再点开一次
                   }}
                 >
-                  <span className="ai-agent-mode-name">Agent 任务</span>
-                  <span className="ai-agent-mode-desc">多轮自主执行，可读可写（下面选授权档）</span>
+                  <span className="ai-agent-mode-name">{tx("Agent 任务", "Agent task")}</span>
+                  <span className="ai-agent-mode-desc">{tx("多轮自主执行，可读可写（下面选授权档）", "Multi-round autonomous run, reads and writes (pick a tier below)")}</span>
                 </button>
               </div>
             </div>
             {agentMode && (
               <div className="ai-agent-group">
-                <div className="ai-agent-group-title">授权档</div>
-                <div className="ai-agent-modes" role="radiogroup" aria-label="授权档">
+                <div className="ai-agent-group-title">{tx("授权档", "Permission tier")}</div>
+                <div className="ai-agent-modes" role="radiogroup" aria-label={tx("授权档", "Permission tier")}>
                   {PRIMARY_TIERS.map((t) => {
                     const on = tierIdOf(agentScope, agentAllowed) === t.id;
                     return (
@@ -1554,8 +1651,10 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 </div>
                 {tierRestore.downgraded && agentMode && (
                   <span className="ai-agent-domains-empty">
-                    上次这里是「全权执行 / 自定义勾选」。高危档不跨重启记忆（避免开机就带着满权限），
-                    已回落到「界面创造」——需要的话在上面的高级区重新勾上。
+                    {tx(
+                      "高危档不跨重启记忆，已回落到「界面创造」——需要请在高级区重新勾上",
+                      "High-risk tiers are never remembered across restarts — this fell back to UI authoring; re-tick it under Advanced if you need it",
+                    )}
                   </span>
                 )}
               </div>
@@ -1568,15 +1667,15 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                   disabled={agentRunning}
                   onClick={() => setAdvOpen((v) => !v)}
                 >
-                  <span className="ai-agent-adv-title">高级 · 具体授权域</span>
+                  <span className="ai-agent-adv-title">{tx("高级 · 具体授权域", "Advanced · specific domains")}</span>
                   <span className="ai-agent-adv-sum">
-                    {tierBadge(agentScope, agentAllowed)} · {DOMAINS.filter((d) => hasDomain(agentScope, agentAllowed, d)).length} 项已授
+                    {tierBadge(agentScope, agentAllowed)} · {tx(`${DOMAINS.filter((d) => hasDomain(agentScope, agentAllowed, d)).length} 项已授`, `${DOMAINS.filter((d) => hasDomain(agentScope, agentAllowed, d)).length} granted`)}
                   </span>
-                  <span className="ai-agent-adv-caret">{advOpen ? "收起" : "展开"}</span>
+                  <span className="ai-agent-adv-caret">{advOpen ? tx("收起", "Less") : tx("展开", "More")}</span>
                 </button>
                 {advOpen && (
                   <>
-                    <div className="ai-agent-presets" role="group" aria-label="授权域预设">
+                    <div className="ai-agent-presets" role="group" aria-label={tx("授权域预设", "Domain presets")}>
                       {DOMAIN_PRESETS.map((p) => {
                         const on = tierIdOf(agentScope, agentAllowed) === p.id;
                         return (
@@ -1623,7 +1722,10 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                       ))}
                     </div>
                     <span className="ai-agent-domains-empty">
-                      一项都不勾时按「界面创造」同权执行（配置 + 插件库），不会出现"选了自定义却什么都改不动"。
+                      {tx(
+                        "一项都不勾 = 按「界面创造」同权执行，不会选了却什么都改不动",
+                        "Ticking none runs with UI-authoring rights — you can't end up with a custom tier that can't do anything",
+                      )}
                     </span>
                   </>
                 )}
@@ -1631,9 +1733,9 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             )}
             {agentMode && !agentRunning && (
               <div className="ai-agent-group">
-                <div className="ai-agent-group-title">常用任务</div>
-                <div className="ai-agent-quick" role="group" aria-label="常用任务">
-                  {QUICK_TASKS.map((t) => (
+                <div className="ai-agent-group-title">{tx("常用任务", "Common tasks")}</div>
+                <div className="ai-agent-quick" role="group" aria-label={tx("常用任务", "Common tasks")}>
+                  {quickTasks().map((t) => (
                     <button
                       key={t.label}
                       className="ai-agent-quick-chip"
@@ -1652,19 +1754,22 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             {agentMode && (
               <div className="ai-agent-group ai-agent-group-meta">
                 <span className="ai-agent-budget">
-                  预算 {DEFAULT_BUDGET.maxRounds} 轮 / {DEFAULT_BUDGET.maxCalls} 次工具 / {Math.round(DEFAULT_BUDGET.timeoutMs / 60000)} 分钟
-                  {agentRunning ? "（运行中，设置已锁定）" : ""}
+                  {tx(
+                    `预算 ${DEFAULT_BUDGET.maxRounds} 轮 / ${DEFAULT_BUDGET.maxCalls} 次工具 / ${Math.round(DEFAULT_BUDGET.timeoutMs / 60000)} 分钟`,
+                    `Budget ${DEFAULT_BUDGET.maxRounds} rounds / ${DEFAULT_BUDGET.maxCalls} tool calls / ${Math.round(DEFAULT_BUDGET.timeoutMs / 60000)} min`,
+                  )}
+                  {agentRunning ? tx("（运行中，设置已锁定）", "(running — settings locked)") : ""}
                 </span>
               </div>
             )}
           </div>
           </Dropdown>
         )}
-        {SCENE_HINT[mode] && (
+        {sceneHint(mode) && (
           <div className="ai-mode-chip">
-            {SCENE_HINT[mode]}
+            {sceneHint(mode)}
             <button className="ai-mode-close" onClick={() => setMode("qa")}>
-              取消
+              {tx("取消", "Cancel")}
             </button>
           </div>
         )}
@@ -1675,7 +1780,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 <img src={u} alt="" />
                 <button
                   className="ai-img-del"
-                  title="移除图片"
+                  title={tx("移除图片", "Remove image")}
                   onClick={() => setPendingImages((prev) => prev.filter((_, j) => j !== i))}
                 >
                   <IconClose />
@@ -1722,8 +1827,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 imgInputRef.current?.click();
               }}
             >
-              附加图片
-              <span className="ai-plus-menu-note">截图 / 图片文件，最多 4 张</span>
+              {tx("附加图片", "Attach image")}
+              <span className="ai-plus-menu-note">{tx("截图 / 图片文件，最多 4 张", "Screenshots or image files, up to 4")}</span>
             </button>
             <button
               className="ai-plus-menu-item"
@@ -1733,8 +1838,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 fileInputRef.current?.click();
               }}
             >
-              附加文件
-              <span className="ai-plus-menu-note">文本类 ≤256KB，最多 4 个（.txt/.md/.csv/.json/.log 等）</span>
+              {tx("附加文件", "Attach file")}
+              <span className="ai-plus-menu-note">{tx("文本类 ≤256KB，最多 4 个（.txt/.md/.csv/.json/.log 等）", "Text files ≤256KB, up to 4 (.txt/.md/.csv/.json/.log and similar)")}</span>
             </button>
             <button
               className="ai-plus-menu-item"
@@ -1744,14 +1849,14 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 setCtxOpen(true);
               }}
             >
-              发送上下文
-              <span className="ai-plus-menu-note">连接配置 / 协议 / 数据样本 / Hex 选区</span>
+              {tx("发送上下文", "Send context")}
+              <span className="ai-plus-menu-note">{tx("连接配置 / 协议 / 数据样本 / Hex 选区", "Connection config / protocols / data samples / Hex selection")}</span>
             </button>
           </div>
           </Dropdown>
         )}
         <div className="ai-input-row">
-          <button ref={plusBtnRef} className="ai-plus" title="附加图片、文件或上下文" onClick={() => setPlusOpen((v) => !v)} aria-haspopup="menu" aria-expanded={plusOpen}>
+          <button ref={plusBtnRef} className="ai-plus" title={tx("附加图片、文件或上下文", "Attach an image, a file or context")} onClick={() => setPlusOpen((v) => !v)} aria-haspopup="menu" aria-expanded={plusOpen}>
             <IconPlus />
           </button>
           <textarea
@@ -1760,11 +1865,11 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             placeholder={
               agentMode
                 ? agentRunning
-                  ? "Agent 任务运行中…可点右侧红色按钮停止后继续"
-                  : "用一句话描述目标，Enter 启动 Agent 任务（AI 连续调用工具完成）"
+                  ? tx("Agent 任务运行中…可点右侧红色按钮停止后继续", "Agent task running… use the red button on the right to stop it")
+                  : tx("用一句话描述目标，Enter 启动 Agent 任务（AI 连续调用工具完成）", "Describe the goal in one sentence; Enter starts an Agent task (the AI calls tools until it is done)")
                 : chat.streaming
-                  ? "AI 正在回复…"
-                  : "输入问题，Enter 发送，Shift+Enter 换行；可粘贴/附加图片"
+                  ? tx("AI 正在回复…", "AI is replying…")
+                  : tx("输入问题，Enter 发送，Shift+Enter 换行；可粘贴/附加图片", "Type a question — Enter sends, Shift+Enter adds a line; you can paste or attach images too")
             }
             rows={1}
             value={input}
@@ -1798,7 +1903,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           {chat.streaming || agentRunning ? (
             <button
               className="ai-send stop"
-              title={agentRunning ? "停止 Agent 任务" : "停止生成"}
+              title={agentRunning ? tx("停止 Agent 任务", "Stop the Agent task") : tx("停止生成", "Stop generating")}
               onClick={() => {
                 if (agentRunning && agentActive) agentRun.stopRun(agentActive.runId);
                 else chatStore.abort();
@@ -1809,7 +1914,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           ) : (
             <button
               className="ai-send"
-              title="发送（Enter）"
+              title={tx("发送（Enter）", "Send (Enter)")}
               disabled={!canSend}
               onClick={doSend}
             >
@@ -1822,12 +1927,12 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           <button
             ref={modePillRef}
             className={`ai-mode-pill${agentMode ? " on" : ""}`}
-            title="选择工作方式与授权档：普通对话一问一答，Agent 任务多轮自主执行"
+            title={tx("选择工作方式与授权档：普通对话一问一答，Agent 任务多轮自主执行", "Choose the mode and permission tier: plain chat answers one question at a time, an Agent task runs many rounds on its own")}
             onClick={() => setModePanelOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={modePanelOpen}
           >
-            {agentMode ? `Agent 任务 · ${tierBadge(agentScope, agentAllowed)}` : "普通对话"}
+            {agentMode ? tx(`Agent 任务 · ${tierBadge(agentScope, agentAllowed)}`, `Agent task · ${tierBadge(agentScope, agentAllowed)}`) : tx("普通对话", "Plain chat")}
             {sessionBadge && (
               <span className={`agent-badge${sessionRun?.pending ? " warn" : ""}`}>{sessionBadge}</span>
             )}
@@ -1835,7 +1940,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           </button>
           {sessionRun && (
             <span className="ai-agent-prog">
-              第 {sessionRun.rounds} 轮 · {sessionRun.calls} 次工具
+              {tx(`第 ${sessionRun.rounds} 轮 · ${sessionRun.calls} 次工具`, `Round ${sessionRun.rounds} · ${sessionRun.calls} tool calls`)}
             </span>
           )}
           {/*
@@ -1850,8 +1955,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               </span>
               <span className="ai-ctx-num">{ctxMeter.text}</span>
               {ctxEstimate.shadowed > 0 && (
-                <span className="ai-ctx-shadowed" title="较早的工具回执已只以摘要下发（台账未删）">
-                  已折 {ctxEstimate.shadowed}
+                <span className="ai-ctx-shadowed" title={tx("较早的工具回执已只以摘要下发（台账未删）", "Older tool receipts now go as summaries (the ledger is intact)")}>
+                  {tx(`已折 ${ctxEstimate.shadowed}`, `${ctxEstimate.shadowed} folded`)}
                 </span>
               )}
               <button
@@ -1859,18 +1964,18 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                 disabled={atBudgetFloor || agentRunning}
                 title={
                   atBudgetFloor
-                    ? "已到压缩下限：再小模型就没有上下文了。要彻底清空请新建会话"
+                    ? tx("已到压缩下限：再小模型就没有上下文了。要彻底清空请新建会话", "At the compression floor: go smaller and the model has no context left. Start a new session to clear it fully")
                     : agentRunning
-                      ? "任务运行中，等它结束再压缩"
-                      : "把更早的会话历史收得更紧一些再发（台账一条不删，本会话内不可还原）"
+                      ? tx("任务运行中，等它结束再压缩", "A task is running — wait for it to finish before compressing")
+                      : tx("把更早的会话历史收得更紧一些再发（台账一条不删，本会话内不可还原）", "Fold older session history tighter before sending (the ledger keeps every entry; not reversible within this session)")
                 }
                 onClick={compressContext}
               >
-                压缩
+                {tx("压缩", "Compress")}
               </button>
               {ctxBudget < HISTORY_CHAR_BUDGET && (
-                <button className="ai-ctx-btn ghost" onClick={resetContextBudget} title="恢复完整历史预算">
-                  还原
+                <button className="ai-ctx-btn ghost" onClick={resetContextBudget} title={tx("恢复完整历史预算", "Restore the full history budget")}>
+                  {tx("还原", "Reset")}
                 </button>
               )}
             </span>
@@ -1880,7 +1985,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
       {/* P88d ③：活动任务不在当前会话视图时，右下角悬浮条一键切回 */}
       <AgentFloat sessionId={chat.activeId} onOpen={(id) => chatStore.switchSession(id)} />
       {plgLibOpen && (
-        <ErrorBoundary label="本地插件库">
+        <ErrorBoundary label={tx("本地插件库", "Local plugin library")}>
           <PluginLibraryDialog onClose={() => setPlgLibOpen(false)} />
         </ErrorBoundary>
       )}

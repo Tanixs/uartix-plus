@@ -109,10 +109,12 @@ describe("帮助文档不得落后于实现", () => {
   });
 
   it("P98 新增的用户可见入口有说明", () => {
+    // 三处措辞在 P105-F 改过名（「当前外观被谁改了」→「外观覆盖层」等）：
+    // 这条守卫的价值恰恰是**逼你两边一起改**——设置页改了而帮助没改，它就会红。
     for (const phrase of [
-      "当前外观被谁改了", // M1 面板
-      "清除 AI 的全部临时改动", // M1 主按钮
-      "恢复外观默认", // M1 次级按钮（与「恢复出厂」刻意区分）
+      "外观覆盖层", // M1 面板
+      "清除 AI 临时覆盖", // M1 主按钮
+      "恢复默认外观", // M1 次级按钮（与「恢复出厂」刻意区分）
       "上下文用量与手动压缩", // M4
       "让 AI 改界面", // M6 新增节
       "外观是怎么叠起来的", // M6 新增节
@@ -236,8 +238,8 @@ describe("帮助文档不得落后于实现", () => {
     expect(page).toContain("version_mismatch");
     // 放行域与两句原话都从代码取，帮助里不许长出抄本（R4）
     expect(page).toContain("MARKET_ALLOW_HOSTS.join");
-    expect(page).toContain("MARKET_NO_ENDORSE");
-    expect(page).toContain("MARKET_INSTALL_NOTE");
+    expect(page).toContain("marketNoEndorse()");
+    expect(page).toContain("marketInstallNote()");
     expect(page, "帮助里抄了一份域名清单＝等着过期").not.toContain("raw.githubusercontent.com");
   });
 

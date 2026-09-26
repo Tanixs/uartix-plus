@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AiChat } from "./AiChat";
-import { IconSparkle } from "../../shared/icons";
+import { Glyph, IconSparkle } from "../../shared/icons";
+import { zoomFactor } from "../../shared/zoom";
+import { tx, useLocale } from "../../i18n/strings";
 
 /** v3：P88d 默认展宽——升键让新默认生效（仅浮窗位置/尺寸，旧值作废） */
 const POS_KEY = "vs.aiFloat.v3";
@@ -14,11 +16,6 @@ interface FloatState {
   w: number;
   h: number;
   min: boolean;
-}
-
-function zoomFactor(): number {
-  const z = parseFloat(document.documentElement.style.zoom || "100");
-  return Number.isFinite(z) && z > 0 ? z / 100 : 1;
 }
 
 function vwvh(): { vw: number; vh: number } {
@@ -71,6 +68,7 @@ export function AiFloat({
   onDock: () => void;
   onClose: () => void;
 }) {
+  useLocale(); // 浮窗的标题与按钮都是 tx() 出来的，切语言要有人重渲染
   const [st, setSt] = useState<FloatState>(() => clampState(loadState()));
   const [, setTick] = useState(0);
   const dragRef = useRef<{
@@ -147,7 +145,7 @@ export function AiFloat({
     st.min ? (
       <button
         className="ai-bubble"
-        title="展开 AI 助手（Ctrl+K）"
+        title={tx("展开 AI 助手（Ctrl+K）", "Open the AI assistant (Ctrl+K)")}
         onClick={() => setSt((s) => ({ ...s, min: false }))}
       >
         <IconSparkle />
@@ -165,13 +163,13 @@ export function AiFloat({
         >
           <span className="ai-float-title">
             <IconSparkle />
-            AI 助手
+            {tx("AI 助手", "AI assistant")}
           </span>
-          <button className="ai-float-btn" title="最小化到气泡" onClick={() => setSt((s) => ({ ...s, min: true }))}>
-            <svg width="12" height="12" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          <button className="ai-float-btn" title={tx("最小化到气泡", "Minimise to the bubble")} onClick={() => setSt((s) => ({ ...s, min: true }))}>
+            <Glyph><line x1="5" y1="12" x2="19" y2="12" /></Glyph>
           </button>
-          <button className="ai-float-btn" title="关闭浮窗" onClick={onClose}>
-            <svg width="12" height="12" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+          <button className="ai-float-btn" title={tx("关闭浮窗", "Close the floating window")} onClick={onClose}>
+            <Glyph><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></Glyph>
           </button>
         </div>
         <div className="ai-float-body">

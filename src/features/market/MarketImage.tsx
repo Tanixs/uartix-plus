@@ -14,9 +14,10 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { IconChevron } from "../../shared/icons";
 import { loadImage, marketImageSlot, subscribeMarketImages, type ImageSlot } from "./marketImages";
+import { t, tx, useLocale } from "../../i18n/strings";
 
-const BTN_RETRY = "重试";
-const BTN_CLOSE = "关闭";
+// 「重试 / 关闭」原来是两枚模块级常量：值在 import 那一刻就定死了语言，
+// 现在直接写在调用点上（关闭走中心键，与全局同一口径）。
 
 function useImage(url: string): ImageSlot {
   const slot = useSyncExternalStore(subscribeMarketImages, () => marketImageSlot(url), () => marketImageSlot(url));
@@ -28,6 +29,7 @@ function useImage(url: string): ImageSlot {
 }
 
 export function MarketImage({ url, alt, onZoom }: { url: string; alt: string; onZoom?: () => void }) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const slot = useImage(url);
   if (slot.status === "ok") {
     return (
@@ -35,20 +37,20 @@ export function MarketImage({ url, alt, onZoom }: { url: string; alt: string; on
         className="mkt-img"
         src={slot.dataUrl}
         alt={alt}
-        title={onZoom ? "点开看大图" : alt}
+        title={onZoom ? tx("点开看大图", "Click for the full-size image") : alt}
         onClick={onZoom}
       />
     );
   }
   if (slot.status === "idle" || slot.status === "loading") {
-    return <span className="mkt-img mkt-img-skel" role="img" aria-label={`${alt} 正在取回`} />;
+    return <span className="mkt-img mkt-img-skel" role="img" aria-label={tx(`${alt} 正在取回`, `${alt} is being fetched`)} />;
   }
   return (
     <span className={`mkt-img mkt-img-bad ${slot.status}`} role="img" aria-label={`${alt}：${slot.msg}`} title={slot.msg}>
       <span className="mkt-img-why">{slot.msg}</span>
       {slot.status === "failed" ? (
-        <button className="btn mkt-img-retry" title={`重新取回「${alt}」`} onClick={() => void loadImage(url)}>
-          {BTN_RETRY}
+        <button className="btn mkt-img-retry" title={tx(`重新取回「${alt}」`, `Fetch "${alt}" again`)} onClick={() => void loadImage(url)}>
+          {tx("重试", "Retry")}
         </button>
       ) : null}
     </span>
@@ -61,22 +63,24 @@ export function MarketImage({ url, alt, onZoom }: { url: string; alt: string; on
  * 只有一张时不放箭头——没得翻还摆两个按钮，是假面。
  */
 export function ShotStrip({ urls, name }: { urls: readonly string[]; name: string }) {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const [i, setI] = useState(0);
   const [big, setBig] = useState(false);
   if (urls.length === 0) return null;
   const at = Math.min(Math.max(i, 0), urls.length - 1);
   const cur = urls[at];
   const many = urls.length > 1;
+  const shotName = tx(`${name} 预览图 ${at + 1}/${urls.length}`, `${name} preview ${at + 1}/${urls.length}`);
   return (
     <div className="mkt-shots">
       <div className="mkt-shot-stage">
-        <MarketImage url={cur} alt={`${name} 预览图 ${at + 1}/${urls.length}`} onZoom={() => setBig(true)} />
+        <MarketImage url={cur} alt={shotName} onZoom={() => setBig(true)} />
         {many ? (
           <>
             <button
               className="mkt-shot-nav prev"
-              title={`上一张预览图（${at}/${urls.length}）`}
-              aria-label="上一张"
+              title={tx(`上一张预览图（${at}/${urls.length}）`, `Previous preview (${at}/${urls.length})`)}
+              aria-label={tx("上一张", "Previous")}
               disabled={at === 0}
               onClick={() => setI(at - 1)}
             >
@@ -84,8 +88,8 @@ export function ShotStrip({ urls, name }: { urls: readonly string[]; name: strin
             </button>
             <button
               className="mkt-shot-nav next"
-              title={`下一张预览图（${at + 2}/${urls.length}）`}
-              aria-label="下一张"
+              title={tx(`下一张预览图（${at + 2}/${urls.length}）`, `Next preview (${at + 2}/${urls.length})`)}
+              aria-label={tx("下一张", "Next")}
               disabled={at === urls.length - 1}
               onClick={() => setI(at + 1)}
             >
@@ -96,20 +100,20 @@ export function ShotStrip({ urls, name }: { urls: readonly string[]; name: strin
         ) : null}
       </div>
       {many ? (
-        <div className="mkt-shot-dots" role="tablist" aria-label="预览图选择">
+        <div className="mkt-shot-dots" role="tablist" aria-label={tx("预览图选择", "Choose a preview")}>
           {urls.map((u, k) => (
             <button
               key={u}
               className={`mkt-shot-dot${k === at ? " on" : ""}`}
               role="tab"
               aria-selected={k === at}
-              title={`看第 ${k + 1} 张（共 ${urls.length} 张）`}
+              title={tx(`看第 ${k + 1} 张（共 ${urls.length} 张）`, `Show image ${k + 1} of ${urls.length}`)}
               onClick={() => setI(k)}
             />
           ))}
         </div>
       ) : null}
-      {big ? <BigShot url={cur} name={`${name} 预览图 ${at + 1}/${urls.length}`} onClose={() => setBig(false)} /> : null}
+      {big ? <BigShot url={cur} name={shotName} onClose={() => setBig(false)} /> : null}
     </div>
   );
 }
@@ -133,11 +137,11 @@ function BigShot({ url, name, onClose }: { url: string; name: string; onClose: (
         {slot.status === "ok" ? (
           <img className="mkt-big-img" src={slot.dataUrl} alt={name} />
         ) : (
-          <span className="mkt-big-msg">{slot.status === "idle" || slot.status === "loading" ? "正在取回…" : slot.msg}</span>
+          <span className="mkt-big-msg">{slot.status === "idle" || slot.status === "loading" ? tx("正在取回…", "Fetching…") : slot.msg}</span>
         )}
         <div className="mkt-big-foot">
           <span className="mkt-big-name">{name}</span>
-          <button className="btn" title="关闭大图（Esc）" onClick={onClose}>{BTN_CLOSE}</button>
+          <button className="btn" title={tx("关闭大图（Esc）", "Close the full-size image (Esc)")} onClick={onClose}>{t("c.close")}</button>
         </div>
       </div>
     </div>,

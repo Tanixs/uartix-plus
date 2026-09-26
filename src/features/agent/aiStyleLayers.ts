@@ -40,7 +40,7 @@ export function subscribeAiStyle(cb: () => void): () => void {
 /**
  * 清掉 AI 留下的全部外观改动（两层），返回各自清了多少——回执/提示要能说清动了什么。
  * 刻意**不碰**插件主题层与用户自己的外观设置：这一键的语义是"撤掉 AI 动过的"，
- * 不是"把界面恢复出厂"。后者是 `恢复外观默认`，另一颗按钮、另一次确认。
+ * 不是"把界面恢复出厂"。后者是 `恢复默认外观`，另一颗按钮、另一次确认。
  */
 export function clearAiStyleLayers(): { tokens: number; layers: number } {
   const tokens = Object.keys(getOverrides()).length;

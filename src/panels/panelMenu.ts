@@ -25,6 +25,27 @@ type GroupedPanelId = (typeof PANEL_GROUPS)[number]["ids"][number];
  *  `never` 约束即「必须为空集」；刻意导出以免被 noUnusedLocals 误伤。 */
 export type _AllPanelsGrouped = Exclude<PanelId, GroupedPanelId> extends never ? true : never;
 
+/** P104-R5：内容已搬进左侧导轨、因此**不再出现在"添加面板"入口**里的面板。
+ *
+ *  为什么不干脆从 `PanelId` 与注册表里删掉：dockview 的序列化存档里存的是组件名字符串，
+ *  老存档（以及用户自己存的布局槽）还指着 `templates`。摘掉注册表 = 那些存档反序列化为空块。
+ *  所以这里只关入口、不关组件；B13 做 v3 布局迁移时再连着 `PanelId` 一起退役。
+ *
+ *  列在这里而不是从 `PANEL_GROUPS` 里删：分组表同时是 `ui_inventory` 与帮助覆盖度检查的
+ *  事实源——面板"存在但不再可添加"这件事，对那两者也应当看得见。 */
+export const RETIRED_PANELS: readonly PanelId[] = ["templates"];
+
+export function isRetiredPanel(id: string): boolean {
+  return (RETIRED_PANELS as readonly string[]).includes(id);
+}
+
+/** 给"添加面板"入口用的分组表：分组结构不变，只剔掉已退役的面板；整组空掉则整组不出现。 */
+export function panelGroupsAddable(): { key: string; zh: string; en: string; ids: PanelId[] }[] {
+  return PANEL_GROUPS.map((g) => ({ ...g, ids: g.ids.filter((id) => !isRetiredPanel(id)) })).filter(
+    (g) => g.ids.length > 0,
+  );
+}
+
 /** 分组显示名（语言感知） */
 export function panelGroupLabel(g: PanelGroup): string {
   return getLocale() === "en" ? g.en : g.zh;

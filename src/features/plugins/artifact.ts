@@ -25,8 +25,15 @@ export type ArtifactKind = keyof typeof KIND_TABLE_DEF;
  * 载荷校验器缺一样都编译不过，也不会在运行时"静默通过校验"。
  */
 export interface ArtifactKindMeta {
-  /** 中文名：插件库标签、`save_plugin` 参数摘要、帮助文本共用这一份 */
+  /**
+   * 这一类的名字（中文那一条）。两份并列**不是**"一份给人看、另一份冻结给出口" ——
+   * 那个判断我最初写错了，查过之后：出口要么走 `--json` 的结构字段，要么自己另写文案，
+   * 没有一处依赖这里的中文。所以它就是同一个名字的**中英两条**，
+   * 上屏时按当前语言挑（`pluginUiNames.kindName`）。
+   */
   label: string;
+  /** 同一名的外文；缺了就退回 `label`，所以加 kind 时不会漏出空洞 */
+  labelEn: string;
   /** manifest.contributions 里这类产物占的键 */
   contribKey: string;
   /** 声明了这类产物就必须有的最低能力（`validateManifest` 用它判"有产物没能力"） */
@@ -312,6 +319,7 @@ export function validateArtifactPayload(kind: ArtifactKind, payload: unknown): V
 const KIND_TABLE_DEF = {
   theme: {
     label: "主题",
+    labelEn: "Theme",
     contribKey: "themes",
     requiredCap: "theme.tokens",
     caps: ["theme.tokens"],
@@ -319,6 +327,7 @@ const KIND_TABLE_DEF = {
   },
   widget: {
     label: "小部件",
+    labelEn: "Widget",
     contribKey: "widgets",
     requiredCap: "ui.widget",
     caps: ["ui.widget", "telemetry.read"],
@@ -326,6 +335,7 @@ const KIND_TABLE_DEF = {
   },
   panel: {
     label: "面板",
+    labelEn: "Panel",
     contribKey: "panels",
     requiredCap: "ui.panel",
     caps: ["ui.panel", "telemetry.read"],
@@ -333,6 +343,7 @@ const KIND_TABLE_DEF = {
   },
   workspacePreset: {
     label: "工作区预设",
+    labelEn: "Workspace preset",
     contribKey: "workspacePresets",
     requiredCap: "workspace.preset",
     caps: ["workspace.preset"],
@@ -340,6 +351,7 @@ const KIND_TABLE_DEF = {
   },
   workflow: {
     label: "任务模板",
+    labelEn: "Task template",
     contribKey: "workflows",
     requiredCap: "workflow.compose",
     caps: ["workflow.compose"],
@@ -347,6 +359,7 @@ const KIND_TABLE_DEF = {
   },
   module: {
     label: "逻辑模块",
+    labelEn: "Logic module",
     contribKey: "modules",
     requiredCap: "logic.run",
     caps: ["logic.run"],

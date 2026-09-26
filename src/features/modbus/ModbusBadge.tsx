@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { tx } from "../../i18n/strings";
+import { tx, useLocale } from "../../i18n/strings";
 import { requestOpenPanel } from "../ai/appBus";
 import * as slave from "./slaveStore";
 import * as poll from "./pollStore";
@@ -10,6 +10,7 @@ import * as poll from "./pollStore";
  * 软件会"看起来什么都没做但在偷偷应答/发请求"，现场无法判断。
  */
 export function ModbusBadge() {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const sl = useSyncExternalStore(slave.subscribe, slave.getSnapshot);
   const pl = useSyncExternalStore(poll.subscribe, poll.getSnapshot);
   if (!sl.running && !pl.running) return null;

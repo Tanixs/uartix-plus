@@ -15,11 +15,12 @@ import { ModbusPoll } from "./ModbusPoll";
  * 用户一关页签从站就不应答，这种"偶发失联"在现场几乎无法排查。）
  */
 
-const AREAS: { key: MbArea; zh: string; en: string; bit: boolean }[] = [
-  { key: "coil", zh: "线圈 0x（可读写位）", en: "Coils 0x (R/W bits)", bit: true },
-  { key: "disc", zh: "离散输入 1x（只读位）", en: "Discrete inputs 1x (read-only)", bit: true },
-  { key: "holding", zh: "保持寄存器 4x（可写字）", en: "Holding 4x (R/W words)", bit: false },
-  { key: "input", zh: "输入寄存器 3x（只读字）", en: "Input 3x (read-only)", bit: false },
+/** 四个数据区：`key`/`bit` 是协议侧的码，名字渲染时挑（表在模块级拼好字符串就是把语言冻在加载那一刻） */
+const AREAS: { key: MbArea; label: () => string; bit: boolean }[] = [
+  { key: "coil", label: () => tx("线圈 0x（可读写位）", "Coils 0x (R/W bits)"), bit: true },
+  { key: "disc", label: () => tx("离散输入 1x（只读位）", "Discrete inputs 1x (read-only bits)"), bit: true },
+  { key: "holding", label: () => tx("保持寄存器 4x（可写字）", "Holding registers 4x (R/W words)"), bit: false },
+  { key: "input", label: () => tx("输入寄存器 3x（只读字）", "Input registers 3x (read-only words)"), bit: false },
 ];
 
 export function ModbusWorkbench() {
@@ -64,10 +65,10 @@ function SlaveTab() {
 
   return (
     <div className="mb-pane">
-      <div className="mb-bar">
+      <div className="mb-bar p-bar">
         <button
           type="button"
-          className={`btn sm${s.running ? " warn" : " primary"}`}
+          className={`btn sm${s.running ? " danger" : " primary"}`}
           onClick={() => {
             if (s.running) {
               slave.stop();
@@ -186,8 +187,8 @@ function SlaveTab() {
             {!s.events.length && (
               <div className="mb-empty">
                 {tx(
-                  "启动后接上串口（或让另一台机器/指令工厂向本机发请求），每一条请求与应答都记在这里；本机发出的帧同时进发送日志。",
-                  "Once started, every request and reply is listed here; frames we send also land in the TX log.",
+                  "启动后每一条请求与应答都记在这里，本机发出的帧同时进发送日志",
+                  "Once started, every request and reply is listed here; frames we send also land in the TX log",
                 )}
               </div>
             )}
@@ -255,7 +256,7 @@ function BankEditor() {
         >
           {AREAS.map((a) => (
             <option key={a.key} value={a.key}>
-              {tx(a.zh, a.en)}
+              {a.label()}
             </option>
           ))}
         </select>

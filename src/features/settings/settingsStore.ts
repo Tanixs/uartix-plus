@@ -145,7 +145,12 @@ function clampDecimals(v: unknown, fallback: number): number {
 
 function load(): Settings {
   const fallback: Settings = {
-    theme: localStorage.getItem("vs.theme") === "dark" ? "dark" : "begonia",
+    /* P104-B2：默认主题 海棠 → light。
+       不是因为海棠不好看，而是 P104 的层级规则要求「accent 面积 ≤3%、层级由明度档承担」——
+       海棠的 accent 就是它的主色，任何 accent 化都等于给整屏上色，那条预算在它身上执行不干净。
+       light (#f5f6f8/#ffffff/#eceef1/#eef0f4) 实测壳/面板 1.141、画布/面板 1.081，本就是中性档。
+       海棠仍在 THEME_LIST 里可选，只是不再当默认；老用户已存的 vs.settings 不受影响。 */
+    theme: localStorage.getItem("vs.theme") === "dark" ? "dark" : "light",
     locale: "zh",
     zoom: 100,
     decimals: clampDecimals(localStorage.getItem("vs.decimals") ?? "2", 2),

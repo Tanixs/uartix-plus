@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { widgetReq, widgetSubscribe, WIDGET_POS_KEY, type WidgetState } from "./sentinelHub";
+import { tx, useLocale } from "../../i18n/strings";
 
 /**
  * 哨兵桌面挂件（P62-S2）：独立 WebviewWindow 根（#/sentinel-widget），
@@ -15,6 +16,7 @@ function fmtHms(ts: number): string {
 }
 
 export function SentinelWidget() {
+  useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const [st, setSt] = useState<WidgetState | null>(null);
   const [offline, setOffline] = useState(true);
   const lastTs = useRef(0);
@@ -76,10 +78,12 @@ export function SentinelWidget() {
           void getCurrentWindow().startDragging();
         }}
       >
+        {/* 这个挂件独立成窗，收不到主窗的 notifyLocale()；hub 每 1s 广播一次状态，
+            所以下面这些 tx() 最多滞后一秒就会跟着新语言重画。 */}
         <span className="sw-title">
-          {offline ? "哨兵 · 主窗离线" : st?.enabled ? "哨兵监测中" : "哨兵已停用"}
+          {offline ? tx("哨兵 · 主窗离线", "Sentinel - main window offline") : st?.enabled ? tx("哨兵监测中", "Sentinel watching") : tx("哨兵已停用", "Sentinel is off")}
         </span>
-        <button type="button" className="sw-x" onClick={close} title="关闭挂件" aria-label="关闭挂件">
+        <button type="button" className="sw-x" onClick={close} title={tx("关闭挂件", "Close the widget")} aria-label={tx("关闭挂件", "Close the widget")}>
           ×
         </button>
       </div>
@@ -92,15 +96,15 @@ export function SentinelWidget() {
         </div>
         <div className="sw-meta">
           <span className={st && st.activeCrit > 0 && !offline ? "sw-b crit" : "sw-b"}>
-            严重 {offline ? "–" : st?.activeCrit ?? 0}
+            {tx(`严重 ${offline ? "–" : st?.activeCrit ?? 0}`, `Critical ${offline ? "–" : st?.activeCrit ?? 0}`)}
           </span>
           <span className={st && st.activeWarn > 0 && !offline ? "sw-b warn" : "sw-b"}>
-            警告 {offline ? "–" : st?.activeWarn ?? 0}
+            {tx(`警告 ${offline ? "–" : st?.activeWarn ?? 0}`, `Warning ${offline ? "–" : st?.activeWarn ?? 0}`)}
           </span>
-          {st && st.unack > 0 && !offline && <span className="sw-b unack">{st.unack} 未确认</span>}
+          {st && st.unack > 0 && !offline && <span className="sw-b unack">{tx(`${st.unack} 未确认`, `${st.unack} unacked`)}</span>}
         </div>
       </div>
-      <div className="sw-alerts" role="log" aria-label="最近报警">
+      <div className="sw-alerts" role="log" aria-label={tx("最近报警", "Recent alerts")}>
         {st && st.alerts.length > 0 && !offline ? (
           st.alerts.map((a) => (
             <div key={a.key + a.ts} className={`sw-alert ${a.level}`}>
@@ -113,20 +117,20 @@ export function SentinelWidget() {
                   type="button"
                   className="sw-mute"
                   onClick={() => widgetReq({ mute: a.key })}
-                  title="静音此类报警"
+                  title={tx("静音此类报警", "Mute alerts of this kind")}
                 >
-                  静
+                  {tx("静", "M")}
                 </button>
               )}
             </div>
           ))
         ) : (
-          <div className="sw-none">{offline ? "等待主窗数据…" : "一切正常"}</div>
+          <div className="sw-none">{offline ? tx("等待主窗数据…", "Waiting for the main window…") : tx("一切正常", "All quiet")}</div>
         )}
       </div>
       <div className="sw-foot">
         <button type="button" className="btn sm" onClick={() => widgetReq("open")}>
-          打开面板
+          {tx("打开面板", "Open panel")}
         </button>
         <button
           type="button"
@@ -134,7 +138,7 @@ export function SentinelWidget() {
           onClick={() => widgetReq("ackAll")}
           disabled={!st || st.unack === 0 || offline}
         >
-          全部确认
+          {tx("全部确认", "Ack all")}
         </button>
       </div>
     </div>

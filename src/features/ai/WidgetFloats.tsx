@@ -4,11 +4,9 @@ import { useExtensions, setOpen, type AiExtension } from "./extensionStore";
 import { WidgetFrame, type WidgetFrameHandle } from "./WidgetFrame";
 import { popWidgetToDesktop, type WidgetMenuItem } from "./widgetShell";
 import { pluginCtxForExt, type PluginFrameCtx } from "../plugins/pluginStore";
-
-function zoomFactor(): number {
-  const z = parseFloat(document.documentElement.style.zoom || "100");
-  return Number.isFinite(z) && z > 0 ? z / 100 : 1;
-}
+import { zoomFactor } from "../../shared/zoom";
+import { Glyph } from "../../shared/icons";
+import { tx, useLocale } from "../../i18n/strings";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -28,6 +26,7 @@ function SingleFloat({
   pluginCtx?: PluginFrameCtx;
 }) {
   const bare = chrome === "none";
+  const loc = useLocale();
   const [pos, setPos] = useState({ x: window.innerWidth - 320, y: 80 + index * 40 });
   const [size, setSize] = useState({ w: bare ? 200 : 260, h: 160 });
   const boxRef = useRef<HTMLDivElement>(null);
@@ -120,10 +119,11 @@ function SingleFloat({
 
   const sysMenu = useCallback(
     (): WidgetMenuItem[] => [
-      { label: "弹出为桌面挂件", onClick: () => popWidgetToDesktop({ id, name, chrome }) },
-      { label: "关闭浮窗", danger: true, onClick: () => setOpen(id, false) },
+      { label: tx("弹出为桌面挂件", "Pop out as a desktop widget"), onClick: () => popWidgetToDesktop({ id, name, chrome }) },
+      { label: tx("关闭浮窗", "Close the floating window"), danger: true, onClick: () => setOpen(id, false) },
     ],
-    [id, name, chrome],
+    // 菜单条目是回调里拼好的字符串：语言不进依赖，切语言后弹出来的还是旧文案
+    [id, name, chrome, loc],
   );
 
   return createPortal(
@@ -141,13 +141,13 @@ function SingleFloat({
           <span className="aiw-float-title">{name}</span>
           <button
             className="ai-float-btn"
-            title="弹出为桌面挂件（独立置顶小窗）"
+            title={tx("弹出为桌面挂件（独立置顶小窗）", "Pop out as a desktop widget (a separate always-on-top window)")}
             onClick={() => popWidgetToDesktop({ id, name, chrome })}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M15 4h5v5" /><path d="M20 4l-7 7" /><path d="M19 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" /></svg>
+            <Glyph><path d="M15 4h5v5" /><path d="M20 4l-7 7" /><path d="M19 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" /></Glyph>
           </button>
-          <button className="ai-float-btn" title="收起" onClick={() => setOpen(id, false)}>
-            <svg width="12" height="12" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+          <button className="ai-float-btn" title={tx("收起", "Dismiss")} onClick={() => setOpen(id, false)}>
+            <Glyph><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></Glyph>
           </button>
         </div>
       )}

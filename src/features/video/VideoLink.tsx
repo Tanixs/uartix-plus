@@ -3,6 +3,7 @@ import { onRx } from "../../ipc/binbus";
 import { EmptyState } from "../../shared/EmptyState";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import { IconDownload, IconFlipH, IconFlipV, IconPause, IconPlay, IconTune, IconTrash } from "../../shared/icons";
+import { t, tx, useLocale } from "../../i18n/strings";
 
 interface FrameRec {
   url: string;
@@ -89,6 +90,7 @@ function findSeq(buf: Uint8Array, from: number, seq: number[]): number {
 }
 
 export function VideoLink() {
+  useLocale();
   const [frames, setFrames] = useState<FrameRec[]>([]);
   const [selected, setSelected] = useState(-1);
   const [paused, setPaused] = useState(false);
@@ -348,41 +350,41 @@ export function VideoLink() {
 
   return (
     <div className="video-panel">
-      <div className="video-bar">
-        <button className={`btn icon-btn ${paused ? "primary" : ""}`} onClick={togglePause} title={paused ? "继续" : "暂停"}>
+      <div className="video-bar p-bar">
+        <button className={`btn icon-btn ${paused ? "on" : ""}`} onClick={togglePause} title={paused ? tx("继续", "Resume") : tx("暂停", "Pause")}>
           {paused ? <IconPlay /> : <IconPause />}
         </button>
-        <button className="btn icon-btn" onClick={saveFrame} disabled={!view} title="保存当前显示的帧">
+        <button className="btn icon-btn" onClick={saveFrame} disabled={!view} title={tx("保存当前显示的帧", "Save the frame on screen")}>
           <IconDownload />
         </button>
         <button
-          className={`btn icon-btn ${mirror ? "primary" : ""}`}
+          className={`btn icon-btn ${mirror ? "on" : ""}`}
           onClick={() => setMirror((v) => !v)}
-          title="水平镜像"
+          title={tx("水平镜像", "Mirror horizontally")}
         >
           <IconFlipH />
         </button>
         <button
-          className={`btn icon-btn ${flip ? "primary" : ""}`}
+          className={`btn icon-btn ${flip ? "on" : ""}`}
           onClick={() => setFlip((v) => !v)}
-          title="垂直翻转"
+          title={tx("垂直翻转", "Flip vertically")}
         >
           <IconFlipV />
         </button>
         <button
-          className={`btn icon-btn ${cfg.mode === "raw" ? "primary" : ""}`}
+          className={`btn icon-btn ${cfg.mode === "raw" ? "on" : ""}`}
           onClick={() => setRawOpen(true)}
-          title="解析设置（JPEG 自动 / RAW 自定义帧）"
+          title={tx("解析设置（JPEG 自动 / RAW 自定义帧）", "Parse settings (JPEG auto / RAW custom frame)")}
         >
           <IconTune />
         </button>
-        <button className="btn icon-btn" onClick={clearAll} title="清空全部帧">
+        <button className="btn icon-btn" onClick={clearAll} title={tx("清空全部帧", "Clear all frames")}>
           <IconTrash />
         </button>
         <div className="video-bar-spacer" />
         <span className="video-stat">
-          {stats.fps.toFixed(1)} FPS · 共 {stats.count} 帧 · {stats.bytes} B
-          {stats.dropped > 0 ? ` · 丢弃 ${stats.dropped}` : ""}
+          {tx(`${stats.fps.toFixed(1)} FPS · 共 ${stats.count} 帧 · ${stats.bytes} B${stats.dropped > 0 ? ` · 丢弃 ${stats.dropped}` : ""}`,
+            `${stats.fps.toFixed(1)} FPS · ${stats.count} frames · ${stats.bytes} B${stats.dropped > 0 ? ` · dropped ${stats.dropped}` : ""}`)}
         </span>
       </div>
       <div
@@ -440,19 +442,19 @@ export function VideoLink() {
               }}
             />
             {zoom !== 1 && (
-              <span className="video-tag">{Math.round(zoom * 100)}% · 双击复位</span>
+              <span className="video-tag">{tx(`${Math.round(zoom * 100)}% · 双击复位`, `${Math.round(zoom * 100)}% · double-click to reset`)}</span>
             )}
-            {paused && <span className="video-tag warn">已暂停</span>}
+            {paused && <span className="video-tag warn">{tx("已暂停", "Paused")}</span>}
             {!paused && reviewing && (
-              <span className="video-tag warn">回看中 · 点击「实时」返回</span>
+              <span className="video-tag warn">{tx("回看中 · 点击「实时」返回", "Reviewing · click Live to go back")}</span>
             )}
           </>
         ) : (
           <EmptyState
-            title="等待图传数据"
+            title={tx("等待图传数据", "Waiting for video")}
             hint={[
-              "默认自动识别 JPEG 图片流（FFD8FF … FFD9），串口 / TCP / UDP 通吃",
-              "RAW 灰度 / RGB 传感器请在「解析设置」中配置帧头与分辨率",
+              tx("默认自动识别 JPEG 图片流（FFD8FF … FFD9），串口 / TCP / UDP 通吃", "JPEG streams (FFD8FF … FFD9) are detected automatically — serial / TCP / UDP all work"),
+              tx("RAW 灰度 / RGB 传感器请在「解析设置」里配帧头与分辨率", "For RAW grey / RGB sensors set the header and resolution under Parse Settings"),
             ]}
           />
         )}
@@ -462,9 +464,9 @@ export function VideoLink() {
           <button
             className={`video-thumb-btn ${selected === -1 && !paused ? "on" : ""}`}
             onClick={() => setSelected(-1)}
-            title="实时"
+            title={tx("实时", "Live")}
           >
-            实时
+            {tx("实时", "Live")}
           </button>
           {frames.map((f, i) => (
             <button
@@ -485,22 +487,22 @@ export function VideoLink() {
       {rawOpen && (
         <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={() => setRawOpen(false)}>
           <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="modal-title">图传解析设置</div>
+            <div className="modal-title">{tx("图传解析设置", "Video parse settings")}</div>
             <div className="form-row">
-              <label>格式</label>
+              <label>{tx("格式", "Format")}</label>
               <select
                 className="input"
                 value={cfg.mode}
                 onChange={(e) => patchCfg({ mode: e.target.value as RawCfg["mode"] })}
               >
-                <option value="jpeg">JPEG 自动识别</option>
-                <option value="raw">RAW 自定义帧</option>
+                <option value="jpeg">{tx("JPEG 自动识别", "JPEG auto-detect")}</option>
+                <option value="raw">{tx("RAW 自定义帧", "RAW custom frame")}</option>
               </select>
             </div>
             {cfg.mode === "raw" && (
               <>
                 <div className="form-row">
-                  <label>帧头 HEX</label>
+                  <label>{tx("帧头 HEX", "Frame header HEX")}</label>
                   <TextInput
                     value={cfg.head}
                     onCommit={(v) => patchCfg({ head: v })}
@@ -508,7 +510,7 @@ export function VideoLink() {
                   />
                 </div>
                 <div className="form-row">
-                  <label>宽度</label>
+                  <label>{tx("宽度", "Width")}</label>
                   <select
                     className="input"
                     value={cfg.fixedW > 0 ? "fixed" : "frame"}
@@ -516,8 +518,8 @@ export function VideoLink() {
                       patchCfg({ fixedW: e.target.value === "fixed" ? 320 : 0 })
                     }
                   >
-                    <option value="frame">帧内 u16 偏移</option>
-                    <option value="fixed">固定值</option>
+                    <option value="frame">{tx("帧内 u16 偏移", "u16 offset inside the frame")}</option>
+                    <option value="fixed">{tx("固定值", "Fixed value")}</option>
                   </select>
                   <NumInput
                     value={cfg.fixedW > 0 ? cfg.fixedW : cfg.wOff}
@@ -530,7 +532,7 @@ export function VideoLink() {
                   />
                 </div>
                 <div className="form-row">
-                  <label>高度</label>
+                  <label>{tx("高度", "Height")}</label>
                   <select
                     className="input"
                     value={cfg.fixedH > 0 ? "fixed" : "frame"}
@@ -538,8 +540,8 @@ export function VideoLink() {
                       patchCfg({ fixedH: e.target.value === "fixed" ? 240 : 0 })
                     }
                   >
-                    <option value="frame">帧内 u16 偏移</option>
-                    <option value="fixed">固定值</option>
+                    <option value="frame">{tx("帧内 u16 偏移", "u16 offset inside the frame")}</option>
+                    <option value="fixed">{tx("固定值", "Fixed value")}</option>
                   </select>
                   <NumInput
                     value={cfg.fixedH > 0 ? cfg.fixedH : cfg.hOff}
@@ -552,35 +554,36 @@ export function VideoLink() {
                   />
                 </div>
                 <div className="form-row">
-                  <label>像素格式</label>
+                  <label>{tx("像素格式", "Pixel format")}</label>
                   <select
                     className="input"
                     value={cfg.pix}
                     onChange={(e) => patchCfg({ pix: e.target.value as PixFmt })}
                   >
-                    <option value="gray8">灰度 GRAY8（1B/像素）</option>
-                    <option value="rgb565">RGB565（2B/像素）</option>
-                    <option value="rgb888">RGB888（3B/像素）</option>
+                    <option value="gray8">{tx("灰度 GRAY8（1B/像素）", "Gray GRAY8 (1 B/px)")}</option>
+                    <option value="rgb565">{tx("RGB565（2B/像素）", "RGB565 (2 B/px)")}</option>
+                    <option value="rgb888">{tx("RGB888（3B/像素）", "RGB888 (3 B/px)")}</option>
                   </select>
-                  <label>字节序</label>
+                  <label>{tx("字节序", "Byte order")}</label>
                   <select
                     className="input"
                     value={cfg.be ? "be" : "le"}
                     onChange={(e) => patchCfg({ be: e.target.value === "be" })}
                   >
-                    <option value="le">小端 LE</option>
-                    <option value="be">大端 BE</option>
+                    <option value="le">{tx("小端 LE", "Little-endian LE")}</option>
+                    <option value="be">{tx("大端 BE", "Big-endian BE")}</option>
                   </select>
                 </div>
                 <div className="cmd-hint" style={{ marginLeft: 0 }}>
-                  帧契约：帧头后紧跟像素数据；宽高可从帧内偏移读 u16 或用固定值
+                  {tx("帧契约：帧头后紧跟像素数据；宽高可从帧内偏移读 u16 或用固定值",
+                    "Frame contract: pixel data follows the header immediately; width/height come from a u16 inside the frame or from a fixed value")}
                 </div>
               </>
             )}
             <div className="modal-foot">
               <span />
               <button className="btn primary" onClick={() => setRawOpen(false)}>
-                完成
+                {t("c.done")}
               </button>
             </div>
           </div>

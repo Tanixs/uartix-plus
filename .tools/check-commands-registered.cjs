@@ -26,7 +26,7 @@ function commandFns() {
   const out = [];
   for (const name of fs.readdirSync(SRC).filter((f) => f.endsWith(".rs"))) {
     const src = fs.readFileSync(path.join(SRC, name), "utf8");
-    const lines = src.split("\n");
+    const lines = src.split(/\r?\n/);
     lines.forEach((line, i) => {
       if (!/^\s*#\[tauri::command\]/.test(line)) return;
       // 属性后面的下一个非空、非属性行就是函数签名

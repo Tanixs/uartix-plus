@@ -11,6 +11,7 @@
 import * as tourStore from "./tourStore";
 import { requestOpenPanel } from "../ai/appBus";
 import * as templateStore from "../protocol/templateStore";
+import type { RailKey } from "../../shell/railState";
 
 const openPanel = (panel: Parameters<typeof requestOpenPanel>[0]) => () => {
   requestOpenPanel(panel);
@@ -30,6 +31,8 @@ type RawStep = {
   title: { zh: string; en: string };
   body: { zh: string; en: string };
   selector?: string;
+  /** 锚点住在导轨二级面板里时声明这一项：导览会先把它展开（见 `tourStore.TourStep.rail`） */
+  rail?: RailKey;
   /** 环扩到目标那组面板的停靠框外框（面板类步骤用；见 `tourStore.TourStep.frame`） */
   frame?: boolean;
   do?: () => void | Promise<void>;
@@ -41,19 +44,21 @@ const CONTENT: RawStep[] = [
     id: "connect",
     title: { zh: "连接设备", en: "Connect" },
     body: {
-      zh: "标题条选数据接口（串口 / TCP / UDP / BLE），工具栏设好参数后点这个「连接」按钮。没有硬件？直接点「下一步」，我们用内置演示源。",
-      en: "Pick an interface in the title bar, set parameters, then hit Connect. No hardware? Just continue — we'll use the built-in demo source.",
+      zh: "左侧「接入」里选数据接口（串口 / TCP / UDP / BLE）并设好参数，再点这个「连接」按钮。没有硬件？直接点「下一步」，我们用内置演示源。",
+      en: "Pick an interface and set its parameters in the Link panel on the left, then hit Connect. No hardware? Just continue — we'll use the built-in demo source.",
     },
     selector: '[data-tour="connect"]',
+    rail: "link",
   },
   {
     id: "demo",
     title: { zh: "启动演示源", en: "Demo source" },
     body: {
-      zh: "演示源已开始生成混合协议数据流（匿名 V7 + 维特 WIT + CSV + Modbus，含坏帧）。左下角这个按钮随时可以停。",
-      en: "The demo source now streams mixed protocols (V7 + WIT + CSV + Modbus, with bad frames). This button toggles it.",
+      zh: "演示源已开始生成混合协议数据流（匿名 V7 + 维特 WIT + CSV + Modbus，含坏帧）。左侧「协议」底部这个按钮随时可以停。",
+      en: "The demo source now streams mixed protocols (V7 + WIT + CSV + Modbus, with bad frames). This button at the bottom of the Protocol panel toggles it.",
     },
     selector: '[data-tour="demo"]',
+    rail: "templates",
     do: ensureDemo(),
     settleMs: 900,
   },
@@ -65,6 +70,7 @@ const CONTENT: RawStep[] = [
       en: "Pick a preset protocol (V7 / WIT / Modbus RTU…). Imports are editable copies — break one, delete and re-import; presets stay pristine.",
     },
     selector: '[data-tour="preset"]',
+    rail: "templates",
   },
   {
     id: "framecanvas",
@@ -82,8 +88,8 @@ const CONTENT: RawStep[] = [
     id: "plot",
     title: { zh: "2D 曲线：点亮即绘图", en: "2D plot" },
     body: {
-      zh: "左侧字段图例点眼睛即实时绘图；曲线支持拖动回看、双击回实时、游标测量。选中通道后还能在「频谱分析」面板做 FFT。",
-      en: "Toggle the eye icon on a field to plot it live. Drag to pan, double-click to follow, cursors to measure. Spectrum panel does FFT on any channel.",
+      zh: "「协议」面板下半区的字段图例里点眼睛即实时绘图；曲线支持拖动回看、双击回实时、游标测量。选中通道后还能在「频谱分析」面板做 FFT。",
+      en: "Toggle the eye icon on a field in the legend under Protocol to plot it live. Drag to pan, double-click to follow, cursors to measure. Spectrum panel does FFT on any channel.",
     },
     selector: '[data-panel="plot2d"]',
     frame: true,

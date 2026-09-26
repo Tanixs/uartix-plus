@@ -10,17 +10,14 @@ import { createPortal } from "react-dom";
 import * as tourStore from "./tourStore";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconClose } from "../../shared/icons";
+import { zoomFactor } from "../../shared/zoom";
+import { openRailPanel } from "../../shell/railState";
 
 interface Rect {
   x: number;
   y: number;
   w: number;
   h: number;
-}
-
-function zoomFactor(): number {
-  const z = parseFloat(document.documentElement.style.zoom || "100");
-  return Number.isFinite(z) && z > 0 ? z / 100 : 1;
 }
 
 export function TourOverlay() {
@@ -42,6 +39,9 @@ export function TourOverlay() {
     }
     setRect(null);
     setMissing(false);
+    // 锚点在导轨二级面板里：先把它展开，否则下面的 rAF 永远找不到目标，
+    // 而失败的样子是"引导照样走完、只是没有高亮"——静默的，谁也发现不了。
+    if (step.rail) openRailPanel(step.rail);
     const grace = (step.settleMs ?? 600) + 2200;
     const t0 = performance.now();
     let raf = 0;
@@ -72,7 +72,7 @@ export function TourOverlay() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [s.active, s.idx, step?.selector, step?.frame, step?.settleMs]);
+  }, [s.active, s.idx, step?.selector, step?.frame, step?.rail, step?.settleMs]);
 
   // 键盘闭环：Enter/→ 下一步，Esc 退出（输入框聚焦时忽略）
   useEffect(() => {

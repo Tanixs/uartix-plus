@@ -8,21 +8,27 @@ type ParameterDraft = { key: number } & Record<keyof DebugParameter, string>;
 const emptyParameter = (key: number): ParameterDraft => ({
   key, id: "", name: "", min: "", max: "", step: "", value: "", unit: "",
 });
-const identityFields = [
-  { key: "id", label: { zh: "参数 ID", en: "Parameter ID" }, maxLength: 64 },
-  { key: "name", label: { zh: "名称", en: "Name" }, maxLength: 64 },
-  { key: "unit", label: { zh: "单位（可选）", en: "Unit (optional)" }, maxLength: undefined },
-] as const;
-const numericFields = [
-  { key: "min", zh: "最小值", en: "Minimum" },
-  { key: "max", zh: "最大值", en: "Maximum" },
-  { key: "step", zh: "步进", en: "Step" },
-  { key: "value", zh: "初值", en: "Initial value" },
-] as const;
+/**
+ * 字段清单。两份都写成**函数**：表放模块级（哪怕每行中英都齐）等于把语言冻在 import 那一刻，
+ * 而且门只认 `tx("中文", "English")` 这种双语落在调用点上的写法。`key` 留字面量联合，索引草稿才不塌成 string。
+ */
+const identityFields = (): { key: "id" | "name" | "unit"; label: () => string; maxLength?: number }[] => [
+  { key: "id", label: () => tx("参数 ID", "Parameter ID"), maxLength: 64 },
+  { key: "name", label: () => tx("名称", "Name"), maxLength: 64 },
+  { key: "unit", label: () => tx("单位（可选）", "Unit (optional)") },
+];
+/** `label` 是**取值函数**而不是字符串：校验报错要把字段名嵌进句中（英文还要小写），
+ *  取值必须发生在报错那一刻，不然英文句子里会掉进 "Minimum" 这种首字母大写的标签形状。 */
+const numericFields = (): { key: "min" | "max" | "step" | "value"; label: () => string }[] => [
+  { key: "min", label: () => tx("最小值", "Minimum") },
+  { key: "max", label: () => tx("最大值", "Maximum") },
+  { key: "step", label: () => tx("步进", "Step") },
+  { key: "value", label: () => tx("初值", "Initial value") },
+];
 
 export function DebugPresetDialog({ onClose }: { onClose: () => void }) {
   useLocale();
-  const [name, setName] = useState("惯导调试");
+  const [name, setName] = useState(tx("惯导调试", "Inertial debug"));
   const [parameters, setParameters] = useState<ParameterDraft[]>(() => [
     { ...emptyParameter(0), id: "kp", name: "Kp" },
   ]);
@@ -94,12 +100,12 @@ export function DebugPresetDialog({ onClose }: { onClose: () => void }) {
       }
       const values: DebugParameter[] = parameters.map((p, index) => {
         const numbers = {} as Pick<DebugParameter, "min" | "max" | "step" | "value">;
-        for (const field of numericFields) {
+        for (const field of numericFields()) {
           // Never coerce a missing physical value to zero or supply a guessed range.
           if (!p[field.key].trim() || !Number.isFinite(Number(p[field.key]))) {
             throw new Error(tx(
-              `参数 ${index + 1}：请填写有效的${field.zh}。`,
-              `Parameter ${index + 1}: enter a finite ${field.en.toLowerCase()}.`,
+              `参数 ${index + 1}：请填写有效的${field.label()}。`,
+              `Parameter ${index + 1}: enter a finite ${field.label().toLowerCase()}.`,
             ));
           }
           numbers[field.key] = Number(p[field.key]);
@@ -155,9 +161,9 @@ export function DebugPresetDialog({ onClose }: { onClose: () => void }) {
                 "身份与显示", "Identity and display",
               )}</p>
               <div className="workflow-grid">
-                {identityFields.map(field => (
+                {identityFields().map(field => (
                   <div className="workflow-field" key={field.key}>
-                    <label htmlFor={`${titleId}-${p.key}-${field.key}`}>{tx(field.label.zh, field.label.en)}</label>
+                    <label htmlFor={`${titleId}-${p.key}-${field.key}`}>{field.label()}</label>
                     <input id={`${titleId}-${p.key}-${field.key}`} className="input"
                       value={p[field.key]} maxLength={field.maxLength}
                       required={field.key !== "unit"} onChange={event => patch(p.key, field.key, event.target.value)} />
@@ -168,9 +174,9 @@ export function DebugPresetDialog({ onClose }: { onClose: () => void }) {
                 "数值约束（按设备规格填写，不猜测默认值）", "Numeric constraints (from device specifications; no guessed defaults)",
               )}</p>
               <div className="workflow-grid">
-                {numericFields.map(field => (
+                {numericFields().map(field => (
                   <div className="workflow-field" key={field.key}>
-                    <label htmlFor={`${titleId}-${p.key}-${field.key}`}>{tx(field.zh, field.en)}</label>
+                    <label htmlFor={`${titleId}-${p.key}-${field.key}`}>{field.label()}</label>
                     <input id={`${titleId}-${p.key}-${field.key}`} className="input"
                       type="number" step="any" required value={p[field.key]}
                       onChange={event => patch(p.key, field.key, event.target.value)} />

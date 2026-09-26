@@ -128,7 +128,7 @@ for (const f of files) {
     /\/\*[\s\S]*?\*\/|`(?:\\[\s\S]|[^`\\])*`|"(?:\\[\s\S]|[^"\\\n])*"|'(?:\\[\s\S]|[^'\\\n])*'|[ \t]*\/\/[^\n]*/g,
     (m) => "\n".repeat((m.match(/\n/g) || []).length),
   );
-  const lines = stripped.split("\n");
+  const lines = stripped.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const m2 = /^([A-Za-z_$][\w$]*)\(([^()]*)\)\s*;?\s*$/.exec(line);

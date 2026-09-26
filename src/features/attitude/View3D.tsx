@@ -10,6 +10,7 @@ import * as templateStore from "../protocol/templateStore";
 import type { FieldDef, FieldType } from "../../ipc/types";
 import { Flyout } from "../../shared/Flyout";
 import { IconChevron, IconCircle, IconDot } from "../../shared/icons";
+import { tx, useLocale } from "../../i18n/strings";
 import { useSettings } from "../settings/settingsStore";
 
 const ORDERS: EulerOrder[] = ["XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"];
@@ -30,20 +31,28 @@ const NUMERIC_TYPES = new Set<FieldType>([
   "bits",
 ]);
 
-const TYPE_LABEL: Record<FieldType, string> = {
-  uint8: "U8",
-  int8: "S8",
-  uint16: "U16",
-  int16: "S16",
-  uint32: "U32",
-  int32: "S32",
-  float32: "F32",
-  float64: "F64",
-  ascii: "文本",
-  bcd: "BCD",
-  bits: "位",
-  csv: "CSV",
-};
+/**
+ * 字段类型标签。写成函数而不是 `Record` 常量表，是因为常量表在**模块求值时**就定了，
+ * 那时语言还没读出来 —— 留着它，英文构建下这两格会永远显示"文本 / 位"。
+ * 只有"每颗都要短"的六边形缩写在这里翻译，其余仍走 `tx()`。
+ */
+const typeLabel = (t: FieldType): string =>
+  t === "ascii"
+    ? tx("文本", "Text")
+    : t === "bits"
+      ? tx("位", "Bits")
+      : ({
+          uint8: "U8",
+          int8: "S8",
+          uint16: "U16",
+          int16: "S16",
+          uint32: "U32",
+          int32: "S32",
+          float32: "F32",
+          float64: "F64",
+          bcd: "BCD",
+          csv: "CSV",
+        } as Record<FieldType, string>)[t];
 
 const isNumericField = (f: FieldDef): boolean => NUMERIC_TYPES.has(f.type);
 
@@ -315,6 +324,8 @@ function buildModel(
 }
 
 export function View3D() {
+  // 语言切换要立刻重渲染：本面板的标签、下拉、tooltip 全是就近双语
+  useLocale();
   const wrapRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const hudRef = useRef<HTMLDivElement>(null);
@@ -358,11 +369,11 @@ export function View3D() {
   const tplById = (id: string) =>
     proto.rules.templates.find((t) => t.id === id);
   const refInfo = (ref: FieldRef | null) => {
-    if (!ref) return { text: "—", title: "未绑定（点击选择，可跨已启用模板）" };
+    if (!ref) return { text: "—", title: tx("未绑定（点击选择，可跨已启用模板）", "Unbound (click to pick, across enabled templates)") };
     const t = tplById(ref.tplId);
     const f = t?.fields.find((x) => x.id === ref.fieldId);
     if (!t || !f)
-      return { text: "已失效", title: "绑定的模板或字段不存在，请重新选择" };
+      return { text: tx("已失效", "Stale"), title: tx("绑定的模板或字段不存在，请重新选择", "The bound template or field no longer exists; pick again") };
     return { text: f.name, title: `${t.name} · ${f.name}` };
   };
 
@@ -430,7 +441,7 @@ export function View3D() {
           let buf: ArrayBuffer | null = null;
           if (sel === "cesium") {
             const res = await fetch("/models/CesiumDrone.glb");
-            if (!res.ok) throw new Error(`模型资源缺失 (${res.status})`);
+            if (!res.ok) throw new Error(tx(`模型资源缺失 (${res.status})`, `Model asset missing (${res.status})`));
             buf = await res.arrayBuffer();
           } else if (custom) {
             if (customBytesCache) {
@@ -442,7 +453,7 @@ export function View3D() {
             }
           }
           if (disposed) return;
-          if (!buf) throw new Error("未选择模型文件");
+          if (!buf) throw new Error(tx("未选择模型文件", "No model file selected"));
           const loader = new GLTFLoader();
           const gltf = await new Promise<{ scene: THREE_NS.Group }>(
             (resolve, reject) => loader.parse(buf as ArrayBuffer, "", resolve, reject),
@@ -514,7 +525,7 @@ export function View3D() {
         if (hudRef.current) {
           hudRef.current.textContent = v.has
             ? `R ${v.roll.toFixed(1)}°  P ${v.pitch.toFixed(1)}°  Y ${v.yaw.toFixed(1)}°`
-            : "等待姿态数据…";
+            : tx("等待姿态数据…", "Waiting for attitude data…");
         }
         renderer.render(scene, camera);
       };
@@ -566,15 +577,15 @@ export function View3D() {
 
   const pickModel = async () => {
     const path = await open({
-      title: "选择 3D 模型（建议 GLB）",
+      title: tx("选择 3D 模型（建议 GLB）", "Choose a 3D model (GLB recommended)"),
       multiple: false,
-      filters: [{ name: "3D 模型", extensions: ["glb", "gltf"] }],
+      filters: [{ name: tx("3D 模型", "3D models"), extensions: ["glb", "gltf"] }],
     });
     if (typeof path !== "string") return;
     try {
       await invoke<number[]>("read_binary_file", { path });
       const meta: CustomMeta = {
-        name: path.split(/[\\/]/).pop() ?? "模型",
+        name: path.split(/[\\/]/).pop() ?? tx("模型", "Model"),
         path,
       };
       localStorage.setItem(CUSTOM_KEY, JSON.stringify(meta));
@@ -583,7 +594,7 @@ export function View3D() {
       setSel("custom");
       localStorage.setItem(SEL_KEY, "custom");
     } catch (e) {
-      setLoadErr(`导入失败：${String(e).replace(/^Error:\s*/, "")}`);
+      setLoadErr(tx(`导入失败：${String(e).replace(/^Error:\s*/, "")}`, `Import failed: ${String(e).replace(/^Error:\s*/, "")}`));
     }
   };
 
@@ -625,7 +636,7 @@ export function View3D() {
           }}
         >
           <span className={`v3d-ref-name ${ref ? "" : "dim"}`}>{info.text}</span>
-          <IconChevron dir="down" size={10} />
+          <IconChevron dir="down" size={12} />
         </button>
       </label>
     );
@@ -633,60 +644,62 @@ export function View3D() {
 
   return (
     <div className="view3d">
-      <div className="v3d-bar">
+      <div className="v3d-bar p-bar">
         <select
           className="input"
           value={sel}
-          title="模型"
+          title={tx("模型", "Model")}
           onChange={(e) => changeSel(e.target.value as ModelSel)}
         >
-          <option value="uav">四轴飞行器</option>
-          <option value="cube">立方体</option>
-          <option value="cesium">四轴 · 精细（Cesium）</option>
-          {custom && <option value="custom">外部模型 · {custom.name}</option>}
+          <option value="uav">{tx("四轴飞行器", "Quadcopter")}</option>
+          <option value="cube">{tx("立方体", "Cube")}</option>
+          <option value="cesium">{tx("四轴 · 精细（Cesium）", "Quad · detailed (Cesium)")}</option>
+          {custom && <option value="custom">{tx("外部模型", "External model")} · {custom.name}</option>}
         </select>
-        <button className="btn" onClick={() => void pickModel()} title="导入外部 GLB/GLTF 模型">
-          导入模型
+        <button className="btn" onClick={() => void pickModel()} title={tx("导入外部 GLB/GLTF 模型", "Import an external GLB/GLTF model")}>
+          {tx("导入模型", "Import model")}
         </button>
         {isGltf && (
           <select
             className="input"
             value={rot}
-            title="机头朝向修正（绕竖直轴旋转）"
+            title={tx("机头朝向修正（绕竖直轴旋转）", "Nose heading offset (rotate about the vertical axis)")}
             onChange={(e) => {
               const v = Number(e.target.value);
               localStorage.setItem(ROT_KEY, String(v));
               setRot(v);
             }}
           >
-            <option value={0}>机头 +X</option>
-            <option value={90}>机头 +Z</option>
-            <option value={180}>机头 -X</option>
-            <option value={270}>机头 -Z</option>
+            <option value={0}>{tx("机头 +X", "Nose +X")}</option>
+            <option value={90}>{tx("机头 +Z", "Nose +Z")}</option>
+            <option value={180}>{tx("机头 -X", "Nose -X")}</option>
+            <option value={270}>{tx("机头 -Z", "Nose -Z")}</option>
           </select>
         )}
-        <button className="btn" onClick={resetView} title="复位观察视角">
-          复位视角
+        <button className="btn" onClick={resetView} title={tx("复位观察视角", "Reset the view")}>
+          {tx("复位视角", "Reset view")}
         </button>
         <div className="v3d-hud" ref={hudRef}>
-          等待姿态数据…
+          {tx("等待姿态数据…", "Waiting for attitude data…")}
         </div>
       </div>
       <div className="v3d-canvas" ref={wrapRef}>
         <div className="v3d-host" ref={hostRef} />
-        {loadErr && <div className="v3d-loaderr">模型加载失败：{loadErr}（已回退内置四轴）</div>}
+        {loadErr && (
+            <div className="v3d-loaderr">{tx(`模型加载失败：${loadErr}（已回退内置四轴）`, `Model failed to load: ${loadErr} (fell back to the built-in quad)`)}</div>
+          )}
       </div>
       <div className="v3d-bind">
         <div className="v3d-bind-row">
           <label className="v3d-field grow">
-            <span>模板</span>
+            <span>{tx("模板", "Model")}</span>
             <select
               className="input"
               value={attitude.config.templateId}
               onChange={(e) => onTemplateChange(e.target.value)}
-              title="选择后自动按字段名匹配姿态字段"
+              title={tx("选择后自动按字段名匹配姿态字段", "Auto-matches attitude fields by name once a template is picked")}
             >
-              <option value="">— 选择协议模板 —</option>
+              <option value="">{tx("— 选择协议模板 —", "— Pick a protocol template —")}</option>
               {proto.rules.templates.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.name}
@@ -696,16 +709,16 @@ export function View3D() {
           </label>
           <div className="v3d-seg">
             <button
-              className={`btn ${isEuler ? "warn" : ""}`}
+              className={`btn ${isEuler ? "on" : ""}`}
               onClick={() => store.setConfig({ mode: "euler" })}
             >
-              欧拉角
+              {tx("欧拉角", "Euler")}
             </button>
             <button
-              className={`btn ${!isEuler ? "warn" : ""}`}
+              className={`btn ${!isEuler ? "on" : ""}`}
               onClick={() => store.setConfig({ mode: "quaternion" })}
             >
-              四元数
+              {tx("四元数", "Quaternion")}
             </button>
           </div>
           <button
@@ -715,9 +728,9 @@ export function View3D() {
                 tpl ? store.autoMatch(tpl.id, tpl.fields.filter(isNumericField)) : {},
               )
             }
-            title="按字段名关键词自动匹配（roll/pitch/yaw 或 qw/qx/qy/qz）"
+            title={tx("按字段名关键词自动匹配（roll/pitch/yaw 或 qw/qx/qy/qz）", "Auto-match by field keyword (roll/pitch/yaw or qw/qx/qy/qz)")}
           >
-            自动匹配
+            {tx("自动匹配", "Auto")}
           </button>
         </div>
         {isEuler ? (
@@ -726,14 +739,14 @@ export function View3D() {
             {refPicker("Pitch", "pitch")}
             {refPicker("Yaw", "yaw")}
             <label className="v3d-field">
-              <span>顺序</span>
+              <span>{tx("顺序", "Order")}</span>
               <select
                 className="input"
                 value={attitude.config.order}
                 onChange={(e) =>
                   store.setConfig({ order: e.target.value as EulerOrder })
                 }
-                title="欧拉角旋转顺序（惯导常用 ZYX）"
+                title={tx("欧拉角旋转顺序（惯导常用 ZYX）", "Euler rotation order (INS usually ZYX)")}
               >
                 {ORDERS.map((o) => (
                   <option key={o} value={o}>
@@ -743,7 +756,7 @@ export function View3D() {
               </select>
             </label>
             <div className="v3d-inv">
-              <span>取反</span>
+              <span>{tx("取反", "Invert")}</span>
               {(["X", "Y", "Z"] as const).map((ax) => (
                 <button
                   key={ax}
@@ -753,7 +766,7 @@ export function View3D() {
                       [`invert${ax}`]: !attitude.config[`invert${ax}`],
                     } as Partial<typeof attitude.config>)
                   }
-                  title={`反转 ${ax} 轴角度`}
+                  title={tx(`反转 ${ax} 轴角度`, `Invert the ${ax} axis`)}
                 >
                   {ax}
                   <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
@@ -778,7 +791,7 @@ export function View3D() {
           {pick.tplId === null ? (
             <>
               <div className="v3d-crumb">
-                <span className="v3d-crumb-cur">选择模板</span>
+                <span className="v3d-crumb-cur">{tx("选择模板", "Pick a template")}</span>
               </div>
               <button
                 type="button"
@@ -790,11 +803,11 @@ export function View3D() {
                   setPick(null);
                 }}
               >
-                {attitude.config[pick.key] ? <IconCircle /> : <IconDot />} 清除绑定
+                {attitude.config[pick.key] ? <IconCircle /> : <IconDot />} {tx("清除绑定", "Clear binding")}
               </button>
-              <div className="ctx-group">已启用模板</div>
+              <div className="ctx-group">{tx("已启用模板", "Enabled templates")}</div>
               {enabledTpls.length === 0 && (
-                <div className="ctx-group">暂无已启用模板</div>
+                <div className="ctx-group">{tx("暂无已启用模板", "No enabled templates")}</div>
               )}
               {enabledTpls.map((t) => (
                 <button
@@ -827,14 +840,14 @@ export function View3D() {
                   >
                     <IconChevron size={12} />
                   </span>
-                  返回
+                  {tx("返回", "Back")}
                 </button>
                 <span className="v3d-crumb-sep">/</span>
                 <span className="v3d-crumb-cur" title={tplById(pick.tplId)?.name}>
-                  {tplById(pick.tplId)?.name ?? "未知模板"}
+                  {tplById(pick.tplId)?.name ?? tx("未知模板", "Unknown template")}
                 </span>
               </div>
-              <div className="ctx-group">数值字段</div>
+              <div className="ctx-group">{tx("数值字段", "Numeric fields")}</div>
               {(tplById(pick.tplId)?.fields ?? [])
                 .filter(isNumericField)
                 .map((f) => {
@@ -861,7 +874,7 @@ export function View3D() {
                       <span className="ctx-item-l">
                         {active ? <IconDot /> : <IconCircle />} {f.name}
                       </span>
-                      <span className="ctx-cur">{TYPE_LABEL[f.type]}</span>
+                      <span className="ctx-cur">{typeLabel(f.type)}</span>
                     </button>
                   );
                 })}

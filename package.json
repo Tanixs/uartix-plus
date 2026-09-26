@@ -20,13 +20,18 @@
     "check:style": "node .tools/check-style.cjs",
     "check:aria": "node .tools/check-aria.cjs",
     "check:motion": "node .tools/check-motion.cjs",
+    "check:copy": "node .tools/check-empty-copy.cjs",
+    "check:chrome": "node .tools/check-chrome.cjs",
     "check:cycles": "node .tools/check-import-cycles.cjs",
-    "check:all": "node .tools/check-contrast.cjs && node .tools/check-undeclared-vars.cjs && node .tools/check-style.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-import-cycles.cjs && node .tools/check-commands-registered.cjs",
+    "check:all": "node .tools/check-contrast.cjs && node .tools/check-undeclared-vars.cjs && node .tools/check-style.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-empty-copy.cjs && node .tools/check-i18n.cjs && node .tools/check-chrome.cjs && node .tools/check-import-cycles.cjs && node .tools/check-commands-registered.cjs",
+    "metrics:ui": "node scripts/ui-metrics.mjs css",
     "market:img": "node scripts/gen-market-img.mjs",
     "market:gen": "node scripts/gen-market-img.mjs && node scripts/gen-market-index.mjs",
     "market:check": "node scripts/gen-market-img.mjs --check",
     "market:validate": "node dist-cli/uartix-plugin.cjs validate",
-    "check:commands": "node .tools/check-commands-registered.cjs"
+    "check:commands": "node .tools/check-commands-registered.cjs",
+    "check:i18n": "node .tools/check-i18n.cjs",
+    "welcome:snap": "node .tools/gen-welcome-shot.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

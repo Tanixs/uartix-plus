@@ -7,7 +7,7 @@ import { IconPlay } from "../../shared/icons";
 // P99b-N6：市场那一页说的每个数/每句承诺都要能指回实现——
 // 放行域、自带索引地址、"装完是停用态"与"列表不等于背书"那两句原文，一律从代码取，不抄第二份。
 import { MARKET_ALLOW_HOSTS, MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
-import { MARKET_INSTALL_NOTE, MARKET_NO_ENDORSE } from "../market/marketBrowse";
+import { marketInstallNote, marketNoEndorse } from "../market/marketBrowse";
 import { CAP_LABEL, autoEnableBlockedCaps } from "../plugins/pluginManifest";
 
 export function HelpModal({ onClose }: { onClose: () => void }) {
@@ -57,9 +57,9 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 <p><b>Uartix+</b> 是一台跑在电脑上的可视化上位机：定义协议 → 自动筛选有效帧 → 在干净数据上查看、绘图并反向控制设备。</p>
                 <Section title="五步上手">
                   <ol className="help-ol">
-                    <li>标题条选择<code>数据接口</code>（串口 / TCP 客户端 / TCP 服务端 / UDP / 蓝牙 BLE），在工具栏完成参数设置后点击<code>连接</code>。</li>
-                    <li>左侧<code>协议模板</code>面板点<code>＋ 预设</code>，导入一个协议（如 匿名 V7、维特 WIT、Modbus RTU / TCP）；也可<code>＋ 新建</code>自己画。</li>
-                    <li>没有设备？点左下角<code>启动演示源</code>，软件会生成混合协议数据流；想扮演一台有脾气的具体设备（温漂/丢帧/命令应答，还能 UDP/TCP/串口对外发），开<code>虚拟设备工坊</code>面板。</li>
+                    <li>左侧<code>接入</code>导轨里选<code>数据接口</code>（串口 / TCP 客户端 / TCP 服务端 / UDP / 蓝牙 BLE）并填参数，再点工具栏的<code>连接</code>。</li>
+                    <li>左侧<code>协议</code>导轨点<code>＋ 预设</code>，导入一个协议（如 匿名 V7、维特 WIT、Modbus RTU / TCP）；也可<code>＋ 新建</code>自己画。</li>
+                    <li>没有设备？点<code>协议</code>导轨底部的<code>启动演示源</code>，软件会生成混合协议数据流；想扮演一台有脾气的具体设备（温漂/丢帧/命令应答，还能 UDP/TCP/串口对外发），开<code>虚拟设备工坊</code>面板。</li>
                     <li>中央<code>帧画布</code>查看每帧的字节结构（绿色=字段、橙=帧头、粉=校验），悬停可看数值。</li>
                     <li>底部<code>2D 曲线</code>点亮字段图例的眼睛即可实时绘图；<code>数据表格</code>查看帧列表。</li>
                   </ol>
@@ -72,7 +72,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>改完点画布左上角<code>💾 保存</code>，立即生效并持久化（平时改动也会自动同步解析内核）。</li>
                     <li>页签下方细条是<code>结构覆盖条</code>：红色段=还没被字段覆盖的字节，点一下直接定义；新建/AI/考古得到的协议在未启用时显示为<code>灰色页签</code>，点它一键启用。</li>
                     <li>工具栏<code>对比</code>按钮把当前帧设为基线，←/→ 翻帧时差异字节左上角标红，用于协议考古与版本对比。</li>
-                    <li>把左侧协议模板面板的<code>字段</code>直接拖到 2D 曲线=开通道、拖到控制画布=建监视卡、拖到编排器=秒挂阈值事件组；字段改名后曲线图例与通道标签同步更新。</li>
+                    <li>把<code>协议</code>导轨里的<code>字段</code>直接拖到 2D 曲线=开通道、拖到控制画布=建监视卡、拖到编排器=秒挂阈值事件组；字段改名后曲线图例与通道标签同步更新。</li>
                   </ol>
                 </Section>
                 <Section title="网络接口（TCP / UDP）">
@@ -185,7 +185,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>这些改动是<b>会话临时层</b>：重启就没了，也不归插件管。满意了要显式说"保存为主题/固化下来"才会持久化——
                       让它报个名字就行，它会用 <code>style_commit</code> 把<b>当前真正生效的那几层</b>读出来存成已启用的主题插件
                       （不是凭记忆重抄一遍规则，重抄在多轮改动后一定走样）。想撤就 <code>style_revert</code>、卡片上的「撤销」，
-                      或直接 设置 → 通用 → <b>清除 AI 的全部临时改动</b>；固化之后恢复路径变成 停用插件 或 <code>rollback_plugin</code>。</li>
+                      或直接 设置 → 通用 → <b>清除 AI 临时覆盖</b>；固化之后恢复路径变成 停用插件 或 <code>rollback_plugin</code>。</li>
                     <li>改坏了的插件版本可以 <code>rollback_plugin</code> 退回上一版——Agent 自己改自己存的东西会升版本号并留下旧版，不会堆出一堆近似副本。</li>
                   </ol>
                   <p className="help-tip">
@@ -211,11 +211,11 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <p className="help-tip">
                     常见困惑：「AI 把按钮改圆了，我把那个主题插件停用甚至卸载了，怎么还在？」
                     —— 因为那是<b>AI 临时层</b>改的，插件停用管不到它。
-                    去 设置 → 通用 → <b>「当前外观被谁改了」</b>，那里逐层显示谁在生效，
-                    点<b>「清除 AI 的全部临时改动」</b>就干净了（你自己的设置与已存插件不受影响）。
+                    去 设置 → 通用 → <b>「外观覆盖层」</b>，那里逐层显示谁在生效，
+                    点<b>「清除 AI 临时覆盖」</b>就干净了（你自己的设置与已存插件不受影响）。
                   </p>
                   <p className="help-tip">
-                    旁边那颗<b>「恢复外观默认」</b>是另一回事：它连你自己选的主题、缩放、精度一起回默认，会先弹确认。
+                    旁边那颗<b>「恢复默认外观」</b>是另一回事：它连你自己选的主题、缩放、精度一起回默认，会先弹确认。
                     两者都不是「恢复出厂」——那个在 设置 → AI 服务 底部，会清空<b>全部</b>本地数据，不可恢复。
                   </p>
                 </Section>
@@ -996,7 +996,7 @@ else send("RGT:" + phase);`}</pre>
                 </Section>
                 <Section title="装进来归谁管：一颗按钮、一处落地、三个启停入口">
                   <ol className="help-ol">
-                    <li>卡片与详情各一颗<b>「安装」</b>（或「更新到 v×」）。{MARKET_INSTALL_NOTE}</li>
+                    <li>卡片与详情各一颗<b>「安装」</b>（或「更新到 v×」）。{marketInstallNote()}</li>
                     <li><b>新装直接落地为停用态</b>，不再弹第二张卡；只有<b>覆盖本机已有版本</b>那种会停在右下角那张确认卡上等你点「装入」。命令行发起的装包停在<b>同一张卡</b>上，标题栏那颗拼图会亮「等你确认」——两个入口做的是同一件事，结论也只有一个来源。</li>
                     <li>启用与停用有三个地方：市场页的<b>「外观」页签</b>（主题那一类）、<b>插件库</b>（所有种类）、<b>设置 → 通用</b>的主题卡。三处调的是同一个 <code>setEnabled</code>，同一动作同一句话，不存在"在这儿启用与在那儿启用不同"。</li>
                     <li><b>主题互斥</b>：内置与插件主题同级，同时只有一枚在画；启用一枚主题会照实告诉你挤掉了谁。插件库里停用一枚包，它带的所有产物一起退出。</li>
@@ -1030,7 +1030,7 @@ else send("RGT:" + phase);`}</pre>
                         <td>
                           <b>不替你启用</b>，不替你启用那些要点名的能力（{autoEnableBlockedCaps().map((c) => CAP_LABEL[c].name).join("、")}）——这些永远要你自己点一次；
                           不替你决定"覆盖本机已有版本"（停在确认卡上）；也不替你判断这堆东西<b>好不好</b>——
-                          {MARKET_NO_ENDORSE}
+                          {marketNoEndorse()}
                         </td>
                       </tr>
                       <tr>

@@ -30,7 +30,7 @@ const infinite = [];
 const allFiles = roots.flatMap((root) => walk(root));
 for (const f of allFiles) {
   const rel = path.relative(process.cwd(), f).replace(/\\/g, "/");
-  const lines = fs.readFileSync(f, "utf8").split("\n");
+  const lines = fs.readFileSync(f, "utf8").split(/\r?\n/);
   lines.forEach((line, i) => {
     const m = /animation\s*:[^;]*\binfinite\b/.exec(line);
     if (!m) return;
