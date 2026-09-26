@@ -27,6 +27,7 @@ import { agentPluginId, freeAgentId } from "../plugins/pluginId";
 import { RECEIPT_DATA_LIMIT } from "./context";
 import { channelStats, decimate } from "./runMath";
 import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolResultBody } from "./toolRegistry";
+import { setPlan, type PlanItem, type PlanStatus } from "./planLedger";
 
 /** 按引用取回时的单页字节上限（P94-G3）。等于回执裁剪线，保证"取回来的这一页"不会再被裁。 */
 export const ARTIFACT_PAGE_BYTES = RECEIPT_DATA_LIMIT;
@@ -74,6 +75,45 @@ export function nextVersion(cur: string): string {
 const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31})+$/;
 
 const HOST = { kind: "host" } as const;
+
+const PLAN_STATUSES: PlanStatus[] = ["pending", "doing", "done", "skipped"];
+
+/** task_plan 的参数摘要（时间线展开用）：只报"几项 / 几项没闭环"，不把计划全文塞进卡片 */
+function planArgsSummary(a: Record<string, unknown>): string {
+  const items = Array.isArray(a?.items) ? (a.items as PlanItem[]) : [];
+  const open = items.filter((i) => i.status === "pending" || i.status === "doing").length;
+  return `计划 ${items.length} 项` + (open ? ` · 未闭环 ${open}` : " · 全部闭环");
+}
+
+/**
+ * task_plan 的执行：整表替换（计划是快照语义，不是补丁），然后回一份"宿主记成了什么"，
+ * 让模型下一轮能自查。参数不合法一律 `not_executed` —— 静默收下坏计划比拒收更坏：
+ * 那等于后面那道完成检查建立在一个模型以为存在的计划上。
+ */
+function writePlan(callId: string, ctx: ToolCtx, a: Record<string, unknown>): ToolResultBody {
+  const raw = Array.isArray(a?.items) ? (a.items as Partial<PlanItem>[]) : null;
+  if (!raw || raw.length === 0 || raw.length > 12) return notExecuted(callId, "invalid_items");
+  const items: PlanItem[] = [];
+  for (const it of raw) {
+    if (!it || typeof it.id !== "string" || typeof it.text !== "string") return notExecuted(callId, "invalid_items");
+    if (!PLAN_STATUSES.includes(it.status as PlanStatus)) return notExecuted(callId, "invalid_status");
+    items.push({ id: it.id.slice(0, 24), text: it.text.slice(0, 200), status: it.status as PlanStatus });
+  }
+  setPlan(ctx.runId, items);
+  const open = items.filter((i) => i.status === "pending" || i.status === "doing").map((i) => i.id);
+  return {
+    callId,
+    ok: true,
+    status: "applied",
+    data: {
+      total: items.length,
+      open,
+      note: open.length
+        ? `${open.length} item(s) still open; the task will not be accepted as finished until they are done or skipped.`
+        : "all plan items closed",
+    },
+  };
+}
 const PURE = PURE_UI_CAPS as readonly string[];
 const isPureUiCaps = (caps: readonly string[]) => caps.every((c) => PURE.includes(c));
 
@@ -279,6 +319,41 @@ export const localToolEntries: AgentToolEntry[] = [
         },
       };
     },
+  }),
+  // P109-C：任务计划。它是**完成契约**不是权限闸——不拦写操作、不改审批语义（§8-44），
+  // 只把"还有步骤没闭环就想收工"变成宿主侧可查的事实，而不是模型自己的一句话。
+  defineTool({
+    name: "task_plan",
+    labelZh: "记录任务计划",
+    effect: "read",
+    domain: null,
+    provenance: HOST,
+    description:
+      "Record or update your step plan for the current task. Call it before multi-step work, then update statuses as you go. While items stay 'pending' or 'doing' the task will not be accepted as finished - close them with 'done', or move them to 'skipped' and say why in your reply. Re-sending the full list replaces the plan (it is a snapshot, not a patch).",
+    parameters: {
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          minItems: 1,
+          maxItems: 12,
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string", description: "short stable id, e.g. p1" },
+              text: { type: "string", description: "what this step delivers" },
+              status: { type: "string", enum: ["pending", "doing", "done", "skipped"] },
+            },
+            required: ["id", "text", "status"],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ["items"],
+      additionalProperties: false,
+    },
+    summarize: (a) => planArgsSummary(a),
+    execute: async (a, ctx) => writePlan(ctx.callId, ctx, a),
   }),
   defineTool({
     /* —— P99a-C1：宿主自省面。先看菜单再点菜（DSH `cordis_inspect_list` 口径） —— */

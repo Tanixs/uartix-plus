@@ -12,9 +12,31 @@ import { invoke } from "@tauri-apps/api/core";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import type { AgentMessage, AgentProvider, ModelTurn, ToolCall, ToolDefinition, TurnOptions } from "./types";
 
-/** Base URL 清洗：去引号/空白/尾部斜杠（测试连接与真实请求共用） */
+/**
+ * P108：从网页/终端复制必然带进来的那一族字符。
+ * ⚠ JS 的 `\s` **不含零宽字符**（U+200B~U+200D），而从网页、PDF、聊天软件里粘贴最容易带的就是它，
+ * 所以显式列出。字符集只有这一份，URL 与 Key 共用 —— 两套规则早晚分叉。
+ */
+const PASTE_JUNK = /[`"'\s\u200b-\u200d\ufeff]/g;
+
+/** Base URL 清洗：去引号/空白/零宽/尾部斜杠（测试连接与真实请求共用） */
 export function cleanBaseUrl(url: string): string {
-  return url.replace(/[`"'\s]/g, "").replace(/\/+$/, "");
+  return url.replace(PASTE_JUNK, "").replace(/\/+$/, "");
+}
+
+/**
+ * P108：API Key 的边界清洗，与 `cleanBaseUrl` 同一个 `PASTE_JUNK`。
+ *
+ * 为什么要有它：base URL 一直是清洗过的，key 却是原样发出的（三个发送点全都直接读设置里的原值）。
+ * 粘贴带进来的一个换行、一对引号、一个零宽空格，都会原样进 `Authorization` 头，
+ * 而界面只回一句"API Key 无效（401）"—— 用户既看不到送出去的是什么，也分不清是谁的锅。
+ *
+ * 只剥这一族字符，**不校验形状**：不要求 `sk-or-v1-` 开头、不要求长度。各家的 key 格式不一样，
+ * 猜一套白名单会把合法 key 直接拒掉 —— 那比 401 更难查。
+ * 清洗只发生在**发送**这一刻；`localStorage` 里存的是用户贴进去的原样内容，软件不改写它。
+ */
+export function cleanApiKey(key: string): string {
+  return key.replace(PASTE_JUNK, "");
 }
 
 interface RustTurnResult {
@@ -81,7 +103,7 @@ export const invokeAgentProvider: AgentProvider = async (
     const raw = await invoke<RustTurnResult>("ai_agent_turn", {
       reqId,
       baseUrl: cleanBaseUrl(st.aiBaseUrl),
-      apiKey: st.aiApiKey,
+      apiKey: cleanApiKey(st.aiApiKey),
       model: st.aiModel,
       format: st.aiFormat,
       proxy: st.aiProxy || null,

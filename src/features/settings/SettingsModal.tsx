@@ -26,7 +26,7 @@ import { toast } from "../ai/extRuntime";
 import { activeThemeFacts, subscribeStyleApply } from "../../styles/themeFacts";
 import { drawnTalk, pluginSectionStart, selectTheme, themeCards } from "./themePicker";
 import { themeBearingPackages, usePlugins } from "../plugins/pluginStore";
-import { cleanBaseUrl } from "../agent/provider";
+import { cleanApiKey, cleanBaseUrl } from "../agent/provider";
 import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
 import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
@@ -146,7 +146,7 @@ function AiConnTestRow() {
       await invoke("ai_agent_turn", {
         reqId: crypto.randomUUID(),
         baseUrl: cleanBaseUrl(settings.aiBaseUrl),
-        apiKey: settings.aiApiKey,
+        apiKey: cleanApiKey(settings.aiApiKey),
         model: settings.aiModel,
         format: settings.aiFormat,
         proxy: settings.aiProxy || null,
@@ -859,7 +859,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       style={{ width: 280 }}
                       type={showKey ? "text" : "password"}
                       value={settings.aiApiKey}
-                      placeholder={settings.aiPreset === "ollama" ? tx("本地 Ollama 无需 Key", "Local Ollama needs no key") : "sk-…"}
+                      placeholder={settings.aiPreset === "ollama" ? tx("本地 Ollama 无需 Key", "Local Ollama needs no key") : AI_PRESETS[settings.aiPreset].keyHint ?? "sk-…"}
                       onChange={(e) => patch({ aiApiKey: e.target.value })}
                     />
                     <button
@@ -1006,17 +1006,95 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), t("set.ai.widgetSend.tip"))}
-                {row(tx("Agent 文件白名单", "Agent file whitelist"), (
+                {/* P109-A：Agent 预算。0 = 不限制，且**默认就是 0**（2026-09-26 用户裁决，
+                    对标 DSH "No built-in turn budget"）。以前它是 loop.ts 里两处 Math.min 焊死的
+                    24 轮 / 64 次 / 10 分钟，界面上只显示"第 N/24 轮"却没有任何地方能改。
+                    ⚠ 这三项在 schema 里是 protected ⇒ 模型改不了自己的上限；这条有测试钉。 */}
+                {row(tx("Agent 轮数上限（0=不限）", "Agent round limit (0 = unlimited)"), (
                   <input
                     className="input"
-                    style={{ width: 280 }}
-                    value={settings.agentFsRoots}
-                    placeholder={tx("如 D:\\Projects;D:\\data（留空=关闭）", "e.g. D:\\Projects;D:\\data (empty = off)")}
-                    onChange={(e) => patch({ agentFsRoots: e.target.value })}
+                    style={{ width: 120 }}
+                    type="number"
+                    min={0}
+                    max={100000}
+                    step={1}
+                    value={settings.agentMaxRounds}
+                    onChange={(e) => patch({ agentMaxRounds: Number(e.target.value) })}
                   />
                 ), tx(
-                  "Agent 的 fs_read/fs_list 只能访问白名单内的路径；多个目录用分号分隔，留空表示文件工具关闭",
-                  "fs_read/fs_list can only access whitelisted paths; separate folders with semicolons; empty disables file tools",
+                  "一个任务最多允许多少轮「模型 → 工具 → 模型」。0 = 不限制，跑到模型自己认为完成为止。成本由你承担：无限预算下长任务会持续消耗 token。",
+                  "How many model→tool→model rounds one task may use. 0 = unlimited, it runs until the model considers the goal done. Cost is on you: an unlimited budget keeps spending tokens on long tasks.",
+                ))}
+                {row(tx("Agent 工具调用上限（0=不限）", "Agent tool-call limit (0 = unlimited)"), (
+                  <input
+                    className="input"
+                    style={{ width: 120 }}
+                    type="number"
+                    min={0}
+                    max={100000}
+                    step={1}
+                    value={settings.agentMaxCalls}
+                    onChange={(e) => patch({ agentMaxCalls: Number(e.target.value) })}
+                  />
+                ), tx(
+                  "一个任务最多允许执行多少次工具调用（一轮里可以并行多次）。0 = 不限制。",
+                  "How many tool calls one task may execute (a round can issue several). 0 = unlimited.",
+                ))}
+                {row(tx("Agent 单次任务时限（分钟，0=不限）", "Per-task time limit (minutes, 0 = unlimited)"), (
+                  <input
+                    className="input"
+                    style={{ width: 120 }}
+                    type="number"
+                    min={0}
+                    max={1440}
+                    step={1}
+                    value={settings.agentTimeoutMins}
+                    onChange={(e) => patch({ agentTimeoutMins: Number(e.target.value) })}
+                  />
+                ), tx(
+                  "超过时限任务会暂停（不是失败），可以点「继续任务」接着跑。0 = 不限制。另有一条不受这里管的保护：同一个调用连续失败 3/5 次会提醒模型换做法，8 次才自动暂停。",
+                  "Past the limit the task pauses (not fails) and can be resumed. 0 = unlimited. One guard is not controlled here: 3/5 identical failures remind the model to change approach, 8 pauses the run.",
+                ))}
+                {row(tx("重启后保留全权执行档", "Keep the full-access tier across restarts"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.agentRestoreTier}
+                      onChange={(e) => patch({ agentRestoreTier: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), tx(
+                  "默认关闭：重启后「全权执行 / 手工勾选」会回落到「界面创造」，并在档位旁标出已降档。打开它 = 高危授权跨重启存活，这是你自己在 P109 里点名的放松（§8-44）；软件不会替你默认打开。",
+                  "Off by default: after a restart the full-access / hand-picked tier falls back to UI-creation and the downgrade is shown next to the tier. Turning it on keeps high-risk grants across restarts - the relaxation you asked for in P109 (rule 8-44); the app never enables it for you.",
+                ))}
+                {row(tx("Agent 文件白名单", "Agent file whitelist"), (
+                  <div className="ai-key-wrap">
+                    <input
+                      className="input"
+                      style={{ width: 232 }}
+                      value={settings.agentFsRoots}
+                      placeholder={tx("如 D:\Projects;D:\data（留空=关闭）", "e.g. D:\Projects;D:\data (empty = off)")}
+                      onChange={(e) => patch({ agentFsRoots: e.target.value })}
+                    />
+                    <button
+                      className="btn sm"
+                      type="button"
+                      title={tx("弹目录选择器，选中的目录追加到白名单末尾（不是覆盖，也不自动清空）", "Pick a folder; it gets appended to the whitelist (this never overwrites or clears the list)")}
+                      onClick={async () => {
+                        const dir = await open({ directory: true, multiple: false });
+                        if (typeof dir !== "string" || !dir) return;
+                        const cur = settings.agentFsRoots.trim();
+                        if (cur.split(";").map((x) => x.trim().toLowerCase()).includes(dir.toLowerCase())) return;
+                        patch({ agentFsRoots: cur ? `${cur};${dir}` : dir });
+                      }}
+                    >
+                      {tx("浏览…", "Browse…")}
+                    </button>
+                  </div>
+                ), tx(
+                  "Agent 的 fs_read / fs_list / fs_grep / fs_glob 只能访问白名单内的路径，fs_write / fs_edit 亦然；多个目录用分号分隔，留空表示文件工具整体关闭",
+                  "fs_read / fs_list / fs_grep / fs_glob can only reach whitelisted paths, and so do fs_write / fs_edit; separate folders with semicolons; empty disables the file tools",
                 ))}
                 {row(tx("Agent 允许执行命令", "Agent may run commands"), (
                   <label className="set-switch">

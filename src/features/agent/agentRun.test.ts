@@ -29,6 +29,9 @@ const { releaseDataLease, leaseCount } = await import("../plot/dataLease");
 const { invokeAgentProvider } = await import("./provider");
 const { setLocalJobInterest } = await import("../mcp/jobExecutor");
 const { isLiveRun } = await import("./types");
+// P109-B：必须在这里领——文件后面的用例会 vi.resetModules()，
+// 在测试体内再 import 会拿到**另一份** settingsStore，patch 打在副本上、agentRun 读的还是旧的。
+const settings = await import("../settings/settingsStore");
 const agentRun = await import("./agentRun");
 import type { AgentProvider, ModelTurn } from "./types";
 
@@ -501,5 +504,99 @@ describe("P91 A1/A4：实时增量与失败续跑", () => {
     expect(wire).not.toContain("〔第");
     expect(wire).not.toContain("执行出错");
     expect(wire).not.toContain("自动重试");
+  });
+});
+
+/**
+ * P109-B：暂停要带真实成因，「继续任务」必须真的接得上。
+ * 这批的回归价值全在这里：旧实现 `resumeRun` 是"拿原 goal 新开一个 run"，
+ * 新 run 不带历史（loop 只拼得出 system + 目标）、轮数归零、`seen` 重建
+ * ⇒ 模型不知道走到哪、已生效的写入会被重做一遍。下面第二条就是钉这个的。
+ */
+describe("P109-B · 暂停成因与续跑可重建", () => {
+  it("轮数耗尽 ⇒ pauseReason=rounds；「继续」在同一个 run 上跑且带上先前回执", async () => {
+    const before = settings.getSnapshot();
+    const saved = { r: before.agentMaxRounds, c: before.agentMaxCalls, t: before.agentTimeoutMins };
+    settings.patch({ agentMaxRounds: 2, agentMaxCalls: 0, agentTimeoutMins: 0 });
+    const seen: number[] = [];
+    vi.mocked(invokeAgentProvider).mockImplementation(async (messages) => {
+      seen.push(messages.filter((m) => m.role === "tool").length);
+      const n = seen.length;
+      return { content: `第 ${n} 步`, calls: [{ callId: `b${n}`, name: "settings_read", arguments: "{}" }] };
+    });
+    try {
+      const runId = await agentRun.startRun({ goal: "budget 反复读设置", scope: "create" });
+      const v1 = agentRun.getSnapshot().runs.find((r) => r.runId === runId)!;
+      expect(v1.status, JSON.stringify(v1.events.slice(-3).map((e) => e.text))).toBe("paused");
+      expect(v1.pauseReason).toBe("rounds");
+      expect(v1.rounds).toBe(2);
+      expect(seen).toEqual([0, 1]); // 第一轮没回执、第二轮带 1 条
+
+      const again = await agentRun.resumeRun(runId);
+      expect(again, "续跑必须是同一个 run（新开一个就等于丢掉历史）").toBe(runId);
+      // 第三次请求（续跑后的第一轮）必须带着先前那 2 条工具回执 —— 可重建性的正面证据
+      expect(seen[2], `续跑后模型看到的历史里没有先前回执：${JSON.stringify(seen)}`).toBeGreaterThanOrEqual(2);
+      const v2 = agentRun.getSnapshot().runs.find((r) => r.runId === runId)!;
+      expect(v2.events.some((e) => e.kind === "status" && (e.text ?? "").includes("已从中断处继续"))).toBe(true);
+    } finally {
+      settings.patch({ agentMaxRounds: saved.r, agentMaxCalls: saved.c, agentTimeoutMins: saved.t });
+    }
+  });
+
+  it("无进展暂停 ⇒ pauseReason=no-progress，与「预算用完」不是一句话", async () => {
+    const before = settings.getSnapshot();
+    const saved = { r: before.agentMaxRounds, c: before.agentMaxCalls, t: before.agentTimeoutMins };
+    settings.patch({ agentMaxRounds: 0, agentMaxCalls: 0, agentTimeoutMins: 0 });
+    let n = 0;
+    vi.mocked(invokeAgentProvider).mockImplementation(async () => {
+      n++;
+      // 不存在的工具 + 完全相同的参数 ⇒ 每次都产出一模一样的失败（无进展阶梯的正解）
+      return { content: `再试一次 ${n}`, calls: [{ callId: `x${n}`, name: "no_such_tool", arguments: "{}" }] };
+    });
+    try {
+      const runId = await agentRun.startRun({ goal: "stuck 反复调同一支不存在的工具", scope: "create" });
+      const view = agentRun.getSnapshot().runs.find((r) => r.runId === runId)!;
+      expect(view.status).toBe("paused");
+      expect(view.pauseReason).toBe("no-progress");
+      expect(view.calls).toBe(8);
+    } finally {
+      settings.patch({ agentMaxRounds: saved.r, agentMaxCalls: saved.c, agentTimeoutMins: saved.t });
+    }
+  });
+
+  it("canRetry 认 paused（旧实现只认 failed/interrupted，暂停的任务没有重放路径）", async () => {
+    const before = settings.getSnapshot();
+    const saved = { r: before.agentMaxRounds, c: before.agentMaxCalls, t: before.agentTimeoutMins };
+    settings.patch({ agentMaxRounds: 1, agentMaxCalls: 0, agentTimeoutMins: 0 });
+    vi.mocked(invokeAgentProvider).mockImplementation(async (messages) => ({
+      content: "还在跑",
+      calls: [{ callId: `k${messages.length}`, name: "settings_read", arguments: "{}" }],
+    }));
+    try {
+      const runId = await agentRun.startRun({ goal: "retryable 一轮就耗尽", scope: "create" });
+      expect(agentRun.getSnapshot().runs.find((r) => r.runId === runId)!.status).toBe("paused");
+      expect(agentRun.canRetry(runId)).toBe(true);
+    } finally {
+      settings.patch({ agentMaxRounds: saved.r, agentMaxCalls: saved.c, agentTimeoutMins: saved.t });
+    }
+  });
+
+  it("pauseReason 进得了落盘（reviveRun 是逐字段白名单，漏字段=重启后静默消失）", async () => {
+    const before = settings.getSnapshot();
+    const saved = { r: before.agentMaxRounds, c: before.agentMaxCalls, t: before.agentTimeoutMins };
+    settings.patch({ agentMaxRounds: 1, agentMaxCalls: 0, agentTimeoutMins: 0 });
+    vi.mocked(invokeAgentProvider).mockImplementation(async (messages) => ({
+      content: "还在跑",
+      calls: [{ callId: `p${messages.length}`, name: "settings_read", arguments: "{}" }],
+    }));
+    try {
+      const runId = await agentRun.startRun({ goal: "persist 一轮就耗尽", scope: "create" });
+      const raw = localStorage.getItem("vs.agentRuns.v1");
+      expect(raw, "台账没落盘，谈不上重启后还在").toBeTruthy();
+      const rec = (JSON.parse(raw as string) as { runId: string; pauseReason?: string }[]).find((r) => r.runId === runId);
+      expect(rec?.pauseReason, "pauseReason 没进持久化副本").toBe("rounds");
+    } finally {
+      settings.patch({ agentMaxRounds: saved.r, agentMaxCalls: saved.c, agentTimeoutMins: saved.t });
+    }
   });
 });

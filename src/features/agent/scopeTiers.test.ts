@@ -138,7 +138,7 @@ describe("restoreTier（Q3 折中：记住选择，但高危档不自动恢复�
 
   it("上次是全权执行或手工勾选 → 回落 create 并如实报 downgraded，让 UI 明说而不是静默改", () => {
     rememberTier("custom", [...DOMAINS] as Domain[]);
-    const r = restoreTier();
+    const r = restoreTier(false);
     expect(r.scope).toBe("create");
     expect(r.downgraded).toBe(true);
     // 回落后的档位必须是"低危"的：全权执行绝不跨重启回来
@@ -189,3 +189,31 @@ describe("hasDomain", () => {
     expect(resolveTier("host", []).allowed).not.toContain("write");
   });
 });
+
+/**
+ * P109-D：高危档跨重启。默认必须仍是"回落 + 如实报 downgraded"——
+ * 恢复是用户在 P109 里点名要的放松（§8-44），所以它只能由用户显式开闸换来，
+ * 不能成为新的默认，也不能被模型自己打开（schema 那条 protected 测试钉着）。
+ */
+describe("P109-D · agentRestoreTier（重启后保留全权执行档）", () => {
+  it("默认关闭：custom 回落 create 并 downgraded=true", async () => {
+    const settings = await import("../settings/settingsStore");
+    settings.patch({ agentRestoreTier: false });
+    rememberTier("custom", ["config", "plugins", "files"]);
+    const r = restoreTier(false);
+    expect(r.scope).toBe("create");
+    expect(r.downgraded).toBe(true);
+    expect(r.allowed).toContain("files");
+  });
+
+  it("显式打开后：custom 原样恢复，且不再报 downgraded", async () => {
+    const settings = await import("../settings/settingsStore");
+    settings.patch({ agentRestoreTier: true });
+    rememberTier("custom", ["config", "plugins", "files"]);
+    const r = restoreTier(true);
+    expect(r.scope).toBe("custom");
+    expect(r.downgraded).toBe(false);
+    settings.patch({ agentRestoreTier: false });
+  });
+});
+

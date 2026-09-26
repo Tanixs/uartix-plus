@@ -66,12 +66,27 @@ export interface Settings {
   agentFsRoots: string;
   /** P88e B2：Agent 通用工具——命令执行总开关（默认关；开启后 shell_exec 仍需逐次审批） */
   agentShellEnabled: boolean;
+  /**
+   * P109-D：重启后要不要**保留**「全权执行 / 手工勾选」这一档。默认 false = 保持原行为
+   * （回落「界面创造」并如实标 downgraded）。这是 2026-09-26 用户点名的放松（§8-44 要求单独点头）；
+   * 开了它，高危授权就跨重启存活 —— 所以开关本身必须是 protected：模型不许自己开。
+   */
+  agentRestoreTier: boolean;
   showThinking: boolean;
   /** P96-K4：是否让模型进入"先想后答"模式（与 showThinking 的界面显示解耦）。
    *  思考模式会显著拉长首字节前的静默，是网关按空闲掐断的主要来源，所以单独成项。 */
   deepThink: boolean;
   /** P96-K4：流式相邻两 chunk 之间的读空闲上限（秒）；只约束我们这一侧，管不到上游网关 */
   streamIdleSecs: number;
+  /* P109-A：Agent 预算，**0 = 不限制**，默认全部不限（2026-09-26 用户裁决，对标 DSH
+     "No built-in turn budget"）。它们以前是 `loop.ts` 里两处 `Math.min` 焊死的天花板，
+     而"允许收紧不允许放宽"那句从来不是用户裁决。
+     ⚠ 三项在 settingsSchema 里必须是 `protected`：Agent 不能写自己的上限，
+     否则"成本责任回到用户侧"就是一句空话（有测试钉）。 */
+  agentMaxRounds: number;
+  agentMaxCalls: number;
+  /** 单位：分钟（界面按分钟说话，落盘也是分钟；换算成 ms 只发生在交给 loop 的那一处） */
+  agentTimeoutMins: number;
   chartPalette: "standard" | "cbSafe";
   conWrap: boolean;
   /** 减弱动效：强制关闭呼吸/过渡动画（独立于系统 prefers-reduced-motion） */
@@ -96,7 +111,14 @@ export interface Settings {
 /** 设置页「插件管理」那一栏的键——标题栏那颗、页签表、渲染分支都引它，别各处再写一遍 "ext" */
 export const SETTINGS_TAB_PLUGINS = "ext";
 
-export type AiPreset = "openai" | "deepseek" | "zhipu" | "qwen" | "ollama" | "anthropic";
+export type AiPreset =
+  | "openai"
+  | "deepseek"
+  | "zhipu"
+  | "qwen"
+  | "ollama"
+  | "anthropic"
+  | "openrouter";
 
 export type AiFormat = "chat" | "anthropic" | "responses";
 
@@ -106,14 +128,27 @@ export const AI_FORMATS: { key: AiFormat; label: string }[] = [
   { key: "responses", label: "Responses (/responses)" },
 ];
 
-/** AI 服务预设（2026-09 按各家官方文档刷新：默认模型名以官方 API ID 为准） */
-export const AI_PRESETS: Record<AiPreset, { label: string; baseUrl: string; model: string }> = {
+/** AI 服务预设（2026-09 按各家官方文档刷新：默认模型名以官方 API ID 为准）
+ *  `keyHint` 只在真实前缀不是通用的 `sk-…` 时才给（P108）：输入框里那句提示是用户唯一
+ *  能对照"我贴的这串长得对不对"的地方，缺前缀这类事故就发生在这里。 */
+export const AI_PRESETS: Record<
+  AiPreset,
+  { label: string; baseUrl: string; model: string; keyHint?: string }
+> = {
   openai: { label: "OpenAI 兼容", baseUrl: "https://api.openai.com/v1", model: "gpt-5.6-sol" },
   deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-v4-pro" },
   zhipu: { label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.3" },
   qwen: { label: "通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3.8-flash" },
   ollama: { label: "本地 Ollama", baseUrl: "http://localhost:11434/v1", model: "gemma4:12b" },
   anthropic: { label: "Anthropic Claude", baseUrl: "https://api.anthropic.com", model: "claude-sonnet-5" },
+  // P108：网关不是厂商，模型名由用户挑 —— 默认给一条**实测存在**的 `:free` 路由
+  // （2026-09-26 从公开 /api/v1/models 的 458 条里核对），不替用户默认一个要花钱的档位。
+  openrouter: {
+    label: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "qwen/qwen3.8-27b:free",
+    keyHint: "sk-or-v1-…",
+  },
 };
 
 /** 旧预设模型名 → 现行官方 ID 的存量迁移表（如 deepseek-chat 已于 2026-07-24 停服） */
@@ -143,6 +178,14 @@ function clampDecimals(v: unknown, fallback: number): number {
   return Number.isFinite(n) && n >= 0 && n <= 6 ? n : fallback;
 }
 
+/** P109-A：预算项的恢复口径。**0 是合法值且就是默认（不限制）**，所以非法值也落回 0，
+ *  而不是偷偷给用户开一个他以为关着的上限。`max` 只防手滑输入天文数字。 */
+function clampBudgetNum(v: unknown, max: number): number {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, max);
+}
+
 function load(): Settings {
   const fallback: Settings = {
     /* P104-B2：默认主题 海棠 → light。
@@ -169,9 +212,13 @@ function load(): Settings {
     aiWidgetSend: false,
     agentFsRoots: "",
     agentShellEnabled: false,
+    agentRestoreTier: false,
     showThinking: true,
     deepThink: true,
     streamIdleSecs: 120,
+    agentMaxRounds: 0,
+    agentMaxCalls: 0,
+    agentTimeoutMins: 0,
     chartPalette: "standard",
     conWrap: true,
     reduceMotion: false,
@@ -205,9 +252,10 @@ function load(): Settings {
       fcCellSize: Number.isFinite(p.fcCellSize)
         ? Math.max(20, Math.min(96, Math.round(p.fcCellSize as number)))
         : 42,
-      aiPreset: (["openai", "deepseek", "zhipu", "qwen", "ollama", "anthropic"] as const).includes(
-        p.aiPreset as AiPreset,
-      )
+      // P108：名单从 AI_PRESETS 派生。原来是手抄的六个字面量 —— 加了第七档而忘了这里，
+      // 表现是"选了 OpenRouter、重启软件，预设被静默退回 deepseek、baseUrl 跟着被覆盖"：
+      // 新档位在设置里存在、在重启后消失。（settingsSchema.ts:25 早就是派生的，这里只是并轨。）
+      aiPreset: (Object.keys(AI_PRESETS) as AiPreset[]).includes(p.aiPreset as AiPreset)
         ? (p.aiPreset as AiPreset)
         : "deepseek",
       aiFormat: (["chat", "anthropic", "responses"] as const).includes(p.aiFormat as AiFormat)
@@ -228,12 +276,18 @@ function load(): Settings {
       aiWidgetSend: Boolean(p.aiWidgetSend),
       agentFsRoots: typeof p.agentFsRoots === "string" ? p.agentFsRoots.slice(0, 4096) : "",
       agentShellEnabled: Boolean(p.agentShellEnabled),
+      agentRestoreTier: Boolean(p.agentRestoreTier),
       showThinking: p.showThinking === undefined ? true : Boolean(p.showThinking),
       deepThink: p.deepThink === undefined ? true : Boolean(p.deepThink),
       streamIdleSecs: (() => {
         const n = Math.round(Number(p.streamIdleSecs));
         return Number.isFinite(n) && n >= 30 && n <= 600 ? n : 120;
       })(),
+      // P109-A：0 = 不限制，所以"洗掉非法值"的落点也是 0（默认就是不限）；上限只是防手滑输入
+      // 一个天文数字把界面计数撑坏，不是安全边界。
+      agentMaxRounds: clampBudgetNum(p.agentMaxRounds, 100000),
+      agentMaxCalls: clampBudgetNum(p.agentMaxCalls, 100000),
+      agentTimeoutMins: clampBudgetNum(p.agentTimeoutMins, 1440),
       chartPalette: p.chartPalette === "cbSafe" ? "cbSafe" : "standard",
       conWrap: p.conWrap === undefined ? true : Boolean(p.conWrap),
       reduceMotion: Boolean(p.reduceMotion),

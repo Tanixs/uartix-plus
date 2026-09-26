@@ -11,6 +11,7 @@
  * 不在任何 handler 里——这是"忘记检查不再可能"的那处结构保证（详设 §4.2）。
  */
 import { getSnapshot as getOperator } from "../operator/operatorStore";
+import { openPlanText } from "./planLedger";
 import { getSnapshot as getSerial } from "../serial/serialStore";
 import { hasDataLease } from "../plot/dataLease";
 import { shrinkByShape } from "./shrink";
@@ -117,6 +118,8 @@ export function createLocalAgentAdapter(opts: LocalAgentAdapterOpts): TaskAdapte
     // 每 run 冻结一次：本任务可见的工具面＝建适配器那一刻的快照（详设 §4.5-2）
     definitions: registry.modelDefinitions(scope, allowed),
     execute: (call, ctx) => runToolCall(registry, call, makeCtx(ctx), hooks),
+    // P109-C：完成契约的读数口。loop 在模型想收工时问一次，不自己认计划。
+    openPlan: () => openPlanText(runId),
   };
 }
 

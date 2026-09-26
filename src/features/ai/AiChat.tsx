@@ -10,7 +10,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
-import { useSettings } from "../settings/settingsStore";
+import { getSnapshot as getSettings, useSettings } from "../settings/settingsStore";
 import * as chatStore from "./chatStore";
 import type { ChatMsg, ReasonRound } from "./chatStore";
 import { bubbleMode } from "./messageClip";
@@ -33,7 +33,6 @@ import {
 } from "../agent/scopeTiers";
 import * as agentRun from "../agent/agentRun";
 import { isLiveRun, type RunScope } from "../agent/types";
-import { DEFAULT_BUDGET } from "../agent/loop";
 import { Dropdown } from "../../shared/Dropdown";
 import { PluginLibraryDialog } from "../plugins/PluginLibraryDialog";
 import { resolveVars } from "../controls/variableStore";
@@ -588,6 +587,15 @@ function MessageBody({
 
 /* ---------------- 会话侧栏 ---------------- */
 
+/**
+ * P109-A：预算的读法。0 = 不限制，写成 "0" 会被读成"预算是 0、任务该立刻停"——那是反的。
+ * 用 `∞` 而不是"不限"这个词：`预算 不限 轮` 读不通，而 `∞` 与 `AgentInline` 里同一处同一记号，
+ * 也不用翻。
+ */
+function capWord(n: number): string {
+  return n === 0 ? "∞" : String(n);
+}
+
 function fmtSessionTime(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
@@ -772,7 +780,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const [sideOpen, setSideOpen] = useState(false);
   // P88d ③：Agent 集成进对话——agentMode=输入框走 Agent 任务而非问答；档位/授权域内联选择
   // P98-M3（Q3 折中）：记住上次的授权档，但高危档不自动恢复（restoreTier 里回落并报 downgraded）
-  const [tierRestore] = useState(restoreTier);
+  const [tierRestore] = useState(() => restoreTier(getSettings().agentRestoreTier));
   const [agentMode, setAgentMode] = useState(false);
   const [agentScope, setAgentScope] = useState<RunScope>(tierRestore.scope);
   const [agentAllowed, setAgentAllowed] = useState<Domain[]>(tierRestore.allowed);
@@ -1753,10 +1761,12 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             )}
             {agentMode && (
               <div className="ai-agent-group ai-agent-group-meta">
+                {/* P109-A：读**设置**，不再读常量。以前这里直接写 DEFAULT_BUDGET，
+                    于是"设置改了、界面还报 24 轮"——一盏只能看的灯。 */}
                 <span className="ai-agent-budget">
                   {tx(
-                    `预算 ${DEFAULT_BUDGET.maxRounds} 轮 / ${DEFAULT_BUDGET.maxCalls} 次工具 / ${Math.round(DEFAULT_BUDGET.timeoutMs / 60000)} 分钟`,
-                    `Budget ${DEFAULT_BUDGET.maxRounds} rounds / ${DEFAULT_BUDGET.maxCalls} tool calls / ${Math.round(DEFAULT_BUDGET.timeoutMs / 60000)} min`,
+                    `预算 ${capWord(settings.agentMaxRounds)} 轮 / ${capWord(settings.agentMaxCalls)} 次工具 / ${capWord(settings.agentTimeoutMins)} 分钟`,
+                    `Budget ${capWord(settings.agentMaxRounds)} rounds / ${capWord(settings.agentMaxCalls)} tool calls / ${capWord(settings.agentTimeoutMins)} min`,
                   )}
                   {agentRunning ? tx("（运行中，设置已锁定）", "(running — settings locked)") : ""}
                 </span>
@@ -1933,6 +1943,12 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             aria-expanded={modePanelOpen}
           >
             {agentMode ? tx(`Agent 任务 · ${tierBadge(agentScope, agentAllowed)}`, `Agent task · ${tierBadge(agentScope, agentAllowed)}`) : tx("普通对话", "Plain chat")}
+            {/* P109-D：`downgraded` 从 P98-M3 算到现在才第一次被显示——旧状态是"算了但没人看"，
+                用户以为自己还在全权执行，实际已被降档。重新选到 custom 后这句自己消失
+                （条件绑在 agentScope 上），不是一条会说谎的常驻文案。 */}
+            {agentMode && tierRestore.downgraded && agentScope === "create"
+              ? tx("（上次是全权执行，重启已降档）", " (last session used full access; downgraded after restart)")
+              : null}
             {sessionBadge && (
               <span className={`agent-badge${sessionRun?.pending ? " warn" : ""}`}>{sessionBadge}</span>
             )}

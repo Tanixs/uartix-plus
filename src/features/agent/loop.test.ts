@@ -99,12 +99,77 @@ it("budget: maxRounds cap pauses, caps reported for remaining-quota UI", async (
   expect(result.caps.maxRounds).toBe(3);
 });
 
-it("budget options cannot exceed hard caps", async () => {
+it("P109-A：预算不再被天花板夹住（9999 原样生效）", async () => {
+  // 这条**取代**旧断言 "budget options cannot exceed hard caps"（它钉的是 9999→24）。
+  // 契约本身被改判了，不是测试写错：2026-09-26 用户裁决预算改成设置项、0=不限，
+  // 而旧的"允许收紧不允许放宽"从未是用户裁决（详设 docs/P109-…md §1-8、§6-1）。
   stubStorage();
   const provider: AgentProvider = async () => ({ content: "done", calls: [] });
   const result = await runAgent({ goal: "g", provider, adapter: echoAdapter(() => ({ callId: "x", ok: true, status: "read" })), context: ctx(), maxRounds: 9999, maxCalls: 9999 });
-  expect(result.caps.maxRounds).toBe(DEFAULT_BUDGET.maxRounds);
-  expect(result.caps.maxCalls).toBe(DEFAULT_BUDGET.maxCalls);
+  expect(result.caps.maxRounds).toBe(9999);
+  expect(result.caps.maxCalls).toBe(9999);
+});
+
+it("P109-A：maxRounds=0 = 不限制，跑过旧的 24 轮天花板也不暂停", async () => {
+  stubStorage();
+  let turns = 0;
+  const provider: AgentProvider = async () => {
+    turns++;
+    if (turns > 30) return { content: "done", calls: [] };
+    // 每轮参数都不同 ⇒ 不触发无进展阶梯，测的就只是轮数不封顶
+    return { content: "", calls: [{ callId: `c${turns}`, name: "echo", arguments: JSON.stringify({ n: turns }) }] };
+  };
+  const result = await runAgent({ goal: "g", provider, adapter: echoAdapter(() => ({ callId: "x", ok: true, status: "read" })), context: ctx(), maxRounds: 0, maxCalls: 0, timeoutMs: 0 });
+  expect(result.status).toBe("succeeded");
+  // 断言的是"跑过了旧的那道 24 轮天花板"，不是某个具体轮数（Off-by-one 不该是契约）
+  expect(result.rounds).toBeGreaterThan(DEFAULT_BUDGET.maxRounds);
+  expect(result.caps.maxRounds).toBe(0);
+  // 0 是"没有截止时间"的线上形态。写 Infinity 会在 JSON 落盘时变成 null，读回来就是坏值。
+  expect(result.caps.deadlineAt).toBe(0);
+});
+
+it("P109-A：resolveBudget 把 0 原样保留、把负数/NaN 退回兜底（不让一个计算 bug 静默变成无限跑）", async () => {
+  const { resolveBudget, DEFAULT_BUDGET } = await import("./loop");
+  expect(resolveBudget({ maxRounds: 0 }).maxRounds).toBe(0);
+  expect(resolveBudget({ maxRounds: -5 }).maxRounds).toBe(DEFAULT_BUDGET.maxRounds);
+  expect(resolveBudget({ maxCalls: Number.NaN }).maxCalls).toBe(DEFAULT_BUDGET.maxCalls);
+  expect(resolveBudget({ timeoutMs: Number.POSITIVE_INFINITY }).timeoutMs).toBe(DEFAULT_BUDGET.timeoutMs);
+  expect(resolveBudget({ maxRounds: 7.9 }).maxRounds).toBe(7);
+});
+
+it("P109-A：同一调用连败 3 / 5 次只提醒不暂停，第 8 次才暂停", async () => {
+  stubStorage();
+  let executed = 0;
+  const provider: AgentProvider = async () => ({ content: "", calls: [{ callId: "same", name: "echo", arguments: "{}" }] });
+  const result = await runAgent({
+    goal: "g", provider,
+    adapter: echoAdapter(() => { executed++; return { callId: "same", ok: false, status: "error", code: "boom" }; }),
+    context: ctx(),
+  });
+  expect(result.status).toBe("paused");
+  expect(result.calls).toBe(8);
+  const toolMsgs = result.messages.filter((m) => m.role === "tool").map((m) => m.content);
+  expect(toolMsgs[2]).toContain("failed 3 times");
+  expect(toolMsgs[4]).toContain("failed 5 times");
+  // 提醒只在阶梯上出现，不是每次失败都灌一条（那等于把回执改成聊天）
+  expect(toolMsgs[3]).not.toContain("hostReminder");
+  expect(toolMsgs[5]).not.toContain("hostReminder");
+});
+
+it("P109-A：连败 3 次不再掐断任务（旧行为）——模型换做法就能继续跑完", async () => {
+  stubStorage();
+  let turns = 0;
+  const provider: AgentProvider = async () => {
+    turns++;
+    if (turns <= 3) return { content: "", calls: [{ callId: `f${turns}`, name: "echo", arguments: "{}" }] };
+    return { content: "换了做法，成了", calls: [] };
+  };
+  const result = await runAgent({
+    goal: "g", provider,
+    adapter: echoAdapter(() => ({ callId: "f", ok: false, status: "error", code: "boom" })),
+    context: ctx(),
+  });
+  expect(result.status).toBe("succeeded");
 });
 
 it("same callId executes exactly once; reused id with different args rejected", async () => {
@@ -125,13 +190,16 @@ it("same callId executes exactly once; reused id with different args rejected", 
   expect(receipts[2]).toMatchObject({ ok: false, code: "call_id_reused", status: "not_executed" }); // 换参数：协议违规
 });
 
-it("three identical failures pause the loop (no token burn)", async () => {
+it("identical failures still stop the loop eventually (no infinite token burn)", async () => {
+  // 契约在 P109-A 改了：暂停点从 3 次挪到 8 次（中间 3/5 两次是提醒，见上面那条阶梯测试）。
+  // **意图没变**——"不会无限烧 token"仍然由这条钉着，只是不再被一次抖动就掐断任务。
+  // 旧断言 `executed === 3` 不是被删掉，是按新契约改成 8。
   stubStorage();
   let executed = 0;
   const provider: AgentProvider = async () => ({ content: "retry", calls: [{ callId: `f${executed}`, name: "echo", arguments: '{"fixed":true}' }] });
   const result = await runAgent({ goal: "g", provider, adapter: echoAdapter(() => { executed++; return { callId: "x", ok: false, status: "error", code: "boom" }; }), context: ctx() });
   expect(result.status).toBe("paused");
-  expect(executed).toBe(3);
+  expect(executed).toBe(8);
 });
 
 it("invalid JSON arguments never reach the adapter", async () => {
@@ -593,4 +661,26 @@ it("P99a-C1：取消落在「轮首检查之后、请求发出之前」→ cance
   expect(providerCalls).toBe(0); // 旧实现这里会带已 aborted 的 signal 发请求：监听器永不触发 ⇒ run 永远停在 running
   expect(abortedAtCall).toBe(false);
   expect(JSON.stringify(result.events)).toContain("任务已取消：本轮请求未发送");
+});
+
+it("P109-C：计划未闭环时拦一次，第二次放行（不做死闸）", async () => {
+  stubStorage();
+  let asked = 0;
+  const provider: AgentProvider = async () => {
+    asked++;
+    return { content: `想收工（第 ${asked} 次）`, calls: [] };
+  };
+  const adapter: TaskAdapter = {
+    definitions: [{ name: "echo", description: "echo", parameters: { type: "object", properties: {} } }],
+    async execute(call) { return { callId: call.callId, ok: true, status: "read" }; },
+    // 一直报"没闭环"——循环自己必须只拦一次，否则就是一个新的烧 token 死闸
+    openPlan: () => "2/5 plan item(s) are still open\n- [doing] p2: 保存主题",
+  };
+  const result = await runAgent({ goal: "g", provider, adapter, context: ctx() });
+  expect(asked).toBe(2);
+  expect(result.status).toBe("succeeded");
+  // 提醒必须真的进了模型看到的那份 system（只改变量=没拦）
+  expect(result.messages[0]!.content).toContain("PLAN NOT CLOSED");
+  expect(result.messages[0]!.content).toContain("p2");
+  expect(result.events.some((e) => e.kind === "status" && (e.text ?? "").includes("未闭环项"))).toBe(true);
 });

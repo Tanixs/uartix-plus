@@ -124,6 +124,22 @@ describe("P99b-N6 · 每个设置项都得有个改它的地方（不许只剩 l
   });
 });
 
+describe("P109-A/D · Agent 预算与恢复档的档位（模型不许写自己的上限）", () => {
+  it("四个键都登记为 protected 且不在模型可写清单里，预算默认 0 = 不限制", async () => {
+    const keys = await settingsKeys();
+    for (const k of ["agentMaxRounds", "agentMaxCalls", "agentTimeoutMins", "agentRestoreTier"]) {
+      expect(keys, `${k} 没进 Settings 类型（改了 schema 忘了改类型 = 静默丢设置）`).toContain(k);
+      const e = schemaEntry(k);
+      expect(e, `${k} 没进 schema`).toBeTruthy();
+      // 与 marketIndexUrl 同一形状的理由：能写自己的上限，就等于把"成本责任在用户侧"这句话作废
+      expect(e!.sensitivity, `${k} 的敏感性不对：模型可以自行放宽预算上限`).toBe("protected");
+      expect(agentWritableKeys().map(String), `${k} 出现在模型可写清单里`).not.toContain(k);
+      // 三个预算键的默认值是 0 = 不限制；恢复档开关的默认值是"关"（保持原有回落行为）
+      expect(e!.def, `${k} 的默认值不对`).toBe(k === "agentRestoreTier" ? false : 0);
+    }
+  });
+});
+
 describe("P99b-N6 · 那两个市场键的档位与来源（R2/R4/R5）", () => {
   it("索引地址与镜像前缀登记为 protected：AI 只读不改", async () => {
     const keys = await settingsKeys();

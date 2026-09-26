@@ -317,6 +317,181 @@ pub async fn agent_fs_write(
     Ok(serde_json::json!({ "path": written, "bytes": bytes }))
 }
 
+/* ================= P109-D：代码检索与定点编辑 =================
+ * 为什么要有它们：Agent 早有 fs_read / fs_list / fs_write，但**没有 grep 和 glob**——
+ * 于是"看看这个仓库里谁用了 X"只能靠 fs_list + 逐个 fs_read，几十次工具调用还读不完，
+ * 用户体感就是"它不会看代码"（详设 docs/P109-…md §1-3）。
+ * 白名单判定与 agent_fs_write 同一条权威门：roots 由宿主传入、在 Rust 侧判，越界一律拒。
+ */
+const SEARCH_SKIP_DIRS: [&str; 6] = ["node_modules", ".git", "target", "dist", "out", "__pycache__"];
+/// 单次返回上限。超出不是"丢弃"：`truncated` 会如实写出来，模型该收窄而不是以为找全了。
+const SEARCH_MAX_MATCHES: usize = 250;
+const SEARCH_MAX_SCANNED: usize = 4000;
+const SEARCH_MAX_FILE_BYTES: u64 = 1024 * 1024;
+
+fn search_skip(name: &str) -> bool {
+    SEARCH_SKIP_DIRS.iter().any(|s| name.eq_ignore_ascii_case(s))
+}
+
+/// 有界遍历。`mode="paths"` 按路径子串找文件，否则按文本内容找（忽略大小写）。
+/// 二进制与超大文件跳过但**如实报告跳过了多少**："没找到"与"跳过了 37 个二进制文件"
+/// 是两句不同的话，前者会让模型换一套假设继续干。
+#[tauri::command]
+pub async fn agent_fs_search(
+    root: String,
+    needle: String,
+    mode: Option<String>,
+    max: Option<usize>,
+    roots: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    if !path_in_roots(&root, &roots) {
+        return Err("path_outside_whitelist".to_string());
+    }
+    if needle.trim().is_empty() {
+        return Err("needle 不能为空".to_string());
+    }
+    let by_paths = mode.as_deref() == Some("paths");
+    let cap = max.unwrap_or(SEARCH_MAX_MATCHES).clamp(1, SEARCH_MAX_MATCHES);
+    let want = needle.to_lowercase();
+    let start = PathBuf::from(&root);
+    tokio::task::spawn_blocking(move || {
+        let mut stack = vec![start];
+        let mut hits: Vec<serde_json::Value> = Vec::new();
+        let mut scanned = 0usize;
+        let mut skipped_binary = 0usize;
+        let mut skipped_big = 0usize;
+        let mut truncated = false;
+        while let Some(dir) = stack.pop() {
+            if truncated {
+                break;
+            }
+            let rd = match std::fs::read_dir(&dir) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            for entry in rd.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let path = entry.path();
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    if !search_skip(&name) {
+                        stack.push(path);
+                    }
+                    continue;
+                }
+                if scanned >= SEARCH_MAX_SCANNED {
+                    truncated = true;
+                    break;
+                }
+                scanned += 1;
+                let lower = path.to_string_lossy().to_lowercase();
+                if by_paths {
+                    if lower.contains(&want) {
+                        if hits.len() >= cap {
+                            truncated = true;
+                            break;
+                        }
+                        hits.push(serde_json::json!({ "path": path.display().to_string() }));
+                    }
+                    continue;
+                }
+                let meta = match path.metadata() {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if meta.len() > SEARCH_MAX_FILE_BYTES {
+                    skipped_big += 1;
+                    continue;
+                }
+                let bytes = match std::fs::read(&path) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                if bytes.iter().take(512).any(|b| *b == 0) {
+                    skipped_binary += 1;
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&bytes);
+                for (i, line) in text.lines().enumerate() {
+                    if line.to_lowercase().contains(&want) {
+                        if hits.len() >= cap {
+                            truncated = true;
+                            break;
+                        }
+                        hits.push(serde_json::json!({
+                            "path": path.display().to_string(),
+                            "line": i + 1,
+                            "text": line.trim().chars().take(240).collect::<String>(),
+                        }));
+                    }
+                }
+                if truncated {
+                    break;
+                }
+            }
+        }
+        Ok::<serde_json::Value, String>(serde_json::json!({
+            "mode": if by_paths { "paths" } else { "content" },
+            "needle": needle,
+            "scanned": scanned,
+            "matches": hits,
+            "truncated": truncated,
+            "skipped": { "binary": skipped_binary, "oversized": skipped_big },
+        }))
+    })
+    .await
+    .map_err(|e| format!("检索任务失败：{e}"))?
+}
+
+/// P109-D：定点替换（对标 DSH 的 edit）。**故意不做"整文件覆盖"**：fs_write 重写整个文件
+/// 会把用户手改的内容一起抹掉，而模型十次里有九次只想改一处。命中 0 次报 `not_found`、
+/// 命中多处报 `ambiguous:N` 且**不动文件**——猜着改比不改更坏。
+#[tauri::command]
+pub async fn agent_fs_edit(
+    path: String,
+    old_text: String,
+    new_text: String,
+    all: Option<bool>,
+    roots: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    if old_text.is_empty() {
+        return Err("old_text 不能为空（空串会命中每一行）".to_string());
+    }
+    if old_text == new_text {
+        return Err("old_text 与 new_text 相同，无需修改".to_string());
+    }
+    if !path_in_roots(&path, &roots) {
+        return Err("path_outside_whitelist".to_string());
+    }
+    let every = all.unwrap_or(false);
+    tokio::task::spawn_blocking(move || {
+        let bytes = std::fs::read(&path).map_err(|e| format!("读取失败：{e}"))?;
+        if bytes.iter().take(512).any(|b| *b == 0) {
+            return Err("目标是二进制文件，不做文本编辑".to_string());
+        }
+        let text = String::from_utf8_lossy(&bytes).into_owned();
+        let found = text.matches(old_text.as_str()).count();
+        if found == 0 {
+            return Err("not_found: 文件里没有这段原文，请先用 fs_read 核对（空白与缩进也要逐字相同）".to_string());
+        }
+        if found > 1 && !every {
+            return Err(format!("ambiguous: 这段原文命中 {found} 处；要么把 old_text 加长到唯一，要么显式给 all:true"));
+        }
+        let out = if every {
+            text.replace(old_text.as_str(), &new_text)
+        } else {
+            text.replacen(old_text.as_str(), &new_text, 1)
+        };
+        std::fs::write(&path, out.as_bytes()).map_err(|e| format!("写入失败：{e}"))?;
+        Ok::<serde_json::Value, String>(serde_json::json!({
+            "path": path,
+            "replacements": if every { found } else { 1 },
+            "bytes": out.len(),
+        }))
+    })
+    .await
+    .map_err(|e| format!("编辑任务失败：{e}"))?
+}
+
 fn list_dir(dir: &Path, depth: u32, counter: &mut usize) -> Result<serde_json::Value, String> {
     if *counter >= FS_LIST_MAX_ENTRIES {
         return Ok(serde_json::json!({ "note": "条目已达上限" }));

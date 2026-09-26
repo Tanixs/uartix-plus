@@ -6,7 +6,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...args: unknown[]) => invoke(
 const storage = new Map<string, string>();
 vi.stubGlobal("localStorage", { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => storage.set(k, v) });
 
-const { toWireMessages, fromRustTurn, invokeAgentProvider } = await import("./provider");
+const { toWireMessages, fromRustTurn, invokeAgentProvider, cleanApiKey, cleanBaseUrl } =
+  await import("./provider");
 
 // 注意：必须用块体。箭头函数隐式返回 mockReset() 的 mock 本身，
 // vitest 会把 beforeEach 返回的函数当 teardown 在测试后调用，触发 unhandled rejection。
@@ -87,4 +88,132 @@ it("host error propagates without fabricating tool calls", async () => {
   let err: unknown = null;
   await invokeAgentProvider([], [], new AbortController().signal).catch((e) => { err = e; });
   expect(err).toBe("模型服务 HTTP 401；未执行工具");
+});
+
+/* ================= P108：密钥的边界清洗 + OpenRouter 预置 =================
+ * 起因：用户填 OpenRouter 一直报"API Key 无效或无权限（401）"。查下来 base URL 一直是洗过的，
+ * key 却**原样发出**（粘贴带进来的换行/引号直接进 Authorization 头），界面只回一句"Key 无效"——
+ * 用户分不清是自己的锅还是软件的锅。下面钉的就是"洗没洗"与"有没有第二份名单"。 */
+
+it("cleanApiKey：剥掉粘贴带进来的空白、换行、引号、反引号", () => {
+  expect(cleanApiKey("  sk-or-v1-abc\n")).toBe("sk-or-v1-abc");
+  expect(cleanApiKey("`sk-abc`")).toBe("sk-abc");
+  expect(cleanApiKey("'sk-abc'")).toBe("sk-abc");
+  expect(cleanApiKey("sk-a b\tc")).toBe("sk-abc");
+});
+
+it("cleanApiKey：不校验形状——合法 key 里的 - _ . : 一律原样保留", () => {
+  // 猜一套白名单（必须 sk-or- 开头、必须 64 位十六进制）会把别家网关的合法 key 直接拒掉，
+  // 那是比 401 更难查的失败。所以只剥"复制粘贴必然带进来的那一族字符"。
+  const k = "sk-or-v1_0b6b.9ca:245";
+  expect(cleanApiKey(k)).toBe(k);
+});
+
+it("cleanApiKey：全空白洗成空串（仍是「没填」，不是半个 key）", () => {
+  expect(cleanApiKey(" \n\t ")).toBe("");
+});
+
+it("两个清洗函数同源：共用同一个字符集，零宽字符也在这族里", () => {
+  // 这条不是在测功能，是在测"两处是不是同一个答案"。cleanBaseUrl 只多剥尾斜杠，
+  // 这里故意不放斜杠，于是两者必须逐字相等 —— 哪天有人给其中一个加规则，这条就红。
+  const dirty = " 'sk-or-v1-abc` \n";
+  expect(cleanApiKey(dirty)).toBe(cleanBaseUrl(dirty));
+  // JS 的 \s 不含 U+200B，而它恰恰是网页/PDF 粘贴最常带的字符：两者都必须剥掉
+  const zwsp = "sk-or\u200b-v1-abc";
+  expect(cleanApiKey(zwsp)).toBe("sk-or-v1-abc");
+  expect(cleanBaseUrl(zwsp)).toBe("sk-or-v1-abc");
+});
+
+it("发送点真的洗了：设置里带换行的 key 不会原样进 Authorization", async () => {
+  invoke.mockResolvedValue({ content: "ok", calls: [] });
+  const settings = await import("../settings/settingsStore");
+  settings.patch({ aiApiKey: " sk-or-v1-abc\n", aiBaseUrl: "https://openrouter.ai/api/v1/" });
+  await invokeAgentProvider([{ role: "user", content: "go" }], [], new AbortController().signal);
+  const [, args] = invoke.mock.calls[0];
+  expect(args.apiKey).toBe("sk-or-v1-abc");
+  expect(args.baseUrl, "尾斜杠也要洗掉：Rust 侧还要再拼 /chat/completions").toBe("https://openrouter.ai/api/v1");
+});
+
+it("预置表：base URL 一律不带端点路径、不带尾斜杠（拼重了是 404）", async () => {
+  const { AI_PRESETS } = await import("../settings/settingsStore");
+  for (const [k, v] of Object.entries(AI_PRESETS)) {
+    expect(v.baseUrl, k).not.toMatch(/\/+$/);
+    expect(v.baseUrl, `${k} 的 base 里不该写端点路径`).not.toMatch(/\/(chat\/completions|messages|responses)$/);
+  }
+});
+
+it("P108 OpenRouter 档：base 到 /api/v1、默认模型走 :free、前缀提示给到 sk-or-v1-", async () => {
+  const { AI_PRESETS } = await import("../settings/settingsStore");
+  expect(AI_PRESETS.openrouter.baseUrl).toBe("https://openrouter.ai/api/v1");
+  expect(AI_PRESETS.openrouter.model.endsWith(":free"), "默认档不该替用户花钱").toBe(true);
+  // 输入框原来写死 "sk-…"，而真实前缀是 sk-or-v1- —— 这次"缺前缀"的嫌疑恰恰是这句没帮上忙
+  expect(AI_PRESETS.openrouter.keyHint).toBe("sk-or-v1-…");
+});
+
+/**
+ * 守卫：`src/` 里每一处 `apiKey:` 赋值都必须过 `cleanApiKey(`。
+ * 为什么扫源码而不是又写一遍逻辑：这是"把设置里的串发给宿主"那一族动作的边界，
+ * 第四个发送点（新的调用方、MCP 代理……）忘了包上就会**静默发坏头**，而走正常路径的测试看不见它。
+ * 大小写在这里帮了忙：字段名是 `aiApiKey`（大写 A），不会被 `/apiKey:/` 误伤；
+ * 测试夹具里的假 key 属于脱敏测试，随 `.test.ts` 一起排除。
+ */
+it("守卫：所有 apiKey 发送点都过了 cleanApiKey", async () => {
+  // 变量说明符：src 的 tsconfig 不挂 @types/node，写字面量会被 tsc 判"找不到模块"
+  const fsSpec = "node:fs";
+  const urlSpec = "node:url";
+  const { readdirSync, readFileSync } = (await import(fsSpec)) as unknown as {
+    readdirSync: (p: string, o?: { withFileTypes?: boolean }) => unknown[];
+    readFileSync: (p: string, enc?: string) => string;
+  };
+  const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+    fileURLToPath: (u: string | URL) => string;
+  };
+  const root = fileURLToPath(new URL("../../", import.meta.url)); // = src/
+  const bad: string[] = [];
+  const walk = (dir: string) => {
+    const entries = readdirSync(dir, { withFileTypes: true }) as {
+      name: string;
+      isDirectory: () => boolean;
+    }[];
+    for (const e of entries) {
+      const abs = `${dir}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name !== "node_modules") walk(abs);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(e.name) || /\.test\.tsx?$/.test(e.name)) continue;
+      const rel = abs.slice(root.length);
+      readFileSync(abs, "utf8")
+        .split(/\r?\n/)
+        .forEach((line, i) => {
+          // 注释里写 `apiKey: st.aiApiKey` 是在讲历史，不是在发送 —— 与 i18n 门"注释里的中文不算"
+          // 同一口径（那是写给读代码的人看的）。会被漏掉的只有"整行注释掉的发送点"，那种本来也不发送。
+          const code = line.trim();
+          if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) return;
+          if (!/apiKey:/.test(line) || /cleanApiKey\(/.test(line)) return;
+          bad.push(`${rel}:${i + 1}  ${code}`);
+        });
+    }
+  };
+  walk(root);
+  expect(bad, `新增发送点请写 apiKey: cleanApiKey(...)：\n${bad.join("\n")}`).toEqual([]);
+});
+
+/** 守卫：恢复白名单必须从 AI_PRESETS 派生。手抄一份的后果不是编译错，是**静默丢档位**：
+ *  选了新预设、重启软件，预设被退回 deepseek 且 baseUrl 跟着被覆盖。 */
+it("守卫：settingsStore 不再手抄预置名单", async () => {
+  const fsSpec = "node:fs";
+  const urlSpec = "node:url";
+  const { readFileSync } = (await import(fsSpec)) as unknown as {
+    readFileSync: (p: string, enc?: string) => string;
+  };
+  const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+    fileURLToPath: (u: string | URL) => string;
+  };
+  const src = readFileSync(
+    fileURLToPath(new URL("../settings/settingsStore.ts", import.meta.url)),
+    "utf8",
+  );
+  expect(src, "恢复路径要读 AI_PRESETS 的键").toContain("Object.keys(AI_PRESETS)");
+  expect(src, "不许再手抄一份预置名单").not.toMatch(/\[\s*"openai",\s*"deepseek",/);
 });

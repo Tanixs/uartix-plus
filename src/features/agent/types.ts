@@ -41,8 +41,22 @@ export interface TaskContext {
   /** 本档位勾选的授权域（清单见 `scopeTiers.DOMAINS`）；scope 非 custom 时由 hasDomain 忽略 */
   allowed?: string[];
 }
-export interface TaskAdapter { definitions: ToolDefinition[]; execute(call: ToolCall, ctx: TaskContext): Promise<ToolReceipt> }
+export interface TaskAdapter { definitions: ToolDefinition[]; execute(call: ToolCall, ctx: TaskContext): Promise<ToolReceipt>;
+  /**
+   * P109-C：完成契约。模型这一轮没发工具调用（= 想收工）时，loop 问一次适配器：
+   * 有没有还没闭环的计划项？返回一段可读文本 ⇒ 先不收工，把它刷进 system 再给模型一轮；
+   * 返回 null / 不提供 ⇒ 直接按完成处理。
+   * ⚠ 这是**完成契约不是权限闸**：它不拦任何写操作、不改审批语义（红线 §8-44）。
+   * 而且 loop 一个 run 最多拦一次——反复拦一个铁了心要停的模型只会白烧 token。
+   */
+  openPlan?(): string | null }
 export type RunStatus = "running" | "succeeded" | "paused" | "cancelled" | "failed" | "interrupted";
+/**
+ * P109-B：暂停的**真实成因**。以前四种成因（轮数 / 调用数 / 时限 / 无进展）都写成同一个
+ * `paused`，界面只能显示一句"预算耗尽或连续失败"——那是把两件事混成一件：
+ * 预算耗尽是"该续了"，无进展是"模型在原地打转，续了也一样"，用户的正确动作完全不同。
+ */
+export type PauseReason = "rounds" | "calls" | "deadline" | "no-progress";
 /** P89 A1：running（实时进度）与 paused（就地等用户点「继续任务」）需自动展开；
  *  其余为终态，会话内联流里一律折叠为一行摘要，不遮挡消息。 */
 export function isLiveRun(status: RunStatus): boolean {
@@ -66,4 +80,4 @@ export interface ContextStat {
   shadowed?: number;
 }
 export type RunEvent = { seq: number; ts?: number; kind: "turn" | "reasoning" | "receipt" | "status" | "context"; tool?: string; text?: string; /** 工具调用参数摘要（时间线展开用，落盘前截断） */ args?: string; /** P92 D1：args 因超限被截断——截断过的参数不能当历史回灌，也不能拿来渲染"模型要了什么" */ argsTruncated?: boolean; /** P94 G2（红线 A7）：落盘时 receipt.data 超上限被省略——台账必须说得出"这里原本有内容"，投影据此给说明而不是空回执 */ receiptTruncated?: boolean; /** P91 A1：该事件对应耗时（ms）——思维链=思考时长、turn=本轮往返时长，取代旧「已思考 · 0s」假值 */ ms?: number; receipt?: ToolReceipt; /** P95-H2：kind==="context" 时的用量快照 */ ctx?: ContextStat }
-export interface AgentResult { status: RunStatus; messages: AgentMessage[]; events: RunEvent[]; rounds: number; calls: number; caps: { maxRounds: number; maxCalls: number; deadlineAt: number }; /** P95-H2：本次任务实际送入模型的上下文用量（旧实现把 messages 快照丢掉，事后无从知道"当时带了多少"） */ ctx?: { last?: ContextStat; peakBytes: number } }
+export interface AgentResult { status: RunStatus; messages: AgentMessage[]; events: RunEvent[]; rounds: number; calls: number; caps: { maxRounds: number; maxCalls: number; deadlineAt: number }; /** P109-B：`status === "paused"` 时说明是哪一种暂停；其余状态不带 */ pauseReason?: PauseReason; /** P95-H2：本次任务实际送入模型的上下文用量（旧实现把 messages 快照丢掉，事后无从知道"当时带了多少"） */ ctx?: { last?: ContextStat; peakBytes: number } }

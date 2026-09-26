@@ -12,7 +12,8 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as agentRun from "./agentRun";
 import type { AgentRunView } from "./agentRun";
-import { isLiveRun, type ContextStat, type RunEvent, type ToolProvenance } from "./types";
+import { isLiveRun, type ContextStat, type PauseReason, type RunEvent, type ToolProvenance } from "./types";
+import { NO_PROGRESS_PAUSE_AT } from "./loop";
 import { ctxGauge, fmtKb } from "./context";
 import { hasDataLease } from "../plot/dataLease";
 import { confirmDialog } from "../../shared/Dialog";
@@ -22,6 +23,12 @@ import { tx, useLocale } from "../../i18n/strings";
 // 插件库真值（停用按钮态）：AgentInline 是 UI 叶子，静态引入不成环
 // （pluginStore→extRuntime→chatStore→agentRun 链上没有任何一环回头引本文件）
 import { getSnapshot as getPluginSnapshot, subscribe as subscribePlugins } from "../plugins/pluginStore";
+
+/**
+ * P109-A：`0 = 不限制`（用户裁决，见 `loop.ts` 的 `resolveBudget`）。
+ * 显示成"第 5/0 轮"会被读成"预算是 0 轮、任务该立刻停"——那是反的，所以渲染成 ∞。
+ */
+const capOf = (n: number): string => (n === 0 ? "∞" : String(n));
 
 function fmtClock(ts?: number): string {
   if (!ts) return "";
@@ -43,7 +50,7 @@ function fmtElapsed(ms: number): string {
  * 用 switch 而不是"中英成对存在一张表里"：表里的字面量扫描器认不出来（它只认 `tx("…", "…")` 这个形状），
  * 债会被原样记在预算上 —— 表好看，数却是假的。
  */
-const statusLabel = (status: string): string => {
+const statusLabel = (status: string, reason?: PauseReason): string => {
   switch (status) {
     case "running":
       return tx("运行中", "Running");
@@ -51,8 +58,21 @@ const statusLabel = (status: string): string => {
       return tx("已完成", "Done");
     // P91 A4：failed/interrupted 现在都能「继续任务」（从台账续跑，不重做已生效步骤），
     // 但批准令牌与撤销令牌仍不跨重启（§5.4）——文案必须同时说清这两件事
+    // P109-B：四种暂停的**正确动作不一样**，不能再塌成以前那一句"预算耗尽或连续失败"。
+    // 没有原因码的旧记录只说"已暂停"——宁可不说是猜。
     case "paused":
-      return tx("已暂停（预算耗尽或连续失败）", "Paused (budget spent or repeated failures)");
+      switch (reason) {
+        case "no-progress":
+          return tx(`已暂停（同一个调用连续失败 ${NO_PROGRESS_PAUSE_AT} 次）`, `Paused (same call failed ${NO_PROGRESS_PAUSE_AT} times)`);
+        case "deadline":
+          return tx("已暂停（达到时限）", "Paused (time limit reached)");
+        case "calls":
+          return tx("已暂停（工具调用次数用完）", "Paused (tool-call limit reached)");
+        case "rounds":
+          return tx("已暂停（轮数用完）", "Paused (round limit reached)");
+        default:
+          return tx("已暂停", "Paused");
+      }
     case "cancelled":
       return tx("已取消", "Cancelled");
     case "failed":
@@ -97,7 +117,7 @@ function serializeLog(r: AgentRunView): string {
   lines.push(`runId: ${r.runId}`);
   lines.push(tx(`目标: ${r.goal}`, `Goal: ${r.goal}`));
   lines.push(tx(`档位: ${r.scope}`, `Tier: ${r.scope}`));
-  lines.push(tx(`状态: ${statusLabel(r.status)}`, `Status: ${statusLabel(r.status)}`));
+  lines.push(tx(`状态: ${statusLabel(r.status, r.pauseReason)}`, `Status: ${statusLabel(r.status, r.pauseReason)}`));
   const startedAt = new Date(r.createdAt).toLocaleString();
   const endedAt = r.finishedAt ? new Date(r.finishedAt).toLocaleString() : "";
   lines.push(
@@ -107,8 +127,8 @@ function serializeLog(r: AgentRunView): string {
   );
   lines.push(
     tx(
-      `预算: ${r.rounds}/${r.caps.maxRounds} 轮 · ${r.calls}/${r.caps.maxCalls} 次工具调用`,
-      `Budget: ${r.rounds}/${r.caps.maxRounds} rounds · ${r.calls}/${r.caps.maxCalls} tool calls`,
+      `预算: ${r.rounds}/${capOf(r.caps.maxRounds)} 轮 · ${r.calls}/${capOf(r.caps.maxCalls)} 次工具调用`,
+      `Budget: ${r.rounds}/${capOf(r.caps.maxRounds)} rounds · ${r.calls}/${capOf(r.caps.maxCalls)} tool calls`,
     ),
   );
   // P95-H2：日志里带上下文用量（离线复盘"为什么这轮被截/超限"时的第一手数据）
@@ -374,7 +394,12 @@ function ApprovalCard({ view }: { view: AgentRunView }) {
   );
 }
 
-/** P88e B3：暂停续跑提示——用原 goal/授权域发起新 run；忙碌或失败原因就地展示。 */
+/**
+ * P88e B3 → P109-B：「已暂停」的继续任务。
+ * 文案改了两处事实：① 它不再是"发起新任务"，而是在**同一个 run 上续跑**（走台账重放，
+ * 已生效的步骤不重做）；② 暂停原因现在是真的（`pauseReason`），"预算用完"与"原地打转"
+ * 给的是两句不同的话——因为正确动作不同：前者点继续就行，后者先看看它在重复什么。
+ */
 function ResumeHint({ view, inline }: { view: AgentRunView; inline?: boolean }) {
   useLocale();
   const [err, setErr] = useState("");
@@ -384,12 +409,22 @@ function ResumeHint({ view, inline }: { view: AgentRunView; inline?: boolean }) 
       .resumeRun(view.runId)
       .catch((e: unknown) => setErr(e instanceof Error ? e.message : String(e)));
   };
+  const why =
+    view.pauseReason === "no-progress"
+      ? tx(
+          `同一个调用已经连续失败 ${NO_PROGRESS_PAUSE_AT} 次 —— 先看看它在重复什么，继续会从中断处往下跑，已生效的步骤不重做。`,
+          `The same call failed ${NO_PROGRESS_PAUSE_AT} times in a row — check what it keeps repeating. Resuming continues from where it stopped; applied steps are not redone.`,
+        )
+      : tx(
+          "预算用完了。继续会在同一个任务上接着跑（已生效的步骤不重做，撤销与批准令牌仍是一次性的）。",
+          "The budget ran out. Resuming continues this same task (applied steps are not redone; undo and approval tokens stay one-shot).",
+        );
   if (inline) {
     return (
       <>
         <button
           className="btn primary ai-agent-act"
-          title={tx("以原目标与授权范围发起新任务（本记录保留）", "Start a new task with the same goal and scope (this record is kept)")}
+          title={tx("从台账中断处继续本任务（已生效步骤不重做）", "Continue this task from the ledger (applied steps are not redone)")}
           onClick={resume}
         >
           {tx("继续任务", "Resume task")}
@@ -400,12 +435,7 @@ function ResumeHint({ view, inline }: { view: AgentRunView; inline?: boolean }) 
   }
   return (
     <div className="ai-agent-resume-hint">
-      <span>
-        {tx(
-          "任务因预算耗尽或连续失败而暂停；继续将以原目标与授权范围发起新任务（本记录保留）。",
-          "The task paused because the budget ran out or steps kept failing. Resuming starts a new task with the same goal and scope (this record is kept).",
-        )}
-      </span>
+      <span>{why}</span>
       <button className="btn sm" onClick={resume}>
         {tx("继续任务", "Resume task")}
       </button>
@@ -457,7 +487,7 @@ function RunBlock({ view }: { view: AgentRunView }) {
       .finally(() => setBusy(""));
   };
   const headStatus =
-    interrupted && applied > 0 ? tx(`已完成 ${applied} 步后中断`, `interrupted after ${applied} applied step(s)`) : statusLabel(view.status);
+    interrupted && applied > 0 ? tx(`已完成 ${applied} 步后中断`, `interrupted after ${applied} applied step(s)`) : statusLabel(view.status, view.pauseReason);
   return (
     <div className={`ai-agent-block${running ? " live" : ""}${interrupted ? " bad" : ""}`}>
       <div className="ai-agent-head">
@@ -493,8 +523,8 @@ function RunBlock({ view }: { view: AgentRunView }) {
       </div>
       <div className="ai-agent-meta">
         {tx(
-          `第 ${view.rounds}/${view.caps.maxRounds} 轮 · 工具 ${view.calls}/${view.caps.maxCalls} 次 · 已用 ${fmtElapsed(elapsedBase - view.createdAt)}`,
-          `Round ${view.rounds}/${view.caps.maxRounds} · ${view.calls}/${view.caps.maxCalls} tool calls · ${fmtElapsed(elapsedBase - view.createdAt)} elapsed`,
+          `第 ${view.rounds}/${capOf(view.caps.maxRounds)} 轮 · 工具 ${view.calls}/${capOf(view.caps.maxCalls)} 次 · 已用 ${fmtElapsed(elapsedBase - view.createdAt)}`,
+          `Round ${view.rounds}/${capOf(view.caps.maxRounds)} · ${view.calls}/${capOf(view.caps.maxCalls)} tool calls · ${fmtElapsed(elapsedBase - view.createdAt)} elapsed`,
         )}
         {/* P95-H2：这一轮到底送了多少东西进去（旧实现完全没有这个数） */}
         {view.ctx?.last && (
@@ -686,7 +716,7 @@ export const RunEntry = memo(function RunEntry({ view }: { view: AgentRunView })
             aria-hidden="true"
           />
           <span className="ai-agent-oldrun-status">
-            {interrupted && applied > 0 ? tx(`已完成 ${applied} 步后中断`, `interrupted after ${applied} applied step(s)`) : statusLabel(view.status)}
+            {interrupted && applied > 0 ? tx(`已完成 ${applied} 步后中断`, `interrupted after ${applied} applied step(s)`) : statusLabel(view.status, view.pauseReason)}
           </span>
           <span className="ai-agent-oldrun-goal">{view.goalBrief}</span>
           <span className="ai-agent-oldrun-time">
@@ -755,7 +785,7 @@ export const AgentFloat = memo(function AgentFloat({
       {active.pending
         ? tx("Agent 待批准", "Agent awaiting approval")
         : done
-          ? tx(`任务${statusLabel(active.status)}`, `Task ${statusLabel(active.status)}`)
+          ? tx(`任务${statusLabel(active.status, active.pauseReason)}`, `Task ${statusLabel(active.status, active.pauseReason)}`)
           : tx("Agent 运行中", "Agent running")}
     </button>
   );

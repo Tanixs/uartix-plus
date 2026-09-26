@@ -262,7 +262,11 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>写配置</td><td><code>settings_apply</code>（配置写入）· <code>run_app_action</code>（39 个白名单动作，协议/指令/卡片都走它）· <code>save_plugin</code> · <code>theme_patch</code> / <code>theme_preset</code> / <code>save_theme_extension</code> · <code>style_patch</code> · <code>fs_write</code> · <code>shell_exec</code></td></tr>
                       <tr><td>外观</td><td><code>theme_read</code> / <code>theme_patch</code> / <code>theme_preset</code>（配置写入）· <code>image_swatch</code> 从图片取色（文件读取）· <code>save_theme_extension</code> / <code>style_commit</code> / <code>save_plugin</code> / <code>enable_plugin</code> / <code>rollback_plugin</code>（插件库）</td></tr>
                       <tr><td>界面深改</td><td><code>ui_inventory</code> / <code>ui_inspect</code> 只读自省 · <code>style_patch</code> / <code>style_revert</code> 按组件下样式与撤回（界面深改）· <code>layout_apply</code> 换工作区版式（内置预设/布局槽，每次切换自动快照、可一键回滚）· <code>chrome_set</code> 工具栏三段的排序与显隐</td></tr>
-                      <tr><td>本机</td><td><code>fs_read</code> / <code>fs_list</code>（文件读取，限白名单）· <code>fs_write</code>（软件目录内写文件；<b>覆盖已有文件逐条批准</b>）· <code>web_fetch</code> / <code>web_search</code>（网络）· <code>shell_exec</code>（命令行；另需设置页总开关 + 每条批准）</td></tr>
+                      <tr><td>{tx("计划", "Plan")}</td><td><code>task_plan</code>{tx(
+                        "（模型自己报步骤清单并随手更新。它不是权限闸：还有未闭环项时宿主不认「已完成」这句话，会提醒收尾一次；只提醒一次，不做死闸）",
+                        " (the model records its own step list and keeps it current. It is not a permission gate: while items stay open, the host will not accept the word 'done' - it reminds once, then lets the run end)",
+                      )}</td></tr>
+                      <tr><td>本机</td><td><code>fs_read</code> / <code>fs_list</code>（文件读取，限白名单）· <code>fs_write</code>（软件目录内写文件；<b>覆盖已有文件逐条批准</b>）· <code>web_fetch</code> / <code>web_search</code>（网络）· <code>shell_exec</code>（命令行；另需设置页总开关 + 每条批准）</td> · <code>fs_grep</code> / <code>fs_glob</code> / <code>fs_edit</code>{tx("内容搜索、按名字找文件、定点替换（改已有文件优先用 fs_edit，不要整份覆盖；原文不唯一就报 ambiguous 且不动文件）", "content search, find-by-name and exact-span edits (prefer fs_edit over rewriting a whole file; a non-unique match returns ambiguous and changes nothing)")}</tr>
                     </tbody>
                   </table>
                   <p>

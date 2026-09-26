@@ -65,7 +65,12 @@ export function rememberTier(scope: RunScope, allowed: readonly Domain[]): void 
   }
 }
 
-export function restoreTier(): TierRestore {
+/**
+ * `restoreHighRisk` 由**调用方**传入（= 设置里的 `agentRestoreTier`），这里不 import store：
+ * scopeTiers 是一份纯档位表，自己的单测不想被 localStorage 拖下水——第一版我直接 import 了
+ * settingsStore，`scopeTiers.test.ts` 当场在模块加载期炸 `localStorage is not defined`。
+ */
+export function restoreTier(restoreHighRisk = false): TierRestore {
   const fallback: TierRestore = { scope: "create", allowed: [...DEFAULT_DOMAINS], downgraded: false };
   let raw: string | null;
   try {
@@ -80,6 +85,12 @@ export function restoreTier(): TierRestore {
     if (p.scope === "create") return { scope: "create", allowed: [...DEFAULT_DOMAINS], downgraded: false };
     if (p.scope === "custom" && Array.isArray(p.allowed)) {
       const kept = normalizeAllowed("custom", p.allowed);
+      // P109-D：是否让高危档跨重启存活，交给一条**默认关闭**的设置（`agentRestoreTier`）。
+      // 这是 2026-09-26 用户点名的放松（红线 §8-44 要求单独点头，那次就是那次）；
+      // 默认仍是回落 + 如实报 downgraded，恢复必须是用户显式开闸，不是软件顺手记住。
+      if (restoreHighRisk) {
+        return { scope: "custom", allowed: kept, downgraded: false };
+      }
       return { scope: "create", allowed: kept, downgraded: true };
     }
     return fallback;

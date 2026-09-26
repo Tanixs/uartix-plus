@@ -259,3 +259,65 @@ describe("fs_write（write 域）", () => {
     expect(d.hint).toContain("不可撤销");
   });
 });
+
+/**
+ * P109-D：fs_grep / fs_glob / fs_edit。这三支配角的是"它到底能不能自己翻代码"，
+ * 所以判据集中在两件事：**门在触盘之前**（invoke 一次都不该被调），以及
+ * Rust 回的 not_found / ambiguous 是**决策信息**，不能被糊成一条 error。
+ */
+describe("P109-D · fs_grep / fs_glob / fs_edit", () => {
+  it("白名单为空 ⇒ 三支都在触盘之前被拒，且回的是可操作的话", async () => {
+    patch({ agentFsRoots: "" });
+    invokeMock.mockClear();
+    for (const [name, args] of [
+      ["fs_grep", { root: "D:\\w", needle: "x" }],
+      ["fs_glob", { root: "D:\\w", needle: ".rs" }],
+      ["fs_edit", { path: "D:\\w\\a.ts", old_text: "a", new_text: "b" }],
+    ] as [string, Record<string, unknown>][]) {
+      const r = await executeGeneralTool(call(name, args), ctx("custom", ["files", "write"]), "r1", noGate);
+      expect(r.ok, `${name} 不该在白名单为空时放行`).toBe(false);
+      expect(r.code).toBe("path_outside_whitelist");
+      expect(JSON.stringify(r)).toContain("白名单");
+    }
+    expect(invokeMock, "白名单判定必须在 invoke 之前，否则门只存在于渲染层").not.toHaveBeenCalled();
+  });
+
+  it("fs_grep 把 truncated / skipped 如实带回去（「没找到」与「跳过了二进制」是两件事）", async () => {
+    patch({ agentFsRoots: "D:\\w" });
+    invokeMock.mockResolvedValue({
+      mode: "content", needle: "x", scanned: 4000, matches: [{ path: "D:\\w\\a.ts", line: 3, text: "const x = 1" }],
+      truncated: true, skipped: { binary: 37, oversized: 2 },
+    });
+    const r = await executeGeneralTool(call("fs_grep", { root: "D:\\w", needle: "x" }), ctx("custom", ["files"]), "r1", noGate);
+    expect(r.ok).toBe(true);
+    expect(r.data).toMatchObject({ count: 1, truncated: true, skipped: { binary: 37, oversized: 2 } });
+    expect(JSON.stringify(r.data)).toContain("收窄");
+  });
+
+  it("editFailure：not_found / ambiguous 落成 not_executed，其它才算 error", async () => {
+    const { editFailure } = await import("./generalTools");
+    for (const [msg, code] of [
+      ["Error: not_found: 文件里没有这段原文", "not_found"],
+      ["Error: ambiguous: 这段原文命中 3 处", "ambiguous"],
+      ["path_outside_whitelist", "path_outside_whitelist"],
+    ] as [string, string][]) {
+      const r = editFailure("c1", msg);
+      expect(r.status, msg).toBe("not_executed");
+      expect(r.code).toBe(code);
+      expect(r.ok).toBe(false);
+    }
+    const other = editFailure("c1", "Error: 写入失败：disk full");
+    expect(other.status).toBe("error");
+    expect(JSON.stringify(other)).toContain("disk full");
+  });
+
+  it("fs_edit 走的是逐条批准（覆盖已有内容是 §8-44 四类之一），且门在批准卡之前", () => {
+    const e = generalToolEntries.find((x) => x.name === "fs_edit");
+    expect(e?.effect).toBe("irreversible");
+    expect(e?.domain).toBe("write");
+    // assess 存在＝白名单/参数在"弹批准卡"之前就能拒掉；缺它就会出现
+    // "用户点了允许，才发现路径越界"那种骗人签的卡
+    expect(typeof e?.assess, "fs_edit 必须有 assess，否则拒绝发生在批准之后").toBe("function");
+  });
+});
+

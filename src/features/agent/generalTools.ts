@@ -124,6 +124,134 @@ async function fsRead(callId: string, parsed: Record<string, unknown>): Promise<
   }
 }
 
+/**
+ * P109-D：fs_grep / fs_glob 的共用实现。
+ * 越界与"根不存在"都回**可操作的话**而不是干巴巴的 error：白名单为空时模型只会换个路径再撞一次，
+ * 而把"去设置里加目录"这句话回给它，它就能直接告诉用户下一步做什么。
+ */
+async function fsSearch(
+  callId: string, parsed: Record<string, unknown>, mode: "content" | "paths",
+): Promise<ToolResultBody> {
+  const root = String(parsed.root ?? "").trim();
+  const needle = String(parsed.needle ?? "");
+  if (!root || !needle.trim()) {
+    return notExecuted(callId, "invalid_args", { hint: "root 与 needle 都必填" });
+  }
+  if (!inWhitelist(root)) {
+    return notExecuted(callId, "path_outside_whitelist", {
+      root,
+      hint: "搜索根目录不在「Agent 文件白名单」内：设置 → AI 服务 → Agent 文件白名单（留空 = 文件工具整体关闭）。告诉用户去加，别换个路径再撞一次。",
+    });
+  }
+  try {
+    const r = await invoke<{
+      matches: unknown[]; scanned: number; truncated: boolean;
+      skipped: { binary: number; oversized: number };
+    }>("agent_fs_search", {
+      root, needle, mode,
+      max: Number.isFinite(Number(parsed.max)) ? Number(parsed.max) : null,
+      roots: parseFsRoots(getSettings().agentFsRoots),
+    });
+    return {
+      callId,
+      ok: true,
+      status: "read",
+      data: {
+        mode,
+        root,
+        needle,
+        count: r.matches.length,
+        matches: r.matches,
+        scanned: r.scanned,
+        truncated: r.truncated,
+        skipped: r.skipped,
+        ...(r.matches.length === 0
+          ? { hint: `扫了 ${r.scanned} 个文件、跳过二进制 ${r.skipped?.binary ?? 0} 个 / 超大 ${r.skipped?.oversized ?? 0} 个。没命中不等于不存在——先确认根目录与拼写，或改用 fs_glob 找文件名。` }
+          : r.truncated
+            ? { hint: "结果已达上限被截断，收窄 needle 或换更深的 root 再搜" }
+            : {}),
+      },
+    };
+  } catch (e) {
+    return failed(callId, e);
+  }
+}
+
+/**
+ * P109-D：fs_edit 的实现。Rust 侧回的是 `not_found` / `ambiguous:N` 这类**决策信息**，
+ * 不能糊成一条 error：模型需要知道"是没找到"还是"找到好几处不敢乱改"，两者动作完全不同。
+ */
+/**
+ * fs_edit 的前置校验与风险判定。**顺序就是全部意义**：
+ * 白名单必须在批准卡之前判——否则用户点了「允许」才发现路径越界，那张卡就是骗人签的。
+ * 改的是已存在的文件 ⇒ irreversible（§8-44 四类里的「覆盖已有内容」），逐条批准。
+ */
+async function assessFsEdit(args: Record<string, unknown>, ctx: ToolCtx): Promise<Assessment> {
+  const callId = ctx.callId;
+  const path = typeof args.path === "string" ? args.path.trim() : "";
+  const oldText = typeof args.old_text === "string" ? args.old_text : "";
+  const newText = typeof args.new_text === "string" ? args.new_text : "";
+  if (!path || !oldText) {
+    return { refuse: notExecuted(callId, "invalid_args", { hint: "path 与 old_text 必填（old_text 不能为空，空串会命中每一行）" }) };
+  }
+  if (oldText === newText) {
+    return { refuse: notExecuted(callId, "invalid_args", { hint: "old_text 与 new_text 相同，无需改" }) };
+  }
+  if (!inWhitelist(path)) {
+    return { refuse: notExecuted(callId, "path_outside_whitelist", { path, hint: "把目标目录加入 设置 → AI 服务 → 「Agent 文件白名单」" }) };
+  }
+  let st: FileStat;
+  try {
+    st = await invoke<FileStat>("agent_fs_stat", { path });
+  } catch (e) {
+    return { refuse: failed(callId, `stat 失败：${String(e).slice(0, 200)}`) };
+  }
+  if (st.isDir) return { refuse: notExecuted(callId, "is_dir", { path, hint: "目标是目录，请给完整文件名" }) };
+  if (!st.exists) {
+    return { refuse: notExecuted(callId, "not_found", { path, hint: "fs_edit 只改已存在的文件；新建请用 fs_write" }) };
+  }
+  return {
+    meta: { effect: "irreversible", idempotent: false, reversible: false, mayTouchDevice: false },
+    plan: `定点替换已有文件：\n${path}\n\n现有 ${st.bytes ?? 0} 字节，把 ${oldText.length} 字换成 ${newText.length} 字，应用不提供撤销。原文不唯一时宿主会拒改（ambiguous），批准后同样不改盘。`,
+  };
+}
+
+/**
+ * fs_edit 的失败分类。Rust 回的 `not_found` / `ambiguous` 是**决策信息**，不能糊成一条 error：
+ * 模型对这两者的正确动作完全不同（前者回去核对原文，后者把 old_text 加长或显式 all:true）。
+ * 单独成函数是因为它必须可单测——留在管道里，测试看到的只是管道自己那层包装。
+ */
+export function editFailure(callId: string, err: unknown): ToolResultBody {
+  const msg = String(err).replace(/^Error:\s*/, "");
+  if (/^(not_found|ambiguous|path_outside_whitelist)/.test(msg)) {
+    return notExecuted(callId, msg.split(/[：:]/)[0].trim(), { detail: msg.slice(0, 300) });
+  }
+  return failed(callId, msg);
+}
+
+async function fsEdit(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
+  const path = String(parsed.path ?? "").trim();
+  const oldText = typeof parsed.old_text === "string" ? parsed.old_text : "";
+  const newText = typeof parsed.new_text === "string" ? parsed.new_text : "";
+  if (!path || !oldText) {
+    return notExecuted(callId, "invalid_args", { hint: "path 与 old_text 必填（old_text 不能为空，空串会命中每一行）" });
+  }
+  if (!inWhitelist(path)) return NOT_IN_WL(callId);
+  try {
+    const r = await invoke<{ path: string; replacements: number; bytes: number }>("agent_fs_edit", {
+      path, old_text: oldText, new_text: newText,
+      all: parsed.all === true,
+      roots: parseFsRoots(getSettings().agentFsRoots),
+    });
+    return {
+      callId, ok: true, status: "applied",
+      data: { path: r.path, replacements: r.replacements, bytes: r.bytes, hint: "已就地替换（不可撤销）。改完请读回相关片段确认，别只凭回执宣告完成。" },
+    };
+  } catch (e) {
+    return editFailure(callId, e);
+  }
+}
+
 async function fsList(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const path = String(parsed.path ?? "").trim();
   if (!path) return notExecuted(callId, "invalid_args", { hint: "path 必须是非空字符串" });
@@ -353,6 +481,67 @@ export const generalToolEntries: AgentToolEntry[] = [
     assess: assessFsWrite,
     approvalBinding: (a) => ({ path: a.path, bytes: String(a.content ?? "").length }),
     execute: (a, ctx) => fsWrite(ctx.callId, a),
+  }),
+  // P109-D：grep / glob / 定点编辑。三者补的是同一句话："它怎么不自己去翻代码"。
+  defineTool({
+    name: "fs_grep",
+    labelZh: "搜索文件内容",
+    effect: "read",
+    domain: "files",
+    provenance: HOST,
+    description:
+      "Search text inside a whitelisted directory tree (case-insensitive substring, not regex). Skips node_modules/.git/target/dist/out/__pycache__, binary and >1 MiB files; returns {path,line,text} hits capped at 250. **Check `truncated` and `skipped` before concluding something does not exist** — 'no matches' and 'we skipped 37 binary files' are different facts. Args: { root: string, needle: string, max?: number }. Read-only; requires the files authorization domain.",
+    parameters: {
+      type: "object",
+      properties: { root: { type: "string" }, needle: { type: "string" }, max: { type: "number" } },
+      required: ["root", "needle"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `搜索 ${String(a.needle ?? "")} @ ${String(a.root ?? "")}`,
+    execute: (a, ctx) => fsSearch(ctx.callId, a, "content"),
+  }),
+  defineTool({
+    name: "fs_glob",
+    labelZh: "按名字找文件",
+    effect: "read",
+    domain: "files",
+    provenance: HOST,
+    description:
+      "Find files whose full path contains a substring (case-insensitive; plain substring, not a glob pattern). Same tree rules as fs_grep. Use it to locate a file before reading it. Args: { root: string, needle: string, max?: number }. Read-only; requires the files authorization domain.",
+    parameters: {
+      type: "object",
+      properties: { root: { type: "string" }, needle: { type: "string" }, max: { type: "number" } },
+      required: ["root", "needle"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `找文件 ${String(a.needle ?? "")} @ ${String(a.root ?? "")}`,
+    execute: (a, ctx) => fsSearch(ctx.callId, a, "paths"),
+  }),
+  defineTool({
+    name: "fs_edit",
+    labelZh: "定点改文件",
+    // 改的是**已存在**的文件 ⇒ 覆盖类，逐条批准（§8-44 四类之一）。这里不动态判定不是偷懒：
+    // 它永远落在已有文件上（不存在就报 not_found），所以静态声明就是准的。
+    effect: "irreversible",
+    domain: "write",
+    provenance: HOST,
+    description:
+      "Replace an exact substring inside one existing whitelisted file - prefer this over fs_write, which rewrites the whole file and can erase the user's own edits. `old_text` must match byte-for-byte including indentation and newlines; 0 matches returns not_found, several matches returns ambiguous:N and changes nothing (widen old_text to make it unique, or pass all:true to replace every occurrence on purpose). Args: { path: string, old_text: string, new_text: string, all?: boolean }. Read the file first.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        old_text: { type: "string" },
+        new_text: { type: "string" },
+        all: { type: "boolean" },
+      },
+      required: ["path", "old_text", "new_text"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `改 ${String(a.path ?? "")}（${String(a.old_text ?? "").length} → ${String(a.new_text ?? "").length} 字）`,
+    assess: assessFsEdit,
+    approvalBinding: (a) => ({ path: a.path, chars: String(a.old_text ?? "").length }),
+    execute: (a, ctx) => fsEdit(ctx.callId, a),
   }),
   defineTool({
     name: "web_fetch",

@@ -7,6 +7,9 @@ import { occupiedSessionIds, setRunConclusionCb, setSessionTitleCb } from "../ag
 import { INCOMPLETE_MARK } from "../agent/sessionLog";
 // 体积口径与 Agent 侧共用同一常量与同一个 utf8 估算（context.ts 只依赖类型，不成环；P95-H4）
 import { REQUEST_SOFT_LIMIT, utf8Bytes } from "../agent/context";
+// P108：URL/Key 的清洗与 Agent 侧同一个函数。原来这里另抄了一份逐字相同的 cleanBaseUrl，
+// 而 key 一处都没洗 —— 同一个"把设置里的串发给宿主"的动作有两个答案，正是漂移的温床。
+import { cleanApiKey, cleanBaseUrl } from "../agent/provider";
 import { saveImage, restoreImages, deleteImages } from "./imageStore";
 import {
   getSnapshot as getSettings,
@@ -170,10 +173,6 @@ let pendingDelta = "";
 let pendingReasoning = "";
 let flushRaf = 0;
 let persistTimer = 0;
-
-function cleanBaseUrl(url: string): string {
-  return url.replace(/[`"'\s]/g, "").replace(/\/+$/, "");
-}
 
 /** P89 A5：activeId 失效自愈——失效成因：localStorage 写满时 persistNow 丢旧会话、
  *  外部清空存储、持久化数据被手改。写入路径（cur）直接补建，读取路径（getSnapshot）延迟一拍通知。 */
@@ -763,7 +762,7 @@ async function requestChat(
     await invoke("ai_chat", {
       reqId,
       baseUrl: cleanBaseUrl(st.aiBaseUrl),
-      apiKey: st.aiApiKey,
+      apiKey: cleanApiKey(st.aiApiKey),
       model: st.aiModel,
       temperature: st.aiTemperature,
       format: st.aiFormat,

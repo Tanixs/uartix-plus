@@ -55,6 +55,15 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "aiWidgetSend", type: "boolean", def: false, group: "ai", label: "允许向设备发送", sensitivity: "protected", reversible: false },
   { key: "agentFsRoots", type: "string", maxLen: 4096, def: "", group: "ai", label: "Agent 文件白名单", sensitivity: "protected", reversible: false },
   { key: "agentShellEnabled", type: "boolean", def: false, group: "ai", label: "Agent 允许执行命令", sensitivity: "protected", reversible: false },
+  // P109-D：高危档跨重启。**默认关**＝保持"重启回落界面创造并标 downgraded"的原行为；
+  // 开它是用户点名的放松（§8-44），所以它本身必须是 protected —— 模型不许给自己开这扇门。
+  { key: "agentRestoreTier", type: "boolean", def: false, group: "ai", label: "重启后保留全权执行档", sensitivity: "protected", reversible: true },
+  // P109-A：Agent 预算，**0 = 不限制**（默认）。三条一律 `protected` —— 模型不许写自己的上限，
+  // 否则"无限预算的成本责任在用户侧"这句话就是空的（settingsTools 只放行 safe 键，
+  // 这条由 settingsSchema.test.ts 里与 marketIndexUrl 同一形状的测试钉住）。
+  { key: "agentMaxRounds", type: "int", min: 0, max: 100000, def: 0, group: "ai", label: "Agent 轮数上限（0=不限）", sensitivity: "protected", reversible: true },
+  { key: "agentMaxCalls", type: "int", min: 0, max: 100000, def: 0, group: "ai", label: "Agent 工具调用上限（0=不限）", sensitivity: "protected", reversible: true },
+  { key: "agentTimeoutMins", type: "int", min: 0, max: 1440, def: 0, group: "ai", label: "Agent 单次任务时限（分钟，0=不限）", sensitivity: "protected", reversible: true },
   { key: "autoReconnect", type: "boolean", def: false, group: "behavior", label: "断线自动重连", sensitivity: "protected", reversible: true },
   { key: "mcpEnabled", type: "boolean", def: false, group: "mcp", label: "MCP 桥开关", sensitivity: "protected", reversible: false, requiresRestart: true },
   { key: "mcpPort", type: "int", min: 1024, max: 65535, def: 7731, group: "mcp", label: "MCP 端口", sensitivity: "protected", reversible: true, requiresRestart: true },

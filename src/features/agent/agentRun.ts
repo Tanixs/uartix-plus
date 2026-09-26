@@ -6,7 +6,9 @@
  * - 数据订阅租约随 run 终止释放（§6.1）；run 活动期间保持本地任务轮询（§6）；
  * - 审批卡经 ApprovalGate 绑定 (tool, argsHash)，批准/拒绝/过期由宿主裁决（§7）。
  */
-import { runAgent, DEFAULT_BUDGET } from "./loop";
+import { runAgent, resolveBudget } from "./loop";
+import { clearPlan } from "./planLedger";
+import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { invokeAgentProvider } from "./provider";
 import { createLocalAgentAdapter } from "./agentAdapter";
 import { pluginToolEntries } from "./pluginTools";
@@ -18,7 +20,7 @@ import { releaseDataLease } from "../plot/dataLease";
 import { setLocalJobInterest } from "../mcp/jobExecutor";
 import type { UndoResult } from "./settingsTools";
 import { normalizeAllowed } from "./scopeTiers";
-import type { AgentMessage, AgentResult, ContextStat, RunEvent, RunScope, RunStatus, ToolReceipt } from "./types";
+import type { AgentMessage, AgentResult, ContextStat, PauseReason, RunEvent, RunScope, RunStatus, ToolReceipt } from "./types";
 
 const EVENTS_CAP = 200;
 const RUNS_KEPT = 20;
@@ -66,6 +68,9 @@ export interface AgentRunView {
   rounds: number;
   calls: number;
   caps: { maxRounds: number; maxCalls: number; deadlineAt: number };
+  /** P109-B：`status === "paused"` 时的真实成因。四种暂停的**正确动作不一样**，
+   *  所以不能像以前那样全塌成一句"预算耗尽或连续失败"。 */
+  pauseReason?: PauseReason;
   createdAt: number;
   updatedAt: number;
   finishedAt?: number;
@@ -234,6 +239,11 @@ function reviveRun(r: unknown): AgentRunView | null {
     rounds: typeof o.rounds === "number" ? o.rounds : 0,
     calls: typeof o.calls === "number" ? o.calls : 0,
     caps: o.caps,
+    // P109-B：`reviveRun` 是逐字段白名单重建，不在这里出现的新字段重启后会静默消失
+    pauseReason:
+      o.pauseReason === "rounds" || o.pauseReason === "calls" || o.pauseReason === "deadline" || o.pauseReason === "no-progress"
+        ? o.pauseReason
+        : undefined,
     createdAt: typeof o.createdAt === "number" ? o.createdAt : Date.now(),
     updatedAt: typeof o.updatedAt === "number" ? o.updatedAt : Date.now(),
     finishedAt: typeof o.finishedAt === "number" ? o.finishedAt : undefined,
@@ -408,15 +418,24 @@ export async function startRun(options: {
   if (!goal) throw new Error("任务目标不能为空");
   const runId = crypto.randomUUID();
   const now = Date.now();
-  const maxRounds = Math.min(options.maxRounds ?? DEFAULT_BUDGET.maxRounds, DEFAULT_BUDGET.maxRounds);
-  const maxCalls = Math.min(options.maxCalls ?? DEFAULT_BUDGET.maxCalls, DEFAULT_BUDGET.maxCalls);
-  const timeoutMs = Math.min(options.timeoutMs ?? DEFAULT_BUDGET.timeoutMs, DEFAULT_BUDGET.timeoutMs);
+  // P109-A：预算的**唯一出处是设置**（`0 = 不限制`，2026-09-26 用户裁决）。
+  // 原来这里是两处 `Math.min(..., DEFAULT_BUDGET.*)` 把 24/64/10min 焊成天花板，
+  // 而那句"允许收紧，不允许放宽"从来不是用户裁决 —— 详设 docs/P109-…md §1-8、§6-1。
+  // 调用方显式传参仍然优先（续跑与测试要能注入）。
+  const st = getSettings();
+  const budget = resolveBudget({
+    maxRounds: options.maxRounds ?? st.agentMaxRounds,
+    maxCalls: options.maxCalls ?? st.agentMaxCalls,
+    timeoutMs: options.timeoutMs ?? st.agentTimeoutMins * 60_000,
+  });
+  const { maxRounds, maxCalls, timeoutMs } = budget;
   const brief = briefOf(options.goalBrief?.trim() || goal);
   const view: AgentRunView = {
     runId, goal, goalBrief: brief, scope: options.scope, status: "running", rounds: 0, calls: 0,
     ...(options.scope === "custom" ? { allowed: normalizeAllowed("custom", options.allowed) } : {}),
     sessionId: options.sessionId,
-    caps: { maxRounds, maxCalls, deadlineAt: now + timeoutMs },
+    // `deadlineAt: 0` = 没有截止时间（不能写 Infinity：caps 要经 JSON 落盘，Infinity 会变 null）
+    caps: { maxRounds, maxCalls, deadlineAt: timeoutMs > 0 ? now + timeoutMs : 0 },
     createdAt: now, updatedAt: now, events: [], pending: null, undoState: {},
   };
   runs = [view, ...runs.filter((r) => r.runId !== runId)].slice(0, RUNS_KEPT);
@@ -482,7 +501,9 @@ async function executeRun(
       // 只给读数不给指令——DSH 的 `agent.inject` 那条"每轮往上下文里塞话"的路我们不抄（详设 §6.2）。
       liveFacts: ({ count, bytes }) => runtimeFacts({ scope: view.scope, allowed, toolCount: count, toolBytes: bytes }),
       seqBase: prior.length,
-      maxRounds: view.caps.maxRounds, maxCalls: view.caps.maxCalls, timeoutMs: opts.timeoutMs,
+      maxRounds: view.caps.maxRounds, maxCalls: view.caps.maxCalls,
+      // 续跑给的是**剩余**时间，不是重新发一份完整预算；`deadlineAt === 0` = 无截止 ⇒ 传 0
+      timeoutMs: opts.timeoutMs ?? (view.caps.deadlineAt ? view.caps.deadlineAt - Date.now() : 0),
       onDelta: (kind, text) => appendLive(runId, kind, text),
       // P96-K4：每次送请求（含重试）都清掉实时缓冲 ⇒ "正在思考"从本轮重新计时；
       // 上一段已收内容此时已作为「未完成轮」事件进台账，不会凭空消失。
@@ -531,6 +552,8 @@ function finalize(runId: string, result: AgentResult | null, crashCode?: string,
   if (!view) return;
   if (result) {
     view.status = result.status;
+    // P109-B：成因跟着终态走；非 paused 一律清空（续跑成功后不许留着上一次的"无进展"）
+    view.pauseReason = result.status === "paused" ? result.pauseReason : undefined;
     view.rounds = result.rounds;
     view.calls = result.calls;
     view.events = [...priorEvents, ...result.events.slice(-EVENTS_CAP).map(trimEvent)].slice(-EVENTS_CAP);
@@ -544,6 +567,10 @@ function finalize(runId: string, result: AgentResult | null, crashCode?: string,
     ];
   }
   view.pending = null;
+  // P109-C：计划台账随**真终态**回收。paused 不清——「继续任务」还要靠它判断闭环；
+  // running 也不清（finalize 只在终态调用，这层判断是给以后改动留的护栏）。
+  if (view.status !== "paused" && view.status !== "running") clearPlan(runId);
+  view.pending = null;
   view.finishedAt = Date.now();
   view.updatedAt = view.finishedAt;
   // P92 A4：结论回写会话（气泡=结论、卡片=过程）；无 sessionId 的 run（MCP/Operator）不回写
@@ -553,7 +580,7 @@ function finalize(runId: string, result: AgentResult | null, crashCode?: string,
   }
 }
 
-/** 事件台账里的工具参数被截断过（512 字），半截 JSON 不能回灌模型 → 归一化为 {} */
+/** 事件台账里的工具参数解析不出来（落盘时被截过、或本身不是对象）→ 归一化为 {} */
 function safeArgs(raw: string | undefined): string {
   if (!raw) return "{}";
   try {
@@ -567,7 +594,8 @@ function safeArgs(raw: string | undefined): string {
 /**
  * 事件台账 → 对话骨架（P91 A4）。台账里有每轮模型正文、工具名/参数与完整回执，
  * 足以让模型接着往下想；轮次心跳、失败叙述、续跑标记不回灌（那是给人看的，不是历史）。
- * 已知精度损失：同轮多支调用的顺序按台账顺序还原，参数超 512 字的退化为 {}。
+ * 已知精度损失：同轮多支调用的顺序按台账顺序还原；参数超出落盘上限（`ARGS_PERSIST_CAP` 2 KiB）
+ * 的调用**整对不入历史**（不是退化成 `{}` 假装是原参数），只在末尾如实标注丢了几对。
  */
 export function rebuildMessages(view: AgentRunView): AgentMessage[] {
   const out: AgentMessage[] = [{ role: "user", content: view.goal }];
@@ -630,21 +658,25 @@ export function stopRun(runId: string): void {
 }
 
 /**
- * P88e B3：暂停续跑——paused（预算耗尽/连续失败）不是可恢复的挂起态，续跑 =
- * 用原任务的 goal/scope/授权域/会话重新发起一个新 run；原 run 保留为台账，
- * 在会话时间线里折叠为更早记录。仅 paused 可续跑；interrupted（重启）不复活执行（§5.4）。
+ * P109-B：「已暂停」的继续任务 = 走 `retryRun` 那条**同一个 run 上续跑**的路。
+ *
+ * 旧实现是"用原 goal/scope/会话重新发起一个新 run"，代价是：新 runId、轮数归零、
+ * **不带任何历史**（loop 只拼得出 system + 光秃秃的目标），于是模型既不知道走到哪、
+ * 也看不到先前的工具回执，而 `seen` 台账是每 run 重建的 ⇒ **已经生效的写入会被重做一遍**。
+ * 用户看到的"继续任务接不上来"就是这一条。正确的重放路径（`rebuildMessages`）一直都在，
+ * 只是 `canRetry` 把 `paused` 挡在外面——旧注释甚至写着"paused 不是可恢复的挂起态"。
  */
 export function resumeRun(runId: string): Promise<string> {
   const view = find(runId);
   if (!view) return Promise.reject(new Error("任务不存在"));
   if (view.status !== "paused") return Promise.reject(new Error("仅「已暂停」的任务可以继续"));
-  return startRun({
-    goal: view.goal,
-    goalBrief: view.goalBrief,
-    scope: view.scope,
-    ...(view.scope === "custom" && view.allowed ? { allowed: view.allowed } : {}),
-    sessionId: view.sessionId,
-  });
+  // `retryRun` 是同步抛错（忙碌 / 任务不存在），这里统一成 rejection：
+  // 调用方只写 `.catch(...)`，不该被一条同步异常打穿
+  try {
+    return retryRun(runId);
+  } catch (e) {
+    return Promise.reject(e instanceof Error ? e : new Error(String(e)));
+  }
 }
 
 /**
@@ -660,7 +692,8 @@ export async function retryRun(runId: string): Promise<string> {
   if (view.status === "running") throw new Error("任务正在运行");
   if (controller) throw new RunBusyError();
   const skeleton = rebuildMessages(view);
-  const timeoutMs = DEFAULT_BUDGET.timeoutMs;
+  // P109-A：刷新的是**设置里那份预算**（`0 = 不限制`），不再是硬编码的 10 分钟
+  const timeoutMs = resolveBudget({ timeoutMs: getSettings().agentTimeoutMins * 60_000 }).timeoutMs;
   const mark: RunEvent = {
     seq: view.events.length + 1,
     ts: Date.now(),
@@ -672,7 +705,7 @@ export async function retryRun(runId: string): Promise<string> {
   view.finishedAt = undefined;
   view.rounds = 0;
   view.calls = 0;
-  view.caps = { ...view.caps, deadlineAt: Date.now() + timeoutMs };
+  view.caps = { ...view.caps, deadlineAt: timeoutMs > 0 ? Date.now() + timeoutMs : 0 };
   view.updatedAt = Date.now();
   activeRunId = runId;
   const ctrl = armController();
@@ -682,11 +715,15 @@ export async function retryRun(runId: string): Promise<string> {
   return runId;
 }
 
-/** 「继续任务」可用性判定（UI 出不出这个按钮只认这一处，避免各处自说自话） */
+/**
+ * 「继续任务」可用性判定（UI 出不出这个按钮只认这一处，避免各处自说自话）。
+ * P109-B：`paused` 现在也走这条路——它与 failed/interrupted 用的是同一套台账重放，
+ * 差别只在 `resumeRun` 额外要求"必须是已暂停"这一入口校验。
+ */
 export function canRetry(runId: string): boolean {
   if (controller) return false;
   const view = find(runId);
-  return !!view && (view.status === "failed" || view.status === "interrupted");
+  return !!view && (view.status === "paused" || view.status === "failed" || view.status === "interrupted");
 }
 
 /** 测试隔离：清空内存态与持久化（生产代码不调用）。 */
