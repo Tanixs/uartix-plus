@@ -31,6 +31,18 @@ pub struct SerialConfig {
     pub data_bits: u8,
     pub parity: String,
     pub stop_bits: u8,
+    /// P107：`none` / `software`(XON/XOFF) / `hardware`(RTS/CTS)。
+    /// 给默认值是因为这个结构体在 **IPC 边界上**：边界上的新字段不给默认值，
+    /// 就等于"两侧版本没对齐 ⇒ 连接直接报 missing field"。
+    /// ⚠ 今天的串口配置**并不落盘**（`serialStore` 用模块常量，`settingsStore` 的持久化
+    /// 白名单里没有串口字段），所以它防的是未来的第二个生产者（MCP/插件代发），
+    /// 不是一个现存的老存档 bug —— 别把它写成"修好了升级即坏"。
+    #[serde(default = "default_flow")]
+    pub flow: String,
+}
+
+fn default_flow() -> String {
+    "none".to_string()
 }
 
 #[derive(Serialize, Clone)]
@@ -71,10 +83,25 @@ struct Shared {
 }
 
 /// 把记下来的目标电平施加到端口上：尽力而为，失败不改记忆（下次重开还会再试）。
-fn apply_control_lines(port: &mut Box<dyn serialport::SerialPort>, dtr: Option<bool>, rts: Option<bool>) {
+///
+/// `flow` 不是装饰：**硬件流控之下 RTS 归驱动**（Windows `fRtsControl=Enable` + `fOutxCtsFlow`，
+/// POSIX `CRTSCTS`）。这时再施加一次用户记过的电平，就是让 P106 的记忆去和驱动抢同一根线 ——
+/// `write_request_to_send` 会返回 Ok，线随后被驱动拖回去，界面上什么错都没有。所以这里直接让路。
+/// DTR 三档都不被流控接管，照旧施加。
+fn apply_control_lines(
+    port: &mut Box<dyn serialport::SerialPort>,
+    dtr: Option<bool>,
+    rts: Option<bool>,
+    flow: FlowControl,
+) {
     if let Some(level) = dtr {
         let _ = port.write_data_terminal_ready(level);
     }
+    let rts = if matches!(flow, FlowControl::Hardware) {
+        None
+    } else {
+        rts
+    };
     if let Some(level) = rts {
         let _ = port.write_request_to_send(level);
     }
@@ -158,8 +185,22 @@ fn parse_parity(s: &str) -> Result<Parity, String> {
     }
 }
 
-fn open_with(config: &SerialConfig) -> Result<Box<dyn serialport::SerialPort>, String> {
-    serialport::new(&config.port, config.baud)
+/// P107 数据流控档位。口径与 `parse_parity` 一致：**非法值报错，不静默退回 `none`** ——
+/// 用户以为开了 RTS/CTS 而实际没开，后果是安静地丢字节，那比打不开端口更难查。
+fn parse_flow(s: &str) -> Result<FlowControl, String> {
+    match s {
+        "none" => Ok(FlowControl::None),
+        "software" => Ok(FlowControl::Software),
+        "hardware" => Ok(FlowControl::Hardware),
+        other => Err(format!("不支持的数据流控: {other}")),
+    }
+}
+
+/// 打开端口。返回里带上**生效的**流控档位：`apply_control_lines` 要据此决定 RTS 让不让路，
+/// 而自己再 `parse_flow` 一遍就是第二个真相（两处解析早晚会分叉）。
+fn open_with(config: &SerialConfig) -> Result<(Box<dyn serialport::SerialPort>, FlowControl), String> {
+    let flow = parse_flow(&config.flow)?;
+    let port = serialport::new(&config.port, config.baud)
         .data_bits(match config.data_bits {
             7 => DataBits::Seven,
             _ => DataBits::Eight,
@@ -169,10 +210,11 @@ fn open_with(config: &SerialConfig) -> Result<Box<dyn serialport::SerialPort>, S
             2 => StopBits::Two,
             _ => StopBits::One,
         })
-        .flow_control(FlowControl::None)
+        .flow_control(flow)
         .timeout(Duration::from_millis(50))
         .open()
-        .map_err(|e| format!("打开 {} 失败: {e}", config.port))
+        .map_err(|e| format!("打开 {} 失败: {e}", config.port))?;
+    Ok((port, flow))
 }
 
 fn parse_hex(text: &str) -> Result<Vec<u8>, String> {
@@ -271,13 +313,13 @@ pub async fn open_port(
     }
     // 打开串口（驱动握手）可能阻塞，同样移出主线程
     let cfg = config.clone();
-    let mut port = tauri::async_runtime::spawn_blocking(move || open_with(&cfg))
+    let (mut port, flow) = tauri::async_runtime::spawn_blocking(move || open_with(&cfg))
         .await
         .map_err(|e| e.to_string())??;
     {
         let mut shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
         // 先施加用户显式要过的电平（没要过 = 两条 None = 完全不碰线，这是默认）
-        apply_control_lines(&mut port, shared.dtr, shared.rts);
+        apply_control_lines(&mut port, shared.dtr, shared.rts, flow);
         shared.port = Some(port);
         shared.config = Some(config.clone());
     }
@@ -569,6 +611,57 @@ mod control_line_tests {
     }
 }
 
+#[cfg(test)]
+mod flow_tests {
+    use super::{parse_flow, FlowControl, SerialConfig};
+
+    /// 边界上的新字段必须带默认值。今天串口配置不落盘（详设 §3.1），所以这条防的不是
+    /// "老存档读不出来"，而是**两侧版本没对齐**：少一个键就报 `missing field flow`，
+    /// 用户的现场表现是"点连接直接红字、连不上"。
+    #[test]
+    fn config_without_flow_key_still_deserializes() {
+        let cfg: SerialConfig = serde_json::from_str(
+            r#"{"port":"COM3","baud":115200,"dataBits":8,"parity":"none","stopBits":1}"#,
+        )
+        .expect("缺 flow 键的旧形状配置必须能反序列化");
+        assert_eq!(cfg.flow, "none", "缺键要落到\"不开流控\"，不能落到硬件流控");
+    }
+
+    #[test]
+    fn flow_names_match_the_ts_side() {
+        // 这三枚字面量是与 TS `FlowMode` 的**唯一**约定，改一边就得在这里红
+        assert!(matches!(parse_flow("none"), Ok(FlowControl::None)));
+        assert!(matches!(parse_flow("software"), Ok(FlowControl::Software)));
+        assert!(matches!(parse_flow("hardware"), Ok(FlowControl::Hardware)));
+    }
+
+    #[test]
+    fn unknown_flow_is_rejected_not_fallen_back() {
+        // 静默退回 none = 用户以为开了 RTS/CTS，实际在丢字节，且没有任何地方报错
+        let err = parse_flow("rts").unwrap_err();
+        assert!(err.contains("数据流控"), "报错要说清是哪一项：{err}");
+    }
+
+    #[test]
+    fn bad_flow_fails_before_touching_hardware() {
+        // 不碰真机也能验：parse_flow 在 `.open()` 之前，所以端口名是假的也无所谓 ——
+        // 报的必须是"不支持的数据流控"，而不是"打开不存在端口失败"。
+        // （不用 unwrap_err：`dyn SerialPort` 没有 Debug，Ok 侧过不了它的约束。）
+        let cfg = SerialConfig {
+            port: "COM-不-存在".into(),
+            baud: 115200,
+            data_bits: 8,
+            parity: "none".into(),
+            stop_bits: 1,
+            flow: "both".into(),
+        };
+        match super::open_with(&cfg) {
+            Err(e) => assert!(e.contains("不支持的数据流控"), "{e}"),
+            Ok(_) => panic!("非法流控档位不该被打开，更不能靠\"端口不存在\"蒙混过去"),
+        }
+    }
+}
+
 pub fn start_hotplug(app: AppHandle) {
     thread::spawn(move || {
         let mut last: Vec<String> = Vec::new();
@@ -745,13 +838,13 @@ fn try_reconnect(
             .map(|ports| ports.iter().any(|p| p.port_name == config.port))
             .unwrap_or(false);
         if present {
-            if let Ok(mut port) = open_with(&config) {
+            if let Ok((mut port, flow)) = open_with(&config) {
                 if epoch.load(Ordering::SeqCst) != my_epoch {
                     drop(port);
                     return false;
                 }
                 let (dtr, rts) = shared.lock().map(|g| (g.dtr, g.rts)).unwrap_or((None, None));
-                apply_control_lines(&mut port, dtr, rts);
+                apply_control_lines(&mut port, dtr, rts, flow);
                 if let Ok(mut guard) = shared.lock() {
                     guard.port = Some(port);
                 }

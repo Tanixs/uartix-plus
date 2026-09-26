@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import type { ParityMode } from "../../ipc/types";
+import type { FlowMode, ParityMode } from "../../ipc/types";
 import * as store from "./serialStore";
 import * as sessionStore from "../session/sessionStore";
 import { useSettings } from "../settings/settingsStore";
@@ -242,6 +242,30 @@ export function LinkParams() {
             <option value={2}>2</option>
           </select>
         </div>
+      </Field>
+      {/* P107：数据流控。为什么不并进上面那只帧格式 combo——那三只是一**个**概念（8N1），
+          流控不是帧格式（P104-B6 的判据），塞进去是骗排版。
+          默认「无」与 P106 控制线同一套安全默认：开串口不改变线路行为。
+          这里选 hardware 之后，下面「控制线」那颗手动 RTS 钮会自动让路并说明原因——
+          两处不是重复：这一处是**决定**，那一处是**后果**。 */}
+      <Field
+        label={t("tb.flow")}
+        tip={tx(
+          "默认「无」。软件（XON/XOFF）是带内流控：它借用数据流里的 0x11/0x13 两个字节，二进制协议会被改帧，慎用。硬件（RTS/CTS）由驱动接管 RTS 线。",
+          "Defaults to None. Software (XON/XOFF) is in-band: it borrows bytes 0x11/0x13 from the data stream, which mangles binary frames — use with care. Hardware (RTS/CTS) hands the RTS line to the driver.",
+        )}
+      >
+        <select
+          className="input"
+          disabled={locked}
+          value={s.config.flow}
+          aria-label={t("tb.flow")}
+          onChange={(e) => store.setConfig({ flow: e.target.value as FlowMode })}
+        >
+          <option value="none">{t("tb.flowNone")}</option>
+          <option value="software">{t("tb.flowSoftware")}</option>
+          <option value="hardware">{t("tb.flowHardware")}</option>
+        </select>
       </Field>
       {/* P104-B5：ModbusBadge 不在这里。它原挂在参数尾部，而注释写着
           「服务在跑就必须看得见（面板可能已关）」——参数搬进左栏后，面板一关它就没了，

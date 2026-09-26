@@ -34,12 +34,17 @@ export interface PortInfo {
 
 export type ParityMode = "none" | "even" | "odd";
 
+/** P107 数据流控。三枚字面量与 Rust `parse_flow` 一一对应（那边有一条测试钉着这三枚），
+ *  `software` 是**带内**流控：0x11/0x13 既是信号也是合法数据字节，二进制协议下会吃掉帧。 */
+export type FlowMode = "none" | "software" | "hardware";
+
 export interface SerialConfig {
   port: string;
   baud: number;
   dataBits: 7 | 8;
   parity: ParityMode;
   stopBits: 1 | 2;
+  flow: FlowMode;
 }
 
 export type SerialStatus = "disconnected" | "connected" | "reconnecting";

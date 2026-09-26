@@ -2,7 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import * as serialStore from "./serialStore";
 import type { IfaceKind } from "./serialStore";
 import { IfaceParams } from "./ifaces";
-import { IFACE_ITEMS, ifaceLabels, linkSummary } from "./linkSummary";
+import { IFACE_ITEMS, ifaceLabels, linkSummary, rtsHeldByDriver } from "./linkSummary";
 import { useSettings } from "../settings/settingsStore";
 import { toggleRailPanel } from "../../shell/railState";
 import { toast } from "../ai/extRuntime";
@@ -102,6 +102,13 @@ export function LinkPanel() {
       ? tx("Uartix+ 还没碰过这条线（打开串口也不会碰）；点一下置为高", "Uartix+ has never driven this line (opening the port won't either); click to drive it high")
       : tx("再点一下翻转电平", "Click again to flip the level");
 
+  /* P107：硬件流控 ⇒ 那颗手动 RTS 钮让路（判据与理由在 `rtsHeldByDriver`，Rust 侧同一条）。
+     DTR 三档流控都不被接管，所以只有这一颗钮受影响。 */
+  const rtsOwned = rtsHeldByDriver(s.config.flow);
+  // 没连上的时候端口根本不存在，说"驱动管理中"是另一种撒谎 —— 那时它是"未设置"，
+  // 钮本来就点不动；"归驱动"这句话由 tip 说成**政策**（连上之后会怎样），不说成现状。
+  const rtsDriven = rtsOwned && connected;
+
   const pick = (k: (typeof IFACE_ITEMS)[number]) => {
     if (s.status === "connected" || s.status === "reconnecting") {
       void serialStore.closePort();
@@ -144,7 +151,11 @@ export function LinkPanel() {
         <div className="lk-lines">
           <div className="lk-lines-head">
             <span className="lk-lines-title">{tx("控制线", "Control lines")}</span>
-            <span className="lk-lines-note">{tx("打开串口时不主动碰这两条线", "Opening the port never drives these lines")}</span>
+            <span className="lk-lines-note">
+              {rtsOwned
+                ? tx("硬件流控：连上之后 RTS 归驱动，Uartix+ 不碰它", "Hardware flow: the driver holds RTS once connected — Uartix+ won't touch it")
+                : tx("打开串口时不主动碰这两条线", "Opening the port never drives these lines")}
+            </span>
           </div>
           <div className="lk-line-row">
             <span className="lk-line-name" title={tx("数据终端就绪", "Data Terminal Ready")}>DTR</span>
@@ -157,9 +168,12 @@ export function LinkPanel() {
           <div className="lk-line-row">
             <span className="lk-line-name" title={tx("请求发送", "Request To Send")}>RTS</span>
             <span className="lk-line-btns">
-              <button type="button" className="btn sm" aria-pressed={s.ctrl.rts === true}
-                disabled={!connected} title={lineTip(s.ctrl.rts)}
-                onClick={() => void setLine("rts", s.ctrl.rts !== true)}>{lineWord(s.ctrl.rts)}</button>
+              <button type="button" className="btn sm" aria-pressed={rtsOwned ? undefined : s.ctrl.rts === true}
+                disabled={!connected || rtsOwned}
+                title={rtsOwned
+                  ? tx("硬件流控之下这根线由驱动按 CTS 自行拉放；Uartix+ 不再碰它（连手动置电平也会被驱动拖回去）", "Under hardware flow control the driver raises and drops this line in response to CTS; Uartix+ leaves it alone (a manual level would just be pulled back)")
+                  : lineTip(s.ctrl.rts)}
+                onClick={() => void setLine("rts", s.ctrl.rts !== true)}>{rtsDriven ? tx("驱动管理", "By driver") : lineWord(s.ctrl.rts)}</button>
             </span>
           </div>
           <div className="lk-line-ind" aria-label={tx("对端回来的四条线（只读）", "Lines coming back from the peer (read-only)")}>

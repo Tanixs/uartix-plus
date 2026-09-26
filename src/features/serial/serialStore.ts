@@ -83,6 +83,9 @@ const DEFAULT_CONFIG: SerialConfig = {
   dataBits: 8,
   parity: "none",
   stopBits: 1,
+  // P107：与 P106 控制线同一套安全默认 —— 开串口不改变线路行为。
+  // 流控选错的表现是安静地丢字节，所以它必须由用户明确打开，不能替用户猜。
+  flow: "none",
 };
 
 const DEFAULT_NET: IfaceNetConfig = {
