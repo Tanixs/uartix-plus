@@ -9,7 +9,9 @@ import { INCOMPLETE_MARK } from "../agent/sessionLog";
 import { REQUEST_SOFT_LIMIT, utf8Bytes } from "../agent/context";
 // P108：URL/Key 的清洗与 Agent 侧同一个函数。原来这里另抄了一份逐字相同的 cleanBaseUrl，
 // 而 key 一处都没洗 —— 同一个"把设置里的串发给宿主"的动作有两个答案，正是漂移的温床。
-import { cleanApiKey, cleanBaseUrl } from "../agent/provider";
+import { aiWireArgs } from "../agent/provider";
+import { activeRef } from "./aiProfileStore";
+import { t } from "../../i18n/strings";
 import { saveImage, restoreImages, deleteImages } from "./imageStore";
 import {
   getSnapshot as getSettings,
@@ -759,15 +761,14 @@ async function requestChat(
   snapshot.reqId = reqId;
   emit();
   try {
+    const active = activeRef();
+    if (!active) throw new Error(t("ai.notConfigured"));
     await invoke("ai_chat", {
       reqId,
-      baseUrl: cleanBaseUrl(st.aiBaseUrl),
-      apiKey: cleanApiKey(st.aiApiKey),
-      model: st.aiModel,
-      temperature: st.aiTemperature,
-      format: st.aiFormat,
-      proxy: st.aiProxy,
-      noProxy: st.aiNoProxy,
+      // P110-B1：连接参数只有一个构造点（`provider.aiWireArgs`，清洗在里面）
+      ...aiWireArgs(active),
+      // 逐模型温度优先，没填才跟随全局 `aiTemperature`
+      temperature: active.model.temperature ?? st.aiTemperature,
       messages,
       // P96-K4：模型是否先想后答 = deepThink（原先借用界面开关 showThinking，一个开关管两件事）
       thinking: st.deepThink,

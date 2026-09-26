@@ -11,6 +11,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
 import { getSnapshot as getSettings, useSettings } from "../settings/settingsStore";
+import { activeRef, useAiProfiles } from "./aiProfileStore";
 import * as chatStore from "./chatStore";
 import type { ChatMsg, ReasonRound } from "./chatStore";
 import { bubbleMode } from "./messageClip";
@@ -815,8 +816,10 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const stickRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const configured =
-    settings.aiPreset === "ollama" || settings.aiApiKey.trim().length > 0;
+  // P110-B1：配置态来自档案表。必须**订阅那张表**——只订 settingsStore 的话，
+  // 在设置页加好供应商回到对话面板，这里不会刷新（旧的"未配置"空态就一直挂着）。
+  const profiles = useAiProfiles();
+  const configured = !!activeRef(profiles);
 
   // P90 A3：Agent 模式没有目标文本就不能发（图片/文件是附加物，空发曾被静默丢弃）
   const canSend = agentMode

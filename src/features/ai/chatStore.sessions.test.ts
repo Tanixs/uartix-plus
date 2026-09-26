@@ -19,8 +19,12 @@ vi.mock("../agent/agentRun", () => ({
   setSessionTitleCb: vi.fn(),
   setRunConclusionCb: vi.fn(), // P92 A4：init 里注册结论回写钩子
 }));
-vi.mock("../settings/settingsStore", () => ({
-  getSnapshot: () => ({ aiBaseUrl: "https://example.invalid", aiApiKey: "test-key-not-real", aiModel: "test"}),
+vi.mock("../settings/settingsStore", async (importOriginal) => ({
+  // P110-B1：这里原来是**整模块**替换，只给了三个字段。档案表成型后 settingsStore 成了
+  // `aiProfileStore` 的依赖（seed 取 AI_PRESETS），整模块桩件会把那份依赖抹成 undefined，
+  // 于是模块求值期就抛、整个文件全红。改成"透传原模块 + 只覆盖 getSnapshot"。
+  ...((await importOriginal()) as object),
+  getSnapshot: () => ({ aiBaseUrl: "https://example.invalid", aiApiKey: "test-key-not-real", aiModel: "test" }),
   subscribe: vi.fn(),
 }));
 vi.mock("./contextCollector", () => ({

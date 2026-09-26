@@ -52,11 +52,9 @@ export interface Settings {
   cellSize: number;
   /** 帧画布字节格边长（px，20~96；P86b，与控制画布 cellSize 无关） */
   fcCellSize: number;
-  aiPreset: AiPreset;
-  aiFormat: AiFormat;
-  aiBaseUrl: string;
-  aiApiKey: string;
-  aiModel: string;
+  // P110-B1：`aiPreset` / `aiFormat` / `aiBaseUrl` / `aiApiKey` / `aiModel` 五键已删除。
+  // 它们搬进了 `features/ai/aiProfileStore.ts` 的两张表（供应商 / 模型档案）。
+  // 留在这里的只有"与哪台机器无关的全局偏好"：温度、代理、超时、发送总闸。
   aiTemperature: number;
   aiProxy: string;
   aiNoProxy: string;
@@ -151,15 +149,8 @@ export const AI_PRESETS: Record<
   },
 };
 
-/** 旧预设模型名 → 现行官方 ID 的存量迁移表（如 deepseek-chat 已于 2026-07-24 停服） */
-const LEGACY_MODEL_IDS: Record<string, string> = {
-  "deepseek-chat": "deepseek-v4-flash",
-  "deepseek-reasoner": "deepseek-v4-pro",
-  "gpt-4o-mini": "gpt-5.6-sol",
-  "gpt-4o": "gpt-5.6-sol",
-  "qwen-plus": "qwen3.8-flash",
-  "claude-sonnet-4-5": "claude-sonnet-5",
-};
+/** P110-B1：旧模型名迁移表随 `aiModel` 一起删除（零兼容裁决：未发布、无存量用户）。
+ *  模型名的真相现在是 `aiProfileStore` 里那条 `AiModelProfile.model`，用户自己改。 */
 
 const KEY = "vs.settings";
 
@@ -201,11 +192,6 @@ function load(): Settings {
     workspace: "proto",
     cellSize: 60,
     fcCellSize: 42,
-    aiPreset: "deepseek",
-    aiFormat: "chat",
-    aiBaseUrl: AI_PRESETS.deepseek.baseUrl,
-    aiApiKey: "",
-    aiModel: AI_PRESETS.deepseek.model,
     aiTemperature: 0.3,
     aiProxy: "",
     aiNoProxy: "",
@@ -252,21 +238,11 @@ function load(): Settings {
       fcCellSize: Number.isFinite(p.fcCellSize)
         ? Math.max(20, Math.min(96, Math.round(p.fcCellSize as number)))
         : 42,
-      // P108：名单从 AI_PRESETS 派生。原来是手抄的六个字面量 —— 加了第七档而忘了这里，
-      // 表现是"选了 OpenRouter、重启软件，预设被静默退回 deepseek、baseUrl 跟着被覆盖"：
-      // 新档位在设置里存在、在重启后消失。（settingsSchema.ts:25 早就是派生的，这里只是并轨。）
-      aiPreset: (Object.keys(AI_PRESETS) as AiPreset[]).includes(p.aiPreset as AiPreset)
-        ? (p.aiPreset as AiPreset)
-        : "deepseek",
-      aiFormat: (["chat", "anthropic", "responses"] as const).includes(p.aiFormat as AiFormat)
-        ? (p.aiFormat as AiFormat)
-        : "chat",
-      aiBaseUrl: typeof p.aiBaseUrl === "string" ? p.aiBaseUrl : AI_PRESETS.deepseek.baseUrl,
-      aiApiKey: typeof p.aiApiKey === "string" ? p.aiApiKey : "",
-      aiModel: (() => {
-        const m = typeof p.aiModel === "string" && p.aiModel ? p.aiModel : AI_PRESETS.deepseek.model;
-        return LEGACY_MODEL_IDS[m] ?? m;
-      })(),
+      // P110-B1：这五条（aiPreset / aiFormat / aiBaseUrl / aiApiKey / aiModel）连同下面的
+      // `LEGACY_MODEL_IDS` 一起删掉了 —— 供应商与模型现在住在 `features/ai/aiProfileStore.ts`，
+      // 那张表自己 normalize，坏一行整表退回 seed。
+      // P108 那条教训跟着搬过去，别丢：**名单必须从 AI_PRESETS 派生**，手抄一份的后果不是编译错，
+      // 是"选了新档、重启软件，预设被静默退回 deepseek、baseUrl 跟着被覆盖"。
       aiTemperature:
         typeof p.aiTemperature === "number" && p.aiTemperature >= 0 && p.aiTemperature <= 2
           ? p.aiTemperature

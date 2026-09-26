@@ -1,7 +1,7 @@
 import { onFrames } from "../../ipc/framesBus";
 import * as panelActivity from "../../panels/panelActivity";
 import { getSnapshot as getSerial, subscribe as subSerial } from "../serial/serialStore";
-import { getSnapshot as getSettings } from "../settings/settingsStore";
+import { activeRef } from "../ai/aiProfileStore";
 import { requestClosePanel, requestOpenPanel } from "../ai/appBus";
 import { invokeAiScene } from "../ai/aiBus";
 import { runScene } from "../ai/chatStore";
@@ -330,8 +330,9 @@ function maybeAutoDiag(head: SentinelAlert | undefined, prevHeadId: string | und
   if (head.id === prevHeadId) return;
   const now = Date.now();
   if (now - lastAutoDiagTs < cfg.diagCooldownMin * 60_000) return;
-  const st = getSettings();
-  if (!st.aiBaseUrl) {
+  // P110-B1：判"配好了没"只看一件事——档案表里有没有一对能用的（回环地址免密钥）。
+  // 旧写法读的是 `st.aiBaseUrl` 原值（不 trim、不清洗），与设置页/AiChat 三处口径各不相同。
+  if (!activeRef()) {
     toast("哨兵自动诊断：未配置 AI 服务（设置 → AI 服务）");
     return;
   }

@@ -9,7 +9,7 @@
  * - protected：设备行为/权限/模型端点等，Agent 只能读取（脱敏）与定位到设置页，不能代改；
  * - secret：API key、桥 token，任何工具输出只返回“是否已配置”，值永不回显。
  */
-import { THEME_LIST, AI_PRESETS, type Settings, type ThemeMode, type WorkspacePreset, type AiPreset, type AiFormat } from "./settingsStore";
+import { THEME_LIST, type Settings, type ThemeMode, type WorkspacePreset, type AiPreset, type AiFormat } from "./settingsStore";
 import { LOCALE_LIST } from "../../i18n/strings";
 import { MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
 
@@ -21,8 +21,6 @@ export type SettingEntry =
   | { key: keyof Settings; type: "number"; min: number; max: number; def: number; group: string; label: string; sensitivity: Sensitivity; reversible: boolean; requiresRestart?: boolean }
   | { key: keyof Settings; type: "boolean"; def: boolean; group: string; label: string; sensitivity: Sensitivity; reversible: boolean; requiresRestart?: boolean }
   | { key: keyof Settings; type: "string"; maxLen: number; def: string; group: string; label: string; sensitivity: Sensitivity; reversible: boolean; requiresRestart?: boolean };
-
-const PRESET_KEYS = Object.keys(AI_PRESETS) as AiPreset[];
 
 /** 全量声明：每个 Settings 键恰好一条。 */
 export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
@@ -42,11 +40,11 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "chartPalette", type: "enum", values: ["standard", "cbSafe"], def: "standard", group: "appearance", label: "图表配色", sensitivity: "safe", reversible: true },
   { key: "conWrap", type: "boolean", def: true, group: "appearance", label: "控制台自动换行", sensitivity: "safe", reversible: true },
   { key: "reduceMotion", type: "boolean", def: false, group: "appearance", label: "减弱动效", sensitivity: "safe", reversible: true },
-  { key: "aiPreset", type: "enum", values: PRESET_KEYS, def: "deepseek", group: "ai", label: "AI 服务预设", sensitivity: "protected", reversible: true },
-  { key: "aiFormat", type: "enum", values: ["chat", "anthropic", "responses"], def: "chat", group: "ai", label: "AI 协议格式", sensitivity: "protected", reversible: true },
-  { key: "aiBaseUrl", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 服务地址", sensitivity: "protected", reversible: true },
-  { key: "aiApiKey", type: "string", maxLen: 512, def: "", group: "ai", label: "AI API 密钥", sensitivity: "secret", reversible: true },
-  { key: "aiModel", type: "string", maxLen: 128, def: "", group: "ai", label: "AI 模型名", sensitivity: "protected", reversible: true },
+  // P110-B1：`aiPreset` / `aiFormat` / `aiBaseUrl` / `aiApiKey` / `aiModel` 五条已随
+  // `Settings` 里的字段一起删除。供应商与模型是**表**，不是标量设置项：
+  // `SettingEntry` 只有 enum/int/number/boolean/string 五个分支，一张含密钥的表塞进来
+  // 就会被下面那条 `readSettings()` 的"按 schema 逐键吐值"原样序列化给模型（§8-38）。
+  // 表的读口径在 `features/ai/aiProfileStore.redactedProjection()`。
   { key: "aiTemperature", type: "number", min: 0, max: 2, def: 0.3, group: "ai", label: "AI 温度", sensitivity: "protected", reversible: true },
   { key: "aiProxy", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 代理", sensitivity: "protected", reversible: true },
   { key: "aiNoProxy", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 免代理", sensitivity: "protected", reversible: true },

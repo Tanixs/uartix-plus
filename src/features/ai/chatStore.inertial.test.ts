@@ -14,9 +14,32 @@ vi.mock("./imageStore", () => ({ saveImage: vi.fn(), restoreImages: vi.fn(), del
  * 本测试验证的是出站请求隔离，按隔离意图把 Agent 链整体挡在门外。 */
 vi.mock("../agent/agentRun", () => ({ occupiedSessionIds: () => new Set<string>(), setSessionTitleCb: vi.fn() }));
 vi.mock("../settings/settingsStore", () => ({
-  getSnapshot: () => ({ aiBaseUrl: "https://example.invalid", aiApiKey: "test-key-not-real", aiModel: "test"}),
+  // 这张桩件可以继续保持"整模块替换"：本文件已经把 `./aiProfileStore` 整体 mock 掉了
+  // （见下），而当初需要 importOriginal 透传，只是因为真档案表在求值期要读 AI_PRESETS 建 seed。
+  getSnapshot: () => ({ aiBaseUrl: "https://example.invalid", aiApiKey: "test-key-not-real", aiModel: "test" }),
   subscribe: vi.fn(),
 }));
+/* P110-B1：出站隔离测的是"发出去的那一条里有什么"，不该依赖真档案表 ——
+ * 真表的 seed 密钥是空的，chatStore 会当场判"未配置"（那是 provider 新增的前置门），
+ * 于是一次请求都发不出去：那不是隔离，是没跑。给一张固定的可用档案，
+ * 下面所有出站断言原样成立、一条未改。 */
+vi.mock("./aiProfileStore", () => {
+  const provider = {
+    id: "p", label: "P", baseUrl: "https://example.invalid", apiKey: "test-key-not-real",
+    format: "chat" as const, proxy: "", noProxy: "", enabled: true, createdAt: 0,
+  };
+  const model = {
+    id: "m", providerId: "p", label: "test", model: "test", contextTokens: 128_000,
+    maxOutputTokens: 8_192, thinkingLevels: [], defaultThinking: "", enabled: true, createdAt: 0,
+  };
+  const st = { providers: [provider], models: [model], activeProviderId: "p", activeModelId: "m" };
+  return {
+    activeRef: () => ({ provider, model }),
+    getAiProfiles: () => st,
+    useAiProfiles: () => st,
+    subscribeAiProfiles: () => () => {},
+  };
+});
 vi.mock("./contextCollector", () => ({
   collectContext: mocks.collect,
   contextToText: (blocks: unknown[]) => blocks.length ? "SYNTHETIC_SAMPLE_CONTEXT SYNTHETIC_RAW_BYTES" : "",

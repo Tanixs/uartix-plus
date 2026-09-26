@@ -11,7 +11,16 @@ const { toWireMessages, fromRustTurn, invokeAgentProvider, cleanApiKey, cleanBas
 
 // 注意：必须用块体。箭头函数隐式返回 mockReset() 的 mock 本身，
 // vitest 会把 beforeEach 返回的函数当 teardown 在测试后调用，触发 unhandled rejection。
-beforeEach(() => { invoke.mockReset(); });
+// P110-B1：provider 现在要求"档案表里有一对可用的"才发得出请求（旧行为是把空串发给宿主，
+// 换一个含义不明的 401 —— 正是 P108 那轮排查花掉一小时的地方）。
+// 每个用例都重配一次而不是在文件顶层配：下面的用例里有 `await import("./provider")`，
+// 模块重置后它会拿到**新的** aiProfileStore 实例（seed、密钥空），顶层配一次会时灵时不灵。
+// 出站形状的断言一条没动，这里只是把"没配好"这个前置条件满足掉。
+beforeEach(async () => {
+  invoke.mockReset();
+  const { patchEditingProvider } = await import("../ai/aiProfileStore");
+  patchEditingProvider({ baseUrl: "https://api.deepseek.com", apiKey: "test-key-not-real" });
+});
 
 it("wire format: camelCase, optional fields omitted when empty", () => {
   const wire = toWireMessages([
@@ -124,10 +133,12 @@ it("两个清洗函数同源：共用同一个字符集，零宽字符也在这�
   expect(cleanBaseUrl(zwsp)).toBe("sk-or-v1-abc");
 });
 
-it("发送点真的洗了：设置里带换行的 key 不会原样进 Authorization", async () => {
+it("发送点真的洗了：供应商档案里带换行的 key 不会原样进 Authorization", async () => {
   invoke.mockResolvedValue({ content: "ok", calls: [] });
-  const settings = await import("../settings/settingsStore");
-  settings.patch({ aiApiKey: " sk-or-v1-abc\n", aiBaseUrl: "https://openrouter.ai/api/v1/" });
+  // P110-B1：密钥的住处从 Settings 搬进了供应商表 —— 这里换的只是**喂值的入口**，
+  // 两条断言一字未松：脏 key 不许原样出境、尾斜杠必须洗掉。
+  const profiles = await import("../ai/aiProfileStore");
+  profiles.patchEditingProvider({ apiKey: " sk-or-v1-abc\n", baseUrl: "https://openrouter.ai/api/v1/" });
   await invokeAgentProvider([{ role: "user", content: "go" }], [], new AbortController().signal);
   const [, args] = invoke.mock.calls[0];
   expect(args.apiKey).toBe("sk-or-v1-abc");
@@ -170,6 +181,18 @@ it("守卫：所有 apiKey 发送点都过了 cleanApiKey", async () => {
   };
   const root = fileURLToPath(new URL("../../", import.meta.url)); // = src/
   const bad: string[] = [];
+  /**
+   * P110-B1 判据精化（原话"每一处 `apiKey:` 赋值都必须过 `cleanApiKey(`"在档案表成型后
+   * 会把**类型声明**也判成发送点 —— `AiProvider.apiKey: string;` 不发任何东西）。
+   * 豁免只有两种形状，且都由下面的反向用例钉住边界：接口里的类型标注、空串初始化。
+   * 取值发送（`apiKey: p.apiKey`）必须仍然判红，否则这道守卫就白写了。
+   */
+  const bareApiKeySend = (code: string): boolean => {
+    if (!/apiKey:/.test(code) || /cleanApiKey\(/.test(code)) return false;
+    if (/^apiKey\??\s*:\s*(string|number|boolean|unknown)\s*;?$/.test(code)) return false;
+    if (/^apiKey\s*:\s*""\s*,?$/.test(code)) return false;
+    return true;
+  };
   const walk = (dir: string) => {
     const entries = readdirSync(dir, { withFileTypes: true }) as {
       name: string;
@@ -190,7 +213,12 @@ it("守卫：所有 apiKey 发送点都过了 cleanApiKey", async () => {
           // 同一口径（那是写给读代码的人看的）。会被漏掉的只有"整行注释掉的发送点"，那种本来也不发送。
           const code = line.trim();
           if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) return;
-          if (!/apiKey:/.test(line) || /cleanApiKey\(/.test(line)) return;
+          if (!bareApiKeySend(code)) return;
+          // 两处**角色**豁免，都不是发送点：
+          //  - `aiProfileStore.ts`：那张表存的就是用户贴进去的原样（清洗点唯一，在 `aiWireArgs`）；
+          //  - `patchEditingProvider({ apiKey: … })`：设置页往表里写值，写的是配置不是 HTTP 头。
+          // 判红的能力靠上面的 `bareApiKeySend` 与文件末尾那组反向用例保住，不在这两条豁免里。
+          if (/aiProfileStore\.ts$/.test(rel) || /patchEditingProvider\(\s*\{/.test(code)) return;
           bad.push(`${rel}:${i + 1}  ${code}`);
         });
     }
@@ -201,7 +229,11 @@ it("守卫：所有 apiKey 发送点都过了 cleanApiKey", async () => {
 
 /** 守卫：恢复白名单必须从 AI_PRESETS 派生。手抄一份的后果不是编译错，是**静默丢档位**：
  *  选了新预设、重启软件，预设被退回 deepseek 且 baseUrl 跟着被覆盖。 */
-it("守卫：settingsStore 不再手抄预置名单", async () => {
+it("守卫：档案表的模板名单从 AI_PRESETS 派生，不手抄", async () => {
+  // P110-B1 改钉的位置，**不是删掉的守卫**：这条原来盯的是 `settingsStore.load()` 里那份
+  // `aiPreset` 回落白名单（P108 的教训：手抄一份的后果是"选了新档、重启后静默退回 deepseek"）。
+  // 那个字段已随档案表成型而删除，同一件事的新住址是 aiProfileStore —— 模板列表与
+  // baseUrl→模板的反查都必须派生自 AI_PRESETS，抄一份就会在新加预置时静默丢档。
   const fsSpec = "node:fs";
   const urlSpec = "node:url";
   const { readFileSync } = (await import(fsSpec)) as unknown as {
@@ -211,9 +243,10 @@ it("守卫：settingsStore 不再手抄预置名单", async () => {
     fileURLToPath: (u: string | URL) => string;
   };
   const src = readFileSync(
-    fileURLToPath(new URL("../settings/settingsStore.ts", import.meta.url)),
+    fileURLToPath(new URL("../ai/aiProfileStore.ts", import.meta.url)),
     "utf8",
   );
-  expect(src, "恢复路径要读 AI_PRESETS 的键").toContain("Object.keys(AI_PRESETS)");
+  expect(src, "模板列表要读 AI_PRESETS 的键").toContain("Object.keys(AI_PRESETS)");
+  expect(src, "baseUrl 反查模板也要派生，别再抄一份 Record").not.toMatch(/const TPL_[A-Z_]+: Record/);
   expect(src, "不许再手抄一份预置名单").not.toMatch(/\[\s*"openai",\s*"deepseek",/);
 });

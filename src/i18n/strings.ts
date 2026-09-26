@@ -187,6 +187,9 @@ const zh: Dict = {
   "tb.flowNone": "无",
   "tb.flowSoftware": "软件（XON/XOFF）",
   "tb.flowHardware": "硬件（RTS/CTS）",
+  // P110-B1：供应商/模型档案表成型后，"没配好"这件事有三个抛出点（provider、chatStore、哨兵），
+  // 话术只在这里存一份。它不是设置页的标签，所以走 `t()` 而不是 `tx()`。
+  "ai.notConfigured": "未配置可用的模型服务：请到 设置 → AI 服务 添加供应商与模型，并填好 API Key",
   "tb.remoteHost": "远程地址",
   "tb.remotePort": "远程端口",
   "tb.localPort": "本地端口（服务端=监听端口）",
@@ -424,6 +427,7 @@ const en: Dict = {
   "tb.flowNone": "None",
   "tb.flowSoftware": "Software (XON/XOFF)",
   "tb.flowHardware": "Hardware (RTS/CTS)",
+  "ai.notConfigured": "No usable model service is configured: open Settings → AI Service, add a provider and a model, and fill in the API key",
   "tb.remoteHost": "Remote host",
   "tb.remotePort": "Remote port",
   "tb.localPort": "Local port (server = listen port)",

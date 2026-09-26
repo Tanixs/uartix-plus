@@ -9,7 +9,10 @@
  *   不进入消息、不回显。
  */
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../../i18n/strings";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
+import type { AiFormat } from "../settings/settingsStore";
+import { activeRef, type ActiveAi } from "../ai/aiProfileStore";
 import type { AgentMessage, AgentProvider, ModelTurn, ToolCall, ToolDefinition, TurnOptions } from "./types";
 
 /**
@@ -37,6 +40,33 @@ export function cleanBaseUrl(url: string): string {
  */
 export function cleanApiKey(key: string): string {
   return key.replace(PASTE_JUNK, "");
+}
+
+/**
+ * P110-B1：发给宿主的六个连接参数**只有这一个构造点**。
+ *
+ * 为什么要收成一个（此前是三个调用点各拼一份，字段一样、顺序一样）：那三处每一处都能忘了
+ * `cleanApiKey()` 而**静默发坏头**（P108 的由来），`provider.test.ts` 那道扫源码的守卫就是为它补的。
+ * 现在守卫只需要盯一件事：`aiWireArgs` 里那行还在不在，以及有没有第四个地方绕开它自己拼。
+ *
+ * 清洗只在这里发生：`aiProfileStore` 存的是用户贴进去的原样。
+ */
+export function aiWireArgs(a: ActiveAi): {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  format: AiFormat;
+  proxy: string | null;
+  noProxy: string | null;
+} {
+  return {
+    baseUrl: cleanBaseUrl(a.provider.baseUrl),
+    apiKey: cleanApiKey(a.provider.apiKey),
+    model: a.model.model,
+    format: a.provider.format,
+    proxy: a.provider.proxy.trim() ? a.provider.proxy.trim() : null,
+    noProxy: a.provider.noProxy.trim() ? a.provider.noProxy.trim() : null,
+  };
 }
 
 interface RustTurnResult {
@@ -76,6 +106,10 @@ export const invokeAgentProvider: AgentProvider = async (
 ): Promise<ModelTurn> => {
   if (signal.aborted) throw new Error("已停止；未发起模型请求");
   const st = getSettings();
+  // P110-B1：这次用哪一对（供应商 + 模型）由档案表算。没有可用组合就是"没配好"，
+  // 当场说清楚 —— 把空串发给宿主换一个含糊的 401，正是 P108 那轮排查花掉一小时的地方。
+  const active = activeRef();
+  if (!active) throw new Error(t("ai.notConfigured"));
   const reqId = crypto.randomUUID();
   const abortListener = () => {
     // 协作式中断：通知宿主放弃这条在途请求（超时/断流场景及时中断，不等下一个 chunk）
@@ -102,12 +136,8 @@ export const invokeAgentProvider: AgentProvider = async (
     }
     const raw = await invoke<RustTurnResult>("ai_agent_turn", {
       reqId,
-      baseUrl: cleanBaseUrl(st.aiBaseUrl),
-      apiKey: cleanApiKey(st.aiApiKey),
-      model: st.aiModel,
-      format: st.aiFormat,
-      proxy: st.aiProxy || null,
-      noProxy: st.aiNoProxy || null,
+      // P110-B1：连接参数改由档案表算出来（`aiWireArgs` 是唯一构造点，清洗也在里面）
+      ...aiWireArgs(active),
       messages: toWireMessages(messages),
       tools,
       // P90 B1：Agent 通道也要产思维链——anthropic 不开 thinking 就永远没有思考块。

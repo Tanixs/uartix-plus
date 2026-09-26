@@ -26,7 +26,18 @@ import { toast } from "../ai/extRuntime";
 import { activeThemeFacts, subscribeStyleApply } from "../../styles/themeFacts";
 import { drawnTalk, pluginSectionStart, selectTheme, themeCards } from "./themePicker";
 import { themeBearingPackages, usePlugins } from "../plugins/pluginStore";
-import { cleanApiKey, cleanBaseUrl } from "../agent/provider";
+import { aiWireArgs } from "../agent/provider";
+import {
+  activeRef,
+  applyTemplate,
+  editingPair,
+  keyHintFor,
+  patchEditingModel,
+  patchEditingProvider,
+  providerNeedsKey,
+  templateOf,
+  useAiProfiles,
+} from "../ai/aiProfileStore";
 import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
 import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
@@ -132,25 +143,25 @@ function classifyConnError(e: string): string {
 }
 
 function AiConnTestRow() {
-  const settings = useSettings();
+  // 订阅档案表：密钥填进去的那一刻，这颗按钮才从"禁用"变"可用"（只读 activeRef 不会重渲染）
+  useAiProfiles();
   const [st, setSt] = useState<{ status: "idle" | "testing" | "ok" | "err"; msg: string }>({
     status: "idle",
     msg: "",
   });
-  const configured =
-    settings.aiPreset === "ollama" ? settings.aiBaseUrl.trim().length > 0 : settings.aiApiKey.trim().length > 0 && settings.aiBaseUrl.trim().length > 0;
+  // P110-B1：可用性判断跟着档案表走 —— 有"当前能用的一对"就叫已配置（回环地址不要求密钥）。
+  // 旧写法在这里还带着 `aiPreset === "ollama"` 的特判，且与 AiChat / 哨兵那两处口径不一致。
+  const active = activeRef();
+  const configured = !!active;
   const run = async () => {
+    if (!active) return; // 按钮在 !configured 时是禁用的；这里再兜一层，免得拿非空断言当保证
     setSt({ status: "testing", msg: "" });
     const t0 = Date.now();
     try {
       await invoke("ai_agent_turn", {
         reqId: crypto.randomUUID(),
-        baseUrl: cleanBaseUrl(settings.aiBaseUrl),
-        apiKey: cleanApiKey(settings.aiApiKey),
-        model: settings.aiModel,
-        format: settings.aiFormat,
-        proxy: settings.aiProxy || null,
-        noProxy: settings.aiNoProxy || null,
+        // P110-B1：ping 也走同一个构造点，测试连接与真实请求不可能再配得不一样
+        ...aiWireArgs(active),
         messages: [{ role: "user", content: "ping" }],
         tools: [],
       });
@@ -293,6 +304,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const [tab, setTab] = useState(initialTab ?? "general");
   const [msg, setMsg] = useState("");
   const [showKey, setShowKey] = useState(false);
+  // P110-B1：AI 页那几条输入框现在编辑的是**档案表里选中的那一对**（`editingPair` 故意不做
+  // "可用"过滤，否则密钥空着时就没人能填进去）。订阅它，改完立刻反映到界面上。
+  const aiProfilesSnap = useAiProfiles();
+  const { provider: editProvider, model: editModel } = editingPair(aiProfilesSnap);
   const [mcpCliPath, setMcpCliPath] = useState(() => localStorage.getItem("vs.mcpCliPath") ?? "");
   const mcpSt = useSyncExternalStore(mcpServer.subscribe, mcpServer.getStatus);
   const jobSt = useSyncExternalStore(jobCenter.subscribe, jobCenter.getSnapshot);
@@ -831,18 +846,12 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               <>
                 <div className="set-group-title">{t("set.ai.grp.preset")}</div>
                 {row(t("set.ai.preset"), (
+                  // P110-B1：这枚从"选预设 = 覆盖三个字段"改成"套模板到当前这家"。
+                  // 密钥继续不动（P108 定的），而档案表成型后它也不再是"唯一的当前配置"。
                   <select
                     className="input"
-                    value={settings.aiPreset}
-                    onChange={(e) => {
-                      const p = e.target.value as AiPreset;
-                      patch({
-                        aiPreset: p,
-                        aiBaseUrl: AI_PRESETS[p].baseUrl,
-                        aiModel: AI_PRESETS[p].model,
-                        aiFormat: p === "anthropic" ? "anthropic" : "chat",
-                      });
-                    }}
+                    value={templateOf(editProvider.baseUrl)}
+                    onChange={(e) => applyTemplate(e.target.value as AiPreset)}
                   >
                     {(Object.keys(AI_PRESETS) as AiPreset[]).map((k) => (
                       <option key={k} value={k}>
@@ -858,9 +867,9 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       className="input"
                       style={{ width: 280 }}
                       type={showKey ? "text" : "password"}
-                      value={settings.aiApiKey}
-                      placeholder={settings.aiPreset === "ollama" ? tx("本地 Ollama 无需 Key", "Local Ollama needs no key") : AI_PRESETS[settings.aiPreset].keyHint ?? "sk-…"}
-                      onChange={(e) => patch({ aiApiKey: e.target.value })}
+                      value={editProvider.apiKey}
+                      placeholder={providerNeedsKey(editProvider) ? keyHintFor(editProvider.baseUrl) ?? "sk-…" : tx("本地服务（回环地址）无需 Key", "Local services on a loopback address need no key")}
+                      onChange={(e) => patchEditingProvider({ apiKey: e.target.value })}
                     />
                     <button
                       className="ai-key-eye"
@@ -875,25 +884,25 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   <input
                     className="input"
                     style={{ width: 280 }}
-                    value={settings.aiModel}
-                    placeholder={AI_PRESETS[settings.aiPreset].model}
-                    onChange={(e) => patch({ aiModel: e.target.value })}
+                    value={editModel.model}
+                    placeholder={tx("发给 API 的模型名", "model id sent to the API")}
+                    onChange={(e) => patchEditingModel({ model: e.target.value })}
                   />
                 ), t("set.ai.model.tip"))}
                 {row(t("set.ai.baseUrl"), (
                   <input
                     className="input"
                     style={{ width: 280 }}
-                    value={settings.aiBaseUrl}
+                    value={editProvider.baseUrl}
                     placeholder="https://api.deepseek.com"
-                    onChange={(e) => patch({ aiBaseUrl: e.target.value })}
+                    onChange={(e) => patchEditingProvider({ baseUrl: e.target.value })}
                   />
                 ), t("set.ai.baseUrl.tip"))}
                 {row(t("set.ai.format"), (
                   <select
                     className="input"
-                    value={settings.aiFormat}
-                    onChange={(e) => patch({ aiFormat: e.target.value as AiFormat })}
+                    value={editProvider.format}
+                    onChange={(e) => patchEditingProvider({ format: e.target.value as AiFormat })}
                   >
                     {AI_FORMATS.map((f) => (
                       <option key={f.key} value={f.key}>

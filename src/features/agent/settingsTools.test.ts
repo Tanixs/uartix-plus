@@ -7,13 +7,19 @@ vi.stubGlobal("localStorage", { getItem: (k: string) => storage.get(k) ?? null, 
 const { settingsAdapter, settingsRevision, undoSettingsDetailed, validatePatch, readSettings } = await import("./settingsTools");
 const { SETTINGS_SCHEMA, agentWritableKeys } = await import("../settings/settingsSchema");
 const settings = await import("../settings/settingsStore");
+const { patchEditingProvider } = await import("../ai/aiProfileStore");
 import type { ToolCall } from "./types";
 
 const ctx = { source: "local_agent" as const, runId: "t", signal: new AbortController().signal, scope: "create" as const };
 
 function call(name: string, args: unknown): ToolCall { return { callId: `c-${name}-${Math.random()}`, name, arguments: JSON.stringify(args) }; }
 
-beforeEach(() => { settings.patch({ zoom: 100, theme: "begonia", aiApiKey: "", mcpToken: "" }); });
+// P110-B1：`aiApiKey` 不再是 Settings 键（搬进 aiProfileStore 的供应商表），
+// 这里只剩 `mcpToken` 一枚 schema 内的 secret 可当样本；档案表的密钥另有一条"不许从 settings_read 出境"的断言。
+beforeEach(() => {
+  settings.patch({ zoom: 100, theme: "begonia", mcpToken: "" });
+  patchEditingProvider({ apiKey: "" });
+});
 
 it("describe: full schema, no values, no secrets, writableKeys derived", async () => {
   const r = await settingsAdapter.execute(call("settings_describe", {}), ctx);
@@ -27,12 +33,14 @@ it("describe: full schema, no values, no secrets, writableKeys derived", async (
 });
 
 it("read: secrets masked to configured booleans, revision present", async () => {
-  settings.patch({ aiApiKey: "sk-secret-value", mcpToken: "tok1234567890abcdef" });
+  settings.patch({ mcpToken: "tok1234567890abcdef" });
+  // P110-B1：供应商表里的密钥同样不许出境 —— 这张表**故意**不进 SETTINGS_SCHEMA，
+  // 因为 `readSettings()` 是按 schema 逐键吐值的，表进去就是原样吐给模型。
+  patchEditingProvider({ apiKey: "sk-secret-value" });
   const r = await settingsAdapter.execute(call("settings_read", {}), ctx);
   const raw = JSON.stringify(r.data);
   expect(raw).not.toContain("sk-secret-value");
   expect(raw).not.toContain("tok1234567890abcdef");
-  expect((r.data as Record<string, unknown>).aiApiKey).toEqual({ configured: true });
   expect(typeof r.revision).toBe("string");
 });
 
@@ -93,7 +101,9 @@ it("validatePatch and readSettings are pure exports for host policy reuse", () =
   expect(validatePatch({ [protectedKey!.key]: true })).toEqual({
     ok: false, reason: `protected_or_secret_setting:${protectedKey!.key}`,
   });
-  expect(readSettings().aiApiKey).toEqual({ configured: false });
+  // P110-B1：`aiApiKey` 已不是 Settings 键 —— 契约从"吐出来时要掩成 {configured:false}"
+  // 变成"这条通路上根本不该出现这个键"（供应商表不进 schema，见 aiProfileStore 顶部注释）。
+  expect(Object.keys(readSettings())).not.toContain("aiApiKey");
   expect(agentWritableKeys().length).toBeGreaterThan(5);
 });
 
