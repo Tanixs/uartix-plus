@@ -118,6 +118,19 @@ function thinPatchHint(count: number): string | undefined {
     : undefined;
 }
 
+/**
+ * P110-A 3-D：把"被守卫撤了"翻译成下一步可执行的话，而不是只丢一个 dropped 数组。
+ * 回执必须点名到键：模型看不见是哪枚键、为什么，就会原样再发一遍。
+ */
+function droppedHint(dropped: { key: string; reason: string }[]): string {
+  return (
+    `其中 ${dropped.length} 项在施加后被表面阶梯守卫撤回（值能写进 CSS，但会把界面弄坏）：` +
+    dropped.map((d) => `${d.key} — ${d.reason}`).join("；") +
+    "。--raise-1/--raise-2 是从 --bg-panel/--text **派生**的抬升档：通常该改基础档(--bg/--bg-panel/--text)让派生自己算，" +
+    "只有确实要单独指定浮起色时才写它们，且必须与这套主题的正文色同向、与面板差保持在 24 L* 以内"
+  );
+}
+
 export const APPEARANCE_PRESETS: AppearancePreset[] = [
   {
     id: "motion-calm",
@@ -286,8 +299,17 @@ async function themePatch(parsed: Record<string, unknown>, ctx: ToolCtx): Promis
   }
   const beforeDiff = diffAgainstCurrent(tokens as Record<string, string>);
   const r = patchTokens(tokens as Record<string, string>);
-  if (!r.ok) return notExecuted(callId, r.err ?? "patch_failed");
+  const dropped = r.dropped ?? [];
+  if (!r.ok) {
+    return notExecuted(callId, r.err ?? "patch_failed", {
+      ...(dropped.length ? { dropped, hint: droppedHint(dropped) } : {}),
+    });
+  }
   const count = r.applied?.length ?? 0;
+  // 撤回掉的键不能出现在"旧 → 新"里：那行写着新值，而新值根本没上屏（§8-37② 同族——回执与画面不一致）
+  const kept = new Set(r.applied ?? []);
+  const thin = thinPatchHint(count);
+  const warn = dropped.length ? droppedHint(dropped) : thin;
   return {
     callId,
     ok: true,
@@ -295,8 +317,10 @@ async function themePatch(parsed: Record<string, unknown>, ctx: ToolCtx): Promis
     data: {
       applied: r.applied,
       changedCount: count,
-      diff: beforeDiff.slice(0, 24),
-      ...(thinPatchHint(count) ? { warn: thinPatchHint(count) } : {}),
+      diff: beforeDiff.filter((l) => kept.has(l.slice(0, l.indexOf(":")))).slice(0, 24),
+      ...(dropped.length ? { dropped } : {}),
+      ...(r.warned?.length ? { surfaceNotes: r.warned } : {}),
+      ...(warn ? { warn } : {}),
       overlay: getOverrides(),
       // P90 E1：覆盖层只是预览，默认收尾=落成已启用插件（用户可一键停用）
       next: "把改动清单讲给用户听；满意后调用 save_theme_extension 保存为已启用插件（除非用户要求只看临时效果）",
@@ -317,7 +341,13 @@ async function themePreset(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
   const vars = { ...(preset.vars ?? {}), ...(preset.derive ? preset.derive() : {}) };
   const beforeDiff = diffAgainstCurrent(vars);
   const r = patchTokens(vars);
-  if (!r.ok) return notExecuted(callId, r.err ?? "patch_failed");
+  const dropped = r.dropped ?? [];
+  if (!r.ok) {
+    return notExecuted(callId, r.err ?? "patch_failed", {
+      ...(dropped.length ? { dropped, hint: droppedHint(dropped) } : {}),
+    });
+  }
+  const kept = new Set(r.applied ?? []);
   return {
     callId,
     ok: true,
@@ -327,7 +357,9 @@ async function themePreset(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
       desc: preset.desc,
       applied: r.applied,
       changedCount: r.applied?.length ?? 0,
-      diff: beforeDiff.slice(0, 24),
+      diff: beforeDiff.filter((l) => kept.has(l.slice(0, l.indexOf(":")))).slice(0, 24),
+      ...(dropped.length ? { dropped, warn: droppedHint(dropped) } : {}),
+      ...(r.warned?.length ? { surfaceNotes: r.warned } : {}),
       overlay: getOverrides(),
       next: "把改动清单讲给用户听；满意后调用 save_theme_extension 保存为已启用插件",
     },
@@ -522,7 +554,7 @@ export const appearanceToolEntries: AgentToolEntry[] = [
     effect: "config_write",
     domain: "config",
     provenance: HOST,
-    description: `Apply appearance token overrides (session-level preview; undoable). Needs the ${DOMAIN_ZH.config} authorization. A style request is NOT satisfied by 1-2 tokens: cover surface (--bg/--bg-panel/--bg-inset), border (--border/--border-soft), text (--text/--text-dim) and accent together, or prefer theme_preset which derives a coherent set from the live theme. After the user can see the result, call save_theme_extension to persist it as an enabled plugin unless they asked for a temporary preview. Args: { tokens: Record<string,string> } over whitelist: ${APPEARANCE_TOKENS.join(" ")}. Unit tokens accept <n>px/<n>ms; --ease accepts cubic-bezier(...) or named curves; unknown/invalid tokens reject the whole patch atomically.`,
+    description: `Apply appearance token overrides (session-level preview; undoable). Needs the ${DOMAIN_ZH.config} authorization. A style request is NOT satisfied by 1-2 tokens: cover surface (--bg/--bg-panel/--bg-inset), border (--border/--border-soft), text (--text/--text-dim) and accent together, or prefer theme_preset which derives a coherent set from the live theme. After the user can see the result, call save_theme_extension to persist it as an enabled plugin unless they asked for a temporary preview. Args: { tokens: Record<string,string> } over whitelist: ${APPEARANCE_TOKENS.join(" ")}. Unit tokens accept <n>px/<n>ms; --ease accepts cubic-bezier(...) or named curves; unknown/invalid tokens reject the whole patch atomically. Two layers of validation: format is atomic (whole patch rejected), but the surface ladder is checked AFTER it lands and drops only the offending keys — --raise-1/--raise-2 are DERIVED from --bg-panel/--text, so prefer editing the base tokens and let the derivation compute the elevation; if you must write them they have to stay on the same side as --text and within 24 L* of the panel. Read \`dropped\`/\`surfaceNotes\` in the receipt and fix those keys instead of resending the same values.`,
     parameters: { type: "object", properties: { tokens: { type: "object" } }, required: ["tokens"], additionalProperties: false },
     summarize: (a) => {
       const tokens = a.tokens;

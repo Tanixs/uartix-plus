@@ -350,6 +350,206 @@ export function baselineLabel(scheme: ThemeScheme): string {
   return scheme === "dark" ? "内置 dark（暗底）" : "内置 light（亮底）";
 }
 
+/* ================= P110-A：表面阶梯的**语义**校验（值能写进去 ≠ 写进去不弄坏界面） ================= */
+
+/** 解析后的颜色：r/g/b 取 0~255，a 取 0~1 */
+export interface Rgba {
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+/** CIE L*（0~100，感知均匀）。表面档差必须用它，WCAG 比在近黑区饱和到分不出 8 档。 */
+export function lstarOf(c: Rgba): number {
+  const lin = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const y = 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+}
+
+/**
+ * WCAG 对比度比（1~21）。这里只用于**提醒**：撤不撤由用户定（见 judgeSurfaceLadder 那段注释）。
+ * 与 `.tools/check-contrast.cjs` 里那份是同一算法 —— 那份门禁跑在 node 里、引不了 TS，
+ * 两个实现对同一组内置真值钉在 themeCore.test 里，谁漂了就红。
+ */
+export function contrastRatio(a: Rgba, b: Rgba): number {
+  const lin = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const Y = (c: Rgba) => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  const [hi, lo] = Y(a) >= Y(b) ? [Y(a), Y(b)] : [Y(b), Y(a)];
+  return (hi + 0.05) / (lo + 0.05);
+}
+/** 提醒线：与门禁给内置主题的那条同数（4.5:1）。低于它只出声，不撤 */
+export const TEXT_CONTRAST_WARN = 4.5;
+/** "几乎读不出字"的那条线：只用来把话说明白，判定仍然只到提醒 */
+export const TEXT_CONTRAST_FLOOR = 2.0;
+
+/** 探针要读回的键：四档基础面 + 两档派生抬升 + 方向参照的正文色 */
+export const SURFACE_PROBE_KEYS = [
+  "--bg",
+  "--bg-panel",
+  "--bg-inset",
+  "--bg-titlebar",
+  "--raise-1",
+  "--raise-2",
+  "--text",
+] as const;
+export type SurfaceProbeKey = (typeof SURFACE_PROBE_KEYS)[number];
+
+/** 参与"哪个键不能透"的抬升档（玻璃配方只动基础档，见 appearanceTools 的 glassVars） */
+export const RAISE_KEYS = ["--raise-1", "--raise-2"] as const;
+/** 基础面档（alpha 在这里是**特性**：内置玻璃配方就把 --bg-panel 写成 0.72） */
+export const BASE_SURFACE_KEYS = ["--bg", "--bg-panel", "--bg-inset", "--bg-titlebar"] as const;
+
+/** 抬升档与面板档的最大档差（L*）。**这个数是量出来的不是拍的**：八枚内置主题的
+ * `--raise-1/--raise-2` 实测 |Δ| 分别在 7.9~8.1 与 13.5~13.8（暗底往亮抬、亮底往暗退）。
+ * 上限放到内置最大值的近两倍，留出"这套主题想要更强层级"的余量，又远低于
+ * "暗色主题里写一枚接近白的 --raise-1"（用户 2026-09-27 图 3 那五处白底就是它，ΔL* ≈ 80）。
+ */
+export const RAISE_MAX_DELTA_L = 24;
+/** 低于此值等于"抬了但看不出来"——只提醒，不撤（撤了就是替用户做审美决定） */
+export const RAISE_MIN_DELTA_L = 1.2;
+/** 基础档之间"倒置"的判定容差：两档几乎同色是内置 dark 的既有做法，不算违规 */
+export const LADDER_INVERSION_TOLERANCE_L = 0.3;
+
+export interface SurfaceIssue {
+  key: string;
+  reason: string;
+  /** true = 这条会把界面弄坏，写入方应把该键撤回；false = 原样生效但照实说 */
+  fatal: boolean;
+}
+
+/**
+ * 表面阶梯判定：输入是**施加之后**读回的实际颜色（不是 CSS 源码字符串）。
+ *
+ * 为什么不在字符串层判（详设 §3′.1）：主题可以把 `--raise-1` 写成
+ * `color-mix(in srgb, var(--bg-panel) 60%, transparent)` 或任何只有浏览器算得出的形式，
+ * 字符串层面判不出它最终是不是半透明、是不是比面板更亮。所以这里只吃已解析的 RGBA，
+ * 谁来解析（DOM 探针 / 门禁里的静态求值器）是调用方的事。
+ *
+ * 只判三件"确实会弄坏界面"的事，其余一律 warn（用户 2026-09-27 裁决：别把能力限太死）：
+ *  ① 抬升档必须不透明——半透明的"浮起层"会透出下面的内容，就是漏底那一族；
+ *  ② 抬升方向必须跟正文色同侧（暗底往亮抬、亮底往暗退），反了就把层级读成了凹陷；
+ *  ③ 抬升幅度不得超出 RAISE_MAX_DELTA_L，超了就不是"抬一档"而是换了一枚颜色。
+ */
+export function judgeSurfaceLadder(
+  colors: Partial<Record<SurfaceProbeKey, Rgba | null>>,
+): SurfaceIssue[] {
+  const out: SurfaceIssue[] = [];
+  const get = (k: SurfaceProbeKey) => colors[k] ?? null;
+  const panel = get("--bg-panel");
+  const text = get("--text");
+
+  for (const k of RAISE_KEYS) {
+    const v = get(k);
+    if (!v) continue;
+    if (v.a < 0.999) {
+      out.push({
+        key: k,
+        reason: `抬升档不能半透明（实测 alpha=${v.a.toFixed(2)}）：半透明的浮起层会透出下面的内容。要半透明请用 --accent-soft / --scrim`,
+        fatal: true,
+      });
+      continue;
+    }
+    if (!panel || !text) continue;
+    const want = Math.sign(lstarOf(text) - lstarOf(panel));
+    const d = lstarOf(v) - lstarOf(panel);
+    // 顺序要紧：先判"根本没动"，再判方向。`Δ=0` 的符号是 0，拿它去比方向会把
+    // "与面板同色"误判成"方向反了"而撤掉一整枚本来无害的值（第一版就是这么错的，测试抓住了）。
+    if (Math.abs(d) < RAISE_MIN_DELTA_L) {
+      out.push({ key: k, reason: `与面板几乎同色（ΔL*=${d.toFixed(1)}）：抬升看不出来，等于没抬`, fatal: false });
+    } else if (want !== 0 && Math.sign(d) !== want) {
+      out.push({
+        key: k,
+        reason: `方向反了：这套主题的正文色比面板${want > 0 ? "亮" : "暗"}，抬升档却往${d > 0 ? "亮" : "暗"}走（ΔL*=${d.toFixed(1)}）——层级会被读成凹陷`,
+        fatal: true,
+      });
+    } else if (Math.abs(d) > RAISE_MAX_DELTA_L) {
+      out.push({
+        key: k,
+        reason: `抬过头：与面板差 ΔL*=${d.toFixed(1)}，超过 ${RAISE_MAX_DELTA_L}（内置八枚实测 7.9~13.8）——这不是"抬一档"，是把这块底换成了另一个颜色`,
+        fatal: true,
+      });
+    }
+  }
+
+  const r1 = get("--raise-1");
+  const r2 = get("--raise-2");
+  // 一档已经判死时不再报"两档倒序"：那一档马上要被撤回，拿它当参照只会多一条噪音回执
+  const raiseFatal = out.some((i) => i.fatal && (i.key === "--raise-1" || i.key === "--raise-2"));
+  if (panel && r1 && r2 && !raiseFatal) {
+    const d1 = Math.abs(lstarOf(r1) - lstarOf(panel));
+    const d2 = Math.abs(lstarOf(r2) - lstarOf(panel));
+    if (d2 < d1) {
+      out.push({
+        key: "--raise-2",
+        reason: `二级抬升比一级还弱（|Δ|=${d2.toFixed(1)} < ${d1.toFixed(1)}）：两档阶梯倒置，卡片与弹层会分不出层`,
+        fatal: false,
+      });
+    }
+  }
+
+  for (const k of BASE_SURFACE_KEYS) {
+    const v = get(k);
+    if (v && v.a < 0.999) {
+      out.push({
+        key: k,
+        reason: `基础面是半透明的（alpha=${v.a.toFixed(2)}）：滚动口/工具条这类不画自己的底的区域会透出背板。内置玻璃配方就是这种值，所以只提醒不撤`,
+        fatal: false,
+      });
+    }
+  }
+
+  /* 正文色压在四档表面上够不够 readable。**只提醒**：
+     门禁对八枚内置主题要求 4.5:1（那条不减），但 AI/插件写的值当场判死就是"变严"，
+     需要用户单独点头（红线：任何变严都要先说清）。这里先把话说到位，撤不撤由用户决定。
+     `TEXT_CONTRAST_FLOOR` 以下的话术与门禁那条同一口径。 */
+  for (const k of BASE_SURFACE_KEYS) {
+    const surf = get(k);
+    if (!surf || !text) continue;
+    if (surf.a < 0.999 || text.a < 0.999) continue; // 半透明谈不上对比度，别拿合成前的数唬人
+    const r = contrastRatio(text, surf);
+    if (r < TEXT_CONTRAST_WARN) {
+      out.push({
+        key: k,
+        reason: `正文色压在 ${k} 上只有 ${r.toFixed(2)}:1${r < TEXT_CONTRAST_FLOOR ? "（几乎读不出字）" : "（低于门禁给内置主题定的 4.5:1）"}：这一档表面会看不清。已照常生效，要不要撤由用户定`,
+        fatal: false,
+      });
+    }
+  }
+  const inset = get("--bg-inset");
+  const shell = get("--bg-titlebar");
+  const canvas = get("--bg");
+  if (panel && inset && shell && canvas) {
+    const seq: [string, number][] = [
+      ["--bg-inset", lstarOf(inset)],
+      ["--bg-titlebar", lstarOf(shell)],
+      ["--bg", lstarOf(canvas)],
+      ["--bg-panel", lstarOf(panel)],
+    ];
+    const bad: string[] = [];
+    // 容差 0.3 L*：内置 dark 的壳档与凹档**故意**几乎同色（`themes/dark.css` 里那条注释
+    // 写着"与凹档几乎同色——即页签条与外壳同色，这是 VS Code 暗色的做法，可接受"）。
+    // 判"相等即违规"会给暗色用户的每一次 patch 塞一条假提醒。
+    for (let i = 1; i < seq.length; i++) {
+      if (seq[i][1] < seq[i - 1][1] - LADDER_INVERSION_TOLERANCE_L) bad.push(`${seq[i - 1][0]}>${seq[i][0]}`);
+    }
+    if (bad.length) {
+      out.push({
+        key: "--bg-panel",
+        reason: `表面阶梯倒置（${bad.join("、")}）：凹<壳<画布<面板 这条不成立，外壳会向前浮而不是向后退。只提醒——整套阶梯是四枚键的事，逐键撤会撤出更怪的中间态`,
+        fatal: false,
+      });
+    }
+  }
+  return out;
+}
+
 /**
  * 画布类组件判断"当前是不是暗色"的**唯一口径**：读 `documentElement.dataset.scheme`，
  * 那是 `applyStyleExts()` 按 S4 三层优先序算完写下的一个投影。

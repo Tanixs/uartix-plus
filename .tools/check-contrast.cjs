@@ -147,6 +147,163 @@ for (const f of files) {
 }
 console.log(rows.join("\n"));
 
+/* ---- P110-A：表面阶梯（把这份门禁从"只认 #hex"扩到能算 rgb()/rgba()/color-mix(in srgb)） ----
+   判据的**真相**在 `src/styles/themeCore.ts` 的 `judgeSurfaceLadder()`——运行时撤回坏值用的就是它。
+   `.cjs` 引不了 TS，所以这里按**同一组数字**复刻，数字是从 themeCore.ts 里抠出来的（:42 那种
+   从源码里解析 APPEARANCE_TOKENS 的既有做法），这份文件里不写第二份常量。
+   改判据时两处一起改，下面打印的八枚内置实测阶梯会跟着动，那就是它的回归证据。
+
+   为什么门禁还要再判一遍（运行时不是已经守住了吗）：运行时守卫只管 **AI 覆盖层**那一条写入路径；
+   仓库里这八枚内置主题文件是编译期资产，走的是 `?raw` 解析 → 合成器，谁都能手改一行
+   `--raise-1: #fff` 把它弄坏而没有任何一处会响。 */
+const coreSrc = fs.readFileSync(path.join(__dirname, "..", "src", "styles", "themeCore.ts"), "utf8");
+function constFromCore(name) {
+  const m = new RegExp(`export const ${name} = ([0-9.]+);`).exec(coreSrc);
+  if (!m) {
+    console.log(`FAIL: cannot parse ${name} from themeCore.ts（阶梯判据的数字必须只有一个来源）`);
+    return NaN;
+  }
+  return Number(m[1]);
+}
+const RAISE_MAX_DELTA_L = constFromCore("RAISE_MAX_DELTA_L");
+const RAISE_MIN_DELTA_L = constFromCore("RAISE_MIN_DELTA_L");
+
+/** CSS 源码里的**原始值**表（不再只挑 #hex）：按选择器收集 `--x: value;` */
+function rawVarBlocks(src, selector) {
+  const out = {};
+  const needle = selector + " {";
+  let at = -1;
+  while ((at = src.indexOf(needle, at + 1)) >= 0) {
+    const open = src.indexOf("{", at);
+    const close = src.indexOf("}", open);
+    if (close < 0) continue;
+    for (const m of src.slice(open + 1, close).matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
+      out[m[1]] = m[2].trim();
+    }
+  }
+  return out;
+}
+const themeCssSrc = fs.readFileSync(baseCss, "utf8");
+const rootDarkVars = rawVarBlocks(themeCssSrc, ":root");
+const rootLightVars = rawVarBlocks(themeCssSrc, ':root[data-scheme="light"]');
+
+/** 颜色 → {r,g,b,a}（a 取 0~1）。认不出返回 null：**不猜颜色** */
+function toRgba(v, env, depth = 0) {
+  if (depth > 8 || !v) return null;
+  const s = String(v).trim();
+  if (/^transparent$/i.test(s)) return { r: 0, g: 0, b: 0, a: 0 };
+  let m = /^#([0-9a-fA-F]{3})$/.exec(s);
+  if (m) {
+    const h = m[1].split("").map((c) => c + c).join("");
+    return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16), a: 1 };
+  }
+  m = /^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$/.exec(s);
+  if (m) {
+    return {
+      r: parseInt(m[1].slice(0, 2), 16),
+      g: parseInt(m[1].slice(2, 4), 16),
+      b: parseInt(m[1].slice(4, 6), 16),
+      a: m[2] ? parseInt(m[2], 16) / 255 : 1,
+    };
+  }
+  m = /^rgba?\(\s*([\d.]+)(%?)[,\s]+([\d.]+)(%?)[,\s]+([\d.]+)(%?)(?:[,/]\s*([\d.]+)(%?)?)?\s*\)$/i.exec(s);
+  if (m) {
+    const chan = (v, pct) => (pct === "%" ? (Number(v) * 255) / 100 : Number(v));
+    let a = 1;
+    if (m[7] !== undefined) a = m[8] === "%" ? Number(m[7]) / 100 : Number(m[7]);
+    return { r: chan(m[1], m[2]), g: chan(m[3], m[4]), b: chan(m[5], m[6]), a };
+  }
+  m = /^var\(\s*(--[\w-]+)\s*(?:,\s*([\s\S]*))?\)$/.exec(s);
+  if (m) {
+    const inner = env && env[m[1]];
+    const byName = inner ? toRgba(inner, env, depth + 1) : null;
+    return byName ?? (m[2] ? toRgba(m[2], env, depth + 1) : null);
+  }
+  m = /^color-mix\(\s*in\s+srgb\s*,\s*([\s\S]+)\)$/i.exec(s);
+  if (m) {
+    const parts = [];
+    let d = 0, cur = "";
+    for (const ch of m[1]) {
+      if (ch === "(") d++;
+      if (ch === ")") d--;
+      if (ch === "," && d === 0) { parts.push(cur); cur = ""; continue; }
+      cur += ch;
+    }
+    parts.push(cur);
+    if (parts.length < 2) return null;
+    const split = (tok) => {
+      const mm = /^(.*?)\s+(-?[\d.]+)%$/.exec(tok.trim());
+      return mm ? [mm[1], Number(mm[2])] : [tok.trim(), null];
+    };
+    const [ta, ra] = split(parts[0]);
+    const [tb, rb] = split(parts[1]);
+    const A = toRgba(ta, env, depth + 1);
+    const B = toRgba(tb, env, depth + 1);
+    if (!A || !B) return null;
+    const f = ra !== null ? ra : rb !== null ? 100 - rb : null;
+    if (f === null) return null;
+    const p = f / 100;
+    return { r: A.r * p + B.r * (1 - p), g: A.g * p + B.g * (1 - p), b: A.b * p + B.b * (1 - p), a: A.a * p + B.a * (1 - p) };
+  }
+  return null;
+}
+function lstarRgb(c) {
+  const lin = (v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const y = 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+  return y > 0.008856 ? 116 * Math.cbrt(y) - 16 : 903.3 * y;
+}
+
+{
+  const PROBE = ["--bg", "--bg-panel", "--bg-inset", "--bg-titlebar", "--raise-1", "--raise-2", "--text"];
+  let unresolved = 0;
+  let ladderFails = 0;
+  const lines = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(dir, f), "utf8");
+    const scheme = (/color-scheme:\s*(\w+)/.exec(src) || [])[1] || "dark";
+    const own = rawVarBlocks(src, `:root[data-theme="${f.replace(".css", "")}"]`);
+    // 层叠顺序与运行时一致：theme.css 的派生块 → 亮色覆写 → 主题文件自己（inline 变量压过样式表）
+    const env = { ...rootDarkVars, ...(scheme === "light" ? rootLightVars : {}), ...own };
+    const c = {};
+    for (const k of PROBE) {
+      c[k] = toRgba(env[k], env);
+      if (env[k] && !c[k]) unresolved++;
+    }
+    const name = f.replace(".css", "");
+    const L = (k) => (c[k] ? lstarRgb(c[k]) : NaN);
+    const bad = [];
+    for (const k of ["--raise-1", "--raise-2"]) {
+      if (!c[k] || !c["--bg-panel"] || !c["--text"]) continue;
+      if (c[k].a < 0.999) bad.push(`${k} 半透明(alpha=${c[k].a.toFixed(2)})`);
+      const want = Math.sign(L("--text") - L("--bg-panel"));
+      const d = L(k) - L("--bg-panel");
+      // 与 themeCore 同一顺序：先"根本没抬"，再方向，再幅度（Δ=0 的符号是 0，比方向会误判成反向）
+      if (Math.abs(d) < RAISE_MIN_DELTA_L) bad.push(`${k} 与面板同档(ΔL*=${d.toFixed(1)})`);
+      else if (want !== 0 && Math.sign(d) !== want) bad.push(`${k} 方向反了(ΔL*=${d.toFixed(1)}, 应为 ${want > 0 ? "往亮" : "往暗"})`);
+      else if (Math.abs(d) > RAISE_MAX_DELTA_L) bad.push(`${k} 抬过头(ΔL*=${d.toFixed(1)} > ${RAISE_MAX_DELTA_L})`);
+    }
+    for (const k of ["--bg", "--bg-panel", "--bg-inset", "--bg-titlebar"]) {
+      if (c[k] && c[k].a < 0.999) bad.push(`${k} 表面含 alpha(${c[k].a.toFixed(2)})`);
+    }
+    if (bad.length) ladderFails++;
+    lines.push(
+      `${name.padEnd(8)} ${scheme.padEnd(5)} inset=${L("--bg-inset").toFixed(1)} shell=${L("--bg-titlebar").toFixed(1)} canvas=${L("--bg").toFixed(1)} panel=${L("--bg-panel").toFixed(1)} raise1=${L("--raise-1").toFixed(1)}(${(L("--raise-1") - L("--bg-panel")).toFixed(1)}) raise2=${L("--raise-2").toFixed(1)}(${(L("--raise-2") - L("--bg-panel")).toFixed(1)}) ${bad.length ? "FAIL " + bad.join("; ") : "ok"}`,
+    );
+  }
+  console.log("\n-- P110-A 表面阶梯（L*，派生档按声明的 scheme 判） --");
+  console.log(lines.join("\n"));
+  if (unresolved) console.log(`note: ${unresolved} 个值这份门禁算不出（不是 CSS 引擎，认不出的形式一律跳过不猜）`);
+  if (ladderFails) {
+    console.log(`FAIL: ${ladderFails} 枚内置主题的派生表面阶梯不合格`);
+    fails += ladderFails;
+  } else {
+    console.log("OK: 内置主题的表面阶梯与抬升方向全部合格");
+  }
+}
+
 /* ---- P75 静态扫描：主题色背景必配文字色 ----
    事故形态（.plot-bar .btn.sm）：规则覆盖了背景（--accent 底）却没同时给 color，
    文字色落到继承的灰字上 → 主题色底 + 灰字（实测 1.11:1）。

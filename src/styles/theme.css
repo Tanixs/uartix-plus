@@ -713,7 +713,7 @@ body {
    我们只给它描边形状（见下方 base-select 区）。
    line-height 是 base-select 带出来的第二个问题的解：它把 select 改成内部 button 布局后，
    12px 文字不再上下居中，显式给一行高把它钉回内容盒中线。 */
-select.input {
+select {
   appearance: none;
   -webkit-appearance: none;
   /* 只留正常内距：padding 是 flex 容器的内容边界，箭头进不去，留 18px 就等于把箭头钉在
@@ -731,7 +731,7 @@ select.input {
    ⇒ 用户裁定「接受那颗 ▼，换掉原生灰底弹层」，于是上面我们的描边箭退到 @supports-not 回落档。
    这些规则刻意放在 BASE 区之外：C 门钉的是"基元层基础选择器 ≤2 段"（为 style_patch 留台阶），
    而 `select.input option` 是 3 段——弹层列表不是可被 AI 单类覆写的基元，不该占那个台阶。 */
-select.input {
+select {
   appearance: base-select;
 }
 
@@ -739,7 +739,7 @@ select.input {
    `appearance: base-select` **必须在这里再写一遍**：MDN 明写 select 与 ::picker(select)
    两处都要设，只设 select 的话按钮换皮、弹层仍按系统原生画——上一轮就这么翻的车
    （我量到 ::picker 的计算值是白底圆角双层影就当成了"已生效"，计算值正确不等于真那么画）。 */
-select.input::picker(select) {
+select::picker(select) {
   appearance: base-select;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -755,7 +755,7 @@ select.input::picker(select) {
    这里改成 viewBox 0 0 12 8 + 折角撑满，盒多大箭就多大，位置不再靠猜余量。
    笔画 1.6/12 的比例对齐 icons.tsx 里 2.4/24 在 13px 上的实际粗细。
    颜色走 background-color 的 currentColor ⇒ 主题与 AI 改色自动跟随；mask 里的 stroke 只定形状。 */
-select.input::picker-icon {
+select::picker-icon {
   content: "";
   display: inline-block;
   width: 10px;
@@ -776,15 +776,15 @@ select.input::picker-icon {
   transition: rotate var(--dur-fast) var(--ease);
 }
 
-select.input:open::picker-icon {
+select:open::picker-icon {
   rotate: 180deg;
 }
 
-select.input option::checkmark {
+select option::checkmark {
   display: none;
 }
 
-select.input option {
+select option {
   padding: 5px 10px;
   border-radius: var(--radius-s);
   font-size: var(--fs-sm);
@@ -792,19 +792,19 @@ select.input option {
   color: var(--text);
 }
 
-select.input option:hover {
+select option:hover {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
 /* 选中项不再是引擎整条蓝底，而是菜单类一致的 accent 洗涤 + 加粗（对齐 .baud-menu button.on） */
-select.input option:checked {
+select option:checked {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
 }
 
-select.input optgroup {
+select optgroup {
   padding: 3px 10px 5px;
   font-size: var(--fs-xs);
   font-style: normal;
@@ -1224,6 +1224,11 @@ select.input optgroup {
   margin: 0;
   padding: 8px 10px;
   overflow: auto;
+  /* P110-A：滚动口自己画底。此前这层**完全不画背景**，靠祖先 `.console`（:1153）兜着——
+     而 `--bg-panel` 是可以被主题/玻璃配方写成带 alpha 的值，于是"透明滚动层 + 半透明背板"
+     在反复重绘时会一层层叠上来（用户 2026-09-27 报的"控制台越滚越白"）。
+     画的是**同一个 token**，所以视觉零变化；变的是这层有了自己的底色，不再借背板。 */
+  background: var(--bg-panel);
   font-family: var(--font-mono);
   font-size: var(--fs-sm);
   line-height: 1.55;
@@ -5622,6 +5627,9 @@ select.input optgroup {
 .pca-sel {
   all: unset;
   box-sizing: border-box;
+  /* P110-D：上面那行 `all: unset` 把 appearance 也打回 auto —— 不显式写回来，
+     这一支就还是原生灰底方角弹层（页签条那颗正是截图里漏掉的一个）。 */
+  appearance: base-select;
   height: 24px;
   max-width: 108px;
   padding: 0 4px;
@@ -5650,11 +5658,6 @@ select.input optgroup {
 .pca-sel:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-}
-
-.pca-sel option {
-  background: var(--bg-panel);
-  color: var(--text);
 }
 
 .pca-menu {
@@ -6680,6 +6683,9 @@ a > svg {
   align-items: center;
   gap: 6px;
   padding: 7px 10px;
+  /* P110-A 同类漏底：只靠祖先画布兜着的条带，主题把 --bg-panel 写成半透明时就透下去。
+     与 .console-view 同法——补的是同一个 token，视觉零变化。 */
+  background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
 }
@@ -10417,6 +10423,10 @@ body.pdrag-active *{cursor:grabbing !important;}
   align-items: center;
   gap: 8px;
   padding: 10px 14px 0;
+  /* P110-A 同类漏底（与 .console-view / .ai-toolbar 同法，同一个 token，视觉零变化）。
+     `.plg-filters` 原本也在这份清单里，实现时发现它不是表面：它是 `.plg-toolbar` 里面
+     那组 `role="tablist"` 胶囊的排布容器，给它画底等于多框一个盒子，故撤出。 */
+  background: var(--bg-panel);
 }
 .plg-search { flex: 1 1 auto; }
 /* P88d ⑤：批量选择工具条与行复选框 */
