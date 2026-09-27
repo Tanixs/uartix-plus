@@ -170,7 +170,12 @@ export function WorkspacePill({ onApplyPreset }: { onApplyPreset: (p: WorkspaceP
 /** 系统段（AI / 插件管理 / 设置 / 帮助）。
  *  R2 起它**不再参与 chromeStore 的排序与显隐**：这四颗是应用级身份件，
  *  住在身份栏，和"工具栏有哪几段"不是一个问题。B5 把它们塞进同一份名单，
- *  换来的是 chrome_set 能把它们排到工具栏中间去——而那里根本没有它们的位置。 */
+ *  换来的是 chrome_set 能把它们排到工具栏中间去——而那里根本没有它们的位置。
+ *
+ *  `fullPage`（P114-B，用户："ZCode 的标题栏隐藏了几个组件，只有左边的图标和右边的
+ *  关闭、置顶、最小化"）：整页铺满工作区时，这四颗收起来——它们每一颗都只会
+ *  "从这个全屏页跳到另一个全屏页"，留在原地只让那条 38px 看起来像工具栏。
+ *  这里是**不渲染**而不是 `display:none`：隐藏的话 Tab 键仍会经过四颗点不到的按钮。 */
 export function SystemButtons({
   onOpenSettings,
   onOpenHelp,
@@ -178,6 +183,7 @@ export function SystemButtons({
   onOpenLibrary,
   pinned,
   onTogglePin,
+  fullPage = false,
 }: {
   onOpenSettings: () => void;
   onOpenHelp: () => void;
@@ -188,12 +194,16 @@ export function SystemButtons({
    *  不是窗口本身，与那三颗不是一类。挪回应用动作组，`.tb-win` 只留 Windows 那三件。 */
   pinned: boolean;
   onTogglePin: () => void;
+  /** 有整页（目前就是设置页）正铺在工作区上 */
+  fullPage?: boolean;
 }) {
   useLocale(); // 这一组按钮的 title/aria 都是 tx() 出来的，切语言要有人重渲染
   /** 装包请求里"等你点"的那几条：正在跑的不算（催你做不了的事比不催更坏） */
   const awaitingBadge = pendingBadge(useAwaitingCount());
   return (
     <div className="toolbar-group cb-sys">
+      {!fullPage && (
+        <>
       <button className="tb-btn" title={tx("AI 助手 (Ctrl+K)", "AI Assistant (Ctrl+K)")} data-tour="ai" onClick={onOpenAi}>
         <IconSparkle />
       </button>
@@ -216,8 +226,10 @@ export function SystemButtons({
         <IconHelp />
       </button>
       {/* 置顶前一道小竖线（P105 反馈③"像以前一样"）：它标的是"左边四颗是去哪，
-          右边这颗是窗口的状态"，不是给分组画框。 */}
+          右边这颗是窗口的状态"，不是给分组画框。整页开着时四颗不在，这道线也不在。 */}
       <span className="tb-sep" aria-hidden="true" />
+        </>
+      )}
       <button
         className={`tb-btn${pinned ? " on" : ""}`}
         title={pinned ? t("title.unpin") : t("title.pin")}
@@ -243,11 +255,14 @@ export function IdentityBar({
   onOpenHelp,
   onOpenAi,
   onOpenLibrary,
+  fullPage = false,
 }: {
   onOpenSettings: () => void;
   onOpenHelp: () => void;
   onOpenAi: () => void;
   onOpenLibrary: () => void;
+  /** 有整页铺在工作区上（现只有设置页）：应用级入口收起，见 `SystemButtons` 那段 */
+  fullPage?: boolean;
 }) {
   const win = getWinSafe();
   const [maxed, setMaxed] = useState(false);
@@ -339,6 +354,7 @@ export function IdentityBar({
       </div>
       <span className="cb-drag" {...dragProps} />
       <SystemButtons
+        fullPage={fullPage}
         onOpenSettings={onOpenSettings}
         onOpenHelp={onOpenHelp}
         onOpenAi={onOpenAi}

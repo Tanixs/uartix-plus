@@ -48,6 +48,15 @@ import { t, tx, useLocale } from "../../i18n/strings";
 
 type Probe = "idle" | "testing" | "ok" | "err";
 
+/**
+ * 宿主错误到界面的路上不再截第二次：Rust 侧 `classify_error` 已经把上游响应体
+ * 裁到 220 字了，这里再 slice 一下，剩下的正好是要行动的那半句（P114-A）。
+ * 折行交给 `.msp-med/.msp-probe .set-hint`（见 theme.css）。
+ */
+function errText(e: unknown): string {
+  return String(e).replace(/^Error:\s*/i, "");
+}
+
 /** 中列那个点：几种说法各对应一件真事，不是一根装饰线 */
 function dotOf(p: AiProvider, probe: Probe, modelCount: number): { cls: string; tip: string } {
   if (probe === "ok") return { cls: "ok", tip: tx("上次试连通过（本页内的记忆，重启回到未测）", "Last test passed (kept only while this page is open)") };
@@ -215,38 +224,45 @@ function ModelRow({
 }) {
   const [probe, setProbe] = useState<"idle" | "run" | "ok" | "err">("idle");
   const [note, setNote] = useState("");
+  /** 成功那侧的证据（上游真回过的那几个字），放在 title 里，不占行内 */
+  const [proof, setProof] = useState("");
   const [armed, setArmed] = useState(false);
   const levels = thinkingLabels(m);
 
   /**
-   * 逐模型「测试」发一次真请求（max output 收到最小）。
-   * 它必须花钱：清单接口能证明"这家通不通"，证明不了"这个模型答不答"。
-   * 供应商级那个 `↻` 仍然是免费的 GET，两件事两个入口。
+   * 逐模型「测试」发一次真请求（P114-A）。它必须花钱：清单接口能证明"这家通不通"，
+   * 证明不了"这个模型答不答"。供应商级那个 `↻` 仍然是免费的 GET，两件事两个入口。
+   *
+   * 判定只能来自 `ai_probe` 的 Ok/Err。原来这里 await 的是 `ai_chat`，而它是流式命令：
+   * 签名 `Result<(), String>`，每条失败分支（连不上 / HTTP 4xx / 流断）都是
+   * `emit("ai:error", {reqId, msg})` 之后 `return Ok(())`。于是"命令返回了"被当成
+   * "模型应答了"——删掉密钥一个字母照样绿，后面那个 ms 还是货真价实的一个完整往返。
+   * 错误事件按 reqId 派发，而 `probe-<uuid>` 没人监听（chatStore 第一行就把它丢了），
+   * 所以上游那句 401 从来没有到过你眼前。
    */
   const test = async () => {
     // 同 P113-C 那条判据：需要密钥而没填，就别花额度去打一个必然失败的请求
     if (providerNeedsKey(provider) && !provider.apiKey.trim()) {
       setProbe("err");
+      setProof("");
       setNote(tx("先填这家的 API Key", "Fill in this provider's API key first"));
       return;
     }
     setProbe("run");
     setNote("");
+    setProof("");
     const t0 = Date.now();
     try {
-      await invoke("ai_chat", {
-        reqId: `probe-${crypto.randomUUID()}`,
-        ...aiWireArgs({ provider, model: m }),
-        temperature: m.temperature ?? 0,
-        messages: [{ role: "user", content: "ping" }],
-        thinking: false,
-        maxTokens: 16,
-      });
+      const excerpt = await invoke<string>("ai_probe", aiWireArgs({ provider, model: m }));
       setProbe("ok");
       setNote(`${Date.now() - t0}ms`);
+      setProof(excerpt.trim()
+        ? tx(`它回的是：「${excerpt}」`, `Its reply: “${excerpt}”`)
+        : tx("200 的完成体，只是没带文字（地址、密钥、模型名这三件事已经证明）", "A 200 completion with no text in it — URL, key and model name are still proven"));
     } catch (e) {
+      // 上游原文整句留给 title，行内由 CSS 折行——被裁掉的错误等于没说（用户："直接显示返回的错误信息"）
       setProbe("err");
-      setNote(String(e).slice(0, 120));
+      setNote(errText(e));
     }
   };
 
@@ -292,7 +308,13 @@ function ModelRow({
       </div>
       {(probe !== "idle") && (
         <div className="msp-med">
-          {note && <span className="set-hint">{probe === "ok" ? tx(`已应答 · ${note}`, `answered · ${note}`) : probe === "err" ? tx(`失败：${note}`, `failed: ${note}`) : tx("测试中…", "testing…")}</span>}
+          <span className="set-hint" title={probe === "run" ? "" : probe === "ok" ? proof : note}>
+            {probe === "run"
+              ? tx("测试中…", "testing…")
+              : probe === "ok"
+                ? tx(`通了 · ${note}`, `answered · ${note}`)
+                : note}
+          </span>
         </div>
       )}
     </div>
@@ -388,7 +410,7 @@ export function ModelSettingsPage() {
       }));
     } catch (e) {
       setProbes((s) => ({ ...s, [provider.id]: "err" }));
-      setNotes((s) => ({ ...s, [provider.id]: String(e).slice(0, 160) }));
+      setNotes((s) => ({ ...s, [provider.id]: errText(e) }));
     }
   };
 

@@ -869,6 +869,7 @@ export default function App() {
           + 工具栏 34（工作区预设 + chromeStore 装配好的三段）。
           B5 的合成条把这两件事糊在一行，读起来就是"标题栏很乱"。 */}
       <IdentityBar
+        fullPage={settingsOpen}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenHelp={() => setHelpOpen(true)}
         onOpenAi={() => setAiOpen((v) => !v)}

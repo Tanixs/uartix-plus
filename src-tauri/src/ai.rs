@@ -438,6 +438,176 @@ pub async fn ai_list_models(
     Ok(parse_model_ids(&v))
 }
 
+/// P114-A：探针请求的输出预算。字段名不是我猜的——`agent_body`（824/825 行）
+/// 已经在给这三种格式发 `max_tokens` / `max_output_tokens`，这里沿用同一个写法。
+const PROBE_OUTPUT_TOKENS: u32 = 16;
+
+/// 一次真请求的探针体。**与 `ai_chat` 同形，只减不增**：
+/// 非流式、单条 "ping"、不发 `temperature`（o1/gpt-5 一类对 `temperature != 1` 直接 400，
+/// 探针不该因为自己多塞的字段被判死）、不发 thinking 参数。
+/// 少发一个字段 = 少一种"我们把它自己问挂了"的假失败。
+fn probe_body(format: &str, model: &str) -> serde_json::Value {
+    let msg = serde_json::json!({ "role": "user", "content": "ping" });
+    match format {
+        "anthropic" => serde_json::json!({
+            "model": model, "max_tokens": PROBE_OUTPUT_TOKENS, "stream": false,
+            "messages": [msg],
+        }),
+        "responses" => serde_json::json!({
+            "model": model, "max_output_tokens": PROBE_OUTPUT_TOKENS, "stream": false,
+            "input": [msg],
+        }),
+        _ => serde_json::json!({
+            "model": model, "max_tokens": PROBE_OUTPUT_TOKENS, "stream": false,
+            "messages": [msg],
+        }),
+    }
+}
+
+fn cut_chars(s: &str, n: usize) -> String {
+    s.chars().take(n).collect()
+}
+
+/// 有些网关用 HTTP 200 回一个 `{"error":…}`。按状态码判它"通了"，
+/// 那就是把失败重新写成成功——所以 2xx 也要看体里有没有 error。
+fn upstream_error_text(v: &serde_json::Value) -> Option<String> {
+    let e = v.get("error")?;
+    if e.is_null() {
+        return None;
+    }
+    let msg = e
+        .get("message")
+        .and_then(|m| m.as_str())
+        .or_else(|| e.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| e.to_string());
+    Some(cut_chars(&msg, 220))
+}
+
+/// 从非流式完成体里取那条回答的文字；取不到就空串（空串不是失败：
+/// 2xx 的完成对象已经证明了地址/密钥/模型名三件事，回答为空只是它没话讲）。
+/// 三协议各自的路径：openai `choices[0].message.content`、anthropic `content[].text`、
+/// responses `output[].content[].output_text`（新版也直接给 `output_text` 糖）。
+fn completion_text(format: &str, v: &serde_json::Value) -> String {
+    let join_text = |blocks: &Vec<serde_json::Value>, kind: &str| -> String {
+        blocks
+            .iter()
+            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some(kind))
+            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    match format {
+        "anthropic" => v
+            .get("content")
+            .and_then(|c| c.as_array())
+            .map(|arr| join_text(arr, "text"))
+            .unwrap_or_default(),
+        "responses" => {
+            if let Some(s) = v.get("output_text").and_then(|t| t.as_str()) {
+                return s.to_string();
+            }
+            v.get("output")
+                .and_then(|o| o.as_array())
+                .map(|items| {
+                    let blocks: Vec<serde_json::Value> = items
+                        .iter()
+                        .flat_map(|it| {
+                            it.get("content")
+                                .and_then(|c| c.as_array())
+                                .cloned()
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    join_text(&blocks, "output_text")
+                })
+                .unwrap_or_default()
+        }
+        _ => v
+            .get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|a| a.first())
+            .and_then(|c| {
+                c.get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|t| t.as_str())
+                    .or_else(|| c.get("text").and_then(|t| t.as_str()))
+            })
+            .unwrap_or_default()
+            .to_string(),
+    }
+}
+
+/// 逐模型「测试」的宿主侧判据。**为什么必须有这条命令**：`ai_chat` 是流式命令，
+/// 签名 `Result<(), String>`，而它每一条失败分支（建 client 失败、连不上、HTTP 4xx/5xx、
+/// 流中途断）都是 `app.emit("ai:error", {reqId, msg})` + `return Ok(())`。
+/// 拿"命令返回了"当"模型应答了"，算出来的就是那个删掉一个字母的密钥也照样
+/// "已应答 · 312ms"——时间是真机制（它确实等了一个完整往返），判定是假判据。
+///
+/// 这里的 `Ok` 只有一个意思：上游 2xx，且响应体是一个 JSON 对象，且对象里没有 `error`。
+/// `Err(String)` 里是可直接行动的话（`classify_error` 会带上游响应体前 220 字）。
+#[tauri::command]
+pub async fn ai_probe(
+    base_url: String,
+    api_key: String,
+    model: String,
+    format: String,
+    proxy: Option<String>,
+    no_proxy: Option<String>,
+) -> Result<String, String> {
+    if base_url.trim().is_empty() {
+        return Err("还没有服务地址：先填 Base URL".to_string());
+    }
+    let url = endpoint_url(&base_url, &format);
+    let client = build_client(
+        proxy.as_deref(),
+        no_proxy.as_deref(),
+        // 探针要有总时长上限（聊天的流式路径故意没有：健康长流会被它掐死）。
+        // 一次 16 token 的请求，60 秒还回不来就是不通。
+        Some(Duration::from_secs(60)),
+    )?;
+    let mut req = client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .json(&probe_body(&format, &model));
+    let key = api_key.trim().to_string();
+    if !key.is_empty() {
+        // 与 ai_chat / ai_list_models 同一套鉴权头写法：探针说通，实发就该通
+        req = if format == "anthropic" {
+            req.header("x-api-key", &key).header("anthropic-version", "2023-06-01")
+        } else {
+            req.bearer_auth(&key)
+        };
+    }
+    let resp = req.send().await.map_err(|e| {
+        if e.is_timeout() {
+            format!("60 秒内没有回音（超时）：{}", url)
+        } else {
+            format!("连不上 {}：{}", url, e)
+        }
+    })?;
+    let status = resp.status().as_u16();
+    let text = resp.text().await.unwrap_or_default();
+    probe_verdict(&format, status, &text)
+}
+
+/// 探针的判定表。**这张表就是那次事故的全部**，所以它单独成一个纯函数：
+/// 不碰网络、不碰 reqwest，四条判据每一条都能在 `cargo test` 里逐条钉住
+/// （`probe_tests`），而不是只在真机上"看起来对"。
+/// `Ok` 只有一个意思：HTTP 2xx + 响应体是 JSON + 对象里没有 `error`；
+/// 带回来的 String 是上游回复的开头 60 字，界面拿它当"真答过话"的凭据。
+fn probe_verdict(format: &str, status: u16, body: &str) -> Result<String, String> {
+    if status >= 400 {
+        return Err(classify_error(status, body));
+    }
+    let v: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| format!("上游回了 HTTP {}，但内容不是 JSON：{}", status, e))?;
+    if let Some(msg) = upstream_error_text(&v) {
+        return Err(format!("HTTP 200，但上游报的是错误：{}", msg));
+    }
+    Ok(cut_chars(completion_text(format, &v).trim(), 60))
+}
+
 #[tauri::command]
 pub async fn ai_chat(
     app: AppHandle,
@@ -2002,5 +2172,120 @@ mod model_list_tests {
         // 形状不认识 ⇒ 空表，而不是 panic 也不是"造一个假 id 出来"
         let junk: serde_json::Value = serde_json::from_str(r#"{"oops":true}"#).unwrap();
         assert!(parse_model_ids(&junk).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn probe_body_非流式且不带_temperature() {
+        // temperature 是探针故意少发的字段：o1/gpt-5 一类对 !=1 直接 400，
+        // 少发一个字段就少一种"我们自己把它问挂了"的假失败
+        for f in ["anthropic", "responses", "chat"] {
+            let b = probe_body(f, "glm-4");
+            assert_eq!(b["stream"], json!(false), "{}：探针要一个能整体判定的响应", f);
+            assert!(b.get("temperature").is_none(), "{}：探针不发 temperature", f);
+            assert_eq!(b["model"], json!("glm-4"));
+        }
+        // 输出预算的字段名沿用 agent_body 已经在发的那一套，不是新猜的名字
+        assert_eq!(probe_body("anthropic", "m")["max_tokens"], json!(PROBE_OUTPUT_TOKENS));
+        assert_eq!(probe_body("chat", "m")["max_tokens"], json!(PROBE_OUTPUT_TOKENS));
+        assert_eq!(probe_body("responses", "m")["max_output_tokens"], json!(PROBE_OUTPUT_TOKENS));
+    }
+
+    #[test]
+    fn completion_text_认三种完成体() {
+        let openai: serde_json::Value =
+            serde_json::from_str(r#"{"choices":[{"message":{"role":"assistant","content":"Ping!"}}]}"#).unwrap();
+        assert_eq!(completion_text("chat", &openai), "Ping!");
+
+        let anth: serde_json::Value =
+            serde_json::from_str(r#"{"content":[{"type":"thinking","thinking":"…"},{"type":"text","text":"Hi"}]}"#).unwrap();
+        assert_eq!(completion_text("anthropic", &anth), "Hi", "只取 text 块，思维链不进摘录");
+
+        let resp: serde_json::Value = serde_json::from_str(
+            r#"{"output":[{"type":"message","content":[{"type":"output_text","text":"Yo"}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(completion_text("responses", &resp), "Yo");
+
+        // 空回答不是失败：2xx 的完成对象已经证明了地址/密钥/模型名
+        let empty: serde_json::Value =
+            serde_json::from_str(r#"{"choices":[{"message":{"content":""},"finish_reason":"length"}]}"#).unwrap();
+        assert_eq!(completion_text("chat", &empty), "");
+    }
+
+    #[test]
+    fn http200_带_error_字段仍是失败() {
+        let with_err: serde_json::Value =
+            serde_json::from_str(r#"{"error":{"message":"invalid api key"}}"#).unwrap();
+        assert_eq!(upstream_error_text(&with_err).as_deref(), Some("invalid api key"));
+
+        let err_str: serde_json::Value = serde_json::from_str(r#"{"error":"bad key"}"#).unwrap();
+        assert_eq!(upstream_error_text(&err_str).as_deref(), Some("bad key"));
+
+        // `error:null` 是"没有错误"，不是"有一个内容为 null 的错误"
+        let null_err: serde_json::Value = serde_json::from_str(r#"{"id":"x","error":null}"#).unwrap();
+        assert!(upstream_error_text(&null_err).is_none());
+
+        let clean: serde_json::Value = serde_json::from_str(r#"{"choices":[]}"#).unwrap();
+        assert!(upstream_error_text(&clean).is_none());
+    }
+
+    #[test]
+    fn cut_chars_按字符切不是按字节() {
+        // 上游错误体里常有中文：按字节切会把一个汉字劈成半个，显示成乱码
+        let s = cut_chars("密钥无效 or invalid", 6);
+        assert_eq!(s, "密钥无效 o");
+        assert!(s.len() > 6, "断的是字符数，不是字节数");
+    }
+
+    /// 下面这一组才是这次修复的正主：删掉密钥一个字母之后到底会看到什么。
+    #[test]
+    fn verdict_401_报的是可行动的判定不是时间() {
+        let e = probe_verdict("chat", 401, r#"{"error":{"message":"Incorrect API key provided"}}"#)
+            .expect_err("401 绝不能是 Ok");
+        assert!(e.contains("API Key 无效或无权限（401）"), "实际：{}", e);
+        assert!(e.contains("设置 → 模型设置"), "该指路的时候没指路：{}", e);
+    }
+
+    #[test]
+    fn verdict_404_把上游原文带回来() {
+        let e = probe_verdict("chat", 404, r#"{"error":{"message":"model glm-99 not found"}}"#)
+            .expect_err("404 不能是 Ok");
+        assert!(e.contains("model glm-99 not found"), "原文没带上：{}", e);
+    }
+
+    #[test]
+    fn verdict_200_夹着_error_仍然是失败() {
+        // 不少网关用 200 回错误；只看状态码的话，这一路就是第二个假绿
+        let e = probe_verdict("chat", 200, r#"{"error":{"message":"quota exceeded"}}"#)
+            .expect_err("200-with-error 不能是 Ok");
+        assert!(e.contains("quota exceeded"), "实际：{}", e);
+        assert!(e.starts_with("HTTP 200，但上游报的是错误："), "实际：{}", e);
+    }
+
+    #[test]
+    fn verdict_200_不是_json_也是失败() {
+        let e = probe_verdict("chat", 200, "<html>502 Bad Gateway</html>").expect_err("非 JSON 不能算通");
+        assert!(e.contains("不是 JSON"), "实际：{}", e);
+    }
+
+    #[test]
+    fn verdict_200_完成体_带着摘录回来() {
+        let ok = probe_verdict("chat", 200, r#"{"choices":[{"message":{"content":"  Ping!  "}}]}"#)
+            .expect("这是一次真应答");
+        assert_eq!(ok, "Ping!", "摘录两侧的空白应当收掉");
+
+        // 空内容算通，不算失败：2xx 的完成体已经证明了地址/密钥/模型名三件事
+        let bare = probe_verdict("chat", 200, r#"{"choices":[{"message":{"content":""},"finish_reason":"length"}]}"#)
+            .expect("预算太小被截断不是配置的错");
+        assert_eq!(bare, "");
+
+        let anth = probe_verdict("anthropic", 200, r#"{"content":[{"type":"text","text":"你好"}]}"#).unwrap();
+        assert_eq!(anth, "你好");
     }
 }

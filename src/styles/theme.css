@@ -5891,18 +5891,19 @@ select optgroup {
 .set-page .set-content { background: var(--bg); padding: 16px 24px 26px; }
 /* 页头：ZCode 那一层的读法是"标题独占一行，副标题在它下面一行"。
    P111-B 我做成同一行 baseline 排，标题 16px 被副标题挤得没有权重 —— 现在按它改。 */
+/* 页头住在右栏里（P114-B）：它不再是一层界面，只是一页的标题 ——
+   底色与投影一起撤掉，权重交给 `--fs-xl` 那个字号。原先它是通栏 + `--bg-panel`
+   + `--shadow-pop`，那条带底带影的横条读起来就是"第二条标题栏"，
+   左右分栏被它截断，用户看到的就是"页签在单独的标题栏下面"。 */
 .set-page-head {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: start;
   gap: 4px var(--sp-4);
-  padding: 16px 24px 14px;
-  background: var(--bg-panel);
-  box-shadow: var(--shadow-pop);
+  padding: 2px 0 14px;
 }
 .set-page-title { font-size: var(--fs-xl); font-weight: 700; line-height: 1.25; user-select: none; }
 .set-page-sub { grid-column: 1; font-size: var(--fs-body); line-height: 1.5; color: var(--text-dim); max-width: 72ch; }
-.set-page-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: var(--sp-2); flex: none; }
 /* 页级出口：ZCode 的「← 返回工作区」同位。它不是"某一类设置"，所以不吃 `.set-nav button` 的选中形状 */
 .set-nav-back {
   all: unset;
@@ -6088,6 +6089,15 @@ select optgroup {
   flex-wrap: wrap;
   padding: 0 0 10px;
   font-size: var(--fs-body);
+}
+/* 试连那两行说的是"刚才那一下为什么不行"，正文可以是上游错误原文（最长 220 字）。
+   `.set-hint` 全家的 nowrap 是为 P113-F 那个竖排事故设的，这里要的恰好相反：
+   被裁掉的错误等于没说。允许折行 + 允许收缩，长句就变成两行而不是一行溢出。 */
+.msp-med .set-hint,
+.msp-probe .set-hint {
+  white-space: normal;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 /* 编辑弹窗里的复选与档位行（P113-D）。挂在 workflow-* 上是因为它们只活在那扇窗里，
    不另起一族名字。 */

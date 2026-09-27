@@ -426,10 +426,6 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   return (
     <div className="modal-mask set-page-mask" role="dialog" aria-modal="true" onMouseDown={onClose}>
       <div className="modal set-modal set-page" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="set-page-head">
-          <span className="set-page-title">{headTab.label}</span>
-          {headTab.sub && <span className="set-page-sub">{headTab.sub}</span>}
-        </div>
         <div className="set-body">
           <div className="set-nav">
             {/* P113-D（用户："那个完成按钮很不好理解"）：设置页没有"做完"这回事 ——
@@ -451,6 +447,14 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
             ))}
           </div>
           <div className="set-content">
+            {/* P114-B（用户："只有明显的左右分栏，大的设置页签在右边分栏上面"）：页头从
+                "通栏 + 自带底色和投影"搬进右栏第一行。它挂着 `--bg-panel` 时读起来就是
+                第二条标题栏，于是那条通栏把左右分栏拦腰截断，页标题看着"在标题栏下面"。
+                跟着右栏一起滚，不做 sticky —— sticky 要底色要投影，那又把横幅请回来了。 */}
+            <div className="set-page-head">
+              <span className="set-page-title">{headTab.label}</span>
+              {headTab.sub && <span className="set-page-sub">{headTab.sub}</span>}
+            </div>
             {/* 每组一张浮起的卡（P112-A）。分区器按 `.set-group-title` 的边界切 children，
                 所以十个页签不用各抄一层 div，也不会出现"改了一半"。
                 卡片只加 background/shadow，不加 border —— G 门那条计数因此不动。
