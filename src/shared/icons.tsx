@@ -468,6 +468,26 @@ export const IconMore = () =>
  * 所以基准（16 字形 / 2.0 描边）一改它们跟着改，不用逐枚调。
  */
 
+/** 模型设置：立方体。ZCode 那一页的签名形状就是它；借 IconStack 会读作"图层"不读作"模型"。 */
+export const IconCube = () =>
+  svg(
+    <>
+      <path d="M12 2.8l8 4.4v9.6l-8 4.4-8-4.4V7.2z" />
+      <path d="M4 7.2l8 4.4 8-4.4" />
+      <path d="M12 11.6V21" />
+    </>,
+  );
+
+/** 关于：圈里一个 i。原先借 IconCircle 是个空心圈，读不出"信息"。 */
+export const IconInfo = () =>
+  svg(
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 7.6v.8" />
+    </>,
+  );
+
 /** 接入：插头（两芯 + 座体 + 线缆）。原先借 IconMonitor，那个读作"屏幕"不读作"链路"。 */
 export const IconPlug = () =>
   svg(

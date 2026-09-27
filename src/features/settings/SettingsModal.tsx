@@ -36,8 +36,8 @@ import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent
 import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
-import { SetRow } from "../../shared/SetRow";
-import { IconEdit, IconTrash } from "../../shared/icons";
+import { SetGroups, SetRow } from "../../shared/SetRow";
+import { IconCube, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSparkle, IconStack, IconTrash, IconTune, IconUpload } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 
@@ -364,17 +364,24 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     }
   };
 
-  const tabs: { key: string; label: string; group: string; sub?: string }[] = [
-    { key: "general", label: t("set.general"), group: tx("基础", "Basics") },
-    { key: "workspace", label: t("set.workspace"), group: tx("基础", "Basics") },
-    { key: "data", label: t("set.data"), group: tx("数据与诊断", "Data & diagnostics") },
-    { key: "monitor", label: tx("监测", "Monitoring"), group: tx("数据与诊断", "Data & diagnostics") },
-    { key: "ai", label: t("set.ai"), group: tx("AI 与 Agent", "AI & agent"), sub: tx("回答行为、流式与授权面、Agent 预算", "Answer behaviour, streaming and permission tier, Agent budgets") },
-    { key: "model", label: tx("模型设置", "Model settings"), group: tx("AI 与 Agent", "AI & agent"), sub: tx("管理供应商与模型档案，配置后可在发送框那枚模型钮里选用", "Manage providers and model profiles; pick one from the model chip next to the composer") },
-    { key: SETTINGS_TAB_PLUGINS, label: t("set.ext"), group: tx("扩展与集成", "Extensions & integration") },
-    { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}`, group: tx("扩展与集成", "Extensions & integration") },
-    { key: "io", label: t("set.io"), group: tx("扩展与集成", "Extensions & integration") },
-    { key: "about", label: t("set.about"), group: tx("其他", "Misc") },
+  /**
+   * 导航项 = 图标 + 名字 + 所属组 + 页头那一句（P112-A）。
+   * 图标全部来自 `shared/icons.tsx`（H 门：24 viewBox 描边图标只有这一处出处）；
+   * 分类是重新定过的：主题与外观覆盖层从「通用」里拆成独立的「外观」一页 ——
+   * 混在一起时那一页 8 行、滚三屏，而"界面长什么样"和"用什么语言/缩放"不是一类决定。
+   */
+  const tabs: { key: string; label: string; group: string; icon: React.ReactNode; sub?: string }[] = [
+    { key: "general", label: t("set.general"), group: tx("基础", "Basics"), icon: <IconTune /> },
+    { key: "appearance", label: tx("外观", "Appearance"), group: tx("基础", "Basics"), icon: <IconStack />, sub: tx("配色与那三层覆盖：谁在画这界面、怎么撤回去", "Palette and the three override layers: what is painting this UI and how to undo it") },
+    { key: "workspace", label: t("set.workspace"), group: tx("基础", "Basics"), icon: <IconLayoutEdit /> },
+    { key: "data", label: t("set.data"), group: tx("数据与诊断", "Data & diagnostics"), icon: <IconLogs /> },
+    { key: "monitor", label: tx("监测", "Monitoring"), group: tx("数据与诊断", "Data & diagnostics"), icon: <IconPulse /> },
+    { key: "io", label: t("set.io"), group: tx("数据与诊断", "Data & diagnostics"), icon: <IconUpload /> },
+    { key: "ai", label: t("set.ai"), group: tx("AI 与 Agent", "AI & agent"), icon: <IconSparkle />, sub: tx("回答行为、流式与授权面、Agent 预算", "Answer behaviour, streaming and permission tier, Agent budgets") },
+    { key: "model", label: tx("模型设置", "Model settings"), group: tx("AI 与 Agent", "AI & agent"), icon: <IconCube />, sub: tx("管理自定义模型供应商，配置后可在聊天时选择使用。", "Manage model providers; pick one from the chat composer afterwards") },
+    { key: SETTINGS_TAB_PLUGINS, label: t("set.ext"), group: tx("扩展", "Extensions"), icon: <IconPuzzle /> },
+    { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}`, group: tx("扩展", "Extensions"), icon: <IconPlug /> },
+    { key: "about", label: t("set.about"), group: tx("其他", "Misc"), icon: <IconInfo /> },
   ];
   /** 页头那一句：说明写在页头一次，胜过在每一行重复一遍（P111-B） */
   const headTab = tabs.find((x) => x.key === tab) ?? tabs[0];
@@ -433,22 +440,24 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 {/* 分组标题只在"这一组的第一项"前出现一次 */}
                 {(i === 0 || tabs[i - 1].group !== x.group) && <div className="set-nav-group">{x.group}</div>}
                 <button className={tab === x.key ? "on" : ""} onClick={() => setTab(x.key)}>
+                  <span className="set-nav-ico">{x.icon}</span>
                   {x.label}
                 </button>
               </Fragment>
             ))}
           </div>
           <div className="set-content">
-            {/* 一页 = 一张浮起的卡（ZCode 的「常规」页就是这个形状：一张卡、里面几行带分隔）。
-                旧版是"发丝线接发丝线铺在纯白弹窗上"，所以三面分不出层。
+            {/* 每组一张浮起的卡（P112-A）。分区器按 `.set-group-title` 的边界切 children，
+                所以十个页签不用各抄一层 div，也不会出现"改了一半"。
                 卡片只加 background/shadow，不加 border —— G 门那条计数因此不动。
-                「模型设置」是清单+详情两栏，本身自带卡片结构，所以它不套这张卡。 */}
+                「模型设置」自带两栏卡片结构，所以它不走这个包装。 */}
             {tab === "model" ? (
               <ModelSettingsPage />
             ) : (
-            <div className="set-card">
+            <SetGroups>
             {tab === "general" && (
               <>
+                <div className="set-group-title">{tx("界面", "Interface")}</div>
                 {row(t("set.language"), (
                   <select className="input" value={settings.locale} onChange={(e) => patch({ locale: e.target.value as "zh" | "en" })}>
                     {/* 语言选择器里每种语言**用自己的文字写自己**是惯例（改成 "Chinese" 反而让
@@ -457,6 +466,36 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <option value="en">English</option>
                   </select>
                 ))}
+                <div className="set-group-title">{tx("动效与联动", "Motion & linking")}</div>
+                {row(tx("减弱动效", "Reduce motion"), (
+                  <label className="set-switch">
+                    <input type="checkbox" checked={settings.reduceMotion} onChange={(e) => patch({ reduceMotion: e.target.checked })} />
+                    <span />
+                  </label>
+                ), tx("关闭呼吸灯、闪烁与过渡动画（不依赖系统设置）；低配设备或动画敏感场景可开", "Turn off pulsing, blinking and transitions regardless of the OS setting; useful on weak hardware or motion sensitivity"))}
+                {row(tx("跨面板时间联动", "Link panel time cursors"), (
+                  <label className="set-switch">
+                    <input type="checkbox" aria-label={tx("跨面板时间联动", "Link panel time cursors")} checked={timeLinked} onChange={(e) => timeCursor.setLinked(e.target.checked)} />
+                    <span />
+                  </label>
+                ), tx("同步 2D 时间横轴与 3D 的定位游标；关闭后不互相定位，但回放跳转仍会移动实际播放位置。本次运行有效。", "Synchronize 2D time-axis and 3D cursors. Disabling this stops cross-panel positioning, not actual replay seeks. Applies to this run."))}
+                {row(tx("分析包", "Analysis package"), (
+                  <button className="btn" onClick={() => {
+                    onClose();
+                    window.setTimeout(() => window.dispatchEvent(new Event("vs-analysis-export")), 0);
+                  }}>{tx("导出分析包…", "Export analysis package…")}</button>
+                ), tx("选择缓存窗口与模块，导出到本地新目录；不会自动上传。面板内也保留相关入口。", "Choose a cache window and modules, then export to a new local directory. Nothing is uploaded automatically. Panel shortcuts remain available."))}
+                {row(tx("断线自动重连", "Auto reconnect"), (
+                  <label className="set-switch">
+                    <input type="checkbox" checked={settings.autoReconnect} onChange={(e) => patch({ autoReconnect: e.target.checked })} />
+                    <span />
+                  </label>
+                ), tx("串口/TCP/UDP 意外断开后（拔线、对端重启）每 3 秒重试连接，最多 3 次；手动断开不触发，BLE 不参与", "After an unexpected drop (unplug, peer restart) retry serial/TCP/UDP every 3s, up to 3 times; manual close never triggers it; BLE excluded"))}
+              </>
+            )}
+            {tab === "appearance" && (
+              <>
+                <div className="set-group-title">{tx("配色与缩放", "Palette & zoom")}</div>
                 {row(t("set.theme"), (
                   <div className="theme-grid">
                     {cards.map((c, i) => (
@@ -487,6 +526,16 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     ))}
                   </div>
                 ), t("set.theme.tip"))}
+                {row(t("set.zoom"), (
+                  <div className="set-seg">
+                    {[90, 100, 110, 125].map((z) => (
+                      <button key={z} className={settings.zoom === z ? "on" : ""} onClick={() => patch({ zoom: z })}>
+                        {z}%
+                      </button>
+                    ))}
+                  </div>
+                ), t("set.zoom.tip"))}
+                <div className="set-group-title">{tx("三层覆盖", "Override layers")}</div>
                 {row(tx("外观覆盖层", "Appearance layers"), (
                   <div className="set-apr">
                     <div className="set-apr-ops">
@@ -540,39 +589,6 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     </p>
                   </div>
                 ), tx("从上到下层层覆盖：兜底层 < 当前主题（内置与插件同级，只有一枚）< AI 临时层。哪一层有内容，就说明当前界面是被它改的", "Layers stack top-down: baseline < active theme (built-in and plugin are peers; exactly one) < AI temporary. Whichever layer has content is whichever one is driving the UI"))}
-                {row(t("set.zoom"), (
-                  <div className="set-seg">
-                    {[90, 100, 110, 125].map((z) => (
-                      <button key={z} className={settings.zoom === z ? "on" : ""} onClick={() => patch({ zoom: z })}>
-                        {z}%
-                      </button>
-                    ))}
-                  </div>
-                ), t("set.zoom.tip"))}
-                {row(tx("减弱动效", "Reduce motion"), (
-                  <label className="set-switch">
-                    <input type="checkbox" checked={settings.reduceMotion} onChange={(e) => patch({ reduceMotion: e.target.checked })} />
-                    <span />
-                  </label>
-                ), tx("关闭呼吸灯、闪烁与过渡动画（不依赖系统设置）；低配设备或动画敏感场景可开", "Turn off pulsing, blinking and transitions regardless of the OS setting; useful on weak hardware or motion sensitivity"))}
-                {row(tx("跨面板时间联动", "Link panel time cursors"), (
-                  <label className="set-switch">
-                    <input type="checkbox" aria-label={tx("跨面板时间联动", "Link panel time cursors")} checked={timeLinked} onChange={(e) => timeCursor.setLinked(e.target.checked)} />
-                    <span />
-                  </label>
-                ), tx("同步 2D 时间横轴与 3D 的定位游标；关闭后不互相定位，但回放跳转仍会移动实际播放位置。本次运行有效。", "Synchronize 2D time-axis and 3D cursors. Disabling this stops cross-panel positioning, not actual replay seeks. Applies to this run."))}
-                {row(tx("分析包", "Analysis package"), (
-                  <button className="btn" onClick={() => {
-                    onClose();
-                    window.setTimeout(() => window.dispatchEvent(new Event("vs-analysis-export")), 0);
-                  }}>{tx("导出分析包…", "Export analysis package…")}</button>
-                ), tx("选择缓存窗口与模块，导出到本地新目录；不会自动上传。面板内也保留相关入口。", "Choose a cache window and modules, then export to a new local directory. Nothing is uploaded automatically. Panel shortcuts remain available."))}
-                {row(tx("断线自动重连", "Auto reconnect"), (
-                  <label className="set-switch">
-                    <input type="checkbox" checked={settings.autoReconnect} onChange={(e) => patch({ autoReconnect: e.target.checked })} />
-                    <span />
-                  </label>
-                ), tx("串口/TCP/UDP 意外断开后（拔线、对端重启）每 3 秒重试连接，最多 3 次；手动断开不触发，BLE 不参与", "After an unexpected drop (unplug, peer restart) retry serial/TCP/UDP every 3s, up to 3 times; manual close never triggers it; BLE excluded"))}
               </>
             )}
             {tab === "workspace" && (
@@ -1348,7 +1364,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 ), t("set.checkUpdate.tip"))}
               </div>
             )}
-            </div>
+            </SetGroups>
             )}
             {msg && <div className="set-msg">{msg}</div>}
           </div>

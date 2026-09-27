@@ -15,6 +15,9 @@
   --fs-sm: 12px;
   --fs-md: 14px;
   --fs-lg: 16px;
+  /* 页标题一档：设置页那种"标题独占一行"的大字。E 门要求字号走刻度，
+     所以要更大的字就加一档 token，而不是在某处就地写 22px。 */
+  --fs-xl: 22px;
   /* 布局常量：身份栏高度。`.ibar` 与全窗口覆盖层（P111-B 设置页）都要它——
      抄成两处字面量的话，改高度那一天遮罩就会压住窗口控件，或露出一条工作区。 */
   --h-ibar: 38px;
@@ -5875,18 +5878,20 @@ select optgroup {
 }
 .set-page .set-nav { flex: 0 0 200px; background: var(--bg-inset); padding: 12px 10px 18px; }
 .set-page .set-content { background: var(--bg); padding: 16px 24px 26px; }
-/* 页头：标题 + 一句副标题 + 右侧动作。说明写在页头一次，胜过写在每一行重复。 */
+/* 页头：ZCode 那一层的读法是"标题独占一行，副标题在它下面一行"。
+   P111-B 我做成同一行 baseline 排，标题 16px 被副标题挤得没有权重 —— 现在按它改。 */
 .set-page-head {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-3);
-  padding: 14px 24px 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 4px var(--sp-4);
+  padding: 16px 24px 14px;
   background: var(--bg-panel);
   box-shadow: var(--shadow-pop);
 }
-.set-page-title { font-size: var(--fs-lg); font-weight: 700; user-select: none; }
-.set-page-sub { font-size: var(--fs-body); color: var(--text-dim); line-height: 1.5; min-width: 0; }
-.set-page-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.set-page-title { font-size: var(--fs-xl); font-weight: 700; line-height: 1.25; user-select: none; }
+.set-page-sub { grid-column: 1; font-size: var(--fs-body); line-height: 1.5; color: var(--text-dim); max-width: 72ch; }
+.set-page-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: var(--sp-2); flex: none; }
 .set-nav-group {
   margin: 14px 0 3px;
   padding: 0 13px;
@@ -5897,6 +5902,11 @@ select optgroup {
   user-select: none;
 }
 .set-nav-group:first-child { margin-top: 2px; }
+/* 导航项的图标：15px 与 12px 文字同轴；选中时跟着文字变色，不另设一套选中形状 */
+.set-page .set-nav button { display: flex; align-items: center; gap: var(--sp-2); }
+.set-nav-ico { flex: none; display: inline-flex; color: var(--text-faint); }
+.set-page .set-nav button:hover .set-nav-ico { color: var(--text-dim); }
+.set-page .set-nav button.on .set-nav-ico { color: var(--accent); }
 /* 一组设置 = 一张浮起的卡，而不是"一条发丝线接一条发丝线" */
 .set-card {
   margin: 0 0 var(--sp-4);
@@ -5994,13 +6004,15 @@ select optgroup {
   gap: 6px;
   line-height: 1.5;
 }
-/* 高内容行（主题色卡 / 预设卡）：label 顶部对齐，不再垂直悬在中间 */
+/* 高内容行（主题色卡 / 预设卡 / 三层覆盖清单）：label 顶部对齐，不再垂直悬在中间 */
 .set-row:has(> .set-ctl .theme-grid),
-.set-row:has(> .set-ctl .preset-grid) {
+.set-row:has(> .set-ctl .preset-grid),
+.set-row:has(> .set-ctl .set-apr) {
   align-items: flex-start;
 }
 .set-row:has(> .set-ctl .theme-grid) > label,
-.set-row:has(> .set-ctl .preset-grid) > label {
+.set-row:has(> .set-ctl .preset-grid) > label,
+.set-row:has(> .set-ctl .set-apr) > label {
   padding-top: 8px;
 }
 .set-ctl { flex: 1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
