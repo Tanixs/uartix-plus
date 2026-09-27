@@ -450,9 +450,12 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
             {/* 每组一张浮起的卡（P112-A）。分区器按 `.set-group-title` 的边界切 children，
                 所以十个页签不用各抄一层 div，也不会出现"改了一半"。
                 卡片只加 background/shadow，不加 border —— G 门那条计数因此不动。
-                「模型设置」自带两栏卡片结构，所以它不走这个包装。 */}
+                两页不走这个包装：「模型设置」自带两栏卡片结构；「插件管理」是一列卡片，
+                再套一层白卡就成了"白卡套白卡"，反而看不出分层。 */}
             {tab === "model" ? (
               <ModelSettingsPage />
+            ) : tab === SETTINGS_TAB_PLUGINS ? (
+              <ExtPage />
             ) : (
             <SetGroups>
             {tab === "general" && (

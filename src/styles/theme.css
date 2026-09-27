@@ -10795,12 +10795,31 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-fchip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .plg-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
 .plg-empty { font-size: var(--fs-sm); color: var(--text-dim); text-align: center; padding: 24px 0; }
-.plg-item { border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--bg); }
+/* P112-C：列表行 → 小卡。原来那一行只有"名字 + id + 状态 + 开关"，扫一眼看不出这批东西各是什么。
+   底色抬到 --bg-panel 并加近场影（页面底是 --bg，同色才显得整片是平的），
+   左边加类型图标、名字下面补一句描述。边框一条都不动。 */
+.plg-item { border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--bg-panel); box-shadow: var(--shadow-pop); }
 .plg-item.open { border-color: var(--accent); }
-.plg-item-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
-.plg-item-main { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; background: transparent; border: none; cursor: pointer; text-align: left; padding: 0; color: var(--text); }
+/* 停用/隔离的包整卡降一档，而不是只让一枚开关灰着 —— 一眼能扫出"哪些在生效" */
+.plg-item:has(.plg-switch input:not(:checked)) { opacity: 0.72; }
+.plg-item-row { display: flex; align-items: center; gap: 8px; padding: 9px 11px; }
+.plg-item-main { flex: 1 1 auto; display: flex; align-items: center; gap: 10px; background: transparent; border: none; cursor: pointer; text-align: left; padding: 0; color: var(--text); min-width: 0; }
+.plg-item-ico { flex: none; display: inline-flex; align-items: center; color: var(--text-faint); }
+.plg-item-main:hover .plg-item-ico { color: var(--accent); }
+.plg-item-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.plg-item-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.plg-item-desc {
+  font-size: var(--fs-body);
+  line-height: 1.45;
+  color: var(--text-dim);
+  /* 两行封顶：描述长到十行的包，把列表撑成一堵墙就没人扫得动了 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .plg-item-name { font-size: var(--fs-md); font-weight: 600; }
-.plg-item-id { font-size: var(--fs-body); color: var(--text-dim); }
+.plg-item-id { font-size: var(--fs-body); color: var(--text-dim); font-family: var(--font-mono); }
 .plg-state { font-size: var(--fs-body); padding: 1px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border); color: var(--text-dim); }
 .plg-state.s-enabled { color: var(--ok); border-color: var(--ok); }
 .plg-state.s-quarantined { color: var(--warn-fg); border-color: var(--warn); }

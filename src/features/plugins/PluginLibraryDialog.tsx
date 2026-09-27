@@ -39,7 +39,23 @@ import { moduleDiagnostics, type ModuleStatus } from "./moduleBus";
 import { describeToolChange, pluginToolChangeOf, pluginToolDefsOf } from "./pluginToolDefs";
 import { CAP_LABEL, PLUGIN_CAPS, describeDiff, manifestDiff, type PluginManifest } from "./pluginManifest";
 import { setOpen } from "../ai/extensionStore";
-import { Glyph } from "../../shared/icons";
+import { Glyph, IconColumns, IconDock, IconPlug, IconStack } from "../../shared/icons";
+
+/**
+ * 列表行的类型图标。插件那一面原来只有"名字 + id + 状态 + 开关"一条线，
+ * 用户判"感觉很单调" —— 单调的不是颜色，是**一眼扫不出这批东西各是什么**。
+ * 图标只走 `shared/icons.tsx` 这一处出处（H 门），并且是装饰性的：
+ * 可读名字仍由 `aria-hidden` 的那颗开关与文字给，不靠形状传达唯一信息。
+ */
+function KindIcon({ kinds }: { kinds: readonly string[] }) {
+  const one = kinds[0];
+  const Ico = one === "theme" ? IconStack : one === "widget" ? IconColumns : one === "panel" ? IconDock : IconPlug;
+  return (
+    <span className="plg-item-ico" aria-hidden="true">
+      <Ico />
+    </span>
+  );
+}
 import { t, tx, useLocale } from "../../i18n/strings";
 
 /**
@@ -448,10 +464,21 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   onClick={() => (selMode ? toggleSel(r.pkg.id) : setDetailId(detailId === r.pkg.id ? null : r.pkg.id))}
                   title={selMode ? tx("选中/取消", "Check / uncheck") : tx("展开详情", "Expand details")}
                 >
-                  <span className="plg-item-name">{r.pkg.name}</span>
-                  <span className="plg-item-id">{r.pkg.id}</span>
+                  <KindIcon kinds={recordKinds(r)} />
+                  <span className="plg-item-body">
+                    <span className="plg-item-line">
+                      <span className="plg-item-name">{r.pkg.name}</span>
+                      <span className="plg-item-id">{r.pkg.id}</span>
+                      {/* AI 生成的包要标出来，但它**不构成信任**：能力白名单之外一律拒绝，
+                          这条徽标只是让人知道该多看一眼来源。 */}
+                      {r.pkg.provenance?.createdBy === "agent" && (
+                        <span className="plg-chip">{tx("AI 生成", "agent-made")}</span>
+                      )}
+                      {r.candidate && <span className="plg-chip warn">{tx(`有候选 v${r.candidate.version}`, `Update candidate v${r.candidate.version}`)}</span>}
+                    </span>
+                    {r.pkg.desc && <span className="plg-item-desc">{r.pkg.desc}</span>}
+                  </span>
                   <span className={`plg-state s-${r.state}`}>{stateName(r.state)}</span>
-                  {r.candidate && <span className="plg-chip warn">{tx(`有候选 v${r.candidate.version}`, `Update candidate v${r.candidate.version}`)}</span>}
                 </button>
                 <label className="plg-switch" title={switchTalk(r)}>
                   <input
