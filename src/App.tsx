@@ -20,12 +20,12 @@ import { IdentityBar, ToolBar, LinkCapsule } from "./shell/TopBars";
 import { InfoBar } from "./shell/InfoBar";
 import { SideRail } from "./shell/SideRail";
 import { PanelChromeActions } from "./shell/PanelChromeActions";
-import { railWidth, subscribeRail, toggleRailPanel, openRailPanel, type RailKey } from "./shell/railState";
+import { railWidth, setRailPanelW, subscribeRail, toggleRailPanel, openRailPanel, type RailKey } from "./shell/railState";
 import { CommandPalette } from "./shell/CommandPalette";
 import { buildCommands, type PaletteDeps } from "./shell/commandRegistry";
 import { Welcome } from "./shell/Welcome";
 import { markWelcomeSeen, welcomeSeen } from "./shell/welcomeSlides";
-import { devOpenRequest, devWelcomeAt } from "./dev/bootOverrides";
+import { devForensics, devOpenRequest, devWelcomeAt } from "./dev/bootOverrides";
 import { type RailActions } from "./shell/RailPanel";
 import { IfaceAction } from "./features/serial/ifaces";
 import { ModbusBadge } from "./features/modbus/ModbusBadge";
@@ -272,6 +272,22 @@ export default function App() {
     } else if (devOpen?.view === "ai") {
       setAiOpen(true);
     }
+    // P113-A：`?railw=220&probe=overflow` —— 钉住导轨二级面板的宽度，再把"内容画到自己格子外面"
+    // 的元素描红。拖窄才复现得出的叠字，光读 CSS 只能列候选、定不了案；这两个开关让它变成一张图。
+    // 动态 import：不叫它的时候连模块都不下载，产品路径一行 CSS 都不加。
+    const forensic = devForensics(location.search);
+    if (forensic.railw) setRailPanelW(forensic.railw);
+    // 这里**不能提前 return**：下面还要挂 unPop / onKey / 防拖拽导航，且它们的清理都在
+    // 本 effect 末尾那一个 return 里 —— 中途 return 会让取证模式下的应用少一半监听器，
+    // 而"只在 ?probe= 时坏"的 bug 最难查。所以只记一个 timer，交给同一个清理去撤。
+    let probeTimer = 0;
+    if (forensic.probeOverflow || forensic.click) {
+      probeTimer = window.setTimeout(() => {
+        if (forensic.probeOverflow) void import("./dev/overflowAudit").then(({ probeOverflowNow }) => probeOverflowNow());
+        // `?click=` 点一下才出现的界面（弹窗、浮层、展开态）：不点就只能"相信代码"
+        if (forensic.click) document.querySelector<HTMLElement>(forensic.click)?.click();
+      }, 1400);
+    }
     const unPop = onPop(() => {
       chatStore.setFloatOpen(true);
       setAiOpen(true);
@@ -306,6 +322,7 @@ export default function App() {
     window.addEventListener("dragover", preventNav);
     window.addEventListener("drop", preventNav);
     return () => {
+      if (probeTimer) window.clearTimeout(probeTimer);
       unScene();
       unExtPanel();
       unAppBus();

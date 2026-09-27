@@ -95,6 +95,24 @@ export interface DevBootOverrides {
    */
   open?: DevOpenView;
   settingsTab?: string;
+  /**
+   * `?probe=overflow` —— 把"内容画到自己格子外面"的元素描红并在角落报个数（P113-A 取证）。
+   *
+   * 为什么需要它：用户报"拖窄面板后行与行叠在一起"，而这类问题的现场**只在某个宽度上出现**，
+   * 光读 CSS 只能列出候选、不能定案。P111-A 补的是"拍得到打开态"，这一条补的是"量得到溢出"。
+   */
+  probeOverflow?: boolean;
+  /** `?railw=220` —— 启动就把导轨二级面板钉到某个宽度（配合 `?probe=overflow` 复现窄档） */
+  railw?: number;
+  /**
+   * `?click=<css 选择器>` —— 挂载后自动点一下那个元素（P113 加）。
+   *
+   * 为什么要有：弹窗、浮层、展开态这些**点一下才出现**的界面，无头截图拍不到，
+   * 于是"我自己验收"对它们就只剩"我相信代码"。给一个通用的点击入口，
+   * 比给每个弹窗各加一个 `?dialog=xxx` 参数诚实得多 —— 后者会长成一屏专用开关。
+   * 只点第一个命中项，且只 dispatch 一次点击；它不改数据，点错顶多是拍不到图。
+   */
+  click?: string;
   /** 仅在 preset 生效时才连带置真；?layout=keep 可豁免 */
   resetLayout: boolean;
 }
@@ -166,13 +184,38 @@ export function parseDevBoot(search: string): DevBootOverrides {
       if (tab && (DEV_SETTINGS_TABS as readonly string[]).includes(tab)) o.settingsTab = tab;
     }
   }
+
+  if (q.get("probe") === "overflow") o.probeOverflow = true;
+  const railw = Number(q.get("railw"));
+  // 只认"拖得出来的那段"：越界就当没给，不去 clamp（clamp 会让 200 静默变成 220，
+  // 而取证要的恰恰是"200 那一档长什么样"）
+  if (Number.isFinite(railw) && railw >= 120 && railw <= 640) o.railw = Math.round(railw);
+  const click = q.get("click");
+  if (click && click.length <= 120) o.click = click;
   return o;
+}
+
+/**
+ * App 用：取证开关（`?probe=overflow` / `?railw=` / `?click=`）。生产构建恒为关。
+ * 与 `devOpenRequest` 同一闸门、同一理由：这是脚手架，不是产品路径。
+ */
+export function devForensics(
+  search: string,
+  env: { dev?: boolean; prod?: boolean } = { dev: import.meta.env.DEV, prod: import.meta.env.PROD },
+): { probeOverflow: boolean; railw?: number; click?: string } {
+  if (!devBootEnabled(env)) return { probeOverflow: false };
+  const o = parseDevBoot(search);
+  return {
+    probeOverflow: !!o.probeOverflow,
+    ...(o.railw ? { railw: o.railw } : {}),
+    ...(o.click ? { click: o.click } : {}),
+  };
 }
 
 export function hasDevBoot(o: DevBootOverrides): boolean {
   return Boolean(
     o.preset || o.theme || o.zoom || o.lang || o.tourAt !== undefined || o.rail || o.iface ||
-    o.open ||
+    o.open || o.probeOverflow || o.railw !== undefined || o.click !== undefined ||
     o.welcomeOff || o.welcomeForce || o.resetLayout,
   );
 }

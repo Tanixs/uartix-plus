@@ -18,7 +18,7 @@ import { Dropdown } from "../../shared/Dropdown";
 import { HelpHint } from "../../shared/HelpHint";
 import { SetRow } from "../../shared/SetRow";
 import { Listbox } from "../../shared/Listbox";
-import { IconEdit, IconMore, IconPlus, IconRefresh, IconTarget, IconTrash } from "../../shared/icons";
+import { IconCheck, IconEdit, IconMore, IconPlus, IconRefresh, IconTarget, IconTrash } from "../../shared/icons";
 import { AI_FORMATS, AI_PRESETS, patch, useSettings, type AiFormat, type AiPreset } from "./settingsStore";
 import { guessContextTokens, listModels, missingFrom } from "../ai/modelCatalog";
 import { aiWireArgs } from "../agent/provider";
@@ -28,6 +28,7 @@ import {
   keyHintFor,
   removeModel,
   removeProvider,
+  providerNeedsKey,
   setActive,
   thinkingLabels,
   updateModel,
@@ -85,7 +86,128 @@ function Field({ label, tip, children }: { label: string; tip?: string; children
   );
 }
 
-/** 一个模型档案行：平时一行，点编辑才展开字段（ZCode 的清爽来自这里，不是字少） */
+/**
+ * 模型编辑弹窗（P113-D，照 ZCode 图4 那扇窗）。
+ *
+ * 为什么不是行内展开：行内那一排里"模型 ID"确实是个输入框，但它挤在横排中间，
+ * 用户读不出那是改名 —— 用户原话"现在的编辑都编辑不了模型名字"。
+ * 改名、改窗口、改档位是**一次有始有终的编辑**，给一扇窗比给一条会伸缩的行更清楚，
+ * 也才不会让列表在展开时跳成两屏高。
+ *
+ * 复用现成的 `workflow-dialog` 一族（`ParameterSetDialog` 在用）：mask + head + body + foot，
+ * label 本来就在控件上方。**不新造第四种弹窗样式**，也天然满足"弹窗必须 portal 到 body"。
+ */
+function ModelEditDialog({ provider, model, onClose }: { provider: AiProvider; model: AiModelProfile; onClose: () => void }) {
+  const [draft, setDraft] = useState<AiModelProfile>({ ...model });
+  const [err, setErr] = useState("");
+  useLocale();
+  const titleId = "msp-edit-title";
+
+  const save = () => {
+    const name = draft.model.trim();
+    if (!name) {
+      // 空名字不是"保存一个空串"，而是会发一个必然 404 的 model 字段 —— 在这里拦住
+      setErr(tx("模型 ID 不能为空", "The model id cannot be empty"));
+      return;
+    }
+    updateModel(model.id, {
+      model: name,
+      label: name,
+      contextTokens: Math.max(1024, Math.round(draft.contextTokens || 0)),
+      maxOutputTokens: Math.max(256, Math.round(draft.maxOutputTokens || 0)),
+      vision: !!draft.vision,
+      thinkingLevels: draft.thinkingLevels.filter((l) => l.label.trim()),
+      defaultThinking: draft.defaultThinking,
+    });
+    onClose();
+  };
+
+  const renameLevel = (i: number, label: string) => {
+    setDraft((d) => ({ ...d, thinkingLevels: d.thinkingLevels.map((l, k) => (k === i ? { ...l, label } : l)) }));
+  };
+
+  return (
+    <div className="modal-mask workflow-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal workflow-dialog" role="dialog" aria-modal="true" tabIndex={-1}
+        aria-labelledby={titleId} onKeyDown={(e) => e.stopPropagation()}>
+        <header className="workflow-dialog-head">
+          <h2 className="workflow-dialog-head-title" id={titleId}>{tx("编辑模型配置", "Edit model profile")}</h2>
+          <p className="workflow-dialog-head-sub">
+            {tx(`${provider.label} · 窗口与输出上限决定压缩阈值和仪表的分母`, `${provider.label} — the window and output cap are the denominators for compaction and the meter`)}
+          </p>
+        </header>
+        <div className="workflow-dialog-body">
+          <Field label={tx("模型 ID", "Model id")} tip={tx("原样发给 API；改了这里就等于改了这个档案是谁", "Sent to the API verbatim; changing it changes who this profile is")}>
+            <input className="input" value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
+          </Field>
+          <div className="msp-field-2">
+            <Field label={tx("上下文窗口", "Context window")} tip={tx("token 数。压缩阈值按它算，用量条也按它显示", "In tokens: the compaction threshold and the meter both divide by it")}>
+              <input className="input" type="number" min={1024} step={1000} value={draft.contextTokens}
+                onChange={(e) => setDraft({ ...draft, contextTokens: Number(e.target.value) || 0 })} />
+            </Field>
+            <Field label={tx("单次输出上限", "Max output")} tip={tx("宿主侧还会再钳一次（对话 256–32768 / Agent 1024–32768）", "The host clamps it again (chat 256-32768 / agent 1024-32768)")}>
+              <input className="input" type="number" min={256} step={1024} value={draft.maxOutputTokens}
+                onChange={(e) => setDraft({ ...draft, maxOutputTokens: Number(e.target.value) || 0 })} />
+            </Field>
+          </div>
+          <label className="workflow-check">
+            <input type="checkbox" checked={!!draft.vision} onChange={(e) => setDraft({ ...draft, vision: e.target.checked })} />
+            {tx("支持视觉（可发图片）", "Accepts images")}
+          </label>
+
+          <div className="workflow-inset">
+            <div className="workflow-inset-title">{tx("思考档位", "Thinking levels")}</div>
+            {/* 档位名可以改、可以增删；**每档要发什么参数不在这里编辑**。
+                那是档案里的静态对象（宿主只做浅合并、保留键拒收），
+                给一个自由表达式输入框等于让用户写出一个让上游 400 的东西 —— 宁缺不猜。 */}
+            {draft.thinkingLevels.length === 0 && (
+              <p className="workflow-muted">{tx("这台没有档位：发送框里那枚「思考强度」整个不出现。", "No levels on this model: the thinking selector does not appear at all.")}</p>
+            )}
+            {draft.thinkingLevels.map((l, i) => (
+              <div className="workflow-level" key={i}>
+                <input className="input" style={{ width: 140 }} value={l.label}
+                  aria-label={tx(`第 ${i + 1} 档的名字`, `Label of level ${i + 1}`)}
+                  onChange={(e) => renameLevel(i, e.target.value)} />
+                <span className="set-hint">
+                  {Object.keys(l.params).length
+                    ? tx(`发 ${Object.keys(l.params).length} 个参数`, `sends ${Object.keys(l.params).length} field(s)`)
+                    : tx("什么都不发", "sends nothing")}
+                </span>
+                <button type="button" className="msp-ibtn" aria-label={tx("删掉这一档", "Remove this level")}
+                  onClick={() => setDraft({ ...draft, thinkingLevels: draft.thinkingLevels.filter((_, k) => k !== i) })}>
+                  <IconTrash />
+                </button>
+              </div>
+            ))}
+            <button type="button" className="btn sm"
+              onClick={() => setDraft({ ...draft, thinkingLevels: [...draft.thinkingLevels, { label: `level-${draft.thinkingLevels.length + 1}`, params: {} }] })}>
+              {tx("加一档", "Add a level")}
+            </button>
+            {draft.thinkingLevels.length > 0 && (
+              <label className="workflow-check">
+                {tx("默认档", "Default")}
+                <select className="input" style={{ width: 140 }} value={draft.defaultThinking}
+                  onChange={(e) => setDraft({ ...draft, defaultThinking: e.target.value })}>
+                  <option value="">{tx("不设", "none")}</option>
+                  {draft.thinkingLevels.map((l, i) => <option key={i} value={l.label}>{l.label || `#${i + 1}`}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+          {err && <p role="alert" className="workflow-status">{err}</p>}
+        </div>
+        <footer className="workflow-dialog-foot">
+          <button type="button" className="btn" onClick={() => setDraft({ ...model })}>{tx("重置表单", "Reset")}</button>
+          <span className="spacer" />
+          <button type="button" className="btn" onClick={onClose}>{tx("取消", "Cancel")}</button>
+          <button type="button" className="btn primary" onClick={save}>{tx("保存", "Save")}</button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+/** 一个模型档案行：一行装名字、徽标与四个动作；「编辑」开一扇窗（P113-D） */
 function ModelRow({
   m, provider, isActive, editing, onEdit,
 }: {
@@ -102,6 +224,12 @@ function ModelRow({
    * 供应商级那个 `↻` 仍然是免费的 GET，两件事两个入口。
    */
   const test = async () => {
+    // 同 P113-C 那条判据：需要密钥而没填，就别花额度去打一个必然失败的请求
+    if (providerNeedsKey(provider) && !provider.apiKey.trim()) {
+      setProbe("err");
+      setNote(tx("先填这家的 API Key", "Fill in this provider's API key first"));
+      return;
+    }
     setProbe("run");
     setNote("");
     const t0 = Date.now();
@@ -128,8 +256,18 @@ function ModelRow({
         <span className="msp-mname" title={m.model}>{m.model || tx("（空名）", "(empty)")}</span>
         <span className="msp-badge">{fmtTokens(m.contextTokens)}</span>
         {m.vision && <span className="msp-badge">{tx("视觉", "vision")}</span>}
+        {/* 档位数也上徽标：它决定发送框里那枚「思考强度」出不出现，是这台模型的能力，不是偏好 */}
+        {levels.length > 0 && <span className="msp-badge">{tx(`${levels.length} 档`, `${levels.length} lvl`)}</span>}
         {!m.enabled && <span className="msp-moff">{tx("已停用", "off")}</span>}
         <span className="msp-macts">
+          <button type="button" className={`msp-ibtn${isActive ? " on" : ""}`} disabled={!provider.enabled || !m.enabled || isActive}
+            aria-label={isActive ? tx("当前使用的模型", "This is the model in use") : tx("设为当前使用", "Use this model")}
+            title={isActive
+              ? tx("发送框那枚模型钮正指着它", "The composer's model chip points at this one")
+              : tx("设为当前使用（发送框那枚模型钮会跟着变）", "Use it; the model chip next to the composer follows")}
+            onClick={() => setActive(m.providerId, m.id)}>
+            <IconCheck />
+          </button>
           <button type="button" className="msp-ibtn" onClick={() => void test()} disabled={probe === "run"}
             aria-label={tx("测试这个模型", "Test this model")}
             title={tx("发一次真请求问它答不答（会消耗少量额度）；供应商级的 ↻ 才是免费的", "Sends one real request to see whether this model answers (costs a little); the provider-level refresh is the free one")}>
@@ -152,36 +290,8 @@ function ModelRow({
           </label>
         </span>
       </div>
-      {(probe !== "idle" || editing) && (
+      {(probe !== "idle") && (
         <div className="msp-med">
-          {editing && (
-            <>
-              <label className="msp-med-field">
-                {tx("上下文窗口", "Context window")}
-                <input className="input" type="number" min={1024} step={1000} value={m.contextTokens}
-                  onChange={(e) => updateModel(m.id, { contextTokens: Math.max(1024, Math.round(Number(e.target.value) || 0)) })} />
-              </label>
-              <label className="msp-med-field">
-                {tx("单次输出上限", "Max output")}
-                <input className="input" type="number" min={256} step={1024} value={m.maxOutputTokens}
-                  title={tx("宿主侧还会再钳一次", "The host clamps it again")}
-                  onChange={(e) => updateModel(m.id, { maxOutputTokens: Math.max(256, Math.round(Number(e.target.value) || 0)) })} />
-              </label>
-              <label className="msp-med-check">
-                <input type="checkbox" checked={!!m.vision} onChange={(e) => updateModel(m.id, { vision: e.target.checked })} />
-                {tx("支持视觉", "Accepts images")}
-              </label>
-              <button type="button" className="btn sm" disabled={!provider.enabled || !m.enabled || isActive}
-                onClick={() => setActive(m.providerId, m.id)}>
-                {isActive ? tx("使用中", "In use") : tx("设为当前", "Use")}
-              </button>
-              {levels.length > 0 && (
-                <span className="msp-med-note">
-                  {tx(`思考档位 ${levels.join(" / ")}，默认 ${m.defaultThinking || tx("无", "none")}`, `thinking levels ${levels.join(" / ")}, default ${m.defaultThinking || "none"}`)}
-                </span>
-              )}
-            </>
-          )}
           {note && <span className="set-hint">{probe === "ok" ? tx(`已应答 · ${note}`, `answered · ${note}`) : probe === "err" ? tx(`失败：${note}`, `failed: ${note}`) : tx("测试中…", "testing…")}</span>}
         </div>
       )}
@@ -237,11 +347,29 @@ export function ModelSettingsPage() {
     setAddOpen(false);
   };
 
-  /** 供应商级试连 = 拉一次模型清单（P111-D），不花 token */
+  /**
+   * 供应商级试连 = 拉一次模型清单（P111-D），不花 token。
+   *
+   * P113-C 修掉一处**判据错误**：空密钥也报"已连通"。两层原因——
+   *  ① 没走现成的 `providerNeedsKey()`；
+   *  ② 更本质：`GET /models` 返回 200 只证明**地址可达**，不证明**密钥有效**——
+   *    不少网关的清单端点压根不鉴权。我把"连通"和"配得对"混成了一件事。
+   * 所以现在：需要密钥而密钥为空 ⇒ **不发请求**，直接写"先填 API Key"。
+   * 发出去的每一次都只报它真正证明到的事：带上去的密钥被 2xx 收下 ⇒ 才敢说"密钥有效"。
+   */
   const test = async () => {
-    if (!provider.baseUrl.trim()) {
+    const base = provider.baseUrl.trim();
+    if (!base) {
       setProbes((s) => ({ ...s, [provider.id]: "err" }));
       setNotes((s) => ({ ...s, [provider.id]: tx("先填服务地址", "Fill in the base URL first") }));
+      return;
+    }
+    if (providerNeedsKey(provider) && !provider.apiKey.trim()) {
+      setProbes((s) => ({ ...s, [provider.id]: "idle" }));
+      setNotes((s) => ({
+        ...s,
+        [provider.id]: tx("还没填 API Key —— 没发请求，也没法说它通不通", "No API key yet — nothing was sent, so nothing can be claimed"),
+      }));
       return;
     }
     setProbes((s) => ({ ...s, [provider.id]: "testing" }));
@@ -255,8 +383,8 @@ export function ModelSettingsPage() {
       setNotes((s) => ({
         ...s,
         [provider.id]: ids.length
-          ? tx(`已连通 · ${ms}ms · 清单 ${ids.length} 个`, `connected · ${ms}ms · ${ids.length} listed`)
-          : tx("已连通 · 这家不提供模型列表（可以自己填）", "connected · no model list here (fill names by hand)"),
+          ? tx(`密钥有效 · ${ms}ms · 清单 ${ids.length} 个`, `key accepted · ${ms}ms · ${ids.length} listed`)
+          : tx(`密钥有效 · 这家不提供模型清单（可以自己填）`, `key accepted · no model list here (fill names by hand)`),
       }));
     } catch (e) {
       setProbes((s) => ({ ...s, [provider.id]: "err" }));
@@ -292,6 +420,8 @@ export function ModelSettingsPage() {
   };
 
   const activeModel = st.models.find((m) => m.id === st.activeModelId) ?? null;
+  // 弹窗只挂一个实例，编辑哪一行由 `editing` 指；换供应商时上面已经把它清了
+  const editingModel = models.find((m) => m.id === editing) ?? null;
 
   return (
     <div className="msp">
@@ -458,6 +588,9 @@ export function ModelSettingsPage() {
           </SetRow>
         </div>
       </section>
+      {editingModel && (
+        <ModelEditDialog provider={provider} model={editingModel} onClose={() => setEditing("")} />
+      )}
     </div>
   );
 }

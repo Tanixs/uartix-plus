@@ -37,7 +37,7 @@ import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { SetGroups, SetRow } from "../../shared/SetRow";
-import { IconCube, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSparkle, IconStack, IconTrash, IconTune, IconUpload } from "../../shared/icons";
+import { IconChevron, IconCube, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSparkle, IconStack, IconTrash, IconTune, IconUpload } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 
@@ -429,12 +429,16 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
         <div className="set-page-head">
           <span className="set-page-title">{headTab.label}</span>
           {headTab.sub && <span className="set-page-sub">{headTab.sub}</span>}
-          <span className="set-page-actions">
-            <button className="btn primary" onClick={onClose}>{t("c.done")}</button>
-          </span>
         </div>
         <div className="set-body">
           <div className="set-nav">
+            {/* P113-D（用户："那个完成按钮很不好理解"）：设置页没有"做完"这回事 ——
+                改一项生效一项，所以出口说的是它本来的意思：**离开这个全屏页，回工作区**。
+                Esc 仍然有效，两条出口做同一件事。 */}
+            <button className="set-nav-back" onClick={onClose}>
+              <IconChevron dir="left" size={13} />
+              {tx("返回工作区", "Back to workspace")}
+            </button>
             {tabs.map((x, i) => (
               <Fragment key={x.key}>
                 {/* 分组标题只在"这一组的第一项"前出现一次 */}

@@ -162,7 +162,13 @@ export function consumePersistError(): string | null {
 }
 
 function emit() {
-  snapshot = { ...snapshot };
+  // P113-E：**广播出去的数组引用必须是新的**。原来这里只 `{\u2026snapshot}` —— 换的是外层对象，
+  // `plugins` 那个数组的引用被原样带走，于是所有以 `[plugins]` 为依赖的消费方
+  // （插件库列表、市场页的 localVersions/offShelf）**永远等不到重算**：
+  // 表现就是"市场装完插件，插件管理要重进才刷新"，而同一页的计数徽标读的是当下的
+  // `plugins.length`，所以数字会变、行不会出来 —— 这个不一致正是本案的指纹。
+  // 数组本身也 copy 一层，是为了让"以后谁再原地改数组"不会又把这条契约悄悄破一次。
+  snapshot = { ...snapshot, plugins: [...snapshot.plugins] };
   try {
     localStorage.setItem(KEY, JSON.stringify(snapshot));
     lastPersistError = null;
@@ -192,9 +198,14 @@ export function getPlugin(id: string): PluginRecord | undefined {
 }
 
 function upsert(record: PluginRecord) {
+  // 不再原地 `plugins[idx] = …` / `.push(…)`：那是 P113-E 那半条根因
+  // （数组引用不变 ⇒ 消费方的 useMemo 永不重算）。
   const idx = snapshot.plugins.findIndex((p) => p.pkg.id === record.pkg.id);
-  if (idx >= 0) snapshot.plugins[idx] = record;
-  else snapshot.plugins.push(record);
+  const plugins =
+    idx >= 0
+      ? snapshot.plugins.map((p, i) => (i === idx ? record : p))
+      : [...snapshot.plugins, record];
+  snapshot = { ...snapshot, plugins };
 }
 
 /* ---------------- staging 与安装 ---------------- */

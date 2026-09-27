@@ -94,8 +94,17 @@ export function subscribeRail(cb: () => void): () => void {
  *  `var(--rail-w, 300px)` 的那个**回退值** —— `defaultLayout.test.ts` 比对这两个数。
  *  P105-D 之前这里是硬编码 300，改一处忘一处就会让"布局算的分母"与"画出来的宽"错位。 */
 export const RAIL_PANEL_DEFAULT = SHELL_CHROME.railPanelW;
-/** 再窄就读不到字段标签了。 */
-export const RAIL_PANEL_MIN = 220;
+/**
+ * 允许拖到多窄。用户 2026-09-28 裁定：**允许更窄，遮住一部分可以接受**——
+ * "如果用户觉得遮住了看不见，他还可以自己拖动一下"。所以这里从 220 降到 180，
+ * 代价由裁切承担（`.lk-ctl { overflow: hidden }`），不再靠"抬高下限"回避。
+ *
+ * 一条不能含糊的边界：裁切只发生在**这一行的控件列**里，面板自己仍然可拖宽，
+ * 而且 P3 那批的教训仍然成立 —— 所以 180 之下不再允许（再小就是整颗控件点不到了，
+ * 不是"少看半行字"）。`check-style` 的 I 门看着这条：它禁的是用 `overflow:hidden`
+ * 去裁**工具条**，而工具条那条路我们没走（工具条改成换行/滚动）。
+ */
+export const RAIL_PANEL_MIN = 180;
 /** 硬上限；比它更严的是视口算出来的那个（`railPanelMaxAvailable`），二者取小。 */
 export const RAIL_PANEL_MAX = 460;
 

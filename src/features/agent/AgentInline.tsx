@@ -715,8 +715,15 @@ export const RunEntry = memo(function RunEntry({ view }: { view: AgentRunView })
             className={`ai-agent-dot${view.status === "succeeded" ? " ok" : interrupted ? " err" : " warn"}`}
             aria-hidden="true"
           />
-          <span className="ai-agent-oldrun-status">
-            {interrupted && applied > 0 ? tx(`已完成 ${applied} 步后中断`, `interrupted after ${applied} applied step(s)`) : statusLabel(view.status, view.pauseReason)}
+          <span
+            className="ai-agent-oldrun-status"
+            title={interrupted && applied > 0
+              ? tx(`中断前已完成 ${applied} 步`, `${applied} step(s) were done before it was interrupted`)
+              : undefined}
+          >
+            {/* 短到能在 320px 浮窗里站成一行的理由见 theme.css 的 .ai-agent-oldrun-status：
+                完整句子留在 title 里，不靠换行硬塞。 */}
+            {interrupted && applied > 0 ? tx(`已中断 · ${applied} 步`, `stopped · ${applied} steps`) : statusLabel(view.status, view.pauseReason)}
           </span>
           <span className="ai-agent-oldrun-goal">{view.goalBrief}</span>
           <span className="ai-agent-oldrun-time">

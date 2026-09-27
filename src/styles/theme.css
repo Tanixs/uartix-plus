@@ -1956,6 +1956,13 @@ select optgroup {
   align-items: center;
   gap: var(--sp-1);
   min-width: 0;
+  /* P113-A（用户裁定：允许拖得更窄，"遮住一部分可以，他自己拖一下就行"）：
+     这一行的控件列收不下去时**裁掉**，而不是让它画到下一行身上。
+     为什么不是"抬高面板下限"：那条路要用户放弃窄面板，而他要的是窄面板 + 不叠字。
+     为什么裁在这里而不是裁 `.rail-panel`：面板自己还有那条故意骑出 4px 的拖拽条
+     （`.rail-sash { right: -4px }`），在面板上裁会把它裁没。
+     边界：`RAIL_PANEL_MIN = 180` 以下不再允许 —— 再小就是整颗控件点不到，不是少看半行字。 */
+  overflow: hidden;
 }
 
 .lk-ctl > .input {
@@ -2954,6 +2961,10 @@ select optgroup {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* P113-A 探针在同一屏里量到这条工具条溢出 +45px（面板窄到一定程度时 CSV/XLSX 被切在框外）。
+     工具条**不能靠裁切解决**：那正是 P3 那批"控件在盒外点不到"的事故，`check-style` 的 I 门
+     就是为它写的。换行 = 条自己长高，控件仍然点得到。 */
+  flex-wrap: wrap;
   box-sizing: border-box;
   min-height: 28px;
   padding: 2px 8px;
@@ -5892,6 +5903,20 @@ select optgroup {
 .set-page-title { font-size: var(--fs-xl); font-weight: 700; line-height: 1.25; user-select: none; }
 .set-page-sub { grid-column: 1; font-size: var(--fs-body); line-height: 1.5; color: var(--text-dim); max-width: 72ch; }
 .set-page-actions { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+/* 页级出口：ZCode 的「← 返回工作区」同位。它不是"某一类设置"，所以不吃 `.set-nav button` 的选中形状 */
+.set-nav-back {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 2px 0 10px;
+  padding: 8px 13px;
+  border-radius: var(--radius-l);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.set-nav-back:hover { color: var(--accent); background: var(--raise-1); }
 .set-nav-group {
   margin: 14px 0 3px;
   padding: 0 13px;
@@ -5910,7 +5935,10 @@ select optgroup {
 /* 一组设置 = 一张浮起的卡，而不是"一条发丝线接一条发丝线" */
 .set-card {
   margin: 0 0 var(--sp-4);
-  padding: 0 18px;
+  /* P113-B（用户："标题文字都太贴上下边框了"）：卡片自己只留一点边，
+     上下气口交给组标题自己管（见下面 .set-card > .set-group-title）——
+     原来靠 `:first-child { margin-top: 12px }` 特例顶开，于是"第一组特殊、其余不特殊"。 */
+  padding: 2px 20px 4px;
   background: var(--bg-panel);
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-pop), var(--shadow);
@@ -5919,7 +5947,8 @@ select optgroup {
   max-width: 1080px;
 }
 .set-card > .set-row:last-child { border-bottom: none; }
-.set-card > .set-group-title:first-child { margin-top: 12px; }
+.set-card > .set-group-title { margin: 0; padding: 16px 0 6px; }
+.set-card > .set-group-title:first-child { padding-top: 14px; }
 /* ---------------- P111-C 「模型设置」：清单 + 详情两栏 ----------------
    中列是"扫一眼挑一家"，右列是"改这一家"，所以两栏各自成面：
    中列与左导航同属凹陷区（--bg-inset），右列的卡片浮在页面底色上。
@@ -5964,13 +5993,14 @@ select optgroup {
 @keyframes msp-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 .msp-detail { flex: 1; min-width: 0; max-width: 780px; display: flex; flex-direction: column; gap: var(--sp-4); }
 .msp-card {
-  padding: 0 18px 6px;
+  padding: 2px 18px 4px;
   background: var(--bg-panel);
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-pop), var(--shadow);
 }
 .msp-card > .set-row:last-child { border-bottom: none; }
-.msp-card > .set-group-title:first-child { margin-top: 14px; }
+.msp-card > .set-group-title { margin: 0; padding: 16px 0 6px; }
+.msp-card > .set-group-title:first-child { padding-top: 14px; }
 .msp-test { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
 .msp-model { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
 /* P112-B：详情改竖排（label 在上、控件通栏），模型收成一行 + 四个动作，字段点编辑才展开 */
@@ -6059,10 +6089,10 @@ select optgroup {
   padding: 0 0 10px;
   font-size: var(--fs-body);
 }
-.msp-med-field { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); }
-.msp-med-field .input { width: 104px; }
-.msp-med-check { display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim); }
-.msp-med-note { font-size: var(--fs-xs); color: var(--text-faint); }
+/* 编辑弹窗里的复选与档位行（P113-D）。挂在 workflow-* 上是因为它们只活在那扇窗里，
+   不另起一族名字。 */
+.workflow-check { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 0; font-size: var(--fs-sm); color: var(--text-dim); }
+.workflow-level { display: flex; align-items: center; gap: var(--sp-2); padding: 4px 0; }
 .msp-fresh { padding: 0 0 10px; }
 .msp-fresh-head { font-size: var(--fs-body); color: var(--text-dim); padding-bottom: 6px; }
 /* 远端清单里"档案还没有"的那几行：一行一个，右侧一个「导入」 */
@@ -6124,6 +6154,10 @@ select optgroup {
   font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--text-dim);
+  /* P113-F：这一句在窄浮窗里被那段 `flex: 1 1 auto` 的目标文字挤成了竖排
+     （"已完成 / 10 / 步后 / 中断"一行一个字）。状态短语不该让位——要截的应该是目标。 */
+  flex: none;
+  white-space: nowrap;
 }
 /* 命令面板的一个分组：段标题 + 若干行。原来只有 .cmdk-section-h 有样式，
    组与组之间因此没有留白（P111-A 的 J 门把这类"用了却没定义"集体点名时抓到的）。 */
