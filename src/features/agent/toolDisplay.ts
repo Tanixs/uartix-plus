@@ -134,6 +134,8 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     invalid_id: "标识不合法",
     invalid_payload: "载荷不符合产物形状",
     update_needs_user: "需要你在插件库里批准",
+    // P110-C：撞名不再悄悄多出一份副本，而是把候选回给模型让它带 update 去升版本
+    duplicate_plugin_name: "库里已有同名插件",
     update_rejected: "候选未通过校验",
     update_failed: "更新失败（已回退）",
     rollback_failed: "回滚失败",

@@ -127,7 +127,7 @@ describe("save_plugin 档位与落库", () => {
     expect(store.getPlugin(id)?.state).not.toBe("enabled");
   });
 
-  it("包校验失败回传 errors；显式同 ID＝升版本，撞名但没指 ID＝另起一份绝不覆盖", async () => {
+  it("包校验失败回传 errors；显式同 ID＝升版本，撞名没指 ID＝拒并给候选（不再悄悄多一份）", async () => {
     const a = createLocalAgentAdapter({ runId: "r1", gate: fakeGate() });
     const bad = await a.execute(call("save_plugin", { kind: "theme", name: "坏主题", payload: {} }), ctx("create"));
     expect(bad.code).toBe("invalid_package");
@@ -141,13 +141,26 @@ describe("save_plugin 档位与落库", () => {
     const d2 = second.data as { pluginId: string; updated?: boolean; version?: string; history?: number };
     expect(d2).toMatchObject({ pluginId: "user.agent.panel", updated: true, version: "0.1.1", history: 1 });
     expect(store.getSnapshot().plugins.filter((p) => p.pkg.id === "user.agent.panel")).toHaveLength(1);
-    // 没给 id 时按名字派生 id，撞车仍是"再来一份"：没有指名就不该覆盖别人的东西
+    // P110-C 改的正是这一半。旧断言钉的是"没指 id 时撞名就再派生一个 id"
+    // （`freeAgentId` 加 `-2`）——那恰好是本批禁掉的行为：模型迭代自己的作品时长出两份
+    // 并排插件，用户看到的不是"没改"就是"该启用哪一个"。旧断言在新行为下还会退化成
+    // "两个都 undefined 所以不相等"的名存实亡，所以直接换成判新契约：
     const dupA = await a.execute(call("save_plugin", { kind: "panel", name: "同名面板", payload: { format: "html", html: "a" } }), ctx("create"));
     const dupB = await a.execute(call("save_plugin", { kind: "panel", name: "同名面板", payload: { format: "html", html: "b" } }), ctx("create"));
     const idA = (dupA.data as { pluginId: string }).pluginId;
-    const idB = (dupB.data as { pluginId: string }).pluginId;
-    expect(idB).not.toBe(idA);
-    expect((dupB.data as { updated?: boolean }).updated).toBeUndefined();
+    expect(dupB.ok, JSON.stringify(dupB.data)).toBe(false);
+    expect(dupB.code).toBe("duplicate_plugin_name");
+    const cand = (dupB.data as { existing_candidates: { id: string; createdBy: string }[] }).existing_candidates;
+    expect(cand.map((r) => r.id)).toContain(idA);
+    expect(cand[0].createdBy).toBe("agent");
+    // 候选里带着〜该带 update 去改々的指路，模型下一步就能自己接上
+    // 不能只看对象里有没有这个字：String(对象) 是 "[object Object]"，那是一条永远不会红的断言
+    expect(JSON.stringify(dupB.data)).toContain("update=");
+    // 库里不许因此多出一份副本
+    expect(store.getSnapshot().plugins.filter((r) => r.pkg.name === "同名面板")).toHaveLength(1);
+    // 换个能区分的名字仍然要能存（拒绝只针对撞名，不是把保存这条路堵死）
+    const other = await a.execute(call("save_plugin", { kind: "panel", name: "另一个面板", payload: { format: "html", html: "c" } }), ctx("create"));
+    expect(other.ok).toBe(true);
   });
 });
 

@@ -18,6 +18,7 @@ import { actionKindLabel } from "./toolCatalog";
 import { actionMeta } from "./toolCatalog";
 import {
   stagePackage, installStaged, setEnabled, getPlugin,
+  getSnapshot as getPluginLib,
   proposeUpdate, approveUpdate, rollback as rollbackPlugin,
   armModulePackage,
 } from "../plugins/pluginStore";
@@ -297,15 +298,22 @@ export const localToolEntries: AgentToolEntry[] = [
     domain: null,
     provenance: HOST,
     description: "List local plugin library entries (id/name/version/state/capabilities/createdBy/history/pending candidate). Read-only. Same reader as app_read path `plugins` — this one just keeps the historical receipt shape.",
-    parameters: { type: "object", properties: {}, additionalProperties: false },
-    summarize: () => "查看插件库",
+    parameters: { type: "object", properties: { q: { type: "string" } }, additionalProperties: false },
+    summarize: (a) => (String(a.q ?? "").trim() ? `查找插件「${String(a.q).trim()}」` : "查看插件库"),
     async execute(_a, ctx) {
       // P99a-C1：字段与分页都改由 hostCatalog 的 `plugins` 视图出（以前这里自己 map 一份 store，
       // 与目录里那份就是同一件事的两个门——加一个字段必然只改一处）
       const r = await readCatalog("plugins", { limit: LIST_CAP.plugins });
       if (!r.ok) return notExecuted(ctx.callId, r.code, r.data);
       const d = r.data as { total: number; items: Record<string, unknown>[] };
-      const shown = d.items;
+      // P110-C：可选 `q` 按 id/名字过滤。库里几十件时，整库翻一遍既慢又吃上下文，
+      // 而“先找到我上次存的那个，再带 update 去改”正是这条工具要支持的动作。
+      const q = typeof _a.q === "string" ? _a.q.trim().toLowerCase() : "";
+      const shown = q
+        ? d.items.filter((it) =>
+            String(it.id ?? "").toLowerCase().includes(q) || String(it.name ?? "").toLowerCase().includes(q),
+          )
+        : d.items;
       return {
         callId: ctx.callId,
         ok: true,
@@ -487,6 +495,7 @@ export const localToolEntries: AgentToolEntry[] = [
       `Save an artifact as a reusable local plugin package (uartix-plugin). Args: { kind: one of ${ARTIFACT_KINDS.join("|")}, name: string, payload: object (artifact content per kind; widget/panel payload = {format:'html',html} | {format:'declarative',blocks}; workspacePreset payload = {layout:<dockview JSON>, note?}; workflow payload = {goal:string, steps:[{tool,args?,note?}]} where every tool must be one you can actually call; module payload = {format:'js',code}); id?: string (dotted lowercase, default user.agent.*), desc?: string, enable?: boolean (auto-enable pure-UI plugin), update?: string (existing plugin id to revise), version?: string }. ` +
       "A workflow artifact is a reusable task template, NOT a macro runner: the user loads it into the Agent composer and it still goes through the current scope and approval rules. " +
       "Iterating on your own work: pass update (or just the same id) — it bumps the version and pushes the previous package onto the rollback stack instead of creating a near-duplicate plugin. " +
+      "P110-C: a name that already exists is now refused with `duplicate_plugin_name` plus `existing_candidates` (id/version/createdBy/state) — read that list, then either pass update=\"<id>\" or pick a distinguishable name. We no longer mint `-2` copies, because two side-by-side plugins left the user guessing which one is live. " +
       "Only plugins you (the agent) created can be revised silently; user/imported plugins return update_needs_user and are never overwritten. " +
       PLUGIN_CAP_BOUNDARY,
     parameters: {
@@ -583,6 +592,48 @@ export const localToolEntries: AgentToolEntry[] = [
       const targetId = typeof a.update === "string" && a.update.trim()
         ? a.update.trim().toLowerCase()
         : provided && getPlugin(provided) ? provided : "";
+      /**
+       * P110-C：同名插件已经存在时**不再自动加 `-2` 另建一份**。
+       *
+       * 为什么这是缺陷而不是便利（用户 2026-09-27 的图 1、2）：旧写法把"名字撞了"当成
+       * "那就在 id 后面加个序号"，于是模型迭代自己上一个作品时，库里长出 `battery-panel`
+       * 与 `battery-panel-2` 两份并排的插件——用户看到的是"让你改你没改，又新建了一个"，
+       * 而旧那份还在画面上，谁都不知道该启用哪一个。这不是命名策略问题，是把"迭代"
+       * 这条路悄悄换成了"复制"。
+       *
+       * 现在：撞名就拒，并把候选连同"谁创建的、什么版本、启没启用"一起回给模型，
+       * 让它自己带 `update=<id>` 走上面的升版本链路。别人创建的件由 `update_needs_user`
+       * 挡着，所以这里也不给 Agent 一条改用户东西的后路。
+       */
+      if (!targetId) {
+        const wanted = name.trim().toLowerCase();
+        const sameName = getPluginLib()
+          .plugins.filter((r) => r.pkg.name.trim().toLowerCase() === wanted)
+          .map((r) => ({
+            id: r.pkg.id,
+            name: r.pkg.name,
+            version: r.pkg.version,
+            createdBy: r.pkg.provenance.createdBy,
+            state: r.state,
+          }));
+        if (sameName.length) {
+          const mine = sameName.some((r) => r.createdBy === "agent");
+          const listed = sameName
+            .map(
+              (r) =>
+                `${r.id} v${r.version}（${r.createdBy === "agent" ? "你存的" : r.createdBy}，${r.state === "enabled" ? "启用中" : "未启用"}）`,
+            )
+            .join("、");
+          return notExecuted(callId, "duplicate_plugin_name", {
+            name,
+            existing_candidates: sameName,
+            hint: mine
+              ? `库里已有同名插件：${listed}。要改自己上一个作品请带 update="<那个 id>"——会升版本并把旧版压进回滚栈，而不是另建一份副本；确实要做成另一个插件，就换个能区分的 name。`
+              : `库里已有同名插件：${listed}，但都不是你存的，Agent 不替用户改它。要么换个能区分的 name，要么把这件事交回用户在插件库里决定。`,
+          });
+        }
+      }
+
       if (targetId) {
         const rec = getPlugin(targetId);
         if (!rec) return notExecuted(callId, "plugin_not_found", { id: targetId });
