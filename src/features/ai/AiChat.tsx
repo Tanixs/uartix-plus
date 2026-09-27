@@ -28,6 +28,8 @@ import {
 import { RunEntry, AgentFloat } from "../agent/AgentInline";
 import { buildTimeline } from "../agent/timeline";
 import { buildAgentHistory, budgetFor, HISTORY_CHAR_BUDGET, MIN_HISTORY_BUDGET, tightenHistoryBudget } from "../agent/sessionLog";
+import { windowGauge } from "../agent/contextBudget";
+import { AiModelPicker } from "./AiModelPicker";
 import { agentPayloadBytes, ctxGauge } from "../agent/context";
 import {
   DOMAINS, DOMAIN_PRESETS, DOMAIN_TIP, DOMAIN_ZH, PRIMARY_TIERS, hasDomain, rememberTier, resolveTier, restoreTier, tierBadge, tierIdOf, type Domain,
@@ -861,6 +863,10 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, ctxBudget, sessionRuns.length, runsWork]);
   const ctxMeter = ctxGauge(ctxEstimate.bytes);
+  // P110-B4：**第二个分母**。`ctxGauge` 那条量的是传输保险丝（"这次请求会不会被宿主 2 MiB 撞断"），
+  // 这一条量的是模型窗口（"历史到这儿就该折叠了"）。两条各管一件事，合成一条就会撒谎——
+  // 旧版只有传输那条，于是出现过"仪表显示 1%、其实正在丢 36 条历史"（详设 §2.1）。
+  const ctxWindow = windowGauge(ctxEstimate.bytes, activeForCtx?.model.contextTokens ?? 0, settings.aiCompactRatio);
   // P110-B3：**第二个分母** —— 已用占当前模型窗口的比例。两条线各管各的含义：传输那条说
   // "这次请求会不会被宿主 2 MiB 撞断"，窗口那条说"历史到这儿就该折叠了"。
   // 合成一个数就会撒谎：旧版只有传输那条，于是出现过"仪表显示 1%、其实正在丢 36 条历史"。
@@ -1982,7 +1988,19 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               <span className="ai-ctx-bar" aria-hidden="true">
                 <span className="ai-ctx-bar-fill" style={{ width: `${ctxMeter.pct}%` }} />
               </span>
-              <span className="ai-ctx-num">{ctxMeter.text}</span>
+              {/* P110-B4：两条线一起报，因为两个分母管两件不同的事：
+                  窗口那条说"历史到这儿该折了"，传输那条说"请求会不会被宿主 2 MiB 撞断"。
+                  只报传输那条就出现过"显示 1%、其实正在丢几十条历史"（详设 §2.1）。 */}
+              <span
+                className="ai-ctx-num"
+                title={tx(
+                  "左：已用占当前模型上下文窗口的比例（到压缩阈值就开始折更早的内容）；右：已用占传输上限 1.6 MB 的比例（宿主 2 MiB 熔断之前的前端软顶）",
+                  "left: usage against the current model's context window (past the compaction threshold, older content folds); right: usage against the 1.6 MB transport cap, a soft ceiling under the host's 2 MiB fuse",
+                )}
+              >
+                {tx(`窗口 ${ctxWindow.pct}% · 传输 ${ctxMeter.pct}%`, `window ${ctxWindow.pct}% · transport ${ctxMeter.pct}%`)}
+              </span>
+              <AiModelPicker />
               {ctxEstimate.shadowed > 0 && (
                 <span className="ai-ctx-shadowed" title={tx("较早的工具回执已只以摘要下发（台账未删）", "Older tool receipts now go as summaries (the ledger is intact)")}>
                   {tx(`已折 ${ctxEstimate.shadowed}`, `${ctxEstimate.shadowed} folded`)}
