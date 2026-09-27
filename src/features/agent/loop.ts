@@ -119,6 +119,12 @@ export async function runAgent(options: {
   historyShadowed?: number;
   /** 退避节奏（毫秒）；仅测试注入更短的，生产用 TURN_RETRY_BACKOFF_MS */
   retryBackoffMs?: number[];
+  /**
+   * P110-B5：当前模型的单次输出上限（档案表里的 `maxOutputTokens`），由 agentRun 传入。
+   * 它同时是**起点**和**截断重试阶梯的顶**：没有这一参，loop 只能拿三个硬编码数去试，
+   * 于是一台只能吐 4k 的模型也要先撞两次「16384 太大」才轮到自己那档。
+   */
+  maxOutputTokens?: number;
   maxRounds?: number; maxCalls?: number; timeoutMs?: number; onEvent?: (event: RunEvent) => void;
 }): Promise<AgentResult> {
   const { provider, adapter, context } = options;
@@ -259,7 +265,9 @@ ${planNotice}` : systemPrompt);
    * 每次重试都落 status 事件——用户看得见"在自动重试"，而不是界面卡住。
    */
   async function callTurn(roundNo: number, onDelta: (kind: "text" | "reasoning", text: string) => void): Promise<ModelTurn> {
-    let budget = MAX_TOKENS_LADDER[0];
+    // 起点 = 档案的上限（宿主侧还会再钳一次）；拿不到档案才退回旧阶梯顶
+    const ceiling = Math.min(options.maxOutputTokens ?? MAX_TOKENS_LADDER[0], 32_768);
+    let budget = ceiling;
     let attempt = 0;
     // P96-K4：本轮已收到的增量。旧实现失败即丢——真机上"已思考 2m48s"的那一大段直接蒸发，
     // 界面上看到的就是"卡很久什么都没有"。现在失败前把它落进台账（reasoning 不回灌模型，无副作用）。
@@ -315,7 +323,7 @@ ${planNotice}` : systemPrompt);
           throw err;
         }
         attempt++;
-        const lowered = nextMaxTokens(budget, te.shrink);
+        const lowered = nextMaxTokens(budget, te.shrink, ceiling);
         let note = `第 ${roundNo} 轮失败：${te.msg}；自动重试 ${attempt}/${TURN_RETRY_LIMIT}`;
         if (lowered !== null) { budget = lowered; note += `，输出预算降至 ${lowered}`; }
         note += "，并改为不深度思考";

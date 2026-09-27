@@ -10,6 +10,7 @@ import { runAgent, resolveBudget } from "./loop";
 import { clearPlan } from "./planLedger";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { invokeAgentProvider } from "./provider";
+import { activeRef } from "../ai/aiProfileStore";
 import { createLocalAgentAdapter } from "./agentAdapter";
 import { pluginToolEntries } from "./pluginTools";
 import { runtimeFacts } from "./hostCatalog";
@@ -485,6 +486,10 @@ async function executeRun(
   const adapter = createLocalAgentAdapter({ runId, gate, scope: view.scope, allowed, extraEntries: pluginToolEntries() });
   setLocalJobInterest(true);
   try {
+    // P110-B5：输出预算的顶取自当前模型档案（provider 实发时用的是同一个数）。
+    // 取一次存局部变量：`activeRef()` 每次都过一遍筛选，写在对象字面量里连着调两次就是
+    // 既浪费又可能在中间被改 —— 那会撒一次非空断言的谎。
+    const activeAi = activeRef();
     const result = await runAgent({
       goal: view.goal,
       provider: invokeAgentProvider,
@@ -501,6 +506,7 @@ async function executeRun(
       // 只给读数不给指令——DSH 的 `agent.inject` 那条"每轮往上下文里塞话"的路我们不抄（详设 §6.2）。
       liveFacts: ({ count, bytes }) => runtimeFacts({ scope: view.scope, allowed, toolCount: count, toolBytes: bytes }),
       seqBase: prior.length,
+      ...(activeAi ? { maxOutputTokens: activeAi.model.maxOutputTokens } : {}),
       maxRounds: view.caps.maxRounds, maxCalls: view.caps.maxCalls,
       // 续跑给的是**剩余**时间，不是重新发一份完整预算；`deadlineAt === 0` = 无截止 ⇒ 传 0
       timeoutMs: opts.timeoutMs ?? (view.caps.deadlineAt ? view.caps.deadlineAt - Date.now() : 0),

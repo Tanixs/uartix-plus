@@ -104,6 +104,14 @@ describe("输出预算阶梯：从档案的上限往下退，不再拿三个硬�
     expect(nextMaxTokens(4096, true)).toBeNull();
   });
 
+  it("loop 的起点与顶都来自档案：拿不到档案才退回旧阶梯", () => {
+    // 这两条是把上面那个设计意图钉住，不是把实现细节描一遍：
+    // 4k 的模型第一次就该发 4096，而不是先撞两次 16384
+    expect(ladderFrom(4096)[0]).toBe(4096);
+    expect(nextMaxTokens(4096, true, 4096)).toBe(2048);
+    expect(nextMaxTokens(1024, true, 4096)).toBeNull();
+  });
+
   it("上限异常小也不会算出 0 档（0 会让请求体没有 max_tokens 语义）", () => {
     for (const n of ladderFrom(1)) expect(n).toBeGreaterThanOrEqual(256);
   });

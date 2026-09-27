@@ -134,6 +134,8 @@ export const invokeAgentProvider: AgentProvider = async (
         /* 无事件通道：静默降级为非实时 */
       }
     }
+    // 单一口径：这一轮能用的输出顶就是档案里那个数（宿主还会再 clamp 一次）
+    const sentCeiling = Math.min(active.model.maxOutputTokens, 32_768);
     const raw = await invoke<RustTurnResult>("ai_agent_turn", {
       reqId,
       // P110-B1：连接参数改由档案表算出来（`aiWireArgs` 是唯一构造点，清洗也在里面）
@@ -149,7 +151,7 @@ export const invokeAgentProvider: AgentProvider = async (
       // P91 A3：输出预算（截断类失败后 loop 逐级下调重试）
       // P110-B5：输出预算的**起点**取自档案表（模型自己的 maxOutputTokens），
       // 不再由 loop 那边拿三个硬编码数猜。宿主侧仍会钳一次（这是"客户端别把上游打死"的保险）。
-      maxTokens: options?.maxTokens ?? Math.min(active.model.maxOutputTokens, 32_768),
+      maxTokens: Math.min(options?.maxTokens ?? sentCeiling, sentCeiling),
       // 思考档位参数：档案里写死的静态对象，这里只透传（不猜任何平台的字段名）
       thinkingParams: thinkingParamsFor(active.model, st.aiThinkingLevel) ?? undefined,
     });
