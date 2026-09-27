@@ -5,6 +5,7 @@ import * as sessionStore from "../session/sessionStore";
 import { useSettings } from "../settings/settingsStore";
 import { t, tx, useLocale } from "../../i18n/strings";
 import { IconChevron } from "../../shared/icons";
+import { Listbox } from "../../shared/Listbox";
 
 const BAUDS = [
   1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600,
@@ -18,7 +19,7 @@ const BAUDS = [
  * 含义只活在 `title` 里 —— 第一次用的人看到的是一排不知道填什么的小框。
  *
  * 为什么是 `div` + 控件自带 `aria-label`，而不是把整行包进 `<label>`：
- * 波特率那一格里有 `.baud-combo`（内含 `.baud-menu` 与两颗按钮），帧格式那一格里有
+ * 波特率那一格里有 `.baud-combo`（内含共享的 Listbox 菜单与两颗按钮），帧格式那一格里有
  * 三只下拉 —— `<label>` 的内容模型是 phrasing content，塞 div 进去不合法；
  * 而隐式关联只指向**第一个** labelable 后代，用它命名三只下拉是在撒谎。
  * 所以可见标签归排版，可访问名归控件自己（`aria-label` 与可见文字同一个变量，不是第二真相）。
@@ -176,22 +177,19 @@ export function LinkParams() {
           >
             <IconChevron size={13} dir="down" />
           </button>
-          {baudOpen && (
-            <div className="baud-menu">
-              {BAUDS.map((b) => (
-                <button
-                  key={b}
-                  className={b === s.config.baud ? "on" : ""}
-                  onClick={() => {
-                    store.setConfig({ baud: b });
-                    setBaudOpen(false);
-                  }}
-                >
-                  {b}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* P110-E：这张菜单不再是本地一份"绝对定位 + 一组按钮"，
+              换成共享基元：portal 到 body（不会被面板的 overflow/z-index 裁掉）、
+              键盘上下/Home/End/Esc、超出高度自己滚。行样式用 .lbx-row，
+              容器复用 .ctx-menu 那张脸，所以全仓边框条数是净减的。 */}
+          <Listbox
+            anchorRef={comboRef}
+            open={baudOpen}
+            onClose={() => setBaudOpen(false)}
+            ariaLabel={BAUD_LABEL}
+            value={String(s.config.baud)}
+            options={BAUDS.map((b) => ({ value: String(b), label: String(b) }))}
+            onSelect={(v) => store.setConfig({ baud: Number(v) })}
+          />
         </div>
       </Field>
       {/* P104-B6：数据位 / 校验 / 停止位是**一个**概念（帧格式），过去是三只各带边框、

@@ -735,7 +735,7 @@ select {
   appearance: base-select;
 }
 
-/* 弹层盒：与九类展开菜单同一条脸（值与 .baud-menu/.tb-menu 实测逐项相同）。
+/* 弹层盒：与九类展开菜单同一条脸（值与 .tb-menu 等菜单类实测逐项相同）。
    `appearance: base-select` **必须在这里再写一遍**：MDN 明写 select 与 ::picker(select)
    两处都要设，只设 select 的话按钮换皮、弹层仍按系统原生画——上一轮就这么翻的车
    （我量到 ::picker 的计算值是白底圆角双层影就当成了"已生效"，计算值正确不等于真那么画）。 */
@@ -797,7 +797,7 @@ select option:hover {
   color: var(--accent);
 }
 
-/* 选中项不再是引擎整条蓝底，而是菜单类一致的 accent 洗涤 + 加粗（对齐 .baud-menu button.on） */
+/* 选中项不再是引擎整条蓝底，而是菜单类一致的 accent 洗涤 + 加粗（对齐 .lbx-row.on） */
 select option:checked {
   background: var(--accent-soft);
   color: var(--accent);
@@ -6404,35 +6404,35 @@ label.set-switch,
   background: var(--accent-soft);
 }
 .baud-toggle:disabled { opacity: .45; cursor: not-allowed; }
-.baud-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 60;
-  min-width: 100%;
-  max-height: 250px;
-  overflow-y: auto;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-l);
-  /* 基准那张菜单自己的影也是坏的：--shadow-lg 全仓无定义，一直吃 rgba 字面量兜底 ⇒ 换成弹层双层影 */
-  box-shadow: var(--shadow-pop), var(--shadow);
-  padding: var(--sp-1);
-}
-.baud-menu button {
+/* P110-E：Listbox 的行与注记。容器复用 `.ctx-menu` 那张脸（底/描边/圆角/双层影都由它给），
+   这里**不再写 border**——全仓边框条数是门禁数着的（只降不升），新基元各画一份描边就等于把门往上抬。
+   顺带：这一批把 `.baud-menu` 那三条规则撤了，所以边框是**净减**的。 */
+.lbx-row {
   all: unset;
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
   width: 100%;
   box-sizing: border-box;
   padding: 5px 12px;
   font-size: var(--fs-sm);
-  font-family: var(--font-mono);
+  color: var(--text);
   border-radius: var(--radius-m);
   cursor: pointer;
+}
+.lbx-row:hover:not(:disabled),
+.lbx-row:focus-visible {
+  background: var(--accent-soft);
   color: var(--text);
 }
-.baud-menu button:hover { background: var(--accent-soft); color: var(--accent); }
-.baud-menu button.on { color: var(--accent); font-weight: 600; }
+.lbx-row.on { color: var(--accent); }
+.lbx-row:disabled { opacity: .45; cursor: not-allowed; }
+.lbx-label { font-family: var(--font-mono); }
+.lbx-note {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+}
 
 /* 图传工具栏：图标按钮加大 + 常用按钮颜色区分 */
 .video-bar .icon-btn {
