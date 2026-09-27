@@ -10,7 +10,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { getVersion } from "@tauri-apps/api/app";
-import { getSnapshot as getSettings, useSettings } from "../settings/settingsStore";
+import { getSnapshot as getSettings, patch, useSettings } from "../settings/settingsStore";
 import { activeRef, useAiProfiles } from "./aiProfileStore";
 import * as chatStore from "./chatStore";
 import type { ChatMsg, ReasonRound } from "./chatStore";
@@ -27,7 +27,7 @@ import {
 } from "./aiActions";
 import { RunEntry, AgentFloat } from "../agent/AgentInline";
 import { buildTimeline } from "../agent/timeline";
-import { buildAgentHistory, HISTORY_CHAR_BUDGET, MIN_HISTORY_BUDGET, tightenHistoryBudget } from "../agent/sessionLog";
+import { buildAgentHistory, budgetFor, HISTORY_CHAR_BUDGET, MIN_HISTORY_BUDGET, tightenHistoryBudget } from "../agent/sessionLog";
 import { agentPayloadBytes, ctxGauge } from "../agent/context";
 import {
   DOMAINS, DOMAIN_PRESETS, DOMAIN_TIP, DOMAIN_ZH, PRIMARY_TIERS, hasDomain, rememberTier, resolveTier, restoreTier, tierBadge, tierIdOf, type Domain,
@@ -846,7 +846,13 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
    * 台账事件一条不删，所以这是"少发给模型"，不是"忘掉"。
    */
   const sessionRuns = agentSnap.runs.filter((r) => r.sessionId === chat.activeId);
-  const [ctxBudget, setCtxBudget] = useState(HISTORY_CHAR_BUDGET);
+  // P110-B2：预算不再是"一个跟模型无关的 12000"。自动值 = 当前模型窗口 × 压缩阈值
+  // （`aiCompactRatio`），并被传输保险丝封顶；手动压缩写进 `aiHistoryOverride` 并持久化。
+  // 窗口改了而手动值还留着时以窗口为准（否则换了个 8k 的小模型，历史照旧堆 2 万字）。
+  const aiProfilesForCtx = useAiProfiles();
+  const activeForCtx = activeRef(aiProfilesForCtx);
+  const autoBudget = budgetFor(activeForCtx?.model.contextTokens ?? 0, settings.aiCompactRatio);
+  const ctxBudget = settings.aiHistoryOverride > 0 ? Math.min(settings.aiHistoryOverride, autoBudget) : autoBudget;
   // sessionRuns 每次 agentSnap 变化都是新数组 ⇒ 用"内容摘要"当实质依赖（写在数组外，规则才能静态检查）
   const runsWork = sessionRuns.reduce((n, r) => n + r.rounds + r.calls, 0);
   const ctxEstimate = useMemo(() => {
@@ -859,12 +865,13 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const compressContext = () => {
     const next = tightenHistoryBudget(ctxBudget);
     if (next === ctxBudget) return; // 已到下限：按钮此时是禁用的，这里只是双保险不静默空转
-    setCtxBudget(next);
-    setNotice(tx(`已压缩：会话历史预算 ${ctxBudget} → ${next} 字，更早的工具回执只以摘要下发（台账一条不删，本会话内不可还原）`, `Compressed: session history budget ${ctxBudget} → ${next} chars; older tool receipts now go as summaries (the ledger keeps every entry; not reversible within this session)`));
+    // 写进设置而不是 useState：切面板/重挂不丢，且"还原"有一个明确的可逆对象
+    patch({ aiHistoryOverride: next });
+    setNotice(tx(`已压缩：会话历史预算 ${ctxBudget} → ${next} 字，更早的工具回执只以摘要下发（台账一条不删）`, `Compressed: session history budget ${ctxBudget} → ${next} chars; older tool receipts now go as summaries (the ledger keeps every entry)`));
   };
   const resetContextBudget = () => {
-    setCtxBudget(HISTORY_CHAR_BUDGET);
-    setNotice(tx("已恢复完整的会话历史预算", "Full session history budget restored"));
+    patch({ aiHistoryOverride: 0 });
+    setNotice(tx("已恢复按模型窗口自动计算的历史预算", "History budget restored to the model-window default"));
   };
 
   useEffect(() => {
@@ -1986,7 +1993,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                     ? tx("已到压缩下限：再小模型就没有上下文了。要彻底清空请新建会话", "At the compression floor: go smaller and the model has no context left. Start a new session to clear it fully")
                     : agentRunning
                       ? tx("任务运行中，等它结束再压缩", "A task is running — wait for it to finish before compressing")
-                      : tx("把更早的会话历史收得更紧一些再发（台账一条不删，本会话内不可还原）", "Fold older session history tighter before sending (the ledger keeps every entry; not reversible within this session)")
+                      : tx("把更早的会话历史收得更紧一些再发（台账一条不删）", "Fold older session history tighter before sending (the ledger keeps every entry)")
                 }
                 onClick={compressContext}
               >

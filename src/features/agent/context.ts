@@ -65,8 +65,10 @@ function estimateChars(messages: AgentMessage[]): number {
  * images——P94-G5 让最近 3 轮历史截图进上下文之后，这条盲区直接变成硬失败面。
  * 这一节把"会不会撞线"变成发送前可测、可收缩、可记账的事实。 */
 
-/** Rust 侧 2 MiB 是最终裁判；这里取 ~76% 作为前端软顶，留协议外壳/转义/工具定义的估算误差。 */
-export const REQUEST_SOFT_LIMIT = 1_600_000;
+/** P110-B2：这条数搬到 `contextBudget.ts`（算术叶子，零 import ⇒ 结构上不会成环）。
+ *  这里 re-export 是为了老 import 路径不破，更重要的是**不留第二份 1.6 MB**。 */
+import { REQUEST_SOFT_LIMIT as BUDGET_SOFT_LIMIT } from "./contextBudget";
+export const REQUEST_SOFT_LIMIT = BUDGET_SOFT_LIMIT;
 
 /** P95-H2：体积可读化（<1 MB 用 KB，以上用一位小数 MB） */
 export function fmtKb(bytes: number): string {

@@ -187,6 +187,8 @@ const zh: Dict = {
   "tb.flowNone": "无",
   "tb.flowSoftware": "软件（XON/XOFF）",
   "tb.flowHardware": "硬件（RTS/CTS）",
+  "set.ai.compact.tip": "会话历史送到这个比例就开始折叠更早的内容（按当前模型的上下文窗口算，不是固定字数）。60% 是多数宿主的量级；调高更舍得留历史、更容易撞上游截断，调低相反",
+  "set.ai.history.tip": "0 = 跟随模型窗口自动算。在对话面板按「压缩」会写到这里并存住（旧实现是组件状态，切个面板就神秘复原）。窗口改了而手动值还留着时，以窗口为准",
   // P110-B1：供应商/模型档案表成型后，"没配好"这件事有三个抛出点（provider、chatStore、哨兵），
   // 话术只在这里存一份。它不是设置页的标签，所以走 `t()` 而不是 `tx()`。
   "ai.notConfigured": "未配置可用的模型服务：请到 设置 → AI 服务 添加供应商与模型，并填好 API Key",
@@ -427,6 +429,8 @@ const en: Dict = {
   "tb.flowNone": "None",
   "tb.flowSoftware": "Software (XON/XOFF)",
   "tb.flowHardware": "Hardware (RTS/CTS)",
+  "set.ai.compact.tip": "Earlier session history starts folding once it reaches this share of the current model context window (a window ratio, not a fixed char count). 60% is the common ballpark; higher keeps more history but risks upstream truncation, lower the opposite",
+  "set.ai.history.tip": "0 = follow the model window automatically. Pressing Compress in the chat panel writes here and persists (the old build kept it in component state that reverted on remount). If the window changes while a manual value is set, the window wins",
   "ai.notConfigured": "No usable model service is configured: open Settings → AI Service, add a provider and a model, and fill in the API key",
   "tb.remoteHost": "Remote host",
   "tb.remotePort": "Remote port",

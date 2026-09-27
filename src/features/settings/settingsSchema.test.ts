@@ -89,7 +89,12 @@ describe("P99b-N6 · 每个设置项都得有个改它的地方（不许只剩 l
    * 它的"被引用"不能只扫 SettingsModal（那里本来就该没有它），要扫全 src：
    * 不然这条豁免会变成"文件删了名单还留着"的空门。
    */
-  const WRITERS_ELSEWHERE = ["features/market/MarketSourceRows.tsx"];
+  const WRITERS_ELSEWHERE = [
+    "features/market/MarketSourceRows.tsx",
+    // P110-B2：手动历史预算的写入方是对话面板的「压缩 / 恢复自动」两个按钮
+    // （AiChat.tsx 里那句 patch({ aiHistoryOverride })）。设置页那行只读显示，不代替它写。
+    "features/ai/AiChat.tsx",
+  ];
 
   it("P4c 的另一半：豁免文件里再也写不出设置 ⇒ 豁免该删（这条由 P4b 探针实测为红）", () => {
     for (const f of [...DELEGATED_WRITERS, ...WRITERS_ELSEWHERE]) {

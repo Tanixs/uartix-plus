@@ -100,20 +100,32 @@ export interface Projection {
 }
 
 /**
- * 会话历史字符预算（P95 命名澄清：与 loop 的 `DEFAULT_BUDGET`（轮数/调用数预算）同名不同物）。
- * P98-M4 起导出给"手动压缩"用：那颗按钮做的事就是**把这个预算调小**，
- * 而不是新写一套压缩算法（否则就是第二份真相，且会绕开 §8-34"压缩只在放不下时发生"的合同）。
+ * P110-B2：这些数的**定义**搬到了算术叶子 `contextBudget.ts`（窗口/token/字节/保险丝一处说清），
+ * 这里只做 re-export —— 老 import 路径不破，也不留第二份 12000。
+ * `HISTORY_CHAR_BUDGET` 的语义跟着变了：它不再是"那个跟模型无关的预算"，
+ * 而是**没配模型档案时的兜底值**；真正的预算由 `budgetFor()` 按窗口算。
  */
-export const HISTORY_CHAR_BUDGET = 12000;
-/** 手动压缩的下限：再小就只剩"本轮目标 + 最近一问一答"，模型基本失去上下文，不如让用户开新会话 */
-export const MIN_HISTORY_BUDGET = 2000;
+import {
+  FALLBACK_HISTORY_CHAR_BUDGET,
+  MIN_HISTORY_BUDGET as BUDGET_MIN,
+  tightenHistoryBudget as tightenByHalf,
+  historyCharBudget as budgetFromWindow,
+} from "./contextBudget";
+
+export const HISTORY_CHAR_BUDGET = FALLBACK_HISTORY_CHAR_BUDGET;
+export const MIN_HISTORY_BUDGET = BUDGET_MIN;
 
 /**
  * 手动压缩的一档：预算减半、夹在下限之上。
  * 返回新值；**已到下限则原样返回**，调用方据此禁用按钮并说明原因（不许"点了没反应"）。
  */
 export function tightenHistoryBudget(current: number = HISTORY_CHAR_BUDGET): number {
-  return Math.max(MIN_HISTORY_BUDGET, Math.round(current / 2));
+  return tightenByHalf(current);
+}
+
+/** 当前该用多少历史预算：模型窗口 × 压缩比例，并被传输保险丝封顶（详设 §2′.3） */
+export function budgetFor(contextTokens: number, ratio?: number): number {
+  return budgetFromWindow(contextTokens, ratio);
 }
 
 /** 只对最近这么多条带图的历史 user 透传图片：data URL 一张可达上百 KB，全量重发会撑爆请求 */

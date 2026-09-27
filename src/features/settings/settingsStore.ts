@@ -56,6 +56,12 @@ export interface Settings {
   // 它们搬进了 `features/ai/aiProfileStore.ts` 的两张表（供应商 / 模型档案）。
   // 留在这里的只有"与哪台机器无关的全局偏好"：温度、代理、超时、发送总闸。
   aiTemperature: number;
+  /** P110-B2：自动压缩阈值（占模型上下文窗口的比例，0.4~0.9）。默认 0.6 = 用户点的名，
+   *  对照 DSH 的 0.8 —— 做成可调项而不是在代码里选边站 */
+  aiCompactRatio: number;
+  /** P110-B2：手动压缩的持久化落点。0 = 跟随窗口自动算；>0 = 压到这么多字符（"还原"写回 0）。
+   *  旧实现是组件里的 `useState`，重挂即失效 —— 用户按了压缩、切个面板就神秘复原，那是假反馈 */
+  aiHistoryOverride: number;
   aiProxy: string;
   aiNoProxy: string;
   /** P98-M2：aiCreativity / aiScript 已删（死码与假装生效的安全控件） */
@@ -193,6 +199,8 @@ function load(): Settings {
     cellSize: 60,
     fcCellSize: 42,
     aiTemperature: 0.3,
+    aiCompactRatio: 0.6,
+    aiHistoryOverride: 0,
     aiProxy: "",
     aiNoProxy: "",
     aiWidgetSend: false,
@@ -247,6 +255,17 @@ function load(): Settings {
         typeof p.aiTemperature === "number" && p.aiTemperature >= 0 && p.aiTemperature <= 2
           ? p.aiTemperature
           : 0.3,
+      // P110-B2：压缩阈值钳在 0.4~0.9 —— 超出这两头都不是"调阈值"而是"关掉/废掉压缩"，
+      // 那种事得由界面上专门的开关来做，不能靠一个数字型滑杆的越界值顺手实现。
+      aiCompactRatio:
+        typeof p.aiCompactRatio === "number" && p.aiCompactRatio >= 0.4 && p.aiCompactRatio <= 0.9
+          ? p.aiCompactRatio
+          : 0.6,
+      // 手动预算落回钳制区间；0 是合法值且就是默认（自动）
+      aiHistoryOverride:
+        typeof p.aiHistoryOverride === "number" && Number.isFinite(p.aiHistoryOverride) && p.aiHistoryOverride >= 0
+          ? Math.min(200_000, Math.round(p.aiHistoryOverride))
+          : 0,
       aiProxy: typeof p.aiProxy === "string" ? p.aiProxy : "",
       aiNoProxy: typeof p.aiNoProxy === "string" ? p.aiNoProxy : "",
       aiWidgetSend: Boolean(p.aiWidgetSend),

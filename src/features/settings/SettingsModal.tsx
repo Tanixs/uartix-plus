@@ -911,6 +911,23 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     ))}
                   </select>
                 ), t("set.ai.format.tip"))}
+                {row(tx("上下文压缩阈值", "Context compaction threshold"), (
+                  // P110-B2：阈值按**模型窗口**的比例算，不再是一个跟模型无关的 12000 字符。
+                  // 默认 0.6（你点的名），对照 DSH 的 0.8；范围 0.4~0.9，越界在 load 里钳回。
+                  <input
+                    className="input"
+                    style={{ width: 90 }}
+                    type="number"
+                    min={0.4}
+                    max={0.9}
+                    step={0.05}
+                    value={settings.aiCompactRatio}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      patch({ aiCompactRatio: Math.min(0.9, Math.max(0.4, Number.isFinite(n) ? n : 0.6)) });
+                    }}
+                  />
+                ), t("set.ai.compact.tip"))}
                 {row(t("set.ai.temp"), (
                   <input
                     type="number"
@@ -1000,10 +1017,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 */}
                 <div className="set-group-title">{tx("权限与安全", "Permissions & safety")}</div>
                 <div className="set-danger-note">
-                  {tx(
-                    "以下是本机能力总闸：关掉后即使 Agent 档位给了授权域也调不动。默认全部关闭，按需开启。",
-                    "Machine-wide capability switches. Turning one off blocks the capability even when the Agent tier grants that domain. All off by default.",
-                  )}
+                  {tx("以下是本机能力总闸：关掉后即使 Agent 档位给了授权域也调不动。默认全部关闭，按需开启。", "Machine-wide capability switches. Turning one off blocks the capability even when the Agent tier grants that domain. All off by default.")}
                 </div>
                 {row(t("set.ai.widgetSend"), (
                   <label className="set-switch">
@@ -1030,10 +1044,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     value={settings.agentMaxRounds}
                     onChange={(e) => patch({ agentMaxRounds: Number(e.target.value) })}
                   />
-                ), tx(
-                  "一个任务最多允许多少轮「模型 → 工具 → 模型」。0 = 不限制，跑到模型自己认为完成为止。成本由你承担：无限预算下长任务会持续消耗 token。",
-                  "How many model→tool→model rounds one task may use. 0 = unlimited, it runs until the model considers the goal done. Cost is on you: an unlimited budget keeps spending tokens on long tasks.",
-                ))}
+                ), tx("一个任务最多允许多少轮「模型 → 工具 → 模型」。0 = 不限制，跑到模型自己认为完成为止。成本由你承担：无限预算下长任务会持续消耗 token。", "How many model→tool→model rounds one task may use. 0 = unlimited, it runs until the model considers the goal done. Cost is on you: an unlimited budget keeps spending tokens on long tasks."))}
                 {row(tx("Agent 工具调用上限（0=不限）", "Agent tool-call limit (0 = unlimited)"), (
                   <input
                     className="input"
@@ -1045,10 +1056,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     value={settings.agentMaxCalls}
                     onChange={(e) => patch({ agentMaxCalls: Number(e.target.value) })}
                   />
-                ), tx(
-                  "一个任务最多允许执行多少次工具调用（一轮里可以并行多次）。0 = 不限制。",
-                  "How many tool calls one task may execute (a round can issue several). 0 = unlimited.",
-                ))}
+                ), tx("一个任务最多允许执行多少次工具调用（一轮里可以并行多次）。0 = 不限制。", "How many tool calls one task may execute (a round can issue several). 0 = unlimited."))}
                 {row(tx("Agent 单次任务时限（分钟，0=不限）", "Per-task time limit (minutes, 0 = unlimited)"), (
                   <input
                     className="input"
@@ -1060,10 +1068,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     value={settings.agentTimeoutMins}
                     onChange={(e) => patch({ agentTimeoutMins: Number(e.target.value) })}
                   />
-                ), tx(
-                  "超过时限任务会暂停（不是失败），可以点「继续任务」接着跑。0 = 不限制。另有一条不受这里管的保护：同一个调用连续失败 3/5 次会提醒模型换做法，8 次才自动暂停。",
-                  "Past the limit the task pauses (not fails) and can be resumed. 0 = unlimited. One guard is not controlled here: 3/5 identical failures remind the model to change approach, 8 pauses the run.",
-                ))}
+                ), tx("超过时限任务会暂停（不是失败），可以点「继续任务」接着跑。0 = 不限制。另有一条不受这里管的保护：同一个调用连续失败 3/5 次会提醒模型换做法，8 次才自动暂停。", "Past the limit the task pauses (not fails) and can be resumed. 0 = unlimited. One guard is not controlled here: 3/5 identical failures remind the model to change approach, 8 pauses the run."))}
                 {row(tx("重启后保留全权执行档", "Keep the full-access tier across restarts"), (
                   <label className="set-switch">
                     <input
@@ -1073,10 +1078,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     />
                     <span />
                   </label>
-                ), tx(
-                  "默认关闭：重启后「全权执行 / 手工勾选」会回落到「界面创造」，并在档位旁标出已降档。打开它 = 高危授权跨重启存活，这是你自己在 P109 里点名的放松（§8-44）；软件不会替你默认打开。",
-                  "Off by default: after a restart the full-access / hand-picked tier falls back to UI-creation and the downgrade is shown next to the tier. Turning it on keeps high-risk grants across restarts - the relaxation you asked for in P109 (rule 8-44); the app never enables it for you.",
-                ))}
+                ), tx("默认关闭：重启后「全权执行 / 手工勾选」会回落到「界面创造」，并在档位旁标出已降档。打开它 = 高危授权跨重启存活，这是你自己在 P109 里点名的放松（§8-44）；软件不会替你默认打开。", "Off by default: after a restart the full-access / hand-picked tier falls back to UI-creation and the downgrade is shown next to the tier. Turning it on keeps high-risk grants across restarts - the relaxation you asked for in P109 (rule 8-44); the app never enables it for you."))}
                 {row(tx("Agent 文件白名单", "Agent file whitelist"), (
                   <div className="ai-key-wrap">
                     <input
@@ -1101,10 +1103,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       {tx("浏览…", "Browse…")}
                     </button>
                   </div>
-                ), tx(
-                  "Agent 的 fs_read / fs_list / fs_grep / fs_glob 只能访问白名单内的路径，fs_write / fs_edit 亦然；多个目录用分号分隔，留空表示文件工具整体关闭",
-                  "fs_read / fs_list / fs_grep / fs_glob can only reach whitelisted paths, and so do fs_write / fs_edit; separate folders with semicolons; empty disables the file tools",
-                ))}
+                ), tx("Agent 的 fs_read / fs_list / fs_grep / fs_glob 只能访问白名单内的路径，fs_write / fs_edit 亦然；多个目录用分号分隔，留空表示文件工具整体关闭", "fs_read / fs_list / fs_grep / fs_glob can only reach whitelisted paths, and so do fs_write / fs_edit; separate folders with semicolons; empty disables the file tools"))}
                 {row(tx("Agent 允许执行命令", "Agent may run commands"), (
                   <label className="set-switch">
                     <input
@@ -1114,10 +1113,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     />
                     <span />
                   </label>
-                ), tx(
-                  "命令执行总开关，默认关闭。开启后 Agent 仍需在「自定义」档位勾选命令行域，且每条命令都弹出批准卡逐条确认；单条命令 10s 超时自动终止、输出窗口 64KB（超出时首尾都保留并标明中间省略量，原文仍可分页取回）",
-                  "Master switch for shell_exec, off by default. Even when on, the Agent must pick the shell domain in custom scope and every command shows an approval card; 10s timeout and a 64 KiB output window per command (beyond it both ends are kept and the omitted span is stated, full text stays pageable)",
-                ))}
+                ), tx("命令执行总开关，默认关闭。开启后 Agent 仍需在「自定义」档位勾选命令行域，且每条命令都弹出批准卡逐条确认；单条命令 10s 超时自动终止、输出窗口 64KB（超出时首尾都保留并标明中间省略量，原文仍可分页取回）", "Master switch for shell_exec, off by default. Even when on, the Agent must pick the shell domain in custom scope and every command shows an approval card; 10s timeout and a 64 KiB output window per command (beyond it both ends are kept and the omitted span is stated, full text stays pageable)"))}
                 <div className="set-row">
                   <label>
                     {t("set.ai.manage")}
@@ -1358,22 +1354,13 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   </div>
                 </div>
                 <p className="set-about-intro">
-                  {tx(
-                    "Uartix+ 是一台跑在电脑上的上位机。向下，它连着单片机、惯导、云台、机器人这些下位机；向上，它把一串串看不懂的原始字节变成结构、数值、曲线和画面，再把你的操作回写成设备能够接受的指令。",
-                    "Uartix+ is a host computer running on your PC. Downward it talks to MCUs, IMUs, gimbots and robots; upward it turns raw bytes into structure, numbers, curves and pictures, then writes your actions back as commands the device accepts.",
-                  )}
+                  {tx("Uartix+ 是一台跑在电脑上的上位机。向下，它连着单片机、惯导、云台、机器人这些下位机；向上，它把一串串看不懂的原始字节变成结构、数值、曲线和画面，再把你的操作回写成设备能够接受的指令。", "Uartix+ is a host computer running on your PC. Downward it talks to MCUs, IMUs, gimbots and robots; upward it turns raw bytes into structure, numbers, curves and pictures, then writes your actions back as commands the device accepts.")}
                 </p>
                 <p className="set-about-intro">
-                  {tx(
-                    "它不是只会收发字符的串口助手。协议无需编写解析代码——在数据流上框选字节即可定义帧结构与字段含义；界面无需编写界面代码——拖拽控件就能拼出专属调试台。连接、校验、测量、可视化、脚本自动化与数据导出，在同一处完成闭环。",
-                    "It is far more than a serial terminal that echoes characters. Protocols need no parser code: select bytes on the stream to define the frame layout and what each field means. Interfaces need no UI code: drag widgets together into a bench of your own. Connecting, checksums, measurement, visualisation, scripting and export close the loop in one place.",
-                  )}
+                  {tx("它不是只会收发字符的串口助手。协议无需编写解析代码——在数据流上框选字节即可定义帧结构与字段含义；界面无需编写界面代码——拖拽控件就能拼出专属调试台。连接、校验、测量、可视化、脚本自动化与数据导出，在同一处完成闭环。", "It is far more than a serial terminal that echoes characters. Protocols need no parser code: select bytes on the stream to define the frame layout and what each field means. Interfaces need no UI code: drag widgets together into a bench of your own. Connecting, checksums, measurement, visualisation, scripting and export close the loop in one place.")}
                 </p>
                 <p className="set-about-intro">
-                  {tx(
-                    "自 v0.3.6 起内置 AI 助手：说出需求，它便能生成协议模板、控制卡片、停靠面板乃至无边框悬浮小部件，并直接替你执行操作。Rust 内核与二进制数据通道，让数十万帧的长时间采集依旧流畅。",
-                    "Since v0.3.6 a built-in AI assistant turns requests into protocol templates, control cards, dockable panels and even borderless floating widgets, and carries out operations on your behalf. A Rust core over a binary data channel keeps hundreds of thousands of frames of long-running capture smooth.",
-                  )}
+                  {tx("自 v0.3.6 起内置 AI 助手：说出需求，它便能生成协议模板、控制卡片、停靠面板乃至无边框悬浮小部件，并直接替你执行操作。Rust 内核与二进制数据通道，让数十万帧的长时间采集依旧流畅。", "Since v0.3.6 a built-in AI assistant turns requests into protocol templates, control cards, dockable panels and even borderless floating widgets, and carries out operations on your behalf. A Rust core over a binary data channel keeps hundreds of thousands of frames of long-running capture smooth.")}
                 </p>
                 {row(t("set.version"), <span className="set-mono">{appVersion}</span>)}
                 {row(t("set.author"), (

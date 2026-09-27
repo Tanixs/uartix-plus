@@ -46,6 +46,11 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   // 就会被下面那条 `readSettings()` 的"按 schema 逐键吐值"原样序列化给模型（§8-38）。
   // 表的读口径在 `features/ai/aiProfileStore.redactedProjection()`。
   { key: "aiTemperature", type: "number", min: 0, max: 2, def: 0.3, group: "ai", label: "AI 温度", sensitivity: "protected", reversible: true },
+  // P110-B2：自动压缩阈值。**protected 而不是 safe**：这是模型自己的上下文预算，
+  // 让它能改就等于让它给自己放宽“什么时候该把历史折掉”（同 P109-A 那三条预算的口径）。
+  { key: "aiCompactRatio", type: "number", min: 0.4, max: 0.9, def: 0.6, group: "ai", label: "上下文压缩阈值（占窗口比例）", sensitivity: "protected", reversible: true },
+  // P110-B2：手动压缩的持久化落点。0 = 跟随窗口自动算。故意也标 protected（同上）。
+  { key: "aiHistoryOverride", type: "int", min: 0, max: 200_000, def: 0, group: "ai", label: "手动历史预算（0=自动）", sensitivity: "protected", reversible: true },
   { key: "aiProxy", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 代理", sensitivity: "protected", reversible: true },
   { key: "aiNoProxy", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 免代理", sensitivity: "protected", reversible: true },
   // P98-M2：aiCreativity / aiScript 已删（前者 prompts 从不读；后者是"假装生效"的安全控件）。
