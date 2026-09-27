@@ -99,6 +99,9 @@ describe("P99b-N6 · 每个设置项都得有个改它的地方（不许只剩 l
     // P110-B2：手动历史预算的写入方是对话面板的「压缩 / 恢复自动」两个按钮
     // （AiChat.tsx 里那句 patch({ aiHistoryOverride })）。设置页那行只读显示，不代替它写。
     "features/ai/AiChat.tsx",
+    // P110-B5：思考强度档位的写入方是发送框下面那枚选择器（`AiModelPicker.tsx`）。
+    // 它不在设置页里，也不该在：档位是**跟着模型走**的即时选择，不是要翻一页去改的偏好。
+    "features/ai/AiModelPicker.tsx",
   ];
 
   it("P4c 的另一半：豁免文件里再也写不出设置 ⇒ 豁免该删（这条由 P4b 探针实测为红）", () => {

@@ -62,6 +62,9 @@ export interface Settings {
   /** P110-B2：手动压缩的持久化落点。0 = 跟随窗口自动算；>0 = 压到这么多字符（"还原"写回 0）。
    *  旧实现是组件里的 `useState`，重挂即失效 —— 用户按了压缩、切个面板就神秘复原，那是假反馈 */
   aiHistoryOverride: number;
+  /** P110-B5：选中的思考强度档位名。空串 = 跟随该模型档案里的 defaultThinking。
+   *  只存名字不存参数：参数的真相永远在档案表里，这里选慢一份就是第二份真相 */
+  aiThinkingLevel: string;
   aiProxy: string;
   aiNoProxy: string;
   /** P98-M2：aiCreativity / aiScript 已删（死码与假装生效的安全控件） */
@@ -201,6 +204,7 @@ function load(): Settings {
     aiTemperature: 0.3,
     aiCompactRatio: 0.6,
     aiHistoryOverride: 0,
+    aiThinkingLevel: "",
     aiProxy: "",
     aiNoProxy: "",
     aiWidgetSend: false,
@@ -266,6 +270,7 @@ function load(): Settings {
         typeof p.aiHistoryOverride === "number" && Number.isFinite(p.aiHistoryOverride) && p.aiHistoryOverride >= 0
           ? Math.min(200_000, Math.round(p.aiHistoryOverride))
           : 0,
+      aiThinkingLevel: typeof p.aiThinkingLevel === "string" ? p.aiThinkingLevel.slice(0, 40) : "",
       aiProxy: typeof p.aiProxy === "string" ? p.aiProxy : "",
       aiNoProxy: typeof p.aiNoProxy === "string" ? p.aiNoProxy : "",
       aiWidgetSend: Boolean(p.aiWidgetSend),

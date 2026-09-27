@@ -9,7 +9,20 @@ import type { TurnError } from "./types";
 export const TURN_RETRY_LIMIT = 2;
 export const TURN_RETRY_BACKOFF_MS = [1500, 4000];
 /** 输出预算阶梯：截断类失败逐级下调重试（16384 起步，最低 4096） */
+/**
+ * 截断类失败下调输出预算的**兜底阶梯**：只在拿不到档案（没配模型）时用。
+ * P110-B5 之后正常路径的阶梯来自档案里那台的 `maxOutputTokens`（见 `ladderFrom`），
+ * 这三个数不再是"每个模型都先撞一次 16384"的理由。
+ */
 export const MAX_TOKENS_LADDER = [16384, 8192, 4096];
+
+/** 按真实上限生成阶梯：1.0 → 0.5 → 0.25（宿主侧还会再钳一次，这里只管"别一上来就顶格"） */
+export function ladderFrom(ceiling: number): number[] {
+  const top = Math.max(256, Math.round(ceiling));
+  const half = Math.max(256, Math.round(top / 2));
+  const quarter = Math.max(256, Math.round(top / 4));
+  return [top, half, quarter];
+}
 
 /**
  * 宿主错误 → 结构化 TurnError。
@@ -54,9 +67,21 @@ export function cancelledBeforeSend(): Error {
   return new Error(JSON.stringify(e));
 }
 
-/** 截断/400 之后该用哪一档输出预算；已在最低档返回 null（不再降） */
-export function nextMaxTokens(current: number, shrink: boolean): number | null {
+/**
+ * 截断类失败之后把输出预算往下退一档。
+ *
+ * P110-B5：给了 `ceiling`（档案里那台的 `maxOutputTokens`）就按 1.0 → 0.5 → 0.25 退，
+ * 不再拿三个硬编码数去试——旧写法的后果是：对面那台只能吐 4k 的模型，
+ * 也要先撞两次「16384 太大」才知道自己是谁。拿不到档案时才退回 `MAX_TOKENS_LADDER`。
+ */
+export function nextMaxTokens(current: number, shrink: boolean, ceiling = 0): number | null {
   if (!shrink) return null;
+  if (ceiling > 0) {
+    const ladder = ladderFrom(ceiling);
+    const under = ladder.filter((n) => n < current);
+    // 退到"比现在小的最大一档"；已经在一档之下就没得退了
+    return under.length ? Math.max(...under) : null;
+  }
   const i = MAX_TOKENS_LADDER.indexOf(current);
   const next = i === -1 ? MAX_TOKENS_LADDER[MAX_TOKENS_LADDER.length - 1] : MAX_TOKENS_LADDER[Math.min(i + 1, MAX_TOKENS_LADDER.length - 1)];
   return next < current ? next : null;

@@ -362,9 +362,14 @@ pub async fn ai_chat(
     no_proxy: Option<String>,
     messages: Vec<AiMessage>,
     thinking: Option<bool>,
+    // P110-B5：档案表里那一档思考强度的静态参数（保留键在合并处拒收）
+    thinking_params: Option<serde_json::Map<String, serde_json::Value>>,
+    // 单次回复的输出上限，取自当前模型档案；缺省沿用旧的 8192
+    max_tokens: Option<u32>,
 ) -> Result<(), String> {
     let fmt = format.as_str();
     let url = endpoint_url(&base_url, fmt);
+    let out_tokens = max_tokens.unwrap_or(8192).clamp(256, 32_768);
     // anthropic/responses 的 parts 语法与 OpenAI 不同，逐条转换 content；
     // openai 兼容格式原样透传（字符串保持字符串，parts 数组直接序列化）
     let converted: Vec<serde_json::Value> = messages
@@ -376,12 +381,12 @@ pub async fn ai_chat(
             })
         })
         .collect();
-    let body = match fmt {
+    let mut body = match fmt {
         "anthropic" => {
             let (system, rest) = split_system(&messages);
             let mut b = serde_json::json!({
                 "model": model,
-                "max_tokens": 8192,
+                "max_tokens": out_tokens, 
                 "temperature": temperature,
                 "stream": true,
                 "messages": converted
@@ -423,6 +428,8 @@ pub async fn ai_chat(
             "messages": converted,
         }),
     };
+    // P110-B5：档案里那一档思考强度的参数在这一步并进 body（保留键在 merge 里拒收）
+    merge_extra_body(&mut body, thinking_params);
 
     let flag = Arc::new(AtomicBool::new(false));
     state
@@ -643,6 +650,27 @@ fn data_url_parts(url: &str) -> Option<(String, String)> {
     Some((media.to_string(), data.to_string()))
 }
 
+/// P110-B5：把"档案里那一档思考强度要下发的参数"合进请求体。
+///
+/// 为什么不让前端直接拼整份 body：那等于把协议所有权交给配置文本，一枚写错的
+/// `messages` 就能把整轮请求换掉。这里只允许**增量**，且保留键一律拒收：
+/// 模型、消息、工具、流式标志与输出预算继续由宿主说了算。
+/// 参数名也不由我们猜：前端只会把用户在档案里写的那几个键透传过来
+/// （详设 §2′.7.2：不做表达式求值，也不替不认识的平台编字段名）。
+fn merge_extra_body(body: &mut serde_json::Value, extra: Option<serde_json::Map<String, serde_json::Value>>) {
+    const RESERVED: [&str; 8] = ["model", "messages", "tools", "input", "instructions", "stream", "max_tokens", "max_output_tokens"];
+    let Some(map) = extra else { return };
+    let Some(obj) = body.as_object_mut() else { return };
+    for (k, v) in map {
+        if RESERVED.contains(&k.as_str()) {
+            eprintln!("[ai] extra_body 里的保留键被忽略：{k}");
+            continue;
+        }
+        // 只收标量与对象/数组的浅值：不接受嵌套里的敏感形状由前端白名单负责
+        obj.insert(k, v);
+    }
+}
+
 fn agent_body(format: &str, model: &str, messages: &[AgentMessage], tools: &[AgentTool], thinking: bool, max_tokens: u32) -> serde_json::Value {
     use serde_json::json;
     let mut converted = Vec::new();
@@ -709,6 +737,24 @@ fn agent_body(format: &str, model: &str, messages: &[AgentMessage], tools: &[Age
     };
     // P90 B1：Agent 通道也要产思维链——anthropic 不开 thinking 就永远没有思考块
     if format == "anthropic" { apply_anthropic_thinking(&mut body, thinking); }
+    body
+}
+
+/// P110-B5：anthropic 之外的各家把"思考"写成什么字段完全不统一
+/// （`thinking:{type,budget_tokens}` / `reasoning_effort:"low"` / `enable_thinking:true` …）。
+/// 我们**不猜**：档案作者把这一档要发的参数写成静态对象，宿主只做浅合并，
+/// 并拒掉会换掉整轮请求的保留键。
+fn agent_body_with_thinking(
+    format: &str,
+    model: &str,
+    messages: &[AgentMessage],
+    tools: &[AgentTool],
+    thinking: bool,
+    max_tokens: u32,
+    thinking_params: Option<serde_json::Map<String, serde_json::Value>>,
+) -> serde_json::Value {
+    let mut body = agent_body(format, model, messages, tools, thinking, max_tokens);
+    merge_extra_body(&mut body, thinking_params);
     body
 }
 
@@ -1142,13 +1188,15 @@ pub async fn ai_agent_turn(
     model: String, format: String, proxy: Option<String>, no_proxy: Option<String>,
     messages: Vec<AgentMessage>, tools: Vec<AgentTool>, thinking: Option<bool>,
     max_tokens: Option<u32>, stream_idle_secs: Option<u64>,
+    // P110-B5：这一档思考强度要下发的参数（前端从档案表里那档原样透传；保留键在合并处拒收）
+    thinking_params: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<serde_json::Value, String> {
     if !["chat", "anthropic", "responses"].contains(&format.as_str()) {
         return Err(TurnErr::plain("bad_format", "不支持执行模式协议").to_json());
     }
     // 输出预算：默认 16384（思维链吃输出预算，给小必截断）；前端可按 shrink 逐级下调重试
     let budget = max_tokens.unwrap_or(16384).clamp(1024, 32768);
-    let body = agent_body(&format, &model, &messages, &tools, thinking.unwrap_or(false), budget);
+    let body = agent_body_with_thinking(&format, &model, &messages, &tools, thinking.unwrap_or(false), budget, thinking_params);
     // P95-H1：阈值常量化，前端 `REQUEST_SOFT_LIMIT` 就是按这个数取 80% 的
     if let Err(e) = assert_request_size(&body) {
         return Err(e.to_json());
@@ -1783,5 +1831,53 @@ mod tests {
         // 反面对照：内容审核不是体积问题，重试无意义
         let e = stop_err(Some("content_filter"), 1);
         assert!(!e.retryable);
+    }
+}
+
+#[cfg(test)]
+mod thinking_merge_tests {
+    use super::merge_extra_body;
+    use serde_json::{json, Map, Value};
+
+    fn extra(pairs: &[(&str, Value)]) -> Map<String, Value> {
+        let mut m = Map::new();
+        for (k, v) in pairs {
+            m.insert((*k).to_string(), v.clone());
+        }
+        m
+    }
+
+    #[test]
+    fn 档位参数合得进去_保留键拒收() {
+        let mut body = json!({"model":"m","messages":[],"max_tokens":8192,"stream":true});
+        merge_extra_body(
+            &mut body,
+            Some(extra(&[
+                ("reasoning_effort", json!("high")),
+                ("model", json!("evil")),
+                ("messages", json!("把整轮换掉")),
+                ("max_tokens", json!(1)),
+            ])),
+        );
+        assert_eq!(body["reasoning_effort"], json!("high"), "档案里那一档的参数必须真的发出去");
+        assert_eq!(body["model"], json!("m"), "保留键不许被配置改写");
+        assert_eq!(body["messages"], json!([]), "同上");
+        assert_eq!(body["max_tokens"], json!(8192), "输出预算由宿主说了算");
+    }
+
+    #[test]
+    fn 没有档位时逐字不变() {
+        let mut body = json!({"model":"m"});
+        let before = body.clone();
+        merge_extra_body(&mut body, None);
+        assert_eq!(body, before, "缺省不许顺手塞一个默认 thinking");
+    }
+
+    #[test]
+    fn 嵌套形状按原样透传() {
+        // 有的平台是 `thinking:{type,budget_tokens}`：不改写它的形状，只做浅合并
+        let mut body = json!({"model":"m"});
+        merge_extra_body(&mut body, Some(extra(&[("thinking", json!({"type":"enabled","budget_tokens":2048}))])));
+        assert_eq!(body["thinking"]["budget_tokens"], json!(2048));
     }
 }

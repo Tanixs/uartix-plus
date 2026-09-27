@@ -51,6 +51,8 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "aiCompactRatio", type: "number", min: 0.4, max: 0.9, def: 0.6, group: "ai", label: "上下文压缩阈值（占窗口比例）", sensitivity: "protected", reversible: true },
   // P110-B2：手动压缩的持久化落点。0 = 跟随窗口自动算。故意也标 protected（同上）。
   { key: "aiHistoryOverride", type: "int", min: 0, max: 200_000, def: 0, group: "ai", label: "手动历史预算（0=自动）", sensitivity: "protected", reversible: true },
+  // P110-B5：思考强度档位。**档位名与它的参数都在档案里**，这里只存"选了哪一档"。
+  { key: "aiThinkingLevel", type: "string", maxLen: 40, def: "", group: "ai", label: "思考强度档位", sensitivity: "protected", reversible: true },
   { key: "aiProxy", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 代理", sensitivity: "protected", reversible: true },
   { key: "aiNoProxy", type: "string", maxLen: 512, def: "", group: "ai", label: "AI 免代理", sensitivity: "protected", reversible: true },
   // P98-M2：aiCreativity / aiScript 已删（前者 prompts 从不读；后者是"假装生效"的安全控件）。

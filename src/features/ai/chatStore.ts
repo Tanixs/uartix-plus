@@ -10,7 +10,7 @@ import { REQUEST_SOFT_LIMIT, utf8Bytes } from "../agent/context";
 // P108：URL/Key 的清洗与 Agent 侧同一个函数。原来这里另抄了一份逐字相同的 cleanBaseUrl，
 // 而 key 一处都没洗 —— 同一个"把设置里的串发给宿主"的动作有两个答案，正是漂移的温床。
 import { aiWireArgs } from "../agent/provider";
-import { activeRef } from "./aiProfileStore";
+import { activeRef, thinkingParamsFor } from "./aiProfileStore";
 import { t } from "../../i18n/strings";
 import { saveImage, restoreImages, deleteImages } from "./imageStore";
 import {
@@ -772,6 +772,9 @@ async function requestChat(
       messages,
       // P96-K4：模型是否先想后答 = deepThink（原先借用界面开关 showThinking，一个开关管两件事）
       thinking: st.deepThink,
+      // P110-B5：QA 通道同样不再吃硬编码 8192；档位参数同上，只透传不猜
+      maxTokens: Math.min(active.model.maxOutputTokens, 32_768),
+      thinkingParams: thinkingParamsFor(active.model, st.aiThinkingLevel) ?? undefined,
     });
   } catch (e) {
     if (snapshot.reqId === reqId) {

@@ -22,10 +22,19 @@ import { useSyncExternalStore } from "react";
 import { AI_PRESETS, type AiFormat } from "../settings/settingsStore";
 
 /** 一档"思考强度"：界面显示名 + 这一档实际下发给 API 的**静态**参数对象 */
+/**
+ * 一档思考强度的参数值。**允许一层嵌套**：真实形状就有嵌套的——Anthropic 是
+ * `thinking: {type:"enabled", budget_tokens:8192}`，只收标量的扁平表表达不了它。
+ * 深度、每层键数、键名字符集都在读取时钳死（sanitizeParams），越界整档丢弃：
+ * 这些键值直接进 HTTP body，不能变成代码（详设 §2′.7.2）。
+ */
+export type ThinkingParamValue =
+  | string | number | boolean | null | ThinkingParamValue[] | { [key: string]: ThinkingParamValue };
+
 export interface ThinkingLevel {
   label: string;
-  /** 空对象 = 这一档什么都不发。值只允许字面量，不做表达式求值（详设 §2′.7.2） */
-  params: Record<string, string | number | boolean | null>;
+  /** 空对象 = 这一档什么都不发。允许一层嵌套（见 ThinkingParamValue 的注释） */
+  params: Record<string, ThinkingParamValue>;
 }
 
 export interface AiProvider {
@@ -113,6 +122,28 @@ const finite = (v: unknown, fallback: number): number =>
   typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.round(v) : fallback;
 
 const FORMATS: readonly AiFormat[] = ["chat", "anthropic", "responses"];
+
+/** 静态参数清洗：只收标量与有限的对象/数组；深度 ≤3、每层 ≤12 键、键名限 [w.-]{1,64} */
+function sanitizeParams(v: unknown, depth = 0): Record<string, ThinkingParamValue> {
+  const out: Record<string, ThinkingParamValue> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v) || depth > 3) return out;
+  for (const [k, val] of Object.entries(v as Record<string, unknown>).slice(0, 12)) {
+    if (!/^[w.-]{1,64}$/.test(k)) continue;
+    out[k] = cleanParam(val, depth + 1);
+  }
+  return out;
+}
+function cleanParam(val: unknown, depth: number): ThinkingParamValue {
+  if (val === null) return null;
+  const t = typeof val;
+  if (t === "string") return (val as string).slice(0, 512);
+  if (t === "number") return Number.isFinite(val as number) ? (val as number) : null;
+  if (t === "boolean") return val as boolean;
+  if (depth > 3) return null;
+  if (Array.isArray(val)) return val.slice(0, 12).map((x) => cleanParam(x, depth + 1));
+  if (t === "object") return sanitizeParams(val, depth);
+  return null; // function / symbol / bigint 一律丢
+}
 
 function readThinkingLevels(v: unknown): ThinkingLevel[] {
   if (!Array.isArray(v)) return [];
@@ -484,6 +515,40 @@ export function templateOf(baseUrl: string): keyof typeof AI_PRESETS {
     (k) => AI_PRESETS[k].baseUrl.replace(/\/+$/, "") === baseUrl.trim().replace(/\/+$/, ""),
   );
   return hit ?? "deepseek";
+}
+
+/**
+ * P110-B5：把“当前选中的思考强度档”翻成要下发的静态参数对象。
+ *
+ * 三条口径：
+ *  - 这台模型没配档位 ⇒ null，也就是**什么都不多发**（不是发一个我们猜的默认值）；
+ *  - 选中的名字在这台模型上不存在 ⇒ 退回该档案自己的 `defaultThinking`；再找不到还是 null
+ *    （换了模型而设置里还留着上一台模型的档位名，是这条规则存在的唯一理由）；
+ *  - 参数只做浅拷贝：不在这层求值、不拼表达式、不替不认识的平台编字段名（详设 §2′.7.2）。
+ */
+export function thinkingParamsFor(
+  model: AiModelProfile,
+  wanted: string,
+): Record<string, ThinkingParamValue> | null {
+  if (!model.thinkingLevels.length) return null;
+  const hit =
+    model.thinkingLevels.find((l) => l.label === wanted) ||
+    model.thinkingLevels.find((l) => l.label === model.defaultThinking);
+  return hit ? { ...hit.params } : null;
+}
+
+/** 界面上那枚选择器的候选。空数组 = 这台模型没有思考开关 ⇒ 选择器整个不出现（不留假开关） */
+export function thinkingLabels(model: AiModelProfile | null | undefined): string[] {
+  return model ? model.thinkingLevels.map((l) => l.label) : [];
+}
+
+/**
+ * 当前那台模型的单次输出上限；没有可用档案时返回 null，调用方退回兜底阶梯。
+ * 上限之外宿主侧还有一道 clamp —— 这层只负责“别拿硬编码 16384 去顶一台 4k 的模型”。
+ */
+export function activeMaxOutputTokens(st: AiProfileState = snapshot): number | null {
+  const a = activeRef(st);
+  return a ? Math.min(a.model.maxOutputTokens, 32_768) : null;
 }
 
 /** 测试连接/发送用的默认温度仍住在 `Settings.aiTemperature`（那是全局偏好，不是档案字段） */

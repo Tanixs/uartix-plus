@@ -38,6 +38,8 @@ vi.mock("./aiProfileStore", () => {
     getAiProfiles: () => st,
     useAiProfiles: () => st,
     subscribeAiProfiles: () => () => {},
+    thinkingParamsFor: () => null,
+    thinkingLabels: () => [],
   };
 });
 vi.mock("./contextCollector", () => ({

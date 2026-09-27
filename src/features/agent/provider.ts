@@ -12,7 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { t } from "../../i18n/strings";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import type { AiFormat } from "../settings/settingsStore";
-import { activeRef, type ActiveAi } from "../ai/aiProfileStore";
+import { activeRef, thinkingParamsFor, type ActiveAi } from "../ai/aiProfileStore";
 import type { AgentMessage, AgentProvider, ModelTurn, ToolCall, ToolDefinition, TurnOptions } from "./types";
 
 /**
@@ -147,7 +147,11 @@ export const invokeAgentProvider: AgentProvider = async (
       // P96-K4：读空闲上限从设置来（只约束我们这一侧；上游网关自己掐断的管不到）
       streamIdleSecs: st.streamIdleSecs,
       // P91 A3：输出预算（截断类失败后 loop 逐级下调重试）
-      maxTokens: options?.maxTokens ?? null,
+      // P110-B5：输出预算的**起点**取自档案表（模型自己的 maxOutputTokens），
+      // 不再由 loop 那边拿三个硬编码数猜。宿主侧仍会钳一次（这是"客户端别把上游打死"的保险）。
+      maxTokens: options?.maxTokens ?? Math.min(active.model.maxOutputTokens, 32_768),
+      // 思考档位参数：档案里写死的静态对象，这里只透传（不猜任何平台的字段名）
+      thinkingParams: thinkingParamsFor(active.model, st.aiThinkingLevel) ?? undefined,
     });
     return fromRustTurn(raw);
   } finally {
