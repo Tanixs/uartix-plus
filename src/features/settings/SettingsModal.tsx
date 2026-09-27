@@ -364,17 +364,35 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     }
   };
 
-  const tabs: { key: string; label: string }[] = [
-    { key: "general", label: t("set.general") },
-    { key: "workspace", label: t("set.workspace") },
-    { key: "data", label: t("set.data") },
-    { key: "monitor", label: tx("监测", "Monitoring") },
-    { key: "ai", label: t("set.ai") },
-    { key: SETTINGS_TAB_PLUGINS, label: t("set.ext") },
-    { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}` },
-    { key: "io", label: t("set.io") },
-    { key: "about", label: t("set.about") },
+  const tabs: { key: string; label: string; group: string; sub?: string }[] = [
+    { key: "general", label: t("set.general"), group: tx("基础", "Basics") },
+    { key: "workspace", label: t("set.workspace"), group: tx("基础", "Basics") },
+    { key: "data", label: t("set.data"), group: tx("数据与诊断", "Data & diagnostics") },
+    { key: "monitor", label: tx("监测", "Monitoring"), group: tx("数据与诊断", "Data & diagnostics") },
+    { key: "ai", label: t("set.ai"), group: tx("AI 与 Agent", "AI & agent"), sub: tx("回答行为、流式与授权面、Agent 预算", "Answer behaviour, streaming and permission tier, Agent budgets") },
+    { key: SETTINGS_TAB_PLUGINS, label: t("set.ext"), group: tx("扩展与集成", "Extensions & integration") },
+    { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}`, group: tx("扩展与集成", "Extensions & integration") },
+    { key: "io", label: t("set.io"), group: tx("扩展与集成", "Extensions & integration") },
+    { key: "about", label: t("set.about"), group: tx("其他", "Misc") },
   ];
+  /** 页头那一句：说明写在页头一次，胜过在每一行重复一遍（P111-B） */
+  const headTab = tabs.find((x) => x.key === tab) ?? tabs[0];
+
+  // Esc 是这一页的键盘出口：改成全窗口之后，"点遮罩外面"那条出口不存在了
+  // （页面自己就铺满工作区），没有 Esc 就等于只有一颗「完成」可点。
+  // 只在本页是唯一覆盖层、且没有内层浮层开着时响应 —— 否则按一次 Esc 会把
+  // 浮层和整页一起关掉，那是"我明明只想收起菜单"的事故。二次确认框自己也建
+  // .modal-mask，所以"层数 > 1 就跳过"同时覆盖了它。
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (document.querySelectorAll(".modal-mask").length > 1) return;
+      if (document.querySelector('[role="listbox"]')) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [onClose]);
 
   const row = (label: string, node: React.ReactNode, tip?: string) => (
     <SetRow label={label} tip={tip}>
@@ -398,18 +416,32 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   );
 
   return (
-    <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={onClose}>
-      <div className="modal set-modal" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="modal-title">{t("title.settings")}</div>
+    <div className="modal-mask set-page-mask" role="dialog" aria-modal="true" onMouseDown={onClose}>
+      <div className="modal set-modal set-page" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="set-page-head">
+          <span className="set-page-title">{headTab.label}</span>
+          {headTab.sub && <span className="set-page-sub">{headTab.sub}</span>}
+          <span className="set-page-actions">
+            <button className="btn primary" onClick={onClose}>{t("c.done")}</button>
+          </span>
+        </div>
         <div className="set-body">
           <div className="set-nav">
-            {tabs.map((x) => (
-              <button key={x.key} className={tab === x.key ? "on" : ""} onClick={() => setTab(x.key)}>
-                {x.label}
-              </button>
+            {tabs.map((x, i) => (
+              <Fragment key={x.key}>
+                {/* 分组标题只在"这一组的第一项"前出现一次 */}
+                {(i === 0 || tabs[i - 1].group !== x.group) && <div className="set-nav-group">{x.group}</div>}
+                <button className={tab === x.key ? "on" : ""} onClick={() => setTab(x.key)}>
+                  {x.label}
+                </button>
+              </Fragment>
             ))}
           </div>
           <div className="set-content">
+            {/* 一页 = 一张浮起的卡（ZCode 的「常规」页就是这个形状：一张卡、里面几行带分隔）。
+                旧版是"发丝线接发丝线铺在纯白弹窗上"，所以三面分不出层。
+                卡片只加 background/shadow，不加 border —— G 门那条计数因此不动。 */}
+            <div className="set-card">
             {tab === "general" && (
               <>
                 {row(t("set.language"), (
@@ -1325,12 +1357,9 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 ), t("set.checkUpdate.tip"))}
               </div>
             )}
+            </div>
             {msg && <div className="set-msg">{msg}</div>}
           </div>
-        </div>
-        <div className="modal-foot">
-          <span />
-          <button className="btn primary" onClick={onClose}>{t("c.done")}</button>
         </div>
       </div>
     </div>

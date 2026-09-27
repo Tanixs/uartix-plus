@@ -15,6 +15,9 @@
   --fs-sm: 12px;
   --fs-md: 14px;
   --fs-lg: 16px;
+  /* 布局常量：身份栏高度。`.ibar` 与全窗口覆盖层（P111-B 设置页）都要它——
+     抄成两处字面量的话，改高度那一天遮罩就会压住窗口控件，或露出一条工作区。 */
+  --h-ibar: 38px;
   --radius-s: 4px;
   --radius-m: 6px;
   --radius-l: 8px;
@@ -274,7 +277,7 @@ body {
    就能关"这个肌肉记忆动作变成"先瞄准"。左侧仍留 12px 给品牌呼吸。 */
 .ibar {
   position: relative;
-  flex: 0 0 38px;
+  flex: 0 0 var(--h-ibar);
   display: flex;
   align-items: center;
   gap: var(--sp-1);
@@ -5840,6 +5843,73 @@ select optgroup {
 .set-nav button:hover { color: var(--text); background: var(--raise-1); }
 .set-nav button.on { color: var(--accent); background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 .set-content { flex: 1; padding: 6px 22px 16px; overflow-y: auto; }
+/* ---------------- P111-B 设置页：全窗口 + 三面分层 ----------------
+   改判来自用户的两条事实：ZCode 的设置是**全窗口页**，而它的分层靠颜色与阴影，
+   不靠描边。实测旧状：`.set-nav` 与 `.set-content` 的 background 都是
+   `rgba(0,0,0,0)`、弹窗是纯白 ⇒ 三面贴在同一张白纸上，只靠 1px 发丝线分组，
+   所以"没有分层"不是错觉。
+   阶梯用现成的三档表面色，亮暗同向（light: inset #eceef1 < bg #f5f6f8 < panel #fff；
+   dark: #0b0d10 < #0f1115 < #161a20）：导航凹、内容平、分组卡浮。
+   全部走 background + box-shadow，**一条 `border:` 都不加**（G 门 394 只降不升）。 */
+.modal-mask.set-page-mask {
+  /* 顶部从身份栏下沿开始：窗口拖拽与最小/最大/关闭必须一直点得到。
+     旧版弹窗是居中 + 遮罩压暗，整块盖住身份栏，那是"弹窗"的语义；
+     改成占满工作区之后，再盖住它就是事故。 */
+  inset: var(--h-ibar) 0 0 0;
+  background: var(--bg);
+  align-items: stretch;
+  justify-content: stretch;
+}
+.set-modal.set-page {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+  max-height: none;
+  height: auto;
+  padding: 0;
+  border-radius: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.set-page .set-nav { flex: 0 0 200px; background: var(--bg-inset); padding: 12px 10px 18px; }
+.set-page .set-content { background: var(--bg); padding: 16px 24px 26px; }
+/* 页头：标题 + 一句副标题 + 右侧动作。说明写在页头一次，胜过写在每一行重复。 */
+.set-page-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: 14px 24px 12px;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-pop);
+}
+.set-page-title { font-size: var(--fs-lg); font-weight: 700; user-select: none; }
+.set-page-sub { font-size: var(--fs-body); color: var(--text-dim); line-height: 1.5; min-width: 0; }
+.set-page-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.set-nav-group {
+  margin: 14px 0 3px;
+  padding: 0 13px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+  user-select: none;
+}
+.set-nav-group:first-child { margin-top: 2px; }
+/* 一组设置 = 一张浮起的卡，而不是"一条发丝线接一条发丝线" */
+.set-card {
+  margin: 0 0 var(--sp-4);
+  padding: 0 18px;
+  background: var(--bg-panel);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-pop), var(--shadow);
+  /* 行长上限：1440 宽下一行说明能排到 130+ 字，读到句尾已经忘了句首（实测那张
+     「上下文压缩阈值」的提示横穿了整页）。卡片不铺满，右侧留页面底色。 */
+  max-width: 1080px;
+}
+.set-card > .set-row:last-child { border-bottom: none; }
+.set-card > .set-group-title:first-child { margin-top: 12px; }
 .set-row {
   display: flex;
   align-items: center;

@@ -64,7 +64,18 @@ const css = readFileSync(
 const flexBasis = (sel: string): number => {
   const m = new RegExp(`^\\.${sel} \\{[^}]*?flex: 0 0 ([^;]+);`, "m").exec(css);
   expect(m, `theme.css 里 .${sel} 的 flex: 0 0 … 写法变了，抠不出数值`).not.toBeNull();
-  const nums = [...m![1].matchAll(/([0-9.]+)px/g)];
+  let raw = m![1].trim();
+  // P111-B：身份栏高度改挂在 `--h-ibar` 上（全窗口设置页的遮罩要用同一个数，
+  // 抄两份就会有一天遮罩压住窗口控件）。这里**跟着 var() 解析到真值**再比 ——
+  // 这条守卫的活是"CSS 与 TS 不许漂"，不是"CSS 里必须写字面量"，
+  // 所以能解析间接引用才算它还在干活；解析不出来仍然判红，不放松。
+  const varRef = /^var\((--[a-z0-9-]+)\)$/.exec(raw);
+  if (varRef) {
+    const t = new RegExp(`\\${varRef[1]}:\\s*([0-9.]+)px`, "m").exec(css);
+    expect(t, `.${sel} 的 flex-basis 写了 ${varRef[1]}，但 theme.css 里找不到它的 px 定义`).not.toBeNull();
+    raw = `${t![1]}px`;
+  }
+  const nums = [...raw.matchAll(/([0-9.]+)px/g)];
   expect(nums.length, `.${sel} 的 flex-basis 里找不到 px 数值`).toBeGreaterThan(0);
   return Number(nums[nums.length - 1][1]);
 };
