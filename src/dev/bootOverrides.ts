@@ -13,6 +13,7 @@
  */
 import {
   patch,
+  SETTINGS_TAB_PLUGINS,
   THEME_LIST,
   WORKSPACE_PRESETS,
   type Settings,
@@ -80,9 +81,40 @@ export interface DevBootOverrides {
    * 取值表来自 `i18n/strings` 的 `LOCALE_LIST`（有哪几种语言只有一处答案）。
    */
   lang?: Locale;
+  /**
+   * `?open=settings/model` / `?open=ai` —— 启动就把某个"打开态"摆出来（P111-A2）。
+   *
+   * 为什么需要它：P110-B3/B4 那两处界面被判不合格，而我交出去之前**一眼都没看过**——
+   * 理由写的是"无头浏览器点不到设置页"。设置页是纯 DOM，无头截图本来就拍得到，
+   * 缺的只是"启动后自动打开它"这一个入口。补上它，界面改判的验收证据就不该再等用户实拍。
+   *
+   * 取值表：视图名在这张白名单里；设置页那一页的 key 走 `DEV_SETTINGS_TABS`。
+   * 未知 key **丢掉 tab 但保留视图**（打开到默认页），因为 SettingsModal 是
+   * `useState(initialTab ?? "general")`：把 "bogus" 递进去会得到一个空白内容区，
+   * 那比拍不到更坏——它会让人以为页面本身是空的。
+   */
+  open?: DevOpenView;
+  settingsTab?: string;
   /** 仅在 preset 生效时才连带置真；?layout=keep 可豁免 */
   resetLayout: boolean;
 }
+
+/** `?open=` 认的视图。`ai` = AI 助手面板（它默认可能没开）。 */
+export const DEV_OPEN_VIEWS = ["settings", "ai"] as const;
+export type DevOpenView = (typeof DEV_OPEN_VIEWS)[number];
+
+/**
+ * 设置页导航项的 key。这里**不 import `SettingsModal`**：那个模块 value-import 了
+ * 半个应用（串口、任务中心、档案表…），把它拉进取证层等于给截图脚手架接上整条运行时。
+ * 漂移由 `bootOverrides.test.ts` 钉：它读 SettingsModal 的源文本，逐项比这份表。
+ *
+ * 插件那一格写的是 `SETTINGS_TAB_PLUGINS` 而不是字面量「ext」——
+ * `marketUi.test.ts` 有一条门专门拦「标签键长出第二处」（它是全文搜那个带引号的字面量，连注释都算），
+ * 抄字面量当场被判红（本批实测）。
+ */
+export const DEV_SETTINGS_TABS = [
+  "general", "workspace", "data", "monitor", "ai", SETTINGS_TAB_PLUGINS, "mcp", "io", "about",
+] as const;
 
 /** 纯函数：把「能不能生效」与 import.meta.env 解耦，好让测试能同时钉住两侧。缺省即拒绝。 */
 export function devBootEnabled(env?: { dev?: boolean; prod?: boolean }): boolean {
@@ -123,14 +155,38 @@ export function parseDevBoot(search: string): DevBootOverrides {
 
   const lang = q.get("lang");
   if (lang && (LOCALE_LIST as readonly string[]).includes(lang)) o.lang = lang as Locale;
+
+  // `?open=settings/model`：视图与页 key 一起给；也接受只给视图（`?open=ai`）
+  const open = q.get("open");
+  if (open) {
+    const [view, tab] = open.split("/");
+    if ((DEV_OPEN_VIEWS as readonly string[]).includes(view)) {
+      o.open = view as DevOpenView;
+      if (tab && (DEV_SETTINGS_TABS as readonly string[]).includes(tab)) o.settingsTab = tab;
+    }
+  }
   return o;
 }
 
 export function hasDevBoot(o: DevBootOverrides): boolean {
   return Boolean(
     o.preset || o.theme || o.zoom || o.lang || o.tourAt !== undefined || o.rail || o.iface ||
+    o.open ||
     o.welcomeOff || o.welcomeForce || o.resetLayout,
   );
+}
+
+/**
+ * App 用：启动要摆出哪个"打开态"。生产构建恒为 undefined（同一个 `devBootEnabled` 闸门）。
+ * 一次性的：App 消费完就当作没这回事，用户之后关设置不会被重新弹开。
+ */
+export function devOpenRequest(
+  search: string,
+  env: { dev?: boolean; prod?: boolean } = { dev: import.meta.env.DEV, prod: import.meta.env.PROD },
+): { view: DevOpenView; tab?: string } | undefined {
+  if (!devBootEnabled(env)) return undefined;
+  const o = parseDevBoot(search);
+  return o.open ? { view: o.open, tab: o.settingsTab } : undefined;
 }
 
 /**

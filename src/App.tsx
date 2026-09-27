@@ -25,7 +25,7 @@ import { CommandPalette } from "./shell/CommandPalette";
 import { buildCommands, type PaletteDeps } from "./shell/commandRegistry";
 import { Welcome } from "./shell/Welcome";
 import { markWelcomeSeen, welcomeSeen } from "./shell/welcomeSlides";
-import { devWelcomeAt } from "./dev/bootOverrides";
+import { devOpenRequest, devWelcomeAt } from "./dev/bootOverrides";
 import { type RailActions } from "./shell/RailPanel";
 import { IfaceAction } from "./features/serial/ifaces";
 import { ModbusBadge } from "./features/modbus/ModbusBadge";
@@ -261,6 +261,17 @@ export default function App() {
       setSettingsTab(tab);
       setSettingsOpen(true);
     });
+    // P111-A2：`?open=settings/ai` —— 把取证要拍的那个"打开态"直接摆出来。
+    // 一次性：这个 effect 依赖表为空、只跑一次，用户之后关掉它不会被重新弹开。
+    // 没有这层入口，P110-B3/B4 那种"界面交出去之前自己一眼没看"就会重演——
+    // 设置页是纯 DOM，无头截图本来拍得到，缺的只是"启动后自动打开"这一句话。
+    const devOpen = devOpenRequest(location.search);
+    if (devOpen?.view === "settings") {
+      setSettingsTab(devOpen.tab);
+      setSettingsOpen(true);
+    } else if (devOpen?.view === "ai") {
+      setAiOpen(true);
+    }
     const unPop = onPop(() => {
       chatStore.setFloatOpen(true);
       setAiOpen(true);

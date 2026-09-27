@@ -5876,6 +5876,43 @@ select optgroup {
 .set-ctl .form-row { margin-bottom: 0; }
 .set-ctl .form-row > label { width: auto; min-width: 0; text-align: left; }
 .set-ctl .form-hint { margin: 2px 0 0; flex-basis: 100%; }
+/* P111-A：「一行次要说明」这一族形状只此一处。
+   事故（P110-B3/B4，用户判"字体又大又丑"后实测定位）：`.set-hint` 等 5 个类名被 TSX 用了
+   却在全项目 CSS 里没有一条规则 ⇒ 它们继承 body 的 **16px**，而同页真正的标签是 12px，
+   于是说明文字比它要说明的东西大 1.33 倍、还不降色。判据收在 check-style 的 J 门。
+   `pm-hint` / `sq-hint` 是同一族的老欠账（P111-A 之前就有），症状一样，一起落在这条里。 */
+.set-hint,
+.pm-hint,
+.sq-hint,
+.ai-model-picker-note {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+/* 配置投影预览：`<pre>` 默认 13px 且不带主题色，跟在上面那族旁边会重新变成"最响的那块" */
+.set-json {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: var(--raise-1);
+  border-radius: var(--radius-s);
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+/* 发送框那两枚选择器：容器与标签（P111-E 会把它们收进模型 chip，先让现状不再裸奔） */
+.ai-model-picker { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.ai-model-picker-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  min-width: 0;
+}
 .set-seg { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-l); overflow: hidden; }
 .set-seg.col { flex-direction: column; }
 .set-seg button {

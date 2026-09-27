@@ -12,10 +12,12 @@
  *
  * 用法：先起 dev（`npm run dev`），再 `node .tools/gen-welcome-shot.mjs`。
  */
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+// 浏览器探测与无头截图只有 `.tools/shot.mjs` 一份（P111-A1）：
+// 两处各抄一份候选路径表，装在非默认盘的那个浏览器就只有一处能找到。
+import { browserPath, shoot } from "./shot.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const OUT_DIR = path.join(ROOT, "src", "assets", "welcome");
@@ -34,28 +36,12 @@ const shotNum = (name) => {
 };
 const VIEWPORT = `${shotNum("SHOT_W")},${shotNum("SHOT_H")}`;
 
-const CANDIDATES = [
-  "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-];
-
-function browser() {
-  const fromEnv = process.env.LARIX_BROWSER;
-  for (const p of fromEnv ? [fromEnv, ...CANDIDATES] : CANDIDATES) {
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
 const SHOTS = [
   { file: "proto-light.png", theme: "light" },
   { file: "proto-dark.png", theme: "dark" },
 ];
 
-const exe = browser();
-if (!exe) {
+if (!browserPath()) {
   console.error("FAIL: 找不到 Edge/Chrome。设 LARIX_BROWSER=<可执行文件绝对路径> 再试。");
   process.exit(1);
 }
@@ -74,29 +60,12 @@ for (const s of SHOTS) {
   const out = path.join(OUT_DIR, s.file);
   // 无头截图只认 Windows 绝对路径；相对路径会被解析到浏览器的 cwd
   const url = `${DEV_URL}?welcome=0&preset=proto&theme=${s.theme}&zoom=100`;
-  const r = spawnSync(
-    exe,
-    [
-      "--headless=new",
-      "--disable-gpu",
-      "--hide-scrollbars",
-      "--force-device-scale-factor=1",
-      // 等 React 挂载 + dockview 布局落定；给短了会截到空壳。
-      // 9000 在 125% 档实测截出过一张全白图（不是失败，是"看起来成功"的坏证据），所以留到 15000。
-      "--virtual-time-budget=15000",
-      `--window-size=${VIEWPORT}`,
-      `--user-data-dir=${profile}`,
-      `--screenshot=${out}`,
-      url,
-    ],
-    { encoding: "utf8" },
-  );
-  const ok = r.status === 0 && existsSync(out) && statSync(out).size > 20000;
-  if (!ok) {
+  const r = shoot({ url, out, size: VIEWPORT, profile });
+  if (!r.ok) {
     bad++;
-    console.error(`FAIL ${s.file}: ${r.stderr?.slice(0, 200) || "产物过小，多半是白屏"}`);
+    console.error(`FAIL ${s.file}: ${r.note}`);
   } else {
-    console.log(`  ✓ ${s.file}  ${(statSync(out).size / 1024).toFixed(0)} KB  ← ${url}`);
+    console.log(`  ✓ ${s.file}  ${(r.bytes / 1024).toFixed(0)} KB  ← ${url}`);
   }
 }
 rmSync(profile, { recursive: true, force: true });

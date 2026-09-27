@@ -17,7 +17,7 @@ vi.stubGlobal("localStorage", {
   removeItem: (k: string) => storage.delete(k),
 });
 
-const { applyDevBoot, devBootEnabled, devWelcomeAt, hasDevBoot, parseDevBoot, ZOOM_STEPS, LAYOUT_KEY } =
+const { applyDevBoot, devBootEnabled, devOpenRequest, devWelcomeAt, hasDevBoot, parseDevBoot, DEV_SETTINGS_TABS, ZOOM_STEPS, LAYOUT_KEY } =
   await import("./bootOverrides");
 const { WELCOME_SEEN_KEY } = await import("../shell/welcomeSlides");
 const { RAIL_PANEL_KEY } = await import("../shell/railState");
@@ -210,5 +210,59 @@ describe("applyDevBoot：真实副作用", () => {
     storage.set(LAYOUT_KEY, '{"panels":[]}');
     applyDevBoot("?preset=analyze", { dev: false, prod: true });
     expect(storage.has(LAYOUT_KEY)).toBe(true);
+  });
+});
+
+/**
+ * P111-A2：`?open=` —— 把"打开态"摆给无头截图看。
+ *
+ * 这条入口存在的理由写在 `bootOverrides.ts` 的注释里：P110-B3/B4 交出去之前我一眼没看，
+ * 而当时那句"看不了"是假的，缺的只是"启动后自动打开它"这一句话。
+ * 于是它要钉住的还是同两件事：**prod 里必须不存在**，以及**脏值不能把界面开成空白**。
+ */
+describe("?open=settings/ai：取证要的那个打开态", () => {
+  it("视图与页 key 一起给", () => {
+    expect(parseDevBoot("?open=settings/ai")).toMatchObject({ open: "settings", settingsTab: "ai" });
+    expect(devOpenRequest("?open=settings/ai", { dev: true, prod: false })).toEqual({ view: "settings", tab: "ai" });
+  });
+  it("只给视图也认（?open=ai 是浮窗助手，不是设置页）", () => {
+    expect(devOpenRequest("?open=ai", { dev: true, prod: false })).toEqual({ view: "ai", tab: undefined });
+  });
+  it("未知视图整个丢；未知页 key 只丢 key、保留视图", () => {
+    // 把 "bogus" 原样递进 SettingsModal 会得到一个**空白内容区**（它是 useState(initialTab ?? "general")），
+    // 那比拍不到更坏：看图的人会以为这一页本来就是空的。
+    expect(parseDevBoot("?open=bogus").open).toBeUndefined();
+    expect(parseDevBoot("?open=settings/bogus")).toMatchObject({ open: "settings" });
+    expect(parseDevBoot("?open=settings/bogus").settingsTab).toBeUndefined();
+  });
+  it("prod 恒为 undefined（一个能弹开任何界面的 URL 入口不该进产物）", () => {
+    expect(devOpenRequest("?open=settings/ai", { dev: false, prod: true })).toBeUndefined();
+    expect(devOpenRequest("?open=ai", { dev: true, prod: true })).toBeUndefined();
+    expect(devOpenRequest("", { dev: true, prod: false })).toBeUndefined();
+    // 缺省 env 走 import.meta.env：vitest 里那是 dev=true，所以**不能**拿缺省调用去证 prod-inert，
+    // 上面两条显式给 prod=true 的才是那条纪律的落点（与 devWelcomeAt 同一写法同一理由）。
+  });
+  it("hasDevBoot 认得它 —— 否则 ?open= 单独出现时整层短路", () => {
+    expect(hasDevBoot(parseDevBoot("?open=ai"))).toBe(true);
+  });
+  it("DEV_SETTINGS_TABS == SettingsModal 的 tabs key 列表（改名会红）", async () => {
+    // 与上面 ?iface 那条同一手法：读源文本逐项比，不 import 组件（那会把半个应用拉进取证层）。
+    const fsSpec = "node:fs";
+    const urlSpec = "node:url";
+    const { readFileSync } = (await import(fsSpec)) as unknown as {
+      readFileSync: (p: string, enc?: string) => string;
+    };
+    const { fileURLToPath } = (await import(urlSpec)) as unknown as { fileURLToPath: (u: string | URL) => string };
+    const src = readFileSync(
+      fileURLToPath(new URL("../features/settings/SettingsModal.tsx", import.meta.url)),
+      "utf8",
+    );
+    const block = /const tabs: \{[^}]*\}\[\] = \[([\s\S]*?)\n  \];/.exec(src)?.[1] ?? "";
+    const literal = [...block.matchAll(/key: "([^"]+)"/g)].map((m) => m[1]);
+    expect(literal.length, "从 SettingsModal 抠不出 tabs —— 写法变了要同步改这条").toBeGreaterThan(5);
+    const inModal = new Set([...literal, settings.SETTINGS_TAB_PLUGINS]);
+    const inDev = new Set<string>(DEV_SETTINGS_TABS);
+    for (const k of inModal) expect(inDev.has(k), `设置页有「${k}」这一页，?open= 却开不到`).toBe(true);
+    for (const k of inDev) expect(inModal.has(k), `?open= 白名单里的「${k}」在设置页已经不存在了，删掉它`).toBe(true);
   });
 });

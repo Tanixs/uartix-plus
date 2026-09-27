@@ -434,5 +434,114 @@ const ICON_STROKE_AREA_FLOOR = 32; // size × strokeWidth
   }
 }
 
+/* ---- P111-J 门：用了的类名必须有定义（写了没人看的那一半） ----
+ * 事故形态（P110-B3/B4 交付，用户判不合格后实测定位）：`AiModelRows.tsx` 与
+ * `AiModelPicker.tsx` 里用了 `.set-hint` / `.set-json` / `.ai-model-picker*` 共 5 个类名，
+ * 而**全项目 CSS 里根本没有这些规则**。后果不是"没样式"这么轻：
+ * 没有规则 ⇒ 继承 body 的 16px，而同页真正的标签是 12px ⇒ **说明文字比它要说明的东西大 1.33 倍**，
+ * 还不降色、没有行高。用户看到的是"字体又大又丑"，根因是一行没写出来的 CSS。
+ *
+ * 为什么现有门禁拦不住：`check-undeclared-vars` 管的是"用了没定义的**变量**"，
+ * 这条是它的镜像——"用了没定义的**类名**"。边框数、翻译数都数得对，唯独没人问过
+ * "这个类名有没有人写样式"。这条门若在，P110-B3 当场红，我根本交不出去。
+ *
+ * 判据三条：
+ *  ① TSX 里 `className=` 位置的**静态**类名 token，必须在 `cssFiles` 并集里出现过；
+ *  ② 豁免逐条写理由，且**必须仍被真引用**——文件删了名单还留着就是给下一次偷懒开门
+ *     （与 `settingsSchema.test` 的 DELEGATED_WRITERS 同一纪律）；
+ *  ③ 豁免总数只降不升（基线见 J_CEILING）。
+ *
+ * 认不到的形态（明写在这是为了不让下一个人以为它全能管）：
+ *  - 模板串里 `${}` 拼出来的动态类名：剥掉插值后剩下的字面量段照查，整段动态的查不了；
+ *  - 不带连字符的裸词（`btn`、`input`、`on`）：与属性值/英文词撞车率太高，不在判据内；
+ *  - 第三方 CSS 里的类（dockview 的 `dv-*`）：实测 src 里没有手写 `dv-*` 的 className，
+ *    真出现时把它加进 `cssFiles` 的并集，而不是给它开豁免。
+ */
+/**
+ * 基线 16：P111-A 上线当天实测的**存量**欠账。
+ * 我自己在 P110-B3/B4 新写的那 7 个（`set-hint`/`set-json`/`ai-model-picker`×3/`pm-hint`/`sq-hint`）
+ * **不进这张表**——一条会拦这个错的门，如果开局第一件事是把这个错豁免掉，它就白造了。
+ * 那 7 个当场补了 CSS（theme.css 的「一行次要说明」族）。
+ *
+ * 每条豁免只有两种合法写法：① 说清它为什么不需要规则（身份/锚点钩子）；
+ * ② 明说是欠账、什么时候还（P111-E）。写不出这两句话的，就该补 CSS 或删类名。
+ */
+const J_CEILING = 16;
+/** token → 为什么允许它没有 CSS（说不出人话的理由等于没有理由） */
+const J_EXEMPT = {
+  // —— 身份 / 锚点钩子：同元素的另一个类或父级已有样式，这个 token 只用来定位 ——
+  "ctlg-switch": "与 .ctlg-row 同元素，样式在 .ctlg-row；这三枚是控件卡类型的身份钩子（插件与 AI 覆写按它定位）",
+  "ctlg-monitor": "同上（控件卡类型身份钩子）",
+  "ctlg-led": "同上（控件卡类型身份钩子）",
+  "mkt-offshelf-toggle": "与 .plg-fchip 同元素，样式在 plg-fchip；这枚是「下架态开关」的身份钩子",
+  "ai-streaming-only": "可见性钩子（流式期间才显示），布局由父级 .ai-msgs 管",
+  "ai-edit-input": "与 .input 同元素，样式在 .input",
+  "help-modal": "尺寸/布局全在 .set-modal；这枚留给「帮助」自己的覆写锚点（P111-B 会把全窗口只挂在 .set-page 上，届时复核）",
+  "ext-panel-host": "扩展面板的宿主容器钩子，内部内容自带样式",
+  "orch-chip-wrap": "浮层锚点（relative 由 Dropdown 侧给），无自有视觉",
+  // —— 明说的欠账：症状比 .set-hint 轻（父级是 flex/grid，被带着走），P111-E 逐条补或删 ——
+  "plot-measure-col": "欠账：测量列容器没写规则，靠父级 flex 撑着 ⇒ 间距不受控。P111-E 补",
+  "cmdk-section": "欠账：命令面板分组容器没写规则 ⇒ 分组之间没有留白。P111-E 补",
+  "ai-anom-item": "欠账：异常项行没写规则。P111-E 补",
+  "ai-agent-oldrun-status": "欠账：旧任务状态那行文字按继承字号渲染（正是 .set-hint 那一族的症状，只是没人抱怨过）。P111-E 并入「一行次要说明」族",
+  "ai-ext-head": "欠账：扩展面板标题行没写规则。P111-E 补",
+  "ai-edit-wrap": "欠账：消息编辑态容器没写规则。P111-E 补",
+  "ext-panel-miss": "欠账：「面板未找到」提示态没写规则。P111-E 补",
+};
+{
+  const defined = new Set();
+  for (const f of cssFiles) {
+    const src = fs.readFileSync(f, "utf8");
+    for (const m of src.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) defined.add(m[1]);
+  }
+  const tsxFiles = [];
+  (function walkTsx(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walkTsx(p);
+      else if (e.name.endsWith(".tsx")) tsxFiles.push(p);
+    }
+  })(path.join(ROOT, "src"));
+
+  const used = new Map(); // token → 出处（rel:line）
+  for (const f of tsxFiles) {
+    const rel = path.relative(ROOT, f).replace(/\\/g, "/");
+    fs
+      .readFileSync(f, "utf8")
+      .split(/\r?\n/)
+      .forEach((line, i) => {
+        // className= 后面跟的字符串字面量：`"a b"` / `'a b'` / `` {`a b`} `` / `{"a"}`
+        for (const m of line.matchAll(/className=(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`|\{\s*"([^"]*)"\s*\}|\{\s*'([^']*)'\s*\})/g)) {
+          const raw = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5] ?? "").replace(/\$\{[^}]*\}/g, " ");
+          for (const tok of raw.split(/\s+/)) {
+            if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(tok)) continue;
+            if (defined.has(tok)) continue;
+            if (!used.has(tok)) used.set(tok, []);
+            used.get(tok).push(`${rel}:${i + 1}`);
+          }
+        }
+      });
+  }
+
+  const unexempted = [...used.keys()].filter((t) => !J_EXEMPT[t]);
+  if (unexempted.length) {
+    console.error(`FAIL(J): ${unexempted.length} 个类名被 TSX 用了却在项目 CSS 里没有定义 —— 它会继承 body 字号（16px），`);
+    console.error("       把「说明」顶到比标签还大。补一条规则，或者删掉这个类名：");
+    for (const t of unexempted.slice(0, 30)) console.error(`  - .${t}  ← ${used.get(t).slice(0, 3).join(", ")}${used.get(t).length > 3 ? ` …共 ${used.get(t).length} 处` : ""}`);
+    fails++;
+  } else if (used.size > J_CEILING) {
+    console.error(`FAIL(J): 未定义类名 ${used.size} 个 > 基线 ${J_CEILING} —— 豁免名单只降不升`);
+    fails++;
+  } else {
+    const stale = Object.keys(J_EXEMPT).filter((t) => !used.has(t));
+    if (stale.length) {
+      console.error(`FAIL(J): 豁免名单里这 ${stale.length} 条已经没人引用了，是个空门，删掉：${stale.join(", ")}`);
+      fails++;
+    } else {
+      console.log(`OK(J): TSX 用到的静态类名全部有定义（豁免 ${Object.keys(J_EXEMPT).length} 条 ≤ 基线 ${J_CEILING}，且条条仍被引用）`);
+    }
+  }
+}
+
 console.log(fails === 0 ? "OK: 样式契约通过" : `FAIL: ${fails} 类问题`);
 process.exit(fails === 0 ? 0 : 1);
