@@ -468,6 +468,15 @@ export const IconMore = () =>
  * 所以基准（16 字形 / 2.0 描边）一改它们跟着改，不用逐枚调。
  */
 
+/** 刷新：环形箭头。原先借 IconChevron(dir="up")，那个读作"收起"不读作"再来一次"。 */
+export const IconRefresh = () =>
+  svg(
+    <>
+      <path d="M20 12a8 8 0 1 1-2.6-5.9" />
+      <path d="M20 4v4h-4" />
+    </>,
+  );
+
 /** 模型设置：立方体。ZCode 那一页的签名形状就是它；借 IconStack 会读作"图层"不读作"模型"。 */
 export const IconCube = () =>
   svg(

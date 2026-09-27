@@ -70,6 +70,12 @@ export interface AiModelProfile {
   defaultThinking: string;
   /** 逐模型温度；不填跟随全局 `aiTemperature` */
   temperature?: number;
+  /**
+   * 会不会看图。P112-B 加的一枚徽标位 —— 它是"用户填一次的事实"，不是我们从模型名猜的：
+   * 猜错会让人把图片发给一个收不了的模型。老档案没这个字段就是 undefined ⇒ 不显示徽标
+   * （零兼容裁决 2026-09-22：未发布、无存量用户，不做迁移表）。
+   */
+  vision?: boolean;
   enabled: boolean;
   createdAt: number;
 }

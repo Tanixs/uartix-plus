@@ -1,25 +1,27 @@
 /**
- * P111-C「模型设置」：三栏里的中+右两栏（左栏是设置页自己的导航，在 SettingsModal）。
+ * P111-C 起、P112-B 对齐 ZCode 的「模型设置」页：中列挑供应商，右列改这一家。
  *
- * 为什么从 AI 服务页里搬出来单独一页（用户判 P110-B3 不合格之后改判）：
- *  - 旧形状是"一家供应商 = 一行 set-row，行里 16 个控件同时在场"，实测那一行 674px 宽
- *    × 195px 高。它把"看"和"改"挤在同一处，谁都不是主角；
- *  - 供应商/模型是**一对多的清单**，清单类内容的通形就是 ZCode 那样：左列选，右列改
- *    （GitHub Desktop / Linear 的设置也是这个形状）。
- *  - 搬出来之后 AI 服务页只剩行为参数与授权面，两页各自能一屏读完。
+ * 为什么从"一行摊着 16 个控件"改成这样（用户判 P110-B3 不合格的第一现场）：
+ *  - 旧形状实测 674px 宽 × 195px 高，把"看"和"改"挤在同一处，谁都不是主角；
+ *  - 供应商/模型是一对多的清单，清单的通形就是左列选、右列改（ZCode / GitHub 设置同形）；
+ *  - ZCode 的模型行平时只有一行（名字 + 徽标 + 四个动作），字段点「编辑」才展开——
+ *    这才是那面看起来清爽的原因，而不是它字少。
  *
  * 两处刻意不同步的东西：
- *  - **试连态**是这一页的内存态，切走就没了。它不叫"在线状态"：做常绿的点需要心跳，
+ *  - **试连态**是这一页的内存态，切走就没了。它不叫"在线状态"：常绿需要心跳，
  *    这一页只需要"我刚点那一下成功没有"（P110-B3 同口径）。
- *  - **选中哪一家**也是内存态，但进页面时默认落在"当前使用模型"所属那一家 ——
- *    右列空白一屏会让人以为配置丢了。
+ *  - **哪一行在编辑**也是内存态，换供应商就清空——留着会让用户以为编辑的是另一家的模型。
  */
 import { useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { Dropdown } from "../../shared/Dropdown";
+import { HelpHint } from "../../shared/HelpHint";
 import { SetRow } from "../../shared/SetRow";
 import { Listbox } from "../../shared/Listbox";
-import { IconChevron } from "../../shared/icons";
+import { IconEdit, IconMore, IconPlus, IconRefresh, IconTarget, IconTrash } from "../../shared/icons";
 import { AI_FORMATS, AI_PRESETS, patch, useSettings, type AiFormat, type AiPreset } from "./settingsStore";
 import { guessContextTokens, listModels, missingFrom } from "../ai/modelCatalog";
+import { aiWireArgs } from "../agent/provider";
 import {
   addModel,
   addProvider,
@@ -31,6 +33,7 @@ import {
   updateModel,
   updateProvider,
   useAiProfiles,
+  type AiModelProfile,
   type AiProvider,
 } from "../ai/aiProfileStore";
 import {
@@ -44,9 +47,9 @@ import { t, tx, useLocale } from "../../i18n/strings";
 
 type Probe = "idle" | "testing" | "ok" | "err";
 
-/** 中列那个点：四种说法各自对应一件真事，不是一根装饰线 */
+/** 中列那个点：几种说法各对应一件真事，不是一根装饰线 */
 function dotOf(p: AiProvider, probe: Probe, modelCount: number): { cls: string; tip: string } {
-  if (probe === "ok") return { cls: "ok", tip: tx("上次试连通过（本页面内的记忆，重启回到未测）", "Last test passed (kept only while this page is open)") };
+  if (probe === "ok") return { cls: "ok", tip: tx("上次试连通过（本页内的记忆，重启回到未测）", "Last test passed (kept only while this page is open)") };
   if (probe === "err") return { cls: "err", tip: tx("上次试连失败", "Last test failed") };
   if (probe === "testing") return { cls: "run", tip: tx("正在试连…", "Testing…") };
   if (!p.enabled) return { cls: "off", tip: tx("这家已停用", "This provider is switched off") };
@@ -56,7 +59,7 @@ function dotOf(p: AiProvider, probe: Probe, modelCount: number): { cls: string; 
 }
 
 /**
- * 掩码回显。P111-C 修掉一处双掩码：旧代码 `type="password"` 与掩码串叠着写，
+ * 密钥回显。P111-C 修掉一处双掩码：旧代码 `type="password"` 与掩码串叠着写，
  * 于是 maskKey 精心留出的头 6 尾 3 被圆点全盖掉 —— 那段是死代码。
  * 现在未聚焦时是**文本**（看得见头尾，用来判断"这格装的到底是哪把 key"），
  * 聚焦才换成原文可编辑。中间值不出现，出境仍只有 `aiWireArgs` 一处。
@@ -68,6 +71,124 @@ function maskKey(k: string): string {
   return `${v.slice(0, 6)}…${v.slice(-3)}`;
 }
 
+/** 竖排字段：label 在上、控件通栏 —— ZCode 那一面的表单形状，比左标签右控件更能撑开宽度 */
+function Field({ label, tip, children }: { label: string; tip?: string; children: React.ReactNode }) {
+  return (
+    <div className="msp-field">
+      <span className="msp-field-label">
+        {label}
+        {/* 说明走那颗「?」气泡（SetRow 同一族原语），不写成长句摊在字段下面 */}
+        {tip && <HelpHint text={tip} />}
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/** 一个模型档案行：平时一行，点编辑才展开字段（ZCode 的清爽来自这里，不是字少） */
+function ModelRow({
+  m, provider, isActive, editing, onEdit,
+}: {
+  m: AiModelProfile; provider: AiProvider; isActive: boolean; editing: boolean; onEdit: (v: boolean) => void;
+}) {
+  const [probe, setProbe] = useState<"idle" | "run" | "ok" | "err">("idle");
+  const [note, setNote] = useState("");
+  const [armed, setArmed] = useState(false);
+  const levels = thinkingLabels(m);
+
+  /**
+   * 逐模型「测试」发一次真请求（max output 收到最小）。
+   * 它必须花钱：清单接口能证明"这家通不通"，证明不了"这个模型答不答"。
+   * 供应商级那个 `↻` 仍然是免费的 GET，两件事两个入口。
+   */
+  const test = async () => {
+    setProbe("run");
+    setNote("");
+    const t0 = Date.now();
+    try {
+      await invoke("ai_chat", {
+        reqId: `probe-${crypto.randomUUID()}`,
+        ...aiWireArgs({ provider, model: m }),
+        temperature: m.temperature ?? 0,
+        messages: [{ role: "user", content: "ping" }],
+        thinking: false,
+        maxTokens: 16,
+      });
+      setProbe("ok");
+      setNote(`${Date.now() - t0}ms`);
+    } catch (e) {
+      setProbe("err");
+      setNote(String(e).slice(0, 120));
+    }
+  };
+
+  return (
+    <div className={`msp-mrow${isActive ? " on" : ""}${editing ? " open" : ""}`}>
+      <div className="msp-mline">
+        <span className="msp-mname" title={m.model}>{m.model || tx("（空名）", "(empty)")}</span>
+        <span className="msp-badge">{fmtTokens(m.contextTokens)}</span>
+        {m.vision && <span className="msp-badge">{tx("视觉", "vision")}</span>}
+        {!m.enabled && <span className="msp-moff">{tx("已停用", "off")}</span>}
+        <span className="msp-macts">
+          <button type="button" className="msp-ibtn" onClick={() => void test()} disabled={probe === "run"}
+            aria-label={tx("测试这个模型", "Test this model")}
+            title={tx("发一次真请求问它答不答（会消耗少量额度）；供应商级的 ↻ 才是免费的", "Sends one real request to see whether this model answers (costs a little); the provider-level refresh is the free one")}>
+            <IconTarget />
+          </button>
+          <button type="button" className={`msp-ibtn${editing ? " on" : ""}`} onClick={() => onEdit(!editing)}
+            aria-label={tx("编辑这个模型", "Edit this model")}
+            title={tx("改窗口、输出上限与思考档位", "Change the window, output cap and thinking levels")}>
+            <IconEdit />
+          </button>
+          <button type="button" className={`msp-ibtn danger${armed ? " on" : ""}`}
+            aria-label={tx("删除这个模型", "Delete this model")}
+            title={armed ? tx("再点一次确认删除（不可撤销）", "Press again to delete (no undo)") : tx("删除这个模型档案", "Delete this model profile")}
+            onClick={() => { if (!armed) { setArmed(true); return; } removeModel(m.id); }}>
+            <IconTrash />
+          </button>
+          <label className="set-switch" title={tx("启用后它才出现在发送框那枚模型钮里", "Only enabled models show up in the composer chip")}>
+            <input type="checkbox" aria-label={tx("启用这个模型", "Enable this model")} checked={m.enabled} onChange={(e) => updateModel(m.id, { enabled: e.target.checked })} />
+            <span />
+          </label>
+        </span>
+      </div>
+      {(probe !== "idle" || editing) && (
+        <div className="msp-med">
+          {editing && (
+            <>
+              <label className="msp-med-field">
+                {tx("上下文窗口", "Context window")}
+                <input className="input" type="number" min={1024} step={1000} value={m.contextTokens}
+                  onChange={(e) => updateModel(m.id, { contextTokens: Math.max(1024, Math.round(Number(e.target.value) || 0)) })} />
+              </label>
+              <label className="msp-med-field">
+                {tx("单次输出上限", "Max output")}
+                <input className="input" type="number" min={256} step={1024} value={m.maxOutputTokens}
+                  title={tx("宿主侧还会再钳一次", "The host clamps it again")}
+                  onChange={(e) => updateModel(m.id, { maxOutputTokens: Math.max(256, Math.round(Number(e.target.value) || 0)) })} />
+              </label>
+              <label className="msp-med-check">
+                <input type="checkbox" checked={!!m.vision} onChange={(e) => updateModel(m.id, { vision: e.target.checked })} />
+                {tx("支持视觉", "Accepts images")}
+              </label>
+              <button type="button" className="btn sm" disabled={!provider.enabled || !m.enabled || isActive}
+                onClick={() => setActive(m.providerId, m.id)}>
+                {isActive ? tx("使用中", "In use") : tx("设为当前", "Use")}
+              </button>
+              {levels.length > 0 && (
+                <span className="msp-med-note">
+                  {tx(`思考档位 ${levels.join(" / ")}，默认 ${m.defaultThinking || tx("无", "none")}`, `thinking levels ${levels.join(" / ")}, default ${m.defaultThinking || "none"}`)}
+                </span>
+              )}
+            </>
+          )}
+          {note && <span className="set-hint">{probe === "ok" ? tx(`已应答 · ${note}`, `answered · ${note}`) : probe === "err" ? tx(`失败：${note}`, `failed: ${note}`) : tx("测试中…", "testing…")}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ModelSettingsPage() {
   const st = useAiProfiles();
   const settings = useSettings();
@@ -75,16 +196,17 @@ export function ModelSettingsPage() {
   const [sel, setSel] = useState<string>(st.providers[0]?.id ?? "");
   const [probes, setProbes] = useState<Record<string, Probe>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
-  /** 上一次试连拉回的远端清单（按供应商存）。null = 还没拉过；空数组 = 这家不开清单 */
   const [remote, setRemote] = useState<Record<string, string[] | null>>({});
   const [armed, setArmed] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState<string>("");
   const addBtnRef = useRef<HTMLButtonElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
 
   const modelsOf = (id: string) => st.models.filter((m) => m.providerId === id);
-  // 选中的那家被删掉了要落到别处，否则右列指着空气。
-  // 这里**没有"一家都没有"那种空态**：档案表的 load 与 removeProvider 都保证至少留一家
-  // （删空会退回 seed 默认），为一个到不了的分支写文案，就是给空态预算白加一笔。
+  // 选中的那家被删掉了要落到别处，否则右列指着空气。档案表保证至少留一家，
+  // 所以这里没有"一家都没有"的空态分支（那是到不了的代码）。
   const provider = st.providers.find((p) => p.id === sel) ?? st.providers[0];
   const models = modelsOf(provider.id);
   const probe: Probe = probes[provider.id] ?? "idle";
@@ -115,11 +237,7 @@ export function ModelSettingsPage() {
     setAddOpen(false);
   };
 
-  /**
-   * 试连 = 拉一次模型清单（P111-D）。
-   * 旧写法是发一次真 completion（内容 "ping"）——要花钱才能证明"配得对"，那是设计缺陷。
-   * `Ok(空表)` 在这套语义里是**好消息**：连得上、鉴权过，只是这家不开清单端点。
-   */
+  /** 供应商级试连 = 拉一次模型清单（P111-D），不花 token */
   const test = async () => {
     if (!provider.baseUrl.trim()) {
       setProbes((s) => ({ ...s, [provider.id]: "err" }));
@@ -146,7 +264,6 @@ export function ModelSettingsPage() {
     }
   };
 
-  /** 导入一个远端模型：窗口从 id 后缀预填，认不出就留档案默认（不编数） */
   const importModel = (id: string) => {
     const guessed = guessContextTokens(id);
     addModel({
@@ -165,6 +282,7 @@ export function ModelSettingsPage() {
     }
     const r = removeProvider(provider.id, models.length > 0);
     setArmed(false);
+    setMenuOpen(false);
     if (!r.ok) {
       setNotes((s) => ({ ...s, [provider.id]: r.reason ?? tx("删除被拒绝", "Delete refused") }));
       return;
@@ -180,16 +298,24 @@ export function ModelSettingsPage() {
       <aside className="msp-list">
         <div className="msp-list-head">
           <span className="msp-list-title">{tx("供应商", "Providers")}</span>
-          <button ref={addBtnRef} className="btn sm" onClick={() => setAddOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={addOpen}>
-            {tx("添加", "Add")}
-            <IconChevron dir="down" size={12} />
-          </button>
+          <span className="msp-list-acts">
+            <button type="button" className="msp-ibtn" onClick={() => void test()} disabled={probe === "testing"}
+              aria-label={tx("刷新模型清单", "Refresh the model list")}
+              title={tx("拉一次 /models：免费（不消耗额度），顺带证明连得通", "Fetch /models — free, and it proves the connection too")}>
+              <IconRefresh />
+            </button>
+            <button ref={addBtnRef} className="btn sm primary" onClick={() => setAddOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={addOpen}>
+              <IconPlus />
+              {tx("添加供应商", "Add provider")}
+            </button>
+          </span>
         </div>
         {st.providers.map((p) => {
           const n = modelsOf(p.id).length;
           const d = dotOf(p, probes[p.id] ?? "idle", n);
           return (
-            <button key={p.id} type="button" className={`msp-row${provider?.id === p.id ? " on" : ""}`} onClick={() => { setSel(p.id); setArmed(false); }}>
+            <button key={p.id} type="button" className={`msp-row${provider.id === p.id ? " on" : ""}`}
+              onClick={() => { setSel(p.id); setArmed(false); setEditing(""); }}>
               <span className={`msp-dot ${d.cls}`} title={d.tip} aria-hidden="true" />
               <span className="msp-name">{p.label}</span>
               <span className="msp-count">{n}</span>
@@ -208,125 +334,90 @@ export function ModelSettingsPage() {
       </aside>
 
       <section className="msp-detail">
-            <div className="msp-card">
-              <div className="set-group-title">{tx("连接", "Connection")}</div>
-              <SetRow label={tx("名称", "Name")} tip={tx("只影响界面显示，不参与请求", "UI label only — never sent")}>
-                <input className="input" style={{ width: 220 }} value={provider.label}
-                  onChange={(e) => updateProvider(provider.id, { label: e.target.value })} />
-              </SetRow>
-              <SetRow label={tx("API 格式", "API format")} tip={tx("决定请求体怎么拼、端点路径是哪一条", "Chooses the request shape and the endpoint path")}>
-                <select className="input" style={{ width: 160 }} value={provider.format}
-                  onChange={(e) => updateProvider(provider.id, { format: e.target.value as AiFormat })}>
-                  {AI_FORMATS.map((f) => <option key={f.key} value={f.key}>{f.label.split(" (")[0]}</option>)}
-                </select>
-              </SetRow>
-              <SetRow label={tx("服务地址", "Base URL")} tip={tx("不含 /chat/completions 这类端点路径", "Without the endpoint path")}>
-                <input className="input" style={{ width: 420 }} value={provider.baseUrl} placeholder="https://api.example.com/v1"
-                  onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })} />
-              </SetRow>
-              <SetRow label="API Key" tip={tx("聚焦时换成原文可编辑；密钥只在发送那一刻清洗，出境只有 aiWireArgs 一处", "Shows the real value while focused; it is scrubbed at send time in exactly one place")}>
-                <KeyField value={provider.apiKey} hint={keyHintFor(provider.baseUrl)}
-                  onChange={(v) => updateProvider(provider.id, { apiKey: v })} />
-              </SetRow>
-              <SetRow label={tx("代理", "Proxy")} tip={tx("留空 = 跟随系统 / 无", "Empty = follow the system")}>
-                <input className="input" style={{ width: 300 }} value={provider.proxy} placeholder="http://127.0.0.1:7890"
-                  onChange={(e) => updateProvider(provider.id, { proxy: e.target.value })} />
-              </SetRow>
-              <SetRow label={tx("免代理列表", "No-proxy list")}>
-                <input className="input" style={{ width: 300 }} value={provider.noProxy} placeholder="localhost,127.0.0.1"
-                  onChange={(e) => updateProvider(provider.id, { noProxy: e.target.value })} />
-              </SetRow>
-              <SetRow label={tx("启用", "Enabled")} tip={tx("停用后它在选择器里置灰，不是从列表里消失", "Switching off greys it out in the picker; it does not vanish")}>
-                <input type="checkbox" checked={provider.enabled} onChange={(e) => updateProvider(provider.id, { enabled: e.target.checked })} />
-              </SetRow>
-              <SetRow label={tx("试连", "Test")} tip={tx("只拉一次模型清单（GET /models），不花 token；404 也算连通", "A single GET /models — no tokens spent; even a 404 proves the connection")}>
-                <div className="msp-test">
-                  <button type="button" className="btn sm" disabled={probe === "testing"} onClick={() => void test()}>
-                    {probe === "testing" ? tx("测试中…", "Testing…") : tx("拉模型清单", "Fetch models")}
-                  </button>
-                  {note && <span className="set-hint">{note}</span>}
-                </div>
-              </SetRow>
-              <SetRow label={tx("删除这家", "Delete provider")}>
-                <button type="button" className={`btn sm${armed ? " danger" : ""}`} onClick={del}
-                  title={models.length
-                    ? tx(`名下还有 ${models.length} 个模型：再点一次连它们一起删（不可撤销）`, `${models.length} model(s) inside: press again to delete them too (no undo)`)
-                    : tx("删除这家供应商", "Delete this provider")}>
-                  {armed ? tx("再点确认", "Press again") : tx("删除", "Delete")}
-                </button>
-              </SetRow>
-            </div>
+        <div className="msp-card">
+          <div className="msp-card-head">
+            <input className="msp-title-input" value={provider.label} aria-label={tx("供应商名称", "Provider name")}
+              title={tx("界面上叫这个名字，不参与请求", "The name shown in the UI; never sent")}
+              onChange={(e) => updateProvider(provider.id, { label: e.target.value })} />
+            <label className="set-switch" title={tx("停用后它在模型选择器里置灰，不是消失", "Switching off greys it out in the picker; it does not vanish")}>
+              <input type="checkbox" aria-label={tx("启用这家", "Enable this provider")} checked={provider.enabled}
+                onChange={(e) => updateProvider(provider.id, { enabled: e.target.checked })} />
+              <span />
+            </label>
+            <button ref={menuBtnRef} type="button" className="msp-ibtn" onClick={() => setMenuOpen((v) => !v)}
+              aria-haspopup="menu" aria-expanded={menuOpen} aria-label={tx("更多操作", "More actions")}>
+              <IconMore />
+            </button>
+            <Dropdown anchor={menuBtnRef.current} open={menuOpen} onClose={() => setMenuOpen(false)} align="end">
+              <button type="button" role="menuitem" className="ai-scene-menu-item danger" onClick={del}>
+                {armed
+                  ? tx(`再点确认删除（名下 ${models.length} 个模型一起删，不可撤销）`, `Press again to delete (${models.length} model(s) go too; no undo)`)
+                  : tx("删除这家供应商", "Delete this provider")}
+              </button>
+            </Dropdown>
+          </div>
+          <Field label="Base URL" tip={tx("不含 /chat/completions 这类端点路径", "Without the endpoint path")}>
+            <input className="input" value={provider.baseUrl} placeholder="https://api.example.com/v1"
+              onChange={(e) => updateProvider(provider.id, { baseUrl: e.target.value })} />
+          </Field>
+          <Field label={tx("API 格式", "API format")} tip={tx("决定请求体怎么拼、端点路径是哪一条", "Chooses the request shape and the endpoint path")}>
+            <select className="input" value={provider.format}
+              onChange={(e) => updateProvider(provider.id, { format: e.target.value as AiFormat })}>
+              {AI_FORMATS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+            </select>
+          </Field>
+          <Field label="API Key" tip={tx("聚焦时换成原文可编辑；出境只有 aiWireArgs 一处清洗", "Shows the real value while focused; scrubbed at send time in exactly one place")}>
+            <KeyField value={provider.apiKey} hint={keyHintFor(provider.baseUrl)} onChange={(v) => updateProvider(provider.id, { apiKey: v })} />
+          </Field>
+          <div className="msp-field-2">
+            <Field label={tx("代理", "Proxy")} tip={tx("留空 = 跟随系统 / 无", "Empty = follow the system")}>
+              <input className="input" value={provider.proxy} placeholder="http://127.0.0.1:7890"
+                onChange={(e) => updateProvider(provider.id, { proxy: e.target.value })} />
+            </Field>
+            <Field label={tx("免代理列表", "No-proxy list")}>
+              <input className="input" value={provider.noProxy} placeholder="localhost,127.0.0.1"
+                onChange={(e) => updateProvider(provider.id, { noProxy: e.target.value })} />
+            </Field>
+          </div>
+          {note && <div className="msp-probe"><span className={`msp-dot ${probe === "ok" ? "ok" : probe === "err" ? "err" : probe === "testing" ? "run" : "idle"}`} aria-hidden="true" /><span className="set-hint">{note}</span></div>}
+        </div>
 
-            <div className="msp-card">
-              <div className="set-group-title">{tx("模型", "Models")}</div>
-              {models.map((m) => {
-                const isActive = m.id === st.activeModelId;
-                const levels = thinkingLabels(m);
-                return (
-                  <SetRow key={m.id} label={m.model || tx("（空名）", "(empty)")}
-                    tip={`${tx("上下文窗口是分母：压缩阈值与用量条都按它算", "The context window is the denominator for compaction and the meter")}${levels.length ? tx(`；这台配了 ${levels.length} 档思考强度`, `; this one has ${levels.length} thinking levels`) : ""}`}>
-                    <div className="msp-model">
-                      <input className="input" style={{ width: 220 }} value={m.model} placeholder="deepseek-v4-pro"
-                        title={tx("发给 API 的模型名", "Model id sent to the API")}
-                        onChange={(e) => updateModel(m.id, { model: e.target.value, label: e.target.value })} />
-                      <input className="input" style={{ width: 110 }} type="number" min={1024} step={1000} value={m.contextTokens}
-                        title={tx("上下文窗口（token）", "Context window in tokens")}
-                        onChange={(e) => updateModel(m.id, { contextTokens: Math.max(1024, Math.round(Number(e.target.value) || 0)) })} />
-                      <input className="input" style={{ width: 100 }} type="number" min={256} step={1024} value={m.maxOutputTokens}
-                        title={tx("单次回复输出上限（宿主侧还会再钳一次）", "Per-reply output cap (the host clamps it again)")}
-                        onChange={(e) => updateModel(m.id, { maxOutputTokens: Math.max(256, Math.round(Number(e.target.value) || 0)) })} />
-                      <label className="set-inline">
-                        <input type="checkbox" checked={m.enabled} onChange={(e) => updateModel(m.id, { enabled: e.target.checked })} />
-                        {tx("启用", "On")}
-                      </label>
-                      <button type="button" className="btn sm" disabled={!provider.enabled || !m.enabled || isActive}
-                        onClick={() => setActive(m.providerId, m.id)}
-                        title={provider.enabled && m.enabled
-                          ? tx("设为当前使用（发送框那枚模型钮会跟着变）", "Use this one; the model chip next to the composer follows")
-                          : tx("先启用这家供应商和这个模型", "Enable this provider and model first")}>
-                        {isActive ? tx("使用中", "In use") : tx("设为当前", "Use")}
-                      </button>
-                      <button type="button" className="btn sm" onClick={() => removeModel(m.id)} title={tx("删除这个模型档案", "Delete this model profile")}>
-                        {tx("删", "Del")}
-                      </button>
-                    </div>
-                  </SetRow>
-                );
-              })}
-              <SetRow label={tx("新增", "Add")}>
-                <div className="msp-test">
-                  <button type="button" className="btn sm" onClick={() => addModel({ providerId: provider.id, model: "new-model", label: "new-model" })}>
-                    {tx("添加模型", "Add model")}
-                  </button>
-                  {/* 远端有、档案里没有的那些：一次点一个导进来，窗口从 id 后缀预填。
-                      不"一键全部导入"——有的家一次列 200 个模型，全塞进档案表只是把噪声留下。 */}
-                  {fresh.length > 0 && (
-                    <span className="set-hint">
-                      {tx(`远端有 ${fresh.length} 个还没进档案`, `${fresh.length} upstream model(s) are not in the profile yet`)}
-                    </span>
-                  )}
-                </div>
-              </SetRow>
+        <div className="msp-card">
+          <div className="msp-card-head">
+            <span className="msp-card-title">{tx("模型列表", "Models")}</span>
+            <button type="button" className="btn sm" onClick={() => addModel({ providerId: provider.id, model: "new-model", label: "new-model" })}>
+              <IconPlus />
+              {tx("添加模型", "Add model")}
+            </button>
+          </div>
+          <div className="msp-models">
+            {models.map((m) => (
+              <ModelRow key={m.id} m={m} provider={provider} isActive={m.id === st.activeModelId}
+                editing={editing === m.id} onEdit={(v) => setEditing(v ? m.id : "")} />
+            ))}
+          </div>
+          {fresh.length > 0 && (
+            <div className="msp-fresh">
+              <div className="msp-fresh-head">
+                {tx(`远端有 ${fresh.length} 个还没进档案`, `${fresh.length} upstream model(s) are not in the profile yet`)}
+              </div>
               {fresh.slice(0, 12).map((id) => (
                 <div className="msp-pick" key={id}>
                   <span className="msp-pick-name">{id}</span>
                   {guessContextTokens(id) && (
                     <span className="set-hint">{tx(`窗口按名字猜 ${fmtTokens(guessContextTokens(id)!)}`, `window guessed from the name: ${fmtTokens(guessContextTokens(id)!)}`)}</span>
                   )}
-                  <button type="button" className="btn sm" onClick={() => importModel(id)}>
-                    {tx("导入", "Import")}
-                  </button>
+                  <button type="button" className="btn sm" onClick={() => importModel(id)}>{tx("导入", "Import")}</button>
                 </div>
               ))}
               {fresh.length > 12 && (
                 <div className="msp-pick">
-                  <span className="set-hint">
-                    {tx(`另有 ${fresh.length - 12} 个未列出：用「添加模型」自己填名字`, `${fresh.length - 12} more are not shown — add them by name`)}
-                  </span>
+                  <span className="set-hint">{tx(`另有 ${fresh.length - 12} 个未列出：用「添加模型」自己填名字`, `${fresh.length - 12} more are not shown — add them by name`)}</span>
                 </div>
               )}
             </div>
-        {/* 上下文那一卡独立于"选中的是哪一家"，所以它不跟着上面的选择块走。 */}
+          )}
+        </div>
 
         <div className="msp-card">
           <div className="set-group-title">{tx("上下文", "Context")}</div>
@@ -377,7 +468,6 @@ function KeyField({ value, onChange, hint }: { value: string; onChange: (v: stri
   return (
     <input
       className="input"
-      style={{ width: 420 }}
       value={focus ? value : maskKey(value)}
       placeholder={hint ?? "sk-…"}
       onFocus={() => setFocus(true)}
