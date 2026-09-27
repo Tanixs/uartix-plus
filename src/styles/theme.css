@@ -5963,6 +5963,15 @@ select optgroup {
 .msp-card > .set-group-title:first-child { margin-top: 14px; }
 .msp-test { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
 .msp-model { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+/* 远端清单里"档案还没有"的那几行：一行一个，右侧一个「导入」 */
+.msp-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 0 4px 108px;
+  font-size: var(--fs-body);
+}
+.msp-pick-name { font-family: var(--font-mono); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-row {
   display: flex;
   align-items: center;

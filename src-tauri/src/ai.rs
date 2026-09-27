@@ -107,7 +107,7 @@ fn convert_content(v: &serde_json::Value, fmt: &str) -> serde_json::Value {
 fn classify_error(status: u16, body: &str) -> String {
     let snippet: String = body.chars().take(220).collect();
     match status {
-        401 | 403 => format!("API Key 无效或无权限（{}）。请到 设置 → AI 服务 检查 Key。", status),
+        401 | 403 => format!("API Key 无效或无权限（{}）。请到 设置 → 模型设置 检查 Key。", status),
         402 => format!("账户额度不足（{}）。请到服务商控制台充值或更换模型。", status),
         404 => format!("接口或模型不存在（{}）。请检查 Base URL、接口格式与模型名。{}", status, snippet),
         429 => format!("请求过于频繁或额度受限（{}）。请稍后再试。", status),
@@ -246,6 +246,50 @@ fn endpoint_url(base: &str, format: &str) -> String {
     }
 }
 
+/// P111-D：模型清单的地址。规则只有一条——把 base 上已有的端点尾巴换成 `/models`，
+/// 剩下的原样拼。不按 format 猜各家私有路径：猜错的代价是"点了刷新，404，
+/// 用户以为这家坏了"，而不猜的代价只是"拿不到列表"（下面把它当成连通证据）。
+fn models_url(base: &str) -> String {
+    let mut b = base.trim_end_matches('/').to_string();
+    for tail in ["/chat/completions", "/messages", "/responses", "/completions", "/embeddings"] {
+        if b.ends_with(tail) {
+            b.truncate(b.len() - tail.len());
+            break;
+        }
+    }
+    if b.ends_with("/models") {
+        return b;
+    }
+    format!("{}/models", b)
+}
+
+/// `/models` 的响应形状三家不同：OpenAI 系是 `data[].id`，有的网关是 `models[].name`，
+/// 还有人直接给字符串数组。都收，收不到就是空表（不是错）。
+fn parse_model_ids(v: &serde_json::Value) -> Vec<String> {
+    let arr = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .or_else(|| v.get("models").and_then(|d| d.as_array()))
+        .cloned()
+        .unwrap_or_default();
+    let mut ids: Vec<String> = arr
+        .iter()
+        .filter_map(|m| match m {
+            serde_json::Value::String(s) => Some(s.clone()),
+            o => o
+                .get("id")
+                .or_else(|| o.get("name"))
+                .and_then(|i| i.as_str())
+                .map(|s| s.to_string()),
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 fn split_system(messages: &[AiMessage]) -> (Option<String>, Vec<&AiMessage>) {
     let mut system = None;
     let mut rest = Vec::new();
@@ -346,6 +390,52 @@ fn extract_usage(v: &serde_json::Value, last: &mut Option<(u64, u64)>) {
             *last = Some((np, nc));
         }
     }
+}
+
+/// P111-D：拉一家供应商的模型清单。**它同时就是那枚「试连」该用的东西**——
+/// 旧的试连发一次真 completion（"ping"），要花钱才能证明"配得对"，这是设计缺陷。
+///
+/// 返回 `Ok(空表)` 与 `Err` 的分工是刻意的：
+///  - 404/405 ⇒ `Ok(vec![])`：连得上、但没有清单端点。这**是**连通性证据，
+///    报成"失败"会让人以为配置错了（很多网关确实不开 /models）；
+///  - 401/402/429/5xx ⇒ `Err`：这些才是要人去修的东西。
+#[tauri::command]
+pub async fn ai_list_models(
+    base_url: String,
+    api_key: String,
+    format: String,
+    proxy: Option<String>,
+    no_proxy: Option<String>,
+) -> Result<Vec<String>, String> {
+    if base_url.trim().is_empty() {
+        return Err("还没有服务地址：先填 Base URL".to_string());
+    }
+    let url = models_url(&base_url);
+    let client = build_client(proxy.as_deref(), no_proxy.as_deref(), Some(Duration::from_secs(20)))?;
+    let key = api_key.trim().to_string();
+    let mut req = client.get(&url);
+    if !key.is_empty() {
+        // 与真实请求同一套鉴权头写法：试连通过而实发 401，不该由头的拼法不同引起
+        req = if format == "anthropic" {
+            req.header("x-api-key", &key).header("anthropic-version", "2023-06-01")
+        } else {
+            req.bearer_auth(&key)
+        };
+    }
+    let resp = req.send().await.map_err(|e| format!("连不上 {}：{}", url, e))?;
+    let status = resp.status().as_u16();
+    if status == 404 || status == 405 {
+        return Ok(Vec::new());
+    }
+    if status >= 400 {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(classify_error(status, &body));
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("清单返回不是 JSON：{}", e))?;
+    Ok(parse_model_ids(&v))
 }
 
 #[tauri::command]
@@ -1879,5 +1969,38 @@ mod thinking_merge_tests {
         let mut body = json!({"model":"m"});
         merge_extra_body(&mut body, Some(extra(&[("thinking", json!({"type":"enabled","budget_tokens":2048}))])));
         assert_eq!(body["thinking"]["budget_tokens"], json!(2048));
+    }
+}
+
+#[cfg(test)]
+mod model_list_tests {
+    use super::*;
+
+    #[test]
+    fn models_url_只换端点尾巴_不猜私有路径() {
+        // 用户把整条 chat 端点粘进 Base URL 是常态：尾巴要换成 /models 而不是再叠一层
+        assert_eq!(models_url("https://api.deepseek.com/v1/chat/completions"), "https://api.deepseek.com/v1/models");
+        assert_eq!(models_url("https://api.anthropic.com/v1/messages"), "https://api.anthropic.com/v1/models");
+        assert_eq!(models_url("https://api.deepseek.com/"), "https://api.deepseek.com/models");
+        assert_eq!(models_url("https://x.test/v1"), "https://x.test/v1/models");
+        // 幂等：已经指着 /models 的不要再拼出 /models/models
+        assert_eq!(models_url("https://x.test/v1/models"), "https://x.test/v1/models");
+    }
+
+    #[test]
+    fn parse_model_ids_收三种写法并去重排序() {
+        let openai: serde_json::Value =
+            serde_json::from_str(r#"{"data":[{"id":"b"},{"id":"a"},{"id":"b"},{"id":"  "}]}"#).unwrap();
+        assert_eq!(parse_model_ids(&openai), vec!["a".to_string(), "b".to_string()]);
+
+        let named: serde_json::Value = serde_json::from_str(r#"{"models":[{"name":"glm-4"}]}"#).unwrap();
+        assert_eq!(parse_model_ids(&named), vec!["glm-4".to_string()]);
+
+        let strs: serde_json::Value = serde_json::from_str(r#"{"data":["m1","m2"]}"#).unwrap();
+        assert_eq!(parse_model_ids(&strs), vec!["m1".to_string(), "m2".to_string()]);
+
+        // 形状不认识 ⇒ 空表，而不是 panic 也不是"造一个假 id 出来"
+        let junk: serde_json::Value = serde_json::from_str(r#"{"oops":true}"#).unwrap();
+        assert!(parse_model_ids(&junk).is_empty());
     }
 }

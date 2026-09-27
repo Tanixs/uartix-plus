@@ -180,6 +180,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             busevt::ipc_subscribe,
             ai::ai_chat,
+            ai::ai_list_models,
             ai::ai_agent_turn,
             ai::ai_abort,
             ai::ai_upload_report,

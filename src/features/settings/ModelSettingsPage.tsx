@@ -15,12 +15,11 @@
  *    右列空白一屏会让人以为配置丢了。
  */
 import { useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { SetRow } from "../../shared/SetRow";
 import { Listbox } from "../../shared/Listbox";
 import { IconChevron } from "../../shared/icons";
 import { AI_FORMATS, AI_PRESETS, patch, useSettings, type AiFormat, type AiPreset } from "./settingsStore";
-import { aiWireArgs } from "../agent/provider";
+import { guessContextTokens, listModels, missingFrom } from "../ai/modelCatalog";
 import {
   addModel,
   addProvider,
@@ -32,7 +31,6 @@ import {
   updateModel,
   updateProvider,
   useAiProfiles,
-  type AiModelProfile,
   type AiProvider,
 } from "../ai/aiProfileStore";
 import {
@@ -77,6 +75,8 @@ export function ModelSettingsPage() {
   const [sel, setSel] = useState<string>(st.providers[0]?.id ?? "");
   const [probes, setProbes] = useState<Record<string, Probe>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  /** 上一次试连拉回的远端清单（按供应商存）。null = 还没拉过；空数组 = 这家不开清单 */
+  const [remote, setRemote] = useState<Record<string, string[] | null>>({});
   const [armed, setArmed] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const addBtnRef = useRef<HTMLButtonElement>(null);
@@ -89,6 +89,8 @@ export function ModelSettingsPage() {
   const models = modelsOf(provider.id);
   const probe: Probe = probes[provider.id] ?? "idle";
   const note = notes[provider.id] ?? "";
+  const remoteIds = remote[provider.id] ?? null;
+  const fresh = remoteIds ? missingFrom(remoteIds, models.map((m) => m.model)) : [];
 
   const templateOptions = useMemo(
     () =>
@@ -113,6 +115,11 @@ export function ModelSettingsPage() {
     setAddOpen(false);
   };
 
+  /**
+   * 试连 = 拉一次模型清单（P111-D）。
+   * 旧写法是发一次真 completion（内容 "ping"）——要花钱才能证明"配得对"，那是设计缺陷。
+   * `Ok(空表)` 在这套语义里是**好消息**：连得上、鉴权过，只是这家不开清单端点。
+   */
   const test = async () => {
     if (!provider.baseUrl.trim()) {
       setProbes((s) => ({ ...s, [provider.id]: "err" }));
@@ -122,25 +129,33 @@ export function ModelSettingsPage() {
     setProbes((s) => ({ ...s, [provider.id]: "testing" }));
     setNotes((s) => ({ ...s, [provider.id]: "" }));
     const t0 = Date.now();
-    // 没有模型也照发：试的是"这家通不通"，不是"这个模型答不答"
-    const probeModel: AiModelProfile = models[0] ?? {
-      id: "", providerId: provider.id, label: "", model: "", contextTokens: 0,
-      maxOutputTokens: 0, thinkingLevels: [], defaultThinking: "", enabled: true, createdAt: 0,
-    };
     try {
-      await invoke("ai_agent_turn", {
-        reqId: crypto.randomUUID(),
-        // 与真实请求同一个构造点：清洗过、字段一致，试连通过而实发失败不该由参数拼法不同引起
-        ...aiWireArgs({ provider, model: probeModel }),
-        messages: [{ role: "user", content: "ping" }],
-        tools: [],
-      });
+      const ids = await listModels(provider);
+      const ms = Date.now() - t0;
+      setRemote((s) => ({ ...s, [provider.id]: ids }));
       setProbes((s) => ({ ...s, [provider.id]: "ok" }));
-      setNotes((s) => ({ ...s, [provider.id]: `${Date.now() - t0}ms` }));
+      setNotes((s) => ({
+        ...s,
+        [provider.id]: ids.length
+          ? tx(`已连通 · ${ms}ms · 清单 ${ids.length} 个`, `connected · ${ms}ms · ${ids.length} listed`)
+          : tx("已连通 · 这家不提供模型列表（可以自己填）", "connected · no model list here (fill names by hand)"),
+      }));
     } catch (e) {
       setProbes((s) => ({ ...s, [provider.id]: "err" }));
       setNotes((s) => ({ ...s, [provider.id]: String(e).slice(0, 160) }));
     }
+  };
+
+  /** 导入一个远端模型：窗口从 id 后缀预填，认不出就留档案默认（不编数） */
+  const importModel = (id: string) => {
+    const guessed = guessContextTokens(id);
+    addModel({
+      providerId: provider.id,
+      model: id,
+      label: id,
+      ...(guessed ? { contextTokens: guessed } : {}),
+    });
+    setRemote((s) => ({ ...s, [provider.id]: (s[provider.id] ?? []).filter((x) => x !== id) }));
   };
 
   const del = () => {
@@ -224,10 +239,10 @@ export function ModelSettingsPage() {
               <SetRow label={tx("启用", "Enabled")} tip={tx("停用后它在选择器里置灰，不是从列表里消失", "Switching off greys it out in the picker; it does not vanish")}>
                 <input type="checkbox" checked={provider.enabled} onChange={(e) => updateProvider(provider.id, { enabled: e.target.checked })} />
               </SetRow>
-              <SetRow label={tx("试连", "Test")}>
+              <SetRow label={tx("试连", "Test")} tip={tx("只拉一次模型清单（GET /models），不花 token；404 也算连通", "A single GET /models — no tokens spent; even a 404 proves the connection")}>
                 <div className="msp-test">
                   <button type="button" className="btn sm" disabled={probe === "testing"} onClick={() => void test()}>
-                    {probe === "testing" ? tx("测试中…", "Testing…") : tx("发一次", "Send once")}
+                    {probe === "testing" ? tx("测试中…", "Testing…") : tx("拉模型清单", "Fetch models")}
                   </button>
                   {note && <span className="set-hint">{note}</span>}
                 </div>
@@ -279,10 +294,37 @@ export function ModelSettingsPage() {
                 );
               })}
               <SetRow label={tx("新增", "Add")}>
-                <button type="button" className="btn sm" onClick={() => addModel({ providerId: provider.id, model: "new-model", label: "new-model" })}>
-                  {tx("添加模型", "Add model")}
-                </button>
+                <div className="msp-test">
+                  <button type="button" className="btn sm" onClick={() => addModel({ providerId: provider.id, model: "new-model", label: "new-model" })}>
+                    {tx("添加模型", "Add model")}
+                  </button>
+                  {/* 远端有、档案里没有的那些：一次点一个导进来，窗口从 id 后缀预填。
+                      不"一键全部导入"——有的家一次列 200 个模型，全塞进档案表只是把噪声留下。 */}
+                  {fresh.length > 0 && (
+                    <span className="set-hint">
+                      {tx(`远端有 ${fresh.length} 个还没进档案`, `${fresh.length} upstream model(s) are not in the profile yet`)}
+                    </span>
+                  )}
+                </div>
               </SetRow>
+              {fresh.slice(0, 12).map((id) => (
+                <div className="msp-pick" key={id}>
+                  <span className="msp-pick-name">{id}</span>
+                  {guessContextTokens(id) && (
+                    <span className="set-hint">{tx(`窗口按名字猜 ${fmtTokens(guessContextTokens(id)!)}`, `window guessed from the name: ${fmtTokens(guessContextTokens(id)!)}`)}</span>
+                  )}
+                  <button type="button" className="btn sm" onClick={() => importModel(id)}>
+                    {tx("导入", "Import")}
+                  </button>
+                </div>
+              ))}
+              {fresh.length > 12 && (
+                <div className="msp-pick">
+                  <span className="set-hint">
+                    {tx(`另有 ${fresh.length - 12} 个未列出：用「添加模型」自己填名字`, `${fresh.length - 12} more are not shown — add them by name`)}
+                  </span>
+                </div>
+              )}
             </div>
         {/* 上下文那一卡独立于"选中的是哪一家"，所以它不跟着上面的选择块走。 */}
 
