@@ -29,7 +29,9 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
   ];
   return (
     <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={onClose}>
-      <div className="modal set-modal help-modal" onMouseDown={(e) => e.stopPropagation()}>
+      {/* 原来这里还挂着 `help-modal` 一个类名，而全项目没有任何一条 CSS 定义它 ——
+          P111-A 的 J 门把它点名了。尺寸/皮肤全在 .set-modal 上，删掉这个空钩子。 */}
+      <div className="modal set-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">{tx("帮助与入门", "Help & Getting Started")}</div>
         <div className="set-body">
           <div className="set-nav">

@@ -6016,11 +6016,14 @@ select optgroup {
 .set-hint,
 .pm-hint,
 .sq-hint,
-.ai-model-picker-note {
+.ai-agent-oldrun-status {
   font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--text-dim);
 }
+/* 命令面板的一个分组：段标题 + 若干行。原来只有 .cmdk-section-h 有样式，
+   组与组之间因此没有留白（P111-A 的 J 门把这类"用了却没定义"集体点名时抓到的）。 */
+.cmdk-section + .cmdk-section { margin-top: var(--sp-3); }
 /* 配置投影预览：`<pre>` 默认 13px 且不带主题色，跟在上面那族旁边会重新变成"最响的那块" */
 .set-json {
   margin: 4px 0 0;

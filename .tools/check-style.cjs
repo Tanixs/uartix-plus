@@ -466,7 +466,7 @@ const ICON_STROKE_AREA_FLOOR = 32; // size × strokeWidth
  * 每条豁免只有两种合法写法：① 说清它为什么不需要规则（身份/锚点钩子）；
  * ② 明说是欠账、什么时候还（P111-E）。写不出这两句话的，就该补 CSS 或删类名。
  */
-const J_CEILING = 16;
+const J_CEILING = 13;
 /** token → 为什么允许它没有 CSS（说不出人话的理由等于没有理由） */
 const J_EXEMPT = {
   // —— 身份 / 锚点钩子：同元素的另一个类或父级已有样式，这个 token 只用来定位 ——
@@ -476,17 +476,14 @@ const J_EXEMPT = {
   "mkt-offshelf-toggle": "与 .plg-fchip 同元素，样式在 plg-fchip；这枚是「下架态开关」的身份钩子",
   "ai-streaming-only": "可见性钩子（流式期间才显示），布局由父级 .ai-msgs 管",
   "ai-edit-input": "与 .input 同元素，样式在 .input",
-  "help-modal": "尺寸/布局全在 .set-modal；这枚留给「帮助」自己的覆写锚点（P111-B 会把全窗口只挂在 .set-page 上，届时复核）",
   "ext-panel-host": "扩展面板的宿主容器钩子，内部内容自带样式",
   "orch-chip-wrap": "浮层锚点（relative 由 Dropdown 侧给），无自有视觉",
-  // —— 明说的欠账：症状比 .set-hint 轻（父级是 flex/grid，被带着走），P111-E 逐条补或删 ——
-  "plot-measure-col": "欠账：测量列容器没写规则，靠父级 flex 撑着 ⇒ 间距不受控。P111-E 补",
-  "cmdk-section": "欠账：命令面板分组容器没写规则 ⇒ 分组之间没有留白。P111-E 补",
-  "ai-anom-item": "欠账：异常项行没写规则。P111-E 补",
-  "ai-agent-oldrun-status": "欠账：旧任务状态那行文字按继承字号渲染（正是 .set-hint 那一族的症状，只是没人抱怨过）。P111-E 并入「一行次要说明」族",
-  "ai-ext-head": "欠账：扩展面板标题行没写规则。P111-E 补",
-  "ai-edit-wrap": "欠账：消息编辑态容器没写规则。P111-E 补",
-  "ext-panel-miss": "欠账：「面板未找到」提示态没写规则。P111-E 补",
+  // —— 明说的欠账：症状比 .set-hint 轻（父级是 flex/grid，被带着走），逐条还 ——
+  "plot-measure-col": "欠账：测量列容器没写规则，靠父级 flex 撑着 ⇒ 间距不受控",
+  "ai-anom-item": "欠账：异常项行没写规则。",
+  "ai-ext-head": "欠账：扩展面板标题行没写规则。",
+  "ai-edit-wrap": "欠账：消息编辑态容器没写规则。",
+  "ext-panel-miss": "欠账：「面板未找到」提示态没写规则。",
 };
 {
   const defined = new Set();
