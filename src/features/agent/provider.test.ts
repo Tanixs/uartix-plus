@@ -218,7 +218,9 @@ it("守卫：所有 apiKey 发送点都过了 cleanApiKey", async () => {
           //  - `aiProfileStore.ts`：那张表存的就是用户贴进去的原样（清洗点唯一，在 `aiWireArgs`）；
           //  - `patchEditingProvider({ apiKey: … })`：设置页往表里写值，写的是配置不是 HTTP 头。
           // 判红的能力靠上面的 `bareApiKeySend` 与文件末尾那组反向用例保住，不在这两条豁免里。
-          if (/aiProfileStore\.ts$/.test(rel) || /patchEditingProvider\(\s*\{/.test(code)) return;
+          if (/aiProfileStore\.ts$/.test(rel)) return;
+          // 往表里写配置的调用也不是发送点：设置页那几条输入框改的是配置，不是 HTTP 头。
+          if (/(updateProvider|patchEditingProvider|addProvider)\s*\(/.test(code)) return;
           bad.push(`${rel}:${i + 1}  ${code}`);
         });
     }

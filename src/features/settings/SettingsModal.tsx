@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { useSettings, patch, SETTINGS_TAB_PLUGINS, type WorkspacePreset, AI_PRESETS, AI_FORMATS, type AiPreset, type AiFormat } from "./settingsStore";
+import { useSettings, patch, SETTINGS_TAB_PLUGINS, type WorkspacePreset } from "./settingsStore";
 import { WORKSPACE_META } from "../../shell/workspaceMeta";
 import { useLayouts, removeLayout, renameLayout } from "./layoutsStore";
 import { FULL_KIND, exportFullBackup, importDispatch } from "./transfer";
@@ -29,21 +29,15 @@ import { themeBearingPackages, usePlugins } from "../plugins/pluginStore";
 import { aiWireArgs } from "../agent/provider";
 import {
   activeRef,
-  applyTemplate,
-  editingPair,
-  keyHintFor,
-  patchEditingModel,
-  patchEditingProvider,
-  providerNeedsKey,
-  templateOf,
   useAiProfiles,
 } from "../ai/aiProfileStore";
+import { AiModelSection } from "./AiModelRows";
 import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
 import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { SetRow } from "../../shared/SetRow";
-import { IconEye, IconEyeOff, IconEdit, IconTrash } from "../../shared/icons";
+import { IconEdit, IconTrash } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 
@@ -303,11 +297,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const [layoutName, setLayoutName] = useState("");
   const [tab, setTab] = useState(initialTab ?? "general");
   const [msg, setMsg] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  // P110-B1：AI 页那几条输入框现在编辑的是**档案表里选中的那一对**（`editingPair` 故意不做
+    // P110-B1：AI 页那几条输入框现在编辑的是**档案表里选中的那一对**（`editingPair` 故意不做
   // "可用"过滤，否则密钥空着时就没人能填进去）。订阅它，改完立刻反映到界面上。
   const aiProfilesSnap = useAiProfiles();
-  const { provider: editProvider, model: editModel } = editingPair(aiProfilesSnap);
+  void aiProfilesSnap; // 订阅仍然要：它决定「测试连接」那颗按钮的禁用态
   const [mcpCliPath, setMcpCliPath] = useState(() => localStorage.getItem("vs.mcpCliPath") ?? "");
   const mcpSt = useSyncExternalStore(mcpServer.subscribe, mcpServer.getStatus);
   const jobSt = useSyncExternalStore(jobCenter.subscribe, jobCenter.getSnapshot);
@@ -844,73 +837,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
             )}
             {tab === "ai" && (
               <>
-                <div className="set-group-title">{t("set.ai.grp.preset")}</div>
-                {row(t("set.ai.preset"), (
-                  // P110-B1：这枚从"选预设 = 覆盖三个字段"改成"套模板到当前这家"。
-                  // 密钥继续不动（P108 定的），而档案表成型后它也不再是"唯一的当前配置"。
-                  <select
-                    className="input"
-                    value={templateOf(editProvider.baseUrl)}
-                    onChange={(e) => applyTemplate(e.target.value as AiPreset)}
-                  >
-                    {(Object.keys(AI_PRESETS) as AiPreset[]).map((k) => (
-                      <option key={k} value={k}>
-                        {AI_PRESETS[k].label}
-                      </option>
-                    ))}
-                  </select>
-                ), t("set.ai.preset.tip"))}
-                <div className="set-group-title">{t("set.ai.grp.model")}</div>
-                {row(t("set.ai.key"), (
-                  <div className="ai-key-wrap">
-                    <input
-                      className="input"
-                      style={{ width: 280 }}
-                      type={showKey ? "text" : "password"}
-                      value={editProvider.apiKey}
-                      placeholder={providerNeedsKey(editProvider) ? keyHintFor(editProvider.baseUrl) ?? "sk-…" : tx("本地服务（回环地址）无需 Key", "Local services on a loopback address need no key")}
-                      onChange={(e) => patchEditingProvider({ apiKey: e.target.value })}
-                    />
-                    <button
-                      className="ai-key-eye"
-                      title={showKey ? tx("隐藏 API Key", "Hide the API key") : tx("显示 API Key", "Show the API key")}
-                      onClick={() => setShowKey((v) => !v)}
-                    >
-                      {showKey ? <IconEyeOff /> : <IconEye />}
-                    </button>
-                  </div>
-                ), t("set.ai.key.tip"))}
-                {row(t("set.ai.model"), (
-                  <input
-                    className="input"
-                    style={{ width: 280 }}
-                    value={editModel.model}
-                    placeholder={tx("发给 API 的模型名", "model id sent to the API")}
-                    onChange={(e) => patchEditingModel({ model: e.target.value })}
-                  />
-                ), t("set.ai.model.tip"))}
-                {row(t("set.ai.baseUrl"), (
-                  <input
-                    className="input"
-                    style={{ width: 280 }}
-                    value={editProvider.baseUrl}
-                    placeholder="https://api.deepseek.com"
-                    onChange={(e) => patchEditingProvider({ baseUrl: e.target.value })}
-                  />
-                ), t("set.ai.baseUrl.tip"))}
-                {row(t("set.ai.format"), (
-                  <select
-                    className="input"
-                    value={editProvider.format}
-                    onChange={(e) => patchEditingProvider({ format: e.target.value as AiFormat })}
-                  >
-                    {AI_FORMATS.map((f) => (
-                      <option key={f.key} value={f.key}>
-                        {f.label}
-                      </option>
-                    ))}
-                  </select>
-                ), t("set.ai.format.tip"))}
+                <AiModelSection />
                 {row(tx("上下文压缩阈值", "Context compaction threshold"), (
                   // P110-B2：阈值按**模型窗口**的比例算，不再是一个跟模型无关的 12000 字符。
                   // 默认 0.6（你点的名），对照 DSH 的 0.8；范围 0.4~0.9，越界在 load 里钳回。

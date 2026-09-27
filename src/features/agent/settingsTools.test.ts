@@ -7,6 +7,8 @@ vi.stubGlobal("localStorage", { getItem: (k: string) => storage.get(k) ?? null, 
 const { settingsAdapter, settingsRevision, undoSettingsDetailed, validatePatch, readSettings } = await import("./settingsTools");
 const { SETTINGS_SCHEMA, agentWritableKeys } = await import("../settings/settingsSchema");
 const settings = await import("../settings/settingsStore");
+// P110-B3：读档案表的当前状态要用它自己的出口，别隔着 settingsStore 猜
+const aiProfiles = await import("../ai/aiProfileStore");
 const { patchEditingProvider } = await import("../ai/aiProfileStore");
 import type { ToolCall } from "./types";
 
@@ -104,6 +106,11 @@ it("validatePatch and readSettings are pure exports for host policy reuse", () =
   // P110-B1：`aiApiKey` 已不是 Settings 键 —— 契约从"吐出来时要掩成 {configured:false}"
   // 变成"这条通路上根本不该出现这个键"（供应商表不进 schema，见 aiProfileStore 顶部注释）。
   expect(Object.keys(readSettings())).not.toContain("aiApiKey");
+  // 更硬的一半：表里**真的**配着密钥时，schema 通路一个字都不许吐出来
+  aiProfiles.patchEditingProvider({ apiKey: "sk-in-table" });
+  expect(aiProfiles.getAiProfiles().providers.some((p) => p.apiKey === "sk-in-table")).toBe(true);
+  expect(JSON.stringify(readSettings())).not.toContain("sk-in-table");
+  aiProfiles.patchEditingProvider({ apiKey: "" });
   expect(agentWritableKeys().length).toBeGreaterThan(5);
 });
 

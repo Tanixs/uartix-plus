@@ -861,6 +861,9 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, ctxBudget, sessionRuns.length, runsWork]);
   const ctxMeter = ctxGauge(ctxEstimate.bytes);
+  // P110-B3：**第二个分母** —— 已用占当前模型窗口的比例。两条线各管各的含义：传输那条说
+  // "这次请求会不会被宿主 2 MiB 撞断"，窗口那条说"历史到这儿就该折叠了"。
+  // 合成一个数就会撒谎：旧版只有传输那条，于是出现过"仪表显示 1%、其实正在丢 36 条历史"。
   const atBudgetFloor = ctxBudget <= MIN_HISTORY_BUDGET;
   const compressContext = () => {
     const next = tightenHistoryBudget(ctxBudget);

@@ -82,7 +82,12 @@ describe("P99b-N6 · 每个设置项都得有个改它的地方（不许只剩 l
    * 设置页把一部分写入**委托**给了自己的模块（主题卡那条链在 `themePicker.selectTheme` 里 patch）。
    * 这些文件一起算"有地方改"，但每条豁免都要被真引用着——不然就是给下一次偷懒留的门。
    */
-  const DELEGATED_WRITERS = ["features/settings/themePicker.ts"];
+  const DELEGATED_WRITERS = [
+    "features/settings/themePicker.ts",
+    // P110-B3：「模型与供应商」那一节写着 aiCompactRatio / aiHistoryOverride 两个键的 patch。
+    // 登记的前提是它真的在写，不是给豁免开门（下面那条"必须是活的"检查就是干这个的）。
+    "features/settings/AiModelRows.tsx",
+  ];
 
   /**
    * P102：还有一类——**写入者整个文件都不在设置页里**（市场那两行搬进了市场弹窗的「货架来源」）。
@@ -106,7 +111,9 @@ describe("P99b-N6 · 每个设置项都得有个改它的地方（不许只剩 l
     const modal = read("features/settings/SettingsModal.tsx");
     const writers = [modal, ...[...DELEGATED_WRITERS, ...WRITERS_ELSEWHERE].map((f) => read(f))].join("\n");
     for (const f of DELEGATED_WRITERS) {
-      expect(modal, `${f} 已经不被设置页引用了：这条豁免该删掉`).toContain(f.slice(f.lastIndexOf("/") + 1).replace(/\.ts$/, ""));
+      // 文件名推导要能吃掉 .ts **和** .tsx：原来只去 `.ts$`，遇到 .tsx 的写入者
+      // 就留下一个带扩展名的"名字"去 modal 里找，永远找不到 ⇒ 这条守卫对 .tsx 是失效的。
+      expect(modal, `${f} 已经不被设置页引用了：这条豁免该删掉`).toContain(f.slice(f.lastIndexOf("/") + 1).replace(/\.tsx?$/, ""));
     }
     for (const f of WRITERS_ELSEWHERE) {
       const name = f.slice(f.lastIndexOf("/") + 1).replace(/\.tsx$/, "");
