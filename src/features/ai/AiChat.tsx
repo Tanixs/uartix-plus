@@ -29,7 +29,7 @@ import { RunEntry, AgentFloat } from "../agent/AgentInline";
 import { buildTimeline } from "../agent/timeline";
 import { buildAgentHistory, budgetFor, HISTORY_CHAR_BUDGET, MIN_HISTORY_BUDGET, tightenHistoryBudget } from "../agent/sessionLog";
 import { windowGauge } from "../agent/contextBudget";
-import { AiModelPicker } from "./AiModelPicker";
+import { AiModelChip } from "./AiModelPicker";
 import { agentPayloadBytes, ctxGauge } from "../agent/context";
 import {
   DOMAINS, DOMAIN_PRESETS, DOMAIN_TIP, DOMAIN_ZH, PRIMARY_TIERS, hasDomain, rememberTier, resolveTier, restoreTier, tierBadge, tierIdOf, type Domain,
@@ -771,6 +771,9 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const [sceneMenuOpen, setSceneMenuOpen] = useState(false);
   // P90 C1：顶栏「更多 ▾」（插件库/导出/巡检上报/清空）
   const [moreOpen, setMoreOpen] = useState(false);
+  // P111-E：上下文百分比点开的那一面（照 Qoder：常驻只有数字，细节在浮层里）
+  const [meterOpen, setMeterOpen] = useState(false);
+  const meterBtnRef = useRef<HTMLButtonElement>(null);
   const sceneBtnRef = useRef<HTMLButtonElement>(null);
   const moreBtnRef = useRef<HTMLButtonElement>(null);
   const plusBtnRef = useRef<HTMLButtonElement>(null);
@@ -1894,12 +1897,15 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             placeholder={
               agentMode
                 ? agentRunning
-                  ? tx("Agent 任务运行中…可点右侧红色按钮停止后继续", "Agent task running… use the red button on the right to stop it")
-                  : tx("用一句话描述目标，Enter 启动 Agent 任务（AI 连续调用工具完成）", "Describe the goal in one sentence; Enter starts an Agent task (the AI calls tools until it is done)")
+                  ? tx("Agent 任务运行中…可点右侧红色按钮停止后继续", "An Agent task is running… the red button on the right stops it")
+                  : tx("描述目标，Enter 启动 Agent", "Describe the goal — Enter starts the Agent")
                 : chat.streaming
                   ? tx("AI 正在回复…", "AI is replying…")
-                  : tx("输入问题，Enter 发送，Shift+Enter 换行；可粘贴/附加图片", "Type a question — Enter sends, Shift+Enter adds a line; you can paste or attach images too")
+                  : tx("输入问题，Enter 发送", "Ask something — Enter sends")
             }
+            /* 键位与粘贴能力从 placeholder 搬到这里：placeholder 是"该做什么"，
+               说明书不该占着它（用户判"整那么多文字"就是这两句各 20~30 字）。 */
+            title={tx("Enter 发送 · Shift+Enter 换行 · 可直接粘贴图片", "Enter sends · Shift+Enter adds a line · images can be pasted")}
             rows={1}
             value={input}
             disabled={chat.streaming || (agentMode && agentRunning)}
@@ -1965,9 +1971,16 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             {/* P109-D：`downgraded` 从 P98-M3 算到现在才第一次被显示——旧状态是"算了但没人看"，
                 用户以为自己还在全权执行，实际已被降档。重新选到 custom 后这句自己消失
                 （条件绑在 agentScope 上），不是一条会说谎的常驻文案。 */}
-            {agentMode && tierRestore.downgraded && agentScope === "create"
-              ? tx("（上次是全权执行，重启已降档）", " (last session used full access; downgraded after restart)")
-              : null}
+            {agentMode && tierRestore.downgraded && agentScope === "create" && (
+              /* 这件事必须看得见（用户以为自己还在全权执行，实际已被降档），
+                 但不该用一句 17 个字的话把 pill 撑爆：徽标 + tooltip 说同一件事。 */
+              <span
+                className="ai-pill-warn"
+                title={tx("上次是全权执行，重启后已降到当前档", "The last session ran with full access; it was lowered to this tier after restart")}
+              >
+                {tx("降档", "lowered")}
+              </span>
+            )}
             {sessionBadge && (
               <span className={`agent-badge${sessionRun?.pending ? " warn" : ""}`}>{sessionBadge}</span>
             )}
@@ -1978,55 +1991,78 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               {tx(`第 ${sessionRun.rounds} 轮 · ${sessionRun.calls} 次工具`, `Round ${sessionRun.rounds} · ${sessionRun.calls} tool calls`)}
             </span>
           )}
+          <span className="ai-toolbar-spacer" />
           {/*
-            P98-M4：上下文用量条常驻在输入区（旧版只有跑起来之后、在任务卡里露一个
-            「上下文 N KB」的细胶囊，既没有分母也没有百分比，用户判断不了还剩多少）。
-            这里显示的是**下一次发送真正会带上的那份投影**，所以压缩按钮按下去数字就动。
+            P111-E：这一行的常驻文字砍到只剩"谁"和"多少"。
+            原来这里同时摆着 `模型 [DeepSeek · deepseek-v4-pro · 128k]`、
+            `窗口 128k · 输出 8k · 历史预算 153600 字`、`窗口 16% · 传输 4%`、`已折 N`、
+            `压缩`、`还原` 六段话 —— 用户判"好乱，干嘛整这么多字"。
+            档案数字归「模型设置」，压缩/还原与双分母收进那枚百分比的浮层（照 Qoder）。
           */}
           {agentMode && (
-            <span className={`ai-ctx-meter${ctxMeter.level !== "ok" ? ` ${ctxMeter.level}` : ""}`}>
-              <span className="ai-ctx-bar" aria-hidden="true">
-                <span className="ai-ctx-bar-fill" style={{ width: `${ctxMeter.pct}%` }} />
-              </span>
-              {/* P110-B4：两条线一起报，因为两个分母管两件不同的事：
-                  窗口那条说"历史到这儿该折了"，传输那条说"请求会不会被宿主 2 MiB 撞断"。
-                  只报传输那条就出现过"显示 1%、其实正在丢几十条历史"（详设 §2.1）。 */}
-              <span
-                className="ai-ctx-num"
+            <>
+              <button
+                ref={meterBtnRef}
+                type="button"
+                className={`ai-ctx-chip${ctxMeter.level !== "ok" ? ` ${ctxMeter.level}` : ""}`}
+                onClick={() => setMeterOpen((v) => !v)}
+                aria-haspopup="dialog"
+                aria-expanded={meterOpen}
                 title={tx(
-                  "左：已用占当前模型上下文窗口的比例（到压缩阈值就开始折更早的内容）；右：已用占传输上限 1.6 MB 的比例（宿主 2 MiB 熔断之前的前端软顶）",
-                  "left: usage against the current model's context window (past the compaction threshold, older content folds); right: usage against the 1.6 MB transport cap, a soft ceiling under the host's 2 MiB fuse",
+                  "上下文用量：点开看窗口与传输两条分母，也能压缩更早的历史",
+                  "Context usage: open for both denominators and the manual compaction",
                 )}
               >
-                {tx(`窗口 ${ctxWindow.pct}% · 传输 ${ctxMeter.pct}%`, `window ${ctxWindow.pct}% · transport ${ctxMeter.pct}%`)}
-              </span>
-              <AiModelPicker />
-              {ctxEstimate.shadowed > 0 && (
-                <span className="ai-ctx-shadowed" title={tx("较早的工具回执已只以摘要下发（台账未删）", "Older tool receipts now go as summaries (the ledger is intact)")}>
-                  {tx(`已折 ${ctxEstimate.shadowed}`, `${ctxEstimate.shadowed} folded`)}
+                <span className="ai-ctx-bar" aria-hidden="true">
+                  <span className="ai-ctx-bar-fill" style={{ width: `${ctxMeter.pct}%` }} />
                 </span>
-              )}
-              <button
-                className="ai-ctx-btn"
-                disabled={atBudgetFloor || agentRunning}
-                title={
-                  atBudgetFloor
-                    ? tx("已到压缩下限：再小模型就没有上下文了。要彻底清空请新建会话", "At the compression floor: go smaller and the model has no context left. Start a new session to clear it fully")
-                    : agentRunning
-                      ? tx("任务运行中，等它结束再压缩", "A task is running — wait for it to finish before compressing")
-                      : tx("把更早的会话历史收得更紧一些再发（台账一条不删）", "Fold older session history tighter before sending (the ledger keeps every entry)")
-                }
-                onClick={compressContext}
-              >
-                {tx("压缩", "Compress")}
+                {ctxWindow.pct}%
               </button>
-              {ctxBudget < HISTORY_CHAR_BUDGET && (
-                <button className="ai-ctx-btn ghost" onClick={resetContextBudget} title={tx("恢复完整历史预算", "Restore the full history budget")}>
-                  {tx("还原", "Reset")}
-                </button>
-              )}
-            </span>
+              <Dropdown anchor={meterBtnRef.current} open={meterOpen} onClose={() => setMeterOpen(false)} align="end">
+                <div className="ai-ctx-pop">
+                  <div className="ai-ctx-pop-head">
+                    <span>{tx("上下文窗口", "Context window")}</span>
+                    <span className="ai-ctx-pop-pct">{ctxWindow.pct}%</span>
+                  </div>
+                  <div className="ai-ctx-bar tall" aria-hidden="true">
+                    <span className="ai-ctx-bar-fill" style={{ width: `${ctxWindow.pct}%` }} />
+                  </div>
+                  {/* 双分母不能丢：窗口那条说"历史到这儿该折了"，传输那条说"请求会不会撞宿主熔断"。
+                      只报传输那条出现过"显示 1%、其实正在丢几十条历史"（详设 §2.1）。 */}
+                  <div className="ai-ctx-pop-row">
+                    {tx(`窗口 ${ctxWindow.pct}% · 传输 ${ctxMeter.pct}%`, `window ${ctxWindow.pct}% · transport ${ctxMeter.pct}%`)}
+                  </div>
+                  {ctxEstimate.shadowed > 0 && (
+                    <div className="ai-ctx-pop-row">
+                      {tx(`已折 ${ctxEstimate.shadowed} 条较早的工具回执（台账未删）`, `${ctxEstimate.shadowed} older tool receipts now go as summaries (the ledger is intact)`)}
+                    </div>
+                  )}
+                  <div className="ai-ctx-pop-foot">
+                    <button
+                      className="btn sm"
+                      disabled={atBudgetFloor || agentRunning}
+                      title={
+                        atBudgetFloor
+                          ? tx("已到压缩下限：再小模型就没有上下文了。要彻底清空请新建会话", "At the compression floor: go smaller and the model has no context left. Start a new session to clear it fully")
+                          : agentRunning
+                            ? tx("任务运行中，等它结束再压缩", "A task is running — wait for it to finish before compressing")
+                            : tx("把更早的会话历史收得更紧一些再发（台账一条不删）", "Fold older session history tighter before sending (the ledger keeps every entry)")
+                      }
+                      onClick={compressContext}
+                    >
+                      {tx("压缩上下文", "Compress context")}
+                    </button>
+                    {ctxBudget < HISTORY_CHAR_BUDGET && (
+                      <button className="btn sm" onClick={resetContextBudget} title={tx("恢复完整历史预算", "Restore the full history budget")}>
+                        {tx("恢复自动", "Restore auto")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </Dropdown>
+            </>
           )}
+          <AiModelChip />
         </div>
       </div>
       {/* P88d ③：活动任务不在当前会话视图时，右下角悬浮条一键切回 */}

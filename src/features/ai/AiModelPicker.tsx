@@ -1,99 +1,109 @@
 /**
- * P110-B4/B5：发送框下面那两枚选择器——**模型**与**思考强度**。
+ * P111-E：发送框那枚**模型 chip**（照 Qoder 的 `Qwen3.8-Flash 极高`）。
  *
- * 为什么单独一个文件：这两枚控件的真值全在 `aiProfileStore` 与 `contextBudget` 里，
- * 塞进 `AiChat`（一千多行）就没人能在一次阅读里看懂"选了之后到底发什么"。
+ * 它替代 P110-B4 那一带标签的下拉：常驻区原来写着
+ * `模型 [DeepSeek · deepseek-v4-pro · 128k] 窗口 128k · 输出 8k · 历史预算 153600 字`
+ * —— 一行里三处文字、两个分隔符族，用户判"好乱，干嘛整这么多字"。
+ * 现在常驻只有模型名本身；档案数字与切换列表都收进点开的那一面，
+ * 因为"我正在跟谁说话"是每句都要看的，"窗口多大"不是。
  *
- * 思考强度**只在档案给了档位的时候出现**：这台模型没配档位 ⇒ 整枚选择器不出现。
- * 摆一枚下拉而下面没接线，就是 `aiScript` 那个"说明写着能关、实际一句没读"的假开关
- * 重演（红线 §8-34 的反面）。参数本身是档案里写死的静态对象，宿主只做浅合并，
- * 我们不为不认识的平台猜字段名（详设 §2′.7.2）。
+ * 两件事没变：
+ *  - 不可用的那一家**置灰留在列表里**并写明原因，不隐藏（隐藏会让人以为配置丢了）；
+ *  - 思考强度只在档案给了档位时出现（没接线却摆一枚下拉就是假开关，红线 §8-34 的反面）。
  */
-import type { AiModelProfile } from "./aiProfileStore";
+import { useRef, useState } from "react";
+import { Dropdown } from "../../shared/Dropdown";
+import { IconChevron } from "../../shared/icons";
+import { invokeOpenSettings } from "./aiBus";
 import { patch, useSettings } from "../settings/settingsStore";
-import { tx, useLocale } from "../../i18n/strings";
-import { fmtTokens, historyCharBudget } from "../agent/contextBudget";
+import { fmtTokens } from "../agent/contextBudget";
 import { setActive, thinkingLabels, useAiProfiles } from "./aiProfileStore";
+import { tx, useLocale } from "../../i18n/strings";
 
-export function AiModelPicker() {
+export function AiModelChip() {
   const st = useAiProfiles();
   const settings = useSettings();
   useLocale();
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
   const list = st.models.flatMap((model) => {
     const provider = st.providers.find((p) => p.id === model.providerId);
     return provider ? [{ model, provider }] : [];
   });
   if (!list.length) return null;
   const active = list.find((x) => x.model.id === st.activeModelId && x.provider.id === st.activeProviderId) ?? null;
-  // 预算口径与仪表、chatStore 用的是同一个函数：这里显示的数必须等于实际生效的数，
-  // 否则这行字只是安慰话。
-  const budget = historyCharBudget(active?.model.contextTokens ?? 0, settings.aiCompactRatio);
+  const usable = !!active && active.provider.enabled && active.model.enabled && active.provider.baseUrl.trim().length > 0;
   const levels = thinkingLabels(active?.model);
   // 设置里留着的档位名在这台模型上不存在时，实际退回档案的 defaultThinking（provider 那边同序）
   const shown = levels.includes(settings.aiThinkingLevel) ? settings.aiThinkingLevel : "";
 
   return (
-    <div className="ai-model-picker">
-      <label className="ai-model-picker-label">
-        {tx("模型", "Model")}
-        <select
-          className="input"
-          value={active?.model.id ?? ""}
-          onChange={(e) => {
-            const hit = list.find((x) => x.model.id === e.target.value);
-            if (hit) setActive(hit.provider.id, hit.model.id);
-          }}
-          title={tx(
-            "切换当前使用的模型。没填密钥的那一家在列表里置灰并写明原因，不是从列表里消失",
-            "Switch the model in use. A provider without an API key is greyed out with the reason, not hidden from the list",
-          )}
-        >
-          {!active && <option value="">{tx("（未选）", "(none)")}</option>}
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`ai-model-chip${usable ? "" : " warn"}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={active
+          ? tx(`${active.provider.label} · ${active.model.model} · 窗口 ${fmtTokens(active.model.contextTokens)} · 输出 ${fmtTokens(active.model.maxOutputTokens)}`,
+              `${active.provider.label} · ${active.model.model} · window ${fmtTokens(active.model.contextTokens)} · output ${fmtTokens(active.model.maxOutputTokens)}`)
+          : tx("还没有可用的模型档案", "No model profile is usable yet")}
+      >
+        {/* 圆点说"能不能发"，文字说"发给谁"，档位说"它会怎么想"——三件事三种视觉通道 */}
+        <span className={`ai-chip-dot${usable ? "" : active ? " warn" : " err"}`} aria-hidden="true" />
+        <span className="ai-chip-name">{active?.model.model ?? tx("选模型", "Pick a model")}</span>
+        {shown && <span className="ai-chip-level">{shown}</span>}
+        <IconChevron dir="up" size={12} />
+      </button>
+      <Dropdown anchor={btnRef.current} open={open} onClose={() => setOpen(false)} align="end">
+        <div className="ai-chip-pop">
+          <div className="ai-chip-pop-title">{tx("模型", "Model")}</div>
           {list.map((x) => {
-            const usable = x.provider.enabled && x.model.enabled && x.provider.baseUrl.trim().length > 0;
+            const ok = x.provider.enabled && x.model.enabled && x.provider.baseUrl.trim().length > 0;
+            const on = active?.model.id === x.model.id && active?.provider.id === x.provider.id;
             return (
-              <option key={`${x.provider.id}:${x.model.id}`} value={x.model.id} disabled={!usable}>
-                {`${x.provider.label} · ${x.model.model} · ${fmtTokens(x.model.contextTokens)}${usable ? "" : tx("（不可用）", " (unusable)")}`}
-              </option>
+              <button
+                key={`${x.provider.id}:${x.model.id}`}
+                type="button"
+                role="menuitem"
+                className={`ai-chip-opt${on ? " on" : ""}`}
+                disabled={!ok}
+                title={ok ? undefined : tx("这家还没填密钥或已停用——先补配置再选", "This one has no key or is off — configure it first")}
+                onClick={() => {
+                  setActive(x.provider.id, x.model.id);
+                  setOpen(false);
+                }}
+              >
+                <span className="ai-chip-opt-name">{x.model.model}</span>
+                <span className="ai-chip-opt-meta">{`${x.provider.label} · ${fmtTokens(x.model.contextTokens)}`}</span>
+                {!ok && <span className="ai-chip-opt-warn">{tx("未配置", "unset")}</span>}
+              </button>
             );
           })}
-        </select>
-      </label>
-      {levels.length > 0 && (
-        <label className="ai-model-picker-label">
-          {tx("思考强度", "Thinking")}
-          <select
-            className="input"
-            value={shown}
-            onChange={(e) => patch({ aiThinkingLevel: e.target.value })}
-            title={tx(
-              "档位名与每档要发的参数都写在这台模型的档案里；选「跟随模型默认」就按档案上那一档发。我们不为不认识的平台猜字段名",
-              "Level names and their parameters live in this model's profile; Follow model default sends whatever the profile marks as default. We never guess field names for unknown providers",
-            )}
-          >
-            <option value="">{tx("跟随模型默认", "Follow model default")}</option>
-            {levels.map((l) => (
-              <option key={l} value={l}>{l}</option>
-            ))}
-          </select>
-        </label>
-      )}
-      {active && (
-        <span
-          className="ai-model-picker-note"
-          title={tx(
-            "上下文窗口 / 单次输出上限都取自档案表；历史预算按窗口乘以压缩阈值算，与仪表同一口径",
-            "Context window and per-reply output cap come from the profile table; the history budget is window × compaction ratio, the same basis the meter uses",
+          {levels.length > 0 && (
+            <div className="ai-chip-levels">
+              <span className="ai-chip-pop-title">{tx("思考强度", "Thinking")}</span>
+              <div className="ai-chip-level-row">
+                <button type="button" className={`btn sm${shown === "" ? " on" : ""}`} onClick={() => patch({ aiThinkingLevel: "" })}>
+                  {tx("跟随默认", "Default")}
+                </button>
+                {levels.map((l) => (
+                  <button key={l} type="button" className={`btn sm${shown === l ? " on" : ""}`} onClick={() => patch({ aiThinkingLevel: l })}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
-        >
-          {tx(
-            `窗口 ${fmtTokens(active.model.contextTokens)} · 输出 ${fmtTokens(active.model.maxOutputTokens)} · 历史预算 ${budget} 字`,
-            `window ${fmtTokens(active.model.contextTokens)} · output ${fmtTokens(active.model.maxOutputTokens)} · history budget ${budget} chars`,
-          )}
-        </span>
-      )}
-    </div>
+          <div className="ai-chip-foot">
+            <button type="button" className="ai-chip-link" onClick={() => { setOpen(false); invokeOpenSettings("model"); }}>
+              {tx("模型设置…", "Model settings…")}
+            </button>
+          </div>
+        </div>
+      </Dropdown>
+    </>
   );
 }
-
-export type { AiModelProfile };

@@ -6035,16 +6035,6 @@ select optgroup {
   overflow: auto;
   white-space: pre-wrap;
 }
-/* 发送框那两枚选择器：容器与标签（P111-E 会把它们收进模型 chip，先让现状不再裸奔） */
-.ai-model-picker { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-.ai-model-picker-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: var(--fs-sm);
-  color: var(--text-dim);
-  min-width: 0;
-}
 .set-seg { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-l); overflow: hidden; }
 .set-seg.col { flex-direction: column; }
 .set-seg button {
@@ -7252,15 +7242,27 @@ a > svg {
   background: var(--accent-soft);
 }
 .ai-agent-prog { font-size: var(--fs-body); color: var(--text-dim); }
-/* P98-M4：输入区常驻的上下文用量条（带分母与百分比 + 手动压缩出口）。
-   数字是"下一次发送真正会带上的那份投影"，所以按压缩立刻看得见它变小。 */
-.ai-ctx-meter {
+/* ---------------- P111-E 发送框那一行：数字 → 浮层（照 Qoder） ----------------
+   旧形状是六个东西常驻一排：百分比条、`窗口 16% · 传输 4%`、模型下拉、`已折 N`、
+   `压缩`、`还原`。用户判"好乱，干嘛整这么多字"。现在常驻只剩一枚百分比，
+   点开才是分母、折叠数与压缩出口——那三件都是"偶尔要看"，不是"每句都要读"。
+   `.ai-ctx-btn` 那一族（3 条 border 声明）随旧排版一起删掉，G 门因此只降不升。 */
+.ai-ctx-chip {
+  all: unset;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
-  min-width: 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
 }
+.ai-ctx-chip:hover { background: var(--raise-1); color: var(--text); }
+.ai-ctx-chip.warn { color: var(--warn-fg); }
+.ai-ctx-chip.danger { color: var(--danger); }
 .ai-ctx-bar {
   flex: 0 0 54px;
   width: 54px;
@@ -7270,37 +7272,94 @@ a > svg {
   border: 1px solid var(--border-soft);
   overflow: hidden;
 }
+.ai-ctx-bar.tall { flex: none; width: 100%; height: 6px; }
 .ai-ctx-bar-fill {
   display: block;
   height: 100%;
   background: var(--text-dim);
   transition: width var(--dur-fast, 120ms) var(--ease, ease);
 }
-.ai-ctx-meter.warn .ai-ctx-bar-fill { background: var(--warn-fg); }
-.ai-ctx-meter.danger .ai-ctx-bar-fill { background: var(--danger); }
-.ai-ctx-num {
+.ai-ctx-chip.warn .ai-ctx-bar-fill { background: var(--warn-fg); }
+.ai-ctx-chip.danger .ai-ctx-bar-fill { background: var(--danger); }
+.ai-ctx-pop { min-width: 268px; padding: 2px; }
+.ai-ctx-pop-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.ai-ctx-pop-pct { font-variant-numeric: tabular-nums; color: var(--text-dim); font-weight: 400; }
+.ai-ctx-pop-row { margin-top: 8px; font-size: var(--fs-body); line-height: 1.5; color: var(--text-dim); }
+.ai-ctx-pop-foot { display: flex; gap: var(--sp-2); margin-top: 10px; }
+/* pill 上的「降档」徽标：这件事必须看得见，但不该用一句 17 字的话把 pill 撑爆 */
+.ai-pill-warn {
+  padding: 0 5px;
+  border-radius: var(--radius-s);
+  font-size: var(--fs-xs);
+  color: var(--warn-fg);
+  background: color-mix(in srgb, var(--warn-fg) 14%, transparent);
+}
+/* 模型 chip：常驻只有"名字 + 档位 + 一个点"，其余在点开的那一面 */
+.ai-model-chip {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
   font-size: var(--fs-body);
   color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  cursor: pointer;
+  min-width: 0;
 }
-.ai-ctx-meter.warn .ai-ctx-num { color: var(--warn-fg); }
-.ai-ctx-meter.danger .ai-ctx-num { color: var(--danger); }
-.ai-ctx-shadowed { font-size: var(--fs-xs); color: var(--text-dim); white-space: nowrap; }
-.ai-ctx-btn {
-  padding: 1px 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--text-dim);
-  font: inherit;
+.ai-model-chip:hover { background: var(--raise-1); color: var(--text); }
+.ai-model-chip.warn { color: var(--warn-fg); }
+.ai-chip-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.ai-chip-dot.warn { background: var(--warn-fg); }
+.ai-chip-dot.err { background: var(--danger); }
+.ai-chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-chip-level { color: var(--accent); }
+.ai-chip-pop { min-width: 268px; max-width: 340px; padding: 2px; }
+.ai-chip-pop-title {
+  margin: 6px 0 2px;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--text-faint);
+}
+.ai-chip-opt {
+  all: unset;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border-radius: var(--radius-m);
   font-size: var(--fs-body);
   cursor: pointer;
-  white-space: nowrap;
+  min-width: 0;
 }
-.ai-ctx-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.ai-ctx-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.ai-ctx-btn.ghost { border-color: var(--border-soft); }
+.ai-chip-opt:hover:not(:disabled) { background: var(--raise-1); }
+.ai-chip-opt.on { color: var(--accent); background: var(--accent-soft); }
+.ai-chip-opt:disabled { color: var(--text-faint); cursor: not-allowed; }
+.ai-chip-opt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-chip-opt-meta { margin-left: auto; flex: none; font-size: var(--fs-xs); color: var(--text-faint); }
+.ai-chip-opt-warn { flex: none; font-size: var(--fs-xs); color: var(--warn-fg); }
+.ai-chip-levels { margin-top: 6px; }
+.ai-chip-level-row { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding: 2px 8px; }
+.ai-chip-foot { margin-top: 8px; padding-top: 6px; }
+.ai-chip-link {
+  all: unset;
+  cursor: pointer;
+  font-size: var(--fs-body);
+  color: var(--text-dim);
+}
+.ai-chip-link:hover { color: var(--accent); }
 /* P88e C1：「发送方式」面板（原常驻 agent-bar 收拢为按需展开） */
 /* P90 C3：面板已是 .ui-dropdown 的 child，容器外观（边框/底色/阴影）由浮层承担，这里只管内部排版 */
 /* P92-B：发送方式面板——分组带小标题与分隔线，档位一行一项且说明常驻可见
