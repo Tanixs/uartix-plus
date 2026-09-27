@@ -31,7 +31,7 @@ import {
   activeRef,
   useAiProfiles,
 } from "../ai/aiProfileStore";
-import { AiModelSection } from "./AiModelRows";
+import { ModelSettingsPage } from "./ModelSettingsPage";
 import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
 import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
@@ -370,6 +370,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     { key: "data", label: t("set.data"), group: tx("数据与诊断", "Data & diagnostics") },
     { key: "monitor", label: tx("监测", "Monitoring"), group: tx("数据与诊断", "Data & diagnostics") },
     { key: "ai", label: t("set.ai"), group: tx("AI 与 Agent", "AI & agent"), sub: tx("回答行为、流式与授权面、Agent 预算", "Answer behaviour, streaming and permission tier, Agent budgets") },
+    { key: "model", label: tx("模型设置", "Model settings"), group: tx("AI 与 Agent", "AI & agent"), sub: tx("管理供应商与模型档案，配置后可在发送框那枚模型钮里选用", "Manage providers and model profiles; pick one from the model chip next to the composer") },
     { key: SETTINGS_TAB_PLUGINS, label: t("set.ext"), group: tx("扩展与集成", "Extensions & integration") },
     { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}`, group: tx("扩展与集成", "Extensions & integration") },
     { key: "io", label: t("set.io"), group: tx("扩展与集成", "Extensions & integration") },
@@ -440,7 +441,11 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
           <div className="set-content">
             {/* 一页 = 一张浮起的卡（ZCode 的「常规」页就是这个形状：一张卡、里面几行带分隔）。
                 旧版是"发丝线接发丝线铺在纯白弹窗上"，所以三面分不出层。
-                卡片只加 background/shadow，不加 border —— G 门那条计数因此不动。 */}
+                卡片只加 background/shadow，不加 border —— G 门那条计数因此不动。
+                「模型设置」是清单+详情两栏，本身自带卡片结构，所以它不套这张卡。 */}
+            {tab === "model" ? (
+              <ModelSettingsPage />
+            ) : (
             <div className="set-card">
             {tab === "general" && (
               <>
@@ -869,24 +874,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
             )}
             {tab === "ai" && (
               <>
-                <AiModelSection />
-                {row(tx("上下文压缩阈值", "Context compaction threshold"), (
-                  // P110-B2：阈值按**模型窗口**的比例算，不再是一个跟模型无关的 12000 字符。
-                  // 默认 0.6（你点的名），对照 DSH 的 0.8；范围 0.4~0.9，越界在 load 里钳回。
-                  <input
-                    className="input"
-                    style={{ width: 90 }}
-                    type="number"
-                    min={0.4}
-                    max={0.9}
-                    step={0.05}
-                    value={settings.aiCompactRatio}
-                    onChange={(e) => {
-                      const n = Number(e.target.value);
-                      patch({ aiCompactRatio: Math.min(0.9, Math.max(0.4, Number.isFinite(n) ? n : 0.6)) });
-                    }}
-                  />
-                ), t("set.ai.compact.tip"))}
+                {/* P111-C：模型/密钥/地址/窗口全部搬到「模型设置」那一页。
+                    这里原本有**两条**「上下文压缩阈值」——一条在 AiModelSection 里、
+                    一条在下面这几行（实测截图上同一页出现两次，都写 aiCompactRatio）：
+                    那是 P110-B3 我自己造的第二套编辑面，删掉一条不够，两条都撤。 */}
                 {row(t("set.ai.temp"), (
                   <input
                     type="number"
@@ -1358,6 +1349,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               </div>
             )}
             </div>
+            )}
             {msg && <div className="set-msg">{msg}</div>}
           </div>
         </div>

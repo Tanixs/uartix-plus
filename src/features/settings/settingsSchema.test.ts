@@ -85,8 +85,9 @@ describe("P99b-N6 · 每个设置项都得有个改它的地方（不许只剩 l
   const DELEGATED_WRITERS = [
     "features/settings/themePicker.ts",
     // P110-B3：「模型与供应商」那一节写着 aiCompactRatio / aiHistoryOverride 两个键的 patch。
-    // 登记的前提是它真的在写，不是给豁免开门（下面那条"必须是活的"检查就是干这个的）。
-    "features/settings/AiModelRows.tsx",
+    // P111-C 它从 AiModelRows.tsx 搬进 ModelSettingsPage.tsx（独立一页），登记跟着搬 ——
+    // 前提不变：它真的在写，不是给豁免开门（下面那条"必须是活的"检查就是干这个的）。
+    "features/settings/ModelSettingsPage.tsx",
   ];
 
   /**

@@ -5910,6 +5910,59 @@ select optgroup {
 }
 .set-card > .set-row:last-child { border-bottom: none; }
 .set-card > .set-group-title:first-child { margin-top: 12px; }
+/* ---------------- P111-C 「模型设置」：清单 + 详情两栏 ----------------
+   中列是"扫一眼挑一家"，右列是"改这一家"，所以两栏各自成面：
+   中列与左导航同属凹陷区（--bg-inset），右列的卡片浮在页面底色上。
+   仍然零 `border:`：分隔靠底色与阴影，不靠描边。 */
+.msp { display: flex; align-items: flex-start; gap: var(--sp-4); }
+.msp-list {
+  flex: 0 0 220px;
+  position: sticky;
+  top: 0;
+  /* 不 stretch：撑到与右列同高会拖出一大块空灰面，列表本来只有几行 */
+  padding: 8px;
+  background: var(--bg-inset);
+  border-radius: var(--radius-l);
+}
+.msp-list-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 2px 4px 8px; }
+.msp-list-title { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.4px; color: var(--text-faint); }
+.msp-row {
+  all: unset;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border-radius: var(--radius-m);
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+}
+.msp-row:hover { color: var(--text); background: var(--raise-1); }
+.msp-row.on { color: var(--accent); background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.msp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msp-count { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+/* 状态点：五种说法各对应一件真事（未测 / 停用 / 缺配置 / 测试中 / 通过 / 失败）。
+   它不是"在线指示灯"——那需要心跳，这里只有"我刚点那一下的结果"。 */
+.msp-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
+.msp-dot.ok { background: var(--ok); }
+.msp-dot.err { background: var(--danger); }
+.msp-dot.warn { background: var(--warn-fg); }
+.msp-dot.off { background: var(--border); }
+.msp-dot.run { background: var(--accent); animation: msp-pulse 1s ease-in-out infinite; }
+@keyframes msp-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+.msp-detail { flex: 1; min-width: 0; max-width: 780px; display: flex; flex-direction: column; gap: var(--sp-4); }
+.msp-card {
+  padding: 0 18px 6px;
+  background: var(--bg-panel);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-pop), var(--shadow);
+}
+.msp-card > .set-row:last-child { border-bottom: none; }
+.msp-card > .set-group-title:first-child { margin-top: 14px; }
+.msp-test { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
+.msp-model { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
 .set-row {
   display: flex;
   align-items: center;
