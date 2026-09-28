@@ -57,7 +57,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
 export function panelTitleOf(id: string): string {
   if (id.startsWith("ext-panel-")) {
     const ext = getExt(id.slice("ext-panel-".length));
-    return ext?.name ?? tx("AI 面板", "AI panel");
+    return ext?.name ?? tx("AI 扩展面板", "AI extension panel");
   }
   return PANEL_TITLES()[id as PanelId] ?? id;
 }

@@ -735,7 +735,7 @@ export default function App() {
       api.addPanel({
         id,
         component: "aiExtPanel",
-        title: `${ext?.name ?? tx("AI 面板", "AI Panel")}`,
+        title: `${ext?.name ?? tx("AI 扩展面板", "AI extension panel")}`,
         params: { extId: id.slice("ext-panel-".length) },
         ...(ref
           ? { position: { referencePanel: ref.id, direction: "within" as const } }

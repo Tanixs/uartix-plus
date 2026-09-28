@@ -1376,12 +1376,12 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
             <div className="ai-welcome">
               <div className="ai-welcome-title">
                 <IconSparkle />
-                {tx("AI 调试助手", "AI debugging assistant")}
+                {tx("AI 助手", "AI assistant")}
               </div>
               <div className="ai-welcome-desc">
                 {tx(
-                  "框选 Hex 字节右键「AI 识别协议」；或用上方快捷按钮解读数据、分析曲线、生成指令、诊断问题。想做主题、小部件、面板？用「Agent 任务」让 AI 直接保存为插件并自动启用。发送前可勾选随消息附带的软件内上下文。",
-                  "Select Hex bytes and choose “AI: detect protocol” from the context menu, or use the scene buttons above to interpret data, analyse curves, generate commands and diagnose problems. Want a theme, widget or panel? Start an “Agent task” and the AI saves it as a plugin and enables it. Before sending you can tick which in-app context travels with the message.",
+                  "框选 Hex 字节右键「AI 识别协议」；或点顶栏「场景 ▾」里的解读数据、分析曲线、生成指令、诊断问题。想做主题、小部件、面板？把输入区那颗「普通对话」切成「Agent 任务」，AI 会直接保存为插件并自动启用。发送前可勾选随消息附带的软件内上下文。",
+                  "Select Hex bytes and choose “AI: detect protocol” from the context menu, or open “Scenes ▾” in the top bar to interpret data, analyse curves, generate commands and diagnose problems. Want a theme, widget or panel? Switch the “Plain chat” pill under the input to “Agent task” and the AI saves it as a plugin and enables it. Before sending you can tick which in-app context travels with the message.",
                 )}
               </div>
             </div>
