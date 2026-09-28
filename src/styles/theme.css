@@ -7002,8 +7002,13 @@ a > svg {
   flex-direction: column;
   gap: 2px;
   min-width: 150px;
-  max-width: min(340px, calc(100vw - 16px));
-  max-height: calc(100vh - 16px);
+  /* §19：这里不再写 vh / vw。真实上限由 `shared/Dropdown.tsx` 按「窗口尺寸 ÷ zoom」
+     折算后内联下发——实测 1098×824 的窗口上，`calc(100vh - 16px)` 在 110% 档把浮层
+     撑出窗口 74px、125% 档 196px，底下那几项就点不到了（F2 修 `.ctx-menu` 时这条被
+     记成同族债没动）。下面两个静态值只是「JS 还没跑的那一帧」的兜底，
+     取的是最窄窗口也放得下的量，不是最终上限。 */
+  max-width: 340px;
+  max-height: 420px;
   overflow: auto;
   padding: var(--sp-1);
   border: 1px solid var(--border);
