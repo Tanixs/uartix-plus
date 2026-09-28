@@ -383,10 +383,20 @@ export function addProvider(input: Partial<AiProvider>): AiProvider {
 }
 
 export function updateProvider(id: string, patch: Partial<AiProvider>): void {
-  commit({
+  const next: AiProfileState = {
     ...snapshot,
     providers: snapshot.providers.map((p) => (p.id === id ? { ...p, ...patch, id: p.id } : p)),
-  });
+  };
+  // P115-F6：停用 active 所在的供应商与停用 active 模型同族——行高亮/chip/activeRef
+  // 三方必须读同一个事实，指针不重排就会出现"界面指着它、发送落到别家"的假状态
+  if (patch.enabled === false && next.activeProviderId === id) {
+    const re = activeRef(next);
+    if (re) {
+      next.activeProviderId = re.provider.id;
+      next.activeModelId = re.model.id;
+    }
+  }
+  commit(next);
 }
 
 /** 删供应商。名下还有模型 ⇒ 默认**禁止**（`ok:false, reason:"has_models"`）：
@@ -438,10 +448,21 @@ export function addModel(input: Partial<AiModelProfile> & { providerId: string }
 }
 
 export function updateModel(id: string, patch: Partial<AiModelProfile>): void {
-  commit({
+  const next: AiProfileState = {
     ...snapshot,
     models: snapshot.models.map((m) => (m.id === id ? { ...m, ...patch, id: m.id } : m)),
-  });
+  };
+  // P115-F6：停用的正是发送框指着的那个模型时，把指针重排到 activeRef() 会落到的
+  // "第一个可用"——行高亮、发送框 chip 与实际发送三方从此读同一个事实。
+  // 旧写法留着旧指针：高亮 ✓ 说"发送框正指着它"，真发送却静默落到别家（假状态）。
+  if (patch.enabled === false && next.activeModelId === id) {
+    const re = activeRef(next);
+    if (re) {
+      next.activeProviderId = re.provider.id;
+      next.activeModelId = re.model.id;
+    }
+  }
+  commit(next);
 }
 
 export function removeModel(id: string): void {
@@ -557,5 +578,5 @@ export function activeMaxOutputTokens(st: AiProfileState = snapshot): number | n
   return a ? Math.min(a.model.maxOutputTokens, 32_768) : null;
 }
 
-/** 测试连接/发送用的默认温度仍住在 `Settings.aiTemperature`（那是全局偏好，不是档案字段） */
+/** 试连/发送用的默认温度仍住在 `Settings.aiTemperature`（那是全局偏好，不是档案字段） */
 export { DEFAULT_CONTEXT_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS };

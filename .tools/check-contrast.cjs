@@ -71,6 +71,10 @@ for (const f of files) {
     "--on-accent",
     "--warn-fg",
     "--danger",
+    // P115-F22：危险钮按压态文字色（.tb-close:hover），从 #fff 字面量提为令牌
+    "--on-danger",
+    "--k-keypad",
+    "--k-keypad-ink",
     ...K_TOKENS,
   ];
   const missing = need.filter((k) => !vars[k]);
@@ -95,6 +99,10 @@ for (const f of files) {
     ["accent/panel(text)", vars["--accent"], vars["--bg-panel"], 3.0],
     // P75：只读/受限横幅文字色（--warn-fg 此前未定义静默回退 accent）
     ["warn-fg/panel", vars["--warn-fg"], vars["--bg-panel"], 4.5],
+    // P115-F22：危险钮按压态文字压 danger 底（原 #fff 字面量无人验过）
+    ["on-danger/danger", vars["--on-danger"], vars["--danger"], 3.0],
+    // P115-F22：键盘遥控按键的墨色压键底（固定值令牌，见 theme.css :root）
+    ["keypad-ink/keypad", vars["--k-keypad-ink"], vars["--k-keypad"], 4.5],
     // 块类型语义色：作为小字胶囊文字与 3px 色条使用 → 面板底上 4.5 起
     ...K_TOKENS.map((k) => [`${k}/panel`, vars[k], vars["--bg-panel"], 4.5]),
   ];

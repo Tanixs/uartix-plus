@@ -6,7 +6,7 @@
  * PluginLibraryDialog 仅保留 overlay/portal 壳。
  * 样式全部使用主题变量（8 主题兼容），无字面量颜色。
  */
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import {
   usePlugins,
@@ -39,17 +39,34 @@ import { moduleDiagnostics, type ModuleStatus } from "./moduleBus";
 import { describeToolChange, pluginToolChangeOf, pluginToolDefsOf } from "./pluginToolDefs";
 import { CAP_LABEL, PLUGIN_CAPS, describeDiff, manifestDiff, type PluginManifest } from "./pluginManifest";
 import { setOpen } from "../ai/extensionStore";
-import { Glyph, IconColumns, IconDock, IconPlug, IconStack } from "../../shared/icons";
+import { Glyph, IconCode, IconColumns, IconDock, IconLayoutEdit, IconMore, IconPlay, IconStack } from "../../shared/icons";
 
 /**
  * 列表行的类型图标。插件那一面原来只有"名字 + id + 状态 + 开关"一条线，
  * 用户判"感觉很单调" —— 单调的不是颜色，是**一眼扫不出这批东西各是什么**。
  * 图标只走 `shared/icons.tsx` 这一处出处（H 门），并且是装饰性的：
  * 可读名字仍由 `aria-hidden` 的那颗开关与文字给，不靠形状传达唯一信息。
+ *
+ * P115-F20：不再取 `kinds[0]`（插入序 = 看运气，panel+theme 混合包会亮出小部件的图标）。
+ * 固定优先级 theme > panel > widget > 其余逐 kind 写全（`Record<ArtifactKind,…>` 让
+ * "产物元表加一种 kind 忘配图标"编译期就红，§8-36①）；扫描不中的未知 kind 显式给
+ * 「更多」图标，不再静默落成插头。
  */
+const KIND_ICON: Record<import("./artifact").ArtifactKind, () => ReactElement> = {
+  theme: IconStack,
+  panel: IconDock,
+  widget: IconColumns,
+  workspacePreset: IconLayoutEdit,
+  workflow: IconPlay,
+  module: IconCode,
+};
+const KIND_ICON_ORDER: readonly (keyof typeof KIND_ICON)[] = [
+  "theme", "panel", "widget", "workspacePreset", "workflow", "module",
+];
+
 function KindIcon({ kinds }: { kinds: readonly string[] }) {
-  const one = kinds[0];
-  const Ico = one === "theme" ? IconStack : one === "widget" ? IconColumns : one === "panel" ? IconDock : IconPlug;
+  const hit = KIND_ICON_ORDER.find((k) => kinds.includes(k));
+  const Ico = hit ? KIND_ICON[hit] : IconMore;
   return (
     <span className="plg-item-ico" aria-hidden="true">
       <Ico />

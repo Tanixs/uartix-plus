@@ -109,6 +109,18 @@ export function LinkPanel() {
   // 钮本来就点不动；"归驱动"这句话由 tip 说成**政策**（连上之后会怎样），不说成现状。
   const rtsDriven = rtsOwned && connected;
 
+  /* P115-F12：控制线记忆按端口名分档。ctrl 非空的那几条会在下次打开**这个口**时被
+     Rust 复施加，注释行要诚实说出来；硬件流控下的 RTS 记忆不参与复施加（归驱动）。
+     全空才说"不主动碰"。 */
+  const reapply: string[] = [];
+  if (s.ctrl.dtr !== null) reapply.push(`${tx("DTR=", "DTR=")}${s.ctrl.dtr ? tx("高", "high") : tx("低", "low")}`);
+  if (s.ctrl.rts !== null && !rtsOwned) reapply.push(`${tx("RTS=", "RTS=")}${s.ctrl.rts ? tx("高", "high") : tx("低", "low")}`);
+  const linesNote = reapply.length
+    ? tx(`打开串口时将复施加 ${reapply.join("、")}（上次设置）`, `On open, re-applies ${reapply.join(", ")} (last setting)`)
+    : rtsOwned
+      ? tx("硬件流控：连上之后 RTS 归驱动，Uartix+ 不碰它", "Hardware flow: the driver holds RTS once connected — Uartix+ won't touch it")
+      : tx("打开串口时不主动碰这两条线", "Opening the port never drives these lines");
+
   const pick = (k: (typeof IFACE_ITEMS)[number]) => {
     if (s.status === "connected" || s.status === "reconnecting") {
       void serialStore.closePort();
@@ -151,11 +163,7 @@ export function LinkPanel() {
         <div className="lk-lines">
           <div className="lk-lines-head">
             <span className="lk-lines-title">{tx("控制线", "Control lines")}</span>
-            <span className="lk-lines-note">
-              {rtsOwned
-                ? tx("硬件流控：连上之后 RTS 归驱动，Uartix+ 不碰它", "Hardware flow: the driver holds RTS once connected — Uartix+ won't touch it")
-                : tx("打开串口时不主动碰这两条线", "Opening the port never drives these lines")}
-            </span>
+            <span className="lk-lines-note">{linesNote}</span>
           </div>
           <div className="lk-line-row">
             <span className="lk-line-name" title={tx("数据终端就绪", "Data Terminal Ready")}>DTR</span>

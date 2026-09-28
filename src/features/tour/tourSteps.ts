@@ -44,8 +44,10 @@ const CONTENT: RawStep[] = [
     id: "connect",
     title: { zh: "连接设备", en: "Connect" },
     body: {
-      zh: "左侧「接入」里选数据接口（串口 / TCP / UDP / BLE）并设好参数，再点这个「连接」按钮。没有硬件？直接点「下一步」，我们用内置演示源。",
-      en: "Pick an interface and set its parameters in the Link panel on the left, then hit Connect. No hardware? Just continue — we'll use the built-in demo source.",
+      // 「这个连接按钮」以前是句谎话：环落在顶部工具栏那颗钮上，文案却说在左侧「接入」里，
+      // 而且 TCP / UDP / BLE 三种接口当时根本没有锚点可圈（见 ifaces.tsx 的 data-tour）。
+      zh: "接口与参数在左侧「接入」里选、在这里填；真去连，按的是圈着的这颗「连接」钮（它在顶部工具栏，四种接口共用这一颗）。没有硬件？直接点「下一步」，我们用内置演示源。",
+      en: "Pick the interface and fill its parameters in the Link panel on the left; the button circled here is what actually opens it (it lives in the toolbar and all four interfaces share it). No hardware? Just continue - we'll use the built-in demo source.",
     },
     selector: '[data-tour="connect"]',
     rail: "link",
@@ -157,8 +159,9 @@ const DONE: RawStep = {
   id: DONE_ID,
   title: { zh: "完成 · 去哪继续", en: "Done · Where to go next" },
   body: {
-    zh: "进阶玩法：自动编排器搭自动化、3D 轨迹看姿态、虚拟设备工坊无硬件仿真、录制定整场会话随时回放；标题栏那颗还能开「插件市场」，看别人做好的主题与面板（打开那一页才联网）。帮助（? ）里可随时重看本引导，AI 与插件的细节在「AI 助手详解」「插件与创造」「插件市场」三页。",
-    en: "Next: orchestrator for automation, 3D trajectory, the virtual device workshop for hardware-free testing, session recording/replay — and the title-bar button opens the plugin market (it only goes online when that page is open). Replay this tour from Help (?); deeper dives live on the AI, plugins and market pages.",
+    // 「帮助（? ）」那半句是假的：全软件没有 ? 这个键位（B12 之后帮助只有按钮与命令面板两条路）。
+    zh: "进阶玩法：自动编排器搭自动化、3D 轨迹看姿态、虚拟设备工坊无硬件仿真、录制定整场会话随时回放；标题栏那颗拼图开的是「插件管理」，从那里进「插件市场」看别人做好的主题与面板（只有打开市场那一页才联网）。想重看本引导：标题栏的「帮助」顶部那颗按钮，或按 Ctrl+Shift+P 搜「重播入门引导」。AI 与插件的细节在「AI 助手详解」「插件与创造」「插件市场」三页。",
+    en: "Next: the orchestrator for automation, 3D trajectories, the virtual device workshop for hardware-free testing, and session recording/replay. The puzzle button in the title bar opens the plugin library - the market is one click inside it (it only goes online when that page is open). To replay this tour use the button at the top of Help, or press Ctrl+Shift+P and search for the guided tour. The AI and plugin details live on the AI, plugins and market pages.",
   },
 };
 

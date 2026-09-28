@@ -26,7 +26,7 @@ async function css(): Promise<string> {
 
 it("base-select 那一组挂在裸 select 上，不是 select.input（收窄回去就红）", async () => {
   const s = await css();
-  expect(s).toMatch(/^select \{\n  appearance: base-select;/m);
+  expect(s).toMatch(/^select \{\n {2}appearance: base-select;/m);
   expect(s).toMatch(/^select::picker\(select\) \{/m);
   expect(s).toMatch(/^select::picker-icon \{/m);
   expect(s).toMatch(/^select option \{/m);

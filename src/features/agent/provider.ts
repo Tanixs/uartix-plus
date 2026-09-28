@@ -22,7 +22,7 @@ import type { AgentMessage, AgentProvider, ModelTurn, ToolCall, ToolDefinition, 
  */
 const PASTE_JUNK = /[`"'\s\u200b-\u200d\ufeff]/g;
 
-/** Base URL 清洗：去引号/空白/零宽/尾部斜杠（测试连接与真实请求共用） */
+/** Base URL 清洗：去引号/空白/零宽/尾部斜杠（试连与真实请求共用） */
 export function cleanBaseUrl(url: string): string {
   return url.replace(PASTE_JUNK, "").replace(/\/+$/, "");
 }

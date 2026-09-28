@@ -17,7 +17,7 @@ import { PluginManagerBody } from "../plugins/PluginLibraryDialog";
 import * as sentinelStore from "../sentinel/sentinelStore";
 import * as timeCursor from "../analysis/timeCursorStore";
 import * as mcpServer from "../mcp/mcpServer";
-import { jobCenter } from "../mcp/jobExecutor";
+import { jobCenter, jobStateText } from "../mcp/jobExecutor";
 import { JobDetails } from "../mcp/JobDetails";
 import { OperatorGenBlock } from "../operator/OperatorGen";
 import { mcpServerConfig } from "../mcp/mcpTools";
@@ -26,11 +26,6 @@ import { toast } from "../ai/extRuntime";
 import { activeThemeFacts, subscribeStyleApply } from "../../styles/themeFacts";
 import { drawnTalk, pluginSectionStart, selectTheme, themeCards } from "./themePicker";
 import { themeBearingPackages, usePlugins } from "../plugins/pluginStore";
-import { aiWireArgs } from "../agent/provider";
-import {
-  activeRef,
-  useAiProfiles,
-} from "../ai/aiProfileStore";
 import { ModelSettingsPage } from "./ModelSettingsPage";
 import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
 import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
@@ -115,8 +110,7 @@ function appearanceResetNames(): string[] {
  * 用户裁决：这一栏只留本地插件库。两行搬进市场弹窗自己里面（`market/MarketSourceRows.tsx`，
  * 顶上那颗齿轮展开）——它们服务的正是"这一页从哪儿取清单"，与货架状态是同一条信息，
  * 而且失败页原本就叫人回设置页改，绕一圈才回到用户站着的地方。
- */
-function ExtPage() {
+ */function ExtPage() {
   return (
     <div className="set-ext-page">
       <div className="set-plg-embed">
@@ -126,66 +120,12 @@ function ExtPage() {
   );
 }
 
-/* ---------------- AI 服务：测试连接（E2） ---------------- */
-
-/** 按 Rust ai_agent_turn 的错误文本分类：密钥 / 网络 / 其他 */
-function classifyConnError(e: string): string {
-  if (/HTTP 401|HTTP 403|Unauthorized|Forbidden/i.test(e)) return tx("密钥无效", "Invalid key");
-  if (/连接失败|中断|超时|timeout|timed out|Could not connect|dns|error sending request|invalid URL/i.test(e))
-    return tx("无法连接服务端", "Cannot reach the server");
-  return e.slice(0, 80);
-}
-
-function AiConnTestRow() {
-  // 订阅档案表：密钥填进去的那一刻，这颗按钮才从"禁用"变"可用"（只读 activeRef 不会重渲染）
-  useAiProfiles();
-  const [st, setSt] = useState<{ status: "idle" | "testing" | "ok" | "err"; msg: string }>({
-    status: "idle",
-    msg: "",
-  });
-  // P110-B1：可用性判断跟着档案表走 —— 有"当前能用的一对"就叫已配置（回环地址不要求密钥）。
-  // 旧写法在这里还带着 `aiPreset === "ollama"` 的特判，且与 AiChat / 哨兵那两处口径不一致。
-  const active = activeRef();
-  const configured = !!active;
-  const run = async () => {
-    if (!active) return; // 按钮在 !configured 时是禁用的；这里再兜一层，免得拿非空断言当保证
-    setSt({ status: "testing", msg: "" });
-    const t0 = Date.now();
-    try {
-      await invoke("ai_agent_turn", {
-        reqId: crypto.randomUUID(),
-        // P110-B1：ping 也走同一个构造点，测试连接与真实请求不可能再配得不一样
-        ...aiWireArgs(active),
-        messages: [{ role: "user", content: "ping" }],
-        tools: [],
-      });
-      setSt({ status: "ok", msg: tx(`连接正常 · ${Date.now() - t0}ms`, `Connected · ${Date.now() - t0}ms`) });
-    } catch (e) {
-      setSt({ status: "err", msg: classifyConnError(String(e)) });
-    }
-  };
-  return (
-    <div className="set-row">
-      <label>
-        {tx("测试连接", "Test connection")}
-        <HelpHint text={tx("向当前配置的模型服务发一条最小请求（ping），验证地址/密钥/网络是否可用；不消耗多少额度", "Sends one minimal request (ping) to the configured model endpoint to verify URL / key / network; costs almost no quota")} />
-      </label>
-      <div className="set-ctl set-conn-test">
-        <button
-          className="btn"
-          disabled={!configured || st.status === "testing"}
-          title={configured ? tx("发一条 ping 请求验证配置", "Send a ping request to verify the config") : tx("请先填写 Base URL 与 API Key", "Fill in Base URL and API Key first")}
-          onClick={() => void run()}
-        >
-          {tx("测试连接", "Test connection")}
-        </button>
-        {st.status === "testing" && <span className="set-conn-note">{tx("测试中…", "Testing…")}</span>}
-        {st.status === "ok" && <span className="set-conn-note ok">{st.msg}</span>}
-        {st.status === "err" && <span className="set-conn-note err">{st.msg}</span>}
-      </div>
-    </div>
-  );
-}
+/**
+ * P115-F16（用户裁决）：AI 页的「测试连接」整行删除。
+ * 理由：模型设置页已有两支按真判据走的试连——供应商级 ↻（免费拉清单）与
+ * 逐模型 ◎（ai_probe 真请求），这行旧 ping 是第三套口径（P114-A 之前它甚至把
+ * 「命令没抛错」当成功），留着的价值只剩"教会用户两种讲法"。
+ */
 
 export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayout, onSaveLayout }: { onClose: () => void; onResetLayout: (p: WorkspacePreset) => void; initialTab?: string; onApplyLayout: (id: string) => boolean; onSaveLayout: (name: string) => boolean }) {
   useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
@@ -297,10 +237,11 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const [layoutName, setLayoutName] = useState("");
   const [tab, setTab] = useState(initialTab ?? "general");
   const [msg, setMsg] = useState("");
-    // P110-B1：AI 页那几条输入框现在编辑的是**档案表里选中的那一对**（`editingPair` 故意不做
-  // "可用"过滤，否则密钥空着时就没人能填进去）。订阅它，改完立刻反映到界面上。
-  const aiProfilesSnap = useAiProfiles();
-  void aiProfilesSnap; // 订阅仍然要：它决定「测试连接」那颗按钮的禁用态
+  /**
+   * P110-B1：AI 页那几条输入框现在编辑的是**档案表里选中的那一对**（`editingPair` 故意不做
+   * "可用"过滤，否则密钥空着时就没人能填进去）。P115-F16 后本页不再直接消费这份快照
+   * （「测试连接」行已删），订阅随那行一起撤。
+   */
   const [mcpCliPath, setMcpCliPath] = useState(() => localStorage.getItem("vs.mcpCliPath") ?? "");
   const mcpSt = useSyncExternalStore(mcpServer.subscribe, mcpServer.getStatus);
   const jobSt = useSyncExternalStore(jobCenter.subscribe, jobCenter.getSnapshot);
@@ -395,7 +336,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (document.querySelectorAll(".modal-mask").length > 1) return;
-      if (document.querySelector('[role="listbox"]')) return;
+      // P115-F5：.ui-dropdown（⋯ 菜单那一族）也开了就先让它吃 Esc——
+      // Dropdown 自己在 document 上监听并关菜单，window 这层若不豁免，
+      // 一次 Esc 会把菜单和整页一起关掉
+      if (document.querySelector('[role="listbox"], .ui-dropdown')) return;
       onClose();
     };
     window.addEventListener("keydown", onEsc);
@@ -439,7 +383,9 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               <Fragment key={x.key}>
                 {/* 分组标题只在"这一组的第一项"前出现一次 */}
                 {(i === 0 || tabs[i - 1].group !== x.group) && <div className="set-nav-group">{x.group}</div>}
-                <button className={tab === x.key ? "on" : ""} onClick={() => setTab(x.key)}>
+                <button className={tab === x.key ? "on" : ""} onClick={() => { setTab(x.key); setMsg(""); }}>
+                  {/* P115-F17：回执跟着页签走——切页就清。否则在「数据/IO」导出完，
+                      切到「关于」还挂着「模板已导出」，回执成了无主的话。 */}
                   <span className="set-nav-ico">{x.icon}</span>
                   {x.label}
                 </button>
@@ -959,7 +905,6 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     }}
                   />
                 ), t("set.ai.idle.tip"))}
-                <AiConnTestRow />
                 <details className="set-coll">
                   <summary>{t("set.ai.grp.net")}</summary>
                   <div className="set-coll-body">
@@ -1062,7 +1007,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       className="input"
                       style={{ width: 232 }}
                       value={settings.agentFsRoots}
-                      placeholder={tx("如 D:\Projects;D:\data（留空=关闭）", "e.g. D:\Projects;D:\data (empty = off)")}
+                      placeholder={tx("如 D:\\Projects;D:\\data（留空=关闭）", "e.g. D:\\Projects;D:\\data (empty = off)")}
                       onChange={(e) => patch({ agentFsRoots: e.target.value })}
                     />
                     <button
@@ -1128,7 +1073,8 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 <div className="set-io-hint">{t("set.ai.privacy")}</div>
               </>
             )}
-            {tab === SETTINGS_TAB_PLUGINS && <ExtPage />}
+            {/* P115-F15：原先这里还有一行 `{tab === SETTINGS_TAB_PLUGINS && <ExtPage />}`——
+                外层三元在渲染头就把它拦截了，是够不着的死代码，删。 */}
             {tab === "mcp" && (
               <>
                 <div className="set-group-title">{tx("MCP 服务器（AI IDE 反向集成）", "MCP server (AI IDE integration)")}</div>
@@ -1216,7 +1162,9 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                         <span>{jobRow.taskType} · MCP · {Math.max(0, Math.round(((jobRow.finishedAt ?? Date.now()) - jobRow.createdAt) / 1000))}s</span>
                         <JobDetails jobId={jobRow.jobId} />
                         <span className={jobRow.state === "succeeded" ? "set-ok-note" : jobRow.state === "cancel_requested" || jobRow.state === "running" ? "set-danger-note" : ""}>
-                          {jobRow.state === "cancel_requested" ? tx("停止中", "stopping") : jobRow.state}
+                          {/* P115-F18：状态词收进 jobStateText 的 Record 表（对齐 bridge_jobs.rs 状态机），
+                              不再裸显 snake_case */}
+                          {jobStateText(jobRow.state)}
                         </span>
                         <span style={{ opacity: 0.7 }}>{jobRow.phase}</span>
                         {jobRow.effectStatus !== "none" && <span>· effect={jobRow.effectStatus}</span>}
@@ -1248,7 +1196,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   <span className="set-usage" style={{ display: "inline-block", maxWidth: 380, textAlign: "left" }}>
                     {mcpSt.audit.slice(-5).reverse().map((a) => (
                       <div key={`${a.ts}-${a.kind}`}>
-                        {new Date(a.ts).toLocaleTimeString()} · {a.kind} · {a.ok ? "OK" : "ERR"} · {a.ms}ms
+                        {new Date(a.ts).toLocaleTimeString()} · {a.kind} · {a.ok ? tx("成功", "OK") : tx("失败", "ERR")} · {a.ms}ms
                       </div>
                     ))}
                   </span>

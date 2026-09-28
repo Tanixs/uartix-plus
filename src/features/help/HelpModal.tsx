@@ -88,7 +88,13 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 </Section>
                 <Section title="AI 助手">
                   <ol className="help-ol">
-                    <li>先到<code>设置 → AI 服务</code>选服务商预设（OpenAI 兼容 / DeepSeek / 智谱 GLM / 通义千问 / 本地 Ollama / Claude），选<code>接口格式</code>并填入 API Key；如需代理可填 HTTP 代理地址。</li>
+                    <li>{tx("先到", "Go first to")}<code>设置 → 模型设置</code>{tx(
+                      "选服务商预设（OpenAI 兼容 / DeepSeek / 智谱 GLM / 通义千问 / 本地 Ollama / Claude），选",
+                      "and pick a provider preset (OpenAI-compatible / DeepSeek / Zhipu GLM / Qwen / local Ollama / Claude), choose the",
+                    )}<code>{tx("接口格式", "wire format")}</code>{tx(
+                      "并填入 API Key；要走代理就填在这一家自己的那一栏——模型请求只认这一家的代理。",
+                      ", then fill in the API key. A proxy belongs on that provider's own field: model requests only read that one.",
+                    )}</li>
                     <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；浮窗可拖动、缩放、最小化到角落气泡，也可一键<code>停靠为面板</code>（面板内可再弹出为浮窗）。</li>
                     <li><b>识别协议</b>：在 Hex 数据流框选一段字节 → 右键「AI 识别协议」，AI 输出候选帧结构表（帧头/长度/字段/校验+置信度），点「写入协议模板」即可直接解析。</li>
                     <li><b>解读数据 / 分析曲线</b>：一键概括设备状态、诊断振荡与噪声；发现坏帧率偏高、数据停滞、字段突变时面板顶部会主动提示。</li>
@@ -112,8 +118,17 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
               <>
                 <Section title="基础操作">
                   <ol className="help-ol">
-                    <li>先到<code>设置 → AI 服务</code>：选服务商预设（OpenAI 兼容 / DeepSeek / 智谱 GLM / 通义千问 / 本地 Ollama / Claude）→ 填 API Key → 需要代理时在「高级连接」里填。</li>
-                    <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；可停靠为面板（工具栏「+ 面板」）。</li>
+                    <li>{tx("先到", "Go first to")}<code>设置 → 模型设置</code>{tx(
+                      "：选服务商预设（OpenAI 兼容 / DeepSeek / 智谱 GLM / 通义千问 / 本地 Ollama / Claude）→ 填 API Key → 需要代理就填在",
+                      ": pick a provider preset (OpenAI-compatible / DeepSeek / Zhipu GLM / Qwen / local Ollama / Claude), fill in the API key, and put a proxy on",
+                    )}<b>{tx("这一家", "that provider")}</b>{tx("的", "'s")}<code>{tx("代理", "proxy")}</code>{tx(
+                      " 那一栏。",
+                      " field.",
+                    )}<code>{tx("设置 → AI 服务 → 高级连接（代理）", "Settings - AI service - Advanced connection (proxy)")}</code>{tx(
+                      "管的是另一批通道：抓网页、搜索、装插件、上传巡检报告。模型请求不读它。",
+                      " drives a different set of channels: web fetch, search, plugin downloads and the inspection-report upload. Model requests never read it.",
+                    )}</li>
+                    <li>按 <code>Ctrl+K</code> 或点标题栏星形按钮唤起 AI 浮窗；可停靠为面板（导轨<code>视图</code>里加）。</li>
                     <li>输入框：<code>Enter</code> 发送；<code>Shift+Enter</code> 或 <code>Ctrl+Enter</code> 换行。</li>
                     <li>要带哪些上下文，点输入框左侧的 <code>＋</code> → <b>发送上下文</b> 勾选；<b>协议清单</b>（一行式，便宜）默认带，<b>协议完整定义</b>只在需要精确分析时勾。面板上实时显示本次发送的估算体积。</li>
                     <li>支持思维链模型（如 deepseek-v4-pro / glm-5.3）：思考过程实时流式显示并计时，正文开始后自动折叠。<b>「显示思考过程」与「深度思考（先想后答）」是两个独立开关</b>（设置 → AI 服务）：只想看过程就开前者，长任务反复超时就把后者关掉，别为了看过程而背上等待。同处的<b>「流式读空闲超时」</b>只管本机这一侧：连续多少秒收不到任何字节才判定卡住并重试（默认 120 秒）——上游网关自己返回的超时错误调它没用，那种情况关深度思考或换更快的模型。</li>
@@ -122,6 +137,30 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <b>上传巡检报告</b>、<b>清空当前对话</b>。
                       其中「上传巡检报告」是<b>真的往外发</b>：它把最近那条含「巡检发现」的回复正文（末尾最多 8000 字）连同软件版本与时间戳发到一个固定收报地址。
                       报告里写到的字段名、数值、端口、文件路径会<b>一起出去</b>——涉及客户设备或内部编号时先自己看一眼正文再点。</li>
+                  </ol>
+                </Section>
+                <Section title={tx("模型与供应商（设置 → 模型设置）", "Models and providers (Settings - Model settings)")}>
+                  <ol className="help-ol">
+                    <li>{tx(
+                      "左列挑一家，右列改这一家：服务地址、接口格式、API Key、按家填的代理，再往下是这家的模型列表与上下文设置。当前在用哪一台，看发送框左边那枚模型徽标。",
+                      "Pick a provider on the left, edit it on the right: base URL, wire format, API key, a proxy per provider, then that provider's model list and context settings. The chip to the left of the composer shows which model is in use.",
+                    )}</li>
+                    <li>{tx(
+                      "每个模型一行，四个动作：设为当前 / 测 / 编辑 / 删除；行尾那枚开关决定它出不出现在发送框里。",
+                      "Each model is one row with four actions - use it, test, edit, delete - and a switch on the right that decides whether it shows up in the composer.",
+                    )}</li>
+                    <li>{tx(
+                      "两种测试证明的不是同一件事，别混：供应商级那枚刷新是免费的 GET（拉一次模型清单），它证明地址与密钥通不通，顺带能把模型名导进来；模型级那颗「测」会发一次真请求，花一点点额度——因为清单证明不了这台模型答不答话。",
+                      "The two tests prove different things, so do not confuse them: the provider-level refresh is a free GET of the model list - it proves the URL and key and imports names along the way - while the per-model test sends one real request and costs a little quota, because a list can never prove this model answers.",
+                    )}</li>
+                    <li>{tx(
+                      "失败时界面直接显示上游返回的原文（密钥无效 / 模型不存在 / 额度不足 / 服务端错误），不是一句「测试失败」。密钥没填时它根本不发请求，也照实说「没发请求，没法说它通不通」。",
+                      "When it fails you get the upstream text verbatim - invalid key, model not found, quota, server error - not just “test failed”. With no key filled in it sends nothing and says exactly that, because a request that never left proves nothing.",
+                    )}</li>
+                    <li>{tx(
+                      "上下文窗口按模型档案走（模型名尾巴上的 128k / 32k 这类会自动猜一个初值，你可以改）；压缩阈值默认 0.6，意思是历史填到窗口的六成就开始折叠较早的工具回执——折叠只影响发给模型的那份，台账一条不删。",
+                      "The context window comes from the model profile (a 128k / 32k suffix seeds a guess you can edit); the compaction ratio defaults to 0.6, i.e. older tool receipts start folding once history reaches 60% of the window - folding only changes what is sent, the ledger keeps every entry.",
+                    )}</li>
                   </ol>
                 </Section>
                 <Section title="工作方式与授权档（发送方式 pill）">
@@ -167,8 +206,9 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 </Section>
                 <Section title="上下文用量与手动压缩">
                   <ul className="help-ol">
-                    <li>Agent 模式下，输入区右下角常驻一条 <code>上下文 240 KB / 1.6 MB · 15%</code> 的用量条。
-                      它显示的是<b>下一次发送真正会带上的那份内容</b>，不是历史累计——所以压缩之后数字立刻就会动。</li>
+                    <li>{tx("Agent 模式下，发送区右下角常驻一枚百分比徽标（超过 70% 转黄、90% 转红）；点开是浮层，里面有",
+                      "In Agent mode the composer keeps a percent badge at its lower right (amber past 70%, red past 90%). It opens a popover holding the")} <b>{tx("上下文窗口", "context window")}</b>{tx("那一根、", ", ")}<code>{tx("窗口 X% · 传输 Y%", "window X% / transport Y%")}</code>{tx("两个分母、", " - two denominators - and the ")}<code>{tx("压缩上下文", "Compress context")}</code>{tx(" 与 ", " and ")}<code>{tx("恢复自动", "Restore auto")}</code>{tx(" 两颗钮。", " button.")}
+                      {tx("它显示的是", "It reports")}<b>{tx("下一次发送真正会带上的那份内容", "exactly what the next send will carry")}</b>{tx("，不是历史累计——所以压缩之后数字立刻就会动。", ", not the running total - which is why it moves the moment you compress.")}</li>
                     <li>超过 70% 转黄、超过 90% 转红。撞线时模型会报"上下文过大"，任务卡上会写明当前用量。</li>
                     <li><b>压缩</b>：把较早的工具回执收得更紧（只发摘要，不发全文）。<b>台账事件一条都不删</b>，
                       所以这是"少发给模型"，不是"忘掉"——展开任务卡仍能看到完整过程。
@@ -187,7 +227,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>这些改动是<b>会话临时层</b>：重启就没了，也不归插件管。满意了要显式说"保存为主题/固化下来"才会持久化——
                       让它报个名字就行，它会用 <code>style_commit</code> 把<b>当前真正生效的那几层</b>读出来存成已启用的主题插件
                       （不是凭记忆重抄一遍规则，重抄在多轮改动后一定走样）。想撤就 <code>style_revert</code>、卡片上的「撤销」，
-                      或直接 设置 → 通用 → <b>清除 AI 临时覆盖</b>；固化之后恢复路径变成 停用插件 或 <code>rollback_plugin</code>。</li>
+                      或直接 设置 → 外观 → <b>清除 AI 临时覆盖</b>；固化之后恢复路径变成 停用插件 或 <code>rollback_plugin</code>。</li>
                     <li>改坏了的插件版本可以 <code>rollback_plugin</code> 退回上一版——Agent 自己改自己存的东西会升版本号并留下旧版，不会堆出一堆近似副本。</li>
                   </ol>
                   <p className="help-tip">
@@ -201,7 +241,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <tbody>
                       <tr><td>兜底层（暗/亮两张）</td><td>主题没写的键由它垫上，取的是内置 <code>dark</code>/<code>light</code> 那两枚的表。<b>不可停用，也不需要你动。</b></td></tr>
                       <tr><td>在画的这一枚主题</td><td><b>内置与插件主题同级</b>：同一张列表里点哪枚就是哪枚，<b>同时只有一枚在画</b>。内置不可卸载；插件主题落盘在插件库，停用/卸载就是撤掉它。<b>落盘。</b></td></tr>
-                      <tr><td>外观设置</td><td>界面缩放、显示精度、减弱动效等。<b>落盘。</b></td></tr>
+                      <tr><td>{tx("外观设置", "Appearance settings")}</td><td>{tx("主题与缩放（外观页）、显示精度（数据页）、减弱动效（通用页）。", "Theme and zoom (Appearance), decimals (Data), reduced motion (General).")}<b>{tx("落盘。", "Persisted.")}</b></td></tr>
                       <tr><td>AI 临时 token 覆盖</td><td>AI 改主题色/字号/圆角时的会话层。<b>不落盘。</b></td></tr>
                       <tr><td>AI 组件样式层</td><td>AI 按组件下的样式（一层一个名字）。<b>不落盘。</b></td></tr>
                     </tbody>
@@ -213,7 +253,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <p className="help-tip">
                     常见困惑：「AI 把按钮改圆了，我把那个主题插件停用甚至卸载了，怎么还在？」
                     —— 因为那是<b>AI 临时层</b>改的，插件停用管不到它。
-                    去 设置 → 通用 → <b>「外观覆盖层」</b>，那里逐层显示谁在生效，
+                    去 设置 → 外观 → <b>「外观覆盖层」</b>，那里逐层显示谁在生效，
                     点<b>「清除 AI 临时覆盖」</b>就干净了（你自己的设置与已存插件不受影响）。
                   </p>
                   <p className="help-tip">
@@ -240,7 +280,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <ul className="help-ol">
                     <li><b>手动诊断</b>：哨兵面板顶部点<code>AI 诊断</code>，会自动携带结构化证据（连接状态、健康度、近期报警、异常通道评分、帧型与错误率统计）打开 AI 助手发起诊断，无需手动描述现象。</li>
                     <li><b>自动诊断</b>：哨兵面板底部参数区开启<code>自动 AI 诊断</code>后，出现<b>严重报警</b>（通信静默、重大突变等）会自动发起诊断并直接写入 AI 会话——不弹窗、不抢焦点，打开 AI 助手即可看到结论。</li>
-                    <li><b>冷却</b>：自动诊断按所选冷却时间（1~60 分钟）去重，避免报警风暴时连环调用；未配置 AI 服务时会提示先到 设置 → AI 服务 配置。</li>
+                    <li><b>冷却</b>：自动诊断按所选冷却时间（1~60 分钟）去重，避免报警风暴时连环调用；{tx("未配置模型服务时会提示先到 设置 → 模型设置 配置。", "With no usable model configured it tells you to set one up under Settings - Model settings.")}</li>
                   </ul>
                 </Section>
                 <Section title="代码块与 UI 创造（回复中直接可用）">
@@ -518,17 +558,45 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
             )}
             {tab === "panels" && (
               <>
+                <Section title={tx("界面骨架：导轨、两条横栏与全窗口设置页", "The shell: rail, two bars, and the full-window settings page")}>
+                  <ol className="help-ol">
+                    <li>{tx(
+                      "左侧一条导轨，五项：「接入」「协议」「控件」「命令」「视图」。点开哪一项，哪一项就往右展开一块二级面板；两块之间那道边缘可以拖着调宽。",
+                      "One rail on the left with five items: Link, Protocol, Widgets, Commands, Views. Whichever you open slides a secondary panel out to its right, and the edge between them drags to a new width.",
+                    )}</li>
+                    <li>{tx(
+                      "顶部两条横栏各管一件事：身份栏（38px）回答「这是哪个应用」——品牌、AI/插件管理/设置/帮助四颗入口、置顶与窗口三件；工具栏（34px）才是点得动的东西——工作区预设加上接口/会话/布局三段，哪几段露不露、谁在前，在「设置 → 工作区」里排。",
+                      "Two bars on top, one job each: the identity bar (38px) answers which app this is - brand, the four app entries, pin and the three window controls; the toolbar (34px) is where the clickable things live - the workspace preset plus the interface / session / layout segments, whose order and visibility you set under Settings - Workspace.",
+                    )}</li>
+                    <li>{tx(
+                      "想多一枚面板，两个入口都行：工具栏最右边那枚「+ 面板」下拉（多列一组「最近使用」和 AI 扩展面板），或导轨的「视图」。两处列的是同一张清单，按五个分组摆好（数据接入 / 解析与画布 / 可视化 / 测试与自动化 / AI 与探索）。",
+                      "Two ways to add a panel: the “+ Panel” dropdown at the right end of the toolbar (it also groups recently used panels and AI extension panels), or Views in the rail. Both list the same set, in five groups: data input / parse and canvas / visualisation / test and automation / AI and discovery.",
+                    )}</li>
+                    <li>{tx(
+                      "设置页占满整个工作区，不是一居中的弹窗：左列是带图标的导航（十一项，分成「基础 / 数据与诊断 / AI 与 Agent / 扩展 / 其他」四组），右栏顶部那行大字就是当前这一页的名字。出口两条：左上的「← 返回工作区」，或者按 Esc。",
+                      "Settings fills the whole workspace instead of sitting in a centred dialog: an icon nav on the left (eleven entries in four groups - basics, data and diagnostics, AI and agent, extensions, misc), and the page name in large type at the top of the right pane. Two exits: the “Back to workspace” link at the top left, or Esc.",
+                    )}</li>
+                    <li>{tx(
+                      "开着设置页时，标题栏只留品牌图标和右边的置顶/最小化/最大化/关闭——那四颗入口在这里只会把你从一屏换到另一屏，所以收起来了。",
+                      "While that page is open the title bar keeps only the brand icon plus pin / minimise / maximise / close - the four app entries would just swap one full screen for another, so they step aside.",
+                    )}</li>
+                    <li>{tx(
+                      "Ctrl+Shift+P 是命令面板：这个软件能做的事列在一处，打字筛一下就能执行，包括「打开帮助与入门」和「重播入门引导」。",
+                      "Ctrl+Shift+P opens the command palette: everything the app can do in one filterable list, including “Open help” and “Replay the guided tour”.",
+                    )}</li>
+                  </ol>
+                </Section>
                   <Section title="面板一览与推荐工作流">
                   <table className="help-table">
                     <tbody>
-                      <tr><td>协议模板</td><td>协议簇管理：导入预设、新建、启停解析、复制/粘贴帧型</td></tr>
+                      <tr><td>{tx("协议（导轨）", "Protocol (rail)")}</td><td>{tx("协议簇管理：导入预设、新建、启停解析、复制/粘贴帧型。", "Protocol families: import a preset, create one, toggle parsing, copy/paste a frame type.")}<b>{tx("它住在左侧导轨，不再是一枚可添加的面板", "It lives in the left rail now - it is no longer an addable panel")}</b></td></tr>
                       <tr><td>帧画布</td><td>核心编辑器：字节格上框选定义字段，帧头帧尾可编辑</td></tr>
                       <tr><td>Hex 数据流</td><td>原始字节流总览，同样支持框选定义与 Ctrl+F 搜索</td></tr>
                       <tr><td>属性</td><td>选中模板/字段后编辑其全部参数</td></tr>
                       <tr><td>数据表格</td><td>逐帧列表，可排序/筛选/导出 CSV·XLSX</td></tr>
                       <tr><td>2D 曲线</td><td>字段图例点眼睛开曲线；支持平移/框选缩放/双击复位</td></tr>
                       <tr><td>频谱分析</td><td>FFT 频谱（主峰/频率分辨率/线性或 dB）与直方图（均值/σ/分布）双模式；与 2D 曲线共享通道数据，选通道点数窗函数，可冻结谱面观察</td></tr>
-                      <tr><td>3D 姿态</td><td>把欧拉角或四元数字段映射到 3D 模型（+面板可添加）</td></tr>
+                      <tr><td>3D 姿态</td><td>把欧拉角或四元数字段映射到 3D 模型（工具栏「+ 面板」或导轨「视图」里加）</td></tr>
                       <tr><td>3D 轨迹</td><td>三路变量当空间坐标画实时三维轨迹（着色/拖尾/网格/跟随/自动旋转/键盘飞行/光标缩放/底部时间条历史回看与回放联动）；内置椭球校准（八象限点云采样 → 九参数拟合：硬磁偏置×3 + 软磁对称校正矩阵×6，给 CV 与残差 RMS，支持残差着色、校正前后对比、在线补偿预览，一键复制 JSON/C 数组）与六面校准（加计专用，六姿态各静置 2 秒直接解算）</td></tr>
                       <tr><td>图传</td><td>把每帧数据渲染为画面：暂停/回看/保存帧、镜像翻转、缩放拖动；「解析设置」定义帧定界方式</td></tr>
                       <tr><td>控制画布</td><td>拖拽部署滑条/按钮/开关/LED/蜂鸣器等控件向下位机发指令；拖动时虚线幽灵框指示落点，松手只会落到空格。「更多」菜单可从预设生成<b>惯导调试页</b>（1–12 个受管参数滑条 + 录制/停止/打点等会话动作卡）并用<b>参数集</b>保存/载入本地草稿值；受管设备的发送/急停/校准/读回需配置设备契约后可用，生成与载入均不发送指令</td></tr>
@@ -538,17 +606,17 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
                       <tr><td>Modbus 工作台</td><td>模拟从站（本机当从站应答，四张可编辑数据表 + 故障注入）与主站轮询表（按周期读寄存器/线圈，值直接写成变量）；关掉面板仍在运行，工具栏有绿色徽标</td></tr>
                       <tr><td>测试序列器</td><td>拖积木组出自动化测试：发送/等待/等帧/断言/分组/备注六类步骤，帧到达触发自动运行、单步调试、failFast；自包含 HTML 报告一键导出；JSON 导入导出分享套件；配套 CLI（内置回环设备）可进 CI 无硬件跑断言。关面板即停，绝不后台发包</td></tr>
                       <tr><td>自动编排器</td><td>事件-条件-动作编排：组头部事件槽挂事件块（帧命中/坏帧/新帧型/阈值/通道变化/定时器/会话开断/哨兵/变量变更/自定义事件/通信静默共 12 类）自动触发，组内块流 23 类块——除发送/等待/等帧/跑序列/调用组/变量/通知/提示音与如果/循环/跳出/中止/子组外，还有操作画布控件、写 Modbus、截图/导 CSV/剪贴板、发自定义事件等自动化工具箱；「从模板新建」内置报警通知/看门狗/定时轮询/收发握手/PID 继电反馈整定五套模板（导入默认停用）；总开关 + 冷却 + 熔断多重保护（详见帮助页签）</td></tr>
-                      <tr><td>AI 助手</td><td>AI 调试助手：协议识别、数据解读、曲线分析、指令/卡片生成、诊断排查、调试报告；Ctrl+K 唤起浮窗，可停靠为面板（+面板 可添加）</td></tr>
-                      <tr><td>虚拟设备工坊</td><td>可编程虚拟数据源（与真实接口互斥，关面板仍在跑，状态栏有徽标）：信号模型（常量/正弦/方波/三角/一阶对象/镜像）+ 温漂/丢帧/卡死/毛刺故障注入 + 命令应答（匹配前缀可捕获数值写输入量、回应答帧）；可选 net 段走 UDP/TCP 客户端/TCP 服务端/串口对外收发；启动即自动配套协议模板；内置「温控炉」（PID 教学被控对象）与「虚拟 MPU6050」（WIT 兼容帧）；设备库存档/导出 JSON 分享，也可让 AI 按自然语言生成（+面板 可添加）</td></tr>
+                      <tr><td>AI 助手</td><td>AI 调试助手：协议识别、数据解读、曲线分析、指令/卡片生成、诊断排查、调试报告；Ctrl+K 唤起浮窗，可停靠为面板（工具栏「+ 面板」或导轨「视图」里加）</td></tr>
+                      <tr><td>虚拟设备工坊</td><td>可编程虚拟数据源（与真实接口互斥，关面板仍在跑，状态栏有徽标）：信号模型（常量/正弦/方波/三角/一阶对象/镜像）+ 温漂/丢帧/卡死/毛刺故障注入 + 命令应答（匹配前缀可捕获数值写输入量、回应答帧）；可选 net 段走 UDP/TCP 客户端/TCP 服务端/串口对外收发；启动即自动配套协议模板；内置「温控炉」（PID 教学被控对象）与「虚拟 MPU6050」（WIT 兼容帧）；设备库存档/导出 JSON 分享，也可让 AI 按自然语言生成（工具栏「+ 面板」或导轨「视图」里加）</td></tr>
                     </tbody>
                   </table>
                   <p className="help-tip">推荐流：Hex/帧画布定义协议 → 表格与曲线观察 → 控制画布下发指令闭环调试。没有硬件？「虚拟设备工坊」载入内置设备即可全链路体验；新手推荐先点「快速入门」顶部的「启动交互式教学」。</p>
                   </Section>
-                {/* P102：这一节原先在「协议画布教程」里——图传是一枚面板（+ 面板 → 数据接入），
+                {/* P102：这一节原先在「协议画布教程」里——图传是一枚面板（「+ 面板」→ 数据接入），
                     不是画布上的定义动作；它唯一与画布有关的那句（帧定界）就是"复用解析设置"。 */}
                 <Section title="图传（视频链路）用法">
                   <p>
-                    面板在<b>「+ 面板 → 数据接入」</b>。把数据流按<b>已解析出的帧</b>渲染成画面（如无人机摄像头的 JPEG 帧流）：
+                    面板在工具栏<b>「+ 面板」→ 数据接入</b>（导轨「视图」里也列着同一批）。把数据流按<b>已解析出的帧</b>渲染成画面（如无人机摄像头的 JPEG 帧流）：
                   </p>
                   <ol className="help-ol">
                     <li>工具栏点<code>解析设置</code>，选择帧定界方式（定长 / 长度域 / 帧尾）——<b>每解析出一帧即刷新画面</b>，所以它跟的是解析结果，不是原始字节。</li>
@@ -571,7 +639,7 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
                   </ul>
                 </Section>
                 <Section title="虚拟设备工坊：让软件扮演一台设备">
-                  <p>面板在「+ 面板 → 数据接入」。设备 = 一份 JSON 规格：信号模型（常量/正弦/方波/三角/<b>一阶惯性对象</b>/镜像）+ 噪声/温漂 + 丢帧/卡死/毛刺故障 + 帧格式 + 命令匹配。启动即自动配套协议模板；运行中锁定编辑（停机再改）。内置两台：<b>温控炉</b>（HEAT ON/OFF 控温、SET DUTY 45 捕获数值直调加热功率，PID 整定模板的被控对象）与<b>虚拟 MPU6050</b>（维特 WIT 兼容帧 + 温漂 + 丢帧 + 毛刺）。设备库存档管理：载入库条目编辑后点<code>保存</code>原位更新（改名不产生重复；新建/内置/另存副本/导入均为未保存态，脏了按钮亮起）。</p>
+                  <p>面板在工具栏「+ 面板」→ 数据接入（导轨「视图」里也列着同一批）。设备 = 一份 JSON 规格：信号模型（常量/正弦/方波/三角/<b>一阶惯性对象</b>/镜像）+ 噪声/温漂 + 丢帧/卡死/毛刺故障 + 帧格式 + 命令匹配。启动即自动配套协议模板；运行中锁定编辑（停机再改）。内置两台：<b>温控炉</b>（HEAT ON/OFF 控温、SET DUTY 45 捕获数值直调加热功率，PID 整定模板的被控对象）与<b>虚拟 MPU6050</b>（维特 WIT 兼容帧 + 温漂 + 丢帧 + 毛刺）。设备库存档管理：载入库条目编辑后点<code>保存</code>原位更新（改名不产生重复；新建/内置/另存副本/导入均为未保存态，脏了按钮亮起）。</p>
                   <p><b>网络收发（像真设备一样在链路上）</b>：规格里可选 net 段——UDP 把帧逐字节发到指定 host:port（.255 自动广播，可加 ≤4 个额外目标一帧多投，可选监听端口收外部命令）；TCP 客户端拨出、TCP 服务端监听（≤8 客户端广播）；串口独占 COM 口直写（接收端可用 com0com 虚拟串口对）。命令去向：本机控制台/编排器与网络来令走同一匹配器，网络来令的应答原路返回。运行中状态行实时显示发出的帧数/收令数/客户端数与最近命令。</p>
                   <p><b>双机教学</b>：A 机启动温控炉开 UDP 发射 9010 → B 机数据接口选 UDP 服务端监听 9010 + 「+ 预设 → 虚拟设备·温控炉」→ 两台看到同一条曲线。绑 0.0.0.0 允许局域网接入（首次可能弹防火墙授权）。</p>
                 </Section>
@@ -613,14 +681,14 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
             )}
             {tab === "plot3d" && (
               <>
-                <p><b>3D 轨迹面板</b>支持<b>多组独立轨迹（默认三组）</b>（如惯导推算 / 实际导航 / 目标路径）叠加显示：每组各绑 X / Y（Z 可留空=平面轨迹）并独立选显示模式（实时定位 / 点集 / 连线），支持大坐标（经纬度）自动重锚（跨组并集）、双层 LOD 长跑不卡。工具栏「+ 面板」添加。</p>
+                <p><b>3D 轨迹面板</b>{tx("支持", " supports")}<b>{tx("多组独立轨迹（默认三组）", "multiple independent trajectory groups (three by default)")}</b>{tx("（如惯导推算 / 实际导航 / 目标路径）叠加显示：每组各绑 X / Y（Z 可留空=平面轨迹）并独立选显示模式（实时定位 / 点集 / 连线），支持大坐标（经纬度）自动重锚（跨组并集）、双层 LOD 长跑不卡。工具栏「+ 面板」或导轨「视图」里添加。", "(e.g. dead reckoning, actual navigation, a target path) overlaid: each group binds its own X / Y (leave Z empty for a flat track) and picks its own display mode - live point / point cloud / line - with automatic re-anchoring for large coordinates (union across groups) and two-level LOD so long runs stay smooth. Add it from the “+ Panel” dropdown in the toolbar or from Views in the rail.")}</p>
                 <Section title="轨迹组增删与显示模式">
                   <ol className="help-ol">
                     <li>左上<b>组托盘</b>默认三行（G1 / G2 / G3），底部可新增、行按钮可删除（本机确认）；组多时滚动：每行 = 可见性眼睛、组色点、名称、模式徽标、<b>X / Y / Z 三个绑定下拉</b>（红绿蓝侧条区分轴，Z 留空=平面轨迹）、<b>设置齿轮</b>。X/Y 绑齐该组才开始绘制；未绑齐的行置灰。</li>
                     <li>每组独立选择显示模式（<b>不提供混合模式</b>——不同组各选各的天然叠加）：<code>实时定位</code>=只显示最新点、零历史内存（看当前车位置）；<code>点集</code>=全部历史点不连线（看打点分布）；<code>连线</code>=按时间连线。</li>
                     <li>连线<b>平滑四档</b>：无（折线）/ <b>滑动平均</b>（奇数窗）/ <b>Catmull-Rom</b>（曲线穿过数据点，张力 0~1 + 细分 2~10 可调）/ <b>三次样条</b>（曲率连续）。平滑只作用于视觉几何——悬停读数、测距、CSV 导出、游标截断全部仍读原始数据点。</li>
                     <li>组设置弹层（齿轮 / 行右键菜单）：名称、颜色、模式、着色（按时间 / 按通道 / 组色实底）、渐隐窗口、点大小 / 透明度、最大点数（超限从最老端丢弃，0=不限）、点密度、数据配对与容差、备注。<b>确认一次 = 一步可撤销</b>（Ctrl+Z；面板右上也有撤销/重做钮）。</li>
-                    <li>拖拽：把协议模板面板的<b>图例字段行直接拖到组行</b>=智能绑定（按 X→Y→Z 填第一个空槽；三槽已满会打开组设置让你手动改）。</li>
+                    <li>拖拽：把导轨「协议」里的<b>图例字段行直接拖到组行</b>=智能绑定（按 X→Y→Z 填第一个空槽；三槽已满会打开组设置让你手动改）。</li>
                     <li>行操作：双击组行 = 相机聚焦该组；行右键 = 设置 / 隐藏 / 聚焦 / 单组导出 CSV / <b>导入轨迹 CSV → 本组</b>（t,x,y[,z] 列→虚拟通道，重复导入替换旧的）/ 单组清空（<b>清空不可撤销</b>，有确认）。</li>
                     <li>三轴来自不同帧/不同采样率时，组设置里可切<b>配对模式</b>（插值/最近点）与容差，右下 HUD 有主组配对统计行；各组量级悬殊可切全局<b>逐轴独立缩放</b>（右键「设置」），避免小跨度组被压扁。</li>
                     <li>右上视角托盘（毛玻璃胶囊）：<b>俯视 / 侧视 / 正视 / 等轴</b>四预设、重置视角、聚焦最新点、跟随模式、自动旋转、<b>撤销/重做</b>、<b>打点</b>（录制中在当前时刻记标注：时间轴刻度+2D 虚线+3D 旗标三处同步，点旗标即跳游标）、椭球校准、<b>清空数据</b>（全部组清空，带确认）。左键拖动旋转、右键拖动平移、滚轮缩放。</li>
@@ -681,7 +749,7 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
             )}
             {tab === "orchestrator" && (
               <>
-                <p><b>自动编排器</b>＝测试序列器（线性流程）× 触发器（事件驱动）：组是编排单元，头部事件槽挂事件块自动触发，组内块线性执行。工具栏「+ 面板」添加；编辑随时可做，运行中的实例不受影响（下次触发生效）。</p>
+                <p><b>自动编排器</b>{tx("＝测试序列器（线性流程）× 触发器（事件驱动）：组是编排单元，头部事件槽挂事件块自动触发，组内块线性执行。工具栏「+ 面板」或导轨「视图」里添加；编辑随时可做，运行中的实例不受影响（下次触发生效）。", " = the test sequencer (linear flow) crossed with triggers (event-driven): a group is the unit, its header event slots fire automatically, and the blocks inside run in order. Add it from the “+ Panel” dropdown in the toolbar or from Views in the rail; you can keep editing while it runs - instances already in flight are untouched and pick the changes up on the next trigger.")}</p>
                 <Section title="组与事件槽">
                   <ol className="help-ol">
                     <li>组头部：勾选框启用（禁用后事件不触发、运行按钮也不跑）、<b>运行</b>按钮手动跑一次（不受熔断限制）、复制整组、删除；双击标题重命名，标题行箭头折叠。</li>
@@ -825,6 +893,7 @@ else send("RGT:" + phase);`}</pre>
                 <tbody>
                   <tr><td>Ctrl+F</td><td>Hex 数据流搜索（Esc 关闭）</td></tr>
                   <tr><td>Ctrl+K</td><td>AI 助手浮窗开关；AI 输入框内 <code>Enter</code> 发送、<code>Shift/Ctrl+Enter</code> 换行、<code>Ctrl+V</code> 粘贴截图</td></tr>
+                  <tr><td>Ctrl+Shift+P</td><td>{tx("命令面板：把软件能做的事列在一处，打字筛选即可执行（含打开帮助与入门、重播入门引导）", "Command palette: everything the app can do in one filterable list, including opening help and replaying the guided tour")}</td></tr>
                   <tr><td>Agent 任务</td><td>输入框下方 pill 切换工作方式与授权档；任务运行中可「停止」，暂停后可「继续任务」就地续跑（已生效的步骤不重做）</td></tr>
                   <tr><td>Agent 审批卡</td><td>破坏性/覆盖/实车/命令行操作会就地弹批准卡：<b>批准只对同样参数这一次有效</b>，改了参数要重新批准</td></tr>
                   <tr><td>Ctrl+Z / Ctrl+Y</td><td>协议编辑撤销 / 重做（全局 50 步）；3D 轨迹面板内同样撤销/重做组配置（清空数据不可撤销）</td></tr>
@@ -832,7 +901,7 @@ else send("RGT:" + phase);`}</pre>
                   <tr><td>← / →</td><td>帧画布上一帧 / 下一帧</td></tr>
                   <tr><td>W/A/S/D · Q/E · 方向键</td><td>3D 轨迹面板键盘飞行（右键菜单「视图」开启，鼠标悬停画布才响应）；F 跟随、R 复位</td></tr>
                   <tr><td>双击</td><td>帧画布帧头/帧尾直接打开编辑框；2D 曲线图区=保形回实时；3D 时间条=回到最新</td></tr>
-                  <tr><td>Esc</td><td>取消框选 / 关闭菜单 / 退出教学引导</td></tr>
+                  <tr><td>Esc</td><td>{tx("取消框选 / 关闭菜单 / 退出教学引导 / 关闭全窗口的设置页", "Cancel a selection, close a menu, leave the guided tour, or close the full-window settings page")}</td></tr>
                   <tr><td>左键拖拽</td><td>Hex/帧画布框选定义字段</td></tr>
                   <tr><td>右键</td><td>帧画布：字段/帧头/帧尾/簇 菜单；曲线区：更多设置；3D：视图/测量/模式/数据/设置</td></tr>
                   <tr><td>拖拽图例</td><td>把字段拖到 2D 曲线区直接开线</td></tr>
@@ -946,7 +1015,7 @@ else send("RGT:" + phase);`}</pre>
                 <Section title="生成部署包（工程机）">
                   <ol className="help-ol">
                     <li>先把工作区调好：协议能解析、控制页与命令库可用、面板布局满意。</li>
-                    <li>打开<code>设置 → 数据</code>，找到 <code>Operator 部署包（.uopk）</code> 块。</li>
+                    <li>打开<code>设置 → 导入 / 导出</code>，找到 <code>Operator 部署包（.uopk）</code> 块。</li>
                     <li>填<b>包名</b>与<b>说明</b>（会显示在操作员端横幅），勾选要进包的部件：协议模板 / 控制页 / 命令库 / 面板布局 / 外观设置 / 3D 面板设置——<b>至少勾一项</b>才能生成（空包等于把对方永久锁进只读）。</li>
                     <li>点<code>生成部署包</code>，保存为 <code>.uopk</code> 文件。</li>
                   </ol>
@@ -954,7 +1023,7 @@ else send("RGT:" + phase);`}</pre>
                 </Section>
                 <Section title="导入与运行（操作员机）">
                   <ol className="help-ol">
-                    <li><b>方式一</b>：<code>设置 → 数据 → 导入并运行</code>，选择 .uopk 文件。</li>
+                    <li><b>方式一</b>：<code>设置 → 导入 / 导出 → 导入并运行</code>，选择 .uopk 文件。</li>
                     <li><b>方式二</b>：直接<b>双击</b> .uopk 文件（安装版已注册文件关联）。应用未启动时会自动拉起；已启动时在当前窗口打开并聚焦，同一包不会重复导入。</li>
                     <li>导入后进入<b>只读模式</b>：标题栏横幅显示包名与退出按钮；协议、控制页、命令库替换为包内容；布局整屏应用。</li>
                     <li>重启应用会自动恢复该部署包（保持只读），直到点横幅上的<code>退出</code>。</li>
@@ -1004,7 +1073,7 @@ else send("RGT:" + phase);`}</pre>
                   <ol className="help-ol">
                     <li>卡片与详情各一颗<b>「安装」</b>（或「更新到 v×」）。{marketInstallNote()}</li>
                     <li><b>新装直接落地为停用态</b>，不再弹第二张卡；只有<b>覆盖本机已有版本</b>那种会停在右下角那张确认卡上等你点「装入」。命令行发起的装包停在<b>同一张卡</b>上，标题栏那颗拼图会亮「等你确认」——两个入口做的是同一件事，结论也只有一个来源。</li>
-                    <li>启用与停用有三个地方：市场页的<b>「外观」页签</b>（主题那一类）、<b>插件库</b>（所有种类）、<b>设置 → 通用</b>的主题卡。三处调的是同一个 <code>setEnabled</code>，同一动作同一句话，不存在"在这儿启用与在那儿启用不同"。</li>
+                    <li>启用与停用有三个地方：市场页的<b>「外观」页签</b>（主题那一类）、<b>插件库</b>（所有种类）、<b>设置 → 外观</b>的主题卡。三处调的是同一个 <code>setEnabled</code>，同一动作同一句话，不存在"在这儿启用与在那儿启用不同"。</li>
                     <li><b>主题互斥</b>：内置与插件主题同级，同时只有一枚在画；启用一枚主题会照实告诉你挤掉了谁。插件库里停用一枚包，它带的所有产物一起退出。</li>
                     <li>卸载只在<b>插件库</b>做（市场不提供删除本机内容的按钮），每条都要你确认。</li>
                   </ol>

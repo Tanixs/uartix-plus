@@ -63,14 +63,15 @@ export interface PaletteDeps {
   zoom: number;
 }
 
-const G_PANEL = tx("面板", "Panels");
-const G_LAYOUT = tx("布局", "Layout");
-const G_RAIL = tx("导轨", "Rail");
-const G_LINK = tx("连接与采集", "Link & capture");
-const G_PREF = tx("偏好", "Preferences");
-const G_HELP = tx("帮助", "Help");
-
 export function buildCommands(deps: PaletteDeps): PaletteCommand[] {
+  // P115-F11：分组名原先在模块顶层调 tx()（§8-17）——locale 被冻结在 import 时刻，
+  // 切语言后命令面板的分组还是启动时那套字。搬进调用点，每次构建命令现取现译。
+  const G_PANEL = tx("面板", "Panels");
+  const G_LAYOUT = tx("布局", "Layout");
+  const G_RAIL = tx("导轨", "Rail");
+  const G_LINK = tx("连接与采集", "Link & capture");
+  const G_PREF = tx("偏好", "Preferences");
+  const G_HELP = tx("帮助", "Help");
   const out: PaletteCommand[] = [];
   const opened = new Set(deps.openPanels);
 

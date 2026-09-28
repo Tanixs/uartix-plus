@@ -1,6 +1,6 @@
 [package]
 name = "uartix-plus"
-version = "0.5.0"
+version = "0.5.2"
 description = "Uartix+ - visual serial protocol analyzer"
 authors = ["Tanix"]
 edition = "2021"

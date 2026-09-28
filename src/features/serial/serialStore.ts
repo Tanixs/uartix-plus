@@ -88,6 +88,55 @@ const DEFAULT_CONFIG: SerialConfig = {
   flow: "none",
 };
 
+/* ---------------- P115-F13：串口参数落盘（便利优先，用户 2026-09-28 裁决） ----------------
+ * 以前这份 config 是纯模块内存：改好 921600/8N1，重启又回 115200/8N1。
+ * 只持久化 config 六项；ctrl/modem 线状态是"这一次连接的事实"，不落盘。
+ * 载入走单次清洗（枚举外/非法值一律落回默认），照 attitudeStore 的模式。 */
+
+/** 波特率档位表的唯一出处（SerialParams 的菜单也从这里取，不再抄第二份） */
+export const BAUD_RATES: readonly number[] = [
+  1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600,
+  1000000, 2000000, 3000000,
+];
+
+const SERIAL_CONFIG_KEY = "vs.serialConfig";
+const PARITIES: readonly string[] = ["none", "even", "odd"];
+const FLOWS: readonly string[] = ["none", "software", "hardware"];
+
+/** 单次清洗：任何一项不认识都落回默认（半张坏表比默认值更危险——它会让人以为配置还在） */
+export function sanitizeSerialConfig(raw: unknown): SerialConfig {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const baud = typeof o.baud === "number" && Number.isFinite(o.baud) ? Math.round(o.baud) : DEFAULT_CONFIG.baud;
+  return {
+    port: typeof o.port === "string" ? o.port.slice(0, 64) : DEFAULT_CONFIG.port,
+    baud: BAUD_RATES.includes(baud) ? baud : DEFAULT_CONFIG.baud,
+    dataBits: o.dataBits === 7 || o.dataBits === 8 ? o.dataBits : DEFAULT_CONFIG.dataBits,
+    parity: PARITIES.includes(o.parity as string) ? (o.parity as SerialConfig["parity"]) : DEFAULT_CONFIG.parity,
+    stopBits: o.stopBits === 1 || o.stopBits === 2 ? o.stopBits : DEFAULT_CONFIG.stopBits,
+    flow: FLOWS.includes(o.flow as string) ? (o.flow as SerialConfig["flow"]) : DEFAULT_CONFIG.flow,
+  };
+}
+
+function loadPersistedConfig(): SerialConfig {
+  if (typeof localStorage === "undefined") return { ...DEFAULT_CONFIG };
+  try {
+    const raw = localStorage.getItem(SERIAL_CONFIG_KEY);
+    if (!raw) return { ...DEFAULT_CONFIG };
+    return sanitizeSerialConfig(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+
+function persistConfig() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(SERIAL_CONFIG_KEY, JSON.stringify(snapshot.config));
+  } catch {
+    /* 存不下（配额/隐私模式）：本次进程内的设置照常生效 */
+  }
+}
+
 const DEFAULT_NET: IfaceNetConfig = {
   remoteHost: "127.0.0.1",
   remotePort: 1346,
@@ -97,7 +146,9 @@ const DEFAULT_NET: IfaceNetConfig = {
 
 let snapshot: SerialSnapshot = {
   ports: [],
-  config: DEFAULT_CONFIG,
+  // P115-F13：启动即恢复上次落盘的参数（端口不在枚举表里也保持选中，
+  // 走既有的"口不存在"处理；绝不自动连接）
+  config: loadPersistedConfig(),
   status: "disconnected",
   error: null,
   rxTotal: 0,
@@ -242,8 +293,22 @@ export async function init() {
   }
 }
 
+/**
+ * P115-F12：控制线记忆按端口名分档（进程级镜像，真身在 Rust 侧 Shared；绝不落盘）。
+ * 旧实现整表一份：给 COM3 设过的 DTR 会在打开 COM4 时被 Rust 复施加——记忆串了端口。
+ */
+const ctrlByPort = new Map<string, { dtr: boolean | null; rts: boolean | null }>();
+
 export function setConfig(patch: Partial<SerialConfig>) {
-  set({ config: { ...snapshot.config, ...patch } });
+  if (patch.port !== undefined && patch.port !== snapshot.config.port) {
+    // 换口 = 换一份记忆：界面 ctrl 跟着切到那个口名下的电平（没碰过就是 null/null），
+    // 注释行才不会拿 COM3 的旧电平说 COM4 的事
+    const mem = ctrlByPort.get(patch.port) ?? { dtr: null, rts: null };
+    set({ config: { ...snapshot.config, ...patch }, ctrl: { ...mem } });
+  } else {
+    set({ config: { ...snapshot.config, ...patch } });
+  }
+  persistConfig();
 }
 
 export function setIface(iface: IfaceKind) {
@@ -404,15 +469,16 @@ export function stopRecord() {
 
 /* ---------------- P106 串口控制线（详设 docs/P106-串口控制线-详设.md） ---------------- */
 
-/** 置 DTR / RTS：只发用户点过的那条（两条都不发就是空操作，Rust 侧直接返回 Ok）。 */
+/** 置 DTR / RTS：只发用户点过的那条（两条都不发就是空操作，Rust 侧直接返回 Ok）。
+ *  P115-F12：电平记到**当前口名下**（Rust 侧同口径），换口后界面 ctrl 随 setConfig 切档。 */
 export async function setControlLines(patch: { dtr?: boolean; rts?: boolean }) {
   await invoke("set_control_lines", { dtr: patch.dtr ?? null, rts: patch.rts ?? null });
-  set({
-    ctrl: {
-      dtr: patch.dtr ?? snapshot.ctrl.dtr,
-      rts: patch.rts ?? snapshot.ctrl.rts,
-    },
-  });
+  const next = {
+    dtr: patch.dtr ?? snapshot.ctrl.dtr,
+    rts: patch.rts ?? snapshot.ctrl.rts,
+  };
+  if (snapshot.config.port) ctrlByPort.set(snapshot.config.port, { ...next });
+  set({ ctrl: next });
 }
 
 /** 一次读四条（Rust 侧也是一次锁内读完）；调用方负责把失败画成"未知" */

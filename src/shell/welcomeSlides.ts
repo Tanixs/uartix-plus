@@ -122,8 +122,8 @@ export const WELCOME_SLIDES: WelcomeSlide[] = [
         en: "Five drawers on the rail: link, protocol, widgets, commands, views.",
       },
       {
-        zh: "第二条栏只说一件事：当前工作区、当前接口、连接、录制回放。",
-        en: "The second bar says one thing: workspace, interface, connect, record for replay.",
+        zh: "第二条栏是干活的那条：当前工作区、接口与连接、录制回放，最右边那枚「+ 面板」下拉把面板加回来。",
+        en: "The second bar is the working one: workspace, interface and connect, recording - and the “+ Panel” dropdown at its right end brings panels back.",
       },
       {
         zh: "帧画布上框选字节 → 右键定义为字段，零代码定义私有协议。",
@@ -182,4 +182,8 @@ export const SHOT_FACTS: readonly ShotFact[] = [
   { word: "数据表格", file: "panels/panels.tsx", key: "table" },
   { word: "2D 曲线", file: "panels/panels.tsx", key: "plot2d" },
   { word: "控制画布", file: "panels/panels.tsx", key: "controls" },
+  // P115：底图右上角那枚「+ 面板」下拉是工具栏布局段里的一个 `<select>`（App.tsx），
+  // 不是导轨「视图」的替代品——两处入口并存。图上印着它，所以它也得进这张表：
+  // 哪天改名或删掉而不重拍，这条就红。
+  { word: "+ 面板", file: "App.tsx", key: "+ Panel" },
 ];

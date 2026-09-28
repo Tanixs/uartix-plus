@@ -69,8 +69,9 @@ export interface DevBootOverrides {
   rail?: RailKey;
   /**
    * `?iface=tcp-client` —— 启动就切到某个数据接口。
-   * 接口选择**今天不落盘**（serialStore 里没有 localStorage），所以不靠这个入口就拍不到
-   * 其余四种接口的参数区 —— P105-E 的验收要求五套各一张，没有它就只能出示一张。
+   * P115-F13 起串口**参数**（口/波特率/数据位/校验/停止位/流控）已落盘，但**接口类别**
+   * （serial/tcp/…，本参数管的就是它）仍是内存态：重启回 serial。所以不靠这个入口
+   * 还是拍不到其余四种接口的参数区 —— P105-E 的验收要求五套各一张。
    * 消费点在 `LinkPanel` 的挂载 effect 里（与 `devTourAt` 同一手法），
    * 生产构建恒为 undefined。
    */

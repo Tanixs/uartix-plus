@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { tx, useLocale } from "../../i18n/strings";
 import { invoke } from "@tauri-apps/api/core";
+import { jobStateText } from "./jobExecutor";
 interface Details {
   jobId: string; source: string; createdAt: number; updatedAt: number; deadlineAt: number;
   targetSummary: string; permissionCheck: string; error?: { code: string };
@@ -31,7 +32,7 @@ export function JobDetails({ jobId }: { jobId: string }) {
         <p>{detail.source} · {detail.targetSummary} · {detail.permissionCheck}</p>
                 <p>{tx("创建", "Created")} {new Date(detail.createdAt).toLocaleString()} · {tx("截止", "Deadline")} {new Date(detail.deadlineAt).toLocaleString()}</p>
         {detail.error && <p>{detail.error.code} — {tx("请查询同一任务，不自动补发", "Query the same job, never auto-replay.")}</p>}
-        <div style={{ maxHeight: 140, overflow: "auto" }}>{detail.events?.map((e) => <div key={e.seq}>{e.seq} · {new Date(e.ts).toLocaleTimeString()} · {e.state} · {e.phase}</div>)}</div>
+        <div style={{ maxHeight: 140, overflow: "auto" }}>{detail.events?.map((e) => <div key={e.seq}>{e.seq} · {new Date(e.ts).toLocaleTimeString()} · {jobStateText(e.state)} · {e.phase}</div>)}</div>
         <p>{tx("结果", "Result")}: {detail.resultAvailability}</p>
         {detail.result && <>
           <pre style={{ maxHeight: 180, overflow: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{detail.result.text}</pre>

@@ -257,7 +257,7 @@ describe("?open=settings/ai：取证要的那个打开态", () => {
       fileURLToPath(new URL("../features/settings/SettingsModal.tsx", import.meta.url)),
       "utf8",
     );
-    const block = /const tabs: \{[^}]*\}\[\] = \[([\s\S]*?)\n  \];/.exec(src)?.[1] ?? "";
+    const block = /const tabs: \{[^}]*\}\[\] = \[([\s\S]*?)\n {2}\];/.exec(src)?.[1] ?? "";
     const literal = [...block.matchAll(/key: "([^"]+)"/g)].map((m) => m[1]);
     expect(literal.length, "从 SettingsModal 抠不出 tabs —— 写法变了要同步改这条").toBeGreaterThan(5);
     const inModal = new Set([...literal, settings.SETTINGS_TAB_PLUGINS]);

@@ -12,7 +12,8 @@
  *    这一页只需要"我刚点那一下成功没有"（P110-B3 同口径）。
  *  - **哪一行在编辑**也是内存态，换供应商就清空——留着会让用户以为编辑的是另一家的模型。
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { Dropdown } from "../../shared/Dropdown";
 import { HelpHint } from "../../shared/HelpHint";
@@ -46,7 +47,37 @@ import {
 } from "../agent/contextBudget";
 import { t, tx, useLocale } from "../../i18n/strings";
 
-type Probe = "idle" | "testing" | "ok" | "err";
+/**
+ * 试连状态。P115-F14 加 `"blocked"`：没发出去（缺钥匙）不是"没测过"（idle 灰点）
+ * 也不是"测失败"（err 红点）——红点会让人以为连不上，灰点会让人以为还没人碰过。
+ * 分发一律 `Record<Probe,…>` / 穷举（§8-35①）：将来加状态漏配一处，编译期就红。
+ */
+type Probe = "idle" | "testing" | "ok" | "err" | "blocked";
+
+/** 中列探针点色：状态 → 颜色类，一张表说完（旧写法是嵌套三元 if 链） */
+const PROBE_DOT: Record<Probe, string> = {
+  idle: "idle",
+  testing: "run",
+  ok: "ok",
+  err: "err",
+  blocked: "warn",
+};
+
+/** 缺钥匙那句解释：供应商级与逐模型两处**同一句**（两套说法早晚漂移） */
+const noKeyNote = () =>
+  tx("还没填 API Key —— 没发请求，也没法说它通不通", "No API key yet — nothing was sent, so nothing can be claimed");
+
+/**
+ * 远端清单的落点（P115-F8）：除了 id 列表，还存**这份清单是从哪个地址、哪种格式拉回来的**。
+ * 旧写法只按 provider.id 键控——改了 baseUrl/format 之后旧清单照显「远端有 N 个还没进档案」，
+ * 照着导入写出的全是会 404 的模型。快照与当前供应商不符 ⇒ 不再当 fresh（选快照而非清除：
+ * 撤销编辑后清单自动回来）。
+ */
+interface RemoteCatalog {
+  baseUrl: string;
+  format: AiFormat;
+  ids: string[];
+}
 
 /**
  * 宿主错误到界面的路上不再截第二次：Rust 侧 `classify_error` 已经把上游响应体
@@ -57,11 +88,17 @@ function errText(e: unknown): string {
   return String(e).replace(/^Error:\s*/i, "");
 }
 
-/** 中列那个点：几种说法各对应一件真事，不是一根装饰线 */
+/** 中列那个点：几种说法各对应一件真事，不是一根装饰线（P115-F14：穷举 Record 编译期兜底） */
 function dotOf(p: AiProvider, probe: Probe, modelCount: number): { cls: string; tip: string } {
-  if (probe === "ok") return { cls: "ok", tip: tx("上次试连通过（本页内的记忆，重启回到未测）", "Last test passed (kept only while this page is open)") };
-  if (probe === "err") return { cls: "err", tip: tx("上次试连失败", "Last test failed") };
-  if (probe === "testing") return { cls: "run", tip: tx("正在试连…", "Testing…") };
+  if (probe !== "idle") {
+    const direct: Record<Exclude<Probe, "idle">, { cls: string; tip: string }> = {
+      ok: { cls: "ok", tip: tx("上次试连通过（本页内的记忆，重启回到未测）", "Last test passed (kept only while this page is open)") },
+      err: { cls: "err", tip: tx("上次试连失败", "Last test failed") },
+      blocked: { cls: "warn", tip: noKeyNote() },
+      testing: { cls: "run", tip: tx("正在试连…", "Testing…") },
+    };
+    return direct[probe];
+  }
   if (!p.enabled) return { cls: "off", tip: tx("这家已停用", "This provider is switched off") };
   if (!p.baseUrl.trim()) return { cls: "warn", tip: tx("还没有服务地址", "No base URL yet") };
   if (modelCount === 0) return { cls: "warn", tip: tx("这家下面一个模型都没有，选不到也发不出", "No model under this provider, so nothing can be sent") };
@@ -96,21 +133,39 @@ function Field({ label, tip, children }: { label: string; tip?: string; children
 }
 
 /**
- * 模型编辑弹窗（P113-D，照 ZCode 图4 那扇窗）。
- *
- * 为什么不是行内展开：行内那一排里"模型 ID"确实是个输入框，但它挤在横排中间，
- * 用户读不出那是改名 —— 用户原话"现在的编辑都编辑不了模型名字"。
- * 改名、改窗口、改档位是**一次有始有终的编辑**，给一扇窗比给一条会伸缩的行更清楚，
- * 也才不会让列表在展开时跳成两屏高。
+ * 模型编辑弹窗（P113-D，照 ZCode 图4 那扇窗；P115-F9/F10 修三条）：
+ *  - F9 它原先**不是** portal（注释自称是，实际只靠 position:fixed 巧合没被裁）——
+ *    现在真 portal 到 body（§20，与 shared/Dialog 同一纪律）；
+ *  - F9 Esc 原先被一行 `onKeyDown={(e) => e.stopPropagation()}` 吞掉（没有 handler，
+ *    纯死键），Tab 一出场就落进弹窗背后的页面——现在 Esc=关闭（document 捕获段，
+ *    抢在设置页 window 守卫之前），打开即聚焦第一个输入框；
+ *  - F10 保存时校验默认档：指向的档位被删/被改名 ⇒ `defaultThinking` 悬空，
+ *    `thinkingParamsFor` 返回 null、思考参数**静默不发**。第一次保存拦下：置回「不设」
+ *    并在弹窗里说清楚，用户再按一次保存确认——不静默、不猜测。
  *
  * 复用现成的 `workflow-dialog` 一族（`ParameterSetDialog` 在用）：mask + head + body + foot，
- * label 本来就在控件上方。**不新造第四种弹窗样式**，也天然满足"弹窗必须 portal 到 body"。
+ * label 本来就在控件上方。**不新造第四种弹窗样式**。
  */
 function ModelEditDialog({ provider, model, onClose }: { provider: AiProvider; model: AiModelProfile; onClose: () => void }) {
   const [draft, setDraft] = useState<AiModelProfile>({ ...model });
   const [err, setErr] = useState("");
   useLocale();
+  const firstInputRef = useRef<HTMLInputElement | null>(null);
   const titleId = "msp-edit-title";
+
+  useEffect(() => {
+    firstInputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [onClose]);
 
   const save = () => {
     const name = draft.model.trim();
@@ -119,13 +174,23 @@ function ModelEditDialog({ provider, model, onClose }: { provider: AiProvider; m
       setErr(tx("模型 ID 不能为空", "The model id cannot be empty"));
       return;
     }
+    const levels = draft.thinkingLevels.filter((l) => l.label.trim());
+    const dangling = !!draft.defaultThinking && !levels.some((l) => l.label === draft.defaultThinking);
+    if (dangling) {
+      setDraft({ ...draft, thinkingLevels: levels, defaultThinking: "" });
+      setErr(tx(
+        `默认档「${draft.defaultThinking}」指向的那一档已经不存在（被删或被改名），已改回「不设」——再按一次「保存」确认`,
+        `The default level “${draft.defaultThinking}” no longer exists (removed or renamed); it was reset to “none” — press Save again to confirm`,
+      ));
+      return;
+    }
     updateModel(model.id, {
       model: name,
       label: name,
       contextTokens: Math.max(1024, Math.round(draft.contextTokens || 0)),
       maxOutputTokens: Math.max(256, Math.round(draft.maxOutputTokens || 0)),
       vision: !!draft.vision,
-      thinkingLevels: draft.thinkingLevels.filter((l) => l.label.trim()),
+      thinkingLevels: levels,
       defaultThinking: draft.defaultThinking,
     });
     onClose();
@@ -135,10 +200,10 @@ function ModelEditDialog({ provider, model, onClose }: { provider: AiProvider; m
     setDraft((d) => ({ ...d, thinkingLevels: d.thinkingLevels.map((l, k) => (k === i ? { ...l, label } : l)) }));
   };
 
-  return (
+  return createPortal(
     <div className="modal-mask workflow-dialog-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal workflow-dialog" role="dialog" aria-modal="true" tabIndex={-1}
-        aria-labelledby={titleId} onKeyDown={(e) => e.stopPropagation()}>
+        aria-labelledby={titleId}>
         <header className="workflow-dialog-head">
           <h2 className="workflow-dialog-head-title" id={titleId}>{tx("编辑模型配置", "Edit model profile")}</h2>
           <p className="workflow-dialog-head-sub">
@@ -147,7 +212,7 @@ function ModelEditDialog({ provider, model, onClose }: { provider: AiProvider; m
         </header>
         <div className="workflow-dialog-body">
           <Field label={tx("模型 ID", "Model id")} tip={tx("原样发给 API；改了这里就等于改了这个档案是谁", "Sent to the API verbatim; changing it changes who this profile is")}>
-            <input className="input" value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
+            <input ref={firstInputRef} className="input" value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} />
           </Field>
           <div className="msp-field-2">
             <Field label={tx("上下文窗口", "Context window")} tip={tx("token 数。压缩阈值按它算，用量条也按它显示", "In tokens: the compaction threshold and the meter both divide by it")}>
@@ -212,7 +277,8 @@ function ModelEditDialog({ provider, model, onClose }: { provider: AiProvider; m
           <button type="button" className="btn primary" onClick={save}>{tx("保存", "Save")}</button>
         </footer>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -222,7 +288,7 @@ function ModelRow({
 }: {
   m: AiModelProfile; provider: AiProvider; isActive: boolean; editing: boolean; onEdit: (v: boolean) => void;
 }) {
-  const [probe, setProbe] = useState<"idle" | "run" | "ok" | "err">("idle");
+  const [probe, setProbe] = useState<Probe>("idle");
   const [note, setNote] = useState("");
   /** 成功那侧的证据（上游真回过的那几个字），放在 title 里，不占行内 */
   const [proof, setProof] = useState("");
@@ -241,14 +307,21 @@ function ModelRow({
    * 所以上游那句 401 从来没有到过你眼前。
    */
   const test = async () => {
-    // 同 P113-C 那条判据：需要密钥而没填，就别花额度去打一个必然失败的请求
-    if (providerNeedsKey(provider) && !provider.apiKey.trim()) {
+    // 同供应商级那条判据（P115-F19）：地址没填就别把"连不上"错报成网络/代理问题
+    if (!provider.baseUrl.trim()) {
       setProbe("err");
       setProof("");
-      setNote(tx("先填这家的 API Key", "Fill in this provider's API key first"));
+      setNote(tx("先填服务地址", "Fill in the base URL first"));
       return;
     }
-    setProbe("run");
+    // 同 P113-C 那条判据：需要密钥而没填，就别花额度去打一个必然失败的请求
+    if (providerNeedsKey(provider) && !provider.apiKey.trim()) {
+      setProbe("blocked");
+      setProof("");
+      setNote(noKeyNote());
+      return;
+    }
+    setProbe("testing");
     setNote("");
     setProof("");
     const t0 = Date.now();
@@ -284,7 +357,7 @@ function ModelRow({
             onClick={() => setActive(m.providerId, m.id)}>
             <IconCheck />
           </button>
-          <button type="button" className="msp-ibtn" onClick={() => void test()} disabled={probe === "run"}
+          <button type="button" className="msp-ibtn" onClick={() => void test()} disabled={probe === "testing"}
             aria-label={tx("测试这个模型", "Test this model")}
             title={tx("发一次真请求问它答不答（会消耗少量额度）；供应商级的 ↻ 才是免费的", "Sends one real request to see whether this model answers (costs a little); the provider-level refresh is the free one")}>
             <IconTarget />
@@ -308,8 +381,8 @@ function ModelRow({
       </div>
       {(probe !== "idle") && (
         <div className="msp-med">
-          <span className="set-hint" title={probe === "run" ? "" : probe === "ok" ? proof : note}>
-            {probe === "run"
+          <span className="set-hint" title={probe === "testing" ? "" : probe === "ok" ? proof : note}>
+            {probe === "testing"
               ? tx("测试中…", "testing…")
               : probe === "ok"
                 ? tx(`通了 · ${note}`, `answered · ${note}`)
@@ -328,7 +401,7 @@ export function ModelSettingsPage() {
   const [sel, setSel] = useState<string>(st.providers[0]?.id ?? "");
   const [probes, setProbes] = useState<Record<string, Probe>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
-  const [remote, setRemote] = useState<Record<string, string[] | null>>({});
+  const [remote, setRemote] = useState<Record<string, RemoteCatalog>>({});
   const [armed, setArmed] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -343,7 +416,10 @@ export function ModelSettingsPage() {
   const models = modelsOf(provider.id);
   const probe: Probe = probes[provider.id] ?? "idle";
   const note = notes[provider.id] ?? "";
-  const remoteIds = remote[provider.id] ?? null;
+  // P115-F8：清单只在快照（拉它时的地址/格式）与当前供应商一致时才算数
+  const catalog = remote[provider.id] ?? null;
+  const catalogFresh = !!catalog && catalog.baseUrl === provider.baseUrl.trim() && catalog.format === provider.format;
+  const remoteIds = catalogFresh ? catalog.ids : null;
   const fresh = remoteIds ? missingFrom(remoteIds, models.map((m) => m.model)) : [];
 
   const templateOptions = useMemo(
@@ -377,7 +453,8 @@ export function ModelSettingsPage() {
    *  ② 更本质：`GET /models` 返回 200 只证明**地址可达**，不证明**密钥有效**——
    *    不少网关的清单端点压根不鉴权。我把"连通"和"配得对"混成了一件事。
    * 所以现在：需要密钥而密钥为空 ⇒ **不发请求**，直接写"先填 API Key"。
-   * 发出去的每一次都只报它真正证明到的事：带上去的密钥被 2xx 收下 ⇒ 才敢说"密钥有效"。
+   * 发出去的每一次都只报它真正证明到的事（P115-F7 分层）：密钥随请求被 2xx 收下 ⇒
+   * 才敢说「密钥被接受」；免钥匙/端点不鉴权 ⇒ 只说「清单取回 · 端点可达」。
    */
   const test = async () => {
     const base = provider.baseUrl.trim();
@@ -387,10 +464,11 @@ export function ModelSettingsPage() {
       return;
     }
     if (providerNeedsKey(provider) && !provider.apiKey.trim()) {
-      setProbes((s) => ({ ...s, [provider.id]: "idle" }));
+      // P115-F14：没发出去要说成 blocked（灰黄点），不能落回 idle——灰点说的是"还没人测过"
+      setProbes((s) => ({ ...s, [provider.id]: "blocked" }));
       setNotes((s) => ({
         ...s,
-        [provider.id]: tx("还没填 API Key —— 没发请求，也没法说它通不通", "No API key yet — nothing was sent, so nothing can be claimed"),
+        [provider.id]: noKeyNote(),
       }));
       return;
     }
@@ -400,13 +478,21 @@ export function ModelSettingsPage() {
     try {
       const ids = await listModels(provider);
       const ms = Date.now() - t0;
-      setRemote((s) => ({ ...s, [provider.id]: ids }));
+      // P115-F7：回执措辞分层——带上去的密钥被 2xx 收下才说「密钥被接受」；
+      // 免钥匙（回环）或清单端点本来就不鉴权时只说真正证明到的事：清单取回了、端点可达。
+      // 旧写法对无钥匙的 Ollama 也报「密钥有效」，是替没人验过的东西背书。
+      const keyProven = providerNeedsKey(provider) && provider.apiKey.trim().length > 0;
+      setRemote((s) => ({ ...s, [provider.id]: { baseUrl: base, format: provider.format, ids } }));
       setProbes((s) => ({ ...s, [provider.id]: "ok" }));
       setNotes((s) => ({
         ...s,
-        [provider.id]: ids.length
-          ? tx(`密钥有效 · ${ms}ms · 清单 ${ids.length} 个`, `key accepted · ${ms}ms · ${ids.length} listed`)
-          : tx(`密钥有效 · 这家不提供模型清单（可以自己填）`, `key accepted · no model list here (fill names by hand)`),
+        [provider.id]: keyProven
+          ? ids.length
+            ? tx(`密钥被接受 · ${ms}ms · 清单 ${ids.length} 个`, `key accepted · ${ms}ms · ${ids.length} listed`)
+            : tx(`密钥被接受 · 这家不提供模型清单（可以自己填）`, `key accepted · no model list here (fill names by hand)`)
+          : ids.length
+            ? tx(`清单取回 · 端点可达 · ${ids.length} 个`, `catalog fetched · endpoint reachable · ${ids.length} listed`)
+            : tx(`清单取回 · 端点可达（这家不提供模型清单，可以自己填）`, `catalog fetched · endpoint reachable (no model list here; fill names by hand)`),
       }));
     } catch (e) {
       setProbes((s) => ({ ...s, [provider.id]: "err" }));
@@ -422,19 +508,42 @@ export function ModelSettingsPage() {
       label: id,
       ...(guessed ? { contextTokens: guessed } : {}),
     });
-    setRemote((s) => ({ ...s, [provider.id]: (s[provider.id] ?? []).filter((x) => x !== id) }));
+    // P115-F8：只从"还新鲜"的那份清单里划掉；快照已过期的清单不动它（它本来就不再显示）
+    setRemote((s) => {
+      const cat = s[provider.id];
+      if (!cat) return s;
+      return { ...s, [provider.id]: { ...cat, ids: cat.ids.filter((x) => x !== id) } };
+    });
   };
 
+  /**
+   * P115-F15：删除走"两段明说"，不走聪明的自动级联。
+   * 旧写法第二次点击把 `cascade = models.length > 0` 传下去——有模型就**连模型一起删**，
+   * 拒绝分支因此永远够不着（死代码），而菜单上那句"一起删"藏在浮层里没人读全。
+   * 现在：首次点击就把「名下还有 N 个模型，先删除或移走它们」亮在 hint 行（不碰探针，
+   * 删除不是"试连失败"），第二次点击传 `cascade=false`——被拒就走真正的拒绝分支。
+   */
   const del = () => {
     if (!armed) {
       setArmed(true);
+      if (models.length > 0) {
+        setNotes((s) => ({
+          ...s,
+          [provider.id]: tx(`名下还有 ${models.length} 个模型，先删除或移走它们`, `${models.length} model(s) still live under this provider — delete or move them first`),
+        }));
+      }
       return;
     }
-    const r = removeProvider(provider.id, models.length > 0);
+    const r = removeProvider(provider.id, false);
     setArmed(false);
     setMenuOpen(false);
     if (!r.ok) {
-      setNotes((s) => ({ ...s, [provider.id]: r.reason ?? tx("删除被拒绝", "Delete refused") }));
+      setNotes((s) => ({
+        ...s,
+        [provider.id]: r.reason === "has_models"
+          ? tx(`名下还有 ${models.length} 个模型，先删除或移走它们`, `${models.length} model(s) still live under this provider — delete or move them first`)
+          : tx("删除被拒绝", "Delete refused"),
+      }));
       return;
     }
     const next = st.providers.find((p) => p.id !== provider.id);
@@ -503,7 +612,7 @@ export function ModelSettingsPage() {
             <Dropdown anchor={menuBtnRef.current} open={menuOpen} onClose={() => setMenuOpen(false)} align="end">
               <button type="button" role="menuitem" className="ai-scene-menu-item danger" onClick={del}>
                 {armed
-                  ? tx(`再点确认删除（名下 ${models.length} 个模型一起删，不可撤销）`, `Press again to delete (${models.length} model(s) go too; no undo)`)
+                  ? tx("再点一次确认删除这家供应商（不可撤销）", "Press again to delete this provider (no undo)")
                   : tx("删除这家供应商", "Delete this provider")}
               </button>
             </Dropdown>
@@ -531,7 +640,7 @@ export function ModelSettingsPage() {
                 onChange={(e) => updateProvider(provider.id, { noProxy: e.target.value })} />
             </Field>
           </div>
-          {note && <div className="msp-probe"><span className={`msp-dot ${probe === "ok" ? "ok" : probe === "err" ? "err" : probe === "testing" ? "run" : "idle"}`} aria-hidden="true" /><span className="set-hint">{note}</span></div>}
+          {note && <div className="msp-probe"><span className={`msp-dot ${PROBE_DOT[probe]}`} aria-hidden="true" /><span className="set-hint">{note}</span></div>}
         </div>
 
         <div className="msp-card">
@@ -590,8 +699,12 @@ export function ModelSettingsPage() {
           </SetRow>
           <SetRow label={tx("手动历史预算", "Manual history budget")} tip={t("set.ai.history.tip")}>
             <div className="msp-test">
+              {/* P115-F4：输入框永远可编辑——旧写法在值为 0 时连输入框一起禁用，
+                  从这一页就没有任何路径设出手动预算，那是一枚死控件。
+                  口径：空/0 提交 = 回自动（写 0），placeholder 常驻「自动」。 */}
               <input className="input" style={{ width: 110 }} type="number" min={0} step={1000}
-                value={settings.aiHistoryOverride} disabled={settings.aiHistoryOverride === 0}
+                value={settings.aiHistoryOverride || ""}
+                placeholder={tx("自动", "auto")}
                 onChange={(e) => {
                   const n = Math.round(Number(e.target.value));
                   patch({ aiHistoryOverride: Number.isFinite(n) && n > 0 ? Math.min(200_000, n) : 0 });

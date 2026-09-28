@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serialport::{DataBits, FlowControl, Parity, StopBits};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -34,8 +35,8 @@ pub struct SerialConfig {
     /// P107：`none` / `software`(XON/XOFF) / `hardware`(RTS/CTS)。
     /// 给默认值是因为这个结构体在 **IPC 边界上**：边界上的新字段不给默认值，
     /// 就等于"两侧版本没对齐 ⇒ 连接直接报 missing field"。
-    /// ⚠ 今天的串口配置**并不落盘**（`serialStore` 用模块常量，`settingsStore` 的持久化
-    /// 白名单里没有串口字段），所以它防的是未来的第二个生产者（MCP/插件代发），
+    /// ⚠ P115-F13 起 TS 侧把这份配置落盘到 localStorage（带枚举/钳制清洗），但 Rust 侧
+    /// 仍不读任何存档——这个默认值防的是未来的第二个生产者（MCP/插件代发），
     /// 不是一个现存的老存档 bug —— 别把它写成"修好了升级即坏"。
     #[serde(default = "default_flow")]
     pub flow: String,
@@ -72,14 +73,40 @@ pub struct TxEvent {
     pub ts: u64,
 }
 
+/// 一对控制线的记忆（P115-F12 起按端口名分档存放，见 `Shared::ctrl`）。
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+struct CtrlLines {
+    dtr: Option<bool>,
+    rts: Option<bool>,
+}
+
+impl CtrlLines {
+    /// 只收 Some 的那条（与 set_control_lines 的口径一致：没点过的不覆盖）。
+    fn merge(&mut self, dtr: Option<bool>, rts: Option<bool>) {
+        if dtr.is_some() {
+            self.dtr = dtr;
+        }
+        if rts.is_some() {
+            self.rts = rts;
+        }
+    }
+}
+
+/// 取某个端口名下的记忆；没碰过的口 = (None, None) = 打开时完全不碰线。
+fn remembered_for(map: &HashMap<String, CtrlLines>, port: &str) -> CtrlLines {
+    map.get(port).copied().unwrap_or_default()
+}
+
 struct Shared {
     port: Option<Box<dyn serialport::SerialPort>>,
     config: Option<SerialConfig>,
     /// P106：用户**显式**要过的电平（`None` = 从没碰过）。
     /// 记在 Rust 侧而不是只记在前端：重连/重开是在这条读线程里发生的，
     /// 等前端看到"已连接"再补一刀，中间那几百毫秒线是悬的 —— 板子就是在这时候被踢进 bootloader 的。
-    dtr: Option<bool>,
-    rts: Option<bool>,
+    /// P115-F12：**按端口名分档**。整表一份的记忆会把 COM3 要过的电平在打开 COM4 时
+    /// 复施加过去——板子进不进 bootloader 是按端口发生的事，记忆也必须按端口存。
+    /// 仍是进程级、不落盘。
+    ctrl: HashMap<String, CtrlLines>,
 }
 
 /// 把记下来的目标电平施加到端口上：尽力而为，失败不改记忆（下次重开还会再试）。
@@ -138,8 +165,7 @@ impl SerialManager {
             shared: Arc::new(Mutex::new(Shared {
                 port: None,
                 config: None,
-                dtr: None,
-                rts: None,
+                ctrl: HashMap::new(),
             })),
             run_flag: Arc::new(AtomicBool::new(false)),
             reconnect_flag: Arc::new(AtomicBool::new(false)),
@@ -318,8 +344,10 @@ pub async fn open_port(
         .map_err(|e| e.to_string())??;
     {
         let mut shared = state.shared.lock().map_err(|_| "状态锁中毒")?;
-        // 先施加用户显式要过的电平（没要过 = 两条 None = 完全不碰线，这是默认）
-        apply_control_lines(&mut port, shared.dtr, shared.rts, flow);
+        // 先施加"用户在这个口名下显式要过的电平"（没要过 = 完全不碰线，这是默认）。
+        // P115-F12：按 config.port 取记忆——别的口要过的电平绝不施加到这个口上。
+        let mem = remembered_for(&shared.ctrl, &config.port);
+        apply_control_lines(&mut port, mem.dtr, mem.rts, flow);
         shared.port = Some(port);
         shared.config = Some(config.clone());
     }
@@ -507,12 +535,12 @@ pub async fn set_control_lines(
                 .map_err(|e| format!("设置 RTS 失败: {e}"))?;
         }
     }
-    // 端口借用结束之后再记：记下来的是"用户要过的电平"，重开/重连时由它复施加
-    if dtr.is_some() {
-        shared.dtr = dtr;
-    }
-    if rts.is_some() {
-        shared.rts = rts;
+    // 端口借用结束之后再记：记下来的是"用户要过的电平"，重开/重连时由它复施加。
+    // P115-F12：记到当前打开的端口名下（config 与 port 同锁同写，这里必有）。
+    if dtr.is_some() || rts.is_some() {
+        if let Some(name) = shared.config.as_ref().map(|c| c.port.clone()) {
+            shared.ctrl.entry(name).or_default().merge(dtr, rts);
+        }
     }
     Ok(())
 }
@@ -615,8 +643,8 @@ mod control_line_tests {
 mod flow_tests {
     use super::{parse_flow, FlowControl, SerialConfig};
 
-    /// 边界上的新字段必须带默认值。今天串口配置不落盘（详设 §3.1），所以这条防的不是
-    /// "老存档读不出来"，而是**两侧版本没对齐**：少一个键就报 `missing field flow`，
+    /// 边界上的新字段必须带默认值。TS 侧 P115-F13 起把配置落盘（带清洗），但 Rust 侧
+    /// 不读任何存档——这条防的是**两侧版本没对齐**：少一个键就报 `missing field flow`，
     /// 用户的现场表现是"点连接直接红字、连不上"。
     #[test]
     fn config_without_flow_key_still_deserializes() {
@@ -659,6 +687,44 @@ mod flow_tests {
             Err(e) => assert!(e.contains("不支持的数据流控"), "{e}"),
             Ok(_) => panic!("非法流控档位不该被打开，更不能靠\"端口不存在\"蒙混过去"),
         }
+    }
+}
+
+#[cfg(test)]
+mod ctrl_memory_tests {
+    use super::{remembered_for, CtrlLines};
+    use std::collections::HashMap;
+
+    /// P115-F12 的判据：控制线记忆按端口名隔离。
+    /// 事故：记忆整表一份，给 COM3 设过的 DTR=高 会在**打开 COM4** 时被复施加——
+    /// ESP32/STM32 的自动烧录电路恰好趴在 DTR+RTS 上，串了口的电平就是事故。
+    #[test]
+    fn control_line_memory_is_per_port() {
+        let mut map: HashMap<String, CtrlLines> = HashMap::new();
+        map.insert("COM3".into(), CtrlLines { dtr: Some(true), rts: Some(false) });
+
+        // COM3 自己记得住
+        let m3 = remembered_for(&map, "COM3");
+        assert_eq!(m3.dtr, Some(true));
+        assert_eq!(m3.rts, Some(false));
+        // 别的口必须一个字都不记得——打开 COM4 时两条线都不许被碰
+        let m4 = remembered_for(&map, "COM4");
+        assert_eq!(m4, CtrlLines::default(), "记忆串了端口：COM3 的电平会被复施加到 COM4");
+        assert_eq!(remembered_for(&map, ""), CtrlLines::default(), "连口名都没选时同样一条不碰");
+    }
+
+    /// merge 的口径与 set_control_lines 一致：只收 Some 的那条，没点过的不覆盖旧记忆。
+    #[test]
+    fn merge_updates_only_the_lines_the_user_touched() {
+        let mut mem = CtrlLines::default();
+        mem.merge(Some(true), None);
+        assert_eq!(mem, CtrlLines { dtr: Some(true), rts: None });
+        mem.merge(None, Some(false));
+        assert_eq!(mem, CtrlLines { dtr: Some(true), rts: Some(false) });
+        mem.merge(Some(false), None);
+        assert_eq!(mem, CtrlLines { dtr: Some(false), rts: Some(false) }, "显式再点要能翻转");
+        mem.merge(None, None);
+        assert_eq!(mem, CtrlLines { dtr: Some(false), rts: Some(false) }, "两条 None 是空操作，不许清掉记忆");
     }
 }
 
@@ -843,8 +909,9 @@ fn try_reconnect(
                     drop(port);
                     return false;
                 }
-                let (dtr, rts) = shared.lock().map(|g| (g.dtr, g.rts)).unwrap_or((None, None));
-                apply_control_lines(&mut port, dtr, rts, flow);
+                // P115-F12：重连是"同一个口"，仍按口名取记忆（与 open_port 同一条口径）
+                let mem = shared.lock().map(|g| remembered_for(&g.ctrl, &config.port)).unwrap_or_default();
+                apply_control_lines(&mut port, mem.dtr, mem.rts, flow);
                 if let Ok(mut guard) = shared.lock() {
                     guard.port = Some(port);
                 }

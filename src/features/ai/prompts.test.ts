@@ -10,7 +10,7 @@
 import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
 import { describe, expect, it } from "vitest";
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
-import { buildSystemPrompt } from "./prompts";
+import { buildSystemPrompt, schemaFor } from "./prompts";
 
 const qaPrompt = buildSystemPrompt("qa", "（无）");
 
@@ -83,3 +83,59 @@ describe("UI 创造引导与产物元表对齐", () => {
     }
   });
 });
+
+/* ================= P115-D：知识面与"界面现在长什么样"同源 =================
+ * 两条各自治一段旧病：
+ * ① `openPanel` 那行的面板清单原先是手抄的 18 个 id——漏了「指标面板」，还把已退役的
+ *    「协议模板」面板当成能打开的东西告诉模型（用户照着问，AI 就指一个不存在的面板）。
+ *    现在它从 `panelGroupsAddable()` 派生，本测试钉的是**渲染结果 == 注册表**，
+ *    按 P99a-D2 的教训：不扫源码形状，扫模型真正看到的那段文字。
+ * ② 整个知识面从没写过导轨 / 全窗口设置页 / 命令面板 / 模型设置。用户问"模型在哪配"
+ *    时模型只能凭印象答。这里钉几个非有不可的名字，缺一个就红。
+ */
+const { panelGroupsAddable } = await import("../../panels/panelMenu");
+const actionSpec = schemaFor("action");
+const listed = /打开面板（([^）]*)）/.exec(actionSpec)?.[1] ?? "";
+
+describe("P115-D · 可打开面板的清单与注册表同源", () => {
+  const addable = panelGroupsAddable().flatMap((g) => g.ids) as string[];
+
+  it("渲染出的 openPanel 清单既不比注册表多，也不比它少", () => {
+    expect(listed.length, "动作规范里没有 openPanel 那一行了").toBeGreaterThan(0);
+    const ids = listed.split("/");
+    for (const id of ids) {
+      expect(addable, `清单里教了 ${id}，可它不在「可添加面板」表里（退役或改名了）`).toContain(id);
+    }
+    for (const id of addable) {
+      expect(ids, `注册表能添加 ${id}，却没告诉模型`).toContain(id);
+    }
+  });
+
+  it("已退役的 templates 不再被当成一枚可打开的面板教给用户", () => {
+    expect(listed.split("/")).not.toContain("templates");
+    // 但要知道它去哪了——否则用户问"协议面板呢"，模型只会说"没有这个东西"
+    expect(actionSpec).toContain("「协议」已搬进左侧导轨");
+  });
+});
+
+describe("P115-D · 知识面认得现在这套壳", () => {
+  for (const [needle, why] of [
+    ["设置 → 模型设置", "模型/密钥去哪配，AI 必须说得出（P110-B 起就不在 AI 服务那一页了）"],
+    ["供应商级那枚刷新是免费的", "两种测试各自证明什么——说错就是让用户白花钱或白等"],
+    ["导轨「视图」", "加面板的两处入口之一，另一处是工具栏那枚「+ 面板」下拉"],
+    ["「+ 面板」", "两处入口现在都存在——只告诉模型一处，用户按模型的话找就找不到"],
+    ["Ctrl+Shift+P", "命令面板是全局入口，知识面不能不知道它存在"],
+    ["占满整个工作区", "设置页从弹窗改成全窗口（P111-B），旧描述会让人去找一个不存在的对话框"],
+  ] as const) {
+    it(`qa 速览里有「${needle}」：${why}`, () => {
+      expect(qaPrompt, why).toContain(needle);
+    });
+  }
+
+  it("动作规范里点名了发送总闸的实名「允许向设备发送」", () => {
+    // 只说"需发送权限"，用户找不到那一行；闸名与设置页那一行的标签是同一个来源
+    expect(actionSpec).toContain("允许向设备发送");
+    expect(actionSpec).not.toMatch(/开关连接（需发送权限）/);
+  });
+});
+

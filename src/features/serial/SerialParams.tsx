@@ -7,10 +7,8 @@ import { t, tx, useLocale } from "../../i18n/strings";
 import { IconChevron } from "../../shared/icons";
 import { Listbox } from "../../shared/Listbox";
 
-const BAUDS = [
-  1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600,
-  1000000, 2000000, 3000000,
-];
+// P115-F13：波特率档位表搬到 serialStore（落盘清洗与菜单共用一张表，别抄第二份）
+const BAUDS = store.BAUD_RATES;
 
 /**
  * P105-E：接入面板的字段行 = 标签列 + 控件列。

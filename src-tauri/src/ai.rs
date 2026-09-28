@@ -174,7 +174,7 @@ fn net_err(e: &reqwest::Error) -> TurnErr {
     } else if e.is_connect() {
         TurnErr {
             code: "connect",
-            msg: "网络连接失败；若访问的是国外服务，请到 设置 → AI 服务 填写 HTTP 代理（如 http://127.0.0.1:7897）".into(),
+            msg: "网络连接失败；若访问的是国外服务，请到 设置 → 模型设置 给这一家填上代理（如 http://127.0.0.1:7897）".into(),
             retryable: true,
             shrink: false,
         }
@@ -738,7 +738,7 @@ pub async fn ai_chat(
                 .map(|mut m| m.remove(&req_id));
             let msg = if e.is_connect() || e.is_timeout() {
                 format!(
-                    "网络连接失败（{}）。若访问的是国外服务，请到 设置 → AI 服务 填写 HTTP 代理（如 http://127.0.0.1:7897）；留空时将跟随系统代理。",
+                    "网络连接失败（{}）。若访问的是国外服务，请到 设置 → 模型设置 给这一家填上代理（如 http://127.0.0.1:7897）；留空时将跟随系统代理。",
                     e
                 )
             } else {

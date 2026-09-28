@@ -48,11 +48,59 @@ it("波特率那张本地菜单已经收编（不许留第二份实现）", asyn
   expect(params, "没换成共享 Listbox").toContain("<Listbox");
 });
 
-it("键盘语义齐全：上下 / Home / Enter / Escape 一个都不能少", async () => {
+it("键盘语义齐全：上下 / Home / End / Enter / Escape 一个都不能少", async () => {
   const s = await read("./Listbox.tsx");
-  for (const key of ["ArrowDown", "ArrowUp", "Home", "Enter", "Escape"]) {
+  for (const key of ["ArrowDown", "ArrowUp", "Home", "End", "Enter", "Escape"]) {
     expect(s, `少了 ${key}：菜单必须能纯键盘用`).toContain(`"${key}"`);
   }
   expect(s).toContain('role="listbox"');
   expect(s).toContain("aria-selected");
+});
+
+/**
+ * P115-F3 加严：上一版只钉键名字符串，而键盘其实是死的——容器没有 tabIndex，
+ * 焦点从不进入弹层，onKeyDown 一场空。这里钉"焦点真的会动"的三段接线形状：
+ * 容器可编程聚焦 / 打开后有 focus() 调用 / 选中与 Esc 都把焦点还给锚点。
+ */
+it("焦点真的进得来、回得去：容器 tabIndex + 打开即聚焦 + 关闭归还锚点", async () => {
+  const s = await read("./Listbox.tsx");
+  // §8-41④：先剥注释再断言——注释里复述 `tabIndex={-1}` 不算接线
+  const code = s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/([^:])\/\/[^\n]*/g, "$1");
+  expect(code, "容器必须 tabIndex={-1}（不进 Tab 序，但可编程聚焦）").toMatch(/tabIndex=\{-1\}/);
+  expect(code, "open 后必须有 focus() 调用（否则 onKeyDown 全是死键）").toMatch(/boxRef\.current\?\.focus\(/);
+  // 归还锚点的形状只此一处（closeAndRefocus），选中与 Esc 都走它：
+  // 出现两个各自 focus anchor 的形状 = 关闭路径又开始各写各的
+  expect(code.match(/anchorRef\.current\?\.focus\(\)/g)?.length, "归还锚点必须收口在 closeAndRefocus 一处").toBe(1);
+  const helperAt = code.indexOf("const closeAndRefocus");
+  expect(helperAt, "closeAndRefocus 不见了：Esc/选中又各写各的关闭").toBeGreaterThan(-1);
+  const onKeyAt = code.indexOf("const onKey");
+  expect(onKeyAt, "onKey 不见了").toBeGreaterThan(-1);
+  const clickAt = code.indexOf("onClick={() => {");
+  for (const user of [code.slice(helperAt, onKeyAt), code.slice(onKeyAt), code.slice(clickAt)]) {
+    expect(user, "每条关闭路径都必须经 closeAndRefocus 归还锚点").toContain("closeAndRefocus");
+  }
+  // 上下键必须真的把焦点挪进行（focusRow = setActive + querySelector().focus()）
+  const focusRowAt = code.indexOf("const focusRow");
+  expect(focusRowAt, "focusRow（挪焦点的那只手）不见了").toBeGreaterThan(-1);
+  const focusRowBody = code.slice(focusRowAt, code.indexOf("};", focusRowAt));
+  expect(focusRowBody, "focusRow 必须真的调用行上的 focus()").toMatch(/querySelector[\s\S]*?\.focus\(\)/);
+  const stepAt = code.indexOf("const step");
+  expect(stepAt, "step 不见了").toBeGreaterThan(-1);
+  const stepBody = code.slice(stepAt, code.indexOf("};", stepAt));
+  expect(stepBody, "上下键不再挪焦点：step 里必须有 focusRow").toContain("focusRow(");
+});
+
+/** P115-F2：rect 里带着 zoom，写进 fixed style 必须 ÷zoom（Dropdown 同式，zoom.ts 已证） */
+it("定位除以 zoom 且带视口钳制与向上翻", async () => {
+  const s = await read("./Listbox.tsx");
+  const code = s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/([^:])\/\/[^\n]*/g, "$1");
+  // left/top/minWidth 三处写坐标，每处都得除——少一处那一维就会飞
+  expect(code.match(/\/ zf\}px`/g)?.length, "三处坐标（left/top/minWidth）必须全部 ÷zoom").toBe(3);
+  expect(code, "没有读 zoom 因子").toContain('getComputedStyle(document.documentElement).zoom');
+  expect(code, "缺视口钳制（贴近右/下屏沿时会被裁）").toContain("window.innerWidth");
+  expect(code, "缺向上翻（放不下时该翻到锚点上方）").toMatch(/ar\.top - r\.height/);
+  expect(code, "定位必须直接写 DOM style，不在 layout effect 里 setState（P88c 白屏教训）")
+    .toMatch(/el\.style\.left = /);
+  const css = await read(cssSpec);
+  expect(css, ".ctx-menu 的 70vh 上限还在：vh 在 zoom 下双重缩放（§19）").not.toMatch(/max-height:\s*70vh/);
 });

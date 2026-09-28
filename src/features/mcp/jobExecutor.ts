@@ -1,5 +1,6 @@
 /** Generic fenced executor transport; Rust owns all task states and admission. */
 import { invoke } from "@tauri-apps/api/core";
+import { tx } from "../../i18n/strings";
 import { sequenceAdapters, type TaskAdapter } from "./jobAdapters";
 import { onFrames } from "../../ipc/framesBus";
 import { getVar } from "../controls/variableStore";
@@ -82,6 +83,32 @@ export class JobExecutor {
 export interface JobRow {
   jobId: string; taskType: string; state: string; phase: string; effectStatus: string;
   resultAvailability: string; createdAt: number; updatedAt: number; finishedAt?: number | null; stopReason: string | null; error: { code: string } | null;
+}
+
+/**
+ * 任务状态机词表：与 Rust `bridge_jobs.rs` 的 `terminal()` / `transition()` 那套状态名
+ * 是**唯一**约定（queued / running / cancel_requested / succeeded / failed / cancelled /
+ * timed_out / interrupted）。P115-F18 前 UI 拿到什么印什么，时间线上一直挂着裸 snake_case
+ * ——能回给用户的每个码都要有中文说法（§8-46），兜底仍回显原文（新码不装认识）。
+ */
+export type JobState =
+  | "queued" | "running" | "cancel_requested" | "succeeded"
+  | "failed" | "cancelled" | "timed_out" | "interrupted";
+
+const JOB_STATE_TABLE: Record<JobState, [string, string]> = {
+  queued: ["已排队", "queued"],
+  running: ["执行中", "running"],
+  cancel_requested: ["停止中", "stopping"],
+  succeeded: ["已完成", "succeeded"],
+  failed: ["失败", "failed"],
+  cancelled: ["已取消", "cancelled"],
+  timed_out: ["已超时", "timed out"],
+  interrupted: ["已中断", "interrupted"],
+};
+
+export function jobStateText(state: string): string {
+  const hit = (JOB_STATE_TABLE as Record<string, [string, string] | undefined>)[state];
+  return hit ? tx(hit[0], hit[1]) : state;
 }
 const jobListeners = new Set<() => void>();
 let jobSnap: { jobs: JobRow[] } = { jobs: [] };

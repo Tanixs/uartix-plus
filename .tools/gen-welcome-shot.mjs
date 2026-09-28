@@ -11,6 +11,8 @@
  * 改名/删元素那一类由 `src/shell/welcome.test.ts` 判红。
  *
  * 用法：先起 dev（`npm run dev`），再 `node .tools/gen-welcome-shot.mjs`。
+ *      自验不想占用 1420（那是 `tauri dev` 的端口）时：
+ *      `npx vite --port 1421 --strictPort` + `LARIX_SNAP_URL=http://[::1]:1421/ node .tools/gen-welcome-shot.mjs`。
  */
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +23,8 @@ import { browserPath, shoot } from "./shot.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const OUT_DIR = path.join(ROOT, "src", "assets", "welcome");
-const DEV_URL = "http://[::1]:1420/";
+// 默认仍是 `npm run dev` 那一台；可覆盖是为了让"自己验完顺手重拍"不必去抢 1420（端口纪律）。
+const DEV_URL = process.env.LARIX_SNAP_URL ?? "http://[::1]:1420/";
 /** 视口从 `welcomeSlides.ts` 派生，不在这里另写一遍数：
  *  徽标坐标是相对底图宽高的**比例**，两边口径一漂，标注就集体指错地方。 */
 const slidesSrc = readFileSync(path.join(ROOT, "src", "shell", "welcomeSlides.ts"), "utf8");
@@ -47,10 +50,12 @@ if (!browserPath()) {
 }
 
 try {
-  const probe = await fetch(DEV_URL, { signal: AbortSignal.timeout(2000) });
+  // 2 秒探不到就放弃是错的：vite 冷启动后**第一个请求**要现做依赖预构建与转译，
+  // 实测能到 5~10 秒，于是"服务明明起着"却被报成"没起"。给 25 秒，够一次冷首屏。
+  const probe = await fetch(DEV_URL, { signal: AbortSignal.timeout(25000) });
   if (!probe.ok) throw new Error(String(probe.status));
 } catch {
-  console.error(`FAIL: dev 服务没在 ${DEV_URL}（先 npm run dev）。注意它只听 IPv6，用 localhost 会连不上。`);
+  console.error(`FAIL: dev 服务没在 ${DEV_URL}（先 npm run dev）。注意 vite 只听 IPv6：127.0.0.1 连不上，走 [::1] 或 localhost。`);
   process.exit(1);
 }
 

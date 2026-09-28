@@ -7,6 +7,7 @@ import { linkSummary } from "../features/serial/linkSummary";
 import { patch as patchSettings, useSettings } from "../features/settings/settingsStore";
 import type { WorkspacePreset } from "../features/settings/settingsStore";
 import { t, tx, useLocale } from "../i18n/strings";
+import { Dropdown } from "../shared/Dropdown";
 import { Glyph, IconCheck, IconChevron, IconPuzzle, IconSettings, IconSparkle } from "../shared/icons";
 import { pendingBadge } from "../features/market/marketBrowse";
 import { useAwaitingCount } from "../features/market/useMarketPending";
@@ -114,55 +115,52 @@ export function LinkCapsule() {
   );
 }
 
-/** 工作区药丸：九套预设就地切换（此前只能进设置页翻到「工作区」那一栏才能改）。 */
+/** 工作区药丸：九套预设就地切换（此前只能进设置页翻到「工作区」那一栏才能改）。
+ *  P115-F21：弹出层从 inline absolute（§20 裁剪风险、Esc 不关、焦点散养、mousedown）
+ *  改挂 shared/Dropdown 原语——portal 到 body、÷zoom 定位、点外/Esc 关闭并归还焦点
+ *  都是原语的约定；`.cb-ws-menu/.tb-menu-item` 样式钩子原样保留。 */
 export function WorkspacePill({ onApplyPreset }: { onApplyPreset: (p: WorkspacePreset) => void }) {
   const { workspace } = useSettings();
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [open]);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
   const meta = WORKSPACE_META();
   const cur = meta.find((m) => m.key === workspace);
   return (
-    <div className="cb-ws" ref={ref}>
+    <div className="cb-ws">
       <button
+        ref={btnRef}
         className="cb-ws-btn"
         aria-haspopup="menu"
         aria-expanded={open}
         title={tx("工作区预设：一键切换面板组合（当前布局会先自动备份）", "Workspace preset: switch the panel set (current layout is backed up first)")}
         onClick={() => setOpen((v) => !v)}
       >
-        {cur?.label ?? workspace}
+        {/* P115-F23：标签包一层 span，窄窗时随 media 查询收起，药丸塌成图标档 */}
+        <span className="cb-ws-label">{cur?.label ?? workspace}</span>
         <IconChevron size={12} dir="down" />
       </button>
-      {open && (
-        <div className="tb-menu cb-ws-menu" role="menu">
-          <span className="tb-menu-title">{t("set.preset")}</span>
-          {meta.map((m) => (
-            <button
-              key={m.key}
-              role="menuitem"
-              className={`tb-menu-item cb-ws-item${m.key === workspace ? " on" : ""}`}
-              title={m.desc}
-              onClick={() => {
-                patchSettings({ workspace: m.key });
-                onApplyPreset(m.key);
-                setOpen(false);
-              }}
-            >
-              <span className="cb-ws-name">{m.label}</span>
-              <span className="cb-ws-desc">{m.desc}</span>
-              {m.key === workspace ? <em className="tb-menu-check"><IconCheck /></em> : null}
-            </button>
-          ))}
-        </div>
-      )}
+      <Dropdown anchor={btnRef.current} open={open} onClose={() => setOpen(false)} className="cb-ws-menu">
+        <span className="tb-menu-title">{t("set.preset")}</span>
+        {meta.map((m) => (
+          <button
+            key={m.key}
+            role="menuitem"
+            className={`tb-menu-item cb-ws-item${m.key === workspace ? " on" : ""}`}
+            title={m.desc}
+            onClick={() => {
+              patchSettings({ workspace: m.key });
+              onApplyPreset(m.key);
+              setOpen(false);
+              // P115-F21：选中关层后焦点回到药丸——不让键盘流掉进 body（与 Listbox 同一口径）
+              btnRef.current?.focus();
+            }}
+          >
+            <span className="cb-ws-name">{m.label}</span>
+            <span className="cb-ws-desc">{m.desc}</span>
+            {m.key === workspace ? <em className="tb-menu-check"><IconCheck /></em> : null}
+          </button>
+        ))}
+      </Dropdown>
     </div>
   );
 }

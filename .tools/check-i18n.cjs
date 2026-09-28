@@ -62,7 +62,9 @@ const ROOT = path.join(__dirname, "..");
  * 整族决定（内置预设 / 出厂规格 / store 默认对象名要不要按当下语言播种）记在 P105-方案清单 §8 等拍。
  */
 const BUDGETS = {
-  "src/features/help/HelpModal.tsx": 20514,
+  // P115-B：帮助回写时把改写过的那几句顺手转成 tx(中, 英) 双语（整句进 tx 的中文第一参
+  // 在计数前就被剥掉），所以这一格从 20514 降到 20214。方向与棘轮一致：债只会更小。
+  "src/features/help/HelpModal.tsx": 20214,
   "src/features/console/QuickCommandBar.tsx": 100,
   "src/App.tsx": 10,
   "src/features/vdev/VdevPanel.tsx": 5,
@@ -229,6 +231,11 @@ const total = rows.reduce((s2, [, n]) => s2 + n, 0);
  * 导轨五项与顶栏那颗连接胶囊在切语言后一直是旧语言，门全程绿。
  * 判据：`.tsx` / `UI_TS` 文件里，任何 `tx(` / `t("…")` 调用只要**不在函数体内**就判红。
  * 修法只有一条：把那张表改成函数（`const railItems = () => [...]`），值在渲染时取。
+ *
+ * P115-F11 补的盲区：这份清单原先只盖 `.tsx` + UI_TS 点名表——而模块级 tx 同样会
+ * 长在 `.ts` 里（实录：shell/commandRegistry.ts 六个分组名 G_PANEL…G_HELP 冻在 import 时刻，
+ * 门全程绿）。结构违规与"这文件是不是 UI 层"无关，改为扫全部代码文件
+ * （walkAllCode = .ts + .tsx，排除测试）。
  */
 {
   const ts = require("typescript");
@@ -239,7 +246,7 @@ const total = rows.reduce((s2, [, n]) => s2 + n, 0);
     }
     return false;
   };
-  const files = [...walkTsx(path.join(ROOT, "src")), ...uiTsFiles(ROOT)];
+  const files = walkAllCode(path.join(ROOT, "src"));
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
     if (!/tx\(/.test(src) && !/\bt\("/.test(src)) continue;

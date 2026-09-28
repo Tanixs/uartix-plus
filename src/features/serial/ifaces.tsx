@@ -41,6 +41,10 @@ function IfaceConnectButton() {
     <button
       className={`btn${busy ? " on" : ""}`}
       title={busy ? t("tb.disconnect") : t("tb.connect")}
+      // 入门引导第 1 步的聚光灯锚点。原先只有串口那颗（ConnectButton）带它，
+      // 于是选 TCP / UDP / BLE 时第 1 步找不到东西可圈，退化成一张漂浮卡 ——
+      // 而这一步教的恰恰是"四种接口都在这儿连"。
+      data-tour="connect"
       onClick={() => void onToggle()}
     >
       <span className={`dot ${busy ? "connected" : "disconnected"}`} />

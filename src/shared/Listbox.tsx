@@ -17,8 +17,16 @@
  *    新基元若各写一份描边，就是把那条门往上抬；
  *  - 键盘与读屏语义齐全（`role=listbox` / `aria-selected` / `aria-active-descendant`），
  *    不只是"能用鼠标点"。
+ *
+ * P115-F2/F3：定位与焦点两条也收进约定——
+ *  - 定位照 `Dropdown` 同一纪律：rect 里带着 zoom，写进 fixed style 必须先 ÷zoom；
+ *    视口钳制 + 放不下时向上翻（此前只有 Dropdown 有，Listbox 会在屏沿裁掉半张菜单）；
+ *    定位一律直接写 DOM style，绝不在 layout effect 里 setState（P88c 无限重渲染白屏教训）。
+ *  - 打开即聚焦容器（`tabIndex={-1}`：不进 Tab 序、只可编程聚焦），onKeyDown 才接得到键；
+ *    选中与 Esc 两条关闭路径都把焦点还给锚点——此前鼠标选中路径把焦点掉在 body 上，
+ *    键盘流当场断线。
  */
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 export interface ListboxOption {
@@ -40,7 +48,7 @@ export interface ListboxProps<T extends HTMLElement = HTMLElement> {
   onSelect: (value: string) => void;
   onClose: () => void;
   ariaLabel: string;
-  /** 最多显示多少行后开始滚（不给就按 CSS 的 max-height 自然滚） */
+  /** 最多显示多少行后开始滚（不给就按 CSS 的逻辑 px 上限自然滚） */
   visibleRows?: number;
 }
 
@@ -62,33 +70,56 @@ export function Listbox<T extends HTMLElement = HTMLElement>({
 }: ListboxProps<T>) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [active, setActive] = useState(0);
-  const [pos, setPos] = useState<{ top: number; left: number; minWidth: number } | null>(null);
 
   const enabledIdx = useMemo(
     () => options.map((o, i) => (o.disabled ? -1 : i)).filter((i) => i >= 0),
     [options],
   );
 
-  /* 打开时定位一次 + 跟随滚动/缩放更新。用锚点的 rect 而不是 CSS 的 100%：
-     弹层已经在 body 上了，再谈"父元素宽高"就没有父元素可言。 */
+  /* 打开时定位（并在滚动/缩放后重算）。锚点 rect 是视觉 px：除以 zoom 才是 fixed style
+     要的逻辑 px；放不下下沿时翻到上沿，左右钳进视口。 */
+  const placeRef = useRef<() => void>(() => {});
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    if (!open || !el) return;
+    const place = () => {
+      const anchor = anchorRef.current;
+      if (!anchor || !anchor.isConnected) return;
+      const zf = Number(getComputedStyle(document.documentElement).zoom) || 1;
+      const ar = anchor.getBoundingClientRect();
+      el.style.visibility = "hidden";
+      const r = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const left = Math.min(Math.max(8, ar.left), Math.max(8, vw - r.width - 8));
+      let top = ar.bottom + 4;
+      if (top + r.height > vh - 8) top = Math.max(8, ar.top - r.height - 4);
+      el.style.left = `${left / zf}px`;
+      el.style.top = `${top / zf}px`;
+      el.style.minWidth = `${ar.width / zf}px`;
+      el.style.visibility = "visible";
+    };
+    placeRef.current = place;
+    place();
+  });
   useEffect(() => {
     if (!open) return;
-    const place = () => {
-      const el = anchorRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, left: r.left, minWidth: r.width });
+    const re = () => placeRef.current();
+    window.addEventListener("resize", re);
+    window.addEventListener("scroll", re, true);
+    return () => {
+      window.removeEventListener("resize", re);
+      window.removeEventListener("scroll", re, true);
     };
-    place();
+  }, [open]);
+
+  /* 打开即聚焦容器：焦点不进来，onKeyDown 就是摆设（P115-F3 的"键盘全死"真因） */
+  useEffect(() => {
+    if (!open) return;
     const idx = Math.max(0, options.findIndex((o) => o.value === value));
     setActive(options[idx]?.disabled ? Math.max(0, enabledIdx[0] ?? 0) : idx);
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
-    return () => {
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
-    };
-    // options/enabledIdx 变化时不该重开定位，故只跟 open 与锚点走
+    boxRef.current?.focus({ preventScroll: true });
+    // options/enabledIdx 变化时不重置焦点与 active，只跟 open 走
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -101,33 +132,54 @@ export function Listbox<T extends HTMLElement = HTMLElement>({
       onClose();
     };
     // pointerdown 而不是 click：拖拽选中输入框文字时松手也会派发 click，
-    // 那会让"选完一段波特率数字"顺手把菜单关掉
+    // 那会让"选完一段波特率数字"顺手把菜单关掉。
+    // 这条路径刻意不抢焦点：用户明明在点别处，把焦点拽回锚点是反直觉的。
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, [open, onClose, anchorRef]);
 
   if (!open || typeof document === "undefined") return null;
 
+  const focusRow = (i: number) => {
+    setActive(i);
+    boxRef.current?.querySelector<HTMLElement>(`[data-idx="${i}"]`)?.focus();
+  };
+
   const step = (dir: 1 | -1) => {
     if (!enabledIdx.length) return;
     const at = enabledIdx.indexOf(active);
     const next = at < 0 ? enabledIdx[0] : enabledIdx[(at + dir + enabledIdx.length) % enabledIdx.length];
-    setActive(next);
-    boxRef.current?.querySelector<HTMLElement>(`[data-idx="${next}"]`)?.focus();
+    focusRow(next);
+  };
+
+  const closeAndRefocus = () => {
+    onClose();
+    anchorRef.current?.focus();
   };
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.stopPropagation();
-      onClose();
-      anchorRef.current?.focus();
-    } else if (e.key === "ArrowDown") e.preventDefault(), step(1);
-    else if (e.key === "ArrowUp") e.preventDefault(), step(-1);
-    else if (e.key === "Home") e.preventDefault(), setActive(enabledIdx[0] ?? 0);
-    else if (e.key === "Enter" || e.key === " ") {
+      closeAndRefocus();
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault();
+      step(1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      step(-1);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      if (enabledIdx.length) focusRow(enabledIdx[0]);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      if (enabledIdx.length) focusRow(enabledIdx[enabledIdx.length - 1]);
+    } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       const o = options[active];
-      if (o && !o.disabled) onSelect(o.value);
+      if (o && !o.disabled) {
+        closeAndRefocus();
+        onSelect(o.value);
+      }
     } else if (e.key === "Tab") onClose();
   };
 
@@ -136,11 +188,12 @@ export function Listbox<T extends HTMLElement = HTMLElement>({
     <div
       ref={boxRef}
       className="ctx-menu lbx"
-      // maxHeight 只在调用方指定"看得见几行"时接管；否则交给 .ctx-menu 的 70vh
-      style={pos ? { top: pos.top, left: pos.left, minWidth: pos.minWidth, ...(maxH ? { maxHeight: maxH } : {}) } : undefined}
+      // 首帧先藏在屏外（照 Dropdown）：layout effect 量完尺寸写回真实坐标再显形
+      style={{ left: -9999, top: -9999, visibility: "hidden", ...(maxH ? { maxHeight: maxH } : {}) }}
       role="listbox"
       aria-label={ariaLabel}
       aria-activedescendant={`lbx-${active}`}
+      tabIndex={-1}
       onKeyDown={onKey}
     >
       {options.map((o, i) => (
@@ -157,8 +210,8 @@ export function Listbox<T extends HTMLElement = HTMLElement>({
           onFocus={() => setActive(i)}
           onClick={() => {
             if (o.disabled) return;
+            closeAndRefocus();
             onSelect(o.value);
-            onClose();
           }}
         >
           <span className="lbx-label">{o.label}</span>

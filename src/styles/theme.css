@@ -209,6 +209,15 @@ input[type="range"] {
   /* 只读/受限提示文字色（Operator 只读横幅、上下文锁定条）；暗色系默认值，亮色主题覆写
      ——此前 .ctx-lock/.orch-ro-bar 引用未定义的 `--warn-fg` 静默回退 accent，失去"警告"语义 */
   --warn-fg: #e8a13c;
+  /* 危险按钮按压态的文字色（.tb-close:hover）。P115-F22：原先一行 #fff 字面量，
+     是关闭钮自己的私有配色；提为令牌后与 --danger 配对使用，8 主题同值（各家 danger
+     都是中明度红，白字通吃），进 check:contrast 的 need 清单防"新主题忘了给"。 */
+  --on-danger: #ffffff;
+  /* 键盘遥控九宫格按键（.keypad-btn）与其上的深色墨。P115-F22：原先 #e2622b/#1c1f24
+     两行字面量。照 --cursor-a/b 的先例**刻意不随主题变**（品牌感按键 + 固定墨色，
+     held 态走 brightness 滤镜），对比度由 check:contrast 逐主题验证 ≥ 4.5。 */
+  --k-keypad: #e2622b;
+  --k-keypad-ink: #1c1f24;
 }
 
 
@@ -341,6 +350,10 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 240px;
+  /* P115-F23：窄窗兜底第一层——胶囊是这条横栏里唯一可牺牲的弹性项，
+     允许真收缩（否则 flex 默认 min-width=内容宽，横栏右端被窗沿裁掉） */
+  flex: 0 1 auto;
+  min-width: 0;
   cursor: pointer;
 }
 
@@ -403,6 +416,17 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* P115-F23：窄窗兜底第二/三层。此前这条横栏没有任何收缩策略，~700px 以下右端
+   直接被窗沿裁掉。media 按 CSS px（与布局同一坐标系，zoom 不影响档位判定）：
+   ≤900px 胶囊再收一档；≤700px 预设药丸塌成图标档。600px 是"全控件可达"的地板。 */
+@media (max-width: 900px) {
+  .cb-capsule { max-width: 150px; }
+}
+@media (max-width: 700px) {
+  .cb-capsule { max-width: 96px; }
+  .cb-ws-label { display: none; }
 }
 
 /* P105 反馈③（推翻我上一版的判断）：应用动作组推到右边，贴着窗口三键。
@@ -1729,7 +1753,8 @@ select optgroup {
   position: fixed;
   z-index: 1000;
   min-width: 260px;
-  max-height: 70vh;
+  /* P115-F2：vh 在 CSS zoom 下双重缩放（§19），改逻辑 px 上限（≈15 行后开滚） */
+  max-height: 420px;
   overflow: auto;
   padding: var(--sp-1);
   /* P103-VIS2 展开菜单同类化（十类同此，基准=用户点名的波特率菜单）：
@@ -5801,7 +5826,7 @@ select optgroup {
 }
 .tb-btn:hover { background: var(--accent-soft); color: var(--accent); }
 .tb-btn.on { color: var(--accent); background: var(--accent-soft); }
-.tb-close:hover { background: color-mix(in srgb, var(--danger) 85%, transparent) !important; color: #fff !important; }
+.tb-close:hover { background: color-mix(in srgb, var(--danger) 85%, transparent) !important; color: var(--on-danger, #fff) !important; }
 .tb-sep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; }
 .tb-menu {
   position: absolute;
@@ -6539,8 +6564,10 @@ label.set-switch,
   aspect-ratio: 1;
   border: none;
   border-radius: 50%;
-  background: #e2622b;
-  color: #1c1f24;
+  /* P115-F22：#e2622b/#1c1f24 字面量提为固定值令牌 --k-keypad / --k-keypad-ink
+     （定义与理由见 :root；check:contrast 钉 ink/keypad ≥ 4.5） */
+  background: var(--k-keypad);
+  color: var(--k-keypad-ink);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -8125,10 +8152,12 @@ a > svg {
 .ai-anom {
   flex: none;
   margin: 8px 12px 0;
-  border: 1px solid rgba(224, 123, 31, 0.5);
+  border: 1px solid color-mix(in srgb, var(--warn-fg) 50%, transparent);
   border-radius: var(--radius-l);
   overflow: hidden;
-  background: rgba(224, 123, 31, 0.08);
+  /* P115-F22：异常检测告警色原是 #e07b1f/rgba 字面量家族（同一语义五处各写一份），
+     归到 --warn-fg（亮色主题各自覆写，check:contrast 已钉 warn-fg/panel ≥ 4.5） */
+  background: color-mix(in srgb, var(--warn-fg) 8%, transparent);
 }
 .ai-anom-bar {
   all: unset;
@@ -8139,15 +8168,15 @@ a > svg {
   padding: 7px 10px;
   font-size: var(--fs-sm);
   font-weight: 600;
-  color: #e07b1f;
+  color: var(--warn-fg);
   cursor: pointer;
 }
-.ai-anom-bar:hover { background: rgba(224, 123, 31, 0.1); }
+.ai-anom-bar:hover { background: color-mix(in srgb, var(--warn-fg) 10%, transparent); }
 .ai-anom-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #e07b1f;
+  background: var(--warn-fg);
   animation: ai-blink 1.2s steps(2) infinite;
   flex: none;
 }
@@ -8157,7 +8186,7 @@ a > svg {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border-top: 1px solid rgba(224, 123, 31, 0.35);
+  border-top: 1px solid color-mix(in srgb, var(--warn-fg) 35%, transparent);
 }
 .ai-anom-title { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
 .ai-anom-detail { font-size: var(--fs-sm); line-height: 1.65; color: var(--text-dim); margin-top: 2px; }
@@ -8568,12 +8597,6 @@ html.aiw-transparent-root #root {
   line-height: 1.6;
 }
 
-/* E2：AI 服务页测试连接（按钮旁状态小字） */
-.set-conn-test { flex-wrap: wrap; gap: 8px; }
-.set-conn-note { font-size: var(--fs-body); color: var(--text-dim); }
-.set-conn-note.ok { color: var(--ok); }
-.set-conn-note.err { color: var(--warn-fg); }
-
 /* 设置页「插件管理」tab：内嵌插件库主体（PluginManagerBody），撑满内容列高度 */
 .set-plg-embed {
   display: flex;
@@ -8662,8 +8685,9 @@ html.aiw-transparent-root #root {
   margin: 0 0 10px;
   padding: 8px 12px;
   border-radius: var(--radius-l);
-  border: 1px solid color-mix(in srgb, #e0a030 40%, transparent);
-  background: color-mix(in srgb, #e0a030 8%, transparent);
+  /* P115-F22：#e0a030 字面量归 --warn-fg（同上，一处语义一处定义） */
+  border: 1px solid color-mix(in srgb, var(--warn-fg) 40%, transparent);
+  background: color-mix(in srgb, var(--warn-fg) 8%, transparent);
   color: var(--text);
   font-size: var(--fs-sm);
   line-height: 1.6;
@@ -8756,9 +8780,10 @@ html.aiw-transparent-root #root {
   line-height: 16px;
 }
 .ai-ext-badge.bare {
-  color: #d8863b;
-  border-color: color-mix(in srgb, #d8863b 45%, transparent);
-  background: color-mix(in srgb, #d8863b 14%, transparent);
+  /* P115-F22：#d8863b 归 --warn-fg（.fc-noframe-badge.live 同一批裁定的告警线色，见 5457 行注释） */
+  color: var(--warn-fg);
+  border-color: color-mix(in srgb, var(--warn-fg) 45%, transparent);
+  background: color-mix(in srgb, var(--warn-fg) 14%, transparent);
 }
 .ai-ext-running { font-size: var(--fs-xs); color: var(--ok); }
 .ai-widget-ops {
