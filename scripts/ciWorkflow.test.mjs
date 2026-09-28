@@ -39,8 +39,7 @@ describe("P102 · workflow 不许指向不入库的目录", () => {
   });
 });
 
-describe("P102 · 发版正文只有一个出处", () => {
-  const rel = readFileSync(path.join(ROOT, WF_DIR, "release.yml"), "utf8");
+describe("P102 · 发版正文只有一个出处", () => {  const rel = readFileSync(path.join(ROOT, WF_DIR, "release.yml"), "utf8");
 
   it("正文从 CHANGELOG.md 派生", () => {
     expect(rel, "release.yml 不再从 CHANGELOG 那一节取正文 ⇒ 又要长出第二个说明文件了").toContain("CHANGELOG.md");
@@ -52,5 +51,38 @@ describe("P102 · 发版正文只有一个出处", () => {
     expect(guard, "空正文的检查没了：jq/awk 失败也会把半成品建到 Releases 页上").toBeGreaterThan(-1);
     expect(create, "找不到创建 release 那句，这条的顺序比较没意义").toBeGreaterThan(-1);
     expect(guard < create, "正文检查挪到了创建之后 ⇒ 失败会留下一份空草稿（v0.5.0 第一轮就这样）").toBe(true);
+  });
+});
+
+/* ================= P118：门禁自己得在 CI 里跑 =================
+ * 这一批之前，`.github/workflows` 里 grep `check:` / `vitest` / `tsc` 是 **0 处**：
+ * 11 道门与 1800 多条测试只在本地由当值会话自觉执行。"这批全绿"因此不可审计、
+ * 也不可强制——漏跑一次没人知道，而 §8-60 那次付账（发版说明读不入库的目录，
+ * CI 连挂两轮）说的正是同一件事：**没人检查的约定早晚会烂**。
+ */
+describe("P118 · CI 必须真的跑门禁与测试", () => {
+  const all = files.map((f) => [f, readFileSync(path.join(ROOT, WF_DIR, f), "utf8")]);
+  const joined = all.map(([, s]) => s).join("\n");
+
+  it("至少有一份 workflow 跑 check:all（否则十道门是本地荣誉）", () => {
+    const runners = all.filter(([, s]) => /npm run check:all/.test(s)).map(([f]) => f);
+    expect(runners.length, "没有任何 workflow 跑 check:all：门禁只能在本地自觉").toBeGreaterThan(0);
+  });
+
+  it("至少有一份跑 vitest，且跑 tsc", () => {
+    expect(/vitest/.test(joined), "CI 不跑测试 ⇒ 1800 条断言在远端一文不值").toBe(true);
+    expect(/tsc --noEmit/.test(joined), "CI 不查类型 ⇒ 类型错误要到发版构建才炸").toBe(true);
+  });
+
+  it("ci.yml 只读：不发布、不写产物、不碰密钥", () => {
+    const ci = readFileSync(path.join(ROOT, WF_DIR, "ci.yml"), "utf8");
+    expect(/contents: read/.test(ci), "CI 需要写权限吗？发版是 release.yml 的活").toBe(true);
+    expect(/secrets\./.test(ci), "CI 里出现了 secrets —— 每个 fork/PR 都能读到，别顺手接密钥").toBe(false);
+    expect(/gh release|createRelease|uploads\.github/.test(ci), "CI 不该顺手发布").toBe(false);
+  });
+
+  it("标签推送到 v* 时由 release.yml 负责，ci.yml 明确让开（避免同一次发版跑两遍）", () => {
+    const ci = readFileSync(path.join(ROOT, WF_DIR, "ci.yml"), "utf8");
+    expect(/tags-ignore/.test(ci), "ci.yml 没排除 tag：发版会给同一个 tag 跑两套流水线").toBe(true);
   });
 });

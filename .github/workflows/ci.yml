@@ -1,0 +1,85 @@
+name: CI
+
+# P118：把"门禁全绿"从口头承诺变成机器事实。
+#
+# 为什么要这一份：仓库里有 11 道门 + 1800 多条测试，但**没有任何 workflow 跑它们**
+# （`check:` / `vitest` / `tsc` 在 .github/workflows 里 grep 到 0 处，seq-smoke 还是手动的）。
+# 于是"这批验过了"完全依赖当值会话自觉：两次并行施工里我们都各自跑了 check:all 才提交，
+# 可这既不可审计、也不可强制——漏跑一次，绿的就只是本地记忆。
+# 而 §8-60 那次付账（发版说明读一个不入库的文件，CI 连挂两轮）说的就是同一件事：
+# **没人检查的约定，早晚会烂**。
+#
+# 只读权限：这道流水线不发布、不写产物、不碰密钥。发版仍走 release.yml 的 tag 触发。
+
+on:
+  push:
+    branches: [main]
+    # 标签推的是 release.yml 的活；这里排除，避免同一次发版跑两遍
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # 同一分支上新提交直接作废旧的排队（runner 分钟花在最新状态上）
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: 前端（tsc + 11 道门 + vitest）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 与 release.yml 同一条 node 线：CI 两侧版本不一致时，
+          # `npm ci` 与 lockfile 的对话会给出两种答案（@tauri-apps/plugin-updater 那次就是）
+          node-version: 20
+          cache: npm
+
+      # §8-57：本地 node_modules 是 pnpm 装的，`package-lock.json` 的存在意义就是喂 CI。
+      # 所以这里用 npm ci 是它的本职，不是"跑 npm install"。
+      - name: Install dependencies
+        run: npm ci
+
+      - name: 类型
+        run: npx tsc --noEmit
+
+      - name: 十道门 + 视口单位门（check:all）
+        run: npm run check:all
+
+      - name: 测试
+        run: npx vitest run
+
+      - name: lint（0 error 是基线；warning 单独记账，不在这里挡门）
+        run: npm run lint
+
+  rust:
+    name: Rust（cargo test --lib）
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 系统依赖（与 release.yml 同一份清单）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libfuse2 \
+            libudev-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      # 只跑 --lib：桥/序列 CLI 的集成测试要真设备或额外构建，归 seq-smoke 手动那条
+      - name: 测试
+        run: cargo test --lib
