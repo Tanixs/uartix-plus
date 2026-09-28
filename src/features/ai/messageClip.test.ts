@@ -35,7 +35,11 @@ describe("bubbleMode", () => {
     const { readFileSync } = (await import(spec)) as {
       readFileSync: (p: string, enc: string) => string;
     };
-    const css = readFileSync(new URL("../../styles/theme.css", import.meta.url).pathname.slice(1), "utf8");
+    // fileURLToPath 而不是 `.pathname.slice(1)`：后者只在 Windows 上对（`/D:/x` → `D:/x`），
+    // Linux CI 上会把绝对路径的前导 `/` 吃掉，报一个和断言无关的 ENOENT（P118 CI 首跑实录）
+    const urlSpec = "node:url";
+    const { fileURLToPath } = (await import(urlSpec)) as { fileURLToPath: (u: string | URL) => string };
+    const css = readFileSync(fileURLToPath(new URL("../../styles/theme.css", import.meta.url)), "utf8");
     const block = css.match(/\.ai-msg-text\.scroll\s*\{[^}]*\}/);
     expect(block, "theme.css 里找不到 .ai-msg-text.scroll").toBeTruthy();
     expect(block![0]).toContain(`max-height: ${SCROLL_MAX_PX}px`);

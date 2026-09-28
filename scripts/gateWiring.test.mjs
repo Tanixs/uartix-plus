@@ -7,13 +7,19 @@
  * 这一条补的是**接线覆盖**：新增一道门而忘了挂链，这里当场红。
  */
 import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const ROOT = new URL("../", import.meta.url).pathname.replace(/^\/(\w:)/, "$1");
-const pkg = JSON.parse(readFileSync(`${ROOT}package.json`, "utf8"));
+// 仓库根：这里用 path 拼而不是 `new URL("../", import.meta.url)` —— 裸 `URL` 在 scripts/ 的
+// eslint 配置下是 no-undef（ciWorkflow.test.mjs 同一手法）。也**不要**退回
+// `.pathname.replace(/^\//,"")`：那是只在 Windows 上成立的剥法，Linux（CI）会把绝对路径
+// 削成相对路径，第十二道门（check-path-portability）判的就是它。
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const pkg = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
 const chain = pkg.scripts["check:all"];
 
-const gates = readdirSync(`${ROOT}.tools`)
+const gates = readdirSync(path.join(ROOT, ".tools"))
   .filter((f) => /^check-.*\.cjs$/.test(f))
   .sort();
 

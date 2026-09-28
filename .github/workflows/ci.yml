@@ -2,7 +2,7 @@ name: CI
 
 # P118：把"门禁全绿"从口头承诺变成机器事实。
 #
-# 为什么要这一份：仓库里有 11 道门 + 1800 多条测试，但**没有任何 workflow 跑它们**
+# 为什么要这一份：仓库里十几道门 + 1800 多条测试，但**没有任何 workflow 跑它们**
 # （`check:` / `vitest` / `tsc` 在 .github/workflows 里 grep 到 0 处，seq-smoke 还是手动的）。
 # 于是"这批验过了"完全依赖当值会话自觉：两次并行施工里我们都各自跑了 check:all 才提交，
 # 可这既不可审计、也不可强制——漏跑一次，绿的就只是本地记忆。
@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   frontend:
-    name: 前端（tsc + 11 道门 + vitest）
+    name: 前端（tsc + 全部门禁 + vitest + lint）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +49,7 @@ jobs:
       - name: 类型
         run: npx tsc --noEmit
 
-      - name: 十道门 + 视口单位门（check:all）
+      - name: 全部门禁（npm run check:all）
         run: npm run check:all
 
       - name: 测试

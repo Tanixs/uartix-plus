@@ -435,7 +435,11 @@ describe("P92-F 样式层接线", () => {
     const { readFileSync } = (await import(spec)) as {
       readFileSync: (p: string, enc: string) => string;
     };
-    const src = readFileSync(new URL("./pluginStore.ts", import.meta.url).pathname.slice(1), "utf8");
+    // fileURLToPath 而不是 `.pathname.slice(1)`：后者把 Windows 的前导斜杠剥法带到了
+    // Linux 上，CI 里变成 ENOENT（P118 首跑实录）——它测的是接线，不是路径
+    const urlSpec = "node:url";
+    const { fileURLToPath } = (await import(urlSpec)) as { fileURLToPath: (u: string | URL) => string };
+    const src = readFileSync(fileURLToPath(new URL("./pluginStore.ts", import.meta.url)), "utf8");
     // 只看代码：本文件顶部的教训注释里**引用**了那行 import，不能算命中
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(code).not.toMatch(/from\s+["']\.\.\/ai\/extRuntime["']/);

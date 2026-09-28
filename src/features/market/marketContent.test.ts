@@ -36,10 +36,16 @@ const { join, resolve } = (await import(pathSpec)) as unknown as {
   join: (...p: string[]) => string;
   resolve: (...p: string[]) => string;
 };
+const urlSpec = "node:url";
+const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+  fileURLToPath: (u: string | URL) => string;
+};
 const { validateManifest } = await import("../plugins/pluginManifest");
 
 // src/features/market → 仓库根（三层上跳）；路径不对时测试会指着错的目录，所以先自证
-const ROOT = resolve(new URL(".", import.meta.url).pathname.replace(/^\//, ""), "..", "..", "..");
+// 走 fileURLToPath：`.pathname.replace(/^\//,"")` 是 Windows 专有的剥法，Linux 会把绝对路径
+// 变成相对路径（P118 CI 首跑在这里拼出 `cwd + home/runner/...`）
+const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "..", "..");
 const committed = JSON.parse(readFileSync(join(ROOT, "public", "market", "index.json"), "utf8")) as MarketIndex;
 
 /** 索引里每条对应的**上架字节**（应用装的就是这个，不是源包） */

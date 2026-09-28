@@ -58,7 +58,13 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
       readFileSync: (p: string, enc?: string) => string;
     };
     const { join } = (await import(pathSpec)) as unknown as { join: (...p: string[]) => string };
-    const root = new URL(".", import.meta.url).pathname.replace(/^\//, "");
+    // fileURLToPath 而不是 `.pathname.replace(/^\//,"")`：后者是 Windows 专有的剥法，
+    // 到 Linux（CI）上会把绝对路径削成相对路径，报的是 ENOENT 而不是断言（P118 首跑实录）
+    const urlSpec = "node:url";
+    const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+      fileURLToPath: (u: string | URL) => string;
+    };
+    const root = fileURLToPath(new URL(".", import.meta.url));
     const dirs = [join(root, ""), join(root, "..", "plugins", "")];
     const codes = new Set<string>();
     for (const dir of dirs) {
@@ -83,7 +89,11 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
      */
     const fsSpec = "node:fs";
     const { readFileSync } = (await import(fsSpec)) as unknown as { readFileSync: (p: string, enc?: string) => string };
-    const src = readFileSync(new URL("./hostCatalog.ts", import.meta.url).pathname.replace(/^\//, ""), "utf8");
+    const urlSpec = "node:url";
+    const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+      fileURLToPath: (u: string | URL) => string;
+    };
+    const src = readFileSync(fileURLToPath(new URL("./hostCatalog.ts", import.meta.url)), "utf8");
     const codes = new Set<string>();
     for (const line of src.split(/\r?\n/)) {
       if (!/(^|[^.\w])code:/.test(line)) continue;
@@ -109,7 +119,11 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
     // 那样从表里删一个码，运行时这条钉一声不响（证伪实测过）。
     const fsSpec = "node:fs";
     const { readFileSync } = (await import(fsSpec)) as unknown as { readFileSync: (p: string, enc?: string) => string };
-    const src = readFileSync(new URL("../market/marketInstall.ts", import.meta.url).pathname.replace(/^\//, ""), "utf8");
+    const urlSpec = "node:url";
+    const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+      fileURLToPath: (u: string | URL) => string;
+    };
+    const src = readFileSync(fileURLToPath(new URL("../market/marketInstall.ts", import.meta.url)), "utf8");
     const used = new Set<string>([
       ...[...src.matchAll(/code:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),
       ...[...src.matchAll(/\bbad\(\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),

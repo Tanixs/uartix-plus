@@ -23,6 +23,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CANDIDATES = [
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -84,7 +85,7 @@ export function shoot({ url, out, size = "1440,900", wait = 15000, profile }) {
 }
 
 /* 只有被当命令跑时才解析 argv —— 被 import 时不能顺手把调用方的参数吃了 */
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname.replace(/^\/(\w:)/, "$1"))) {
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const [out, url, size] = process.argv.slice(2);
   if (!out || !url) {
     console.error("用法：node .tools/shot.mjs <out.png> <url> [宽,高]");
