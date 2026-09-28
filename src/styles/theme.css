@@ -1634,7 +1634,7 @@ select optgroup {
 }
 
 /* 自定义协议编辑器 */
-.qk-editor { max-width: 860px; width: min(860px, 92vw); }
+.qk-editor { max-width: 860px; width: min(860px, calc(92vw / var(--zoom))); }
 .qk-ed-grid {
   display: flex;
   gap: 14px;
@@ -1652,7 +1652,7 @@ select optgroup {
   flex-direction: column;
   gap: 6px;
   margin-top: 6px;
-  max-height: 34vh;
+  max-height: calc(34vh / var(--zoom));
   overflow: auto;
 }
 .qk-ed-seg {
@@ -1708,7 +1708,7 @@ select optgroup {
   color: var(--accent);
 }
 .qk-manage-list {
-  max-height: 46vh;
+  max-height: calc(46vh / var(--zoom));
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -2996,13 +2996,21 @@ select optgroup {
   border-bottom: 1px solid var(--border);
 }
 
+/* P117-C：上面那条 wrap 治不了这一处——探针在 700px 窗口量到 `.tbl-bar` 仍溢出 +8px，
+   因为某个孩子（那两枚下拉）的固有宽比整行还宽，换行也换不下。允许收缩 + 限宽到一行：
+   控件仍在框内点得到（下拉自己截字），不是把按钮裁到盒外。 */
+.tbl-bar > * { min-width: 0; max-width: 100%; }
+
 .tbl-bar-spacer {
   flex: 1;
 }
 
 .tbl-filter {
   flex: 1 1 140px;
-  min-width: 100px;
+  /* P117-C：地板不能比房间大。探针在窄面板里量到这条工具条溢出 +8px，元凶就是这个
+     写死的 100px —— 那一屏里工具条的内容盒只有 84px，`flex-wrap` 也救不了一整行放不下的
+     单项。改成"有地方就 100，没地方就让给容器"：按钮仍在框内点得到，不靠裁切（§I 门口径）。 */
+  min-width: min(100px, 100%);
 }
 
 .tbl-capped {
@@ -4427,8 +4435,8 @@ select optgroup {
 }
 
 .modal {
-  width: min(560px, 92vw);
-  max-height: 86vh;
+  width: min(560px, calc(92vw / var(--zoom)));
+  max-height: calc(86vh / var(--zoom));
   overflow-y: auto;
   padding: 16px 18px;
   background: var(--bg-panel);
@@ -4962,7 +4970,7 @@ select optgroup {
 .ctx-flyout {
   min-width: 150px;
   max-width: 320px;
-  max-height: 60vh;
+  max-height: calc(60vh / var(--zoom));
 }
 
 .cmd-edit-hint {
@@ -5244,7 +5252,10 @@ select optgroup {
    这是两害相权后的选择：另一条路（抬面板最小宽）实测是拿邻居换自己的空间，
    已被用户 2026-09-25 判掉，详见 docs/P104-P3-详设.md §9。
    I 门钉的就是"别再往条上写 overflow:hidden"。 */
-.fc-toolbar{display:flex;align-items:center;gap:8px;box-sizing:border-box;min-height:28px;padding:2px 8px;border-bottom:1px solid var(--border);flex:none;}
+/* P117-C：窄面板下这条工具条溢出 +19px（探针实测）。按 `.tbl-bar` 立着的同族口径处理——
+   工具条**不靠裁切**（裁掉的按钮等于没有，那正是 P3 那批"控件在盒外点不到"的事故，
+   I 门就是为它写的），换行让条自己长高，按钮仍然点得到。 */
+.fc-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;box-sizing:border-box;min-height:28px;padding:2px 8px;border-bottom:1px solid var(--border);flex:none;}
 .fc-toolbar .btn.icon{display:inline-flex;align-items:center;justify-content:center;padding:5px 7px;}
 .fc-toolbar .btn.saved-ok{color:var(--ok);border-color:color-mix(in srgb, var(--ok) 50%, transparent);background:color-mix(in srgb, var(--ok) 12%, transparent);}
 .fc-toolbar .btn.saved-err{color:var(--danger);border-color:color-mix(in srgb, var(--danger) 55%, transparent);background:color-mix(in srgb, var(--danger) 12%, transparent);animation:fc-shake .3s;}
@@ -6451,7 +6462,7 @@ label.set-switch,
 .set-io-desc { flex: 1; min-width: 180px; }
 .set-io-parts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 /* 主题跟随确认/提示弹窗（P82⑤，shared/Dialog）：复用 .modal 体系，小号单列 */
-.app-dlg { width: min(400px, 86vw); height: auto; padding: 0 0 14px; }
+.app-dlg { width: min(400px, calc(86vw / var(--zoom))); height: auto; padding: 0 0 14px; }
 /* app-dlg 把 .modal 的水平 padding 清零后标题会贴边——标题自带内边距对齐正文节奏 */
 .app-dlg .modal-title { padding: 16px 18px 0; margin-bottom: 6px; }
 .app-dlg-msg { font-size: var(--fs-sm); line-height: 1.7; color: var(--text); padding: 12px 18px 14px; white-space: pre-wrap; word-break: break-word; user-select: text; }
@@ -6471,7 +6482,7 @@ label.set-switch,
 .props-confirm { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--danger); border-radius: var(--radius-l); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .props-confirm-msg { font-size: var(--fs-sm); line-height: 1.6; margin-bottom: 8px; }
 .props-confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
-.fc-confirm { width: min(420px, 90vw); }
+.fc-confirm { width: min(420px, calc(90vw / var(--zoom))); }
 .fc-confirm-body { padding: 6px 18px 4px; font-size: var(--fs-sm); line-height: 1.7; }
 .ctx-row { position: relative; }
 .ctx-row > .ctx-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left; }
@@ -6857,7 +6868,7 @@ a > svg {
   max-width: 520px;
 }
 .crash-root {
-  margin: 15vh auto 0;
+  margin: calc(15vh / var(--zoom)) auto 0;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
 }
 .crash-title {
@@ -8332,7 +8343,7 @@ a > svg {
 .aiw-desktop {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: calc(100vh / var(--zoom));
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -8802,7 +8813,7 @@ html.aiw-transparent-root #root {
 .ai-widget-ops .btn { padding: 2px 8px; height: 22px; font-size: var(--fs-body); flex: none; }
 
 /* ==== XMODEM/YMODEM 文件传输（P49） ==== */
-.xfer-modal { width: min(560px, 92vw); }
+.xfer-modal { width: min(560px, calc(92vw / var(--zoom))); }
 .xfer-body { padding: 14px 20px; display: flex; flex-direction: column; gap: 10px; }
 .xfer-row { display: flex; align-items: center; gap: 8px; }
 .xfer-row > label { width: 34px; flex: none; font-size: var(--fs-sm); opacity: .75; }
@@ -9116,7 +9127,7 @@ html.aiw-transparent-root #root {
 /* ---- P62-S2 桌面挂件窗（独立根 #/sentinel-widget）---- */
 html:has(.sw), .sw { background: transparent; }
 .sw {
-  height: 100vh; display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  height: calc(100vh / var(--zoom)); display: flex; flex-direction: column; gap: 6px; padding: 8px;
   background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-l);
   font-family: var(--font-ui); font-size: var(--fs-sm); overflow: hidden; user-select: none;
 }
@@ -9965,7 +9976,7 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
 .tour-pop {
   position: fixed;
   z-index: 5001;
-  width: min(340px, calc(100vw - 24px));
+  width: min(340px, calc((100vw - 24px) / var(--zoom)));
   padding: 14px 16px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -10370,8 +10381,8 @@ body.pdrag-active *{cursor:grabbing !important;}
 /* 遮罩与外壳对齐现有 .modal/.modal-mask 的 12px 圆角与主题阴影，层级不与菜单/拖拽竞争 */
 .workflow-dialog-mask.modal-mask { align-items: center; }
 .workflow-dialog {
-  width: min(820px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
+  width: min(820px, calc((100vw - 32px) / var(--zoom)));
+  max-height: calc((100dvh - 32px) / var(--zoom));
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -11022,8 +11033,8 @@ body.pdrag-active *{cursor:grabbing !important;}
 .mkt-shot-dot.on { background: var(--accent); }
 .mkt-shots-tip { font-size: var(--fs-body); }
 .mkt-big { position: fixed; inset: 0; z-index: 220; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.6); }
-.mkt-big-inner { display: flex; flex-direction: column; gap: 8px; max-width: 92vw; max-height: 92vh; }
-.mkt-big-img { max-width: 92vw; max-height: 82vh; object-fit: contain; border-radius: var(--radius-m); border: 1px solid var(--border); background: var(--bg-inset); }
+.mkt-big-inner { display: flex; flex-direction: column; gap: 8px; max-width: calc(92vw / var(--zoom)); max-height: calc(92vh / var(--zoom)); }
+.mkt-big-img { max-width: calc(92vw / var(--zoom)); max-height: calc(82vh / var(--zoom)); object-fit: contain; border-radius: var(--radius-m); border: 1px solid var(--border); background: var(--bg-inset); }
 .mkt-big-msg { padding: 40px; color: var(--text-dim); font-size: var(--fs-sm); }
 .mkt-big-foot { display: flex; align-items: center; gap: 8px; }
 .mkt-big-name { font-size: var(--fs-sm); margin-right: auto; }
@@ -11052,7 +11063,7 @@ html.no-motion .mkt-img-skel { animation: none; }
 .tb-badge { position: absolute; top: 3px; right: 3px; min-width: 14px; padding: 0 3px; border-radius: var(--radius-l); background: var(--warn); color: var(--on-accent, #fff); font-size: var(--fs-xs); font-weight: 700; line-height: 14px; text-align: center; pointer-events: none; }
 
 /* 确认卡从弹窗里搬出来挂顶层一份：以前关掉宿主弹窗就看不见它，而命令行那句"请在应用里点装入"指的正是这里 */
-.mkt-pend { position: fixed; right: 16px; bottom: 44px; z-index: 215; width: min(430px, calc(100vw - 32px)); margin: 0; background: var(--bg-panel); box-shadow: var(--shadow); }
+.mkt-pend { position: fixed; right: 16px; bottom: 44px; z-index: 215; width: min(430px, calc((100vw - 32px) / var(--zoom))); margin: 0; background: var(--bg-panel); box-shadow: var(--shadow); }
 .mkt-pend-count { font-size: var(--fs-sm); font-weight: 600; }
 .mkt-pend-sub { margin-left: auto; font-size: var(--fs-body); font-weight: 400; color: var(--text-dim); }
 .mkt-pend-head { display: flex; align-items: center; gap: 8px; }
@@ -11148,15 +11159,15 @@ html.no-motion .mkt-img-skel { animation: none; }
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 12vh;
+  padding-top: calc(12vh / var(--zoom));
   background: color-mix(in srgb, var(--bg-inset) 62%, transparent);
 }
 
 .cmdk {
   display: flex;
   flex-direction: column;
-  width: min(560px, calc(100vw - 32px));
-  max-height: min(60vh, 460px);
+  width: min(560px, calc((100vw - 32px) / var(--zoom)));
+  max-height: min(calc(60vh / var(--zoom)), 460px);
   background: var(--bg-panel);
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-pop), var(--shadow);
@@ -11277,8 +11288,8 @@ html.no-motion .mkt-img-skel { animation: none; }
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  width: min(620px, calc(100vw - 32px));
-  max-height: calc(100vh - 24px);
+  width: min(620px, calc((100vw - 32px) / var(--zoom)));
+  max-height: calc((100vh - 24px) / var(--zoom));
   overflow-y: auto;
   padding: var(--sp-5);
   background: var(--bg-panel);
