@@ -2593,3 +2593,110 @@ mod checksum_vectors {
         assert_eq!(checksum_compute("no-such-algo", &[0x01]), 0, "未知算法必须回 0，而不是 panic");
     }
 }
+
+/// P121-B · 发送谱 ↔ 解析器的往返。
+///
+/// 这里钉的是这一整批**最该钉的一件事**：TS 侧 `encodeSend` 编出来的字节，
+/// 用接收侧同一套类型/字序/校验解释，必须还原成编码前那个数。
+/// 光看单侧是看不出来的 —— `checksums.ts` 与 `checksum_compute` 就是两份实现漂了没人钉的先例
+/// （P121-A 刚给它补上向量表）。
+///
+/// 表里的 hex 与 `src/features/send/roundTrip.test.ts` 是同一份；那边有一条测试会扫本文件确认
+/// 每个 hex 都在，所以"改一边忘一边"当场红。下面这张注释就是那份对账表：
+///
+/// ```text
+/// A5 12 34 FF FE 3F 80 00 00    大端帧：uint16 / int16(-2) / float32(1.0)
+/// 78 56 34 12 00 00 80 3F       小端帧：uint32(0x12345678) / float32(1.0)
+/// 56 78 12 34                   CDAB 字序：uint32(0x12345678)
+/// 34 12 78 56                   BADC 字序：uint32(0x12345678)
+/// 3F F0 00 00 00 00 00 00       float64(1.0)
+/// 50                            位段：index=4 count=3 值 5
+/// 31 32 33 34 35 36 37 38 39 37 4B          CRC-16/MODBUS 低字节在前
+/// 31 32 33 34 35 36 37 38 39 CB F4 39 26    CRC-32 大端
+/// ```
+#[cfg(test)]
+mod send_round_trip {
+    use super::*;
+
+    fn f(id: &str, ty: &str, endian: &str) -> FieldDef {
+        FieldDef {
+            id: id.into(),
+            name: id.into(),
+            role: "data".into(),
+            offset: 0,
+            field_type: ty.into(),
+            endian: endian.into(),
+            size: None,
+            scale: None,
+            offset_value: None,
+            unit: None,
+            color: "#888888".into(),
+            bits: None,
+            csv_delim: None,
+            csv_type: None,
+            disc: None,
+            span_tail: None,
+            span_elem: None,
+        }
+    }
+
+    #[test]
+    fn big_endian_frame_decodes_back_to_the_encoded_values() {
+        // A5 | 1234 | FFFE(-2) | 3F800000(1.0)
+        let b = [0xA5u8, 0x12, 0x34, 0xFF, 0xFE, 0x3F, 0x80, 0x00, 0x00];
+        assert_eq!(read_uint(&b[1..3], "big"), 0x1234);
+        assert_eq!(decode_numeric(&f("i", "int16", "big"), &b[3..5]), -2.0);
+        assert_eq!(decode_numeric(&f("t", "float32", "big"), &b[5..9]), 1.0);
+    }
+
+    #[test]
+    fn little_endian_frame_decodes_back() {
+        // 12345678(小端) | 1.0(小端)
+        let b = [0x78u8, 0x56, 0x34, 0x12, 0x00, 0x00, 0x80, 0x3F];
+        assert_eq!(read_uint(&b[0..4], "little"), 0x1234_5678);
+        assert_eq!(decode_numeric(&f("t", "float32", "little"), &b[4..8]), 1.0);
+    }
+
+    #[test]
+    fn both_word_swaps_round_trip() {
+        // CDAB 与 BADC 是 Modbus 那类"32 位量占两个寄存器"的线上形状
+        let cdab = [0x56u8, 0x78, 0x12, 0x34];
+        let badc = [0x34u8, 0x12, 0x78, 0x56];
+        assert_eq!(read_uint(&cdab, "big-word-swap"), 0x1234_5678);
+        assert_eq!(read_uint(&badc, "little-word-swap"), 0x1234_5678);
+    }
+
+    #[test]
+    fn float64_round_trips() {
+        let b = [0x3Fu8, 0xF0, 0, 0, 0, 0, 0, 0];
+        assert_eq!(decode_numeric(&f("d", "float64", "big"), &b), 1.0);
+    }
+
+    #[test]
+    fn bit_field_round_trips() {
+        // 发送侧 (5 << 4) & 0x70 = 0x50；接收侧按 (byte >> index) & mask 还原
+        let mut fd = f("bit", "bits", "big");
+        fd.bits = Some(BitsCfg { index: 4, count: 3 });
+        assert_eq!(decode_numeric(&fd, &[0x50]), 5.0);
+    }
+
+    #[test]
+    fn checksums_land_on_the_wire_in_the_order_the_parser_reads_them() {
+        let body = [0x31u8, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39];
+        let crc = crc16_modbus(&body) as u64;
+        assert_eq!(crc, 0x4B37);
+        // CRC16-Modbus 低字节在前
+        assert_eq!([0x37u8, 0x4B][0] as u64, crc & 0xff);
+        assert_eq!([0x37u8, 0x4B][1] as u64, (crc >> 8) & 0xff);
+        // CRC-32 大端落帧：CB F4 39 26
+        let c32 = crc32(&body) as u64;
+        let wire = [0xCBu8, 0xF4, 0x39, 0x26];
+        let joined = ((wire[0] as u64) << 24) | ((wire[1] as u64) << 16) | ((wire[2] as u64) << 8) | wire[3] as u64;
+        assert_eq!(joined, c32);
+        // SUM8 的覆盖口径：coverage_end = -1 表示"不含最后这一个字节"
+        let mut framed = body.to_vec();
+        framed.push(0);
+        let n = framed.len();
+        assert_eq!(checksum_compute("sum8", &framed[0..n - 1]), 0xDD);
+    }
+}

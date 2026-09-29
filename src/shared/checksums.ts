@@ -44,6 +44,30 @@ export function crc32(bytes: number[]): number {
 
 export type Crc16Algo = "modbus" | "ccitt-false" | "x25";
 
+/**
+ * 校验字段占几字节。
+ *
+ * 这张表今天有**三份**：这里、`protocol/templateStore.ts` 的 `CHECKSUM_SIZES`、
+ * `framecanvas/frameLayout.ts` 的 `checksumLen`，外加 Rust 侧 `parser.rs` 的 `checksum_size`
+ * ——四份对"未知算法"的兜底都不一样（frameLayout 给 2、Rust 给 1）。
+ * P121-B 先把发送侧接在这里，并用 `checksums.test.ts` 钉住六个已知算法三方一致；
+ * D10（CRC 参数化）会把表收成一份、兜底也收成一条。
+ */
+export const CHECKSUM_WIDTHS: Record<string, number> = {
+  none: 0,
+  sum8: 1,
+  xor8: 1,
+  sumadd: 2,
+  crc16_modbus: 2,
+  crc16_ccitt: 2,
+  crc32: 4,
+};
+
+export function checksumWidth(algo: string | null | undefined): number {
+  if (!algo) return 0;
+  return CHECKSUM_WIDTHS[algo] ?? 0;
+}
+
 export function crc16(algo: Crc16Algo, bytes: number[]): number {
   const cfg = {
     modbus: { poly: 0x8005, init: 0xffff, refin: true, refout: true, xorout: 0x0000 },
