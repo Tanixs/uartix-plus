@@ -24,6 +24,7 @@ import MetricsPanel from "../features/analysis/MetricsPanel";
 import { OrchestratorPanel } from "../features/orchestrator/OrchestratorPanel";
 import { VdevPanel } from "../features/vdev/VdevPanel";
 import { ExtPanelHost } from "../features/ai/ExtPanel";
+import { SendBuildPanel } from "../features/send/SendBuildPanel";
 
 /** 面板页签名（语言感知，P33 i18n）；页签重挂靠 App 的 retitlePanels（locale 变化时 setTitle） */
 export const PANEL_TITLES = (): Record<PanelId, string> => {
@@ -50,6 +51,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     metrics: pick("指标面板", "Metrics"),
     orchestrator: pick("自动编排器", "Orchestrator"),
     vdev: pick("虚拟设备工坊", "Virtual Devices"),
+    sendbuild: pick("发送组包", "Send Builder"),
   };
 };
 
@@ -82,6 +84,7 @@ const MPlot3D = memo(Plot3D);
 const MMetrics = memo(MetricsPanel);
 const MOrchestrator = memo(OrchestratorPanel);
 const MVdev = memo(VdevPanel);
+const MSendBuild = memo(SendBuildPanel);
 
 export const panelComponents = {
   templates: () => (
@@ -182,6 +185,11 @@ export const panelComponents = {
   vdev: () => (
     <ErrorBoundary label={panelTitleOf("vdev")}>
       <MVdev />
+    </ErrorBoundary>
+  ),
+  sendbuild: () => (
+    <ErrorBoundary label={panelTitleOf("sendbuild")}>
+      <MSendBuild />
     </ErrorBoundary>
   ),
   aiExtPanel: (props: { params?: { extId?: string } }) => (

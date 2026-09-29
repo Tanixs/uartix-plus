@@ -18,7 +18,8 @@ export type PanelId =
   | "plot3d"
   | "metrics"
   | "orchestrator"
-  | "vdev";
+  | "vdev"
+  | "sendbuild";
 
 export interface PanelMeta {
   id: PanelId;

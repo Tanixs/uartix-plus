@@ -96,6 +96,8 @@ export interface DevBootOverrides {
    */
   open?: DevOpenView;
   settingsTab?: string;
+  /** `?open=panel/framecanvas`：取证时直接打开某枚面板（id 由 App 侧对着面板表校验） */
+  openPanel?: string;
   /**
    * `?probe=overflow` —— 把"内容画到自己格子外面"的元素描红并在角落报个数（P113-A 取证）。
    *
@@ -119,7 +121,7 @@ export interface DevBootOverrides {
 }
 
 /** `?open=` 认的视图。`ai` = AI 助手面板（它默认可能没开）。 */
-export const DEV_OPEN_VIEWS = ["settings", "ai"] as const;
+export const DEV_OPEN_VIEWS = ["settings", "ai", "panel"] as const;
 export type DevOpenView = (typeof DEV_OPEN_VIEWS)[number];
 
 /**
@@ -182,7 +184,8 @@ export function parseDevBoot(search: string): DevBootOverrides {
     const [view, tab] = open.split("/");
     if ((DEV_OPEN_VIEWS as readonly string[]).includes(view)) {
       o.open = view as DevOpenView;
-      if (tab && (DEV_SETTINGS_TABS as readonly string[]).includes(tab)) o.settingsTab = tab;
+      if (view === "panel") o.openPanel = tab && /^[\w-]{1,40}$/.test(tab) ? tab : undefined;
+      else if (tab && (DEV_SETTINGS_TABS as readonly string[]).includes(tab)) o.settingsTab = tab;
     }
   }
 
@@ -216,7 +219,7 @@ export function devForensics(
 export function hasDevBoot(o: DevBootOverrides): boolean {
   return Boolean(
     o.preset || o.theme || o.zoom || o.lang || o.tourAt !== undefined || o.rail || o.iface ||
-    o.open || o.probeOverflow || o.railw !== undefined || o.click !== undefined ||
+    o.open || o.openPanel || o.probeOverflow || o.railw !== undefined || o.click !== undefined ||
     o.welcomeOff || o.welcomeForce || o.resetLayout,
   );
 }
@@ -228,10 +231,10 @@ export function hasDevBoot(o: DevBootOverrides): boolean {
 export function devOpenRequest(
   search: string,
   env: { dev?: boolean; prod?: boolean } = { dev: import.meta.env.DEV, prod: import.meta.env.PROD },
-): { view: DevOpenView; tab?: string } | undefined {
+): { view: DevOpenView; tab?: string; panel?: string } | undefined {
   if (!devBootEnabled(env)) return undefined;
   const o = parseDevBoot(search);
-  return o.open ? { view: o.open, tab: o.settingsTab } : undefined;
+  return o.open ? { view: o.open, tab: o.settingsTab, panel: o.openPanel } : undefined;
 }
 
 /**

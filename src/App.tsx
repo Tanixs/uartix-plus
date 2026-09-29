@@ -271,6 +271,10 @@ export default function App() {
       setSettingsOpen(true);
     } else if (devOpen?.view === "ai") {
       setAiOpen(true);
+    } else if (devOpen?.view === "panel" && devOpen.panel && devOpen.panel in PANEL_TITLES()) {
+      // 取证用：`?open=panel/sendbuild` 直接把某枚面板拉进工作区（id 对着面板表校验，
+      // 认不出来就当没给，免得 dockview 拿一个不存在的组件名去 addPanel）
+      addOrFocusPanel(devOpen.panel);
     }
     // P113-A：`?railw=220&probe=overflow` —— 钉住导轨二级面板的宽度，再把"内容画到自己格子外面"
     // 的元素描红。拖窄才复现得出的叠字，光读 CSS 只能列候选、定不了案；这两个开关让它变成一张图。

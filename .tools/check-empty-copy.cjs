@@ -29,6 +29,9 @@ const SRC = path.join(ROOT, "src");
  *  2026-09-25 B11 第一轮：1063 → 615（对 HEAD 复测，同一套 measure()），
  *  下面全部降到当轮实测值。 */
 const BUDGETS = {
+  /* P121-C 发送组包面板：23 字 = 空态那两句（"还没有发送谱" + 一句它是什么）。
+     新面板第一次有默认页文字，按规矩进来登记而不是偷偷留白 —— 之后只许降。 */
+  "src/features/send/SendBuildPanel.tsx": 23,
   "src/features/ai/AiChat.tsx": 87,
   "src/features/xray/XRayPanel.tsx": 80,
   "src/features/sentinel/SentinelPanel.tsx": 67,

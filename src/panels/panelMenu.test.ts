@@ -41,8 +41,10 @@ describe("PANEL_GROUPS", () => {
     expect(panelGroupOf("nope")).toBeUndefined();
   });
 
-  it("面板总数与清单一致（20 个内置面板）", () => {
-    expect(PANEL_GROUPS.flatMap((g) => g.ids as readonly string[])).toHaveLength(20);
+  it("面板总数与清单一致（21 个内置面板）", () => {
+    // P121-C 加了「发送组包」：20 → 21。这条断言存在的意义就是"加面板必须留痕"，
+    // 改数字的人必须顺带确认分组、标题、帮助覆盖都跟上了
+    expect(PANEL_GROUPS.flatMap((g) => g.ids as readonly string[])).toHaveLength(21);
   });
 
   it("分组名随语言切换", () => {
@@ -97,5 +99,41 @@ describe("最近使用面板", () => {
       mem.set("vs.panels.recent", JSON.stringify(["plot2d", "nope-panel", 7]));
       expect(getRecentPanels()).toEqual(["plot2d"]);
     });
+  });
+});
+
+/* ================= P121-C：注册完整性 =================
+ * 加一枚面板要动 8 处（详设 §12.3）。分组、标题、可添加清单都有守卫，
+ * 唯独 **dockview 的组件注册表**没有：`panelComponents` 是个普通对象，
+ * 少一个键不会 tsc 红，症状是"清单里能选到它，选完是一块空白"。
+ * 这里按源码扫一遍补上——与 `prompts.test.ts` 的"清单 == 注册表"同一族钉。
+ */
+const fsSpec = "node:fs";
+const urlSpec = "node:url";
+const { readFileSync } = (await import(fsSpec)) as unknown as {
+  readFileSync: (p: string, enc?: string) => string;
+};
+const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+  fileURLToPath: (u: string | URL) => string;
+};
+
+describe("P121-C · 每枚可添加面板都真的注册了组件", () => {
+  const src = readFileSync(fileURLToPath(new URL("./panels.tsx", import.meta.url)), "utf8");
+  const registry = src.slice(src.indexOf("export const panelComponents = {"));
+
+  it("注册表片段找得到（找不到就说明 panels.tsx 结构变了，下面几条没意义）", () => {
+    expect(registry.length).toBeGreaterThan(200);
+  });
+
+  for (const id of PANEL_GROUPS.flatMap((g) => g.ids as readonly string[])) {
+    it(`${id} 在 panelComponents 里有组件`, () => {
+      expect(registry, `「+ 面板」能选到 ${id}，但注册表里没有它 ⇒ 打开是空白`).toContain(`${id}: (`);
+    });
+  }
+
+  it("发送组包面板落在「解析与画布」分组（与帧画布同族：一个描述收到的字节，一个描述要发的）", () => {
+    expect(panelGroupOf("sendbuild")?.key).toBe("parse");
+    const ids = (PANEL_GROUPS.find((g) => g.key === "parse")!.ids ?? []) as readonly string[];
+    expect(ids.indexOf("sendbuild")).toBeGreaterThan(ids.indexOf("framecanvas"));
   });
 });

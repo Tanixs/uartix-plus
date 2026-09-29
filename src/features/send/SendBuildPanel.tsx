@@ -1,0 +1,500 @@
+/**
+ * P121-C · 发送组包面板。
+ *
+ * 为什么是一枚独立面板而不是"塞回控制台"：用户的原话是"指令工厂挤在控制台里有点拥挤"。
+ * 这不是样式问题——导轨二级面板固定 300px（`SHELL_CHROME.railPanelW`），
+ * 料板 + 字节带 + 属性 + 预览四块在里面放不下，硬放就是今天控制台的翻版。
+ *
+ * 交互与接收侧同族但方向相反：帧画布是"在真帧上框选一段字节 → 命名"，
+ * 这里是"往空字节带上摆块 → 填值"。**用的是 DOM 字节条而不是 canvas**
+ * （详设 §12.2 的改判）：帧画布的 canvas 服务于归档、滚动、缩放那一套，
+ * 发送谱没有这些，共用只会把改动 134KB 文件的风险引进来。
+ *
+ * 预览与发送调的是同一个 `encodeSend`（P121-A 立的那条规矩）：
+ * 界面上看到的字节**就是**点发送会出去的字节，没有第二份计算。
+ */
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { ChecksumAlgo, Endian, FieldRole, FieldType } from "../../ipc/types";
+import { tx, useLocale } from "../../i18n/strings";
+import { EmptyState } from "../../shared/EmptyState";
+import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
+import { IconPlus, IconTrash } from "../../shared/icons";
+import * as serialStore from "../serial/serialStore";
+import * as sendStore from "./sendStore";
+import { encodeSend } from "./encodeSend";
+import { sendFieldWidth, type SendField, type SendTemplate } from "./sendTypes";
+
+/** 料板：每一项就是一个字段预设。顺序即界面顺序，按"结构件 → 数值 → 文本 → 计算件"排 */
+const PALETTE: { key: string; label: () => string; make: () => Omit<SendField, "id"> }[] = [
+  { key: "header", label: () => tx("帧头", "Header"), make: () => ({ name: tx("帧头", "Header"), type: "uint8", endian: "big", role: "header", source: { kind: "const", bytes: [0xaa] } }) },
+  { key: "const", label: () => tx("固定字节", "Fixed bytes"), make: () => ({ name: "00", type: "uint8", endian: "big", role: "data", source: { kind: "const", bytes: [0x00] } }) },
+  { key: "u8", label: () => "u8", make: () => ({ name: "u8", type: "uint8", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "u16", label: () => "u16", make: () => ({ name: "u16", type: "uint16", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "u32", label: () => "u32", make: () => ({ name: "u32", type: "uint32", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "i16", label: () => "i16", make: () => ({ name: "i16", type: "int16", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "f32", label: () => "f32", make: () => ({ name: "f32", type: "float32", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "f64", label: () => "f64", make: () => ({ name: "f64", type: "float64", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "bcd", label: () => "BCD", make: () => ({ name: "bcd", type: "bcd", size: 2, endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "bits", label: () => tx("位段", "Bits"), make: () => ({ name: "bit", type: "bits", endian: "big", role: "data", bits: { index: 0, count: 1 }, source: { kind: "param", paramId: "" } }) },
+  { key: "ascii", label: () => tx("文本", "Text"), make: () => ({ name: "txt", type: "ascii", size: 4, endian: "big", role: "payload", source: { kind: "param", paramId: "" } }) },
+  { key: "seq", label: () => tx("帧序号", "Sequence"), make: () => ({ name: "seq", type: "uint8", endian: "big", role: "seq", source: { kind: "seq" } }) },
+  { key: "len", label: () => tx("长度域", "Length"), make: () => ({ name: "len", type: "uint8", endian: "big", role: "length", source: { kind: "len", covers: "after" } }) },
+  { key: "ck", label: () => tx("校验段", "Checksum"), make: () => ({ name: "ck", type: "uint8", endian: "big", role: "checksum", source: { kind: "const", bytes: [] } }) },
+  { key: "footer", label: () => tx("帧尾", "Footer"), make: () => ({ name: tx("帧尾", "Footer"), type: "uint8", endian: "big", role: "footer", source: { kind: "const", bytes: [0x55] } }) },
+];
+
+const TYPES: FieldType[] = ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "ascii", "bcd", "bits"];
+const ENDIANS: Endian[] = ["big", "little", "big-word-swap", "little-word-swap"];
+const ROLES: FieldRole[] = ["header", "addr", "id", "seq", "length", "data", "payload", "checksum", "footer"];
+const CK_ALGOS: ChecksumAlgo[] = ["none", "sum8", "xor8", "sumadd", "crc16_modbus", "crc16_ccitt", "crc32"];
+
+const roleLabel = (r: FieldRole): string =>
+  ({
+    header: tx("帧头", "header"), addr: tx("地址", "addr"), id: tx("标识", "id"), seq: tx("序号", "seq"),
+    length: tx("长度", "length"), data: tx("数据", "data"), payload: tx("载荷", "payload"),
+    checksum: tx("校验", "checksum"), checksum2: tx("校验 2", "checksum 2"), footer: tx("帧尾", "footer"),
+  })[r];
+
+const uid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
+const hexOf = (f: SendField) =>
+  f.source.kind === "const" ? f.source.bytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ") : "";
+
+/** 落点：按 x 找插到第几块之前（半格吸附：越过块中线才算后一格） */
+function dropIndex(el: HTMLElement, clientX: number): number {
+  const chips = Array.from(el.querySelectorAll<HTMLElement>("[data-sb-field]"));
+  for (let i = 0; i < chips.length; i++) {
+    const r = chips[i].getBoundingClientRect();
+    if (clientX < r.left + r.width / 2) return i;
+  }
+  return chips.length;
+}
+
+export function SendBuildPanel() {
+  useLocale();
+  const tpls = useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
+  const [selId, setSelId] = useState("");
+  const [selField, setSelField] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [seq, setSeq] = useState(0);
+  const [err, setErr] = useState("");
+  const [at, setAt] = useState(-1);
+  const stripRef = useRef<HTMLDivElement>(null);
+
+  const tpl: SendTemplate | null = tpls.find((x) => x.id === selId) ?? tpls[0] ?? null;
+  useEffect(() => {
+    if (tpl && selId !== tpl.id) setSelId(tpl.id);
+  }, [tpl, selId]);
+
+  const preview = useMemo(() => {
+    if (!tpl) return null;
+    try {
+      const r = encodeSend(tpl, { values, seq });
+      return { ok: true as const, ...r };
+    } catch (e) {
+      return { ok: false as const, msg: String(e).replace(/^Error:\s*/, "") };
+    }
+  }, [tpl, values, seq]);
+
+  const field = tpl?.fields.find((f) => f.id === selField) ?? null;
+
+  const insertAt = useCallback(
+    (key: string, index: number) => {
+      if (!tpl) return;
+      const spec = PALETTE.find((p) => p.key === key);
+      if (!spec) return;
+      const made: SendField = { id: uid("sf"), ...spec.make() };
+      if (made.source.kind === "param") {
+        // 参数化字段必须同时留下参数定义，否则预览第一步就报"引用了不存在的参数"
+        const pid = uid("sp");
+        made.name = made.name || pid;
+        made.source = { kind: "param", paramId: pid };
+        sendStore.addParam(tpl.id, { id: pid, name: made.name, type: "int", def: "0" });
+      }
+      // 校验段一落地就把算法定下来：留着 null 让用户先摆块再回头找下拉，
+      // 换来的是预览报"字段标成校验但没选算法"——一个只有作者看得懂的中间态
+      if (made.role === "checksum" && !tpl.checksum) {
+        sendStore.patchTemplate(tpl.id, { checksum: { algo: "crc16_modbus", coverageStart: 0, coverageEnd: -2 } });
+      }
+      sendStore.addField(tpl.id, made, index);
+      setSelField(made.id);
+      setErr("");
+    },
+    [tpl],
+  );
+
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el || !tpl) return;
+    return attachPdragZone(el, {
+      kinds: "sendspec,sendfield",
+      onOver: (d: PdragDetail) => setAt(dropIndex(el, d.x)),
+      onLeave: () => setAt(-1),
+      onDrop: (d: PdragDetail) => {
+        const index = dropIndex(el, d.x);
+        setAt(-1);
+        if (d.kind === "sendspec") insertAt(d.data, index);
+        else if (d.kind === "sendfield") {
+          const from = tpl.fields.findIndex((f) => f.id === d.data);
+          // 往前插要让回一格：先把被拖的那块摘掉，后面的下标都左移了
+          const to = from < index ? index - 1 : index;
+          sendStore.moveField(tpl.id, from, to);
+        }
+      },
+    });
+  }, [tpl, insertAt]);
+
+  const send = async () => {
+    if (!tpl || !preview?.ok) return;
+    try {
+      await serialStore.sendData("hex", preview.hex);
+      setSeq(preview.seqAfter);
+      setErr("");
+    } catch (e) {
+      setErr(String(e).replace(/^Error:\s*/, ""));
+    }
+  };
+
+  const patchSel = (patch: Partial<SendField>) => {
+    if (tpl && field) sendStore.patchField(tpl.id, field.id, patch);
+  };
+
+  return (
+    <div className="sb">
+      <div className="sb-bar p-bar">
+        <button
+          className="btn icon-btn"
+          title={tx("新建", "New")}
+          onClick={() => {
+            const id = sendStore.addTemplate();
+            if (id) setSelId(id);
+          }}
+        >
+          <IconPlus />
+        </button>
+        <button className="btn" onClick={() => sendStore.undo()} disabled={!sendStore.canUndo()}>
+          {tx("撤销", "Undo")}
+        </button>
+        <button className="btn" onClick={() => sendStore.redo()} disabled={!sendStore.canRedo()}>
+          {tx("重做", "Redo")}
+        </button>
+        {tpl && (
+          <>
+            <input
+              className="input sb-name"
+              value={tpl.name}
+              onChange={(e) => sendStore.patchTemplate(tpl.id, { name: e.target.value })}
+            />
+            <button
+              className="btn icon-btn"
+              title={tx("复制这份发送谱", "Duplicate this template")}
+              onClick={() => setSelId(sendStore.duplicateTemplate(tpl.id))}
+            >
+              <IconPlus />
+            </button>
+            <button
+              className="btn icon-btn"
+              title={tx("删除这份发送谱", "Delete this template")}
+              onClick={() => {
+                sendStore.removeTemplate(tpl.id);
+                setSelId("");
+              }}
+            >
+              <IconTrash />
+            </button>
+          </>
+        )}
+        <div className="sb-bar-spacer" />
+        <select
+          className="input"
+          value={tpl?.id ?? ""}
+          onChange={(e) => setSelId(e.target.value)}
+          title={tx("切换发送谱", "Switch template")}
+        >
+          {!tpl && <option value="">{tx("（无）", "(none)")}</option>}
+          {tpls.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {!tpl ? (
+        <EmptyState
+          title={tx("还没有发送谱", "No send templates yet")}
+          hint={[tx("一张谱描述一帧要发的字节：帧头、字段、长度域、校验", "A template describes one frame to send: header, fields, length, checksum")]}
+          actions={[{ label: tx("新建", "New"), onClick: () => setSelId(sendStore.addTemplate()), primary: true }]}
+        />
+      ) : (
+        <div className="sb-body">
+          <div className="sb-palette" role="group" aria-label={tx("字段料板", "Field palette")}>
+            {PALETTE.map((p) => (
+              <button
+                key={p.key}
+                className="sb-chip sb-palette-chip"
+                title={tx("拖到字节带上，或点一下加到尾部", "Drag onto the byte strip, or click to append")}
+                onPointerDown={(e) =>
+                  beginPointerDrag(e, { kind: "sendspec", data: p.key, label: p.label() })
+                }
+                onClick={() => insertAt(p.key, sendStore.getTemplate(tpl.id)?.fields.length ?? 0)}
+              >
+                {p.label()}
+              </button>
+            ))}
+          </div>
+
+          <div
+            className="sb-strip"
+            ref={stripRef}
+            role="group"
+            aria-label={tx("字节带", "Byte strip")}
+            onDragOver={(e) => e.preventDefault()}
+          >
+            {tpl.fields.length === 0 && <span className="sb-strip-blank">{tx("从料板拖一块进来，或点一下加到尾部", "Drag a block from the palette, or click one to append it")}</span>}
+            {tpl.fields.map((f, i) => (
+              <span key={f.id} className="sb-slot-wrap">
+                {at === i && <i className="sb-caret" aria-hidden="true" />}
+                <button
+                  data-sb-field={f.id}
+                  className={`sb-chip sb-f-${f.role}${f.id === selField ? " on" : ""}`}
+                  title={`${roleLabel(f.role)} · ${f.type} · ${sendFieldWidth(f)}B`}
+                  onPointerDown={(e) =>
+                    beginPointerDrag(e, { kind: "sendfield", data: f.id, label: f.name })
+                  }
+                  onClick={() => setSelField(f.id)}
+                >
+                  <b>{f.name}</b>
+                  <i>{hexOf(f) || f.type}</i>
+                </button>
+              </span>
+            ))}
+            {at >= tpl.fields.length && tpl.fields.length > 0 && <i className="sb-caret" aria-hidden="true" />}
+          </div>
+
+          <div className="sb-side">
+            {field ? (
+              <>
+                <label className="sb-row">
+                  <span>{tx("名称", "Name")}</span>
+                  <input className="input" value={field.name} onChange={(e) => patchSel({ name: e.target.value })} />
+                </label>
+                <label className="sb-row">
+                  <span>{tx("类型", "Type")}</span>
+                  <select className="input" value={field.type} onChange={(e) => patchSel({ type: e.target.value as FieldType })}>
+                    {TYPES.map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="sb-row">
+                  <span>{tx("角色", "Role")}</span>
+                  <select className="input" value={field.role} onChange={(e) => patchSel({ role: e.target.value as FieldRole })}>
+                    {ROLES.map((x) => (
+                      <option key={x} value={x}>
+                        {roleLabel(x)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="sb-row">
+                  <span>{tx("字节序", "Byte order")}</span>
+                  <select className="input" value={field.endian} onChange={(e) => patchSel({ endian: e.target.value as Endian })}>
+                    {ENDIANS.map((x) => (
+                      <option key={x}>{x}</option>
+                    ))}
+                  </select>
+                </label>
+                {(field.type === "ascii" || field.type === "bcd") && (
+                  <label className="sb-row">
+                    <span>{tx("字节数", "Bytes")}</span>
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      value={field.size ?? 1}
+                      onChange={(e) => patchSel({ size: Math.max(1, Number(e.target.value) || 1) })}
+                    />
+                  </label>
+                )}
+                {field.type === "bits" && (
+                  <label className="sb-row">
+                    <span>{tx("位起 / 位宽", "Bit / width")}</span>
+                    <span className="sb-inline">
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        max={7}
+                        value={field.bits?.index ?? 0}
+                        onChange={(e) => patchSel({ bits: { index: Number(e.target.value), count: field.bits?.count ?? 1 } })}
+                      />
+                      <input
+                        className="input"
+                        type="number"
+                        min={1}
+                        max={8}
+                        value={field.bits?.count ?? 1}
+                        onChange={(e) => patchSel({ bits: { index: field.bits?.index ?? 0, count: Number(e.target.value) } })}
+                      />
+                    </span>
+                  </label>
+                )}
+                <label className="sb-row">
+                  <span>{tx("值来源", "Value from")}</span>
+                  <select
+                    className="input"
+                    value={field.source.kind}
+                    onChange={(e) => {
+                      const k = e.target.value;
+                      if (k === "param") {
+                        const pid = uid("sp");
+                        sendStore.addParam(tpl.id, { id: pid, name: field.name, type: "int", def: "0" });
+                        patchSel({ source: { kind: "param", paramId: pid } });
+                      } else if (k === "const") patchSel({ source: { kind: "const", bytes: [0] } });
+                      else if (k === "var") patchSel({ source: { kind: "var", name: "" } });
+                      else if (k === "seq") patchSel({ source: { kind: "seq" } });
+                      else patchSel({ source: { kind: "len", covers: "after" } });
+                    }}
+                  >
+                    {["const", "param", "var", "seq", "len"].map((k) => (
+                      <option key={k} value={k}>
+                        {k === "const" ? tx("固定字节", "Fixed") : k === "param" ? tx("参数", "Parameter") : k === "var" ? tx("解析变量", "Parsed variable") : k === "seq" ? tx("自增序号", "Auto counter") : tx("长度回填", "Length")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {field.source.kind === "const" && (
+                  <label className="sb-row">
+                    <span>{tx("字节 (hex)", "Bytes (hex)")}</span>
+                    <input
+                      className="input"
+                      value={hexOf(field)}
+                      placeholder="AA 55"
+                      onChange={(e) =>
+                        patchSel({
+                          source: {
+                            kind: "const",
+                            bytes: e.target.value
+                              .split(/[\s,]+/)
+                              .filter(Boolean)
+                              .map((h) => Number.parseInt(h, 16))
+                              .filter((n) => Number.isInteger(n) && n >= 0 && n <= 255),
+                        },
+                      })}
+                    />
+                  </label>
+                )}
+                {field.source.kind === "var" && (
+                  <label className="sb-row">
+                    <span>{tx("变量名", "Variable")}</span>
+                    <input
+                      className="input"
+                      value={field.source.name}
+                      onChange={(e) => patchSel({ source: { kind: "var", name: e.target.value } })}
+                    />
+                  </label>
+                )}
+                {field.source.kind === "len" && (
+                  <label className="sb-row">
+                    <span>{tx("长度数谁", "Length counts")}</span>
+                    <select
+                      className="input"
+                      value={field.source.covers}
+                      onChange={(e) => patchSel({ source: { kind: "len", covers: e.target.value as "self" | "after" | "body", adjust: field.source.kind === "len" ? field.source.adjust : undefined } })}
+                    >
+                      <option value="after">{tx("它之后的字节", "bytes after it")}</option>
+                      <option value="body">{tx("含它自身", "including itself")}</option>
+                      <option value="self">{tx("整帧", "whole frame")}</option>
+                    </select>
+                  </label>
+                )}
+                <button className="btn sb-danger" onClick={() => sendStore.removeField(tpl.id, field.id)}>
+                  {tx("删除这个字段", "Remove this field")}
+                </button>
+              </>
+            ) : (
+              <div className="sb-hint">{tx("点字节带上的一块来编辑它", "Click a block on the strip to edit it")}</div>
+            )}
+
+            <div className="sb-params">
+              <div className="sb-sec">{tx("参数", "Parameters")}</div>
+              {tpl.params.map((p) => (
+                <label key={p.id} className="sb-row">
+                  <span>{p.name}</span>
+                  {/* 这里改的是**本次预览/发送的临时值**，不是谱里的默认值：
+                      默认值属于谱的内容，编辑入口在 D 期的参数表，不在这个面板的侧栏里混两份 */}
+                  <input
+                    className="input"
+                    value={values[p.id] ?? ""}
+                    placeholder={p.def || tx("默认", "default")}
+                    onChange={(e) => setValues({ ...values, [p.id]: e.target.value })}
+                  />
+                </label>
+              ))}
+              {!tpl.params.length && <div className="sb-hint">{tx("没有参数：把某块的来源选成「参数」就有了", "No parameters — set a block’s source to Parameter")}</div>}
+            </div>
+
+            <div className="sb-params">
+              <div className="sb-sec">{tx("校验", "Checksum")}</div>
+              <label className="sb-row">
+                <span>{tx("算法", "Algorithm")}</span>
+                <select
+                  className="input"
+                  value={tpl.checksum?.algo ?? "none"}
+                  onChange={(e) => {
+                    const algo = e.target.value as ChecksumAlgo;
+                    sendStore.patchTemplate(tpl.id, {
+                      checksum: algo === "none" ? null : { algo, coverageStart: tpl.checksum?.coverageStart ?? 0, coverageEnd: tpl.checksum?.coverageEnd ?? -1 },
+                    });
+                  }}
+                >
+                  {CK_ALGOS.map((a) => (
+                    <option key={a}>{a}</option>
+                  ))}
+                </select>
+              </label>
+              {tpl.checksum && (
+                <label className="sb-row">
+                  <span>{tx("覆盖起 / 止", "Coverage")}</span>
+                  <span className="sb-inline">
+                    <input
+                      className="input"
+                      type="number"
+                      value={tpl.checksum.coverageStart}
+                      onChange={(e) =>
+                        sendStore.patchTemplate(tpl.id, { checksum: { ...tpl.checksum!, coverageStart: Number(e.target.value) } })
+                      }
+                    />
+                    <input
+                      className="input"
+                      type="number"
+                      value={tpl.checksum.coverageEnd}
+                      onChange={(e) =>
+                        sendStore.patchTemplate(tpl.id, { checksum: { ...tpl.checksum!, coverageEnd: Number(e.target.value) } })
+                      }
+                    />
+                  </span>
+                </label>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tpl && (
+        <div className="sb-foot">
+          <div className={`sb-preview${preview?.ok ? "" : " bad"}`}>
+            {preview?.ok ? preview.hex : preview?.msg || ""}
+          </div>
+          <div className="sb-notes">
+            {preview?.ok ? preview.notes.join(" · ") : ""}
+            {err ? ` ${err}` : ""}
+          </div>
+          <button className="btn primary" disabled={!preview?.ok} onClick={() => void send()}>
+            {tx("发送一次", "Send once")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

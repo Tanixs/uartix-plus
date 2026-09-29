@@ -11522,3 +11522,47 @@ html.no-motion .mkt-img-skel { animation: none; }
   color: var(--text-dim);
 }
 
+
+/* ============================================================ P121-C 发送组包面板
+ * 一条都不写 `border: Npx` —— G 门的天花板（393 条）就在数这个，层级用底色与间距解决；
+ * 选中态是"这一块被挑中了"，语义上属于 outline（与 :focus 同一族），不是结构线。
+ * 也不写视口单位：面板宽高全交给 dockview，第 11 道门那条 `÷ var(--zoom)` 在这里没有适用面。
+ */
+.sb{display:flex;flex-direction:column;height:100%;min-width:0;background:var(--bg);}
+.sb-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;box-sizing:border-box;min-height:28px;padding:3px 8px;background:var(--bg-panel);flex:none;}
+.sb-bar-spacer{flex:1;}
+.sb-name{width:150px;flex:none;}
+.sb-body{display:flex;flex:1;min-height:0;gap:8px;padding:8px;overflow:hidden;}
+.sb-palette{display:flex;flex-direction:column;gap:4px;flex:none;width:96px;overflow:auto;}
+.sb-chip{all:unset;display:flex;flex-direction:column;justify-content:center;gap:1px;box-sizing:border-box;padding:4px 8px;border-radius:var(--radius-m);background:var(--bg-panel);font-size:var(--fs-sm);color:var(--text-dim);cursor:grab;min-height:26px;}
+.sb-chip:hover{background:var(--raise-1);color:var(--text);}
+.sb-chip b{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sb-chip i{font-style:normal;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sb-palette-chip{cursor:grab;}
+.sb-strip{display:flex;flex:1;flex-wrap:wrap;align-content:flex-start;gap:4px;padding:6px;border-radius:var(--radius-m);background:var(--bg-inset);overflow:auto;min-width:0;position:relative;}
+.sb-strip-blank{align-self:center;margin:auto;font-size:var(--fs-body);color:var(--text-faint);}
+.sb-slot-wrap{display:inline-flex;align-items:stretch;}
+.sb-caret{width:2px;border-radius:var(--radius-pill);background:var(--accent);flex:none;}
+.sb-f-header b{color:var(--accent);}
+.sb-f-footer b{color:var(--accent);}
+.sb-f-length b{color:var(--warn);}
+.sb-f-checksum b{color:var(--warn);}
+.sb-f-checksum2 b{color:var(--warn);}
+.sb-f-seq b{color:var(--ok);}
+.sb-f-addr b,.sb-f-id b{color:color-mix(in srgb, var(--accent) 62%, var(--text));}
+.sb-f-data b,.sb-f-payload b{color:var(--text);}
+.sb-chip.on{outline:2px solid var(--accent);outline-offset:1px;background:var(--raise-1);}
+.sb-side{flex:none;width:240px;display:flex;flex-direction:column;gap:8px;overflow:auto;}
+.sb-row{display:flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--text-dim);}
+.sb-row>span:first-child{flex:none;width:74px;}
+.sb-row>.input{flex:1;min-width:0;}
+.sb-inline{display:flex;flex:1;gap:4px;min-width:0;}
+.sb-inline>.input{flex:1;min-width:0;}
+.sb-sec{font-size:var(--fs-sm);color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;}
+.sb-params{display:flex;flex-direction:column;gap:5px;padding-top:6px;background:var(--bg-panel);border-radius:var(--radius-m);padding:6px 8px;}
+.sb-hint{font-size:var(--fs-body);color:var(--text-faint);}
+.sb-danger{color:var(--danger);align-self:flex-start;}
+.sb-foot{display:flex;align-items:center;gap:8px;flex:none;padding:6px 8px;background:var(--bg-panel);}
+.sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}
+.sb-notes{flex:none;max-width:40%;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
