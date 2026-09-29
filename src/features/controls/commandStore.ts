@@ -59,9 +59,9 @@ function load(): CommandsSnapshot {
           {
             id: crypto.randomUUID(),
             name: "设速度",
-            template: "SPD:%d!",
+            template: "SPD:{速度:d}!",
             sendMode: "ascii",
-            note: "%d 会被替换为整数",
+            note: "「速度」需是协议解析出的字段名；:d 取整。没有该字段时原样发出（不静默删）",
             script: "",
             scriptEnabled: false,
           },
@@ -165,6 +165,9 @@ export function renameNode(id: string, name: string) {
 }
 
 export function removeNode(id: string) {
+  // P121-A：删节点先前不拦锁（同文件另外五处写方法都有）——只读发行包里能删指令。
+  // 权限面在 store 收口，不在按钮上。
+  if (guardLocked()) return;
   const rec = (items: CommandNode[]): CommandNode[] =>
     items
       .filter((n) => n.id !== id)
@@ -207,6 +210,8 @@ export function patchCommand(
   cmdId: string,
   patch: Partial<CommandItem>,
 ) {
+  // P121-A：改指令内容先前不拦锁——只读发行包里能把一条命令悄悄换成别的字节。
+  if (guardLocked()) return;
   snapshot = {
     ...snapshot,
     groups: mapTree(snapshot.groups, (n) =>

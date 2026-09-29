@@ -837,7 +837,7 @@ send("AT+SAVE");`}</pre>
                   <pre>{`// 滑条值在变量 value 中（0~100）
 const duty = Math.round(value * 2.55);
 send("PWM:" + duty);`}</pre>
-                  <p className="help-tip">模板串写法：<code>{"{温度:.1f}"}</code> 按格式插值、<code>{"{名称:str}"}</code> 文本插值、<code>{"%d"}</code> 等printf风格用于命令库。</p>
+                  <p className="help-tip">模板串写法：<code>{"{温度:.1f}"}</code> 插值、<code>{"{名称:str}"}</code> 文本、<code>{"{名:d}"}</code> 取整；<code>{"%d"}</code> 仅滑条卡片可用。</p>
                 </Section>
                 <Section title="控件联动（setControl）">
                   <p>

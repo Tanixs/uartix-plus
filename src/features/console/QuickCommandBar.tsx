@@ -3,7 +3,8 @@ import * as cmdStore from "../controls/commandStore";
 import type { CommandItem } from "../controls/commandStore";
 import * as serialStore from "../serial/serialStore";
 import * as variableStore from "../controls/variableStore";
-import { beep, runScript } from "../controls/scriptRunner";
+import { runCommand } from "../controls/cmdExec";
+import { guardLocked } from "../operator/lock";
 import { IconChevron, IconClose } from "../../shared/icons";
 import { useSettings } from "../settings/settingsStore";
 import { CODECS, userCodecToCodec, type Codec, type FactoryField } from "./commandFactory";
@@ -40,22 +41,31 @@ function ChipTooltip({ tip }: { tip: TipState }) {
   let body: React.ReactNode;
   if (isScript) {
     body = <pre className="qk-tip-pre">{item.script}</pre>;
-  } else if (item.sendMode === "hex") {
-    const shown = fmtHexPreview(item.template);
-    const count = shown ? shown.split(" ").length : 0;
-    body = (
-      <>
-        <div className="qk-tip-mono">{shown || tx("（空）", "(empty)")}</div>
-        <div className="qk-tip-sub">{tx(`${count} 字节`, `${count} bytes`)}</div>
-      </>
-    );
   } else {
-    body = (
-      <>
-        <div className="qk-tip-mono">{item.template || tx("（空）", "(empty)")}</div>
-        <div className="qk-tip-sub">{tx(`${new TextEncoder().encode(item.template).length} 字节`, `${new TextEncoder().encode(item.template).length} bytes`)}</div>
-      </>
-    );
+    // P121-A：预览显示的是**要发出去的那一份**（求值后），不是模板原文。
+    // 旧版这里数的是原文的字节，而发送路径会不会替换变量取决于另一个入口——提示与事实两回事。
+    const out = variableStore.resolveVars(item.template);
+    if (item.sendMode === "hex") {
+      const shown = fmtHexPreview(out);
+      const count = shown ? shown.split(" ").length : 0;
+      body = (
+        <>
+          <div className="qk-tip-mono">{shown || tx("（空）", "(empty)")}</div>
+          <div className="qk-tip-sub">{tx(`${count} 字节`, `${count} bytes`)}</div>
+        </>
+      );
+    } else {
+      const bytes = new TextEncoder().encode(out).length;
+      body = (
+        <>
+          <div className="qk-tip-mono">{out || tx("（空）", "(empty)")}</div>
+          <div className="qk-tip-sub">
+            {tx(`${bytes} 字节`, `${bytes} bytes`)}
+            {out !== item.template && ` · ${item.template}`}
+          </div>
+        </>
+      );
+    }
   }
   return (
     <div
@@ -155,25 +165,10 @@ export function QuickCommandBar() {
 
   const runItem = async (item: CommandItem) => {
     try {
-      if (item.scriptEnabled && item.script.trim()) {
-        const vars = variableStore
-          .listVars()
-          .map((vd) => ({
-            name: vd.name,
-            value: variableStore.getVar(vd.name) ?? (vd.kind === "str" ? "" : 0),
-          }));
-        await runScript(item.script, {
-          send: async (text, mode) => {
-            await serialStore.sendData(mode ?? "ascii", String(text));
-          },
-          beep,
-          delay_ms: delay,
-          get: (name: string) => variableStore.getVar(name),
-        }, vars);
-      } else {
-        if (!item.template.trim()) throw new Error(tx("指令内容为空，请先在「管理」中填写", "Command is empty — fill it in under Manage first"));
-        await serialStore.sendData(item.sendMode, item.template);
-      }
+      // P121-A：执行判据搬进 `cmdExec.runCommand`。原先这份重复实现**漏了 resolveVars**，
+      // 同一条 `SPD:{speed}` 在导轨点会替换变量、在这里直接发原文——两份都不算错，
+      // 只是不是同一份。
+      await runCommand(item);
       setErr(null);
       setFlash(item.id);
       setTimeout(() => setFlash((f) => (f === item.id ? null : f)), 400);
@@ -216,6 +211,10 @@ export function QuickCommandBar() {
   };
 
   const saveFactory = () => {
+    // P121-A：Operator 只读锁下先就地返回。store 那五个写方法本来就各自拦锁，
+    // 但 `ensureGroup` 里有一句 `groups.find(...)!`——被拦之后分组不存在，
+    // 空断言会抛一个和"只读"毫无关系的 TypeError 糊在错误面上。
+    if (guardLocked()) return;
     try {
       const r = codec.build(vals);
       const gid = ensureGroup(codec.group);
@@ -243,6 +242,7 @@ export function QuickCommandBar() {
   };
 
   const addPresetGroup = () => {
+    if (guardLocked()) return; // 同上：只读锁下就地返回，别让 ensureGroup 的空断言抛 TypeError
     const gid = ensureGroup("WIT");
     const calib = (addr: number, v: number, pre = 200) =>
       [

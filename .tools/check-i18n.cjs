@@ -64,7 +64,8 @@ const ROOT = path.join(__dirname, "..");
 const BUDGETS = {
   // P115-B：帮助回写时把改写过的那几句顺手转成 tx(中, 英) 双语（整句进 tx 的中文第一参
   // 在计数前就被剥掉），所以这一格从 20514 降到 20214。方向与棘轮一致：债只会更小。
-  "src/features/help/HelpModal.tsx": 20214,
+  // P121-A：`%d` 那句改口时顺手收紧（"按格式插值"→"插值"），20214 → 20211。
+  "src/features/help/HelpModal.tsx": 20211,
   "src/features/console/QuickCommandBar.tsx": 100,
   "src/App.tsx": 10,
   "src/features/vdev/VdevPanel.tsx": 5,

@@ -169,7 +169,7 @@ function schemaCard(): string {
 }
 
 function schemaCommand(): string {
-  return `【uartix-command 命令格式】输出一个 \`\`\`uartix-command 代码块，内容为 JSON：单条 {"name":"命令名","template":"模板串或HEX","sendMode":"ascii"|"hex","script":"可选JS脚本","scriptEnabled":false}；多条用 {"commands":[单条对象,...]}（或纯数组）。命令将写入命令库「AI 生成」分组。模板串语法：printf 风格 %d/%.2f 占位（按顺序对应输入值），或 {变量名} 引用实时变量（支持 {名:d}/{名:.2f} 格式化）。脚本约束：JS 子集，可用 API：send(text,mode?)、delay_ms(ms)、get(name)、set(name,v)、beep(freq,ms)、log(text)、waitParse(fieldName,timeoutMs)、repeat(n,fn)。`;
+  return `【uartix-command 命令格式】输出一个 \`\`\`uartix-command 代码块，内容为 JSON：单条 {"name":"命令名","template":"模板串或HEX","sendMode":"ascii"|"hex","script":"可选JS脚本","scriptEnabled":false}；多条用 {"commands":[单条对象,...]}（或纯数组）。命令将写入命令库「AI 生成」分组。模板串语法：用 \`{变量名}\` 引用实时变量（支持 \`{名:d}\` 取整、\`{名:.2f}\` 两位小数、\`{名:str}\` 原文），变量名必须是协议解析出的字段名；**不要用 %d/%.2f 这类 printf 占位**——它们只在滑条卡片链路生效，命令库点击发送时原样发出。脚本约束：JS 子集，可用 API：send(text,mode?)、delay_ms(ms)、get(name)、set(name,v)、beep(freq,ms)、log(text)、waitParse(fieldName,timeoutMs)、repeat(n,fn)。`;
 }
 
 function schemaCodec(): string {

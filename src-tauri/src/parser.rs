@@ -2518,3 +2518,78 @@ mod tests {
         );
     }
 }
+
+/// P121-A · 校验算法的跨语言向量表。
+///
+/// 这张表与 `src/shared/checksums.test.ts` 里的 `VECTORS` 是**同一份**：TS 侧第 ③ 条测试
+/// 会扫本文件确认每个期望值都在，所以"改一边忘一边"当场红。
+/// 为什么要有这份重复：同一批算法有两份实现（前端组帧要算、解析热路径也要算），
+/// 两份各自单测只能证明"自己没写错"，证明不了"两边说的是同一个算法"——
+/// 而漂移的症状是"发得出去、自己解不回来"，最难查。
+#[cfg(test)]
+mod checksum_vectors {
+    use super::*;
+
+    struct Vector {
+        name: &'static str,
+        bytes: &'static [u8],
+        sum8: u64,
+        xor8: u64,
+        sumadd: u64,
+        crc16_modbus: u64,
+        crc16_ccitt: u64,
+        crc32: u64,
+    }
+
+    const VECTORS: [Vector; 3] = [
+        Vector {
+            name: "123456789",
+            bytes: &[0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39],
+            sum8: 0xDD,
+            xor8: 0x31,
+            sumadd: 0x15DD,
+            crc16_modbus: 0x4B37,
+            crc16_ccitt: 0x29B1,
+            crc32: 0xCBF43926,
+        },
+        Vector {
+            name: "AA 55 01 02 0F",
+            bytes: &[0xAA, 0x55, 0x01, 0x02, 0x0F],
+            sum8: 0x11,
+            xor8: 0xF3,
+            sumadd: 0xBC11,
+            crc16_modbus: 0x703D,
+            crc16_ccitt: 0x1405,
+            crc32: 0xA32D9A9E,
+        },
+        Vector {
+            name: "AA",
+            bytes: &[0xAA],
+            sum8: 0xAA,
+            xor8: 0xAA,
+            sumadd: 0xAAAA,
+            crc16_modbus: 0x3F3F,
+            crc16_ccitt: 0xF550,
+            crc32: 0xE401A57B,
+        },
+    ];
+
+    #[test]
+    fn checksum_compute_matches_the_frontend_table() {
+        for v in VECTORS.iter() {
+            assert_eq!(checksum_compute("sum8", v.bytes), v.sum8, "{} sum8", v.name);
+            assert_eq!(checksum_compute("xor8", v.bytes), v.xor8, "{} xor8", v.name);
+            assert_eq!(checksum_compute("sumadd", v.bytes), v.sumadd, "{} sumadd", v.name);
+            assert_eq!(checksum_compute("crc16_modbus", v.bytes), v.crc16_modbus, "{} crc16_modbus", v.name);
+            assert_eq!(checksum_compute("crc16_ccitt", v.bytes), v.crc16_ccitt, "{} crc16_ccitt", v.name);
+            assert_eq!(checksum_compute("crc32", v.bytes), v.crc32, "{} crc32", v.name);
+        }
+    }
+
+    /// 探针自证：向量表若被删空，上面那条会"全绿地什么都不测"（§8-43②）
+    #[test]
+    fn the_table_actually_has_vectors() {
+        assert!(VECTORS.len() >= 3, "向量表只剩 {} 条，上面那条测试没意义", VECTORS.len());
+        assert_eq!(checksum_compute("no-such-algo", &[0x01]), 0, "未知算法必须回 0，而不是 panic");
+    }
+}

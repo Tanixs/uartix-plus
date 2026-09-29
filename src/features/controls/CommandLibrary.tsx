@@ -5,8 +5,7 @@ import { isGroup } from "./commandStore";
 import type { CommandItem } from "./commandStore";
 import type { SendMode } from "./controlsStore";
 import { useSettings } from "../settings/settingsStore";
-import { sendCmd, runCmdScript } from "./cmdExec";
-import * as variableStore from "./variableStore";
+import { runCommand } from "./cmdExec";
 import { TextInput } from "../protocol/PropertiesPanel";
 import { IconChevron, IconClose } from "../../shared/icons";
 import { HelpHint } from "../../shared/HelpHint";
@@ -298,15 +297,9 @@ export function CommandLibrary() {
                 });
               }}
               onClick={() => {
-                if (n.scriptEnabled && n.script) {
-                  runCmdScript(n.script, {})
-                    .then(() => setErr(null))
-                    .catch((er) => setErr(String(er)));
-                } else {
-                  sendCmd(n.sendMode, variableStore.resolveVars(n.template)).catch(
-                    (er) => setErr(String(er)),
-                  );
-                }
+                runCommand(n)
+                  .then(() => setErr(null))
+                  .catch((er) => setErr(String(er)));
                 setFlashCmd(n.id);
                 window.setTimeout(() => setFlashCmd(null), 500);
               }}
@@ -491,8 +484,8 @@ function CommandModal(props: {
             </div>
             <div className="cmd-hint">
                 {tx(
-                  "语法：%f %.2f %d，支持 {变量} 引用解析数据",
-                  "Syntax: %f %.2f %d; {var} references parsed data",
+                  "语法：{变量} 引用解析出的数据，可带格式后缀（{速度:d} 取整、{速度:.2f} 两位小数、{速度:str} 原文）；%d 这类 printf 占位**只在滑条卡片上**替换，命令库点击发送不认",
+                  "Syntax: {var} references parsed values, with optional format suffixes ({speed:d} integer, {speed:.2f} two decimals, {speed:str} raw). printf placeholders like %d are substituted only on slider cards — clicking a command here does not.",
                 )}
               </div>
           </>
