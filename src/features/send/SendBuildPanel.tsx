@@ -208,7 +208,7 @@ export function SendBuildPanel() {
     const el = stripRef.current;
     if (!el || !tpl) return;
     return attachPdragZone(el, {
-      kinds: "sendspec,sendfield",
+      kinds: "sendspec sendfield",
       onOver: (d: PdragDetail) => setAt(dropIndex(el, d.x)),
       onLeave: () => setAt(-1),
       onDrop: (d: PdragDetail) => {

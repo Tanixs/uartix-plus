@@ -28,6 +28,18 @@ function zoomF(): number {
   return Number(getComputedStyle(document.documentElement).zoom) || 1;
 }
 
+/**
+ * 区域声明的 kind 列表。空白与逗号都当分隔符认。
+ *
+ * 为什么值得单独抽出来：分隔符写错的后果不是报错，而是**这块区域永远接不到拖拽**——
+ * kind 对不上就静默没有落点，界面看起来"拖了没反应"。这种坑只在真 DOM 上暴露，
+ * 纯函数测试全都绿着（P121-C 的字节带就栽在 `"sendspec,sendfield"` 上，一直没被发现）。
+ * 所以两种写法都收，并且把解析本身钉在 `pointerDrag.test.ts` 里。
+ */
+export function parseKinds(raw: string): string[] {
+  return raw.split(/[\s,]+/).filter(Boolean);
+}
+
 function zoneAt(x: number, y: number): Element | null {
   if (!spec) return null;
   const stack = document.elementsFromPoint(x, y);
@@ -37,7 +49,7 @@ function zoneAt(x: number, y: number): Element | null {
     while (z) {
       if (!seen.has(z)) {
         seen.add(z);
-        const kinds = (z.getAttribute("data-pdrag") || "").split(/\s+/);
+        const kinds = parseKinds(z.getAttribute("data-pdrag") || "");
         if (kinds.includes(spec.kind)) return z;
       }
       const parent = z.parentElement;
@@ -183,7 +195,7 @@ export interface PdragZoneHandlers {
 /** 在 el 上挂 data-pdrag 并监听 pdrag:* 自定义事件（内核派发、冒泡）。
  *  只有当事件的最深命中区就是 el 本身时才回调（嵌套区各管各的）。 */
 export function attachPdragZone(el: HTMLElement, h: PdragZoneHandlers): () => void {
-  el.setAttribute("data-pdrag", h.kinds);
+  el.setAttribute("data-pdrag", parseKinds(h.kinds).join(" "));
   const isForMe = (t: EventTarget | null): t is HTMLElement => {
     const e = t as HTMLElement | null;
     if (!e || typeof e.closest !== "function") return false;
