@@ -51,7 +51,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     metrics: pick("指标面板", "Metrics"),
     orchestrator: pick("自动编排器", "Orchestrator"),
     vdev: pick("虚拟设备工坊", "Virtual Devices"),
-    sendbuild: pick("发送组包", "Send Builder"),
+    sendbuild: pick("TX组帧台", "TX Frame Builder"),
   };
 };
 

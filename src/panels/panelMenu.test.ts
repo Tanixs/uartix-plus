@@ -42,7 +42,7 @@ describe("PANEL_GROUPS", () => {
   });
 
   it("面板总数与清单一致（21 个内置面板）", () => {
-    // P121-C 加了「发送组包」：20 → 21。这条断言存在的意义就是"加面板必须留痕"，
+    // P121-C 加了「TX组帧台」：20 → 21。这条断言存在的意义就是"加面板必须留痕"，
     // 改数字的人必须顺带确认分组、标题、帮助覆盖都跟上了
     expect(PANEL_GROUPS.flatMap((g) => g.ids as readonly string[])).toHaveLength(21);
   });
@@ -131,7 +131,7 @@ describe("P121-C · 每枚可添加面板都真的注册了组件", () => {
     });
   }
 
-  it("发送组包面板落在「解析与画布」分组（与帧画布同族：一个描述收到的字节，一个描述要发的）", () => {
+  it("TX组帧台面板落在「解析与画布」分组（与帧画布同族：一个描述收到的字节，一个描述要发的）", () => {
     expect(panelGroupOf("sendbuild")?.key).toBe("parse");
     const ids = (PANEL_GROUPS.find((g) => g.key === "parse")!.ids ?? []) as readonly string[];
     expect(ids.indexOf("sendbuild")).toBeGreaterThan(ids.indexOf("framecanvas"));

@@ -489,7 +489,7 @@ function CommandModal(props: {
                     ),
                   )
                 : tx(
-                    "引用的发送谱已被删除：这条命令发不出去。清除引用后自己写字节，或回「发送组包」重新存一条。",
+                    "引用的发送谱已被删除：这条命令发不出去。清除引用后自己写字节，或回「TX组帧台」重新存一条。",
                     "The referenced send template was deleted: this command cannot send. Clear the reference and type the bytes, or save it again from the send builder.",
                   )}
             </div>
