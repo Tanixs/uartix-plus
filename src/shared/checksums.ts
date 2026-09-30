@@ -45,13 +45,20 @@ export function crc32(bytes: number[]): number {
 export type Crc16Algo = "modbus" | "ccitt-false" | "x25";
 
 /**
- * 校验字段占几字节。
+ * 校验字段占几字节 —— **数字只有这一份**。
  *
- * 这张表今天有**三份**：这里、`protocol/templateStore.ts` 的 `CHECKSUM_SIZES`、
- * `framecanvas/frameLayout.ts` 的 `checksumLen`，外加 Rust 侧 `parser.rs` 的 `checksum_size`
- * ——四份对"未知算法"的兜底都不一样（frameLayout 给 2、Rust 给 1）。
- * P121-B 先把发送侧接在这里，并用 `checksums.test.ts` 钉住六个已知算法三方一致；
- * D10（CRC 参数化）会把表收成一份、兜底也收成一条。
+ * P121-B2 把原先抄了四份的数字收在这里：`protocol/templateStore.CHECKSUM_SIZES` 现在是它的一层
+ * 视图（剔掉 `none`，因为那几处 `?? 1` 依赖"认不出来时按 1 字节预留"），
+ * `framecanvas/frameLayout.checksumLen` 与发送侧 `checksumWidth` 都从这里取数。
+ *
+ * **兜底没统一，而且不止一条**（统一会改到帧画布与引擎的行为）：
+ *  发送侧 `checksumWidth` 认不出 ⇒ 0（编码时直接点名报错，不凑数）；
+ *  接收侧布局 `checksumLen`：空串/null/`none` ⇒ 0，表里没有的算法名 ⇒ 2（字段已在带上了，先占两位）；
+ *  `CHECKSUM_SIZES` 的读方认不出 ⇒ 1（另有两处按 `fieldSize(f)` 走）；
+ *  引擎 `parser.rs::checksum_size` 认不出 ⇒ 1，**而 sum8/xor8 今天就没有自己的臂、正靠这条兜底取宽度**
+ *  ——动它等于改这两支的接收宽度，#94b 收兜底时先读 `checksums.test.ts` 的 ⑥。
+ * 六个已知算法三方一致由 `checksums.test.ts` 扫 `parser.rs` / `vdev.rs` / 面板选项钉住——
+ * 改一边忘一边当场红。剩下那半（CRC 参数化 + 兜底收成一条 + 接收侧缺 x25/sum16）在 #94b。
  */
 export const CHECKSUM_WIDTHS: Record<string, number> = {
   none: 0,

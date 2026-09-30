@@ -12,11 +12,22 @@
  *  ② 同一张向量表在 TS 侧逐算法成立；
  *  ③ 那张表的每个期望值**也出现在 Rust 源文里**（两边必须同时改，改一边当场红）。
  *
- * 已知缺口（明写，不假装）：`x25` 与 `sum16` 只有 TS 侧有——接收侧解不了它们，
- * 属于"能发不能解"。P121-B 的 D10（CRC 参数化）会把算法表收成一份，届时删掉这条注释。
+ * 已知缺口（明写，不假装）：`x25` 与 `sum16` 只有 TS 侧的**计算**有——接收侧解不了它们，
+ * 属于"能发不能解"。宽度表在 #94a 已收成一份（下面的 ④~⑦ 钉它），算法参数化与这两支
+ * 接收侧算法在 #94b。
  */
 import { describe, expect, it } from "vitest";
-import { anoCheck, crc16, crc32, sum8, sumadd16, xor8 } from "./checksums";
+import {
+  CHECKSUM_WIDTHS,
+  anoCheck,
+  checksumWidth,
+  crc16,
+  crc32,
+  sum8,
+  sumadd16,
+  xor8,
+} from "./checksums";
+import { checksumLen } from "../features/framecanvas/frameLayout";
 
 const fsSpec = "node:fs";
 const urlSpec = "node:url";
@@ -116,5 +127,149 @@ describe("P121-A · 校验原语", () => {
       }
     }
     expect(missing, `这些向量只在 TS 侧，Rust 的 checksum_compute 测试没跟上：${missing.join("、")}`).toEqual([]);
+  });
+});
+
+/**
+ * ④~⑧ · "校验字段占几字节"这张表。
+ *
+ * 数字原先抄在四份里（`shared/checksums`、`protocol/templateStore.CHECKSUM_SIZES`、
+ * `framecanvas/frameLayout.checksumLen`、Rust `parser.rs::checksum_size`），#94a 把它们收进
+ * `CHECKSUM_WIDTHS`。这里钉的是**收表之后不许再漂**：三方取同一个数、Rust 两支函数跟着走、
+ * 面板与类型能选到的算法都必须有宽度。
+ *
+ * 更要钉的是**没统一的那几条兜底**——它们是行为差异，不是笔误：
+ *  发送侧 `checksumWidth` 认不出 ⇒ 0（编码时点名报错，不凑数）；
+ *  帧画布布局 `checksumLen`：空串/null/`none` ⇒ 0，表里没有的算法名 ⇒ 2（字段已在带上了，先占两位）；
+ *  `CHECKSUM_SIZES` 的六处读方 ⇒ 1（另两处按 `fieldSize(f)`）；
+ *  引擎 `parser.rs::checksum_size` ⇒ 1，而 sum8/xor8 **就靠这条兜底**取宽度（`none` 在三个调用点被短路）。
+ * 一把统一会改到帧画布与引擎的行为（引擎那条尤其动不得，见 ⑥），所以留到 #94b 连 CRC
+ * 参数化一起定。这里按当前值钉住：谁悄悄改了兜底，当场红，并且知道要连带改注释。
+ */
+
+/** 取 `sig` 起、到该函数收尾那个顶格的 `}` 为止的源文 */
+function fnBody(src: string, sig: string, where: string): string {
+  const at = src.indexOf(sig);
+  if (at < 0) throw new Error(`${where} 里找不到 ${sig}`);
+  const end = src.indexOf("\n}", at);
+  if (end < 0) throw new Error(`${where} 的 ${sig} 没找到收尾`);
+  return src.slice(at, end);
+}
+
+/** Rust `match` 的 `"a" | "b" => N` 臂与 `_ => N` 兜底；`=> return Err(..)` 那种臂不是数字，自然跳过 */
+function rustWidthArms(body: string): { arms: Record<string, number>; fallback: number | null } {
+  const arms: Record<string, number> = {};
+  let fallback: number | null = null;
+  for (const line of body.split("\n")) {
+    const m = /^\s*(.+?)\s*=>\s*(\d+)\s*,?\s*$/.exec(line);
+    if (!m) continue;
+    const n = Number(m[2]);
+    const names = [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]);
+    if (!names.length) {
+      if (m[1].trim() === "_") fallback = n;
+      continue;
+    }
+    for (const nm of names) arms[nm] = n;
+  }
+  return { arms, fallback };
+}
+
+const ALGOS = Object.keys(CHECKSUM_WIDTHS);
+const COMPUTED = ALGOS.filter((a) => a !== "none");
+
+describe("P121-B2 · 校验字段宽度：数字一份、兜底三条", () => {
+  it("④ TS 三方对六个已知算法同数，且各自的兜底停在今天这条线上", () => {
+    for (const a of COMPUTED) {
+      expect(checksumWidth(a), `发送侧 ${a}`).toBe(CHECKSUM_WIDTHS[a]);
+      expect(checksumLen(a), `帧画布布局的 ${a} 和表漂了`).toBe(CHECKSUM_WIDTHS[a]);
+    }
+    expect(checksumWidth("none"), "没有校验段就是 0 字节").toBe(0);
+    expect(checksumLen("none")).toBe(0);
+    expect(checksumLen(""), "算法还没选：布局不占位（占位的是下面那条）").toBe(0);
+    expect(checksumLen(null), "同上，null 走同一条路").toBe(0);
+    expect(checksumWidth("not-an-algo"), "发送侧兜底 0：认不出就别凑数").toBe(0);
+    expect(
+      checksumLen("not-an-algo"),
+      "布局对表里没有的算法名按 2 留位；统一它属于 #94b，要连注释一起改",
+    ).toBe(2);
+  });
+
+  it("⑤ templateStore 的 CHECKSUM_SIZES 只是这份表的一个视图，不再是第二份数字", () => {
+    const src = readFileSync(
+      fileURLToPath(new URL("../features/protocol/templateStore.ts", import.meta.url)),
+      "utf8",
+    );
+    const at = src.indexOf("export const CHECKSUM_SIZES");
+    expect(at, "CHECKSUM_SIZES 消失了或改名——那六处 `?? 1` 的口径要重新对").toBeGreaterThan(-1);
+    const decl = src.slice(at, src.indexOf("\n);", at) + 3);
+    expect(decl, "CHECKSUM_SIZES 不再从 CHECKSUM_WIDTHS 派生").toContain("CHECKSUM_WIDTHS");
+    const literals = [...decl.matchAll(/["'][a-z0-9_]+["']\s*:\s*\d+/g)].map((m) => m[0]);
+    expect(literals, `这里又自己写数字了：${literals.join("、")}`).toEqual([]);
+    // 故意不含 none：那几处 `CHECKSUM_SIZES[algo] ?? 1` 靠"认不出来留 1 字节"过活
+    expect(decl).toContain('"none"');
+  });
+
+  it("⑥ 引擎 parser.rs::checksum_size 的已知算法宽度与表一致", () => {
+    const src = readFileSync(
+      fileURLToPath(new URL("../../src-tauri/src/parser.rs", import.meta.url)),
+      "utf8",
+    );
+    const { arms, fallback } = rustWidthArms(
+      fnBody(src, "fn checksum_size(algo: &str) -> usize", "parser.rs"),
+    );
+    // sum8/xor8 今天**没有自己的臂**，宽度就是从 `_ => 1` 拿的：
+    // 所以动那条兜底不是"改未知算法怎么处理"，是把这两支的接收宽度一起改了。#94b 收兜底时先看这里。
+    const drift: string[] = [];
+    for (const a of COMPUTED) {
+      const eff = arms[a] ?? fallback;
+      if (eff !== CHECKSUM_WIDTHS[a]) drift.push(`${a}：Rust ${eff ?? "算不出"} vs 表 ${CHECKSUM_WIDTHS[a]}`);
+    }
+    expect(drift, `两边宽度漂了：${drift.join("；")}`).toEqual([]);
+    expect(fallback, "引擎兜底此刻是 1，且 sum8/xor8 正靠它").toBe(1);
+    expect("none" in arms, "none 不该出现在引擎的宽度臂里：三个调用点都先短路了它").toBe(false);
+  });
+
+  it("⑦ 虚拟设备 vdev.rs::checksum_len 严格表：认得的算法宽度一致，认不出的必须报错", () => {
+    const src = readFileSync(
+      fileURLToPath(new URL("../../src-tauri/src/vdev.rs", import.meta.url)),
+      "utf8",
+    );
+    const { arms, fallback } = rustWidthArms(fnBody(src, "fn checksum_len(kind: &str) -> Result<usize, String>", "vdev.rs"));
+    const drift: string[] = [];
+    for (const [algo, n] of Object.entries(arms)) {
+      // "" 是 vdev 里"没有校验"的另一种写法，表里没这个键（表用 `none`）
+      const want = algo === "" ? 0 : CHECKSUM_WIDTHS[algo];
+      if (want !== n) drift.push(`${algo}：vdev ${n} vs 表 ${want}`);
+    }
+    expect(drift, `vdev 的严格表和表冲突：${drift.join("；")}`).toEqual([]);
+    // 它只认这五支：比表的覆盖面窄（发不了 crc32/sumadd/ccitt 的模拟帧），是缺口不是冲突
+    expect(Object.keys(arms).sort(), "vdev 支持的校验算法集合变了——它窄于表，宽了更要过一遍宽度").toEqual(
+      ["", "crc16_modbus", "none", "sum8", "xor8"].sort(),
+    );
+    expect(fallback, "vdev 走 other => return Err(...)，没有数字兜底").toBe(null);
+  });
+
+  it("⑧ 类型、表、面板选项三者同一支算法集：能选到就必须算得出宽度", () => {
+    const types = readFileSync(
+      fileURLToPath(new URL("../ipc/types.ts", import.meta.url)),
+      "utf8",
+    );
+    const uni = /export type ChecksumAlgo =([^;]*);/.exec(types);
+    if (!uni) throw new Error("ChecksumAlgo 这个联合类型不见了——表和类型从此没关系了，得重新对");
+    const inType = [...uni[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
+    expect([...inType].sort(), "ChecksumAlgo 与 CHECKSUM_WIDTHS 的键不再是同一支算法集").toEqual(
+      [...ALGOS].sort(),
+    );
+
+    const panel = readFileSync(
+      fileURLToPath(new URL("../features/send/SendBuildPanel.tsx", import.meta.url)),
+      "utf8",
+    );
+    const opts = /const CK_ALGOS: ChecksumAlgo\[\] = \[([^\]]*)\]/.exec(panel);
+    if (!opts) throw new Error("TX组帧台的校验算法下拉消失了——面板与类型脱钩了");
+    const inPanel = [...opts[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
+    expect([...inPanel].sort(), "面板能选的算法与表不一致（选了算不出宽度的那一支会当场报错）").toEqual(
+      [...ALGOS].sort(),
+    );
   });
 });

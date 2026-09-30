@@ -4,6 +4,7 @@ import { guardLocked } from "../operator/lock";
 import { dropFieldValues } from "./telemetryStore";
 import { fieldSize } from "./fieldTypes";
 import { checksumTail, effRange, footerTail } from "../framecanvas/frameLayout";
+import { CHECKSUM_WIDTHS } from "../../shared/checksums";
 import type {
   ChecksumAlgo,
   FieldDef,
@@ -947,14 +948,16 @@ export function patchField(
   scheduleSync();
 }
 
-export const CHECKSUM_SIZES: Record<string, number> = {
-  sum8: 1,
-  xor8: 1,
-  sumadd: 2,
-  crc16_modbus: 2,
-  crc16_ccitt: 2,
-  crc32: 4,
-};
+/**
+ * 校验算法 → 字节数。**数字住在 `shared/checksums.CHECKSUM_WIDTHS`**，这里只是一层视图。
+ *
+ * 故意**不含 `none`**：帧画布那几处 `CHECKSUM_SIZES[algo] ?? 1` 依赖"认不出来时按 1 字节预留"，
+ * 把 `none: 0` 折进来会在"字段已放、算法还没选"这个常见状态下改行为。
+ * 各处兜底分别停在哪、什么时候统一，只写在 `shared/checksums.CHECKSUM_WIDTHS` 的表注释里（#94b）。
+ */
+export const CHECKSUM_SIZES: Record<string, number> = Object.fromEntries(
+  Object.entries(CHECKSUM_WIDTHS).filter(([algo]) => algo !== "none"),
+);
 
 export interface UpsertOpts {
   /** 高级：定长帧保留校验字段在选区位置（中间校验），coverageEnd 同步为绝对偏移（引擎按字段位置验证，语义自洽） */

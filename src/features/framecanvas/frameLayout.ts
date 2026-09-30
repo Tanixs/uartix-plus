@@ -1,5 +1,6 @@
 import type { FieldDef, FieldRole, FrameTemplate } from "../../ipc/types";
 import { fieldSize } from "../protocol/fieldTypes";
+import { CHECKSUM_WIDTHS } from "../../shared/checksums";
 import { tx } from "../../i18n/strings";
 
 export const PAD_L = 10;
@@ -43,11 +44,14 @@ export interface Layout {
   frLen: number;
 }
 
+/**
+ * 校验段的字节数（帧画布布局用）。数字来自 `shared/checksums.CHECKSUM_WIDTHS`，这一层只定兜底：
+ * `none` ⇒ 0（没有校验段），认不出的算法 ⇒ 2（今天就是 `return 2` 那行，不改）。
+ * 引擎侧 `parser.rs` 对认不出的算法按 1 字节算 —— 两边什么时候统一，是 #94b 的活。
+ */
 export function checksumLen(algo: string | null): number {
   if (!algo || algo === "none") return 0;
-  if (algo === "sum8" || algo === "xor8") return 1;
-  if (algo === "crc32") return 4;
-  return 2;
+  return CHECKSUM_WIDTHS[algo] ?? 2;
 }
 
 export interface CovRun {
