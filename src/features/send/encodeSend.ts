@@ -11,8 +11,19 @@
  *  3. 长度域与校验都是**两趟**：第一趟按占位宽度铺字节，第二趟回填 —— 因为长度要等全帧定型、
  *     校验要等长度填完。
  */
-import { checksumWidth, crc16, crc32, sum16, sum8, sumadd16, xor8 } from "../../shared/checksums";
-import type { Endian, FieldType } from "../../ipc/types";
+import {
+  CRC_CUSTOM,
+  checksumWidth,
+  crc16,
+  crc32,
+  crcByParams,
+  crcParamError,
+  sum16,
+  sum8,
+  sumadd16,
+  xor8,
+} from "../../shared/checksums";
+import type { CrcParams, Endian, FieldType } from "../../ipc/types";
 import { sendFieldWidth, type SendField, type SendParam, type SendTemplate } from "./sendTypes";
 
 export interface EncodeInput {
@@ -218,7 +229,7 @@ function fieldBytes(
   return { bytes: applyEndian(beBytes(Math.round(n), sendFieldWidth(f)), f.endian) };
 }
 
-function checksumBytes(algo: string, data: number[]): number[] {
+function checksumBytes(algo: string, data: number[], crc?: CrcParams | null): number[] {
   switch (algo) {
     case "sum8":
       return [sum8(data)];
@@ -248,6 +259,17 @@ function checksumBytes(algo: string, data: number[]): number[] {
     case "crc32": {
       const v = crc32(data) >>> 0;
       return [(v >>> 24) & 0xff, (v >>> 16) & 0xff, (v >>> 8) & 0xff, v & 0xff];
+    }
+    case CRC_CUSTOM: {
+      const why = crcParamError(crc);
+      if (why) throw new SendEncodeError(`自定义 CRC 参数不合法：${why}`);
+      const p = crc as CrcParams;
+      const v = crcByParams(p, data);
+      const out: number[] = [];
+      for (let i = p.width / 8 - 1; i >= 0; i--) out.push((v >>> (i * 8)) & 0xff);
+      // 线上字节序跟着反射走（Rockwell 模型本身不规定这个）：refout ⇒ 低字节在前。
+      // 于是同一组参数下，Modbus / X-25 与具名算法逐字节相同，CCITT-FALSE 高在前。
+      return p.refout ? out.reverse() : out;
     }
     default:
       throw new SendEncodeError(`发送谱用了不支持的校验算法「${algo}」`);
@@ -316,7 +338,12 @@ export function encodeSend(tpl: SendTemplate, inp: EncodeInput = {}): EncodeResu
       // 校验段的宽度**由算法决定**，不是用户填的：让它自己声明宽度就会长出"宽度与算法不符"
       // 这一类根本该存在的错误。它也不该绑来源——值是算出来的。
       if (!tpl.checksum) throw new SendEncodeError(`字段「${f.name}」标成校验，但这张谱没有选校验算法`);
-      const want = checksumWidth(tpl.checksum.algo);
+      if (tpl.checksum.algo === CRC_CUSTOM) {
+        // 先验参数再取宽度：width 填成 12 之类会算出 1.5 字节，宁可在这里点名，不要长出一个半个字节的段
+        const why = crcParamError(tpl.checksum.crc);
+        if (why) throw new SendEncodeError(`发送谱的自定义 CRC 有问题：${why}`);
+      }
+      const want = checksumWidth(tpl.checksum.algo, tpl.checksum.crc);
       if (want === 0) throw new SendEncodeError(`发送谱用了不支持的校验算法「${tpl.checksum.algo}」`);
       if (f.source.kind !== "const") {
         throw new SendEncodeError(`校验段「${f.name}」的值由算法算出，不能绑参数或变量`);
@@ -352,7 +379,7 @@ export function encodeSend(tpl: SendTemplate, inp: EncodeInput = {}): EncodeResu
     const span = spans.find((s) => s.field.role === "checksum" || s.field.role === "checksum2");
     if (!span) throw new SendEncodeError("选了校验算法，但没有一个字段标成校验段");
     const data = coverageSlice(bytes, tpl.checksum.coverageStart, tpl.checksum.coverageEnd);
-    const ck = checksumBytes(tpl.checksum.algo, data);
+    const ck = checksumBytes(tpl.checksum.algo, data, tpl.checksum.crc);
     bytes.splice(span.at, span.len, ...ck);
     notes.push(`${tpl.checksum.algo} = ${ck.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ")}`);
   }

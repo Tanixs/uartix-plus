@@ -1,4 +1,4 @@
-import type { FieldDef, FieldRole, FrameTemplate } from "../../ipc/types";
+import type { CrcParams, FieldDef, FieldRole, FrameTemplate } from "../../ipc/types";
 import { fieldSize } from "../protocol/fieldTypes";
 import { CHECKSUM_WIDTHS } from "../../shared/checksums";
 import { tx } from "../../i18n/strings";
@@ -47,10 +47,12 @@ export interface Layout {
 /**
  * 校验段的字节数（帧画布布局用）。数字来自 `shared/checksums.CHECKSUM_WIDTHS`，这一层只定兜底：
  * `none` ⇒ 0（没有校验段），认不出的算法 ⇒ 2（今天就是 `return 2` 那行，不改）。
- * 引擎侧 `parser.rs` 对认不出的算法按 1 字节算 —— 两边什么时候统一，是 #94b 的活。
+ * `crc_custom` 的宽度在参数里（`crc.width / 8`）；参数还没填时按 2 留位 —— 与兜底同一条线。
+ * 引擎侧 `parser.rs` 对认不出的算法按 1 字节算 —— 两边什么时候统一，是 #94 的活（已定为不收）。
  */
-export function checksumLen(algo: string | null): number {
+export function checksumLen(algo: string | null, crc?: CrcParams | null): number {
   if (!algo || algo === "none") return 0;
+  if (algo === "crc_custom") return crc ? crc.width / 8 : 2;
   return CHECKSUM_WIDTHS[algo] ?? 2;
 }
 

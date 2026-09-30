@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { encodeSend } from "./encodeSend";
 import type { SendField, SendTemplate } from "./sendTypes";
-import type { ChecksumAlgo } from "../../ipc/types";
+import type { ChecksumAlgo, CrcParams } from "../../ipc/types";
 
 const fsSpec = "node:fs";
 const urlSpec = "node:url";
@@ -104,23 +104,37 @@ describe("P121-B · 往返（TS 编码侧）", () => {
     });
   }
 
-  it("校验段的落帧字节序（Modbus / X-25 / SUM16 / CRC-32）", () => {
+  it("校验段的落帧字节序（具名算法 + 同一组参数的 crc_custom）", () => {
     const body = Array.from("123456789", (c) => c.charCodeAt(0));
     const frame = () =>
       t([
         ...body.map((b, i) => field({ name: `B${i}`, source: { kind: "const", bytes: [b] } })),
         field({ name: "CK", role: "checksum", source: { kind: "const", bytes: [] } }),
       ]);
-    const cases: [ChecksumAlgo, number, string][] = [
-      ["crc16_modbus", -2, "31 32 33 34 35 36 37 38 39 37 4B"],
-      ["crc16_x25", -2, "31 32 33 34 35 36 37 38 39 6E 90"],
-      ["sum16", -2, "31 32 33 34 35 36 37 38 39 DD 01"],
-      ["crc32", -4, "31 32 33 34 35 36 37 38 39 CB F4 39 26"],
+    const CRC_MODBUS: CrcParams = { width: 16, poly: 0x8005, init: 0xffff, refin: true, refout: true, xorout: 0 };
+    const CRC32: CrcParams = {
+      width: 32,
+      poly: 0x04c11db7,
+      init: 0xffffffff,
+      refin: true,
+      refout: true,
+      xorout: 0xffffffff,
+    };
+    const cases: { algo: ChecksumAlgo; end: number; hex: string; crc?: CrcParams }[] = [
+      { algo: "crc16_modbus", end: -2, hex: "31 32 33 34 35 36 37 38 39 37 4B" },
+      { algo: "crc16_x25", end: -2, hex: "31 32 33 34 35 36 37 38 39 6E 90" },
+      { algo: "sum16", end: -2, hex: "31 32 33 34 35 36 37 38 39 DD 01" },
+      { algo: "crc32", end: -4, hex: "31 32 33 34 35 36 37 38 39 CB F4 39 26" },
+      // 同一组 Modbus 参数走 crc_custom：逐字节必须与具名算法一样
+      { algo: "crc_custom", end: -2, hex: "31 32 33 34 35 36 37 38 39 37 4B", crc: CRC_MODBUS },
+      // 而 CRC-32 不一样：具名那支历史上大端落帧，参数化那支按反射走低字节在前。
+      // 同一个值、两种线上形状 —— 钉在这里，免得变成"没人注意到会不一样"的坑。
+      { algo: "crc_custom", end: -4, hex: "31 32 33 34 35 36 37 38 39 26 39 F4 CB", crc: CRC32 },
     ];
-    for (const [algo, coverageEnd, hex] of cases) {
+    for (const c of cases) {
       const tpl = frame();
-      tpl.checksum = { algo, coverageStart: 0, coverageEnd };
-      expect(encodeSend(tpl).hex, `${algo} 的落帧字节序`).toBe(hex);
+      tpl.checksum = { algo: c.algo, coverageStart: 0, coverageEnd: c.end, crc: c.crc ?? null };
+      expect(encodeSend(tpl).hex, `${c.algo}${c.crc ? "（参数化）" : ""} 的落帧字节序`).toBe(c.hex);
     }
   });
 
@@ -136,6 +150,7 @@ describe("P121-B · 往返（TS 编码侧）", () => {
         "31 32 33 34 35 36 37 38 39 6E 90",
         "31 32 33 34 35 36 37 38 39 DD 01",
         "31 32 33 34 35 36 37 38 39 CB F4 39 26",
+        "31 32 33 34 35 36 37 38 39 26 39 F4 CB",
       ])
       .filter((hex) => !header.includes(hex));
     expect(missing, `这些 hex 只在 TS 侧，Rust 的往返表没跟上：${missing.join(" / ")}`).toEqual([]);

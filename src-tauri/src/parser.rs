@@ -81,6 +81,24 @@ pub struct ChecksumCfg {
     pub coverage_end: i32,
     #[serde(default = "default_endian")]
     pub endian: String,
+    /// 只有 algo == "crc_custom" 时读。缺了不 panic，按算不出处理（回 0）。
+    #[serde(default)]
+    pub crc: Option<CrcParams>,
+}
+
+/// 参数化 CRC（Rockwell 模型）。`poly` 是去掉最高位那个 1 的既约式，
+/// 与前端 `shared/checksums.crcByParams` 同一套参数、同一套字节序。
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+pub struct CrcParams {
+    pub width: u8,
+    pub poly: u32,
+    pub init: u32,
+    #[serde(default)]
+    pub refin: bool,
+    #[serde(default)]
+    pub refout: bool,
+    pub xorout: u32,
 }
 
 #[derive(Deserialize, Clone)]
@@ -650,7 +668,7 @@ fn validate(tpl: &FrameTemplate) -> Result<(), String> {
         if ck.algo != "none" {
             if let Some(f) = tpl.fields.iter().find(|f| f.role == "checksum") {
                 let fw = type_size(f);
-                let aw = checksum_size(&ck.algo);
+                let aw = checksum_size_with(&ck.algo, ck.crc.as_ref());
                 if fw != aw {
                     return Err(format!(
                         "模板[{}]校验域占 {} B，但算法 {} 产出 {} B——请调整校验字段宽度或算法",
@@ -670,7 +688,7 @@ fn verify(tpl: &FrameTemplate, buf: &[u8]) -> (bool, Option<String>) {
     if ck.algo == "none" {
         return (true, None);
     }
-    let size = checksum_size(&ck.algo);
+    let size = checksum_size_with(&ck.algo, ck.crc.as_ref());
     let exp_off = match tpl.fields.iter().find(|f| f.role == "checksum") {
         Some(f) => {
             if f.offset < 0 {
@@ -718,7 +736,7 @@ fn verify(tpl: &FrameTemplate, buf: &[u8]) -> (bool, Option<String>) {
     if cov_start >= cov_end {
         return (false, Some("校验覆盖区间为空".into()));
     }
-    let computed = checksum_compute(&ck.algo, &buf[cov_start..cov_end]);
+    let computed = checksum_compute_with(&ck.algo, &buf[cov_start..cov_end], ck.crc.as_ref());
     let expected = read_uint(&buf[exp_off..exp_off + size], &ck.endian);
     if computed == expected {
         (true, None)
@@ -765,6 +783,68 @@ pub fn checksum_compute(algo: &str, data: &[u8]) -> u64 {
         "crc32" => crc32(data) as u64,
         _ => 0,
     }
+}
+
+/// 带参数化的校验：`crc_custom` 走通用 CRC，其余算法名走上面那张表。
+/// 解析热路径上只有校验段会调它，逐位算 8×N 次与既有的 crc16_modbus 同量级。
+pub fn checksum_compute_with(algo: &str, data: &[u8], crc: Option<&CrcParams>) -> u64 {
+    if algo == "crc_custom" {
+        return crc.map(|p| crc_by_params(p, data)).unwrap_or(0);
+    }
+    checksum_compute(algo, data)
+}
+
+/// 同理：宽度在参数里，不在算法名里。参数缺失或位数非法时按 1 字节兜，
+/// 让上面那条「校验域占几字节 vs 算法产出几字节」的守卫去点名，而不是这里静默给个宽度。
+fn checksum_size_with(algo: &str, crc: Option<&CrcParams>) -> usize {
+    if algo == "crc_custom" {
+        return match crc {
+            Some(p) if matches!(p.width, 8 | 16 | 32) => (p.width / 8) as usize,
+            _ => 1,
+        };
+    }
+    checksum_size(algo)
+}
+
+fn reflect_bits(v: u32, w: u8) -> u32 {
+    let mut r = 0u32;
+    for i in 0..w {
+        if v & (1u32 << i) != 0 {
+            r |= 1u32 << (w - 1 - i);
+        }
+    }
+    r
+}
+
+/// 通用逐位 CRC。只支持 8/16/32 位；别的宽度直接回 0 —— 宁可算不中，也不在 `1 << (w-1)` 上炸。
+/// 三个公开模型当自证用（见 `checksum_vectors` 里的 custom 三条）：参数错一个数就复现不出来。
+fn crc_by_params(p: &CrcParams, data: &[u8]) -> u64 {
+    if !matches!(p.width, 8 | 16 | 32) {
+        return 0;
+    }
+    let mask: u32 = if p.width == 32 { u32::MAX } else { (1u32 << p.width) - 1 };
+    let top: u32 = 1u32 << (p.width - 1);
+    let mut crc = p.init & mask;
+    for &b in data {
+        let mut v = if p.refin { reflect_bits(b as u32, 8) } else { b as u32 };
+        v = if p.width >= 8 {
+            (v << (p.width - 8)) & mask
+        } else {
+            v >> (8 - p.width)
+        };
+        crc = (crc ^ v) & mask;
+        for _ in 0..8 {
+            crc = if crc & top != 0 {
+                ((crc << 1) ^ p.poly) & mask
+            } else {
+                (crc << 1) & mask
+            };
+        }
+    }
+    if p.refout {
+        crc = reflect_bits(crc, p.width);
+    }
+    ((crc ^ (p.xorout & mask)) & mask) as u64
 }
 
 pub fn crc16_modbus(data: &[u8]) -> u16 {
@@ -1096,7 +1176,7 @@ fn reserved_tail_len(tpl: &FrameTemplate) -> usize {
     let mut rt = 0;
     if let Some(ck) = &tpl.checksum {
         if ck.algo != "none" && ck.coverage_end < 0 {
-            rt += checksum_size(&ck.algo);
+            rt += checksum_size_with(&ck.algo, ck.crc.as_ref());
         }
     }
     if tpl.boundary.mode == "footer" {
@@ -1158,6 +1238,7 @@ mod tests {
                         ..Default::default()
                     },
                     checksum: Some(ChecksumCfg {
+                        crc: None,
                         algo: "sum8".into(),
                         coverage_start: 0,
                         coverage_end: -1,
@@ -1189,6 +1270,7 @@ mod tests {
                         ..Default::default()
                     },
                     checksum: Some(ChecksumCfg {
+                        crc: None,
                         algo: "crc16_modbus".into(),
                         coverage_start: 0,
                         coverage_end: -2,
@@ -1358,6 +1440,7 @@ mod tests {
                 ..Default::default()
             },
             checksum: Some(ChecksumCfg {
+                crc: None,
                 algo: "sum8".into(),
                 coverage_start: 0,
                 coverage_end: -1,
@@ -1489,6 +1572,7 @@ mod tests {
                     ..Default::default()
                 },
                 checksum: Some(ChecksumCfg {
+                    crc: None,
                     algo: "sumadd".into(),
                     coverage_start: 0,
                     coverage_end: -2,
@@ -1655,6 +1739,7 @@ mod tests {
                 ..Default::default()
             },
             checksum: Some(ChecksumCfg {
+                crc: None,
                 algo: "sumadd".into(),
                 coverage_start: 0,
                 coverage_end: -2,
@@ -1831,6 +1916,7 @@ mod tests {
                 ..Default::default()
             },
             checksum: Some(ChecksumCfg {
+                crc: None,
                 algo: "sum8".into(),
                 coverage_start: 0,
                 coverage_end: -1,
@@ -1987,6 +2073,7 @@ mod tests {
                 ..Default::default()
             },
             checksum: Some(ChecksumCfg {
+                crc: None,
                 algo: "sum8".into(),
                 coverage_start: 0,
                 coverage_end: -1,
@@ -2009,6 +2096,35 @@ mod tests {
         let rows = eng.feed(&[0x10, 0x10], 0, 1);
         assert_eq!(rows.len(), 1);
         assert!(rows[0].valid, "sum8(0x10)=0x10 应通过");
+    }
+
+    /// 参数化那支也归宽度守卫管：宽度是从 `crc.width` 来的，不是从算法名来的
+    #[test]
+    fn custom_crc_width_must_match_the_field_as_well() {
+        let mut tpl = ck_template("uint16");
+        let ck = tpl.checksum.as_mut().unwrap();
+        ck.algo = "crc_custom".into();
+        ck.crc = Some(CrcParams {
+            width: 16,
+            poly: 0x1021,
+            init: 0xFFFF,
+            refin: false,
+            refout: false,
+            xorout: 0,
+        });
+        let mut eng = ParserEngine::new();
+        assert!(eng.set_rules(ParseRules { templates: vec![tpl.clone()] }).is_ok(), "16 位参数配 uint16 校验域该收");
+        let ck = tpl.checksum.as_mut().unwrap();
+        ck.crc = Some(CrcParams {
+            width: 32,
+            poly: 0x04C1_1DB7,
+            init: 0xFFFF_FFFF,
+            refin: true,
+            refout: true,
+            xorout: 0xFFFF_FFFF,
+        });
+        let err = eng.set_rules(ParseRules { templates: vec![tpl] }).unwrap_err();
+        assert!(err.contains("校验域占"), "32 位参数配 uint16 校验域该被点名: {err}");
     }
 
     #[test]
@@ -2100,6 +2216,7 @@ mod tests {
                 ..Default::default()
             },
             checksum: Some(ChecksumCfg {
+                crc: None,
                 algo: "crc16_modbus".into(),
                 coverage_start: 0,
                 coverage_end: -2,
@@ -2277,6 +2394,7 @@ mod tests {
                 ..Default::default()
             },
             checksum: Some(ChecksumCfg {
+                crc: None,
                 algo: "crc16_modbus".into(),
                 coverage_start: 0,
                 coverage_end: -2,
@@ -2649,6 +2767,7 @@ mod checksum_vectors {
 /// 31 32 33 34 35 36 37 38 39 6E 90          CRC-16/X-25 低字节在前（check 值 0x906E）
 /// 31 32 33 34 35 36 37 38 39 DD 01          SUM16 低字节在前（累加和 0x01DD）
 /// 31 32 33 34 35 36 37 38 39 CB F4 39 26    CRC-32 大端
+/// 31 32 33 34 35 36 37 38 39 26 39 F4 CB    同一个 CRC-32 走 crc_custom：反射 ⇒ 低字节在前
 /// ```
 #[cfg(test)]
 mod send_round_trip {
@@ -2737,6 +2856,22 @@ mod send_round_trip {
         let s16 = checksum_compute("sum16", &body);
         assert_eq!(s16, 0x01DD);
         assert_eq!(read_uint(&[0xDDu8, 0x01], "little"), s16);
+        // 参数化那支：同一组 Modbus 参数与具名算法逐字节相同；CRC-32 的参数化按反射走低字节在前
+        let cm = CrcParams { width: 16, poly: 0x8005, init: 0xFFFF, refin: true, refout: true, xorout: 0 };
+        assert_eq!(checksum_compute_with("crc_custom", &body, Some(&cm)), 0x4B37);
+        assert_eq!(read_uint(&[0x37u8, 0x4B], "little"), checksum_compute_with("crc_custom", &body, Some(&cm)));
+        let c32 = CrcParams {
+            width: 32,
+            poly: 0x04C1_1DB7,
+            init: 0xFFFF_FFFF,
+            refin: true,
+            refout: true,
+            xorout: 0xFFFF_FFFF,
+        };
+        assert_eq!(checksum_compute_with("crc_custom", &body, Some(&c32)), 0xCBF4_3926);
+        assert_eq!(read_uint(&[0x26u8, 0x39, 0xF4, 0xCB], "little"), checksum_compute_with("crc_custom", &body, Some(&c32)));
+        assert_eq!(checksum_compute_with("crc_custom", &body, None), 0, "没有参数就不算，不猜一组默认值");
+        assert_eq!(checksum_compute_with("crc_custom", &body, Some(&CrcParams { width: 12, ..cm })), 0, "位数不合法也不算");
         // SUM8 的覆盖口径：coverage_end = -1 表示"不含最后这一个字节"
         let mut framed = body.to_vec();
         framed.push(0);

@@ -300,6 +300,7 @@ mod tests {
     /// 与「Modbus RTU」预设同构的一小组规则，用来端到端验证演示源产出的字节流
     fn rtu_rules() -> ParseRules {
         let crc = || Some(ChecksumCfg {
+            crc: None,
             algo: "crc16_modbus".into(),
             coverage_start: 0,
             coverage_end: -2,

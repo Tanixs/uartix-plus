@@ -104,6 +104,7 @@ export type ChecksumAlgo =
   | "crc16_modbus"
   | "crc16_ccitt"
   | "crc16_x25"
+  | "crc_custom"
   | "crc32";
 export type FieldType =
   | "uint8"
@@ -159,11 +160,27 @@ export interface Boundary {
   discs?: DiscSpec[] | null;
 }
 
+/**
+ * 参数化 CRC（crc_custom 才读它）。八个公开模型里有六个靠这五个数就能描述完，
+ * 所以不再为每支协议加一个算法名。`width` 决定寄存器位数与掩码，`poly` 是**去掉最高位**
+ * 那个 1 的既约式（CRC-16/CCITT 写 0x1021，不写 0x11021）。
+ */
+export interface CrcParams {
+  width: 8 | 16 | 32;
+  poly: number;
+  init: number;
+  refin: boolean;
+  refout: boolean;
+  xorout: number;
+}
+
 export interface ChecksumCfg {
   algo: ChecksumAlgo;
   coverageStart: number;
   coverageEnd: number;
   endian: Endian;
+  /** 只有 algo === "crc_custom" 时生效；缺了就点名报错，不按默认值凑一帧 */
+  crc?: CrcParams | null;
 }
 
 export interface BitsCfg {

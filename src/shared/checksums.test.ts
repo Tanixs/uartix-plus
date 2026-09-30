@@ -20,15 +20,19 @@
 import { describe, expect, it } from "vitest";
 import {
   CHECKSUM_WIDTHS,
+  CRC_CUSTOM,
   anoCheck,
   checksumWidth,
   crc16,
   crc32,
+  crcByParams,
+  crcParamError,
   sum16,
   sum8,
   sumadd16,
   xor8,
 } from "./checksums";
+import type { CrcParams } from "../ipc/types";
 import { checksumLen } from "../features/framecanvas/frameLayout";
 
 const fsSpec = "node:fs";
@@ -266,17 +270,14 @@ describe("P121-B2 · 校验字段宽度：数字一份、兜底三条", () => {
     expect(fallback, "vdev 走 other => return Err(...)，没有数字兜底").toBe(null);
   });
 
-  it("⑧ 类型、表、面板选项三者同一支算法集：能选到就必须算得出宽度", () => {
+  it("⑧ 类型、面板选项同一支算法集，表 = 它们减去 crc_custom", () => {
     const types = readFileSync(
       fileURLToPath(new URL("../ipc/types.ts", import.meta.url)),
       "utf8",
     );
     const uni = /export type ChecksumAlgo =([^;]*);/.exec(types);
     if (!uni) throw new Error("ChecksumAlgo 这个联合类型不见了——表和类型从此没关系了，得重新对");
-    const inType = [...uni[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
-    expect([...inType].sort(), "ChecksumAlgo 与 CHECKSUM_WIDTHS 的键不再是同一支算法集").toEqual(
-      [...ALGOS].sort(),
-    );
+    const inType = [...uni[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]).sort();
 
     const panel = readFileSync(
       fileURLToPath(new URL("../features/send/SendBuildPanel.tsx", import.meta.url)),
@@ -284,9 +285,48 @@ describe("P121-B2 · 校验字段宽度：数字一份、兜底三条", () => {
     );
     const opts = /const CK_ALGOS: ChecksumAlgo\[\] = \[([^\]]*)\]/.exec(panel);
     if (!opts) throw new Error("TX组帧台的校验算法下拉消失了——面板与类型脱钩了");
-    const inPanel = [...opts[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]);
-    expect([...inPanel].sort(), "面板能选的算法与表不一致（选了算不出宽度的那一支会当场报错）").toEqual(
-      [...ALGOS].sort(),
+    const inPanel = [...opts[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]).sort();
+
+    // 面板能选的必须等于类型全集：少一支是能力面没铺开，多一支是选了算不出来
+    expect(inPanel, "TX组帧台下拉的算法集与 ChecksumAlgo 不一致").toEqual(inType);
+    // 表里**不该**有 crc_custom：它的宽度在参数里，不在算法名里（checksumWidth 的第二入参）
+    expect(inType, "类型里该有 crc_custom 这一支").toContain(CRC_CUSTOM);
+    expect(inType.filter((a) => a !== CRC_CUSTOM).sort(), "具名算法与宽度表的键不再是同一支集合").toEqual(
+      [...ALGOS].filter((a) => a !== CRC_CUSTOM).sort(),
     );
+    expect(CHECKSUM_WIDTHS[CRC_CUSTOM], "crc_custom 不该进宽度表").toBeUndefined();
+  });
+
+  it("⑨ 参数化 CRC 复现四支公开模型（错一个数就复现不出来）", () => {
+    const v = VECTORS[0].bytes;
+    const models: [string, CrcParams, number][] = [
+      ["CRC-16/MODBUS", { width: 16, poly: 0x8005, init: 0xffff, refin: true, refout: true, xorout: 0 }, 0x4b37],
+      ["CRC-16/CCITT-FALSE", { width: 16, poly: 0x1021, init: 0xffff, refin: false, refout: false, xorout: 0 }, 0x29b1],
+      ["CRC-16/X-25", { width: 16, poly: 0x1021, init: 0xffff, refin: true, refout: true, xorout: 0xffff }, 0x906e],
+      ["CRC-32", { width: 32, poly: 0x04c11db7, init: 0xffffffff, refin: true, refout: true, xorout: 0xffffffff }, 0xcbf43926],
+    ];
+    for (const [name, p, want] of models) {
+      expect(crcParamError(p), `${name} 的这组参数该判合法`).toBe(null);
+      expect(crcByParams(p, v), `${name} 的 check 值是公开的 0x${want.toString(16)}`).toBe(want);
+    }
+    // 三支 16 位模型逐向量与具名算法同数（CRC-32 的**值**也同，但落帧字节序不同，见 ⑩）
+    for (const t of VECTORS) {
+      expect(crcByParams(models[0][1], t.bytes), `${t.name} 参数化 Modbus`).toBe(t.modbus);
+      expect(crcByParams(models[1][1], t.bytes), `${t.name} 参数化 CCITT`).toBe(t.ccitt);
+      expect(crcByParams(models[2][1], t.bytes), `${t.name} 参数化 X-25`).toBe(t.x25);
+      expect(crcByParams(models[3][1], t.bytes), `${t.name} 参数化 CRC-32`).toBe(t.crc32);
+    }
+  });
+
+  it("⑩ 参数不合法就点名，不静默按默认值凑", () => {
+    const base: CrcParams = { width: 16, poly: 0x1021, init: 0xffff, refin: false, refout: false, xorout: 0 };
+    expect(crcParamError(null), "一个参数都没填").toContain("没填");
+    expect(crcParamError({ ...base, width: 12 as never }), "位数不在 8/16/32 里").not.toBeNull();
+    expect(crcParamError({ ...base, poly: 0x11021 }), "多项式写了带最高位的全式：超出位宽").not.toBeNull();
+    expect(crcParamError({ ...base, init: -1 }), "负数").not.toBeNull();
+    expect(crcParamError({ ...base, xorout: 1.5 }), "非整数").not.toBeNull();
+    expect(checksumWidth(CRC_CUSTOM, base), "参数化算法的宽度 = 位数 / 8").toBe(2);
+    expect(checksumWidth(CRC_CUSTOM, { ...base, width: 32 }), "32 位占 4 字节").toBe(4);
+    expect(checksumWidth(CRC_CUSTOM), "没参数就问不出宽度：回 0，由编码器点名").toBe(0);
   });
 });

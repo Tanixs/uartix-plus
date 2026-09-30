@@ -2,6 +2,7 @@
  * 校验原语（前端侧）：与 Rust parser.rs 的校验实现同一套参数，
  * 供指令工厂组帧、Modbus 内核、自定义协议预览共用——避免同一算法两处实现漂移。
  */
+import type { CrcParams } from "../ipc/types";
 
 export function sum8(bytes: number[]): number {
   let s = 0;
@@ -78,11 +79,65 @@ export const CHECKSUM_WIDTHS: Record<string, number> = {
   crc16_ccitt: 2,
   crc16_x25: 2,
   crc32: 4,
+  // crc_custom 不在表里：它的宽度是 `crc.width / 8`，由 checksumWidth 的第二入参回答
 };
 
-export function checksumWidth(algo: string | null | undefined): number {
+/** `crc_custom` 专用：算法名给不出宽度，宽度在参数里 */
+export const CRC_CUSTOM = "crc_custom";
+
+export function checksumWidth(algo: string | null | undefined, crc?: CrcParams | null): number {
   if (!algo) return 0;
+  if (algo === CRC_CUSTOM) return crc ? crc.width / 8 : 0;
   return CHECKSUM_WIDTHS[algo] ?? 0;
+}
+
+/**
+ * 参数化 CRC（Rockwell 那套：width / poly / init / refin / refout / xorout）。
+ *
+ * `poly` 按**既约式**写（CRC-16/CCITT 是 0x1021，不是 0x11021），所以三个公开模型可以直接
+ * 当自证用：同一份实现必须算出 Modbus 0x4B37、X-25 0x906E、CRC-32 0xCBF43926 —— 参数填错
+ * 就复现不出来。`parser.rs` 里有一份同参数的实现，两边由 `checksums.test.ts` 的 ⑨ 钉住。
+ */
+export function crcByParams(p: CrcParams, bytes: number[]): number {
+  const mask = p.width === 32 ? 0xffffffff : (1 << p.width) - 1;
+  const top = 1 << (p.width - 1);
+  const reflect = (v: number, w: number) => {
+    let r = 0;
+    for (let i = 0; i < w; i++) if (v & (1 << i)) r |= 1 << (w - 1 - i);
+    return r >>> 0;
+  };
+  let crc = (p.init & mask) >>> 0;
+  for (let b of bytes) {
+    if (p.refin) b = reflect(b, 8);
+    crc = ((crc ^ (b << (p.width - 8))) & mask) >>> 0;
+    for (let i = 0; i < 8; i++) {
+      crc = crc & top ? (((crc << 1) ^ p.poly) & mask) >>> 0 : ((crc << 1) & mask) >>> 0;
+    }
+  }
+  if (p.refout) crc = reflect(crc, p.width);
+  return ((crc ^ (p.xorout & mask)) & mask) >>> 0;
+}
+
+/**
+ * 参数的合法性检查 —— **返回错误文字，不返回布尔**。
+ * 参数化最容易出的事是"看着能填、算出来是 0"：非法值必须点名，绝不静默按默认值凑一帧。
+ */
+export function crcParamError(p: CrcParams | null | undefined): string | null {
+  if (!p) return "选了 crc_custom，但一个参数都没填";
+  if (p.width !== 8 && p.width !== 16 && p.width !== 32) {
+    return `CRC 位数只支持 8 / 16 / 32（当前 ${p.width}）`;
+  }
+  const mask = p.width === 32 ? 0xffffffff : (1 << p.width) - 1;
+  for (const [k, v] of [
+    ["poly", p.poly],
+    ["init", p.init],
+    ["xorout", p.xorout],
+  ] as const) {
+    if (!Number.isInteger(v) || v < 0 || v > mask) {
+      return `CRC 的 ${k}（${v}）超出 ${p.width} 位（0~${mask.toString(16)}）；多项式要写去掉最高位的既约式`;
+    }
+  }
+  return null;
 }
 
 export function crc16(algo: Crc16Algo, bytes: number[]): number {

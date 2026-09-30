@@ -14,7 +14,7 @@
  * 界面上看到的字节**就是**点发送会出去的字节，没有第二份计算。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { ChecksumAlgo, Endian, FieldRole, FieldType } from "../../ipc/types";
+import type { ChecksumAlgo, CrcParams, Endian, FieldRole, FieldType } from "../../ipc/types";
 import { tx, useLocale } from "../../i18n/strings";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
@@ -25,7 +25,7 @@ import * as controlsStore from "../controls/controlsStore";
 import { guardLocked } from "../operator/lock";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import * as sendStore from "./sendStore";
-import { encodeSend, intRangeOf, parseHexInput } from "./encodeSend";
+import { encodeSend, intRangeOf, parseHexInput, parseNumber } from "./encodeSend";
 import {
   dropIndexAt,
   moveTargetIndex,
@@ -76,8 +76,22 @@ const CK_ALGOS: ChecksumAlgo[] = [
   "crc16_modbus",
   "crc16_ccitt",
   "crc16_x25",
+  "crc_custom",
   "crc32",
 ];
+
+/**
+ * 切到 crc_custom 时先给一组**当场就能算出东西**的参数（CRC-16/CCITT-FALSE）。
+ * 留一个空参数组就是"选了算法却填不出帧"的中间态——这面板一路在消的就是这种态。
+ */
+const DEFAULT_CRC: CrcParams = {
+  width: 16,
+  poly: 0x1021,
+  init: 0xffff,
+  refin: false,
+  refout: false,
+  xorout: 0,
+};
 
 const roleLabel = (r: FieldRole): string =>
   ({
@@ -322,6 +336,28 @@ export function SendBuildPanel() {
 
   const patchSel = (patch: Partial<SendField>) => {
     if (tpl && field) sendStore.patchField(tpl.id, field.id, patch);
+  };
+
+  /** 参数化 CRC 的读写：没选 crc_custom 时界面不显示这些行，读到的就是那组能算的默认参数 */
+  const crcOf = (): CrcParams => tpl?.checksum?.crc ?? DEFAULT_CRC;
+  const setCrc = (patch: Partial<CrcParams>) => {
+    if (!tpl?.checksum) return;
+    sendStore.patchTemplate(tpl.id, { checksum: { ...tpl.checksum, crc: { ...crcOf(), ...patch } } });
+  };
+  /** poly / init / xorout 用十六进制写最自然（0x1021），parseNumber 认 0x 也认十进制 */
+  const commitCrcNum = (key: "poly" | "init" | "xorout", text: string) => {
+    try {
+      setCrc({ [key]: parseNumber(text, `CRC ${key}`) });
+      setErr("");
+    } catch (e) {
+      // 这条会留在屏上直到下一次成功提交，所以得说清"没写进去"——不然看着像现在这帧坏了
+      setErr(
+        `${String(e).replace(/^Error:\s*/, "")} ${tx(
+          "—— 这个值没写进谱，原来那个还在",
+          "— this value was not written in; the previous one still stands",
+        )}`,
+      );
+    }
   };
 
   return (
@@ -698,7 +734,15 @@ export function SendBuildPanel() {
                   onChange={(e) => {
                     const algo = e.target.value as ChecksumAlgo;
                     sendStore.patchTemplate(tpl.id, {
-                      checksum: algo === "none" ? null : { algo, coverageStart: tpl.checksum?.coverageStart ?? 0, coverageEnd: tpl.checksum?.coverageEnd ?? -1 },
+                      checksum:
+                        algo === "none"
+                          ? null
+                          : {
+                              algo,
+                              coverageStart: tpl.checksum?.coverageStart ?? 0,
+                              coverageEnd: tpl.checksum?.coverageEnd ?? -1,
+                              crc: algo === "crc_custom" ? (tpl.checksum?.crc ?? DEFAULT_CRC) : null,
+                            },
                     });
                   }}
                 >
@@ -729,6 +773,53 @@ export function SendBuildPanel() {
                     />
                   </span>
                 </label>
+              )}
+              {tpl.checksum?.algo === "crc_custom" && (
+                <>
+                  <label className="sb-row">
+                    <span>{tx("位数", "Width")}</span>
+                    <select
+                      className="input"
+                      value={crcOf().width}
+                      onChange={(e) => setCrc({ width: Number(e.target.value) as CrcParams["width"] })}
+                    >
+                      {([8, 16, 32] as const).map((w) => (
+                        <option key={w} value={w}>
+                          {w}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {(["poly", "init", "xorout"] as const).map((k) => (
+                    <label className="sb-row" key={k}>
+                      <span>{k}</span>
+                      <TextInput value={"0x" + crcOf()[k].toString(16)} onCommit={(v) => commitCrcNum(k, v)} />
+                    </label>
+                  ))}
+                  <label className="sb-row">
+                    <span>{tx("反射", "Reflect")}</span>
+                    <span className="sb-inline">
+                      <input
+                        type="checkbox"
+                        checked={crcOf().refin}
+                        onChange={(e) => setCrc({ refin: e.target.checked })}
+                      />
+                      <span>{tx("输入", "in")}</span>
+                      <input
+                        type="checkbox"
+                        checked={crcOf().refout}
+                        onChange={(e) => setCrc({ refout: e.target.checked })}
+                      />
+                      <span>{tx("输出", "out")}</span>
+                    </span>
+                  </label>
+                  <div className="sb-hint">
+                    {tx(
+                      "线上字节序跟着反射走：反射算法低字节在前 —— 同样的参数下 Modbus / X-25 与具名算法逐字节相同",
+                      "Wire byte order follows reflection: reflected means low byte first — with these parameters Modbus / X-25 match the named algorithms byte for byte",
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>

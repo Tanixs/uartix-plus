@@ -1,6 +1,7 @@
 import type {
   Boundary,
   ChecksumAlgo,
+  CrcParams,
   DiscSpec,
   Endian,
   FieldDef,
@@ -9,6 +10,7 @@ import type {
   FrameTemplate,
   ValueLabel,
 } from "../../ipc/types";
+import { crcParamError } from "../../shared/checksums";
 import * as templateStore from "../protocol/templateStore";
 import * as commandStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
@@ -26,8 +28,28 @@ const CHECKSUM_ALGOS: ChecksumAlgo[] = [
   "crc16_modbus",
   "crc16_ccitt",
   "crc16_x25",
+  "crc_custom",
   "crc32",
 ];
+
+/**
+ * AI 写的 crc_custom 参数：六个字段缺一个、位数不合法就整条拒收 —— 猜一组默认值会造出
+ * "看着配上了、算出来谁也不认"的模板，那比拒收更坏。
+ */
+function parseCrcParams(raw: unknown): CrcParams | null {
+  const r = raw as Record<string, unknown> | null;
+  if (!r || typeof r !== "object") return null;
+  const w = toInt(r.width);
+  const poly = toInt(r.poly);
+  const init = toInt(r.init);
+  const xorout = toInt(r.xorout);
+  if (w !== 8 && w !== 16 && w !== 32) return null;
+  if (poly === null || init === null || xorout === null) return null;
+  if (typeof r.refin !== "boolean" || typeof r.refout !== "boolean") return null;
+  const p: CrcParams = { width: w, poly, init, refin: r.refin, refout: r.refout, xorout };
+  return crcParamError(p) ? null : p;
+}
+
 const FIELD_TYPES: FieldType[] = [
   "uint8",
   "int8",
@@ -181,12 +203,20 @@ function parseOneTemplate(o: Record<string, unknown>): { tpl?: FrameTemplate; er
       ? (c.algo as ChecksumAlgo)
       : null;
     if (algo && algo !== "none") {
-      checksum = {
-        algo,
-        coverageStart: toInt(c.coverageStart) ?? 0,
-        coverageEnd: toInt(c.coverageEnd) ?? -1,
-        endian: (c.endian === "big" ? "big" : "little") as Endian,
-      };
+      // custom 的参数不合法就当这条校验没写：留下一个"选了 custom 却没参数"的模板，
+      // 引擎只会算出 0，症状比拒收难查得多
+      const crc = algo === "crc_custom" ? parseCrcParams(c.crc) : null;
+      if (algo === "crc_custom" && !crc) {
+        checksum = null;
+      } else {
+        checksum = {
+          algo,
+          coverageStart: toInt(c.coverageStart) ?? 0,
+          coverageEnd: toInt(c.coverageEnd) ?? -1,
+          endian: (c.endian === "big" ? "big" : "little") as Endian,
+          crc,
+        };
+      }
     }
   }
 

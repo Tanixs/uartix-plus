@@ -11,7 +11,7 @@
  * 今天发送侧的 `UserSeg` 自有一套 `u8/u16/…/le:boolean`，比接收侧少了 f64/bcd/bits，
  * 字节序也只剩一个布尔，于是"能发出去却解不回来"和"能解出来却发不出去"两个方向都会发生。
  */
-import type { ChecksumAlgo, Endian, FieldRole, FieldType } from "../../ipc/types";
+import type { ChecksumAlgo, CrcParams, Endian, FieldRole, FieldType } from "../../ipc/types";
 
 /** 一个字段的可变来源。四种，且只有这四种（详设 D3：来源写在字段上，不散进字符串） */
 export type SendSource =
@@ -63,7 +63,7 @@ export interface SendTemplate {
   fields: SendField[];
   params: SendParam[];
   /** 覆盖范围与接收侧同语义：负数终点 = 距帧尾 */
-  checksum: { algo: ChecksumAlgo; coverageStart: number; coverageEnd: number } | null;
+  checksum: { algo: ChecksumAlgo; coverageStart: number; coverageEnd: number; crc?: CrcParams | null } | null;
   /**
    * 下一帧要用的自增序号（D9）。它**属于这张谱**而不是属于某个调用方：
    * 同一张谱可以从面板、命令库、卡片、序列器四处发，计数器若各存一份，
