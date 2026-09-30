@@ -19,7 +19,9 @@ import { tx, useLocale } from "../../i18n/strings";
 import { CRC_DEFAULT, parseCrcLiteral } from "../../shared/checksums";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
-import { IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
+import { IconClock, IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
+import * as frameStore from "../framecanvas/frameStore";
+import { draftFromFrame } from "./fromFrame";
 import { runCommand } from "../controls/cmdExec";
 import * as cmdStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
@@ -119,6 +121,44 @@ export function SendBuildPanel() {
   useEffect(() => {
     if (tpl && selId !== tpl.id) setSelId(tpl.id);
   }, [tpl, selId]);
+
+  // 别的面板请这里选一张谱（Hex 右键、反推入口）：按 nonce 变化生效，再点同一张也该有反应
+  const selNonce = useSyncExternalStore(sendStore.subscribe, sendStore.getSelectNonce);
+  useEffect(() => {
+    const req = sendStore.getSelectReq();
+    if (req) setSelId(req.id);
+  }, [selNonce]);
+
+  /**
+   * 「照最近收到的一帧起一张谱」。
+   * 归档只在帧画布开着的时候收字节，所以"没有可反推的帧"是一种正常状态，要说清为什么没有。
+   */
+  const draftFromLastFrame = () => {
+    const list = frameStore.archiveRef().list;
+    const row = list[list.length - 1];
+    if (!row?.bytes?.length) {
+      setErr(
+        tx(
+          "帧归档里没有帧，反推不了：先收到一帧（归档只在帧画布开着时收字节）",
+          "Nothing to infer — the archive holds no frame (it only fills while the frame canvas is open)",
+        ),
+      );
+      return;
+    }
+    try {
+      const bytes = Array.from(row.bytes);
+      const { tpl: draft, notes } = draftFromFrame(bytes, row.tplId, `${tx("照帧起的谱", "Frame draft")} ${row.tplName}`);
+      const id = sendStore.addDraftTemplate(draft);
+      if (!id) {
+        setErr(tx("Operator 只读：不能新建发送谱", "Operator read-only: no new send template"));
+        return;
+      }
+      setSelId(id);
+      setMsg(notes.join("；"));
+    } catch (e) {
+      setErr(String(e).replace(/^Error:\s*/, ""));
+    }
+  };
 
   // 换一张谱：上一张的报错和"已存为指令"不该还挂在下面冒充当前状态
   useEffect(() => {
@@ -369,6 +409,16 @@ export function SendBuildPanel() {
         </button>
         <button
           className="btn icon-btn"
+          title={tx(
+            "照最近收到的一帧起一张谱（能重算验证的才写进谱，其余按定长字节放）",
+            "Draft a template from the last received frame (only what recomputes exactly gets inferred; the rest lands as fixed bytes)",
+          )}
+          onClick={draftFromLastFrame}
+        >
+          <IconClock />
+        </button>
+        <button
+          className="btn icon-btn"
           title={tx("从文件导入发送谱", "Import send templates from a file")}
           onClick={() => void doImport()}
         >
@@ -431,11 +481,19 @@ export function SendBuildPanel() {
       </div>
 
       {!tpl ? (
-        <EmptyState
-          title={tx("还没有发送谱", "No send templates yet")}
-          hint={[tx("一张谱描述一帧要发的字节：帧头、字段、长度域、校验", "A template describes one frame to send: header, fields, length, checksum")]}
-          actions={[{ label: tx("新建", "New"), onClick: () => setSelId(sendStore.addTemplate()), primary: true }]}
-        />
+        <>
+          {/* 空状态里没有页脚，报错只能自己挂在这里 —— 不然点了「照一帧起谱」而归档是空的，
+              屏幕上一个字都不动，用户只会以为按钮坏了 */}
+          {err !== "" && <div className="sb-danger">{err}</div>}
+          <EmptyState
+            title={tx("还没有发送谱", "No send templates yet")}
+            hint={[tx("描述一帧要发的字节", "Describe the bytes one frame sends")]}
+            actions={[
+              { label: tx("新建", "New"), onClick: () => setSelId(sendStore.addTemplate()), primary: true },
+              { label: tx("照最近收到的一帧起谱", "Draft from last frame"), onClick: draftFromLastFrame },
+            ]}
+          />
+        </>
       ) : (
         <div className="sb-body">
           <div className="sb-palette" role="group" aria-label={tx("字段料板", "Field palette")}>

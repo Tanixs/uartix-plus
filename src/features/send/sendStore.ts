@@ -69,6 +69,25 @@ function load(): SendTemplate[] {
 
 templates = load();
 
+/**
+ * 跨面板的"选这张谱"请求（Hex 右键、反推入口都靠它，不然它们只能新建一张谱却选不中）。
+ * nonce 让"再点一次同一张"也能触发 —— 面板那边是按 nonce 变化生效的，不是按 id。
+ */
+let selectReq: { id: string; nonce: number } | null = null;
+
+export function requestSelect(id: string) {
+  selectReq = { id, nonce: (selectReq?.nonce ?? 0) + 1 };
+  emit();
+}
+
+export function getSelectReq() {
+  return selectReq;
+}
+
+export function getSelectNonce() {
+  return selectReq?.nonce ?? 0;
+}
+
 export function subscribe(cb: () => void) {
   listeners.add(cb);
   return () => listeners.delete(cb);
@@ -107,6 +126,27 @@ export function addTemplate(name?: string): string {
     createdAt: Date.now(),
   };
   write([...templates, tpl]);
+  return id;
+}
+
+/**
+ * 一次写入一整张草稿谱（反推、将来的预设包都走这里）。
+ *
+ * 为什么不逐块 `addField`：一张十二块的草稿会烧掉十二条撤销 —— 用户按一次 Ctrl+Z 只想回到
+ * "还没反推"那个状态，不该按十二次。草稿是**一个动作**。
+ * `nextSeq` 原样保留：反推出来的序号域起点就是那一帧的值，归零等于第一次发就发错。
+ */
+export function addDraftTemplate(draft: SendTemplate): string {
+  if (guardLocked()) return "";
+  pushHistory();
+  const id = uid("st");
+  let name = draft.name?.trim() || tx("反推的发送谱", "Inferred template");
+  let n = 2;
+  while (templates.some((t) => t.name === name)) name = `${draft.name} (${n++})`;
+  write([
+    ...templates,
+    { ...draft, id, name, params: draft.params ?? [], createdAt: Date.now() },
+  ]);
   return id;
 }
 
