@@ -161,9 +161,11 @@ const roleNames = (): Record<FieldRole, string> => ({
 const ALGOS: { id: ChecksumAlgo; name: () => string }[] = [
   { id: "sum8", name: () => tx("累加和 Sum8", "Sum8") },
   { id: "sumadd", name: () => tx("双重累加 Sum+Add (匿名V7)", "Sum+Add (AnoV7)") },
+  { id: "sum16", name: () => tx("累加和 Sum16（16 位）", "Sum16 (16-bit)") },
   { id: "xor8", name: () => tx("异或 XOR8", "XOR8") },
   { id: "crc16_modbus", name: () => "CRC16 Modbus" },
   { id: "crc16_ccitt", name: () => "CRC16 CCITT-FALSE" },
+  { id: "crc16_x25", name: () => "CRC16 X-25" },
   { id: "crc32", name: () => "CRC32" },
   { id: "none", name: () => tx("无校验", "None") },
 ];

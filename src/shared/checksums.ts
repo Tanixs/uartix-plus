@@ -32,6 +32,13 @@ export function sumadd16(bytes: number[]): number {
   return sc | (ac << 8);
 }
 
+/** 16 位累加和：逐字节加进 16 位累加器取低 16 位（与 sumadd 的 SC+AC 双字节不是一支算法） */
+export function sum16(bytes: number[]): number {
+  let s = 0;
+  for (const b of bytes) s = (s + b) & 0xffff;
+  return s;
+}
+
 /** 标准 CRC-32（反射 poly 0xEDB88320，init/xorout 0xFFFFFFFF——与 Rust parser crc32 同参数） */
 export function crc32(bytes: number[]): number {
   let crc = 0xffffffff;
@@ -55,18 +62,21 @@ export type Crc16Algo = "modbus" | "ccitt-false" | "x25";
  *  发送侧 `checksumWidth` 认不出 ⇒ 0（编码时直接点名报错，不凑数）；
  *  接收侧布局 `checksumLen`：空串/null/`none` ⇒ 0，表里没有的算法名 ⇒ 2（字段已在带上了，先占两位）；
  *  `CHECKSUM_SIZES` 的读方认不出 ⇒ 1（另有两处按 `fieldSize(f)` 走）；
- *  引擎 `parser.rs::checksum_size` 认不出 ⇒ 1，**而 sum8/xor8 今天就没有自己的臂、正靠这条兜底取宽度**
- *  ——动它等于改这两支的接收宽度，#94b 收兜底时先读 `checksums.test.ts` 的 ⑥。
- * 六个已知算法三方一致由 `checksums.test.ts` 扫 `parser.rs` / `vdev.rs` / 面板选项钉住——
- * 改一边忘一边当场红。剩下那半（CRC 参数化 + 兜底收成一条 + 接收侧缺 x25/sum16）在 #94b。
+ *  引擎 `parser.rs::checksum_size` 认不出 ⇒ 1。八支已知算法在引擎里**都有自己的臂**了
+ *  （以前 sum8/xor8 靠兜底拿宽度，动那条兜底等于动它们的接收宽度 —— #94 那批已把它们写开）。
+ * 已知算法的宽度与算法集合由 `checksums.test.ts` 扫 `parser.rs` / `vdev.rs` / 面板选项钉住——
+ * 改一边忘一边当场红。还剩的两件事：虚拟设备 `vdev.rs` 只认 5 支（模拟帧发不出 x25/sum16），
+ * 以及 CRC 还不能自己填参数（#100）。
  */
 export const CHECKSUM_WIDTHS: Record<string, number> = {
   none: 0,
   sum8: 1,
   xor8: 1,
   sumadd: 2,
+  sum16: 2,
   crc16_modbus: 2,
   crc16_ccitt: 2,
+  crc16_x25: 2,
   crc32: 4,
 };
 

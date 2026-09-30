@@ -12,9 +12,10 @@
  *  ② 同一张向量表在 TS 侧逐算法成立；
  *  ③ 那张表的每个期望值**也出现在 Rust 源文里**（两边必须同时改，改一边当场红）。
  *
- * 已知缺口（明写，不假装）：`x25` 与 `sum16` 只有 TS 侧的**计算**有——接收侧解不了它们，
- * 属于"能发不能解"。宽度表在 #94a 已收成一份（下面的 ④~⑦ 钉它），算法参数化与这两支
- * 接收侧算法在 #94b。
+ * 缺口这条变了（不假装）：`x25` 与 `sum16` 以前只有 TS 侧算得出，接收侧解不了它们，是"能发不能解"——
+ * 现在 Rust `checksum_compute` 有这两支，向量表两边一起长（① 里 0x906E 就是 CRC-16/X-25 的公开 check 值）。
+ * 还剩的两条明写：虚拟设备 `vdev.rs` 只认 5 支算法（模拟帧发不出 x25/sum16），
+ * 以及 CRC 只能从预制算法里选、还不能自己填参数（#100）。宽度表在 #94a 收成一份（④~⑧ 钉它）。
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -23,6 +24,7 @@ import {
   checksumWidth,
   crc16,
   crc32,
+  sum16,
   sum8,
   sumadd16,
   xor8,
@@ -45,8 +47,10 @@ const VECTORS: {
   sum8: number;
   xor8: number;
   sumadd16: number;
+  sum16: number;
   modbus: number;
   ccitt: number;
+  x25: number;
   crc32: number;
 }[] = [
   {
@@ -55,8 +59,10 @@ const VECTORS: {
     sum8: 0xdd,
     xor8: 0x31,
     sumadd16: 0x15dd,
+    sum16: 0x01dd,
     modbus: 0x4b37,
     ccitt: 0x29b1,
+    x25: 0x906e,
     crc32: 0xcbf43926,
   },
   {
@@ -65,8 +71,10 @@ const VECTORS: {
     sum8: 0x11,
     xor8: 0xf3,
     sumadd16: 0xbc11,
+    sum16: 0x0111,
     modbus: 0x703d,
     ccitt: 0x1405,
+    x25: 0x43c1,
     crc32: 0xa32d9a9e,
   },
   {
@@ -75,8 +83,10 @@ const VECTORS: {
     sum8: 0xaa,
     xor8: 0xaa,
     sumadd16: 0xaaaa,
+    sum16: 0x00aa,
     modbus: 0x3f3f,
     ccitt: 0xf550,
+    x25: 0xfa28,
     crc32: 0xe401a57b,
   },
 ];
@@ -86,6 +96,7 @@ describe("P121-A · 校验原语", () => {
     const v = VECTORS[0].bytes;
     expect(crc16("modbus", v), "CRC-16/MODBUS 的 check 值是公开的 0x4B37").toBe(0x4b37);
     expect(crc16("ccitt-false", v), "CRC-16/CCITT-FALSE 的 check 值是公开的 0x29B1").toBe(0x29b1);
+    expect(crc16("x25", v), "CRC-16/X-25（= BUETE）的 check 值是公开的 0x906E").toBe(0x906e);
     expect(crc32(v) >>> 0, "CRC-32 的 check 值是公开的 0xCBF43926（与 zlib 一致）").toBe(0xcbf43926);
   });
 
@@ -94,8 +105,10 @@ describe("P121-A · 校验原语", () => {
       expect(sum8(t.bytes), `${t.name} sum8`).toBe(t.sum8);
       expect(xor8(t.bytes), `${t.name} xor8`).toBe(t.xor8);
       expect(sumadd16(t.bytes), `${t.name} sumadd16`).toBe(t.sumadd16);
+      expect(sum16(t.bytes), `${t.name} sum16`).toBe(t.sum16);
       expect(crc16("modbus", t.bytes), `${t.name} crc16-modbus`).toBe(t.modbus);
       expect(crc16("ccitt-false", t.bytes), `${t.name} crc16-ccitt`).toBe(t.ccitt);
+      expect(crc16("x25", t.bytes), `${t.name} crc16-x25`).toBe(t.x25);
       expect(crc32(t.bytes) >>> 0, `${t.name} crc32`).toBe(t.crc32);
     }
     // sumadd16 与匿名 V7 的 SC/AC 是同一件事的两种写法，这里钉住它们别各漂各的
@@ -116,8 +129,10 @@ describe("P121-A · 校验原语", () => {
         ["sum8", t.sum8],
         ["xor8", t.xor8],
         ["sumadd", t.sumadd16],
+        ["sum16", t.sum16],
         ["crc16_modbus", t.modbus],
         ["crc16_ccitt", t.ccitt],
+        ["crc16_x25", t.x25],
         ["crc32", t.crc32],
       ] as [string, number][]) {
         // Rust 侧写 0x 大写或小写都算命中；按 4/8 位补齐再找
@@ -142,9 +157,9 @@ describe("P121-A · 校验原语", () => {
  *  发送侧 `checksumWidth` 认不出 ⇒ 0（编码时点名报错，不凑数）；
  *  帧画布布局 `checksumLen`：空串/null/`none` ⇒ 0，表里没有的算法名 ⇒ 2（字段已在带上了，先占两位）；
  *  `CHECKSUM_SIZES` 的六处读方 ⇒ 1（另两处按 `fieldSize(f)`）；
- *  引擎 `parser.rs::checksum_size` ⇒ 1，而 sum8/xor8 **就靠这条兜底**取宽度（`none` 在三个调用点被短路）。
- * 一把统一会改到帧画布与引擎的行为（引擎那条尤其动不得，见 ⑥），所以留到 #94b 连 CRC
- * 参数化一起定。这里按当前值钉住：谁悄悄改了兜底，当场红，并且知道要连带改注释。
+ *  引擎 `parser.rs::checksum_size` ⇒ 1，只吃未知算法（八支已知算法现在都有自己的臂，见 ⑥）。
+ * 一把统一会改到帧画布与引擎的行为 —— 已拍板**不收**，把这三条写成有名分工：发送侧宁可不发、
+ * 布局宁可先占位、引擎按算法读。这里按当前值钉住：谁悄悄改了兜底，当场红，并且知道要连带改注释。
  */
 
 /** 取 `sig` 起、到该函数收尾那个顶格的 `}` 为止的源文 */
@@ -178,7 +193,7 @@ const ALGOS = Object.keys(CHECKSUM_WIDTHS);
 const COMPUTED = ALGOS.filter((a) => a !== "none");
 
 describe("P121-B2 · 校验字段宽度：数字一份、兜底三条", () => {
-  it("④ TS 三方对六个已知算法同数，且各自的兜底停在今天这条线上", () => {
+  it("④ TS 三方对八支已知算法同数，且各自的兜底停在今天这条线上", () => {
     for (const a of COMPUTED) {
       expect(checksumWidth(a), `发送侧 ${a}`).toBe(CHECKSUM_WIDTHS[a]);
       expect(checksumLen(a), `帧画布布局的 ${a} 和表漂了`).toBe(CHECKSUM_WIDTHS[a]);
@@ -217,15 +232,17 @@ describe("P121-B2 · 校验字段宽度：数字一份、兜底三条", () => {
     const { arms, fallback } = rustWidthArms(
       fnBody(src, "fn checksum_size(algo: &str) -> usize", "parser.rs"),
     );
-    // sum8/xor8 今天**没有自己的臂**，宽度就是从 `_ => 1` 拿的：
-    // 所以动那条兜底不是"改未知算法怎么处理"，是把这两支的接收宽度一起改了。#94b 收兜底时先看这里。
+    // 八支已知算法在引擎里**都必须有自己的臂**。以前 sum8/xor8 是从 `_ => 1` 那条兜底拿到宽度的，
+    // 于是"改兜底"实际上等于"改这两支的接收宽度"——把臂写开之后，`_` 只代表真不认识的算法，
+    // 这条断言也就能收紧成"不许靠兜底凑"。
     const drift: string[] = [];
     for (const a of COMPUTED) {
-      const eff = arms[a] ?? fallback;
-      if (eff !== CHECKSUM_WIDTHS[a]) drift.push(`${a}：Rust ${eff ?? "算不出"} vs 表 ${CHECKSUM_WIDTHS[a]}`);
+      if (arms[a] !== CHECKSUM_WIDTHS[a]) {
+        drift.push(`${a}：Rust ${arms[a] ?? "没有自己的臂（在吃兜底）"} vs 表 ${CHECKSUM_WIDTHS[a]}`);
+      }
     }
     expect(drift, `两边宽度漂了：${drift.join("；")}`).toEqual([]);
-    expect(fallback, "引擎兜底此刻是 1，且 sum8/xor8 正靠它").toBe(1);
+    expect(fallback, "引擎兜底此刻是 1，且只吃未知算法").toBe(1);
     expect("none" in arms, "none 不该出现在引擎的宽度臂里：三个调用点都先短路了它").toBe(false);
   });
 

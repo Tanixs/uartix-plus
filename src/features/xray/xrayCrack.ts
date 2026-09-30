@@ -5,13 +5,21 @@
  * 组合，对采样行逐帧验证。全部通过 = 实锤；≥95% = 疑似。纯确定性穷举——
  * AI 不参与计算，只拿证据链 JSON 写推理报告（红线：模型手算校验不可靠）。
  *
- * 算法族与 Rust parser checksum_compute 完全对齐（6 种），保证实锤结果直接写进
+ * 算法族与 Rust parser checksum_compute 完全对齐（8 种），保证实锤结果直接写进
  * 模板 checksum.algo 后可被解析器复验，不会出现「爆破命中但模板验不过」的坑。
  */
-import { sum8, xor8, sumadd16, crc16, crc32 } from "../../shared/checksums";
+import { sum8, xor8, sumadd16, sum16, crc16, crc32 } from "../../shared/checksums";
 
-/** 爆破算法族 = 模板系统 ChecksumAlgo 全集（与 Rust parser checksum_compute 对齐） */
-export type CrackAlgo = "sum8" | "xor8" | "sumadd" | "crc16_modbus" | "crc16_ccitt" | "crc32";
+/** 爆破算法族 = 模板系统 ChecksumAlgo 全集（除 none），与 Rust parser checksum_compute 对齐 */
+export type CrackAlgo =
+  | "sum8"
+  | "xor8"
+  | "sumadd"
+  | "sum16"
+  | "crc16_modbus"
+  | "crc16_ccitt"
+  | "crc16_x25"
+  | "crc32";
 
 interface AlgoDef {
   algo: CrackAlgo;
@@ -23,8 +31,10 @@ const ALGOS: AlgoDef[] = [
   { algo: "sum8", size: 1, calc: sum8 },
   { algo: "xor8", size: 1, calc: xor8 },
   { algo: "sumadd", size: 2, calc: sumadd16 },
+  { algo: "sum16", size: 2, calc: sum16 },
   { algo: "crc16_modbus", size: 2, calc: (b) => crc16("modbus", b) },
   { algo: "crc16_ccitt", size: 2, calc: (b) => crc16("ccitt-false", b) },
+  { algo: "crc16_x25", size: 2, calc: (b) => crc16("x25", b) },
   { algo: "crc32", size: 4, calc: crc32 },
 ];
 
@@ -159,8 +169,10 @@ const ALGO_NAMES: Record<string, string> = {
   sum8: "SUM8",
   xor8: "XOR8",
   sumadd: "SUM+AC16",
+  sum16: "SUM16",
   crc16_modbus: "CRC16-Modbus",
   crc16_ccitt: "CRC16-CCITT",
+  crc16_x25: "CRC16-X25",
   crc32: "CRC32",
 };
 

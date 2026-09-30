@@ -934,7 +934,7 @@ else send("RGT:" + phase);`}</pre>
                       <tr><td>boundary.footerBytes</td><td>帧尾模式：帧尾字节序列</td></tr>
                       <tr><td>boundary.maxLength</td><td>安全上限，超长候选帧直接丢弃重新同步</td></tr>
                       <tr><td>boundary.discs</td><td>帧识别字段列表：{"{ offset, value: number[], mask?: number[] }"}，用于同簇多帧型筛选；mask 同上可只比较某些 bit</td></tr>
-                      <tr><td>checksum.algo</td><td>none / sum8 / sumadd / xor8 / crc16_modbus / crc16_ccitt / crc32</td></tr>
+                      <tr><td>checksum.algo</td><td>none / sum8 / sumadd / sum16 / xor8 / crc16_modbus / crc16_ccitt / crc16_x25 / crc32</td></tr>
                       <tr><td>checksum.coverageStart / coverageEnd</td><td>校验覆盖区间；正数=帧头偏移，负数=距帧尾（-1 = 不含最后 1 字节）</td></tr>
                       <tr><td>checksum.endian</td><td>校验值存储字节序：little / big</td></tr>
                       <tr><td>fields[].role</td><td>header / addr / id / seq / length / data / payload / checksum / checksum2 / footer</td></tr>

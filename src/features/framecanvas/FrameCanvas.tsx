@@ -2824,8 +2824,10 @@ function FieldDialog({
                 <option value="sum8">{tx("和校验 sum8（字节累加）", "sum8 (byte sum)")}</option>
                 <option value="xor8">{tx("异或 xor8", "XOR8")}</option>
                 <option value="sumadd">{tx("SC+AC（和 + 0xAA 累加）", "SC+AC")}</option>
+                <option value="sum16">{tx("和校验 sum16（16 位累加）", "sum16 (16-bit sum)")}</option>
                 <option value="crc16_modbus">CRC16 Modbus</option>
                 <option value="crc16_ccitt">CRC16 CCITT-FALSE</option>
+                <option value="crc16_x25">CRC16 X-25</option>
                 <option value="crc32">CRC32</option>
                 <option value="none">{tx("不校验（仅标注）", "No verification (marker only)")}</option>
               </select>

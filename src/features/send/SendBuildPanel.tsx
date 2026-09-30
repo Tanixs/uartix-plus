@@ -67,7 +67,17 @@ const PALETTE: { key: string; label: () => string; make: () => Omit<SendField, "
 const TYPES: FieldType[] = ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "ascii", "bcd", "bits"];
 const ENDIANS: Endian[] = ["big", "little", "big-word-swap", "little-word-swap"];
 const ROLES: FieldRole[] = ["header", "addr", "id", "seq", "length", "data", "payload", "checksum", "footer"];
-const CK_ALGOS: ChecksumAlgo[] = ["none", "sum8", "xor8", "sumadd", "crc16_modbus", "crc16_ccitt", "crc32"];
+const CK_ALGOS: ChecksumAlgo[] = [
+  "none",
+  "sum8",
+  "xor8",
+  "sumadd",
+  "sum16",
+  "crc16_modbus",
+  "crc16_ccitt",
+  "crc16_x25",
+  "crc32",
+];
 
 const roleLabel = (r: FieldRole): string =>
   ({

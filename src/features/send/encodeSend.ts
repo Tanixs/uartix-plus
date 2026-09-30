@@ -11,7 +11,7 @@
  *  3. 长度域与校验都是**两趟**：第一趟按占位宽度铺字节，第二趟回填 —— 因为长度要等全帧定型、
  *     校验要等长度填完。
  */
-import { checksumWidth, crc16, crc32, sum8, sumadd16, xor8 } from "../../shared/checksums";
+import { checksumWidth, crc16, crc32, sum16, sum8, sumadd16, xor8 } from "../../shared/checksums";
 import type { Endian, FieldType } from "../../ipc/types";
 import { sendFieldWidth, type SendField, type SendParam, type SendTemplate } from "./sendTypes";
 
@@ -228,6 +228,10 @@ function checksumBytes(algo: string, data: number[]): number[] {
       const v = sumadd16(data);
       return [v & 0xff, (v >> 8) & 0xff];
     }
+    case "sum16": {
+      const v = sum16(data);
+      return [v & 0xff, (v >> 8) & 0xff];
+    }
     case "crc16_modbus": {
       const v = crc16("modbus", data);
       return [v & 0xff, (v >> 8) & 0xff];
@@ -235,6 +239,11 @@ function checksumBytes(algo: string, data: number[]): number[] {
     case "crc16_ccitt": {
       const v = crc16("ccitt-false", data);
       return [(v >> 8) & 0xff, v & 0xff];
+    }
+    case "crc16_x25": {
+      // 反射算法（X.25 / BUETE），线上低字节在前，与 crc16_modbus 同一档
+      const v = crc16("x25", data);
+      return [v & 0xff, (v >> 8) & 0xff];
     }
     case "crc32": {
       const v = crc32(data) >>> 0;

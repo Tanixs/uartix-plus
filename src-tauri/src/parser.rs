@@ -734,8 +734,11 @@ fn verify(tpl: &FrameTemplate, buf: &[u8]) -> (bool, Option<String>) {
 
 fn checksum_size(algo: &str) -> usize {
     match algo {
-        "crc16_modbus" | "crc16_ccitt" | "sumadd" => 2,
+        "crc16_modbus" | "crc16_ccitt" | "crc16_x25" | "sumadd" | "sum16" => 2,
         "crc32" => 4,
+        // sum8/xor8 以前是靠下面那条 `_` 拿到 1 的。写出来不是为了算得对，是为了让 `_`
+        // 从此只代表"真不认识的算法"——兜底和已知算法分开记账，动兜底不会连带改这两支的接收宽度。
+        "sum8" | "xor8" => 1,
         _ => 1,
     }
 }
@@ -753,8 +756,12 @@ pub fn checksum_compute(algo: &str, data: &[u8]) -> u64 {
             sc as u64 | ((ac as u64) << 8)
         }
         "xor8" => data.iter().fold(0u8, |acc, &b| acc ^ b) as u64,
+        "sum16" => data
+            .iter()
+            .fold(0u16, |acc, &b| acc.wrapping_add(b as u16)) as u64,
         "crc16_modbus" => crc16_modbus(data) as u64,
         "crc16_ccitt" => crc16_ccitt(data) as u64,
+        "crc16_x25" => crc16_x25(data) as u64,
         "crc32" => crc32(data) as u64,
         _ => 0,
     }
@@ -788,6 +795,23 @@ fn crc16_ccitt(data: &[u8]) -> u16 {
         }
     }
     crc
+}
+
+/// CRC-16/X-25（= CRC-16/BUETE）：poly 0x1021 反射成 0x8408、init 0xFFFF、输入输出都反射、
+/// xorout 0xFFFF。"123456789" 的公开 check 值是 0x906E —— 与前端 `crc16("x25", …)` 同一套参数。
+fn crc16_x25(data: &[u8]) -> u16 {
+    let mut crc = 0xFFFFu16;
+    for &b in data {
+        crc ^= b as u16;
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0x8408
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    crc ^ 0xFFFF
 }
 
 fn crc32(data: &[u8]) -> u32 {
@@ -2536,8 +2560,10 @@ mod checksum_vectors {
         sum8: u64,
         xor8: u64,
         sumadd: u64,
+        sum16: u64,
         crc16_modbus: u64,
         crc16_ccitt: u64,
+        crc16_x25: u64,
         crc32: u64,
     }
 
@@ -2548,8 +2574,10 @@ mod checksum_vectors {
             sum8: 0xDD,
             xor8: 0x31,
             sumadd: 0x15DD,
+            sum16: 0x01DD,
             crc16_modbus: 0x4B37,
             crc16_ccitt: 0x29B1,
+            crc16_x25: 0x906E,
             crc32: 0xCBF43926,
         },
         Vector {
@@ -2558,8 +2586,10 @@ mod checksum_vectors {
             sum8: 0x11,
             xor8: 0xF3,
             sumadd: 0xBC11,
+            sum16: 0x0111,
             crc16_modbus: 0x703D,
             crc16_ccitt: 0x1405,
+            crc16_x25: 0x43C1,
             crc32: 0xA32D9A9E,
         },
         Vector {
@@ -2568,8 +2598,10 @@ mod checksum_vectors {
             sum8: 0xAA,
             xor8: 0xAA,
             sumadd: 0xAAAA,
+            sum16: 0x00AA,
             crc16_modbus: 0x3F3F,
             crc16_ccitt: 0xF550,
+            crc16_x25: 0xFA28,
             crc32: 0xE401A57B,
         },
     ];
@@ -2580,8 +2612,10 @@ mod checksum_vectors {
             assert_eq!(checksum_compute("sum8", v.bytes), v.sum8, "{} sum8", v.name);
             assert_eq!(checksum_compute("xor8", v.bytes), v.xor8, "{} xor8", v.name);
             assert_eq!(checksum_compute("sumadd", v.bytes), v.sumadd, "{} sumadd", v.name);
+            assert_eq!(checksum_compute("sum16", v.bytes), v.sum16, "{} sum16", v.name);
             assert_eq!(checksum_compute("crc16_modbus", v.bytes), v.crc16_modbus, "{} crc16_modbus", v.name);
             assert_eq!(checksum_compute("crc16_ccitt", v.bytes), v.crc16_ccitt, "{} crc16_ccitt", v.name);
+            assert_eq!(checksum_compute("crc16_x25", v.bytes), v.crc16_x25, "{} crc16_x25", v.name);
             assert_eq!(checksum_compute("crc32", v.bytes), v.crc32, "{} crc32", v.name);
         }
     }
@@ -2612,6 +2646,8 @@ mod checksum_vectors {
 /// 3F F0 00 00 00 00 00 00       float64(1.0)
 /// 50                            位段：index=4 count=3 值 5
 /// 31 32 33 34 35 36 37 38 39 37 4B          CRC-16/MODBUS 低字节在前
+/// 31 32 33 34 35 36 37 38 39 6E 90          CRC-16/X-25 低字节在前（check 值 0x906E）
+/// 31 32 33 34 35 36 37 38 39 DD 01          SUM16 低字节在前（累加和 0x01DD）
 /// 31 32 33 34 35 36 37 38 39 CB F4 39 26    CRC-32 大端
 /// ```
 #[cfg(test)]
@@ -2693,6 +2729,14 @@ mod send_round_trip {
         let wire = [0xCBu8, 0xF4, 0x39, 0x26];
         let joined = ((wire[0] as u64) << 24) | ((wire[1] as u64) << 16) | ((wire[2] as u64) << 8) | wire[3] as u64;
         assert_eq!(joined, c32);
+        // CRC16-X25 与 CRC16-Modbus 同档（反射算法，低字节在前）：906E → 6E 90
+        let x25 = crc16_x25(&body) as u64;
+        assert_eq!(x25, 0x906E);
+        assert_eq!(read_uint(&[0x6Eu8, 0x90], "little"), x25);
+        // SUM16 低字节在前：0x01DD → DD 01
+        let s16 = checksum_compute("sum16", &body);
+        assert_eq!(s16, 0x01DD);
+        assert_eq!(read_uint(&[0xDDu8, 0x01], "little"), s16);
         // SUM8 的覆盖口径：coverage_end = -1 表示"不含最后这一个字节"
         let mut framed = body.to_vec();
         framed.push(0);

@@ -99,9 +99,11 @@ export type ChecksumAlgo =
   | "none"
   | "sum8"
   | "sumadd"
+  | "sum16"
   | "xor8"
   | "crc16_modbus"
   | "crc16_ccitt"
+  | "crc16_x25"
   | "crc32";
 export type FieldType =
   | "uint8"

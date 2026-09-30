@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import { encodeSend } from "./encodeSend";
 import type { SendField, SendTemplate } from "./sendTypes";
+import type { ChecksumAlgo } from "../../ipc/types";
 
 const fsSpec = "node:fs";
 const urlSpec = "node:url";
@@ -103,21 +104,24 @@ describe("P121-B · 往返（TS 编码侧）", () => {
     });
   }
 
-  it("CRC16-Modbus 与 CRC-32 的落帧字节序", () => {
+  it("校验段的落帧字节序（Modbus / X-25 / SUM16 / CRC-32）", () => {
     const body = Array.from("123456789", (c) => c.charCodeAt(0));
-    const crc16Tpl = t([
-      ...body.map((b, i) => field({ name: `B${i}`, source: { kind: "const", bytes: [b] } })),
-      field({ name: "CK", role: "checksum", source: { kind: "const", bytes: [] } }),
-    ]);
-    crc16Tpl.checksum = { algo: "crc16_modbus", coverageStart: 0, coverageEnd: -2 };
-    expect(encodeSend(crc16Tpl).hex).toBe("31 32 33 34 35 36 37 38 39 37 4B");
-
-    const crc32Tpl = t([
-      ...body.map((b, i) => field({ name: `B${i}`, source: { kind: "const", bytes: [b] } })),
-      field({ name: "CK", role: "checksum", source: { kind: "const", bytes: [] } }),
-    ]);
-    crc32Tpl.checksum = { algo: "crc32", coverageStart: 0, coverageEnd: -4 };
-    expect(encodeSend(crc32Tpl).hex).toBe("31 32 33 34 35 36 37 38 39 CB F4 39 26");
+    const frame = () =>
+      t([
+        ...body.map((b, i) => field({ name: `B${i}`, source: { kind: "const", bytes: [b] } })),
+        field({ name: "CK", role: "checksum", source: { kind: "const", bytes: [] } }),
+      ]);
+    const cases: [ChecksumAlgo, number, string][] = [
+      ["crc16_modbus", -2, "31 32 33 34 35 36 37 38 39 37 4B"],
+      ["crc16_x25", -2, "31 32 33 34 35 36 37 38 39 6E 90"],
+      ["sum16", -2, "31 32 33 34 35 36 37 38 39 DD 01"],
+      ["crc32", -4, "31 32 33 34 35 36 37 38 39 CB F4 39 26"],
+    ];
+    for (const [algo, coverageEnd, hex] of cases) {
+      const tpl = frame();
+      tpl.checksum = { algo, coverageStart: 0, coverageEnd };
+      expect(encodeSend(tpl).hex, `${algo} 的落帧字节序`).toBe(hex);
+    }
   });
 
   it("对面还在测同一批字节（改一边忘一边当场红）", () => {
@@ -127,7 +131,12 @@ describe("P121-B · 往返（TS 编码侧）", () => {
     // Rust 侧那张对账表（模块开头的注释）里，每个 hex 都要作为连续串出现
     const header = rust.slice(0, rust.indexOf("#[cfg(test)]\nmod send_round_trip"));
     const missing = VECTORS.map((v) => v.hex)
-      .concat(["31 32 33 34 35 36 37 38 39 37 4B", "31 32 33 34 35 36 37 38 39 CB F4 39 26"])
+      .concat([
+        "31 32 33 34 35 36 37 38 39 37 4B",
+        "31 32 33 34 35 36 37 38 39 6E 90",
+        "31 32 33 34 35 36 37 38 39 DD 01",
+        "31 32 33 34 35 36 37 38 39 CB F4 39 26",
+      ])
       .filter((hex) => !header.includes(hex));
     expect(missing, `这些 hex 只在 TS 侧，Rust 的往返表没跟上：${missing.join(" / ")}`).toEqual([]);
   });
