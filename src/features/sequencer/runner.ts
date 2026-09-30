@@ -388,6 +388,9 @@ async function execSend(step: SendStep, ctx: Ctx, base: ResultBase): Promise<Ste
   if (!resolved) {
     return { ...base, status: "fail", durationMs: 0, detail: "发送内容解析失败（命令不存在或载荷无效）" };
   }
+  // 发送谱引用的号是解析时就占下的（引擎先解析后发送，晚占会撞号）：
+  // 出门与否都要回话。`catch` 里 `resolved` 不再收窄到单帧那一支，所以先在 try 外取好。
+  const settle = "frames" in resolved ? undefined : resolved.settle;
   try {
     if ("frames" in resolved) {
       // B4e：factory 多帧按序逐帧发送（序列器 UI 暂不暴露多帧，此路径为兼容预留）
@@ -401,6 +404,7 @@ async function execSend(step: SendStep, ctx: Ctx, base: ResultBase): Promise<Ste
       };
     }
     await ctx.deps.send(resolved.mode, resolved.text);
+    settle?.(true);
     return {
       ...base,
       status: "pass",
@@ -408,6 +412,7 @@ async function execSend(step: SendStep, ctx: Ctx, base: ResultBase): Promise<Ste
       detail: `${resolved.mode === "hex" ? "HEX" : "TXT"} ${resolved.text}`,
     };
   } catch (e) {
+    settle?.(false);
     return {
       ...base,
       status: "fail",

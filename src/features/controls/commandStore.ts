@@ -187,8 +187,10 @@ export function removeNode(id: string) {
   emit();
 }
 
-export function addCommand(parentId: string) {
-  if (guardLocked()) return;
+/** 新建一条命令，返回它的 id；只读锁下返回 ""（调用方据此不写"已保存"这类话） */
+export function addCommand(parentId: string): string {
+  if (guardLocked()) return "";
+  const id = crypto.randomUUID();
   snapshot = {
     ...snapshot,
     groups: mapTree(snapshot.groups, (n) =>
@@ -198,7 +200,7 @@ export function addCommand(parentId: string) {
             items: [
               ...n.items,
               {
-                id: crypto.randomUUID(),
+                id,
                 name: `命令${n.items.length + 1}`,
                 template: "",
                 sendMode: "ascii" as SendMode,
@@ -212,6 +214,42 @@ export function addCommand(parentId: string) {
     ) as CommandGroup[],
   };
   emit();
+  return id;
+}
+
+/**
+ * 「存为指令」= 存一条**引用**（P121-D）：命令里不落任何字节，发的是那张谱此刻算出来的一帧，
+ * 改谱命令跟着变。落在分组「发送谱」下，分组不存在就建。
+ *
+ * 分组名**故意不套 tx()**：它是要写进用户命令库的数据，不是渲染给人的界面文字 ——
+ * 套上就等于让"分组叫什么"取决于点按钮那一刻的语言（同 QuickCommandBar 预置分组的裁决）。
+ *
+ * 返回新命令的 id；只读锁下返回 ""，分组也不会被建出来。
+ */
+export function addReferenceCommand(ref: {
+  templateId: string;
+  name: string;
+  note: string;
+  overrides?: Record<string, string>;
+}): string {
+  if (guardLocked()) return "";
+  const gname = "发送谱";
+  if (!snapshot.groups.some((g) => g.name === gname)) addGroup(gname);
+  const g = snapshot.groups.find((x) => x.name === gname);
+  if (!g) return "";
+  const id = addCommand(g.id);
+  const over = ref.overrides && Object.keys(ref.overrides).length ? ref.overrides : undefined;
+  patchCommand(id, {
+    name: ref.name,
+    template: "",
+    sendMode: "hex",
+    note: ref.note,
+    script: "",
+    scriptEnabled: false,
+    sendTemplateId: ref.templateId,
+    overrides: over,
+  });
+  return id;
 }
 
 export function patchCommand(

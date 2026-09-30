@@ -17,9 +17,13 @@ export type SendPayload =
  * resolveSend 的解析结果（B4e 多帧扩展）：
  * - 单帧 `{ mode, text }`（既有全部路径，行为零变化）；
  * - 指令工厂一次组出多帧 → `{ mode: "hex", frames }`（空帧已过滤，按序逐帧发送）。
+ *
+ * `settle` 只挂在单帧那一支，且只有**发送谱引用**会给：那种帧的自增序号在解析时就占掉了
+ * （引擎先解析后发送，占号晚于 await 会让两步撞同一个号），所以引擎必须回来告诉解析方
+ * 这帧到底有没有出门 —— 没出门就把号退回去，别让设备看到我们自己造的空洞。
  */
 export type ResolvedSend =
-  | { mode: "ascii" | "hex"; text: string }
+  | { mode: "ascii" | "hex"; text: string; settle?(sent: boolean): void }
   | { mode: "hex"; frames: string[] };
 
 /** 断言/字段匹配共用的比较运算符。changed = 与步骤开始前的值不同 */

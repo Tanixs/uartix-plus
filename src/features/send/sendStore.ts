@@ -103,7 +103,6 @@ export function addTemplate(name?: string): string {
     fields: [],
     params: [],
     checksum: null,
-    textMode: "hex",
     nextSeq: 0,
     createdAt: Date.now(),
   };

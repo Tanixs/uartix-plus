@@ -39,8 +39,21 @@ vi.stubGlobal("localStorage", {
 });
 vi.stubGlobal("structuredClone", (v: unknown) => JSON.parse(JSON.stringify(v)));
 
+const fsSpec = "node:fs";
+const urlSpec = "node:url";
+const { readFileSync } = (await import(fsSpec)) as unknown as {
+  readFileSync: (p: string, enc?: string) => string;
+};
+const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+  fileURLToPath: (u: string | URL) => string;
+};
+/** 接线层是模块求值期就生效的单例（订阅帧流、挂面板生命周期），不好在测试里真 import；
+ *  ⑭ 因此读源码钉形状——与 cmdExec.test.ts 第 ② 层同一手法。 */
+const readSrc = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+
 let sendStore: typeof import("./sendStore");
 let cmdExec: typeof import("../controls/cmdExec");
+let cmdStore: typeof import("../controls/commandStore");
 let lock: typeof import("../operator/lock");
 
 beforeEach(async () => {
@@ -49,6 +62,7 @@ beforeEach(async () => {
   mocks.sendData.mockReset().mockResolvedValue(undefined);
   sendStore = await import("./sendStore");
   cmdExec = await import("../controls/cmdExec");
+  cmdStore = await import("../controls/commandStore");
   lock = await import("../operator/lock");
   lock.setOperatorLocked(false);
 });
@@ -201,5 +215,103 @@ describe("P121-D · 引用式命令", () => {
     const added = sendStore.importTemplates([{ ...sendStore.getTemplate(id)!, id: "外来", name: "外来谱", nextSeq: 7 }]);
     expect(added).toBe(1);
     expect(sendStore.getSnapshot().find((t) => t.name === "外来谱")!.nextSeq).toBe(0);
+  });
+});
+
+/**
+ * 序列器 / 编排器的引擎形状是"先解析出这一帧发什么，再去发"，两者之间隔着 await。
+ * 所以占号必须发生在解析（`prepareReferenceSend`）、出门与否由引擎回话（`settle`）——
+ * 这一组钉的就是这条缝：号在解析那一刻已经占用，`settle(false)` 才把它退回来。
+ */
+describe("P121-D · 引擎侧的解析/发送两段式", () => {
+  it("⑫ 解析即占号：settle(true) 才算数，settle(false) 把号退回去", () => {
+    const id = buildSeqTemplate();
+    const cmd = { sendMode: "hex" as const, template: "", script: "", scriptEnabled: false, sendTemplateId: id };
+    const p = cmdExec.prepareReferenceSend(cmd);
+    expect(p.text).toBe("AA 00 01 AB");
+    expect(sendStore.getTemplate(id)!.nextSeq, "还没发就已经占下 0 号：这是不撞号的代价").toBe(1);
+    p.settle(true);
+    expect(sendStore.getTemplate(id)!.nextSeq).toBe(1);
+
+    const q = cmdExec.prepareReferenceSend(cmd);
+    expect(q.text).toBe("AA 01 01 AC");
+    q.settle(false); // 串口没开 / 中途停止
+    expect(sendStore.getTemplate(id)!.nextSeq, "没出门的帧不该烧号").toBe(1);
+    expect(cmdExec.prepareReferenceSend(cmd).text).toBe("AA 01 01 AC");
+  });
+
+  it("⑬ settle(false) 只退自己那一个号：中间别人插了一帧就不退", () => {
+    const id = buildSeqTemplate();
+    const cmd = { sendMode: "hex" as const, template: "", script: "", scriptEnabled: false, sendTemplateId: id };
+    const p = cmdExec.prepareReferenceSend(cmd); // 占 0，计数器 → 1
+    const q = cmdExec.prepareReferenceSend(cmd); // 占 1，计数器 → 2
+    q.settle(false); // 退 1：计数器仍是最新 → 回到 1
+    expect(sendStore.getTemplate(id)!.nextSeq).toBe(1);
+    const r = cmdExec.prepareReferenceSend(cmd); // 占 1，计数器 → 2
+    p.settle(false); // p 的号早被 r 顶掉了，退它等于把已用的 1 再放出去
+    expect(sendStore.getTemplate(id)!.nextSeq).toBe(2);
+    expect(r.text).toBe("AA 01 01 AC");
+  });
+
+  it("⑭ 序列器与编排器都认谱：解析走 prepareReferenceSend，回话走 settle", async () => {
+    const binds = [
+      ["序列器接线", readSrc("../sequencer/sequencerBind.ts")],
+      ["编排器接线", readSrc("../orchestrator/orchestratorBind.ts")],
+    ] as const;
+    for (const [who, src] of binds) {
+      expect(src, `${who}：命令带 sendTemplateId 时不能再看一眼 template 就 return null`).toMatch(/sendTemplateId/);
+      expect(src, `${who}：解析要走同一条判据，不许在接线层自己 encodeSend 一份`).toContain(
+        "cmdExec.prepareReferenceSend",
+      );
+    }
+    const engines = [
+      ["序列器引擎", readSrc("../sequencer/runner.ts")],
+      ["编排器引擎", readSrc("../orchestrator/engine.ts")],
+    ] as const;
+    for (const [who, src] of engines) {
+      expect(src, `${who}：帧真出门了要回话，否则占下的号退不回来`).toContain("settle?.(true)");
+      expect(src, `${who}：发送失败要回 false`).toContain("settle?.(false)");
+    }
+  });
+
+  it("⑮ 序列器接线真解析得出一张谱：老命令带 sendTemplateId 不再被当成空命令", async () => {
+    const bind = await import("../sequencer/sequencerBind");
+    const id = buildSeqTemplate();
+    const cmdId = cmdStore.addReferenceCommand({ templateId: id, name: "带序号", note: "" });
+    expect(cmdId, "存成引用式命令").toBeTruthy();
+    expect(bind.resolveSend({ type: "cmd", cmdId })).toEqual({
+      mode: "hex",
+      text: "AA 00 01 AB",
+      settle: expect.any(Function),
+    });
+    expect(sendStore.getTemplate(id)!.nextSeq).toBe(1);
+    // 谱被删 ⇒ 解析失败（引擎记 fail），而不是悄悄发一条空内容
+    sendStore.removeTemplate(id);
+    expect(bind.resolveSend({ type: "cmd", cmdId })).toBeNull();
+  });
+
+  it("⑯ 只读锁下「存为指令」什么都不会改：不建分组、不建命令", () => {
+    const id = buildSeqTemplate();
+    const before = JSON.stringify(cmdStore.getSnapshot().groups);
+    lock.setOperatorLocked(true);
+    expect(cmdStore.addReferenceCommand({ templateId: id, name: "偷偷存", note: "" })).toBe("");
+    expect(JSON.stringify(cmdStore.getSnapshot().groups), "只读发行包里能悄悄往命令库塞一条命令").toBe(before);
+  });
+
+  it("⑰ 断开引用：烤成字节之后就不跟谱走了，而且不占号", async () => {
+    const id = sendStore.addTemplate("设速度");
+    sendStore.addField(id, { id: "h", name: "HDR", type: "uint8", endian: "big", role: "header", source: { kind: "const", bytes: [0xa5] } });
+    sendStore.addField(id, { id: "v", name: "SPD", type: "uint16", endian: "big", role: "data", source: { kind: "param", paramId: "p1" } });
+    sendStore.addParam(id, { id: "p1", name: "速度", type: "int", def: "300" });
+    const cmdId = cmdStore.addReferenceCommand({ templateId: id, name: "设速度", note: "" });
+    const item = cmdStore.getCommand(cmdId)!;
+    const hex = cmdExec.bakeReferenceFrame(item);
+    expect(hex).toBe("A5 01 2C");
+    expect(sendStore.getTemplate(id)!.nextSeq, "断开不是发送，不该占号").toBe(0);
+
+    cmdStore.patchCommand(cmdId, { template: hex, sendTemplateId: undefined, overrides: undefined });
+    sendStore.patchParam(id, "p1", { def: "500" }); // 改谱
+    await cmdExec.runCommand(cmdStore.getCommand(cmdId)!);
+    expect(mocks.sendData.mock.calls[0][1], "断开后就该定格在那一帧").toBe("A5 01 2C");
   });
 });

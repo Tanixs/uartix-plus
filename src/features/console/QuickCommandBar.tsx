@@ -218,22 +218,21 @@ export function QuickCommandBar() {
     try {
       const r = codec.build(vals);
       const gid = ensureGroup(codec.group);
-      cmdStore.addCommand(gid);
-      const g = cmdStore.getSnapshot().groups.find((x) => x.id === gid)!;
-      const item = g.items[g.items.length - 1] as CommandItem;
+      // addCommand 直接回 id：不必再"重取快照拿最后一条"去猜刚建的那条是谁
+      const id = cmdStore.addCommand(gid);
       const base = {
         name: `${codec.name} ${codec.summary?.(vals) ?? ""}`.trim(),
         sendMode: "hex" as const,
         note: r.note ?? "",
       };
       if (r.frames.length === 1) {
-        cmdStore.patchCommand(item.id, { ...base, template: r.frames[0], script: "", scriptEnabled: false });
+        cmdStore.patchCommand(id, { ...base, template: r.frames[0], script: "", scriptEnabled: false });
       } else {
         // 多帧序列存为脚本，逐帧发送
         const script = r.frames
           .map((f, i) => `await send("${f}","hex");${i < r.frames.length - 1 ? "\nawait delay_ms(60);" : ""}`)
           .join("\n");
-        cmdStore.patchCommand(item.id, { ...base, template: "", script, scriptEnabled: true });
+        cmdStore.patchCommand(id, { ...base, template: "", script, scriptEnabled: true });
       }
       showMsg(tx("已存入命令库，可在控制画布拖挂到卡片", "Saved to the command library — drag it onto a card in the control canvas"));
     } catch (e) {
@@ -273,10 +272,7 @@ export function QuickCommandBar() {
       { name: "九轴算法", script: calib(0x24, 0x00), note: "AXIS6=0" },
     ];
     for (const p of presets) {
-      cmdStore.addCommand(gid);
-      const g = cmdStore.getSnapshot().groups.find((x) => x.id === gid)!;
-      const item = g.items[g.items.length - 1] as CommandItem;
-      cmdStore.patchCommand(item.id, {
+      cmdStore.patchCommand(cmdStore.addCommand(gid), {
         name: p.name,
         template: p.template ?? "",
         sendMode: "hex",

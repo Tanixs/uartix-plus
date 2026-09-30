@@ -33,16 +33,25 @@ export interface RunnableCommand {
   overrides?: Record<string, string>;
 }
 
+/** 一条引用式命令此刻该发出的那一帧：字节已算好，`settle` 告诉它最后有没有出门 */
+export interface PreparedSend {
+  /** 引用式命令一律按 hex 出门：hex 是字节的确切描述，而 ascii 那支会把 ≥0x80 的字节按 UTF-8 重新编码 */
+  mode: "hex";
+  text: string;
+  settle(sent: boolean): void;
+}
+
 /**
- * 发一帧发送谱。三件事只有在这里定一次才成立：
- *  - 参数值 = 谱里的默认值 + 命令上的覆盖；缺值由编码器报错点名，不凑数；
- *  - 自增序号**同步占号**、包没发出去就退还（见 `sendStore.reserveSeq`）：
- *    占号在 `await` 之前 ⇒ 重叠的两次发送不会拿到同一个号；退还 ⇒ 失败不跳号；
- *  - 引用被删 ⇒ 明确报错，**不退回**去发那条命令残留的 `template` 字面量
- *    （一台机器上同时留着两份真相是 P121-A 刚清掉的那个病）。
+ * 谱引用 → 一帧的字节（**同步**，不发送）。
+ *
+ * 拆出来是因为序列器 / 编排器的引擎形状是"先解析出要发什么，再去发"：
+ * 它们必须能在 `await` 之前拿到这帧字节，所以占号只能发生在解析那一刻
+ * （占号若在发送之后，重叠的两步会拿到同一个号）。作为交换，调用方在帧
+ * 真的出门后要 `settle(true)`，没出门 `settle(false)` 把号退回来 ——
+ * `refundSeq` 只退"仍是最新一次占号"的那个，所以中途别人插了一帧也不会退错。
  */
-async function sendByTemplate(id: string, overrides?: Record<string, string>): Promise<void> {
-  const tpl = sendStore.getTemplate(id);
+export function prepareReferenceSend(cmd: RunnableCommand): PreparedSend {
+  const tpl = sendStore.getTemplate(cmd.sendTemplateId ?? "");
   if (!tpl) {
     throw new Error(
       tx(
@@ -51,12 +60,48 @@ async function sendByTemplate(id: string, overrides?: Record<string, string>): P
       ),
     );
   }
-  const seq = sendStore.reserveSeq(id);
+  const seq = sendStore.reserveSeq(tpl.id);
   try {
-    const r = encodeSend(tpl, { values: sendValues(tpl, overrides), seq });
-    await sendCmd("hex", r.hex);
+    const r = encodeSend(tpl, { values: sendValues(tpl, cmd.overrides), seq });
+    return {
+      mode: "hex",
+      text: r.hex,
+      settle: (sent) => {
+        if (!sent) sendStore.refundSeq(tpl.id, seq);
+      },
+    };
   } catch (e) {
-    sendStore.refundSeq(id, seq);
+    sendStore.refundSeq(tpl.id, seq);
+    throw e;
+  }
+}
+
+/**
+ * 把一条引用式命令**烤成字节**（断开引用时用）：此刻这一帧长什么样就永久发什么。
+ * 不占号——它不是发送。自增序号会被定死在这里取到的那个值，这是"断开"这个词本来的代价，
+ * 界面要把这句话说到（见 CommandLibrary 的引用块）。
+ */
+export function bakeReferenceFrame(cmd: RunnableCommand): string {
+  const tpl = sendStore.getTemplate(cmd.sendTemplateId ?? "");
+  if (!tpl) return "";
+  return encodeSend(tpl, { values: sendValues(tpl, cmd.overrides), seq: tpl.nextSeq }).hex;
+}
+
+/**
+ * 发一帧发送谱。三件事只有在这里定一次才成立：
+ *  - 参数值 = 谱里的默认值 + 命令上的覆盖；缺值由编码器报错点名，不凑数；
+ *  - 自增序号**同步占号**、包没发出去就退还（见 `sendStore.reserveSeq`）：
+ *    占号在 `await` 之前 ⇒ 重叠的两次发送不会拿到同一个号；退还 ⇒ 失败不跳号；
+ *  - 引用被删 ⇒ 明确报错，**不退回**去发那条命令残留的 `template` 字面量
+ *    （一台机器上同时留着两份真相是 P121-A 刚清掉的那个病）。
+ */
+async function sendByTemplate(cmd: RunnableCommand): Promise<void> {
+  const p = prepareReferenceSend(cmd);
+  try {
+    await sendCmd(p.mode, p.text);
+    p.settle(true);
+  } catch (e) {
+    p.settle(false);
     throw e;
   }
 }
@@ -81,7 +126,7 @@ export async function runCommand(
     return;
   }
   if (cmd.sendTemplateId) {
-    await sendByTemplate(cmd.sendTemplateId, cmd.overrides);
+    await sendByTemplate(cmd);
     return;
   }
   if (!(cmd.template ?? "").trim()) {

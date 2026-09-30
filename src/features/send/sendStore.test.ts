@@ -104,7 +104,7 @@ describe("sendStore", () => {
     store.patchTemplate(id, { name: "改了" });
     store.removeParam(id, "whatever");
     store.undo();
-    store.importTemplates([{ id: "z", name: "导入", note: "", fields: [], params: [], checksum: null, textMode: "hex", createdAt: 0, nextSeq: 0 }]);
+    store.importTemplates([{ id: "z", name: "导入", note: "", fields: [], params: [], checksum: null, createdAt: 0, nextSeq: 0 }]);
     expect(store.getTemplate(id)!.name).toBe("锁");
     expect(store.getTemplate(id)!.fields).toHaveLength(0);
     expect(store.getSnapshot()).toHaveLength(1);
@@ -115,7 +115,7 @@ describe("sendStore", () => {
 
   it("导入：重名加序号，坏结构整条跳过而不是半条进来", () => {
     store.addTemplate("已存在");
-    const good = { id: "g", name: "已存在", note: "", fields: [field({ id: "a" })], params: [], checksum: null, textMode: "hex" as const, createdAt: 1, nextSeq: 0 };
+    const good = { id: "g", name: "已存在", note: "", fields: [field({ id: "a" })], params: [], checksum: null, createdAt: 1, nextSeq: 0 };
     const added = store.importTemplates([
       good,
       { id: "bad", name: "坏谱" } as unknown as never,

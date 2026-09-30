@@ -32,7 +32,7 @@ function field(over: Partial<SendField> & { name: string }): SendField {
 function t(fields: SendField[]): SendTemplate {
   return {
     id: "rt", name: "往返", note: "", fields, params: [], checksum: null,
-    textMode: "hex", nextSeq: 0, createdAt: 0,
+    nextSeq: 0, createdAt: 0,
   };
 }
 

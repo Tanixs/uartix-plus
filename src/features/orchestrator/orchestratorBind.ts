@@ -22,6 +22,7 @@ import { tx } from "../../i18n/strings";
 import * as panelActivity from "../../panels/panelActivity";
 import * as serialStore from "../serial/serialStore";
 import * as variableStore from "../controls/variableStore";
+import * as cmdExec from "../controls/cmdExec";
 import * as commandStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as plotStore from "../plot/plotStore";
@@ -59,7 +60,18 @@ function resolveSendOrch(payload: SendPayload): ResolvedSend | null {
   // cmd 分支自行处理：命令库模板的 {var} 先走编排器变量，再回落控制画布变量
   if (payload.type === "cmd") {
     const item = commandStore.getCommand(payload.cmdId);
-    if (!item || !item.template.trim()) return null;
+    if (!item) return null;
+    // 谱引用：字节已经是算好的 HEX，往里插值是把它当 ASCII 文本搅乱（hex 里的空格是分隔符）。
+    // 参数值走谱的默认值 + 命令上的覆盖，编排器变量这一层留给 P121-E。
+    if (item.sendTemplateId) {
+      try {
+        const p = cmdExec.prepareReferenceSend(item);
+        return { mode: p.mode, text: p.text, settle: p.settle };
+      } catch {
+        return null;
+      }
+    }
+    if (!item.template.trim()) return null;
     return {
       mode: item.sendMode,
       text: variableStore.resolveVars(flowInterpolateText(item.template, flowValue)),

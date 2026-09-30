@@ -631,6 +631,8 @@ export class OrchEngine {
         }
         const resolved = this.deps.resolveSend(node.payload);
         if (!resolved) return fail("发送内容解析失败（命令不存在或载荷无效）");
+        // 同 runner：发送谱引用的自增号在解析时已占下，没出门要退还
+        const settle = "frames" in resolved ? undefined : resolved.settle;
         try {
           if ("frames" in resolved) {
             // B4e：factory 多帧按序逐帧发送，每帧过令牌桶；单帧失败按 onFail
@@ -648,9 +650,11 @@ export class OrchEngine {
             return "ok";
           }
           await this.deps.send(resolved.mode, resolved.text);
+          settle?.(true);
           this.log(inst.id, gid, "block", node.id, `${resolved.mode === "hex" ? "HEX" : "TXT"} ${resolved.text}`);
           return "ok";
         } catch (e) {
+          settle?.(false);
           return fail(`发送失败：${String(e)}`);
         }
       }

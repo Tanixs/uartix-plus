@@ -19,12 +19,10 @@ import { tx, useLocale } from "../../i18n/strings";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
 import { IconPlus, IconTrash } from "../../shared/icons";
-import { sendCmd } from "../controls/cmdExec";
+import { runCommand } from "../controls/cmdExec";
 import * as cmdStore from "../controls/commandStore";
-import type { CommandItem } from "../controls/commandStore";
-import { guardLocked } from "../operator/lock";
 import * as sendStore from "./sendStore";
-import { encodeSend, sendValues } from "./encodeSend";
+import { encodeSend } from "./encodeSend";
 import { sendFieldWidth, type SendField, type SendTemplate } from "./sendTypes";
 
 /** 料板：每一项就是一个字段预设。顺序即界面顺序，按"结构件 → 数值 → 文本 → 计算件"排 */
@@ -153,17 +151,24 @@ export function SendBuildPanel() {
     });
   }, [tpl, insertAt]);
 
+  /**
+   * 面板这枚「发送一次」走的就是命令库、快捷栏、卡片那同一条 `runCommand`：
+   * 占号 / 编码 / 失败退号的判据因此只有一份。面板上填的参数值当作 `overrides` 传进去，
+   * 与谱的默认值在 `sendValues` 里合流。
+   */
   const send = async () => {
     if (!tpl || !preview?.ok) return;
-    // 与 `cmdExec.sendByTemplate` 同一套规矩：同步占号 → 用占到的号现编一帧 →
-    // 没发出去就把号退回来。发的是刚占的号，不是预览那一刻的号——中间可能又改了谱或连点了两次。
-    const seq = sendStore.reserveSeq(tpl.id);
     try {
-      const r = encodeSend(tpl, { values: sendValues(tpl, values), seq });
-      await sendCmd("hex", r.hex);
+      await runCommand({
+        sendMode: "hex",
+        template: "",
+        script: "",
+        scriptEnabled: false,
+        sendTemplateId: tpl.id,
+        overrides: values,
+      });
       setErr("");
     } catch (e) {
-      sendStore.refundSeq(tpl.id, seq);
       setErr(String(e).replace(/^Error:\s*/, ""));
     }
   };
@@ -173,39 +178,30 @@ export function SendBuildPanel() {
    *
    * 今天快捷栏那枚「存为指令」把当前参数值烤成 hex 字面量写进 `template`
    * （详设 §1.4）：存完参数就没了、长度不再回填、校验不再重算，用户以为存下的是"怎么做一帧"，
-   * 实际存下的是"那一帧当时长什么样"。这里换成 `sendTemplateId`，改谱命令跟着变。
+   * 实际存下的是"那一帧当时长什么样"。这里交给 `addReferenceCommand`，改谱命令跟着变。
    *
-   * 参数只把**和默认值不同**的那些记成 `overrides`：没动过的参数继续跟着谱的默认值走
-   * （改谱即改命令），现场特意填过的那个值则必须留下——否则填了 500、存完发的是 300。
+   * 参数只把**和默认值不同**的那些记成 `overrides`：没动过的继续跟着谱的默认值走，
+   * 现场特意填过的那个值则必须留下——否则填了 500、存完发的是 300。
    */
   const saveAsCommand = () => {
     if (!tpl || !preview?.ok) return;
-    if (guardLocked()) return;
-    const gname = "发送谱"; // 分组名是要写进用户命令库的数据，不随界面语言变（同 addPresetGroup 那条理由）
-    const findGroup = () => cmdStore.getSnapshot().groups.find((x) => x.name === gname);
-    if (!findGroup()) cmdStore.addGroup(gname);
-    const g = findGroup();
-    if (!g) return;
-    cmdStore.addCommand(g.id);
-    // 重新取快照：addCommand 换的是整个 snapshot，旧 `g.items` 里没有刚建的那条
-    const item = g.items[g.items.length - 1] as CommandItem | undefined;
-    if (!item) return;
     const overrides: Record<string, string> = {};
     for (const p of tpl.params) {
       const v = (values[p.id] ?? "").trim();
       if (v && v !== (p.def ?? "").trim()) overrides[p.id] = v;
     }
-    cmdStore.patchCommand(item.id, {
+    const id = cmdStore.addReferenceCommand({
+      templateId: tpl.id,
       name: tpl.name,
-      template: "",
-      sendMode: "hex",
-      note: tpl.note || tx("由发送谱「{n}」引用：改谱即改命令", "Referenced from template “{n}”: editing the template edits this").replace("{n}", tpl.name),
-      script: "",
-      scriptEnabled: false,
-      sendTemplateId: tpl.id,
-      overrides: Object.keys(overrides).length ? overrides : undefined,
+      note:
+        tpl.note ||
+        tx(
+          "由发送谱「{n}」引用：改谱即改命令",
+          "Referenced from template “{n}”: editing the template edits this",
+        ).replace("{n}", tpl.name),
+      overrides,
     });
-    setMsg(tx("已存为指令（引用这张谱）", "Saved as a command — it references this template"));
+    if (id) setMsg(tx("已存为指令（引用这张谱）", "Saved as a command — it references this template"));
   };
 
   const patchSel = (patch: Partial<SendField>) => {

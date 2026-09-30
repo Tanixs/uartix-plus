@@ -16,6 +16,7 @@ import type { ResolvedSend, RunProgress, SendPayload, Suite } from "./types";
 import { onFrames } from "../../ipc/framesBus";
 import * as panelActivity from "../../panels/panelActivity";
 import * as serialStore from "../serial/serialStore";
+import * as cmdExec from "../controls/cmdExec";
 import * as variableStore from "../controls/variableStore";
 import * as commandStore from "../controls/commandStore";
 import { CODECS, userCodecToCodec, type Codec } from "../console/commandFactory";
@@ -45,7 +46,20 @@ export function resolveSend(payload: SendPayload): ResolvedSend | null {
   }
   if (payload.type === "cmd") {
     const item = commandStore.getCommand(payload.cmdId);
-    if (!item || !item.template.trim()) return null;
+    if (!item) return null;
+    // P121-D：引用发送谱的命令。字节由谱现算，长度回填与校验都跟着谱走；
+    // 自增号在这次解析里就占下（引擎先解析后发送，晚占会撞号），出门与否用 settle 回话。
+    if (item.sendTemplateId) {
+      try {
+        const p = cmdExec.prepareReferenceSend(item);
+        return { mode: p.mode, text: p.text, settle: p.settle };
+      } catch {
+        // 谱被删 / 参数没值：引擎记 fail。原因点在面板那条路上（runCommand 抛的是点名错误），
+        // 这里保持 `null` 是因为 ResolvedSend 的失败面至今只有一个字符串 detail，塞不进去。
+        return null;
+      }
+    }
+    if (!item.template.trim()) return null;
     // 变量占位 {var} 与控制画布同语义；脚本命令暂不支持（v2：经 scriptRunner 执行）
     return { mode: item.sendMode, text: variableStore.resolveVars(item.template) };
   }

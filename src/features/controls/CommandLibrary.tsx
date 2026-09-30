@@ -5,7 +5,8 @@ import { isGroup } from "./commandStore";
 import type { CommandItem } from "./commandStore";
 import type { SendMode } from "./controlsStore";
 import { useSettings } from "../settings/settingsStore";
-import { runCommand } from "./cmdExec";
+import { bakeReferenceFrame, runCommand } from "./cmdExec";
+import * as sendStore from "../send/sendStore";
 import { TextInput } from "../protocol/PropertiesPanel";
 import { IconChevron, IconClose } from "../../shared/icons";
 import { HelpHint } from "../../shared/HelpHint";
@@ -428,6 +429,7 @@ function CommandModal(props: {
   const { item } = props;
   useLocale();
   const scriptOn = item.scriptEnabled;
+  const specName = item.sendTemplateId ? sendStore.getTemplate(item.sendTemplateId)?.name : undefined;
   return (
     <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
@@ -468,7 +470,60 @@ function CommandModal(props: {
             {tx("优先执行脚本（隐藏指令模板）", "Run script first (hide template)")}
           </label>
         </div>
-        {!scriptOn && (
+        {item.sendTemplateId ? (
+          <div className="form-row">
+            <label>{tx("发送谱", "Template")}</label>
+            <div className="cmd-hint">
+              {specName
+                ? tx(
+                    "这条命令不存字节：点它 = 发「{n}」此刻算出来的一帧，改那张谱这条命令跟着变。".replace(
+                      "{n}",
+                      specName,
+                    ),
+                    "This command stores no bytes: clicking it sends whatever “{n}” computes right now — edit the spec and this follows.".replace(
+                      "{n}",
+                      specName,
+                    ),
+                  )
+                : tx(
+                    "引用的发送谱已被删除：这条命令发不出去。清除引用后自己写字节，或回「发送组包」重新存一条。",
+                    "The referenced send template was deleted: this command cannot send. Clear the reference and type the bytes, or save it again from the send builder.",
+                  )}
+            </div>
+            {specName ? (
+              <button
+                className="btn"
+                onClick={() => {
+                  const hex = bakeReferenceFrame(item);
+                  if (!hex) return;
+                  commandStore.patchCommand(item.id, {
+                    template: hex,
+                    sendTemplateId: undefined,
+                    overrides: undefined,
+                  });
+                }}
+              >
+                {tx("断开引用：存成固定字节", "Detach: freeze into bytes")}
+              </button>
+            ) : (
+              <button
+                className="btn"
+                onClick={() =>
+                  commandStore.patchCommand(item.id, { sendTemplateId: undefined, overrides: undefined })
+                }
+              >
+                {tx("清除引用：自己写字节", "Clear the reference: type the bytes")}
+              </button>
+            )}
+            <div className="cmd-hint">
+              {tx(
+                "断开之后长度不再回填、校验不再重算、自增序号定死在这一帧——想跟着谱走就别断开。",
+                "Once detached, lengths stop auto-filling, the checksum stops recomputing and the sequence number freezes on this frame.",
+              )}
+            </div>
+          </div>
+        ) : (
+          !scriptOn && (
           <>
             <div className="form-row">
               <label>{tx("指令模板", "Template")}</label>
@@ -489,6 +544,7 @@ function CommandModal(props: {
                 )}
               </div>
           </>
+          )
         )}
         {scriptOn && (
           <>

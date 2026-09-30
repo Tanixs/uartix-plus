@@ -28,7 +28,6 @@ function tpl(fields: SendField[], rest: Partial<SendTemplate> = {}): SendTemplat
     fields,
     params: [],
     checksum: null,
-    textMode: "hex",
     nextSeq: 0,
     createdAt: 0,
     ...rest,
