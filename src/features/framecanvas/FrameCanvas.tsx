@@ -21,7 +21,7 @@ import * as sessionStore from "../session/sessionStore";
 import { toast } from "../ai/extRuntime";
 import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
-import { fieldSize, PALETTE, CHECKSUM_SIZES } from "../protocol/templateStore";
+import { fieldSize, PALETTE } from "../protocol/templateStore";
 import { groupDisplayName, presetGroupKey } from "./presets";
 import { parseHexBytes } from "../../shared/hexBytes";
 import { labeledValue } from "../../shared/valueLabels";
@@ -2600,7 +2600,12 @@ function FieldDialog({
   }, [lenRestricted]);
   useEffect(() => {
     if (role !== "checksum" || ckAlgo === "none") return;
-    const want = CHECKSUM_SIZES[ckAlgo] ?? 1;
+    // 自定义那支的宽度在参数里；这里取谱上现有的，没有就按默认那组（16 位）算，
+    // 保存时 upsertField 也是按同一组种子，两边不会给出两个宽度
+    const liveCrc = templateStore
+      .getSnapshot()
+      .rules.templates.find((x) => x.id === init.tplId)?.checksum?.crc ?? null;
+    const want = templateStore.checksumSizeOf(ckAlgo, liveCrc) ?? 1;
     const cur = fieldSize({ id: "", name: "", role: "checksum", offset: 0, type, endian, color: "" });
     if (cur !== want) {
       setType(want === 2 ? "uint16" : want === 4 ? "uint32" : want === 8 ? "float64" : "uint8");
@@ -2635,7 +2640,7 @@ function FieldDialog({
   // P86a：校验字段锚尾归一化预览 + 唯一性/帧长守卫 + 中间校验高级开关
   const [keepMiddle, setKeepMiddle] = useState(false);
   const tplNow = protoLive.rules.templates.find((x) => x.id === init.tplId) ?? null;
-  const ckSize = CHECKSUM_SIZES[ckAlgo] ?? 1;
+  const ckSize = templateStore.checksumSizeOf(ckAlgo, tplNow?.checksum?.crc) ?? 1;
   const otherCk =
     role === "checksum"
       ? (tplNow?.fields.find((x) => x.role === "checksum" && x.id !== (init.field?.id ?? "")) ?? null)
@@ -2828,6 +2833,7 @@ function FieldDialog({
                 <option value="crc16_modbus">CRC16 Modbus</option>
                 <option value="crc16_ccitt">CRC16 CCITT-FALSE</option>
                 <option value="crc16_x25">CRC16 X-25</option>
+                <option value="crc_custom">{tx("自定义 CRC（参数化）", "Custom CRC")}</option>
                 <option value="crc32">CRC32</option>
                 <option value="none">{tx("不校验（仅标注）", "No verification (marker only)")}</option>
               </select>
@@ -2839,8 +2845,8 @@ function FieldDialog({
                     "Visual marker only, no verification. Pick an algorithm to enable it.",
                   )
                 : tx(
-                    `保存即启用 ${ckAlgo}：覆盖范围=帧首至校验域前（可在属性面板改），校验不过的帧会被过滤。字段宽度已自动匹配算法（${CHECKSUM_SIZES[ckAlgo] ?? 1} B）。`,
-                    `Saves with ${ckAlgo} enabled: coverage = frame start to before this field (editable in properties); failing frames are filtered. Field width auto-matches the algorithm (${CHECKSUM_SIZES[ckAlgo] ?? 1} B).`,
+                    `保存即启用 ${ckAlgo}：覆盖范围=帧首至校验域前（可在属性面板改），校验不过的帧会被过滤。字段宽度已自动匹配算法（${ckSize} B）。${ckAlgo === "crc_custom" ? "自定义 CRC 的参数在属性面板「校验」那一节里填。" : ""}`,
+                    `Saves with ${ckAlgo} enabled: coverage = frame start to before this field (editable in properties); failing frames are filtered. Field width auto-matches the algorithm (${ckSize} B).${ckAlgo === "crc_custom" ? " The custom CRC parameters live in the properties panel's Checksum section." : ""}`,
                   )}
             </div>
             {otherCk && (

@@ -85,6 +85,28 @@ export const CHECKSUM_WIDTHS: Record<string, number> = {
 /** `crc_custom` 专用：算法名给不出宽度，宽度在参数里 */
 export const CRC_CUSTOM = "crc_custom";
 
+/**
+ * CRC 参数框的字面量：认十进制，也认 `0x` 十六进制（`poly` 这类值天生写成十六进制）。
+ * 认不出来就返回 null 由界面点名 —— 两处界面（TX组帧台 / 属性面板）共用这一条规则，
+ * 免得同一框在一边收 0x1021、在另一边收成别的数。
+ */
+export function parseCrcLiteral(text: string): number | null {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+/** crc_custom 的起手参数：CRC-16/CCITT-FALSE。三处界面共用这一份，免得各挑一个模型 */
+export const CRC_DEFAULT: CrcParams = {
+  width: 16,
+  poly: 0x1021,
+  init: 0xffff,
+  refin: false,
+  refout: false,
+  xorout: 0,
+};
+
 export function checksumWidth(algo: string | null | undefined, crc?: CrcParams | null): number {
   if (!algo) return 0;
   if (algo === CRC_CUSTOM) return crc ? crc.width / 8 : 0;

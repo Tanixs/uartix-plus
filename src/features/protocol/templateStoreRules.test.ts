@@ -345,3 +345,69 @@ describe("setHeaderBytes / removeChecksumField / revealField", () => {
     expect(b).toMatchObject({ tplId: "t1", fieldId: "f2" });
   });
 });
+
+/**
+ * P121-B2 #101 · 接收侧的自定义 CRC。
+ *
+ * 这一支的宽度不在算法表里而在参数里，所以上面那些"按算法名查宽度"的老代码全都要问对地方：
+ * 问错了就是 16 位的 CRC 被当成 1 字节字段，而引擎的宽度守卫会拒收整份规则 ——
+ * 症状离原因很远，故这里逐条钉住。
+ */
+const CRC16 = { width: 16, poly: 0x1021, init: 0xffff, refin: false, refout: false, xorout: 0 } as const;
+const CRC32 = {
+  width: 32,
+  poly: 0x04c11db7,
+  init: 0xffffffff,
+  refin: true,
+  refout: true,
+  xorout: 0xffffffff,
+} as const;
+
+describe("P121-B2 · 接收侧自定义 CRC（#101）", () => {
+  it("checksumSizeOf：custom 的宽度在参数里，具名的仍查表，未知算法把兜底留给调用方", () => {
+    expect(templateStore.checksumSizeOf("crc16_modbus")).toBe(2);
+    expect(templateStore.checksumSizeOf("sum8")).toBe(1);
+    expect(templateStore.checksumSizeOf("crc_custom", CRC32)).toBe(4);
+    expect(templateStore.checksumSizeOf("crc_custom"), "没参数按默认那组（16 位）——与保存时种的是同一组").toBe(2);
+    expect(templateStore.checksumSizeOf("no-such-algo")).toBeNull();
+  });
+
+  it("选成 crc_custom 就种一组能算的参数；换回具名算法就把参数清掉", () => {
+    makeTpl({ fields: [fld({ id: "ck", role: "checksum", offset: 6, type: "uint16" })] });
+    templateStore.setChecksumAlgo("t1", "crc_custom");
+    expect(getTpl("t1").checksum?.crc?.width, "种子参数得在：空着引擎只能对着 custom 算出 0").toBe(16);
+    templateStore.setChecksumAlgo("t1", "crc16_modbus");
+    expect(getTpl("t1").checksum?.crc, "换了算法还留着自定义参数 = 谁也不知道该信谁的态").toBeNull();
+  });
+
+  it("参数非法 ⇒ 一个字节都不动，错误文字还给界面点名", () => {
+    makeTpl({
+      checksum: { algo: "crc_custom", coverageStart: 0, coverageEnd: -2, endian: "little", crc: { ...CRC16 } },
+      fields: [fld({ id: "ck", role: "checksum", offset: 6, type: "uint16" })],
+    });
+    const why = templateStore.setChecksumCrc("t1", { ...CRC16, poly: 0x11021 });
+    expect(why, "多项式写成带最高位的全式是最常见的一种填错").toMatch(/超出 16 位/);
+    expect(getTpl("t1").checksum?.crc, "非法值不能落库").toMatchObject({ poly: 0x1021 });
+  });
+
+  it("位数 16 → 32 ⇒ 校验域字段与贴尾覆盖终点跟着新宽度走", () => {
+    makeTpl({
+      checksum: { algo: "crc_custom", coverageStart: 0, coverageEnd: -2, endian: "little", crc: { ...CRC16 } },
+      fields: [fld({ id: "ck", role: "checksum", offset: 4, type: "uint16" })],
+    });
+    expect(templateStore.setChecksumCrc("t1", CRC32)).toBeNull();
+    const t = getTpl("t1");
+    expect(t.checksum?.crc?.width).toBe(32);
+    expect(t.fields.find((f) => f.id === "ck")?.type, "字段还是 uint16 的话，引擎按宽度不一致拒收整份规则").toBe("uint32");
+    expect(t.checksum?.coverageEnd).toBe(-4);
+  });
+
+  it("patchChecksum 改覆盖时不把 crc 顺手丢掉", () => {
+    makeTpl({
+      checksum: { algo: "crc_custom", coverageStart: 0, coverageEnd: -2, endian: "little", crc: { ...CRC16 } },
+      fields: [fld({ id: "ck", role: "checksum", offset: 6, type: "uint16" })],
+    });
+    templateStore.patchChecksum("t1", { coverageStart: 1 });
+    expect(getTpl("t1").checksum).toMatchObject({ coverageStart: 1, crc: { poly: 0x1021 } });
+  });
+});

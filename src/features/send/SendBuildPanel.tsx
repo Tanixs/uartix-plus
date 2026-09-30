@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChecksumAlgo, CrcParams, Endian, FieldRole, FieldType } from "../../ipc/types";
 import { tx, useLocale } from "../../i18n/strings";
+import { CRC_DEFAULT, parseCrcLiteral } from "../../shared/checksums";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
 import { IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
@@ -25,7 +26,7 @@ import * as controlsStore from "../controls/controlsStore";
 import { guardLocked } from "../operator/lock";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import * as sendStore from "./sendStore";
-import { encodeSend, intRangeOf, parseHexInput, parseNumber } from "./encodeSend";
+import { encodeSend, intRangeOf, parseHexInput } from "./encodeSend";
 import {
   dropIndexAt,
   moveTargetIndex,
@@ -81,17 +82,9 @@ const CK_ALGOS: ChecksumAlgo[] = [
 ];
 
 /**
- * 切到 crc_custom 时先给一组**当场就能算出东西**的参数（CRC-16/CCITT-FALSE）。
+ * 切到 crc_custom 时先给一组**当场就能算出东西**的参数（CRC-16/CCITT-FALSE，`CRC_DEFAULT`）。
  * 留一个空参数组就是"选了算法却填不出帧"的中间态——这面板一路在消的就是这种态。
  */
-const DEFAULT_CRC: CrcParams = {
-  width: 16,
-  poly: 0x1021,
-  init: 0xffff,
-  refin: false,
-  refout: false,
-  xorout: 0,
-};
 
 const roleLabel = (r: FieldRole): string =>
   ({
@@ -339,25 +332,26 @@ export function SendBuildPanel() {
   };
 
   /** 参数化 CRC 的读写：没选 crc_custom 时界面不显示这些行，读到的就是那组能算的默认参数 */
-  const crcOf = (): CrcParams => tpl?.checksum?.crc ?? DEFAULT_CRC;
+  const crcOf = (): CrcParams => tpl?.checksum?.crc ?? CRC_DEFAULT;
   const setCrc = (patch: Partial<CrcParams>) => {
     if (!tpl?.checksum) return;
     sendStore.patchTemplate(tpl.id, { checksum: { ...tpl.checksum, crc: { ...crcOf(), ...patch } } });
   };
-  /** poly / init / xorout 用十六进制写最自然（0x1021），parseNumber 认 0x 也认十进制 */
+  /** poly / init / xorout 用十六进制写最自然（0x1021）；认不出来就点名，原值留在谱里 */
   const commitCrcNum = (key: "poly" | "init" | "xorout", text: string) => {
-    try {
-      setCrc({ [key]: parseNumber(text, `CRC ${key}`) });
-      setErr("");
-    } catch (e) {
+    const n = parseCrcLiteral(text);
+    if (n === null) {
       // 这条会留在屏上直到下一次成功提交，所以得说清"没写进去"——不然看着像现在这帧坏了
       setErr(
-        `${String(e).replace(/^Error:\s*/, "")} ${tx(
+        `${tx(`CRC ${key}：「${text}」不是数字（认十进制或 0x 十六进制）`, `CRC ${key}: “${text}” is not a number (decimal or 0x hex)`)} ${tx(
           "—— 这个值没写进谱，原来那个还在",
           "— this value was not written in; the previous one still stands",
         )}`,
       );
+      return;
     }
+    setCrc({ [key]: n });
+    setErr("");
   };
 
   return (
@@ -741,7 +735,7 @@ export function SendBuildPanel() {
                               algo,
                               coverageStart: tpl.checksum?.coverageStart ?? 0,
                               coverageEnd: tpl.checksum?.coverageEnd ?? -1,
-                              crc: algo === "crc_custom" ? (tpl.checksum?.crc ?? DEFAULT_CRC) : null,
+                              crc: algo === "crc_custom" ? (tpl.checksum?.crc ?? CRC_DEFAULT) : null,
                             },
                     });
                   }}

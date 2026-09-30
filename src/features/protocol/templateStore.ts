@@ -4,9 +4,10 @@ import { guardLocked } from "../operator/lock";
 import { dropFieldValues } from "./telemetryStore";
 import { fieldSize } from "./fieldTypes";
 import { checksumTail, effRange, footerTail } from "../framecanvas/frameLayout";
-import { CHECKSUM_WIDTHS } from "../../shared/checksums";
+import { CHECKSUM_WIDTHS, CRC_DEFAULT, crcParamError } from "../../shared/checksums";
 import type {
   ChecksumAlgo,
+  CrcParams,
   FieldDef,
   FieldRole,
   FieldType,
@@ -951,13 +952,25 @@ export function patchField(
 /**
  * 校验算法 → 字节数。**数字住在 `shared/checksums.CHECKSUM_WIDTHS`**，这里只是一层视图。
  *
- * 故意**不含 `none`**：帧画布那几处 `CHECKSUM_SIZES[algo] ?? 1` 依赖"认不出来时按 1 字节预留"，
- * 把 `none: 0` 折进来会在"字段已放、算法还没选"这个常见状态下改行为。
- * 各处兜底分别停在哪、什么时候统一，只写在 `shared/checksums.CHECKSUM_WIDTHS` 的表注释里（#94b）。
+ * 故意**不含 `none`**：帧画布那几处宽度兜底（现在是 `checksumSizeOf(...) ?? 1`）依赖
+ * "认不出来时按 1 字节预留"，把 `none: 0` 折进来会在"字段已放、算法还没选"这个常见状态下改行为。
+ * 各处兜底分别停在哪、为什么不统一，只写在 `shared/checksums.CHECKSUM_WIDTHS` 的表注释里。
  */
 export const CHECKSUM_SIZES: Record<string, number> = Object.fromEntries(
   Object.entries(CHECKSUM_WIDTHS).filter(([algo]) => algo !== "none"),
 );
+
+/**
+ * 「这支算法占几字节」—— 界面该问这个，而不是直接查 `CHECKSUM_SIZES`。
+ *
+ * `crc_custom` 不在那张表里（它的宽度在参数里），直接查表会掉进 `?? 1` 的兜底，
+ * 于是 16 位的自定义 CRC 被当成 1 字节字段。其余算法名走的还是那张表，兜底原样留给调用方：
+ * 返回 null 表示"算法名给不出答案"，由调用处决定是 1 还是字段自己的宽度。
+ */
+export function checksumSizeOf(algo: string, crc?: CrcParams | null): number | null {
+  if (algo === "crc_custom") return (crc ?? CRC_DEFAULT).width / 8;
+  return CHECKSUM_SIZES[algo] ?? null;
+}
 
 export interface UpsertOpts {
   /** 高级：定长帧保留校验字段在选区位置（中间校验），coverageEnd 同步为绝对偏移（引擎按字段位置验证，语义自洽） */
@@ -988,7 +1001,7 @@ export function upsertFieldLinked(
         const fbOf = (b: FrameTemplate["boundary"]) =>
           b.mode === "footer" ? (b.footerBytes?.length ?? 0) : 0;
         if (f.role === "checksum" && ckAlgo && ckAlgo !== "none") {
-          const size = CHECKSUM_SIZES[ckAlgo] ?? fieldSize(f);
+          const size = checksumSizeOf(ckAlgo, t.checksum?.crc) ?? fieldSize(f);
           if (t.boundary.mode === "fixedLength") {
             const fl = t.boundary.fixedLength ?? 0;
             const target = fl - size;
@@ -1046,7 +1059,7 @@ export function upsertFieldLinked(
         }
         let checksum = t.checksum;
         if (f.role === "checksum" && ckAlgo && ckAlgo !== "none") {
-          const size = CHECKSUM_SIZES[ckAlgo] ?? fieldSize(f);
+          const size = checksumSizeOf(ckAlgo, t.checksum?.crc) ?? fieldSize(f);
           const middle =
             boundary.mode === "fixedLength" &&
             opts?.keepMiddle &&
@@ -1057,6 +1070,8 @@ export function upsertFieldLinked(
             coverageStart: t.checksum?.coverageStart ?? 0,
             coverageEnd: middle ? f.offset : -(size + fbOf(boundary)),
             endian: (t.checksum?.endian ?? "little") as "little" | "big",
+            // 换算法就把上一支的参数清掉：留着会出"选了 Modbus、谱里还挂着自定义参数"的矛盾态
+            crc: ckAlgo === "crc_custom" ? (t.checksum?.crc ?? CRC_DEFAULT) : null,
           };
         }
         return { ...t, fields, boundary, checksum };
@@ -1066,14 +1081,23 @@ export function upsertFieldLinked(
   scheduleSync();
 }
 
-export function setChecksumAlgo(templateId: string, algo: ChecksumAlgo) {
+export function setChecksumAlgo(
+  templateId: string,
+  algo: ChecksumAlgo,
+  crcForCustom?: CrcParams | null,
+) {
   pushHistory();
-  const size = CHECKSUM_SIZES[algo] ?? 1;
   set({
     rules: {
       templates: snapshot.rules.templates.map((t) => {
         if (t.id !== templateId) return t;
-        const oldSize = t.checksum ? (CHECKSUM_SIZES[t.checksum.algo] ?? 1) : 1;
+        // 换算法就换一组参数：custom 用传进来的（没有就沿用现成的，再没有给默认那组），
+        // 其余算法把参数清掉 —— 留着会出"选了 Modbus、谱里还挂着自定义参数"这种谁都不知道该信谁的态
+        const crc = algo === "crc_custom" ? (crcForCustom ?? t.checksum?.crc ?? CRC_DEFAULT) : null;
+        const size = checksumSizeOf(algo, crc) ?? 1;
+        const oldSize = t.checksum
+          ? (checksumSizeOf(t.checksum.algo, t.checksum.crc) ?? 1)
+          : 1;
         const oldEnd = t.checksum?.coverageEnd ?? -oldSize;
         const fb =
           t.boundary.mode === "footer" ? (t.boundary.footerBytes?.length ?? 0) : 0;
@@ -1082,6 +1106,7 @@ export function setChecksumAlgo(templateId: string, algo: ChecksumAlgo) {
           coverageStart: t.checksum?.coverageStart ?? 0,
           coverageEnd: oldEnd === -oldSize ? -(size + fb) : oldEnd,
           endian: t.checksum?.endian ?? "little",
+          crc,
         };
         const fields =
           algo === "none"
@@ -1112,6 +1137,20 @@ export function setChecksumAlgo(templateId: string, algo: ChecksumAlgo) {
     },
   });
   scheduleSync();
+}
+
+/**
+ * 改自定义 CRC 的参数。**非法就一个字节都不动**，把错误文字还给界面点名 ——
+ * 这组数字最容易填错一位（多项式写成带最高位的全式是最常见的一种），静默收下就是
+ * 做出一帧谁也对不上的字节，比填不进去难查得多。
+ * 位数改动会带动校验域宽度（16 ⇄ 32）与贴尾的覆盖终点，所以直接走 `setChecksumAlgo` 那条同步，
+ * 不在这里再抄一份几何。
+ */
+export function setChecksumCrc(templateId: string, crc: CrcParams): string | null {
+  const why = crcParamError(crc);
+  if (why) return why;
+  setChecksumAlgo(templateId, "crc_custom", crc);
+  return null;
 }
 
 export function setLengthDomain(

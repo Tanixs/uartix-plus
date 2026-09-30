@@ -2,11 +2,14 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type {
   BoundaryMode,
   ChecksumAlgo,
+  CrcParams,
   Endian,
   FieldDef,
   FieldRole,
   FieldType,
+  FrameTemplate,
 } from "../../ipc/types";
+import { CRC_DEFAULT, parseCrcLiteral } from "../../shared/checksums";
 import * as store from "./templateStore";
 import { fieldSize } from "./templateStore";
 import { toast } from "../ai/extRuntime";
@@ -166,9 +169,85 @@ const ALGOS: { id: ChecksumAlgo; name: () => string }[] = [
   { id: "crc16_modbus", name: () => "CRC16 Modbus" },
   { id: "crc16_ccitt", name: () => "CRC16 CCITT-FALSE" },
   { id: "crc16_x25", name: () => "CRC16 X-25" },
+  { id: "crc_custom", name: () => tx("自定义 CRC（参数化）", "Custom CRC") },
   { id: "crc32", name: () => "CRC32" },
   { id: "none", name: () => tx("无校验", "None") },
 ];
+
+/**
+ * 参数化 CRC 那六项。口径与 TX组帧台完全一致：**非法值不进模板**，错误就地挂出来点名。
+ * 校验域字段宽度由 `store.setChecksumCrc` 跟着位数同步，这里不再重复那份逻辑。
+ */
+function CrcRows({ tpl }: { tpl: FrameTemplate }) {
+  const [err, setErr] = useState("");
+  const crc = tpl.checksum?.crc ?? CRC_DEFAULT;
+  const put = (patch: Partial<CrcParams>) => setErr(store.setChecksumCrc(tpl.id, { ...crc, ...patch }) ?? "");
+  const lit = (key: "poly" | "init" | "xorout", text: string) => {
+    const n = parseCrcLiteral(text);
+    if (n === null) {
+      setErr(
+        `${tx(`CRC ${key}：「${text}」不是数字（认十进制或 0x 十六进制）`, `CRC ${key}: “${text}” is not a number (decimal or 0x hex)`)} ${tx(
+          "—— 这个值没写进模板，原来那个还在",
+          "— this value was not written in; the previous one still stands",
+        )}`,
+      );
+      return;
+    }
+    put({ [key]: n });
+  };
+  return (
+    <>
+      <div className="form-row">
+        <div className="form-pair grow">
+          <label>{tx("CRC 位数", "CRC width")}</label>
+          <select
+            className="input"
+            value={crc.width}
+            onChange={(e) => put({ width: Number(e.target.value) as CrcParams["width"] })}
+          >
+            {([8, 16, 32] as const).map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="form-pair">
+          <label>{tx("多项式", "Polynomial")}</label>
+          <TextInput value={"0x" + crc.poly.toString(16)} onCommit={(v) => lit("poly", v)} />
+        </div>
+      </div>
+      <div className="form-row">
+        <div className="form-pair grow">
+          <label>{tx("初值", "Initial")}</label>
+          <TextInput value={"0x" + crc.init.toString(16)} onCommit={(v) => lit("init", v)} />
+        </div>
+        <div className="form-pair">
+          <label>{tx("末异或", "Final XOR")}</label>
+          <TextInput value={"0x" + crc.xorout.toString(16)} onCommit={(v) => lit("xorout", v)} />
+        </div>
+      </div>
+      <div className="form-row">
+        <label>{tx("反射", "Reflection")}</label>
+        <label className="chk">
+          <input type="checkbox" checked={crc.refin} onChange={(e) => put({ refin: e.target.checked })} />
+          {tx("输入", "reflect input")}
+        </label>
+        <label className="chk">
+          <input type="checkbox" checked={crc.refout} onChange={(e) => put({ refout: e.target.checked })} />
+          {tx("输出", "reflect output")}
+        </label>
+      </div>
+      <div className="form-hint">
+        {tx(
+          "多项式写去掉最高位的既约式（CCITT 是 0x1021，不是 0x11021）。线上字节序跟着反射走：反射 ⇒ 校验段低字节在前。",
+          "Write the polynomial without its leading bit (CCITT is 0x1021, not 0x11021). Wire byte order follows reflection: reflected means the low byte goes first.",
+        )}
+      </div>
+      {err !== "" && <div className="props-warn">{err}</div>}
+    </>
+  );
+}
 
 export function PropertiesPanel() {
   useLocale();
@@ -491,7 +570,7 @@ export function PropertiesPanel() {
             const fl =
               tpl.boundary.mode === "fixedLength" ? tpl.boundary.fixedLength ?? 0 : 0;
             if (!ck || !fl) return null;
-            const w = store.CHECKSUM_SIZES[tpl.checksum.algo] ?? 1;
+            const w = store.checksumSizeOf(tpl.checksum.algo, tpl.checksum.crc) ?? 1;
             const end = ck.offset + fieldSize(ck);
             if (end === fl) return null;
             if (ck.offset >= 0 && tpl.checksum.coverageEnd === ck.offset) {
@@ -558,6 +637,7 @@ export function PropertiesPanel() {
                 />
               </div>
             </div>
+            {tpl.checksum.algo === "crc_custom" && <CrcRows tpl={tpl} />}
           </>
         )}
 
@@ -994,7 +1074,7 @@ export function PropertiesPanel() {
                 </div>
               );
             }
-            const aw = store.CHECKSUM_SIZES[tpl.checksum?.algo ?? ""] ?? 1;
+            const aw = store.checksumSizeOf(tpl.checksum?.algo ?? "", tpl.checksum?.crc) ?? 1;
             const target = fl - aw;
             const okTarget = target >= tpl.boundary.headerBytes.length;
             return (

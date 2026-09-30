@@ -309,7 +309,7 @@ describe("P121-B2 · 校验字段宽度：数字一份、兜底三条", () => {
       expect(crcParamError(p), `${name} 的这组参数该判合法`).toBe(null);
       expect(crcByParams(p, v), `${name} 的 check 值是公开的 0x${want.toString(16)}`).toBe(want);
     }
-    // 三支 16 位模型逐向量与具名算法同数（CRC-32 的**值**也同，但落帧字节序不同，见 ⑩）
+    // 三支 16 位模型逐向量与具名算法同数（CRC-32 的**值**也同，但落帧字节序不同——钉在 send/roundTrip.test.ts）
     for (const t of VECTORS) {
       expect(crcByParams(models[0][1], t.bytes), `${t.name} 参数化 Modbus`).toBe(t.modbus);
       expect(crcByParams(models[1][1], t.bytes), `${t.name} 参数化 CCITT`).toBe(t.ccitt);
@@ -328,5 +328,32 @@ describe("P121-B2 · 校验字段宽度：数字一份、兜底三条", () => {
     expect(checksumWidth(CRC_CUSTOM, base), "参数化算法的宽度 = 位数 / 8").toBe(2);
     expect(checksumWidth(CRC_CUSTOM, { ...base, width: 32 }), "32 位占 4 字节").toBe(4);
     expect(checksumWidth(CRC_CUSTOM), "没参数就问不出宽度：回 0，由编码器点名").toBe(0);
+  });
+
+  it("⑪ 接收侧两处算法选择器覆盖全集：新加一支不许漏一边", () => {
+    const src = readFileSync(fileURLToPath(new URL("../ipc/types.ts", import.meta.url)), "utf8");
+    const uni = /export type ChecksumAlgo =([^;]*);/.exec(src);
+    if (!uni) throw new Error("ChecksumAlgo 联合类型不见了");
+    const all = [...uni[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]).sort();
+
+    const canvas = readFileSync(
+      fileURLToPath(new URL("../features/framecanvas/FrameCanvas.tsx", import.meta.url)),
+      "utf8",
+    );
+    const at = canvas.indexOf('tx("校验算法"');
+    expect(at, "帧画布新建字段弹窗里的「校验算法」下拉不见了").toBeGreaterThan(-1);
+    const dlg = canvas.slice(at, canvas.indexOf("</select>", at));
+    const inCanvas = [...dlg.matchAll(/value="([a-z0-9_]+)"/g)].map((m) => m[1]).sort();
+    expect(inCanvas, "帧画布的算法下拉与类型不再是同一支集合").toEqual(all);
+
+    const props = readFileSync(
+      fileURLToPath(new URL("../features/protocol/PropertiesPanel.tsx", import.meta.url)),
+      "utf8",
+    );
+    const pa = props.indexOf("const ALGOS: { id: ChecksumAlgo");
+    expect(pa, "属性面板的算法清单（ALGOS）不见了").toBeGreaterThan(-1);
+    const list = props.slice(pa, props.indexOf("\n];", pa));
+    const inProps = [...list.matchAll(/id:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]).sort();
+    expect(inProps, "属性面板的算法清单与类型不再是同一支集合").toEqual(all);
   });
 });
