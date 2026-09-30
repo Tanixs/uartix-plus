@@ -212,12 +212,13 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
     path: "commands",
     group: "commands",
     zh: "指令库清单",
-    gives: "每项 {id,name,group,sendMode,scriptEnabled,template,sendTemplateId}；带 sendTemplateId 的那条 template 是空的、发送内容由那张发送谱算，明细请读 commands/<id>",
+    gives: "每项 {id,name,group,sendMode,scriptEnabled,template,sendTemplateId,sendSpec}；带 sendTemplateId 的那条 template 是空的、发送内容由 sendSpec 那张发送谱算，明细请读 commands/<id>",
     listKey: "items",
     defaultLimit: DEFAULT_LIST_LIMIT,
     maxBytes: 8192,
     async read() {
       const { getSnapshot } = await import("../controls/commandStore");
+      const { getTemplate } = await import("../send/sendStore");
       const items: unknown[] = [];
       const walk = (nodes: CommandNode[], trail: string) => {
         for (const n of nodes) {
@@ -229,11 +230,13 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
             sendMode: n.sendMode,
             scriptEnabled: n.scriptEnabled,
             template: n.template,
-            // 引用式命令的 template 天生是空的。不把引用带出来，模型看到的就是"一条空指令"，
-            // 下一句很可能是"这条命令没内容，是不是坏了"。这里只带 id：
-            // 谱名要 `../send/sendStore`，那是给 Agent 新开一个可读源（白名单那条钉），
-            // 没点头之前不开。
+            // 引用式命令的 template 天生是空的。只给 id，模型仍然叫不出它引用的是谁，
+            // 下一句很可能是"这条命令没内容，是不是坏了"。
+            // 读谱名 = 给 Agent 新开一个可读源（`hostCatalog.test.ts` 那条白名单钉），2026-09-30 已点头。
             sendTemplateId: n.sendTemplateId,
+            sendSpec: n.sendTemplateId
+              ? getTemplate(n.sendTemplateId)?.name ?? "（谱已删）"
+              : undefined,
           });
         }
       };

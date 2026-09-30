@@ -55,8 +55,11 @@ const ho = vi.hoisted(() => {
       groups: [
         { id: "g1", name: "组一", items: [{ id: "cmd1", name: "查询", template: "AT\r\n", sendMode: "once", scriptEnabled: false, note: "n" }] },
         { id: "cmd2", name: "单条", template: "01 03", sendMode: "loop", scriptEnabled: false },
+        // P121-E2：引用式命令的 template 是空的，目录必须报出它引用的是哪张谱
+        { id: "cmd3", name: "设速度", template: "", sendMode: "hex", scriptEnabled: false, sendTemplateId: "sp1" },
       ],
     },
+    sendSpecs: [{ id: "sp1", name: "速度谱" }] as { id: string; name: string }[],
     controls: {
       activePageId: "p1",
       pages: [{ id: "p1", name: "面板1", cols: 12, rows: 8, locked: false, cards: [{ id: "k1", type: "button", name: "按钮", x: 0, y: 0, w: 2, h: 1, bindTemplate: "t1" }] }],
@@ -87,6 +90,10 @@ function makeRows(n: number, fat = false) {
 }
 
 vi.mock("../serial/serialStore", () => ({ getSnapshot: () => ho.serial }));
+// P121-E2 起 `commands` 列表要报谱名：这里只给 `getTemplate`，目录侧也只该用这一个（白名单那条注释说的就是它）
+vi.mock("../send/sendStore", () => ({
+  getTemplate: (id: string) => ho.sendSpecs.find((t) => t.id === id) ?? null,
+}));
 vi.mock("../operator/operatorStore", () => ({ getSnapshot: () => ho.operator }));
 vi.mock("../session/sessionStore", () => ({
   getSnapshot: () => {
@@ -453,6 +460,10 @@ describe("hostCatalog：目录自洽（菜单=能点到的菜）", () => {
       "../plot/plotStore", "../plot3d/plot3dStore",
       "../plugins/moduleHost", "../plugins/pluginStore", "../plugins/pluginToolDefs",
       "../protocol/telemetryStore", "../protocol/templateStore",
+      // P121-E2（2026-09-30 点头）：`commands` 列表要报出引用式命令背后的**谱名**。
+      // 只读 `getTemplate().name` 一个字段——谱的写方法（addTemplate/patchField/clearAll…）
+      // 一句都不许这个目录碰，与 `templateStore` 那条同一个口径。
+      "../send/sendStore",
       "../sentinel/sentinelStore", "../serial/serialStore",
       "../session/sessionStore", "../sequencer/sequencerStore",
       "../table/framesStore", "../vdev/vdevStore",
@@ -569,9 +580,29 @@ describe("hostCatalog：各视图内容口径", () => {
     expect(d.serial).toMatchObject({ iface: "serial", status: "connected", port: "COM7", rxTotal: 1234, bps: 12 });
     expect(d.operatorLocked).toBe(false);
     expect(d.appVersion).toBe("9.9.9-test");
-    expect(d.counts).toMatchObject({ channels: 3, protocols: 2, commands: 2, controls: 1, plugins: 1 });
+    // commands 2 → 3：P121-E2 往夹具里加了一条引用式命令（cmd3），叶子数跟着长。契约变更，不是断言放松。
+    expect(d.counts).toMatchObject({ channels: 3, protocols: 2, commands: 3, controls: 1, plugins: 1 });
     expect(d.session).toMatchObject({ state: "recording", frames: 90, durationMs: 1501, bridgePort: 5599 });
     expect(r.bytes).toBe(JSON.stringify(r.data).length); // bytes 说的就是这份 data 的体积（§8-34）
+  });
+
+  it("引用式命令不是空指令：目录报得出谱名，谱没了也说得清", async () => {
+    const r = await readCatalog("commands");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    type Row = { id: string; template: string; sendSpec?: string };
+    const items = (r.data as { items: Row[] }).items;
+    const ref = items.find((i) => i.id === "cmd3");
+    expect(ref?.template, "引用式命令的 template 本来就是空的").toBe("");
+    expect(ref?.sendSpec).toBe("速度谱");
+    expect(items.find((i) => i.id === "cmd1")?.sendSpec, "普通命令不该冒出 sendSpec").toBeUndefined();
+
+    ho.sendSpecs.pop(); // 谱被删：不能只留一个对不上的 id，那等于让模型自己去猜
+    const after = await readCatalog("commands");
+    expect(after.ok).toBe(true);
+    if (!after.ok) return;
+    expect((after.data as { items: Row[] }).items.find((i) => i.id === "cmd3")?.sendSpec).toBe("（谱已删）");
+    ho.sendSpecs.push({ id: "sp1", name: "速度谱" });
   });
 
   it("操纵者锁与串口错误都按现状出（不缓存不省略）", async () => {
