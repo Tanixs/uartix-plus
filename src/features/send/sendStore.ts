@@ -53,11 +53,14 @@ function load(): SendTemplate[] {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) throw new Error("not an array");
     // 只认结构上说得通的条目：字段数组缺失的半条记录会让编码器在运行期抛奇怪错误
-    return parsed.filter(
-      (t): t is SendTemplate =>
-        !!t && typeof t === "object" && Array.isArray((t as SendTemplate).fields) &&
-        Array.isArray((t as SendTemplate).params),
-    );
+    return parsed
+      .filter(
+        (t): t is SendTemplate =>
+          !!t && typeof t === "object" && Array.isArray((t as SendTemplate).fields) &&
+          Array.isArray((t as SendTemplate).params),
+      )
+      // 序号计数器缺就归零：它是状态不是配置，缺一个值不该让整张谱不可用
+      .map((t) => ({ ...t, nextSeq: Number.isFinite(t.nextSeq) ? t.nextSeq : 0 }));
   } catch {
     localStorage.removeItem(KEY);
     return [];
@@ -101,6 +104,7 @@ export function addTemplate(name?: string): string {
     params: [],
     checksum: null,
     textMode: "hex",
+    nextSeq: 0,
     createdAt: Date.now(),
   };
   write([...templates, tpl]);
@@ -128,6 +132,9 @@ export function duplicateTemplate(id: string): string {
     ...structuredClone(src),
     id: uid("st"),
     name: `${src.name} ${tx("副本", "copy")}`,
+    // 计数器不跟着复制：两张谱各发各的，都从 5 开始就是让设备看到两个 5。
+    // 副本是一条新流，从 0 起；真要接上原流的尾巴，用户在序号框里手填一次。
+    nextSeq: 0,
     createdAt: Date.now(),
   };
   write([...templates, copy]);
@@ -223,7 +230,12 @@ export function canRedo() {
 }
 
 function restore(json: string) {
-  templates = JSON.parse(json) as SendTemplate[];
+  const prev = JSON.parse(json) as SendTemplate[];
+  // 撤销栈里存的是**配置**，运行期计数器不跟着回退：
+  // 改完字段发过 5 帧再 Ctrl+Z，把 seq 拨回 0 等于让设备重收一遍 0..4。
+  // 被撤销掉的那张谱（removeTemplate 后 undo）没有现值可继承，只能用快照里那个。
+  const live = new Map(templates.map((t) => [t.id, t.nextSeq]));
+  templates = prev.map((t) => ({ ...t, nextSeq: live.get(t.id) ?? t.nextSeq }));
   scheduleSave();
   emit();
 }
@@ -268,6 +280,8 @@ export function importTemplates(incoming: SendTemplate[]): number {
       name,
       params: Array.isArray(raw.params) ? raw.params : [],
       fields: raw.fields,
+      // 同 duplicateTemplate：导入的是一条新流，计数器从 0 起，不接文件里那个尾巴
+      nextSeq: 0,
     };
     templates = [...templates, tpl];
     added++;
@@ -284,4 +298,51 @@ export function clearAll() {
   if (guardLocked()) return;
   pushHistory();
   write([]);
+}
+
+/**
+ * 取本次发送该用的自增序号，并**同步**把计数器往前推一格（D9）。
+ *
+ * 为什么是"先占号、发失败再退号"（`reserveSeq` + `refundSeq`），而不是"发成功后才推"：
+ * 推号若发生在 `await sendCmd` 之后，两次重叠的发送（快速连点、循环发送、序列器）
+ * 会读到同一个号各发一帧、然后把计数器推两格——设备看到的是"同一个号来两次、中间缺一个"。
+ * 同步占号把这件事堵死；失败退还保住的仍是「失败不跳号」那条承诺。
+ *
+ * 刻意**不过 `guardLocked()`**：只读锁锁的是"改配置"，而发一帧正是现场操作员的本职。
+ * 但序号存在谱里，所以它照样写盘、发通知——关键是**四个入口共用一个计数器**：
+ * 面板、命令库、卡片、序列器各存一份的话，设备看到的 seq 就会跳号，
+ * 而这正是"自增帧序号"这个字段要解决的问题本身。
+ */
+export function reserveSeq(id: string): number {
+  const tpl = templates.find((t) => t.id === id);
+  if (!tpl) return 0;
+  const at = Number.isFinite(tpl.nextSeq) ? tpl.nextSeq : 0;
+  write(templates.map((t) => (t.id === id ? { ...t, nextSeq: (at + 1) % seqWrap(t) } : t)));
+  return at;
+}
+
+/**
+ * 发失败时把刚占的号退回去。只在这个号**仍是最新一次占号**时才退——
+ * 两次发送重叠、前一次失败的话，后一个号已经发出去了，硬退会把已用的号再放出去一次。
+ */
+export function refundSeq(id: string, value: number) {
+  const tpl = templates.find((t) => t.id === id);
+  if (!tpl) return;
+  if (tpl.nextSeq !== (value + 1) % seqWrap(tpl)) return;
+  write(templates.map((t) => (t.id === id ? { ...t, nextSeq: value } : t)));
+}
+
+/** 序号回绕周期：谱上那个 seq 字段的宽度说了算（`wrap` 显式给定时以它为准） */
+function seqWrap(tpl: SendTemplate): number {
+  const seqField = tpl.fields.find((f) => f.source.kind === "seq");
+  return seqField && seqField.source.kind === "seq"
+    ? seqField.source.wrap ?? Math.pow(2, 8 * Math.max(1, seqField.size ?? 1))
+    : 256;
+}
+
+/** 归零 / 手改序号：这是对谱内容的显式编辑，走锁也走撤销 */
+export function setSeq(id: string, value: number) {
+  if (guardLocked()) return;
+  pushHistory();
+  write(templates.map((t) => (t.id === id ? { ...t, nextSeq: Math.max(0, Math.floor(value) || 0) } : t)));
 }

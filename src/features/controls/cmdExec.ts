@@ -3,6 +3,8 @@ import * as serialStore from "../serial/serialStore";
 import * as variableStore from "./variableStore";
 import { beep, runScript } from "./scriptRunner";
 import { tx } from "../../i18n/strings";
+import * as sendStore from "../send/sendStore";
+import { encodeSend, sendValues } from "../send/encodeSend";
 
 /**
  * P104-R3：命令发送与脚本执行的**唯一**实现。
@@ -26,6 +28,37 @@ export interface RunnableCommand {
   template: string;
   script: string;
   scriptEnabled: boolean;
+  /** 引用一张发送谱（P121-D）。带着它时 `template` 不再参与发送 */
+  sendTemplateId?: string;
+  overrides?: Record<string, string>;
+}
+
+/**
+ * 发一帧发送谱。三件事只有在这里定一次才成立：
+ *  - 参数值 = 谱里的默认值 + 命令上的覆盖；缺值由编码器报错点名，不凑数；
+ *  - 自增序号**同步占号**、包没发出去就退还（见 `sendStore.reserveSeq`）：
+ *    占号在 `await` 之前 ⇒ 重叠的两次发送不会拿到同一个号；退还 ⇒ 失败不跳号；
+ *  - 引用被删 ⇒ 明确报错，**不退回**去发那条命令残留的 `template` 字面量
+ *    （一台机器上同时留着两份真相是 P121-A 刚清掉的那个病）。
+ */
+async function sendByTemplate(id: string, overrides?: Record<string, string>): Promise<void> {
+  const tpl = sendStore.getTemplate(id);
+  if (!tpl) {
+    throw new Error(
+      tx(
+        "引用的发送谱已被删除：请重新「存为指令」，或把这条命令改回模板",
+        "The referenced send template was deleted — save it as a command again, or turn this one back into a template command",
+      ),
+    );
+  }
+  const seq = sendStore.reserveSeq(id);
+  try {
+    const r = encodeSend(tpl, { values: sendValues(tpl, overrides), seq });
+    await sendCmd("hex", r.hex);
+  } catch (e) {
+    sendStore.refundSeq(id, seq);
+    throw e;
+  }
 }
 
 /**
@@ -36,8 +69,8 @@ export interface RunnableCommand {
  * 三份不一致里没有任何一份是错的，它们只是**不是同一份**。`cmdExec` 的注释早就写明
  * 这个文件存在的理由就是消掉这种重复，但快捷栏那份一直留在原地没搬过来。
  *
- * 判据只在这里定一次：脚本命令走 `runCmdScript`，其余走"变量求值 → 发送"；
- * 空内容在发出前就报错（原先只有快捷栏查，命令库那边要靠 Rust 侧回一句「发送内容为空」）。
+ * 判据只在这里定一次：脚本命令走 `runCmdScript`，引用谱的走 `sendByTemplate`，
+ * 其余走"变量求值 → 发送"；空内容在发出前就报错（原先只有快捷栏查，命令库那边要靠 Rust 侧回一句「发送内容为空」）。
  */
 export async function runCommand(
   cmd: RunnableCommand,
@@ -45,6 +78,10 @@ export async function runCommand(
 ): Promise<void> {
   if (cmd.scriptEnabled && cmd.script.trim()) {
     await runCmdScript(cmd.script, ctx);
+    return;
+  }
+  if (cmd.sendTemplateId) {
+    await sendByTemplate(cmd.sendTemplateId, cmd.overrides);
     return;
   }
   if (!(cmd.template ?? "").trim()) {

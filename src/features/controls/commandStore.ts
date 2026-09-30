@@ -9,6 +9,14 @@ export interface CommandItem {
   note: string;
   script: string;
   scriptEnabled: boolean;
+  /**
+   * P121-D：这条命令**引用**一张发送谱。带着它时 `template` 不再参与发送——
+   * 存字节字面量正是今天「存为指令」把结构烤死的地方（详设 §1.4）：
+   * 参数没了、长度不回填、校验不重算。引用式意味着改谱，命令跟着变。
+   */
+  sendTemplateId?: string;
+  /** 谱里参数的本次覆盖值；没覆盖的走参数默认值 */
+  overrides?: Record<string, string>;
 }
 
 export interface CommandGroup {

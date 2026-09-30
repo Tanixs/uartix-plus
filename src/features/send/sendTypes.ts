@@ -66,6 +66,12 @@ export interface SendTemplate {
   checksum: { algo: ChecksumAlgo; coverageStart: number; coverageEnd: number } | null;
   /** 整帧按文本发（UTF-8）还是按 hex 发。今天这件事住在 `CommandItem.sendMode` 上 */
   textMode: "hex" | "utf8";
+  /**
+   * 下一帧要用的自增序号（D9）。它**属于这张谱**而不是属于某个调用方：
+   * 同一张谱可以从面板、命令库、卡片、序列器四处发，计数器若各存一份，
+   * 设备看到的 seq 就会跳号——那正是我们做这个字段要解决的问题。
+   */
+  nextSeq: number;
   groupKey?: string;
   createdAt: number;
 }

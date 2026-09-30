@@ -314,7 +314,7 @@ export function CommandLibrary() {
             >
               <span className="cmd-item-name">{n.name}</span>
               <span className="cmd-item-tpl">
-                {n.scriptEnabled && n.script ? tx("⚡脚本", "⚡ script") : n.template}
+                {n.scriptEnabled && n.script ? tx("⚡脚本", "⚡ script") : n.sendTemplateId ? tx("📐 发送谱引用", "📐 template reference") : n.template}
               </span>
               <button
                 className="cmd-edit"

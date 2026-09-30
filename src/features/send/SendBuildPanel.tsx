@@ -19,9 +19,12 @@ import { tx, useLocale } from "../../i18n/strings";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
 import { IconPlus, IconTrash } from "../../shared/icons";
-import * as serialStore from "../serial/serialStore";
+import { sendCmd } from "../controls/cmdExec";
+import * as cmdStore from "../controls/commandStore";
+import type { CommandItem } from "../controls/commandStore";
+import { guardLocked } from "../operator/lock";
 import * as sendStore from "./sendStore";
-import { encodeSend } from "./encodeSend";
+import { encodeSend, sendValues } from "./encodeSend";
 import { sendFieldWidth, type SendField, type SendTemplate } from "./sendTypes";
 
 /** 料板：每一项就是一个字段预设。顺序即界面顺序，按"结构件 → 数值 → 文本 → 计算件"排 */
@@ -75,8 +78,8 @@ export function SendBuildPanel() {
   const [selId, setSelId] = useState("");
   const [selField, setSelField] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
-  const [seq, setSeq] = useState(0);
   const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
   const [at, setAt] = useState(-1);
   const stripRef = useRef<HTMLDivElement>(null);
 
@@ -85,15 +88,22 @@ export function SendBuildPanel() {
     if (tpl && selId !== tpl.id) setSelId(tpl.id);
   }, [tpl, selId]);
 
+  // 换一张谱：上一张的报错和"已存为指令"不该还挂在下面冒充当前状态
+  useEffect(() => {
+    setErr("");
+    setMsg("");
+  }, [selId]);
+
+  // 预览用的序号 = 谱自己的计数器：这样"预览里那个 seq"就是下一次发送真会带上的那个
   const preview = useMemo(() => {
     if (!tpl) return null;
     try {
-      const r = encodeSend(tpl, { values, seq });
+      const r = encodeSend(tpl, { values, seq: tpl.nextSeq ?? 0 });
       return { ok: true as const, ...r };
     } catch (e) {
       return { ok: false as const, msg: String(e).replace(/^Error:\s*/, "") };
     }
-  }, [tpl, values, seq]);
+  }, [tpl, values]);
 
   const field = tpl?.fields.find((f) => f.id === selField) ?? null;
 
@@ -145,13 +155,57 @@ export function SendBuildPanel() {
 
   const send = async () => {
     if (!tpl || !preview?.ok) return;
+    // 与 `cmdExec.sendByTemplate` 同一套规矩：同步占号 → 用占到的号现编一帧 →
+    // 没发出去就把号退回来。发的是刚占的号，不是预览那一刻的号——中间可能又改了谱或连点了两次。
+    const seq = sendStore.reserveSeq(tpl.id);
     try {
-      await serialStore.sendData("hex", preview.hex);
-      setSeq(preview.seqAfter);
+      const r = encodeSend(tpl, { values: sendValues(tpl, values), seq });
+      await sendCmd("hex", r.hex);
       setErr("");
     } catch (e) {
+      sendStore.refundSeq(tpl.id, seq);
       setErr(String(e).replace(/^Error:\s*/, ""));
     }
+  };
+
+  /**
+   * 存为指令 = 存一条**引用**，不是存一串字节。
+   *
+   * 今天快捷栏那枚「存为指令」把当前参数值烤成 hex 字面量写进 `template`
+   * （详设 §1.4）：存完参数就没了、长度不再回填、校验不再重算，用户以为存下的是"怎么做一帧"，
+   * 实际存下的是"那一帧当时长什么样"。这里换成 `sendTemplateId`，改谱命令跟着变。
+   *
+   * 参数只把**和默认值不同**的那些记成 `overrides`：没动过的参数继续跟着谱的默认值走
+   * （改谱即改命令），现场特意填过的那个值则必须留下——否则填了 500、存完发的是 300。
+   */
+  const saveAsCommand = () => {
+    if (!tpl || !preview?.ok) return;
+    if (guardLocked()) return;
+    const gname = "发送谱"; // 分组名是要写进用户命令库的数据，不随界面语言变（同 addPresetGroup 那条理由）
+    const findGroup = () => cmdStore.getSnapshot().groups.find((x) => x.name === gname);
+    if (!findGroup()) cmdStore.addGroup(gname);
+    const g = findGroup();
+    if (!g) return;
+    cmdStore.addCommand(g.id);
+    // 重新取快照：addCommand 换的是整个 snapshot，旧 `g.items` 里没有刚建的那条
+    const item = g.items[g.items.length - 1] as CommandItem | undefined;
+    if (!item) return;
+    const overrides: Record<string, string> = {};
+    for (const p of tpl.params) {
+      const v = (values[p.id] ?? "").trim();
+      if (v && v !== (p.def ?? "").trim()) overrides[p.id] = v;
+    }
+    cmdStore.patchCommand(item.id, {
+      name: tpl.name,
+      template: "",
+      sendMode: "hex",
+      note: tpl.note || tx("由发送谱「{n}」引用：改谱即改命令", "Referenced from template “{n}”: editing the template edits this").replace("{n}", tpl.name),
+      script: "",
+      scriptEnabled: false,
+      sendTemplateId: tpl.id,
+      overrides: Object.keys(overrides).length ? overrides : undefined,
+    });
+    setMsg(tx("已存为指令（引用这张谱）", "Saved as a command — it references this template"));
   };
 
   const patchSel = (patch: Partial<SendField>) => {
@@ -489,7 +543,11 @@ export function SendBuildPanel() {
           <div className="sb-notes">
             {preview?.ok ? preview.notes.join(" · ") : ""}
             {err ? ` ${err}` : ""}
+            {msg ? ` ${msg}` : ""}
           </div>
+          <button className="btn" disabled={!preview?.ok} onClick={saveAsCommand}>
+            {tx("存为指令", "Save as command")}
+          </button>
           <button className="btn primary" disabled={!preview?.ok} onClick={() => void send()}>
             {tx("发送一次", "Send once")}
           </button>

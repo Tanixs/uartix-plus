@@ -250,6 +250,16 @@ function coverageSlice(bytes: number[], start: number, end: number): number[] {
   return bytes.slice(from, to);
 }
 
+/** 参数默认值 + 本次覆盖 = 编码器要的 values。没覆盖也不给默认值时留空，由编码器报错点名 */
+export function sendValues(tpl: SendTemplate, overrides?: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of tpl.params) {
+    const v = overrides?.[p.id];
+    out[p.id] = v !== undefined && v !== "" ? v : p.def ?? "";
+  }
+  return out;
+}
+
 export function encodeSend(tpl: SendTemplate, inp: EncodeInput = {}): EncodeResult {
   if (!tpl.fields.length) throw new SendEncodeError(`发送谱「${tpl.name}」一个字段都没有`);
   const notes: string[] = [];
