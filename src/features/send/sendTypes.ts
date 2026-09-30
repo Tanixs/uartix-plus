@@ -74,6 +74,28 @@ export interface SendTemplate {
   createdAt: number;
 }
 
+/**
+ * 落点判定（半格吸附）：指针越过某块的中线才算"插到它后面"。
+ * 空带 = 0；落在所有块右边 = `rects.length`（追加）。
+ * 抽成纯函数是因为这台机器上进不去真实输入（CDP 的鼠标事件到不了页面），
+ * 至少这条规则得有断言钉着。
+ */
+export function dropIndexAt(rects: { left: number; width: number }[], clientX: number): number {
+  for (let i = 0; i < rects.length; i++) {
+    if (clientX < rects[i].left + rects[i].width / 2) return i;
+  }
+  return rects.length;
+}
+
+/**
+ * 带内换位的目标下标。
+ * 往前挪（`from < index`）要让回一格：被拖的那块先被摘掉，后面的下标整体左移了一位；
+ * 往后挪不用让。这条写错的症状是"往右拖一格却跳两格"。
+ */
+export function moveTargetIndex(from: number, index: number): number {
+  return from < index ? index - 1 : index;
+}
+
 /** 字段宽度：定长类型查表，变长类型取 `size`（bcd 默认 2 字节，与 `fieldSize()` 同兜底） */
 export function sendFieldWidth(f: SendField): number {
   switch (f.type) {

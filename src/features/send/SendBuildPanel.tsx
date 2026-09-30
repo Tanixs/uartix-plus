@@ -27,6 +27,8 @@ import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import * as sendStore from "./sendStore";
 import { encodeSend, intRangeOf, parseHexInput } from "./encodeSend";
 import {
+  dropIndexAt,
+  moveTargetIndex,
   sendFieldWidth,
   type SendField,
   type SendParamType,
@@ -78,14 +80,12 @@ const uid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
 const hexOf = (f: SendField) =>
   f.source.kind === "const" ? f.source.bytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ") : "";
 
-/** 落点：按 x 找插到第几块之前（半格吸附：越过块中线才算后一格） */
+/** 落点：把带上的块读成矩形，判定规则本身在 `sendTypes.dropIndexAt`（那条规则要能单独测） */
 function dropIndex(el: HTMLElement, clientX: number): number {
-  const chips = Array.from(el.querySelectorAll<HTMLElement>("[data-sb-field]"));
-  for (let i = 0; i < chips.length; i++) {
-    const r = chips[i].getBoundingClientRect();
-    if (clientX < r.left + r.width / 2) return i;
-  }
-  return chips.length;
+  return dropIndexAt(
+    Array.from(el.querySelectorAll<HTMLElement>("[data-sb-field]")).map((c) => c.getBoundingClientRect()),
+    clientX,
+  );
 }
 
 export function SendBuildPanel() {
@@ -160,8 +160,7 @@ export function SendBuildPanel() {
         if (d.kind === "sendspec") insertAt(d.data, index);
         else if (d.kind === "sendfield") {
           const from = tpl.fields.findIndex((f) => f.id === d.data);
-          // 往前插要让回一格：先把被拖的那块摘掉，后面的下标都左移了
-          const to = from < index ? index - 1 : index;
+          const to = moveTargetIndex(from, index);
           sendStore.moveField(tpl.id, from, to);
         }
       },
