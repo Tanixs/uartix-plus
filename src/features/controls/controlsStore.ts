@@ -32,6 +32,17 @@ export interface BaseCard {
   y: number;
   w: number;
   h: number;
+  /**
+   * P121-D3：这张卡**引用**一张发送谱（`SendTemplate`）。带着它时 `template` 不参与发送——
+   * 卡片今天是从命令**拷**一份字节过来的（`mountCommand`），改命令不会回头改卡片；
+   * 引用式让"改谱 ⇒ 命令 / 序列器 / 卡片三处跟着变"成立（详设 §7 P121-D 的验收句）。
+   */
+  sendTemplateId?: string;
+  /**
+   * 这张卡的控制值灌进谱的哪个参数（滑条 value / 开关 state）。
+   * 必须显式存：不存就得靠"参数叫什么名字"去猜，而猜参数名是这条仓库明令禁止的。
+   */
+  paramId?: string;
 }
 
 export interface SliderCard extends BaseCard {
@@ -316,6 +327,8 @@ export function newGroupChild(kind: GroupChildKind): GroupChild {
 }
 
 function migrateCard(raw: Record<string, unknown>): ControlCard {
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" && v ? v : undefined;
   const base = {
     managed: sanitizeManaged(raw.managed),
     id: String(raw.id ?? crypto.randomUUID()),
@@ -324,6 +337,9 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
     y: Math.max(0, Math.round(Number(raw.y) || 0)),
     w: Math.max(1, Math.min(64, Math.round(Number(raw.w) || 1))),
     h: Math.max(1, Math.min(64, Math.round(Number(raw.h) || 1))),
+    // 空串一律当"没有引用"：清掉引用不该留下一根指向空 id 的线
+    sendTemplateId: str(raw.sendTemplateId),
+    paramId: str(raw.paramId),
   };
   const type = (raw.type ?? "slider") as ControlType;
   switch (type) {

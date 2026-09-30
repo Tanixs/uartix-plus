@@ -21,6 +21,8 @@ import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../share
 import { IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
 import { runCommand } from "../controls/cmdExec";
 import * as cmdStore from "../controls/commandStore";
+import * as controlsStore from "../controls/controlsStore";
+import { guardLocked } from "../operator/lock";
 import * as sendStore from "./sendStore";
 import { encodeSend } from "./encodeSend";
 import { sendFieldWidth, type SendField, type SendTemplate } from "./sendTypes";
@@ -252,6 +254,43 @@ export function SendBuildPanel() {
     } catch (e) {
       setErr(String(e).replace(/^Error:\s*/, ""));
     }
+  };
+
+  /**
+   * D11：参数的「生成控件」——在控制画布落一张滑条卡，卡的值灌进这个参数。
+   *
+   * 卡片带的是**引用**（`sendTemplateId` + `paramId`），不是此刻烤出来的字节：
+   * 改谱，这张卡跟着变（详设 §7 P121-D 的验收句）。
+   * 参数没声明 min/max 就用滑条默认的 0~100；`text` / `enum` 两档现在没有对应的
+   * 卡片类型（选择框卡还没造），所以那两行的按钮是 disabled + 一句为什么，不是点了没反应。
+   */
+  const spawnSliderCard = (paramId: string) => {
+    if (!tpl) return;
+    // 就地拦锁：`controlsStore.addCard/patchCard` 今天不拦（它们还要服务只读锁下的正常操作，
+    // 比如开关卡记自己那一档），所以这颗按钮的入口自己把关。
+    if (guardLocked()) return;
+    const p = tpl.params.find((x) => x.id === paramId);
+    const page = controlsStore.activePage();
+    if (!p || !page) {
+      setErr(tx("没有可落卡片的控制页", "No control page to place the card on"));
+      return;
+    }
+    const lo = Number.isFinite(p.min) ? (p.min as number) : 0;
+    const hi = Number.isFinite(p.max) ? (p.max as number) : 100;
+    const def = Math.min(Math.max(Number(p.def) || 0, Math.min(lo, hi)), Math.max(lo, hi));
+    const id = controlsStore.addCard(page.id, "slider");
+    controlsStore.patchCard(page.id, id, {
+      name: p.name,
+      sendTemplateId: tpl.id,
+      paramId: p.id,
+      template: "",
+      sendMode: "hex",
+      min: Math.min(lo, hi),
+      max: Math.max(lo, hi),
+      defaultValue: def,
+      step: p.type === "float" ? 0.01 : 1,
+    });
+    setMsg(tx("已在控制画布生成一张滑条卡（引用这张谱）", "Slider card created on the control canvas — it references this template"));
   };
 
   const patchSel = (patch: Partial<SendField>) => {
@@ -538,12 +577,32 @@ export function SendBuildPanel() {
                   <span>{p.name}</span>
                   {/* 这里改的是**本次预览/发送的临时值**，不是谱里的默认值：
                       默认值属于谱的内容，编辑入口在 D 期的参数表，不在这个面板的侧栏里混两份 */}
-                  <input
-                    className="input"
-                    value={values[p.id] ?? ""}
-                    placeholder={p.def || tx("默认", "default")}
-                    onChange={(e) => setValues({ ...values, [p.id]: e.target.value })}
-                  />
+                  <span className="sb-inline">
+                    <input
+                      className="input"
+                      value={values[p.id] ?? ""}
+                      placeholder={p.def || tx("默认", "default")}
+                      onChange={(e) => setValues({ ...values, [p.id]: e.target.value })}
+                    />
+                    <button
+                      className="btn"
+                      disabled={p.type === "text" || p.type === "enum"}
+                      title={
+                        p.type === "text" || p.type === "enum"
+                          ? tx(
+                              "文本 / 枚举参数还没有对应的控件类型（选择框卡在 P122）",
+                              "Text and enum parameters have no matching card type yet (the select card is in P122)",
+                            )
+                          : tx(
+                              "在控制画布生成一张滑条卡，值灌进这个参数",
+                              "Create a slider card on the control canvas that feeds this parameter",
+                            )
+                      }
+                      onClick={() => spawnSliderCard(p.id)}
+                    >
+                      {tx("生成控件", "Add control")}
+                    </button>
+                  </span>
                 </label>
               ))}
               {!tpl.params.length && <div className="sb-hint">{tx("没有参数：把某块的来源选成「参数」就有了", "No parameters — set a block’s source to Parameter")}</div>}

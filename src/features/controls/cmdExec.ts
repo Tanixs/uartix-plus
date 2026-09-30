@@ -135,6 +135,25 @@ export async function runCommand(
   await sendCmd(cmd.sendMode, variableStore.resolveVars(cmd.template));
 }
 
+/**
+ * 控制画布上那张卡 → 一次发送。卡的值灌进卡自己记着的 `paramId`（映射存在卡上，
+ * 不靠"参数叫什么名字"去猜——同名参数、改过名的参数都会让猜错变成发错字节）。
+ * 没配 `paramId` 的卡（按钮卡）就发谱的默认值。
+ */
+export async function runSpecCard(
+  card: { sendTemplateId?: string; paramId?: string },
+  value?: number,
+): Promise<void> {
+  await runCommand({
+    sendMode: "hex",
+    template: "",
+    script: "",
+    scriptEnabled: false,
+    sendTemplateId: card.sendTemplateId,
+    overrides: value !== undefined && card.paramId ? { [card.paramId]: String(value) } : undefined,
+  });
+}
+
 /** `ctx` 是卡片传进来的即时值（滑条 value、开关 state…），排在持久变量之后覆盖同名 */
 export async function runCmdScript(
   script: string,

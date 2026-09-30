@@ -15,12 +15,11 @@ import type {
   SendMode,
   SliderCard,
 } from "./controlsStore";
-import * as serialStore from "../serial/serialStore";
 import * as variableStore from "./variableStore";
 import * as commandStore from "./commandStore";
 import { isGroup } from "./commandStore";
 import { useSettings } from "../settings/settingsStore";
-import { sendCmd, runCmdScript } from "./cmdExec";
+import { runSpecCard, sendCmd, runCmdScript, type RunnableCommand } from "./cmdExec";
 import { IconLock, IconMore, IconUnlock, IconSlider, IconChevron } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
@@ -676,7 +675,16 @@ export function ControlCanvas() {
         break;
       }
       case "button":
-        await sendRaw(card.sendMode, variableStore.resolveVars(card.template));
+        if (card.sendTemplateId) {
+          try {
+            await runSpecCard(card);
+            setErr(null);
+          } catch (e) {
+            setErr(String(e));
+          }
+        } else {
+          await sendRaw(card.sendMode, variableStore.resolveVars(card.template));
+        }
         break;
       case "switch": {
         const i = Number(ctx.state ?? card.state);
@@ -758,13 +766,19 @@ export function ControlCanvas() {
 
   const doSend = async (card: SliderCard, value: number) => {
     if (card.managed !== undefined) return;
-    const text = store.formatTemplate(
-      variableStore.resolveVars(card.template),
-      value,
-      card.sendMode,
-    );
     try {
-      await serialStore.sendData(card.sendMode, text);
+      if (card.sendTemplateId) {
+        await runSpecCard(card, value);
+      } else {
+        await sendCmd(
+          card.sendMode,
+          store.formatTemplate(
+            variableStore.resolveVars(card.template),
+            value,
+            card.sendMode,
+          ),
+        );
+      }
       setErr(null);
       const st = throttleRef.current.get(card.id);
       if (st) {
@@ -896,14 +910,31 @@ export function ControlCanvas() {
 
   const mountCommand = (
     card: ControlCard,
-    cmd: {
-      template: string;
-      sendMode: SendMode;
-      script: string;
-      scriptEnabled: boolean;
-    },
+    cmd: RunnableCommand & { name?: string },
   ) => {
     const useScript = !!cmd.scriptEnabled && !!cmd.script;
+    // 引用式命令**没有字节可拷**（它的 template 是空的）。
+    // 支持引用的卡片类型把引用接过来；不支持的（开关带两档各自的模板）就地说明——
+    // 原先这里会把空 template 写进卡片，症状是"拖了一下，卡片原来那条指令没了"。
+    if (cmd.sendTemplateId && !useScript) {
+      if (card.type === "slider" || card.type === "button") {
+        store.patchCard(page.id, card.id, {
+          sendTemplateId: cmd.sendTemplateId,
+          template: "",
+          sendMode: "hex",
+          useScript: false,
+          script: "",
+        });
+      } else {
+        setErr(
+          tx(
+            `「${card.name}」挂不了引用式命令：它自己带模板，不认发送谱。要引用就拖成滑条或按钮卡`,
+            `"${card.name}" cannot mount a referenced send template: it carries its own. Use a slider or button card`,
+          ),
+        );
+      }
+      return;
+    }
     if (card.type === "switch" && !useScript) {
       const templates = [...card.templates];
       templates[card.state] = cmd.template;
@@ -983,13 +1014,7 @@ export function ControlCanvas() {
       }
     } else if (d.kind === "vs-cmd") {
       try {
-        cmd = JSON.parse(d.data) as {
-          template: string;
-          sendMode: SendMode;
-          script: string;
-          scriptEnabled: boolean;
-          name: string;
-        };
+        cmd = JSON.parse(d.data) as RunnableCommand & { name: string };
       } catch {
         return;
       }
@@ -1092,15 +1117,8 @@ export function ControlCanvas() {
         setRenamingCard(null);
       },
       onRenameCancel: () => setRenamingCard(null),
-      onDropTemplate: (
-        card: ControlCard,
-        cmd: {
-          template: string;
-          sendMode: SendMode;
-          script: string;
-          scriptEnabled: boolean;
-        },
-      ) => mountCommand(card, cmd),
+      onDropTemplate: (card: ControlCard, cmd: RunnableCommand & { name?: string }) =>
+        mountCommand(card, cmd),
       resizable: !page.locked,
       onResizeStart,
     };

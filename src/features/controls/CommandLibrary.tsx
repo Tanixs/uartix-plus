@@ -290,6 +290,9 @@ export function CommandLibrary() {
                     sendMode: n.sendMode,
                     script: n.script,
                     scriptEnabled: n.scriptEnabled,
+                    // 引用式命令拖成卡片要带走的是**引用**：不带这个字段，
+                    // 拖过去就是一张空模板卡（详设 §1.4 那个"拷死字节"的病换了个入口复发）
+                    sendTemplateId: n.sendTemplateId,
                     name: n.name,
                   }),
                   label: n.name,

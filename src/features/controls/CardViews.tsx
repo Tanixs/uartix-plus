@@ -21,6 +21,7 @@ import type {
   SwitchCard,
 } from "./controlsStore";
 import * as variableStore from "./variableStore";
+import * as sendStore from "../send/sendStore";
 import { beep } from "./scriptRunner";
 import { WidgetFrame } from "../ai/WidgetFrame";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
@@ -1474,6 +1475,9 @@ export function CardModal(props: {
   const { card } = props;
   useSyncExternalStore(variableStore.subscribe, variableStore.getSnapshot);
   const vars = variableStore.listVars();
+  // 引用式卡片要显示它引用的是哪张谱：谱改了这张卡就跟着改，所以这里得跟着订阅
+  useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
+  const spec = card.sendTemplateId ? sendStore.getTemplate(card.sendTemplateId) : undefined;
   const patch = (p: Record<string, unknown>) =>
     store.patchCard(props.pageId, card.id, p);
 
@@ -1989,7 +1993,51 @@ export function CardModal(props: {
               />
             </div>
           )}
-          {card.type === "slider" && !card.useScript && (
+          {card.sendTemplateId && (card.type === "slider" || card.type === "button") && (
+            <div className="form-col">
+              <label>{tx("发送谱", "Send template")}</label>
+              <div className="form-hint">
+                {spec
+                  ? tx(
+                      "这张卡不存字节：发的是「{n}」此刻算出来的一帧，改那张谱这张卡跟着变".replace("{n}", spec.name),
+                      "This card stores no bytes: it sends what “{n}” computes right now".replace("{n}", spec.name),
+                    )
+                  : tx(
+                      "引用的发送谱已被删除：这张卡发不出去。取消引用后自己写字节。",
+                      "The referenced send template was deleted: this card cannot send. Clear the reference and type the bytes.",
+                    )}
+              </div>
+              {spec && card.type === "slider" && (
+                <>
+                  <label>{tx("滑条的值灌进参数", "Slider value feeds")}</label>
+                  <select
+                    className="input"
+                    value={card.paramId ?? ""}
+                    onChange={(e) => patch({ paramId: e.target.value || undefined })}
+                  >
+                    <option value="">{tx("（不灌：发默认值）", "(none: defaults)")}</option>
+                    {spec.params.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                  {!card.paramId && (
+                    <div className="form-hint">
+                      {tx("没选参数：滑条拖到哪，发出去的都是同一帧。", "No parameter picked — the slider moves but the frame stays the same.")}
+                    </div>
+                  )}
+                </>
+              )}
+              <button
+                className="btn"
+                onClick={() => patch({ sendTemplateId: undefined, paramId: undefined })}
+              >
+                {tx("不用这张谱（自己写字节）", "Drop the reference: type the bytes")}
+              </button>
+            </div>
+          )}
+          {card.type === "slider" && !card.useScript && !card.sendTemplateId && (
             <div className="form-col">
               <label>{tx("指令模板（%f %.2f %d，支持 {变量}）", "Template (%f %.2f %d, {var} supported)")}</label>
               <textarea
@@ -2000,7 +2048,7 @@ export function CardModal(props: {
               />
             </div>
           )}
-          {card.type === "button" && !card.useScript && (
+          {card.type === "button" && !card.useScript && !card.sendTemplateId && (
             <div className="form-col">
               <label>{tx("指令模板（%f %.2f %d，支持 {变量}）", "Template (%f %.2f %d, {var} supported)")}</label>
               <textarea

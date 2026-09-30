@@ -314,4 +314,31 @@ describe("P121-D · 引擎侧的解析/发送两段式", () => {
     await cmdExec.runCommand(cmdStore.getCommand(cmdId)!);
     expect(mocks.sendData.mock.calls[0][1], "断开后就该定格在那一帧").toBe("A5 01 2C");
   });
+
+  it("⑱ 卡片引用：卡的值灌进卡自己记着的 paramId，改谱卡片跟着变", async () => {
+    const id = sendStore.addTemplate("设速度");
+    sendStore.addField(id, { id: "h", name: "HDR", type: "uint8", endian: "big", role: "header", source: { kind: "const", bytes: [0xa5] } });
+    sendStore.addField(id, { id: "v", name: "SPD", type: "uint16", endian: "big", role: "data", source: { kind: "param", paramId: "p1" } });
+    sendStore.addParam(id, { id: "p1", name: "速度", type: "int", def: "300" });
+
+    const slider = { sendTemplateId: id, paramId: "p1" };
+    await cmdExec.runSpecCard(slider, 500);
+    expect(mocks.sendData.mock.calls[0][1], "滑条的值就是这一帧的那个参数").toBe("A5 01 F4");
+
+    await cmdExec.runSpecCard({ sendTemplateId: id });
+    expect(mocks.sendData.mock.calls[1][1], "按钮卡没配参数 ⇒ 发谱的默认值").toBe("A5 01 2C");
+
+    sendStore.patchField(id, "h", { name: "HDR", type: "uint8", endian: "big", role: "header", source: { kind: "const", bytes: [0xbb] } });
+    await cmdExec.runSpecCard(slider, 7);
+    expect(mocks.sendData.mock.calls[2][1], "改谱不重新生成卡片，卡片发的字节跟着变").toBe("BB 00 07");
+  });
+
+  it("⑲ 卡片引用的号也走同一个计数器", async () => {
+    const id = buildSeqTemplate();
+    const card = { sendTemplateId: id, paramId: "" };
+    await cmdExec.runSpecCard(card);
+    await cmdExec.runSpecCard(card);
+    expect(sendStore.getTemplate(id)!.nextSeq).toBe(2);
+    expect(mocks.sendData.mock.calls.map((c) => c[1])).toEqual(["AA 00 01 AB", "AA 01 01 AC"]);
+  });
 });
