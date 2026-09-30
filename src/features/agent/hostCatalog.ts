@@ -212,7 +212,7 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
     path: "commands",
     group: "commands",
     zh: "指令库清单",
-    gives: "每项 {id,name,group,sendMode,scriptEnabled,template}；payload 明细请读 commands/<id>",
+    gives: "每项 {id,name,group,sendMode,scriptEnabled,template,sendTemplateId}；带 sendTemplateId 的那条 template 是空的、发送内容由那张发送谱算，明细请读 commands/<id>",
     listKey: "items",
     defaultLimit: DEFAULT_LIST_LIMIT,
     maxBytes: 8192,
@@ -222,7 +222,19 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
       const walk = (nodes: CommandNode[], trail: string) => {
         for (const n of nodes) {
           if ("items" in n) walk(n.items, trail ? `${trail}/${n.name}` : n.name);
-          else items.push({ id: n.id, name: n.name, group: trail, sendMode: n.sendMode, scriptEnabled: n.scriptEnabled, template: n.template });
+          else items.push({
+            id: n.id,
+            name: n.name,
+            group: trail,
+            sendMode: n.sendMode,
+            scriptEnabled: n.scriptEnabled,
+            template: n.template,
+            // 引用式命令的 template 天生是空的。不把引用带出来，模型看到的就是"一条空指令"，
+            // 下一句很可能是"这条命令没内容，是不是坏了"。这里只带 id：
+            // 谱名要 `../send/sendStore`，那是给 Agent 新开一个可读源（白名单那条钉），
+            // 没点头之前不开。
+            sendTemplateId: n.sendTemplateId,
+          });
         }
       };
       walk(getSnapshot().groups, "");
@@ -233,7 +245,7 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
     path: "commands/<id>",
     group: "commands",
     zh: "单条指令完整定义",
-    gives: "{id,name,template,sendMode,note,script,scriptEnabled}（template 就是发送内容）",
+    gives: "{id,name,template,sendMode,note,script,scriptEnabled}（template 就是发送内容；带 sendTemplateId 的那条改由发送谱算字节，overrides 是参数覆盖）",
     byId: true,
     maxBytes: 8192,
     async read({ id }) {

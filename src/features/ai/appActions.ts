@@ -238,11 +238,21 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
       }));
     }
     case "listCommands": {
-      const out: { name: string; template?: string; group: string }[] = [];
+      const { getTemplate } = await import("../send/sendStore");
+      const out: { name: string; template?: string; group: string; sendSpec?: string }[] = [];
       const walk = (nodes: commandStore.CommandNode[], group: string) => {
         for (const n of nodes) {
           if (isGroup(n)) walk(n.items, n.name);
-          else out.push({ name: n.name, template: n.template, group });
+          // 引用式命令的 template 是空的：不说它来自哪张谱，模型只会把"空指令"当成坏了
+          else
+            out.push({
+              name: n.name,
+              template: n.template,
+              group,
+              sendSpec: n.sendTemplateId
+                ? getTemplate(n.sendTemplateId)?.name ?? "（谱已删）"
+                : undefined,
+            });
         }
       };
       walk(commandStore.getSnapshot().groups, "");
