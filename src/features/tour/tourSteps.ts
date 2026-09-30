@@ -99,6 +99,18 @@ const CONTENT: RawStep[] = [
     settleMs: 800,
   },
   {
+    id: "sendbuild",
+    title: { zh: "TX组帧台：拖块组一帧要发的", en: "TX Frame Builder" },
+    body: {
+      zh: "发侧与收侧对称：从料板把帧头/数值/长度域/校验段摆上字节带，每块的值取固定字节、参数或自增序号；参数有默认值，那就是发出去的值。底部预览就是上线的字节，「存为指令」存的是一条引用——改这张谱，命令、序列器里那一步、控制画布上生成的卡片一起变。",
+      en: "The send-side twin of the frame canvas: drag header, numbers, a length field and a checksum onto the byte strip; each block is fed by a constant, a parameter or an auto counter, and a parameter's default is exactly what goes out. The preview is the bytes that hit the wire, and Save as command stores a reference — edit the template and the command, the sequencer step and the generated card all follow.",
+    },
+    selector: '[data-panel="sendbuild"]',
+    frame: true,
+    do: openPanel("sendbuild"),
+    settleMs: 800,
+  },
+  {
     id: "controls",
     title: { zh: "控制画布：反向发指令", en: "Control canvas" },
     body: {
