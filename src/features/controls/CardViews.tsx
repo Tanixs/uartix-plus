@@ -22,6 +22,7 @@ import type {
 } from "./controlsStore";
 import * as variableStore from "./variableStore";
 import * as sendStore from "../send/sendStore";
+import { bindingDetail, bindingLabel } from "./cardBinding";
 import { beep } from "./scriptRunner";
 import { WidgetFrame } from "../ai/WidgetFrame";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
@@ -184,6 +185,11 @@ export function SliderCardView(props: {
   onResizeStart?: (e: React.MouseEvent, card: ControlCard) => void;
 }) {
   const { card } = props;
+  // 引用式的卡要看得见自己绑的是哪张谱、哪个参数；谱改名或参数被删都得当场看出来
+  useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
+  const boundSpec = card.sendTemplateId ? sendStore.getTemplate(card.sendTemplateId) : null;
+  const binding = bindingLabel(card, boundSpec);
+  const bindingTip = bindingDetail(card, boundSpec);
   const sliderRef = useRef<HTMLInputElement>(null);
   const spanRef = useRef<HTMLDivElement>(null);
   const stepRef = useRef<HTMLInputElement>(null);
@@ -266,6 +272,18 @@ export function SliderCardView(props: {
         <span className="ctl-name" title={tx("右键更多操作", "Right-click for more")}>
           {card.name}
           {card.useScript ? " ⚡" : ""}
+          {binding && (
+            <span
+              className="ctl-unit"
+              title={bindingTip || tx(
+                "这张滑条的值灌进所绑发送谱的这个参数；改谱即改这张卡的行为",
+                "This slider feeds that parameter of the bound template; editing the template changes what the card does",
+              )}
+            >
+              {" "}
+              {binding}
+            </span>
+          )}
         </span>
         <div className="ctl-stepgrp" onMouseDown={(e) => e.stopPropagation()}>
           <input
