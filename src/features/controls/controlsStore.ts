@@ -656,6 +656,8 @@ export function createDebugPage(name: string, parameters: DebugParameter[]): str
 }
 
 export function addPage() {
+  // 与 `removePage` 对称：那条早就拦了，这条漏着
+  if (guardLocked()) return;
   const page: ControlPage = {
     id: crypto.randomUUID(),
     name: `控制页 ${snapshot.pages.length + 1}`,
@@ -964,6 +966,8 @@ function defaultCard(type: ControlType, name: string): ControlCard {
 }
 
 export function addCard(pageId: string, type: ControlType = "slider"): string {
+  // 加一张卡就是加一条能上线的字节：只读包里不放行（返回空串，调用方据此不往下写）
+  if (guardLocked()) return "";
   const page = snapshot.pages.find((p) => p.id === pageId);
   const card = defaultCard(type, `${type}_${(page?.cards.length ?? 0) + 1}`);
   if (page) {
@@ -1008,11 +1012,27 @@ export function findFlowPos(
   return { x: 0, y: rows };
 }
 
+/**
+ * 只读锁下仍然允许写的字段：**卡片自己的运行态**。
+ *
+ * `state` 是开关卡当前拨到哪一档——操作员在只读包里翻开关是他的本职，
+ * 与 `sendStore.reserveSeq` 同一个判断（锁拦"改配置"，不拦"用"）。
+ * 整函数一把加锁的症状很具体：只读发行包里的开关卡点不动。
+ *
+ * `defaultValue` 故意**不在**这张名单里：它是"下次开机滑条停在哪"的配置；
+ * 操作员拖动滑条的即时值住在 ControlCanvas 的 valuesRef 里，不经过 store，
+ * 所以拦掉它不影响发送，只影响"记住上次位置"——那本来就该是编辑态的事。
+ */
+const RUNTIME_CARD_KEYS = new Set(["state"]);
+
 export function patchCard(
   pageId: string,
   cardId: string,
   patch: Record<string, unknown>,
 ) {
+  // P121-F：按字段拆。混进任何一个配置字段就整份拒绝（不做"半生效"——
+  // 一半生效的写入比整份失败更难解释，也没法撤销）。
+  if (guardLocked() && Object.keys(patch).some((k) => !RUNTIME_CARD_KEYS.has(k))) return;
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) =>
@@ -1049,6 +1069,7 @@ export function patchCard(
 }
 
 export function removeCard(pageId: string, cardId: string) {
+  if (guardLocked()) return;
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) =>

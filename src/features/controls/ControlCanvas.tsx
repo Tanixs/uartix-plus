@@ -603,6 +603,17 @@ export function ControlCanvas() {
   const getVal = (c: SliderCard): number =>
     valuesRef.current.get(c.id) ?? c.defaultValue;
 
+  /**
+   * 加卡唯一入口。只读锁下 `store.addCard` 返回空串（P121-F），那就把这句话到界面上，
+   * 别让人以为按钮点动了却什么都没发生。
+   */
+  const addCardOrSay = (type: ControlType) => {
+    const id = store.addCard(page.id, type);
+    if (!id)
+      setErr(tx("Operator 只读：不能往控制画布加卡片", "Operator read-only: cards cannot be added to this canvas"));
+    return id;
+  };
+
   /* P104-R3：发送与脚本执行的实现搬进 `cmdExec`——命令库现在住在左侧导轨，
      和这里的卡片是两个调用方，同一份发送逻辑不该再有两份。
      错误面仍留在本地：画布报的错不该往导轨那边喊。 */
@@ -990,7 +1001,8 @@ export function ControlCanvas() {
           );
           return;
         }
-        const id = store.addCard(page.id, "monitor");
+        const id = addCardOrSay("monitor");
+        if (!id) return;
         store.patchCard(page.id, id, { varName: vd.name, name: vd.name });
         placeAt(id, d.x, d.y);
       } catch {
@@ -1021,7 +1033,8 @@ export function ControlCanvas() {
     } else {
       return;
     }
-    const id = store.addCard(page.id, type);
+    const id = addCardOrSay(type);
+    if (!id) return;
     if (cmd) {
       const card = store.activePage()?.cards.find((c) => c.id === id);
       if (card) mountCommand(card, cmd);
@@ -1236,7 +1249,7 @@ export function ControlCanvas() {
         <div className="ctl-tabs-spacer" />
         <button
           className="btn icon-btn"
-          onClick={() => store.addCard(page.id, "slider")}
+          onClick={() => addCardOrSay("slider")}
           title={tx("添加滑条卡片", "Add slider card")}
         >
           <IconSlider />
@@ -1404,7 +1417,7 @@ export function ControlCanvas() {
                 {
                   label: tx("＋ 滑条", "＋ Slider"),
                   primary: true,
-                  onClick: () => store.addCard(page.id, "slider"),
+                  onClick: () => addCardOrSay("slider"),
                 },
               ]}
             />
