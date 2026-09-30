@@ -7,7 +7,7 @@
  * 以及"缺值必须报错、不许静默发原文"这一族。
  */
 import { describe, expect, it } from "vitest";
-import { SendEncodeError, encodeSend } from "./encodeSend";
+import { SendEncodeError, encodeSend, parseHexInput } from "./encodeSend";
 import type { SendField, SendSource, SendTemplate } from "./sendTypes";
 
 function field(over: Partial<SendField> & { name: string }): SendField {
@@ -260,5 +260,26 @@ describe("encodeSend · 缺值与越界必须报错", () => {
     expect(encodeSend(t3, { values: { M: "停止" } }).hex).toBe("00");
     expect(encodeSend(t3, { values: { M: "01" } }).hex).toBe("01");
     expect(() => encodeSend(t3, { values: { M: "暂停" } })).toThrow(/不在参数「M」的档位里/);
+  });
+});
+
+/**
+ * 「字节 (hex)」输入框的解析（P121-D4）。
+ *
+ * 钉的是浏览器里量出来的那个坑：旧实现把 `1234`（忘了空格）parseInt 成 4660，
+ * 再被 `0..255` 的 filter 静默丢掉 ⇒ 那一块**变成 0 字节**，预览少了两格而界面一声不吭。
+ */
+describe("parseHexInput · 不许悄悄吞字节", () => {
+  it("空格分开的、连着写的、逗号分开的都算得出来", () => {
+    expect(parseHexInput("12 34")).toEqual({ bytes: [0x12, 0x34], bad: [] });
+    expect(parseHexInput("1234")).toEqual({ bytes: [0x12, 0x34], bad: [] });
+    expect(parseHexInput("aa,55 ff")).toEqual({ bytes: [0xaa, 0x55, 0xff], bad: [] });
+    expect(parseHexInput("   ")).toEqual({ bytes: [], bad: [] });
+  });
+
+  it("组不成对 / 不是 hex 的 token 进 bad，由界面点名", () => {
+    expect(parseHexInput("123")).toEqual({ bytes: [], bad: ["123"] });
+    expect(parseHexInput("12 zz")).toEqual({ bytes: [0x12], bad: ["zz"] });
+    expect(parseHexInput("0x12")).toEqual({ bytes: [], bad: ["0x12"] });
   });
 });

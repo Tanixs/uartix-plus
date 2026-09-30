@@ -41,6 +41,9 @@ export class SendEncodeError extends Error {
   }
 }
 
+/** 整数类型的取值范围（`float*` / `ascii` / `bcd` / `bits` 不在表里，返回 undefined） */
+export const intRangeOf = (t: FieldType): [number, number] | undefined => INT_RANGE[t];
+
 const INT_RANGE: Partial<Record<FieldType, [number, number]>> = {
   uint8: [0, 0xff],
   int8: [-128, 127],
@@ -248,6 +251,27 @@ function coverageSlice(bytes: number[], start: number, end: number): number[] {
   const to = end < 0 ? bytes.length + end : Math.min(bytes.length, end + 1);
   if (to <= from) throw new SendEncodeError(`校验覆盖范围是空的（start=${start}、end=${end}、帧长=${bytes.length}）`);
   return bytes.slice(from, to);
+}
+
+/**
+ * 「字节 (hex)」输入框的解析。
+ *
+ * 旧实现是 `split(空格).map(parseInt(h,16)).filter(0..255)` —— 于是打 `1234`（忘了空格）
+ * 得到 4660，被 filter 静默丢掉，那一块**变成 0 字节**而界面一声不吭。
+ * 这里改成：连续 hex 按两两分组（`1234` = `12 34`），组不成对或超字节的 token 一律进 `bad`
+ * 由界面点名，绝不悄悄改数据。
+ */
+export function parseHexInput(text: string): { bytes: number[]; bad: string[] } {
+  const bytes: number[] = [];
+  const bad: string[] = [];
+  for (const raw of text.replace(/,/g, " ").split(/\s+/).filter(Boolean)) {
+    if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length % 2 !== 0) {
+      bad.push(raw);
+      continue;
+    }
+    for (let i = 0; i < raw.length; i += 2) bytes.push(Number.parseInt(raw.slice(i, i + 2), 16));
+  }
+  return { bytes, bad };
 }
 
 /** 参数默认值 + 本次覆盖 = 编码器要的 values。没覆盖也不给默认值时留空，由编码器报错点名 */

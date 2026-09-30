@@ -23,9 +23,25 @@ import { runCommand } from "../controls/cmdExec";
 import * as cmdStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
 import { guardLocked } from "../operator/lock";
+import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import * as sendStore from "./sendStore";
-import { encodeSend } from "./encodeSend";
-import { sendFieldWidth, type SendField, type SendTemplate } from "./sendTypes";
+import { encodeSend, intRangeOf, parseHexInput } from "./encodeSend";
+import {
+  sendFieldWidth,
+  type SendField,
+  type SendParamType,
+  type SendTemplate,
+} from "./sendTypes";
+
+/**
+ * 参数类型表。`enum` 故意不在选项里：它的档位表还没有编辑入口，
+ * 给一个"选了却没法填"的选项就是假开关；但**已有** enum 参数的谱（导进来的）照样显示原值。
+ */
+const PARAM_TYPES: SendParamType[] = ["int", "uint", "float", "text"];
+
+/** 字段类型 → 参数类型：u16 块不该自动长出一个带符号的 int 参数 */
+const paramTypeOf = (t: FieldType): SendParamType =>
+  t === "float32" || t === "float64" ? "float" : t.startsWith("u") ? "uint" : "int";
 
 /** 料板：每一项就是一个字段预设。顺序即界面顺序，按"结构件 → 数值 → 文本 → 计算件"排 */
 const PALETTE: { key: string; label: () => string; make: () => Omit<SendField, "id"> }[] = [
@@ -77,7 +93,6 @@ export function SendBuildPanel() {
   const tpls = useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
   const [selId, setSelId] = useState("");
   const [selField, setSelField] = useState("");
-  const [values, setValues] = useState<Record<string, string>>({});
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
   const [at, setAt] = useState(-1);
@@ -98,12 +113,12 @@ export function SendBuildPanel() {
   const preview = useMemo(() => {
     if (!tpl) return null;
     try {
-      const r = encodeSend(tpl, { values, seq: tpl.nextSeq ?? 0 });
+      const r = encodeSend(tpl, { seq: tpl.nextSeq ?? 0 });
       return { ok: true as const, ...r };
     } catch (e) {
       return { ok: false as const, msg: String(e).replace(/^Error:\s*/, "") };
     }
-  }, [tpl, values]);
+  }, [tpl]);
 
   const field = tpl?.fields.find((f) => f.id === selField) ?? null;
 
@@ -118,7 +133,7 @@ export function SendBuildPanel() {
         const pid = uid("sp");
         made.name = made.name || pid;
         made.source = { kind: "param", paramId: pid };
-        sendStore.addParam(tpl.id, { id: pid, name: made.name, type: "int", def: "0" });
+        sendStore.addParam(tpl.id, { id: pid, name: made.name, type: paramTypeOf(made.type), def: "0" });
       }
       // 校验段一落地就把算法定下来：留着 null 让用户先摆块再回头找下拉，
       // 换来的是预览报"字段标成校验但没选算法"——一个只有作者看得懂的中间态
@@ -155,8 +170,8 @@ export function SendBuildPanel() {
 
   /**
    * 面板这枚「发送一次」走的就是命令库、快捷栏、卡片那同一条 `runCommand`：
-   * 占号 / 编码 / 失败退号的判据因此只有一份。面板上填的参数值当作 `overrides` 传进去，
-   * 与谱的默认值在 `sendValues` 里合流。
+   * 占号 / 编码 / 失败退号的判据因此只有一份。参数值不在这层另存一份——
+   * 面板上编辑的就是谱里的默认值，要临时改一版归命令与卡片的覆盖管。
    */
   const send = async () => {
     if (!tpl || !preview?.ok) return;
@@ -167,7 +182,6 @@ export function SendBuildPanel() {
         script: "",
         scriptEnabled: false,
         sendTemplateId: tpl.id,
-        overrides: values,
       });
       setErr("");
     } catch (e) {
@@ -182,16 +196,11 @@ export function SendBuildPanel() {
    * （详设 §1.4）：存完参数就没了、长度不再回填、校验不再重算，用户以为存下的是"怎么做一帧"，
    * 实际存下的是"那一帧当时长什么样"。这里交给 `addReferenceCommand`，改谱命令跟着变。
    *
-   * 参数只把**和默认值不同**的那些记成 `overrides`：没动过的继续跟着谱的默认值走，
-   * 现场特意填过的那个值则必须留下——否则填了 500、存完发的是 300。
+   * 不带 `overrides`：面板上编辑的就是谱的默认值，那份值属于谱、不属于这条命令。
+   * "这条指令要发另一个值"是命令自己的事（参数条覆盖），别在这里长出第二份真值。
    */
   const saveAsCommand = () => {
     if (!tpl || !preview?.ok) return;
-    const overrides: Record<string, string> = {};
-    for (const p of tpl.params) {
-      const v = (values[p.id] ?? "").trim();
-      if (v && v !== (p.def ?? "").trim()) overrides[p.id] = v;
-    }
     const id = cmdStore.addReferenceCommand({
       templateId: tpl.id,
       name: tpl.name,
@@ -201,7 +210,6 @@ export function SendBuildPanel() {
           "由发送谱「{n}」引用：改谱即改命令",
           "Referenced from template “{n}”: editing the template edits this",
         ).replace("{n}", tpl.name),
-      overrides,
     });
     if (id) setMsg(tx("已存为指令（引用这张谱）", "Saved as a command — it references this template"));
   };
@@ -275,8 +283,18 @@ export function SendBuildPanel() {
       setErr(tx("没有可落卡片的控制页", "No control page to place the card on"));
       return;
     }
-    const lo = Number.isFinite(p.min) ? (p.min as number) : 0;
-    const hi = Number.isFinite(p.max) ? (p.max as number) : 100;
+    // 范围：参数自己声明的优先；没声明就按**吃这个参数的那块能装下什么**推。
+    // 写死 0~100 的后果是实测过的：u16 参数的默认值 1234，生成出来的滑条上限 100、
+    // 开机值被夹成 100 —— 卡发出去的不是谱里那个值。
+    const users = tpl.fields.filter((f) => f.source.kind === "param" && f.source.paramId === p.id);
+    const widest = users.reduce<[number, number] | null>((acc, f) => {
+      const r = intRangeOf(f.type);
+      if (!r) return acc;
+      return !acc || r[1] > acc[1] ? r : acc;
+    }, null);
+    const declared = Number.isFinite(p.min) || Number.isFinite(p.max);
+    const lo = declared ? (p.min ?? widest?.[0] ?? 0) : (widest?.[0] ?? 0);
+    const hi = declared ? (p.max ?? widest?.[1] ?? 100) : (widest?.[1] ?? 100);
     const def = Math.min(Math.max(Number(p.def) || 0, Math.min(lo, hi)), Math.max(lo, hi));
     const id = controlsStore.addCard(page.id, "slider");
     controlsStore.patchCard(page.id, id, {
@@ -502,7 +520,7 @@ export function SendBuildPanel() {
                       const k = e.target.value;
                       if (k === "param") {
                         const pid = uid("sp");
-                        sendStore.addParam(tpl.id, { id: pid, name: field.name, type: "int", def: "0" });
+                        sendStore.addParam(tpl.id, { id: pid, name: field.name, type: paramTypeOf(field.type), def: "0" });
                         patchSel({ source: { kind: "param", paramId: pid } });
                       } else if (k === "const") patchSel({ source: { kind: "const", bytes: [0] } });
                       else if (k === "var") patchSel({ source: { kind: "var", name: "" } });
@@ -520,21 +538,23 @@ export function SendBuildPanel() {
                 {field.source.kind === "const" && (
                   <label className="sb-row">
                     <span>{tx("字节 (hex)", "Bytes (hex)")}</span>
-                    <input
-                      className="input"
+                    <TextInput
                       value={hexOf(field)}
                       placeholder="AA 55"
-                      onChange={(e) =>
-                        patchSel({
-                          source: {
-                            kind: "const",
-                            bytes: e.target.value
-                              .split(/[\s,]+/)
-                              .filter(Boolean)
-                              .map((h) => Number.parseInt(h, 16))
-                              .filter((n) => Number.isInteger(n) && n >= 0 && n <= 255),
-                        },
-                      })}
+                      onCommit={(v) => {
+                        const { bytes, bad } = parseHexInput(v);
+                        if (bad.length) {
+                          setErr(
+                            tx(
+                              `「${bad.join(" ")}」不是成对的十六进制（写 12 34，或连着写 1234）`,
+                              `"${bad.join(" ")}" is not whole hex pairs — write 12 34, or contiguous 1234`,
+                            ),
+                          );
+                          return;
+                        }
+                        patchSel({ source: { kind: "const", bytes } });
+                        setErr("");
+                      }}
                     />
                   </label>
                 )}
@@ -573,16 +593,12 @@ export function SendBuildPanel() {
             <div className="sb-params">
               <div className="sb-sec">{tx("参数", "Parameters")}</div>
               {tpl.params.map((p) => (
-                <label key={p.id} className="sb-row">
-                  <span>{p.name}</span>
-                  {/* 这里改的是**本次预览/发送的临时值**，不是谱里的默认值：
-                      默认值属于谱的内容，编辑入口在 D 期的参数表，不在这个面板的侧栏里混两份 */}
-                  <span className="sb-inline">
-                    <input
-                      className="input"
-                      value={values[p.id] ?? ""}
-                      placeholder={p.def || tx("默认", "default")}
-                      onChange={(e) => setValues({ ...values, [p.id]: e.target.value })}
+                <div key={p.id} className="sb-param">
+                  <div className="sb-row">
+                    <span>{tx("名字", "Name")}</span>
+                    <TextInput
+                      value={p.name}
+                      onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { name: v })}
                     />
                     <button
                       className="btn"
@@ -602,10 +618,65 @@ export function SendBuildPanel() {
                     >
                       {tx("生成控件", "Add control")}
                     </button>
-                  </span>
-                </label>
+                  </div>
+                  <div className="sb-row">
+                    <span>{tx("类型", "Type")}</span>
+                    <select
+                      className="input"
+                      value={p.type}
+                      onChange={(e) =>
+                        sendStore.patchParam(tpl.id, p.id, { type: e.target.value as SendParamType })
+                      }
+                    >
+                      {(p.type === "enum" ? [...PARAM_TYPES, "enum" as SendParamType] : PARAM_TYPES).map(
+                        (t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </div>
+                  <div className="sb-row">
+                    <span>{tx("默认值", "Default")}</span>
+                    <TextInput
+                      value={p.def}
+                      placeholder="0"
+                      onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { def: v })}
+                    />
+                  </div>
+                  {p.type !== "text" && p.type !== "enum" && (
+                    <div className="sb-row">
+                      <span>{tx("范围", "Range")}</span>
+                      <NumInput
+                        value={p.min ?? 0}
+                        width={62}
+                        title={tx("最小值：生成滑条卡时当滑条下限", "Minimum — the lower bound of a generated slider")}
+                        onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { min: v })}
+                      />
+                      <NumInput
+                        value={p.max ?? 100}
+                        width={62}
+                        title={tx("最大值：生成滑条卡时当滑条上限", "Maximum — the upper bound of a generated slider")}
+                        onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { max: v })}
+                      />
+                    </div>
+                  )}
+                  {p.type === "enum" && (
+                    <div className="sb-hint">
+                      {tx("档位表还不能在这里编辑：导进来的谱原样保留，改不了", "The option table isn't editable here yet — imported specs keep theirs untouched")}
+                    </div>
+                  )}
+                </div>
               ))}
-              {!tpl.params.length && <div className="sb-hint">{tx("没有参数：把某块的来源选成「参数」就有了", "No parameters — set a block’s source to Parameter")}</div>}
+              {!tpl.params.length && (
+                <div className="sb-hint">
+                  {tx("没有参数：把某块的来源选成「参数」就有了", "No parameters — set a block’s source to Parameter")}
+                </div>
+              )}
+              <div className="sb-hint">
+                {tx("默认值就是发出去的那一帧里的值；要临时改一版，在命令或卡片上覆盖它。", "The default is what goes out; override it per command or card for a one-off value.")}
+              </div>
             </div>
 
             <div className="sb-params">

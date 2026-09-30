@@ -11556,6 +11556,9 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-row{display:flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--text-dim);}
 .sb-row>span:first-child{flex:none;width:74px;}
 .sb-row>.input{flex:1;min-width:0;}
+/* 一个参数的编辑器：名字 / 类型 / 默认值 / 范围 各一行（P121-D4）。
+   不加 border——G 门那条边框基线只降不升，块与块之间靠 .sb-params 的 gap 分。 */
+.sb-param{display:flex;flex-direction:column;gap:4px;}
 .sb-inline{display:flex;flex:1;gap:4px;min-width:0;}
 .sb-inline>.input{flex:1;min-width:0;}
 .sb-sec{font-size:var(--fs-sm);color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;}
