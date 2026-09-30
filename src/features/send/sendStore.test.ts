@@ -140,4 +140,27 @@ describe("sendStore", () => {
     expect(store.getTemplate(id)!.fields[0].name).toBe("A");
     expect(store.getTemplate(copy)!.fields[0].name).toBe("改了");
   });
+
+  it("文件信封往返：导出再导入回得来，计数器不跟着分享", () => {
+    const id = store.addTemplate("要分享的谱");
+    store.addField(id, field({ id: "a", name: "A" }));
+    store.setSeq(id, 9);
+    const text = store.packSpecFile(store.exportTemplates());
+    expect(JSON.parse(text).kind).toBe("uartix-sendspecs");
+    expect(JSON.parse(text).data[0].nextSeq, "发出去的号是这台机器的状态，不该跟着文件走").toBe(0);
+
+    store.clearAll();
+    expect(store.importTemplates(store.unpackSpecFile(text)!)).toBe(1);
+    const back = store.getTemplate(store.getSnapshot()[0].id)!;
+    expect(back.name).toBe("要分享的谱");
+    expect(back.fields.map((f) => f.id)).toEqual(["a"]);
+    expect(back.nextSeq).toBe(0);
+  });
+
+  it("认不出来的文件整份拒收，而不是能解析几条算几条", () => {
+    expect(store.unpackSpecFile(JSON.stringify({ kind: "uartix-controls", data: [] }))).toBeNull();
+    expect(store.unpackSpecFile(JSON.stringify([1, 2]))).toBeNull();
+    expect(store.unpackSpecFile("{ not json")).toBeNull();
+    expect(store.unpackSpecFile(JSON.stringify({ kind: "uartix-sendspecs", data: null }))).toBeNull();
+  });
 });

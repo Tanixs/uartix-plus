@@ -18,7 +18,7 @@ import type { ChecksumAlgo, Endian, FieldRole, FieldType } from "../../ipc/types
 import { tx, useLocale } from "../../i18n/strings";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
-import { IconPlus, IconTrash } from "../../shared/icons";
+import { IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
 import { runCommand } from "../controls/cmdExec";
 import * as cmdStore from "../controls/commandStore";
 import * as sendStore from "./sendStore";
@@ -204,6 +204,56 @@ export function SendBuildPanel() {
     if (id) setMsg(tx("已存为指令（引用这张谱）", "Saved as a command — it references this template"));
   };
 
+  /**
+   * 导出 / 导入 = 一张谱的**文件**往返。
+   *
+   * 为什么走 Tauri 的另存为而不是 `<a download>`：与控制画布 / 参数集 / 编排器那几处
+   * 同一族（`save_text_file` / `read_text_file`），文件对话框能记住目录，
+   * 而"发谱"是要拿去给同事、拿去配另一台机器的东西。
+   */
+  const doExport = async () => {
+    if (!tpl) return;
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { invoke } = await import("@tauri-apps/api/core");
+      const path = await save({
+        title: tx("导出发送谱", "Export send template"),
+        defaultPath: `uartix-sendspec-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`,
+        filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
+      await invoke("save_text_file", { path, content: sendStore.packSpecFile([tpl]) });
+      setMsg(tx("已导出到文件", "Exported to file"));
+    } catch (e) {
+      setErr(String(e).replace(/^Error:\s*/, ""));
+    }
+  };
+
+  const doImport = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const { invoke } = await import("@tauri-apps/api/core");
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
+      });
+      if (typeof path !== "string") return;
+      const list = sendStore.unpackSpecFile(await invoke<string>("read_text_file", { path }));
+      if (!list) {
+        setErr(tx("不是发送谱文件（kind 不匹配）", "Not a send-template file (kind does not match)"));
+        return;
+      }
+      const n = sendStore.importTemplates(list);
+      setMsg(
+        n
+          ? tx(`已导入 ${n} 张谱`, `Imported ${n} templates`)
+          : tx("文件里没有可导入的谱", "Nothing importable in that file"),
+      );
+    } catch (e) {
+      setErr(String(e).replace(/^Error:\s*/, ""));
+    }
+  };
+
   const patchSel = (patch: Partial<SendField>) => {
     if (tpl && field) sendStore.patchField(tpl.id, field.id, patch);
   };
@@ -220,6 +270,21 @@ export function SendBuildPanel() {
           }}
         >
           <IconPlus />
+        </button>
+        <button
+          className="btn icon-btn"
+          title={tx("从文件导入发送谱", "Import send templates from a file")}
+          onClick={() => void doImport()}
+        >
+          <IconUpload />
+        </button>
+        <button
+          className="btn icon-btn"
+          title={tx("导出这份发送谱到文件", "Export this template to a file")}
+          disabled={!tpl}
+          onClick={() => void doExport()}
+        >
+          <IconDownload />
         </button>
         <button className="btn" onClick={() => sendStore.undo()} disabled={!sendStore.canUndo()}>
           {tx("撤销", "Undo")}

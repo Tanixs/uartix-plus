@@ -261,6 +261,33 @@ export function exportTemplates(): SendTemplate[] {
   return structuredClone(templates);
 }
 
+/** 文件信封的 kind：与 `uartix-controls` 同一族，导入时靠它认文件是不是我们要的那种 */
+const FILE_KIND = "uartix-sendspecs";
+
+/** 打包成文件内容。计数器（`nextSeq`）是运行期状态，不跟着谱分享——导出去、导入回 0 */
+export function packSpecFile(list: SendTemplate[]): string {
+  return JSON.stringify(
+    {
+      kind: FILE_KIND,
+      version: 1,
+      data: list.map((t) => ({ ...t, nextSeq: 0 })),
+    },
+    null,
+    2,
+  );
+}
+
+/** 认不出来就整份拒收（返回 null），而不是"能解析几条算几条" */
+export function unpackSpecFile(text: string): SendTemplate[] | null {
+  try {
+    const obj = JSON.parse(text) as { kind?: string; data?: unknown };
+    if (!obj || obj.kind !== FILE_KIND || !Array.isArray(obj.data)) return null;
+    return obj.data as SendTemplate[];
+  } catch {
+    return null;
+  }
+}
+
 /** 重名加序号合并（`templateStore.importTemplates` 同一语义：导入不该覆盖用户的东西） */
 export function importTemplates(incoming: SendTemplate[]): number {
   if (guardLocked()) return 0;
