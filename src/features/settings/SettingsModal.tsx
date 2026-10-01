@@ -677,6 +677,18 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <b style={{ minWidth: 26, textAlign: "right" }}>{settings.fcCellSize}</b>
                   </div>
                 ), t("set.fcCellSize.tip"))}
+                {row(t("set.sbCellSize"), (
+                  <div className="form-pair grow" style={{ gap: 8, alignItems: "center" }}>
+                    <input
+                      type="range"
+                      min={20}
+                      max={96}
+                      value={settings.sbCellSize}
+                      onChange={(e) => patch({ sbCellSize: Number(e.target.value) })}
+                    />
+                    <b style={{ minWidth: 26, textAlign: "right" }}>{settings.sbCellSize}</b>
+                  </div>
+                ), t("set.sbCellSize.tip"))}
               </>
             )}
             {tab === "data" && (

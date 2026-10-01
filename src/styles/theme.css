@@ -11557,19 +11557,22 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-chip i{font-style:normal;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-palette-chip{cursor:grab;}
 /* P122-A 字节带 = 字节网格：一格一个将要发出的字节，行首那条是偏移尺。
-   格子宽 22px / 缝 2px 是 `byteGrid.CELL_W / CELL_GAP`，两边只认那一份数；
-   条带（块名）用绝对定位压在格子正上方同一套间距上，所以段宽 = 占的格数 × 24 - 2。
+   P123-B 起格宽不再写死在这儿：面板按设置项算出 `--sb-cell`，段宽 = 占的格数 × (格宽 + 缝) - 缝，
+   那个间距只从 `byteGrid.pitchOf()` 出一份数（原来 CSS 里还另写了一份 22px，两处写就必然对不齐）。
    一条都不写 border：G 门那条天花板（393）只降不升，层级靠底色与间距解决。 */
-.sb-strip{display:flex;flex:1;flex-direction:column;align-items:flex-start;gap:3px;padding:6px;border-radius:var(--radius-m);background:var(--bg-inset);overflow:auto;min-width:0;position:relative;}
+/* --sb-cell / --sb-fs-k / --sb-band 由面板按设置项 sbCellSize 派生后写在行内 style 上（P123-B）。
+   字号不自造一档：以刻度 `--fs-sm` 为基准乘一个比例（E 门要的就是这个 —— 刻度改了这里跟着改）。
+   声明在这儿：check-undeclared-vars 才认得它们，而默认值 = 缩放上线前的原样（22 / ×1 / 15）。 */
+.sb-strip{--sb-cell:22px;--sb-fs-k:1;--sb-band:15px;display:flex;flex:1;flex-direction:column;align-items:flex-start;gap:3px;padding:6px;border-radius:var(--radius-m);background:var(--bg-inset);overflow:auto;min-width:0;position:relative;}
 .sb-strip-blank{align-self:center;margin:auto;font-size:var(--fs-body);color:var(--text-faint);}
 .sb-rowgrid{display:flex;align-items:flex-start;gap:4px;flex:none;}
-.sb-ruler{flex:none;width:30px;box-sizing:border-box;text-align:right;font-family:var(--font-mono);font-size:var(--fs-sm);line-height:15px;color:var(--text-faint);}
+.sb-ruler{flex:none;min-width:24px;box-sizing:border-box;text-align:right;font-family:var(--font-mono);font-size:calc(var(--fs-sm) * var(--sb-fs-k));line-height:var(--sb-band);color:var(--text-faint);}
 .sb-track{display:flex;flex-direction:column;gap:1px;flex:none;}
 /* --blk 是这一块的主色：角色规则写默认值，字段自带 color 时由行内 style 覆写。
    声明在这儿，check-undeclared-vars 那条才认得它。 */
-.sb-band{--blk:var(--text-dim);position:relative;display:flex;height:15px;flex:none;}
+.sb-band{--blk:var(--text-dim);position:relative;display:flex;height:var(--sb-band);flex:none;}
 .sb-band-loose{margin:2px 0;}
-.sb-seg{all:unset;position:absolute;top:0;height:15px;box-sizing:border-box;display:flex;align-items:center;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:var(--fs-sm);color:var(--text-dim);background:color-mix(in srgb,var(--blk) 22%,transparent);border-radius:var(--radius-s);cursor:grab;}
+.sb-seg{all:unset;position:absolute;top:0;height:var(--sb-band);box-sizing:border-box;display:flex;align-items:center;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:calc(var(--fs-sm) * var(--sb-fs-k));color:var(--text-dim);background:color-mix(in srgb,var(--blk) 22%,transparent);border-radius:var(--radius-s);cursor:grab;}
 .sb-seg:hover{color:var(--text);background:color-mix(in srgb,var(--blk) 36%,transparent);}
 /* 选中环走 inset 阴影不走 outline：一格宽的块里 outline 正好压在裁剩的字上（P123-A）。
    零 border —— G 门那条边框基线只降不升。 */
@@ -11579,12 +11582,12 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-seg.drop{box-shadow:inset 3px 0 0 var(--accent);color:var(--text);}
 /* 既是选中块又是落点：两条都得在，阴影是叠加的所以手写在一起 */
 .sb-seg.on.drop{box-shadow:inset 3px 0 0 var(--accent),inset 0 0 0 2px var(--blk);}
-.sb-drop-caret{flex:none;width:2px;height:15px;border-radius:var(--radius-pill);background:var(--accent);}
-.sb-seg-point{padding:0;justify-content:center;font-size:var(--fs-sm);}
+.sb-drop-caret{flex:none;width:2px;height:var(--sb-band);border-radius:var(--radius-pill);background:var(--accent);}
+.sb-seg-point{padding:0;justify-content:center;font-size:calc(var(--fs-sm) * var(--sb-fs-k));}
 /* 编码没过时的降级条带：没有格子可对齐，就交给 flex 排 */
 .sb-band-loose .sb-seg{position:static;flex:none;}
 .sb-cells{display:flex;gap:2px;flex:none;}
-.sb-cell{all:unset;box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:22px;height:18px;flex:none;font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text-dim);background:var(--bg-panel);border-radius:var(--radius-s);cursor:pointer;}
+.sb-cell{all:unset;box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:var(--sb-cell);height:calc(var(--sb-cell) - 4px);flex:none;font-family:var(--font-mono);font-size:calc(var(--fs-sm) * var(--sb-fs-k));color:var(--text-dim);background:var(--bg-panel);border-radius:var(--radius-s);cursor:pointer;}
 .sb-cell:hover{color:var(--text);background:var(--raise-1);}
 .sb-cell.on{background:color-mix(in srgb,var(--blk) 26%,var(--bg-panel));color:var(--text);}
 /* 可就地改的格子（只有 const 块）：脚下一条同色短线，和覆盖条一个语法 */
@@ -11592,7 +11595,7 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-cell.drop-l{box-shadow:inset 2px 0 0 var(--accent);}
 .sb-cell.drop-r{box-shadow:inset -2px 0 0 var(--accent);}
 .sb-cell-edit{background:var(--bg-panel);border-radius:var(--radius-s);}
-.sb-byte{width:22px;height:18px;box-sizing:border-box;padding:0;text-align:center;font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text);background:transparent;outline:2px solid var(--accent);outline-offset:-1px;border-radius:var(--radius-s);}
+.sb-byte{width:var(--sb-cell);height:calc(var(--sb-cell) - 4px);box-sizing:border-box;padding:0;text-align:center;font-family:var(--font-mono);font-size:calc(var(--fs-sm) * var(--sb-fs-k));color:var(--text);background:transparent;outline:2px solid var(--accent);outline-offset:-1px;border-radius:var(--radius-s);}
 .sb-cov{position:relative;height:3px;flex:none;}
 /* 这块的参数在控制画布上的去处：一句状态 +（在别的页时）一颗「去那里」 */
 .sb-link{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
@@ -11601,17 +11604,21 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-cov i{position:absolute;top:0;height:3px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--warn) 55%,transparent);}
 /* 覆盖条收起后，那行数留在脚上；点它就选中校验块，线跟着出来（P123-A） */
 .sb-cov-sum{all:unset;flex:none;padding:2px 6px;border-radius:var(--radius-s);font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text-dim);cursor:pointer;}
+/* 工具条那枚格宽滑杆：与帧画布 .fc-cellsz 同形，各面板各留一份类名（样式在两条里重复是可接受的，共用一条才会互相牵制） */
+.sb-cellsz{display:flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--text-dim);white-space:nowrap;}
+.sb-cellsz input[type=range]{width:80px;}
+.sb-cellsz b{font-weight:600;color:var(--text);min-width:22px;}
 .sb-cov-sum:hover{color:var(--text);background:var(--raise-1);}
 /* D1 拖宽：把手只给 const 与 bcd；文本块给的是"为什么没有把手"的那个记号（cursor:help + 一句话） */
 /* 把手 hover 才显形（P123-A）：常态画着它，一格宽的块就被 6px 挤掉名字；而且看不见的时候
    它还是个隐形命中区，所以连 pointer-events 一起收，别让人点到不存在的东西。 */
-.sb-grip{all:unset;position:absolute;top:0;height:15px;width:6px;box-sizing:border-box;cursor:ew-resize;box-shadow:inset 2px 0 0 color-mix(in srgb,var(--accent) 70%,transparent);border-radius:var(--radius-s);opacity:0;pointer-events:none;}
+.sb-grip{all:unset;position:absolute;top:0;height:var(--sb-band);width:6px;box-sizing:border-box;cursor:ew-resize;box-shadow:inset 2px 0 0 color-mix(in srgb,var(--accent) 70%,transparent);border-radius:var(--radius-s);opacity:0;pointer-events:none;}
 .sb-band:hover .sb-grip,.sb-grip:focus-visible{opacity:1;pointer-events:auto;}
 .sb-grip:hover{background:color-mix(in srgb,var(--accent) 22%,transparent);}
-.sb-grip-na{position:absolute;top:0;height:15px;width:3px;background:repeating-linear-gradient(180deg,var(--text-faint) 0 2px,transparent 2px 4px);opacity:0;cursor:help;pointer-events:none;}
+.sb-grip-na{position:absolute;top:0;height:var(--sb-band);width:3px;background:repeating-linear-gradient(180deg,var(--text-faint) 0 2px,transparent 2px 4px);opacity:0;cursor:help;pointer-events:none;}
 .sb-band:hover .sb-grip-na{opacity:.55;pointer-events:auto;}
-.sb-ghost{position:absolute;top:0;height:15px;border-radius:var(--radius-s);background:color-mix(in srgb,var(--accent) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 55%,transparent);pointer-events:none;}
-.sb-grip-tag{position:absolute;top:0;height:15px;line-height:15px;padding:0 3px;font-size:var(--fs-sm);color:var(--accent);pointer-events:none;}
+.sb-ghost{position:absolute;top:0;height:var(--sb-band);border-radius:var(--radius-s);background:color-mix(in srgb,var(--accent) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 55%,transparent);pointer-events:none;}
+.sb-grip-tag{position:absolute;top:0;height:var(--sb-band);line-height:var(--sb-band);padding:0 3px;font-size:calc(var(--fs-sm) * var(--sb-fs-k));color:var(--accent);pointer-events:none;}
 .sb-seg.resizing{opacity:.7;}
 /* D3 拖动中的实时值：整带换一个底色语气，下面那句 sb-live 说清这一帧是谁的 */
 .sb-strip.live{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 45%,transparent);}

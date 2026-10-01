@@ -22,7 +22,7 @@ import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
 import { IconChevron, IconClock, IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
 import { Flyout } from "../../shared/Flyout";
-import { useSettings } from "../settings/settingsStore";
+import { getSnapshot as readSettings, patch as patchSettings, useSettings } from "../settings/settingsStore";
 import { SEND_PRESETS, applySendPreset, type SendPresetDef } from "./sendPresets";
 import * as frameStore from "../framecanvas/frameStore";
 import { draftFromFrame } from "./fromFrame";
@@ -38,9 +38,8 @@ import * as sendStore from "./sendStore";
 import { encodeSend, intRangeOf, parseHexInput } from "./encodeSend";
 import {
   CELL_GAP,
+  CELL_W,
   MIN_COLS,
-  PITCH,
-  RULER_W,
   canResize,
   caretAt,
   guessBadFieldId,
@@ -49,9 +48,11 @@ import {
   insertIndexAtBoundary,
   LABEL_MIN_W,
   predictedBlocks,
+  pitchOf,
   resizeWidthBy,
   resizedField,
   rowsOf,
+  rulerW,
   segBox,
   segEndsBlock,
   type GridBlock,
@@ -169,6 +170,18 @@ export function SendBuildPanel() {
   // 浮层的定位要按缩放折算（共享 Flyout 的约定：它写回 style 时除以 zf）
   const settings = useSettings();
   const zf = (settings.zoom || 100) / 100;
+  /**
+   * 缩放（P123-B）：格宽只有一个真值 = 设置项 `sbCellSize`，像素全从 `pitchOf` 算，
+   * CSS 那侧靠 `--sb-cell` 拿同一个数（原来 CSS 里另写死一份 22px，缩放就成第二份真相）。
+   */
+  const cellW = settings.sbCellSize;
+  const pitch = pitchOf(cellW);
+  const ruler = rulerW(cellW);
+  /** 字号与条带高跟着格宽派生。字号**不自造一档**：E 门要求刻度，所以这里只出一个
+   *  乘数（基准是 `--fs-sm`），上限 1.6 —— 96 档的格子配 12px 太空、配 52px 又一行放不下三个字节。
+   *  22 档算出来是 ×1 / 15px ⇒ 默认档一个像素都不变。 */
+  const fsK = Math.min(1.6, cellW / CELL_W).toFixed(3);
+  const bandH = Math.max(13, Math.min(24, Math.round(cellW * 0.68)));
   const tpls = useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
   const [selId, setSelId] = useState("");
   const [selField, setSelField] = useState("");
@@ -298,12 +311,39 @@ export function SendBuildPanel() {
   useEffect(() => {
     const el = stripRef.current;
     if (!el) return;
-    const fit = () => setCols(Math.max(MIN_COLS, Math.floor((el.clientWidth - 12 - RULER_W + CELL_GAP) / PITCH)));
+    const fit = () => setCols(Math.max(MIN_COLS, Math.floor((el.clientWidth - 12 - ruler + CELL_GAP) / pitch)));
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [tpl?.id]);
+    // 缩放改的是 pitch/ruler，不改条带元素的尺寸 ⇒ ResizeObserver 不会因此回调，
+    // 所以每行几格必须跟着这两个数重算，否则放大后还是按旧档排（P123-B）
+  }, [tpl?.id, pitch, ruler]);
+
+  /** 上下限与帧画布同一对数（20~96）：两屏的手势该给出同一个结果 */
+  const setCellW = (next: number) =>
+    patchSettings({ sbCellSize: Math.max(20, Math.min(96, Math.round(next))) });
+
+  /** 网格上 Ctrl+滚轮缩放 —— 与帧画布画布上那条手势同一条（P123-B） */
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const onW = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      const cur = readSettings().sbCellSize;
+      const next = Math.max(20, Math.min(96, cur + (e.deltaY < 0 ? 2 : -2)));
+      if (next !== cur) patchSettings({ sbCellSize: next });
+    };
+    el.addEventListener("wheel", onW, { passive: false });
+    return () => el.removeEventListener("wheel", onW);
+  }, []);
+
+  /** 缩放后把选中那块拉回视野：格宽一变行就重排，不锚定就是"我看的字节跳走了" */
+  useEffect(() => {
+    const on = stripRef.current?.querySelector(".sb-seg.on") ?? null;
+    on?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [cellW]);
 
   /**
    * P122-C：这一块的值在控制画布上被谁用着 —— 在当前页就当场定位（闪一下），
@@ -380,7 +420,7 @@ export function SendBuildPanel() {
     const specIdOf = tpl.id;
     const fields = tpl.fields;
     const x0 = e.clientX;
-    const move = (ev: PointerEvent) => setResize({ fieldId, width: resizeWidthBy(from, ev.clientX - x0) });
+    const move = (ev: PointerEvent) => setResize({ fieldId, width: resizeWidthBy(from, ev.clientX - x0, pitch) });
     const detach = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", onUp);
@@ -391,7 +431,7 @@ export function SendBuildPanel() {
       detach();
       setResize(null);
       if (!ev) return;
-      const w = resizeWidthBy(from, ev.clientX - x0);
+      const w = resizeWidthBy(from, ev.clientX - x0, pitch);
       if (w === from) return;
       const f = fields.find((x) => x.id === fieldId);
       if (!f) return;
@@ -813,6 +853,17 @@ export function SendBuildPanel() {
             </button>
           </>
         )}
+        <label className="sb-cellsz" title={tx("字节格尺寸（20~96，网格上 Ctrl+滚轮缩放，自动保存）", "Byte-cell size (20–96; Ctrl+wheel over the grid zooms; saved automatically)")}>
+          <input
+            type="range"
+            min={20}
+            max={96}
+            value={cellW}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => setCellW(Number(e.target.value))}
+          />
+          <b>{cellW}</b>
+        </label>
         <div className="sb-bar-spacer" />
         <select
           className="input"
@@ -863,6 +914,7 @@ export function SendBuildPanel() {
 
           <div
             className={`sb-strip${liveOn ? " live" : ""}`}
+            style={{ ["--sb-cell"]: `${cellW}px`, ["--sb-fs-k"]: fsK, ["--sb-band"]: `${bandH}px` } as CSSProperties}
             ref={stripRef}
             role="group"
             aria-label={tx("字节带", "Byte strip")}
@@ -880,12 +932,12 @@ export function SendBuildPanel() {
                     data-seg-byte={b.start}
                     data-seg-len={b.len}
                     className={`sb-seg${b.len === 0 ? " sb-seg-point" : ""} sb-r-${b.role}${b.fieldId === selField ? " on" : ""}${b.fieldId === badId ? " bad" : ""}${at === bi ? " drop" : ""}`}
-                    style={{ width: Math.max(12, b.len * PITCH - CELL_GAP) }}
+                    style={{ width: Math.max(12, b.len * pitch - CELL_GAP) }}
                     title={`${b.name} · ${roleLabel(b.role)} · ${b.len}B`}
                     onPointerDown={(e) => beginPointerDrag(e, { kind: "sendfield", data: b.fieldId, label: b.name })}
                     onClick={() => setSelField(b.fieldId)}
                   >
-                    {b.len * PITCH - CELL_GAP >= LABEL_MIN_W ? b.name : ""}
+                    {b.len * pitch - CELL_GAP >= LABEL_MIN_W ? b.name : ""}
                   </button>
                 ))}
                 {at >= band.length && <i className="sb-drop-caret" aria-hidden="true" />}
@@ -901,14 +953,14 @@ export function SendBuildPanel() {
             )}
 
             {rows.map((row) => {
-              const cw = row.cells * PITCH - CELL_GAP;
+              const cw = row.cells * pitch - CELL_GAP;
               return (
                 <div className="sb-rowgrid" key={row.idx0}>
-                  <div className="sb-ruler">{row.idx0.toString(16).toUpperCase().padStart(2, "0")}</div>
+                  <div className="sb-ruler" style={{ width: ruler }}>{row.idx0.toString(16).toUpperCase().padStart(2, "0")}</div>
                   <div className="sb-track" style={{ width: cw }}>
                     <div className="sb-band" style={{ width: cw }}>
                       {row.segs.map((s) => {
-                        const box = segBox(s);
+                        const box = segBox(s, pitch);
                         // 把手只画在块的"最后一截"上：跨行的块中间那道断口不是它的边界
                         const ends = segEndsBlock(row.idx0, s);
                         const rz = resize && ends && resize.fieldId === s.block.fieldId ? resize : null;
@@ -938,11 +990,11 @@ export function SendBuildPanel() {
                               <i
                                 className="sb-ghost"
                                 aria-hidden="true"
-                                style={{ left: box.left, width: Math.max(4, rz.width * PITCH - CELL_GAP) }}
+                                style={{ left: box.left, width: Math.max(4, rz.width * pitch - CELL_GAP) }}
                               />
                             )}
                             {rz && (
-                              <i className="sb-grip-tag" aria-hidden="true" style={{ left: box.left + rz.width * PITCH }}>
+                              <i className="sb-grip-tag" aria-hidden="true" style={{ left: box.left + rz.width * pitch }}>
                                 {rz.width} B
                               </i>
                             )}
@@ -1022,7 +1074,7 @@ export function SendBuildPanel() {
                           <i
                             key={c.start}
                             aria-hidden="true"
-                            style={{ left: c.start * PITCH, width: c.len * PITCH - CELL_GAP }}
+                            style={{ left: c.start * pitch, width: c.len * pitch - CELL_GAP }}
                             title={tx("校验覆盖到的字节", "Bytes the checksum covers")}
                           />
                         ))}

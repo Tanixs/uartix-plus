@@ -14,8 +14,12 @@ import { encodeSend } from "./encodeSend";
 import type { SendField, SendTemplate } from "./sendTypes";
 import {
   CELL_GAP,
+  CELL_W,
   MAX_BLOCK_W,
   PITCH,
+  RULER_W,
+  pitchOf,
+  rulerW,
   canResize,
   resizedField,
   resizeWidthBy,
@@ -28,6 +32,7 @@ import {
   predictedBlocks,
   rowsOf,
   segBox,
+  type GridSeg,
   type EncodedSpans,
 } from "./byteGrid";
 
@@ -416,5 +421,38 @@ describe("segEndsBlock · 把手只许画在块的右端", () => {
 
   it("块不从头开始的行也算得对 —— 第一版把行内偏移当块内偏移，这类块根本没有把手", () => {
     expect(segEndsBlock(rows[1].idx0, rows[1].segs[1]), "b 行内起点 1、长 2，块起点 6").toBe(true);
+  });
+});
+
+/* ================= P123-B · 缩放只有一份间距 =================
+ * 格宽从设置项 `sbCellSize` 来（20~96），像素一律由 `pitchOf(cellW)` 算。钉两件事：
+ *  ① 默认档必须逐字节等于缩放上线前的样子 —— 加一枚设置项不该让任何人的界面动一下；
+ *  ② 段宽与拖宽换算跟着 pitch 线性走。别处再写一个字面 24，放大之后就错位。
+ */
+describe("P123-B 缩放：几何只认 pitchOf(cellW)", () => {
+  it("默认档 = 缩放上线前的原样（22 的格、30 的尺、24 的间距）", () => {
+    expect(pitchOf(CELL_W)).toBe(PITCH);
+    expect(rulerW(CELL_W)).toBe(RULER_W);
+  });
+
+  const seg = (start: number, len: number): GridSeg =>
+    ({
+      block: { fieldId: "a", name: "a", role: "data", start, len, type: "uint8", color: "" },
+      start,
+      len,
+      cont: false,
+      point: false,
+    }) as GridSeg;
+
+  it("段宽随格宽线性走：44 档下第 2 块起、占 3 格的段落在 92px、宽 136px", () => {
+    expect(segBox(seg(2, 3), pitchOf(44))).toEqual({ left: 2 * 46, width: 3 * 46 - CELL_GAP });
+    expect(segBox(seg(2, 3)).left, "不传间距就是默认档").toBe(2 * PITCH);
+  });
+
+  it("拖宽按当前档算：拖 46px 在 44 档是一格，拖 24px 在 22 档也是一格", () => {
+    expect(resizeWidthBy(2, 46, pitchOf(44))).toBe(3);
+    expect(resizeWidthBy(2, 24, pitchOf(22))).toBe(3);
+    expect(resizeWidthBy(2, 25, pitchOf(44)), "44 档下过半格(23)就进到下一格").toBe(3);
+    expect(resizeWidthBy(2, 22, pitchOf(44)), "不到半格不算改").toBe(2);
   });
 });

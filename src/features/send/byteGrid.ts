@@ -18,12 +18,23 @@ import type { FieldRole, FieldType } from "../../ipc/types";
 import { checksumWidth } from "../../shared/checksums";
 import { sendFieldWidth, type SendField, type SendTemplate } from "./sendTypes";
 
-/** 一格的字面宽。CSS 里不重复写这个数：轨道宽与段宽全从这里算，两处写就必然对不齐 */
+/**
+ * 一格的字面宽。**P123-B 起它只是"默认档"**：真值在设置项 `sbCellSize`，
+ * 像素一律从 `pitchOf(cellW)` 与 CSS 的 `--sb-cell` 走（原来 CSS 里还写死一份 22px，
+ * 两处写就必然对不齐 —— 那句注释说的正是没做到的事）。
+ */
 export const CELL_W = 22;
 export const CELL_GAP = 2;
+/** 一格 + 一缝 = 默认档的间距（缩放时请改用 `pitchOf(cellW)`） */
 export const PITCH = CELL_W + CELL_GAP;
-/** 行首那条偏移槽的宽度：网格的尺就是它，与 HexView 的地址栏同一族 */
-export const RULER_W = 30;
+/** 间距只从这一处算：条带、覆盖线、把手、拖宽换算全认它，别处不许再写 24 */
+export const pitchOf = (cellW: number): number => cellW + CELL_GAP;
+/**
+ * 行首那条偏移槽的宽度：网格的尺就是它，与 HexView 的地址栏同一族。
+ * 跟着格宽走（帧画布没有尺，这层是 TX 独有的），小档时不白占地方。
+ */
+export const rulerW = (cellW: number): number => Math.max(24, cellW + 8);
+export const RULER_W = rulerW(CELL_W);
 /** 0 字节块画成的那个点的宽度 */
 export const POINT_W = 10;
 export const MIN_COLS = 4;
@@ -223,11 +234,11 @@ export const segEndsBlock = (rowIdx0: number, seg: GridSeg): boolean =>
   !seg.point && rowIdx0 + seg.start + seg.len === seg.block.start + seg.block.len;
 
 /** 段在行内的像素位置。点画在边界中央，越界的一边夹回来 */
-export function segBox(seg: GridSeg): { left: number; width: number } {
+export function segBox(seg: GridSeg, pitch: number = PITCH): { left: number; width: number } {
   if (seg.point) {
-    return { left: Math.max(0, seg.start * PITCH - POINT_W / 2), width: POINT_W };
+    return { left: Math.max(0, seg.start * pitch - POINT_W / 2), width: POINT_W };
   }
-  return { left: seg.start * PITCH, width: seg.len * PITCH - CELL_GAP };
+  return { left: seg.start * pitch, width: seg.len * pitch - CELL_GAP };
 }
 
 /**

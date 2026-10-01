@@ -32,6 +32,7 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "workspace", type: "enum", values: ["proto", "analyze", "attitude", "console", "video", "calib", "auto", "modbus", "vdev"], def: "proto", group: "layout", label: "预设布局", sensitivity: "safe", reversible: true },
   { key: "cellSize", type: "enum", values: [48, 60, 72, 90, 110], def: 60, group: "appearance", label: "控制画布格尺寸", sensitivity: "safe", reversible: true },
   { key: "fcCellSize", type: "int", min: 20, max: 96, def: 42, group: "appearance", label: "帧画布格尺寸", sensitivity: "safe", reversible: true },
+  { key: "sbCellSize", type: "int", min: 20, max: 96, def: 22, group: "appearance", label: "TX组帧台格尺寸", sensitivity: "safe", reversible: true },
   { key: "showThinking", type: "boolean", def: true, group: "appearance", label: "显示思考过程", sensitivity: "safe", reversible: true },
   // P96-K4：以前"显示思考过程"一个开关同时管着"界面上看不看得到思维链"和"要不要让模型先想后说"。
   // 后者会显著拉长静默时间，正是网关按空闲掐断的直接来源 ⇒ 拆开，显示归显示、模型行为归模型行为。
@@ -104,7 +105,7 @@ export function agentWritableKeys(): (keyof Settings)[] {
  * 名单只在这里声明一次——恢复动作、确认文案、测试都从它派生，不再各抄一份（§8-36）。
  */
 export const APPEARANCE_RESET_KEYS: readonly (keyof Settings)[] = [
-  "theme", "zoom", "decimals", "perfHud", "cellSize", "fcCellSize", "chartPalette", "conWrap", "reduceMotion",
+  "theme", "zoom", "decimals", "perfHud", "cellSize", "fcCellSize", "sbCellSize", "chartPalette", "conWrap", "reduceMotion",
 ];
 
 /** 这些键的默认值（从 schema 的 `def` 取，不另立第二份数字） */

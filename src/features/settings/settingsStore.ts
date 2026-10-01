@@ -52,6 +52,11 @@ export interface Settings {
   cellSize: number;
   /** 帧画布字节格边长（px，20~96；P86b，与控制画布 cellSize 无关） */
   fcCellSize: number;
+  /**
+   * TX组帧台字节格边长（px，20~96；P123-B，与上面两枚各自独立）。
+   * 默认 22 = 网格上线以来的样子，所以加这个键本身不改变任何人的界面。
+   */
+  sbCellSize: number;
   // P110-B1：`aiPreset` / `aiFormat` / `aiBaseUrl` / `aiApiKey` / `aiModel` 五键已删除。
   // 它们搬进了 `features/ai/aiProfileStore.ts` 的两张表（供应商 / 模型档案）。
   // 留在这里的只有"与哪台机器无关的全局偏好"：温度、代理、超时、发送总闸。
@@ -201,6 +206,7 @@ function load(): Settings {
     workspace: "proto",
     cellSize: 60,
     fcCellSize: 42,
+    sbCellSize: 22,
     aiTemperature: 0.3,
     aiCompactRatio: 0.6,
     aiHistoryOverride: 0,
@@ -250,6 +256,9 @@ function load(): Settings {
       fcCellSize: Number.isFinite(p.fcCellSize)
         ? Math.max(20, Math.min(96, Math.round(p.fcCellSize as number)))
         : 42,
+      sbCellSize: Number.isFinite(p.sbCellSize)
+        ? Math.max(20, Math.min(96, Math.round(p.sbCellSize as number)))
+        : 22,
       // P110-B1：这五条（aiPreset / aiFormat / aiBaseUrl / aiApiKey / aiModel）连同下面的
       // `LEGACY_MODEL_IDS` 一起删掉了 —— 供应商与模型现在住在 `features/ai/aiProfileStore.ts`，
       // 那张表自己 normalize，坏一行整表退回 seed。
