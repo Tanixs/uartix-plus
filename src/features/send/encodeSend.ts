@@ -42,6 +42,12 @@ export interface EncodeResult {
   notes: string[];
   /** 下一次该用的序号（调用方决定是否落盘） */
   seqAfter: number;
+  /**
+   * 每个字段在这帧里实际占的字节区间（P122-A 给字节网格用）。
+   * 从编码器里原样带出来，**不是**再算一遍宽度：ascii 的字节数跟着值走，
+   * 网格自己推就会和真帧不符。
+   */
+  spans: { fieldId: string; at: number; len: number }[];
 }
 
 /** 面向人的错误：一律点名字段，不抛栈 */
@@ -385,5 +391,11 @@ export function encodeSend(tpl: SendTemplate, inp: EncodeInput = {}): EncodeResu
   }
 
   const hex = bytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ");
-  return { bytes, hex, notes, seqAfter };
+  return {
+    bytes,
+    hex,
+    notes,
+    seqAfter,
+    spans: spans.map((s) => ({ fieldId: s.field.id, at: s.at, len: s.len })),
+  };
 }

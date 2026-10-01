@@ -14,6 +14,7 @@
  * 界面上看到的字节**就是**点发送会出去的字节，没有第二份计算。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { CSSProperties } from "react";
 import type { ChecksumAlgo, CrcParams, Endian, FieldRole, FieldType } from "../../ipc/types";
 import { tx, useLocale } from "../../i18n/strings";
 import { CRC_DEFAULT, parseCrcLiteral } from "../../shared/checksums";
@@ -30,9 +31,22 @@ import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import * as sendStore from "./sendStore";
 import { encodeSend, intRangeOf, parseHexInput } from "./encodeSend";
 import {
-  dropIndexAt,
+  CELL_GAP,
+  MIN_COLS,
+  PITCH,
+  RULER_W,
+  caretAt,
+  guessBadFieldId,
+  gridModel,
+  hexByte,
+  insertIndexAtBoundary,
+  predictedBlocks,
+  rowsOf,
+  segBox,
+  type GridBlock,
+} from "./byteGrid";
+import {
   moveTargetIndex,
-  sendFieldWidth,
   type SendField,
   type SendParamType,
   type SendTemplate,
@@ -99,12 +113,34 @@ const uid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
 const hexOf = (f: SendField) =>
   f.source.kind === "const" ? f.source.bytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ") : "";
 
-/** 落点：把带上的块读成矩形，判定规则本身在 `sendTypes.dropIndexAt`（那条规则要能单独测） */
-function dropIndex(el: HTMLElement, clientX: number): number {
-  return dropIndexAt(
-    Array.from(el.querySelectorAll<HTMLElement>("[data-sb-field]")).map((c) => c.getBoundingClientRect()),
-    clientX,
-  );
+/**
+ * 落点：指针下面那条**字节边界**（全局下标），落在带的空白处（最后一行下面）返回 null ⇒ 追加到尾部。
+ *
+ * 网格里有两种命中物：格子（一个字节）与它上方那一行的块条段。条段也得能判——
+ * 条带占了上半行，`elementsFromPoint` 常常先命中它。"边界→插到第几块前面"是
+ * `byteGrid.insertIndexAtBoundary` 那条纯规则，这里只负责把像素换成字节下标。
+ */
+function boundaryAt(el: HTMLElement, x: number, y: number): number | null {
+  for (const node of document.elementsFromPoint(x, y)) {
+    if (!el.contains(node)) continue;
+    const cell = node.closest<HTMLElement>("[data-byte-index]");
+    if (cell) {
+      const r = cell.getBoundingClientRect();
+      const i = Number(cell.dataset.byteIndex);
+      return i + (x - r.left > r.width / 2 ? 1 : 0);
+    }
+    const seg = node.closest<HTMLElement>("[data-seg-byte]");
+    if (seg) {
+      const len = Number(seg.dataset.segLen);
+      const g = Number(seg.dataset.segByte);
+      if (!len) return g;
+      const r = seg.getBoundingClientRect();
+      const pitch = r.width / len;
+      const k = Math.max(0, Math.min(len - 1, Math.floor((x - r.left) / pitch)));
+      return g + k + (x - r.left - k * pitch > pitch / 2 ? 1 : 0);
+    }
+  }
+  return null;
 }
 
 export function SendBuildPanel() {
@@ -116,6 +152,10 @@ export function SendBuildPanel() {
   const [msg, setMsg] = useState("");
   const [at, setAt] = useState(-1);
   const stripRef = useRef<HTMLDivElement>(null);
+  /** 一行放几格：按带的实际宽度算，窄面板不许把尺撑出横向滚动条 */
+  const [cols, setCols] = useState(12);
+  /** 就地改字节的那一格（只有 const 块允许），null = 没有 */
+  const [edit, setEdit] = useState<{ fieldId: string; off: number } | null>(null);
 
   const tpl: SendTemplate | null = tpls.find((x) => x.id === selId) ?? tpls[0] ?? null;
   useEffect(() => {
@@ -179,6 +219,48 @@ export function SendBuildPanel() {
 
   const field = tpl?.fields.find((f) => f.id === selField) ?? null;
 
+  /**
+   * 网格的数据只认预览这一份：画出来的第 i 格就是将要发出的第 i 字节。
+   * 编码没过就没有字节可画 —— 退化成条带（块名 + 声明宽度），格子与尺一律不画。
+   */
+  const grid = useMemo(() => (tpl ? gridModel(tpl, preview?.ok ? preview : null) : null), [tpl, preview]);
+  const rows = useMemo(() => (grid ? rowsOf(grid, cols) : []), [grid, cols]);
+  const band: GridBlock[] = useMemo(() => {
+    if (!tpl || !grid) return [];
+    return preview?.ok ? grid.blocks : predictedBlocks(tpl);
+  }, [tpl, grid, preview]);
+  const approx = !!tpl && band.length > 0 && !preview?.ok;
+  const badId = tpl && preview && !preview.ok ? guessBadFieldId(preview.msg, tpl) : "";
+  const caret = at >= 0 && grid ? caretAt(grid, at) : null;
+
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const fit = () => setCols(Math.max(MIN_COLS, Math.floor((el.clientWidth - 12 - RULER_W + CELL_GAP) / PITCH)));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tpl?.id]);
+
+  /** 格子里改一个字节：只写进这一块自己的 const 数组，别的来源一概不接 */
+  const commitByte = (fieldId: string, off: number, text: string) => {
+    setEdit(null);
+    const f = tpl?.fields.find((x) => x.id === fieldId);
+    if (!f || f.source.kind !== "const") return;
+    // 编辑期间块自己的字节数变了（撤销就是一条这样的路）：写下去会长出空洞字节，宁可放弃这次提交
+    if (off < 0 || off >= f.source.bytes.length) return;
+    const t = text.trim().toLowerCase();
+    if (!/^[0-9a-f]{1,2}$/.test(t)) {
+      setErr(tx("一个格子只收 1~2 位十六进制（比如 2a）", "One cell takes 1-2 hex digits (like 2a)"));
+      return;
+    }
+    const bytes = f.source.bytes.slice();
+    bytes[off] = Number.parseInt(t, 16);
+    sendStore.patchField(tpl.id, fieldId, { source: { kind: "const", bytes } });
+    setErr("");
+  };
+
   const insertAt = useCallback(
     (key: string, index: number) => {
       if (!tpl) return;
@@ -207,12 +289,16 @@ export function SendBuildPanel() {
   useEffect(() => {
     const el = stripRef.current;
     if (!el || !tpl) return;
+    const idxAt = (x: number, y: number) => {
+      const b = boundaryAt(el, x, y);
+      return b === null ? tpl.fields.length : insertIndexAtBoundary(band, b);
+    };
     return attachPdragZone(el, {
       kinds: "sendspec sendfield",
-      onOver: (d: PdragDetail) => setAt(dropIndex(el, d.x)),
+      onOver: (d: PdragDetail) => setAt(idxAt(d.x, d.y)),
       onLeave: () => setAt(-1),
       onDrop: (d: PdragDetail) => {
-        const index = dropIndex(el, d.x);
+        const index = idxAt(d.x, d.y);
         setAt(-1);
         if (d.kind === "sendspec") insertAt(d.data, index);
         else if (d.kind === "sendfield") {
@@ -222,7 +308,7 @@ export function SendBuildPanel() {
         }
       },
     });
-  }, [tpl, insertAt]);
+  }, [tpl, insertAt, band]);
 
   /**
    * 面板这枚「发送一次」走的就是命令库、快捷栏、卡片那同一条 `runCommand`：
@@ -520,24 +606,129 @@ export function SendBuildPanel() {
             onDragOver={(e) => e.preventDefault()}
           >
             {tpl.fields.length === 0 && <span className="sb-strip-blank">{tx("从料板拖一块进来，或点一下加到尾部", "Drag a block from the palette, or click one to append it")}</span>}
-            {tpl.fields.map((f, i) => (
-              <span key={f.id} className="sb-slot-wrap">
-                {at === i && <i className="sb-caret" aria-hidden="true" />}
-                <button
-                  data-sb-field={f.id}
-                  className={`sb-chip sb-f-${f.role}${f.id === selField ? " on" : ""}`}
-                  title={`${roleLabel(f.role)} · ${f.type} · ${sendFieldWidth(f)}B`}
-                  onPointerDown={(e) =>
-                    beginPointerDrag(e, { kind: "sendfield", data: f.id, label: f.name })
-                  }
-                  onClick={() => setSelField(f.id)}
-                >
-                  <b>{f.name}</b>
-                  <i>{hexOf(f) || f.type}</i>
-                </button>
-              </span>
-            ))}
-            {at >= tpl.fields.length && tpl.fields.length > 0 && <i className="sb-caret" aria-hidden="true" />}
+
+            {/* 条带：块名 + 顺序。编码没过时它就是你唯一能看的东西 —— 没有字节就不画格子、不画尺 */}
+            {approx && (
+              <div className="sb-band sb-band-loose" style={{ ["--blk"]: "var(--text-dim)" } as CSSProperties}>
+                {band.map((b, bi) => (
+                  <button
+                    key={b.fieldId}
+                    type="button"
+                    data-seg-byte={b.start}
+                    data-seg-len={b.len}
+                    className={`sb-seg${b.len === 0 ? " sb-seg-point" : ""} sb-r-${b.role}${b.fieldId === selField ? " on" : ""}${b.fieldId === badId ? " bad" : ""}${at === bi ? " drop" : ""}`}
+                    style={{ width: Math.max(12, b.len * PITCH - CELL_GAP) }}
+                    title={`${b.name} · ${roleLabel(b.role)} · ${b.len}B`}
+                    onPointerDown={(e) => beginPointerDrag(e, { kind: "sendfield", data: b.fieldId, label: b.name })}
+                    onClick={() => setSelField(b.fieldId)}
+                  >
+                    {b.name}
+                  </button>
+                ))}
+                {at >= band.length && <i className="sb-drop-end" aria-hidden="true" />}
+              </div>
+            )}
+            {approx && (
+              <div className="sb-hint">
+                {tx(
+                  "还没算出字节：条带按声明宽度摆块的顺序，格子与尺要等编码通过才画。",
+                  "No bytes yet: the band shows block order at declared widths — cells and the ruler appear once encoding succeeds.",
+                )}
+              </div>
+            )}
+
+            {rows.map((row) => {
+              const cw = row.cells * PITCH - CELL_GAP;
+              return (
+                <div className="sb-rowgrid" key={row.idx0}>
+                  <div className="sb-ruler">{row.idx0.toString(16).toUpperCase().padStart(2, "0")}</div>
+                  <div className="sb-track" style={{ width: cw }}>
+                    <div className="sb-band" style={{ width: cw }}>
+                      {row.segs.map((s) => {
+                        const box = segBox(s);
+                        return (
+                          <button
+                            key={`${s.block.fieldId}:${s.start}`}
+                            type="button"
+                            data-seg-byte={row.idx0 + s.start}
+                            data-seg-len={s.len}
+                            className={`sb-seg${s.point ? " sb-seg-point" : ""} sb-r-${s.block.role}${s.block.fieldId === selField ? " on" : ""}${s.block.fieldId === badId ? " bad" : ""}`}
+                            style={
+                              {
+                                left: box.left,
+                                width: box.width,
+                                ...(s.block.color ? { ["--blk"]: s.block.color } : {}),
+                              } as CSSProperties
+                            }
+                            title={`${s.block.name} · ${roleLabel(s.block.role)} · ${s.block.len}B${s.block.editable ? tx(" · 双击格子可就地改那个字节", " · double-click a cell to edit that byte") : ""}`}
+                            onPointerDown={(e) =>
+                              beginPointerDrag(e, { kind: "sendfield", data: s.block.fieldId, label: s.block.name })
+                            }
+                            onClick={() => setSelField(s.block.fieldId)}
+                          >
+                            {s.point ? "·" : s.cont ? "" : s.block.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="sb-cells">
+                      {Array.from({ length: row.cells }, (_, k) => {
+                        const i = row.idx0 + k;
+                        const b = grid?.owner[i] ?? null;
+                        const ed = !!b && b.editable && edit?.fieldId === b.fieldId && edit.off === i - b.start;
+                        const mark = caret && caret.cell === i ? (caret.side === "left" ? " drop-l" : " drop-r") : "";
+                        if (ed && b) {
+                          return (
+                            <span className={`sb-cell sb-cell-edit${b.fieldId === selField ? " on" : ""}`} key={i} data-byte-index={i}>
+                              <input
+                                className="sb-byte"
+                                defaultValue={hexByte(grid!.bytes[i])}
+                                maxLength={2}
+                                autoFocus
+                                aria-label={`${tx("字节", "Byte")} ${i}`}
+                                onBlur={(e) => commitByte(b.fieldId, i - b.start, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") commitByte(b.fieldId, i - b.start, e.currentTarget.value);
+                                  else if (e.key === "Escape") setEdit(null);
+                                  else e.stopPropagation();
+                                }}
+                              />
+                            </span>
+                          );
+                        }
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            data-byte-index={i}
+                            className={`sb-cell${b ? ` sb-r-${b.role}${b.fieldId === selField ? " on" : ""}${b.editable ? " ed" : ""}` : ""}${mark}`}
+                            title={b ? `${b.name} · ${roleLabel(b.role)}` : tx("不属于任何块", "No block here")}
+                            onClick={() => b && setSelField(b.fieldId)}
+                            onDoubleClick={() => {
+                              if (b?.editable) setEdit({ fieldId: b.fieldId, off: i - b.start });
+                            }}
+                          >
+                            {hexByte(grid!.bytes[i])}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {!!row.cov.length && (
+                      <div className="sb-cov">
+                        {row.cov.map((c) => (
+                          <i
+                            key={c.start}
+                            aria-hidden="true"
+                            style={{ left: c.start * PITCH, width: c.len * PITCH - CELL_GAP }}
+                            title={tx("校验覆盖到的字节", "Bytes the checksum covers")}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <div className="sb-side">

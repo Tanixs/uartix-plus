@@ -11539,19 +11539,45 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-chip b{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-chip i{font-style:normal;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-palette-chip{cursor:grab;}
-.sb-strip{display:flex;flex:1;flex-wrap:wrap;align-content:flex-start;gap:4px;padding:6px;border-radius:var(--radius-m);background:var(--bg-inset);overflow:auto;min-width:0;position:relative;}
+/* P122-A 字节带 = 字节网格：一格一个将要发出的字节，行首那条是偏移尺。
+   格子宽 22px / 缝 2px 是 `byteGrid.CELL_W / CELL_GAP`，两边只认那一份数；
+   条带（块名）用绝对定位压在格子正上方同一套间距上，所以段宽 = 占的格数 × 24 - 2。
+   一条都不写 border：G 门那条天花板（393）只降不升，层级靠底色与间距解决。 */
+.sb-strip{display:flex;flex:1;flex-direction:column;align-items:flex-start;gap:3px;padding:6px;border-radius:var(--radius-m);background:var(--bg-inset);overflow:auto;min-width:0;position:relative;}
 .sb-strip-blank{align-self:center;margin:auto;font-size:var(--fs-body);color:var(--text-faint);}
-.sb-slot-wrap{display:inline-flex;align-items:stretch;}
-.sb-caret{width:2px;border-radius:var(--radius-pill);background:var(--accent);flex:none;}
-.sb-f-header b{color:var(--accent);}
-.sb-f-footer b{color:var(--accent);}
-.sb-f-length b{color:var(--warn);}
-.sb-f-checksum b{color:var(--warn);}
-.sb-f-checksum2 b{color:var(--warn);}
-.sb-f-seq b{color:var(--ok);}
-.sb-f-addr b,.sb-f-id b{color:color-mix(in srgb, var(--accent) 62%, var(--text));}
-.sb-f-data b,.sb-f-payload b{color:var(--text);}
-.sb-chip.on{outline:2px solid var(--accent);outline-offset:1px;background:var(--raise-1);}
+.sb-rowgrid{display:flex;align-items:flex-start;gap:4px;flex:none;}
+.sb-ruler{flex:none;width:30px;box-sizing:border-box;text-align:right;font-family:var(--font-mono);font-size:var(--fs-sm);line-height:15px;color:var(--text-faint);}
+.sb-track{display:flex;flex-direction:column;gap:1px;flex:none;}
+/* --blk 是这一块的主色：角色规则写默认值，字段自带 color 时由行内 style 覆写。
+   声明在这儿，check-undeclared-vars 那条才认得它。 */
+.sb-band{--blk:var(--text-dim);position:relative;display:flex;height:15px;flex:none;}
+.sb-band-loose{margin:2px 0;}
+.sb-seg{all:unset;position:absolute;top:0;height:15px;box-sizing:border-box;display:flex;align-items:center;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:var(--fs-sm);color:var(--text-dim);background:color-mix(in srgb,var(--blk) 22%,transparent);border-radius:var(--radius-s);cursor:grab;}
+.sb-seg:hover{color:var(--text);background:color-mix(in srgb,var(--blk) 36%,transparent);}
+.sb-seg.on{outline:2px solid var(--blk);outline-offset:0;color:var(--text);}
+.sb-seg.bad{color:var(--danger);}
+/* 拖拽中的落点：降级条带（没有格子可标）就在段左侧亮一条，追加到末尾则亮那根竖线 */
+.sb-seg.drop{box-shadow:inset 3px 0 0 var(--accent);color:var(--text);}
+.sb-drop-end{flex:none;width:2px;height:15px;border-radius:var(--radius-pill);background:var(--accent);}
+.sb-seg-point{padding:0;justify-content:center;font-size:var(--fs-sm);}
+/* 编码没过时的降级条带：没有格子可对齐，就交给 flex 排 */
+.sb-band-loose .sb-seg{position:static;flex:none;}
+.sb-cells{display:flex;gap:2px;flex:none;}
+.sb-cell{all:unset;box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:22px;height:18px;flex:none;font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text-dim);background:var(--bg-panel);border-radius:var(--radius-s);cursor:pointer;}
+.sb-cell:hover{color:var(--text);background:var(--raise-1);}
+.sb-cell.on{background:color-mix(in srgb,var(--blk) 26%,var(--bg-panel));color:var(--text);}
+/* 可就地改的格子（只有 const 块）：脚下一条同色短线，和覆盖条一个语法 */
+.sb-cell.ed{box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--blk) 55%,transparent);}
+.sb-cell.drop-l{box-shadow:inset 2px 0 0 var(--accent);}
+.sb-cell.drop-r{box-shadow:inset -2px 0 0 var(--accent);}
+.sb-cell-edit{background:var(--bg-panel);border-radius:var(--radius-s);}
+.sb-byte{width:22px;height:18px;box-sizing:border-box;padding:0;text-align:center;font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text);background:transparent;outline:2px solid var(--accent);outline-offset:-1px;border-radius:var(--radius-s);}
+.sb-cov{position:relative;height:3px;flex:none;}
+.sb-cov i{position:absolute;top:0;height:3px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--warn) 55%,transparent);}
+.sb-r-header,.sb-r-footer,.sb-r-addr,.sb-r-id{--blk:var(--accent);}
+.sb-r-length,.sb-r-checksum,.sb-r-checksum2{--blk:var(--warn);}
+.sb-r-seq{--blk:var(--ok);}
+.sb-r-data,.sb-r-payload{--blk:var(--text-dim);}
 .sb-side{flex:none;width:240px;display:flex;flex-direction:column;gap:8px;overflow:auto;}
 .sb-row{display:flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--text-dim);}
 .sb-row>span:first-child{flex:none;width:74px;}

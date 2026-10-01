@@ -1,32 +1,18 @@
 /**
- * P121-C2 · 字节带上的落点与换位规则。
+ * P121-C2 · 字节带上的换位与宽度规则。
  *
  * 为什么单独钉这几条：这台机器上进不去真实输入（CDP 的鼠标事件到不了页面，
  * 连一次普通 click 都收不到），所以"拖到第几块前面"这件事在自动化里验不了落带那一步；
  * 但**判定规则本身**是纯函数，能钉死。规则写错的症状很具体：
  * 往右拖一格跳两格、落在两块正中插错边、空带插不进去。
+ *
+ * P122-A 改写过一次：原来的 `dropIndexAt(rects, clientX)`（按块矩形的中线吸附）删了，
+ * 因为字节带变成"一格一字节"，落点先要换算成**字节边界**再谈插到第几块前面。
+ * 那条规则没有消失，它搬到了 `byteGrid.insertIndexAtBoundary` + `boundaryAt`，
+ * 断言在 `byteGrid.test.ts`，比原来更严（多了 0 字节块与跨行段的用例）。
  */
 import { describe, expect, it } from "vitest";
-import { dropIndexAt, moveTargetIndex, sendFieldWidth, type SendField } from "./sendTypes";
-
-const at = (left: number) => ({ left, width: 100 });
-const THREE = [at(0), at(100), at(200)];
-
-describe("dropIndexAt · 半格吸附", () => {
-  it("空带 = 0；越过最右边的中线 = 追加到末尾", () => {
-    expect(dropIndexAt([], 999)).toBe(0);
-    expect(dropIndexAt(THREE, 249)).toBe(2);
-    expect(dropIndexAt(THREE, 250)).toBe(3); // 最后一块的中线也按"越过"处理
-    expect(dropIndexAt(THREE, -50)).toBe(0);
-  });
-
-  it("没越过中线算这块之前，越过了算后面一块之前", () => {
-    expect(dropIndexAt(THREE, 49)).toBe(0);
-    expect(dropIndexAt(THREE, 50)).toBe(1); // 正好压中线：按"越过"处理
-    expect(dropIndexAt(THREE, 149)).toBe(1);
-    expect(dropIndexAt(THREE, 150)).toBe(2);
-  });
-});
+import { moveTargetIndex, sendFieldWidth, type SendField } from "./sendTypes";
 
 describe("moveTargetIndex · 带内换位让回一格", () => {
   it("往前挪要让回一格（被拖那块先被摘掉，后面整体左移）", () => {
