@@ -18,6 +18,7 @@ import { tx, useLocale } from "../../i18n/strings";
 import { CRC_DEFAULT, parseCrcLiteral } from "../../shared/checksums";
 import { FormRow, NumInput, TextInput } from "../../shared/FormInputs";
 import { Section } from "../../shared/Section";
+import { IconChevron } from "../../shared/icons";
 import * as controlsStore from "../controls/controlsStore";
 import { revealTargets } from "../controls/cardBinding";
 import { roleNames } from "./roleNames";
@@ -73,6 +74,8 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
   const [msg, setMsg] = useState("");
   const [derivedNotes, setDerivedNotes] = useState<string[]>([]);
   const [link, setLink] = useState<{ line: string; pageId?: string; cardId?: string; cardName?: string } | null>(null);
+  /** 哪个参数展开了（本地态：这是"看哪儿"，不是谱的内容，不该落盘也不该进撤销栈） */
+  const [openParams, setOpenParams] = useState<Record<string, boolean>>({});
 
   /** 与面板底部那行 hex 同一个纯编码器：换界面不换算法，才谈得上"看到的就是发出去的" */
   const preview = useMemo(() => {
@@ -135,6 +138,11 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
     },
     [],
   );
+
+  // 选中一个"来源=参数"的块，就把它绑的那个参数展开 —— 分级折叠最怕的就是"要滚开才知道是谁"
+  useEffect(() => {
+    if (linkParamId) setOpenParams((m) => (m[linkParamId] ? m : { ...m, [linkParamId]: true }));
+  }, [linkParamId]);
 
   /**
    * 参数一键生成滑条卡。
@@ -253,7 +261,8 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
           <span>{field.name}</span>
         </div>
       )}
-      <Section title={tx("发送块", "Send block")}>
+      {/* 当前对象不折叠：它就是这页存在的理由，收起来等于把用户刚点的东西藏了（P124-A） */}
+      <div className="props-title">{tx("发送块", "Send block")}</div>
         {!field && (
           <div className="props-hint">
             {tx("在 TX组帧台的字节网格上点一块来编辑它。", "Click a block on the TX frame builder grid to edit it.")}
@@ -441,71 +450,90 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
         )}
         {err && <div className="props-warn">{err}</div>}
         {msg && <div className="props-hint">{msg}</div>}
-      </Section>
-
-      <Section title={tx("参数", "Parameters")}>
-        {tpl.params.map((p) => (
-          <div key={p.id} className="props-param">
-            <FormRow label={tx("名字", "Name")}>
-              <TextInput value={p.name} onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { name: v })} />
+      
+      <div className="props-section">{tx("参数", "Parameters")}</div>
+        {tpl.params.map((p) => {
+          const open = !!openParams[p.id];
+          const bound = field?.source.kind === "param" && field.source.paramId === p.id;
+          return (
+            <div key={p.id} className={`props-item${bound ? " cur" : ""}${open ? " open" : ""}`}>
               <button
-                className="btn"
-                disabled={p.type === "text" || p.type === "enum"}
-                title={
-                  p.type === "text" || p.type === "enum"
-                    ? tx(
-                        "文本 / 枚举参数还没有对应的控件类型（选择框卡在 P122）",
-                        "Text and enum parameters have no matching card type yet (the select card is in P122)",
-                      )
-                    : tx(
-                        "在控制画布生成一张滑条卡，值灌进这个参数",
-                        "Create a slider card on the control canvas that feeds this parameter",
-                      )
-                }
-                onClick={() => spawnSliderCard(p.id)}
+                type="button"
+                className="props-item-head"
+                aria-expanded={open}
+                onClick={() => setOpenParams((m2) => ({ ...m2, [p.id]: !open }))}
+                title={bound ? tx("当前块用的就是这个参数", "The selected block uses this parameter") : tx("展开来改它的默认值与范围", "Expand to edit its default and range")}
               >
-                {tx("生成控件", "Add control")}
+                <span className="props-item-name">{p.name}</span>
+                <span className="props-item-tag">{p.type}</span>
+                {bound && <span className="props-item-flag">{tx("当前块", "this block")}</span>}
+                <span className="props-item-arrow"><IconChevron size={12} dir={open ? "down" : "right"} /></span>
               </button>
-            </FormRow>
-            <FormRow label={tx("类型", "Type")}>
-              <select
-                className="input"
-                value={p.type}
-                onChange={(e) => sendStore.patchParam(tpl.id, p.id, { type: e.target.value as SendParamType })}
-              >
-                {(p.type === "enum" ? [...PARAM_TYPES, "enum" as SendParamType] : PARAM_TYPES).map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </FormRow>
-            <FormRow label={tx("默认值", "Default")}>
-              <TextInput value={p.def} placeholder="0" onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { def: v })} />
-            </FormRow>
-            {p.type !== "text" && p.type !== "enum" && (
-              <FormRow label={tx("范围", "Range")}>
-                <span className="form-pair grow">
-                  <NumInput
-                    value={p.min ?? 0}
-                    title={tx("最小值：生成滑条卡时当滑条下限", "Minimum — the lower bound of a generated slider")}
-                    onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { min: v })}
-                  />
-                  <NumInput
-                    value={p.max ?? 100}
-                    title={tx("最大值：生成滑条卡时当滑条上限", "Maximum — the upper bound of a generated slider")}
-                    onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { max: v })}
-                  />
-                </span>
-              </FormRow>
-            )}
-            {p.type === "enum" && (
-              <div className="props-hint">
-                {tx("档位表还不能在这里编辑：导进来的谱原样保留，改不了", "The option table isn't editable here yet — imported specs keep theirs untouched")}
-              </div>
-            )}
-          </div>
-        ))}
+              {open && (
+                <div className="props-item-body">
+                  <FormRow label={tx("名字", "Name")}>
+                    <TextInput value={p.name} onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { name: v })} />
+                  </FormRow>
+                  <FormRow label={tx("类型", "Type")}>
+                    <select
+                      className="input"
+                      value={p.type}
+                      onChange={(e) => sendStore.patchParam(tpl.id, p.id, { type: e.target.value as SendParamType })}
+                    >
+                      {(p.type === "enum" ? [...PARAM_TYPES, "enum" as SendParamType] : PARAM_TYPES).map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </FormRow>
+                  <FormRow label={tx("默认值", "Default")} title={tx("默认值就是发出去的那一帧里的值", "The default is what goes out")}>
+                    <TextInput value={p.def} placeholder="0" onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { def: v })} />
+                  </FormRow>
+                  {p.type !== "text" && p.type !== "enum" && (
+                    <FormRow label={tx("范围", "Range")}>
+                      <span className="form-pair grow">
+                        <NumInput
+                          value={p.min ?? 0}
+                          title={tx("最小值：生成滑条卡时当滑条下限", "Minimum — the lower bound of a generated slider")}
+                          onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { min: v })}
+                        />
+                        <NumInput
+                          value={p.max ?? 100}
+                          title={tx("最大值：生成滑条卡时当滑条上限", "Maximum — the upper bound of a generated slider")}
+                          onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { max: v })}
+                        />
+                      </span>
+                    </FormRow>
+                  )}
+                  {p.type === "enum" && (
+                    <div className="props-hint">
+                      {tx("档位表还不能在这里编辑：导进来的谱原样保留，改不了", "The option table isn't editable here yet — imported specs keep theirs untouched")}
+                    </div>
+                  )}
+                  <button
+                    className="btn"
+                    disabled={p.type === "text" || p.type === "enum"}
+                    title={
+                      p.type === "text" || p.type === "enum"
+                        ? tx(
+                            "文本 / 枚举参数还没有对应的控件类型（选择框卡在 P122）",
+                            "Text and enum parameters have no matching card type yet (the select card is in P122)",
+                          )
+                        : tx(
+                            "在控制画布生成一张滑条卡，值灌进这个参数",
+                            "Create a slider card on the control canvas that feeds this parameter",
+                          )
+                    }
+                    onClick={() => spawnSliderCard(p.id)}
+                  >
+                    {tx("生成控件", "Add control")}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
         {!tpl.params.length && (
           <div className="props-hint">
             {tx("没有参数：把某块的来源选成「参数」就有了", "No parameters — set a block’s source to Parameter")}
@@ -514,7 +542,6 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
         <div className="props-hint">
           {tx("默认值就是发出去的那一帧里的值；要临时改一版，在命令或卡片上覆盖它。", "The default is what goes out; override it per command or card for a one-off value.")}
         </div>
-      </Section>
 
       <Section title={tx("校验", "Checksum")}>
         <FormRow label={tx("算法", "Algorithm")}>

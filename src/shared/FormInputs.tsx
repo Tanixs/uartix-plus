@@ -70,13 +70,20 @@ export function TextInput({
   );
 }
 
-/** 一行：一个标签 + 若干控件（成对控件直接放进 children，`form-pair` 那层由调用方管） */
+/**
+ * 一行：一个标签 + 若干控件（成对控件直接放进 children，`form-pair` 那层由调用方管）。
+ *
+ * 标签必须是 `<label>` 这个**元素**，不是 `<span>`：样式只写在 `.form-row > label`
+ * （56px 宽、右对齐、`--fs-sm`）与 `.form-pair > label` 上，而 `body` 不设字号 ——
+ * 写成 span 就没人管，退回浏览器默认 16px，同一个属性页里两边字号就分叉了（P124-A 修的就是这个）。
+ * 外层也不能是 `<label>`：那会变成 label 套 label，非法 HTML，点击行为不可预期。
+ */
 export function FormRow(props: { label: string; title?: string; children: ReactNode }) {
   return (
-    <label className="form-row" title={props.title}>
-      <span>{props.label}</span>
+    <div className="form-row">
+      <label title={props.title}>{props.label}</label>
       {props.children}
-    </label>
+    </div>
   );
 }
 
