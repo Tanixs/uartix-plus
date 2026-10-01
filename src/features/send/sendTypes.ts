@@ -45,6 +45,33 @@ export interface SendField {
 
 export type SendParamType = "int" | "uint" | "float" | "text" | "enum";
 
+/**
+ * 发送谱上「一块」能标哪些角色。料板/属性行（`SendBuildPanel`）与 AI 产谱（`aiActions`）
+ * 共用这一份，两边不许各持一张表。
+ *
+ * 刻意**不含 `checksum2`**：接收侧有附加校验，发送侧的编码器第三趟只 `find` 得到第一个
+ * 校验段，第二个会留在 0x00——那是一扇看着能推、推开是空房间的门（与"缺值就报错不静默"
+ * 这条编码器规矩同一路）。真要用两段校验（匿名 V7 的 SC+AC），得先把编码器补成按段各算。
+ */
+export const SEND_FIELD_ROLES: FieldRole[] = [
+  "header",
+  "addr",
+  "id",
+  "seq",
+  "length",
+  "data",
+  "payload",
+  "checksum",
+  "footer",
+];
+
+/**
+ * 字段类型 → 参数类型：u16 块不该自动长出一个带参数的有符号 int。
+ * 组帧台（料板与参数行）与 AI 产谱共用这一份，两边不许各猜一张表。
+ */
+export const paramTypeOf = (t: FieldType): SendParamType =>
+  t === "float32" || t === "float64" ? "float" : t.startsWith("u") ? "uint" : "int";
+
 export interface SendParam {
   id: string;
   name: string;

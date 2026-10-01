@@ -34,6 +34,7 @@ import { buildEvidence } from "../xray/xrayEvidence";
 import { AREA_LABEL, type MbArea } from "../modbus/mb";
 import {
   writeTemplateFromAiJson,
+  writeSendSpecFromAiJson,
   writeCommandFromAiJson,
   writeCardFromAiJson,
   writeCodecFromAiJson,
@@ -298,9 +299,11 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
     case "writeCard":
     case "writeCommand":
     case "writeTemplate":
+    case "writeSendSpec":
     case "writeCodec": {
       const helper = { writeCard: writeCardFromAiJson, writeCommand: writeCommandFromAiJson,
-        writeTemplate: writeTemplateFromAiJson, writeCodec: writeCodecFromAiJson }[kind];
+        writeTemplate: writeTemplateFromAiJson, writeSendSpec: writeSendSpecFromAiJson,
+        writeCodec: writeCodecFromAiJson }[kind];
       const result = helper(String(a.json ?? "{}"));
       // 真实结构化回执（P88b §3.2-1）：helper 的 ok 决定动作成败，
       // 旧实现在 HEAD 上直接 `.msg` 返回，验证失败会被当成成功上送给 loop。

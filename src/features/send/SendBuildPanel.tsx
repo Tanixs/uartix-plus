@@ -56,7 +56,9 @@ import {
   type GridBlock,
 } from "./byteGrid";
 import {
+  SEND_FIELD_ROLES,
   moveTargetIndex,
+  paramTypeOf,
   type SendField,
   type SendParamType,
   type SendTemplate,
@@ -67,10 +69,6 @@ import {
  * 给一个"选了却没法填"的选项就是假开关；但**已有** enum 参数的谱（导进来的）照样显示原值。
  */
 const PARAM_TYPES: SendParamType[] = ["int", "uint", "float", "text"];
-
-/** 字段类型 → 参数类型：u16 块不该自动长出一个带符号的 int 参数 */
-const paramTypeOf = (t: FieldType): SendParamType =>
-  t === "float32" || t === "float64" ? "float" : t.startsWith("u") ? "uint" : "int";
 
 /** 料板：每一项就是一个字段预设。顺序即界面顺序，按"结构件 → 数值 → 文本 → 计算件"排 */
 const PALETTE: { key: string; label: () => string; make: () => Omit<SendField, "id"> }[] = [
@@ -93,7 +91,6 @@ const PALETTE: { key: string; label: () => string; make: () => Omit<SendField, "
 
 const TYPES: FieldType[] = ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64", "ascii", "bcd", "bits"];
 const ENDIANS: Endian[] = ["big", "little", "big-word-swap", "little-word-swap"];
-const ROLES: FieldRole[] = ["header", "addr", "id", "seq", "length", "data", "payload", "checksum", "footer"];
 const CK_ALGOS: ChecksumAlgo[] = [
   "none",
   "sum8",
@@ -1047,7 +1044,7 @@ export function SendBuildPanel() {
                 <label className="sb-row">
                   <span>{tx("角色", "Role")}</span>
                   <select className="input" value={field.role} onChange={(e) => patchSel({ role: e.target.value as FieldRole })}>
-                    {ROLES.map((x) => (
+                    {SEND_FIELD_ROLES.map((x) => (
                       <option key={x} value={x}>
                         {roleLabel(x)}
                       </option>

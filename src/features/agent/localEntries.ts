@@ -262,7 +262,7 @@ export const localToolEntries: AgentToolEntry[] = [
     effect: "read",
     domain: null,
     provenance: HOST,
-    description: "Run a named app action (openPanel/setTheme/applyPreset/addChannel/writeCard/writeTemplate/writeCommand/writeCodec/listProtocols/listCommands/listCards/xrayEvidence/…). Args: { kind: string, args?: object }. Deletion, overwrite, device send and protected operations require local approval and return needs_local_approval with the plan.",
+    description: "Run a named app action (openPanel/setTheme/applyPreset/addChannel/writeCard/writeTemplate/writeSendSpec/writeCommand/writeCodec/listProtocols/listCommands/listCards/xrayEvidence/…). Args: { kind: string, args?: object }. Deletion, overwrite, device send and protected operations require local approval and return needs_local_approval with the plan.",
     parameters: { type: "object", properties: { kind: { type: "string" }, args: { type: "object" } }, required: ["kind"], additionalProperties: false },
     summarize: (a) => {
       const kind = String(a.kind ?? "");

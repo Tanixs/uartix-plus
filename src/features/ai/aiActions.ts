@@ -10,8 +10,18 @@ import type {
   FrameTemplate,
   ValueLabel,
 } from "../../ipc/types";
-import { crcParamError } from "../../shared/checksums";
+import { checksumWidth, crcParamError } from "../../shared/checksums";
 import * as templateStore from "../protocol/templateStore";
+import * as sendStore from "../send/sendStore";
+import { encodeSend, SendEncodeError } from "../send/encodeSend";
+import {
+  SEND_FIELD_ROLES,
+  paramTypeOf,
+  type SendField,
+  type SendParam,
+  type SendTemplate,
+} from "../send/sendTypes";
+import { guardLocked } from "../operator/lock";
 import * as commandStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
 import { validateUserCodec, buildUserFrame, type UserSeg } from "../console/commandFactory";
@@ -620,4 +630,209 @@ export function writeCardsFromAiJson(raw: string): WriteResult {
     ok: true,
     msg: `${okCount} 张卡片已写入控制页「${pageName}」（自动流式排布）：${names.join("、")}`,
   };
+}
+
+/* ================= P121-E · AI 写发送谱 ================= */
+
+const SEND_ENDIANS: Endian[] = ["big", "little", "big-word-swap", "little-word-swap"];
+const SEND_COVERS = ["self", "after", "body"];
+let sendUid = 0;
+const snid = (p: string) => `${p}-ai-${Date.now().toString(36)}-${(sendUid++).toString(36)}`;
+
+/**
+ * AI 产谱（P121-E 的另一半）。三条不让步的规矩：
+ *
+ *  1. **整张谱试编得出来才写入**：编不出就把编码器的原话回给模型，不写半张进去。
+ *     这一步顺带替模型验了它最容易写错的三处：校验段的宽度与算法是否自洽、
+ *     参数块引用了谁、选了算法却忘了放校验段。
+ *  2. 参数写在**块上**（`source.param` 给个名字），id 由这里统一铸 —— 让模型自己管 id
+ *     只会造出悬空引用，而那正是这批一直在消的症状。同名参数复用同一个 id：
+ *     两块吃同一个参数是合法配置（高字节/低字节那一类）。
+ *  3. 只新增：落库走 `sendStore.importTemplates`（重名加序号），所以它是新建草稿那一档，
+ *     不是覆盖用户的东西。
+ *
+ * 锁着的时候 `importTemplates` 会静默返回 0，那样模型收到一次"成功"。所以这里先问锁并把
+ * 原因回给它 —— 假成功比失败难查得多（`writeTemplate` 现在就有这个毛病，另账处理）。
+ */
+export function writeSendSpecFromAiJson(raw: string): WriteResult {
+  if (guardLocked()) {
+    return { ok: false, msg: "Operator 只读锁开着：可以读谱与命令，但不能新建/改写发送谱" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, msg: "JSON 解析失败：代码块内容不是合法 JSON" };
+  }
+  let list: unknown[] | null = null;
+  if (Array.isArray(parsed)) list = parsed;
+  else if (parsed && typeof parsed === "object" && Array.isArray((parsed as { templates?: unknown }).templates)) {
+    list = (parsed as { templates: unknown[] }).templates;
+  }
+  if (!list) {
+    if (!parsed || typeof parsed !== "object") return { ok: false, msg: "JSON 顶层既不是谱对象也不是 templates 数组" };
+    list = [parsed];
+  }
+  if (!list.length) return { ok: false, msg: "templates 数组是空的" };
+  if (list.length > 16) list = list.slice(0, 16);
+
+  const made: SendTemplate[] = [];
+  const errs: string[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") {
+      errs.push("有一项不是对象");
+      continue;
+    }
+    const r = parseOneSendSpec(item as Record<string, unknown>);
+    if (r.err) errs.push(r.err);
+    else if (r.tpl) made.push(r.tpl);
+  }
+  if (!made.length) {
+    return { ok: false, msg: `没有一张谱能写入：${errs.slice(0, 3).join("；") || "未知原因"}` };
+  }
+  const beforeIds = new Set(sendStore.getSnapshot().map((t) => t.id));
+  const n = sendStore.importTemplates(made);
+  if (!n) return { ok: false, msg: "写入返回 0 —— 谱没有落进面板，请把这一步反馈给用户" };
+  // 面板要显示的是刚写进来那一张，不是用户上一刻正在编的别张谱（与「预设」载入同一行为）。
+  // `importTemplates` 会重铸 id，所以只能前后对表找出新增的那些。
+  const added = sendStore.getSnapshot().filter((t) => !beforeIds.has(t.id));
+  if (added.length) sendStore.requestSelect(added[added.length - 1].id);
+  requestOpenPanel("sendbuild");
+  const names = made.slice(0, n).map((t) => t.name).join("、");
+  return {
+    ok: true,
+    msg:
+      `${n} 张发送谱已写入 TX组帧台：${names}` +
+      (errs.length ? `；另有 ${errs.length} 张被拒绝：${errs.slice(0, 2).join("；")}` : "") +
+      "（每张都试编过一遍才写入）",
+  };
+}
+
+function parseOneSendSpec(o: Record<string, unknown>): { tpl?: SendTemplate; err?: string } {
+  const name = typeof o.name === "string" && o.name.trim() ? o.name.trim() : "AI 发送谱";
+  const rawFields = Array.isArray(o.fields) ? o.fields : null;
+  if (!rawFields || !rawFields.length) return { err: `谱「${name}」没有 fields（要发的字节按块描述）` };
+  if (rawFields.length > 64) return { err: `谱「${name}」有 ${rawFields.length} 块，上限 64` };
+
+  const params: SendParam[] = [];
+  const pidOf = new Map<string, string>();
+  const fields: SendField[] = [];
+
+  for (let i = 0; i < rawFields.length; i++) {
+    const fo = rawFields[i] as Record<string, unknown>;
+    if (!fo || typeof fo !== "object") return { err: `谱「${name}」第 ${i + 1} 块不是对象` };
+    const fname = typeof fo.name === "string" && fo.name.trim() ? fo.name.trim() : `块${i + 1}`;
+    if (!FIELD_TYPES.includes(String(fo.type) as FieldType)) {
+      return { err: `块「${fname}」的类型「${String(fo.type)}」不在允许集里：${FIELD_TYPES.join("/")}` };
+    }
+    const type = fo.type as FieldType;
+    if (type === "csv") return { err: `块「${fname}」是 csv —— 那是解析侧的显示类型，发不出去（改用 ascii）` };
+    const endian = SEND_ENDIANS.includes(fo.endian as Endian) ? (fo.endian as Endian) : "big";
+    // 发送侧的校验只有一段：编码器第三趟 `find` 到第一个校验段就 splice 完事，
+    // 第二个校验块会留在 0x00。所以这里明拒，而不是悄悄降成 data 让它"看着对"。
+    if (fo.role === "checksum2") {
+      return { err: `块「${fname}」标成 checksum2 —— 发送谱目前只算一段校验（第二段的字节没人填），要两段校验先改用一段或到面板里手改` };
+    }
+    const role = SEND_FIELD_ROLES.includes(fo.role as FieldRole) ? (fo.role as FieldRole) : "data";
+    const size = toInt(fo.size);
+    const src = (fo.source ?? {}) as Record<string, unknown>;
+    const kind = typeof src.kind === "string" ? src.kind : "const";
+
+    let source: SendField["source"];
+    if (kind === "const") {
+      const b = toBytes(src.bytes);
+      if (!b) return { err: `块「${fname}」的 const 需要 bytes：0~255 的整数数组` };
+      source = { kind: "const", bytes: b };
+    } else if (kind === "param") {
+      const pname = typeof src.param === "string" && src.param.trim() ? src.param.trim() : "";
+      if (!pname) return { err: `块「${fname}」要绑参数却没给名字（source.param）` };
+      let pid = pidOf.get(pname);
+      if (!pid) {
+        pid = snid("sp");
+        pidOf.set(pname, pid);
+        const mn = toInt(src.min);
+        const mx = toInt(src.max);
+        params.push({
+          id: pid,
+          name: pname,
+          type: paramTypeOf(type),
+          def: String(src.def ?? "0"),
+          ...(mn === null ? {} : { min: mn }),
+          ...(mx === null ? {} : { max: mx }),
+        });
+      }
+      source = { kind: "param", paramId: pid };
+    } else if (kind === "var") {
+      const v = typeof src.name === "string" ? src.name.trim() : "";
+      if (!v) return { err: `块「${fname}」要取解析变量却没给变量名（source.name）` };
+      source = { kind: "var", name: v };
+    } else if (kind === "seq") {
+      const st = toInt(src.step);
+      const wr = toInt(src.wrap);
+      source = { kind: "seq", ...(st ? { step: st } : {}), ...(wr ? { wrap: wr } : {}) };
+    } else if (kind === "len") {
+      const covers = SEND_COVERS.includes(String(src.covers)) ? (src.covers as "self" | "after" | "body") : "after";
+      const adj = toInt(src.adjust);
+      source = { kind: "len", covers, ...(adj === null ? {} : { adjust: adj }) };
+    } else {
+      return { err: `块「${fname}」的来源「${kind}」不认识（const / param / var / seq / len）` };
+    }
+
+    const bt = fo.bits as Record<string, unknown> | undefined;
+    const bi = toInt(bt?.index);
+    const bc = toInt(bt?.count);
+    fields.push({
+      id: snid("sf"),
+      name: fname,
+      type,
+      endian,
+      role,
+      ...(size === null ? {} : { size }),
+      ...(type === "bits" && bc !== null ? { bits: { index: bi ?? 0, count: bc } } : {}),
+      source,
+    });
+  }
+
+  let checksum: SendTemplate["checksum"] = null;
+  const ck = o.checksum as Record<string, unknown> | undefined;
+  const algo = typeof ck?.algo === "string" ? ck.algo : "";
+  if (algo && algo !== "none") {
+    if (!CHECKSUM_ALGOS.includes(algo as ChecksumAlgo)) return { err: `谱「${name}」的校验算法「${algo}」不认识` };
+    let crc: CrcParams | null = null;
+    if (algo === "crc_custom") {
+      const parsedCrc = parseCrcParams(ck?.crc);
+      if (!parsedCrc) return { err: `谱「${name}」的 crc_custom 要给全 width/poly/init/refin/refout/xorout（位数 8/16/32）` };
+      crc = parsedCrc;
+    }
+    const cs = toInt(ck?.coverageStart);
+    const ce = toInt(ck?.coverageEnd);
+    checksum = {
+      algo: algo as ChecksumAlgo,
+      coverageStart: cs ?? 0,
+      coverageEnd: ce ?? -checksumWidth(algo, crc),
+      ...(crc ? { crc } : {}),
+    };
+  }
+
+  const draft: SendTemplate = {
+    id: snid("st"),
+    name,
+    note: typeof o.note === "string" ? o.note : "由 AI 助手生成",
+    fields,
+    params,
+    checksum,
+    nextSeq: 0,
+    createdAt: Date.now(),
+  };
+  // 这道闸替代了"看起来配上了"：编不出帧就整张拒收，编码器点名是哪一块。
+  // 变量块给 "0" 占位——它此刻没有值是**正常的**（要等解析到那一帧才有值），
+  // 试编问的只是结构（宽度、校验自不自洽、参数引没引到），不是值。
+  const probeVars: Record<string, number | string> = {};
+  for (const f of fields) if (f.source.kind === "var") probeVars[f.source.name] = "0";
+  try {
+    encodeSend(draft, { seq: 0, vars: probeVars });
+  } catch (e) {
+    return { err: `谱「${name}」编不出帧：${e instanceof SendEncodeError ? e.message : String(e)}` };
+  }
+  return { tpl: draft };
 }

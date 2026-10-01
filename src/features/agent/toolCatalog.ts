@@ -42,6 +42,7 @@ const META: Record<AppActionKind, ToolPolicyMeta> = {
   writeCard: { effect: "draft_write", idempotent: false, reversible: true, mayTouchDevice: false },
   writeCommand: { effect: "draft_write", idempotent: false, reversible: true, mayTouchDevice: false },
   writeTemplate: { effect: "draft_write", idempotent: false, reversible: true, mayTouchDevice: false },
+  writeSendSpec: { effect: "draft_write", idempotent: false, reversible: true, mayTouchDevice: false },
   writeCodec: { effect: "draft_write", idempotent: false, reversible: true, mayTouchDevice: false },
 
   // —— 修改既有用户对象（HANDOVER §6.3：覆盖用户已定义内容需人工批准）——
@@ -81,7 +82,7 @@ export const ACTION_LABEL_ZH: Record<AppActionKind, string> = {
   openPanel: "打开面板", applyPreset: "应用预设", setTheme: "切换主题",
   listProtocols: "列出协议模板", listCommands: "列出指令", listCards: "列出卡片", listWidgets: "列出小部件",
   addChannel: "新增通道", clearChannels: "清空通道",
-  writeCard: "新建控制卡片", writeCommand: "新建指令", writeTemplate: "写入协议模板", writeCodec: "写入编码配置",
+  writeCard: "新建控制卡片", writeCommand: "新建指令", writeTemplate: "写入协议模板", writeSendSpec: "写入发送谱", writeCodec: "写入编码配置",
   patchCard: "修改卡片", addPage: "新增页", clearPage: "清空页",
   removeCard: "删除卡片", removeProtocol: "删除协议模板", removeCommand: "删除指令", removeCodec: "删除编码配置", removeWidget: "删除小部件",
   openPort: "打开串口", closePort: "关闭串口", modbus: "Modbus 工作台", xferStart: "启动文件传输",

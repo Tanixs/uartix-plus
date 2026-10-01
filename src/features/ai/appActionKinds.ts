@@ -42,6 +42,7 @@ export const APP_ACTION_KINDS = [
   "writeCard",
   "writeCommand",
   "writeTemplate",
+  "writeSendSpec",
   "writeCodec",
   "clearPage",
   "patchCard",

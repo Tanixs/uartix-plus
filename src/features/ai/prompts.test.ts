@@ -10,7 +10,9 @@
 import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
 import { describe, expect, it } from "vitest";
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
-import { buildSystemPrompt, schemaFor } from "./prompts";
+import { buildSystemPrompt, routeNeeds, schemaFor } from "./prompts";
+import { SEND_FIELD_ROLES } from "../send/sendTypes";
+import { FIELD_SIZES } from "../protocol/fieldTypes";
 
 const qaPrompt = buildSystemPrompt("qa", "（无）");
 
@@ -139,3 +141,41 @@ describe("P115-D · 知识面认得现在这套壳", () => {
   });
 });
 
+
+/* ================= P121-E · AI 产发送谱：教的必须等于收的 =================
+ * `writeSendSpec` 收哪几种来源/角色/类型，是 `aiActions.parseOneSendSpec` 那三张白名单定的；
+ * 提示词这边是模型唯一能看到的说明书。两边漂开的方向有两种，都会红：
+ *  少教 ⇒ 模型只能凭记忆猜（猜出来的谱在落库前就被编码器拒了，用户看到的是"AI 一直失败"）；
+ *  多教 ⇒ 教了一个软件不认的写法（如发送侧的 checksum2：编码器只填第一段校验，
+ *         第二段会留在 0x00，那是一张"看着配上了"的帧）。
+ */
+describe("P121-E · writeSendSpec 进了知识面，且说明书不超能力", () => {
+  it("速览不再宣称「没有写发送谱的动作」", () => {
+    expect(qaPrompt).not.toContain("你目前没有写发送谱的动作");
+    expect(qaPrompt).toContain("writeSendSpec");
+  });
+
+  it("动作规范里有 writeSendSpec 那一段，且五种来源一块不少", () => {
+    for (const kind of ["const", "param", "var", "seq", "len"]) {
+      expect(actionSpec, `来源 ${kind} 没教到，模型只能猜`).toContain(`"kind":"${kind}"`);
+    }
+  });
+
+  it("教的角色表与发送谱那张白名单逐字相同", () => {
+    const taught = /·\s*role：([^\s，]+)/.exec(actionSpec)?.[1]?.split("/") ?? [];
+    expect(taught.sort()).toEqual([...SEND_FIELD_ROLES].sort());
+  });
+
+  it("类型表里没有 csv：它是解析侧的显示类型，发不出去", () => {
+    const taught = /·\s*type：([^\n]+)/.exec(actionSpec)?.[1]?.split("/") ?? [];
+    expect(taught.length, "type 那一行没解析出来（改文案时把格式带跑了）").toBeGreaterThan(0);
+    expect(taught).not.toContain("csv");
+    // 教的就是宽表里能编的那些（`FIELD_SIZES` 减 csv）——两边同源于类型表，不是同源于另一份手抄
+    expect(taught.sort()).toEqual(Object.keys(FIELD_SIZES).filter((k) => k !== "csv").sort());
+  });
+
+  it("用户只说「组一帧要发的字节」，这段格式也会被带进上下文", () => {
+    expect(routeNeeds("帮我组一帧要发的字节")).toContain("action");
+    expect(routeNeeds("做一张发送谱")).toContain("action");
+  });
+});
