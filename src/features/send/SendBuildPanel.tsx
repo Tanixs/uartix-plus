@@ -65,22 +65,38 @@ import {
  */
 
 /** 料板：每一项就是一个字段预设。顺序即界面顺序，按"结构件 → 数值 → 文本 → 计算件"排 */
-const PALETTE: { key: string; label: () => string; make: () => Omit<SendField, "id"> }[] = [
-  { key: "header", label: () => tx("帧头", "Header"), make: () => ({ name: tx("帧头", "Header"), type: "uint8", endian: "big", role: "header", source: { kind: "const", bytes: [0xaa] } }) },
-  { key: "const", label: () => tx("固定字节", "Fixed bytes"), make: () => ({ name: "00", type: "uint8", endian: "big", role: "data", source: { kind: "const", bytes: [0x00] } }) },
-  { key: "u8", label: () => "u8", make: () => ({ name: "u8", type: "uint8", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
-  { key: "u16", label: () => "u16", make: () => ({ name: "u16", type: "uint16", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
-  { key: "u32", label: () => "u32", make: () => ({ name: "u32", type: "uint32", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
-  { key: "i16", label: () => "i16", make: () => ({ name: "i16", type: "int16", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
-  { key: "f32", label: () => "f32", make: () => ({ name: "f32", type: "float32", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
-  { key: "f64", label: () => "f64", make: () => ({ name: "f64", type: "float64", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
-  { key: "bcd", label: () => "BCD", make: () => ({ name: "bcd", type: "bcd", size: 2, endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
-  { key: "bits", label: () => tx("位段", "Bits"), make: () => ({ name: "bit", type: "bits", endian: "big", role: "data", bits: { index: 0, count: 1 }, source: { kind: "param", paramId: "" } }) },
-  { key: "ascii", label: () => tx("文本", "Text"), make: () => ({ name: "txt", type: "ascii", size: 4, endian: "big", role: "payload", source: { kind: "param", paramId: "" } }) },
-  { key: "seq", label: () => tx("帧序号", "Sequence"), make: () => ({ name: "seq", type: "uint8", endian: "big", role: "seq", source: { kind: "seq" } }) },
-  { key: "len", label: () => tx("长度域", "Length"), make: () => ({ name: "len", type: "uint8", endian: "big", role: "length", source: { kind: "len", covers: "after" } }) },
-  { key: "ck", label: () => tx("校验段", "Checksum"), make: () => ({ name: "ck", type: "uint8", endian: "big", role: "checksum", source: { kind: "const", bytes: [] } }) },
-  { key: "footer", label: () => tx("帧尾", "Footer"), make: () => ({ name: tx("帧尾", "Footer"), type: "uint8", endian: "big", role: "footer", source: { kind: "const", bytes: [0x55] } }) },
+type PalGroup = "struct" | "num" | "text" | "calc";
+
+/**
+ * 料板：每一项就是一个字段预设。
+ *
+ * 以前是 15 项一长条无标题列表 —— 它和字节带的关系全靠猜（P124-C 加分组说清楚）。
+ * 组按"这块的字节是谁定的"分：结构件写死、数值按类型编码、文本跟着值的长短走、
+ * 计算件由编码器回填（序号 / 长度 / 校验）。
+ */
+const PAL_GROUPS: { key: PalGroup; label: () => string }[] = [
+  { key: "struct", label: () => tx("结构件", "Structure") },
+  { key: "num", label: () => tx("数值", "Numbers") },
+  { key: "text", label: () => tx("文本", "Text") },
+  { key: "calc", label: () => tx("计算件", "Computed") },
+];
+
+const PALETTE: { key: string; group: PalGroup; label: () => string; make: () => Omit<SendField, "id"> }[] = [
+  { key: "header", group: "struct", label: () => tx("帧头", "Header"), make: () => ({ name: tx("帧头", "Header"), type: "uint8", endian: "big", role: "header", source: { kind: "const", bytes: [0xaa] } }) },
+  { key: "const", group: "struct", label: () => tx("固定字节", "Fixed bytes"), make: () => ({ name: "00", type: "uint8", endian: "big", role: "data", source: { kind: "const", bytes: [0x00] } }) },
+  { key: "u8", group: "num", label: () => "u8", make: () => ({ name: "u8", type: "uint8", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "u16", group: "num", label: () => "u16", make: () => ({ name: "u16", type: "uint16", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "u32", group: "num", label: () => "u32", make: () => ({ name: "u32", type: "uint32", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "i16", group: "num", label: () => "i16", make: () => ({ name: "i16", type: "int16", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "f32", group: "num", label: () => "f32", make: () => ({ name: "f32", type: "float32", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "f64", group: "num", label: () => "f64", make: () => ({ name: "f64", type: "float64", endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "bcd", group: "num", label: () => "BCD", make: () => ({ name: "bcd", type: "bcd", size: 2, endian: "big", role: "data", source: { kind: "param", paramId: "" } }) },
+  { key: "bits", group: "num", label: () => tx("位段", "Bits"), make: () => ({ name: "bit", type: "bits", endian: "big", role: "data", bits: { index: 0, count: 1 }, source: { kind: "param", paramId: "" } }) },
+  { key: "ascii", group: "text", label: () => tx("文本", "Text"), make: () => ({ name: "txt", type: "ascii", size: 4, endian: "big", role: "payload", source: { kind: "param", paramId: "" } }) },
+  { key: "seq", group: "calc", label: () => tx("帧序号", "Sequence"), make: () => ({ name: "seq", type: "uint8", endian: "big", role: "seq", source: { kind: "seq" } }) },
+  { key: "len", group: "calc", label: () => tx("长度域", "Length"), make: () => ({ name: "len", type: "uint8", endian: "big", role: "length", source: { kind: "len", covers: "after" } }) },
+  { key: "ck", group: "calc", label: () => tx("校验段", "Checksum"), make: () => ({ name: "ck", type: "uint8", endian: "big", role: "checksum", source: { kind: "const", bytes: [] } }) },
+  { key: "footer", group: "struct", label: () => tx("帧尾", "Footer"), make: () => ({ name: tx("帧尾", "Footer"), type: "uint8", endian: "big", role: "footer", source: { kind: "const", bytes: [0x55] } }) },
 ];
 
 
@@ -583,18 +599,23 @@ export function SendBuildPanel() {
       ) : (
         <div className="sb-body">
           <div className="sb-palette" role="group" aria-label={tx("字段料板", "Field palette")}>
-            {PALETTE.map((p) => (
-              <button
-                key={p.key}
-                className="sb-chip sb-palette-chip"
-                title={tx("拖到字节带上，或点一下加到尾部", "Drag onto the byte strip, or click to append")}
-                onPointerDown={(e) =>
-                  beginPointerDrag(e, { kind: "sendspec", data: p.key, label: p.label() })
-                }
-                onClick={() => insertAt(p.key, sendStore.getTemplate(tpl.id)?.fields.length ?? 0)}
-              >
-                {p.label()}
-              </button>
+            {PAL_GROUPS.map((g) => (
+              <Fragment key={g.key}>
+                <div className="sb-pal-h">{g.label()}</div>
+                {PALETTE.filter((p) => p.group === g.key).map((p) => (
+                <button
+                  key={p.key}
+                  className="sb-chip sb-palette-chip"
+                  title={tx("拖到字节带上，或点一下加到尾部", "Drag onto the byte strip, or click to append")}
+                  onPointerDown={(e) =>
+                    beginPointerDrag(e, { kind: "sendspec", data: p.key, label: p.label() })
+                  }
+                  onClick={() => insertAt(p.key, sendStore.getTemplate(tpl.id)?.fields.length ?? 0)}
+                >
+                  {p.label()}
+                </button>
+                ))}
+              </Fragment>
             ))}
           </div>
 

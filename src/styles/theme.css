@@ -11583,6 +11583,8 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-chip b{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-chip i{font-style:normal;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-palette-chip{cursor:grab;}
+/* P124-C：料板分组小标题。15 项一长条无标题列表，和字节带的关系全靠猜。 */
+.sb-pal-h{margin-top:4px;padding:0 2px;font-size:var(--fs-body);letter-spacing:.04em;color:var(--text-faint);user-select:none;}
 /* P122-A 字节带 = 字节网格：一格一个将要发出的字节，行首那条是偏移尺。
    P123-B 起格宽不再写死在这儿：面板按设置项算出 `--sb-cell`，段宽 = 占的格数 × (格宽 + 缝) - 缝，
    那个间距只从 `byteGrid.pitchOf()` 出一份数（原来 CSS 里还另写了一份 22px，两处写就必然对不齐）。
