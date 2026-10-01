@@ -25,7 +25,7 @@ import * as sendStore from "../send/sendStore";
 import { bindingDetail, bindingLabel, isLinked } from "./cardBinding";
 import { beep } from "./scriptRunner";
 import { WidgetFrame } from "../ai/WidgetFrame";
-import { NumInput, TextInput } from "../protocol/PropertiesPanel";
+import { NumInput, TextInput } from "../../shared/FormInputs";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 

@@ -279,12 +279,14 @@ describe("P121-B2 · 校验字段宽度：数字一份、兜底三条", () => {
     if (!uni) throw new Error("ChecksumAlgo 这个联合类型不见了——表和类型从此没关系了，得重新对");
     const inType = [...uni[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]).sort();
 
+    // P123-C 换了地方：校验算法下拉随发送块编辑面一起搬进了「属性」面板
+    // （`inspector/SendFieldInspector`）。**断言一个字没改** —— 改的是去哪儿找那支清单。
     const panel = readFileSync(
-      fileURLToPath(new URL("../features/send/SendBuildPanel.tsx", import.meta.url)),
+      fileURLToPath(new URL("../features/inspector/SendFieldInspector.tsx", import.meta.url)),
       "utf8",
     );
     const opts = /const CK_ALGOS: ChecksumAlgo\[\] = \[([^\]]*)\]/.exec(panel);
-    if (!opts) throw new Error("TX组帧台的校验算法下拉消失了——面板与类型脱钩了");
+    if (!opts) throw new Error("发送块的校验算法下拉消失了——编辑面与类型脱钩了");
     const inPanel = [...opts[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]).sort();
 
     // 面板能选的必须等于类型全集：少一支是能力面没铺开，多一支是选了算不出来

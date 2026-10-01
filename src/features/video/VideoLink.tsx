@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { onRx } from "../../ipc/binbus";
 import { EmptyState } from "../../shared/EmptyState";
-import { NumInput, TextInput } from "../protocol/PropertiesPanel";
+import { NumInput, TextInput } from "../../shared/FormInputs";
 import { IconDownload, IconFlipH, IconFlipV, IconPause, IconPlay, IconTune, IconTrash } from "../../shared/icons";
 import { t, tx, useLocale } from "../../i18n/strings";
 

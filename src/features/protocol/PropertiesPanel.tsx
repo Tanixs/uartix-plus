@@ -29,66 +29,12 @@ import {
 import { formatLabelSpec, parseLabelSpec } from "../../shared/valueLabels";
 import { tx, useLocale } from "../../i18n/strings";
 import { Glyph } from "../../shared/icons";
-
-export function NumInput({
-  value,
-  onCommit,
-  width,
-  title,
-}: {
-  value: number;
-  onCommit: (v: number) => void;
-  width?: number;
-  title?: string;
-}) {
-  const [txt, setTxt] = useState(String(value));
-  useEffect(() => setTxt(String(value)), [value]);
-  const commit = () => {
-    const v = parseFloat(txt.replace(",", "."));
-    if (!Number.isNaN(v)) onCommit(v);
-    else setTxt(String(value));
-  };
-  return (
-    <input
-      className="input num"
-      style={width ? { width } : { flex: "1 1 90px", minWidth: 56 }}
-      title={title}
-      value={txt}
-      onChange={(e) => setTxt(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === "Enter" && commit()}
-    />
-  );
-}
-
-export function TextInput({
-  value,
-  onCommit,
-  width,
-  placeholder,
-}: {
-  value: string;
-  onCommit: (v: string) => void;
-  width?: number;
-  placeholder?: string;
-}) {
-  const [txt, setTxt] = useState(value);
-  useEffect(() => setTxt(value), [value]);
-  const commit = () => {
-    if (txt !== value) onCommit(txt);
-  };
-  return (
-    <input
-      className="input"
-      style={width ? { width } : { flex: "1 1 110px", minWidth: 70 }}
-      placeholder={placeholder}
-      value={txt}
-      onChange={(e) => setTxt(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => e.key === "Enter" && commit()}
-    />
-  );
-}
+// P123-C：行控件搬到 shared（发送侧的块编辑面也要用它们，而它由本文件渲染 ——
+// 留在原地就是一个组件与它的使用者互相 import 的环）
+import { NumInput, TextInput } from "../../shared/FormInputs";
+import { useInspectorFocus } from "../inspector/focus";
+import { roleNames } from "../inspector/roleNames";
+import { SendFieldInspector } from "../inspector/SendFieldInspector";
 
 function HexBytesInput({
   value,
@@ -159,10 +105,6 @@ const FIELD_TYPES: FieldType[] = [
   "float32", "float64", "ascii", "bcd", "bits", "csv",
 ];
 const ROLES: FieldRole[] = ["header", "addr", "id", "length", "seq", "payload", "data", "checksum", "checksum2", "footer"];
-const roleNames = (): Record<FieldRole, string> => ({
-  header: tx("帧头", "Header"), addr: tx("目标地址", "Address"), id: tx("功能码", "Command ID"), length: tx("数据长度", "Length"), seq: tx("序号", "Seq"),
-  payload: tx("数据载荷", "Payload"), data: tx("数据内容", "Data"), checksum: tx("和校验", "Checksum"), checksum2: tx("附加校验", "Checksum2"), footer: tx("帧尾", "Footer"),
-});
 const ALGOS: { id: ChecksumAlgo; name: () => string }[] = [
   { id: "sum8", name: () => tx("累加和 Sum8", "Sum8") },
   { id: "sumadd", name: () => tx("双重累加 Sum+Add (匿名V7)", "Sum+Add (AnoV7)") },
@@ -263,6 +205,18 @@ export function PropertiesPanel() {
     apply?: () => void;
     applyLabel?: string;
   } | null>(null);
+
+  /**
+   * P123-C：一个属性页、两套 section。最后被点的是发送谱上的一块，这一面就整页换成
+   * 那一侧的编辑面（`SendFieldInspector`）—— 不是叠在下面，也不是弹个浮层：
+   * 同一件事不该有两个地方看，那正是这批要收的债。
+   *
+   * 位置在所有 Hook 之后：早退如果夹在 Hook 中间，React 的调用顺序就变了（rules-of-hooks 判红）。
+   */
+  const focus = useInspectorFocus();
+  if (focus?.side === "tx") {
+    return <SendFieldInspector specId={focus.id} fieldId={focus.fieldId} />;
+  }
 
   if (!sel) {
     return (

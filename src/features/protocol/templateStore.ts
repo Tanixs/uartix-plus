@@ -4,6 +4,7 @@ import { guardLocked } from "../operator/lock";
 import { dropFieldValues } from "./telemetryStore";
 import { fieldSize } from "./fieldTypes";
 import { checksumTail, effRange, footerTail } from "../framecanvas/frameLayout";
+import { setInspectorFocus } from "../inspector/focus";
 import { CHECKSUM_WIDTHS, CRC_DEFAULT, crcParamError } from "../../shared/checksums";
 import type {
   ChecksumAlgo,
@@ -620,6 +621,12 @@ export async function init() {
 
 export function setSelection(sel: Selection) {
   set({ selection: sel });
+  // P123-C：「属性」面板现在同时服务解析协议与发送谱，谁被最后点了一下它就显示谁。
+  // rx 的真值仍然是这里的 selection（帧画布/字段图例还照旧读它），这一句只是把
+  // "注意力"单向同步给那个共用页面 —— 它不反过来写这里。
+  setInspectorFocus(
+    sel === null ? null : { side: "rx", id: sel.templateId, fieldId: sel.kind === "field" ? sel.fieldId : "" },
+  );
 }
 
 export function setHexSelection(sel: HexSelection | null) {

@@ -7,7 +7,7 @@ import type { SendMode } from "./controlsStore";
 import { useSettings } from "../settings/settingsStore";
 import { bakeReferenceFrame, runCommand } from "./cmdExec";
 import * as sendStore from "../send/sendStore";
-import { TextInput } from "../protocol/PropertiesPanel";
+import { TextInput } from "../../shared/FormInputs";
 import { IconChevron, IconClose } from "../../shared/icons";
 import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";

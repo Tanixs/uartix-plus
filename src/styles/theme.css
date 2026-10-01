@@ -11627,17 +11627,9 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-r-length,.sb-r-checksum,.sb-r-checksum2{--blk:var(--warn);}
 .sb-r-seq{--blk:var(--ok);}
 .sb-r-data,.sb-r-payload{--blk:var(--text-dim);}
-.sb-side{flex:none;width:240px;display:flex;flex-direction:column;gap:8px;overflow:auto;}
-.sb-row{display:flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--text-dim);}
-.sb-row>span:first-child{flex:none;width:74px;}
-.sb-row>.input{flex:1;min-width:0;}
-/* 一个参数的编辑器：名字 / 类型 / 默认值 / 范围 各一行（P121-D4）。
-   不加 border——G 门那条边框基线只降不升，块与块之间靠 .sb-params 的 gap 分。 */
-.sb-param{display:flex;flex-direction:column;gap:4px;}
-.sb-inline{display:flex;flex:1;gap:4px;min-width:0;}
-.sb-inline>.input{flex:1;min-width:0;}
-.sb-sec{font-size:var(--fs-sm);color:var(--text-faint);text-transform:uppercase;letter-spacing:.04em;}
-.sb-params{display:flex;flex-direction:column;gap:5px;padding-top:6px;background:var(--bg-panel);border-radius:var(--radius-m);padding:6px 8px;}
+/* 一个参数的编辑器：名字 / 类型 / 默认值 / 范围 各一行（P121-D4，P123-C 起住在「属性」面板里）。
+   不加 border——G 门那条边框基线只降不升，块与块之间靠 gap 分。 */
+.props-param{display:flex;flex-direction:column;gap:4px;}
 .sb-hint{font-size:var(--fs-body);color:var(--text-faint);}
 .sb-danger{color:var(--danger);align-self:flex-start;}
 .sb-foot{display:flex;align-items:center;gap:8px;flex:none;padding:6px 8px;background:var(--bg-panel);}
