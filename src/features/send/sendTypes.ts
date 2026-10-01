@@ -12,6 +12,7 @@
  * 字节序也只剩一个布尔，于是"能发出去却解不回来"和"能解出来却发不出去"两个方向都会发生。
  */
 import type { ChecksumAlgo, CrcParams, Endian, FieldRole, FieldType } from "../../ipc/types";
+import { widthOf } from "../protocol/fieldTypes";
 
 /** 一个字段的可变来源。四种，且只有这四种（详设 D3：来源写在字段上，不散进字符串） */
 export type SendSource =
@@ -71,6 +72,11 @@ export interface SendTemplate {
    */
   nextSeq: number;
   groupKey?: string;
+  /**
+   * P122-B 来处标注：这张谱是从哪个**解析协议**起头的（照帧反推时记下那帧所属的模板）。
+   * 只记录不同步；名字在渲染时按 id 查，不烘进数据里（改了名还能认得出，改了 id 就说已删除）。
+   */
+  fromTplId?: string;
   createdAt: number;
 }
 
@@ -83,20 +89,11 @@ export function moveTargetIndex(from: number, index: number): number {
   return from < index ? index - 1 : index;
 }
 
-/** 字段宽度：定长类型查表，变长类型取 `size`（bcd 默认 2 字节，与 `fieldSize()` 同兜底） */
+/**
+ * 字段宽度：与接收侧**同一张表**（`protocol/fieldTypes.widthOf`）。
+ * 变长类型没声明长度 ⇒ 0 —— 编码器与网格都不再自己猜一个数（历史上发送按 1、接收按 4，
+ * 两边各自猜就成了"能解出来却发不出去"的一类根因）。
+ */
 export function sendFieldWidth(f: SendField): number {
-  switch (f.type) {
-    case "ascii":
-      return Math.max(1, f.size ?? 1);
-    case "bcd":
-      return Math.max(1, f.size ?? 2);
-    case "csv":
-      return Math.max(1, f.size ?? 1);
-    default: {
-      const w = { uint8: 1, int8: 1, uint16: 2, int16: 2, uint32: 4, int32: 4, float32: 4, float64: 8, bits: 1 }[
-        f.type
-      ];
-      return w;
-    }
-  }
+  return widthOf(f.type, f.size) ?? 0;
 }

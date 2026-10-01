@@ -26,5 +26,7 @@ export function layoutOf(tplId: string | undefined, frameLen: number): InferFiel
 }
 
 export function draftFromFrame(bytes: number[], tplId?: string, name?: string): InferResult {
-  return inferSendSpec(bytes, { name, fields: layoutOf(tplId, bytes.length) });
+  const r = inferSendSpec(bytes, { name, fields: layoutOf(tplId, bytes.length) });
+  // P122-B 来处标注：认得出这一帧属于哪个协议就记下 id（只存 id，名字渲染时查）
+  return tplId ? { ...r, tpl: { ...r.tpl, fromTplId: tplId } } : r;
 }

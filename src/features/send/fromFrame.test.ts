@@ -88,3 +88,14 @@ describe("P121-E · draftFromFrame", () => {
     expect(encodeSend(r.tpl, { seq: r.tpl.nextSeq }).hex).toBe("AA 12 34 46");
   });
 });
+
+describe("P122-B · 来处标注（起谱时认得出属于哪个协议）", () => {
+  it("给了 tplId 就把来处记进谱里 —— 只记 id，名字渲染时查", () => {
+    const r = draftFromFrame([0xaa, 0x01, 0x02], "tpl-1");
+    expect(r.tpl.fromTplId).toBe("tpl-1");
+  });
+
+  it("认不出这一帧属于谁 ⇒ 不硬塞一个来处", () => {
+    expect(draftFromFrame([0xaa, 0x01, 0x02]).tpl.fromTplId).toBeUndefined();
+  });
+});

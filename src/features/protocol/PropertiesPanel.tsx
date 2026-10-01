@@ -12,6 +12,8 @@ import type {
 import { CRC_DEFAULT, parseCrcLiteral } from "../../shared/checksums";
 import * as store from "./templateStore";
 import { fieldSize } from "./templateStore";
+import { DECLARED_DEFAULT, VARIABLE_TYPES } from "./fieldTypes";
+import * as sendStore from "../send/sendStore";
 import { toast } from "../ai/extRuntime";
 import { requestOpenPanel } from "../ai/appBus";
 import { Section } from "../../shared/Section";
@@ -252,6 +254,8 @@ function CrcRows({ tpl }: { tpl: FrameTemplate }) {
 export function PropertiesPanel() {
   useLocale();
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  // 来处标注要说"来自哪张谱"，那张谱活着没有、改没改名，得跟着发送谱一起更新
+  const specs = useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
   const sel = s.selection;
   const [confirm, setConfirm] = useState<{
     fid: string;
@@ -302,6 +306,16 @@ export function PropertiesPanel() {
             title={tx("模板颜色", "Template color")}
           />
         </div>
+        {tpl.fromSpecId && (
+          <div className="form-hint">
+            {(() => {
+              const src = specs.find((x) => x.id === tpl.fromSpecId) ?? null;
+              return src
+                ? tx(`由发送谱「${src.name}」派生（派生那一刻的快照，两边之后各改各的）`, `Derived from send template “${src.name}” — a snapshot; the two drift apart on purpose`)
+                : tx("由某张发送谱派生，那张谱已经删了", "Derived from a send template that has since been deleted");
+            })()}
+          </div>
+        )}
 
           <Section title={tx("帧边界", "Frame Boundary")}>
         <div className="form-row">
@@ -881,8 +895,12 @@ export function PropertiesPanel() {
             value={field.type}
             onChange={(e) => {
               const t = e.target.value as FieldType;
-              const size = fieldSize({ ...field, type: t });
-              commitSized({ type: t, size: ["ascii", "bcd"].includes(t) ? (field.size ?? size) : null });
+              // 换成变长类型就把长度**写进字段**：宽度算式里不再藏兜底（历史上接收默认 4、
+              // 发送默认 1，同一块字节两个宽度）。这个默认值是界面给的，看得见也改得动。
+              commitSized({
+                type: t,
+                size: VARIABLE_TYPES.includes(t) ? (field.size ?? DECLARED_DEFAULT[t] ?? 1) : null,
+              });
             }}
           >
             {FIELD_TYPES.map((t) => (
@@ -892,14 +910,23 @@ export function PropertiesPanel() {
             ))}
           </select>
         </div>
-        {["ascii", "bcd"].includes(field.type) && (
+        {VARIABLE_TYPES.includes(field.type) && (
           <div className="form-pair">
             <label>{tx("字节数", "Bytes")}</label>
             <NumInput
-              value={field.size ?? fieldSize(field)}
+              // 没声明就是 0，不显示一个猜出来的数：0 会在那格上塌掉，下面那句警告负责说清
+              value={field.size ?? 0}
               width={64}
               onCommit={(v) => commitSized({ size: Math.max(1, Math.round(v)) })}
             />
+          </div>
+        )}
+        {VARIABLE_TYPES.includes(field.type) && !(field.size && field.size > 0) && (
+          <div className="props-warn">
+            {tx(
+              "这块是变长类型却没声明字节数：它现在占 0 格，解析会从这里开始错位。填一个数就定下来。",
+              "A variable-length field without a declared byte count: it occupies 0 cells and parsing drifts from here. Set a number to settle it.",
+            )}
           </div>
         )}
       </div>

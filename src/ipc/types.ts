@@ -230,6 +230,11 @@ export interface FrameTemplate {
   fields: FieldDef[];
   presetKey?: string | null;
   groupKey?: string | null;
+  /**
+   * P122-B 来处标注：这张协议是从哪张**发送谱**派生出来的。
+   * 只是记录，不做同步（两边各改各的）。解析引擎不看它，所以它只活在 TS 侧的规则与存档里。
+   */
+  fromSpecId?: string | null;
 }
 
 export interface ParseRules {

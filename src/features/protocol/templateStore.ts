@@ -662,6 +662,25 @@ export function addTemplate(headerBytes: number[]): string {
   return tpl.id;
 }
 
+/**
+ * P122-B：把一张发送谱派生出来的解析协议**一次性**落进来。
+ *
+ * 一条撤销条目、只追加不改任何已有模板 —— 派生是"照着做一份新的"，不是"把那边改过来"。
+ * 名字撞了就加序号：改名字这种事不该静默覆盖别人已有的东西。
+ */
+export function addDerivedTemplate(tpl: FrameTemplate): string {
+  pushHistory();
+  const taken = new Set(snapshot.rules.templates.map((t) => t.name));
+  let name = tpl.name;
+  for (let i = 2; taken.has(name); i++) name = `${tpl.name} ${i}`;
+  set({
+    rules: { templates: [...snapshot.rules.templates, { ...tpl, name }] },
+    selection: { kind: "template", templateId: tpl.id },
+  });
+  scheduleSync();
+  return tpl.id;
+}
+
 export function createBlankTemplate(len: number): string {
   pushHistory();
   const n = snapshot.rules.templates.filter((t) => t.presetKey === null || t.presetKey === undefined).length + 1;

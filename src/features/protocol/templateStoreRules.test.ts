@@ -411,3 +411,51 @@ describe("P121-B2 · 接收侧自定义 CRC（#101）", () => {
     expect(getTpl("t1").checksum).toMatchObject({ coverageStart: 1, crc: { poly: 0x1021 } });
   });
 });
+
+describe("P122-B · addDerivedTemplate（派生是新建，不是改那边）", () => {
+  const made = (over: Partial<FrameTemplate> = {}): FrameTemplate =>
+    ({
+      id: "tpl-derived",
+      name: "温控·解析",
+      color: "#123456",
+      enabled: true,
+      boundary: { mode: "fixedLength", headerBytes: [0xaa], fixedLength: 4, maxLength: 64 },
+      checksum: null,
+      fields: [],
+      fromSpecId: "st1",
+      ...over,
+    }) as FrameTemplate;
+
+  it("只追加一条，已有的模板一个字节都不动；选中态跟到新模板上", () => {
+    templateStore.addTemplate([0x11]);
+    const before = templateStore.getSnapshot().rules.templates;
+    const beforeJson = JSON.stringify(before);
+    const id = templateStore.addDerivedTemplate(made());
+    const after = templateStore.getSnapshot().rules.templates;
+    expect(id).toBe("tpl-derived");
+    expect(after.length).toBe(2);
+    expect(JSON.stringify(after.slice(0, 1))).toBe(beforeJson);
+    expect(templateStore.getSnapshot().selection).toEqual({ kind: "template", templateId: id });
+  });
+
+  it("名字撞了就加序号，不静默覆盖你已有的那份", () => {
+    templateStore.addDerivedTemplate(made({ id: "a1" }));
+    templateStore.addDerivedTemplate(made({ id: "a2" }));
+    templateStore.addDerivedTemplate(made({ id: "a3" }));
+    const names = templateStore.getSnapshot().rules.templates.map((t) => t.name);
+    expect(names).toEqual(["温控·解析", "温控·解析 2", "温控·解析 3"]);
+  });
+
+  it("派生是一条撤销条目：撤销一次就回到派生之前（不是撤销我改过名字的那一格）", () => {
+    templateStore.addDerivedTemplate(made({ id: "a1" }));
+    expect(templateStore.getSnapshot().rules.templates.length).toBe(1);
+    templateStore.undo();
+    expect(templateStore.getSnapshot().rules.templates.length).toBe(0);
+  });
+
+  it("fromSpecId 原样存下来：那是来处，不是同步约定", () => {
+    templateStore.addDerivedTemplate(made());
+    const t = templateStore.getSnapshot().rules.templates[0];
+    expect(t.fromSpecId).toBe("st1");
+  });
+});

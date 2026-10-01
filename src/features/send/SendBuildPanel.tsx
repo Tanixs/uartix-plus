@@ -26,7 +26,9 @@ import { draftFromFrame } from "./fromFrame";
 import { runCommand } from "../controls/cmdExec";
 import * as cmdStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
+import * as templateStore from "../protocol/templateStore";
 import { revealTargets } from "../controls/cardBinding";
+import { DeriveError, toReceiveTpl } from "./specToProtocol";
 import { guardLocked } from "../operator/lock";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import * as sendStore from "./sendStore";
@@ -170,6 +172,10 @@ export function SendBuildPanel() {
   const [cols, setCols] = useState(12);
   /** 就地改字节的那一格（只有 const 块允许），null = 没有 */
   const [edit, setEdit] = useState<{ fieldId: string; off: number } | null>(null);
+  /** 上一次派生写了哪些假设（只在点下那颗键的那一刻产生，换谱就清） */
+  const [derivedNotes, setDerivedNotes] = useState<string[]>([]);
+  /** 来处标注要按 id 查协议名，所以这里订阅协议规则（名字不烘进谱里，改了还能认得出） */
+  const rules = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
 
   const tpl: SendTemplate | null = tpls.find((x) => x.id === selId) ?? tpls[0] ?? null;
   useEffect(() => {
@@ -218,6 +224,7 @@ export function SendBuildPanel() {
   useEffect(() => {
     setErr("");
     setMsg("");
+    setDerivedNotes([]);
   }, [selId]);
 
   // 预览用的序号 = 谱自己的计数器：这样"预览里那个 seq"就是下一次发送真会带上的那个
@@ -309,6 +316,31 @@ export function SendBuildPanel() {
           },
     );
   }, [specId, linkParamId]);
+
+  /**
+   * 「写成解析协议」：把这张谱变成一份能解析自己发出去的东西的模板（P122-B 的那座桥）。
+   *
+   * 只在编得出帧的时候派生 —— 投影吃的就是这一帧，偏移是前缀和，没有猜测。
+   * 但它仍然做了三件**替你先定下来**的事（帧头、变长块的长度、长度域→修正值），
+   * 所以每一条都进 notes 并原样列在界面上：派生不是"帮你猜好了"。
+   */
+  const deriveProtocol = () => {
+    if (!tpl || !preview?.ok) return;
+    if (guardLocked()) return;
+    try {
+      const { tpl: made, notes } = toReceiveTpl(tpl, preview.bytes, {
+        id: crypto.randomUUID(),
+        color: templateStore.PALETTE[rules.rules.templates.length % templateStore.PALETTE.length],
+      });
+      const id = templateStore.addDerivedTemplate(made);
+      const stored = templateStore.getSnapshot().rules.templates.find((t) => t.id === id);
+      setDerivedNotes(notes);
+      setMsg(tx(`已派生解析协议「${stored?.name ?? made.name}」`, `Derived protocol “${stored?.name ?? made.name}” created`));
+      setErr("");
+    } catch (e) {
+      setErr(e instanceof DeriveError ? e.message : String(e).replace(/^Error:\s*/, ""));
+    }
+  };
 
   /** 格子里改一个字节：只写进这一块自己的 const 数组，别的来源一概不接 */
   const commitByte = (fieldId: string, off: number, text: string) => {
@@ -1153,6 +1185,40 @@ export function SendBuildPanel() {
                   </div>
                 </>
               )}
+            </div>
+
+            <div className="sb-params">
+              <div className="sb-sec">{tx("解析协议", "Parsing protocol")}</div>
+              {tpl.fromTplId && (
+                <div className="sb-hint">
+                  {(() => {
+                    const src = rules.rules.templates.find((t) => t.id === tpl.fromTplId);
+                    return src
+                      ? tx(`这张谱是从协议「${src.name}」的帧起头的`, `Drafted from frames of protocol “${src.name}”`)
+                      : tx("这张谱起自某个协议的帧，那个协议已经删了", "Drafted from a protocol that has since been deleted");
+                  })()}
+                </div>
+              )}
+              <button
+                className="btn"
+                disabled={!preview?.ok}
+                title={
+                  preview?.ok
+                    ? tx(
+                        "照这张谱的块顺序与宽度新建一份解析协议（只新建，不动已有协议）",
+                        "Create a parsing protocol from this spec's block order and widths — it adds one, it never rewrites an existing one",
+                      )
+                    : tx("编不出帧就派生不出协议：先修好下面那句报错", "No frame, nothing to derive — fix the error below first")
+                }
+                onClick={deriveProtocol}
+              >
+                {tx("写成解析协议", "Write as protocol")}
+              </button>
+              {derivedNotes.map((n, i) => (
+                <div className="sb-hint" key={i}>
+                  {n}
+                </div>
+              ))}
             </div>
           </div>
         </div>

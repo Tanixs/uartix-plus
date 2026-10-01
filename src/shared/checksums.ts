@@ -114,6 +114,26 @@ export function checksumWidth(algo: string | null | undefined, crc?: CrcParams |
 }
 
 /**
+ * 这支算法把校验值**按什么字节序放到线上**。
+ *
+ * 反射的算法（Modbus / X-25 / crc_custom 且 refout）低字节在前，其余高字节在前 ——
+ * 这是 `encodeSend.checksumBytes` 与 `parser.rs` verify 两边共同的事实，写成一个函数而不是
+ * 各抄一份：从发送谱派生解析模板时要按它填 `checksum.endian`，抄错就是"发得出去、解不回来"。
+ * 单字节算法无所谓，返回 little（`read_uint` 只看第一个字节）。
+ */
+export function checksumWireEndian(algo: string, crc?: CrcParams | null): "little" | "big" {
+  switch (algo) {
+    case "crc16_ccitt":
+    case "crc32":
+      return "big";
+    case CRC_CUSTOM:
+      return crc?.refout ? "little" : "big";
+    default:
+      return "little";
+  }
+}
+
+/**
  * 参数化 CRC（Rockwell 那套：width / poly / init / refin / refout / xorout）。
  *
  * `poly` 按**既约式**写（CRC-16/CCITT 是 0x1021，不是 0x11021），所以三个公开模型可以直接
