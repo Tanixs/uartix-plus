@@ -47,6 +47,7 @@ import {
   gridModel,
   hexByte,
   insertIndexAtBoundary,
+  LABEL_MIN_W,
   predictedBlocks,
   resizeWidthBy,
   resizedField,
@@ -286,6 +287,13 @@ export function SendBuildPanel() {
   const caret = at >= 0 && grid ? caretAt(grid, at) : null;
   /** 哪些块给拖宽的把手（只有 const 与 bcd，理由见 `byteGrid.resizedField`） */
   const resizable = useMemo(() => new Set((tpl?.fields ?? []).filter(canResize).map((x) => x.id)), [tpl]);
+  /**
+   * 覆盖条常态收起（P123-A）。那条 3px 的线回答的是"这个校验算到哪"，可它和
+   * "这一格能就地改"的下划线上下相邻、同一个色族，窄面板里没人分得清是哪条在说话。
+   * 现在：选中校验块才画线，平时由底部那行摘要报数 —— 点摘要就选中校验块，线就出来。
+   */
+  const covShown = field?.role === "checksum";
+  const ckField = tpl?.fields.find((f) => f.role === "checksum") ?? null;
 
   useEffect(() => {
     const el = stripRef.current;
@@ -877,7 +885,7 @@ export function SendBuildPanel() {
                     onPointerDown={(e) => beginPointerDrag(e, { kind: "sendfield", data: b.fieldId, label: b.name })}
                     onClick={() => setSelField(b.fieldId)}
                   >
-                    {b.name}
+                    {b.len * PITCH - CELL_GAP >= LABEL_MIN_W ? b.name : ""}
                   </button>
                 ))}
                 {at >= band.length && <i className="sb-drop-caret" aria-hidden="true" />}
@@ -924,7 +932,7 @@ export function SendBuildPanel() {
                               }
                               onClick={() => setSelField(s.block.fieldId)}
                             >
-                              {s.point ? "·" : s.cont ? "" : s.block.name}
+                              {s.point ? "·" : s.cont || box.width < LABEL_MIN_W ? "" : s.block.name}
                             </button>
                             {rz && (
                               <i
@@ -1008,7 +1016,7 @@ export function SendBuildPanel() {
                         );
                       })}
                     </div>
-                    {!!row.cov.length && (
+                    {!!row.cov.length && covShown && (
                       <div className="sb-cov">
                         {row.cov.map((c) => (
                           <i
@@ -1433,6 +1441,16 @@ export function SendBuildPanel() {
           <div className={`sb-preview${preview?.ok ? "" : " bad"}`}>
             {preview?.ok ? preview.hex : preview?.msg || ""}
           </div>
+          {ckField && grid?.cov && (
+            <button
+              type="button"
+              className="sb-cov-sum"
+              onClick={() => setSelField(ckField.id)}
+              title={tx("点它就选中校验块，把算到哪一段画在格子上", "Click to select the checksum block and draw the range under the cells")}
+            >
+              {tx("校验覆盖", "Checksum covers")} {hexByte(grid.cov.start)}–{hexByte(grid.cov.start + grid.cov.len - 1)}
+            </button>
+          )}
           <div className="sb-notes">
             {preview?.ok ? preview.notes.join(" · ") : ""}
             {err ? ` ${err}` : ""}

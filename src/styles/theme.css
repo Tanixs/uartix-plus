@@ -11571,10 +11571,14 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-band-loose{margin:2px 0;}
 .sb-seg{all:unset;position:absolute;top:0;height:15px;box-sizing:border-box;display:flex;align-items:center;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:var(--fs-sm);color:var(--text-dim);background:color-mix(in srgb,var(--blk) 22%,transparent);border-radius:var(--radius-s);cursor:grab;}
 .sb-seg:hover{color:var(--text);background:color-mix(in srgb,var(--blk) 36%,transparent);}
-.sb-seg.on{outline:2px solid var(--blk);outline-offset:0;color:var(--text);}
+/* 选中环走 inset 阴影不走 outline：一格宽的块里 outline 正好压在裁剩的字上（P123-A）。
+   零 border —— G 门那条边框基线只降不升。 */
+.sb-seg.on{box-shadow:inset 0 0 0 2px var(--blk);color:var(--text);}
 .sb-seg.bad{color:var(--danger);}
 /* 拖拽中的落点：降级条带（没有格子可标）就在段左侧亮一条，追加到末尾则亮那根竖线 */
 .sb-seg.drop{box-shadow:inset 3px 0 0 var(--accent);color:var(--text);}
+/* 既是选中块又是落点：两条都得在，阴影是叠加的所以手写在一起 */
+.sb-seg.on.drop{box-shadow:inset 3px 0 0 var(--accent),inset 0 0 0 2px var(--blk);}
 .sb-drop-caret{flex:none;width:2px;height:15px;border-radius:var(--radius-pill);background:var(--accent);}
 .sb-seg-point{padding:0;justify-content:center;font-size:var(--fs-sm);}
 /* 编码没过时的降级条带：没有格子可对齐，就交给 flex 排 */
@@ -11595,10 +11599,17 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-link>.sb-hint{flex:1;min-width:0;}
 .sb-link>.btn{flex:none;}
 .sb-cov i{position:absolute;top:0;height:3px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--warn) 55%,transparent);}
+/* 覆盖条收起后，那行数留在脚上；点它就选中校验块，线跟着出来（P123-A） */
+.sb-cov-sum{all:unset;flex:none;padding:2px 6px;border-radius:var(--radius-s);font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text-dim);cursor:pointer;}
+.sb-cov-sum:hover{color:var(--text);background:var(--raise-1);}
 /* D1 拖宽：把手只给 const 与 bcd；文本块给的是"为什么没有把手"的那个记号（cursor:help + 一句话） */
-.sb-grip{all:unset;position:absolute;top:0;height:15px;width:6px;box-sizing:border-box;cursor:ew-resize;box-shadow:inset 2px 0 0 color-mix(in srgb,var(--accent) 70%,transparent);border-radius:var(--radius-s);}
+/* 把手 hover 才显形（P123-A）：常态画着它，一格宽的块就被 6px 挤掉名字；而且看不见的时候
+   它还是个隐形命中区，所以连 pointer-events 一起收，别让人点到不存在的东西。 */
+.sb-grip{all:unset;position:absolute;top:0;height:15px;width:6px;box-sizing:border-box;cursor:ew-resize;box-shadow:inset 2px 0 0 color-mix(in srgb,var(--accent) 70%,transparent);border-radius:var(--radius-s);opacity:0;pointer-events:none;}
+.sb-band:hover .sb-grip,.sb-grip:focus-visible{opacity:1;pointer-events:auto;}
 .sb-grip:hover{background:color-mix(in srgb,var(--accent) 22%,transparent);}
-.sb-grip-na{position:absolute;top:0;height:15px;width:3px;background:repeating-linear-gradient(180deg,var(--text-faint) 0 2px,transparent 2px 4px);opacity:.55;cursor:help;}
+.sb-grip-na{position:absolute;top:0;height:15px;width:3px;background:repeating-linear-gradient(180deg,var(--text-faint) 0 2px,transparent 2px 4px);opacity:0;cursor:help;pointer-events:none;}
+.sb-band:hover .sb-grip-na{opacity:.55;pointer-events:auto;}
 .sb-ghost{position:absolute;top:0;height:15px;border-radius:var(--radius-s);background:color-mix(in srgb,var(--accent) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 55%,transparent);pointer-events:none;}
 .sb-grip-tag{position:absolute;top:0;height:15px;line-height:15px;padding:0 3px;font-size:var(--fs-sm);color:var(--accent);pointer-events:none;}
 .sb-seg.resizing{opacity:.7;}

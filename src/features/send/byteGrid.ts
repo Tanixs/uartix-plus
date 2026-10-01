@@ -28,6 +28,12 @@ export const RULER_W = 30;
 export const POINT_W = 10;
 export const MIN_COLS = 4;
 export const MAX_COLS = 24;
+/**
+ * 条带上画块名的最小段宽（P123-A）。一格宽的块只有 20px，两字中文名必被裁成
+ * "帧…"再压一层选中环 —— 帧画布同一层用的是 34px 门槛（`FrameCanvas.tsx:998`），
+ * 这里取同一个数：不够宽就只留色块，名字交给悬浮提示。
+ */
+export const LABEL_MIN_W = 34;
 
 export interface GridBlock {
   fieldId: string;
