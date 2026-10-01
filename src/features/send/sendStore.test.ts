@@ -164,3 +164,32 @@ describe("sendStore", () => {
     expect(store.unpackSpecFile(JSON.stringify({ kind: "uartix-sendspecs", data: null }))).toBeNull();
   });
 });
+
+describe("P122-D2 · setFocus（谁正被盯着：瞬态，不进存档也不进撤销）", () => {
+  it("同一个焦点重复设置不再发一次通知；换了焦点才发", () => {
+    store.addTemplate();
+    const id = store.getSnapshot()[0].id;
+    let n = 0;
+    const off = store.subscribe(() => n++);
+    store.setFocus({ specId: id, paramId: "p1" });
+    expect(n).toBe(1);
+    store.setFocus({ specId: id, paramId: "p1" });
+    expect(n, "同样的内容不该再刷一遍订阅者").toBe(1);
+    store.setFocus({ specId: id, paramId: "p2" });
+    expect(n).toBe(2);
+    store.setFocus(null);
+    expect(store.getFocus()).toBeNull();
+    off();
+  });
+
+  it("focus 不落盘也不参与撤销：它说的是「谁在看」，不是数据是什么", () => {
+    store.addTemplate();
+    const id = store.getSnapshot()[0].id;
+    store.setFocus({ specId: id, paramId: "p1" });
+    expect(JSON.stringify(store.getSnapshot())).not.toContain("focus");
+    expect(store.packSpecFile(store.getSnapshot())).not.toContain("focus");
+    store.undo();
+    expect(store.getFocus()).toEqual({ specId: id, paramId: "p1" });
+    store.setFocus(null);
+  });
+});

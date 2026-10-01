@@ -8,7 +8,7 @@
  * 两个方向必须共用"什么叫做绑着"这一条定义，不然会出现卡面说绑着、组帧台说没绑。
  */
 import { describe, expect, it } from "vitest";
-import { bindingDetail, bindingLabel, revealTargets, type BindingSpec } from "./cardBinding";
+import { bindingDetail, bindingLabel, isLinked, revealTargets, type BindingSpec } from "./cardBinding";
 
 const SPEC: BindingSpec = {
   name: "泵机启动",
@@ -133,5 +133,25 @@ describe("P122-C · revealTargets（一块的值在画布上被谁用着）", ()
   it("没给谱或没给参数 ⇒ 空，不猜", () => {
     expect(revealTargets("", "p1", PAGES, "pg1")).toEqual([]);
     expect(revealTargets("st1", "", PAGES, "pg1")).toEqual([]);
+  });
+});
+
+describe("P122-D2 · isLinked（常驻色的判据与定位用的是同一条定义）", () => {
+  const FOCUS = { specId: "st1", paramId: "p1" };
+
+  it("同一张谱 + 同一个参数才算被盯着", () => {
+    expect(isLinked({ sendTemplateId: "st1", paramId: "p1" }, FOCUS)).toBe(true);
+    expect(isLinked({ sendTemplateId: "st1", paramId: "p2" }, FOCUS)).toBe(false);
+    expect(isLinked({ sendTemplateId: "st9", paramId: "p1" }, FOCUS)).toBe(false);
+  });
+
+  it("没盯着任何一块 ⇒ 谁都不亮；卡没绑参数也不亮", () => {
+    expect(isLinked({ sendTemplateId: "st1", paramId: "p1" }, null)).toBe(false);
+    expect(isLinked({}, FOCUS)).toBe(false);
+    expect(isLinked({ paramId: "p1" }, FOCUS), "只有参数 id、没有谱 id ⇒ 不是这张谱的那块").toBe(false);
+  });
+
+  it("盯着一个没有参数的块 ⇒ 不许把所有没选参数的卡一起点亮", () => {
+    expect(isLinked({ sendTemplateId: "st1" }, { specId: "st1", paramId: "" })).toBe(false);
   });
 });

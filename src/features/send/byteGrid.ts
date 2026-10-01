@@ -14,7 +14,7 @@
  * 编码失败时**没有字节可画**：`predictedBlocks` 只摆块的顺序与声明宽度，不画格子也不画尺。
  * 这是刻意的降级——把"猜的宽度"画成格子，用户会以为那就是要发出去的东西。
  */
-import type { FieldRole } from "../../ipc/types";
+import type { FieldRole, FieldType } from "../../ipc/types";
 import { checksumWidth } from "../../shared/checksums";
 import { sendFieldWidth, type SendField, type SendTemplate } from "./sendTypes";
 
@@ -33,6 +33,8 @@ export interface GridBlock {
   fieldId: string;
   name: string;
   role: FieldRole;
+  /** 字段类型：网格本身不靠它算宽度，但"这块能不能拖宽"要说得出是谁 */
+  type: FieldType;
   color: string;
   /** 起始字节下标；0 字节的块也有一条这样的边界 */
   start: number;
@@ -81,6 +83,7 @@ const blockOf = (f: SendField, start: number, len: number): GridBlock => ({
   fieldId: f.id,
   name: f.name,
   role: f.role,
+  type: f.type,
   color: f.color ?? "",
   start,
   len,
@@ -203,6 +206,16 @@ export function caretAt(
   return { cell: model.total - 1, side: "right" };
 }
 
+/**
+ * 这一截是不是那块的收尾那一截。
+ *
+ * 把手只许画在块的右端：跨行的块有两条截，中间那道断口不是块的边界。
+ * 注意 `seg.start` 是**行内**偏移而 `block.start` 是**全局**偏移 —— 拿行内偏移直接比块长
+ * 会错（第一版就错了：那样只有起点正好在 0 的块才有把手）。
+ */
+export const segEndsBlock = (rowIdx0: number, seg: GridSeg): boolean =>
+  !seg.point && rowIdx0 + seg.start + seg.len === seg.block.start + seg.block.len;
+
 /** 段在行内的像素位置。点画在边界中央，越界的一边夹回来 */
 export function segBox(seg: GridSeg): { left: number; width: number } {
   if (seg.point) {
@@ -226,3 +239,34 @@ export function guessBadFieldId(msg: string, tpl: SendTemplate): string {
 }
 
 export const hexByte = (b: number): string => b.toString(16).padStart(2, "0").toUpperCase();
+
+/** 拖边界能拖到的上限：再宽就不是"一块字段"而是一段报文了 */
+export const MAX_BLOCK_W = 64;
+
+/** 拖动量 → 新宽度：一格一字节，四舍五入到整格，夹在 1~MAX_BLOCK_W */
+export function resizeWidthBy(current: number, dx: number, pitch: number = PITCH): number {
+  return Math.min(MAX_BLOCK_W, Math.max(1, current + Math.round(dx / pitch)));
+}
+
+/**
+ * 这块能不能拖宽，以及拖完该改什么。
+ *
+ * 只有"宽度真的是自己说得上"的块才给把手：
+ *  · const —— 它的字节数组就是它的宽度（拖宽补 00，拖窄砍尾）；
+ *  · bcd —— 声明的 size 直接决定编出几个字节。
+ * `ascii` 刻意不给：编码器铺的是值的 UTF-8，不 padding 也不截断，
+ * 给它一个把手就是做一个"拖了什么都不改"的假开关（§8-34）。
+ * 定长数值类型的宽度由类型决定，也不是能拖的东西。
+ */
+export function resizedField(f: SendField, width: number): Partial<SendField> | null {
+  if (f.source.kind === "const" && !isCkRole(f.role)) {
+    const bytes = f.source.bytes.slice(0, width);
+    while (bytes.length < width) bytes.push(0);
+    return { source: { kind: "const", bytes } };
+  }
+  if (f.type === "bcd" && !isCkRole(f.role)) return { size: width };
+  return null;
+}
+
+export const canResize = (f: SendField): boolean =>
+  (f.source.kind === "const" && !isCkRole(f.role)) || (f.type === "bcd" && !isCkRole(f.role));

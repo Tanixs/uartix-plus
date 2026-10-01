@@ -14,7 +14,12 @@ import { encodeSend } from "./encodeSend";
 import type { SendField, SendTemplate } from "./sendTypes";
 import {
   CELL_GAP,
+  MAX_BLOCK_W,
   PITCH,
+  canResize,
+  resizedField,
+  resizeWidthBy,
+  segEndsBlock,
   caretAt,
   coverageRange,
   guessBadFieldId,
@@ -329,5 +334,87 @@ describe("guessBadFieldId · 把错误指到块上", () => {
   });
   it("名字为空就不参与认领（免得 `「」` 撞上任何话术）", () => {
     expect(guessBadFieldId("字段「」有问题", spec([f({ id: "n", name: "" })]))).toBe("");
+  });
+});
+
+describe("拖边界改宽度（D1）", () => {
+  const f = (over: Partial<SendField>): SendField => ({
+    id: "x", name: "x", type: "uint8", endian: "big", role: "data",
+    source: { kind: "const", bytes: [1] }, ...over,
+  }) as SendField;
+
+  it("一格一字节、四舍五入到整格，夹在 1~64", () => {
+    expect(resizeWidthBy(2, 0)).toBe(2);
+    expect(resizeWidthBy(2, PITCH - 3)).toBe(3);
+    expect(resizeWidthBy(2, PITCH / 2 - 1)).toBe(2); // 半格以内不算改
+    expect(resizeWidthBy(2, PITCH / 2)).toBe(3); // 正好半格：按"进到下一格"处理
+    expect(resizeWidthBy(3, -999)).toBe(1);
+    expect(resizeWidthBy(3, 99999)).toBe(MAX_BLOCK_W);
+  });
+
+  it("const 拖宽补 00、拖窄砍尾，动的是它自己的字节数组", () => {
+    const c = f({ id: "c", source: { kind: "const", bytes: [0xaa, 0xbb] } });
+    expect(resizedField(c, 4)).toEqual({ source: { kind: "const", bytes: [0xaa, 0xbb, 0, 0] } });
+    expect(resizedField(c, 1)).toEqual({ source: { kind: "const", bytes: [0xaa] } });
+    expect(resizedField(c, 2)).toEqual({ source: { kind: "const", bytes: [0xaa, 0xbb] } });
+  });
+
+  it("bcd 动的是声明的 size（它真的决定编出几个字节）", () => {
+    const b = f({ id: "b", type: "bcd", size: 2, source: { kind: "param", paramId: "P" } });
+    expect(resizedField(b, 4)).toEqual({ size: 4 });
+  });
+
+  it("ascii 与定长数值、校验段都不给把手 —— 拖了什么都不改的那颗键是假开关", () => {
+    expect(resizedField(f({ type: "ascii", size: 2, source: { kind: "param", paramId: "P" } }), 5)).toBeNull();
+    expect(resizedField(f({ type: "uint16", source: { kind: "param", paramId: "P" } }), 4)).toBeNull();
+    expect(
+      resizedField(f({ role: "checksum", source: { kind: "const", bytes: [0, 0] } }), 4),
+    ).toBeNull();
+  });
+
+  it("把手问的是「这块的宽度是谁说了算」：写死字节的文本块有，灌值的没有", () => {
+    // const 来源 = 这些字节就是字面量，宽度真是它自己定的；param 来源 = 宽度跟着值走，不给把手
+    expect(canResize(f({ type: "ascii", source: { kind: "const", bytes: [1] } }))).toBe(true);
+    expect(canResize(f({ type: "ascii", size: 2, source: { kind: "param", paramId: "P" } }))).toBe(false);
+    expect(resizedField(f({ type: "ascii", source: { kind: "const", bytes: [1] } }), 3)).toEqual({
+      source: { kind: "const", bytes: [1, 0, 0] },
+    });
+    expect(canResize(f({ type: "bcd" }))).toBe(true);
+    expect(canResize(f({ role: "header", source: { kind: "const", bytes: [1] } }))).toBe(true);
+  });
+});
+
+describe("segEndsBlock · 把手只许画在块的右端", () => {
+  // 6 + 2 字节、每行 5 格：a 跨两行且在第二行只剩 1 格，b 在那一行的**行内偏移 1** 上收尾
+  const rows = rowsOf(
+    gridModel(
+      spec([
+        f({ id: "a", name: "A", source: { kind: "const", bytes: [1, 2, 3, 4, 5, 6] } }),
+        f({ id: "b", name: "B", source: { kind: "const", bytes: [7, 8] } }),
+      ]),
+      {
+        bytes: [1, 2, 3, 4, 5, 6, 7, 8],
+        spans: [
+          { fieldId: "a", at: 0, len: 6 },
+          { fieldId: "b", at: 6, len: 2 },
+        ],
+      },
+    ),
+    5,
+  );
+
+  it("跨行的块：中间那截不算收尾，最后一截才算", () => {
+    expect(rows.map((r) => r.cells)).toEqual([5, 3]);
+    expect(rows[0].segs.map((s) => [s.block.fieldId, s.start, s.len, s.cont])).toEqual([["a", 0, 5, false]]);
+    expect(rows[1].segs.map((s) => [s.block.fieldId, s.start, s.len, s.cont])).toEqual([
+      ["a", 0, 1, true],
+      ["b", 1, 2, false],
+    ]);
+    expect(segEndsBlock(rows[0].idx0, rows[0].segs[0])).toBe(false);
+    expect(segEndsBlock(rows[1].idx0, rows[1].segs[0])).toBe(true);
+  });
+
+  it("块不从头开始的行也算得对 —— 第一版把行内偏移当块内偏移，这类块根本没有把手", () => {
+    expect(segEndsBlock(rows[1].idx0, rows[1].segs[1]), "b 行内起点 1、长 2，块起点 6").toBe(true);
   });
 });

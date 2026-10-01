@@ -22,7 +22,7 @@ import type {
 } from "./controlsStore";
 import * as variableStore from "./variableStore";
 import * as sendStore from "../send/sendStore";
-import { bindingDetail, bindingLabel } from "./cardBinding";
+import { bindingDetail, bindingLabel, isLinked } from "./cardBinding";
 import { beep } from "./scriptRunner";
 import { WidgetFrame } from "../ai/WidgetFrame";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
@@ -82,8 +82,33 @@ export interface CardFrameProps {
   children: React.ReactNode;
 }
 
-export function CardFrame(props: CardFrameProps) {
-  const { card } = props;
+/**
+ * P122-D3 · 拖动中把滑条当前值广播出去，让 TX组帧台的网格跟着动一下。
+ *
+ * 走 window 事件而不是 store：这是每帧都在变的手感数据，存进可订阅的 state 会让整张
+ * 控制画布跟着重画，而它只需要被一个面板看见。`value: null` = 松手，网格回到
+ * 「发送一次」真正会发的那一帧上（那才是面板底部预览的口径）。
+ */
+function broadcastLive(
+  card: { sendTemplateId?: string; paramId?: string },
+  value: number | null,
+): void {
+  if (!card.sendTemplateId || !card.paramId) return;
+  window.dispatchEvent(
+    new CustomEvent("vs-send-live", {
+      detail: {
+        specId: card.sendTemplateId,
+        paramId: card.paramId,
+        value: value === null ? null : String(value),
+      },
+    }),
+  );
+}
+
+export function CardFrame(props: CardFrameProps) {  const { card } = props;
+  // P122-D2：TX组帧台正盯着哪一块，灌那个参数的卡就带一个常驻色（位置反馈的"知道是谁"那一半）
+  useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
+  const linked = isLinked(card, sendStore.getFocus());
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dropRef = useRef(props.onDropTemplate);
   dropRef.current = props.onDropTemplate;
@@ -112,7 +137,7 @@ export function CardFrame(props: CardFrameProps) {
   return (
     <div
       ref={rootRef}
-      className={`ctl-card ${props.cont ? "cont" : ""}`}
+      className={`ctl-card ${props.cont ? "cont" : ""}${linked ? " linked" : ""}`}
       data-id={card.id}
       style={{
         left: props.left,
@@ -219,8 +244,13 @@ export function SliderCardView(props: {
     if (stepRef.current && document.activeElement !== stepRef.current) {
       stepRef.current.value = String(v);
     }
-    if (fire === "value") props.onValue(card, v);
-    else if (fire === "release") release(v);
+    if (fire === "value") {
+      props.onValue(card, v);
+      broadcastLive(card, v);
+    } else if (fire === "release") {
+      release(v);
+      broadcastLive(card, null);
+    }
     return v;
   };
 
@@ -263,9 +293,12 @@ export function SliderCardView(props: {
         }
         onPointerUp={() => {
           if (card.sendTrigger === "onRelease") release(current());
+          // 连续档不会走 release()，但松手也一样要把网格还给「发送一次」那一帧
+          broadcastLive(card, null);
         }}
         onKeyUp={() => {
           if (card.sendTrigger === "onRelease") release(current());
+          broadcastLive(card, null);
         }}
       />
       <div className="ctl-foot">

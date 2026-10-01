@@ -4146,6 +4146,10 @@ select optgroup {
   65% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 26%, transparent); }
   100% { box-shadow: 0 0 0 2px transparent; }
 }
+/* D2 常驻关联色：TX组帧台正盯着这一块，灌这个参数的卡就带一条左轴。
+   与 .ctl-reveal 的分工是"知道是谁"对"刚刚在哪"，所以这里是静态一条线，不动。 */
+.ctl-card.linked { box-shadow: inset 3px 0 0 var(--accent); }
+
 /* 减弱动效时不许干脆没有反馈：改成一圈不动的亮边，同样是一闪即走（类照样被摘） */
 @media (prefers-reduced-motion: reduce) { .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent); } }
 html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent); }
@@ -11591,6 +11595,16 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-link>.sb-hint{flex:1;min-width:0;}
 .sb-link>.btn{flex:none;}
 .sb-cov i{position:absolute;top:0;height:3px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--warn) 55%,transparent);}
+/* D1 拖宽：把手只给 const 与 bcd；文本块给的是"为什么没有把手"的那个记号（cursor:help + 一句话） */
+.sb-grip{all:unset;position:absolute;top:0;height:15px;width:6px;box-sizing:border-box;cursor:ew-resize;box-shadow:inset 2px 0 0 color-mix(in srgb,var(--accent) 70%,transparent);border-radius:var(--radius-s);}
+.sb-grip:hover{background:color-mix(in srgb,var(--accent) 22%,transparent);}
+.sb-grip-na{position:absolute;top:0;height:15px;width:3px;background:repeating-linear-gradient(180deg,var(--text-faint) 0 2px,transparent 2px 4px);opacity:.55;cursor:help;}
+.sb-ghost{position:absolute;top:0;height:15px;border-radius:var(--radius-s);background:color-mix(in srgb,var(--accent) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 55%,transparent);pointer-events:none;}
+.sb-grip-tag{position:absolute;top:0;height:15px;line-height:15px;padding:0 3px;font-size:var(--fs-sm);color:var(--accent);pointer-events:none;}
+.sb-seg.resizing{opacity:.7;}
+/* D3 拖动中的实时值：整带换一个底色语气，下面那句 sb-live 说清这一帧是谁的 */
+.sb-strip.live{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--warn) 45%,transparent);}
+.sb-live{font-size:var(--fs-sm);color:var(--warn);}
 .sb-r-header,.sb-r-footer,.sb-r-addr,.sb-r-id{--blk:var(--accent);}
 .sb-r-length,.sb-r-checksum,.sb-r-checksum2{--blk:var(--warn);}
 .sb-r-seq{--blk:var(--ok);}

@@ -13,7 +13,7 @@
  * 预览与发送调的是同一个 `encodeSend`（P121-A 立的那条规矩）：
  * 界面上看到的字节**就是**点发送会出去的字节，没有第二份计算。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 import type { ChecksumAlgo, CrcParams, Endian, FieldRole, FieldType } from "../../ipc/types";
 import { tx, useLocale } from "../../i18n/strings";
@@ -38,14 +38,18 @@ import {
   MIN_COLS,
   PITCH,
   RULER_W,
+  canResize,
   caretAt,
   guessBadFieldId,
   gridModel,
   hexByte,
   insertIndexAtBoundary,
   predictedBlocks,
+  resizeWidthBy,
+  resizedField,
   rowsOf,
   segBox,
+  segEndsBlock,
   type GridBlock,
 } from "./byteGrid";
 import {
@@ -228,15 +232,37 @@ export function SendBuildPanel() {
   }, [selId]);
 
   // 预览用的序号 = 谱自己的计数器：这样"预览里那个 seq"就是下一次发送真会带上的那个
+  /**
+   * P122-D3 · 卡片正在拖动时的实时值。
+   *
+   * 它只在这一次拖动期间存在，松手就回到「发送一次」真正会发的那一帧 —— 因为面板底部那句
+   * "看到的字节就是上线的字节"是这批立下的规矩，不能拿一个瞬态值偷偷把它换掉。
+   * 所以 live 期间预览行改口说清这是谁的那一帧，而不是继续冒充发送口径。
+   */
+  const [live, setLive] = useState<{ specId: string; paramId: string; value: string } | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ specId?: string; paramId?: string; value?: string | null }>).detail;
+      if (!d?.specId || !d.paramId) return;
+      if (d.value === null || d.value === undefined || d.value === "") setLive(null);
+      else setLive({ specId: d.specId, paramId: d.paramId, value: String(d.value) });
+    };
+    window.addEventListener("vs-send-live", on);
+    return () => window.removeEventListener("vs-send-live", on);
+  }, []);
+  const liveOn = !!live && !!tpl && live.specId === tpl.id ? live : null;
   const preview = useMemo(() => {
     if (!tpl) return null;
     try {
-      const r = encodeSend(tpl, { seq: tpl.nextSeq ?? 0 });
+      const r = encodeSend(tpl, {
+        seq: tpl.nextSeq ?? 0,
+        values: liveOn ? { [liveOn.paramId]: liveOn.value } : undefined,
+      });
       return { ok: true as const, ...r };
     } catch (e) {
       return { ok: false as const, msg: String(e).replace(/^Error:\s*/, "") };
     }
-  }, [tpl]);
+  }, [tpl, liveOn]);
 
   const field = tpl?.fields.find((f) => f.id === selField) ?? null;
 
@@ -253,6 +279,8 @@ export function SendBuildPanel() {
   const approx = !!tpl && band.length > 0 && !preview?.ok;
   const badId = tpl && preview && !preview.ok ? guessBadFieldId(preview.msg, tpl) : "";
   const caret = at >= 0 && grid ? caretAt(grid, at) : null;
+  /** 哪些块给拖宽的把手（只有 const 与 bcd，理由见 `byteGrid.resizedField`） */
+  const resizable = useMemo(() => new Set((tpl?.fields ?? []).filter(canResize).map((x) => x.id)), [tpl]);
 
   useEffect(() => {
     const el = stripRef.current;
@@ -280,6 +308,8 @@ export function SendBuildPanel() {
   const specId = tpl?.id ?? "";
   const linkParamId = field?.source.kind === "param" ? field.source.paramId : "";
   useEffect(() => {
+    // D2：常驻色跟着"现在盯着哪一块"走。放在最前面，是因为选了非参数块也要把上一次的高亮收掉
+    sendStore.setFocus(specId && linkParamId ? { specId, paramId: linkParamId } : null);
     if (!specId || !linkParamId) {
       setLink(null);
       return;
@@ -317,6 +347,53 @@ export function SendBuildPanel() {
     );
   }, [specId, linkParamId]);
 
+  // 面板关掉就把高亮收掉：不然"谁正被盯着"会留在控制画布上冒充当前状态
+  useEffect(() => () => sendStore.setFocus(null), []);
+
+  /**
+   * D1 · 拖块右边界改宽度。
+   *
+   * 拖的过程中只改这一个本地状态（虚影 + 那一格数），松手才落一次 store ——
+   * 一路 pointermove 都写 store 的话，撤销栈会被一次拖动灌进几十条。
+   * 只有 const 与 bcd 有把手：它们的宽度真的是自己说得上；`ascii` 的字节数跟着值走
+   * （编码器不 padding 也不截断），给它把手就是个拖了什么都不改的假开关。
+   */
+  const [resize, setResize] = useState<{ fieldId: string; width: number } | null>(null);
+  const resizeOff = useRef<(() => void) | null>(null);
+  useEffect(() => () => resizeOff.current?.(), []);
+
+  const startResize = (e: React.PointerEvent, fieldId: string, from: number) => {
+    if (guardLocked() || !tpl) return;
+    const specIdOf = tpl.id;
+    const fields = tpl.fields;
+    const x0 = e.clientX;
+    const move = (ev: PointerEvent) => setResize({ fieldId, width: resizeWidthBy(from, ev.clientX - x0) });
+    const detach = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      resizeOff.current = null;
+    };
+    const finish = (ev: PointerEvent | null) => {
+      detach();
+      setResize(null);
+      if (!ev) return;
+      const w = resizeWidthBy(from, ev.clientX - x0);
+      if (w === from) return;
+      const f = fields.find((x) => x.id === fieldId);
+      if (!f) return;
+      const patch = resizedField(f, w);
+      if (patch) sendStore.patchField(specIdOf, fieldId, patch);
+    };
+    const onUp = (ev: PointerEvent) => finish(ev);
+    const onCancel = () => finish(null);
+    resizeOff.current = () => finish(null);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    setResize({ fieldId, width: from });
+  };
+
   /**
    * 「写成解析协议」：把这张谱变成一份能解析自己发出去的东西的模板（P122-B 的那座桥）。
    *
@@ -343,8 +420,7 @@ export function SendBuildPanel() {
   };
 
   /** 格子里改一个字节：只写进这一块自己的 const 数组，别的来源一概不接 */
-  const commitByte = (fieldId: string, off: number, text: string) => {
-    setEdit(null);
+  const commitByte = (fieldId: string, off: number, text: string) => {    setEdit(null);
     const f = tpl?.fields.find((x) => x.id === fieldId);
     if (!f || f.source.kind !== "const") return;
     // 编辑期间块自己的字节数变了（撤销就是一条这样的路）：写下去会长出空洞字节，宁可放弃这次提交
@@ -698,7 +774,7 @@ export function SendBuildPanel() {
           </div>
 
           <div
-            className="sb-strip"
+            className={`sb-strip${liveOn ? " live" : ""}`}
             ref={stripRef}
             role="group"
             aria-label={tx("字节带", "Byte strip")}
@@ -745,28 +821,68 @@ export function SendBuildPanel() {
                     <div className="sb-band" style={{ width: cw }}>
                       {row.segs.map((s) => {
                         const box = segBox(s);
+                        // 把手只画在块的"最后一截"上：跨行的块中间那道断口不是它的边界
+                        const ends = segEndsBlock(row.idx0, s);
+                        const rz = resize && ends && resize.fieldId === s.block.fieldId ? resize : null;
                         return (
-                          <button
-                            key={`${s.block.fieldId}:${s.start}`}
-                            type="button"
-                            data-seg-byte={row.idx0 + s.start}
-                            data-seg-len={s.len}
-                            className={`sb-seg${s.point ? " sb-seg-point" : ""} sb-r-${s.block.role}${s.block.fieldId === selField ? " on" : ""}${s.block.fieldId === badId ? " bad" : ""}`}
-                            style={
-                              {
-                                left: box.left,
-                                width: box.width,
-                                ...(s.block.color ? { ["--blk"]: s.block.color } : {}),
-                              } as CSSProperties
-                            }
-                            title={`${s.block.name} · ${roleLabel(s.block.role)} · ${s.block.len}B${s.block.editable ? tx(" · 双击格子可就地改那个字节", " · double-click a cell to edit that byte") : ""}`}
-                            onPointerDown={(e) =>
-                              beginPointerDrag(e, { kind: "sendfield", data: s.block.fieldId, label: s.block.name })
-                            }
-                            onClick={() => setSelField(s.block.fieldId)}
-                          >
-                            {s.point ? "·" : s.cont ? "" : s.block.name}
-                          </button>
+                          <Fragment key={`${s.block.fieldId}:${s.start}`}>
+                            <button
+                              type="button"
+                              data-seg-byte={row.idx0 + s.start}
+                              data-seg-len={s.len}
+                              className={`sb-seg${s.point ? " sb-seg-point" : ""} sb-r-${s.block.role}${s.block.fieldId === selField ? " on" : ""}${s.block.fieldId === badId ? " bad" : ""}${rz ? " resizing" : ""}`}
+                              style={
+                                {
+                                  left: box.left,
+                                  width: box.width,
+                                  ...(s.block.color ? { ["--blk"]: s.block.color } : {}),
+                                } as CSSProperties
+                              }
+                              title={`${s.block.name} · ${roleLabel(s.block.role)} · ${s.block.len}B${s.block.editable ? tx(" · 双击格子可就地改那个字节", " · double-click a cell to edit that byte") : ""}`}
+                              onPointerDown={(e) =>
+                                beginPointerDrag(e, { kind: "sendfield", data: s.block.fieldId, label: s.block.name })
+                              }
+                              onClick={() => setSelField(s.block.fieldId)}
+                            >
+                              {s.point ? "·" : s.cont ? "" : s.block.name}
+                            </button>
+                            {rz && (
+                              <i
+                                className="sb-ghost"
+                                aria-hidden="true"
+                                style={{ left: box.left, width: Math.max(4, rz.width * PITCH - CELL_GAP) }}
+                              />
+                            )}
+                            {rz && (
+                              <i className="sb-grip-tag" aria-hidden="true" style={{ left: box.left + rz.width * PITCH }}>
+                                {rz.width} B
+                              </i>
+                            )}
+                            {ends && resizable.has(s.block.fieldId) && (
+                              <button
+                                type="button"
+                                className="sb-grip"
+                                style={{ left: box.left + box.width - 1 }}
+                                title={tx("拖动改这块的字节数", "Drag to change this block's byte count")}
+                                onPointerDown={(e) => {
+                                  e.stopPropagation();
+                                  startResize(e, s.block.fieldId, s.block.len);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            )}
+                            {ends && s.block.type === "ascii" && (
+                              <i
+                                className="sb-grip-na"
+                                aria-hidden="true"
+                                style={{ left: box.left + box.width - 1 }}
+                                title={tx(
+                                  "文本块没有把手：它发出去几个字节跟着值走，编码器不补长也不截断",
+                                  "A text block has no grip: how many bytes it sends follows the value — the encoder neither pads nor truncates",
+                                )}
+                              />
+                            )}
+                          </Fragment>
                         );
                       })}
                     </div>
@@ -1226,6 +1342,14 @@ export function SendBuildPanel() {
 
       {tpl && (
         <div className="sb-foot">
+          {liveOn && (
+            <div className="sb-live">
+              {tx(
+                `参数「${tpl.params.find((p) => p.id === liveOn.paramId)?.name ?? liveOn.paramId}」正被卡片拖到 ${liveOn.value} —— 这一帧是它此刻的，松手就回到「发送一次」那一帧`,
+                `Parameter “${tpl.params.find((p) => p.id === liveOn.paramId)?.name ?? liveOn.paramId}” is being dragged to ${liveOn.value} — this is that frame right now; release returns to what Send once sends`,
+              )}
+            </div>
+          )}
           <div className={`sb-preview${preview?.ok ? "" : " bad"}`}>
             {preview?.ok ? preview.hex : preview?.msg || ""}
           </div>

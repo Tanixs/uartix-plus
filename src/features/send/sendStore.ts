@@ -88,6 +88,27 @@ export function getSelectNonce() {
   return selectReq?.nonce ?? 0;
 }
 
+/**
+ * P122-D2 · 组帧台当前盯着的那一块。
+ *
+ * 控件画布据此给"值灌进这个参数"的那张卡上一个常驻色（脉冲负责找到位置，常驻色负责知道是谁）。
+ * 它是**瞬态**的：不进持久化的 templates、不参与撤销 —— 这说的是"谁正在看哪一块"，
+ * 不是"数据是什么"，存进存档就会把某个人的一次点击变成所有人重启后还看到的颜色。
+ */
+let focus: { specId: string; paramId: string } | null = null;
+
+export function setFocus(next: { specId: string; paramId: string } | null) {
+  const same =
+    (focus?.specId ?? "") === (next?.specId ?? "") && (focus?.paramId ?? "") === (next?.paramId ?? "");
+  if (same) return;
+  focus = next;
+  emit();
+}
+
+export function getFocus() {
+  return focus;
+}
+
 export function subscribe(cb: () => void) {
   listeners.add(cb);
   return () => listeners.delete(cb);

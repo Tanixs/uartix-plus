@@ -85,6 +85,23 @@ export function revealTargets(
 }
 
 /**
+ * 这张卡是不是"组帧台正盯着的那一块"的值来源（P122-D2 的常驻色判据）。
+ *
+ * 只认同一条引用式绑定（与 revealTargets 同一个定义，两处不许各说一套）。
+ * `focus.paramId` 为空或卡没绑参数都不亮 —— 宁可少亮，也不许指着不相干的东西说"就是这个"。
+ */
+export function isLinked(card: BindingCard, focus: { specId: string; paramId: string } | null): boolean {
+  return (
+    !!focus &&
+    !!focus.paramId &&
+    !!card.sendTemplateId &&
+    !!card.paramId &&
+    card.sendTemplateId === focus.specId &&
+    card.paramId === focus.paramId
+  );
+}
+
+/**
  * 悬浮展开的那一句：值最终落在**哪一帧的哪一块**。
  *
  * 卡面上写不完"哪个协议的哪个字段"，但这句话必须问得到 —— 尤其是最后那种：
