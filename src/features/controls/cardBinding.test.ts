@@ -3,9 +3,12 @@
  *
  * 卡面上只有一行 muted 小字，五种状态却要各说各的实话：没绑的不许装绑了，
  * 谱删了不许继续显示旧名字，参数删了不许说"绑着"。写成纯函数就是为了逐条钉得住。
+ *
+ * P122-C 把同一套判据反着问了一遍（这块参数被哪几张卡用着），也收在这个文件里：
+ * 两个方向必须共用"什么叫做绑着"这一条定义，不然会出现卡面说绑着、组帧台说没绑。
  */
 import { describe, expect, it } from "vitest";
-import { bindingDetail, bindingLabel, type BindingSpec } from "./cardBinding";
+import { bindingDetail, bindingLabel, revealTargets, type BindingSpec } from "./cardBinding";
 
 const SPEC: BindingSpec = {
   name: "泵机启动",
@@ -88,5 +91,47 @@ describe("P121 · bindingDetail", () => {
     const s = bindingDetail({ sendTemplateId: "st1", paramId: "p1" }, two);
     expect(s).toContain("转速高字节");
     expect(s).toContain("转速低字节");
+  });
+});
+
+describe("P122-C · revealTargets（一块的值在画布上被谁用着）", () => {
+  const PAGES = [
+    {
+      id: "pg1",
+      name: "泵机台",
+      cards: [
+        { id: "c1", name: "转速", sendTemplateId: "st1", paramId: "p1" },
+        { id: "c2", name: "按钮", sendTemplateId: "st1", paramId: "p2" },
+        // 惯导预设的卡：managed.paramId 是另一套 id 空间，撞了同一个数也不算绑着
+        { id: "c3", name: "被控量", managed: { paramId: "p1" } },
+      ],
+    },
+    {
+      id: "pg2",
+      name: "炉子",
+      cards: [{ id: "c4", name: "转速副本", sendTemplateId: "st1", paramId: "p1" }],
+    },
+  ];
+
+  it("只认 sendTemplateId + paramId 这一对", () => {
+    expect(revealTargets("st1", "p1", PAGES, "pg1").map((h) => h.cardId)).toEqual(["c1", "c4"]);
+    expect(revealTargets("st1", "p2", PAGES, "pg1").map((h) => h.cardId)).toEqual(["c2"]);
+    expect(revealTargets("st9", "p1", PAGES, "pg1")).toEqual([]);
+  });
+
+  it("managed.paramId 相同不算绑定 —— 说成绑着就是骗人", () => {
+    expect(revealTargets("st1", "p1", PAGES, "pg1").map((h) => h.cardId)).not.toContain("c3");
+  });
+
+  it("在当前页上才算\"能当场闪\"，别的页交给那句\"去那里\"", () => {
+    const hits = revealTargets("st1", "p1", PAGES, "pg1");
+    expect(hits.find((h) => h.cardId === "c1")!.onActivePage).toBe(true);
+    expect(hits.find((h) => h.cardId === "c4")!.onActivePage, "在 pg2 上").toBe(false);
+    expect(hits.find((h) => h.cardId === "c4")!.pageName).toBe("炉子");
+  });
+
+  it("没给谱或没给参数 ⇒ 空，不猜", () => {
+    expect(revealTargets("", "p1", PAGES, "pg1")).toEqual([]);
+    expect(revealTargets("st1", "", PAGES, "pg1")).toEqual([]);
   });
 });

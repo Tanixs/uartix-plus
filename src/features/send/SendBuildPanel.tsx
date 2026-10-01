@@ -26,6 +26,7 @@ import { draftFromFrame } from "./fromFrame";
 import { runCommand } from "../controls/cmdExec";
 import * as cmdStore from "../controls/commandStore";
 import * as controlsStore from "../controls/controlsStore";
+import { revealTargets } from "../controls/cardBinding";
 import { guardLocked } from "../operator/lock";
 import { NumInput, TextInput } from "../protocol/PropertiesPanel";
 import * as sendStore from "./sendStore";
@@ -143,6 +144,19 @@ function boundaryAt(el: HTMLElement, x: number, y: number): number | null {
   return null;
 }
 
+/**
+ * 让控制画布把某张卡闪一下。
+ * 走的是脚本 `setControl` 那条现成的事件桥（`vs-control-trigger`）的同一族写法，
+ * 不为一句话新造总线；控制画布没开着就没有监听者，这正好是我们要的安静。
+ */
+function revealCard(cardId: string) {
+  window.dispatchEvent(new CustomEvent("vs-control-reveal", { detail: { cardId } }));
+}
+
+/** 定位成功那一句：当场闪一次、还是跳过去再闪一次，说的都是同一句话 */
+const locatedLine = (cardName: string) =>
+  tx(`已定位到画布上的「${cardName}」`, `located: “${cardName}” on the canvas`);
+
 export function SendBuildPanel() {
   useLocale();
   const tpls = useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
@@ -242,6 +256,59 @@ export function SendBuildPanel() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [tpl?.id]);
+
+  /**
+   * P122-C：这一块的值在控制画布上被谁用着 —— 在当前页就当场定位（闪一下），
+   * 在别的页就把话写清楚并给一颗「去那里」，什么都没有就明说没有控件在用这个参数。
+   *
+   * 判据全在 `revealTargets`（纯函数，能钉住）；这里只负责问一次、说一句。
+   * deps 只放谱 id 与参数 id：在名字框里打一个字就闪一次别人的面板，那不叫联动叫打扰。
+   */
+  const [link, setLink] = useState<{
+    line: string;
+    pageId?: string;
+    cardId?: string;
+    cardName?: string;
+  } | null>(null);
+  const specId = tpl?.id ?? "";
+  const linkParamId = field?.source.kind === "param" ? field.source.paramId : "";
+  useEffect(() => {
+    if (!specId || !linkParamId) {
+      setLink(null);
+      return;
+    }
+    const snap = controlsStore.getSnapshot();
+    const hits = revealTargets(specId, linkParamId, snap.pages, snap.activePageId);
+    if (!hits.length) {
+      setLink({
+        line: tx(
+          "没有控件在用这个参数：拖滑条不改变这一帧",
+          "No control uses this parameter: dragging a slider changes nothing in this frame",
+        ),
+      });
+      return;
+    }
+    const here = hits.find((h) => h.onActivePage);
+    const h = here ?? hits[0];
+    if (here) {
+      revealCard(here.cardId);
+    }
+    const more =
+      hits.length > 1 ? tx(`（共 ${hits.length} 张）`, ` (${hits.length} cards)`) : "";
+    setLink(
+      here
+        ? { line: locatedLine(here.cardName) }
+        : {
+            line: tx(
+              `绑在页面「${h.pageName}」的「${h.cardName}」上${more}`,
+              `bound to “${h.cardName}” on page “${h.pageName}”${more}`,
+            ),
+            pageId: h.pageId,
+            cardId: h.cardId,
+            cardName: h.cardName,
+          },
+    );
+  }, [specId, linkParamId]);
 
   /** 格子里改一个字节：只写进这一块自己的 const 数组，别的来源一概不接 */
   const commitByte = (fieldId: string, off: number, text: string) => {
@@ -625,7 +692,7 @@ export function SendBuildPanel() {
                     {b.name}
                   </button>
                 ))}
-                {at >= band.length && <i className="sb-drop-end" aria-hidden="true" />}
+                {at >= band.length && <i className="sb-drop-caret" aria-hidden="true" />}
               </div>
             )}
             {approx && (
@@ -823,6 +890,28 @@ export function SendBuildPanel() {
                     ))}
                   </select>
                 </label>
+                {link && (
+                  <div className="sb-link">
+                    <span className="sb-hint">{link.line}</span>
+                    {/* 只有真的在别的页上才有这颗键：当前页已经闪过了还留一个"去那里"，那就是假开关 */}
+                    {link.pageId !== undefined && link.cardId !== undefined && (
+                      <button
+                        className="btn"
+                        onClick={() => {
+                          if (!link.pageId || !link.cardId || !link.cardName) return;
+                          controlsStore.setActivePage(link.pageId);
+                          // 卡是新页面上刚渲染出来的，等一拍再闪（协议画布那条反向定位同一节奏）
+                          const cardId = link.cardId;
+                          window.setTimeout(() => revealCard(cardId), 80);
+                          // 人都跳过去了，那句话不许还停在"在别的页上"
+                          setLink({ line: locatedLine(link.cardName) });
+                        }}
+                      >
+                        {tx("去那里", "Go there")}
+                      </button>
+                    )}
+                  </div>
+                )}
                 {field.source.kind === "const" && (
                   <label className="sb-row">
                     <span>{tx("字节 (hex)", "Bytes (hex)")}</span>

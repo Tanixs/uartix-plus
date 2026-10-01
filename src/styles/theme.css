@@ -4137,6 +4137,19 @@ select optgroup {
   overflow: hidden;
 }
 
+/* P122-C：TX组帧台点了一块 → 吃这个参数的卡亮一下（只定位，不改值）。
+   画阴影不画边框（G 门那条基线只降不升），色从 --accent 派生（不加新视觉 token），
+   类由 JS 在 950ms 后摘掉 —— 它是"一闪"，不是"常驻选中态"。 */
+.ctl-reveal { animation: ctl-reveal 900ms ease-out 1; }
+@keyframes ctl-reveal {
+  0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 88%, transparent); }
+  65% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 26%, transparent); }
+  100% { box-shadow: 0 0 0 2px transparent; }
+}
+/* 减弱动效时不许干脆没有反馈：改成一圈不动的亮边，同样是一闪即走（类照样被摘） */
+@media (prefers-reduced-motion: reduce) { .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent); } }
+html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+
 .ctl-card.dragging {
   box-shadow: var(--shadow-lift);
   outline: 2px solid var(--accent);
@@ -11558,7 +11571,7 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-seg.bad{color:var(--danger);}
 /* 拖拽中的落点：降级条带（没有格子可标）就在段左侧亮一条，追加到末尾则亮那根竖线 */
 .sb-seg.drop{box-shadow:inset 3px 0 0 var(--accent);color:var(--text);}
-.sb-drop-end{flex:none;width:2px;height:15px;border-radius:var(--radius-pill);background:var(--accent);}
+.sb-drop-caret{flex:none;width:2px;height:15px;border-radius:var(--radius-pill);background:var(--accent);}
 .sb-seg-point{padding:0;justify-content:center;font-size:var(--fs-sm);}
 /* 编码没过时的降级条带：没有格子可对齐，就交给 flex 排 */
 .sb-band-loose .sb-seg{position:static;flex:none;}
@@ -11573,6 +11586,10 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-cell-edit{background:var(--bg-panel);border-radius:var(--radius-s);}
 .sb-byte{width:22px;height:18px;box-sizing:border-box;padding:0;text-align:center;font-family:var(--font-mono);font-size:var(--fs-sm);color:var(--text);background:transparent;outline:2px solid var(--accent);outline-offset:-1px;border-radius:var(--radius-s);}
 .sb-cov{position:relative;height:3px;flex:none;}
+/* 这块的参数在控制画布上的去处：一句状态 +（在别的页时）一颗「去那里」 */
+.sb-link{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.sb-link>.sb-hint{flex:1;min-width:0;}
+.sb-link>.btn{flex:none;}
 .sb-cov i{position:absolute;top:0;height:3px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--warn) 55%,transparent);}
 .sb-r-header,.sb-r-footer,.sb-r-addr,.sb-r-id{--blk:var(--accent);}
 .sb-r-length,.sb-r-checksum,.sb-r-checksum2{--blk:var(--warn);}

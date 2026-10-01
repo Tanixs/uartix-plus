@@ -32,6 +32,58 @@ export function bindingLabel(card: BindingCard, spec: BindingSpec | null | undef
   return tx(`绑「${spec.name}」› ${p.name}`, `bound to “${spec.name}” › ${p.name}`);
 }
 
+/** 反向：一张谱的一个参数，在控制画布上被哪些卡用着（P122-C 的字段→控件定位） */
+export interface RevealCard {
+  id: string;
+  name: string;
+  sendTemplateId?: string;
+  paramId?: string;
+}
+
+export interface RevealPage {
+  id: string;
+  name: string;
+  cards: RevealCard[];
+}
+
+export interface RevealHit {
+  cardId: string;
+  cardName: string;
+  pageId: string;
+  pageName: string;
+  /** 这张卡就在当前页上 ⇒ 能当场闪一下；否则得先让人决定要不要切过去 */
+  onActivePage: boolean;
+}
+
+/**
+ * 只认 `sendTemplateId + paramId` 这一对引用式绑定。
+ *
+ * `managed.paramId` 是惯导预设的另一套 id 空间，拿同一个数来认就把两个不相干的东西
+ * 说成"绑着"了 —— 所以这里刻意不看它。多张卡共用一个参数是合法状态，全部列出来。
+ */
+export function revealTargets(
+  specId: string,
+  paramId: string,
+  pages: RevealPage[],
+  activePageId: string,
+): RevealHit[] {
+  if (!specId || !paramId) return [];
+  const out: RevealHit[] = [];
+  for (const p of pages) {
+    for (const c of p.cards) {
+      if (c.sendTemplateId !== specId || c.paramId !== paramId) continue;
+      out.push({
+        cardId: c.id,
+        cardName: c.name,
+        pageId: p.id,
+        pageName: p.name,
+        onActivePage: p.id === activePageId,
+      });
+    }
+  }
+  return out;
+}
+
 /**
  * 悬浮展开的那一句：值最终落在**哪一帧的哪一块**。
  *

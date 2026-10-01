@@ -579,6 +579,36 @@ export function ControlCanvas() {
     return () => window.removeEventListener("vs-control-trigger", onCtl);
   });
 
+  /**
+   * P122-C：TX组帧台点了一块 → 这块参数在画布上那张卡亮一下（只定位，不改值、不发送）。
+   *
+   * 只在卡真的渲染出来的时候动：卡片属于当前页才在 DOM 里，别的页上它不存在，
+   * 这里就安静地什么都不做 —— 那句"在别的页上"由组帧台自己说，还带一颗要不要跳过去的键。
+   * 自动替人切页会把对方正在看的东西换掉，所以不这么干。
+   */
+  useEffect(() => {
+    let last: number | null = null;
+    const onReveal = (e: Event) => {
+      const d = (e as CustomEvent<{ cardId?: string }>).detail;
+      if (!d?.cardId) return;
+      const el = gridRef.current?.querySelector<HTMLElement>(
+        `.ctl-card[data-id="${CSS.escape(d.cardId)}"]`,
+      );
+      if (!el) return;
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+      el.classList.remove("ctl-reveal");
+      void el.offsetWidth; // 同一张卡连着闪两次：不重启动画就只亮一次
+      el.classList.add("ctl-reveal");
+      if (last !== null) window.clearTimeout(last);
+      last = window.setTimeout(() => el.classList.remove("ctl-reveal"), 950);
+    };
+    window.addEventListener("vs-control-reveal", onReveal);
+    return () => {
+      window.removeEventListener("vs-control-reveal", onReveal);
+      if (last !== null) window.clearTimeout(last);
+    };
+  }, [page?.id]);
+
   const gridDropRef = useRef<(d: PdragDetail) => void>(() => {});
   const gridOverRef = useRef<(d: PdragDetail) => void>(() => {});
   const [dropPrev, setDropPrev] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
