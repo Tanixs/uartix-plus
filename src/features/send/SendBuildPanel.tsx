@@ -19,16 +19,13 @@ import type { FieldRole } from "../../ipc/types";
 import { tx, useLocale } from "../../i18n/strings";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
-import { IconChevron, IconClock, IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
-import { Flyout, clampFlyoutMenu } from "../../shared/Flyout";
+import { clampFlyoutMenu } from "../../shared/Flyout";
 import { getSnapshot as readSettings, patch as patchSettings, useSettings } from "../settings/settingsStore";
-import { SEND_PRESETS, applySendPreset, type SendPresetDef } from "./sendPresets";
-import * as frameStore from "../framecanvas/frameStore";
-import { draftFromFrame } from "./fromFrame";
 import { runCommand } from "../controls/cmdExec";
 import * as cmdStore from "../controls/commandStore";
 import { guardLocked } from "../operator/lock";
 import { isOpen as isPanelOpen } from "../../panels/panelActivity";
+import { openProtocolTab } from "../../shell/railState";
 import { requestOpenPanel } from "../ai/appBus";
 import { setInspectorFocus, txeBackToSpec, useInspectorFocus } from "../inspector/focus";
 import { roleNames } from "../inspector/roleNames";
@@ -155,8 +152,6 @@ export function SendBuildPanel() {
   const [selId, setSelId] = useState("");
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
-  /** 「＋ 预设」的下拉开着时锚定的那颗键（浮层走共享 Flyout：portal 到 body，窄面板自动翻向） */
-  const [presetAnchor, setPresetAnchor] = useState<HTMLElement | null>(null);
   /**
    * 块上的右键菜单（P123-D）。锚在点击处、定位在面板根上 —— 侧栏退役后"删一块 / 复制一块"
    * 没了近路，右键就是那条近路；它不新开属性页，只把这一块选中并给两个动作。
@@ -207,36 +202,6 @@ export function SendBuildPanel() {
     if (req) setSelId(req.id);
   }, [selNonce]);
 
-  /**
-   * 「照最近收到的一帧起一张谱」。
-   * 归档只在帧画布开着的时候收字节，所以"没有可反推的帧"是一种正常状态，要说清为什么没有。
-   */
-  const draftFromLastFrame = () => {
-    const list = frameStore.archiveRef().list;
-    const row = list[list.length - 1];
-    if (!row?.bytes?.length) {
-      setErr(
-        tx(
-          "帧归档里没有帧，反推不了：先收到一帧（归档只在帧画布开着时收字节）",
-          "Nothing to infer — the archive holds no frame (it only fills while the frame canvas is open)",
-        ),
-      );
-      return;
-    }
-    try {
-      const bytes = Array.from(row.bytes);
-      const { tpl: draft, notes } = draftFromFrame(bytes, row.tplId, `${tx("照帧起的谱", "Frame draft")} ${row.tplName}`);
-      const id = sendStore.addDraftTemplate(draft);
-      if (!id) {
-        setErr(tx("Operator 只读：不能新建发送谱", "Operator read-only: no new send template"));
-        return;
-      }
-      setSelId(id);
-      setMsg(notes.join("；"));
-    } catch (e) {
-      setErr(String(e).replace(/^Error:\s*/, ""));
-    }
-  };
 
   // 换一张谱：上一张的报错和"已存为指令"不该还挂在下面冒充当前状态
   useEffect(() => {
@@ -537,104 +502,11 @@ export function SendBuildPanel() {
     if (id) setMsg(tx("已存为指令（引用这张谱）", "Saved as a command — it references this template"));
   };
 
-  /**
-   * 导出 / 导入 = 一张谱的**文件**往返。
-   *
-   * 为什么走 Tauri 的另存为而不是 `<a download>`：与控制画布 / 参数集 / 编排器那几处
-   * 同一族（`save_text_file` / `read_text_file`），文件对话框能记住目录，
-   * 而"发谱"是要拿去给同事、拿去配另一台机器的东西。
-   */
-  const doExport = async () => {
-    if (!tpl) return;
-    try {
-      const { save } = await import("@tauri-apps/plugin-dialog");
-      const { invoke } = await import("@tauri-apps/api/core");
-      const path = await save({
-        title: tx("导出发送谱", "Export send template"),
-        defaultPath: `uartix-sendspec-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`,
-        filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
-      });
-      if (!path) return;
-      await invoke("save_text_file", { path, content: sendStore.packSpecFile([tpl]) });
-      setMsg(tx("已导出到文件", "Exported to file"));
-    } catch (e) {
-      setErr(String(e).replace(/^Error:\s*/, ""));
-    }
-  };
-
-  const doImport = async () => {
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const { invoke } = await import("@tauri-apps/api/core");
-      const path = await open({
-        multiple: false,
-        filters: [{ name: "Uartix+ JSON", extensions: ["json"] }],
-      });
-      if (typeof path !== "string") return;
-      const list = sendStore.unpackSpecFile(await invoke<string>("read_text_file", { path }));
-      if (!list) {
-        setErr(tx("不是发送谱文件（kind 不匹配）", "Not a send-template file (kind does not match)"));
-        return;
-      }
-      const n = sendStore.importTemplates(list);
-      setMsg(
-        n
-          ? tx(`已导入 ${n} 张谱`, `Imported ${n} templates`)
-          : tx("文件里没有可导入的谱", "Nothing importable in that file"),
-      );
-    } catch (e) {
-      setErr(String(e).replace(/^Error:\s*/, ""));
-    }
-  };
 
 
-  /**
-   * 载入一份出厂预设谱。
-   *
-   * 落库只有 `sendStore.importTemplates` 这一个出口 —— 于是"只追加、重名加序号、id 每次新生成"
-   * 与「导入文件」是同一套语义，不必在这里再写一遍，也写不出第二份。
-   * 锁着的时候 importTemplates 静默返回 0，所以先问一次锁：点了按钮一声不响是它最坏的失败方式。
-   */
-  const loadPreset = (def: SendPresetDef) => {
-    setPresetAnchor(null);
-    if (guardLocked()) {
-      setErr(tx("Operator 只读：不能载入预设谱", "Operator read-only: presets can't be loaded"));
-      return;
-    }
-    const n = sendStore.importTemplates(applySendPreset(def));
-    if (!n) {
-      setErr(tx("一张都没载入（这份预设是空的）", "Nothing loaded — this preset is empty"));
-      return;
-    }
-    setErr("");
-    // 载入后跳到第一张新谱：预设是"想看看它长什么样"才点的，留在原来那张谱上就等于没给看
-    const list = sendStore.getSnapshot();
-    const first = list[list.length - n];
-    if (first) setSelId(first.id);
-    setMsg(
-      tx(`已载入 ${n} 张预设谱（只新增，不动你已有的）`, `Loaded ${n} preset templates — added only, nothing of yours touched`),
-    );
-  };
+
 
   /** 点开的那份预设菜单：锚在按钮上，portal 在 body（浮层的统一去处） */
-  const presetMenuRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!presetAnchor) return;
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node | null;
-      if ((t && presetMenuRef.current?.contains(t)) || presetAnchor.contains(t)) return;
-      setPresetAnchor(null);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPresetAnchor(null);
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [presetAnchor]);
 
 
 
@@ -648,112 +520,9 @@ export function SendBuildPanel() {
       }}
     >
       <div className="sb-bar p-bar">
-        <button
-          className="btn icon-btn"
-          title={tx("新建", "New")}
-          onClick={() => {
-            const id = sendStore.addTemplate();
-            if (id) setSelId(id);
-          }}
-        >
-          <IconPlus />
-        </button>
-        <button
-          className="btn icon-btn"
-          title={tx(
-            "从预设载入示例谱（可反复载入；改崩了删掉那一份再载入一次）",
-            "Load example templates from a preset (repeatable; delete a broken one and load it again)",
-          )}
-          aria-expanded={presetAnchor !== null}
-          onClick={(e) => {
-            // currentTarget 在事件派发结束就被 React 置空，所以这里同步取走再交给 updater
-            const el = e.currentTarget;
-            setPresetAnchor((cur) => (cur === el ? null : el));
-          }}
-        >
-          {tx("预设", "Preset")} <IconChevron dir="down" size={12} />
-        </button>
-        {presetAnchor && (
-          <Flyout anchor={presetAnchor} zf={zf} minWidth={220}>
-            <div ref={presetMenuRef}>
-              <div className="ctx-group">{tx("载入示例谱（只新增，不动你已有的）", "Load examples — added, never overwriting yours")}</div>
-              {SEND_PRESETS.map((d) => (
-                <button key={d.key} className="ctx-item" title={d.desc} onClick={() => loadPreset(d)}>
-                  {d.tag} · {d.name}
-                </button>
-              ))}
-            </div>
-          </Flyout>
-        )}
-        <button
-          className="btn icon-btn"
-          title={tx(
-            "照最近收到的一帧起一张谱（能重算验证的才写进谱，其余按定长字节放）",
-            "Draft a template from the last received frame (only what recomputes exactly gets inferred; the rest lands as fixed bytes)",
-          )}
-          onClick={draftFromLastFrame}
-        >
-          <IconClock />
-        </button>
-        <button
-          className="btn icon-btn"
-          title={tx("从文件导入发送谱", "Import send templates from a file")}
-          onClick={() => void doImport()}
-        >
-          <IconUpload />
-        </button>
-        <button
-          className="btn icon-btn"
-          title={tx("导出这份发送谱到文件", "Export this template to a file")}
-          disabled={!tpl}
-          onClick={() => void doExport()}
-        >
-          <IconDownload />
-        </button>
-        <button className="btn" onClick={() => sendStore.undo()} disabled={!sendStore.canUndo()}>
-          {tx("撤销", "Undo")}
-        </button>
-        <button className="btn" onClick={() => sendStore.redo()} disabled={!sendStore.canRedo()}>
-          {tx("重做", "Redo")}
-        </button>
-        {tpl && (
-          <>
-            <input
-              className="input sb-name"
-              value={tpl.name}
-              onChange={(e) => sendStore.patchTemplate(tpl.id, { name: e.target.value })}
-            />
-            <button
-              className="btn icon-btn"
-              title={tx("复制这份发送谱", "Duplicate this template")}
-              onClick={() => setSelId(sendStore.duplicateTemplate(tpl.id))}
-            >
-              <IconPlus />
-            </button>
-            <button
-              className="btn icon-btn"
-              title={tx("删除这份发送谱", "Delete this template")}
-              onClick={() => {
-                sendStore.removeTemplate(tpl.id);
-                setSelId("");
-              }}
-            >
-              <IconTrash />
-            </button>
-          </>
-        )}
-        <label className="sb-cellsz" title={tx("字节格尺寸（20~96，网格上 Ctrl+滚轮缩放，自动保存）", "Byte-cell size (20–96; Ctrl+wheel over the grid zooms; saved automatically)")}>
-          <input
-            type="range"
-            min={20}
-            max={96}
-            value={cellW}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => setCellW(Number(e.target.value))}
-          />
-          <b>{cellW}</b>
-        </label>
-        <div className="sb-bar-spacer" />
+        {/* P124-B：工具条只剩"我在编哪一张、这一步撤销什么、格子多大"。
+            新建 / 预设 / 照帧起谱 / 导入 / 导出 / 复制 / 删除都是**对象级**动作，
+            它们的家在左侧 协议 › 发送谱 —— 挤在这条里就会长出"＋预设"那种误读。 */}
         <select
           className="input"
           value={tpl?.id ?? ""}
@@ -767,19 +536,47 @@ export function SendBuildPanel() {
             </option>
           ))}
         </select>
+        {tpl && (
+          <input
+            className="input sb-name"
+            value={tpl.name}
+            onChange={(e) => sendStore.patchTemplate(tpl.id, { name: e.target.value })}
+          />
+        )}
+        <div className="sb-bar-spacer" />
+        <button className="btn" onClick={() => sendStore.undo()} disabled={!sendStore.canUndo()}>
+          {tx("撤销", "Undo")}
+        </button>
+        <button className="btn" onClick={() => sendStore.redo()} disabled={!sendStore.canRedo()}>
+          {tx("重做", "Redo")}
+        </button>
+        <label className="sb-cellsz" title={tx("字节格尺寸（20~96，网格上 Ctrl+滚轮缩放，自动保存）", "Byte-cell size (20–96; Ctrl+wheel over the grid zooms; saved automatically)")}>
+          <input
+            type="range"
+            min={20}
+            max={96}
+            value={cellW}
+            onKeyDown={(e) => e.stopPropagation()}
+            onChange={(e) => setCellW(Number(e.target.value))}
+          />
+          <b>{cellW}</b>
+        </label>
       </div>
 
       {!tpl ? (
         <>
-          {/* 空状态里没有页脚，报错只能自己挂在这里 —— 不然点了「照一帧起谱」而归档是空的，
+          {/* 空状态里没有页脚，报错只能自己挂在这里 —— 点了那颗直达键而导轨那一节没能打开，
               屏幕上一个字都不动，用户只会以为按钮坏了 */}
           {err !== "" && <div className="sb-danger">{err}</div>}
           <EmptyState
             title={tx("还没有发送谱", "No send templates yet")}
             hint={[tx("描述一帧要发的字节", "Describe the bytes one frame sends")]}
             actions={[
-              { label: tx("新建", "New"), onClick: () => setSelId(sendStore.addTemplate()), primary: true },
-              { label: tx("照最近收到的一帧起谱", "Draft from last frame"), onClick: draftFromLastFrame },
+              {
+                label: tx("去 协议 › 发送谱 新建", "Create one under Protocol › Send specs"),
+                onClick: () => openProtocolTab("send"),
+                primary: true,
+              },
             ]}
           />
         </>
