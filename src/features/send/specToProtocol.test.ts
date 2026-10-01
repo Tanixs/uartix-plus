@@ -41,7 +41,7 @@ const spec = (fields: SendField[], over: Partial<SendTemplate> = {}): SendTempla
 /** 真编一遍再派生：投影吃的就是将要上线的那帧字节，不另算宽度 */
 const derive = (s: SendTemplate) => {
   const enc = encodeSend(s, { seq: s.nextSeq });
-  return { enc, ...toReceiveTpl(s, enc.bytes, { id: "tpl-new", color: "#123456" }) };
+  return { enc, ...toReceiveTpl(s, { bytes: enc.bytes, spans: enc.spans }, { id: "tpl-new", color: "#123456" }) };
 };
 
 describe("toReceiveTpl · 偏移与块", () => {
@@ -80,7 +80,7 @@ describe("toReceiveTpl · 偏移与块", () => {
     );
     const { tpl, notes } = derive(s);
     expect(tpl.fields[0].size).toBe(5);
-    expect(notes.join("；")).toContain("这一帧的实际长度");
+    expect(notes.join("；")).toContain("这一帧实际是");
     expect(notes.join("；"), "不许静默当成原样可解析").toContain("错位");
   });
 
@@ -102,8 +102,9 @@ describe("toReceiveTpl · 偏移与块", () => {
     const enc = encodeSend(s);
     expect(enc.hex).toBe("01 02 00 00 00 01");
     // 只给前 4 字节：那块 u32 要占 4 格，装不下 —— 宁可抛错也不交出一张偏移错位的协议
-    expect(() => toReceiveTpl(s, enc.bytes.slice(0, 4), { id: "t" })).toThrow(DeriveError);
-    expect(() => toReceiveTpl(s, enc.bytes.slice(0, 4), { id: "t" })).toThrow(/超界/);
+    const short = { bytes: enc.bytes.slice(0, 4), spans: enc.spans };
+    expect(() => toReceiveTpl(s, short, { id: "t" })).toThrow(DeriveError);
+    expect(() => toReceiveTpl(s, short, { id: "t" })).toThrow(/超界/);
   });
 });
 
@@ -230,9 +231,9 @@ describe("校验的两种口径与字节序", () => {
 
 describe("toReceiveTpl · 拒绝空话", () => {
   it("没有一块的谱派不出东西，点名是哪张谱", () => {
-    expect(() => toReceiveTpl(spec([]), [1], { id: "t" })).toThrow(/谱「谱」一个字段都没有/);
+    expect(() => toReceiveTpl(spec([]), { bytes: [1], spans: [] }, { id: "t" })).toThrow(/谱「谱」一个字段都没有/);
   });
   it("空帧同样不派", () => {
-    expect(() => toReceiveTpl(spec([f({ id: "a", name: "A" })]), [], { id: "t" })).toThrow(/这一帧是空的/);
+    expect(() => toReceiveTpl(spec([f({ id: "a", name: "A" })]), { bytes: [], spans: [] }, { id: "t" })).toThrow(/这一帧是空的/);
   });
 });

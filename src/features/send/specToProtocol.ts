@@ -12,7 +12,8 @@
  *     `parser.rs` 用 `cov_start..cov_end`）。直接抄数字会少算一字节，所以这里换算一次。
  */
 import type { Boundary, ChecksumCfg, FieldDef, FieldType } from "../../ipc/types";
-import { checksumWidth, checksumWireEndian } from "../../shared/checksums";
+import type { EncodedSpans } from "./byteGrid";
+import { checksumWireEndian } from "../../shared/checksums";
 import { sendFieldWidth, type SendField, type SendTemplate } from "./sendTypes";
 
 export class DeriveError extends Error {
@@ -48,19 +49,6 @@ export function covEndToReceive(end: number): number {
   return end < 0 ? end : end + 1;
 }
 
-/** 这块在这一帧里占几个字节：const 看它自己的字节数，校验看算法，其余看声明的宽度 */
-function widthIn(f: SendField, frame: number[], at: number, ckSize: number): number {
-  if (isCk(f.role)) return ckSize;
-  if (f.source.kind === "const") return f.source.bytes.length;
-  const declared = sendFieldWidth(f);
-  // 变长类型没声明 size：这一帧里它到底有几个字节是**看得见**的，就用看见的那个数，
-  // 而不是替它猜一个（历史上接收侧默认 4、发送侧默认 1）
-  if (declared === 0 && (f.type === "ascii" || f.type === "bcd")) {
-    return Math.max(0, frame.length - at);
-  }
-  return declared;
-}
-
 /** 帧头：开头连续几块 const（通常是那一块"帧头"）；一块都没有就不猜 */
 function headerRun(fields: SendField[]): number[] {
   const out: number[] = [];
@@ -71,61 +59,68 @@ function headerRun(fields: SendField[]): number[] {
   return out;
 }
 
+/**
+ * 发送谱 → 解析协议。第二入参是**编码器的那一份**（bytes + spans），不是裸字节数组：
+ * 块宽必须与真帧一致（P122-A 立的"宽度只认编码器那一份"这里同样成立）。
+ * 第一版我自己在这里按声明宽度重推了一遍，结果 ascii 声明 8、值 6 字节就派生不出东西 ——
+ * 由 `sendPresets.test.ts` 抓到。
+ */
 export function toReceiveTpl(
   spec: SendTemplate,
-  frame: number[],
+  enc: EncodedSpans,
   opts: { id: string; name?: string; color?: string },
 ): { tpl: DerivedTpl; notes: string[] } {
+  const frame = enc.bytes;
   if (!spec.fields.length) throw new DeriveError(`发送谱「${spec.name}」一个字段都没有，派生不出协议`);
   if (!frame.length) throw new DeriveError(`发送谱「${spec.name}」这一帧是空的，派生不出协议`);
   const notes: string[] = [];
-  const ckSize =
-    spec.checksum && spec.checksum.algo !== "none"
-      ? checksumWidth(spec.checksum.algo, spec.checksum.crc)
-      : 0;
   const fields: FieldDef[] = [];
   let at = 0;
   let lenBlock: { at: number; size: number; endian: SendField["endian"]; covers: string; adjust?: number } | null = null;
   let empty = 0;
 
-  for (const f of spec.fields) {
-    const w = widthIn(f, frame, at, ckSize);
-    if (w <= 0) {
+  const byId = new Map(spec.fields.map((f) => [f.id, f]));
+  for (const s of enc.spans) {
+    const f = byId.get(s.fieldId);
+    if (!f) {
+      throw new DeriveError(`编码结果里出现谱上没有的块「${s.fieldId}」，先别派生`);
+    }
+    if (s.len <= 0) {
       // 一块不占字节的 const（清空了的固定字节）在帧里根本不存在 —— 协议里也不该有它
       empty++;
       continue;
     }
-    if (at + w > frame.length) {
+    if (s.at + s.len > frame.length) {
       throw new DeriveError(
-        `块「${f.name}」在第 ${at} 字节要占 ${w} 字节，可这一帧只有 ${frame.length} 字节 —— 谱与帧对不上，先别派生`,
+        `块「${f.name}」在第 ${s.at} 字节要占 ${s.len} 字节，可这一帧只有 ${frame.length} 字节 —— 谱与帧对不上，先别派生`,
       );
     }
-    const type: FieldType = isCk(f.role) ? ckType(w) : f.type === "csv" ? "ascii" : f.type;
+    at = Math.max(at, s.at + s.len);
+    const type: FieldType = isCk(f.role) ? ckType(s.len) : f.type === "csv" ? "ascii" : f.type;
     if (f.type === "csv") {
-      notes.push(`块「${f.name}」是 csv（解析侧的显示类型，发不出去）：按 ascii 定长 ${w} 字节放进协议`);
+      notes.push(`块「${f.name}」是 csv（解析侧的显示类型，发不出去）：按 ascii 定长 ${s.len} 字节放进协议`);
     }
-    const needSize = f.type === "ascii" || f.type === "bcd" || type === "ascii";
-    if (needSize && sendFieldWidth(f) === 0) {
+    const declared = sendFieldWidth(f);
+    if ((f.type === "ascii" || f.type === "bcd") && declared !== s.len) {
       notes.push(
-        `块「${f.name}」没声明字节数：按这一帧的实际长度 ${w} 定了下来。值长度一变就会错位，真要变长在属性里开「变长载荷」`,
+        `块「${f.name}」这一帧实际是 ${s.len} 字节${declared ? `（谱里写的是 ${declared}）` : "（谱里没声明长度）"}：解析协议按实际的 ${s.len} 定下来。值长度一变就会错位，真要变长在属性里开「变长载荷」`,
       );
     }
     if (f.source.kind === "len") {
-      lenBlock = { at, size: w, endian: f.endian, covers: f.source.kind === "len" ? f.source.covers : "after", adjust: f.source.adjust };
+      lenBlock = { at: s.at, size: s.len, endian: f.endian, covers: f.source.covers, adjust: f.source.adjust };
     }
     fields.push({
       // 字段 id 原样带过来：两边指的是同一块，回头对得上账
       id: f.id,
       name: f.name,
       role: f.role,
-      offset: at,
+      offset: s.at,
       type,
       endian: f.endian,
-      size: needSize ? w : null,
+      size: type === "ascii" || type === "bcd" ? s.len : null,
       color: f.color || opts.color || "#8a93a6",
       bits: f.bits ?? null,
     });
-    at += w;
   }
   if (empty) notes.push(`有 ${empty} 块不占字节（空的固定字节），没进协议`);
   if (at !== frame.length) {

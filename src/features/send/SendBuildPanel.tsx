@@ -20,7 +20,10 @@ import { tx, useLocale } from "../../i18n/strings";
 import { CRC_DEFAULT, parseCrcLiteral } from "../../shared/checksums";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
-import { IconClock, IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
+import { IconChevron, IconClock, IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
+import { Flyout } from "../../shared/Flyout";
+import { useSettings } from "../settings/settingsStore";
+import { SEND_PRESETS, applySendPreset, type SendPresetDef } from "./sendPresets";
 import * as frameStore from "../framecanvas/frameStore";
 import { draftFromFrame } from "./fromFrame";
 import { runCommand } from "../controls/cmdExec";
@@ -165,11 +168,16 @@ const locatedLine = (cardName: string) =>
 
 export function SendBuildPanel() {
   useLocale();
+  // 浮层的定位要按缩放折算（共享 Flyout 的约定：它写回 style 时除以 zf）
+  const settings = useSettings();
+  const zf = (settings.zoom || 100) / 100;
   const tpls = useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
   const [selId, setSelId] = useState("");
   const [selField, setSelField] = useState("");
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
+  /** 「＋ 预设」的下拉开着时锚定的那颗键（浮层走共享 Flyout：portal 到 body，窄面板自动翻向） */
+  const [presetAnchor, setPresetAnchor] = useState<HTMLElement | null>(null);
   const [at, setAt] = useState(-1);
   const stripRef = useRef<HTMLDivElement>(null);
   /** 一行放几格：按带的实际宽度算，窄面板不许把尺撑出横向滚动条 */
@@ -405,7 +413,7 @@ export function SendBuildPanel() {
     if (!tpl || !preview?.ok) return;
     if (guardLocked()) return;
     try {
-      const { tpl: made, notes } = toReceiveTpl(tpl, preview.bytes, {
+      const { tpl: made, notes } = toReceiveTpl(tpl, { bytes: preview.bytes, spans: preview.spans }, {
         id: crypto.randomUUID(),
         color: templateStore.PALETTE[rules.rules.templates.length % templateStore.PALETTE.length],
       });
@@ -628,6 +636,54 @@ export function SendBuildPanel() {
     setMsg(tx("已在控制画布生成一张滑条卡（引用这张谱）", "Slider card created on the control canvas — it references this template"));
   };
 
+  /**
+   * 载入一份出厂预设谱。
+   *
+   * 落库只有 `sendStore.importTemplates` 这一个出口 —— 于是"只追加、重名加序号、id 每次新生成"
+   * 与「导入文件」是同一套语义，不必在这里再写一遍，也写不出第二份。
+   * 锁着的时候 importTemplates 静默返回 0，所以先问一次锁：点了按钮一声不响是它最坏的失败方式。
+   */
+  const loadPreset = (def: SendPresetDef) => {
+    setPresetAnchor(null);
+    if (guardLocked()) {
+      setErr(tx("Operator 只读：不能载入预设谱", "Operator read-only: presets can't be loaded"));
+      return;
+    }
+    const n = sendStore.importTemplates(applySendPreset(def));
+    if (!n) {
+      setErr(tx("一张都没载入（这份预设是空的）", "Nothing loaded — this preset is empty"));
+      return;
+    }
+    setErr("");
+    // 载入后跳到第一张新谱：预设是"想看看它长什么样"才点的，留在原来那张谱上就等于没给看
+    const list = sendStore.getSnapshot();
+    const first = list[list.length - n];
+    if (first) setSelId(first.id);
+    setMsg(
+      tx(`已载入 ${n} 张预设谱（只新增，不动你已有的）`, `Loaded ${n} preset templates — added only, nothing of yours touched`),
+    );
+  };
+
+  /** 点开的那份预设菜单：锚在按钮上，portal 在 body（浮层的统一去处） */
+  const presetMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!presetAnchor) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if ((t && presetMenuRef.current?.contains(t)) || presetAnchor.contains(t)) return;
+      setPresetAnchor(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPresetAnchor(null);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [presetAnchor]);
+
   const patchSel = (patch: Partial<SendField>) => {
     if (tpl && field) sendStore.patchField(tpl.id, field.id, patch);
   };
@@ -668,6 +724,33 @@ export function SendBuildPanel() {
         >
           <IconPlus />
         </button>
+        <button
+          className="btn icon-btn"
+          title={tx(
+            "从预设载入示例谱（可反复载入；改崩了删掉那一份再载入一次）",
+            "Load example templates from a preset (repeatable; delete a broken one and load it again)",
+          )}
+          aria-expanded={presetAnchor !== null}
+          onClick={(e) => {
+            // currentTarget 在事件派发结束就被 React 置空，所以这里同步取走再交给 updater
+            const el = e.currentTarget;
+            setPresetAnchor((cur) => (cur === el ? null : el));
+          }}
+        >
+          {tx("预设", "Preset")} <IconChevron dir="down" size={12} />
+        </button>
+        {presetAnchor && (
+          <Flyout anchor={presetAnchor} zf={zf} minWidth={220}>
+            <div ref={presetMenuRef}>
+              <div className="ctx-group">{tx("载入示例谱（只新增，不动你已有的）", "Load examples — added, never overwriting yours")}</div>
+              {SEND_PRESETS.map((d) => (
+                <button key={d.key} className="ctx-item" title={d.desc} onClick={() => loadPreset(d)}>
+                  {d.tag} · {d.name}
+                </button>
+              ))}
+            </div>
+          </Flyout>
+        )}
         <button
           className="btn icon-btn"
           title={tx(
