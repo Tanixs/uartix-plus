@@ -81,6 +81,36 @@ function persist(): void {
   listeners.forEach((f) => f());
 }
 
+/**
+ * P124-B：「协议」这一项里的二级页 —— 解析协议 / 发送谱。
+ *
+ * 为什么是二级页而不是导轨第六项：发送谱也是协议（一条线怎么发、怎么收），
+ * 加一格会把"协议"这个词拆成两个入口，用户找东西时先要猜"这算协议还是算发送"；
+ * 而且两边本来就互派生（帧→谱、谱→协议），并排在一节的两个页签里，
+ * 这座桥才看得见。
+ *
+ * **不落盘**：它不是偏好，是"刚才在看哪一面"。重启回到「解析协议」不算错，
+ * 而把一次浏览选择写进 `vs.*` 反而会长成"没人知道它为什么在那儿"的持久状态。
+ */
+export type RailProtoTab = "parse" | "send";
+let protoTab: RailProtoTab = "parse";
+
+export function railProtoTab(): RailProtoTab {
+  return protoTab;
+}
+
+export function setRailProtoTab(next: RailProtoTab): void {
+  if (protoTab === next) return;
+  protoTab = next;
+  listeners.forEach((f) => f());
+}
+
+/** 直达「协议 › 发送谱」：面板空态那颗键用它（先展开这一项，再切到那一页） */
+export function openProtocolTab(next: RailProtoTab): void {
+  openRailPanel("templates");
+  setRailProtoTab(next);
+}
+
 export function subscribeRail(cb: () => void): () => void {
   listeners.add(cb);
   return () => {

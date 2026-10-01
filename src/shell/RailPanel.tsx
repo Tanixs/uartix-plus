@@ -9,6 +9,8 @@ import { tx, useLocale } from "../i18n/strings";
 import { IconLayoutEdit, IconPlus } from "../shared/icons";
 import {
   railPanel,
+  railProtoTab,
+  setRailProtoTab,
   railPanelBounds,
   railPanelW,
   resetRailPanelW,
@@ -19,6 +21,7 @@ import { zoomFactor } from "../shared/zoom";
 import { devRailW } from "../dev/bootOverrides";
 import { LinkPanel } from "../features/serial/LinkPanel";
 import { TemplatesPanel } from "../features/protocol/TemplatesPanel";
+import { SendSpecLibrary } from "../features/send/SendSpecLibrary";
 import { WidgetGallery } from "../features/controls/WidgetGallery";
 import { CommandLibrary } from "../features/controls/CommandLibrary";
 
@@ -160,6 +163,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
 export function RailPanel({ actions }: { actions: RailActions }) {
   useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const open = useSyncExternalStore(subscribeRail, railPanel);
+  const protoTab = useSyncExternalStore(subscribeRail, railProtoTab);
   const w = useSyncExternalStore(subscribeRail, railPanelW);
   const asideRef = useRef<HTMLElement | null>(null);
 
@@ -229,7 +233,34 @@ export function RailPanel({ actions }: { actions: RailActions }) {
           <LinkPanel />
         </div>
       )}
-      {open === "templates" && <TemplatesPanel />}
+      {open === "templates" && (
+        /* P124-B：「协议」这一项里两条二级页 —— 解析协议 / 发送谱。
+           发送谱也是协议（一条线怎么收、怎么发），所以它不配第 6 格导轨，
+           配的是同一格里的一页；两边本来就互派生，并排放这座桥才看得见。 */
+        <div className="rp-proto">
+          <div className="rp-seg" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={protoTab === "parse"}
+              className={protoTab === "parse" ? "on" : ""}
+              onClick={() => setRailProtoTab("parse")}
+            >
+              {tx("解析协议", "Parsing")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={protoTab === "send"}
+              className={protoTab === "send" ? "on" : ""}
+              onClick={() => setRailProtoTab("send")}
+            >
+              {tx("发送谱", "Send specs")}
+            </button>
+          </div>
+          <div className="rp-proto-body">{protoTab === "parse" ? <TemplatesPanel /> : <SendSpecLibrary />}</div>
+        </div>
+      )}
       {/* R3：控件库 / 命令库从控制画布的抽屉搬进来。两者都要滚动，
           而「视图」自己带 .rp-body、字段图例自己带 .legend-root 的滚动列，
           所以只有这两项需要外层补一个滚动壳。 */}

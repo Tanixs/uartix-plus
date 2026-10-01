@@ -2414,6 +2414,31 @@ select optgroup {
 .rp-body-lib {
   padding: var(--sp-2);
 }
+/* P124-B：「协议」这一格里的两条二级页（解析协议 / 发送谱）。
+   分段控件不写 border —— G 门那条边框天花板只降不升，选中态靠底色。 */
+.rp-proto{display:flex;flex-direction:column;flex:1;min-height:0;}
+.rp-seg{display:flex;gap:4px;flex:none;padding:6px 6px 2px;}
+.rp-seg button{all:unset;cursor:pointer;padding:4px 10px;border-radius:var(--radius-pill);font-size:var(--fs-sm);color:var(--text-dim);}
+.rp-seg button:hover{background:var(--raise-1);color:var(--text);}
+.rp-seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600;}
+.rp-proto-body{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;}
+/* 发送谱清单：一行一张谱，摘要说清它有多大、被谁引用 */
+.spl{display:flex;flex-direction:column;flex:1;min-height:0;}
+.spl-bar{display:flex;align-items:center;gap:4px;flex:none;padding:4px 6px 6px;}
+.spl-bar-spacer{flex:1;}
+.spl-list{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow:auto;padding:0 6px 6px;}
+.spl-row{display:flex;align-items:stretch;gap:2px;border-radius:var(--radius-m);}
+.spl-row:hover{background:var(--raise-1);}
+.spl-row.on{background:var(--accent-soft);}
+.spl-main{all:unset;flex:1;min-width:0;cursor:pointer;display:flex;flex-direction:column;gap:2px;padding:6px 8px;}
+.spl-name{font-size:var(--fs-sm);color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.spl-meta{font-size:var(--fs-body);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.spl-kebab{all:unset;flex:none;width:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-faint);font-size:var(--fs-md);}
+.spl-kebab:hover{color:var(--text);}
+.spl-none{padding:14px 8px;font-size:var(--fs-sm);color:var(--text-faint);}
+.spl-msg{flex:none;padding:6px 8px;font-size:var(--fs-body);color:var(--text-dim);max-height:64px;overflow:auto;}
+.spl-msg.bad{color:var(--danger);}
+
 
 /* 库自己的错误一行：画布的 .ctl-err 是贴在画布底部的横条，
    放进导轨会显得像整块的页脚，这里只留字。 */

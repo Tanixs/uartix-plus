@@ -77,6 +77,26 @@ let selectReq: { id: string; nonce: number } | null = null;
 
 export function requestSelect(id: string) {
   selectReq = { id, nonce: (selectReq?.nonce ?? 0) + 1 };
+  // 「请面板显示这一张」与「这就是当前那张」是同一件事，分两处记就会不同步（P124-B）
+  selectedSpecId = id;
+  emit();
+}
+
+/**
+ * 哪一张谱正在被编辑（P124-B）。它原先是 TX组帧台的组件本地 state，
+ * 而发送谱清单（导轨那一节）也要知道、也要能改 —— 两边各存一份就会各显一张，
+ * 用户从清单点 A、面板还画着 B。这里只记 id：它是"看哪儿"，不是谱的内容，
+ * 所以不落盘、不进撤销栈。
+ */
+let selectedSpecId = "";
+
+export function getSelectedSpec(): string {
+  return selectedSpecId;
+}
+
+export function selectSpec(id: string): void {
+  if (selectedSpecId === id) return;
+  selectedSpecId = id;
   emit();
 }
 
