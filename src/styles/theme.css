@@ -11545,7 +11545,9 @@ html.no-motion .mkt-img-skel { animation: none; }
  * 选中态是"这一块被挑中了"，语义上属于 outline（与 :focus 同一族），不是结构线。
  * 也不写视口单位：面板宽高全交给 dockview，第 11 道门那条 `÷ var(--zoom)` 在这里没有适用面。
  */
-.sb{display:flex;flex-direction:column;height:100%;min-width:0;background:var(--bg);}
+/* position:relative 是给块上的右键菜单当定位父级的（P123-D）。
+   菜单不写 border：G 门那条边框天花板只降不升，那圈线用 inset 阴影画。 */
+.sb{position:relative;display:flex;flex-direction:column;height:100%;min-width:0;background:var(--bg);}
 .sb-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;box-sizing:border-box;min-height:28px;padding:3px 8px;background:var(--bg-panel);flex:none;}
 .sb-bar-spacer{flex:1;}
 .sb-name{width:150px;flex:none;}
@@ -11632,6 +11634,23 @@ html.no-motion .mkt-img-skel { animation: none; }
 .props-param{display:flex;flex-direction:column;gap:4px;}
 .sb-hint{font-size:var(--fs-body);color:var(--text-faint);}
 .sb-danger{color:var(--danger);align-self:flex-start;}
+/* P123-D 块上的右键菜单：侧栏退役后，"删一块 / 复制一块"的近路 */
+.sb-menu{position:absolute;z-index:41;min-width:200px;max-width:min(300px,calc(100% - 12px));background:var(--bg-panel);border-radius:var(--radius-l);box-shadow:inset 0 0 0 1px var(--border),var(--shadow-pop),var(--shadow);padding:var(--sp-1);display:flex;flex-direction:column;}
+.sb-menu-head{display:flex;align-items:baseline;gap:8px;padding:6px 12px;font-size:var(--fs-sm);color:var(--text);font-weight:600;}
+.sb-menu-sub{font-weight:400;color:var(--text-faint);}
+.sb-menu-item{all:unset;display:flex;align-items:center;gap:7px;padding:7px 12px;font-size:var(--fs-sm);border-radius:var(--radius-m);cursor:pointer;color:var(--text);white-space:nowrap;}
+.sb-menu-item:hover{background:var(--accent-soft);color:var(--accent);}
+.sb-menu-item.danger{color:var(--danger);}
+.sb-menu-item.danger:hover{background:color-mix(in srgb,var(--danger) 12%,transparent);}
+.sb-menu-item:disabled{opacity:.45;cursor:not-allowed;}
+.sb-menu-item:disabled:hover{background:none;color:inherit;}
+.sb-menu-hint{padding:4px 12px 6px;font-size:var(--fs-body);color:var(--text-faint);}
+/* 属性页顶上的面包屑：谱名 › 块名（点谱名回去，Esc 也回去） */
+.insp-crumb{display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--text-dim);overflow:hidden;}
+.insp-crumb i{font-style:normal;opacity:.6;}
+.insp-crumb span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.insp-crumb-link{all:unset;cursor:pointer;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.insp-crumb-link:hover{text-decoration:underline;}
 .sb-foot{display:flex;align-items:center;gap:8px;flex:none;padding:6px 8px;background:var(--bg-panel);}
 .sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}

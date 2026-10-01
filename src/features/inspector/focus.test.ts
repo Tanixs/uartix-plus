@@ -6,7 +6,7 @@
  * "同值不 emit"的判据同一个来源）。第二件事是别把真值搬进来 —— 它只放注意力。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getInspectorFocus, setInspectorFocus, subscribeInspector } from "./focus";
+import { getInspectorFocus, setInspectorFocus, subscribeInspector, txeBackToSpec } from "./focus";
 
 beforeEach(() => {
   setInspectorFocus(null);
@@ -54,5 +54,24 @@ describe("inspector/focus", () => {
     off();
     setInspectorFocus({ side: "rx", id: "b", fieldId: "" });
     expect(cb).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("txeBackToSpec（Esc 的语义）", () => {
+  it("tx 停在某一块上：退回谱级并说「退了」", () => {
+    setInspectorFocus({ side: "tx", id: "s1", fieldId: "f1" });
+    expect(txeBackToSpec()).toBe(true);
+    expect(getInspectorFocus()).toEqual({ side: "tx", id: "s1", fieldId: "" });
+  });
+
+  it("已经在谱级：没东西可退，返回 false（调用方别白吃掉这次按键）", () => {
+    setInspectorFocus({ side: "tx", id: "s1", fieldId: "" });
+    expect(txeBackToSpec()).toBe(false);
+  });
+
+  it("rx 的焦点它不碰：那一侧有自己的退法（写回 templateStore.selection）", () => {
+    setInspectorFocus({ side: "rx", id: "t1", fieldId: "f1" });
+    expect(txeBackToSpec()).toBe(false);
+    expect(getInspectorFocus()).toEqual({ side: "rx", id: "t1", fieldId: "f1" });
   });
 });

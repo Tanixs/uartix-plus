@@ -21,6 +21,7 @@ import { Section } from "../../shared/Section";
 import * as controlsStore from "../controls/controlsStore";
 import { revealTargets } from "../controls/cardBinding";
 import { roleNames } from "./roleNames";
+import { setInspectorFocus, txeBackToSpec } from "./focus";
 import { guardLocked } from "../operator/lock";
 import * as templateStore from "../protocol/templateStore";
 import { SEND_FIELD_ROLES, paramTypeOf, type SendField, type SendParamType, type SendTemplate } from "../send/sendTypes";
@@ -232,7 +233,26 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
   }
 
   return (
-    <div className="props-panel">
+    <div
+      className="props-panel"
+      onKeyDown={(e) => {
+        // Esc 从这一块退回整张谱。只在这块面板还握着 tx 焦点时才认，别抢别人的 Esc
+        if (e.key === "Escape" && txeBackToSpec()) e.stopPropagation();
+      }}
+    >
+      {field && (
+        <div className="insp-crumb" title={tx("Esc 回到这张谱的属性", "Esc goes back to the whole spec")}>
+          <button
+            type="button"
+            className="insp-crumb-link"
+            onClick={() => setInspectorFocus({ side: "tx", id: tpl.id, fieldId: "" })}
+          >
+            {tpl.name}
+          </button>
+          <i>›</i>
+          <span>{field.name}</span>
+        </div>
+      )}
       <Section title={tx("发送块", "Send block")}>
         {!field && (
           <div className="props-hint">

@@ -13,14 +13,14 @@
  * 预览与发送调的是同一个 `encodeSend`（P121-A 立的那条规矩）：
  * 界面上看到的字节**就是**点发送会出去的字节，没有第二份计算。
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 import type { FieldRole } from "../../ipc/types";
 import { tx, useLocale } from "../../i18n/strings";
 import { EmptyState } from "../../shared/EmptyState";
 import { attachPdragZone, beginPointerDrag, type PdragDetail } from "../../shared/pointerDrag";
 import { IconChevron, IconClock, IconDownload, IconPlus, IconTrash, IconUpload } from "../../shared/icons";
-import { Flyout } from "../../shared/Flyout";
+import { Flyout, clampFlyoutMenu } from "../../shared/Flyout";
 import { getSnapshot as readSettings, patch as patchSettings, useSettings } from "../settings/settingsStore";
 import { SEND_PRESETS, applySendPreset, type SendPresetDef } from "./sendPresets";
 import * as frameStore from "../framecanvas/frameStore";
@@ -30,7 +30,7 @@ import * as cmdStore from "../controls/commandStore";
 import { guardLocked } from "../operator/lock";
 import { isOpen as isPanelOpen } from "../../panels/panelActivity";
 import { requestOpenPanel } from "../ai/appBus";
-import { setInspectorFocus, useInspectorFocus } from "../inspector/focus";
+import { setInspectorFocus, txeBackToSpec, useInspectorFocus } from "../inspector/focus";
 import { roleNames } from "../inspector/roleNames";
 import * as sendStore from "./sendStore";
 import { encodeSend } from "./encodeSend";
@@ -157,6 +157,13 @@ export function SendBuildPanel() {
   const [msg, setMsg] = useState("");
   /** 「＋ 预设」的下拉开着时锚定的那颗键（浮层走共享 Flyout：portal 到 body，窄面板自动翻向） */
   const [presetAnchor, setPresetAnchor] = useState<HTMLElement | null>(null);
+  /**
+   * 块上的右键菜单（P123-D）。锚在点击处、定位在面板根上 —— 侧栏退役后"删一块 / 复制一块"
+   * 没了近路，右键就是那条近路；它不新开属性页，只把这一块选中并给两个动作。
+   */
+  const [menu, setMenu] = useState<{ x: number; y: number; fieldId: string } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuElRef = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState(-1);
   const stripRef = useRef<HTMLDivElement>(null);
   /** 一行放几格：按带的实际宽度算，窄面板不许把尺撑出横向滚动条 */
@@ -294,6 +301,45 @@ export function SendBuildPanel() {
    */
   const covShown = field?.role === "checksum";
   const ckField = tpl?.fields.find((f) => f.role === "checksum") ?? null;
+
+  const openBlockMenu = (e: React.MouseEvent, fieldId: string) => {
+    const r = rootRef.current?.getBoundingClientRect();
+    if (!r) return;
+    e.preventDefault();
+    setSelField(fieldId); // 右键也选中：菜单说的就是这一块，属性页跟着它
+    setMenu({ x: (e.clientX - r.left) / zf, y: (e.clientY - r.top) / zf, fieldId });
+  };
+  useLayoutEffect(() => {
+    const el = menuElRef.current;
+    const root = rootRef.current;
+    if (menu && el && root) clampFlyoutMenu(el, root, menu.x, menu.y);
+  }, [menu]);
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (t && menuElRef.current?.contains(t)) return;
+      setMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  /** 复制一块就插在它后面：来源照抄（两块吃同一个参数是合法配置，计数器本来就共用一个） */
+  const duplicateBlock = (fieldId: string) => {
+    if (!tpl || guardLocked()) return;
+    const at = tpl.fields.findIndex((x) => x.id === fieldId);
+    const f = tpl.fields[at];
+    if (!f) return;
+    sendStore.addField(tpl.id, { ...f, id: uid("sf"), name: `${f.name} 2` }, at + 1);
+  };
 
   useEffect(() => {
     const el = stripRef.current;
@@ -593,7 +639,14 @@ export function SendBuildPanel() {
 
 
   return (
-    <div className="sb">
+    <div
+      className="sb"
+      ref={rootRef}
+      onKeyDown={(e) => {
+        // 菜单没开时，Esc 从这一块退回整张谱（与属性页那侧同一个手势）
+        if (e.key === "Escape" && !menu) txeBackToSpec();
+      }}
+    >
       <div className="sb-bar p-bar">
         <button
           className="btn icon-btn"
@@ -772,6 +825,7 @@ export function SendBuildPanel() {
                     title={`${b.name} · ${roleLabel(b.role)} · ${b.len}B`}
                     onPointerDown={(e) => beginPointerDrag(e, { kind: "sendfield", data: b.fieldId, label: b.name })}
                     onClick={() => setSelField(b.fieldId)}
+                    onContextMenu={(e) => openBlockMenu(e, b.fieldId)}
                   >
                     {b.len * pitch - CELL_GAP >= LABEL_MIN_W ? b.name : ""}
                   </button>
@@ -819,6 +873,7 @@ export function SendBuildPanel() {
                                 beginPointerDrag(e, { kind: "sendfield", data: s.block.fieldId, label: s.block.name })
                               }
                               onClick={() => setSelField(s.block.fieldId)}
+                              onContextMenu={(e) => openBlockMenu(e, s.block.fieldId)}
                             >
                               {s.point ? "·" : s.cont || box.width < LABEL_MIN_W ? "" : s.block.name}
                             </button>
@@ -961,6 +1016,62 @@ export function SendBuildPanel() {
           </button>
         </div>
       )}
+
+      {menu &&
+        (() => {
+          const mf = tpl?.fields.find((x) => x.id === menu.fieldId) ?? null;
+          if (!mf) return null;
+          const locked = guardLocked();
+          const why = tx("Operator 只读锁开着：配置改不动", "Operator read-only lock is on: configuration can't change");
+          return (
+            <div
+              className="sb-menu"
+              ref={menuElRef}
+              style={{ left: menu.x, top: menu.y }}
+              role="menu"
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <div className="sb-menu-head">
+                {mf.name}
+                <span className="sb-menu-sub">
+                  {mf.type} · {roleLabel(mf.role)}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="menuitem"
+                className="sb-menu-item"
+                disabled={locked}
+                title={locked ? why : tx("在它后面再来一块一样的", "Append an identical block right after it")}
+                onClick={() => {
+                  duplicateBlock(mf.id);
+                  setMenu(null);
+                }}
+              >
+                {tx("复制这块", "Duplicate block")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className="sb-menu-item danger"
+                disabled={locked}
+                title={locked ? why : tx("从这张谱上删掉它", "Remove it from this template")}
+                onClick={() => {
+                  if (tpl) sendStore.removeField(tpl.id, mf.id);
+                  setMenu(null);
+                }}
+              >
+                {tx("删除这块", "Remove block")}
+              </button>
+              {canResize(mf) && (
+                <div className="sb-menu-hint">
+                  {tx("改字节数：拖它右边界那条把手（指针移到带上才现身）", "To change its width: drag the handle on its right edge (it appears when the pointer is over the band)")}
+                </div>
+              )}
+            </div>
+          );
+        })()}
     </div>
   );
 }

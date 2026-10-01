@@ -41,6 +41,19 @@ export function subscribeInspector(cb: () => void): () => void {
   };
 }
 
+/**
+ * Esc 的语义：从"某一块"退回"整张谱"。返回是否真的退了（调用方据此决定要不要吃掉这次按键）。
+ *
+ * 只管 tx：rx 那一侧有自己的退法（`FrameCanvas` 的 Esc 会写回 `templateStore.selection`，
+ * 那才是它的真值），在这里替它退就会让 selection 与焦点各说一套。
+ */
+export function txeBackToSpec(): boolean {
+  const f = current;
+  if (!f || f.side !== "tx" || !f.fieldId) return false;
+  setInspectorFocus({ side: "tx", id: f.id, fieldId: "" });
+  return true;
+}
+
 export function useInspectorFocus(): InspectorFocus | null {
   return useSyncExternalStore(subscribeInspector, getInspectorFocus, getInspectorFocus);
 }
