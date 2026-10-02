@@ -1,7 +1,9 @@
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 // P99a-D2：创造面能产出哪几类产物、哪几类要人工启用——从产物元表与能力白名单派生。
 // 原先这里手抄了一份"主题 / 小部件 / 面板"，D1 加出四类产物后它还在说三类（§8-36①）。
-import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
+import { ARTIFACT_KINDS, artifactKindMeta, THEME_CSS_MAX_BYTES } from "../plugins/artifact";
+import { APPEARANCE_TOKENS } from "../../styles/themeCore";
+import { STYLE_CAPS } from "../styles/styleSanitize";
 import { autoEnableableKindLabels } from "../plugins/pluginManifest";
 // P99b-N5：主题清单从装载层取（内置主题清单的唯一出处），不在这儿手抄第二份
 import { BUILTIN_THEME_IDS } from "../../styles/builtinThemes";
@@ -70,6 +72,7 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - MCP 桥（反向集成）：在 127.0.0.1 上开一个受 token 保护的本地控制平面（默认端口 7731，开关/端口/token 都在「设置 → 集成」），让 Claude Desktop / Cursor 这类 AI IDE 直接读实时遥测、发指令、跑测试序列；两道独立权限门：允许远程发送、允许高权限动作。
 - 教学引导：帮助 → 快速入门顶部「启动交互式教学」，聚光灯分步带新手走通连接→预设→帧画布→曲线→控制→AI 主流程；首启自动弹欢迎卡。
 - Operator 部署包：把调好的工作区（协议/控制页/命令库/布局/外观设置/3D 面板设置）打包成 .uopk 给现场操作员，双击导入进入只读运行——配置写入一律被 store 层拦截，连接/发命令/看数据/运行编排与校准操作照常；横幅退出即恢复编辑。
+- 外观（改界面长相时按这三层做，别只改色板）：① **token 层**——theme_patch 写 ${APPEARANCE_TOKENS.length} 项白名单变量（四档表面/描边/文字/主色/语义色/字号/圆角/时长/缓动/抬升档/控件高/间距/行高），一次到位要同时给 surface+border+text+accent，只改一两项等于没改；theme_preset 是现成配方（玻璃/暗化/高对比…），派生自当前在画那枚。② **组件层**——style_patch 按真实类名下 CSS 规则（结构化、逐条回执：命中几个元素、哪个属性从什么变成什么，命中 0 会把真类名递给你），按钮/输入框/页签/开关/滑块/菜单/对话框/标题栏的 hover·active·focus·disabled 态**只能在这一层做**，token 层做不出蓝按钮。单次上限 ${STYLE_CAPS.maxRules} 条规则、每条 ${STYLE_CAPS.maxDeclsPerRule} 条声明，一套全量主题就是多次调用累加（每次一层，可单独 style_revert）。③ **固化**——style_commit 读宿主自己净化过的临时层存成已启用主题插件（**别手抄自己发过的规则**，几轮改撤之后手写副本已经不等于屏幕了）；save_theme_extension 才收模型手写的整段 CSS（上限 ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB，与产物上限同一个数，够写一整套组件覆盖）；一次输不完这么长的文本是正常的，写不完用 style_append 一段一段追加（每段是完整规则、当场生效看得见，回执带剩余字节，最后 done:true + name 落盘）。两条都过同一个净化器：禁 html/body/#root/* 这类全局选择器、position:fixed、z-index>900、url()/@import，:root 只许声明新的 --自定义变量（白名单键必须走 theme_patch，否则与合成器两处真相）。做完必须显式固化并告诉用户停用入口（设置 → 插件管理），会话内的临时层重启即无。先 ui_inspect 看清真实类名再下规则。
 - 图传面板：TCP/UDP 网络视频流接入。
 - 指标面板（metrics）与分析包：对已采集的时间窗口做指标分析，并把结论回写成 3D 轨迹的组备注（先预览再写，冲突/只读/目标已删都照实回执，不静默覆盖）；「分析包」把选定的缓存窗口与模块导出到一个本地目录，**不会自动上传**，全局入口在 设置 → 通用，2D/3D/表格另留局部入口。
 - 变量系统：变量自动绑定启用模板的字段，帧到达时更新；Modbus 轮询项也按行名写入变量（可与模板字段共存，脚本与曲线统一按名引用）。

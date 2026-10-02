@@ -118,6 +118,7 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     enable_failed: "启用失败",
     module_probe_failed: "逻辑模块未通过封网自证",
     no_scratch_layers: "没有待固化的临时样式",
+    draft_overflow: "分段草稿超出上限",
     invalid_tool_args: "参数不符合工具声明",
     invalid_args: "参数不合法",
     not_found: "文件里没有这段原文",

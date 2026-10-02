@@ -353,17 +353,111 @@ describe("appearance tools", () => {
     expect(data.pluginId).toBe(agentPluginId("user.agent.theme", "圆角发光"));
   });
 
-  it("P99a-B4 等价承诺：超过手写 8KiB 上限的层文本仍能固化（同一段走 save_theme_extension 会被拒）", async () => {
+  /**
+   * P131-A 改了这条的**契约**（不是放宽判据，是取消一条不对称）：
+   * 原来两条持久化入口的上限不同——`style_commit`（宿主读自己净化过的临时层）按产物上限 64KB，
+   * `save_theme_extension`（模型手写 CSS）只给 8KB。于是一套 23 组件 × 6 状态的全量主题
+   * 实测 12–20KB，模型一次写不完，只能退化成"改几个 token"——用户看到的"AI 做的主题比内置的还素"
+   * 机器原因就在这条 8KB 上。现在两条同一个上限。
+   *
+   * 所以这条钉跟着改，但**没有变松**：它现在钉三件事——
+   *  ① 9KB 那段两条入口都收（不对称已取消）；
+   *  ② 超过共享上限的那段两条入口**都**拒（上限还在，只是不再是只卡模型那一条）；
+   *  ③ 拒的时候理由仍是 css_too_long（净化器没被绕过）。
+   */
+  it("P131-A：两条持久化入口共用同一个 CSS 上限，超限照旧两边都拒", async () => {
+    stubDom({ "--bg": "#101010" });
+    const { tools } = await load();
+    const { THEME_CSS_MAX_BYTES } = await import("../plugins/artifact");
+    const scratch = await import("./styleScratch");
+    const mid = `.big{padding:${"1".repeat(9000)}px}`;
+    scratch.applyLayer("大层", mid);
+    const committed = await tools.executeAppearanceTool(call("style_commit", { name: "大层主题" }), ctx("create"));
+    expect(committed.ok, "宿主临时层这条路 9KB 必须收（原本就收）").toBe(true);
+    const over = await tools.executeAppearanceTool(call("save_theme_extension", { name: "手写版", css: mid }), ctx("create"));
+    expect(over.ok, "同一段走手写入口也被拒 ⇒ 那条 8KB 不对称还没取消（P131-A 的靶子）").toBe(true);
+
+    const huge = `.huge{padding:${"2".repeat(THEME_CSS_MAX_BYTES + 10)}px}`;
+    scratch.applyLayer("超层", huge);
+    const c2 = await tools.executeAppearanceTool(call("style_commit", { name: "超阈提交" }), ctx("create"));
+    expect(c2.code, "上限没起作用：style_commit 收了超限文本").toBe("unsafe_css");
+    const s2 = await tools.executeAppearanceTool(call("save_theme_extension", { name: "超阈手写", css: huge }), ctx("create"));
+    expect(s2.code).toBe("unsafe_css");
+    for (const r of [c2, s2]) {
+      expect(String((r.data as { problems: string[] }).problems.join())).toContain("css_too_long");
+    }
+  });
+
+  /**
+   * P131-A（详设 A1 的后半）：上限对齐之后，缺的是"一次输不完"这个形状。
+   * 这四条钉的是 style_append 的四条口径——**累加**、**坏段不落地**、**done 才算持久化边界**、
+   * **累计仍受同一个上限**。第四点特别要钉：新工具不能成为绕过上限的第二通道。
+   */
+  it("P131-A：style_append 两段累加成会话草稿，回执报已用与剩余字节", async () => {
     stubDom({ "--bg": "#101010" });
     const { tools } = await load();
     const scratch = await import("./styleScratch");
-    const big = `.big{padding:${"1".repeat(9000)}px}`;
-    scratch.applyLayer("大层", big);
-    const committed = await tools.executeAppearanceTool(call("style_commit", { name: "大层主题" }), ctx("create"));
-    expect(committed.ok).toBe(true);
-    const retyped = await tools.executeAppearanceTool(call("save_theme_extension", { name: "手写版", css: big }), ctx("create"));
-    expect(retyped.code).toBe("unsafe_css");
-    expect(String((retyped.data as { problems: string[] }).problems.join())).toContain("css_too_long");
+    const { THEME_CSS_MAX_BYTES } = await import("../plugins/artifact");
+    const a = await tools.executeAppearanceTool(call("style_append", { css: ".btn{color:#ff0000}" }), ctx("create"));
+    expect(a.ok).toBe(true);
+    const b = await tools.executeAppearanceTool(call("style_append", { css: ".tab{color:#00ff00}" }), ctx("create"));
+    expect(b.ok).toBe(true);
+    const d = scratch.layerCss("分段草稿");
+    expect(d, "草稿必须就是一层会话临时样式（用户边写边看得见，也才可单独 style_revert）").toBe(
+      ".btn{color:#ff0000}\n\n.tab{color:#00ff00}",
+    );
+    const data = b.data as { bytes: number; remainingBytes: number };
+    expect(data.bytes).toBe(String(d).length);
+    expect(data.remainingBytes).toBe(THEME_CSS_MAX_BYTES - String(d).length);
+  });
+
+  it("P131-A：坏段整段拒收，草稿停在上一段（半条规则/全局选择器都不许落地）", async () => {
+    stubDom({ "--bg": "#101010" });
+    const { tools } = await load();
+    const scratch = await import("./styleScratch");
+    await tools.executeAppearanceTool(call("style_append", { css: ".btn{color:#ff0000}" }), ctx("create"));
+    const bad = await tools.executeAppearanceTool(call("style_append", { css: "body{display:none}" }), ctx("create"));
+    expect(bad.ok).toBe(false);
+    expect(bad.code).toBe("unsafe_css");
+    expect(scratch.layerCss("分段草稿"), "拒收的段留进了草稿＝屏幕上是半个主题").toBe(".btn{color:#ff0000}");
+  });
+
+  it("P131-A：done 缺 name 不落地也不丢草稿；带 name 才装插件，草稿交给插件接管", async () => {
+    stubDom({ "--bg": "#101010" });
+    const { tools } = await load();
+    const scratch = await import("./styleScratch");
+    await tools.executeAppearanceTool(call("style_append", { css: ".btn{color:#ff0000}" }), ctx("create"));
+    await tools.executeAppearanceTool(call("style_append", { css: ".tab{color:#00ff00}" }), ctx("create"));
+
+    const noName = await tools.executeAppearanceTool(call("style_append", { done: true }), ctx("create"));
+    expect(noName.code).toBe("invalid_args");
+    expect((scratch.layerCss("分段草稿") ?? "").includes(".btn"), "done 失败把草稿清了＝白写").toBe(true);
+
+    mocks.stage.mockClear();
+    const done = await tools.executeAppearanceTool(call("style_append", { done: true, name: "分段落盘" }), ctx("create"));
+    expect(done.ok).toBe(true);
+    const manifest = mocks.stage.mock.calls[0]?.[0] as { artifacts: Record<string, { css?: string }> };
+    const css = manifest.artifacts["main.json"].css ?? "";
+    expect(css).toContain(".btn{color:#ff0000}");
+    expect(css).toContain(".tab{color:#00ff00}");
+    expect(scratch.layerCss("分段草稿")).toBeNull();
+    expect((done.data as { draftCleared: boolean }).draftCleared).toBe(true);
+  });
+
+  it("P131-A：累计超同一个上限整段拒收——新通道不是绕过上限的口子", async () => {
+    stubDom({ "--bg": "#101010" });
+    const { tools } = await load();
+    const scratch = await import("./styleScratch");
+    const { THEME_CSS_MAX_BYTES } = await import("../plugins/artifact");
+    const seg = `.big{padding:${"1".repeat(THEME_CSS_MAX_BYTES - 24)}px}`;
+    const first = await tools.executeAppearanceTool(call("style_append", { css: seg }), ctx("create"));
+    expect(first.ok, "单段刚好在上限内，净化器不该先拒").toBe(true);
+    const second = await tools.executeAppearanceTool(call("style_append", { css: seg }), ctx("create"));
+    expect(second.code).toBe("draft_overflow");
+    const info = second.data as { usedBytes: number; capBytes: number };
+    expect(info.capBytes).toBe(THEME_CSS_MAX_BYTES);
+    expect(info.usedBytes).toBe(seg.length);
+    expect(scratch.layerCss("分段草稿")).toBe(seg);
   });
 
   it("P99a-B4 固化后覆盖层清空（与保存主题同一持久化边界），且带恢复路径文案", async () => {

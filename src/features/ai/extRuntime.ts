@@ -218,21 +218,13 @@ export function collectThemeVars(keys: readonly string[] = THEME_VAR_KEYS): { va
  * theme/widget/panel 三种，`perms` 字段更是全仓零读取者（M2 清退的那类"假安全控件"）。
  * 零兼容裁决（详设 §13.1）下直接删通道，而不是给它补沙箱：能跑 JS 的合法形态只有
  * 专用 Worker 那一条（`logic.run` + realm 封网 + 探针自证），主世界不留第二个口子。
+ *
+ * P131-A：实现搬到 `shared/toast.ts`。原来这里是**一份独立的 DOM 手搓实现**，
+ * 与 `operator/lock.ts` 里那份共用同一对类名却各记各的 host —— 同一屏能挂两个提示列；
+ * 而那对类名在全部 CSS 里一条规则都没有，于是"配置只读"这类必须看见的话一直是裸 div。
+ * 出口签名不变（`toast(msg)`），老调用方一行不用改。
  */
-
-let toastHost: HTMLDivElement | null = null;
-export function toast(msg: string) {
-  if (!toastHost) {
-    toastHost = document.createElement("div");
-    toastHost.className = "ai-toast-host";
-    document.body.appendChild(toastHost);
-  }
-  const el = document.createElement("div");
-  el.className = "ai-toast";
-  el.textContent = String(msg).slice(0, 200);
-  toastHost.appendChild(el);
-  window.setTimeout(() => el.remove(), 2600);
-}
+export { toast } from "../../shared/toast";
 
 /* ---------------- 总控：随扩展启停同步运行时 ---------------- */
 

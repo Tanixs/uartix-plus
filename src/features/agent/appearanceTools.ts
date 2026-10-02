@@ -1,5 +1,5 @@
 /**
- * P88b-4 A2：外观工具五件套（theme_read / theme_patch / theme_preset / image_swatch / save_theme_extension）。
+ * P88b-4 A2：外观工具族（读 token / 改 token / 配方 / 取色 / 存插件 / 固化临时层 / 分段续写）。
  * - 修改语义与 settings_apply 完全对齐：按**授权域**裁决（外观覆盖＝config，存为插件＝plugins），
  *   preview 档一律只预览；覆盖层撤销走 appearanceStore 内建 undoToken（本次运行内有效，详见 §5.4）；
  * - theme_read 只读不开门（对齐 settings_read）；image_swatch 读取图片 → 前端 canvas 量化取色，
@@ -19,7 +19,7 @@ import {
 } from "./appearanceStore";
 import { inWhitelist } from "./generalTools";
 import { guardStyleText } from "../styles/styleSanitize";
-import { scratchCssMerged } from "./styleScratch";
+import { applyLayer, layerCss, revertLayer, scratchCssMerged } from "./styleScratch";
 import { THEME_CSS_MAX_BYTES } from "../plugins/artifact";
 import { DOMAIN_ZH } from "./scopeTiers";
 import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolResultBody } from "./toolRegistry";
@@ -30,6 +30,8 @@ export const APPEARANCE_TOOLS = [
   "theme_preset",
   "image_swatch",
   "save_theme_extension",
+  "style_commit",
+  "style_append",
 ] as const;
 
 /* ================= 内置配方（借鉴 Harness 第三方主题=一组 alias 覆盖；全部纯 token，无 CSS 注入） ================= */
@@ -402,12 +404,16 @@ async function imageSwatch(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
 }
 
 /**
- * 保存成主题插件的**唯一**安装链。`cssMaxBytes` 是两个调用方唯一的差别，且它是宿主侧参数
- * （模型碰不到）：`save_theme_extension` 收的是模型手写的 CSS，按 8 KiB 计；
- * `style_commit` 收的是宿主自己净化过的临时层，按产物上限计（详设 §13.3 第 3 条：
- * "写入时合法、固化时被拒"不能发生）。结构规则两条完全相同。
+ * 保存成主题插件的**唯一**安装链。
+ *
+ * P131-A（详设 A1）：模型手写的 CSS 从 8 KiB 提到与产物上限同一个数（`THEME_CSS_MAX_BYTES`）。
+ * 原来那 8 KiB 是"一套全量主题写不完"的唯一原因：23 组件 × 6 状态的覆盖矩阵实测要 12–20 KB，
+ * 于是模型只能退化成"改几个 token"——用户看到的是"AI 做的主题比内置的还素"，
+ * 而机器原因是这条与它无关的限制。放开的是**字节数**，不是判据：净化器、结构规则、
+ * 装包校验一条没减（同一份 `guardStyleText`，两条入口现在只差"这段 CSS 谁来写"）。
+ * `style_commit` 仍是更可信的那条：它读宿主自己净化过的临时层，模型不复述自己发过的参数。
  */
-const SAVE_CSS_MAX_BYTES = 8000;
+const SAVE_CSS_MAX_BYTES = THEME_CSS_MAX_BYTES;
 
 async function persistTheme(
   parsed: Record<string, unknown>,
@@ -535,6 +541,95 @@ async function persistTheme(
     };
 }
 
+/* ================= P131-A（详设 A1）：分段续写组件层 ================= */
+
+/**
+ * 草稿层的层名。它就是草稿本身——`style_commit`、外观来源面板、用户屏幕上看到的
+ * 都读这一份，所以这里**不另存一个模块级字符串**（那等于第二真相：续写的字节和落盘的
+ * 字节可以悄悄不一样）。
+ */
+const DRAFT_LAYER = "分段草稿";
+
+/**
+ * 模型写一整套组件层（23 组件 × 6 状态 ≈ 12–20 KB）时会断在 6–8 KB 处——
+ * 上限提到 64 KB 也救不了**一次输完**这个形状。`style_append` 给的是它本来就会用的形状：
+ * 一段一段追加，每段**独立**过净化器，只有累计字节判上限；`done:true` 才落盘。
+ *
+ * 每段都立刻挂成会话临时层 ⇒ 用户边写边看见，写到一半不满意可以直接 `style_revert`
+ * 撤掉这一层，或提前 `style_commit` 把已经落地的部分固化。
+ *
+ * "按段净化"成立的前提是**每段是完整规则**（净化器逐条规则判选择器与声明，
+ * 跨段的半条规则两边都不成句）——写在工具描述里，并由"坏段不落地、草稿仍是上一段"兜住。
+ */
+async function styleAppend(parsed: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResultBody> {
+  const callId = ctx.callId;
+  const chunk = typeof parsed.css === "string" ? parsed.css : "";
+  const done = parsed.done === true;
+  const name = String(parsed.name ?? "").trim();
+  if (!chunk.trim() && !done) {
+    return notExecuted(callId, "invalid_args", {
+      hint: "css 要非空（一段必须是完整规则，别在半条处断开）；只想把已收到的草稿存下来就传 done:true + name",
+    });
+  }
+  const prev = layerCss(DRAFT_LAYER) ?? "";
+  if (chunk.trim()) {
+    const g = guardStyleText(chunk, SAVE_CSS_MAX_BYTES, [...APPEARANCE_TOKENS]);
+    if (!g.ok) {
+      return notExecuted(callId, "unsafe_css", {
+        problems: g.problems.slice(0, 12),
+        ruleCount: g.ruleCount,
+        bytes: g.bytes,
+        hint: "本段没落地，草稿仍是上一段的字节。每段都要是完整规则；被点名的那条改完再发这一段",
+      });
+    }
+    const next = prev ? `${prev}\n\n${chunk}` : chunk;
+    if (next.length > SAVE_CSS_MAX_BYTES) {
+      return notExecuted(callId, "draft_overflow", {
+        usedBytes: prev.length,
+        incomingBytes: chunk.length,
+        capBytes: SAVE_CSS_MAX_BYTES,
+        hint: `草稿已 ${prev.length} 字节，上限 ${SAVE_CSS_MAX_BYTES}：要么把这段裁短，要么 done:true + name 先把这一套存成插件，再开下一套草稿`,
+      });
+    }
+    applyLayer(DRAFT_LAYER, next);
+  }
+  const bytes = (layerCss(DRAFT_LAYER) ?? "").length;
+  if (!done) {
+    return {
+      callId,
+      ok: true,
+      status: "applied",
+      data: {
+        bytes,
+        remainingBytes: Math.max(0, SAVE_CSS_MAX_BYTES - bytes),
+        layer: DRAFT_LAYER,
+        hint: "这段已生效，用户现在就能看见。继续追加下一段；整套写完传 done:true + name 存成已启用主题插件（也可随时 style_commit）",
+      },
+    };
+  }
+  if (!name) {
+    return notExecuted(callId, "invalid_args", {
+      bytes,
+      hint: `done:true 要带 name（存成哪套主题）。草稿仍在会话层里没丢，补一次 done:true + name 即可`,
+    });
+  }
+  // 固化的是**整块临时层**而不是只有草稿：模型可能同一轮里既 style_patch 又续写，
+  // 屏幕上是什么就存什么（与 style_commit 同一条口径）。
+  const merged = scratchCssMerged();
+  const r = await persistTheme({ name, css: merged.css }, ctx, SAVE_CSS_MAX_BYTES);
+  const pending = (r.data as { pendingApproval?: boolean } | undefined)?.pendingApproval === true;
+  if (r.ok && !pending) revertLayer(DRAFT_LAYER); // 持久化边界：插件层接管这份 CSS，草稿作废
+  return {
+    ...r,
+    data: {
+      ...(r.data as Record<string, unknown>),
+      layers: merged.layers,
+      layerCount: merged.layers.length,
+      ...(r.ok && !pending ? { draftCleared: true } : {}),
+    },
+  };
+}
+
 export const appearanceToolEntries: AgentToolEntry[] = [
   defineTool({
     name: "theme_read",
@@ -554,7 +649,7 @@ export const appearanceToolEntries: AgentToolEntry[] = [
     effect: "config_write",
     domain: "config",
     provenance: HOST,
-    description: `Apply appearance token overrides (session-level preview; undoable). Needs the ${DOMAIN_ZH.config} authorization. A style request is NOT satisfied by 1-2 tokens: cover surface (--bg/--bg-panel/--bg-inset), border (--border/--border-soft), text (--text/--text-dim) and accent together, or prefer theme_preset which derives a coherent set from the live theme. After the user can see the result, call save_theme_extension to persist it as an enabled plugin unless they asked for a temporary preview. Args: { tokens: Record<string,string> } over whitelist: ${APPEARANCE_TOKENS.join(" ")}. Unit tokens accept <n>px/<n>ms; --ease accepts cubic-bezier(...) or named curves; unknown/invalid tokens reject the whole patch atomically. Two layers of validation: format is atomic (whole patch rejected), but the surface ladder is checked AFTER it lands and drops only the offending keys — --raise-1/--raise-2 are DERIVED from --bg-panel/--text, so prefer editing the base tokens and let the derivation compute the elevation; if you must write them they have to stay on the same side as --text and within 24 L* of the panel. Read \`dropped\`/\`surfaceNotes\` in the receipt and fix those keys instead of resending the same values.`,
+    description: `Apply appearance token overrides (session-level preview; undoable). Needs the ${DOMAIN_ZH.config} authorization. A style request is NOT satisfied by 1-2 tokens: cover surface (--bg/--bg-panel/--bg-inset), border (--border/--border-soft), text (--text/--text-dim) and accent together, or prefer theme_preset which derives a coherent set from the live theme. After the user can see the result, call save_theme_extension to persist it as an enabled plugin unless they asked for a temporary preview. Args: { tokens: Record<string,string> } over whitelist: ${APPEARANCE_TOKENS.join(" ")}. Unit tokens accept <n>px/<n>ms; --ease accepts cubic-bezier(...) or named curves; unknown/invalid tokens reject the whole patch atomically. Two layers of validation: format is atomic (whole patch rejected), but the surface ladder is checked AFTER it lands and drops only the offending keys — --raise-1/--raise-2 are DERIVED from --bg-panel/--text, so prefer editing the base tokens and let the derivation compute the elevation; if you must write them they have to stay on the same side as --text and within 24 L* of the panel. Read \`dropped\`/\`surfaceNotes\` in the receipt and fix those keys instead of resending the same values. **This is only layer 1 of 3** — tokens cannot paint a component state (a blue button, a tab underline, a hover lift, a disabled switch are all component rules). For those use style_patch (real class names, per-rule receipts), then style_commit to persist what is actually on screen.`,
     parameters: { type: "object", properties: { tokens: { type: "object" } }, required: ["tokens"], additionalProperties: false },
     summarize: (a) => {
       const tokens = a.tokens;
@@ -604,7 +699,7 @@ export const appearanceToolEntries: AgentToolEntry[] = [
     domain: "plugins",
     provenance: HOST,
     description:
-      "Persist the appearance work as an ENABLED theme plugin (default final step of any appearance edit; overlay is cleared afterwards, undo tokens expire). It saves a COMPLETE theme — the currently active theme's full token set with your overlay applied on top — not just the patched tokens, and saving the same name again bumps the version in place instead of creating a duplicate. The user can switch it off from this card's 停用 button or 设置 → 插件管理. Needs the plugin-library (插件库) authorization. Args: { name: string, css?: string (optional scoped CSS; **validated** — html/body/*/#root selectors, position:fixed, url()/@import and z-index>900 are rejected per rule with the reason; a :root rule may only declare NEW --custom-properties, whitelisted tokens go through theme_patch; prefer style_patch for per-component rules) }.",
+      `Persist the appearance work as an ENABLED theme plugin (default final step of any appearance edit; overlay is cleared afterwards, undo tokens expire). It saves a COMPLETE theme — the currently active theme's full token set with your overlay applied on top — not just the patched tokens, and saving the same name again bumps the version in place instead of creating a duplicate. The user can switch it off from this card's 停用 button or 设置 → 插件管理. Needs the plugin-library (插件库) authorization. Args: { name: string, css?: string (a full component-layer stylesheet, up to ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB — enough for a whole theme; **validated** — html/body/*/#root selectors, position:fixed, url()/@import and z-index>900 are rejected per rule with the reason; a :root rule may only declare NEW --custom-properties, whitelisted tokens go through theme_patch) }. If the look came from style_patch layers, prefer style_commit: it persists what is actually on screen instead of a hand-retyped copy. Writing it in several replies? Use style_append instead of retyping the whole sheet here.`,
     parameters: {
       type: "object",
       properties: { name: { type: "string" }, css: { type: "string" } },
@@ -643,5 +738,33 @@ export const appearanceToolEntries: AgentToolEntry[] = [
       const r = await persistTheme({ name: String(a.name ?? ""), css }, ctx, THEME_CSS_MAX_BYTES);
       return { ...r, data: { ...(r.data as Record<string, unknown>), layers, layerCount: layers.length } };
     },
+  }),
+  defineTool({
+    /* —— P131-A（详设 A1）：分段续写。上限对齐之后缺的是"一次输不完"这个形状 —— */
+    name: "style_append",
+    labelZh: "续写组件层",
+    // 追加那一段是会话层（draft_write，同 style_patch 一档）；done:true 会装插件，
+    // 那一步仍然走 plugins 域的同一张批准卡——域取严不取松。
+    effect: "draft_write",
+    domain: "plugins",
+    provenance: HOST,
+    description:
+      `Write a large component-layer stylesheet in **chunks** instead of one reply. Args: { css: string (whole rules only — the sanitizer judges each chunk on its own, so a rule split across two chunks fails both), name?: string, done?: boolean }. Every accepted chunk lands immediately as a session scratch layer the user can see, and the receipt says how many bytes are left out of ${Math.round(SAVE_CSS_MAX_BYTES / 1024)}KB. A rejected chunk leaves the draft untouched, so fix that one rule and resend just that chunk. Finish with done:true + name, which persists the WHOLE scratch set (this draft plus any style_patch layers — the look on screen, not a retype) as an enabled theme plugin and clears the draft. Not done yet? style_commit does the same persist step at any time, style_revert drops the layer. For token values (--bg, --accent, radius, duration) use theme_patch, not this tool.`,
+    parameters: {
+      type: "object",
+      properties: {
+        css: { type: "string" },
+        name: { type: "string" },
+        done: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    summarize: (a) => {
+      const css = typeof a.css === "string" ? a.css : "";
+      const done = a.done === true;
+      if (done) return `续写收口：存为主题「${String(a.name ?? "") || "?"}」`;
+      return `续写组件层 ${css.length} 字节`;
+    },
+    execute: styleAppend,
   }),
 ];

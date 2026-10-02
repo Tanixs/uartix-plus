@@ -96,6 +96,17 @@ export function listLayers(): { name: string; bytes: number }[] {
 }
 
 /**
+ * 单层原文（P131-A：`style_append` 用它把"已收到的段"读回来续写）。
+ *
+ * 为什么不另设一个模块级草稿变量：层表已经是"屏幕上生效的那份"的唯一真相，
+ * 再记一份等于给自己造第二条需要同步的副本——`style_commit` 与用户看到的
+ * 都必须来自这里，否则"续写的内容"和"落盘的内容"可以悄悄不一样。
+ */
+export function layerCss(name: string): string | null {
+  return layers.get(name) ?? null;
+}
+
+/**
  * 当前临时层的**全文**（按追加顺序拼）。`style_commit` 就地固化时读的就是这个真值——
  * 以前没有任何出口能把层文本交给模型，"保存为主题"只能靠模型复述自己历史上发过的参数，
  * 多轮叠加或中途撤过层就一定不忠实（详设 §13.3）。

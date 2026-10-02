@@ -150,7 +150,7 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
       "plot_channels", "plot_window", "read_artifact", "run_app_action",
       "save_plugin", "enable_plugin", "list_plugins", "rollback_plugin",
       "fs_read", "fs_list", "fs_write", "fs_grep", "fs_glob", "fs_edit", "web_fetch", "web_search", "shell_exec",
-      "theme_read", "theme_patch", "theme_preset", "image_swatch", "save_theme_extension", "style_commit",
+      "theme_read", "theme_patch", "theme_preset", "image_swatch", "save_theme_extension", "style_commit", "style_append",
       "ui_inventory", "ui_inspect", "style_patch", "style_revert", "app_state",
       "app_catalog", "app_read", "propose_market_install", "layout_apply", "chrome_set", "task_plan",
     ];
@@ -164,6 +164,14 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
       // 模型侧投影绝不能带出宿主字段
       expect(Object.keys({ name: e.name, description: e.description, parameters: e.parameters }).sort())
         .toEqual(["description", "name", "parameters"]);
+      /**
+       * P131-A 取证抓到的真故障（不是假想）：`save_theme_extension` 的说明写成了普通字符串，
+       * 里面的 `${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB` 于是**原样发给模型**——
+       * 它读到的上限是"up to ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB"。
+       * 这类错在 tsc 里合法、在界面上没人看，只有对着投影才看得出来，所以钉在这里。
+       */
+      expect(e.description, `${name} 的模型说明里有未求值的模板语法`).not.toContain("${");
+      expect(JSON.stringify(e.parameters), `${name} 的参数声明里有未求值的模板语法`).not.toContain("${");
     }
   });
 

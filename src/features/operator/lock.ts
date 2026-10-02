@@ -4,6 +4,12 @@
  * operatorStore 负责置位/复位（应用部署包数据期间临时解锁）。
  */
 
+// P131-A：提示条搬到 shared/toast.ts —— 这里原来是一份**独立的手搓实现**，与
+// `ai/extRuntime.toast()` 共用同一对类名却各记各的 host（同一屏可以挂两个提示列），
+// 而那对类名在 CSS 里一条规则都没有。shared/toast 是零业务依赖的叶子（它不 import 本模块
+// 可能拉进来的任何东西），所以上面那条"独立零业务依赖"的红线仍然成立。
+import { toast } from "../../shared/toast";
+
 let locked = false;
 
 export function isOperatorLocked(): boolean {
@@ -12,22 +18,6 @@ export function isOperatorLocked(): boolean {
 
 export function setOperatorLocked(v: boolean): void {
   locked = v;
-}
-
-let toastHost: HTMLDivElement | null = null;
-
-function toast(msg: string) {
-  if (typeof document === "undefined") return; // 非 DOM 环境（单测）静默
-  if (!toastHost) {
-    toastHost = document.createElement("div");
-    toastHost.className = "ai-toast-host";
-    document.body.appendChild(toastHost);
-  }
-  const el = document.createElement("div");
-  el.className = "ai-toast";
-  el.textContent = msg.slice(0, 200);
-  toastHost.appendChild(el);
-  window.setTimeout(() => el.remove(), 2600);
 }
 
 /** 可变函数入口守卫：锁定时提示并返回 true，调用方 `if (guardLocked()) return;` */
