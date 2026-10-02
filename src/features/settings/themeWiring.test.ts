@@ -86,7 +86,7 @@ describe("P99b-N5 · 判定源与枚举各只有一处（R1/G1）", () => {
     expect(read("features/market/MarketDialog.tsx")).toContain("themeArtsOf(");
   });
 
-  it("内置那八枚的 id 清单只有一份（builtinThemes），设置页的 THEME_LIST 由测试对齐它", () => {
+  it("内置那九枚的 id 清单只有一份（builtinThemes），设置页的 THEME_LIST 由测试对齐它", () => {
     expect(filesWith(/BUILTIN_THEME_IDS:\s*readonly/)).toEqual(["styles/builtinThemes.ts"]);
     expect(read("features/settings/themePicker.ts")).toContain("BUILTIN_THEMES");
     expect(read("features/settings/SettingsModal.tsx"), "选择器不再自己枚举内置主题").not.toContain("THEME_LIST.map");

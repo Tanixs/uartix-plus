@@ -4,7 +4,7 @@
  * 卸载、更新候选批准/拒绝、插件市场入口（弹窗由 App 渲染，这里只发信号）、面板/小部件打开入口。
  * PluginManagerBody 为可复用主体（插件库弹窗与设置→插件管理共用），
  * PluginLibraryDialog 仅保留 overlay/portal 壳。
- * 样式全部使用主题变量（8 主题兼容），无字面量颜色。
+ * 样式全部使用主题变量（与全部内置主题兼容），无字面量颜色。
  */
 import { useMemo, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";

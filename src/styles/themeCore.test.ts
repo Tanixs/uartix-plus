@@ -3,7 +3,7 @@
  *
  * 为什么这些能在 node 里测而组件里的不能：本层不读 DOM、不读 store，
  * 三问（谁在画 / 亮还是暗 / 哪些键没人供）都是纯参数进纯值出。
- * 真实主题文件直接从磁盘读（与 `check:theme` 同一批字节），这样"内置八枚自带的 color-scheme
+ * 真实主题文件直接从磁盘读（与 `check:theme` 同一批字节），这样"内置各枚自带的 color-scheme
  * 必须等于按 --bg 算出来的结果"这条就是**八组真值对照**，不是我自己造的例子。
  */
 import { describe, expect, it } from "vitest";
@@ -37,11 +37,11 @@ function readThemeFile(id: string): string {
   return readFileSync(`${THEME_DIR}${id}.css`, "utf8");
 }
 
-const BUILTIN_IDS = ["dark", "light", "navy", "glaze", "ocean", "matcha", "amber", "begonia"];
+const BUILTIN_IDS = ["dark", "light", "navy", "glaze", "ocean", "matcha", "amber", "begonia", "fluent"];
 
 /** 详设 §1-1 的实测事实：每个文件只有一个 token 块 + 一行 color-scheme，没有别的规则 */
 describe("P99b-N5 · 内置主题文件确实是「一张 token 表」（R8 的前提）", () => {
-  it("八枚都能解析，且块外/块内没有会被 ?raw 静默丢掉的东西", () => {
+  it("九枚都能解析，且块外/块内没有会被 ?raw 静默丢掉的东西", () => {
     const onDisk = readdirSync(THEME_DIR)
       .filter((f) => f.endsWith(".css"))
       .map((f) => f.replace(/\.css$/, ""))
@@ -193,7 +193,7 @@ describe("P99b-N5 · 未知 token 键拒收并给出相近名（R5）", () => {
     expect(nearestKnownKey("--nonsense-xyz", APPEARANCE_TOKENS)).toBeNull();
   });
 
-  it("内置八枚的键全部在白名单内（白名单漏了自己的主题就是自打脸）", () => {
+  it("内置各枚的键全部在白名单内（白名单漏了自己的主题就是自打脸）", () => {
     for (const id of BUILTIN_IDS) {
       const { vars } = parseThemeBlock(readThemeFile(id), id);
       const r = checkThemeVars(vars, [...APPEARANCE_TOKENS]);

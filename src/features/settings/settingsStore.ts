@@ -27,6 +27,7 @@ export type ThemeMode =
   | "amber"
   | "begonia"
   | "glaze"
+  | "fluent"
   | "system";
 
 /** 全部主题（设置页色板网格顺序） */
@@ -40,6 +41,7 @@ export const THEME_LIST: ThemeMode[] = [
   "amber",
   "begonia",
   "glaze",
+  "fluent",
 ];
 
 export interface Settings {

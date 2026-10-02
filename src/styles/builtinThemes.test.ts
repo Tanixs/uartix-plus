@@ -30,14 +30,14 @@ const { readFileSync } = (await import(fsSpec)) as { readFileSync: (p: string, e
 const { fileURLToPath } = (await import(urlSpec)) as { fileURLToPath: (u: string | URL) => string };
 
 describe("P99b-N5 · 装载层出声（解析错误不静默）", () => {
-  it("八枚内置主题装载期零解析错误", () => {
+  it("九枚内置主题装载期零解析错误", () => {
     expect(BUILTIN_THEME_ERRORS, "主题文件里出现了 ?raw 解析不了 / 会静默丢掉的东西").toEqual([]);
-    expect(BUILTIN_THEMES.length).toBe(8);
+    expect(BUILTIN_THEMES.length).toBe(9);
   });
 
   it("内置清单与设置页的 THEME_LIST 对得上（只差 system 那个元选项）", () => {
     expect([...BUILTIN_THEME_IDS].sort()).toEqual(THEME_LIST.filter((t) => t !== "system").sort());
-    expect(builtinTheme("system"), "跟随系统不是第 9 枚主题").toBeNull();
+    expect(builtinTheme("system"), "跟随系统不是再多一枚主题").toBeNull();
     expect(isBuiltinThemeId("plg:whatever")).toBe(false);
   });
 });

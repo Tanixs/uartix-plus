@@ -57,7 +57,7 @@ const base = (over: Partial<PickerInput> = {}): PickerInput => ({
 });
 
 describe("P99b-N5 · 一张列表、一枚在画（同级裁决）", () => {
-  it("内置八枚 + 「跟随系统」都在，且都标着内置、没有 pluginId（没有卸载入口可言）", () => {
+  it("内置九枚 + 「跟随系统」都在，且都标着内置、没有 pluginId（没有卸载入口可言）", () => {
     const cards = themeCards(base());
     const builtinCards = cards.filter((c) => c.builtin);
     expect(builtinCards.map((c) => c.key).filter((k) => k !== "system").sort()).toEqual([...BUILTIN_THEME_IDS].sort());

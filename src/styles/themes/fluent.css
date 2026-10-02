@@ -1,0 +1,89 @@
+/* 流利蓝（Fluent）：亮色系，微软 Fluent Design 的中性四档 + Fluent 蓝家族。
+   取材自 STYLEKIT「流利设计」硬提示词，但只取**这一层表达得出**的那部分。
+   主题文件是一段纯 token 表：`:root[data-theme]` 一块、块外零规则（parseThemeBlock 出声 +
+   builtinThemes.test 钉着"样式表里不该再有按 data-theme 配色的规则"），所以提示词里的
+   亚克力 backdrop-filter、hover 上浮 -translate-y、active:scale-[0.97]、focus ring-offset、
+   图标 group-hover 缩放——那些都是**组件规则**，在这里一条都写不进去。不是不想，是这一层
+   没有这个能力；能力边界清单与改好的提示词见
+   docs/designs/P130-内置主题流利蓝-能力边界与提示词适配.md。 */
+:root[data-theme="fluent"] {
+  color-scheme: light;
+
+  /* 四档中性。Fluent 的层级由中性明度承担、蓝色只做点缀，这与本仓 I 门同向。
+     实测 CIE L*：inset 92.4 < shell 93.1 < canvas 97.9 < panel 100.0；
+     壳→画布 4.8（门 ≥1.0）、画布→面板 2.1（门 ≥1.5）。
+     真实错位要写明：Fluent 本身只有两档（灰画布 + 白控件/卡片），本仓的门禁要求四档有序且
+     凹档最深——所以这里把凹档压到"刚好还读得出层级"的最浅位置（92.4），既守门也少损失字色对比。 */
+  --bg: #faf9f7; /* 画布 = Fluent background 3 */
+  --bg-panel: #ffffff; /* 面板 / 工具栏：卡片档，浮起才有空间 */
+  --bg-inset: #ebe9e7; /* 输入框 / 页签条：凹档，必须是最深的一层 */
+  --bg-titlebar: #edebe9; /* 壳（标题行 / 活动导轨 / 信息栏）：退在画布之后 */
+
+  /* 描边。Fluent 其实有两个角色：分隔线很轻（#e1e1e1）、控件描边较重（#8a8886），
+     而本仓 --border 一个 token 同时管着控件描边、面板分隔、表格线与卡片边——照抄 #8a8886
+     会让整屏线条变重一档。取 #c8c6c4 居中，把"Fluent 那种描边"交给派生的 --line-strong：
+     `.input:hover` 用的就是它（border 68% + text 32% ≈ #7a7876），
+     于是"hover 描边加深"这条 Fluent 手感是免费的。 */
+  --border: #c8c6c4;
+  --border-soft: #e1dfdd;
+
+  --text: #201f1e; /* Fluent 前景色：压画布 15.6:1、压面板 16.5:1 */
+  --text-dim: #605e5c; /* 次级文字：压画布 6.14:1、压面板 6.46:1（门 ≥3.0） */
+
+  /* 这里没有用标志性 #0078d4 当 --accent，是 1421 渲染层抽样抓出来的，不是审美选择：
+     导轨那一面把 --accent 直接当**文字色**用（.rail2-label、页签激活态、"在面板编辑 →"），
+     而 #0078d4 当文字时的天花板就是压纯白 4.53:1——画布档 4.30、壳档 3.81、凹档 3.64，
+     任何非纯白表面都跌破 AA。静态门禁只查 accent 压 --bg-panel（4.53 刚好过），看不见这一条。
+     换成 Fluent 家族更深的那枚 #005a9e（提示词里它本来就是"更深蓝色 / active 态"）：
+     白字压它 7.10:1，它当字压四档 7.10 / 6.75 / 5.97 / 5.87 —— 两个方向都站住。
+     同一个 token 要兼"填充"和"文字"两种角色，而本仓没有 --accent-text 这一档：这是真墙。
+     灰字压它 1.10:1，仍满足门禁那条负向校验（不许有人拿灰字配主题色底）。 */
+  --accent: #005a9e;
+  --on-accent: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+
+  /* 强调黄 #ffb900 / 强调绿 #00cc6a 没照抄，也是有数的：压白底只有 1.72 / 2.13:1，
+     而本仓 --warn 有 27 处、--ok 有 28 处是直接 `color: var(--warn)` 当文字用的。
+     那两个亮色只在"亮填充 + 深墨"那种角色里成立，主题层分不出"这次是填充、那次是文字"。 */
+  --danger: #c50f1f; /* 压白 6.07:1 */
+  --warn: #8a6d1f; /* 压白 4.90:1 */
+  --ok: #0f7a2f; /* 压白 5.46:1 */
+
+  /* Fluent 的阴影是分层柔影（提示词 token 原样）。注意 --shadow-pop 不在 52 项白名单里，
+     主题动不了它——弹层那层更深的影归组件层。 */
+  --shadow: 0 0.6px 1.8px rgba(0, 0, 0, 0.1), 0 3.2px 7.2px rgba(0, 0, 0, 0.13);
+  --scrollbar: #c9c7c5;
+  --scrollbar-hover: #a19f9d;
+
+  /* 圆角。Fluent：标准控件 4px、弹层 8px。本仓刻度 s=输入框、m=控件与卡、l=弹层、xl=弹窗，
+     整体比默认(4/6/8/10)收一档，读起来更接近 Windows 11 那种"方而不尖"。
+     --radius-pill 不动：胶囊与徽标是通用形状，不属于某一家的风格。 */
+  --radius-s: 3px;
+  --radius-m: 4px;
+  --radius-l: 6px;
+  --radius-xl: 8px;
+
+  /* 缓动。Fluent 标准曲线是减速进入、不回头（本仓 motion 门禁也禁 bounce/elastic，同向）。
+     时长**没有改**：本仓已是 --dur-snap 60 / --dur-fast 120 / --dur-base 150ms，
+     全部落在提示词那句"不超过 200ms"里——为改而改没有证据支持。 */
+  --ease: cubic-bezier(0, 0, 0.2, 1);
+
+  /* 焦点环。Fluent 的 focus rect 是实色蓝框，所以把默认那层 55% 透明提到 92%。
+     提示词要的 "ring-offset-2"（环与控件之间那一圈留白）是 `outline-offset`，属组件规则，
+     这一层够不到——这一枚只能把环做实，做不到让它悬空。 */
+  --ring: color-mix(in srgb, var(--accent) 92%, transparent);
+
+  /* 块类型语义色 8 枚。门禁只查"压面板 ≥4.5"，但这一屏多数小胶囊是落在**画布/壳/凹**三档上的，
+     所以这张表是按四档重排的：压画布全部 ≥4.63（light 那套的最低值是 4.50，begonia 是 4.20）。
+     k-send 用 Fluent 亮蓝 #0b6ec7（标志性 #0078d4 的近亲，压画布 4.90:1）；
+     暖色两支（frame/warn-line）比 light 那套各深一档，换来的正是凹档上不再跌破 4.5。 */
+  --k-send: #0b6ec7;
+  --k-wait: #9a6700;
+  --k-frame: #7a3fd0;
+  --k-assert: #0f7a2f;
+  --k-note: #bc4c00;
+  --k-logic: #5e3d99;
+  --k-group: #0f6f7a;
+  --k-warn-line: #a04a05;
+  --warn-fg: #8f6308; /* 只读/受限横幅的文字色：压面板 5.31:1、压画布 5.04:1 */
+}

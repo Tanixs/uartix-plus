@@ -406,8 +406,9 @@ export const RAISE_KEYS = ["--raise-1", "--raise-2"] as const;
 /** 基础面档（alpha 在这里是**特性**：内置玻璃配方就把 --bg-panel 写成 0.72） */
 export const BASE_SURFACE_KEYS = ["--bg", "--bg-panel", "--bg-inset", "--bg-titlebar"] as const;
 
-/** 抬升档与面板档的最大档差（L*）。**这个数是量出来的不是拍的**：八枚内置主题的
- * `--raise-1/--raise-2` 实测 |Δ| 分别在 7.9~8.1 与 13.5~13.8（暗底往亮抬、亮底往暗退）。
+/** 抬升档与面板档的最大档差（L*）。**这些数是量出来的不是拍的**（`npm run check:theme` 逐枚打印）：
+ * 暗底 `--raise-1/--raise-2` 实测 |Δ| = 7.9~8.1 与 13.5~13.8，亮底 = 4.2~4.7 与 7.0~7.8
+ * （暗底往亮抬、亮底往暗退）。原注释只写了暗底那一半，流利蓝进来后亮底那半也有了实测值。
  * 上限放到内置最大值的近两倍，留出"这套主题想要更强层级"的余量，又远低于
  * "暗色主题里写一枚接近白的 --raise-1"（用户 2026-09-27 图 3 那五处白底就是它，ΔL* ≈ 80）。
  */
@@ -472,7 +473,7 @@ export function judgeSurfaceLadder(
     } else if (Math.abs(d) > RAISE_MAX_DELTA_L) {
       out.push({
         key: k,
-        reason: `抬过头：与面板差 ΔL*=${d.toFixed(1)}，超过 ${RAISE_MAX_DELTA_L}（内置八枚实测 7.9~13.8）——这不是"抬一档"，是把这块底换成了另一个颜色`,
+        reason: `抬过头：与面板差 ΔL*=${d.toFixed(1)}，超过 ${RAISE_MAX_DELTA_L}（内置各枚实测 4.2~13.8，按明暗分两族）——这不是"抬一档"，是把这块底换成了另一个颜色`,
         fatal: true,
       });
     }
@@ -506,7 +507,7 @@ export function judgeSurfaceLadder(
   }
 
   /* 正文色压在四档表面上够不够 readable。**只提醒**：
-     门禁对八枚内置主题要求 4.5:1（那条不减），但 AI/插件写的值当场判死就是"变严"，
+     门禁对内置主题要求 4.5:1（那条不减），但 AI/插件写的值当场判死就是"变严"，
      需要用户单独点头（红线：任何变严都要先说清）。这里先把话说到位，撤不撤由用户决定。
      `TEXT_CONTRAST_FLOOR` 以下的话术与门禁那条同一口径。 */
   for (const k of BASE_SURFACE_KEYS) {

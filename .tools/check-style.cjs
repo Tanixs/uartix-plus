@@ -97,7 +97,7 @@ function ruleBodies(src) {
 
 const RGB = semanticRgbSet();
 if (RGB.size < 8) {
-  console.error(`FAIL: 语义色集合只派生出 ${RGB.size} 个值（八枚主题 + 基线合起来不该这么少）——门自己失效了`);
+  console.error(`FAIL: 语义色集合只派生出 ${RGB.size} 个值（内置各枚 + 基线合起来不该这么少）——门自己失效了`);
   fails++;
 }
 

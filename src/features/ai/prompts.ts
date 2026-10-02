@@ -3,7 +3,7 @@ import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 // 原先这里手抄了一份"主题 / 小部件 / 面板"，D1 加出四类产物后它还在说三类（§8-36①）。
 import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
 import { autoEnableableKindLabels } from "../plugins/pluginManifest";
-// P99b-N5：主题清单从装载层取（内置那八枚的唯一出处），不在这儿手抄第二份
+// P99b-N5：主题清单从装载层取（内置主题清单的唯一出处），不在这儿手抄第二份
 import { BUILTIN_THEME_IDS } from "../../styles/builtinThemes";
 // P115-D：可添加面板的清单同样从注册表派生。手抄那份漏了「指标面板」，还把已退役的
 // 「协议模板」面板当成能打开的东西告诉模型——加一枚面板要改两处，正是 §8-36① 那一类。

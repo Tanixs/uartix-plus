@@ -159,10 +159,10 @@ console.log(rows.join("\n"));
    判据的**真相**在 `src/styles/themeCore.ts` 的 `judgeSurfaceLadder()`——运行时撤回坏值用的就是它。
    `.cjs` 引不了 TS，所以这里按**同一组数字**复刻，数字是从 themeCore.ts 里抠出来的（:42 那种
    从源码里解析 APPEARANCE_TOKENS 的既有做法），这份文件里不写第二份常量。
-   改判据时两处一起改，下面打印的八枚内置实测阶梯会跟着动，那就是它的回归证据。
+   改判据时两处一起改，下面打印的内置实测阶梯会跟着动，那就是它的回归证据。
 
    为什么门禁还要再判一遍（运行时不是已经守住了吗）：运行时守卫只管 **AI 覆盖层**那一条写入路径；
-   仓库里这八枚内置主题文件是编译期资产，走的是 `?raw` 解析 → 合成器，谁都能手改一行
+   仓库里这批内置主题文件是编译期资产，走的是 `?raw` 解析 → 合成器，谁都能手改一行
    `--raise-1: #fff` 把它弄坏而没有任何一处会响。 */
 const coreSrc = fs.readFileSync(path.join(__dirname, "..", "src", "styles", "themeCore.ts"), "utf8");
 function constFromCore(name) {

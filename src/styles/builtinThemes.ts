@@ -1,5 +1,5 @@
 /**
- * P99b-N5：内置主题的**装载层**——八份 CSS 文件从"运行时样式"降级成"数据"。
+ * P99b-N5：内置主题的**装载层**——九份 CSS 文件从"运行时样式"降级成"数据"。
  *
  * 为什么还留着 CSS 文件（详设 §6-Q1）：`.tools/check-contrast.cjs`（`npm run check:theme`）
  * 逐主题验对比度时读的就是这批字节。把它们搬进 TS 常量表要么让门禁换个解析入口，
@@ -15,6 +15,7 @@
 import { parseThemeBlock, type ThemeScheme, type ThemeSource } from "./themeCore";
 import amberRaw from "./themes/amber.css?raw";
 import begoniaRaw from "./themes/begonia.css?raw";
+import fluentRaw from "./themes/fluent.css?raw";
 import darkRaw from "./themes/dark.css?raw";
 import glazeRaw from "./themes/glaze.css?raw";
 import lightRaw from "./themes/light.css?raw";
@@ -31,6 +32,7 @@ const RAW: Record<string, string> = {
   matcha: matchaRaw,
   amber: amberRaw,
   begonia: begoniaRaw,
+  fluent: fluentRaw,
 };
 
 /** 选择器与回落都要用的固定次序（与设置页那套 `THEME_LIST` 的对应关系由测试钉住） */
@@ -43,6 +45,7 @@ export const BUILTIN_THEME_IDS: readonly string[] = [
   "amber",
   "begonia",
   "glaze",
+  "fluent",
 ];
 
 /** 装载期解析错误：非空就是真故障（启动时出声，不静默用半张表） */

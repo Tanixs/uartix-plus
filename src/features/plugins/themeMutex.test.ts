@@ -98,7 +98,7 @@ describe("P99b-N5 · 启用第二枚主题 ⇒ 第一枚当场落地停用（G2�
   });
 });
 
-describe("P99b-N5 · 内置那八枚不在这套生命周期里（R3）", () => {
+describe("P99b-N5 · 内置那九枚不在这套生命周期里（R3）", () => {
   it("内置 id 拿去启用/停用/卸载一律拒绝——它们不是插件记录，没有可摘的投影", () => {
     for (const id of ["begonia", "dark", "light", "system"]) {
       expect(store.setEnabled(id, true).ok, `${id} 不该是个插件`).toBe(false);
