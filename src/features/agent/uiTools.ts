@@ -10,7 +10,15 @@
  * TOOL_LABEL、summarizeArgs），漏一处就静默；现在全在下面的 entry 里。
  */
 import { DOMAIN_ZH } from "./scopeTiers";
-import { censusSurface, collectInventory, INVENTORY_SECTIONS, SURFACE_DEFAULTS } from "./uiSurface";
+import { censusSurface, collectInventory, collectAuditInput, AUDIT_DEFAULTS, INVENTORY_SECTIONS, SURFACE_DEFAULTS } from "./uiSurface";
+import {
+  auditContrast,
+  auditHitTargets,
+  auditMotionOverride,
+  auditOverflow,
+  HIT_TARGET_MIN_PX,
+  summarizeAudit,
+} from "../../styles/renderAudit";
 import { buildStyleText, sanitizeStyleRules, STYLE_CAPS } from "../styles/styleSanitize";
 import { applyLayer, listLayers, revertAll, revertByToken, revertLayer } from "./styleScratch";
 import { defineTool, notExecuted as bad, type AgentToolEntry } from "./toolRegistry";
@@ -60,6 +68,20 @@ function nearClasses(selector: string, limit = 5): string[] {
 }
 
 let patchSeq = 0;
+
+/**
+ * 当前**真的贴在屏幕上**的注入层文本（AI 临时层 + 主题扩展层）。
+ *
+ * 为什么从 DOM 节点读而不是从 store 读：节点里的字节就是浏览器实际吃进去的那份，
+ * 从 store 再拼一次等于造第二真相——净化、截断、启停顺序任何一处不同，审计就审了个不存在的东西。
+ */
+function injectedCssText(): string {
+  if (typeof document === "undefined") return "";
+  return [...document.querySelectorAll("style[data-ai-scratch], style[data-ai-ext]")]
+    .map((s) => s.textContent ?? "")
+    .filter(Boolean)
+    .join("\n");
+}
 
 const HOST = { kind: "host" } as const;
 
@@ -205,6 +227,68 @@ export const uiToolEntries: AgentToolEntry[] = [
         status: had ? "applied" : "not_executed",
         ...(!had ? { code: "no_such_layer" } : {}),
         data: { name, removed: had, layers: listLayers(), note: had ? "已撤回该层，原样式自动回落" : "没有这一层；现存层见 layers" },
+      };
+    },
+  }),
+  defineTool({
+    /* —— P131-B1（详设 A9）：把"渲染层到底读不读得出来"做成每次都能跑的证据 —— */
+    name: "theme_audit",
+    labelZh: "审计渲染层",
+    effect: "read",
+    // 与 ui_inspect 同档：只读、不开权限门。审计要是得先申请授权，模型就不会顺手跑了
+    domain: null,
+    provenance: HOST,
+    description:
+      `Measure what is ACTUALLY on screen instead of what the CSS says: contrast of every visible text node against its real composited backdrop (WCAG 4.5:1, 3:1 for large text), text painted outside its own box, interactive targets under ${HIT_TARGET_MIN_PX} CSS px (folded back through --zoom, so a narrow control at 125% is not falsely accused), and rules that would override the user's reduced-motion setting (specificity vs the host's html.no-motion baseline). Read-only — it changes nothing. Args: { root?: string (default "body"), maxSamples?: number (20..800, default ${AUDIT_DEFAULTS.maxSamples}) }. blocking:true means SPEAK: list the findings for the user and fix the selectors/colors, then run it again — it is not an install gate and never will be (evidence open, permissions closed). The 12 static gates cannot see injected theme CSS, so this is the only check that covers what you just painted.`,
+    parameters: {
+      type: "object",
+      properties: { root: { type: "string" }, maxSamples: { type: "number" } },
+      additionalProperties: false,
+    },
+    summarize: () => "审计渲染层（对比度/溢出/命中区/动效降级）",
+    execute(args, ctx) {
+      const callId = ctx.callId;
+      if (typeof document === "undefined") {
+        return bad(callId, "no_dom", { hint: "审计要读活界面，当前环境没有 DOM；界面上跑一次即可" });
+      }
+      const root = typeof args.root === "string" ? args.root.trim() : "";
+      const input = collectAuditInput({
+        ...(root ? { root } : {}),
+        ...(typeof args.maxSamples === "number" ? { maxSamples: args.maxSamples } : {}),
+      });
+      if (!input.visited && !input.textSamples.length) {
+        return bad(callId, "no_visible_nodes", {
+          hint: `选择器 ${root || "body"} 下没有可见元素：先 ui_inspect 看清真实结构，或去掉 root 参数审全局`,
+        });
+      }
+      const { issues, unmeasurable } = auditContrast(input.textSamples);
+      const injected = injectedCssText();
+      const result = summarizeAudit({
+        sampled: input.textSamples.length,
+        contrast: issues.slice(0, 12),
+        unmeasurable: unmeasurable.slice(0, 6),
+        overflow: auditOverflow(input.overflow).slice(0, 12),
+        hitTargets: auditHitTargets(input.hits).slice(0, 12),
+        motionOverride: auditMotionOverride(injected).slice(0, 12),
+        perf: { styleBytes: input.perf.styleBytes, rules: input.perf.rules },
+      });
+      return {
+        callId,
+        ok: true,
+        status: "read",
+        data: {
+          ...result,
+          contrastTotal: issues.length,
+          unmeasurableTotal: unmeasurable.length,
+          visited: input.visited,
+          truncated: input.truncated,
+          zoom: input.zoom,
+          sheetsSkipped: input.perf.sheetsSkipped,
+          injectedBytes: injected.length,
+          hint: result.blocking
+            ? "有要说的：逐条把 selector/ratio/need 讲给用户，改完再跑一次确认归零；不要因为有发现就放弃这条设计，也不要替他决定「可以忽略」"
+            : `界面在 ${root || "body"} 范围内读得出来、没画出格子、命中区够、减弱动效也还压得住（采了 ${input.textSamples.length} 处文字）`,
+        },
       };
     },
   }),
