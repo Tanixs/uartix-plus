@@ -250,4 +250,29 @@ describe("帮助文档不得落后于实现", () => {
     expect(cliSrc, "validate 不再是本地命令了 ⇒ 帮助里那句「离线一条命令」要改口").toMatch(/LOCAL_COMMANDS\s*=\s*\[[^\]]*"validate"/);
     expect(cliSrc).toContain("除 validate 外的前提");
   });
+
+  /**
+   * P128-A · 「在命令上覆盖参数值」是一句说在前面的假话。
+   *
+   * 三处文本（帮助手册 TX组帧台 那一行、属性页参数组的问号、AI 知识库）都写着
+   * "要临时改一版，在命令或卡片上覆盖它"。卡片那半是真的（`cmdExec.ts:153` 滑条 / 开关设的值
+   * 就是那一次发送的覆盖）；命令那半不是 —— `Command.overrides` 这个字段编码器认，
+   * 可命令库里**没有任何界面填它**（`patchCommand(…{overrides:undefined})` 只在清除时出现）。
+   * 而对用户和模型说过的话，就是承诺（§8-41：这一族先例是提示词指引用户去按一个已删的按钮）。
+   *
+   * 所以钉两头：那句原话禁回来；三处都得带着"还没格子"这半句。
+   * 哪天真做出命令侧的覆盖输入面，改这条钉的同时把那三处文本一起改口 —— 不是把钉删掉。
+   */
+  it("P128-A：命令侧的覆盖值——字段有、界面没有，话必须说准", () => {
+    const inspSrc = readFileSync(here.replace(/[/\\]features[/\\]help[/\\].*$/, "/features/inspector/SendFieldInspector.tsx"), "utf8");
+    const CAVEAT = "填它的格子";
+    for (const [name, src] of [
+      ["HelpModal", helpSrc],
+      ["prompts", promptsSrc],
+      ["属性页", inspSrc],
+    ] as const) {
+      expect(src, `${name} 里没有"命令库还欠着这个输入面"那半句 ⇒ 又开始承诺一个不存在的东西了`).toContain(CAVEAT);
+      expect(src, `${name} 里那句"在命令或卡片上覆盖"回来了`).not.toContain("在命令或卡片上覆盖");
+    }
+  });
 });

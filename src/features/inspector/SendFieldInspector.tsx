@@ -556,8 +556,8 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
         <span>{tx("参数", "Parameters")}</span>
         <HelpHint
           text={tx(
-            "一张卡 = 一个参数，点开才看到它的名字、类型、默认值与范围；标着「当前块」的那张，就是你正在编的这块在取值的参数。默认值就是发出去的那一帧里的值；要临时改一版，在命令或卡片上覆盖它，不动默认值。",
-            "One card = one parameter: its name, type, default and range appear when you expand it. The card flagged “this block” is the parameter the block you are editing reads. The default is what goes out in the frame; to try a different value once, override it on the command or the card instead.",
+            "一张卡 = 一个参数，点开才看到它的名字、类型、默认值与范围；标着「当前块」的那张，就是你正在编的这块在取值的参数。默认值就是发出去的那一帧里的值。要临时改一版：控制画布上绑了这个参数的滑条 / 开关卡，它设的那个值就是那一次发送用的覆盖，不动默认值。命令那一侧的覆盖值——编码器认这个字段，命令库里今天还没有填它的格子。",
+            "One card = one parameter: its name, type, default and range appear when you expand it. The card flagged “this block” is the parameter the block you are editing reads. The default is what goes out in the frame. To send something else once: a slider or switch card bound to this parameter overrides it for that send, without touching the default. On the command side the encoder does read an override field, but the command library has no input for it yet.",
           )}
         />
       </div>
