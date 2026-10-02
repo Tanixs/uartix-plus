@@ -18,6 +18,7 @@ import { tx, useLocale } from "../../i18n/strings";
 import { CRC_DEFAULT, parseCrcLiteral } from "../../shared/checksums";
 import { FormRow, NumInput, TextInput } from "../../shared/FormInputs";
 import { Section } from "../../shared/Section";
+import { HelpHint } from "../../shared/HelpHint";
 import { IconChevron } from "../../shared/icons";
 import * as controlsStore from "../controls/controlsStore";
 import { revealTargets } from "../controls/cardBinding";
@@ -248,278 +249,317 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
         if (e.key === "Escape" && txeBackToSpec()) e.stopPropagation();
       }}
     >
-      {field && (
-        <div className="insp-crumb" title={tx("Esc 回到这张谱的属性", "Esc goes back to the whole spec")}>
+      {/* 页头一行搞定，与帧画布那块同一形状（P125-A）：返回键 + 色点 + 「对象 · 名」。
+          上一版把面包屑和标题排成两行，两行都是 12px 灰字，中间没有留白 ⇒ 看着就是"字贴在一起"。
+          返回键不是装饰：Esc 也走同一件事，它的 tooltip 就是那句键盘话。 */}
+      <div className="props-title">
+        {field && (
           <button
             type="button"
-            className="insp-crumb-link"
+            className="back-btn"
             onClick={() => setInspectorFocus({ side: "tx", id: tpl.id, fieldId: "" })}
+            title={tx("回到这张谱的属性（Esc）", "Back to this spec's properties (Esc)")}
           >
-            {tpl.name}
+            <IconChevron size={13} dir="left" />
+            {tx("返回", "Back")}
           </button>
-          <i>›</i>
-          <span>{field.name}</span>
+        )}
+        {field?.color && <span className="tpl-dot" style={{ background: field.color }} />}
+        <span className="tpl-name">
+          {field
+            ? `${tx("发送块", "Send block")} · ${field.name}`
+            : `${tx("发送谱", "Send spec")} · ${tpl.name}`}
+        </span>
+      </div>
+      {!field && (
+        <div className="form-hint">
+          {tx("在 TX组帧台的字节网格上点一块来编辑它。", "Click a block on the TX frame builder grid to edit it.")}
         </div>
       )}
-      {/* 当前对象不折叠：它就是这页存在的理由，收起来等于把用户刚点的东西藏了（P124-A） */}
-      <div className="props-title">{tx("发送块", "Send block")}</div>
-        {!field && (
-          <div className="props-hint">
-            {tx("在 TX组帧台的字节网格上点一块来编辑它。", "Click a block on the TX frame builder grid to edit it.")}
-          </div>
-        )}
-        {field && (
-          <>
-            <FormRow label={tx("名称", "Name")}>
-              <input className="input" value={field.name} onChange={(e) => patchSel({ name: e.target.value })} />
+      {field && (
+        <>
+          <FormRow label={tx("名称", "Name")}>
+            <input className="input" value={field.name} onChange={(e) => patchSel({ name: e.target.value })} />
+          </FormRow>
+          <FormRow label={tx("类型", "Type")}>
+            <select className="input" value={field.type} onChange={(e) => patchSel({ type: e.target.value as FieldType })}>
+              {TYPES.map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          </FormRow>
+          <FormRow label={tx("角色", "Role")}>
+            <select className="input" value={field.role} onChange={(e) => patchSel({ role: e.target.value as FieldRole })}>
+              {SEND_FIELD_ROLES.map((x) => (
+                <option key={x} value={x}>
+                  {roleLabelOf(x)}
+                </option>
+              ))}
+            </select>
+          </FormRow>
+          <FormRow label={tx("字节序", "Byte order")}>
+            <select className="input" value={field.endian} onChange={(e) => patchSel({ endian: e.target.value as Endian })}>
+              {ENDIANS.map((x) => (
+                <option key={x}>{x}</option>
+              ))}
+            </select>
+          </FormRow>
+          {(field.type === "ascii" || field.type === "bcd") && (
+            <FormRow label={tx("字节数", "Bytes")}>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                value={field.size ?? 1}
+                onChange={(e) => patchSel({ size: Math.max(1, Number(e.target.value) || 1) })}
+              />
             </FormRow>
-            <FormRow label={tx("类型", "Type")}>
-              <select className="input" value={field.type} onChange={(e) => patchSel({ type: e.target.value as FieldType })}>
-                {TYPES.map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-            </FormRow>
-            <FormRow label={tx("角色", "Role")}>
-              <select className="input" value={field.role} onChange={(e) => patchSel({ role: e.target.value as FieldRole })}>
-                {SEND_FIELD_ROLES.map((x) => (
-                  <option key={x} value={x}>
-                    {roleLabelOf(x)}
-                  </option>
-                ))}
-              </select>
-            </FormRow>
-            <FormRow label={tx("字节序", "Byte order")}>
-              <select className="input" value={field.endian} onChange={(e) => patchSel({ endian: e.target.value as Endian })}>
-                {ENDIANS.map((x) => (
-                  <option key={x}>{x}</option>
-                ))}
-              </select>
-            </FormRow>
-            {(field.type === "ascii" || field.type === "bcd") && (
-              <FormRow label={tx("字节数", "Bytes")}>
+          )}
+          {field.type === "bits" && (
+            <FormRow label={tx("位起 / 位宽", "Bit / width")}>
+              <span className="form-pair grow">
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  max={7}
+                  value={field.bits?.index ?? 0}
+                  onChange={(e) => patchSel({ bits: { index: Number(e.target.value), count: field.bits?.count ?? 1 } })}
+                />
                 <input
                   className="input"
                   type="number"
                   min={1}
-                  value={field.size ?? 1}
-                  onChange={(e) => patchSel({ size: Math.max(1, Number(e.target.value) || 1) })}
+                  max={8}
+                  value={field.bits?.count ?? 1}
+                  onChange={(e) => patchSel({ bits: { index: field.bits?.index ?? 0, count: Number(e.target.value) } })}
+                />
+              </span>
+            </FormRow>
+          )}
+          <FormRow label={tx("值来源", "Value from")}>
+            <select
+              className="input"
+              value={field.source.kind}
+              onChange={(e) => {
+                const k = e.target.value;
+                if (k === "param") {
+                  const pid = uid("sp");
+                  sendStore.addParam(tpl.id, { id: pid, name: field.name, type: paramTypeOf(field.type), def: "0" });
+                  patchSel({ source: { kind: "param", paramId: pid } });
+                } else if (k === "const") patchSel({ source: { kind: "const", bytes: [0] } });
+                else if (k === "var") patchSel({ source: { kind: "var", name: "" } });
+                else if (k === "seq") patchSel({ source: { kind: "seq" } });
+                else patchSel({ source: { kind: "len", covers: "after" } });
+              }}
+            >
+              {["const", "param", "var", "seq", "len"].map((k) => (
+                <option key={k} value={k}>
+                  {k === "const" ? tx("固定字节", "Fixed") : k === "param" ? tx("参数", "Parameter") : k === "var" ? tx("解析变量", "Parsed variable") : k === "seq" ? tx("自增序号", "Auto counter") : tx("长度回填", "Length")}
+                </option>
+              ))}
+            </select>
+            {/* 五种来源各有一句"什么时候用它"，写在行下就是三排灰字（图一那种杂乱）。
+                收进问号：悬停才占地方，不悬停时这一屏只有行。 */}
+            <HelpHint
+              text={tx(
+                "固定字节 = 帧头、帧尾、写死的操作码；参数 = 每次触发可以改的值；解析变量 = 取接收侧刚解析出来的实时值，取不到就报错，不会把 {名字} 原样发给设备；自增序号 = 每发一帧加一个步进；长度回填 = 按这一帧的字节数自动填。",
+                "Fixed = header, footer, hard-coded op codes; Parameter = a value you can change per trigger; Parsed variable = the live value the receiver just parsed, and a missing one is an error rather than a literal {name} on the wire; Auto counter = steps forward each frame; Length = backfilled from this frame's byte count.",
+              )}
+            />
+          </FormRow>
+          {field.source.kind === "seq" && (
+            <FormRow label={tx("步进 / 回绕", "Step / wrap")}>
+              <span className="form-pair grow">
+                <NumInput
+                  value={field.source.step ?? 1}
+                  title={tx("每发一帧加多少", "How much the counter advances per frame")}
+                  onCommit={(v) => patchSel({ source: { kind: "seq", step: v, wrap: field.source.kind === "seq" ? field.source.wrap : undefined } })}
+                />
+                <NumInput
+                  value={field.source.wrap ?? Math.pow(2, 8 * Math.max(1, field.size ?? 1))}
+                  title={tx("加到多少回到 0（默认按位宽）", "Where the counter wraps (defaults to the field width)")}
+                  onCommit={(v) => patchSel({ source: { kind: "seq", step: field.source.kind === "seq" ? field.source.step : undefined, wrap: v } })}
+                />
+              </span>
+            </FormRow>
+          )}
+          {field.source.kind === "len" && (
+            <>
+              <FormRow label={tx("长度数谁", "Length counts")}>
+                <select
+                  className="input"
+                  value={field.source.covers}
+                  onChange={(e) => patchSel({ source: { kind: "len", covers: e.target.value as "self" | "after" | "body", adjust: field.source.kind === "len" ? field.source.adjust : undefined } })}
+                >
+                  <option value="after">{tx("它之后的字节", "bytes after it")}</option>
+                  <option value="body">{tx("含它自身", "including itself")}</option>
+                  <option value="self">{tx("整帧", "whole frame")}</option>
+                </select>
+              </FormRow>
+              <FormRow label={tx("长度修正", "Length adjust")}>
+                <NumInput
+                  value={field.source.adjust ?? 0}
+                  title={tx("回填的值再加减这个数（帧长含不含某些字节时用）", "Add this to the backfilled length")}
+                  onCommit={(v) => patchSel({ source: { kind: "len", covers: field.source.kind === "len" ? field.source.covers : "after", adjust: v } })}
                 />
               </FormRow>
-            )}
-            {field.type === "bits" && (
-              <FormRow label={tx("位起 / 位宽", "Bit / width")}>
-                <span className="form-pair grow">
-                  <input
-                    className="input"
-                    type="number"
-                    min={0}
-                    max={7}
-                    value={field.bits?.index ?? 0}
-                    onChange={(e) => patchSel({ bits: { index: Number(e.target.value), count: field.bits?.count ?? 1 } })}
-                  />
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    max={8}
-                    value={field.bits?.count ?? 1}
-                    onChange={(e) => patchSel({ bits: { index: field.bits?.index ?? 0, count: Number(e.target.value) } })}
-                  />
-                </span>
-              </FormRow>
-            )}
-            <FormRow label={tx("值来源", "Value from")}>
-              <select
-                className="input"
-                value={field.source.kind}
-                onChange={(e) => {
-                  const k = e.target.value;
-                  if (k === "param") {
-                    const pid = uid("sp");
-                    sendStore.addParam(tpl.id, { id: pid, name: field.name, type: paramTypeOf(field.type), def: "0" });
-                    patchSel({ source: { kind: "param", paramId: pid } });
-                  } else if (k === "const") patchSel({ source: { kind: "const", bytes: [0] } });
-                  else if (k === "var") patchSel({ source: { kind: "var", name: "" } });
-                  else if (k === "seq") patchSel({ source: { kind: "seq" } });
-                  else patchSel({ source: { kind: "len", covers: "after" } });
+            </>
+          )}
+          {link && (
+            <div className="sb-link">
+              <span className="sb-hint">{link.line}</span>
+              {/* 只有真的在别的页上才有这颗键：当前页已经闪过了还留一个"去那里"，那就是假开关 */}
+              {link.pageId !== undefined && link.cardId !== undefined && link.cardName !== undefined && (
+                <button
+                  className="btn"
+                  onClick={() => {
+                    const { pageId, cardId, cardName } = link;
+                    if (!pageId || !cardId || !cardName) return;
+                    controlsStore.setActivePage(pageId);
+                    // 卡是新页面上刚渲染出来的，等一拍再闪（协议画布那条反向定位同一节奏）
+                    window.setTimeout(() => revealCard(cardId), 80);
+                    // 人都跳过去了，那句话不许还停在"在别的页上"
+                    setLink({ line: locatedLine(cardName) });
+                  }}
+                >
+                  {tx("去那里", "Go there")}
+                </button>
+              )}
+            </div>
+          )}
+          {field.source.kind === "const" && (
+            <FormRow label={tx("字节 (hex)", "Bytes (hex)")}>
+              <TextInput
+                value={hexOf(field)}
+                placeholder="AA 55"
+                onCommit={(v) => {
+                  const { bytes, bad } = parseHexInput(v);
+                  if (bad.length) {
+                    setErr(
+                      tx(
+                        `「${bad.join(" ")}」不是成对的十六进制（写 12 34，或连着写 1234）`,
+                        `"${bad.join(" ")}" is not whole hex pairs — write 12 34, or contiguous 1234`,
+                      ),
+                    );
+                    return;
+                  }
+                  patchSel({ source: { kind: "const", bytes } });
+                  setErr("");
                 }}
-              >
-                {["const", "param", "var", "seq", "len"].map((k) => (
-                  <option key={k} value={k}>
-                    {k === "const" ? tx("固定字节", "Fixed") : k === "param" ? tx("参数", "Parameter") : k === "var" ? tx("解析变量", "Parsed variable") : k === "seq" ? tx("自增序号", "Auto counter") : tx("长度回填", "Length")}
-                  </option>
-                ))}
-              </select>
+              />
             </FormRow>
-            {field.source.kind === "seq" && (
-              <FormRow label={tx("步进 / 回绕", "Step / wrap")}>
-                <span className="form-pair grow">
-                  <NumInput
-                    value={field.source.step ?? 1}
-                    title={tx("每发一帧加多少", "How much the counter advances per frame")}
-                    onCommit={(v) => patchSel({ source: { kind: "seq", step: v, wrap: field.source.kind === "seq" ? field.source.wrap : undefined } })}
-                  />
-                  <NumInput
-                    value={field.source.wrap ?? Math.pow(2, 8 * Math.max(1, field.size ?? 1))}
-                    title={tx("加到多少回到 0（默认按位宽）", "Where the counter wraps (defaults to the field width)")}
-                    onCommit={(v) => patchSel({ source: { kind: "seq", step: field.source.kind === "seq" ? field.source.step : undefined, wrap: v } })}
-                  />
-                </span>
-              </FormRow>
-            )}
-            {field.source.kind === "len" && (
-              <>
-                <FormRow label={tx("长度数谁", "Length counts")}>
+          )}
+          {field.source.kind === "var" && (
+            <FormRow label={tx("变量名", "Variable")}>
+              <input
+                className="input"
+                value={field.source.name}
+                onChange={(e) => patchSel({ source: { kind: "var", name: e.target.value } })}
+              />
+            </FormRow>
+          )}
+          <button className="btn sb-danger" onClick={() => sendStore.removeField(tpl.id, field.id)}>
+            {tx("删除这个字段", "Remove this field")}
+          </button>
+        </>
+      )}
+        {err && <div className="props-warn">{err}</div>}
+        {msg && <div className="form-hint">{msg}</div>}
+
+      {/* 组的口径挂在标题右边那颗问号上（props-section 本来就是 space-between，右端就是给它留的位），
+          不再在列表底下压一排居中灰字 —— 那一排既抢参数行的视线，又把"改默认值会发生什么"埋在最下面。 */}
+      <div className="props-section">
+        <span>{tx("参数", "Parameters")}</span>
+        <HelpHint
+          text={tx(
+            "默认值就是发出去的那一帧里的值；要临时改一版，在命令或卡片上覆盖它。",
+            "The default is what goes out in the frame; override it per command or card for a one-off value.",
+          )}
+        />
+      </div>
+      {tpl.params.map((p) => {
+        const open = !!openParams[p.id];
+        const bound = field?.source.kind === "param" && field.source.paramId === p.id;
+        return (
+          <div key={p.id} className={`props-item${bound ? " cur" : ""}${open ? " open" : ""}`}>
+            <button
+              type="button"
+              className="props-item-head"
+              aria-expanded={open}
+              onClick={() => setOpenParams((m2) => ({ ...m2, [p.id]: !open }))}
+              title={bound ? tx("当前块用的就是这个参数", "The selected block uses this parameter") : tx("展开来改它的默认值与范围", "Expand to edit its default and range")}
+            >
+              <span className="props-item-name">{p.name}</span>
+              <span className="props-item-tag">{p.type}</span>
+              {bound && <span className="props-item-flag">{tx("当前块", "this block")}</span>}
+              <span className="props-item-arrow"><IconChevron size={12} dir={open ? "down" : "right"} /></span>
+            </button>
+            {open && (
+              <div className="props-item-body">
+                <FormRow label={tx("名字", "Name")}>
+                  <TextInput value={p.name} onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { name: v })} />
+                </FormRow>
+                <FormRow label={tx("类型", "Type")}>
                   <select
                     className="input"
-                    value={field.source.covers}
-                    onChange={(e) => patchSel({ source: { kind: "len", covers: e.target.value as "self" | "after" | "body", adjust: field.source.kind === "len" ? field.source.adjust : undefined } })}
+                    value={p.type}
+                    onChange={(e) => sendStore.patchParam(tpl.id, p.id, { type: e.target.value as SendParamType })}
                   >
-                    <option value="after">{tx("它之后的字节", "bytes after it")}</option>
-                    <option value="body">{tx("含它自身", "including itself")}</option>
-                    <option value="self">{tx("整帧", "whole frame")}</option>
+                    {(p.type === "enum" ? [...PARAM_TYPES, "enum" as SendParamType] : PARAM_TYPES).map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
                   </select>
                 </FormRow>
-                <FormRow label={tx("长度修正", "Length adjust")}>
-                  <NumInput
-                    value={field.source.adjust ?? 0}
-                    title={tx("回填的值再加减这个数（帧长含不含某些字节时用）", "Add this to the backfilled length")}
-                    onCommit={(v) => patchSel({ source: { kind: "len", covers: field.source.kind === "len" ? field.source.covers : "after", adjust: v } })}
-                  />
+                <FormRow label={tx("默认值", "Default")}>
+                  <TextInput value={p.def} placeholder="0" onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { def: v })} />
                 </FormRow>
-              </>
-            )}
-            {link && (
-              <div className="sb-link">
-                <span className="props-hint">{link.line}</span>
-                {/* 只有真的在别的页上才有这颗键：当前页已经闪过了还留一个"去那里"，那就是假开关 */}
-                {link.pageId !== undefined && link.cardId !== undefined && link.cardName !== undefined && (
-                  <button
-                    className="btn"
-                    onClick={() => {
-                      const { pageId, cardId, cardName } = link;
-                      if (!pageId || !cardId || !cardName) return;
-                      controlsStore.setActivePage(pageId);
-                      // 卡是新页面上刚渲染出来的，等一拍再闪（协议画布那条反向定位同一节奏）
-                      window.setTimeout(() => revealCard(cardId), 80);
-                      // 人都跳过去了，那句话不许还停在"在别的页上"
-                      setLink({ line: locatedLine(cardName) });
-                    }}
-                  >
-                    {tx("去那里", "Go there")}
-                  </button>
+                {p.type !== "text" && p.type !== "enum" && (
+                  <FormRow label={tx("范围", "Range")}>
+                    <span className="form-pair grow">
+                      <NumInput
+                        value={p.min ?? 0}
+                        title={tx("最小值", "Minimum")}
+                        onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { min: v })}
+                      />
+                      <NumInput
+                        value={p.max ?? 100}
+                        title={tx("最大值", "Maximum")}
+                        onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { max: v })}
+                      />
+                    </span>
+                    {/* 原来只在两个输入框上各挂一句"生成滑条卡时当下限/上限"——这句是真的，
+                        但少了一半：编码器同样拿它拦帧，越界就报错。少说这半句会让人以为
+                        范围只是个滑条装饰，于是填了数却不知道怎么把这一帧填错。 */}
+                    <HelpHint
+                      text={tx(
+                        "这两条线同时管两件事：发这一帧时越界会被拦下并报「小于下限 / 大于上限」；用它生成滑条卡时，它俩就是滑条的上下限。",
+                        "These two bounds do two jobs: a value outside them is refused with an error when the frame is encoded, and they become the slider's limits when a card is generated from this parameter.",
+                      )}
+                    />
+                  </FormRow>
                 )}
-              </div>
-            )}
-            {field.source.kind === "const" && (
-              <FormRow label={tx("字节 (hex)", "Bytes (hex)")}>
-                <TextInput
-                  value={hexOf(field)}
-                  placeholder="AA 55"
-                  onCommit={(v) => {
-                    const { bytes, bad } = parseHexInput(v);
-                    if (bad.length) {
-                      setErr(
-                        tx(
-                          `「${bad.join(" ")}」不是成对的十六进制（写 12 34，或连着写 1234）`,
-                          `"${bad.join(" ")}" is not whole hex pairs — write 12 34, or contiguous 1234`,
-                        ),
-                      );
-                      return;
-                    }
-                    patchSel({ source: { kind: "const", bytes } });
-                    setErr("");
-                  }}
-                />
-              </FormRow>
-            )}
-            {field.source.kind === "var" && (
-              <FormRow label={tx("变量名", "Variable")}>
-                <input
-                  className="input"
-                  value={field.source.name}
-                  onChange={(e) => patchSel({ source: { kind: "var", name: e.target.value } })}
-                />
-              </FormRow>
-            )}
-            <button className="btn sb-danger" onClick={() => sendStore.removeField(tpl.id, field.id)}>
-              {tx("删除这个字段", "Remove this field")}
-            </button>
-          </>
-        )}
-        {err && <div className="props-warn">{err}</div>}
-        {msg && <div className="props-hint">{msg}</div>}
-      
-      <div className="props-section">{tx("参数", "Parameters")}</div>
-        {tpl.params.map((p) => {
-          const open = !!openParams[p.id];
-          const bound = field?.source.kind === "param" && field.source.paramId === p.id;
-          return (
-            <div key={p.id} className={`props-item${bound ? " cur" : ""}${open ? " open" : ""}`}>
-              <button
-                type="button"
-                className="props-item-head"
-                aria-expanded={open}
-                onClick={() => setOpenParams((m2) => ({ ...m2, [p.id]: !open }))}
-                title={bound ? tx("当前块用的就是这个参数", "The selected block uses this parameter") : tx("展开来改它的默认值与范围", "Expand to edit its default and range")}
-              >
-                <span className="props-item-name">{p.name}</span>
-                <span className="props-item-tag">{p.type}</span>
-                {bound && <span className="props-item-flag">{tx("当前块", "this block")}</span>}
-                <span className="props-item-arrow"><IconChevron size={12} dir={open ? "down" : "right"} /></span>
-              </button>
-              {open && (
-                <div className="props-item-body">
-                  <FormRow label={tx("名字", "Name")}>
-                    <TextInput value={p.name} onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { name: v })} />
+                {p.type === "enum" && (
+                  // 这条不是"当前行填错了"，是"这一档还没有编辑入口"，所以它是行尾的问号，不是行下的一排灰字
+                  <FormRow label={tx("档位", "Options")}>
+                    <span className="sb-hint">{tx("由导入的谱带进来", "Carried in by the imported spec")}</span>
+                    <HelpHint
+                      text={tx(
+                        "枚举档位表还不能在这里编辑：导进来的谱原样保留，改不了。要改就换成 int / uint 参数，直接填要发出去的值。",
+                        "The option table isn't editable here yet — imported specs keep theirs untouched. Switch to an int / uint parameter to type the value that goes out.",
+                      )}
+                    />
                   </FormRow>
-                  <FormRow label={tx("类型", "Type")}>
-                    <select
-                      className="input"
-                      value={p.type}
-                      onChange={(e) => sendStore.patchParam(tpl.id, p.id, { type: e.target.value as SendParamType })}
-                    >
-                      {(p.type === "enum" ? [...PARAM_TYPES, "enum" as SendParamType] : PARAM_TYPES).map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  </FormRow>
-                  <FormRow label={tx("默认值", "Default")} title={tx("默认值就是发出去的那一帧里的值", "The default is what goes out")}>
-                    <TextInput value={p.def} placeholder="0" onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { def: v })} />
-                  </FormRow>
-                  {p.type !== "text" && p.type !== "enum" && (
-                    <FormRow label={tx("范围", "Range")}>
-                      <span className="form-pair grow">
-                        <NumInput
-                          value={p.min ?? 0}
-                          title={tx("最小值：生成滑条卡时当滑条下限", "Minimum — the lower bound of a generated slider")}
-                          onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { min: v })}
-                        />
-                        <NumInput
-                          value={p.max ?? 100}
-                          title={tx("最大值：生成滑条卡时当滑条上限", "Maximum — the upper bound of a generated slider")}
-                          onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { max: v })}
-                        />
-                      </span>
-                    </FormRow>
-                  )}
-                  {p.type === "enum" && (
-                    <div className="props-hint">
-                      {tx("档位表还不能在这里编辑：导进来的谱原样保留，改不了", "The option table isn't editable here yet — imported specs keep theirs untouched")}
-                    </div>
-                  )}
+                )}
+                <div className="form-row" style={{ marginBottom: 0 }}>
                   <button
                     className="btn"
                     disabled={p.type === "text" || p.type === "enum"}
                     title={
                       p.type === "text" || p.type === "enum"
-                        ? tx(
-                            "文本 / 枚举参数还没有对应的控件类型（选择框卡在 P122）",
-                            "Text and enum parameters have no matching card type yet (the select card is in P122)",
-                          )
+                        ? undefined
                         : tx(
                             "在控制画布生成一张滑条卡，值灌进这个参数",
                             "Create a slider card on the control canvas that feeds this parameter",
@@ -529,19 +569,27 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                   >
                     {tx("生成控件", "Add control")}
                   </button>
+                  {/* 禁用键的 title 在浏览器里不弹 —— 偏偏那颗键上写着"为什么点不动"。
+                      只有真点不动的时候才给这颗问号，能用的时候不摆空牌子。 */}
+                  {(p.type === "text" || p.type === "enum") && (
+                    <HelpHint
+                      text={tx(
+                        "文本 / 枚举参数还没有对应的控件类型（选择框卡在 P122）：没有卡能灌这个参数，所以这颗键点不动。",
+                        "Text and enum parameters have no matching card type yet (the select card is in P122), so nothing can feed this parameter.",
+                      )}
+                    />
+                  )}
                 </div>
-              )}
-            </div>
-          );
-        })}
-        {!tpl.params.length && (
-          <div className="props-hint">
-            {tx("没有参数：把某块的来源选成「参数」就有了", "No parameters — set a block’s source to Parameter")}
+              </div>
+            )}
           </div>
-        )}
-        <div className="props-hint">
-          {tx("默认值就是发出去的那一帧里的值；要临时改一版，在命令或卡片上覆盖它。", "The default is what goes out; override it per command or card for a one-off value.")}
+        );
+      })}
+      {!tpl.params.length && (
+        <div className="form-hint">
+          {tx("没有参数：把某块的来源选成「参数」就有了", "No parameters — set a block’s source to Parameter")}
         </div>
+      )}
 
       <Section title={tx("校验", "Checksum")}>
         <FormRow label={tx("算法", "Algorithm")}>
@@ -569,7 +617,7 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
           </select>
         </FormRow>
         {tpl.checksum && (
-          <FormRow label={tx("覆盖起 / 止", "Coverage")} title={tx("负数按距帧尾算：-2 = 不含最后两字节", "Negative counts from the end: -2 excludes the last two bytes")}>
+          <FormRow label={tx("覆盖起 / 止", "Coverage")}>
             <span className="form-pair grow">
               <NumInput
                 value={tpl.checksum.coverageStart}
@@ -580,6 +628,12 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                 onCommit={(v) => sendStore.patchTemplate(tpl.id, { checksum: { ...tpl.checksum!, coverageEnd: v } })}
               />
             </span>
+            <HelpHint
+              text={tx(
+                "从第几字节算到第几字节。终点填负数按距帧尾算：-2 = 不含最后两字节。",
+                "Which bytes the check runs over. A negative end counts from the tail: -2 excludes the last two bytes.",
+              )}
+            />
           </FormRow>
         )}
         {tpl.checksum?.algo === "crc_custom" && (
@@ -609,20 +663,22 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                 <input type="checkbox" checked={crcOf().refout} onChange={(e) => setCrc({ refout: e.target.checked })} />
                 <span>{tx("输出", "out")}</span>
               </span>
+              {/* 这句是"反射还会顺带决定线上字节序"——两排灰字挂在参数底下，
+                  看着像校验区的一条通用说明，其实是这一行的事（P125-B 收进这颗问号） */}
+              <HelpHint
+                text={tx(
+                  "线上字节序跟着反射走：勾了输出反射就低字节在前 —— 同样这组参数下，Modbus / X-25 与具名算法逐字节相同。",
+                  "The wire byte order follows reflection: with output reflection on, the low byte goes first — so this same parameter set matches the named Modbus / X-25 algorithms byte for byte.",
+                )}
+              />
             </FormRow>
-            <div className="props-hint">
-              {tx(
-                "线上字节序跟着反射走：反射算法低字节在前 —— 同样的参数下 Modbus / X-25 与具名算法逐字节相同",
-                "Wire byte order follows reflection: reflected means low byte first — with these parameters Modbus / X-25 match the named algorithms byte for byte",
-              )}
-            </div>
           </>
         )}
       </Section>
 
       <Section title={tx("解析协议", "Parsing protocol")}>
         {tpl.fromTplId && (
-          <div className="props-hint">
+          <div className="form-hint">
             {(() => {
               const src = rules.rules.templates.find((t) => t.id === tpl.fromTplId);
               return src
@@ -631,23 +687,34 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
             })()}
           </div>
         )}
-        <button
-          className="btn"
-          disabled={!preview?.ok}
-          title={
-            preview?.ok
-              ? tx(
-                  "照这张谱的块顺序与宽度新建一份解析协议（只新建，不动已有协议）",
-                  "Create a parsing protocol from this spec's block order and widths — it adds one, it never rewrites an existing one",
-                )
-              : tx("编不出帧就派生不出协议：先修好下面那句报错", "No frame, nothing to derive — fix the error below first")
-          }
-          onClick={deriveProtocol}
-        >
-          {tx("写成解析协议", "Write as protocol")}
-        </button>
+        <div className="form-row" style={{ marginBottom: 0 }}>
+          <button
+            className="btn"
+            disabled={!preview?.ok}
+            title={
+              preview?.ok
+                ? tx(
+                    "照这张谱的块顺序与宽度新建一份解析协议（只新建，不动已有协议）",
+                    "Create a parsing protocol from this spec's block order and widths — it adds one, it never rewrites an existing one",
+                  )
+                : undefined
+            }
+            onClick={deriveProtocol}
+          >
+            {tx("写成解析协议", "Write as protocol")}
+          </button>
+          {/* 与「生成控件」同一件事：禁用键的 title 弹不出来，点不动的原因就必须换个地方说 */}
+          {!preview?.ok && (
+            <HelpHint
+              text={tx(
+                "编不出帧就派生不出协议：这一帧现在报错，先修好它。",
+                "No frame, nothing to derive — this frame currently fails to encode; fix that first.",
+              )}
+            />
+          )}
+        </div>
         {derivedNotes.map((n, i) => (
-          <div className="props-hint" key={i}>
+          <div className="form-hint" key={i}>
             {n}
           </div>
         ))}

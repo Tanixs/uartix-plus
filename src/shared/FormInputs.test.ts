@@ -50,4 +50,31 @@ describe("P124-A · FormRow 必须落在被样式命中的那个元素上", () =
     expect(insp).not.toContain('<Section title={tx("参数"');
     expect(insp).not.toContain('<Section title={tx("发送块"');
   });
+
+  /**
+   * P125 · 页头一行 + 说明的三级归位。
+   *
+   * 钉的是两条已经付过学费的规则，不是口味：
+   *  1. 页头。面包屑（谱名 › 块名）和标题「发送块」是两行同字号同灰色的字，中间不留白 ⇒
+   *     用户看到的是"两行字贴在一起"。现在回到帧画布那块的老形状：`.props-title` 一行，
+   *     里面是返回键 + 色点 + 「对象 · 名」，`insp-crumb` 那套类连 CSS 一起删了。
+   *  2. `.props-hint` 是**整页空态**的样式（`padding:20px` + 居中），不是行内说明。
+   *     上一版把它当行内说明用了 8 处，每一处都长成一个居中的大块 —— 那些话现在要么进
+   *     行尾的问号（HelpHint），要么走 `.form-hint`（左对齐、跟着表单列缩进）。
+   *     整页空态只留一处：谱被删了。多出来的那条就是有人又把空态样式当说明用。
+   */
+  it("页头只剩一行；行内说明不再借用整页空态那套样式", () => {
+    const insp = readFileSync(
+      fileURLToPath(new URL("./../features/inspector/SendFieldInspector.tsx", import.meta.url)),
+      "utf8",
+    );
+    expect(insp, "面包屑回来了：它会和标题叠成两行").not.toContain("insp-crumb");
+    expect(THEME, "面包屑那套类没人用了还留着，就是等着下一个人误用").not.toContain(".insp-crumb");
+    expect(insp).toContain('className="props-title"');
+    expect(insp).toContain('className="back-btn"');
+    const emptyish = insp.match(/className="props-hint"/g) ?? [];
+    expect(emptyish, ".props-hint 只许用在整页空态那一处").toHaveLength(1);
+    expect(insp).toContain('className="form-hint"');
+    expect(insp, "参数分层的行内口径也该收进问号").toContain('className="props-section"');
+  });
 });

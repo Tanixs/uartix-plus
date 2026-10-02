@@ -11685,12 +11685,9 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-menu-item:disabled{opacity:.45;cursor:not-allowed;}
 .sb-menu-item:disabled:hover{background:none;color:inherit;}
 .sb-menu-hint{padding:4px 12px 6px;font-size:var(--fs-body);color:var(--text-faint);}
-/* 属性页顶上的面包屑：谱名 › 块名（点谱名回去，Esc 也回去） */
-.insp-crumb{display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--text-dim);overflow:hidden;}
-.insp-crumb i{font-style:normal;opacity:.6;}
-.insp-crumb span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.insp-crumb-link{all:unset;cursor:pointer;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.insp-crumb-link:hover{text-decoration:underline;}
+/* P125-A：属性页顶上的那套「谱名 › 块名」面包屑删了 —— 它和下面那行标题都是 12px 灰字，
+   两行贴在一起读不出层级。页头改回帧画布那块的老形状（.props-title + .back-btn + .tpl-dot），
+   三个类都是现成的，所以这里不再需要任何专属规则。 */
 .sb-foot{display:flex;align-items:center;gap:8px;flex:none;padding:6px 8px;background:var(--bg-panel);}
 .sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}
