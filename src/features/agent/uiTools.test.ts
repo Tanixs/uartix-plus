@@ -209,6 +209,33 @@ describe("uiTools", () => {
     expect(styleTags[styleTags.length - 1]?.textContent).not.toContain("body{display:none}");
   });
 
+  /**
+   * P131-D2：材质引用回执里要点名。这一条测的是"**回执自己照不出来的那类失败**"——
+   * `background-image: var(--fx-asset-x)` 里 x 没给时，计算值 before/after 都是 `none`，
+   * 旧→新那栏一片干净，模型看着"应用成功"其实屏幕上什么都没有。
+   */
+  it("style_patch：引用了此刻解析不出的资产要点名（但照常落地，可试可撤）", async () => {
+    const { executeUiTool } = await load();
+    const plain = await executeUiTool(
+      call("style_patch", { name: "没贴图", rules: [{ selector: ".tb-btn", decls: { color: "red" } }] }),
+      ctxFor("custom", ["ui"]),
+    );
+    expect((plain.data as { assetRefsMissing?: string[] }).assetRefsMissing, "没有资产引用就不该报一把").toBeUndefined();
+
+    const hit = await executeUiTool(
+      call("style_patch", {
+        name: "带贴图",
+        rules: [{ selector: ".tb-btn", decls: { "background-image": "var(--fx-asset-acrylic-noise)" } }],
+      }),
+      ctxFor("custom", ["ui"]),
+    );
+    expect(hit.ok, "点名不是拒绝：临时层本来就是可试的").toBe(true);
+    const d = hit.data as { assetRefsMissing: string[]; assetNote: string };
+    expect(d.assetRefsMissing).toEqual(["acrylic-noise"]);
+    expect(d.assetNote).toContain("--fx-asset-acrylic-noise");
+    expect(d.assetNote).toContain("asset_put");
+  });
+
   it("style_revert：撤层即回落原值；没有这层要说不存在", async () => {
     const { executeUiTool } = await load();
     await executeUiTool(call("style_patch", { name: "A", rules: [{ selector: ".tb-btn", decls: { color: "red" } }] }), ctxFor("custom", ["ui"]));

@@ -29,6 +29,7 @@ import {
   summarizeAudit,
 } from "../../styles/renderAudit";
 import { buildStyleText, sanitizeStyleRules, STYLE_CAPS } from "../styles/styleSanitize";
+import { unresolvedAssetNote, unresolvedAssetRefs } from "../ai/assetRuntime";
 import { applyLayer, listLayers, revertAll, revertByToken, revertLayer } from "./styleScratch";
 import { defineTool, notExecuted as bad, type AgentToolEntry } from "./toolRegistry";
 import type { ToolReceipt } from "./types";
@@ -144,7 +145,7 @@ export const uiToolEntries: AgentToolEntry[] = [
     domain: "ui",
     provenance: HOST,
     description:
-      `Apply per-component CSS as **structured rules** (not free text) into a session-scoped scratch layer: rules: [{ selector, decls: {prop:value}, keyframes?: {name:"fx-…", body} }]. Each rule is validated (global selectors html/body/*/#root, url()/@import, and the layer rule: position:fixed must pair with a registered slot such as z-index: var(--z-menu) — slots are ${slotCatalogText()}; protected tiers and unknown slots are rejected; caps ${STYLE_CAPS.maxRules} rules / ${STYLE_CAPS.maxBytes} bytes) and reported back with hit counts and before→after values; a selector that hits 0 elements comes back in zeroHit with the real class names to use instead. Nothing is persisted: call save_theme_extension({name, css}) afterwards if the user wants to keep it; revert with style_revert. For glow/sheen/ripple/particles/border animations use the built-in recipes — call ui_inventory { section: "fx" } first (classes + --fx-* knobs) instead of writing @keyframes from scratch. Needs the ${DOMAIN_ZH.ui} authorization.`,
+      `Apply per-component CSS as **structured rules** (not free text) into a session-scoped scratch layer: rules: [{ selector, decls: {prop:value}, keyframes?: {name:"fx-…", body} }]. Each rule is validated (global selectors html/body/*/#root, @import, and the layer rule: position:fixed must pair with a registered slot such as z-index: var(--z-menu) — slots are ${slotCatalogText()}; protected tiers and unknown slots are rejected; caps ${STYLE_CAPS.maxRules} rules / ${STYLE_CAPS.maxBytes} bytes) and reported back with hit counts and before→after values; a selector that hits 0 elements comes back in zeroHit with the real class names to use instead. Textures/images go through the asset channel, not url(): call asset_put, then reference the var **directly** — \`background-image: var(--fx-asset-<id>)\` (writing \`url(var(--fx-asset-…))\` paints nothing and is rejected; external URLs and inline SVG are rejected too). Nothing is persisted: call save_theme_extension({name, css}) afterwards if the user wants to keep it; revert with style_revert. For glow/sheen/ripple/particles/border animations use the built-in recipes — call ui_inventory { section: "fx" } first (classes + --fx-* knobs) instead of writing @keyframes from scratch. Needs the ${DOMAIN_ZH.ui} authorization.`,
     parameters: {
       type: "object",
       properties: {
@@ -186,6 +187,12 @@ export const uiToolEntries: AgentToolEntry[] = [
       });
       // 打偏的选择器不只说"没命中"，直接把真实类名递过去——这是"改不动界面"的根治那一步
       const zeroHit = applied.filter((a) => a.hits === 0).map((a) => ({ selector: a.selector, near: nearClasses(a.selector) }));
+      /**
+       * P131-D2：引用了此刻解析不出的资产变量，屏幕上就是 `background-image: none`——
+       * 而 before→after 两边都是 none，这条失败面**回执自己照不出来**，所以替它照一次。
+       * 只点名不拦：临时层本来就是可试可撤的，缺哪枚 asset_put 补哪枚。
+       */
+      const assetMissing = unresolvedAssetRefs(css);
       return {
         callId,
         ok: true,
@@ -198,6 +205,9 @@ export const uiToolEntries: AgentToolEntry[] = [
           rejected: sanitized.rejected,
           bytes: sanitized.bytes,
           undoable: true,
+          ...(assetMissing.length
+            ? { assetRefsMissing: assetMissing, assetNote: unresolvedAssetNote(assetMissing) }
+            : {}),
           note: zeroHit.length
             ? `有 ${zeroHit.length} 条选择器命中 0 个元素（见 zeroHit.near 的真实类名），它们已注入但不会产生效果——改正后再发一次。下一步：把实际改动讲给用户听`
             : `临时层「${name}」已生效（共 ${layerCount} 层），重启不保留；要持久化请调 save_theme_extension 并带上同一批规则。下一步：把 changed 里的旧→新讲给用户听，再问是否保存为插件`,

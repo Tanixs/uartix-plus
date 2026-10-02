@@ -6,17 +6,23 @@
  *     门读的是文件，运行时读的是打包器解析后的 `?raw`，两者之间还有一层 vite）；
  *  ② 内置的组件层要过与第三方 CSS **同一台净化器**。这条是"内置没有理由比插件松"的兑现：
  *     第三方 CSS 进宿主前要判 html/body、fixed 落槽、越权 z-index、外链 url()，
- *     自己写的这份如果绕过去，就等于把同一层规则分成"查过的"和"没查过的"两种。
+ *     自己写的这份如果绕过去，就等于把同一层规则分成"查过的"和"没查过的"两种；
+ *  ③ P131-D2 起再加两条：CSS 引到的资产必须给得出来（判据与包产物同一个函数），
+ *     以及"装载忠实"——登记的那枚材质必须能在磁盘上找到同名源文件，且解出来的字节就是那份。
  */
 import { describe, expect, it } from "vitest";
-import { BUILTIN_STYLE_IDS, builtinStyleCss, hasBuiltinStyle } from "./builtinStyles";
+import { BUILTIN_STYLE_IDS, builtinStyleAssets, builtinStyleCss, hasBuiltinStyle } from "./builtinStyles";
 import { BUILTIN_THEME_IDS } from "./builtinThemes";
 import { guardStyleText } from "../features/styles/styleSanitize";
 import { THEME_CSS_MAX_BYTES } from "../features/plugins/artifact";
+import { danglingAssetRefs, decodeBase64, validateAsset } from "../features/styles/assetGuard";
 
 const fsSpec = "node:fs";
 const urlSpec = "node:url";
-const { readdirSync } = (await import(fsSpec)) as unknown as { readdirSync: (p: string) => string[] };
+const { readdirSync, readFileSync } = (await import(fsSpec)) as unknown as {
+  readdirSync: (p: string) => string[];
+  readFileSync: (p: string, enc: string) => string;
+};
 const { fileURLToPath } = (await import(urlSpec)) as unknown as { fileURLToPath: (u: string | URL) => string };
 const dir = fileURLToPath(new URL("./builtinStyles", import.meta.url));
 
@@ -60,5 +66,39 @@ describe("P131-D · 内置 style 包通道", () => {
         }
       }
     }
+  });
+
+  /**
+   * P131-D2 ①：引用闭合。内置 style 包的 CSS 里每句 `var(--fx-asset-…)` 都必须真有一枚材质
+   * 跟着——这条通道刚开时它**天生是悬空的**（内置主题文件是纯 token 的，没有 assets 字段），
+   * 而悬空的表现不是报错，是屏幕上安静地少一张噪声图。判据与包产物同一个函数。
+   */
+  it("内置组件层引用的每枚资产都真给得出来（与包产物同一判据）", () => {
+    let refs = 0;
+    for (const id of BUILTIN_STYLE_IDS) {
+      const dangling = danglingAssetRefs(builtinStyleCss(id), builtinStyleAssets(id));
+      expect(dangling, `${id}: 这些资产名没有对应的枚 → ${dangling.join("、")}`).toEqual([]);
+      refs += new Set(builtinStyleCss(id).match(/--fx-asset-[a-z][a-z0-9-]*/g) ?? []).size;
+    }
+    expect(refs, "一条资产引用都没有＝这条通道只是声明着好看").toBeGreaterThan(0);
+  });
+
+  /** P131-D2 ②：装载忠实。库里存源文件、运行期用 base64，中间漂了没人看得见——两头都对一次 */
+  it("每枚内置材质都过装包同一台校验，且装出来的字节就是磁盘上那份", () => {
+    const onDisk = readdirSync(dir);
+    for (const id of BUILTIN_STYLE_IDS) {
+      for (const a of builtinStyleAssets(id)) {
+        expect(validateAsset(a), `${id}/${a.id} 没过资产校验`).toEqual([]);
+        const file = onDisk.find((f) => f === `${id}.${a.id}.svg` || f === `${id}.${a.id}.png`);
+        expect(file, `${id}.${a.id}：登记了材质却没有同名源文件（名字中段就是资产 id）`).toBeTruthy();
+        const bytes = decodeBase64(a.data);
+        expect(bytes, `${id}/${a.id} base64 解不出来`).not.toBeNull();
+        const loaded = new TextDecoder().decode(bytes as Uint8Array);
+        expect(loaded, `${id}.${a.id}：装载出来的与磁盘上那份不是同一个字节`).toBe(
+          readFileSync(`${dir}/${file}`, "utf8"),
+        );
+      }
+    }
+    expect(builtinStyleAssets("no-such-theme")).toEqual([]);
   });
 });

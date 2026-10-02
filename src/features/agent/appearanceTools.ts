@@ -24,9 +24,10 @@ import { THEME_CSS_MAX_BYTES } from "../plugins/artifact";
 import { DOMAIN_ZH } from "./scopeTiers";
 import { slotCatalogText } from "../../styles/layerSlots";
 // P131-C 资产通道：判据与草稿层（`asset_put` 走的就是装包那一份校验，不开第二条更松的门）
-import { ASSET_MAX_BYTES, ASSET_MIMES } from "../styles/assetGuard";
+import { ASSET_MAX_BYTES, ASSET_MIMES, danglingAssetRefs } from "../styles/assetGuard";
 import { listScratchAssets, putScratchAsset } from "./scratchAssets";
 import { activeThemeFacts } from "../../styles/themeFacts";
+import { unresolvedAssetNote, unresolvedAssetRefs } from "../ai/assetRuntime";
 import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolResultBody } from "./toolRegistry";
 
 export const APPEARANCE_TOOLS = [
@@ -465,6 +466,22 @@ async function persistTheme(
     /** P131-C：草稿层的资产（可能为空）。存包时带上，存完清掉——持久化边界只有一处 */
     const { scratchAssetRecords, revertScratchAssets } = await import("./scratchAssets");
     const assetRecords = scratchAssetRecords();
+    /**
+     * P131-D2 资产引用闭合：存下来的包**只带草稿层那几枚**（在画那枚主题自带的贴图不会
+     * 跟着走）。CSS 引用了草稿层没有的资产 ⇒ 屏幕上现在是对的、换一枚主题就空了，
+     * 属于"存下来的样子 ≠ 屏幕上的样子"那类静默失败，所以在固化边界上拦一次，
+     * 并把该补的那几枚点名说出去（装包校验也会判，但那里的错误串不适合当行动指引）。
+     */
+    if (css) {
+      const dangling = danglingAssetRefs(css, assetRecords);
+      if (dangling.length) {
+        return notExecuted(callId, "asset_reference_not_declared", {
+          refs: dangling,
+          carried: assetRecords.map((a) => a.id),
+          hint: `这些资产名在草稿层里没有找到对应的枚：${dangling.join("、")}。要么先 asset_put 把它们放进草稿层（固化只会带走草稿层里的这些），要么改掉 CSS 里的引用；asset_list 看现在有什么`,
+        });
+      }
+    }
     // P92 D2：id = 名称的稳定哈希。旧 slug 会把中文整个吃掉（「AI 助手现代玻璃风」→
     // `user.agent.theme-ai`），两份不同主题因此撞成同一 id，再叠加"同 id 即原地升版"
     // 就会让后一份**静默覆盖**前一份。现在只有 id 与 name 同时相同才认作同一份主题，
@@ -615,6 +632,9 @@ async function styleAppend(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
   }
   const bytes = (layerCss(DRAFT_LAYER) ?? "").length;
   if (!done) {
+    const draft = layerCss(DRAFT_LAYER) ?? "";
+    /** 与 `style_patch` 同一个点名（同一条说法在 `assetRuntime`）：整段草稿里解析不出的资产先说，别等固化才发现 */
+    const assetMissing = unresolvedAssetRefs(draft);
     return {
       callId,
       ok: true,
@@ -623,6 +643,7 @@ async function styleAppend(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
         bytes,
         remainingBytes: Math.max(0, SAVE_CSS_MAX_BYTES - bytes),
         layer: DRAFT_LAYER,
+        ...(assetMissing.length ? { assetRefsMissing: assetMissing, assetNote: unresolvedAssetNote(assetMissing) } : {}),
         hint: "这段已生效，用户现在就能看见。继续追加下一段；整套写完传 done:true + name 存成已启用主题插件（也可随时 style_commit）",
       },
     };
@@ -718,7 +739,7 @@ export const appearanceToolEntries: AgentToolEntry[] = [
     effect: "draft_write",
     domain: "config",
     provenance: HOST,
-    description: `Put one texture/noise/icon image into the session's scratch asset layer, then reference it from CSS as \`background-image: var(--fx-asset-<id>)\`. This is the ONLY way to get an image into the appearance layer: \`url()\` in CSS is accepted only for \`url(var(--fx-asset-<id>))\` and for small raster \`data:\` URIs — remote \`url(http…)\` is rejected because it breaks in an offline install and it is an outbound channel (the user's IP/online state leaves the machine). Args: { id: lowercase-kebab (1-40 chars, e.g. "acrylic-noise"), mime: one of ${ASSET_MIMES.join(" / ")}, data: base64 without the "data:" prefix }. Validation is the SAME validator a shipped package goes through: bytes must match the declared mime (magic numbers), ≤ ${Math.round(ASSET_MAX_BYTES / 1024)} KB, and SVG is additionally scanned for script vectors (<script>, onload=, external href, <!ENTITY, <foreignObject) — those are rejected, so a checked SVG is the only way an SVG can reach the screen. Receipt gives \`varName\` to write into CSS and \`problems\` with the exact reason. Nothing is persisted until style_commit/save_theme_extension, which carry these assets into the theme plugin.`,
+    description: `Put one texture/noise/icon image into the session's scratch asset layer, then reference it from CSS **directly** as \`background-image: var(--fx-asset-<id>)\`. This is the ONLY way to get an image into the appearance layer: writing \`url(var(--fx-asset-<id>))\` does **not** work — CSS performs no var substitution inside a url() token, so it paints nothing — and the sanitizer rejects that form; \`url()\` is accepted only for a small raster \`data:\` URI, and remote \`url(http…)\` is rejected because it breaks in an offline install and it is an outbound channel (the user's IP/online state leaves the machine). Args: { id: lowercase-kebab (2-40 chars, e.g. "acrylic-noise"), mime: one of ${ASSET_MIMES.join(" / ")}, data: base64 without the "data:" prefix }. Validation is the SAME validator a shipped package goes through: bytes must match the declared mime (magic numbers), ≤ ${Math.round(ASSET_MAX_BYTES / 1024)} KB, and SVG is additionally scanned for script vectors (<script>, onload=, external href, <!ENTITY, <foreignObject) — those are rejected, so a checked SVG is the only way an SVG can reach the screen. Receipt gives \`varName\` to write into CSS and \`problems\` with the exact reason. Nothing is persisted until style_commit/save_theme_extension, which carry these assets into the theme plugin (and 固化 refuses CSS that references an asset the scratch layer does not carry).`,
     parameters: {
       type: "object",
       properties: { id: { type: "string" }, mime: { type: "string" }, data: { type: "string" } },

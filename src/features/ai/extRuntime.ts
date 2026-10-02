@@ -24,7 +24,7 @@ import {
  */
 import { notifyStyleApply, setActiveThemeFacts, type ActiveThemeFacts } from "../../styles/themeFacts";
 import { syncThemeAssets } from "./assetRuntime";
-import { builtinStyleCss } from "../../styles/builtinStyles";
+import { builtinStyleAssets, builtinStyleCss } from "../../styles/builtinStyles";
 import type { ThemeAsset } from "../../styles/themeCore";
 import { clearThemePreview, getThemePreview } from "./themePreview";
 
@@ -184,15 +184,18 @@ export function applyStyleExts() {
    * 而它的 `data-theme` 是 `plg:…`，那些带 `[data-theme="<id>"]` 前缀的规则本来也匹配不上——
    * 这里显式判一层，是为了不依赖"前缀恰好挡得住"这种巧合）。
    */
-  if (painted?.builtin) {
-    const part = builtinStyleCss(painted.id);
-    if (part) cssParts.push(`/* builtin-style: ${painted.id} */\n${part}`);
-  }
+  const builtinPart = painted?.builtin ? builtinStyleCss(painted.id) : "";
+  if (painted && builtinPart) cssParts.push(`/* builtin-style: ${painted.id} */\n${builtinPart}`);
   /**
    * P131-C 资产层与 CSS 同一条规矩：**只跟在画那一枚后面**。
    * 两枚主题的贴图叠在一起，谁也不知道屏幕上那张噪声是谁给的。
+   * P131-D2：内置那一枚的材质**不在主题源里**（内置主题文件是纯 token 的），它住在
+   * 内置 style 包旁边那张源文件里 —— 于是"内置 style 包"必须同时管两件事，
+   * 因为它的 CSS 引用了它：CSS 有注入通道，资产也得有，否则那条引用是悬空的。
    */
-  const declaredAssets = painted?.assets ?? [];
+  const declaredAssets = painted
+    ? (painted.builtin ? builtinStyleAssets(painted.id) : painted.assets ?? [])
+    : [];
   const liveAssets = syncThemeAssets(declaredAssets);
   for (const e of exts) {
     if (!e.enabled || e.type !== "style") continue;

@@ -2,7 +2,8 @@
  * P131-C 资产通道的运行期那一半：把结构化资产（base64）变成
  * `--fx-asset-<id>: url("blob:…")` 写进根元素的**内联样式**。
  * 两条来源共用这一个实现：插件/主题包那枚在画的（`theme-assets` 层）与 AI 临时草稿
- * （`agent-assets` 层，见 `agent/scratchAssets.ts`）。
+ * （`agent-assets` 层，见 `agent/scratchAssets.ts`）。P131-D2 起内置 style 包的材质也走
+ * `theme-assets` 层——**注入通道不同，落地通道只有一个**。
  *
  * 为什么走 blob 而不是把 `data:` 直接写进 CSS：
  *  - 一枚噪声图几百 KB，写进样式表会让每次合成都重新解析那串 base64；
@@ -13,8 +14,8 @@
  * 校验不在这里做：装包时 `validateAssetList` 已经过了一遍（mime 白名单 + 魔数 + 尺寸 +
  * SVG 脚本面）。这里只负责"变成能用的 URL"，解码失败就跳过那一枚并把数报出去，不画半张图。
  */
-import { ROOT_LAYER, submitRootVars, dropRootVars } from "../../styles/rootVars";
-import { assetVarName, decodeBase64, type ThemeAsset } from "../styles/assetGuard";
+import { ROOT_LAYER, dropRootVars, effectiveRootVars, submitRootVars } from "../../styles/rootVars";
+import { assetReferences, assetVarName, decodeBase64, type ThemeAsset } from "../styles/assetGuard";
 
 export const ASSET_LAYER_ID = "theme-assets";
 
@@ -109,4 +110,31 @@ export function syncThemeAssets(assets: readonly ThemeAsset[]): number {
 /** 某一层现在活着几枚（审计与测试读它，不读内部 Map） */
 export function assetLayerCount(layerId: string): number {
   return liveOf.get(layerId)?.size ?? 0;
+}
+
+/**
+ * 这段 CSS 里引用的资产，**此刻屏幕上解析得出东西吗**（返回解析不出的那几枚 id）。
+ *
+ * 与 `assetGuard.danglingAssetRefs` 是两问，不是同一问答两遍：
+ *  - 那边问"**这个包带得齐吗**"——判包自己的 assets，是持久化的自含性；
+ *  - 这边问"**现在看得见吗**"——判根变量的有效值，所以内置 style 包和已启用主题包提供的
+ *    材质也算数（模型正看着它们画，此时报"缺失"就是假警）。
+ * 用途是给模型一条它自己看不见的失败面：var 未定义时 `background-image` 静默为 `none`，
+ * 回执里的 before→after 也照不出（两边都是 none）。
+ */
+export function unresolvedAssetRefs(css: string): string[] {
+  if (!css) return [];
+  const live = effectiveRootVars();
+  return assetReferences(css).filter((id) => !live[assetVarName(id)]);
+}
+
+/**
+ * 点名的那句话只有一个说法（`style_patch` 与 `style_append` 两条回执通路共用）：
+ * 写两遍迟早一处说"会被拒"一处说"没关系"，模型按错的那句行动。
+ */
+export function unresolvedAssetNote(missing: readonly string[]): string {
+  if (!missing.length) return "";
+  return `这 ${missing.length} 枚资产此刻解析不出（引用它们的元素现在就是 background-image:none）：${missing
+    .map((id) => `--fx-asset-${id}`)
+    .join("、")}。先 asset_put 把图放进草稿层，或去掉这条引用；固化（save_theme_extension / style_commit）时缺它们会被直接拒`;
 }

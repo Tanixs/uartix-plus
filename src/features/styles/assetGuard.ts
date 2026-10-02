@@ -18,6 +18,8 @@
  * 字体（`font/woff2`）**这一批没做**：`@font-face { src: … }` 里用不了 `var()`，
  * 所以资产通道对字体不成立，硬做只能给 `@font-face` 开特例——那要单独一次设计，不顺手塞。
  */
+/** 只是**类型**边：形状住在零 import 的 `styles/themeCore`，`import type` 编译后擦除，本模块仍是运行期叶子 */
+import type { ThemeAsset } from "../../styles/themeCore";
 
 export const ASSET_ID_PATTERN = /^[a-z][a-z0-9-]{1,39}$/;
 export const ASSET_VAR_PREFIX = "--fx-asset-";
@@ -128,6 +130,44 @@ export function base64ByteLength(data: string): number {
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(b64) || b64.length % 4 !== 0) return 0;
   const pad = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
   return (b64.length / 4) * 3 - pad;
+}
+
+const B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * UTF-8 文本 → base64（纯实现，不依赖 `btoa`：装载层在 node 测试里也要跑，
+ * 而 `btoa` 遇到非 Latin-1 字符会抛——SVG 注释里写中文是常态）。
+ */
+export function base64FromUtf8(text: string): string {
+  const bytes = typeof TextEncoder !== "undefined" ? new TextEncoder().encode(text) : Uint8Array.from(text, (c) => c.charCodeAt(0) & 0xff);
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < bytes.length ? bytes[i + 1] : -1;
+    const b2 = i + 2 < bytes.length ? bytes[i + 2] : -1;
+    out += B64_ALPHABET[b0 >> 2];
+    out += B64_ALPHABET[((b0 & 3) << 4) | ((b1 < 0 ? 0 : b1) >> 4)];
+    out += b1 < 0 ? "=" : B64_ALPHABET[((b1 & 15) << 2) | ((b2 < 0 ? 0 : b2) >> 6)];
+    out += b2 < 0 ? "=" : B64_ALPHABET[b2 & 63];
+  }
+  return out;
+}
+
+/** CSS 里引用了哪几枚资产变量（`var(--fx-asset-x)` 与 `--fx-asset-x: …` 两种出现都算引用） */
+export function assetReferences(css: string): string[] {
+  const ids = new Set<string>();
+  for (const m of css.matchAll(/--fx-asset-([a-z][a-z0-9-]{1,39})/g)) ids.add(m[1]);
+  return [...ids].sort();
+}
+
+/**
+ * 引用闭合：一段 CSS 里引到的每枚资产，都必须在这份资产清单里真给出来。
+ * 包产物、内置 style 包、AI 草稿固化三条路共用这一个函数——判据写两份就会漂。
+ * 不闭合的后果不是报错而是**安静地画成空**：主题作者以为贴了噪声，屏幕上什么都没有。
+ */
+export function danglingAssetRefs(css: string, assets: readonly ThemeAsset[]): string[] {
+  const declared = new Set(assets.map((a) => a.id));
+  return assetReferences(css).filter((id) => !declared.has(id));
 }
 
 /** 一枚资产的校验：合不合法（返回问题清单，空数组＝合法） */

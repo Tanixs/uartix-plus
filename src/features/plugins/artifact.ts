@@ -13,7 +13,7 @@
  */
 import { guardStyleText } from "../styles/styleSanitize";
 // P131-C：主题带的贴图/噪声走结构化资产，判据在 assetGuard（同一份给运行时复用）
-import { validateAssetList } from "../styles/assetGuard";
+import { danglingAssetRefs, validateAssetList, type ThemeAsset } from "../styles/assetGuard";
 // P99b-N5：主题产物的键白名单与"相近真名"建议，住在零 import 的 `styles/themeCore`（详设 R5）
 import { APPEARANCE_TOKENS, checkThemeVars } from "../../styles/themeCore";
 // 只 import 类型：产物元表要说清"这类产物要什么能力"，而 PluginCap 的权威定义在 manifest 那边
@@ -194,15 +194,14 @@ function validateTheme(a: Record<string, unknown>, out: ValidationIssue) {
    */
   out.errors.push(...validateAssetList(a.assets));
   /**
-   * 引用闭合：CSS 里 `url(var(--fx-asset-<id>))` 指到的每一枚，都必须在这份产物里真给出来。
+   * 引用闭合：CSS 里 `var(--fx-asset-<id>)` 指到的每一枚，都必须在这份产物里真给出来。
    * 净化器只管"形态对不对"，管不了"这枚资产存不存在"——不闭合的话主题会安静地画出一张空背景，
    * 而"写一条打偏的规则比不写更糟"（下一个人会以为这里已经有材质了）。
+   * 三条通路（包产物 / 内置 style 包 / AI 草稿固化）共用 `assetGuard.danglingAssetRefs`，一份规则。
    */
   if (typeof a.css === "string" && a.css) {
-    const declared = new Set((Array.isArray(a.assets) ? (a.assets as Array<{ id?: string }>) : []).map((x) => x?.id));
-    for (const m of a.css.matchAll(/--fx-asset-([a-z][a-z0-9-]{1,39})/g)) {
-      if (!declared.has(m[1])) out.errors.push(`asset_reference_not_declared:${m[1]}`);
-    }
+    const assets = Array.isArray(a.assets) ? (a.assets as ThemeAsset[]) : [];
+    for (const id of danglingAssetRefs(a.css, assets)) out.errors.push(`asset_reference_not_declared:${id}`);
   }
 }
 

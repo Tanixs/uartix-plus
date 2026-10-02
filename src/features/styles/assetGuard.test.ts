@@ -9,7 +9,10 @@
 import { describe, expect, it } from "vitest";
 import {
   ASSET_MAX_BYTES,
+  assetReferences,
+  base64FromUtf8,
   checkCssUrlArg,
+  danglingAssetRefs,
   decodeBase64,
   mimeMatchesBytes,
   svgScriptProblems,
@@ -163,5 +166,38 @@ describe("P131-C · CSS 里那一处 url() 的形态判定", () => {
   it("内联 SVG 与 html 的 data: 各给各的理由（前者要走资产通道才有脚本面检查）", () => {
     expect(checkCssUrlArg("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=")).toBe("url_svg_must_go_through_asset_channel");
     expect(checkCssUrlArg("data:text/html;base64,PHNjcmlwdD48L3NjcmlwdD4=")).toBe("url_data_form_not_allowed");
+  });
+});
+
+/**
+ * P131-D2：引用侧的三支纯函数。它们是"三通路共用一条闭合判据"的那条判据——
+ * 包产物、内置 style 包、AI 固化都调这里，所以这里判错一次，三处一起错。
+ */
+describe("P131-D2 · 资产引用的抽取与闭合", () => {
+  it("base64FromUtf8：与解码器往返一致，中文注释也不会炸（btoa 在这种输入上会抛）", () => {
+    const text = '<svg><!-- 噪声纹理，别当成空图 --><rect fill="#808080"/></svg>\n';
+    const b64 = base64FromUtf8(text);
+    const bytes = decodeBase64(b64);
+    expect(bytes).not.toBeNull();
+    expect(new TextDecoder().decode(bytes as Uint8Array)).toBe(text);
+    expect(base64FromUtf8("")).toBe("");
+  });
+
+  it("assetReferences：两种出现形态都算引用，去重排序；非资产变量不算", () => {
+    expect(assetReferences(".a{background-image:var(--fx-asset-noise)}")).toEqual(["noise"]);
+    /** 真实写法是 `background: var(--fx-asset-a1), var(--fx-asset-b2)`；**空格分隔的两条 var 不是合法 CSS**，抽取器按"看见名字就算引用"判，宁多抓不漏抓 */
+    expect(assetReferences(".a{background:var(--fx-asset-b1) , var(--fx-asset-a2);color:var(--accent)}")).toEqual(["a2", "b1"]);
+    expect(assetReferences(".a{background:url(var(--fx-asset-noise))}")).toEqual(["noise"]);
+    /** 资产 id 最短两位（`ASSET_ID_PATTERN`），所以单串的 `--fx-asset-x` 本来就不是合法名字，抽取器跟着同一条形状 */
+    expect(assetReferences('.a{--fx-asset-xx:url("y")\nbackground:var(--fx-asset-xx)}')).toEqual(["xx"]);
+    expect(assetReferences(".a{background-image:var(--texture)}")).toEqual([]);
+  });
+
+  it("danglingAssetRefs：清单里没给的那几枚点名出来，给了的不报", () => {
+    const assets = [{ id: "noise", mime: "image/png", data: PNG_B64 }];
+    expect(danglingAssetRefs(".a{background:var(--fx-asset-noise)}", assets)).toEqual([]);
+    expect(danglingAssetRefs(".a{background:var(--fx-asset-noise) var(--fx-asset-grid)}", assets)).toEqual(["grid"]);
+    /** 非资产变量不是"缺失的引用"，是"根本没引用"——这条判据不替它操心 */
+    expect(danglingAssetRefs(".a{color:var(--accent)}", [])).toEqual([]);
   });
 });

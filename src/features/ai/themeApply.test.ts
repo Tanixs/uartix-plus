@@ -24,6 +24,7 @@ const { effectiveRootVars, rootVarLayers } = await import("../../styles/rootVars
 const extStore = await import("./extensionStore");
 const settings = await import("../settings/settingsStore");
 const { applyStyleExts, injectedCssParts } = await import("./extRuntime");
+const { unresolvedAssetRefs } = await import("./assetRuntime");
 const { activeThemeFacts } = await import("../../styles/themeFacts");
 
 /** 主题文件的真实形状：从磁盘那份取（不另抄色值，抄了这份测试就只是在测自己） */
@@ -52,6 +53,27 @@ function themeProjection(id: string, vars: Record<string, string>, extra: { enab
     pluginRef: `pkg.${id}`,
     vars,
     ...(extra.scheme ? { scheme: extra.scheme } : {}),
+  });
+}
+
+/**
+ * node 里没有 Blob / createObjectURL，自己 stub：这几组测的是**接线**，不是浏览器的 blob 实现。
+ * 只准收回这两枚——`vi.unstubAllGlobals()` 会把文件顶上那枚 localStorage 桩一起拔掉，
+ * 后面每一组测试都在 `persist()` 里 ReferenceError（假失败比没测更坏）。
+ */
+function withFakeBlobUrl(): void {
+  const prev = { Blob: globalThis.Blob, URL: globalThis.URL };
+  let n = 0;
+  beforeAll(() => {
+    vi.stubGlobal("Blob", class {});
+    vi.stubGlobal(
+      "URL",
+      Object.assign(globalThis.URL ?? function () {}, { createObjectURL: () => "blob:fake-" + ++n, revokeObjectURL: () => undefined }),
+    );
+  });
+  afterAll(() => {
+    vi.stubGlobal("Blob", prev.Blob);
+    vi.stubGlobal("URL", prev.URL);
   });
 }
 
@@ -238,23 +260,7 @@ describe("P131-B3 · theme_preview 走的是同一个合成器（§A7）", () =>
 describe("P131-C · 主题资产跟着「在画那一枚」走", () => {
   /** node 里没有 Blob / createObjectURL，自己 stub：这一条测的是接线，不是浏览器的 blob 实现 */
   const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-  const prev = { Blob: globalThis.Blob, URL: globalThis.URL };
-  beforeAll(() => {
-    vi.stubGlobal("Blob", class {});
-    let n = 0;
-    vi.stubGlobal(
-      "URL",
-      Object.assign(globalThis.URL ?? function () {}, { createObjectURL: () => "blob:fake-" + ++n, revokeObjectURL: () => undefined }),
-    );
-  });
-  /**
-   * 只收回这两枚。`vi.unstubAllGlobals()` 会把文件顶上那枚 localStorage 桩一起拔掉，
-   * 后面每一组测试都在 `persist()` 里 ReferenceError —— 假失败比没测更坏（它让人以为功能坏了）。
-   */
-  afterAll(() => {
-    vi.stubGlobal("Blob", prev.Blob);
-    vi.stubGlobal("URL", prev.URL);
-  });
+  withFakeBlobUrl();
 
   it("启用带资产的主题 ⇒ --fx-asset-<id> 落到内联样式；停用即撤", () => {
     extStore.upsertProjection({
@@ -341,5 +347,46 @@ describe("P131-D · 内置 style 包只跟在画那一枚内置主题后面", ()
     clearThemePreview();
     applyStyleExts();
     expect(labels().some((l) => l.startsWith("builtin-style"))).toBe(false);
+  });
+});
+
+/**
+ * P131-D2：内置 style 包的材质**。这条测的是"什么都没装就有噪声"**——
+ * 内置主题文件是纯 token 的，`assets` 字段从来没有过；组件层一开口引用材质，
+ * 那条 `var(--fx-asset-acrylic-noise)` 就天生悬空（画出来是安静地少一张图，不是报错）。
+ * 所以这里的断言全部对着**真通道**读：不装包、不塞 projection，只看画内置那一枚时变量在不在。
+ */
+describe("P131-D2 · 内置 style 包的材质不依赖任何包", () => {
+  withFakeBlobUrl();
+  const VAR = "--fx-asset-acrylic-noise";
+  const CSS = ".a{background-image:var(--fx-asset-acrylic-noise)}";
+
+  it("画「流利蓝」就有那张噪声；换到没有组件层的内置主题就撤掉", () => {
+    expect(effectiveRootVars()[VAR], "开局画海棠，不该留着流利蓝的材质").toBeUndefined();
+    pickTheme("fluent");
+    expect(effectiveRootVars()[VAR], "内置 style 包的材质没接到 rootVars 上").toBeTruthy();
+    expect(activeThemeFacts().assets).toEqual({ declared: 1, live: 1 });
+    pickTheme("begonia");
+    expect(effectiveRootVars()[VAR], "换一枚主题还留着上一枚的材质 = 屏幕上那张图没人认领").toBeUndefined();
+    expect(activeThemeFacts().assets).toEqual({ declared: 0, live: 0 });
+  });
+
+  it("插件主题在画时不继承内置那枚材质（CSS 与资产同一个来源、同一条规矩）", () => {
+    pickTheme("fluent");
+    expect(effectiveRootVars()[VAR]).toBeTruthy();
+    themeProjection("plg:no-asset:main", { "--bg": "#101010" }, { createdAt: 9000 });
+    applyStyleExts();
+    expect(activeThemeFacts().builtin).toBe(false);
+    expect(effectiveRootVars()[VAR], "那枚插件主题没带资产，屏幕上的噪声不能还挂在根上").toBeUndefined();
+    expect(activeThemeFacts().assets).toEqual({ declared: 0, live: 0 });
+  });
+
+  /** 回执点名用的那条判据对着真通道判一次：画流利蓝时它不该报警，画海棠时该报 */
+  it("unresolvedAssetRefs：解析得出的时候不报，材质撤掉时报", () => {
+    pickTheme("begonia");
+    expect(unresolvedAssetRefs(CSS)).toEqual(["acrylic-noise"]);
+    pickTheme("fluent");
+    expect(unresolvedAssetRefs(CSS)).toEqual([]);
+    expect(unresolvedAssetRefs(".a{color:red}")).toEqual([]);
   });
 });

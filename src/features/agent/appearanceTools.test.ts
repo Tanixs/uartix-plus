@@ -621,3 +621,84 @@ describe("appearance tools", () => {
     expect(prev.code).toBe("preview_only");
   });
 });
+
+/**
+ * P131-D2：固化那一刀。草稿层里可以试（画面少一张贴图只是不好看），但**存下来的包必须自含**——
+ * 包只带草稿层那几枚，在画那枚主题自带的材质不会跟着走。引用了没给的资产，屏幕上现在是对的、
+ * 换一枚主题就安静地空了，所以拒在固化边界上并把缺的那几枚点名（`assetReference` 判据与装包同一个）。
+ */
+describe("P131-D2 · 固化时资产引用必须闭合", () => {
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+  it("引用了草稿层没有的资产 ⇒ 直接拒，一个包都不装", async () => {
+    stubDom({ "--bg": "#101010", "--text": "#eee" });
+    const { tools } = await load();
+    await tools.executeAppearanceTool(call("theme_patch", { tokens: { "--accent": "#336699" } }), ctx("create"));
+    const r = await tools.executeAppearanceTool(
+      call("save_theme_extension", { name: "悬空贴图", css: ".a{background-image:var(--fx-asset-nope)}" }),
+      ctx("create"),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe("asset_reference_not_declared");
+    const d = r.data as { refs: string[]; carried: string[]; hint: string };
+    expect(d.refs).toEqual(["nope"]);
+    expect(d.carried, "草稿层是空的这件事要说得出").toEqual([]);
+    expect(d.hint).toContain("asset_put");
+    expect(d.hint).toContain("asset_list");
+    expect(mocks.stage, "拒了还去装包＝这条判据没接在固化上").not.toHaveBeenCalled();
+  });
+
+  it("先 asset_put 再存：包自含了，产物里真的带上那枚资产", async () => {
+    stubDom({ "--bg": "#101010", "--text": "#eee" });
+    const { tools } = await load();
+    await tools.executeAppearanceTool(call("theme_patch", { tokens: { "--accent": "#336699" } }), ctx("create"));
+    const put = await tools.executeAppearanceTool(
+      call("asset_put", { id: "acrylic-noise", mime: "image/png", data: PNG }),
+      ctx("create"),
+    );
+    expect(put.ok).toBe(true);
+    expect((put.data as { varName: string }).varName).toBe("--fx-asset-acrylic-noise");
+    const r = await tools.executeAppearanceTool(
+      call("save_theme_extension", { name: "带材质", css: ".a{background-image:var(--fx-asset-acrylic-noise)}" }),
+      ctx("create"),
+    );
+    expect(r.ok, JSON.stringify(r.data)).toBe(true);
+    const manifest = mocks.stage.mock.calls[0][0] as {
+      artifacts: Record<string, { assets?: { id: string; mime: string; data: string }[] }>;
+    };
+    const carried = manifest.artifacts["main.json"].assets ?? [];
+    expect(carried.map((a) => a.id)).toEqual(["acrylic-noise"]);
+    expect(carried[0].data).toBe(PNG);
+  });
+
+  /** 草稿那一侧只点名不拦：临时层本来就是可试可撤的，拦它等于不让试 */
+  it("style_append 的段里点名缺的资产，done:true 才撞在固化那一刀上", async () => {
+    stubDom();
+    const { tools } = await load();
+    const seg = await tools.executeAppearanceTool(
+      call("style_append", { css: ".a{background-image:var(--fx-asset-nope)}" }),
+      ctx("create"),
+    );
+    expect(seg.ok, "追加这段本身不该被拒——它还没落地成包").toBe(true);
+    const d = seg.data as { assetRefsMissing: string[]; assetNote: string };
+    expect(d.assetRefsMissing).toEqual(["nope"]);
+    expect(d.assetNote).toContain("asset_put");
+    const done = await tools.executeAppearanceTool(call("style_append", { done: true, name: "悬空" }), ctx("create"));
+    expect(done.code).toBe("asset_reference_not_declared");
+    expect(mocks.stage).not.toHaveBeenCalled();
+  });
+
+  it("不带任何资产引用的 CSS 不受这条新判据影响（旧写法零变化）", async () => {
+    stubDom({ "--bg": "#101010", "--text": "#eee" });
+    const { tools } = await load();
+    await tools.executeAppearanceTool(call("theme_patch", { tokens: { "--accent": "#336699" } }), ctx("create"));
+    const r = await tools.executeAppearanceTool(
+      call("save_theme_extension", { name: "没贴图", css: ".a{color:var(--accent)}" }),
+      ctx("create"),
+    );
+    expect(r.ok).toBe(true);
+    expect((r.data as { assetRefsMissing?: string[] }).assetRefsMissing, "没有引用就别报一把").toBeUndefined();
+    const manifest = mocks.stage.mock.calls[0][0] as { artifacts: Record<string, { assets?: unknown[] }> };
+    expect(manifest.artifacts["main.json"].assets, "没资产就不该塞一个空 assets 字段进产物").toBeUndefined();
+  });
+});
