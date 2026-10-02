@@ -26,7 +26,7 @@ import { roleNames } from "./roleNames";
 import { setInspectorFocus, txeBackToSpec } from "./focus";
 import { guardLocked } from "../operator/lock";
 import * as templateStore from "../protocol/templateStore";
-import { SEND_FIELD_ROLES, paramTypeOf, type SendField, type SendParamType, type SendTemplate } from "../send/sendTypes";
+import { SEND_FIELD_ROLES, paramTypeOf, type SendField, type SendParam, type SendParamType, type SendTemplate } from "../send/sendTypes";
 import { encodeSend, intRangeOf, parseHexInput } from "../send/encodeSend";
 import * as sendStore from "../send/sendStore";
 import { DeriveError, toReceiveTpl } from "../send/specToProtocol";
@@ -144,6 +144,31 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
   useEffect(() => {
     if (linkParamId) setOpenParams((m) => (m[linkParamId] ? m : { ...m, [linkParamId]: true }));
   }, [linkParamId]);
+
+  /**
+   * 删一条参数。走的是 `sendStore.removeParam` 那道守卫：还有块按 id 在取它的时候**不删**，
+   * 并把是哪几个块点出来 —— 参数没了而块还按老 id 取值，症状是"预览突然一直报错"，
+   * 而用户看不出谁被删了（store 里那段注释记的就是 P113-E 的同族教训）。
+   * 界面这边不另建一份"谁在用"的账：两处各算一遍就会有一天算出两个答案。
+   */
+  const dropParam = (p: SendParam) => {
+    if (!tpl) return;
+    const r = sendStore.removeParam(tpl.id, p.id);
+    if (r.ok) {
+      setErr("");
+      setMsg(tx(`参数「${p.name}」已删掉`, `Parameter “${p.name}” removed`));
+      return;
+    }
+    // usedBy 空 = 这张谱不在了，或是只读锁（锁那侧 store 自己弹过话）：都不该在这里复述一遍
+    if (!r.usedBy.length) return;
+    setMsg("");
+    setErr(
+      tx(
+        `删不掉：还有 ${r.usedBy.length} 个块在用参数「${p.name}」（${r.usedBy.join("、")}）。先把这些块的值来源换掉。`,
+        `Can't remove: ${r.usedBy.length} block(s) still read parameter “${p.name}” (${r.usedBy.join(", ")}). Switch those blocks' value source first.`,
+      ),
+    );
+  };
 
   /**
    * 参数一键生成滑条卡。
@@ -553,7 +578,7 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                     />
                   </FormRow>
                 )}
-                <div className="form-row" style={{ marginBottom: 0 }}>
+                <div className="form-row">
                   <button
                     className="btn"
                     disabled={p.type === "text" || p.type === "enum"}
@@ -579,6 +604,21 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                       )}
                     />
                   )}
+                </div>
+                {/* 这颗键补的是这一层欠的出口：值来源每切一次「参数」就长一条，而今天只能改名不能删。
+                    危险键不和「生成控件」并排（挨在一起就有误点），也不挂问号 —— 它不 disabled，
+                    守卫生效时那句点名话走页级报错，那才是它该出现的地方。 */}
+                <div className="form-row" style={{ marginBottom: 0 }}>
+                  <button
+                    className="btn sb-danger"
+                    title={tx(
+                      "从参数表里删掉它。还有块在按这个名字取值时不会删，会点名是哪几个块。",
+                      "Remove it from the parameter table. While a block still reads it, nothing is deleted — the blocks get named instead.",
+                    )}
+                    onClick={() => dropParam(p)}
+                  >
+                    {tx("删掉这个参数", "Remove this parameter")}
+                  </button>
                 </div>
               </div>
             )}

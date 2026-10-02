@@ -77,4 +77,23 @@ describe("P124-A · FormRow 必须落在被样式命中的那个元素上", () =
     expect(insp).toContain('className="form-hint"');
     expect(insp, "参数分层的行内口径也该收进问号").toContain('className="props-section"');
   });
+
+  /**
+   * P126-A · 参数那层"删得掉"。
+   *
+   * 为什么钉这条而不是钉长相：`sendStore.removeParam` 带着 `usedBy` 守卫、单测也覆盖了，
+   * 但界面上**一个调用方都没有** —— 于是"值来源切一次参数就长一条"这件事只有加没有减，
+   * 孤儿参数堆在卡列表里改名都嫌烦。这种缺口不会自己响：store 说"我支持删"，
+   * 界面说"我什么都没得删"，两边各自都成立。所以钉的是"这条链路真的接上了"。
+   */
+  it("参数删除走 store 那道 usedBy 守卫，不在界面另算一遍谁在用", () => {
+    const insp = readFileSync(
+      fileURLToPath(new URL("./../features/inspector/SendFieldInspector.tsx", import.meta.url)),
+      "utf8",
+    );
+    expect(insp, "删除入口又没了：参数表只能长不能收").toContain("sendStore.removeParam(");
+    expect(insp, "点名话术要用 store 算出来的 usedBy，界面不许自己扫一遍 fields").toContain("r.usedBy");
+    expect(insp).toContain("删掉这个参数");
+    expect(insp, "守卫不通过时必须说明是谁还在用，不能静默").toContain("删不掉");
+  });
 });
