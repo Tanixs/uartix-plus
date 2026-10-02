@@ -68,16 +68,39 @@
         "zh": "内置「流利蓝」的组件层完整版：控件五态、标题栏窗口键、浮层亚克力与焦点环留白都在这里——内置那枚只到 token 层。",
         "en": "Full Fluent theme: component states, titlebar buttons, popup acrylic and focus-ring offset. The built-in one covers tokens only."
       },
-      "version": "1.0.0",
+      "version": "1.0.1",
       "packageUrl": "/market/pkg/fluent-blue.uartix.json",
-      "sha256": "ce40e3add66bc35bf5923aaa8eac97e4759af8938b82e136c240c0907c1c473c",
-      "bytes": 19632,
+      "sha256": "3b09072d8eac2f2030257178b7b81d0f4abf02f79fe8d1ebb8a0fbe6b05eac61",
+      "bytes": 19676,
       "capabilities": [
         "theme.tokens"
       ],
       "screenshots": [
         "/market/img/fluent-blue-palette.png",
         "/market/img/fluent-blue-ui-sketch.png"
+      ],
+      "minAppVersion": "0.5.2",
+      "updated": "2026-10-02"
+    },
+    {
+      "id": "uartix.theme.fluent-dark",
+      "name": "流利蓝 · 暗色",
+      "author": "uartix",
+      "category": "theme",
+      "description": {
+        "zh": "流利蓝的暗色一档：凹档 #1b1b1b、画布 #2b2b2b、面板 #323232、壳 #252525，强调色用 Fluent 亮蓝 #4cc2ff。与亮色那枚共用同一层组件规则。",
+        "en": "The dark tier of Fluent Blue: four ordered surfaces plus the light-blue accent. Shares one component layer with the light package."
+      },
+      "version": "1.0.0",
+      "packageUrl": "/market/pkg/fluent-dark.uartix.json",
+      "sha256": "f105342941733b518937e621892c9ee22481e866f35682de46977f660f945625",
+      "bytes": 18909,
+      "capabilities": [
+        "theme.tokens"
+      ],
+      "screenshots": [
+        "/market/img/fluent-dark-palette.png",
+        "/market/img/fluent-dark-ui-sketch.png"
       ],
       "minAppVersion": "0.5.2",
       "updated": "2026-10-02"

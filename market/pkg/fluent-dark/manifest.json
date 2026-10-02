@@ -1,0 +1,66 @@
+{
+  "format": "uartix-plugin",
+  "schemaVersion": 2,
+  "id": "uartix.theme.fluent-dark",
+  "version": "1.0.0",
+  "name": "流利蓝 · 暗色",
+  "desc": "Fluent 暗色：四档表面 + 亮蓝强调（主按钮是浅蓝底配深墨字，Fluent 暗色本家就是这么配的）",
+  "hostApi": "^1.0",
+  "capabilities": [
+    "theme.tokens"
+  ],
+  "contributions": {
+    "themes": [
+      {
+        "id": "main",
+        "entry": "main.json",
+        "name": "流利蓝 · 暗色"
+      }
+    ]
+  },
+  "artifacts": {
+    "main.json": {
+      "kind": "theme",
+      "scheme": "dark",
+      "vars": {
+        "--bg": "#2b2b2b",
+        "--bg-panel": "#323232",
+        "--bg-inset": "#1b1b1b",
+        "--bg-titlebar": "#252525",
+        "--border": "#4a4a4a",
+        "--border-soft": "#383838",
+        "--text": "#ffffff",
+        "--text-dim": "#c8c6c4",
+        "--accent": "#4cc2ff",
+        "--on-accent": "#0b0b0b",
+        "--accent-soft": "color-mix(in srgb, var(--accent) 16%, transparent)",
+        "--danger": "#e5534b",
+        "--warn": "#d8b26a",
+        "--ok": "#7acb8a",
+        "--shadow": "0 0.8px 2px rgba(0, 0, 0, 0.4), 0 3.2px 8px rgba(0, 0, 0, 0.5)",
+        "--scrollbar": "#4f4f4f",
+        "--scrollbar-hover": "#6b6b6b",
+        "--radius-s": "3px",
+        "--radius-m": "4px",
+        "--radius-l": "6px",
+        "--radius-xl": "8px",
+        "--ease": "cubic-bezier(0, 0, 0.2, 1)",
+        "--ring": "color-mix(in srgb, var(--accent) 92%, transparent)",
+        "--k-send": "#4cc2ff",
+        "--k-wait": "#e8b339",
+        "--k-frame": "#b18cf5",
+        "--k-assert": "#7acb8a",
+        "--k-note": "#f08a4b",
+        "--k-logic": "#a493e8",
+        "--k-group": "#4dd0e1",
+        "--k-warn-line": "#e08a4a",
+        "--warn-fg": "#dfb56b"
+      },
+      "cssFile": "components.css"
+    }
+  },
+  "provenance": {
+    "createdBy": "user",
+    "reviewed": false
+  }
+}

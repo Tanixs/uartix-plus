@@ -1,39 +1,29 @@
-/* 流利蓝 · 组件层（Fluent Blue full theme, layer 2）
+/* 流利蓝 · 暗色（Fluent Dark, layer 2）—— 与亮色那枚同一条组件层，只换旋钮
  *
- * 这一份是 P130 那枚内置主题**写不进去**的那一半：亚克力、按下回弹、焦点环留白、
- * 页签底部那条强调色……全是组件规则，内置主题文件是 token-only 的通道（一块
- * `:root[data-theme]`，块外零规则），装不下它们。走插件包通路正是为了这一层。
+ * 这一份与 `fluent-blue/components.css` 的关系是**受测的**：除下面这块 `:root` 之外，
+ * 两个文件逐字节相同（`marketContent.test.ts` 钉着）。为什么钉得住：这一层的颜色本来就
+ * 全部派生自 token（四档表面、--text、--accent），亮暗的差别不在"哪条规则"，而在
+ * "混合方向"与"阴影浓度"这两类旋钮值上——
+ *  · 按压态：亮色往 var(--text)（深墨）混＝变暗；暗色的 var(--text) 是白，照抄就会**越按越亮**，
+ *    所以这里显式往 #000000 混。
+ *  · 阴影：黑色半透明影在 #323232 面板上几乎看不出来，暗色要提到 3~4 倍浓度才读得出"浮起"。
+ *  · 卡片描边：白 9% 的头发丝线在暗色上偏淡，提到 12%。
+ * 真要往规则体里加分支，就得同时往另一枚加，或者把差异也做成旋钮——不许出现两份平行清单。
  *
- * 四条自我约束，每条都对应 `theme_audit` 的一格（不是审美偏好，是可验证性）：
- *
- * 1. **颜色一律走 var()**，字面量只出现在三处：Windows 关闭键那两枚（#E81123/#C42B1C，
- *    它是系统约定不是本家配色）、亚克力/遮罩用的半透明白黑、以及滚动条槽。
- *    理由：任何写死的 hex 都会脱离四档表面阶梯，静态门禁看不见注入层，只有审计看得见。
- * 2. **`transition` / `animation` 只写在单类选择器上**（特异性 (0,1,0)），
- *    永远低于宿主那条 `html.no-motion *`（0,1,1）——用户开"减少动效"时必须压得住。
- *    需要两级类才打得到的地方，动效交给 `:where()`（零特异性）或者干脆不做。
- *    状态**颜色**（`.btn:hover` 之类）不受这条限制，它不是动效。
- * 3. **不写 `position:fixed`、不写 z-index**：这一层没有任何需要新造浮层的活，
- *    而浮层一旦要落层槽，就该是宿主登记过的事，不是主题顺手加的。
- * 4. **只碰真实存在的类名**：每个选择器都在 1421 的活界面上核对过（`ui_inspect` /
- *    theme.css 里 grep 得到），命不中的不写——写一条打偏的规则比不写更糟，
- *    它会让下一个人以为这个组件已经被主题管过了。
- *
- * 缺件如实记 N/A：宿主没有进度条（`<progress>` / role=progressbar 全仓 0 命中）、
- * 没有日期选择器（type=date 0 命中）。不为凑矩阵造组件。
+ * 四条自我约束照亮色那枚原文（颜色一律走 var()、动效只写在单类选择器上、
+ * 不写 position:fixed 与 z-index、只碰真实存在的类名），逐条对应 theme_audit 的一格。
  */
-
 :root {
   /* 本包内部用的旋钮。只定义新键、不碰白名单（白名单归 theme_patch / vars 那块）。 */
   --fb-fill-secondary: color-mix(in srgb, var(--text) 5%, var(--bg-panel));
   --fb-fill-hover: color-mix(in srgb, var(--text) 8%, var(--bg-panel));
   --fb-fill-pressed: color-mix(in srgb, var(--text) 4%, var(--bg-panel));
   --fb-accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff);
-  --fb-accent-pressed: color-mix(in srgb, var(--accent) 82%, var(--text));
-  --fb-card-line: color-mix(in srgb, var(--text) 9%, transparent);
-  --fb-acrylic: color-mix(in srgb, var(--bg-panel) 88%, transparent);
-  --fb-shadow-pop: 0 2px 4px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.14);
-  --fb-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --fb-accent-pressed: color-mix(in srgb, var(--accent) 84%, #000000);
+  --fb-card-line: color-mix(in srgb, var(--text) 12%, transparent);
+  --fb-acrylic: color-mix(in srgb, var(--bg-panel) 90%, transparent);
+  --fb-shadow-pop: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 20px rgba(0, 0, 0, 0.45);
+  --fb-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45);
   --fb-duration: var(--dur-fast);
 }
 

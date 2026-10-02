@@ -2,7 +2,7 @@
   "format": "uartix-plugin",
   "schemaVersion": 2,
   "id": "uartix.theme.fluent-blue",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "流利蓝 · 全量",
   "desc": "Fluent Design 组件层主题：按钮/输入/页签/开关/滑杆/菜单/对话框/卡片/导轨的默认·hover·active·focus·disabled 五态，加两条标题栏与浮层亚克力。",
   "hostApi": "^1.0",

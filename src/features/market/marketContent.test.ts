@@ -86,6 +86,31 @@ describe("P99b-N1：示例货架内容", () => {
    * 所以"我们自己上架的那枚示范主题"带着 warning 上架，等于亲手教投稿人"这没关系"。
    * 这一条只加严不改判据：它查的是自家内容，不是净化器的强度。
    */
+  /**
+   * P132-B：两枚 Fluent（亮 / 暗）**除 `:root` 旋钮块外必须逐字节相同**。
+   *
+   * 暗色那枚不是"另一套组件层"：这一层的颜色本来就全部派生自 token，亮暗真正不同的只有
+   * 混合方向（按压态：亮色往深墨混，暗色的 `--text` 是白，照抄就会越按越亮）与阴影浓度
+   * （黑半透明影在 #323232 上看不出来）。这些都在 `:root` 的 `--fb-*` 里表达。
+   *
+   * 为什么钉字节而不是钉"选择器清单"：清单一致而规则体各写一份，正是本仓最恨的那类
+   * "两份真相"——改一处忘另一处，两枚主题就悄悄长成了两个产品。
+   */
+  it("两枚 Fluent 的组件层只许差 `:root` 那一块（不许长出平行清单）", () => {
+    const bodyOf = (css: string) => {
+      const at = css.indexOf(":root {");
+      expect(at, "组件层得有一块 :root 旋钮").toBeGreaterThan(-1);
+      const end = css.indexOf("}", at) + 1;
+      return { root: css.slice(at, end), body: css.slice(end) };
+    };
+    const light = bodyOf(readFileSync(join(ROOT, "market", "pkg", "fluent-blue", "components.css"), "utf8"));
+    const dark = bodyOf(readFileSync(join(ROOT, "market", "pkg", "fluent-dark", "components.css"), "utf8"));
+    expect(dark.body, "两枚 Fluent 的规则体不是同一份：要么同步改，要么把差异做成 :root 旋钮").toBe(light.body);
+    // 反向：旋钮块**必须**不同——一模一样就说明暗色那枚没适配按压方向与阴影浓度
+    expect(dark.root).not.toBe(light.root);
+    expect(dark.root).toContain("--fb-accent-pressed: color-mix(in srgb, var(--accent) 84%, #000000)");
+  });
+
   it("自家主题包：净化器零 error 也零 warning（带嫌疑上架等于给投稿人开脱）", () => {
     const themes = committed.entries.filter((e) => e.category === "theme");
     expect(themes.length, "反空断言：一枚主题都没有，这条什么都没查").toBeGreaterThan(0);
