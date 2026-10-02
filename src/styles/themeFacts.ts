@@ -31,6 +31,12 @@ export interface ActiveThemeFacts {
   conflicts: string[];
   /** settings 里那枚内置不存在了 ⇒ 回落第一枚，要说 */
   fellBack: boolean;
+  /**
+   * P131-B3：屏幕上正在演一场**预览**时的真相（null = 没有预览，画的就是上面那枚）。
+   * 预览不落盘、不进插件库、到期自动回滚（详设 §A7），所以它必须和"在画那枚"分开记——
+   * 否则"当前主题：琉璃"这句话会在一场 12 秒的演出期间骗人。
+   */
+  preview: { id: string; expiresAt: number; returnsTo: string } | null;
 }
 
 export const EMPTY_THEME_FACTS: ActiveThemeFacts = {
@@ -46,6 +52,7 @@ export const EMPTY_THEME_FACTS: ActiveThemeFacts = {
   fallbackId: null,
   conflicts: [],
   fellBack: false,
+  preview: null,
 };
 
 let facts: ActiveThemeFacts = EMPTY_THEME_FACTS;

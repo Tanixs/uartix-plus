@@ -10,6 +10,13 @@
  * TOOL_LABEL、summarizeArgs），漏一处就静默；现在全在下面的 entry 里。
  */
 import { DOMAIN_ZH } from "./scopeTiers";
+import {
+  clampPreviewSeconds,
+  clearThemePreview,
+  DEFAULT_PREVIEW_MS,
+  getThemePreview,
+  setThemePreview,
+} from "../ai/themePreview";
 import { slotCatalogText } from "../../styles/layerSlots";
 import { censusSurface, collectInventory, collectAuditInput, AUDIT_DEFAULTS, INVENTORY_SECTIONS, SURFACE_DEFAULTS } from "./uiSurface";
 import {
@@ -291,6 +298,85 @@ export const uiToolEntries: AgentToolEntry[] = [
           hint: result.blocking
             ? "有要说的：逐条把 selector/ratio/need 讲给用户，改完再跑一次确认归零；不要因为有发现就放弃这条设计，也不要替他决定「可以忽略」"
             : `界面在 ${root || "body"} 范围内读得出来、没画出格子、命中区够、减弱动效也还压得住（采了 ${input.textSamples.length} 处文字）`,
+        },
+      };
+    },
+  }),
+  defineTool({
+    /* —— P131-B3（详设 A7）：不装包先看一眼 —— */
+    name: "theme_preview",
+    labelZh: "预览主题",
+    // 演一场就散的预览：会话级、自动回滚、不写设置也不进插件库 ⇒ 与 style_patch 同档
+    effect: "config_write",
+    domain: "ui",
+    provenance: HOST,
+    description:
+      `Paint another theme on screen for a few seconds WITHOUT installing or saving anything — the step between "改完了" and "要不要装". Args: { id: string (a built-in theme id or a theme plugin id, list below), seconds?: number (2..60, default ${DEFAULT_PREVIEW_MS / 1000}) }, or { stop: true } to end it early. It is a timed override inside the same compositor: layer order, fallback tables, scheme derivation and data-theme all keep working as usual, and when it expires the screen returns to the theme the user actually chose. Nothing is persisted — a reload always restores the real choice. To keep a previewed look, the user must still say so and you call save_theme_extension / enable_plugin. Unknown id → unknown_theme with the real list; do not invent theme ids.`,
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string" }, seconds: { type: "number" }, stop: { type: "boolean" } },
+      additionalProperties: false,
+    },
+    summarize: (a) =>
+      a.stop === true ? "停止主题预览" : a.id ? `预览主题 ${String(a.id)}` : "查看主题预览状态",
+    execute: async (args, ctx) => {
+      const callId = ctx.callId;
+      if (typeof document === "undefined") return bad(callId, "no_dom", { hint: "预览要画在界面上，当前环境没有 DOM" });
+      // 动态 import：extRuntime → chatStore → agentRun 会与 agent 链成环（§16 红线 R1），
+      // 与 appearanceTools 里那几处保存链同一个理由，不是随手写的。
+      const { applyStyleExts, findThemeSourceById, listPreviewableThemes } = await import("../ai/extRuntime");
+      const { activeThemeFacts } = await import("../../styles/themeFacts");
+      if (args.stop === true) {
+        const had = clearThemePreview();
+        applyStyleExts();
+        return {
+          callId,
+          ok: true,
+          status: "applied",
+          data: {
+            stopped: had,
+            restored: activeThemeFacts().id,
+            hint: had ? "预览已结束，屏幕回到用户自己选的那枚" : "本来就没有预览在演（这条不报错，只是说清楚）",
+          },
+        };
+      }
+      const catalog = listPreviewableThemes();
+      const id = typeof args.id === "string" ? args.id.trim() : "";
+      if (!id) {
+        return {
+          callId,
+          ok: true,
+          status: "read",
+          data: {
+            previewing: getThemePreview(),
+            current: activeThemeFacts().id,
+            themes: catalog.map((t) => `${t.id}${t.builtin ? "" : `（插件 ${t.pluginId ?? "?"}）`}`),
+            hint: "带 id 开一场预览；带 stop:true 提前结束",
+          },
+        };
+      }
+      const source = findThemeSourceById(id);
+      if (!source) {
+        return bad(callId, "unknown_theme", {
+          id,
+          themes: catalog.map((t) => t.id),
+          hint: "这个 id 没有对应的主题；从 themes 里挑一个真的，别编",
+        });
+      }
+      const seconds = clampPreviewSeconds(args.seconds);
+      setThemePreview({ id: source.id, expiresAt: Date.now() + seconds * 1000 }, applyStyleExts);
+      applyStyleExts();
+      const facts = activeThemeFacts();
+      return {
+        callId,
+        ok: true,
+        status: "applied",
+        data: {
+          previewing: { id: source.id, name: source.name, builtin: source.builtin },
+          seconds,
+          persisted: false,
+          returnsTo: facts.preview?.returnsTo ?? facts.id,
+          hint: `屏幕上现在是「${source.name}」，${seconds} 秒后自动回到用户选的那枚；什么都没装、什么都没存。要留下它，得用户点头后再 save_theme_extension / enable_plugin`,
         },
       };
     },

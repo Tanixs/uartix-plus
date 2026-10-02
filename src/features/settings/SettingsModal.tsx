@@ -22,7 +22,8 @@ import { JobDetails } from "../mcp/JobDetails";
 import { OperatorGenBlock } from "../operator/OperatorGen";
 import { mcpServerConfig } from "../mcp/mcpTools";
 import { imageStoreStats, setImageLimits, clearAllImages } from "../ai/imageStore";
-import { toast } from "../ai/extRuntime";
+import { applyStyleExts, toast } from "../ai/extRuntime";
+import { clearThemePreview } from "../ai/themePreview";
 import { activeThemeFacts, subscribeStyleApply } from "../../styles/themeFacts";
 import { drawnTalk, pluginSectionStart, selectTheme, themeCards } from "./themePicker";
 import { themeBearingPackages, usePlugins } from "../plugins/pluginStore";
@@ -525,6 +526,22 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                           </button>
                         )}
                       </li>
+                      {/* P131-B3：预览是**借来的画面**，这一行必须存在——否则用户看到换色，
+                          却没有任何一处写着"这不是你选的、N 秒后自己回去"。 */}
+                      {drawn.preview && (
+                        <li className="on ai">
+                          <span className="set-apr-name">{tx("主题预览中", "Previewing")}</span>
+                          <span className="set-apr-val">
+                            {tx(
+                              `${Math.max(0, Math.round((drawn.preview.expiresAt - Date.now()) / 1000))} 秒后回到「${t(`set.theme.${drawn.preview.returnsTo}`) || drawn.preview.returnsTo}」`,
+                              `back in ${Math.max(0, Math.round((drawn.preview.expiresAt - Date.now()) / 1000))}s`,
+                            )}
+                          </span>
+                          <button className="btn sm" onClick={() => { clearThemePreview(); applyStyleExts(); }}>
+                            {tx("立即结束", "Stop now")}
+                          </button>
+                        </li>
+                      )}
                       <li className={aiStyle.tokens ? "on ai" : ""}>
                         <span className="set-apr-name">{tx("AI 临时 token 覆盖", "AI token overrides")}</span>
                         <span className="set-apr-val">{aiStyle.tokens ? tx(`${aiStyle.tokens} 项`, `${aiStyle.tokens} keys`) : tx("无", "none")}</span>

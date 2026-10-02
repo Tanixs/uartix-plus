@@ -151,7 +151,7 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
       "save_plugin", "enable_plugin", "list_plugins", "rollback_plugin",
       "fs_read", "fs_list", "fs_write", "fs_grep", "fs_glob", "fs_edit", "web_fetch", "web_search", "shell_exec",
       "theme_read", "theme_patch", "theme_preset", "image_swatch", "save_theme_extension", "style_commit", "style_append",
-      "ui_inventory", "ui_inspect", "style_patch", "style_revert", "theme_audit", "app_state",
+      "ui_inventory", "ui_inspect", "style_patch", "style_revert", "theme_audit", "theme_preview", "app_state",
       "app_catalog", "app_read", "propose_market_install", "layout_apply", "chrome_set", "task_plan",
     ];
     // 清单本身也要跟注册表对齐：两边谁漂了都红

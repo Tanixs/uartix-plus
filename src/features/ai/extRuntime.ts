@@ -23,6 +23,7 @@ import {
  * （P92-F 整窗白屏那条禁止边），而插件库那颗开关也要读这份事实说出"启用这颗会挤掉谁"。
  */
 import { notifyStyleApply, setActiveThemeFacts, type ActiveThemeFacts } from "../../styles/themeFacts";
+import { clearThemePreview, getThemePreview } from "./themePreview";
 
 /**
  * 在画的那枚主题占的合成器层（外观来源面板按 id 报告）。
@@ -82,6 +83,36 @@ function sysPrefersDark(): boolean {
 }
 
 /**
+ * 按 id 找一枚主题源（P131-B3 预览用）。
+ * 内置九枚 + 库里的主题插件都算，**停用态也算**——"装不装之前先看一眼"正是预览的意义；
+ * 但停用插件的 CSS 与变量在这里是一起取的，不因为没启用就只画一半（那会演成假预览）。
+ */
+export function findThemeSourceById(id: string): ThemeSource | null {
+  if (!id) return null;
+  const builtin = BUILTIN_THEMES.find((t) => t.id === id);
+  if (builtin) return builtin;
+  const e = getExts().exts.find((x) => x.type === "theme" && (x.id === id || x.pluginRef === id));
+  return e ? themeSourceFromExt(e) : null;
+}
+
+/** 可预览清单（回执与界面都要用它，别在第二处再列一遍主题名） */
+export function listPreviewableThemes(): {
+  id: string;
+  name: string;
+  builtin: boolean;
+  enabled: boolean;
+  pluginId: string | null;
+}[] {
+  const plugins = getExts()
+    .exts.filter((x) => x.type === "theme")
+    .map((x) => ({ id: x.id, name: x.name, builtin: false, enabled: !!x.enabled, pluginId: x.pluginRef ?? null }));
+  return [
+    ...BUILTIN_THEMES.map((t) => ({ id: t.id, name: t.name, builtin: true, enabled: true, pluginId: null })),
+    ...plugins,
+  ];
+}
+
+/**
  * 重建主题层与 CSS 样式层。**这里是"哪枚主题在画"唯一的落地出口**（详设 R1/R7）。
  *
  * P99b-N5 改的是什么（详设 §2）：
@@ -116,8 +147,20 @@ export function applyStyleExts() {
   const pickedSource: ThemeSource | null = decision.active
     ? enabledThemes.find((t) => t.id === decision.active!.id) ?? BUILTIN_THEMES.find((t) => t.id === decision.active!.id) ?? null
     : null;
-  const vars = pickedSource?.vars ?? {};
-  const { scheme, origin } = resolveScheme({ scheme: pickedSource?.scheme ?? null, vars }, lastScheme);
+  /**
+   * P131-B3 预览：有一场没到期的预览在演，就画那一枚——但**只改这一处取源**，
+   * 层序、兜底、CSS 单写者、scheme 推导全部照旧走同一条路。
+   * 预览记录读不到对应主题（比如插件在演出中途被卸）就当没有预览，
+   * 顺手清掉：留着一个演不出来的预览比清掉更糟（界面会一直"欠"一场不存在的演出）。
+   */
+  const preview = getThemePreview();
+  const previewSource = preview ? findThemeSourceById(preview.id) : null;
+  if (preview && !previewSource) clearThemePreview();
+  const livePreview = preview && previewSource ? preview : null;
+  /** 屏幕上真正在画的那一枚：有预览就是预览那枚（`data-theme` 的六个观察者跟着它走） */
+  const painted: ThemeSource | null = previewSource ?? pickedSource;
+  const vars = painted?.vars ?? {};
+  const { scheme, origin } = resolveScheme({ scheme: painted?.scheme ?? null, vars }, lastScheme);
   lastScheme = scheme;
   const baseline = baselineFor(scheme);
   const { inherited } = themeCoverage(vars, baseline);
@@ -127,17 +170,17 @@ export function applyStyleExts() {
 
   // CSS 只跟在画那一枚后面走：两枚主题的 CSS 拼接出来的东西没有任何一处能解释
   const cssParts: string[] = [];
-  if (pickedSource?.css) cssParts.push(`/* theme: ${pickedSource.name} */\n${pickedSource.css}`);
+  if (painted?.css) cssParts.push(`/* theme: ${painted.name} */\n${painted.css}`);
   for (const e of exts) {
     if (!e.enabled || e.type !== "style") continue;
     if (e.css) cssParts.push(`/* style: ${e.name} */\n${e.css}`);
   }
 
   const facts: ActiveThemeFacts = {
-    id: decision.active?.id ?? "",
-    name: decision.active?.name ?? "未装载",
-    builtin: decision.active?.builtin ?? true,
-    pluginId: decision.active?.pluginId ?? null,
+    id: painted?.id ?? decision.active?.id ?? "",
+    name: painted?.name ?? decision.active?.name ?? "未装载",
+    builtin: painted?.builtin ?? decision.active?.builtin ?? true,
+    pluginId: painted?.pluginId ?? (painted ? null : decision.active?.pluginId ?? null),
     scheme,
     schemeOrigin: origin,
     overrides: Object.keys(vars).length,
@@ -146,6 +189,9 @@ export function applyStyleExts() {
     fallbackId: decision.builtinDrawn?.id ?? null,
     conflicts: decision.conflicts.map((c) => c.name),
     fellBack: decision.fellBack,
+    preview: livePreview
+      ? { id: livePreview.id, expiresAt: livePreview.expiresAt, returnsTo: decision.active?.id ?? "" }
+      : null,
   };
 
   if (typeof document !== "undefined") {

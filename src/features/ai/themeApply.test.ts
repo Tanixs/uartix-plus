@@ -167,3 +167,70 @@ describe("P99b-N5 · 市场示例那种 6 键主题（详设 §1-4 的那两枚�
     expect(activeThemeFacts().baseline).toBe("light");
   });
 });
+
+/* ================= P131-B3：预览是"借来的画面"，不是第二个主题系统 ================= */
+
+describe("P131-B3 · theme_preview 走的是同一个合成器（§A7）", () => {
+  const live = (ms = 30_000) => ({ id: "dark", expiresAt: Date.now() + ms });
+
+  it("预览只换在画那一枚：设置里那个字都没动，回得到的那枚写在 returnsTo", async () => {
+    const { clearThemePreview, setThemePreview } = await import("./themePreview");
+    settings.patch({ theme: "begonia" });
+    setThemePreview(live(), applyStyleExts);
+    applyStyleExts();
+    expect(effectiveRootVars()["--bg"], "预览没画上＝合成器没接这条输入").toBe(darkVars["--bg"]);
+    expect(settings.getSnapshot().theme, "预览写进了设置＝它变成用户的决定了").toBe("begonia");
+    const facts = activeThemeFacts();
+    expect(facts.id).toBe("dark");
+    expect(facts.preview?.id).toBe("dark");
+    expect(facts.preview?.returnsTo).toBe("begonia");
+    clearThemePreview();
+    applyStyleExts();
+    expect(effectiveRootVars()["--bg"]).toBe(begoniaVars["--bg"]);
+    expect(activeThemeFacts().preview).toBeNull();
+  });
+
+  it("预览不额外加一层：层序仍是 兜底 < 在画，撤掉后一模一样", async () => {
+    const { clearThemePreview, setThemePreview } = await import("./themePreview");
+    const before = JSON.stringify(rootVarLayers().map((l) => l.id));
+    setThemePreview(live(), applyStyleExts);
+    applyStyleExts();
+    expect(rootVarLayers().map((l) => l.id), "另起一层＝第二个「谁在画」的真相").toEqual(JSON.parse(before));
+    clearThemePreview();
+    applyStyleExts();
+    expect(JSON.stringify(rootVarLayers().map((l) => l.id))).toBe(before);
+  });
+
+  it("计时器没跑也不要紧：过期的预览在合成时自己作废（这条不靠 setTimeout 准）", async () => {
+    const { getThemePreview, setThemePreview } = await import("./themePreview");
+    setThemePreview({ id: "dark", expiresAt: Date.now() - 1 }, applyStyleExts);
+    expect(getThemePreview(), "过期记录还读得出＝屏幕上会留一场不存在的演出").toBeNull();
+    applyStyleExts();
+    expect(effectiveRootVars()["--bg"]).toBe(begoniaVars["--bg"]);
+    expect(activeThemeFacts().preview).toBeNull();
+  });
+
+  it("预览一个不存在的 id ⇒ 当场清掉并照旧画真主题，不清屏也不报错", async () => {
+    const { clearThemePreview, getThemePreview, setThemePreview } = await import("./themePreview");
+    setThemePreview({ id: "no-such-theme", expiresAt: Date.now() + 30_000 }, applyStyleExts);
+    applyStyleExts();
+    expect(effectiveRootVars()["--bg"]).toBe(begoniaVars["--bg"]);
+    expect(activeThemeFacts().preview).toBeNull();
+    expect(getThemePreview()).toBeNull();
+    clearThemePreview();
+  });
+
+  it("停用态的插件主题也能预览（预览正是「装不装」之前的那一眼）", async () => {
+    const { clearThemePreview, setThemePreview } = await import("./themePreview");
+    themeProjection("plg:pv:main", { "--bg": "#030405", "--accent": "#4cc2ff" }, { enabled: false });
+    applyStyleExts();
+    expect(effectiveRootVars()["--accent"], "没启用时不该画它").toBe(begoniaVars["--accent"]);
+    setThemePreview({ id: "plg:pv:main", expiresAt: Date.now() + 30_000 }, applyStyleExts);
+    applyStyleExts();
+    expect(effectiveRootVars()["--accent"]).toBe("#4cc2ff");
+    expect(activeThemeFacts().builtin).toBe(false);
+    clearThemePreview();
+    applyStyleExts();
+    expect(effectiveRootVars()["--accent"]).toBe(begoniaVars["--accent"]);
+  });
+});
