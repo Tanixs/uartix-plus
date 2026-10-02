@@ -2,7 +2,7 @@
   "format": "uartix-plugin",
   "schemaVersion": 2,
   "id": "uartix.theme.begonia",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "name": "秋海棠",
   "desc": "",
   "hostApi": "^1.0",
@@ -25,7 +25,7 @@
         "--bg-panel": "#fffaf8",
         "--text": "#3a2f2c",
         "--text-dim": "#8a7a75",
-        "--accent": "#c76a7a",
+        "--accent": "#b95566",
         "--on-accent": "#ffffff"
       }
     }

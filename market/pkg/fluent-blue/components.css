@@ -357,29 +357,39 @@ select.input {
   box-shadow: var(--fb-shadow-pop);
 }
 
+/* 四族"可点的行"：右键菜单项 / 信息栏计数键 / 挂件菜单项 / 命令面板行。
+   类名是照宿主改对的——原先写的 `.sb-item`、`.aiw-item`、`.cmdk-row` 宿主里根本没有，
+   那三条一直在画空气（新门 J3 抓出来的，见 docs 的 P132-A2 一节）。 */
 .ctx-item,
-.sb-item,
-.aiw-item,
-.cmdk-row {
+.ib-count,
+.aiw-menu-item,
+.cmdk-item {
   border-radius: var(--radius-s);
   color: var(--text);
   transition: background-color var(--dur-snap) var(--ease);
 }
 
 .ctx-item:hover,
-.sb-item:hover,
-.aiw-item:hover,
-.cmdk-row:hover,
+.ib-count:hover,
+.aiw-menu-item:hover,
+.cmdk-item:hover,
 .ctx-item:focus,
-.sb-item:focus,
-.aiw-item:focus,
-.cmdk-row[aria-selected="true"] {
+.ib-count:focus,
+.aiw-menu-item:focus,
+.cmdk-item.sel {
   background: var(--fb-fill-hover);
 }
 
+/* 禁用态宿主有两写法：按钮走 `:disabled`，挂件菜单是 `.disabled` 类 ⇒ 两边都得给 */
 .ctx-item:disabled,
-.sb-item:disabled {
+.ib-count:disabled,
+.cmdk-item:disabled {
   color: color-mix(in srgb, var(--text-dim) 62%, var(--bg-panel));
+  background: transparent;
+}
+
+.aiw-menu-item.disabled,
+.aiw-menu-item.disabled:hover {
   background: transparent;
 }
 

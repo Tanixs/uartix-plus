@@ -56,33 +56,38 @@ const baseVars = baseRootVars();
 const files = fs.readdirSync(dir).filter((f) => f.endsWith(".css"));
 let fails = 0;
 const rows = [];
-for (const f of files) {
-  const src = fs.readFileSync(path.join(dir, f), "utf8");
-  // 主题文件覆盖基线：语义色只写一次，主题各自给值
-  const vars = { ...baseVars, ...hexVars(src) };
-  const need = [
-    "--bg",
-    "--bg-panel",
-    "--bg-inset",
-    "--bg-titlebar",
-    "--text",
-    "--text-dim",
-    "--accent",
-    "--on-accent",
-    "--warn-fg",
-    "--danger",
-    // P115-F22：危险钮按压态文字色（.tb-close:hover），从 #fff 字面量提为令牌
-    "--on-danger",
-    "--k-keypad",
-    "--k-keypad-ink",
-    ...K_TOKENS,
-  ];
-  const missing = need.filter((k) => !vars[k]);
-  if (missing.length) {
-    console.log(`FAIL ${f}: missing color vars: ${missing.join(", ")}`);
-    fails++;
-    continue;
-  }
+
+/** 必查的色键（内置与包共用这一张表） */
+const NEED_KEYS = [
+  "--bg",
+  "--bg-panel",
+  "--bg-inset",
+  "--bg-titlebar",
+  "--text",
+  "--text-dim",
+  "--accent",
+  "--on-accent",
+  "--warn-fg",
+  "--danger",
+  // P115-F22：危险钮按压态文字色（.tb-close:hover），从 #fff 字面量提为令牌
+  "--on-danger",
+  "--k-keypad",
+  "--k-keypad-ink",
+  ...K_TOKENS,
+];
+
+/**
+ * 一张判据表，两处用（P132-A2）：内置主题文件与**上架主题包的 token 表**。
+ *
+ * 为什么不另写一份：判据有两份就会漂，而漂了的那份照样打印 OK。包这一层此前是 12 道门的
+ * 盲区——「`--accent` 当文字压灰底跌破 AA」那一类问题（P130-A 是靠 1421 渲染层抽样才抓到的），
+ * 换成一支插件包带进来时没有任何一处会红。
+ *
+ * @param {Record<string, string>} vars 已叠好基线的色键表（只认 #hex，认不出的不参与）
+ */
+function judgePalette(vars) {
+  const missing = NEED_KEYS.filter((k) => !vars[k]);
+  if (missing.length) return { missing, worst: [], checks: 0, surface: "", surfaceBad: true };
   const checks = [
     ["text/bg", vars["--text"], vars["--bg"], 4.5],
     ["text/panel", vars["--text"], vars["--bg-panel"], 4.5],
@@ -106,19 +111,13 @@ for (const f of files) {
     // 块类型语义色：作为小字胶囊文字与 3px 色条使用 → 面板底上 4.5 起
     ...K_TOKENS.map((k) => [`${k}/panel`, vars[k], vars["--bg-panel"], 4.5]),
   ];
-  const line = [f.replace(".css", "")];
   const worst = [];
   for (const [name, fg, bg, min] of checks) {
     const r = ratio(fg, bg);
     // min < 0 表示「必须低于 |min|」的负向校验（如灰字压主题色底必须不可读）
     const ok = min < 0 ? r < -min : r >= min;
-    if (!ok) {
-      fails++;
-      worst.push(`${name}=${r.toFixed(2)}!!`);
-    }
+    if (!ok) worst.push(`${name}=${r.toFixed(2)}!!`);
   }
-  // 只打印失败项，避免 8×17 列把终端刷满；全绿时给一行汇总
-  line.push(worst.length ? worst.join("  ") : `ok (${checks.length} checks)`);
 
   /* ---- P104-B2 I 门：表面档序与档差（用 CIE L*，不用 WCAG 比） ----
      P104 的外壳（标题行 / 活动导轨 / 信息栏）统一压在「壳档」上，靠档差读出一条外骨骼。
@@ -145,15 +144,79 @@ for (const f of files) {
     ["画布→面板", lstar(tiers.panel) - lstar(tiers.canvas), 1.5],
   ];
   const surfBad = surf.filter(([, v, min]) => v < min).map(([n, v, min]) => `${n}=${v.toFixed(1)}<${min}`);
-  if (!seqOk || surfBad.length) {
+  const surface = seqOk && !surfBad.length
+    ? `surface ${surf.map(([n, v]) => `${n}=${v.toFixed(1)}`).join(" ")}`
+    : `SURFACE ${seqOk ? "" : `序错(${sorted}) `}${surfBad.join(" ")}`;
+  return { missing, worst, checks: checks.length, surface, surfaceBad: !seqOk || surfBad.length > 0 };
+}
+
+for (const f of files) {
+  const src = fs.readFileSync(path.join(dir, f), "utf8");
+  // 主题文件覆盖基线：语义色只写一次，主题各自给值
+  const j = judgePalette({ ...baseVars, ...hexVars(src) });
+  if (j.missing.length) {
+    console.log(`FAIL ${f}: missing color vars: ${j.missing.join(", ")}`);
     fails++;
-    line.push(`SURFACE ${seqOk ? "" : `序错(${sorted}) `}${surfBad.join(" ")}`);
-  } else {
-    line.push(`surface ${surf.map(([n, v]) => `${n}=${v.toFixed(1)}`).join(" ")}`);
+    continue;
   }
-  rows.push(line.join("  "));
+  fails += j.worst.length + (j.surfaceBad ? 1 : 0);
+  // 只打印失败项，避免 8×17 列把终端刷满；全绿时给一行汇总
+  rows.push([f.replace(".css", ""), j.worst.length ? j.worst.join("  ") : `ok (${j.checks} checks)`, j.surface].join("  "));
 }
 console.log(rows.join("\n"));
+
+/* ---- P132-A2：同一张判据也过一遍**上架主题包**的 token 表 ----
+   包里的 vars 是抄本（`market/pkg/<名>/manifest.json` 内联进上架产物），运行时它就是"在画的那一枚"，
+   所以它和内置主题文件是**同一个角色**，没有理由只查一边。
+   差量包（只写几个键）判的不是"它自己写了什么"，而是**用户实际拿到的那一套**：运行时缺的键按明暗
+   归属从内置垫一张表（`builtinThemes.BASELINE_VARS` 就是 dark.css / light.css），所以这里叠同一张表——
+   查的对象必须与合成的结果是同一个东西，否则查的是一个不存在的配色。
+   只认 #hex 那部分键（color-mix(...) 那类派生值交给下面 P110-A 那条阶梯去算）。 */
+{
+  const hexOf = (name) => hexVars(fs.readFileSync(path.join(dir, name), "utf8"));
+  const SCHEME_BASE = { dark: { ...baseVars, ...hexOf("dark.css") }, light: { ...baseVars, ...hexOf("light.css") } };
+  /** 明暗归属：包自己声明优先；没声明就按 --bg 的亮度算（与运行时的推导同一条） */
+  const schemeOf = (art, hexOnly) =>
+    art.scheme === "dark" || art.scheme === "light" ? art.scheme : lstar(hexOnly["--bg"] ?? SCHEME_BASE.dark["--bg"]) >= 50 ? "light" : "dark";
+  const pkgDir = path.join(__dirname, "..", "public", "market", "pkg");
+  const lines = [];
+  let pkgChecked = 0;
+  let pkgBad = 0;
+  if (fs.existsSync(pkgDir)) {
+    for (const f of fs.readdirSync(pkgDir).filter((x) => x.endsWith(".uartix.json")).sort()) {
+      const manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, f), "utf8"));
+      for (const [artName, art] of Object.entries(manifest.artifacts ?? {})) {
+        if (!art || art.kind !== "theme" || !art.vars) continue;
+        pkgChecked++;
+        const hexOnly = {};
+        for (const [k, v] of Object.entries(art.vars)) if (/^#[0-9a-fA-F]{3,8}$/.test(String(v))) hexOnly[k] = String(v);
+        const j = judgePalette({ ...SCHEME_BASE[schemeOf(art, hexOnly)], ...hexOnly });
+        const name = `${f.replace(".uartix.json", "")} · ${artName}(${schemeOf(art, hexOnly)})`;
+        const problems = [
+          ...(j.missing.length ? [`缺色键 ${j.missing.join("、")}`] : []),
+          ...j.worst,
+          ...(j.surfaceBad ? [j.surface] : []),
+        ];
+        if (problems.length) {
+          pkgBad++;
+          fails += problems.length;
+          lines.push(`FAIL ${name}: ${problems.join("  ")}`);
+        } else {
+          lines.push(`ok   ${name}: ${j.checks} checks · ${j.surface.replace("surface ", "")} · 包内 ${Object.keys(art.vars).length} 键（其中 ${Object.keys(hexOnly).length} 键是 #hex，其余是派生表达式）`);
+        }
+      }
+    }
+  }
+  console.log("\n-- P132-A2 上架主题包的 token 表（与内置同一张判据，不是第二份） --");
+  console.log(lines.length ? lines.join("\n") : "（货架上一枚主题包都没有：这一条什么都没查）");
+  if (!pkgChecked) {
+    console.log("note: 没有主题包可查 —— 别把这条当成通过");
+  } else if (!pkgBad) {
+    console.log(`OK: ${pkgChecked} 枚上架主题包的 token 表过同一张对比度与档序判据`);
+  } else {
+    console.log(`FAIL: ${pkgBad} 枚上架主题包的 token 表不合格（包里的配色与内置是同一个角色，同一张表）`);
+  }
+}
 
 /* ---- P110-A：表面阶梯（把这份门禁从"只认 #hex"扩到能算 rgb()/rgba()/color-mix(in srgb)） ----
    判据的**真相**在 `src/styles/themeCore.ts` 的 `judgeSurfaceLadder()`——运行时撤回坏值用的就是它。

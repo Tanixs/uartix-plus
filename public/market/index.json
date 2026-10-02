@@ -44,9 +44,9 @@
         "zh": "默认主题海棠的暖色变体，适合长时间盯曲线的浅色环境。",
         "en": "A warm light variant of the default Begonia theme."
       },
-      "version": "1.1.0",
+      "version": "1.1.1",
       "packageUrl": "/market/pkg/theme-begonia.uartix.json",
-      "sha256": "6853b374c3df771864901cd6f6ecc594269b110bdab088edb33aef7bc1bac061",
+      "sha256": "6a1a84514a60f5b004982c7f1494516c16e1b5c41b4f58766f51aee0d378cdc9",
       "bytes": 675,
       "capabilities": [
         "theme.tokens"
@@ -56,7 +56,7 @@
         "/market/img/theme-begonia-ui-sketch.png"
       ],
       "minAppVersion": "0.4.1",
-      "updated": "2026-09-21",
+      "updated": "2026-10-02",
       "verified": true
     },
     {
@@ -70,8 +70,8 @@
       },
       "version": "1.0.0",
       "packageUrl": "/market/pkg/fluent-blue.uartix.json",
-      "sha256": "7b394bcd82a2362140c16825441a3a6a07b1a97fafdae76b5654f5f26f1f0370",
-      "bytes": 19088,
+      "sha256": "ce40e3add66bc35bf5923aaa8eac97e4759af8938b82e136c240c0907c1c473c",
+      "bytes": 19632,
       "capabilities": [
         "theme.tokens"
       ],
@@ -91,9 +91,9 @@
         "zh": "低饱和深蓝夜视主题，覆盖全部面板与曲线底色；曲线网格在暗底上单独调过对比度。",
         "en": "Low-saturation dark theme covering every panel and plot surface."
       },
-      "version": "1.0.0",
+      "version": "1.0.1",
       "packageUrl": "/market/pkg/theme-ink.uartix.json",
-      "sha256": "335e0bf73916fbb7724a6bad8aba760ce13f7938ae4156902f6920f0d28b6b02",
+      "sha256": "6901a8234519541511911349ab6501ed096d45590c458eab3756424fecb65cee",
       "bytes": 668,
       "capabilities": [
         "theme.tokens"
@@ -103,7 +103,7 @@
         "/market/img/theme-ink-ui-sketch.png"
       ],
       "minAppVersion": "0.4.1",
-      "updated": "2026-09-20",
+      "updated": "2026-10-02",
       "verified": true
     },
     {

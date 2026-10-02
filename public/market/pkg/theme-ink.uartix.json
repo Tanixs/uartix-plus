@@ -2,7 +2,7 @@
   "format": "uartix-plugin",
   "schemaVersion": 2,
   "id": "uartix.theme.ink",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "墨夜",
   "desc": "",
   "hostApi": "^1.0",
@@ -25,7 +25,7 @@
         "--bg-panel": "#151a21",
         "--text": "#e6edf3",
         "--text-dim": "#9fb0c0",
-        "--accent": "#4c8dff",
+        "--accent": "#196cf3",
         "--on-accent": "#ffffff"
       }
     }

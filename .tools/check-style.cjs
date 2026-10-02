@@ -442,6 +442,12 @@ const CSS_CLASS_TOKENS = new Set();
 for (const f of cssFiles) {
   for (const m of fs.readFileSync(f, "utf8").matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) CSS_CLASS_TOKENS.add(m[1]);
 }
+/**
+ * 宿主**会渲染出来**但自己没写样式的类名（J 的豁免族 + J2 的命令式族）。
+ * 下面的 J3 要用它：主题包给一条宿主故意留空的类名写样式，不算死选择器。
+ * 由 J / J2 各自在扫的时候填，不另抄一份清单。
+ */
+const HOST_CLASS_EXTRA = new Set();
 
 /* ---- P111-J 门：用了的类名必须有定义（写了没人看的那一半） ----
  * 事故形态（P110-B3/B4 交付，用户判不合格后实测定位）：`AiModelRows.tsx` 与
@@ -529,6 +535,7 @@ const J_EXEMPT = {
   }
 
   const unexempted = [...used.keys()].filter((t) => !J_EXEMPT[t]);
+  for (const t of used.keys()) HOST_CLASS_EXTRA.add(t);
   if (unexempted.length) {
     console.error(`FAIL(J): ${unexempted.length} 个类名被 TSX 用了却在项目 CSS 里没有定义 —— 它会继承 body 字号（16px），`);
     console.error("       把「说明」顶到比标签还大。补一条规则，或者删掉这个类名：");
@@ -625,6 +632,7 @@ const J2_EXEMPT = {
   }
 
   const unexempted2 = [...used2.keys()].filter((t) => !J2_EXEMPT[t]);
+  for (const t of used2.keys()) HOST_CLASS_EXTRA.add(t);
   if (unexempted2.length) {
     console.error(`FAIL(J2): ${unexempted2.length} 个类名由 JS/HTML 串挂出去却在 CSS 里没有定义 —— 它继承 body 的 16px、`);
     console.error("       没有底色没有定位（`.ai-toast` 就是这么把「配置只读」藏了不知多久）。补一条规则，或删掉这个类名：");
@@ -657,6 +665,113 @@ const J2_EXEMPT = {
   const missed = ["zz-decoy-a", "zz-decoy-b", "zz-decoy-c", "zz-decoy-d"].filter((t) => !caught.has(t));
   if (missed.length) {
     console.error(`FAIL(J2): 检测式对夹具漏检 ${missed.join(", ")} —— 门是瞎的，报出去的"干净"不算数`);
+    fails++;
+  }
+}
+
+/* ---- P132-A2 门 J3：主题包组件 CSS 挂的宿主类名必须真存在 ----
+ * 这一层原本是 12 道门的**完全盲区**：静态门只扫 `src/**`，而插件主题除了 token 还带一段
+ * 组件 CSS，运行时注进 `<style data-ai-ext>`。首跑就抓到三条：fluent-blue 包里的
+ * `.sb-item` / `.aiw-item` / `.cmdk-row` 宿主根本没有（真名 `.ib-count` / `.aiw-menu-item` /
+ * `.cmdk-item`），那三条规则从上架起一直在画空气——净化器只管"能不能进宿主"，管不了"进来了绑不上"。
+ *
+ * 判据：扫**上架产物**（`public/market/pkg/*.uartix.json`，用户装的就是这份字节）里 kind=theme
+ * 的 `css`，取每条规则的选择器段，抽 `.类名`，必须落在
+ *   `CSS_CLASS_TOKENS`（宿主写过样式的类名）∪ `HOST_CLASS_EXTRA`（宿主渲染但故意留空的）里。
+ * 只查主题包：widget / panel 包自带 HTML，那些类名是它自己的，不归这条管。
+ *
+ * 认不到的形态（明写在这，免得下一个人以为它全能管）：
+ *  - 运行时拼出来的类名（宿主自己 `className={\`x-${k}\`}` 那一族）：真出现时按 J 的纪律
+ *    逐条写理由进 `J3_EXEMPT`，且必须仍被真引用；
+ *  - 选择器里的字符串与注释：先剥掉，`content: ".zz"` 不算引用。
+ */
+const J3_CEILING = 0;
+/** token → 为什么宿主确实会渲染它（说不出人话等于没有豁免） */
+const J3_EXEMPT = {};
+{
+  /** 取 CSS 里所有"选择器段"：`{` 之前那一段；`}` 与 `;` 之后重新起算（声明不会被当成选择器） */
+  function selectorsOf(css) {
+    const src = css.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""');
+    const out = [];
+    let buf = "";
+    for (const ch of src) {
+      if (ch === "{") {
+        const s = buf.trim();
+        if (s && !s.startsWith("@")) out.push(s);
+        buf = "";
+        continue;
+      }
+      if (ch === "}" || ch === ";") {
+        buf = "";
+        continue;
+      }
+      buf += ch;
+    }
+    return out;
+  }
+  const classTokens = (sel) => [...sel.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1]);
+
+  const pkgDir = path.join(ROOT, "public", "market", "pkg");
+  const dead = [];
+  const seenTok = new Set();
+  let themePkgs = 0;
+  let ruleSels = 0;
+  if (fs.existsSync(pkgDir)) {
+    for (const f of fs.readdirSync(pkgDir).filter((x) => x.endsWith(".uartix.json")).sort()) {
+      const manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, f), "utf8"));
+      for (const [artName, art] of Object.entries(manifest.artifacts ?? {})) {
+        if (!art || art.kind !== "theme" || typeof art.css !== "string" || !art.css.trim()) continue;
+        themePkgs++;
+        const seen = new Set();
+        for (const sel of selectorsOf(art.css)) {
+          ruleSels++;
+          for (const tok of classTokens(sel)) {
+            seenTok.add(tok);
+            if (CSS_CLASS_TOKENS.has(tok) || HOST_CLASS_EXTRA.has(tok) || seen.has(tok)) continue;
+            seen.add(tok);
+            if (J3_EXEMPT[tok]) continue;
+            dead.push(`${f} · ${artName}: .${tok}  ← ${sel.replace(/\s+/g, " ").slice(0, 52)}`);
+          }
+        }
+      }
+    }
+  }
+  /** 豁免也要"仍被真引用"（与 J / J2 同一条纪律）：包里没这个类名了，条目就得删 */
+  const staleExempt = Object.keys(J3_EXEMPT).filter((t) => !seenTok.has(t));
+  if (dead.length) {
+    console.error(`FAIL(J3): 主题包组件 CSS 里 ${new Set(dead.map((d) => d.split(": .")[1].split(" ")[0])).size} 个类名宿主根本不渲染 —— 那些规则一条都画不出来。`);
+    console.error("       改成真名，或说明为什么宿主会动态长出它（进 J3_EXEMPT 要写清出处）：");
+    for (const d of dead.slice(0, 20)) console.error("  - " + d);
+    fails++;
+  } else if (staleExempt.length) {
+    console.error(`FAIL(J3): 豁免名单里这 ${staleExempt.length} 条已经没人引用了，是个空门，删掉：${staleExempt.join(", ")}`);
+    fails++;
+  } else if (Object.keys(J3_EXEMPT).length > J3_CEILING) {
+    console.error(`FAIL(J3): 主题包死选择器豁免 ${Object.keys(J3_EXEMPT).length} 条 > 基线 ${J3_CEILING} —— 名单只降不升`);
+    fails++;
+  } else {
+    console.log(`OK(J3): ${themePkgs} 枚上架主题包的组件 CSS（${ruleSels} 条选择器段 / ${seenTok.size} 个类名）宿主全都渲染（豁免 ${Object.keys(J3_EXEMPT).length} 条 ≤ 基线 ${J3_CEILING}）`);
+  }
+
+  /* 门自己不是瞎的：夹具三种形态——假类名要抓到、真类名不许误报、@media 里套的选择器也要看见 */
+  const fx = [
+    ".zz-decoy-f { color: red; }",
+    ".btn { color: blue; }",
+    "@media (max-width: 10px) { .zz-decoy-g { color: red; } }",
+    ".ok-hook { content: \".zz-decoy-h\"; }",
+  ].join("\n");
+  const fxTokens = new Set(selectorsOf(fx).flatMap(classTokens));
+  const fxMissed = ["zz-decoy-f", "zz-decoy-g"].filter((t) => !fxTokens.has(t));
+  const fxFalse = ["zz-decoy-h"].filter((t) => fxTokens.has(t));
+  // 四段：顶层两条 + @media 里那条（@media 自己的名字段以 @ 开头，不算选择器）
+  if (fxMissed.length || selectorsOf(fx).length !== 4) {
+    console.error(`FAIL(J3): 选择器抽取对夹具漏检 ${fxMissed.join(", ") || ""}（段数 ${selectorsOf(fx).length}/4）—— 门是瞎的，上面那句"干净"不算数`);
+    fails++;
+  } else if (fxFalse.length) {
+    console.error(`FAIL(J3): 把字符串里的 .${fxFalse.join(", ")} 当成选择器了 —— 会误报`);
+    fails++;
+  } else if (!fxTokens.has("btn")) {
+    console.error("FAIL(J3): 夹具里 .btn 没被抽出来，抽取式坏了");
     fails++;
   }
 }

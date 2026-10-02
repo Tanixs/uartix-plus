@@ -7,9 +7,9 @@
     "zh": "默认主题海棠的暖色变体，适合长时间盯曲线的浅色环境。",
     "en": "A warm light variant of the default Begonia theme."
   },
-  "version": "1.1.0",
+  "version": "1.1.1",
   "minAppVersion": "0.4.1",
-  "updated": "2026-09-21",
+  "updated": "2026-10-02",
   "packageFile": "theme-begonia.uartix.json",
   "publicUrl": "/market/pkg/theme-begonia.uartix.json",
   "capabilities": [
