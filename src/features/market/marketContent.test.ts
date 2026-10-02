@@ -87,28 +87,30 @@ describe("P99b-N1：示例货架内容", () => {
    * 这一条只加严不改判据：它查的是自家内容，不是净化器的强度。
    */
   /**
-   * P132-B：两枚 Fluent（亮 / 暗）**除 `:root` 旋钮块外必须逐字节相同**。
+   * P131-D：同一层表达的**两条通路**必须一致——内置 style 包（`src/styles/builtinStyles/fluent.css`）
+   * 与暗色那枚插件包（`market/pkg/fluent-dark/components.css`）。
    *
-   * 暗色那枚不是"另一套组件层"：这一层的颜色本来就全部派生自 token，亮暗真正不同的只有
-   * 混合方向（按压态：亮色往深墨混，暗色的 `--text` 是白，照抄就会越按越亮）与阴影浓度
-   * （黑半透明影在 #323232 上看不出来）。这些都在 `:root` 的 `--fb-*` 里表达。
-   *
-   * 为什么钉字节而不是钉"选择器清单"：清单一致而规则体各写一份，正是本仓最恨的那类
-   * "两份真相"——改一处忘另一处，两枚主题就悄悄长成了两个产品。
+   * 为什么从"两枚包互相对账"改成"内置对包"：亮色那枚包在内置化之后下架了（同一层留两份抄本
+   * 就是等着漂），但组件层本身仍然有两条通路在写它。归一化 = 去掉主题前缀 + 去掉注释 +
+   * 只看 `:root` 之后的规则体；**注释不参与对账**（两边各自解释自己那条通路，本来就该不一样）。
    */
-  it("两枚 Fluent 的组件层只许差 `:root` 那一块（不许长出平行清单）", () => {
-    const bodyOf = (css: string) => {
-      const at = css.indexOf(":root {");
-      expect(at, "组件层得有一块 :root 旋钮").toBeGreaterThan(-1);
-      const end = css.indexOf("}", at) + 1;
-      return { root: css.slice(at, end), body: css.slice(end) };
-    };
-    const light = bodyOf(readFileSync(join(ROOT, "market", "pkg", "fluent-blue", "components.css"), "utf8"));
-    const dark = bodyOf(readFileSync(join(ROOT, "market", "pkg", "fluent-dark", "components.css"), "utf8"));
-    expect(dark.body, "两枚 Fluent 的规则体不是同一份：要么同步改，要么把差异做成 :root 旋钮").toBe(light.body);
-    // 反向：旋钮块**必须**不同——一模一样就说明暗色那枚没适配按压方向与阴影浓度
-    expect(dark.root).not.toBe(light.root);
-    expect(dark.root).toContain("--fb-accent-pressed: color-mix(in srgb, var(--accent) 84%, #000000)");
+  it("内置 style 包与 Fluent 那枚包：除前缀与 :root 旋钮外必须是同一份规则体", () => {
+    const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "");
+    const bodyOf = (s: string) => s.slice(s.indexOf("}", s.indexOf(":root")) + 1);
+    const norm = (s: string, prefix: string) => stripComments(bodyOf(s)).split(prefix).join("").replace(/\s+/g, " ").trim();
+    const builtin = readFileSync(join(ROOT, "src", "styles", "builtinStyles", "fluent.css"), "utf8");
+    const pkg = readFileSync(join(ROOT, "market", "pkg", "fluent-dark", "components.css"), "utf8");
+    const a = norm(builtin, '[data-theme="fluent"]');
+    const b = norm(pkg, "");
+    expect(a.length, "归一化后是空的，说明抽取方式与文件格式脱钩了").toBeGreaterThan(3000);
+    if (a !== b) {
+      let i = 0;
+      while (i < Math.min(a.length, b.length) && a[i] === b[i]) i++;
+      throw new Error(`两条通路的组件层不一致（第 ${i} 字符起）：\n  内置: …${a.slice(i, i + 120)}\n  包内: …${b.slice(i, i + 120)}\n改一处就要改另一处，或者把差异做成 :root 旋钮。`);
+    }
+    // 反向：前缀确实加了（不然这条测试只是在比同一份文件）
+    expect(builtin).toContain('[data-theme="fluent"] .btn');
+    expect(builtin.slice(0, builtin.indexOf(":root"))).not.toContain(pkg.slice(0, pkg.indexOf(":root")));
   });
 
   it("自家主题包：净化器零 error 也零 warning（带嫌疑上架等于给投稿人开脱）", () => {

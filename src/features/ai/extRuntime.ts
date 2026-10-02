@@ -24,6 +24,7 @@ import {
  */
 import { notifyStyleApply, setActiveThemeFacts, type ActiveThemeFacts } from "../../styles/themeFacts";
 import { syncThemeAssets } from "./assetRuntime";
+import { builtinStyleCss } from "../../styles/builtinStyles";
 import type { ThemeAsset } from "../../styles/themeCore";
 import { clearThemePreview, getThemePreview } from "./themePreview";
 
@@ -51,6 +52,9 @@ function ensureStyleEl(): HTMLStyleElement {
 
 /** 上一次算出的明暗归属：差量主题没给 `--bg` 也没声明时沿用它的（详设 S4 的 ③），要连同出处一起报出去 */
 let lastScheme: ThemeScheme | null = null;
+
+/** 上一次注入的 CSS 分块（见 `injectedCssParts`）；空数组 = 这次什么都没注 */
+let lastCssParts: string[] = [];
 
 /** 一条出声的通道：装载期的解析错误只报一次，不静默用半张表（G12 的运行期那一半） */
 let builtinErrorsReported = false;
@@ -176,6 +180,15 @@ export function applyStyleExts() {
   const cssParts: string[] = [];
   if (painted?.css) cssParts.push(`/* theme: ${painted.name} */\n${painted.css}`);
   /**
+   * P131-D 内置 style 包：只有**内置那一枚**在画时才注入（插件主题自带自己的 css，
+   * 而它的 `data-theme` 是 `plg:…`，那些带 `[data-theme="<id>"]` 前缀的规则本来也匹配不上——
+   * 这里显式判一层，是为了不依赖"前缀恰好挡得住"这种巧合）。
+   */
+  if (painted?.builtin) {
+    const part = builtinStyleCss(painted.id);
+    if (part) cssParts.push(`/* builtin-style: ${painted.id} */\n${part}`);
+  }
+  /**
    * P131-C 资产层与 CSS 同一条规矩：**只跟在画那一枚后面**。
    * 两枚主题的贴图叠在一起，谁也不知道屏幕上那张噪声是谁给的。
    */
@@ -217,8 +230,22 @@ export function applyStyleExts() {
     root.dataset.scheme = scheme;
     root.style.colorScheme = scheme;
   }
+  lastCssParts = cssParts;
   setActiveThemeFacts(facts);
   notifyStyleApply();
+}
+
+/**
+ * 上一次注入的 CSS 是哪几块（来源标签 + 字节数）。
+ * 与 `rootVarLayers()` 同一族性质：DOM 缺席时也能读，所以"到底注入了什么"这件事
+ * 在 node 测试里可断言，而不是只能在真机上看。P131-D 的内置 style 包靠它钉"只在画内置
+ * 那一枚时才注入"。
+ */
+export function injectedCssParts(): { label: string; bytes: number }[] {
+  return lastCssParts.map((p) => {
+    const m = /^\/\* (.+?) \*\//.exec(p);
+    return { label: m ? m[1] : "(未标注来源)", bytes: p.length };
+  });
 }
 
 

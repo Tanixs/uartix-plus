@@ -249,7 +249,8 @@ select.input {
   transition: background-color var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease);
 }
 
-.set-switch input:checked + * ,
+/* contrast-exempt：开关轨道不承载文字（标签在 .set-switch 那一层），accent 底只给滑块当背景 */
+.set-switch input:checked + *,
 .set-switch.on {
   background: var(--accent);
   border-color: var(--accent);
@@ -330,6 +331,7 @@ select.input {
   transition: background-color var(--fb-duration) var(--ease);
 }
 
+/* contrast-exempt：sash 是拖拽分隔条，本身没有文字 */
 .dv-sash:hover {
   background: var(--accent);
 }

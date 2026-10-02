@@ -128,13 +128,24 @@ function splitSelectors(selector: string): string[] {
   return selector.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+/** 一条选择器列表最多几段（段数封顶是为了让"每条各自 ≤200"仍然有上界，见下面那条注释） */
+const MAX_SELECTOR_PARTS = 10;
+
 /** 选择器层判定：返回拒绝理由，通过返回 null */
 function checkSelector(sel: string): string | null {
   if (!sel) return "empty_selector";
-  if (sel.length > 200) return "selector_too_long";
   const parts = splitSelectors(sel);
   if (!parts.length) return "empty_selector";
+  /**
+   * 长度按**每一段**判，不按逗号串起来的整条判。
+   * 原来量整条：P131-D 内置 style 包给每条选择器都加了 `[data-theme="<id>"]` 前缀
+   * （那是它锁主题的方式），于是 `.btn:focus-visible, .btn:active, …` 这种本来正常的分组
+   * 会被"前缀 × 段数"顶过 200 —— 越守规矩的文件越容易撞线，说明量的对象错了。
+   * 整条的总量仍然有界：段数封顶 {@link MAX_SELECTOR_PARTS}，所以最坏 10 × 200。
+   */
+  if (parts.length > MAX_SELECTOR_PARTS) return `too_many_selector_parts:${parts.length}>${MAX_SELECTOR_PARTS}`;
   for (const p of parts) {
+    if (p.length > 200) return "selector_too_long";
     if (BANNED_SELECTOR_HEAD.test(p)) return "global_selector";
     for (const re of BANNED_SELECTOR_PATTERNS) if (re.test(p)) return "banned_selector_syntax";
   }
@@ -246,8 +257,12 @@ function checkPair(selector: string, cssText: string, push: (p: string) => void,
    * `:root` 特例：主题确实要定义新的自定义属性（`--fx-color` 这类配方旋钮），
    * 但**白名单 token 只能走 `theme_patch`**——两处写同一个变量就又回到 P91-D 的"两份真相"。
    * 所以这里放行"整条规则只声明 `--*` 且不碰白名单"的 `:root`，其余照拒。
+   *
+   * P131-D 把带属性限定的写法一起收进来（`:root[data-theme="x"]`）：那是**更严**的写法
+   * （只在某一枚主题在画时才生效，而裸 `:root` 什么时候都生效），
+   * 没有理由因为"它多写了限定"反而被判成越权。放行条件一条没变：只许声明新的 `--*`。
    */
-  if (parts.length && parts.every((p) => /^:root$/i.test(p))) {
+  if (parts.length && parts.every((p) => /^:root(\[[^\]]*\])?$/i.test(p))) {
     /**
      * 取"第一个 { 到最后一个 }"之间——**不是**"{ 之后全部"。
      * P132-A 装 Fluent 组件层时踩到的：浏览器把规则序列化成 `:root { --a: 1; --b: 2; }`

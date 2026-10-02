@@ -3,9 +3,11 @@
    主题文件是一段纯 token 表：`:root[data-theme]` 一块、块外零规则（parseThemeBlock 出声 +
    builtinThemes.test 钉着"样式表里不该再有按 data-theme 配色的规则"），所以提示词里的
    亚克力 backdrop-filter、hover 上浮 -translate-y、active:scale-[0.97]、focus ring-offset、
-   图标 group-hover 缩放——那些都是**组件规则**，在这里一条都写不进去。不是不想，是这一层
-   没有这个能力；能力边界清单与改好的提示词见
-   docs/designs/P130-内置主题流利蓝-能力边界与提示词适配.md。 */
+   图标 group-hover 缩放——那些都是**组件规则**，写不进这一段。
+   但它们没丢：P131-D 起，这枚内置主题的组件层住在 `src/styles/builtinStyles/fluent.css`
+   （每条选择器锁在 `[data-theme="fluent"]` 上，装载时并入与插件主题同一个注入点，门 K 判）。
+   能力边界清单与改好的提示词见 docs/designs/P130-…-能力边界与提示词适配.md（那一份写于
+   组件通道存在之前，"写不进去"那句话现在只对这一半成立）。 */
 :root[data-theme="fluent"] {
   color-scheme: light;
 

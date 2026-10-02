@@ -23,7 +23,7 @@ const { BASELINE_VARS } = await import("../../styles/builtinThemes");
 const { effectiveRootVars, rootVarLayers } = await import("../../styles/rootVars");
 const extStore = await import("./extensionStore");
 const settings = await import("../settings/settingsStore");
-const { applyStyleExts } = await import("./extRuntime");
+const { applyStyleExts, injectedCssParts } = await import("./extRuntime");
 const { activeThemeFacts } = await import("../../styles/themeFacts");
 
 /** 主题文件的真实形状：从磁盘那份取（不另抄色值，抄了这份测试就只是在测自己） */
@@ -238,6 +238,7 @@ describe("P131-B3 · theme_preview 走的是同一个合成器（§A7）", () =>
 describe("P131-C · 主题资产跟着「在画那一枚」走", () => {
   /** node 里没有 Blob / createObjectURL，自己 stub：这一条测的是接线，不是浏览器的 blob 实现 */
   const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const prev = { Blob: globalThis.Blob, URL: globalThis.URL };
   beforeAll(() => {
     vi.stubGlobal("Blob", class {});
     let n = 0;
@@ -246,7 +247,14 @@ describe("P131-C · 主题资产跟着「在画那一枚」走", () => {
       Object.assign(globalThis.URL ?? function () {}, { createObjectURL: () => "blob:fake-" + ++n, revokeObjectURL: () => undefined }),
     );
   });
-  afterAll(() => vi.unstubAllGlobals());
+  /**
+   * 只收回这两枚。`vi.unstubAllGlobals()` 会把文件顶上那枚 localStorage 桩一起拔掉，
+   * 后面每一组测试都在 `persist()` 里 ReferenceError —— 假失败比没测更坏（它让人以为功能坏了）。
+   */
+  afterAll(() => {
+    vi.stubGlobal("Blob", prev.Blob);
+    vi.stubGlobal("URL", prev.URL);
+  });
 
   it("启用带资产的主题 ⇒ --fx-asset-<id> 落到内联样式；停用即撤", () => {
     extStore.upsertProjection({
@@ -290,5 +298,48 @@ describe("P131-C · 主题资产跟着「在画那一枚」走", () => {
     const vars = effectiveRootVars();
     expect(vars["--fx-asset-noise-two"], "最新那枚在画，它的材质该在").toBeTruthy();
     expect(vars["--fx-asset-noise-one"], "被压住的那枚的材质不该一起贴上去").toBeUndefined();
+  });
+});
+
+describe("P131-D · 内置 style 包只跟在画那一枚内置主题后面", () => {
+  const labels = () => injectedCssParts().map((p) => p.label);
+
+  it("画内置「流利蓝」⇒ 注入它的组件层；画别的内置主题 ⇒ 一块都不注入", () => {
+    pickTheme("fluent");
+    expect(labels()).toContain("builtin-style: fluent");
+    pickTheme("begonia");
+    expect(labels().filter((l) => l.startsWith("builtin-style")), "海棠没有组件层，不该有东西被注入").toEqual([]);
+  });
+
+  it("插件主题在画时不注入内置那份（前缀挡不住不等于判据，这里显式判）", () => {
+    pickTheme("fluent");
+    expect(labels()).toContain("builtin-style: fluent");
+    extStore.upsertProjection({
+      id: "plg:ds:main",
+      type: "theme",
+      name: "带 CSS 的那枚",
+      desc: "",
+      version: "1.0.0",
+      enabled: true,
+      createdAt: 5000,
+      pluginRef: "pkg.ds",
+      vars: { "--bg": "#101010" },
+      css: ".x{color:red}",
+    });
+    applyStyleExts();
+    expect(activeThemeFacts().builtin, "在画的应当是插件那枚").toBe(false);
+    expect(labels()).toContain("theme: 带 CSS 的那枚");
+    expect(labels().some((l) => l.startsWith("builtin-style")), "画的是插件主题，内置组件层不该还挂着").toBe(false);
+  });
+
+  it("预览内置「流利蓝」时也带组件层（预览要给的就是最终样子）", async () => {
+    const { clearThemePreview, setThemePreview } = await import("./themePreview");
+    pickTheme("begonia");
+    setThemePreview({ id: "fluent", expiresAt: Date.now() + 30_000 }, applyStyleExts);
+    applyStyleExts();
+    expect(labels()).toContain("builtin-style: fluent");
+    clearThemePreview();
+    applyStyleExts();
+    expect(labels().some((l) => l.startsWith("builtin-style"))).toBe(false);
   });
 });

@@ -38,10 +38,16 @@ beforeEach(() => {
   }));
 });
 
+/** 真身先记下来（在任何 stub 之前求值），afterEach 只收回这两枚 */
+const prevBlob = globalThis.Blob;
+const prevUrl = globalThis.URL;
+
 afterEach(() => {
   revertScratchAssets();
   syncThemeAssets([]);
-  vi.unstubAllGlobals();
+  // 不用 unstubAllGlobals：它会把文件顶上的 localStorage 桩一起拔掉（同 themeApply 那条注释）
+  vi.stubGlobal("Blob", prevBlob);
+  vi.stubGlobal("URL", prevUrl);
 });
 
 describe("P131-C · 主题资产层（在画那一枚带的贴图）", () => {

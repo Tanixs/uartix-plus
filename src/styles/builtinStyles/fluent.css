@@ -1,29 +1,25 @@
-/* 流利蓝 · 组件层（Fluent Blue full theme, layer 2）
+/* 流利蓝 · 内置组件层（P131-D 第一条内置 style 包）
  *
- * 这一份是 P130 那枚内置主题**写不进去**的那一半：亚克力、按下回弹、焦点环留白、
- * 页签底部那条强调色……全是组件规则，内置主题文件是 token-only 的通道（一块
- * `:root[data-theme]`，块外零规则），装不下它们。走插件包通路正是为了这一层。
+ * 这一份补的是 P130 那枚内置主题**装不下**的那一半：控件五态、标题栏窗口键、浮层与焦点环留白。
+ * 主题文件（`themes/<id>.css`）是 token-only 的数据、块外零规则；组件规则走这条新通道：
+ * `src/styles/builtinStyles/<id>.css` 由 `styles/builtinStyles.ts` 以 ?raw 读进来，
+ * 在 `extRuntime` 里并入与插件主题**同一个注入点**。
  *
- * 四条自我约束，每条都对应 `theme_audit` 的一格（不是审美偏好，是可验证性）：
+ * 三条硬规矩都由门 K（`.tools/check-style.cjs`）钉着，不是风格建议：
+ *  1. 每条选择器必须以 `[data-theme="fluent"]` 开头 ⇒ 这层的颜色漏不到别的主题上
+ *     （`theme.css` 里"样式表不许出现 [data-theme=" 那条禁令管的是样式表，管不到数据包，两不冲突）；
+ *  2. 整份文件过与第三方 CSS **同一台净化器**（guardStyleText）：html/body/#root、不落层槽的
+ *     position:fixed、越权 z-index、外链 url() 一律进不来——内置的没有理由比插件松；
+ *  3. 文件必须登记在装载表里（多一个文件却没人装载 = 它安静地不生效，那是最难查的那种坏）。
  *
- * 1. **颜色一律走 var()**，字面量只出现在三处：Windows 关闭键那两枚（#E81123/#C42B1C，
- *    它是系统约定不是本家配色）、亚克力/遮罩用的半透明白黑、以及滚动条槽。
- *    理由：任何写死的 hex 都会脱离四档表面阶梯，静态门禁看不见注入层，只有审计看得见。
- * 2. **`transition` / `animation` 只写在单类选择器上**（特异性 (0,1,0)），
- *    永远低于宿主那条 `html.no-motion *`（0,1,1）——用户开"减少动效"时必须压得住。
- *    需要两级类才打得到的地方，动效交给 `:where()`（零特异性）或者干脆不做。
- *    状态**颜色**（`.btn:hover` 之类）不受这条限制，它不是动效。
- * 3. **不写 `position:fixed`、不写 z-index**：这一层没有任何需要新造浮层的活，
- *    而浮层一旦要落层槽，就该是宿主登记过的事，不是主题顺手加的。
- * 4. **只碰真实存在的类名**：每个选择器都在 1421 的活界面上核对过（`ui_inspect` /
- *    theme.css 里 grep 得到），命不中的不写——写一条打偏的规则比不写更糟，
- *    它会让下一个人以为这个组件已经被主题管过了。
+ * 动效降级照旧成立：宿主两条基线（`html.no-motion *` 与 prefers-reduced-motion）都带
+ * `!important`，压得过这里加了前缀的选择器——本批在 1421 上量过，见 docs 的 P131-D 一节。
  *
- * 缺件如实记 N/A：宿主没有进度条（`<progress>` / role=progressbar 全仓 0 命中）、
- * 没有日期选择器（type=date 0 命中）。不为凑矩阵造组件。
+ * 与 `market/pkg/fluent-dark` 那枚包的关系：**同一层表达的两条通路**。除本文件的前缀与
+ * `:root` 旋钮块外，规则体必须一致（`marketContent.test.ts` 把两边归一化后逐字节对账）。
+ * 改一处就要改另一处；真要分叉，先想清楚为什么让内置和插件长成两个产品。
  */
-
-:root {
+:root[data-theme="fluent"] {
   /* 本包内部用的旋钮。只定义新键、不碰白名单（白名单归 theme_patch / vars 那块）。 */
   --fb-fill-secondary: color-mix(in srgb, var(--text) 5%, var(--bg-panel));
   --fb-fill-hover: color-mix(in srgb, var(--text) 8%, var(--bg-panel));
@@ -44,66 +40,66 @@
 /* ---------- 外壳：两条标题栏 / 信息栏 / 活动导轨 ---------- */
 
 /* Fluent 的标题栏不是"涂深的"，是"退到壳档 + 一条极轻的下边线"。 */
-.ibar {
+[data-theme="fluent"] .ibar {
   border-bottom: 1px solid var(--border-soft);
 }
 
-.tbar {
+[data-theme="fluent"] .tbar {
   border-bottom: 1px solid var(--border-soft);
 }
 
 /* 窗口三键：Fluent 要的是"方角、铺满整行高、hover 才上色"，与本仓那套圆角图标键不同。 */
-.tb-btn {
+[data-theme="fluent"] .tb-btn {
   border-radius: var(--radius-s);
   color: var(--text-dim);
   transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
 }
 
-.tb-btn:hover {
+[data-theme="fluent"] .tb-btn:hover {
   background: var(--fb-fill-hover);
   color: var(--text);
 }
 
-.tb-btn:active {
+[data-theme="fluent"] .tb-btn:active {
   background: var(--fb-fill-pressed);
   color: var(--text-dim);
 }
 
 /* 关闭键是 Windows 的约定色，不是 Fluent 本家色，所以写死（见文件头第 1 条）。 */
-.tb-close:hover {
+[data-theme="fluent"] .tb-close:hover {
   background: #e81123;
   color: #ffffff;
   border-radius: var(--radius-s);
 }
 
-.tb-close:active {
+[data-theme="fluent"] .tb-close:active {
   background: #c42b1c;
   color: #ffffff;
 }
 
-.statusbar {
+[data-theme="fluent"] .statusbar {
   border-top: 1px solid var(--border-soft);
 }
 
 /* 活动导轨：选中项 = 淡底 + 左侧一枚强调色小胶囊（Fluent NavigationView 的形状）。
    胶囊用 ::before 画，不用"单侧粗边框"——那条是本仓明令避免的装饰手法，且会虚增边框读数。 */
-.rail2-btn {
+[data-theme="fluent"] .rail2-btn {
   position: relative;
   color: var(--text-dim);
   transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
 }
 
-.rail2-btn:hover {
+[data-theme="fluent"] .rail2-btn:hover {
   background: var(--fb-fill-secondary);
   color: var(--text);
 }
 
-.rail2-btn.on {
+[data-theme="fluent"] .rail2-btn.on {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
-.rail2-btn.on::before {
+[data-theme="fluent"] .rail2-btn.on::before {
   content: "";
   position: absolute;
   left: 2px;
@@ -119,7 +115,7 @@
 
 /* Fluent 标准按钮：白底 + 一圈很轻的描边 + 底部那道略重的边（"厚度"）。
    本仓 --ctl-h-2 是 26px，Fluent 是 32px——这里不追：追高会把 700px 宽的面板工具条顶穿（P117-C 刚治平）。 */
-.btn {
+[data-theme="fluent"] .btn {
   background: var(--bg-panel);
   border-color: var(--border);
   border-bottom-color: var(--line-strong);
@@ -128,80 +124,80 @@
   transition: background-color var(--fb-duration) var(--ease), border-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
 }
 
-.btn:hover {
+[data-theme="fluent"] .btn:hover {
   background: var(--fb-fill-hover);
   border-color: var(--line-strong);
 }
 
-.btn:active {
+[data-theme="fluent"] .btn:active {
   background: var(--fb-fill-pressed);
   border-color: var(--border);
   color: var(--text-dim);
   transform: scale(0.98);
 }
 
-.btn:disabled,
-.btn[disabled] {
+[data-theme="fluent"] .btn:disabled,
+[data-theme="fluent"] .btn[disabled] {
   background: var(--fb-fill-secondary);
   border-color: var(--border-soft);
   color: color-mix(in srgb, var(--text-dim) 60%, var(--bg-panel));
   transform: none;
 }
 
-.btn.primary {
+[data-theme="fluent"] .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
 }
 
-.btn.primary:hover {
+[data-theme="fluent"] .btn.primary:hover {
   background: var(--fb-accent-hover);
   border-color: var(--fb-accent-hover);
 }
 
-.btn.primary:active {
+[data-theme="fluent"] .btn.primary:active {
   background: var(--fb-accent-pressed);
   border-color: var(--fb-accent-pressed);
   color: var(--on-accent);
 }
 
-.btn.primary:disabled {
+[data-theme="fluent"] .btn.primary:disabled {
   background: color-mix(in srgb, var(--accent) 38%, var(--bg-panel));
   border-color: transparent;
   color: color-mix(in srgb, var(--on-accent) 72%, transparent);
 }
 
 /* 图标键：Fluent 的图标按钮是"方一点、hover 才有底"，不常驻描边。 */
-.icon-btn {
+[data-theme="fluent"] .icon-btn {
   border-color: transparent;
   border-bottom-color: transparent;
   background: transparent;
 }
 
-.icon-btn:hover {
+[data-theme="fluent"] .icon-btn:hover {
   background: var(--fb-fill-hover);
   border-color: var(--border-soft);
 }
 
-.icon-btn:active {
+[data-theme="fluent"] .icon-btn:active {
   background: var(--fb-fill-pressed);
   transform: scale(0.94);
 }
 
 /* 焦点：Fluent 的 focus rect 是"外实内留白"。留白就是 outline-offset——
    这一条在 P130 那份文档里被列为"主题层够不到的能力"，在这一层它写得出。 */
-.btn:focus-visible,
-.icon-btn:focus-visible,
-.input:focus-visible,
-.qk-chip:focus-visible,
-.rail2-btn:focus-visible {
+[data-theme="fluent"] .btn:focus-visible,
+[data-theme="fluent"] .icon-btn:focus-visible,
+[data-theme="fluent"] .input:focus-visible,
+[data-theme="fluent"] .qk-chip:focus-visible,
+[data-theme="fluent"] .rail2-btn:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
 /* ---------- 输入族 ---------- */
 
-.input {
+[data-theme="fluent"] .input {
   background: var(--bg-panel);
   border-color: var(--border);
   border-bottom-color: var(--line-strong);
@@ -209,84 +205,85 @@
   transition: border-color var(--fb-duration) var(--ease), background-color var(--fb-duration) var(--ease);
 }
 
-.input:hover {
+[data-theme="fluent"] .input:hover {
   border-bottom-color: var(--text);
 }
 
-.input:focus {
+[data-theme="fluent"] .input:focus {
   background: var(--bg-panel);
   border-bottom-color: var(--accent);
   border-bottom-width: 2px;
 }
 
-.input:disabled,
-.input[readonly] {
+[data-theme="fluent"] .input:disabled,
+[data-theme="fluent"] .input[readonly] {
   background: var(--fb-fill-secondary);
   border-bottom-color: var(--border);
   color: var(--text-dim);
 }
 
-select.input {
+[data-theme="fluent"] select.input {
   background: var(--bg-panel);
 }
 
 /* 数字步进（控制画布卡片上的 ▲▼）：Fluent 把它当"贴着输入框的一组小键"。 */
-.ctl-step {
+[data-theme="fluent"] .ctl-step {
   background: var(--bg-panel);
   border-color: var(--border);
 }
 
-.ctl-step:focus-within {
+[data-theme="fluent"] .ctl-step:focus-within {
   border-bottom-color: var(--accent);
   border-bottom-width: 2px;
 }
 
 /* 勾选与单选：Fluent 的方框在"未选"时是描边为主、底色很淡，选中才填满强调色。
    accent-color 已经管住了原生态，这里只补容器。 */
-.chk {
+[data-theme="fluent"] .chk {
   color: var(--text);
 }
 
-.chk:hover .chk-box,
-.chk:hover input[type="checkbox"] {
+[data-theme="fluent"] .chk:hover .chk-box,
+[data-theme="fluent"] .chk:hover input[type="checkbox"] {
   border-color: var(--accent);
 }
 
 /* 开关：本仓是 label 包 input 的自绘形状。轨道用凹档、滑块用白、开=强调色。 */
-.set-switch {
+[data-theme="fluent"] .set-switch {
   background: var(--bg-inset);
   border-color: var(--line-strong);
   transition: background-color var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease);
 }
 
-.set-switch input:checked + * ,
-.set-switch.on {
+/* contrast-exempt：开关轨道不承载文字（标签在 .set-switch 那一层），accent 底只给滑块当背景 */
+[data-theme="fluent"] .set-switch input:checked + *,
+[data-theme="fluent"] .set-switch.on {
   background: var(--accent);
   border-color: var(--accent);
 }
 
 /* 滑杆：轨道两段（已走/未走）都归强调色家族，拇指白底描边。
    伪元素 ::-webkit-slider-* 的特异性按伪元素计（(0,1,1) 不高于基线），动效写在这里安全。 */
-.ctl-slider {
+[data-theme="fluent"] .ctl-slider {
   background: transparent;
 }
 
-.ctl-slider::-webkit-slider-runnable-track {
+[data-theme="fluent"] .ctl-slider::-webkit-slider-runnable-track {
   background: color-mix(in srgb, var(--accent) 26%, var(--bg-inset));
   border-radius: var(--radius-pill);
 }
 
-.ctl-slider::-webkit-slider-thumb {
+[data-theme="fluent"] .ctl-slider::-webkit-slider-thumb {
   background: var(--bg-panel);
   border: 1px solid var(--line-strong);
   box-shadow: var(--fb-shadow-pop);
 }
 
-.ctl-slider:hover::-webkit-slider-thumb {
+[data-theme="fluent"] .ctl-slider:hover::-webkit-slider-thumb {
   border-color: var(--accent);
 }
 
-.ctl-slider:disabled::-webkit-slider-thumb {
+[data-theme="fluent"] .ctl-slider:disabled::-webkit-slider-thumb {
   background: var(--fb-fill-secondary);
   border-color: var(--border-soft);
 }
@@ -294,53 +291,54 @@ select.input {
 /* ---------- 页签（dockview 公共类，只用公开形状） ---------- */
 
 /* 页签条：Fluent 的标签栏是"内容往上抬"，所以条本身退到凹档、选中的那枚升到面板档。 */
-.dv-tabs-and-actions-container {
+[data-theme="fluent"] .dv-tabs-and-actions-container {
   background: var(--bg-inset);
 }
 
-.dv-tab {
+[data-theme="fluent"] .dv-tab {
   border-radius: var(--radius-m) var(--radius-m) 0 0;
   color: var(--text-dim);
   transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
 }
 
-.dv-tab:hover {
+[data-theme="fluent"] .dv-tab:hover {
   background: var(--fb-fill-hover);
   color: var(--text);
 }
 
-.dv-tab.dv-active-tab {
+[data-theme="fluent"] .dv-tab.dv-active-tab {
   background: var(--bg-panel);
   color: var(--text);
   box-shadow: inset 0 2px 0 0 var(--accent);
 }
 
-.dv-default-tab {
+[data-theme="fluent"] .dv-default-tab {
   color: inherit;
 }
 
-.dv-default-tab-content {
+[data-theme="fluent"] .dv-default-tab-content {
   color: inherit;
 }
 
 /* 页签上的那颗关闭叉：13px 是可见尺寸，命中区靠内边距撑（P105-B 的结论，别再改回 15）。 */
-.dv-default-tab-action {
+[data-theme="fluent"] .dv-default-tab-action {
   border-radius: var(--radius-s);
   color: var(--text-dim);
 }
 
-.dv-default-tab-action:hover {
+[data-theme="fluent"] .dv-default-tab-action:hover {
   background: var(--fb-fill-hover);
   color: var(--text);
 }
 
 /* 分隔条：可见很细、热区靠 ::before 放宽（与本仓 B13 同一条手法）。 */
-.dv-sash {
+[data-theme="fluent"] .dv-sash {
   background: var(--border-soft);
   transition: background-color var(--fb-duration) var(--ease);
 }
 
-.dv-sash:hover {
+/* contrast-exempt：sash 是拖拽分隔条，本身没有文字 */
+[data-theme="fluent"] .dv-sash:hover {
   background: var(--accent);
 }
 
@@ -352,10 +350,10 @@ select.input {
    （`theme_audit` 就是这种扫描）40 秒都不返回；去掉 blur 后同一台机器同一屏秒回。
    也就是说：亚克力不是"更好看"，是"每次重算都要重合成一遍"。
    真 acrylic 的正确位置是 P131-E（Rust 侧窗口效果，由合成器做），不是主题 CSS。 */
-.ctx-menu,
-.sb-menu,
-.aiw-menu,
-.cmdk {
+[data-theme="fluent"] .ctx-menu,
+[data-theme="fluent"] .sb-menu,
+[data-theme="fluent"] .aiw-menu,
+[data-theme="fluent"] .cmdk {
   background: var(--fb-acrylic);
   background-image: var(--fb-noise);
   border: 1px solid var(--border-soft);
@@ -366,40 +364,40 @@ select.input {
 /* 四族"可点的行"：右键菜单项 / 信息栏计数键 / 挂件菜单项 / 命令面板行。
    类名是照宿主改对的——原先写的 `.sb-item`、`.aiw-item`、`.cmdk-row` 宿主里根本没有，
    那三条一直在画空气（新门 J3 抓出来的，见 docs 的 P132-A2 一节）。 */
-.ctx-item,
-.ib-count,
-.aiw-menu-item,
-.cmdk-item {
+[data-theme="fluent"] .ctx-item,
+[data-theme="fluent"] .ib-count,
+[data-theme="fluent"] .aiw-menu-item,
+[data-theme="fluent"] .cmdk-item {
   border-radius: var(--radius-s);
   color: var(--text);
   transition: background-color var(--dur-snap) var(--ease);
 }
 
-.ctx-item:hover,
-.ib-count:hover,
-.aiw-menu-item:hover,
-.cmdk-item:hover,
-.ctx-item:focus,
-.ib-count:focus,
-.aiw-menu-item:focus,
-.cmdk-item.sel {
+[data-theme="fluent"] .ctx-item:hover,
+[data-theme="fluent"] .ib-count:hover,
+[data-theme="fluent"] .aiw-menu-item:hover,
+[data-theme="fluent"] .cmdk-item:hover,
+[data-theme="fluent"] .ctx-item:focus,
+[data-theme="fluent"] .ib-count:focus,
+[data-theme="fluent"] .aiw-menu-item:focus,
+[data-theme="fluent"] .cmdk-item.sel {
   background: var(--fb-fill-hover);
 }
 
 /* 禁用态宿主有两写法：按钮走 `:disabled`，挂件菜单是 `.disabled` 类 ⇒ 两边都得给 */
-.ctx-item:disabled,
-.ib-count:disabled,
-.cmdk-item:disabled {
+[data-theme="fluent"] .ctx-item:disabled,
+[data-theme="fluent"] .ib-count:disabled,
+[data-theme="fluent"] .cmdk-item:disabled {
   color: color-mix(in srgb, var(--text-dim) 62%, var(--bg-panel));
   background: transparent;
 }
 
-.aiw-menu-item.disabled,
-.aiw-menu-item.disabled:hover {
+[data-theme="fluent"] .aiw-menu-item.disabled,
+[data-theme="fluent"] .aiw-menu-item.disabled:hover {
   background: transparent;
 }
 
-.cmdk-input {
+[data-theme="fluent"] .cmdk-input {
   background: transparent;
   border: none;
   border-bottom: 1px solid var(--border-soft);
@@ -407,11 +405,11 @@ select.input {
   color: var(--text);
 }
 
-.cmdk-empty {
+[data-theme="fluent"] .cmdk-empty {
   color: var(--text-dim);
 }
 
-.help-bubble {
+[data-theme="fluent"] .help-bubble {
   background: var(--fb-acrylic);
   background-image: var(--fb-noise);
   border: 1px solid var(--border-soft);
@@ -421,29 +419,29 @@ select.input {
 }
 
 /* 提示条：本仓的 .ai-toast 已经用 inset 描边当"厚度"，这里只把它抬到 Fluent 的弹层影。 */
-.ai-toast {
+[data-theme="fluent"] .ai-toast {
   box-shadow: inset 0 0 0 1px var(--border-soft), var(--fb-shadow-pop);
 }
 
 /* ---------- 对话框 ---------- */
 
-.modal-mask {
+[data-theme="fluent"] .modal-mask {
   background: color-mix(in srgb, var(--text) 34%, transparent);
 }
 
-.modal {
+[data-theme="fluent"] .modal {
   background: var(--bg-panel);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xl);
   box-shadow: var(--fb-shadow-pop);
 }
 
-.modal-title {
+[data-theme="fluent"] .modal-title {
   color: var(--text);
   font-weight: 600;
 }
 
-.modal-foot {
+[data-theme="fluent"] .modal-foot {
   border-top: 1px solid var(--border-soft);
 }
 
@@ -451,10 +449,10 @@ select.input {
 
 /* Fluent 的卡片靠"极轻的描边 + 很浅的影"分层，hover 才加一档影——不上浮（上浮是动效，
    而 hover 位移会把整屏的滚动条算进重排，代价与收益不成比例）。 */
-.ctl-card,
-.theme-card,
-.set-card,
-.props-item {
+[data-theme="fluent"] .ctl-card,
+[data-theme="fluent"] .theme-card,
+[data-theme="fluent"] .set-card,
+[data-theme="fluent"] .props-item {
   background: var(--bg-panel);
   border: 1px solid var(--fb-card-line);
   border-radius: var(--radius-l);
@@ -462,57 +460,57 @@ select.input {
   transition: border-color var(--fb-duration) var(--ease), box-shadow var(--fb-duration) var(--ease);
 }
 
-.ctl-card:hover,
-.theme-card:hover,
-.set-card:hover,
-.props-item:hover {
+[data-theme="fluent"] .ctl-card:hover,
+[data-theme="fluent"] .theme-card:hover,
+[data-theme="fluent"] .set-card:hover,
+[data-theme="fluent"] .props-item:hover {
   border-color: var(--border);
   box-shadow: var(--fb-shadow-pop);
 }
 
-.theme-card.on {
+[data-theme="fluent"] .theme-card.on {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
-.tpl-row,
-.cmd-item {
+[data-theme="fluent"] .tpl-row,
+[data-theme="fluent"] .cmd-item {
   border-radius: var(--radius-m);
   color: var(--text);
   transition: background-color var(--dur-snap) var(--ease);
 }
 
-.tpl-row:hover,
-.cmd-item:hover {
+[data-theme="fluent"] .tpl-row:hover,
+[data-theme="fluent"] .cmd-item:hover {
   background: var(--fb-fill-secondary);
 }
 
-.tpl-row.on,
-.cmd-item.on {
+[data-theme="fluent"] .tpl-row.on,
+[data-theme="fluent"] .cmd-item.on {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
 /* ---------- 属性页与提示层级 ---------- */
 
-.props-title {
+[data-theme="fluent"] .props-title {
   color: var(--text);
   font-weight: 600;
 }
 
-.props-section {
+[data-theme="fluent"] .props-section {
   border-top: 1px solid var(--border-soft);
 }
 
-.props-hint {
+[data-theme="fluent"] .props-hint {
   color: var(--text-dim);
 }
 
-.form-hint {
+[data-theme="fluent"] .form-hint {
   color: var(--text-dim);
 }
 
-.set-group-title {
+[data-theme="fluent"] .set-group-title {
   color: var(--text-dim);
   font-weight: 600;
   letter-spacing: 0.2px;
@@ -520,66 +518,66 @@ select.input {
 
 /* ---------- 芯片 / 胶囊 / 计数徽标 ---------- */
 
-.qk-chip {
+[data-theme="fluent"] .qk-chip {
   background: var(--bg-panel);
   border: 1px solid var(--fb-card-line);
   color: var(--text);
   transition: background-color var(--fb-duration) var(--ease), border-color var(--fb-duration) var(--ease);
 }
 
-.qk-chip:hover {
+[data-theme="fluent"] .qk-chip:hover {
   background: var(--fb-fill-hover);
   border-color: var(--border);
 }
 
-.qk-chip.on {
+[data-theme="fluent"] .qk-chip.on {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
 }
 
-.cb-capsule {
+[data-theme="fluent"] .cb-capsule {
   background: var(--fb-fill-secondary);
   border: 1px solid var(--fb-card-line);
   color: var(--text-dim);
 }
 
-.ib-count {
+[data-theme="fluent"] .ib-count {
   background: var(--accent-soft);
   color: var(--accent);
   border-radius: var(--radius-pill);
 }
 
 /* 面板工具条上那排小键（帧画布 / 组帧台共用形状） */
-.pca-btn {
+[data-theme="fluent"] .pca-btn {
   border-radius: var(--radius-m);
   color: var(--text-dim);
   transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
 }
 
-.pca-btn:hover {
+[data-theme="fluent"] .pca-btn:hover {
   background: var(--fb-fill-hover);
   color: var(--text);
 }
 
-.pca-btn.on {
+[data-theme="fluent"] .pca-btn.on {
   background: var(--accent-soft);
   color: var(--accent);
 }
 
-.pca-btn:disabled {
+[data-theme="fluent"] .pca-btn:disabled {
   color: color-mix(in srgb, var(--text-dim) 55%, var(--bg-panel));
   background: transparent;
 }
 
 /* ---------- AI 对话面 ---------- */
 
-.ai-msg {
+[data-theme="fluent"] .ai-msg {
   border-radius: var(--radius-l);
 }
 
-.ai-msg code,
-.ai-msg pre {
+[data-theme="fluent"] .ai-msg code,
+[data-theme="fluent"] .ai-msg pre {
   background: var(--bg-inset);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-s);
@@ -587,22 +585,16 @@ select.input {
 
 /* ---------- 表格 ---------- */
 
-.tbl-filter {
+[data-theme="fluent"] .tbl-filter {
   background: var(--bg-panel);
 }
 
-.tbl-col-del {
+[data-theme="fluent"] .tbl-col-del {
   border-radius: var(--radius-s);
   color: var(--text-dim);
 }
 
-.tbl-col-del:hover {
+[data-theme="fluent"] .tbl-col-del:hover {
   background: color-mix(in srgb, var(--danger) 12%, var(--bg-panel));
   color: var(--danger);
 }
-
-/* ---------- 减弱动效的兜底自检 ----------
-   上面所有 transition 都写在单类选择器上（(0,1,0) < 宿主的 html.no-motion * (0,1,1)），
-   所以宿主那条一开，这里全部失效——不需要在本文件里再抄一份 no-motion 分支。
-   `theme_audit` 的 motionOverride 一格就是这条的守卫：它若报出任何一条，就说明
-   有人把动效写到了两级类上，用户设的"减少动效"会被这套主题压住。 */

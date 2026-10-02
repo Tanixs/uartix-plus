@@ -136,7 +136,8 @@ export interface ThemeSource {  /** 内置＝`dark`/`begonia`…；插件＝影�
   css?: string;
   /**
    * P131-C：主题带的贴图/噪声/纹理（结构化资产，装包时已过 `validateAssetList`）。
-   * 只有插件主题能带——内置主题文件是 token-only 的通道，装不下字节资产（那是 P131-D 的事）。
+   * 只有插件主题能带——内置主题的组件层通道（P131-D 的 `builtinStyles/<id>.css`）装的是 CSS，
+   * 资产这条还没通（要先把 blob 的来源从"包产物"扩到"仓库字节"，那是单独一步）。
    */
   assets?: ThemeAsset[];
   /** 插件来源时它所属的包 id（启停只能走 `pluginStore.setEnabled`） */

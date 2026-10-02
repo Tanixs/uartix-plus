@@ -28,6 +28,7 @@ const path = require("path");
 const ROOT = path.join(__dirname, "..");
 const STYLE_DIR = path.join(ROOT, "src", "styles");
 const THEME_DIR = path.join(STYLE_DIR, "themes");
+const BUILTIN_STYLE_DIR = path.join(STYLE_DIR, "builtinStyles");
 const BASE_CSS = path.join(STYLE_DIR, "theme.css");
 const IMPORTANT_CEILING = 24;
 
@@ -106,8 +107,11 @@ const cssFiles = [BASE_CSS];
 (function walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
+    // `builtinStyles/` 与 `themes/` 一样是**数据包**，不参与宿主预算（B 的 !important 数、
+    // G 的边框数、E/F 的字号圆角都是"宿主 chrome 欠多少"的账，主题多写一条边框不该记在这儿）。
+    // 它不是没人管：门 K 判前缀与登记，`builtinStyles.test.ts` 让它过与第三方 CSS 同一台净化器。
     if (e.isDirectory()) walk(p);
-    else if (e.name.endsWith(".css") && p !== BASE_CSS && !p.startsWith(THEME_DIR)) cssFiles.push(p);
+    else if (e.name.endsWith(".css") && p !== BASE_CSS && !p.startsWith(THEME_DIR) && !p.startsWith(BUILTIN_STYLE_DIR)) cssFiles.push(p);
   }
 })(STYLE_DIR);
 (function walkFeatures(dir) {
@@ -716,22 +720,34 @@ const J3_EXEMPT = {};
   const seenTok = new Set();
   let themePkgs = 0;
   let ruleSels = 0;
+  /** 两处来源一起查：上架的插件主题包 + 内置 style 包（同一层表达，判据不该两条通路两套） */
+  const sources = [];
   if (fs.existsSync(pkgDir)) {
     for (const f of fs.readdirSync(pkgDir).filter((x) => x.endsWith(".uartix.json")).sort()) {
       const manifest = JSON.parse(fs.readFileSync(path.join(pkgDir, f), "utf8"));
       for (const [artName, art] of Object.entries(manifest.artifacts ?? {})) {
         if (!art || art.kind !== "theme" || typeof art.css !== "string" || !art.css.trim()) continue;
-        themePkgs++;
-        const seen = new Set();
-        for (const sel of selectorsOf(art.css)) {
-          ruleSels++;
-          for (const tok of classTokens(sel)) {
-            seenTok.add(tok);
-            if (CSS_CLASS_TOKENS.has(tok) || HOST_CLASS_EXTRA.has(tok) || seen.has(tok)) continue;
-            seen.add(tok);
-            if (J3_EXEMPT[tok]) continue;
-            dead.push(`${f} · ${artName}: .${tok}  ← ${sel.replace(/\s+/g, " ").slice(0, 52)}`);
-          }
+        sources.push([`${f} · ${artName}`, art.css]);
+      }
+    }
+  }
+  if (fs.existsSync(BUILTIN_STYLE_DIR)) {
+    for (const f of fs.readdirSync(BUILTIN_STYLE_DIR).filter((x) => x.endsWith(".css")).sort()) {
+      sources.push([`builtinStyles/${f}`, fs.readFileSync(path.join(BUILTIN_STYLE_DIR, f), "utf8")]);
+    }
+  }
+  themePkgs = sources.length;
+  if (fs.existsSync(pkgDir)) {
+    for (const [where, css] of sources) {
+      const seen = new Set();
+      for (const sel of selectorsOf(css)) {
+        ruleSels++;
+        for (const tok of classTokens(sel)) {
+          seenTok.add(tok);
+          if (CSS_CLASS_TOKENS.has(tok) || HOST_CLASS_EXTRA.has(tok) || seen.has(tok)) continue;
+          seen.add(tok);
+          if (J3_EXEMPT[tok]) continue;
+          dead.push(`${where}: .${tok}  ← ${sel.replace(/\s+/g, " ").slice(0, 52)}`);
         }
       }
     }
@@ -750,7 +766,7 @@ const J3_EXEMPT = {};
     console.error(`FAIL(J3): 主题包死选择器豁免 ${Object.keys(J3_EXEMPT).length} 条 > 基线 ${J3_CEILING} —— 名单只降不升`);
     fails++;
   } else {
-    console.log(`OK(J3): ${themePkgs} 枚上架主题包的组件 CSS（${ruleSels} 条选择器段 / ${seenTok.size} 个类名）宿主全都渲染（豁免 ${Object.keys(J3_EXEMPT).length} 条 ≤ 基线 ${J3_CEILING}）`);
+    console.log(`OK(J3): ${themePkgs} 份主题组件 CSS（包 + 内置 style；${ruleSels} 条选择器段 / ${seenTok.size} 个类名）宿主全都渲染（豁免 ${Object.keys(J3_EXEMPT).length} 条 ≤ 基线 ${J3_CEILING}）`);
   }
 
   /* 门自己不是瞎的：夹具三种形态——假类名要抓到、真类名不许误报、@media 里套的选择器也要看见 */
@@ -773,6 +789,88 @@ const J3_EXEMPT = {};
   } else if (!fxTokens.has("btn")) {
     console.error("FAIL(J3): 夹具里 .btn 没被抽出来，抽取式坏了");
     fails++;
+  }
+}
+
+/* ---- P131-D 门 K：内置 style 包必须锁在自己的主题上，且文件与装载表一一对上 ----
+ *
+ * 这条门管的是"内置主题的组件层"那条新通道（`src/styles/builtinStyles/<id>.css`）。
+ * 三件事各自都会安静地坏掉，所以三件都判：
+ *  ① **每条选择器必须以 `[data-theme="<本文件的 id>"]` 开头**——漏了这一条，
+ *     "选流利蓝才有的那套控件样子"就会涂到别的主题上，而那是最难查的一类脏（只在特定组合下出现）；
+ *  ② 磁盘上有的文件必须登记在装载表里：没装载 = 这文件安静地不生效，改它的人以为改了；
+ *  ③ 装载表里登记的 id 必须有文件：否则运行时 `builtinStyleCss` 永远查不到东西。
+ * 顺带：id 必须是真存在的主题（`themes/<id>.css`），别给一个不存在的主题写组件层。
+ *
+ * 与 `theme.css` 里那条"样式表不许出现 `[data-theme=` "的禁令不冲突：那条管的是**宿主样式表**
+ * （宿主规则不该按主题分支写，否则主题一多就长成 if-else 山），这条管的是**数据包**
+ * ——数据包的全部意义就是"只在某一枚主题下生效"。两句话都对，因为对象不同。
+ */
+{
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ");
+  /** 取深度 0 的选择器段（`{` 之前那段）；@ 规则的名字段跳过 */
+  function selectorsAtTopLevel(css) {
+    const src = stripComments(css);
+    const out = [];
+    let buf = "";
+    let depth = 0;
+    for (const ch of src) {
+      if (ch === "{") {
+        if (depth === 0) {
+          const s = buf.trim();
+          if (s && !s.startsWith("@")) out.push(s);
+        }
+        depth++;
+        buf = "";
+        continue;
+      }
+      if (ch === "}") { depth = Math.max(0, depth - 1); buf = ""; continue; }
+      if (ch === ";" && depth === 0) { buf = ""; continue; }
+      buf += ch;
+    }
+    return out;
+  }
+
+  const themeIds = fs.readdirSync(THEME_DIR).filter((f) => f.endsWith(".css")).map((f) => f.replace(/\.css$/, ""));
+  const loaderSrc = fs.readFileSync(path.join(STYLE_DIR, "builtinStyles.ts"), "utf8");
+  const listed = [...(loaderSrc.match(/BUILTIN_STYLE_IDS[^=]*=\s*\[([^\]]*)\]/) || [, ""])[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const styleFiles = fs.existsSync(BUILTIN_STYLE_DIR)
+    ? fs.readdirSync(BUILTIN_STYLE_DIR).filter((f) => f.endsWith(".css")).map((f) => f.replace(/\.css$/, ""))
+    : [];
+
+  const errs = [];
+  for (const id of styleFiles) {
+    if (!themeIds.includes(id)) errs.push(`builtinStyles/${id}.css：没有这么一枚内置主题（themes/${id}.css 不存在）`);
+    if (!listed.includes(id)) errs.push(`builtinStyles/${id}.css 没登记在 builtinStyles.ts 的 BUILTIN_STYLE_IDS 里 ⇒ 它永远不会被装载`);
+    const css = fs.readFileSync(path.join(BUILTIN_STYLE_DIR, `${id}.css`), "utf8");
+    const sels = selectorsAtTopLevel(css);
+    if (!sels.length) errs.push(`builtinStyles/${id}.css：一条选择器都没有`);
+    for (const sel of sels) {
+      for (const part of sel.split(",").map((x) => x.trim())) {
+        const want = `[data-theme="${id}"]`;
+        if (!part.startsWith(want) && !part.startsWith(`:root${want}`)) {
+          errs.push(`builtinStyles/${id}.css：选择器没锁在本主题上 → ${part.slice(0, 56)}`);
+        }
+      }
+    }
+  }
+  for (const id of listed) {
+    if (!styleFiles.includes(id)) errs.push(`装载表登记了 ${id}，但 builtinStyles/${id}.css 不存在`);
+  }
+  /** 反向钉"包不是空门"：漏前缀的写法必须被抓到，同时合法写法不许误报 */
+  const fx = selectorsAtTopLevel(':root[data-theme="zz"] { --a: 1; }\n[data-theme="zz"] .btn { color: red; }\n.btn { color: blue; }\n@media (min-width: 1px) { .x { color: red; } }\n');
+  const fxWouldFlag = fx.filter((s) => !s.startsWith('[data-theme="zz"]') && !s.startsWith(':root[data-theme="zz"]'));
+  if (!fxWouldFlag.includes(".btn")) {
+    console.error("FAIL(K): 抽取式对夹具漏了没加前缀的选择器 —— 这条门是瞎的，下面的 OK 不算数");
+    fails++;
+  } else if (fx.length !== 3) {
+    console.error(`FAIL(K): 夹具应当抽出 3 段（@media 的名字段跳过），实得 ${fx.length} —— 抽取式与格式脱钩了`);
+    fails++;
+  } else if (errs.length) {
+    for (const e of errs) console.error(`FAIL(K): ${e}`);
+    fails++;
+  } else {
+    console.log(`OK(K): ${styleFiles.length} 份内置 style 包（${listed.length} 条登记）锁在自己的 [data-theme] 上，文件与装载表一一对上`);
   }
 }
 
