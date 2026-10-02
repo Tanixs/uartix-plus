@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { ThemeAsset } from "../styles/assetGuard";
 
 /**
  * 扩展类型：主题包 / 样式层 / 沙箱小部件 / 自定义面板。
@@ -26,6 +27,8 @@ export interface AiExtension {
   createdAt: number;
   vars?: Record<string, string>; // theme
   css?: string; // theme / style
+  /** P131-C theme：主题带的贴图/噪声/纹理（base64 结构化资产，装包时已过校验） */
+  assets?: ThemeAsset[]; // theme
   /** theme：作者声明的明暗归属。缺省＝没声明，由 `--bg` 亮度算（详设 S4） */
   scheme?: "dark" | "light"; // theme
   html?: string; // widget / panel

@@ -22,6 +22,10 @@
   --fb-accent-pressed: color-mix(in srgb, var(--accent) 84%, #000000);
   --fb-card-line: color-mix(in srgb, var(--text) 12%, transparent);
   --fb-acrylic: color-mix(in srgb, var(--bg-panel) 90%, transparent);
+  /* P131-C 资产通道：Fluent 的亚克力不是"半透明"就完了，还要有一层细噪声。
+     这一贴从主题的 assets 里来（`--fx-asset-acrylic-noise`），没带资产的那枚解析成空
+     ⇒ 同一份规则体，有材质就贴、没材质就不贴，不靠两份 CSS 各写一遍。 */
+  --fb-noise: var(--fx-asset-acrylic-noise, none);
   --fb-shadow-pop: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 20px rgba(0, 0, 0, 0.45);
   --fb-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45);
   --fb-duration: var(--dur-fast);
@@ -343,6 +347,7 @@ select.input {
 .aiw-menu,
 .cmdk {
   background: var(--fb-acrylic);
+  background-image: var(--fb-noise);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-l);
   box-shadow: var(--fb-shadow-pop);
@@ -398,6 +403,7 @@ select.input {
 
 .help-bubble {
   background: var(--fb-acrylic);
+  background-image: var(--fb-noise);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-l);
   box-shadow: var(--fb-shadow-pop);

@@ -9,7 +9,7 @@
  * 不 mock：mock 掉的那一层等于没测。断言全部读 `effectiveRootVars()` 与 `activeThemeFacts()`，
  * 这两个就是界面实际拿到的东西。
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const stubStore = new Map<string, string>();
 vi.stubGlobal("localStorage", {
@@ -232,5 +232,63 @@ describe("P131-B3 · theme_preview 走的是同一个合成器（§A7）", () =>
     clearThemePreview();
     applyStyleExts();
     expect(effectiveRootVars()["--accent"]).toBe(begoniaVars["--accent"]);
+  });
+});
+
+describe("P131-C · 主题资产跟着「在画那一枚」走", () => {
+  /** node 里没有 Blob / createObjectURL，自己 stub：这一条测的是接线，不是浏览器的 blob 实现 */
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  beforeAll(() => {
+    vi.stubGlobal("Blob", class {});
+    let n = 0;
+    vi.stubGlobal(
+      "URL",
+      Object.assign(globalThis.URL ?? function () {}, { createObjectURL: () => "blob:fake-" + ++n, revokeObjectURL: () => undefined }),
+    );
+  });
+  afterAll(() => vi.unstubAllGlobals());
+
+  it("启用带资产的主题 ⇒ --fx-asset-<id> 落到内联样式；停用即撤", () => {
+    extStore.upsertProjection({
+      id: "plg:ast:main",
+      type: "theme",
+      name: "带材质那枚",
+      desc: "",
+      version: "1.0.0",
+      enabled: true,
+      createdAt: 2000,
+      pluginRef: "pkg.ast",
+      vars: { "--bg": "#101010" },
+      assets: [{ id: "acrylic-noise", mime: "image/png", data: PNG }],
+    });
+    applyStyleExts();
+    expect(effectiveRootVars()["--fx-asset-acrylic-noise"], "资产没接到 rootVars 上：CSS 里那行 url(var(...)) 会解析成空").toBe('url("blob:fake-1")');
+    expect(activeThemeFacts().assets).toEqual({ declared: 1, live: 1 });
+    extStore.removeProjection("plg:ast:main");
+    applyStyleExts();
+    expect(effectiveRootVars()["--fx-asset-acrylic-noise"], "撤了主题还留着贴图 = 下一枚主题继承上一枚的材质").toBeUndefined();
+    expect(activeThemeFacts().assets).toEqual({ declared: 0, live: 0 });
+  });
+
+  it("两枚同时启用的主题：资产只跟在**在画那枚**后面（与 CSS 同一条规矩）", () => {
+    const mk = (id: string, assetId: string, createdAt: number) =>
+      extStore.upsertProjection({
+        id,
+        type: "theme",
+        name: id,
+        desc: "",
+        version: "1.0.0",
+        enabled: true,
+        createdAt,
+        pluginRef: "pkg." + id,
+        vars: { "--bg": "#101010" },
+        assets: [{ id: assetId, mime: "image/png", data: PNG }],
+      });
+    mk("plg:a1:main", "noise-one", 1000);
+    mk("plg:a2:main", "noise-two", 2000);
+    applyStyleExts();
+    const vars = effectiveRootVars();
+    expect(vars["--fx-asset-noise-two"], "最新那枚在画，它的材质该在").toBeTruthy();
+    expect(vars["--fx-asset-noise-one"], "被压住的那枚的材质不该一起贴上去").toBeUndefined();
   });
 });

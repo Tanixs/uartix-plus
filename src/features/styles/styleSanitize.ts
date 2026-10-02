@@ -14,6 +14,7 @@
  * `styles/layerSlots.ts` 一份，本模块只按它判——两处各写各的 z 数就是两处真相。
  */
 import { ALL_LAYERS, MAX_NAMEABLE_Z, NAMEABLE_SLOTS, slotFromZValue } from "../../styles/layerSlots";
+import { urlProblems } from "./assetGuard";
 
 /** 单条规则（结构化输入；不接受自由 CSS 文本，否则无法逐条校验/回执/撤销） */
 export interface StyleRuleInput {
@@ -58,8 +59,15 @@ const BANNED_SELECTOR_HEAD = /^(html|body|#root|:root)\b|^\*/i;
  * `::part()` 越组件边界（dockview 有"只用公共类名"的规矩）、后两条是老 IE 的脚本入口。
  */
 const BANNED_SELECTOR_PATTERNS = [/\[style/i, /::part\(/i, /expression\s*\(/i, /javascript\s*:/i];
-/** 值层面的越权：外链数据外带、旧 IE 行为、脚本 */
-const BANNED_VALUE_PATTERNS = [/url\s*\(/i, /@import/i, /expression\s*\(/i, /javascript\s*:/i, /behavior\s*:/i, /-moz-binding/i];
+/**
+ * 值层面的越权：外链数据外带、旧 IE 行为、脚本。
+ *
+ * P131-C：**`url()` 不再在这里一刀切**。原来那一条把"材质"整层能力删了（噪声 / 贴图 / 纹理），
+ * 而它真正要防的两件事——离线裂图与"把用户 IP 外发"——现在由 `assetGuard.checkCssUrlArg`
+ * 精确判：只放行 `url(var(--fx-asset-<id>))`（资产本体在装包时已过 mime/魔数/尺寸/SVG 脚本面
+ * 四道校验）与 ≤32 KB 的**栅格图** `data:`；`http` / `//` / `file` / 相对路径 / 内联 SVG 仍然拒。
+ */
+const BANNED_VALUE_PATTERNS = [/@import/i, /expression\s*\(/i, /javascript\s*:/i, /behavior\s*:/i, /-moz-binding/i];
 /**
  * P131-B2：`position:fixed` 不再一刀切禁——改成"必须落在登记过的层槽上"（见 `checkLayerUse`）。
  * 一刀切的代价是整层正常能力（浮层/遮罩/贴边工具条/通知）被删；而真正要防的是"盖住撤销入口"，
@@ -139,10 +147,18 @@ function checkDecls(decls: Record<string, string>): string | null {
   if (keys.length > STYLE_CAPS.maxDeclsPerRule) return "too_many_declarations";
   for (const prop of keys) {
     if (!/^[a-z-]+$/.test(prop)) return `bad_property:${prop}`;
+    /**
+     * P131-C 顺手补的一条：`behavior` / `-moz-binding` 以前只在**值**里被 `url(` 撞到，
+     * 于是 `behavior: none` 这种写法能过——而它俩本身就是老 IE 的脚本入口，
+     * 该按**属性名**拒，不该等值里恰好出现 url() 才发现。
+     */
+    if (/^(behavior|-moz-binding)$/i.test(prop)) return `banned_property:${prop}`;
     const value = decls[prop];
     if (typeof value !== "string" || !value.trim()) return `empty_value:${prop}`;
     if (value.length > 400) return `value_too_long:${prop}`;
     for (const re of BANNED_VALUE_PATTERNS) if (re.test(value)) return `banned_value:${prop}`;
+    const up = urlProblems(value);
+    if (up.length) return `${up[0]}:${prop}`;
     if (/[;{}]/.test(value)) return `structural_char:${prop}`;
     if (prop === "z-index") {
       const n = Number.parseInt(value, 10);
@@ -157,6 +173,7 @@ function checkKeyframes(kf: { name: string; body: string }): string | null {
   if (!kf.body || kf.body.length > 4000) return "keyframes_body_empty_or_long";
   // 帧体里允许 { }，但不许出现嵌套 @ 规则与外链
   for (const re of BANNED_VALUE_PATTERNS) if (re.test(kf.body)) return `banned_in_keyframes`;
+  if (urlProblems(kf.body).length) return "banned_in_keyframes";
   if (/@(import|media|supports)/i.test(kf.body)) return "nested_at_rule";
   return null;
 }
@@ -255,6 +272,7 @@ function checkPair(selector: string, cssText: string, push: (p: string) => void,
   const selErr = checkSelector(selector);
   if (selErr) push(`${selErr}:${selector.slice(0, 60)}`);
   for (const re of BANNED_VALUE_PATTERNS) if (re.test(cssText)) push(`banned_value_in:${selector.slice(0, 40)}`);
+  for (const up of urlProblems(cssText)) push(`${up}:${selector.slice(0, 40)}`);
   if (/^@/.test(selector.trim())) return; // @keyframes / @media 交给各自的分支，这里不套层级判定
   const layer = checkLayerUse(declsFromCss(cssText));
   if (layer) push(`${layer}:${selector.slice(0, 40)}`);

@@ -119,6 +119,7 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     module_probe_failed: "逻辑模块未通过封网自证",
     no_scratch_layers: "没有待固化的临时样式",
     draft_overflow: "分段草稿超出上限",
+    asset_rejected: "材质未通过资产校验",
     no_visible_nodes: "这个范围内没有可见元素",
     no_dom: "当前环境没有界面可审计",
     unknown_theme: "没有这枚主题",

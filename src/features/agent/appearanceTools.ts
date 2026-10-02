@@ -23,6 +23,10 @@ import { applyLayer, layerCss, revertLayer, scratchCssMerged } from "./styleScra
 import { THEME_CSS_MAX_BYTES } from "../plugins/artifact";
 import { DOMAIN_ZH } from "./scopeTiers";
 import { slotCatalogText } from "../../styles/layerSlots";
+// P131-C 资产通道：判据与草稿层（`asset_put` 走的就是装包那一份校验，不开第二条更松的门）
+import { ASSET_MAX_BYTES, ASSET_MIMES } from "../styles/assetGuard";
+import { listScratchAssets, putScratchAsset } from "./scratchAssets";
+import { activeThemeFacts } from "../../styles/themeFacts";
 import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolResultBody } from "./toolRegistry";
 
 export const APPEARANCE_TOOLS = [
@@ -30,6 +34,8 @@ export const APPEARANCE_TOOLS = [
   "theme_patch",
   "theme_preset",
   "image_swatch",
+  "asset_put",
+  "asset_list",
   "save_theme_extension",
   "style_commit",
   "style_append",
@@ -456,6 +462,9 @@ async function persistTheme(
     // 而丢了之后停用插件也"看起来没撤干净"（因为从来没生效过）。
     const { collectThemeVars } = await import("../ai/extRuntime");
     const vars = collectThemeVars(APPEARANCE_TOKENS).vars;
+    /** P131-C：草稿层的资产（可能为空）。存包时带上，存完清掉——持久化边界只有一处 */
+    const { scratchAssetRecords, revertScratchAssets } = await import("./scratchAssets");
+    const assetRecords = scratchAssetRecords();
     // P92 D2：id = 名称的稳定哈希。旧 slug 会把中文整个吃掉（「AI 助手现代玻璃风」→
     // `user.agent.theme-ai`），两份不同主题因此撞成同一 id，再叠加"同 id 即原地升版"
     // 就会让后一份**静默覆盖**前一份。现在只有 id 与 name 同时相同才认作同一份主题，
@@ -477,7 +486,16 @@ async function persistTheme(
       hostApi: "^1.0",
       capabilities: ["theme.tokens"],
       contributions: { themes: [{ id: "main", entry: "main.json", name }] },
-      artifacts: { "main.json": { kind: "theme", vars, ...(css ? { css } : {}) } },
+      artifacts: {
+        "main.json": {
+          kind: "theme",
+          vars,
+          ...(css ? { css } : {}),
+          // P131-C：草稿层的贴图/噪声跟着 CSS 一起持久化，否则存完 CSS 里的
+          // url(var(--fx-asset-*)) 会解析成空——"存下来的样子"就不等于"屏幕上的样子"
+          ...(assetRecords.length ? { assets: assetRecords } : {}),
+        },
+      },
       provenance: { createdBy: "agent", reviewed: false },
     };
     let updated = false;
@@ -522,6 +540,7 @@ async function persistTheme(
     const en = setEnabled(pluginId, true);
     const { clearOverlay } = await import("./appearanceStore");
     clearOverlay(); // 保存即持久化边界：插件层接管渲染，覆盖层清空
+    if (assetRecords.length) revertScratchAssets(); // 资产同理：插件那枚已经带着它们了
     return {
       callId,
       ok: true,
@@ -691,6 +710,55 @@ export const appearanceToolEntries: AgentToolEntry[] = [
       return `取色 ${p.split(/[\\/]/).pop() || p.slice(0, 40)}`;
     },
     execute: imageSwatch,
+  }),
+  defineTool({
+    name: "asset_put",
+    labelZh: "放一贴材质",
+    // 资产是"草稿"而不是"配置"：它先只在内存里，跟着 CSS 草稿一起存或一起撤
+    effect: "draft_write",
+    domain: "config",
+    provenance: HOST,
+    description: `Put one texture/noise/icon image into the session's scratch asset layer, then reference it from CSS as \`background-image: var(--fx-asset-<id>)\`. This is the ONLY way to get an image into the appearance layer: \`url()\` in CSS is accepted only for \`url(var(--fx-asset-<id>))\` and for small raster \`data:\` URIs — remote \`url(http…)\` is rejected because it breaks in an offline install and it is an outbound channel (the user's IP/online state leaves the machine). Args: { id: lowercase-kebab (1-40 chars, e.g. "acrylic-noise"), mime: one of ${ASSET_MIMES.join(" / ")}, data: base64 without the "data:" prefix }. Validation is the SAME validator a shipped package goes through: bytes must match the declared mime (magic numbers), ≤ ${Math.round(ASSET_MAX_BYTES / 1024)} KB, and SVG is additionally scanned for script vectors (<script>, onload=, external href, <!ENTITY, <foreignObject) — those are rejected, so a checked SVG is the only way an SVG can reach the screen. Receipt gives \`varName\` to write into CSS and \`problems\` with the exact reason. Nothing is persisted until style_commit/save_theme_extension, which carry these assets into the theme plugin.`,
+    parameters: {
+      type: "object",
+      properties: { id: { type: "string" }, mime: { type: "string" }, data: { type: "string" } },
+      required: ["id", "mime", "data"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `放材质「${String(a.id ?? "") || "?"}」`,
+    execute: async (parsed: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResultBody> => {
+      const callId = ctx.callId;
+      const r = putScratchAsset({ id: parsed.id, mime: parsed.mime, data: parsed.data });
+      if (!r.ok) {
+        return notExecuted(callId, "asset_rejected", {
+          problems: r.problems.slice(0, 8),
+          hint: `改 id/mime/data 后重发；SVG 带脚本面就换一张，或改用 png 噪声位图。允许的 mime：${ASSET_MIMES.join(" / ")}；单枚 ≤${Math.round(ASSET_MAX_BYTES / 1024)}KB`,
+        });
+      }
+      return {
+        callId,
+        ok: true,
+        status: "applied",
+        data: { varName: r.varName, live: r.live, cssHint: `${r.varName} 已可用于 background-image / mask-image` },
+      };
+    },
+  }),
+  defineTool({
+    name: "asset_list",
+    labelZh: "看材质",
+    effect: "read",
+    domain: null,
+    provenance: HOST,
+    description:
+      "List the scratch assets currently available (id, mime, decoded bytes, the CSS var name to reference) plus how many the active theme plugin carries. Read-only, no approval needed. Call it before style_patch so you reference a var that actually exists instead of inventing one.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    summarize: () => "读取可用材质",
+    execute: async (_parsed: Record<string, unknown>, ctx: ToolCtx): Promise<ToolResultBody> => ({
+      callId: ctx.callId,
+      ok: true,
+      status: "applied",
+      data: { assets: listScratchAssets(), themeAssets: activeThemeFacts().assets },
+    }),
   }),
   defineTool({
     name: "save_theme_extension",

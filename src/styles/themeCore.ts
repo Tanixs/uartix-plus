@@ -113,8 +113,20 @@ export const APPEARANCE_TOKENS = [
 
 export type AppearanceToken = (typeof APPEARANCE_TOKENS)[number];
 
-export interface ThemeSource {
-  /** 内置＝`dark`/`begonia`…；插件＝影子扩展 id（`plg:<pkg>:<contrib>`） */
+/**
+ * P131-C 资产通道的一枚资产（base64 结构化字段）。
+ * 类型住这个零 import 的叶子层，是因为 `ThemeSource` 与产物校验器（`plugins/artifact`）
+ * 都要认它——放哪一边都会拉出一条反向依赖。判据（mime 白名单 / 尺寸 / SVG 脚本面）在
+ * `features/styles/assetGuard.ts`。
+ */
+export interface ThemeAsset {
+  id: string;
+  mime: string;
+  /** base64 正文，不带 `data:` 前缀 */
+  data: string;
+}
+
+export interface ThemeSource {  /** 内置＝`dark`/`begonia`…；插件＝影子扩展 id（`plg:<pkg>:<contrib>`） */
   id: string;
   name: string;
   builtin: boolean;
@@ -122,6 +134,11 @@ export interface ThemeSource {
   scheme: ThemeScheme | null;
   vars: Record<string, string>;
   css?: string;
+  /**
+   * P131-C：主题带的贴图/噪声/纹理（结构化资产，装包时已过 `validateAssetList`）。
+   * 只有插件主题能带——内置主题文件是 token-only 的通道，装不下字节资产（那是 P131-D 的事）。
+   */
+  assets?: ThemeAsset[];
   /** 插件来源时它所属的包 id（启停只能走 `pluginStore.setEnabled`） */
   pluginId?: string;
   createdAt?: number;

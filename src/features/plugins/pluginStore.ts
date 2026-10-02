@@ -25,6 +25,7 @@ import {
 } from "./pluginManifest";
 import { renderDeclarativeHtml } from "./declarativePanel";
 import { kindOfContribKey } from "./artifact";
+import type { ThemeAsset } from "../styles/assetGuard";
 import { moduleArtifactsOf } from "./moduleHost";
 import { closeModule, moduleDiagnostics, moduleIsReady, openModule, waitModuleReady } from "./moduleBus";
 // P99a-F2：工具面变化的账本（`pluginToolDefs` 只依赖 pluginLimits，是叶子，不构成环）
@@ -302,6 +303,7 @@ function buildProjections(record: PluginRecord): string | null {
           vars: (artifact.vars as Record<string, string>) ?? {},
           ...(artifact.scheme === "dark" || artifact.scheme === "light" ? { scheme: artifact.scheme } : {}),
           ...(typeof artifact.css === "string" && artifact.css ? { css: artifact.css } : {}),
+          ...(Array.isArray(artifact.assets) && artifact.assets.length ? { assets: artifact.assets as ThemeAsset[] } : {}),
         });
       } else if (key === "widgets") {
         extStore.upsertProjection({

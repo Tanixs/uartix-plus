@@ -96,6 +96,23 @@ describe("artifact 校验", () => {
     expect(validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: ".p3d-host{border-radius:8px}" }).ok).toBe(true);
   });
 
+  /**
+   * P131-C：主题带资产走**同一台校验器**（不是"装的时候松一点"）。
+   * 关键是这三件事各自都要被抓住：撒谎的 mime、带脚本的 SVG、CSS 引用了一个不存在的资产变量。
+   */
+  it("theme.assets：合法贴图放行；假 mime / 带脚本 SVG / 引用未登记的资产变量都拒", () => {
+    const noise = btoa('<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" opacity=".05"/></svg>');
+    const evil = btoa('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const okCss = ".m{background-image:var(--fx-asset-noise)}";
+    expect(validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: okCss, assets: [{ id: "noise", mime: "image/svg+xml", data: noise }] }).ok).toBe(true);
+    expect(validateArtifactPayload("theme", { vars: { "--bg": "#000" }, assets: [{ id: "noise", mime: "image/png", data: noise }] }).errors.join()).toContain("asset_bytes_do_not_match_mime");
+    expect(validateArtifactPayload("theme", { vars: { "--bg": "#000" }, assets: [{ id: "noise", mime: "image/svg+xml", data: evil }] }).errors.join()).toContain("svg_has_script");
+    // CSS 引了一枚包里没给的资产：形态合法（所以净化器放行），但**没有真身**——这条由引用闭合检查抓
+    const dangling = validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: okCss });
+    expect(dangling.errors.join()).toContain("asset_reference_not_declared:noise");
+    expect(validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: ".m{background-image:var(--fx-asset-noise)}", assets: [{ id: "noise", mime: "image/svg+xml", data: noise }] }).errors.join()).not.toContain("asset_reference_not_declared");
+  });
+
   it("widget：format 判别 html/declarative；非 kind 内容拒绝", () => {
     expect(validateArtifactPayload("widget", WIDGET_CONTENT).ok).toBe(true);
     expect(

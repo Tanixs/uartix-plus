@@ -37,6 +37,12 @@ export interface ActiveThemeFacts {
    * 否则"当前主题：琉璃"这句话会在一场 12 秒的演出期间骗人。
    */
   preview: { id: string; expiresAt: number; returnsTo: string } | null;
+  /**
+   * P131-C 资产通道：这枚主题**声明**带了几张贴图/噪声，运行期真能用上几贴。
+   * 两个数分开记是必要的：解码失败或环境没有 `URL.createObjectURL` 时 `live < declared`，
+   * 那时 CSS 里的 `url(var(--fx-asset-*))` 会解析成空——只报 declared 就等于替它撒谎。
+   */
+  assets: { declared: number; live: number };
 }
 
 export const EMPTY_THEME_FACTS: ActiveThemeFacts = {
@@ -53,6 +59,7 @@ export const EMPTY_THEME_FACTS: ActiveThemeFacts = {
   conflicts: [],
   fellBack: false,
   preview: null,
+  assets: { declared: 0, live: 0 },
 };
 
 let facts: ActiveThemeFacts = EMPTY_THEME_FACTS;

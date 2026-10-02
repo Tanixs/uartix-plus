@@ -27,7 +27,19 @@ export const ROOT_LAYER = {
   baseline: 0,
   /** 在画的那枚一枚（内置与插件同级；旧名 `pluginTheme` 指的是"插件叠出来的那一层"，已指错东西） */
   activeTheme: 10,
+  /**
+   * P131-C 资产层（`--fx-asset-<id>`）。写的是**内联样式**，所以它天然压过任何
+   * 样式表里 `:root{--fx-asset-…}` 的仿冒——净化器放行 `url(var(--fx-asset-*))` 靠的就是
+   * "这个变量的真身只能由资产通道写"。没资产时这一层直接 drop，不留空层。
+   */
+  assets: 15,
   agentOverlay: 20,
+  /**
+   * P131-C：AI 临时资产层（`asset_put` 写进来的那批）。它在 `assets` 之上——
+   * 同一枚 id 撞车时，模型正在调的那版草稿应当压过包里那版；
+   * 也在 `agentOverlay` 同一族里（都是"临时的、可一键撤的"），但不与 token 层混。
+   */
+  agentAssets: 25,
 } as const;
 
 export interface RootVarSource {

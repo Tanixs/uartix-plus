@@ -23,6 +23,8 @@ import {
  * （P92-F 整窗白屏那条禁止边），而插件库那颗开关也要读这份事实说出"启用这颗会挤掉谁"。
  */
 import { notifyStyleApply, setActiveThemeFacts, type ActiveThemeFacts } from "../../styles/themeFacts";
+import { syncThemeAssets } from "./assetRuntime";
+import type { ThemeAsset } from "../../styles/themeCore";
 import { clearThemePreview, getThemePreview } from "./themePreview";
 
 /**
@@ -59,6 +61,7 @@ function themeSourceFromExt(e: {
   name: string;
   vars?: Record<string, string>;
   css?: string;
+  assets?: ThemeAsset[];
   pluginRef?: string;
   createdAt?: number;
   scheme?: string;
@@ -70,6 +73,7 @@ function themeSourceFromExt(e: {
     scheme: e.scheme === "dark" || e.scheme === "light" ? e.scheme : null,
     vars: e.vars ?? {},
     ...(e.css ? { css: e.css } : {}),
+    ...(e.assets && e.assets.length ? { assets: e.assets } : {}),
     ...(e.pluginRef ? { pluginId: e.pluginRef } : {}),
     createdAt: e.createdAt ?? 0,
   };
@@ -171,6 +175,12 @@ export function applyStyleExts() {
   // CSS 只跟在画那一枚后面走：两枚主题的 CSS 拼接出来的东西没有任何一处能解释
   const cssParts: string[] = [];
   if (painted?.css) cssParts.push(`/* theme: ${painted.name} */\n${painted.css}`);
+  /**
+   * P131-C 资产层与 CSS 同一条规矩：**只跟在画那一枚后面**。
+   * 两枚主题的贴图叠在一起，谁也不知道屏幕上那张噪声是谁给的。
+   */
+  const declaredAssets = painted?.assets ?? [];
+  const liveAssets = syncThemeAssets(declaredAssets);
   for (const e of exts) {
     if (!e.enabled || e.type !== "style") continue;
     if (e.css) cssParts.push(`/* style: ${e.name} */\n${e.css}`);
@@ -192,6 +202,7 @@ export function applyStyleExts() {
     preview: livePreview
       ? { id: livePreview.id, expiresAt: livePreview.expiresAt, returnsTo: decision.active?.id ?? "" }
       : null,
+    assets: { declared: declaredAssets.length, live: liveAssets },
   };
 
   if (typeof document !== "undefined") {

@@ -2,7 +2,7 @@
   "format": "uartix-plugin",
   "schemaVersion": 2,
   "id": "uartix.theme.fluent-dark",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "流利蓝 · 暗色",
   "desc": "Fluent 暗色：四档表面 + 亮蓝强调（主按钮是浅蓝底配深墨字，Fluent 暗色本家就是这么配的）",
   "hostApi": "^1.0",
@@ -56,7 +56,14 @@
         "--k-warn-line": "#e08a4a",
         "--warn-fg": "#dfb56b"
       },
-      "cssFile": "components.css"
+      "cssFile": "components.css",
+      "assets": [
+        {
+          "id": "acrylic-noise",
+          "mime": "image/svg+xml",
+          "data": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNDAiIGhlaWdodD0iMTQwIj48ZmlsdGVyIGlkPSJuIj48ZmVUdXJidWxlbmNlIHR5cGU9ImZyYWN0YWxOb2lzZSIgYmFzZUZyZXF1ZW5jeT0iMC44MiIgbnVtT2N0YXZlcz0iMiIgc3RpdGNoVGlsZXM9InN0aXRjaCIvPjxmZUNvbG9yTWF0cml4IHR5cGU9InNhdHVyYXRlIiB2YWx1ZXM9IjAiLz48L2ZpbHRlcj48cmVjdCB3aWR0aD0iMTQwIiBoZWlnaHQ9IjE0MCIgZmlsdGVyPSJ1cmwoI24pIiBvcGFjaXR5PSIwLjA1NSIvPjwvc3ZnPg=="
+        }
+      ]
     }
   },
   "provenance": {

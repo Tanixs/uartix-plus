@@ -12,6 +12,8 @@
  * 校验器、能力、contributions 键、中文名都挂在同一条目上：漏一项就编译不过，不存在"通过但没人看过"。
  */
 import { guardStyleText } from "../styles/styleSanitize";
+// P131-C：主题带的贴图/噪声走结构化资产，判据在 assetGuard（同一份给运行时复用）
+import { validateAssetList } from "../styles/assetGuard";
 // P99b-N5：主题产物的键白名单与"相近真名"建议，住在零 import 的 `styles/themeCore`（详设 R5）
 import { APPEARANCE_TOKENS, checkThemeVars } from "../../styles/themeCore";
 // 只 import 类型：产物元表要说清"这类产物要什么能力"，而 PluginCap 的权威定义在 manifest 那边
@@ -171,8 +173,7 @@ function validateTheme(a: Record<string, unknown>, out: ValidationIssue) {
   if (a.css !== undefined) {
     if (typeof a.css !== "string" || a.css.length > THEME_CSS_MAX_BYTES) {
       out.errors.push(`theme.css 必须是 ≤${THEME_CSS_MAX_BYTES} 字节字符串`);
-    } else {
-      /**
+    } else {      /**
        * P99a-A6：走与 AI `style_patch` / `save_theme_extension` **同一个净化器**。
        * 旧写法在这里只正则挡 `@import` 与 `url(http`，`position:fixed` 只给警告——
        * 于是同一个"第三方 CSS 能不能进宿主"的问题有两条门：松的这条恰好是插件/市场要用的，
@@ -182,6 +183,25 @@ function validateTheme(a: Record<string, unknown>, out: ValidationIssue) {
       const g = guardStyleText(a.css, THEME_CSS_MAX_BYTES, []);
       if (!g.ok) out.errors.push(...g.problems.slice(0, 8).map((p) => `theme.css 未通过净化：${p}`));
       else if (g.problems.length) out.warnings.push(...g.problems.slice(0, 8));
+    }
+  }
+  /**
+   * P131-C 资产通道：主题可以带**贴图/噪声/纹理**，但它们不是"CSS 里写个 url()"，
+   * 而是一组结构化资产，装包时过 `validateAssetList`（mime 白名单 + 魔数核对 + 尺寸上限 +
+   * SVG 脚本面检查）。运行时才变成 `blob:` URL 注入 `--fx-asset-<id>`，CSS 只能引用它。
+   * 为什么不给 `url(http…)` 开口：离线插包必然裂图，而且那是一条把用户 IP / 在线状态
+   * 外发的通道——功能正确性 + 数据外带，不是风格问题。
+   */
+  out.errors.push(...validateAssetList(a.assets));
+  /**
+   * 引用闭合：CSS 里 `url(var(--fx-asset-<id>))` 指到的每一枚，都必须在这份产物里真给出来。
+   * 净化器只管"形态对不对"，管不了"这枚资产存不存在"——不闭合的话主题会安静地画出一张空背景，
+   * 而"写一条打偏的规则比不写更糟"（下一个人会以为这里已经有材质了）。
+   */
+  if (typeof a.css === "string" && a.css) {
+    const declared = new Set((Array.isArray(a.assets) ? (a.assets as Array<{ id?: string }>) : []).map((x) => x?.id));
+    for (const m of a.css.matchAll(/--fx-asset-([a-z][a-z0-9-]{1,39})/g)) {
+      if (!declared.has(m[1])) out.errors.push(`asset_reference_not_declared:${m[1]}`);
     }
   }
 }

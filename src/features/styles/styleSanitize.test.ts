@@ -66,10 +66,10 @@ describe("sanitizeStyleRules", () => {
 
   it("值里的外链/脚本/结构字符拒（数据外带与逃逸入口）", () => {
     const cases: Array<[Record<string, string>, string]> = [
-      [{ background: "url(https://evil/x.png)" }, "banned_value:background"],
+      [{ background: "url(https://evil/x.png)" }, "url_not_on_asset_channel:background"],
       [{ background: "red; color: blue" }, "structural_char:background"],
       [{ content: "@import 'x.css'" }, "banned_value:content"],
-      [{ "behavior": "url(#default#xyz)" }, "banned_value:behavior"],
+      [{ "behavior": "url(#default#xyz)" }, "banned_property:behavior"],
     ];
     for (const [decls, want] of cases) {
       expect(sanitizeStyleRules(rule(".a", decls), ok).rejected[0]?.reason, JSON.stringify(decls)).toBe(want);
@@ -150,8 +150,40 @@ describe("guardStyleText", () => {
     expect(check(".a{position:fixed;z-index:var(--z-menu)}").ok).toBe(true);
     expect(check(".a{position:fixed;z-index:var(--z-tour)}").problems.some((p) => p.startsWith("protected_layer"))).toBe(true);
     expect(check(".a{z-index:99999}").problems.some((p) => p.startsWith("z_index_too_high"))).toBe(true);
-    expect(check(".a{background:url(https://evil/x.png)}").problems.some((p) => p.startsWith("banned_value_in"))).toBe(true);
+    expect(check(".a{background:url(https://evil/x.png)}").problems.some((p) => p.startsWith("url_not_on_asset_channel"))).toBe(true);
     expect(check("#root{display:none}").problems.some((p) => p.startsWith("global_selector"))).toBe(true);
+  });
+
+  /**
+   * P131-C 资产通道：`url()` 从"一刀切禁"换成"只认一种形态 + 一条画不出来的写法要拦"。
+   * 这条测试的重点不是"放开了什么"，而是**边界精确到哪一格**：
+   * 外链、协议相对、file、相对路径、内联 SVG 全部仍然拒，而且各给各的理由。
+   */
+  it("url() 只认小体积栅格 data:；url 里套 var 这种画不出来的写法也拒", () => {
+    // 正确写法：资产变量的值本来就是一整个 url("blob:…")，直接引用，不再套一层 url()
+    expect(check(".a{background-image:var(--fx-asset-acrylic-noise)}").ok).toBe(true);
+    // 1421 实测：下面这种"看着对"的写法浏览器根本不认（材质从来没贴上去），所以必须明确拒
+    expect(check(".a{background:url(var(--fx-asset-acrylic-noise))}").problems.some((p) => p.startsWith("url_var_inside_url_token"))).toBe(true);
+    expect(check('.a{background:url("var(--fx-asset-x1)")}').problems.some((p) => p.startsWith("url_var_inside_url_token"))).toBe(true);
+    expect(check(".a{background:url(var(--fx-asset-NOPE))}").problems.some((p) => p.startsWith("url_not_on_asset_channel"))).toBe(true);
+    expect(check(".a{background:url(var(--accent))}").problems.some((p) => p.startsWith("url_not_on_asset_channel"))).toBe(true);
+    // 小体积栅格 data: 放行（400 字符的声明上限在 DOM 通路那侧另有一道，这里测的是形态）
+    const tinyPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==";
+    expect(check(`.a{background:url("${tinyPng}")}`).ok).toBe(true);
+    // 内联 SVG 必须走资产通道（那里的校验器会读内容找脚本面）
+    expect(check(".a{background:url(data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)}").problems.some((p) => p.startsWith("url_svg_must_go_through_asset_channel"))).toBe(true);
+    expect(check(".a{background:url(data:text/html;base64,PHNjcmlwdD48L3NjcmlwdD4=)}").problems.some((p) => p.startsWith("url_data_form_not_allowed"))).toBe(true);
+    expect(check(".a{background:url(//evil/x.png)}").problems.some((p) => p.startsWith("url_not_on_asset_channel"))).toBe(true);
+    expect(check(".a{background:url(file:///etc/passwd)}").problems.some((p) => p.startsWith("url_not_on_asset_channel"))).toBe(true);
+    expect(check(".a{background:url(/local-asset.png)}").problems.some((p) => p.startsWith("url_not_on_asset_channel"))).toBe(true);
+    // 括号不配平不许"看不下去就当没有"
+    expect(check(".a{background:url(var(--fx-asset-x}").problems.some((p) => p.startsWith("url_paren_unbalanced"))).toBe(true);
+    // @keyframes 帧体里同一条判据（两条通路一套规则）：原文形态的 @keyframes 走规则文本那条，
+    // 理由串是 url 的形态名；结构化的 keyframes 字段才报 banned_in_keyframes（见 sanitizeStyleRules 那组）
+    expect(guardStyleText("@keyframes fx-a{from{background:url(https://evil/x)}}", 8000).problems.some((p) => p.startsWith("url_not_on_asset_channel"))).toBe(true);
+    expect(sanitizeStyleRules([{ selector: ".a", decls: { color: "red" }, keyframes: { name: "fx-a", body: "from{background:url(https://evil/x)}" } }], ok).rejected[0]?.reason).toBe("banned_in_keyframes");
+    // 属性名那一侧也补上了：`behavior: none` 以前能过（值里没有 url() 就没人管它）
+    expect(sanitizeStyleRules(rule(".a", { behavior: "none" }), ok).rejected[0]?.reason).toBe("banned_property:behavior");
   });
 
   it("超长要报预算，不静默截断", () => {
