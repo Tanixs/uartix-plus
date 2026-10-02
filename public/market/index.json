@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "name": "Uartix+ 社区插件库（示例）",
-  "generatedAt": "2026-09-21T00:00:00Z",
+  "generatedAt": "2026-10-02T00:00:00Z",
   "source": "https://github.com/Tanixs/uartix-plus/tree/main/market",
   "docsUrl": "https://github.com/Tanixs/uartix-plus/tree/main/market#readme",
   "categories": {
@@ -58,6 +58,29 @@
       "minAppVersion": "0.4.1",
       "updated": "2026-09-21",
       "verified": true
+    },
+    {
+      "id": "uartix.theme.fluent-blue",
+      "name": "流利蓝 · 全量",
+      "author": "uartix",
+      "category": "theme",
+      "description": {
+        "zh": "内置「流利蓝」的组件层完整版：控件五态、标题栏窗口键、浮层亚克力与焦点环留白都在这里——内置那枚只到 token 层。",
+        "en": "Full Fluent theme: component states, titlebar buttons, popup acrylic and focus-ring offset. The built-in one covers tokens only."
+      },
+      "version": "1.0.0",
+      "packageUrl": "/market/pkg/fluent-blue.uartix.json",
+      "sha256": "7b394bcd82a2362140c16825441a3a6a07b1a97fafdae76b5654f5f26f1f0370",
+      "bytes": 19088,
+      "capabilities": [
+        "theme.tokens"
+      ],
+      "screenshots": [
+        "/market/img/fluent-blue-palette.png",
+        "/market/img/fluent-blue-ui-sketch.png"
+      ],
+      "minAppVersion": "0.5.2",
+      "updated": "2026-10-02"
     },
     {
       "id": "uartix.theme.ink",

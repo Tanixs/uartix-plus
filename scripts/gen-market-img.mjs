@@ -4,7 +4,8 @@
  *
  * 为什么要生成器而不是手画图：预览图说的是"这个包装上大概长什么样"，
  * 手画一张"看着像"的图就是 §8-49 那条的老毛病——**图上画的和包里写的可以各说一套，而没人会红**。
- * 这里每个像素都由 `market/pkg/<主题>` 里的 `--bg/--panel/--text/--text-dim/--accent/--accent-contrast`
+ * 这里每个像素都由货架条目指向的那支包（`market/pkg/<名>.uartix.json` 或 `<名>/manifest.json`）
+ * 里的 `--bg/--panel/--text/--text-dim/--accent/--accent-contrast`
  * 算出来，改了主题不重跑，`marketContent.test.ts` 就对账对不上。
  *
  * 两张图各说一件事：
@@ -17,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { loadPackage } from "./gen-market-index.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -111,13 +113,12 @@ class Canvas {
 }
 
 /** 主题包 → 那六个变量（少一个就报错：宁可构建失败，也不画一张"猜出来的"图） */
-function themeVarsOf(pkgPath) {
-  const manifest = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+function themeVarsOf(manifest, where) {
   const art = Object.values(manifest.artifacts ?? {})[0];
-  if (!art || art.kind !== "theme" || !art.vars) throw new Error(`${pkgPath}: 不是带 vars 的主题包`);
+  if (!art || art.kind !== "theme" || !art.vars) throw new Error(`${where}: 不是带 vars 的主题包`);
   const need = ["--bg", "--bg-panel", "--text", "--text-dim", "--accent", "--on-accent"];
   const miss = need.filter((k) => !art.vars[k]);
-  if (miss.length) throw new Error(`${pkgPath}: 缺变量 ${miss.join("、")}（预览图不许用默认色补）`);
+  if (miss.length) throw new Error(`${where}: 缺变量 ${miss.join("、")}（预览图不许用默认色补）`);
   return { order: need.map((k) => [k, parseHex(art.vars[k])]) };
 }
 
@@ -156,22 +157,38 @@ export function renderUiSketch(vars) {
 }
 
 /** 一个主题包 → 两张图（文件名固定，索引条目按同名引用） */
-export function imagesFor(pkgPath) {
-  const vars = themeVarsOf(pkgPath);
-  const slug = path.basename(pkgPath).replace(/\.uartix\.json$/, "").replace(/[^a-z0-9-]/gi, "-");
+export function imagesFor(manifest, slug, where = "包") {
+  const vars = themeVarsOf(manifest, where);
   return [
     [`${slug}-palette.png`, renderPalette(vars)],
     [`${slug}-ui-sketch.png`, renderUiSketch(vars)],
   ];
 }
 
+/**
+ * 从 `market/entries/*.json` 出发枚举，而不是从 `market/pkg/*.uartix.json`。
+ *
+ * 换掉的原因是 P132-A 撞出来的一条真洞：N2.5 起了"目录源包"（`market/pkg/<名>/manifest.json`
+ * ＋旁挂 `cssFile`）之后，按文件名 glob 的这里**只看得到平铺包**——于是目录形态的主题
+ * 一张预览图都产不出，而 `market:gen` 那头偏要"主题必须有两张图"，结果是新主题包
+ * **根本上不了架**（报的是"截图文件不存在"，看图的人不会想到生成器漏了它）。
+ * 走 entries 就跟索引同源，两种形态都过 `loadPackage`（旁挂文件已内联），
+ * 顺带把"包在货架上却没图"这类漂移变成这里的构建失败。
+ */
 export function buildAll() {
   const out = [];
-  for (const f of fs.readdirSync(PKG_DIR).filter((x) => x.endsWith(".uartix.json")).sort()) {
-    const manifest = JSON.parse(fs.readFileSync(path.join(PKG_DIR, f), "utf8"));
+  const entryDir = path.join(ROOT, "market", "entries");
+  const seen = new Set();
+  for (const f of fs.readdirSync(entryDir).filter((x) => x.endsWith(".json")).sort()) {
+    const meta = JSON.parse(fs.readFileSync(path.join(entryDir, f), "utf8"));
+    if (!meta.packageFile) continue;
+    const { buf, name } = loadPackage(PKG_DIR, meta.packageFile);
+    if (seen.has(name)) continue; // 两条元数据指向同一支包：图只出一份
+    seen.add(name);
+    const manifest = JSON.parse(buf.toString("utf8"));
     const art = Object.values(manifest.artifacts ?? {})[0];
     if (!art || art.kind !== "theme") continue;
-    for (const [name, buf] of imagesFor(path.join(PKG_DIR, f))) out.push([name, buf]);
+    for (const pair of imagesFor(manifest, name.replace(/\.uartix\.json$/, ""), `market/entries/${f}`)) out.push(pair);
   }
   return out;
 }

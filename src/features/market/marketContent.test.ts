@@ -78,6 +78,23 @@ describe("P99b-N1：示例货架内容", () => {
     }
   });
 
+  /**
+   * P132-A：自家主题包的**组件层 CSS** 要零 warning。
+   *
+   * `validateTheme` 把 `theme.css` 交给与 AI `style_patch` 同一个净化器：不合法 ⇒ error（装不了），
+   * 合法但有可疑之处 ⇒ warning。安装期那条会把 warning 摊在货架详情页的「来源与校验」里，
+   * 所以"我们自己上架的那枚示范主题"带着 warning 上架，等于亲手教投稿人"这没关系"。
+   * 这一条只加严不改判据：它查的是自家内容，不是净化器的强度。
+   */
+  it("自家主题包：净化器零 error 也零 warning（带嫌疑上架等于给投稿人开脱）", () => {
+    const themes = committed.entries.filter((e) => e.category === "theme");
+    expect(themes.length, "反空断言：一枚主题都没有，这条什么都没查").toBeGreaterThan(0);
+    for (const e of themes) {
+      const v = validateManifest(JSON.parse(shippedText(e)));
+      expect(v.warnings, `${e.id} 的包带着 warning 上架：${v.warnings.join("；")}`).toEqual([]);
+    }
+  });
+
   it("旁挂文件必须已经编译进包：上架产物里不许出现 htmlFile", () => {
     for (const e of committed.entries) {
       expect(shippedText(e), `${e.id} 的产物里残留了源包键`).not.toContain("htmlFile");
@@ -178,6 +195,19 @@ describe("P99b-N1：示例货架内容", () => {
     const used = new Set(committed.entries.flatMap((e) => e.screenshots.map((s) => s.split("/").pop() ?? "")));
     const orphans = readdirSync(join(ROOT, "public", "market", "img")).filter((f: string) => !used.has(f));
     expect(orphans, "这些图没有任何条目引用：要么接上，要么删掉").toEqual([]);
+
+    /**
+     * 反向的**另一半**（P132-A 补）：货架上每枚主题的图都得是这台生成器现在认得的。
+     * 上面那条只查"生成器产出的 = 盘上的"，漏了一整类：N2.5 起包有了目录形态
+     * （`market/pkg/<名>/manifest.json` ＋旁挂 `cssFile`），按 `*.uartix.json` glob 的旧版
+     * 对目录源主题**一张图都不产**，而 `market:gen` 那头要求主题有图 ⇒ 新主题根本上不了架；
+     * 就算有人手画图塞进仓库，这里也全绿——而手画的图正是这条生成器当初要消灭的东西。
+     */
+    for (const e of committed.entries.filter((x) => x.category === "theme")) {
+      for (const s of e.screenshots) {
+        expect(fresh.has(s.split("/").pop() ?? ""), `${e.id} 的 ${s} 不是生成器现算的：目录源包被漏了`).toBe(true);
+      }
+    }
   });
 });
 

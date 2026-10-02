@@ -231,7 +231,17 @@ function checkPair(selector: string, cssText: string, push: (p: string) => void,
    * 所以这里放行"整条规则只声明 `--*` 且不碰白名单"的 `:root`，其余照拒。
    */
   if (parts.length && parts.every((p) => /^:root$/i.test(p))) {
-    const body = cssText.slice(cssText.indexOf("{") + 1);
+    /**
+     * 取"第一个 { 到最后一个 }"之间——**不是**"{ 之后全部"。
+     * P132-A 装 Fluent 组件层时踩到的：浏览器把规则序列化成 `:root { --a: 1; --b: 2; }`
+     * （最后一条后面带分号），于是"全部"里多出一个 `}` 尾巴，被当成一条声明，
+     * 报回来的理由是 `root_rule_must_only_define_custom_properties:`——**属性名是空的**，
+     * 作者无从下手。任何在 `:root` 里写注释或按惯例给末条加分号的 CSS 都会踩到。
+     * 注释同理先剥掉：块注释是合法语法，不是一条声明。
+     */
+    const open = cssText.indexOf("{");
+    const close = cssText.lastIndexOf("}");
+    const body = stripComments(close > open ? cssText.slice(open + 1, close) : cssText.slice(open + 1));
     const decls = body.split(";").map((d) => d.trim()).filter(Boolean);
     if (!decls.length) push("root_rule_must_only_define_custom_properties");
     for (const d of decls) {
@@ -250,10 +260,19 @@ function checkPair(selector: string, cssText: string, push: (p: string) => void,
   if (layer) push(`${layer}:${selector.slice(0, 40)}`);
 }
 
+/**
+ * CSS 注释是合法语法，但对"按字符切声明"的判定器是噪声：剥掉再切。
+ * 只用于解析，**不用于字节账**（`bytes` 仍按原样算——注释真的占体积）。
+ */
+function stripComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, " ");
+}
+
 /** 从一条规则的 cssText 里取出声明表（`position:fixed` 这类判定要看整条，不能逐条判） */
 function declsFromCss(cssText: string): Record<string, string> {
-  const open = cssText.indexOf("{");
-  const close = cssText.lastIndexOf("}");
+  const body = stripComments(cssText);
+  const open = body.indexOf("{");
+  const close = body.lastIndexOf("}");
   if (open < 0 || close <= open) return {};
   const out: Record<string, string> = {};
   for (const decl of cssText.slice(open + 1, close).split(";")) {
@@ -299,10 +318,15 @@ export function guardStyleText(css: string, maxBytes = 8000, reservedVars: strin
       return { ok: false, problems, bytes, ruleCount };
     }
   }
-  // 非 DOM 环境：按 `selector{decls}` 扫描（保守——宁可多报不误放）
+  // 非 DOM 环境：按 `selector{decls}` 扫描（保守——宁可多报不误放）。
+  // **先剥注释**：不剥的话，文件开头那段说明性注释会被当成"第一条规则的选择器"，
+  // 于是 `selector_too_long:/* …` 冤枉一整份合法 CSS。浏览器那条路 CSSOM 本来就不把注释
+  // 当规则，所以这是**两条通路判据不一致**——本文件的立身之本就是"两条路同一个闸"，
+  // 不一致必须修，而不是让作者改写法去迁就测试环境。
+  const scan = stripComments(css);
   const re = /([^{}]+)\{([^{}]*)\}/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(css))) {
+  while ((m = re.exec(scan))) {
     ruleCount++;
     checkPair(m[1].trim(), m[0], (p) => problems.push(p), reservedVars);
   }

@@ -160,6 +160,50 @@ describe("guardStyleText", () => {
     expect(g.problems.some((p) => p.startsWith("css_too_long"))).toBe(true);
   });
 
+  /**
+   * P132-A 装 Fluent 组件层时踩到的两个真故障（都因为"两条通路两套判据"）：
+   *  ① `:root` 里写注释、或按惯例给末条加分号 ⇒ 浏览器路径把规则序列化成
+   *     `:root { --a: 1; --b: 2; }`，"取 { 之后全部"多带一个 `}` 尾巴，
+   *     于是回一个**属性名为空**的理由，作者无从下手；
+   *  ② 非 DOM 通路（node 里跑的市场校验）不剥注释 ⇒ 文件开头那段说明性注释
+   *     被当成"第一条规则的选择器"，直接 `selector_too_long:/* …` 拒掉一整份合法 CSS。
+   * 现在两条路都先剥注释；字节账仍按原样算（注释真的占体积）。
+   */
+  it(":root 块里写注释不算越权（合法 CSS 不能被判定器冤枉）", () => {
+    expect(check(":root{ /* 本包内部旋钮 */ --fx-a: 1px }").ok).toBe(true);
+    expect(check(":root{\n  /* 多行\n     说明 */\n  --fx-b: 2px;\n  --fx-c: 3px\n}").ok).toBe(true);
+    /**
+     * 浏览器路径的真凶：Chrome 把规则序列化成 `:root { --a: 1; --b: 2; }`——
+     * **最后一条后面带分号**，于是"取 { 之后全部"会多出一个 `}` 尾巴，
+     * 被判成一条属性名为空的声明。插件主题与 style_append 只要按惯例写分号就必踩。
+     */
+    expect(check(":root{--fx-a: 1px;--fx-b: 2px;}").ok).toBe(true);
+    expect(guardStyleText(":root { --fx-a: 1px; --fx-b: 2px; }", 8000, ["--accent"]).ok).toBe(true);
+    // 剥注释只影响解析，不影响判据：白名单键藏在注释后面照样抓
+    expect(guardStyleText(":root{ /* 说明 */ --accent: #111 }", 8000, ["--accent"]).problems.some((x) => x.startsWith("root_token_override_use_theme_patch"))).toBe(true);
+    expect(check(":root{ /* 说明 */ position: fixed }").problems.some((x) => x.startsWith("root_rule_must_only_define_custom_properties"))).toBe(true);
+  });
+
+  /** ② 的那一条：文件以注释开头（几乎每份手写 CSS 都这样）不该被当成一条越权选择器 */
+  it("整段 CSS 以注释开头：非 DOM 通路也不许把注释当选择器", () => {
+    const src = [
+      "/* 流利蓝 组件层",
+      "   第二行说明",
+      "*/",
+      ".btn{background:var(--bg-panel)}",
+      "/* 另一段 */",
+      ".input{border:1px solid var(--border)}",
+    ].join("\n");
+    const g = check(src);
+    expect(g.problems, JSON.stringify(g.problems)).toEqual([]);
+    expect(g.ok).toBe(true);
+    expect(g.ruleCount).toBe(2);
+    expect(g.bytes).toBe(src.length);
+    // 剥完注释仍要拦得住真越权：注释里藏 body{} 不算，写在规则里的才算
+    expect(check(["/* body{display:none} */", ".x{color:red}"].join("\n")).ok).toBe(true);
+    expect(check(["/* 说明 */", "body{display:none}"].join("\n")).problems.some((x) => x.startsWith("global_selector"))).toBe(true);
+  });
+
   it(":root 只放行「定义新变量」，覆盖白名单 token 或非变量都拒", () => {
     expect(check(":root{--fx-color:#0ff}").ok).toBe(true);
     const g1 = guardStyleText(":root{--accent:#111}", 8000, ["--accent"]);
