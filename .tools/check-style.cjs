@@ -434,6 +434,15 @@ const ICON_STROKE_AREA_FLOOR = 32; // size × strokeWidth
   }
 }
 
+/**
+ * 项目 CSS 里出现过的类名全集（J 与 J2 共用的"有没有人写样式"口径）。
+ * 主题目录不在 `cssFiles` 里（那批文件是 token-only 的数据，一条选择器规则都不该有）。
+ */
+const CSS_CLASS_TOKENS = new Set();
+for (const f of cssFiles) {
+  for (const m of fs.readFileSync(f, "utf8").matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) CSS_CLASS_TOKENS.add(m[1]);
+}
+
 /* ---- P111-J 门：用了的类名必须有定义（写了没人看的那一半） ----
  * 事故形态（P110-B3/B4 交付，用户判不合格后实测定位）：`AiModelRows.tsx` 与
  * `AiModelPicker.tsx` 里用了 `.set-hint` / `.set-json` / `.ai-model-picker*` 共 5 个类名，
@@ -456,6 +465,8 @@ const ICON_STROKE_AREA_FLOOR = 32; // size × strokeWidth
  *  - 不带连字符的裸词（`btn`、`input`、`on`）：与属性值/英文词撞车率太高，不在判据内；
  *  - 第三方 CSS 里的类（dockview 的 `dv-*`）：实测 src 里没有手写 `dv-*` 的 className，
  *    真出现时把它加进 `cssFiles` 的并集，而不是给它开豁免。
+ *  命令式赋值（`el.className = …` / `classList.add`）与 HTML 字符串里的 `class="…"`
+ *  **不在这一条里**了：那是 J 最初的盲区（`.ai-toast` 就是从这里漏出去的），由下面的 J2 管。
  */
 /**
  * 基线 16：P111-A 上线当天实测的**存量**欠账。
@@ -486,11 +497,8 @@ const J_EXEMPT = {
   "ext-panel-miss": "欠账：「面板未找到」提示态没写规则。",
 };
 {
-  const defined = new Set();
-  for (const f of cssFiles) {
-    const src = fs.readFileSync(f, "utf8");
-    for (const m of src.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) defined.add(m[1]);
-  }
+  // "有没有人写样式"的口径只有一份：J（JSX 的 className=）与 J2（命令式与 HTML 串）共用
+  const defined = CSS_CLASS_TOKENS;
   const tsxFiles = [];
   (function walkTsx(dir) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -537,6 +545,119 @@ const J_EXEMPT = {
     } else {
       console.log(`OK(J): TSX 用到的静态类名全部有定义（豁免 ${Object.keys(J_EXEMPT).length} 条 ≤ 基线 ${J_CEILING}，且条条仍被引用）`);
     }
+  }
+}
+
+/* ---- P131-A2 门 J2：类名不只从 JSX 挂出去（J 的盲区） ----
+ * 事故形态（P131 详设 §4 的第一手样本）：`shared/toast.ts` 之前那两份手搓实现
+ * 用 `document.createElement(...)` + `el.className = "ai-toast-host"` 挂类名，
+ * 而这对类名**在全部 CSS 里一条规则都没有** ——「Operator 模式：配置只读」这句必须被
+ * 用户看见的话，一直是以裸 div 贴在页面末尾。J 门看不见这条通道，因为它只认
+ * JSX 属性位上的 `className=`。
+ *
+ * J2 补的就是这一族：命令式赋值（`.className =` / `classList.*` / `setAttribute("class",…)` /
+ * `class:`）与 HTML 字符串里的 `class="…"`（宿主自己生成的 tooltip、测试序列报告、声明式面板）。
+ *
+ * 两条必要的豁免口径，都是从误报里学来的（首跑把声明式面板 13 个 `ux-*` 全报了，实为自带样式）：
+ *  - **自带样式的文件不算欠账**：自包含 HTML（报告 / iframe 面板）的样式表就在同一个文件的
+ *    另一个 const 里，所以本文件任何一处 `.token` 选择器写法都当作它有定义；
+ *  - 剩下的确实没有规则的，按 J 的纪律逐条写清"为什么不需要"，且必须仍被真引用，总数只降不升。
+ */
+const J2_CEILING = 4;
+const J2_EXEMPT = {
+  // 这四枚都在 `declarativePanel.ts`：`.ux-block` 才是带视觉的那条规则，这几个是同元素的身份钩子
+  // （运行时脚本按 `classList.contains("ux-metric")` 分流，`.ux-text` / `.ux-html` 供覆写定位）
+  "ux-metric": "与 .ux-block 同元素，卡片视觉在 .ux-block；这枚是运行时脚本分流用的身份钩子",
+  "ux-spark": "同上（趋势卡的身份钩子）",
+  "ux-text": "同上（文本卡的身份钩子，间距由 .ux-text-body 承担）",
+  "ux-html": "同上（自定义 HTML 块的身份钩子，容器视觉由 .ux-block 承担）",
+};
+{
+  /** 一行的类名 token 抽取：返回 [{tok, form}]；`own` 是本文件自带样式的豁免集 */
+  const ASSIGN = [
+    ["className=", /\.className\s*=\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g],
+    ["classList", /\.classList\.(?:add|remove|toggle|replace)\(([^)]*)\)/g],
+    ["setAttribute", /\.setAttribute\(\s*["']class["']\s*,\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g],
+    ["class:", /\bclass:\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g],
+    ['class="', /\sclass\s*=\s*(?:"([^"]*)"|'([^']*)')/g],
+  ];
+  function tokensOfLine(line) {
+    const out = [];
+    for (const [form, re] of ASSIGN) {
+      for (const m of line.matchAll(re)) {
+        let raw = m[1] ?? m[2] ?? m[3] ?? "";
+        // classList 那一支抓的是整个参数表：引号要去掉，变量名留着也匹配不上 token 式
+        if (form === "classList") raw = raw.replace(/["'`]/g, " ");
+        raw = raw.replace(/\$\{[^}]*\}/g, " ");
+        for (const tok of raw.split(/[\s,]+/)) if (/^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(tok)) out.push({ tok, form });
+      }
+    }
+    return out;
+  }
+
+  const tsFiles = [];
+  (function walkJs(dir) {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walkJs(p);
+      // 单测里造的是一次性 DOM，不是界面；这条门只管产品代码
+      else if (/\.(ts|tsx)$/.test(e.name) && !/\.test\.(ts|tsx)$/.test(e.name)) tsFiles.push(p);
+    }
+  })(path.join(ROOT, "src"));
+
+  const used2 = new Map(); // token → 出处
+  for (const f of tsFiles) {
+    const rel = path.relative(ROOT, f).replace(/\\/g, "/");
+    const text = fs.readFileSync(f, "utf8");
+    // 本文件自带的选择器（自包含 HTML 的样式表常是另一个 const，所以不按 <style> 块划界）。
+    // 前瞻写法是必要的：`.ux-metric-val .ux-unit{` 里两个类都要认出来。
+    const own = new Set();
+    for (const m of text.matchAll(/\.([_a-zA-Z][\w-]*)(?=\s*[,{:.])/g)) own.add(m[1]);
+    text.split(/\r?\n/).forEach((line, i) => {
+      const t = line.trim();
+      if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return; // 注释里的例子不算引用
+      for (const { tok, form } of tokensOfLine(line)) {
+        if (CSS_CLASS_TOKENS.has(tok) || own.has(tok)) continue;
+        if (!used2.has(tok)) used2.set(tok, []);
+        used2.get(tok).push(`${rel}:${i + 1} ←${form}`);
+      }
+    });
+  }
+
+  const unexempted2 = [...used2.keys()].filter((t) => !J2_EXEMPT[t]);
+  if (unexempted2.length) {
+    console.error(`FAIL(J2): ${unexempted2.length} 个类名由 JS/HTML 串挂出去却在 CSS 里没有定义 —— 它继承 body 的 16px、`);
+    console.error("       没有底色没有定位（`.ai-toast` 就是这么把「配置只读」藏了不知多久）。补一条规则，或删掉这个类名：");
+    for (const t of unexempted2.slice(0, 30)) {
+      const w = used2.get(t);
+      console.error(`  - .${t}  ← ${w.slice(0, 3).join(", ")}${w.length > 3 ? ` …共 ${w.length} 处` : ""}`);
+    }
+    fails++;
+  } else if (used2.size > J2_CEILING) {
+    console.error(`FAIL(J2): 命令式挂出的未定义类名 ${used2.size} 个 > 基线 ${J2_CEILING} —— 豁免名单只降不升`);
+    fails++;
+  } else {
+    const stale2 = Object.keys(J2_EXEMPT).filter((t) => !used2.has(t));
+    if (stale2.length) {
+      console.error(`FAIL(J2): 豁免名单里这 ${stale2.length} 条已经没人引用了，是个空门，删掉：${stale2.join(", ")}`);
+      fails++;
+    } else {
+      console.log(`OK(J2): 命令式与 HTML 串挂出的类名全部有定义（自带样式的文件已按文件豁免；豁免 ${Object.keys(J2_EXEMPT).length} 条 ≤ 基线 ${J2_CEILING}，且条条仍被引用）`);
+    }
+  }
+
+  /* 门自己不是瞎的：三种形态各造一条夹具，抽不出来就是门失效（P119 那条教训：检测式要先被证明能命中） */
+  const fixture = [
+    'x.className = "zz-decoy-a other";',
+    'x.classList.add("zz-decoy-b");',
+    'const html = `<div class="zz-decoy-c">x</div>`;',
+    'x.setAttribute("class", "zz-decoy-d");',
+  ].join("\n");
+  const caught = new Set(tokensOfLine(fixture).map((r) => r.tok));
+  const missed = ["zz-decoy-a", "zz-decoy-b", "zz-decoy-c", "zz-decoy-d"].filter((t) => !caught.has(t));
+  if (missed.length) {
+    console.error(`FAIL(J2): 检测式对夹具漏检 ${missed.join(", ")} —— 门是瞎的，报出去的"干净"不算数`);
+    fails++;
   }
 }
 
