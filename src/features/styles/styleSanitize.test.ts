@@ -26,17 +26,42 @@ describe("sanitizeStyleRules", () => {
     }
   });
 
-  it("结构性选择器语法拒（:has 全量反选、[style 命中内联、::part 越边界）", () => {
-    for (const sel of [".a:has(.b)", "[style]", ".x::part(inner)"]) {
+  /**
+   * P131-B2 改口：`:has()` 从"结构性越权"里放出来了。
+   * 它做的是"聚焦的对话框里的输入框"这类正常表达，打不到"关掉整个界面"——
+   * 那件事是 `body{}` 这类**选择器头**干的，头那一条照禁（上一条测试钉着）。
+   * `[style` 与 `::part(` 一条没放：前者能定向命中内联样式，后者越组件边界（dockview 只许公共类名）。
+   */
+  it("选择器语法：[style 与 ::part 仍拒，:has() 已放行", () => {
+    for (const sel of ["[style]", ".x::part(inner)"]) {
       expect(sanitizeStyleRules(rule(sel, { color: "red" }), ok).rejected[0]?.reason, sel).toBe("banned_selector_syntax");
     }
+    expect(sanitizeStyleRules(rule(".dlg:focus-within .input", { color: "red" }), ok).rules).toHaveLength(1);
+    expect(sanitizeStyleRules(rule(".row:has(.badge)", { color: "red" }), ok).rules).toHaveLength(1);
   });
 
-  it("position:fixed 拒、absolute 放行；z-index 超上限拒", () => {
-    expect(sanitizeStyleRules(rule(".a", { position: "fixed" }), ok).rejected[0]?.reason).toBe("banned_position_fixed");
+  /**
+   * P131-B2 改口（不是放宽判据，是换一种判法）：`position:fixed` 不再一刀切禁，
+   * 改成"必须落在登记过的层槽上"。要防的一直是"盖住撤销入口"，而层槽表里
+   * **没有任何合法档高过保护区**（toast 4000 / 引导 5000 都不出槽），所以那条保证比
+   * 一刀切更硬：一刀切只挡 fixed，挡不住 `position:absolute` + 巨大数值的同类效果。
+   */
+  it("层级：局部数字自由，fixed 必须落槽，保护区与未知槽都拒", () => {
+    const reason = (decls: Record<string, string>) =>
+      sanitizeStyleRules(rule(".a", decls), ok).rejected[0]?.reason;
+    expect(reason({ position: "fixed" })).toBe("fixed_needs_layer_slot");
+    // 数字 3000 先撞上"超出可引用档"这条（它既没落槽也高出表顶，报哪个都对，但只能报一个）
+    expect(reason({ position: "fixed", "z-index": "3000" })).toBe("z_index_too_high");
+    expect(reason({ position: "fixed", "z-index": "1500" })).toBe("fixed_needs_layer_slot");
+    expect(reason({ position: "fixed", "z-index": "var(--z-toast)" })).toBe("protected_layer:z-toast");
+    expect(reason({ position: "fixed", "z-index": "var(--z-foo)" })).toBe("unknown_layer:z-foo");
+    expect(sanitizeStyleRules(rule(".a", { position: "fixed", "z-index": "var(--z-menu)" }), ok).rules).toHaveLength(1);
     expect(sanitizeStyleRules(rule(".a", { position: "absolute" }), ok).rules).toHaveLength(1);
-    expect(sanitizeStyleRules(rule(".a", { "z-index": "99999" }), ok).rejected[0]?.reason).toBe("z_index_too_high");
+    expect(sanitizeStyleRules(rule(".a", { "z-index": "var(--z-float)" }), ok).rules).toHaveLength(1);
+    expect(reason({ "z-index": "99999" })).toBe("z_index_too_high");
     expect(sanitizeStyleRules(rule(".a", { "z-index": "10" }), ok).rules).toHaveLength(1);
+    // 能重定义槽 = 整张表作废。这条是层槽机制成立的前提，不是附带检查
+    expect(reason({ "--z-menu": "99999", "z-index": "var(--z-menu)" })).toBe("layer_slot_is_host_only:--z-menu");
   });
 
   it("值里的外链/脚本/结构字符拒（数据外带与逃逸入口）", () => {
@@ -119,8 +144,11 @@ describe("guardStyleText", () => {
     expect(g.problems.some((p) => p.startsWith("global_selector"))).toBe(true);
   });
 
-  it("position:fixed / z-index 越界 / url() 外带各自有明确理由", () => {
-    expect(check(".a{position:fixed}").problems.some((p) => p.startsWith("banned_position_fixed"))).toBe(true);
+  /** 同上一条改口：整段 CSS 这条通路走的是**同一套**层级判定（两条通路两套规则是本仓的老病） */
+  it("fixed 未落槽 / z-index 越界 / url() 外带各自有明确理由", () => {
+    expect(check(".a{position:fixed}").problems.some((p) => p.startsWith("fixed_needs_layer_slot"))).toBe(true);
+    expect(check(".a{position:fixed;z-index:var(--z-menu)}").ok).toBe(true);
+    expect(check(".a{position:fixed;z-index:var(--z-tour)}").problems.some((p) => p.startsWith("protected_layer"))).toBe(true);
     expect(check(".a{z-index:99999}").problems.some((p) => p.startsWith("z_index_too_high"))).toBe(true);
     expect(check(".a{background:url(https://evil/x.png)}").problems.some((p) => p.startsWith("banned_value_in"))).toBe(true);
     expect(check("#root{display:none}").problems.some((p) => p.startsWith("global_selector"))).toBe(true);

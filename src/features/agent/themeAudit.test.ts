@@ -296,6 +296,16 @@ describe("theme_audit：接的是真值，说的是人话", () => {
     expect(data.blocking).toBe(true);
   });
 
+  it("层冲突：注入层里有铺满视口的 fixed 浮层 → 报出来（它盖得住设置对话框）", async () => {
+    shellTree({ text: "设置", bg: "#edebe9", fg: "#005a9e" });
+    styleNodes = [{ textContent: ".veil{position:fixed;inset:0;z-index:var(--z-float)}", attrs: { aiExt: "1" } }];
+    installDom();
+    const data = (await run({})).data as { layerClash: { selector: string; reason: string }[]; blocking: boolean };
+    expect(data.layerClash.map((l) => l.selector)).toEqual([".veil"]);
+    expect(data.layerClash[0].reason).toBe("covers_host_dialog");
+    expect(data.blocking).toBe(true);
+  });
+
   it("清单有上限，但总数照实报（切了不许装作没有）", async () => {
     body = mk("body", {
       styles: { "background-color": "#ffffff", ...VIS },

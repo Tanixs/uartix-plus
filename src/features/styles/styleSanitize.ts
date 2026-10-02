@@ -9,7 +9,11 @@
  * 设计取向：**行为式白名单**而不是类名白名单。类名清单一旦写在这里就成了第二份真相
  * （theme.css 一改就漂，正是本仓反复拆的"平行清单"），所以这里只拦"结构性越权"，
  * 而"这条规则到底改到了谁"交给应用层用 `querySelectorAll` 实测并回命数（I2 的 zeroHit 回执）。
+ *
+ * P131-B2 起，层级判定不再自己写数：那张表（哪些档能引用、哪一档是保护区）只有
+ * `styles/layerSlots.ts` 一份，本模块只按它判——两处各写各的 z 数就是两处真相。
  */
+import { ALL_LAYERS, MAX_NAMEABLE_Z, NAMEABLE_SLOTS, slotFromZValue } from "../../styles/layerSlots";
 
 /** 单条规则（结构化输入；不接受自由 CSS 文本，否则无法逐条校验/回执/撤销） */
 export interface StyleRuleInput {
@@ -46,14 +50,58 @@ export const STYLE_CAPS = { maxRules: 40, maxBytes: 16_000, maxKeyframes: 6, max
 /** 越权选择器：能一键关掉/遮蔽整个界面的那些。`:root` 也禁——变量有 `patchTokens` 这个唯一出口，
  *  两处写同一个变量就又回到 P91-D 的"两份真相"。 */
 const BANNED_SELECTOR_HEAD = /^(html|body|#root|:root)\b|^\*/i;
-/** 选择器里的结构性越权（:has 可以全量反选、[style 能命中内联样式、::part 越组件边界） */
-const BANNED_SELECTOR_PATTERNS = [/:has\s*\(/i, /\[style/i, /::part\(/i, /expression\s*\(/i, /javascript\s*:/i];
+/**
+ * 选择器里的结构性越权。
+ * P131-B2 放开了 `:has()`：它能做的是"聚焦的对话框里的输入框"这类正常表达，
+ * 打不到"关掉整个界面"——那件事是 `body{…}` 这类**选择器头**干的，头那一条照禁。
+ * 留下的三条各有各的理由：`[style` 能命中内联样式（绕过一切规则的定向打击）、
+ * `::part()` 越组件边界（dockview 有"只用公共类名"的规矩）、后两条是老 IE 的脚本入口。
+ */
+const BANNED_SELECTOR_PATTERNS = [/\[style/i, /::part\(/i, /expression\s*\(/i, /javascript\s*:/i];
 /** 值层面的越权：外链数据外带、旧 IE 行为、脚本 */
 const BANNED_VALUE_PATTERNS = [/url\s*\(/i, /@import/i, /expression\s*\(/i, /javascript\s*:/i, /behavior\s*:/i, /-moz-binding/i];
-/** 只禁 position:fixed（把界面盖住/劫持指针）；absolute/sticky/relative 是组件级样式正常需求 */
-const BANNED_POSITION_FIXED = /^\s*fixed\s*$/i;
-const MAX_Z_INDEX = 900;
+/**
+ * P131-B2：`position:fixed` 不再一刀切禁——改成"必须落在登记过的层槽上"（见 `checkLayerUse`）。
+ * 一刀切的代价是整层正常能力（浮层/遮罩/贴边工具条/通知）被删；而真正要防的是"盖住撤销入口"，
+ * 那件事现在由**没有比救援档更高的合法层**来保证。
+ */
+const MAX_Z_INDEX = MAX_NAMEABLE_Z;
 const KEYFRAMES_NAME = /^fx-[a-z0-9-]{1,40}$/;
+
+/**
+ * 层级判定（两条通路共用）：返回拒绝理由，通过返回 null。
+ *
+ * 规则一句话：**局部堆叠自由，全屏层级必须走槽，槽里最高的档也高不过救援入口。**
+ *  - `z-index` 数字 ≤ {@link MAX_NAMEABLE_Z} 放行（1~6 那种"谁压过兄弟"不必查表，
+ *    而 2000 这一档本身就在菜单层，压不住撤销入口）；
+ *  - `var(--z-<已知槽>)` 放行；`var(--z-toast/--z-tour)` 是保护区 → `protected_layer`；
+ *    写得出但查无此档的 `var(--z-foo)` → `unknown_layer`（宁可拒也不"就当它是 0"）；
+ *  - 数字超过 2000 → `z_index_too_high`（与放开前同一条码，语义从"太高"变成"太高且没落槽"）；
+ *  - `position:fixed` 必须配一个可引用的槽：没有槽的 fixed 就是"随便盖住谁"；
+ *  - 任何 `--z-*` 声明一律拒：能重定义槽，整张层槽表就作废了。
+ */
+function checkLayerUse(decls: Record<string, string>): string | null {
+  for (const prop of Object.keys(decls)) {
+    if (prop.startsWith("--z-")) return `layer_slot_is_host_only:${prop}`;
+  }
+  const z = decls["z-index"];
+  if (z !== undefined) {
+    const varName = /^\s*var\(\s*(--[\w-]+)\s*\)\s*$/.exec(z.trim());
+    if (varName) {
+      const name = varName[1].slice(2);
+      if (!(name in ALL_LAYERS)) return `unknown_layer:${name}`;
+      if (!(name in NAMEABLE_SLOTS)) return `protected_layer:${name}`;
+    } else {
+      const n = Number.parseInt(z, 10);
+      if (Number.isFinite(n) && n > MAX_Z_INDEX) return "z_index_too_high";
+    }
+  }
+  if (/^\s*fixed\s*$/i.test(decls["position"] ?? "")) {
+    const slot = z !== undefined ? slotFromZValue(z) : null;
+    if (!slot || !(slot in NAMEABLE_SLOTS)) return "fixed_needs_layer_slot";
+  }
+  return null;
+}
 
 /** 默认用浏览器自己的 CSS 解析器兜底语法（零依赖、不会漏新语法）；测环境里没有时退化为结构检查。 */
 function browserCssAccepts(css: string): boolean {
@@ -96,13 +144,12 @@ function checkDecls(decls: Record<string, string>): string | null {
     if (value.length > 400) return `value_too_long:${prop}`;
     for (const re of BANNED_VALUE_PATTERNS) if (re.test(value)) return `banned_value:${prop}`;
     if (/[;{}]/.test(value)) return `structural_char:${prop}`;
-    if (prop === "position" && BANNED_POSITION_FIXED.test(value)) return "banned_position_fixed";
     if (prop === "z-index") {
       const n = Number.parseInt(value, 10);
       if (Number.isFinite(n) && n > MAX_Z_INDEX) return "z_index_too_high";
     }
   }
-  return null;
+  return checkLayerUse(decls);
 }
 
 function checkKeyframes(kf: { name: string; body: string }): string | null {
@@ -190,6 +237,7 @@ function checkPair(selector: string, cssText: string, push: (p: string) => void,
     for (const d of decls) {
       const prop = d.slice(0, d.indexOf(":")).trim();
       if (!prop.startsWith("--")) push(`root_rule_must_only_define_custom_properties:${prop}`);
+      else if (prop.startsWith("--z-")) push(`layer_slot_is_host_only:${prop}`);
       else if (reservedVars.includes(prop)) push(`root_token_override_use_theme_patch:${prop}`);
     }
     return;
@@ -197,9 +245,23 @@ function checkPair(selector: string, cssText: string, push: (p: string) => void,
   const selErr = checkSelector(selector);
   if (selErr) push(`${selErr}:${selector.slice(0, 60)}`);
   for (const re of BANNED_VALUE_PATTERNS) if (re.test(cssText)) push(`banned_value_in:${selector.slice(0, 40)}`);
-  if (/position\s*:\s*fixed/i.test(cssText)) push(`banned_position_fixed:${selector.slice(0, 40)}`);
-  const z = cssText.match(/z-index\s*:\s*(-?\d+)/i);
-  if (z && Number.parseInt(z[1], 10) > MAX_Z_INDEX) push(`z_index_too_high:${selector.slice(0, 40)}`);
+  if (/^@/.test(selector.trim())) return; // @keyframes / @media 交给各自的分支，这里不套层级判定
+  const layer = checkLayerUse(declsFromCss(cssText));
+  if (layer) push(`${layer}:${selector.slice(0, 40)}`);
+}
+
+/** 从一条规则的 cssText 里取出声明表（`position:fixed` 这类判定要看整条，不能逐条判） */
+function declsFromCss(cssText: string): Record<string, string> {
+  const open = cssText.indexOf("{");
+  const close = cssText.lastIndexOf("}");
+  if (open < 0 || close <= open) return {};
+  const out: Record<string, string> = {};
+  for (const decl of cssText.slice(open + 1, close).split(";")) {
+    const i = decl.indexOf(":");
+    if (i <= 0) continue;
+    out[decl.slice(0, i).trim().toLowerCase()] = decl.slice(i + 1).trim();
+  }
+  return out;
 }
 
 /**

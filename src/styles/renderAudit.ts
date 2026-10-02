@@ -12,6 +12,7 @@
  *  - 对比度比与提醒线**引自 `themeCore`**，不在这里重抄（同一算法的第三份副本等于多一处会漂的地方）。
  */
 import { contrastRatio, TEXT_CONTRAST_FLOOR, TEXT_CONTRAST_WARN, type Rgba } from "./themeCore";
+import { ALL_LAYERS, NAMEABLE_SLOTS, slotFromZValue } from "./layerSlots";
 
 /* ================= 颜色：把 computed style 的字符串变成可算的数 ================= */
 
@@ -290,6 +291,64 @@ export function auditMotionOverride(css: string, baseline: [number, number, numb
   return out;
 }
 
+/* ================= 层槽：谁能盖住谁 ================= */
+
+/**
+ * 宿主对话框遮码所在的档（`.modal-mask` 实测 200）。
+ * 注入层里 `position:fixed` + 高于这档 + 铺满视口 = 能把"清除 AI 临时覆盖"那个入口盖住。
+ * 这条**不靠禁令**解决：层槽表只保证主题拿不到通知/引导/拖拽那三档，
+ * 而 200 以上、2000 以下是合法区，所以这里出证据、由人决定留不留。
+ */
+export const HOST_DIALOG_Z = 200;
+
+export interface LayerClashIssue {
+  selector: string;
+  /** 写的是什么：`var(--z-float)` / `1500` */
+  zValue: string;
+  /** 解析到的数值；未知槽为 null */
+  zResolved: number | null;
+  reason: "covers_host_dialog" | "protected_layer_in_use" | "unknown_layer_in_use";
+}
+
+/** 一条规则里是不是"铺满视口"：inset:0，或四边都钉上，或宽高都是 100% */
+function coversViewport(body: string): boolean {
+  if (/inset\s*:\s*0\b/i.test(body)) return true;
+  const edges = ["top", "right", "bottom", "left"].filter((e) => new RegExp(`(^|[;\\s])${e}\\s*:`, "i").test(body));
+  if (edges.length === 4) return true;
+  return /width\s*:\s*100(\.0)?%/i.test(body) && /height\s*:\s*100(\.0)?%/i.test(body);
+}
+
+/**
+ * 扫注入层文本，报出"能盖住宿主对话框"的浮层与用错了的槽。
+ * 与净化器**判据不同**是故意的：净化器管"能不能写进去"，这里管"已经贴在屏幕上的东西会不会挡路"
+ * （手写的插件包可以绕过写入期检查，而屏幕不会说谎）。
+ */
+export function auditLayerClash(css: string): LayerClashIssue[] {
+  const out: LayerClashIssue[] = [];
+  for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const body = m[2];
+    const selector = m[1].trim();
+    if (!selector || selector.startsWith("@")) continue;
+    if (!/position\s*:\s*fixed/i.test(body)) continue;
+    const z = /z-index\s*:\s*([^;}]+)/i.exec(body);
+    const zValue = (z?.[1] ?? "auto").trim();
+    const slot = slotFromZValue(zValue);
+    if (/^var\(\s*--z-[\w-]+\s*\)$/.test(zValue) && !slot) {
+      out.push({ selector, zValue, zResolved: null, reason: "unknown_layer_in_use" });
+      continue;
+    }
+    if (slot && !(slot in NAMEABLE_SLOTS)) {
+      out.push({ selector, zValue, zResolved: ALL_LAYERS[slot as keyof typeof ALL_LAYERS] ?? null, reason: "protected_layer_in_use" });
+      continue;
+    }
+    const resolved = slot ? NAMEABLE_SLOTS[slot as keyof typeof NAMEABLE_SLOTS] : Number.parseInt(zValue, 10);
+    if (!Number.isFinite(resolved) || resolved <= HOST_DIALOG_Z) continue;
+    if (!coversViewport(body)) continue; // 小浮层盖不住入口，报了只是噪声
+    out.push({ selector, zValue, zResolved: resolved, reason: "covers_host_dialog" });
+  }
+  return out;
+}
+
 /* ================= 汇总 ================= */
 
 export interface AuditResult {
@@ -299,6 +358,7 @@ export interface AuditResult {
   overflow: BoxSample[];
   hitTargets: HitIssue[];
   motionOverride: MotionIssue[];
+  layerClash: LayerClashIssue[];
   perf: { styleBytes: number; rules: number };
   /**
    * "有问题必须说出口"的标记。**它不是安装拦截位**（详设 A9：能力面全开＝不拦，
@@ -313,6 +373,7 @@ export function summarizeAudit(input: Omit<AuditResult, "blocking">): AuditResul
     input.contrast.length > 0 ||
     input.overflow.length > 0 ||
     input.hitTargets.length > 0 ||
-    input.motionOverride.length > 0;
+    input.motionOverride.length > 0 ||
+    input.layerClash.length > 0;
   return { ...input, blocking };
 }

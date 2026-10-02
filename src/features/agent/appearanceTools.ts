@@ -22,6 +22,7 @@ import { guardStyleText } from "../styles/styleSanitize";
 import { applyLayer, layerCss, revertLayer, scratchCssMerged } from "./styleScratch";
 import { THEME_CSS_MAX_BYTES } from "../plugins/artifact";
 import { DOMAIN_ZH } from "./scopeTiers";
+import { slotCatalogText } from "../../styles/layerSlots";
 import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolResultBody } from "./toolRegistry";
 
 export const APPEARANCE_TOOLS = [
@@ -699,7 +700,7 @@ export const appearanceToolEntries: AgentToolEntry[] = [
     domain: "plugins",
     provenance: HOST,
     description:
-      `Persist the appearance work as an ENABLED theme plugin (default final step of any appearance edit; overlay is cleared afterwards, undo tokens expire). It saves a COMPLETE theme — the currently active theme's full token set with your overlay applied on top — not just the patched tokens, and saving the same name again bumps the version in place instead of creating a duplicate. The user can switch it off from this card's 停用 button or 设置 → 插件管理. Needs the plugin-library (插件库) authorization. Args: { name: string, css?: string (a full component-layer stylesheet, up to ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB — enough for a whole theme; **validated** — html/body/*/#root selectors, position:fixed, url()/@import and z-index>900 are rejected per rule with the reason; a :root rule may only declare NEW --custom-properties, whitelisted tokens go through theme_patch) }. If the look came from style_patch layers, prefer style_commit: it persists what is actually on screen instead of a hand-retyped copy. Writing it in several replies? Use style_append instead of retyping the whole sheet here.`,
+      `Persist the appearance work as an ENABLED theme plugin (default final step of any appearance edit; overlay is cleared afterwards, undo tokens expire). It saves a COMPLETE theme — the currently active theme's full token set with your overlay applied on top — not just the patched tokens, and saving the same name again bumps the version in place instead of creating a duplicate. The user can switch it off from this card's 停用 button or 设置 → 插件管理. Needs the plugin-library (插件库) authorization. Args: { name: string, css?: string (a full component-layer stylesheet, up to ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB — enough for a whole theme; **validated** — html/body/*/#root selectors, url()/@import and script-era values are rejected per rule with the reason; position:fixed must land on a registered layer slot (z-index: ${slotCatalogText()}) because nothing a theme writes may outrank the notification/tour/drag tiers; a :root rule may only declare NEW --custom-properties (never --z-*, and whitelisted tokens go through theme_patch)) }. If the look came from style_patch layers, prefer style_commit: it persists what is actually on screen instead of a hand-retyped copy. Writing it in several replies? Use style_append instead of retyping the whole sheet here.`,
     parameters: {
       type: "object",
       properties: { name: { type: "string" }, css: { type: "string" } },

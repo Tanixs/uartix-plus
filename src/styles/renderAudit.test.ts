@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   auditContrast,
   auditHitTargets,
+  auditLayerClash,
   auditMotionOverride,
   auditOverflow,
   flattenOver,
@@ -176,6 +177,34 @@ describe("特异性与减弱动效", () => {
   });
 });
 
+describe("层槽：谁能盖住谁", () => {
+  it("fixed + 铺满视口 + 高于对话框档 → 报 covers_host_dialog", () => {
+    const r = auditLayerClash(".veil{position:fixed;inset:0;z-index:var(--z-float)}");
+    expect(r).toHaveLength(1);
+    expect(r[0].selector).toBe(".veil");
+    expect(r[0].zResolved).toBe(500);
+    expect(r[0].reason).toBe("covers_host_dialog");
+  });
+
+  it("低于对话框档的不报；不铺满视口的也不报（报了只是噪声）", () => {
+    expect(auditLayerClash(".tip{position:fixed;inset:auto 12px 40px auto;z-index:var(--z-raised)}")).toHaveLength(0);
+    expect(auditLayerClash(".pop{position:fixed;top:10px;left:10px;width:120px;height:60px;z-index:1500}")).toHaveLength(0);
+    expect(auditLayerClash(".full{position:fixed;top:0;right:0;bottom:0;left:0;z-index:1500}")).toHaveLength(1);
+  });
+
+  it("保护区与未知槽单独报因（写入期被净化器拦过，这里兜手写包那条路）", () => {
+    const prot = auditLayerClash(".a{position:fixed;inset:0;z-index:var(--z-toast)}");
+    expect(prot[0].reason).toBe("protected_layer_in_use");
+    const unk = auditLayerClash(".a{position:fixed;inset:0;z-index:var(--z-nope)}");
+    expect(unk[0].reason).toBe("unknown_layer_in_use");
+    expect(unk[0].zResolved).toBeNull();
+  });
+
+  it("没写 z-index 的 fixed 不报（它按 DOM 序排，判不了层）", () => {
+    expect(auditLayerClash(".a{position:fixed;inset:0}")).toHaveLength(0);
+  });
+});
+
 describe("溢出与命中区", () => {
   it("只报越过容差的，按越界量从大到小", () => {
     const r = auditOverflow([
@@ -213,6 +242,7 @@ describe("汇总", () => {
     overflow: [],
     hitTargets: [],
     motionOverride: [],
+    layerClash: [],
     perf: { styleBytes: 0, rules: 0 },
   };
 

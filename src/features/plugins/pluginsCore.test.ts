@@ -70,8 +70,21 @@ describe("artifact 校验", () => {
     expect(validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: "@import url(x.css)" }).ok).toBe(false);
     expect(validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: "a{background:url(https://x.y)}" }).ok).toBe(false);
     const fixed = validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: ".x{position:fixed;inset:0}" });
-    expect(fixed.ok, "一层 fixed 就能盖住批准弹层与停止入口，不能只给警告").toBe(false);
-    expect(fixed.errors.join()).toContain("banned_position_fixed");
+    expect(fixed.ok, "一层没落槽的 fixed 就能盖住批准弹层与停止入口，不能只给警告").toBe(false);
+    /**
+     * P131-B2 改口（判据没变松，同一个输入仍然拒）：理由从"一律禁 fixed"换成
+     * "fixed 必须落在登记过的层槽上"。落槽的写法现在两条通路都放行——
+     * 保护区（通知 / 引导 / 拖拽）不出槽，所以主题仍然拿不到比它们更高的合法层。
+     */
+    expect(fixed.errors.join()).toContain("fixed_needs_layer_slot");
+    expect(
+      validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: ".x{position:fixed;inset:0;z-index:var(--z-popup)}" }).ok,
+      "落槽的浮层是正常能力，插件通路不该比 style_patch 更严",
+    ).toBe(true);
+    expect(
+      validateArtifactPayload("theme", { vars: { "--bg": "#000" }, css: ".x{position:fixed;inset:0;z-index:var(--z-toast)}" }).ok,
+      "保护区出槽＝层槽表作废",
+    ).toBe(false);
     /**
      * 证伪用：这条正是旧实现的漏洞——`body{display:none}` 以前只被"工具描述里的话术"拦，
      * 校验层放行，装上一个这样的主题＝整个界面关掉。现在与 style_patch 同一条净化器。

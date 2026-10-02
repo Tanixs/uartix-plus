@@ -10,10 +10,12 @@
  * TOOL_LABEL、summarizeArgs），漏一处就静默；现在全在下面的 entry 里。
  */
 import { DOMAIN_ZH } from "./scopeTiers";
+import { slotCatalogText } from "../../styles/layerSlots";
 import { censusSurface, collectInventory, collectAuditInput, AUDIT_DEFAULTS, INVENTORY_SECTIONS, SURFACE_DEFAULTS } from "./uiSurface";
 import {
   auditContrast,
   auditHitTargets,
+  auditLayerClash,
   auditMotionOverride,
   auditOverflow,
   HIT_TARGET_MIN_PX,
@@ -135,7 +137,7 @@ export const uiToolEntries: AgentToolEntry[] = [
     domain: "ui",
     provenance: HOST,
     description:
-      `Apply per-component CSS as **structured rules** (not free text) into a session-scoped scratch layer: rules: [{ selector, decls: {prop:value}, keyframes?: {name:"fx-…", body} }]. Each rule is validated (global selectors html/body/*/#root, position:fixed, url()/@import, z-index>900, caps ${STYLE_CAPS.maxRules} rules / ${STYLE_CAPS.maxBytes} bytes) and reported back with hit counts and before→after values; a selector that hits 0 elements comes back in zeroHit with the real class names to use instead. Nothing is persisted: call save_theme_extension({name, css}) afterwards if the user wants to keep it; revert with style_revert. For glow/sheen/ripple/particles/border animations use the built-in recipes — call ui_inventory { section: "fx" } first (classes + --fx-* knobs) instead of writing @keyframes from scratch. Needs the ${DOMAIN_ZH.ui} authorization.`,
+      `Apply per-component CSS as **structured rules** (not free text) into a session-scoped scratch layer: rules: [{ selector, decls: {prop:value}, keyframes?: {name:"fx-…", body} }]. Each rule is validated (global selectors html/body/*/#root, url()/@import, and the layer rule: position:fixed must pair with a registered slot such as z-index: var(--z-menu) — slots are ${slotCatalogText()}; protected tiers and unknown slots are rejected; caps ${STYLE_CAPS.maxRules} rules / ${STYLE_CAPS.maxBytes} bytes) and reported back with hit counts and before→after values; a selector that hits 0 elements comes back in zeroHit with the real class names to use instead. Nothing is persisted: call save_theme_extension({name, css}) afterwards if the user wants to keep it; revert with style_revert. For glow/sheen/ripple/particles/border animations use the built-in recipes — call ui_inventory { section: "fx" } first (classes + --fx-* knobs) instead of writing @keyframes from scratch. Needs the ${DOMAIN_ZH.ui} authorization.`,
     parameters: {
       type: "object",
       properties: {
@@ -239,7 +241,7 @@ export const uiToolEntries: AgentToolEntry[] = [
     domain: null,
     provenance: HOST,
     description:
-      `Measure what is ACTUALLY on screen instead of what the CSS says: contrast of every visible text node against its real composited backdrop (WCAG 4.5:1, 3:1 for large text), text painted outside its own box, interactive targets under ${HIT_TARGET_MIN_PX} CSS px (folded back through --zoom, so a narrow control at 125% is not falsely accused), and rules that would override the user's reduced-motion setting (specificity vs the host's html.no-motion baseline). Read-only — it changes nothing. Args: { root?: string (default "body"), maxSamples?: number (20..800, default ${AUDIT_DEFAULTS.maxSamples}) }. blocking:true means SPEAK: list the findings for the user and fix the selectors/colors, then run it again — it is not an install gate and never will be (evidence open, permissions closed). The 12 static gates cannot see injected theme CSS, so this is the only check that covers what you just painted.`,
+      `Measure what is ACTUALLY on screen instead of what the CSS says: contrast of every visible text node against its real composited backdrop (WCAG 4.5:1, 3:1 for large text), text painted outside its own box, interactive targets under ${HIT_TARGET_MIN_PX} CSS px (folded back through --zoom, so a narrow control at 125% is not falsely accused), rules that would override the user's reduced-motion setting (specificity vs the host's html.no-motion baseline), and layer clashes (a position:fixed overlay high enough to bury the settings dialog, or a reference to a protected/unknown z slot). Read-only — it changes nothing. Args: { root?: string (default "body"), maxSamples?: number (20..800, default ${AUDIT_DEFAULTS.maxSamples}) }. blocking:true means SPEAK: list the findings for the user and fix the selectors/colors, then run it again — it is not an install gate and never will be (evidence open, permissions closed). The 12 static gates cannot see injected theme CSS, so this is the only check that covers what you just painted.`,
     parameters: {
       type: "object",
       properties: { root: { type: "string" }, maxSamples: { type: "number" } },
@@ -270,6 +272,7 @@ export const uiToolEntries: AgentToolEntry[] = [
         overflow: auditOverflow(input.overflow).slice(0, 12),
         hitTargets: auditHitTargets(input.hits).slice(0, 12),
         motionOverride: auditMotionOverride(injected).slice(0, 12),
+        layerClash: auditLayerClash(injected).slice(0, 12),
         perf: { styleBytes: input.perf.styleBytes, rules: input.perf.rules },
       });
       return {

@@ -88,6 +88,22 @@
      实测 50/50：亮色 bar=97.0（距页签条 3.0、距内容 3.0），暗色 bar=6.0（2.4 / 3.1）。
      派生 token，不进 AI 外观白名单（同 --text-faint 的口径）。 */
   --bar-bg: color-mix(in srgb, var(--bg-panel) 50%, var(--bg-inset));
+
+  /* P131-B2 层槽（z 轴的唯一一份数值）。
+     数值表在 `src/styles/layerSlots.ts`，这里只是把它落到 CSS 上——两边由
+     `layerSlots.test.ts` 钉住（写歪一个数就红）。
+     前四档是**主题/AI 能引用的**（`z-index: var(--z-menu)` 这种），
+     后两档是保护区：撤销入口、通知、教学引导必须永远拿得到比任何合法浮层更高的档，
+     所以它们不出槽（净化器对 `var(--z-toast)` 回 protected_layer）。
+     这条替掉了原来那条"z-index 不许超过 900 + 一律禁 position:fixed"——
+     一刀切挡不住 `position:absolute` + 巨大数值的同类效果，却把浮层/遮罩/通知整层能力删了。 */
+  --z-raised: 100;
+  --z-float: 500;
+  --z-popup: 999;
+  --z-menu: 2000;
+  --z-toast: 4000;
+  --z-tour: 5000;
+  --z-drag: 10000;
 }
 
 :root[data-scheme="light"] {
@@ -1468,7 +1484,7 @@ select optgroup {
 /* 芯片悬浮预览（跟随主题） */
 .qk-tip {
   position: fixed;
-  z-index: 2000;
+  z-index: var(--z-menu);
   transform: translateX(-50%);
   min-width: 180px;
   max-width: 320px;
@@ -6471,7 +6487,7 @@ label.set-switch,
   position: fixed;
   right: var(--sp-4);
   bottom: 36px;
-  z-index: 4000;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -6497,7 +6513,7 @@ label.set-switch,
 
 .help-bubble {
   position: fixed;
-  z-index: 999;
+  z-index: var(--z-popup);
   background: var(--bg-panel);
   border: 1px solid var(--border);
   padding: 8px 11px;
@@ -6968,7 +6984,7 @@ a > svg {
 /* ==== AI 助手 ==== */
 .ai-float {
   position: fixed;
-  z-index: 500;
+  z-index: var(--z-float);
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
@@ -7042,7 +7058,7 @@ a > svg {
   position: fixed;
   right: 18px;
   bottom: 40px;
-  z-index: 500;
+  z-index: var(--z-float);
   width: 44px;
   height: 44px;
   border-radius: 50%;
@@ -8468,7 +8484,7 @@ html.aiw-transparent-root #root {
 /* 挂件自绘右键菜单（无边框形态的常驻操作入口） */
 .aiw-menu {
   position: fixed;
-  z-index: 2000;
+  z-index: var(--z-menu);
   min-width: 150px;
   padding: var(--sp-1);
   background: var(--bg-panel);
@@ -9189,7 +9205,7 @@ html.aiw-transparent-root #root {
 .snt-foot-info .dim { color: var(--text-dim); }
 
 /* ---- 最小化浮球（App 全局 portal 层）---- */
-.snt-float-wrap { position: fixed; right: 18px; bottom: 96px; z-index: 500; }
+.snt-float-wrap { position: fixed; right: 18px; bottom: 96px; z-index: var(--z-float); }
 .snt-float { position: relative; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-panel); color: var(--accent); display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: var(--shadow); padding: 0; transition: transform var(--dur-fast) var(--ease); }
 .snt-float:hover { transform: scale(1.06); }
 .snt-float.crit { animation: snt-pulse 2s var(--ease) infinite; }
@@ -9698,7 +9714,7 @@ html:has(.sw), .sw { background: transparent; }
 .orch-evadd:hover { border-color: var(--accent); color: var(--accent); }
 /* 弹层经 OrchDropdown portal 到 body + fixed（组卡/画布 overflow 裁剪逃逸），坐标由 JS 写入 */
 .orch-pop { display: flex; flex-direction: column; min-width: 150px; padding: var(--sp-1); background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-l); box-shadow: var(--shadow-pop), var(--shadow); }
-.orch-pop-fixed { position: fixed; z-index: 999; }
+.orch-pop-fixed { position: fixed; z-index: var(--z-popup); }
 .orch-pop-i { all: unset; cursor: pointer; padding: 4px 9px; font-size: var(--fs-sm); border-radius: var(--radius-m); color: var(--text); white-space: nowrap; }
 .orch-pop-i:hover { background: var(--accent-soft); color: var(--accent); }
 
@@ -9721,7 +9737,7 @@ html:has(.sw), .sw { background: transparent; }
    ghost 浮层 portal 到 body、直写 transform 跟手（不用 left/top 过渡，跟手零延迟）；
    drag-active 锁全局光标与文本选中，按下即有"拖起来了"的反馈 */
 .drag-ghost {
-  position: fixed; left: 0; top: 0; z-index: 9999; pointer-events: none;
+  position: fixed; left: 0; top: 0; z-index: var(--z-drag); pointer-events: none;
   display: inline-flex; align-items: center; gap: 6px; max-width: 360px;
   padding: 4px 10px; border-radius: var(--radius-l);
   background: var(--bg-panel); border: 1px solid var(--accent);
@@ -10035,7 +10051,7 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 5000;
+  z-index: var(--z-tour);
 }
 
 .tour-mask path {
@@ -10047,11 +10063,11 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
   border-radius: var(--radius-xl);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
   pointer-events: none;
-  z-index: 5000;
+  z-index: var(--z-tour);
 }
 .tour-pop {
   position: fixed;
-  z-index: 5001;
+  z-index: calc(var(--z-tour) + 1);
   width: min(340px, calc((100vw - 24px) / var(--zoom)));
   padding: 14px 16px 12px;
   border: 1px solid var(--border);
@@ -10444,7 +10460,7 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
 .vdev-hint { font-size: var(--fs-body); line-height: 1.7; color: var(--text-dim); }
 
 /* ---------- 指针式拖拽内核（shared/pointerDrag，P83b） ---------- */
-.pdrag-ghost{position:fixed;z-index:10000;pointer-events:none;display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--radius-l);border:1px solid var(--accent);background:color-mix(in srgb,var(--bg-panel) 94%,transparent);box-shadow:var(--shadow-lift);font-size:var(--fs-sm);color:var(--text);max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pdrag-ghost{position:fixed;z-index:var(--z-drag);pointer-events:none;display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--radius-l);border:1px solid var(--accent);background:color-mix(in srgb,var(--bg-panel) 94%,transparent);box-shadow:var(--shadow-lift);font-size:var(--fs-sm);color:var(--text);max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .pdrag-ghost .pdrag-dot{width:8px;height:8px;border-radius:50%;flex:none;}
 .pdrag-ghost .pdrag-sub{color:var(--text-dim);font-size:var(--fs-xs);}
 body.pdrag-active{cursor:grabbing;user-select:none;}
