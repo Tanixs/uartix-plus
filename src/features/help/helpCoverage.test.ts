@@ -252,27 +252,37 @@ describe("帮助文档不得落后于实现", () => {
   });
 
   /**
-   * P128-A · 「在命令上覆盖参数值」是一句说在前面的假话。
+   * P128-A → P129-A · 命令级覆盖：话和格子必须一起在场。
    *
-   * 三处文本（帮助手册 TX组帧台 那一行、属性页参数组的问号、AI 知识库）都写着
-   * "要临时改一版，在命令或卡片上覆盖它"。卡片那半是真的（`cmdExec.ts:153` 滑条 / 开关设的值
-   * 就是那一次发送的覆盖）；命令那半不是 —— `Command.overrides` 这个字段编码器认，
-   * 可命令库里**没有任何界面填它**（`patchCommand(…{overrides:undefined})` 只在清除时出现）。
-   * 而对用户和模型说过的话，就是承诺（§8-41：这一族先例是提示词指引用户去按一个已删的按钮）。
+   * 这一族的经过值得留全：三处文本（帮助手册 TX组帧台 那一行、属性页参数组的问号、AI 知识库）
+   * 原本写着"要临时改一版，在命令或卡片上覆盖它"，而命令那半没有界面 ——
+   * `Command.overrides` 编码器认，`patchCommand(…{overrides:undefined})` 却只出现在"清除引用"两处。
+   * P128 先把话改口，P129 把格子补上，于是这句话现在又反过来过期了。
    *
-   * 所以钉两头：那句原话禁回来；三处都得带着"还没格子"这半句。
-   * 哪天真做出命令侧的覆盖输入面，改这条钉的同时把那三处文本一起改口 —— 不是把钉删掉。
+   * 所以这条钉钉的是**双向**：
+   *  - 三处话术都得提到"覆盖参数"那一节（说了 → 代码里得真有一节）；
+   *  - 命令库里真得有那一节，而且"空着 = 不覆盖"要写成删键、不是存空串
+   *    （存空串就成"这条命令把参数改成了没有值"，编码器照实报错，而那人只是按了一下退格）；
+   *  - 那句不带出处的原话「在命令或卡片上覆盖」不许再回来 —— 它错在没说什么情况下才成立。
+   *
+   * 对用户和模型说过的话就是承诺（§8-41：同族先例是提示词让用户去按一颗早已删掉的按钮）。
    */
-  it("P128-A：命令侧的覆盖值——字段有、界面没有，话必须说准", () => {
+  it("P129-A：命令级覆盖——话与格子一起在场，缺一边就红", () => {
     const inspSrc = readFileSync(here.replace(/[/\\]features[/\\]help[/\\].*$/, "/features/inspector/SendFieldInspector.tsx"), "utf8");
-    const CAVEAT = "填它的格子";
+    const clSrc = readFileSync(here.replace(/[/\\]features[/\\]help[/\\].*$/, "/features/controls/CommandLibrary.tsx"), "utf8");
+    expect(clSrc, "命令设置弹窗里没有「覆盖参数」那一节了 ⇒ 三处话术又成假话").toContain("覆盖参数");
+    expect(clSrc, "覆盖值不许存空串：空着 = 从 overrides 里删键").toMatch(
+      /overrides:\s*Object\.keys\(next\)\.length\s*\?\s*next\s*:\s*undefined/,
+    );
     for (const [name, src] of [
       ["HelpModal", helpSrc],
       ["prompts", promptsSrc],
       ["属性页", inspSrc],
     ] as const) {
-      expect(src, `${name} 里没有"命令库还欠着这个输入面"那半句 ⇒ 又开始承诺一个不存在的东西了`).toContain(CAVEAT);
-      expect(src, `${name} 里那句"在命令或卡片上覆盖"回来了`).not.toContain("在命令或卡片上覆盖");
+      expect(src, `${name} 没跟上：命令设置里已经有「覆盖参数」那一节`).toContain("覆盖参数");
+      expect(src, `${name} 还挂着"命令库里没有格子"那句过期的话`).not.toContain("填它的格子");
     }
+    const all = `${helpSrc}${promptsSrc}${inspSrc}${clSrc}`;
+    expect(all, "「在命令或卡片上覆盖」这句没出处的话回来了").not.toContain("在命令或卡片上覆盖");
   });
 });

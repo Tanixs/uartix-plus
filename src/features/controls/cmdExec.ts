@@ -88,6 +88,27 @@ export function bakeReferenceFrame(cmd: RunnableCommand): string {
 }
 
 /**
+ * 给界面看的那一帧：与 `bakeReferenceFrame` 同一个编码器、同一份覆盖值，唯一区别是
+ * **编不出来时把编码器的原话交回调用方**，而不是抛出去。
+ *
+ * 为什么单独一件而不让界面自己 try/catch `bakeReferenceFrame`：那等于在命令库里再搭一条
+ * 编码路径，两处对"什么算一帧"的理解会分叉。为什么值得再开一件：覆盖值是用户手打的，
+ * 「256 装不进 u8」这句必须在这一屏说得出——不然他要先关掉弹窗、去 TX 组帧台改默认值
+ * 再发一次才知道自己打错了。
+ */
+export function previewReferenceFrame(
+  cmd: RunnableCommand,
+): { ok: true; hex: string } | { ok: false; msg: string } | { ok: false; noSpec: true } {
+  const tpl = sendStore.getTemplate(cmd.sendTemplateId ?? "");
+  if (!tpl) return { ok: false, noSpec: true };
+  try {
+    return { ok: true, hex: encodeSend(tpl, { values: sendValues(tpl, cmd.overrides), seq: tpl.nextSeq }).hex };
+  } catch (e) {
+    return { ok: false, msg: String(e).replace(/^SendEncodeError:\s*/, "").replace(/^Error:\s*/, "") };
+  }
+}
+
+/**
  * 发一帧发送谱。三件事只有在这里定一次才成立：
  *  - 参数值 = 谱里的默认值 + 命令上的覆盖；缺值由编码器报错点名，不凑数；
  *  - 自增序号**同步占号**、包没发出去就退还（见 `sendStore.reserveSeq`）：

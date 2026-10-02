@@ -5,7 +5,7 @@ import { isGroup } from "./commandStore";
 import type { CommandItem } from "./commandStore";
 import type { SendMode } from "./controlsStore";
 import { useSettings } from "../settings/settingsStore";
-import { bakeReferenceFrame, runCommand } from "./cmdExec";
+import { bakeReferenceFrame, previewReferenceFrame, runCommand } from "./cmdExec";
 import * as sendStore from "../send/sendStore";
 import { TextInput } from "../../shared/FormInputs";
 import { IconChevron, IconClose } from "../../shared/icons";
@@ -432,7 +432,30 @@ function CommandModal(props: {
   const { item } = props;
   useLocale();
   const scriptOn = item.scriptEnabled;
-  const specName = item.sendTemplateId ? sendStore.getTemplate(item.sendTemplateId)?.name : undefined;
+  /**
+   * P129-A：这里**订阅** sendStore，不再 `getTemplate()` 一次就完。
+   * 以前只取个名字，弹窗开着时谱改了界面不知道 —— 一旦这一屏要显示"这条命令会发哪一帧"，
+   * 不订阅就成了一个看着权威、其实过期的读数。
+   */
+  const specs = useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
+  const spec = item.sendTemplateId ? specs.find((x) => x.id === item.sendTemplateId) : undefined;
+  const specName = spec?.name;
+  /** 一帧预览：编不出就把编码器的原话摆在这一屏（他要的是先看见再决定，不是先关掉弹窗去试） */
+  const frame = spec ? previewReferenceFrame({ ...item, sendTemplateId: spec.id }) : null;
+
+  /**
+   * 写一个覆盖值。**空着 = 不覆盖**，所以清空是从 `overrides` 里删键、全空是整个字段置空 ——
+   * 不是存一个空串：存了空串就成"这条命令把参数改成了没有值"，编码器会照实报错，
+   * 而界面上那个人只是按了一下退格。
+   */
+  const setOverride = (pid: string, v: string) => {
+    const next = { ...(item.overrides ?? {}) };
+    if (v.trim() === "") delete next[pid];
+    else next[pid] = v;
+    commandStore.patchCommand(item.id, {
+      overrides: Object.keys(next).length ? next : undefined,
+    });
+  };
   return (
     <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
@@ -474,6 +497,7 @@ function CommandModal(props: {
           </label>
         </div>
         {item.sendTemplateId ? (
+          <>
           <div className="form-row">
             <label>{tx("发送谱", "Template")}</label>
             <div className="cmd-hint">
@@ -525,6 +549,67 @@ function CommandModal(props: {
               )}
             </div>
           </div>
+          {/* P129-A：命令级参数覆盖。P128 之前这一屏什么都没有，
+              而帮助、属性页、提示词三处都在承诺"要临时改一版就在命令上覆盖"。
+              规则只有一条：空着的行 = 不覆盖，走的还是谱里的默认值。 */}
+          {spec && spec.params.length > 0 && (
+            <div className="form-col">
+              <label>
+                {tx("覆盖参数", "Override parameters")}{" "}
+                <HelpHint
+                  text={tx(
+                    "空着的那一行不覆盖，发的是谱里的默认值；填了就只改这一条命令，那张谱和其他命令都不动。改错了把这一行清空就回去。",
+                    "An empty row overrides nothing — the spec's default goes out. A filled row changes only this command: the template and every other command are untouched. Clear it to go back.",
+                  )}
+                />
+              </label>
+              {spec.params.map((p) => {
+                const cur = item.overrides?.[p.id] ?? "";
+                const opts = p.enumMap ?? [];
+                return (
+                  <div className="form-row" key={p.id} style={{ marginBottom: 0 }}>
+                    <span
+                      className="tpl-name"
+                      title={`${p.name} · ${tx(`谱里的默认值 ${p.def}`, `spec default ${p.def}`)}`}
+                    >
+                      {p.name}
+                    </span>
+                    {p.type === "enum" ? (
+                      <select className="input" value={cur} onChange={(e) => setOverride(p.id, e.target.value)}>
+                        <option value="">{tx(`（用默认 ${p.def}）`, `(default ${p.def})`)}</option>
+                        {opts.map((o) => (
+                          <option key={o.label} value={o.label}>
+                            {`${o.label} → ${o.value}`}
+                          </option>
+                        ))}
+                        {/* 存的值已经不在档位里（改了谱、或是卡片留下的值）：必须原样列出来。
+                            不然下拉框显示"用默认"、数据里却还留着那个值 —— 屏上说的和发出去的就分家了。 */}
+                        {!!cur && !opts.some((o) => o.label === cur) && (
+                          <option value={cur}>{tx(`${cur}（不是档位名）`, `${cur} (not an option label)`)}</option>
+                        )}
+                      </select>
+                    ) : (
+                      <TextInput
+                        value={cur}
+                        placeholder={tx(`默认 ${p.def}`, `default ${p.def}`)}
+                        onCommit={(v) => setOverride(p.id, v)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+              {/* 看到的 = 发出去的：这一行跟着覆盖值当场重算，编不出也把编码器的原话贴在这一屏。
+                  没有它，打错一个数要等点过一次发送才知道（而那一下是真发到实车上的）。 */}
+              {frame?.ok ? (
+                <div className="cmd-hint">
+                  {`${tx("这条命令此刻算出来的一帧", "What this command encodes to right now")}：${frame.hex}`}
+                </div>
+              ) : (
+                frame && !("noSpec" in frame) && <div className="tpl-sync-error">{frame.msg}</div>
+              )}
+            </div>
+          )}
+          </>
         ) : (
           !scriptOn && (
           <>
