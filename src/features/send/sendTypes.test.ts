@@ -14,7 +14,60 @@
 import { describe, expect, it } from "vitest";
 import type { FieldType } from "../../ipc/types";
 import { fieldSize } from "../protocol/fieldTypes";
-import { moveTargetIndex, sendFieldWidth, type SendField } from "./sendTypes";
+import {
+  formatEnumSpec,
+  moveTargetIndex,
+  parseEnumSpec,
+  sendFieldWidth,
+  type SendField,
+} from "./sendTypes";
+
+describe("parseEnumSpec · 档位表那一行文本", () => {
+  it("往返：写进去的表读出来还是它（顺序也保住——界面列的就是这个顺序）", () => {
+    const map = [
+      { label: "启动", value: "01" },
+      { label: "停止", value: "00" },
+      { label: "低速", value: "0x02" },
+    ];
+    expect(formatEnumSpec(map)).toBe("启动=01; 停止=00; 低速=0x02");
+    expect(parseEnumSpec(formatEnumSpec(map)).map).toEqual(map);
+  });
+
+  it("分号 / 换行 / 全角分号都能分；两侧空白吃掉", () => {
+    const r = parseEnumSpec(" 启动 = 01 ；\n停止=00\r\n");
+    expect(r.map).toEqual([
+      { label: "启动", value: "01" },
+      { label: "停止", value: "00" },
+    ]);
+    expect(r.bad).toEqual([]);
+  });
+
+  /**
+   * 这一条是整个函数的理由。接收侧的 `parseLabelSpec` 对认不出的条目是**跳过**——
+   * 那是一张注释，跳了不改变行为；这一张表决定发出去的字节，悄悄丢一档的症状是
+   * "我明明写了停止，按下去却报「不在档位里」"。所以坏条目原样交回界面点名。
+   */
+  it("缺 = 或空着的条目进 bad 交回界面，不静默丢档", () => {
+    const r = parseEnumSpec("启动=01; 停止; =00; 低速=; 好的=1");
+    expect(r.map).toEqual([
+      { label: "启动", value: "01" },
+      { label: "好的", value: "1" },
+    ]);
+    expect(r.bad).toEqual(["停止", "=00", "低速="]);
+  });
+
+  it("同名两档单独报出来：编码器 find 只取第一条，后面那档永远发不出去", () => {
+    const r = parseEnumSpec("启动=01; 启动=02; 停止=00");
+    expect(r.bad, "两条都合法，不该被当成格式错误").toEqual([]);
+    expect(r.dupes).toEqual(["启动"]);
+  });
+
+  it("值里再出现 = 算值的一部分（只有第一个 = 是分号）；空文本不是错", () => {
+    expect(parseEnumSpec("模式=a=b").map).toEqual([{ label: "模式", value: "a=b" }]);
+    expect(parseEnumSpec("   ")).toEqual({ map: [], bad: [], dupes: [] });
+    expect(formatEnumSpec(undefined)).toBe("");
+  });
+});
 
 describe("moveTargetIndex · 带内换位让回一格", () => {
   it("往前挪要让回一格（被拖那块先被摘掉，后面整体左移）", () => {

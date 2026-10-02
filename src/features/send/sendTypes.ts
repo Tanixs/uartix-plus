@@ -84,6 +84,49 @@ export interface SendParam {
   enumMap?: { label: string; value: string }[];
 }
 
+/** 档位表 → 编辑用的一行文本（`启动=01; 停止=00`），与 `parseEnumSpec` 往返一致 */
+export const formatEnumSpec = (map: SendParam["enumMap"]): string =>
+  (map ?? []).map((e) => `${e.label}=${e.value}`).join("; ");
+
+/**
+ * 一行 `启动=01; 停止=00` → 档位表。
+ *
+ * 为什么不照抄接收侧 `parseLabelSpec` 的"认不出来就跳过"：那是一张**注释**，跳掉一档只是少一行
+ * 说明；这一张表决定发出去的字节。悄悄丢一档的症状是"我明明写了停止，按下去却报「不在档位里」"，
+ * 而那句报错还是编码器说的实话——没人知道自己那一档是被界面弄丢的。所以坏条目原样交回界面点名
+ * （`parseHexInput` 的 `bad` 同一路）。
+ *
+ * `dupes` 单独算：编码器按 `find` 取第一条，同名两档时后写的那档**永远发不出去**，
+ * 而这件事不报错、不显眼 —— 正是这一族最贵的静默。
+ */
+export function parseEnumSpec(text: string): {
+  map: { label: string; value: string }[];
+  bad: string[];
+  dupes: string[];
+} {
+  const map: { label: string; value: string }[] = [];
+  const bad: string[] = [];
+  for (const raw of text.split(/[;；\r\n]/)) {
+    const t = raw.trim();
+    if (!t) continue;
+    const i = t.indexOf("=");
+    const label = i > 0 ? t.slice(0, i).trim() : "";
+    const value = i > 0 ? t.slice(i + 1).trim() : "";
+    if (!label || !value) {
+      bad.push(t);
+      continue;
+    }
+    map.push({ label, value });
+  }
+  const seen = new Set<string>();
+  const dupes: string[] = [];
+  for (const e of map) {
+    if (seen.has(e.label) && !dupes.includes(e.label)) dupes.push(e.label);
+    seen.add(e.label);
+  }
+  return { map, bad, dupes };
+}
+
 export interface SendTemplate {
   id: string;
   name: string;

@@ -26,7 +26,7 @@ import { roleNames } from "./roleNames";
 import { setInspectorFocus, txeBackToSpec } from "./focus";
 import { guardLocked } from "../operator/lock";
 import * as templateStore from "../protocol/templateStore";
-import { SEND_FIELD_ROLES, paramTypeOf, type SendField, type SendParam, type SendParamType, type SendTemplate } from "../send/sendTypes";
+import { SEND_FIELD_ROLES, formatEnumSpec, paramTypeOf, parseEnumSpec, type SendField, type SendParam, type SendParamType, type SendTemplate } from "../send/sendTypes";
 import { encodeSend, intRangeOf, parseHexInput } from "../send/encodeSend";
 import * as sendStore from "../send/sendStore";
 import { DeriveError, toReceiveTpl } from "../send/specToProtocol";
@@ -48,10 +48,11 @@ const CK_ALGOS: ChecksumAlgo[] = [
   "crc_custom",
 ];
 /**
- * 参数类型表。`enum` 故意不在选项里：它的档位表还没有编辑入口，
- * 给一个"选了却没法填"的选项就是假开关；但**已有** enum 参数的谱（导进来的）照样显示原值。
+ * 参数类型表。`enum` 以前故意不在选项里——它的档位表没有编辑入口，给一个"选了却没法填"的选项
+ * 就是假开关（§8-34）。P127-A 把那张表补上了（卡里的「档位表」那一行），假开关的指控不再成立，
+ * 于是收进来。`text` / `enum` 仍然点不动「生成控件」：选择框卡还没做，那颗键的问号在说这件事。
  */
-const PARAM_TYPES: SendParamType[] = ["int", "uint", "float", "text"];
+const PARAM_TYPES: SendParamType[] = ["int", "uint", "float", "text", "enum"];
 
 const hexOf = (f: SendField) =>
   f.source.kind === "const" ? f.source.bytes.map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(" ") : "";
@@ -77,6 +78,13 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
   const [link, setLink] = useState<{ line: string; pageId?: string; cardId?: string; cardName?: string } | null>(null);
   /** 哪个参数展开了（本地态：这是"看哪儿"，不是谱的内容，不该落盘也不该进撤销栈） */
   const [openParams, setOpenParams] = useState<Record<string, boolean>>({});
+  /**
+   * 档位表被拒收的次数。拒收时那张表**没变**，可输入框里还留着刚打的那一句（`TextInput` 自己
+   * 存着草稿），于是红字说的和被拒的那句已经不在屏上了——下一句更糟：如果改成与谱里相同的内容，
+   * `TextInput` 认为"没变化"根本不提交，红字就永远留在那儿。
+   * 拿它当 `key`：拒收那一刻整块重挂，框子回到谱里真正那张表，话和框说的就是同一件事。
+   */
+  const [enumNonce, setEnumNonce] = useState<Record<string, number>>({});
 
   /** 与面板底部那行 hex 同一个纯编码器：换界面不换算法，才谈得上"看到的就是发出去的" */
   const preview = useMemo(() => {
@@ -84,7 +92,9 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
     try {
       return { ok: true as const, ...encodeSend(tpl, { seq: tpl.nextSeq ?? 0 }) };
     } catch (e) {
-      return { ok: false as const, msg: String(e).replace(/^Error:\s*/, "") };
+      // 类名剥两层：`Error:` 是老账，`SendEncodeError:` 是这一族自己的。这行红字是给人读的一句
+      // 话，前面挂一个异常类名就像系统在替自己辩解（面板脚那行今天还带着它，那是另一处的事）。
+      return { ok: false as const, msg: String(e).replace(/^(Error|SendEncodeError):\s*/, "") };
     }
   }, [tpl]);
 
@@ -168,6 +178,45 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
         `Can't remove: ${r.usedBy.length} block(s) still read parameter “${p.name}” (${r.usedBy.join(", ")}). Switch those blocks' value source first.`,
       ),
     );
+  };
+
+  /**
+   * 写档位表。三件事按"谁会造成静默"排：
+   *  1. 不成对的条目（少了 `=`、值空着）原样退回界面点名 —— 悄悄丢一档的症状是
+   *     "我明明写了停止，按下去却报「不在档位里」"，那句还是编码器说的实话；
+   *  2. 同名两档也点名：编码器 `find` 只取第一条，后面那档永远发不出去，而且不报错；
+   *  3. 值本身编不出字节（比如给 u8 写了「启动=256」）**不在这里判** ——
+   *     判它就得在这儿再写一份"什么值能进什么字段"的规则，那就是第二份真值。
+   *     这条交给编码器：它的话原样显示在下面的红字里。
+   */
+  const commitEnum = (p: SendParam, text: string) => {
+    if (!tpl) return;
+    const { map, bad, dupes } = parseEnumSpec(text);
+    // 拒收时把框子收回谱里真正那张表：红字说的是"那一句没写进去"，框里却还留着那一句，
+    // 读起来就成了"屏上这个值没生效"——而屏上那个值根本不在谱里。两边得说同一件事。
+    const snapBack = () => setEnumNonce((m) => ({ ...m, [p.id]: (m[p.id] ?? 0) + 1 }));
+    if (bad.length) {
+      setErr(
+        tx(
+          `档位表里这几条不是「名字=值」：${bad.join("、")} —— 这一句没写进谱，原来那张表还在`,
+          `These rows aren't “label=value”: ${bad.join(", ")} — nothing was written; the previous table still stands`,
+        ),
+      );
+      snapBack();
+      return;
+    }
+    if (dupes.length) {
+      setErr(
+        tx(
+          `同一个名字写了两档：${dupes.join("、")} —— 编码器只取第一条，后面那一档永远发不出去`,
+          `Duplicated labels: ${dupes.join(", ")} — the encoder takes the first match, so the later row could never be sent`,
+        ),
+      );
+      snapBack();
+      return;
+    }
+    sendStore.patchParam(tpl.id, p.id, { enumMap: map });
+    setErr("");
   };
 
   /**
@@ -494,6 +543,10 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
         </>
       )}
         {err && <div className="props-warn">{err}</div>}
+        {/* 编不出帧时把编码器的原话搬到这里一句。它和面板脚上那行红字是同一个纯函数的同一个结果，
+            不是第二份真相 —— 搬的理由只是位置：刚在卡里改完一档，报错该出现在手边，而不是
+            "另一面面板的底部那儿"。「256 装不进 u8」这类话只有编码器会说。 */}
+        {!err && preview && !preview.ok && <div className="props-warn">{preview.msg}</div>}
         {msg && <div className="form-hint">{msg}</div>}
 
       {/* 这一层的读法整句收在组头这颗问号里：原来每张卡各挂一句"展开来改它的默认值与范围"，
@@ -536,7 +589,7 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                     value={p.type}
                     onChange={(e) => sendStore.patchParam(tpl.id, p.id, { type: e.target.value as SendParamType })}
                   >
-                    {(p.type === "enum" ? [...PARAM_TYPES, "enum" as SendParamType] : PARAM_TYPES).map((t) => (
+                    {PARAM_TYPES.map((t) => (
                       <option key={t} value={t}>
                         {t}
                       </option>
@@ -576,13 +629,17 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                   </FormRow>
                 )}
                 {p.type === "enum" && (
-                  // 这条不是"当前行填错了"，是"这一档还没有编辑入口"，所以它是行尾的问号，不是行下的一排灰字
-                  <FormRow label={tx("档位", "Options")}>
-                    <span className="sb-hint">{tx("由导入的谱带进来", "Carried in by the imported spec")}</span>
+                  <FormRow label={tx("档位表", "Options")}>
+                    <TextInput
+                      key={`enum-${p.id}-${enumNonce[p.id] ?? 0}`}
+                      value={formatEnumSpec(p.enumMap)}
+                      placeholder={tx("启动=01; 停止=00", "on=01; off=00")}
+                      onCommit={(v) => commitEnum(p, v)}
+                    />
                     <HelpHint
                       text={tx(
-                        "枚举档位表还不能在这里编辑：导进来的谱原样保留，改不了。要改就换成 int / uint 参数，直接填要发出去的值。",
-                        "The option table isn't editable here yet — imported specs keep theirs untouched. Switch to an int / uint parameter to type the value that goes out.",
+                        "写成「界面名字 = 发出去的值」，用分号或换行分开。触发时输入左边的名字，发出去的是右边的值；默认值也必须是其中一档（名字或值都行），否则这一帧编不出来。",
+                        "Write pairs of “label = bytes to send”, separated by ; or newlines. Typing the label on the left sends the value on the right; the default has to be one of these rows too, or the frame won't encode.",
                       )}
                     />
                   </FormRow>

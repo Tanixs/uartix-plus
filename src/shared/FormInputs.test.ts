@@ -98,6 +98,25 @@ describe("P124-A · FormRow 必须落在被样式命中的那个元素上", () =
   });
 
   /**
+   * P127-A · `enum` 进了类型表，就必须同时有填它的地方。
+   *
+   * 这条钉的是两者**一起存在**这个关系，不是长相。历史上 `enum` 被故意从类型下拉里排除，
+   * 理由写得很清楚："档位表还没有编辑入口，给一个选了却没法填的选项就是假开关"（§8-34）。
+   * 以后谁把 `enum` 加回类型表却没配入口 —— 或者反过来把入口删了留着类型 —— 都是回到那扇门。
+   * 规格串的解析规则本身有五条单测在 `sendTypes.test.ts`（含"坏条目与同名档交回界面点名"）。
+   */
+  it("enum 可选 ⇔ 有档位表可填：两头必须同时在场", () => {
+    const insp = readFileSync(
+      fileURLToPath(new URL("./../features/inspector/SendFieldInspector.tsx", import.meta.url)),
+      "utf8",
+    );
+    expect(insp, "类型表里请了 enum，却没把档位表请回来 ⇒ 假开关").toContain('"enum"');
+    expect(insp, "档位表的入口没了：选了 enum 就没法填").toContain("parseEnumSpec(");
+    expect(insp).toContain('label={tx("档位表"');
+    expect(insp, "拒收时不许把框子留在被拒的那句话上（话和框得说同一件事）").toContain("enumNonce");
+  });
+
+  /**
    * P126-B · 行尾的问号不许站在 form-pair 外面。
    *
    * 这条钉的是一个**我自己在 P125 里造成的**缺陷，而且是实测出来的：属性面板 263px 宽时，
