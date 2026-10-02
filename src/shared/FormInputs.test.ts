@@ -96,4 +96,53 @@ describe("P124-A · FormRow 必须落在被样式命中的那个元素上", () =
     expect(insp).toContain("删掉这个参数");
     expect(insp, "守卫不通过时必须说明是谁还在用，不能静默").toContain("删不掉");
   });
+
+  /**
+   * P126-B · 行尾的问号不许站在 form-pair 外面。
+   *
+   * 这条钉的是一个**我自己在 P125 里造成的**缺陷，而且是实测出来的：属性面板 263px 宽时，
+   * 「范围」「覆盖起 / 止」两行高 45px / 53px —— 问号掉到了第二排。原因在换行判定用的是
+   * 基准宽而不是可缩宽：`.form-row` 是 `flex-wrap:wrap`，`.form-pair.grow` 是 `flex:1 1 130px`，
+   * 于是 56 + 130 + 13 + 两个 gap ≈ 215 > 213 ⇒ 那一项整个被推到下一行，
+   * 哪怕它其实缩得下去。把问号放进 form-pair 里就绕开了：一个 flex 项，不参与换行计数。
+   *
+   * 钉形状而不是钉像素：这个仓库没有渲染测试基座，而错的那个东西就是形状。
+   */
+  it("成对输入框那行，问号在 form-pair 里面（否则窄面板里它掉第二排）", () => {
+    const insp = readFileSync(
+      fileURLToPath(new URL("./../features/inspector/SendFieldInspector.tsx", import.meta.url)),
+      "utf8",
+    );
+    /**
+     * 按 span 深度找每个 `form-pair grow` 那一项的闭合处，再看紧跟其后的是不是问号。
+     * 不这么写就会误判：一条扁平正则的 lazy `[\s\S]*?</span>` 能一路吃过别的行的 span
+     * （档位那行就正好是 `<span className="sb-hint">…</span>` + 问号，那是合法的），
+     * 于是钉住的是"下一个 span 后面有没有问号"这种和形状无关的东西。
+     */
+    const open = /<span className="form-pair grow">/g;
+    let m: RegExpExecArray | null;
+    let checked = 0;
+    while ((m = open.exec(insp))) {
+      let depth = 1;
+      const tag = /<\/?span\b/g;
+      tag.lastIndex = m.index + m[0].length;
+      let t: RegExpExecArray | null;
+      let closeAt = -1;
+      while ((t = tag.exec(insp))) {
+        depth += t[0][1] === "/" ? -1 : 1;
+        if (depth === 0) {
+          closeAt = t.index;
+          break;
+        }
+      }
+      expect(closeAt, `第 ${m.index} 行起的那个 form-pair 没有闭合`).toBeGreaterThan(0);
+      const after = insp.slice(closeAt + 7, closeAt + 400).replace(/^\s*(?:\{\/\*[\s\S]*?\*\/\s*)?/, "");
+      expect(
+        after.startsWith("<HelpHint"),
+        "问号站到 form-pair 外面了：窄属性面板里它会掉到第二排（实测 263px 宽时行高从 24 变 45）",
+      ).toBe(false);
+      checked++;
+    }
+    expect(checked, "一个 form-pair grow 都没找到：这一面的结构整个变了，这条钉该重新想").toBeGreaterThan(0);
+  });
 });

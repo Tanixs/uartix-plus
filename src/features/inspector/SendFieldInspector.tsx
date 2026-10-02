@@ -341,13 +341,16 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
             </FormRow>
           )}
           {field.type === "bits" && (
-            <FormRow label={tx("位起 / 位宽", "Bit / width")}>
+            // 标签收成「位段」（与料板上那颗同名），两个框各自说自己是谁 ——
+            // 原来叫"位起 / 位宽"，六个字加斜杠放不下 56px 的标签列，标签自己先折成两排
+            <FormRow label={tx("位段", "Bit span")}>
               <span className="form-pair grow">
                 <input
                   className="input"
                   type="number"
                   min={0}
                   max={7}
+                  title={tx("起始位：从这一字节的第几位开始", "First bit: which bit of the byte it starts at")}
                   value={field.bits?.index ?? 0}
                   onChange={(e) => patchSel({ bits: { index: Number(e.target.value), count: field.bits?.count ?? 1 } })}
                 />
@@ -356,6 +359,7 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                   type="number"
                   min={1}
                   max={8}
+                  title={tx("位宽：占几位", "Width: how many bits")}
                   value={field.bits?.count ?? 1}
                   onChange={(e) => patchSel({ bits: { index: field.bits?.index ?? 0, count: Number(e.target.value) } })}
                 />
@@ -394,7 +398,7 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
             />
           </FormRow>
           {field.source.kind === "seq" && (
-            <FormRow label={tx("步进 / 回绕", "Step / wrap")}>
+            <FormRow label={tx("步进回绕", "Step / wrap")}>
               <span className="form-pair grow">
                 <NumInput
                   value={field.source.step ?? 1}
@@ -454,7 +458,7 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
             </div>
           )}
           {field.source.kind === "const" && (
-            <FormRow label={tx("字节 (hex)", "Bytes (hex)")}>
+            <FormRow label={tx("固定字节", "Fixed bytes")}>
               <TextInput
                 value={hexOf(field)}
                 placeholder="AA 55"
@@ -492,14 +496,15 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
         {err && <div className="props-warn">{err}</div>}
         {msg && <div className="form-hint">{msg}</div>}
 
-      {/* 组的口径挂在标题右边那颗问号上（props-section 本来就是 space-between，右端就是给它留的位），
-          不再在列表底下压一排居中灰字 —— 那一排既抢参数行的视线，又把"改默认值会发生什么"埋在最下面。 */}
+      {/* 这一层的读法整句收在组头这颗问号里：原来每张卡各挂一句"展开来改它的默认值与范围"，
+          四条参数就是四句一模一样的话 —— 说一次就够，而且说在组头比说在卡上更对（那是"这组怎么读"，
+          不是"这张卡怎么读"）。卡头只留真状态：正在编的这块用的是哪一条。 */}
       <div className="props-section">
         <span>{tx("参数", "Parameters")}</span>
         <HelpHint
           text={tx(
-            "默认值就是发出去的那一帧里的值；要临时改一版，在命令或卡片上覆盖它。",
-            "The default is what goes out in the frame; override it per command or card for a one-off value.",
+            "一张卡 = 一个参数，点开才看到它的名字、类型、默认值与范围；标着「当前块」的那张，就是你正在编的这块在取值的参数。默认值就是发出去的那一帧里的值；要临时改一版，在命令或卡片上覆盖它，不动默认值。",
+            "One card = one parameter: its name, type, default and range appear when you expand it. The card flagged “this block” is the parameter the block you are editing reads. The default is what goes out in the frame; to try a different value once, override it on the command or the card instead.",
           )}
         />
       </div>
@@ -513,7 +518,7 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
               className="props-item-head"
               aria-expanded={open}
               onClick={() => setOpenParams((m2) => ({ ...m2, [p.id]: !open }))}
-              title={bound ? tx("当前块用的就是这个参数", "The selected block uses this parameter") : tx("展开来改它的默认值与范围", "Expand to edit its default and range")}
+              title={bound ? tx("你正在编的这块，取的就是这个参数", "The block you are editing reads this parameter") : undefined}
             >
               <span className="props-item-name">{p.name}</span>
               <span className="props-item-tag">{p.type}</span>
@@ -543,6 +548,10 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                 </FormRow>
                 {p.type !== "text" && p.type !== "enum" && (
                   <FormRow label={tx("范围", "Range")}>
+                    {/* 问号放进 form-pair 里，不是放在行尾：form-pair 是 `flex:1 1 130px`，
+                        行又是 flex-wrap，于是"标签 + 那对框 + 问号"在窄面板里算的是基准宽 56+130+13+16 > 面板宽
+                        ⇒ 问号掉到第二排（实测 263px 面板行高 45px）。放进那一个 flex 项里，
+                        两个输入框能缩到各自 56px，整行 24px 站得住，也不用为它新写一条 CSS。 */}
                     <span className="form-pair grow">
                       <NumInput
                         value={p.min ?? 0}
@@ -554,16 +563,16 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                         title={tx("最大值", "Maximum")}
                         onCommit={(v) => sendStore.patchParam(tpl.id, p.id, { max: v })}
                       />
+                      {/* 原来只在两个输入框上各挂一句"生成滑条卡时当下限/上限"——这句是真的，
+                          但少了一半：编码器同样拿它拦帧，越界就报错。少说这半句会让人以为
+                          范围只是个滑条装饰，于是填了数却不知道怎么把这一帧填错。 */}
+                      <HelpHint
+                        text={tx(
+                          "这两条线同时管两件事：发这一帧时越界会被拦下并报「小于下限 / 大于上限」；用它生成滑条卡时，它俩就是滑条的上下限。",
+                          "These two bounds do two jobs: a value outside them is refused with an error when the frame is encoded, and they become the slider's limits when a card is generated from this parameter.",
+                        )}
+                      />
                     </span>
-                    {/* 原来只在两个输入框上各挂一句"生成滑条卡时当下限/上限"——这句是真的，
-                        但少了一半：编码器同样拿它拦帧，越界就报错。少说这半句会让人以为
-                        范围只是个滑条装饰，于是填了数却不知道怎么把这一帧填错。 */}
-                    <HelpHint
-                      text={tx(
-                        "这两条线同时管两件事：发这一帧时越界会被拦下并报「小于下限 / 大于上限」；用它生成滑条卡时，它俩就是滑条的上下限。",
-                        "These two bounds do two jobs: a value outside them is refused with an error when the frame is encoded, and they become the slider's limits when a card is generated from this parameter.",
-                      )}
-                    />
                   </FormRow>
                 )}
                 {p.type === "enum" && (
@@ -657,23 +666,25 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
           </select>
         </FormRow>
         {tpl.checksum && (
-          <FormRow label={tx("覆盖起 / 止", "Coverage")}>
+          <FormRow label={tx("覆盖起止", "Coverage")}>
             <span className="form-pair grow">
               <NumInput
                 value={tpl.checksum.coverageStart}
+                title={tx("起点：从第几字节算起", "Start: which byte the check begins at")}
                 onCommit={(v) => sendStore.patchTemplate(tpl.id, { checksum: { ...tpl.checksum!, coverageStart: v } })}
               />
               <NumInput
                 value={tpl.checksum.coverageEnd}
+                title={tx("终点：算到第几字节（负数按距帧尾算）", "End: which byte it stops at (negative counts from the tail)")}
                 onCommit={(v) => sendStore.patchTemplate(tpl.id, { checksum: { ...tpl.checksum!, coverageEnd: v } })}
               />
+              <HelpHint
+                text={tx(
+                  "从第几字节算到第几字节。终点填负数按距帧尾算：-2 = 不含最后两字节。",
+                  "Which bytes the check runs over. A negative end counts from the tail: -2 excludes the last two bytes.",
+                )}
+              />
             </span>
-            <HelpHint
-              text={tx(
-                "从第几字节算到第几字节。终点填负数按距帧尾算：-2 = 不含最后两字节。",
-                "Which bytes the check runs over. A negative end counts from the tail: -2 excludes the last two bytes.",
-              )}
-            />
           </FormRow>
         )}
         {tpl.checksum?.algo === "crc_custom" && (
@@ -702,15 +713,15 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                 <span>{tx("输入", "in")}</span>
                 <input type="checkbox" checked={crcOf().refout} onChange={(e) => setCrc({ refout: e.target.checked })} />
                 <span>{tx("输出", "out")}</span>
+                {/* 这句是"反射还会顺带决定线上字节序"——两排灰字挂在参数底下，
+                    看着像校验区的一条通用说明，其实是这一行的事（P125-B 收进这颗问号） */}
+                <HelpHint
+                  text={tx(
+                    "线上字节序跟着反射走：勾了输出反射就低字节在前 —— 同样这组参数下，Modbus / X-25 与具名算法逐字节相同。",
+                    "The wire byte order follows reflection: with output reflection on, the low byte goes first — so this same parameter set matches the named Modbus / X-25 algorithms byte for byte.",
+                  )}
+                />
               </span>
-              {/* 这句是"反射还会顺带决定线上字节序"——两排灰字挂在参数底下，
-                  看着像校验区的一条通用说明，其实是这一行的事（P125-B 收进这颗问号） */}
-              <HelpHint
-                text={tx(
-                  "线上字节序跟着反射走：勾了输出反射就低字节在前 —— 同样这组参数下，Modbus / X-25 与具名算法逐字节相同。",
-                  "The wire byte order follows reflection: with output reflection on, the low byte goes first — so this same parameter set matches the named Modbus / X-25 algorithms byte for byte.",
-                )}
-              />
             </FormRow>
           </>
         )}
