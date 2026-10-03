@@ -16,7 +16,10 @@
     "hint",
     "model",
     "speclib",
-    "hovermenu"
+    "hovermenu",
+    "welcome1",
+    "welcome2",
+    "cmdk-empty"
   ],
   "themes": {
     "light": {
@@ -25,8 +28,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -41,8 +44,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -57,8 +60,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -73,8 +76,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -89,8 +92,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -105,8 +108,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -121,8 +124,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -137,8 +140,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -153,8 +156,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -169,8 +172,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -190,8 +241,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -206,8 +257,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -222,8 +273,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -238,8 +289,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -254,8 +305,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -270,8 +321,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -286,8 +337,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -302,8 +353,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -318,8 +369,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -334,8 +385,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -355,8 +454,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -371,8 +470,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -387,8 +486,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -403,8 +502,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -419,8 +518,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -435,8 +534,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -451,8 +550,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -467,8 +566,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -483,8 +582,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -499,8 +598,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -520,8 +667,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -536,8 +683,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -552,8 +699,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -568,8 +715,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -584,8 +731,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -600,8 +747,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -616,8 +763,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -632,8 +779,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -648,8 +795,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -664,8 +811,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -685,8 +880,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -701,8 +896,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -717,8 +912,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -733,8 +928,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -749,8 +944,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -765,8 +960,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -781,8 +976,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -797,8 +992,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -813,8 +1008,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -829,8 +1024,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -850,8 +1093,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -866,8 +1109,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -882,8 +1125,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -898,8 +1141,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -914,8 +1157,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -930,8 +1173,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -946,8 +1189,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -962,8 +1205,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -978,8 +1221,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -994,8 +1237,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1015,8 +1306,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1031,8 +1322,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1047,8 +1338,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1063,8 +1354,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1079,8 +1370,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1095,8 +1386,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1111,8 +1402,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1127,8 +1418,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1143,8 +1434,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1159,8 +1450,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1180,8 +1519,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1196,8 +1535,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1212,8 +1551,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1228,8 +1567,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1244,8 +1583,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1260,8 +1599,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1276,8 +1615,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1292,8 +1631,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1308,8 +1647,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1324,8 +1663,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 987990,
-          "rules": 3455,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 987931,
+          "rules": 3453,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1345,8 +1732,8 @@
         "workspace": {
           "sampled": 362,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1361,8 +1748,8 @@
         "settings": {
           "sampled": 504,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1377,8 +1764,8 @@
         "palette": {
           "sampled": 477,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1393,8 +1780,8 @@
         "menu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1409,8 +1796,8 @@
         "lbx": {
           "sampled": 442,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1425,8 +1812,8 @@
         "ctxmenu": {
           "sampled": 366,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1441,8 +1828,8 @@
         "hint": {
           "sampled": 505,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1457,8 +1844,8 @@
         "model": {
           "sampled": 502,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1473,8 +1860,8 @@
         "speclib": {
           "sampled": 389,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -1489,8 +1876,56 @@
         "hovermenu": {
           "sampled": 394,
           "truncated": false,
-          "styleBytes": 1001286,
-          "rules": 3544,
+          "styleBytes": 1001227,
+          "rules": 3542,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome1": {
+          "sampled": 440,
+          "truncated": false,
+          "styleBytes": 1001227,
+          "rules": 3542,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "welcome2": {
+          "sampled": 399,
+          "truncated": false,
+          "styleBytes": 1001227,
+          "rules": 3542,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "cmdk-empty": {
+          "sampled": 371,
+          "truncated": false,
+          "styleBytes": 1001227,
+          "rules": 3542,
           "issues": [],
           "worst": null,
           "unmeasurable": {

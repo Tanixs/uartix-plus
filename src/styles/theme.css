@@ -11433,9 +11433,11 @@ html.no-motion .mkt-img-skel { animation: none; }
   font-size: var(--fs-xs);
 }
 
+/* 空态那句"没有匹配的命令"是**字**（P132-H：cmdk-empty 面进账后实测 3.64~3.77）。
+   以前这一格从来不在账上——命令面板只采了"有结果"那一档。 */
 .cmdk-empty {
   padding: var(--sp-4) var(--sp-3);
-  color: var(--text-faint);
+  color: var(--text-dim);
   font-size: var(--fs-sm);
   text-align: center;
 }
@@ -11508,16 +11510,25 @@ html.no-motion .mkt-img-skel { animation: none; }
 }
 
 /* ---- 卡 1：管线示意（四个节点 + 箭头，全 DOM，图标走 Glyph 单一出处） ---- */
+/* 管线示意以前是"四个 126 的节点 + 三支箭头"硬排：582px 排在 572px 的舞台上，
+   1440 视口就溢出 5px（P132-H welcome1 面量到的 `.wlc-body +5`），窗口再窄只会更糟。
+   放开收缩：舞台多宽就挤多宽，节点文字该折行就折行——溢出可见不如根本不溢出。
+   `min-width: 0` 是关键：flex 项默认 `min-width:auto`（= 内容宽），不写这条 shrink 就是空话。
+   刻意**不写 `flex-wrap`**：加了它，582 挤不进 572 时第四枚会掉到第二排，
+   "字节流 → 筛帧 → 字段 → 用它"就变成 2×2 的方阵（实测：默认视口就占两排）。
+   示意讲的是一条线——宁可挤窄，不折行。 */
 .wlc-pipe {
   display: flex;
   align-items: stretch;
   justify-content: center;
   gap: var(--sp-0);
+  max-width: 100%;
 }
 
 .wlc-pipe-row {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .wlc-arrow {
@@ -11534,17 +11545,19 @@ html.no-motion .mkt-img-skel { animation: none; }
   align-items: center;
   gap: var(--sp-1);
   width: 126px;
+  min-width: 0;
   padding: var(--sp-4) var(--sp-3);
   background: var(--raise-1);
   border-radius: var(--radius-l);
   text-align: center;
 }
 
+/* 管线示意上的 1/2/3/4 是**编号字**（P132-H welcome1 面实测 3.27~3.37），不是角标纹样 */
 .wlc-node-n {
   position: absolute;
   top: var(--sp-1);
   left: var(--sp-2);
-  color: var(--text-faint);
+  color: var(--text-dim);
   font-size: var(--fs-xs);
   font-weight: 700;
 }
@@ -11674,18 +11687,22 @@ html.no-motion .mkt-img-skel { animation: none; }
   line-height: var(--lh-read);
 }
 
+/* 行首那个编号是**字**，所以走 `--accent-text`（P132-H welcome 面实测 3.95）：
+   `--accent` 直接当字用是 P132-D 就立了口径的那一族，账现在每接一面就抓到几处。 */
 .wlc-lead-n {
   flex: none;
   width: 12px;
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: var(--fs-sm);
   font-weight: 650;
   line-height: var(--lh-read);
 }
 
+/* 快捷键那一行整句都是字（含 `Ctrl+Shift+P` 之间那个间隔符），所以吃 dim 而不是 faint；
+   `kbd` 自己那档本来就是 dim。实测 3.64~3.77 后改的。 */
 .wlc-hint {
   margin: 0;
-  color: var(--text-faint);
+  color: var(--text-dim);
   font-size: var(--fs-xs);
 }
 
@@ -11703,15 +11720,6 @@ html.no-motion .mkt-img-skel { animation: none; }
   display: flex;
   justify-content: center;
   gap: var(--sp-2);
-}
-
-.wlc-skip {
-  color: var(--text-faint);
-  background: transparent;
-}
-
-.wlc-skip:hover {
-  color: var(--text-dim);
 }
 
 

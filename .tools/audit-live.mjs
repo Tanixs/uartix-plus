@@ -49,7 +49,10 @@ const VIEWPORT = { w: 1440, h: 900 };
  *    （实测 938,326 与 963,713 那两枚 `elementFromPoint` 命中的是 `set-card`/`set-content`）——
  *    照 DOM 顺序点第一枚就永远开不出泡。现在按"那个点上是不是它自己"挑目标。
  */
-const base = (t, extra = "", rail = "none") => `/?theme=${t}&welcome=0&preset=proto&rail=${rail}${extra}`;
+/** 每一面都把状态写进 URL：`preset=proto` 钉布局、`rail=none|…` 钉导轨、`welcome=…` 钉首启卡。
+    三个键都只能出现一次（`assertNoDupKeys`），所以拼 URL 只能走这里，不许在外面再挂同名参数。 */
+const base = (t, { extra = "", rail = "none", welcome = "0" } = {}) =>
+  `/?theme=${t}&welcome=${welcome}&preset=proto&rail=${rail}${extra}`;
 /** 同一个键写两遍时 `URLSearchParams.get` 只认第一个：`rail=none` 后面再挂一个 `rail=templates`
    不会覆盖它，只会让那一面**静默地"导轨没开"**（本批实测踩了一次）。所以钉住：路径里不许有重复键。 */
 function assertNoDupKeys(path, id) {
@@ -59,21 +62,29 @@ function assertNoDupKeys(path, id) {
 }
 const SURFACES = [
   { id: "workspace", path: (t) => base(t) },
-  { id: "settings", path: (t) => base(t, "&open=settings/appearance") },
+  { id: "settings", path: (t) => base(t, { extra: "&open=settings/appearance" }) },
   { id: "palette", path: (t) => base(t), drive: "palette", require: ".cmdk" },
-  { id: "menu", path: (t) => base(t, "&click=.cb-ws-btn"), require: ".cb-ws-menu" },
-  { id: "lbx", path: (t) => base(t, "&click=.baud-toggle", "link"), require: ".ctx-menu.lbx" },
+  { id: "menu", path: (t) => base(t, { extra: "&click=.cb-ws-btn" }), require: ".cb-ws-menu" },
+  { id: "lbx", path: (t) => base(t, { extra: "&click=.baud-toggle", rail: "link" }), require: ".ctx-menu.lbx" },
   { id: "ctxmenu", path: (t) => base(t), drive: "ctxmenu", require: ".ctx-menu" },
-  { id: "hint", path: (t) => base(t, "&open=settings/appearance"), drive: "hint", require: ".help-bubble" },
+  { id: "hint", path: (t) => base(t, { extra: "&open=settings/appearance" }), drive: "hint", require: ".help-bubble" },
   /* P132-G 三面：faint 当字那一族只有把面板摆出来才量得到（P132-F §7.1）。
-     `model`/`speclib` 各抓到 2 条、1~2 条；`hovermenu` 现在是 0 条——它钉的是上一批那个结论，
+     `model`/`speclib` 各抓到 2 条；`hovermenu` 现在是 0 条——它钉的是上一批那个结论，
      以后谁把 `.tb-menu-item:hover` 改回 `--accent`，这一面会当场多一条。 */
-  { id: "model", path: (t) => base(t, "&open=settings/model") },
+  { id: "model", path: (t) => base(t, { extra: "&open=settings/model" }) },
   /* `?click=` 的值里有空格（`:nth-child` 前那个后代选择器）——必须编码，
      否则 `URLSearchParams` 会把空格读成 `+`，`querySelector(".rp-seg+button…")` 直接抛，
      表现就是"这一面永远开不出来"（实测踩过：探针里手写 %20 能开，脚本里裸空格不能）。 */
-  { id: "speclib", path: (t) => base(t, `&click=${encodeURIComponent(".rp-seg button:nth-child(2)")}`, "templates"), require: ".spl-list" },
-  { id: "hovermenu", path: (t) => base(t, "&click=.cb-ws-btn"), drive: "hovermenu", require: ".cb-ws-menu" },
+  { id: "speclib", path: (t) => base(t, { extra: `&click=${encodeURIComponent(".rp-seg button:nth-child(2)")}`, rail: "templates" }), require: ".spl-list" },
+  { id: "hovermenu", path: (t) => base(t, { extra: "&click=.cb-ws-btn" }), drive: "hovermenu", require: ".cb-ws-menu" },
+  /* P132-H 三面：首启两张卡 + 命令面板的**空态**。
+     前一批的 `palette` 面是"有结果"那一档，空态那句"没有匹配的命令"从来不进账——
+     它用的正是 `--text-faint`（实测 3.64~3.77）。两张卡分开记：卡 1 有管线示意（那条 +5px 溢出在它身上），
+     卡 2 有截图与徽标，两身的文字位不一样。`welcome=1|2` 是 dev 入口，会把"已看过"标记清掉，
+     所以这三面**必须**用一次性 profile（脚本头那条规矩同 `preset=`）。 */
+  { id: "welcome1", path: (t) => base(t, { welcome: "1" }), require: ".wlc-body" },
+  { id: "welcome2", path: (t) => base(t, { welcome: "2" }), require: ".wlc-body" },
+  { id: "cmdk-empty", path: (t) => base(t), drive: "cmdkEmpty", require: ".cmdk-empty" },
 ];
 
 /** 哨兵问的是"看得见的一张浮层"，不是"DOM 里有没有这个类"：屏外的隐藏实例（如列树那份）不算开出来 */
@@ -160,11 +171,28 @@ async function hoverAt(at) {
   await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, button: "none" });
   await rest(450);
 }
+/** 往焦点里打字：`keyDown` 带 `text` 才真的落字符（`Input.insertText` 不发 key 事件，React 收不到） */
+async function typeText(s) {
+  for (const ch of s) {
+    const up = ch.toUpperCase();
+    await send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, code: "Key" + up, windowsVirtualKeyCode: up.charCodeAt(0), text: ch, unmodifiedText: ch });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: ch, code: "Key" + up, windowsVirtualKeyCode: up.charCodeAt(0) });
+    await rest(30);
+  }
+}
 /** 浮层怎么开：命令面板是 Ctrl+Shift+P（真按键）；右键菜单落在控制画布那块；提示泡要真 hover */
 async function drive(how) {
   if (how === "palette") {
     await key("P", "KeyP", 80, 2 | 8);
     await rest(550);
+    return;
+  }
+  if (how === "cmdkEmpty") {
+    // 先等面板真开出来再打字：不等的结果是字符落进工作区，"空态"这一面就成了假面
+    await key("P", "KeyP", 80, 2 | 8);
+    if (!(await waitOpen(".cmdk"))) throw new Error("cmdkEmpty：命令面板没开出来，空态无从谈起");
+    await typeText("qqqzzz");
+    await rest(450);
     return;
   }
   if (how === "ctxmenu") { await rightClickOn(".ctl-main", "ctxmenu"); return; }
