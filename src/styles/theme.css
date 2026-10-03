@@ -10834,7 +10834,9 @@ body.pdrag-active *{cursor:grabbing !important;}
   color: var(--text-dim);
 }
 .agent-ev-tool.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
-.agent-undone { font-size: var(--fs-body); color: var(--text-dim); }
+/* P133-C2：`.agent-undone` 删掉了。它是"换形状不是改名"那一类——新面的"已撤销"是
+   `<span class="ai-agent-v dim">`（AgentInline.tsx:350-351），不在这个类上挂任何样式，
+   所以删它不伤界面；判据②③是硬的（全仓无同名字面量、无模板前缀能拼出）。 */
 /* D2 时间线卡片：工具回执=状态点+名称+摘要，可展开参数/回执/撤销 */
 .agent-tl-item { display: flex; align-items: flex-start; gap: 8px; }
 .agent-tl-dot {

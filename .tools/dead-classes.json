@@ -5,7 +5,7 @@
   "judge": "四道判据：CSS 有 ∧ 源码无同名字面量 ∧ 无模板前缀能拼出 ∧ 13 面没渲染（.tools/check-dead-classes.cjs）",
   "exemptions": [],
   "budget": {
-    "unreferenced": 133
+    "unreferenced": 132
   },
   "unreferenced": [
     {
@@ -154,10 +154,6 @@
     },
     {
       "cls": "agent-tl-v",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-undone",
       "file": "src\\styles\\theme.css"
     },
     {
