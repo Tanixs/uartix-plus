@@ -231,22 +231,23 @@ function load(): AiProfileState {
   }
   if (!parsed || typeof parsed !== "object") return fresh;
   const o = parsed as Record<string, unknown>;
-  const providers = (Array.isArray(o.providers) ? o.providers : [])
-    .map(normalizeProvider)
-    .filter((x): x is AiProvider => !!x);
-  const models = (Array.isArray(o.models) ? o.models : [])
-    .map(normalizeModel)
-    .filter((x): x is AiModelProfile => !!x);
+  // 形状不对（两张表缺其一或不是数组）才是坏档；两张都在、都空，那是用户在设置里
+  // 删空了——P133-G 之前这里和 removeProvider 一起把"空"当成不可能，重启就复活整张预置表。
+  if (!Array.isArray(o.providers) || !Array.isArray(o.models)) return fresh;
+  const providers = (o.providers as unknown[]).map(normalizeProvider).filter((x): x is AiProvider => !!x);
+  const models = (o.models as unknown[]).map(normalizeModel).filter((x): x is AiModelProfile => !!x);
+  if (!providers.length && !models.length) return { providers: [], models: [], activeProviderId: "", activeModelId: "" };
+  // 半张表仍然比空表危险（它会让人以为配好了）：有模型却没有能挂它们的供应商，或反过来
   if (!providers.length || !models.length) return fresh;
   // 孤儿模型（供应商被删了）整条丢掉：留着它，`activeRef` 就得替它编一个不存在的 baseUrl
   const kept = models.filter((m) => providers.some((p) => p.id === m.providerId));
   if (!kept.length) return fresh;
-  return {
+  return repoint({
     providers,
     models: kept,
     activeProviderId: str(o.activeProviderId, fresh.activeProviderId),
     activeModelId: str(o.activeModelId, kept[0].id),
-  };
+  });
 }
 
 let snapshot: AiProfileState = load();
@@ -378,7 +379,11 @@ export function addProvider(input: Partial<AiProvider>): AiProvider {
     enabled: input.enabled ?? true,
     createdAt: Date.now(),
   };
-  commit({ ...snapshot, providers: [...snapshot.providers, p] });
+  // P133-G 取证时照出来的一条：从**空表**建第一家时两个指针还停在空串上，
+  // 发送侧靠 activeRef() 的"第一个可用"兜底能发出去，但选择器那枚 chip 会说"选模型"、
+  // 上下文那行会说"没有当前模型"——表里明明有一行。加上第一家就该指着它。
+  // 表非空时 repoint 是恒等的（当前那对还有效），所以这条不影响原有行为。
+  commit(repoint({ ...snapshot, providers: [...snapshot.providers, p] }));
   return p;
 }
 
@@ -399,6 +404,19 @@ export function updateProvider(id: string, patch: Partial<AiProvider>): void {
   commit(next);
 }
 
+/**
+ * 删完之后把两个指针落回"同一个供应商名下的同一个模型"。
+ * 空表在这里是合法输入（P133-G）：两个指针落空串，下游一律按"未配置"走。
+ */
+function repoint(st: AiProfileState): AiProfileState {
+  const model =
+    st.models.find((m) => m.id === st.activeModelId && m.providerId === st.activeProviderId) ??
+    st.models.find((m) => m.providerId === st.activeProviderId) ??
+    st.models[0];
+  const provider = st.providers.find((p) => p.id === model?.providerId) ?? st.providers[0];
+  return { ...st, activeProviderId: provider?.id ?? "", activeModelId: model?.id ?? "" };
+}
+
 /** 删供应商。名下还有模型 ⇒ 默认**禁止**（`ok:false, reason:"has_models"`）：
  *  静默级联删模型 = 用户丢配置，这类事在本仓库一律要一次明确确认。 */
 export function removeProvider(id: string, cascade = false): { ok: boolean; reason?: string; droppedModels: string[] } {
@@ -406,22 +424,12 @@ export function removeProvider(id: string, cascade = false): { ok: boolean; reas
   if (children.length && !cascade) return { ok: false, reason: "has_models", droppedModels: [] };
   const providers = snapshot.providers.filter((p) => p.id !== id);
   const models = cascade ? snapshot.models.filter((m) => m.providerId !== id) : snapshot.models;
-  if (!providers.length || !models.length) {
-    // 删空了就回到 seed：这张表没有任何一种"空状态"是有意义的
-    commit(seed());
-    return { ok: true, droppedModels: children.map((m) => m.id) };
-  }
-  const next: AiProfileState = {
-    ...snapshot,
-    providers,
-    models,
-    activeProviderId: snapshot.activeProviderId === id ? providers[0].id : snapshot.activeProviderId,
-  };
-  if (!models.some((m) => m.id === next.activeModelId)) next.activeModelId = models[0].id;
-  if (next.activeProviderId !== next.models.find((m) => m.id === next.activeModelId)?.providerId) {
-    next.activeProviderId = next.models.find((m) => m.id === next.activeModelId)?.providerId ?? providers[0].id;
-  }
-  commit(next);
+  // P133-G：这里原先写的是 `if (!providers.length || !models.length) commit(seed())`——
+  // "删空了就复活整张预置表"。听起来在保护用户，实际是**这一页删不掉任何东西**：
+  // 唯一那家名下有一个模型，而最后一个模型也删不掉（见 removeModel），于是第一家
+  // 永远删不掉。空表本来就是真状态：activeRef() 返回 null，chatStore / agentRun /
+  // 哨兵三处都有守卫，哨兵还会把人指回这一页——只有删除路径假装它不存在。
+  commit(repoint({ ...snapshot, providers, models }));
   return { ok: true, droppedModels: children.map((m) => m.id) };
 }
 
@@ -443,7 +451,7 @@ export function addModel(input: Partial<AiModelProfile> & { providerId: string }
     enabled: true,
     createdAt: Date.now(),
   };
-  commit({ ...snapshot, models: [...snapshot.models, m] });
+  commit(repoint({ ...snapshot, models: [...snapshot.models, m] }));
   return m;
 }
 
@@ -467,14 +475,9 @@ export function updateModel(id: string, patch: Partial<AiModelProfile>): void {
 
 export function removeModel(id: string): void {
   const models = snapshot.models.filter((m) => m.id !== id);
-  if (!models.length) return;
-  const next: AiProfileState = { ...snapshot, models };
-  if (next.activeModelId === id) {
-    const first = models[0];
-    next.activeModelId = first.id;
-    next.activeProviderId = first.providerId;
-  }
-  commit(next);
+  // P133-G：原来这里是 `if (!models.length) return;`——删最后一个模型时**静默什么都不发生**，
+  // 那把垃圾桶按钮就成了假开关，而"最后一个模型删不掉"正是"第一家供应商删不掉"的另一半。
+  commit(repoint({ ...snapshot, models }));
 }
 
 /** 选中并（如果被停用过）顺手启用：点了却没反应是假开关，这里不留那种状态 */
@@ -495,24 +498,29 @@ export function setActive(providerId: string, modelId: string): boolean {
  * 编辑态用的那一对：故意**不做"可用"过滤**。
  * `activeRef()` 会滤掉"密钥还空着"的供应商，设置页若用它取编辑对象，
  * 一进来就没东西可填，用户永远填不上 Key（先有鸡还是先有蛋）。
+ *
+ * P133-G：表空了返回 null，而不是回 seed 造一对表里不存在的行——那对行是幻影，
+ * 往它们身上写只会改到一个没人渲染的 id。
  */
-export function editingPair(st: AiProfileState = snapshot): { provider: AiProvider; model: AiModelProfile } {
-  const provider = st.providers.find((p) => p.id === st.activeProviderId) ?? st.providers[0] ?? seed().providers[0];
+export function editingPair(st: AiProfileState = snapshot): { provider: AiProvider; model: AiModelProfile } | null {
+  const provider = st.providers.find((p) => p.id === st.activeProviderId) ?? st.providers[0];
+  if (!provider) return null;
   const model =
     st.models.find((m) => m.id === st.activeModelId && m.providerId === provider.id) ??
     st.models.find((m) => m.providerId === provider.id) ??
-    st.models[0] ??
-    seed().models[0];
-  return { provider, model };
+    st.models[0];
+  return model ? { provider, model } : null;
 }
 
-/** 表为空时（理论上不会：每次删空都回 seed）也要能写，所以写入按 editingPair 的 id 落 */
+/** 往**当前选中**那对上写；表空了就没有可写的行，这里不猜（调用方自己保证有一行） */
 export function patchEditingProvider(patch: Partial<AiProvider>): void {
-  updateProvider(editingPair().provider.id, patch);
+  const pair = editingPair();
+  if (pair) updateProvider(pair.provider.id, patch);
 }
 
 export function patchEditingModel(patch: Partial<AiModelProfile>): void {
-  updateModel(editingPair().model.id, patch);
+  const pair = editingPair();
+  if (pair) updateModel(pair.model.id, patch);
 }
 
 /** Key 输入框那句提示：按 baseUrl 反查是哪家的模板（存的是值不是"预设 id"，所以查得到就有提示） */
@@ -524,7 +532,9 @@ export function keyHintFor(baseUrl: string): string | undefined {
 /** 套模板：改这家的地址/协议/模型名，**不动密钥**（旧行为，P108 定下的） */
 export function applyTemplate(presetKey: keyof typeof AI_PRESETS): void {
   const t = AI_PRESETS[presetKey];
-  const { provider, model } = editingPair();
+  const pair = editingPair();
+  if (!pair) return;
+  const { provider, model } = pair;
   commit({
     ...snapshot,
     providers: snapshot.providers.map((p) =>

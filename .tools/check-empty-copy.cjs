@@ -53,6 +53,11 @@ const BUDGETS = {
   "src/features/console/QuickCommandBar.tsx": 11,
   "src/features/vdev/VdevPanel.tsx": 8,
   "src/features/plugins/PluginLibraryDialog.tsx": 7,
+  /* P133-G：模型设置页删掉最后一家供应商之后表可以真空了（原先"删空就回 seed"，
+     等价于这一页删不掉任何东西）。空态只有一句"怎么回去"——添加供应商那颗按钮本来就在
+     上方，不再多写一段说明墙。实测 10 字（EmptyState 的 title 被 title={…} 剔除规则
+     一起吃掉了，门自己的口径问题，记在这儿免得下一个人以为账做小了）。 */
+  "src/features/settings/ModelSettingsPage.tsx": 10,
   /* B9 命令面板：这 7 个汉字是"搜不到东西"的反馈，不是说明墙 ——
      没有它，输入一个错拼的词之后界面会**静默变空**，用户分不清"没匹配"和"卡住了"。
      与其余条目同性质：功能性的空态回执。 */

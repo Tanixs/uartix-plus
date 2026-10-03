@@ -98,12 +98,31 @@ describe("P115-A/D · 模型设置页的面", () => {
     expect(src).toContain("再按一次「保存」确认");
   });
 
-  it("F15：删除供应商走 cascade=false 的两段明说；够不着的 ExtPage 死行已删", () => {
+  it("F15：级联不许从数据里猜；明说改到确认窗里（P133-G2 换形，不变的是同一条）", () => {
     const src = read(PAGE);
-    expect(src, "又把 models.length 当 cascade 传回去了").toMatch(/removeProvider\(provider\.id, false\)/);
-    expect(src).not.toMatch(/removeProvider\(provider\.id, models\.length > 0\)/);
-    expect(src, "首次点击的拒绝提示不见了").toContain("先删除或移走它们");
+    // F15 当年钉的是"`cascade = models.length > 0`——有模型就偷偷连模型一起删"。
+    // P133-G2 按用户裁决把两段点击换成共享确认窗，`cascade` 变成常量 true，
+    // 但它只能在用户看过"和名下 N 个模型一起删除"并按下「删除」之后到达。
+    // 所以这条反向钉原样保留：cascade 的位置上不许出现表达式。
+    expect(code(PAGE), "又把模型数当 cascade 传回去了").not.toMatch(/removeProvider\([^)]*models\.length/);
+    expect(src, "删家的确认窗不见了").toMatch(/removeProvider\(provider\.id, true\)/);
     expect(code(MODAL), "外层三元已经拦截插件页，这行永远渲染不到").not.toMatch(/\{tab === SETTINGS_TAB_PLUGINS && <ExtPage \/>\}/);
+  });
+
+  it("P133-G2：删除这家 = 一条菜单项 + 一扇说清后果的窗；取消什么都不做", () => {
+    const src = read(PAGE);
+    // 用户裁决（2026-10-04）：「供应商这个删除就删除了，没必要确认两次，你整两个按钮
+    // 这么多文字不觉得很奇怪很不规范吗？」——两条菜单项 + 各自两段确认文字是我造的，
+    // 本仓早就有共享 confirmDialog（OrchestratorPanel / Plot3D 在用），该用它。
+    const menu = src.slice(src.indexOf('<Dropdown anchor={menuBtnRef.current}'), src.indexOf("</Dropdown>"));
+    expect((menu.match(/role="menuitem"/g) ?? []).length, "菜单里又长出第二条删除").toBe(1);
+    expect(menu, "菜单项上又挂回“再点一次”那套").not.toContain("再点一次");
+    const fn = src.slice(src.indexOf("const del = async"), src.indexOf("const activeModel"));
+    expect(fn, "确认窗不见了").toMatch(/await confirmDialog\(\{/);
+    expect(fn, "窗里没说要连几个模型一起删").toMatch(/名下的 \$\{n\} 个模型会一起删除/);
+    expect(fn, "取消不返回就等于按下去照删").toMatch(/if \(!ok\) return;/);
+    expect(fn.indexOf("if (!ok) return;") < fn.indexOf("removeProvider(provider.id, true)"),
+      "removeProvider 跑在确认之前").toBe(true);
   });
 
   it("F16：AI 页「测试连接」整行删除（含 helper 与 ai_agent_turn ping）", () => {

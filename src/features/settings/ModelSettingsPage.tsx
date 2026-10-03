@@ -16,6 +16,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { Dropdown } from "../../shared/Dropdown";
+import { confirmDialog } from "../../shared/Dialog";
+import { EmptyState } from "../../shared/EmptyState";
 import { HelpHint } from "../../shared/HelpHint";
 import { SetRow } from "../../shared/SetRow";
 import { Listbox } from "../../shared/Listbox";
@@ -402,7 +404,6 @@ export function ModelSettingsPage() {
   const [probes, setProbes] = useState<Record<string, Probe>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [remote, setRemote] = useState<Record<string, RemoteCatalog>>({});
-  const [armed, setArmed] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState<string>("");
@@ -410,15 +411,16 @@ export function ModelSettingsPage() {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
 
   const modelsOf = (id: string) => st.models.filter((m) => m.providerId === id);
-  // 选中的那家被删掉了要落到别处，否则右列指着空气。档案表保证至少留一家，
-  // 所以这里没有"一家都没有"的空态分支（那是到不了的代码）。
-  const provider = st.providers.find((p) => p.id === sel) ?? st.providers[0];
-  const models = modelsOf(provider.id);
-  const probe: Probe = probes[provider.id] ?? "idle";
-  const note = notes[provider.id] ?? "";
+  // 选中的那家被删掉了要落到别处，否则右列指着空气。
+  // P133-G 改判：这里原先假设"表里至少有一家"（因为删空会回 seed）。那个假设现在不成立了，
+  // 而它是真的会走到——把最后一家删掉，`st.providers[0]` 是 undefined，右列当场白屏。
+  const provider = st.providers.find((p) => p.id === sel) ?? st.providers[0] ?? null;
+  const models = provider ? modelsOf(provider.id) : [];
+  const probe: Probe = provider ? probes[provider.id] ?? "idle" : "idle";
+  const note = provider ? notes[provider.id] ?? "" : "";
   // P115-F8：清单只在快照（拉它时的地址/格式）与当前供应商一致时才算数
-  const catalog = remote[provider.id] ?? null;
-  const catalogFresh = !!catalog && catalog.baseUrl === provider.baseUrl.trim() && catalog.format === provider.format;
+  const catalog = provider ? remote[provider.id] ?? null : null;
+  const catalogFresh = !!provider && !!catalog && catalog.baseUrl === provider.baseUrl.trim() && catalog.format === provider.format;
   const remoteIds = catalogFresh ? catalog.ids : null;
   const fresh = remoteIds ? missingFrom(remoteIds, models.map((m) => m.model)) : [];
 
@@ -517,35 +519,28 @@ export function ModelSettingsPage() {
   };
 
   /**
-   * P115-F15：删除走"两段明说"，不走聪明的自动级联。
-   * 旧写法第二次点击把 `cascade = models.length > 0` 传下去——有模型就**连模型一起删**，
-   * 拒绝分支因此永远够不着（死代码），而菜单上那句"一起删"藏在浮层里没人读全。
-   * 现在：首次点击就把「名下还有 N 个模型，先删除或移走它们」亮在 hint 行（不碰探针，
-   * 删除不是"试连失败"），第二次点击传 `cascade=false`——被拒就走真正的拒绝分支。
+   * 删除这家：菜单里一条，点下去开一扇确认窗（P133-G2 —— 用户判我上一版"两条菜单项 +
+   * 各自两段确认文字"不像设置页，像报错弹窗）。
+   *
+   * P115-F15 的原意是**级联不能悄悄做**，不是"不能做"：这里把它搬到唯一说得清后果的地方——
+   * 窗里写死"和名下 N 个模型一起删、没有撤销"，取消就什么都不发生。
+   * 于是 `armed` 那套"再点一次"整族退出这一页：一个动作一次明确同意，不需要用户记住
+   * 第二次点击才会执行。
    */
-  const del = () => {
-    if (!armed) {
-      setArmed(true);
-      if (models.length > 0) {
-        setNotes((s) => ({
-          ...s,
-          [provider.id]: tx(`名下还有 ${models.length} 个模型，先删除或移走它们`, `${models.length} model(s) still live under this provider — delete or move them first`),
-        }));
-      }
-      return;
-    }
-    const r = removeProvider(provider.id, false);
-    setArmed(false);
+  const del = async () => {
+    if (!provider) return;
+    const n = models.length;
     setMenuOpen(false);
-    if (!r.ok) {
-      setNotes((s) => ({
-        ...s,
-        [provider.id]: r.reason === "has_models"
-          ? tx(`名下还有 ${models.length} 个模型，先删除或移走它们`, `${models.length} model(s) still live under this provider — delete or move them first`)
-          : tx("删除被拒绝", "Delete refused"),
-      }));
-      return;
-    }
+    const ok = await confirmDialog({
+      title: tx("删除这家供应商", "Delete this provider"),
+      message: n
+        ? tx(`${provider.label} 和它名下的 ${n} 个模型会一起删除，删了没有撤销。`, `${provider.label} and its ${n} model(s) will be deleted together. There is no undo.`)
+        : tx(`${provider.label} 会删除，删了没有撤销。`, `${provider.label} will be deleted. There is no undo.`),
+      okLabel: tx("删除", "Delete"),
+      danger: true,
+    });
+    if (!ok) return;
+    removeProvider(provider.id, true);
     const next = st.providers.find((p) => p.id !== provider.id);
     setSel(next?.id ?? "");
   };
@@ -560,7 +555,7 @@ export function ModelSettingsPage() {
         <div className="msp-list-head">
           <span className="msp-list-title">{tx("供应商", "Providers")}</span>
           <span className="msp-list-acts">
-            <button type="button" className="msp-ibtn" onClick={() => void test()} disabled={probe === "testing"}
+            <button type="button" className="msp-ibtn" onClick={() => void test()} disabled={probe === "testing" || !provider}
               aria-label={tx("刷新模型清单", "Refresh the model list")}
               title={tx("拉一次 /models：免费（不消耗额度），顺带证明连得通", "Fetch /models — free, and it proves the connection too")}>
               <IconRefresh />
@@ -576,7 +571,7 @@ export function ModelSettingsPage() {
           const d = dotOf(p, probes[p.id] ?? "idle", n);
           return (
             <button key={p.id} type="button" className={`msp-row${provider.id === p.id ? " on" : ""}`}
-              onClick={() => { setSel(p.id); setArmed(false); setEditing(""); }}>
+              onClick={() => { setSel(p.id); setEditing(""); }}>
               <span className={`msp-dot ${d.cls}`} title={d.tip} aria-hidden="true" />
               <span className="msp-name">{p.label}</span>
               <span className="msp-count">{n}</span>
@@ -595,6 +590,17 @@ export function ModelSettingsPage() {
       </aside>
 
       <section className="msp-detail">
+        {/* P133-G：表可以真空了（删掉最后一家就是空表），所以右列需要一个空态分支。
+            下面这三张卡整块包起来而不是逐处补 `?.`——它们没有一张能在"没有供应商"
+            这件事上说出有意义的话，半张卡比空态更假。 */}
+        {!provider && (
+          <EmptyState
+            title={tx("还没有供应商", "No provider yet")}
+            hint={[tx("点「添加供应商」建第一家", "Use Add provider above")]}
+          />
+        )}
+        {provider && (
+          <>
         <div className="msp-card">
           <div className="msp-card-head">
             <input className="msp-title-input" value={provider.label} aria-label={tx("供应商名称", "Provider name")}
@@ -610,10 +616,8 @@ export function ModelSettingsPage() {
               <IconMore />
             </button>
             <Dropdown anchor={menuBtnRef.current} open={menuOpen} onClose={() => setMenuOpen(false)} align="end">
-              <button type="button" role="menuitem" className="ai-scene-menu-item danger" onClick={del}>
-                {armed
-                  ? tx("再点一次确认删除这家供应商（不可撤销）", "Press again to delete this provider (no undo)")
-                  : tx("删除这家供应商", "Delete this provider")}
+              <button type="button" role="menuitem" className="ai-scene-menu-item danger" onClick={() => void del()}>
+                {tx("删除这家供应商", "Delete this provider")}
               </button>
             </Dropdown>
           </div>
@@ -722,8 +726,10 @@ export function ModelSettingsPage() {
             </div>
           </SetRow>
         </div>
+          </>
+        )}
       </section>
-      {editingModel && (
+      {provider && editingModel && (
         <ModelEditDialog provider={provider} model={editingModel} onClose={() => setEditing("")} />
       )}
     </div>
