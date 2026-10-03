@@ -28,10 +28,20 @@ const WRITE = args.includes("--write");
 const CHECK = args.includes("--check");
 const VIEWPORT = { w: 1440, h: 900 };
 
-/** 两面：默认工作区 + 设置窗（外观页）。加面=加一次采集，不加基线口径 */
+/**
+ * 四面：默认工作区 + 设置窗（外观页）+ 两张浮层。
+ * 浮层这两面**必须靠真事件开**（按键 / 右键），注入一个 DOM 节点出来不算——
+ * 注入的浮层没有真实的定位、层叠与 backdrop，量出来的东西用户看不到。
+ * `require` 是"开没开出来"的哨兵：没开出来直接抛，而不是静默少测一面（P132-E）。
+ */
 const SURFACES = [
   { id: "workspace", path: (t) => `/?theme=${t}&welcome=0` },
   { id: "settings", path: (t) => `/?theme=${t}&welcome=0&open=settings/appearance` },
+  { id: "palette", path: (t) => `/?theme=${t}&welcome=0`, drive: "palette", require: ".cmdk" },
+  /* 右键菜单那一族**这一批没进账**，原因是实测出来的而不是"以后再说"：
+     `.ctx-menu` 是逐功能挂的，HexView 那条要先 `hitTest` 命中一字节序列才出菜单（无数据=不弹），
+     控制画布那条要右键在网格上——固定坐标在面板开合后会点到别处，点到别处就是**静默少测一面**。
+     要覆盖它得给 dev 层加一个"启动即右键某处"的入口，那是独立的一件事（记在验收 §7）。 */
 ];
 
 let list = null;
@@ -70,6 +80,37 @@ const send = (method, params = {}) =>
     ws.send(JSON.stringify({ id: n, method, params }));
   });
 const rest = (ms) => new Promise((r) => setTimeout(r, ms));
+async function key(k, code, vk, modifiers = 0) {
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, modifiers });
+}
+async function rightClick(x, y) {
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "right", clickCount: 1, buttons: 2 });
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "right", clickCount: 1, buttons: 0 });
+}
+/** 浮层怎么开：命令面板是 Ctrl+Shift+P；右键菜单落在控制画布那块（实测唯一能稳定开出 `.ctx-menu` 的落点） */
+async function drive(how) {
+  if (how === "palette") {
+    await key("P", "KeyP", 80, 2 | 8);
+    await rest(550);
+    return;
+  }
+  if (how === "ctxmenu") {
+    /** 落点不写死坐标：布局一换（面板开合、窗口尺寸）死坐标就点到别处——上次就是这么"静默开不出菜单"的 */
+    const at = await evaluate(`(() => {
+      const el = document.querySelector('.hex-canvas') || document.querySelector('canvas');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 40) return null;
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    })()`);
+    if (!at) throw new Error("ctxmenu：找不到可右键的画布（Hex 数据流那面没开出来？）");
+    await rightClick(at.x, at.y);
+    await rest(550);
+    return;
+  }
+  throw new Error(`不认识的驱动方式：${how}`);
+}
 
 async function evaluate(expression) {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
@@ -126,6 +167,11 @@ function fold(items, key, worse) {
 
 async function collectOne(themeId, surface) {
   await goto(`${ORIGIN}${surface.path(themeId)}`);
+  if (surface.drive) await drive(surface.drive);
+  if (surface.require) {
+    const open = await evaluate(`!!document.querySelector(${JSON.stringify(surface.require)})`);
+    if (!open) throw new Error(`${themeId}/${surface.id}：浮层没开出来（找不到 ${surface.require}）——这一面不能空着记账`);
+  }
   const raw = await evaluate(COLLECT);
   if (!raw || typeof raw.sampled !== "number") throw new Error(`${themeId}/${surface.id} 没采到东西`);
   const reasons = {};

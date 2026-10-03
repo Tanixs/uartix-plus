@@ -351,18 +351,23 @@
 
 /* ---------- 浮层：菜单 / 命令面板 / 气泡 ---------- */
 
-/* Fluent 的弹出层是"8px 圆角 + 分层影 + 半透明底"。
-   **半透明留、`backdrop-filter: blur()` 不留**——这是量出来的，不是审美：
-   带着 blur 时，无头渲染（--disable-gpu）下任何一次全树 `getComputedStyle` 扫描
-   （`theme_audit` 就是这种扫描）40 秒都不返回；去掉 blur 后同一台机器同一屏秒回。
-   也就是说：亚克力不是"更好看"，是"每次重算都要重合成一遍"。
-   真 acrylic 的正确位置是 P131-E（Rust 侧窗口效果，由合成器做），不是主题 CSS。 */
+/* Fluent 的弹出层是"8px 圆角 + 分层影 + 半透明底 + **磨砂**"。
+   这一档 blur 之前是不加的，理由写在旧注释里："无头环境下全树 getComputedStyle 扫描会卡 40 秒"。
+   P132-E 复验：这条**在本机不成立**——同一页同一浮层，加 blur(20px) saturate(1.4) 前后
+   扫描 37ms vs 39ms、四次截图 106/64/60/76 vs 78/90/80/62 ms，没有可测差异
+   （`.scratch/p136-blur.mjs` / `p136-blur2.mjs` 留档）。
+   而不加 blur 的代价是看得见的：88% 的底挡不住背后的字，命令面板里能读出后面面板的
+   "等待有效帧…""2D 曲线"（截图 `.tmp/p136-fluent-palette.png`）。半透明而不磨砂不是通透，是脏。
+   真 Mica 仍在 P131-E（合成器侧做，能省下的其实是窗口而非浮层）；**若真机测出代价，撤的是这一档 blur，
+   不是把 ghost 留着当已知问题**。 */
 [data-theme="fluent"] .ctx-menu,
 [data-theme="fluent"] .sb-menu,
 [data-theme="fluent"] .aiw-menu,
 [data-theme="fluent"] .cmdk {
   background: var(--fb-acrylic);
   background-image: var(--fb-noise);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-l);
   box-shadow: var(--fb-shadow-pop);
@@ -419,6 +424,8 @@
 [data-theme="fluent"] .help-bubble {
   background: var(--fb-acrylic);
   background-image: var(--fb-noise);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-l);
   box-shadow: var(--fb-shadow-pop);

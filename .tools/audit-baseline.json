@@ -8,17 +8,18 @@
   "judge": "生产同一份：src/features/agent/uiSurface.collectAuditInput + src/styles/renderAudit",
   "surfaces": [
     "workspace",
-    "settings"
+    "settings",
+    "palette"
   ],
   "themes": {
     "light": {
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -30,10 +31,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -50,10 +66,10 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -65,10 +81,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -85,10 +116,10 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -100,10 +131,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -120,10 +166,10 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -135,10 +181,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -155,10 +216,10 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -170,10 +231,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -190,10 +266,10 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -205,10 +281,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -225,10 +316,10 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -240,10 +331,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -260,10 +366,10 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -275,10 +381,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 987877,
-          "rules": 3454,
+          "styleBytes": 987920,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 987920,
+          "rules": 3455,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -295,10 +416,10 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 362,
+          "sampled": 324,
           "truncated": false,
-          "styleBytes": 1001128,
-          "rules": 3543,
+          "styleBytes": 1001257,
+          "rules": 3544,
           "issues": [],
           "worst": null,
           "unmeasurable": {
@@ -310,10 +431,25 @@
           "overflow": 0
         },
         "settings": {
-          "sampled": 504,
+          "sampled": 466,
           "truncated": false,
-          "styleBytes": 1001128,
-          "rules": 3543,
+          "styleBytes": 1001257,
+          "rules": 3544,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hitIssues": 0,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "palette": {
+          "sampled": 439,
+          "truncated": false,
+          "styleBytes": 1001257,
+          "rules": 3544,
           "issues": [],
           "worst": null,
           "unmeasurable": {

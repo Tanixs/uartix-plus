@@ -113,6 +113,48 @@ describe("P99b-N1：示例货架内容", () => {
     expect(builtin.slice(0, builtin.indexOf(":root"))).not.toContain(pkg.slice(0, pkg.indexOf(":root")));
   });
 
+  /**
+   * P132-E：`:root` 是上一条对账**故意留的出口**（"改不动就做成 :root 旋钮"）。
+   * 但出口没有清单就等于没有——本次实测两边 13 条派生 token 里有 5 条值不同，
+   * 其中只有 `--fb-acrylic`（88% vs 90%）在 P132-B 验收文档里写过一句，其余 4 条是**没人记的漂移**。
+   * 所以这里把出口写成契约：① 键集合必须一致（少一条＝那条从"可调"变成"漂丢"）；
+   * ② 只有列出来的这几条允许不同，且每条要写清为什么暗色要另取值；
+   * ③ 列出来的这几条**必须真的不同**——哪天两边一样了，就把这条删掉，别留一条空转的豁免。
+   */
+  it("两条通路的 :root 旋钮：只有登记过的几条可以不同，其余必须一模一样", () => {
+    const rootBlock = (s: string) => {
+      const a = s.indexOf("{", s.indexOf(":root"));
+      return s.slice(a + 1, s.indexOf("}", a));
+    };
+    const varsOf = (blk: string) => {
+      const out = new Map<string, string>();
+      for (const m of blk.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) out.set(m[1], m[2].replace(/\s+/g, " ").trim());
+      return out;
+    };
+    const builtin = varsOf(rootBlock(readFileSync(join(ROOT, "src", "styles", "builtinStyles", "fluent.css"), "utf8")));
+    const pkg = varsOf(rootBlock(readFileSync(join(ROOT, "market", "pkg", "fluent-dark", "components.css"), "utf8")));
+    expect([...pkg.keys()].sort(), "两边的派生 token 集合不一致（少一条就是那条悄悄漂了）").toEqual([...builtin.keys()].sort());
+
+    const ALLOWED_DIFF: Record<string, string> = {
+      "--fb-acrylic": "暗色底更不透（88% → 90%）：近黑的面板色再透出来就与画布糊成一片（P132-B 记过）",
+      "--fb-shadow-pop": "暗色下浅黑阴影几乎不可见，浮层要靠更强的影分层（0.1/0.14 → 0.3/0.45）",
+      "--fb-shadow-card": "同上，卡片的贴地影也要加档",
+      "--fb-card-line": "暗色发丝线需要更高不透明度才看得见（9% → 12%）",
+      "--fb-accent-pressed": "按压态往哪边压：亮色往主题自己的墨（--text），暗色往纯黑——都是\"压深\"，但混的对象不同",
+    };
+    const same: string[] = [];
+    const diff: string[] = [];
+    for (const k of builtin.keys()) (builtin.get(k) === pkg.get(k) ? same : diff).push(k);
+    for (const k of diff) {
+      expect(ALLOWED_DIFF[k], `:root 旋钮 ${k} 两边不同但没登记过（${builtin.get(k)} vs ${pkg.get(k)}）——要么统一，要么写清为什么暗色要另取值`).toBeTruthy();
+    }
+    for (const k of Object.keys(ALLOWED_DIFF)) {
+      expect(diff.includes(k), `登记 ${k} 可以不同，但两边现在是一样的——这条豁免该删了，别留空转的出口`).toBe(true);
+    }
+    // 反空断言：真有一条对账在跑，而不是两边都空
+    expect(same.length, "两边一模一样的旋钮一个都没有＝抽取方式与文件格式脱钩了").toBeGreaterThan(3);
+  });
+
   it("自家主题包：净化器零 error 也零 warning（带嫌疑上架等于给投稿人开脱）", () => {
     const themes = committed.entries.filter((e) => e.category === "theme");
     expect(themes.length, "反空断言：一枚主题都没有，这条什么都没查").toBeGreaterThan(0);

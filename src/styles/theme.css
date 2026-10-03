@@ -77,8 +77,13 @@
      所以必须有比 --text-dim 更轻的一档可用，否则人们又会拿一条线去代替字重。
      方向不用分亮暗：往 `--bg`（画布）掺，在两套 scheme 里都是"向背景退后"，
      对比自然降低——这也是为什么这里用 --bg 而不是 --bg-panel。
-     派生 token，不进 AI 外观白名单。 */
-  --text-faint: color-mix(in srgb, var(--text-dim) 62%, var(--bg));
+     派生 token，不进 AI 外观白名单。
+     P132-E 给它一条地板：原来掺 38%，实测压四档表面只有 2.23~2.94:1——
+     注释写着"第三级文字"，值却是个装饰档，于是 31 处拿它当字色全都读不出（命令面板的分组标题 2.70 是其中一处）。
+     改成掺 20%：仍比 --text-dim 明显轻一档（层级没丢），但每一枚主题都站上 3.0
+     （WCAG 非文本/大字那一档；`check:theme` 按同一条混式复算，改不回 38% 会当场红）。
+     **正文级的小字该用 --text-dim，不是这一档**——账点到谁，谁就升。 */
+  --text-faint: color-mix(in srgb, var(--text-dim) 80%, var(--bg));
   /* P104-P1 面板工具条专用档：页签条与工具条在亮色下原本只差 0.21 L*
      （inset 94.0 vs raise-1 93.8），肉眼就是同一条灰带；而暗色下差 13.6 L*，
      工具条反而成了亮带 —— 两套主题差 65 倍，因为 --raise-* 是往 --text 混的，
@@ -11334,7 +11339,8 @@ html.no-motion .mkt-img-skel { animation: none; }
 
 .cmdk-section-h {
   padding: var(--sp-1) var(--sp-3);
-  color: var(--text-faint);
+  /* P132-E：分组标题是要读的标签，不是纹样——faint 那一档在暗底上只有 3.35 */
+  color: var(--text-dim);
   font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -11362,8 +11368,18 @@ html.no-motion .mkt-img-skel { animation: none; }
   background: var(--raise-2);
 }
 
+/* 选中行换了底（--raise-2 是抬升档里最深的一档），hint 那档灰字压上去只剩 3.32~3.5。
+   层级本来就靠字号（10 vs 12）与位置（右端）表达，这里让字跟着底走：
+   选中行上的说明文字用正字色。静态门从没查过"字压抬升档"这一格，已记进欠账（验收 §7）。 */
+.cmdk-item.sel .cmdk-hint {
+  color: var(--text);
+}
+
 .cmdk-item:disabled {
-  color: var(--text-faint);
+  /* P132-E：禁用行也从 3.32~4.42 提到 dim。"这条现在点不动"已经由"点了没反应 + 右侧没有提示"表达了，
+     不需要再把字洗淡一档——**全应用一条标准：凡是字都得 4.5**，不给判据开"禁用态例外"那个口子
+     （开了之后每次想少修一处，都可以说"它是 disabled"）。 */
+  color: var(--text-dim);
   cursor: default;
 }
 
@@ -11397,7 +11413,11 @@ html.no-motion .mkt-img-skel { animation: none; }
   flex: none;
   padding: var(--sp-1) var(--sp-3);
   background: var(--bar-bg);
-  color: var(--text-faint);
+  /* P132-E：页脚那三枚提示（↑↓ 选择 / Enter 执行 / Esc 关闭）是**教人用面板的字**，
+     不是装饰——faint 压在 `--bar-bg` 上实测 3.32~4.42。顺带暴露一格门洞：
+     `--bar-bg` 这种"条带底"从来没进过 token 门的表面清单（它查 bg/panel/inset/titlebar 四档），
+     已记进验收 §7 的欠账。 */
+  color: var(--text-dim);
   font-size: var(--fs-xs);
 }
 

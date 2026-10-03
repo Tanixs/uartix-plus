@@ -399,6 +399,7 @@ function lstarRgb(c) {
     fails++;
   } else {
     let bad = 0;
+    const softBad = [];
     const lines = [];
     for (const f of files) {
       const src = fs.readFileSync(path.join(dir, f), "utf8");
@@ -424,7 +425,16 @@ function lstarRgb(c) {
         const mix = (i) => soft.a * soft[["r", "g", "b"][i]] + (1 - soft.a) * panel[["r", "g", "b"][i]];
         chips.push(["accent-soft", hexOf({ r: mix(0), g: mix(1), b: mix(2) })]);
       }
+      const surfaces = chips.filter(([k]) => k !== "accent-soft");
       const rs = chips.map(([k, s]) => [k, ratio(hexOf(at), s)]);
+      /* P132-E：`--text-faint` 的注释写着"第三级文字"，值却是个装饰档（掺 38% 洗到 2.23~2.94）。
+         给它一条自己的地板 3.0（非文本/大字那一档）——**不吃上面那条 4.5**，
+         因为这一档的用途就是"比 dim 更轻"，要 4.5 就等于取消这一档。
+         正文级小字该用哪一档由审计说：账点到谁，谁升 `--text-dim`。 */
+      const faint = toRgba(rootDarkVars["--text-faint"], env);
+      const fw = faint ? Math.min(...surfaces.map(([, s]) => ratio(hexOf(faint), s))) : 0;
+      if (!faint) softBad.push(`${name}: --text-faint 这份混式本门算不出（不猜）`);
+      else if (fw < 3.0) softBad.push(`${name}: --text-faint 压表面只有 ${fw.toFixed(2)}，地板是 3.0`);
       /* 白字压 danger 实底那一档（P132-D 另起 `--danger-fill`，比 --danger 深 12%） */
       const df = toRgba(rootDarkVars["--danger-fill"], env);
       const ink = toRgba(env["--on-danger"] ?? rootDarkVars["--on-danger"], env);
@@ -460,6 +470,8 @@ function lstarRgb(c) {
     }
     console.log("\n-- P132-D --accent-text 派生复算（accent 当文字用的那一档，四档表面 + soft 胶囊都要 ≥4.5） --");
     console.log(lines.join("\n"));
+    for (const s of softBad) console.log(`FAIL ${s}`);
+    if (softBad.length) fails += softBad.length;
     if (bad) {
       console.log(`FAIL: ${bad} 枚主题的 --accent-text 不够 4.5（混式或品牌色改过，得重新算）`);
       fails += bad;

@@ -357,6 +357,8 @@ select.input {
 .cmdk {
   background: var(--fb-acrylic);
   background-image: var(--fb-noise);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-l);
   box-shadow: var(--fb-shadow-pop);
@@ -413,6 +415,8 @@ select.input {
 .help-bubble {
   background: var(--fb-acrylic);
   background-image: var(--fb-noise);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-l);
   box-shadow: var(--fb-shadow-pop);
