@@ -17,7 +17,7 @@ import { hasDataLease } from "../plot/dataLease";
 import { shrinkByShape } from "./shrink";
 import { RECEIPT_DATA_LIMIT } from "./context";
 import { ARTIFACT_PAGE_BYTES } from "./localEntries";
-import { hasDomain, type Domain } from "./scopeTiers";
+import { hasDomain, isFullAuthority, type Domain } from "./scopeTiers";
 import { hostEntryNames, hostToolEntries } from "./hostEntries";
 import {
   buildToolCtx,
@@ -110,6 +110,9 @@ export function createLocalAgentAdapter(opts: LocalAgentAdapterOpts): TaskAdapte
     authorized: (key) => hasDomain(t.scope, t.allowed, key as Domain),
     operatorLocked: operatorLocked(),
     deviceContext: deviceContext(),
+    // P133-H：八域全开＝「全权执行」。策略侧据此跳过那两类"软件内部且宿主留了退路"的批准，
+    // 每张批准卡的**产生与跳过**都只由这一个事实决定，模型改不了它。
+    fullAuthority: isFullAuthority(t.scope, t.allowed),
   }, scratch);
 
   return {

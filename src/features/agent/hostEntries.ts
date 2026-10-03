@@ -57,8 +57,9 @@ export function hostEntryNames(): string[] {
   return hostToolEntries().map((e) => e.name);
 }
 
-/** 撤销路由查表：没登记 undoRoute 的工具回 undefined，由调用方落 `unrouted_tool` 如实出声。 */
-export function undoRouteOf(tool: string): ((token: string) => UndoResult) | undefined {
+/** 撤销路由查表：没登记 undoRoute 的工具回 undefined，由调用方落 `unrouted_tool` 如实出声。
+ *  允许回 Promise（P133-H：文件撤销要走 IPC 写回磁盘），调用方负责落中间态。 */
+export function undoRouteOf(tool: string): ((token: string) => UndoResult | Promise<UndoResult>) | undefined {
   return hostEntryByName(tool)?.undoRoute;
 }
 

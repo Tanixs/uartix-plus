@@ -8,7 +8,7 @@ const storage = new Map<string, string>();
 vi.stubGlobal("localStorage", { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => storage.set(k, v) });
 const { decide, settingsEffect } = await import("./toolPolicy");
 
-const base: PolicyContext = { scope: "create", authorized: () => true, operatorLocked: false, deviceContext: "sim" };
+const base: PolicyContext = { scope: "create", authorized: () => true, operatorLocked: false, deviceContext: "sim", fullAuthority: false };
 const meta = (effect: ToolPolicyMeta["effect"], over: Partial<ToolPolicyMeta> = {}): ToolPolicyMeta => ({ effect, idempotent: false, reversible: true, mayTouchDevice: false, ...over });
 
 it("four manual-confirmation categories always require local approval", () => {
@@ -20,8 +20,43 @@ it("four manual-confirmation categories always require local approval", () => {
   expect(decide(meta("device_send", { mayTouchDevice: true }), { ...base, deviceContext: "unknown" })).toBe("require_local_approval");
 });
 
-it("secrets are denied regardless of scope; protected config needs approval", () => {
-  expect(decide(meta("secret"), { ...base, scope: "create" })).toBe("deny");
+it("P133-H：全权执行档只放宽「有退路」的两类，其余一条不动", () => {
+  const full: PolicyContext = { ...base, fullAuthority: true };
+  // ① 覆盖已有文件：宿主真留了快照（reversible:true）⇒ 直接执行
+  expect(decide(meta("destructive_write", { reversible: true }), full)).toBe("allow");
+  // ② 命令行里只有 argv 全由宿主钉死的那条（repo_check）⇒ 直接执行
+  expect(decide(meta("irreversible", { reversible: false, hostBounded: true }), full)).toBe("allow");
+
+  // 放宽的边界就是这两条，逐条反证：
+  expect(decide(meta("destructive_write", { reversible: false }), full),
+    "没快照的覆盖也放行了——快照是全权档放宽的唯一凭据").toBe("require_local_approval");
+  expect(decide(meta("irreversible"), full),
+    "自由命令行（shell_exec 没有 hostBounded）被顺手放宽了").toBe("require_local_approval");
+  expect(decide(meta("safety_boundary", { reversible: true }), full),
+    "急停/校准跟着档位走 = 用户点个「全权」就把自己最要紧的一道确认关掉了").toBe("require_local_approval");
+  expect(decide(meta("protected_config"), full),
+    "AI 自己的权限/端点开关被放宽 = 它能给自己加权限（能力面开放、权限面封闭）").toBe("require_local_approval");
+  expect(decide(meta("device_send", { mayTouchDevice: true }), { ...full, deviceContext: "real" }),
+    "实车发送被放宽了").toBe("require_local_approval");
+  expect(decide(meta("secret"), full)).toBe("deny");
+  // 低一档（fullAuthority:false）时上面那两条照旧弹卡：见上一条用例，base 就是它
+  expect(decide(meta("destructive_write", { reversible: true }), base)).toBe("require_local_approval");
+  expect(decide(meta("irreversible", { reversible: false, hostBounded: true }), base)).toBe("require_local_approval");
+});
+
+it("P133-H：「全权执行」按实际授权集合判，不按预设名字判", async () => {
+  const { isFullAuthority } = await import("./scopeTiers");
+  const ALL = ["config", "plugins", "device", "files", "network", "shell", "ui", "write"];
+  expect(isFullAuthority("custom", ALL)).toBe(true);
+  // 手工勾满八项与选「全权执行」是同一件事：策略只认权限，不认名字
+  expect(isFullAuthority("custom", [...ALL].reverse())).toBe(true);
+  expect(isFullAuthority("custom", ALL.slice(0, 7)), "少一个域也算全权？").toBe(false);
+  expect(isFullAuthority("create", undefined), "默认档被读成全权").toBe(false);
+  expect(isFullAuthority("preview", ALL), "预览档再满也不放宽").toBe(false);
+  expect(isFullAuthority("custom", []), "空勾选").toBe(false);
+});
+
+it("secrets are denied regardless of scope; protected config needs approval", () => {  expect(decide(meta("secret"), { ...base, scope: "create" })).toBe("deny");
   expect(decide(meta("protected_config"), base)).toBe("require_local_approval");
   expect(settingsEffect("secret", true)).toBe("secret");
   expect(settingsEffect("protected", true)).toBe("protected_config");

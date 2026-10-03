@@ -16,7 +16,8 @@ const { patch } = await import("../settings/settingsStore");
 const invokeMock = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => undefined as unknown));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 const { inWhitelist, parseFsRoots, parseDdgResults, generalToolEntries, expandRepoCheck, resolveRepoCheck, validRepoTestPath, REPO_CHECKS } = await import("./generalTools");
-const { toolHarness } = await import("./toolTestKit");
+const { toolHarness, recordingGate } = await import("./toolTestKit");
+const { isFullAuthority } = await import("./scopeTiers");
 import type { ApprovalGate } from "./toolRegistry";
 import type { TaskContext, ToolCall } from "./types";
 
@@ -26,7 +27,11 @@ import type { TaskContext, ToolCall } from "./types";
  * generalTools 反过来 import 了 agentAdapter；那条边断掉之后，夹具只需要注册表。
  */
 function executeGeneralTool(call: ToolCall, ctx: TaskContext, _runId: string, gate: ApprovalGate) {
-  return toolHarness(generalToolEntries, { gate })
+  return toolHarness(generalToolEntries, {
+    gate,
+    // 与生产同一判据（agentAdapter 里就是这一行）：全权档由实际授权集合算出来，测试不写死
+    policy: { fullAuthority: isFullAuthority(ctx.scope, ctx.allowed ?? []) },
+  })
     .exec(call, { scope: ctx.scope, allowed: ctx.allowed ?? [], runId: ctx.runId, signal: ctx.signal });
 }
 
@@ -256,14 +261,16 @@ describe("fs_write（write 域）", () => {
     expect((last[1] as { roots: string[] }).roots).toEqual(["D:\\w"]);
   });
 
-  it("覆盖已有文件先要批准；拿到令牌后才真写，且回执说清覆盖了几个字节", async () => {
+  it("覆盖已有文件：低一档先要批准，拿到令牌后才真写；回执说清覆盖了几个字节", async () => {
     patch({ agentFsRoots: "D:\\w" });
     invokeMock.mockResolvedValue({ exists: true, isDir: false, bytes: 512 });
     const denied = fakeGate(false);
     const r1 = await executeGeneralTool(call("fs_write", { path: "D:\\w\\old.txt", content: "新内容" }), ctx("custom", ["write"]), "r1", denied.gate);
     expect(r1.code).toBe("needs_local_approval");
     expect(denied.requested).toHaveLength(1);
-    expect((denied.requested[0] as { effect: string; plan: string }).effect).toBe("irreversible");
+    // P133-H：类名从 irreversible 改成 destructive_write——宿主写之前留了整份旧内容，
+    // "不提供撤销"那句话不再成立。批准行为在低一档一模一样（这条断言没放松）。
+    expect((denied.requested[0] as { effect: string; plan: string }).effect).toBe("destructive_write");
     expect(String((denied.requested[0] as { plan: string }).plan)).toContain("512");
     expect(invokeMock.mock.calls.some((c) => c[0] === "agent_fs_write")).toBe(false);
 
@@ -273,7 +280,30 @@ describe("fs_write（write 域）", () => {
     const d = r2.data as { overwroteBytes?: number; created?: boolean; hint: string };
     expect(d.overwroteBytes).toBe(512);
     expect(d.created).toBeUndefined();
-    expect(d.hint).toContain("不可撤销");
+    expect(d.hint).toContain("可撤销");
+    // 覆盖必须带撤销令牌（新建才不该带，见下一条）
+    expect(r2.undoToken, "覆盖已有文件却没给撤销令牌：全权档就不该放宽").toBeTruthy();
+  });
+
+  it("P133-H：八域全开（＝全权执行）时覆盖不再弹卡，新建也不该有假的撤销", async () => {
+    patch({ agentFsRoots: "D:\\w" });
+    const ALL = ["config", "plugins", "device", "files", "network", "shell", "ui", "write"];
+    invokeMock.mockResolvedValue({ exists: true, isDir: false, bytes: 512 });
+    const g = fakeGate(false);
+    const r = await executeGeneralTool(call("fs_write", { path: "D:\\w\\old.txt", content: "新内容" }), ctx("custom", ALL), "r1", g.gate);
+    expect(g.requested, "全权档还弹卡：放宽没生效").toHaveLength(0);
+    expect(r.ok).toBe(true);
+    expect(invokeMock.mock.calls.some((c) => c[0] === "agent_fs_write"), "没弹卡就没真写").toBe(true);
+    // 令牌是宿主生成的，不是模型能挑的：写请求里必须带上它，Rust 才有地方存底
+    const w = invokeMock.mock.calls.find((c) => c[0] === "agent_fs_write");
+    expect(Object.keys((w?.[1] ?? {}) as object)).toContain("token");
+
+    // 新建没有"之前" ⇒ 不给 undoToken，否则时间线上会长出一颗按了没用的「撤销」
+    invokeMock.mockResolvedValue({ exists: false, isDir: false, bytes: 0 });
+    const g2 = fakeGate(false);
+    const created = await executeGeneralTool(call("fs_write", { path: "D:\\w\\new.txt", content: "新文件" }), ctx("custom", ["write"]), "r1", g2.gate);
+    expect(created.ok).toBe(true);
+    expect(created.undoToken, "新建文件哪来的「之前」？").toBeUndefined();
   });
 });
 
@@ -328,13 +358,55 @@ describe("P109-D · fs_grep / fs_glob / fs_edit", () => {
     expect(JSON.stringify(other)).toContain("disk full");
   });
 
-  it("fs_edit 走的是逐条批准（覆盖已有内容是 §8-44 四类之一），且门在批准卡之前", () => {
+  it("fs_edit 是覆盖类写（有快照 ⇒ 可撤销），且门在批准卡之前", () => {
     const e = generalToolEntries.find((x) => x.name === "fs_edit");
-    expect(e?.effect).toBe("irreversible");
+    // P133-H：irreversible → destructive_write。改的是"能不能撤销"这句事实，
+    // 不是把批准放松掉：低一档它照样弹卡（上一条 fs_write 用例走的是同一条策略）。
+    expect(e?.effect).toBe("destructive_write");
     expect(e?.domain).toBe("write");
+    expect(typeof e?.undoRoute, "声明了可撤销却没有撤销路由 = 假话").toBe("function");
     // assess 存在＝白名单/参数在"弹批准卡"之前就能拒掉；缺它就会出现
     // "用户点了允许，才发现路径越界"那种骗人签的卡
     expect(typeof e?.assess, "fs_edit 必须有 assess，否则拒绝发生在批准之后").toBe("function");
+  });
+
+  it("P133-H：全权档下 fs_edit 直接落盘并带回撤销令牌；低一档照旧弹卡", async () => {
+    patch({ agentFsRoots: "D:\\w" });
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({ exists: true, isDir: false, bytes: 512 });
+    const ALL = ["config", "plugins", "device", "files", "network", "shell", "ui", "write"];
+    const g1 = recordingGate();
+    const r1 = await executeGeneralTool(
+      call("fs_edit", { path: "D:\\w\\a.ts", old_text: "旧的一段", new_text: "新的一段" }),
+      ctx("custom", ALL), "r1", g1,
+    );
+    expect(g1.requests, "全权档还弹卡").toHaveLength(0);
+    expect(r1.ok).toBe(true);
+    expect(r1.undoToken, "改完没留撤销令牌：放宽就没有凭据了").toBeTruthy();
+    const e = invokeMock.mock.calls.find((c) => c[0] === "agent_fs_edit");
+    expect(Object.keys((e?.[1] ?? {}) as Record<string, unknown>)).toContain("token");
+
+    invokeMock.mockClear();
+    const g2 = recordingGate();
+    const r2 = await executeGeneralTool(
+      call("fs_edit", { path: "D:\\w\\a.ts", old_text: "旧的一段", new_text: "新的一段" }),
+      ctx("custom", ["write"]), "r1", g2,
+    );
+    expect(g2.requests, "低一档不该跳过批准").toHaveLength(1);
+    expect(r2.code).toBe("needs_local_approval");
+    expect(invokeMock.mock.calls.some((c) => c[0] === "agent_fs_edit")).toBe(false);
+  });
+
+  it("P133-H：repo_check 是宿主钉死参数的（hostBounded），shell_exec 不是", () => {
+    // 全权档放宽"不可逆"这一类只给 hostBounded 的工具，判据就落在 assess 回的 meta 上。
+    // 这里不真跑进程（那属于 B0 的活），钉的是"两条命令形状不同 ⇒ 策略不同"。
+    const rc = generalToolEntries.find((x) => x.name === "repo_check");
+    const sh = generalToolEntries.find((x) => x.name === "shell_exec");
+    expect(rc?.effect, "repo_check 仍声明不可逆：那它凭什么在全权档跳过批准卡").toBe("irreversible");
+    expect(sh?.effect).toBe("irreversible");
+    const keys = (n: typeof rc) => Object.keys((n?.parameters?.properties ?? {}) as Record<string, unknown>);
+    expect(keys(rc), "repo_check 拿得到自由命令参数，就不再是 hostBounded").not.toContain("command");
+    expect(keys(sh), "shell_exec 的 command 参数没了：这条反证就不成立").toContain("command");
   });
 });
 
@@ -367,8 +439,24 @@ describe("repo_check 命令表闭合", () => {
     expect(Object.keys(REPO_CHECKS)).toEqual(["gates", "types", "tests", "one_test", "rust"]);
   });
 
-  it("表外的一律 unknown_check，并把允许的那几档回给模型", () => {
-    // 两个变体的判别键是 `err`，所以这里按"两边都可能有的形状"读，不做单侧窄化
+  it("P133-H：八域全开时它直接执行（不弹卡），少一个域照旧弹卡", async () => {
+    patch({ agentFsRoots: ROOT, agentRepoCheck: true });
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue({ exit_code: 0, stdout: "OK", stderr: "", timed_out: false, argv: ["node"], cwd: ROOT });
+    const ALL = ["config", "plugins", "device", "files", "network", "shell", "ui", "write"];
+    const g1 = fakeGate(false);
+    await executeGeneralTool(call("repo_check", { check: "gates", root: ROOT }), ctx("custom", ALL), "r1", g1.gate);
+    expect(g1.requested, "全权档还在为跑一次校验要人点头").toHaveLength(0);
+    expect(invokeMock.mock.calls.some((c) => c[0] === "agent_repo_check"), "没弹卡却没真执行：放宽只放宽了门").toBe(true);
+
+    invokeMock.mockClear();
+    const g2 = fakeGate(false);
+    await executeGeneralTool(call("repo_check", { check: "gates", root: ROOT }), ctx("custom", ALL.slice(0, 7)), "r1", g2.gate);
+    expect(g2.requested, "少一个域就不该放宽（判据是授权集合，不是档位名字）").toHaveLength(1);
+    expect(invokeMock.mock.calls.some((c) => c[0] === "agent_repo_check")).toBe(false);
+  });
+
+  it("表外的一律 unknown_check，并把允许的那几档回给模型", () => {    // 两个变体的判别键是 `err`，所以这里按"两边都可能有的形状"读，不做单侧窄化
     const p = expandRepoCheck("rm_rf", ROOT) as { err?: string; extra?: { allowed: string[] } };
     expect(p.err).toBe("unknown_check");
     expect(p.extra!.allowed).toEqual(["gates", "types", "tests", "one_test", "rust"]);

@@ -44,7 +44,18 @@ export function settingsRevision() { return JSON.stringify(safeSettings()); }
 interface UndoItem { before: Partial<Settings>; after: string }
 const undo = new Map<string, UndoItem>();
 
-export type UndoResult = "undone" | "token_expired" | "revision_conflict" | "unrouted_tool";
+/**
+ * 撤销结果。前四态是同步撤销（改设置、改外观）；后两态是 P133-H 加的**异步**撤销
+ * （把文件旧内容写回磁盘要等 IPC）：先落 `restoring` 让按钮立刻变成不可重复按，
+ * 回来再改成 `undone` 或 `restore_failed`。中间态不是装饰——按了没反应就是假开关。
+ */
+export type UndoResult =
+  | "undone"
+  | "token_expired"
+  | "revision_conflict"
+  | "unrouted_tool"
+  | "restoring"
+  | "restore_failed";
 
 /** 撤销结果三态：成功 / 令牌不存在（跨重启或已消费）/ 之后又被修改（详设 §5.4 H3） */
 export function undoSettingsDetailed(token: string): UndoResult {
@@ -167,5 +178,5 @@ export const settingsToolEntries: AgentToolEntry[] = [
 export const settingsAdapter: TaskAdapter & { registry: ToolRegistry } = adapterFromEntries(
   settingsToolEntries,
   { truncate: (r) => r, gate: silentGate, now: () => Date.now(), newRequestId: () => crypto.randomUUID() },
-  (t) => buildToolCtx(t, { scope: t.scope, authorized: () => true, operatorLocked: false, deviceContext: "unknown" }, newRunScratch()),
+  (t) => buildToolCtx(t, { scope: t.scope, authorized: () => true, operatorLocked: false, deviceContext: "unknown", fullAuthority: false }, newRunScratch()),
 );

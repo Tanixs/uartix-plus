@@ -39,7 +39,7 @@ function ctx(over: Partial<ToolCtx> & { signal?: AbortSignal } = {}): ToolCtx {
     allowed: ["config", "plugins"],
     allowedDomains: ["config", "plugins"] as Domain[],
     hasDomain: (_d) => true,
-    policy: { scope: "create", authorized: () => true, operatorLocked: false, deviceContext: "sim" } as PolicyContext,
+    policy: { scope: "create", authorized: () => true, operatorLocked: false, deviceContext: "sim", fullAuthority: false } as PolicyContext,
   };
   return { ...base, ...over };
 }
@@ -205,7 +205,7 @@ describe("管线：abort / 参数 / 策略 / 批准", () => {
     const exec = vi.fn();
     const reg = createToolRegistry([entry({ name: "write_cmd", effect: "draft_write", execute: exec })]);
     const h = hooks();
-    const locked = ctx({ policy: { scope: "create", authorized: () => true, operatorLocked: true, deviceContext: "sim" } });
+    const locked = ctx({ policy: { scope: "create", authorized: () => true, operatorLocked: true, deviceContext: "sim", fullAuthority: false } });
     const r = await runToolCall(reg, call("write_cmd"), locked, h);
     expect(r.code).toBe("denied_by_policy");
     expect(exec).not.toHaveBeenCalled();

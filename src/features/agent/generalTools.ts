@@ -8,8 +8,9 @@
  *   · fs 路径必须落在设置页「Agent 文件白名单」内（默认空=功能关闭），读侧绝不暴露写/删/移动；
  *   · shell_exec 三重门：设置总开关（默认关）+ 勾选 shell 域 + 每次逐条审批，缺一不可。
  *     总开关关着时**不弹批准卡**（白要一次人工确认＝把用户训练成橡皮图章），这条走 assess。
- *   · fs_write：新建直接写，**覆盖已有文件逐条批准**（应用不提供撤销）——风险由 stat 才知道，
- *     所以它的 effect 也在 assess 里定，而不是写死在 entry 上。
+ *   · fs_write：新建直接写；**覆盖已有文件是 destructive_write**——风险由 stat 才知道，
+ *     所以它的 effect 也在 assess 里定，而不是写死在 entry 上。P133-H 起宿主在写之前
+ *     留一份旧内容（agent_fs_restore 写回），所以「全权执行」档不再为它弹卡；低一档仍要批准。
  * - 网络出口复用 Rust agent_http_get（SSRF 基础防护：拒内网/本机地址、15s 超时、1MB 限量读流），
  *   代理沿用 AI 服务的 aiProxy/aiNoProxy 设置；
  * - web_search 用 DuckDuckGo HTML 端点（免 API Key），正则解析，最多 8 条；
@@ -19,6 +20,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { DOMAIN_ZH, type Domain } from "./scopeTiers";
 import { defineTool, notExecuted, type AgentToolEntry, type Assessment, type ToolCtx, type ToolResultBody } from "./toolRegistry";
+import type { UndoResult } from "./settingsTools";
 
 /**
  * 工具 → 所需授权域（P93-A6）。P99a 起这条映射**只有一处**：写在 entry.domain 上，
@@ -198,7 +200,8 @@ async function fsSearch(
 /**
  * fs_edit 的前置校验与风险判定。**顺序就是全部意义**：
  * 白名单必须在批准卡之前判——否则用户点了「允许」才发现路径越界，那张卡就是骗人签的。
- * 改的是已存在的文件 ⇒ irreversible（§8-44 四类里的「覆盖已有内容」），逐条批准。
+ * 改的是已存在的文件 ⇒ destructive_write（§8-44 四类里的「覆盖已有内容」）。
+ * P133-H：写之前宿主留整份旧内容，所以这条是可撤销的破坏性写，不再是 irreversible。
  */
 async function assessFsEdit(args: Record<string, unknown>, ctx: ToolCtx): Promise<Assessment> {
   const callId = ctx.callId;
@@ -223,9 +226,26 @@ async function assessFsEdit(args: Record<string, unknown>, ctx: ToolCtx): Promis
     return { refuse: notExecuted(callId, "not_found", { path, hint: "fs_edit 只改已存在的文件；新建请用 fs_write" }) };
   }
   return {
-    meta: { effect: "irreversible", idempotent: false, reversible: false, mayTouchDevice: false },
-    plan: `定点替换已有文件：\n${path}\n\n现有 ${st.bytes ?? 0} 字节，把 ${oldText.length} 字换成 ${newText.length} 字，应用不提供撤销。原文不唯一时宿主会拒改（ambiguous），批准后同样不改盘。`,
+    // P133-H：见 assessFsWrite 同处注释——有快照了，类名就跟着事实走。
+    meta: { effect: "destructive_write", idempotent: false, reversible: true, mayTouchDevice: false },
+    plan: `定点替换已有文件：\n${path}\n\n现有 ${st.bytes ?? 0} 字节，把 ${oldText.length} 字换成 ${newText.length} 字；改之前的整份内容宿主留底，回执上可撤销。原文不唯一时宿主会拒改（ambiguous），批准后同样不改盘。`,
   };
+}
+
+/**
+ * P133-H：撤销一次覆盖/编辑——把宿主留的旧内容写回磁盘。
+ *
+ * 异步（要等 IPC），`agentRun.undoReceipt` 因此先落"正在写回"中间态再改终态。
+ * 两条出声分开报：令牌没了（跨重启、或被有界表挤掉）与写不回去（文件被别的程序占用、
+ * 已被移走）是两回事——前者该让 AI 重新改一次，后者该去关掉占着的程序。
+ */
+async function restoreSnapshot(token: string): Promise<UndoResult> {
+  try {
+    await invoke("agent_fs_restore", { token, roots: parseFsRoots(getSettings().agentFsRoots) });
+    return "undone";
+  } catch (e) {
+    return String(e).includes("token_expired") ? "token_expired" : "restore_failed";
+  }
 }
 
 /**
@@ -254,14 +274,16 @@ async function fsEdit(callId: string, parsed: Record<string, unknown>): Promise<
      * 会得到 `invalid args 'oldText'`，**命令根本没被调用**。P109-D 交付时没发现，
      * 因为单测 mock 掉了 invoke——它测的是"我们怎么调自己"，不是"线上是什么键名"。
      * 现在由第 15 道门 check-invoke-args.cjs 钉住整类错误。 */
+    const token = crypto.randomUUID();
     const r = await invoke<{ path: string; replacements: number; bytes: number }>("agent_fs_edit", {
       path, oldText, newText,
       all: parsed.all === true,
+      token,
       roots: parseFsRoots(getSettings().agentFsRoots),
     });
     return {
-      callId, ok: true, status: "applied",
-      data: { path: r.path, replacements: r.replacements, bytes: r.bytes, hint: "已就地替换（不可撤销）。改完请读回相关片段确认，别只凭回执宣告完成。" },
+      callId, ok: true, status: "applied", undoToken: token,
+      data: { path: r.path, replacements: r.replacements, bytes: r.bytes, hint: "已就地替换，宿主留了改之前的整份内容（用户在任务时间线上可撤销）。改完请读回相关片段确认，别只凭回执宣告完成。" },
     };
   } catch (e) {
     return editFailure(callId, e);
@@ -380,7 +402,7 @@ const FS_WRITE_MAX_CHARS = 1_000_000;
 
 interface FileStat { exists?: boolean; bytes?: number; isDir?: boolean }
 
-/** fs_write 的前置校验与风险判定：新建=draft_write，覆盖=irreversible（逐条批准）。 */
+/** fs_write 的前置校验与风险判定：新建=draft_write，覆盖=destructive_write（有快照，可撤销）。 */
 async function assessFsWrite(
   args: Record<string, unknown>, ctx: ToolCtx,
 ): Promise<Assessment> {
@@ -406,21 +428,27 @@ async function assessFsWrite(
   }
   // 批准卡要把"会被替换掉多少字节"说清楚——这个事实只有这里的 stat 知道
   return {
-    meta: { effect: "irreversible", idempotent: false, reversible: false, mayTouchDevice: false },
-    plan: `覆盖已有文件：\n${path}\n\n现有 ${st.bytes ?? 0} 字节会被替换成新写的 ${content.length} 字符，应用不提供撤销。确认路径与内容后再批准。`,
+    // P133-H：覆盖不再是 `irreversible`——宿主真的留了覆盖前的整份内容（agent_tools.rs 的
+    // 快照表 + agent_fs_restore）。类名跟着事实走，全权执行档才敢据此放行；
+    // 哪天快照没了，这条就得跟着退回 require_local_approval。
+    meta: { effect: "destructive_write", idempotent: false, reversible: true, mayTouchDevice: false },
+    plan: `覆盖已有文件：\n${path}\n\n现有 ${st.bytes ?? 0} 字节会被替换成新写的 ${content.length} 字符。覆盖前的整份内容宿主留底，回执上可撤销。`,
   };
 }
 
 async function fsWrite(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const path = String(parsed.path ?? "").trim();
   const content = typeof parsed.content === "string" ? parsed.content : "";
+  // P133-H：快照令牌由**宿主**生成、随写请求交给 Rust 存底，撤销时用同一个令牌取回。
+  // 不让模型给：它能挑路径已经够了，再能挑令牌就等于能指定"撤销要回到哪"。
+  const token = crypto.randomUUID();
   let st: FileStat;
   try {
     // 再 stat 一次只为回执说清"覆盖了多少字节"；放行判定已在 assess 里做完，这里不重复设门
     st = await invoke<FileStat>("agent_fs_stat", { path });
     // P99a-A6：写文件走专属命令，白名单根由宿主传入并在 **Rust 侧**判定——
     // 旧实现调通用的 save_text_file（界面导出也在用、不带根判定），门只存在于渲染层。
-    await invoke("agent_fs_write", { path, content, roots: parseFsRoots(getSettings().agentFsRoots) });
+    await invoke("agent_fs_write", { path, content, token, roots: parseFsRoots(getSettings().agentFsRoots) });
   } catch (e) {
     return failed(callId, e);
   }
@@ -428,12 +456,14 @@ async function fsWrite(callId: string, parsed: Record<string, unknown>): Promise
     callId,
     ok: true,
     status: "applied",
+    // 新建没有"之前"，就不给 undoToken——给了会长出一颗按了没用的「撤销」（§8-35）
+    ...(st.exists ? { undoToken: token } : {}),
     data: {
       path,
       chars: content.length,
       ...(st.exists ? { overwroteBytes: st.bytes ?? 0 } : { created: true }),
       hint: st.exists
-        ? "已覆盖旧文件（不可撤销）。把写入路径告诉用户；下轮再改同一文件仍需再次批准"
+        ? "已覆盖旧文件，宿主留了覆盖前的内容（用户在任务时间线上可撤销）。把写入路径告诉用户；下轮再改同一文件会再留一份底"
         : "已新建文件。把写入路径告诉用户",
     },
   };
@@ -672,7 +702,7 @@ export const generalToolEntries: AgentToolEntry[] = [
     domain: "write",
     provenance: HOST,
     description:
-      `Write a UTF-8 text file inside the Agent file whitelist (设置 → AI 服务 → Agent 文件白名单): reports {path, bytes, created|overwroteBytes}. **Creating a new file applies immediately; overwriting an existing one needs a per-call user approval** (irreversible). Use it for generated artifacts (configs, scripts, reports, plugin sources) — not for the app's own settings (use settings_apply) or plugins (use save_plugin). Args: { path: string, content: string }. Needs the ${DOMAIN_ZH.write} authorization.`,
+      `Write a UTF-8 text file inside the Agent file whitelist (设置 → AI 服务 → Agent 文件白名单): reports {path, bytes, created|overwroteBytes}. **Creating a new file applies immediately; overwriting an existing one is a destructive write** — the host keeps the previous content and the receipt carries an undo, but a tier that doesn't grant 文件写入 still asks first. Use it for generated artifacts (configs, scripts, reports, plugin sources) — not for the app's own settings (use settings_apply) or plugins (use save_plugin). Args: { path: string, content: string }. Needs the ${DOMAIN_ZH.write} authorization.`,
     parameters: {
       type: "object",
       properties: { path: { type: "string" }, content: { type: "string" } },
@@ -682,6 +712,7 @@ export const generalToolEntries: AgentToolEntry[] = [
     summarize: (a) => `写入 ${String(a.path ?? "")}`,
     assess: assessFsWrite,
     approvalBinding: (a) => ({ path: a.path, bytes: String(a.content ?? "").length }),
+    undoRoute: (token) => restoreSnapshot(token),
     execute: (a, ctx) => fsWrite(ctx.callId, a),
   }),
   // P109-D：grep / glob / 定点编辑。三者补的是同一句话："它怎么不自己去翻代码"。
@@ -722,13 +753,14 @@ export const generalToolEntries: AgentToolEntry[] = [
   defineTool({
     name: "fs_edit",
     labelZh: "定点改文件",
-    // 改的是**已存在**的文件 ⇒ 覆盖类，逐条批准（§8-44 四类之一）。这里不动态判定不是偷懒：
-    // 它永远落在已有文件上（不存在就报 not_found），所以静态声明就是准的。
-    effect: "irreversible",
+    // 改的是**已存在**的文件 ⇒ 覆盖类（destructive_write）。P133-H：类名从 irreversible 改成
+    // 这个不是放宽措辞，是事实变了——宿主在写之前留了整份旧内容，回执上真能撤销。
+    // 静态声明就够准：它永远落在已有文件上（不存在就报 not_found），所以每次都有快照。
+    effect: "destructive_write",
     domain: "write",
     provenance: HOST,
     description:
-      "Replace an exact substring inside one existing whitelisted file - prefer this over fs_write, which rewrites the whole file and can erase the user's own edits. `old_text` must match byte-for-byte including indentation and newlines; 0 matches returns not_found, several matches returns ambiguous:N and changes nothing (widen old_text to make it unique, or pass all:true to replace every occurrence on purpose). Args: { path: string, old_text: string, new_text: string, all?: boolean }. Read the file first.",
+      "Replace an exact substring inside one existing whitelisted file - prefer this over fs_write, which rewrites the whole file and can erase the user's own edits. `old_text` must match byte-for-byte including indentation and newlines; 0 matches returns not_found, several matches returns ambiguous:N and changes nothing (widen old_text to make it unique, or pass all:true to replace every occurrence on purpose). The host keeps the pre-edit copy and the receipt carries an undo. Args: { path: string, old_text: string, new_text: string, all?: boolean }. Read the file first.",
     parameters: {
       type: "object",
       properties: {
@@ -743,6 +775,7 @@ export const generalToolEntries: AgentToolEntry[] = [
     summarize: (a) => `改 ${String(a.path ?? "")}（${String(a.old_text ?? "").length} → ${String(a.new_text ?? "").length} 字）`,
     assess: assessFsEdit,
     approvalBinding: (a) => ({ path: a.path, chars: String(a.old_text ?? "").length }),
+    undoRoute: (token) => restoreSnapshot(token),
     execute: (a, ctx) => fsEdit(ctx.callId, a),
   }),
   defineTool({
@@ -801,7 +834,7 @@ export const generalToolEntries: AgentToolEntry[] = [
     domain: "files",
     provenance: HOST,
     description:
-      `Run THIS REPOSITORY's own verification commands and get back the real exit code plus output. The command table is a host constant — there is no \`command\` parameter, no flags and no working directory for you to pick: argv is assembled from that table and spawned WITHOUT a shell, so \`&&\`, \`|\` and \`>\` inside an argument stay literals. Args: { check: one of ${Object.keys(REPO_CHECKS).join("|")}, root?: string (must be one of the whitelisted dirs; needed only when more than one is whitelisted), testPath?: string (one_test only, repo-relative) }. The receipt carries { check, argv, cwd, passed, exitCode, timedOut, stdout, stdoutTruncated, stderrBytes } where passed = exitCode===0 && !timedOut. Two rules: (1) never tell the user a source change is verified without a repo_check receipt with passed:true — "I edited the file" is not "the gates are green"; (2) one family being green does not mean everything is fine: each check's \`covers\` states plainly what it does NOT prove (static gates cannot see runtime pixels — for what is actually on screen run theme_audit). Needs the ${DOMAIN_ZH.files} authorization domain, the "Agent 允许跑本仓校验" master switch in settings, and per-call approval.`,
+      `Run THIS REPOSITORY's own verification commands and get back the real exit code plus output. The command table is a host constant — there is no \`command\` parameter, no flags and no working directory for you to pick: argv is assembled from that table and spawned WITHOUT a shell, so \`&&\`, \`|\` and \`>\` inside an argument stay literals. Args: { check: one of ${Object.keys(REPO_CHECKS).join("|")}, root?: string (must be one of the whitelisted dirs; needed only when more than one is whitelisted), testPath?: string (one_test only, repo-relative) }. The receipt carries { check, argv, cwd, passed, exitCode, timedOut, stdout, stdoutTruncated, stderrBytes } where passed = exitCode===0 && !timedOut. Two rules: (1) never tell the user a source change is verified without a repo_check receipt with passed:true — "I edited the file" is not "the gates are green"; (2) one family being green does not mean everything is fine: each check's \`covers\` states plainly what it does NOT prove (static gates cannot see runtime pixels — for what is actually on screen run theme_audit). Needs the ${DOMAIN_ZH.files} authorization domain plus the "Agent 允许跑本仓校验" master switch in settings; on the 界面创造 tier each run also needs one user approval, while 全权执行 runs it without a card because every parameter comes from a host constant table.`,
     parameters: {
       type: "object",
       properties: {
@@ -825,7 +858,10 @@ export const generalToolEntries: AgentToolEntry[] = [
       const plan = resolveRepoCheck(a, parseFsRoots(getSettings().agentFsRoots));
       if ("err" in plan) return { refuse: notExecuted(ctx.callId, plan.err, plan.extra) };
       return {
-        meta: { effect: "irreversible", idempotent: true, reversible: false, mayTouchDevice: false },
+        // P133-H：`hostBounded` 是它敢在全权执行档跳过批准卡的**唯一**理由——
+        // argv 全部来自宿主常量表、无 shell、cwd 必须在白名单内、超时钳死，模型只能挑枚举档。
+        // 隔壁 shell_exec 拿的是自由文本，所以永远不算 hostBounded（见 toolPolicy.ts）。
+        meta: { effect: "irreversible", idempotent: true, reversible: false, mayTouchDevice: false, hostBounded: true },
         plan:
           `将执行（无 shell、argv 直启，超时 ${plan.timeoutSecs}s）：\n${plan.argv.join(" ")}\n\n` +
           `工作目录：${plan.cwd}\n\n这一档跑的是：${plan.covers}`,

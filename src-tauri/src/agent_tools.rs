@@ -281,6 +281,61 @@ pub fn path_in_roots(path: &str, roots: &[String]) -> bool {
     })
 }
 
+/// P133-H：覆盖前的宿主快照。
+///
+/// 为什么现在才加：全权执行档要把「覆盖已有文件」从逐次批准改成自动放行，而这个改动的
+/// **唯一依据**就是"能写回去"。没有快照就放宽不是放松，是拿用户的数据换省事。
+/// 只存在本次进程的内存里（与既有撤销口径同一句话：撤销仅本次运行内有效）；
+/// 有界到条数与总字节，超了就从头丢——丢最旧的比不丢更诚实，因为"能撤销"这句话
+/// 只对还留在账上的那些成立。
+///
+/// 令牌由**宿主**生成并传进来（TS 侧 `crypto.randomUUID()`）：uuid  crate 在这里只开了
+/// 最小特性，没有 `new_v4`；而"谁生成"本来就该是发起写的那一侧，模型碰不到这个参数。
+pub struct FsSnapshot {
+    pub path: String,
+    pub bytes: Vec<u8>,
+}
+
+const SNAPSHOT_MAX_ENTRIES: usize = 24;
+const SNAPSHOT_MAX_TOTAL_BYTES: usize = 32 * 1024 * 1024;
+
+static SNAPSHOTS: std::sync::Mutex<Vec<(String, FsSnapshot)>> = std::sync::Mutex::new(Vec::new());
+
+fn snapshot_put(token: &str, path: &str, bytes: Vec<u8>) {
+    // 锁中毒（别处 panic 过）不吞：快照表本身没坏，接着用即可
+    let mut ok = SNAPSHOTS.lock().unwrap_or_else(|p| p.into_inner());
+    ok.retain(|(t, _)| t != token);
+    ok.push((token.to_string(), FsSnapshot { path: path.to_string(), bytes }));
+    let mut total: usize = ok.iter().map(|(_, s)| s.bytes.len()).sum();
+    loop {
+        let over = ok.len() > SNAPSHOT_MAX_ENTRIES || total > SNAPSHOT_MAX_TOTAL_BYTES;
+        if !over || ok.is_empty() {
+            break;
+        }
+        let dropped = ok.remove(0).1.bytes.len();
+        total = total.saturating_sub(dropped);
+    }
+}
+
+fn snapshot_get(token: &str) -> Option<FsSnapshot> {
+    let ok = SNAPSHOTS.lock().unwrap_or_else(|p| p.into_inner());
+    ok.iter()
+        .find(|(t, _)| t == token)
+        .map(|(_, s)| FsSnapshot { path: s.path.clone(), bytes: s.bytes.clone() })
+}
+
+/// 写之前把**旧内容**存下来。文件不存在（新建）就没有可撤销的东西，回 false——
+/// 回执上这时也不给 undoToken，界面就不会长出一颗按了没用的「撤销」。
+fn snapshot_before_overwrite(token: &str, path: &str) -> bool {
+    match std::fs::read(path) {
+        Ok(bytes) if !bytes.is_empty() => {
+            snapshot_put(token, path, bytes);
+            true
+        }
+        _ => false,
+    }
+}
+
 /// P99a-A6：Agent 写文件的**权威门**。
 ///
 /// 旧路径是 `fs_write` → 通用 `save_text_file`（应用自身导出也在用，不带任何根判定），
@@ -292,6 +347,7 @@ pub async fn agent_fs_write(
     path: String,
     content: String,
     roots: Vec<String>,
+    token: String,
 ) -> Result<serde_json::Value, String> {
     const MAX_WRITE_BYTES: usize = 2 * 1024 * 1024;
     if content.len() > MAX_WRITE_BYTES {
@@ -303,18 +359,46 @@ pub async fn agent_fs_write(
     }
     let bytes = content.len();
     let written = path.clone();
-    tokio::task::spawn_blocking(move || {
+    let undo = tokio::task::spawn_blocking(move || {
         let target = PathBuf::from(&path);
         if let Some(dir) = target.parent() {
             if !dir.as_os_str().is_empty() {
                 std::fs::create_dir_all(dir).map_err(|e| format!("创建目录失败：{e}"))?;
             }
         }
-        std::fs::write(&target, content.as_bytes()).map_err(|e| format!("写入文件失败：{e}"))
+        // 覆盖之前先留旧内容。P133-H：全权执行档"不再逐次问"的全部依据就是这条 token；
+        // 新建（文件本来不存在）没有可撤销的东西，undoToken 回 null，回执上也不假装有撤销。
+        let before = snapshot_before_overwrite(&token, &path);
+        std::fs::write(&target, content.as_bytes()).map_err(|e| format!("写入文件失败：{e}"))?;
+        Ok::<Option<String>, String>(if before { Some(token) } else { None })
     })
     .await
     .map_err(|e| format!("写文件任务失败：{e}"))??;
-    Ok(serde_json::json!({ "path": written, "bytes": bytes }))
+    Ok(serde_json::json!({ "path": written, "bytes": bytes, "undoToken": undo }))
+}
+
+/// P133-H：把一次覆盖写回去（时间线上那颗「撤销」走的就是这里）。
+///
+/// 这是**用户点出来**的动作，不是模型工具，所以不过批准门；但白名单照判——令牌是 uuid、
+/// 猜不到也拼不出，可一旦快照表里存着越界路径（不该发生），也不能借这条路写出去。
+/// 同步体单独拆出来给 `cargo test` 直接跑（同 P133-B0 那条：能跑校验的那部分不该等 IPC）。
+fn restore_snapshot(token: &str, roots: &[String]) -> Result<serde_json::Value, String> {
+    let Some(snap) = snapshot_get(token) else {
+        return Err("token_expired".to_string());
+    };
+    if !path_in_roots(&snap.path, roots) {
+        return Err("path_outside_whitelist".to_string());
+    }
+    let n = snap.bytes.len();
+    std::fs::write(PathBuf::from(&snap.path), &snap.bytes).map_err(|e| format!("写回失败：{e}"))?;
+    Ok(serde_json::json!({ "path": snap.path, "bytes": n, "restored": true }))
+}
+
+#[tauri::command]
+pub async fn agent_fs_restore(token: String, roots: Vec<String>) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || restore_snapshot(&token, &roots))
+        .await
+        .map_err(|e| format!("写回任务失败：{e}"))?
 }
 
 /* ================= P109-D：代码检索与定点编辑 =================
@@ -452,6 +536,7 @@ pub async fn agent_fs_edit(
     new_text: String,
     all: Option<bool>,
     roots: Vec<String>,
+    token: String,
 ) -> Result<serde_json::Value, String> {
     if old_text.is_empty() {
         return Err("old_text 不能为空（空串会命中每一行）".to_string());
@@ -481,11 +566,15 @@ pub async fn agent_fs_edit(
         } else {
             text.replacen(old_text.as_str(), &new_text, 1)
         };
+        // 改之前整份留底（不是只留被替换那一段）：撤销要说的是"回到我点之前"，
+        // 而不是一段一段往回拼。P133-H：这条 token 就是全权档不再逐次问的凭据。
+        snapshot_put(&token, &path, bytes);
         std::fs::write(&path, out.as_bytes()).map_err(|e| format!("写入失败：{e}"))?;
         Ok::<serde_json::Value, String>(serde_json::json!({
             "path": path,
             "replacements": if every { found } else { 1 },
             "bytes": out.len(),
+            "undoToken": token,
         }))
     })
     .await
@@ -1041,5 +1130,83 @@ mod tests {
         let e = run_repo_check(argv(&["uartix-not-a-real-program-xyz"]), &cwd, &roots, 20)
             .expect_err("程序不存在必须报错，不能假装跑完了");
         assert!(e.contains("命令启动失败"), "话要说清是起不来，实际是：{e}");
+    }
+
+    /* ============ P133-H：覆盖快照与写回 ============
+     * 快照表是进程级 static，两条测试会互相挤掉对方的条目 ⇒ 各自先拿这把测试锁串行化。
+     * 这条锁只活在 #[cfg(test)] 里，不改生产路径的并发形状。
+     */
+    static SNAP_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn tmp_dir(tag: &str) -> PathBuf {
+        // 不用 uuid（crate 在这里只开了最小特性，没有 v4）；纳秒 + 计数足够避开并发撞名
+        static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!(
+            "uartix-{}-{}-{}",
+            tag,
+            n,
+            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        dir
+    }
+
+    #[test]
+    fn snapshot_store_is_bounded_and_evicts_from_the_front() {
+        let _g = SNAP_TEST.lock().unwrap_or_else(|p| p.into_inner());
+        let dir = tmp_dir("snap");
+        let sp = dir.join("a.txt").to_string_lossy().to_string();
+
+        snapshot_put("t1", &sp, b"first".to_vec());
+        assert_eq!(snapshot_get("t1").map(|s| s.bytes), Some(b"first".to_vec()), "刚存的读不回来");
+        // 同令牌再存一次是替换不是追加：一次调用一个令牌，追加会让撤销回到"上一次的中间态"
+        snapshot_put("t1", &sp, b"second".to_vec());
+        assert_eq!(snapshot_get("t1").map(|s| s.bytes), Some(b"second".to_vec()));
+
+        // 一直塞到最早那条被挤掉：条数上限必须真的生效（"能撤销"只对还在账上的成立）
+        let mut pushed = 0usize;
+        while snapshot_get("t1").is_some() {
+            pushed += 1;
+            assert!(pushed <= SNAPSHOT_MAX_ENTRIES + 2, "塞了 {} 次还没挤掉最旧，条数上限是假的", pushed);
+            snapshot_put(&format!("filler-{pushed}"), &sp, vec![b'b'; 16]);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_writes_the_old_bytes_back_and_still_judges_the_whitelist() {
+        let _g = SNAP_TEST.lock().unwrap_or_else(|p| p.into_inner());
+        let dir = tmp_dir("restore");
+        let file = dir.join("b.txt");
+        let sp = file.to_string_lossy().to_string();
+        let root = dir.to_string_lossy().to_string();
+        let roots = vec![root.clone()];
+
+        std::fs::write(&file, b"original").unwrap();
+        assert!(snapshot_before_overwrite("rt1", &sp), "覆盖已存在的文件必须留下快照");
+        std::fs::write(&file, b"model wrote this").unwrap();
+
+        // 令牌认得路径，但路径不在本次宿主给的 roots 里 ⇒ 一个字都不许写回去
+        let e = restore_snapshot("rt1", &[]).expect_err("空 roots 必须拒");
+        assert_eq!(e, "path_outside_whitelist");
+        assert_eq!(std::fs::read(&file).unwrap(), b"model wrote this", "被拒的撤销不该已经动了盘");
+
+        assert_eq!(
+            restore_snapshot("deadbeef", &roots).expect_err("未知令牌要出声"),
+            "token_expired",
+        );
+
+        let v = restore_snapshot("rt1", &roots).expect("同一次会话内撤销要成功");
+        assert_eq!(v["restored"].as_bool(), Some(true));
+        assert_eq!(std::fs::read(&file).unwrap(), b"original", "撤销没把覆盖前的内容写回来");
+
+        // 新建的文件没有"之前"，也就没有可撤销的东西——回执上这时不给 undoToken
+        let fresh = dir.join("c.txt").to_string_lossy().to_string();
+        assert!(!snapshot_before_overwrite("rt2", &fresh), "不存在的文件凭空造出一条快照");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

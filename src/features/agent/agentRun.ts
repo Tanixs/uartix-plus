@@ -451,6 +451,9 @@ export const UNDO_STATE_UI: Record<Exclude<UndoResult, "undone">, { label: strin
   token_expired: { label: "撤销已失效", tip: "撤销仅本次运行内有效" },
   revision_conflict: { label: "已被新改动覆盖", tip: "该设置之后又被修改，撤销会覆盖新改动" },
   unrouted_tool: { label: "无法撤销", tip: "这个改动没有可用的撤销路径（程序缺陷，已在控制台留痕）" },
+  // P133-H：写回磁盘要等 IPC。没有这一态，按钮按下去会真的没反应（假开关）。
+  restoring: { label: "正在写回…", tip: "要把文件的旧内容写回去，稍等" },
+  restore_failed: { label: "撤销失败", tip: "旧内容没能写回（文件被别的程序占用、或已被移走）；请手动核对这个文件" },
 };
 
 export function undoReceipt(runId: string, seq: number): UndoResult | null {
@@ -459,8 +462,18 @@ export function undoReceipt(runId: string, seq: number): UndoResult | null {
   const token = ev?.receipt?.undoToken;
   if (!view || !token) return null;
   const handler = ev.tool ? undoRouteOf(ev.tool) : undefined;
-  const result = handler ? handler(token) : "unrouted_tool";
   if (!handler) console.warn(`[Agent撤销] 工具「${ev.tool}」发了 undoToken 却没登记撤销路由，回执不会被撤掉`);
+  const result = handler ? handler(token) : "unrouted_tool";
+  if (typeof result !== "string") {
+    // 异步撤销：先占住按钮，回来再落最终态。中间态本身就是"我听见了"的证据。
+    view.undoState[seq] = "restoring";
+    notify();
+    result.then(
+      (r) => { view.undoState[seq] = r; notify(); },
+      () => { view.undoState[seq] = "restore_failed"; notify(); },
+    );
+    return "restoring";
+  }
   view.undoState[seq] = result;
   notify();
   return result;

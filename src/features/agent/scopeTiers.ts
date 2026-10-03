@@ -35,7 +35,7 @@ export const DOMAIN_TIP: Record<Domain, string> = {
   network: "抓取公网网页与搜索（自动拒绝内网地址）",
   shell: "执行 shell 命令：需设置页总开关 + 每次逐条批准",
   ui: "对具体组件/面板注入受校验的样式与动效（全局选择器、fixed 遮罩、外链资源一律拒）",
-  write: "在软件目录/工作区内新建与修改文件；覆盖已有文件与删除仍逐次批准",
+  write: "在软件目录/工作区内新建与修改文件；覆盖已有文件前宿主会留旧内容，回执上可撤销",
 };
 
 /** custom 的兜底授权集＝与「界面创造」同权。**空数组绝不允许落盘**：
@@ -127,7 +127,7 @@ export interface ScopeTier {
 export const TIERS: ScopeTier[] = [
   { id: "read", label: "仅预览", desc: "只读数据与状态；任何写入只给预览，不落一行改动", scope: "preview", domains: [], primary: true },
   { id: "create", label: "界面创造", desc: "改应用设置、保存主题/控件/面板插件，可逆的自动做；不碰设备与本机", scope: "create", domains: ["config", "plugins"], primary: true },
-  { id: "full", label: "全权执行", desc: "软件目录内八个能力域全开（含界面深改、读白名单文件、写目录内文件、网络、命令行）；覆盖已有文件、删除、实车发送与命令行仍逐次批准", scope: "custom", domains: ["config", "plugins", "device", "files", "network", "shell", "ui", "write"], primary: true },
+  { id: "full", label: "全权执行", desc: "软件目录内八个能力域全开（含界面深改、读白名单文件、写目录内文件、网络、命令行）；覆盖已有文件与跑本仓校验不再逐次问（宿主留了撤销），实车发送、急停校准与 AI 自己的权限开关仍逐次批准", scope: "custom", domains: ["config", "plugins", "device", "files", "network", "shell", "ui", "write"], primary: true },
   // ↓ 高级区预设：不是"更低一档"，是"某一组勾选的一键填法"
   { id: "workspace", label: "工作区写入", desc: "界面创造的全部 + 读取白名单内文件", scope: "custom", domains: ["config", "plugins", "files"], primary: false },
   { id: "device", label: "设备收发", desc: "界面创造的全部 + 向仿真/虚拟设备发送；实车连接时仍逐次人工批准", scope: "custom", domains: ["config", "plugins", "device"], primary: false },
@@ -164,6 +164,18 @@ export function hasDomain(
   if (scope === "preview") return false;
   const set: readonly string[] = scope === "create" ? CREATE_DOMAINS : allowed ?? [];
   return set.includes(domain);
+}
+
+/**
+ * P133-H：这一档是不是"八个域一个没留"。
+ *
+ * 判据取「实际授权集合 ⊇ DOMAINS」而不是「预设 id === full」：手工把八项全勾上与选
+ * 「全权执行」是同一件事，按 id 判会让两条同权的路说法不一（而策略只认权限，不认名字）。
+ */
+export function isFullAuthority(scope: RunScope, allowed: readonly string[] | undefined): boolean {
+  if (scope === "preview") return false;
+  const set: readonly string[] = scope === "create" ? CREATE_DOMAINS : allowed ?? [];
+  return DOMAINS.every((d) => set.includes(d));
 }
 
 /** 档位/预设 id → 实际下发给 runAgent 的 (scope, allowed) */

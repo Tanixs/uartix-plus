@@ -27,8 +27,8 @@ export interface HarnessCtxOpts {
 export interface HarnessOpts {
   /** 只要求 ApprovalGate：要断言批准行为就传 `recordingGate()` 的返回值，自己读它的 requests */
   gate?: ApprovalGate;
-  /** 覆盖策略上下文里与档位无关的两项（测 Operator 锁、实车判定） */
-  policy?: Partial<Pick<PolicyContext, "operatorLocked" | "deviceContext">>;
+  /** 覆盖策略上下文里与档位无关的三项（测 Operator 锁、实车判定、全权执行档） */
+  policy?: Partial<Pick<PolicyContext, "operatorLocked" | "deviceContext" | "fullAuthority">>;
 }
 
 /** 记录型审批门：request 攒起来供断言，takeToken 只在测试显式 approve 后放行 */
@@ -64,6 +64,8 @@ export function toolHarness(entries: readonly AgentToolEntry[], opts: HarnessOpt
       authorized: (key) => hasDomain(t.scope, t.allowed, key as Domain),
       operatorLocked: opts.policy?.operatorLocked ?? false,
       deviceContext: opts.policy?.deviceContext ?? "sim",
+      // 默认**不是**全权档：放宽批准的那两条规则要测试显式打开，免得旧用例顺手变绿
+      fullAuthority: opts.policy?.fullAuthority ?? false,
     },
     scratch,
   );

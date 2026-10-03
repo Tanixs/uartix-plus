@@ -27,6 +27,12 @@ export interface ToolPolicyMeta {
   reversible: boolean;
   /** 目标是否可能是实车（未知时按 true 处理，不得猜成仿真） */
   mayTouchDevice: boolean;
+  /**
+   * P133-H：这条调用的**每一个决定后果的参数都由宿主钉死**（模型只能从枚举里挑一档），
+   * 不是它自己能拼出来的命令行。`repo_check` 是唯一的用户；`shell_exec` 拿的是自由文本，
+   * 所以永远不算。只有这一类才允许在全权执行档跳过逐次批准。
+   */
+  hostBounded?: boolean;
 }
 
 export type PolicyDecision = "allow" | "preview_only" | "require_local_approval" | "deny";
@@ -40,15 +46,32 @@ export interface PolicyContext {
   operatorLocked: boolean;
   /** 设备上下文：real=实车已连接，sim=仿真/无设备，unknown=无法判定 */
   deviceContext: "real" | "sim" | "unknown";
+  /**
+   * P133-H（用户裁决 2026-10-04：「不要老是限制的太死，这样用户会觉得麻烦」）：
+   * 用户挑了「全权执行」——八个能力域一个没勾掉。这一位说的就是这件事，
+   * 由装配侧从档位算出来，模型碰不到（`decide` 的调用点只有工具管线一处）。
+   */
+  fullAuthority: boolean;
 }
 
 /**
  * 主机端策略判定（可信代码，模型不能调用）。
  * 顺序：秘密 → 安全边界/实车/不可逆/破坏性（人工批准）→ 受保护配置 → 档位 → 允许。
+ *
+ * P133-H 放宽的是**软件内部、宿主留了退路**的那两类，边界写在下面，一条不多放：
+ *  - `destructive_write` 且 `reversible` ⇒ 全权档直接执行。凭据是宿主真存了旧内容
+ *    （`agent_tools.rs` 的快照表 + `agent_fs_restore`），不是"应该能撤销吧"；
+ *  - `irreversible` 且 `hostBounded` ⇒ 全权档直接执行。今天只有 `repo_check`：
+ *    argv 全部来自宿主常量表、无 shell、cwd 必须在白名单内、超时钳死，且它自己还有总开关。
+ * 仍然逐次批准的：`secret`（直接拒）、`safety_boundary`（急停/校准）、`protected_config`
+ * （AI 自己的权限开关与端点——能力面开放、权限面封闭）、实车或判不清的 `device_send`、
+ * 以及一切"没快照又没钉死"的不可逆操作。
  */
 export function decide(meta: ToolPolicyMeta, ctx: PolicyContext): PolicyDecision {
   if (meta.effect === "secret") return "deny";
   if (meta.effect === "safety_boundary" || meta.effect === "irreversible" || meta.effect === "destructive_write") {
+    if (ctx.fullAuthority && meta.reversible && meta.effect === "destructive_write") return "allow";
+    if (ctx.fullAuthority && meta.hostBounded === true && meta.effect === "irreversible") return "allow";
     return "require_local_approval";
   }
   if (meta.effect === "device_send") {

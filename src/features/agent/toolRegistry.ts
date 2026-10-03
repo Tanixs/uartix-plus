@@ -153,8 +153,9 @@ export interface AgentToolEntry {
   approvalSubject?: (args: Record<string, unknown>) => string;
   /** 参数摘要；缺省时管线回退可读化兜底并**出声**（旧 `default: ""` 会静默空摘要） */
   summarize?: (args: Record<string, unknown>, truncated: boolean) => string;
-  /** 撤销路径；带 undoToken 却没有这里的 entry 会在撤销时落 `unrouted_tool`（P98 口径） */
-  undoRoute?: (token: string) => UndoResult;
+  /** 撤销路径；带 undoToken 却没有这里的 entry 会在撤销时落 `unrouted_tool`（P98 口径）。
+   *  允许回 Promise：P133-H 的撤销要写回磁盘（IPC），agentRun.undoReceipt 会先落 `restoring` 中间态 */
+  undoRoute?: (token: string) => UndoResult | Promise<UndoResult>;
   /** 回执 data 超限是否按引用缓存。只有 `read_artifact` 自己必须是 false——否则取回→缓存→再取回自我放大 */
   truncate?: boolean;
 }

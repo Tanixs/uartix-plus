@@ -127,9 +127,9 @@ const CONTENT: RawStep[] = [
     title: { zh: "AI 助手：两层选择决定它动多少", en: "AI assistant" },
     body: {
       zh:
-        "配好 API Key 后，输入框下方那颗 pill 是 Agent 的唯一入口，里面是两个各自独立的选择：先选「普通对话 / Agent 任务」（要不要让它动手），再选授权档「仅预览 / 界面创造 / 全权执行」（它能改什么）；要中间态就展开 pill 里的「高级 · 具体授权域」逐项勾。Agent 任务会读这个软件自己的现状（连接、协议字段、控件、帧统计，每轮重读一次），也会改设置、画界面；发送、删除、覆盖、命令行仍然一条条弹批准卡。",
+        "配好 API Key 后，输入框下方那颗 pill 是 Agent 的唯一入口，里面是两个各自独立的选择：先选「普通对话 / Agent 任务」（要不要让它动手），再选授权档「仅预览 / 界面创造 / 全权执行」（它能改什么）；要中间态就展开 pill 里的「高级 · 具体授权域」逐项勾。Agent 任务会读这个软件自己的现状（连接、协议字段、控件、帧统计，每轮重读一次），也会改设置、画界面；到「全权执行」它就不再来烦你，只有实车发送、急停校准和它自己的权限开关仍然一条条弹批准卡。",
       en:
-        "With an API key, the pill under the input is the only Agent entry, and it holds two independent choices: 普通对话 / Agent 任务 (should it act at all), then 仅预览 / 界面创造 / 全权执行 (how much it may change); 高级 lets you tick domains. A task re-reads the app's own state each round, and writes, deletes and shell calls still ask you one by one.",
+        "With an API key, the pill under the input is the only Agent entry, and it holds two independent choices: 普通对话 / Agent 任务 (should it act at all), then 仅预览 / 界面创造 / 全权执行 (how much it may change); 高级 lets you tick domains. A task re-reads the app's own state each round; on 全权执行 it stops interrupting you, and only sending to real hardware, safety actions and its own permission switches still ask one by one.",
     },
     selector: '[data-tour="ai"]',
   },

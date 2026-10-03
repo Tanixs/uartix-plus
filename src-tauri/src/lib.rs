@@ -247,6 +247,7 @@ pub fn run() {
             agent_tools::agent_fs_edit,
             agent_tools::agent_fs_list,
             agent_tools::agent_fs_read_b64,
+            agent_tools::agent_fs_restore,
             agent_tools::agent_fs_read_text,
             agent_tools::agent_fs_search,
             agent_tools::agent_fs_stat,
