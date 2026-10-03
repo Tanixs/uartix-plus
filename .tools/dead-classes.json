@@ -1,0 +1,592 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-03",
+  "theme": "fluent",
+  "judge": "四道判据：CSS 有 ∧ 源码无同名字面量 ∧ 无模板前缀能拼出 ∧ 13 面没渲染（.tools/check-dead-classes.cjs）",
+  "exemptions": [],
+  "budget": {
+    "unreferenced": 145
+  },
+  "unreferenced": [
+    {
+      "cls": "agent-approval",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-approval-args",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-approval-btns",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-approval-plan",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-approval-row",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-approval-title",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-body",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-dialog",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-domain",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-domains",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-ev",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-ev-status",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-ev-tool",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-ev-turn",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-ev-wait",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-events",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-events-head",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-events-list",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-goal",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-head",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-head-title",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-hint",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-hist",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-hist-chip",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-hist-clear",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-lease",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-new",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-new-row",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-note",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-scope",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-scope-btn",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-status",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-task",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-task-goal",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-task-meta",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-task-row",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-body",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-caret",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-detail",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-dot",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-head",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-item",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-k",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-kv",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-sum",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-time",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-tool",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-tl-v",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-undo",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "agent-undone",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "axis-line-h",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "axis-line-v",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "axis-tip",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "cmd-form",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "collide",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ctl-rename",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ctl-script-badge",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ctl-script-code",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ctl-script-err",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ctl-script-head",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ctx-tpl-preview",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "d4",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "d5",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "drop-hint",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-check",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-chips",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-desc",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-empty",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-info",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-list",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-name",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-name-line",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-ops",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-risk",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-row",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-selall",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-toolbar",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-ver",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "ext-warn",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "fc-empty-presets",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "iface-soon",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "inline-edit",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "inline-edit-input",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-assert",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-check",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-frame",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-group",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-len",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-logic",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-note",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-send",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-var",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "k-wait",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "mb-ev-drop",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "mb-ev-in",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "mb-ev-out",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "mkt-act-bad",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "mkt-act-busy",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "mkt-act-done",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "mkt-act-you",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "msp-model",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "p-fail",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "p-fuse",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "p3d-axis",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "perf-toggle",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "plot-add",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "run-add",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "run-chip",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "run-chip-x",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "run-none",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "s-enabled",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "s-quarantined",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "s-update_pending",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-addr",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-checksum",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-checksum2",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-data",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-footer",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-header",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-id",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-length",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-payload",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sb-r-seq",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "seq-empty-title",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "set-json",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "set-talk-blocked",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "set-talk-bundled",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "set-talk-invalid",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "set-talk-remote",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "set-talk-unset",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sq-k-assert",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sq-k-frame",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sq-k-group",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sq-k-note",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sq-k-send",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "sq-k-wait",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "tb-menu-soon",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "tb-spacer",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "tbl-empty",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "tone-bad",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "tone-you",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "vdev-cell-check",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "vdev-num",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "vdev-w120",
+      "file": "src\\styles\\theme.css"
+    },
+    {
+      "cls": "vdev-w88",
+      "file": "src\\styles\\theme.css"
+    }
+  ]
+}

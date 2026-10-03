@@ -8,100 +8,29 @@
  * 为什么判据不另写一份：下面 `import()` 的是 vite 服务着的**生产模块本体**
  * （`collectAuditInput` 采样、`auditContrast` / `auditHitTargets` / `auditOverflow` 判定）。
  * 自己抄一份"看起来差不多"的比值算法就是制造第二真值——那扇门永远测不到产品实际会报什么。
+ * P132-I 把同一条规矩扩到**面表**：面与浮层驱动在 `.tools/audit-faces.mjs`，
+ * 类名普查（`.tools/class-census.mjs`）与这里共用一份——两本账必须跑在同一批面上。
  *
- * 用法（需要 1421 的 dev server 与 9333 的 headless Chrome/Edge）：
+ * 用法（需要 1421 的 dev server 与 9333 的 headless Chrome/Edge，且**必须是一次性 profile**：
+ * `preset=proto` 会清已存布局，拿它跑日常那个 profile 等于删人布局）：
  *   node .tools/audit-live.mjs            # 采一遍，打摘要，与磁盘上的基线比差（不改文件）
  *   node .tools/audit-live.mjs --write    # 采一遍并写 .tools/audit-baseline.json
  *   node .tools/audit-live.mjs --check    # 只判"有没有变差"，差即 exit 1（给 npm run audit:live 用）
- *
- * 状态怎么摆：不靠点击链（点第几下、哪个动画没跑完都会漂），走 P104-B0 那层 dev 覆盖，
- * 把每一面的状态写死在 URL 里：`?theme=<id>&welcome=0&preset=proto&rail=none[&open=…][&click=…]`。
- *
- * 用法里加一条 `--only=fluent,dark`：调试时只采那几枚（一轮 63 次采集太重），**交门禁前必须跑全量**。
+ *   node .tools/audit-live.mjs --only=fluent,dark   # 调试用局部采集；不许配 --write，交门禁前必须跑全量
  */
 const CDP_HTTP = "http://127.0.0.1:9333";
-const ORIGIN = "http://localhost:1421";
 const OUT = new URL("./audit-baseline.json", import.meta.url);
 const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
 const { fileURLToPath } = await import("node:url");
+const { ORIGIN, VIEWPORT, SURFACES, assertNoDupKeys, makeSession } = await import("./audit-faces.mjs");
 
 const args = process.argv.slice(2);
 const WRITE = args.includes("--write");
 const CHECK = args.includes("--check");
-const VIEWPORT = { w: 1440, h: 900 };
-
-/**
- * 十面：启动态两面 + 五张浮层 + 三个"要点一下才出现"的面（P132-G）。
- * 浮层**必须靠真事件开**（按键 / 真点击 / 真右键 / 真 hover），注入一个 DOM 节点出来不算——
- * 注入的浮层没有真实的定位、层叠与 backdrop，量出来的东西用户看不到。
- * `require` 是"开没开出来"的哨兵：没开出来直接抛，而不是静默少测一面（P132-E）。
- *
- * 每一面都把状态**写死在 URL 里**（P132-F）：`preset=proto` 钉布局、`rail=none|link` 钉导轨。
- * 不钉的代价是实测撞上的——profile 里留着"接入"面板开着，于是每一面都多扫 89 个带字节点、
- * 多背 2 条命中区，同一份代码在两个 profile 上交出两本账。账要能当判据，前提是"这一面长什么样"
- * 只有一个答案；否则它记的是那台机器此刻的记忆。
- *
- * 为什么这几面以前不在账上（P132-F 实测才补上，不是"以后再说"）：
- *  - `menu`/`lbx`：dev 层早有 `?click=<选择器>`（P113），一直没拿它开浮层；`.baud-toggle`
- *    要先有「接入」面板，所以这一面单独 `rail=link`；
- *  - `ctxmenu`：右键落点从**问元素**来（旧版写死坐标，面板开合后点到别处＝静默少测一面）；
- *  - `hint`：`.help-bubble` 靠 hover，而 DOM 里前两枚 `.help-hint` 被设置整页**盖在后面**
- *    （实测 938,326 与 963,713 那两枚 `elementFromPoint` 命中的是 `set-card`/`set-content`）——
- *    照 DOM 顺序点第一枚就永远开不出泡。现在按"那个点上是不是它自己"挑目标。
- */
-/** 每一面都把状态写进 URL：`preset=proto` 钉布局、`rail=none|…` 钉导轨、`welcome=…` 钉首启卡。
-    三个键都只能出现一次（`assertNoDupKeys`），所以拼 URL 只能走这里，不许在外面再挂同名参数。 */
-const base = (t, { extra = "", rail = "none", welcome = "0" } = {}) =>
-  `/?theme=${t}&welcome=${welcome}&preset=proto&rail=${rail}${extra}`;
-/** 同一个键写两遍时 `URLSearchParams.get` 只认第一个：`rail=none` 后面再挂一个 `rail=templates`
-   不会覆盖它，只会让那一面**静默地"导轨没开"**（本批实测踩了一次）。所以钉住：路径里不许有重复键。 */
-function assertNoDupKeys(path, id) {
-  const keys = (path.replace(/^[^?]*\?/, "").match(/[^&=?]+=/g) || []).map((k) => k.slice(0, -1));
-  const dup = keys.filter((k, i) => keys.indexOf(k) !== i);
-  if (dup.length) throw new Error(`${id}：URL 里 ${dup.join(",")} 出现了两次——后写的会被静默忽略，这一面的状态不是你以为的那个`);
-}
-const SURFACES = [
-  { id: "workspace", path: (t) => base(t) },
-  { id: "settings", path: (t) => base(t, { extra: "&open=settings/appearance" }) },
-  { id: "palette", path: (t) => base(t), drive: "palette", require: ".cmdk" },
-  { id: "menu", path: (t) => base(t, { extra: "&click=.cb-ws-btn" }), require: ".cb-ws-menu" },
-  { id: "lbx", path: (t) => base(t, { extra: "&click=.baud-toggle", rail: "link" }), require: ".ctx-menu.lbx" },
-  { id: "ctxmenu", path: (t) => base(t), drive: "ctxmenu", require: ".ctx-menu" },
-  { id: "hint", path: (t) => base(t, { extra: "&open=settings/appearance" }), drive: "hint", require: ".help-bubble" },
-  /* P132-G 三面：faint 当字那一族只有把面板摆出来才量得到（P132-F §7.1）。
-     `model`/`speclib` 各抓到 2 条；`hovermenu` 现在是 0 条——它钉的是上一批那个结论，
-     以后谁把 `.tb-menu-item:hover` 改回 `--accent`，这一面会当场多一条。 */
-  { id: "model", path: (t) => base(t, { extra: "&open=settings/model" }) },
-  /* `?click=` 的值里有空格（`:nth-child` 前那个后代选择器）——必须编码，
-     否则 `URLSearchParams` 会把空格读成 `+`，`querySelector(".rp-seg+button…")` 直接抛，
-     表现就是"这一面永远开不出来"（实测踩过：探针里手写 %20 能开，脚本里裸空格不能）。 */
-  { id: "speclib", path: (t) => base(t, { extra: `&click=${encodeURIComponent(".rp-seg button:nth-child(2)")}`, rail: "templates" }), require: ".spl-list" },
-  { id: "hovermenu", path: (t) => base(t, { extra: "&click=.cb-ws-btn" }), drive: "hovermenu", require: ".cb-ws-menu" },
-  /* P132-H 三面：首启两张卡 + 命令面板的**空态**。
-     前一批的 `palette` 面是"有结果"那一档，空态那句"没有匹配的命令"从来不进账——
-     它用的正是 `--text-faint`（实测 3.64~3.77）。两张卡分开记：卡 1 有管线示意（那条 +5px 溢出在它身上），
-     卡 2 有截图与徽标，两身的文字位不一样。`welcome=1|2` 是 dev 入口，会把"已看过"标记清掉，
-     所以这三面**必须**用一次性 profile（脚本头那条规矩同 `preset=`）。 */
-  { id: "welcome1", path: (t) => base(t, { welcome: "1" }), require: ".wlc-body" },
-  { id: "welcome2", path: (t) => base(t, { welcome: "2" }), require: ".wlc-body" },
-  { id: "cmdk-empty", path: (t) => base(t), drive: "cmdkEmpty", require: ".cmdk-empty" },
-];
-
-/** 哨兵问的是"看得见的一张浮层"，不是"DOM 里有没有这个类"：屏外的隐藏实例（如列树那份）不算开出来 */
-const OPEN_CHECK = (sel) => `(() => {
-  const els = [...document.querySelectorAll(${JSON.stringify(sel)})];
-  return els.some((e) => {
-    const s = getComputedStyle(e), r = e.getBoundingClientRect();
-    return s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0"
-      && r.width > 8 && r.height > 8 && r.left > -100 && r.top > -100;
-  });
-})()`;
-
 
 let list = null;
 try {
-  const r = await fetch(`${CDP_HTTP}/json`);
-  list = await r.json();
+  list = await (await fetch(`${CDP_HTTP}/json`)).json();
 } catch {
   list = null;
 }
@@ -134,42 +63,15 @@ const send = (method, params = {}) =>
     ws.send(JSON.stringify({ id: n, method, params }));
   });
 const rest = (ms) => new Promise((r) => setTimeout(r, ms));
+async function evaluate(expression) {
+  const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
+  const ex = r.result?.exceptionDetails;
+  if (ex) throw new Error(`页内异常：${JSON.stringify(ex).slice(0, 300)}`);
+  return r.result?.result?.value;
+}
 async function key(k, code, vk, modifiers = 0) {
   await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, modifiers });
   await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk, modifiers });
-}
-/** 落点从"问到元素"来：写死坐标在面板开合后会点到别处，点到别处＝静默少测一面。
-    还要那个点上落得下它——被别的层盖住的元素（设置整页身后的工作区）派发不出真事件。
-    `el.contains(hit)` 而不是 `hit === el`：容器类的落点（`.ctl-main`）中心往往是自己的孩子。 */
-async function clickableCenter(sel) {
-  return hoverableCenter(sel, 0);
-}
-/** 第 n 枚"落得下鼠标"的元素中心（选中态那一族要的是"把鼠标停在某一项上"） */
-async function hoverableCenter(sel, n) {
-  return evaluate(`(() => {
-    const els = [...document.querySelectorAll(${JSON.stringify(sel)})];
-    const el = els[${n}];
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    if (r.width < 8 || r.height < 8) return null;
-    const x = Math.round(r.x + r.width / 2), y = Math.round(r.y + r.height / 2);
-    const hit = document.elementFromPoint(x, y);
-    if (!hit || !(hit === el || el.contains(hit))) return null;
-    return { x, y };
-  })()`);
-}
-async function rightClickOn(sel, label) {
-  const at = await clickableCenter(sel);
-  if (!at) throw new Error(`${label}：${sel} 不存在、太小或被盖住，右键点不到——这一面不能空着记账`);
-  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "right", clickCount: 1, buttons: 2 });
-  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "right", clickCount: 1, buttons: 0 });
-  await rest(450);
-}
-async function hoverAt(at) {
-  // 先从上方移进来：没有"进入"这一步就没有 mouseover/mouseenter，React 的 onMouseEnter 不会跑
-  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y - 24, button: "none" });
-  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y, button: "none" });
-  await rest(450);
 }
 /** 往焦点里打字：`keyDown` 带 `text` 才真的落字符（`Input.insertText` 不发 key 事件，React 收不到） */
 async function typeText(s) {
@@ -180,70 +82,8 @@ async function typeText(s) {
     await rest(30);
   }
 }
-/** 浮层怎么开：命令面板是 Ctrl+Shift+P（真按键）；右键菜单落在控制画布那块；提示泡要真 hover */
-async function drive(how) {
-  if (how === "palette") {
-    await key("P", "KeyP", 80, 2 | 8);
-    await rest(550);
-    return;
-  }
-  if (how === "cmdkEmpty") {
-    // 先等面板真开出来再打字：不等的结果是字符落进工作区，"空态"这一面就成了假面
-    await key("P", "KeyP", 80, 2 | 8);
-    if (!(await waitOpen(".cmdk"))) throw new Error("cmdkEmpty：命令面板没开出来，空态无从谈起");
-    await typeText("qqqzzz");
-    await rest(450);
-    return;
-  }
-  if (how === "ctxmenu") { await rightClickOn(".ctl-main", "ctxmenu"); return; }
-  if (how === "hovermenu") {
-    // 先等菜单开出来再移鼠标：`?click=` 是挂载后 1400ms 才点的，先移后等就是拿时序赌
-    if (!(await waitOpen(".cb-ws-menu"))) throw new Error("hovermenu：菜单没开出来，悬停档无从谈起");
-    const at = await hoverableCenter(".tb-menu-item", 1);
-    if (!at) throw new Error("hovermenu：第 2 枚 .tb-menu-item 落不下鼠标——这一面不能空着记账");
-    await hoverAt(at);
-    return;
-  }
-  if (how === "hint") {
-    /* 逐枚挑"点得到的那一枚"：DOM 里第一枚 `.help-hint` 实测在设置整页**身后**
-       （938,326 那枚 elementFromPoint 命中的是 set-card），照 DOM 顺序点第一枚就永远开不出泡。 */
-    const at = await evaluate(`(() => {
-      const els = [...document.querySelectorAll(".help-hint")];
-      for (const el of els) {
-        const r = el.getBoundingClientRect();
-        if (r.width < 8 || r.height < 8) continue;
-        const x = Math.round(r.x + r.width / 2), y = Math.round(r.y + r.height / 2);
-        if (document.elementFromPoint(x, y) === el) return { x, y, n: els.length };
-      }
-      return { n: els.length };
-    })()`);
-    if (!at || at.x === undefined) {
-      throw new Error(`hint：${at?.n ?? 0} 枚 .help-hint 没有一枚点得到（全被盖住？）——这一面不能空着记账`);
-    }
-    await hoverAt(at);
-    return;
-  }
-  throw new Error(`不认识的驱动方式：${how}`);
-}
-
-async function evaluate(expression) {
-  const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  const ex = r.result?.exceptionDetails;
-  if (ex) throw new Error(`页内异常：${JSON.stringify(ex).slice(0, 300)}`);
-  return r.result?.result?.value;
-}
-
-async function goto(url) {
-  await send("Page.navigate", { url });
-  // 等到外壳真的画出来（.titlebar 是宿主自己的，.dv-react-tab 是 dockview 摆好布局的），
-  // 再给一点时间：布局没摆完时采到的盒子尺寸是假的
-  for (let i = 0; i < 60; i++) {
-    const ready = await evaluate(`!!document.querySelector(".titlebar") && !!document.querySelector(".dv-react-tab")`);
-    if (ready) break;
-    await rest(200);
-  }
-  await rest(1200);
-}
+/** 面表、哨兵、落点与浮层驱动都在 audit-faces：这里只决定"跑完之后量什么" */
+const { goto, drive, waitOpen } = makeSession({ send, evaluate, rest, key, typeText });
 
 /** 页内跑的就是生产那两份：采样 + 判定，一个都不另写 */
 const COLLECT = `(async () => {
@@ -269,7 +109,7 @@ const COLLECT = `(async () => {
   };
 })()`;
 
-/** selector 是人话链不是稳定身份：数字段折成 \`#\`，归一化后同一条取最坏值 */
+/** selector 是人话链不是稳定身份：数字段折成 `#`，归一化后同一条取最坏值 */
 const norm = (sel) => sel.replace(/\d+/g, "#");
 function fold(items, worse) {
   const m = new Map();
@@ -281,22 +121,12 @@ function fold(items, worse) {
   return [...m.values()];
 }
 
-/** 轮询哨兵：`?click=` 那枚 dev 入口是挂载后 1400ms 才点的，只看一眼会把"还没点开"误判成"开不出来"。 */
-async function waitOpen(sel, ms = 6000) {
-  const expr = OPEN_CHECK(sel);
-  for (let waited = 0; waited < ms; waited += 200) {
-    if (await evaluate(expr)) return true;
-    await rest(200);
-  }
-  return false;
-}
-
 async function collectOne(themeId, surface) {
   /* 真事件偶发丢一次（焦点还没进文档，Ctrl+Shift+P 就没人接）：重开这一面，而不是放过这一面。
      一轮全量里中一次是实测发生的（P132-F 的 matcha/palette），把它当"覆盖到了"是假绿，
      直接抛又会让整本账因为一次抖动重跑——所以只重试**同一面**，第三次还开不出来才判红。 */
-  let open = true;
   assertNoDupKeys(surface.path(themeId), `${themeId}/${surface.id}`);
+  let open = true;
   for (let attempt = 1; attempt <= 3; attempt++) {
     await goto(`${ORIGIN}${surface.path(themeId)}`);
     if (surface.drive) await drive(surface.drive);
@@ -321,7 +151,7 @@ async function collectOne(themeId, surface) {
     worst: issues.length ? Math.min(...issues.map((i) => i.ratio)) : null,
     unmeasurable: { count: raw.unmeasurable.length, byReason: reasons },
     /** 命中区与溢出都记**条目**不记条数：只记条数的话，"哪一颗控件变小了"这条信息在账上不存在，
-       回退比对也就没有可对的身份（上一版正是这样，而且 \`hitMin\` 恒 null）。 */
+       回退比对也就没有可对的身份（上一版正是这样，而且 `hitMin` 恒 null）。 */
     hits,
     hitMin: hits.length ? Math.min(...hits.map((h) => h.minSide)) : null,
     overflow: over,
@@ -352,6 +182,7 @@ const baseline = {
   generatedAt: new Date().toISOString().slice(0, 10),
   viewport: VIEWPORT,
   judge: "生产同一份：src/features/agent/uiSurface.collectAuditInput + src/styles/renderAudit",
+  faces: "面表在 .tools/audit-faces.mjs（与 class-census 共用一份）",
   surfaces: SURFACES.map((s) => s.id),
   themes: {},
   /** 豁免由人写、由门管：每条都要有理由，severe 一条都不许豁免（详设 §9.3） */
@@ -365,7 +196,7 @@ for (const id of pick) {
     baseline.themes[id].surfaces[s.id] = await collectOne(id, s);
     const r = baseline.themes[id].surfaces[s.id];
     console.log(
-      `${id.padEnd(8)} ${s.id.padEnd(10)} 采样 ${String(r.sampled).padStart(3)}${r.truncated ? "(截断)" : "     "} 问题 ${String(r.issues.length).padStart(2)} 最坏 ${r.worst ?? "-"} 采不出 ${r.unmeasurable.count} 命中区 ${r.hits.length}${r.hitMin != null ? `(最小 ${r.hitMin})` : "     "} 溢出 ${r.overflow.length}`,
+      `${id.padEnd(8)} ${s.id.padEnd(11)} 采样 ${String(r.sampled).padStart(3)}${r.truncated ? "(截断)" : "     "} 问题 ${String(r.issues.length).padStart(2)} 最坏 ${r.worst ?? "-"} 采不出 ${r.unmeasurable.count} 命中区 ${r.hits.length}${r.hitMin != null ? `(最小 ${r.hitMin})` : "     "} 溢出 ${r.overflow.length}`,
     );
   }
 }
@@ -380,7 +211,7 @@ const FAMILIES = [
 /* ---- 与磁盘上那份比差：变差就是回退，回退要解释 ---- */
 const regressions = [];
 if (prev && prev.version !== baseline.version) {
-  // v1 那本把命中区/溢出记成"一个数"，与这一版的"一组条目"没法逐条对——
+  // 形状换了（v1 把命中区/溢出记成"一个数"）就没法逐条对——
   // 与其假装能比（或者更坏：因为读不出旧字段而比出"无回退"），不如明说这一趟没有对照。
   console.log(`注意：磁盘上的基线是 version ${prev.version}，这一版写的是 ${baseline.version}（形状换了），本轮不做回退比对；--write 之后下一轮才有线可拉`);
 } else if (prev) {
