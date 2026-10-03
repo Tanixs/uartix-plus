@@ -61,6 +61,43 @@ export function parseRenderColor(raw: string): Rgba | null {
     }
     return { r: clamp255(r), g: clamp255(g), b: clamp255(b), a: Math.min(1, Math.max(0, a)) };
   }
+  /**
+   * `color(srgb r g b / a)` —— P132-D 补的一形。
+   *
+   * 为什么必须认：**浏览器把 `color-mix()` 的计算值就序列化成这个形态**（本仓 CSS 里 color-mix 有
+   * 上百处，P132-D 又加了 `--accent-text` / `--danger-fill` 两档派生）。不认它的时候，
+   * 一面真实存在的深红底会被读成"这层没有背景"，于是采样器继续往外层走，
+   * 拿白面板当底去算白字 → 报出 1.00:1 的假故障（实测 `.btn.danger` 就是这条）。
+   * 只认 `srgb` 与 `srgb-linear` 两种空间（线性那档按反伽马换回 8bit）；
+   * `oklch` / `oklab` / `hsl` 这些**不猜**——算不出的形态照旧回 null，让"采不出"被如实报出去。
+   */
+  const fn2 = /^color\(\s*(srgb-linear|srgb)\s+([^)]+)\)$/.exec(s);
+  if (fn2) {
+    const body = fn2[2].replace(/\//g, " ").split(/[\s,]+/).filter(Boolean);
+    if (body.length < 3) return null;
+    const unit = (v: string): number | null => {
+      if (v.endsWith("%")) {
+        const p = Number(v.slice(0, -1));
+        return Number.isFinite(p) ? p / 100 : null;
+      }
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const ch = [unit(body[0]), unit(body[1]), unit(body[2])];
+    if (ch.some((v) => v === null)) return null;
+    const to255 = (v: number): number => {
+      const x = Math.min(1, Math.max(0, v));
+      if (fn2[1] === "srgb-linear") return (x <= 0.0031308 ? x * 12.92 : 1.055 * x ** (1 / 2.4) - 0.055) * 255;
+      return x * 255;
+    };
+    let a = 1;
+    if (body.length >= 4) {
+      const av = body[3].endsWith("%") ? Number(body[3].slice(0, -1)) / 100 : Number(body[3]);
+      if (!Number.isFinite(av)) return null;
+      a = av;
+    }
+    return { r: clamp255(to255(ch[0] as number)), g: clamp255(to255(ch[1] as number)), b: clamp255(to255(ch[2] as number)), a: Math.min(1, Math.max(0, a)) };
+  }
   return null;
 }
 

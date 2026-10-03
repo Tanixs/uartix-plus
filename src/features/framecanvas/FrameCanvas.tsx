@@ -336,7 +336,7 @@ function ArchStat() {
   useLocale();
   return (
     <span className="fc-stat" title={tx("归档的有效帧数与字节数；已过滤为剔除的杂散/坏包字节", "Archived valid frames and bytes; flt = discarded stray/bad bytes")}>
-      <b>{meta.frames}</b>{tx("帧", "fr")}<i>·</i>{fmtB(meta.bytes)}
+      <b>{meta.frames}</b>{tx("帧", "fr")}<i className="fc-sep" aria-hidden="true" />{fmtB(meta.bytes)}
       {meta.dropped > 0 ? <em className="fc-stat-warn">{tx("滤", "flt")}{fmtB(meta.dropped)}</em> : null}
     </span>
   );

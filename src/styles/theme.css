@@ -190,9 +190,14 @@ input[type="radio"] {
 /* 原生滑杆的 runnable-track 计算高度直接跟随 element 高度（实测 h3→track 3px、h18→track 18px），
    想要高热区只能把 element 撑高。16 不是新发明——控制画布的 .ctl-slider 一直是 16，
    而画布工具栏那两只是 3px 和 4px（实测命中区 80×3，全项目最差的一只）。这里统一 16。
-   不给 flex 默认值：3D 对话框的滑杆要伸缩（.p3d-gdlg-inline2 自定 0 1 120px）。 */
+   不给 flex 默认值：3D 对话框的滑杆要伸缩（.p3d-gdlg-inline2 自定 0 1 120px）。
+   P132-D：命中区补到本仓自己的 24 地板（审计量到 80×16）。**不加 height**——track 跟随内容高度，
+   撑高 element 就等于把滑杆画粗一根；改成 content-box + 上下 padding：内容仍 16（视觉不变），
+   边框盒 24（热区达标）。实测行高 29 不变，轨道计算高度仍是 16px。 */
 input[type="range"] {
   height: 16px;
+  padding-block: 4px;
+  box-sizing: content-box;
   margin: 0;
   cursor: pointer;
   accent-color: var(--accent);
@@ -201,6 +206,27 @@ input[type="range"] {
 :root {
   --font-ui: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+
+  /* ---------- P132-D：accent 当**文字**用时另起一档 ----------
+     审计在真浏览器里量到 14 条「accent 直接当字色」不够 4.5：亮色系里 accent 是品牌色，
+     压在面板/凹档/`--accent-soft` 胶囊上普遍只有 3.25~4.08（amber 3.25、matcha 3.35、begonia 3.70）。
+     以前只能逐枚主题手压色值，那是把品牌色改没了；这里改成**派生**：往本主题的 `--text` 压 30%。
+     `--text` 本身被门禁保证可读，所以压过去的结果单调地朝可读走；9 枚实测最差 4.55（原来最差 3.25）。
+     只用于**文字与图标前景**——border/background 仍然用 `--accent`（那两处不是可读性问题，是身份问题）。
+     静态门 `check:theme` 现在按同一条 70/30 混式复算这条派生，所以它不会悄悄漂。 */
+  --accent-text: color-mix(in srgb, var(--accent) 70%, var(--text));
+
+  /* P132-D：破坏性动作的**实底**单独一档，比 `--danger` 深 12%。
+     白字压 `--danger` 在三枚暗色主题（dark/navy/glaze 共用 #e5534b）上只有 3.70，够不到 4.5；
+     而 `--on-danger` 是全局一枚 #ffffff（不是每主题各一枚），所以要么改墨色、要么改底。
+     选改底：暗一档仍然是同一个红，改墨色会让"暗色主题的红钮黑字、亮色主题的红钮白字"分裂成两套。
+     描边那种"只给字与框"的 danger 仍用 `--danger` 本体——那处是红字压面板，方向相反。 */
+  --danger-fill: color-mix(in srgb, var(--danger) 88%, #000);
+
+  /* P132-D：danger 当**文字**用也另起一档（与 --accent-text 同一个道理，方向相反不用管：
+     往 `--text` 混永远是"朝可读走"，因为 --text 本身被门禁钉着）。
+     实测 `.fc-sync-warn`（红字压 12% 红底）在亮色系只有 4.17。描边型 danger 钮同族。 */
+  --danger-text: color-mix(in srgb, var(--danger) 82%, var(--text));
 
   /* ---------- 语义色（P74c C4）：块类型编码 + 警示线 ----------
      为什么要令牌化：编排器/序列器的块类型色原先散落成 7 个字面量 + 若干 rgba 副本，
@@ -615,7 +641,7 @@ body {
 }
 .seg > button.on {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 .seg > button:disabled {
@@ -708,12 +734,14 @@ body {
 .btn.primary:disabled {
   background: var(--accent-soft);
   border-color: transparent;
-  color: var(--accent);
+  /* P132-D：禁用态的主钮是"accent 当文字"最大的那一处（amber 实测 3.83）。
+     实底那档仍走 `--on-accent`（上面 `.btn.primary`），只有这种"没底、只剩字"的形态要换档。 */
+  color: var(--accent-text);
 }
 
 /* 破坏性动作（确认框/删除）：只给文字与描边色，实底留给 primary 一种 */
 .btn.danger {
-  color: var(--danger);
+  color: var(--danger-text);
   border-color: color-mix(in srgb, var(--danger) 45%, transparent);
 }
 
@@ -1064,8 +1092,15 @@ select optgroup {
   white-space: nowrap;
 }
 
+/* P132-D：信息栏那三枚分隔点与帧画布统计条同一件事——它是**线**，就别打成一个字。
+   原来 `<span class="ib-sep">·</span>` + `color:var(--text-faint)`，审计量到 2.32:1（9 枚主题 × 2 面 = 18 条）。
+   判据没错：只要它是文字就得够 4.5；而它本来就不是文字，所以把它画出来。 */
 .ib-sep {
-  color: var(--text-faint);
+  flex: none;
+  width: 1px;
+  height: 10px;
+  align-self: center;
+  background: var(--border);
 }
 
 .status-left {
@@ -1180,9 +1215,9 @@ select optgroup {
 }
 
 .btn.danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
+  background: var(--danger-fill);
+  border-color: var(--danger-fill);
+  color: var(--on-danger, #fff);
 }
 
 .input.baud {
@@ -1408,7 +1443,7 @@ select optgroup {
   z-index: 3;
 }
 .hex-pause-btn:hover { color: var(--text); }
-.hex-pause-btn.on { color: var(--accent); border-color: var(--accent); }
+.hex-pause-btn.on { color: var(--accent-text); border-color: var(--accent); }
 
 .hex-clear-btn {
   position: absolute;
@@ -2320,7 +2355,7 @@ select optgroup {
 /* 当前项：底 + 左缘一道 accent。这是导航的固有反馈，不是 B5 那种"有没有面板开着"的装饰徽标 */
 .rail2-btn.on {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .rail2-btn.on::before {
@@ -2507,7 +2542,7 @@ select optgroup {
 
 .rp-mini.on {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -3424,11 +3459,11 @@ select optgroup {
   height: 24px;
 }
 .plot-bar .btn.sm:hover:not(:disabled) {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .plot-bar .btn.sm.on,
 .plot-bar .btn.sm.on:hover:not(:disabled) {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .plot-bar .btn.sm svg {
   width: 13px;
@@ -3532,7 +3567,7 @@ select optgroup {
   color: var(--text-dim);
   white-space: nowrap;
 }
-.plot-cursor-hint b { color: var(--accent); }
+.plot-cursor-hint b { color: var(--accent-text); }
 
 .plot-measure {
   position: absolute;
@@ -5061,7 +5096,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .btn.on,
 .icon-btn.on {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -5319,11 +5354,15 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .fc-toolbar .btn.saved-err{color:var(--danger);border-color:color-mix(in srgb, var(--danger) 55%, transparent);background:color-mix(in srgb, var(--danger) 12%, transparent);animation:fc-shake .3s;}
 .fc-toolbar .btn.saving{opacity:.55;pointer-events:none;}
 @keyframes fc-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
-.fc-sync-warn{font-size:var(--fs-body);color:var(--danger);background:color-mix(in srgb, var(--danger) 12%, transparent);border-radius:var(--radius-l);padding:2px 8px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
+.fc-sync-warn{font-size:var(--fs-body);color:var(--danger-text);background:color-mix(in srgb, var(--danger) 12%, transparent);border-radius:var(--radius-l);padding:2px 8px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
 .fc-sync-warn.open{white-space:normal;max-width:520px;overflow-wrap:anywhere;cursor:default;}
 .fc-stat{font-size:var(--fs-sm);color:var(--text-dim);white-space:nowrap;}
-.fc-stat b{color:var(--accent);font-weight:600;}
-.fc-stat i{margin:0 6px;font-style:normal;color:var(--border);}
+.fc-stat b{color:var(--accent-text);font-weight:600;}
+/* P132-D：统计条中间那道分隔**画**出来，不再打一个点字符。
+   原来写的是 `<i>·</i>` + `color:var(--border)`——颜色取边框档本身就说明它是线不是字，
+   而审计按"带字的节点"判它 1.44:1（9 枚主题 × 2 面 = 18 条 severe 全来自这一个字符）。
+   改成 1px 实线之后它不再是文字，WCAG 1.4.3 那一档也不用再为它写豁免。 */
+.fc-stat .fc-sep{display:inline-block;width:1px;height:10px;margin:0 6px;background:var(--border);vertical-align:-1px;}
 .fc-stat-warn{font-style:normal;margin-left:8px;padding:1px 6px;border-radius:var(--radius-l);background:color-mix(in srgb, var(--danger) 14%, transparent);color:var(--danger);font-size:var(--fs-body);}
 .fc-cellsz{display:flex;align-items:center;gap:6px;font-size:var(--fs-body);color:var(--text-dim);white-space:nowrap;}
 .fc-cellsz input[type=range]{width:80px;}/* 高度走 B4 滑杆底座（原 3px＝命中区 80×3） */
@@ -5436,7 +5475,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .fc-cov-gap:hover{background:var(--warn);}
 .fc-cov-info{font-size:var(--fs-xs);color:var(--text-dim);white-space:nowrap;align-self:center;}
 .fc-navinfo{font-size:var(--fs-body);color:var(--text-dim);white-space:nowrap;}
-.fc-navinfo b{color:var(--accent);font-weight:600;}
+.fc-navinfo b{color:var(--accent-text);font-weight:600;}
 .fc-dlg-roles{display:flex;flex-direction:column;gap:7px;margin-bottom:9px;}
 .fc-dlg-roles-g{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
 .fc-dlg-roles-l{width:56px;flex:none;font-size:var(--fs-body);color:var(--text-dim);text-align:right;}
@@ -5678,6 +5717,11 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
    两者兼得要换自定义页签组件 —— 那不属于本批。 */
 .dv-tab .dv-default-tab .dv-default-tab-action {
   padding: 6px;
+  /* P132-D：字形继续留在 11（P105-B 的账），但热区从 23×23 补到 24×24——
+     差的这 1px 是本仓自己的地板（HIT_TARGET_MIN_PX）与库形状之间唯一没对上的一格。
+     用 min-* 而不是加 padding：加到 7px 会变 25，页签条高度只有 29，宁可刚好踩线不虚涨。 */
+  min-width: 24px;
+  min-height: 24px;
 }
 
 .dv-tab .dv-default-tab .dv-default-tab-action svg {
@@ -5949,7 +5993,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   transition: background .12s, color .12s;
 }
 .set-nav button:hover { color: var(--text); background: var(--raise-1); }
-.set-nav button.on { color: var(--accent); background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+.set-nav button.on { color: var(--accent-text); background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 .set-content { flex: 1; padding: 6px 22px 16px; overflow-y: auto; }
 /* ---------------- P111-B 设置页：全窗口 + 三面分层 ----------------
    改判来自用户的两条事实：ZCode 的设置是**全窗口页**，而它的分层靠颜色与阴影，
@@ -6011,14 +6055,17 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   color: var(--text-dim);
   cursor: pointer;
 }
-.set-nav-back:hover { color: var(--accent); background: var(--raise-1); }
+.set-nav-back:hover { color: var(--accent-text); background: var(--raise-1); }
 .set-nav-group {
   margin: 14px 0 3px;
   padding: 0 13px;
   font-size: var(--fs-xs);
   font-weight: 700;
   letter-spacing: 0.4px;
-  color: var(--text-faint);
+  /* P132-D：分组标题是**要读的标签**（"外观 / 模型 / 串口…"），不是装饰纹样。
+     `--text-faint` 在暗色主题上只有 2.23:1——那是给图标描边用的档位，用在字上就是看不见。
+     留白与字重已经足够表达"这是一组"，颜色走 `--text-dim`（门禁钉在四档表面 ≥4.5）。 */
+  color: var(--text-dim);
   user-select: none;
 }
 .set-nav-group:first-child { margin-top: 2px; }
@@ -6026,7 +6073,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .set-page .set-nav button { display: flex; align-items: center; gap: var(--sp-2); }
 .set-nav-ico { flex: none; display: inline-flex; color: var(--text-faint); }
 .set-page .set-nav button:hover .set-nav-ico { color: var(--text-dim); }
-.set-page .set-nav button.on .set-nav-ico { color: var(--accent); }
+.set-page .set-nav button.on .set-nav-ico { color: var(--accent-text); }
 /* 一组设置 = 一张浮起的卡，而不是"一条发丝线接一条发丝线" */
 .set-card {
   margin: 0 0 var(--sp-4);
@@ -6429,7 +6476,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   border: 1px solid rgba(128, 128, 128, 0.25);
 }
 .theme-name { font-size: var(--fs-body); color: var(--text-dim); }
-.theme-card.on .theme-name { color: var(--accent); font-weight: 600; }
+.theme-card.on .theme-name { color: var(--accent-text); font-weight: 600; }
 .set-switch { position: relative; display: inline-block; width: 34px; height: 18px; flex: 0 0 auto; }
 .set-usage { font-size: var(--fs-body); color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .set-inline { display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
@@ -9558,7 +9605,7 @@ html:has(.sw), .sw { background: transparent; }
   line-height: 1;
 }
 .p3d-calib .p3d-mclose:hover { color: var(--danger); }
-.p3d-calib .p3d-measure-head b { color: var(--accent); }
+.p3d-calib .p3d-measure-head b { color: var(--accent-text); }
 .p3d-calib-hint { color: var(--text-dim); max-width: 300px; white-space: normal; line-height: 1.5; }
 .p3d-calib-row { display: flex; gap: 8px; align-items: center; white-space: nowrap; flex-wrap: wrap; }
 .p3d-calib-count { color: var(--text-dim); }

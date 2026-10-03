@@ -93,8 +93,16 @@ function judgePalette(vars) {
     ["text/panel", vars["--text"], vars["--bg-panel"], 4.5],
     ["text/inset", vars["--text"], vars["--bg-inset"], 4.5],
     ["text/titlebar", vars["--text"], vars["--bg-titlebar"], 4.5],
-    ["dim/bg", vars["--text-dim"], vars["--bg"], 3.0],
-    ["dim/panel", vars["--text-dim"], vars["--bg-panel"], 3.0],
+    // P132-D：`--text-dim` 从 3.0 提到 4.5，并补上凹档与壳档两处。
+    // 原来这里只按 3.0 管 bg/panel 两档，而运行期判据（`renderAudit.needFor`）对 13px 正文一律要 4.5
+    // ——**两把尺打架**，于是审计在真浏览器里量出 3.95~4.11 一片（`.empty-hint`、页签标题、状态胶囊、
+    // 信息栏计数…全是 `--text-dim`），静态门却一路绿灯。提到同一把尺之后这一族不用浏览器也能守住。
+    // 代价说清楚：四枚主题的 `--text-dim` 往 `--text` 方向压了 5~15%（amber/begonia 15%，matcha/ocean 5%），
+    // 灰字与正字的层级差变小——这是可读性与层次感的取舍，本批选了可读性。
+    ["dim/bg", vars["--text-dim"], vars["--bg"], 4.5],
+    ["dim/panel", vars["--text-dim"], vars["--bg-panel"], 4.5],
+    ["dim/inset", vars["--text-dim"], vars["--bg-inset"], 4.5],
+    ["dim/titlebar", vars["--text-dim"], vars["--bg-titlebar"], 4.5],
     // P75：主按钮文字/底 —— 曾因 --on-accent 缺失静默回退 #fff，亮色主题逼近阈值，收紧到 4.5
     ["on-accent/accent(btn)", vars["--on-accent"], vars["--accent"], 4.5],
     // P75：负向校验——灰字压主题色底（.plot-bar .btn.sm 事故形态）必须不合格，
@@ -372,6 +380,92 @@ function lstarRgb(c) {
     fails += ladderFails;
   } else {
     console.log("OK: 内置主题的表面阶梯与抬升方向全部合格");
+  }
+}
+
+/* ---- P132-D：`--accent-text` 这条派生必须真的够 4.5 ----
+   `--accent` 当文字用是审计量出来的第二大族（亮色系里普遍只有 3.25~4.08：amber 3.25、
+   matcha 3.35、begonia 3.70）。修法不是逐枚主题手压品牌色，而是 theme.css 里派生一档
+   `color-mix(in srgb, var(--accent) 70%, var(--text))`。
+   派生这东西一旦没人算，就会变成"写着好看、算着不对"——所以这里按**运行时同一张层叠表**
+   把它复算一遍，压在四档表面与 `--accent-soft` 胶囊上都得 ≥4.5。
+   这条同时管两件事：① 声明还在（删掉它，244 处之外的 `var(--accent-text)` 会静默失效）；
+   ② 混式没被改松（把 70% 调到 90% 当场红）。 */
+{
+  const hexOf = (c) => "#" + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("");
+  const DECL = rootDarkVars["--accent-text"];
+  if (!DECL) {
+    console.log("FAIL: theme.css 的 :root 里没有 --accent-text（它被样式表引用，删掉等于静默失效）");
+    fails++;
+  } else {
+    let bad = 0;
+    const lines = [];
+    for (const f of files) {
+      const src = fs.readFileSync(path.join(dir, f), "utf8");
+      const scheme = (/color-scheme:\s*(\w+)/.exec(src) || [])[1] || "dark";
+      const own = rawVarBlocks(src, `:root[data-theme="${f.replace(".css", "")}"]`);
+      const env = { ...rootDarkVars, ...(scheme === "light" ? rootLightVars : {}), ...own };
+      const at = toRgba(DECL, env);
+      const name = f.replace(".css", "");
+      if (!at) {
+        lines.push(`${name.padEnd(8)} FAIL 这份混式本门算不出（不猜）`);
+        bad++;
+        continue;
+      }
+      const soft = toRgba(env["--accent-soft"], env);
+      const panel = toRgba(env["--bg-panel"], env);
+      const chips = [];
+      for (const k of ["--bg", "--bg-panel", "--bg-inset", "--bg-titlebar"]) {
+        const s = toRgba(env[k], env);
+        if (s && s.a > 0.999) chips.push([k, hexOf(s)]);
+      }
+      // 胶囊：accent-soft 是半透明，先合成到面板上再谈比值
+      if (soft && panel && soft.a < 0.999) {
+        const mix = (i) => soft.a * soft[["r", "g", "b"][i]] + (1 - soft.a) * panel[["r", "g", "b"][i]];
+        chips.push(["accent-soft", hexOf({ r: mix(0), g: mix(1), b: mix(2) })]);
+      }
+      const rs = chips.map(([k, s]) => [k, ratio(hexOf(at), s)]);
+      /* 白字压 danger 实底那一档（P132-D 另起 `--danger-fill`，比 --danger 深 12%） */
+      const df = toRgba(rootDarkVars["--danger-fill"], env);
+      const ink = toRgba(env["--on-danger"] ?? rootDarkVars["--on-danger"], env);
+      if (!df) rs.push(["danger-fill 算不出", 0]);
+      else if (!ink) rs.push(["on-danger 算不出", 0]);
+      else rs.push(["白字/danger-fill", ratio(hexOf(ink), hexOf(df))]);
+      /* danger 当文字那一档（`.fc-sync-warn`、描边型 danger 钮）：四档表面 + 12% 红底胶囊 */
+      const dt = toRgba(rootDarkVars["--danger-text"], env);
+      if (!dt) rs.push(["danger-text 算不出", 0]);
+      else {
+        const dRaw = toRgba(env["--danger"], env);
+        const panelBg = toRgba(env["--bg-panel"], env);
+        if (dRaw && panelBg && dRaw.a > 0.999) {
+          const t = 0.12;
+          const chip = (i) => t * dRaw[["r", "g", "b"][i]] + (1 - t) * panelBg[["r", "g", "b"][i]];
+          rs.push([
+            "danger-text/表面",
+            Math.min(
+              ...chips.filter(([k]) => k !== "accent-soft").map(([, s]) => ratio(hexOf(dt), s)),
+              ratio(hexOf(dt), hexOf({ r: chip(0), g: chip(1), b: chip(2) })),
+            ),
+          ]);
+        } else rs.push(["danger-text/表面", 0]);
+      }
+      const worst = Math.min(...rs.map(([, r]) => r));
+      const ok = worst >= 4.5;
+      if (!ok) bad++;
+      lines.push(
+        `${name.padEnd(8)} ${scheme.padEnd(5)} accent-text=${hexOf(at)} ` +
+          rs.map(([k, r]) => `${k.replace("--", "")}=${r.toFixed(2)}`).join(" ") +
+          (ok ? " ok" : " FAIL"),
+      );
+    }
+    console.log("\n-- P132-D --accent-text 派生复算（accent 当文字用的那一档，四档表面 + soft 胶囊都要 ≥4.5） --");
+    console.log(lines.join("\n"));
+    if (bad) {
+      console.log(`FAIL: ${bad} 枚主题的 --accent-text 不够 4.5（混式或品牌色改过，得重新算）`);
+      fails += bad;
+    } else {
+      console.log(`OK: ${files.length} 枚内置主题的 --accent-text 全部 ≥4.5`);
+    }
   }
 }
 

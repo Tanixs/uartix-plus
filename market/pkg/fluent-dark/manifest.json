@@ -2,7 +2,7 @@
   "format": "uartix-plugin",
   "schemaVersion": 2,
   "id": "uartix.theme.fluent-dark",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "name": "流利蓝 · 暗色",
   "desc": "Fluent 暗色：四档表面 + 亮蓝强调（主按钮是浅蓝底配深墨字，Fluent 暗色本家就是这么配的）",
   "hostApi": "^1.0",

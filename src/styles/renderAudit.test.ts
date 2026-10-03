@@ -42,6 +42,27 @@ describe("parseRenderColor：认不了就说认不了", () => {
     expect(parseRenderColor("rgb(0% 50% 100%)")).toEqual({ r: 0, g: 128, b: 255, a: 1 });
   });
 
+  /**
+   * P132-D：`color(srgb r g b / a)` 这一形必须认。
+   * 浏览器把 `color-mix()` 的**计算值**就序列化成它——不认，一面真实存在的深红底会被读成
+   * "这层没有背景"，采样器继续往外层走拿白面板当底，于是白字压红钮报出 1.00:1 的假故障。
+   */
+  it("color(srgb …) 与 srgb-linear：换算回 8bit；算不出的色彩空间不猜", () => {
+    expect(parseRenderColor("color(srgb 1 1 1)")).toEqual({ r: 255, g: 255, b: 255, a: 1 });
+    // amber 的 --danger-fill 实测计算值（就是那条假故障的当事人）
+    expect(parseRenderColor("color(srgb 0.731608 0.200157 0.169098)")).toEqual({ r: 187, g: 51, b: 43, a: 1 });
+    expect(parseRenderColor("color(srgb 0 0.35 0.62 / 0.5)")!.a).toBe(0.5);
+    expect(parseRenderColor("color(srgb 50% 20% 10%)")).toEqual({ r: 128, g: 51, b: 26, a: 1 });
+    // srgb-linear 走反伽马：线性 0.0203 ≈ sRGB 0.15（→ 38.99，取整 39）。
+    // 刻意挑不落在 .5 边界上的数：0.21404114 那条正好卡在 127.49/127.50，测的是舍入不是换算。
+    expect(parseRenderColor("color(srgb-linear 0.0203 0.0203 0.0203)")).toEqual({ r: 39, g: 39, b: 39, a: 1 });
+    expect(parseRenderColor("color(srgb-linear 1 0 0)")).toEqual({ r: 255, g: 0, b: 0, a: 1 });
+    // 这些**不猜**：作者形态与没实现的空间一律 null，让"采不出"被如实报出去
+    expect(parseRenderColor("color(oklch 0.7 0.1 230)")).toBeNull();
+    expect(parseRenderColor("color(srgb)")).toBeNull();
+    expect(parseRenderColor("color(srgb 1 2)")).toBeNull();
+  });
+
   it("transparent 是透明黑，currentColor 与垃圾串返回 null（不猜颜色）", () => {
     expect(parseRenderColor("transparent")).toEqual({ r: 0, g: 0, b: 0, a: 0 });
     expect(parseRenderColor("currentColor")).toBeNull();

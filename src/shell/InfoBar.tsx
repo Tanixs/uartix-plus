@@ -135,7 +135,7 @@ export function InfoBar({
         >
           RX {fmtBytes(serial.rxTotal)}
         </button>
-        <span className="ib-sep">·</span>
+        <span className="ib-sep" aria-hidden="true" />
         <button
           type="button"
           className="ib-count"
@@ -144,9 +144,9 @@ export function InfoBar({
         >
           TX {fmtBytes(serial.txTotal)}
         </button>
-        <span className="ib-sep">·</span>
+        <span className="ib-sep" aria-hidden="true" />
         <span className="ib-rate">{bpsText}</span>
-        <span className="ib-sep">·</span>
+        <span className="ib-sep" aria-hidden="true" />
         <button
           type="button"
           className="ib-count"
@@ -155,7 +155,7 @@ export function InfoBar({
         >
           {tx("帧", "fr")} {tele.stats.total}
         </button>
-        <span className="ib-sep">/</span>
+        <span className="ib-sep" aria-hidden="true" />
         <button
           type="button"
           className={`ib-count${tele.stats.errors > 0 ? " err" : ""}`}

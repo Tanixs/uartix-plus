@@ -134,7 +134,10 @@
 .btn[disabled] {
   background: var(--fb-fill-secondary);
   border-color: var(--border-soft);
-  color: color-mix(in srgb, var(--text-dim) 60%, var(--bg-panel));
+  /* 禁用态要"淡"但不能"看不见"：原来把字色往面板方向冲掉 40%，压在主钮那档浅灰底上
+     实测只有 1.61:1（P132-D 审计在 fluent/settings 抓到，SEVERE 档）。改成走 `--text-dim`——
+     它本身被门禁钉在四档表面上 ≥4.5，"淡"由去掉阴影与描边变浅来表达，不靠把字洗白。 */
+  color: var(--text-dim);
   transform: none;
 }
 
@@ -158,7 +161,11 @@
 .btn.primary:disabled {
   background: color-mix(in srgb, var(--accent) 38%, var(--bg-panel));
   border-color: transparent;
-  color: color-mix(in srgb, var(--on-accent) 72%, transparent);
+  /* 淡出要淡在"墨"上，不能淡成透明：原来写的是 `--on-accent` 72%（白字带透明）压在这档
+     洗淡的主题色底上，实测 1.61:1——审计直接判进 SEVERE 档（读不出字）。
+     改成同一档淡出，但淡的是主题自己的墨色：72% 的 `--text` 压 #9ec0da ≈ 5.2:1，
+     "禁用"这件事仍由那层洗淡的底与去掉描边来表达。 */
+  color: color-mix(in srgb, var(--text) 72%, transparent);
 }
 
 /* 图标键：Fluent 的图标按钮是"方一点、hover 才有底"，不常驻描边。 */
@@ -560,7 +567,8 @@ select.input {
 }
 
 .pca-btn:disabled {
-  color: color-mix(in srgb, var(--text-dim) 55%, var(--bg-panel));
+  /* 与 `.btn:disabled` 同一条改判：洗白到面板那一档就不是"淡"，是看不见 */
+  color: var(--text-dim);
   background: transparent;
 }
 
