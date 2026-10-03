@@ -25,7 +25,7 @@
     "check:cycles": "node .tools/check-import-cycles.cjs",
     "check:audit": "node .tools/check-audit-baseline.cjs",
     "audit:live": "node .tools/audit-live.mjs --check",
-    "check:all": "node .tools/check-contrast.cjs && node .tools/check-undeclared-vars.cjs && node .tools/check-style.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-empty-copy.cjs && node .tools/check-i18n.cjs && node .tools/check-chrome.cjs && node .tools/check-import-cycles.cjs && node .tools/check-commands-registered.cjs && node .tools/check-viewport-units.cjs && node .tools/check-path-portability.cjs && node .tools/check-audit-baseline.cjs && node .tools/check-dead-classes.cjs",
+    "check:all": "node .tools/check-contrast.cjs && node .tools/check-undeclared-vars.cjs && node .tools/check-style.cjs && node .tools/check-aria.cjs && node .tools/check-motion.cjs && node .tools/check-empty-copy.cjs && node .tools/check-i18n.cjs && node .tools/check-chrome.cjs && node .tools/check-import-cycles.cjs && node .tools/check-commands-registered.cjs && node .tools/check-viewport-units.cjs && node .tools/check-path-portability.cjs && node .tools/check-audit-baseline.cjs && node .tools/check-dead-classes.cjs && node .tools/check-invoke-args.cjs",
     "metrics:ui": "node scripts/ui-metrics.mjs css",
     "market:img": "node scripts/gen-market-img.mjs",
     "market:gen": "node scripts/gen-market-img.mjs && node scripts/gen-market-index.mjs",

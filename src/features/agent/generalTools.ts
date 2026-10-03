@@ -250,8 +250,12 @@ async function fsEdit(callId: string, parsed: Record<string, unknown>): Promise<
   }
   if (!inWhitelist(path)) return wlRefuse(callId, path);
   try {
+    /* Tauri 把 Rust 的 snake_case 形名转成 camelCase 作为 JS 侧的键名：这里发 `old_text`
+     * 会得到 `invalid args 'oldText'`，**命令根本没被调用**。P109-D 交付时没发现，
+     * 因为单测 mock 掉了 invoke——它测的是"我们怎么调自己"，不是"线上是什么键名"。
+     * 现在由第 15 道门 check-invoke-args.cjs 钉住整类错误。 */
     const r = await invoke<{ path: string; replacements: number; bytes: number }>("agent_fs_edit", {
-      path, old_text: oldText, new_text: newText,
+      path, oldText, newText,
       all: parsed.all === true,
       roots: parseFsRoots(getSettings().agentFsRoots),
     });
