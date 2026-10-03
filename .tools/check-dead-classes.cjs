@@ -9,8 +9,10 @@
  *  ① CSS 选择器里有这个类名；
  *  ② `src` 下的 .ts/.tsx 里**没有这个整词**（保守取法，见 `sourceFacts` 的注释：宁可少报不误删）；
  *  ③ 源码里没有任何能拼出它的**模板前缀**（`orch-dot-${kind}` 能拼出 `.orch-dot-logic`，
- *     所以那 35 条不能算死——这一道是 P132-I 补的，没有它清单本身就是错的）；
- *  ④ 13 面运行时**没渲染过**它（`.tools/class-census.json`）。
+ *     `d${Math.min(depth, 5)}` 能拼出 `.d5`，所以这些不能算死——这一道是 P132-I 补的，
+ *     但**补错了判法**：见 `prefixesFrom` 的注释，它把至少 18 条活规则留在了死账上）；
+ *  ④ 普查里那些面运行时**没渲染过**它（`.tools/class-census.json`；面数不写死在这里——
+ *     规矩 1 拿 `audit-faces.mjs` 现算，写死一个数字就是等着漂成假话）。
  *     ④ 不是冗余：静态说"没人用"的 124 条里，被运行时证明活着的正好是 4 条 `.dv-*`
  *     ——dockview 自己画 DOM，我们的源码里当然没有那些字面量。
  *
@@ -67,6 +69,38 @@ function cssClasses() {
   return map;
 }
 
+/** 从一段源码里抠"能拼出类名的模板前缀"。
+ *
+ * 每一处 `${` 都看，取它**前面紧邻的那串类名字符**当候选。
+ * 旧写法是 `["'`](…){1,80}?\$\{`——从引号起匹配，两个后果实测都踩到了：
+ *  ① 只认模板里**第一处**插值，`` `a ${x} sq-k-${y}` `` 的第二处看不见；
+ *  ② 抓到的"前缀"带着前导静态段与空格 —— `` `sq-kind sq-k-${STEP_KIND_CLS[k]}` ``
+ *    抓成 `"sq-kind sq-k-"`，`"sq-k-send".startsWith(那个)` 永远为假。
+ * 合起来的后果不是"少报"而是**误判活规则为死**：`sq-k-*` 六条（序列步种的颜色）
+ * 就这么躺在死账上，谁照账删 CSS 就把界面改坏了，而门一直是绿的。
+ *
+ * 抓到的段分两类，各有各的真实见证：
+ *  · 带连字符（`sq-k-`、`sb-r-`、`k-`）→ 前缀匹配；
+ *  · 不带连字符的**词干**（`d${Math.min(depth, 5)}` 拼出 `.d5`）→ 只认 `词干+纯数字`。
+ *    词干不敢放宽成"以它开头"：`s`、`a`、`v` 这类一段字母能覆盖掉大半张账，
+ *    门就变成"永远放行"，那和没有这条判据一样。 */
+function prefixesFrom(text) {
+  const prefixes = new Set();
+  const stems = new Set();
+  for (const m of text.matchAll(/\$\{/g)) {
+    let i = m.index;
+    let seg = "";
+    while (i > 0 && /[\w-]/.test(text[i - 1])) {
+      seg = text[i - 1] + seg;
+      i--;
+    }
+    if (!seg) continue;
+    if (seg.includes("-")) prefixes.add(seg);
+    else stems.add(seg);
+  }
+  return { prefixes, stems };
+}
+
 /** ② 源码里的 class token 与 ③ 能拼出它的模板前缀；外加主题包对宿主类的引用
  *
  * token 的取法是"整份源码按非类名字符切开"，不是"只认引号里的字符串"。
@@ -76,22 +110,21 @@ function cssClasses() {
  * 而它的职责是"别让新的死规则长出来"，少报可以接受、误判不能。 */
 function sourceFacts() {
   const tokens = new Set();
-  const prefixes = new Set();
   let all = "";
   for (const f of walk(SRC_DIR).filter((x) => /\.(ts|tsx)$/.test(x))) all += fs.readFileSync(f, "utf8") + "\n";
   for (const t of all.split(/[^A-Za-z0-9_-]+/)) if (/^[A-Za-z_][\w-]*$/.test(t)) tokens.add(t);
-  // 只认带 `-` 的静态段：不带连字符的前缀太宽（"x" 能拼出一切），等于没有这条判据
-  for (const m of all.matchAll(/["'`]([^"'`\n]{1,80}?)\$\{/g)) {
-    if (m[1].includes("-")) prefixes.add(m[1]);
-  }
+  const { prefixes, stems } = prefixesFrom(all);
   // 主题包 CSS 引用宿主类名是合法的（那一侧由 J3 管），所以不能因为"我们自己的 tsx 没写"就判死
   const pkg = walk(PKG_DIR).filter((x) => x.endsWith(".css")).map((x) => fs.readFileSync(x, "utf8")).join("\n");
-  return { tokens, prefixes, pkg };
+  return { tokens, prefixes, stems, pkg };
 }
 
 /** 模板头能不能拼出这个类名：`` `agent-badge${warn}` `` 的头是 "agent-badge"，
-    它**同时**覆盖"恰好等于头"与"以头开头"两种——只认后者会把 `agent-badge` 本身误判成死规则（实测踩过）。 */
-const reachableByTemplate = (cls, pre) => pre.some((p) => cls === p || cls.startsWith(p));
+    它**同时**覆盖"恰好等于头"与"以头开头"两种——只认后者会把 `agent-badge` 本身误判成死规则（实测踩过）。
+    纯数字尾另有来源：`` `sq-res d${Math.min(depth, 5)}` `` 拼出 `.d5`，头是不带连字符的词干。 */
+const reachableByTemplate = (cls, pre, stems) =>
+  pre.some((p) => cls === p || cls.startsWith(p))
+  || [...stems].some((s) => new RegExp(`^${s}\\d+$`).test(cls));
 
 /** 四道判据跑一遍；顺带把每条豁免命中了几次记回去（规矩 5 要用） */
 function computeUnreferenced(census, css, facts, exemptions) {
@@ -101,7 +134,7 @@ function computeUnreferenced(census, css, facts, exemptions) {
   const out = [];
   for (const [cls, file] of css) {
     if (facts.tokens.has(cls)) continue;
-    if (reachableByTemplate(cls, pre)) continue;
+    if (reachableByTemplate(cls, pre, facts.stems)) continue;
     if (rendered.has(cls)) continue;
     if (cls.includes("-") && facts.pkg.includes(cls)) continue;
     const e = exemptions.find((x) => typeof x.prefix === "string" && cls.startsWith(x.prefix));
@@ -167,6 +200,7 @@ function checkLedger(ledger, census, faceIds, found, css) {
 const faceIds = () => [...fs.readFileSync(FACES, "utf8").matchAll(/\{\s*id:\s*"([\w-]+)"/g)].map((m) => m[1]);
 
 function main() {
+  fixturePrefixes();
   const ids = faceIds();
   if (!ids.length) {
     console.log("FAIL: 从 audit-faces.mjs 里一个面都没读到（面表写法换了？同步改这条门）");
@@ -189,7 +223,7 @@ function main() {
       version: 1,
       generatedAt: new Date().toISOString().slice(0, 10),
       theme: census.theme,
-      judge: "四道判据：CSS 有 ∧ 源码无同名字面量 ∧ 无模板前缀能拼出 ∧ 13 面没渲染（.tools/check-dead-classes.cjs）",
+      judge: `四道判据：CSS 有 ∧ 源码无同名字面量 ∧ 无模板前缀能拼出 ∧ ${ids.length} 面没渲染（.tools/check-dead-classes.cjs）`,
       exemptions,
       budget: { unreferenced: typeof old === "number" ? Math.min(old, found.length) : found.length },
       unreferenced: found,
@@ -212,18 +246,22 @@ function main() {
   const hint = res.count < res.budget ? `（实测 ${res.count} < 预算 ${res.budget}，可以收紧）` : "";
   console.log(`OK: 死规则 ${res.count} 条 / 预算 ${res.budget} 条${hint} · CSS 类名 ${res.cssTotal} · 面上渲染过 ${res.rendered}`);
 
-  /* ---------------- 夹具自证 ---------------- */
-  const fix = JSON.parse(JSON.stringify(prev));
-  const first = (fix.unreferenced || [])[0];
-  if (!first) { console.log("FAIL: 账是空的，夹具没法自证"); process.exit(1); }
-  fix.version = 9;                                              // ① 版本不对
-  fix.unreferenced.push({ cls: "zz-nobody-renders-this", file: "src/styles/theme.css" }); // ② 账上有条 CSS 里已不存在
-  fix.exemptions = (fix.exemptions || []).concat([{ prefix: "zzgone", reason: "这条豁免一条都不命中，应该被抓住" }]); // ③ 陈旧豁免
-  fix.budget.unreferenced = 0;                                  // ④ 超预算
+  /* ---------------- 夹具自证 ----------------
+     这份"故意做坏的账"是**合成**的，不拿真账当原料：P133-B2 把死规则清到 0 条之后，
+     原先"从 prev.unreferenced[0] 借一条"的写法会让门对着自己判红（实测踩过）。
+     顺带把 `found` 假造多一条，这样"多出一条死规则"（规矩 3）也在夹具里有牙齿，
+     而且"超预算"与实测条数无关——真账是 0 条时它照样必须响。 */
+  const fix = {
+    version: 9,                                                  // ① 版本不对
+    exemptions: (prev?.exemptions ?? []).concat([{ prefix: "zzgone", reason: "这条豁免一条都不命中，应该被抓住" }]), // ③ 陈旧豁免
+    budget: { unreferenced: 0 },                                 // ④ 超预算
+    unreferenced: [{ cls: "zz-nobody-renders-this", file: "src/styles/theme.css" }],  // ② 账上有条 CSS 里已不存在
+  };
+  const fakeFound = found.concat([{ cls: "zz-extra-dead-rule", file: "src/styles/theme.css" }]);  // ⑦ 新的死规则长出来了
   const badCensus = JSON.parse(JSON.stringify(census));
   badCensus.faces = { workspace: 3 };                           // ⑤ 面表与普查不一致 + ⑥ 假覆盖
-  const f = checkLedger(fix, badCensus, ids, found, css);
-  const want = ["version=9", "在 CSS 里已经找不到", "一条都没命中", "超预算", "在普查里没有记录", "低于下限"];
+  const f = checkLedger(fix, badCensus, ids, fakeFound, css);
+  const want = ["version=9", "在 CSS 里已经找不到", "一条都没命中", "超预算", "在普查里没有记录", "低于下限", "多出一条死规则"];
   const hit = want.filter((w) => f.problems.some((p) => p.includes(w)));
   if (hit.length !== want.length) {
     console.log(`FAIL: 夹具自证只命中 ${hit.length}/${want.length} 条，门是瞎的：${want.filter((x) => !hit.includes(x)).join(" / ")}`);
@@ -231,4 +269,40 @@ function main() {
   }
   console.log(`OK: 检测式对 ${want.length} 条夹具全部命中（门自己不是瞎的）`);
 }
-main();
+
+/** 判据③ 的夹具：**直接调用被测函数本身**，不吃本仓源码（源码里哪天少了那个写法，夹具就悄悄失效了）。
+ *  钉住的是两次实测误判：`sq-kind sq-k-${…}` 抓成带空格的前缀（`sq-k-*` 六条被判死）、
+ *  `sq-res d${Math.min(depth, 5)}` 的词干被丢掉（`.d4/.d5` 被判死）。
+ *  反向那条同样钉住：词干只能配"纯数字尾"，不然 `s`、`a` 这类一段字母能把大半张账洗成活的。
+ *  放在 `main()` 最前面跑：它不依赖普查，普查过期那条红不该把它一起挡掉。 */
+function fixturePrefixes() {
+  const { prefixes, stems } = prefixesFrom([
+    "const a = `sq-kind sq-k-${STEP_KIND_CLS[step.kind]}`;",
+    "const b = `ui ${variant} mcp-tool-${name}`;",
+    "const c = `agent-badge${warn}`;",
+    "const e = `sq-res d${Math.min(depth, 5)} st-${r.status}`;",
+    "const f = 'no interpolation here';",
+  ].join("\n"));
+  const reaches = (cls) => reachableByTemplate(cls, [...prefixes], stems);
+  const cases = [
+    ["sq-k-send", true, "第一段是 `sq-kind`，前缀在**第二处**插值上"],
+    ["mcp-tool-read", true, "插值前面是空格，候选段必须从空格后起算"],
+    ["agent-badge", true, "类名恰好等于头（`${warn}` 为空串时就是它）"],
+    ["agent-badge-warn", true, "类名以头开头"],
+    ["d5", true, "词干 `d` + 纯数字尾（序列结果行的缩进档）"],
+    ["st-out", true, "词干带连字符时照常前缀匹配"],
+    ["d-x", false, "词干不放宽成前缀：`s`/`a`/`d` 配一切会把门做成永远放行"],
+    ["zz-nothing-builds-this", false, "没有任何模板能拼出它 ⇒ 必须仍然判死"],
+  ];
+  const wrong = cases.filter(([cls, expect]) => reaches(cls) !== expect);
+  if (wrong.length) {
+    console.log(`FAIL: 判据③自证没过：${wrong.map(([c, e, why]) => `.${c} 应为${e ? "活" : "死"}（${why}）`).join(" / ")}`);
+    process.exit(1);
+  }
+  console.log(`OK: 判据③对 ${cases.length} 条夹具全部命中（模板前缀三种拼法都认，且不误放行）`);
+}
+
+/* 直接跑才执行；被 require 时只交出判据本身——判"死"的口径必须只有一份实现，
+   复盘脚本抄一份就是等着两本账漂开（P132-I 那条注释讲的就是同一件事）。 */
+if (require.main === module) main();
+module.exports = { prefixesFrom, reachableByTemplate, cssClasses, sourceFacts, computeUnreferenced, checkLedger, faceIds };

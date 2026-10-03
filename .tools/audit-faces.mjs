@@ -86,6 +86,11 @@ export const SURFACES = [
   { id: "welcome1", path: (t) => base(t, { welcome: "1" }), require: ".wlc-body" },
   { id: "welcome2", path: (t) => base(t, { welcome: "2" }), require: ".wlc-body" },
   { id: "cmdk-empty", path: (t) => base(t), drive: "cmdkEmpty", require: ".cmdk-empty" },
+  /* P133-B2：第 14 面 = AI 助手浮窗。它一直是账外的，代价是 P133-D/G/H 三批连着留下
+     同一句"只有单测、没有像素证据"——批准卡、工具时间线、撤销态全长在这一面里，
+     而 9 主题 × 13 面从来没看过它一眼。`?open=ai` 是现成的 dev 入口（摆出真实打开态，
+     不是注入节点），`require` 认 `.ai-chat`：开不出来直接抛，不许静默少测一面。 */
+  { id: "ai", path: (t) => base(t, { extra: "&open=ai" }), require: ".ai-chat" },
 ];
 
 /**

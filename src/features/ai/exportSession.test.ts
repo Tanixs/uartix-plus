@@ -53,8 +53,8 @@ const msg = (over: Record<string, unknown>) => ({ id: `m${Math.random()}`, ts: T
 function fakeRun(over: Record<string, unknown> = {}) {
   return {
     runId: "r1",
-    goal: "删掉 .agent-tl-caret 那条规则并跑校验",
-    goalBrief: "删掉 .agent-tl-caret 那条规则",
+    goal: "删掉那条没人用的旧 CSS 规则并跑校验",
+    goalBrief: "删掉那条没人用的旧 CSS 规则",
     scope: "custom",
     status: "succeeded",
     rounds: 2,

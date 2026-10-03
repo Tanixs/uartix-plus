@@ -16,10 +16,19 @@
     "hovermenu": 159,
     "welcome1": 173,
     "welcome2": 168,
-    "cmdk-empty": 157
+    "cmdk-empty": 157,
+    "ai": 159
   },
   "rendered": [
     "active",
+    "ai-chat",
+    "ai-empty-wrap",
+    "ai-float",
+    "ai-float-body",
+    "ai-float-btn",
+    "ai-float-grip",
+    "ai-float-head",
+    "ai-float-title",
     "app",
     "app-body",
     "app-shell",
