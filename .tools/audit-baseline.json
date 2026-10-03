@@ -1,0 +1,1321 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-03",
+  "viewport": {
+    "w": 1440,
+    "h": 900
+  },
+  "judge": "生产同一份：src/features/agent/uiSurface.collectAuditInput + src/styles/renderAudit",
+  "surfaces": [
+    "workspace",
+    "settings"
+  ],
+  "themes": {
+    "light": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.36,
+              "need": 4.5,
+              "fg": "rgb(217 221 227)",
+              "bg": "rgb(255 255 255)",
+              "severe": true
+            }
+          ],
+          "worst": 1.36,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.36,
+              "need": 4.5,
+              "fg": "rgb(217 221 227)",
+              "bg": "rgb(255 255 255)",
+              "severe": true
+            },
+            {
+              "selector": ".on",
+              "ratio": 4.22,
+              "need": 4.5,
+              "fg": "rgb(47 111 206)",
+              "bg": "rgb(236 238 241)",
+              "severe": false
+            }
+          ],
+          "worst": 1.36,
+          "unmeasurable": {
+            "count": 9,
+            "byReason": {
+              "no_foreground": 9
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    },
+    "dark": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.23,
+              "need": 4.5,
+              "fg": "rgb(38 43 51)",
+              "bg": "rgb(22 26 32)",
+              "severe": true
+            }
+          ],
+          "worst": 1.23,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.23,
+              "need": 4.5,
+              "fg": "rgb(38 43 51)",
+              "bg": "rgb(22 26 32)",
+              "severe": true
+            },
+            {
+              "selector": ".btn.sm",
+              "ratio": 3.7,
+              "need": 4.5,
+              "fg": "rgb(255 255 255)",
+              "bg": "rgb(229 83 75)",
+              "severe": false
+            }
+          ],
+          "worst": 1.23,
+          "unmeasurable": {
+            "count": 9,
+            "byReason": {
+              "no_foreground": 9
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    },
+    "ocean": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.43,
+              "need": 4.5,
+              "fg": "rgb(204 217 231)",
+              "bg": "rgb(255 255 255)",
+              "severe": true
+            },
+            {
+              "selector": ".cb-capsule",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".dv-default-tab-content",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".ctl-tab-add",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-title",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-hint",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            }
+          ],
+          "worst": 1.43,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.43,
+              "need": 4.5,
+              "fg": "rgb(204 217 231)",
+              "bg": "rgb(255 255 255)",
+              "severe": true
+            },
+            {
+              "selector": ".on",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(30 111 217)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".cb-capsule",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".dv-default-tab-content",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".ctl-tab-add",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-title",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-hint",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": ".set-nav-back",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            },
+            {
+              "selector": "button",
+              "ratio": 4.5,
+              "need": 4.5,
+              "fg": "rgb(90 109 130)",
+              "bg": "rgb(228 237 246)",
+              "severe": false
+            }
+          ],
+          "worst": 1.43,
+          "unmeasurable": {
+            "count": 9,
+            "byReason": {
+              "no_foreground": 9
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    },
+    "navy": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.36,
+              "need": 4.5,
+              "fg": "rgb(38 51 78)",
+              "bg": "rgb(19 27 46)",
+              "severe": true
+            }
+          ],
+          "worst": 1.36,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.36,
+              "need": 4.5,
+              "fg": "rgb(38 51 78)",
+              "bg": "rgb(19 27 46)",
+              "severe": true
+            },
+            {
+              "selector": ".btn.sm",
+              "ratio": 3.7,
+              "need": 4.5,
+              "fg": "rgb(255 255 255)",
+              "bg": "rgb(229 83 75)",
+              "severe": false
+            }
+          ],
+          "worst": 1.36,
+          "unmeasurable": {
+            "count": 9,
+            "byReason": {
+              "no_foreground": 9
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    },
+    "matcha": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.47,
+              "need": 4.5,
+              "fg": "rgb(198 216 189)",
+              "bg": "rgb(251 253 249)",
+              "severe": true
+            },
+            {
+              "selector": "b",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(62 142 82)",
+              "bg": "rgb(251 253 249)",
+              "severe": false
+            },
+            {
+              "selector": ".cb-capsule",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".dv-default-tab-content",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".ctl-tab-add",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-title",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-hint",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            }
+          ],
+          "worst": 1.47,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.47,
+              "need": 4.5,
+              "fg": "rgb(198 216 189)",
+              "bg": "rgb(251 253 249)",
+              "severe": true
+            },
+            {
+              "selector": ".on",
+              "ratio": 3.37,
+              "need": 4.5,
+              "fg": "rgb(62 142 82)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": "b",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(62 142 82)",
+              "bg": "rgb(251 253 249)",
+              "severe": false
+            },
+            {
+              "selector": ".theme-name",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(62 142 82)",
+              "bg": "rgb(251 253 249)",
+              "severe": false
+            },
+            {
+              "selector": ".btn.sm",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(62 142 82)",
+              "bg": "rgb(251 253 249)",
+              "severe": false
+            },
+            {
+              "selector": ".cb-capsule",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".dv-default-tab-content",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".ctl-tab-add",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-title",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-hint",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".set-nav-back",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            },
+            {
+              "selector": "button",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(95 113 87)",
+              "bg": "rgb(226 238 221)",
+              "severe": false
+            }
+          ],
+          "worst": 1.47,
+          "unmeasurable": {
+            "count": 9,
+            "byReason": {
+              "no_foreground": 9
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    },
+    "amber": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.44,
+              "need": 4.5,
+              "fg": "rgb(236 208 174)",
+              "bg": "rgb(255 251 246)",
+              "severe": true
+            },
+            {
+              "selector": "b",
+              "ratio": 3.83,
+              "need": 4.5,
+              "fg": "rgb(201 100 21)",
+              "bg": "rgb(255 251 246)",
+              "severe": false
+            },
+            {
+              "selector": ".cb-capsule",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".dv-default-tab-content",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".ctl-tab-add",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-title",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-hint",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".rail#-label",
+              "ratio": 4.11,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(250 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".status-left",
+              "ratio": 4.11,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(250 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".ib-count",
+              "ratio": 4.11,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(250 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".ib-rate",
+              "ratio": 4.11,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(250 238 221)",
+              "severe": false
+            }
+          ],
+          "worst": 1.44,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.44,
+              "need": 4.5,
+              "fg": "rgb(236 208 174)",
+              "bg": "rgb(255 251 246)",
+              "severe": true
+            },
+            {
+              "selector": ".on",
+              "ratio": 3.32,
+              "need": 4.5,
+              "fg": "rgb(201 100 21)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": "b",
+              "ratio": 3.83,
+              "need": 4.5,
+              "fg": "rgb(201 100 21)",
+              "bg": "rgb(255 251 246)",
+              "severe": false
+            },
+            {
+              "selector": ".theme-name",
+              "ratio": 3.83,
+              "need": 4.5,
+              "fg": "rgb(201 100 21)",
+              "bg": "rgb(255 251 246)",
+              "severe": false
+            },
+            {
+              "selector": ".btn.sm",
+              "ratio": 3.83,
+              "need": 4.5,
+              "fg": "rgb(201 100 21)",
+              "bg": "rgb(255 251 246)",
+              "severe": false
+            },
+            {
+              "selector": ".cb-capsule",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".dv-default-tab-content",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".ctl-tab-add",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-title",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-hint",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".set-nav-back",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": "button",
+              "ratio": 3.95,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(249 233 214)",
+              "severe": false
+            },
+            {
+              "selector": ".rail#-label",
+              "ratio": 4.11,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(250 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".status-left",
+              "ratio": 4.11,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(250 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".ib-count",
+              "ratio": 4.11,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(250 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".ib-rate",
+              "ratio": 4.11,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(250 238 221)",
+              "severe": false
+            },
+            {
+              "selector": ".set-page-sub",
+              "ratio": 4.32,
+              "need": 4.5,
+              "fg": "rgb(138 111 78)",
+              "bg": "rgb(253 244 234)",
+              "severe": false
+            }
+          ],
+          "worst": 1.44,
+          "unmeasurable": {
+            "count": 9,
+            "byReason": {
+              "no_foreground": 9
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    },
+    "begonia": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.48,
+              "need": 4.5,
+              "fg": "rgb(220 210 213)",
+              "bg": "rgb(255 255 255)",
+              "severe": true
+            },
+            {
+              "selector": ".cb-capsule",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".dv-default-tab-content",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".ctl-tab-add",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-title",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-hint",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".rail#-label",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(236 229 232)",
+              "severe": false
+            },
+            {
+              "selector": ".status-left",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(236 229 232)",
+              "severe": false
+            },
+            {
+              "selector": ".ib-count",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(236 229 232)",
+              "severe": false
+            },
+            {
+              "selector": ".ib-rate",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(236 229 232)",
+              "severe": false
+            }
+          ],
+          "worst": 1.48,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.48,
+              "need": 4.5,
+              "fg": "rgb(220 210 213)",
+              "bg": "rgb(255 255 255)",
+              "severe": true
+            },
+            {
+              "selector": ".on",
+              "ratio": 3.7,
+              "need": 4.5,
+              "fg": "rgb(200 68 92)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".cb-capsule",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".dv-default-tab-content",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".ctl-tab-add",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-title",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".empty-hint",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".set-nav-back",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": "button",
+              "ratio": 3.98,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(232 226 228)",
+              "severe": false
+            },
+            {
+              "selector": ".rail#-label",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(236 229 232)",
+              "severe": false
+            },
+            {
+              "selector": ".status-left",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(236 229 232)",
+              "severe": false
+            },
+            {
+              "selector": ".ib-count",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(236 229 232)",
+              "severe": false
+            },
+            {
+              "selector": ".ib-rate",
+              "ratio": 4.1,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(236 229 232)",
+              "severe": false
+            },
+            {
+              "selector": ".set-page-sub",
+              "ratio": 4.39,
+              "need": 4.5,
+              "fg": "rgb(123 106 110)",
+              "bg": "rgb(242 237 239)",
+              "severe": false
+            }
+          ],
+          "worst": 1.48,
+          "unmeasurable": {
+            "count": 9,
+            "byReason": {
+              "no_foreground": 9
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    },
+    "glaze": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.43,
+              "need": 4.5,
+              "fg": "rgb(42 56 80)",
+              "bg": "rgb(21 29 44)",
+              "severe": true
+            },
+            {
+              "selector": "b",
+              "ratio": 4.46,
+              "need": 4.5,
+              "fg": "rgb(208 95 110)",
+              "bg": "rgb(21 29 44)",
+              "severe": false
+            }
+          ],
+          "worst": 1.43,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 987376,
+          "rules": 3454,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.43,
+              "need": 4.5,
+              "fg": "rgb(42 56 80)",
+              "bg": "rgb(21 29 44)",
+              "severe": true
+            },
+            {
+              "selector": ".btn.sm",
+              "ratio": 3.7,
+              "need": 4.5,
+              "fg": "rgb(255 255 255)",
+              "bg": "rgb(229 83 75)",
+              "severe": false
+            },
+            {
+              "selector": "b",
+              "ratio": 4.46,
+              "need": 4.5,
+              "fg": "rgb(208 95 110)",
+              "bg": "rgb(21 29 44)",
+              "severe": false
+            },
+            {
+              "selector": ".theme-name",
+              "ratio": 4.46,
+              "need": 4.5,
+              "fg": "rgb(208 95 110)",
+              "bg": "rgb(21 29 44)",
+              "severe": false
+            }
+          ],
+          "worst": 1.43,
+          "unmeasurable": {
+            "count": 9,
+            "byReason": {
+              "no_foreground": 9
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    },
+    "fluent": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 362,
+          "truncated": false,
+          "styleBytes": 1000714,
+          "rules": 3543,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.7,
+              "need": 4.5,
+              "fg": "rgb(200 198 196)",
+              "bg": "rgb(255 255 255)",
+              "severe": true
+            }
+          ],
+          "worst": 1.7,
+          "unmeasurable": {
+            "count": 4,
+            "byReason": {
+              "no_foreground": 4
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        },
+        "settings": {
+          "sampled": 504,
+          "truncated": false,
+          "styleBytes": 1000714,
+          "rules": 3543,
+          "issues": [
+            {
+              "selector": "i",
+              "ratio": 1.7,
+              "need": 4.5,
+              "fg": "rgb(200 198 196)",
+              "bg": "rgb(255 255 255)",
+              "severe": true
+            }
+          ],
+          "worst": 1.7,
+          "unmeasurable": {
+            "count": 10,
+            "byReason": {
+              "no_foreground": 10
+            }
+          },
+          "hitIssues": 3,
+          "hitMin": null,
+          "overflow": 0
+        }
+      }
+    }
+  },
+  "exemptions": [
+    {
+      "theme": "amber",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "amber",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "begonia",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "begonia",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "dark",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "dark",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "fluent",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "fluent",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "glaze",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "glaze",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "light",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "light",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "matcha",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "matcha",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "navy",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "navy",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "ocean",
+      "surface": "settings",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    },
+    {
+      "theme": "ocean",
+      "surface": "workspace",
+      "selector": "i",
+      "reason": "帧画布统计条里的分隔点（FrameCanvas.tsx:339 的 <i>·</i>）取的是 --border 档：它是分隔线不是文字，WCAG 1.4.3 只管文字。留在这里而不是悄悄放行——真要改它得先决定它是线还是字。"
+    }
+  ],
+  "budget": {
+    "total": 103
+  }
+}

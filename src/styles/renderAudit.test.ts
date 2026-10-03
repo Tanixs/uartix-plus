@@ -256,3 +256,65 @@ describe("汇总", () => {
     expect(summarizeAudit({ ...empty, hitTargets: [{ selector: ".b", minSide: 16, need: 24 }] }).blocking).toBe(true);
   });
 });
+
+/**
+ * P132-C · 采集器与判据的名字不能各改各的。
+ *
+ * `.tools/audit-live.mjs` 是在页面里按 **URL + 导出名** 调这两个模块的（这样基线跑的才是产品那份判据，
+ * 不是第二套）。问题是：CI 没有浏览器，那道门只读基线 JSON——**改个名字不会让任何门变红**，
+ * 只会让下一次采集悄悄失败或写出假账。所以这里把"采集器用到的每个名字"钉回导出表上。
+ */
+const fsSpec = "node:fs";
+const urlSpec = "node:url";
+const { readFileSync, existsSync } = (await import(fsSpec)) as unknown as {
+  readFileSync: (p: string, e?: string) => string;
+  existsSync: (p: string) => boolean;
+};
+const { fileURLToPath } = (await import(urlSpec)) as unknown as { fileURLToPath: (u: string | URL) => string };
+/** 采集器按 `ui.xxx` / `ra.xxx` 调生产模块，也按 `import("/src/…")` 取模块本体 */
+const harness = readFileSync(fileURLToPath(new URL("../../.tools/audit-live.mjs", import.meta.url)), "utf8");
+const namesOf = (ns: string) =>
+  [...new Set([...harness.matchAll(new RegExp("\\b" + ns + "\\.([A-Za-z_]\\w*)", "g"))].map((m) => m[1]))];
+const imported = [...harness.matchAll(/import\("\/src\/([^"]+)"\)/g)].map((m) => m[1]);
+const exportedFrom = (rel: string) => {
+  const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
+  return new Set([...src.matchAll(/export\s+(?:const|function|interface|type)\s+([A-Za-z_]\w*)/g)].map((m) => m[1]));
+};
+
+describe("P132-C · 审计采集器依赖的导出名", () => {
+
+  it("采集器 import 的那两个模块路径仍然真存在", () => {
+    expect(imported.length, "采集器里一个 import 说明符都没抓到＝探针瞎了").toBeGreaterThan(1);
+    for (const p of imported) {
+      expect(existsSync(fileURLToPath(new URL(`../../src/${p}`, import.meta.url))), `模块被移走或改名：/src/${p}`).toBe(true);
+    }
+  });
+
+  it("ui.* 与 ra.* 用到的每个名字都在生产模块里导出着", () => {
+    const ui = exportedFrom("../features/agent/uiSurface.ts");
+    const ra = exportedFrom("./renderAudit.ts");
+    const uiNames = namesOf("ui");
+    const raNames = namesOf("ra");
+    // 探针自证：至少钉到几个真名字，不然这条绿了也是空的
+    expect(uiNames.length).toBeGreaterThanOrEqual(1);
+    expect(raNames.length).toBeGreaterThanOrEqual(3);
+    for (const n of uiNames) expect(ui.has(n), `uiSurface 不再导出 ${n}，采集器会拿到 undefined`).toBe(true);
+    for (const n of raNames) expect(ra.has(n), `renderAudit 不再导出 ${n}，采集器会拿到 undefined`).toBe(true);
+  });
+
+  it("基线文件在，且形状是采集器写出来的那种", () => {
+    const b = JSON.parse(readFileSync(fileURLToPath(new URL("../../.tools/audit-baseline.json", import.meta.url)), "utf8"));
+    expect(b.version).toBe(1);
+    expect(b.surfaces).toContain("workspace");
+    const ids = Object.keys(b.themes);
+    expect(ids.length).toBeGreaterThanOrEqual(9);
+    for (const id of ids) {
+      for (const s of b.surfaces) {
+        const r = b.themes[id].surfaces[s];
+        expect(r, `${id}/${s} 没有记录`).toBeTruthy();
+        expect(r.sampled).toBeGreaterThan(0);
+        expect(Array.isArray(r.issues)).toBe(true);
+      }
+    }
+  });
+});
