@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "generatedAt": "2026-10-03",
   "viewport": {
     "w": 1440,
@@ -9,16 +9,20 @@
   "surfaces": [
     "workspace",
     "settings",
-    "palette"
+    "palette",
+    "menu",
+    "lbx",
+    "ctxmenu",
+    "hint"
   ],
   "themes": {
     "light": {
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -26,14 +30,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -41,14 +46,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -56,9 +62,74 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     },
@@ -66,9 +137,9 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -76,14 +147,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -91,14 +163,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -106,9 +179,74 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     },
@@ -116,9 +254,9 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -126,14 +264,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -141,14 +280,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -156,9 +296,74 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     },
@@ -166,9 +371,9 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -176,14 +381,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -191,14 +397,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -206,9 +413,74 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     },
@@ -216,9 +488,9 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -226,14 +498,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -241,14 +514,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -256,9 +530,74 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     },
@@ -266,9 +605,9 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -276,14 +615,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -291,14 +631,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -306,9 +647,74 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     },
@@ -316,9 +722,9 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -326,14 +732,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -341,14 +748,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -356,9 +764,74 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     },
@@ -366,9 +839,9 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -376,14 +849,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -391,14 +865,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 987920,
+          "styleBytes": 987985,
           "rules": 3455,
           "issues": [],
           "worst": null,
@@ -406,9 +881,74 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 987985,
+          "rules": 3455,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     },
@@ -416,9 +956,9 @@
       "kind": "builtin",
       "surfaces": {
         "workspace": {
-          "sampled": 324,
+          "sampled": 362,
           "truncated": false,
-          "styleBytes": 1001257,
+          "styleBytes": 1001281,
           "rules": 3544,
           "issues": [],
           "worst": null,
@@ -426,14 +966,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "settings": {
-          "sampled": 466,
+          "sampled": 504,
           "truncated": false,
-          "styleBytes": 1001257,
+          "styleBytes": 1001281,
           "rules": 3544,
           "issues": [],
           "worst": null,
@@ -441,14 +982,15 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
         },
         "palette": {
-          "sampled": 439,
+          "sampled": 477,
           "truncated": false,
-          "styleBytes": 1001257,
+          "styleBytes": 1001281,
           "rules": 3544,
           "issues": [],
           "worst": null,
@@ -456,15 +998,82 @@
             "count": 0,
             "byReason": {}
           },
-          "hitIssues": 0,
+          "hits": [],
           "hitMin": null,
-          "overflow": 0
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "menu": {
+          "sampled": 394,
+          "truncated": false,
+          "styleBytes": 1001281,
+          "rules": 3544,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "lbx": {
+          "sampled": 442,
+          "truncated": false,
+          "styleBytes": 1001281,
+          "rules": 3544,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "ctxmenu": {
+          "sampled": 366,
+          "truncated": false,
+          "styleBytes": 1001281,
+          "rules": 3544,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
+        },
+        "hint": {
+          "sampled": 505,
+          "truncated": false,
+          "styleBytes": 1001281,
+          "rules": 3544,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null
         }
       }
     }
   },
   "exemptions": [],
   "budget": {
-    "total": 0
+    "total": 0,
+    "hitTargets": 0,
+    "overflow": 0
   }
 }

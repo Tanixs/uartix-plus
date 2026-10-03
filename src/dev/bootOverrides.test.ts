@@ -159,6 +159,26 @@ describe("applyDevBoot：真实副作用", () => {
     expect(storage.has(RAIL_PANEL_KEY)).toBe(false);
   });
   /**
+   * P132-F：`?rail=none` 是这一参数的另一档——把开着的那一组合上。
+   * 审计基线要的是"这一面长什么样"只有一个答案：导轨开合是落盘的，profile 里留着「接入」，
+   * 同一份代码就会在两个 profile 上交出两本账（实测多扫 89 个带字节点、多背 2 条命中区）。
+   */
+  it("rail=none 把开着的那一组合上；它得算「有覆盖」，否则整条被 applyDevBoot 丢掉", () => {
+    // 起点用「协议」而不是"先删存储再开链接"：railState 的当前项是**内存态**（求值期读过一次），
+    // 删 localStorage 不会把它清掉，而 openRailPanel 对同一个 key 是直接 return 的——
+    // 上一枚测试留下的内存态是 link，"删了再开 link"就什么都没人写（实测踩过一次，别再来一次）。
+    applyDevBoot("?rail=templates", { dev: true, prod: false });
+    expect(storage.get(RAIL_PANEL_KEY)).toBe("templates");
+
+    const off = parseDevBoot("?rail=none");
+    expect(off.rail, "none 不是导轨项的名字，不能被当成 rail=<key>").toBeUndefined();
+    expect(off.railClosed).toBe(true);
+    expect(hasDevBoot(off), "?rail=none 没进 hasDevBoot 的话，applyDevBoot 会当它「什么都没要」直接返回空壳").toBe(true);
+    applyDevBoot("?rail=none", { dev: true, prod: false });
+    expect(storage.get(RAIL_PANEL_KEY)).toBe("0");
+    storage.delete(RAIL_PANEL_KEY);
+  });
+  /**
    * `?iface=` 认的取值必须与导轨/胶囊用的那份接口清单一致。
    * 这里**读源码文本**而不是 import `linkSummary.ts`：那个模块 value-import 了 serialStore，
    * 一引进来就把 Tauri 事件与 invoke 拖进这个测试 —— 与 `defaultLayout.test.ts`

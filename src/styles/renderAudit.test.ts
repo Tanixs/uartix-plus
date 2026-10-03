@@ -325,8 +325,11 @@ describe("P132-C · 审计采集器依赖的导出名", () => {
 
   it("基线文件在，且形状是采集器写出来的那种", () => {
     const b = JSON.parse(readFileSync(fileURLToPath(new URL("../../.tools/audit-baseline.json", import.meta.url)), "utf8"));
-    expect(b.version).toBe(1);
+    expect(b.version, "形状换了（命中区/溢出从条数改成条目）就要同步改门与这条").toBe(2);
     expect(b.surfaces).toContain("workspace");
+    for (const s of ["palette", "menu", "lbx", "ctxmenu", "hint"]) {
+      expect(b.surfaces, `浮层那一族的面 ${s} 不在账上（采集器的 SURFACES 被改小了？）`).toContain(s);
+    }
     const ids = Object.keys(b.themes);
     expect(ids.length).toBeGreaterThanOrEqual(9);
     for (const id of ids) {
@@ -335,7 +338,63 @@ describe("P132-C · 审计采集器依赖的导出名", () => {
         expect(r, `${id}/${s} 没有记录`).toBeTruthy();
         expect(r.sampled).toBeGreaterThan(0);
         expect(Array.isArray(r.issues)).toBe(true);
+        expect(Array.isArray(r.hits), "命中区只记了个数、没记条目＝这一族等于没记账").toBe(true);
+        expect(Array.isArray(r.overflow)).toBe(true);
+        expect(r.hitMin, "hits 空时 hitMin 必须是 null，非空时必须是条目里的最小值")
+          .toBe(r.hits.length ? Math.min(...r.hits.map((h: { minSide: number }) => h.minSide)) : null);
+        expect(r.overflowWorst)
+          .toBe(r.overflow.length ? Math.max(...r.overflow.map((o: { overPx: number }) => o.overPx)) : null);
       }
+    }
+    for (const k of ["total", "hitTargets", "overflow"]) {
+      expect(typeof b.budget?.[k], `基线没有 budget.${k}（这一族没有上限＝可以无声长回来）`).toBe("number");
+    }
+  });
+
+  /**
+   * P132-F：字段名也要对账。上一版采集器把命中区条目写成 `{ w: h.width, h: h.height }`，
+   * 而判据返回的是 `{ selector, minSide, need }`——两个 undefined 在 JSON 落盘时被静默丢掉，
+   * `hitMin` 于是恒为 null，账上"有这一族"其实一条都没记。名字对上（上面那条）不代表字段对上。
+   */
+  const mapFields = (re: RegExp, label: string) => {
+    const m = re.exec(harness);
+    if (!m) throw new Error(`采集器里找不到 ${label} 那段落盘映射——写法换了请同步改这条探针`);
+    return [...m[1].matchAll(/(\w+):\s*(\w+)\.(\w+)/g)].map((x) => ({ out: x[1], field: x[3] }));
+  };
+  const judgeKeys = (o: object, label: string) => {
+    const keys = Object.keys(o);
+    expect(keys.length, `${label} 返回的是空对象——探针瞎了`).toBeGreaterThan(0);
+    return keys;
+  };
+
+  it("采集器写进账本的字段名，就是判据返回的那几个（抄一份就会静默丢字段）", () => {
+    const hit = auditHitTargets([{ selector: ".a", width: 10, height: 10, zoom: 1 }])[0];
+    const hitKeys = judgeKeys(hit, "auditHitTargets");
+    const hitFields = mapFields(/hits:\s*hits\.map\(\(h\)\s*=>\s*\(\{([^)]*)\}\)\)/, "命中区");
+    expect(hitFields.length).toBeGreaterThanOrEqual(3);
+    for (const f of hitFields) {
+      expect(hitKeys, `判据 ${JSON.stringify(hitKeys)} 里没有 ${f.field}`).toContain(f.field);
+      expect(f.out, `账本把 ${f.field} 改名成了 ${f.out}——两边必须同名`).toBe(f.field);
+    }
+
+    const over = auditOverflow([{ selector: ".a", overPx: 40 }])[0];
+    const overKeys = judgeKeys(over, "auditOverflow");
+    const overFields = mapFields(/overflow:\s*over\.map\(\(o\)\s*=>\s*\(\{([^)]*)\}\)\)/, "溢出");
+    expect(overFields.length).toBeGreaterThanOrEqual(2);
+    for (const f of overFields) {
+      expect(overKeys, `判据 ${JSON.stringify(overKeys)} 里没有 ${f.field}`).toContain(f.field);
+      expect(f.out, `账本把 ${f.field} 改名成了 ${f.out}`).toBe(f.field);
+    }
+
+    const iss = auditContrast([
+      { selector: ".x", text: "t", fontSizePx: 12, fontWeight: 400, fg: c("#0078d4"), backdrop: [c("#edebe9")] },
+    ]).issues[0];
+    const issKeys = judgeKeys(iss, "auditContrast");
+    const issFields = mapFields(/issues:\s*c\.issues\.map\(\(i\)\s*=>\s*\(\{([^)]*)\}\)\)/, "对比度");
+    expect(issFields.length).toBeGreaterThanOrEqual(4);
+    for (const f of issFields) {
+      expect(issKeys, `判据 ${JSON.stringify(issKeys)} 里没有 ${f.field}`).toContain(f.field);
+      expect(f.out, `账本把 ${f.field} 改名成了 ${f.out}`).toBe(f.field);
     }
   });
 });

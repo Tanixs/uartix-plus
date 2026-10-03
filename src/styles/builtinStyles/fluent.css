@@ -396,11 +396,15 @@
   background: var(--fb-fill-hover);
 }
 
-/* 禁用态宿主有两写法：按钮走 `:disabled`，挂件菜单是 `.disabled` 类 ⇒ 两边都得给 */
+/* 禁用态宿主有两写法：按钮走 `:disabled`，挂件菜单是 `.disabled` 类 ⇒ 两边都得给。
+   P132-F：这里原来写的是 `color-mix(… --text-dim 62%, --bg-panel)`——把"已经淡一档"的字
+   再朝面板洗 38%，实测压菜单底 2.64（账上 fluent/ctxmenu 那一条）。洗到读不出来不是"淡"，
+   是看不见；禁用这一档由 `--text-dim` + `cursor: not-allowed` 表达就够了，与宿主
+   `.ctx-item:disabled`（同批改）同一条口径。 */
 [data-theme="fluent"] .ctx-item:disabled,
 [data-theme="fluent"] .ib-count:disabled,
 [data-theme="fluent"] .cmdk-item:disabled {
-  color: color-mix(in srgb, var(--text-dim) 62%, var(--bg-panel));
+  color: var(--text-dim);
   background: transparent;
 }
 

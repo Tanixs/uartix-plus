@@ -1855,13 +1855,18 @@ select optgroup {
   cursor: pointer;
 }
 
+/* 与 `.tb-menu-item.on` 是**同一对颜色**（`--accent` 压在 `--accent-soft` 洗涤后的菜单底上，
+   账上量到 3.83~4.46 那一族），所以走同一个 `--accent-text`（P132-D 立的"accent 当字"口径）。
+   这一条本身没被账抓到过——鼠标停在菜单项上那一格还没进账（记在验收 §7）。 */
 .ctx-item:hover:not(:disabled) {
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
+/* 禁用态不能用 `opacity`：那半透明会把字压到面板 2.64（实测），正是"看得见但读不出"那一档。
+   禁用是**颜色**的事——淡一档 + not-allowed 就说清了，与 `.cmdk-item:disabled`（P132-E）同口径。 */
 .ctx-item:disabled {
-  opacity: 0.4;
+  color: var(--text-dim);
   cursor: not-allowed;
 }
 
@@ -2072,8 +2077,11 @@ select optgroup {
   min-width: 0;
 }
 
+/* 这一句是**字**（"波特率要与设备一致…"那条说明），不是纹样，所以吃 4.5 那一档。
+   `--text-faint` 现在是装饰档（实测压四档表面 3.2~3.6），拿它写说明文就是"注释说给字用、值却是装饰档"
+   那一族（P132-E 记的 §7.2；这一处是导轨「接入」进账后被账撞上的）。 */
 .lk-hint {
-  color: var(--text-faint);
+  color: var(--text-dim);
   font-size: var(--fs-body);
   line-height: var(--lh-ui);
 }
@@ -5852,13 +5860,15 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   background: var(--raise-1);
 }
 
+/* 与 `.tb-menu-item` 同族的两条（画布右键菜单，账上还没量到——那一面要右键在画布菜单项上）：
+   禁用不吃 opacity，选中档的"字"走 `--accent-text`。同一条算术，同一批一起改，别留半套。 */
 .pca-menu-item:disabled {
-  opacity: 0.45;
+  color: var(--text-dim);
   cursor: default;
 }
 
 .pca-menu-item.on {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .pca-menu-item.danger {
@@ -5970,9 +5980,12 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   border-radius: var(--radius-m);
   cursor: pointer;
 }
-.tb-menu-item:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
-.tb-menu-item:disabled { opacity: .45; cursor: not-allowed; }
-.tb-menu-item.on { color: var(--accent); font-weight: 600; }
+.tb-menu-item:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent-text); }
+.tb-menu-item:disabled { color: var(--text-dim); cursor: not-allowed; }
+/* 选中/悬停这两档都是"accent 当字"（P132-D 立的口径）：`--accent` 是色相，
+   `--accent-text` 才是能站在面板/菜单底上读的那一档（check:theme 按 4.5 逐枚复算）。
+   matcha 3.95 / amber 3.83 / glaze 4.46 是 P132-F 把菜单面拉进账之后量出来的。 */
+.tb-menu-item.on { color: var(--accent-text); font-weight: 600; }
 .tb-menu-check { margin-left: auto; font-style: normal; }
 .tb-menu-soon { margin-left: auto; font-style: normal; font-size: var(--fs-xs); color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-s); padding: 0 4px; }
 .iface-soon { font-size: var(--fs-body); color: var(--text-dim); }
@@ -6525,7 +6538,9 @@ label.set-switch,
   user-select: none;
 }
 .help-hint:hover {
-  color: var(--accent);
+  /* 那枚 `?` 是**字**（账上 hover 档实测 3.83~4.46 那一族），所以走 `--accent-text`；
+     圆圈的描边仍是 `--accent`——与 `.hex-pause-btn.on` 同一条口径：只改字，不改描边。 */
+  color: var(--accent-text);
   border-color: var(--accent);
   background: var(--accent-soft);
 }
@@ -6846,18 +6861,21 @@ label.set-switch,
   flex: 0 0 auto;
   /* P103-VIS2：框只在这里画一次。此前是"输入框画左三条边 + 箭头那颗画右三条边"两半各自成盒，
      于是中间有缝、图标看着像贴在框外。现在盒、底色、凹陷影、焦点环全归外层，两半透明无边
-     ⇒ 与同排 select 是同一只框的观感。 */
+     ⇒ 与同排 select 是同一只框的观感。
+     P132-F：外轮廓从 `border: 1px` 改成 `box-shadow: inset 0 0 0 1px`——**画的还是那一条线**，
+     但 border 会占掉布局高度：`box-sizing: border-box` 下 24px 的盒里，两个孩子（`.input.baud`
+     与 `.baud-toggle`，都是 `height: 100%`）只剩 22px，于是账上出现两条"命中区低于 24"。
+     inset 影不吃尺寸，孩子拿回整 24px；两个孩子底色都是 transparent，所以那条线照样透出来。
+     顺带让 G 门的"带宽度边框声明"净减一条（只降不升，这里是降）。 */
   height: var(--ctl-h-2);
   box-sizing: border-box;
-  border: 1px solid var(--border);
   border-radius: var(--radius-s);
   background: var(--bg-inset);
-  box-shadow: var(--inset-1);
+  box-shadow: inset 0 0 0 1px var(--border), var(--inset-1);
 }
 
 .baud-combo:focus-within {
-  border-color: var(--accent);
-  box-shadow: var(--inset-1), 0 0 0 3px var(--ring-soft);
+  box-shadow: inset 0 0 0 1px var(--accent), var(--inset-1), 0 0 0 3px var(--ring-soft);
 }
 
 .baud-combo .input.baud {
@@ -6917,8 +6935,12 @@ label.set-switch,
   background: var(--accent-soft);
   color: var(--text);
 }
-.lbx-row.on { color: var(--accent); }
-.lbx-row:disabled { opacity: .45; cursor: not-allowed; }
+/* 选中档是"accent 当字"：账上 `.lbx-label` 在 matcha/amber/glaze 三枚 3.83~4.46（P132-F 进账量到） */
+.lbx-row.on { color: var(--accent-text); }
+/* 禁用档不吃 `opacity`：45% 的 `--text` 压在菜单底上是 2.6~3.0 那一档（账上 `.ctx-item:disabled`
+   实测 2.64，P132-F）。判据没开"disabled 例外"（P132-D 的口径：开了之后每处想少修都能说它是 disabled），
+   所以这里与 `.ctx-item:disabled` 同一条改法：淡一档 + not-allowed，别把字洗掉。 */
+.lbx-row:disabled { color: var(--text-dim); cursor: not-allowed; }
 .lbx-label { font-family: var(--font-mono); }
 .lbx-note {
   margin-left: auto;

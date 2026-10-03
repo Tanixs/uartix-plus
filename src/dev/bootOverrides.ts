@@ -26,7 +26,7 @@ import {
   LAYOUT_KEY_V3,
 } from "../features/settings/layoutEnvelope";
 import { WELCOME_SEEN_KEY } from "../shell/welcomeSlides";
-import { openRailPanel, RAIL_ITEMS, type RailKey } from "../shell/railState";
+import { openRailPanel, RAIL_ITEMS, toggleRailPanel, type RailKey } from "../shell/railState";
 import { LOCALE_LIST, type Locale } from "../i18n/strings";
 import type { IfaceKind } from "../features/serial/serialStore";
 
@@ -65,8 +65,15 @@ export interface DevBootOverrides {
    */
   welcomeOff?: boolean;
   welcomeForce?: boolean;
-  /** `?rail=link` —— 启动就把导轨的某一项展开（取证用：新 profile 的 localStorage 是空的） */
+  /** `?rail=link` —— 启动就把导轨的某一项展开（取证用：新 profile 的 localStorage 是空的）；
+   *  `?rail=none` —— 反向：启动就把它**合上**。
+   *
+   *  为什么需要 `none`（P132-F 实测撞出来的）：导轨的开合状态是落盘的，而审计基线要的是
+   *  "这一面长什么样"有唯一答案。上一版只钉了主题与布局，profile 里留着"接入"面板开着，
+   *  于是每一面都多扫到 89 个带字节点、多背 2 条命中区——同一份代码在两个 profile 上
+   *  交出两本账，那本账就不是判据而是记忆。`?preset=` 钉布局，`?rail=none` 钉导轨。 */
   rail?: RailKey;
+  railClosed?: boolean;
   /**
    * `?iface=tcp-client` —— 启动就切到某个数据接口。
    * P115-F13 起串口**参数**（口/波特率/数据位/校验/停止位/流控）已落盘，但**接口类别**
@@ -168,9 +175,11 @@ export function parseDevBoot(search: string): DevBootOverrides {
   else if (Number.isFinite(Number(q.get("welcome"))) && Number(q.get("welcome")) >= 1)
     o.welcomeForce = true;
 
-  // 导轨项走 RAIL_ITEMS 白名单（与导轨本身同一份事实源），不在这份表里的值一律丢
+  // 导轨项走 RAIL_ITEMS 白名单（与导轨本身同一份事实源），不在这份表里的值一律丢；
+  // "none" 是这一参数自己的另一档（合上），不是导轨项的名字，所以单独认。
   const rail = q.get("rail");
-  if (rail && RAIL_ITEMS.some((i) => i.key === rail)) o.rail = rail as RailKey;
+  if (rail === "none") o.railClosed = true;
+  else if (rail && RAIL_ITEMS.some((i) => i.key === rail)) o.rail = rail as RailKey;
 
   const iface = q.get("iface");
   if (iface && (IFACE_LIST as readonly string[]).includes(iface)) o.iface = iface as IfaceKind;
@@ -218,7 +227,8 @@ export function devForensics(
 
 export function hasDevBoot(o: DevBootOverrides): boolean {
   return Boolean(
-    o.preset || o.theme || o.zoom || o.lang || o.tourAt !== undefined || o.rail || o.iface ||
+    o.preset || o.theme || o.zoom || o.lang || o.tourAt !== undefined || o.rail || o.railClosed ||
+    o.iface ||
     o.open || o.openPanel || o.probeOverflow || o.railw !== undefined || o.click !== undefined ||
     o.welcomeOff || o.welcomeForce || o.resetLayout,
   );
@@ -263,8 +273,9 @@ export function applyDevBoot(
     else if (parsed.welcomeForce) localStorage.removeItem(WELCOME_SEEN_KEY);
     // 走 railState 的 setter，**不是**直接 setItem：本文件 value-import 了 railState，
     // 它在求值期就把 localStorage 读过一遍存进模块变量了 —— 只写存储的话
-    // 内存态还是旧的 null，表现就是"?rail= 静默失效、面板不开"（实测撞上过一次）。
+    // 内存态还是旧的 null，表现就是"?rail= 静默失效、面板不开"（早前实测撞上过一次）。
     if (parsed.rail) openRailPanel(parsed.rail);
+    else if (parsed.railClosed) toggleRailPanel(null);
   } catch {
     /* 无 localStorage 的环境（node 测试）：覆盖退化为「只改内存 settings」 */
   }

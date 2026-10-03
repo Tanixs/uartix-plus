@@ -387,11 +387,13 @@ select.input {
   background: var(--fb-fill-hover);
 }
 
-/* 禁用态宿主有两写法：按钮走 `:disabled`，挂件菜单是 `.disabled` 类 ⇒ 两边都得给 */
+/* 禁用态宿主有两写法：按钮走 `:disabled`，挂件菜单是 `.disabled` 类 ⇒ 两边都得给。
+   P132-F：与内置那通路同步改——原来把 --text-dim 再朝面板洗 38%（"淡"变成了"看不见"），
+   现在禁用一档由 --text-dim + not-allowed 表达。两条通路的规则体由 marketContent 对账。 */
 .ctx-item:disabled,
 .ib-count:disabled,
 .cmdk-item:disabled {
-  color: color-mix(in srgb, var(--text-dim) 62%, var(--bg-panel));
+  color: var(--text-dim);
   background: transparent;
 }
 
