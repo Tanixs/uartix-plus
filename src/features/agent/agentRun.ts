@@ -9,6 +9,7 @@
 import { runAgent, resolveBudget } from "./loop";
 import { clearPlan } from "./planLedger";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
+import { parseFsRoots } from "./generalTools";
 import { invokeAgentProvider } from "./provider";
 import { activeRef } from "../ai/aiProfileStore";
 import { createLocalAgentAdapter } from "./agentAdapter";
@@ -504,7 +505,11 @@ async function executeRun(
       ...(opts.resumeFrom?.length ? { resumeFrom: opts.resumeFrom } : {}),
       // P99a-C1 §6.2：每轮重算的宿主事实（授权域 / 可见工具面 / 连接现状 / 版本）。
       // 只给读数不给指令——DSH 的 `agent.inject` 那条"每轮往上下文里塞话"的路我们不抄（详设 §6.2）。
-      liveFacts: ({ count, bytes }) => runtimeFacts({ scope: view.scope, allowed, toolCount: count, toolBytes: bytes }),
+      liveFacts: ({ count, bytes }) => runtimeFacts({
+        scope: view.scope, allowed, toolCount: count, toolBytes: bytes,
+        // P133-C1：把白名单根报给模型（解析只有 parseFsRoots 这一处，不在这里再 split 一遍）
+        fsRoots: parseFsRoots(getSettings().agentFsRoots),
+      }),
       seqBase: prior.length,
       ...(activeAi ? { maxOutputTokens: activeAi.model.maxOutputTokens } : {}),
       maxRounds: view.caps.maxRounds, maxCalls: view.caps.maxCalls,

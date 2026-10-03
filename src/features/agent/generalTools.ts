@@ -68,9 +68,24 @@ export function inWhitelist(path: string): boolean {
   return isUnderRoots(path, parseFsRoots(getSettings().agentFsRoots));
 }
 
-const NOT_IN_WL = (callId: string): ToolResultBody => notExecuted(callId, "path_outside_whitelist", {
-  hint: "路径不在「Agent 文件白名单」内（设置 → AI 服务）；白名单为空表示文件工具关闭",
-});
+/**
+ * 白名单拒绝要说清是**哪一种**：空 = 功能关（只有用户能改），非空 = 路径不对（模型自己就能换对的那枚）。
+ * 合成一句话的后果是它只能回去问用户，而它其实有信息自己纠正——P133-C1 的第一次真跑就卡在这。
+ * 非空时把 `candidates` 回出去：那几枚根本来就是它下一步要拼的前缀。
+ */
+function wlRefuse(callId: string, path: string): ToolResultBody {
+  const roots = parseFsRoots(getSettings().agentFsRoots);
+  if (!roots.length) {
+    return notExecuted(callId, "files_whitelist_empty", {
+      hint: "「Agent 文件白名单」为空 ⇒ 文件工具整体关闭。要用户去 设置 → AI 服务 → Agent 文件白名单 加目录；换个路径再撞一次不会有用",
+    });
+  }
+  return notExecuted(callId, "path_outside_whitelist", {
+    path,
+    candidates: roots,
+    hint: "路径不在白名单内。root / path 必须是**绝对路径**且落在 candidates 某枚之内——从里面挑一枚再拼一次，别用相对路径",
+  });
+}
 
 interface HttpResult {
   url: string;
@@ -98,7 +113,7 @@ export const FS_READ_PAGE_MAX = 64 * 1024;
 async function fsRead(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const path = String(parsed.path ?? "").trim();
   if (!path) return notExecuted(callId, "invalid_args", { hint: "path 必须是非空字符串" });
-  if (!inWhitelist(path)) return NOT_IN_WL(callId);
+  if (!inWhitelist(path)) return wlRefuse(callId, path);
   const from = Math.max(0, Math.floor(Number(parsed.from)) || 0);
   const maxBytes = Math.min(Math.max(1, Math.floor(Number(parsed.maxBytes)) || FS_READ_PAGE_MAX), FS_READ_PAGE_MAX);
   try {
@@ -141,12 +156,7 @@ async function fsSearch(
   if (!root || !needle.trim()) {
     return notExecuted(callId, "invalid_args", { hint: "root 与 needle 都必填" });
   }
-  if (!inWhitelist(root)) {
-    return notExecuted(callId, "path_outside_whitelist", {
-      root,
-      hint: "搜索根目录不在「Agent 文件白名单」内：设置 → AI 服务 → Agent 文件白名单（留空 = 文件工具整体关闭）。告诉用户去加，别换个路径再撞一次。",
-    });
-  }
+  if (!inWhitelist(root)) return wlRefuse(callId, root);
   try {
     const r = await invoke<{
       matches: unknown[]; scanned: number; truncated: boolean;
@@ -201,9 +211,7 @@ async function assessFsEdit(args: Record<string, unknown>, ctx: ToolCtx): Promis
   if (oldText === newText) {
     return { refuse: notExecuted(callId, "invalid_args", { hint: "old_text 与 new_text 相同，无需改" }) };
   }
-  if (!inWhitelist(path)) {
-    return { refuse: notExecuted(callId, "path_outside_whitelist", { path, hint: "把目标目录加入 设置 → AI 服务 → 「Agent 文件白名单」" }) };
-  }
+  if (!inWhitelist(path)) return { refuse: wlRefuse(callId, path) };
   let st: FileStat;
   try {
     st = await invoke<FileStat>("agent_fs_stat", { path });
@@ -240,7 +248,7 @@ async function fsEdit(callId: string, parsed: Record<string, unknown>): Promise<
   if (!path || !oldText) {
     return notExecuted(callId, "invalid_args", { hint: "path 与 old_text 必填（old_text 不能为空，空串会命中每一行）" });
   }
-  if (!inWhitelist(path)) return NOT_IN_WL(callId);
+  if (!inWhitelist(path)) return wlRefuse(callId, path);
   try {
     const r = await invoke<{ path: string; replacements: number; bytes: number }>("agent_fs_edit", {
       path, old_text: oldText, new_text: newText,
@@ -259,7 +267,7 @@ async function fsEdit(callId: string, parsed: Record<string, unknown>): Promise<
 async function fsList(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
   const path = String(parsed.path ?? "").trim();
   if (!path) return notExecuted(callId, "invalid_args", { hint: "path 必须是非空字符串" });
-  if (!inWhitelist(path)) return NOT_IN_WL(callId);
+  if (!inWhitelist(path)) return wlRefuse(callId, path);
   const depthRaw = Number(parsed.depth);
   const depth = Number.isFinite(depthRaw) ? Math.min(Math.max(Math.round(depthRaw), 1), 3) : 2;
   try {
@@ -381,9 +389,7 @@ async function assessFsWrite(
   if (content.length > FS_WRITE_MAX_CHARS) {
     return { refuse: notExecuted(callId, "too_large", { chars: content.length, max: FS_WRITE_MAX_CHARS, hint: "分几次写，或先写模板再补数据" }) };
   }
-  if (!inWhitelist(path)) {
-    return { refuse: notExecuted(callId, "path_outside_whitelist", { path, hint: "把目标目录加入 设置 → AI 服务 → 「Agent 文件白名单」" }) };
-  }
+  if (!inWhitelist(path)) return { refuse: wlRefuse(callId, path) };
   let st: FileStat;
   try {
     st = await invoke<FileStat>("agent_fs_stat", { path });

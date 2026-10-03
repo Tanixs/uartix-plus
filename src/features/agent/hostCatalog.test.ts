@@ -639,7 +639,7 @@ describe("hostCatalog：各视图内容口径", () => {
 
 describe("hostCatalog §6.2：每轮注入的运行时事实", () => {
   it("只注事实：档位 / 工具面 / 连接现状 / 版本，一段都不落就不叫自省", async () => {
-    const line = await runtimeFacts({ scope: "create", allowed: [], toolCount: 41, toolBytes: 28 * 1024 });
+    const line = await runtimeFacts({ scope: "create", allowed: [], toolCount: 41, toolBytes: 28 * 1024, fsRoots: [] });
     expect(line).toContain("scope=create");
     expect(line).not.toContain("domains="); // 非 custom 档不报勾选集（那本来就不是它的事实）
     expect(line).toContain("tools=41/28KB");
@@ -653,7 +653,7 @@ describe("hostCatalog §6.2：每轮注入的运行时事实", () => {
     ho.operator.pkg = { x: 1 };
     ho.serial.status = "disconnected";
     ho.serial.portName = null;
-    const line = await runtimeFacts({ scope: "custom", allowed: ["config", "plugins"], toolCount: 3, toolBytes: 1024 });
+    const line = await runtimeFacts({ scope: "custom", allowed: ["config", "plugins"], toolCount: 3, toolBytes: 1024, fsRoots: [] });
     expect(line).toContain("scope=custom domains=config,plugins");
     expect(line).toContain("operatorLocked=true");
     expect(line).toContain("serial=serial:disconnected rx");
@@ -661,14 +661,28 @@ describe("hostCatalog §6.2：每轮注入的运行时事实", () => {
 
   it("读不到就承认读不到，并给整行封顶（每轮都进请求，长了就是 24 轮的浪费）", async () => {
     ho.failSession = true;
-    const line = await runtimeFacts({ scope: "create", allowed: [], toolCount: 1, toolBytes: 1024 });
+    const line = await runtimeFacts({ scope: "create", allowed: [], toolCount: 1, toolBytes: 1024, fsRoots: [] });
     expect(line).toContain("scope=create"); // 前面几段仍是真读数，不因一段失败整行作废
     expect(line).toContain("host=unavailable(store 读取炸了)");
     ho.failSession = false;
 
-    const long = await runtimeFacts({ scope: "custom", allowed: Array.from({ length: 40 }, (_, i) => `domain${i}`), toolCount: 999, toolBytes: 999 * 1024 });
+    const long = await runtimeFacts({ scope: "custom", allowed: Array.from({ length: 40 }, (_, i) => `domain${i}`), toolCount: 999, toolBytes: 999 * 1024, fsRoots: [] });
     expect(long.length).toBeLessThanOrEqual(RUNTIME_FACTS_MAX);
     expect(long.endsWith("…")).toBe(true);
+  });
+
+  it("P133-C1：勾了 files 域才把白名单根报给模型，且路径不参与整行截断", async () => {
+    // 第一次真跑这条回路时模型传了相对路径 `src/styles` ⇒ 越界拒绝。
+    // 它没有任何地方能知道根是哪几枚绝对路径，猜相对路径是唯一合理动作。
+    const off = await runtimeFacts({ scope: "custom", allowed: ["config"], toolCount: 3, toolBytes: 1024, fsRoots: ["D:\\Projects\\Larix"] });
+    expect(off, "没授权 files 域就别把用户路径送出去").not.toContain("fsRoots");
+    const on = await runtimeFacts({ scope: "custom", allowed: ["files"], toolCount: 3, toolBytes: 1024, fsRoots: ["D:\\Projects\\Larix"] });
+    expect(on).toContain("fsRoots");
+    expect(on).toContain("D:\\Projects\\Larix");
+    // 根单独成行：路径被砍掉一半比行长更糟，模型会照着错前缀再拼一次
+    expect(on.split("\n").length).toBe(2);
+    const empty = await runtimeFacts({ scope: "custom", allowed: ["files"], toolCount: 3, toolBytes: 1024, fsRoots: [] });
+    expect(empty).toContain("(empty)");
   });
 });
 

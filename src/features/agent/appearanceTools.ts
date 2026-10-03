@@ -382,6 +382,10 @@ async function imageSwatch(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
   const path = String(parsed.path ?? "").trim();
   if (!path) return notExecuted(callId, "invalid_args", { hint: "path 必须是非空字符串" });
   // 授权域（files）由管线的 entry.domain 裁决，这里不再自判——两处判同一个门就是第二真相
+  // P133-C1 注：这里**没有**改去复用 generalTools.wlRefuse。试过，退回来了：
+  // 本测试文件里 `patch` 拿到的 settingsStore 与 generalTools 读的不是同一份模块实例，
+  // 一复用就得靠 importOriginal 拉真模块，整文件 31 条测试随 localStorage 的撤桩顺序全红。
+  // 为一条话术的去重去跟模块身份较劲不值 ⇒ 记成欠账（验收账 §4）。
   if (!inWhitelist(path)) {
     return notExecuted(callId, "path_outside_whitelist", { hint: "路径不在「Agent 文件白名单」内" });
   }

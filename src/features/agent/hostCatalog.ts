@@ -1213,6 +1213,8 @@ export async function runtimeFacts(ctx: {
   allowed: readonly string[];
   toolCount: number;
   toolBytes: number;
+  /** 设置里的「Agent 文件白名单」根（由调用方读，本模块不碰 settingsStore：那条边一开就是新的成环面） */
+  fsRoots: readonly string[];
 }): Promise<string> {
   const bits = [
     `scope=${ctx.scope}${ctx.scope === "custom" ? ` domains=${ctx.allowed.join(",") || "(none)"}` : ""}`,
@@ -1234,6 +1236,16 @@ export async function runtimeFacts(ctx: {
   } catch (err) {
     bits.push(`host=unavailable(${String((err as Error)?.message ?? err).slice(0, 40)})`);
   }
-  const line = bits.join(" · ");
-  return line.length > RUNTIME_FACTS_MAX ? `${line.slice(0, RUNTIME_FACTS_MAX - 1)}…` : line;
+  let line = bits.join(" · ");
+  if (line.length > RUNTIME_FACTS_MAX) line = `${line.slice(0, RUNTIME_FACTS_MAX - 1)}…`;
+  /* P133-C1：白名单那几枚根必须**报给模型**。第一次真跑这条回路时，模型调 fs_grep 传了相对路径
+   * `src/styles` ⇒ path_outside_whitelist —— 它没有任何地方能知道根是哪些绝对路径，
+   * 猜相对路径是唯一合理动作，于是能力面明明开着却表现为"它不会看代码"（与 P109 §1-3 同一课）。
+   * 只在勾了 files 域时才报（没授权就把用户路径送出去是无谓的），且**单独成行、不参与截断**：
+   * 路径被砍掉一半比行长更糟——它会照着错前缀再拼一次。 */
+  if (!ctx.allowed.includes("files")) return line;
+  const roots = ctx.fsRoots.length
+    ? `fsRoots（绝对路径，fs_* 的 root / path 必须落在其中之一）: ${ctx.fsRoots.join(" | ")}`
+    : "fsRoots: (empty) —— 「Agent 文件白名单」为空，文件工具整体关闭；要用户去 设置 → AI 服务 加目录";
+  return `${line}\n${roots}`;
 }

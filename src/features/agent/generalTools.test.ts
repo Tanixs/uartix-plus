@@ -136,10 +136,27 @@ describe("executeGeneralTool 域门", () => {
     expect(r2.code).toBe("unauthorized_scope");
   });
 
-  it("勾了 files 域但白名单为空 → 拒绝且不触盘", async () => {
+  it("勾了 files 域但白名单为空 → files_whitelist_empty（P133-C1：与「路径越界」分家），且不触盘", async () => {
     const r = await executeGeneralTool(call("fs_read", { path: "D:\\Projects\\a.txt" }), ctx("custom", ["files"]), "r1", noGate);
     expect(r.ok).toBe(false);
+    // 两种情况的正确动作不同：空=只有用户能改；越界=模型自己就能换对的那枚。
+    // 合成一句话时模型只能回去问用户，第一次真跑这条回路就卡在这。
+    expect(r.code).toBe("files_whitelist_empty");
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("P133-C1：白名单非空却填了相对路径 → 拒，并把 candidates 回出去让它自己纠正", async () => {
+    patch({ agentFsRoots: "D:\\Projects\\Larix" });
+    const r = await executeGeneralTool(call("fs_grep", { root: "src/styles", needle: "agent-undone" }), ctx("custom", ["files"]), "r1", noGate);
     expect(r.code).toBe("path_outside_whitelist");
+    const d = r.data as { path: string; candidates: string[]; hint: string };
+    expect(d.path).toBe("src/styles");
+    expect(d.candidates).toEqual(["D:\\Projects\\Larix"]);
+    expect(d.hint).toContain("绝对路径");
+    // 换对前缀就该放行（证明 candidates 是真能用的信息，不是装饰）
+    invokeMock.mockResolvedValueOnce({ matches: [], scanned: 3, truncated: false, skipped: { binary: 0, oversized: 0 } });
+    const ok = await executeGeneralTool(call("fs_grep", { root: "D:\\Projects\\Larix\\src\\styles", needle: "x" }), ctx("custom", ["files"]), "r1", noGate);
+    expect(ok.ok).toBe(true);
   });
 
   it("shell：勾域但总开关关闭 → shell_disabled，且不进审批门", async () => {
@@ -276,7 +293,7 @@ describe("P109-D · fs_grep / fs_glob / fs_edit", () => {
     ] as [string, Record<string, unknown>][]) {
       const r = await executeGeneralTool(call(name, args), ctx("custom", ["files", "write"]), "r1", noGate);
       expect(r.ok, `${name} 不该在白名单为空时放行`).toBe(false);
-      expect(r.code).toBe("path_outside_whitelist");
+      expect(r.code).toBe("files_whitelist_empty");
       expect(JSON.stringify(r)).toContain("白名单");
     }
     expect(invokeMock, "白名单判定必须在 invoke 之前，否则门只存在于渲染层").not.toHaveBeenCalled();
