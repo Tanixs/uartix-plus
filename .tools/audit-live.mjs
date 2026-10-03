@@ -31,13 +31,13 @@ const CHECK = args.includes("--check");
 const VIEWPORT = { w: 1440, h: 900 };
 
 /**
- * 七面：启动态两面 + 五张浮层。
+ * 十面：启动态两面 + 五张浮层 + 三个"要点一下才出现"的面（P132-G）。
  * 浮层**必须靠真事件开**（按键 / 真点击 / 真右键 / 真 hover），注入一个 DOM 节点出来不算——
  * 注入的浮层没有真实的定位、层叠与 backdrop，量出来的东西用户看不到。
  * `require` 是"开没开出来"的哨兵：没开出来直接抛，而不是静默少测一面（P132-E）。
  *
  * 每一面都把状态**写死在 URL 里**（P132-F）：`preset=proto` 钉布局、`rail=none|link` 钉导轨。
- * 不钉的代价是实测撞上的——profile 里留着"接入"面板开着，于是七面全都多扫 89 个带字节点、
+ * 不钉的代价是实测撞上的——profile 里留着"接入"面板开着，于是每一面都多扫 89 个带字节点、
  * 多背 2 条命中区，同一份代码在两个 profile 上交出两本账。账要能当判据，前提是"这一面长什么样"
  * 只有一个答案；否则它记的是那台机器此刻的记忆。
  *
@@ -49,15 +49,31 @@ const VIEWPORT = { w: 1440, h: 900 };
  *    （实测 938,326 与 963,713 那两枚 `elementFromPoint` 命中的是 `set-card`/`set-content`）——
  *    照 DOM 顺序点第一枚就永远开不出泡。现在按"那个点上是不是它自己"挑目标。
  */
-const base = (t, extra = "") => `/?theme=${t}&welcome=0&preset=proto&rail=none${extra}`;
+const base = (t, extra = "", rail = "none") => `/?theme=${t}&welcome=0&preset=proto&rail=${rail}${extra}`;
+/** 同一个键写两遍时 `URLSearchParams.get` 只认第一个：`rail=none` 后面再挂一个 `rail=templates`
+   不会覆盖它，只会让那一面**静默地"导轨没开"**（本批实测踩了一次）。所以钉住：路径里不许有重复键。 */
+function assertNoDupKeys(path, id) {
+  const keys = (path.replace(/^[^?]*\?/, "").match(/[^&=?]+=/g) || []).map((k) => k.slice(0, -1));
+  const dup = keys.filter((k, i) => keys.indexOf(k) !== i);
+  if (dup.length) throw new Error(`${id}：URL 里 ${dup.join(",")} 出现了两次——后写的会被静默忽略，这一面的状态不是你以为的那个`);
+}
 const SURFACES = [
   { id: "workspace", path: (t) => base(t) },
   { id: "settings", path: (t) => base(t, "&open=settings/appearance") },
   { id: "palette", path: (t) => base(t), drive: "palette", require: ".cmdk" },
   { id: "menu", path: (t) => base(t, "&click=.cb-ws-btn"), require: ".cb-ws-menu" },
-  { id: "lbx", path: (t) => `/?theme=${t}&welcome=0&preset=proto&rail=link&click=.baud-toggle`, require: ".ctx-menu.lbx" },
+  { id: "lbx", path: (t) => base(t, "&click=.baud-toggle", "link"), require: ".ctx-menu.lbx" },
   { id: "ctxmenu", path: (t) => base(t), drive: "ctxmenu", require: ".ctx-menu" },
   { id: "hint", path: (t) => base(t, "&open=settings/appearance"), drive: "hint", require: ".help-bubble" },
+  /* P132-G 三面：faint 当字那一族只有把面板摆出来才量得到（P132-F §7.1）。
+     `model`/`speclib` 各抓到 2 条、1~2 条；`hovermenu` 现在是 0 条——它钉的是上一批那个结论，
+     以后谁把 `.tb-menu-item:hover` 改回 `--accent`，这一面会当场多一条。 */
+  { id: "model", path: (t) => base(t, "&open=settings/model") },
+  /* `?click=` 的值里有空格（`:nth-child` 前那个后代选择器）——必须编码，
+     否则 `URLSearchParams` 会把空格读成 `+`，`querySelector(".rp-seg+button…")` 直接抛，
+     表现就是"这一面永远开不出来"（实测踩过：探针里手写 %20 能开，脚本里裸空格不能）。 */
+  { id: "speclib", path: (t) => base(t, `&click=${encodeURIComponent(".rp-seg button:nth-child(2)")}`, "templates"), require: ".spl-list" },
+  { id: "hovermenu", path: (t) => base(t, "&click=.cb-ws-btn"), drive: "hovermenu", require: ".cb-ws-menu" },
 ];
 
 /** 哨兵问的是"看得见的一张浮层"，不是"DOM 里有没有这个类"：屏外的隐藏实例（如列树那份）不算开出来 */
@@ -115,8 +131,13 @@ async function key(k, code, vk, modifiers = 0) {
     还要那个点上落得下它——被别的层盖住的元素（设置整页身后的工作区）派发不出真事件。
     `el.contains(hit)` 而不是 `hit === el`：容器类的落点（`.ctl-main`）中心往往是自己的孩子。 */
 async function clickableCenter(sel) {
+  return hoverableCenter(sel, 0);
+}
+/** 第 n 枚"落得下鼠标"的元素中心（选中态那一族要的是"把鼠标停在某一项上"） */
+async function hoverableCenter(sel, n) {
   return evaluate(`(() => {
-    const el = document.querySelector(${JSON.stringify(sel)});
+    const els = [...document.querySelectorAll(${JSON.stringify(sel)})];
+    const el = els[${n}];
     if (!el) return null;
     const r = el.getBoundingClientRect();
     if (r.width < 8 || r.height < 8) return null;
@@ -147,6 +168,14 @@ async function drive(how) {
     return;
   }
   if (how === "ctxmenu") { await rightClickOn(".ctl-main", "ctxmenu"); return; }
+  if (how === "hovermenu") {
+    // 先等菜单开出来再移鼠标：`?click=` 是挂载后 1400ms 才点的，先移后等就是拿时序赌
+    if (!(await waitOpen(".cb-ws-menu"))) throw new Error("hovermenu：菜单没开出来，悬停档无从谈起");
+    const at = await hoverableCenter(".tb-menu-item", 1);
+    if (!at) throw new Error("hovermenu：第 2 枚 .tb-menu-item 落不下鼠标——这一面不能空着记账");
+    await hoverAt(at);
+    return;
+  }
   if (how === "hint") {
     /* 逐枚挑"点得到的那一枚"：DOM 里第一枚 `.help-hint` 实测在设置整页**身后**
        （938,326 那枚 elementFromPoint 命中的是 set-card），照 DOM 顺序点第一枚就永远开不出泡。 */
@@ -236,9 +265,10 @@ async function waitOpen(sel, ms = 6000) {
 
 async function collectOne(themeId, surface) {
   /* 真事件偶发丢一次（焦点还没进文档，Ctrl+Shift+P 就没人接）：重开这一面，而不是放过这一面。
-     63 次采集里中一次是实测发生的（matcha/palette），把它当"覆盖到了"是假绿，直接抛又会让整本账
-     因为一次抖动重跑——所以只重试**同一面**，第三次还开不出来才判红。 */
+     一轮全量里中一次是实测发生的（P132-F 的 matcha/palette），把它当"覆盖到了"是假绿，
+     直接抛又会让整本账因为一次抖动重跑——所以只重试**同一面**，第三次还开不出来才判红。 */
   let open = true;
+  assertNoDupKeys(surface.path(themeId), `${themeId}/${surface.id}`);
   for (let attempt = 1; attempt <= 3; attempt++) {
     await goto(`${ORIGIN}${surface.path(themeId)}`);
     if (surface.drive) await drive(surface.drive);

@@ -2484,7 +2484,9 @@ select optgroup {
 .rp-seg{display:flex;gap:4px;flex:none;padding:6px 6px 2px;}
 .rp-seg button{all:unset;cursor:pointer;padding:4px 10px;border-radius:var(--radius-pill);font-size:var(--fs-sm);color:var(--text-dim);}
 .rp-seg button:hover{background:var(--raise-1);color:var(--text);}
-.rp-seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600;}
+/* 选中的那一枚页签是"字"不是色块，所以走 `--accent-text`（P132-D 的"accent 当字"口径）：
+   账上 `.on` 在 light 4.29 / matcha 3.46（P132-G speclib 面）。描边与底色仍吃 `--accent` 系。 */
+.rp-seg button.on{background:var(--accent-soft);color:var(--accent-text);font-weight:600;}
 .rp-proto-body{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;}
 /* 发送谱清单：一行一张谱，摘要说清它有多大、被谁引用 */
 .spl{display:flex;flex-direction:column;flex:1;min-height:0;}
@@ -2496,10 +2498,13 @@ select optgroup {
 .spl-row.on{background:var(--accent-soft);}
 .spl-main{all:unset;flex:1;min-width:0;cursor:pointer;display:flex;flex-direction:column;gap:2px;padding:6px 8px;}
 .spl-name{font-size:var(--fs-sm);color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.spl-meta{font-size:var(--fs-body);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* 「N 块 · 42 B · 2 参数」是一行**读数**，⋯ 那颗才是纹样（留在 faint 是对的）。
+   P132-G：speclib 面进账后 `.spl-none` 实测 3.19~3.45；`.spl-meta` 要有谱才渲染，
+   所以这一条是同族兄弟（同一张列表、同一个角色），账还没量到。 */
+.spl-meta{font-size:var(--fs-body);color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .spl-kebab{all:unset;flex:none;width:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-faint);font-size:var(--fs-md);}
 .spl-kebab:hover{color:var(--text);}
-.spl-none{padding:14px 8px;font-size:var(--fs-sm);color:var(--text-faint);}
+.spl-none{padding:14px 8px;font-size:var(--fs-sm);color:var(--text-dim);}
 .spl-msg{flex:none;padding:6px 8px;font-size:var(--fs-body);color:var(--text-dim);max-height:64px;overflow:auto;}
 .spl-msg.bad{color:var(--danger);}
 
@@ -6124,7 +6129,9 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   border-radius: var(--radius-l);
 }
 .msp-list-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 2px 4px 8px; }
-.msp-list-title { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.4px; color: var(--text-faint); }
+/* 小标题与计数都是**字**（P132-G：model 面进账后实测 3.39）。
+   `--text-faint` 是装饰档（P132-E 给它钉了 3.0 的地板，非文本那一档），别拿它写读得出的话。 */
+.msp-list-title { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.4px; color: var(--text-dim); }
 .msp-row {
   all: unset;
   display: flex;
@@ -6139,9 +6146,11 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   font-size: var(--fs-sm);
 }
 .msp-row:hover { color: var(--text); background: var(--raise-1); }
-.msp-row.on { color: var(--accent); background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
+/* 选中行的**字**走 `--accent-text`（账上 `.msp-name` 实测 light 4.22 / matcha 3.37 / amber 3.32）；
+   左边那条 3px 立条与底色仍是 `--accent`——那是图形，不是字。P132-D 立的口径。 */
+.msp-row.on { color: var(--accent-text); background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
 .msp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.msp-count { font-size: var(--fs-xs); color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.msp-count { font-size: var(--fs-xs); color: var(--text-dim); font-variant-numeric: tabular-nums; }
 /* 状态点：五种说法各对应一件真事（未测 / 停用 / 缺配置 / 测试中 / 通过 / 失败）。
    它不是"在线指示灯"——那需要心跳，这里只有"我刚点那一下的结果"。 */
 .msp-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); }
@@ -6229,8 +6238,10 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   font-size: var(--fs-body);
   color: var(--text);
 }
-.msp-mrow.on .msp-mname { color: var(--accent); }
-.msp-moff { font-size: var(--fs-xs); color: var(--text-faint); }
+.msp-mrow.on .msp-mname { color: var(--accent-text); }
+/* 「未配置」是状态文字，与上面 `.msp-count` 同一张列表：账上要有它得先有一条没填密钥的档案
+   （新 profile 只有一条已启用的），所以这一条是同族兄弟、没被量到——写清楚，别当成实测过。 */
+.msp-moff { font-size: var(--fs-xs); color: var(--text-dim); }
 .msp-macts { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
 .msp-badge {
   flex: none;

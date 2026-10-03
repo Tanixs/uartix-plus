@@ -327,8 +327,8 @@ describe("P132-C · 审计采集器依赖的导出名", () => {
     const b = JSON.parse(readFileSync(fileURLToPath(new URL("../../.tools/audit-baseline.json", import.meta.url)), "utf8"));
     expect(b.version, "形状换了（命中区/溢出从条数改成条目）就要同步改门与这条").toBe(2);
     expect(b.surfaces).toContain("workspace");
-    for (const s of ["palette", "menu", "lbx", "ctxmenu", "hint"]) {
-      expect(b.surfaces, `浮层那一族的面 ${s} 不在账上（采集器的 SURFACES 被改小了？）`).toContain(s);
+    for (const s of ["palette", "menu", "lbx", "ctxmenu", "hint", "model", "speclib", "hovermenu"]) {
+      expect(b.surfaces, `那一面不在账上（采集器的 SURFACES 被改小了？）：${s}`).toContain(s);
     }
     const ids = Object.keys(b.themes);
     expect(ids.length).toBeGreaterThanOrEqual(9);
