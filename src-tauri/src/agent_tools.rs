@@ -633,8 +633,36 @@ fn repo_check_guard(argv: &[String], cwd: &str, roots: &[String]) -> Result<(), 
     Ok(())
 }
 
-/// 在本仓根目录用 argv 直接启动一条校验命令（无 shell）。
-/// 超时由宿主表传入、在这里夹到 1..=1200 秒；输出与 shell 同一份 64KB 头尾预算。
+/// 在本仓根目录用 argv 直接启动一条校验命令（无 shell）。**同步本体**，给命令与测试共用。
+///
+/// 为什么把本体从 `async fn` 里拆出来：拆之前那段 spawn 代码只有走 IPC 才够得着，
+/// 而取证环境没有 Tauri 窗口 ⇒ "这条通路到底起不起得来进程"这件事**从没被执行过一次**
+/// （P133-A 验收账 §6-1 记的就是它）。拆成同步函数后，`cargo test` 能真起一个子进程验一遍。
+/// 判定与执行都在这一处，不出现"测的是 A、跑的是 B"。
+fn run_repo_check(
+    argv: Vec<String>,
+    cwd: &str,
+    roots: &[String],
+    timeout_secs: u64,
+) -> Result<serde_json::Value, String> {
+    repo_check_guard(&argv, cwd, roots)?;
+    let secs = clamp_repo_check_timeout(timeout_secs);
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..])
+        .current_dir(cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：不闪黑框
+    }
+    let (child, reader) = spawn_piped(cmd)?;
+    finish_child(child, reader, Duration::from_secs(secs))
+}
+
+/// 校验命令的 IPC 外壳：只做"移出 async 运行时"这一件事。
+/// 超时由宿主表传入、在 `run_repo_check` 里夹到 1..=1200 秒；输出与 shell 同一份 64KB 头尾预算。
 #[tauri::command]
 pub async fn agent_repo_check(
     argv: Vec<String>,
@@ -642,24 +670,9 @@ pub async fn agent_repo_check(
     roots: Vec<String>,
     timeout_secs: u64,
 ) -> Result<serde_json::Value, String> {
-    repo_check_guard(&argv, &cwd, &roots)?;
-    let secs = clamp_repo_check_timeout(timeout_secs);
-    tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
-        let mut cmd = Command::new(&argv[0]);
-        cmd.args(&argv[1..])
-            .current_dir(&cwd)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：不闪黑框
-        }
-        let (child, reader) = spawn_piped(cmd)?;
-        finish_child(child, reader, Duration::from_secs(secs))
-    })
-    .await
-    .map_err(|e| format!("校验任务失败：{e}"))?
+    tokio::task::spawn_blocking(move || run_repo_check(argv, &cwd, &roots, timeout_secs))
+        .await
+        .map_err(|e| format!("校验任务失败：{e}"))?
 }
 
 fn spawn_shell(
@@ -979,5 +992,54 @@ mod tests {
         assert_eq!(clamp_repo_check_timeout(0), 1);
         assert_eq!(clamp_repo_check_timeout(600), 600);
         assert_eq!(clamp_repo_check_timeout(999_999), REPO_CHECK_TIMEOUT_MAX_SECS);
+    }
+
+    /* —— P133-B0：真起一个子进程 ——
+     * 上面四条钉的是"该拒的拒掉"，但一条通路从没**成功执行**过一次，就不能说它是通的。
+     * P133-A 的验收账 §6-1 记的正是这个缺口（浏览器取证环境没有宿主，invoke 到不了 Rust）。
+     * 这里用 `cargo`：跑这些测试本身就意味着 cargo 在 PATH 上，所以它是这个环境里唯一
+     * "必然存在、且是宿主表真会用到的程序"（换成 node 就要赌机器，换成自造 exe 就是自证夹具）。
+     */
+
+    fn here() -> String {
+        std::env::current_dir().expect("取当前目录失败").to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn repo_check_actually_spawns_and_reads_stdout() {
+        let cwd = here();
+        let roots = roots(&[&cwd]);
+        let v = run_repo_check(argv(&["cargo", "--version"]), &cwd, &roots, 60)
+            .expect("spawn 应当成功：这条测试的全部意义就是它真起得来进程");
+        assert_eq!(v["exitCode"].as_i64(), Some(0), "cargo --version 该退 0：{v}");
+        assert_eq!(v["timedOut"].as_bool(), Some(false));
+        let out = v["stdout"].as_str().unwrap_or_default();
+        assert!(out.contains("cargo"), "stdout 里要读得到真输出，实际是：{out}");
+        // 截断那套字段必须一起回来：前端靠它们判断"这是全文还是被压过"
+        assert_eq!(v["stdoutTruncated"].as_bool(), Some(false));
+        assert!(v["stdoutBytes"].as_u64().unwrap_or(0) > 0, "stdoutBytes 要报真实字节数");
+    }
+
+    #[test]
+    fn repo_check_reports_a_red_exit_as_an_observation_not_an_error() {
+        // 门禁红了 = 一次真观察。把它抛成 Err，模型读到的是"工具坏了"，
+        // 于是它会重试而不是去修代码——那正是 §8-41 说的那种会被误读的回执。
+        let cwd = here();
+        let roots = roots(&[&cwd]);
+        let v = run_repo_check(argv(&["cargo", "__definitely_not_a_subcommand"]), &cwd, &roots, 60)
+            .expect("非零退出不是命令启动失败，必须回 Ok");
+        assert_ne!(v["exitCode"].as_i64(), Some(0), "这条子命令本该失败，退出码不能是 0");
+        assert_eq!(v["timedOut"].as_bool(), Some(false));
+        assert!(!v["stderr"].as_str().unwrap_or_default().is_empty(), "失败原因要在 stderr 里");
+    }
+
+    #[test]
+    fn repo_check_says_so_when_the_program_cannot_be_found() {
+        // PATH 上没有的东西必须**出声**（Err），不能悄悄退成"exitCode -1 且什么都没跑"
+        let cwd = here();
+        let roots = roots(&[&cwd]);
+        let e = run_repo_check(argv(&["uartix-not-a-real-program-xyz"]), &cwd, &roots, 20)
+            .expect_err("程序不存在必须报错，不能假装跑完了");
+        assert!(e.contains("命令启动失败"), "话要说清是起不来，实际是：{e}");
     }
 }
