@@ -3,6 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import * as panelActivity from "../../panels/panelActivity";
 import { updateChatFeed } from "./aiChatFeed";
 import { occupiedSessionIds, setRunConclusionCb, setSessionTitleCb } from "../agent/agentRun";
+import type { AgentRunView } from "../agent/agentRun";
+// 导出会话时把 Agent 任务过程一并写进去（P133-I）：与界面上「复制日志」同一份序列化，
+// 不在此处再写一个"看起来像过程"的渲染器。runLog 只依赖 types/loop/i18n，不成环。
+import { serializeLog } from "../agent/runLog";
 // 半截话标记与 Agent 投影共用一份常量（sessionLog 零运行时依赖，不会成环；P94-G5）
 import { INCOMPLETE_MARK } from "../agent/sessionLog";
 // 体积口径与 Agent 侧共用同一常量与同一个 utf8 估算（context.ts 只依赖类型，不成环；P95-H4）
@@ -11,7 +15,7 @@ import { REQUEST_SOFT_LIMIT, utf8Bytes } from "../agent/context";
 // 而 key 一处都没洗 —— 同一个"把设置里的串发给宿主"的动作有两个答案，正是漂移的温床。
 import { aiWireArgs } from "../agent/provider";
 import { activeRef, thinkingParamsFor } from "./aiProfileStore";
-import { t } from "../../i18n/strings";
+import { t, tx } from "../../i18n/strings";
 import { saveImage, restoreImages, deleteImages } from "./imageStore";
 import {
   getSnapshot as getSettings,
@@ -976,25 +980,119 @@ export async function runScene(
   await doSend(text, scene, scene === "inertial" ? [] : collectContext({ ...snapshot.contextSel, ...sel }));
 }
 
-/** 导出当前会话为 Markdown 文本 */
-export function exportSessionMd(): string {
+/** 出境正文的上限：一条上限不是防"文件太大"，是防一条 fs_read 回执把整份导出撑成看不完的墙。
+ *  工具参数与回执 data 的上限在 `runLog.ts`（那份序列化剪贴板与导出共用，两处一套口径）。 */
+const EXPORT_TEXT_LIMIT = 20_000;
+
+/** 超了就写明"此处截断，共 N 字"——不给一段看起来完整的假文本（§8-41） */
+function clip(s: string, max: number): string {
+  return s.length <= max
+    ? s
+    : `${s.slice(0, max)}${tx(`…（此处截断，共 ${s.length} 字）`, `… (truncated; ${s.length} chars total)`)}`;
+}
+
+/**
+ * P133-I：导出会话为 Markdown。
+ *
+ * 原来这里只写 `m.content`。用户贴回来的那份「对话记录」把过程全丢了——思维链、
+ * 每一次工具调用的参数、每一条回执都看不见，只剩两段结果；他要的正是能离线看现场。
+ *
+ * 四条口径：
+ *  - **过程不重造**：Agent 任务那一段直接用 `runLog.serializeLog`（与界面上「复制日志」
+ *    同一份实现）。两处各写一遍就是两套真相，早晚对不上；
+ *  - **过程落在它发生的位置**：任务挂在它那条结论气泡上面，不是全甩到文件末尾；
+ *  - **截断要说**：见 `clip`；
+ *  - **出境前擦密钥**：这个文件是用户会转出去的东西。`sk-…`、`apiKey` / `Authorization`
+ *    的字段值一律打码。软件里存的仍是原样，清洗只发生在这一个出口（与 provider.ts
+ *    的发送清洗同一形状：一处清洗，不是到处清洗）。
+ *
+ * 全文走 `tx()`：内嵌的台账本来就是双语的，外壳写死中文会得到一份半中半英的文件。
+ */
+export function exportSessionMd(runs: readonly AgentRunView[] = []): string {
   const s = cur();
+  const mine = runs.filter((r) => r.sessionId === s.id);
+  const used = new Set<string>();
+  const calls = mine.reduce((n, r) => n + r.calls, 0);
+  const sessionTitle = s.title || tx("未命名", "Untitled");
   const lines: string[] = [
-    `# Uartix+ 对话记录`,
+    tx("# Uartix+ 对话记录", "# Uartix+ conversation log"),
     "",
-    `- 导出时间：${new Date().toLocaleString()}`,
-    `- 会话：${s.title || "未命名"}`,
-    `- 消息数：${s.messages.length}`,
+    tx(`- 导出时间：${new Date().toLocaleString()}`, `- Exported: ${new Date().toLocaleString()}`),
+    tx(`- 会话：${sessionTitle}`, `- Session: ${sessionTitle}`),
+    tx(
+      `- 消息数：${s.messages.length} · Agent 任务 ${mine.length} 个 · 工具调用 ${calls} 次`,
+      `- Messages: ${s.messages.length} · agent tasks ${mine.length} · tool calls ${calls}`,
+    ),
     "",
   ];
+  const pushRun = (r: AgentRunView): void => {
+    lines.push(`${tx("### Agent 任务", "### Agent task")} · ${r.goalBrief || r.goal}`);
+    lines.push("");
+    lines.push("```text");
+    lines.push(serializeLog(r));
+    lines.push("```");
+    lines.push("");
+  };
   for (const m of s.messages) {
-    const who = m.role === "user" ? "用户" : "AI";
+    const who = m.role === "user" ? tx("用户", "User") : tx("AI", "AI");
     lines.push(`## ${who} · ${new Date(m.ts).toLocaleTimeString()}`);
     lines.push("");
-    lines.push(m.error ? `> 出错：${m.error}` : m.content || "（空）");
-    lines.push("");
+    if (m.notice) lines.push(`> ${m.notice}`, "");
+    if (m.contextTitles?.length) {
+      lines.push(tx(`- 附带上下文：${m.contextTitles.join("、")}`, `- Attached context: ${m.contextTitles.join(", ")}`));
+    }
+    if (m.images?.length) {
+      lines.push(tx(`- 图片 ${m.images.length} 张（导出不含图片内容）`, `- ${m.images.length} image(s) (content not exported)`));
+    }
+    if (m.via === "agent") lines.push(`- ${tx("这是一条 Agent 任务目标", "This is an agent task goal")}`);
+    if (m.fromRunId) {
+      const r = mine.find((x) => x.runId === m.fromRunId);
+      if (r) {
+        used.add(r.runId);
+        lines.push("");
+        pushRun(r);
+      }
+    }
+    // 思维链：多轮就一轮一轮落（rounds 才是过程），只有一段 reasoning 就落那一段
+    if (m.rounds?.length) {
+      m.rounds.forEach((rd, i) => {
+        if (rd.r.trim()) {
+          lines.push(
+            tx(`**第 ${i + 1} 轮思考 · ${(Math.max(0, rd.ms) / 1000).toFixed(1)}s**`, `**Round ${i + 1} thinking · ${(Math.max(0, rd.ms) / 1000).toFixed(1)}s**`),
+            "",
+            clip(rd.r, EXPORT_TEXT_LIMIT).split("\n").map((l) => `> ${l}`).join("\n"),
+            "",
+          );
+        }
+        if (rd.c.trim()) lines.push(clip(rd.c, EXPORT_TEXT_LIMIT), "");
+      });
+    } else if (m.reasoning?.trim()) {
+      lines.push(tx("**思考**", "**Thinking**"), "", clip(m.reasoning, EXPORT_TEXT_LIMIT).split("\n").map((l) => `> ${l}`).join("\n"), "");
+    }
+    if (m.error) lines.push(tx(`> 出错：${m.error}`, `> Error: ${m.error}`), "");
+    if (m.aborted) lines.push(`> ${tx("这一轮被中止，正文是半截话", "the turn was aborted; the text below stops mid-way")}`, "");
+    // 有 rounds 时正文就是各轮 `c` 的拼接，上面已经一轮一轮落过了——再落一遍就是同一句话写两次
+    if (!m.rounds?.length) {
+      if (m.content.trim()) lines.push(clip(m.content, EXPORT_TEXT_LIMIT), "");
+      else if (!m.error) lines.push(tx("（空）", "(empty)"), "");
+    }
   }
-  return lines.join("\n");
+  const orphans = mine.filter((r) => !used.has(r.runId));
+  if (orphans.length) {
+    lines.push(tx("## 未回写进对话的任务（过程照录）", "## Tasks never written back to the chat (log as-is)"), "");
+    for (const r of orphans) pushRun(r);
+  }
+  return scrubSecrets(lines.join("\n"));
+}
+
+/** 密钥擦除：三种形状都盖住——JSON 字段、裸 `sk-…`、`Bearer …`。
+ *  打码后仍留出头几位之外的一点痕迹，是为了让用户认得出"这里原本有一把 key、被软件盖掉了"，
+ *  而不是以为导出漏了内容。 */
+export function scrubSecrets(text: string): string {
+  return text
+    .replace(/("(?:api[_-]?key|apikey|authorization|x-api-key)"\s*:\s*")[^"]*(")/gi, '$1•••已打码$2')
+    .replace(/\bsk-[A-Za-z0-9_-]{6,}/g, "sk-•••已打码")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+/=-]{6,}/gi, "$1•••已打码");
 }
 
 /** 会话搜索：返回 [sessionId, msg] 匹配项 */

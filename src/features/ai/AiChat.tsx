@@ -1148,7 +1148,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
     });
     if (typeof path !== "string") return;
     try {
-      await invoke("save_text_file", { path, content: chatStore.exportSessionMd() });
+      // P133-I：把本会话的 Agent 任务一起交给导出器——导出的是现场，不是只有结果两段话
+      await invoke("save_text_file", { path, content: chatStore.exportSessionMd(sessionRuns) });
       setNotice(tx("对话已导出", "Conversation exported"));
     } catch (e) {
       setNotice(tx(`导出失败：${String(e).slice(0, 80)}`, `Export failed: ${String(e).slice(0, 80)}`));
@@ -1295,7 +1296,10 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           <button className="ai-scene-menu-item" role="menuitem" onClick={() => { setMoreOpen(false); setPlgLibOpen(true); }}>
             {tx("本地插件库", "Local plugin library")}
           </button>
-          <button className="ai-scene-menu-item" role="menuitem" onClick={() => { setMoreOpen(false); void exportConversation(); }}>
+          <button className="ai-scene-menu-item" role="menuitem"
+            title={tx("含思维链、每次工具调用的参数与回执；API Key 一类秘密写出时会打码",
+              "includes the thinking chain, every tool call's args and receipt; API keys are masked on the way out")}
+            onClick={() => { setMoreOpen(false); void exportConversation(); }}>
             {tx("导出对话为 Markdown", "Export conversation as Markdown")}
           </button>
           <button
