@@ -1181,6 +1181,197 @@ fn read_usess(path: &str) -> Result<Loaded, String> {
     Ok(build_loaded(meta, batches, rx, tx, anns))
 }
 
+/* ================= 只读检视：让"这段到底录了什么"可被回答（P109-D2） =================
+ *
+ * 为什么另开一条路而不是复用 `session_open`：后者会把会话**装进回放引擎**（改全局状态、
+ * 与真实连接互斥），那是一支写操作，不该出现在只读工具面上。
+ * `read_usess` 本来就是纯函数（不碰 `State`/`Core`），这里只是给它一个不返回 `Loaded`
+ * 这种重结构、且**处处带截断标记**的出口。
+ */
+
+/// 摘要直方图最多解多少批。一份两百万帧的会话全解要吃掉整秒，
+/// 而"前 200 批长什么样"已经足够回答"录的是哪个模板、字段叫什么"——
+/// 解了多少必须写在返回里（`histogramCovers`），不能让直方图被读成全量统计。
+const INSPECT_SAMPLE_BATCHES: usize = 200;
+/// 一帧页的时间线条数 / 一批里的行数 / 一行里的字段数
+const INSPECT_PAGE_MAX: usize = 40;
+const INSPECT_ROWS_MAX: usize = 6;
+const INSPECT_FIELDS_MAX: usize = 12;
+/// 每个 rx/tx 块回显的字节上限（十六进制串 = 2×）
+const INSPECT_HEX_MAX: usize = 64;
+/// 标注一次最多回多少条
+const INSPECT_ANN_MAX: usize = 200;
+/// 检视允许打开的文件大小上限。512MB 是**录制端**的护栏，
+/// 不是"随手打开一个陌生大文件"的许可证——read_usess 会把整份读进内存。
+const INSPECT_FILE_MAX: u64 = 64 * 1024 * 1024;
+
+fn hex_cap(bytes: &[u8]) -> String {
+    let n = bytes.len().min(INSPECT_HEX_MAX);
+    let mut s = String::with_capacity(n * 2 + 10);
+    for b in &bytes[..n] {
+        s.push_str(&format!("{:02x}", b));
+    }
+    if bytes.len() > n {
+        s.push_str(&format!("…(共 {} 字节)", bytes.len()));
+    }
+    s
+}
+
+/// `mode`：`summary` | `frames` | `annotations`。`cursor`/`limit` 为 0 时取默认。
+pub(crate) fn inspect_usess(
+    path: &str,
+    mode: &str,
+    cursor: usize,
+    limit: usize,
+) -> Result<serde_json::Value, String> {
+    let size = std::fs::metadata(path)
+        .map_err(|e| format!("无法读取 {path}：{e}"))?
+        .len();
+    if size > INSPECT_FILE_MAX {
+        return Err(format!(
+            "会话文件 {} MB，超过检视上限 {} MB",
+            size / 1024 / 1024,
+            INSPECT_FILE_MAX / 1024 / 1024
+        ));
+    }
+    let l = read_usess(path)?;
+    let common = || -> serde_json::Map<String, serde_json::Value> {
+        let mut m = serde_json::Map::new();
+        m.insert("file".into(), serde_json::json!(path));
+        m.insert("recordedAt".into(), serde_json::json!(l.meta.recorded_at));
+        m.insert("durationMs".into(), serde_json::json!(l.meta.duration_ms));
+        m.insert("firstTs".into(), serde_json::json!(l.first_ts));
+        m.insert("lastTs".into(), serde_json::json!(l.last_ts));
+        m.insert(
+            "counts".into(),
+            serde_json::json!({
+                "frameBatches": l.batches.len(),
+                "rxChunks": l.rx.len(),
+                "txChunks": l.tx.len(),
+                "annotations": l.annotations.len(),
+                "timeline": l.timeline.len(),
+            }),
+        );
+        m.insert("port".into(), l.meta.port.clone());
+        m.insert(
+            "tplRuleCount".into(),
+            serde_json::json!(
+                l.meta.tpl_rules.get("templates").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0)
+            ),
+        );
+        m
+    };
+    match mode {
+        "summary" => {
+            let mut tpls: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+            let mut fields: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+            let sampled = l.batches.len().min(INSPECT_SAMPLE_BATCHES);
+            let mut decoded = 0u64;
+            for b in &l.batches[..sampled] {
+                if let Some(ev) = busevt::decode_frames(b) {
+                    decoded += 1;
+                    for r in &ev.rows {
+                        *tpls.entry(r.tpl_name.clone()).or_insert(0) += 1;
+                        for f in &r.fields {
+                            *fields.entry(f.name.clone()).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            let top = |m: &std::collections::HashMap<String, u64>, n: usize| -> Vec<serde_json::Value> {
+                let mut v: Vec<(String, u64)> = m.iter().map(|(k, c)| (k.clone(), *c)).collect();
+                v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+                v.truncate(n);
+                v.into_iter().map(|(k, c)| serde_json::json!({ "name": k, "count": c })).collect()
+            };
+            let mut obj = common();
+            obj.insert("mode".into(), serde_json::json!("summary"));
+            obj.insert("templates".into(), serde_json::json!(top(&tpls, 20)));
+            obj.insert("fields".into(), serde_json::json!(top(&fields, 24)));
+            obj.insert(
+                "histogramCovers".into(),
+                serde_json::json!({ "batches": sampled, "decoded": decoded, "of": l.batches.len() }),
+            );
+            obj.insert(
+                "truncated".into(),
+                serde_json::json!(sampled < l.batches.len()),
+            );
+            Ok(serde_json::Value::Object(obj))
+        }
+        "frames" => {
+            let cap = if limit == 0 { INSPECT_PAGE_MAX } else { limit.min(INSPECT_PAGE_MAX) };
+            let start = cursor.min(l.timeline.len());
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            let mut i = start;
+            while i < l.timeline.len() && items.len() < cap {
+                let (ts, ev) = &l.timeline[i];
+                let row = match ev {
+                    ReplayEv::Rx(k) => serde_json::json!({
+                        "i": i, "ts": ts, "kind": "rx",
+                        "bytes": l.rx[*k].1.len(), "hex": hex_cap(&l.rx[*k].1),
+                    }),
+                    ReplayEv::Tx(k) => serde_json::json!({
+                        "i": i, "ts": ts, "kind": "tx",
+                        "bytes": l.tx[*k].1.len(), "hex": hex_cap(&l.tx[*k].1),
+                    }),
+                    ReplayEv::Frames(k) => match busevt::decode_frames(&l.batches[*k]) {
+                        Some(ev) => serde_json::json!({
+                            "i": i, "ts": ts, "kind": "frames",
+                            "total": ev.total, "errors": ev.errors, "dropped": ev.dropped,
+                            "rows": ev.rows.iter().take(INSPECT_ROWS_MAX).map(|r| serde_json::json!({
+                                "tpl": r.tpl_name, "seq": r.seq, "len": r.len,
+                                "valid": r.valid, "error": r.error,
+                                "fields": r.fields.iter().take(INSPECT_FIELDS_MAX).map(|f| serde_json::json!({
+                                    "name": f.name, "value": f.value, "text": f.text,
+                                })).collect::<Vec<_>>(),
+                                "fieldsTruncated": r.fields.len() > INSPECT_FIELDS_MAX,
+                                "hex": hex_cap(&r.bytes),
+                            })).collect::<Vec<_>>(),
+                            "rowsTruncated": ev.rows.len() > INSPECT_ROWS_MAX,
+                        }),
+                        None => serde_json::json!({
+                            "i": i, "ts": ts, "kind": "frames",
+                            "decodeError": "这一批解不出来（文件损坏或版本不认识）",
+                        }),
+                    },
+                };
+                items.push(row);
+                i += 1;
+            }
+            let mut obj = common();
+            obj.insert("mode".into(), serde_json::json!("frames"));
+            obj.insert("cursor".into(), serde_json::json!(start));
+            obj.insert("returned".into(), serde_json::json!(items.len()));
+            obj.insert("total".into(), serde_json::json!(l.timeline.len()));
+            obj.insert("nextCursor".into(), serde_json::json!(if i < l.timeline.len() { Some(i) } else { None }));
+            obj.insert("truncated".into(), serde_json::json!(i < l.timeline.len()));
+            obj.insert("items".into(), serde_json::json!(items));
+            Ok(serde_json::Value::Object(obj))
+        }
+        "annotations" => {
+            let cap = if limit == 0 { INSPECT_ANN_MAX } else { limit.min(INSPECT_ANN_MAX) };
+            let start = cursor.min(l.annotations.len());
+            let end = (start + cap).min(l.annotations.len());
+            let items: Vec<serde_json::Value> = l.annotations[start..end]
+                .iter()
+                .map(|(ts, t)| serde_json::json!({ "ts": ts, "text": t }))
+                .collect();
+            let mut obj = common();
+            obj.insert("mode".into(), serde_json::json!("annotations"));
+            obj.insert("cursor".into(), serde_json::json!(start));
+            obj.insert("returned".into(), serde_json::json!(items.len()));
+            obj.insert("total".into(), serde_json::json!(l.annotations.len()));
+            obj.insert("nextCursor".into(), serde_json::json!(if end < l.annotations.len() { Some(end) } else { None }));
+            obj.insert("truncated".into(), serde_json::json!(end < l.annotations.len()));
+            obj.insert("items".into(), serde_json::json!(items));
+            Ok(serde_json::Value::Object(obj))
+        }
+        other => Err(format!(
+            "未知 mode：{other}（可用 summary / frames / annotations）"
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1283,6 +1474,106 @@ mod tests {
         assert_eq!(kinds, vec!["R", "F", "F", "T", "R"]);
         assert_eq!(back.first_ts, 1_700_000_000_000);
         assert_eq!(back.last_ts, 1_700_000_000_500);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    /// P109-D2 检视用的样本会话：两批帧（模板甲/模板乙）+ 2 rx + 1 tx + 2 标注，
+    /// 时间线 5 条（R F F T R）。返回临时文件路径，调用方负责删。
+    fn write_sample_session(tag: &str) -> std::path::PathBuf {
+        let meta = SessionMeta {
+            recorded_at: 1_700_000_000_000,
+            duration_ms: 30_000,
+            frame_count: 2,
+            rx_chunk_count: 2,
+            tx_chunk_count: 1,
+            port: serde_json::json!({ "kind": "demo", "portName": null, "baud": 115200 }),
+            tpl_rules: serde_json::json!({ "templates": [{ "id": "tpl-1", "name": "模板甲" }] }),
+        };
+        let l = Loaded {
+            meta,
+            batches: vec![
+                busevt::encode_frames(&sample_event(true)),
+                busevt::encode_frames(&sample_event(false)),
+            ],
+            rx: vec![
+                (1_700_000_000_000, vec![0xAA, 0x01, 0x02]),
+                (1_700_000_000_500, vec![0x03, 0x04]),
+            ],
+            tx: vec![(1_700_000_000_200, vec![0xDD, 0xEE])],
+            annotations: vec![
+                (1_700_000_000_100, "事件甲：按键".into()),
+                (1_700_000_000_450, "事件乙：数据跳变".into()),
+            ],
+            timeline: Vec::new(),
+            first_ts: 0,
+            last_ts: 0,
+        };
+        let p = std::env::temp_dir().join(format!("uartix_inspect_{tag}.usess"));
+        write_usess(p.to_str().unwrap(), &l, &l.annotations).unwrap();
+        p
+    }
+
+    #[test]
+    fn inspect_summary_counts_templates_and_says_how_much_it_read() {
+        let p = write_sample_session("summary");
+        let v = inspect_usess(p.to_str().unwrap(), "summary", 0, 0).unwrap();
+        assert_eq!(v["mode"], "summary");
+        assert_eq!(v["counts"]["frameBatches"], 2);
+        assert_eq!(v["counts"]["timeline"], 5);
+        assert_eq!(v["tplRuleCount"], 1);
+        // 直方图来自解码后的行：甲/乙各一条，且**明说了覆盖多少批**
+        assert_eq!(v["histogramCovers"]["batches"], 2);
+        assert_eq!(v["histogramCovers"]["of"], 2);
+        assert_eq!(v["truncated"], false);
+        let names: Vec<&str> = v["templates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"模板甲") && names.contains(&"模板乙"), "{v}");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn inspect_frames_pages_and_marks_the_cut() {
+        let p = write_sample_session("frames");
+        let one = inspect_usess(p.to_str().unwrap(), "frames", 0, 2).unwrap();
+        assert_eq!(one["returned"], 2);
+        assert_eq!(one["total"], 5);
+        assert_eq!(one["truncated"], true, "只回了 2/5 条，必须带截断标记");
+        assert_eq!(one["nextCursor"], 2);
+        // 第一条是 rx（时间线 R F F T R），hex 是真实字节不是占位
+        assert_eq!(one["items"][0]["kind"], "rx");
+        assert_eq!(one["items"][0]["hex"], "aa0102");
+        let two = inspect_usess(p.to_str().unwrap(), "frames", 2, 2).unwrap();
+        assert_eq!(two["items"][0]["i"], 2);
+        assert_eq!(two["nextCursor"], 4);
+        let last = inspect_usess(p.to_str().unwrap(), "frames", 4, 0).unwrap();
+        assert_eq!(last["returned"], 1);
+        assert!(last["truncated"].is_boolean());
+        assert_eq!(last["truncated"], false, "翻到末尾了还报截断＝模型会一直翻页");
+        assert!(last["nextCursor"].is_null(), "没有下一页时 nextCursor 必须是 null，不是 0（0 会被当成\"从头再来\"）");
+        // 帧行里的字段值真的解出来了（不是只有计数）
+        let withframes = inspect_usess(p.to_str().unwrap(), "frames", 1, 1).unwrap();
+        assert_eq!(withframes["items"][0]["kind"], "frames");
+        assert_eq!(withframes["items"][0]["rows"][0]["tpl"], "模板甲");
+        assert_eq!(withframes["items"][0]["rows"][0]["fields"][0]["name"], "值");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn inspect_annotations_reject_and_size_guards() {
+        let p = write_sample_session("guards");
+        let a = inspect_usess(p.to_str().unwrap(), "annotations", 0, 1).unwrap();
+        assert_eq!(a["returned"], 1);
+        assert_eq!(a["total"], 2);
+        assert_eq!(a["items"][0]["text"], "事件甲：按键");
+        // 未知 mode 必须**报错**而不是默默回空对象：静默空结果会被模型读成"这个会话没有标注"
+        let bad = inspect_usess(p.to_str().unwrap(), "everything", 0, 0).unwrap_err();
+        assert!(bad.contains("未知 mode"), "{bad}");
+        // 不存在的文件与不是会话的文件都要友好失败（read_usess 的判据，这里只确认接得上）
+        assert!(inspect_usess("/nonexistent/nope.usess", "summary", 0, 0).is_err());
         let _ = std::fs::remove_file(&p);
     }
 

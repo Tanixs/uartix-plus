@@ -568,3 +568,87 @@ describe("repo_check 命令表闭合", () => {
   });
 });
 
+
+/* ================= P109-D2：session_read（读 .usess 会话文件） =================
+ * 这一族断言的是三件事：门没让路（白名单与档位照旧）、参数按 Rust 的形名给（第十五道门之外再钉一次）、
+ * 以及**截断标记必须原样传到模型手里**——样本报成全量是这类工具最容易撒的谎。 */
+describe("session_read 读会话文件", () => {
+  it("summary 走 agent_session_read，roots 一起交给 Rust（两边同一道门，不靠前端独判）", async () => {
+    patch({ agentFsRoots: "D:/w" });
+    invokeMock.mockResolvedValueOnce({
+      mode: "summary",
+      counts: { frameBatches: 3, rxChunks: 2, txChunks: 1, annotations: 2, timeline: 9 },
+      firstTs: 1, lastTs: 2, tplRuleCount: 1,
+      histogramCovers: { batches: 3, decoded: 3, of: 3 },
+      truncated: false,
+      templates: [{ name: "模板甲", count: 2 }],
+      fields: [{ name: "值", count: 2 }],
+    });
+    const r = await executeGeneralTool(call("session_read", { path: "D:/w/a.usess" }), ctx("custom", ["files"]), "r1", noGate);
+    expect(r.ok).toBe(true);
+    const last = invokeMock.mock.calls[invokeMock.mock.calls.length - 1];
+    expect(last[0]).toBe("agent_session_read");
+    expect(last[1]).toMatchObject({ path: "D:/w/a.usess", mode: "summary", roots: ["D:/w"], cursor: 0, limit: 40 });
+    const d = r.data as { histogramCovers: { of: number }; truncated: boolean; templates: unknown[] };
+    expect(d.histogramCovers.of).toBe(3);
+    expect(d.truncated).toBe(false);
+    expect(d.templates).toHaveLength(1);
+  });
+
+  it("直方图只看了前 200 批时 truncated=true 必须传出去（样本报成全量是这支工具唯一会撒的谎）", async () => {
+    patch({ agentFsRoots: "D:/w" });
+    invokeMock.mockResolvedValueOnce({
+      mode: "summary", counts: { timeline: 900 },
+      histogramCovers: { batches: 200, decoded: 200, of: 900 }, truncated: true,
+      templates: [], fields: [],
+    });
+    const r = await executeGeneralTool(call("session_read", { path: "D:/w/big.usess" }), ctx("custom", ["files"]), "r1", noGate);
+    const d = r.data as { truncated: boolean; histogramCovers: { batches: number; of: number } };
+    expect(d.truncated).toBe(true);
+    expect(d.histogramCovers).toMatchObject({ batches: 200, of: 900 });
+  });
+
+  it("limit 超上限夹到 40、cursor 负数夹到 0：模型写多大都不能把回执撑爆", async () => {
+    patch({ agentFsRoots: "D:/w" });
+    invokeMock.mockResolvedValueOnce({ mode: "frames", items: [], returned: 0, total: 0, truncated: false });
+    await executeGeneralTool(
+      call("session_read", { path: "D:/w/a.usess", mode: "frames", cursor: -7, limit: 9_999 }),
+      ctx("custom", ["files"]), "r1", noGate,
+    );
+    const last = invokeMock.mock.calls[invokeMock.mock.calls.length - 1][1] as { cursor: number; limit: number };
+    expect(last.cursor).toBe(0);
+    expect(last.limit).toBe(40);
+  });
+
+  it("未知 mode 不触 Rust：回 unknown_mode 并给三枚候选（静默回空对象会被读成「这个会话没有标注」）", async () => {
+    patch({ agentFsRoots: "D:/w" });
+    const before = invokeMock.mock.calls.length;
+    const r = await executeGeneralTool(call("session_read", { path: "D:/w/a.usess", mode: "everything" }), ctx("custom", ["files"]), "r1", noGate);
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe("unknown_mode");
+    expect((r.data as { candidates: string[] }).candidates).toEqual(["summary", "frames", "annotations"]);
+    expect(invokeMock.mock.calls.length).toBe(before);
+  });
+
+  it("白名单为空 ⇒ files_whitelist_empty 且不触盘；未勾 files 域 ⇒ unauthorized_scope", async () => {
+    patch({ agentFsRoots: "" });
+    const before = invokeMock.mock.calls.length;
+    const a = await executeGeneralTool(call("session_read", { path: "D:/w/a.usess" }), ctx("custom", ["files"]), "r1", noGate);
+    expect(a.code).toBe("files_whitelist_empty");
+    const b = await executeGeneralTool(call("session_read", { path: "D:/w/a.usess" }), ctx("custom", ["config"]), "r1", noGate);
+    expect(b.code).toBe("unauthorized_scope");
+    expect(invokeMock.mock.calls.length).toBe(before);
+  });
+
+  it("它是只读工具：effect=read、domain=files，且**没有** undoRoute / approvalBinding", () => {
+    const e = generalToolEntries.find((x) => x.name === "session_read");
+    expect(e).toBeTruthy();
+    expect(e!.effect).toBe("read");
+    expect(e!.domain).toBe("files");
+    expect(e!.undoRoute).toBeUndefined();
+    expect(e!.approvalBinding).toBeUndefined();
+    // 描述里必须自己说清"不装进回放器"，否则模型会以为它能切回放
+    expect(e!.description).toContain("without loading it into playback");
+    expect(e!.description).toContain("histogramCovers");
+  });
+});

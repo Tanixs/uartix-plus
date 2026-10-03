@@ -145,6 +145,43 @@ async function fsRead(callId: string, parsed: Record<string, unknown>): Promise<
   }
 }
 
+/* ---------- P109-D2：读会话文件（.usess）---------- */
+
+/** 三种检视模式。名字与 Rust `inspect_usess` 的 match 分支一一对应，两边各留一份就是等着漂。 */
+export const SESSION_MODES = ["summary", "frames", "annotations"] as const;
+/** 一帧页的时间线条数上限（与 Rust 的 INSPECT_PAGE_MAX 同值；这里只用来把 limit 夹住再报给模型） */
+export const SESSION_PAGE_MAX = 40;
+
+/**
+ * 只读检视一份录好的会话。
+ * 为什么不走界面那条 `session_open`：它会把会话**装进回放引擎**（改全局状态、与真实连接互斥），
+ * 那是一支写操作；模型问的是"这段录了什么"，不是"把回放器切到这段"。
+ * 白名单两边各判一次（这里 + Rust `agent_session_read`），与 fs_write 同一纵深口径。
+ */
+async function sessionRead(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
+  const path = String(parsed.path ?? "").trim();
+  if (!path) return notExecuted(callId, "invalid_args", { hint: "path 必须是 .usess 文件的绝对路径（先用 fs_glob { pattern: \"*.usess\" } 找）" });
+  if (!inWhitelist(path)) return wlRefuse(callId, path);
+  const mode = String(parsed.mode ?? "summary").trim();
+  if (!(SESSION_MODES as readonly string[]).includes(mode)) {
+    return notExecuted(callId, "unknown_mode", {
+      mode,
+      candidates: [...SESSION_MODES],
+      hint: "summary 看这份录了什么（模板/字段直方图）、frames 逐条看时间线、annotations 看标注",
+    });
+  }
+  const cursor = Math.max(0, Math.floor(Number(parsed.cursor)) || 0);
+  const limit = Math.min(Math.max(1, Math.floor(Number(parsed.limit)) || SESSION_PAGE_MAX), SESSION_PAGE_MAX);
+  try {
+    const r = await invoke<Record<string, unknown>>("agent_session_read", {
+      path, roots: parseFsRoots(getSettings().agentFsRoots), mode, cursor, limit,
+    });
+    return { callId, ok: true, status: "read", data: { ...r } };
+  } catch (e) {
+    return failed(callId, e);
+  }
+}
+
 /**
  * P109-D：fs_grep / fs_glob 的共用实现。
  * 越界与"根不存在"都回**可操作的话**而不是干巴巴的 error：白名单为空时模型只会换个路径再撞一次，
@@ -777,6 +814,30 @@ export const generalToolEntries: AgentToolEntry[] = [
     approvalBinding: (a) => ({ path: a.path, chars: String(a.old_text ?? "").length }),
     undoRoute: (token) => restoreSnapshot(token),
     execute: (a, ctx) => fsEdit(ctx.callId, a),
+  }),
+  // P109-D2：界面能录能放，模型却看不见"录了什么"——app_read 的 session 视图只有当前状态，
+  // 明写"无会话列表"。这里补的是那份文件的内容本身，不是回放控制。
+  defineTool({
+    name: "session_read",
+    labelZh: "读会话文件",
+    effect: "read",
+    domain: "files",
+    provenance: HOST,
+    description:
+      `Inspect a recorded session file (.usess) inside the Agent file whitelist, read-only and without loading it into playback. Args: { path: string, mode?: "summary" | "frames" | "annotations" (default summary), cursor?: number, limit?: number (default and cap 40) }. summary gives file meta (port, duration, template count) plus a template/field histogram built from **at most the first 200 batches** - histogramCovers and truncated say how much of the file it actually saw, so a histogram is never a census. frames pages the merged timeline ({kind:"rx"|"tx"|"frames"}) with hex capped at 64 bytes per chunk and rowsTruncated/fieldsTruncated on parsed frames; advance with cursor=nextCursor until truncated is false before concluding anything about counts. annotations lists timeline notes. Find files first with fs_glob { pattern: "*.usess" }. This never starts or stops recording; requires the ${DOMAIN_ZH.files} authorization.`,
+    parameters: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        mode: { type: "string", enum: [...SESSION_MODES] },
+        cursor: { type: "number" },
+        limit: { type: "number" },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `读会话 ${String(a.path ?? "").split(/[/\\]/).pop()} · ${String(a.mode ?? "summary")}`,
+    execute: (a, ctx) => sessionRead(ctx.callId, a),
   }),
   defineTool({
     name: "web_fetch",

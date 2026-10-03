@@ -237,6 +237,41 @@ pub async fn agent_fs_stat(path: String) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("stat 任务失败：{e}"))?
 }
 
+/// P109-D2：只读检视一份 `.usess` 会话文件（Agent 的 `session_read` 工具）。
+/// 两道门都写在这里：路径必须在白名单内（与 `agent_fs_write` 用**同一个** `path_in_roots`），
+/// 且**不碰录制器状态**——界面上那条 `session_open` 会把会话装进回放引擎（与真实连接互斥），
+/// 那是一支写操作，不该出现在只读工具面上。
+/// 白名单先判、后读盘——顺序写在一个能被单测跑的同步函数里，
+/// 因为"门在磁盘之前"这件事只有反过来测（给一个门外的不存在路径）才看得出来。
+fn session_read_guarded(
+    path: &str,
+    roots: &[String],
+    mode: &str,
+    cursor: usize,
+    limit: usize,
+) -> Result<serde_json::Value, String> {
+    if !path_in_roots(path, roots) {
+        // 与 agent_fs_write 同一句话：不回显归一化结果，避免把宿主路径规则当成信息泄露面
+        return Err("path_outside_whitelist".to_string());
+    }
+    crate::session::inspect_usess(path, mode, cursor, limit)
+}
+
+#[tauri::command]
+pub async fn agent_session_read(
+    path: String,
+    roots: Vec<String>,
+    mode: String,
+    cursor: Option<usize>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || {
+        session_read_guarded(&path, &roots, &mode, cursor.unwrap_or(0), limit.unwrap_or(0))
+    })
+    .await
+    .map_err(|e| format!("会话检视任务失败：{e}"))?
+}
+
 /* ================= Agent 写文件：白名单在 Rust 侧强制 ================= */
 
 /// 路径归一化：分隔符统一、盘符大写、压重复分隔符、去尾分隔符，最后转小写用于比较。
@@ -1137,6 +1172,35 @@ mod tests {
      * 这条锁只活在 #[cfg(test)] 里，不改生产路径的并发形状。
      */
     static SNAP_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn session_read_judges_the_whitelist_before_touching_the_disk() {
+        // 门外的路径**连打开都不该打开**：如果先读盘再判门，模型就能靠"无法读取 vs 不在白名单"
+        // 两种错误探测哪些路径真的存在——那把白名单本身变成了信息泄露面。
+        let outside = session_read_guarded(
+            "/definitely/not/here.usess",
+            &roots(&["D:\\Projects\\Larix"]),
+            "summary",
+            0,
+            0,
+        );
+        assert_eq!(outside.unwrap_err(), "path_outside_whitelist");
+        // 门内但不是会话：错误必须来自解析，说明门真的放它过去了（而不是门永远拦死、测试假绿）
+        let dir = tmp_dir("sess");
+        std::fs::create_dir_all(&dir).unwrap();
+        let junk = dir.join("not-a-session.usess");
+        std::fs::write(&junk, b"hello").unwrap();
+        let e = session_read_guarded(
+            junk.to_str().unwrap(),
+            &roots(&[dir.to_str().unwrap()]),
+            "summary",
+            0,
+            0,
+        )
+        .unwrap_err();
+        assert!(e.contains("不是有效") || e.contains("不完整"), "解析没跑到：{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn tmp_dir(tag: &str) -> PathBuf {
         // 不用 uuid（crate 在这里只开了最小特性，没有 v4）；纳秒 + 计数足够避开并发撞名

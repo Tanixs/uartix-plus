@@ -143,6 +143,7 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     unknown_tool: "工具不存在",
     unknown_action: "动作不在清单里",
     unknown_tool_ref: "模板引用了不存在的工具",
+    unknown_mode: "检视模式不在枚举里",
     unsafe_css: "样式未通过净化",
     too_large: "内容超出单次上限",
     is_dir: "目标是目录不是文件",

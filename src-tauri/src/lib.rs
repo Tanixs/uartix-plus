@@ -251,6 +251,7 @@ pub fn run() {
             agent_tools::agent_fs_read_text,
             agent_tools::agent_fs_search,
             agent_tools::agent_fs_stat,
+            agent_tools::agent_session_read,
             agent_tools::agent_fs_write,
             agent_tools::agent_repo_check,
             agent_tools::agent_shell_exec,
