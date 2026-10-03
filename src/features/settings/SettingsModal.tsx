@@ -1065,6 +1065,16 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), tx("命令执行总开关，默认关闭。开启后 Agent 仍需在「自定义」档位勾选命令行域，且每条命令都弹出批准卡逐条确认；单条命令 10s 超时自动终止、输出窗口 64KB（超出时首尾都保留并标明中间省略量，原文仍可分页取回）", "Master switch for shell_exec, off by default. Even when on, the Agent must pick the shell domain in custom scope and every command shows an approval card; 10s timeout and a 64 KiB output window per command (beyond it both ends are kept and the omitted span is stated, full text stays pageable)"))}
+                {row(tx("Agent 允许跑本仓校验", "Agent may run this project's checks"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.agentRepoCheck}
+                      onChange={(e) => patch({ agentRepoCheck: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), tx("默认关闭，而且它不需要打开上面那条「允许执行命令」。它只跑一张固定的命令表：全部工程门禁 / 类型检查 / 全部单元测试 / 单个测试文件 / Rust 侧测试。表是宿主常量、启动时不经过 shell，所以模型给不出表外的命令，参数里的 && 和 | 都只是字面量。工作目录仍必须落在「Agent 文件白名单」内，每次执行仍会弹批准卡。它存在的意义就是让 AI 能自证改动没弄坏东西，而不必拿到任意命令。", "Off by default, and enabling it does NOT require the command-execution switch above. It runs one fixed host-owned table: all project gates / type check / full unit tests / a single test file / Rust-side tests. The table is a constant and no shell is involved, so the model cannot produce a command outside it, and && or | inside an argument stay literals. The working directory must still sit inside the Agent file whitelist, and every run shows an approval card. Its whole reason to exist is letting the AI prove a change broke nothing without ever being handed an arbitrary command."))}
                 <div className="set-row">
                   <label>
                     {t("set.ai.manage")}

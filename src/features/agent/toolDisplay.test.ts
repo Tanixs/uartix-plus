@@ -81,6 +81,21 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
     expect(bare).toEqual([]);
   });
 
+  it("P133-A：repo_check 的失败码也走**变量**（notExecuted(callId, plan.err)），同 F3 的盲区——单独扫一次 err 字面量", async () => {
+    const fsSpec = "node:fs";
+    const urlSpec = "node:url";
+    const { readFileSync } = (await import(fsSpec)) as unknown as { readFileSync: (p: string, e?: string) => string };
+    const { fileURLToPath } = (await import(urlSpec)) as unknown as { fileURLToPath: (u: string | URL) => string };
+    const src = readFileSync(fileURLToPath(new URL("./generalTools.ts", import.meta.url)), "utf8");
+    const codes = new Set<string>();
+    for (const m of src.matchAll(/\berr:\s*"([a-z0-9_]+)"/g)) codes.add(m[1]);
+    // 探针自证：扫不到就说明这条也瞎了（§8-43②）
+    expect(codes.size, "generalTools.ts 里应有 repo_check 那一批 err 码").toBeGreaterThan(4);
+    for (const c of codes) {
+      expect(receiptStatusText(false, "not_executed", c), `${c} 裸挂在时间线上`).not.toBe(c);
+    }
+  });
+
   it("P99c-C2：目录那批码走的是**变量**，F3 那条扫字面量的钉看不见——单独钉一次", async () => {
     /**
      * `readCatalog` 把失败码放在 `code` 字段里，调用方 `notExecuted(ctx.callId, r.code, …)` 原样透传，
@@ -149,7 +164,7 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
       "settings_read", "settings_describe", "settings_apply", "settings_preview_patch",
       "plot_channels", "plot_window", "read_artifact", "run_app_action",
       "save_plugin", "enable_plugin", "list_plugins", "rollback_plugin",
-      "fs_read", "fs_list", "fs_write", "fs_grep", "fs_glob", "fs_edit", "web_fetch", "web_search", "shell_exec",
+      "fs_read", "fs_list", "fs_write", "fs_grep", "fs_glob", "fs_edit", "web_fetch", "web_search", "shell_exec", "repo_check",
       "theme_read", "theme_patch", "theme_preset", "image_swatch", "asset_put", "asset_list", "save_theme_extension", "style_commit", "style_append",
       "ui_inventory", "ui_inspect", "style_patch", "style_revert", "theme_audit", "theme_preview", "app_state",
       "app_catalog", "app_read", "propose_market_install", "layout_apply", "chrome_set", "task_plan",

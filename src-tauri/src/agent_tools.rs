@@ -521,6 +521,54 @@ fn list_dir(dir: &Path, depth: u32, counter: &mut usize) -> Result<serde_json::V
     Ok(serde_json::Value::Array(out))
 }
 
+/// 等一个已启动的子进程收尾：硬超时 kill → join 读线程 → 头尾各留一半预算的输出。
+///
+/// `agent_shell_exec` 与 `agent_repo_check` **共用这一条**：kill 循环在两处各写一遍，
+/// 迟早漂移成"一条会 kill、另一条不会"——那是把超时当成了两件不同的事。
+fn finish_child(
+    mut child: std::process::Child,
+    reader: std::thread::JoinHandle<(String, String)>,
+    timeout: Duration,
+) -> Result<serde_json::Value, String> {
+    // kill/wait 循环结束后 join 读线程拿回 (stdout, stderr)；
+    // 读线程在 spawn 侧就已 take 管道，避免「父 wait / 子写满管道」的经典死锁。
+    let start = std::time::Instant::now();
+    let mut timed_out = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    timed_out = true;
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(format!("命令执行异常：{e}")),
+        }
+    }
+    let (out, err) = reader
+        .join()
+        .map_err(|_| "输出收集线程异常退出".to_string())?;
+    let status = child.try_wait().ok().flatten().and_then(|s| s.code()).unwrap_or(-1);
+    // 头尾各留一半预算，并把"原始多少字节 / 是否压过"做成结构化字段（红线 A7：截断必须说真话，
+    // 内联文案模型分不清是数据还是提示）。键名与前端 shrink.ts 的 `${k}Bytes/${k}Truncated` 同族。
+    let (so, so_bytes, so_cut) = squeeze_head_tail(&out, SHELL_OUTPUT_LIMIT / 2, SHELL_OUTPUT_LIMIT / 2);
+    let (se, se_bytes, se_cut) = squeeze_head_tail(&err, SHELL_OUTPUT_LIMIT / 2, SHELL_OUTPUT_LIMIT / 2);
+    Ok(serde_json::json!({
+        "exitCode": status,
+        "timedOut": timed_out,
+        "stdout": so,
+        "stdoutBytes": so_bytes,
+        "stdoutTruncated": so_cut,
+        "stderr": se,
+        "stderrBytes": se_bytes,
+        "stderrTruncated": se_cut,
+    }))
+}
+
 /// 执行 shell 命令（前端审批门批准后调用）：Windows cmd /C，隐藏窗口；10s 超时 kill。
 /// 返回 { exitCode, stdout, stderr, timedOut }；输出截断至 64KB。
 #[tauri::command]
@@ -529,47 +577,89 @@ pub async fn agent_shell_exec(command: String) -> Result<serde_json::Value, Stri
         return Err("命令为空".into());
     }
     tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
-        // 管道读线程先行，避免「父 wait / 子写满管道」的经典死锁；
-        // kill/wait 循环结束后 join 读线程拿回 (stdout, stderr)。
-        let (mut child, reader) = spawn_shell(&command)?;
-        let start = std::time::Instant::now();
-        let mut timed_out = false;
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) => {
-                    if start.elapsed() >= Duration::from_secs(SHELL_TIMEOUT_SECS) {
-                        timed_out = true;
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                Err(e) => return Err(format!("命令执行异常：{e}")),
-            }
-        }
-        let (out, err) = reader
-            .join()
-            .map_err(|_| "输出收集线程异常退出".to_string())?;
-        let status = child.try_wait().ok().flatten().and_then(|s| s.code()).unwrap_or(-1);
-        // 头尾各留一半预算，并把"原始多少字节 / 是否压过"做成结构化字段（红线 A7：截断必须说真话，
-        // 内联文案模型分不清是数据还是提示）。键名与前端 shrink.ts 的 `${k}Bytes/${k}Truncated` 同族。
-        let (so, so_bytes, so_cut) = squeeze_head_tail(&out, SHELL_OUTPUT_LIMIT / 2, SHELL_OUTPUT_LIMIT / 2);
-        let (se, se_bytes, se_cut) = squeeze_head_tail(&err, SHELL_OUTPUT_LIMIT / 2, SHELL_OUTPUT_LIMIT / 2);
-        Ok(serde_json::json!({
-            "exitCode": status,
-            "timedOut": timed_out,
-            "stdout": so,
-            "stdoutBytes": so_bytes,
-            "stdoutTruncated": so_cut,
-            "stderr": se,
-            "stderrBytes": se_bytes,
-            "stderrTruncated": se_cut,
-        }))
+        let (child, reader) = spawn_shell(&command)?;
+        finish_child(child, reader, Duration::from_secs(SHELL_TIMEOUT_SECS))
     })
     .await
     .map_err(|e| format!("命令任务失败：{e}"))?
+}
+
+/* ================= P133-A：本仓校验命令的 argv 直启 =================
+ * 为什么要单独一条命令而不是复用 agent_shell_exec：那条的半径是"任意命令"，
+ * 而"AI 能跑本项目门禁"是它自证改动没弄坏东西的唯一办法。把后者绑在前者上，
+ * 用户就得多开一次"能跑任何东西"的闸——这条通路存在的意义就是**不用**。
+ * 差别全在形状上：这里是 argv 数组、无 shell、程序名由宿主表给且不含路径分隔符，
+ * 所以参数里出现 `&&` `|` `>` 也只是字面量，不会被第二个解释器读成命令。
+ */
+
+/// 校验命令的超时上限（秒）。宿主表里每一档都必须小于它；传 0 只会得到 1——
+/// **没有"0 = 不限"这个洞**：门禁/测试一轮再慢也不该是无界的。
+const REPO_CHECK_TIMEOUT_MAX_SECS: u64 = 1200;
+
+fn clamp_repo_check_timeout(secs: u64) -> u64 {
+    secs.clamp(1, REPO_CHECK_TIMEOUT_MAX_SECS)
+}
+
+/// argv 直启前的纯检查。独立成函数是为了**能单测**：真起进程这件事在 CI 上不可靠
+/// （有没有 node、PATH 怎么配都不定），而这三条规矩的正确性不该依赖那些。
+///
+/// - 程序名不许带路径分隔符 ⇒ 只能从 PATH 取（宿主表里就是 `node` / `cargo`），
+///   换个工作目录也就换不掉执行体；
+/// - 任何参数含换行或 `\0` 一律拒 ⇒ 这两个字符是"往一条参数里塞第二条命令"的形状，
+///   测试文件路径里永远不该有；
+/// - `cwd` 必须落在**宿主传入**的白名单根内（与 `agent_fs_write` 同一条权威门）。
+fn repo_check_guard(argv: &[String], cwd: &str, roots: &[String]) -> Result<(), String> {
+    if argv.is_empty() || argv[0].trim().is_empty() {
+        return Err("argv_empty".to_string());
+    }
+    if argv[0].contains('/') || argv[0].contains('\\') {
+        return Err(format!("program_must_be_bare:{}", argv[0]));
+    }
+    for a in argv.iter() {
+        if a.is_empty() {
+            return Err("argv_has_empty_item".to_string());
+        }
+        if a.contains('\n') || a.contains('\r') || a.contains('\0') {
+            return Err("argv_has_control_char".to_string());
+        }
+    }
+    if cwd.trim().is_empty() {
+        return Err("cwd_empty".to_string());
+    }
+    if !path_in_roots(cwd, roots) {
+        // 不回显归一化结果，避免把宿主路径规则当成信息泄露面
+        return Err("cwd_outside_whitelist".to_string());
+    }
+    Ok(())
+}
+
+/// 在本仓根目录用 argv 直接启动一条校验命令（无 shell）。
+/// 超时由宿主表传入、在这里夹到 1..=1200 秒；输出与 shell 同一份 64KB 头尾预算。
+#[tauri::command]
+pub async fn agent_repo_check(
+    argv: Vec<String>,
+    cwd: String,
+    roots: Vec<String>,
+    timeout_secs: u64,
+) -> Result<serde_json::Value, String> {
+    repo_check_guard(&argv, &cwd, &roots)?;
+    let secs = clamp_repo_check_timeout(timeout_secs);
+    tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        let mut cmd = Command::new(&argv[0]);
+        cmd.args(&argv[1..])
+            .current_dir(&cwd)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW：不闪黑框
+        }
+        let (child, reader) = spawn_piped(cmd)?;
+        finish_child(child, reader, Duration::from_secs(secs))
+    })
+    .await
+    .map_err(|e| format!("校验任务失败：{e}"))?
 }
 
 fn spawn_shell(
@@ -828,5 +918,66 @@ mod tests {
         assert_eq!(v["bytes"].as_u64().unwrap(), 0); // 目录没有"自身字节数"，报 0 而不是猜一个
         assert_eq!(v["path"].as_str().unwrap(), d.to_string_lossy());
         let _ = std::fs::remove_file(&f);
+    }
+
+    /* —— P133-A：repo_check 的三条纯规矩（不起进程，所以每条都真能跑） —— */
+
+    fn argv(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    // 上面 `agent_write_roots_match_frontend_semantics` 里那个 `roots` 是它自己的闭包（测试体内），
+    // 这里再要一份同名同语义的——**同一份白名单判定，两条命令共用**才是重点。
+    fn roots(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn repo_check_program_must_be_bare() {
+        let r = roots(&["D:\\Projects\\repo"]);
+        let cwd = "D:\\Projects\\repo";
+        assert!(repo_check_guard(&argv(&["node", ".tools/run-gates.mjs"]), cwd, &r).is_ok());
+        // 程序名带路径 ⇒ "换个工作目录就能换执行体"，宿主表的意义就没了。
+        // （裸名带扩展是合法的：`node.exe` 仍旧从 PATH 解析，它不指向 cwd。）
+        for bad in ["D:\\Tools\\node", "./node", ".\\node", "/usr/bin/node"] {
+            assert!(
+                repo_check_guard(&argv(&[bad, "a"]), cwd, &r).is_err(),
+                "带路径的程序名要拒：{bad}"
+            );
+        }
+        assert!(repo_check_guard(&argv(&["node.exe", "a"]), cwd, &r).is_ok());
+        assert!(repo_check_guard(&argv(&[]), cwd, &r).is_err());
+        assert!(repo_check_guard(&argv(&[" ", "a"]), cwd, &r).is_err());
+    }
+
+    #[test]
+    fn repo_check_rejects_control_chars_in_args() {
+        // 无 shell 时换行没有语义，但审批卡上它会伪装成"两条命令"，`\0` 是截断的形状，
+        // 空串是"参数错位"的形状——三者都不该出现在一条测试路径里，一律拒。
+        let r = roots(&["D:\\Projects\\repo"]);
+        let cwd = "D:\\Projects\\repo";
+        assert!(repo_check_guard(&argv(&["node", "-e\nrm -rf /"]), cwd, &r).is_err());
+        assert!(repo_check_guard(&argv(&["node", "a\0b"]), cwd, &r).is_err());
+        assert!(repo_check_guard(&argv(&["node", ""]), cwd, &r).is_err());
+    }
+
+    #[test]
+    fn repo_check_cwd_uses_the_same_authority_root_as_fs_write() {
+        let r = roots(&["D:\\Projects\\repo"]);
+        let one = argv(&["node"]);
+        let cwd = "D:\\Projects\\repo";
+        assert!(repo_check_guard(&one, "D:\\Projects", &r).is_err()); // 根之外
+        assert!(repo_check_guard(&one, "D:\\Projects\\repoX", &r).is_err()); // 分隔符边界
+        assert!(repo_check_guard(&one, "D:\\Projects\\repo\\..\\..\\Windows", &r).is_err()); // `..` 先拒
+        assert!(repo_check_guard(&one, cwd, &roots(&[])).is_err()); // 白名单为空 ⇒ 文件工具关闭
+        assert!(repo_check_guard(&one, "", &r).is_err());
+    }
+
+    #[test]
+    fn repo_check_timeout_has_no_unlimited_hole() {
+        // 0 不能读成"不限"：agent_shell_exec 那里就没有这个口子，这条也不给。
+        assert_eq!(clamp_repo_check_timeout(0), 1);
+        assert_eq!(clamp_repo_check_timeout(600), 600);
+        assert_eq!(clamp_repo_check_timeout(999_999), REPO_CHECK_TIMEOUT_MAX_SECS);
     }
 }

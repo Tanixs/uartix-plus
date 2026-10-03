@@ -49,9 +49,8 @@ function normPath(p: string): string {
   return s.toLowerCase();
 }
 
-/** 路径是否落在白名单内（分隔符边界匹配，防 D:\Projects 前缀误配 D:\ProjectsX）。 */
-export function inWhitelist(path: string): boolean {
-  const roots = parseFsRoots(getSettings().agentFsRoots);
+/** 路径是否落在**给定的**那几枚根之内（分隔符边界匹配，防 D:\Projects 前缀误配 D:\ProjectsX）。 */
+export function isUnderRoots(path: string, roots: string[]): boolean {
   if (roots.length === 0) return false;
   // P99a-A6：`..` 段必须在匹配之前先拒。归一化不折叠 `..`，旧写法下
   // `D:\w\..\..\Windows\x` 以 `D:\w\` 开头照样通过——Rust 侧同一条规则，两边一起补。
@@ -62,6 +61,11 @@ export function inWhitelist(path: string): boolean {
     const nr = normPath(r);
     return np === nr || np.startsWith(nr + "\\");
   });
+}
+
+/** 路径是否落在用户当前设的白名单内。判定本体在 `isUnderRoots`，这里只负责去取那份设置。 */
+export function inWhitelist(path: string): boolean {
+  return isUnderRoots(path, parseFsRoots(getSettings().agentFsRoots));
 }
 
 const NOT_IN_WL = (callId: string): ToolResultBody => notExecuted(callId, "path_outside_whitelist", {
@@ -427,6 +431,194 @@ async function fsWrite(callId: string, parsed: Record<string, unknown>): Promise
 
 const HOST = { kind: "host" } as const;
 
+/* ================= P133-A：本仓校验（比 shell_exec 窄一档的自证通路） =================
+ * 为什么要单独一支工具：AI 要能改本仓源码并**自证没弄坏东西**，唯一办法是跑门禁与测试。
+ * 但今天这件事只能走 `shell_exec`，那条的半径是"任意命令"——把"能跑校验"绑在"能跑任何东西"上，
+ * 用户就得多开一次他不必要开的闸。这条通路存在的意义就是**不用开那一道**。
+ *
+ * 差别全在形状上：命令表是这里的常量，模型只给一个 `check` 名，argv 由宿主拼；
+ * Rust 侧无 shell 直启（详设 §5-A），所以参数里出现 `&&` / `|` / `>` 也只是字面量。
+ *
+ * 每一档的 `covers` 都写清了"绿了证明什么、没证明什么"——一条只会说"passed"的门禁
+ * 迟早会被读成"这次改动全对"，那正是 §8-41 说的需要对模型兑现的承诺。
+ */
+
+export interface RepoCheckSpec {
+  labelZh: string;
+  /** PATH 上的裸程序名（Rust 侧再钉一次"不许带路径分隔符"） */
+  program: string;
+  /** 相对被校验仓库根的程序文件，由宿主拼成绝对路径后才下发 */
+  script?: string;
+  /** 程序自己的固定参数——模型永远拿不到这一格 */
+  args?: readonly string[];
+  /** 这一档要模型给一个测试文件路径（唯一允许的字面量入参） */
+  needsTestPath?: boolean;
+  /** 相对仓库根的子目录（cargo 那一档住在 src-tauri） */
+  subdir?: string;
+  timeoutSecs: number;
+  /** 人话：跑的是什么、绿了证明什么、没证明什么 */
+  covers: string;
+}
+
+export const REPO_CHECKS: Readonly<Record<string, RepoCheckSpec>> = {
+  gates: {
+    labelZh: "全部工程门禁",
+    program: "node",
+    script: ".tools/run-gates.mjs",
+    timeoutSecs: 600,
+    covers:
+      "14 道静态门（对比度 / 未声明变量 / 边框预算 / aria / 动效 / 空态话术 / i18n / chrome / 导入成环 / 命令注册 / 视口单位 / 路径可移植 / 审计账 / 死规则）。绿了证明这些预算与契约没被这次改动弄坏；第一道红即止，后面的门不会跑。",
+  },
+  types: {
+    labelZh: "TypeScript 类型检查",
+    program: "node",
+    script: "node_modules/typescript/bin/tsc",
+    args: ["--noEmit"],
+    timeoutSecs: 600,
+    covers: "全项目类型（不产出文件）。绿了证明类型层自洽；不证明行为正确，也不证明界面好看。",
+  },
+  tests: {
+    labelZh: "全部单元测试",
+    program: "node",
+    script: "node_modules/vitest/vitest.mjs",
+    args: ["run"],
+    timeoutSecs: 1200,
+    covers: "整条 vitest 套件。绿了证明既有断言全过——注意断言只覆盖被写下来的东西。",
+  },
+  one_test: {
+    labelZh: "单个测试文件",
+    program: "node",
+    script: "node_modules/vitest/vitest.mjs",
+    args: ["run"],
+    needsTestPath: true,
+    timeoutSecs: 600,
+    covers: "只跑一个测试文件（改完一处先跑它，比整条套件快两个数量级）。",
+  },
+  rust: {
+    labelZh: "Rust 侧单元测试",
+    program: "cargo",
+    args: ["test", "--lib"],
+    subdir: "src-tauri",
+    timeoutSecs: 1200,
+    covers: "Rust 库内单元测试（串口字节解析、白名单判定、文件写序这些宿主权威门住在这里）。",
+  },
+};
+
+/** `one_test` 唯一允许模型给的字面量：仓库内测试文件的相对路径形状。 */
+const TEST_PATH_RE = /^(?:src|scripts)\/[\w.@\-/]+\.test\.(?:ts|tsx|mjs)$/;
+
+export function validRepoTestPath(p: string): boolean {
+  if (!p) return false;
+  // `..`/`.` 段必须在形状匹配之前先拒：正则里的 `.` 允许它们，归一化又不折叠它们
+  if (p.split("/").some((seg) => seg === ".." || seg === ".")) return false;
+  return TEST_PATH_RE.test(p);
+}
+
+/** 拼进白名单根之下：分隔符跟着用户机器上那个根走，不在这里猜平台。 */
+function joinUnderRoot(root: string, rel: string): string {
+  const sep = root.includes("\\") ? "\\" : "/";
+  const tail = rel.split("/").filter(Boolean).join(sep);
+  const head = root.replace(/[\\/]+$/, "");
+  return tail ? `${head}${sep}${tail}` : head;
+}
+
+export type RepoCheckPlan =
+  | { err: string; extra?: Record<string, unknown> }
+  | { check: string; labelZh: string; covers: string; argv: string[]; cwd: string; timeoutSecs: number };
+
+/**
+ * 纯展开：`check` 名（+ 可选测试路径）→ 具体 argv。不碰 settings、不碰 invoke，
+ * 所以"命令表不可被参数扩展"这件事能在单测里逐条钉住。
+ */
+export function expandRepoCheck(checkId: string, root: string, testPath = ""): RepoCheckPlan {
+  const c = REPO_CHECKS[checkId];
+  if (!c) return { err: "unknown_check", extra: { check: checkId, allowed: Object.keys(REPO_CHECKS) } };
+  if (!root) return { err: "root_required" };
+  if (c.needsTestPath) {
+    if (!validRepoTestPath(testPath)) {
+      return {
+        err: "invalid_test_path",
+        extra: { testPath, hint: '仓库内测试文件的相对路径，如 "src/features/agent/generalTools.test.ts"' },
+      };
+    }
+  } else if (testPath) {
+    return { err: "test_path_not_accepted", extra: { check: checkId } };
+  }
+  const argv = [c.program];
+  if (c.script) argv.push(joinUnderRoot(root, c.script));
+  if (c.args) argv.push(...c.args);
+  if (c.needsTestPath && testPath) argv.push(testPath);
+  return {
+    check: checkId,
+    labelZh: c.labelZh,
+    covers: c.covers,
+    argv,
+    cwd: c.subdir ? joinUnderRoot(root, c.subdir) : root,
+    timeoutSecs: c.timeoutSecs,
+  };
+}
+
+/** 加上"工作目录只能落在用户白名单里"这一层（与 fs_* 同一条 `inWhitelist` 门）。 */
+export function resolveRepoCheck(
+  args: Record<string, unknown>,
+  roots: string[],
+): RepoCheckPlan {
+  if (roots.length === 0) {
+    return {
+      err: "files_whitelist_empty",
+      extra: { hint: "设置 → AI 服务 → 「Agent 文件白名单」为空 ⇒ 文件与校验工具关闭；把本仓目录加进去" },
+    };
+  }
+  const wanted = typeof args.root === "string" ? args.root.trim() : "";
+  let root = wanted;
+  if (!root && roots.length === 1) root = roots[0];
+  if (!root) return { err: "root_required", extra: { candidates: roots } };
+  // 用**传进来的**那份 roots 判，不在这里再去看一次 settings：同一件事有两个出处，
+  // 迟早漂成"调用方以为的门"和"实际的门"不是一扇（这条是 resolveRepoCheck 能被单测跑的原因）
+  if (!isUnderRoots(root, roots)) return { err: "path_outside_whitelist", extra: { root, candidates: roots } };
+  return expandRepoCheck(
+    String(args.check ?? "").trim(),
+    root,
+    typeof args.testPath === "string" ? args.testPath.trim() : "",
+  );
+}
+
+async function repoCheck(callId: string, parsed: Record<string, unknown>): Promise<ToolResultBody> {
+  // 只取一次：JS 侧的门与 Rust 侧的门必须看到的是**同一份** roots，
+  // 分两次读设置就等于允许中间有人换过白名单
+  const roots = parseFsRoots(getSettings().agentFsRoots);
+  const plan = resolveRepoCheck(parsed, roots);
+  if ("err" in plan) return notExecuted(callId, plan.err, plan.extra);
+  try {
+    const r = await invoke<{
+      exitCode: number; stdout: string; stderr: string; timedOut: boolean;
+      stdoutBytes: number; stdoutTruncated: boolean; stderrBytes: number; stderrTruncated: boolean;
+    }>("agent_repo_check", {
+      argv: plan.argv,
+      cwd: plan.cwd,
+      roots,
+      timeoutSecs: plan.timeoutSecs,
+    });
+    // 退出码非 0 是**一次真观察**（门禁红了），不是工具故障——与 shell_exec 同一个判据。
+    // 但"跑完了"和"绿了"必须分开写：只回 exitCode 就等着被读成"它跑了所以没事"。
+    return {
+      callId,
+      ok: true,
+      status: "read",
+      data: {
+        check: plan.check,
+        argv: plan.argv,
+        cwd: plan.cwd,
+        passed: r.exitCode === 0 && !r.timedOut,
+        covers: plan.covers,
+        ...r,
+      },
+    };
+  } catch (e) {
+    return failed(callId, e);
+  }
+}
+
 export const generalToolEntries: AgentToolEntry[] = [
   defineTool({
     name: "fs_read",
@@ -589,5 +781,52 @@ export const generalToolEntries: AgentToolEntry[] = [
     approvalBinding: (a) => ({ tool: "shell_exec", command: String(a.command ?? "").trim() }),
     planFor: (a) => `在系统 Shell 执行命令：\n${String(a.command ?? "")}\n\n超时 10s 自动终止；输出截断 64KB。请确认命令来源与影响后批准。`,
     execute: (a, ctx) => shellExec(ctx.callId, a),
+  }),
+  defineTool({
+    name: "repo_check",
+    labelZh: "跑本仓校验",
+    // 与 shell_exec 同一类：都是"在这台机器上起一个进程"，§8-44 把命令行列为四类逐次批准之一。
+    // 半径的差别在形状上：那一条能跑任何东西，这一条只能跑命令表里那五档，且无 shell。
+    effect: "irreversible",
+    domain: "files",
+    provenance: HOST,
+    description:
+      `Run THIS REPOSITORY's own verification commands and get back the real exit code plus output. The command table is a host constant — there is no \`command\` parameter, no flags and no working directory for you to pick: argv is assembled from that table and spawned WITHOUT a shell, so \`&&\`, \`|\` and \`>\` inside an argument stay literals. Args: { check: one of ${Object.keys(REPO_CHECKS).join("|")}, root?: string (must be one of the whitelisted dirs; needed only when more than one is whitelisted), testPath?: string (one_test only, repo-relative) }. The receipt carries { check, argv, cwd, passed, exitCode, timedOut, stdout, stdoutTruncated, stderrBytes } where passed = exitCode===0 && !timedOut. Two rules: (1) never tell the user a source change is verified without a repo_check receipt with passed:true — "I edited the file" is not "the gates are green"; (2) one family being green does not mean everything is fine: each check's \`covers\` states plainly what it does NOT prove (static gates cannot see runtime pixels — for what is actually on screen run theme_audit). Needs the ${DOMAIN_ZH.files} authorization domain, the "Agent 允许跑本仓校验" master switch in settings, and per-call approval.`,
+    parameters: {
+      type: "object",
+      properties: {
+        check: { type: "string", enum: Object.keys(REPO_CHECKS) },
+        root: { type: "string" },
+        testPath: { type: "string" },
+      },
+      required: ["check"],
+      additionalProperties: false,
+    },
+    summarize: (a) => `跑本仓校验「${String(a.check ?? "")}」${a.testPath ? ` · ${String(a.testPath).slice(0, 40)}` : ""}`,
+    /** 总开关关着就地拒、**不弹批准卡**（与 shell_exec 同一条理由：白要一次人工确认＝把用户训练成橡皮图章） */
+    assess: (a, ctx) => {
+      if (!getSettings().agentRepoCheck) {
+        return {
+          refuse: notExecuted(ctx.callId, "repo_check_disabled", {
+            hint: "设置 → AI 服务 → 「Agent 允许跑本仓校验」总开关未开启",
+          }),
+        };
+      }
+      const plan = resolveRepoCheck(a, parseFsRoots(getSettings().agentFsRoots));
+      if ("err" in plan) return { refuse: notExecuted(ctx.callId, plan.err, plan.extra) };
+      return {
+        meta: { effect: "irreversible", idempotent: true, reversible: false, mayTouchDevice: false },
+        plan:
+          `将执行（无 shell、argv 直启，超时 ${plan.timeoutSecs}s）：\n${plan.argv.join(" ")}\n\n` +
+          `工作目录：${plan.cwd}\n\n这一档跑的是：${plan.covers}`,
+      };
+    },
+    /** 令牌绑**展开后的 argv**而不是原始参数：白名单被换掉时同一份参数指的是另一条命令，
+     *  那一次批准不该复用（默认按 args 哈希就复用上去了）。 */
+    approvalBinding: (a) => {
+      const p = resolveRepoCheck(a, parseFsRoots(getSettings().agentFsRoots));
+      return "argv" in p ? { check: p.check, argv: p.argv, cwd: p.cwd } : { check: String(a.check ?? "") };
+    },
+    execute: (a, ctx) => repoCheck(ctx.callId, a),
   }),
 ];

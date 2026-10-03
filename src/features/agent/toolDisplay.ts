@@ -93,6 +93,14 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     unauthorized_scope: "超出授权范围",
     general_tool_requires_custom: "未勾选对应授权域",
     shell_disabled: "命令执行未开启",
+    // P133-A：repo_check 的失败码。`err` 是经变量透传的（F3 那条扫字面量的钉看不见它），
+    // 所以同一条测试在 toolDisplay.test.ts 里单独扫 `err: "…"` 钉一次。
+    repo_check_disabled: "本仓校验未开启",
+    files_whitelist_empty: "文件白名单为空",
+    root_required: "要指明校验哪个目录",
+    unknown_check: "校验项不存在",
+    invalid_test_path: "测试文件路径不合形状",
+    test_path_not_accepted: "这一档不收测试路径",
     path_outside_whitelist: "路径不在白名单",
     unknown_token: "未知外观 token",
     invalid_value: "token 值非法",

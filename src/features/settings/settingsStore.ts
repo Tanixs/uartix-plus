@@ -81,6 +81,13 @@ export interface Settings {
   /** P88e B2：Agent 通用工具——命令执行总开关（默认关；开启后 shell_exec 仍需逐次审批） */
   agentShellEnabled: boolean;
   /**
+   * P133-A：跑本仓校验的**独立**开关（默认关）。故意与 `agentShellEnabled` 分开：
+   * 那条的半径是"任意命令"，这条只能跑宿主命令表里那五档、且不经过 shell。
+   * 想让用户"允许 AI 自证改动没弄坏"却不交出任意命令，就必须是两个口子而不是一个。
+   * 同样必须 protected：模型不许自己开校验面。
+   */
+  agentRepoCheck: boolean;
+  /**
    * P109-D：重启后要不要**保留**「全权执行 / 手工勾选」这一档。默认 false = 保持原行为
    * （回落「界面创造」并如实标 downgraded）。这是 2026-09-26 用户点名的放松（§8-44 要求单独点头）；
    * 开了它，高危授权就跨重启存活 —— 所以开关本身必须是 protected：模型不许自己开。
@@ -218,6 +225,7 @@ function load(): Settings {
     aiWidgetSend: false,
     agentFsRoots: "",
     agentShellEnabled: false,
+    agentRepoCheck: false,
     agentRestoreTier: false,
     showThinking: true,
     deepThink: true,
@@ -287,6 +295,7 @@ function load(): Settings {
       aiWidgetSend: Boolean(p.aiWidgetSend),
       agentFsRoots: typeof p.agentFsRoots === "string" ? p.agentFsRoots.slice(0, 4096) : "",
       agentShellEnabled: Boolean(p.agentShellEnabled),
+      agentRepoCheck: Boolean(p.agentRepoCheck),
       agentRestoreTier: Boolean(p.agentRestoreTier),
       showThinking: p.showThinking === undefined ? true : Boolean(p.showThinking),
       deepThink: p.deepThink === undefined ? true : Boolean(p.deepThink),

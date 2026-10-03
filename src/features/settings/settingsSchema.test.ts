@@ -156,6 +156,34 @@ describe("P109-A/D · Agent 预算与恢复档的档位（模型不许写自己�
   });
 });
 
+/**
+ * P133-A · 执行面的三个口子都得是用户点的。
+ * 这批新增的 `repo_check` 整条理由就是"能跑校验 ≠ 能跑任意命令"，
+ * 而如果这三个开关里有任何一个落在模型可写清单里，那句话就作废了。
+ */
+describe("P133-A · Agent 执行面开关的档位", () => {
+  it("agentShellEnabled / agentRepoCheck 登记为 protected、默认关、不在模型可写清单里", async () => {
+    const keys = await settingsKeys();
+    for (const k of ["agentShellEnabled", "agentRepoCheck"]) {
+      expect(keys, `${k} 没进 Settings 类型（改了 schema 忘了改类型 = 静默丢设置）`).toContain(k);
+      const e = schemaEntry(k);
+      expect(e, `${k} 没进 schema`).toBeTruthy();
+      // 与预算三键同一条理由：能给自己开执行面，"逐条人工批准"这句话就是空的
+      expect(e!.sensitivity, `${k} 必须 protected：模型不许给自己开执行面`).toBe("protected");
+      expect(agentWritableKeys().map(String), `${k} 出现在模型可写清单里`).not.toContain(k);
+      expect(e!.def, `${k} 的默认值必须是"关"`).toBe(false);
+    }
+  });
+
+  it("三条口子各自独立成键：白名单、任意命令、本仓校验不是同一个开关", async () => {
+    const writable = agentWritableKeys().map(String);
+    for (const k of ["agentFsRoots", "agentShellEnabled", "agentRepoCheck"]) {
+      expect(SETTINGS_SCHEMA.filter((s) => s.key === k), `${k} 应当恰好一条`).toHaveLength(1);
+      expect(writable).not.toContain(k);
+    }
+  });
+});
+
 describe("P99b-N6 · 那两个市场键的档位与来源（R2/R4/R5）", () => {
   it("索引地址与镜像前缀登记为 protected：AI 只读不改", async () => {
     const keys = await settingsKeys();

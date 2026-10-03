@@ -15,7 +15,7 @@ vi.stubGlobal("localStorage", {
 const { patch } = await import("../settings/settingsStore");
 const invokeMock = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => undefined as unknown));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
-const { inWhitelist, parseFsRoots, parseDdgResults, generalToolEntries } = await import("./generalTools");
+const { inWhitelist, parseFsRoots, parseDdgResults, generalToolEntries, expandRepoCheck, resolveRepoCheck, validRepoTestPath, REPO_CHECKS } = await import("./generalTools");
 const { toolHarness } = await import("./toolTestKit");
 import type { ApprovalGate } from "./toolRegistry";
 import type { TaskContext, ToolCall } from "./types";
@@ -55,7 +55,7 @@ const noGate: ApprovalGate & { requests: unknown[] } = {
 };
 
 beforeEach(() => {
-  patch({ agentFsRoots: "", agentShellEnabled: false });
+  patch({ agentFsRoots: "", agentShellEnabled: false, agentRepoCheck: false });
   // 每个用例重置：跨用例残留的 mockResolvedValue 会让"新建 vs 覆盖"的判定读到上一个文件的状态
   invokeMock.mockReset();
   invokeMock.mockImplementation(async () => undefined as unknown);
@@ -318,6 +318,148 @@ describe("P109-D · fs_grep / fs_glob / fs_edit", () => {
     // assess 存在＝白名单/参数在"弹批准卡"之前就能拒掉；缺它就会出现
     // "用户点了允许，才发现路径越界"那种骗人签的卡
     expect(typeof e?.assess, "fs_edit 必须有 assess，否则拒绝发生在批准之后").toBe("function");
+  });
+});
+
+/**
+ * P133-A · `repo_check`：命令表是宿主常量。
+ *
+ * 这批的全部理由就是"能跑校验 ≠ 能跑任何东西"，所以钉的是**参数面拿不到命令**这件事。
+ * 没有钉"跑起来能过"——那取决于机器上装没装 node/cargo，不该由单测去赌（真跑通在验收里做一次）。
+ */
+describe("repo_check 命令表闭合", () => {
+  const ROOT = "D:\\Projects\\repo";
+
+  function fakeGate(hasToken: boolean) {
+    const requested: unknown[] = [];
+    const gate: ApprovalGate = {
+      request: (req) => { requested.push(req); },
+      takeToken: () => (hasToken ? { id: "t1" } as never : null),
+      reject: () => undefined,
+    };
+    return { gate, requested };
+  }
+
+  it("参数面只有 check/root/testPath——能扩这张表的只有源码", () => {
+    const e = generalToolEntries.find((x) => x.name === "repo_check")!;
+    expect(Object.keys(e.parameters!.properties as Record<string, unknown>).sort()).toEqual([
+      "check", "root", "testPath",
+    ]);
+    expect(JSON.stringify(e.parameters)).not.toContain('"command"');
+    // 表就是那五档，多一档都得改这里（写死而不是 Object.keys，是为了让"有人偷偷加一档"必须过断言）
+    expect(Object.keys(REPO_CHECKS)).toEqual(["gates", "types", "tests", "one_test", "rust"]);
+  });
+
+  it("表外的一律 unknown_check，并把允许的那几档回给模型", () => {
+    // 两个变体的判别键是 `err`，所以这里按"两边都可能有的形状"读，不做单侧窄化
+    const p = expandRepoCheck("rm_rf", ROOT) as { err?: string; extra?: { allowed: string[] } };
+    expect(p.err).toBe("unknown_check");
+    expect(p.extra!.allowed).toEqual(["gates", "types", "tests", "one_test", "rust"]);
+  });
+
+  it("argv 由表拼装：程序名裸着、脚本绝对化到根之下、cargo 那档换子目录", () => {
+    const p = expandRepoCheck("gates", ROOT) as { argv: string[]; cwd: string; timeoutSecs: number };
+    expect(p.argv).toEqual(["node", "D:\\Projects\\repo\\.tools\\run-gates.mjs"]);
+    expect(p.cwd).toBe(ROOT);
+    expect(p.timeoutSecs).toBeGreaterThan(10); // 10s 是 shell 那一档的预算，门禁必然被掐死在里面
+    const c = expandRepoCheck("rust", ROOT) as { argv: string[]; cwd: string };
+    expect(c.argv).toEqual(["cargo", "test", "--lib"]);
+    // cwd 走子目录而不是 --manifest-path：少一格"可以被拼"的东西
+    expect(c.cwd).toBe("D:\\Projects\\repo\\src-tauri");
+  });
+
+  it("testPath 只给 one_test 用，越界与形状不符都拒", () => {
+    expect("err" in expandRepoCheck("gates", ROOT, "src/a.test.ts")).toBe(true);
+    for (const bad of ["../src/a.test.ts", "src/../src/a.test.ts", "src/a.test.txt", "C:\\repo\\a.test.ts", "src\\a.test.ts", ""]) {
+      expect(validRepoTestPath(bad), bad).toBe(false);
+    }
+    expect(validRepoTestPath("src/features/agent/loop.test.ts")).toBe(true);
+    expect(validRepoTestPath("scripts/gateWiring.test.mjs")).toBe(true);
+    const p = expandRepoCheck("one_test", ROOT, "src/x.test.ts") as { argv: string[] };
+    expect(p.argv[p.argv.length - 1]).toBe("src/x.test.ts");
+    expect("err" in expandRepoCheck("one_test", ROOT)).toBe(true); // 缺 testPath 也拒，不猜一个
+  });
+
+  it("白名单为空 ⇒ 校验也关：它借的是同一条文件门", () => {
+    expect(resolveRepoCheck({ check: "gates" }, [])).toMatchObject({ err: "files_whitelist_empty" });
+  });
+
+  it("多根必须点名 root，点名也只能点白名单里那一个", () => {
+    expect(resolveRepoCheck({ check: "gates" }, ["D:\\a", "D:\\b"])).toMatchObject({ err: "root_required" });
+    expect(resolveRepoCheck({ check: "gates", root: "D:\\c" }, ["D:\\a"])).toMatchObject({
+      err: "path_outside_whitelist",
+    });
+    expect("argv" in resolveRepoCheck({ check: "gates", root: "D:\\a" }, ["D:\\a"])).toBe(true);
+  });
+
+  it("总开关关着 → repo_check_disabled，且不进审批门（与 shell_disabled 同一条理由）", async () => {
+    patch({ agentFsRoots: ROOT, agentRepoCheck: false });
+    const r = await executeGeneralTool(call("repo_check", { check: "gates" }), ctx("custom", ["files"]), "r1", noGate);
+    expect(r.code).toBe("repo_check_disabled");
+  });
+
+  it("没勾 files 域进不去；preview 一律 preview_only", async () => {
+    patch({ agentFsRoots: ROOT, agentRepoCheck: true });
+    const a = await executeGeneralTool(call("repo_check", { check: "gates" }), ctx("custom", ["config"]), "r1", noGate);
+    expect(a.code).toBe("unauthorized_scope");
+    const b = await executeGeneralTool(call("repo_check", { check: "gates" }), ctx("preview"), "r1", noGate);
+    expect(b.code).toBe("preview_only");
+  });
+
+  it("开开关后先弹批准卡，卡上写的是展开后的 argv，一次 invoke 都没发生", async () => {
+    patch({ agentFsRoots: ROOT, agentRepoCheck: true });
+    const g = fakeGate(false);
+    const r = await executeGeneralTool(call("repo_check", { check: "types" }), ctx("custom", ["files"]), "r1", g.gate);
+    expect(r.code).toBe("needs_local_approval");
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(g.requested).toHaveLength(1);
+    const plan = JSON.stringify(g.requested[0]);
+    expect(plan).toContain("node_modules"); // 用户批的是这条命令，不是"我要跑个检查"这句话
+    expect(plan).toContain("--noEmit");
+  });
+
+  it("批准后无 shell 直启：argv 原样下发、roots 随调用交给 Rust 再判一次", async () => {
+    patch({ agentFsRoots: ROOT, agentRepoCheck: true });
+    const g = fakeGate(true);
+    invokeMock.mockResolvedValueOnce({
+      exitCode: 1, timedOut: false, stdout: "FAIL gate 7", stderr: "",
+      stdoutBytes: 10, stdoutTruncated: false, stderrBytes: 0, stderrTruncated: false,
+    });
+    const r = await executeGeneralTool(call("repo_check", { check: "gates" }), ctx("custom", ["files"]), "r1", g.gate);
+    const last = invokeMock.mock.calls[invokeMock.mock.calls.length - 1];
+    expect(last[0]).toBe("agent_repo_check");
+    expect(last[1]).toMatchObject({
+      argv: ["node", "D:\\Projects\\repo\\.tools\\run-gates.mjs"],
+      cwd: ROOT,
+      roots: [ROOT],
+    });
+    // 门禁红了是一次**观察**，不是工具故障：ok:true + passed:false，回执里带着真退出码
+    expect(r.ok).toBe(true);
+    const d = r.data as { passed: boolean; exitCode: number; covers: string };
+    expect(d.passed).toBe(false);
+    expect(d.exitCode).toBe(1);
+    expect(d.covers).toContain("14");
+  });
+
+  it("表里没有 git/网络/包管理器：那句「AI 不 push」是有机制的，不是空头承诺", () => {
+    for (const [id, c] of Object.entries(REPO_CHECKS)) {
+      expect(["node", "cargo"], `${id} 的程序名越界了`).toContain(c.program);
+      const flat = [c.script ?? "", ...(c.args ?? [])].join(" ").toLowerCase();
+      for (const banned of ["git", "curl", "npm", "npx", "pnpm", "http", "ssh"]) {
+        expect(flat, `${id} 的 argv 里出现了 ${banned}`).not.toContain(banned);
+      }
+    }
+  });
+
+  it("exitCode 0 且没超时才算 passed", async () => {
+    patch({ agentFsRoots: ROOT, agentRepoCheck: true });
+    const g = fakeGate(true);
+    invokeMock.mockResolvedValueOnce({
+      exitCode: 0, timedOut: true, stdout: "", stderr: "killed",
+      stdoutBytes: 0, stdoutTruncated: false, stderrBytes: 6, stderrTruncated: false,
+    });
+    const r = await executeGeneralTool(call("repo_check", { check: "tests" }), ctx("custom", ["files"]), "r1", g.gate);
+    expect((r.data as { passed: boolean }).passed).toBe(false);
   });
 });
 

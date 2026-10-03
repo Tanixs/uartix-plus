@@ -61,6 +61,10 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "aiWidgetSend", type: "boolean", def: false, group: "ai", label: "允许向设备发送", sensitivity: "protected", reversible: false },
   { key: "agentFsRoots", type: "string", maxLen: 4096, def: "", group: "ai", label: "Agent 文件白名单", sensitivity: "protected", reversible: false },
   { key: "agentShellEnabled", type: "boolean", def: false, group: "ai", label: "Agent 允许执行命令", sensitivity: "protected", reversible: false },
+  // P133-A：跑本仓校验的**独立**开关。故意与 agentShellEnabled 分开：那条的半径是"任意命令"，
+  // 这条只能跑命令表里那五档且无 shell。想让用户"能自证改动没弄坏"却不必开那道闸，就得有两个口子。
+  // 同样 protected —— 模型不许给自己开校验面（与预算三键、agentRestoreTier 同一条测试钉着）。
+  { key: "agentRepoCheck", type: "boolean", def: false, group: "ai", label: "Agent 允许跑本仓校验", sensitivity: "protected", reversible: false },
   // P109-D：高危档跨重启。**默认关**＝保持"重启回落界面创造并标 downgraded"的原行为；
   // 开它是用户点名的放松（§8-44），所以它本身必须是 protected —— 模型不许给自己开这扇门。
   { key: "agentRestoreTier", type: "boolean", def: false, group: "ai", label: "重启后保留全权执行档", sensitivity: "protected", reversible: true },
