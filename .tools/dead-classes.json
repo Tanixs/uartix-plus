@@ -5,33 +5,9 @@
   "judge": "四道判据：CSS 有 ∧ 源码无同名字面量 ∧ 无模板前缀能拼出 ∧ 13 面没渲染（.tools/check-dead-classes.cjs）",
   "exemptions": [],
   "budget": {
-    "unreferenced": 145
+    "unreferenced": 133
   },
   "unreferenced": [
-    {
-      "cls": "agent-approval",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-approval-args",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-approval-btns",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-approval-plan",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-approval-row",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-approval-title",
-      "file": "src\\styles\\theme.css"
-    },
     {
       "cls": "agent-body",
       "file": "src\\styles\\theme.css"
@@ -81,14 +57,6 @@
       "file": "src\\styles\\theme.css"
     },
     {
-      "cls": "agent-goal",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-head",
-      "file": "src\\styles\\theme.css"
-    },
-    {
       "cls": "agent-head-title",
       "file": "src\\styles\\theme.css"
     },
@@ -109,10 +77,6 @@
       "file": "src\\styles\\theme.css"
     },
     {
-      "cls": "agent-lease",
-      "file": "src\\styles\\theme.css"
-    },
-    {
       "cls": "agent-new",
       "file": "src\\styles\\theme.css"
     },
@@ -121,19 +85,11 @@
       "file": "src\\styles\\theme.css"
     },
     {
-      "cls": "agent-note",
-      "file": "src\\styles\\theme.css"
-    },
-    {
       "cls": "agent-scope",
       "file": "src\\styles\\theme.css"
     },
     {
       "cls": "agent-scope-btn",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-status",
       "file": "src\\styles\\theme.css"
     },
     {
@@ -198,10 +154,6 @@
     },
     {
       "cls": "agent-tl-v",
-      "file": "src\\styles\\theme.css"
-    },
-    {
-      "cls": "agent-undo",
       "file": "src\\styles\\theme.css"
     },
     {

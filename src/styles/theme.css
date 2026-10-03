@@ -10679,15 +10679,6 @@ body.pdrag-active *{cursor:grabbing !important;}
   box-shadow: var(--shadow-pop), var(--shadow);
   overflow: hidden;
 }
-.agent-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  background: var(--raise-1);
-  border-bottom: 1px solid var(--border);
-}
 .agent-head-title { font-size: var(--fs-md); font-weight: 600; }
 .agent-scope { display: flex; gap: 6px; margin-left: auto; }
 .agent-scope-btn {
@@ -10705,16 +10696,6 @@ body.pdrag-active *{cursor:grabbing !important;}
   border-color: var(--accent);
   background: var(--accent-soft);
 }
-.agent-note {
-  flex: 0 0 auto;
-  margin: 10px 14px 0;
-  padding: 8px 10px;
-  font-size: var(--fs-sm);
-  color: var(--warn-fg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-  background: var(--bg);
-}
 .agent-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -10725,18 +10706,6 @@ body.pdrag-active *{cursor:grabbing !important;}
   overflow-y: auto;
 }
 .agent-new { display: flex; flex-direction: column; gap: 8px; }
-.agent-goal {
-  width: 100%;
-  resize: vertical;
-  padding: 8px 10px;
-  font-family: var(--font-ui);
-  font-size: var(--fs-sm);
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-m);
-}
-.agent-goal:focus { outline: none; border-color: var(--accent); }
 .agent-new-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .agent-hint { font-size: var(--fs-body); color: var(--text-dim); }
 /* Agent 任务入口徽标（AiChat 工具栏）：运行中=accent，待批准=warn */
@@ -10785,10 +10754,6 @@ body.pdrag-active *{cursor:grabbing !important;}
   background: var(--bg);
 }
 .agent-task-row { display: flex; align-items: center; gap: 10px; }
-.agent-status { font-size: var(--fs-sm); font-weight: 600; white-space: nowrap; }
-.agent-status.run { color: var(--accent); }
-.agent-status.ok { color: var(--k-assert); }
-.agent-status.bad { color: var(--danger); }
 .agent-task-goal {
   flex: 1 1 auto;
   font-size: var(--fs-sm);
@@ -10797,35 +10762,10 @@ body.pdrag-active *{cursor:grabbing !important;}
   white-space: nowrap;
 }
 .agent-task-meta { display: flex; align-items: center; gap: 8px; font-size: var(--fs-body); color: var(--text-dim); }
-.agent-lease {
-  padding: 1px 8px;
-  font-size: var(--fs-body);
-  color: var(--k-group);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: transparent;
-}
-.agent-approval {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--warn-fg);
-  border-radius: var(--radius-m);
-}
-.agent-approval-title { font-size: var(--fs-sm); font-weight: 700; color: var(--warn-fg); }
-.agent-approval-plan { font-size: var(--fs-sm); line-height: 1.5; color: var(--text); }
-.agent-approval-args {
-  font-family: var(--font-mono);
-  font-size: var(--fs-body);
-  color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.agent-approval-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.agent-approval-btns { display: flex; gap: 8px; }
+/* P133-B1：`.agent-lease` 与 `.agent-approval*` 那六条是"改名加 ai- 前缀"没删旧的残留，
+   活的一套在 `.ai-agent-*`（AgentInline.tsx 的批准卡）。`-args` 也一起走：它不是被改名顶掉的，
+   是**被 `req.plan` 顶掉的**——参数预览那一格没有丢，plan 文本里就写着参数
+   （P133-A 的 repo_check 把展开后的 argv 写进批准卡，正是同一形状）。 */
 .agent-events {
   flex: 1 1 auto;
   min-height: 0;
@@ -10894,17 +10834,6 @@ body.pdrag-active *{cursor:grabbing !important;}
   color: var(--text-dim);
 }
 .agent-ev-tool.bad { color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
-.agent-undo {
-  flex: 0 0 auto;
-  padding: 1px 8px;
-  font-size: var(--fs-body);
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-s);
-  cursor: pointer;
-}
-.agent-undo:hover { background: var(--accent-soft); }
 .agent-undone { font-size: var(--fs-body); color: var(--text-dim); }
 /* D2 时间线卡片：工具回执=状态点+名称+摘要，可展开参数/回执/撤销 */
 .agent-tl-item { display: flex; align-items: flex-start; gap: 8px; }
