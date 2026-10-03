@@ -52,18 +52,33 @@ const scripted: AgentProvider = async (messages, _tools, signal) => {
     if (turn === 3) return { content: "", calls: [{ callId: "c3", name: "run_app_action", arguments: JSON.stringify({ kind: "setTheme", args: { name: "begonia" } }) }] };
     return { content: "完成：字号精度已应用", calls: [] };
   }
+  // ⚠ 这条必须排在 "approve" 之前判：`startsWith("approve")` 也会命中 "approve2"，
+  //    排错了就是"两条调用的场景静默退化成一条"，测试看着像在验队列、其实验的是单卡。
+  if (goal.startsWith("approve2")) {
+    if (turn === 1) {
+      return {
+        content: "",
+        calls: [
+          { callId: "e1", name: "run_app_action", arguments: JSON.stringify({ kind: "removeCard", args: { id: "card-1" } }) },
+          { callId: "e2", name: "run_app_action", arguments: JSON.stringify({ kind: "removeCard", args: { id: "card-2" } }) },
+        ],
+      };
+    }
+    return { content: "两条都处理完了", calls: [] };
+  }
   if (goal.startsWith("approve")) {
     if (turn === 1) {
       return { content: "", calls: [{ callId: "d1", name: "run_app_action", arguments: JSON.stringify({ kind: "removeCard", args: { id: "card-9" } }) }] };
     }
     if (turn === 2) {
+      /* P133-D：批准不再由"下一轮的模型"来点。旧写法之所以能成立，是因为那条门根本不等人：
+       * 它当场回 needs_local_approval，循环走到第二轮，模型在第二轮里替用户 approve。
+       * 现在循环停在工具调用里等，第二轮要等批准之后才会发生——所以批准改由测试本体并发发出。
+       * 这里只负责看回执：被拦下就说"没执行"，执行了就收尾。 */
       const last = [...messages].reverse().find((m) => m.role === "tool");
-      if ((JSON.parse(last?.content ?? "{}") as { code?: string }).code === "needs_local_approval") {
-        const snap = agentRun.getSnapshot();
-        const pending = snap.runs[0]?.pending;
-        expect(pending).toBeTruthy();
-        expect(agentRun.approve(snap.runs[0].runId, pending!.id)).toBe(true);
-        return { content: "", calls: [{ callId: "d2", name: "run_app_action", arguments: JSON.stringify({ kind: "removeCard", args: { id: "card-9" } }) }] };
+      const got = (JSON.parse(last?.content ?? "{}") as { code?: string; status?: string }).code;
+      if (got === "needs_local_approval" || got === "approval_rejected" || got === "approval_expired") {
+        return { content: "被拦下了，没有执行任何改动", calls: [] };
       }
       return { content: "清理完成", calls: [] };
     }
@@ -127,21 +142,84 @@ describe("agentRun 运行宿主", () => {
     expect(agentRun.getSnapshot().activeRunId).toBeNull();
   });
 
-  it("批准闭环：needs_local_approval → 批准后同参重试放行", async () => {
-    await agentRun.startRun({ goal: "approve 删除测试卡片", scope: "create" });
+  it("批准闭环（P133-D：门真的等人）：卡片挂着不动 → 批准后**同一次调用**就执行", async () => {
+    const p = agentRun.startRun({ goal: "approve 删除测试卡片", scope: "create" });
+    // 关键判据：批准之前，任务必须**停在**这张卡上（旧实现会一路跑到收尾）
+    await vi.waitFor(() => {
+      expect(agentRun.getSnapshot().runs[0].pending.length).toBe(1);
+    }, { timeout: 3000 });
+    const stuck = agentRun.getSnapshot().runs[0];
+    expect(stuck.status, "等待批准期间任务不该已经收尾").toBe("running");
+    expect(runAppAction, "没批准就不能执行删除").not.toHaveBeenCalled();
+
+    const out = agentRun.approve(stuck.runId, stuck.pending[0].id);
+    expect(out, "点中一张还在队列里的卡，必须回 approved").toBe("approved");
+    await p;
+
     const view = agentRun.getSnapshot().runs[0];
     expect(view.status).toBe("succeeded");
+    expect(runAppAction, "批准后由同一次调用执行，不需要模型再发一遍").toHaveBeenCalledTimes(1);
     const okEvt = view.events.find((e) => e.kind === "receipt" && e.receipt?.ok === true && e.receipt.status === "applied");
-    expect(okEvt).toBeTruthy();
+    expect(okEvt, "回执要落在这一次调用上，不是重试出来的第二次").toBeTruthy();
+    expect(view.pending).toEqual([]);
   });
 
-  it("拒绝后不再弹同参卡；run 结束 pending 清空", async () => {
+  it("P133-D：一轮里两条待批调用**各出一张卡、按序等**（旧实现两条瞬间各回一次，单槽只留最后一张）", async () => {
+    const p = agentRun.startRun({ goal: "approve2 一次删两张卡", scope: "create" });
+    await vi.waitFor(() => {
+      expect(agentRun.getSnapshot().runs[0].pending.length).toBe(1);
+    }, { timeout: 3000 });
+    const runId = agentRun.getSnapshot().runs[0].runId;
+    const first = agentRun.getSnapshot().runs[0].pending[0];
+    expect(runAppAction, "第一张没批之前不能执行任何一条").not.toHaveBeenCalled();
+    expect(agentRun.approve(runId, first.id)).toBe("approved");
+
+    // 批准第一条之后，第二条的卡才出现——这才是"两条都要批"的正确形状
+    await vi.waitFor(() => {
+      expect(agentRun.getSnapshot().runs[0].pending.length).toBe(1);
+    }, { timeout: 3000 });
+    const second = agentRun.getSnapshot().runs[0].pending[0];
+    expect(second.id, "第二条必须是另一张卡，不是第一条的残留").not.toBe(first.id);
+    expect(agentRun.reject(runId, second.id)).toBe("rejected");
+    await p;
+
+    const done = agentRun.getSnapshot().runs.find((r) => r.runId === runId)!;
+    expect(done.pending).toEqual([]);
+    // 一条批准一条拒绝 ⇒ 恰好执行一次删除
+    expect(runAppAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("P133-D：点了张已经不在队列里的卡要**报 stale**，不是静默 false", async () => {
+    const p = agentRun.startRun({ goal: "approve 删除测试卡片", scope: "create" });
+    await vi.waitFor(() => {
+      expect(agentRun.getSnapshot().runs[0].pending.length).toBe(1);
+    }, { timeout: 3000 });
+    const v = agentRun.getSnapshot().runs[0];
+    expect(agentRun.approve(v.runId, "no-such-card")).toBe("stale");
+    expect(agentRun.approve("no-such-run", v.pending[0].id)).toBe("stale");
+    agentRun.approve(v.runId, v.pending[0].id);
+    await p;
+  });
+
+  it("拒绝：不执行、同参不再弹卡、run 结束 pending 清空", async () => {
     runAppAction.mockResolvedValue({ ok: false, err: "卡片不存在" });
-    // 用 preview 档位触发 preview_only（不走批准卡）——此处验证 pending 生命周期由 UI 驱动的路径在 reject 后不再出现
-    const runId = await agentRun.startRun({ goal: "approve 删除测试卡片", scope: "preview" });
+    /* 这条测试原本的注释写着"用 preview 档位触发 preview_only（不走批准卡）"——**那是错的**：
+     * `toolPolicy.decide` 把 `destructive_write / irreversible` 排在 preview 分支之前，
+     * 所以 preview 档一样要批准。旧实现不阻塞，测试靠模型桩在第二轮里自己 approve 混了过去；
+     * 门改成真的等人之后它就死锁了。改成按标题本意测拒绝：并发 reject，断言一次都不执行。 */
+    const p = agentRun.startRun({ goal: "approve 删除测试卡片", scope: "preview" });
+    await vi.waitFor(() => {
+      expect(agentRun.getSnapshot().runs[0].pending.length).toBe(1);
+    }, { timeout: 3000 });
+    const runId = agentRun.getSnapshot().runs[0].runId;
+    const req = agentRun.getSnapshot().runs[0].pending[0];
+    expect(agentRun.reject(runId, req.id)).toBe("rejected");
+    await p;
     const view = agentRun.getSnapshot().runs.find((r) => r.runId === runId)!;
-    expect(view.status).toBe("succeeded");
-    expect(view.pending).toBeNull();
+    expect(runAppAction, "被拒绝的调用一次都不该执行").not.toHaveBeenCalled();
+    expect(view.pending, "run 收尾时队列必须清空").toEqual([]);
+    const got = view.events.find((e) => e.kind === "receipt" && (e.receipt as { code?: string })?.code === "approval_rejected");
+    expect(got, "回执要写清是「被拒绝」，不是「等待批准」").toBeTruthy();
   });
 
   it("stopRun：取消态、租约释放、不执行后续工具", async () => {

@@ -85,7 +85,19 @@ export interface ApprovalGate {
   request(req: ApprovalRequest): void;
   takeToken(runId: string, tool: string, argsHash: string, now: number): string | null;
   reject(req: ApprovalRequest): void;
+  /**
+   * P133-D：批准门**真的等人**。旧实现弹完卡立刻回 `needs_local_approval`，
+   * 于是模型在同一轮里连刷三次重试（第一次真跑实录），而卡片在它刷轮次时被
+   * `finalize` 清掉——用户点的那一下落在一张已经消失的卡上，且没人告诉他。
+   * 缺省（没有 UI 可批的独立适配器 / MCP 门）＝"这里不会有人来批"，
+   * 调用方照旧立刻回 `needs_local_approval`：不阻塞、也不假装能等。
+   */
+  waitFor?(
+    runId: string, tool: string, argsHash: string, expiresAt: number, signal: AbortSignal,
+  ): Promise<WaitOutcome>;
 }
+
+export type WaitOutcome = "approved" | "rejected" | "expired" | "aborted";
 
 /** 批准令牌有效期：绑定单次执行，过期重新评估（§7.4）。 */
 export const APPROVAL_TTL_MS = 5 * 60 * 1000;
@@ -370,7 +382,7 @@ async function dispatchToolCall(
       const subject = entry.approvalSubject ? entry.approvalSubject(args) : entry.name;
       const now = hooks.now();
       if (!hooks.gate.takeToken(ctx.runId, subject, hash, now)) {
-        hooks.gate.request({
+        const req: ApprovalRequest = {
           id: hooks.newRequestId(),
           runId: ctx.runId,
           callId: call.callId,
@@ -382,12 +394,36 @@ async function dispatchToolCall(
             ?? (entry.planFor ? entry.planFor(args, meta) : `${entry.labelZh}（${meta.effect}）需要你确认后才会执行`),
           createdAt: now,
           expiresAt: now + APPROVAL_TTL_MS,
-        });
-        return notExecuted(call.callId, "needs_local_approval", {
-          tool: entry.name,
-          effect: meta.effect,
-          hint: "等待用户在任务卡批准；批准后用相同参数重试",
-        });
+        };
+        hooks.gate.request(req);
+        /* P133-D：等用户点。三种落点各回各的话，不共用一句"等待批准"——
+         *   拒绝：这是人的决定，模型**不该**再拿同参重试；
+         *   过期：卡还挂着但令牌已作废，重试只会再要一次；
+         *   停止/无 UI：任务被中止，或这条装配根本没有能批的人。
+         * 三个码都写成 notExecuted 的字面量，好让 toolDisplay 那条 F3 扫描看得见（§8-43）。 */
+        const waited = hooks.gate.waitFor
+          ? await hooks.gate.waitFor(ctx.runId, subject, hash, req.expiresAt, ctx.signal)
+          : ("aborted" as const);
+        if (waited === "rejected") {
+          return notExecuted(call.callId, "approval_rejected", {
+            tool: entry.name, effect: meta.effect, hint: "用户拒绝了这一条。这是决定，不是超时——别用同样的参数再来一次",
+          });
+        }
+        if (waited === "expired") {
+          return notExecuted(call.callId, "approval_expired", {
+            tool: entry.name, effect: meta.effect, hint: "批准卡过期了（有效期 5 分钟）。要往下走得重新征求批准",
+          });
+        }
+        if (waited !== "approved" || !hooks.gate.takeToken(ctx.runId, subject, hash, hooks.now())) {
+          return notExecuted(call.callId, "needs_local_approval", {
+            tool: entry.name,
+            effect: meta.effect,
+            hint: waited === "aborted"
+              ? "任务被停止或这条通路没有能批准的界面；未执行任何改动"
+              : "等待用户在任务卡批准；批准后用相同参数重试",
+          });
+        }
+        // 落这里 = 已批准且令牌刚被消费，继续往下执行（下面 undoRoute/撤销登记照常）
       }
     }
   }

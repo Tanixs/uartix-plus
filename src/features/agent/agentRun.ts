@@ -17,7 +17,7 @@ import { pluginToolEntries } from "./pluginTools";
 import { runtimeFacts } from "./hostCatalog";
 import { armEnabledModules } from "../plugins/pluginStore";
 import { undoRouteOf } from "./hostEntries";
-import type { ApprovalGate, ApprovalRequest } from "./toolRegistry";
+import type { ApprovalGate, ApprovalRequest, WaitOutcome } from "./toolRegistry";
 import { releaseDataLease } from "../plot/dataLease";
 import { setLocalJobInterest } from "../mcp/jobExecutor";
 import type { UndoResult } from "./settingsTools";
@@ -82,7 +82,13 @@ export interface AgentRunView {
   /** P95-H2：本次任务实际送入模型的上下文用量（最后一轮快照 + 峰值字节）。
    *  旧实现把 loop 的 messages 快照丢掉，"当时带了多少"事后无从得知。 */
   ctx?: { last?: ContextStat; peakBytes: number };
-  pending: ApprovalRequest | null;
+  /**
+   * P133-D：待批**队列**，不是单槽。旧实现一张卡一个槽，模型在同一轮里提两个编辑时
+   * 第二个把第一个静默顶掉——用户看到的"两条都要批"实际只有一条能批，
+   * 而点了的那张如果已被顶掉，`approve()` 返回 false 却没人读它（那就是"我明明点了批准"）。
+   * UI 渲染队首；批准/拒绝各消费自己那一张。
+   */
+  pending: ApprovalRequest[];
   /** seq → 撤销结果（仅会话内；重启后条目消失=令牌失效） */
   undoState: Record<number, UndoResult>;
 }
@@ -207,7 +213,7 @@ function persist() {
     const payload = runs.slice(0, RUNS_KEPT).map((r) => ({
       ...r,
       events: r.events.slice(-EVENTS_CAP).map(trimEvent),
-      pending: null,
+      pending: [],
     }));
     localStorage.setItem(STORE_KEY, JSON.stringify(payload));
   } catch {
@@ -252,7 +258,7 @@ function reviveRun(r: unknown): AgentRunView | null {
     events: Array.isArray(o.events) ? o.events : [],
     // P95-H2：`reviveRun` 是逐字段白名单重建——新字段不在这里出现，重启后就静默消失
     ctx: o.ctx && typeof o.ctx === "object" ? o.ctx : undefined,
-    pending: null,
+    pending: [],
     undoState: {},
   };
 }
@@ -298,19 +304,50 @@ interface ApprovalToken { token: string; exp: number }
 const approved = new Map<string, ApprovalToken>(); // key = `${runId}|${tool}|${hash}`
 const rejected = new Set<string>();
 
+/** P133-D：正在等用户点的调用。一个 key 最多挂一个等待者（同参重试只留最新那个）。 */
+type Waiter = (outcome: WaitOutcome) => void;
+const waiters = new Map<string, Waiter>();
+
+const keyOf = (runId: string, tool: string, hash: string) => `${runId}|${tool}|${hash}`;
+
+/** 叫醒等待者。没有等待者就是空操作——独立适配器那条门从不 waitFor，那条路保持旧行为。 */
+function wake(key: string, outcome: WaitOutcome) {
+  const w = waiters.get(key);
+  if (!w) return;
+  waiters.delete(key);
+  w(outcome); // 定时器由它自己的 done 清，这里不越俎代庖
+}
+
+/** 把 run 的所有等待者一次性收尾（停止/收工时用，不留悬着的 Promise） */
+function wakeRun(runId: string, outcome: WaitOutcome) {
+  for (const key of [...waiters.keys()]) if (key.startsWith(`${runId}|`)) wake(key, outcome);
+}
+
+function dropPending(view: AgentRunView, id: string): boolean {
+  const i = view.pending.findIndex((p) => p.id === id);
+  if (i < 0) return false;
+  view.pending.splice(i, 1);
+  notify();
+  schedulePersist();
+  return true;
+}
+
 function makeGate(runId: string): ApprovalGate {
   return {
     request(req) {
+      const key = keyOf(runId, req.tool, req.argsHash);
       // 用户已明确拒绝的同参请求不再重复弹卡（模型重试由连续失败暂停兜底）
-      if (rejected.has(`${runId}|${req.tool}|${req.argsHash}`)) return;
+      if (rejected.has(key)) return;
       const view = find(runId);
       if (!view) return;
-      view.pending = req;
+      // 同参只留一张：模型重试同一个调用不该把队列刷成一叠重复卡
+      if (view.pending.some((p) => p.tool === req.tool && p.argsHash === req.argsHash)) return;
+      view.pending.push(req);
       notify();
       schedulePersist();
     },
     takeToken(rid, tool, hash, now) {
-      const key = `${rid}|${tool}|${hash}`;
+      const key = keyOf(rid, tool, hash);
       const t = approved.get(key);
       if (!t) return null;
       approved.delete(key);
@@ -318,40 +355,83 @@ function makeGate(runId: string): ApprovalGate {
       return t.token;
     },
     reject(req) {
-      rejected.add(`${runId}|${req.tool}|${req.argsHash}`);
+      rejected.add(keyOf(runId, req.tool, req.argsHash));
       const view = find(runId);
-      if (view?.pending?.id === req.id) {
-        view.pending = null;
-        notify();
-      }
+      if (view) dropPending(view, req.id);
+      wake(keyOf(runId, req.tool, req.argsHash), "rejected");
+    },
+    /**
+     * P133-D：批准门真的等人。旧实现不等人——弹完卡立刻回 `needs_local_approval`，
+     * 模型在同一轮里连刷三次重试，而卡片在刷轮次途中被 finalize 清掉，
+     * 用户点下去时落在一张已消失的卡上（第一次真跑实录）。
+     * 到点自动把那张卡从队列里摘掉并回 `expired`：留一张点不动的卡比没有卡更坏。
+     */
+    waitFor(rid, tool, hash, expiresAt, signal) {
+      const key = keyOf(rid, tool, hash);
+      return new Promise<WaitOutcome>((resolve) => {
+        // 用 holder 而不是 `let timer`：done 要在定时器建好之前就能取消它，而 eslint 的
+        // prefer-const 不许"声明后只赋值一次"的 let（这里确实是先声明后赋值）
+        const holder: { timer?: ReturnType<typeof setTimeout> } = {};
+        const done = (outcome: WaitOutcome) => {
+          if (waiters.get(key) === done) waiters.delete(key);
+          clearTimeout(holder.timer);
+          signal.removeEventListener("abort", onAbort);
+          resolve(outcome);
+        };
+        const onAbort = () => done("aborted");
+        holder.timer = setTimeout(() => {
+          const view = find(rid);
+          if (view) {
+            const i = view.pending.findIndex((p) => p.tool === tool && p.argsHash === hash);
+            if (i >= 0) view.pending.splice(i, 1);
+            notify();
+          }
+          done("expired");
+        }, Math.max(0, expiresAt - Date.now()));
+        const prev = waiters.get(key);
+        if (prev) {
+          waiters.delete(key);
+          prev("aborted"); // 它自己的 done 会清掉它的定时器
+        }
+        signal.addEventListener("abort", onAbort, { once: true });
+        waiters.set(key, done);
+      });
     },
   };
 }
 
-export function approve(runId: string, approvalId: string): boolean {
+/**
+ * 一次点击的结果。**故意不再返回 boolean**：旧实现返回 `false` 而界面把返回值丢掉，
+ * 于是"点了批准但那张卡早已被顶掉/已过期"与"点成功了"在屏幕上长得一模一样——
+ * 用户看到的就是一句"我明明点了批准"。
+ */
+export type ApprovalOutcome = "approved" | "rejected" | "expired" | "stale";
+
+export function approve(runId: string, approvalId: string): ApprovalOutcome {
   const view = find(runId);
-  const req = view?.pending;
-  if (!view || !req || req.id !== approvalId) return false;
+  const req = view?.pending.find((p) => p.id === approvalId);
+  if (!view || !req) return "stale";
+  const key = keyOf(runId, req.tool, req.argsHash);
   if (Date.now() >= req.expiresAt) {
-    view.pending = null;
-    notify();
-    return false;
+    dropPending(view, req.id);
+    wake(key, "expired");
+    return "expired";
   }
-  approved.set(`${runId}|${req.tool}|${req.argsHash}`, { token: crypto.randomUUID(), exp: req.expiresAt });
-  rejected.delete(`${runId}|${req.tool}|${req.argsHash}`);
-  view.pending = null;
-  notify();
-  return true;
+  approved.set(key, { token: crypto.randomUUID(), exp: req.expiresAt });
+  rejected.delete(key);
+  dropPending(view, req.id);
+  wake(key, "approved");
+  return "approved";
 }
 
-export function reject(runId: string, approvalId: string): boolean {
+export function reject(runId: string, approvalId: string): ApprovalOutcome {
   const view = find(runId);
-  const req = view?.pending;
-  if (!view || !req || req.id !== approvalId) return false;
-  rejected.add(`${runId}|${req.tool}|${req.argsHash}`);
-  view.pending = null;
-  notify();
-  return true;
+  const req = view?.pending.find((p) => p.id === approvalId);
+  if (!view || !req) return "stale";
+  rejected.add(keyOf(runId, req.tool, req.argsHash));
+  dropPending(view, req.id);
+  wake(keyOf(runId, req.tool, req.argsHash), "rejected");
+  return "rejected";
 }
 
 /* ================= 撤销（§5.4：仅会话内有效，如实三态） ================= */
@@ -438,7 +518,7 @@ export async function startRun(options: {
     sessionId: options.sessionId,
     // `deadlineAt: 0` = 没有截止时间（不能写 Infinity：caps 要经 JSON 落盘，Infinity 会变 null）
     caps: { maxRounds, maxCalls, deadlineAt: timeoutMs > 0 ? now + timeoutMs : 0 },
-    createdAt: now, updatedAt: now, events: [], pending: null, undoState: {},
+    createdAt: now, updatedAt: now, events: [], pending: [], undoState: {},
   };
   runs = [view, ...runs.filter((r) => r.runId !== runId)].slice(0, RUNS_KEPT);
   activeRunId = runId;
@@ -577,11 +657,13 @@ function finalize(runId: string, result: AgentResult | null, crashCode?: string,
       { seq: view.events.length + 1, ts: Date.now(), kind: "turn", text: `执行出错：${crashCode ?? "未知错误"}` },
     ];
   }
-  view.pending = null;
+  // P133-D：收工时把还挂在批准门上的调用一次性叫醒（否则那条 Promise 会一直等下去），
+  // 并清空队列。这里顺手合并了旧代码里连着写两遍的同一句 `view.pending = null`。
+  wakeRun(runId, "aborted");
+  view.pending = [];
   // P109-C：计划台账随**真终态**回收。paused 不清——「继续任务」还要靠它判断闭环；
   // running 也不清（finalize 只在终态调用，这层判断是给以后改动留的护栏）。
   if (view.status !== "paused" && view.status !== "running") clearPlan(runId);
-  view.pending = null;
   view.finishedAt = Date.now();
   view.updatedAt = view.finishedAt;
   // P92 A4：结论回写会话（气泡=结论、卡片=过程）；无 sessionId 的 run（MCP/Operator）不回写

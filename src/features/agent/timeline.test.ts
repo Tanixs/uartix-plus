@@ -10,7 +10,7 @@ const msg = (id: string, ts: number, role: "user" | "assistant" = "user"): ChatM
 const run = (runId: string, createdAt: number): AgentRunView => ({
   runId, goal: runId, goalBrief: runId, scope: "create", status: "running",
   rounds: 0, calls: 0, caps: { maxRounds: 24, maxCalls: 64, deadlineAt: 0 },
-  createdAt, updatedAt: createdAt, events: [], pending: null, undoState: {},
+  createdAt, updatedAt: createdAt, events: [], pending: [], undoState: {},
 });
 
 const shape = (items: ReturnType<typeof buildTimeline>) => items.map((i) => `${i.kind}:${i.key.slice(2)}`);

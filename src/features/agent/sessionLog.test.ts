@@ -14,7 +14,7 @@ const msg = (id: string, ts: number, role: "user" | "assistant", content: string
 const run = (over: Partial<AgentRunView> & { events: AgentRunView["events"] }): AgentRunView => ({
   runId: "r1", goal: "把面板做成玻璃", goalBrief: "把面板做成玻璃", scope: "create", status: "succeeded",
   rounds: 2, calls: 1, caps: { maxRounds: 24, maxCalls: 64, deadlineAt: 0 },
-  createdAt: 100, updatedAt: 500, finishedAt: 500, sessionId: "s1", pending: null, undoState: {},
+  createdAt: 100, updatedAt: 500, finishedAt: 500, sessionId: "s1", pending: [], undoState: {},
   ...over,
 });
 

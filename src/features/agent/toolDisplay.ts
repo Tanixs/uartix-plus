@@ -89,6 +89,9 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     // 市场装链的码：中文在契约层（`marketIndex.INSTALL_CODE_ZH`，穷举 Record），这里只合表不重抄
     ...INSTALL_CODE_ZH,
     needs_local_approval: "等待批准",
+    // P133-D：批准门改成"真的等人"之后多出来的落点（`approval_rejected` 徽章本来就有，
+    // 只是旧实现从不产生它——现在它有了出处）
+    approval_expired: "批准卡已过期",
     preview_only: "仅预览未执行",
     unauthorized_scope: "超出授权范围",
     general_tool_requires_custom: "未勾选对应授权域",

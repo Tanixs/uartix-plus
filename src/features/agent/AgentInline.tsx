@@ -367,17 +367,34 @@ function ToolCard({
   );
 }
 
-/** 审批卡（内联在消息流位置） */
+/** 审批卡（内联在消息流位置）。队列里一次只展示队首那一张，但**会告诉用户还有几张**。 */
 function ApprovalCard({ view }: { view: AgentRunView }) {
   useLocale();
-  const req = view.pending;
+  // P133-D：点了没生效必须出声。旧实现是 `onClick={() => agentRun.approve(...)}`，
+  // 返回值被丢掉 ⇒ "批准成功" 与 "这张卡早已被顶掉/已过期" 在屏幕上长得一模一样。
+  const [stale, setStale] = useState(false);
+  const req = view.pending[0];
   if (!req) return null;
+  const click = (kind: "approve" | "reject") => {
+    const out = kind === "approve" ? agentRun.approve(view.runId, req.id) : agentRun.reject(view.runId, req.id);
+    setStale(out === "stale" || out === "expired");
+  };
+  const more = view.pending.length - 1;
   return (
     <div className="ai-agent-approval" role="alert">
       <div className="ai-agent-approval-title">
         {tx(`需要你的批准：${toolLabel(req.tool)}`, `Approval needed: ${toolLabel(req.tool)}`)}
+        {more > 0 ? tx(`（还有 ${more} 条待批）`, ` (${more} more awaiting approval)`) : ""}
       </div>
       <div className="ai-agent-approval-plan">{req.plan}</div>
+      {stale && (
+        <div className="ai-agent-approval-exp">
+          {tx(
+            "这次点击没有生效：这张卡已经被更新的请求顶掉或已过期。请对当前这张操作。",
+            "That click did not take: this card was replaced or has expired. Act on the card now shown.",
+          )}
+        </div>
+      )}
       <div className="ai-agent-approval-row">
         <span className="ai-agent-approval-exp">
           {tx(
@@ -386,8 +403,8 @@ function ApprovalCard({ view }: { view: AgentRunView }) {
           )}
         </span>
         <div className="ai-agent-approval-btns">
-          <button className="btn" onClick={() => agentRun.reject(view.runId, req.id)}>{tx("拒绝", "Reject")}</button>
-          <button className="btn primary" onClick={() => agentRun.approve(view.runId, req.id)}>{tx("批准执行", "Approve")}</button>
+          <button className="btn" onClick={() => click("reject")}>{tx("拒绝", "Reject")}</button>
+          <button className="btn primary" onClick={() => click("approve")}>{tx("批准执行", "Approve")}</button>
         </div>
       </div>
     </div>
@@ -788,8 +805,8 @@ export const AgentFloat = memo(function AgentFloat({
       onClick={() => active.sessionId && onOpen(active.sessionId)}
       title={tx("回到任务所在会话查看结果", "Back to the session this task belongs to")}
     >
-      <span className={`ai-agent-dot${active.pending ? " err" : done && active.status === "succeeded" ? " ok" : done ? " err" : " ok"}`} aria-hidden="true" />
-      {active.pending
+      <span className={`ai-agent-dot${active.pending.length ? " err" : done && active.status === "succeeded" ? " ok" : done ? " err" : " ok"}`} aria-hidden="true" />
+      {active.pending.length
         ? tx("Agent 待批准", "Agent awaiting approval")
         : done
           ? tx(`任务${statusLabel(active.status, active.pauseReason)}`, `Task ${statusLabel(active.status, active.pauseReason)}`)
