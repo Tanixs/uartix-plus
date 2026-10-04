@@ -10,7 +10,7 @@ import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
  *
  * 旧注释写的是"§5.3 初版建议预算……允许收紧，不允许放宽"，并被 `loop.ts` 与 `agentRun.ts`
  * 两处 `Math.min` 焊成硬上限。核对过：**那句从来不是用户裁决**，只是 P88b §5.3 的初版建议
- * 被实现成了常量（详设 `docs/P109-A助手能力对标DSH-调研与升级方案.md` §1-8、§6-1）。
+ * 被实现成了常量（详设 `docs/designs/P109-A助手能力对标DSH-调研与升级方案.md` §1-8、§6-1）。
  * 2026-09-26 用户裁决：预算改成设置项，`0 = 不限制`，默认不限。
  * 对标结论也支持这条：DSH 官方明写 "No built-in turn budget"。
  */
