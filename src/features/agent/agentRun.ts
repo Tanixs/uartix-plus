@@ -7,6 +7,7 @@
  * - 审批卡经 ApprovalGate 绑定 (tool, argsHash)，批准/拒绝/过期由宿主裁决（§7）。
  */
 import { runAgent, resolveBudget } from "./loop";
+import { markStaleArtifacts } from "./context";
 import { clearPlan } from "./planLedger";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { parseFsRoots } from "./generalTools";
@@ -743,11 +744,11 @@ export function rebuildMessages(view: AgentRunView): AgentMessage[] {
   return out;
 }
 
-/** 回灌用的回执：剥掉一次性撤销令牌（跨轮/跨重启复用即误撤销） */
+/** 回灌用的回执：剥掉一次性撤销令牌（跨轮/跨重启复用即误撤销），并把"可取回"改成实话 */
 function receiptForReplay(rec: ToolReceipt | undefined): unknown {
   if (!rec) return { ok: false, status: "error", code: "ledger_missing_receipt" };
   const { undoToken: _drop, ...rest } = rec;
-  return rest;
+  return markStaleArtifacts(rest);
 }
 
 export function stopRun(runId: string): void {

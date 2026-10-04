@@ -146,6 +146,26 @@ export function dropHistoryImages(messages: AgentMessage[]): number {
   return dropped;
 }
 
+/**
+ * 重放旧回执时，把"完整内容已缓存，可用 read_artifact 取回"改成实话（P134-A）。
+ *
+ * 依据是两条都已核实的事实：artifacts 缓存是**每个 run 一份内存**（`agentAdapter` 里
+ * `newRunScratch()`），而 `read_artifact` 自己的说明就写着"任务结束后取回会得到
+ * artifact_expired"。所以「继续任务」/新任务重放上一次的回执时，那句 note 是一张必然兑不了的支票
+ * ——模型照它做一次就白烧一轮。引用本身留着（历史形状不变、日志可复盘），只把承诺改口。
+ */
+export function markStaleArtifacts<T>(rec: T): T {
+  const r = rec as { data?: unknown; artifactRefs?: unknown };
+  const d = r?.data;
+  const hasRefs = Array.isArray(r.artifactRefs) && r.artifactRefs.length > 0;
+  if (!d || typeof d !== "object") return hasRefs ? { ...r, artifactRefs: undefined } as T : rec;
+  const o = d as Record<string, unknown>;
+  if (typeof o.artifactRef !== "string" && !hasRefs) return rec;
+  const next: Record<string, unknown> = { ...o, note: "原文缓存在上一次运行的内存里，那次任务结束即失效：不要调 read_artifact，需要内容请重新调用对应工具" };
+  delete next.artifactRef;
+  return { ...r, data: next } as T;
+}
+
 /** 折叠结果带计数——"折了几条"必须能被记进事件台账，而不是像旧实现那样折完即丢。 */
 export interface FoldResult {
   messages: AgentMessage[];
@@ -166,7 +186,13 @@ export function foldContext(messages: AgentMessage[], maxBytes?: number): FoldRe
   while (headEnd < messages.length && (messages[headEnd].role === "system" || (messages[headEnd].role === "user" && headEnd === 1))) headEnd++;
   /** 折成"头部不折 + 中间一条摘要 + 最近 keep 条完整" */
   const foldWith = (keep: number) => {
-    const tailStart = Math.max(headEnd, messages.length - keep);
+    let tailStart = Math.max(headEnd, messages.length - keep);
+    /* P134-A（对标 DSH `region.ts:133-147` 的 toolPairingBalancedBefore）：
+       折叠边界不许把"一次调用"和"它的回执"劈开。劈开的代价不是难看而已——
+       Anthropic 那条路上 `tool_result` 找不到配对的 `tool_use` 是 400，
+       而就算协议层放过了，模型读到一条孤儿回执也会以为存在一次没发生的调用
+       （P92 A2 对"孤儿调用"的同一判据，这次发生在折叠侧）。 */
+    while (tailStart > headEnd && messages[tailStart]?.role === "tool") tailStart--;
     const middle = messages.slice(headEnd, tailStart);
     return {
       out: [...messages.slice(0, headEnd), ...(middle.length ? [summarize(middle)] : []), ...messages.slice(tailStart)],
@@ -177,11 +203,16 @@ export function foldContext(messages: AgentMessage[], maxBytes?: number): FoldRe
     maxBytes === undefined ? estimateChars(arr) <= CONTEXT_SOFT_LIMIT : agentPayloadBytes(arr) <= maxBytes;
 
   if (fits(messages)) return { messages, folded: 0, changed: false };
+  /* P134-A：阶梯必须**逐级往下试到放得下为止**。
+     旧写法是 `for (keep = 8; keep >= 2; keep -= 2) { best = foldWith(keep); if (best.folded === 0 || fits || keep === 2) break; }`
+     ——第一轮 keep=8 时"最近 8 条"往往就是全部（10 条消息 ⇒ 中间段为空 ⇒ folded===0），
+     于是 `folded === 0` 这条 break 立刻命中，阶梯在第一级就收工，报一个本来可避免的 context_overflow。
+     症状是"任务没多大就说放不下"。现在从 8 起算，放不下就继续 6/4/2，取第一个放得下的那一级。 */
   let best = foldWith(KEEP_RECENT_MESSAGES);
-  if (maxBytes !== undefined) {
-    for (let keep = KEEP_RECENT_MESSAGES; keep >= 2; keep -= 2) {
+  if (maxBytes !== undefined && !fits(best.out)) {
+    for (let keep = KEEP_RECENT_MESSAGES - 2; keep >= 2; keep -= 2) {
       best = foldWith(keep);
-      if (best.folded === 0 || fits(best.out) || keep === 2) break;
+      if (fits(best.out)) break;
     }
   }
   return { messages: best.out, folded: best.folded, changed: best.folded > 0 };
@@ -200,5 +231,13 @@ function summarize(msgs: AgentMessage[]): AgentMessage {
     }
     return `${m.role}: ${m.content.slice(0, 80)}`;
   });
-  return { role: "system", content: `（较早 ${msgs.length} 条步骤摘要，细节已折叠，可用 read_artifact 取回）\n${lines.join("\n")}` };
+  /* P134-A：这句说明里"能不能取回原文"必须跟着事实走。旧写法无条件写"可用 read_artifact 取回"，
+     而 read_artifact 只认**当时被裁过并存进 artifacts 的那份**（`artifactRef`）——
+     被折叠的多是普通正文与短回执，照着这句话去调只会拿到 artifact_not_found。
+     同一类空头支票 P94-G3 在 shrinkReceipt 里修过一次，这里是它的另一半。 */
+  const refable = msgs.some((m) => m.role === "tool" && m.content.includes("artifactRef"));
+  const tail = refable
+    ? "带 artifactRef 的条目可用 read_artifact 分页取回，其余请重新调用对应工具"
+    : "需要原文请重新调用对应工具（这里没有可取回的缓存）";
+  return { role: "system", content: `（较早 ${msgs.length} 条步骤摘要，细节已折叠；${tail}）\n${lines.join("\n")}` };
 }

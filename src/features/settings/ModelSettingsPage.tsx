@@ -719,8 +719,8 @@ export function ModelSettingsPage() {
               </button>
               <span className="set-hint">
                 {activeModel
-                  ? tx(`按 ${activeModel.model} 的 ${fmtTokens(activeModel.contextTokens)} 窗口算，当前 ${(settings.aiHistoryOverride || historyCharBudget(activeModel.contextTokens, settings.aiCompactRatio))} 字`,
-                      `from ${activeModel.model}'s ${fmtTokens(activeModel.contextTokens)} window: ${(settings.aiHistoryOverride || historyCharBudget(activeModel.contextTokens, settings.aiCompactRatio))} chars now`)
+                  ? tx(`按 ${activeModel.model} 的 ${fmtTokens(activeModel.contextTokens)} 窗口算，当前 ${(settings.aiHistoryOverride || historyCharBudget(activeModel.contextTokens, settings.aiCompactRatio, undefined, activeModel.maxOutputTokens))} 字`,
+                      `from ${activeModel.model}'s ${fmtTokens(activeModel.contextTokens)} window: ${(settings.aiHistoryOverride || historyCharBudget(activeModel.contextTokens, settings.aiCompactRatio, undefined, activeModel.maxOutputTokens))} chars now`)
                   : tx("没有当前模型：窗口算不出来，走固定兜底预算", "No active model: the window is unknown, so the fallback budget applies")}
               </span>
             </div>

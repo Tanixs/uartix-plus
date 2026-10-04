@@ -7,7 +7,10 @@
  * （chatStore 会话消息 + agentRun 任务台账）之上的派生视图，避免造出第三份真相。
  *
  * 依赖只有类型（编译期擦除），因此不引入 chatStore/agentRun 的运行时环（红线 R1）。
+ * 唯一的运行时 import 是 `contextBudget`（零 import 的算术叶子）与 `context`（同样只 import 类型
+ * + contextBudget）——两者都指不回本模块，环守卫（门禁 9）盯的就是这条。
  */
+import { markStaleArtifacts } from "./context";
 import type { ChatMsg } from "../ai/chatStore";
 import type { AgentRunView } from "./agentRun";
 import type { AgentMessage, ToolReceipt } from "./types";
@@ -123,9 +126,9 @@ export function tightenHistoryBudget(current: number = HISTORY_CHAR_BUDGET): num
   return tightenByHalf(current);
 }
 
-/** 当前该用多少历史预算：模型窗口 × 压缩比例，并被传输保险丝封顶（详设 §2′.3） */
-export function budgetFor(contextTokens: number, ratio?: number): number {
-  return budgetFromWindow(contextTokens, ratio);
+/** 当前该用多少历史预算：模型窗口 × 压缩比例，扣掉这一轮回答的输出预留，再被传输保险丝封顶 */
+export function budgetFor(contextTokens: number, ratio?: number, outputTokens?: number): number {
+  return budgetFromWindow(contextTokens, ratio, undefined, outputTokens);
 }
 
 /** 只对最近这么多条带图的历史 user 透传图片：data URL 一张可达上百 KB，全量重发会撑爆请求 */
@@ -142,10 +145,11 @@ function sizeOf(m: AgentMessage): number {
   return m.content.length + JSON.stringify(m.calls ?? "[]").length + img;
 }
 
-/** 剥掉一次性令牌：跨轮/跨重启复用即误撤销（陈旧 revision 会被宿主拒，属自纠，保留） */
+/** 剥掉一次性令牌：跨轮/跨重启复用即误撤销（陈旧 revision 会被宿主拒，属自纠，保留）；
+ *  顺带把"可用 read_artifact 取回"改成实话——缓存是上一个 run 的内存（P134-A）。 */
 function receiptForModel(rec: ToolReceipt): string {
   const { undoToken: _drop, ...rest } = rec;
-  return JSON.stringify(rest);
+  return JSON.stringify(markStaleArtifacts(rest));
 }
 
 /**

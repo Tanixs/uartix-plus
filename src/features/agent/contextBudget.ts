@@ -46,20 +46,35 @@ export function capacityBytes(contextTokens: number): number {
 }
 
 /**
- * 会话历史的字符预算 = min(窗口 × 压缩比例 × 每 token 字符数, 传输保险丝)。
+ * 会话历史的字符预算 = min(窗口 × 压缩比例, 窗口 − 输出预留, 传输保险丝) × 每 token 字符数。
  * `contextTokens` 不合法（没配档案）时退回兜底值，**不返回 0**：
  * 预算 0 会让历史整段消失，那是比"没压缩"更坏的失败。
+ *
+ * P134-A（对标 DSH）：`outputTokens` 是**这一轮回答要占的预留**。DSH 的算法是
+ * `messageBudget = W − O`、`threshold = floor(min(W × 0.8, messageBudget − 65536))`
+ * （`packages/compaction/compaction-basic/src/config.ts:191-197`，源码核实于 commit 477b4f4）。
+ * 我们此前只算 `W × ratio`，于是档案里 `maxOutputTokens` 填到接近窗口一半时，
+ * "历史放得下"是假的：历史塞满，回答没地方落，最后撞的是上游的硬截断。
+ * 那条 65536 的 headroom **没有照抄**：DSH 默认在 80% 才压缩，留的是 20%；
+ * 我们默认 60%（用户点的名），已经留了 40% 给提示词/工具定义/增长，再减一份就是三重保守。
  */
 export function historyCharBudget(
   contextTokens: number,
   ratio: number = CTX_FILL_RATIO_DEFAULT,
   hardCapChars: number = TRANSPORT_CHAR_CAP,
+  outputTokens: number = 0,
 ): number {
   const r = Number.isFinite(ratio) ? Math.min(CTX_FILL_RATIO_MAX, Math.max(CTX_FILL_RATIO_MIN, ratio)) : CTX_FILL_RATIO_DEFAULT;
   if (!Number.isFinite(contextTokens) || contextTokens <= 0) {
     return Math.max(MIN_HISTORY_BUDGET, Math.min(FALLBACK_HISTORY_CHAR_BUDGET, hardCapChars));
   }
-  const byWindow = Math.floor(contextTokens * r * CHARS_PER_TOKEN_EST);
+  // 输出预留最多只能吃掉半个窗口：档案里把 maxOutputTokens 填成窗口那么大（或填错）时，
+  // 不能让"预留"把历史压到下限——那时该坏的是档案，不是历史。
+  const o = Number.isFinite(outputTokens) && outputTokens > 0
+    ? Math.min(outputTokens, Math.floor(contextTokens / 2))
+    : 0;
+  const usable = Math.max(1, contextTokens - o);
+  const byWindow = Math.floor(Math.min(usable, contextTokens * r) * CHARS_PER_TOKEN_EST);
   return Math.max(MIN_HISTORY_BUDGET, Math.min(byWindow, hardCapChars, FALLBACK_HISTORY_CHAR_BUDGET * 40));
 }
 

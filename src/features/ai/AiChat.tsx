@@ -856,7 +856,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   // 窗口改了而手动值还留着时以窗口为准（否则换了个 8k 的小模型，历史照旧堆 2 万字）。
   const aiProfilesForCtx = useAiProfiles();
   const activeForCtx = activeRef(aiProfilesForCtx);
-  const autoBudget = budgetFor(activeForCtx?.model.contextTokens ?? 0, settings.aiCompactRatio);
+  const autoBudget = budgetFor(activeForCtx?.model.contextTokens ?? 0, settings.aiCompactRatio, activeForCtx?.model.maxOutputTokens ?? 0);
   const ctxBudget = settings.aiHistoryOverride > 0 ? Math.min(settings.aiHistoryOverride, autoBudget) : autoBudget;
   // sessionRuns 每次 agentSnap 变化都是新数组 ⇒ 用"内容摘要"当实质依赖（写在数组外，规则才能静态检查）
   const runsWork = sessionRuns.reduce((n, r) => n + r.rounds + r.calls, 0);

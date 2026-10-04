@@ -157,12 +157,30 @@ export async function runAgent(options: {
   const resumed = clean(options.resumeFrom);
   // P109-C：提示按“本轮真的发出去了哪些工具”组装（`adapter.definitions` 就是那份投影）
   const systemPrompt = buildSystemPrompt(new Set(adapter.definitions.map((d) => d.name)));
-  /** 未闭环计划的提示（一次性）。刷进 system 而不新插消息：中途插 system 角色在
-   *  Anthropic 那条路上会被拒，插 user 又等于伪造用户发言。 */
+  /**
+   * P134-A：历史与续跑骨架里的 `system` **不再被丢弃**，而是并进那唯一一份 system 提示。
+   *
+   * 旧写法 `filter(m => m.role !== "system")` 的理由是"中途插 system 角色在 Anthropic 那条路上会被拒"，
+   * 但这句话对**我们自己的传输层**也不成立：`ai.rs` 的 `agent_body()` 在拼 body 之前就把所有
+   * `role=="system"` 摘出来拼进顶层 system 字段（`src-tauri/src/ai.rs:937`），模型侧从来没见过
+   * "消息流中间冒出来的 system"。于是过滤器拦掉的不是协议错误，而是三句真话：
+   *  ① 「更早 N 条会话记录已省略以适配上下文预算」；
+   *  ② 「先前 N 次工具调用的参数超出台账上限，未纳入本历史——它们确实已执行过，请勿重复写入」；
+   *  ③ 「先前 N 次工具回执的返回内容因持久化上限未纳入本历史」。
+   * 这三句存在的全部理由就是防止模型把"我看不到"读成"当时没发生"（§8-41），
+   * 而它们此前在函数边界上被静默丢弃——压缩照做，说明没送出去。
+   *
+   * 并进 system[0] 而不是原样留在历史里，是为了保住"整份上下文只有一份 system 提示"这条不变式
+   * （`loop.test.ts` 的 P92 A2 钉的就是它——它让"提示词被复制了一遍"这类事故可被检出）；
+   * 顺带躲开 `foldContext` 的可折区：元陈述若被折成一行，等于拿一条压缩说明换另一条。
+   */
+  const hostNotes = [...history, ...resumed]
+    .filter((m) => m.role === "system" && m.content.trim())
+    .map((m) => m.content.trim());
+  /** 未闭环计划的提示（一次性）。与上面同一套做法：刷进 system，不新插消息。 */
   let planNotice = "";
-  const composedSystem = () => (planNotice ? `${systemPrompt}
-
-${planNotice}` : systemPrompt);
+  const composedSystem = () => [systemPrompt, planNotice, ...(hostNotes.length ? [hostNotes.join("\n")] : [])]
+    .filter(Boolean).join("\n\n");
   const messages: AgentMessage[] = [
     { role: "system", content: composedSystem() },
     ...history.filter((m) => m.role !== "system"),

@@ -550,7 +550,13 @@ it("P92 A2：history 注入会话先前上下文——一份 system、历史在�
   });
   expect(result.status).toBe("succeeded");
   expect(seen.filter((m) => m.role === "system")).toHaveLength(1); // 唯一一份系统提示
-  expect(seen[0].content).not.toContain("不该再来一份");
+  /* P134-A 改判（契约变了，不是把断言放松）：这条旧断言 `not.toContain("不该再来一份")`
+     钉的其实是"历史里的 system 必须被丢掉"——而那正是这批修掉的缺陷：投影写的三句
+     「有 N 条被省略」都是 system，被丢掉之后模型就看不见"自己看的是节选"。
+     现在它们**并进那唯一一份 system**（`ai.rs:937` 本来就会把所有 system 拼进顶层 system 字段）。
+     真正要守的不变式没松：system 角色只有一份、提示词没被复制第二遍、历史顺序与"目标在最后"不变。 */
+  expect(seen[0].content).toContain("不该再来一份 system");
+  expect(seen[0].content.match(/You are Uartix/g)).toHaveLength(1); // 提示词只有一份
   expect(seen[1].content).toBe("先看现状再决定"); // 上一轮对话在前
   expect(seen[2].content).toBe("已看，建议 A/B 两种落地");
   expect(seen[3]).toMatchObject({ role: "user", content: "切常规创造" }); // 本轮目标在最后
