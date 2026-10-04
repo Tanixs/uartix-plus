@@ -6,7 +6,7 @@ import { occupiedSessionIds, setRunConclusionCb, setSessionTitleCb } from "../ag
 import type { AgentRunView } from "../agent/agentRun";
 // 导出会话时把 Agent 任务过程一并写进去（P133-I）：与界面上「复制日志」同一份序列化，
 // 不在此处再写一个"看起来像过程"的渲染器。runLog 只依赖 types/loop/i18n，不成环。
-import { serializeLog } from "../agent/runLog";
+import { LOG_FILE, serializeLog } from "../agent/runLog";
 // 半截话标记与 Agent 投影共用一份常量（sessionLog 零运行时依赖，不会成环；P94-G5）
 import { INCOMPLETE_MARK } from "../agent/sessionLog";
 // 体积口径与 Agent 侧共用同一常量与同一个 utf8 估算（context.ts 只依赖类型，不成环；P95-H4）
@@ -998,8 +998,9 @@ function clip(s: string, max: number): string {
  * 每一次工具调用的参数、每一条回执都看不见，只剩两段结果；他要的正是能离线看现场。
  *
  * 四条口径：
- *  - **过程不重造**：Agent 任务那一段直接用 `runLog.serializeLog`（与界面上「复制日志」
- *    同一份实现）。两处各写一遍就是两套真相，早晚对不上；
+ *  - **过程不重造**：Agent 任务那一段直接用 `runLog.serializeLog`，与界面上「复制日志」同一份实现；
+ *    但**尺度不同**（P139）：这份文件是用户主动留的档，走 `LOG_FILE`（不截正文），
+ *    剪贴板才走 `LOG_CLIPBOARD`。同一份实现、两个 profile，两处各写数字就是两套真相；
  *  - **过程落在它发生的位置**：任务挂在它那条结论气泡上面，不是全甩到文件末尾；
  *  - **截断要说**：见 `clip`；
  *  - **出境前擦密钥**：这个文件是用户会转出去的东西。`sk-…`、`apiKey` / `Authorization`
@@ -1029,7 +1030,7 @@ export function exportSessionMd(runs: readonly AgentRunView[] = []): string {
     lines.push(`${tx("### Agent 任务", "### Agent task")} · ${r.goalBrief || r.goal}`);
     lines.push("");
     lines.push("```text");
-    lines.push(serializeLog(r));
+    lines.push(serializeLog(r, LOG_FILE));
     lines.push("```");
     lines.push("");
   };

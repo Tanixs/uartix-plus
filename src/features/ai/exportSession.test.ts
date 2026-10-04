@@ -130,11 +130,44 @@ describe("P133-I · 导出会话为 Markdown", () => {
     expect(md.split("第一段").length - 1).toBe(1);
   });
 
-  it("截断必须看得见——被砍短的参数读起来不许像完整的", async () => {
-    const chat = await loadChat([msg({ content: "x" })]);
+  it("剪贴板档：截断必须看得见——被砍短的参数读起来不许像完整的", async () => {
+    await loadChat([msg({ content: "x" })]);
+    const { serializeLog, LOG_CLIPBOARD } = await import("../agent/runLog");
+    const clip = serializeLog(fakeRun(), LOG_CLIPBOARD);
+    expect(clip).toContain("此处截断，共");
+    expect(clip).not.toContain("x".repeat(3000));
+    // 对照：同一个 run 走文件档就必须完整——这条对照才是 P139 的命题，
+    // 少了它，"两个出口"只是一个说法（把文件档也设成 4000 就没人红）。
+    const { LOG_FILE } = await import("../agent/runLog");
+    expect(serializeLog(fakeRun(), LOG_FILE)).toContain("x".repeat(3000));
+  });
+
+  it("P139：用户主动导出的那份文件不再被剪贴板的尺度截断", async () => {
+    const chat = await loadChat([msg({ content: "结果正文", fromRunId: "r1" })]);
     const md = chat.exportSessionMd([fakeRun()]);
-    expect(md).toContain("此处截断，共");
-    expect(md).not.toContain(`${"x".repeat(3000)}`);
+    expect(md).toContain("x".repeat(3000));
+    expect(md).not.toContain("此处截断，共");
+  });
+
+  it("P139：从磁盘恢复的台账，未落盘的正文条数要在文件里说一次", async () => {
+    const { droppedPlaceholder } = await import("../agent/context");
+    const run = fakeRun({
+      events: [
+        { seq: 1, ts: T0 + 1000, kind: "receipt", tool: "session_read", receipt: { callId: "c1", ok: true, status: "read", data: droppedPlaceholder(41_000) } },
+        { seq: 2, ts: T0 + 2000, kind: "receipt", tool: "fs_read", receipt: { callId: "c2", ok: true, status: "read", data: { content: "短正文，本来就在预算内" } } },
+      ],
+    });
+    const chat = await loadChat([msg({ content: "结果正文", fromRunId: "r1" })]);
+    const md = chat.exportSessionMd([run]);
+    expect(md).toContain("未落盘: 1 条");
+    // 这份文件不是"缺了三条"——占位形状只认真被落盘省略的那几条（fs_read 的 truncated 不算）
+    expect(md).not.toContain("未落盘: 2 条");
+  });
+
+  it("P139 对照：一条都没被省略时那句「未落盘」不许凭空出现", async () => {
+    const chat = await loadChat([msg({ content: "结果正文", fromRunId: "r1" })]);
+    const md = chat.exportSessionMd([fakeRun()]);
+    expect(md).not.toContain("未落盘");
   });
 
   it("密钥进不去：回执里带着 apiKey 也得被盖掉", async () => {
@@ -183,8 +216,8 @@ describe("P133-I · 导出会话为 Markdown", () => {
     // 台账那半边的语言由同一个 locale 决定（runLog 走 tx()）
     expect(md).toContain("Status: Done");
     expect(md).toContain("Reasoning: ");
-    expect(md).toContain("truncated;");
-    // 中文侧的字样一个都不许漏进英文文档（正文本身是用户内容，不参与判断）
+    // P139：文件档不截，所以英文文档里既不该有截断标记，也不该漏进中文侧的字样
+    expect(md).not.toContain("truncated;");
     expect(md).not.toContain("导出时间");
     expect(md).not.toContain("回执:");
     expect(md).not.toContain("此处截断");

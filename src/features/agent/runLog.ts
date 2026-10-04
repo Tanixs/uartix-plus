@@ -61,9 +61,15 @@ export function statusLabel(status: string, reason?: PauseReason): string {
  * P133-I：日志里的截断必须**看得见**。原来直接 `slice(0, 400)` 就写出去，
  * 于是一条被砍短的参数读起来像完整的——离线排查时那是最坏的一种假话。
  * 上限也从 400/1200 抬到 2000/4000：这份东西的存在理由就是"不用对着界面猜"。
+ *
+ * P139：这两个数字原来是**函数里写死的一对常量**，被剪贴板与文件两个出口共用，
+ * 于是用户主动导出的那份 .md 被剪贴板的尺度截断（一份 6 万字的子代理报告落盘只剩 4000 字）。
+ * 现在两个出口各有各的档，且**只在这里定义**——调用点再写一遍数字就是第二份真相（§8-36）。
  */
-const LOG_ARGS_LIMIT = 2_000;
-const LOG_DATA_LIMIT = 4_000;
+export const LOG_CLIPBOARD = { args: 2_000, data: 4_000 };
+/** 文件是留档：正文与参数都不该被截。留"不截"这个显式值，而不是把上限调到一个自认为够大的数 */
+export const LOG_FILE = { args: Number.POSITIVE_INFINITY, data: Number.POSITIVE_INFINITY };
+export type LogProfile = typeof LOG_CLIPBOARD;
 
 function cut(s: string, max: number): string {
   // 截断标记本身也要双语：这份日志的其余行都走 tx()，这里冒出一句纯中文，
@@ -71,9 +77,11 @@ function cut(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max)}${tx(`…（此处截断，共 ${s.length} 字）`, `… (truncated; ${s.length} chars total)`)}`;
 }
 
-/** P88e C2：事件台账 → 纯文本日志（剪贴板与导出共用）。含起止/预算/每事件时间戳与回执码，
- *  让用户拿到一份可离线排查的完整现场，而不是对着界面猜。 */
-export function serializeLog(r: AgentRunView): string {  const lines: string[] = [];
+/** P88e C2：事件台账 → 纯文本日志。含起止/预算/每事件时间戳与回执码，
+ *  让用户拿到一份可离线排查的完整现场，而不是对着界面猜。
+ *  `profile` 决定截断尺度：剪贴板档小、文件档不截（默认是剪贴板档，导出必须显式传 `LOG_FILE`）。 */
+export function serializeLog(r: AgentRunView, profile: LogProfile = LOG_CLIPBOARD): string {
+  const lines: string[] = [];
   lines.push(tx("# Uartix Agent 任务日志", "# Uartix+ Agent task log"));
   lines.push(`runId: ${r.runId}`);
   lines.push(tx(`目标: ${r.goal}`, `Goal: ${r.goal}`));
@@ -92,6 +100,17 @@ export function serializeLog(r: AgentRunView): string {  const lines: string[] =
       `Budget: ${r.rounds}/${capOf(r.caps.maxRounds)} rounds · ${r.calls}/${capOf(r.caps.maxCalls)} tool calls`,
     ),
   );
+  // P139：从磁盘恢复的台账里，落盘预算装不下的那些正文是**占位**（P138-B）。
+  // 这份文件的读者必须知道自己在看的是"完整现场"还是"缺了几段正文的现场"（§8-41）。
+  const atRestOmitted = r.events.filter(
+    (e) => e.kind === "receipt" && (readDroppedPlaceholder(e.receipt?.data) !== null || e.receiptTrim === "dropped"),
+  ).length;
+  if (atRestOmitted) {
+    lines.push(tx(
+      `未落盘: ${atRestOmitted} 条回执正文超出生成预算，已换成占位（这份日志是从磁盘恢复的，缺的那几段正文内存里也未必还在；需要内容请重新调用对应工具）`,
+      `Not persisted: ${atRestOmitted} receipt bodies exceeded the at-rest budget and were replaced by placeholders (this log was restored from disk; re-run the tool if you need the content)`,
+    ));
+  }
   // P95-H2：日志里带上下文用量（离线复盘"为什么这轮被截/超限"时的第一手数据）
   if (r.ctx) {
     const last = r.ctx.last;
@@ -119,8 +138,8 @@ export function serializeLog(r: AgentRunView): string {  const lines: string[] =
     } else if (e.kind === "receipt") {
       lines.push(
         tx(
-          `${t} #${e.seq} 工具: ${e.tool ?? ""} 参数: ${cut(e.args ?? "", LOG_ARGS_LIMIT)}${e.argsTruncated ? "（宿主侧已先行截断）" : ""}`,
-          `${t} #${e.seq} Tool: ${e.tool ?? ""} Args: ${cut(e.args ?? "", LOG_ARGS_LIMIT)}${e.argsTruncated ? " (already truncated by the host)" : ""}`,
+          `${t} #${e.seq} 工具: ${e.tool ?? ""} 参数: ${cut(e.args ?? "", profile.args)}${e.argsTruncated ? "（宿主侧已先行截断）" : ""}`,
+          `${t} #${e.seq} Tool: ${e.tool ?? ""} Args: ${cut(e.args ?? "", profile.args)}${e.argsTruncated ? " (already truncated by the host)" : ""}`,
         ),
       );
       const rec = e.receipt;
@@ -142,8 +161,8 @@ export function serializeLog(r: AgentRunView): string {  const lines: string[] =
         } else if (rec.data !== undefined) {
           try {
             lines.push(tx(
-              `    数据: ${cut(JSON.stringify(rec.data), LOG_DATA_LIMIT)}${e.receiptTrim === "excerpt" ? "（落盘摘录：超长正文只留头尾）" : ""}`,
-              `    Data: ${cut(JSON.stringify(rec.data), LOG_DATA_LIMIT)}${e.receiptTrim === "excerpt" ? " (rest excerpt: long bodies keep head and tail only)" : ""}`,
+              `    数据: ${cut(JSON.stringify(rec.data), profile.data)}${e.receiptTrim === "excerpt" ? "（落盘摘录：超长正文只留头尾）" : ""}`,
+              `    Data: ${cut(JSON.stringify(rec.data), profile.data)}${e.receiptTrim === "excerpt" ? " (rest excerpt: long bodies keep head and tail only)" : ""}`,
             ));
           } catch {
             lines.push(tx("    数据: <不可序列化>", "    Data: <not serializable>"));

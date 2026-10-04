@@ -431,6 +431,10 @@ function RunBlock({ view }: { view: AgentRunView }) {
       : nested.lost
         ? tx(`（其中 ${nested.lost} 次子任务的用量已随台账落盘上限省略）`, `(${nested.lost} sub-agent usage(s) were omitted at the ledger's persistence cap)`)
         : "";
+  /** P139：这份台账是从磁盘恢复的 ⇒ 有几条正文只剩占位要看得见，不然导出的那份文件会被当成完整现场 */
+  const atRestOmitted = view.events.filter(
+    (e) => e.kind === "receipt" && (readDroppedPlaceholder(e.receipt?.data) !== null || e.receiptTrim === "dropped"),
+  ).length;
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -491,7 +495,7 @@ function RunBlock({ view }: { view: AgentRunView }) {
           {view.status === "paused" && <ResumeHint view={view} inline />}
           <button
             className="btn ai-agent-act"
-            title={tx("复制完整事件台账（含时间戳与回执码），便于离线排查", "Copy the full event ledger (timestamps and receipt codes) for offline debugging")}
+            title={tx("复制事件台账（含时间戳与回执码）；长正文按剪贴板尺度截断，要完整现场请用对话导出", "Copy the event ledger (timestamps and receipt codes); long bodies are clipped to clipboard size - export the conversation for the full scene")}
             onClick={copyLog}
           >
             {copied ? tx("已复制", "Copied") : tx("复制日志", "Copy log")}
@@ -500,8 +504,8 @@ function RunBlock({ view }: { view: AgentRunView }) {
       </div>
       <div className="ai-agent-meta">
         {tx(
-          `第 ${view.rounds}/${capOf(view.caps.maxRounds)} 轮 · 工具 ${view.calls}/${capOf(view.caps.maxCalls)} 次 · 已用 ${fmtElapsed(elapsedBase - view.createdAt)}${nestedSuffix}`,
-          `Round ${view.rounds}/${capOf(view.caps.maxRounds)} · ${view.calls}/${capOf(view.caps.maxCalls)} tool calls · ${fmtElapsed(elapsedBase - view.createdAt)} elapsed${nestedSuffix}`,
+          `第 ${view.rounds}/${capOf(view.caps.maxRounds)} 轮 · 工具 ${view.calls}/${capOf(view.caps.maxCalls)} 次 · 已用 ${fmtElapsed(elapsedBase - view.createdAt)}${nestedSuffix}${atRestOmitted ? ` · ${tx(`${atRestOmitted} 条正文未落盘`, `${atRestOmitted} bodies not persisted`)}` : ""}`,
+          `Round ${view.rounds}/${capOf(view.caps.maxRounds)} · ${view.calls}/${capOf(view.caps.maxCalls)} tool calls · ${fmtElapsed(elapsedBase - view.createdAt)} elapsed${nestedSuffix}${atRestOmitted ? ` · ${atRestOmitted} bodies not persisted` : ""}`,
         )}
         {/* P95-H2：这一轮到底送了多少东西进去（旧实现完全没有这个数） */}
         {view.ctx?.last && (
