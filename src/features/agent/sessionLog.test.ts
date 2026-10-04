@@ -194,3 +194,48 @@ describe("P94 投影口径", () => {
     expect(all.stats).toMatchObject({ shadowed: 0, chars: expect.any(Number) });
   });
 });
+
+/* ================= P134-B：崩溃在调用中途时，投影要说"结果未知"而不是抹掉 =================
+ * 新任务/重发走的是这条投影（续跑走 rebuildMessages，两边判据必须一致）。
+ * 旧行为：台账里只有回执事件，声明过却没回执的调用在这里同样不存在 ⇒ 模型以为没发生。 */
+describe("P134-B：有声明无回执的调用在投影里成对出现且说结果未知", () => {
+  const crashed = run({
+    status: "interrupted",
+    events: [
+      { seq: 1, ts: 110, kind: "turn", text: "先读文件", calls: [{ callId: "x1", name: "fs_read", args: "{}" }] },
+      { seq: 2, ts: 120, kind: "receipt", tool: "fs_read", args: "{}", receipt: rec("x1", { status: "read" }) },
+      // 应用在这里被结束：x2 有声明、没有回执
+      { seq: 3, ts: 130, kind: "turn", text: "写回去", calls: [{ callId: "x2", name: "fs_edit", args: "{\"path\":\"d:/a\"}" }] },
+    ] as AgentRunView["events"],
+  });
+
+  it("日志里补出一对 tool/call + tool/result，投影后模型看得见「结果未知」", () => {
+    const log = buildSessionLog([], [crashed]);
+    expect(log.filter((e) => e.callId === "x2").map((e) => e.kind)).toEqual(["tool/call", "tool/result"]);
+    const p = projectMessages(log);
+    const synth = p.messages.find((m) => m.role === "tool" && m.callId === "x2");
+    expect(synth, "投影把崩溃那一步抹掉了").toBeTruthy();
+    expect(synth!.content).toContain("结果未知");
+    expect(synth!.content).toContain("不要盲目重试");
+    expect(p.messages.flatMap((m) => (m.calls ?? []).map((c) => c.callId))).toContain("x2");
+  });
+
+  it("有回执的调用不会被重复补一对", () => {
+    const log = buildSessionLog([], [crashed]);
+    expect(log.filter((e) => e.callId === "x1" && e.kind === "tool/call")).toHaveLength(1);
+    const p = projectMessages(log);
+    expect(p.messages.filter((m) => m.role === "tool" && m.callId === "x1")).toHaveLength(1);
+  });
+
+  it("参数没记下来的崩溃调用也放行成对（P92 D1 的丢弃规则不适用于「结果未知」）", () => {
+    const big = run({
+      status: "interrupted",
+      events: [
+        { seq: 1, ts: 110, kind: "turn", text: "写", calls: [{ callId: "y1", name: "fs_write", argsTruncated: true }] },
+      ] as AgentRunView["events"],
+    });
+    const p = projectMessages(buildSessionLog([], [big]));
+    expect(p.messages.find((m) => m.role === "tool" && m.callId === "y1"), "丢掉「结果未知」等于把崩溃也抹掉").toBeTruthy();
+    expect(p.messages.find((m) => m.role === "assistant" && (m.calls ?? []).some((c) => c.callId === "y1")), "孤儿回执：Anthropic 会 400").toBeTruthy();
+  });
+});

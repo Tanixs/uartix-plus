@@ -72,11 +72,23 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
         if (!/\.ts$/.test(f) || /\.test\.ts$/.test(f)) continue;
         const src = readFileSync(join(dir, f), "utf8");
         for (const m of src.matchAll(/notExecuted\(\s*[^,]+,\s*"([a-z0-9_]+)"/g)) codes.add(m[1]);
+        /* P134-B：还有一类码不走 notExecuted——`{ ok:false, code:"…" }` 这种**直接构造**的回执。
+           旧口径扫不到它们，于是 8 个码（tool_failed / context_overflow / ledger_missing_receipt…）
+           一直在时间线上以裸 snake_case 出现。补进同一个扫描，两类来源一起守。 */
+        for (const m of src.matchAll(/\bcode:\s*"([a-z0-9_]+)"/g)) codes.add(m[1]);
       }
     }
+    /* 常量形式的码扫不到（`code: INTERRUPTED_CODE` 里没有字面量），但它们是**跨模块比较的键**，
+       不能为了被扫到就抄成字面量——那会变成同一个字符串的两份真相。所以按名字引进来一起判。 */
+    const { INTERRUPTED_CODE, NOT_DISPATCHED_CODE } = await import("./context");
+    codes.add(INTERRUPTED_CODE);
+    codes.add(NOT_DISPATCHED_CODE);
     // 探针自证：抽不到码就说明正则瞎了，那这条测试是绿的也没用（§8-43②）
-    expect(codes.size).toBeGreaterThan(10);
+    expect(codes.size).toBeGreaterThan(25);
     expect([...codes]).toContain("unknown_tool");
+    // 两类来源各自都要抽得到，否则"扩了口径"这件事本身不可证
+    expect([...codes]).toContain("tool_failed");
+    expect([...codes]).toContain(INTERRUPTED_CODE);
     const bare = [...codes].filter((c) => receiptStatusText(false, "not_executed", c) === c);
     expect(bare).toEqual([]);
   });

@@ -79,5 +79,10 @@ export interface ContextStat {
   /** 会话历史投影阶段被遮蔽的事件数（sessionLog.projectMessages 的 shadowed） */
   shadowed?: number;
 }
-export type RunEvent = { seq: number; ts?: number; kind: "turn" | "reasoning" | "receipt" | "status" | "context"; tool?: string; text?: string; /** 工具调用参数摘要（时间线展开用，落盘前截断） */ args?: string; /** P92 D1：args 因超限被截断——截断过的参数不能当历史回灌，也不能拿来渲染"模型要了什么" */ argsTruncated?: boolean; /** P94 G2（红线 A7）：落盘时 receipt.data 超上限被省略——台账必须说得出"这里原本有内容"，投影据此给说明而不是空回执 */ receiptTruncated?: boolean; /** P91 A1：该事件对应耗时（ms）——思维链=思考时长、turn=本轮往返时长，取代旧「已思考 · 0s」假值 */ ms?: number; receipt?: ToolReceipt; /** P95-H2：kind==="context" 时的用量快照 */ ctx?: ContextStat }
+/** P134-B：`turn` 事件带上的"这一轮声明了哪些调用"。
+ *  存在的意义是**执行前就落账**：回执事件要等工具跑完才有，而"应用被杀在写操作中途"
+ *  恰好是那条回执永远不会出现的时候——没有这份声明，续跑时模型看到的不是"结果未知"，
+ *  而是"这一步没发生过"，于是它会把那次写入再做一遍。 */
+export interface LedgedCall { callId: string; name: string; args?: string; argsTruncated?: boolean }
+export type RunEvent = { seq: number; ts?: number; kind: "turn" | "reasoning" | "receipt" | "status" | "context"; tool?: string; text?: string; /** P134-B：kind==="turn" 时这一轮声明的调用（未执行的也在，配对靠回执事件） */ calls?: LedgedCall[]; /** 工具调用参数摘要（时间线展开用，落盘前截断） */ args?: string; /** P92 D1：args 因超限被截断——截断过的参数不能当历史回灌，也不能拿来渲染"模型要了什么" */ argsTruncated?: boolean; /** P94 G2（红线 A7）：落盘时 receipt.data 超上限被省略——台账必须说得出"这里原本有内容"，投影据此给说明而不是空回执 */ receiptTruncated?: boolean; /** P91 A1：该事件对应耗时（ms）——思维链=思考时长、turn=本轮往返时长，取代旧「已思考 · 0s」假值 */ ms?: number; receipt?: ToolReceipt; /** P95-H2：kind==="context" 时的用量快照 */ ctx?: ContextStat }
 export interface AgentResult { status: RunStatus; messages: AgentMessage[]; events: RunEvent[]; rounds: number; calls: number; caps: { maxRounds: number; maxCalls: number; deadlineAt: number }; /** P109-B：`status === "paused"` 时说明是哪一种暂停；其余状态不带 */ pauseReason?: PauseReason; /** P95-H2：本次任务实际送入模型的上下文用量（旧实现把 messages 快照丢掉，事后无从知道"当时带了多少"） */ ctx?: { last?: ContextStat; peakBytes: number } }

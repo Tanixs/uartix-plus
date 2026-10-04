@@ -166,6 +166,38 @@ export function markStaleArtifacts<T>(rec: T): T {
   return { ...r, data: next } as T;
 }
 
+/* ================= P134-B：台账里"有调用、没回执"时该说什么 =================
+ * 两种情形必须分开，它们的正确动作相反：
+ *  · 宿主主动丢弃（取消 / 调用数或时限耗尽）⇒ **确定没执行**，可以直接重试；
+ *  · 进程被杀在写操作中途 ⇒ **结果未知**，盲目重试可能把同一份写入落两次。
+ * 旧实现两种都不说：调用在台账里根本不存在（回执事件要等执行完才有），
+ * 于是续跑的模型读到的是"这一步没发生过"——那是第三种、也是最坏的一种假话。
+ * 判据与措辞对标 DSH `packages/core/session/src/repair.ts:36-39`（源码核实于 commit 477b4f4）。 */
+
+export const INTERRUPTED_CODE = "interrupted_no_result";
+export const NOT_DISPATCHED_CODE = "cancelled_before_dispatch";
+
+/** 结果未知：措辞里三条判据一条都不能省——只说"失败了"模型就会原样重试。 */
+export function interruptedReceipt(callId: string, tool = "tool"): ToolReceipt {
+  return {
+    callId, ok: false, status: "error", code: INTERRUPTED_CODE,
+    data: {
+      tool,
+      note: "这次调用在台账里有声明、没有回执：应用可能在它执行到一半时被结束，**结果未知**。"
+        + "只有确认它是只读或幂等的才可以重试；可能有副作用（写文件、改设置、发设备、装插件）时，"
+        + "先用只读工具核对当前状态，或把情况告诉用户由用户决定——不要盲目重试。",
+    },
+  };
+}
+
+/** 确定没执行：宿主在派发之前就中止了它，所以这里可以说"没有产生任何效果"。 */
+export function notDispatchedReceipt(callId: string, tool: string, why: string): ToolReceipt {
+  return {
+    callId, ok: false, status: "not_executed", code: NOT_DISPATCHED_CODE,
+    data: { tool, note: `这次调用没有派发执行（${why}），没有产生任何效果；需要它请重新发起。` },
+  };
+}
+
 /** 折叠结果带计数——"折了几条"必须能被记进事件台账，而不是像旧实现那样折完即丢。 */
 export interface FoldResult {
   messages: AgentMessage[];

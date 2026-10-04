@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { runAgent, DEFAULT_BUDGET } from "./loop";
 import type { AgentProvider, TaskAdapter, ToolCall, ToolReceipt } from "./types";
 
@@ -689,4 +689,54 @@ it("P109-C：计划未闭环时拦一次，第二次放行（不做死闸）", a
   expect(result.messages[0]!.content).toContain("PLAN NOT CLOSED");
   expect(result.messages[0]!.content).toContain("p2");
   expect(result.events.some((e) => e.kind === "status" && (e.text ?? "").includes("未闭环项"))).toBe(true);
+});
+
+/* ================= P134-B：调用先落账、被丢弃的说清没派发 =================
+ * 回执事件是执行**之后**才有的，而崩溃恰好发生在那之前。这组测试钉两件事：
+ * ① 每一轮"声明了哪些调用"必须在执行前就进台账；
+ * ② 宿主主动丢弃的调用要有一条说得准的回执（没派发 = 没产生任何效果），
+ *    不能像旧实现那样让它凭空消失——续跑时模型看见自己说过要做、却什么都查不到，只能猜。 */
+describe("P134-B：调用先落账、被丢弃的说清没派发", () => {
+  it("turn 事件带这一轮声明的调用；未派发的补 not_executed 回执", async () => {
+    stubStorage();
+    let turn = 0;
+    let executed = 0;
+    const provider: AgentProvider = async () => {
+      turn++;
+      return {
+        content: `第 ${turn} 轮`,
+        calls: [
+          { callId: "d1", name: "echo", arguments: "{}" },
+          { callId: "d2", name: "echo", arguments: "{\"path\":\"d:/x\"}" },
+        ],
+      };
+    };
+    const result = await runAgent({
+      goal: "g", provider,
+      adapter: echoAdapter(() => { executed++; return { callId: "d1", ok: true, status: "read" }; }),
+      context: ctx(), maxCalls: 1, maxRounds: 5, timeoutMs: 0,
+    });
+    expect(result.status).toBe("paused");
+    expect(result.pauseReason).toBe("calls");
+    expect(executed).toBe(1);
+    const declared = result.events.find((e) => e.kind === "turn" && (e.calls?.length ?? 0) > 0);
+    expect(declared?.calls?.map((c) => c.callId)).toEqual(["d1", "d2"]); // 声明在执行之前就记下了
+    const dropped = result.events.find((e) => e.kind === "receipt" && e.receipt?.callId === "d2");
+    expect(dropped?.receipt?.status, "被丢弃的调用凭空消失：续跑时模型只能猜它做没做").toBe("not_executed");
+    expect(dropped?.receipt?.code).toBe("cancelled_before_dispatch");
+    expect(String((dropped?.receipt?.data as { note?: string })?.note)).toContain("没有派发执行");
+  });
+
+  it("声明里的长参数只留摘要并打 argsTruncated（台账有界，参数不该抄两份）", async () => {
+    stubStorage();
+    const longArgs = JSON.stringify({ path: "d:/x", body: "y".repeat(2000) });
+    const provider: AgentProvider = async () => ({ content: "c", calls: [{ callId: "L1", name: "echo", arguments: longArgs }] });
+    const result = await runAgent({
+      goal: "g", provider, adapter: echoAdapter(() => ({ callId: "L1", ok: true, status: "read" })),
+      context: ctx(), maxRounds: 2, timeoutMs: 0,
+    });
+    const declared = result.events.find((e) => e.kind === "turn" && (e.calls?.length ?? 0) > 0)!.calls![0];
+    expect(declared.argsTruncated).toBe(true);
+    expect(declared.args ?? "").toBe("");
+  });
 });

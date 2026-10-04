@@ -144,6 +144,18 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     unknown_action: "动作不在清单里",
     unknown_tool_ref: "模板引用了不存在的工具",
     unknown_mode: "检视模式不在枚举里",
+    interrupted_no_result: "调用有声明、没回执：结果未知",
+    cancelled_before_dispatch: "未派发执行：任务已中断",
+    // P134-B：补的这批来自 `code:"…"` 字面量构造的回执——P99a-F3 旧版只扫 notExecuted(...) 的第一参数，
+    // 于是它们一直是时间线上的裸 snake_case（扫描口径已一起补上）。
+    ledger_missing_receipt: "台账里找不到这条回执",
+    needs_manual: "需要你手动操作",
+    needs_high_priv: "需要更高授权档",
+    action_failed: "动作执行失败",
+    tool_failed: "工具执行失败",
+    context_overflow: "上下文放不下",
+    no_such_layer: "没有这一层外观",
+    legacy: "旧版记录（无详情）",
     unsafe_css: "样式未通过净化",
     too_large: "内容超出单次上限",
     is_dir: "目标是目录不是文件",

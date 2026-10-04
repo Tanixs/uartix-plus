@@ -1,5 +1,5 @@
-import type { AgentMessage, AgentProvider, AgentResult, ContextStat, ModelTurn, RunEvent, TaskAdapter, TaskContext, ToolReceipt } from "./types";
-import { foldContext, shrinkReceipt, agentPayloadBytes, countImages, dropHistoryImages, utf8Bytes, REQUEST_SOFT_LIMIT } from "./context";
+import type { AgentMessage, AgentProvider, AgentResult, ContextStat, LedgedCall, ModelTurn, RunEvent, TaskAdapter, TaskContext, ToolReceipt } from "./types";
+import { foldContext, shrinkReceipt, agentPayloadBytes, countImages, dropHistoryImages, notDispatchedReceipt, utf8Bytes, REQUEST_SOFT_LIMIT } from "./context";
 import { parseTurnError, nextMaxTokens, sleepAbortable, TURN_RETRY_LIMIT, TURN_RETRY_BACKOFF_MS, MAX_TOKENS_LADDER, cancelledBeforeSend } from "./turnError";
 // P115-D：save_plugin 那段"能产出哪几类产物"从元表派生（中文侧 P99a-D2 已经这么改了，
 // 英文片段还手抄着 theme/widget/panel 三类——D1 加出六类之后它就在教一个不存在的清单）
@@ -61,6 +61,8 @@ function noProgressReminder(name: string, streak: number): string {
  *  而 P91-A4 的续跑更把 `{}` 当成"模型当初要的参数"回灌（污染历史）。
  *  提到 8 KiB 并显式打 argsTruncated 标记：日志要么说真话，要么承认自己没说全。 */
 export const ARGS_LEDGER_CAP = 8192;
+/** P134-B：`turn` 事件里"这一轮声明了哪些调用"的参数摘要上限（比台账回执窄得多，理由见用处注释） */
+export const CALL_ARGS_CAP = 512;
 function ledgerArgs(raw: string): string {
   return raw.length > ARGS_LEDGER_CAP ? `${raw.slice(0, ARGS_LEDGER_CAP - 1)}…` : raw;
 }
@@ -409,7 +411,16 @@ export async function runAgent(options: {
         const to = firstTextAt || Date.now();
         event({ kind: "reasoning", text: turn.reasoning, ms: Math.max(0, to - from) });
       }
-      event({ kind: "turn", text: turn.content, ms: Date.now() - t0 });
+      /* P134-B：这一轮**声明了哪些调用**要在执行之前落账。
+         回执事件要等工具跑完才有，而"应用被杀在写操作中途"正是那条回执永远不会出现的时刻——
+         没有这份声明，续跑时模型读到的不是"结果未知"，而是"这一步没发生过"。
+         参数只带 512 字以内的短摘要：这份声明的作用是"说过要做哪一支工具"，不是第二份台账
+         （台账 200 条上限 × 每轮若干调用，抄全参数会把内存与 localStorage 配额都撑起来）。 */
+      const declared: LedgedCall[] = turn.calls.map((c) => ({
+        callId: c.callId, name: c.name,
+        ...(c.arguments.length <= CALL_ARGS_CAP ? { args: c.arguments } : { argsTruncated: true }),
+      }));
+      event({ kind: "turn", text: turn.content, ms: Date.now() - t0, ...(declared.length ? { calls: declared } : {}) });
       if (!turn.calls.length) {
         // P109-C：收工前问一次适配器——模型自己记的计划还有未闭环项就先不收工。
         // **只拦一次**：反复拦一个铁了心要停的模型只会白烧 token，那是刚拆掉的那类闸。
@@ -426,6 +437,8 @@ ${open}`;
         result.status = "succeeded";
         break;
       }
+      /** 已派发的调用：循环因取消/预算中断时，剩下的那些要各补一条"确定没执行"的回执（P134-B） */
+      const dispatched = new Set<string>();
       for (const call of turn.calls) {
         if (context.signal.aborted) { result.status = "cancelled"; break; }
         // 取消后未执行调用直接丢弃（§5.3：先停模型流，再丢未执行调用）
@@ -481,7 +494,23 @@ ${open}`;
           : shrinkReceipt(outbound);
         messages.push({ role: "tool", callId: call.callId, content: JSON.stringify(shrunk.receipt) });
         event({ kind: "receipt", tool: call.name, args: ledgerArgs(call.arguments), ...(call.arguments.length > ARGS_LEDGER_CAP ? { argsTruncated: true } : {}), receipt: outbound });
+        dispatched.add(call.callId);
         if (!receipt.ok && failStreak >= NO_PROGRESS_PAUSE_AT) { result.status = "paused"; result.pauseReason = "no-progress"; break; }
+      }
+      /* P134-B：被丢弃的调用也要有回执。
+         模型这一轮说了"我要做 A、B、C"，中断只记了 A——续跑时它看见自己声明过 B/C 却没有结果，
+         而台账没说"这两条是宿主丢的"，它只能猜。这里猜的权利在宿主手上，就该宿主说清：
+         没派发就是没派发，写明白，需要它请重新发起。 */
+      if (result.status !== "running" && turn.calls.some((c) => !dispatched.has(c.callId))) {
+        const why = result.status === "cancelled" ? "用户点了停止"
+          : result.pauseReason === "calls" ? "工具调用次数用完"
+          : result.pauseReason === "deadline" ? "达到时限" : "任务已中断";
+        for (const call of turn.calls) {
+          if (dispatched.has(call.callId)) continue;
+          const rec = notDispatchedReceipt(call.callId, call.name, why);
+          messages.push({ role: "tool", callId: call.callId, content: JSON.stringify(rec) });
+          event({ kind: "receipt", tool: call.name, args: ledgerArgs(call.arguments), receipt: rec });
+        }
       }
       if (result.status !== "running") break;
     }

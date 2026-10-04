@@ -7,7 +7,7 @@
  * - 审批卡经 ApprovalGate 绑定 (tool, argsHash)，批准/拒绝/过期由宿主裁决（§7）。
  */
 import { runAgent, resolveBudget } from "./loop";
-import { markStaleArtifacts } from "./context";
+import { markStaleArtifacts, interruptedReceipt } from "./context";
 import { clearPlan } from "./planLedger";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { parseFsRoots } from "./generalTools";
@@ -196,6 +196,16 @@ function trimEvent(e: RunEvent): RunEvent {
   let out = e;
   if (out.args && out.args.length > ARGS_PERSIST_CAP) {
     out = { ...out, args: `${out.args.slice(0, ARGS_PERSIST_CAP - 1)}…`, argsTruncated: true };
+  }
+  // P134-B：turn 事件现在带"声明过的调用"。写入侧已有 512 字上限，这里再夹一次是防御
+  // 旧台账/别的来源塞进来的长串——持久化配额是硬边界（200 事件 × N 调用 × 长参数会直接撞满）。
+  if (out.calls?.length) {
+    out = {
+      ...out,
+      calls: out.calls.map((c) => (c.args && c.args.length > ARGS_PERSIST_CAP
+        ? { ...c, args: `${c.args.slice(0, ARGS_PERSIST_CAP - 1)}…`, argsTruncated: true }
+        : c)),
+    };
   }
   if (out.kind !== "receipt" || !out.receipt || out.receipt.data === undefined) return out;
   const bytes = JSON.stringify(out.receipt.data).length;
@@ -709,6 +719,12 @@ export function rebuildMessages(view: AgentRunView): AgentMessage[] {
   let pendingText = "";
   let cur: AgentMessage | null = null;
   let droppedTruncated = 0;
+  /* P134-B：先收集"有回执的 callId"。turn 事件里声明过、这里却没有回执的调用，
+     就是"应用被杀在它执行中途"的那些——不能当没发生（模型会重做写入），
+     也不能说没执行（那是假话），只能说：结果未知 + 下一步该怎么判断。 */
+  const haveReceipt = new Set<string>();
+  for (const e of view.events) if (e.kind === "receipt" && e.receipt?.callId) haveReceipt.add(e.receipt.callId);
+  let unknownOutcome = 0;
   const needAssistant = (): AgentMessage => {
     if (!cur) {
       cur = { role: "assistant", content: pendingText, calls: [] };
@@ -723,6 +739,13 @@ export function rebuildMessages(view: AgentRunView): AgentMessage[] {
       if (!t || /^〔第 \d+ 轮〕$/.test(t) || t.startsWith("执行出错：") || t.startsWith("已从中断处继续")) continue;
       cur = null; // 新正文 = 新一轮，其工具调用属于新的 assistant 消息
       pendingText += (pendingText ? "\n" : "") + t;
+      for (const c of e.calls ?? []) {
+        if (haveReceipt.has(c.callId)) continue; // 有回执的走 receipt 分支（成对下发）
+        const a = needAssistant();
+        a.calls = [...(a.calls ?? []), { callId: c.callId, name: c.name, arguments: c.argsTruncated ? "{}" : (c.args || "{}") }];
+        out.push({ role: "tool", callId: c.callId, content: JSON.stringify(interruptedReceipt(c.callId, c.name)) });
+        unknownOutcome++;
+      }
     } else if (e.kind === "receipt") {
       // P92 D1：参数被截断过的调用**整对不入历史**。把 `{}` 当"模型当初要的参数"回灌，
       // 等于让模型基于伪造的历史做决策（这是 P91-A4 续跑的真实毒源）。宁可少一段上下文，
@@ -739,6 +762,13 @@ export function rebuildMessages(view: AgentRunView): AgentMessage[] {
     out.push({
       role: "system",
       content: `（续跑说明：先前有 ${droppedTruncated} 次工具调用的参数超出台账上限，未纳入本历史；它们确实已执行过，请勿据此重复写入。需要原文请让用户点「复制日志」。）`,
+    });
+  }
+  if (unknownOutcome > 0) {
+    out.push({
+      role: "system",
+      content: `（续跑说明：有 ${unknownOutcome} 次调用在台账里有声明、没有回执，结果未知——应用很可能是在它们执行到一半时被结束的。`
+        + "只读或幂等的可以重试；可能有副作用的先用只读工具核对当前状态，或把情况告诉用户由用户决定，不要盲目重试。）",
     });
   }
   return out;

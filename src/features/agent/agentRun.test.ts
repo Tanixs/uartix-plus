@@ -678,3 +678,61 @@ describe("P109-B · 暂停成因与续跑可重建", () => {
     }
   });
 });
+
+/* ================= P134-B：有声明、没回执的调用（崩溃中途）=================
+ * 台账里"这一轮声明了哪些调用"是**执行前**落的，回执是执行后落的。
+ * 两者对不上就是应用被杀在中途——这时模型必须被告知"结果未知"，
+ * 而不是读到"这一步没发生过"，然后把它刚才那次写入再做一遍。 */
+describe("P134-B：续跑时「有声明无回执」必须说成结果未知", () => {
+  type Ev = Record<string, unknown>;
+  type Msg = { role: string; content: string; callId?: string; calls?: { callId: string }[] };
+  const viewWith = (events: Ev[]) => ({
+    runId: "z", goal: "把温度阈值改成 80", goalBrief: "改阈值", scope: "create", status: "interrupted",
+    rounds: 2, calls: 1, caps: { maxRounds: 24, maxCalls: 64, deadlineAt: 0 }, createdAt: 1, updatedAt: 1,
+    events, pending: null, undoState: {},
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+
+  const crashLedger: Ev[] = [
+    { seq: 1, ts: 1, kind: "turn", text: "先看现状", calls: [{ callId: "a1", name: "fs_read", args: "{}" }] },
+    { seq: 2, ts: 2, kind: "receipt", tool: "fs_read", args: "{}", receipt: { callId: "a1", ok: true, status: "read" } },
+    // 第二轮声明了 a2，进程在这里被结束：a2 不会有回执
+    { seq: 3, ts: 3, kind: "turn", text: "改阈值", calls: [{ callId: "a2", name: "fs_edit", args: "{\"path\":\"d:/x\"}" }] },
+  ];
+
+  it("补出一对（assistant 声明 + 合成回执），措辞是「结果未知 + 不要盲目重试」", () => {
+    const msgs = agentRun.rebuildMessages(viewWith(crashLedger)) as Msg[];
+    const synth = msgs.find((m) => m.role === "tool" && m.callId === "a2");
+    expect(synth, "a2 消失了：模型会以为这一步没发生过，于是重做那次写入").toBeTruthy();
+    expect(synth!.content).toContain("结果未知");
+    expect(synth!.content).toContain("不要盲目重试");
+    const declared = msgs.flatMap((m) => (m.calls ?? []).map((c) => c.callId));
+    expect(declared).toContain("a2");
+    expect(declared.filter((c) => c === "a2")).toHaveLength(1); // 不重复声明
+    expect(msgs.some((m) => m.role === "system" && m.content.includes("结果未知"))).toBe(true);
+  });
+
+  it("有回执的调用不会被再补一对（配对数 = 声明数）", () => {
+    const msgs = agentRun.rebuildMessages(viewWith(crashLedger)) as Msg[];
+    expect(msgs.filter((m) => m.role === "tool").map((m) => m.callId).sort()).toEqual(["a1", "a2"]);
+  });
+
+  it("旧台账（turn 事件没有 calls 字段）不报错，也不凭空造对", () => {
+    const legacy: Ev[] = [
+      { seq: 1, ts: 1, kind: "turn", text: "先看现状" },
+      { seq: 2, ts: 2, kind: "receipt", tool: "fs_read", args: "{}", receipt: { callId: "b1", ok: true, status: "read" } },
+    ];
+    const msgs = agentRun.rebuildMessages(viewWith(legacy)) as Msg[];
+    expect(msgs.filter((m) => m.role === "tool")).toHaveLength(1);
+    expect(msgs.some((m) => m.role === "system" && m.content.includes("结果未知"))).toBe(false);
+  });
+
+  it("参数没记进台账的崩溃调用仍然成对（P92 D1 的丢弃规则不适用于「结果未知」）", () => {
+    const big: Ev[] = [
+      { seq: 1, ts: 1, kind: "turn", text: "写文件", calls: [{ callId: "c1", name: "fs_write", argsTruncated: true }] },
+    ];
+    const msgs = agentRun.rebuildMessages(viewWith(big)) as Msg[];
+    expect(msgs.find((m) => m.role === "tool" && m.callId === "c1"), "把「结果未知」丢掉，等于把崩溃这件事也一起抹掉").toBeTruthy();
+    expect(msgs.find((m) => m.role === "assistant" && (m.calls ?? []).some((c) => c.callId === "c1")), "回执找不到配对的调用：Anthropic 会直接 400").toBeTruthy();
+  });
+});

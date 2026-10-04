@@ -10,7 +10,7 @@
  * 唯一的运行时 import 是 `contextBudget`（零 import 的算术叶子）与 `context`（同样只 import 类型
  * + contextBudget）——两者都指不回本模块，环守卫（门禁 9）盯的就是这条。
  */
-import { markStaleArtifacts } from "./context";
+import { interruptedReceipt, INTERRUPTED_CODE, markStaleArtifacts } from "./context";
 import type { ChatMsg } from "../ai/chatStore";
 import type { AgentRunView } from "./agentRun";
 import type { AgentMessage, ToolReceipt } from "./types";
@@ -70,12 +70,21 @@ export function buildSessionLog(messages: ChatMsg[], runs: AgentRunView[]): Sess
   }
   for (const r of runs) {
     raw.push({ ts: r.createdAt, kind: "turn/start", text: r.goalBrief, runId: r.runId });
+    /* P134-B：turn 事件里声明过、却没有回执的调用 = 应用被杀在中途的那些。
+       这里补一对（call + 合成 result），措辞见 `interruptedReceipt`。
+       不补的后果不是"少一段上下文"，而是模型会把那次写入**再做一遍**。 */
+    const withReceipt = new Set<string>();
+    for (const e of r.events) if (e.kind === "receipt" && e.receipt?.callId) withReceipt.add(e.receipt.callId);
     for (const e of r.events) {
       const ts = e.ts ?? r.createdAt;
       if (e.kind === "turn") {
         const t = (e.text ?? "").trim();
-        if (!t || isScaffold(t)) continue;
-        raw.push({ ts, kind: "assistant/message/attempt", text: t, runId: r.runId });
+        if (t && !isScaffold(t)) raw.push({ ts, kind: "assistant/message/attempt", text: t, runId: r.runId });
+        for (const c of e.calls ?? []) {
+          if (withReceipt.has(c.callId)) continue; // 有回执的走下面 receipt 分支，避免重复下发
+          raw.push({ ts, kind: "tool/call", callId: c.callId, tool: c.name, args: c.args, argsTruncated: c.argsTruncated, runId: r.runId });
+          raw.push({ ts, kind: "tool/result", callId: c.callId, receipt: interruptedReceipt(c.callId, c.name), runId: r.runId });
+        }
       } else if (e.kind === "receipt") {
         const callId = e.receipt?.callId ?? `r${r.runId}-${e.seq}`;
         raw.push({ ts, kind: "tool/call", callId, tool: e.tool ?? "tool", args: e.args, argsTruncated: e.argsTruncated, runId: r.runId });
@@ -185,6 +194,14 @@ export function projectMessages(events: SessionEvent[], opts: ProjectOptions = {
     pendingCalls = [];
   };
 
+  /* P134-B：合成出来的「结果未知」那一对要放行，即使参数没记下来。
+     P92 D1「截断过的参数整对丢弃」防的是"模型把 `{}` 当成自己当初要的参数"；
+     而这里的回执明写着结果未知、不要据此重做——再丢弃就把"这一步存在过"这条事实一起抹掉了，
+     那正是续跑会重做写入的来源。 */
+  const interruptedCall = new Set<string>();
+  for (const e of events) {
+    if (e.kind === "tool/result" && e.callId && e.receipt?.code === INTERRUPTED_CODE) interruptedCall.add(e.callId);
+  }
   const byCall = new Map<string, SessionEvent>();
   for (let i = 0; i < events.length; i++) {
     const e = events[i];
@@ -210,7 +227,7 @@ export function projectMessages(events: SessionEvent[], opts: ProjectOptions = {
         break;
       }
       case "tool/call": {
-        if (e.argsTruncated) { droppedTruncated++; break; } // 整对丢弃（含其 result）
+        if (e.argsTruncated && !(e.callId && interruptedCall.has(e.callId))) { droppedTruncated++; break; } // 整对丢弃（含其 result）
         if (!e.callId) break;
         byCall.set(e.callId, e);
         pendingCalls = [...pendingCalls, { callId: e.callId, name: e.tool ?? "tool", arguments: e.args || "{}" }];
