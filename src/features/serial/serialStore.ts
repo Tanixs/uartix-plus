@@ -467,7 +467,7 @@ export function stopRecord() {
   return invoke("stop_record");
 }
 
-/* ---------------- P106 串口控制线（详设 docs/P106-串口控制线-详设.md） ---------------- */
+/* ---------------- P106 串口控制线（详设 docs/designs/P106-串口控制线-详设.md） ---------------- */
 
 /** 置 DTR / RTS：只发用户点过的那条（两条都不发就是空操作，Rust 侧直接返回 Ok）。
  *  P115-F12：电平记到**当前口名下**（Rust 侧同口径），换口后界面 ctrl 随 setConfig 切档。 */

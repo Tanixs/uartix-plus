@@ -6,7 +6,8 @@ import type { FrameTemplate } from "../../ipc/types";
 import * as store from "./templateStore";
 import * as teleStore from "./telemetryStore";
 import { EmptyState } from "../../shared/EmptyState";
-import { clampFlyoutMenu } from "../../shared/Flyout";
+import { clampFlyoutMenu, Flyout } from "../../shared/Flyout";
+import { zoomFactor } from "../../shared/zoom";
 import { Glyph, IconChevron } from "../../shared/icons";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
@@ -77,6 +78,15 @@ export function TemplatesPanel() {
   const tele = useSyncExternalStore(teleStore.subscribe, teleStore.getSnapshot);
   const [newOpen, setNewOpen] = useState(false);
   const [pMenu, setPMenu] = useState(false);
+  /**
+   * P145：「＋ 预设」那枚菜单原来是一条 `position: absolute; right: 0; min-width: 230px`
+   * 住在 `.rp-proto-body{overflow:hidden}` 里——导轨面板可以拖到 180px 宽，
+   * 230px 的菜单放不下，左半截（正是每条预设名的头几个字）被祖先裁掉（用户实拍）。
+   * 改成走宿主已有的浮层原语 `Flyout`：portal 到 body、按视口夹紧、zoom 补偿，
+   * 于是"浮层住在会被裁剪的容器里"这一类病一次了断，而不是给这一枚再补一条 max-width。
+   */
+  const presetBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [presetAnchor, setPresetAnchor] = useState<HTMLElement | null>(null);
   const [note, setNote] = useState("");
   const [expGrp, setExpGrp] = useState<Set<string>>(() => new Set());
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
@@ -337,18 +347,19 @@ export function TemplatesPanel() {
             {tx("＋ 新建", "+ New")}
           </button>
           <div className="tpl-preset-wrap">
-          <button className="btn tpl-preset-btn" data-tour="preset" title={tx("从预设导入协议副本（可反复添加，改崩了删除副本再添加）", "Import editable copies from presets (add repeatedly; delete a broken copy and re-import)")} onClick={() => setPMenu((v) => !v)}>
+          <button ref={presetBtnRef} className="btn tpl-preset-btn" data-tour="preset" aria-haspopup="menu" aria-expanded={pMenu} title={tx("从预设导入协议副本（可反复添加，改崩了删除副本再添加）", "Import editable copies from presets (add repeatedly; delete a broken copy and re-import)")} onClick={() => { setPresetAnchor(presetBtnRef.current); setPMenu((v) => !v); }}>
             {tx("＋ 预设", "+ Preset")} <IconChevron size={12} dir="down" />
           </button>
           {pMenu && (
             <>
               <div className="tpl-menu-mask" onClick={() => setPMenu(false)} />
-              <div className="tpl-menu">
+              <Flyout anchor={presetAnchor} zf={zoomFactor()} minWidth={230}>
                 <span className="tpl-menu-title">{tx("导入预设副本", "Import preset copies")}</span>
                 {PRESETS.map((p) => (
                   <button
                     key={p.key}
                     className="tpl-menu-item"
+                    role="menuitem"
                     title={p.desc}
                     onClick={() => {
                       setPMenu(false);
@@ -358,7 +369,7 @@ export function TemplatesPanel() {
                     {p.tag} {p.name}
                   </button>
                 ))}
-              </div>
+              </Flyout>
             </>
           )}
           </div>

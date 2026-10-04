@@ -28,22 +28,23 @@ HANDOFF.md
 # 设计与交接文档（2026-09-19 用户裁决：docs 内容一律不再提交）
 docs/
 
-# 私有协议文档（仅本地参考，不发布）
-JY901P-WIT私有协议.md
-
 # 签名私钥（绝不提交）
 .keys/
 
 models-test/
 
-# P99a-E4：仓库清账——历史上调试/试跑掉在根目录的一次性产物（**不删文件，只停止跟踪**）。
-# 它们既不是源码也不是资料，留在 git 视角里只会让"哪些改动属于本批"看不清。
-# 要真删是另一个动作（这些文件不是我造的，按可逆优先处理）。
-/test*.txt
-/run_*.txt
-/result.txt
-/from_project.txt
-/arx.xml
+# P99a-E4 曾把根目录调试残渣与私有协议文档只停止跟踪（不删）；
+# P136（2026-10-04）已把残渣移入 docs/archive/root-residue/、协议文档移入 docs/reference/，
+# 均由上面的 docs/ 兜底规则覆盖，根目录专项规则随之撤销。
 /opencode.json
 # 收口时补的第一条漏项：本地助手工具留下的记忆目录，不是源码也不是资料
 /.workbuddy/
+
+# P146：取证脚手架与一次性现场（截图、headless profile、探针脚本）——都不是源码，
+# 留在 git 视角里只会让「哪些改动属于本批」看不清（同 P99a-E4 那条理由）。
+/.scratch/
+/.tmp/
+
+# 本地助手工具状态目录（同 .workbuddy 那条理由）
+/.zcode/
+/.zcodeignore

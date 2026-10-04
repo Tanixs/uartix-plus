@@ -8,8 +8,9 @@ import { patch as patchSettings, useSettings } from "../features/settings/settin
 import type { WorkspacePreset } from "../features/settings/settingsStore";
 import { t, tx, useLocale } from "../i18n/strings";
 import { Dropdown } from "../shared/Dropdown";
-import { Glyph, IconCheck, IconChevron, IconPuzzle, IconSettings, IconSparkle } from "../shared/icons";
+import { Glyph, IconCheck, IconChevron, IconPuzzle, IconRailCollapse, IconSettings, IconSparkle } from "../shared/icons";
 import { pendingBadge } from "../features/market/marketBrowse";
+import { railStrip, subscribeRail, toggleRailStrip } from "./railState";
 import { useAwaitingCount } from "../features/market/useMarketPending";
 import { WORKSPACE_META } from "./workspaceMeta";
 import iconPlain from "../assets/icon-plain.svg";
@@ -202,13 +203,14 @@ export function SystemButtons({
     <div className="toolbar-group cb-sys">
       {!fullPage && (
         <>
-      <button className="tb-btn" title={tx("AI 助手 (Ctrl+K)", "AI Assistant (Ctrl+K)")} data-tour="ai" onClick={onOpenAi}>
+      <button className="tb-btn" data-ctl="tool" title={tx("AI 助手 (Ctrl+K)", "AI Assistant (Ctrl+K)")} data-tour="ai" onClick={onOpenAi}>
         <IconSparkle />
       </button>
       {/* data-tour="plugins" 是入门引导第 9 步的高亮锚点（tourSteps.test.ts 按文件路径钉它挂在
           「插件管理」这颗上）。锚点写错不会报错，只会让引导悄悄退化成漂浮卡片。 */}
       <button
         className={`tb-btn${awaitingBadge ? " tb-attn" : ""}`}
+        data-ctl="tool"
         title={tx("插件管理", "Plugin library")}
         aria-label={awaitingBadge ? tx(`插件管理，${awaitingBadge} 条装包请求等你确认`, `Plugin library - ${awaitingBadge} install requests await your call`) : tx("插件管理", "Plugin library")}
         data-tour="plugins"
@@ -217,10 +219,10 @@ export function SystemButtons({
         <IconPuzzle size={16} />
         {awaitingBadge ? <span className="tb-badge">{awaitingBadge}</span> : null}
       </button>
-      <button className="tb-btn" title={t("title.settings")} onClick={onOpenSettings}>
+      <button className="tb-btn" data-ctl="tool" title={t("title.settings")} onClick={onOpenSettings}>
         <IconSettings />
       </button>
-      <button className="tb-btn" title={t("title.help")} onClick={onOpenHelp}>
+      <button className="tb-btn" data-ctl="tool" title={t("title.help")} onClick={onOpenHelp}>
         <IconHelp />
       </button>
       {/* 置顶前一道小竖线（P105 反馈③"像以前一样"）：它标的是"左边四颗是去哪，
@@ -230,6 +232,7 @@ export function SystemButtons({
       )}
       <button
         className={`tb-btn${pinned ? " on" : ""}`}
+        data-ctl="tool"
         title={pinned ? t("title.unpin") : t("title.pin")}
         aria-pressed={pinned}
         onClick={onTogglePin}
@@ -368,17 +371,17 @@ export function IdentityBar({
           `margin-left:auto` 把它们推到右边缘 —— 无边框窗口的关闭钮不在右上角，
           比"不好看"更糟：它是肌肉记忆层面的错位（改前实测内容止于 x=486，右边 63% 是死的）。 */}
       <div className="tb-win">
-        <button className="tb-btn" title={t("title.minimize")} onClick={() => void win.minimize()}>
+        <button className="tb-btn" data-ctl="tool" title={t("title.minimize")} onClick={() => void win.minimize()}>
           <Glyph><line x1="5" y1="12" x2="19" y2="12" /></Glyph>
         </button>
-        <button className="tb-btn" title={maxed ? t("title.restore") : t("title.maximize")} onClick={() => void win.toggleMaximize()}>
+        <button className="tb-btn" data-ctl="tool" title={maxed ? t("title.restore") : t("title.maximize")} onClick={() => void win.toggleMaximize()}>
           {maxed ? (
             <Glyph><rect x="8" y="8" width="12" height="12" rx="1.5" /><path d="M5 16V5a1 1 0 0 1 1-1h11" /></Glyph>
           ) : (
             <Glyph><rect x="5.5" y="5.5" width="13" height="13" rx="1.5" /></Glyph>
           )}
         </button>
-        <button className="tb-btn tb-close" title={t("title.close")} onClick={() => void win.close()}>
+        <button className="tb-btn tb-close" data-ctl="tool" title={t("title.close")} onClick={() => void win.close()}>
           <Glyph><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></Glyph>
         </button>
       </div>
@@ -402,8 +405,22 @@ export function ToolBar({
   segs: ReactNode[];
   onApplyPreset: (p: WorkspacePreset) => void;
 }) {
+  /** 开关读 store，组件里不另存一份（P145 立的口径） */
+  const railOn = useSyncExternalStore(subscribeRail, railStrip);
   return (
     <header className="tbar">
+      {/* P146 反馈⑤：把手从身份栏右端挪到**工具栏左端**——它管的就是"左边那一条"，
+          放在窗口按钮旁边是隔着一整个窗口说话；图标也换成说得出对象的那一枚（不再借通用 chevron）。
+          仍然不能放在导轨自己身上：收起来以后导轨不存在了，把手不能长在被它锁上的门上。 */}
+      <button
+        className="icon-btn"
+        data-ctl="tool"
+        title={railOn ? tx("收起左侧导轨", "Collapse the left rail") : tx("展开左侧导轨", "Expand the left rail")}
+        aria-pressed={!railOn}
+        onClick={toggleRailStrip}
+      >
+        <IconRailCollapse />
+      </button>
       <WorkspacePill onApplyPreset={onApplyPreset} />
       <span className="tb-sep" />
       {segs}

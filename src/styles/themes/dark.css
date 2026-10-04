@@ -17,7 +17,7 @@
   --danger: #e5534b;
   --warn: #d29922;
   --ok: #3fb950;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow: 0 0.8px 2px rgba(0, 0, 0, 0.30), 0 5px 12px rgba(0, 0, 0, 0.38);
   --scrollbar: #2c333d;
   --scrollbar-hover: #3d4653;
   --warn-fg: #d29922;

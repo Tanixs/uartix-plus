@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { IconFrameSpec, IconLayoutEdit, IconPlug, IconSlider, IconStack, IconTerminal } from "../shared/icons";
 import { tx, useLocale } from "../i18n/strings";
-import { railPanel, subscribeRail, toggleRailPanel, type RailKey } from "./railState";
+import { railPanel, railStrip, subscribeRail, toggleRailPanel, type RailKey } from "./railState";
 import { RailPanel, type RailActions } from "./RailPanel";
 
 /**
@@ -27,6 +27,12 @@ const railItems = (): { key: RailKey; label: string; tip: string; icon: () => Re
 export function SideRail({ actions }: { actions: RailActions }) {
   useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const open = useSyncExternalStore(subscribeRail, railPanel);
+  // P145：导轨条整体收起时，这一整块（48px 图标条 + 二级面板）都不渲染。
+  // 不渲染而不是 `display:none`：留着 DOM 就有"看着没有、Tab 却能走进去"的键盘陷阱，
+  // 而布局分母那边（`stripWidth()` 返回 0）也已经把 48px 还给画布了——两边必须同一件事。
+  const strip = useSyncExternalStore(subscribeRail, railStrip);
+
+  if (!strip) return null;
 
   return (
     <>
@@ -36,6 +42,7 @@ export function SideRail({ actions }: { actions: RailActions }) {
             key={it.key}
             type="button"
             className={`rail2-btn${open === it.key ? " on" : ""}${it.key === "views" && actions.editLayout ? " act" : ""}`}
+            data-ctl="tool"
             aria-expanded={open === it.key}
             title={it.label + " · " + it.tip}
             onClick={() => toggleRailPanel(it.key)}

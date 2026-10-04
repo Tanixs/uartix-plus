@@ -1,0 +1,70 @@
+{
+  "theme": "fluent",
+  "bus": "button, [role=\"button\"], [role=\"tab\"], [role=\"menuitem\"], [role=\"option\"], .btn, .icon-btn, [data-ctl]",
+  "faces": {
+    "workspace": {
+      "elems": 68,
+      "kinds": 23
+    },
+    "settings": {
+      "elems": 92,
+      "kinds": 29
+    },
+    "palette": {
+      "elems": 108,
+      "kinds": 25
+    },
+    "menu": {
+      "elems": 77,
+      "kinds": 25
+    },
+    "lbx": {
+      "elems": 86,
+      "kinds": 28
+    },
+    "ctxmenu": {
+      "elems": 70,
+      "kinds": 24
+    },
+    "hint": {
+      "elems": 92,
+      "kinds": 29
+    },
+    "model": {
+      "elems": 88,
+      "kinds": 32
+    },
+    "speclib": {
+      "elems": 75,
+      "kinds": 26
+    },
+    "hovermenu": {
+      "elems": 77,
+      "kinds": 25
+    },
+    "welcome1": {
+      "elems": 74,
+      "kinds": 28
+    },
+    "welcome2": {
+      "elems": 74,
+      "kinds": 28
+    },
+    "cmdk-empty": {
+      "elems": 68,
+      "kinds": 23
+    },
+    "ai": {
+      "elems": 71,
+      "kinds": 25
+    }
+  },
+  "elems": 1120,
+  "covered": 1104,
+  "exempted": 0,
+  "pct": 98.57,
+  "gaps": {
+    "input.(无类名)": 14,
+    "span.(无类名)": 2
+  }
+}

@@ -666,7 +666,7 @@ export function ModelSettingsPage() {
               <div className="msp-fresh-head">
                 {tx(`远端有 ${fresh.length} 个还没进档案`, `${fresh.length} upstream model(s) are not in the profile yet`)}
               </div>
-              {fresh.slice(0, 12).map((id) => (
+              {fresh.map((id) => (
                 <div className="msp-pick" key={id}>
                   <span className="msp-pick-name">{id}</span>
                   {guessContextTokens(id) && (
@@ -675,11 +675,6 @@ export function ModelSettingsPage() {
                   <button type="button" className="btn sm" onClick={() => importModel(id)}>{tx("导入", "Import")}</button>
                 </div>
               ))}
-              {fresh.length > 12 && (
-                <div className="msp-pick">
-                  <span className="set-hint">{tx(`另有 ${fresh.length - 12} 个未列出：用「添加模型」自己填名字`, `${fresh.length - 12} more are not shown — add them by name`)}</span>
-                </div>
-              )}
             </div>
           )}
         </div>

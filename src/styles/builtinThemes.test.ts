@@ -60,6 +60,13 @@ describe("P99b-N5 · 主题文件不再是运行时样式（G7 的 @import 那�
   it("theme.css 里一条 @import \"./themes/\" 都不许留：留着就是样式表与内联层两套真相", () => {
     const css = readFileSync(fileURLToPath(new URL("./theme.css", import.meta.url)), "utf8");
     expect(css.match(/@import\s+["']\.\/themes\//g) ?? [], "内置主题仍在按 :root[data-theme] 上色").toEqual([]);
-    expect(css, "样式表里不该再有按 data-theme 配色的规则").not.toMatch(/\[data-theme\s*=/);
+    /**
+     * 判"规则"不判"散文"：这条要钉的是"样式表里再没有按属性配色的**规则**"，
+     * 而注释里的一个 `[data-theme=` 词不画任何颜色。P143 在 theme.css 解释签名槽为什么不写在
+     * 主题文件里，必然要提到那种写法——把它当违规，等于逼文档写得看不懂。
+     * 反过来说，剥注释也不会放过真规则：注释里写不下生效的选择器。
+     */
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(rules, "样式表里不该再有按 data-theme 配色的规则").not.toMatch(/\[data-theme\s*=/);
   });
 });

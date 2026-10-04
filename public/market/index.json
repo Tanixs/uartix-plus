@@ -70,8 +70,8 @@
       },
       "version": "1.0.4",
       "packageUrl": "/market/pkg/fluent-dark.uartix.json",
-      "sha256": "b9de506b7928cc6ee24de75178c340b627fc36faf4df3f57406a244222032276",
-      "bytes": 21280,
+      "sha256": "7909cc98608eade60f361fc13c513940a7aba4e62f574751510a37e9c88a0522",
+      "bytes": 38526,
       "capabilities": [
         "theme.tokens"
       ],

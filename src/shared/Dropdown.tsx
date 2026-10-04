@@ -70,6 +70,7 @@ export function Dropdown(props: {
     <div
       ref={ref}
       className={`ui-dropdown${props.className ? ` ${props.className}` : ""}`}
+      data-elev="4"
       role="menu"
       style={{ left: -9999, top: -9999, visibility: "hidden" }}
     >

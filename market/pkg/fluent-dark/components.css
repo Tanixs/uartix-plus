@@ -1,99 +1,139 @@
 /* 流利蓝 · 暗色（Fluent Dark, layer 2）—— 与亮色那枚同一条组件层，只换旋钮
  *
- * 这一份与 `fluent-blue/components.css` 的关系是**受测的**：除下面这块 `:root` 之外，
- * 两个文件逐字节相同（`marketContent.test.ts` 钉着）。为什么钉得住：这一层的颜色本来就
- * 全部派生自 token（四档表面、--text、--accent），亮暗的差别不在"哪条规则"，而在
- * "混合方向"与"阴影浓度"这两类旋钮值上——
- *  · 按压态：亮色往 var(--text)（深墨）混＝变暗；暗色的 var(--text) 是白，照抄就会**越按越亮**，
- *    所以这里显式往 #000000 混。
- *  · 阴影：黑色半透明影在 #323232 面板上几乎看不出来，暗色要提到 3~4 倍浓度才读得出"浮起"。
- *  · 卡片描边：白 9% 的头发丝线在暗色上偏淡，提到 12%。
- * 真要往规则体里加分支，就得同时往另一枚加，或者把差异也做成旋钮——不许出现两份平行清单。
- *
- * 四条自我约束照亮色那枚原文（颜色一律走 var()、动效只写在单类选择器上、
- * 不写 position:fixed 与 z-index、只碰真实存在的类名），逐条对应 theme_audit 的一格。
- */
-:root {
-  /* 本包内部用的旋钮。只定义新键、不碰白名单（白名单归 theme_patch / vars 那块）。 */
-  --fb-fill-secondary: color-mix(in srgb, var(--text) 5%, var(--bg-panel));
-  --fb-fill-hover: color-mix(in srgb, var(--text) 8%, var(--bg-panel));
-  --fb-fill-pressed: color-mix(in srgb, var(--text) 4%, var(--bg-panel));
-  --fb-accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff);
+ * 这一份与 `fluent-blue/components.css` 的关系是**受测的**：除下面这块 `:root {
+  /* 旋钮清单与每一条取值理由在 `src/styles/builtinStyles/fluent.css` 的 :root 块（受测同源，
+     这里只是暗色同胞的落点）；本块与那块的**键集必须一致**，取值差异只许留在
+     marketContent.test.ts 登记过的那几条出口里。 */
+  --fb-control-line: #8a8886;
+  --fb-fill-secondary: color-mix(in srgb, var(--text) 4%, var(--bg-panel));
+  --fb-fill-hover: color-mix(in srgb, var(--text) 7%, var(--bg-panel));
+  --fb-fill-pressed: color-mix(in srgb, var(--text) 11%, var(--bg-panel));
+  --fb-accent-light: #deecf9;
+  --fb-accent-hover: #106ebe;
   --fb-accent-pressed: color-mix(in srgb, var(--accent) 84%, #000000);
   --fb-card-line: color-mix(in srgb, var(--text) 12%, transparent);
-  --fb-acrylic: color-mix(in srgb, var(--bg-panel) 90%, transparent);
-  /* P131-C 资产通道：Fluent 的亚克力不是"半透明"就完了，还要有一层细噪声。
-     这一贴从主题的 assets 里来（`--fx-asset-acrylic-noise`），没带资产的那枚解析成空
-     ⇒ 同一份规则体，有材质就贴、没材质就不贴，不靠两份 CSS 各写一遍。 */
-  --fb-noise: var(--fx-asset-acrylic-noise, none);
+  --fb-danger-fill: #e81123;
+  --fb-shadow-s: 0 0.3px 0.9px rgba(0, 0, 0, 0.1), 0 1.6px 3.6px rgba(0, 0, 0, 0.13);
+  --fb-shadow-m: 0 0.6px 1.8px rgba(0, 0, 0, 0.1), 0 3.2px 7.2px rgba(0, 0, 0, 0.13);
+  --fb-shadow-l: 0 1.2px 3.6px rgba(0, 0, 0, 0.1), 0 6.4px 14.4px rgba(0, 0, 0, 0.13);
+  --fb-shadow-hover: 0 1.2px 3.6px rgba(0, 0, 0, 0.14), 0 6.4px 14.4px rgba(0, 0, 0, 0.18);
   --fb-shadow-pop: 0 2px 4px rgba(0, 0, 0, 0.3), 0 8px 20px rgba(0, 0, 0, 0.45);
   --fb-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --fb-reveal-line: color-mix(in srgb, #ffffff 60%, var(--fb-card-line));
+  --fb-acrylic: color-mix(in srgb, var(--bg-panel) 90%, transparent);
+  --fb-noise: var(--fx-asset-acrylic-noise, none);
   --fb-duration: var(--dur-fast);
+  --fb-duration-card: var(--dur-base);
+  --ctl-fill-hover: var(--fb-fill-hover);
+  --ctl-fill-active: var(--fb-fill-pressed);
+  --ctl-fill-selected: var(--fb-accent-light);
+  --ctl-fill-primary-hover: var(--fb-accent-hover);
+  --ctl-fill-primary-active: var(--fb-accent-pressed);
+  --ctl-line-hover: var(--fb-control-line);
+  --ctl-ring: var(--accent);
+  --ctl-ring-w: 2px;
+  --ctl-ring-offset: 2px;
+  --ctl-focus-outline: 2px solid var(--accent);
+  --ctl-input-focus: 2px solid var(--accent);
+  --ctl-focus-border: var(--accent);
+  --ctl-focus-halo: transparent;
+  --ctl-press: scale(0.97);
+  --ctl-press-tight: scale(0.94);
+  --ctl-lift: translateY(-0.5px);
+  --dv-sash-color: var(--border-soft);
+  --dv-active-sash-color: var(--accent);
+  --dv-tab-border-radius: var(--radius-m);
+  --dv-icon-hover-background-color: var(--fb-accent-light);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg-panel);
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--bg-inset);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text-dim);
+  --dv-activegroup-hiddenpanel-tab-color: var(--text-dim);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--text-dim);
 }
 
-/* ---------- 外壳：两条标题栏 / 信息栏 / 活动导轨 ---------- */
-
-/* Fluent 的标题栏不是"涂深的"，是"退到壳档 + 一条极轻的下边线"。 */
-.ibar {
-  border-bottom: 1px solid var(--border-soft);
+/* ---------- P143 降级义务：填了位移槽，就得同时给出两条清零 ----------
+   特异度是算过的：上面那段 `:root` = (0,2,0)，
+   `.no-motion` 同为 (0,2,0) 但**写在它后面** ⇒ 同特异度后写者胜；
+   系统偏好那条一样。⇒ 一条 `!important` 都不加（B 门现状 21 / 天花板 24 不动）。
+   为什么不写成 `:root[…].no-motion`（更高特异度、更直白）：净化器对 :root 开头只放行
+   `/^:root(\[[^\]]*\])?$/` 那一种形状（styleSanitize.ts:265），多挂一个类判 global_selector——
+   内置包与插件包同一台机器判，内置没有理由更宽。
+   只清位移类：焦点环不参与降级，减弱动效不该让人更难看见自己在哪。 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ctl-press: none;
+    --ctl-press-tight: none;
+    --ctl-lift: none;
+  }
 }
 
-.tbar {
-  border-bottom: 1px solid var(--border-soft);
+.no-motion {
+  --ctl-press: none;
+  --ctl-press-tight: none;
+  --ctl-lift: none;
 }
 
-/* 窗口三键：Fluent 要的是"方角、铺满整行高、hover 才上色"，与本仓那套圆角图标键不同。 */
-.tb-btn {
+/* ---------- 外壳：身份栏 / 工具栏 / 信息栏 / 活动导轨 ---------- */
+
+/* 壳层三条收口发丝线不在这里：P136 已并进基元的 `--elevation-line`，
+   再写一遍就是同一事实的第二处落点（G 门那条"边框只降不升"就是被这种重复顶上去的）。 */
+
+/* 窗口三键：Windows 的约定是"方角、铺满整行高、hover 才上色"，与圆角图标键不同。 */
+ .tb-btn {
   border-radius: var(--radius-s);
   color: var(--text-dim);
   transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
 }
 
-.tb-btn:hover {
+ .tb-btn:hover {
   background: var(--fb-fill-hover);
   color: var(--text);
 }
 
-.tb-btn:active {
+ .tb-btn:active {
   background: var(--fb-fill-pressed);
   color: var(--text-dim);
+  /* 例外一条，写在主题层而不是给总线加 :not()：**窗口三键按住不缩**。
+     ① 它们在 `-webkit-app-region: drag` 里，按住时缩放会把"甩到角上就能关"这个肌肉记忆
+       变成一次位移，拖动起点跟着抖；② Windows 的约定是三键"命中即作用"，只有底色变化。
+     签名属于主题，约定属于平台：约定要赢。 */
+  transform: none;
 }
 
-/* 关闭键是 Windows 的约定色，不是 Fluent 本家色，所以写死（见文件头第 1 条）。 */
-.tb-close:hover {
-  background: #e81123;
+ .tb-close:hover {
+  background: var(--fb-danger-fill);
   color: #ffffff;
   border-radius: var(--radius-s);
 }
 
-.tb-close:active {
-  background: #c42b1c;
+ .tb-close:active {
+  background: color-mix(in srgb, var(--fb-danger-fill) 82%, #000000);
   color: #ffffff;
 }
 
-.statusbar {
-  border-top: 1px solid var(--border-soft);
-}
-
-/* 活动导轨：选中项 = 淡底 + 左侧一枚强调色小胶囊（Fluent NavigationView 的形状）。
-   胶囊用 ::before 画，不用"单侧粗边框"——那条是本仓明令避免的装饰手法，且会虚增边框读数。 */
-.rail2-btn {
+/* 活动导轨：选中 = 强调浅底 #deecf9 + 前缘一枚 3×16 强调色胶囊（Fluent NavigationView 的形状）。
+   胶囊用 ::before 画，不用"单侧粗边框"——那条在提示词的禁止项里（border-left accent stripe），
+   也会虚增本仓的边框读数。字色走 --accent-text：浅蓝底上放 #0078d4 本体只有 3.83。 */
+ .rail2-btn {
   position: relative;
+  border-radius: var(--radius-m);
   color: var(--text-dim);
-  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease),
+    transform var(--fb-duration) var(--ease);
 }
 
-.rail2-btn:hover {
+ .rail2-btn:hover {
   background: var(--fb-fill-secondary);
   color: var(--text);
 }
 
-.rail2-btn.on {
-  background: var(--accent-soft);
-  color: var(--accent);
+ .rail2-btn.on {
+  background: var(--fb-accent-light);
+  color: var(--accent-text);
 }
 
-.rail2-btn.on::before {
+ .rail2-btn.on::before {
   content: "";
   position: absolute;
   left: 2px;
@@ -105,510 +145,865 @@
   background: var(--accent);
 }
 
-/* ---------- 按钮族 ---------- */
+/* ---------- 按钮族（提示词：主色 #0078d4 白字；辅色白底 + #8a8886 描边） ---------- */
 
-/* Fluent 标准按钮：白底 + 一圈很轻的描边 + 底部那道略重的边（"厚度"）。
-   本仓 --ctl-h-2 是 26px，Fluent 是 32px——这里不追：追高会把 700px 宽的面板工具条顶穿（P117-C 刚治平）。 */
-.btn {
+/* 次按钮（默认档）：白底 + 一圈 #8a8886 + 小投影 + 底部那道略重的边（提示词 [REQUIRED] 的
+   rounded-md / shadow-小 / 辅色描边三条）。
+   **font-semibold 这一条本枚没照抄，是有实测理由的偏离**：提示词要求按钮字重 600，
+   而本仓的面板工具条在 700px 窗口下是逐像素排下来的（P117-C 刚把两条工具条的溢出治平，
+   #31 还挂着"降固有宽"）——实测加上 600 之后"XLSX"被挤到第二行（`.tmp/f3-work.png`）。
+   字重留给主按钮（一屏一只，宽度代价可控），默认按钮维持常规字重。 */
+ .btn {
   background: var(--bg-panel);
-  border-color: var(--border);
-  border-bottom-color: var(--line-strong);
+  border-color: var(--fb-control-line);
+  border-bottom-color: color-mix(in srgb, var(--fb-control-line) 60%, var(--text));
   color: var(--text);
-  box-shadow: none;
-  transition: background-color var(--fb-duration) var(--ease), border-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
+  box-shadow: var(--fb-shadow-s);
+  transition: background-color var(--fb-duration) var(--ease), border-color var(--fb-duration) var(--ease),
+    color var(--fb-duration) var(--ease), box-shadow var(--fb-duration) var(--ease),
+    transform var(--fb-duration) var(--ease);
 }
 
-.btn:hover {
-  background: var(--fb-fill-hover);
-  border-color: var(--line-strong);
+ .btn:hover {
+  box-shadow: var(--fb-shadow-m);
 }
 
-.btn:active {
-  background: var(--fb-fill-pressed);
-  border-color: var(--border);
+ .btn:active {
+  border-color: var(--fb-control-line);
   color: var(--text-dim);
-  transform: scale(0.98);
+  box-shadow: none;
 }
 
-.btn:disabled,
-.btn[disabled] {
+ .btn:disabled,
+ .btn[disabled] {
   background: var(--fb-fill-secondary);
   border-color: var(--border-soft);
-  /* 禁用态要"淡"但不能"看不见"：原来把字色往面板方向冲掉 40%，压在主钮那档浅灰底上
-     实测只有 1.61:1（P132-D 审计在 fluent/settings 抓到，SEVERE 档）。改成走 `--text-dim`——
-     它本身被门禁钉在四档表面上 ≥4.5，"淡"由去掉阴影与描边变浅来表达，不靠把字洗白。 */
+  /* 禁用要"淡"但不能"看不见"：字色走 --text-dim（它被门禁钉在四档 ≥4.5），
+     "淡"由去掉阴影与描边变浅表达，不靠把字洗白（审计抓到过 1.61:1 的那种写法）。 */
   color: var(--text-dim);
-  transform: none;
+  box-shadow: none;
 }
 
-.btn.primary {
+/* 主按钮：#0078d4 实底 + 白字 + semibold（提示词的"按钮主色 + font-semibold"两档都在这），
+   hover #106ebe、active #005a9e 两档由签名槽发。 */
+ .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  box-shadow: var(--fb-shadow-s);
+}
+
+ .btn.primary:hover {
+  border-color: var(--fb-accent-hover);
+  box-shadow: var(--fb-shadow-m);
+}
+
+ .btn.primary:active {
+  border-color: var(--fb-accent-pressed);
+  color: var(--on-accent);
+  box-shadow: none;
+}
+
+/* 禁用的主按钮：淡在**底色退一档 + 字走强调文字档**，不淡在透明度上。
+   审计抓到过原写法（38% 强调底 + 72% 透明墨）在强调色换回 #0078d4 后只剩 4.02:1——
+   底更亮了、墨却还是半透明的，两头一起松就是读不出来。
+   现在：#deecf9 底 + `--accent-text` 字 = 5.24:1（`.scratch/btnsm.mjs` 量的），
+   "禁用"这件事仍由描边转浅与去掉投影表达。 */
+ .btn.primary:disabled {
+  background: var(--fb-accent-light);
+  border-color: var(--fb-card-line);
+  color: var(--accent-text);
+  box-shadow: none;
+}
+
+/* 破坏性动作：只给字与描边转红，实底留给 primary 一种（提示词"禁止不协调配色"） */
+ .btn.danger {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  color: var(--danger-text);
+}
+
+ .btn.danger:hover {
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-panel));
+  border-color: var(--danger);
+}
+
+/* 只有一枚 glyph、没有文字的 `.btn.*.icon`：它的角色就是"图标容器"，所以跟着图标键那一档走
+   （蓝底白 glyph、hover 提亮 + scale 1.05、active 压深 + 缩）。
+   读法依据：提示词的图标规则说的正是这种键；而"辅色 = 白底 + #8a8886 描边"那条说的是带文字的按钮。
+   特异度 (0,3,0) 才压得过宿主 `.plot-bar .btn.sm` 那一族，所以这里必须写全三个类。 */
+ .btn.icon {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--fb-shadow-s);
+}
+
+ .btn.icon:hover:not(:disabled) {
+  background: var(--fb-accent-hover);
+  border-color: var(--fb-accent-hover);
+  color: var(--on-accent);
+  box-shadow: var(--fb-shadow-m);
+}
+
+ .btn.icon:active:not(:disabled) {
+  background: var(--fb-accent-pressed);
+  border-color: var(--fb-accent-pressed);
+}
+
+ .btn.icon.on {
+  background: var(--fb-accent-pressed);
+  border-color: var(--fb-accent-pressed);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #ffffff 62%, transparent);
+}
+
+ .btn.icon:disabled,
+ .btn.icon[disabled] {
+  background: var(--fb-fill-secondary);
+  border-color: var(--border-soft);
+  color: var(--text-dim);
+  box-shadow: none;
+}
+
+/* 图标容器：静置就是**一枚蓝底白 glyph 的控件**，hover 提亮一档 + scale 1.05，active 压深 + 缩。
+   两句话叠起来读的就是这个：提示词的 [REQUIRED] 说"按钮 = rounded-md + 小投影 + font-semibold"、
+   配色方案说"主蓝色 #0078d4（按钮、链接、焦点环）"，图标规则又说"hover 时蓝色填充 + scale-105"。
+   参考档（用户自己那版流利主题）也是这个密度：面板工具条上每一枚动作都是看得见的控件，
+   而不是"hover 才现身"的幽灵键——静置无底是本仓中性态的默认，不是 Fluent 的要求。
+   scale 与总线的上浮都写 transform，所以这里必须把两件事合成一条（特异度 (0,2,0) 压得住总线）。 */
+ .icon-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  border-bottom-color: var(--accent);
+  color: var(--on-accent);
+  border-radius: var(--radius-m);
+  box-shadow: var(--fb-shadow-s);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease),
+    border-color var(--fb-duration) var(--ease), box-shadow var(--fb-duration) var(--ease),
+    transform var(--fb-duration) var(--ease);
+}
+
+ .icon-btn:hover:not(:disabled) {
+  background: var(--fb-accent-hover);
+  border-color: var(--fb-accent-hover);
+  border-bottom-color: var(--fb-accent-hover);
+  color: var(--on-accent);
+  box-shadow: var(--fb-shadow-m);
+  transform: translateY(-0.5px) scale(1.05);
+}
+
+ .icon-btn:active:not(:disabled) {
+  background: var(--fb-accent-pressed);
+  border-color: var(--fb-accent-pressed);
+  border-bottom-color: var(--fb-accent-pressed);
+  color: var(--on-accent);
+  box-shadow: none;
+  transform: scale(0.94);
+}
+
+ .icon-btn:disabled {
+  background: var(--fb-fill-secondary);
+  border-color: var(--border-soft);
+  border-bottom-color: var(--border-soft);
+  color: var(--text-dim);
+  box-shadow: none;
+}
+
+/* 开关处于"开"：比静置那档蓝更深一层 + 一圈白内描边，
+   两档蓝只差一点时，"选中"必须再有一件别的东西说话（禁止只靠颜色传状态）。 */
+ .icon-btn.on,
+ .icon-btn.on:hover {
+  background: var(--fb-accent-pressed);
+  border-color: var(--fb-accent-pressed);
+  border-bottom-color: var(--fb-accent-pressed);
+  color: var(--on-accent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #ffffff 62%, transparent);
+}
+
+ .icon-btn.on:active {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #ffffff 62%, transparent);
+  transform: scale(0.94);
+}
+
+/* 面板工具条上那排小键（帧画布 / 组帧台共用形状）：与图标容器同一套语言 */
+ .pca-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  border-radius: var(--radius-m);
+  box-shadow: var(--fb-shadow-s);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease),
+    box-shadow var(--fb-duration) var(--ease), transform var(--fb-duration) var(--ease);
+}
+
+ .pca-btn:hover {
+  background: var(--fb-accent-hover);
+  border-color: var(--fb-accent-hover);
+  color: var(--on-accent);
+  box-shadow: var(--fb-shadow-m);
+}
+
+ .pca-btn.on,
+ .pca-btn.on:hover {
+  background: var(--fb-accent-pressed);
+  border-color: var(--fb-accent-pressed);
+  color: var(--on-accent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #ffffff 62%, transparent);
+}
+
+ .pca-btn:disabled {
+  background: var(--fb-fill-secondary);
+  border-color: var(--border-soft);
+  color: var(--text-dim);
+  box-shadow: none;
+}
+
+/* 文字型小钮与胶囊：白底 + 控件描边（= 提示词的"按钮辅色"），选中档走强调浅底 */
+ .qk-chip {
+  background: var(--bg-panel);
+  border: 1px solid var(--fb-control-line);
+  border-radius: var(--radius-m);
+  color: var(--text);
+  transition: background-color var(--fb-duration) var(--ease), border-color var(--fb-duration) var(--ease),
+    color var(--fb-duration) var(--ease), transform var(--fb-duration) var(--ease);
+}
+
+ .qk-chip:hover {
+  background: var(--fb-fill-hover);
+}
+
+ .qk-chip.on {
   background: var(--accent);
   border-color: var(--accent);
   color: var(--on-accent);
 }
 
-.btn.primary:hover {
-  background: var(--fb-accent-hover);
-  border-color: var(--fb-accent-hover);
+ .cb-capsule {
+  background: var(--fb-fill-secondary);
+  border: 1px solid var(--fb-card-line);
+  color: var(--text-dim);
 }
 
-.btn.primary:active {
-  background: var(--fb-accent-pressed);
-  border-color: var(--fb-accent-pressed);
-  color: var(--on-accent);
+ .ib-count {
+  background: var(--fb-accent-light);
+  color: var(--accent-text);
+  border-radius: var(--radius-pill);
 }
 
-.btn.primary:disabled {
-  background: color-mix(in srgb, var(--accent) 38%, var(--bg-panel));
-  border-color: transparent;
-  /* 淡出要淡在"墨"上，不能淡成透明：原来写的是 `--on-accent` 72%（白字带透明）压在这档
-     洗淡的主题色底上，实测 1.61:1——审计直接判进 SEVERE 档（读不出字）。
-     改成同一档淡出，但淡的是主题自己的墨色：72% 的 `--text` 压 #9ec0da ≈ 5.2:1，
-     "禁用"这件事仍由那层洗淡的底与去掉描边来表达。 */
-  color: color-mix(in srgb, var(--text) 72%, transparent);
+ .le-btn {
+  border-radius: var(--radius-m);
+  color: var(--text-dim);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease),
+    transform var(--fb-duration) var(--ease);
 }
 
-/* 图标键：Fluent 的图标按钮是"方一点、hover 才有底"，不常驻描边。 */
-.icon-btn {
-  border-color: transparent;
-  border-bottom-color: transparent;
-  background: transparent;
-}
-
-.icon-btn:hover {
+ .le-btn:hover {
   background: var(--fb-fill-hover);
-  border-color: var(--border-soft);
-}
-
-.icon-btn:active {
-  background: var(--fb-fill-pressed);
-  transform: scale(0.94);
-}
-
-/* 焦点：Fluent 的 focus rect 是"外实内留白"。留白就是 outline-offset——
-   这一条在 P130 那份文档里被列为"主题层够不到的能力"，在这一层它写得出。 */
-.btn:focus-visible,
-.icon-btn:focus-visible,
-.input:focus-visible,
-.qk-chip:focus-visible,
-.rail2-btn:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  color: var(--text);
 }
 
 /* ---------- 输入族 ---------- */
 
-.input {
+/* 输入框：白底 + #8a8886 描边 + rounded-md（提示词 [REQUIRED] 原样）。
+   本仓基线给输入框的是"凹档底 + 顶缘内阴影"（Linear 那套凹陷签名），这一枚按 Fluent 改白底：
+   Fluent 的输入框是**浮在内容上的白控件**，不是刻进表面的凹槽。 */
+ .input {
   background: var(--bg-panel);
-  border-color: var(--border);
-  border-bottom-color: var(--line-strong);
+  border-color: var(--fb-control-line);
   box-shadow: none;
-  transition: border-color var(--fb-duration) var(--ease), background-color var(--fb-duration) var(--ease);
+  transition: border-color var(--fb-duration) var(--ease), background-color var(--fb-duration) var(--ease),
+    box-shadow var(--fb-duration) var(--ease);
 }
 
-.input:hover {
-  border-bottom-color: var(--text);
+ .input:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--fb-control-line) 55%, var(--text));
 }
 
-.input:focus {
+/* 焦点 = 描边转强调色 + 底部那道 2px 强调线（Fluent 的 focus rect），
+   键盘焦点另由签名总线给 2px 环 + 2px 留白（--ctl-input-focus）。 */
+ .input:focus {
   background: var(--bg-panel);
-  border-bottom-color: var(--accent);
-  border-bottom-width: 2px;
-}
-
-.input:disabled,
-.input[readonly] {
-  background: var(--fb-fill-secondary);
-  border-bottom-color: var(--border);
-  color: var(--text-dim);
-}
-
-select.input {
-  background: var(--bg-panel);
-}
-
-/* 数字步进（控制画布卡片上的 ▲▼）：Fluent 把它当"贴着输入框的一组小键"。 */
-.ctl-step {
-  background: var(--bg-panel);
-  border-color: var(--border);
-}
-
-.ctl-step:focus-within {
-  border-bottom-color: var(--accent);
-  border-bottom-width: 2px;
-}
-
-/* 勾选与单选：Fluent 的方框在"未选"时是描边为主、底色很淡，选中才填满强调色。
-   accent-color 已经管住了原生态，这里只补容器。 */
-.chk {
-  color: var(--text);
-}
-
-.chk:hover .chk-box,
-.chk:hover input[type="checkbox"] {
   border-color: var(--accent);
 }
 
-/* 开关：本仓是 label 包 input 的自绘形状。轨道用凹档、滑块用白、开=强调色。 */
-.set-switch {
-  background: var(--bg-inset);
-  border-color: var(--line-strong);
-  transition: background-color var(--dur-base) var(--ease), border-color var(--dur-base) var(--ease);
-}
-
-/* contrast-exempt：开关轨道不承载文字（标签在 .set-switch 那一层），accent 底只给滑块当背景 */
-.set-switch input:checked + *,
-.set-switch.on {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-/* 滑杆：轨道两段（已走/未走）都归强调色家族，拇指白底描边。
-   伪元素 ::-webkit-slider-* 的特异性按伪元素计（(0,1,1) 不高于基线），动效写在这里安全。 */
-.ctl-slider {
-  background: transparent;
-}
-
-.ctl-slider::-webkit-slider-runnable-track {
-  background: color-mix(in srgb, var(--accent) 26%, var(--bg-inset));
-  border-radius: var(--radius-pill);
-}
-
-.ctl-slider::-webkit-slider-thumb {
-  background: var(--bg-panel);
-  border: 1px solid var(--line-strong);
-  box-shadow: var(--fb-shadow-pop);
-}
-
-.ctl-slider:hover::-webkit-slider-thumb {
-  border-color: var(--accent);
-}
-
-.ctl-slider:disabled::-webkit-slider-thumb {
+ .input:disabled,
+ .input[readonly] {
   background: var(--fb-fill-secondary);
   border-color: var(--border-soft);
-}
-
-/* ---------- 页签（dockview 公共类，只用公开形状） ---------- */
-
-/* 页签条：Fluent 的标签栏是"内容往上抬"，所以条本身退到凹档、选中的那枚升到面板档。 */
-.dv-tabs-and-actions-container {
-  background: var(--bg-inset);
-}
-
-.dv-tab {
-  border-radius: var(--radius-m) var(--radius-m) 0 0;
   color: var(--text-dim);
-  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
 }
 
-.dv-tab:hover {
-  background: var(--fb-fill-hover);
-  color: var(--text);
-}
-
-.dv-tab.dv-active-tab {
+ select.input {
   background: var(--bg-panel);
-  color: var(--text);
-  box-shadow: inset 0 2px 0 0 var(--accent);
 }
 
-.dv-default-tab {
-  color: inherit;
+/* 数字步进（控制画布卡片上的 ▲▼）：贴着输入框的一组小键 */
+ .ctl-step {
+  background: var(--bg-panel);
+  border-color: var(--fb-control-line);
 }
 
-.dv-default-tab-content {
-  color: inherit;
+ .ctl-step:focus-within {
+  border-color: var(--accent);
 }
 
-/* 页签上的那颗关闭叉：13px 是可见尺寸，命中区靠内边距撑（P105-B 的结论，别再改回 15）。 */
-.dv-default-tab-action {
-  border-radius: var(--radius-s);
-  color: var(--text-dim);
-}
-
-.dv-default-tab-action:hover {
-  background: var(--fb-fill-hover);
+/* 勾选与单选：accent-color 管住原生态的蓝，这里补容器与 hover。
+   勾选框是"图标容器"角色：hover 时描边转强调色，选中就是蓝底白勾（accent-color 已经画了）。 */
+ .chk {
   color: var(--text);
 }
 
-/* 分隔条：可见很细、热区靠 ::before 放宽（与本仓 B13 同一条手法）。 */
-.dv-sash {
-  background: var(--border-soft);
+ .chk:hover .chk-box,
+ .chk:hover input[type="checkbox"] {
+  border-color: var(--accent);
+}
+
+/* 开关：能画脸的只有那枚 span（轨道），label 是 34×18 的**方角外壳**。
+   P146-B 踩过：把底色写在 label 上，圆角轨道外面就支出一圈方角，
+   放大看像一张贴歪的图（`.tmp/p146-b1-setswitch.png`：底=#e1e1e1、radius=0px）。
+   静置档由宿主给（`--border` = #c8c6c4，正是提示词的 ControlStrongStroke 一档），
+   开 = 强调色实底 + 白滑块同样由宿主的 `:checked + span` 给——这里只把轨道收成真正的胶囊。 */
+ .set-switch span {
+  border-radius: var(--radius-pill);
   transition: background-color var(--fb-duration) var(--ease);
 }
 
-/* contrast-exempt：sash 是拖拽分隔条，本身没有文字 */
-.dv-sash:hover {
-  background: var(--accent);
+/* 滑杆：已走的那段是强调色实底、拇指白底描边 + 投影（提示词的 Fluent 滑杆形状） */
+ .ctl-slider {
+  background: transparent;
 }
+
+ .ctl-slider::-webkit-slider-runnable-track {
+  background: color-mix(in srgb, var(--accent) 30%, var(--bg-inset));
+  border-radius: var(--radius-pill);
+}
+
+ .ctl-slider::-webkit-slider-thumb {
+  background: var(--bg-panel);
+  border: 1px solid var(--fb-control-line);
+  box-shadow: var(--fb-shadow-m);
+}
+
+ .ctl-slider:hover::-webkit-slider-thumb {
+  border-color: var(--accent);
+}
+
+ .ctl-slider:disabled::-webkit-slider-thumb {
+  background: var(--fb-fill-secondary);
+  border-color: var(--border-soft);
+  box-shadow: none;
+}
+
+/* 分段控件与两段开关：选中档 = 强调浅底 + 强调字（不是实底蓝——那是"开关"角色） */
+ .seg {
+  background: var(--bg-panel);
+  border-color: var(--fb-control-line);
+  border-radius: var(--radius-m);
+}
+
+ .seg > button {
+  border-radius: var(--radius-s);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease),
+    transform var(--fb-duration) var(--ease);
+}
+
+ .ctl-sw-seg {
+  border-radius: var(--radius-m);
+  color: var(--text-dim);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease),
+    transform var(--fb-duration) var(--ease);
+}
+
+ .ctl-sw-seg.active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* ---------- 页签：只认宿主词汇与 ARIA ---------- */
+
+/* 页签条退到凹档，选中的那枚升到白底 + 底部那道 2px 强调线（参考图里面板头下那条蓝线）。 */
+ [data-ctl="tablist"] {
+  background: var(--bg-inset);
+}
+
+ [data-ctl="tab"] {
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  color: var(--text-dim);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease),
+    box-shadow var(--fb-duration) var(--ease);
+}
+
+ [data-ctl="tab"]:hover {
+  background: var(--fb-fill-hover);
+  color: var(--text);
+}
+
+ [data-ctl="tab"][aria-selected="true"] {
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+/* 页签上那颗关闭叉是 div[role=button]：底色走 --dv-icon-hover-background-color，
+   颜色 inherit 自页签，这里只留形状。13px 是可见尺寸、命中区靠内边距撑（P105-B 的结论）。 */
+ [data-ctl="tab"] [role="button"] {
+  border-radius: var(--radius-s);
+}
+
+/* 分隔条：静置与拖拽激活色都是 dockview 自己的变量（--dv-sash-color / --dv-active-sash-color），
+   本文件里它一条选择器都不需要。 */
 
 /* ---------- 浮层：菜单 / 命令面板 / 气泡 ---------- */
 
-/* Fluent 的弹出层是"8px 圆角 + 分层影 + 半透明底"。
-   **半透明留、`backdrop-filter: blur()` 不留**——这是量出来的，不是审美：
-   带着 blur 时，无头渲染（--disable-gpu）下任何一次全树 `getComputedStyle` 扫描
-   （`theme_audit` 就是这种扫描）40 秒都不返回；去掉 blur 后同一台机器同一屏秒回。
-   也就是说：亚克力不是"更好看"，是"每次重算都要重合成一遍"。
-   真 acrylic 的正确位置是 P131-E（Rust 侧窗口效果，由合成器做），不是主题 CSS。 */
-.ctx-menu,
-.sb-menu,
-.aiw-menu,
-.cmdk {
+/* 浮层档由宿主在元素上声明 `data-elev="4"`，材质在这里给一次：
+   8px 圆角 + 分层影 + 半透明底 + 磨砂（依据"必须遵守"的亚克力，按"禁止过度使用"只给浮层）。
+   旧注释里"无头环境加 blur 会卡 40 秒"这条**在本机不成立**：同一页同一浮层加 blur 前后
+   扫描 37ms vs 39ms、四次截图 106/64/60/76 vs 78/90/80/62 ms（`.scratch/p136-blur*.mjs` 留档）。
+   而不 blur 的代价是看得见的：88% 的底挡不住背后的字（`.tmp/p136-fluent-palette.png`）。
+   若真机测出代价，撤的是这一档 blur，不是把 ghost 留着当已知问题。
+   顺序要紧：`.modal` 与 `.ai-toast` 也挂这一档，它们各自的规则写在**后面** ⇒
+   同特异度后写者胜，对话框保持实底（模态窗要读长文）。 */
+ [data-elev="4"] {
   background: var(--fb-acrylic);
   background-image: var(--fb-noise);
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-l);
   box-shadow: var(--fb-shadow-pop);
 }
 
-/* 四族"可点的行"：右键菜单项 / 信息栏计数键 / 挂件菜单项 / 命令面板行。
-   类名是照宿主改对的——原先写的 `.sb-item`、`.aiw-item`、`.cmdk-row` 宿主里根本没有，
-   那三条一直在画空气（新门 J3 抓出来的，见 docs 的 P132-A2 一节）。 */
-.ctx-item,
-.ib-count,
-.aiw-menu-item,
-.cmdk-item {
-  border-radius: var(--radius-s);
-  color: var(--text);
-  transition: background-color var(--dur-snap) var(--ease);
+/* 菜单族的外壳：圆角与那一圈极轻的边（#e1e1e1 = 提示词的卡片描边）。 */
+ [data-ctl="menu"] {
+  border: 1px solid var(--fb-card-line);
+  border-radius: var(--radius-l);
 }
 
-.ctx-item:hover,
-.ib-count:hover,
-.aiw-menu-item:hover,
-.cmdk-item:hover,
-.ctx-item:focus,
-.ib-count:focus,
-.aiw-menu-item:focus,
-.cmdk-item.sel {
-  background: var(--fb-fill-hover);
+/* 系统「透明度效果」关掉时退成实底、不 blur：依据两头都要顾（"用亚克力"与"禁止过度使用"）。
+   两条都写在上面那两条之后 ⇒ 同特异度后写者胜，一条 !important 都不加。 */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --fb-acrylic: var(--bg-panel);
+  }
+
+   [data-elev="4"] {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* 四族"可点的行"：右键菜单项 / 信息栏计数键 / 挂件菜单项 / 命令面板行。
+   hover 一律是**材质提亮一档**（Reveal 的"变亮"），不是变蓝底——选中档才用强调浅底。 */
+ .ctx-item,
+ .aiw-menu-item,
+ .cmdk-item {
+  border-radius: var(--radius-m);
+  color: var(--text);
+  transition: background-color var(--dur-snap) var(--ease), color var(--dur-snap) var(--ease);
+}
+
+ .ctx-item:hover,
+ .aiw-menu-item:hover,
+ .cmdk-item:hover,
+ .cmdk-item.sel {
+  background: var(--fb-accent-light);
+  color: var(--accent-text);
 }
 
 /* 禁用态宿主有两写法：按钮走 `:disabled`，挂件菜单是 `.disabled` 类 ⇒ 两边都得给。
-   P132-F：与内置那通路同步改——原来把 --text-dim 再朝面板洗 38%（"淡"变成了"看不见"），
-   现在禁用一档由 --text-dim + not-allowed 表达。两条通路的规则体由 marketContent 对账。 */
-.ctx-item:disabled,
-.ib-count:disabled,
-.cmdk-item:disabled {
+   洗到读不出不是"淡"，是看不见；这一档由 --text-dim + cursor 表达就够了。 */
+ .ctx-item:disabled,
+ .cmdk-item:disabled,
+ .aiw-menu-item.disabled,
+ .aiw-menu-item.disabled:hover {
+  background: transparent;
   color: var(--text-dim);
-  background: transparent;
 }
 
-.aiw-menu-item.disabled,
-.aiw-menu-item.disabled:hover {
-  background: transparent;
-}
-
-.cmdk-input {
+ .cmdk-input {
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--fb-card-line);
   border-radius: 0;
   color: var(--text);
 }
 
-.cmdk-empty {
+ .cmdk-empty {
   color: var(--text-dim);
 }
 
-.help-bubble {
-  background: var(--fb-acrylic);
-  background-image: var(--fb-noise);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-l);
-  box-shadow: var(--fb-shadow-pop);
+/* 气泡：材质与外壳由上面两条给（它同时挂了 data-elev 与 data-ctl），这里只留文字色。 */
+ .help-bubble {
   color: var(--text);
 }
 
-/* 提示条：本仓的 .ai-toast 已经用 inset 描边当"厚度"，这里只把它抬到 Fluent 的弹层影。 */
-.ai-toast {
-  box-shadow: inset 0 0 0 1px var(--border-soft), var(--fb-shadow-pop);
+/* 提示条：抬到 Fluent 的浮层影，底保持实底（要读的是一句话，不是列表）。 */
+ .ai-toast {
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--fb-card-line), var(--fb-shadow-pop);
+}
+
+/* ---------- 面板工具条（.p-bar）：图标键不幽灵化，文字命令仍幽灵化 ----------
+   宿主在 theme.css:10844 立了一条统一约定：`.p-bar` 里的 `.btn` / `.icon-btn`
+   静置无底无框、hover 才出现（理由写在它上面——灰条上一排白底描边盒子会让工具条比页签条还响）。
+   这条对**文字命令**成立（"分析包… / CSV / XLSX" 本来就该是轻的一排字），
+   对**图标键**不成立：图标没有文字兜底，静置完全透明时"这里能点"只能靠猜；
+   而依据的图标规则要的就是"蓝色填充 + scale-105"，用户那版参考档也是一排看得见的蓝方块。
+   所以这里只把图标那一支收回来（`.icon-btn` 与只有 glyph 的 `.btn.icon`），文字那一支不动。
+   特异度算过：宿主静置 (0,4,0)、hover (0,6,0)，这里各加一层主题前缀 ⇒ (0,5,0) / (0,7,0) 压得住，
+   不加 `!important`（B 门天花板只许降）。禁用态必须一起点回来，
+   否则 (0,5,0) 会反过来把 `.icon-btn:disabled` (0,2,0) 压掉——那正是"灰掉却看着能点"。 */
+ .p-bar .icon-btn:not(.on):not(.primary),
+ .p-bar .btn.icon:not(.on):not(.primary) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--fb-shadow-s);
+}
+
+ .p-bar .icon-btn:not(.on):not(.primary):hover:not(:disabled),
+ .p-bar .btn.icon:not(.on):not(.primary):hover:not(:disabled) {
+  background: var(--fb-accent-hover);
+  border-color: var(--fb-accent-hover);
+  color: var(--on-accent);
+  box-shadow: var(--fb-shadow-m);
+}
+
+ .p-bar .icon-btn:not(.on):not(.primary):active:not(:disabled),
+ .p-bar .btn.icon:not(.on):not(.primary):active:not(:disabled) {
+  background: var(--fb-accent-pressed);
+  border-color: var(--fb-accent-pressed);
+  color: var(--on-accent);
+  box-shadow: none;
+}
+
+ .p-bar .icon-btn:disabled,
+ .p-bar .icon-btn[disabled],
+ .p-bar .btn.icon:disabled,
+ .p-bar .btn.icon[disabled] {
+  background: var(--fb-fill-secondary);
+  border-color: var(--border-soft);
+  color: var(--text-dim);
+  box-shadow: none;
+}
+
+/* 选中/进行中那一档在灰条上要更明确：比静置那档蓝更深 + 一圈白内描边（颜色之外再给一件事说话） */
+ .p-bar .icon-btn.on,
+ .p-bar .btn.icon.on {
+  background: var(--fb-accent-pressed);
+  border-color: var(--fb-accent-pressed);
+  color: var(--on-accent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #ffffff 62%, transparent);
+}
+
+/* 文字型命令（.btn.sm 那批）：保持宿主的幽灵档，只把 hover 换成 Fluent 的强调浅底 */
+ .p-bar .btn:not(.on):not(.primary):not(.icon):hover:not(:disabled) {
+  background: var(--fb-accent-light);
+  border-color: transparent;
+  color: var(--accent-text);
 }
 
 /* ---------- 对话框 ---------- */
 
-.modal-mask {
+ .modal-mask {
   background: color-mix(in srgb, var(--text) 34%, transparent);
 }
 
-.modal {
+ .modal {
   background: var(--bg-panel);
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--fb-card-line);
   border-radius: var(--radius-xl);
-  box-shadow: var(--fb-shadow-pop);
+  box-shadow: var(--fb-shadow-l);
 }
 
-.modal-title {
+ .modal-title {
   color: var(--text);
   font-weight: 600;
 }
 
-.modal-foot {
-  border-top: 1px solid var(--border-soft);
+ .modal-foot {
+  border-top: 1px solid var(--fb-card-line);
 }
 
-/* ---------- 卡片与列表行 ---------- */
+/* ---------- 卡片与列表行（Reveal + Z 轴：hover 提亮边框、影升一档、浮起 1px） ---------- */
 
-/* Fluent 的卡片靠"极轻的描边 + 很浅的影"分层，hover 才加一档影——不上浮（上浮是动效，
-   而 hover 位移会把整屏的滚动条算进重排，代价与收益不成比例）。 */
-.ctl-card,
-.theme-card,
-.set-card,
-.props-item {
+ .ctl-card,
+ .theme-card,
+ .set-card,
+ .props-item,
+ .ph-card {
   background: var(--bg-panel);
   border: 1px solid var(--fb-card-line);
   border-radius: var(--radius-l);
   box-shadow: var(--fb-shadow-card);
-  transition: border-color var(--fb-duration) var(--ease), box-shadow var(--fb-duration) var(--ease);
+  transition: border-color var(--fb-duration-card) var(--ease), box-shadow var(--fb-duration-card) var(--ease),
+    transform var(--fb-duration-card) var(--ease);
 }
 
-.ctl-card:hover,
-.theme-card:hover,
-.set-card:hover,
-.props-item:hover {
-  border-color: var(--border);
-  box-shadow: var(--fb-shadow-pop);
+/* 卡片 hover:-translate-y-1 + 阴影扩张（提示词"必须遵守"点名的 Z 轴签名）。
+   这里必须自己写 transform：总线给的是控件档的 -0.5px，卡片要的是 -1px 配 200ms。 */
+ .ctl-card:hover,
+ .theme-card:hover,
+ .set-card:hover,
+ .props-item:hover,
+ .ph-card:hover {
+  border-color: var(--fb-reveal-line);
+  box-shadow: var(--fb-shadow-hover);
+  transform: translateY(-1px);
 }
 
-.theme-card.on {
+ .theme-card.on {
   border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent), var(--fb-shadow-m);
 }
 
-.tpl-row,
-.cmd-item {
+ .tpl-row,
+ .cmd-item,
+ .rp-item-name,
+ .tbl-row {
   border-radius: var(--radius-m);
   color: var(--text);
-  transition: background-color var(--dur-snap) var(--ease);
-}
-
-.tpl-row:hover,
-.cmd-item:hover {
-  background: var(--fb-fill-secondary);
-}
-
-.tpl-row.on,
-.cmd-item.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-/* ---------- 属性页与提示层级 ---------- */
-
-.props-title {
-  color: var(--text);
-  font-weight: 600;
-}
-
-.props-section {
-  border-top: 1px solid var(--border-soft);
-}
-
-.props-hint {
-  color: var(--text-dim);
-}
-
-.form-hint {
-  color: var(--text-dim);
-}
-
-.set-group-title {
-  color: var(--text-dim);
-  font-weight: 600;
-  letter-spacing: 0.2px;
-}
-
-/* ---------- 芯片 / 胶囊 / 计数徽标 ---------- */
-
-.qk-chip {
-  background: var(--bg-panel);
-  border: 1px solid var(--fb-card-line);
-  color: var(--text);
-  transition: background-color var(--fb-duration) var(--ease), border-color var(--fb-duration) var(--ease);
-}
-
-.qk-chip:hover {
-  background: var(--fb-fill-hover);
-  border-color: var(--border);
-}
-
-.qk-chip.on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-}
-
-.cb-capsule {
-  background: var(--fb-fill-secondary);
-  border: 1px solid var(--fb-card-line);
-  color: var(--text-dim);
-}
-
-.ib-count {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: var(--radius-pill);
-}
-
-/* 面板工具条上那排小键（帧画布 / 组帧台共用形状） */
-.pca-btn {
-  border-radius: var(--radius-m);
-  color: var(--text-dim);
   transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
 }
 
-.pca-btn:hover {
+ .tpl-row:hover,
+ .cmd-item:hover,
+ .rp-item-name:hover,
+ .tbl-row:hover {
   background: var(--fb-fill-hover);
-  color: var(--text);
 }
 
-.pca-btn.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.pca-btn:disabled {
-  /* 与 `.btn:disabled` 同一条改判：洗白到面板那一档就不是"淡"，是看不见 */
-  color: var(--text-dim);
-  background: transparent;
-}
-
-/* ---------- AI 对话面 ---------- */
-
-.ai-msg {
-  border-radius: var(--radius-l);
-}
-
-.ai-msg code,
-.ai-msg pre {
-  background: var(--bg-inset);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-s);
+/* 选中行 = 强调浅底 + 强调字（参考图里那条被选中的协议行） */
+ .tpl-row.on,
+ .cmd-item.on,
+ .rp-item-name.on,
+ .tbl-row.on,
+ .tbl-row.sel {
+  background: var(--fb-accent-light);
+  color: var(--accent-text);
 }
 
 /* ---------- 表格 ---------- */
 
-.tbl-filter {
+ .tbl-filter {
   background: var(--bg-panel);
 }
 
-.tbl-col-del {
+ .tbl-hcell {
+  color: var(--text-dim);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
+}
+
+ .tbl-hcell:hover {
+  background: var(--fb-fill-hover);
+  color: var(--text);
+}
+
+ .tbl-col-del {
   border-radius: var(--radius-s);
   color: var(--text-dim);
 }
 
-.tbl-col-del:hover {
-  background: color-mix(in srgb, var(--danger) 12%, var(--bg-panel));
-  color: var(--danger);
+ .tbl-col-del:hover {
+  background: var(--fb-danger-fill);
+  color: #ffffff;
 }
 
-/* ---------- 减弱动效的兜底自检 ----------
-   上面所有 transition 都写在单类选择器上（(0,1,0) < 宿主的 html.no-motion * (0,1,1)），
-   所以宿主那条一开，这里全部失效——不需要在本文件里再抄一份 no-motion 分支。
-   `theme_audit` 的 motionOverride 一格就是这条的守卫：它若报出任何一条，就说明
-   有人把动效写到了两级类上，用户设的"减少动效"会被这套主题压住。 */
+/* ---------- 属性页与提示层级 ---------- */
+
+ .props-title,
+ .set-group-title {
+  color: var(--text);
+  font-weight: 600;
+}
+
+ .props-section {
+  border-top: 1px solid var(--fb-card-line);
+}
+
+ .props-hint,
+ .form-hint {
+  color: var(--text-dim);
+}
+
+/* ---------- AI 对话面 ---------- */
+
+ .ai-msg {
+  border-radius: var(--radius-l);
+}
+
+ .ai-msg code,
+ .ai-msg pre {
+  background: var(--fb-fill-secondary);
+  border: 1px solid var(--fb-card-line);
+  border-radius: var(--radius-s);
+}
+
+/* 正文行宽：依据自检那条"正文行宽不超过 65-75 个字符"在本仓**此前没有落点**——
+   我上一份文档（P142 §2）写着"由 `.md` / 帮助正文的 max-width 保证"，实测 theme.css 里
+   `.md` 一条 max-width 都没有，那句是假话。补在这里：只管段落与列表项的阅读宽度，
+   标题 / 表格 / 代码块不动（它们要的是铺满，不是行长）。
+   70ch 落在那句要求的区间内，且按 `--zoom` 折算后仍是一行的字符数，不随密度漂。 */
+ .md-p,
+ .md li {
+  max-width: 70ch;
+}
+
+/* ---------- 选区与滚动条（Fluent 的选区是强调浅底，不是系统蓝） ---------- */
+
+ ::selection {
+  background: var(--fb-accent-light);
+  color: var(--accent-text);
+}
+
+/* ======================================================================
+   P146 反馈④ · 覆盖面铺开（第一批：设置页与壳层里那批"不走基元"的自绘控件）
+   —— 这批不是装饰，是补账：实测宿主有 1718 个活类名，流利层只点了 58 个（96.7% 未覆盖），
+   而 P143 那条签名总线只管 transform/outline，**管不到底色、描边、圆角、投影**，
+   所以"手感有了、形状没有"正是用户看到的"好多按钮输入框展开栏没被覆盖到"。
+   口径：一个家族一条，形状四件事（圆角 / 控件描边 / 填充档 / 投影档）都从既有旋钮取，
+   不新增色值；特异度按 `.p-bar` 那次的模板加锚点，不用 !important。
+   ==================================================================== */
+
+/* 连接钮（工具栏那枚主行动）：Fluent 的"按钮主色"档，选中/连接态走深一档 */
+ .connect-btn {
+  border-radius: var(--radius-m);
+  font-weight: 600;
+  box-shadow: var(--fb-shadow-s);
+  transition: background-color var(--fb-duration) var(--ease), border-color var(--fb-duration) var(--ease),
+    color var(--fb-duration) var(--ease), box-shadow var(--fb-duration) var(--ease),
+    transform var(--fb-duration) var(--ease);
+}
+
+ .connect-btn:hover {
+  box-shadow: var(--fb-shadow-m);
+}
+
+ .connect-btn:active {
+  box-shadow: none;
+}
+
+/* 波特率下拉与它的弹层触发键：与输入框同一种"白底 + 控件描边"的控件，不是灰凹块 */
+ .baud-toggle,
+ .baud-combo,
+ .color-input,
+ .back-btn {
+  background: var(--bg-panel);
+  border-color: var(--fb-control-line);
+  border-radius: var(--radius-m);
+}
+
+ .baud-toggle:hover:not(:disabled),
+ .baud-toggle.open,
+ .back-btn:hover:not(:disabled) {
+  background: var(--fb-fill-hover);
+  border-color: var(--fb-control-line);
+  color: var(--text);
+}
+
+/* 芯片与徽标：Fluent 的小标签是"强调浅底 + 强调字"，不是半透明强调底 + 强调色本体
+   （后者压浅蓝底只有 3.8~4.2，P132-D 的派生档就是为这一族立的） */
+ .chip,
+ .plg-chip,
+ .plg-fchip,
+ .fc-role-chip,
+ .msp-badge,
+ .snt-badge,
+ .xray-badge {
+  background: var(--fb-accent-light);
+  color: var(--accent-text);
+  border-radius: var(--radius-s);
+}
+
+/* 导航与分段（设置页左栏、分段切换）：选中档 = 强调浅底 + 强调字 + 前缘指示，
+   hover 是材质提亮一档，不是变蓝底 */
+ .set-nav button,
+ .set-seg button {
+  border-radius: var(--radius-m);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease),
+    transform var(--fb-duration) var(--ease);
+}
+
+ .set-nav button:hover,
+ .set-seg button:hover {
+  background: var(--fb-fill-hover);
+  color: var(--text);
+}
+
+ .set-nav button.on,
+ .set-seg button.on {
+  background: var(--fb-accent-light);
+  color: var(--accent-text);
+}
+
+/* 自绘页签（控制画布的页）：与停靠页签同一套语言——白底 + 底部那道强调线 */
+ .ctl-tab {
+  background: var(--bg-inset);
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
+  color: var(--text-dim);
+}
+
+ .ctl-tab.active {
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+/* 模型设置页那几张卡与列表：凹档底在 Fluent 里是"控件之间的面"，
+   卡片本身仍是白底 + 极轻描边 + 分层影（用户截图里那一大片灰块就是它） */
+ .msp-list,
+ .msp-models {
+  border-radius: var(--radius-l);
+}
+
+ .msp-mrow {
+  border-radius: var(--radius-m);
+  transition: background-color var(--fb-duration) var(--ease);
+}
+
+ .msp-mrow:hover {
+  background: var(--fb-fill-hover);
+}
+
+ .msp-mrow.on {
+  background: var(--fb-accent-light);
+}
+
+/* 表格：行悬停是材质提亮，选中才是强调浅底；表头那格现在挂了 data-ctl="col" 也吃总线按压 */
+ .tbl-header,
+ .tbl-hcell {
+  color: var(--text-dim);
+}
+
+ .tbl-cell {
+  border-radius: var(--radius-s);
+}
+
+/* 折叠/展开栏（属性页分组、协议树）：整行是热区，hover 给一档材质 */
+ .props-section > summary,
+ .coltree-row,
+ .rp-item,
+ .workflow-section {
+  border-radius: var(--radius-m);
+  transition: background-color var(--fb-duration) var(--ease), color var(--fb-duration) var(--ease);
+}
+
+ .coltree-row:hover,
+ .rp-item:hover,
+ .workflow-section:hover {
+  background: var(--fb-fill-hover);
+}
+
+/* 对话框与它的行（帧画布那几个自绘弹窗）：外壳抬到浮层档的形状 */
+ .fc-dlg,
+ .workflow-dialog {
+  background: var(--bg-panel);
+  border: 1px solid var(--fb-card-line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--fb-shadow-l);
+}
+
+ .fc-dlg-row input,
+ .fc-dlg-row select {
+  background: var(--bg-panel);
+  border-color: var(--fb-control-line);
+  border-radius: var(--radius-s);
+}

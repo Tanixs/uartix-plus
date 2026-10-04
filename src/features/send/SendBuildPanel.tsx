@@ -848,6 +848,8 @@ export function SendBuildPanel() {
           return (
             <div
               className="sb-menu"
+              data-elev="4"
+              data-ctl="menu"
               ref={menuElRef}
               style={{ left: menu.x, top: menu.y }}
               role="menu"

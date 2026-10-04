@@ -188,6 +188,8 @@ export function Listbox<T extends HTMLElement = HTMLElement>({
     <div
       ref={boxRef}
       className="ctx-menu lbx"
+      data-elev="4"
+      data-ctl="menu"
       // 首帧先藏在屏外（照 Dropdown）：layout effect 量完尺寸写回真实坐标再显形
       style={{ left: -9999, top: -9999, visibility: "hidden", ...(maxH ? { maxHeight: maxH } : {}) }}
       role="listbox"

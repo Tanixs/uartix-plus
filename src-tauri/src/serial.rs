@@ -493,7 +493,7 @@ pub async fn stop_record(state: State<'_, SerialManager>) -> Result<(), String> 
  * 因为 ESP32/STM32 的自动烧录电路就是靠 DTR+RTS 的组合沿决定"复位跑固件"还是"进 bootloader"，
  * 一个"顺手给个默认电平"就能让用户的板子在连接那一刻被踢进烧录模式）。
  * 只有用户显式点过（`Some(..)`）才写线；`None` 那条一律不动。
- * 详设：docs/P106-串口控制线-详设.md
+ * 详设：docs/designs/P106-串口控制线-详设.md
  */
 
 /// Break 时长下限（ms）：给得起 LIN 唤醒（≥250 µs）这类短中断

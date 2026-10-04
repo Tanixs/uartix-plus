@@ -665,8 +665,8 @@ export function SendFieldInspector(props: { specId: string; fieldId: string }) {
                   {(p.type === "text" || p.type === "enum") && (
                     <HelpHint
                       text={tx(
-                        "文本 / 枚举参数还没有对应的控件类型（选择框卡在 P122）：没有卡能灌这个参数，所以这颗键点不动。",
-                        "Text and enum parameters have no matching card type yet (the select card is in P122), so nothing can feed this parameter.",
+                        "文本 / 枚举参数还没有对应的控件类型（选择框卡规划中）：没有卡能灌这个参数，所以这颗键点不动。",
+                        "Text and enum parameters have no matching card type yet (the select card is planned), so nothing can feed this parameter.",
                       )}
                     />
                   )}

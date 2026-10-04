@@ -91,6 +91,20 @@ export const IconSlider = () =>
     </>,
   );
 
+/**
+ * 导轨收起（P146 反馈⑤：通用 chevron 读不出"收的是哪一条"，换一枚说得出对象的）。
+ * 读法：一个窗口 + 左边一道分隔栏 + 朝左的箭头 = 把左轨收进去。
+ * 24 viewBox / 描边 2 / 走 svg() 同一出处（门 H 钉着图标基准只有一处）。
+ */
+export const IconRailCollapse = () =>
+  svg(
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M9.5 4v16" />
+      <polyline points="16.5 9.5 13.5 12 16.5 14.5" />
+    </>,
+  );
+
 export const IconButton = () =>
   svg(<rect x="4" y="8" width="16" height="8" rx="3" />);
 
@@ -459,7 +473,7 @@ export const IconMore = () =>
 /**
  * P104-B12：导轨四枚 + 版式一枚。
  *
- * 语义盘点（`.tools/icon-semantics.mjs`，见 `docs/P104-B12-详设.md` §B）之后，
+ * 语义盘点（`.tools/icon-semantics.mjs`，见 `docs/designs/P104-B12-详设.md` §B）之后，
  * "约 60 枚整套重画"缩成了这几枚 —— 因为扫出来发现**跨域复用绝大多数是对的**
  * （IconChevron 20 个文件、IconPlay 14 个文件，那是共享词汇表该有的样子，不是缺陷）。
  * 真正的碰撞只有：`IconColumns` 四义、`IconTrash` 混了两种后果不同的动作。

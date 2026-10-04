@@ -380,6 +380,7 @@ export function DataTable() {
               <div
                 key={c.key}
                 className="tbl-hcell"
+                data-ctl="col"
                 onClick={() => toggleSort(c.key)}
                 title={`${t("tbl.sortBy")}：${c.label}`}
               >

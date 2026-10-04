@@ -71,7 +71,8 @@ const BUDGETS = {
   // 在计数前就被剥掉），所以这一格从 20514 降到 20214。方向与棘轮一致：债只会更小。
   // P121-A：`%d` 那句改口时顺手收紧（"按格式插值"→"插值"），20214 → 20211。
   // P133-H（同一格续账）：「全权执行」那一行改口，20211 → 20210。
-  "src/features/help/HelpModal.tsx": 20210,
+  // P146（同一格续账）：P136 改写过帮助文案后实测 20209，棘轮只降不升，按门禁自己的话把数改小。
+  "src/features/help/HelpModal.tsx": 20209,
   "src/features/console/QuickCommandBar.tsx": 100,
   "src/App.tsx": 10,
   "src/features/vdev/VdevPanel.tsx": 5,

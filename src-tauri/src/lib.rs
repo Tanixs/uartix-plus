@@ -58,6 +58,27 @@ fn dev_server_alive(host: &str, port: u16) -> bool {
     })
 }
 
+/// P146 反馈①：dev server 探测从"一次定生死"改成**有界重试**。
+/// 成因链：vite 冷启动（本机依赖预构建要几十秒）期间窗口已经建好，单次探测扑空 ⇒
+/// 用户看到引导页 + 原生弹框，必须手点 ↻ 才进得去；`%TEMP%\uartix-dev-guide.log`
+/// 里连着几条"未响应 HTTP"就是这么来的。端口没人听时 connect 立刻失败，
+/// 所以"真的没起 vite"这种情况也不会多等几秒以上。
+#[cfg(debug_assertions)]
+fn wait_dev_server(host: &str, port: u16, tries: u32, step_ms: u64) -> bool {
+    for i in 0..tries {
+        if dev_server_alive(host, port) {
+            if i > 0 {
+                glog(&format!("dev server 第 {} 次探测才存活（等它起来是应该的）", i + 1));
+            }
+            return true;
+        }
+        if i + 1 < tries {
+            std::thread::sleep(std::time::Duration::from_millis(step_ms));
+        }
+    }
+    false
+}
+
 #[cfg(debug_assertions)]
 fn guide_html(host: &str, port: u16) -> String {
     format!(
@@ -81,7 +102,21 @@ fn guide_html(host: &str, port: u16) -> String {
          <b>这不是程序卡死</b>。</p>\
          <p>请在项目目录运行：<code>npm run tauri dev</code>，然后点右上角 ↻ 重试。</p>\
          <p class=tip>若需要可双击运行的版本，请执行 npm run tauri build 后到 target\\release 获取。</p>\
-         </div></body></html>"
+         </div>\
+         <script>\
+         // P146 反馈①：引导页自己等 dev server，起来就自动进去，不用再手点 ↻。\
+         // 为什么在页面里等而不是只在 Rust 里死等：窗口创建前长等会让「真没起 vite」的人\
+         // 连引导页都看不到；页面已经在屏幕上了，轮询是零成本的。\
+         // no-cors 的 fetch 只要不抛异常就说明端口有人听。\
+         const target = \"http://{host}:{port}\";\
+         let tries = 0;\
+         const timer = setInterval(() => {{\
+           fetch(target, {{ mode: \"no-cors\", cache: \"no-store\" }})\
+             .then(() => {{ clearInterval(timer); location.href = target; }})\
+             .catch(() => {{ if (++tries > 400) clearInterval(timer); }});\
+         }}, 1500);\
+         </script>\
+         </body></html>"
     )
 }
 
@@ -276,7 +311,9 @@ pub fn run() {
                         let host = u.host_str().unwrap_or("localhost").to_string();
                         let port = u.port_or_known_default().unwrap_or(1420);
                         glog(&format!("探测 {host}:{port} …"));
-                        if dev_server_alive(&host, port) {
+                        // P146 反馈①：一次探测改成有界重试（10 × 400ms），
+                        // 免得 vite 冷启动那几十秒里建好的窗口直接判死、用户得手点 ↻。
+                        if wait_dev_server(&host, port, 10, 400) {
                             glog("dev server 存活，加载前端");
                             (tauri::WebviewUrl::External(u), None)
                         } else {

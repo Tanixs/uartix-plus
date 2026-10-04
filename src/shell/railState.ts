@@ -203,7 +203,50 @@ if (typeof window !== "undefined") {
   });
 }
 
-/** 二级面板当前占掉的宽度（逻辑 px），给布局分母用。收起 = 0。 */
+/**
+ * P145：48px 那条**活动导轨**（接入/协议/控件/命令/视图）本身开还是收。
+ * 用户要的是"能把它收起来"——收起来时画布多出 48px，二级面板跟着一起藏
+ * （入口图标都不在了还留着面板，就是留一扇没有把手的门）。
+ *
+ * 宽度这件事只有两个出处：CSS 的 `.rail2{flex:0 0 48px}` 与 `SHELL_CHROME.railW`
+ * （`defaultLayout.test.ts:83-90` 逐条比对它们），这里**只引用不重定义**——
+ * 再写一个 48 就是第三处，改一漏二。
+ */
+export const RAIL_STRIP_KEY = "vs.rail.strip";
+
+function readStrip(): boolean {
+  try {
+    return localStorage.getItem(RAIL_STRIP_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+let stripOpen = readStrip();
+
+export function railStrip(): boolean {
+  return stripOpen;
+}
+
+/** 导轨条当下占掉的宽度（逻辑 px），给布局分母用。收起 = 0。 */
+export function stripWidth(): number {
+  return stripOpen ? SHELL_CHROME.railW : 0;
+}
+
+export function toggleRailStrip(): void {
+  stripOpen = !stripOpen;
+  try {
+    localStorage.setItem(RAIL_STRIP_KEY, stripOpen ? "1" : "0");
+  } catch {
+    /* 无 localStorage：只在内存里生效 */
+  }
+  // 与开合二级面板同一出口：App 的订阅回调会拿新的 gridSize 重排一次画布
+  listeners.forEach((f) => f());
+}
+
+/** 二级面板当前占掉的宽度（逻辑 px），给布局分母用。收起 = 0。
+ *  导轨条整体收起时它也一并归零——那时面板没有任何入口。 */
 export function railWidth(): number {
+  if (!stripOpen) return 0;
   return current ? panelW : 0;
 }

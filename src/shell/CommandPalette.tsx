@@ -84,7 +84,7 @@ export function CommandPalette(props: { commands: PaletteCommand[]; onClose: () 
       }}
       onWheel={props.onClose}
     >
-      <div className="cmdk" role="dialog" aria-modal="true" aria-label={tx("命令面板", "Command palette")}>
+      <div className="cmdk" data-elev="4" data-ctl="menu" role="dialog" aria-modal="true" aria-label={tx("命令面板", "Command palette")}>
         <input
           ref={inputRef}
           className="cmdk-input"

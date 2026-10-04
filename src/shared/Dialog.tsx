@@ -79,7 +79,7 @@ function DialogBox(o: DialogOpts & { onDone: (ok: boolean) => void }) {
   const isAlert = o.alertMode === true;
   return (
     <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={() => o.onDone(false)}>
-      <div className="modal app-dlg" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal app-dlg" data-elev="4" onMouseDown={(e) => e.stopPropagation()}>
         {o.title && <div className="modal-title">{o.title}</div>}
         <div className="app-dlg-msg">{o.message}</div>
         <div className="app-dlg-actions">

@@ -502,6 +502,7 @@ export function SwitchCardView(props: {
           <button
             key={i}
             className={`ctl-sw-seg ${state === i ? "active" : ""}`}
+            data-ctl="seg"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={() => {
               if (i === state) return;

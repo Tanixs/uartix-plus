@@ -20,7 +20,8 @@ import { IdentityBar, ToolBar, LinkCapsule } from "./shell/TopBars";
 import { InfoBar } from "./shell/InfoBar";
 import { SideRail } from "./shell/SideRail";
 import { PanelChromeActions } from "./shell/PanelChromeActions";
-import { railWidth, setRailPanelW, subscribeRail, toggleRailPanel, openRailPanel, type RailKey } from "./shell/railState";
+import { watchDockHooks } from "./shell/dockHostHooks";
+import { railWidth, setRailPanelW, stripWidth, subscribeRail, toggleRailPanel, openRailPanel, type RailKey } from "./shell/railState";
 import { CommandPalette } from "./shell/CommandPalette";
 import { buildCommands, type PaletteDeps } from "./shell/commandRegistry";
 import { Welcome } from "./shell/Welcome";
@@ -197,6 +198,14 @@ export default function App() {
       el.classList.toggle("dockview-theme-light", dockBase !== "dark");
     }
   }, [dockBase]);
+
+  // P143-B：页签条与分隔条是 dockview 自己画的 DOM，主题层不该认它的私有类名——
+  // 这里把它的 DOM 翻成宿主词汇（data-ctl），全仓唯一一处认识 `.dv-*` 的地方是 dockHostHooks.ts。
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    return watchDockHooks(el);
+  }, []);
 
   useEffect(() => {
     if (perfOn !== settings.perfHud) setPerfOn(settings.perfHud);
@@ -433,7 +442,7 @@ export default function App() {
         /* 连备份都写不下就算了，至少别白屏 */
       }
     }
-    applyDefaultLayout(api, getSettingsSnapshot().workspace, panelTitleOf, railWidth());
+    applyDefaultLayout(api, getSettingsSnapshot().workspace, panelTitleOf, railWidth(), stripWidth());
     retitlePanels();
     syncPanels();
     // 兜底：布局恢复/首帧渲染后可见性可能尚未稳定，延迟再同步一次
@@ -574,7 +583,7 @@ export default function App() {
     }
     clearStoredLayout();
     api.clear();
-    applyDefaultLayout(api, preset, panelTitleOf, railWidth());
+    applyDefaultLayout(api, preset, panelTitleOf, railWidth(), stripWidth());
     if (preset === "attitude") {
       const exists = controlsStore
         .getSnapshot()
@@ -701,7 +710,7 @@ export default function App() {
       subscribeRail(() => {
         const api = apiRef.current;
         if (!api) return;
-        const g = gridSize(railWidth());
+        const g = gridSize(railWidth(), stripWidth());
         api.layout(g.w, g.h);
       }),
     [],

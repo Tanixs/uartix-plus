@@ -1029,7 +1029,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     />
                     <span />
                   </label>
-                ), tx("默认关闭：重启后「全权执行 / 手工勾选」会回落到「界面创造」，并在档位旁标出已降档。打开它 = 高危授权跨重启存活，这是你自己在 P109 里点名的放松（§8-44）；软件不会替你默认打开。", "Off by default: after a restart the full-access / hand-picked tier falls back to UI-creation and the downgrade is shown next to the tier. Turning it on keeps high-risk grants across restarts - the relaxation you asked for in P109 (rule 8-44); the app never enables it for you."))}
+                ), tx("默认关闭：重启后「全权执行 / 手工勾选」会回落到「界面创造」，并在档位旁标出已降档。打开它 = 高危授权跨重启存活，这是你此前明确要求的放松；软件不会替你默认打开。", "Off by default: after a restart the full-access / hand-picked tier falls back to UI-creation and the downgrade is shown next to the tier. Turning it on keeps high-risk grants across restarts - a relaxation you explicitly asked for; the app never enables it for you."))}
                 {row(tx("Agent 文件白名单", "Agent file whitelist"), (
                   <div className="ai-key-wrap">
                     <input

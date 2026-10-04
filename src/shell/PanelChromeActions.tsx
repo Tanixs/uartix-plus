@@ -110,6 +110,8 @@ export function PanelChromeActions(props: IDockviewHeaderActionsProps) {
               <div
                 ref={menuRef}
                 className="pca-menu"
+                data-elev="4"
+                data-ctl="menu"
                 role="menu"
                 style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? "visible" : "hidden" }}
               >

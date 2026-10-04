@@ -1879,6 +1879,7 @@ function FrameCanvas() {
         {proto.syncError ? (
           <span
             className={`fc-sync-warn${errOpen ? " open" : ""}`}
+            data-ctl="disc"
             title={proto.syncError}
             onClick={() => setErrOpen((v) => !v)}
           >

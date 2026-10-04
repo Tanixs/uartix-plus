@@ -35,6 +35,7 @@ export function toast(msg: string): void {
   if (!h) return;
   const el = document.createElement("div");
   el.className = "ai-toast";
+  el.setAttribute("data-elev", "4");
   // 上限 200 字：原来两处都是这么裁的，保持一致（超长通常是异常串，截断比撑爆界面好）
   el.textContent = String(msg).slice(0, 200);
   h.appendChild(el);

@@ -105,7 +105,13 @@ export function WidgetMenu({
   const py = nested ? y : y + H > window.innerHeight ? Math.max(4, y - H) : y;
 
   const body = (
-    <div ref={ref} className={`aiw-menu${nested ? " nested" : ""}`} style={{ left: px, top: py }}>
+    <div
+      ref={ref}
+      className={`aiw-menu${nested ? " nested" : ""}`}
+      data-elev="4"
+      data-ctl="menu"
+      style={{ left: px, top: py }}
+    >
       {items.map((it, i) =>
         it.sep ? (
           <div key={i} className="aiw-menu-sep" />

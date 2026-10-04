@@ -65,8 +65,10 @@ describe("P131-A · 提示条", () => {
       children: Node[];
       firstElementChild: Node | null;
       isConnected: boolean;
+      attrs: Record<string, string>;
       remove(): void;
       appendChild(n: Node): void;
+      setAttribute(k: string, v: string): void;
     };
     const mk = (): Node => {
       const node: Node = {
@@ -76,6 +78,11 @@ describe("P131-A · 提示条", () => {
         firstElementChild: null,
         // toast.ts 靠 isConnected 认"宿主还挂在文档上吗"（被整体清空过就重建）
         isConnected: false,
+        // P143-B：toast() 给 .ai-toast 挂 data-elev 语义钩子，这里只记账不生效
+        attrs: {},
+        setAttribute(k: string, v: string) {
+          node.attrs[k] = v;
+        },
         remove() {
           /* 由父节点摘走，见下方 appendChild 的联动 */
         },

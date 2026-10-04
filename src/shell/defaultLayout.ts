@@ -33,10 +33,12 @@ export const SHELL_CHROME = {
  *  `api.layout()` 强制重排（dockview 自己的 ResizeObserver 绑在渲染帧上，
  *  页面被遮挡时不发，B8 实测撞到过）。各写一遍就是两个真值——改一条横栏
  *  的高度只会中一处，另一处就悄悄错位。本函数是唯一实现。 */
-export function gridSize(railPanelW = 0): { w: number; h: number } {
+export function gridSize(railPanelW = 0, stripW: number = SHELL_CHROME.railW): { w: number; h: number } {
   const vp = logicalViewport();
   return {
-    w: vp.w - SHELL_CHROME.railW - railPanelW,
+    // P145：导轨条可以整体收起，那 48px 就还给画布——默认值仍是满条，
+    // 所以不传第二个参数的调用方（含全部既有测试）行为一字不变。
+    w: vp.w - stripW - railPanelW,
     h: vp.h - SHELL_CHROME.barH - SHELL_CHROME.toolH - SHELL_CHROME.infoH,
   };
 }
@@ -80,8 +82,10 @@ export function applyDefaultLayout(
   /** R：二级面板占掉的宽度（逻辑 px，在导轨与画布之间）。由调用方按当前展开态传进来，
    *  本模块不读 store——否则这条纯布局文件会被 React 依赖拖进测试环境。 */
   railPanelW = 0,
+  /** P145：活动导轨条当下占的宽度（收起时传 0）。默认满条，既有调用方行为不变。 */
+  stripW: number = SHELL_CHROME.railW,
 ) {
-  const { w, h } = gridSize(railPanelW);
+  const { w, h } = gridSize(railPanelW, stripW);
   const leftW = Math.max(240, Math.round(w * 0.25));
   const rightW = Math.max(RIGHT_MIN, Math.round(w * 0.25));
   const midW = Math.max(MID_MIN, w - rightW);

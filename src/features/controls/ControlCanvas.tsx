@@ -1227,6 +1227,7 @@ export function ControlCanvas() {
           <div
             key={p.id}
             className={`ctl-tab ${p.id === s.activePageId ? "active" : ""}`}
+            data-ctl="tab"
             onClick={() => store.setActivePage(p.id)}
             onDoubleClick={() => setRenamingPage(p.id)}
             title={tx("双击重命名", "Double-click to rename")}

@@ -2,7 +2,8 @@
  * P102 发版批：`.github/workflows/` 的守卫（六道门一条都扫不到这里，§8-60 就是这么断的）。
  *
  * v0.5.0 的 CI 第一轮挂在 `create-release` 第一步：`release.yml` 建 release 时读
- * `docs/RELEASE_NOTES/<tag>.md`，而 `docs/` 自 `539034e` 起按用户裁决**不再入库**。
+ * `docs/reports/release-notes/<tag>.md`（该目录 P136 起归档为 `docs/reports/release-notes/`，且早已冻结），
+ * 而 `docs/` 自 `539034e` 起按用户裁决**不再入库**。
  * 两条裁决各自都对，接缝处没人检查——而 `check:all` 扫的是 `src`，`.github/` 不在任何门里。
  *
  * 所以这里钉两件能被代码反驳的事：
@@ -32,7 +33,7 @@ describe("P102 · workflow 不许指向不入库的目录", () => {
       // 只抓"被当成文件路径读"的 docs/（引号里 / 反引号里 / 紧跟 `/` 的下一级），注释里讲历史不算
       for (const line of src.split("\n")) {
         if (/^\s*(#|\/\/)/.test(line.trim()) || line.includes("# ") && line.indexOf("docs/") > line.indexOf("# ")) continue;
-        if (/[("'`]docs\/|\/ docs\/|\bdocs\/RELEASE_NOTES/.test(line)) hits.push(`${f}: ${line.trim().slice(0, 90)}`);
+        if (/[("'`]docs\/|\/ docs\/|\bdocs\//.test(line)) hits.push(`${f}: ${line.trim().slice(0, 90)}`);
       }
     }
     expect(hits, `这些行读的是不入库的目录，CI 上必然找不到文件：\n${hits.join("\n")}`).toEqual([]);

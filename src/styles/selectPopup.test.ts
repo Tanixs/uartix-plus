@@ -5,7 +5,7 @@
  * 于是全仓 169 支 `<select>` 里那 10 支没带 `input` 类的（帧画布模板选择器、新建模板对话框、
  * 页签条那颗…）照旧弹原生灰底方角菜单。用户看到的"好多地方还是灰白底"就是这个。
  * 顺带一句前提纠正：`color-scheme` 早就设了（`extRuntime.ts:161`），而仓库在 P103 就实测过
- * 根 color-scheme **染不黑**原生 select 弹层（`docs/HANDOVER_P103_2026-09-23.md:404-409`），
+ * 根 color-scheme **染不黑**原生 select 弹层（`docs/handover/HANDOVER_P103_2026-09-23.md:404-409`），
  * 所以才引入 base-select。加 color-scheme 不解决问题，别再往那条路上走。
  */
 import { expect, it } from "vitest";

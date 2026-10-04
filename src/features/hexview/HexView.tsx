@@ -1075,6 +1075,8 @@ export function HexView() {
           <div
             ref={menuRef}
             className="ctx-menu"
+            data-elev="4"
+            data-ctl="menu"
             style={{
               left: menuPos?.left ?? -9999,
               top: menuPos?.top ?? -9999,

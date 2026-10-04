@@ -117,6 +117,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
                 <button
                   type="button"
                   className="rp-item-name"
+                  data-ctl="item"
                   title={open ? tx("已打开：点击聚焦", "Open: click to focus") : tx("打开此面板", "Open this panel")}
                   onClick={() => requestOpenPanel(id)}
                 >
@@ -146,6 +147,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
               <button
                 type="button"
                 className="rp-item-name"
+                data-ctl="item"
                 title={tx("打开扩展面板", "Open the extension panel")}
                 onClick={() => requestOpenPanel(`ext-panel-${e.id}`)}
               >
@@ -280,6 +282,7 @@ export function RailPanel({ actions }: { actions: RailActions }) {
           可见 4px、命中区靠 ::before 扩到 16px —— 与 B13 给 dockview sash 的手法同一条。 */}
       <div
         className="rail-sash"
+        data-ctl="sash"
         role="separator"
         aria-orientation="vertical"
         tabIndex={0}

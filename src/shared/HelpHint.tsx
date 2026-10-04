@@ -39,6 +39,8 @@ export function HelpHint({ text }: { text: string }) {
           <div
             ref={bubbleRef}
             className="help-bubble"
+            data-elev="4"
+            data-ctl="menu"
             style={{ left: -9999, top: -9999, visibility: "hidden" }}
           >
             {text}
