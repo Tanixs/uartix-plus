@@ -1,3 +1,4 @@
+import type { InertAudit, ShapeIssue } from "./shapeAudit";
 /**
  * P131-B1：渲染层审计的**判定核**（纯函数，零 DOM）。
  *
@@ -396,6 +397,10 @@ export interface AuditResult {
   hitTargets: HitIssue[];
   motionOverride: MotionIssue[];
   layerClash: LayerClashIssue[];
+  /** P151：形状 artifact（方底垫圆身 / 无脸投影）。不是 WCAG 阻断项，但同属"必须说出口"的账 */
+  shapes: ShapeIssue[];
+  /** P151：点了原生控件部件而 appearance 仍是 auto 的死规则；blind=true 表示这一面没这类控件，探测器无话可说 */
+  inertWidgetRules: InertAudit;
   perf: { styleBytes: number; rules: number };
   /**
    * "有问题必须说出口"的标记。**它不是安装拦截位**（详设 A9：能力面全开＝不拦，
@@ -411,6 +416,17 @@ export function summarizeAudit(input: Omit<AuditResult, "blocking">): AuditResul
     input.overflow.length > 0 ||
     input.hitTargets.length > 0 ||
     input.motionOverride.length > 0 ||
-    input.layerClash.length > 0;
+    input.layerClash.length > 0 ||
+    /* P146 用户那句"控件像图片粘贴"就是这一族：形状错了也是问题，不能只报文字读不读得出来 */
+    input.shapes.length > 0;
   return { ...input, blocking };
 }
+
+/* P151：形状判据的实现住在 shapeAudit（零 DOM、可单测），这里整批转口——
+   采集器与 AI 侧只认"判定核"这一扇门，不新增第三个命名空间。 */
+export {
+  auditInertWidgetRules,
+  auditShadowWithoutFace,
+  auditSquareBehindRounded,
+} from "./shapeAudit";
+export type { InertAudit, PartRuleSample, ShapeIssue, ShapeSample } from "./shapeAudit";

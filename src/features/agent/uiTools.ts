@@ -29,6 +29,7 @@ import {
   summarizeAudit,
 } from "../../styles/renderAudit";
 import { buildStyleText, sanitizeStyleRules, STYLE_CAPS } from "../styles/styleSanitize";
+import { auditInertWidgetRules, auditShadowWithoutFace, auditSquareBehindRounded } from "../../styles/shapeAudit";
 import { unresolvedAssetNote, unresolvedAssetRefs } from "../ai/assetRuntime";
 import { applyLayer, listLayers, revertAll, revertByToken, revertLayer } from "./styleScratch";
 import { defineTool, notExecuted as bad, type AgentToolEntry } from "./toolRegistry";
@@ -290,6 +291,13 @@ export const uiToolEntries: AgentToolEntry[] = [
         hitTargets: auditHitTargets(input.hits).slice(0, 12),
         motionOverride: auditMotionOverride(injected).slice(0, 12),
         layerClash: auditLayerClash(injected).slice(0, 12),
+        // P151：三族形状 artifact。用户那句"控件像图片粘贴、四角有不圆润的阴影"就是这一族，
+        // 以前审计只量文字读不读得出来，看不见"形状对不对"。
+        shapes: [
+          ...auditSquareBehindRounded(input.shapes, [window.innerWidth, window.innerHeight]),
+          ...auditShadowWithoutFace(input.shapes),
+        ].slice(0, 12),
+        inertWidgetRules: auditInertWidgetRules(input.partRules),
         perf: { styleBytes: input.perf.styleBytes, rules: input.perf.rules },
       });
       return {

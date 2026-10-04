@@ -29,6 +29,7 @@ import { APPEARANCE_TOKENS } from "./appearanceStore";
 import { fxCatalog } from "./fxRecipes";
 import { DOMAINS, DOMAIN_TIP, DOMAIN_ZH } from "./scopeTiers";
 import { CTL_BUS_HOOK, CTL_HOOKS, CTL_SLOTS, ELEV_TIERS } from "../../styles/hostHooks";
+import type { PartRuleSample, ShapeSample } from "../../styles/shapeAudit";
 
 export const INVENTORY_SECTIONS = ["panels", "controls", "blocks", "actions", "tokens", "domains", "fx", "hooks"] as const;
 export type InventorySection = (typeof INVENTORY_SECTIONS)[number];
@@ -314,7 +315,7 @@ export const INTERACTIVE_SELECTOR =
   "button,a[href],input,select,textarea,summary,[role=button],[role=tab],[role=menuitem],[role=checkbox],[role=switch]," +
   CTL_BUS_HOOK;
 
-export const AUDIT_DEFAULTS = { maxSamples: 260, maxOverflow: 40, maxHits: 40 } as const;
+export const AUDIT_DEFAULTS = { maxSamples: 260, maxOverflow: 40, maxHits: 40, maxShapes: 320, maxPartRules: 24 } as const;
 
 export interface AuditInput {
   /** 看得见的文字节点：前景色 + 祖先背景（由内到外）+ 字号字重 */
@@ -323,6 +324,10 @@ export interface AuditInput {
   overflow: BoxSample[];
   /** 可点元素的盒子（CSS px，未折缩放） */
   hits: HitSample[];
+  /** P151：形状 artifact 的原始量（判定在 styles/shapeAudit，这里只采） */
+  shapes: ShapeSample[];
+  /** 点了原生控件部件伪元素的作者规则 + 那只控件的 appearance */
+  partRules: PartRuleSample[];
   /** 当前缩放档：命中区写成 `calc(24px / var(--zoom))`，不折回去就会冤枉窄控件 */
   zoom: number;
   visited: number;
@@ -364,17 +369,98 @@ function ownText(el: Element): string {
  *
  * 只读：不碰 class、不碰 style、不触发重排之外的任何东西。
  */
+/** `4px` / `0.5rem` 这类长度取不出 rem 的换算，这里只用到 px 与 0 */
+const pxOf = (v: string) => Number.parseFloat(v) || 0;
+
+/** 稳定路径键：判定核要在"候选枚 / 基准枚"两次采样之间认出同一只元素，所以键里不带文字与尺寸 */
+function shapeKeyOf(el: Element): string {
+  const seg: string[] = [];
+  let n: Element | null = el;
+  for (let d = 0; d < 4 && n && n.tagName; d++, n = n.parentElement) {
+    const cls = typeof n.className === "string" ? n.className.trim().split(/\s+/).slice(0, 2).join(".") : "";
+    let idx = 0;
+    for (let sib = n.previousElementSibling; sib; sib = sib.previousElementSibling) idx++;
+    seg.unshift(n.tagName.toLowerCase() + (cls ? "." + cls : "") + (idx ? "#" + idx : ""));
+  }
+  return seg.join(">");
+}
+
+/** 一只元素的形状事实。没画脸也没投影的返回 null（那两者都不在任何 artifact 的分母里） */
+function shapeSampleOf(el: Element, cs: CSSStyleDeclaration): ShapeSample | null {
+  const r = el.getBoundingClientRect();
+  const bg = colorOf(cs, "background-color");
+  const radius = Math.max(pxOf(cs.borderTopLeftRadius), pxOf(cs.borderTopRightRadius));
+  const painted = (!!bg && bg.a > 0.02) || (!!cs.backgroundImage && cs.backgroundImage !== "none");
+  const shadow = !!cs.boxShadow && cs.boxShadow !== "none";
+  const line = colorOf(cs, "border-top-color");
+  const borderVisible = pxOf(cs.borderTopWidth) > 0 && !!line && line.a > 0.02;
+  if (!painted && !shadow) return null;
+  let child: ShapeSample["child"] = null;
+  if (painted && radius < 2) {
+    // 只有"方底"这一侧才需要去找重合的圆身子，否则每只元素都要再算一遍子样式
+    for (const k of el.children) {
+      const kcs = getComputedStyle(k);
+      const kbg = colorOf(kcs, "background-color");
+      const kRadius = Math.max(pxOf(kcs.borderTopLeftRadius), pxOf(kcs.borderTopRightRadius));
+      const kPainted = (!!kbg && kbg.a > 0.02) || (!!kcs.backgroundImage && kcs.backgroundImage !== "none");
+      if (kPainted && kRadius > 0) {
+        const kr = k.getBoundingClientRect();
+        child = { radius: kRadius, painted: true, box: [kr.width, kr.height] };
+        break;
+      }
+    }
+  }
+  return { key: shapeKeyOf(el), box: [r.width, r.height], radius, painted, bgAlpha: bg ? bg.a : undefined, shadow, borderVisible, child };
+}
+
+/**
+ * 空转的部件规则（C 类）：作者规则点了 `::-webkit-slider-thumb` 这类原生控件部件，
+ * 而那只元素的 `appearance` 还是 auto ⇒ Blink 整条不采纳，那是死代码不是样式。
+ * P146 的滑杆就是这么"改了没反应"的。
+ */
+function collectPartRules(): PartRuleSample[] {
+  const out: PartRuleSample[] = [];
+  const PART = /::-(webkit|moz)-(slider|inner-text|outer-spin|color|search)/;
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList | null = null;
+    try { rules = sheet.cssRules; } catch { continue; }
+    if (!rules) continue;
+    const walk = (rs: CSSRuleList) => {
+      for (const r of Array.from(rs)) {
+        const sel = (r as CSSStyleRule).selectorText;
+        if (!sel) { const nested = (r as CSSGroupingRule).cssRules; if (nested) walk(nested); continue; }
+        if (!PART.test(sel)) continue;
+        const base = sel.split(/::/)[0].replace(/\[[^\]]*\]/g, "").trim();
+        if (!base) continue;
+        let els: Element[] = [];
+        try { els = Array.from(document.querySelectorAll(base)); } catch { continue; }
+        out.push({
+          rule: sel.slice(0, 90),
+          hits: els.length,
+          appearance: els.length ? getComputedStyle(els[0]).appearance : "n/a",
+        });
+        if (out.length >= AUDIT_DEFAULTS.maxPartRules) return;
+      }
+    };
+    walk(rules);
+    if (out.length >= AUDIT_DEFAULTS.maxPartRules) break;
+  }
+  return out;
+}
+
 export function collectAuditInput(
   opts: { root?: string; maxSamples?: number } = {},
 ): AuditInput {
   const rootSel = opts.root?.trim() || "body";
   const maxSamples = Math.min(Math.max(opts.maxSamples ?? AUDIT_DEFAULTS.maxSamples, 20), 800);
   const textSamples: TextSample[] = [];
+  const shapes: ShapeSample[] = [];
+  const partRules: PartRuleSample[] = [];
   const overflow: BoxSample[] = [];
   const hits: HitSample[] = [];
   if (typeof document === "undefined") {
     return {
-      textSamples, overflow, hits, zoom: 1, visited: 0, truncated: false,
+      textSamples, overflow, hits, shapes, partRules, zoom: 1, visited: 0, truncated: false,
       perf: { styleBytes: 0, rules: 0, sheetsSkipped: 0 },
     };
   }
@@ -385,7 +471,7 @@ export function collectAuditInput(
   let truncated = false;
   if (!rootEl) {
     return {
-      textSamples, overflow, hits, zoom, visited: 0, truncated: false,
+      textSamples, overflow, hits, shapes, partRules, zoom, visited: 0, truncated: false,
       perf: readPerf(),
     };
   }
@@ -397,6 +483,12 @@ export function collectAuditInput(
     if (cs.visibility === "hidden" || cs.visibility === "collapse" || cs.display === "none") continue;
     if (Number.parseFloat(cs.opacity || "1") === 0) continue;
     visited++;
+
+    /* P151：形状事实顺手采一份（判定在 styles/shapeAudit，这里只量不判） */
+    if (shapes.length < AUDIT_DEFAULTS.maxShapes) {
+      const sh = shapeSampleOf(el, cs);
+      if (sh) shapes.push(sh);
+    }
 
     const text = ownText(el);
     if (text && textSamples.length < maxSamples) {
@@ -431,7 +523,7 @@ export function collectAuditInput(
     }
   }
   if (visited >= maxSamples) truncated = true;
-  return { textSamples, overflow, hits, zoom, visited, truncated, perf: readPerf() };
+  return { textSamples, overflow, hits, shapes, partRules: collectPartRules(), zoom, visited, truncated, perf: readPerf() };
 }
 
 function weightOf(raw: string): number {

@@ -264,6 +264,8 @@ describe("汇总", () => {
     hitTargets: [],
     motionOverride: [],
     layerClash: [],
+    shapes: [],
+    inertWidgetRules: { issues: [], denominator: 0, blind: true },
     perf: { styleBytes: 0, rules: 0 },
   };
 
@@ -299,7 +301,21 @@ const namesOf = (ns: string) =>
 const imported = [...harness.matchAll(/import\("\/src\/([^"]+)"\)/g)].map((m) => m[1]);
 const exportedFrom = (rel: string) => {
   const src = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
-  return new Set([...src.matchAll(/export\s+(?:const|function|interface|type)\s+([A-Za-z_]\w*)/g)].map((m) => m[1]));
+  const names = new Set(
+    [...src.matchAll(/export\s+(?:const|function|interface|type)\s+([A-Za-z_]\w*)/g)].map((m) => m[1]),
+  );
+  /**
+   * 转口也算导出。P151 把形状判据放在 `shapeAudit.ts`（零 DOM、可单测），
+   * `renderAudit` 整批转口给采集器用——只认 `export function` 的写法会把这条判成"名字没了"，
+   * 而采集器其实拿得好好的：判据要跟着模块系统的真话走，不是跟着正则的形状走。
+   */
+  for (const m of src.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}\s*from/g)) {
+    for (const part of m[1].split(",")) {
+      const name = part.trim().split(/\s+as\s+/).pop()?.trim();
+      if (name) names.add(name);
+    }
+  }
+  return names;
 };
 
 describe("P132-C · 审计采集器依赖的导出名", () => {

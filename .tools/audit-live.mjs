@@ -93,6 +93,9 @@ const COLLECT = `(async () => {
   const c = ra.auditContrast(input.textSamples);
   const hits = ra.auditHitTargets(input.hits, ra.HIT_TARGET_MIN_PX);
   const over = ra.auditOverflow(input.overflow);
+  /* P151：形状三族。判定核在 renderAudit（转口自 shapeAudit），这里只调不判 */
+  const shapes = [...ra.auditSquareBehindRounded(input.shapes, [innerWidth, innerHeight]), ...ra.auditShadowWithoutFace(input.shapes)];
+  const parts = ra.auditInertWidgetRules(input.partRules);
   const fgs = input.textSamples.map((s) => s.fg).filter(Boolean).length;
   return {
     sampled: input.visited,
@@ -106,6 +109,8 @@ const COLLECT = `(async () => {
         \`hitMin\` 于是恒为 null——命中区那一族账上看着有数，其实一条都没记下来（P132-F 实测）。 */
     hits: hits.map((h) => ({ selector: h.selector, minSide: h.minSide, need: h.need })),
     overflow: over.map((o) => ({ selector: o.selector, overPx: o.overPx })),
+    shapes: shapes.map((x) => ({ selector: x.key, kind: x.kind, why: x.why })),
+    parts: { issues: (parts.issues || []).map((x) => ({ selector: x.rule, why: x.why })), denominator: parts.denominator, blind: parts.blind },
   };
 })()`;
 
@@ -156,6 +161,9 @@ async function collectOne(themeId, surface) {
     hitMin: hits.length ? Math.min(...hits.map((h) => h.minSide)) : null,
     overflow: over,
     overflowWorst: over.length ? Math.max(...over.map((o) => o.overPx)) : null,
+    shapes: fold(raw.shapes ?? [], (a, b) => a.overPx > b.overPx),
+    partsDenominator: raw.parts?.denominator ?? 0,
+    partsIssues: raw.parts?.issues ?? [],
   };
 }
 
@@ -175,10 +183,28 @@ for (const id of want) {
 const pick = want;
 if (WRITE && only) throw new Error("--only= 是调试用的局部采集，不许 --write：那会把没采到的主题从账里删掉");
 
+/**
+ * P150-5（P145 那条纪律的工具化）：跑量前先把这个 profile 的存档清掉。
+ *
+ * 为什么：dev 探针写的是**持久** localStorage（`?railw=` → `vs.rail.panel.w`、`?theme=`、`?zoom=`、
+ * 导轨开合、拖分割条…）。P145 那次用 `?railw=180` 量完最窄面板，同一个一次性 profile 之后每次加载
+ * 都是 180px 窄布局，于是 `audit:live` 连挂两次 `ctxmenu：.ctl-main 被盖住` 并误报 `ocean/lbx 溢出 1`——
+ * 量到的是自己上一步留下的现场，而它长得非常像别人的回归。
+ * 一次性 profile 这条约定挡不住"同一个 profile 上先跑过探针"，所以这里主动清，并如实报清掉了几个键。
+ */
+await send("Page.navigate", { url: `${ORIGIN}/?welcome=0` });
+for (let i = 0; i < 60; i++) {
+  if (await evaluate('!!document.querySelector(".dv-react-tab")')) break;
+  await rest(200);
+}
+const wiped = await evaluate(`(function(){var n=localStorage.length;var k=[];for(var i=0;i<n;i++)k.push(localStorage.key(i));localStorage.clear();return JSON.stringify(k);})()`);
+const keys = (() => { try { return JSON.parse(wiped); } catch { return []; } })();
+console.log(`跑量前清存档：丢掉 ${keys.length} 个键${keys.length ? `（${keys.slice(0, 8).join(" ")}${keys.length > 8 ? " …" : ""}）` : ""}`);
+
 await send("Emulation.setDeviceMetricsOverride", { width: VIEWPORT.w, height: VIEWPORT.h, deviceScaleFactor: 1, mobile: false });
 
 const baseline = {
-  version: 2,
+  version: 3,
   generatedAt: new Date().toISOString().slice(0, 10),
   viewport: VIEWPORT,
   judge: "生产同一份：src/features/agent/uiSurface.collectAuditInput + src/styles/renderAudit",
@@ -196,16 +222,25 @@ for (const id of pick) {
     baseline.themes[id].surfaces[s.id] = await collectOne(id, s);
     const r = baseline.themes[id].surfaces[s.id];
     console.log(
-      `${id.padEnd(8)} ${s.id.padEnd(11)} 采样 ${String(r.sampled).padStart(3)}${r.truncated ? "(截断)" : "     "} 问题 ${String(r.issues.length).padStart(2)} 最坏 ${r.worst ?? "-"} 采不出 ${r.unmeasurable.count} 命中区 ${r.hits.length}${r.hitMin != null ? `(最小 ${r.hitMin})` : "     "} 溢出 ${r.overflow.length}`,
+      `${id.padEnd(8)} ${s.id.padEnd(11)} 采样 ${String(r.sampled).padStart(3)}${r.truncated ? "(截断)" : "     "} 问题 ${String(r.issues.length).padStart(2)} 最坏 ${r.worst ?? "-"} 采不出 ${r.unmeasurable.count} 命中区 ${r.hits.length}${r.hitMin != null ? `(最小 ${r.hitMin})` : "     "} 溢出 ${r.overflow.length}  形状 ${r.shapes.length}`,
     );
   }
 }
+
+/* P151：C 类探测器的**分母自证**。它一条都没报，可能是因为真没有问题，也可能因为
+   这批面上根本没有原生控件——后者不是通过（P146 那次就是这么假绿的）。 */
+const partsSeen = Object.values(baseline.themes).reduce(
+  (n, t) => n + Object.values(t.surfaces).reduce((m, r) => m + (r.partsDenominator ?? 0), 0), 0,
+);
+if (partsSeen === 0) console.log("注意：全批面都没扫到任何原生控件部件规则 ⇒ 形状 C 探测器这一趟没有分母，它的 0 不等于通过");
 
 /** 三族各自的身份比对：账上存的是条目，所以"哪一条新出现/变差"都能说出来，不只有一个数 */
 const FAMILIES = [
   { field: "issues", side: "ratio", worse: (a, b) => a.ratio < b.ratio - 0.005, label: "对比度", at: (i) => `${i.ratio}（需 ${i.need}）` },
   { field: "hits", side: "minSide", worse: (a, b) => a.minSide < b.minSide - 0.5, label: "命中区", at: (h) => `${h.minSide}px（需 ${h.need}）` },
   { field: "overflow", side: "overPx", worse: (a, b) => a.overPx > b.overPx + 0.5, label: "溢出", at: (o) => `溢出 ${o.overPx}px` },
+  /** 形状没有"更差"这个方向（要么方底垫圆身，要么没有），所以只比身份：新出现即回退 */
+  { field: "shapes", side: "kind", worse: () => false, label: "形状", at: (x) => x.why },
 ];
 
 /* ---- 与磁盘上那份比差：变差就是回退，回退要解释 ---- */
