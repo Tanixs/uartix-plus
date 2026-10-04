@@ -239,3 +239,74 @@ describe("P134-B：有声明无回执的调用在投影里成对出现且说结�
     expect(p.messages.find((m) => m.role === "assistant" && (m.calls ?? []).some((c) => c.callId === "y1")), "孤儿回执：Anthropic 会 400").toBeTruthy();
   });
 });
+
+/* ================= P135-A：窗口那一路也先裁后遮 =================
+ * 这条线上的旧行为只有一种手段——从最旧端**整条遮蔽**。为了放下一条 40 KB 的旧回执，
+ * 可以让整段小步骤一起消失，而"更早 N 条已省略"里的 N 就是那些整条。
+ * 现在先跑同一份无模型裁剪器：省下来的预算是**整条记录**。 */
+describe("P135-A：投影先无模型裁短巨型回执，再谈整条遮蔽", () => {
+  /** 一条巨型 tool/call + tool/result（放最旧端），后面跟若干条小记录 */
+  const logWith = (bigChars: number, small: number): SessionEvent[] => {
+    const ev: SessionEvent[] = [
+      { seq: 1, ts: 1, kind: "user/message", text: "读一下那份日志" },
+      { seq: 2, ts: 2, kind: "tool/call", callId: "b1", tool: "session_read", args: "{}" },
+      { seq: 3, ts: 3, kind: "tool/result", callId: "b1", receipt: { callId: "b1", ok: true, status: "read", data: { text: "x".repeat(bigChars) } } },
+    ];
+    for (let i = 0; i < small; i++) {
+      ev.push({ seq: 4 + i, ts: 4 + i, kind: i % 2 ? "assistant/message" : "user/message", text: `小记 ${i}`.padEnd(200, "y") });
+    }
+    return ev;
+  };
+
+  it("裁短那条大的之后，整段小记录一条都不用被省略", () => {
+    const log = logWith(40_000, 14);
+    const r = projectMessages(log, { budgetChars: 8_000 });
+    expect(r.pruned, "那条 40KB 的回执没被裁短：说明先裁后遮这条路没走通").toBe(1);
+    expect(r.shadowed, "裁短之后还要遮蔽整条记录 ⇒ 省下来的预算没落到小记录上").toBe(0);
+    expect(r.messages.some((m) => m.role === "tool" && m.callId === "b1"), "回执整条不见了：裁短不是删除").toBe(true);
+    const big = r.messages.find((m) => m.callId === "b1")!;
+    expect(big.content).toContain('"pruned":true');
+    expect(big.content.length, "发出去的那份没被裁短").toBeLessThan(6_000);
+    // 投影不改日志：事件里那条回执仍是全文（两条路径共用同一份判据）
+    const raw = log[2]!.receipt as { data: { text: string } };
+    expect(raw.data.text.length).toBe(40_000);
+  });
+
+  it("投影这一路没有可取回的缓存：裁短说明必须降档，不许承诺 read_artifact", () => {
+    const big = projectMessages(logWith(40_000, 2), { budgetChars: 8_000 }).messages.find((m) => m.callId === "b1")!;
+    expect(big.content).not.toContain("read_artifact");
+    expect(big.content).toContain("重新调用");
+  });
+
+  it("预算小到裁短也救不回来时，遮蔽照旧发生（裁剪不是替代品）", () => {
+    const r = projectMessages(logWith(40_000, 14), { budgetChars: 1_200 });
+    expect(r.pruned).toBeGreaterThan(0);
+    expect(r.shadowed, "裁完仍然放不下却没遮蔽：那条说明「更早 N 条已省略」是必须送的").toBeGreaterThan(0);
+    expect(r.messages[0].role).toBe("system");
+    expect(r.messages[0].content).toContain(`更早 ${r.shadowed} 条`);
+  });
+
+  it("同输入两次投影字节相同：裁剪是确定性的，不随轮次漂", () => {
+    const log = logWith(30_000, 6);
+    expect(projectMessages(log, { budgetChars: 6_000 }).messages).toEqual(projectMessages(log, { budgetChars: 6_000 }).messages);
+  });
+
+  it("buildAgentHistory 把 pruned 一起报出去（输入区那两行读的是它，不能变成内部知识）", () => {
+    const view = run({
+      events: [
+        { seq: 1, ts: 120, kind: "receipt", tool: "fs_read", args: "{}", receipt: { callId: "f1", ok: true, status: "read", data: { text: "z".repeat(30_000) } } },
+        { seq: 2, ts: 130, kind: "turn", text: "读完了" },
+      ],
+    });
+    // 大回执之后还要有别的记录：末尾两条是工作集，裁剪碰不到它们
+    const chats = [
+      msg("u1", 100, "user", "读文件"),
+      msg("a1", 200, "assistant", "后面又聊了两轮"),
+      msg("u2", 210, "user", "再看一下曲线"),
+      msg("a2", 220, "assistant", "好了"),
+    ];
+    const h = buildAgentHistory(chats, [view], { budgetChars: 4_000 });
+    expect(h.stats.pruned, "stats 里没带 pruned：UI 只能说「遮蔽了几条」，说不出「裁短了几条」").toBeGreaterThan(0);
+    expect(h.messages.some((m) => m.content.includes('"pruned":true'))).toBe(true);
+  });
+});

@@ -8,7 +8,7 @@
  * 2) 送模型前折叠：保留系统提示与目标（永不折叠）+ 最近 keepRecentTurns 轮完整消息，
  *    更早的 assistant/tool 折叠为一行状态摘要（callId、工具名、status、revision）；
  * 3) **P95-H1 字节口径的自适应阶梯**：`agentPayloadBytes` 估算真实 UTF-8 字节（含图片），
- *    超 `REQUEST_SOFT_LIMIT` 就按"丢历史图 → 收紧折叠 → 本地抛 context_overflow"施压，
+ *    超 `REQUEST_SOFT_LIMIT` 就按"丢历史图 → **P135-A 无模型裁短巨型回执** → 收紧折叠 → 本地抛 context_overflow"施压，
  *    并把每一步记成事件——旧实现只有字符软阈，与 Rust 的 2 MiB 字节熔断互不知情。
  * 以字节/字符近似估算，不引入 tokenizer 依赖。
  */
@@ -163,7 +163,9 @@ export function markStaleArtifacts<T>(rec: T): T {
   if (typeof o.artifactRef !== "string" && !hasRefs) return rec;
   const next: Record<string, unknown> = { ...o, note: "原文缓存在上一次运行的内存里，那次任务结束即失效：不要调 read_artifact，需要内容请重新调用对应工具" };
   delete next.artifactRef;
-  return { ...r, data: next } as T;
+  /** 数组型回执的引用挂在顶层 `artifactRefs` 上（P95-H3）——那条也得一起摘，
+   *  否则 `data` 里的承诺改了口、壳上却还留着一串能照着撞的 ref（P135-A 补的同一类）。 */
+  return { ...r, ...(hasRefs ? { artifactRefs: undefined } : {}), data: next } as T;
 }
 
 /* ================= P134-B：台账里"有调用、没回执"时该说什么 =================
@@ -204,6 +206,110 @@ export interface FoldResult {
   folded: number;
   /** 是否真的动了（未超阈值时返回原数组引用，测试据此钉"无副作用"这件事） */
   changed: boolean;
+}
+
+/* ================= P135-A：压缩时的无模型裁剪器（对标 DSH `compaction-tool-result-pruner` + `spill-policy`） =================
+ * 这里补的是 P134-A §10 留下的空档：**按形态裁短只在回执进台账那一刻跑一次**（`shrinkByShape`），
+ * 压缩的时候没有再跑一遍——于是超限之后只有一种手段可用：把整条记录扔掉
+ * （折叠压成一行 / 投影整条遮蔽）。为了放下一条 40 KB 的旧回执，
+ * 旁边三十条几百字节的小步骤一起没了，那是本可避免的损失。
+ *
+ * 顺序的含义：**先做不花钱、不撒谎、可复算的那一步，再让"整段没了"退成最后手段**。
+ * 无模型 ⇒ 不多烧一轮请求；确定性 ⇒ 每一轮重算都得到同一份字节（台账随时能复演）。 */
+
+/** 单条不足这个字节数不值得动手：省不下什么，却先毁了一份原文 */
+export const PRUNE_MIN_BYTES = 3 * 1024;
+/** 头部留多少：字段名与结构在这儿 */
+export const PRUNE_HEAD_BYTES = 1_200;
+/** 尾部留多少：失败原因与末行统计在这儿（`shrink.ts` 开头那条教训——只给头部等于只给回声） */
+export const PRUNE_TAIL_BYTES = 600;
+/** 末尾这么多条不动：那是模型当前的工作集，裁它的尾巴等于让它在关键一步上盲猜 */
+export const PRUNE_KEEP_RECENT = 2;
+
+export interface PruneOptions {
+  /** "这一套发得下吗"。两条压缩线口径不同（传输按字节、窗口投影按字符），所以由调用方给 */
+  fits: (messages: AgentMessage[]) => boolean;
+  /** 单条尺寸，与 `fits` 同一口径 */
+  size: (m: AgentMessage) => number;
+  /**
+   * 把即将从这一轮请求里消失的原文交进**本 run 的可取回缓存**，返回真能取回的 ref。
+   * 不提供（或返回 null）⇒ 裁剪仍然发生，但 note 自动降档成"请重新调用对应工具"——
+   * P94-G3 / P134-A ③ 两次都栽在无条件承诺 `read_artifact`，这一条就是那道闸。
+   */
+  spill?: (ref: string, original: string) => string | null;
+  keepRecent?: number;
+}
+
+export interface PruneResult {
+  messages: AgentMessage[];
+  pruned: number;
+  /** 未超限时返回**原数组引用**，与 `foldContext` 同一套"无副作用可被钉住"的写法 */
+  changed: boolean;
+}
+
+/**
+ * 把超预算那几条**巨型工具回执**裁成 head + marker + tail。
+ * 四条判据：① 未超限一条不裁（`fits` 先判）② 只裁发出那一份，绝不改台账本体
+ * ③ 末尾 `keepRecent` 条不动 ④ content 解析不出 JSON 对象的**跳过**，不猜形状。
+ */
+export function pruneToolResults(messages: AgentMessage[], opts: PruneOptions): PruneResult {
+  if (opts.fits(messages)) return { messages, pruned: 0, changed: false };
+  const keep = Math.max(0, Math.floor(opts.keepRecent ?? PRUNE_KEEP_RECENT));
+  const out = messages.slice();
+  const cutPoint = Math.max(0, out.length - keep);
+  let n = 0;
+  for (let i = 0; i < cutPoint; i++) {
+    const pruned = pruneReceipt(out[i], opts);
+    if (!pruned) continue;
+    out[i] = pruned;
+    n++;
+    if (opts.fits(out)) break; // 放得下就立刻停手：多裁一条都是白毁的保真度
+  }
+  return n > 0 ? { messages: out, pruned: n, changed: true } : { messages, pruned: 0, changed: false };
+}
+
+/** 一条都裁不动时返回 null（调用方据此决定"这条不动"，而不是换成我猜的形状）。 */
+function pruneReceipt(m: AgentMessage, opts: PruneOptions): AgentMessage | null {
+  if (m.role !== "tool" || opts.size(m) < PRUNE_MIN_BYTES) return null;
+  let rec: Record<string, unknown>;
+  try {
+    const v = JSON.parse(m.content) as unknown;
+    if (!v || typeof v !== "object") return null;
+    rec = v as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  // 没有 `data` 就没有正文可裁（顶层是数组的回执也落在这里：数组上没有 data 字段，
+  // 于是它不会被 `{...rec, data}` 改写成对象——验牙时正是这条把数组形状接住的）
+  const data = rec.data;
+  if (data === undefined) return null;
+  const full = typeof data === "string" ? data : JSON.stringify(data);
+  const fullBytes = utf8Bytes(full);
+  if (fullBytes <= PRUNE_HEAD_BYTES + PRUNE_TAIL_BYTES) return null; // 裁不出东西，别白毁
+  const head = full.slice(0, PRUNE_HEAD_BYTES);
+  const tail = full.slice(-PRUNE_TAIL_BYTES);
+  /** 原文已经在缓存里的那一份（捕获层 `rememberArtifact` 存的）优先沿用，绝不另开一个引用 */
+  const carried = (data !== null && typeof data === "object" && typeof (data as { artifactRef?: unknown }).artifactRef === "string")
+    ? (data as { artifactRef: string }).artifactRef
+    : Array.isArray(rec.artifactRefs) && typeof rec.artifactRefs[0] === "string" ? rec.artifactRefs[0] as string : null;
+  const key = `prune:${m.callId ?? ""}`;
+  const spilled = !carried && m.callId ? opts.spill?.(key, full) ?? null : null;
+  const ref = carried ?? spilled;
+  const omitted = fullBytes - utf8Bytes(head) - utf8Bytes(tail);
+  const nextData: Record<string, unknown> = {
+    pruned: true,
+    fullBytes,
+    omittedBytes: Math.max(0, omitted),
+    head,
+    tail,
+    ...(ref ? { artifactRef: ref } : {}),
+    note: ref
+      ? `这条回执在发送前被无模型裁剪压短：中间约 ${omitted} 字节本轮没有发出去。`
+        + `完整原文可用 read_artifact { ref: "${ref}" } 分页取回；台账与用户界面上仍是全文。`
+      : `这条回执在发送前被无模型裁剪压短：中间约 ${omitted} 字节本轮没有发出去，`
+        + "这里没有可取回的缓存；需要完整内容请重新调用对应工具（把范围缩小）。台账与用户界面上仍是全文。",
+  };
+  return { ...m, content: JSON.stringify({ ...rec, data: nextData }) };
 }
 
 /**

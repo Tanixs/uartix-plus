@@ -49,7 +49,14 @@ export interface TaskAdapter { definitions: ToolDefinition[]; execute(call: Tool
    * ⚠ 这是**完成契约不是权限闸**：它不拦任何写操作、不改审批语义（红线 §8-44）。
    * 而且 loop 一个 run 最多拦一次——反复拦一个铁了心要停的模型只会白烧 token。
    */
-  openPlan?(): string | null }
+  openPlan?(): string | null;
+  /**
+   * P135-A：把"即将从这一轮请求里被裁短、但台账里仍是全文"的那份原文交进**本 run 的可取回缓存**，
+   * 返回真能取回的 ref；不提供或返回 null ⇒ 裁剪照做，但回执里的说明必须降档成"请重新调用对应工具"。
+   * ⚠ 这是**说明的根据，不是权限面**：它只写内存里那份缓存（`read_artifact` 读同一张表），
+   * 不给模型任何新能力，也不能把东西写到磁盘上。
+   */
+  spill?(ref: string, original: string): string | null }
 export type RunStatus = "running" | "succeeded" | "paused" | "cancelled" | "failed" | "interrupted";
 /**
  * P109-B：暂停的**真实成因**。以前四种成因（轮数 / 调用数 / 时限 / 无进展）都写成同一个
@@ -72,10 +79,12 @@ export interface ContextStat {
   images: number;
   /** 为塞进去而丢掉的历史附图张数 */
   droppedImages?: number;
+  /** P135-A：发送前被无模型裁短的巨型工具回执条数（台账未改，见 `pruneToolResults`） */
+  pruned?: number;
   /** 被折叠成一条摘要的中间消息条数 */
   folded?: number;
-  /** 施压到哪一级：none < images < fold（阶梯见 context.ts / loop.ts） */
-  step?: "none" | "images" | "fold";
+  /** 施压到哪一级：none < images < prune < fold（阶梯见 context.ts / loop.ts） */
+  step?: "none" | "images" | "prune" | "fold";
   /** 会话历史投影阶段被遮蔽的事件数（sessionLog.projectMessages 的 shadowed） */
   shadowed?: number;
 }

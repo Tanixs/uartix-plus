@@ -862,7 +862,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const runsWork = sessionRuns.reduce((n, r) => n + r.rounds + r.calls, 0);
   const ctxEstimate = useMemo(() => {
     const hist = buildAgentHistory(messages, sessionRuns, { budgetChars: ctxBudget });
-    return { bytes: agentPayloadBytes(hist.messages), shadowed: hist.stats.shadowed };
+    return { bytes: agentPayloadBytes(hist.messages), shadowed: hist.stats.shadowed, pruned: hist.stats.pruned };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, ctxBudget, sessionRuns.length, runsWork]);
   const ctxMeter = ctxGauge(ctxEstimate.bytes);
@@ -2036,9 +2036,17 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
                   <div className="ai-ctx-pop-row">
                     {tx(`窗口 ${ctxWindow.pct}% · 传输 ${ctxMeter.pct}%`, `window ${ctxWindow.pct}% · transport ${ctxMeter.pct}%`)}
                   </div>
+                  {/* P135-A：两行是两种手段，各说各的账。裁短＝原文还在、只是本轮少发中间那段；
+                      遮蔽＝整条没进这一轮。旧写法把遮蔽说成"已折…工具回执"，
+                      而这一路从来没有折叠，措辞跟着事实走（P134-A ③ 同一条判据）。 */}
+                  {ctxEstimate.pruned > 0 && (
+                    <div className="ai-ctx-pop-row">
+                      {tx(`无模型裁短 ${ctxEstimate.pruned} 条巨型回执（台账仍是全文）`, `${ctxEstimate.pruned} oversized receipt(s) pruned without a model call, ledger intact`)}
+                    </div>
+                  )}
                   {ctxEstimate.shadowed > 0 && (
                     <div className="ai-ctx-pop-row">
-                      {tx(`已折 ${ctxEstimate.shadowed} 条较早的工具回执（台账未删）`, `${ctxEstimate.shadowed} older tool receipts now go as summaries (the ledger is intact)`)}
+                      {tx(`较早 ${ctxEstimate.shadowed} 条会话记录本轮不发（台账未删）`, `${ctxEstimate.shadowed} older session records are not sent this turn (the ledger is intact)`)}
                     </div>
                   )}
                   <div className="ai-ctx-pop-foot">

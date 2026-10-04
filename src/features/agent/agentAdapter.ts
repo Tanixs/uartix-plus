@@ -121,6 +121,15 @@ export function createLocalAgentAdapter(opts: LocalAgentAdapterOpts): TaskAdapte
     // 每 run 冻结一次：本任务可见的工具面＝建适配器那一刻的快照（详设 §4.5-2）
     definitions: registry.modelDefinitions(scope, allowed),
     execute: (call, ctx) => runToolCall(registry, call, makeCtx(ctx), hooks),
+    /**
+     * P135-A：压缩时（`pruneToolResults`）交回来的原文进**同一张** artifacts 表
+     * ⇒ `read_artifact` 拿那个 ref 一定读得到，裁剪说明才敢承诺"可取回"。
+     * 红线"压缩不能等于销毁"在这一层的具体形态：销毁的只是这一轮发出去的字节。
+     */
+    spill: (ref, original) => {
+      scratch.artifacts.set(ref, original);
+      return ref;
+    },
     // P109-C：完成契约的读数口。loop 在模型想收工时问一次，不自己认计划。
     openPlan: () => openPlanText(runId),
   };

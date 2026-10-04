@@ -10,7 +10,7 @@
  * 唯一的运行时 import 是 `contextBudget`（零 import 的算术叶子）与 `context`（同样只 import 类型
  * + contextBudget）——两者都指不回本模块，环守卫（门禁 9）盯的就是这条。
  */
-import { interruptedReceipt, INTERRUPTED_CODE, markStaleArtifacts } from "./context";
+import { interruptedReceipt, INTERRUPTED_CODE, markStaleArtifacts, pruneToolResults } from "./context";
 import type { ChatMsg } from "../ai/chatStore";
 import type { AgentRunView } from "./agentRun";
 import type { AgentMessage, ToolReceipt } from "./types";
@@ -108,6 +108,8 @@ export interface Projection {
   messages: AgentMessage[];
   /** 被遮蔽的事件数（>0 时 messages 头部有一条说明性 system 消息） */
   shadowed: number;
+  /** P135-A：遮蔽之前先被无模型裁短的巨型回执条数（与 `shadowed` 两个含义，不许合成一个） */
+  pruned: number;
   chars: number;
 }
 
@@ -166,7 +168,8 @@ function receiptForModel(rec: ToolReceipt): string {
  * 规则：连续 assistant 文本合并成一条；`tool/call` 与其 `tool/result` **成对才下发**
  * （孤儿调用会让模型以为存在一次没发生的写入）；参数被截断过的调用整对丢弃；
  * 被中止/出错的轮次保留正文但加前缀说明（P94-G5：模型不能把半截话当成完整回答）；
- * 超预算从最旧端遮蔽，并在头部追加一条说明——**绝不修改日志本身**。
+ * 超预算先**无模型裁短巨型工具回执**（P135-A），仍放不下才从最旧端遮蔽，
+ * 并在头部追加一条说明——**绝不修改日志本身**。
  */
 export function projectMessages(events: SessionEvent[], opts: ProjectOptions = {}): Projection {
   const budget = opts.budgetChars ?? HISTORY_CHAR_BUDGET;
@@ -245,14 +248,28 @@ export function projectMessages(events: SessionEvent[], opts: ProjectOptions = {
     }
   }
   flushAssistant();
+
+  /* P135-A：窗口那一路（模型窗口 × 压缩比例，与传输软顶是两个数）此前只有一种手段——
+     从最旧端**整条遮蔽**。为了放下一条 40 KB 的旧回执，可以让二十条几百字节的小步骤整条消失。
+     现在先跑同一份无模型裁剪器：裁短那条大的，省下来的预算是**整条记录**，
+     下面那个"更早 N 条已省略"的 N 会跟着变小。
+     刻意**不给** `spill`：投影读的是上一个 run 的台账，那份缓存随上次任务结束就没了
+     （`markStaleArtifacts` 已经把失效引用摘干净），所以这里的说明会自动降档成
+     "没有可取回的缓存，请重新调用对应工具"——不写一张兑不了的支票。 */
+  const pruned = pruneToolResults(msgs, {
+    fits: (arr) => arr.reduce((n, m) => n + sizeOf(m), 0) <= budget,
+    size: sizeOf,
+  });
+  const list = pruned.changed ? pruned.messages : msgs;
+
   if (droppedTruncated > 0) {
-    msgs.push({
+    list.push({
       role: "system",
       content: `（先前 ${droppedTruncated} 次工具调用的参数超出台账上限，未纳入本历史；它们确实已执行过，请勿据此重复写入。）`,
     });
   }
   if (omittedReceipts > 0) {
-    msgs.push({
+    list.push({
       role: "system",
       content: `（先前 ${omittedReceipts} 次工具回执的返回内容因持久化上限未纳入本历史，状态与结果码仍在；需要细节请重新调用对应工具，不要据此判断"当时什么都没发生"。）`,
     });
@@ -260,19 +277,19 @@ export function projectMessages(events: SessionEvent[], opts: ProjectOptions = {
 
   // 遮蔽式压缩：从新到旧收取，超预算的旧段整体换成一条说明
   let chars = 0;
-  let keepFrom = msgs.length;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const next = chars + sizeOf(msgs[i]);
-    if (i < msgs.length - 1 && next > budget) break;
+  let keepFrom = list.length;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const next = chars + sizeOf(list[i]);
+    if (i < list.length - 1 && next > budget) break;
     chars = next;
     keepFrom = i;
   }
   const shadowed = keepFrom;
-  const kept = msgs.slice(keepFrom);
+  const kept = list.slice(keepFrom);
   if (shadowed > 0) {
     kept.unshift({ role: "system", content: `（更早 ${shadowed} 条会话记录已省略以适配上下文预算；需要全文请让用户看会话。）` });
   }
-  return { messages: kept, shadowed, chars };
+  return { messages: kept, shadowed, pruned: pruned.pruned, chars };
 }
 
 /**
@@ -289,7 +306,7 @@ export function buildAgentHistory(
   messages: ChatMsg[],
   runs: AgentRunView[],
   opts: { excludeFromMsgId?: string; excludeRunId?: string; budgetChars?: number } = {},
-): { messages: AgentMessage[]; stats: { shadowed: number; chars: number } } {
+): { messages: AgentMessage[]; stats: { shadowed: number; pruned: number; chars: number } } {
   let list = messages;
   if (opts.excludeFromMsgId) {
     const idx = list.findIndex((m) => m.id === opts.excludeFromMsgId);
@@ -299,5 +316,5 @@ export function buildAgentHistory(
     ...(opts.excludeRunId ? { excludeRunId: opts.excludeRunId } : {}),
     ...(opts.budgetChars ? { budgetChars: opts.budgetChars } : {}),
   });
-  return { messages: p.messages, stats: { shadowed: p.shadowed, chars: p.chars } };
+  return { messages: p.messages, stats: { shadowed: p.shadowed, pruned: p.pruned, chars: p.chars } };
 }

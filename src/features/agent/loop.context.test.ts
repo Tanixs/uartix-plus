@@ -1,13 +1,15 @@
 /**
- * P134-A · "每轮到底送给模型多少"的可复核断言。
+ * P134-A · "每轮到底送给模型多少"的可复核断言。（P135-A 在这条线上续了两条）
  *
  * 起因是一句观察："上下文好像每次重新发送对话就会变少、自动压缩"。这句话可证伪，所以不写成注释，
- * 写成测试：把 provider 收到的每一轮 payload 全量记下来，然后问五件事——
+ * 写成测试：把 provider 收到的每一轮 payload 全量记下来，然后问六件事——
  * ① 没到线时是不是真的全量重发（是，且必须一直是）；
  * ② 到线之后折叠会不会**毁掉台账**（不会：折叠只作用于这一轮发出去的那份）；
  * ③ 折叠阶梯放不下时是不是真的放不下（实测修掉一处"第一级就收工"的假溢出）；
  * ④ 折叠边界会不会把"一次调用"和"它的回执"劈开（对标 DSH：不会）；
- * ⑤ 宿主对模型许的诺（"有 N 条被省略"、"可用 read_artifact 取回"）是不是真送到、真兑得上。
+ * ⑤ 宿主对模型许的诺（"有 N 条被省略"、"可用 read_artifact 取回"）是不是真送到、真兑得上；
+ * ⑥ **P135-A**：超线之后是不是先跑一遍无模型裁剪，让"整条丢掉"退成最后手段
+ *    （裁的是发出去那一份，台账仍是全文；裁完放得下就不许再折叠）。
  * §8-41：对模型的承诺要有守卫，没有守卫的承诺等于没有承诺。
  */
 import { expect, it } from "vitest";
@@ -46,17 +48,20 @@ function echoAdapter(payload: string, capped = false): TaskAdapter {
   };
 }
 
-async function runTurns(rounds: number, receiptBytes: number, rec: ReturnType<typeof recorder>, capped = false) {
+async function runTurns(rounds: number, receiptBytes: number, rec: ReturnType<typeof recorder>, capped = false, narrationBytes = 0, adapter?: TaskAdapter) {
   let turn = 0;
   const provider: AgentProvider = async (messages) => {
     rec.snap(messages);
     turn++;
     if (turn > rounds) return { content: "done", calls: [] };
-    return { content: `step ${turn}`, calls: [{ callId: `c${turn}`, name: "echo", arguments: "{}" }] };
+    return {
+      content: `step ${turn}${narrationBytes ? ` ${"y".repeat(narrationBytes)}` : ""}`,
+      calls: [{ callId: `c${turn}`, name: "echo", arguments: "{}" }],
+    };
   };
   return runAgent({
     goal: "measure the per-round payload", provider,
-    adapter: echoAdapter("x".repeat(receiptBytes), capped),
+    adapter: adapter ?? echoAdapter("x".repeat(receiptBytes), capped),
     context: ctx(), maxRounds: rounds + 4, maxCalls: rounds + 4, timeoutMs: 0,
   });
 }
@@ -78,22 +83,48 @@ it("没到软顶时确实是全量重发：第 1 轮的回执原文在第 8 轮�
   expect(first, "第 1 轮的工具回执在最后一轮不见了").toBeTruthy();
   expect(first!.content).toContain(SENTINEL); // 回执原文逐字还在（消息数与字节都另有断言在管）
   // 第 1 轮那条"送模型 N 条 · 约 X KB"是基线读数，不等于发生了压缩
-  const shrunk = r.events.filter((e) => e.kind === "context").filter((e) => (e.ctx?.folded ?? 0) > 0 || (e.ctx?.droppedImages ?? 0) > 0);
-  expect(shrunk, "远未软顶却发生了丢图/折叠").toEqual([]);
+  const shrunk = r.events.filter((e) => e.kind === "context").filter((e) => (e.ctx?.folded ?? 0) > 0 || (e.ctx?.droppedImages ?? 0) > 0 || (e.ctx?.pruned ?? 0) > 0);
+  expect(shrunk, "远未软顶却发生了丢图/裁短/折叠（P135-A：未超限一条都不许裁）").toEqual([]);
 });
 
 it("超软顶才折叠，且折叠只作用于发出去的那一份：台账本体不许被改写", async () => {
   const rec = recorder();
-  // 10 × 400KB：越过软顶，但"只留最近 2 条"放得下 ⇒ 走的是折叠成功这条路，不是 context_overflow
-  const r = await runTurns(10, 400_000, rec, true);
+  /* 夹具形状换了（P135-A 的契约变更，详设 §7）：原来是 10 × 400KB 的**工具回执**，
+     那条路现在先被无模型裁短救回来，根本走不到折叠。而裁剪碰不到助手正文，
+     所以"只有折叠能救"这条路要用长正文来逼出来 —— 断言一条没松，只是终于打在它声称的那件事上。 */
+  const r = await runTurns(10, 2_000, rec, false, 400_000);
   const fold = r.events.find((e) => e.kind === "context" && e.text?.includes("超软顶"));
-  expect(fold, "10 条巨型回执还没触发折叠，这条测试就没测到折叠路径").toBeTruthy();
+  expect(fold, "10 条 400KB 的助手正文还没触发折叠，这条测试就没测到折叠路径").toBeTruthy();
   expect(fold!.ctx!.folded ?? 0, "折叠事件里没有 folded 计数（折了多少必须可复盘）").toBeGreaterThan(0);
+  expect(fold!.ctx!.pruned ?? 0, "回执只有 2KB，裁剪不该抢这一步").toBe(0);
   expect(r.status, "折叠没收进预算，任务被溢出判死").toBe("succeeded");
-  const kept = r.messages.filter((m) => m.role === "tool");
-  expect(kept).toHaveLength(10);
-  for (const m of kept) expect(m.content).toContain(SENTINEL);
+  const kept = r.messages.filter((m) => m.role === "assistant" && m.content.includes("y".repeat(64)));
+  expect(kept, "长正文台账本体被改写：折叠只能作用于发出去的那一份").toHaveLength(10);
   expect(r.ctx?.peakBytes ?? 0, "峰值字节没记账（输入区那条用量条读的就是它）").toBeGreaterThan(0);
+});
+
+it("P135-A：超软顶先跑无模型裁短巨型回执，裁完放得下就不必整条丢掉（台账仍是全文）", async () => {
+  const rec = recorder();
+  // 与上面同一条形状：10 × 400KB 的**回执**（带 artifactRef 的生产形状）
+  const r = await runTurns(10, 400_000, rec, true);
+  const ev = r.events.find((e) => e.kind === "context" && e.text?.includes("超软顶"));
+  expect(ev, "10 条巨型回执没记账").toBeTruthy();
+  expect(ev!.ctx!.pruned ?? 0, "pruned 计数没记账（裁了几条必须可复盘，与 folded 同口径）").toBeGreaterThan(0);
+  expect(ev!.ctx!.folded ?? 0, "裁完就放得下了，折叠必须退成最后手段而不是顺手把小步骤也压成一行").toBe(0);
+  expect(ev!.ctx!.step, "阶梯步数没跟上 prune").toBe("prune");
+  expect(r.status, "该被裁剪救回来的任务仍然被判了溢出").toBe("succeeded");
+  // 台账本体：每条回执仍是 400KB 原文；发出去的那一份才是裁短版
+  for (const m of r.messages.filter((x) => x.role === "tool")) {
+    expect(m.content.length, "台账里的回执被压缩改写了").toBeGreaterThan(300_000);
+    expect(m.content).toContain(SENTINEL);
+  }
+  const last = rec.rounds[rec.rounds.length - 1]!;
+  const sent = last.find((m) => m.role === "tool" && m.callId === "c1")!;
+  expect(sent, "第 1 条回执整条不见了：裁短不是删除").toBeTruthy();
+  expect(sent.content).toContain('"pruned":true');
+  expect(sent.content.length, "发出去的那份没被裁短").toBeLessThan(8_000);
+  expect(sent.content).not.toContain("x".repeat(3_000)); // 中间那段确实没发
+  expect(sent.content).toContain("call:c1"); // 原本就有的 ref 被保留，不是另开一张支票
 });
 
 /* ============ 折叠边界：不许劈开"一次调用"和"它的回执"（对标 DSH toolPairingBalancedBefore） ============ */
@@ -233,4 +264,11 @@ it("重放旧回执时「已缓存可取回」改口成实话，引用不再留�
   expect(String((out.data as { note: string }).note)).toContain("上一次运行");
   const plain = { callId: "c2", ok: true, status: "read" as const, data: { text: "hi" } };
   expect(markStaleArtifacts(plain), "没有引用的回执不该被复制一遍").toBe(plain);
+  // 数组型回执的引用挂在**顶层** artifactRefs 上：只改 data 里那句承诺不够（P135-A 补的同一类）
+  const withArrayRefs = {
+    callId: "c3", ok: true as const, status: "read" as const, artifactRefs: ["call:c3"],
+    data: { rows: [], note: "完整内容已缓存，用 read_artifact 取回" },
+  };
+  const cleared = markStaleArtifacts(withArrayRefs) as typeof withArrayRefs;
+  expect(cleared.artifactRefs, "顶层 artifactRefs 还留着：模型照样能照着撞一次空引用").toBeUndefined();
 });

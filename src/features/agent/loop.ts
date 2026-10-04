@@ -1,5 +1,5 @@
 import type { AgentMessage, AgentProvider, AgentResult, ContextStat, LedgedCall, ModelTurn, RunEvent, TaskAdapter, TaskContext, ToolReceipt } from "./types";
-import { foldContext, shrinkReceipt, agentPayloadBytes, countImages, dropHistoryImages, notDispatchedReceipt, utf8Bytes, REQUEST_SOFT_LIMIT } from "./context";
+import { foldContext, shrinkReceipt, agentPayloadBytes, countImages, dropHistoryImages, pruneToolResults, messageBytes, notDispatchedReceipt, utf8Bytes, REQUEST_SOFT_LIMIT } from "./context";
 import { parseTurnError, nextMaxTokens, sleepAbortable, TURN_RETRY_LIMIT, TURN_RETRY_BACKOFF_MS, MAX_TOKENS_LADDER, cancelledBeforeSend } from "./turnError";
 // P115-D：save_plugin 那段"能产出哪几类产物"从元表派生（中文侧 P99a-D2 已经这么改了，
 // 英文片段还手抄着 theme/widget/panel 三类——D1 加出六类之后它就在教一个不存在的清单）
@@ -201,12 +201,17 @@ export async function runAgent(options: {
   let failStreak = 0;
 
   /**
-   * P95-H1/H2：每轮发送前的体积自适应，并产出"这次到底带了多少"的用量快照。
+   * P95-H1/H2 + P135-A：每轮发送前的体积自适应，并产出"这次到底带了多少"的用量快照。
    *
    * 旧实现是 `structuredClone(foldContext(messages))` 一次性折叠、折了多少不落账，而且
    * 字符软阈与 Rust 的 2 MiB 字节熔断互不知情（P94-G5 把历史截图带进上下文之后，
    * 撞线就是硬失败）。阶梯按代价从低到高：
-   *   ① 丢历史图（本轮目标的附图永不丢）② 收紧折叠 ③ 仍超 → 本地抛 context_overflow。
+   *   ① 丢历史图（本轮目标的附图永不丢）
+   *   ② **P135-A：无模型裁短巨型工具回执**（head/marker/tail，台账不动，能取回才承诺取回）
+   *   ③ 收紧折叠（中间段压成一行）
+   *   ④ 仍超 → 本地抛 context_overflow。
+   * ②插在折叠之前是有理由的：折叠的处理单位是"整条记录"，为了放下一条 40 KB 的旧回执
+   * 会把旁边几十条几百字节的小步骤一起压成一行；先裁那条大的，小步骤就能整条留下。
    */
   function fitContext(roundNo: number): { send: AgentMessage[]; stats: ContextStat } {
     const base: ContextStat = {
@@ -220,16 +225,33 @@ export async function runAgent(options: {
     let stats = base;
     if (base.bytes > REQUEST_SOFT_LIMIT) {
       const dropped = dropHistoryImages(messages);
-      const bytes = agentPayloadBytes(messages, adapter.definitions);
-      stats = { ...stats, bytes, images: countImages(messages), ...(dropped ? { droppedImages: dropped, step: "images" as const } : {}) };
-      const fold = foldContext(messages, REQUEST_SOFT_LIMIT);
-      if (fold.changed) {
-        send = fold.messages;
-        stats = { ...stats, bytes: agentPayloadBytes(fold.messages, adapter.definitions), msgs: fold.messages.length, folded: fold.folded, step: "fold" };
-      }
+      const pruned = pruneToolResults(messages, {
+        fits: (arr) => agentPayloadBytes(arr, adapter.definitions) <= REQUEST_SOFT_LIMIT,
+        size: messageBytes,
+        ...(adapter.spill ? { spill: (ref, original) => adapter.spill!(ref, original) } : {}),
+      });
+      const working = pruned.changed ? pruned.messages : messages;
+      const fold = foldContext(working, REQUEST_SOFT_LIMIT);
+      const final = fold.changed ? fold.messages : working;
+      let step: ContextStat["step"] = "none";
+      if (dropped) step = "images";
+      if (pruned.pruned) step = "prune";
+      if (fold.changed) step = "fold";
+      stats = {
+        ...stats,
+        bytes: agentPayloadBytes(final, adapter.definitions),
+        msgs: final.length,
+        images: countImages(messages),
+        ...(dropped ? { droppedImages: dropped } : {}),
+        ...(pruned.pruned ? { pruned: pruned.pruned } : {}),
+        ...(fold.changed ? { folded: fold.folded } : {}),
+        step,
+      };
+      if (dropped || pruned.pruned || fold.changed) send = final;
       const kb = (n: number) => `${(n / 1024).toFixed(0)} KB`;
       const done: string[] = [];
       if (dropped) done.push(`不再重发 ${dropped} 张历史截图（本轮附图保留）`);
+      if (pruned.pruned) done.push(`无模型裁短 ${pruned.pruned} 条巨型回执（台账仍是全文）`);
       if (fold.changed) done.push(`较早 ${fold.folded} 条步骤折叠为摘要`);
       if (done.length) {
         event({ kind: "context", ctx: stats, text: `第 ${roundNo} 轮：请求 ${kb(base.bytes)} 超软顶 → ${done.join("，")}；现约 ${kb(stats.bytes)}` });
@@ -239,7 +261,7 @@ export async function runAgent(options: {
         throw new Error(JSON.stringify({
           agentError: 1,
           code: "context_overflow",
-          msg: `任务上下文 ${kb(stats.bytes)} 已超软顶，去掉历史附图并收紧折叠后仍放不下；请把目标拆成几次任务，或减少勾选的附加上下文`,
+          msg: `任务上下文 ${kb(stats.bytes)} 已超软顶，去掉历史附图、裁短巨型回执并收紧折叠后仍放不下；请把目标拆成几次任务，或减少勾选的附加上下文`,
           retryable: false,
           shrink: false,
           shrinkInput: true,

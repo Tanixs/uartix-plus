@@ -99,6 +99,7 @@ export function serializeLog(r: AgentRunView): string {  const lines: string[] =
       tx(`峰值 ${(r.ctx.peakBytes / 1024).toFixed(0)} KB`, `peak ${(r.ctx.peakBytes / 1024).toFixed(0)} KB`),
     ];
     if (last?.droppedImages) bits.push(tx(`已弃历史图 ${last.droppedImages} 张`, `${last.droppedImages} history images dropped`));
+    if (last?.pruned) bits.push(tx(`无模型裁短 ${last.pruned} 条巨型回执（台账仍是全文）`, `${last.pruned} oversized receipt(s) pruned without a model call, the ledger still holds the full text`));
     if (last?.folded) bits.push(tx(`折叠 ${last.folded} 条`, `${last.folded} folded`));
     if (last?.shadowed) bits.push(tx(`会话遮蔽 ${last.shadowed} 条`, `${last.shadowed} session turns shadowed`));
     lines.push(bits.join(" · "));

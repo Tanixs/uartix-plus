@@ -49,6 +49,7 @@ function fmtElapsed(ms: number): string {
 function ctxParts(last: ContextStat): string[] {
   const bits = [tx(`上下文 ${ctxGauge(last.bytes).text}`, `Context ${ctxGauge(last.bytes).text}`)];
   if (last.droppedImages) bits.push(tx(`弃图 ${last.droppedImages}`, `${last.droppedImages} dropped`));
+  if (last.pruned) bits.push(tx(`裁短 ${last.pruned}`, `${last.pruned} pruned`));
   if (last.folded) bits.push(tx(`折叠 ${last.folded}`, `${last.folded} folded`));
   return bits;
 }
@@ -62,6 +63,7 @@ function ctxTalk(ctx: { last?: ContextStat; peakBytes: number }): string {
     tx(`${last.msgs} 条消息`, `${last.msgs} messages`),
   ];
   if (last.images) bits.push(tx(`附图 ${last.images} 张`, `${last.images} image(s)`));
+  if (last.pruned) bits.push(tx(`无模型裁短 ${last.pruned} 条巨型回执（台账仍是全文）`, `${last.pruned} oversized receipt(s) pruned in flight, ledger intact`));
   if (last.shadowed) bits.push(tx(`会话历史遮蔽 ${last.shadowed} 条`, `${last.shadowed} session turns shadowed`));
   return bits.join(" · ");
 }
