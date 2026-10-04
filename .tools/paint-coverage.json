@@ -1,0 +1,956 @@
+{
+  "cand": "fluent",
+  "base": "light",
+  "faces": [
+    {
+      "face": "workspace",
+      "elems": 90,
+      "deltaElems": 55,
+      "handleElems": 64,
+      "propTotal": 187,
+      "propDelta": 75,
+      "propHandle": 155,
+      "deltaPct": 61.111111111111114,
+      "handlePct": 71.11111111111111,
+      "propDeltaPct": 40.106951871657756,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "settings",
+      "elems": 168,
+      "deltaElems": 87,
+      "handleElems": 92,
+      "propTotal": 372,
+      "propDelta": 120,
+      "propHandle": 231,
+      "deltaPct": 51.785714285714285,
+      "handlePct": 54.76190476190476,
+      "propDeltaPct": 32.25806451612903,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "theme-swatch 70x34",
+          10
+        ],
+        [
+          "theme-bar 68x6",
+          10
+        ],
+        [
+          "theme-panel 56x14",
+          10
+        ],
+        [
+          "(无类名) 914x28",
+          3
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "(无类名) 84x71",
+          2
+        ],
+        [
+          "(无类名) 70x34",
+          2
+        ],
+        [
+          "(无类名) 68x6",
+          2
+        ],
+        [
+          "(无类名) 56x14",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "palette",
+      "elems": 133,
+      "deltaElems": 59,
+      "handleElems": 106,
+      "propTotal": 235,
+      "propDelta": 79,
+      "propHandle": 202,
+      "deltaPct": 44.3609022556391,
+      "handlePct": 79.69924812030075,
+      "propDeltaPct": 33.61702127659574,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "menu",
+      "elems": 100,
+      "deltaElems": 56,
+      "handleElems": 74,
+      "propTotal": 201,
+      "propDelta": 77,
+      "propHandle": 169,
+      "deltaPct": 56,
+      "handlePct": 74,
+      "propDeltaPct": 38.308457711442784,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "lbx",
+      "elems": 123,
+      "deltaElems": 72,
+      "handleElems": 91,
+      "propTotal": 254,
+      "propDelta": 104,
+      "propHandle": 211,
+      "deltaPct": 58.53658536585366,
+      "handlePct": 73.98373983739837,
+      "propDeltaPct": 40.94488188976378,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "frm-combo 231x24",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1092x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 819x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 819x320",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 409x400",
+          1
+        ],
+        [
+          "tbl 409x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 410x400",
+          1
+        ],
+        [
+          "plot 410x372",
+          1
+        ],
+        [
+          "props-panel 273x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 273x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ],
+        [
+          "(无类名) 206x24",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "ctxmenu",
+      "elems": 93,
+      "deltaElems": 56,
+      "handleElems": 66,
+      "propTotal": 193,
+      "propDelta": 77,
+      "propHandle": 157,
+      "deltaPct": 60.215053763440864,
+      "handlePct": 70.96774193548387,
+      "propDeltaPct": 39.89637305699482,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "hint",
+      "elems": 169,
+      "deltaElems": 88,
+      "handleElems": 93,
+      "propTotal": 378,
+      "propDelta": 123,
+      "propHandle": 236,
+      "deltaPct": 52.071005917159766,
+      "handlePct": 55.02958579881657,
+      "propDeltaPct": 32.53968253968254,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "theme-swatch 70x34",
+          10
+        ],
+        [
+          "theme-bar 68x6",
+          10
+        ],
+        [
+          "theme-panel 56x14",
+          10
+        ],
+        [
+          "(无类名) 914x28",
+          3
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "(无类名) 84x71",
+          2
+        ],
+        [
+          "(无类名) 70x34",
+          2
+        ],
+        [
+          "(无类名) 68x6",
+          2
+        ],
+        [
+          "(无类名) 56x14",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "model",
+      "elems": 136,
+      "deltaElems": 94,
+      "handleElems": 97,
+      "propTotal": 289,
+      "propDelta": 132,
+      "propHandle": 231,
+      "deltaPct": 69.11764705882354,
+      "handlePct": 71.32352941176471,
+      "propDeltaPct": 45.674740484429066,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ],
+        [
+          "msp-title-input 670x25",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "speclib",
+      "elems": 99,
+      "deltaElems": 63,
+      "handleElems": 72,
+      "propTotal": 213,
+      "propDelta": 91,
+      "propHandle": 180,
+      "deltaPct": 63.63636363636363,
+      "handlePct": 72.72727272727273,
+      "propDeltaPct": 42.72300469483568,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1092x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 819x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 819x320",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 409x400",
+          1
+        ],
+        [
+          "tbl 409x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 410x400",
+          1
+        ],
+        [
+          "plot 410x372",
+          1
+        ],
+        [
+          "props-panel 273x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 273x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "hovermenu",
+      "elems": 100,
+      "deltaElems": 57,
+      "handleElems": 74,
+      "propTotal": 202,
+      "propDelta": 78,
+      "propHandle": 170,
+      "deltaPct": 57,
+      "handlePct": 74,
+      "propDeltaPct": 38.613861386138616,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "welcome1",
+      "elems": 106,
+      "deltaElems": 71,
+      "handleElems": 68,
+      "propTotal": 227,
+      "propDelta": 96,
+      "propHandle": 171,
+      "deltaPct": 66.98113207547169,
+      "handlePct": 64.15094339622641,
+      "propDeltaPct": 42.290748898678416,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "welcome2",
+      "elems": 103,
+      "deltaElems": 67,
+      "handleElems": 68,
+      "propTotal": 224,
+      "propDelta": 92,
+      "propHandle": 171,
+      "deltaPct": 65.04854368932038,
+      "handlePct": 66.01941747572816,
+      "propDeltaPct": 41.07142857142857,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ],
+        [
+          "wlc-shot 480x300",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "cmdk-empty",
+      "elems": 93,
+      "deltaElems": 58,
+      "handleElems": 66,
+      "propTotal": 194,
+      "propDelta": 78,
+      "propHandle": 161,
+      "deltaPct": 62.365591397849464,
+      "handlePct": 70.96774193548387,
+      "propDeltaPct": 40.20618556701031,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    },
+    {
+      "face": "ai",
+      "elems": 97,
+      "deltaElems": 60,
+      "handleElems": 67,
+      "propTotal": 201,
+      "propDelta": 84,
+      "propHandle": 161,
+      "deltaPct": 61.855670103092784,
+      "handlePct": 69.0721649484536,
+      "propDeltaPct": 41.791044776119406,
+      "declaredTokens": 14,
+      "slotsFilled": 16,
+      "themeRules": 128,
+      "misses": [
+        [
+          "dv-groupview dv-groupview-header-top dv- 522x400",
+          2
+        ],
+        [
+          "tbar 1440x34",
+          1
+        ],
+        [
+          "dv-grid-view dv-dockview 1392x800",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 1044x400",
+          1
+        ],
+        [
+          "(无类名) 80x24",
+          1
+        ],
+        [
+          "fc-empty 1044x320",
+          1
+        ],
+        [
+          "tbl 522x372",
+          1
+        ],
+        [
+          "plot 522x372",
+          1
+        ],
+        [
+          "props-panel 348x372",
+          1
+        ],
+        [
+          "dv-groupview dv-groupview-header-top dv- 348x400",
+          1
+        ],
+        [
+          "ctl-grid-inner 552x552",
+          1
+        ]
+      ]
+    }
+  ],
+  "elems": 1610,
+  "deltaElems": 943,
+  "handleElems": 1098,
+  "propTotal": 3370,
+  "propDelta": 1306,
+  "deltaPct": 58.6,
+  "handlePct": 68.2,
+  "propDeltaPct": 38.8
+}
