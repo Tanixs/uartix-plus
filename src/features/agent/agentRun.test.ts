@@ -33,15 +33,25 @@ const { isLiveRun } = await import("./types");
 // 在测试体内再 import 会拿到**另一份** settingsStore，patch 打在副本上、agentRun 读的还是旧的。
 const settings = await import("../settings/settingsStore");
 const agentRun = await import("./agentRun");
+// P138-B：落盘的口径常数必须由被测模块自己给（在这里写第二份数字，就等于又养一把尺）
+const { storageChars, RECEIPT_DATA_LIMIT, RUN_PERSIST_BUDGET } = await import("./context");
 import type { AgentProvider, ModelTurn } from "./types";
 
 let turn = 0;
+/** P138-B：manytext 场景要连发多少轮（用来把落盘副本顶到预算） */
+let manyRounds = 0;
 let hangSignal: AbortSignal | null = null;
 
 /** 场景由 goal 前缀驱动，模拟真实多轮工具反馈。 */
 const scripted: AgentProvider = async (messages, _tools, signal) => {
   const goal = messages.find((m) => m.role === "user")?.content ?? "";
   turn++;
+  if (goal.startsWith("manytext")) {
+    if (turn <= manyRounds) {
+      return { content: "", calls: [{ callId: `m${turn}`, name: "run_app_action", arguments: JSON.stringify({ kind: "setTheme", args: { name: "dark" } }) }] };
+    }
+    return { content: "灌完了", calls: [] };
+  }
   if (goal.startsWith("flow")) {
     if (turn === 1) return { content: "读取设置", calls: [{ callId: "c1", name: "settings_read", arguments: "{}" }] };
     if (turn === 2) {
@@ -236,25 +246,32 @@ describe("agentRun 运行宿主", () => {
     expect(hangSignal?.aborted).toBe(true);
   });
 
-  it("持久化脱敏：大 data 不落盘但**留截断标记**；重启后 running → interrupted", async () => {
-    // P95-H3 之后 plot_window 这类会被形态压缩到预算内，改用"形态无关的长文本"制造超限回执
-    runAppAction.mockResolvedValueOnce({ ok: true, data: { evidence: "E".repeat(9000) } });
+  it("P138-B：超长正文进台账时**按字段分配额度**，不再整条折成 2000 字残骸", async () => {
+    // 旧断言是"大 data 不落盘、只留 truncated 占位"——那条钉的正是这次修掉的东西。
+    // 而真正的元凶在更上游：超过 `RECEIPT_DATA_LIMIT` 就整条退化成 2000 字 preview，
+    // 一份长证据在台账里只剩两千字，而「导出为 md」读的正是这份台账。
+    const body = (tag: string) => `${tag}HEAD`.repeat(40) + "x".repeat(200_000) + `${tag}TAIL`.repeat(40);
+    runAppAction.mockResolvedValueOnce({
+      ok: true,
+      data: { a: body("A"), b: body("B"), c: body("C"), note: "末行统计在这" },
+    });
     const runId = await agentRun.startRun({ goal: "bigtext 取证据链", scope: "create" });
-    await agentRun.getSnapshot(); // ensure settled
     const stored = JSON.parse(storage.get("vs.agentRuns.v1") ?? "[]") as {
       runId: string; status: string;
-      events: { kind: string; receiptTruncated?: boolean; receipt?: { data?: { truncated?: boolean; bytes?: number } } }[];
+      events: { kind: string; receipt?: { data?: Record<string, unknown> } }[];
     }[];
-    const row = stored.find((r) => r.runId === runId);
-    expect(row?.status).toBe("succeeded");
-    const oversize = row!.events.find((e) => e.receipt && JSON.stringify(e.receipt.data ?? "").length > 2048);
-    expect(oversize).toBeUndefined(); // 落盘副本有界
-    // P94-G2（红线 A7）：省略必须留下可辨认的痕迹——旧实现把 data 直接设 undefined，
-    // 台账读起来像"那次调用没返回任何内容"，投影也无从向模型说明。
-    const cut = row!.events.find((e) => e.kind === "receipt" && e.receiptTruncated);
-    expect(cut).toBeTruthy();
-    expect(cut!.receipt?.data?.truncated).toBe(true);
-    expect(cut!.receipt?.data?.bytes).toBeGreaterThan(2048);
+    const row = stored.find((r) => r.runId === runId)!;
+    expect(row.status).toBe("succeeded");
+    const rec = row.events.find((e) => e.kind === "receipt")!;
+    const data = rec.receipt!.data as { a: string; c: string; note: string; preview?: string; artifactRef?: string };
+    expect(storageChars(rec.receipt!.data), "进台账的副本必须有界").toBeLessThanOrEqual(RECEIPT_DATA_LIMIT);
+    // 摘录必须是原文的**逐字头尾**，不是重写的一段摘要（说的话得能被原文反驳）
+    expect(data.a.startsWith("AHEAD")).toBe(true);
+    expect(data.c.endsWith("CTAIL")).toBe(true);
+    expect(data.a).toContain("摘录：中间省略");
+    expect(data.note, "只削超长字段，短字段与结构不许一起消失").toBe("末行统计在这");
+    expect(data.artifactRef, "削过就得留一个真能取回原文的引用（压缩不等于销毁）").toBeTruthy();
+    expect(data.preview, "还能按字段分配的时候，不许整份退化成 2000 字残骸").toBeUndefined();
     // 模拟重启：手动把状态改成 running 再重新加载模块
     stored[0].status = "running";
     storage.set("vs.agentRuns.v1", JSON.stringify(stored));
@@ -262,6 +279,39 @@ describe("agentRun 运行宿主", () => {
     const fresh = await import("./agentRun");
     expect(fresh.getSnapshot().runs[0].status).toBe("interrupted");
     expect(fresh.getSnapshot().activeRunId).toBeNull();
+  });
+
+  it("P138-B：一个 run 的落盘副本顶到预算 ⇒ 按档削短，并且**出声**", async () => {
+    // 24 轮各灌一条 6 万字的回执：内存台账照原样留着（那是复盘的现场），落盘副本必须落进预算。
+    runAppAction.mockResolvedValue({ ok: true, data: { a: "y".repeat(200_000) } });
+    turn = 0;
+    manyRounds = 40;
+    const runId = await agentRun.startRun({ goal: "manytext 灌满台账", scope: "create" });
+    const stored = JSON.parse(storage.get("vs.agentRuns.v1") ?? "[]") as { runId: string; events: { receiptTrim?: string }[] }[];
+    const row = stored.find((r) => r.runId === runId)!;
+    expect(row.events.length, "剧本前提：真的跑满了 manyRounds 条回执").toBeGreaterThan(10);
+    expect(storageChars(row.events), "剧本前提：内存里那份确实顶到了预算").toBeLessThanOrEqual(RUN_PERSIST_BUDGET);
+    expect(row.events.filter((e) => e.receiptTrim).length, "顶到预算就要留下「削到哪一档」的痕迹").toBeGreaterThan(0);
+    expect(agentRun.getPersistStatus()?.trimmedDatas ?? 0, "削了却没人知道自己丢过东西 = §8-46 那句静默兜底").toBeGreaterThan(0);
+    manyRounds = 0;
+    runAppAction.mockReset();
+  });
+
+  it("P138-B：落盘失败与降级都必须出声（旧实现是一句静默 catch，没人知道自己丢过东西）", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const real = localStorage.setItem;
+    const thrower: typeof localStorage.setItem = () => { throw new Error("QuotaExceeded"); };
+    localStorage.setItem = thrower;
+    try {
+      const runId = await agentRun.startRun({ goal: "flow 调大精度并应用主题", scope: "create" });
+      expect(runId).toBeTruthy();
+      const st = agentRun.getPersistStatus();
+      expect(st?.failed, "写盘失败必须成为一个可读到的事实，而不是 catch 里的一句注释").toBe(true);
+      expect(warn.mock.calls.map((c) => c.join(" ")).join("\n")).toContain("台账落盘失败");
+    } finally {
+      localStorage.setItem = real;
+      warn.mockRestore();
+    }
   });
 
   it("P95-H2：ctx 用量快照过 persist→loadSaved 一轮不丢（reviveRun 是字段白名单，漏字段即静默消失）", async () => {

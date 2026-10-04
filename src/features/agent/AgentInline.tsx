@@ -13,6 +13,7 @@ import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import * as agentRun from "./agentRun";
 import type { AgentRunView } from "./agentRun";
 import { isLiveRun, type ContextStat, type ToolProvenance } from "./types";
+import { readDroppedPlaceholder } from "./context";
 import { NO_PROGRESS_PAUSE_AT } from "./loop";
 import { ctxGauge, fmtKb } from "./context";
 import { hasDataLease } from "../plot/dataLease";
@@ -142,6 +143,7 @@ function ToolCard({
   undoState,
   onUndo,
   subRun,
+  trim,
 }: {
   tool: string;
   args?: string;
@@ -155,6 +157,8 @@ function ToolCard({
   onUndo?: () => void;
   /** P137：这一支是派发时，子任务的实时过程（内存态；没有=已过期或本来就没有） */
   subRun?: agentRun.SubRunLive | null;
+  /** P138-B：这条回执的正文在落盘时被削到哪一档（`excerpt` 只削超长字段，`dropped` 整份换占位） */
+  trim?: "excerpt" | "dropped";
 }) {
   const [open, setOpen] = useState(false);
   // P90 E4：任务保存的插件就地一键停用（覆盖层已清、撤销令牌已失效，"停用"才是恢复路径）。
@@ -185,8 +189,8 @@ function ToolCard({
   /** P137：派发回执有专门的读法——报告全文与逐轮过程都不走通用 160 字通道（详设 C3） */
   const sub = tool === "subagent" ? asSubagentData(receipt.data) : null;
   const steps = open && subRun ? subRunSteps(subRun.events) : [];
-  /** 落盘时被省略的那条派发回执：`data` 只剩占位，但"原本有多少字节"还在——读数不许假装有内容 */
-  const droppedBytes = !sub && tool === "subagent" ? (receipt.data as { bytes?: number } | undefined)?.bytes : undefined;
+  /** P138-B：正文被落盘整份省略时"原本多大"（读的是 `context.droppedPlaceholder` 那同一个形状） */
+  const restOmitted = readDroppedPlaceholder(receipt.data);
   return (
     <div className={`ai-agent-tool${receipt.ok ? "" : " bad"}`}>
       <button className="ai-agent-tool-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
@@ -237,7 +241,9 @@ function ToolCard({
           )}
           {sub?.answer ? (
             <Foldable
-              label={tx(`报告全文 · 共 ${sub.answer.length} 字`, `Full report · ${sub.answer.length} characters`)}
+              label={trim === "excerpt"
+                ? tx(`报告（落盘摘录）· 此处 ${sub.answer.length} 字，头尾照原文`, `Report (on-disk excerpt) · ${sub.answer.length} chars here, head and tail verbatim`)
+                : tx(`报告全文 · 共 ${sub.answer.length} 字`, `Full report · ${sub.answer.length} characters`)}
               text={sub.answer}
             />
           ) : null}
@@ -257,11 +263,11 @@ function ToolCard({
                 : tx("子任务的逐轮过程只留在本次会话内存里，现在已过期；额度与报告数字随台账保留。", "The sub-agent's step detail lives for this session only and has expired; the budget line and the report persist with the ledger.")}
             </div>
           )}
-          {droppedBytes != null && (
+          {restOmitted !== null && (
             <div className="ai-agent-note">
               {tx(
-                `报告全文与额度读数已随台账落盘上限省略（原本 ${droppedBytes} 字节）；要看这一趟查了什么，让任务重跑一次派发。`,
-                `The report and its budget line were omitted at the ledger's persistence cap (${droppedBytes} bytes originally); dispatch it again to read what it found.`,
+                `这次调用返回的正文因落盘上限整份省略（原本 ${restOmitted} 字）；状态与结果码仍在，要内容请重新调用该工具。`,
+                `The body of this receipt was omitted at rest (${restOmitted} chars originally); status and codes remain - re-run the tool if you need the content.`,
               )}
             </div>
           )}
@@ -595,6 +601,7 @@ function RunBlock({ view }: { view: AgentRunView }) {
               undoState={view.undoState[e.seq]}
               onUndo={() => agentRun.undoReceipt(view.runId, e.seq)}
               subRun={e.tool === "subagent" && rec.callId ? agentRun.getSubRun(rec.callId) : null}
+              trim={e.receiptTrim}
             />
           );
         })}

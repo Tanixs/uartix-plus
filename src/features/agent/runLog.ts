@@ -9,6 +9,7 @@
 import type { AgentRunView } from "./agentRun";
 import { NO_PROGRESS_PAUSE_AT } from "./loop";
 import type { PauseReason, RunEvent } from "./types";
+import { readDroppedPlaceholder } from "./context";
 import { tx } from "../../i18n/strings";
 
 /**
@@ -130,9 +131,20 @@ export function serializeLog(r: AgentRunView): string {  const lines: string[] =
             `    Receipt: ok=${rec.ok} status=${rec.status}${rec.code ? ` code=${rec.code}` : ""}`,
           ),
         );
-        if (rec.data !== undefined) {
+        const restOmitted = readDroppedPlaceholder(rec.data);
+        if (restOmitted !== null) {
+          // P138-B：旧写法只在 `data === undefined` 时才说"省略"，而落盘占位本身是个**有值**的对象
+          // ⇒ 那句"省略"其实从来没说出来过，读导出的人只看见一个长得像业务字段的 truncated（§8-46 同族）。
+          lines.push(tx(
+            `    数据: <落盘时整份省略，原始 ${restOmitted} 字；这段正文不在台账里，需要请重新调用该工具>`,
+            `    Data: <omitted at rest: ${restOmitted} chars originally; this text is not in the ledger - re-run the tool if you need it>`,
+          ));
+        } else if (rec.data !== undefined) {
           try {
-            lines.push(tx(`    数据: ${cut(JSON.stringify(rec.data), LOG_DATA_LIMIT)}`, `    Data: ${cut(JSON.stringify(rec.data), LOG_DATA_LIMIT)}`));
+            lines.push(tx(
+              `    数据: ${cut(JSON.stringify(rec.data), LOG_DATA_LIMIT)}${e.receiptTrim === "excerpt" ? "（落盘摘录：超长正文只留头尾）" : ""}`,
+              `    Data: ${cut(JSON.stringify(rec.data), LOG_DATA_LIMIT)}${e.receiptTrim === "excerpt" ? " (rest excerpt: long bodies keep head and tail only)" : ""}`,
+            ));
           } catch {
             lines.push(tx("    数据: <不可序列化>", "    Data: <not serializable>"));
           }

@@ -6,8 +6,8 @@
  * - 数据订阅租约随 run 终止释放（§6.1）；run 活动期间保持本地任务轮询（§6）；
  * - 审批卡经 ApprovalGate 绑定 (tool, argsHash)，批准/拒绝/过期由宿主裁决（§7）。
  */
-import { runAgent, resolveBudget } from "./loop";
-import { markStaleArtifacts, interruptedReceipt } from "./context";
+import { runAgent, resolveBudget, ARGS_LEDGER_CAP } from "./loop";
+import { RUN_PERSIST_BUDGET, TOTAL_PERSIST_BUDGET, excerptForStorage, storageChars, readDroppedPlaceholder, droppedPlaceholder, markStaleArtifacts, interruptedReceipt } from "./context";
 import { clearPlan } from "./planLedger";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { parseFsRoots } from "./generalTools";
@@ -27,7 +27,9 @@ import { normalizeAllowed, type Domain } from "./scopeTiers";
 import type { AgentMessage, AgentResult, ContextStat, PauseReason, RunEvent, RunScope, RunStatus, SubagentDispatch, ToolReceipt } from "./types";
 
 const EVENTS_CAP = 200;
-const RUNS_KEPT = 20;
+/** 留多少条任务记录。P138-B 从 20 抬到 40：记录条数不是配额主项（正文才是），
+ *  而"上个任务我怎么找回来"是真实需求；主项由 `TOTAL_PERSIST_BUDGET` 管着。 */
+const RUNS_KEPT = 40;
 const STORE_KEY = "vs.agentRuns.v1";
 const PERSIST_MS = 2000;
 
@@ -243,49 +245,123 @@ export function occupiedSessionIds(): Set<string> {
 
 /* ================= 持久化（脱敏、有界） ================= */
 
-/** 落盘裁剪：内存台账可以说全（8 KiB），localStorage 不行——
- *  200 事件 × 8 KiB 会直接撞配额。持久副本压到 2 KiB 并**打截断标记**，
- *  这样重启后续跑同样不会拿半截参数当历史（P92 D1 的边界一致）。
- *  P94-G2（红线 A7）：回执侧旧实现是 `data: undefined` 一句话抹掉且**不留痕迹** ⇒ 台账读起来像
- *  "那次调用没返回任何内容"。现在保留控制字段（ok/status/code/revision）+ 截断占位 + 标记。 */
-const ARGS_PERSIST_CAP = 2048;
-function trimEvent(e: RunEvent): RunEvent {
-  let out = e;
-  if (out.args && out.args.length > ARGS_PERSIST_CAP) {
-    out = { ...out, args: `${out.args.slice(0, ARGS_PERSIST_CAP - 1)}…`, argsTruncated: true };
-  }
-  // P134-B：turn 事件现在带"声明过的调用"。写入侧已有 512 字上限，这里再夹一次是防御
-  // 旧台账/别的来源塞进来的长串——持久化配额是硬边界（200 事件 × N 调用 × 长参数会直接撞满）。
-  if (out.calls?.length) {
-    out = {
-      ...out,
-      calls: out.calls.map((c) => (c.args && c.args.length > ARGS_PERSIST_CAP
-        ? { ...c, args: `${c.args.slice(0, ARGS_PERSIST_CAP - 1)}…`, argsTruncated: true }
-        : c)),
-    };
-  }
-  if (out.kind !== "receipt" || !out.receipt || out.receipt.data === undefined) return out;
-  const bytes = JSON.stringify(out.receipt.data).length;
-  if (bytes <= ARGS_PERSIST_CAP) return out;
-  const { data: dropped, ...rest } = out.receipt;
-  const ref = typeof dropped === "object" && dropped !== null ? (dropped as { artifactRef?: string }).artifactRef : undefined;
+/**
+ * 落盘副本削短。P138-B 之前这里是**一把尺量两样东西**：`ARGS_PERSIST_CAP = 2048`（名字与注释都写着
+ * ARGS，本是量参数的尺）被拿去量 `receipt.data`，且一超就**整份丢掉**——于是一份子代理报告、
+ * 一次 `fs_read` 的正文，在磁盘上那本台账里是空的，而「导出对话为 md」正是用户拿去离线提问的文件。
+ *
+ * 现在三件事分开：
+ *  ① 参数只有一把尺——照内存台账那把 `ARGS_LEDGER_CAP`（`loop.ts:63`，8192），不再自带第二把
+ *     （§8-36：一份东西两套口径迟早漂移，旧写法是"内存 8192、落盘 2048"两个答案）；
+ *  ② 正文先**逐字段摘录**（只削超长字符串叶子，结构、计数、状态、其余正文都留着），
+ *     实在削不动才退回整份占位——档位记在 `receiptTrim` 上，因为"被削过"和"没了"是两句不同的话（§8-41）；
+ *  ③ 配额是**硬边界但有预算**：`persist()` 逐 run 夹、全局夹，且丢了什么必须出声（见 `getPersistStatus`）。
+ */
+function clipArgs(s: string): string {
+  return s.length > ARGS_LEDGER_CAP ? `${s.slice(0, ARGS_LEDGER_CAP - 1)}…` : s;
+}
+
+/** 整份占位：保留控制字段与"原本多大"，必要时把可取回引用留在壳上 */
+function droppedData(e: RunEvent): RunEvent {
+  const { data, ...rest } = e.receipt!;
+  const ref = data !== null && typeof data === "object" ? (data as { artifactRef?: string }).artifactRef : undefined;
+  const chars = storageChars(data);
   return {
-    ...out,
+    ...e,
     receiptTruncated: true,
-    receipt: { ...rest, data: { truncated: true, bytes, ...(ref ? { artifactRef: ref } : {}) } },
+    receiptTrim: "dropped",
+    receipt: { ...rest, data: { ...droppedPlaceholder(chars), ...(ref ? { artifactRef: ref } : {}) } },
   };
 }
 
+function trimEvent(e: RunEvent): RunEvent {
+  let out = e;
+  if (out.args) out = { ...out, args: clipArgs(out.args), ...(out.args.length > ARGS_LEDGER_CAP ? { argsTruncated: true } : {}) };
+  // P134-B：turn 事件带"声明过的调用"，长串同样按这把尺夹（持久化配额是硬边界）
+  if (out.calls?.length) {
+    out = { ...out, calls: out.calls.map((c) => (c.args ? { ...c, args: clipArgs(c.args), ...(c.args.length > ARGS_LEDGER_CAP ? { argsTruncated: true } : {}) } : c)) };
+  }
+  // 正文不在这里按"单条上限"削：进台账那层已经有 `RECEIPT_DATA_LIMIT` 管着单条大小，
+  // 落盘再设一把更宽的尺就是永远不可达的死代码（§8-54②）。落盘只管两件事：本 run 多大、
+  // 所有 run 合计多大——那是 `withinRunBudget` 与 `persist` 的活。
+  return out;
+}
+
+/** 落盘削短的两档额度：先给到 8k/条，还超再给到 2k/条，最后才整份换占位 */
+const PERSIST_ROOMS = [8_192, 2_048];
+
+/** 逐 run 预算：从**尾部**（最旧的事件）开始让位，用户当下正在看的这条最后才动。
+ *  ⚠ 记账必须是**增量**的：以前每削一条都把整个 events 数组重新 stringify 一遍，
+ *  40 条 200 KB 的回执就足以把测试 worker 顶到 4 GB 堆溢出（本批实测撞到的）。
+ *  总量只算一次，之后每次替换只加减那一条的差值。 */
+function withinRunBudget(events: RunEvent[]): { events: RunEvent[]; trimmed: number } {
+  const out = [...events];
+  let total = storageChars(out);
+  if (total <= RUN_PERSIST_BUDGET) return { events: out, trimmed: 0 };
+  let trimmed = 0;
+  const swap = (i: number, next: RunEvent) => {
+    total += storageChars(next) - storageChars(out[i]);
+    out[i] = next;
+    trimmed++;
+  };
+  for (const room of PERSIST_ROOMS) {
+    for (let i = out.length - 1; i >= 0 && total > RUN_PERSIST_BUDGET; i--) {
+      const e = out[i];
+      if (e.kind !== "receipt" || !e.receipt || e.receipt.data === undefined) continue;
+      if (readDroppedPlaceholder(e.receipt.data) !== null || storageChars(e.receipt.data) <= room) continue;
+      const cut = excerptForStorage(e.receipt.data, room);
+      swap(i, cut.mode === "excerpt" && cut.data !== null && typeof cut.data === "object"
+        ? { ...e, receiptTruncated: true, receiptTrim: "excerpt", receipt: { ...e.receipt, data: cut.data } }
+        : droppedData(e));
+    }
+  }
+  for (let i = out.length - 1; i >= 0 && total > RUN_PERSIST_BUDGET; i--) {
+    const e = out[i];
+    if (e.kind !== "receipt" || !e.receipt || e.receipt.data === undefined || readDroppedPlaceholder(e.receipt.data) !== null) continue;
+    swap(i, droppedData(e));
+  }
+  return { events: out, trimmed };
+}
+
+/**
+ * P138-B：落盘这件事的**可观察结果**。以前 `persist()` 的失败是一句 `catch { /* 忽略 *\/ }`——
+ * 配额满了没人知道自己丢过东西（§8-46：兜底不是错，"兜底 + 没人盯着覆盖度"才是错）。
+ * 现在三档都出声：削了多少条 data、掉了多少个 run、写盘到底成没成。
+ */
+export interface PersistStatus { chars: number; trimmedDatas: number; droppedRuns: number; failed: boolean; at: number }
+let persistStatus: PersistStatus | null = null;
+export function getPersistStatus(): PersistStatus | null {
+  return persistStatus;
+}
+
 function persist() {
+  let trimmedDatas = 0;
+  // 每个 run 的字节数只量一次（同样是 O(n²) 的坑：以前每次判断都 stringify 整包）
+  const rows = runs.slice(0, RUNS_KEPT).map((r) => {
+    const capped = withinRunBudget(r.events.slice(-EVENTS_CAP).map(trimEvent));
+    trimmedDatas += capped.trimmed;
+    const row = { ...r, events: capped.events, pending: [] };
+    return { row, chars: storageChars(row) };
+  });
+  let chars = rows.reduce((n, x) => n + x.chars, 0);
+  let droppedRuns = 0;
+  // 全局预算：`runs[0]` 是最新（startRun 用 unshift），所以从尾部丢起 = 先丢最旧的整条记录
+  while (chars > TOTAL_PERSIST_BUDGET && rows.length > 1) {
+    const gone = rows.pop();
+    if (!gone) break;
+    chars -= gone.chars;
+    droppedRuns++;
+  }
+  const payload = rows.map((x) => x.row);
   try {
-    const payload = runs.slice(0, RUNS_KEPT).map((r) => ({
-      ...r,
-      events: r.events.slice(-EVENTS_CAP).map(trimEvent),
-      pending: [],
-    }));
     localStorage.setItem(STORE_KEY, JSON.stringify(payload));
-  } catch {
-    /* 配额满/隐私模式：台账仅会话内可见 */
+    persistStatus = trimmedDatas || droppedRuns ? { chars, trimmedDatas, droppedRuns, failed: false, at: Date.now() } : null;
+    if (trimmedDatas || droppedRuns) {
+      console.warn(`[agentRun] 台账落盘被削：${trimmedDatas} 条回执正文降档、${droppedRuns} 条记录未落盘（现约 ${chars} 字符）`);
+    }
+  } catch (e) {
+    persistStatus = { chars, trimmedDatas, droppedRuns, failed: true, at: Date.now() };
+    console.warn(`[agentRun] 台账落盘失败（${String((e as Error)?.name ?? e).slice(0, 40)}）：本次仅会话内可见，重启后回看不了`);
   }
 }
 
@@ -827,7 +903,8 @@ function safeArgs(raw: string | undefined): string {
 /**
  * 事件台账 → 对话骨架（P91 A4）。台账里有每轮模型正文、工具名/参数与完整回执，
  * 足以让模型接着往下想；轮次心跳、失败叙述、续跑标记不回灌（那是给人看的，不是历史）。
- * 已知精度损失：同轮多支调用的顺序按台账顺序还原；参数超出落盘上限（`ARGS_PERSIST_CAP` 2 KiB）
+ * 已知精度损失：同轮多支调用的顺序按台账顺序还原；参数超出落盘那把尺（P138-B 起与内存台账
+ * 同一把 `ARGS_LEDGER_CAP`）
  * 的调用**整对不入历史**（不是退化成 `{}` 假装是原参数），只在末尾如实标注丢了几对。
  */
 export function rebuildMessages(view: AgentRunView): AgentMessage[] {

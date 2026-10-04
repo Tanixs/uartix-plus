@@ -29,6 +29,8 @@ const { createLocalAgentAdapter } = await import("./agentAdapter");
 // P99a-A2：审批原语搬到 toolRegistry、清单上限搬到 localEntries（不再有"从适配器再导一次"的壳）
 const { argsHash, APPROVAL_TTL_MS } = await import("./toolRegistry");
 const { LIST_CAP, OVERVIEW_LIMIT } = await import("./localEntries");
+// P138-B：阈值必须由被测模块自己给——测试里再写一遍 8 KiB / 48 KiB 就是第二把尺
+const { RECEIPT_DATA_LIMIT } = await import("./context");
 // P99a-C1：parity 断言要用目录本体当参照（app_state 必须是它的投影，不是第二份读者）
 const { CATALOG_VIEWS, readCatalog } = await import("./hostCatalog");
 const { releaseDataLease, leaseCount } = await import("../plot/dataLease");
@@ -219,48 +221,36 @@ describe("agentAdapter 数据分析工具（§6.1 租约）", () => {
     expect(data.series[0].t).toHaveLength(500);
     expect(data.series[0].t[0]).toBe(0);
     expect(data.series[0].t[499]).toBe(49990);
-    // 请求 99999 → 硬顶 2000：P95-H3 先按形态压缩（回执里是分位数+首尾），
-    // 但**原文照存**并挂 artifactRef ⇒ 压缩不等于销毁，模型仍能要回逐点数据。
+    // 请求 99999 → 硬顶 2000（`localEntries` 里工具自管的那把顶，本批不动）。
+    // P138-B 改的是**阈值**：旧实现 8 KiB 一线，2000 点（约 3 万字节）被按形态抽稀成"分位数 + 首尾"，
+    // 模型要逐点数据还得再跑一轮 read_artifact；现在 48 KiB，这份窗口原样进台账
+    // （§8-34① 的正解：未超限就不许为了"压得更聪明"而销毁逐点保真度）。
     const c2 = call("plot_window", { maxPoints: 99999 });
     const r2 = await a.execute(c2, ctx("create"));
-    const d2 = r2.data as { shrunk?: { shape: string; dropped: number }; artifactRef?: string };
-    expect(d2.shrunk?.shape).toBe("series");
-    expect(d2.shrunk?.dropped).toBeGreaterThan(0);
-    expect(d2.artifactRef).toBe(`call:${c2.callId}`);
-    const stored = a.artifacts.get(`call:${c2.callId}`) as { series: { t: number[] }[] };
-    expect(stored.series[0].t.length).toBe(2000);
+    const d2 = r2.data as { series: { t: number[] }[]; shrunk?: { shape: string; dropped: number }; artifactRef?: string };
+    expect(d2.series[0].t).toHaveLength(2000);
+    expect(d2.shrunk, "没超限却被抽稀＝「更聪明的默认值也是回归」").toBeUndefined();
+    expect(d2.artifactRef).toBeUndefined();
   });
 
-  it("大回执转 artifactRef（带预览）；read_artifact 分页取回可完整拼回原文", async () => {
-    plot.getChanData.mockReturnValue({
-      t: Array.from({ length: 4000 }, (_, i) => i),
-      v: Array.from({ length: 4000 }, (_, i) => i),
-    });
-    const a = createLocalAgentAdapter({ runId: "r1", gate: fakeGate() });
-    const c = call("plot_window", { maxPoints: 2000 });
+  it("P138-B：真超限才压缩；多字段巨型回执按字段分配额度，不整份退化成 2000 字残骸", async () => {
+    const body = (tag: string) => `${tag}HEAD`.repeat(30) + "y".repeat(200_000) + `${tag}TAIL`.repeat(30);
+    runAppAction.mockResolvedValueOnce({ ok: true, data: { a: body("A"), b: body("B"), note: "末行统计在这" } });
+    const a = createLocalAgentAdapter({ runId: "rz", gate: fakeGate() });
+    const c = call("run_app_action", { kind: "setTheme", args: { name: "dark" } });
     const r = await a.execute(c, ctx("create"));
-    const d = r.data as { artifactRef?: string; shrunk?: { shape: string }; preview?: string };
-    // P95-H3：能按形态压进预算就不给"预览占位"，但一定挂可取回的 ref
-    expect(d.shrunk?.shape).toBe("series");
-    expect(d.artifactRef).toBe(`call:${c.callId}`);
-
-    let acc = "";
-    let from = 0;
-    for (let i = 0; i < 40; i++) {
-      const page = await a.execute(call("read_artifact", { ref: d.artifactRef, from }), ctx("create"));
-      const pd = page.data as { text: string; hasMore: boolean; nextFrom: number; from: number };
-      expect(pd.from).toBe(from);
-      expect(pd.text.length).toBeGreaterThan(0); // 保证有前进量，否则模型会在同一页死循环
-      acc += pd.text;
-      from = pd.nextFrom;
-      if (!pd.hasMore) break;
-    }
-    const restored = JSON.parse(acc) as { series: { t: number[] }[] };
-    expect(restored.series[0].t.length).toBe(2000); // 分页拼回 = 原样
-    // 读完了再要一页 → 空文本、hasMore=false（不报错，模型能自然停止）
-    const tail = await a.execute(call("read_artifact", { ref: d.artifactRef, from }), ctx("create"));
-    expect((tail.data as { hasMore: boolean; text: string }).hasMore).toBe(false);
-    expect((tail.data as { text: string }).text).toBe("");
+    const d = r.data as { a: string; b: string; note: string; preview?: string; artifactRef?: string };
+    expect(d.artifactRef, "超限必须挂上真能取回原文的引用（压缩不等于销毁）").toBe(`call:${c.callId}`);
+    expect(JSON.stringify(d).length).toBeLessThanOrEqual(RECEIPT_DATA_LIMIT);
+    expect(d.a.startsWith("AHEAD")).toBe(true);
+    expect(d.b.endsWith("BTAIL")).toBe(true);
+    // "给多"必须是可测量的长度，不是"看起来还在"：上一版断言只查头尾字样，
+    // 把 shrink 的 4000 字折回与分配器的 4.8 万字留在断言上**长得一样**（B2 探针因此红不了）。
+    expect(d.a.length, "留在台账里的正文长度就是这批要买的东西").toBeGreaterThan(8_000);
+    expect(d.note).toBe("末行统计在这");
+    expect(d.preview, "还能按字段分配时不许整份退化 preview").toBeUndefined();
+    const stored = a.artifacts.get(`call:${c.callId}`) as { a: string };
+    expect(stored.a, "缓存里那份必须是原文逐字").toBe(body("A"));
   });
 
   it("P94-G3：ref 不在缓存里如实报过期（旧实现报 not_found，模型以为是自己写错了参数）", async () => {

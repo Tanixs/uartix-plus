@@ -40,6 +40,8 @@ export interface SessionEvent {
   argsTruncated?: boolean;
   /** P94-G2（红线 A7）：落盘时回执内容被省略过——投影要说明，不能下发一条"没返回任何内容"的回执 */
   receiptTruncated?: boolean;
+  /** P138-B：落盘削到哪一档（没有=旧记录，按 `dropped` 读） */
+  receiptTrim?: "excerpt" | "dropped";
   receipt?: ToolReceipt;
   runId?: string;
 }
@@ -238,7 +240,10 @@ export function projectMessages(events: SessionEvent[], opts: ProjectOptions = {
       }
       case "tool/result": {
         if (!e.callId || !byCall.has(e.callId) || !e.receipt) break; // 孤儿回执不下发
-        if (e.receiptTruncated) omittedReceipts++;
+        // P138-B：只有"整份换成占位"那一档才算"内容没进来"。逐字段摘录（`excerpt`）的正文
+        // 结构、状态、其余字段都还在，把那句"未纳入本历史"套到它头上就是一句假话（§8-41）；
+        // 摘录态若真放不下，下面那台无模型裁剪器会自己再削一次并另给说明。
+        if (e.receiptTruncated && e.receiptTrim !== "excerpt") omittedReceipts++;
         flushAssistant();
         msgs.push({ role: "tool", callId: e.callId, content: receiptForModel(e.receipt) });
         break;

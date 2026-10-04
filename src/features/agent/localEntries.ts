@@ -25,13 +25,18 @@ import {
 import { PURE_UI_CAPS, autoEnableBlockedCaps } from "../plugins/pluginManifest";
 import { ARTIFACT_KINDS, artifactKindLabel, artifactKindMeta, type ArtifactKind } from "../plugins/artifact";
 import { agentPluginId, freeAgentId } from "../plugins/pluginId";
-import { RECEIPT_DATA_LIMIT } from "./context";
 import { channelStats, decimate } from "./runMath";
 import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolResultBody } from "./toolRegistry";
 import { setPlan, type PlanItem, type PlanStatus } from "./planLedger";
 
-/** 按引用取回时的单页字节上限（P94-G3）。等于回执裁剪线，保证"取回来的这一页"不会再被裁。 */
-export const ARTIFACT_PAGE_BYTES = RECEIPT_DATA_LIMIT;
+/**
+ * 一页取多少字节（P94-G3）。**刻意不等于 `RECEIPT_DATA_LIMIT`**，两条线是两件事：
+ * 那条是"要不要截断"的阈值，这条是"一次传多少"的传输经济（模型每页都得把它吃进上下文）。
+ * P138-B 抬阈值时这里是别名，等于顺手把每页成本抬了一档——本批把它拆回 8 KiB，
+ * **保持与改动前的行为一致**。（我一度在注释里写"相等时页会被适配器再截一层"，
+ * 用变异探针打不出去 ⇒ 那句没被证明 ⇒ 撤掉，只留能证的部分。）
+ */
+export const ARTIFACT_PAGE_BYTES = 8 * 1024;
 /**
  * `save_plugin` 的能力边界（P99a-D2）：包能声明什么**由产物元表决定**，模型没有加码的余地。
  * 不写清就会出现"存下来却静默不生效"的产物——小部件包没有 `ui.action`，它里面的 `uartix.app`
@@ -495,7 +500,7 @@ export const localToolEntries: AgentToolEntry[] = [
       `Save an artifact as a reusable local plugin package (uartix-plugin). Args: { kind: one of ${ARTIFACT_KINDS.join("|")}, name: string, payload: object (artifact content per kind; widget/panel payload = {format:'html',html} | {format:'declarative',blocks}; workspacePreset payload = {layout:<dockview JSON>, note?}; workflow payload = {goal:string, steps:[{tool,args?,note?}]} where every tool must be one you can actually call; module payload = {format:'js',code}); id?: string (dotted lowercase, default user.agent.*), desc?: string, enable?: boolean (auto-enable pure-UI plugin), update?: string (existing plugin id to revise), version?: string }. ` +
       "A workflow artifact is a reusable task template, NOT a macro runner: the user loads it into the Agent composer and it still goes through the current scope and approval rules. " +
       "Iterating on your own work: pass update (or just the same id) — it bumps the version and pushes the previous package onto the rollback stack instead of creating a near-duplicate plugin. " +
-      "P110-C: a name that already exists is now refused with `duplicate_plugin_name` plus `existing_candidates` (id/version/createdBy/state) — read that list, then either pass update=\"<id>\" or pick a distinguishable name. We no longer mint `-2` copies, because two side-by-side plugins left the user guessing which one is live. " +
+      "A name that already exists is refused with `duplicate_plugin_name` plus `existing_candidates` (id/version/createdBy/state) — read that list, then either pass update=\"<id>\" or pick a distinguishable name. Near-duplicate `-2` copies are never minted, because two side-by-side plugins left the user guessing which one is live. " +
       "Only plugins you (the agent) created can be revised silently; user/imported plugins return update_needs_user and are never overwritten. " +
       PLUGIN_CAP_BOUNDARY,
     parameters: {

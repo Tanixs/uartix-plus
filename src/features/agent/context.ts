@@ -14,8 +14,13 @@
  */
 import type { AgentMessage, ToolReceipt } from "./types";
 
-/** 单个回执 data 超此字节数即截断为摘要 + artifactRef。 */
-export const RECEIPT_DATA_LIMIT = 8 * 1024;
+/** 单个回执 data 超此字节数即截断为摘要 + artifactRef。
+ *  P138-B：8 KiB → 48 KiB。这是"报告读不到"的**上游真凶**：超了它就走 `shrinkByShape`，
+ *  压完仍超则整条退化成 2000 字的 preview 占位（`agentAdapter` 那条阶梯），
+ *  于是一份长报告在台账里只剩两千字，而「导出为 md」正是用户拿去离线提问的文件。
+ *  ⚠ 它必须**不小于** shrink 折完之后的量（`TEXT_HEAD + TEXT_TAIL` + meta），
+ *  否则抬了 shrink 反而让更多回执掉进 preview 那一档——两个数字是一对，不是各定各的。 */
+export const RECEIPT_DATA_LIMIT = 48 * 1024;
 /** 折叠后仍超此字符数才继续折叠更早轮次（近似，非精确 token）。 */
 export const CONTEXT_SOFT_LIMIT = 120 * 1024;
 /** 折叠时保留最近多少条消息（约 N 轮）不动。 */
@@ -225,6 +230,123 @@ export const PRUNE_HEAD_BYTES = 1_200;
 export const PRUNE_TAIL_BYTES = 600;
 /** 末尾这么多条不动：那是模型当前的工作集，裁它的尾巴等于让它在关键一步上盲猜 */
 export const PRUNE_KEEP_RECENT = 2;
+
+/* ---------------- P138-B：落盘侧的配额（与上面那组数字是两把尺，各有各的理由） ----------------
+ * 上面那组（PRUNE_*）管的是**每一轮发给模型**的字节——那是要花钱的地方，所以裁得狠，
+ * 且只在真放不下时才裁（§8-34①）。下面这组管的是**留在磁盘上的那份台账**——写一次就不再花钱，
+ * 所以可以给多；但必须有界：localStorage 是每 origin 的小配额（业界沿袭 5 MB 口径，
+ * 且按 UTF-16 存，中文翻倍），"给多"的天花板不在应用里，而在浏览器存储这一层。
+ * ⚠ 单位是**字符**（`JSON.stringify(v).length`），不是 UTF-8 字节——两把尺口径本来就不同，
+ *  写清楚免得下一个人以为它们该对齐；抬这些数字之前要先在真宿主里测配额（详设 §6），不许拍。
+ * ⚠ 这里**刻意没有"单条上限"**：进台账那一层已经有 `RECEIPT_DATA_LIMIT`（48 KiB）管着单条大小，
+ *  落盘再设一把比它更宽的尺就是永远不可达的死代码（§8-54②：摘掉仍绿的代码该删）。
+ *  落盘这一层只问两件事：这个 run 多大、所有这些 run 加起来多大。
+ */
+/** 单个 run 落盘副本的字符预算 */
+export const RUN_PERSIST_BUDGET = 768_000;
+/** 全部 run 合计的字符预算：按 5 MB 口径折半（UTF-16）再留一半余量 ⇒ 1.5 M 字符 */
+export const TOTAL_PERSIST_BUDGET = 1_500_000;
+
+/** 落盘测量口径：字符串长度（不是 UTF-8 字节数） */
+export const storageChars = (v: unknown): number => {
+  try {
+    return JSON.stringify(v ?? null)?.length ?? 0;
+  } catch {
+    return 0;
+  }
+};
+
+/** 标记本身占的字符预算（那句"省略了多少"写得再准也要地方） */
+const MARKER_ROOM = 60;
+/** 单个字段削到比这还短就没有可读价值：与其给一行残骸，不如老实说"整份省略" */
+const MIN_FIELD_ROOM = 1_200;
+
+/** 头 + 〔省略 N 字〕 + 尾。`room` 是这个字段分到的总字符额度（头尾按 0.65/0.35 分） */
+function squeezeMiddle(full: string, room: number): { text: string; omitted: number } | null {
+  if (full.length <= room) return null;
+  const head = Math.floor(room * 0.65);
+  const tail = room - head - MARKER_ROOM;
+  if (tail <= 0) return null;
+  const h = full.slice(0, head);
+  const t = full.slice(-tail);
+  const omitted = full.length - h.length - t.length;
+  return { text: `${h}\n〔摘录：中间省略 ${omitted} 字，头尾照原文〕\n${t}`, omitted };
+}
+
+type Leaf = { box: Record<string, unknown>; key: string };
+
+/** 浅复制一层（对象与数组项）：削的是副本，台账本体一字节不动（§8-34② 同一条不变式） */
+function shallowWork(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map((it) => (it && typeof it === "object" ? shallowWork(it) : it));
+  if (v && typeof v === "object") {
+    const box: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) box[k] = val && typeof val === "object" ? shallowWork(val) : val;
+    return box;
+  }
+  return v;
+}
+
+/** 收出所有字符串叶子（含数组项里的对象字段）——结构型字段（数字/布尔）不参与削短 */
+function collectLeaves(node: unknown, out: Leaf[] = []): Leaf[] {
+  if (Array.isArray(node)) { for (const it of node) collectLeaves(it, out); return out; }
+  if (!node || typeof node !== "object") return out;
+  const box = node as Record<string, unknown>;
+  for (const [k, v] of Object.entries(box)) {
+    if (typeof v === "string") { out.push({ box, key: k }); continue; }
+    if (v && typeof v === "object") collectLeaves(v, out);
+  }
+  return out;
+}
+
+/**
+ * 落盘副本削短：**按剩余额度分配**，而不是给每个字段各留一大坨。
+ * 第一版就栽在这里——每个长字段各留 4.8 万字，三个字段顶穿总上限，只能退回整份丢弃，
+ * 于是"给多"在实现里悄悄变回"没了"（写这类东西时最容易自欺的形状）。
+ *
+ * 只削**超长的字符串叶子**：结构、计数、状态、短字段一律照留。为什么不整条丢掉（旧行为）：
+ * 整条丢会连"这次调用返回过什么形状"一起消失，而人和模型要的恰恰是结构 + 一段可读正文
+ * （P94-G2 那句"必须留下可辨认的痕迹"是同一件事）。
+ * 分完额度仍放不下（结构本身巨大）才退回占位——那是第二档，`mode` 要说得出是哪一档（§8-41）。
+ */
+export function excerptForStorage(data: unknown, cap: number): { data: unknown; omitted: number; mode: "kept" | "excerpt" | "dropped" } {
+  const chars = storageChars(data);
+  if (chars <= cap) return { data, omitted: 0, mode: "kept" };
+  if (typeof data === "string") {
+    const s = squeezeMiddle(data, cap);
+    return s ? { data: s.text, omitted: s.omitted, mode: "excerpt" } : { data: null, omitted: chars, mode: "dropped" };
+  }
+  const work = shallowWork(data);
+  if (!work || typeof work !== "object") return { data: null, omitted: chars, mode: "dropped" };
+  const leaves = collectLeaves(work);
+  if (!leaves.length) return { data: null, omitted: chars, mode: "dropped" };
+  const leafChars = leaves.reduce((n, l) => n + String(l.box[l.key]).length, 0);
+  const rest = Math.max(0, storageChars(work) - leafChars);
+  const room = Math.floor((cap - rest) / leaves.length) - MARKER_ROOM;
+  if (room < MIN_FIELD_ROOM) return { data: null, omitted: chars, mode: "dropped" };
+  let omitted = 0;
+  for (const l of leaves) {
+    const s = squeezeMiddle(l.box[l.key] as string, room);
+    if (s) { l.box[l.key] = s.text; omitted += s.omitted; }
+  }
+  if (storageChars(work) > cap) return { data: null, omitted: chars, mode: "dropped" };
+  return omitted ? { data: work, omitted, mode: "excerpt" } : { data, omitted: 0, mode: "kept" };
+}
+
+/**
+ * 落盘"整份省略"的占位形状。**写侧与读侧共用这两个函数**——它是线格式，各写一遍就是
+ * 第二份真相（§8-36），而这种漂移的表现很静：导出里那句"内容已省略"永远说不出来。
+ *
+ * ⚠ 键名刻意不叫 `truncated` / `bytes`：`fs_read` 的正常返回就是
+ * `{content, from, bytes, returned, truncated, nextFrom}`（`generalTools.ts:707`），
+ * 用那两个名字会把一次**完整存在**的分页读取误判成"正文被落盘抹掉"——把假话说得像格式问题。
+ * `atRestOmitted` 没有任何工具在用，才是安全的判别键。
+ */
+export const droppedPlaceholder = (chars: number): { atRestOmitted: true; chars: number } => ({ atRestOmitted: true, chars });
+export const readDroppedPlaceholder = (data: unknown): number | null => {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const d = data as { atRestOmitted?: unknown; chars?: unknown };
+  return d.atRestOmitted === true && typeof d.chars === "number" ? d.chars : null;
+};
 
 export interface PruneOptions {
   /** "这一套发得下吗"。两条压缩线口径不同（传输按字节、窗口投影按字符），所以由调用方给 */

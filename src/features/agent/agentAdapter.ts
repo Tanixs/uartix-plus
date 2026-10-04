@@ -15,7 +15,7 @@ import { openPlanText } from "./planLedger";
 import { getSnapshot as getSerial } from "../serial/serialStore";
 import { hasDataLease } from "../plot/dataLease";
 import { shrinkByShape } from "./shrink";
-import { RECEIPT_DATA_LIMIT } from "./context";
+import { RECEIPT_DATA_LIMIT, excerptForStorage } from "./context";
 import { ARTIFACT_PAGE_BYTES } from "./localEntries";
 import { hasDomain, isFullAuthority, type Domain } from "./scopeTiers";
 import { hostEntryNames, hostToolEntries } from "./hostEntries";
@@ -77,13 +77,36 @@ function rememberArtifact(scratch: RunScratch, receipt: ToolReceipt): ToolReceip
     fullBytes: originalBytes,
     note: `完整内容已缓存，用 read_artifact { ref: "${ref}" } 分页取回（每页 ${ARTIFACT_PAGE_BYTES} 字节）`,
   };
+  /**
+   * 控制字段与散文分开合。**`artifactRef`/`shrunk`/`fullBytes` 必须宿主说了算**——那是"能不能取回原文"
+   * 的事实，让业务字段盖上来就是一张兑不了的支票（§8-41 那一族）；
+   * **`note` 则让位给 data 自己的同名字段**：本批第一条测试就撞出这个形状——
+   * 工具返回 `{a, b, note}` 时，宿主那句"完整内容已缓存…"会把用户的 `note` 整字抹掉，
+   * 而读台账的人只会以为"这次调用根本没有 note 字段"。
+   */
+  const { note: hostNote, ...control } = meta;
+  const merge = (box: Record<string, unknown>) => ({
+    ...box, ...control, ...(box.note === undefined ? { note: hostNote } : {}),
+  });
   const shapedBytes = JSON.stringify(shaped.data).length;
   // 数组型 data 不能 spread 成对象（会把 `[a,b]` 变成 `{0:a,1:b}`）——引用走回执自带的 artifactRefs
   if (Array.isArray(shaped.data)) {
     return { ...receipt, artifactRefs: [ref], data: shaped.data };
   }
   if (shapedBytes <= RECEIPT_DATA_LIMIT && shaped.data !== null && typeof shaped.data === "object") {
-    return { ...receipt, data: { ...(shaped.data as Record<string, unknown>), ...meta } };
+    return { ...receipt, data: merge(shaped.data as Record<string, unknown>) };
+  }
+  /**
+   * P138-B：压完仍超限，旧行为是**整条退化成 2000 字的 preview**——几段各两万字的证据一起折成两千字，
+   * 而这份台账正是「导出为 md」的数据源，用户拿去离线问的就是这里。
+   * 现在交给与落盘同一台分配器（`excerptForStorage`）：按剩余额度给每个长字段分头尾，
+   * 结构、计数、短字段全留。只有分配器自己也救不了（结构本身巨大）才退回 preview 那一档。
+   */
+  if (shaped.data !== null && typeof shaped.data === "object") {
+    const fit = excerptForStorage(shaped.data, RECEIPT_DATA_LIMIT);
+    if (fit.mode !== "dropped" && fit.data !== null && typeof fit.data === "object") {
+      return { ...receipt, data: merge(fit.data as Record<string, unknown>) };
+    }
   }
   const preview = typeof shaped.data === "string"
     ? shaped.data.slice(0, 2000)

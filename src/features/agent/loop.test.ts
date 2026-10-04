@@ -213,7 +213,10 @@ it("invalid JSON arguments never reach the adapter", async () => {
 
 it("oversized receipt data is truncated before feeding the model; ledger keeps full receipt", async () => {
   stubStorage();
-  const big = "x".repeat(9 * 1024);
+  // P138-B：夹具要从 9 KiB 抬到超过新的 `RECEIPT_DATA_LIMIT`（48 KiB）。
+  // 这条测试钉的是"超限的正文不许整段喂给模型、而台账保留全量"——那条性质一条没松；
+  // 抬的是**阈值**，所以夹具必须跟着过线，否则它只是在测一段本来就不用削的数据。
+  const big = "x".repeat(60 * 1024);
   let modelSawTruncated = false;
   let modelSawFakeRef = false;
   const provider: AgentProvider = async (messages) => {

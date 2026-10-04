@@ -18,10 +18,15 @@ export const KEEP_EDGES = 8;
 export const KEEP_ITEMS = 12;
 /** 树/目录类：每层保留前 N 个子项 */
 export const KEEP_TREE = 30;
-/** 长文本类：超过这个长度就换头/尾摘录（单位字符） */
-export const TEXT_CLAMP = 4000;
-export const TEXT_HEAD = 1600;
-export const TEXT_TAIL = 1600;
+/** 长文本类：超过这个长度就换头/尾摘录（单位字符）
+ *  P138-B：4000 → 32000。这条才是"报告读不到"的真凶——它作用于**进台账的那一份副本**，
+ *  落盘那把尺（`DATA_PERSIST_CAP`）在它下游，根本轮不到。一份子代理报告、一次 `fs_read`
+ *  的正文都被折成 3200 字存着，而「导出为 md」正是用户拿去离线提问的文件。
+ *  ⚠ 这条不是发送预算：发出去的那一份仍由软顶与 P135-A 的裁剪阶梯自适应（未超限才全量带，
+ *  超限先削这条大的）。所以抬高它多花的是磁盘，不是每一轮的钱——除非上下文真的顶到软顶。 */
+export const TEXT_CLAMP = 32_000;
+export const TEXT_HEAD = 16_000;
+export const TEXT_TAIL = 10_000;
 
 export interface ShapedResult {
   data: unknown;

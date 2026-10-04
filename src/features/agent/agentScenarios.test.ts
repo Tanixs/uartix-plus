@@ -29,6 +29,8 @@ const { releaseDataLease } = await import("../plot/dataLease");
 
 const { invokeAgentProvider } = await import("./provider");
 const agentRun = await import("./agentRun");
+// P138-B：页大小是"一次传多少"，与截断线（一次留多少）分家；测试必须读同一枚常数而不是抄数字
+const { ARTIFACT_PAGE_BYTES } = await import("./localEntries");
 import type { AgentMessage, AgentProvider, ModelTurn } from "./types";
 
 /** 已执行工具调用数 = 消息序列中的 tool 回执数（确定性步数）。 */
@@ -46,7 +48,16 @@ beforeEach(() => {
   agentRun.resetForTests();
 });
 
+describe("P138-B：两条线必须分家（不自我引用的不变式）", () => {
+  it("页大小必须明显小于截断线——相等就等于把「一次传多少」钉死在「一次留多少」上", async () => {
+    const { RECEIPT_DATA_LIMIT } = await import("./context");
+    // 上一条断言拿常数验常数，是同义反复（改常数它一定跟着过）；这条比的是两枚常数之间的关系。
+    expect(ARTIFACT_PAGE_BYTES * 4).toBeLessThan(RECEIPT_DATA_LIMIT);
+  });
+});
+
 describe("P88b-2 三跨工具场景", () => {
+
   it("场景① 主题/布局：读→建卡→应用主题→修正→撤销设置", async () => {
     let readRevision = "";
     const script: AgentProvider = async (messages) => {
@@ -109,10 +120,14 @@ describe("P88b-2 三跨工具场景", () => {
   });
 
   it("场景③ 数据分析：租约采样 → 读窗口 → 指标 → 报告回填", async () => {
-    // 600 点正弦窗口（>8KiB 才走压缩这条道）：模型侧计算 min/max 并写报告卡
+    // P138-B 改了这条的前提：`plot_window` 硬顶 2000 点（约 3 万字节），落在新的 48 KiB 阈值之内
+    // ⇒ 窗口**原样**进上下文，不再"先抽稀、再让模型分页要回逐点数据"
+    // （§8-34①：未超限就原样，压缩的唯一触发条件是超限）。
+    // 压缩与分页那条路仍各自有人钉：agentAdapter 的"真超限才压缩 + 按字段分配额度"、loop 的 P94-G3 两条。
+    let wroteCard = false;
     plot.getChanData.mockReturnValue({
-      t: Array.from({ length: 600 }, (_, i) => i * 10),
-      v: Array.from({ length: 600 }, (_, i) => Math.sin(i / 10)),
+      t: Array.from({ length: 2000 }, (_, i) => i * 10),
+      v: Array.from({ length: 2000 }, (_, i) => Math.sin(i / 10)),
     });
     const script: AgentProvider = async (messages) => {
       const step = doneCount(messages);
@@ -122,42 +137,55 @@ describe("P88b-2 三跨工具场景", () => {
         .filter((m) => m.role === "tool")
         .map((m) => JSON.parse(m.content).data as Record<string, unknown> | undefined);
       if (step === 0) return { content: "订阅并枚举通道", calls: [{ callId: "c1", name: "plot_channels", arguments: "{}" }] };
-      if (step === 1) return turn("plot_window", { channelIds: ["c1"], maxPoints: 600 });
+      if (step === 1) return turn("plot_window", { channelIds: ["c1"], maxPoints: 2000 });
       if (step === 2) {
-        // P95-H3：模型看到的是形态压缩后的摘要（分位数 + 首尾），全量仍可分页取回
+        // 这条场景**仍然**走压缩：2000 个点的 `v` 是 17 位浮点，整份窗口实测越过 48 KiB 那条线
+        // （同一条场景在 `agentAdapter.test` 里的整数版本则落在线内、原样进台账——两条一起把阈值两侧都盖住）。
         const pw = toolData()[1] as { series?: { points: number }[]; artifactRef?: string };
-        expect(pw.series?.[0].points).toBe(600);
-        expect(pw.artifactRef, "压缩过的收据必须带可取回的 artifactRef").toBeTruthy();
+        expect(pw.series?.[0].points).toBe(2000);
+        expect(pw.artifactRef, "压缩过的收据必须带一个真能取回原文的 ref").toBeTruthy();
         return turn("read_artifact", { ref: pw.artifactRef });
       }
-      if (step === 3) {
-        // 一页只有 8KiB：hasMore 就得用 nextFrom 续要（这就是模型侧的真实循环）
-        const page = toolData()[2] as { hasMore?: boolean; nextFrom?: number; from?: number };
-        expect(page.from).toBe(0);
-        expect(page.hasMore).toBe(true);
-        const pw = toolData()[1] as { artifactRef?: string };
-        return turn("read_artifact", { ref: pw.artifactRef, from: page.nextFrom });
-      }
-      if (step === 4) {
-        // 拼回全量后算指标（正弦峰值 ≈ 0.999）
-        const pages = toolData()
-          .filter((d): d is { text: string; from: number } =>
-            typeof d?.text === "string" && typeof d?.from === "number")
-          .sort((a, b) => a.from - b.from)
-          .map((d) => d.text)
-          .join("");
-        const full = JSON.parse(pages) as { series: { v: number[] }[] };
-        expect(full.series[0].v).toHaveLength(600);
+      // 分页循环：一页只有 ARTIFACT_PAGE_BYTES，`hasMore` 为真就得按 nextFrom 续要——
+      // 这就是模型侧的真实循环。旧剧本把页数写死（两页），换窗口大小就会在半截 JSON 上 parse 失败，
+      // 那正是"剧本假设了阈值"的形状；现在按 hasMore 续到取完为止。
+      const pages = toolData()
+        .filter((d): d is { text: string; from: number; hasMore?: boolean; nextFrom?: number } =>
+          typeof d?.text === "string" && typeof d?.from === "number")
+        .sort((a, b) => a.from - b.from);
+      if (pages.length) {
+        const last = pages[pages.length - 1];
+        expect(pages[0].from, "第一页必须从头开始").toBe(0);
+        // 取回来的那一页不许被再截一层：页大小一旦等于截断线，适配器会把这一页当成"超限回执"
+        // 再折一次并生成新 ref ⇒ 模型永远取不完（本批把 ARTIFACT_PAGE_BYTES 与阈值拆开就是为了这条）。
+        // 分页结果不许被二次裁剪，也不许跟着截断线一起变胖（页大小是传输经济，两条线分家才有这条）
+        expect(pages.some((p) => (p as { shrunk?: unknown }).shrunk !== undefined), "分页结果被二次裁剪").toBe(false);
+        expect(Math.max(...pages.map((p) => p.text.length)), "每页的正文长度必须由 ARTIFACT_PAGE_BYTES 定")
+          .toBeLessThanOrEqual(ARTIFACT_PAGE_BYTES + 8);
+        if (last.hasMore) {
+          // 剧本必须自己封顶：预算默认不限轮数（2026-09-26 裁决），一个不会停的续要是能把
+          // 测试 worker 顶到堆溢出的（本批实测撞过一次）。真取不完就该红，不该 OOM。
+          expect(pages.length, "分页续到第 20 页还没完 ⇒ 说明 hasMore/nextFrom 不收敛，是真缺陷").toBeLessThan(20);
+          return turn("read_artifact", { ref: (toolData()[1] as { artifactRef?: string }).artifactRef, from: last.nextFrom });
+        }
+        if (wroteCard) return { content: "诊断报告已回填", calls: [] };
+        const full = JSON.parse(pages.map((d) => d.text).join("")) as { series: { v: number[] }[] };
+        expect(full.series[0].v).toHaveLength(2000);
         const max = Math.max(...full.series[0].v);
+        wroteCard = true;
         return turn("run_app_action", { kind: "writeCard", args: { id: "rpt-1", title: "振动分析", kind: "report", summary: { max } } });
       }
+      // 卡片写过就得收工。旧剧本靠 `step === 4` 这种写死的步数停在这一点上；
+      // 改成按状态判，是因为上一版我把"续到 hasMore 为假"写成循环后，
+      // 取完页之后每一轮都重新算一遍指标再发一次 writeCard —— 3125 轮、6250 条消息，
+      // 直接把测试 worker 顶到堆溢出（预算默认不限轮数，所以剧本自己必须会停）。
       return { content: "诊断报告已回填", calls: [] };
     };
     vi.mocked(invokeAgentProvider).mockImplementation(script);
     const runId = await agentRun.startRun({ goal: "场景3：读取曲线做诊断报告", scope: "create" });
     const view = agentRun.getSnapshot().runs.find((r) => r.runId === runId)!;
     expect(view.status).toBe("succeeded");
-    expect(view.calls).toBe(5);
+    expect(view.calls).toBeGreaterThanOrEqual(5);
     // 报告卡拿到的是真实窗口算出的指标
     const reportCall = runAppAction.mock.calls.find((c) => c[0] === "writeCard");
     expect((reportCall?.[1] as { summary?: { max?: number } }).summary?.max).toBeGreaterThan(0.99);
