@@ -229,8 +229,8 @@ function ToolCard({
               <span className="ai-agent-k">{tx("额度", "Budget")}</span>
               <span className="ai-agent-v">
                 {tx(
-                  `${sub.rounds}/${sub.caps.maxRounds} 轮 · ${sub.calls}/${sub.caps.maxCalls} 次 · 用时 ${fmtElapsed(sub.elapsedMs ?? 0)}${sub.capHit ? ` · ${SUB_CAP_HIT_TX[sub.capHit]()}` : ""}`,
-                  `${sub.rounds}/${sub.caps.maxRounds} rounds · ${sub.calls}/${sub.caps.maxCalls} calls · ${fmtElapsed(sub.elapsedMs ?? 0)}${sub.capHit ? ` · ${SUB_CAP_HIT_TX[sub.capHit]()}` : ""}`,
+                  `${sub.rounds}/${capOf(sub.caps.maxRounds)} 轮 · ${sub.calls}/${capOf(sub.caps.maxCalls)} 次 · 用时 ${fmtElapsed(sub.elapsedMs ?? 0)}${sub.capHit ? ` · ${SUB_CAP_HIT_TX[sub.capHit]()}` : ""}${sub.caps.maxRounds === 0 || sub.caps.maxCalls === 0 ? "（∞ = 不设上限）" : ""}`,
+                  `${sub.rounds}/${capOf(sub.caps.maxRounds)} rounds · ${sub.calls}/${capOf(sub.caps.maxCalls)} calls · ${fmtElapsed(sub.elapsedMs ?? 0)}${sub.capHit ? ` · ${SUB_CAP_HIT_TX[sub.capHit]()}` : ""}${sub.caps.maxRounds === 0 || sub.caps.maxCalls === 0 ? ` (∞ = no ceiling)` : ""}`,
                 )}
               </span>
             </div>
@@ -627,8 +627,8 @@ function RunBlock({ view }: { view: AgentRunView }) {
           return (
             <div key={s.callId} className="ai-agent-note">
               {tx(
-                `子代理正在查「${briefGoal}」· 第 ${s.rounds}/${s.caps.maxRounds} 轮 · 工具 ${s.calls}/${s.caps.maxCalls} 次${last ? ` · 上一步 ${last.k}` : ""}（只读面，改动仍由本任务自己发起）`,
-                `Sub-agent digging into “${briefGoal}” · round ${s.rounds}/${s.caps.maxRounds} · ${s.calls}/${s.caps.maxCalls} calls${last ? ` · last step ${last.k}` : ""} (read-only face; changes still come from this task's own calls)`,
+                `子代理正在查「${briefGoal}」· 第 ${s.rounds}/${capOf(s.caps.maxRounds)} 轮 · 工具 ${s.calls}/${capOf(s.caps.maxCalls)} 次${last ? ` · 上一步 ${last.k}` : ""}（只读面，改动仍由本任务自己发起）`,
+                `Sub-agent digging into “${briefGoal}” · round ${s.rounds}/${capOf(s.caps.maxRounds)} · ${s.calls}/${capOf(s.caps.maxCalls)} calls${last ? ` · last step ${last.k}` : ""} (read-only face; changes still come from this task's own calls)`,
               )}
             </div>
           );

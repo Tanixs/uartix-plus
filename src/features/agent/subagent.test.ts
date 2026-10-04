@@ -32,7 +32,7 @@ const plot = vi.hoisted(() => ({
 vi.mock("../plot/plotStore", () => plot);
 vi.mock("../ai/extRuntime", () => ({ applyStyleExts: vi.fn() }));
 
-const { SUBAGENT_FACE, SUBAGENT_CAPS, subagentCaps, subagentToolEntries } = await import("./subagent");
+const { SUBAGENT_FACE, SUBAGENT_CAPS, subagentCaps, subagentCapHit, subagentToolEntries } = await import("./subagent");
 const { createReadOnlyAgentAdapter } = await import("./agentAdapter");
 const { hostEntryByName } = await import("./hostEntries");
 const { toolHarness, recordingGate } = await import("./toolTestKit");
@@ -129,15 +129,27 @@ describe("授权域继承（判据③：不能再扩权）", () => {
 });
 
 describe("预算继承（判据②）", () => {
-  it("null 才是不限；数字包括 0 都照实夹取，0 直接不许开跑", () => {
+  it("父剩多少就交多少；父不限则跟着不限；父剩 0 一律不许开跑", () => {
+    // P138-A 撤掉自带上限 ⇒ SUBAGENT_CAPS 三项都是 0（=不限）。
+    // 契约变更（§8-44 口径）：旧断言钉的是"子有一档自己的顶（16 次）"，那档现在没了；
+    // 换成钉"父剩 40 次就交 40 次"——它同时是撤除后最容易写反的那处：
+    // 若照 `Math.min(own=0, 40)` 取，0 会被 loop 读成"不限" ⇒ 绕开父预算（P135-B §3 那颗雷复活）。
     expect(subagentCaps(undefined)).toEqual(SUBAGENT_CAPS);
     expect(subagentCaps({ rounds: null, calls: null, ms: null })).toEqual(SUBAGENT_CAPS);
     expect(subagentCaps({ rounds: 2, calls: 40, ms: 30_000 }))
-      .toEqual({ maxRounds: 2, maxCalls: SUBAGENT_CAPS.maxCalls, timeoutMs: 30_000 });
+      .toEqual({ maxRounds: 2, maxCalls: 40, timeoutMs: 30_000 });
     // ⚠ 这三条是本批最容易写错的地方：caps 的 0 = 不限，父额度用完也是 0
     expect(subagentCaps({ rounds: 0, calls: 5, ms: 5_000 }), "父轮数用尽还放行 ⇒ 派子任务成了绕过预算的路").toBeNull();
     expect(subagentCaps({ rounds: 3, calls: 0, ms: 5_000 })).toBeNull();
     expect(subagentCaps({ rounds: 3, calls: 3, ms: 0 }), "已到时限还放行").toBeNull();
+  });
+
+  it("撞顶判定不再把'不限'读成'用尽'（0 档必须跳过，否则每次派发都报撞顶）", () => {
+    expect(subagentCapHit({ maxRounds: 0, maxCalls: 0, timeoutMs: 0 }, { rounds: 99, calls: 99, elapsedMs: 10 ** 9 })).toBeNull();
+    expect(subagentCapHit({ maxRounds: 3, maxCalls: 0, timeoutMs: 0 }, { rounds: 3, calls: 99, elapsedMs: 10 ** 9 })).toBe("rounds");
+    expect(subagentCapHit({ maxRounds: 9, maxCalls: 4, timeoutMs: 0 }, { rounds: 1, calls: 4, elapsedMs: 1 })).toBe("calls");
+    expect(subagentCapHit({ maxRounds: 9, maxCalls: 9, timeoutMs: 1000 }, { rounds: 1, calls: 1, elapsedMs: 1000 })).toBe("ms");
+    expect(subagentCapHit({ maxRounds: 9, maxCalls: 9, timeoutMs: 1000 }, { rounds: 1, calls: 1, elapsedMs: 999 })).toBeNull();
   });
 
   it("开关关着 → subagent_disabled，而且不弹批准卡（白要一次确认＝橡皮图章）", async () => {

@@ -85,7 +85,8 @@ beforeEach(() => {
   childTurns = 0;
   childNeverStops = false;
   agentRun.resetForTests();
-  settings.patch({ agentSubagent: true });
+  // 预算与开关都在 beforeEach 显式复位：设置项是全局 store，单条用例里 patch 过的值会留给后面的用例
+  settings.patch({ agentSubagent: true, agentMaxRounds: 0, agentMaxCalls: 0 });
 });
 
 describe("P137 派发的实时过程：接得上、且放对位置", () => {
@@ -97,7 +98,10 @@ describe("P137 派发的实时过程：接得上、且放对位置", () => {
     expect(toolsOf(live!.events)).toContain(CHILD_TOOL);
     expect(live!.done).toBe(true);
     expect(live!.status).toBe("succeeded");
-    expect(live!.caps).toEqual({ maxRounds: 6, maxCalls: 16, timeoutMs: 180_000 });
+    expect(live!.caps).toEqual({ maxRounds: 0, maxCalls: 0, timeoutMs: 0 });
+    // P138-A：父任务默认不限（`agentMaxRounds: 0 = 不限`）⇒ 子也不限。
+    // 若这里读出来是 6/16/180000，说明自带上限被谁加回去了；若是"父剩 N"而父并未设上限，
+    // 那就是把"不限"当 0 的那处反向雷写回来了（详设 §2）。
     expect(live!.rounds).toBeGreaterThanOrEqual(1);
   });
 
@@ -144,8 +148,10 @@ describe("P137 派发的实时过程：接得上、且放对位置", () => {
     expect(agentRun.liveSubRunsOf(runId)).toEqual([]);
   });
 
-  it("子撞自己的轮数顶：回执要说得出是**哪一项**用尽，而不是只回一个终态", async () => {
-    // 子代理每轮都发一次调用、永不收工 ⇒ 6 轮那一项先到线（`SUBAGENT_CAPS.maxRounds`）
+  it("父设了额度时子撞的是**父的剩余**——撤掉自带上限不等于撤掉边界", async () => {
+    // P138-A 之后子没有自己那一档了；这条钉的是"边界只剩一个出处"仍然成立（P135-B §3 那颗雷）。
+    // 父 4 轮：第一轮派子 ⇒ 交下去的剩余额度 = 3，子永不收工就只能跑 3 轮。
+    settings.patch({ agentMaxRounds: 4 });
     childNeverStops = true;
     const runId = await oneDispatch();
     const view = agentRun.getSnapshot().runs.find((r) => r.runId === runId)!;
@@ -155,10 +161,11 @@ describe("P137 派发的实时过程：接得上、且放对位置", () => {
     const data = asSubagentData(rec.receipt!.data)!;
     expect(data.subStatus).toBe("paused");
     expect(data.capHit).toBe("rounds");
-    expect(data.rounds).toBe(SUBAGENT_CAPS.maxRounds);
-    // 内存表里同一件事也要答得出（界面上的"额度 6/6 轮"用的就是这份）
+    expect(data.caps).toEqual({ maxRounds: 3, maxCalls: 0, timeoutMs: 0 });
+    expect(data.rounds).toBe(3);
+    // 内存表里同一件事也要答得出（界面上的"额度 3/3 轮"用的就是这份）
     const live = agentRun.getSubRun(rec.receipt!.callId)!;
-    expect(live.rounds).toBe(SUBAGENT_CAPS.maxRounds);
+    expect(live.rounds).toBe(3);
   });
 });
 

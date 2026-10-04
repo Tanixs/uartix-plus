@@ -37,26 +37,31 @@ export const SUBAGENT_FACE = [
 ] as const;
 
 /**
- * 子任务自己那一档的上限。为什么不是"不设限"：一次派发等于若干轮真实模型请求（用户的钱包），
- * 而父任务那三条预算（`agentMaxRounds` 等）默认是 0=不限。
- * 所以这里是**双重夹取**：既夹自己的档，也夹父任务的剩余（`subagentCaps`）。
+ * 子任务那一档的上限。**2026-10-04 用户裁决撤掉自带上限**（"不要限制子代理的工具调用轮数"），
+ * 所以这里是 `0 = 不限制`——与 caps 的线上形态同源（`Infinity` 过不了 JSON 落盘，故用 0 表达不限）。
+ *
+ * ⚠ 撤掉的是"子自己那一档"，**不是**"父还剩多少"：后者是权限事实，不是成本偏好（P135-B §3 那颗雷）。
+ * 边界只剩一个出处（`subagentCaps` 往父剩余夹），用量照旧 `chargeNested` 记回父账，
+ * 父额度用尽照旧就地拒 `subagent_budget_exhausted`。成本侧的人工闸也没动：
+ * `agentSubagent` 默认关且 `protected`——模型不许自己开这条通路，一次派发要花的是真实额度。
  */
-export const SUBAGENT_CAPS = { maxRounds: 6, maxCalls: 16, timeoutMs: 180_000 };
+export const SUBAGENT_CAPS = { maxRounds: 0, maxCalls: 0, timeoutMs: 0 };
 
 /**
- * P137：这一趟是**撞了哪一项顶**才停的（`null` = 三项都没碰线）。
- * 三个常数现在是拍的（详设 C5），但"拍的数够不够"要有读数的地方——
+ * P137：这一趟是**撞了哪一项顶**才停的（`null` = 没撞线，或那一项本来就不限）。
  * 界面上 `额度 6/6 轮` 与一句"轮数用尽，它可能没查完"才是回头校准它的依据。
  * 判据用 `>=` 而不是 `===`：轮数与调用数由 loop 累加，超限那一档也可能一次加过头。
+ * ⚠ P138-A 撤掉自带上限后，`0` 这一档是"不限"而不是"0 轮"——不加 `> 0` 那道前置判断，
+ * `usage.rounds >= 0` 恒真，于是每次派发都会被报成"轮数用尽，它可能没查完"。
  */
 export type SubagentCapHit = "rounds" | "calls" | "ms" | null;
 export function subagentCapHit(
   caps: { maxRounds: number; maxCalls: number; timeoutMs: number },
   usage: { rounds: number; calls: number; elapsedMs: number },
 ): SubagentCapHit {
-  if (usage.rounds >= caps.maxRounds) return "rounds";
-  if (usage.calls >= caps.maxCalls) return "calls";
-  if (usage.elapsedMs >= caps.timeoutMs) return "ms";
+  if (caps.maxRounds > 0 && usage.rounds >= caps.maxRounds) return "rounds";
+  if (caps.maxCalls > 0 && usage.calls >= caps.maxCalls) return "calls";
+  if (caps.timeoutMs > 0 && usage.elapsedMs >= caps.timeoutMs) return "ms";
   return null;
 }
 
@@ -71,19 +76,23 @@ const CAP_HIT_ZH: Record<Exclude<SubagentCapHit, null>, string> = {
  * 从父任务的剩余折算子的上限。返回 `null` = **这一趟不该开跑**（额度已经没了）。
  *
  * 这里就是那颗雷：宿主 caps 的线上形态是 `0 = 不限制`（P109-A 裁决，`deadlineAt: 0` 同理，
- * 因为 `Infinity` 过不了 JSON 落盘）。如果"还剩 0"也用 0 表达，
- * "父预算用尽"与"父没设上限"就是同一个数 ⇒ `Math.min(档, 0)` 会得到 0 ⇒ 传进 loop 变成"不限"
+ * 因为 `Infinity` 过不了 JSON 落盘）。如果"还剩 0"也用 0 表示，
+ * "父预算用尽"与"父没设上限"就是同一个数 ⇒ 传进 loop 变成"不限"
  * ⇒ 派子任务成了一条绕过预算的路。所以 `BudgetLeft` 用 `null` 表示不限，
  * 而**数字 0 在这里是硬闸**，宁可拒一次要说清原因，不许静默放行。
+ *
+ * P138-A 撤掉自带上限之后，同一族雷换了个方向：`Math.min(0, 父剩余)` 里的 `0` 是"不限"不是"0 轮"，
+ * 照 min 取会把"不限"当成 0 —— 要么子拿到"不限"（绕开父预算），要么被夹成 0 轮（永远派不出去），
+ * 两个都错。所以"不限"那一档不参与 min，直接照交父剩余。
  */
 export function subagentCaps(left?: BudgetLeft): { maxRounds: number; maxCalls: number; timeoutMs: number } | null {
-  const own = SUBAGENT_CAPS;
-  if (!left) return { ...own };
+  if (!left) return { ...SUBAGENT_CAPS };
   if (left.rounds === 0 || left.calls === 0 || left.ms === 0) return null;
+  const clamp = (own: number, remaining: number): number => (own === 0 ? remaining : Math.min(own, remaining));
   return {
-    maxRounds: left.rounds === null ? own.maxRounds : Math.min(own.maxRounds, left.rounds),
-    maxCalls: left.calls === null ? own.maxCalls : Math.min(own.maxCalls, left.calls),
-    timeoutMs: left.ms === null ? own.timeoutMs : Math.min(own.timeoutMs, left.ms),
+    maxRounds: left.rounds === null ? SUBAGENT_CAPS.maxRounds : clamp(SUBAGENT_CAPS.maxRounds, left.rounds),
+    maxCalls: left.calls === null ? SUBAGENT_CAPS.maxCalls : clamp(SUBAGENT_CAPS.maxCalls, left.calls),
+    timeoutMs: left.ms === null ? SUBAGENT_CAPS.timeoutMs : clamp(SUBAGENT_CAPS.timeoutMs, left.ms),
   };
 }
 
@@ -96,7 +105,7 @@ export const subagentToolEntries = [
     domain: null,
     provenance: HOST,
     description:
-      `Dispatch a READ-ONLY sub-agent: it gets its own short run with a subset of these tools (${SUBAGENT_FACE.join(", ")}), reports back one text answer, and CANNOT write settings, files, plugins, appearance or the device - the tool face it inherits is this task's own authorization domains, so a task that cannot read files produces a sub-agent that cannot either. Args: { goal: string - one concrete question to answer, e.g. "which fields in frame A look like a checksum and why" }. The receipt carries { goal, answer, rounds, calls, toolsUsed, status, caps, elapsedMs }, plus capHit when it stopped on one of its limits. Three things to know before using it. (1) It burns the SAME budget as this run: its rounds and tool calls are charged back to this task's counters, and if this task has no rounds left the dispatch is refused (subagent_budget_exhausted) rather than silently unlimited. (2) It cannot ask the user anything and cannot be approved past its read-only face, so it is for digging, not for deciding. (3) Its answer is a REPORT, not evidence that anything happened: to change something you still call the write tools yourself and read their receipts. Needs the "Agent 只读子代理" master switch in settings (off by default) because each dispatch costs real model requests.`,
+      `Dispatch a READ-ONLY sub-agent: it gets a run of its own with a subset of these tools (${SUBAGENT_FACE.join(", ")}), reports back one text answer, and CANNOT write settings, files, plugins, appearance or the device - the tool face it inherits is this task's own authorization domains, so a task that cannot read files produces a sub-agent that cannot either. Args: { goal: string - one concrete question to answer, e.g. "which fields in frame A look like a checksum and why" }. The receipt carries { goal, answer, rounds, calls, toolsUsed, status, caps, elapsedMs }, plus capHit when it stopped on one of its limits. Three things to know before using it. (1) It burns the SAME budget as this run: its rounds and tool calls are charged back to this task's counters, and if this task has no rounds left the dispatch is refused (subagent_budget_exhausted) rather than silently unlimited. It has NO round limit of its own - the host deliberately removed the built-in cap - so one dispatch can consume the rest of this run's real money: ask ONE narrow question, and do not re-dispatch the same goal hoping for a different answer. (2) It cannot ask the user anything and cannot be approved past its read-only face, so it is for digging, not for deciding. (3) Its answer is a REPORT, not evidence that anything happened: to change something you still call the write tools yourself and read their receipts. Needs the "Agent 只读子代理" master switch in settings (off by default) because each dispatch costs real model requests.`,
     parameters: {
       type: "object",
       properties: { goal: { type: "string", description: "要子代理回答的那一个具体问题" } },
