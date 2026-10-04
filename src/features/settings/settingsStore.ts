@@ -88,6 +88,13 @@ export interface Settings {
    */
   agentRepoCheck: boolean;
   /**
+   * P135-B：只读子代理（`subagent`）的总开关，**默认关**。
+   * 关着时那支工具就地拒、不弹批准卡；开着时它也只能读——工具面是宿主点名的白名单，
+   * 授权域照抄父任务，预算从父任务的剩余折算（子任务的轮数与调用数记回父账）。
+   * 必须 protected：这条通路花的是用户的模型请求额度，不许模型给自己开。
+   */
+  agentSubagent: boolean;
+  /**
    * P109-D：重启后要不要**保留**「全权执行 / 手工勾选」这一档。默认 false = 保持原行为
    * （回落「界面创造」并如实标 downgraded）。这是 2026-09-26 用户点名的放松（§8-44 要求单独点头）；
    * 开了它，高危授权就跨重启存活 —— 所以开关本身必须是 protected：模型不许自己开。
@@ -226,6 +233,7 @@ function load(): Settings {
     agentFsRoots: "",
     agentShellEnabled: false,
     agentRepoCheck: false,
+    agentSubagent: false,
     agentRestoreTier: false,
     showThinking: true,
     deepThink: true,
@@ -296,6 +304,7 @@ function load(): Settings {
       agentFsRoots: typeof p.agentFsRoots === "string" ? p.agentFsRoots.slice(0, 4096) : "",
       agentShellEnabled: Boolean(p.agentShellEnabled),
       agentRepoCheck: Boolean(p.agentRepoCheck),
+      agentSubagent: Boolean(p.agentSubagent),
       agentRestoreTier: Boolean(p.agentRestoreTier),
       showThinking: p.showThinking === undefined ? true : Boolean(p.showThinking),
       deepThink: p.deepThink === undefined ? true : Boolean(p.deepThink),

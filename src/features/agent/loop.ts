@@ -94,6 +94,7 @@ const PROMPT_FRAGMENTS: [string, string][] = [
   ["theme_read", " Appearance edits (theme_patch/theme_preset/image_swatch) are a session-level preview: call theme_read first, then prefer theme_preset (it derives a coherent token set from the live theme) - a 1-2 token patch is not a finished style, cover surface, borders, text and accent together. Tokens cannot paint a component state: a coloured button, a tab underline, a hover lift or a titlebar belong to the component layer, written with style_patch (per-rule receipts) or style_append (whole stylesheet, in chunks of complete rules). Painting a whole new look is worth a look before it is installed: theme_preview { id, seconds } borrows the screen for a few seconds without writing settings or the plugin library (it reverts on its own; stop with { stop:true }). Run theme_audit before reporting done: it measures the rendered screen (every visible text against its real composited backdrop, text painted outside its own box, hit targets folded through --zoom, rules whose specificity outranks the reduced-motion baseline) - the static gates scan repository bytes and cannot see injected theme CSS, so this is the only check covering what you just painted; blocking:true means read those findings to the user and fix them, not ship them as fine. After the user sees the result, persist it by default with style_commit (reads what is actually on screen) or save_theme_extension (hand-written css) so it becomes a complete enabled plugin they can switch off in 设置 → 插件管理 (skip saving only when the user explicitly asks for a temporary preview)."],
   ["task_plan", " For anything longer than two steps, record a plan with task_plan and update it as you go; the host will not accept a finished report while items stay pending or doing - close them or mark them skipped and say why."],
   ["repo_check", " Working on the repository itself (beyond appearance) is a three-step loop, and the third step is not optional: read with fs_grep/fs_glob/fs_read, change with fs_edit (surgical old/new - it refuses ambiguous matches and never rewrites a whole file; the host keeps the pre-write copy, so the user can undo an edit from the timeline - that is a safety net for you, not a licence to overwrite files you have not read), then PROVE it with repo_check: { check: \"one_test\", testPath: \"src/…/x.test.ts\" } while iterating, { check: \"gates\" } for the static budgets, { check: \"types\" }, { check: \"tests\" } before calling anything done, { check: \"rust\" } when src-tauri changed. Two promises live here. To the user: \"it is verified\" may only be said with a repo_check receipt whose passed is true - \"I edited the file\" is not \"the gates are green\", and one green family does not mean everything is fine (each check states what it does not prove). To yourself: a gate that got redder is a bug in your change, not a budget to raise; you never push, and committing stays the user's decision."],
+  ["subagent", " `subagent { goal }` hands ONE question to a read-only helper run: it gets a subset of these same tools, bounded by THIS task's authorization domains, and it can neither write anything nor ask the user. Use it when the answer costs many reads you would rather not drag into your own context (digging through a session log, a large file, the plugin/widget inventory). Two costs to state plainly: it burns this run's budget (its rounds and tool calls are charged back here, so when the budget is spent the host refuses the dispatch with subagent_budget_exhausted instead of silently running unlimited), and its answer is a REPORT, not evidence that anything changed - a write still needs your own tool call and its receipt."],
 ];
 
 /** 本轮可见工具决定提示内容：工具没被发出去，它那段约定就不该出现在提示里 */
@@ -196,6 +197,27 @@ export async function runAgent(options: {
   const result: AgentResult = { status: "running", messages, events: [], rounds: 0, calls: 0, caps: { maxRounds, maxCalls, deadlineAt: deadline } };
   const event = (e: Omit<RunEvent, "seq">) => { const item = { ...e, ts: Date.now(), seq: seqBase + result.events.length + 1 }; result.events.push(item); options.onEvent?.(item); };
   const seen = new Map<string, { signature: string; receipt: ToolReceipt }>();
+
+  /**
+   * P135-B：派发给工具的上下文 = 任务上下文 + **这一轮实际还剩多少** + 记回父账的口。
+   * 目前只有 `subagent` 读这两个字段，其余 handler 拿到的还是原来那份（多两个可选项，不改语义）。
+   * ⚠ 额度口径刻意与 caps 不同：`caps` 用 `0 = 不限制`（要经 JSON 落盘），这里用 `null = 不限`，
+   * 因为"还剩 0"是一个**真实的、必须被拒**的状态——两者共用 0 就等于给嵌套开了一条绕过预算的路。
+   */
+  const callContext = (): TaskContext => ({
+    ...context,
+    remaining: {
+      rounds: maxRounds === 0 ? null : Math.max(0, maxRounds - result.rounds),
+      calls: maxCalls === 0 ? null : Math.max(0, maxCalls - result.calls),
+      ms: deadline === 0 ? null : Math.max(0, deadline - Date.now()),
+    },
+    /** 嵌套跑掉的轮数与调用数记进**父**账：界面上那个 N/24 因此包含子任务烧掉的量 */
+    chargeNested: (u) => {
+      result.rounds += Math.max(0, Math.floor(u.rounds));
+      result.calls += Math.max(0, Math.floor(u.calls));
+      options.onProgress?.(result.rounds, result.calls);
+    },
+  });
   // 连续相同失败计数（签名=工具名+参数）；成功或失败形态变化即清零（§5.3 暂停条件）
   let failSignature = "";
   let failStreak = 0;
@@ -478,7 +500,7 @@ ${open}`;
           try {
             if (!call.callId || call.arguments.length > 1048576) throw new Error("invalid_call");
             JSON.parse(call.arguments);
-            receipt = await adapter.execute(call, context);
+            receipt = await adapter.execute(call, callContext());
           } catch { receipt = { callId: call.callId, ok: false, status: "error", code: "tool_failed_or_invalid_arguments" }; }
           seen.set(call.callId, { signature, receipt });
         }

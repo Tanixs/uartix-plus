@@ -22,7 +22,7 @@ import { shortHash } from "../plugins/pluginId"; // 零依赖叶子（与上面�
 import { DOMAIN_ZH, hasDomain, type Domain } from "./scopeTiers";
 import { decide, type EffectClass, type PolicyContext, type ToolPolicyMeta } from "./toolPolicy";
 import type { UndoResult } from "./settingsTools";
-import type { RunScope, ToolCall, ToolDefinition, ToolProvenance, ToolReceipt, TaskContext } from "./types";
+import type { RunScope, SubagentDispatch, ToolCall, ToolDefinition, ToolProvenance, ToolReceipt, TaskContext } from "./types";
 
 /** 工具来源。插件注册的工具必须在台账与 UI 上与宿主工具分得开（详设 §1.2 第 13 号静默点）。 */
 export type { ToolProvenance } from "./types";
@@ -49,10 +49,17 @@ export interface RunScratch {
   artifacts: Map<string, unknown>;
   /** 数据租约是否已申请过（plot_channels / plot_window 首调申请一次即可） */
   leaseRequested: boolean;
+  /**
+   * P135-B：这一份装配**能不能**派只读子代理。entry 是模块级常量（显示层从它派生），
+   * 所以"这条通路有没有接到宿主"必须走 per-run 的 scratch，不能藏在 entry 的闭包里。
+   * 没有装配它的调用方（MCP / 单测 / 独立设置适配器）拿到的是如实的 `subagent_unavailable`，
+   * 不是一条假成功。
+   */
+  subagent?: SubagentDispatch;
 }
 
-export function newRunScratch(): RunScratch {
-  return { artifacts: new Map<string, unknown>(), leaseRequested: false };
+export function newRunScratch(subagent?: SubagentDispatch): RunScratch {
+  return { artifacts: new Map<string, unknown>(), leaseRequested: false, ...(subagent ? { subagent } : {}) };
 }
 
 /**

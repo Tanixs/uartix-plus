@@ -13,7 +13,8 @@ import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { parseFsRoots } from "./generalTools";
 import { invokeAgentProvider } from "./provider";
 import { activeRef } from "../ai/aiProfileStore";
-import { createLocalAgentAdapter } from "./agentAdapter";
+import { createLocalAgentAdapter, createReadOnlyAgentAdapter } from "./agentAdapter";
+import { SUBAGENT_CAPS, subagentCaps } from "./subagent";
 import { pluginToolEntries } from "./pluginTools";
 import { runtimeFacts } from "./hostCatalog";
 import { armEnabledModules } from "../plugins/pluginStore";
@@ -22,8 +23,8 @@ import type { ApprovalGate, ApprovalRequest, WaitOutcome } from "./toolRegistry"
 import { releaseDataLease } from "../plot/dataLease";
 import { setLocalJobInterest } from "../mcp/jobExecutor";
 import type { UndoResult } from "./settingsTools";
-import { normalizeAllowed } from "./scopeTiers";
-import type { AgentMessage, AgentResult, ContextStat, PauseReason, RunEvent, RunScope, RunStatus, ToolReceipt } from "./types";
+import { normalizeAllowed, type Domain } from "./scopeTiers";
+import type { AgentMessage, AgentResult, ContextStat, PauseReason, RunEvent, RunScope, RunStatus, SubagentDispatch, ToolReceipt } from "./types";
 
 const EVENTS_CAP = 200;
 const RUNS_KEPT = 20;
@@ -565,6 +566,45 @@ export async function startRun(options: {
   return runId;
 }
 
+/**
+ * P135-B：只读子代理的装配（详设 §2-§6）。三件事各自的落点：
+ *  - **只读** ⇒ `createReadOnlyAgentAdapter` 那张点名白名单（不是按 effect 反射筛的，
+ *    `run_app_action` 会按内层 kind 升档、plot_* 申请的租约没人替子任务回收、task_plan 写父台账）；
+ *  - **同一总预算** ⇒ 上限从 loop 交下来的 `ctx.remaining` 折算（`subagentCaps`），
+ *    用量交回 `ctx.chargeNested` 记进父账；父额度用尽时是**就地拒**，不是"0=不限"；
+ *  - **不能再扩权** ⇒ 档位与授权域照抄父任务那份 `(scope, allowed)` 再裁一次。
+ *
+ * 子的逐轮过程**不进父台账**：`EVENTS_CAP = 200`，把子的每一轮塞进来等于把父任务可复盘的
+ * 深度砍一半（P134-B 量的就是同一件事）。父侧只留一条派发回执。
+ */
+function makeSubagentDispatch(view: AgentRunView, allowed: readonly Domain[]): SubagentDispatch {
+  return async (goal, ctxIn) => {
+    const caps = subagentCaps(ctxIn.remaining) ?? { ...SUBAGENT_CAPS };
+    const subRunId = crypto.randomUUID();
+    const adapter = createReadOnlyAgentAdapter({ runId: subRunId, scope: view.scope, allowed });
+    const activeAi = activeRef();
+    const res = await runAgent({
+      goal,
+      provider: invokeAgentProvider,
+      adapter,
+      // 父任务的 signal 原样透传：点了停止，子的下一轮请求根本发不出去
+      context: {
+        source: "local_agent", runId: subRunId, signal: ctxIn.signal, scope: view.scope,
+        ...(view.scope === "custom" ? { allowed: [...allowed] } : {}),
+      },
+      liveFacts: ({ count, bytes }) => runtimeFacts({
+        scope: view.scope, allowed, toolCount: count, toolBytes: bytes,
+        fsRoots: parseFsRoots(getSettings().agentFsRoots),
+      }),
+      maxRounds: caps.maxRounds, maxCalls: caps.maxCalls, timeoutMs: caps.timeoutMs,
+      ...(activeAi ? { maxOutputTokens: activeAi.model.maxOutputTokens } : {}),
+    });
+    const tools = [...new Set(res.events.filter((e) => e.kind === "receipt" && e.tool).map((e) => e.tool as string))];
+    const text = [...res.messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
+    return { status: res.status, rounds: res.rounds, calls: res.calls, tools, text };
+  };
+}
+
 /** 跑一个 run（首发与续跑共用一套控制器/租约/收尾语义）。
  *  控制器**由调用方在发布任务时 arm 并传入**：没有控制器的 run 不允许开跑，
  *  于是"running 但 stop 不掉"这类窗口在类型上就不存在（P99a-C1）。 */
@@ -588,7 +628,12 @@ async function executeRun(
   if (armed.blocked.length) {
     console.warn(`[agentRun] ${armed.blocked.length} 个包的逻辑模块未就绪：${armed.blocked.map((b) => `${b.id}（${b.msg}）`).join("；")}`);
   }
-  const adapter = createLocalAgentAdapter({ runId, gate, scope: view.scope, allowed, extraEntries: pluginToolEntries() });
+  const adapter = createLocalAgentAdapter({
+    runId, gate, scope: view.scope, allowed,
+    extraEntries: pluginToolEntries(),
+    // P135-B：只读子代理的装配（开关在设置里，关着时工具自己会如实拒）
+    subagent: makeSubagentDispatch(view, allowed),
+  });
   setLocalJobInterest(true);
   try {
     // P110-B5：输出预算的顶取自当前模型档案（provider 实发时用的是同一个数）。

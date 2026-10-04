@@ -1065,6 +1065,16 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), tx("命令执行总开关，默认关闭。开启后 Agent 仍需在「自定义」档位勾选命令行域，且每条命令都弹出批准卡逐条确认；单条命令 10s 超时自动终止、输出窗口 64KB（超出时首尾都保留并标明中间省略量，原文仍可分页取回）", "Master switch for shell_exec, off by default. Even when on, the Agent must pick the shell domain in custom scope and every command shows an approval card; 10s timeout and a 64 KiB output window per command (beyond it both ends are kept and the omitted span is stated, full text stays pageable)"))}
+                {row(tx("Agent 只读子代理", "Agent read-only sub-agent"), (
+                  <label className="set-switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.agentSubagent}
+                      onChange={(e) => patch({ agentSubagent: e.target.checked })}
+                    />
+                    <span />
+                  </label>
+                ), tx("默认关闭。打开后 AI 可以把一个具体问题交给一只只读子代理去查：它只能用一份宿主点名的只读工具清单，权限范围与这次任务完全相同（任务读不到的目录它也读不到），也不能写设置、改文件、动设备或问你问题。它烧的是同一个预算——子任务用掉的轮数和调用会记回这次任务，额度用完时宿主直接拒绝派发而不是偷偷不限。一次派发等于若干轮真实模型请求，所以这条要单独开，而且它不需要打开上面那条「允许执行命令」。", "Off by default. When on, the AI can hand ONE question to a read-only sub-agent: it gets a host-named read-only tool list, the exact same authorization domains as this task (what the task cannot read, it cannot read either), and it can neither write settings or files, touch the device, nor ask you questions. It spends the SAME budget - the sub-run's rounds and tool calls are charged back to this task, and when the budget is spent the host refuses the dispatch instead of silently running unlimited. One dispatch costs real model requests, which is why it has its own switch and why it does not need the command-execution switch above."))}
                 {row(tx("Agent 允许跑本仓校验", "Agent may run this project's checks"), (
                   <label className="set-switch">
                     <input

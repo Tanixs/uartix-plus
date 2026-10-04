@@ -12,7 +12,7 @@ import {
 } from "./toolRegistry";
 import { hasDomain, type Domain } from "./scopeTiers";
 import type { PolicyContext } from "./toolPolicy";
-import type { RunScope, TaskContext, ToolCall, ToolReceipt } from "./types";
+import type { BudgetLeft, RunScope, SubagentUsage, TaskContext, ToolCall, ToolReceipt } from "./types";
 
 /** 宿主时钟固定值：批准卡上的 expiresAt = now + TTL，测试要能钉住绝对值 */
 export const HARNESS_NOW = 1_700_000_000_000;
@@ -22,6 +22,10 @@ export interface HarnessCtxOpts {
   allowed?: string[];
   runId?: string;
   signal?: AbortSignal;
+  /** P135-B：嵌套用的"本轮还剩多少"。只有 `subagent` 读它，缺省不提供 */
+  remaining?: BudgetLeft;
+  /** P135-B：嵌套用量记回父账的那张嘴。测试用它断言"记了、且只记一次" */
+  chargeNested?: (u: SubagentUsage) => void;
 }
 
 export interface HarnessOpts {
@@ -78,6 +82,8 @@ export function toolHarness(entries: readonly AgentToolEntry[], opts: HarnessOpt
       signal: c.signal ?? new AbortController().signal,
       scope: c.scope ?? "create",
       allowed: c.allowed ?? [],
+      ...(c.remaining ? { remaining: c.remaining } : {}),
+      ...(c.chargeNested ? { chargeNested: c.chargeNested } : {}),
     }),
     { truncate: (r) => r, gate, now: () => HARNESS_NOW, newRequestId: () => "req-harness" },
   );

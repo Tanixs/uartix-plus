@@ -40,7 +40,27 @@ export interface TaskContext {
   scope: RunScope;
   /** 本档位勾选的授权域（清单见 `scopeTiers.DOMAINS`）；scope 非 custom 时由 hasDomain 忽略 */
   allowed?: string[];
+  /**
+   * P135-B：宿主**本轮还剩多少预算**，只有派发只读子代理的工具（`subagent`）读它。
+   * ⚠ 这里刻意用 `null = 不限`而不是 0：`caps` 的线上形态是 `0 = 不限制`（P109-A 的用户裁决），
+   * 若"还剩 0"也用 0 表达，"父预算用尽"与"父没设上限"就成同一个数 ⇒
+   * 派子任务立刻变成一条绕过预算的路（那是 §8-44 意义上的扩权）。数字就是还剩多少，**包括 0**。
+   */
+  remaining?: BudgetLeft;
+  /**
+   * P135-B：把嵌套跑掉的轮数/调用数**记回父账**。由 loop 实现（父计数只有它知道），
+   * 调用方只交实测用量 —— "同一总预算"因此是可复核的事实，不是注释里的口号。
+   */
+  chargeNested?(u: SubagentUsage): void;
 }
+/** P135-B：预算剩余量。`null` = 这一项不限；数字 = 还剩多少（0 就是没了） */
+export interface BudgetLeft { rounds: number | null; calls: number | null; ms: number | null }
+/** P135-B：一次嵌套运行的用量 */
+export interface SubagentUsage { rounds: number; calls: number; tools: string[] }
+/** P135-B：子任务的回报。`status` 是它自己的终态，父侧据此决定这条回执算不算成 */
+export interface SubagentReport extends SubagentUsage { status: RunStatus; text: string }
+/** P135-B：装配方（agentRun）提供的派发函数，挂在 `RunScratch.subagent` 上 */
+export type SubagentDispatch = (goal: string, ctx: TaskContext) => Promise<SubagentReport>;
 export interface TaskAdapter { definitions: ToolDefinition[]; execute(call: ToolCall, ctx: TaskContext): Promise<ToolReceipt>;
   /**
    * P109-C：完成契约。模型这一轮没发工具调用（= 想收工）时，loop 问一次适配器：

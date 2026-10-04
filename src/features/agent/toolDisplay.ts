@@ -99,6 +99,13 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     // P133-A：repo_check 的失败码。`err` 是经变量透传的（F3 那条扫字面量的钉看不见它），
     // 所以同一条测试在 toolDisplay.test.ts 里单独扫 `err: "…"` 钉一次。
     repo_check_disabled: "本仓校验未开启",
+    // P135-B：只读子代理的四个落点。四种"没做成"含义完全不同，用户该做的动作也不同：
+    // 开关没开 / 这条通路根本没接 / 父任务额度用尽 / 子任务跑了一半。
+    subagent_disabled: "只读子代理未开启",
+    subagent_unavailable: "这条通路没有子代理",
+    subagent_budget_exhausted: "本任务额度已用完",
+    subagent_incomplete: "子代理没跑完",
+    subagent_no_goal: "要说清让它查什么",
     files_whitelist_empty: "文件白名单为空",
     root_required: "要指明校验哪个目录",
     unknown_check: "校验项不存在",
