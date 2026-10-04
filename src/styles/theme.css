@@ -1078,7 +1078,7 @@ select optgroup {
   justify-content: center;
   box-shadow: var(--shadow);
   padding: 0;
-  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 
 .le-btn:hover {
@@ -1306,7 +1306,7 @@ select optgroup {
   border-radius: 50%;
   background: var(--text-dim);
   flex: 0 0 auto;
-  transition: background .15s;
+  transition: background var(--dur-base);
 }
 .connect-btn:hover {
   border-color: var(--accent);
@@ -3045,7 +3045,7 @@ select optgroup {
   font-size: var(--fs-sm);
   cursor: pointer;
   line-height: 1;
-  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .back-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
@@ -3485,7 +3485,7 @@ select optgroup {
   background: var(--bg-panel);
   color: var(--text-dim);
   cursor: pointer;
-  transition: color .12s, border-color .12s, background .12s;
+  transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
 }
 .plot-bar .icon-btn:hover {
   color: var(--accent);
@@ -3703,7 +3703,7 @@ select optgroup {
   cursor: pointer;
   padding: 1px 4px;
   border-radius: var(--radius-s);
-  transition: color .12s, background .12s;
+  transition: color var(--dur-fast), background var(--dur-fast);
 }
 .pm-clear:hover { color: var(--danger); background: var(--accent-soft); }
 
@@ -4111,7 +4111,7 @@ select optgroup {
   background: var(--bg-panel);
   color: var(--text-dim);
   cursor: pointer;
-  transition: border-color .12s, color .12s, background .12s;
+  transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
 }
 .inv-chip svg { opacity: .55; }
 .inv-chip:hover { color: var(--text); border-color: var(--accent); }
@@ -4391,7 +4391,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   height: 12px;
   border-radius: 50%;
   background: var(--text-dim, #888);
-  transition: left 0.12s ease, background 0.12s ease;
+  transition: left var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 
 .ctlg-sw.on {
@@ -4928,7 +4928,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   height: 26px;
   border-radius: 50%;
   border: 2px solid var(--border);
-  transition: background 0.15s ease, box-shadow 0.15s ease;
+  transition: background var(--dur-base) ease, box-shadow var(--dur-base) ease;
 }
 
 .ctl-unit {
@@ -5344,7 +5344,11 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .fc-toolbar .btn.saved-err{color:var(--danger);border-color:color-mix(in srgb, var(--danger) 55%, transparent);background:color-mix(in srgb, var(--danger) 12%, transparent);animation:fc-shake .3s;}
 .fc-toolbar .btn.saving{opacity:.55;pointer-events:none;}
 @keyframes fc-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
-.fc-sync-warn{font-size:var(--fs-body);color:var(--danger-text);background:color-mix(in srgb, var(--danger) 12%, transparent);border-radius:var(--radius-l);padding:2px 8px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
+/* P148/P150 副产：命中区审计从 P148 起也认 `[data-ctl]`，这枚"点一下看校验失败原因"的胶囊
+   于是被量出来 19px（本仓自己的地板是 24，P132-D）。它是可点的（data-ctl="disc" + onClick），
+   所以按控件补高度，而不是把 24 那条地板改软。
+   展开态 `.open` 本来就是多行文本，不受这条影响。 */
+.fc-sync-warn{display:inline-flex;align-items:center;min-height:24px;font-size:var(--fs-body);color:var(--danger-text);background:color-mix(in srgb, var(--danger) 12%, transparent);border-radius:var(--radius-l);padding:2px 8px;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
 .fc-sync-warn.open{white-space:normal;max-width:520px;overflow-wrap:anywhere;cursor:default;}
 .fc-stat{font-size:var(--fs-sm);color:var(--text-dim);white-space:nowrap;}
 .fc-stat b{color:var(--accent-text);font-weight:600;}
@@ -5441,7 +5445,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .fc-dlg-row input[type=text],.fc-dlg-row input:not([type]),.fc-dlg-row select{width:100%;flex:1;min-width:0;padding:6px 9px;border-radius:var(--radius-m);border:1px solid var(--border);background:var(--bg-inset);color:var(--text);font-size:var(--fs-sm);outline:none;}
 .fc-dlg-row input:focus,.fc-dlg-row select:focus{border-color:var(--accent);}
 .fc-dlg-colors{display:flex;gap:6px;flex-wrap:wrap;}
-.fc-color-chip{all:unset;width:20px;height:20px;border-radius:var(--radius-m);cursor:pointer;opacity:.55;transition:.15s;}
+.fc-color-chip{all:unset;width:20px;height:20px;border-radius:var(--radius-m);cursor:pointer;opacity:.55;transition:var(--dur-base);}
 .fc-color-chip:hover{opacity:.85;}
 .fc-color-chip.on{opacity:1;outline:2px solid var(--accent);outline-offset:2px;}
 .fc-dlg-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
@@ -5468,7 +5472,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .fc-dlg-roles{display:flex;flex-direction:column;gap:7px;margin-bottom:9px;}
 .fc-dlg-roles-g{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
 .fc-dlg-roles-l{width:56px;flex:none;font-size:var(--fs-body);color:var(--text-dim);text-align:right;}
-.fc-role-chip{all:unset;padding:4px 9px;border-radius:var(--radius-m);font-size:var(--fs-sm);cursor:pointer;border:1px solid color-mix(in srgb,var(--chipc,#8a93a2) 42%,transparent);color:var(--text);opacity:.62;transition:.15s;}
+.fc-role-chip{all:unset;padding:4px 9px;border-radius:var(--radius-m);font-size:var(--fs-sm);cursor:pointer;border:1px solid color-mix(in srgb,var(--chipc,#8a93a2) 42%,transparent);color:var(--text);opacity:.62;transition:var(--dur-base);}
 .fc-role-chip:hover{opacity:1;}
 .fc-role-chip.on{opacity:1;background:color-mix(in srgb,var(--chipc,#8a93a2) 16%,transparent);border-color:var(--chipc,#8a93a2);font-weight:600;}
 .fc-color-picker{all:unset;width:26px;height:26px;border-radius:var(--radius-m);border:1px solid var(--border);padding:2px;cursor:pointer;background:var(--bg-inset);flex:none;}
@@ -5482,7 +5486,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .fc-sb-info{font-size:var(--fs-sm);opacity:.7;flex:1;}
 .fc-sb-info.bad{color:var(--danger);opacity:1;}
 .fc-seg{display:flex;border:1px solid var(--border);border-radius:var(--radius-l);overflow:hidden;background:var(--bg-inset);}
-.fc-seg > button{all:unset;flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:6px 10px;font-size:var(--fs-sm);color:var(--text-dim);cursor:pointer;transition:background .15s,color .15s;}
+.fc-seg > button{all:unset;flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:6px 10px;font-size:var(--fs-sm);color:var(--text-dim);cursor:pointer;transition:background var(--dur-base),color var(--dur-base);}
 .fc-seg > button + button{border-left:1px solid var(--border);}
 .fc-seg > button.on{background:var(--accent);color:var(--on-accent, #fff);font-weight:600;}
 .fc-seg > button:not(.on):hover{background:var(--accent-soft);color:var(--accent);}
@@ -5646,7 +5650,8 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   color: var(--text-dim);
   cursor: pointer;
   flex: none;
-  transition: transform 0.18s ease, background 0.12s ease, color 0.12s ease;
+  /* motion-token-exempt: 折叠箭头那 90° 的行程是 180ms，与三档令牌都不等——硬映射等于改这处观感，登记不静默换值 */
+  transition: transform 0.18s ease, background var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .tpl-chev-btn:hover { background: var(--accent-soft); color: var(--accent); }
 .tpl-chev-btn.open { transform: rotate(90deg); color: var(--accent); }
@@ -5960,7 +5965,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   border-radius: var(--radius-l);
   cursor: pointer;
   color: var(--text-dim);
-  transition: background .12s, color .12s;
+  transition: background var(--dur-fast), color var(--dur-fast);
 }
 .set-nav button:hover { color: var(--text); background: var(--raise-1); }
 .set-nav button.on { color: var(--accent-text); background: var(--accent-soft); font-weight: 600; box-shadow: inset 3px 0 0 var(--accent); }
@@ -6323,7 +6328,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   font-size: var(--fs-sm);
   cursor: pointer;
   color: var(--text-dim);
-  transition: background .12s, color .12s;
+  transition: background var(--dur-fast), color var(--dur-fast);
 }
 .set-seg button + button { border-left: 1px solid var(--border); }
 .set-seg.col button + button { border-left: none; border-top: 1px solid var(--border); }
@@ -6347,7 +6352,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   cursor: pointer;
-  transition: border-color .12s, background .12s;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
 }
 .preset-card:hover { border-color: var(--accent); background: var(--accent-soft); }
 .preset-card.on { border-color: var(--accent); background: var(--accent-soft); }
@@ -6434,7 +6439,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   cursor: pointer;
-  transition: border-color .12s, background .12s;
+  transition: border-color var(--dur-fast), background var(--dur-fast);
 }
 .theme-card:hover { border-color: var(--accent); background: var(--accent-soft); }
 .theme-card.on { border-color: var(--accent); background: var(--accent-soft); }
@@ -6480,11 +6485,11 @@ label.set-switch,
 .set-switch input { display: none; }
 .set-switch span {
   position: absolute; inset: 0; border-radius: var(--radius-xl);
-  background: var(--border); cursor: pointer; transition: background .15s;
+  background: var(--border); cursor: pointer; transition: background var(--dur-base);
 }
 .set-switch span::after {
   content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px;
-  border-radius: 50%; background: #fff; transition: transform .15s;
+  border-radius: 50%; background: #fff; transition: transform var(--dur-base);
   box-shadow: 0 1px 2px rgba(0,0,0,.35);
 }
 /* contrast-exempt：开关轨道无文字，白旋钮 14×14 在 accent 上为纯几何对比 */
@@ -6571,7 +6576,7 @@ label.set-switch,
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xl);
   background: var(--bg-inset);
-  transition: border-color .12s;
+  transition: border-color var(--dur-fast);
 }
 .set-io-block:hover { border-color: var(--border); }
 .set-io-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -6647,7 +6652,7 @@ label.set-switch,
   font-size: var(--fs-sm);
   cursor: pointer;
 }
-.author-link .author-name { transition: color .12s; }
+.author-link .author-name { transition: color var(--dur-fast); }
 .author-link:hover .author-name { color: var(--accent); text-decoration: underline; }
 .author-avatar {
   width: 22px;
@@ -6679,7 +6684,7 @@ label.set-switch,
   position: fixed; top: 46px; left: 50%; transform: translateX(-50%);
   z-index: 400; padding: 8px 16px; border-radius: var(--radius-l);
   font-size: var(--fs-sm); box-shadow: var(--shadow);
-  animation: drop-toast-in .18s ease-out;
+  animation: drop-toast-in .18s ease-out; /* motion-token-exempt: 通知入场自己的周期，不是交互反馈节奏 */
 }
 .drop-toast.ok { background: var(--bg-panel); border: 1px solid var(--ok); color: var(--ok); }
 .drop-toast.bad { background: var(--bg-panel); border: 1px solid var(--danger); color: var(--danger); }
@@ -6713,7 +6718,8 @@ label.set-switch,
   justify-content: center;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
-  transition: transform .08s, filter .12s;
+  /* motion-token-exempt: 键盘遥控的跟手微反馈 80ms，比 --dur-snap(60ms) 慢一档；同样不做硬映射 */
+  transition: transform .08s, filter var(--dur-fast);
   padding: 0;
 }
 .keypad-btn:hover { filter: brightness(1.12); }
@@ -6788,7 +6794,7 @@ label.set-switch,
     inset 0 2px 0 rgba(255, 255, 255, .35),
     inset 0 -3px 0 rgba(0, 0, 0, .28),
     0 3px 5px rgba(0, 0, 0, .3);
-  transition: transform .06s, box-shadow .06s, filter .12s;
+  transition: transform var(--dur-snap), box-shadow var(--dur-snap), filter var(--dur-fast);
 }
 .keymon-dot:hover { filter: brightness(1.1); }
 .keymon-dot.held {
@@ -7187,7 +7193,7 @@ a > svg {
   color: var(--text-dim);
   cursor: pointer;
   white-space: nowrap;
-  transition: border-color .12s, color .12s, background .12s;
+  transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
 }
 .ai-scene-btn:hover { border-color: var(--line-strong); color: var(--text); background: var(--raise-1); }
 .ai-scene-btn.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
@@ -7283,7 +7289,7 @@ a > svg {
   margin-top: 4px;
   padding: 0 2px;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity var(--dur-base);
 }
 
 /* uartix-action 动作执行块 */
@@ -7336,7 +7342,7 @@ a > svg {
   color: var(--text-dim);
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.12s, background 0.12s;
+  transition: color var(--dur-fast), background var(--dur-fast);
 }
 .ai-msg-ops button:hover {
   color: var(--accent);
@@ -7360,7 +7366,7 @@ a > svg {
   justify-content: center;
   cursor: pointer;
   box-shadow: var(--shadow);
-  transition: color 0.15s, border-color 0.15s, transform 0.15s;
+  transition: color var(--dur-base), border-color var(--dur-base), transform var(--dur-base);
 }
 .ai-scroll-btn:hover {
   color: var(--accent);
@@ -7436,7 +7442,7 @@ a > svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ai-attach-chip.as-btn { cursor: pointer; transition: color 0.12s, border-color 0.12s; }
+.ai-attach-chip.as-btn { cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast); }
 .ai-attach-chip.as-btn:hover { color: var(--accent); border-color: var(--accent); }
 .ai-attach-chip.as-btn.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .ai-attach-del {
@@ -7524,7 +7530,7 @@ a > svg {
   justify-content: center;
   color: var(--text-dim);
   cursor: pointer;
-  transition: color 0.12s, background 0.12s;
+  transition: color var(--dur-fast), background var(--dur-fast);
 }
 .ai-plus:hover { color: var(--accent); background: var(--accent-soft); }
 .ai-plus-menu {
@@ -7568,7 +7574,7 @@ a > svg {
   color: var(--text-dim);
   cursor: pointer;
   background: transparent;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
 }
 .ai-mode-pill:hover { color: var(--accent); border-color: var(--accent); }
 .ai-mode-pill.on {
@@ -7612,7 +7618,7 @@ a > svg {
   display: block;
   height: 100%;
   background: var(--text-dim);
-  transition: width var(--dur-fast, 120ms) var(--ease, ease);
+  transition: width var(--dur-fast, var(--dur-fast)) var(--ease, ease);
 }
 .ai-ctx-chip.warn .ai-ctx-bar-fill { background: var(--warn-fg); }
 .ai-ctx-chip.danger .ai-ctx-bar-fill { background: var(--danger); }
@@ -7731,7 +7737,7 @@ a > svg {
   border: 1px solid transparent;
   border-radius: var(--radius-l);
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
 }
 .ai-agent-mode-name { font-size: var(--fs-sm); color: var(--text); }
 .ai-agent-mode-desc { font-size: var(--fs-body); line-height: 1.4; color: var(--text-dim); }
@@ -7886,7 +7892,7 @@ a > svg {
   font-size: var(--fs-body);
   color: var(--text-dim);
   cursor: pointer;
-  transition: color 0.12s, border-color 0.12s;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
 }
 .ai-agent-copylog:hover { color: var(--accent); border-color: var(--accent); }
 /* P88e B3：暂停续跑提示（文字 + 继续任务按钮 + 就地错误） */
@@ -8414,14 +8420,14 @@ a > svg {
 .ai-think.done summary:hover { color: var(--accent); }
 .ai-think-chev {
   display: inline-block;
-  transition: transform 0.15s;
+  transition: transform var(--dur-base);
 }
 .ai-think.done[open] .ai-think-chev { transform: rotate(90deg); }
 /* D4：思维链折叠头 caret 旋转动效（折叠头通用做法：转 90° + reduced-motion 关掉；独立 class 避免耦合） */
 .think-caret {
   display: inline-flex;
   flex: 0 0 auto;
-  transition: transform 0.15s;
+  transition: transform var(--dur-base);
 }
 .ai-think.done[open] .think-caret { transform: rotate(90deg); }
 .ai-think.done .ai-reasoning-body {
@@ -8676,7 +8682,7 @@ html.aiw-transparent-root #root {
   padding: 3px;
   cursor: pointer;
   opacity: 0;
-  transition: opacity .12s;
+  transition: opacity var(--dur-fast);
 }
 .ai-side-item:hover .ai-side-del { opacity: 1; }
 .ai-side-del:hover { color: var(--danger); }
@@ -8722,7 +8728,7 @@ html.aiw-transparent-root #root {
   display: inline-block;
   margin-right: 7px;
   color: var(--text-dim);
-  transition: transform 0.15s;
+  transition: transform var(--dur-base);
 }
 .set-coll[open] summary::before { transform: rotate(90deg); }
 .set-coll-body { padding: 0 14px 8px; border-top: 1px solid var(--border-soft); }
@@ -8844,7 +8850,7 @@ html.aiw-transparent-root #root {
 .xfer-ok { color: var(--ok); }
 .xfer-bad { color: var(--danger); }
 .xfer-bar { height: 8px; border-radius: var(--radius-s); background: rgba(127,127,127,.18); overflow: hidden; }
-.xfer-bar-fill { height: 100%; background: linear-gradient(90deg, var(--ok), var(--accent)); transition: width .15s linear; }
+.xfer-bar-fill { height: 100%; background: linear-gradient(90deg, var(--ok), var(--accent)); transition: width var(--dur-base) linear; }
 .xfer-meta { display: flex; gap: 14px; font-size: var(--fs-body); opacity: .7; }
 .xfer-retry { color: var(--warn); }
 .xfer-result { font-size: var(--fs-sm); padding: 7px 10px; border-radius: var(--radius-m); border: 1px solid transparent; }
@@ -8976,7 +8982,7 @@ html.aiw-transparent-root #root {
 .sq-n90 { width: 90px; height: 24px; padding: 0 4px; font-size: var(--fs-body); flex: none; }
 .sq-n110 { width: 110px; height: 24px; padding: 0 4px; font-size: var(--fs-body); flex: none; }
 .sq-n150 { width: 150px; height: 24px; padding: 0 4px; font-size: var(--fs-body); flex: none; }
-.sq-acts { display: inline-flex; gap: 2px; flex: none; margin-left: auto; opacity: 0; transition: opacity .12s; }
+.sq-acts { display: inline-flex; gap: 2px; flex: none; margin-left: auto; opacity: 0; transition: opacity var(--dur-fast); }
 .sq-row:hover .sq-acts { opacity: 1; }
 .sq-a { all: unset; cursor: pointer; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: var(--radius-s); font-size: var(--fs-sm); color: var(--text-dim); }
 .sq-a:hover { background: var(--accent-soft); color: var(--accent); }
@@ -10650,8 +10656,8 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-chip.warn { color: var(--warn-fg); border-color: var(--warn); }
 .plg-switch { position: relative; display: inline-flex; align-items: center; cursor: pointer; flex: 0 0 auto; }
 .plg-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
-.plg-switch-ui { width: 32px; height: 18px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--bg-inset); position: relative; transition: background .15s; }
-.plg-switch-ui::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-dim); transition: transform .15s, background .15s; }
+.plg-switch-ui { width: 32px; height: 18px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--bg-inset); position: relative; transition: background var(--dur-base); }
+.plg-switch-ui::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--text-dim); transition: transform var(--dur-base), background var(--dur-base); }
 .plg-switch input:checked + .plg-switch-ui { background: var(--accent-soft); border-color: var(--accent); }
 .plg-switch input:checked + .plg-switch-ui::after { transform: translateX(14px); background: var(--accent); }
 .plg-switch input:disabled + .plg-switch-ui { opacity: .5; cursor: not-allowed; }

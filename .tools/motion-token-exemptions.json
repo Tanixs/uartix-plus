@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "judge": "transition 的字面时长 + animation 里 <200ms 的字面时长；≥200ms 的 animation 是效果自己的周期（不判），0s 与 var(--dur-*) 不判；豁免须带 motion-token-exempt 理由并在此登记",
+  "effect_cycle_floor_ms": 200,
+  "budget": {
+    "literals": 0
+  },
+  "exemptions": [
+    {
+      "file": "src/styles/theme.css",
+      "decl": "tran ition: tran form 0.18  ea e, background var(--dur-fa t) ea e, color var(--dur-fa t) ea e;",
+      "lits": [
+        180
+      ],
+      "reason": "折叠箭头那 90° 的行程是 180ms，与三档令牌都不等——硬映射等于改这处观感，登记不静默换值 */"
+    },
+    {
+      "file": "src/styles/theme.css",
+      "decl": "animation: drop-toa t-in .18  ea e-out;",
+      "lits": [
+        180
+      ],
+      "reason": "通知入场自己的周期，不是交互反馈节奏 */"
+    },
+    {
+      "file": "src/styles/theme.css",
+      "decl": "tran ition: tran form .08 , filter var(--dur-fa t);",
+      "lits": [
+        80
+      ],
+      "reason": "键盘遥控的跟手微反馈 80ms，比 --dur-snap(60ms) 慢一档；同样不做硬映射 */"
+    }
+  ]
+}
