@@ -18,7 +18,7 @@ import { ctxGauge, fmtKb } from "./context";
 import { hasDataLease } from "../plot/dataLease";
 import { confirmDialog } from "../../shared/Dialog";
 import { IconChevron, IconTrash } from "../../shared/icons";
-import { parseArgs, receiptRows, receiptStatusText, summarizeArgs, toolLabel } from "./toolDisplay";
+import { asSubagentData, nestedSubagentUsage, parseArgs, receiptRows, receiptStatusText, subRunSteps, summarizeArgs, toolLabel } from "./toolDisplay";
 // 台账→文本、状态人话、预算 ∞：与「导出对话为 md」共用同一份（P133-I，搬进 runLog.ts）
 import { capOf, serializeLog, statusLabel } from "./runLog";
 import { tx, useLocale } from "../../i18n/strings";
@@ -122,6 +122,15 @@ function Foldable({
   );
 }
 
+/** P137：撞顶说法。穷举 `Record` ⇒ 以后 `SubagentCapHit` 多一档而这里没配说法，tsc 直接红（§8-35①）。
+ *  每项存成 `() => tx(...)` 而不是 `[中, 英]` 字面量对：i18n 扫描器认的是**真的 `tx()` 调用**，
+ *  用 `tx(...表[hit])` 那种展开写法它看不见，中文就整个算成未翻译债（本批实测 26 字判红）。 */
+const SUB_CAP_HIT_TX: Record<"rounds" | "calls" | "ms", () => string> = {
+  rounds: () => tx("轮数用尽，它可能没查完", "hit its round limit and may not have finished"),
+  calls: () => tx("调用次数用尽，它可能没查完", "hit its tool-call limit and may not have finished"),
+  ms: () => tx("时间到了", "ran out of time"),
+};
+
 /** 单条工具卡：状态点 + 中文工具名 + 人类摘要 + 时刻与耗时；展开=参数/回执表格化 */
 function ToolCard({
   tool,
@@ -132,17 +141,20 @@ function ToolCard({
   dur,
   undoState,
   onUndo,
+  subRun,
 }: {
   tool: string;
   args?: string;
   /** P92 D1：参数被截断过——摘要要承认"没看全"，不能猜 */
   truncated?: boolean;
-  receipt: { ok: boolean; status: string; code?: string; undoToken?: string; data?: unknown; src?: ToolProvenance };
+  receipt: { callId?: string; ok: boolean; status: string; code?: string; undoToken?: string; data?: unknown; src?: ToolProvenance };
   ts?: number;
   dur?: number;
   /** 撤销态；类型直接由展示表反推 ⇒ 加了新撤销态却没配说法，这里就编译不过 */
   undoState?: keyof typeof agentRun.UNDO_STATE_UI | "undone";
   onUndo?: () => void;
+  /** P137：这一支是派发时，子任务的实时过程（内存态；没有=已过期或本来就没有） */
+  subRun?: agentRun.SubRunLive | null;
 }) {
   const [open, setOpen] = useState(false);
   // P90 E4：任务保存的插件就地一键停用（覆盖层已清、撤销令牌已失效，"停用"才是恢复路径）。
@@ -170,6 +182,11 @@ function ToolCard({
   const sum = summarizeArgs(tool, parsed, truncated) || (truncated ? tx("参数过长（见日志）", "arguments too long (see log)") : "");
   const stat = receiptStatusText(receipt.ok, receipt.status, receipt.code);
   const rows = open ? receiptRows(receipt.data) : [];
+  /** P137：派发回执有专门的读法——报告全文与逐轮过程都不走通用 160 字通道（详设 C3） */
+  const sub = tool === "subagent" ? asSubagentData(receipt.data) : null;
+  const steps = open && subRun ? subRunSteps(subRun.events) : [];
+  /** 落盘时被省略的那条派发回执：`data` 只剩占位，但"原本有多少字节"还在——读数不许假装有内容 */
+  const droppedBytes = !sub && tool === "subagent" ? (receipt.data as { bytes?: number } | undefined)?.bytes : undefined;
   return (
     <div className={`ai-agent-tool${receipt.ok ? "" : " bad"}`}>
       <button className="ai-agent-tool-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
@@ -207,6 +224,47 @@ function ToolCard({
               <span className="ai-agent-v">{r.v}</span>
             </div>
           ))}
+          {sub?.caps && (
+            <div className="ai-agent-kv">
+              <span className="ai-agent-k">{tx("额度", "Budget")}</span>
+              <span className="ai-agent-v">
+                {tx(
+                  `${sub.rounds}/${sub.caps.maxRounds} 轮 · ${sub.calls}/${sub.caps.maxCalls} 次 · 用时 ${fmtElapsed(sub.elapsedMs ?? 0)}${sub.capHit ? ` · ${SUB_CAP_HIT_TX[sub.capHit]()}` : ""}`,
+                  `${sub.rounds}/${sub.caps.maxRounds} rounds · ${sub.calls}/${sub.caps.maxCalls} calls · ${fmtElapsed(sub.elapsedMs ?? 0)}${sub.capHit ? ` · ${SUB_CAP_HIT_TX[sub.capHit]()}` : ""}`,
+                )}
+              </span>
+            </div>
+          )}
+          {sub?.answer ? (
+            <Foldable
+              label={tx(`报告全文 · 共 ${sub.answer.length} 字`, `Full report · ${sub.answer.length} characters`)}
+              text={sub.answer}
+            />
+          ) : null}
+          {steps.map((r, i) => (
+            <div key={`substep-${i}`} className="ai-agent-kv">
+              <span className="ai-agent-k">{r.k}</span>
+              <span className="ai-agent-v">{r.v}</span>
+            </div>
+          ))}
+          {sub && (
+            <div className="ai-agent-note">
+              {subRun
+                ? tx(
+                    `子任务逐轮共 ${subRun.events.length} 条过程事件，只留在本次会话内存里，刷新即没；额度与报告数字随台账保留。`,
+                    `${subRun.events.length} step event(s) kept in this session's memory only - they do not survive a reload, while the budget line and the report persist with the ledger.`,
+                  )
+                : tx("子任务的逐轮过程只留在本次会话内存里，现在已过期；额度与报告数字随台账保留。", "The sub-agent's step detail lives for this session only and has expired; the budget line and the report persist with the ledger.")}
+            </div>
+          )}
+          {droppedBytes != null && (
+            <div className="ai-agent-note">
+              {tx(
+                `报告全文与额度读数已随台账落盘上限省略（原本 ${droppedBytes} 字节）；要看这一趟查了什么，让任务重跑一次派发。`,
+                `The report and its budget line were omitted at the ledger's persistence cap (${droppedBytes} bytes originally); dispatch it again to read what it found.`,
+              )}
+            </div>
+          )}
           {pluginId && (
             <div className="ai-agent-kv">
               <span className="ai-agent-k">{tx("持久化", "Persistence")}</span>
@@ -355,6 +413,18 @@ function RunBlock({ view }: { view: AgentRunView }) {
   const [busy, setBusy] = useState("");
   const running = view.status === "running";
   const live = agentRun.getLive(view.runId);
+  /** P137：派发期间的实时行（详设 D1 甲）。子任务不是一条 run 视图，它的事件只在这张内存表里，
+   *  所以"父侧只显示那一条卡片"这句 P135-B §10-3 的欠账在这里还。 */
+  const liveSubs = running ? agentRun.liveSubRunsOf(view.runId) : [];
+  /** P137-D4：父计数含子的量（`chargeNested` 记的账），这里把它从**回执**里派生出来标明白——
+   *  不另记第二份账，所以重启后仍答得出（除非落盘时被省略，那走 `lost` 那句）。 */
+  const nested = nestedSubagentUsage(view.events);
+  const nestedSuffix =
+    nested.rounds || nested.calls
+      ? tx(`（其中子任务 ${nested.rounds} 轮 / ${nested.calls} 次）`, `(of which sub-agents: ${nested.rounds} rounds / ${nested.calls} calls)`)
+      : nested.lost
+        ? tx(`（其中 ${nested.lost} 次子任务的用量已随台账落盘上限省略）`, `(${nested.lost} sub-agent usage(s) were omitted at the ledger's persistence cap)`)
+        : "";
   useEffect(() => {
     if (!running) return;
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -424,8 +494,8 @@ function RunBlock({ view }: { view: AgentRunView }) {
       </div>
       <div className="ai-agent-meta">
         {tx(
-          `第 ${view.rounds}/${capOf(view.caps.maxRounds)} 轮 · 工具 ${view.calls}/${capOf(view.caps.maxCalls)} 次 · 已用 ${fmtElapsed(elapsedBase - view.createdAt)}`,
-          `Round ${view.rounds}/${capOf(view.caps.maxRounds)} · ${view.calls}/${capOf(view.caps.maxCalls)} tool calls · ${fmtElapsed(elapsedBase - view.createdAt)} elapsed`,
+          `第 ${view.rounds}/${capOf(view.caps.maxRounds)} 轮 · 工具 ${view.calls}/${capOf(view.caps.maxCalls)} 次 · 已用 ${fmtElapsed(elapsedBase - view.createdAt)}${nestedSuffix}`,
+          `Round ${view.rounds}/${capOf(view.caps.maxRounds)} · ${view.calls}/${capOf(view.caps.maxCalls)} tool calls · ${fmtElapsed(elapsedBase - view.createdAt)} elapsed${nestedSuffix}`,
         )}
         {/* P95-H2：这一轮到底送了多少东西进去（旧实现完全没有这个数） */}
         {view.ctx?.last && (
@@ -524,6 +594,7 @@ function RunBlock({ view }: { view: AgentRunView }) {
               dur={dur}
               undoState={view.undoState[e.seq]}
               onUndo={() => agentRun.undoReceipt(view.runId, e.seq)}
+              subRun={e.tool === "subagent" && rec.callId ? agentRun.getSubRun(rec.callId) : null}
             />
           );
         })}
@@ -549,14 +620,27 @@ function RunBlock({ view }: { view: AgentRunView }) {
         {running && live?.text && (
           <div key="live-text" className="ai-agent-turn ai-agent-turn-live">{live.text}</div>
         )}
+        {liveSubs.map((s) => {
+          const st = subRunSteps(s.events);
+          const last = st[st.length - 1];
+          const briefGoal = s.goal.length > 40 ? `${s.goal.slice(0, 40)}…` : s.goal;
+          return (
+            <div key={s.callId} className="ai-agent-note">
+              {tx(
+                `子代理正在查「${briefGoal}」· 第 ${s.rounds}/${s.caps.maxRounds} 轮 · 工具 ${s.calls}/${s.caps.maxCalls} 次${last ? ` · 上一步 ${last.k}` : ""}（只读面，改动仍由本任务自己发起）`,
+                `Sub-agent digging into “${briefGoal}” · round ${s.rounds}/${s.caps.maxRounds} · ${s.calls}/${s.caps.maxCalls} calls${last ? ` · last step ${last.k}` : ""} (read-only face; changes still come from this task's own calls)`,
+              )}
+            </div>
+          );
+        })}
         {running && <ApprovalCard view={view} />}
-        {running && !live?.text && !live?.reasoning && (
+        {running && !liveSubs.length && !live?.text && !live?.reasoning && (
           <div className="ai-agent-wait">{tx(`模型思考中… ${fmtElapsed(now - view.updatedAt)}`, `Model is thinking… ${fmtElapsed(now - view.updatedAt)}`)}</div>
         )}
         {/* 静默 20s 以上必须说清"为什么"和"怎么办"：旧实现只有一个跳秒的数字，
             用户只能在"卡死了"和"还在想"之间猜。做成兄弟节点而不是嵌进上面那行，
             是为了不跟着它的 agent-pulse 呼吸一起闪（长文闪烁没法读）。 */}
-        {running && !live?.text && !live?.reasoning && now - view.updatedAt > 20_000 && (
+        {running && !liveSubs.length && !live?.text && !live?.reasoning && now - view.updatedAt > 20_000 && (
           <div className="ai-agent-wait-hint">
             {tx(
               "上游一直没有吐字。若反复停在这一轮：设置 → AI 服务 里关掉「深度思考」或调大「流式读空闲超时」；右侧红色按钮可停止并保留已完成步骤。",

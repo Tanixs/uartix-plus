@@ -45,7 +45,8 @@ const FACE = new Set<string>(SUBAGENT_FACE);
 const names = (adapter: { definitions: { name: string }[] }) => adapter.definitions.map((d) => d.name);
 
 const report = (over: Partial<SubagentReport> = {}): SubagentReport => ({
-  status: "succeeded", rounds: 2, calls: 3, tools: ["fs_read", "fs_grep"], text: "帧尾两字节像 CRC16，初值 0xFFFF", ...over,
+  status: "succeeded", rounds: 2, calls: 3, tools: ["fs_read", "fs_grep"], text: "帧尾两字节像 CRC16，初值 0xFFFF",
+  caps: { ...SUBAGENT_CAPS }, elapsedMs: 12_000, ...over,
 });
 
 function harness(dispatch?: unknown, gate = recordingGate()) {

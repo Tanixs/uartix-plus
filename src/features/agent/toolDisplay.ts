@@ -12,6 +12,7 @@
 import { hostEntryByName, hostToolLabel, readableToolName } from "./hostEntries";
 import { actionKindLabel } from "./toolCatalog";
 import { INSTALL_CODE_ZH } from "../market/marketIndex";
+import type { RunEvent } from "./types";
 
 export { actionKindLabel };
 
@@ -47,6 +48,25 @@ export function fallbackToolLabel(name: string): string {
   return readableToolName(name);
 }
 
+/**
+ * P137：父计数里"其中子任务"的量 = 逐条派发回执相加（**派生自台账**，不是另记的账）。
+ * `lost` 只数"**这条真的派发生过、但 `data` 被落盘上限省略了**"（P94 G2 那条通道，
+ * 子代理的报告正文常常 > 2 KiB）。就地被拒的派发（关着开关 / 额度没了 / 通路没装配）
+ * 也算"没有可读 data"，但它一分钱都没烧过——把它计入 `lost` 会当场说谎（§8-41），
+ * 所以判据落在省略标记 `receiptTruncated` / 占位里的 `truncated` 上，不是落在"读不出形状"上。
+ */
+export function nestedSubagentUsage(events: readonly RunEvent[]): { rounds: number; calls: number; lost: number } {
+  let rounds = 0, calls = 0, lost = 0;
+  for (const e of events) {
+    if (e.kind !== "receipt" || e.tool !== "subagent") continue;
+    const d = asSubagentData(e.receipt?.data);
+    if (d) { rounds += d.rounds; calls += d.calls; continue; }
+    const placeholder = e.receipt?.data as { truncated?: boolean } | undefined;
+    if (e.receiptTruncated || placeholder?.truncated) lost++;
+  }
+  return { rounds, calls, lost };
+}
+
 /** 回执 data → 人类可读行（表格化：只列标量与短数组，嵌套对象折叠为键名列表） */
 export function receiptRows(data: unknown): { k: string; v: string }[] {
   if (data == null) return [];
@@ -55,6 +75,20 @@ export function receiptRows(data: unknown): { k: string; v: string }[] {
     if (data.length === 0) return [{ k: "结果", v: "（空）" }];
     return [{ k: "条目数", v: String(data.length) }, ...data.slice(0, 6).map((it, i) => ({ k: `#${i + 1}`, v: cell(it) }))];
   }
+  /**
+   * P137：子代理那条回执**不走通用 160 字通道**。
+   * 通用通道是"什么都不知道就每人给 160 字"的兜底，而这里的 `answer` 恰恰是整条回执唯一的正文——
+   * 模型侧超 8 KiB 能 `read_artifact` 分页取全文，人被兜底截成 160 字却看不出处置过（详设 F8/C3）。
+   * 全文交给渲染层单独一块（`AgentInline` 用 `Foldable`），这里只保证**不再出现一句看起来完整的残段**。
+   */
+  if (asSubagentData(data)) return objectRows(data).filter((r) => !SUB_RUN_TEXT_KEYS.has(r.k));
+  return objectRows(data);
+}
+
+/** 子代理回执里"不由通用通道负责"的键：正文与额度读数各有专门的渲染处 */
+const SUB_RUN_TEXT_KEYS = new Set(["answer", "caps", "elapsedMs"]);
+
+function objectRows(data: unknown): { k: string; v: string }[] {
   const out: { k: string; v: string }[] = [];
   for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
     if (v === undefined) continue;
@@ -66,6 +100,41 @@ export function receiptRows(data: unknown): { k: string; v: string }[] {
       out.push({ k, v: `对象 {${Object.keys(v as object).slice(0, 6).join(", ")}}` });
     }
     if (out.length >= 12) break;
+  }
+  return out;
+}
+
+/** P137：派发回执 `data` 的形状（与 `subagent.ts` execute 那一份同源；判据取四个必填字段） */
+export interface SubagentReceiptData {
+  goal: string; answer: string; rounds: number; calls: number;
+  toolsUsed: string[]; subStatus: string; note?: string; capHit?: "rounds" | "calls" | "ms";
+  caps?: { maxRounds: number; maxCalls: number; timeoutMs: number };
+  elapsedMs?: number;
+}
+export function asSubagentData(data: unknown): SubagentReceiptData | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const d = data as Record<string, unknown>;
+  if (typeof d.goal !== "string" || typeof d.answer !== "string") return null;
+  if (typeof d.subStatus !== "string" || typeof d.rounds !== "number" || typeof d.calls !== "number") return null;
+  if (!Array.isArray(d.toolsUsed)) return null;
+  return d as unknown as SubagentReceiptData;
+}
+
+/**
+ * P137：子任务的逐轮过程 → 简表行。**纯派生**（详设 §8-48：界面只渲染，逻辑要钉得住）。
+ * 只列**带回执**的事件——轮次心跳、思维链与"第 N 轮失败"那类叙述是给人的进度感，
+ * 不是"子代理做过哪些动作"的证据；把它们混进来会让一张简表读起来像父任务的日志。
+ * （判据落在 `receipt` 这一个字段上就够：台账里只有 `kind === "receipt"` 的事件才带回执，
+ *  再叠一个 kind 判断是永远不会生效的第二道闸，§8-54② 说这种分支该删。）
+ */
+export function subRunSteps(events: readonly RunEvent[]): { k: string; v: string }[] {
+  const out: { k: string; v: string }[] = [];
+  for (const e of events) {
+    if (!e.receipt) continue;
+    const name = e.tool ?? "tool";
+    const sum = summarizeArgs(name, parseArgs(e.args), e.argsTruncated);
+    const stat = receiptStatusText(e.receipt.ok, e.receipt.status, e.receipt.code);
+    out.push({ k: toolLabel(name), v: [stat, sum].filter(Boolean).join(" · ") });
   }
   return out;
 }

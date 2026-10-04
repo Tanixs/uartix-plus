@@ -54,6 +54,62 @@ function appendLive(runId: string, kind: "text" | "reasoning", chunk: string) {
   }
 }
 
+/**
+ * P137：子任务（只读子代理）的**实时过程**——与 `liveBuffers` 同一族：只活在内存里，
+ * 不进父台账、不持久化（详设 C1/C2）。
+ *
+ * 为什么要有这张表：`makeSubagentDispatch` 原先一个回调都不传（详设 F1），子的逐轮事件
+ * 在 `runAgent` 返回后就地蒸发——于是"子代理在查"与"子代理挂了"在屏幕上长得一样。
+ * 为什么不塞进 `view.events`：一次派发上界约 22 条事件（6 轮 + ≤16 回执），五次就是
+ * 父台账 200 条上限的 55%（F4/F5）——那才是 P135-B §6 真正拒绝的东西。
+ * ⚠ **刷新即没**：这条事实由界面上那句说明承担（`AgentInline` 的展开区），别在这里加
+ * 任何"看起来像台账"的持久化——`persist()` 的配额失败是静默 `catch`（F6），多塞一份
+ * 逐轮就是在赌它不炸。
+ */
+export interface SubRunLive {
+  /** 父侧那次调用的 callId——键，也是渲染层找回它的唯一入口 */
+  callId: string;
+  /** 父 runId（`removeRun` / 记录挤出 / `clearHistory` 按它清理） */
+  parentId: string;
+  goal: string;
+  caps: { maxRounds: number; maxCalls: number; timeoutMs: number };
+  events: RunEvent[];
+  rounds: number;
+  calls: number;
+  startedAt: number;
+  endedAt?: number;
+  status?: RunStatus;
+  done: boolean;
+}
+const subRuns = new Map<string, SubRunLive>();
+
+export function getSubRun(callId: string): SubRunLive | null {
+  return subRuns.get(callId) ?? null;
+}
+
+/** 某个父 run 名下**还在跑**的派发（渲染实时行用；已完成的走卡片找回，不从这里出）。 */
+export function liveSubRunsOf(parentId: string): SubRunLive[] {
+  return [...subRuns.values()].filter((s) => s.parentId === parentId && !s.done);
+}
+
+function makeSubRun(callId: string, parentId: string, goal: string, caps: SubRunLive["caps"]): SubRunLive {
+  const live: SubRunLive = { callId, parentId, goal, caps, events: [], rounds: 0, calls: 0, startedAt: Date.now(), done: false };
+  subRuns.set(callId, live);
+  return live;
+}
+
+/** 子的一条事件外发到这里。条数不需要自己的环：一次派发的量被 `SUBAGENT_CAPS`
+ *  夹死在"≤6 轮 + ≤16 次"这个上界里（详设 F5），而条目本身随父记录的生命周期走。 */
+function pushSubRunEvent(live: SubRunLive, e: RunEvent) {
+  live.events.push(e);
+  notify();
+}
+
+/** 随父任务消失：删记录时它名下的派发过程一起走（不留"点开是空的"的壳）。 */
+function dropSubRunsOf(parentId: string) {
+  for (const s of [...subRuns.values()]) if (s.parentId === parentId) subRuns.delete(s.callId);
+}
+
 /** 展示用目标：附件全文会拼进 goal 给模型，卡片/摘要只显示用户原话首行（P90 A2）。 */
 function briefOf(text: string): string {
   const line = text.replace(/\s+/g, " ").trim();
@@ -291,6 +347,7 @@ function loadSaved(): AgentRunView[] {
 export function clearHistory(): void {
   if (controller) return;
   runs = [];
+  subRuns.clear();
   try {
     localStorage.removeItem(STORE_KEY);
   } catch { /* 忽略 */ }
@@ -304,6 +361,7 @@ export function removeRun(runId: string): boolean {
   if (!view || view.status === "running") return false;
   runs = runs.filter((r) => r.runId !== runId);
   liveBuffers.delete(runId);
+  dropSubRunsOf(runId);
   if (activeRunId === runId) activeRunId = null;
   persist();
   notify();
@@ -545,7 +603,10 @@ export async function startRun(options: {
     caps: { maxRounds, maxCalls, deadlineAt: timeoutMs > 0 ? now + timeoutMs : 0 },
     createdAt: now, updatedAt: now, events: [], pending: [], undoState: {},
   };
-  runs = [view, ...runs.filter((r) => r.runId !== runId)].slice(0, RUNS_KEPT);
+  const kept = runs.filter((r) => r.runId !== runId);
+  // 被 RUNS_KEPT 挤出去的那几条记录，名下的派发过程要一起走（否则内存表只进不出）
+  for (const r of kept.slice(RUNS_KEPT - 1)) dropSubRunsOf(r.runId);
+  runs = [view, ...kept].slice(0, RUNS_KEPT);
   activeRunId = runId;
   // P99a-C1：控制器与 `running` 状态**同时**成立。以前它到 executeRun 里才 new，而 executeRun
   // 前面还压着 `await armEnabledModules()`——于是存在"任务已是 running、控制器还不存在"的窗口，
@@ -575,11 +636,14 @@ export async function startRun(options: {
  *  - **不能再扩权** ⇒ 档位与授权域照抄父任务那份 `(scope, allowed)` 再裁一次。
  *
  * 子的逐轮过程**不进父台账**：`EVENTS_CAP = 200`，把子的每一轮塞进来等于把父任务可复盘的
- * 深度砍一半（P134-B 量的就是同一件事）。父侧只留一条派发回执。
+ * 深度砍一半（P134-B 量的就是同一件事）。父台账里只留一条派发回执。
+ * P137 补上另一半：过程不是不给看，是**换个位置给**——`subRuns` 那张内存表接 `onEvent`/`onProgress`
+ * （详设 §3-D1 甲），于是派发期间界面有实时行、派发完展开有逐轮简表，而父台账一格没多占。
  */
 function makeSubagentDispatch(view: AgentRunView, allowed: readonly Domain[]): SubagentDispatch {
   return async (goal, ctxIn) => {
     const caps = subagentCaps(ctxIn.remaining) ?? { ...SUBAGENT_CAPS };
+    const live = makeSubRun(ctxIn.callId, view.runId, goal, caps);
     const subRunId = crypto.randomUUID();
     const adapter = createReadOnlyAgentAdapter({ runId: subRunId, scope: view.scope, allowed });
     const activeAi = activeRef();
@@ -598,10 +662,17 @@ function makeSubagentDispatch(view: AgentRunView, allowed: readonly Domain[]): S
       }),
       maxRounds: caps.maxRounds, maxCalls: caps.maxCalls, timeoutMs: caps.timeoutMs,
       ...(activeAi ? { maxOutputTokens: activeAi.model.maxOutputTokens } : {}),
+      onEvent: (e) => pushSubRunEvent(live, e),
+      onProgress: (rounds, calls) => { live.rounds = rounds; live.calls = calls; },
     });
     const tools = [...new Set(res.events.filter((e) => e.kind === "receipt" && e.tool).map((e) => e.tool as string))];
     const text = [...res.messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
-    return { status: res.status, rounds: res.rounds, calls: res.calls, tools, text };
+    const elapsedMs = Date.now() - live.startedAt;
+    live.done = true;
+    live.endedAt = Date.now();
+    live.status = res.status;
+    notify();
+    return { status: res.status, rounds: res.rounds, calls: res.calls, tools, text, caps, elapsedMs };
   };
 }
 
@@ -915,6 +986,7 @@ export function resetForTests(): void {
   runs = [];
   activeRunId = null;
   liveBuffers.clear();
+  subRuns.clear();
   approved.clear();
   rejected.clear();
   try {

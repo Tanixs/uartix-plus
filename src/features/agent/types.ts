@@ -57,10 +57,18 @@ export interface TaskContext {
 export interface BudgetLeft { rounds: number | null; calls: number | null; ms: number | null }
 /** P135-B：一次嵌套运行的用量 */
 export interface SubagentUsage { rounds: number; calls: number; tools: string[] }
-/** P135-B：子任务的回报。`status` 是它自己的终态，父侧据此决定这条回执算不算成 */
-export interface SubagentReport extends SubagentUsage { status: RunStatus; text: string }
-/** P135-B：装配方（agentRun）提供的派发函数，挂在 `RunScratch.subagent` 上 */
-export type SubagentDispatch = (goal: string, ctx: TaskContext) => Promise<SubagentReport>;
+/** P135-B：子任务的回报。`status` 是它自己的终态，父侧据此决定这条回执算不算成。
+ *  P137 起带上**实际生效的上限与耗时**：`SUBAGENT_CAPS` 那三个数是拍的，而"查完了"与
+ *  "轮数撞顶了"在屏幕上必须分得开——没有这份读数就永远没有校准它的依据（详设 C5）。 */
+export interface SubagentReport extends SubagentUsage {
+  status: RunStatus; text: string;
+  /** 这一趟真正跑在哪个上限下（`subagentCaps` 双夹之后的值，不是常量表本身） */
+  caps: { maxRounds: number; maxCalls: number; timeoutMs: number };
+  elapsedMs: number;
+}
+/** P135-B：装配方（agentRun）提供的派发函数，挂在 `RunScratch.subagent` 上。
+ *  P137：参数类型带 `callId`——子任务的实时过程要按"父侧那次调用"归位（详设 §3-D1 甲）。 */
+export type SubagentDispatch = (goal: string, ctx: TaskContext & { callId: string }) => Promise<SubagentReport>;
 export interface TaskAdapter { definitions: ToolDefinition[]; execute(call: ToolCall, ctx: TaskContext): Promise<ToolReceipt>;
   /**
    * P109-C：完成契约。模型这一轮没发工具调用（= 想收工）时，loop 问一次适配器：

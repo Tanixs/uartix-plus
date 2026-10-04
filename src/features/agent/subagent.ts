@@ -44,6 +44,30 @@ export const SUBAGENT_FACE = [
 export const SUBAGENT_CAPS = { maxRounds: 6, maxCalls: 16, timeoutMs: 180_000 };
 
 /**
+ * P137：这一趟是**撞了哪一项顶**才停的（`null` = 三项都没碰线）。
+ * 三个常数现在是拍的（详设 C5），但"拍的数够不够"要有读数的地方——
+ * 界面上 `额度 6/6 轮` 与一句"轮数用尽，它可能没查完"才是回头校准它的依据。
+ * 判据用 `>=` 而不是 `===`：轮数与调用数由 loop 累加，超限那一档也可能一次加过头。
+ */
+export type SubagentCapHit = "rounds" | "calls" | "ms" | null;
+export function subagentCapHit(
+  caps: { maxRounds: number; maxCalls: number; timeoutMs: number },
+  usage: { rounds: number; calls: number; elapsedMs: number },
+): SubagentCapHit {
+  if (usage.rounds >= caps.maxRounds) return "rounds";
+  if (usage.calls >= caps.maxCalls) return "calls";
+  if (usage.elapsedMs >= caps.timeoutMs) return "ms";
+  return null;
+}
+
+/** 撞顶说法（穷举 Record：漏一项就编译不过，§8-35①） */
+const CAP_HIT_ZH: Record<Exclude<SubagentCapHit, null>, string> = {
+  rounds: "轮数已用尽，它可能没查完",
+  calls: "调用次数已用尽，它可能没查完",
+  ms: "时间到了",
+};
+
+/**
  * 从父任务的剩余折算子的上限。返回 `null` = **这一趟不该开跑**（额度已经没了）。
  *
  * 这里就是那颗雷：宿主 caps 的线上形态是 `0 = 不限制`（P109-A 裁决，`deadlineAt: 0` 同理，
@@ -72,7 +96,7 @@ export const subagentToolEntries = [
     domain: null,
     provenance: HOST,
     description:
-      `Dispatch a READ-ONLY sub-agent: it gets its own short run with a subset of these tools (${SUBAGENT_FACE.join(", ")}), reports back one text answer, and CANNOT write settings, files, plugins, appearance or the device - the tool face it inherits is this task's own authorization domains, so a task that cannot read files produces a sub-agent that cannot either. Args: { goal: string - one concrete question to answer, e.g. "which fields in frame A look like a checksum and why" }. The receipt carries { goal, answer, rounds, calls, toolsUsed, status }. Three things to know before using it. (1) It burns the SAME budget as this run: its rounds and tool calls are charged back to this task's counters, and if this task has no rounds left the dispatch is refused (subagent_budget_exhausted) rather than silently unlimited. (2) It cannot ask the user anything and cannot be approved past its read-only face, so it is for digging, not for deciding. (3) Its answer is a REPORT, not evidence that anything happened: to change something you still call the write tools yourself and read their receipts. Needs the "Agent 只读子代理" master switch in settings (off by default) because each dispatch costs real model requests.`,
+      `Dispatch a READ-ONLY sub-agent: it gets its own short run with a subset of these tools (${SUBAGENT_FACE.join(", ")}), reports back one text answer, and CANNOT write settings, files, plugins, appearance or the device - the tool face it inherits is this task's own authorization domains, so a task that cannot read files produces a sub-agent that cannot either. Args: { goal: string - one concrete question to answer, e.g. "which fields in frame A look like a checksum and why" }. The receipt carries { goal, answer, rounds, calls, toolsUsed, status, caps, elapsedMs }, plus capHit when it stopped on one of its limits. Three things to know before using it. (1) It burns the SAME budget as this run: its rounds and tool calls are charged back to this task's counters, and if this task has no rounds left the dispatch is refused (subagent_budget_exhausted) rather than silently unlimited. (2) It cannot ask the user anything and cannot be approved past its read-only face, so it is for digging, not for deciding. (3) Its answer is a REPORT, not evidence that anything happened: to change something you still call the write tools yourself and read their receipts. Needs the "Agent 只读子代理" master switch in settings (off by default) because each dispatch costs real model requests.`,
     parameters: {
       type: "object",
       properties: { goal: { type: "string", description: "要子代理回答的那一个具体问题" } },
@@ -123,6 +147,7 @@ export const subagentToolEntries = [
       // 用量记回父账（loop 实现的那一处），于是界面上的 N/24 轮包含子任务烧掉的量
       ctx.chargeNested?.({ rounds: rep.rounds, calls: rep.calls, tools: rep.tools });
       const done = rep.status === "succeeded";
+      const hit = subagentCapHit(rep.caps, { rounds: rep.rounds, calls: rep.calls, elapsedMs: rep.elapsedMs });
       return {
         ok: done,
         status: done ? "read" : "error",
@@ -134,9 +159,13 @@ export const subagentToolEntries = [
           calls: rep.calls,
           toolsUsed: rep.tools,
           subStatus: rep.status,
+          // P137：额度读数随回执走（不是只在实时表里）——台账与导出日志也要答得出"跑在哪个顶上"
+          caps: rep.caps,
+          elapsedMs: rep.elapsedMs,
+          ...(!done && hit ? { capHit: hit } : {}),
           note: done
             ? "这是子代理查出来的**报告**，不是任何改动已经发生的证据；要落改动仍需你自己调用写类工具并读回执"
-            : `子代理没跑完（终态 ${rep.status}）：上面是它到此为止拿到的东西。需要更多就缩小问题，或让任务续跑`,
+            : `子代理没跑完（终态 ${rep.status}${hit ? `，${CAP_HIT_ZH[hit]}` : ""}）：上面是它到此为止拿到的东西。需要更多就缩小问题，或让任务续跑`,
         },
       };
     },
