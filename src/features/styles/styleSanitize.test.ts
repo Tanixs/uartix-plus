@@ -255,6 +255,23 @@ describe("guardStyleText", () => {
     expect(check(":root, body{color:red}").problems.some((p) => p.startsWith("global_selector"))).toBe(true);
   });
 
+  it("P153-1：声明数上限两条入口同判——但 :root 的旋钮表不套用（那是变量表借了 CSS 的门）", () => {
+    const many = Array.from({ length: STYLE_CAPS.maxDeclsPerRule + 1 }, (_, i) => `color: #0${i}${i}`).join("; ");
+    const g = guardStyleText(`.a{${many}}`);
+    expect(g.problems.some((p) => p.startsWith("too_many_declarations"))).toBe(true);
+    const rootTable = `:root{${Array.from({ length: STYLE_CAPS.maxDeclsPerRule + 6 }, (_, i) => `--fb-k${i}: ${i}px`).join("; ")}}`;
+    expect(guardStyleText(rootTable).problems, "内置 fluent 那份 46 条旋钮的 :root 块不能被这条判死").toEqual([]);
+    // 反向：结构化那条一直就在判，两条现在给同一个答案
+    const PROPS = ["color", "background", "border", "margin", "padding", "width", "height", "opacity",
+      "display", "position", "top", "left", "right", "bottom", "font", "line-height", "letter-spacing",
+      "text-align", "overflow", "cursor", "flex", "grid", "gap", "inset", "visibility"];
+    expect(PROPS.length).toBeGreaterThan(STYLE_CAPS.maxDeclsPerRule);
+    expect(sanitizeStyleRules(
+      [{ selector: ".a", decls: Object.fromEntries(PROPS.map((p) => [p, "1px"])) }],
+      ok,
+    ).rejected[0]?.reason).toContain("too_many_declarations");
+  });
+
   it("P148：自由文本与 :root 块里的 !important 也拒（:root 那条在值判据之前就 return，别留成漏口）", () => {
     expect(guardStyleText(".a{color:red !important}").problems.some((p) => p.startsWith("banned_value_in"))).toBe(true);
     expect(guardStyleText(":root{--ctl-press:scale(.97) !important}").problems.some((p) => p.startsWith("banned_value_in_root"))).toBe(true);

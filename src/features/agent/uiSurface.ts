@@ -422,29 +422,34 @@ function shapeSampleOf(el: Element, cs: CSSStyleDeclaration): ShapeSample | null
 function collectPartRules(): PartRuleSample[] {
   const out: PartRuleSample[] = [];
   const PART = /::-(webkit|moz)-(slider|inner-text|outer-spin|color|search)/;
+  /** 读不到 cssRules（跨源表）就当这条规则不存在，不猜 */
+  const rulesOf = (sheet: CSSStyleSheet): CSSRuleList | undefined => {
+    try { return sheet.cssRules; } catch { return undefined; }
+  };
+  const matchesOf = (base: string): Element[] | undefined => {
+    try { return Array.from(document.querySelectorAll(base)); } catch { return undefined; }
+  };
+  const walk = (rs: CSSRuleList) => {
+    for (const r of Array.from(rs)) {
+      if (out.length >= AUDIT_DEFAULTS.maxPartRules) return;
+      const sel = (r as CSSStyleRule).selectorText;
+      if (!sel) { const nested = (r as CSSGroupingRule).cssRules; if (nested) walk(nested); continue; }
+      if (!PART.test(sel)) continue;
+      const base = partRuleBase(sel);
+      if (!base) continue;
+      const els = matchesOf(base);
+      if (!els) continue;
+      out.push({
+        rule: sel.slice(0, 90),
+        hits: els.length,
+        appearance: els.length ? getComputedStyle(els[0]).appearance : "n/a",
+      });
+    }
+  };
   for (const sheet of Array.from(document.styleSheets)) {
-    let rules: CSSRuleList | null = null;
-    try { rules = sheet.cssRules; } catch { continue; }
-    if (!rules) continue;
-    const walk = (rs: CSSRuleList) => {
-      for (const r of Array.from(rs)) {
-        const sel = (r as CSSStyleRule).selectorText;
-        if (!sel) { const nested = (r as CSSGroupingRule).cssRules; if (nested) walk(nested); continue; }
-        if (!PART.test(sel)) continue;
-        const base = partRuleBase(sel);
-        if (!base) continue;
-        let els: Element[] = [];
-        try { els = Array.from(document.querySelectorAll(base)); } catch { continue; }
-        out.push({
-          rule: sel.slice(0, 90),
-          hits: els.length,
-          appearance: els.length ? getComputedStyle(els[0]).appearance : "n/a",
-        });
-        if (out.length >= AUDIT_DEFAULTS.maxPartRules) return;
-      }
-    };
-    walk(rules);
     if (out.length >= AUDIT_DEFAULTS.maxPartRules) break;
+    const rules = rulesOf(sheet);
+    if (rules) walk(rules);
   }
   return out;
 }

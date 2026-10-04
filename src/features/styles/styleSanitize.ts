@@ -296,6 +296,21 @@ function checkPair(selector: string, cssText: string, push: (p: string) => void,
   }
   const selErr = checkSelector(selector);
   if (selErr) push(`${selErr}:${selector.slice(0, 60)}`);
+  /**
+   * P153-1：两条入口的判据对齐。`maxDeclsPerRule` 原来只在结构化那条（`checkDecls`）判，
+   * 自由文本这条不判 ⇒ 同一个主题走两条门得到不同结果，而"整段 CSS"恰恰是写全量主题那条。
+   * `:root` 那一条在上面已经早退了，所以这里天然不套用它——**这是有意的**：
+   * 一枚主题的旋钮表（内置 fluent 那份就是 46 条 `--fb-*`）是"变量表借了 CSS 的门进来"，
+   * 它受的约束是"只许新变量、不许白名单键、不许 --z-*"那三条，不是"一条规则最多几条声明"。
+   * 实测内置包与货架包都没有任何非 `:root` 规则超过 24 条声明，所以对齐不减能力。
+   */
+  const braceOpen = cssText.indexOf("{");
+  const braceClose = cssText.lastIndexOf("}");
+  const declCount = (braceClose > braceOpen ? cssText.slice(braceOpen + 1, braceClose) : "")
+    .split(";").map((x) => x.trim()).filter(Boolean).length;
+  if (declCount > STYLE_CAPS.maxDeclsPerRule) {
+    push(`too_many_declarations:${selector.slice(0, 40)}(${declCount}>${STYLE_CAPS.maxDeclsPerRule})`);
+  }
   for (const re of BANNED_VALUE_PATTERNS) if (re.test(cssText)) push(`banned_value_in:${selector.slice(0, 40)}`);
   for (const up of urlProblems(cssText)) push(`${up}:${selector.slice(0, 40)}`);
   if (/^@/.test(selector.trim())) return; // @keyframes / @media 交给各自的分支，这里不套层级判定
