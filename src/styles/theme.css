@@ -266,20 +266,85 @@ input[type="radio"] {
   accent-color: var(--accent);
 }
 
-/* 原生滑杆的 runnable-track 计算高度直接跟随 element 高度（实测 h3→track 3px、h18→track 18px），
-   想要高热区只能把 element 撑高。16 不是新发明——控制画布的 .ctl-slider 一直是 16，
-   而画布工具栏那两只是 3px 和 4px（实测命中区 80×3，全项目最差的一只）。这里统一 16。
-   不给 flex 默认值：3D 对话框的滑杆要伸缩（.p3d-gdlg-inline2 自定 0 1 120px）。
-   P132-D：命中区补到本仓自己的 24 地板（审计量到 80×16）。**不加 height**——track 跟随内容高度，
-   撑高 element 就等于把滑杆画粗一根；改成 content-box + 上下 padding：内容仍 16（视觉不变），
-   边框盒 24（热区达标）。实测行高 29 不变，轨道计算高度仍是 16px。 */
+/* P152：滑杆从"平台皮"变成可主题化。
+   原来这里是 `appearance: auto` + `accent-color`，代价是**主题根本画不到它**：
+   Blink 在 auto 下不采纳任何 `::-webkit-slider-*` 作者声明（P146 实测——改 background 像素零变化，
+   改 appearance:none 轨道整个消失），所以流利蓝那三条滑杆规则四批以来一行都没落地，
+   用户看到的就是一枚 Chromium 自己的滑杆贴在主题里"像图片粘贴"。
+   关掉原生皮之后必须自己把轨道与拇指画回来，所以这一份是**九枚主题共用的底座**，全部走令牌。
+   高度算法跟着换了：原来 16 是因为"runnable-track 跟随元素高度"，现在轨道自己定 4px，
+   于是元素改成 4 + 上下 10 的 content-box —— 视觉轨道仍是 4px，边框盒 24px（P132-D 那条地板不变）。
+   "已走的那段"要百分比：Chromium 没有 ::-webkit-slider-progress（Firefox 才有 -moz-range-progress），
+   所以读 `--range-pct`，由 `src/shell/rangeFill.ts` 在渲染期喂（15 个调用点，一处一份，跟着 state 走）。 */
 input[type="range"] {
-  height: 16px;
-  padding-block: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  padding-block: 10px;
   box-sizing: content-box;
   margin: 0;
   cursor: pointer;
   accent-color: var(--accent);
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 calc(var(--range-pct, 0) * 1%),
+    var(--bg-inset) calc(var(--range-pct, 0) * 1%) 100%
+  );
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--bg-panel);
+  /* 拇指的描边不能走 --border：暗色主题下拇指底与轨道底只差一档，量出来拇指几乎看不见
+     （P152 第一次截图实测：dark 那枚只剩一圈淡环）。--line-strong 是必须被看见的那档线，
+     由 border 与 text 派生，九枚主题各自都够。 */
+  border: 2px solid var(--line-strong);
+}
+
+input[type="range"]:hover::-webkit-slider-thumb {
+  border-color: var(--accent);
+}
+
+input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+input[type="range"]:disabled::-webkit-slider-thumb {
+  background: var(--bg-inset);
+  border-color: var(--border-soft);
+}
+
+/* Firefox：本仓跑在 WebView2，但这里不是防御性代码——同一支渐变写在 track 上，
+   比另开一条 `::-moz-range-progress` 少一个规则，也不会被"accent 实底必须配字色"那条门
+   误判成文字容器（那条门认的是装饰类名，`range-progress` 不在它的词表里）。 */
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    to right,
+    var(--accent) 0 calc(var(--range-pct, 0) * 1%),
+    var(--bg-inset) calc(var(--range-pct, 0) * 1%) 100%
+  );
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg-panel);
+  border: 2px solid var(--line-strong);
 }
 
 :root {
@@ -4449,7 +4514,8 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 
 .ctl-slider {
   width: 100%;
-  height: 16px;
+  /* P152：这里原来钉着 height:16px（那是"轨道跟随元素高度"时代的产物）。
+     现在轨道自己定 4px、热区靠元素的上下 padding 凑到 24，再钉 16 就是把滑杆画粗三倍。 */
   accent-color: var(--accent);
   cursor: pointer;
   margin: 0;
@@ -6483,17 +6549,20 @@ label.set-switch,
   text-align: left;
 }
 .set-switch input { display: none; }
+/* P152-3：开关的三档颜色走槽，不靠主题点名 `.set-switch span`。
+   槽名故意不在 :root 定义——缺省值就是等值替换（今天这两个字面值），
+   而 P146 因二那种"把底色画在 34×18 的方角 label 外壳上"的错法，从此有了正确的出口。 */
 .set-switch span {
   position: absolute; inset: 0; border-radius: var(--radius-xl);
-  background: var(--border); cursor: pointer; transition: background var(--dur-base);
+  background: var(--ctl-track, var(--border)); cursor: pointer; transition: background var(--dur-base);
 }
 .set-switch span::after {
   content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px;
-  border-radius: 50%; background: #fff; transition: transform var(--dur-base);
-  box-shadow: 0 1px 2px rgba(0,0,0,.35);
+  border-radius: 50%; background: var(--ctl-knob, #fff); transition: transform var(--dur-base);
+  box-shadow: var(--ctl-knob-shadow, 0 1px 2px rgba(0,0,0,.35));
 }
 /* contrast-exempt：开关轨道无文字，白旋钮 14×14 在 accent 上为纯几何对比 */
-.set-switch input:checked + span { background: var(--accent); }
+.set-switch input:checked + span { background: var(--ctl-track-on, var(--accent)); }
 .set-switch input:checked + span::after { transform: translateX(16px); }
 
 .help-hint {
@@ -6860,6 +6929,12 @@ label.set-switch,
   border: none;
   border-radius: 0;
   background: transparent;
+  /* P152：静置态也要清投影。上面那段 P132-F 的说明只处理了"两个孩子透明、外框那条线透出来"，
+     而基元 `.input` 的**凹陷签名**（`box-shadow: var(--inset-1)`）是 P103 就有的；
+     原来只有 `:focus` 那两条清了影，于是静置态里这只没有脸的输入框自己凹了一档——
+     外层已经凹过一次，影叠影。这是常驻形状探测器（`shapeAudit` B 类）在 dark/lbx 面上抓到的第一条。
+     规矩同 P146：**没有脸就没有影**，声明"我不画盒子"的地方要连影一起关。 */
+  box-shadow: none;
 }
 
 /* 内层不再自己画焦点环，否则与外层 focus-within 叠成两圈 */

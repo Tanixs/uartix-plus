@@ -43,6 +43,7 @@ import { Glyph, IconAutoSpin, IconCheck, IconChevron, IconCircle, IconClose, Ico
 import { confirmDialog } from "../../shared/Dialog";
 import { fmtVal } from "../plot/plotMeasure";
 import { tx, useLocale } from "../../i18n/strings";
+import { rangeStyle } from "../../shell/rangeFill";
 
 /** 轴显示色：与 scene 轴线配色一致（X 红 / Y 绿 / Z 蓝，RViz 惯例） */
 const AX_COLOR = { x: "#e05252", y: "#4caf50", z: "#4e9cef" } as const;
@@ -371,6 +372,7 @@ function GroupDialog(props: {
           <div className="p3d-gdlg-inline2">
             <input
               type="range"
+              style={rangeStyle(draft.pointSize, 1, draft.mode === "point" ? 32 : 24)}
               min={1}
               max={draft.mode === "point" ? 32 : 24}
               step={1}
@@ -381,6 +383,7 @@ function GroupDialog(props: {
             <b className="p3d-gdlg-num">{draft.pointSize}px</b>
             <input
               type="range"
+              style={rangeStyle(draft.opacity, 0.05, 1)}
               min={0.05}
               max={1}
               step={0.05}
@@ -430,6 +433,7 @@ function GroupDialog(props: {
                 <div className="p3d-gdlg-inline2">
                   <input
                     type="range"
+                    style={rangeStyle(draft.smoothWin, 3, 51)}
                     min={3}
                     max={51}
                     step={2}
@@ -448,6 +452,7 @@ function GroupDialog(props: {
                 <div className="p3d-gdlg-inline2">
                   <input
                     type="range"
+                    style={rangeStyle(draft.smoothSub, 2, 10)}
                     min={2}
                     max={10}
                     step={1}
@@ -462,6 +467,7 @@ function GroupDialog(props: {
                       <span className="fc-dlg-hint">{tx("张力", "tension")}</span>
                       <input
                         type="range"
+                        style={rangeStyle(draft.smoothTension, 0, 1)}
                         min={0}
                         max={1}
                         step={0.05}
@@ -689,6 +695,7 @@ function GroupDialog(props: {
               <>
                 <input
                   type="range"
+                  style={rangeStyle(draft.model.scale, 0.1, 5)}
                   min={0.1}
                   max={5}
                   step={0.1}

@@ -7,6 +7,7 @@ import {
   auditInertWidgetRules,
   auditShadowWithoutFace,
   auditSquareBehindRounded,
+  partRuleBase,
   type ShapeSample,
 } from "./shapeAudit";
 
@@ -65,7 +66,23 @@ describe("B 无脸投影", () => {
   });
 });
 
+describe("partRuleBase：该去问谁的 appearance", () => {
+  /** P152 的真实假阳性：把 `[type=range]` 一起剥掉，就会去问一只文本框，探测器从此常报假案 */
+  it("留着类型选择器，只剥主题作用域", () => {
+    expect(partRuleBase('input[type="range"]::-webkit-slider-thumb')).toBe('input[type="range"]');
+    expect(partRuleBase('[data-theme="fluent"] .ctl-slider::-webkit-slider-runnable-track')).toBe(".ctl-slider");
+    expect(partRuleBase('.p3d input[type="range"]::-moz-range-thumb')).toBe('.p3d input[type="range"]');
+  });
+
+  it("问不出是哪类控件的，返回空串让调用方跳过（宁可不判，也不拿错元素判）", () => {
+    expect(partRuleBase("input::-webkit-slider-thumb")).toBe("");
+    expect(partRuleBase('select::-webkit-color-swatch').trim()).toBe("");
+    expect(partRuleBase('[data-theme="x"]::-moz-range-track')).toBe("");
+  });
+});
+
 describe("C 空转的部件规则（分母自证）", () => {
+
   it("appearance:auto 的滑杆上写 ::-webkit-slider-thumb ⇒ 那条规则是死代码", () => {
     const r = auditInertWidgetRules([{ rule: '[data-theme="fluent"] .ctl-slider::-webkit-slider-thumb', appearance: "auto", hits: 3 }]);
     expect(r.issues).toHaveLength(1);

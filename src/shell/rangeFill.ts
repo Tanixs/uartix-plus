@@ -31,3 +31,16 @@ export function rangePct(value: number, min: number, max: number): number {
 export function rangeStyle(value: number, min = 0, max = 100): CSSProperties {
   return { [RANGE_FILL_VAR]: String(rangePct(value, min, max)) } as CSSProperties;
 }
+
+/** 从一只 range 元素算出它现在该填到几成 */
+export function pctOfRange(el: HTMLInputElement): number {
+  return rangePct(Number.parseFloat(el.value), Number.parseFloat(el.min || "0"), Number.parseFloat(el.max || "100"));
+}
+
+/**
+ * 命令式补一次。**只**给非受控的那一只用（控制画布的滑条：defaultValue + ref，
+ * 值由 commit() 直接写 DOM）——React 不重渲染它，渲染期算不到。
+ */
+export function syncRangeFill(el: HTMLInputElement): void {
+  el.style.setProperty(RANGE_FILL_VAR, String(pctOfRange(el)));
+}

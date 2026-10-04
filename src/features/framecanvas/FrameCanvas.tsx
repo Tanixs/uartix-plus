@@ -27,6 +27,7 @@ import { parseHexBytes } from "../../shared/hexBytes";
 import { labeledValue } from "../../shared/valueLabels";
 import { tx, useLocale } from "../../i18n/strings";
 import { Glyph } from "../../shared/icons";
+import { rangeStyle } from "../../shell/rangeFill";
 import {
   PAD_T,
   BLOK_PAD,
@@ -195,6 +196,7 @@ function SessionTransport() {
           </select>
           <input
             type="range"
+            style={rangeStyle(s.durationMs > 0 ? Math.min(1000, Math.round((s.posMs / s.durationMs) * 1000)) : 0, 0, 1000)}
             className="fc-progress"
             min={0}
             max={1000}
@@ -1903,6 +1905,7 @@ function FrameCanvas() {
         <label className="fc-cellsz" title={tx("单元格尺寸（20~96，画布上 Ctrl+滚轮缩放，自动保存）", "Cell size (20–96; Ctrl+wheel on canvas zooms; saved automatically)")}>
           <input
             type="range"
+            style={rangeStyle(cellSize, 20, 96)}
             min={20}
             max={96}
             value={cellSize}

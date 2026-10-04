@@ -294,7 +294,10 @@ export const uiToolEntries: AgentToolEntry[] = [
         // P151：三族形状 artifact。用户那句"控件像图片粘贴、四角有不圆润的阴影"就是这一族，
         // 以前审计只量文字读不读得出来，看不见"形状对不对"。
         shapes: [
-          ...auditSquareBehindRounded(input.shapes, [window.innerWidth, window.innerHeight]),
+          ...auditSquareBehindRounded(input.shapes, [
+            document.documentElement.clientWidth,
+            document.documentElement.clientHeight,
+          ]),
           ...auditShadowWithoutFace(input.shapes),
         ].slice(0, 12),
         inertWidgetRules: auditInertWidgetRules(input.partRules),

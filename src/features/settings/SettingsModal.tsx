@@ -36,6 +36,7 @@ import { SetGroups, SetRow } from "../../shared/SetRow";
 import { IconChevron, IconCube, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSparkle, IconStack, IconTrash, IconTune, IconUpload } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
+import { rangeStyle } from "../../shell/rangeFill";
 
 function fmtBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "-";
@@ -686,6 +687,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   <div className="form-pair grow" style={{ gap: 8, alignItems: "center" }}>
                     <input
                       type="range"
+                      style={rangeStyle(settings.fcCellSize, 20, 96)}
                       min={20}
                       max={96}
                       value={settings.fcCellSize}
@@ -698,6 +700,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   <div className="form-pair grow" style={{ gap: 8, alignItems: "center" }}>
                     <input
                       type="range"
+                      style={rangeStyle(settings.sbCellSize, 20, 96)}
                       min={20}
                       max={96}
                       value={settings.sbCellSize}
@@ -860,7 +863,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       value={snt.cfg.volume}
                       onChange={(e) => sentinelStore.setVolume(Number(e.target.value))}
                       onMouseUp={() => void import("../sentinel/sentinelSound").then((m) => m.playAlertTone("warn", false, snt.cfg.volume))}
-                      style={{ width: 140, accentColor: "var(--accent)" }}
+                      style={{ width: 140, accentColor: "var(--accent)", ...rangeStyle(snt.cfg.volume, 0, 100) }}
                     />
                     <span className="set-usage">{snt.cfg.volume}</span>
                   </span>

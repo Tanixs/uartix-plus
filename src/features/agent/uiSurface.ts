@@ -29,6 +29,7 @@ import { APPEARANCE_TOKENS } from "./appearanceStore";
 import { fxCatalog } from "./fxRecipes";
 import { DOMAINS, DOMAIN_TIP, DOMAIN_ZH } from "./scopeTiers";
 import { CTL_BUS_HOOK, CTL_HOOKS, CTL_SLOTS, ELEV_TIERS } from "../../styles/hostHooks";
+import { partRuleBase } from "../../styles/shapeAudit";
 import type { PartRuleSample, ShapeSample } from "../../styles/shapeAudit";
 
 export const INVENTORY_SECTIONS = ["panels", "controls", "blocks", "actions", "tokens", "domains", "fx", "hooks"] as const;
@@ -430,7 +431,7 @@ function collectPartRules(): PartRuleSample[] {
         const sel = (r as CSSStyleRule).selectorText;
         if (!sel) { const nested = (r as CSSGroupingRule).cssRules; if (nested) walk(nested); continue; }
         if (!PART.test(sel)) continue;
-        const base = sel.split(/::/)[0].replace(/\[[^\]]*\]/g, "").trim();
+        const base = partRuleBase(sel);
         if (!base) continue;
         let els: Element[] = [];
         try { els = Array.from(document.querySelectorAll(base)); } catch { continue; }

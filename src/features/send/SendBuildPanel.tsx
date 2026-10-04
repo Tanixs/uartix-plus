@@ -52,6 +52,7 @@ import {
   segEndsBlock,
   type GridBlock,
 } from "./byteGrid";
+import { rangeStyle } from "../../shell/rangeFill";
 import {
   moveTargetIndex,
   paramTypeOf,
@@ -573,6 +574,7 @@ export function SendBuildPanel() {
         <label className="sb-cellsz" title={tx("字节格尺寸（20~96，网格上 Ctrl+滚轮缩放，自动保存）", "Byte-cell size (20–96; Ctrl+wheel over the grid zooms; saved automatically)")}>
           <input
             type="range"
+            style={rangeStyle(cellW, 20, 96)}
             min={20}
             max={96}
             value={cellW}

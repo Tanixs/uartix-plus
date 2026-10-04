@@ -28,6 +28,7 @@ import { WidgetFrame } from "../ai/WidgetFrame";
 import { NumInput, TextInput } from "../../shared/FormInputs";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
+import { rangeStyle, syncRangeFill } from "../../shell/rangeFill";
 
 function fmtVal(v: number): string {
   if (Number.isInteger(v)) return String(v);
@@ -218,6 +219,10 @@ export function SliderCardView(props: {
   const sliderRef = useRef<HTMLInputElement>(null);
   const spanRef = useRef<HTMLDivElement>(null);
   const stepRef = useRef<HTMLInputElement>(null);
+  /* 挂载时补一次填色：defaultValue 走的是 DOM 初始值，渲染期算不到它 */
+  useEffect(() => {
+    if (sliderRef.current) syncRangeFill(sliderRef.current);
+  }, [props.initial]);
 
   const current = (): number =>
     parseFloat(sliderRef.current?.value ?? String(props.initial));
@@ -239,7 +244,11 @@ export function SliderCardView(props: {
       ).toFixed(6),
     );
     const v = Math.min(card.max, Math.max(card.min, snapped));
-    if (sliderRef.current) sliderRef.current.value = String(v);
+    if (sliderRef.current) {
+      sliderRef.current.value = String(v);
+      /* 非受控滑杆：React 不重渲染它，填色只能在这里补（值只有 commit() 这一个写入点） */
+      syncRangeFill(sliderRef.current);
+    }
     if (spanRef.current) spanRef.current.textContent = fmtVal(v);
     if (stepRef.current && document.activeElement !== stepRef.current) {
       stepRef.current.value = String(v);
@@ -840,6 +849,7 @@ export function GroupCardView(props: {
                 <input
                   className="ctl-slider"
                   type="range"
+                  style={rangeStyle(v, ch.min, ch.max)}
                   min={ch.min}
                   max={ch.max}
                   step={ch.step}
@@ -1659,6 +1669,7 @@ export function CardModal(props: {
             <label>{tx("音量", "Volume")}</label>
             <input
               type="range"
+              style={rangeStyle(card.volume, 0, 100)}
               className="input"
               min={0}
               max={100}

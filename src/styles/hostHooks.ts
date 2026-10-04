@@ -64,6 +64,10 @@ export const CTL_SLOTS: ReadonlyArray<{ name: string; defaultAtRoot: boolean; gl
   { name: "--ctl-input-focus", defaultAtRoot: false, gloss: "输入框聚焦时的边框（基元自带兜底）" },
   { name: "--ctl-focus-border", defaultAtRoot: false, gloss: "聚焦边框色（同上，与 --ctl-input-focus 分给不同基元）" },
   { name: "--ctl-focus-halo", defaultAtRoot: false, gloss: "聚焦光晕（同上）" },
+  { name: "--ctl-track", defaultAtRoot: false, gloss: "开关轨道：关（缺省 = --border）" },
+  { name: "--ctl-track-on", defaultAtRoot: false, gloss: "开关轨道：开（缺省 = --accent）" },
+  { name: "--ctl-knob", defaultAtRoot: false, gloss: "开关旋钮（缺省 = 白）" },
+  { name: "--ctl-knob-shadow", defaultAtRoot: false, gloss: "开关旋钮的投影（缺省 = 宿主今天那档）" },
 ];
 
 /**

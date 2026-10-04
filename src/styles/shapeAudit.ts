@@ -120,3 +120,20 @@ export function auditInertWidgetRules(rules: readonly PartRuleSample[], minDenom
     .map((r) => ({ rule: r.rule, why: "appearance:auto 下 Blink 不采纳部件伪元素的作者声明，这条规则一行都不落地" }));
   return { issues, denominator, blind: denominator < minDenominator };
 }
+
+/**
+ * 从一条部件规则里取出"该去页面上找谁问 appearance"的那段选择器。
+ *
+ * 只剥主题作用域那一段（`[data-theme="x"]`），**其余属性选择器必须留着**：
+ * `input[type="range"]::-webkit-slider-thumb` 要是把 `[type=range]` 也剥掉，
+ * 就变成去问一只文本框的 appearance ⇒ 探测器稳定报假阳性
+ * （P152 第一次跑 28 面就是这么被骗的：报"滑杆规则空转"，而那时滑杆早就 appearance:none 了）。
+ * 取不出可用片段就返回空串，调用方跳过这条规则——宁可不判，也不拿错的元素判。
+ */
+export function partRuleBase(selector: string): string {
+  const stripped = selector.split(/::/)[0].replace(/\[\s*data-theme\s*=[^\]]*\]/gi, "").trim();
+  if (!stripped) return "";
+  // 裸元素名单独出现时问不出是哪一类控件（input 可以是文本框、复选、滑杆……）
+  if (/^(?:input|select|textarea|button)$/i.test(stripped)) return "";
+  return stripped;
+}
