@@ -341,7 +341,10 @@ describe("P132-C · 审计采集器依赖的导出名", () => {
 
   it("基线文件在，且形状是采集器写出来的那种", () => {
     const b = JSON.parse(readFileSync(fileURLToPath(new URL("../../.tools/audit-baseline.json", import.meta.url)), "utf8"));
-    expect(b.version, "形状换了（命中区/溢出从条数改成条目）就要同步改门与这条").toBe(2);
+    expect(b.version, "形状换了（P151 把形状三族接进账）就要同步改门与这条").toBe(3);
+    expect(b.budget, "四族各一条预算：少一格＝那一族可以无声长回来").toEqual(
+      expect.objectContaining({ total: expect.any(Number), hitTargets: expect.any(Number), overflow: expect.any(Number), shapes: expect.any(Number) }),
+    );
     expect(b.surfaces).toContain("workspace");
     for (const s of ["palette", "menu", "lbx", "ctxmenu", "hint", "model", "speclib", "hovermenu",
       "welcome1", "welcome2", "cmdk-empty"]) {

@@ -286,12 +286,12 @@ for (const f of FAMILIES) {
   );
 }
 /** 预算的名字与账上的族对齐：issues→total、hits→hitTargets、overflow→overflow */
-const BUDGET_KEY = { issues: "total", hits: "hitTargets", overflow: "overflow" };
+const BUDGET_KEY = { issues: "total", hits: "hitTargets", overflow: "overflow", shapes: "shapes" };
 
 if (WRITE) {
   // 人工写过的豁免与预算跟着基线走：重新采集不该把它们冲掉，也不该让预算悄悄变大
   baseline.exemptions = prev?.exemptions ?? [];
-  baseline.budget = { total: 0, hitTargets: 0, overflow: 0 };
+  baseline.budget = { total: 0, hitTargets: 0, overflow: 0, shapes: 0 };
   for (const f of FAMILIES) {
     const k = BUDGET_KEY[f.field];
     const old = prev?.budget?.[k];

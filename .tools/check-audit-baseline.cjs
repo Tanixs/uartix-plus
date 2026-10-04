@@ -63,7 +63,7 @@ const key = (theme, surface, selector) => `${theme}|${surface}|${selector}`;
 function checkBaseline(b, ids, floor, hitLine) {
   const problems = [];
   if (!b || typeof b !== "object") return ["基线不是一个对象"];
-  if (b.version !== 2) problems.push(`基线 version=${b.version}，门只认 2（形状换了：命中区/溢出从"条数"改成"条目"，就要同步改门）`);
+  if (b.version !== 3) problems.push(`基线 version=${b.version}，门只认 3（P151 把形状三族接进账，就要同步改门）`);
   if (!Array.isArray(b.surfaces) || !b.surfaces.length) problems.push("基线里没有 surfaces 清单");
   if (!b.themes || typeof b.themes !== "object") return problems;
 
@@ -79,6 +79,7 @@ function checkBaseline(b, ids, floor, hitLine) {
 
   let total = 0;
   let hitsTotal = 0;
+  let shapesTotal = 0;
   let overTotal = 0;
   let severe = 0;
   const seen = new Set();
@@ -124,6 +125,23 @@ function checkBaseline(b, ids, floor, hitLine) {
           if (!exempt.has(key(id, s, i.selector))) {
             problems.push(`${id}/${s}：${i.selector} 比值 ${i.ratio} 低于 ${floor}（读不出来那一档），没有豁免理由就是判红，不许记账放行`);
           }
+        }
+      }
+
+      /* ---- 形状（P151 新增）：A 方底垫圆身 / B 无脸投影。条目形状由 shapeAudit 定：{selector, kind, why} ---- */
+      if (!Array.isArray(r.shapes)) {
+        problems.push(`${id}/${s}：shapes 不是数组（这一族没记账＝没采到）`);
+      } else {
+        for (const sh of r.shapes) {
+          if (typeof sh.selector !== "string" || typeof sh.why !== "string") {
+            problems.push(`${id}/${s}：形状记录缺 selector/why（判据返回的字段名与采集器抄的漂了）`);
+            continue;
+          }
+          if (sh.kind !== "square-behind-rounded" && sh.kind !== "shadow-without-face") {
+            problems.push(`${id}/${s}：形状记录 ${sh.selector} 的 kind=${sh.kind} 不在判据会返回的两种里`);
+            continue;
+          }
+          shapesTotal++;
         }
       }
 
@@ -195,6 +213,7 @@ function checkBaseline(b, ids, floor, hitLine) {
     ["total", total, "对比度"],
     ["hitTargets", hitsTotal, "命中区"],
     ["overflow", overTotal, "溢出"],
+    ["shapes", shapesTotal, "形状"],
   ];
   for (const [k, n, label] of BUDGETS) {
     const have = b.budget?.[k];
@@ -204,7 +223,7 @@ function checkBaseline(b, ids, floor, hitLine) {
       problems.push(`${label}记账 ${n} 条，超预算 ${have} 条——只降不升，要放宽得说清为什么`);
     }
   }
-  return { problems, total, hits: hitsTotal, overflow: overTotal, severe, budget: b.budget };
+  return { problems, total, hits: hitsTotal, overflow: overTotal, shapes: shapesTotal, severe, budget: b.budget };
 }
 
 /* ---------------- 跑 ---------------- */
@@ -241,7 +260,7 @@ if (res.problems?.length) {
 }
 const bud = res.budget ?? {};
 console.log(
-  `OK: 审计基线 ${ids.length} 枚内置主题 × ${baseline.surfaces.length} 面 · 对比度 ${res.total}/${bud.total} 命中区 ${res.hits}/${bud.hitTargets} 溢出 ${res.overflow}/${bud.overflow}（三档预算都只降不升）· severe(<${floor}) ${res.severe} 条全部带理由豁免`,
+  `OK: 审计基线 ${ids.length} 枚内置主题 × ${baseline.surfaces.length} 面 · 对比度 ${res.total}/${bud.total} 命中区 ${res.hits}/${bud.hitTargets} 溢出 ${res.overflow}/${bud.overflow} 形状 ${res.shapes}/${bud.shapes}（四档预算都只降不升）· severe(<${floor}) ${res.severe} 条全部带理由豁免`,
 );
 
 /* ---------------- 夹具自证：门自己不是瞎的 ---------------- */
@@ -271,6 +290,11 @@ fs2.hits = [
 fs2.hitMin = 999; // ⑩ 与 hits 里算出来的对不上（旧版恒 null 的形状）
 fs2.overflow = [{ selector: "cc", overPx: 0 }]; // ⑪ 溢出记录没量到东西
 delete fixture.budget.hitTargets; // ⑫ 这一族没上限＝可以无声长回来
+/* ⑭⑮ 形状族（P151 接进账）：判据返回 {selector, kind, why}，字段漂了必须当场抓到 */
+fs2.shapes = [
+  { selector: "sd", kind: "square-behind-rounded" }, // ⑭ 缺 why
+  { selector: "se", kind: "made-up-kind", why: "看着不对" }, // ⑮ kind 不是判据会返回的那两种
+];
 
 const fRes = checkBaseline(fixture, ids, floor, hitLine);
 const want = [
@@ -286,6 +310,8 @@ const want = [
   `与 hits 里算出来的`,
   `缺 selector/overPx`,
   `没有上限`,
+  `缺 selector/why`,
+  `kind=made-up-kind`,
 ];
 const hit = want.filter((w) => fRes.problems.some((p) => p.includes(w)));
 if (hit.length !== want.length) {

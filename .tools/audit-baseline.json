@@ -1,2095 +1,2474 @@
 {
-  "version": 2,
-  "generatedAt": "2026-10-04",
-  "viewport": {
-    "w": 1440,
-    "h": 900
-  },
-  "judge": "生产同一份：src/features/agent/uiSurface.collectAuditInput + src/styles/renderAudit",
-  "faces": "面表在 .tools/audit-faces.mjs（与 class-census 共用一份）",
-  "surfaces": [
-    "workspace",
-    "settings",
-    "palette",
-    "menu",
-    "lbx",
-    "ctxmenu",
-    "hint",
-    "model",
-    "speclib",
-    "hovermenu",
-    "welcome1",
-    "welcome2",
-    "cmdk-empty",
-    "ai"
-  ],
-  "themes": {
-    "light": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+ "version": 3,
+ "generatedAt": "2026-10-04",
+ "viewport": {
+  "w": 1440,
+  "h": 900
+ },
+ "judge": "生产同一份：src/features/agent/uiSurface.collectAuditInput + src/styles/renderAudit",
+ "faces": "面表在 .tools/audit-faces.mjs（与 class-census 共用一份）",
+ "surfaces": [
+  "workspace",
+  "settings",
+  "palette",
+  "menu",
+  "lbx",
+  "ctxmenu",
+  "hint",
+  "model",
+  "speclib",
+  "hovermenu",
+  "welcome1",
+  "welcome2",
+  "cmdk-empty",
+  "ai"
+ ],
+ "themes": {
+  "light": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     },
-    "dark": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     },
-    "ocean": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     },
-    "navy": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     },
-    "matcha": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     },
-    "amber": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     },
-    "begonia": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     },
-    "glaze": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 959984,
-          "rules": 3325,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     },
-    "fluent": {
-      "kind": "builtin",
-      "surfaces": {
-        "workspace": {
-          "sampled": 362,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "settings": {
-          "sampled": 504,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "palette": {
-          "sampled": 477,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "menu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "lbx": {
-          "sampled": 442,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ctxmenu": {
-          "sampled": 366,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hint": {
-          "sampled": 505,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "model": {
-          "sampled": 502,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "speclib": {
-          "sampled": 389,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "hovermenu": {
-          "sampled": 394,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome1": {
-          "sampled": 440,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "welcome2": {
-          "sampled": 399,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "cmdk-empty": {
-          "sampled": 371,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        },
-        "ai": {
-          "sampled": 387,
-          "truncated": false,
-          "styleBytes": 973280,
-          "rules": 3414,
-          "issues": [],
-          "worst": null,
-          "unmeasurable": {
-            "count": 0,
-            "byReason": {}
-          },
-          "hits": [],
-          "hitMin": null,
-          "overflow": [],
-          "overflowWorst": null
-        }
-      }
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
     }
+   }
   },
-  "exemptions": [],
-  "budget": {
-    "total": 0,
-    "hitTargets": 0,
-    "overflow": 0
+  "dark": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    }
+   }
+  },
+  "ocean": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    }
+   }
+  },
+  "navy": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    }
+   }
+  },
+  "matcha": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    }
+   }
+  },
+  "amber": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    }
+   }
+  },
+  "begonia": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    }
+   }
+  },
+  "glaze": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 963074,
+     "rules": 3336,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    }
+   }
+  },
+  "fluent": {
+   "kind": "builtin",
+   "surfaces": {
+    "workspace": {
+     "sampled": 366,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "settings": {
+     "sampled": 508,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "palette": {
+     "sampled": 481,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "menu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "lbx": {
+     "sampled": 446,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ctxmenu": {
+     "sampled": 370,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hint": {
+     "sampled": 509,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "model": {
+     "sampled": 506,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "speclib": {
+     "sampled": 393,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "hovermenu": {
+     "sampled": 398,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome1": {
+     "sampled": 444,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "welcome2": {
+     "sampled": 403,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "cmdk-empty": {
+     "sampled": 375,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    },
+    "ai": {
+     "sampled": 391,
+     "truncated": false,
+     "styleBytes": 987063,
+     "rules": 3463,
+     "issues": [],
+     "worst": null,
+     "unmeasurable": {
+      "count": 0,
+      "byReason": {}
+     },
+     "hits": [],
+     "hitMin": null,
+     "overflow": [],
+     "overflowWorst": null,
+     "shapes": [],
+     "partsDenominator": 2,
+     "partsIssues": []
+    }
+   }
   }
+ },
+ "exemptions": [],
+ "budget": {
+  "total": 0,
+  "hitTargets": 0,
+  "overflow": 0,
+  "shapes": 0
+ }
 }
