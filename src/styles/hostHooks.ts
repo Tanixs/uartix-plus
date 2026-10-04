@@ -38,6 +38,44 @@ export type CtlHook = (typeof CTL_HOOKS)[number];
 /** 表面档位：与 P136 `--elevation-0..4` 同一套数字，别起第二套深度词汇 */
 export const ELEV_TIERS = [0, 1, 2, 3, 4] as const;
 
+/**
+ * P148：**签名槽表**。P143 那 12 枚（+ 3 枚故意不在 `:root` 给值的）此前只活在 `theme.css` 的注释里，
+ * 而提示词对模型**一个字都没提**（P147 §4 实测：`prompts.ts` 里 `--ctl-` 零命中）——
+ * 结果就是模型每次都走最贵的那条路（逐类点名），永远写不出"一条槽改约 1,120 只控件"的主题。
+ * 这张表是那份知识的唯一出处：`hostHooks.test.ts` 拿它和 CSS 双向闭合，`prompts.ts` 拿它生成话术。
+ *
+ * `defaultAtRoot:false` 那三枚是**有意的**：它们靠各基元自己的 `var()` 兜底
+ * （`.btn` 的焦点环 +1px、`.seg` 的 -2px），在 `:root` 写死就等于把所有基元压成同一档。
+ */
+export const CTL_SLOTS: ReadonlyArray<{ name: string; defaultAtRoot: boolean; gloss: string }> = [
+  { name: "--ctl-fill-hover", defaultAtRoot: true, gloss: "控件静置→悬停的填充档" },
+  { name: "--ctl-fill-active", defaultAtRoot: true, gloss: "按下去那一瞬的填充档" },
+  { name: "--ctl-fill-selected", defaultAtRoot: true, gloss: "选中/开着（.on、[aria-selected]）的填充档" },
+  { name: "--ctl-fill-primary-hover", defaultAtRoot: true, gloss: "主按钮悬停底色" },
+  { name: "--ctl-fill-primary-active", defaultAtRoot: true, gloss: "主按钮按下底色" },
+  { name: "--ctl-line-hover", defaultAtRoot: true, gloss: "描边悬停档" },
+  { name: "--ctl-ring", defaultAtRoot: true, gloss: "焦点环颜色" },
+  { name: "--ctl-ring-w", defaultAtRoot: true, gloss: "焦点环粗细" },
+  { name: "--ctl-press", defaultAtRoot: true, gloss: "按下的位移/缩放（普通控件）" },
+  { name: "--ctl-press-tight", defaultAtRoot: true, gloss: "按下的位移/缩放（20px 小键一档）" },
+  { name: "--ctl-lift", defaultAtRoot: true, gloss: "悬停抬起（多数主题为 none）" },
+  { name: "--ctl-focus-outline", defaultAtRoot: true, gloss: "键盘焦点轮廓" },
+  { name: "--ctl-ring-offset", defaultAtRoot: false, gloss: "焦点环外扩（各基元不同档，故意不在 :root 给值）" },
+  { name: "--ctl-input-focus", defaultAtRoot: false, gloss: "输入框聚焦时的边框（基元自带兜底）" },
+  { name: "--ctl-focus-border", defaultAtRoot: false, gloss: "聚焦边框色（同上，与 --ctl-input-focus 分给不同基元）" },
+  { name: "--ctl-focus-halo", defaultAtRoot: false, gloss: "聚焦光晕（同上）" },
+];
+
+/**
+ * 签名总线**排除**的那几个角色：它们是拖拽把手与分隔线，不是"按得动的东西"。
+ * 命中标的（`uiSurface` 的命中区审计）与覆盖率仪表（`.tools/ctl-coverage.mjs`）都必须读这一份，
+ * 否则会出现"总线不认它、审计却拿 24px 去量一条 1px 的分隔条"这种自相矛盾（P148 之前正是如此）。
+ */
+export const CTL_BUS_EXCLUSIONS = ['[data-ctl="sash"]', '[role="separator"]', "[data-pdrag]"] as const;
+
+/** `[data-ctl]` 那一支的完整可点选择器（排除项内联，两个消费方共用同一个串） */
+export const CTL_BUS_HOOK = `[data-ctl]:not([data-ctl="sash"]):not([role="separator"]):not([data-pdrag])`;
+
 export function isCtlHook(v: string): v is CtlHook {
   return (CTL_HOOKS as readonly string[]).includes(v);
 }

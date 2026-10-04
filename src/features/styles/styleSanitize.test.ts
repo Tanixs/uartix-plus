@@ -76,6 +76,16 @@ describe("sanitizeStyleRules", () => {
     }
   });
 
+  it("P148：!important 三条入口一律拒（注入层一旦能 important，宿主降级基线与层槽表都作废）", () => {
+    // 特异性判据看不见 !important：它不走特异性，所以一条就能压掉 html.no-motion *
+    expect(sanitizeStyleRules(rule(".a", { transition: "none !important" }), ok).rejected[0]?.reason).toBe("banned_value:transition");
+    expect(sanitizeStyleRules(rule(".a", { "z-index": "9999 !important" }), ok).rejected[0]?.reason).toBe("banned_value:z-index");
+    expect(sanitizeStyleRules(rule(".a", { animation: "fx-a 1s" }, { name: "fx-a", body: "0%{opacity:0 !important}" }), ok).rejected[0]?.reason)
+      .toBe("banned_in_keyframes");
+    // 反向：不带 important 的照常通过（拒的是那一个词，不是这类写法）
+    expect(sanitizeStyleRules(rule(".a", { transition: "background-color .2s ease" }), ok).rules).toHaveLength(1);
+  });
+
   it("keyframes 必须 fx- 前缀（防覆盖内置动画名），帧体不许夹 @ 规则", () => {
     expect(sanitizeStyleRules(rule(".a", { animation: "fx-glow 2s" }, { name: "fx-glow", body: "0%{opacity:.4}100%{opacity:1}" }), ok).rules[0].keyframes)
       .toContain("@keyframes fx-glow{");
@@ -243,5 +253,13 @@ describe("guardStyleText", () => {
     expect(check(":root{background:red}").problems.some((p) => p.startsWith("root_rule_must_only_define_custom_properties"))).toBe(true);
     // :root 与越权选择器并列时整条都按越权处理（不能借逗号分段夹带）
     expect(check(":root, body{color:red}").problems.some((p) => p.startsWith("global_selector"))).toBe(true);
+  });
+
+  it("P148：自由文本与 :root 块里的 !important 也拒（:root 那条在值判据之前就 return，别留成漏口）", () => {
+    expect(guardStyleText(".a{color:red !important}").problems.some((p) => p.startsWith("banned_value_in"))).toBe(true);
+    expect(guardStyleText(":root{--ctl-press:scale(.97) !important}").problems.some((p) => p.startsWith("banned_value_in_root"))).toBe(true);
+    // 反向且是 P147 §4 的那条事实：签名槽**不在**白名单里，所以 :root 填槽本来就是合法通路——
+    // 禁 important 不该顺手把这条通路也堵掉。
+    expect(guardStyleText(":root{--ctl-press:scale(.97)}", 8000, ["--accent", "--bg"]).ok).toBe(true);
   });
 });

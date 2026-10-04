@@ -28,8 +28,9 @@ import { PANEL_GROUPS, panelGroupLabel } from "../../panels/panelMenu";
 import { APPEARANCE_TOKENS } from "./appearanceStore";
 import { fxCatalog } from "./fxRecipes";
 import { DOMAINS, DOMAIN_TIP, DOMAIN_ZH } from "./scopeTiers";
+import { CTL_BUS_HOOK, CTL_HOOKS, CTL_SLOTS, ELEV_TIERS } from "../../styles/hostHooks";
 
-export const INVENTORY_SECTIONS = ["panels", "controls", "blocks", "actions", "tokens", "domains", "fx"] as const;
+export const INVENTORY_SECTIONS = ["panels", "controls", "blocks", "actions", "tokens", "domains", "fx", "hooks"] as const;
 export type InventorySection = (typeof INVENTORY_SECTIONS)[number];
 
 type BlockMeta = {
@@ -113,7 +114,45 @@ export async function collectInventory(rawSection?: string): Promise<Record<stri
   if (want("tokens")) out.tokens = tokenRows();
   if (want("domains")) out.domains = domainRows();
   if (want("fx")) out.fx = fxRows();
+  if (want("hooks")) out.hooks = hooksRows();
   return out;
+}
+
+/**
+ * P148：宿主词汇与签名槽的**现场清单**。
+ *
+ * 为什么单开一档：P143 铺的 12 枚签名槽与 `data-ctl`/`data-elev` 两对钩子，此前对模型**完全不可见**
+ * （提示词零提及、`ui_inspect` 不读 dataset），于是它每次都走最贵的那条路——逐类点名，
+ * 点不全就是用户看到的"AI 做的主题比内置的还素"。这一档把"有哪几枚槽、屏幕上真挂了哪几个钩子"
+ * 一次讲清，词汇表本体仍从 `styles/hostHooks` 现读（不在这抄第二份）。
+ */
+/** 纯函数那一半（DOM 计数交进来）：这张清单因此能在 node 里被断言反驳，不必养一个假 document。 */
+export function hooksReport(onScreen: { ctl: Record<string, number>; elev: Record<string, number> }) {
+  return {
+    // 屏幕上此刻真挂着的（某档为 0 说明这一面没这类角色，不是词表错了）
+    on_screen: onScreen,
+    vocabulary: { ctl: [...CTL_HOOKS], elev: [...ELEV_TIERS] },
+    slots: CTL_SLOTS.map((s) => ({ name: s.name, default_at_root: s.defaultAtRoot, gloss: s.gloss })),
+    how_to_fill:
+      '槽属于组件层：在 :root 或 :root[data-theme="<id>"] 里声明它们（它们不在 token 白名单里，' +
+      '所以 theme_patch 到不了，也不该到——那里落成行内样式会压过宿主的减弱动效基线）。' +
+      '填一枚槽 = 约 1,120 只可点元素同时换签名；先查槽，再逐类点名。',
+  };
+}
+
+/** P148：宿主词汇与签名槽的现场清单（详见 collectInventory 上方那段理由）。 */
+function hooksRows(): Record<string, unknown> {
+  const ctl: Record<string, number> = {};
+  for (const el of document.querySelectorAll('[data-ctl]')) {
+    const v = el.getAttribute('data-ctl') ?? '?';
+    ctl[v] = (ctl[v] ?? 0) + 1;
+  }
+  const elev: Record<string, number> = {};
+  for (const el of document.querySelectorAll('[data-elev]')) {
+    const v = el.getAttribute('data-elev') ?? '?';
+    elev[v] = (elev[v] ?? 0) + 1;
+  }
+  return hooksReport({ ctl, elev });
 }
 
 /* ================= 活 DOM 现场 ================= */
@@ -131,6 +170,11 @@ export interface SurfaceNode {
   selector: string;
   tag: string;
   classes: string[];
+  /**
+   * P148：`data-ctl` / `data-elev` 这两个宿主钩子。以前载荷里没有它们，
+   * 模型在屏幕上看见一只 `data-ctl="tab"` 也看不见——它只能猜类名，猜不全就漏面。
+   */
+  hooks?: Record<string, string>;
   box: [number, number];
   /** 短文本（按钮/标题这类"是哪个控件"的关键线索），超 40 字截断并标记 */
   text?: string;
@@ -216,6 +260,16 @@ export function censusSurface(
       selector: usableSelector(el),
       tag: el.tagName.toLowerCase(),
       classes: [...el.classList].slice(0, 6),
+      // 只带这两个词汇钩子：整张 dataset 会把 data-pdrag / data-id 这类内部状态一起灌给模型，
+      // 而那些不是"主题能往哪一层写"的入口。
+      ...(() => {
+        const hooks: Record<string, string> = {};
+        const ctl = el.getAttribute("data-ctl");
+        const elev = el.getAttribute("data-elev");
+        if (ctl) hooks["data-ctl"] = ctl;
+        if (elev) hooks["data-elev"] = elev;
+        return Object.keys(hooks).length ? { hooks } : null;
+      })(),
       box: [Math.round(el.clientWidth), Math.round(el.clientHeight)],
       ...shortText(el),
       styles: sampleStyles(el),
@@ -250,8 +304,15 @@ export function censusSurface(
 /* ================= P131-B1：渲染层审计的采样侧 ================= */
 
 /** 能被"点"的元素——命中区只量这些，量到纯排版元素上就是噪声 */
-const INTERACTIVE_SELECTOR =
-  "button,a[href],input,select,textarea,summary,[role=button],[role=tab],[role=menuitem],[role=checkbox],[role=switch]";
+/**
+ * 命中区审计认"什么算可点物"。P148 补上 `[data-ctl]` 那一支——在此之前它和覆盖率脚本
+ * （`.tools/ctl-coverage.mjs` 的 BUS，含 `[data-ctl]`）**认的不是同一批元素**：
+ * 那些"靠宿主词汇才够得着"的控件（div 当页签、div 当表头、label 包出来的两段开关）
+ * 在 24px 这条地板下面是隐形的。排除项从 `styles/hostHooks` 现读，不在这重抄一份。
+ */
+export const INTERACTIVE_SELECTOR =
+  "button,a[href],input,select,textarea,summary,[role=button],[role=tab],[role=menuitem],[role=checkbox],[role=switch]," +
+  CTL_BUS_HOOK;
 
 export const AUDIT_DEFAULTS = { maxSamples: 260, maxOverflow: 40, maxHits: 40 } as const;
 

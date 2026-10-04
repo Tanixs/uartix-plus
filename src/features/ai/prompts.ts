@@ -14,6 +14,19 @@ import { panelGroupsAddable } from "../../panels/panelMenu";
 // 发送谱预设的名字同样从注册表派生：这三组是 AI 该"建议用户点预设"而不是手写清单的依据，
 // 手抄一份改名就漂（§8-36① 同一类）。sendPresets 是纯 build() 模块，不碰 store，无启动图代价。
 import { SEND_PRESETS } from "../send/sendPresets";
+// P148：签名槽与宿主词汇是"主题往哪儿写"的地图，此前只活在 theme.css 的注释里，提示词一个字没提
+// ⇒ 模型每次都走最贵的那条路（逐类点名），点不全就是用户看到的"AI 做的主题比内置的还素"。
+import { CTL_HOOKS, CTL_SLOTS, ELEV_TIERS } from "../../styles/hostHooks";
+// 静态门数量同样现数不手抄：写过一次"12 道门"，实际早就 15 道了（§8-36① 同一类）。
+import pkgJson from "../../../package.json";
+
+/** `check:all` 里那串 `node .tools/check-*.cjs` 的条数。数不出来就抛——宁可炸给开发者看，
+ *  也不要在提示词里写一句"0 道门"糊过模型。 */
+const STATIC_GATES: number = (() => {
+  const n = (pkgJson.scripts?.["check:all"] ?? "").match(/node \.tools\/check-[\w-]+\.cjs/g)?.length ?? 0;
+  if (n < 10) throw new Error(`check:all 里只数出 ${n} 道静态门，判据或脚本名漂了`);
+  return n;
+})();
 
 export type AiScene =
   | "protocol"
@@ -73,8 +86,8 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - MCP 桥（反向集成）：在 127.0.0.1 上开一个受 token 保护的本地控制平面（默认端口 7731，开关/端口/token 都在「设置 → 集成」），让 Claude Desktop / Cursor 这类 AI IDE 直接读实时遥测、发指令、跑测试序列；两道独立权限门：允许远程发送、允许高权限动作。
 - 教学引导：帮助 → 快速入门顶部「启动交互式教学」，聚光灯分步带新手走通连接→预设→帧画布→曲线→控制→AI 主流程；首启自动弹欢迎卡。
 - Operator 部署包：把调好的工作区（协议/控制页/命令库/布局/外观设置/3D 面板设置）打包成 .uopk 给现场操作员，双击导入进入只读运行——配置写入一律被 store 层拦截，连接/发命令/看数据/运行编排与校准操作照常；横幅退出即恢复编辑。
-- 外观（改界面长相时按这三层做，别只改色板）：① **token 层**——theme_patch 写 ${APPEARANCE_TOKENS.length} 项白名单变量（四档表面/描边/文字/主色/语义色/字号/圆角/时长/缓动/抬升档/控件高/间距/行高），一次到位要同时给 surface+border+text+accent，只改一两项等于没改；theme_preset 是现成配方（玻璃/暗化/高对比…），派生自当前在画那枚。② **组件层**——style_patch 按真实类名下 CSS 规则（结构化、逐条回执：命中几个元素、哪个属性从什么变成什么，命中 0 会把真类名递给你），按钮/输入框/页签/开关/滑块/菜单/对话框/标题栏的 hover·active·focus·disabled 态**只能在这一层做**，token 层做不出蓝按钮。单次上限 ${STYLE_CAPS.maxRules} 条规则、每条 ${STYLE_CAPS.maxDeclsPerRule} 条声明，一套全量主题就是多次调用累加（每次一层，可单独 style_revert）。③ **固化**——style_commit 读宿主自己净化过的临时层存成已启用主题插件（**别手抄自己发过的规则**，几轮改撤之后手写副本已经不等于屏幕了）；save_theme_extension 才收模型手写的整段 CSS（上限 ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB，与产物上限同一个数，够写一整套组件覆盖）；一次输不完这么长的文本是正常的，写不完用 style_append 一段一段追加（每段是完整规则、当场生效看得见，回执带剩余字节，最后 done:true + name 落盘）。两条都过同一个净化器：禁 html/body/#root/* 这类全局选择器与 @import；层级走**层槽**——position:fixed 必须配 z-index: var(--z-menu) 这类登记过的槽（可引用档：${slotCatalogText()}），通知/引导/拖拽三档是保护区、写进去就拒，未知槽名也拒；:root 只许声明新的 --自定义变量（白名单键必须走 theme_patch，--z-* 更不许重定义，否则整张层槽表作废）。做完必须显式固化并告诉用户停用入口（设置 → 插件管理），会话内的临时层重启即无。先 ui_inspect 看清真实类名再下规则。看一眼不必装包：theme_preview { id, seconds } 把候选主题借画面演 N 秒（默认 12 秒，最长 60），到期自动回到用户自己选的那枚——它不写设置、不进插件库、刷新即无，界面那一句「主题预览中」会一直挂着；要留下必须用户点头后再走固化。材质（噪声/贴图/纹理）走资产通道：asset_put { id, mime, base64 } 放一贴，CSS 里写 background-image: var(--fx-asset-<id>)——注意不是 url(var(...))，浏览器不认那种写法；asset_list 看现在有哪几贴。外链 url(http…) 与内联 SVG 一律拒（离线必裂 + 数据外带 + SVG 能带脚本），SVG 只能作为资产交进来、由宿主扫过脚本面再用；字体这条通道还没开。要留下必须用户点头后再走固化。id 只能从回执/清单里挑，别编。
-- ④ **审计**——theme_audit 量的是屏幕上**真的读不读得出来**：每处可见文字 × 它真正压着的那层合成底 × WCAG 比值（4.5:1，大字 3:1）、文字画出格子外、可点目标 <24px（按 --zoom 折回设备像素）、以及特异性压得住宿主「减弱动效」基线的 transition/animation 规则。静态那 12 道门扫的是仓库字节，**看不见运行时注入的 CSS**，所以画完就得跑它；回执里 blocking:true 不是拦你安装，是**必须逐条讲给用户并改到归零**（能力面全开，证据面也全开）。
+- 外观（改界面长相时按这三层做，别只改色板）：① **token 层**——theme_patch 写 ${APPEARANCE_TOKENS.length} 项白名单变量（四档表面/描边/文字/主色/语义色/字号/圆角/时长/缓动/抬升档/控件高/间距/行高），一次到位要同时给 surface+border+text+accent，只改一两项等于没改；theme_preset 是现成配方（玻璃/暗化/高对比…），派生自当前在画那枚。② **组件层**——style_patch 按真实类名下 CSS 规则（结构化、逐条回执：命中几个元素、哪个属性从什么变成什么，命中 0 会把真类名递给你），按钮/输入框/页签/开关/滑块/菜单/对话框/标题栏的 hover·active·focus·disabled 态**只能在这一层做**，token 层做不出蓝按钮。单次上限 ${STYLE_CAPS.maxRules} 条规则、每条 ${STYLE_CAPS.maxDeclsPerRule} 条声明，一套全量主题就是多次调用累加（每次一层，可单独 style_revert）。**下规则前先问一句"这件事槽管不管"**——宿主铺了 ${CTL_SLOTS.length} 枚交互签名槽（${CTL_SLOTS.map((s) => s.name).join(" ")}），填一枚就等于给约 1,120 只可点元素换掉按压/悬停/焦点签名，比逐类点名便宜两个数量级；槽值写在 :root 或 :root[data-theme="<id>"]（它们**不在** token 白名单里，theme_patch 到不了也不该到——那里落成行内样式会压过宿主的减弱动效基线），设了位移槽（--ctl-press / --ctl-press-tight / --ctl-lift）就**必须**同时写 @media (prefers-reduced-motion: reduce) 与 .no-motion 两条清零，否则你把用户自己开的"减弱动效"压回去了。还有两对宿主词汇可以直接当选择器用，它们不随类名漂：data-ctl（${CTL_HOOKS.join("/")}）说"这个可点物是什么角色"、data-elev（${ELEV_TIERS.join("/")}）说"这块表面落在哪一档"；屏幕上此刻真挂着哪几个，用 ui_inventory { section: "hooks" } 问，别猜。③ **固化**——style_commit 读宿主自己净化过的临时层存成已启用主题插件（**别手抄自己发过的规则**，几轮改撤之后手写副本已经不等于屏幕了）；save_theme_extension 才收模型手写的整段 CSS（上限 ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB，与产物上限同一个数，够写一整套组件覆盖）；一次输不完这么长的文本是正常的，写不完用 style_append 一段一段追加（每段是完整规则、当场生效看得见，回执带剩余字节，最后 done:true + name 落盘）。两条都过同一个净化器：禁 html/body/#root/* 这类全局选择器、禁 @import，也**禁 !important**（注入层一旦能 important，就能反过来压掉用户自己的"减弱动效"与整张层槽表，而按特异性算的那条判据根本看不见它）；层级走**层槽**——position:fixed 必须配 z-index: var(--z-menu) 这类登记过的槽（可引用档：${slotCatalogText()}），通知/引导/拖拽三档是保护区、写进去就拒，未知槽名也拒；:root 只许声明新的 --自定义变量（白名单键必须走 theme_patch，--z-* 更不许重定义，否则整张层槽表作废）。做完必须显式固化并告诉用户停用入口（设置 → 插件管理），会话内的临时层重启即无。先 ui_inspect 看清真实类名再下规则。看一眼不必装包：theme_preview { id, seconds } 把候选主题借画面演 N 秒（默认 12 秒，最长 60），到期自动回到用户自己选的那枚——它不写设置、不进插件库、刷新即无，界面那一句「主题预览中」会一直挂着；要留下必须用户点头后再走固化。材质（噪声/贴图/纹理）走资产通道：asset_put { id, mime, base64 } 放一贴，CSS 里写 background-image: var(--fx-asset-<id>)——注意不是 url(var(...))，浏览器不认那种写法；asset_list 看现在有哪几贴。外链 url(http…) 与内联 SVG 一律拒（离线必裂 + 数据外带 + SVG 能带脚本），SVG 只能作为资产交进来、由宿主扫过脚本面再用；字体这条通道还没开。要留下必须用户点头后再走固化。id 只能从回执/清单里挑，别编。
+- ④ **审计**——theme_audit 量的是屏幕上**真的读不读得出来**：每处可见文字 × 它真正压着的那层合成底 × WCAG 比值（4.5:1，大字 3:1）、文字画出格子外、可点目标 <24px（按 --zoom 折回设备像素）、以及特异性压得住宿主「减弱动效」基线的 transition/animation 规则。静态那 ${STATIC_GATES} 道门扫的是仓库字节，**看不见运行时注入的 CSS**，所以画完就得跑它；回执里 blocking:true 不是拦你安装，是**必须逐条讲给用户并改到归零**（能力面全开，证据面也全开）。
 - 图传面板：TCP/UDP 网络视频流接入。
 - 指标面板（metrics）与分析包：对已采集的时间窗口做指标分析，并把结论回写成 3D 轨迹的组备注（先预览再写，冲突/只读/目标已删都照实回执，不静默覆盖）；「分析包」把选定的缓存窗口与模块导出到一个本地目录，**不会自动上传**，全局入口在 设置 → 通用，2D/3D/表格另留局部入口。
 - 变量系统：变量自动绑定启用模板的字段，帧到达时更新；Modbus 轮询项也按行名写入变量（可与模板字段共存，脚本与曲线统一按名引用）。

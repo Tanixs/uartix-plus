@@ -9,7 +9,7 @@
  * 但 8 枚没填槽的主题会一起开始动。所以这两件事只能在这里钉。
  */
 import { describe, expect, it } from "vitest";
-import { CTL_HOOKS, ELEV_TIERS } from "./hostHooks";
+import { CTL_BUS_HOOK, CTL_BUS_EXCLUSIONS, CTL_HOOKS, CTL_SLOTS, ELEV_TIERS } from "./hostHooks";
 import { specificityOf } from "./renderAudit";
 import { APPEARANCE_TOKENS } from "./themeCore";
 import { DOCK_HOOK_MAP } from "../shell/dockHostHooks";
@@ -154,12 +154,35 @@ describe("P143 签名槽：缺省必须等于 P103 今天的值", () => {
     }
   });
 
-  it("ring-offset 与输入框焦点三档**故意不在 :root 定义**：不定义，各基元自己的 var() 缺省才生效", () => {
+  it("没有缺省的那几枚**故意不在 :root 定义**：不定义，各基元自己的 var() 缺省才生效", () => {
     // 按"声明"判，不按"出现"判：那一块里有一段**注释**在解释为什么不定义，
     // 用 includes() 会被自己的注释判红（这已经是本仓第二次踩同一处了）。
     const declared = new Set([...slotBlock().matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
-    for (const k of ["--ctl-ring-offset", "--ctl-input-focus", "--ctl-focus-border", "--ctl-focus-halo"]) {
-      expect(declared.has(k), `${k} 一旦在 :root 定义，.btn 的 +1px 与 .seg 的 -2px 就被统一掉了（那是行为变更）`).toBe(false);
+    const noDefault = CTL_SLOTS.filter((s) => !s.defaultAtRoot);
+    expect(noDefault.length, "反空断言：表里没有一枚槽被标成「无 :root 缺省」，这条就没在判任何东西").toBeGreaterThanOrEqual(4);
+    for (const s of noDefault) {
+      expect(declared.has(s.name), `${s.name} 一旦在 :root 定义，.btn 的 +1px 与 .seg 的 -2px 就被统一掉了（那是行为变更）`).toBe(false);
+    }
+  });
+
+  /**
+   * P148：这张表是**提示词的唯一出处**（`prompts.ts` 拿它生成话术给模型读）。
+   * 所以它必须与 CSS 双向闭合：表里多一枚 = 给模型讲了一枚不存在的槽；
+   * CSS 多一枚 = 新加的槽没人告诉模型（P143 那 12 枚就是这么静默隐身了四批的）。
+   */
+  it("CTL_SLOTS 与 theme.css 里的槽双向闭合，且「有没有 :root 缺省」记的是真话", () => {
+    const declared = new Set([...slotBlock().matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+    // --ctl-h-* 是三档控件高（在白名单里、走 theme_patch），不是签名槽，别混进来
+    const inCss = new Set(
+      [...stripComments(baseCss).matchAll(/--ctl-(?!h-)([\w-]+)/g)].map((m) => `--ctl-${m[1]}`),
+    );
+    expect(inCss.size, "反空断言：CSS 里一枚槽都没扫到").toBeGreaterThan(10);
+    for (const s of CTL_SLOTS) {
+      expect(inCss.has(s.name), `CTL_SLOTS 列了 ${s.name}，CSS 里却找不到 ⇒ 模型会去填一枚不存在的槽`).toBe(true);
+      expect(s.defaultAtRoot, `${s.name} 的「有没有 :root 缺省」记错了`).toBe(declared.has(s.name));
+    }
+    for (const k of inCss) {
+      expect(CTL_SLOTS.some((s) => s.name === k), `theme.css 里有 ${k}，CTL_SLOTS 没登记 ⇒ 提示词就少讲一枚`).toBe(true);
     }
   });
 
@@ -170,6 +193,32 @@ describe("P143 签名槽：缺省必须等于 P103 今天的值", () => {
     expect(baseCss, `theme.css 里没有这条总线选择器：${bus}`).toContain(`:where(${bus})`);
     // 两边必须是同一串：脚本量的是"总线够不够得着"，样式表漂了读数就自欺
     expect(busSelector()).toBe(bus);
+  });
+
+  /**
+   * P148：命中区审计（`uiSurface` 的 INTERACTIVE_SELECTOR）与覆盖率仪表（ctl-coverage 的 BUS）
+   * 以前认的不是同一批元素——总线含 `[data-ctl]`、审计不含，于是"靠宿主词汇才够得着"的那批控件
+   * 在 24px 这条地板下面**隐形**。现在两边都从这张表读，排除项也只有一份出处。
+   */
+  it("命中区审计与覆盖率仪表认同一批元素，且拖拽把手/分隔线两边都排除", () => {
+    const surface = read("src/features/agent/uiSurface.ts");
+    /**
+     * 判"定义里拼没拼上"，不判"文件里有没有这个名字"——后者连 import 那行都算命中，
+     * 是一条永真的判据（第一次验牙就是这么抓出来的：把 CTL_BUS_HOOK 从定义里删掉它还是绿）。
+     */
+    const def = /export const INTERACTIVE_SELECTOR\s*=\s*([\s\S]*?);\n/.exec(surface);
+    expect(def, "找不到 INTERACTIVE_SELECTOR 的定义（改名了？这条判据失去对象）").toBeTruthy();
+    expect(def![1], "定义里没拼上 CTL_BUS_HOOK ⇒ 命中区审计又对长尾控件隐身了").toContain("CTL_BUS_HOOK");
+    expect(def![1], "排除项被重抄进 uiSurface（第二真值：改一处漏一处）").not.toMatch(/data-ctl="sash"/);
+    const tool = read(".tools/ctl-coverage.mjs");
+    expect(tool, "覆盖率脚本丢了 [data-ctl]，它量的就不再是总线够得着的那批").toContain("[data-ctl]");
+    // 排除项本身：sash 是 1px 的拖拽条，拿 24px 地板量它是把审计变成噪声制造机
+    expect(CTL_BUS_EXCLUSIONS).toContain('[data-ctl="sash"]');
+    expect(CTL_BUS_HOOK).toContain('[data-ctl="sash"]');
+    expect(CTL_BUS_HOOK).toContain('[role="separator"]');
+    expect(CTL_BUS_HOOK).toContain("[data-pdrag]");
+    // 词汇表与钩子串同源：表里加一枚角色，钩子串的排除项不该跟着漏
+    expect(CTL_HOOKS).toContain("sash");
   });
 
   it("签名槽不许写在主题 token 文件里（那里落成 inline style，降级基线就再也关不掉它）", () => {

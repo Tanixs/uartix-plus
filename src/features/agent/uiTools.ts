@@ -103,7 +103,7 @@ export const uiToolEntries: AgentToolEntry[] = [
     domain: null,
     provenance: HOST,
     description:
-      "Enumerate what this app actually is: panel groups & panel ids, control (widget) types, orchestrator blocks/events, app-action kinds, themable token names, authorization domains. Derived from the live registries, never from a hand-written list. Args: { section?: " + INVENTORY_SECTIONS.join("|") + " }. Read-only.",
+      "Enumerate what this app actually is: panel groups & panel ids, control (widget) types, orchestrator blocks/events, app-action kinds, themable token names, authorization domains, and (section:hooks) the host vocabulary hooks data-ctl/data-elev plus the interaction signature slots a theme can fill. Derived from the live registries, never from a hand-written list. Args: { section?: " + INVENTORY_SECTIONS.join("|") + " }. Read-only.",
     parameters: { type: "object", properties: { section: { type: "string" } }, additionalProperties: false },
     summarize: (a) => (a.section ? `查看界面清单 · ${String(a.section)}` : "查看界面清单"),
     async execute(args, ctx) {

@@ -13,6 +13,8 @@ import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 import { buildSystemPrompt, routeNeeds, schemaFor } from "./prompts";
 import { SEND_FIELD_ROLES } from "../send/sendTypes";
 import { FIELD_SIZES } from "../protocol/fieldTypes";
+import { CTL_HOOKS, CTL_SLOTS, ELEV_TIERS } from "../../styles/hostHooks";
+import pkgJson from "../../../package.json";
 
 const qaPrompt = buildSystemPrompt("qa", "（无）");
 
@@ -177,5 +179,42 @@ describe("P121-E · writeSendSpec 进了知识面，且说明书不超能力", (
   it("用户只说「组一帧要发的字节」，这段格式也会被带进上下文", () => {
     expect(routeNeeds("帮我组一帧要发的字节")).toContain("action");
     expect(routeNeeds("做一张发送谱")).toContain("action");
+  });
+});
+
+/**
+ * P148：外观**知识面**。P143 铺的签名槽与宿主词汇此前只活在 theme.css 的注释里，
+ * 提示词对它们零提及（实测 grep `--ctl-` / `data-ctl` 在 prompts.ts 里 0 命中）——
+ * 于是模型每次都走最贵的那条路：逐类点名，点不全就是用户看到的"AI 做的主题比内置的还素"。
+ * 这一组不测"文案写得漂亮"，只测**派生**：槽表加了名字提示词必须跟着有，漏一枚就红。
+ */
+describe("P148 外观知识面：槽、词汇、降级义务、门数都要在提示词里", () => {
+  it("CTL_SLOTS 每一枚都以真名出现（表是话术的唯一出处，不是手抄）", () => {
+    expect(CTL_SLOTS.length, "反空断言：槽表空了，这条就没在判任何东西").toBeGreaterThanOrEqual(12);
+    for (const s of CTL_SLOTS) {
+      expect(qaPrompt, `签名槽 ${s.name} 没进提示词 ⇒ 模型不会去填它`).toContain(s.name);
+    }
+  });
+
+  it("两对宿主词汇与它的每一档都在（模型得知道 data-ctl/data-elev 可以当选择器用）", () => {
+    expect(qaPrompt).toContain("data-ctl");
+    expect(qaPrompt).toContain("data-elev");
+    for (const h of CTL_HOOKS) expect(qaPrompt, `词汇档 ${h} 没讲`).toContain(h);
+    for (const t of ELEV_TIERS) expect(qaPrompt, `表面档 ${t} 没讲`).toContain(String(t));
+    expect(qaPrompt, "ui_inventory 的 hooks 档没告诉模型怎么问").toContain('section: "hooks"');
+  });
+
+  it("降级义务跟着说：设了位移槽就必须成对写两条清零；!important 这条新禁也要讲明", () => {
+    expect(qaPrompt).toContain("prefers-reduced-motion");
+    expect(qaPrompt).toContain(".no-motion");
+    expect(qaPrompt, "净化器禁了 !important，提示词没说 ⇒ 模型会以为还能用").toContain("!important");
+  });
+
+  it("静态门数从 package.json 现数（写过一次「12 道门」，实际 15 道就是那次的账）", () => {
+    const inPrompt = /静态那 (\d+) 道门/.exec(qaPrompt);
+    expect(inPrompt, "提示词里那句静态门计数不见了").toBeTruthy();
+    const real = (pkgJson.scripts?.["check:all"] ?? "").match(/node \.tools\/check-[\w-]+\.cjs/g)?.length ?? 0;
+    expect(real, "package.json 里数不出静态门，判据本身漂了").toBeGreaterThanOrEqual(15);
+    expect(Number(inPrompt![1])).toBe(real);
   });
 });

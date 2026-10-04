@@ -4,6 +4,7 @@
  * 否则模型又会回到"改背景色试试运气"的老路（真机反馈 5 的根因）。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CTL_HOOKS, CTL_SLOTS, ELEV_TIERS } from "../../styles/hostHooks";
 
 vi.mock("../../panels/panels", () => ({ panelTitleOf: (id: string) => `标题:${id}` }));
 
@@ -27,12 +28,14 @@ interface FakeEl {
   clientHeight: number;
   textContent: string;
   styles: Record<string, string>;
+  /** P148：假 DOM 也要能回答属性读取——`ui_inspect` 现在会读 data-ctl / data-elev 这两个词汇钩子 */
+  getAttribute: (n: string) => string | null;
   parentEl?: FakeEl;
   querySelectorAll: (sel: string) => FakeEl[];
   querySelector: (sel: string) => FakeEl | null;
 }
 
-function el(tag: string, opts: { id?: string; cls?: string[]; text?: string; size?: [number, number]; styles?: Record<string, string>; kids?: FakeEl[] } = {}): FakeEl {
+function el(tag: string, opts: { id?: string; cls?: string[]; attrs?: Record<string, string>; text?: string; size?: [number, number]; styles?: Record<string, string>; kids?: FakeEl[] } = {}): FakeEl {
   const set = new Set(opts.cls ?? []);
   const cls = Object.assign(set, { contains: (c: string) => set.has(c) }) as FakeEl["classList"];
   const node: FakeEl = {
@@ -45,6 +48,7 @@ function el(tag: string, opts: { id?: string; cls?: string[]; text?: string; siz
     clientHeight: opts.size?.[1] ?? 24,
     textContent: opts.text ?? "",
     styles: opts.styles ?? {},
+    getAttribute: (n: string) => opts.attrs?.[n] ?? null,
     querySelectorAll: (sel: string) => walkAll(opts.kids ?? []).filter((n) => match(n, sel)),
     querySelector: (sel: string) => walkAll(opts.kids ?? []).find((n) => match(n, sel)) ?? null,
   };
@@ -84,7 +88,7 @@ const tree: FakeEl[] = [
   el("div", { cls: ["app-shell"], kids: [
     el("div", { cls: ["cmdbar"], text: "Uartix+", kids: [
       el("span", { cls: ["tb-brand"], text: "Uartix+" }),
-      el("button", { cls: ["tb-btn"], text: "设置" }),
+      el("button", { cls: ["tb-btn"], text: "设置", attrs: { "data-ctl": "tool" } }),
     ] }),
     el("div", { cls: ["p3d-host"], kids: [
       el("button", { cls: ["p3d-cbtn"], text: "选通道", styles: { "border-radius": "4px" } }),
@@ -160,11 +164,11 @@ describe("uiTools", () => {
     for (const alias of ["None", "all", "", "  ", "*", "全部"]) {
       const aliased = await executeUiTool(call("ui_inventory", { section: alias }), ctxFor("preview"));
       expect(aliased.ok, `section=${JSON.stringify(alias)}`).toBe(true);
-      expect(Object.keys(aliased.data as object)).toHaveLength(7);
+      expect(Object.keys(aliased.data as object)).toHaveLength(8);
     }
     const all2 = await executeUiTool(call("ui_inventory", {}), ctxFor("create"));
     const d = all2.data as Record<string, unknown>;
-    expect(Object.keys(d).sort()).toEqual(["actions", "blocks", "controls", "domains", "fx", "panels", "tokens"]);
+    expect(Object.keys(d).sort()).toEqual(["actions", "blocks", "controls", "domains", "fx", "hooks", "panels", "tokens"]);
     expect((d.fx as { className: string }[]).map((f) => f.className)).toContain(".fx-glow");
     expect((d.panels as { panels: { title: string }[] }[])[0].panels[0].title).toBe("标题:hexview");
   });
@@ -177,9 +181,31 @@ describe("uiTools", () => {
     expect(d.classes.map((c) => c.name)).toContain("tb-btn");
     expect(d.nodes[0].selector).toBe(".cmdbar");
     expect(d.nodes[0].children).toBeTruthy();
+    // P148：载荷要带出宿主词汇钩子，否则模型看得见 .tb-btn 却看不见它是"导轨/工具栏那一档小键"
+    const kids = d.nodes[0].children as { selector: string; hooks?: Record<string, string> }[];
+    expect(kids.find((k) => k.selector === ".tb-btn")?.hooks).toEqual({ "data-ctl": "tool" });
+    expect(kids.find((k) => k.selector === ".tb-brand")?.hooks, "没挂词汇的节点不该凭空长出 hooks 键").toBeUndefined();
     const miss = await executeUiTool(call("ui_inspect", { root: ".no-such-class" }), ctxFor("preview"));
     expect((miss.data as { matched: number; note: string }).matched).toBe(0);
     expect((miss.data as { note: string }).note).toContain("没有元素命中");
+  });
+
+  /**
+   * P148：宿主词汇与签名槽的现场清单。P143 那批槽此前对模型完全隐身（提示词零提及、
+   * ui_inspect 不读 dataset），于是它只能逐类点名——点不全就是"AI 做的主题比内置的还素"。
+   */
+  it("ui_inventory { section: 'hooks' } 把词汇表与签名槽原样递给模型", async () => {
+    const { executeUiTool } = await load();
+    const r = await executeUiTool(call("ui_inventory", { section: "hooks" }), ctxFor("preview"));
+    expect(r.ok).toBe(true);
+    const h = (r.data as { hooks: Record<string, unknown> }).hooks;
+    expect((h.vocabulary as { ctl: string[]; elev: number[] }).ctl).toEqual([...CTL_HOOKS]);
+    expect((h.vocabulary as { elev: number[] }).elev).toEqual([...ELEV_TIERS]);
+    const slots = h.slots as { name: string; default_at_root: boolean; gloss: string }[];
+    expect(slots.map((x) => x.name)).toEqual(CTL_SLOTS.map((x) => x.name));
+    expect(slots.every((x) => x.gloss.length > 0), "槽要讲得出语义，否则模型不知道该填哪一枚").toBe(true);
+    expect(h.on_screen).toHaveProperty("ctl");
+    expect(typeof h.how_to_fill).toBe("string");
   });
 
   it("style_patch：命中数 + 旧→新都回，越权条目单独退回而不是整批失败", async () => {

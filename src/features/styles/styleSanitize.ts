@@ -60,14 +60,21 @@ const BANNED_SELECTOR_HEAD = /^(html|body|#root|:root)\b|^\*/i;
  */
 const BANNED_SELECTOR_PATTERNS = [/\[style/i, /::part\(/i, /expression\s*\(/i, /javascript\s*:/i];
 /**
- * 值层面的越权：外链数据外带、旧 IE 行为、脚本。
+ * 值层面的越权：外链数据外带、旧 IE 行为、脚本、**以及 `!important`**。
  *
  * P131-C：**`url()` 不再在这里一刀切**。原来那一条把"材质"整层能力删了（噪声 / 贴图 / 纹理），
  * 而它真正要防的两件事——离线裂图与"把用户 IP 外发"——现在由 `assetGuard.checkCssUrlArg`
  * 精确判：只放行 `url(var(--fx-asset-<id>))`（资产本体在装包时已过 mime/魔数/尺寸/SVG 脚本面
  * 四道校验）与 ≤32 KB 的**栅格图** `data:`；`http` / `//` / `file` / 相对路径 / 内联 SVG 仍然拒。
+ *
+ * P148：**`!important` 从"没判"改成"拒"**。它原来只在仓库源码侧有上限（`check-style.cjs` 的
+ * `IMPORTANT_CEILING`），注入侧一条都没判——而注入的 CSS 恰恰是唯一能打赢宿主降级基线的那一层：
+ * 一条 `transition: none !important` 就能把用户"减弱动效"的开关压回去，而 `renderAudit`
+ * 那条按特异性算的判据（`html.no-motion *` = (0,1,1)）**根本看不见 `!important`**，因为它不走特异性。
+ * 同理 `z-index: … !important` 让整张层槽表作废。内置的 fluent 组件层一条都不需要它
+ * （`hostHooks.test.ts` 早就把"内置包不许有 !important"钉成了断言），所以拒掉不减能力。
  */
-const BANNED_VALUE_PATTERNS = [/@import/i, /expression\s*\(/i, /javascript\s*:/i, /behavior\s*:/i, /-moz-binding/i];
+const BANNED_VALUE_PATTERNS = [/@import/i, /expression\s*\(/i, /javascript\s*:/i, /behavior\s*:/i, /-moz-binding/i, /!important/i];
 /**
  * P131-B2：`position:fixed` 不再一刀切禁——改成"必须落在登记过的层槽上"（见 `checkLayerUse`）。
  * 一刀切的代价是整层正常能力（浮层/遮罩/贴边工具条/通知）被删；而真正要防的是"盖住撤销入口"，
@@ -278,6 +285,9 @@ function checkPair(selector: string, cssText: string, push: (p: string) => void,
     if (!decls.length) push("root_rule_must_only_define_custom_properties");
     for (const d of decls) {
       const prop = d.slice(0, d.indexOf(":")).trim();
+      // P148：`:root` 这条路在 :289 那条值判据之前就 return 了，所以 !important 要在这里各判一次
+      // ——自定义属性一样能带 important，而槽值一旦被 important 钉死，宿主的降级通道就废了。
+      if (/!important/i.test(d)) push(`banned_value_in_root:${prop}`);
       if (!prop.startsWith("--")) push(`root_rule_must_only_define_custom_properties:${prop}`);
       else if (prop.startsWith("--z-")) push(`layer_slot_is_host_only:${prop}`);
       else if (reservedVars.includes(prop)) push(`root_token_override_use_theme_patch:${prop}`);
