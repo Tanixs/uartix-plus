@@ -218,10 +218,23 @@ describe("P148 外观知识面：槽、词汇、降级义务、门数都要在�
     expect(Number(m![1])).toBeGreaterThan(0);
   });
 
-  it("静态门数从 package.json 现数（写过一次「12 道门」，实际 15 道就是那次的账）", () => {
+  it("静态门数从 package.json 现数（写过一次「12 道门」，实际 15 道就是那次的账）", async () => {
     const inPrompt = /静态那 (\d+) 道门/.exec(qaPrompt);
     expect(inPrompt, "提示词里那句静态门计数不见了").toBeTruthy();
-    const real = (pkgJson.scripts?.["check:all"] ?? "").match(/node \.tools\/check-[\w-]+\.cjs/g)?.length ?? 0;
+    /** 独立数法（**不抄** prompts.ts 那条正则）：枚举 .tools 下真实存在的 check-*.{cjs,mjs} 文件，
+     *  取「以完整命令段出现在 check:all 链里」的那些——两条清单相交才算数。
+     *  P154 收口时踩过：生产正则只认 .cjs，第 17 道 check-paint-coverage.mjs 被漏掉、
+     *  提示词对模型少报一道门；而测试从同一把尺上读数，两处一起绿（同义反复）。
+     *  动态 import 的理由同 bootOverrides.test.ts 那条：src 的 tsconfig 不挂 @types/node，
+     *  说明符必须走变量，写字面量会被 tsc 判「找不到模块」。 */
+    const fsSpec = "node:fs";
+    const urlSpec = "node:url";
+    const { readdirSync } = (await import(fsSpec)) as unknown as { readdirSync: (p: string) => string[] };
+    const { fileURLToPath } = (await import(urlSpec)) as unknown as { fileURLToPath: (u: string | URL) => string };
+    const cmds = (pkgJson.scripts?.["check:all"] ?? "").split(" && ").map((s) => s.trim());
+    const real = readdirSync(fileURLToPath(new URL("../../../.tools", import.meta.url)))
+      .filter((f) => /^check-[\w-]+\.(cjs|mjs)$/.test(f))
+      .filter((f) => cmds.includes(`node .tools/${f}`)).length;
     expect(real, "package.json 里数不出静态门，判据本身漂了").toBeGreaterThanOrEqual(15);
     expect(Number(inPrompt![1])).toBe(real);
   });

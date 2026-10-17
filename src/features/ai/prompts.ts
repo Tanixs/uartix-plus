@@ -20,10 +20,10 @@ import { CTL_HOOKS, CTL_SLOTS, ELEV_TIERS } from "../../styles/hostHooks";
 // 静态门数量同样现数不手抄：写过一次"12 道门"，实际早就 15 道了（§8-36① 同一类）。
 import pkgJson from "../../../package.json";
 
-/** `check:all` 里那串 `node .tools/check-*.cjs` 的条数。数不出来就抛——宁可炸给开发者看，
- *  也不要在提示词里写一句"0 道门"糊过模型。 */
+/** `check:all` 里那串 `node .tools/check-*.{cjs,mjs}` 的条数。数不出来就抛——宁可炸给开发者看，
+ *  也不要在提示词里写一句"0 道门"糊过模型。P154-A 起链里多了 .mjs（第 17 道），只认 .cjs 会少报。 */
 const STATIC_GATES: number = (() => {
-  const n = (pkgJson.scripts?.["check:all"] ?? "").match(/node \.tools\/check-[\w-]+\.cjs/g)?.length ?? 0;
+  const n = (pkgJson.scripts?.["check:all"] ?? "").match(/node \.tools\/check-[\w-]+\.(?:cjs|mjs)/g)?.length ?? 0;
   if (n < 10) throw new Error(`check:all 里只数出 ${n} 道静态门，判据或脚本名漂了`);
   return n;
 })();
