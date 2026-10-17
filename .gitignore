@@ -48,3 +48,7 @@ models-test/
 # 本地助手工具状态目录（同 .workbuddy 那条理由）
 /.zcode/
 /.zcodeignore
+
+# P154-F：迁移包「模型与供应商设置」是给接收方的拷贝物，常驻工作树但不进提交
+# （同 docs/ 与 HANDOFF.md 那条理由；重生成走 .scratch/pack-*.mjs 三步）。
+/portable/

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 // defineConfig 换到 vitest/config：它是 vite 那份的超集，只为让下面的 `test` 有类型。
 type ViteUserConfig = import("vite").UserConfig;
 import type { Plugin } from "vite";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 // P99b-N5 自检锚点：本文件必须能被 vitest 的 esbuild 解析（BOM 会让它整份配置静默失效）
 
@@ -50,6 +50,11 @@ export default defineConfig(async () => ({
   test: {
     testTimeout: 20000,
     hookTimeout: 20000,
+    // P154-F：portable/ 是「模型与供应商设置」可拷贝包（未跟踪），自带 6 份测试；
+    // 其中 3 份按它的 README 属「宿主件·换成你自己的」（读 src-tauri 源码、import 主线的 mcp/jobExecutor），
+    // 在主线账里必红 —— 摘出后主线回到 180 文件全绿。
+    // 注意 exclude 是替换不是合并：configDefaults 必须展开，漏了默认项会把 node_modules 扫进来。
+    exclude: [...configDefaults.exclude, "portable/**"],
   },
   build: {
     rollupOptions: {
