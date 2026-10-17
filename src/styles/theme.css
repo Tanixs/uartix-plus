@@ -31,6 +31,10 @@
   --dur-snap: 60ms;
   --dur-fast: 120ms;
   --dur-base: 150ms;
+  /* P154-B：80/180ms 两档从豁免台账转正（键盘跟手 / 折叠与入场落定）——
+     名字给语义不给数字，主题从此对全部交互时长都有句柄，豁免台账清零 */
+  --dur-nudge: 80ms;
+  --dur-settle: 180ms;
   --ease: cubic-bezier(0.2, 0.8, 0.3, 1);
   /* ---------------- P103 控件与节奏（新增样式的规范基准） ----------------
      这一组是"壳与基元"的尺寸来源：控制条高、控件高三档、间距基、行高。
@@ -1143,7 +1147,7 @@ select optgroup {
   justify-content: center;
   box-shadow: var(--shadow);
   padding: 0;
-  transition: background var(--dur-fast) ease, color var(--dur-fast) ease, transform var(--dur-fast) ease;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 
 .le-btn:hover {
@@ -3110,7 +3114,7 @@ select optgroup {
   font-size: var(--fs-sm);
   cursor: pointer;
   line-height: 1;
-  transition: border-color var(--dur-fast) ease, background var(--dur-fast) ease, color var(--dur-fast) ease;
+  transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .back-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
@@ -4456,7 +4460,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   height: 12px;
   border-radius: 50%;
   background: var(--text-dim, #888);
-  transition: left var(--dur-fast) ease, background var(--dur-fast) ease;
+  transition: left var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 
 .ctlg-sw.on {
@@ -4994,7 +4998,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   height: 26px;
   border-radius: 50%;
   border: 2px solid var(--border);
-  transition: background var(--dur-base) ease, box-shadow var(--dur-base) ease;
+  transition: background var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
 }
 
 .ctl-unit {
@@ -5716,8 +5720,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   color: var(--text-dim);
   cursor: pointer;
   flex: none;
-  /* motion-token-exempt: 折叠箭头那 90° 的行程是 180ms，与三档令牌都不等——硬映射等于改这处观感，登记不静默换值 */
-  transition: transform 0.18s ease, background var(--dur-fast) ease, color var(--dur-fast) ease;
+  transition: transform var(--dur-settle) var(--ease), background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .tpl-chev-btn:hover { background: var(--accent-soft); color: var(--accent); }
 .tpl-chev-btn.open { transform: rotate(90deg); color: var(--accent); }
@@ -6753,7 +6756,7 @@ label.set-switch,
   position: fixed; top: 46px; left: 50%; transform: translateX(-50%);
   z-index: 400; padding: 8px 16px; border-radius: var(--radius-l);
   font-size: var(--fs-sm); box-shadow: var(--shadow);
-  animation: drop-toast-in .18s ease-out; /* motion-token-exempt: 通知入场自己的周期，不是交互反馈节奏 */
+  animation: drop-toast-in var(--dur-settle) var(--ease);
 }
 .drop-toast.ok { background: var(--bg-panel); border: 1px solid var(--ok); color: var(--ok); }
 .drop-toast.bad { background: var(--bg-panel); border: 1px solid var(--danger); color: var(--danger); }
@@ -6787,8 +6790,7 @@ label.set-switch,
   justify-content: center;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
-  /* motion-token-exempt: 键盘遥控的跟手微反馈 80ms，比 --dur-snap(60ms) 慢一档；同样不做硬映射 */
-  transition: transform .08s, filter var(--dur-fast);
+  transition: transform var(--dur-nudge), filter var(--dur-fast);
   padding: 0;
 }
 .keypad-btn:hover { filter: brightness(1.12); }
@@ -8925,7 +8927,7 @@ html.aiw-transparent-root #root {
 .xfer-ok { color: var(--ok); }
 .xfer-bad { color: var(--danger); }
 .xfer-bar { height: 8px; border-radius: var(--radius-s); background: rgba(127,127,127,.18); overflow: hidden; }
-.xfer-bar-fill { height: 100%; background: linear-gradient(90deg, var(--ok), var(--accent)); transition: width var(--dur-base) linear; }
+.xfer-bar-fill { height: 100%; background: linear-gradient(90deg, var(--ok), var(--accent)); transition: width var(--dur-base) linear; /* ease-token-exempt: 传输进度条恒速是语义（恒定速率），不跟主题曲线 */ }
 .xfer-meta { display: flex; gap: 14px; font-size: var(--fs-body); opacity: .7; }
 .xfer-retry { color: var(--warn); }
 .xfer-result { font-size: var(--fs-sm); padding: 7px 10px; border-radius: var(--radius-m); border: 1px solid transparent; }
