@@ -102,6 +102,36 @@ describe("P99b-N5 · 内置主题也走合成器那一层（S2/S3）", () => {
     expect(effectiveRootVars()["--accent"], "撤不回去就是 P98-M0 那类事故的复发").toBe(begoniaVars["--accent"]);
     expect(activeThemeFacts().builtin).toBe(true);
   });
+
+  it("P154-E · 停用即撤层（组件层 CSS 那一半）：撤掉投影 ⇒ 注入文本里不再有它的规则", () => {
+    /** 门 K 收法 (c) 的证据腿：内置包文件常驻 DOM 所以必须自锁 [data-theme]；
+     *  插件包的层随启停生灭（extRuntime 每次从活投影全量重算 textContent）——
+     *  这条断言成立，插件包才不需要门 K 的前缀强制（check-style.cjs 门 K 注释引用此处）。 */
+    pickTheme("begonia");
+    extStore.upsertProjection({
+      id: "plg:css:main",
+      type: "theme",
+      name: "带组件层那枚",
+      desc: "",
+      version: "1.0.0",
+      enabled: true,
+      createdAt: 3000,
+      pluginRef: "pkg.cssx",
+      vars: {},
+      css: ".plgx-card { border-radius: 9px; }",
+    });
+    applyStyleExts();
+    expect(
+      injectedCssParts().map((p) => p.label).join("|"),
+      "CSS 没进注入层，这条就测不到撤层（反空断言）",
+    ).toContain("theme: 带组件层那枚");
+    extStore.removeProjection("plg:css:main");
+    applyStyleExts();
+    expect(
+      injectedCssParts().map((p) => p.label).join("|"),
+      "状态停了 CSS 还在画 ⇒ 插件包免门 K 的前提不成立，门 K 注释要改回去",
+    ).not.toContain("带组件层那枚");
+  });
 });
 
 describe("P99b-N5 · 一次只画一枚（R1/R2 渲染侧）", () => {
