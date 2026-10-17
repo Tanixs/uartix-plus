@@ -356,3 +356,37 @@ describe("P146-B 不变式：没有脸就没有影", () => {
     expect(ghosts.length, "宿主里「把 .btn/.icon-btn 底色写 transparent」的规则数").toBeGreaterThanOrEqual(3);
   });
 });
+
+/**
+ * P154-D：复选/单选从"平台皮"（appearance:auto + accent-color，主题只够得着 accent 一档）
+ * 改成自绘——与 P152 滑杆同一模式。这条判据钉的是**画法与句柄**：appearance 必须是 none
+ * （这是"自绘"的本体），勾/描边/焦点环必须走令牌与签名槽（主题拿得着），
+ * 并反向钉死旧写法 accent-color 不许回来（它回来 = 又画回 Chromium 皮）。
+ */
+describe("P154-D 复选/单选不是平台皮", () => {
+  const src = stripComments(baseCss);
+  const ruleBody = (frag: string) => {
+    const re = new RegExp(`([^{}]*${frag}[^{}]*)\\{([^{}]*)\\}`, "g");
+    const hits: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) hits.push(m[2]);
+    return hits;
+  };
+
+  it("底座是 appearance:none，旧写法 accent-color 不许回来", () => {
+    const base = ruleBody("input\\[type=\"checkbox\"\\],\\s*input\\[type=\"radio\"\\]").filter((b) => b.includes("width"));
+    expect(base.length, "反空：底座规则没找到").toBe(1);
+    expect(base[0]).toContain("appearance: none");
+    expect(base[0], "accent-color 是原生皮的门牌，出现 = 退回平台皮").not.toContain("accent-color");
+    expect(base[0]).toContain("var(--line-strong)");
+    expect(base[0]).toContain("var(--bg-panel)");
+  });
+
+  it("勾与点走令牌，hover 认签名槽，焦点环与 .btn 同一套", () => {
+    expect(ruleBody("input\\[type=\"checkbox\"\\]:checked\\b").join("\n")).toContain("var(--accent)");
+    expect(ruleBody(":checked::after").join("\n"), "勾必须画在 --on-accent 上").toContain("var(--on-accent)");
+    expect(ruleBody("input\\[type=\"radio\"\\]:checked\\b").join("\n"), "单选点是 radial-gradient").toContain("radial-gradient");
+    expect(ruleBody(":hover").filter((b) => b.includes("border-color")).join("\n"), "hover 描边必须认 --ctl-line-hover，主题填了才变").toContain("var(--ctl-line-hover)");
+    expect(ruleBody(":focus-visible").filter((b) => b.includes("outline")).join("\n"), "焦点环与 .btn 同一套槽").toContain("var(--ctl-ring-w) solid var(--ctl-ring)");
+  });
+});

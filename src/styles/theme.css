@@ -254,20 +254,79 @@ html.no-motion *::after {
   box-sizing: border-box;
 }
 
-/* ---------- 原生勾选/单选控件底座（P104-B4） ----------
-   全库十余处勾选框各写各的：绝大多数跟 UA 默认 13×13，另有 15、14 两种（`.ext-check` 那一族已随 P133-B2 清死规则删掉）、
-   `.chk-box` 13——同一个概念三种大小。这里收成一处元素规则，站点只在确有需要时用类覆写。
-   16 而不是 24：原生控件的 padding 会被 appearance:auto 吃掉（实测 computed padding:0px），
-   纯 CSS 撑不出「视觉小盒 + 热区 24」；剩下的路只有 label 关联（见下方 .chk 包法）。
+/* ---------- 勾选/单选控件底座（P104-B4 收编；P154-D 从平台皮改成可主题化） ----------
+   全库十余处勾选框各写各的：绝大多数跟 UA 默认 13×13，另有 15、14 两种、`.chk-box` 13——
+   同一个概念三种大小。这里收成一处元素规则，站点只在确有需要时用类覆写。
+   P154-D：appearance:none 自绘，与 P152 滑杆同一模式。此前 accent-color + 原生皮，
+   主题只够得着 accent 一档，勾/点的形状、描边、底色全是 Chromium 的——"像贴图"那族最后一块平台皮。
+   盒 16×16 不变（热区照旧靠 .chk label 包法；改盒尺寸会动十余处基线，不在这批顺手改）。
+   伪元素在 appearance:none 的 input 上会画（2026-10-07 CDP 实证：.tmp/p154-probe.png 像素可核），
+   勾是 ::after 斜切描边、点是 radial-gradient，全部走令牌，九枚主题自动跟色。
+   焦点环与 .btn 同一套槽（--ctl-ring-w/--ctl-ring）；hover 描边认 --ctl-line-hover，
+   它的缺省逐字等于 --line-strong ⇒ 九枚主题 hover 前后零变化，槽被主题填了才变。
    开关 `.set-switch input` 是 display:none，不受本规则影响。 */
 input[type="checkbox"],
 input[type="radio"] {
+  -webkit-appearance: none;
+  appearance: none;
   width: 16px;
   height: 16px;
   margin: 0;
   flex: none;
   cursor: pointer;
-  accent-color: var(--accent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-s);
+  background: var(--bg-panel);
+  transition: background var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+input[type="checkbox"]:hover,
+input[type="radio"]:hover {
+  border-color: var(--ctl-line-hover);
+}
+input[type="checkbox"]:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+  /* 勾选框的"内容"就是那只 ::after 勾——accent 实底必须成文配对内容色（check-contrast 的判据） */
+  color: var(--on-accent);
+}
+input[type="checkbox"]:checked::after {
+  content: "";
+  display: block;
+  width: 7px;
+  height: 3px;
+  margin: 4px 0 0 2px;
+  border-left: 2px solid var(--on-accent);
+  border-bottom: 2px solid var(--on-accent);
+  transform: rotate(-45deg);
+}
+input[type="radio"] {
+  border-radius: 50%;
+}
+input[type="radio"]:checked {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 3px, var(--bg-panel) 3.5px);
+}
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  cursor: default;
+  border-color: var(--border-soft);
+  background: var(--bg-inset);
+}
+input[type="checkbox"]:checked:disabled {
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+input[type="checkbox"]:checked:disabled::after {
+  border-color: var(--ctl-line-hover);
+}
+input[type="radio"]:checked:disabled {
+  border-color: var(--accent-soft);
+  background: radial-gradient(circle, var(--accent-soft) 0 3px, var(--bg-inset) 3.5px);
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: var(--ctl-ring-w) solid var(--ctl-ring);
+  outline-offset: var(--ctl-ring-offset, 1px);
 }
 
 /* P152：滑杆从"平台皮"变成可主题化。
@@ -9006,7 +9065,7 @@ html.aiw-transparent-root #root {
 .mb-spark { display: block; width: 92px; height: 22px; color: var(--accent); }
 .mb-ops { text-align: right; }
 .mb-ops .btn.icon { padding: 0 5px; }
-.mb-poll input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+.mb-poll input[type="checkbox"] { margin: 0; }
 @media (max-width: 900px) { .mb-split { grid-template-columns: minmax(0, 1fr); } .mb-log { border-top: 1px solid var(--border); max-height: 200px; } }
 
 /* ---------------- 测试序列器（T2/T3） ---------------- */
