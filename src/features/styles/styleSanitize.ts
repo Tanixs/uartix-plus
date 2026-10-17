@@ -358,11 +358,13 @@ export function guardStyleText(css: string, maxBytes = 8000, reservedVars: strin
       sheet.replaceSync(css);
       ruleCount = sheet.cssRules.length;
       if (!ruleCount) problems.push("no_parsable_rules");
+      let kfCount = 0;
       for (let i = 0; i < sheet.cssRules.length; i++) {
         const r = sheet.cssRules[i] as CSSStyleRule;
         const sel = typeof r.selectorText === "string" ? r.selectorText : "";
         const text = typeof r.cssText === "string" ? r.cssText : "";
         if (r.type === CSSRule.KEYFRAMES_RULE) {
+          kfCount++;
           const name = (r as unknown as { name?: string }).name ?? "";
           if (!KEYFRAMES_NAME.test(name)) problems.push(`keyframes_name_must_start_with_fx:${name}`);
           continue;
@@ -370,6 +372,9 @@ export function guardStyleText(css: string, maxBytes = 8000, reservedVars: strin
         if (!sel) continue;
         checkPair(sel, text, (p) => problems.push(p), reservedVars);
       }
+      /** P154-C：整段通路的 @keyframes 此前没有条数上限（结构化那条早有 maxKeyframes=6）——
+       *  同一个主题走两条门得到不同结果，是本文件立身之敌。 */
+      if (kfCount > STYLE_CAPS.maxKeyframes) problems.push(`too_many_keyframes(max=${STYLE_CAPS.maxKeyframes})`);
       return { ok: problems.length === 0, problems, bytes, ruleCount };
     } catch {
       problems.push("css_parse_failed");
@@ -389,5 +394,10 @@ export function guardStyleText(css: string, maxBytes = 8000, reservedVars: strin
     checkPair(m[1].trim(), m[0], (p) => problems.push(p), reservedVars);
   }
   if (!ruleCount) problems.push("no_parsable_rules");
+  /** P154-C：非 DOM 通路同样数 @keyframes、验 fx- 名（此前只有浏览器那条路认得 keyframes 规则，
+   *  node 里跑的装包校验对名字和条数都是瞎的——两条通路一个闸，漏一半等于没闸）。 */
+  const kfNames = [...stripComments(css).matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]);
+  if (kfNames.length > STYLE_CAPS.maxKeyframes) problems.push(`too_many_keyframes(max=${STYLE_CAPS.maxKeyframes})`);
+  for (const n of kfNames) if (!KEYFRAMES_NAME.test(n)) problems.push(`keyframes_name_must_start_with_fx:${n}`);
   return { ok: problems.length === 0, problems, bytes, ruleCount };
 }

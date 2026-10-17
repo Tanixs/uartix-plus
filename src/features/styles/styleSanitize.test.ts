@@ -196,6 +196,15 @@ describe("guardStyleText", () => {
     expect(sanitizeStyleRules(rule(".a", { behavior: "none" }), ok).rejected[0]?.reason).toBe("banned_property:behavior");
   });
 
+  it("P154-C：整段通路的 @keyframes 也有上限与 fx- 名（此前只有浏览器那条路认得 keyframes，node 校验是瞎的）", () => {
+    const one = (n: string) => `@keyframes ${n}{from{opacity:.4}to{opacity:1}}`;
+    const six = Array.from({ length: STYLE_CAPS.maxKeyframes }, (_, i) => one(`fx-k${i}`)).join("\n");
+    expect(guardStyleText(`${six}\n.a{color:red}`, 8000).ok, "恰好 cap 数要放行——栏杆不是封门").toBe(true);
+    const seven = Array.from({ length: STYLE_CAPS.maxKeyframes + 1 }, (_, i) => one(`fx-k${i}`)).join("\n");
+    expect(guardStyleText(seven, 8000).problems.some((p) => p.startsWith("too_many_keyframes"))).toBe(true);
+    expect(guardStyleText(one("fade-in"), 8000).problems.some((p) => p.startsWith("keyframes_name_must_start_with_fx"))).toBe(true);
+  });
+
   it("超长要报预算，不静默截断", () => {
     const g = guardStyleText(`.a{color:${"r".repeat(9000)}}`, 8000);
     expect(g.ok).toBe(false);

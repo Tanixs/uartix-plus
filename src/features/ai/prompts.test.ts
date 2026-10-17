@@ -210,6 +210,14 @@ describe("P148 外观知识面：槽、词汇、降级义务、门数都要在�
     expect(qaPrompt, "净化器禁了 !important，提示词没说 ⇒ 模型会以为还能用").toContain("!important");
   });
 
+  it("P154-C：@keyframes 出口的知识要讲（fx- 前缀 + 枚数上限，否则模型不知道主题能带动效形状）", () => {
+    expect(qaPrompt).toContain("@keyframes");
+    expect(qaPrompt).toContain("fx- 前缀");
+    const m = /最多 (\d+) 枚 @keyframes/.exec(qaPrompt);
+    expect(m, "枚数必须是派生的 cap，不是手抄的数").not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThan(0);
+  });
+
   it("静态门数从 package.json 现数（写过一次「12 道门」，实际 15 道就是那次的账）", () => {
     const inPrompt = /静态那 (\d+) 道门/.exec(qaPrompt);
     expect(inPrompt, "提示词里那句静态门计数不见了").toBeTruthy();

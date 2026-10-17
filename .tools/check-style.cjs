@@ -884,5 +884,41 @@ const J3_EXEMPT = {};
   }
 }
 
+/* ---- P154-C 门 K2：主题侧 @keyframes 出口的栏杆（内置组件层） ----
+ * 出口是 P147 §8 决定 5 裁决开的：主题可以带自己的动画形状，不再只改时长。
+ * 栏杆两条：名字必须 `<本文件 id>-` 前缀（宿主 15 个 @keyframes 与别的主题的同名帧不许被盖）、
+ * 每份 ≤ 6 枚（与注入层 STYLE_CAPS.maxKeyframes 同一个数——两条通路一把尺）。
+ * 插件包那半边在 guardStyleText 里（fx- 前缀 + 同一枚 cap），不在这条门的扫描范围（与门 K 同理：
+ * 内置包文件常驻 DOM 所以在源码门里管，插件包层随启停生灭所以在净化器里管）。
+ */
+{
+  const kfProbe = (css, id) => {
+    const src = css.replace(/\/\*[\s\S]*?\*\//g, " ");
+    const names = [...src.matchAll(/@keyframes\s+([\w-]+)/g)].map((m) => m[1]);
+    const problems = [];
+    for (const n of names) {
+      if (!new RegExp(`^${id}-[a-z0-9-]{1,40}$`).test(n)) problems.push(`@keyframes 名必须以 ${id}- 开头 → ${n}`);
+    }
+    if (names.length > 6) problems.push(`@keyframes 超过 6 枚（实测 ${names.length}）`);
+    return problems;
+  };
+  const kfFx = kfProbe('@keyframes zz-in{from{opacity:0}to{opacity:1}}\n@keyframes fade{to{opacity:1}}\n@keyframes zz-ok{to{opacity:1}}', "zz");
+  if (kfFx.length !== 1 || !kfFx[0].includes("fade")) {
+    console.error("FAIL(K2): 夹具里 foreign 名字没被抓到 —— 这条门是瞎的");
+    fails++;
+  } else {
+    const kfErrs = [];
+    const kfFiles = fs.existsSync(BUILTIN_STYLE_DIR)
+      ? fs.readdirSync(BUILTIN_STYLE_DIR).filter((f) => f.endsWith(".css")).map((f) => f.replace(/\.css$/, ""))
+      : [];
+    for (const id of kfFiles) {
+      const css = fs.readFileSync(path.join(BUILTIN_STYLE_DIR, `${id}.css`), "utf8");
+      kfErrs.push(...kfProbe(css, id).map((p) => `builtinStyles/${id}.css：${p}`));
+    }
+    if (kfErrs.length) { for (const e of kfErrs) console.error(`FAIL(K2): ${e}`); fails++; }
+    else console.log(`OK(K2): ${kfFiles.length} 份内置 style 包的 @keyframes 全部 <id>- 前缀且 ≤ 6 枚`);
+  }
+}
+
 console.log(fails === 0 ? "OK: 样式契约通过" : `FAIL: ${fails} 类问题`);
 process.exit(fails === 0 ? 0 : 1);
