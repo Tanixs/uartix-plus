@@ -14,13 +14,19 @@
  *
  * 第一期**不设预算线**：先把缺口点名。预算由实测定，定了之后只降不升（同 dead-classes 那本账）。
  *
- * 用法：`node .tools/paint-coverage.mjs [候选主题] [基准主题]`（需要 1421 dev 与 9333 headless，一次性 profile）
+ * 用法：`node .tools/paint-coverage.mjs [候选主题] [基准主题] [--write|--check]`（需要 1421 dev 与 9333 headless，一次性 profile）
+ *       开关与位置参数顺序无关（早期版本把 `--write` 读成候选主题名，两趟采成同一枚皮 ⇒ 真变 0%）；
+ *       `--write` 把本次实测升成基线账本（`.tools/paint-coverage-baseline.json`，地板=实测）；
+ *       `--check` 跑量后对地板（P154-A 起的常开账）。判据本体在 `paint-coverage-lib.mjs`，
+ *       与第 17 道门共用一份——两把尺迟早各说各话。
  */
-import { writeFileSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync } from "node:fs";
+import { judgeAgg } from "./paint-coverage-lib.mjs";
 
 const CDP_HTTP = "http://127.0.0.1:9333";
-const CAND = process.argv[2] || "fluent";
-const BASE = process.argv[3] || "light";
+const posArgs = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const CAND = posArgs[0] || "fluent";
+const BASE = posArgs[1] || "light";
 const { ORIGIN, VIEWPORT, SURFACES, makeSession } = await import("./audit-faces.mjs");
 
 const list = await (await fetch(`${CDP_HTTP}/json`)).json().catch(() => null);
@@ -180,5 +186,35 @@ console.log(`  按属性算真变了 ${agg.propDeltaPct}%（分母 ${agg.propTot
 console.log(`\n既没变、也没句柄的（这些才是真缺口）：`);
 for (const [k, n] of topMisses) console.log(`  ${k.padEnd(46)} ${n}`);
 writeFileSync(new URL("./paint-coverage.json", import.meta.url), JSON.stringify(agg, null, 2) + "\n");
-console.log("\n写出 .tools/paint-coverage.json（第一期不设预算线：先让缺口点名）");
+
+const BASELINE = new URL("./paint-coverage-baseline.json", import.meta.url);
+if (process.argv.includes("--write")) {
+  const body = {
+    version: 1,
+    judge: "绘画级覆盖率地板（fluent 对 light，P154-A 起）。三张百分比是地板（只升不降——方向与问题数那本账相反）；elems/faces 是分母自证，分母缩水先查面为什么开不出来。活体比对：node .tools/paint-coverage.mjs --check（判据与第 17 道门共用 paint-coverage-lib.mjs）",
+    cand: CAND,
+    base: BASE,
+    measured: { deltaPct: agg.deltaPct, handlePct: agg.handlePct, propDeltaPct: agg.propDeltaPct, elems: agg.elems, faces: agg.faces.length },
+    floor: { deltaPct: agg.deltaPct, handlePct: agg.handlePct, propDeltaPct: agg.propDeltaPct, elems: agg.elems, faces: agg.faces.length },
+  };
+  writeFileSync(BASELINE, JSON.stringify(body, null, 2) + "\n");
+  console.log(`\n写出 .tools/paint-coverage-baseline.json：地板=本次实测（真变 ${agg.deltaPct}% / 有句柄 ${agg.handlePct}% / 按属性 ${agg.propDeltaPct}% / 分母 ${agg.elems} / ${agg.faces.length} 面）`);
+} else if (process.argv.includes("--check")) {
+  if (!existsSync(BASELINE)) {
+    console.error("FAIL: 还没有基线账本（先跑一次 --write）。没有地板的仪表只是展览品。");
+    process.exit(1);
+  }
+  const led = JSON.parse(readFileSync(BASELINE, "utf8"));
+  if (led.cand !== CAND || led.base !== BASE) {
+    console.error(`FAIL: 基线记的是 ${led.cand} 对 ${led.base}，这次跑的是 ${CAND} 对 ${BASE} —— 同一对才可比`);
+    process.exit(1);
+  }
+  const bad = judgeAgg(agg, led);
+  if (bad.length) {
+    for (const b of bad) console.error(`FAIL: ${b}`);
+    process.exit(1);
+  }
+  console.log(`\nOK: 绘画级覆盖率对上地板 —— 真变 ${agg.deltaPct}%(≥${led.floor.deltaPct}) 有句柄 ${agg.handlePct}%(≥${led.floor.handlePct}) 按属性 ${agg.propDeltaPct}%(${led.floor.propDeltaPct}) 分母 ${agg.elems}(≥${led.floor.elems}) ${agg.faces.length} 面`);
+}
+console.log("写出 .tools/paint-coverage.json");
 ws.close();

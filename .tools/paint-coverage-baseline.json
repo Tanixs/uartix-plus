@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "judge": "绘画级覆盖率地板（fluent 对 light，P154-A 起）。三张百分比是地板（只升不降——方向与问题数那本账相反）；elems/faces 是分母自证，分母缩水先查面为什么开不出来。活体比对：node .tools/paint-coverage.mjs --check（判据与第 17 道门共用 paint-coverage-lib.mjs）",
+  "cand": "fluent",
+  "base": "light",
+  "measured": {
+    "deltaPct": 59.1,
+    "handlePct": 68.8,
+    "propDeltaPct": 38.9,
+    "elems": 1595,
+    "faces": 14
+  },
+  "floor": {
+    "deltaPct": 59.1,
+    "handlePct": 68.8,
+    "propDeltaPct": 38.9,
+    "elems": 1595,
+    "faces": 14
+  }
+}
