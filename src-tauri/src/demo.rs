@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, State};
 
@@ -37,9 +37,16 @@ fn build_v7(fid: u8, payload: &[u8]) -> Vec<u8> {
     f.push(fid);
     f.push(payload.len() as u8);
     f.extend_from_slice(payload);
-    let sc = sumadd(&f);
+    // 匿名 V7 的帧尾是 SC+AC（AC = 逐字节累计和；TS `sumadd16` / Rust parser "sumadd" /
+    // V7 预案三处同构）。P156-B2 实测这里曾写成 [SC, SC+0xAA]：那是另一门"和再加 0xAA"
+    // 的写法，与预案对不上——导入 V7 预案看演示源 1175/1175 全判坏帧（曲线全空）。
+    let (mut sc, mut ac) = (0u8, 0u8);
+    for &b in &f {
+        sc = sc.wrapping_add(b);
+        ac = ac.wrapping_add(sc);
+    }
     f.push(sc);
-    f.push(sc.wrapping_add(0xAA));
+    f.push(ac);
     f
 }
 
@@ -207,8 +214,40 @@ fn modbus_poll(tick: u64) -> Vec<u8> {
     out
 }
 
+/// 演示源节奏（Hz）：默认 10（历史行为不变）。压测（P156-B2）用 `UARTIX_DEMO_HZ=500/2000`。
+/// 只影响演示源的**发送节拍**：帧内容、编号序列、UI、落盘一概不变；非法值或越界回默认 10。
+fn parse_hz(v: Option<&str>) -> u64 {
+    v.and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|n| (1..=5000).contains(n))
+        .unwrap_or(10)
+}
+
+fn demo_hz() -> u64 {
+    parse_hz(std::env::var("UARTIX_DEMO_HZ").ok().as_deref())
+}
+
+/// 睡到 `deadline`：远则睡、近则自旋。Windows 的 `thread::sleep` 分辨率约 1-15ms，
+/// 500/2000Hz 的节拍（2ms/0.5ms）纯 sleep 打不准，而演示源节拍漂移会直接污染
+/// "收包数 vs 渲染数"的分母。
+fn pace_until(deadline: Instant) {
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            return;
+        }
+        let left = deadline - now;
+        if left > Duration::from_millis(2) {
+            thread::sleep(left - Duration::from_millis(1));
+        } else {
+            std::hint::spin_loop();
+        }
+    }
+}
+
 fn demo_loop(app: AppHandle, ctx: Arc<IngestCtx>, flag: Arc<AtomicBool>) {
     let mut tick: u64 = 0;
+    let period = Duration::from_micros((1_000_000 / demo_hz().max(1)).max(1));
+    let mut next = Instant::now();
     while flag.load(Ordering::SeqCst) {
         let mut out: Vec<u8> = Vec::with_capacity(128);
 
@@ -255,7 +294,15 @@ fn demo_loop(app: AppHandle, ctx: Arc<IngestCtx>, flag: Arc<AtomicBool>) {
 
         ingest(&ctx, &app, &out);
         tick += 1;
-        thread::sleep(Duration::from_millis(100));
+        next += period;
+        let now = Instant::now();
+        if next <= now {
+            // 生产追不上（解析/编码耗时超过节拍）：重置相位。宁可丢预定时点，
+            // 也不让积压的"追赶帧"把延迟越滚越大。
+            next = now;
+        } else {
+            pace_until(next);
+        }
     }
 }
 
@@ -449,5 +496,63 @@ mod tests {
             }
             assert_eq!(pos, bytes.len(), "帧长划分应恰好覆盖整段");
         }
+    }
+
+    /// P156-B2：压测旋钮的判据。默认必须是 10（历史行为），非法值回默认而不是
+    /// 变成 0 —— 0 会在 `1_000_000 / hz` 处除零 panic，整个演示线程当场死掉。
+    #[test]
+    fn demo_hz_env_knob() {
+        assert_eq!(parse_hz(None), 10);
+        assert_eq!(parse_hz(Some("500")), 500);
+        assert_eq!(parse_hz(Some(" 2000 ")), 2000);
+        assert_eq!(parse_hz(Some("10")), 10);
+        assert_eq!(parse_hz(Some("0")), 10, "0 必须回默认（除零牙）");
+        assert_eq!(parse_hz(Some("5001")), 10, "越界回默认");
+        assert_eq!(parse_hz(Some("-5")), 10);
+        assert_eq!(parse_hz(Some("abc")), 10);
+    }
+
+    /// P156-B2 牙：演示源的 V7 帧必须能被「匿名 V7」预案那条校验规则解出来。
+    /// 旧 `build_v7` 写 [SC, SC+0xAA]，此用例红（解出 0 帧）——B2 活体实测
+    /// 导入 V7 预案后 1175/1175 全坏帧，就是这条在界面上的投影。
+    #[test]
+    fn demo_v7_frames_match_v7_preset_checksum() {
+        let tpl = FrameTemplate {
+            id: "v7".into(),
+            name: "V7·0x03 欧拉".into(),
+            color: "#3fb950".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "lengthField".into(),
+                header_bytes: vec![0xaa],
+                length_offset: Some(3),
+                length_size: Some(1),
+                length_endian: Some("little".into()),
+                length_adjust: Some(6),
+                max_length: Some(64),
+                ..Default::default()
+            },
+            checksum: Some(ChecksumCfg {
+                crc: None,
+                algo: "sumadd".into(),
+                coverage_start: 0,
+                coverage_end: -2,
+                endian: "little".into(),
+            }),
+            fields: vec![
+                fld("addr", "目标地址", "addr", 1, "uint8", "little"),
+                fld("id", "功能码", "id", 2, "uint8", "little"),
+                fld("len", "数据长度", "length", 3, "uint8", "little"),
+                fld("rol", "Roll", "data", 4, "int16", "little"),
+            ],
+        };
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![tpl],
+        })
+        .unwrap();
+        let rows = eng.feed(&v7_euler(7), 0, 1);
+        assert_eq!(rows.len(), 1, "应解出 1 帧: {rows:?}");
+        assert!(rows[0].valid, "V7 帧应校验通过: {:?}", rows[0].error);
     }
 }
