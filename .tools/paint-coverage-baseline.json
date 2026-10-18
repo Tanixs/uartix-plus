@@ -5,16 +5,16 @@
   "base": "light",
   "measured": {
     "deltaPct": 59.1,
-    "handlePct": 68.8,
+    "handlePct": 68.9,
     "propDeltaPct": 38.9,
-    "elems": 1595,
+    "elems": 1594,
     "faces": 14
   },
   "floor": {
     "deltaPct": 59.1,
-    "handlePct": 68.8,
+    "handlePct": 68.9,
     "propDeltaPct": 38.9,
-    "elems": 1595,
+    "elems": 1594,
     "faces": 14
   }
 }
