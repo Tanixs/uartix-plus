@@ -348,11 +348,20 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     return () => window.removeEventListener("keydown", onEsc);
   }, [onClose]);
 
-  const row = (label: string, node: React.ReactNode, tip?: string) => (
-    <SetRow label={label} tip={tip}>
-      {node}
-    </SetRow>
-  );
+  /** P156-Z（用户："像 ZCode 这样左右分栏"，并选了"全部 tip 转可见说明"）：
+   *  短说明直接显示在标签下方；超过 60 个汉字（或 140 字符）的技术注记仍收进「?」——
+   *  它们是"翻开才看"的长文，摊在行里会把一页撑成散文。同一串文案只有一份，
+   *  阈值决定它去哪边渲染，不会两边各写一半再漂移。 */
+  const DESC_CJK_MAX = 60;
+  const row = (label: string, node: React.ReactNode, tip?: string, wide?: boolean) => {
+    const cjk = tip ? (tip.match(/[\u3400-\u9fff]/g)?.length ?? 0) : 0;
+    const short = !!tip && cjk <= DESC_CJK_MAX && tip.length <= 140;
+    return (
+      <SetRow label={label} desc={short ? tip : undefined} tip={short ? undefined : tip} wide={wide}>
+        {node}
+      </SetRow>
+    );
+  };
 
   const ioBlock = (label: string, tip: string, onExport: () => Promise<void>, onImport: () => Promise<void>) => (
     <div className="set-io-block">
@@ -1037,7 +1046,6 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   <div className="ai-key-wrap">
                     <input
                       className="input"
-                      style={{ width: 232 }}
                       value={settings.agentFsRoots}
                       placeholder={tx("如 D:\\Projects;D:\\data（留空=关闭）", "e.g. D:\\Projects;D:\\data (empty = off)")}
                       onChange={(e) => patch({ agentFsRoots: e.target.value })}
@@ -1057,7 +1065,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       {tx("浏览…", "Browse…")}
                     </button>
                   </div>
-                ), tx("Agent 的 fs_read / fs_list / fs_grep / fs_glob 只能访问白名单内的路径，fs_write / fs_edit 亦然；多个目录用分号分隔，留空表示文件工具整体关闭", "fs_read / fs_list / fs_grep / fs_glob can only reach whitelisted paths, and so do fs_write / fs_edit; separate folders with semicolons; empty disables the file tools"))}
+                ), tx("Agent 的 fs_read / fs_list / fs_grep / fs_glob 只能访问白名单内的路径，fs_write / fs_edit 亦然；多个目录用分号分隔，留空表示文件工具整体关闭", "fs_read / fs_list / fs_grep / fs_glob can only reach whitelisted paths, and so do fs_write / fs_edit; separate folders with semicolons; empty disables the file tools"), true)}
                 {row(tx("Agent 允许执行命令", "Agent may run commands"), (
                   <label className="set-switch">
                     <input
@@ -1088,17 +1096,13 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), tx("默认关闭，而且它不需要打开上面那条「允许执行命令」。它只跑一张固定的命令表：全部工程门禁 / 类型检查 / 全部单元测试 / 单个测试文件 / Rust 侧测试。表是宿主常量、启动时不经过 shell，所以模型给不出表外的命令，参数里的 && 和 | 都只是字面量。工作目录仍必须落在「Agent 文件白名单」内，每次执行仍会弹批准卡。它存在的意义就是让 AI 能自证改动没弄坏东西，而不必拿到任意命令。", "Off by default, and enabling it does NOT require the command-execution switch above. It runs one fixed host-owned table: all project gates / type check / full unit tests / a single test file / Rust-side tests. The table is a constant and no shell is involved, so the model cannot produce a command outside it, and && or | inside an argument stay literals. The working directory must still sit inside the Agent file whitelist, and every run shows an approval card. Its whole reason to exist is letting the AI prove a change broke nothing without ever being handed an arbitrary command."))}
-                <div className="set-row">
-                  <label>
-                    {t("set.ai.manage")}
-                    <HelpHint text={t("set.ai.manage.tip")} />
-                  </label>
-                  <div className="set-ctl">
-                    <button className="btn primary" onClick={() => setTab(SETTINGS_TAB_PLUGINS)}>
-                      {t("set.ai.manageBtn")}
-                    </button>
-                  </div>
-                </div>
+                {row(
+                  t("set.ai.manage"),
+                  <button className="btn primary" onClick={() => setTab(SETTINGS_TAB_PLUGINS)}>
+                    {t("set.ai.manageBtn")}
+                  </button>,
+                  t("set.ai.manage.tip"),
+                )}
                 <div className="set-danger">
                   <div className="set-danger-head">{t("set.ai.danger")}</div>
                   <div className="set-danger-body">
@@ -1163,7 +1167,6 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 {row(tx("桥接 CLI 路径", "Bridge CLI path"), (
                   <input
                     className="input"
-                    style={{ width: 340 }}
                     value={mcpCliPath}
                     placeholder="…\\dist-cli\\uartix-mcp.cjs"
                     onChange={(e) => {
@@ -1171,7 +1174,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       localStorage.setItem("vs.mcpCliPath", e.target.value);
                     }}
                   />
-                ), tx("uartix-mcp.cjs 的绝对路径（npm run build:mcp 产出）。下面的复制配置会使用它；需要本机装有 Node ≥ 18", "Absolute path to uartix-mcp.cjs (built by npm run build:mcp), used by the copy buttons below; requires Node ≥ 18"))}
+                ), tx("uartix-mcp.cjs 的绝对路径（npm run build:mcp 产出）。下面的复制配置会使用它；需要本机装有 Node ≥ 18", "Absolute path to uartix-mcp.cjs (built by npm run build:mcp), used by the copy buttons below; requires Node ≥ 18"), true)}
                 {row(tx("复制客户端配置", "Copy client config"), (
                   <span className="set-inline">
                     <button

@@ -7,14 +7,31 @@ import { HelpHint } from "./HelpHint";
  * 它原先住在 `SettingsModal` 里，只有设置页能用；独立小组件想同形就得抄一遍
  * div/label/set-ctl。P102 把市场那两行搬进市场弹窗后，两个界面共用这一个形状——
  * 抄一份就会漂移（一边改了间距，另一边还留着旧的）。
+ *
+ * P156-Z（用户："像 ZCode 这样左右分栏"）：多了 `desc`——标签下面一行可见说明
+ * （ZCode 每一行都是"标题 + 说明"，说明不该只活在悬停里）。`wide` 把控件落到
+ * 标签下方整行（长文本/路径输入那种）。两枚开关都由调用方按内容决定，组件不猜。
  */
-export function SetRow({ label, tip, children }: { label: string; tip?: string; children: React.ReactNode }) {
+export function SetRow({
+  label,
+  tip,
+  desc,
+  wide,
+  children,
+}: {
+  label: string;
+  tip?: string;
+  desc?: string;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="set-row">
+    <div className={`set-row${desc ? " has-desc" : ""}${wide ? " wide" : ""}`}>
       <label>
         {label}
         {tip && <HelpHint text={tip} />}
       </label>
+      {desc && <div className="set-desc">{desc}</div>}
       <div className="set-ctl">{children}</div>
     </div>
   );

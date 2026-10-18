@@ -16,8 +16,10 @@
   --fs-md: 14px;
   --fs-lg: 16px;
   /* 页标题一档：设置页那种"标题独占一行"的大字。E 门要求字号走刻度，
-     所以要更大的字就加一档 token，而不是在某处就地写 22px。 */
+     所以要更大的字就加一档 token，而不是在某处就地写 22px。
+     P156-Z：照 ZCode 的页头提到 28px，再立一档（E 门的 FS_ALLOWED 早已收它）。 */
   --fs-xl: 22px;
+  --fs-2xl: 28px;
   /* 布局常量：身份栏高度。`.ibar` 与全窗口覆盖层（P111-B 设置页）都要它——
      抄成两处字面量的话，改高度那一天遮罩就会压住窗口控件，或露出一条工作区。 */
   --h-ibar: 38px;
@@ -6192,7 +6194,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   flex-direction: column;
   overflow: hidden;
 }
-.set-page .set-nav { flex: 0 0 200px; background: var(--bg-inset); padding: 12px 10px 18px; }
+.set-page .set-nav { flex: 0 0 240px; background: var(--bg-inset); padding: 12px 10px 18px; }
 .set-page .set-content { background: var(--bg); padding: 16px 24px 26px; }
 /* 页头：ZCode 那一层的读法是"标题独占一行，副标题在它下面一行"。
    P111-B 我做成同一行 baseline 排，标题 16px 被副标题挤得没有权重 —— 现在按它改。 */
@@ -6219,7 +6221,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .ibar.ib-fullpage {
   border-bottom-color: transparent;
 }
-.set-page-title { font-size: var(--fs-xl); font-weight: 700; line-height: 1.25; user-select: none; }
+.set-page-title { font-size: var(--fs-2xl); font-weight: 700; line-height: 1.2; user-select: none; }
 .set-page-sub { grid-column: 1; font-size: var(--fs-body); line-height: 1.5; color: var(--text-dim); max-width: 72ch; }
 /* 页级出口：ZCode 的「← 返回工作区」同位。它不是"某一类设置"，所以不吃 `.set-nav button` 的选中形状 */
 .set-nav-back {
@@ -6249,7 +6251,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 }
 .set-nav-group:first-child { margin-top: 2px; }
 /* 导航项的图标：15px 与 12px 文字同轴；选中时跟着文字变色，不另设一套选中形状 */
-.set-page .set-nav button { display: flex; align-items: center; gap: var(--sp-2); }
+.set-page .set-nav button { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-md); padding: 9px 14px; }
 .set-nav-ico { flex: none; display: inline-flex; color: var(--text-faint); }
 .set-page .set-nav button:hover .set-nav-ico { color: var(--text-dim); }
 .set-page .set-nav button.on .set-nav-ico { color: var(--accent-text); }
@@ -6264,7 +6266,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
      可导入/导出、协议模板那几张的首子是一条**带底色的行**，而行内 padding 是在填充色**里面**的，
      于是 13px 全落在灰条内部，灰底直接顶到卡片上沿。卡片给足 10px，
      首子是行 / 标题 / 自绘块都同一条规则，不再靠某种首子特例。 */
-  padding: 10px 20px;
+  padding: 14px 22px;
   background: var(--bg-panel);
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-pop), var(--shadow);
@@ -6462,18 +6464,23 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 }
 .msp-pick-name { font-family: var(--font-mono); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .set-row {
-  display: flex;
+  /* P156-Z：ZCode 的两栏行——左列「标签 + 说明」两行，右列控件；说明在标签正下方。
+     没有说明的行收成单行（:not(.has-desc)），不留空行与多余行距。 */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "label ctl" "desc ctl";
   align-items: center;
-  gap: 16px;
-  padding: 13px 0;
+  column-gap: 16px;
+  row-gap: 3px;
+  padding: 16px 0;
   border-bottom: 1px solid var(--border-soft);
 }
 .set-row:last-child { border-bottom: none; }
+.set-row:not(.has-desc) { grid-template-areas: "label ctl"; row-gap: 0; }
 .set-row > label {
-  /* label 左对齐 + 控件列起点统一（min-width 补齐短标签） */
-  flex: 0 0 auto;
-  min-width: 108px;
-  max-width: 40%;
+  /* 标签列在网格里（P156-Z 起），不再用 flex 的 min/max-width 卡 */
+  grid-area: label;
+  min-width: 0;
   font-size: var(--fs-sm);
   color: var(--text);
   text-align: left;
@@ -6483,6 +6490,27 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   gap: 6px;
   line-height: 1.5;
 }
+/* P156-Z：全页设置行标签升一档并加粗（ZCode 的读数），说明走 fs-sm + text-dim */
+.set-page .set-row > label { font-size: var(--fs-md); font-weight: 600; }
+.set-desc {
+  grid-area: desc;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--text-dim);
+  max-width: 72ch;
+}
+/* 宽控件落整行：长文本/路径输入不必挤在右侧窄列里 */
+.set-row.wide {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "label" "desc" "ctl";
+}
+.set-row.wide:not(.has-desc) { grid-template-areas: "label" "ctl"; }
+.set-row.wide > .set-ctl { margin-top: 4px; }
+/* 宽行里的输入吃掉整行宽（原先在 TSX 里就地写 width:232/340，落整行后交给这条） */
+.set-row.wide > .set-ctl > .input { flex: 1 1 260px; min-width: 0; }
+.set-row.wide > .set-ctl > .ai-key-wrap { flex: 1 1 260px; min-width: 0; }
+.set-row.wide > .set-ctl > .ai-key-wrap > .input { flex: 1; min-width: 0; }
 /* 高内容行（主题色卡 / 预设卡 / 三层覆盖清单）：label 顶部对齐，不再垂直悬在中间 */
 .set-row:has(> .set-ctl .theme-grid),
 .set-row:has(> .set-ctl .preset-grid),
@@ -6494,7 +6522,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .set-row:has(> .set-ctl .set-apr) > label {
   padding-top: 8px;
 }
-.set-ctl { flex: 1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.set-ctl { grid-area: ctl; flex: 1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* 设置行内嵌表单：去除 form-row 自带的 label 定宽/底边距与 form-hint 的 84px 缩进，保证整行对齐 */
 .set-ctl .form-row { margin-bottom: 0; }
 .set-ctl .form-row > label { width: auto; min-width: 0; text-align: left; }

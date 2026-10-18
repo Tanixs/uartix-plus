@@ -53,7 +53,8 @@ describe("P114-B · 页头住在右栏里，不是一条通栏", () => {
     expect(body.includes("background"), "页头又自带底色了").toBe(false);
     expect(body.includes("box-shadow"), "页头又浮起来了").toBe(false);
     // 权重只剩字号，这与 `.set-page-title` 用 --fs-xl 是同一个决定的两半
-    expect(ruleBody(".set-page-title").includes("var(--fs-xl)")).toBe(true);
+    // 权重只剩字号：P156-Z 起 `.set-page-title` 引用 --fs-2xl（ZCode 的页头档）
+    expect(ruleBody(".set-page-title").includes("var(--fs-2xl)")).toBe(true);
   });
 });
 
@@ -107,5 +108,32 @@ describe("P155-S · 设置页列宽与顶线", () => {
     expect(bodyOfRule(".ibar.ib-fullpage"), "规则不在：线色没转透明").toContain("border-bottom-color: transparent");
     // 工作区那条线必须还在（只改全页态，不做全局删除）
     expect(bodyOfRule(".ibar"), "身份栏的基础下边框被整条删了").toContain("border-bottom: 1px solid var(--elevation-line)");
+  });
+});
+
+describe("P156-Z · 设置页 ZCode 化（两栏行 + 页头档）", () => {
+  it("--fs-2xl 在 :root 声明，页头只引用它（不是就地写 28px）", () => {
+    expect(bodyOfRule(":root"), "--fs-2xl 没立档").toContain("--fs-2xl: 28px");
+    expect(bodyOfRule(".set-page-title"), "页头没引 --fs-2xl").toContain("var(--fs-2xl)");
+  });
+
+  it("导航列 240px，与分栏后的 ZCode 侧栏同宽", () => {
+    expect(bodyOfRule(".set-page .set-nav")).toContain("flex: 0 0 240px");
+  });
+
+  it("设置行是两栏网格：说明在标签正下方（desc 区），控件占 ctl 区", () => {
+    const row = bodyOfRule(".set-row");
+    expect(row, "行不再是网格").toContain("display: grid");
+    expect(row, "没有两行模板（label/desc 同列、ctl 跨两行）").toContain('"label ctl" "desc ctl"');
+    expect(bodyOfRule(".set-row:not(.has-desc)"), "无说明的单行收形不见了").toContain('grid-template-areas: "label ctl"');
+    expect(bodyOfRule(".set-desc"), "说明行没有网格位").toContain("grid-area: desc");
+    expect(CSS, "控件列没落 ctl 区").toContain(".set-ctl { grid-area: ctl;");
+  });
+
+  it("SettingsModal 的 row() 把短说明转可见 desc，长注记仍保底走悬停", () => {
+    const src = read(PAGE);
+    expect(src, "row() 不再产出 desc").toContain("desc={short ? tip : undefined}");
+    expect(src, "长注记没保底留在悬停里").toContain("tip={short ? undefined : tip}");
+    expect(src, "说明长度阈值不见了").toContain("DESC_CJK_MAX");
   });
 });
