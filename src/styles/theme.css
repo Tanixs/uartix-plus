@@ -4438,6 +4438,9 @@ select optgroup {
   cursor: grab;
   user-select: none;
   overflow: hidden;
+  /* P155-X：卡片高由 JS 按格算（1 行 = 60px）。滑条卡内容自然高 ~85px，
+     矮卡由下面那条 container 条件收脚注——这里给查询建容器（同 .p3d 的手法）。 */
+  container-type: size;
 }
 
 /* P122-C：TX组帧台点了一块 → 吃这个参数的卡亮一下（只定位，不改值）。
@@ -4635,6 +4638,13 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* P155-X：滑条卡矮档（≤1 行）。自然高装不下时只留「值 + 滑杆」这对主角，
+   名字/步进器收进脚注一起藏；拖回 2 行整组自动回来（脚注与 resize 把手是兄弟，
+   把手不受影响）。改这张尺要连 `defaultCardSize('slider')` 一起看。 */
+@container (max-height: 78px) {
+  .ctl-card:has(.ctl-slider) .ctl-foot { display: none; }
 }
 
 .ctl-name {

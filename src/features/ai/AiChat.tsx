@@ -47,7 +47,6 @@ import { Glyph, IconChevron, IconClose, IconDock, IconPlus, IconPop, IconSend, I
 import { confirmDialog } from "../../shared/Dialog";
 import { ErrorBoundary } from "../../shared/ErrorBoundary";
 import { t, tx, useLocale } from "../../i18n/strings";
-import { HelpHint } from "../../shared/HelpHint";
 
 const BUG_ENDPOINT = "https://larix.teuioe.cn/api/bugreport.php";
 
@@ -1219,12 +1218,6 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               tx("选一个服务商预设、填入 API Key 就能用", "Pick a provider preset and drop in an API key"),
               tx("Key 只存在本机，请求由本机程序转发", "The key stays on this machine; requests are relayed by the app itself"),
             ]}
-          />
-          <HelpHint
-            text={tx(
-              "支持 OpenAI 兼容 / DeepSeek / 通义千问 / 本地 Ollama。",
-              "Works with OpenAI-compatible / DeepSeek / Qwen / a local Ollama.",
-            )}
           />
           <button className="btn primary" onClick={() => invokeOpenSettings()}>
             {tx("打开设置", "Open Settings")}

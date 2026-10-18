@@ -788,26 +788,18 @@ export function defaultCardSize(type: ControlType): { w: number; h: number } {
           : type === "custom"
             ? { w: 3, h: 3 }
             : type === "slider"
-              ? { w: 2, h: 1 }
+              // P155-X：滑条卡内容自然高约 85px（值 19 + 滑杆 24 + 脚注 24 + 气口），
+              // 2×1（60px）装不下——新卡默认 2×2；已存的 2×1 卡由 .ctl-card 的
+              // container 条件收掉脚注（theme.css「滑条卡矮档」）。
+              ? { w: 2, h: 2 }
               : { w: 1, h: 1 };
 }
 
 function defaultCard(type: ControlType, name: string): ControlCard {
-  // monitor 默认 2×2（应用图标式正方，此前 2×1 拖入即扁）
-  const size =
-    type === "joystick"
-      ? { w: 2, h: 2 }
-      : type === "keypad"
-        ? { w: 3, h: 3 }
-        : type === "monitor"
-          ? { w: 2, h: 2 }
-          : type === "group"
-            ? { w: 2, h: 3 }
-            : type === "custom"
-              ? { w: 3, h: 3 }
-              : type === "slider"
-                ? { w: 2, h: 1 }
-                : { w: 1, h: 1 };
+  // 尺寸表只有一处出处（`defaultCardSize`）：P155 之前这里是同一张表抄了两份，
+  // 改一处漏一处就会长出"新卡一种尺寸、拖入另一种"。
+  // monitor 默认 2×2（应用图标式正方，此前 2×1 拖入即扁）；slider 2×2 见上面那条注释。
+  const size = defaultCardSize(type);
   const base = {
     id: crypto.randomUUID(),
     type,
