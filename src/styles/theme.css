@@ -3274,10 +3274,10 @@ select optgroup {
   display: flex;
   flex-direction: column;
   background: var(--bg-panel);
-  /* 建立包含块：.tbl-empty-slot 是 absolute + left/right:0，本面板此前没有 position，
-     它就一路锚到 .app-shell（那里有 relative）⇒ 空态横跨整个内容区，居中的提示文字被
-     面板边界切掉（截图实锤）。虚拟滚动的行锚在 .tbl-inner（已 relative）、滚动在 .tbl-scroll，
-     都不受这一条影响。 */
+  /* P132-F：当时的 .tbl-empty-slot 绝对定位曾一路锚到 .app-shell（空态横跨整个内容区、
+     文字被面板边界切掉，截图实锤），所以给过 relative。
+     P155-E：空槽挪进 .tbl-scroll 之后这里不再是它的包含块——保留 relative（浮层与列菜单
+     仍按这个面板锚定），空槽的真实约束在 .tbl-scroll 那条。 */
   position: relative;
 }
 
@@ -3451,6 +3451,10 @@ select optgroup {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  /* P155-E：空槽（.tbl-empty-slot）的包含块从 .tbl-inner 挪到这里——inner 在无行时
+     只有表头高（26px），旧规则 top:40px + bottom:0 直接算出负高被钳 0，空态骑在表头上
+     （实测宿主 0 高、内容被裁）。top 由组件行内给 HEADER_H，让开表头那一条。 */
+  position: relative;
 }
 
 .tbl-inner {
@@ -5271,7 +5275,6 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   position: absolute;
   left: 0;
   right: 0;
-  top: 40px;
   bottom: 0;
 }
 
@@ -5286,7 +5289,12 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* P155-E：宿主比内容矮时（小面板里的空态），原先的 center 把内容两头一起推出去——
+     上面骑工具条、下面被裁半截。safe center = 溢出时退回顶对齐、只裁尾部；
+     overflow:hidden 保证一个像素都不再溢出宿主。 */
+  justify-content: safe center;
+  overflow: hidden;
+  padding: 8px 12px;
   gap: 8px;
   color: var(--text-dim);
   pointer-events: none;
@@ -11453,6 +11461,9 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb{position:relative;display:flex;flex-direction:column;height:100%;min-width:0;background:var(--bg);}
 .sb-bar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;box-sizing:border-box;min-height:28px;padding:3px 8px;background:var(--bg-panel);flex:none;}
 .sb-bar-spacer{flex:1;}
+/* P155-E：空态宿主——把 EmptyState 的绝对定位关在"工具条之下"的内容区里。
+   宿主含 .sb-bar 时面板一矮，居中内容就骑到工具条上（实测 320px 以下必现）。 */
+.sb-empty{flex:1;min-height:0;position:relative;}
 .sb-name{width:150px;flex:none;}
 .sb-body{display:flex;flex:1;min-height:0;gap:8px;padding:8px;overflow:hidden;}
 .sb-palette{display:flex;flex-direction:column;gap:4px;flex:none;width:96px;overflow:auto;}

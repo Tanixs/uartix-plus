@@ -416,15 +416,19 @@ export function DataTable() {
               ))}
             </div>
           ))}
-          {total === 0 && (
-            <div className="tbl-empty-slot">
-              <EmptyState
-                title={t("tbl.empty")}
-                hint={[tx("启动演示源或连接串口后，解析出的帧会逐行显示在这里", "Once the demo source or the serial port is running, parsed frames fill in row by row")]}
-              />
-            </div>
-          )}
         </div>
+        {/* P155-E：空态**不能**住在 .tbl-inner 里——那里 total=0 时高度只有表头那 26px，
+            老的 top:40px+bottom:0 直接算出负高，空态骑在表头上（实测宿主 26px / 溢出裁切）。
+            挂到 .tbl-scroll（position:relative 由 CSS 给），top 用 HEADER_H 同一出处，
+            让出表头那一条，剩下的滚动区里居中。 */}
+        {total === 0 && (
+          <div className="tbl-empty-slot" style={{ top: HEADER_H }}>
+            <EmptyState
+              title={t("tbl.empty")}
+              hint={[tx("启动演示源或连接串口后，解析出的帧会逐行显示在这里", "Once the demo source or the serial port is running, parsed frames fill in row by row")]}
+            />
+          </div>
+        )}
       </div>
     </div>
   );

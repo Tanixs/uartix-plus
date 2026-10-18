@@ -590,17 +590,21 @@ export function SendBuildPanel() {
           {/* 空状态里没有页脚，报错只能自己挂在这里 —— 点了那颗直达键而导轨那一节没能打开，
               屏幕上一个字都不动，用户只会以为按钮坏了 */}
           {err !== "" && <div className="sb-danger">{err}</div>}
-          <EmptyState
-            title={tx("还没有发送谱", "No send templates yet")}
-            hint={[tx("描述一帧要发的字节", "Describe the bytes one frame sends")]}
-            actions={[
-              {
-                label: tx("去 协议 › 发送谱 新建", "Create one under Protocol › Send specs"),
-                onClick: () => openProtocolTab("send"),
-                primary: true,
-              },
-            ]}
-          />
+          {/* P155-E：空态的宿主是**内容区**，不是含工具条的 .sb 根——
+              宿主含 .sb-bar 时面板一矮，inset:0 居中的内容就骑到工具条上（实测 320px 以下必现）。 */}
+          <div className="sb-empty">
+            <EmptyState
+              title={tx("还没有发送谱", "No send templates yet")}
+              hint={[tx("描述一帧要发的字节", "Describe the bytes one frame sends")]}
+              actions={[
+                {
+                  label: tx("去 协议 › 发送谱 新建", "Create one under Protocol › Send specs"),
+                  onClick: () => openProtocolTab("send"),
+                  primary: true,
+                },
+              ]}
+            />
+          </div>
         </>
       ) : (
         <div className="sb-body">
