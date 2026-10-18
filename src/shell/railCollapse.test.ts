@@ -1,12 +1,13 @@
 /**
- * P145 · 左侧活动导轨可以整条收起（用户："能不能加一个把左边导轨收起来的按钮"）。
- *
- * 钉四件事，每件都对应一个会静默坏掉的地方：
- *  1. **布局分母真的少 48**——CSS 不渲染 `.rail2` 而 dockview 还按旧宽度排，
- *     结果就是"画布右边整条压在看不见的地方"（P3 那批的老病，`RailPanel.tsx:182` 记过）；
- *  2. **二级面板跟着归零**——条都收了还留着面板占宽，就是留一扇没有把手的门；
- *  3. **把手长在导轨之外**——开关若挂在 `.rail2` 里，收起后用户就再也打不开它；
- *  4. **收起态落盘**——"常驻"是这套导轨既有语义（开着哪一项都会记住）。
+ * P145 立：左侧活动导轨可以整条收起（用户："能不能加一个把左边导轨收起来的按钮"）。
+ * P155-R 改判（用户 2026-10-17："收缩导轨栏时不要把第二栏给收起来"）：**条与二级面板各自独立**。
+ * 本文件跟着改判，钉四件事，每件都对应一个会静默坏掉的地方：
+ *  1. **布局分母各算各的**——条收起少 48；面板开着仍占它自己的宽（P145 那版是"一起归零"，
+ *     P155-R 起作废：面板在无条状态下能单独立着才是用户要的）；
+ *  2. **无条状态的面板有把手**——`.rp-head` 报案名、关闭钮走 `toggleRailPanel(null)`；
+ *  3. **开关长在导轨之外、图标两态接线**——开关挂在 `.rail2` 里，收起后用户就再也打不开它；
+ *     图标不做两态区分，用户看不出点下去是收还是开（P155-R 用户第二条原话）；
+ *  4. **收起态落盘 + 宽度常量单出处**——"常驻"是这套导轨既有语义。
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -33,7 +34,7 @@ const { SHELL_CHROME, gridSize } = await import("./defaultLayout");
 const rail = await import("./railState");
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), "utf8");
 
-describe("P145 导轨收起：分母、面板、把手、落盘", () => {
+describe("P145/P155-R 导轨收起：分母各算各的、面板有把手、开关在外", () => {
   it("默认展开，收起时 stripWidth() 归零并落盘；再点回来分毫复位", () => {
     expect(rail.railStrip(), "新键默认必须是展开（默认收起等于偷偷改用户的界面）").toBe(true);
     expect(rail.stripWidth()).toBe(SHELL_CHROME.railW);
@@ -48,18 +49,23 @@ describe("P145 导轨收起：分母、面板、把手、落盘", () => {
     expect(LS.get(rail.RAIL_STRIP_KEY)).toBe("1");
   });
 
-  it("二级面板开着时收起整条，railWidth() 也必须归零（面板不能独自占着宽度）", () => {
+  it("P155-R 改判：面板开着时收起条，railWidth() 仍报面板宽（它单独立着）", () => {
     rail.toggleRailPanel("views");
     expect(rail.railPanel()).toBe("views");
     const openW = rail.railWidth();
     expect(openW, "反空断言：面板没占宽，这条判据就是空转").toBeGreaterThan(0);
 
     rail.toggleRailStrip();
-    expect(rail.railWidth(), "导轨条收起后二级面板仍报宽度：画布会被一条不存在的面板挤窄").toBe(0);
+    expect(rail.stripWidth(), "条收起要真的还 48px 给画布").toBe(0);
+    expect(
+      rail.railWidth(),
+      "条收起后面板仍立着 ⇒ 布局分母必须继续算它的宽（旧行为在这里归零就是把面板一起藏了）",
+    ).toBe(openW);
 
     rail.toggleRailStrip();
-    expect(rail.railWidth(), "重新展开必须回到原来那一项的宽度（记住开着哪一项是这里的既有语义）").toBe(openW);
+    expect(rail.railWidth(), "条再展开，面板宽度分毫不变").toBe(openW);
     rail.toggleRailPanel(null);
+    expect(rail.railWidth(), "面板自己关了才是 0").toBe(0);
   });
 
   it("gridSize 的分母：少一条导轨就多 48px，且默认参数下读数一字不变", () => {
@@ -82,17 +88,25 @@ describe("P145 导轨收起：分母、面板、把手、落盘", () => {
     rail.toggleRailStrip();
   });
 
-  it("把手长在导轨之外：开关在身份栏，SideRail 收起时整块不渲染（不是 display:none）", () => {
+  it("把手与两态：开关在身份栏且图标接线 railOn；条收起时面板照渲染并有 .rp-head 关闭钮", () => {
     const bars = read("./TopBars.tsx");
     expect(bars, "身份栏里没有那颗开关").toContain("onClick={toggleRailStrip}");
     expect(bars, "开关必须有按压态（aria-pressed），否则读屏不知道导轨在不在").toContain("aria-pressed={!railOn}");
+    expect(bars, "图标没有接 railOn，两态就永远只画一态").toContain("<IconRailCollapse open={railOn} />");
 
     const side = read("./SideRail.tsx");
     expect(side, "SideRail 里不该再有第二个收起入口（同一件事两个把手就是两本账）").not.toContain("toggleRailStrip");
-    expect(side, "收起必须是**不渲染**：留着 DOM 就有'看不见却能 Tab 进去'的键盘陷阱").toMatch(
-      /if \(!strip\) return null;/,
-    );
-    expect(side).not.toMatch(/rail2[^"]*display:\s*none/);
+    expect(side, "条收起仍必须是**不渲染**（留着 DOM 就有能 Tab 进去的键盘陷阱）").toMatch(/\{strip && \(/);
+    expect(side, "P145 的整块不渲染回来了——面板要跟条各自独立").not.toMatch(/if \(!strip\) return null;/);
+    expect(side, "RailPanel 必须在条收起时照渲染").toContain("<RailPanel actions={actions} />");
+
+    const panel = read("./RailPanel.tsx");
+    expect(panel, "无条状态的面板头（把手）不见了").toContain('className="rp-head"');
+    expect(panel, "面板头没有关闭动作").toContain("toggleRailPanel(null)");
+    expect(panel, "面板头不判 railStrip——有条时也画出来就是两份入口").toMatch(/!strip && \(/);
+
+    const css = read("../styles/theme.css");
+    expect(css, "图标两态的 .irc-closed 规则不在").toMatch(/\.irc\.irc-closed \.irc-arrow\s*\{\s*transform:\s*rotate\(180deg\)/);
   });
 
   it("宽度只有一个出处：SHELL_CHROME.railW 与 CSS 的 .rail2 flex-basis 仍是一回事", () => {

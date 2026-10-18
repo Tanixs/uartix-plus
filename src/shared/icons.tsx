@@ -96,13 +96,18 @@ export const IconSlider = () =>
  * 读法：一个窗口 + 左边一道分隔栏 + 朝左的箭头 = 把左轨收进去。
  * 24 viewBox / 描边 2 / 走 svg() 同一出处（门 H 钉着图标基准只有一处）。
  */
-export const IconRailCollapse = () =>
-  svg(
+/** P155-R：导轨开合两态（展开=左栏线在 + 箭头朝左；收起=线淡出 + 箭头转 180°）。
+ *  过渡在 theme.css 的 `.irc-*` 三条规则里（走 --dur-fast/--ease；
+ *  减弱动效由 `html.no-motion` 的统一 0.01ms 总闸接住，不在图标里另开一条零值路）。 */
+export const IconRailCollapse = ({ open = true }: { open?: boolean } = {}) =>
+  render(
     <>
       <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M9.5 4v16" />
-      <polyline points="16.5 9.5 13.5 12 16.5 14.5" />
+      <path className="irc-div" d="M9.5 4v16" />
+      <polyline className="irc-arrow" points="16.5 9.5 13.5 12 16.5 14.5" />
     </>,
+    ICON_SIZE,
+    open ? "irc" : "irc irc-closed",
   );
 
 export const IconButton = () =>

@@ -10,6 +10,11 @@ import { RailPanel, type RailActions } from "./RailPanel";
  * 分界线：**库在左，视图在中间画布**。导轨上每一项是一个"库"，点开在右侧展开二级面板；
  * 再点同一项收起。上次开着哪项会记住（常驻）。
  *
+ * P155-R（用户 2026-10-17："收缩导轨栏时不要把第二栏给收起来"）：**条与面板各自独立**——
+ * P145 那条"收起时整块都不渲染"的裁决就此作废；面板在无条状态下照常立着，由自己的
+ * 面板头（`.rp-head`，见 RailPanel）报出项名并给关闭钮。条本身仍是"不渲染而非 display:none"
+ * （键盘不走进不存在的门）。
+ *
  * 这套交互不是新发明：控制画布里的 `sideTab` 抽屉（控件库 / 命令库两个 Tab、再点收起）
  * 已经用了一年多，本文件只是把它从面板里升到壳层、给它几个目的地。
  * R3 起那两个 Tab 的内容真的搬过来了，抽屉本身连状态一起删除。
@@ -27,38 +32,38 @@ const railItems = (): { key: RailKey; label: string; tip: string; icon: () => Re
 export function SideRail({ actions }: { actions: RailActions }) {
   useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const open = useSyncExternalStore(subscribeRail, railPanel);
-  // P145：导轨条整体收起时，这一整块（48px 图标条 + 二级面板）都不渲染。
-  // 不渲染而不是 `display:none`：留着 DOM 就有"看着没有、Tab 却能走进去"的键盘陷阱，
-  // 而布局分母那边（`stripWidth()` 返回 0）也已经把 48px 还给画布了——两边必须同一件事。
+  // P155-R：条与面板各自独立。条收起 = 这一条不渲染（不渲染而不是 `display:none`：
+  // 留着 DOM 就有"看着没有、Tab 却能走进去"的键盘陷阱）；二级面板不再跟它走——
+  // 面板在无条状态下由自己的头（.rp-head）报案名与关闭钮，宽度照旧进布局分母。
   const strip = useSyncExternalStore(subscribeRail, railStrip);
-
-  if (!strip) return null;
 
   return (
     <>
-      <nav className="rail2" aria-label={tx("工作区", "Workspaces")}>
-        {railItems().map((it) => (
-          <button
-            key={it.key}
-            type="button"
-            className={`rail2-btn${open === it.key ? " on" : ""}${it.key === "views" && actions.editLayout ? " act" : ""}`}
-            data-ctl="tool"
-            aria-expanded={open === it.key}
-            title={it.label + " · " + it.tip}
-            onClick={() => toggleRailPanel(it.key)}
-          >
-            {it.icon()}
-            <span className="rail2-label">{it.label}</span>
-          </button>
-        ))}
-        <span className="rail2-spacer" />
-        {/* 编辑布局的开关位在「视图」项上（它才是"看什么"的那一节），这里只给状态点 */}
-        {actions.editLayout && (
-          <span className="rail2-editing" title={tx("正在编辑显示区布局", "Editing the area layout")}>
-            <IconLayoutEdit />
-          </span>
-        )}
-      </nav>
+      {strip && (
+        <nav className="rail2" aria-label={tx("工作区", "Workspaces")}>
+          {railItems().map((it) => (
+            <button
+              key={it.key}
+              type="button"
+              className={`rail2-btn${open === it.key ? " on" : ""}${it.key === "views" && actions.editLayout ? " act" : ""}`}
+              data-ctl="tool"
+              aria-expanded={open === it.key}
+              title={it.label + " · " + it.tip}
+              onClick={() => toggleRailPanel(it.key)}
+            >
+              {it.icon()}
+              <span className="rail2-label">{it.label}</span>
+            </button>
+          ))}
+          <span className="rail2-spacer" />
+          {/* 编辑布局的开关位在「视图」项上（它才是"看什么"的那一节），这里只给状态点 */}
+          {actions.editLayout && (
+            <span className="rail2-editing" title={tx("正在编辑显示区布局", "Editing the area layout")}>
+              <IconLayoutEdit />
+            </span>
+          )}
+        </nav>
+      )}
       <RailPanel actions={actions} />
     </>
   );

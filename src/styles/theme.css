@@ -752,9 +752,16 @@ body {
 }
 .ibar .icon-btn:not(.on):hover:not(:disabled),
 .tbar .icon-btn:not(.on):hover:not(:disabled) {
-  background: var(--raise-1);
-  color: var(--text);
-}
+    background: var(--raise-1);
+    color: var(--text);
+  }
+
+/* P155-R：导轨开合按钮的两态动效。IconRailCollapse 按 open 切 `.irc-closed`：
+   箭头绕自己中心转 180°、左栏线淡出；时长/曲线走令牌，减弱动效由 html.no-motion 接住。 */
+.irc .irc-div { transition: opacity var(--dur-fast) var(--ease); }
+.irc .irc-arrow { transition: transform var(--dur-fast) var(--ease); transform-origin: 15px 12px; }
+.irc.irc-closed .irc-div { opacity: 0; }
+.irc.irc-closed .irc-arrow { transform: rotate(180deg); }
 
 /* Operator 只读模式横幅（P67）：工具栏下方细条，强调色描边提示当前处于受控模式 */
 .op-banner {
@@ -2680,6 +2687,41 @@ select optgroup {
   min-height: 0;
   background: transparent;
 }
+
+/* P155-R：无 48px 条时的面板头（把手）——条收起后这块面板仍立在这里，得有地方
+   报自己是谁、并关掉它。只在无条状态渲染（RailPanel 判 railStrip）；有条时这一行不存在。 */
+.rp-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 8px 6px 6px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.rp-head-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rp-head-close {
+  all: unset;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-s);
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+.rp-head-close:hover { background: var(--raise-1); color: var(--text); }
 
 .rp-body {
   flex: 1 1 auto;

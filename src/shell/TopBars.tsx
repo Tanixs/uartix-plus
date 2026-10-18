@@ -419,7 +419,7 @@ export function ToolBar({
         aria-pressed={!railOn}
         onClick={toggleRailStrip}
       >
-        <IconRailCollapse />
+        <IconRailCollapse open={railOn} />
       </button>
       <WorkspacePill onApplyPreset={onApplyPreset} />
       <span className="tb-sep" />

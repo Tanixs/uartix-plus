@@ -5,7 +5,7 @@ import * as panelActivity from "../panels/panelActivity";
 import { getExt, useExtensions } from "../features/ai/extensionStore";
 import { requestClosePanel, requestOpenPanel } from "../features/ai/appBus";
 import { removeLayout, useLayouts } from "../features/settings/layoutsStore";
-import { tx, useLocale } from "../i18n/strings";
+import { tx, useLocale, getLocale } from "../i18n/strings";
 import { IconLayoutEdit, IconPlus } from "../shared/icons";
 import {
   railPanel,
@@ -15,7 +15,11 @@ import {
   railPanelW,
   resetRailPanelW,
   setRailPanelW,
+  railStrip,
+  toggleRailPanel,
+  RAIL_ITEMS,
   subscribeRail,
+  type RailKey,
 } from "./railState";
 import { zoomFactor } from "../shared/zoom";
 import { devRailW } from "../dev/bootOverrides";
@@ -38,6 +42,13 @@ export interface RailActions {
   onToggleEditLayout: () => void;
   onApplyLayoutSlot: (id: string) => void;
   onSaveLayout: (name: string) => boolean;
+}
+
+/** 面板头标题：导轨项的本地化名。RAIL_ITEMS 是"导轨有哪几项"的唯一事实源，渲染层不抄第二份。 */
+function railItemLabel(k: RailKey): string {
+  const it = RAIL_ITEMS.find((i) => i.key === k);
+  if (!it) return k;
+  return getLocale() === "en" ? it.en : it.zh;
 }
 
 /** 版本串：面板开合状态变了就重算，用它驱动 useSyncExternalStore */
@@ -167,6 +178,7 @@ export function RailPanel({ actions }: { actions: RailActions }) {
   const open = useSyncExternalStore(subscribeRail, railPanel);
   const protoTab = useSyncExternalStore(subscribeRail, railProtoTab);
   const w = useSyncExternalStore(subscribeRail, railPanelW);
+  const strip = useSyncExternalStore(subscribeRail, railStrip);
   const asideRef = useRef<HTMLElement | null>(null);
 
   /** P105-D 取证入口：`?railw=420`。走 setRailPanelW 的钳制，所以拍出来的一定是拖得出来的状态。 */
@@ -226,6 +238,22 @@ export function RailPanel({ actions }: { actions: RailActions }) {
       style={{ "--rail-w": `${w}px` } as React.CSSProperties}
       aria-label={tx("工作区内容", "Workspace content")}
     >
+      {/* P155-R：条收起后这块面板仍立着——头行就是它的"把手"：报案名 + 关闭钮。
+          条在的时候这一行不渲染（项名与切换都在条上，两处都写就是两份入口）。 */}
+      {!strip && (
+        <div className="rp-head">
+          <span className="rp-head-title">{railItemLabel(open)}</span>
+          <button
+            type="button"
+            className="rp-head-close"
+            aria-label={tx("收起这块面板", "Hide this panel")}
+            title={tx("收起这块面板", "Hide this panel")}
+            onClick={() => toggleRailPanel(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {open === "views" && <ViewPanel actions={actions} />}
       {/* R4：接入面板是新写的（接口选择 + 参数一处看完）；
           协议面板是把 TemplatesPanel **原样换个家**——组件本来就自包含，
