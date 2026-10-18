@@ -6074,7 +6074,11 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
    matcha 3.95 / amber 3.83 / glaze 4.46 是 P132-F 把菜单面拉进账之后量出来的。 */
 .tb-menu-item.on { color: var(--accent-text); font-weight: 600; }
 .tb-menu-check { margin-left: auto; font-style: normal; }
-.set-modal { width: min(896px, 84%); height: min(640px, 72%); padding: 0 0 14px; overflow: hidden; display: flex; flex-direction: column; }
+.set-modal { width: min(896px, 84%); height: min(640px, 72%); padding: 0 0 14px; overflow: hidden; display: flex; flex-direction: column;
+  /* P155-S：设置内容的列宽上限**只有这一处声明**——页头、卡片、模型页、插件页四处引用。
+     起因（用户 2026-10-17）：全屏下标题有 1080 上限而模型/插件页内容没有，
+     窗口越宽标题相对内容缩进越大，看起来"不是完全向左"。 */
+  --set-col-w: 1080px; }
 .set-modal .modal-title { padding: 16px 20px 0; font-size: var(--fs-lg); }
 .set-body { display: flex; gap: 0; flex: 1; min-height: 0; }
 .set-nav {
@@ -6145,8 +6149,15 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   /* 与 .set-card 同一档上限并居中：标题独占一行时，它必须和下面的卡片同一条左右缘，
      不然宽窗口下标题贴左、卡片居中，看着像两个页面叠在一起。
      刻意不加底色与投影（settingsShell.test.ts:50-57 钉着这条） */
-  max-width: 1080px;
+  max-width: var(--set-col-w);
   margin-inline: auto;
+}
+
+/* P155-S：全屏设置页开着时身份栏不画分级线——那条线的语义是"身份栏与工具栏的分级"，
+   设置全页下面根本没有工具条，线没有对象（用户 2026-10-17："那条横向分割线好丑"）。
+   工作区不变：IBar 只有 fullPage 一个来源能带上这个类。 */
+.ibar.ib-fullpage {
+  border-bottom-color: transparent;
 }
 .set-page-title { font-size: var(--fs-xl); font-weight: 700; line-height: 1.25; user-select: none; }
 .set-page-sub { grid-column: 1; font-size: var(--fs-body); line-height: 1.5; color: var(--text-dim); max-width: 72ch; }
@@ -6199,7 +6210,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   box-shadow: var(--shadow-pop), var(--shadow);
   /* 行长上限：1440 宽下一行说明能排到 130+ 字，读到句尾已经忘了句首（实测那张
      「上下文压缩阈值」的提示横穿了整页）。卡片不铺满，右侧留页面底色。 */
-  max-width: 1080px;
+  max-width: var(--set-col-w);
 }
 .set-card > .set-row:last-child { border-bottom: none; }
 .set-card > .set-group-title { margin: 0; padding: 16px 0 6px; }
@@ -6210,7 +6221,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
    中列是"扫一眼挑一家"，右列是"改这一家"，所以两栏各自成面：
    中列与左导航同属凹陷区（--bg-inset），右列的卡片浮在页面底色上。
    仍然零 `border:`：分隔靠底色与阴影，不靠描边。 */
-.msp { display: flex; align-items: flex-start; gap: var(--sp-4); }
+.msp { display: flex; align-items: flex-start; gap: var(--sp-4); max-width: var(--set-col-w); margin-inline: auto; }
 .msp-list {
   flex: 0 0 220px;
   position: sticky;
@@ -8896,13 +8907,16 @@ html.aiw-transparent-root #root {
   line-height: 1.6;
 }
 
-/* 设置页「插件管理」tab：内嵌插件库主体（PluginManagerBody），撑满内容列高度 */
+/* 设置页「插件管理」tab：内嵌插件库主体（PluginManagerBody），撑满内容列高度。
+   P155-S：横向原来用 -22px 负边距做「列表贴 .set-content 边滚动」——列宽(1080)居中之后
+   那会让本块比父各宽出 22px，标题与内容左缘重开一档错位（实测 x=494 vs 516）。
+   贴边改为列内自理：横向负边距撤掉，列表内边距仍由下面几条 .plg-* padding 给。 */
 .set-plg-embed {
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 420px;
-  margin: -6px -22px -16px; /* 抵消 .set-content 内边距，让列表区贴边滚动 */
+  margin: -6px 0 -16px; /* 纵向仍抵消 .set-content 内边距，横向不动 */
 }
 .set-plg-embed .plg-head { padding: 12px 16px; }
 .set-plg-embed .plg-notice { margin: 10px 16px 0; }
@@ -8914,7 +8928,7 @@ html.aiw-transparent-root #root {
    回显那一句的字来自 `marketBrowse.marketEndpointTalk`（与 applyMirror 同一个判定内核），
    这里只负责给五种语气上色——组件不许自己再判一次对不对。
    P102 起这块住在市场弹窗里（顶上那颗齿轮展开），设置页那一栏只剩本地插件库。 */
-.set-ext-page { display: flex; flex-direction: column; height: 100%; }
+.set-ext-page { display: flex; flex-direction: column; height: 100%; max-width: var(--set-col-w); margin-inline: auto; width: 100%; }
 .set-ext-page .set-plg-embed { flex: 1; min-height: 0; height: auto; }
 /* 只有图标的按钮：与旁边那颗文字按钮同高，不然一排看着一深一浅 */
 .btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 6px 8px; }

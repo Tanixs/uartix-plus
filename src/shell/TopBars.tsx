@@ -340,7 +340,7 @@ export function IdentityBar({
   };
 
   return (
-    <header className="ibar">
+    <header className={`ibar${fullPage ? " ib-fullpage" : ""}`}>
       <div className="tb-brand" title="Uartix+" {...dragProps}>
         <img
           src={iconPlain}

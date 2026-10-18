@@ -80,3 +80,32 @@ describe("P114-B · 整页开着时标题栏收起应用级入口", () => {
     expect(/<IdentityBar\s+fullPage=\{settingsOpen\}/.test(read(APP)), "App.tsx 没再把 settingsOpen 传下去").toBe(true);
   });
 });
+
+/** P155-S：设置页列宽与顶线的形状钉。上面那个 `ruleBody` 用 indexOf 找第一个出现处，
+ *  会被注释里提到的选择器名骗到（`.set-card` 在页头注释里出现过）——这一节改用
+ *  "选择器 + 空格 + {" 定位，只认真的规则头。 */
+function bodyOfRule(sel: string): string {
+  const at = CSS.indexOf(`${sel} {`);
+  expect(at, `theme.css 里找不到规则 ${sel} {`).toBeGreaterThan(-1);
+  const open = CSS.indexOf("{", at);
+  return CSS.slice(open + 1, CSS.indexOf("}", open));
+}
+
+describe("P155-S · 设置页列宽与顶线", () => {
+  it("列宽上限只有一枚出处：--set-col-w，页头/卡片/模型页/插件页四处引用", () => {
+    expect(bodyOfRule(".set-modal"), "变量没在 .set-modal 上声明").toContain("--set-col-w: 1080px");
+    for (const sel of [".set-page-head", ".set-card"]) {
+      expect(bodyOfRule(sel), `${sel} 没引用 --set-col-w（改一处漏一处就是 P155 前那种错位）`).toContain("var(--set-col-w)");
+    }
+    expect(bodyOfRule(".msp"), "模型页没引用").toContain("var(--set-col-w)");
+    expect(bodyOfRule(".set-ext-page"), "插件页没引用").toContain("var(--set-col-w)");
+  });
+
+  it("全页打开时身份栏不画分级线：ib-fullpage 只由 fullPage 一个来源驱动", () => {
+    const tb = read(MODAL);
+    expect(tb, "ibar 的类不再是 fullPage 条件式").toContain('`ibar${fullPage ? " ib-fullpage" : ""}`');
+    expect(bodyOfRule(".ibar.ib-fullpage"), "规则不在：线色没转透明").toContain("border-bottom-color: transparent");
+    // 工作区那条线必须还在（只改全页态，不做全局删除）
+    expect(bodyOfRule(".ibar"), "身份栏的基础下边框被整条删了").toContain("border-bottom: 1px solid var(--elevation-line)");
+  });
+});

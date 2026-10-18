@@ -445,11 +445,12 @@
 
 /* ---------- 输入族 ---------- */
 
-/* 输入框：白底 + #8a8886 描边 + rounded-md（提示词 [REQUIRED] 原样）。
-   本仓基线给输入框的是"凹档底 + 顶缘内阴影"（Linear 那套凹陷签名），这一枚按 Fluent 改白底：
-   Fluent 的输入框是**浮在内容上的白控件**，不是刻进表面的凹槽。 */
+/* 输入框：凹档底 + #8a8886 描边 + rounded-md。
+   底为什么不是白：P143 曾按提示词做"浮在内容上的白控件"，实测白底配白卡片 dL=0
+   ——用户 2026-10-17 判"只有一个描线框，很丑"，改回可见的凹档底（--bg-inset）；
+   描边/焦点矩形/圆角仍按 Fluent。 */
 [data-theme="fluent"] .input {
-  background: var(--bg-panel);
+  background: var(--bg-inset);
   border-color: var(--fb-control-line);
   box-shadow: none;
   transition: border-color var(--fb-duration) var(--ease), background-color var(--fb-duration) var(--ease),
@@ -463,7 +464,7 @@
 /* 焦点 = 描边转强调色 + 底部那道 2px 强调线（Fluent 的 focus rect），
    键盘焦点另由签名总线给 2px 环 + 2px 留白（--ctl-input-focus）。 */
 [data-theme="fluent"] .input:focus {
-  background: var(--bg-panel);
+  background: var(--bg-inset);
   border-color: var(--accent);
 }
 
@@ -475,7 +476,7 @@
 }
 
 [data-theme="fluent"] select.input {
-  background: var(--bg-panel);
+  background: var(--bg-inset);
 }
 
 /* 数字步进（控制画布卡片上的 ▲▼）：贴着输入框的一组小键 */
