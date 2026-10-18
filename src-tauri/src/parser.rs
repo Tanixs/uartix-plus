@@ -2659,6 +2659,217 @@ mod tests {
             "事务号应解出（便于人工对齐请求-应答）"
         );
     }
+
+    /// P156-B1 · 复杂协议压力：10 万帧混合流（3 模板 + 前缀噪声 + 周期坏帧），
+    /// 按 4KiB 分块喂 `feed`——帧跨块切分正是要压的路径。
+    ///
+    /// 为什么要有它：错位自愈（`scan` 的后退重扫）与跨模板去噪都是"两段拼起来才对"
+    /// 的复杂逻辑，单帧用例证明不了 10 万帧连续流里不吞帧、不退化成 O(n²)。
+    /// 输入用确定性 LCG：同一种子 → 同一字节流 → 计数可以钉死当判据。
+    ///
+    /// 数字（2026-10-19 本机首测）：两次连跑 817ms / 817ms（逐毫秒一致，无抖动），
+    /// 预算 = 基线 ×2 上取整到 1700ms。跑不动的那天先看是不是噪声/覆盖变了，
+    /// 别直接抬预算。
+    #[test]
+    fn stress_100k_mixed_protocol_frames() {
+        const CYCLES: usize = 33_334; // ×3 ≈ 10 万帧
+        const CHUNK: usize = 4096;
+        const CORRUPT_EVERY: usize = 500;
+        const BUDGET_MS: u128 = 1_700;
+
+        // ---- 复杂规则集：变长+位段+sum8 / 定长+大端+crc16 / 2字节大端长度+crc32 ----
+        let t1 = FrameTemplate {
+            id: "L1".into(),
+            name: "变长帧".into(),
+            color: "#4e9cef".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "lengthField".into(),
+                header_bytes: vec![0xAA, 0x55],
+                length_offset: Some(2),
+                length_size: Some(1),
+                length_endian: Some("little".into()),
+                length_adjust: Some(3),
+                max_length: Some(64),
+                ..Default::default()
+            },
+            checksum: Some(ChecksumCfg {
+                crc: None,
+                algo: "sum8".into(),
+                coverage_start: 0,
+                coverage_end: -1,
+                endian: "little".into(),
+            }),
+            fields: vec![
+                field("s-seq", "序号", "seq", 3, "uint16", "little"),
+                FieldDef {
+                    bits: Some(BitsCfg { index: 2, count: 3 }),
+                    ..field("s-flags", "标志", "data", 5, "bits", "little")
+                },
+                field("s-temp", "温度", "data", 6, "float32", "little"),
+                field("s-extra", "附加", "data", 10, "float32", "little"),
+            ],
+        };
+        let t2 = FrameTemplate {
+            id: "L2".into(),
+            name: "定长帧".into(),
+            color: "#e5534b".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "fixedLength".into(),
+                header_bytes: vec![0xBB, 0x66],
+                fixed_length: Some(12),
+                max_length: Some(64),
+                ..Default::default()
+            },
+            checksum: Some(ChecksumCfg {
+                crc: None,
+                algo: "crc16_modbus".into(),
+                coverage_start: 0,
+                coverage_end: -2,
+                endian: "little".into(),
+            }),
+            fields: vec![
+                field("r-roll", "Roll", "data", 2, "int16", "big"),
+                FieldDef {
+                    bits: Some(BitsCfg { index: 0, count: 4 }),
+                    ..field("r-mode", "模式", "data", 4, "bits", "little")
+                },
+                field("r-name", "名", "data", 5, "ascii", "little"),
+            ],
+        };
+        let t3 = FrameTemplate {
+            id: "L3".into(),
+            name: "两字节长度帧".into(),
+            color: "#39c5cf".into(),
+            enabled: true,
+            boundary: Boundary {
+                mode: "lengthField".into(),
+                header_bytes: vec![0xCC, 0x99],
+                length_offset: Some(2),
+                length_size: Some(2),
+                length_endian: Some("big".into()),
+                length_adjust: Some(4),
+                max_length: Some(256),
+                ..Default::default()
+            },
+            checksum: Some(ChecksumCfg {
+                crc: None,
+                algo: "crc32".into(),
+                coverage_start: 0,
+                coverage_end: -4,
+                endian: "little".into(),
+            }),
+            fields: vec![
+                field("t-id", "编号", "data", 4, "uint32", "little"),
+                field("t-tag", "标签", "data", 8, "ascii", "little"),
+            ],
+        };
+
+        // L1：AA55 | 12 | seq16 | flags | temp32 | extra32 | sum8 = 15 字节
+        let f1 = |temp: f32| -> Vec<u8> {
+            let mut f = vec![0xAA, 0x55, 12u8];
+            f.extend_from_slice(&0x0123u16.to_le_bytes());
+            f.push(5);
+            f.extend_from_slice(&temp.to_le_bytes());
+            f.extend_from_slice(&40.0f32.to_le_bytes());
+            let sum = f.iter().fold(0u8, |a, &b| a.wrapping_add(b));
+            f.push(sum);
+            f
+        };
+        // L2：BB66 | roll16BE | mode | "ABCDE" | crc16LE = 12 字节
+        let f2 = || -> Vec<u8> {
+            let mut f = vec![0xBB, 0x66];
+            f.extend_from_slice(&0x1122u16.to_be_bytes());
+            f.push(6);
+            f.extend_from_slice(b"ABCDE");
+            let crc = crc16_modbus(&f);
+            f.extend_from_slice(&crc.to_le_bytes());
+            f
+        };
+        // L3：CC99 | len16BE | id32 | "T3TAG-01" | crc32LE = 20 字节
+        let f3 = || -> Vec<u8> {
+            let mut f = vec![0xCC, 0x99];
+            f.extend_from_slice(&16u16.to_be_bytes());
+            f.extend_from_slice(&0x1122_3344u32.to_le_bytes());
+            f.extend_from_slice(b"T3TAG-01");
+            let crc = crc32(&f);
+            f.extend_from_slice(&crc.to_le_bytes());
+            f
+        };
+
+        // 确定性噪声：只落 0x20..=0x29。三个帧头首字节（AA/BB/CC）都不会出现在噪声里，
+        // 噪声就只是"帧间垃圾"，不会伪造帧头把计数搅乱。
+        let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut rnd = move || -> usize {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(144_269_504_088_896_3407);
+            (seed >> 33) as usize
+        };
+
+        let mut stream: Vec<u8> = Vec::with_capacity(CYCLES * 80);
+        let mut corrupt = 0usize;
+        for i in 0..CYCLES {
+            for _ in 0..(rnd() % 6) {
+                stream.push((0x20 + rnd() % 10) as u8);
+            }
+            let temps = [20.5f32, 21.5, 22.5];
+            let mut a = f1(temps[i % 3]);
+            if i % CORRUPT_EVERY == CORRUPT_EVERY - 1 {
+                // 每 500 周期坏一帧 L1：翻转校验字节 → 必须是坏帧，且不吞邻帧
+                *a.last_mut().unwrap() ^= 0x5A;
+                corrupt += 1;
+            }
+            stream.extend_from_slice(&a);
+            for _ in 0..(rnd() % 6) {
+                stream.push((0x20 + rnd() % 10) as u8);
+            }
+            stream.extend_from_slice(&f2());
+            for _ in 0..(rnd() % 6) {
+                stream.push((0x20 + rnd() % 10) as u8);
+            }
+            stream.extend_from_slice(&f3());
+        }
+
+        let mut eng = ParserEngine::new();
+        eng.set_rules(ParseRules {
+            templates: vec![t1, t2, t3],
+        })
+        .unwrap();
+
+        let t0 = std::time::Instant::now();
+        let mut rows: Vec<FrameRow> = Vec::new();
+        for (ci, chunk) in stream.chunks(CHUNK).enumerate() {
+            rows.extend(eng.feed(chunk, (ci * CHUNK) as u64, 1));
+        }
+        let ms = t0.elapsed().as_millis();
+
+        let valid = |id: &str| rows.iter().filter(|r| r.tpl_id == id && r.valid).count();
+        assert_eq!(valid("L1"), CYCLES - corrupt, "L1 有效帧数（含坏帧剔除）");
+        assert_eq!(valid("L2"), CYCLES, "L2 有效帧数");
+        assert_eq!(valid("L3"), CYCLES, "L3 有效帧数");
+        assert_eq!(
+            rows.iter().filter(|r| r.valid).count(),
+            CYCLES * 3 - corrupt,
+            "三种模板合计有效帧数"
+        );
+        // 坏帧计数：坏帧与其它模板的合法帧在字节区间上互不重叠，去噪不该吞掉它们的账
+        assert_eq!(eng.errors as usize, corrupt, "坏帧应逐条记账");
+        assert_eq!(eng.total as usize, rows.len(), "total 与返回行数对得上");
+        assert!(
+            ms <= BUDGET_MS,
+            "10 万帧解析耗时 {ms}ms 超预算 {BUDGET_MS}ms（基线×2，基线见测试注释）"
+        );
+        eprintln!(
+            "P156-B1 压力：{} 字节 / {} 帧（坏 {}）/ {}ms / dropped {}",
+            stream.len(),
+            rows.len(),
+            corrupt,
+            ms,
+            eng.dropped
+        );
+    }
 }
 
 /// P121-A · 校验算法的跨语言向量表。
