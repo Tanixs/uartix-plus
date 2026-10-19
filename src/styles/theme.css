@@ -6173,10 +6173,11 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
    dark: #0b0d10 < #0f1115 < #161a20）：导航凹、内容平、分组卡浮。
    全部走 background + box-shadow，**一条 `border:` 都不加**（G 门 394 只降不升）。 */
 .modal-mask.set-page-mask {
-  /* 顶部从身份栏下沿开始：窗口拖拽与最小/最大/关闭必须一直点得到。
-     旧版弹窗是居中 + 遮罩压暗，整块盖住身份栏，那是"弹窗"的语义；
-     改成占满工作区之后，再盖住它就是事故。 */
-  inset: var(--h-ibar) 0 0 0;
+  /* P157-F（用户点名 ZCode 脸）：整页吃满全窗，包含身份栏那 38px。
+     P111-B 当时立的规矩是"再盖住身份栏就是事故（拖拽与窗控要在）"——这条被用户
+     显式改判：身份栏的职能**搬进了页里**（`.set-drag` 拖拽条 + `.set-winctl` 窗键组），
+     所以盖住它不再丢东西；身份栏同时由 `fullPage` 置 `inert`，Tab 也走不进那排看不见的按钮。 */
+  inset: 0;
   background: var(--bg);
   align-items: stretch;
   justify-content: stretch;
@@ -6193,9 +6194,32 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* P157-F：拖拽条 / 窗键组是它的绝对定位子件 */
+  position: relative;
 }
 .set-page .set-nav { flex: 0 0 240px; background: var(--bg-inset); padding: 12px 10px 18px; }
 .set-page .set-content { background: var(--bg); padding: 16px 24px 26px; }
+/* P157-F · 全窗设置页顶部的三件套：拖拽条 / 左栏品牌 / 右栏窗控。
+   `.set-drag` 接 `.cb-drag` 的职能（按住拖窗口、双击最大化），横贯整页顶 38px；
+   品牌与窗控浮在它上面。 */
+.set-drag { position: absolute; top: 0; left: 0; right: 0; height: 38px; z-index: 5; }
+.set-nav-brand {
+  /* 软件图标住左栏顶（ZCode 同位）：它是身份、不是控件——pointer-events: none
+     让拖拽从它身上穿过去（否则按住 logo 拖不动窗口，恰是最自然的拖拽起点）。 */
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 34px;
+  margin: 0 0 6px;
+  padding: 0 13px;
+  font-size: var(--fs-md);
+  font-weight: 700;
+  color: var(--text);
+  user-select: none;
+  pointer-events: none;
+}
+.set-winctl { position: absolute; top: 7px; right: 10px; z-index: 6; }
+.set-winctl .tb-win { margin-left: 0; height: auto; }
 /* 页头：ZCode 那一层的读法是"标题独占一行，副标题在它下面一行"。
    P111-B 我做成同一行 baseline 排，标题 16px 被副标题挤得没有权重 —— 现在按它改。 */
 /* 页头住在右栏里（P114-B）：它不再是一层界面，只是一页的标题 ——

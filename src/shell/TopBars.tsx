@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { getCurrentWindow, currentMonitor } from "@tauri-apps/api/window";
+import { currentMonitor } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import type { ReactNode } from "react";
 import * as serialStore from "../features/serial/serialStore";
@@ -13,6 +13,8 @@ import { pendingBadge } from "../features/market/marketBrowse";
 import { railStrip, subscribeRail, toggleRailStrip } from "./railState";
 import { useAwaitingCount } from "../features/market/useMarketPending";
 import { WORKSPACE_META } from "./workspaceMeta";
+import { WinKeys, IconPin } from "./WindowControls";
+import { getWinSafe, useWindowPin } from "./windowCtl";
 import iconPlain from "../assets/icon-plain.svg";
 
 /**
@@ -53,47 +55,9 @@ const IconHelp = () =>
     </>,
   );
 
-const IconPin = () =>
-  tbSvg(
-    <>
-      <line x1="12" y1="17" x2="12" y2="22" />
-      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-.89 1.55l-1.72.9A2 2 0 0 0 5.34 15z" />
-    </>,
-  );
-
-/**
- * 纯浏览器（npm run dev 直开）没有 Tauri 内核，getCurrentWindow() 构造即抛；降级为 no-op 桩以便浏览器验证 UI。
- * tauri 环境行为不变。
- * 桩里**列全被调到的方法**：少一个就是整页被错误边界接管（`innerSize` 漏掉时就是这样，
- * 于是"纯浏览器验证通道"这条我们自己依赖的路直接废掉——见 §8-46：兜底要兜得住实际调用面）。
- */
-function getWinSafe(): ReturnType<typeof getCurrentWindow> {
-  try {
-    return getCurrentWindow();
-  } catch {
-    const p = <T,>(v: T): Promise<T> => Promise.resolve(v);
-    const size = () => p({ width: 0, height: 0 });
-    const pos = () => p({ x: 0, y: 0 });
-    return {
-      onResized: () => p(() => {}),
-      onMoved: () => p(() => {}),
-      isMaximized: () => p(false),
-      isFocused: () => p(true),
-      innerSize: size,
-      outerSize: size,
-      innerPosition: pos,
-      outerPosition: pos,
-      scaleFactor: () => p(1),
-      startDragging: () => p(undefined),
-      toggleMaximize: () => p(undefined),
-      maximize: () => p(undefined),
-      unmaximize: () => p(undefined),
-      setAlwaysOnTop: () => p(undefined),
-      minimize: () => p(undefined),
-      close: () => p(undefined),
-    } as unknown as ReturnType<typeof getCurrentWindow>;
-  }
-}
+/* P157-F：`IconPin` 与窗口三件（最小化/最大化/关闭）搬进 `./WindowControls.tsx`——
+   设置页的全窗脸也要这一组，身份栏与它共用一份；`getWinSafe` 同批搬进 `./windowCtl.ts`
+   （两处各抄一份 no-op 桩清单就是等着漂，见那里保留的完整说明）。 */
 
 /**
  * 只读链路胶囊：`串口 · COM7 · 115200 · 8N1`。
@@ -266,8 +230,7 @@ export function IdentityBar({
   fullPage?: boolean;
 }) {
   const win = getWinSafe();
-  const [maxed, setMaxed] = useState(false);
-  const [pinned, setPinned] = useState(false);
+  const [pinned, togglePin] = useWindowPin();
   const [ver, setVer] = useState<string | null>(null);
   useEffect(() => {
     // 版本号动态读取（tauri.conf.json 单一来源），硬编码会随发版遗忘
@@ -308,12 +271,10 @@ export function IdentityBar({
       }).catch(() => undefined);
     };
     const unP = win.onResized(() => {
-      void win.isMaximized().then((v) => setMaxed(v));
       probe();
     }).then((u) => {
       un1 = u;
     });
-    void win.isMaximized().then((v) => setMaxed(v));
     probe();
     return () => {
       un1();
@@ -340,7 +301,7 @@ export function IdentityBar({
   };
 
   return (
-    <header className={`ibar${fullPage ? " ib-fullpage" : ""}`}>
+    <header className={`ibar${fullPage ? " ib-fullpage" : ""}`} inert={fullPage ? true : undefined}>
       <div className="tb-brand" title="Uartix+" {...dragProps}>
         <img
           src={iconPlain}
@@ -361,30 +322,14 @@ export function IdentityBar({
         onOpenAi={onOpenAi}
         onOpenLibrary={onOpenLibrary}
         pinned={pinned}
-        onTogglePin={() => {
-          const next = !pinned;
-          setPinned(next);
-          void win.setAlwaysOnTop(next);
-        }}
+        onTogglePin={togglePin}
       />
       {/* P105-A：这里只剩 Windows 那三件（最小化/最大化/关闭）。
           `margin-left:auto` 把它们推到右边缘 —— 无边框窗口的关闭钮不在右上角，
-          比"不好看"更糟：它是肌肉记忆层面的错位（改前实测内容止于 x=486，右边 63% 是死的）。 */}
-      <div className="tb-win">
-        <button className="tb-btn" data-ctl="tool" title={t("title.minimize")} onClick={() => void win.minimize()}>
-          <Glyph><line x1="5" y1="12" x2="19" y2="12" /></Glyph>
-        </button>
-        <button className="tb-btn" data-ctl="tool" title={maxed ? t("title.restore") : t("title.maximize")} onClick={() => void win.toggleMaximize()}>
-          {maxed ? (
-            <Glyph><rect x="8" y="8" width="12" height="12" rx="1.5" /><path d="M5 16V5a1 1 0 0 1 1-1h11" /></Glyph>
-          ) : (
-            <Glyph><rect x="5.5" y="5.5" width="13" height="13" rx="1.5" /></Glyph>
-          )}
-        </button>
-        <button className="tb-btn tb-close" data-ctl="tool" title={t("title.close")} onClick={() => void win.close()}>
-          <Glyph><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></Glyph>
-        </button>
-      </div>
+          比"不好看"更糟：它是肌肉记忆层面的错位（改前实测内容止于 x=486，右边 63% 是死的）。
+          P157-F 起这三件搬进 `WinKeys`（设置页全窗脸共用同一组）；身份栏的置顶仍住在
+          SystemButtons 里 —— fullPage 时那四颗应用入口收走，置顶单独留下。 */}
+      <WinKeys />
     </header>
   );
 }

@@ -37,6 +37,8 @@ import { IconChevron, IconCube, IconEdit, IconInfo, IconLayoutEdit, IconLogs, Ic
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 import { rangeStyle } from "../../shell/rangeFill";
+import { WinKeys } from "../../shell/WindowControls";
+import { getWinSafe } from "../../shell/windowCtl";
 
 function fmtBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "-";
@@ -132,6 +134,7 @@ function appearanceResetNames(): string[] {
 export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayout, onSaveLayout }: { onClose: () => void; onResetLayout: (p: WorkspacePreset) => void; initialTab?: string; onApplyLayout: (id: string) => boolean; onSaveLayout: (name: string) => boolean }) {
   useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const settings = useSettings();
+  const win = getWinSafe(); // P157-F：全窗脸接管了身份栏的拖拽与窗控，窗口对象走共享桩
   const timeLinked = useSyncExternalStore(timeCursor.subscribe, () => timeCursor.getSnapshot().linked);
   const snt = useSyncExternalStore(sentinelStore.subscribe, sentinelStore.getSnapshot);
   /**
@@ -381,8 +384,30 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   return (
     <div className="modal-mask set-page-mask" role="dialog" aria-modal="true" onMouseDown={onClose}>
       <div className="modal set-modal set-page" onMouseDown={(e) => e.stopPropagation()}>
+        {/* P157-F（用户点名 ZCode 脸）：设置页吃满整个窗口，身份栏被盖在下面 ——
+            它的两件职能搬进页里：页顶这条 `.set-drag` 管拖拽与双击最大化（原 `.cb-drag`），
+            右上角 `.set-winctl` 管 [置顶][最小][最大][关闭]（原 SystemButtons / `.tb-win`）。
+            身份栏被 fullPage 置 `inert`，Tab 不会再走进看不见的那一排。 */}
+        <div
+          className="set-drag"
+          data-tauri-drag-region
+          onMouseDown={(e) => {
+            if (e.button !== 0) return;
+            void win.startDragging();
+          }}
+          onDoubleClick={() => void win.toggleMaximize()}
+        />
+        <div className="set-winctl">
+          <WinKeys withPin />
+        </div>
         <div className="set-body">
           <div className="set-nav">
+            {/* 左栏顶的软件图标（ZCode 的同位）：它是身份、不是控件 ——
+                pointer-events: none 让拖拽从它身上穿过去，`aria-hidden` 免得读屏重复念一遍。 */}
+            <div className="set-nav-brand" aria-hidden="true">
+              <img src={appIcon} alt="" width={20} height={20} draggable={false} />
+              Uartix+
+            </div>
             {/* P113-D（用户："那个完成按钮很不好理解"）：设置页没有"做完"这回事 ——
                 改一项生效一项，所以出口说的是它本来的意思：**离开这个全屏页，回工作区**。
                 Esc 仍然有效，两条出口做同一件事。 */}

@@ -72,13 +72,44 @@ describe("P114-B · 整页开着时标题栏收起应用级入口", () => {
       expect(at, `入口锚点不在 TopBars 里：${anchor}`).toBeGreaterThan(-1);
       expect(at > guard && at < guardEnd, `${anchor} 没被 !fullPage 包住`).toBe(true);
     }
-    // 置顶与窗口三件在守卫之外：用户点名的"右边留着关闭、置顶、最小化"
+    // 置顶与窗口三件在守卫之外：用户点名的"右边留着关闭、置顶、最小化"。
+    // P157-F 起窗口三件搬进 WindowControls（设置页全窗脸共用同一组），置顶仍住 SystemButtons。
     expect(tb.indexOf("aria-pressed={pinned}")).toBeGreaterThan(guardEnd);
-    expect(tb.indexOf('<div className="tb-win">')).toBeGreaterThan(guardEnd);
+    expect(tb, "身份栏没引用窗键组").toContain("<WinKeys />");
+    const wctl = read("shell/WindowControls.tsx");
+    expect(wctl, "窗口三件不在 WindowControls 里").toContain('<div className="tb-win">');
+    for (const anchor of ['t("title.minimize")', 't("title.maximize")', 't("title.close")']) {
+      expect(wctl, `窗口键不在窗键组里：${anchor}`).toContain(anchor);
+    }
   });
 
   it("App 把 settingsOpen 交给身份栏（这条线断了，收起就是永不发生）", () => {
     expect(/<IdentityBar\s+fullPage=\{settingsOpen\}/.test(read(APP)), "App.tsx 没再把 settingsOpen 传下去").toBe(true);
+  });
+});
+
+describe("P157-F · 设置页全窗二栏（ZCode 脸）", () => {
+  it("遮罩吃满全窗：inset: 0（P111-B 的旧裁决已由用户显式改判，身份栏职能搬进页里）", () => {
+    const body = bodyOfRule(".modal-mask.set-page-mask");
+    expect(body, "不再吃满全窗").toContain("inset: 0");
+    expect(body, "还从身份栏下沿开始（38px 露头 = 旧三分布局）").not.toContain("--h-ibar");
+  });
+
+  it("页内有拖拽条、左栏品牌、右栏窗键组，且三样都有样式", () => {
+    const src = read(PAGE);
+    expect(src, "拖拽条不见了（窗口没法拖了）").toContain('className="set-drag"');
+    expect(src, "左栏品牌不见了").toContain('className="set-nav-brand"');
+    expect(src, "右栏窗键组不见了").toContain("<WinKeys withPin />");
+    expect(CSS, "拖拽条没有样式").toContain(".set-drag {");
+    expect(CSS, "窗键组没有定位样式").toContain(".set-winctl {");
+    expect(CSS, "左栏品牌没有样式").toContain(".set-nav-brand {");
+  });
+
+  it("置顶单一出处：身份栏与窗键组同读 windowCtl；身份栏 fullPage 时 inert", () => {
+    const tb = read(MODAL);
+    expect(tb, "身份栏没接共享 store").toContain("useWindowPin");
+    expect(read("shell/WindowControls.tsx"), "窗键组没接共享 store").toContain("useWindowPin");
+    expect(tb, "身份栏没 inert（Tab 会走进被盖住那排看不见的按钮）").toContain("inert={fullPage ? true : undefined}");
   });
 });
 
