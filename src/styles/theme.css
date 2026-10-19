@@ -9045,6 +9045,9 @@ html.aiw-transparent-root #root {
 .set-plg-embed .plg-toolbar { padding: 10px 16px 0; }
 .set-plg-embed .plg-list { padding: 10px 16px; }
 .set-plg-embed .plg-foot { padding: 8px 16px; }
+/* P157-E1：内嵌设置页时列表不再自己滚——`.set-content` 是这一页唯一的滚动口
+   （原来外层滚 + 内层滚两根条，"滚到一半卡住"就是这么来的）；弹窗模式没有外层滚动，保持内滚。 */
+.set-plg-embed .plg-list { overflow-y: visible; }
 
 /* ---- P99b-N6 → P102：市场「货架来源」那两行 ----
    回显那一句的字来自 `marketBrowse.marketEndpointTalk`（与 applyMirror 同一个判定内核），
@@ -10902,8 +10905,22 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-item.open { border-color: var(--accent); }
 /* 停用/隔离的包整卡降一档，而不是只让一枚开关灰着 —— 一眼能扫出"哪些在生效" */
 .plg-item:has(.plg-switch input:not(:checked)) { opacity: 0.72; }
-.plg-item-row { display: flex; align-items: center; gap: 8px; padding: 9px 11px; }
+.plg-item-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
 .plg-item-main { flex: 1 1 auto; display: flex; align-items: center; gap: 10px; background: transparent; border: none; cursor: pointer; text-align: left; padding: 0; color: var(--text); min-width: 0; }
+/* P157-E1：行首 40×40 封面砖——有封面放图（E2），没有就放类型图标。
+   图标砖给列表一个"扫得出这批东西各是什么"的形状；砖底色用抬升面。 */
+.plg-cover {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-m);
+  background: var(--raise-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.plg-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .plg-item-ico { flex: none; display: inline-flex; align-items: center; color: var(--text-faint); }
 .plg-item-main:hover .plg-item-ico { color: var(--accent); }
 .plg-item-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -10912,9 +10929,10 @@ body.pdrag-active *{cursor:grabbing !important;}
   font-size: var(--fs-body);
   line-height: 1.45;
   color: var(--text-dim);
-  /* 两行封顶：描述长到十行的包，把列表撑成一堵墙就没人扫得动了 */
+  /* P157-E1：单行封顶——行首有封面砖之后，"标题 + 一行描述"就是扫读单元，
+     长描述摊两行会把列表节奏拉垮；完整描述在展开的详情里。 */
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -10933,10 +10951,12 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-switch input:checked + .plg-switch-ui { background: var(--accent-soft); border-color: var(--accent); }
 .plg-switch input:checked + .plg-switch-ui::after { transform: translateX(14px); background: var(--accent); }
 .plg-switch input:disabled + .plg-switch-ui { opacity: .5; cursor: not-allowed; }
-.plg-detail { border-top: 1px dashed var(--border); padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+.plg-detail { border-top: 1px dashed var(--border); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
 .plg-detail-desc { font-size: var(--fs-sm); color: var(--text-dim); }
 .plg-detail-dim { font-size: var(--fs-sm); color: var(--text-dim); }
-.plg-sec { font-size: var(--fs-body); font-weight: 600; color: var(--text-dim); margin-top: 4px; letter-spacing: .04em; }
+/* P157-E1：分区标题升语义（h4）并给足上气口——此前六节同权重平铺，
+   读起来是一根柱子；现在"能力/模块/产物/配置/版本/危险区"各有各的断点。 */
+.plg-sec { font-size: var(--fs-sm); font-weight: 700; color: var(--text-dim); margin: var(--sp-3) 0 0; letter-spacing: .04em; }
 .plg-caps { display: flex; flex-wrap: wrap; gap: 4px; }
 .plg-contrib-row { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
 .plg-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -10946,8 +10966,10 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-candidate { padding: 6px 8px; font-size: var(--fs-sm); border: 1px solid var(--accent); border-radius: var(--radius-m); background: var(--accent-soft); display: flex; flex-direction: column; gap: 6px; }
 .plg-candidate-actions { display: flex; gap: 6px; }
 .plg-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.plg-actions.plg-danger { margin-top: var(--sp-2); }
 .plg-actions .btn.danger { color: var(--warn-fg); border-color: var(--warn); }
 .plg-meta { font-size: var(--fs-body); color: var(--text-dim); }
+.plg-count { color: var(--text); }
 .plg-foot { flex: 0 0 auto; padding: 8px 14px; font-size: var(--fs-body); color: var(--text-dim); border-top: 1px solid var(--border); background: var(--bg); }
 
 /* ── P99a-B：插件逻辑模块与插件工具来源 ───────────────────────────────

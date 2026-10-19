@@ -354,39 +354,20 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
 
   return (
     <>
-      <div className="plg-head">
-        <span className="plg-title">{tx("本地插件库", "Local plugin library")}</span>
-        <span className="plg-sub">
-          {plugins.length ? tx(`${plugins.length} 个插件`, `${plugins.length} plugin(s)`) : tx("暂无插件；由 AI 助手「保存为插件」或导入插件包", "No plugins yet — save one from the AI assistant or import a package")}
-        </span>
-        <div className="plg-head-actions">
-          <button
-            className="btn"
-            onClick={requestOpenMarket}
-            title={tx("打开社区插件货架：实时拉取索引，看得见来源、能力与哈希", "Open the community shelf: live index, with origin, capabilities and hashes")}
-          >
-            {tx("插件市场", "Plugin market")}
-          </button>
-          <button className="btn" onClick={() => fileRef.current?.click()} title={tx("导入 uartix-plugin 包（默认停用，校验后才可启用）", "Import a uartix-plugin package (installed disabled; enable it after validation)")}>
-            {tx("导入", "Import")}
-          </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept=".json,application/json"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              void onImportFile(e.target.files?.[0]);
-              e.target.value = "";
-            }}
-          />
-          {onClose && (
+      {/* P157-E1：内嵌设置页时不再渲染这行大标题——设置页页头已经是「插件管理」，
+          再叠一层「本地插件库」就是页中页；弹窗模式保留一行小标题 + 关闭
+          （弹窗没有页头可用，aria-label 也认这一行）。
+          「插件市场 / 导入」搬去工具栏右端：它们是这一页的**动作**，不是这一页的名字。 */}
+      {onClose ? (
+        <div className="plg-head">
+          <span className="plg-title">{tx("本地插件库", "Local plugin library")}</span>
+          <div className="plg-head-actions">
             <button className="btn" onClick={onClose} aria-label={tx("关闭插件库", "Close the plugin library")}>
               {t("c.close")}
             </button>
-          )}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {notice && (
         <div className={notice.ok ? "plg-notice ok" : "plg-notice err"} role="status">
@@ -418,6 +399,27 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
             </button>
           ))}
         </div>
+        <span className="plg-batch-spacer" />
+        <button
+          className="btn"
+          onClick={requestOpenMarket}
+          title={tx("打开社区插件货架：实时拉取索引，看得见来源、能力与哈希", "Open the community shelf: live index, with origin, capabilities and hashes")}
+        >
+          {tx("插件市场", "Plugin market")}
+        </button>
+        <button className="btn" onClick={() => fileRef.current?.click()} title={tx("导入 uartix-plugin 包（默认停用，校验后才可启用）", "Import a uartix-plugin package (installed disabled; enable it after validation)")}>
+          {tx("导入", "Import")}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            void onImportFile(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
         <button
           className={`plg-fchip${selMode ? " on" : ""}`}
           title={tx("多选插件进行批量导出/启停/卸载", "Multi-select plugins to export / enable / disable / uninstall in batch")}
@@ -461,6 +463,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       )}
 
       <div className="plg-list">
+        {/* 空态块只留这一句（check-empty-copy 的账：本文件上限 7 汉字，只许降）——
+            首启"从哪儿来插件"的指引挪去脚注（原来住在被删掉的标题行副文案里）。 */}
         {list.length === 0 && <div className="plg-empty">{tx("没有匹配的插件", "No plugins match")}</div>}
         {list.map((r) => {
           const enabled = r.state === "enabled";
@@ -481,7 +485,9 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   onClick={() => (selMode ? toggleSel(r.pkg.id) : setDetailId(detailId === r.pkg.id ? null : r.pkg.id))}
                   title={selMode ? tx("选中/取消", "Check / uncheck") : tx("展开详情", "Expand details")}
                 >
-                  <KindIcon kinds={recordKinds(r)} />
+                  <span className="plg-cover" aria-hidden="true">
+                    <KindIcon kinds={recordKinds(r)} />
+                  </span>
                   <span className="plg-item-body">
                     <span className="plg-item-line">
                       <span className="plg-item-name">{r.pkg.name}</span>
@@ -543,7 +549,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                       )}
                     </div>
                   )}
-                  <div className="plg-sec">{tx("能力与权限", "Capabilities and permissions")}</div>
+                  <h4 className="plg-sec">{tx("能力与权限", "Capabilities and permissions")}</h4>
                   <div className="plg-caps">
                     {r.pkg.capabilities.map((c) => (
                       <span key={c} className="plg-chip" title={CAP_LABEL[c].note}>
@@ -556,13 +562,13 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                       否则用户只知道"启用了"，却不知道 Agent 面为什么少了/多了东西。 */}
                   {moduleArtifactsOf(r.pkg).length > 0 && (
                     <>
-                      <div className="plg-sec">{tx("逻辑模块", "Logic modules")}</div>
+                      <h4 className="plg-sec">{tx("逻辑模块", "Logic modules")}</h4>
                       <div className="plg-notice">
                         {moduleBlock(r.pkg.id)}
                       </div>
                       {pluginToolDefsOf(r.pkg.id).length > 0 && (
                         <>
-                          <div className="plg-sec">{tx("为 AI 助手提供的工具", "Tools provided to the AI assistant")}</div>
+                          <h4 className="plg-sec">{tx("为 AI 助手提供的工具", "Tools provided to the AI assistant")}</h4>
                           <div className="plg-caps">
                             {pluginToolDefsOf(r.pkg.id).map((d) => (
                               <span key={d.baseName} className="plg-chip" title={d.description}>
@@ -582,7 +588,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     </>
                   )}
 
-                  <div className="plg-sec">{tx("产物与操作", "Artifacts and actions")}</div>
+                  <h4 className="plg-sec">{tx("产物与操作", "Artifacts and actions")}</h4>
                   {Object.entries(r.pkg.contributions).length === 0 && <div className="plg-detail-dim">{tx("无可挂载产物", "No mountable artifacts")}</div>}
                   {Object.entries(r.pkg.contributions).map(([key, entries]) =>
                     (entries ?? []).map((it) => {
@@ -631,7 +637,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
 
                   {r.pkg.settingsSchema && r.pkg.settingsSchema.length > 0 && (
                     <>
-                      <div className="plg-sec">{tx("配置", "Configuration")}</div>
+                      <h4 className="plg-sec">{tx("配置", "Configuration")}</h4>
                       {r.pkg.settingsSchema.map((f) => (
                         <label key={f.key} className="plg-cfg-row">
                           <span className="plg-cfg-label">{f.label}</span>
@@ -666,7 +672,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     </>
                   )}
 
-                  <div className="plg-sec">{tx("版本", "Versions")}</div>
+                  <h4 className="plg-sec">{tx("版本", "Versions")}</h4>
                   <div className="plg-detail-dim">
                     {tx(`当前 v${r.pkg.version}；历史 ${r.versions.length} 个`, `Current v${r.pkg.version}; ${r.versions.length} in history`)}
                     {r.versions.length > 0 && r.versions[r.versions.length - 1] && (
@@ -694,7 +700,9 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     </div>
                   )}
 
-                  <div className="plg-actions">
+                  {/* P157-E1：导出/复制/回滚/卸载四颗是一组"包动作"——成组并留出气口，
+                      与上面的信息区拉开；拆掉包的三颗（回滚/卸载）保持危险色。 */}
+                  <div className="plg-actions plg-danger">
                     <button className="btn" onClick={() => doExport(r)} title={tx("导出为 uartix-plugin 包 JSON（不含配置值与秘密）", "Export as a uartix-plugin package JSON (no config values or secrets)")}>
                       {tx("导出", "Export")}
                     </button>
@@ -740,7 +748,14 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       </div>
 
       <div className="plg-foot">
-        {tx(`能力白名单（${PLUGIN_CAPS.length} 项）之外的声明一律拒绝；导入的插件一律默认停用；作者自报的可信标记不构成信任。`, `Anything outside the capability allowlist (${PLUGIN_CAPS.length} entries) is rejected; imported plugins start disabled; an author's own trust claims earn no trust.`)}
+        {plugins.length === 0 ? (
+          tx("暂无插件；由 AI 助手「保存为插件」或导入插件包", "No plugins yet — save one from the AI assistant or import a package")
+        ) : (
+          <>
+            <span className="plg-count">{tx(`共 ${plugins.length} 个插件 · `, `${plugins.length} plugin(s) · `)}</span>
+            {tx(`能力白名单（${PLUGIN_CAPS.length} 项）之外的声明一律拒绝；导入的插件一律默认停用；作者自报的可信标记不构成信任。`, `Anything outside the capability allowlist (${PLUGIN_CAPS.length} entries) is rejected; imported plugins start disabled; an author's own trust claims earn no trust.`)}
+          </>
+        )}
       </div>
 
     </>
