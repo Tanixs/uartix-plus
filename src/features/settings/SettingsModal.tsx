@@ -1228,6 +1228,37 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     <span />
                   </label>
                 ), tx("openPort/closePort、删除模板/命令/卡片等破坏性动作的开关（与高权限动作同一集合）", "Gates openPort/closePort and destructive remove actions (same set as high-privilege actions)"))}
+                <div className="set-group-title">{tx("插件发布 · GitHub", "Plugin publishing · GitHub")}</div>
+                {row(tx("GitHub Token", "GitHub token"), (
+                  <input
+                    className="input"
+                    type="password"
+                    style={{ width: 300 }}
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder="github_pat_… / ghp_…"
+                    value={settings.ghToken}
+                    onChange={(e) => patch({ ghToken: e.target.value.trim() })}
+                  />
+                ), tx("只在本机保存，发布时直接交给 api.github.com；权限只需 Contents: Read and write、Administration: Read and write（建仓）与 Metadata: Read", "Stored locally, sent only to api.github.com. Needs Contents: RW, Administration: RW (create repos) and Metadata: Read"))}
+                {row(tx("默认仓库属主", "Default repo owner"), (
+                  <input
+                    className="input"
+                    style={{ width: 200 }}
+                    value={settings.ghOwner}
+                    placeholder={tx("留空＝token 所属账号", "Empty = token account")}
+                    onChange={(e) => patch({ ghOwner: e.target.value.trim() })}
+                  />
+                ), tx("填组织名可把仓库建在组织下；留空则建在 token 所属账号下", "Fill an org name to publish under that org; empty publishes under the token account"))}
+                {row(tx("默认话题", "Default topic"), (
+                  <input
+                    className="input"
+                    style={{ width: 200 }}
+                    value={settings.ghTopic}
+                    placeholder="uartix-plugin"
+                    onChange={(e) => patch({ ghTopic: e.target.value.trim().toLowerCase() })}
+                  />
+                ), tx("发布时强制并入该话题；GitHub 的 /topics/<话题> 就是插件目录页", "Always merged on publish; /topics/<topic> is the catalog page on GitHub"))}
                 <div className="set-group-title">{tx("任务（P88a 异步任务）", "Jobs (async tasks)")}</div>
                 <div className="set-danger-note">{tx("收到≠成功；停止中≠已停止。取消不会撤销已发生的设备操作。", "Accepted is not success. Stopping is not stopped. Cancelling never undoes effects already sent.")}</div>
                 {jobSt.jobs.length === 0 ? (

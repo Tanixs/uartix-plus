@@ -18,6 +18,7 @@ function call(name: string, args: unknown): ToolCall { return { callId: `c-${nam
 
 // P110-B1：`aiApiKey` 不再是 Settings 键（搬进 aiProfileStore 的供应商表），
 // 这里只剩 `mcpToken` 一枚 schema 内的 secret 可当样本；档案表的密钥另有一条"不许从 settings_read 出境"的断言。
+// P157-E3 起 `ghToken` 也是 secret（同一掩码口径），本文件仍用 mcpToken 当样本即可。
 beforeEach(() => {
   settings.patch({ zoom: 100, theme: "begonia", mcpToken: "" });
   patchEditingProvider({ apiKey: "" });

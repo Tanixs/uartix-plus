@@ -10991,6 +10991,20 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-edit-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
 .plg-edit-row > span { flex: 0 0 64px; color: var(--text-dim); }
 .plg-edit-row > .input { flex: 1 1 auto; min-width: 0; }
+/* P157-E3：发布面板（表单 + 文件清单 + 结果） */
+.plg-publish {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  background: var(--raise-1);
+}
+.plg-publish-warn { color: var(--warn-fg); font-size: var(--fs-sm); }
+.plg-publish-check { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text-dim); }
+.plg-publish-files { font-size: var(--fs-sm); color: var(--text-faint); word-break: break-all; }
+.plg-publish-ok { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: var(--text-dim); word-break: break-all; }
 .plg-meta { font-size: var(--fs-body); color: var(--text-dim); }
 .plg-count { color: var(--text); }
 .plg-foot { flex: 0 0 auto; padding: 8px 14px; font-size: var(--fs-body); color: var(--text-dim); border-top: 1px solid var(--border); background: var(--bg); }

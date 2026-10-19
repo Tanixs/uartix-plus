@@ -130,6 +130,12 @@ export interface Settings {
   mcpHighPriv: boolean;
   /** 桥握手 token（首启自动生成，32 hex） */
   mcpToken: string;
+  /** GitHub 发布（P157-E3）：细粒度 token，只在本机保存，发布时直接交给 api.github.com */
+  ghToken: string;
+  /** 默认仓库属主（空＝token 所属账号；填组织名则建在组织下） */
+  ghOwner: string;
+  /** 默认话题（发布时强制并入；GitHub /topics/<话题> 就是插件目录） */
+  ghTopic: string;
   /** 插件市场（P99b-N1）：索引地址。默认是应用自带的示例货架（同源，不联网） */
   marketIndexUrl: string;
   /** 国内可达性兜底：直连失败后才试的 https 前缀，域同样要过市场白名单（空＝不用） */
@@ -250,6 +256,9 @@ function load(): Settings {
     mcpAllowSend: false,
     mcpHighPriv: false,
     mcpToken: newToken(),
+    ghToken: "",
+    ghOwner: "",
+    ghTopic: "uartix-plugin",
     marketIndexUrl: MARKET_BUNDLED_INDEX_URL,
     marketMirrorPrefix: "",
   };
@@ -330,6 +339,14 @@ function load(): Settings {
       mcpHighPriv: Boolean(p.mcpHighPriv),
       mcpToken:
         typeof p.mcpToken === "string" && p.mcpToken.length >= 16 ? p.mcpToken : newToken(),
+      ghToken: typeof p.ghToken === "string" ? p.ghToken.trim().slice(0, 200) : "",
+      ghOwner: typeof p.ghOwner === "string" ? p.ghOwner.trim().slice(0, 39) : "",
+      ghTopic: (() => {
+        const t = typeof p.ghTopic === "string"
+          ? p.ghTopic.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 50)
+          : "";
+        return t || "uartix-plugin";
+      })(),
       marketIndexUrl:
         typeof p.marketIndexUrl === "string" && p.marketIndexUrl.trim()
           ? p.marketIndexUrl.trim().slice(0, 300)

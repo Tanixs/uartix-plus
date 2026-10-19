@@ -40,6 +40,8 @@ import { moduleArtifactsOf } from "./moduleHost";
 import { moduleDiagnostics, type ModuleStatus } from "./moduleBus";
 import { describeToolChange, pluginToolChangeOf, pluginToolDefsOf } from "./pluginToolDefs";
 import { CAP_LABEL, PLUGIN_CAPS, describeDiff, manifestDiff, type PluginManifest } from "./pluginManifest";
+import { buildPublishFiles, publishPlugin, type PublishResult } from "./githubPublish";
+import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { setOpen } from "../ai/extensionStore";
 import { Glyph, IconCode, IconColumns, IconDock, IconLayoutEdit, IconMore, IconPlay, IconStack } from "../../shared/icons";
 
@@ -318,6 +320,15 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   }>(null);
   const [coverBusy, setCoverBusy] = useState(false);
   const coverRef = useRef<HTMLInputElement>(null);
+  const [pub, setPub] = useState<null | {
+    repo: string;
+    description: string;
+    isPrivate: boolean;
+    topics: string;
+    busy: boolean;
+    result?: PublishResult;
+  }>(null);
+  const pubRes = pub?.result;
   const toggleSel = (id: string) =>
     setSel((prev) => {
       const nx = new Set(prev);
@@ -641,10 +652,87 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                             >
                               {tx("编辑信息", "Edit info")}
                             </button>
+                            <button
+                              className="btn"
+                              onClick={() => {
+                                setPub({
+                                  repo: (r.pkg.id.split(".").pop() ?? r.pkg.id).replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 100),
+                                  description: r.pkg.desc ?? "",
+                                  isPrivate: false,
+                                  topics: getSettings().ghTopic || "uartix-plugin",
+                                  busy: false,
+                                });
+                                setEdit(null);
+                              }}
+                            >
+                              {tx("发布到 GitHub", "Publish to GitHub")}
+                            </button>
                           </div>
                         </div>
                       </div>
                     </>
+                  )}
+                  {pub && (
+                    <div className="plg-publish">
+                      {!getSettings().ghToken && (
+                        <div className="plg-publish-warn">
+                          {tx("先在「设置 → 集成」填入 GitHub Token 才能发布。", "Add a GitHub token in Settings → Integration first.")}
+                        </div>
+                      )}
+                      <label className="plg-edit-row">
+                        <span>{tx("仓库名", "Repository")}</span>
+                        <input className="input" value={pub.repo} maxLength={100} onChange={(e) => setPub({ ...pub, repo: e.target.value })} />
+                      </label>
+                      <label className="plg-edit-row">
+                        <span>{tx("描述", "Description")}</span>
+                        <input className="input" value={pub.description} maxLength={120} onChange={(e) => setPub({ ...pub, description: e.target.value })} />
+                      </label>
+                      <label className="plg-edit-row">
+                        <span>{tx("话题", "Topics")}</span>
+                        <input className="input" value={pub.topics} placeholder="uartix-plugin, serial" onChange={(e) => setPub({ ...pub, topics: e.target.value })} />
+                      </label>
+                      <label className="plg-publish-check">
+                        <input type="checkbox" checked={pub.isPrivate} onChange={(e) => setPub({ ...pub, isPrivate: e.target.checked })} />
+                        {tx("私有仓库", "Private repository")}
+                      </label>
+                      <div className="plg-publish-files">
+                        {tx("将上传：", "Will upload: ")}
+                        {buildPublishFiles(r).map((f) => f.path).join(" · ")}
+                      </div>
+                      <div className="plg-actions">
+                        <button
+                          className="btn primary"
+                          disabled={pub.busy || !getSettings().ghToken}
+                          onClick={() => {
+                            setPub({ ...pub, busy: true, result: undefined });
+                            void publishPlugin(r, {
+                              repo: pub.repo,
+                              description: pub.description,
+                              isPrivate: pub.isPrivate,
+                              topics: pub.topics,
+                            }).then((result) => setPub({ ...pub, busy: false, result }));
+                          }}
+                        >
+                          {pub.busy ? tx("发布中…", "Publishing…") : tx("一键发布", "Publish")}
+                        </button>
+                        <button className="btn" onClick={() => setPub(null)}>{tx("取消", "Cancel")}</button>
+                      </div>
+                      {pubRes && (pubRes.ok ? (
+                        <div className="plg-publish-ok">
+                          <div>{tx("仓库：", "Repo: ")}{pubRes.repoUrl}</div>
+                          <div>{tx("话题：", "Topic: ")}{pubRes.topicUrl}</div>
+                          {pubRes.warning && <div className="plg-publish-warn">{pubRes.warning}</div>}
+                          <div className="plg-actions">
+                            <button className="btn" onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl(pubRes.repoUrl))}>{tx("打开仓库", "Open repo")}</button>
+                            <button className="btn" onClick={() => void import("@tauri-apps/plugin-opener").then((m) => m.openUrl(pubRes.topicUrl))}>{tx("打开话题页", "Open topic")}</button>
+                            <button className="btn" onClick={() => void navigator.clipboard.writeText(pubRes.repoUrl)}>{tx("复制仓库链接", "Copy repo link")}</button>
+                            <button className="btn" onClick={() => void navigator.clipboard.writeText(pubRes.topicUrl)}>{tx("复制话题链接", "Copy topic link")}</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="plg-publish-warn">{pubRes.msg}</div>
+                      ))}
+                    </div>
                   )}
                   <input
                     ref={coverRef}

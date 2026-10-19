@@ -84,6 +84,11 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "mcpAllowSend", type: "boolean", def: false, group: "mcp", label: "MCP 允许远程发送", sensitivity: "protected", reversible: false },
   { key: "mcpHighPriv", type: "boolean", def: false, group: "mcp", label: "MCP 允许高权限动作", sensitivity: "protected", reversible: false },
   { key: "mcpToken", type: "string", maxLen: 128, def: "", group: "mcp", label: "MCP 握手 token", sensitivity: "secret", reversible: true },
+  // P157-E3：GitHub 一键发布。token 与 MCP 握手 token 同口径（secret：工具输出只报 configured）；
+  // 属主/话题标 protected —— 这两键决定"发到谁家、进哪个目录"，是信任面不是技术面（同 marketIndexUrl）。
+  { key: "ghToken", type: "string", maxLen: 200, def: "", group: "mcp", label: "GitHub 发布 Token", sensitivity: "secret", reversible: true },
+  { key: "ghOwner", type: "string", maxLen: 39, def: "", group: "mcp", label: "插件发布默认属主", sensitivity: "protected", reversible: true },
+  { key: "ghTopic", type: "string", maxLen: 50, def: "uartix-plugin", group: "mcp", label: "插件发布默认话题", sensitivity: "protected", reversible: true },
   // P99b-N6：这两键从 N1 起就存在于 store，但一直没进 schema、也没进界面——
   // 那句「全量声明：每个 Settings 键恰好一条」因此是假的（双向守卫现在钉着它）。
   // **为什么是 protected 而不是 safe**：`marketIndexUrl` 决定"从哪台机器取包的元数据"。

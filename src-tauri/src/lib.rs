@@ -7,6 +7,7 @@ mod bridge_jobs;
 mod busevt;
 mod demo;
 mod files;
+mod github_publish;
 mod market_fetch;
 mod net;
 mod parser;
@@ -291,7 +292,8 @@ pub fn run() {
             agent_tools::agent_repo_check,
             agent_tools::agent_shell_exec,
             agent_tools::agent_http_get,
-            market_fetch::market_fetch,
+            github_publish::github_publish,
+    market_fetch::market_fetch,
             // 双击 .uopk（文件关联）时前端 operatorStore 经它取走待打开路径。
             // 这条曾经**只定义了没注册**，前端 invoke 直接 reject 又被空 catch 吞掉 ⇒ 表现为"双击没反应"；
             // 现由 .tools/check-commands-registered.cjs 钉住（§8-P44"注册命令≠State 可用"的镜像形状）。
