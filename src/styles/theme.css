@@ -6511,16 +6511,26 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .set-row.wide > .set-ctl > .input { flex: 1 1 260px; min-width: 0; }
 .set-row.wide > .set-ctl > .ai-key-wrap { flex: 1 1 260px; min-width: 0; }
 .set-row.wide > .set-ctl > .ai-key-wrap > .input { flex: 1; min-width: 0; }
-/* 高内容行（主题色卡 / 预设卡 / 三层覆盖清单）：label 顶部对齐，不再垂直悬在中间 */
+/* P157-R：整片卡组控件（主题色卡 / 预设卡 / 三层覆盖清单）不走两栏——它们不是"一个控件"，
+   塞进 `auto` 列时固有宽度被压成一条 `minmax(84px,1fr)` 轨道，9 张卡竖排贴右缘
+   （P156-Z 实装后用户实测第一眼就是这个）。含卡组的行自动改**堆叠版**（同 `.wide` 形），
+   卡组才有整行宽铺开；`:has()` 覆盖三家消费点（设置页 / 模型页 / 市场来源），
+   以后新行塞了卡组也自动正确，不需要谁记得传 `wide`。 */
 .set-row:has(> .set-ctl .theme-grid),
 .set-row:has(> .set-ctl .preset-grid),
 .set-row:has(> .set-ctl .set-apr) {
-  align-items: flex-start;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "label" "desc" "ctl";
 }
-.set-row:has(> .set-ctl .theme-grid) > label,
-.set-row:has(> .set-ctl .preset-grid) > label,
-.set-row:has(> .set-ctl .set-apr) > label {
-  padding-top: 8px;
+.set-row:has(> .set-ctl .theme-grid):not(.has-desc),
+.set-row:has(> .set-ctl .preset-grid):not(.has-desc),
+.set-row:has(> .set-ctl .set-apr):not(.has-desc) {
+  grid-template-areas: "label" "ctl";
+}
+.set-row:has(> .set-ctl .theme-grid) > .set-ctl,
+.set-row:has(> .set-ctl .preset-grid) > .set-ctl,
+.set-row:has(> .set-ctl .set-apr) > .set-ctl {
+  margin-top: 4px;
 }
 .set-ctl { grid-area: ctl; flex: 1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* 设置行内嵌表单：去除 form-row 自带的 label 定宽/底边距与 form-hint 的 84px 缩进，保证整行对齐 */

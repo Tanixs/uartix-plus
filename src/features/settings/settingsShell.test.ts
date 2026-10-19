@@ -137,3 +137,24 @@ describe("P156-Z · 设置页 ZCode 化（两栏行 + 页头档）", () => {
     expect(src, "说明长度阈值不见了").toContain("DESC_CJK_MAX");
   });
 });
+
+describe("P157-R · 卡组行自动堆叠（不再被压进 auto 列）", () => {
+  it("含卡组的行是单列堆叠：theme-grid / preset-grid / set-apr 三家同一形状", () => {
+    // 三家的规则头同行并列，从第一个选择器切到 `}` 拿到整块
+    const at = CSS.indexOf(".set-row:has(> .set-ctl .theme-grid)");
+    expect(at, "卡组堆叠规则不见了（P156-Z 的 auto 列挤压会回来）").toBeGreaterThan(-1);
+    const block = CSS.slice(at, CSS.indexOf("}", at));
+    for (const sel of [".set-row:has(> .set-ctl .preset-grid)", ".set-row:has(> .set-ctl .set-apr)"]) {
+      expect(block, `${sel} 不在同一规则组里（漏一家就是漏一片消费面）`).toContain(sel);
+    }
+    expect(block, "卡组行没落单列").toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(block, "卡组行不是堆叠区（label/desc/ctl 三行）").toContain('grid-template-areas: "label" "desc" "ctl"');
+    expect(block, "卡组行还是两栏（label ctl 并存）").not.toContain('"label ctl"');
+
+    // 无说明时收成两行（:not(.has-desc) 与通用收形同一条思路）
+    const at2 = CSS.indexOf(".set-row:has(> .set-ctl .theme-grid):not(.has-desc)");
+    expect(at2, "无说明卡组行的收形不见了").toBeGreaterThan(-1);
+    const block2 = CSS.slice(at2, CSS.indexOf("}", at2));
+    expect(block2, "无说明卡组行没收成 label/ctl 两行").toContain('grid-template-areas: "label" "ctl"');
+  });
+});
