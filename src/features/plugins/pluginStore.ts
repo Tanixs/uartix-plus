@@ -720,6 +720,34 @@ export function duplicate(id: string): { ok: boolean; msg: string; id?: string }
   return { ok: true, msg: `已创建副本 ${newId}（默认停用）`, id: newId };
 }
 
+/* ---------------- P157-E2：就地编辑展示信息 ---------------- */
+
+export type PluginMetaPatch = Partial<
+  Pick<PluginManifest, "name" | "desc" | "version" | "author" | "homepage" | "cover">
+>;
+
+/**
+ * 就地改"展示信息"（名称/描述/版本/作者/主页/封面）。id 不可改——引用与历史都挂在它上面。
+ * 走同一把 `validateManifest`：手工改坏版本号/主页/封面一样当场拒；通过后用**规范化结果**
+ * 覆盖 pkg（界面看到的永远是校验过的形状）。不产生历史版本：这几项不是"逻辑版本"。
+ * 清空可选字段传 `undefined`（键会在落盘时消失，校验器按"未填"处理）。
+ */
+export function updateMeta(id: string, patch: PluginMetaPatch): { ok: boolean; msg: string } {
+  const record = getPlugin(id);
+  if (!record) return { ok: false, msg: "插件不存在" };
+  const next = { ...structuredClone(record.pkg), ...structuredClone(patch) } as Record<string, unknown>;
+  for (const k of Object.keys(next)) {
+    if (next[k] === undefined) delete next[k];
+  }
+  const v = validateManifest(next);
+  if (!v.ok || !v.manifest) return { ok: false, msg: v.errors[0] ?? "校验未通过" };
+  record.pkg = v.manifest;
+  record.updatedAt = Date.now();
+  upsert(record);
+  emit();
+  return { ok: true, msg: "插件信息已更新" };
+}
+
 export function uninstall(id: string): { ok: boolean; msg: string } {
   const record = getPlugin(id);
   if (!record) return { ok: false, msg: "插件不存在" };

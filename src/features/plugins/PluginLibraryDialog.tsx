@@ -21,8 +21,10 @@ import {
   rejectUpdate,
   shadowExtId,
   armModulePackage,
+  updateMeta,
   type PluginRecord,
 } from "./pluginStore";
+import { readCover } from "./coverImage";
 // 界面上屏的种类名/状态名走 `pluginUiNames`（按语言挑）；元表里那份中文是 CLI 与模型摘要用的原文，别拿到这里
 import { contribName, kindName, stateName } from "./pluginUiNames";
 import type { WorkflowArtifact } from "./artifact";
@@ -305,6 +307,17 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   /* —— P88d ⑤：批量多选（导出/启停/卸载） —— */
   const [selMode, setSelMode] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  /* P157-E2：就地编辑展示信息（名称/版本/作者/主页/描述）。同一时刻只开一条详情，所以状态按 id 挂。 */
+  const [edit, setEdit] = useState<null | {
+    id: string;
+    name: string;
+    version: string;
+    author: string;
+    homepage: string;
+    desc: string;
+  }>(null);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const coverRef = useRef<HTMLInputElement>(null);
   const toggleSel = (id: string) =>
     setSel((prev) => {
       const nx = new Set(prev);
@@ -486,7 +499,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                   title={selMode ? tx("选中/取消", "Check / uncheck") : tx("展开详情", "Expand details")}
                 >
                   <span className="plg-cover" aria-hidden="true">
-                    <KindIcon kinds={recordKinds(r)} />
+                    {r.pkg.cover ? <img src={r.pkg.cover} alt="" /> : <KindIcon kinds={recordKinds(r)} />}
                   </span>
                   <span className="plg-item-body">
                     <span className="plg-item-line">
@@ -540,7 +553,119 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
 
               {detailId === r.pkg.id && (
                 <div className="plg-detail">
-                  {r.pkg.desc && <div className="plg-detail-desc">{r.pkg.desc}</div>}
+                  {/* P157-E2：概览（封面 + 作者/主页 + 图片与信息编辑）住详情顶部。
+                      没封面时给类型图标砖；有封面时列表缩略也用同一张（`pkg.cover`）。 */}
+                  {edit?.id === r.pkg.id ? (
+                    <div className="plg-edit">
+                      <label className="plg-edit-row">
+                        <span>{tx("名称", "Name")}</span>
+                        <input className="input" value={edit.name} maxLength={60} onChange={(e) => setEdit({ ...edit, name: e.target.value })} />
+                      </label>
+                      <label className="plg-edit-row">
+                        <span>{tx("版本", "Version")}</span>
+                        <input className="input" value={edit.version} maxLength={20} onChange={(e) => setEdit({ ...edit, version: e.target.value })} />
+                      </label>
+                      <label className="plg-edit-row">
+                        <span>{tx("作者", "Author")}</span>
+                        <input className="input" value={edit.author} maxLength={40} onChange={(e) => setEdit({ ...edit, author: e.target.value })} />
+                      </label>
+                      <label className="plg-edit-row">
+                        <span>{tx("主页", "Homepage")}</span>
+                        <input className="input" value={edit.homepage} maxLength={200} placeholder="https://…" onChange={(e) => setEdit({ ...edit, homepage: e.target.value })} />
+                      </label>
+                      <label className="plg-edit-row">
+                        <span>{tx("描述", "Description")}</span>
+                        <input className="input" value={edit.desc} maxLength={300} onChange={(e) => setEdit({ ...edit, desc: e.target.value })} />
+                      </label>
+                      <div className="plg-actions">
+                        <button
+                          className="btn primary"
+                          onClick={() => {
+                            const res = updateMeta(edit.id, {
+                              name: edit.name,
+                              version: edit.version,
+                              author: edit.author.trim() || undefined,
+                              homepage: edit.homepage.trim() || undefined,
+                              desc: edit.desc.trim() || undefined,
+                            });
+                            setNotice(res);
+                            if (res.ok) setEdit(null);
+                          }}
+                        >
+                          {tx("保存", "Save")}
+                        </button>
+                        <button className="btn" onClick={() => setEdit(null)}>{tx("取消", "Cancel")}</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {r.pkg.desc && <div className="plg-detail-desc">{r.pkg.desc}</div>}
+                      <div className="plg-overview">
+                        <div className="plg-overview-cover">
+                          {r.pkg.cover ? <img src={r.pkg.cover} alt="" /> : <KindIcon kinds={recordKinds(r)} />}
+                        </div>
+                        <div className="plg-overview-main">
+                          <div className="plg-overview-line">
+                            <span className="plg-detail-dim">
+                              {r.pkg.author ? tx(`作者：${r.pkg.author}`, `by ${r.pkg.author}`) : tx("作者未填", "No author yet")}
+                            </span>
+                            {r.pkg.homepage && (
+                              <span className="plg-overview-url" title={r.pkg.homepage}>{r.pkg.homepage}</span>
+                            )}
+                          </div>
+                          <div className="plg-overview-actions">
+                            <button className="btn" disabled={coverBusy} onClick={() => coverRef.current?.click()}>
+                              {coverBusy
+                                ? tx("处理中…", "Processing…")
+                                : r.pkg.cover
+                                  ? tx("更换图片", "Replace image")
+                                  : tx("添加图片", "Add image")}
+                            </button>
+                            {r.pkg.cover && (
+                              <button className="btn" onClick={() => setNotice(updateMeta(r.pkg.id, { cover: undefined }))}>
+                                {tx("移除图片", "Remove image")}
+                              </button>
+                            )}
+                            <button
+                              className="btn"
+                              onClick={() =>
+                                setEdit({
+                                  id: r.pkg.id,
+                                  name: r.pkg.name,
+                                  version: r.pkg.version,
+                                  author: r.pkg.author ?? "",
+                                  homepage: r.pkg.homepage ?? "",
+                                  desc: r.pkg.desc ?? "",
+                                })
+                              }
+                            >
+                              {tx("编辑信息", "Edit info")}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  <input
+                    ref={coverRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (!f) return;
+                      setCoverBusy(true);
+                      void readCover(f).then((res) => {
+                        setCoverBusy(false);
+                        if (!res.ok) {
+                          setNotice({ ok: false, msg: res.msg });
+                          return;
+                        }
+                        setNotice(updateMeta(r.pkg.id, { cover: res.dataUrl }));
+                      });
+                    }}
+                  />
                   {r.state === "quarantined" && (
                     <div className="plg-notice err">
                       {tx(

@@ -213,6 +213,13 @@ export interface PluginManifest {
   version: string;
   name: string;
   desc?: string;
+  /** P157-E2：作者署名（自由文本，1..40 字符；老包没有这个字段也照常装） */
+  author?: string;
+  /** P157-E2：主页（只收 https，≤200 字符） */
+  homepage?: string;
+  /** P157-E2：封面（data URL：png/jpeg/webp，解码后 ≤200KB）。随包导出/导入，
+   *  是"一枚封面"不是画廊——多图/截图归市场索引的 `screenshots`（另批）。 */
+  cover?: string;
   hostApi: string;
   capabilities: PluginCap[];
   contributions: Partial<Record<string, ContribEntry[]>>;
@@ -233,6 +240,20 @@ export interface ManifestValidation {
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31})+$/;
 const VER_RE = /^\d+\.\d+\.\d+$/;
 const CONTRIBUT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/;
+/** P157-E2：封面预算（解码后的字节）。包体上限 4MiB，一枚 200KB 的封面不会把它顶出去。 */
+export const COVER_MAX_BYTES = 200 * 1024;
+/** 封面最长边（上传压缩时按它缩；校验器不重解码，只管格式与字节） */
+export const COVER_MAX_EDGE = 1024;
+const COVER_DATA_URL_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+/** data URL 的 base64 段解码后字节数（估算只用于预算判据：base64 长度 × 3/4 减 padding）。 */
+export function coverBytes(dataUrl: string): number {
+  const i = dataUrl.indexOf(",");
+  if (i < 0) return 0;
+  const b64 = dataUrl.slice(i + 1);
+  const pad = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - pad);
+}
 
 /**
  * 包内条目路径规范化：拒绝绝对路径、盘符、反斜杠、路径穿越、空段（§11）。
@@ -283,6 +304,21 @@ export function validateManifest(raw: unknown): ManifestValidation {
   }
   if (typeof raw.name !== "string" || !raw.name.trim() || raw.name.length > 60) {
     out.errors.push("name 必须是 1..60 字符");
+  }
+  /* —— P157-E2：可选展示信息（作者 / 主页 / 封面）——老包不带它们，零变更 —— */
+  if (raw.author !== undefined && (typeof raw.author !== "string" || !raw.author.trim() || raw.author.trim().length > 40)) {
+    out.errors.push("author 必须是 1..40 字符");
+  }
+  if (
+    raw.homepage !== undefined &&
+    (typeof raw.homepage !== "string" || raw.homepage.length > 200 || !/^https:\/\/\S+$/i.test(raw.homepage))
+  ) {
+    out.errors.push("homepage 必须是 https URL（≤200 字符）");
+  }
+  if (raw.cover !== undefined && (typeof raw.cover !== "string" || !COVER_DATA_URL_RE.test(raw.cover))) {
+    out.errors.push("cover 必须是 png/jpeg/webp 的 data URL");
+  } else if (typeof raw.cover === "string" && coverBytes(raw.cover) > COVER_MAX_BYTES) {
+    out.errors.push(`cover 解码后超过 ${Math.round(COVER_MAX_BYTES / 1024)}KB 上限（先压缩再入包）`);
   }
   if (raw.hostApi !== HOST_API) {
     out.errors.push(`hostApi 必须是 "${HOST_API}"`);
@@ -475,6 +511,9 @@ export function validateManifest(raw: unknown): ManifestValidation {
     version: raw.version as string,
     name: (raw.name as string).trim(),
     ...(typeof raw.desc === "string" && raw.desc.trim() ? { desc: raw.desc.trim().slice(0, 300) } : {}),
+    ...(typeof raw.author === "string" && raw.author.trim() ? { author: raw.author.trim().slice(0, 40) } : {}),
+    ...(typeof raw.homepage === "string" && raw.homepage ? { homepage: raw.homepage } : {}),
+    ...(typeof raw.cover === "string" && raw.cover ? { cover: raw.cover } : {}),
     hostApi: HOST_API,
     capabilities: caps,
     contributions,
