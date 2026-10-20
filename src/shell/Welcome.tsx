@@ -128,7 +128,7 @@ export function Welcome({ dark, initial = 0, onStartTour, onRunDemo, onDismiss }
           </Glyph>
         </button>
 
-        <div className="wlc-body">
+        <div className={`wlc-body wlc-body-${slide.id}`}>
           {slide.id === "pipeline" ? <Pipeline /> : <AnnotatedShot slide={slide} dark={dark} />}
         </div>
 

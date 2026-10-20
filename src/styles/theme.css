@@ -511,6 +511,18 @@ body,
   background: transparent;
 }
 
+/* P158-C2：选区跟随 accent（默认系统蓝在九套主题里都像"外来物"） */
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+
+/* P158-C3：可点卡片的按压缩感（即时状态，不是过渡；no-motion 下连这点位移也不要） */
+:root:not(.no-motion) .theme-card:active,
+:root:not(.no-motion) .preset-card:active {
+  transform: scale(0.985);
+}
+
 body {
   font-family: var(--font-ui);
   color: var(--text);
@@ -11487,6 +11499,7 @@ html.no-motion .mkt-img-skel { animation: none; }
 }
 
 .wlc-body {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -11496,6 +11509,16 @@ html.no-motion .mkt-img-skel { animation: none; }
      两张卡又差一行，这条"等高"就没有约束力了。宁可溢出可见，不要悄悄破约。 */
   height: 300px;
   flex: none;
+}
+/* P158-C1：管线卡只有 ~140 高，舞台上下各空 ~80——铺一层很淡的 accent 光晕把空白变成留白。
+   只给管线卡（截图卡背后加光会和截图本身打架），且不拦事件。 */
+.wlc-body-pipeline::before {
+  content: "";
+  position: absolute;
+  inset: 22px 48px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 12%, transparent), transparent 72%);
+  pointer-events: none;
 }
 
 /* ---- 卡 1：管线示意（四个节点 + 箭头，全 DOM，图标走 Glyph 单一出处） ---- */
@@ -11535,7 +11558,7 @@ html.no-motion .mkt-img-skel { animation: none; }
   gap: var(--sp-1);
   width: 126px;
   min-width: 0;
-  padding: var(--sp-4) var(--sp-3);
+  padding: 20px var(--sp-3);
   background: var(--raise-1);
   border-radius: var(--radius-l);
   text-align: center;
@@ -11555,9 +11578,10 @@ html.no-motion .mkt-img-skel { animation: none; }
   display: grid;
   place-items: center;
   /* 34px 不是随手挑的：`Glyph` 的 16px 图标装进 28px 圆片里，圆片四周只剩 6px，
-     在示意区里读起来像"图标旁边长了圈灰边"而不是一枚徽章。抬到 34 让留白到 9px。 */
-  width: 34px;
-  height: 34px;
+     在示意区里读起来像"图标旁边长了圈灰边"而不是一枚徽章。抬到 34 让留白到 9px。
+     P158-C1 再抬到 38：舞台 300 的上下留白靠光晕收，图标本身也可以更"有存在感"。 */
+  width: 38px;
+  height: 38px;
   color: var(--accent);
   background: var(--raise-2);
   border-radius: var(--radius-pill);

@@ -70,3 +70,18 @@ describe("P158-B · 插件详情两栏与危险区", () => {
     expect(read(CSS), "行没有 hover 回应").toContain(".plg-item:hover { border-color: var(--line-strong); }");
   });
 });
+
+describe("P158-C · 首启与全局", () => {
+  it("欢迎舞台仍是 300px（welcome.test 的等式），光晕只给管线卡", () => {
+    const css = read(CSS);
+    expect(css, "舞台高度被改了（两张卡会不等高）").toMatch(/\.wlc-body \{[^}]*height: 300px/);
+    expect(css, "管线卡没有光晕").toContain(".wlc-body-pipeline::before");
+    expect(read("shell/Welcome.tsx"), "没有按卡区分舞台 class").toContain("wlc-body-${slide.id}");
+  });
+
+  it("选区跟 accent；按压只在非 no-motion 下", () => {
+    const css = read(CSS);
+    expect(css, "选区还是系统蓝").toMatch(/::selection \{[^}]*var\(--accent\)/);
+    expect(css, "按压没给 no-motion 留出口").toMatch(/:root:not\(\.no-motion\) \.theme-card:active/);
+  });
+});
