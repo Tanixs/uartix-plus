@@ -50,13 +50,41 @@ impl SpanRing {
         }
     }
 
+    /// 二分定位与 [start, end) 相交的区间。spans 按 start 递增且互不重叠，
+    /// 因此只需从左边界（第一个 end > start）扫到右边界（第一个 start >= end）。
+    fn range_bounds(&self, start: u64, end: u64) -> (usize, usize) {
+        if start >= end || self.spans.is_empty() {
+            return (0, 0);
+        }
+        let n = self.spans.len();
+        let mut lo = 0usize;
+        let mut hi = n;
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let s = &self.spans[mid];
+            if s.start + s.len as u64 <= start {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        let first = lo;
+        let mut hi = n;
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if self.spans[mid].start < end {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        (first, lo)
+    }
+
     pub fn in_range(&self, start: u64, end: u64) -> Vec<Span> {
-        SPAN_SCANS.fetch_add(self.spans.len() as u64, Ordering::Relaxed);
-        self.spans
-            .iter()
-            .filter(|s| s.start < end && s.start + s.len as u64 > start)
-            .cloned()
-            .collect()
+        let (first, last) = self.range_bounds(start, end);
+        SPAN_SCANS.fetch_add((last - first) as u64, Ordering::Relaxed);
+        self.spans.range(first..last).cloned().collect()
     }
 
     pub fn clear(&mut self) {
@@ -123,6 +151,14 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
     };
     INGEST_STAGE.store(4, Ordering::Relaxed);
     if !rows.is_empty() {
+        // 先取 keep_from 再锁 spans：ring/spans 不嵌套持有（hex_fetch 同序），
+        // 否则 ingest（spans→ring）与 hex_fetch（ring→spans）会 ABBA 死锁。
+        let keep_from = ctx
+            .pipeline
+            .ring
+            .lock()
+            .expect("环形缓冲锁中毒")
+            .start_seq();
         let mut spans = ctx.pipeline.spans.lock().expect("帧区间锁中毒");
         for r in &rows {
             spans.push(Span {
@@ -132,7 +168,6 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
                 valid: r.valid,
             });
         }
-        let keep_from = ctx.pipeline.ring.lock().expect("环形缓冲锁中毒").start_seq();
         spans.prune(keep_from);
     }
     INGEST_STAGE.store(5, Ordering::Relaxed);
@@ -263,17 +298,22 @@ pub fn replay_spans(ctx: &IngestCtx, rows: &[crate::parser::FrameRow]) {
 pub fn hex_fetch(start: u64, end: u64, state: State<SerialManager>) -> HexSlice {
     let t0 = std::time::Instant::now();
     HEX_FETCHES.fetch_add(1, Ordering::Relaxed);
-    let ring = state.ctx.pipeline.ring.lock().expect("环形缓冲锁中毒");
-    let (s, bytes) = ring.fetch(start, end);
-    let ts_first = if bytes.is_empty() {
-        0
-    } else {
-        ring.ts_at(s)
-    };
-    let ts_last = if bytes.is_empty() {
-        0
-    } else {
-        ring.ts_at(s + bytes.len() as u64 - 1)
+    // ring 只在取字节/时间戳时短暂持有；随后释放再锁 spans（不嵌套，避免 ABBA）。
+    let (s, bytes, total, ts_first, ts_last) = {
+        let ring = state.ctx.pipeline.ring.lock().expect("环形缓冲锁中毒");
+        let (s, bytes) = ring.fetch(start, end);
+        let total = ring.total();
+        let ts_first = if bytes.is_empty() {
+            0
+        } else {
+            ring.ts_at(s)
+        };
+        let ts_last = if bytes.is_empty() {
+            0
+        } else {
+            ring.ts_at(s + bytes.len() as u64 - 1)
+        };
+        (s, bytes, total, ts_first, ts_last)
     };
     let spans = state
         .ctx
@@ -292,7 +332,7 @@ pub fn hex_fetch(start: u64, end: u64, state: State<SerialManager>) -> HexSlice 
         .collect();
     let out = HexSlice {
         start: s,
-        total: ring.total(),
+        total,
         bytes,
         ts_first,
         ts_last,
@@ -300,4 +340,57 @@ pub fn hex_fetch(start: u64, end: u64, state: State<SerialManager>) -> HexSlice 
     };
     HEX_FETCH_US.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span(start: u64, len: u32) -> Span {
+        Span {
+            start,
+            len,
+            tpl_id: "tpl".into(),
+            valid: true,
+        }
+    }
+
+    fn table(n: usize) -> SpanRing {
+        let mut r = SpanRing::new(n + 10);
+        for i in 0..n {
+            r.push(span(i as u64 * 10, 4));
+        }
+        r
+    }
+
+    #[test]
+    fn span_range_returns_overlaps_only() {
+        let r = table(100);
+        assert_eq!(
+            r.in_range(100, 130)
+                .iter()
+                .map(|s| s.start)
+                .collect::<Vec<_>>(),
+            vec![100, 110, 120]
+        );
+        // 查询起点落在 span 中间：前一个 span 仍应命中
+        assert_eq!(
+            r.in_range(102, 103)
+                .iter()
+                .map(|s| s.start)
+                .collect::<Vec<_>>(),
+            vec![100]
+        );
+        // 空洞：100 号 span 到 104 结束，104..109 无命中
+        assert!(r.in_range(104, 109).is_empty());
+    }
+
+    #[test]
+    fn span_range_does_not_scan_whole_table() {
+        let r = table(10_000);
+        assert_eq!(r.range_bounds(50_000, 50_020), (5000, 5002));
+        assert_eq!(r.range_bounds(50_004, 50_011), (5001, 5002));
+        assert_eq!(r.range_bounds(50_004, 50_009), (5001, 5001));
+        assert!(r.range_bounds(50_000, 50_020).1 - r.range_bounds(50_000, 50_020).0 <= 4);
+    }
 }

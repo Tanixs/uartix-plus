@@ -15,6 +15,7 @@ import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
 import { IconChevron, IconPause, IconPlay, IconTrash } from "../../shared/icons";
 import { t, tx } from "../../i18n/strings";
+import { hexSliceCovers } from "./hexCoverage";
 
 const ROW_H = 20;
 const COLS = 16;
@@ -62,6 +63,7 @@ export function HexView() {
   const viewRef = useRef({ follow: true, viewEnd: COLS - 1 });
   const sliceRef = useRef<(Omit<HexSlice, "bytes"> & { bytes: Uint8Array }) | null>(null);
   const fetchingRef = useRef(false);
+  const lastFetchRef = useRef(0);
   const dirtyRef = useRef(true);
   // 暂停：停更画面（数据仍在后台接收累计），恢复后立即补刷一次
   const pausedRef = useRef(false);
@@ -224,13 +226,15 @@ export function HexView() {
     const wantStart = Math.max(0, v.viewEnd + 1 - rows * COLS - FETCH_MARGIN);
     const wantEnd = Math.min(total, v.viewEnd + 1 + FETCH_MARGIN);
     const sl = sliceRef.current;
-    const covered =
-      sl &&
-      sl.start <= wantStart &&
-      sl.start + sl.bytes.length >= wantEnd &&
-      sl.total === total;
+    const covered = hexSliceCovers(sl, wantStart, wantEnd, total);
     if (!covered && !fetchingRef.current && wantEnd > wantStart) {
+      if (performance.now() - lastFetchRef.current < 100) {
+        // 节流窗口内：保持脏标记，下一帧再试（否则暂停/跳尾后可能一直停在旧片）
+        dirtyRef.current = true;
+        return;
+      }
       fetchingRef.current = true;
+      lastFetchRef.current = performance.now();
       invoke<HexSlice>("hex_fetch", { start: wantStart, end: wantEnd })
         .then((s) => {
           sliceRef.current = { ...s, bytes: b64ToBytes(s.bytes) };
