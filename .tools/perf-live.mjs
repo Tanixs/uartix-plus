@@ -377,6 +377,9 @@ for (let i = 0; i < totalSamples; i++) {
     ipcRowsOut: snap.ipc?.framesRowsOut ?? null,
     ipcSendUs: snap.ipc?.sendUs ?? null,
     ipcSendErr: snap.ipc?.sendErr ?? null,
+    ipcStage: snap.ipc?.ingestStage ?? null,
+    demoStage: snap.ipc?.demoStage ?? null,
+    demoTick: snap.ipc?.demoTick ?? null,
     busMsgs: snap.bus?.msgs ?? null,
     busGap: snap.bus?.maxGapMs != null ? Math.round(snap.bus.maxGapMs) : null,
     visibility: snap.visibility,
@@ -387,7 +390,7 @@ for (let i = 0; i < totalSamples; i++) {
     `t=${String(row.tSec).padStart(4)}s fps=${String(row.fps ?? "-").padStart(5)} 行/s=${String(row.rowsPerSec ?? "-").padStart(7)} ` +
       `行=${row.rows} 堆=${row.jsHeapMB}MB 长任务=${row.longTasks}(${row.longMs}ms max ${row.longMax}) ` +
       `console=${row.consoleBlocks} table=${row.tableRows} plotMax=${row.plotPointsMax} hex=${row.hexRx} ` +
-      `ipcOut=${row.ipcOut}/${row.ipcIn} bus=${row.busMsgs} gap=${row.busGap} ${row.visibility}`,
+      `ipcOut=${row.ipcOut}/${row.ipcIn} bus=${row.busMsgs} gap=${row.busGap} stage=${row.ipcStage} demo=${row.demoStage}@${row.demoTick} ${row.visibility}`,
   );
   if (i < totalSamples - 1) await rest(5000);
 }

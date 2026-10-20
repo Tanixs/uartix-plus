@@ -28,19 +28,118 @@
 //! 前端注册 Channel 的同时全部监听点已迁到本总线。
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::parser::FramesEvent;
+use crate::parser::{FrameRow, FramesEvent};
 
 const MSG_FRAMES: u8 = 1;
 const MSG_RX: u8 = 2;
 const MSG_TX: u8 = 3;
 const NONE16: u16 = 0xFFFF;
+
+/// 一次 flush 上限：正常 16ms 窗口远达不到，只在消费端卡死时兜底内存。
+const MAX_PENDING_ROWS: usize = 8192;
+const MAX_PENDING_RX: usize = 1024 * 1024;
+
+/// 合批缓冲：frames 与 rx 各自积攒，flush 时各发一条消息。
+struct Batcher {
+    rows: Vec<FrameRow>,
+    total: u64,
+    errors: u64,
+    dropped: u64,
+    rx: Vec<u8>,
+    rx_first: u64,
+    rx_last: u64,
+    since: Option<Instant>,
+}
+
+impl Batcher {
+    const fn new() -> Self {
+        Self {
+            rows: Vec::new(),
+            total: 0,
+            errors: 0,
+            dropped: 0,
+            rx: Vec::new(),
+            rx_first: 0,
+            rx_last: 0,
+            since: None,
+        }
+    }
+
+    fn push_frames(&mut self, ev: FramesEvent) {
+        if self.since.is_none() {
+            self.since = Some(Instant::now());
+        }
+        self.rows.extend(ev.rows);
+        self.total = ev.total;
+        self.errors = ev.errors;
+        self.dropped = ev.dropped;
+    }
+
+    fn push_rx(&mut self, ts_first: u64, ts_last: u64, bytes: &[u8]) {
+        if self.since.is_none() {
+            self.since = Some(Instant::now());
+        }
+        if self.rx.is_empty() {
+            self.rx_first = ts_first;
+        }
+        self.rx_last = ts_last;
+        self.rx.extend_from_slice(bytes);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rows.is_empty() && self.rx.is_empty()
+    }
+
+    fn due(&self, window: Duration, now: Instant) -> bool {
+        self.since
+            .map_or(false, |t| now.saturating_duration_since(t) >= window)
+    }
+
+    fn over_cap(&self) -> bool {
+        self.rows.len() >= MAX_PENDING_ROWS || self.rx.len() >= MAX_PENDING_RX
+    }
+
+    fn take_frames(&mut self) -> Option<FramesEvent> {
+        if self.rows.is_empty() {
+            return None;
+        }
+        Some(FramesEvent {
+            rows: std::mem::take(&mut self.rows),
+            total: self.total,
+            errors: self.errors,
+            dropped: self.dropped,
+            emit_ts: ts_now(),
+        })
+    }
+
+    fn take_rx(&mut self) -> Option<(u64, u64, Vec<u8>)> {
+        if self.rx.is_empty() {
+            return None;
+        }
+        Some((self.rx_first, self.rx_last, std::mem::take(&mut self.rx)))
+    }
+}
+
+static PENDING: Mutex<Batcher> = Mutex::new(Batcher::new());
+static FLUSHER: AtomicBool = AtomicBool::new(false);
+static WINDOW_MS: OnceLock<u64> = OnceLock::new();
+
+/// 默认 16ms（≈60Hz）；`UARTIX_IPC_BATCH_MS=0` 关闭合批，回到逐事件发送。
+fn batch_window_ms() -> u64 {
+    *WINDOW_MS.get_or_init(|| {
+        std::env::var("UARTIX_IPC_BATCH_MS")
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(16)
+    })
+}
 
 /// IPC 分段计数：只做观测，不参与发送决策。
 struct IpcCounters {
@@ -88,11 +187,21 @@ pub struct IpcStatsOut {
     flushes: u64,
     send_us: u64,
     send_err: u64,
+    batch_ms: u64,
+    pending_rows: u64,
+    pending_rx_bytes: u64,
+    ingest_stage: u64,
+    demo_stage: u64,
+    demo_tick: u64,
 }
 
 /// 活体诊断：perf-live 通过 invoke 读取，判断冻结在发送端还是接收端。
 #[tauri::command]
 pub fn ipc_stats() -> IpcStatsOut {
+    let (pending_rows, pending_rx_bytes) = PENDING
+        .lock()
+        .map(|b| (b.rows.len() as u64, b.rx.len() as u64))
+        .unwrap_or((0, 0));
     IpcStatsOut {
         frames_in: IPC.frames_in.load(Ordering::Relaxed),
         frames_rows_in: IPC.frames_rows_in.load(Ordering::Relaxed),
@@ -104,6 +213,12 @@ pub fn ipc_stats() -> IpcStatsOut {
         flushes: IPC.flushes.load(Ordering::Relaxed),
         send_us: IPC.send_us.load(Ordering::Relaxed),
         send_err: IPC.send_err.load(Ordering::Relaxed),
+        batch_ms: batch_window_ms(),
+        pending_rows,
+        pending_rx_bytes,
+        ingest_stage: crate::pipeline::INGEST_STAGE.load(Ordering::Relaxed),
+        demo_stage: crate::demo::DEMO_STAGE.load(Ordering::Relaxed),
+        demo_tick: crate::demo::DEMO_TICK.load(Ordering::Relaxed),
     }
 }
 
@@ -360,21 +475,62 @@ fn take_channel(app: &AppHandle) -> Option<Channel> {
     ch
 }
 
-pub fn send_frames(app: &AppHandle, ev: &FramesEvent) {
-    // 会话录制 tap（单点覆盖串口/网络/演示源等一切帧源；录制与回放互斥，
-    // 回放经过此处时 recording 恒为 false，不会二次入库）
-    crate::session::tap_frames(app, ev);
-    IPC.frames_in.fetch_add(1, Ordering::Relaxed);
-    IPC.frames_rows_in.fetch_add(ev.rows.len() as u64, Ordering::Relaxed);
+fn flush(app: &AppHandle) {
+    let (frames, rx) = match PENDING.lock() {
+        Ok(mut b) => {
+            let f = b.take_frames();
+            let r = b.take_rx();
+            if b.is_empty() {
+                b.since = None;
+            }
+            (f, r)
+        }
+        Err(_) => (None, None),
+    };
+    if frames.is_none() && rx.is_none() {
+        return;
+    }
+    IPC.flushes.fetch_add(1, Ordering::Relaxed);
+    // 与逐事件时 ingest 的发送顺序一致：先 rx 再 frames。
+    if let Some((first, last, bytes)) = rx {
+        send_rx_now(app, first, last, &bytes);
+    }
+    if let Some(ev) = frames {
+        send_frames_now(app, &ev);
+    }
+}
+
+fn ensure_flusher(app: &AppHandle) {
+    if FLUSHER.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(4));
+        let window = batch_window_ms();
+        if window == 0 {
+            continue;
+        }
+        let due = PENDING
+            .lock()
+            .map(|b| !b.is_empty() && b.due(Duration::from_millis(window), Instant::now()))
+            .unwrap_or(false);
+        if due {
+            flush(&app);
+        }
+    });
+}
+
+fn send_frames_now(app: &AppHandle, ev: &FramesEvent) {
     let t0 = Instant::now();
     let ok = if let Some(ch) = take_channel(app) {
-        let buf = encode_frames(ev);
-        ch.send(InvokeResponseBody::Raw(buf)).is_ok()
+        ch.send(InvokeResponseBody::Raw(encode_frames(ev))).is_ok()
     } else {
         app.emit("parser:frames", ev).is_ok()
     };
     IPC.frames_out.fetch_add(1, Ordering::Relaxed);
-    IPC.frames_rows_out.fetch_add(ev.rows.len() as u64, Ordering::Relaxed);
+    IPC.frames_rows_out
+        .fetch_add(ev.rows.len() as u64, Ordering::Relaxed);
     IPC.send_us
         .fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
     if !ok {
@@ -382,11 +538,7 @@ pub fn send_frames(app: &AppHandle, ev: &FramesEvent) {
     }
 }
 
-pub fn send_rx(app: &AppHandle, ts_first: u64, ts_last: u64, bytes: &[u8]) {
-    // 会话录制 RX tap（ingest 单点覆盖一切帧源；回放重灌时 recording 恒 false）
-    crate::session::tap_rx(app, ts_first, bytes);
-    IPC.rx_in.fetch_add(1, Ordering::Relaxed);
-    IPC.rx_bytes_in.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+fn send_rx_now(app: &AppHandle, ts_first: u64, ts_last: u64, bytes: &[u8]) {
     let t0 = Instant::now();
     let ok = if let Some(ch) = take_channel(app) {
         let buf = encode_rx(ts_first, ts_last, ts_now(), bytes);
@@ -408,6 +560,59 @@ pub fn send_rx(app: &AppHandle, ts_first: u64, ts_last: u64, bytes: &[u8]) {
         .fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
     if !ok {
         IPC.send_err.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+pub fn send_frames(app: &AppHandle, ev: FramesEvent) {
+    // 会话录制 tap（单点覆盖串口/网络/演示源等一切帧源；录制与回放互斥，
+    // 回放经过此处时 recording 恒为 false，不会二次入库）
+    crate::session::tap_frames(app, &ev);
+    IPC.frames_in.fetch_add(1, Ordering::Relaxed);
+    IPC.frames_rows_in
+        .fetch_add(ev.rows.len() as u64, Ordering::Relaxed);
+    if batch_window_ms() == 0 {
+        send_frames_now(app, &ev);
+        return;
+    }
+    let over = match PENDING.lock() {
+        Ok(mut b) => {
+            b.push_frames(ev);
+            b.over_cap()
+        }
+        Err(_) => {
+            send_frames_now(app, &ev);
+            return;
+        }
+    };
+    ensure_flusher(app);
+    if over {
+        flush(app);
+    }
+}
+
+pub fn send_rx(app: &AppHandle, ts_first: u64, ts_last: u64, bytes: &[u8]) {
+    // 会话录制 RX tap（ingest 单点覆盖一切帧源；回放重灌时 recording 恒 false）
+    crate::session::tap_rx(app, ts_first, bytes);
+    IPC.rx_in.fetch_add(1, Ordering::Relaxed);
+    IPC.rx_bytes_in
+        .fetch_add(bytes.len() as u64, Ordering::Relaxed);
+    if batch_window_ms() == 0 {
+        send_rx_now(app, ts_first, ts_last, bytes);
+        return;
+    }
+    let over = match PENDING.lock() {
+        Ok(mut b) => {
+            b.push_rx(ts_first, ts_last, bytes);
+            b.over_cap()
+        }
+        Err(_) => {
+            send_rx_now(app, ts_first, ts_last, bytes);
+            return;
+        }
+    };
+    ensure_flusher(app);
+    if over {
+        flush(app);
     }
 }
 
@@ -533,7 +738,82 @@ mod tests {
             emit_ts: 0,
         });
         let n = enc.len();
-        enc.truncate(n - 1); // 截断 → 溢出保护生效
+        enc.truncate(n - 1); // 截断 → 解码必须无效
         assert!(decode_frames(&enc).is_none());
+    }
+
+    fn batcher_row(seq: u64) -> FrameRow {
+        FrameRow {
+            tpl_id: "tpl".into(),
+            tpl_name: "模板".into(),
+            color: "#000000".into(),
+            ts_ms: seq,
+            seq,
+            len: 0,
+            valid: true,
+            error: None,
+            fields: vec![],
+            bytes: vec![],
+        }
+    }
+
+    fn batcher_ev(rows: Vec<FrameRow>, total: u64, errors: u64, dropped: u64) -> FramesEvent {
+        FramesEvent {
+            rows,
+            total,
+            errors,
+            dropped,
+            emit_ts: 0,
+        }
+    }
+
+    #[test]
+    fn batcher_merges_frames_in_order_and_takes_latest_totals() {
+        let mut b = Batcher::new();
+        b.push_frames(batcher_ev(vec![batcher_row(1), batcher_row(2)], 10, 1, 0));
+        b.push_frames(batcher_ev(vec![batcher_row(3)], 11, 2, 1));
+        let out = b.take_frames().expect("应有一批帧");
+        assert_eq!(
+            out.rows.iter().map(|r| r.seq).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!((out.total, out.errors, out.dropped), (11, 2, 1));
+        assert!(b.take_frames().is_none());
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn batcher_merges_rx_bytes_and_keeps_ts_range() {
+        let mut b = Batcher::new();
+        b.push_rx(100, 101, b"ab");
+        b.push_rx(102, 103, b"cd");
+        let (first, last, bytes) = b.take_rx().expect("应有一段 rx");
+        assert_eq!((first, last), (100, 103));
+        assert_eq!(bytes, b"abcd");
+        assert!(b.take_rx().is_none());
+    }
+
+    #[test]
+    fn batcher_due_only_after_window() {
+        let mut b = Batcher::new();
+        b.push_frames(batcher_ev(vec![batcher_row(1)], 1, 0, 0));
+        let t0 = Instant::now();
+        assert!(!b.due(Duration::from_millis(16), t0));
+        assert!(b.due(Duration::from_millis(16), t0 + Duration::from_millis(17)));
+    }
+
+    #[test]
+    fn batcher_flags_caps() {
+        let mut b = Batcher::new();
+        let mut ev = batcher_ev(vec![], 0, 0, 0);
+        ev.rows = (0..MAX_PENDING_ROWS)
+            .map(|i| batcher_row(i as u64))
+            .collect();
+        b.push_frames(ev);
+        assert!(b.over_cap());
+
+        let mut b = Batcher::new();
+        b.push_rx(0, 0, &vec![0u8; MAX_PENDING_RX]);
+        assert!(b.over_cap());
     }
 }

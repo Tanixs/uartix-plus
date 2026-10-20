@@ -69,6 +69,11 @@ pub struct Pipeline {
     pub engine: Mutex<ParserEngine>,
 }
 
+/// 诊断探针：ingest 最后到达的阶段（1 入口 / 2 读取状态后 / 3 环形缓冲后 /
+/// 4 解析后 / 5 spans 后 / 6 录制后 / 7 rx 入队后 / 8 frames 入队后 / 9 返回）。
+/// 冻结时读它即可区分是解析挂死、锁等待还是发送阻塞。
+pub static INGEST_STAGE: AtomicU64 = AtomicU64::new(0);
+
 impl Pipeline {
     pub fn new() -> Self {
         Self {
@@ -88,6 +93,7 @@ pub struct IngestCtx {
 }
 
 pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
+    INGEST_STAGE.store(1, Ordering::Relaxed);
     if data.is_empty() {
         return;
     }
@@ -99,16 +105,19 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
         return;
     }
     let ts = ts_now();
+    INGEST_STAGE.store(2, Ordering::Relaxed);
     let start = {
         let mut ring = ctx.pipeline.ring.lock().expect("环形缓冲锁中毒");
         let s = ring.total();
         ring.append(data, ts);
         s
     };
+    INGEST_STAGE.store(3, Ordering::Relaxed);
     let rows = {
         let mut engine = ctx.pipeline.engine.lock().expect("解析引擎锁中毒");
         engine.feed(data, start, ts)
     };
+    INGEST_STAGE.store(4, Ordering::Relaxed);
     if !rows.is_empty() {
         let mut spans = ctx.pipeline.spans.lock().expect("帧区间锁中毒");
         for r in &rows {
@@ -122,13 +131,16 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
         let keep_from = ctx.pipeline.ring.lock().expect("环形缓冲锁中毒").start_seq();
         spans.prune(keep_from);
     }
+    INGEST_STAGE.store(5, Ordering::Relaxed);
     ctx.rx_total.fetch_add(data.len() as u64, Ordering::SeqCst);
     if let Ok(mut rec) = ctx.record.lock() {
         if let Some(f) = rec.as_mut() {
             let _ = f.write_all(data);
         }
     }
+    INGEST_STAGE.store(6, Ordering::Relaxed);
     crate::busevt::send_rx(app, ts, ts, data);
+    INGEST_STAGE.store(7, Ordering::Relaxed);
     if !rows.is_empty() {
         let (total, errors, dropped) = {
             let engine = ctx.pipeline.engine.lock().expect("解析引擎锁中毒");
@@ -136,7 +148,7 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
         };
         crate::busevt::send_frames(
             app,
-            &FramesEvent {
+            FramesEvent {
                 rows,
                 total,
                 errors,
@@ -144,7 +156,9 @@ pub fn ingest(ctx: &IngestCtx, app: &AppHandle, data: &[u8]) {
                 emit_ts: ts_now(),
             },
         );
+        INGEST_STAGE.store(8, Ordering::Relaxed);
     }
+    INGEST_STAGE.store(9, Ordering::Relaxed);
 }
 
 fn ts_now() -> u64 {

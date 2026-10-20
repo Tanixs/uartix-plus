@@ -540,8 +540,9 @@ fn play_loop(
                     continue;
                 };
                 crate::pipeline::replay_spans(&ctx, &e.rows);
-                crate::busevt::send_frames(&app, &e);
-                done += e.rows.len() as u64;
+                let n = e.rows.len();
+                crate::busevt::send_frames(&app, e);
+                done += n as u64;
                 frame_idx.store(done, Ordering::SeqCst);
             }
             ReplayEv::Rx(i) => {

@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -9,6 +9,11 @@ use crate::parser::crc16_modbus;
 use crate::pipeline::ingest;
 use crate::serial::SerialManager;
 use crate::pipeline::IngestCtx;
+
+/// 诊断探针：demo 线程最后阶段（1 生成 / 2 待 ingest / 3 ingest 后 /
+/// 4 节拍后 / 5 已退出）。与 `INGEST_STAGE` 对照即可定位冻结在循环哪一段。
+pub static DEMO_STAGE: AtomicU64 = AtomicU64::new(0);
+pub static DEMO_TICK: AtomicU64 = AtomicU64::new(0);
 
 pub fn start_demo(
     app: AppHandle,
@@ -184,7 +189,7 @@ fn modbus_poll(tick: u64) -> Vec<u8> {
     // —— 1 号从站：读保持寄存器 4 个（温度 0.1℃、光照 lux、计数低 16 位、计数高 16 位）——
     out.extend(mb_rtu(0x01, &[0x03, 0x00, 0x00, 0x00, 0x04])); // 主站请求（定长 8）
     let temp = (250.0 + 80.0 * (tick as f32 * 0.08).sin()) as i16;
-    let lux = 300u16 + (tick as u16 * 7) % 900;
+    let lux = 300u16 + ((tick as u32 * 7) % 900) as u16;
     let cnt = tick as u32;
     if tick % 23 == 7 {
         // 异常响应：FC|0x80 + 异常码 02（非法数据地址）
@@ -244,55 +249,64 @@ fn pace_until(deadline: Instant) {
     }
 }
 
+fn demo_frame_bytes(tick: u64) -> Vec<u8> {
+    let mut out: Vec<u8> = Vec::with_capacity(128);
+
+    let mut euler = v7_euler(tick);
+    if tick % 29 == 3 {
+        corrupt(&mut euler, 4 + (tick % 6) as usize, 0x77);
+    }
+    out.extend_from_slice(&euler);
+
+    if tick % 4 == 1 {
+        let mut gps = v7_gps(tick);
+        if tick % 31 == 5 {
+            corrupt(&mut gps, 6 + (tick % 8) as usize, 0x81);
+        }
+        out.extend_from_slice(&gps);
+    }
+
+    if tick % 8 == 3 {
+        out.extend_from_slice(&v7_inertial(tick));
+    }
+
+    if tick % 3 == 0 {
+        let which = (tick / 3) % 3;
+        let mut w = match which {
+            0 => wit_acc(tick),
+            1 => wit_gyro(tick),
+            _ => wit_angle(tick),
+        };
+        if tick % 19 == 7 {
+            corrupt(&mut w, 2 + (tick % 8) as usize, 0x55);
+        }
+        out.extend_from_slice(&w);
+    }
+
+    if tick % 5 == 2 {
+        out.extend_from_slice(&csv_line(tick));
+    }
+
+    // 一路 Modbus RTU 主从对话：导入「Modbus RTU」预设即可看到曲线、
+    // 线圈位计数换算与异常帧识别（每 400ms 一轮轮询）
+    if tick % 4 == 0 {
+        out.extend(modbus_poll(tick));
+    }
+
+    out
+}
+
 fn demo_loop(app: AppHandle, ctx: Arc<IngestCtx>, flag: Arc<AtomicBool>) {
     let mut tick: u64 = 0;
     let period = Duration::from_micros((1_000_000 / demo_hz().max(1)).max(1));
     let mut next = Instant::now();
     while flag.load(Ordering::SeqCst) {
-        let mut out: Vec<u8> = Vec::with_capacity(128);
-
-        let mut euler = v7_euler(tick);
-        if tick % 29 == 3 {
-            corrupt(&mut euler, 4 + (tick % 6) as usize, 0x77);
-        }
-        out.extend_from_slice(&euler);
-
-        if tick % 4 == 1 {
-            let mut gps = v7_gps(tick);
-            if tick % 31 == 5 {
-                corrupt(&mut gps, 6 + (tick % 8) as usize, 0x81);
-            }
-            out.extend_from_slice(&gps);
-        }
-
-        if tick % 8 == 3 {
-            out.extend_from_slice(&v7_inertial(tick));
-        }
-
-        if tick % 3 == 0 {
-            let which = (tick / 3) % 3;
-            let mut w = match which {
-                0 => wit_acc(tick),
-                1 => wit_gyro(tick),
-                _ => wit_angle(tick),
-            };
-            if tick % 19 == 7 {
-                corrupt(&mut w, 2 + (tick % 8) as usize, 0x55);
-            }
-            out.extend_from_slice(&w);
-        }
-
-        if tick % 5 == 2 {
-            out.extend_from_slice(&csv_line(tick));
-        }
-
-        // 一路 Modbus RTU 主从对话：导入「Modbus RTU」预设即可看到曲线、
-        // 线圈位计数换算与异常帧识别（每 400ms 一轮轮询）
-        if tick % 4 == 0 {
-            out.extend(modbus_poll(tick));
-        }
-
+        DEMO_STAGE.store(1, Ordering::Relaxed);
+        DEMO_TICK.store(tick, Ordering::Relaxed);
+        let out = demo_frame_bytes(tick);
+        DEMO_STAGE.store(2, Ordering::Relaxed);
         ingest(&ctx, &app, &out);
+        DEMO_STAGE.store(3, Ordering::Relaxed);
         tick += 1;
         next += period;
         let now = Instant::now();
@@ -303,7 +317,9 @@ fn demo_loop(app: AppHandle, ctx: Arc<IngestCtx>, flag: Arc<AtomicBool>) {
         } else {
             pace_until(next);
         }
+        DEMO_STAGE.store(4, Ordering::Relaxed);
     }
+    DEMO_STAGE.store(5, Ordering::Relaxed);
 }
 
 #[tauri::command]
@@ -554,5 +570,17 @@ mod tests {
         let rows = eng.feed(&v7_euler(7), 0, 1);
         assert_eq!(rows.len(), 1, "应解出 1 帧: {rows:?}");
         assert!(rows[0].valid, "V7 帧应校验通过: {:?}", rows[0].error);
+    }
+
+    #[test]
+    fn demo_frames_survive_tick_past_u16_mul() {
+        // tick=9364 是首个 7×tick 越过 u16 上限的 4 的倍数（9364×7=65548）。
+        // 旧实现 `tick as u16 * 7` 在 debug 构建溢出 panic，演示源线程静默死亡，
+        // 前端表现为"500/2000Hz 跑一会儿就冻结"，与 IPC 无关。
+        for tick in 0..20_000u64 {
+            let b = demo_frame_bytes(tick);
+            assert!(!b.is_empty(), "tick {tick} 不应生成空帧");
+        }
+        assert!(!demo_frame_bytes(9364).is_empty());
     }
 }
