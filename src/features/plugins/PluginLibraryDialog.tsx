@@ -45,7 +45,7 @@ import { CAP_LABEL, PLUGIN_CAPS, SHOTS_MAX, describeDiff, manifestDiff, type Plu
 import { buildPublishFiles, publishPlugin, type PublishResult } from "./githubPublish";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { setOpen } from "../ai/extensionStore";
-import { Glyph, IconCode, IconColumns, IconDock, IconLayoutEdit, IconMore, IconPlay, IconPuzzle, IconStack } from "../../shared/icons";
+import { Glyph, IconClose, IconCode, IconColumns, IconDock, IconLayoutEdit, IconMore, IconPlay, IconPuzzle, IconSearch, IconStack } from "../../shared/icons";
 
 /**
  * 列表行的类型图标。插件那一面原来只有"名字 + id + 状态 + 开关"一条线，
@@ -407,13 +407,27 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       )}
 
       <div className="plg-toolbar">
-        <input
-          className="input plg-search"
-          placeholder={tx("搜索名称 / ID / 描述", "Search name / ID / description")}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label={tx("搜索插件", "Search plugins")}
-        />
+        <div className="plg-search-box">
+          <span className="plg-search-ico" aria-hidden="true"><IconSearch /></span>
+          <input
+            className="input plg-search"
+            placeholder={tx("搜索名称 / ID / 描述", "Search name / ID / description")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label={tx("搜索插件", "Search plugins")}
+          />
+          {query && (
+            <button
+              type="button"
+              className="plg-search-clear"
+              title={tx("清空搜索", "Clear search")}
+              aria-label={tx("清空搜索", "Clear search")}
+              onClick={() => setQuery("")}
+            >
+              <IconClose />
+            </button>
+          )}
+        </div>
         <div className="plg-filters" role="tablist" aria-label={tx("按类型筛选", "Filter by kind")}>
           {KIND_FILTERS.map((k) => (
             <button
@@ -427,37 +441,38 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
             </button>
           ))}
         </div>
-        <span className="plg-batch-spacer" />
-        <button
-          className="btn"
-          onClick={requestOpenMarket}
-          title={tx("打开社区插件货架：实时拉取索引，看得见来源、能力与哈希", "Open the community shelf: live index, with origin, capabilities and hashes")}
-        >
-          {tx("插件市场", "Plugin market")}
-        </button>
-        <button className="btn" onClick={() => fileRef.current?.click()} title={tx("导入 uartix-plugin 包（默认停用，校验后才可启用）", "Import a uartix-plugin package (installed disabled; enable it after validation)")}>
-          {tx("导入", "Import")}
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".json,application/json"
-          style={{ display: "none" }}
-          onChange={(e) => {
-            void onImportFile(e.target.files?.[0]);
-            e.target.value = "";
-          }}
-        />
-        <button
-          className={`plg-fchip${selMode ? " on" : ""}`}
-          title={tx("多选插件进行批量导出/启停/卸载", "Multi-select plugins to export / enable / disable / uninstall in batch")}
-          onClick={() => {
-            setSelMode((v) => !v);
-            setSel(new Set());
-          }}
-        >
-          {selMode ? tx("退出选择", "Exit selection") : tx("选择", "Select")}
-        </button>
+        <div className="plg-toolbar-actions">
+          <button
+            className="btn primary"
+            onClick={requestOpenMarket}
+            title={tx("打开社区插件货架：实时拉取索引，看得见来源、能力与哈希", "Open the community shelf: live index, with origin, capabilities and hashes")}
+          >
+            {tx("插件市场", "Plugin market")}
+          </button>
+          <button className="btn" onClick={() => fileRef.current?.click()} title={tx("导入 uartix-plugin 包（默认停用，校验后才可启用）", "Import a uartix-plugin package (installed disabled; enable it after validation)")}>
+            {tx("导入", "Import")}
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              void onImportFile(e.target.files?.[0]);
+              e.target.value = "";
+            }}
+          />
+          <button
+            className={`plg-fchip${selMode ? " on" : ""}`}
+            title={tx("多选插件进行批量导出/启停/卸载", "Multi-select plugins to export / enable / disable / uninstall in batch")}
+            onClick={() => {
+              setSelMode((v) => !v);
+              setSel(new Set());
+            }}
+          >
+            {selMode ? tx("退出选择", "Exit selection") : tx("选择", "Select")}
+          </button>
+        </div>
       </div>
 
       {/* 确认卡搬到 App 顶层一份了：插件库关掉也要看得见命令行发起的那条请求 */}
