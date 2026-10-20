@@ -309,6 +309,12 @@ const SNAP = `(async () => {
     const m = await import("/src/features/serial/serialStore.ts");
     hex = { rxTotal: m.getSnapshot().rxTotal };
   } catch {}
+  /* P159：发送端与接收端计数对照。Rust 还在发、JS 停收 ⇒ 通道层堵；
+     Rust 入队也停 ⇒ send 本身阻塞。 */
+  let ipc = null;
+  try { ipc = await window.__TAURI_INTERNALS__?.invoke("ipc_stats"); } catch {}
+  let bus = null;
+  try { bus = (await import("/src/ipc/binbus.ts")).ipcStats(); } catch {}
   return {
     elMs: Math.round(el),
     raf: st.raf,
@@ -319,7 +325,7 @@ const SNAP = `(async () => {
     longMax: Math.round(st.longMax),
     longtaskUnsupported: st.longtaskUnsupported,
     consoleBlocks: document.querySelector(".console-view")?.childElementCount ?? null,
-    table, plot, hex,
+    table, plot, hex, ipc, bus,
     visibility: document.visibilityState,
     panels: [...document.querySelectorAll(".dv-tab")].map(x => x.textContent.trim()),
   };
@@ -366,6 +372,13 @@ for (let i = 0; i < totalSamples; i++) {
     tableRows: snap.table?.rows ?? null,
     plotPointsMax: snap.plot?.pointsMax ?? null,
     hexRx: snap.hex?.rxTotal ?? null,
+    ipcOut: snap.ipc?.framesOut ?? null,
+    ipcIn: snap.ipc?.framesIn ?? null,
+    ipcRowsOut: snap.ipc?.framesRowsOut ?? null,
+    ipcSendUs: snap.ipc?.sendUs ?? null,
+    ipcSendErr: snap.ipc?.sendErr ?? null,
+    busMsgs: snap.bus?.msgs ?? null,
+    busGap: snap.bus?.maxGapMs != null ? Math.round(snap.bus.maxGapMs) : null,
     visibility: snap.visibility,
   };
   prev = snap;
@@ -373,7 +386,8 @@ for (let i = 0; i < totalSamples; i++) {
   console.log(
     `t=${String(row.tSec).padStart(4)}s fps=${String(row.fps ?? "-").padStart(5)} 行/s=${String(row.rowsPerSec ?? "-").padStart(7)} ` +
       `行=${row.rows} 堆=${row.jsHeapMB}MB 长任务=${row.longTasks}(${row.longMs}ms max ${row.longMax}) ` +
-      `console=${row.consoleBlocks} table=${row.tableRows} plotMax=${row.plotPointsMax} hex=${row.hexRx} ${row.visibility}`,
+      `console=${row.consoleBlocks} table=${row.tableRows} plotMax=${row.plotPointsMax} hex=${row.hexRx} ` +
+      `ipcOut=${row.ipcOut}/${row.ipcIn} bus=${row.busMsgs} gap=${row.busGap} ${row.visibility}`,
   );
   if (i < totalSamples - 1) await rest(5000);
 }

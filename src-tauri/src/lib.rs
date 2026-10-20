@@ -215,6 +215,7 @@ pub fn run() {
         .manage(bridge_jobs::JobsState::new())
         .invoke_handler(tauri::generate_handler![
             busevt::ipc_subscribe,
+            busevt::ipc_stats,
             ai::ai_chat,
             ai::ai_list_models,
             ai::ai_probe,

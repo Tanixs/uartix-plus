@@ -28,6 +28,22 @@ const rxHandlers = new Set<RxH>();
 const txHandlers = new Set<TxH>();
 let started = false;
 
+/** 接收侧计数：与 Rust `ipc_stats` 对照，判断冻结在发送端还是接收端。 */
+const stats = {
+  msgs: 0,
+  framesMsgs: 0,
+  rows: 0,
+  rxMsgs: 0,
+  rxBytes: 0,
+  txMsgs: 0,
+  lastAt: 0,
+  maxGapMs: 0,
+};
+
+export function ipcStats() {
+  return { ...stats };
+}
+
 const utf8 = new TextDecoder();
 
 /** 小端顺序读取器 */
@@ -141,16 +157,28 @@ export function decodeTx(r: Rd): TxEventPayload {
 
 function dispatch(buf: ArrayBuffer) {
   try {
+    const now = performance.now();
+    if (stats.lastAt) {
+      const gap = now - stats.lastAt;
+      if (gap > stats.maxGapMs) stats.maxGapMs = gap;
+    }
+    stats.lastAt = now;
+    stats.msgs += 1;
     const r = new Rd(buf);
     const t = r.byte();
     if (t === 1) {
       const p = decodeFrames(r);
+      stats.framesMsgs += 1;
+      stats.rows += p.rows.length;
       for (const h of Array.from(framesHandlers)) h(p);
     } else if (t === 2) {
       const p = decodeRx(r);
+      stats.rxMsgs += 1;
+      stats.rxBytes += p.bytes.length;
       for (const h of Array.from(rxHandlers)) h(p);
     } else if (t === 3) {
       const p = decodeTx(r);
+      stats.txMsgs += 1;
       for (const h of Array.from(txHandlers)) h(p);
     }
   } catch (err) {

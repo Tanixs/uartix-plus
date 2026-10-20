@@ -28,7 +28,9 @@
 //! 前端注册 Channel 的同时全部监听点已迁到本总线。
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -39,6 +41,71 @@ const MSG_FRAMES: u8 = 1;
 const MSG_RX: u8 = 2;
 const MSG_TX: u8 = 3;
 const NONE16: u16 = 0xFFFF;
+
+/// IPC 分段计数：只做观测，不参与发送决策。
+struct IpcCounters {
+    frames_in: AtomicU64,
+    frames_rows_in: AtomicU64,
+    frames_out: AtomicU64,
+    frames_rows_out: AtomicU64,
+    rx_in: AtomicU64,
+    rx_bytes_in: AtomicU64,
+    rx_out: AtomicU64,
+    flushes: AtomicU64,
+    send_us: AtomicU64,
+    send_err: AtomicU64,
+}
+
+impl IpcCounters {
+    const fn new() -> Self {
+        Self {
+            frames_in: AtomicU64::new(0),
+            frames_rows_in: AtomicU64::new(0),
+            frames_out: AtomicU64::new(0),
+            frames_rows_out: AtomicU64::new(0),
+            rx_in: AtomicU64::new(0),
+            rx_bytes_in: AtomicU64::new(0),
+            rx_out: AtomicU64::new(0),
+            flushes: AtomicU64::new(0),
+            send_us: AtomicU64::new(0),
+            send_err: AtomicU64::new(0),
+        }
+    }
+}
+
+static IPC: IpcCounters = IpcCounters::new();
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcStatsOut {
+    frames_in: u64,
+    frames_rows_in: u64,
+    frames_out: u64,
+    frames_rows_out: u64,
+    rx_in: u64,
+    rx_bytes_in: u64,
+    rx_out: u64,
+    flushes: u64,
+    send_us: u64,
+    send_err: u64,
+}
+
+/// 活体诊断：perf-live 通过 invoke 读取，判断冻结在发送端还是接收端。
+#[tauri::command]
+pub fn ipc_stats() -> IpcStatsOut {
+    IpcStatsOut {
+        frames_in: IPC.frames_in.load(Ordering::Relaxed),
+        frames_rows_in: IPC.frames_rows_in.load(Ordering::Relaxed),
+        frames_out: IPC.frames_out.load(Ordering::Relaxed),
+        frames_rows_out: IPC.frames_rows_out.load(Ordering::Relaxed),
+        rx_in: IPC.rx_in.load(Ordering::Relaxed),
+        rx_bytes_in: IPC.rx_bytes_in.load(Ordering::Relaxed),
+        rx_out: IPC.rx_out.load(Ordering::Relaxed),
+        flushes: IPC.flushes.load(Ordering::Relaxed),
+        send_us: IPC.send_us.load(Ordering::Relaxed),
+        send_err: IPC.send_err.load(Ordering::Relaxed),
+    }
+}
 
 /// 已注册的前端通道（注册即代表前端已全部迁移到二进制监听）
 #[derive(Default)]
@@ -297,22 +364,35 @@ pub fn send_frames(app: &AppHandle, ev: &FramesEvent) {
     // 会话录制 tap（单点覆盖串口/网络/演示源等一切帧源；录制与回放互斥，
     // 回放经过此处时 recording 恒为 false，不会二次入库）
     crate::session::tap_frames(app, ev);
-    if let Some(ch) = take_channel(app) {
+    IPC.frames_in.fetch_add(1, Ordering::Relaxed);
+    IPC.frames_rows_in.fetch_add(ev.rows.len() as u64, Ordering::Relaxed);
+    let t0 = Instant::now();
+    let ok = if let Some(ch) = take_channel(app) {
         let buf = encode_frames(ev);
-        let _ = ch.send(InvokeResponseBody::Raw(buf));
+        ch.send(InvokeResponseBody::Raw(buf)).is_ok()
     } else {
-        let _ = app.emit("parser:frames", ev);
+        app.emit("parser:frames", ev).is_ok()
+    };
+    IPC.frames_out.fetch_add(1, Ordering::Relaxed);
+    IPC.frames_rows_out.fetch_add(ev.rows.len() as u64, Ordering::Relaxed);
+    IPC.send_us
+        .fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+    if !ok {
+        IPC.send_err.fetch_add(1, Ordering::Relaxed);
     }
 }
 
 pub fn send_rx(app: &AppHandle, ts_first: u64, ts_last: u64, bytes: &[u8]) {
     // 会话录制 RX tap（ingest 单点覆盖一切帧源；回放重灌时 recording 恒 false）
     crate::session::tap_rx(app, ts_first, bytes);
-    if let Some(ch) = take_channel(app) {
+    IPC.rx_in.fetch_add(1, Ordering::Relaxed);
+    IPC.rx_bytes_in.fetch_add(bytes.len() as u64, Ordering::Relaxed);
+    let t0 = Instant::now();
+    let ok = if let Some(ch) = take_channel(app) {
         let buf = encode_rx(ts_first, ts_last, ts_now(), bytes);
-        let _ = ch.send(InvokeResponseBody::Raw(buf));
+        ch.send(InvokeResponseBody::Raw(buf)).is_ok()
     } else {
-        let _ = app.emit(
+        app.emit(
             "serial:rx",
             crate::serial::RxEvent {
                 bytes: bytes.to_vec(),
@@ -320,7 +400,14 @@ pub fn send_rx(app: &AppHandle, ts_first: u64, ts_last: u64, bytes: &[u8]) {
                 ts_last,
                 emit_ts: ts_now(),
             },
-        );
+        )
+        .is_ok()
+    };
+    IPC.rx_out.fetch_add(1, Ordering::Relaxed);
+    IPC.send_us
+        .fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+    if !ok {
+        IPC.send_err.fetch_add(1, Ordering::Relaxed);
     }
 }
 
