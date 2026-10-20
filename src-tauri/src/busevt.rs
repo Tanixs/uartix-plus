@@ -193,6 +193,9 @@ pub struct IpcStatsOut {
     ingest_stage: u64,
     demo_stage: u64,
     demo_tick: u64,
+    hex_fetches: u64,
+    hex_fetch_us: u64,
+    span_scans: u64,
 }
 
 /// 活体诊断：perf-live 通过 invoke 读取，判断冻结在发送端还是接收端。
@@ -219,6 +222,9 @@ pub fn ipc_stats() -> IpcStatsOut {
         ingest_stage: crate::pipeline::INGEST_STAGE.load(Ordering::Relaxed),
         demo_stage: crate::demo::DEMO_STAGE.load(Ordering::Relaxed),
         demo_tick: crate::demo::DEMO_TICK.load(Ordering::Relaxed),
+        hex_fetches: crate::pipeline::HEX_FETCHES.load(Ordering::Relaxed),
+        hex_fetch_us: crate::pipeline::HEX_FETCH_US.load(Ordering::Relaxed),
+        span_scans: crate::pipeline::SPAN_SCANS.load(Ordering::Relaxed),
     }
 }
 

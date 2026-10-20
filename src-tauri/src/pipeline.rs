@@ -51,6 +51,7 @@ impl SpanRing {
     }
 
     pub fn in_range(&self, start: u64, end: u64) -> Vec<Span> {
+        SPAN_SCANS.fetch_add(self.spans.len() as u64, Ordering::Relaxed);
         self.spans
             .iter()
             .filter(|s| s.start < end && s.start + s.len as u64 > start)
@@ -71,8 +72,11 @@ pub struct Pipeline {
 
 /// 诊断探针：ingest 最后到达的阶段（1 入口 / 2 读取状态后 / 3 环形缓冲后 /
 /// 4 解析后 / 5 spans 后 / 6 录制后 / 7 rx 入队后 / 8 frames 入队后 / 9 返回）。
-/// 冻结时读它即可区分是解析挂死、锁等待还是发送阻塞。
 pub static INGEST_STAGE: AtomicU64 = AtomicU64::new(0);
+/// Hex 窗口诊断：取片次数、取片总耗时、跨度表扫描量。
+pub static HEX_FETCHES: AtomicU64 = AtomicU64::new(0);
+pub static HEX_FETCH_US: AtomicU64 = AtomicU64::new(0);
+pub static SPAN_SCANS: AtomicU64 = AtomicU64::new(0);
 
 impl Pipeline {
     pub fn new() -> Self {
@@ -257,6 +261,8 @@ pub fn replay_spans(ctx: &IngestCtx, rows: &[crate::parser::FrameRow]) {
 
 #[tauri::command]
 pub fn hex_fetch(start: u64, end: u64, state: State<SerialManager>) -> HexSlice {
+    let t0 = std::time::Instant::now();
+    HEX_FETCHES.fetch_add(1, Ordering::Relaxed);
     let ring = state.ctx.pipeline.ring.lock().expect("环形缓冲锁中毒");
     let (s, bytes) = ring.fetch(start, end);
     let ts_first = if bytes.is_empty() {
@@ -284,12 +290,14 @@ pub fn hex_fetch(start: u64, end: u64, state: State<SerialManager>) -> HexSlice 
             valid: sp.valid,
         })
         .collect();
-    HexSlice {
+    let out = HexSlice {
         start: s,
         total: ring.total(),
         bytes,
         ts_first,
         ts_last,
         spans,
-    }
+    };
+    HEX_FETCH_US.fetch_add(t0.elapsed().as_micros() as u64, Ordering::Relaxed);
+    out
 }

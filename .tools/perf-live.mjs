@@ -38,6 +38,7 @@ const opt = (name, def) => {
 const HZ = Number(opt("hz", "10"));
 const MINUTES = Number(opt("minutes", "2"));
 const PRESET = opt("preset", "base");
+const PANEL = opt("panel", "");
 const PORT = Number(opt("port", "9333"));
 const APP = opt("app", "http://localhost:1420");
 const OUT = opt("out", `.tmp/p156/perf-${HZ}hz-${PRESET}.json`);
@@ -271,8 +272,20 @@ const START = `(async () => {
   };
 })()`;
 const started = await evaluate(START);
-console.log(`演示源：${started.demoRunning ? "运行中" : "没起来！"}；面板：${started.panels.join(" / ")}`);
+console.log(`演示源：${started.demoRunning ? "运行中" : "没启动"}；面板：${started.panels.join(" / ")}`);
 if (!started.demoRunning) throw new Error("toggleDemo 之后 demoRunning 仍是 false");
+
+/* --panel=Hex：切到指定面板再测（Hex 等画布面板只有在前台才走取数/重绘） */
+if (PANEL) {
+  const hit = await evaluate(`(() => {
+    const tab = [...document.querySelectorAll(".dv-tab")].find((x) => x.textContent.includes(${JSON.stringify(PANEL)}));
+    if (!tab) return null;
+    tab.click();
+    return tab.textContent.trim();
+  })()`);
+  console.log(hit ? `已切面板：${hit}` : `未找到面板：${PANEL}`);
+  await rest(1200);
+}
 
 // 等第一批帧真的到前端（不然 5 秒采样全 0 会读成"很流畅"）
 for (let i = 0; i < 40; i++) {
@@ -380,6 +393,13 @@ for (let i = 0; i < totalSamples; i++) {
     ipcStage: snap.ipc?.ingestStage ?? null,
     demoStage: snap.ipc?.demoStage ?? null,
     demoTick: snap.ipc?.demoTick ?? null,
+    hexFetches: snap.ipc?.hexFetches ?? null,
+    hexFetchMs: snap.ipc?.hexFetchUs != null ? Math.round(snap.ipc.hexFetchUs / 1000) : null,
+    spanScans: snap.ipc?.spanScans ?? null,
+    hexFetchDelta:
+      prev && snap.ipc && prev.ipc ? snap.ipc.hexFetches - prev.ipc.hexFetches : null,
+    spanScanDelta:
+      prev && snap.ipc && prev.ipc ? snap.ipc.spanScans - prev.ipc.spanScans : null,
     busMsgs: snap.bus?.msgs ?? null,
     busGap: snap.bus?.maxGapMs != null ? Math.round(snap.bus.maxGapMs) : null,
     visibility: snap.visibility,
@@ -390,7 +410,8 @@ for (let i = 0; i < totalSamples; i++) {
     `t=${String(row.tSec).padStart(4)}s fps=${String(row.fps ?? "-").padStart(5)} 行/s=${String(row.rowsPerSec ?? "-").padStart(7)} ` +
       `行=${row.rows} 堆=${row.jsHeapMB}MB 长任务=${row.longTasks}(${row.longMs}ms max ${row.longMax}) ` +
       `console=${row.consoleBlocks} table=${row.tableRows} plotMax=${row.plotPointsMax} hex=${row.hexRx} ` +
-      `ipcOut=${row.ipcOut}/${row.ipcIn} bus=${row.busMsgs} gap=${row.busGap} stage=${row.ipcStage} demo=${row.demoStage}@${row.demoTick} ${row.visibility}`,
+      `ipcOut=${row.ipcOut}/${row.ipcIn} bus=${row.busMsgs} gap=${row.busGap} stage=${row.ipcStage} demo=${row.demoStage}@${row.demoTick} ` +
+      `hexFetch=${row.hexFetchDelta} scan=${row.spanScanDelta} ${row.visibility}`,
   );
   if (i < totalSamples - 1) await rest(5000);
 }
@@ -432,6 +453,7 @@ const report = {
   tool: "P156-B2 perf-live",
   hz: HZ,
   preset: PRESET,
+  panel: PANEL || null,
   minutes: MINUTES,
   url,
   startedAt: samples[0]?.at ?? null,
