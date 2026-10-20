@@ -218,8 +218,10 @@ export interface PluginManifest {
   /** P157-E2：主页（只收 https，≤200 字符） */
   homepage?: string;
   /** P157-E2：封面（data URL：png/jpeg/webp，解码后 ≤200KB）。随包导出/导入，
-   *  是"一枚封面"不是画廊——多图/截图归市场索引的 `screenshots`（另批）。 */
+   *  用于列表卡片；详情多图见 `screenshots`。 */
   cover?: string;
+  /** P161：详情预览图（data URL：png/jpeg/webp，最多 `SHOTS_MAX` 张，单张 ≤200KB）。 */
+  screenshots?: string[];
   hostApi: string;
   capabilities: PluginCap[];
   contributions: Partial<Record<string, ContribEntry[]>>;
@@ -244,6 +246,8 @@ const CONTRIBUT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,47}$/;
 export const COVER_MAX_BYTES = 200 * 1024;
 /** 封面最长边（上传压缩时按它缩；校验器不重解码，只管格式与字节） */
 export const COVER_MAX_EDGE = 1024;
+/** P161：详情预览图张数上限。每张仍走封面同一预算，最多约 800KB。 */
+export const SHOTS_MAX = 4;
 const COVER_DATA_URL_RE = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
 
 /** data URL 的 base64 段解码后字节数（估算只用于预算判据：base64 长度 × 3/4 减 padding）。 */
@@ -318,7 +322,23 @@ export function validateManifest(raw: unknown): ManifestValidation {
   if (raw.cover !== undefined && (typeof raw.cover !== "string" || !COVER_DATA_URL_RE.test(raw.cover))) {
     out.errors.push("cover 必须是 png/jpeg/webp 的 data URL");
   } else if (typeof raw.cover === "string" && coverBytes(raw.cover) > COVER_MAX_BYTES) {
-    out.errors.push(`cover 解码后超过 ${Math.round(COVER_MAX_BYTES / 1024)}KB 上限（先压缩再入包）`);
+    out.errors.push(`cover 解码后超过 ${Math.round(COVER_MAX_BYTES / 1024)}KB 上限，请压缩后再试`);
+  }
+  if (raw.screenshots !== undefined) {
+    if (!Array.isArray(raw.screenshots)) {
+      out.errors.push("screenshots 必须是数组");
+    } else {
+      if (raw.screenshots.length > SHOTS_MAX) {
+        out.errors.push(`screenshots 最多 ${SHOTS_MAX} 张`);
+      }
+      raw.screenshots.forEach((s, i) => {
+        if (typeof s !== "string" || !COVER_DATA_URL_RE.test(s)) {
+          out.errors.push(`screenshots[${i}] 必须是 png/jpeg/webp 的 data URL`);
+        } else if (coverBytes(s) > COVER_MAX_BYTES) {
+          out.errors.push(`screenshots[${i}] 解码后超过 ${Math.round(COVER_MAX_BYTES / 1024)}KB 上限，请压缩后再试`);
+        }
+      });
+    }
   }
   if (raw.hostApi !== HOST_API) {
     out.errors.push(`hostApi 必须是 "${HOST_API}"`);
@@ -514,6 +534,7 @@ export function validateManifest(raw: unknown): ManifestValidation {
     ...(typeof raw.author === "string" && raw.author.trim() ? { author: raw.author.trim().slice(0, 40) } : {}),
     ...(typeof raw.homepage === "string" && raw.homepage ? { homepage: raw.homepage } : {}),
     ...(typeof raw.cover === "string" && raw.cover ? { cover: raw.cover } : {}),
+    ...(Array.isArray(raw.screenshots) && raw.screenshots.length ? { screenshots: raw.screenshots as string[] } : {}),
     hostApi: HOST_API,
     capabilities: caps,
     contributions,

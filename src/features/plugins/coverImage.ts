@@ -31,7 +31,7 @@ function readAsDataUrl(f: File): Promise<string> {
 }
 
 /** 压到预算内：从 0.85 逐档降质；仍超预算就缩一半再试（最多两轮）。 */
-async function compress(file: File): Promise<string> {
+async function compress(file: File, label: string): Promise<string> {
   const bmp = await createImageBitmap(file);
   try {
     let { w, h } = fitSize(bmp.width, bmp.height);
@@ -49,7 +49,7 @@ async function compress(file: File): Promise<string> {
       w = Math.max(1, Math.round(w / 2));
       h = Math.max(1, Math.round(h / 2));
     }
-    throw new Error(`压缩后仍超过 ${Math.round(COVER_MAX_BYTES / 1024)}KB，请换一张更简单的图`);
+    throw new Error(`${label}压缩后仍超过 ${Math.round(COVER_MAX_BYTES / 1024)}KB，请换一张更简单的图`);
   } finally {
     bmp.close();
   }
@@ -57,16 +57,21 @@ async function compress(file: File): Promise<string> {
 
 export type CoverResult = { ok: true; dataUrl: string } | { ok: false; msg: string };
 
-/** 读一张本地图片为封面 data URL：≤200KB 的 png/jpeg/webp 原样保留，其余压成 JPEG。 */
-export async function readCover(file: File): Promise<CoverResult> {
-  if (!file.type.startsWith("image/")) return { ok: false, msg: "不是图片文件" };
-  if (file.size > 12 * 1024 * 1024) return { ok: false, msg: "图片超过 12MB，请先裁小" };
+/** 读一张本地图片为 data URL：≤200KB 的 png/jpeg/webp 原样保留，其余压成 JPEG。 */
+export async function readPicture(file: File, label = "封面"): Promise<CoverResult> {
+  if (!file.type.startsWith("image/")) return { ok: false, msg: `${label}不是图片文件` };
+  if (file.size > 12 * 1024 * 1024) return { ok: false, msg: `${label}超过 12MB，请先裁小` };
   try {
     if (RAW_OK.has(file.type) && file.size <= COVER_MAX_BYTES) {
       return { ok: true, dataUrl: await readAsDataUrl(file) };
     }
-    return { ok: true, dataUrl: await compress(file) };
+    return { ok: true, dataUrl: await compress(file, label) };
   } catch (e) {
-    return { ok: false, msg: `图片处理失败：${String(e).replace(/^Error:\s*/, "").slice(0, 120)}` };
+    return { ok: false, msg: `${label}处理失败：${String(e).replace(/^Error:\s*/, "").slice(0, 120)}` };
   }
+}
+
+/** 读一张本地图片为封面 data URL：≤200KB 的 png/jpeg/webp 原样保留，其余压成 JPEG。 */
+export function readCover(file: File): Promise<CoverResult> {
+  return readPicture(file, "封面");
 }

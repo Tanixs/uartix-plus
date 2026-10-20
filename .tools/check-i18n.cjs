@@ -75,6 +75,7 @@ const BUDGETS = {
   "src/features/help/HelpModal.tsx": 20209,
   "src/features/console/QuickCommandBar.tsx": 100,
   "src/App.tsx": 10,
+  "src/features/plugins/PluginLibraryDialog.tsx": 4,
   "src/features/vdev/VdevPanel.tsx": 5,
   "src/features/ai/AiChat.tsx": 4,
   "src/features/controls/CardViews.tsx": 4,

@@ -723,7 +723,7 @@ export function duplicate(id: string): { ok: boolean; msg: string; id?: string }
 /* ---------------- P157-E2：就地编辑展示信息 ---------------- */
 
 export type PluginMetaPatch = Partial<
-  Pick<PluginManifest, "name" | "desc" | "version" | "author" | "homepage" | "cover">
+  Pick<PluginManifest, "name" | "desc" | "version" | "author" | "homepage" | "cover" | "screenshots">
 >;
 
 /**

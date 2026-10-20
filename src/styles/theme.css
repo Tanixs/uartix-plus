@@ -11087,6 +11087,70 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-overview-line { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
 .plg-overview-url { font-size: var(--fs-sm); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40ch; }
 .plg-overview-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+/* P161 本地插件详情多图：缩略图贴近设置页 raise/border 语言，灯箱复用弹层层级 */
+.plg-shots { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
+.plg-shots-head { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.plg-shots-head .plg-sec { margin: 0; }
+.plg-shots-head .btn { margin-left: auto; }
+.plg-shot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: var(--sp-2); }
+.plg-shot {
+  position: relative;
+  min-width: 0;
+  aspect-ratio: 16 / 10;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  background: var(--bg-inset);
+}
+.plg-shot-open { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+.plg-shot-open img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.plg-shot-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+}
+.plg-shot:hover .plg-shot-del,
+.plg-shot-del:focus-visible { opacity: 1; }
+.plg-shot-del:hover { color: var(--danger); border-color: var(--danger); }
+.plg-shot-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  padding: var(--sp-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-m);
+}
+.plg-big {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+}
+.plg-big-inner { display: flex; flex-direction: column; gap: 8px; max-width: calc(92vw / var(--zoom)); max-height: calc(92vh / var(--zoom)); }
+.plg-big-img {
+  max-width: calc(92vw / var(--zoom));
+  max-height: calc(82vh / var(--zoom));
+  object-fit: contain;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+}
+.plg-big-foot { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.plg-big-n { font-size: var(--fs-sm); color: var(--text-dim); min-width: 48px; text-align: center; }
 .plg-edit { display: flex; flex-direction: column; gap: 6px; }
 .plg-edit-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
 .plg-edit-row > span { flex: 0 0 64px; color: var(--text-dim); }

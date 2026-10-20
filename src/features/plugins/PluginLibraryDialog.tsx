@@ -24,7 +24,9 @@ import {
   updateMeta,
   type PluginRecord,
 } from "./pluginStore";
-import { readCover } from "./coverImage";
+import { readCover, readPicture } from "./coverImage";
+import { PluginShotGallery } from "./PluginShotGallery";
+import { appendShots, removeShot } from "./pluginShots";
 // 界面上屏的种类名/状态名走 `pluginUiNames`（按语言挑）；元表里那份中文是 CLI 与模型摘要用的原文，别拿到这里
 import { contribName, kindName, stateName } from "./pluginUiNames";
 import type { WorkflowArtifact } from "./artifact";
@@ -39,7 +41,7 @@ import { unknownTemplateTools, templateToPrompt } from "../agent/taskTemplate";
 import { moduleArtifactsOf } from "./moduleHost";
 import { moduleDiagnostics, type ModuleStatus } from "./moduleBus";
 import { describeToolChange, pluginToolChangeOf, pluginToolDefsOf } from "./pluginToolDefs";
-import { CAP_LABEL, PLUGIN_CAPS, describeDiff, manifestDiff, type PluginManifest } from "./pluginManifest";
+import { CAP_LABEL, PLUGIN_CAPS, SHOTS_MAX, describeDiff, manifestDiff, type PluginManifest } from "./pluginManifest";
 import { buildPublishFiles, publishPlugin, type PublishResult } from "./githubPublish";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { setOpen } from "../ai/extensionStore";
@@ -320,6 +322,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   }>(null);
   const [coverBusy, setCoverBusy] = useState(false);
   const coverRef = useRef<HTMLInputElement>(null);
+  const [shotsBusy, setShotsBusy] = useState(false);
+  const shotsRef = useRef<HTMLInputElement>(null);
   const [pub, setPub] = useState<null | {
     repo: string;
     description: string;
@@ -675,6 +679,17 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                           </div>
                         </div>
                       </div>
+                      <PluginShotGallery
+                        shots={r.pkg.screenshots ?? []}
+                        name={r.pkg.name}
+                        max={SHOTS_MAX}
+                        busy={shotsBusy}
+                        onAdd={() => shotsRef.current?.click()}
+                        onRemove={(i) => {
+                          const next = removeShot(r.pkg.screenshots ?? [], i);
+                          setNotice(updateMeta(r.pkg.id, { screenshots: next.length ? next : undefined }));
+                        }}
+                      />
                     </>
                   )}
                   {pub && (
@@ -757,6 +772,49 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                         }
                         setNotice(updateMeta(r.pkg.id, { cover: res.dataUrl }));
                       });
+                    }}
+                  />
+                  <input
+                    ref={shotsRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const picked = Array.from(e.target.files ?? []);
+                      e.target.value = "";
+                      if (!picked.length) return;
+                      const cur = r.pkg.screenshots ?? [];
+                      const room = Math.max(0, SHOTS_MAX - cur.length);
+                      if (room === 0) {
+                        setNotice({ ok: false, msg: tx(`最多 ${SHOTS_MAX} 张截图，先移除一张再添加`, `Up to ${SHOTS_MAX} screenshots; remove one before adding`) });
+                        return;
+                      }
+                      const take = picked.slice(0, room);
+                      setShotsBusy(true);
+                      void (async () => {
+                        try {
+                          const got: string[] = [];
+                          const errors: string[] = [];
+                          for (let i = 0; i < take.length; i++) {
+                            const res = await readPicture(take[i], `第 ${cur.length + i + 1} 张截图`);
+                            if (res.ok) got.push(res.dataUrl);
+                            else errors.push(res.msg);
+                          }
+                          if (!got.length) {
+                            setNotice({ ok: false, msg: errors[0] ?? tx("没有可用的图片", "No usable images") });
+                            return;
+                          }
+                          const merged = appendShots(cur, got, SHOTS_MAX);
+                          const res = updateMeta(r.pkg.id, { screenshots: merged.next });
+                          if (!res.ok) setNotice(res);
+                          else if (errors.length) setNotice({ ok: false, msg: `${res.msg}；${errors[0]}` });
+                          else if (picked.length > take.length) setNotice({ ok: true, msg: tx(`已加入 ${got.length} 张；最多 ${SHOTS_MAX} 张，其余未加入`, `Added ${got.length}; up to ${SHOTS_MAX}, the rest were skipped`) });
+                          else setNotice(res);
+                        } finally {
+                          setShotsBusy(false);
+                        }
+                      })();
                     }}
                   />
                   {r.state === "quarantined" && (
