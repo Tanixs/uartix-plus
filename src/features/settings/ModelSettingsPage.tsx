@@ -560,11 +560,12 @@ export function ModelSettingsPage() {
               title={tx("拉一次 /models：免费（不消耗额度），顺带证明连得通", "Fetch /models — free, and it proves the connection too")}>
               <IconRefresh />
             </button>
-            <button ref={addBtnRef} className="btn sm primary" onClick={() => setAddOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={addOpen}>
-              <IconPlus />
-              {tx("添加供应商", "Add provider")}
-            </button>
           </span>
+          {/* P158-A3：主操作整行虚线 ghost（原来挤在 24px 的图标行里折成半截） */}
+          <button ref={addBtnRef} className="btn sm msp-add" onClick={() => setAddOpen((v) => !v)} aria-haspopup="listbox" aria-expanded={addOpen}>
+            <IconPlus />
+            {tx("添加供应商", "Add provider")}
+          </button>
         </div>
         {st.providers.map((p) => {
           const n = modelsOf(p.id).length;

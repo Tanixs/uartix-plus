@@ -623,7 +623,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   <button className="btn" onClick={() => onResetLayout(settings.workspace)}>{t("set.resetLayout")}</button>
                 ), t("set.resetLayout.tip"))}
                 {row(t("set.layouts.save"), (
-                  <div className="qk-fgroup">
+                  <div className="qk-fgroup set-save-layout">
                     <input
                       className="input"
                       style={{ width: 160 }}

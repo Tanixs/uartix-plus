@@ -6318,6 +6318,15 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   border-radius: var(--radius-l);
 }
 .msp-list-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 2px 4px 8px; }
+/* P158-A3：添加供应商是列表的主操作，给它整行虚线 ghost，而不是挤在图标行里折半截 */
+.msp-add {
+  flex: 1 0 100%;
+  justify-content: center;
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-dim);
+}
+.msp-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 /* 小标题与计数都是**字**（P132-G：model 面进账后实测 3.39）。
    `--text-faint` 是装饰档（P132-E 给它钉了 3.0 的地板，非文本那一档），别拿它写读得出的话。 */
 .msp-list-title { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.4px; color: var(--text-dim); }
@@ -6708,27 +6717,47 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   position: relative;
   display: block;
   width: 100%;
-  height: 34px;
+  height: 44px;
   border-radius: var(--radius-m);
   border: 1px solid rgba(128, 128, 128, 0.35);
   overflow: hidden;
 }
+/* P158-A1：预览里补两条微缩"文字线"，让十张卡不再像同一扇小窗。
+   灰度是**预览内容**不是主题文本，所以不跟 token（同外层 1px 边的口径）。 */
+.theme-swatch .theme-panel::before,
+.theme-swatch .theme-panel::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: rgba(128, 128, 128, 0.42);
+}
+.theme-swatch .theme-panel::before { top: 6px; width: 52%; }
+.theme-swatch .theme-panel::after { top: 12px; width: 32%; }
 .theme-swatch .theme-bar {
   position: absolute;
   left: 0;
   top: 0;
   right: 0;
-  height: 6px;
+  height: 8px;
 }
 .theme-swatch .theme-panel {
   position: absolute;
-  left: 6px;
-  right: 6px;
-  top: 12px;
-  bottom: 6px;
+  left: 7px;
+  right: 7px;
+  top: 15px;
+  bottom: 8px;
   border-radius: var(--radius-s);
   border: 1px solid rgba(128, 128, 128, 0.25);
 }
+/* P158-A4：`all: unset` 把按钮默认的 pointer 一起抹掉了——卡片是可点的，光标要说实话 */
+.theme-card,
+.preset-card,
+.layout-slot { cursor: pointer; }
+/* P158-A2：另存布局是"输入 + 保存"一行；旧的 .qk-fgroup 是列容器，按钮会被挤到下一行 */
+.set-save-layout { flex-direction: row; align-items: center; gap: var(--sp-2); flex-wrap: nowrap; }
+.set-save-layout .input { flex: 1 1 auto; min-width: 0; max-width: 180px; }
 .theme-name { font-size: var(--fs-body); color: var(--text-dim); }
 .theme-card.on .theme-name { color: var(--accent-text); font-weight: 600; }
 .set-switch { position: relative; display: inline-block; width: 34px; height: 18px; flex: 0 0 auto; }
