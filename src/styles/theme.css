@@ -10926,12 +10926,27 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-fchip:hover:not(.on) { color: var(--text); border-color: var(--line-strong); background: var(--raise-1); }
 .plg-fchip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 .plg-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
-.plg-empty { font-size: var(--fs-sm); color: var(--text-dim); text-align: center; padding: 24px 0; }
+.plg-empty {
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  text-align: center;
+  padding: 24px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  /* 列表是纵向 flex 且占满剩余高度：auto 外边距把空态放到可视区中间，而不是贴在工具栏下 */
+  margin-block: auto;
+}
+.plg-empty > svg { color: var(--text-faint); }
 /* P112-C：列表行 → 小卡。原来那一行只有"名字 + id + 状态 + 开关"，扫一眼看不出这批东西各是什么。
    底色抬到 --bg-panel 并加近场影（页面底是 --bg，同色才显得整片是平的），
    左边加类型图标、名字下面补一句描述。边框一条都不动。 */
 .plg-item { border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--bg-panel); box-shadow: var(--shadow-pop); }
+/* P158-B4：整行可点，给一条很轻的悬停回应（不抢选中/展开的 accent 边框） */
+.plg-item:hover { border-color: var(--line-strong); }
 .plg-item.open { border-color: var(--accent); }
+.plg-item.open:hover { border-color: var(--accent); }
 /* 停用/隔离的包整卡降一档，而不是只让一枚开关灰着 —— 一眼能扫出"哪些在生效" */
 .plg-item:has(.plg-switch input:not(:checked)) { opacity: 0.72; }
 .plg-item-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
@@ -10980,12 +10995,56 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-switch input:checked + .plg-switch-ui { background: var(--accent-soft); border-color: var(--accent); }
 .plg-switch input:checked + .plg-switch-ui::after { transform: translateX(14px); background: var(--accent); }
 .plg-switch input:disabled + .plg-switch-ui { opacity: .5; cursor: not-allowed; }
-.plg-detail { border-top: 1px dashed var(--border); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.plg-detail { border-top: 1px dashed var(--border); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; container-type: inline-size; }
 .plg-detail-desc { font-size: var(--fs-sm); color: var(--text-dim); }
 .plg-detail-dim { font-size: var(--fs-sm); color: var(--text-dim); }
 /* P157-E1：分区标题升语义（h4）并给足上气口——此前六节同权重平铺，
    读起来是一根柱子；现在"能力/模块/产物/配置/版本/危险区"各有各的断点。 */
 .plg-sec { font-size: var(--fs-sm); font-weight: 700; color: var(--text-dim); margin: var(--sp-3) 0 0; letter-spacing: .04em; }
+/* P158-B1：宽卡两栏（左内容 / 右版本·包操作·危险·来源），窄了自动收单列。
+   container query 而不是 viewport 媒体查询：同一份详情在设置页内嵌（宽）与弹窗（窄）都能自适应。 */
+.plg-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: var(--sp-3);
+  align-items: start;
+}
+.plg-col-main, .plg-col-side { min-width: 0; display: flex; flex-direction: column; }
+/* P158-B2：非首节画一条极细的分隔线，章节之间不再只靠 12px 空白 */
+.plg-col-main > .plg-sec:not(:first-child),
+.plg-col-side > .plg-sec:not(:first-child) {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-soft);
+}
+@container (max-width: 720px) {
+  .plg-cols { grid-template-columns: minmax(0, 1fr); }
+}
+/* P158-B3：危险区（只住"卸载"这一颗破坏性动作） */
+.plg-danger-zone {
+  margin-top: var(--sp-3);
+  padding: 8px 10px 10px;
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-radius: var(--radius-m);
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+}
+.plg-danger-zone > .plg-sec {
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  color: var(--danger-text);
+}
+.plg-danger-zone .plg-actions.plg-danger { margin-top: 0; }
+.plg-danger-zone .plg-actions .btn.danger {
+  background: transparent;
+  box-shadow: none;
+  color: var(--danger-text);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+.plg-danger-zone .plg-actions .btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: var(--danger);
+}
 .plg-caps { display: flex; flex-wrap: wrap; gap: 4px; }
 .plg-contrib-row { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); }
 .plg-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

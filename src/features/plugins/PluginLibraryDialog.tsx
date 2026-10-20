@@ -43,7 +43,7 @@ import { CAP_LABEL, PLUGIN_CAPS, describeDiff, manifestDiff, type PluginManifest
 import { buildPublishFiles, publishPlugin, type PublishResult } from "./githubPublish";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { setOpen } from "../ai/extensionStore";
-import { Glyph, IconCode, IconColumns, IconDock, IconLayoutEdit, IconMore, IconPlay, IconStack } from "../../shared/icons";
+import { Glyph, IconCode, IconColumns, IconDock, IconLayoutEdit, IconMore, IconPlay, IconPuzzle, IconStack } from "../../shared/icons";
 
 /**
  * 列表行的类型图标。插件那一面原来只有"名字 + id + 状态 + 开关"一条线，
@@ -489,7 +489,12 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
       <div className="plg-list">
         {/* 空态块只留这一句（check-empty-copy 的账：本文件上限 7 汉字，只许降）——
             首启"从哪儿来插件"的指引挪去脚注（原来住在被删掉的标题行副文案里）。 */}
-        {list.length === 0 && <div className="plg-empty">{tx("没有匹配的插件", "No plugins match")}</div>}
+        {list.length === 0 && (
+          <div className="plg-empty">
+            <IconPuzzle />
+            {tx("没有匹配的插件", "No plugins match")}
+          </div>
+        )}
         {list.map((r) => {
           const enabled = r.state === "enabled";
           return (
@@ -762,6 +767,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                       )}
                     </div>
                   )}
+                  <div className="plg-cols">
+                    <section className="plg-col-main">
                   <h4 className="plg-sec">{tx("能力与权限", "Capabilities and permissions")}</h4>
                   <div className="plg-caps">
                     {r.pkg.capabilities.map((c) => (
@@ -885,6 +892,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     </>
                   )}
 
+                    </section>
+                    <aside className="plg-col-side">
                   <h4 className="plg-sec">{tx("版本", "Versions")}</h4>
                   <div className="plg-detail-dim">
                     {tx(`当前 v${r.pkg.version}；历史 ${r.versions.length} 个`, `Current v${r.pkg.version}; ${r.versions.length} in history`)}
@@ -913,9 +922,10 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     </div>
                   )}
 
-                  {/* P157-E1：导出/复制/回滚/卸载四颗是一组"包动作"——成组并留出气口，
-                      与上面的信息区拉开；拆掉包的三颗（回滚/卸载）保持危险色。 */}
-                  <div className="plg-actions plg-danger">
+                  {/* P158-B3：导出/复制/回滚是"包操作"，卸载单独进危险区——
+                      危险区有红调底与自己的标题，不再和信息、普通操作混成一条长队。 */}
+                  <h4 className="plg-sec">{tx("包操作", "Package")}</h4>
+                  <div className="plg-actions">
                     <button className="btn" onClick={() => doExport(r)} title={tx("导出为 uartix-plugin 包 JSON（不含配置值与秘密）", "Export as a uartix-plugin package JSON (no config values or secrets)")}>
                       {tx("导出", "Export")}
                     </button>
@@ -930,6 +940,10 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     >
                       {tx("回滚", "Roll back")}
                     </button>
+                  </div>
+                  <div className="plg-danger-zone">
+                    <h4 className="plg-sec">{tx("危险操作", "Danger zone")}</h4>
+                    <div className="plg-actions plg-danger">
                     <button
                       className="btn danger"
                       onClick={() => {
@@ -940,8 +954,10 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     >
                       {tx("卸载", "Uninstall")}
                     </button>
+                    </div>
                   </div>
 
+                  <h4 className="plg-sec">{tx("来源", "Origin")}</h4>
                   <div className="plg-meta">
                     {r.pkg.provenance.createdBy === "agent"
                       ? tx("AI 生成", "AI-generated")
@@ -952,6 +968,8 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                     {r.pkg.provenance.sourceExtId
                       ? tx(` · 来源扩展 ${r.pkg.provenance.sourceExtId.slice(0, 8)}`, ` · from extension ${r.pkg.provenance.sourceExtId.slice(0, 8)}`)
                       : ""}
+                  </div>
+                  </aside>
                   </div>
                 </div>
               )}
