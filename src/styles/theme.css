@@ -10998,6 +10998,21 @@ body.pdrag-active *{cursor:grabbing !important;}
   cursor: pointer;
 }
 .plg-search-clear:hover { color: var(--text); background: var(--raise-1); }
+.plg-search-kbd {
+  position: absolute;
+  right: 7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--bg-inset);
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+}
 .plg-toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* P88d ⑤：批量选择工具条与行复选框 */
 .plg-batch {
@@ -12039,6 +12054,7 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}
 .sb-notes{flex:none;max-width:40%;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
 
 
 

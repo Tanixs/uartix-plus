@@ -6,7 +6,7 @@
  * PluginLibraryDialog 仅保留 overlay/portal 壳。
  * 样式全部使用主题变量（与全部内置主题兼容），无字面量颜色。
  */
-import { useMemo, useRef, useState, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { createPortal } from "react-dom";
 import {
   usePlugins,
@@ -198,10 +198,23 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   useLocale(); // 这一面的话术全是 tx() 出来的，切语言要有人重渲染
   const { plugins } = usePlugins();
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [filter, setFilter] = useState<(typeof KIND_FILTERS)[number]>("all");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -410,12 +423,21 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
         <div className="plg-search-box">
           <span className="plg-search-ico" aria-hidden="true"><IconSearch /></span>
           <input
+            ref={searchRef}
             className="input plg-search"
             placeholder={tx("搜索名称 / ID / 描述", "Search name / ID / description")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label={tx("搜索插件", "Search plugins")}
+            aria-keyshortcuts="/"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query) {
+                e.stopPropagation();
+                setQuery("");
+              }
+            }}
           />
+          {!query && <kbd className="plg-search-kbd" aria-hidden="true">/</kbd>}
           {query && (
             <button
               type="button"
@@ -1083,3 +1105,4 @@ export function PluginLibraryDialog({ onClose }: { onClose: () => void }) {
     document.body,
   );
 }
+
