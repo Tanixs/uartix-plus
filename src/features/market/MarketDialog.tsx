@@ -11,7 +11,7 @@
  * 卡片与详情的每一个字都由 `marketBrowse` 的 `cardFacts` / `cardAction` 派生——本文件里
  * 出现任何具体条目名/URL，或自己判"这一相该显示什么"，都是 bug（`marketUi.test.ts` 钉着）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { setEnabled, shadowExtId, themeArtsOf, usePlugins } from "../plugins/pluginStore";
 import { stateName } from "../plugins/pluginUiNames";
@@ -138,6 +138,7 @@ export function MarketDialog({ onClose }: { onClose: () => void }) {
   const lang = useLocale();
   const [tab, setTab] = useState<MarketTab>("discover");
   const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [category, setCategory] = useState("all");
   const [sort, setSort] = useState<MarketSort>("updated");
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -147,6 +148,18 @@ export function MarketDialog({ onClose }: { onClose: () => void }) {
   const [showOffShelf, setShowOffShelf] = useState(false);
   /** 货架来源（索引地址 / 镜像前缀）：P102 从设置页搬进来，默认收着 */
   const [sourceOpen, setSourceOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /** 拉不到的那一刻是唯一需要改地址的时候：把「来源」摊开，别让人再去找那颗按钮 */
   useEffect(() => {
@@ -368,11 +381,19 @@ export function MarketDialog({ onClose }: { onClose: () => void }) {
 
         <div className="plg-toolbar">
           <input
+            ref={searchRef}
             className="input plg-search"
             placeholder={tx("搜索名称 / ID / 作者 / 说明 / 分类", "Search name / ID / author / description / category")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label={tx("搜索插件市场", "Search the plugin market")}
+            aria-keyshortcuts="/"
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && query) {
+                e.stopPropagation();
+                setQuery("");
+              }
+            }}
           />
           <select className="input mkt-sort" value={sort} onChange={(e) => setSort(e.target.value as MarketSort)} aria-label={tx("排序方式", "Sort order")}>
             {MARKET_SORTS.map((s) => (
@@ -557,3 +578,4 @@ export function MarketDialog({ onClose }: { onClose: () => void }) {
     document.body,
   );
 }
+
