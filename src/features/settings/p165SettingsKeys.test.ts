@@ -15,6 +15,8 @@ describe("P165 · 设置搜索键盘导航", () => {
     const src = read(MODAL);
     expect(src).toContain('e.key === "ArrowDown"');
     expect(src).toContain('e.key === "ArrowUp"');
+    expect(src).toContain('e.key === "Home"');
+    expect(src).toContain('e.key === "End"');
     expect(src).toContain("navActive");
     expect(src).toMatch(/goToSearchHit\(navHits\[Math\.min\(navActive, navHits\.length - 1\)\]\)/);
     expect(src).not.toContain("goToSearchHit(navHits[0])");
@@ -24,6 +26,7 @@ describe("P165 · 设置搜索键盘导航", () => {
     const src = read(MODAL);
     expect(src).toContain("onMouseEnter={() => setNavActive(i)}");
     expect(src).toContain("onFocus={() => setNavActive(i)}");
+    expect(src).toContain('scrollIntoView({ block: "nearest" })');
     expect(src).toContain("aria-current={i === navActive");
     expect(src).toMatch(/setNavActive\(0\);\s*\}, \[navQuery\]\)/);
   });

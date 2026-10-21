@@ -336,6 +336,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const headTab = tabs.find((x) => x.key === tab) ?? tabs[0];
   const navHits = searchSettings(navQuery, tabs);
   useEffect(() => { setNavActive(0); }, [navQuery]);
+  useEffect(() => {
+    if (!navQuery.trim()) return;
+    document.getElementById(`set-nav-hit-${navActive}`)?.scrollIntoView({ block: "nearest" });
+  }, [navActive, navQuery]);
   const goToSearchHit = (hit: SettingsSearchHit) => {
     setTab(hit.tab);
     setMsg("");
@@ -443,6 +447,14 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                     e.preventDefault();
                     e.stopPropagation();
                     setNavActive((i) => Math.max(i - 1, 0));
+                  } else if (e.key === "Home" && navHits.length) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setNavActive(0);
+                  } else if (e.key === "End" && navHits.length) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setNavActive(navHits.length - 1);
                   } else if (e.key === "Enter" && navHits.length) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -1518,3 +1530,5 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
 }
 
 export { Section };
+
+
