@@ -199,6 +199,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
   const { plugins } = usePlugins();
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<(typeof KIND_FILTERS)[number]>("all");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -239,6 +240,18 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
         return ag - bg || b.updatedAt - a.updatedAt;
       });
   }, [plugins, query, filter]);
+
+  const focusResult = (where: "first" | "last" | "next" | "prev") => {
+    const items = [...(listRef.current?.querySelectorAll<HTMLButtonElement>(".plg-item-main") ?? [])];
+    if (!items.length) return;
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const idx = where === "first" || (where === "next" && current < 0)
+      ? 0
+      : where === "last" || (where === "prev" && current < 0)
+        ? items.length - 1
+        : Math.min(Math.max(current + (where === "next" ? 1 : -1), 0), items.length - 1);
+    items[idx]?.focus();
+  };
 
   const doExport = (r: PluginRecord) => {
     const res = exportPackages([r.pkg.id]);
@@ -431,7 +444,18 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
             aria-label={tx("搜索插件", "Search plugins")}
             aria-keyshortcuts="/"
             onKeyDown={(e) => {
-              if (e.key === "Escape" && query) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                e.stopPropagation();
+                focusResult("next");
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                e.stopPropagation();
+                focusResult("last");
+              } else if (e.key === "Enter" && list[0] && !selMode) {
+                e.preventDefault();
+                setDetailId(list[0].pkg.id);
+              } else if (e.key === "Escape" && query) {
                 e.stopPropagation();
                 setQuery("");
               }
@@ -527,7 +551,7 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
         </div>
       )}
 
-      <div className="plg-list">
+      <div className="plg-list" ref={listRef}>
         {/* 空态块只留这一句（check-empty-copy 的账：本文件上限 7 汉字，只许降）——
             首启"从哪儿来插件"的指引挪去脚注（原来住在被删掉的标题行副文案里）。 */}
         {list.length === 0 && (
@@ -553,6 +577,25 @@ export function PluginManagerBody({ onClose }: { onClose?: () => void }) {
                 <button
                   className="plg-item-main"
                   onClick={() => (selMode ? toggleSel(r.pkg.id) : setDetailId(detailId === r.pkg.id ? null : r.pkg.id))}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown") {
+                      e.preventDefault();
+                      focusResult("first");
+                    } else if (e.key === "ArrowUp") {
+                      e.preventDefault();
+                      focusResult("prev");
+                    } else if (e.key === "Home") {
+                      e.preventDefault();
+                      focusResult("first");
+                    } else if (e.key === "End") {
+                      e.preventDefault();
+                      focusResult("last");
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      searchRef.current?.focus();
+                    }
+                  }}
                   title={selMode ? tx("选中/取消", "Check / uncheck") : tx("展开详情", "Expand details")}
                 >
                   <span className="plg-cover" aria-hidden="true">

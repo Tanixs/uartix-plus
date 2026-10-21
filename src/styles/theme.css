@@ -11007,7 +11007,7 @@ body.pdrag-active *{cursor:grabbing !important;}
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
   background: var(--bg-inset);
-  color: var(--text-faint);
+  color: var(--text-dim);
   font-size: var(--fs-xs);
   line-height: 16px;
   text-align: center;
@@ -12054,6 +12054,7 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}
 .sb-notes{flex:none;max-width:40%;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
 
 
 
