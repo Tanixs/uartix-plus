@@ -244,6 +244,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const [tab, setTab] = useState(initialTab ?? "general");
   const [msg, setMsg] = useState("");
   const [navQuery, setNavQuery] = useState("");
+  const [navActive, setNavActive] = useState(0);
   /**
    * P110-B1：AI 页那几条输入框现在编辑的是**档案表里选中的那一对**（`editingPair` 故意不做
    * "可用"过滤，否则密钥空着时就没人能填进去）。P115-F16 后本页不再直接消费这份快照
@@ -334,6 +335,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   /** 页头那一句：说明写在页头一次，胜过在每一行重复一遍（P111-B） */
   const headTab = tabs.find((x) => x.key === tab) ?? tabs[0];
   const navHits = searchSettings(navQuery, tabs);
+  useEffect(() => { setNavActive(0); }, [navQuery]);
   const goToSearchHit = (hit: SettingsSearchHit) => {
     setTab(hit.tab);
     setMsg("");
@@ -433,13 +435,23 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   if (e.key === "Escape" && navQuery) {
                     e.stopPropagation();
                     setNavQuery("");
-                  } else if (e.key === "Enter" && navHits[0]) {
+                  } else if (e.key === "ArrowDown" && navHits.length) {
                     e.preventDefault();
-                    goToSearchHit(navHits[0]);
+                    e.stopPropagation();
+                    setNavActive((i) => Math.min(i + 1, navHits.length - 1));
+                  } else if (e.key === "ArrowUp" && navHits.length) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setNavActive((i) => Math.max(i - 1, 0));
+                  } else if (e.key === "Enter" && navHits.length) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    goToSearchHit(navHits[Math.min(navActive, navHits.length - 1)]);
                   }
                 }}
                 placeholder={tx("搜索设置或页面", "Search settings or pages")}
                 aria-label={tx("搜索设置或页面", "Search settings or pages")}
+                aria-controls={navQuery.trim() ? "set-nav-hits" : undefined}
               />
               {navQuery && (
                 <button
@@ -454,15 +466,19 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               )}
             </div>
             {navQuery.trim() ? (
-              <div className="set-nav-results" aria-label={tx("搜索结果", "Search results")}>
+              <div className="set-nav-results" id="set-nav-hits" aria-label={tx("搜索结果", "Search results")}>
                 {navHits.length === 0 ? (
                   <div className="set-nav-empty">{tx("没有匹配的设置或页面", "No matching settings or pages")}</div>
                 ) : navHits.map((hit, i) => (
                   <button
                     key={`${hit.kind}-${hit.tab}-${hit.label}-${i}`}
                     type="button"
-                    className="set-nav-hit"
+                    id={`set-nav-hit-${i}`}
+                    className={i === navActive ? "set-nav-hit on" : "set-nav-hit"}
                     title={`${hit.label} · ${hit.hint}`}
+                    aria-current={i === navActive ? "true" : undefined}
+                    onMouseEnter={() => setNavActive(i)}
+                    onFocus={() => setNavActive(i)}
                     onClick={() => goToSearchHit(hit)}
                   >
                     <span className="set-nav-hit-label">{hit.label}</span>

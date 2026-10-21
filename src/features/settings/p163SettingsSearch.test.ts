@@ -61,7 +61,7 @@ describe("P163 · 设置导航接线", () => {
     expect(src).toContain("searchSettings");
     expect(src).toContain('className="set-nav-search"');
     expect(src).toContain('className="set-nav-results"');
-    expect(src).toContain('className="set-nav-hit"');
+    expect(src).toContain("set-nav-hit");
     expect(src).toContain('"Escape"');
     expect(src).toContain('"Enter"');
     expect(src).toContain('className="set-nav-search-clear"');

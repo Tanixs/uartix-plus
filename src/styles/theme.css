@@ -6316,7 +6316,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   background: var(--bg-panel);
   text-align: left;
 }
-.set-nav .set-nav-hit:hover { border-color: var(--accent); background: var(--accent-soft); }
+.set-nav .set-nav-hit:hover, .set-nav .set-nav-hit.on { border-color: var(--accent); background: var(--accent-soft); }
 .set-nav-hit-label { font-size: var(--fs-sm); color: var(--text); }
 .set-nav-hit-hint { font-size: var(--fs-xs); color: var(--text-dim); }
 .set-nav-empty { padding: 10px 13px; font-size: var(--fs-sm); color: var(--text-dim); }
@@ -12037,5 +12037,9 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}
 .sb-notes{flex:none;max-width:40%;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+
+
+
 
 
