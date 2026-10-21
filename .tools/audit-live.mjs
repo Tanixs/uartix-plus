@@ -22,7 +22,7 @@ const CDP_HTTP = "http://127.0.0.1:9333";
 const OUT = new URL("./audit-baseline.json", import.meta.url);
 const { readFileSync, writeFileSync, existsSync } = await import("node:fs");
 const { fileURLToPath } = await import("node:url");
-const { ORIGIN, VIEWPORT, SURFACES, assertNoDupKeys, makeSession } = await import("./audit-faces.mjs");
+const { ORIGIN, VIEWPORT, SURFACES, SEED_PLUGIN, assertNoDupKeys, makeSession } = await import("./audit-faces.mjs");
 
 const args = process.argv.slice(2);
 const WRITE = args.includes("--write");
@@ -133,6 +133,7 @@ async function collectOne(themeId, surface) {
   assertNoDupKeys(surface.path(themeId), `${themeId}/${surface.id}`);
   let open = true;
   for (let attempt = 1; attempt <= 3; attempt++) {
+    if (surface.seed === "plugin") await evaluate(SEED_PLUGIN);
     await goto(`${ORIGIN}${surface.path(themeId)}`);
     if (surface.drive) await drive(surface.drive);
     open = !surface.require || (await waitOpen(surface.require));

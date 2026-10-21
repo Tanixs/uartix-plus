@@ -72,9 +72,47 @@ export const FIRST_REACHABLE = (sel) => `(() => {
  * `?click=` 的值里有空格（`:nth-child` 前那个后代选择器）必须编码，否则 `URLSearchParams`
  * 把空格读成 `+`、`querySelector(".rp-seg+button…")` 直接抛，表现就是"这一面永远开不出来"。
  */
+const AUDIT_THEME_ID = "main";
+const AUDIT_PLUGIN = {
+  pkg: {
+    format: "uartix-plugin",
+    schemaVersion: 2,
+    id: "audit.faces.fixture",
+    version: "1.0.0",
+    name: "Audit fixture plugin",
+    desc: "Seeded by audit-faces to cover plugin detail without market or network.",
+    hostApi: "^1.0",
+    capabilities: ["theme.tokens"],
+    contributions: { themes: [{ id: AUDIT_THEME_ID, entry: "main.json" }] },
+    artifacts: { "main.json": { kind: "theme", vars: { "--bg": "#101014", "--fg": "#e8e8ef" } } },
+    provenance: { createdBy: "user", reviewed: false },
+  },
+  state: "disabled",
+  nonce: "audit-faces",
+  config: {},
+  versions: [],
+  createdAt: 1,
+  updatedAt: 1,
+};
+
+export const SEED_PLUGIN = `localStorage.setItem("vs.pluginLib.v1", ${JSON.stringify(JSON.stringify({ plugins: [AUDIT_PLUGIN] }))})`;
+
 export const SURFACES = [
   { id: "workspace", path: (t) => base(t) },
   { id: "settings", path: (t) => base(t, { extra: "&open=settings/appearance" }) },
+  {
+    id: "settings-plugins",
+    path: (t) => base(t, { extra: "&open=settings/ext" }),
+    seed: "plugin",
+    drive: "pluginDetail",
+    require: ".plg-detail",
+  },
+  {
+    id: "settings-search",
+    path: (t) => base(t, { extra: "&open=settings/appearance" }),
+    drive: "settingsSearch",
+    require: ".set-nav-hit",
+  },
   { id: "palette", path: (t) => base(t), drive: "palette", require: ".cmdk" },
   { id: "menu", path: (t) => base(t, { extra: "&click=.cb-ws-btn" }), require: ".cb-ws-menu" },
   { id: "lbx", path: (t) => base(t, { extra: "&click=.baud-toggle", rail: "link" }), require: ".ctx-menu.lbx" },
@@ -157,7 +195,31 @@ export function makeSession({ send, evaluate, rest, key, typeText, ready = '!!do
       await hoverAt(at);
       return;
     }
+    if (how === "settingsSearch") {
+      const focused = await evaluate(`(() => {
+        const el = document.querySelector(".set-nav-search-input");
+        if (!el) return false;
+        el.focus();
+        return true;
+      })()`);
+      if (!focused) throw new Error("settingsSearch：左栏搜索框不在");
+      await typeText("a");
+      await rest(550);
+      return;
+    }
+    if (how === "pluginDetail") {
+      const opened = await evaluate(`(() => {
+        const el = document.querySelector(".plg-item-main");
+        if (!el) return false;
+        el.click();
+        return true;
+      })()`);
+      if (!opened) throw new Error("pluginDetail：种子插件卡片不在");
+      await rest(550);
+      return;
+    }
     throw new Error(`不认识的驱动方式：${how}`);
   }
   return { goto, drive, waitOpen, hoverAt };
 }
+

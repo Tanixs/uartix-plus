@@ -1,2474 +1,2818 @@
 {
- "version": 3,
- "generatedAt": "2026-10-04",
- "viewport": {
-  "w": 1440,
-  "h": 900
- },
- "judge": "生产同一份：src/features/agent/uiSurface.collectAuditInput + src/styles/renderAudit",
- "faces": "面表在 .tools/audit-faces.mjs（与 class-census 共用一份）",
- "surfaces": [
-  "workspace",
-  "settings",
-  "palette",
-  "menu",
-  "lbx",
-  "ctxmenu",
-  "hint",
-  "model",
-  "speclib",
-  "hovermenu",
-  "welcome1",
-  "welcome2",
-  "cmdk-empty",
-  "ai"
- ],
- "themes": {
-  "light": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    }
-   }
+  "version": 3,
+  "generatedAt": "2026-10-21",
+  "viewport": {
+    "w": 1440,
+    "h": 900
   },
-  "dark": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+  "judge": "生产同一份：src/features/agent/uiSurface.collectAuditInput + src/styles/renderAudit",
+  "faces": "面表在 .tools/audit-faces.mjs（与 class-census 共用一份）",
+  "surfaces": [
+    "workspace",
+    "settings",
+    "settings-plugins",
+    "settings-search",
+    "palette",
+    "menu",
+    "lbx",
+    "ctxmenu",
+    "hint",
+    "model",
+    "speclib",
+    "hovermenu",
+    "welcome1",
+    "welcome2",
+    "cmdk-empty",
+    "ai"
+  ],
+  "themes": {
+    "light": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 534,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+    "dark": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 541,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+    "ocean": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 541,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+    "navy": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 541,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+    "matcha": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 541,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+    "amber": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 541,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+    "begonia": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 541,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+    "glaze": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 541,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 997987,
+          "rules": 3506,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
+    "fluent": {
+      "kind": "builtin",
+      "surfaces": {
+        "workspace": {
+          "sampled": 369,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings": {
+          "sampled": 541,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-plugins": {
+          "sampled": 526,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "settings-search": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "palette": {
+          "sampled": 484,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "menu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "lbx": {
+          "sampled": 449,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ctxmenu": {
+          "sampled": 373,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hint": {
+          "sampled": 542,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "model": {
+          "sampled": 532,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "speclib": {
+          "sampled": 396,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "hovermenu": {
+          "sampled": 401,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome1": {
+          "sampled": 447,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "welcome2": {
+          "sampled": 406,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "cmdk-empty": {
+          "sampled": 378,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        },
+        "ai": {
+          "sampled": 393,
+          "truncated": false,
+          "styleBytes": 1021976,
+          "rules": 3633,
+          "issues": [],
+          "worst": null,
+          "unmeasurable": {
+            "count": 0,
+            "byReason": {}
+          },
+          "hits": [],
+          "hitMin": null,
+          "overflow": [],
+          "overflowWorst": null,
+          "shapes": [],
+          "partsDenominator": 2,
+          "partsIssues": []
+        }
+      }
     }
-   }
   },
-  "ocean": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    }
-   }
-  },
-  "navy": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    }
-   }
-  },
-  "matcha": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    }
-   }
-  },
-  "amber": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    }
-   }
-  },
-  "begonia": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    }
-   }
-  },
-  "glaze": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 963074,
-     "rules": 3336,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    }
-   }
-  },
-  "fluent": {
-   "kind": "builtin",
-   "surfaces": {
-    "workspace": {
-     "sampled": 366,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "settings": {
-     "sampled": 508,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "palette": {
-     "sampled": 481,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "menu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "lbx": {
-     "sampled": 446,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ctxmenu": {
-     "sampled": 370,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hint": {
-     "sampled": 509,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "model": {
-     "sampled": 506,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "speclib": {
-     "sampled": 393,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "hovermenu": {
-     "sampled": 398,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome1": {
-     "sampled": 444,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "welcome2": {
-     "sampled": 403,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "cmdk-empty": {
-     "sampled": 375,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    },
-    "ai": {
-     "sampled": 391,
-     "truncated": false,
-     "styleBytes": 987063,
-     "rules": 3463,
-     "issues": [],
-     "worst": null,
-     "unmeasurable": {
-      "count": 0,
-      "byReason": {}
-     },
-     "hits": [],
-     "hitMin": null,
-     "overflow": [],
-     "overflowWorst": null,
-     "shapes": [],
-     "partsDenominator": 2,
-     "partsIssues": []
-    }
-   }
+  "exemptions": [],
+  "budget": {
+    "total": 0,
+    "hitTargets": 0,
+    "overflow": 0,
+    "shapes": 0
   }
- },
- "exemptions": [],
- "budget": {
-  "total": 0,
-  "hitTargets": 0,
-  "overflow": 0,
-  "shapes": 0
- }
 }

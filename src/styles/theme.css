@@ -6303,12 +6303,14 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   cursor: pointer;
 }
 .set-nav .set-nav-search-clear:hover { color: var(--text); background: var(--raise-1); }
-.set-nav-results { display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.set-nav-results { display: flex; flex-direction: column; gap: 2px; min-height: 0; width: 100%; min-width: 0; }
 .set-nav .set-nav-hit {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
+  min-width: 0;
+  box-sizing: border-box;
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -6317,8 +6319,8 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   text-align: left;
 }
 .set-nav .set-nav-hit:hover, .set-nav .set-nav-hit.on { border-color: var(--accent); background: var(--accent-soft); }
-.set-nav-hit-label { font-size: var(--fs-sm); color: var(--text); }
-.set-nav-hit-hint { font-size: var(--fs-xs); color: var(--text-dim); }
+.set-nav-hit-label { max-width: 100%; overflow-wrap: anywhere; font-size: var(--fs-sm); color: var(--text); }
+.set-nav-hit-hint { max-width: 100%; overflow-wrap: anywhere; font-size: var(--fs-xs); color: var(--text-dim); }
 .set-nav-empty { padding: 10px 13px; font-size: var(--fs-sm); color: var(--text-dim); }
 .set-nav-group {
   margin: 14px 0 3px;
@@ -6753,7 +6755,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .set-apr-list li.ai.on { background: color-mix(in srgb, var(--warn-fg) 12%, transparent); }
 /* P102：层名这一列要能挂一颗「?」——说明文字收起来之后，它是唯一的入口 */
 .set-apr-name { flex: 0 0 130px; display: inline-flex; align-items: center; gap: 3px; color: var(--text); }
-.set-apr-val { flex: 0 0 auto; min-width: 62px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.set-apr-val { flex: 0 1 auto; min-width: 62px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .set-apr-list li.on .set-apr-val { color: var(--text); }
 .set-apr-note { flex: 1 1 auto; min-width: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* 两颗恢复动作挪到块头（P102）：它们是整个块的出口，不该跟在清单后面像第三条数据 */
@@ -11030,7 +11032,7 @@ body.pdrag-active *{cursor:grabbing !important;}
   background: transparent;
 }
 .plg-filters .plg-fchip:hover:not(.on) { border-color: transparent; background: var(--raise-1); }
-.plg-filters .plg-fchip.on { color: var(--accent); border-color: transparent; background: var(--bg-panel); box-shadow: var(--shadow-pop); }
+.plg-filters .plg-fchip.on { color: var(--text); border-color: transparent; background: var(--bg-panel); box-shadow: var(--shadow-pop); }
 .plg-fchip {
   padding: 4px 9px;
   font-size: var(--fs-sm);
@@ -11042,7 +11044,7 @@ body.pdrag-active *{cursor:grabbing !important;}
   transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 .plg-fchip:hover:not(.on) { color: var(--text); border-color: var(--line-strong); background: var(--raise-1); }
-.plg-fchip.on { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.plg-fchip.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
 .plg-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 10px; }
 .plg-empty {
   font-size: var(--fs-sm);
@@ -12037,6 +12039,10 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}
 .sb-notes{flex:none;max-width:40%;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+
+
+
 
 
 
