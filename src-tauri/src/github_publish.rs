@@ -125,6 +125,16 @@ fn topics_for_publish(input: &[String]) -> Vec<String> {
     merge_topics(input, FORCED_TOPIC)
 }
 
+fn pin_forced_topic(mut topics: Vec<String>) -> Vec<String> {
+    if let Some(i) = topics.iter().position(|t| t == FORCED_TOPIC) {
+        let t = topics.remove(i);
+        topics.insert(0, t);
+    } else {
+        topics.insert(0, FORCED_TOPIC.to_string());
+    }
+    topics
+}
+
 fn brief(msg: &str) -> String {
     msg.chars().take(200).collect()
 }
@@ -327,7 +337,7 @@ pub async fn github_publish(
         if let Some(arr) = body["names"].as_array() {
             let got: Vec<String> = arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
             if !got.is_empty() {
-                final_topics = got;
+                final_topics = pin_forced_topic(got);
             }
         }
     } else {
@@ -399,6 +409,18 @@ mod tests {
 
         let many: Vec<String> = (0..30).map(|i| format!("t{i}")).collect();
         assert_eq!(topics_for_publish(&many).len(), MAX_TOPICS);
+    }
+
+    #[test]
+    fn github_topic_order_is_pinned() {
+        assert_eq!(
+            pin_forced_topic(vec!["e2e".into(), "uartix-plugin".into()]),
+            vec!["uartix-plugin", "e2e"]
+        );
+        assert_eq!(
+            pin_forced_topic(vec!["e2e".into()]),
+            vec!["uartix-plugin", "e2e"]
+        );
     }
 
     #[test]
