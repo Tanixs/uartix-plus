@@ -9151,6 +9151,11 @@ html.aiw-transparent-root #root {
    P102 起这块住在市场弹窗里（顶上那颗齿轮展开），设置页那一栏只剩本地插件库。 */
 .set-ext-page { display: flex; flex-direction: column; height: 100%; max-width: var(--set-col-w); margin-inline: auto; width: 100%; }
 .set-ext-page .set-plg-embed { flex: 1; min-height: 0; height: auto; }
+/* P164：窄窗下工具栏不再把搜索/筛选/动作硬塞一行；搜索独占一行，筛选与动作落第二行 */
+.set-plg-embed { container-type: inline-size; }
+@container (max-width: 900px) {
+  .set-plg-embed .plg-search-box { flex: 1 1 100%; max-width: none; }
+}
 /* 只有图标的按钮：与旁边那颗文字按钮同高，不然一排看着一深一浅 */
 .btn-icon { display: inline-flex; align-items: center; justify-content: center; padding: 6px 8px; }
 .btn-icon.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
@@ -12032,3 +12037,5 @@ html.no-motion .mkt-img-skel { animation: none; }
 .sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}
 .sb-notes{flex:none;max-width:40%;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+
