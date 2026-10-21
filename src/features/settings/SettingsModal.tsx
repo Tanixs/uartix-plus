@@ -33,12 +33,13 @@ import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { SetGroups, SetRow } from "../../shared/SetRow";
-import { IconChevron, IconCube, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSparkle, IconStack, IconTrash, IconTune, IconUpload } from "../../shared/icons";
+import { IconChevron, IconClose, IconCube, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSearch, IconSparkle, IconStack, IconTrash, IconTune, IconUpload } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 import { rangeStyle } from "../../shell/rangeFill";
 import { WinKeys } from "../../shell/WindowControls";
 import { getWinSafe } from "../../shell/windowCtl";
+import { searchSettings, type SettingsSearchHit } from "./settingsSearch";
 
 function fmtBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "-";
@@ -242,6 +243,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const [layoutName, setLayoutName] = useState("");
   const [tab, setTab] = useState(initialTab ?? "general");
   const [msg, setMsg] = useState("");
+  const [navQuery, setNavQuery] = useState("");
   /**
    * P110-B1：AI 页那几条输入框现在编辑的是**档案表里选中的那一对**（`editingPair` 故意不做
    * "可用"过滤，否则密钥空着时就没人能填进去）。P115-F16 后本页不再直接消费这份快照
@@ -331,6 +333,12 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   ];
   /** 页头那一句：说明写在页头一次，胜过在每一行重复一遍（P111-B） */
   const headTab = tabs.find((x) => x.key === tab) ?? tabs[0];
+  const navHits = searchSettings(navQuery, tabs);
+  const goToSearchHit = (hit: SettingsSearchHit) => {
+    setTab(hit.tab);
+    setMsg("");
+    setNavQuery("");
+  };
 
   // Esc 是这一页的键盘出口：改成全窗口之后，"点遮罩外面"那条出口不存在了
   // （页面自己就铺满工作区），没有 Esc 就等于只有一颗「完成」可点。
@@ -415,7 +423,56 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               <IconChevron dir="left" size={13} />
               {tx("返回工作区", "Back to workspace")}
             </button>
-            {tabs.map((x, i) => (
+            <div className="set-nav-search">
+              <span className="set-nav-search-ico" aria-hidden="true"><IconSearch /></span>
+              <input
+                className="input set-nav-search-input"
+                value={navQuery}
+                onChange={(e) => setNavQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && navQuery) {
+                    e.stopPropagation();
+                    setNavQuery("");
+                  } else if (e.key === "Enter" && navHits[0]) {
+                    e.preventDefault();
+                    goToSearchHit(navHits[0]);
+                  }
+                }}
+                placeholder={tx("搜索设置或页面", "Search settings or pages")}
+                aria-label={tx("搜索设置或页面", "Search settings or pages")}
+              />
+              {navQuery && (
+                <button
+                  type="button"
+                  className="set-nav-search-clear"
+                  title={tx("清空搜索", "Clear search")}
+                  aria-label={tx("清空搜索", "Clear search")}
+                  onClick={() => setNavQuery("")}
+                >
+                  <IconClose />
+                </button>
+              )}
+            </div>
+            {navQuery.trim() ? (
+              <div className="set-nav-results" aria-label={tx("搜索结果", "Search results")}>
+                {navHits.length === 0 ? (
+                  <div className="set-nav-empty">{tx("没有匹配的设置或页面", "No matching settings or pages")}</div>
+                ) : navHits.map((hit, i) => (
+                  <button
+                    key={`${hit.kind}-${hit.tab}-${hit.label}-${i}`}
+                    type="button"
+                    className="set-nav-hit"
+                    title={`${hit.label} · ${hit.hint}`}
+                    onClick={() => goToSearchHit(hit)}
+                  >
+                    <span className="set-nav-hit-label">{hit.label}</span>
+                    <span className="set-nav-hit-hint">
+                      {hit.kind === "tab" ? hit.hint : tx(`设置 · ${hit.hint}`, `Setting · ${hit.hint}`)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : tabs.map((x, i) => (
               <Fragment key={x.key}>
                 {/* 分组标题只在"这一组的第一项"前出现一次 */}
                 {(i === 0 || tabs[i - 1].group !== x.group) && <div className="set-nav-group">{x.group}</div>}

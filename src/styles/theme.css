@@ -6273,6 +6273,53 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   cursor: pointer;
 }
 .set-nav-back:hover { color: var(--accent-text); background: var(--raise-1); }
+.set-nav-search { position: relative; margin: 0 0 8px; }
+.set-nav-search-input { width: 100%; height: 30px; padding: 4px 24px 4px 26px; font-size: var(--fs-sm); }
+.set-nav-search-ico {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.set-nav-search-ico svg { width: 14px; height: 14px; }
+.set-nav .set-nav-search-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.set-nav .set-nav-search-clear:hover { color: var(--text); background: var(--raise-1); }
+.set-nav-results { display: flex; flex-direction: column; gap: 2px; min-height: 0; }
+.set-nav .set-nav-hit {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--bg-panel);
+  text-align: left;
+}
+.set-nav .set-nav-hit:hover { border-color: var(--accent); background: var(--accent-soft); }
+.set-nav-hit-label { font-size: var(--fs-sm); color: var(--text); }
+.set-nav-hit-hint { font-size: var(--fs-xs); color: var(--text-dim); }
+.set-nav-empty { padding: 10px 13px; font-size: var(--fs-sm); color: var(--text-dim); }
 .set-nav-group {
   margin: 14px 0 3px;
   padding: 0 13px;
@@ -6291,6 +6338,14 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .set-nav-ico { flex: none; display: inline-flex; color: var(--text-faint); }
 .set-page .set-nav button:hover .set-nav-ico { color: var(--text-dim); }
 .set-page .set-nav button.on .set-nav-ico { color: var(--accent-text); }
+.set-page .set-nav .set-nav-hit {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  font-size: var(--fs-sm);
+}
+.set-page .set-nav .set-nav-search-clear { gap: 0; padding: 0; font-size: var(--fs-sm); }
 /* 一组设置 = 一张浮起的卡，而不是"一条发丝线接一条发丝线" */
 .set-card {
   /* 居中而不是靠左：卡片本来就有 1080px 的行长上限（下面那条注释立的理由），
