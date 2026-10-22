@@ -14,6 +14,7 @@ mod parser;
 mod pipeline;
 mod ring;
 mod serial;
+mod ext_host;
 mod session;
 mod vdev;
 mod xfer;
@@ -213,6 +214,7 @@ pub fn run() {
         .manage(session::SessionState::default())
         .manage(bridge::BridgeState::new())
         .manage(bridge_jobs::JobsState::new())
+        .manage(ext_host::ExtHostState::default())
         .invoke_handler(tauri::generate_handler![
             busevt::ipc_subscribe,
             busevt::ipc_stats,
@@ -295,6 +297,11 @@ pub fn run() {
             agent_tools::agent_http_get,
             github_publish::github_publish,
     market_fetch::market_fetch,
+            ext_host::ext_host_start,
+            ext_host::ext_host_send,
+            ext_host::ext_host_touch,
+            ext_host::ext_host_stop,
+            ext_host::ext_host_status,
             // 双击 .uopk（文件关联）时前端 operatorStore 经它取走待打开路径。
             // 这条曾经**只定义了没注册**，前端 invoke 直接 reject 又被空 catch 吞掉 ⇒ 表现为"双击没反应"；
             // 现由 .tools/check-commands-registered.cjs 钉住（§8-P44"注册命令≠State 可用"的镜像形状）。
