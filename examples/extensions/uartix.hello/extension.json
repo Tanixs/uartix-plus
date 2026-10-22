@@ -2,13 +2,15 @@
   "format": "uartix-extension",
   "schemaVersion": 3,
   "id": "uartix.hello",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "示例扩展",
-  "description": "装完之后每 2 秒打一条心跳：用来确认宿主进程真的在跑、日志真的在流动",
+  "description": "带自己的面板：每 2 秒一条心跳，按钮走一次真正的 RPC 到插件进程",
   "author": "uartix",
   "license": "MIT",
   "main": "main.mjs",
   "activation": ["onPanel:hello"],
-  "permissions": {},
-  "contributes": { "panels": [] }
+  "permissions": { "ui": { "panel": true } },
+  "contributes": {
+    "panels": [{ "id": "hello", "title": "示例面板", "entry": "panel.html" }]
+  }
 }

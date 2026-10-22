@@ -7,6 +7,16 @@ import {
   type IDockviewPanel,
 } from "dockview-react";
 import { panelComponents, PANEL_TITLES, panelTitleOf } from "./panels/panels";
+import {
+  EXT_VIEW_PREFIX,
+  collectExtensionPanels,
+  parsePanelViewId,
+} from "./features/extensions/panelBridge";
+import {
+  ensureLoaded as ensureExtRepoLoaded,
+  getSnapshot as getExtRepoSnapshot,
+  subscribe as subscribeExtRepo,
+} from "./features/extensions/extStore";
 import { applyDefaultLayout, gridSize } from "./shell/defaultLayout";
 import {
   panelGroupsAddable,
@@ -145,6 +155,15 @@ export default function App() {
   const operator = operatorStore.useOperator(); // P67：只读模式横幅 + 布局应用
   const exts = useExtensions();
   const extPanelOptions = exts.exts.filter((e) => e.type === "panel" && e.enabled);
+  /* A7：插件自己声明的面板（iframe）。清单里的 `contributes.panels` 就是这张表的唯一来源，
+     所以装/卸之后不需要额外通知——仓库 store 一变，这里跟着重算。 */
+  const extRepo = useSyncExternalStore(subscribeExtRepo, getExtRepoSnapshot);
+  const extViewPanels = collectExtensionPanels(extRepo.entries);
+  /* 面板清单来自磁盘（`extensions/<id>/extension.json`），所以启动时得读一次盘——
+     否则「+ 面板」里要等到有人打开扩展管理面才出现"扩展面板"那一组。 */
+  useEffect(() => {
+    void ensureExtRepoLoaded();
+  }, []);
   // B6：「最近使用」置顶（会话内响应式；跨会话持久在 localStorage）
   const [recentPanels, setRecentPanels] = useState<string[]>(() => getRecentPanels());
   renderTick += 1;
@@ -734,6 +753,25 @@ export default function App() {
       exist.api.setActive();
       return;
     }
+    // A7：插件自己的面板，id 形如 ext-view-<extId>:<panelId>
+    if (id.startsWith(EXT_VIEW_PREFIX)) {
+      const v = parsePanelViewId(id);
+      if (!v) return;
+      const groups0 = api.groups;
+      const ref0 =
+        api.activePanel ??
+        (groups0.length
+          ? groups0[groups0.length - 1].panels[groups0[groups0.length - 1].panels.length - 1]
+          : null);
+      api.addPanel({
+        id,
+        component: "extViewPanel",
+        title: panelTitleOf(id),
+        params: { extId: v.extId, panelId: v.panelId },
+        ...(ref0 ? { position: { referencePanel: ref0.id, direction: "within" as const } } : {}),
+      });
+      return;
+    }
     // AI 扩展面板：id 形如 ext-panel-<extId>，统一走 aiExtPanel 宿主组件
     if (id.startsWith("ext-panel-")) {
       const ext = getExtSnapshot(id.slice("ext-panel-".length));
@@ -850,6 +888,15 @@ export default function App() {
                   {extPanelOptions.map((e) => (
                     <option key={`ext-panel-${e.id}`} value={`ext-panel-${e.id}`}>
                       {e.name}（AI）
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {extViewPanels.length > 0 && (
+                <optgroup label={tx("扩展面板", "Extension panels")}>
+                  {extViewPanels.map((p) => (
+                    <option key={p.viewId} value={p.viewId}>
+                      {p.title}
                     </option>
                   ))}
                 </optgroup>

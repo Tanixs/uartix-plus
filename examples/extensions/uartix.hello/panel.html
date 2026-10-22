@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>示例面板</title>
+    <!--
+      这是一个**自足的** HTML：没有外链 CSS/JS。
+      原因是宿主把面板渲染在不透明源的 iframe 里（sandbox 只给 allow-scripts），
+      它没有基址、没有存储，拿不到相对路径，所以资源要么内联、要么经 `uartix.readText()` 显式取。
+      这一页两个都演示了：样式内联，文件清单走 uartix.list()。
+    -->
+    <style>
+      :root {
+        color-scheme: dark light;
+        --fg: #e6e6e6;
+        --dim: #9aa0a6;
+        --bg: #1b1d21;
+        --line: #2e3238;
+        --accent: #4a9eff;
+        --ok: #3fb950;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --fg: #1c1f23;
+          --dim: #5a616b;
+          --bg: #fbfbfc;
+          --line: #e3e6ea;
+          --accent: #1a73e8;
+          --ok: #1a7f37;
+        }
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font: 12px/1.6 "Segoe UI", system-ui, sans-serif;
+      }
+      main {
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0;
+        font-weight: 600;
+      }
+      .sub {
+        color: var(--dim);
+        font-size: 11px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      button {
+        font: inherit;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .beats {
+        font-size: 26px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+        color: var(--ok);
+      }
+      pre {
+        margin: 0;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        max-height: 40vh;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--dim);
+      }
+      code {
+        font-family: "Cascadia Mono", Consolas, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>示例面板</h1>
+      <div class="sub">
+        这个页面跑在一个不透明源的 iframe 里：碰不到宿主的 DOM，也没有自己的 localStorage。
+        它跟插件进程说话的方式只有 <code>uartix.call()</code>。
+      </div>
+
+      <div class="row">
+        <span class="beats" id="beats">0</span>
+        <span class="sub">次心跳（插件 push 过来的）</span>
+      </div>
+
+      <div class="row">
+        <button id="ping">问一下插件（RPC）</button>
+        <button id="files">列出包内文件</button>
+      </div>
+
+      <pre id="out">点上面的按钮试试。</pre>
+    </main>
+
+    <script>
+      var out = document.getElementById("out");
+      var beats = document.getElementById("beats");
+
+      function show(x) {
+        out.textContent = typeof x === "string" ? x : JSON.stringify(x, null, 2);
+      }
+
+      // 插件那边（main.mjs）每 2 秒 emit 一次，这里是它的另一端。
+      // 先 on 再 call：晚注册的监听器会漏掉这之前的事件，而"我先点按钮再挂监听"是常见写法。
+      uartix.on("heartbeat", function (p) {
+        if (p && typeof p.beats === "number") beats.textContent = String(p.beats);
+      });
+
+      document.getElementById("ping").onclick = function () {
+        show("调用中…");
+        uartix
+          .call("ping", { from: "panel", at: Date.now() })
+          .then(function (r) {
+            show(r);
+          })
+          .catch(function (e) {
+            show("失败：" + (e && e.code ? e.code + " " : "") + (e && e.message));
+          });
+      };
+
+      document.getElementById("files").onclick = function () {
+        uartix
+          .list(".")
+          .then(function (items) {
+            show(
+              items
+                .map(function (i) {
+                  return (i.dir ? "[dir]  " : "       ") + i.name;
+                })
+                .join("\n")
+            );
+          })
+          .catch(function (e) {
+            show("失败：" + (e && e.message));
+          });
+      };
+    </script>
+  </body>
+</html>

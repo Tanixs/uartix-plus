@@ -26,6 +26,9 @@ import { VdevPanel } from "../features/vdev/VdevPanel";
 import { ExtPanelHost } from "../features/ai/ExtPanel";
 import { SendBuildPanel } from "../features/send/SendBuildPanel";
 import { ExtManagerPanel } from "../features/extensions/ExtManagerPanel";
+import { ExtViewPanel } from "../features/extensions/ExtViewPanel";
+import { getSnapshot as getExtRepo } from "../features/extensions/extStore";
+import { EXT_VIEW_PREFIX, parsePanelViewId } from "../features/extensions/panelBridge";
 
 /** 面板页签名（语言感知，P33 i18n）；页签重挂靠 App 的 retitlePanels（locale 变化时 setTitle） */
 export const PANEL_TITLES = (): Record<PanelId, string> => {
@@ -59,6 +62,14 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
 
 /** 任意面板 id → 页签标题：内置面板查表；AI 扩展面板用扩展名（用户数据不翻译） */
 export function panelTitleOf(id: string): string {
+  // A7：插件自己的面板（iframe）。标题由清单里的 `contributes.panels[].title` 决定，
+  // 扩展被卸载后回落到一个中性名字——不然页签上会挂着一个 `ext-view-a.b:c` 这样的原始 id。
+  if (id.startsWith(EXT_VIEW_PREFIX)) {
+    const v = parsePanelViewId(id);
+    const e = v ? getExtRepo().entries.find((x) => x.id === v.extId) : undefined;
+    const d = e?.manifest.contributes.panels?.find((x) => x.id === v?.panelId);
+    return d?.title ?? tx("扩展面板", "Extension panel");
+  }
   if (id.startsWith("ext-panel-")) {
     const ext = getExt(id.slice("ext-panel-".length));
     return ext?.name ?? tx("AI 扩展面板", "AI extension panel");
@@ -198,6 +209,11 @@ export const panelComponents = {
   extruntime: () => (
     <ErrorBoundary label={panelTitleOf("extruntime")}>
       <MExtManager />
+    </ErrorBoundary>
+  ),
+  extViewPanel: (props: { params?: { extId?: string; panelId?: string } }) => (
+    <ErrorBoundary label={`${props.params?.extId ?? ""}:${props.params?.panelId ?? ""}`}>
+      <ExtViewPanel params={props.params} />
     </ErrorBoundary>
   ),
   aiExtPanel: (props: { params?: { extId?: string } }) => (

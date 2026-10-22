@@ -17,7 +17,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { BOOTSTRAP_SOURCE } from "./bootstrap";
 import { validateExtension, type ExtensionManifest } from "./manifest";
 import { planHostStart, HostPlanError } from "./hostPlan";
-import { decodeMessage, encodeMessage, type ExtToHost } from "./protocol";
+import { decodeMessage, encodeMessage, RPC_TIMEOUT_MS, type ExtToHost } from "./protocol";
 import {
   applyInstall,
   applyUninstall,
@@ -29,6 +29,7 @@ import {
 import {
   extDir,
   flattenPermissions,
+  resolveInExtDir,
   STAGING_DIR,
   trustVerdict,
   type ExtIndex,
@@ -111,6 +112,38 @@ let trust: TrustBook | null = null;
  * 表现是"disposer 没跑"：插件没来得及把状态落盘就被杀了。丢的是数据，不是一条报错。
  */
 const tokens = new Map<string, string>();
+
+/**
+ * 在途 RPC。键是宿主自己生成的 id（不是扩展给的），值带一个超时定时器。
+ *
+ * 为什么要超时：`call` 发出去之后，扩展可能因为死循环、等一个永不返回的 Promise、
+ * 或者干脆崩了而永远不回 `result`。没有定时器的话，面板上的那一次点击就永远转圈，
+ * 而且**看不出是插件的问题还是界面的问题**。
+ */
+interface PendingCall {
+  res: (v: unknown) => void;
+  rej: (e: Error) => void;
+  timer: number;
+  /** 谁发的：进程退出时要按 handle 把它的在途调用单独拒掉，不能一锅端（别的扩展还在跑）。 */
+  handle: string;
+}
+const pending = new Map<string, PendingCall>();
+let callSeq = 0;
+
+/** 面板事件订阅（扩展 `ctx.panels.emit` 的另一端）。 */
+export interface PanelEvent {
+  extId: string;
+  panelId: string;
+  event: string;
+  payload: unknown;
+}
+type PanelEventCb = (p: PanelEvent) => void;
+const panelSubs = new Set<PanelEventCb>();
+
+export function onPanelEvent(cb: PanelEventCb): () => void {
+  panelSubs.add(cb);
+  return () => panelSubs.delete(cb);
+}
 
 let repo: ExtRepo = { loading: true, appDir: "", entries: [], issues: [] };
 const subs = new Set<() => void>();
@@ -392,6 +425,15 @@ async function ensureListeners(): Promise<void> {
         });
         return;
       }
+      if (msg.t === "result") {
+        const p = pending.get(msg.id);
+        if (!p) return; // 超时之后才回来的结果：丢弃（调用方早就拿到 timeout 了）
+        pending.delete(msg.id);
+        clearTimeout(p.timer);
+        if (msg.ok) p.res(msg.data);
+        else p.rej(Object.assign(new Error(msg.err), { code: msg.code }));
+        return;
+      }
       if (msg.t === "emit") {
         const payload = msg.payload as { msg?: string } | null;
         log(handle, {
@@ -399,6 +441,14 @@ async function ensureListeners(): Promise<void> {
           level: "info",
           text: payload?.msg ? `[通知] ${payload.msg}` : `${msg.event}: ${JSON.stringify(msg.payload)}`,
         });
+        // 面板事件要**转给界面**，不只是记一行日志：日志是给人看的，事件是给 iframe 用的
+        for (const cb of panelSubs) {
+          try {
+            cb({ extId: handle, panelId: msg.panelId, event: msg.event, payload: msg.payload });
+          } catch {
+            /* 某个面板的监听器抛错不该打断别的面板 */
+          }
+        }
         return;
       }
       if (msg.t === "disposed") {
@@ -411,6 +461,8 @@ async function ensureListeners(): Promise<void> {
       const h = e.payload.handle;
       patch(h, { phase: nextPhase(getEntry(h)?.phase ?? "running", { type: "exit" }), pid: undefined });
       log(h, { at: Date.now(), level: "warn", text: "进程已退出" });
+      // 进程没了，在途的调用不可能再有结果：立刻拒掉，别让面板等到超时
+      rejectPendingOf(h, "宿主进程已退出");
     }),
   );
   unlisteners.push(
@@ -529,6 +581,95 @@ export async function touch(id: string): Promise<void> {
   } catch {
     /* 没在跑就算了 */
   }
+}
+
+/** 把某个 handle 的在途调用全部拒掉（进程退出时用）。 */
+function rejectPendingOf(handle: string, why: string): void {
+  for (const [id, p] of pending) {
+    if (p.handle !== handle) continue;
+    pending.delete(id);
+    clearTimeout(p.timer);
+    p.rej(Object.assign(new Error(why), { code: "unsupported" }));
+  }
+}
+
+/**
+ * 调扩展注册的方法（`ctx.commands.register` 或 `ctx.panels.register` 的处理器）。
+ *
+ * 面板传进来的是 `panel.<panelId>.<method>`，命令是 `command.<id>`——前缀由**调用方**拼，
+ * 这里不做猜测：拼错的后果是扩展侧一句 `not_found`，比宿主瞎猜一个方法名好查。
+ */
+export async function callExt(
+  handle: string,
+  method: string,
+  args?: unknown,
+  timeoutMs = RPC_TIMEOUT_MS,
+): Promise<unknown> {
+  const e = getEntry(handle);
+  if (!e) throw Object.assign(new Error(`没有这个扩展：${handle}`), { code: "not_found" });
+  if (e.phase !== "running") {
+    throw Object.assign(new Error("扩展还没在运行：先启动它"), { code: "unsupported" });
+  }
+  await ensureListeners();
+  const id = `c${(++callSeq).toString(36)}`;
+  return new Promise((res, rej) => {
+    const timer = window.setTimeout(() => {
+      pending.delete(id);
+      rej(Object.assign(new Error(`调用超时（${timeoutMs}ms）：${method}`), { code: "timeout" }));
+    }, timeoutMs);
+    pending.set(id, { res, rej, timer, handle });
+    void invoke("ext_host_send", {
+      handle,
+      line: encodeMessage({ t: "call", token: tokens.get(handle) ?? "", id, method, args: args ?? null }),
+    }).catch((err) => {
+      pending.delete(id);
+      clearTimeout(timer);
+      rej(Object.assign(new Error(String((err as Error)?.message ?? err)), { code: "unsupported" }));
+    });
+  });
+}
+
+/** 包内相对路径 → 绝对路径；越界返回 null（面板侧拿到的是 `denied`，不是"文件不存在"）。 */
+async function resolveInExt(handle: string, rel: string): Promise<string | null> {
+  if (!paths) paths = await invoke<ExtPaths>("ext_paths");
+  const dir = getEntry(handle)?.dir ?? extDir(paths.appDir, handle);
+  return resolveInExtDir(dir, rel);
+}
+
+/**
+ * 面板读包内文件。
+ *
+ * 为什么不让 iframe 自己去 fetch：不透明源的文档没有可用的基址，也拿不到文件系统；
+ * 走这条路顺带把"它到底读了哪个文件"留在宿主这边——出问题时能看见它读的是什么。
+ */
+export async function readInExt(handle: string, rel: string): Promise<string> {
+  const abs = await resolveInExt(handle, rel);
+  if (!abs) throw Object.assign(new Error(`路径越界或非法：${rel}`), { code: "denied" });
+  if (!paths) throw new Error("还没读到扩展目录");
+  const r = await invoke<{ exists: boolean; text: string; truncated: boolean }>("ext_fs_read", {
+    path: abs,
+    roots: [paths.extensionsRoot],
+  });
+  if (!r.exists) throw Object.assign(new Error(`包内没有这个文件：${rel}`), { code: "not_found" });
+  return r.text;
+}
+
+export async function writeInExt(handle: string, rel: string, content: string): Promise<void> {
+  const abs = await resolveInExt(handle, rel);
+  if (!abs) throw Object.assign(new Error(`路径越界或非法：${rel}`), { code: "denied" });
+  if (!paths) throw new Error("还没读到扩展目录");
+  await invoke("ext_fs_write", { path: abs, content, roots: [paths.extensionsRoot] });
+}
+
+export async function listInExt(handle: string, rel: string): Promise<{ name: string; dir: boolean }[]> {
+  const abs = await resolveInExt(handle, rel);
+  if (!abs) throw Object.assign(new Error(`路径越界或非法：${rel}`), { code: "denied" });
+  if (!paths) throw new Error("还没读到扩展目录");
+  const r = await invoke<{ exists: boolean; items: { name: string; dir: boolean }[] }>("ext_fs_list", {
+    dir: abs,
+    roots: [paths.extensionsRoot],
+  });
+  return r.items;
 }
 
 function newToken(): string {

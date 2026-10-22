@@ -265,13 +265,13 @@ describe("P174-A6 · 仓库示例包在真引导脚本里跑通", () => {
       );
       const got = [];
       let buf = "";
-      let disposed = false;
       let done = false;
+      let kick = null;
       const finish = (code) => {
         if (done) return;
         done = true;
         clearTimeout(timer);
-        clearTimeout(kick);
+        if (kick) clearTimeout(kick);
         resolve({ messages: got, code });
       };
       const timer = setTimeout(() => {
@@ -284,12 +284,20 @@ describe("P174-A6 · 仓库示例包在真引导脚本里跑通", () => {
         }
         reject(new Error(`超时；已收到 ${JSON.stringify(got).slice(0, 600)}`));
       }, 15_000);
-      // 心跳是 2s 一次：等到超过一个周期再收手，否则"定时器根本没跑"也能过
-      const kick = setTimeout(() => {
-        if (disposed) return;
-        disposed = true;
-        child.stdin.write(encodeMessage({ t: "dispose", token: TOKEN, reason: "test" }) + "\n");
-      }, 2_600);
+      /* 2.6 秒的"收手"计时**从激活那一刻起算**，不是从 spawn 起算。
+         从 spawn 起算的版本在满负载下会红：全套测试并行时，起进程 + activate 可能超过 2.6s，
+         于是 dispose 赶在激活之前发出去，看起来像"心跳没跑"（实际是插件还没跑）。
+         判据必须只对"插件的行为"敏感，不能对"机器有多忙"敏感。 */
+      const armKick = () => {
+        if (kick) return;
+        kick = setTimeout(() => {
+          try {
+            child.stdin.write(encodeMessage({ t: "dispose", token: TOKEN, reason: "test" }) + "\n");
+          } catch {
+            /* 进程可能已经没了 */
+          }
+        }, 2_600);
+      };
 
       child.stdout.on("data", (d) => {
         buf += d.toString("utf8");
@@ -305,7 +313,11 @@ describe("P174-A6 · 仓库示例包在真引导脚本里跑通", () => {
             continue;
           }
           got.push(m);
-          if (m.t === "ready") child.stdin.write(encodeMessage({ t: "activate", token: TOKEN }) + "\n");
+          if (m.t === "ready") {
+            child.stdin.write(encodeMessage({ t: "activate", token: TOKEN }) + "\n");
+            return;
+          }
+          if (m.t === "log" && String(m.msg || "").includes("示例扩展已启动")) armKick();
         }
       });
       child.stderr.on("data", (d) => got.push({ t: "__stderr", line: d.toString("utf8") }));
@@ -330,5 +342,136 @@ describe("P174-A6 · 仓库示例包在真引导脚本里跑通", () => {
     // disposer 报的是它自己数到的次数，不是写死的话
     expect(messages.some((m) => m.t === "log" && /已停止：共 \d+ 次心跳/.test(m.msg)), `disposer 没跑：${dump}`).toBe(true);
     expect(messages.some((m) => m.t === "disposed")).toBe(true);
+  }, 25_000);
+});
+
+/**
+ * P174-A7：**面板的那条 RPC 线**，在真进程上跑一遍。
+ *
+ * 面板里的按钮 → `uartix.call("ping")` → 宿主拼成 `panel.<panelId>.ping` → 发 `call` →
+ * 引导脚本路由到 `ctx.panels.register(panelId, { ping })` → 回 `result`。
+ *
+ * 这条线断在哪一环都不会抛错，只会让按钮一直转圈：方法名前缀拼错是 `not_found`、
+ * token 没带是**静默丢弃**（设计如此）、`id` 不复用结果是等不到回音。所以只能真跑。
+ */
+describe("P174-A7 · 面板 RPC 在真进程上走通", () => {
+  it("panel.<id>.<method> 拿得到结果；未知方法得 not_found；emit 带 panelId 回来", async () => {
+    const manifestRaw = readFileSync(path.join(EXAMPLE_DIR, "extension.json"), "utf8");
+    const v = validateExtension(JSON.parse(manifestRaw));
+    expect(v.ok, `示例包清单不合法：${v.errors.join("；")}`).toBe(true);
+    expect(v.manifest.contributes.panels?.[0]?.id).toBe("hello");
+
+    const pluginDir = path.join(dir, "p7", v.manifest.id);
+    const bootPath = path.join(dir, "bootstrap-p7.mjs");
+    writeFileSync(bootPath, BOOTSTRAP_SOURCE, "utf8");
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(path.join(pluginDir, "main.mjs"), readFileSync(path.join(EXAMPLE_DIR, v.manifest.main), "utf8"), "utf8");
+
+    const { messages } = await new Promise((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [PERM, "--allow-fs-read=*", "--allow-child-process", bootPath, pluginDir],
+        { cwd: pluginDir, windowsHide: true },
+      );
+      const got = [];
+      let buf = "";
+      let done = false;
+      let step = 0;
+      let kick = null;
+      const finish = (code) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (kick) clearTimeout(kick);
+        resolve({ messages: got, code });
+      };
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        try {
+          child.kill();
+        } catch {
+          /* 已退出 */
+        }
+        reject(new Error(`超时；已收到 ${JSON.stringify(got).slice(0, 700)}`));
+      }, 15_000);
+      /* 心跳是 2s 一次：**必须等过一个周期再收手**，否则"emit 通路根本没接上"也能过。
+         （第一版是 r2 一到就 dispose，于是这条断言永远看不到 emit —— 它红得对。）
+         计时同样从激活那一刻起算，不跟机器忙不忙挂钩。 */
+      const armKick = () => {
+        if (kick) return;
+        kick = setTimeout(() => {
+          try {
+            child.stdin.write(encodeMessage({ t: "dispose", token: TOKEN, reason: "test" }) + "\n");
+          } catch {
+            /* 进程可能已经没了 */
+          }
+        }, 2_600);
+      };
+
+      child.stdout.on("data", (d) => {
+        buf += d.toString("utf8");
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (!line) continue;
+          let m;
+          try {
+            m = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          got.push(m);
+          if (m.t === "ready") {
+            child.stdin.write(encodeMessage({ t: "activate", token: TOKEN }) + "\n");
+            return;
+          }
+          // activate 的输出到齐了才开始调：过早调用会得到 not_found（处理器还没注册）
+          if (m.t === "log" && String(m.msg || "").includes("示例扩展已启动") && step === 0) {
+            step = 1;
+            child.stdin.write(
+              encodeMessage({ t: "call", token: TOKEN, id: "r1", method: "panel.hello.ping", args: { from: "probe" } }) + "\n",
+            );
+            return;
+          }
+          if (m.t === "result" && m.id === "r1") {
+            step = 2;
+            child.stdin.write(
+              encodeMessage({ t: "call", token: TOKEN, id: "r2", method: "panel.hello.nope" }) + "\n",
+            );
+            return;
+          }
+          // r2 之后还要等一个心跳才收手（armKick 由它来管）
+          if (m.t === "result" && m.id === "r2") armKick();
+        }
+      });
+      child.stderr.on("data", (d) => got.push({ t: "__stderr", line: d.toString("utf8") }));
+      child.on("error", reject);
+      child.on("exit", (code) => finish(code));
+
+      child.stdin.write(
+        encodeMessage({ t: "hello", v: 1, token: TOKEN, workspace: pluginDir, appDir: dir, dev: true }) + "\n",
+      );
+    });
+
+    const dump = JSON.stringify(messages).slice(0, 900);
+    const r1 = messages.find((m) => m.t === "result" && m.id === "r1");
+    const r2 = messages.find((m) => m.t === "result" && m.id === "r2");
+    expect(r1, `第一条 call 没有结果：${dump}`).toBeTruthy();
+    expect(r1.ok, `ping 失败：${dump}`).toBe(true);
+    expect(r1.data.pong).toBe(true);
+    // 参数真的到了扩展里（拼错前缀也会"成功"，所以要看回传的内容）
+    expect(r1.data.echo).toEqual({ from: "probe" });
+    expect(r2, `未知方法没有结果：${dump}`).toBeTruthy();
+    expect(r2.ok).toBe(false);
+    expect(r2.code).toBe("not_found");
+    // 面板事件的另一端：host 靠 panelId 分发给对应的 iframe
+    expect(
+      messages.some((m) => m.t === "emit" && m.panelId === "hello" && m.event === "heartbeat"),
+      `没收到面板事件：${dump}`,
+    ).toBe(true);
+    // token 必须回带（A2 的规矩，这条是顺手复核）
+    expect(r1.token).toBe(TOKEN);
   }, 25_000);
 });
