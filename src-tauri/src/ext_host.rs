@@ -62,6 +62,22 @@ fn lock<'a, T>(m: &'a Mutex<T>) -> std::sync::MutexGuard<'a, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+
+/// 探测这个 node 认哪个权限开关。探不出来就按 `--permission` 试——真不认会立刻退出，
+/// 至少比"悄悄不带权限跑起来"安全（后者等于全部权限敞开）。
+fn permission_flag(node_path: &str) -> &'static str {
+    let ok = Command::new(node_path)
+        .args(["--permission", "-e", ""])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if ok {
+        "--permission"
+    } else {
+        "--experimental-permission"
+    }
+}
+
 /// 杀进程树。Windows 用 `taskkill /T`（含所有后代），失败再退回单杀。
 #[cfg(windows)]
 fn kill_tree(pid: u32) {
@@ -118,6 +134,14 @@ pub async fn ext_host_start(
     if let Some(old) = lock(&state.hosts).get(&handle).cloned() {
         teardown(&handle, &old);
         lock(&state.hosts).remove(&handle);
+    }
+
+    // Node 20 只认 `--experimental-permission`，22 起才把 `--permission` 转正。
+    // 用户的 node 是哪个版本不由我们决定，所以**启动前探一次**，把参数换成它能认的那个。
+    // 不探的后果：Node 20 上第一行就 `bad option: --permission`，而错误指向参数、不指向版本。
+    let mut args = args;
+    if let Some(pos) = args.iter().position(|a| a == "--permission") {
+        args[pos] = permission_flag(&node_path).to_string();
     }
 
     let mut cmd = Command::new(&node_path);

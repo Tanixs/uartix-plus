@@ -14,6 +14,7 @@ mod parser;
 mod pipeline;
 mod ring;
 mod serial;
+mod ext_fs;
 mod ext_host;
 mod session;
 mod vdev;
@@ -297,6 +298,12 @@ pub fn run() {
             agent_tools::agent_http_get,
             github_publish::github_publish,
     market_fetch::market_fetch,
+            ext_fs::ext_fs_write,
+            ext_fs::ext_fs_read,
+            ext_fs::ext_fs_list,
+            ext_fs::ext_fs_remove,
+            ext_fs::ext_store_read,
+            ext_fs::ext_store_write,
             ext_host::ext_host_start,
             ext_host::ext_host_send,
             ext_host::ext_host_touch,
