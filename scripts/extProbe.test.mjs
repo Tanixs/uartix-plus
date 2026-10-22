@@ -16,6 +16,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { BOOTSTRAP_SOURCE } from "../src/features/extensions/bootstrap.ts";
 import { encodeMessage } from "../src/features/extensions/protocol.ts";
+import { DEMO_EXT_ID, DEMO_MAIN } from "../src/features/extensions/demoExtension.ts";
 
 
 /**
@@ -167,8 +168,7 @@ describe("P174-A4 · 端到端（真进程）", () => {
     expect(messages.some((m) => m.t === "disposed")).toBe(true);
   }, 20_000);
 
-  it("token 不对的指令被丢弃（不执行、不回报）", async () => {
-    const pluginDir = path.join(dir, "plug2");
+  it("token 不对的指令被丢弃（不执行、不回报）", async () => {    const pluginDir = path.join(dir, "plug2");
     const bootPath = path.join(dir, "bootstrap2.mjs");
     writeFileSync(bootPath, BOOTSTRAP_SOURCE, "utf8");
     writePlugin(pluginDir);
@@ -223,4 +223,100 @@ describe("P174-A4 · 端到端（真进程）", () => {
     // 错 token 的 activate 不许生效
     expect(messages.some((m) => m.t === "log" && m.msg === "hello from probe")).toBe(false);
   }, 20_000);
+});
+
+/**
+ * P174-A5：**面板真的会跑的那份文件**，用它自己跑一遍。
+ *
+ * 前两条钉的是"引导脚本与一个最小插件对得上"，这一条钉的是"`demoExtension.ts` 里那串
+ * 字符串真的能被引导脚本跑起来"。两者不是同一件事：示例是**行数组 join 出来的 JS**，
+ * 少一个逗号、少一层缩进都可能变成一个语法错误，而那种错误在面板上表现为
+ * "进程起来了但一直没日志、8 秒后超时"——用户完全看不出是示例写坏了。
+ *
+ * 另外它还钉住一件只有真跑才知道的事：**定时器真的在推日志**。心跳停止（比如
+ * `setInterval` 被权限模式挡掉、或 stdout 被别的东西占住）时，握手照样成功、日志照样
+ * 一行不报，面板看起来"活着"，其实插件已经不动了。
+ */
+describe("P174-A5 · 内置示例在真引导脚本里跑通", () => {
+  it("activate 输出工作区 → 心跳到达 → dispose 报总数", async () => {
+    const pluginDir = path.join(dir, `${DEMO_EXT_ID}`);
+    const bootPath = path.join(dir, "bootstrap-demo.mjs");
+    writeFileSync(bootPath, BOOTSTRAP_SOURCE, "utf8");
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(path.join(pluginDir, "main.mjs"), DEMO_MAIN, "utf8");
+
+    const { messages } = await new Promise((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [PERM, "--allow-fs-read=*", "--allow-child-process", bootPath, pluginDir],
+        { cwd: pluginDir, windowsHide: true },
+      );
+      const got = [];
+      let buf = "";
+      let disposed = false;
+      let done = false;
+      const finish = (code) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        clearTimeout(kick);
+        resolve({ messages: got, code });
+      };
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        try {
+          child.kill();
+        } catch {
+          /* 已退出 */
+        }
+        reject(new Error(`超时；已收到 ${JSON.stringify(got).slice(0, 600)}`));
+      }, 15_000);
+      // 心跳是 2s 一次：等到超过一个周期再收手，否则"定时器根本没跑"也能过
+      const kick = setTimeout(() => {
+        if (disposed) return;
+        disposed = true;
+        child.stdin.write(encodeMessage({ t: "dispose", token: TOKEN, reason: "test" }) + "\n");
+      }, 2_600);
+
+      child.stdout.on("data", (d) => {
+        buf += d.toString("utf8");
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (!line) continue;
+          let m;
+          try {
+            m = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          got.push(m);
+          if (m.t === "ready") child.stdin.write(encodeMessage({ t: "activate", token: TOKEN }) + "\n");
+        }
+      });
+      child.stderr.on("data", (d) => got.push({ t: "__stderr", line: d.toString("utf8") }));
+      child.on("error", reject);
+      child.on("exit", (code) => finish(code));
+
+      child.stdin.write(
+        encodeMessage({ t: "hello", v: 1, token: TOKEN, workspace: pluginDir, appDir: dir, dev: true }) + "\n",
+      );
+    });
+
+    const dump = JSON.stringify(messages).slice(0, 800);
+    const logs = messages.filter((m) => m.t === "log").map((m) => m.msg);
+
+    expect(messages.some((m) => m.t === "ready"), `没握手：${dump}`).toBe(true);
+    // 语法错了 / import 失败，都是在这里现形（activate 根本没跑）
+    expect(logs.some((m) => m.includes("宿主已连接")), `activate 没跑：${dump}`).toBe(true);
+    // 工作区真的传进去了：面板显示"未配置"和不显示，是两种不同的故障
+    expect(logs.some((m) => m.includes(pluginDir)), `工作区没传到插件里：${dump}`).toBe(true);
+    // 心跳至少一次 —— 这是唯一能证明"定时器活着、stdout 还在流动"的判据
+    expect(logs.some((m) => /心跳 \d+/.test(m)), `心跳没到（定时器没跑）：${dump}`).toBe(true);
+    // disposer 报的是它自己数到的次数，不是写死的话
+    expect(messages.some((m) => m.t === "log" && /已停止：共 \d+ 次心跳/.test(m.msg)), `disposer 没跑：${dump}`).toBe(true);
+    expect(messages.some((m) => m.t === "disposed")).toBe(true);
+  }, 25_000);
 });

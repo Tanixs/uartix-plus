@@ -19,7 +19,9 @@ export type PanelId =
   | "metrics"
   | "orchestrator"
   | "vdev"
-  | "sendbuild";
+  | "sendbuild"
+  /** P174：扩展运行时（宿主进程状态 + 插件日志）。后面装包/批准卡/市场都长在这个面上。 */
+  | "extruntime";
 
 export interface PanelMeta {
   id: PanelId;

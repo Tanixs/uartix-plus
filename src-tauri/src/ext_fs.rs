@@ -19,6 +19,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::agent_tools::path_in_roots;
+use std::process::Command;
+use tauri::Manager;
 
 /// 单次写入上限。清单/账本/引导脚本都远小于这个数；真传大文件请走未来的 zip 通道。
 const MAX_WRITE_BYTES: usize = 8 * 1024 * 1024;
@@ -26,6 +28,59 @@ const MAX_WRITE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_READ_BYTES: u64 = 256 * 1024;
 /// 允许的账本名。加一个就要同时想清楚"它的写入是不是也该原子"。
 const STORE_NAMES: [&str; 2] = ["index", "trust"];
+
+/// 扩展仓库的根路径。前端要在启动宿主前把它们传给各条命令，
+/// 而"应用数据目录在哪"只有 Rust 知道（Tauri 的 path resolver）。
+#[tauri::command]
+pub fn ext_paths(app: tauri::AppHandle) -> Result<Value, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("拿不到应用数据目录：{e}"))?;
+    let root = dir.join("extensions");
+    let host = dir.join("ext-host");
+    Ok(json!({
+        "appDir": dir.to_string_lossy(),
+        "extensionsRoot": root.to_string_lossy(),
+        "hostDir": host.to_string_lossy(),
+        "bootstrapPath": host.join("bootstrap.mjs").to_string_lossy(),
+    }))
+}
+
+/// 找 Node 运行时：**探测但不静默**。
+///
+/// 返回的是"我试了这些地方、这个能跑、版本是多少"，不是"我猜它在 PATH 里"。
+/// 前端把路径与版本显示出来，用户能改——这比一个隐藏的自动探测诚实得多，
+/// 也比"要求用户先自己装 node 再来"少一步。
+#[tauri::command]
+pub fn ext_probe_node() -> Result<Value, String> {
+    let mut tried: Vec<String> = Vec::new();
+    let mut cands: Vec<String> = Vec::new();
+    // 1) PATH 里的 node（最常见）
+    cands.push("node".to_string());
+    // 2) Windows 官方安装器的默认落点（PATH 没配好时也能找到）
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        cands.push(format!("{pf}\\nodejs\\node.exe"));
+    }
+    if let Ok(la) = std::env::var("LOCALAPPDATA") {
+        cands.push(format!("{la}\\Programs\\nodejs\\node.exe"));
+    }
+    for c in cands {
+        match Command::new(&c).arg("--version").output() {
+            Ok(o) if o.status.success() => {
+                let v = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                return Ok(json!({
+                    "found": true,
+                    "path": c,
+                    "version": v,
+                    "tried": tried,
+                }));
+            }
+            _ => tried.push(c),
+        }
+    }
+    Ok(json!({ "found": false, "path": "", "version": "", "tried": tried }))
+}
 
 fn guard(path: &str, roots: &[String]) -> Result<(), String> {
     if !path_in_roots(path, roots) {

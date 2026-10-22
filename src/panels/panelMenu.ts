@@ -17,13 +17,23 @@ export const PANEL_GROUPS = [
   { key: "visual", zh: "可视化", en: "Visualization", ids: ["table", "plot2d", "spectrum", "view3d", "plot3d", "metrics"] },
   { key: "auto", zh: "测试与自动化", en: "Test & automation", ids: ["sequencer", "sentinel", "orchestrator"] },
   { key: "ai", zh: "AI 与探索", en: "AI & discovery", ids: ["ai", "xray"] },
+  { key: "extensions", zh: "扩展", en: "Extensions", ids: ["extruntime"] },
 ] as const satisfies readonly PanelGroup[];
 
 type GroupedPanelId = (typeof PANEL_GROUPS)[number]["ids"][number];
 
-/** 编译期完整性守卫（B6）：新增面板却忘了放进分组 → 这里的类型约束立刻报错。
- *  `never` 约束即「必须为空集」；刻意导出以免被 noUnusedLocals 误伤。 */
-export type _AllPanelsGrouped = Exclude<PanelId, GroupedPanelId> extends never ? true : never;
+/** 编译期完整性守卫（B6）：新增面板却忘了放进分组 → 这里报错。
+ *
+ *  **P174-A5 修**：原来的写法是 `export type _AllPanelsGrouped = … extends never ? true : never`，
+ *  它一个错都不会报——TS 对"求值成 `never` 的类型别名"没有任何意见（`type X = never` 是合法的），
+ *  导出了也不会被 noUnusedLocals 抓到。所以那条守卫从 B6 起一直是**哑的**：本批加面板时
+ *  把 `extruntime` 从分组里摘掉，tsc 照样全绿（实测）。
+ *
+ *  改成"类型必须接受 true 这个值"：不在组里时声明类型会变成 `[标签, 漏掉的 id 联合]`，
+ *  赋值 `true` 立刻红，而且报错信息里直接写着漏了哪些 id。 */
+type AllGrouped = Exclude<PanelId, GroupedPanelId>;
+export type _AllPanelsGrouped = AllGrouped extends never ? true : ["这些面板没进任何分组", AllGrouped];
+export const _assertAllPanelsGrouped: _AllPanelsGrouped = true;
 
 /** P104-R5：内容已搬进左侧导轨、因此**不再出现在"添加面板"入口**里的面板。
  *
