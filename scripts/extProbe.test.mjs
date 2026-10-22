@@ -10,7 +10,7 @@
  * `--allow-child-process`），因为权限模型下**连 import node:child_process 都需要那个开关**。
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -474,4 +474,134 @@ describe("P174-A7 · 面板 RPC 在真进程上走通", () => {
     // token 必须回带（A2 的规矩，这条是顺手复核）
     expect(r1.token).toBe(TOKEN);
   }, 25_000);
+});
+
+/**
+ * P174-A8：**工作区根真的通到插件里了吗**——这一条要在内核层验，不是在字符串上验。
+ *
+ * 判据分两半，缺一半就什么都没证明：
+ * 1. 给了 `--allow-fs-write=<ws>` 且 `hello.workspace = <ws>` ⇒ 插件真能把文件写进那个目录；
+ * 2. **不给**那个参数 ⇒ 同一个插件写同一个目录必须失败（`ERR_ACCESS_DENIED`）。
+ *
+ * 只有 1 的话，"参数没生效但目标目录恰好可写"也能过；只有 2 的话，
+ * "插件根本没跑"也能过。两条一起才说明"牢笼是真的、绑定是真的"。
+ */
+describe("P174-A8 · 工作区根与写权限（内核级）", () => {
+  const MAIN = [
+    'import fs from "node:fs";',
+    'import path from "node:path";',
+    "export async function activate(ctx) {",
+    "  const dir = ctx.workspace || '';",
+    // 先用 SDK 写一次：`ctx.fs.writeText(\"$WS/...\")` 是插件作者最自然的写法，
+    // 它必须和 node:fs 走同一条内核路径（否则"SDK 能用、真跑不能用"这种错很难查）
+    "  try {",
+    "    await ctx.fs.writeText('$WS/sdk-out.txt', 'sdk');",
+    "    ctx.log.info('SDK_OK');",
+    "  } catch (e) {",
+    "    ctx.log.info('SDK_FAIL ' + (e && e.message));",
+    "  }",
+    "  try {",
+    "    const p = path.join(dir, 'probe-out.txt');",
+    "    fs.writeFileSync(p, 'ok');",
+    "    ctx.log.info('WRITE_OK ' + p);",
+    "  } catch (e) {",
+    "    ctx.log.info('WRITE_FAIL ' + (e && e.code));",
+    "  }",
+    "}",
+  ].join("\n");
+
+  function runOnce(tag, ws, allowWriteDir, pluginDir, bootPath) {
+    return new Promise((resolve, reject) => {
+      const args = [PERM, "--allow-fs-read=*"];
+      if (allowWriteDir) args.push(`--allow-fs-write=${allowWriteDir}`);
+      args.push("--allow-child-process", bootPath, pluginDir);
+
+      const child = spawn(process.execPath, args, { cwd: pluginDir, windowsHide: true });
+      const got = [];
+      let buf = "";
+      let done = false;
+      const finish = (code) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ messages: got, code });
+      };
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        try {
+          child.kill();
+        } catch {
+          /* 已退出 */
+        }
+        reject(new Error(`${tag} 超时；已收到 ${JSON.stringify(got).slice(0, 600)}`));
+      }, 12_000);
+
+      child.stdout.on("data", (d) => {
+        buf += d.toString("utf8");
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (!line) continue;
+          let m;
+          try {
+            m = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          got.push(m);
+          if (m.t === "ready") {
+            child.stdin.write(encodeMessage({ t: "activate", token: TOKEN }) + "\n");
+            return;
+          }
+          if (m.t === "log" && /^WRITE_(OK|FAIL)/.test(String(m.msg || ""))) {
+            child.stdin.write(encodeMessage({ t: "dispose", token: TOKEN, reason: "test" }) + "\n");
+          }
+        }
+      });
+      child.stderr.on("data", (d) => got.push({ t: "__stderr", line: d.toString("utf8") }));
+      child.on("error", reject);
+      child.on("exit", (code) => finish(code));
+
+      child.stdin.write(
+        encodeMessage({ t: "hello", v: 1, token: TOKEN, workspace: ws, appDir: dir, dev: true }) + "\n",
+      );
+    });
+  }
+
+  function setupPkg(tag) {
+    const pluginDir = path.join(dir, `ws-${tag}`);
+    const bootPath = path.join(dir, `bootstrap-${tag}.mjs`);
+    const ws = path.join(dir, `wsroot-${tag}`);
+    mkdirSync(pluginDir, { recursive: true });
+    mkdirSync(ws, { recursive: true });
+    writeFileSync(bootPath, BOOTSTRAP_SOURCE, "utf8");
+    writeFileSync(path.join(pluginDir, "main.mjs"), MAIN, "utf8");
+    return { pluginDir, bootPath, ws };
+  }
+
+  it("给了写目录 + hello.workspace ⇒ 文件真的落到工作区里", async () => {
+    const { pluginDir, bootPath, ws } = setupPkg("allow");
+    const { messages } = await runOnce("allow", ws, ws, pluginDir, bootPath);
+    const dump = JSON.stringify(messages).slice(0, 700);
+    expect(messages.some((m) => m.t === "log" && /^WRITE_OK/.test(String(m.msg))), dump).toBe(true);
+    // SDK 那条路：`$WS` 前缀在引导脚本里展开，写的是同一个内核允许的目录
+    expect(messages.some((m) => m.t === "log" && String(m.msg) === "SDK_OK"), `ctx.fs 走 $WS 失败：${dump}`).toBe(true);
+    expect(readFileSync(path.join(ws, "sdk-out.txt"), "utf8")).toBe("sdk");
+    // 光看日志不够：日志也可能是插件自己编的
+    const out = path.join(ws, "probe-out.txt");
+    expect(existsSync(out), `文件没真落盘：${dump}`).toBe(true);
+    expect(readFileSync(out, "utf8")).toBe("ok");
+  });
+
+  it("不给写目录 ⇒ 同一个插件写同一个目录必须被内核拒（ERR_ACCESS_DENIED）", async () => {
+    const { pluginDir, bootPath, ws } = setupPkg("deny");
+    const { messages } = await runOnce("deny", ws, null, pluginDir, bootPath);
+    const dump = JSON.stringify(messages).slice(0, 700);
+    const fail = messages.find((m) => m.t === "log" && /^WRITE_FAIL/.test(String(m.msg)));
+    expect(fail, `没看到失败日志（可能根本没写）：${dump}`).toBeTruthy();
+    expect(String(fail.msg)).toContain("ERR_ACCESS_DENIED");
+    expect(existsSync(path.join(ws, "probe-out.txt"))).toBe(false);
+  });
 });

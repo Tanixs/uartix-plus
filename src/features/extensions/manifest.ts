@@ -724,6 +724,18 @@ export function buildHostNodeArgs(manifest: ExtensionManifest, bind: PathVarBind
   return args;
 }
 
+/**
+ * 这个扩展是否要用工作区根（`$WS`）。
+ *
+ * 读和写都算：一个只读 `$WS` 的扩展没有工作区同样跑不了。
+ * 判据放在这里而不是 `hostPlan` 里内联，是因为**界面也要问同一个问题**
+ * （"声明了工作区但没登记"要在面板上顶一条黄条，而不是等用户点启动才被拒）。
+ */
+export function usesWorkspace(m: ExtensionManifest): boolean {
+  const specs = [...(m.permissions.fs?.write ?? []), ...(m.permissions.fs?.read ?? [])];
+  return specs.some((p) => p === "$WS" || p.startsWith("$WS/"));
+}
+
 /** 一个插件是否要求任何"会被限制"的权限（批准卡据此决定要不要单列一段）。 */
 export function hasEnforcedPermissions(m: ExtensionManifest): boolean {
   return (m.permissions.fs?.write?.length ?? 0) > 0;

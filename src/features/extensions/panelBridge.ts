@@ -93,6 +93,8 @@ export type BridgeIn =
   | { kind: "req"; reqId: string; method: string; args: unknown }
   /** 包内文件读写：路径必须落在扩展目录里（由宿主再解析一次）。 */
   | { kind: "fs"; reqId: string; op: "readText" | "writeText" | "list"; path: string; content?: string }
+  /** 问宿主的事：当前工作区根、让用户挑一个目录。**都不是文件读写**，不需要包内路径。 */
+  | { kind: "host"; reqId: string; op: "workspace" | "pickFolder" }
   /** iframe 里的脚本跑起来了（宿主据此判断"页面真的活了"，而不是"iframe 加载完了"）。 */
   | { kind: "ready" };
 
@@ -118,6 +120,11 @@ export function parseBridgeMessage(data: unknown): BridgeIn | null {
     if (typeof method !== "string" || !method || method.length > MAX_METHOD) return null;
     if (!/^[A-Za-z0-9_.-]+$/.test(method)) return null;
     return { kind: "req", reqId, method, args: data.args };
+  }
+  if (kind === "host") {
+    const op = data.op;
+    if (op !== "workspace" && op !== "pickFolder") return null;
+    return { kind: "host", reqId, op };
   }
   if (kind === "fs") {
     const op = data.op;
@@ -200,6 +207,8 @@ const BRIDGE_JS = [
   "    readText: function (p) { return ask({ kind: 'fs', op: 'readText', path: String(p) }); },",
   "    writeText: function (p, s) { return ask({ kind: 'fs', op: 'writeText', path: String(p), content: String(s) }); },",
   "    list: function (p) { return ask({ kind: 'fs', op: 'list', path: String(p) }); },",
+  "    workspace: function () { return ask({ kind: 'host', op: 'workspace' }); },",
+  "    pickFolder: function () { return ask({ kind: 'host', op: 'pickFolder' }); },",
   "    on: function (event, fn) {",
   "      var k = String(event);",
   "      (handlers[k] = handlers[k] || []).push(fn);",

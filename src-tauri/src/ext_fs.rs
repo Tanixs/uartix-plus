@@ -27,7 +27,11 @@ const MAX_WRITE_BYTES: usize = 8 * 1024 * 1024;
 /// 读文本的上限：超过就截断并标 `truncated`，不静默裁（与 shell 的 64KB 头尾预算同一条规矩）。
 const MAX_READ_BYTES: u64 = 256 * 1024;
 /// 允许的账本名。加一个就要同时想清楚"它的写入是不是也该原子"。
-const STORE_NAMES: [&str; 2] = ["index", "trust"];
+///
+/// A8 加了 `settings`：扩展子系统自己的偏好（目前只有"工作区根"）。
+/// **刻意不放进全局设置**：那里面已经有一个叫 `workspace` 的键（预设布局），
+/// 再放一个"工作区根"进同一张表，两个 `workspace` 迟早有人看错。
+const STORE_NAMES: [&str; 3] = ["index", "trust", "settings"];
 
 /// 扩展仓库的根路径。前端要在启动宿主前把它们传给各条命令，
 /// 而"应用数据目录在哪"只有 Rust 知道（Tauri 的 path resolver）。

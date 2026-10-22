@@ -19,6 +19,7 @@
  */
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { tx, useLocale } from "../../i18n/strings";
 import {
   callExt,
@@ -143,6 +144,17 @@ export function ExtViewPanel(props: { params?: { extId?: string; panelId?: strin
             // 前缀在宿主这边拼：扩展里注册的是 `ctx.panels.register(panelId, { method })`
             const data = await callExt(extId, `panel.${panelId}.${m.method}`, m.args);
             if (mounted.current) post(resOk(m.reqId, data));
+            return;
+          }
+          if (m.kind === "host") {
+            if (m.op === "workspace") {
+              if (mounted.current) post(resOk(m.reqId, getSnapshot().workspaceRoot));
+              return;
+            }
+            // pickFolder：**对话框由宿主弹**，插件拿不到"静默选目录"的能力——
+            // 那正是这个 API 存在的意义（选目录必须是用户做的动作，不是插件做的）。
+            const picked = await open({ directory: true, multiple: false });
+            if (mounted.current) post(resOk(m.reqId, typeof picked === "string" ? picked : null));
             return;
           }
           if (m.op === "readText") {

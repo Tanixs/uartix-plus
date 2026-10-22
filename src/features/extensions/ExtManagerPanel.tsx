@@ -21,12 +21,14 @@ import {
   getSnapshot,
   planFolder,
   reload,
+  setWorkspaceRoot,
   start,
   stop,
   subscribe,
   touch,
   uninstall,
 } from "./extStore";
+import { usesWorkspace } from "./manifest";
 import { canStart, canStop, phaseLabel, type ExtLogLevel } from "./extRuntime";
 import { needsApproval, type InstallPlan } from "./install";
 
@@ -101,6 +103,18 @@ export function ExtManagerPanel() {
     const el = logBox.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [logCount, entry?.phase]);
+
+  /** 选工作区根。对话框是宿主的，插件拿不到"静默选目录"的能力。 */
+  async function pickWorkspace() {
+    setErr("");
+    try {
+      const dir = await open({ directory: true, multiple: false, title: tx("选择工作区根（扩展的 $WS）", "Pick the workspace root (extension $WS)") });
+      if (!dir || Array.isArray(dir)) return;
+      await setWorkspaceRoot(dir);
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    }
+  }
 
   /** 选目录 → 算计划 → 信任就直接装，否则顶出批准条。 */
   async function pickAndInstall() {
@@ -198,6 +212,45 @@ export function ExtManagerPanel() {
         <button className="btn" disabled={!!busy} onClick={() => void reload()} title={tx("重新读盘", "Reload from disk")}>
           {tx("刷新", "Refresh")}
         </button>
+      </div>
+
+      {/* 工作区根（`$WS`）：声明了它的扩展没有这个就跑不起来，所以要摆在列表上面 */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "var(--sp-2)",
+          padding: "var(--sp-1) var(--sp-3)",
+          borderBottom: "1px solid var(--border)",
+          fontSize: "var(--fs-xs)",
+          color: "var(--text-dim)",
+          flex: "0 0 auto",
+        }}
+      >
+        <span>{tx("工作区", "Workspace")}</span>
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            color: repo.workspaceRoot ? "var(--text)" : "var(--warn)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            maxWidth: "45%",
+          }}
+          title={repo.workspaceRoot || undefined}
+        >
+          {repo.workspaceRoot || tx("未设置", "not set")}
+        </span>
+        <button className="btn" disabled={!!busy} onClick={() => void pickWorkspace()}>
+          {tx("选择…", "Choose…")}
+        </button>
+        {repo.workspaceRoot ? (
+          <button className="btn" disabled={!!busy} onClick={() => void setWorkspaceRoot("")}>
+            {tx("清除", "Clear")}
+          </button>
+        ) : null}
+        <div style={{ flex: "1 1 auto" }} />
+        <span>{tx("声明了 $WS 的扩展要用它；改动在下一次启动生效", "Used by extensions declaring $WS; applies on next start")}</span>
       </div>
 
       {err ? (
@@ -432,6 +485,23 @@ export function ExtManagerPanel() {
                   {confirmUninstall === entry.id ? tx("确认卸载？", "Confirm?") : tx("卸载", "Uninstall")}
                 </button>
               </div>
+
+              {usesWorkspace(entry.manifest) && !repo.workspaceRoot ? (
+                <div
+                  style={{
+                    padding: "var(--sp-1) var(--sp-3)",
+                    color: "var(--warn)",
+                    borderBottom: "1px solid var(--border)",
+                    fontSize: "var(--fs-xs)",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  {tx(
+                    "这个扩展要用工作区根（$WS），但还没设置——启动会被拒绝。请先在上面选一个目录。",
+                    "This extension needs a workspace root ($WS) but none is set — starting it will be refused. Pick a folder above.",
+                  )}
+                </div>
+              ) : null}
 
               {/* 权限面：装过之后仍然要能查（"它当初要了什么"是会被忘掉的） */}
               <div

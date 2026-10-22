@@ -37,7 +37,16 @@ import {
   type TrustBook,
   type TrustVerdict,
 } from "./repo";
-import { loadIndex, loadTrust, saveIndex, saveTrust } from "./store";
+import {
+  emptyExtSettings,
+  loadExtSettings,
+  saveExtSettings,
+  loadIndex,
+  loadTrust,
+  saveIndex,
+  saveTrust,
+  type ExtSettings,
+} from "./store";
 import {
   appendLog,
   canStart,
@@ -69,6 +78,8 @@ export interface ExtEntry {
 export interface ExtRepo {
   loading: boolean;
   appDir: string;
+  /** 工作区根（`$WS`）；空串 = 没登记。面板要据此提示"某个扩展需要它"。 */
+  workspaceRoot: string;
   entries: ExtEntry[];
   /** 读盘过程中发现的问题（坏清单、悬空目录、账本损坏…）。**不吞**，面板上要能看见。 */
   issues: string[];
@@ -145,7 +156,9 @@ export function onPanelEvent(cb: PanelEventCb): () => void {
   return () => panelSubs.delete(cb);
 }
 
-let repo: ExtRepo = { loading: true, appDir: "", entries: [], issues: [] };
+let repo: ExtRepo = { loading: true, appDir: "", workspaceRoot: "", entries: [], issues: [] };
+/** 扩展子系统自己的设置（目前只有工作区根）。 */
+let extSettings: ExtSettings = emptyExtSettings();
 const subs = new Set<() => void>();
 const unlisteners: UnlistenFn[] = [];
 let loadingPromise: Promise<void> | null = null;
@@ -226,9 +239,11 @@ export async function reload(): Promise<void> {
 
     const loadedIndex = await loadIndex([root]);
     const loadedTrust = await loadTrust([root]);
+    const loadedSettings = await loadExtSettings([root]);
     index = loadedIndex.index;
     trust = loadedTrust.trust;
-    issues.push(...loadedIndex.issues, ...loadedTrust.issues);
+    extSettings = loadedSettings.settings;
+    issues.push(...loadedIndex.issues, ...loadedTrust.issues, ...loadedSettings.issues);
 
     const entries: ExtEntry[] = [];
     // 重读盘**不能把运行时状态清掉**：装 B 的时候 A 可能正跑着，
@@ -275,12 +290,13 @@ export async function reload(): Promise<void> {
       if (!entries.some((e) => e.id === id)) issues.push(`账本里有「${id}」，但目录已经不在了（可在此卸载）`);
     }
     entries.sort((a, b) => a.id.localeCompare(b.id));
-    repo = { loading: false, appDir: paths.appDir, entries, issues };
+    repo = { loading: false, appDir: paths.appDir, workspaceRoot: extSettings.workspaceRoot, entries, issues };
     emit();
   } catch (e) {
     repo = {
       loading: false,
       appDir: paths?.appDir ?? "",
+      workspaceRoot: extSettings.workspaceRoot,
       entries: [],
       issues: [...issues, `读取扩展目录失败：${String((e as Error)?.message ?? e)}`],
     };
@@ -292,6 +308,20 @@ export async function reload(): Promise<void> {
 export function ensureLoaded(): Promise<void> {
   if (!loadingPromise) loadingPromise = reload().finally(() => (loadingPromise = null));
   return loadingPromise;
+}
+
+/**
+ * 登记/清除工作区根（`$WS`）。
+ *
+ * **只影响下一次启动**：已经在跑的宿主进程，它的 `--allow-fs-write` 是启动那一刻定死的，
+ * 改不了（内核参数没有"热改"这回事）。所以这里不重启任何东西，只在面板上说清楚。
+ */
+export async function setWorkspaceRoot(path: string): Promise<void> {
+  if (!paths) paths = await invoke<ExtPaths>("ext_paths");
+  extSettings = { workspaceRoot: path.trim() };
+  await saveExtSettings(extSettings, [paths.extensionsRoot]);
+  repo = { ...repo, workspaceRoot: extSettings.workspaceRoot };
+  emit();
 }
 
 /* ============================ 装 ============================ */
@@ -507,7 +537,7 @@ export async function start(id: string): Promise<void> {
     // 2) 起进程
     const plan = planHostStart({
       manifest: cur.manifest,
-      bind: { workspace: "", appDir: paths.appDir, extra: {} },
+      bind: { workspace: extSettings.workspaceRoot, appDir: paths.appDir, extra: {} },
       // appDir 是顶层的、不属于 bind：pluginDir 由它 + manifest.id 推出，
       // 调用方不能自己另给一份（给了就会和 staging 校验对不上）
       appDir: paths.appDir,
@@ -533,7 +563,8 @@ export async function start(id: string): Promise<void> {
         t: "hello",
         v: 1,
         token,
-        workspace: "",
+        // 插件的 `ctx.workspace` 就是它：空串 = 没登记，插件必须自己判
+        workspace: extSettings.workspaceRoot,
         appDir: paths.appDir,
         dev: true,
       }),

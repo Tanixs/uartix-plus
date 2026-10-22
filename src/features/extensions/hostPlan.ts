@@ -8,7 +8,7 @@
  * 真正的 IPC 在 `hostClient.ts`，本文件不 import 任何 tauri 东西。
  */
 
-import { buildHostNodeArgs, type ExtensionManifest, type PathVarBinding } from "./manifest";
+import { buildHostNodeArgs, usesWorkspace, type ExtensionManifest, type PathVarBinding } from "./manifest";
 import { extDir, extensionsRoot, STAGING_DIR } from "./repo";
 
 export interface HostPlanInput {
@@ -73,11 +73,10 @@ export function planHostStart(input: HostPlanInput): HostPlan {
   const pluginDir = extDir(appDir, manifest.id);
 
   // 声明了 $WS 却没有绑定：启动前就拒，别让它跑到 EACCES 再回来说"权限不足"
-  const wantsWorkspace =
-    (manifest.permissions.fs?.write ?? []).some((p) => p === "$WS" || p.startsWith("$WS/")) ||
-    (manifest.permissions.fs?.read ?? []).some((p) => p === "$WS" || p.startsWith("$WS/"));
-  if (wantsWorkspace && !bind.workspace) {
-    throw new HostPlanError("这个插件要用工作区，但还没选工作区根：请先在设置里选一个目录", "no_workspace");
+  if (usesWorkspace(manifest) && !bind.workspace) {
+    // 指路要指对：这个开关在**扩展面板**顶上那一行，不在全局设置里
+    // （全局设置里那个 `workspace` 是预设布局，同名不同义）。
+    throw new HostPlanError("这个插件要用工作区（$WS），但还没选：请在「扩展」面板顶部选一个工作区目录", "no_workspace");
   }
 
   // 插件目录不能落在 staging 里（那是"装到一半"的地方，不该被当成已安装的包跑起来）

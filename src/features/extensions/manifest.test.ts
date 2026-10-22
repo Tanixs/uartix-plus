@@ -16,6 +16,7 @@ import {
   buildHostNodeArgs,
   expandPathSpec,
   isLegacyPackage,
+  usesWorkspace,
   validateExtension,
   type ExtensionManifest,
   type PathVarBinding,
@@ -199,6 +200,37 @@ describe("P174-A · 变量展开", () => {
     expect(expandPathSpec("$EXT:deploy", BIND)).toBe("D:/OneDrive/deploy");
     expect(expandPathSpec("$EXT:nope", BIND)).toBeNull();
     expect(expandPathSpec("$WS", { ...BIND, workspace: "" })).toBeNull();
+  });
+});
+
+describe("P174-A8 · 谁需要工作区根", () => {
+  const m = (permissions: Record<string, unknown>) =>
+    validateExtension({
+      format: "uartix-extension",
+      schemaVersion: 3,
+      id: "a.b",
+      version: "1.0.0",
+      name: "x",
+      main: "main.mjs",
+      activation: ["onPanel:p"],
+      permissions,
+      contributes: { panels: [] },
+    });
+
+  it("写 $WS 或读 $WS 都算需要（只读的扩展没工作区同样跑不了）", () => {
+    expect(usesWorkspace(m({ fs: { write: ["$WS/runs"] } }).manifest!)).toBe(true);
+    expect(usesWorkspace(m({ fs: { read: ["$WS"] } }).manifest!)).toBe(true);
+  });
+
+  it("只写 $APP/自己包内 ⇒ 不需要（别让无关扩展也去要工作区）", () => {
+    expect(usesWorkspace(m({ fs: { write: ["$APP/logs"] } }).manifest!)).toBe(false);
+    expect(usesWorkspace(m({}).manifest!)).toBe(false);
+  });
+
+  it("$WSX 这种前缀相似的不算（必须整段相等或以 $WS/ 开头）", () => {
+    // 校验器本来就会拒这种写法，这里直接构造一个已通过校验的清单再改字段来钉判据
+    const base = m({ fs: { write: ["$APP/x"] } }).manifest!;
+    expect(usesWorkspace({ ...base, permissions: { fs: { write: ["$WSX/y"] } } })).toBe(false);
   });
 });
 

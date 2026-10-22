@@ -17,7 +17,7 @@ import { emptyIndex, emptyTrust, type ExtIndex, type TrustBook } from "./repo";
  * 两边不一致的症状是"写得进读不出"或"读得出写不进"，而且两边各自都"没报错"。
  * 这条契约由 `scripts/extContract.test.mjs` 直接读 Rust 源码比对，不靠人记。
  */
-export const EXT_STORE_NAMES = ["index", "trust"] as const;
+export const EXT_STORE_NAMES = ["index", "trust", "settings"] as const;
 export type ExtStoreName = (typeof EXT_STORE_NAMES)[number];
 
 export interface StoreIssues {
@@ -100,6 +100,50 @@ export async function loadTrust(roots: string[]): Promise<{ trust: TrustBook; is
   } catch (e) {
     return { trust: emptyTrust(), issues: [`读取信任账失败：${String((e as Error)?.message ?? e)}`] };
   }
+}
+
+/* ============================ 扩展子系统自己的设置 ============================ */
+
+/**
+ * 扩展子系统的偏好。目前只有一条：**工作区根**（`$WS`）。
+ *
+ * 为什么它不放进全局设置：那里已经有一个 `workspace`（预设布局），
+ * 同名不同义的两个键放在一张表里，agent 工具与帮助文档都会指着它说错话。
+ */
+export interface ExtSettings {
+  /** 工作区根目录。空串 = 没登记（声明了 `$WS` 的扩展会被拒启动，这是有意为之）。 */
+  workspaceRoot: string;
+}
+
+export function emptyExtSettings(): ExtSettings {
+  return { workspaceRoot: "" };
+}
+
+/** 归一：只要形状不对就退回默认并说一句，不静默保留半截数据。 */
+export function normalizeExtSettings(raw: unknown): { settings: ExtSettings; issues: string[] } {
+  const issues: string[] = [];
+  if (!isObj(raw)) {
+    if (raw !== null && raw !== undefined) issues.push("扩展设置不是预期形状，已按默认值启动");
+    return { settings: emptyExtSettings(), issues };
+  }
+  const root = raw.workspaceRoot;
+  if (root !== undefined && typeof root !== "string") {
+    issues.push("工作区根不是字符串，已按未设置处理");
+    return { settings: emptyExtSettings(), issues };
+  }
+  return { settings: { workspaceRoot: typeof root === "string" ? root : "" }, issues };
+}
+
+export async function loadExtSettings(roots: string[]): Promise<{ settings: ExtSettings; issues: string[] }> {
+  try {
+    return normalizeExtSettings(await readStore("settings", roots));
+  } catch (e) {
+    return { settings: emptyExtSettings(), issues: [`读取扩展设置失败：${String((e as Error)?.message ?? e)}`] };
+  }
+}
+
+export async function saveExtSettings(settings: ExtSettings, roots: string[]): Promise<void> {
+  await invoke("ext_store_write", { name: "settings", data: settings, roots });
 }
 
 export async function saveIndex(index: ExtIndex, roots: string[]): Promise<void> {

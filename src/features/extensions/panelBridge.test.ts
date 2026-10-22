@@ -118,6 +118,18 @@ describe("parseBridgeMessage（来自 iframe 的输入一律当不可信）", ()
     expect(parseBridgeMessage([env({ kind: "ready" })])).toBeNull();
   });
 
+  it("host：只认 workspace / pickFolder 两个 op（多一个就是给插件多一条宿主能力）", () => {
+    expect(parseBridgeMessage(env({ kind: "host", reqId: "r1", op: "workspace" }))).toEqual({
+      kind: "host",
+      reqId: "r1",
+      op: "workspace",
+    });
+    expect(parseBridgeMessage(env({ kind: "host", reqId: "r1", op: "pickFolder" }))).not.toBeNull();
+    for (const op of ["exec", "openUrl", "dialog", ""]) {
+      expect(parseBridgeMessage(env({ kind: "host", reqId: "r1", op })), op).toBeNull();
+    }
+  });
+
   it("ready 是最小形状，不需要 reqId", () => {
     expect(parseBridgeMessage(env({ kind: "ready" }))).toEqual({ kind: "ready" });
   });
