@@ -1,0 +1,14 @@
+{
+  "format": "uartix-extension",
+  "schemaVersion": 3,
+  "id": "uartix.hello",
+  "version": "1.0.0",
+  "name": "示例扩展",
+  "description": "装完之后每 2 秒打一条心跳：用来确认宿主进程真的在跑、日志真的在流动",
+  "author": "uartix",
+  "license": "MIT",
+  "main": "main.mjs",
+  "activation": ["onPanel:hello"],
+  "permissions": {},
+  "contributes": { "panels": [] }
+}

@@ -159,13 +159,32 @@ export function stableStringify(v: unknown): string {
  *
  * 含 `id` 与 `version`：id 变了是另一个插件；version 变了便于在信任库里说清"你批的是哪一版"。
  */
+/**
+ * 权限面里的**字符串清单**都是集合，不是序列。
+ *
+ * `["$WS/a","$WS/b"]` 与反过来是同一份风险，所以摘要必须对书写顺序不敏感——
+ * 否则用户只是把清单调了一下顺序，就被要求重新批准一次。A2 当时只对 `activation`
+ * 排了序，其余照抄；A6 补上（并留了 `...p` 这类展开，好在以后 `ExtFsPermission`
+ * 加字段时**不会静默从摘要里漏掉**——漏掉等于"加了权限却不重批"，那是这套模型最坏的失败）。
+ */
+function sortedCopy(xs: readonly string[] | undefined): string[] | undefined {
+  return xs ? [...xs].sort() : undefined;
+}
+
 export function trustDigestInput(m: ExtensionManifest): string {
+  const perm = m.permissions;
   return stableStringify({
     id: m.id,
     version: m.version,
     main: m.main ?? "",
     activation: [...m.activation].sort(),
-    permissions: m.permissions,
+    permissions: {
+      ...perm,
+      fs: perm.fs ? { ...perm.fs, read: sortedCopy(perm.fs.read), write: sortedCopy(perm.fs.write) } : undefined,
+      process: perm.process ? { ...perm.process, spawn: sortedCopy(perm.process.spawn) } : undefined,
+      net: perm.net ? { ...perm.net, connect: sortedCopy(perm.net.connect) } : undefined,
+      secrets: sortedCopy(perm.secrets),
+    },
     inject: m.inject,
     panels: (m.contributes.panels ?? []).map((p) => ({ id: p.id, entry: p.entry })),
     commands: (m.contributes.commands ?? []).map((c) => c.id),

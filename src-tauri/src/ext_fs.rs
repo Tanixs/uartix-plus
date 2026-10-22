@@ -235,6 +235,189 @@ pub fn ext_store_write(name: String, data: Value, roots: Vec<String>) -> Result<
     Ok(json!({ "ok": true, "bytes": text.len() }))
 }
 
+/* ============================ 安装：复制 / 提升 / 卸载 ============================ */
+
+/// 一次安装最多搬多少个文件。扩展是"几百 KB 的脚本"，不是数据包；
+/// 真需要搬大东西应该由插件自己去读工作区，而不是塞进 AppData。
+const MAX_COPY_FILES: usize = 2000;
+/// 单次安装的总字节上限。与 `MAX_COPY_FILES` 一起挡的是"选错目录"这种手滑：
+/// 选到 `C:\` 时会先在文件数上撞墙，而不是先把几十 GB 复制进去再失败。
+const MAX_COPY_BYTES: u64 = 32 * 1024 * 1024;
+/// 目录层级上限。源包里放一条 `a/a/a/...` 的深链，靠这个止损。
+const MAX_COPY_DEPTH: usize = 20;
+
+#[derive(Default)]
+struct CopyBudget {
+    files: usize,
+    bytes: u64,
+    skipped_links: usize,
+}
+
+/// 归一成"小写 + 正斜杠"的可比字符串。只用于**同一台机器上的自己和自己比**
+/// （`roots` 与目标都来自同一处调用），不用于展示，所以不做盘符规范化的完整处理。
+fn norm_path(p: &Path) -> String {
+    p.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+
+/// `child` 是否就是 `parent` 或在其之下。
+fn path_within(child: &Path, parent: &Path) -> bool {
+    let c = norm_path(child);
+    let p = norm_path(parent);
+    c == p || c.starts_with(&format!("{p}/"))
+}
+
+/// 这个路径是否**正好是**某个根。`path_in_roots` 对"根自己"也算在内，
+/// 而复制/删除这两种动作对"根自己"必须是拒绝的：往 extensions 根上复制一次、
+/// 或者在根上按一次删除，整个仓库就没了。
+fn is_root_itself(p: &Path, roots: &[String]) -> bool {
+    let n = norm_path(p);
+    roots.iter().any(|r| norm_path(Path::new(r)) == n)
+}
+
+fn copy_tree(src: &Path, dst: &Path, budget: &mut CopyBudget, depth: usize) -> Result<(), String> {    if depth > MAX_COPY_DEPTH {
+        return Err(format!("目录层级过深（> {MAX_COPY_DEPTH}）：{}", src.display()));
+    }
+    fs::create_dir_all(dst).map_err(|e| io_err("建目录", e))?;
+    for ent in fs::read_dir(src).map_err(|e| io_err("列目录", e))? {
+        let ent = ent.map_err(|e| io_err("列目录", e))?;
+        // `file_type()` 不跟随链接，所以这里能看出"它是个链接"。
+        // 源包里放一条指向 `C:\` 的 junction，递归复制就会把整块盘搬进 AppData——
+        // 跳过它不算失败，但要计数并报给用户（静默跳过会让人以为"文件都在"）。
+        let ft = ent.file_type().map_err(|e| io_err("读文件类型", e))?;
+        if ft.is_symlink() {
+            budget.skipped_links += 1;
+            continue;
+        }
+        let s = ent.path();
+        let d = dst.join(ent.file_name());
+        if ft.is_dir() {
+            copy_tree(&s, &d, budget, depth + 1)?;
+        } else if ft.is_file() {
+            let len = ent.metadata().map(|m| m.len()).unwrap_or(0);
+            budget.files += 1;
+            budget.bytes = budget.bytes.saturating_add(len);
+            if budget.files > MAX_COPY_FILES {
+                return Err(format!("包内文件过多（> {MAX_COPY_FILES} 个）：{src:?}"));
+            }
+            if budget.bytes > MAX_COPY_BYTES {
+                return Err(format!("包过大（> {} MB）", MAX_COPY_BYTES / 1024 / 1024));
+            }
+            fs::copy(&s, &d).map_err(|e| io_err("复制文件", e))?;
+        }
+    }
+    Ok(())
+}
+
+/// 把 `src` 整个目录复制到 `dst`（`dst` 必须尚不存在）。
+///
+/// 为什么复制而不是就地跑：**跑的东西必须是校验过的那一份**。就地跑等于"校验 A、运行 B"，
+/// 中间任何一次改动（用户自己改的、别的程序改的）都不在批准范围内。
+/// 复制到 `extensions/staging/<draft>` 之后再校验一次，校验对象就是将要被提升的那份副本。
+#[tauri::command]
+pub fn ext_copy_dir(src: String, dst: String, roots: Vec<String>) -> Result<Value, String> {
+    guard(&dst, &roots)?;
+    let s = PathBuf::from(&src);
+    let d = PathBuf::from(&dst);
+    if is_root_itself(&d, &roots) {
+        return Err(format!("目标不能是扩展根目录：{dst}"));
+    }
+    // 复制进自己（或从自己里面复制到自己）会无限增长，且第一次就写坏源
+    if path_within(&d, &s) || path_within(&s, &d) {
+        return Err(format!("源与目标互相包含：{src} → {dst}"));
+    }
+    if !s.is_dir() {
+        return Err(format!("源不是目录（或者说它不存在）：{src}"));
+    }
+    if d.exists() {
+        return Err(format!("目标已存在：{dst}"));
+    }
+    let mut budget = CopyBudget::default();
+    copy_tree(&s, &d, &mut budget, 0)?;
+    Ok(json!({
+        "ok": true,
+        "files": budget.files,
+        "bytes": budget.bytes,
+        "skippedLinks": budget.skipped_links,
+        "dst": dst,
+    }))
+}
+
+/// 把 `staging/<draft>` 提升成 `extensions/<id>`。
+///
+/// 用 `rename` 而不是"复制 + 删"：同一卷上 rename 是原子的，而"复制到一半断电"
+/// 会留下一个**看起来装好了、其实缺文件**的目录——那种状态最难解释。
+/// 跨卷/被占用时才退回复制（reparse 或不常见布局下 rename 会失败）。
+#[tauri::command]
+pub fn ext_promote(draft_id: String, id: String, roots: Vec<String>) -> Result<Value, String> {
+    let root = roots.first().ok_or_else(|| "roots 为空".to_string())?;
+    let id = id.trim().to_string();
+    let bad_id = id.is_empty()
+        || id == "."
+        || id == ".."
+        || id.contains('/')
+        || id.contains('\\')
+        || id.eq_ignore_ascii_case("staging");
+    if bad_id {
+        return Err(format!("「{id}」不能用作安装目录名"));
+    }
+    let draft = draft_id.trim().to_string();
+    if draft.is_empty() || draft.contains('/') || draft.contains('\\') || draft == "." || draft == ".." {
+        return Err(format!("「{draft_id}」不能用作暂存目录名"));
+    }
+
+    let staging = Path::new(root).join("staging").join(&draft);
+    let final_dir = Path::new(root).join(&id);
+    guard(staging.to_string_lossy().as_ref(), &roots)?;
+    guard(final_dir.to_string_lossy().as_ref(), &roots)?;
+
+    if !staging.is_dir() {
+        return Err(format!("没有这个暂存目录（可能是上一次安装被中断了）：{}", staging.display()));
+    }
+    if final_dir.exists() {
+        return Err(format!("已经有一个叫 {id} 的扩展：请先卸载再装"));
+    }
+
+    let mut via_copy = false;
+    if fs::rename(&staging, &final_dir).is_err() {
+        // 退路：复制过去再删暂存。失败了就把半成品清掉，不留一个吊着的目录
+        via_copy = true;
+        let mut budget = CopyBudget::default();
+        if let Err(e) = copy_tree(&staging, &final_dir, &mut budget, 0) {
+            let _ = fs::remove_dir_all(&final_dir);
+            return Err(e);
+        }
+        let _ = fs::remove_dir_all(&staging);
+    }
+    Ok(json!({
+        "ok": true,
+        "id": id,
+        "dir": final_dir.to_string_lossy(),
+        "viaCopy": via_copy,
+    }))
+}
+
+/// 递归删一个目录（卸载用）。**与 `ext_fs_remove` 分开**：那条刻意不递归，
+/// 因为"删一个文件"和"删一整棵树"混在一个入口里，迟早有人在错的入口上按了确认。
+#[tauri::command]
+pub fn ext_remove_tree(path: String, roots: Vec<String>) -> Result<Value, String> {
+    guard(&path, &roots)?;
+    let p = PathBuf::from(&path);
+    if is_root_itself(&p, &roots) {
+        return Err(format!("拒绝删除扩展根目录：{path}"));
+    }
+    if !p.exists() {
+        return Ok(json!({ "ok": true, "existed": false }));
+    }
+    if !p.is_dir() {
+        return Err(format!("不是目录（删文件请用 ext_fs_remove）：{path}"));
+    }
+    fs::remove_dir_all(&p).map_err(|e| io_err("删目录", e))?;
+    Ok(json!({ "ok": true, "existed": true }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{store_path, STORE_NAMES};
@@ -253,5 +436,190 @@ mod tests {
     fn store_path_lands_inside_root() {
         let p = store_path("index", &["C:\\app\\extensions".to_string()]).unwrap();
         assert_eq!(p.to_string_lossy(), "C:\\app\\extensions\\index.json");
+    }
+}
+
+/// 安装三步（复制 / 提升 / 卸载）的判据。**真读写临时目录**——
+/// 这三条命令的全部价值就是"盘上发生了什么"，只测参数校验等于没测。
+#[cfg(test)]
+mod install_tests {
+    use super::{ext_copy_dir, ext_promote, ext_remove_tree};
+    use serde_json::Value;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// 每个用例一个独立目录：并行跑测试时共用一处会互相删文件。
+    fn scratch(tag: &str) -> PathBuf {
+        let n = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let p = std::env::temp_dir().join(format!("uartix-ext-it-{tag}-{}-{n}", std::process::id()));
+        fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    fn roots(p: &Path) -> Vec<String> {
+        vec![p.to_string_lossy().to_string()]
+    }
+
+    /// 造一个"包"：`extension.json` + `main.mjs` + 一层子目录里的文件。
+    fn make_pkg(dir: &Path) {
+        fs::create_dir_all(dir.join("lib")).unwrap();
+        fs::write(dir.join("extension.json"), r#"{"id":"a.b"}"#).unwrap();
+        fs::write(dir.join("main.mjs"), "export function activate(){}").unwrap();
+        fs::write(dir.join("lib").join("util.mjs"), "export const n = 1;").unwrap();
+    }
+
+    #[test]
+    fn copy_dir_copies_whole_tree_and_counts() {
+        let root = scratch("copy");
+        let src = root.join("src");
+        make_pkg(&src);
+        let dst = root.join("extensions").join("staging").join("draft-1");
+
+        let v = ext_copy_dir(
+            src.to_string_lossy().to_string(),
+            dst.to_string_lossy().to_string(),
+            roots(&root.join("extensions")),
+        )
+        .expect("应当复制成功");
+
+        assert_eq!(v["files"], 3); // json 数字与 usize 比较走 Value 的 PartialEq
+        assert!(dst.join("main.mjs").is_file());
+        assert!(dst.join("lib").join("util.mjs").is_file());
+        // 内容必须真的搬过来了（只建目录不写文件是最容易"看起来成功"的错）
+        assert_eq!(
+            fs::read_to_string(dst.join("main.mjs")).unwrap(),
+            "export function activate(){}"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copy_dir_refuses_target_outside_root() {
+        let root = scratch("outside");
+        let src = root.join("src");
+        make_pkg(&src);
+        let outside = std::env::temp_dir().join("uartix-not-in-roots");
+        let e = ext_copy_dir(
+            src.to_string_lossy().to_string(),
+            outside.to_string_lossy().to_string(),
+            roots(&root.join("extensions")),
+        );
+        assert!(e.is_err(), "写到 roots 外面必须被拒");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copy_dir_refuses_into_itself() {
+        let root = scratch("self");
+        let ext_root = root.join("extensions");
+        let src = ext_root.join("pkg");
+        make_pkg(&src);
+        // 目标在源里面：一次复制就会把 src 越搬越大，第二次复制再翻一倍
+        let e = ext_copy_dir(
+            src.to_string_lossy().to_string(),
+            src.join("inner").to_string_lossy().to_string(),
+            roots(&ext_root),
+        );
+        assert!(e.is_err(), "复制进自己必须被拒");
+        // 反向也一样：从子目录往父目录复制，会把父目录里正在写的文件读进来
+        let e2 = ext_copy_dir(
+            src.join("lib").to_string_lossy().to_string(),
+            src.to_string_lossy().to_string(),
+            roots(&ext_root),
+        );
+        assert!(e2.is_err(), "覆盖源目录必须被拒（目标已存在）");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn copy_dir_refuses_existing_target_and_root_itself() {
+        let root = scratch("exists");
+        let ext_root = root.join("extensions");
+        let src = root.join("src");
+        make_pkg(&src);
+        let dst = ext_root.join("dup");
+        fs::create_dir_all(&dst).unwrap();
+        assert!(
+            ext_copy_dir(
+                src.to_string_lossy().to_string(),
+                dst.to_string_lossy().to_string(),
+                roots(&ext_root)
+            )
+            .is_err(),
+            "目标已存在时不许覆盖（半装状态比没装更难解释）"
+        );
+        assert!(
+            ext_copy_dir(
+                src.to_string_lossy().to_string(),
+                ext_root.to_string_lossy().to_string(),
+                roots(&ext_root)
+            )
+            .is_err(),
+            "不许往扩展根上复制（那样整个仓库都变成这个包）"
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn promote_moves_staging_to_final_and_clears_staging() {
+        let root = scratch("promote");
+        let ext_root = root.join("extensions");
+        let staging = ext_root.join("staging").join("draft-9");
+        make_pkg(&staging);
+
+        let v = ext_promote(
+            "draft-9".to_string(),
+            "a.b".to_string(),
+            roots(&ext_root),
+        )
+        .expect("提升应当成功");
+
+        let final_dir = ext_root.join("a.b");
+        assert_eq!(v["dir"], Value::String(final_dir.to_string_lossy().to_string()));
+        assert!(final_dir.join("main.mjs").is_file());
+        assert!(!staging.exists(), "暂存目录必须被清掉（留着会被下次安装当成半成品）");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn promote_refuses_bad_id_and_existing_target() {
+        let root = scratch("promote-bad");
+        let ext_root = root.join("extensions");
+        fs::create_dir_all(ext_root.join("staging").join("d1")).unwrap();
+
+        for bad in ["", ".", "..", "a/b", "a\\b", "staging"] {
+            assert!(
+                ext_promote("d1".to_string(), bad.to_string(), roots(&ext_root)).is_err(),
+                "「{bad}」不该被当成安装目录名"
+            );
+        }
+        // 目标已存在：更新安装必须先卸载，不许悄悄覆盖（避免"装到一半两个版本混着"）
+        fs::create_dir_all(ext_root.join("a.b")).unwrap();
+        assert!(ext_promote("d1".to_string(), "a.b".to_string(), roots(&ext_root)).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn remove_tree_deletes_only_below_root() {
+        let root = scratch("rm");
+        let ext_root = root.join("extensions");
+        let pkg = ext_root.join("a.b");
+        make_pkg(&pkg);
+
+        assert!(ext_remove_tree(ext_root.to_string_lossy().to_string(), roots(&ext_root)).is_err());
+        assert!(ext_remove_tree(
+            PathBuf::from(&pkg).join("main.mjs").to_string_lossy().to_string(),
+            roots(&ext_root)
+        )
+        .is_err(), "删文件走 ext_fs_remove，这条只删目录");
+
+        ext_remove_tree(pkg.to_string_lossy().to_string(), roots(&ext_root)).expect("包目录应被删掉");
+        assert!(!pkg.exists());
+        assert!(ext_root.exists(), "删包不能把根一起带走");
+        let _ = fs::remove_dir_all(&root);
     }
 }

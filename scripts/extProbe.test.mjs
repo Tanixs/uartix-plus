@@ -10,13 +10,14 @@
  * `--allow-child-process`），因为权限模型下**连 import node:child_process 都需要那个开关**。
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { BOOTSTRAP_SOURCE } from "../src/features/extensions/bootstrap.ts";
 import { encodeMessage } from "../src/features/extensions/protocol.ts";
-import { DEMO_EXT_ID, DEMO_MAIN } from "../src/features/extensions/demoExtension.ts";
+import { validateExtension } from "../src/features/extensions/manifest.ts";
 
 
 /**
@@ -226,24 +227,35 @@ describe("P174-A4 · 端到端（真进程）", () => {
 });
 
 /**
- * P174-A5：**面板真的会跑的那份文件**，用它自己跑一遍。
+ * P174-A6：**仓库里那个示例包**，用它自己跑一遍。
  *
- * 前两条钉的是"引导脚本与一个最小插件对得上"，这一条钉的是"`demoExtension.ts` 里那串
- * 字符串真的能被引导脚本跑起来"。两者不是同一件事：示例是**行数组 join 出来的 JS**，
- * 少一个逗号、少一层缩进都可能变成一个语法错误，而那种错误在面板上表现为
- * "进程起来了但一直没日志、8 秒后超时"——用户完全看不出是示例写坏了。
+ * 前两条钉的是"引导脚本与一个最小插件对得上"，这一条钉的是"`examples/extensions/uartix.hello`
+ * 这个真的会被用户拿去装的包，能被引导脚本跑起来"。两者不是同一件事：
+ * 示例包是磁盘上的真文件，它的清单可能过期、入口可能写错，而那种错误在面板上表现为
+ * "进程起来了但一直没日志、8 秒后超时"——用户完全看不出是示例包坏了。
  *
  * 另外它还钉住一件只有真跑才知道的事：**定时器真的在推日志**。心跳停止（比如
  * `setInterval` 被权限模式挡掉、或 stdout 被别的东西占住）时，握手照样成功、日志照样
  * 一行不报，面板看起来"活着"，其实插件已经不动了。
  */
-describe("P174-A5 · 内置示例在真引导脚本里跑通", () => {
-  it("activate 输出工作区 → 心跳到达 → dispose 报总数", async () => {
-    const pluginDir = path.join(dir, `${DEMO_EXT_ID}`);
+// 用 dirname + join 而不是 `new URL(..., import.meta.url)`：eslint 的 scripts 环境里没有 URL 全局
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const EXAMPLE_DIR = path.join(HERE, "..", "examples", "extensions", "uartix.hello");
+
+describe("P174-A6 · 仓库示例包在真引导脚本里跑通", () => {
+  it("清单合法 → activate 输出工作区 → 心跳到达 → dispose 报总数", async () => {
+    const manifestRaw = readFileSync(path.join(EXAMPLE_DIR, "extension.json"), "utf8");
+    const v = validateExtension(JSON.parse(manifestRaw));
+    // 示例包自己都不合法，就没有说服力——而且这里红的时候信息很清楚："示例坏了"，
+    // 不是"某个用户的包装不上"。
+    expect(v.ok, `示例包清单不合法：${v.errors.join("；")}`).toBe(true);
+    expect(v.manifest.main).toBe("main.mjs");
+
+    const pluginDir = path.join(dir, v.manifest.id);
     const bootPath = path.join(dir, "bootstrap-demo.mjs");
     writeFileSync(bootPath, BOOTSTRAP_SOURCE, "utf8");
     mkdirSync(pluginDir, { recursive: true });
-    writeFileSync(path.join(pluginDir, "main.mjs"), DEMO_MAIN, "utf8");
+    writeFileSync(path.join(pluginDir, "main.mjs"), readFileSync(path.join(EXAMPLE_DIR, v.manifest.main), "utf8"), "utf8");
 
     const { messages } = await new Promise((resolve, reject) => {
       const child = spawn(
@@ -310,7 +322,7 @@ describe("P174-A5 · 内置示例在真引导脚本里跑通", () => {
 
     expect(messages.some((m) => m.t === "ready"), `没握手：${dump}`).toBe(true);
     // 语法错了 / import 失败，都是在这里现形（activate 根本没跑）
-    expect(logs.some((m) => m.includes("宿主已连接")), `activate 没跑：${dump}`).toBe(true);
+    expect(logs.some((m) => m.includes("示例扩展已启动")), `activate 没跑：${dump}`).toBe(true);
     // 工作区真的传进去了：面板显示"未配置"和不显示，是两种不同的故障
     expect(logs.some((m) => m.includes(pluginDir)), `工作区没传到插件里：${dump}`).toBe(true);
     // 心跳至少一次 —— 这是唯一能证明"定时器活着、stdout 还在流动"的判据

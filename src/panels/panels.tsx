@@ -25,7 +25,7 @@ import { OrchestratorPanel } from "../features/orchestrator/OrchestratorPanel";
 import { VdevPanel } from "../features/vdev/VdevPanel";
 import { ExtPanelHost } from "../features/ai/ExtPanel";
 import { SendBuildPanel } from "../features/send/SendBuildPanel";
-import { ExtRuntimePanel } from "../features/extensions/ExtRuntimePanel";
+import { ExtManagerPanel } from "../features/extensions/ExtManagerPanel";
 
 /** 面板页签名（语言感知，P33 i18n）；页签重挂靠 App 的 retitlePanels（locale 变化时 setTitle） */
 export const PANEL_TITLES = (): Record<PanelId, string> => {
@@ -53,7 +53,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     orchestrator: pick("自动编排器", "Orchestrator"),
     vdev: pick("虚拟设备工坊", "Virtual Devices"),
     sendbuild: pick("TX组帧台", "TX Frame Builder"),
-    extruntime: pick("扩展运行时", "Extension Runtime"),
+    extruntime: pick("扩展", "Extensions"),
   };
 };
 
@@ -87,7 +87,7 @@ const MMetrics = memo(MetricsPanel);
 const MOrchestrator = memo(OrchestratorPanel);
 const MVdev = memo(VdevPanel);
 const MSendBuild = memo(SendBuildPanel);
-const MExtRuntime = memo(ExtRuntimePanel);
+const MExtManager = memo(ExtManagerPanel);
 
 export const panelComponents = {
   templates: () => (
@@ -197,7 +197,7 @@ export const panelComponents = {
   ),
   extruntime: () => (
     <ErrorBoundary label={panelTitleOf("extruntime")}>
-      <MExtRuntime />
+      <MExtManager />
     </ErrorBoundary>
   ),
   aiExtPanel: (props: { params?: { extId?: string } }) => (
