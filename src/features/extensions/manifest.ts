@@ -159,7 +159,11 @@ export interface ExtValidation {
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31})+$/;
 const VER_RE = /^\d+\.\d+\.\d+$/;
-const LOCAL_ID_RE = /^[a-z][a-z0-9-]{1,31}$/;
+/**
+ * 包内局部 id（面板/插槽/区块）。允许单字符：`id: "x"` 完全合法，
+ * 拒绝它没有任何安全收益，只会让人猜"为什么这也不行"。
+ */
+const LOCAL_ID_RE = /^[a-z][a-z0-9-]{0,31}$/;
 const REL_PATH_RE = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[A-Za-z0-9._@\-/]+$/;
 const NODE_REQ_RE = /^>=\s*\d+(\.\d+)?$/;
 
