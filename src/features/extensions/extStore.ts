@@ -55,7 +55,14 @@ export interface NodeProbe {
 
 let paths: ExtPaths | null = null;
 let node: NodeProbe | null = null;
-let token = "";
+/**
+ * 每个 handle 一枚 token。
+ *
+ * 为什么不是模块级的一个 string：装了第二个插件、它也起了一次，后起的那次会把值覆盖掉，
+ * 于是前一个插件的 `dispose` 带着错的 token 过去——**引导脚本会静默丢弃它**（那是设计），
+ * 表现是"disposer 没跑"：插件没来得及把状态落盘就被杀了。丢的是数据，不是一条报错。
+ */
+const tokens = new Map<string, string>();
 let snapshot: Record<string, ExtRuntimeState> = {};
 const subs = new Set<() => void>();
 const unlisteners: UnlistenFn[] = [];
@@ -152,7 +159,7 @@ async function ensureListeners(): Promise<void> {
         // 握手成功才发 activate：顺序反了插件会在 token 还没对上的时候被执行
         void invoke("ext_host_send", {
           handle,
-          line: encodeMessage({ t: "activate", token }),
+          line: encodeMessage({ t: "activate", token: tokens.get(handle) ?? "" }),
         }).catch((err) => {
           patch(handle, { phase: "failed", error: String(err) });
         });
@@ -194,7 +201,9 @@ export async function start(id: string): Promise<void> {
   if (!canStart(cur.phase)) return;
 
   patch(id, { phase: "starting", error: undefined });
-  token = newToken();
+  // 本地一份给本次启动用，同时登记到表里给 ready 回调与 stop 用（两处不能各生成一枚）
+  const token = newToken();
+  tokens.set(id, token);
 
   try {
     paths = await invoke<ExtPaths>("ext_paths");
@@ -277,8 +286,10 @@ export async function stop(id: string): Promise<void> {
   const cur = snapshot[id];
   if (!cur || !canStop(cur.phase)) return;
   try {
-    // 先让插件跑 disposer（它可能要把状态落盘），再停进程
-    await invoke("ext_host_send", { handle: id, line: encodeMessage({ t: "dispose", token, reason: "disable" }) });
+    // 先让插件跑 disposer（它可能要把状态落盘），再停进程。
+    // token 从表里取这个 handle 自己那一枚：拿别人的会被引导脚本静默丢弃，disposer 就不跑了。
+    const own = tokens.get(id) ?? "";
+    await invoke("ext_host_send", { handle: id, line: encodeMessage({ t: "dispose", token: own, reason: "disable" }) });
   } catch {
     /* 进程可能已经没了——下面照样 stop */
   }
@@ -287,6 +298,7 @@ export async function stop(id: string): Promise<void> {
   } catch {
     /* 已经不在了也算停成功 */
   }
+  tokens.delete(id);
   patch(id, { phase: nextPhase(cur.phase, { type: "stopped" }), pid: undefined });
 }
 
