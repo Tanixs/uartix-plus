@@ -11,7 +11,7 @@
   "activation": ["onPanel:train"],
   "permissions": {
     "fs": {
-      "read": ["$WS"],
+      "read": ["$WS", "$EXT:deploy"],
       "write": ["$WS/.uartix", "$WS/datasets", "$WS/runs", "$WS/logs"]
     },
     "process": { "spawn": ["python"] },

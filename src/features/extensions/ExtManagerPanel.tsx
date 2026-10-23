@@ -24,6 +24,7 @@ import {
   planFolder,
   reload,
   setActiveTheme,
+  setExtRoot,
   setWorkspaceRoot,
   start,
   stop,
@@ -31,7 +32,7 @@ import {
   touch,
   uninstall,
 } from "./extStore";
-import { usesWorkspace } from "./manifest";
+import { extRootKeys, extWriteRootKeys, usesWorkspace } from "./manifest";
 import { canStart, canStop, phaseLabel, type ExtLogLevel } from "./extRuntime";
 import { needsApproval, type InstallPlan } from "./install";
 
@@ -93,6 +94,27 @@ export function ExtManagerPanel() {
   const entry = useMemo(() => repo.entries.find((e) => e.id === selected) ?? null, [repo.entries, selected]);
   const logCount = entry?.logs.length ?? 0;
 
+  /**
+   * 已安装插件声明过的外部目录键（`$EXT:<key>`）→ 谁需要它。
+   *
+   * 只列**被声明过的**键：让用户凭空输一个键名是没意义的（清单里写不出来就用不上），
+   * 而"绑了但没有任何插件要"的键只会变成一张对不上账的表。
+   */
+  const neededRoots = useMemo(() => {
+    const map = new Map<string, { owners: string[]; must: boolean }>();
+    for (const e of repo.entries) {
+      const writes = new Set(extWriteRootKeys(e.manifest));
+      for (const k of extRootKeys(e.manifest)) {
+        const cur = map.get(k) ?? { owners: [], must: false };
+        cur.owners.push(e.id);
+        // 只要有**一个**插件要写这个目录，它就必须绑：写不进去的插件一启动就得拒
+        if (writes.has(k)) cur.must = true;
+        map.set(k, cur);
+      }
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [repo.entries]);
+
   useEffect(() => {
     void ensureLoaded();
   }, []);
@@ -114,6 +136,22 @@ export function ExtManagerPanel() {
       const dir = await open({ directory: true, multiple: false, title: tx("选择工作区根（插件的 $WS）", "Pick the workspace root (plugin $WS)") });
       if (!dir || Array.isArray(dir)) return;
       await setWorkspaceRoot(dir);
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    }
+  }
+
+  /** 选一个外部目录（`$EXT:<key>`）。键名来自清单，用户只负责指路。 */
+  async function pickExtRoot(key: string) {
+    setErr("");
+    try {
+      const dir = await open({
+        directory: true,
+        multiple: false,
+        title: tx(`选择外部目录（$EXT:${key}）`, `Pick the external folder ($EXT:${key})`),
+      });
+      if (!dir || Array.isArray(dir)) return;
+      await setExtRoot(key, dir);
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     }
@@ -267,6 +305,55 @@ export function ExtManagerPanel() {
         <div style={{ flex: "1 1 auto" }} />
         <span>{tx("声明了 $WS 的插件要用它；改动在下一次启动生效", "Used by extensions declaring $WS; applies on next start")}</span>
       </div>
+
+      {/* 外部目录：只列被插件声明过的键（清单里写不出来的键，绑了也用不上） */}
+      {neededRoots.map(([key, need]) => (
+        <div
+          key={key}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--sp-2)",
+            padding: "var(--sp-1) var(--sp-3)",
+            borderBottom: "1px solid var(--border)",
+            fontSize: "var(--fs-xs)",
+            color: "var(--text-dim)",
+            flex: "0 0 auto",
+          }}
+        >
+          <span>{tx("外部目录", "External")}</span>
+          <span style={{ fontFamily: "var(--font-mono)", color: "var(--text)" }}>{key}</span>
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: repo.roots[key] ? "var(--text)" : need.must ? "var(--warn)" : "var(--text-dim)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              maxWidth: "38%",
+            }}
+            title={repo.roots[key] || undefined}
+          >
+            {repo.roots[key] || (need.must ? tx("必须绑定", "required") : tx("未绑定（只读声明，可留空）", "not bound (read-only, optional)"))}
+          </span>
+          <button className="btn" disabled={!!busy} onClick={() => void pickExtRoot(key)}>
+            {repo.roots[key] ? tx("更改…", "Change…") : tx("选择…", "Choose…")}
+          </button>
+          {repo.roots[key] ? (
+            <button className="btn" disabled={!!busy} onClick={() => void setExtRoot(key, "").catch((e) => setErr(String(e?.message ?? e)))}>
+              {tx("解绑", "Unbind")}
+            </button>
+          ) : null}
+          <div style={{ flex: "1 1 auto" }} />
+          <span>
+            {tx("被 ", "needed by ")}
+            {need.owners.join(tx("、", ", "))}
+            {need.must
+              ? tx(" 需要写入；插件里拿到的路径就是它", " — needs write access; this is the path it gets")
+              : tx(" 只读；不绑也能启动", " — read-only; works without binding")}
+          </span>
+        </div>
+      ))}
 
       {err ? (
         <div style={{ padding: "var(--sp-2) var(--sp-3)", color: "var(--danger)", borderBottom: "1px solid var(--border)" }}>
@@ -548,6 +635,28 @@ export function ExtManagerPanel() {
                   )}
                 </div>
               ) : null}
+
+              {/* 缺外部目录（只列**要写**的：只读的缺了照样能启动，插件自己会降级） */}
+              {(() => {
+                const missing = extWriteRootKeys(entry.manifest).filter((k) => !repo.roots[k]);
+                if (!missing.length) return null;
+                return (
+                  <div
+                    style={{
+                      padding: "var(--sp-1) var(--sp-3)",
+                      color: "var(--warn)",
+                      borderBottom: "1px solid var(--border)",
+                      fontSize: "var(--fs-xs)",
+                      flex: "0 0 auto",
+                    }}
+                  >
+                    {tx(
+                      `这个插件要写外部目录（${missing.map((k) => `$EXT:${k}`).join("、")}），但还没绑定——启动会被拒绝。请先在上面为它选一个目录。`,
+                      `This extension writes external folders (${missing.map((k) => `$EXT:${k}`).join(", ")}) that are not bound yet — starting will be refused. Bind one above.`,
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* 权限面：装过之后仍然要能查（"它当初要了什么"是会被忘掉的） */}
               <div

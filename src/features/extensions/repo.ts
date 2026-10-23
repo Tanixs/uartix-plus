@@ -217,8 +217,16 @@ export function flattenPermissions(m: ExtensionManifest): string[] {
   const out: string[] = [];
   const w = m.permissions.fs?.write ?? [];
   const r = m.permissions.fs?.read ?? [];
-  for (const p of r) out.push(`读 ${p}`);
-  for (const p of w) out.push(`写 ${p}`);
+  /**
+   * `$EXT:<key>` 在批准卡上要说人话：用户看到的是"它要碰「deploy」那个目录"，
+   * 而不是 `读 $EXT:deploy`（那是清单语法，不是给人看的）。键名保留——它正是用户绑定时看到的那个词。
+   */
+  const human = (p: string) => {
+    const hit = p.match(/^\$EXT:([a-z][a-z0-9-]{0,23})/);
+    return hit ? `外部目录「${hit[1]}」` : p;
+  };
+  for (const p of r) out.push(`读 ${human(p)}`);
+  for (const p of w) out.push(`写 ${human(p)}`);
   for (const p of m.permissions.process?.spawn ?? []) out.push(`运行 ${p}`);
   for (const p of m.permissions.net?.connect ?? []) out.push(`联网 ${p}`);
   if (m.permissions.ui?.panel) out.push("在界面里加面板");

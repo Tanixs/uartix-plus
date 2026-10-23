@@ -783,6 +783,30 @@ async function startJob(kind, overrides) {
 
 /* ============================ 面板 API ============================ */
 
+/**
+ * 部署工具目录（`$EXT:deploy`）现在长什么样。
+ *
+ * **只读声明就能拿到路径**：路径是用户绑的，不是插件写死的。没绑就返回 `bound:false`，
+ * 面板上一句话说明"还没配部署工具"，而不是让整个插件起不来——
+ * 训练和部署本来就是两件事，缺后者不该拖住前者。
+ */
+function scanDeployTool() {
+  const dir = String((ctx && typeof ctx.root === "function" && ctx.root("deploy")) || "").replace(/\\/g, "/");
+  if (!dir) return { dir: "", bound: false, ready: false, runBat: false, configs: [], error: "" };
+  try {
+    const ents = fs.readdirSync(dir, { withFileTypes: true });
+    const configs = ents
+      .filter((e) => e.isFile() && /^deploy_config.*\.ps1$/i.test(e.name))
+      .map((e) => e.name)
+      .sort();
+    const runBat = ents.some((e) => e.isFile() && e.name.toLowerCase() === "run.bat");
+    return { dir, bound: true, ready: runBat && configs.length > 0, runBat, configs, error: "" };
+  } catch (e) {
+    // 绑了但读不到（目录被删/没权限）：说清楚，别装成"没配"
+    return { dir, bound: true, ready: false, runBat: false, configs: [], error: String((e && e.message) || e) };
+  }
+}
+
 async function panelState() {
   if (!root) {
     // 没登记工作区时**不抛**：面板要能把"去上面选一个目录"显示出来
@@ -792,6 +816,7 @@ async function panelState() {
       python: { path: "", ok: false, version: "", source: "", error: "" },
       config: { effective: DEFAULTS, overrides: {}, baseFound: false, baseError: "", baseSource: "" },
       dataset: { dir: "", dataYaml: "", exists: false, trainCount: 0, valCount: 0, classes: [] },
+      deploy: scanDeployTool(),
       runs: [],
       jobs: [],
       active: null,
@@ -811,6 +836,7 @@ async function panelState() {
       baseSource: cfg.baseSource,
     },
     dataset: scanDataset(cfg.effective.dataset.output_dir),
+    deploy: scanDeployTool(),
     runs: scanRuns(cfg.effective.train.project).slice(0, 12),
     jobs: [...jobs.values()].slice(-8).map(snapshot),
     active: snapshot(active),

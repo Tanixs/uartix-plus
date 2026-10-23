@@ -605,3 +605,132 @@ describe("P174-A8 · 工作区根与写权限（内核级）", () => {
     expect(existsSync(path.join(ws, "probe-out.txt"))).toBe(false);
   });
 });
+
+/**
+ * P174-A11：**外部目录真的递到插件里了吗**——同样要在内核层验。
+ *
+ * 两半，缺一半就什么都没证明：
+ * 1. `hello.roots` 里的路径 ⇒ `ctx.root("deploy")` 拿得到，且给了 `--allow-fs-write=<那个目录>`
+ *    时插件**真能写进去**；
+ * 2. **不给**那个参数 ⇒ 同一个插件写同一个目录必须 `ERR_ACCESS_DENIED`。
+ *
+ * 只验 1，"参数没生效但临时目录恰好可写"也能过；只验 2，"插件根本没跑"也能过。
+ */
+describe("P174-A11 · 外部目录（内核级）", () => {
+  const MAIN = [
+    'import fs from "node:fs";',
+    'import path from "node:path";',
+    "export async function activate(ctx) {",
+    // 路径只能是宿主递进来的那份：插件里写死绝对路径在清单校验期就被拒了
+    "  const dir = ctx.root('deploy');",
+    "  ctx.log.info('ROOT=' + dir);",
+    "  ctx.log.info('ROOTS=' + JSON.stringify(ctx.roots));",
+    "  if (!dir) { ctx.log.info('ROOT_MISSING'); return; }",
+    "  try {",
+    "    fs.writeFileSync(path.join(dir, 'ext-out.txt'), 'hi');",
+    "    ctx.log.info('EXT_WRITE_OK');",
+    "  } catch (e) {",
+    "    ctx.log.info('EXT_WRITE_FAIL ' + (e && e.code));",
+    "  }",
+    "}",
+  ].join("\n");
+
+  function runOnce(tag, extRoot, allowWriteDir) {
+    const pluginDir = path.join(dir, `ext-${tag}`);
+    const bootPath = path.join(dir, `bootstrap-ext-${tag}.mjs`);
+    mkdirSync(pluginDir, { recursive: true });
+    writeFileSync(bootPath, BOOTSTRAP_SOURCE, "utf8");
+    writeFileSync(path.join(pluginDir, "main.mjs"), MAIN, "utf8");
+
+    return new Promise((resolve, reject) => {
+      const args = [PERM, "--allow-fs-read=*"];
+      if (allowWriteDir) args.push(`--allow-fs-write=${allowWriteDir}`);
+      args.push("--allow-child-process", bootPath, pluginDir);
+
+      const child = spawn(process.execPath, args, { cwd: pluginDir, windowsHide: true });
+      const got = [];
+      let buf = "";
+      let done = false;
+      const finish = (code) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ messages: got, code });
+      };
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        try {
+          child.kill();
+        } catch {
+          /* 已退出 */
+        }
+        reject(new Error(`${tag} 超时；已收到 ${JSON.stringify(got).slice(0, 600)}`));
+      }, 12_000);
+
+      child.stdout.on("data", (d) => {
+        buf += d.toString("utf8");
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i).trim();
+          buf = buf.slice(i + 1);
+          if (!line) continue;
+          let m;
+          try {
+            m = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          got.push(m);
+          if (m.t === "ready") {
+            child.stdin.write(encodeMessage({ t: "activate", token: TOKEN }) + "\n");
+            return;
+          }
+          if (m.t === "log" && /^EXT_WRITE_(OK|FAIL)/.test(String(m.msg || ""))) {
+            child.stdin.write(encodeMessage({ t: "dispose", token: TOKEN, reason: "test" }) + "\n");
+          }
+        }
+      });
+      child.stderr.on("data", (d) => got.push({ t: "__stderr", line: d.toString("utf8") }));
+      child.on("error", reject);
+      child.on("exit", (code) => finish(code));
+
+      child.stdin.write(
+        encodeMessage({
+          t: "hello",
+          v: 1,
+          token: TOKEN,
+          workspace: pluginDir,
+          appDir: dir,
+          roots: { deploy: extRoot },
+          dev: true,
+        }) + "\n",
+      );
+    });
+  }
+
+  it("绑定 + 给了写参数 ⇒ 文件真的落到那个外部目录里", async () => {
+    const extRoot = path.join(dir, "deployroot");
+    mkdirSync(extRoot, { recursive: true });
+    const { messages } = await runOnce("allow", extRoot, extRoot);
+    const dump = JSON.stringify(messages).slice(0, 800);
+    // 路径是宿主递的，不是插件猜的
+    expect(messages.some((m) => m.t === "log" && String(m.msg) === `ROOT=${extRoot}`), dump).toBe(true);
+    expect(messages.some((m) => m.t === "log" && String(m.msg) === "EXT_WRITE_OK"), dump).toBe(true);
+    // 光看日志不够：日志也可能是插件自己编的
+    expect(readFileSync(path.join(extRoot, "ext-out.txt"), "utf8")).toBe("hi");
+  });
+
+  it("不给写参数 ⇒ 同一个插件写同一个目录必须被内核拒；ctx.root 仍拿得到路径", async () => {
+    const extRoot = path.join(dir, "deployroot-deny");
+    mkdirSync(extRoot, { recursive: true });
+    const { messages } = await runOnce("deny", extRoot, null);
+    const dump = JSON.stringify(messages).slice(0, 800);
+    // 路径照样递得进来 —— 这正是"能不能写"与"知不知道在哪"是两件事
+    expect(messages.some((m) => m.t === "log" && String(m.msg) === `ROOT=${extRoot}`), dump).toBe(true);
+    const fail = messages.find((m) => m.t === "log" && /^EXT_WRITE_FAIL/.test(String(m.msg)));
+    expect(fail, `没看到失败日志：${dump}`).toBeTruthy();
+    expect(String(fail.msg)).toContain("ERR_ACCESS_DENIED");
+    expect(existsSync(path.join(extRoot, "ext-out.txt"))).toBe(false);
+  });
+});

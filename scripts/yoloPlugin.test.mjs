@@ -218,7 +218,17 @@ function makeWorkspace(tag) {
 }
 
 /** 起宿主（真 bootstrap + 真插件进程），返回一个能 call 的客户端。 */
-function startPlugin(pluginDir, ws) {
+/** 把仓库里的插件复制到临时目录：运行期它只往 $WS 写，但别让它有机会碰源码。 */
+function copyPlugin(tag = "plug") {
+  const pluginDir = path.join(dir, tag, "uartix.yolo");
+  mkdirSync(pluginDir, { recursive: true });
+  for (const f of ["plugin.json", "main.mjs", "panel.html"]) {
+    writeFileSync(path.join(pluginDir, f), readFileSync(path.join(PLUGIN_SRC, f), "utf8"), "utf8");
+  }
+  return pluginDir;
+}
+
+function startPlugin(pluginDir, ws, roots) {
   const bootPath = path.join(dir, `boot-${path.basename(ws)}.mjs`);
   writeFileSync(bootPath, BOOTSTRAP_SOURCE, "utf8");
   const args = [PERM, "--allow-fs-read=*"];
@@ -315,7 +325,7 @@ function startPlugin(pluginDir, ws) {
   });
 
   child.stdin.write(
-    encodeMessage({ t: "hello", v: 1, token: TOKEN, workspace: ws, appDir: dir, dev: true }) + "\n",
+    encodeMessage({ t: "hello", v: 1, token: TOKEN, workspace: ws, appDir: dir, roots: roots || {}, dev: true }) + "\n",
   );
 
   return { child, call, events, waitFor, done, ready };
@@ -452,4 +462,48 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
       }
     }
   }, 60_000);
+});
+
+/**
+ * P174-A11：**真插件**吃到了外部目录。
+ *
+ * 与契约层那条（`extProbe`）不同，这条走的是 `plugins/uartix.yolo` 本体：
+ * 它 `state()` 里的 `deploy` 块必须随 `hello.roots` 变化——没绑是 `bound:false`（不是崩），
+ * 绑了就得报出 `run.bat` 与配置文件名。这条断了的表现是"面板上部署那块永远是'还没配置'",
+ * 而用户明明绑了目录。
+ */
+describe("P174-A11 · 外部目录递进真插件", () => {
+  it("没绑 ⇒ deploy.bound = false（插件照常启动，训练不受影响）", async () => {
+    const ws = makeWorkspace("deploy-none");
+    const pluginDir = copyPlugin("deploy-none");
+    const p = startPlugin(pluginDir, ws);
+    await p.ready;
+    const st = await p.call("panel.train.state", {});
+    expect(st.deploy, "state 里没有 deploy 块").toBeTruthy();
+    expect(st.deploy.bound).toBe(false);
+    expect(st.deploy.dir).toBe("");
+    p.child.stdin.end();
+    await p.done;
+  }, 30_000);
+
+  it("绑上 ⇒ 报出目录、run.bat 与 deploy_config，并给出可否部署", async () => {
+    const ws = makeWorkspace("deploy-bound");
+    const pluginDir = copyPlugin("deploy-bound");
+    // 造一个"长得像部署工具"的目录：run.bat + 一个 deploy_config*.ps1
+    const toolDir = path.join(dir, "maixcam2_deploy");
+    mkdirSync(toolDir, { recursive: true });
+    writeFileSync(path.join(toolDir, "run.bat"), "@echo off\r\n", "utf8");
+    writeFileSync(path.join(toolDir, "deploy_config.digits.ps1"), "# fake\n", "utf8");
+
+    const p = startPlugin(pluginDir, ws, { deploy: toolDir });
+    await p.ready;
+    const st = await p.call("panel.train.state", {});
+    expect(st.deploy.bound, `绑了却报没绑：${JSON.stringify(st.deploy)}`).toBe(true);
+    expect(st.deploy.dir.replace(/\\/g, "/")).toBe(toolDir.replace(/\\/g, "/"));
+    expect(st.deploy.runBat).toBe(true);
+    expect(st.deploy.configs).toEqual(["deploy_config.digits.ps1"]);
+    expect(st.deploy.ready).toBe(true);
+    p.child.stdin.end();
+    await p.done;
+  }, 30_000);
 });

@@ -75,6 +75,12 @@ export type PanelSlotId = (typeof PANEL_SLOTS)[number];
 
 /** 变量前缀。`$WS` 工作区根、`$EXT:<key>` 用户登记的外部根、`$APP` 应用数据目录。 */
 export const PATH_VARS = ["$WS", "$APP"] as const;
+
+/**
+ * 外部目录的键名规则。`$EXT:<key>` 里的 `<key>` 与 `settings.roots` 的键**同一套**——
+ * 两处各写一份正则，迟早会出现"能在清单里写、却绑不上去"的键。
+ */
+export const ROOT_KEY_RE = /^[a-z][a-z0-9-]{0,23}$/;
 const EXT_VAR_RE = /^\$EXT:([a-z][a-z0-9-]{0,23})(\/|$)/;
 
 export interface ExtFsPermission {
@@ -804,6 +810,41 @@ export function buildHostNodeArgs(manifest: ExtensionManifest, bind: PathVarBind
 export function usesWorkspace(m: ExtensionManifest): boolean {
   const specs = [...(m.permissions.fs?.write ?? []), ...(m.permissions.fs?.read ?? [])];
   return specs.some((p) => p === "$WS" || p.startsWith("$WS/"));
+}
+
+/**
+ * 这个插件用到了哪些外部目录键（`$EXT:<key>`）。读和写都算——只读的插件没有那个目录同样跑不了。
+ *
+ * 返回**排序去重**的键：界面要按它列"绑定/未绑定"，启动前要按它判缺；两处用同一个函数，
+ * 才不会出现"面板说齐了、启动说缺一个"。
+ */
+export function extRootKeys(m: ExtensionManifest): string[] {
+  const specs = [...(m.permissions.fs?.write ?? []), ...(m.permissions.fs?.read ?? [])];
+  const keys = new Set<string>();
+  for (const p of specs) {
+    const hit = p.trim().replace(/\\/g, "/").match(EXT_VAR_RE);
+    if (hit) keys.add(hit[1]);
+  }
+  return [...keys].sort();
+}
+
+/**
+ * 只在**写**声明里出现的外部目录键。
+ *
+ * 为什么启动前要分开看：这套模型里"读"天生拦不住（`--allow-fs-read=*` 是被迫的，Windows
+ * 上精确路径不生效），读声明只是**知情**；而"写"是真牢笼。所以：
+ * - 写的外部目录没绑 ⇒ 启动前拒（它一写就会 `ERR_ACCESS_DENIED`，现象指错方向）；
+ * - 读的外部目录没绑 ⇒ **不拒**，递空值给插件，让它自己说"没配这项功能"。
+ *   拿一个只是告知性的声明去阻止启动，等于把向导当牢笼用。
+ */
+export function extWriteRootKeys(m: ExtensionManifest): string[] {
+  const specs = m.permissions.fs?.write ?? [];
+  const keys = new Set<string>();
+  for (const p of specs) {
+    const hit = p.trim().replace(/\\/g, "/").match(EXT_VAR_RE);
+    if (hit) keys.add(hit[1]);
+  }
+  return [...keys].sort();
 }
 
 /** 一个插件是否要求任何"会被限制"的权限（批准卡据此决定要不要单列一段）。 */

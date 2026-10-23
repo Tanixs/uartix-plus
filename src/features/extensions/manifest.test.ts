@@ -13,8 +13,11 @@ import {
   EXT_SCHEMA_VERSION,
   NEVER_HIDEABLE_PANELS,
   PANEL_SLOTS,
+  ROOT_KEY_RE,
   buildHostNodeArgs,
   expandPathSpec,
+  extRootKeys,
+  extWriteRootKeys,
   isLegacyPackage,
   usesWorkspace,
   validateExtension,
@@ -201,6 +204,65 @@ describe("P174-A · 变量展开", () => {
     expect(expandPathSpec("$EXT:deploy", BIND)).toBe("D:/OneDrive/deploy");
     expect(expandPathSpec("$EXT:nope", BIND)).toBeNull();
     expect(expandPathSpec("$WS", { ...BIND, workspace: "" })).toBeNull();
+  });
+});
+
+describe("P174-A11 · 外部目录的键", () => {
+  /** 只造清单、不关心别的字段：`extRootKeys` 只看 `permissions.fs`。 */
+  const withFs = (fs: Record<string, unknown>) =>
+    validateExtension({
+      format: "uartix-plugin",
+      schemaVersion: 3,
+      id: "a.b",
+      version: "1.0.0",
+      name: "x",
+      main: "main.mjs",
+      activation: ["onPanel:p"],
+      permissions: { fs, ui: { panel: true } },
+      contributes: { panels: [{ id: "p", title: "P", entry: "p.html" }] },
+    }).manifest!;
+
+  it("读和写都算（只读的插件没那个目录同样跑不了），并按子路径归到键上", () => {
+    expect(extRootKeys(withFs({ read: ["$EXT:deploy"], write: ["$EXT:assets/sub/deep"] }))).toEqual(["assets", "deploy"]);
+    // 同一个键写两遍只算一次
+    expect(extRootKeys(withFs({ read: ["$EXT:deploy/a"], write: ["$EXT:deploy"] }))).toEqual(["deploy"]);
+  });
+
+  it("只要用到 $WS / $APP 就不算外部目录（两条通路不能混着数）", () => {
+    expect(extRootKeys(withFs({ read: ["$WS"], write: ["$APP/x"] }))).toEqual([]);
+  });
+
+  it("声明顺序不影响结果（排序去重 ⇒ 面板与启动前判断用同一份）", () => {
+    const a = extRootKeys(withFs({ read: ["$EXT:zeta", "$EXT:alpha"] }));
+    const b = extRootKeys(withFs({ read: ["$EXT:alpha"], write: ["$EXT:zeta"] }));
+    expect(a).toEqual(["alpha", "zeta"]);
+    expect(b).toEqual(a);
+  });
+
+  it("extWriteRootKeys 只数写声明（读是知情、写才是牢笼，两者不能混着判）", () => {
+    expect(extWriteRootKeys(withFs({ read: ["$EXT:deploy"], write: ["$EXT:assets"] }))).toEqual(["assets"]);
+    expect(extWriteRootKeys(withFs({ read: ["$EXT:deploy"] }))).toEqual([]);
+    // 全量那个仍然两个都要（面板要列出所有被声明的键，哪怕只是只读）
+    expect(extRootKeys(withFs({ read: ["$EXT:deploy"], write: ["$EXT:assets"] }))).toEqual(["assets", "deploy"]);
+  });
+
+  it("键名规则与设置账本共用一套（ROOT_KEY_RE）：大写得拒、数字开头得拒", () => {
+    // 校验器先拒，说明清单里根本写不出一个绑不上的键
+    const bad = validateExtension({
+      format: "uartix-plugin",
+      schemaVersion: 3,
+      id: "a.b",
+      version: "1.0.0",
+      name: "x",
+      main: "main.mjs",
+      activation: ["onPanel:p"],
+      permissions: { fs: { read: ["$EXT:Deploy"] }, ui: { panel: true } },
+      contributes: { panels: [{ id: "p", title: "P", entry: "p.html" }] },
+    });
+    expect(bad.ok, "大写键应当被校验器拒").toBe(false);
+    expect(ROOT_KEY_RE.test("deploy-2")).toBe(true);
+    expect(ROOT_KEY_RE.test("Deploy")).toBe(false);
+    expect(ROOT_KEY_RE.test("2deploy")).toBe(false);
   });
 });
 

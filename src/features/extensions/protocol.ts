@@ -28,8 +28,11 @@ export const READY_TIMEOUT_MS = 15_000;
 
 /** 宿主 → 扩展。 */
 export type HostToExt =
-  /** 握手。`token` 是本次实例的 nonce，后续每条消息都必须带回（防串台）。 */
-  | { t: "hello"; v: number; token: string; workspace: string; appDir: string; dev: boolean }
+  /**
+   * 握手。`token` 是本次实例的 nonce，后续每条消息都必须带回（防串台）。
+   * `roots` 是用户登记的外部目录（`$EXT:<key>` → 绝对路径）。**可选**：老夹具不带它也必须能跑。
+   */
+  | { t: "hello"; v: number; token: string; workspace: string; appDir: string; dev: boolean; roots?: Record<string, string> }
   /** 让扩展执行 `activate()`。 */
   | { t: "activate"; token: string }
   /** 调用扩展注册的某个方法（来自面板的 `uartix.call` 或命令）。 */

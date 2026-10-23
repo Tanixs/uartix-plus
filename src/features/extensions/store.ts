@@ -11,6 +11,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { emptyIndex, emptyTrust, type ExtIndex, type TrustBook } from "./repo";
+import { ROOT_KEY_RE } from "./manifest";
 
 /**
  * 账本名白名单。**必须与 Rust 侧 `ext_fs.rs` 的 `STORE_NAMES` 一致**——
@@ -120,10 +121,18 @@ export interface ExtSettings {
    * 把第三方的 id 塞进去会一路撞类型与校验器。插件主题有它自己的"谁在画"这件事。
    */
   activeTheme: string;
+  /**
+   * 外部目录登记表（`$EXT:<key>` → 绝对路径）。
+   *
+   * 为什么它是**一张表**而不是又一个 `xxxRoot` 字段：插件要碰的工作区外目录是开放的
+   * （部署工具、素材库、模型仓……），每来一个就加一个 `if` 是不可持续的。表里的键由清单声明，
+   * 用户绑一次，宿主展开进 `--allow-fs-write` 并经 `hello.roots` 递进去。
+   */
+  roots: Record<string, string>;
 }
 
 export function emptyExtSettings(): ExtSettings {
-  return { workspaceRoot: "", activeTheme: "" };
+  return { workspaceRoot: "", activeTheme: "", roots: {} };
 }
 
 /** 归一：只要形状不对就退回默认并说一句，不静默保留半截数据。 */
@@ -142,9 +151,36 @@ export function normalizeExtSettings(raw: unknown): { settings: ExtSettings; iss
     settings: {
       workspaceRoot: typeof root === "string" ? root : "",
       activeTheme: typeof raw.activeTheme === "string" ? raw.activeTheme : "",
+      roots: normalizeRoots(raw.roots, issues),
     },
     issues,
   };
+}
+
+/**
+ * 外部目录表的归一。丢掉三类东西：键名不合规的（清单里根本写不出来，留着只会永远绑不上）、
+ * 值不是非空字符串的、以及**与 `$EXT:<key>` 语法不一致的键**。
+ * 丢的时候说一句，且**指名道姓**——静默丢一个用户刚绑的目录，是最难查的那类"怎么不生效"。
+ */
+function normalizeRoots(raw: unknown, issues: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (raw === undefined) return out;
+  if (!isObj(raw)) {
+    issues.push("外部目录表不是预期形状，已按空处理");
+    return out;
+  }
+  for (const [k, v] of Object.entries(raw)) {
+    if (!ROOT_KEY_RE.test(k)) {
+      issues.push(`外部目录「${k}」的键名不合规（只许小写字母开头、小写字母/数字/连字符，最长 24），已忽略`);
+      continue;
+    }
+    if (typeof v !== "string" || !v.trim()) {
+      issues.push(`外部目录「${k}」没有路径，已忽略`);
+      continue;
+    }
+    out[k] = v.trim();
+  }
+  return out;
 }
 
 export async function loadExtSettings(roots: string[]): Promise<{ settings: ExtSettings; issues: string[] }> {

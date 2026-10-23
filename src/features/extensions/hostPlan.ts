@@ -8,7 +8,13 @@
  * 真正的 IPC 在 `hostClient.ts`，本文件不 import 任何 tauri 东西。
  */
 
-import { buildHostNodeArgs, usesWorkspace, type ExtensionManifest, type PathVarBinding } from "./manifest";
+import {
+  buildHostNodeArgs,
+  extWriteRootKeys,
+  usesWorkspace,
+  type ExtensionManifest,
+  type PathVarBinding,
+} from "./manifest";
 import { extDir, extensionsRoot, STAGING_DIR } from "./repo";
 
 export interface HostPlanInput {
@@ -37,7 +43,7 @@ export interface HostPlan {
 export class HostPlanError extends Error {
   constructor(
     message: string,
-    readonly code: "no_main" | "no_node" | "no_workspace" | "bad_dir",
+    readonly code: "no_main" | "no_node" | "no_workspace" | "no_root" | "bad_dir",
   ) {
     super(message);
     this.name = "HostPlanError";
@@ -76,7 +82,23 @@ export function planHostStart(input: HostPlanInput): HostPlan {
   if (usesWorkspace(manifest) && !bind.workspace) {
     // 指路要指对：这个开关在**扩展面板**顶上那一行，不在全局设置里
     // （全局设置里那个 `workspace` 是预设布局，同名不同义）。
-    throw new HostPlanError("这个插件要用工作区（$WS），但还没选：请在「扩展」面板顶部选一个工作区目录", "no_workspace");
+    throw new HostPlanError("这个插件要用工作区（$WS），但还没选：请在「插件」面板顶部选一个工作区目录", "no_workspace");
+  }
+
+  /**
+   * 要**写**的外部目录（`$EXT:<key>`）却没绑定：同一个形状，同一条理由。
+   * **点名叫缺哪个键**——一个插件可能要三个目录，只说"缺外部目录"等于让用户去猜。
+   *
+   * 只看写声明：读声明在这套模型里天生拦不住（只是知情），拿它去阻止启动
+   * 等于把"向导"当"牢笼"用。只读的缺绑定由插件自己降级报"没配"。
+   */
+  const missingRoots = extWriteRootKeys(manifest).filter((k) => !bind.extra[k]);
+  if (missingRoots.length) {
+    const names = missingRoots.map((k) => `$EXT:${k}`).join("、");
+    throw new HostPlanError(
+      `这个插件要用外部目录（${names}），但还没绑定：请在「插件」面板的「外部目录」里为它选一个目录`,
+      "no_root",
+    );
   }
 
   // 插件目录不能落在 staging 里（那是"装到一半"的地方，不该被当成已安装的包跑起来）

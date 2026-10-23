@@ -15,7 +15,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { BOOTSTRAP_SOURCE } from "./bootstrap";
-import { validateExtension, type ExtensionManifest } from "./manifest";
+import { ROOT_KEY_RE, validateExtension, type ExtensionManifest } from "./manifest";
 import { setActiveExtTheme, themeKey, type ActiveExtTheme } from "./activeTheme";
 import { planHostStart, HostPlanError } from "./hostPlan";
 import { guardThemeCss, type ThemeCssResult } from "./themeCss";
@@ -99,6 +99,8 @@ export interface ExtRepo {
   workspaceRoot: string;
   /** 当前在画的插件主题键；空串 = 用内置主题。 */
   activeTheme: string;
+  /** 外部目录登记表（`$EXT:<key>` → 绝对路径）。面板要据此提示"某个插件缺哪个目录"。 */
+  roots: Record<string, string>;
   entries: ExtEntry[];
   /** 读盘过程中发现的问题（坏清单、悬空目录、账本损坏…）。**不吞**，面板上要能看见。 */
   issues: string[];
@@ -175,8 +177,8 @@ export function onPanelEvent(cb: PanelEventCb): () => void {
   return () => panelSubs.delete(cb);
 }
 
-let repo: ExtRepo = { loading: true, appDir: "", workspaceRoot: "", activeTheme: "", entries: [], issues: [] };
-/** 插件子系统自己的设置（目前只有工作区根）。 */
+let repo: ExtRepo = { loading: true, appDir: "", workspaceRoot: "", activeTheme: "", roots: {}, entries: [], issues: [] };
+/** 插件子系统自己的设置（工作区根、外部目录、当前主题）。 */
 let extSettings: ExtSettings = emptyExtSettings();
 const subs = new Set<() => void>();
 const unlisteners: UnlistenFn[] = [];
@@ -351,6 +353,7 @@ export async function reload(): Promise<void> {
       appDir: paths.appDir,
       workspaceRoot: extSettings.workspaceRoot,
       activeTheme: extSettings.activeTheme,
+      roots: { ...extSettings.roots },
       entries,
       issues,
     };
@@ -361,6 +364,7 @@ export async function reload(): Promise<void> {
       appDir: paths?.appDir ?? "",
       workspaceRoot: extSettings.workspaceRoot,
       activeTheme: extSettings.activeTheme,
+      roots: { ...extSettings.roots },
       entries: [],
       issues: [...issues, `读取插件目录失败：${String((e as Error)?.message ?? e)}`],
     };
@@ -387,6 +391,28 @@ export async function setWorkspaceRoot(path: string): Promise<void> {
   repo = { ...repo, workspaceRoot: extSettings.workspaceRoot };
   emit();
 }
+
+/**
+ * 绑定/解绑一个外部目录（`$EXT:<key>`）。`path` 传空串 = 解绑。
+ *
+ * 与工作区根同样的"只影响下一次启动"：`--allow-fs-write` 是启动参数。
+ * 但这里**多走一步 reload**：面板要立刻显示"已绑/未绑"，否则用户以为没保存。
+ * 绑错了键名（不合规）直接拒——那张表的键必须和清单里写得出来的键同一套规则，
+ * 否则会出现"绑了但永远匹配不上"的鬼故事。
+ */
+export async function setExtRoot(key: string, path: string): Promise<void> {
+  if (!ROOT_KEY_RE.test(key)) throw new Error(`外部目录的键名不合规：${key}`);
+  if (!paths) paths = await invoke<ExtPaths>("ext_paths");
+  const next = { ...extSettings.roots };
+  const v = path.trim();
+  if (v) next[key] = v;
+  else delete next[key];
+  extSettings = { ...extSettings, roots: next };
+  await saveExtSettings(extSettings, [paths.extensionsRoot]);
+  repo = { ...repo, roots: { ...next } };
+  emit();
+}
+
 
 /**
  * 读一枚主题的 CSS 并过净化器。
@@ -654,7 +680,7 @@ export async function start(id: string): Promise<void> {
     // 2) 起进程
     const plan = planHostStart({
       manifest: cur.manifest,
-      bind: { workspace: extSettings.workspaceRoot, appDir: paths.appDir, extra: {} },
+      bind: { workspace: extSettings.workspaceRoot, appDir: paths.appDir, extra: extSettings.roots },
       // appDir 是顶层的、不属于 bind：pluginDir 由它 + manifest.id 推出，
       // 调用方不能自己另给一份（给了就会和 staging 校验对不上）
       appDir: paths.appDir,
@@ -683,6 +709,8 @@ export async function start(id: string): Promise<void> {
         // 插件的 `ctx.workspace` 就是它：空串 = 没登记，插件必须自己判
         workspace: extSettings.workspaceRoot,
         appDir: paths.appDir,
+        // 外部目录：插件拿到的是一份**副本**，改它不会回流（`ctx.roots` 那侧也 freeze 了）
+        roots: { ...extSettings.roots },
         dev: true,
       }),
     });

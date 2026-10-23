@@ -342,6 +342,11 @@
         </div>
 
         <div class="card">
+          <h2>部署工具</h2>
+          <div class="kv" id="depkv"></div>
+        </div>
+
+        <div class="card">
           <h2>训练记录</h2>
           <div id="runs"></div>
         </div>
@@ -549,6 +554,36 @@
           "</span>";
       }
 
+      /**
+       * 部署工具（`$EXT:deploy`）。
+       *
+       * 路径不写死在插件里：用户在「插件」面板给它绑一次，宿主经 ctx.root("deploy") 递进来。
+       * 没绑就直说"去绑一下"，而不是让这块显示成"坏了"。
+       */
+      function renderDeploy() {
+        var d = st.deploy || {};
+        if (!d.bound) {
+          $("depkv").innerHTML =
+            '<b>状态</b><span><span class="tag warn">还没配置</span></span>' +
+            '<b>怎么配</b><span>到「插件」面板顶部的「外部目录 deploy」里选一次 maixcam2_deploy 目录</span>';
+          return;
+        }
+        $("depkv").innerHTML =
+          '<b>目录</b><span>' +
+          esc(d.dir) +
+          "</span>" +
+          "<b>run.bat</b><span>" +
+          (d.runBat ? '<span class="tag ok">在</span>' : '<span class="tag warn">没找到</span>') +
+          "</span>" +
+          "<b>配置</b><span>" +
+          esc((d.configs || []).join(" / ") || "(没有 deploy_config*.ps1)") +
+          "</span>" +
+          "<b>可否部署</b><span>" +
+          (d.ready ? '<span class="tag ok">可以</span>' : '<span class="tag warn">还不行</span>') +
+          "</span>" +
+          (d.error ? "<b>读取失败</b><span>" + esc(d.error) + "</span>" : "");
+      }
+
       function renderDataset() {
         var d = st.dataset || {};
         var eff = st.config.effective || {};
@@ -654,6 +689,7 @@
         st = s;
         renderEnv();
         renderDataset();
+        renderDeploy();
         renderRuns();
         renderTrainParams();
         renderJob(s.active || (s.jobs && s.jobs.length ? s.jobs[s.jobs.length - 1] : null));

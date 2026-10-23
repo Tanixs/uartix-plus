@@ -98,3 +98,51 @@ describe("P174-A3 · 装配", () => {
     expect(plan.args.some((a) => a.startsWith("--allow-fs-write="))).toBe(false);
   });
 });
+
+/**
+ * P174-A11：外部目录（`$EXT:<key>`）。
+ *
+ * 这三条钉的是"用户绑的那一次真的走到命令行上"：漏一条的表现分别是
+ * "插件永远写不进部署目录"（参数没给）或"启动前不吭声、跑起来才 EACCES"（没拦）。
+ */
+describe("P174-A11 · 外部目录", () => {
+  const withRoot = (spec: string, perm: Record<string, unknown> = {}) =>
+    manifest({
+      permissions: { fs: { read: ["$EXT:deploy"], write: [spec] }, ui: { panel: true }, ...perm },
+    });
+
+  it("声明了 $EXT:key 却没绑 ⇒ 启动前拒，并且**点名**缺哪个键", () => {
+    try {
+      planHostStart({ ...BASE, manifest: withRoot("$EXT:deploy"), bind: { workspace: "", appDir: APP, extra: {} } });
+      throw new Error("应该抛");
+    } catch (e) {
+      expect((e as HostPlanError).code).toBe("no_root");
+      expect((e as Error).message).toContain("$EXT:deploy");
+    }
+  });
+
+  it("绑上之后：展开成绝对路径进 --allow-fs-write（内核才认这条）", () => {
+    const plan = planHostStart({
+      ...BASE,
+      manifest: withRoot("$EXT:deploy/.uartix"),
+      bind: { workspace: "", appDir: APP, extra: { deploy: "D:/OneDrive/maixcam2_deploy" } },
+    });
+    expect(plan.args).toContain("--allow-fs-write=D:/OneDrive/maixcam2_deploy/.uartix");
+    // 反斜杠必须归一：Windows 内核参数吃 `/`，混用会让日志与断言都难读
+    expect(plan.args.some((a) => a.includes("\\"))).toBe(false);
+  });
+
+  it("只读声明不会凭空开出写权限（读那半在这套模型里拦不住，但也不能反过来放宽写）", () => {
+    const m = manifest({ permissions: { fs: { read: ["$EXT:deploy"] }, ui: { panel: true } } });
+    const plan = planHostStart({ ...BASE, manifest: m, bind: { workspace: "", appDir: APP, extra: { deploy: "D:/d" } } });
+    expect(plan.args.some((a) => a.startsWith("--allow-fs-write="))).toBe(false);
+  });
+
+  it("只读声明没绑也照样启动（读是知情不是牢笼，拿它阻止启动等于把向导当了牢笼）", () => {
+    const m = manifest({ permissions: { fs: { read: ["$EXT:deploy"] }, ui: { panel: true } } });
+    // 不抛：插件要自己降级成"没配这项功能"，而不是被拒之门外
+    const plan = planHostStart({ ...BASE, manifest: m, bind: { workspace: "", appDir: APP, extra: {} } });
+    expect(plan.handle).toBe("user.yolo.workbench");
+    expect(plan.args.some((a) => a.startsWith("--allow-fs-write="))).toBe(false);
+  });
+});

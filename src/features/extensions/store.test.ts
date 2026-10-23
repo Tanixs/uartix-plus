@@ -85,3 +85,38 @@ describe("normalizeTrust（缺摘要的条目一律无效）", () => {
     expect(r.trust.items["a.b"].grantedSummary).toEqual(["ok"]);
   });
 });
+
+/**
+ * P174-A11：外部目录表。
+ *
+ * 这里最要紧的一条是"**丢的时候要说出来，并指名道姓**"：用户刚绑的目录如果因为键名不合规
+ * 被静默丢掉，表现就是"我明明绑了、它就是没有"——那种故障没有任何线索可查。
+ */
+describe("normalizeExtSettings（外部目录）", () => {
+  it("合法键原样保留；顺序无关（表不是数组）", () => {
+    const r = normalizeExtSettings({ roots: { deploy: "D:/OneDrive/maixcam2_deploy", "assets-2": "D:/a" } });
+    expect(r.settings.roots).toEqual({ deploy: "D:/OneDrive/maixcam2_deploy", "assets-2": "D:/a" });
+    expect(r.issues).toEqual([]);
+  });
+
+  it("键名不合规 ⇒ 丢掉并点名（清单里写不出来的键，绑上也永远匹配不上）", () => {
+    const r = normalizeExtSettings({ roots: { Deploy: "D:/a", "a.b": "D:/b", deploy: "D:/ok" } });
+    expect(r.settings.roots).toEqual({ deploy: "D:/ok" });
+    expect(r.issues.join("")).toContain("Deploy");
+    expect(r.issues.join("")).toContain("a.b");
+  });
+
+  it("空值 / 非字符串 ⇒ 丢掉并说一句（空路径当已绑定会让启动前判断误放行）", () => {
+    const r = normalizeExtSettings({ roots: { deploy: "   ", assets: 42, ok: "D:/ok" } });
+    expect(r.settings.roots).toEqual({ ok: "D:/ok" });
+    expect(r.issues.length).toBe(2);
+  });
+
+  it("表本身不是对象 ⇒ 空表 + 一句；没有这个键 ⇒ 空表（不是 undefined）", () => {
+    expect(normalizeExtSettings({ roots: [] }).settings.roots).toEqual({});
+    expect(normalizeExtSettings({ roots: [] }).issues.length).toBe(1);
+    expect(normalizeExtSettings({}).settings.roots).toEqual({});
+    // 空表与"没这个键"必须给出同一种形状：下游到处在 `for (const k of Object.keys(...))`
+    expect(emptyExtSettings().roots).toEqual({});
+  });
+});
