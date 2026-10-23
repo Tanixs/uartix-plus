@@ -15,6 +15,7 @@ import {
   flattenPermissions,
   indexPath,
   logsDir,
+  panelEnabled,
   permissionDelta,
   removeFromIndex,
   resolveInExtDir,
@@ -152,6 +153,7 @@ describe("P174-A2 · 索引", () => {
       digest: "d1",
       installedAt: 1,
       source: "market",
+      enabled: true,
     });
     expect(Object.keys(one.items)).toEqual(["a.b"]);
 
@@ -187,5 +189,21 @@ describe("P174-A2 · 权限人话与差异", () => {
     const d = permissionDelta(["写 $WS", "运行 python"], ["写 $WS", "联网 api.x:443"]);
     expect(d.added).toEqual(["联网 api.x:443"]);
     expect(d.removed).toEqual(["运行 python"]);
+  });
+});
+
+/**
+ * A12：**面板出现的两个条件**（启用 + 批过），以及"装完默认不启用"。
+ *
+ * 这三条钉的是产品流程本身：市场里装完 → 菜单里**没有**它 → 点启用 → 才有。
+ * 任何一条红，都意味着这个流程被某个默认值悄悄改回去了。
+ */
+describe("P174-A12 · 启用与批准是两件事", () => {
+  it("panelEnabled：两个都成立才为真（缺一个就不出场）", () => {
+    expect(panelEnabled({ enabled: true, verdict: "trusted" })).toBe(true);
+    expect(panelEnabled({ enabled: false, verdict: "trusted" })).toBe(false);
+    // 权限变了还没重新批准：即使启用了也不许出场（否则批准卡形同虚设）
+    expect(panelEnabled({ enabled: true, verdict: "changed" })).toBe(false);
+    expect(panelEnabled({ enabled: true, verdict: "needs-approval" })).toBe(false);
   });
 });

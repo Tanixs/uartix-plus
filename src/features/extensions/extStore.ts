@@ -79,6 +79,11 @@ export interface ExtEntry {
   version: string;
   installedAt: number;
   source: ExtIndexItem["source"];
+  /**
+   * 用户启用了它吗。**装完是 false**：不启用的插件不进「+面板」、不许起进程。
+   * 与 `verdict` 是两件事：`enabled` 是意愿，`verdict` 是"批过没有"。面板要两个都成立才出现。
+   */
+  enabled: boolean;
   /** 与信任库比出来的三态；`needs-approval`/`changed` 的面板会顶一条黄条。 */
   verdict: TrustVerdict;
   permissions: string[];
@@ -313,6 +318,7 @@ export async function reload(): Promise<void> {
         version: manifest.version,
         installedAt: index.items[manifest.id]?.installedAt ?? 0,
         source: index.items[manifest.id]?.source ?? "import",
+        enabled: index.items[manifest.id]?.enabled ?? true,
         verdict: trustVerdict(rec, fingerprint),
         permissions: flattenPermissions(manifest),
         themes,
@@ -390,6 +396,29 @@ export async function setWorkspaceRoot(path: string): Promise<void> {
   await saveExtSettings(extSettings, [paths.extensionsRoot]);
   repo = { ...repo, workspaceRoot: extSettings.workspaceRoot };
   emit();
+}
+
+/**
+ * 启用/停用一个插件。
+ *
+ * 两件事一起做，缺一件都是 bug：
+ * 1. 写账本（`enabled`）——决定它的面板要不要出现在「+面板」；
+ * 2. **停用时先把进程停掉**——否则界面里已经没有它的面板了，后台还挂着一个没人看得见的进程。
+ *
+ * 与"批准"是两条独立的路：批准是"我同意它的权限"，启用是"我现在要用它"。
+ * 装完默认不启用，用户点这一下才算用上；权限变了的插件要重新批准才 `trusted`，
+ * 在那之前即使 `enabled` 也不进菜单（见 `panelEnabled`）。
+ */
+export async function setEnabled(id: string, on: boolean): Promise<void> {
+  const cur = getEntry(id);
+  if (!cur) return;
+  if (!on && canStop(cur.phase)) await stop(id);
+  if (!paths) paths = await invoke<ExtPaths>("ext_paths");
+  const index = (await loadIndex([paths.extensionsRoot])).index;
+  const item = index.items[id];
+  if (!item) return; // 账本里没有它（磁盘上躺着的孤儿）：等它走一次安装再说
+  await saveIndex({ ...index, items: { ...index.items, [id]: { ...item, enabled: on } } }, [paths.extensionsRoot]);
+  await reload();
 }
 
 /**
@@ -642,6 +671,14 @@ export async function start(id: string): Promise<void> {
   const cur = getEntry(id);
   if (!cur) return;
   if (!canStart(cur.phase)) return;
+  // 没启用就没面板，也没理由起进程。这里再说一次（面板那侧已经把它挡在菜单外了）：
+  // 起进程要走 IPC，重活一点不假，但"不该活的进程活着"更难查。
+  if (!cur.enabled) {
+    const msg = "这个插件还没启用：先在详情里点「启用」，它的面板才会进入「+面板」";
+    patch(id, { phase: nextPhase(cur.phase, { type: "failed", error: msg }), error: msg });
+    log(id, { at: Date.now(), level: "warn", text: msg });
+    return;
+  }
   // 没批准过就不许跑。安装路径上本来就会拦（`commitInstall` 之前没有批准按钮），
   // 但"磁盘上直接躺着一个包"这条路绕过了安装——信任模型必须在**启动**这一层再拦一次，
   // 否则它就只是安装向导里的一个装饰。

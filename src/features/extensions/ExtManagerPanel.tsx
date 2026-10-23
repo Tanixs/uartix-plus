@@ -24,6 +24,7 @@ import {
   planFolder,
   reload,
   setActiveTheme,
+  setEnabled,
   setExtRoot,
   setWorkspaceRoot,
   start,
@@ -203,6 +204,20 @@ export function ExtManagerPanel() {
     setBusy("approve");
     try {
       await approveOnDisk(id);
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  /** 启用/停用。停用会先停进程（在 `setEnabled` 里做的），然后重读盘刷新菜单。 */
+  async function doSetEnabled(id: string, on: boolean) {
+    setErr("");
+    setBusy(on ? "enable" : "disable");
+    try {
+      await setEnabled(id, on);
+      if (on) setNotice(null);
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {
@@ -561,11 +576,28 @@ export function ExtManagerPanel() {
                   </span>
                 ) : null}
                 <div style={{ flex: "1 1 auto" }} />
+                {/* 启用是"我现在要用它"：没启用就没有面板（不进 +面板）、也不许起进程 */}
+                <button
+                  className={entry.enabled ? "btn" : "btn primary"}
+                  disabled={!!busy}
+                  onClick={() => void doSetEnabled(entry.id, !entry.enabled)}
+                  title={
+                    entry.enabled
+                      ? tx("停用：面板从「+面板」里收起，进程一并停掉", "Disable: hide its panel from +Panel and stop the process")
+                      : tx("启用：面板才会出现在「+面板」里", "Enable: its panel will appear in +Panel")
+                  }
+                >
+                  {entry.enabled ? tx("停用", "Disable") : tx("启用", "Enable")}
+                </button>
                 <button
                   className="btn"
-                  disabled={!canStart(entry.phase) || !!busy}
+                  disabled={!entry.enabled || !canStart(entry.phase) || !!busy}
                   onClick={() => void start(entry.id)}
-                  title={tx("拉起宿主进程", "Start the host process")}
+                  title={
+                    entry.enabled
+                      ? tx("拉起宿主进程", "Start the host process")
+                      : tx("先启用这个插件", "Enable this plugin first")
+                  }
                 >
                   {tx("启动", "Start")}
                 </button>
@@ -587,6 +619,23 @@ export function ExtManagerPanel() {
                   {confirmUninstall === entry.id ? tx("确认卸载？", "Confirm?") : tx("卸载", "Uninstall")}
                 </button>
               </div>
+
+              {!entry.enabled ? (
+                <div
+                  style={{
+                    padding: "var(--sp-1) var(--sp-3)",
+                    color: "var(--text-dim)",
+                    borderBottom: "1px solid var(--border)",
+                    fontSize: "var(--fs-xs)",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  {tx(
+                    "已安装，但还没启用——它的面板不会出现在「+面板」里，进程也不会起来。点右边的「启用」。",
+                    "Installed but disabled — its panel will not appear in +Panel and no process starts. Use “Enable”.",
+                  )}
+                </div>
+              ) : null}
 
               {entry.verdict !== "trusted" ? (
                 <div

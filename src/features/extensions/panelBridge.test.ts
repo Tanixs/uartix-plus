@@ -37,9 +37,10 @@ describe("视图 id", () => {
 });
 
 describe("collectExtensionPanels", () => {
-  const src = (id: string, panels: { id: string; title: string; entry: string }[]) => ({
+  const src = (id: string, panels: { id: string; title: string; entry: string }[], enabled = true) => ({
     id,
     manifest: { contributes: { panels } },
+    enabled,
   });
 
   it("按视图 id 排序，与目录/安装顺序无关", () => {
@@ -70,7 +71,20 @@ describe("collectExtensionPanels", () => {
   });
 
   it("没声明面板的扩展贡献 0 条（不产生空 optgroup）", () => {
-    expect(collectExtensionPanels([{ id: "x.y", manifest: { contributes: {} } }])).toEqual([]);
+    expect(collectExtensionPanels([{ id: "x.y", manifest: { contributes: {} }, enabled: true }])).toEqual([]);
+  });
+
+  /**
+   * A12：**装完不启用就不该出现在 +面板**。
+   *
+   * 这条是产品流程的那半句"然后启用"。它红了的表现很具体：用户刚在市场里装完一个插件，
+   * 还没点启用，菜单里就已经多了一项——于是"启用"这个动作变成装饰。
+   */
+  it("没启用的插件贡献 0 条；启用与否不影响别的插件", () => {
+    const panels = [{ id: "p", title: "P", entry: "p.html" }];
+    expect(collectExtensionPanels([src("a.b", panels, false)])).toEqual([]);
+    const out = collectExtensionPanels([src("a.b", panels, false), src("c.d", panels)]);
+    expect(out.map((p) => p.viewId)).toEqual(["ext-view-c.d:p"]);
   });
 });
 

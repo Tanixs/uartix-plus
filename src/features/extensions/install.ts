@@ -140,12 +140,16 @@ export function applyInstall(
   plan: InstallPlan,
   { approvedAt, source }: ApplyInput,
 ): { index: ExtIndex; trust: TrustBook } {
+  const prev = index.items[plan.id];
   const item: ExtIndexItem = {
     dir: plan.id,
     version: plan.version,
     digest: plan.fingerprint,
     installedAt: approvedAt,
     source,
+    // **新装默认不启用**：产品流程是"安装 → 启用 → 面板才出现"。
+    // 但重装/升级要保留用户原来的选择——否则每次更新都悄悄把插件关掉（或悄悄打开）。
+    enabled: prev ? prev.enabled : false,
   };
   const nextIndex = upsertIndex(index, plan.id, item);
   if (!needsApproval(plan)) return { index: nextIndex, trust };

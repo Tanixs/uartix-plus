@@ -122,6 +122,8 @@ describe("applyInstall（写两本账）", () => {
       digest: p.fingerprint,
       installedAt: 1234,
       source: "local",
+      // A12：新装默认**不启用**——产品流程是"安装 → 启用 → 面板才出现"
+      enabled: false,
     });
     expect(trust.items[m.id]).toEqual({
       id: m.id,
@@ -203,5 +205,28 @@ describe("applyUninstall（两本账一起摘）", () => {
     const out = applyUninstall(emptyIndex(), emptyTrust(), "nope.nope");
     expect(out.index.items).toEqual({});
     expect(out.trust.items).toEqual({});
+  });
+});
+
+/**
+ * A12：重装/升级要保留用户的启用选择。
+ *
+ * 这条不写，升级一次就把用户启用的插件关回"未启用"（或把停用的又打开），
+ * 而这两种都只能靠用户自己发现。
+ */
+describe("P174-A12 · enabled 的续命", () => {
+  it("重装一个已启用的插件：仍然启用；重装一个停用的：仍然停用", () => {
+    const m = manifest();
+    const p = plan(m);
+    const first = applyInstall(emptyIndex(), emptyTrust(), p, { approvedAt: 1, source: "local" });
+    expect(first.index.items[m.id].enabled).toBe(false);
+
+    const turnedOn = { ...first.index, items: { ...first.index.items, [m.id]: { ...first.index.items[m.id], enabled: true } } };
+    const again = applyInstall(turnedOn, first.trust, p, { approvedAt: 2, source: "local" });
+    expect(again.index.items[m.id].enabled, "重装把用户启用的插件关掉了").toBe(true);
+
+    const turnedOff = { ...again.index, items: { ...again.index.items, [m.id]: { ...again.index.items[m.id], enabled: false } } };
+    const third = applyInstall(turnedOff, again.trust, p, { approvedAt: 3, source: "local" });
+    expect(third.index.items[m.id].enabled, "重装把用户停用的插件又打开了").toBe(false);
   });
 });

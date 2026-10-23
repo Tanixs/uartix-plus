@@ -60,6 +60,13 @@ export interface ExtPanelItem {
 export interface PanelSource {
   id: string;
   manifest: Pick<ExtensionManifest, "contributes">;
+  /**
+   * 这个插件的面板该不该出现（= 已启用**且**已批准，判据在 `extStore.panelEnabled`）。
+   *
+   * **必填**，不给默认值：这一条就是"装完不会自动出现在 +面板"的那道门。
+   * 少了它，产品流程会悄悄退回"装上就有"，而那正是这次要改掉的行为。
+   */
+  enabled: boolean;
 }
 
 /**
@@ -75,6 +82,7 @@ export function collectExtensionPanels(sources: readonly PanelSource[]): ExtPane
   const out: ExtPanelItem[] = [];
   const seen = new Set<string>();
   for (const s of sources) {
+    if (!s.enabled) continue;
     for (const p of s.manifest.contributes.panels ?? []) {
       const viewId = panelViewId(s.id, p.id);
       if (seen.has(viewId)) continue;

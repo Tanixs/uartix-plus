@@ -82,6 +82,14 @@ export interface ExtIndexItem {
   digest: string;
   installedAt: number;
   source: "market" | "local" | "ai" | "import";
+  /**
+   * 用户是否启用它。**装完默认不启用**（产品流程是"安装 → 启用 → 才出现面板"），
+   * 只有用户点了启用，它的面板才进「+面板」，才允许起进程。
+   *
+   * 迁移口径：老账本里没有这个字段 ⇒ 按 `true` 处理（那些插件本来就装着在用，
+   * 静默把它们藏起来比多问一次更糟）。判据在 `normalizeIndex`，不在读盘那一侧各写一份。
+   */
+  enabled: boolean;
 }
 
 export interface ExtIndex {
@@ -240,6 +248,20 @@ export function flattenPermissions(m: ExtensionManifest): string[] {
   for (const sec of m.inject.sections ?? []) out.push(`往 ${sec.slot} 加区块`);
   for (const mu of m.inject.mutations ?? []) out.push(`${mu.op === "hide" ? "隐藏" : mu.op === "retitle" ? "改标题" : "移动"}面板 ${mu.target}`);
   return out;
+}
+
+/**
+ * 这个插件的面板该不该出现在「+面板」：**启用了**，并且**批过**。
+ *
+ * 两条缺一不可。只判 `enabled` 的话，一个权限刚被改过的插件（`changed`）会带着一份
+ * 没人看过的权限声明直接出现在菜单里——批准卡就没意义了。
+ * 只判 `verdict` 的话，"启用"这个动作变成装饰（装完就有）。
+ *
+ * 放在这里（而不是 `extStore`）是因为它是**纯判据**：`extStore` 一 import 就拉起 tauri，
+ * 那里面写判据等于不可测。
+ */
+export function panelEnabled(e: { enabled: boolean; verdict: TrustVerdict }): boolean {
+  return e.enabled && e.verdict === "trusted";
 }
 
 export function permissionDelta(prev: readonly string[], next: readonly string[]): PermissionDelta {

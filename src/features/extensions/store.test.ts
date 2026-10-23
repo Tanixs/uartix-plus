@@ -120,3 +120,27 @@ describe("normalizeExtSettings（外部目录）", () => {
     expect(emptyExtSettings().roots).toEqual({});
   });
 });
+
+/**
+ * A12：`enabled` 的迁移口径。
+ *
+ * 缺字段按"启用"算——这个字段出现之前就装着的插件本来就在用，静默藏掉一批面板，
+ * 用户只会得到"我插件呢"这一种反馈，而没有任何线索。
+ */
+describe("normalizeIndex（enabled 迁移）", () => {
+  const item = (extra: Record<string, unknown> = {}) => ({
+    items: { "a.b": { dir: "a.b", version: "1.0.0", digest: "d", installedAt: 1, source: "local", ...extra } },
+  });
+
+  it("没有这个字段 ⇒ 按启用算（老账本迁移）；显式 false ⇒ 停用", () => {
+    expect(normalizeIndex(item()).index.items["a.b"].enabled).toBe(true);
+    expect(normalizeIndex(item({ enabled: false })).index.items["a.b"].enabled).toBe(false);
+    expect(normalizeIndex(item({ enabled: true })).index.items["a.b"].enabled).toBe(true);
+  });
+
+  it("字段是别的类型（字符串/数字）⇒ 按启用算，不当成停用", () => {
+    // 既不是 true 也不是 false 的值只可能来自手改或坏账本：当成"没说过"比当成"停用"安全
+    expect(normalizeIndex(item({ enabled: "false" })).index.items["a.b"].enabled).toBe(true);
+    expect(normalizeIndex(item({ enabled: 0 })).index.items["a.b"].enabled).toBe(true);
+  });
+});

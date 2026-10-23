@@ -17,6 +17,7 @@ import {
   getSnapshot as getExtRepoSnapshot,
   subscribe as subscribeExtRepo,
 } from "./features/extensions/extStore";
+import { panelEnabled } from "./features/extensions/repo";
 import { applyDefaultLayout, gridSize } from "./shell/defaultLayout";
 import {
   panelGroupsAddable,
@@ -158,7 +159,10 @@ export default function App() {
   /* A7：插件自己声明的面板（iframe）。清单里的 `contributes.panels` 就是这张表的唯一来源，
      所以装/卸之后不需要额外通知——仓库 store 一变，这里跟着重算。 */
   const extRepo = useSyncExternalStore(subscribeExtRepo, getExtRepoSnapshot);
-  const extViewPanels = collectExtensionPanels(extRepo.entries);
+  // A12：只有**已启用且已批准**的插件才把面板挂进「+面板」——装完不启用就看不到
+  const extViewPanels = collectExtensionPanels(
+    extRepo.entries.map((e) => ({ id: e.id, manifest: e.manifest, enabled: panelEnabled(e) })),
+  );
   /* 面板清单来自磁盘（`extensions/<id>/extension.json`），所以启动时得读一次盘——
      否则「+ 面板」里要等到有人打开扩展管理面才出现"扩展面板"那一组。 */
   useEffect(() => {
