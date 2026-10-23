@@ -27,6 +27,7 @@ import {
   type ExtIndexItem,
   type PermissionDelta,
   type TrustBook,
+  type TrustRecord,
   type TrustVerdict,
 } from "./repo";
 
@@ -100,6 +101,24 @@ export function planInstall(input: PlanInput): InstallPlan {
     draftId,
     stagingPath: stagingDir(appDir, draftId),
     finalDir: extDir(appDir, manifest.id),
+  };
+}
+
+/**
+ * 给"磁盘上已经有、但没批准过"的扩展补一条信任记录。
+ *
+ * 为什么需要它：批准原来只发生在**安装**那一刻（`commitInstall` 写信任账）。于是有两种东西
+ * 会永久卡在"未批准"——手工放进 `extensions/` 的包、以及装到一半崩掉留下的半成品。
+ * 它们在列表里是黄点、点启动就该被拒，但界面上**没有任何地方能批准它们**：
+ * 用户唯一的出路是删掉重装。这条路径补上这个洞。
+ */
+export function trustRecordFor(manifest: ExtensionManifest, grantedAt: number): TrustRecord {
+  return {
+    id: manifest.id,
+    version: manifest.version,
+    digest: fingerprintOf(manifest),
+    grantedAt,
+    grantedSummary: flattenPermissions(manifest),
   };
 }
 

@@ -24,10 +24,13 @@ import {
   fingerprintOf,
   needsApproval,
   planInstall,
+  trustRecordFor,
   type InstallPlan,
 } from "./install";
 import {
+  REPO_VERSION,
   extDir,
+  emptyTrust,
   flattenPermissions,
   resolveInExtDir,
   STAGING_DIR,
@@ -420,6 +423,24 @@ export async function uninstall(id: string): Promise<void> {
   await reload();
 }
 
+/**
+ * 批准一个**已经在磁盘上**的扩展。
+ *
+ * 只有一条路径会用到这里：包是手工放进 `extensions/` 的，或者上一次安装崩在了中间。
+ * 正常安装走的是 `commitInstall`——它在提升之后立刻写信任账，所以装完就是 trusted。
+ */
+export async function approve(id: string): Promise<void> {
+  const e = getEntry(id);
+  if (!e) throw new Error(`没有这个扩展：${id}`);
+  if (!paths) throw new Error("还没读到扩展目录");
+  const cur = trust ?? emptyTrust();
+  const rec = trustRecordFor(e.manifest, Date.now());
+  const next: TrustBook = { version: REPO_VERSION, items: { ...cur.items, [id]: rec } };
+  trust = next;
+  await saveTrust(next, [paths.extensionsRoot]);
+  await reload();
+}
+
 /* ============================ 跑 ============================ */
 
 /**
@@ -508,6 +529,15 @@ export async function start(id: string): Promise<void> {
   const cur = getEntry(id);
   if (!cur) return;
   if (!canStart(cur.phase)) return;
+  // 没批准过就不许跑。安装路径上本来就会拦（`commitInstall` 之前没有批准按钮），
+  // 但"磁盘上直接躺着一个包"这条路绕过了安装——信任模型必须在**启动**这一层再拦一次，
+  // 否则它就只是安装向导里的一个装饰。
+  if (cur.verdict !== "trusted") {
+    const msg = "这个扩展的权限还没批准：在右侧点「批准」之后才能启动";
+    patch(id, { phase: nextPhase(cur.phase, { type: "failed", error: msg }), error: msg });
+    log(id, { at: Date.now(), level: "warn", text: msg });
+    return;
+  }
 
   patch(id, { phase: "starting", error: undefined });
   // 本地一份给本次启动用，同时登记到表里给 ready 回调与 stop 用（两处不能各生成一枚）

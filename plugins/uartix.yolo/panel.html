@@ -315,6 +315,8 @@
       还没有登记工作区根。请关掉这个面板，在「扩展」面板顶部选一个目录（就是含 config.yaml 的那一个），再打开这里。
     </div>
 
+    <div id="noconf" class="banner" hidden></div>
+
     <nav>
       <button data-tab="overview" class="on">概览</button>
       <button data-tab="data">数据</button>
@@ -511,6 +513,19 @@
         var env = eff.env || {};
         $("ws").textContent = st.workspace || "（没有工作区）";
         $("nows").hidden = !st.needWorkspace;
+
+        /* 工作区选错的典型形态：选到了上层目录（那里没有 config.yaml），
+           于是"参数全用内置默认、数据集空的" —— 看起来像插件坏了。这条横幅专治它。 */
+        var nc = $("noconf");
+        var noConf = !st.needWorkspace && cfg && !cfg.baseFound;
+        nc.hidden = !noConf;
+        if (noConf) {
+          nc.textContent =
+            "这个工作区里没有 config.yaml（" +
+            st.workspace +
+            "）。工作区根要选含 config.yaml 的那一层——通常是 D:\\YOLO-Workspace 这一级；" +
+            "现在面板用的是内置默认参数，数据集路径多半也是错的。";
+        }
 
         var pyTag = $("pystat");
         pyTag.className = "tag " + (py.ok ? "ok" : "bad");

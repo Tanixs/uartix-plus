@@ -16,6 +16,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { open } from "@tauri-apps/plugin-dialog";
 import { tx, useLocale } from "../../i18n/strings";
 import {
+  // 与下面组件内那个 `approve()`（批准**待安装**的计划）区分：这个是批准**磁盘上已有**的扩展
+  approve as approveOnDisk,
   commitInstall,
   ensureLoaded,
   getSnapshot,
@@ -150,6 +152,18 @@ export function ExtManagerPanel() {
       setNotice(warn);
       setSelected(pending.id);
       setPending(null);
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function doApprove(id: string) {
+    setErr("");
+    setBusy("approve");
+    try {
+      await approveOnDisk(id);
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {
@@ -485,6 +499,37 @@ export function ExtManagerPanel() {
                   {confirmUninstall === entry.id ? tx("确认卸载？", "Confirm?") : tx("卸载", "Uninstall")}
                 </button>
               </div>
+
+              {entry.verdict !== "trusted" ? (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "var(--sp-2)",
+                    padding: "var(--sp-1) var(--sp-3)",
+                    color: "var(--warn)",
+                    borderBottom: "1px solid var(--border)",
+                    fontSize: "var(--fs-xs)",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  <span>
+                    {entry.verdict === "changed"
+                      ? tx(
+                          "它的权限相比你上次批准的有变化——确认下面这份清单之后再批准。",
+                          "Its permissions changed since you last approved — review the list below before approving.",
+                        )
+                      : tx(
+                          "这个扩展的权限还没被批准（可能是手工放进扩展目录的，或上次安装中断了）。批准之前不许启动。",
+                          "This extension has not been approved yet (hand-copied, or a previous install was interrupted). It cannot start until approved.",
+                        )}
+                  </span>
+                  <div style={{ flex: "1 1 auto" }} />
+                  <button className="btn" disabled={!!busy} onClick={() => void doApprove(entry.id)}>
+                    {tx("批准", "Approve")}
+                  </button>
+                </div>
+              ) : null}
 
               {usesWorkspace(entry.manifest) && !repo.workspaceRoot ? (
                 <div

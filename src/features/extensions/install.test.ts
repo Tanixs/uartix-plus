@@ -9,7 +9,15 @@
 import { describe, expect, it } from "vitest";
 import { validateExtension, type ExtensionManifest } from "./manifest";
 import { emptyIndex, emptyTrust, flattenPermissions, type TrustBook } from "./repo";
-import { applyInstall, applyUninstall, fingerprintOf, needsApproval, planInstall } from "./install";
+import {
+  applyInstall,
+  applyUninstall,
+  fingerprintOf,
+  needsApproval,
+  planInstall,
+  trustRecordFor,
+} from "./install";
+import { trustVerdict } from "./repo";
 
 const APP = "C:/Users/u/AppData/Roaming/uartix";
 
@@ -145,6 +153,28 @@ describe("applyInstall（写两本账）", () => {
     expect(Object.keys(idx.items).sort()).toEqual(["demo.tool", "other.pkg"]);
     expect(trust.items["other.pkg"].grantedAt).toBe(2);
     expect(trust.items["demo.tool"].grantedAt).toBe(1);
+  });
+});
+
+describe("trustRecordFor（批准磁盘上已有的扩展）", () => {
+  it("补出来的记录能让它变成 trusted，且摘要与权限行同源", () => {
+    const m = manifest();
+    const rec = trustRecordFor(m, 999);
+    expect(rec.id).toBe(m.id);
+    expect(rec.version).toBe(m.version);
+    expect(rec.digest).toBe(fingerprintOf(m));
+    // 账上记的就是批准卡上列的那几行（不是另算一遍）
+    expect(rec.grantedSummary).toEqual(flattenPermissions(m));
+    expect(rec.grantedAt).toBe(999);
+    // 关键：补完之后再判就是 trusted，不会"批了还让再批一次"
+    expect(trustVerdict(rec, fingerprintOf(m))).toBe("trusted");
+  });
+
+  it("清单改了权限 ⇒ 补出来的记录对不上新指纹（必须重新批）", () => {
+    const m = manifest();
+    const rec = trustRecordFor(m, 1);
+    const changed = manifest({ permissions: { fs: { write: ["$WS/other"] } } });
+    expect(trustVerdict(rec, fingerprintOf(changed))).toBe("changed");
   });
 });
 
