@@ -18,11 +18,14 @@ import { BOOTSTRAP_SOURCE } from "../src/features/extensions/bootstrap.ts";
 import { encodeMessage } from "../src/features/extensions/protocol.ts";
 
 const WS = "D:/YOLO-Workspace";
+/** 部署工具目录（`$EXT:deploy`）。它就在工作区外面 —— 正是 A11 要解决的那种情况。 */
+const DEPLOY = "D:/OneDrive/Desktop/yolo-gongchuang/maixcam2_deploy";
 const PY = "D:/projects/anaconda3/envs/yolo_env/python.exe";
 const TOKEN = "yolo-real-1";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_SRC = path.join(HERE, "..", "plugins", "uartix.yolo");
 const OK = existsSync(path.join(WS, "config.yaml")) && existsSync(PY);
+const DEPLOY_OK = existsSync(path.join(DEPLOY, "run.bat"));
 
 function permFlag() {
   for (const f of ["--permission", "--experimental-permission"]) {
@@ -123,7 +126,16 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
 
       try {
         child.stdin.write(
-          encodeMessage({ t: "hello", v: 1, token: TOKEN, workspace: WS, appDir: dir, dev: true }) + "\n",
+          encodeMessage({
+            t: "hello",
+            v: 1,
+            token: TOKEN,
+            workspace: WS,
+            appDir: dir,
+            // 有就绑上：这一条顺带验"真目录 + 真插件 + 真宿主"这条链，没有就留空（插件该降级）
+            roots: DEPLOY_OK ? { deploy: DEPLOY } : {},
+            dev: true,
+          }) + "\n",
         );
 
         // 先等握手：**call 不能抢在 activate 前面**（引导脚本会把未激活的 call 直接拒掉）
@@ -169,8 +181,20 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
             st.runs.length +
             " 条（最佳 mAP50(M)=" +
             best.metrics.mAP50M +
-            "）",
+            "）· 部署工具 " +
+            (st.deploy.ready ? st.deploy.configs.join("/") : "未配置"),
         );
+
+        /* 部署工具（A11）：路径是 hello.roots 递进去的，插件自己没写死过任何绝对路径。
+           没绑时应当 bound:false 而不是崩 —— 那一半由 yoloPlugin 的用例钉，这里只验"真目录认得出来"。 */
+        if (DEPLOY_OK) {
+          expect(st.deploy.bound, JSON.stringify(st.deploy)).toBe(true);
+          expect(st.deploy.runBat).toBe(true);
+          expect(st.deploy.configs.length, JSON.stringify(st.deploy)).toBeGreaterThan(0);
+          expect(st.deploy.ready, JSON.stringify(st.deploy)).toBe(true);
+        } else {
+          expect(st.deploy.bound).toBe(false);
+        }
 
         // 深度自检：torch / ultralytics 都要能报出来（慢，但这是真机才验得了的那一半）
         const probe = await call("panel.train.probe", {});
