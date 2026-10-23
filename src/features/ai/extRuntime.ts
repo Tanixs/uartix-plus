@@ -1,6 +1,7 @@
 // P99a-D1c：这里曾经 import 了 framesBus / variableStore / serialStore / widgetHub / aiChatFeed /
 // appActions 六组模块，只为喂给主世界 `new Function` 的 ScriptApi。脚本通道删掉后它们全部无用了——
 // 少一批静态边也意味着 extRuntime 这条曾经的环边更薄（§8-33）。
+import { getActiveExtTheme } from "../extensions/activeTheme";
 import { getSnapshot as getExts } from "./extensionStore";
 import { setStyleApplier } from "../plugins/pluginStore";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
@@ -145,15 +146,42 @@ export function applyStyleExts() {
   const enabledThemes = exts
     .filter((e) => e.enabled && e.type === "theme")
     .map((e) => themeSourceFromExt(e));
+  /**
+   * P174：**v3 插件贡献的主题**也走这条管线。
+   *
+   * 它排在最前面（`createdAt` 给一个极大的常量 ⇒ 排序后落在最后 ⇒ 按"最后启用的一枚在画"的
+   * 旧规矩，它就是被选中的那枚）。理由：用户是在插件面板里**显式点过"应用"**的，
+   * 而旧主题插件是"启用了就画"——两者同时存在时，显式那次应该赢。
+   *
+   * 注意 `vars` 给空对象：插件主题是整段 CSS（`:root{--bg:…}` 自己在里面），
+   * 不需要宿主替它拆 token；`scheme` 用它声明的，没声明就按 CSS 的实际取值推导。
+   */
+  const extTheme = getActiveExtTheme();
+  const pluginThemes = extTheme
+    ? [
+        ...enabledThemes,
+        {
+          id: extTheme.id,
+          name: extTheme.name,
+          builtin: false,
+          scheme: extTheme.scheme,
+          vars: {},
+          css: extTheme.css,
+          pluginId: extTheme.pluginId,
+          createdAt: Number.MAX_SAFE_INTEGER,
+        },
+      ]
+    : enabledThemes;
+
   const settings = getSettings();
   const decision = resolveActiveTheme({
     settingsTheme: settings.theme,
     sysDark: sysPrefersDark(),
     builtins: BUILTIN_THEMES,
-    enabledThemePlugins: enabledThemes,
+    enabledThemePlugins: pluginThemes,
   });
   const pickedSource: ThemeSource | null = decision.active
-    ? enabledThemes.find((t) => t.id === decision.active!.id) ?? BUILTIN_THEMES.find((t) => t.id === decision.active!.id) ?? null
+    ? pluginThemes.find((t) => t.id === decision.active!.id) ?? BUILTIN_THEMES.find((t) => t.id === decision.active!.id) ?? null
     : null;
   /**
    * P131-B3 预览：有一场没到期的预览在演，就画那一枚——但**只改这一处取源**，

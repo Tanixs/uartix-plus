@@ -21,6 +21,7 @@ import {
   type ExtensionManifest,
   type PathVarBinding,
 } from "./manifest";
+import { flattenPermissions } from "./repo";
 
 /** 一份最小可用的 s3 清单。各用例只改自己关心的那几格。 */
 function base(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -200,6 +201,66 @@ describe("P174-A · 变量展开", () => {
     expect(expandPathSpec("$EXT:deploy", BIND)).toBe("D:/OneDrive/deploy");
     expect(expandPathSpec("$EXT:nope", BIND)).toBeNull();
     expect(expandPathSpec("$WS", { ...BIND, workspace: "" })).toBeNull();
+  });
+});
+
+describe("P174-A10 · 插件贡献主题", () => {
+  const withTheme = (extra: Record<string, unknown> = {}, perm: Record<string, unknown> = { ui: { theme: true } }) =>
+    validateExtension({
+      format: "uartix-plugin",
+      schemaVersion: 3,
+      id: "a.b",
+      version: "1.0.0",
+      name: "x",
+      main: "main.mjs",
+      activation: ["onPanel:p"],
+      permissions: perm,
+      contributes: { panels: [], themes: [{ id: "seaglass", title: "海玻璃", entry: "theme.css" }] },
+      ...extra,
+    });
+
+  it("要贡献主题就必须声明 permissions.ui.theme（改了界面就得在批准卡上说出来）", () => {
+    const ok = withTheme();
+    expect(ok.ok, ok.errors.join("；")).toBe(true);
+    expect(ok.manifest?.contributes.themes?.[0]).toEqual({ id: "seaglass", title: "海玻璃", entry: "theme.css" });
+
+    const bad = withTheme({}, {});
+    expect(bad.ok).toBe(false);
+    expect(bad.errors.join("")).toContain("permissions.ui.theme");
+  });
+
+  it("条目字段：id 必须合法且不重复、entry 必须是包内相对路径、scheme 只认 dark/light", () => {
+    const cases: [string, unknown[]][] = [
+      ["id 非法", [{ id: "Bad Id", title: "x", entry: "a.css" }]],
+      ["entry 越界", [{ id: "a", title: "x", entry: "../a.css" }]],
+      ["scheme 乱写", [{ id: "a", title: "x", entry: "a.css", scheme: "auto" }]],
+      ["重复 id", [{ id: "a", title: "x", entry: "a.css" }, { id: "a", title: "y", entry: "b.css" }]],
+    ];
+    for (const [what, themes] of cases) {
+      const r = validateExtension({
+        format: "uartix-plugin",
+        schemaVersion: 3,
+        id: "a.b",
+        version: "1.0.0",
+        name: "x",
+        main: "main.mjs",
+        activation: ["onPanel:p"],
+        permissions: { ui: { theme: true } },
+        contributes: { panels: [], themes },
+      });
+      expect(r.ok, `${what} 应当被拒`).toBe(false);
+    }
+  });
+
+  it("标题缺省时用 id（不给空的标题去渲染选择器）", () => {
+    const r = withTheme({ contributes: { panels: [], themes: [{ id: "only-id", entry: "a.css" }] } });
+    expect(r.ok, r.errors.join("；")).toBe(true);
+    expect(r.manifest?.contributes.themes?.[0].title).toBe("only-id");
+  });
+
+  it("批准卡上要把「改界面主题」单列出来（装完发现配色自己变了最说不清）", () => {
+    const r = withTheme();
+    expect(flattenPermissions(r.manifest!)).toContain("改界面主题（海玻璃）");
   });
 });
 

@@ -223,6 +223,8 @@ export function flattenPermissions(m: ExtensionManifest): string[] {
   for (const p of m.permissions.net?.connect ?? []) out.push(`联网 ${p}`);
   if (m.permissions.ui?.panel) out.push("在界面里加面板");
   if (m.permissions.ui?.notify) out.push("发系统通知");
+  // 主题改的是**整张界面的长相**，批准卡上必须单列：装完发现配色自己变了，是最说不清的那种惊吓
+  for (const th of m.contributes.themes ?? []) out.push(`改界面主题（${th.title}）`);
   if (m.permissions.ui?.clipboard) out.push("读写剪贴板");
   if (m.permissions.ai?.registerTools) out.push("向 AI 注册工具");
   if (m.permissions.ai?.ask) out.push("向 AI 提问");

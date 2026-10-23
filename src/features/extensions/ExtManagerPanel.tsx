@@ -23,6 +23,7 @@ import {
   getSnapshot,
   planFolder,
   reload,
+  setActiveTheme,
   setWorkspaceRoot,
   start,
   stop,
@@ -564,6 +565,54 @@ export function ExtManagerPanel() {
                 <PermList lines={entry.permissions} />
                 <div style={{ marginTop: "var(--sp-1)", fontFamily: "var(--font-mono)" }}>{entry.dir}</div>
               </div>
+
+              {entry.themes.length ? (
+                <div
+                  style={{
+                    padding: "var(--sp-2) var(--sp-3)",
+                    borderBottom: "1px solid var(--border)",
+                    fontSize: "var(--fs-xs)",
+                    flex: "0 0 auto",
+                  }}
+                >
+                  <div style={{ color: "var(--text-dim)", marginBottom: "var(--sp-1)" }}>
+                    {tx(
+                      "这个插件带的界面主题（改了整张界面的配色与组件样式；随时可停用）：",
+                      "UI themes shipped by this plugin (they repaint the whole app; you can switch back anytime):",
+                    )}
+                  </div>
+                  {entry.themes.map((th) => {
+                    const on = repo.activeTheme === th.key;
+                    return (
+                      <div
+                        key={th.key}
+                        style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)", padding: "1px 0" }}
+                      >
+                        <span style={{ color: on ? "var(--accent)" : "var(--text)" }}>{th.title}</span>
+                        <span style={{ color: "var(--text-faint)", fontFamily: "var(--font-mono)" }}>{th.id}</span>
+                        {th.scheme ? (
+                          <span style={{ color: "var(--text-faint)" }}>
+                            {th.scheme === "dark" ? tx("暗", "Dark") : tx("亮", "Light")}
+                          </span>
+                        ) : null}
+                        <div style={{ flex: "1 1 auto" }} />
+                        <button
+                          className="btn"
+                          disabled={!!busy}
+                          onClick={() => void setActiveTheme(on ? "" : th.key)}
+                          title={
+                            on
+                              ? tx("回到内置主题", "Back to the built-in theme")
+                              : tx("用这枚主题重画界面", "Repaint the UI with this theme")
+                          }
+                        >
+                          {on ? tx("停用", "Disable") : tx("应用", "Apply")}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
 
               {entry.error ? (
                 <div style={{ padding: "var(--sp-2) var(--sp-3)", color: "var(--danger)", borderBottom: "1px solid var(--border)" }}>

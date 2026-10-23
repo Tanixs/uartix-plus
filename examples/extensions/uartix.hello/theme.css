@@ -1,0 +1,21 @@
+/*
+  一枚最小的插件主题：只改配色与圆角，不动任何组件行为。
+
+  能写什么、不能写什么由宿主那条净化器说了算（和 AI 写主题同一条）：
+  - `:root` 里只许声明 `--*` 变量（不能写 `!important`，不能碰 `--z-*`）；
+  - 不许出现 html / body / #root / * 这类全局选择器，也不许 @import；
+  - 组件层用**真实类名**，这里挑了 .btn 与 .tabs 两个最稳的。
+
+  颜色是"海玻璃"：深青底 + 薄荷主色。暗色系，所以 plugin.json 里 scheme 写 dark。
+*/
+:root {
+  --bg: #0d1418;
+  --bg-panel: #121b21;
+  --bg-inset: #0a1014;
+  --bg-titlebar: #0f181e;
+  --border: #24343d;
+  --text: #dcebee;
+  --text-dim: #8fa8b0;
+  --text-faint: #6b838b;
+  --accent: #35c2a8;
+}

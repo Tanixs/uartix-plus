@@ -45,6 +45,7 @@ export const EXT_LIMITS = {
    */
   settingsFields: 256,
   panels: 64,
+  themes: 8,
   commands: 256,
   sections: 256,
   mutations: 128,
@@ -89,7 +90,7 @@ export interface ExtPermissions {
   process?: { spawn?: string[] };
   /** 声明会连的地址。**不参与拦截**，`connect-src` 恒为 `*`；只用于批准卡。 */
   net?: { connect?: string[] };
-  ui?: { panel?: boolean; notify?: boolean; clipboard?: boolean };
+  ui?: { panel?: boolean; notify?: boolean; clipboard?: boolean; /** 贡献主题（改界面长相） */ theme?: boolean };
   ai?: { registerTools?: boolean; ask?: boolean };
   secrets?: string[];
 }
@@ -120,8 +121,19 @@ export interface ExtInject {
   mutations?: ExtMutation[];
 }
 
+/** 一枚插件主题：包内一份 CSS（变量块或整段组件覆盖），由宿主的净化器验过才用。 */
+export interface ExtThemeDecl {
+  id: string;
+  title: string;
+  /** 包内相对路径，通常 `theme.css`。 */
+  entry: string;
+  /** 供选择器预览用的底色倾向；不给就按 CSS 里实际声明推导。 */
+  scheme?: "dark" | "light";
+}
+
 export interface ExtContributes {
   panels?: { id: string; title: string; entry: string }[];
+  themes?: ExtThemeDecl[];
   commands?: { id: string; title: string }[];
   settings?: ExtSettingField[];
 }
@@ -302,6 +314,7 @@ function validatePermissions(raw: unknown, out: ExtValidation): ExtPermissions {
         panel: raw.ui.panel === true,
         notify: raw.ui.notify === true,
         clipboard: raw.ui.clipboard === true,
+        theme: raw.ui.theme === true,
       };
     }
   }
@@ -467,6 +480,44 @@ function validateContributes(raw: unknown, out: ExtValidation): ExtContributes {
     }
   }
 
+  if (raw.themes !== undefined) {
+    if (!Array.isArray(raw.themes)) out.errors.push("contributes.themes 必须是数组");
+    else if (raw.themes.length > EXT_LIMITS.themes) out.errors.push(`contributes.themes 最多 ${EXT_LIMITS.themes} 条`);
+    else {
+      const list: ExtThemeDecl[] = [];
+      const seen = new Set<string>();
+      for (const t of raw.themes) {
+        if (!isPlainObject(t)) {
+          out.errors.push("contributes.themes 的条目必须是对象");
+          continue;
+        }
+        const id = typeof t.id === "string" ? t.id : "";
+        if (!LOCAL_ID_RE.test(id) || seen.has(id)) {
+          out.errors.push(`contributes.themes.id「${id}」非法或重复`);
+          continue;
+        }
+        const entry = typeof t.entry === "string" ? t.entry : "";
+        if (!REL_PATH_RE.test(entry)) {
+          out.errors.push(`contributes.themes[${id}].entry「${entry}」必须是包内相对路径`);
+          continue;
+        }
+        const scheme = t.scheme;
+        if (scheme !== undefined && scheme !== "dark" && scheme !== "light") {
+          out.errors.push(`contributes.themes[${id}].scheme 只能是 "dark" / "light"`);
+          continue;
+        }
+        seen.add(id);
+        list.push({
+          id,
+          title: typeof t.title === "string" && t.title.trim() ? t.title.trim().slice(0, 60) : id,
+          entry,
+          ...(scheme ? { scheme } : {}),
+        });
+      }
+      c.themes = list;
+    }
+  }
+
   if (raw.commands !== undefined) {
     if (!Array.isArray(raw.commands)) out.errors.push("contributes.commands 必须是数组");
     else if (raw.commands.length > EXT_LIMITS.commands) out.errors.push(`contributes.commands 最多 ${EXT_LIMITS.commands} 条`);
@@ -624,6 +675,11 @@ export function validateExtension(raw: unknown): ExtValidation {
   // 5) 语义交叉校验（单字段都合法、组合起来不成立的那几类）
   const hasPanelPerm = permissions.ui?.panel === true;
   const wantsPanel = (contributes.panels?.length ?? 0) > 0 || (inject.sections?.length ?? 0) > 0;
+  const wantsTheme = (contributes.themes?.length ?? 0) > 0;
+  if (wantsTheme && permissions.ui?.theme !== true) {
+    // 与面板同一条规矩：**改了界面就要在批准卡上说出来**，而不是装完才发现"我的配色是自己变的"
+    out.errors.push("要贡献主题（改界面长相），必须在 permissions.ui.theme 声明 true");
+  }
   if (wantsPanel && !hasPanelPerm) {
     out.errors.push("要贡献面板或往插槽注入，必须在 permissions.ui.panel 声明 true");
   }

@@ -164,6 +164,12 @@ export default function App() {
   useEffect(() => {
     void ensureExtRepoLoaded();
   }, []);
+
+  /* A10：插件主题换了就重画一次。`applyStyleExts` 是整张界面配色的唯一出口，
+     这里只负责"喂它一次"——不自己往 DOM 上写任何东西。 */
+  useEffect(() => {
+    applyStyleExts();
+  }, [extRepo.activeTheme]);
   // B6：「最近使用」置顶（会话内响应式；跨会话持久在 localStorage）
   const [recentPanels, setRecentPanels] = useState<string[]>(() => getRecentPanels());
   renderTick += 1;

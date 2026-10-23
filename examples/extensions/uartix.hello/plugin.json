@@ -3,14 +3,35 @@
   "schemaVersion": 3,
   "id": "uartix.hello",
   "version": "1.1.0",
-  "name": "示例扩展",
-  "description": "带自己的面板：每 2 秒一条心跳，按钮走一次真正的 RPC 到插件进程",
+  "name": "示例插件",
+  "description": "带自己的面板与一枚主题：每 2 秒一条心跳，按钮走一次真正的 RPC 到插件进程",
   "author": "uartix",
   "license": "MIT",
   "main": "main.mjs",
-  "activation": ["onPanel:hello"],
-  "permissions": { "ui": { "panel": true } },
+  "activation": [
+    "onPanel:hello"
+  ],
+  "permissions": {
+    "ui": {
+      "panel": true,
+      "theme": true
+    }
+  },
   "contributes": {
-    "panels": [{ "id": "hello", "title": "示例面板", "entry": "panel.html" }]
+    "panels": [
+      {
+        "id": "hello",
+        "title": "示例面板",
+        "entry": "panel.html"
+      }
+    ],
+    "themes": [
+      {
+        "id": "seaglass",
+        "title": "海玻璃",
+        "entry": "theme.css",
+        "scheme": "dark"
+      }
+    ]
   }
 }

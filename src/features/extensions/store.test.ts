@@ -28,6 +28,12 @@ describe("normalizeExtSettings（工作区根）", () => {
     expect(r.issues.join()).toContain("不是字符串");
   });
 
+  it("activeTheme：字符串原样保留；类型不对退回空（空串 = 用内置主题）", () => {
+    expect(normalizeExtSettings({ activeTheme: "plg:a.b:seaglass" }).settings.activeTheme).toBe("plg:a.b:seaglass");
+    expect(normalizeExtSettings({ activeTheme: 42 }).settings.activeTheme).toBe("");
+    expect(normalizeExtSettings({}).settings.activeTheme).toBe("");
+  });
+
   it("整份不是对象 ⇒ 默认 + 一句", () => {
     const r = normalizeExtSettings("oops");
     expect(r.settings).toEqual(emptyExtSettings());

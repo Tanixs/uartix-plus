@@ -111,12 +111,19 @@ export async function loadTrust(roots: string[]): Promise<{ trust: TrustBook; is
  * 同名不同义的两个键放在一张表里，agent 工具与帮助文档都会指着它说错话。
  */
 export interface ExtSettings {
-  /** 工作区根目录。空串 = 没登记（声明了 `$WS` 的扩展会被拒启动，这是有意为之）。 */
+  /** 工作区根目录。空串 = 没登记（声明了 `$WS` 的插件会被拒启动，这是有意为之）。 */
   workspaceRoot: string;
+  /**
+   * 当前在画的插件主题（`plg:<pluginId>:<themeId>`）。空串 = 用内置主题。
+   *
+   * 为什么它不在全局设置里：`settings.theme` 是**内置主题的枚举**（light/dark/system…），
+   * 把第三方的 id 塞进去会一路撞类型与校验器。插件主题有它自己的"谁在画"这件事。
+   */
+  activeTheme: string;
 }
 
 export function emptyExtSettings(): ExtSettings {
-  return { workspaceRoot: "" };
+  return { workspaceRoot: "", activeTheme: "" };
 }
 
 /** 归一：只要形状不对就退回默认并说一句，不静默保留半截数据。 */
@@ -131,7 +138,13 @@ export function normalizeExtSettings(raw: unknown): { settings: ExtSettings; iss
     issues.push("工作区根不是字符串，已按未设置处理");
     return { settings: emptyExtSettings(), issues };
   }
-  return { settings: { workspaceRoot: typeof root === "string" ? root : "" }, issues };
+  return {
+    settings: {
+      workspaceRoot: typeof root === "string" ? root : "",
+      activeTheme: typeof raw.activeTheme === "string" ? raw.activeTheme : "",
+    },
+    issues,
+  };
 }
 
 export async function loadExtSettings(roots: string[]): Promise<{ settings: ExtSettings; issues: string[] }> {

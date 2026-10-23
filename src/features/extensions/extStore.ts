@@ -16,7 +16,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { BOOTSTRAP_SOURCE } from "./bootstrap";
 import { validateExtension, type ExtensionManifest } from "./manifest";
+import { setActiveExtTheme, themeKey, type ActiveExtTheme } from "./activeTheme";
 import { planHostStart, HostPlanError } from "./hostPlan";
+import { guardThemeCss, type ThemeCssResult } from "./themeCss";
 import { decodeMessage, encodeMessage, RPC_TIMEOUT_MS, type ExtToHost } from "./protocol";
 import {
   applyInstall,
@@ -59,6 +61,16 @@ import {
   type ExtPhase,
 } from "./extRuntime";
 
+/** 一枚可用的插件主题（已过净化）。 */
+export interface ExtThemeItem {
+  /** `plg:<pluginId>:<themeId>` */
+  key: string;
+  id: string;
+  title: string;
+  scheme: "dark" | "light" | null;
+  css: string;
+}
+
 /** 一个已安装的插件：**账本上的事实**（装在哪、批过什么）+ **运行时状态**（在不在跑、日志）。 */
 export interface ExtEntry {
   id: string;
@@ -70,6 +82,8 @@ export interface ExtEntry {
   /** 与信任库比出来的三态；`needs-approval`/`changed` 的面板会顶一条黄条。 */
   verdict: TrustVerdict;
   permissions: string[];
+  /** 这个插件贡献的主题（CSS 已经过宿主净化器；没过的不会出现在这里，问题在 issues 里）。 */
+  themes: ExtThemeItem[];
   phase: ExtPhase;
   pid?: number;
   error?: string;
@@ -83,6 +97,8 @@ export interface ExtRepo {
   appDir: string;
   /** 工作区根（`$WS`）；空串 = 没登记。面板要据此提示"某个插件需要它"。 */
   workspaceRoot: string;
+  /** 当前在画的插件主题键；空串 = 用内置主题。 */
+  activeTheme: string;
   entries: ExtEntry[];
   /** 读盘过程中发现的问题（坏清单、悬空目录、账本损坏…）。**不吞**，面板上要能看见。 */
   issues: string[];
@@ -159,7 +175,7 @@ export function onPanelEvent(cb: PanelEventCb): () => void {
   return () => panelSubs.delete(cb);
 }
 
-let repo: ExtRepo = { loading: true, appDir: "", workspaceRoot: "", entries: [], issues: [] };
+let repo: ExtRepo = { loading: true, appDir: "", workspaceRoot: "", activeTheme: "", entries: [], issues: [] };
 /** 插件子系统自己的设置（目前只有工作区根）。 */
 let extSettings: ExtSettings = emptyExtSettings();
 const subs = new Set<() => void>();
@@ -271,6 +287,23 @@ export async function reload(): Promise<void> {
       const rec = trust.items[manifest.id];
       const old = before.get(manifest.id);
       const keep = old && old.version === manifest.version ? old : null;
+      // 主题 CSS 在这里读（而不是等插件进程起来）：主题要在**面板关着**的时候也能画，
+      // 而那时插件进程可能已经被空闲回收了。它只是包里的一个静态文件。
+      const themes: ExtThemeItem[] = [];
+      for (const decl of manifest.contributes.themes ?? []) {
+        const got = await readThemeCss(dir, root, decl.entry);
+        if (!got.css) {
+          issues.push(`「${manifest.id}」的主题「${decl.title}」已跳过：${got.issue}`);
+          continue;
+        }
+        themes.push({
+          key: themeKey(manifest.id, decl.id),
+          id: decl.id,
+          title: decl.title,
+          scheme: decl.scheme ?? null,
+          css: got.css,
+        });
+      }
       entries.push({
         id: manifest.id,
         manifest,
@@ -280,6 +313,7 @@ export async function reload(): Promise<void> {
         source: index.items[manifest.id]?.source ?? "import",
         verdict: trustVerdict(rec, fingerprint),
         permissions: flattenPermissions(manifest),
+        themes,
         phase: keep ? keep.phase : "idle",
         pid: keep?.pid,
         error: keep?.error,
@@ -293,13 +327,40 @@ export async function reload(): Promise<void> {
       if (!entries.some((e) => e.id === id)) issues.push(`账本里有「${id}」，但目录已经不在了（可在此卸载）`);
     }
     entries.sort((a, b) => a.id.localeCompare(b.id));
-    repo = { loading: false, appDir: paths.appDir, workspaceRoot: extSettings.workspaceRoot, entries, issues };
+
+    /**
+     * 谁来画：设置里那枚如果还在（插件没卸、主题没删）就用它，否则清空回到内置。
+     * **找不到就清**——留一个画不出来的键，界面会一直"欠"一场不存在的主题切换。
+     */
+    const wanted = extSettings.activeTheme;
+    const found = wanted ? entries.flatMap((e) => e.themes).find((t) => t.key === wanted) : undefined;
+    const owner = found ? entries.find((e) => e.themes.some((t) => t.key === found.key)) : undefined;
+    if (wanted && (!found || !owner)) {
+      issues.push(`设置里选中的插件主题「${wanted}」已经不在了，已回到内置主题`);
+      extSettings = { ...extSettings, activeTheme: "" };
+      if (paths) await saveExtSettings(extSettings, [paths.extensionsRoot]);
+    }
+    setActiveExtTheme(
+      found && owner
+        ? ({ id: found.key, name: found.title, scheme: found.scheme, css: found.css, pluginId: owner.id } satisfies ActiveExtTheme)
+        : null,
+    );
+
+    repo = {
+      loading: false,
+      appDir: paths.appDir,
+      workspaceRoot: extSettings.workspaceRoot,
+      activeTheme: extSettings.activeTheme,
+      entries,
+      issues,
+    };
     emit();
   } catch (e) {
     repo = {
       loading: false,
       appDir: paths?.appDir ?? "",
       workspaceRoot: extSettings.workspaceRoot,
+      activeTheme: extSettings.activeTheme,
       entries: [],
       issues: [...issues, `读取插件目录失败：${String((e as Error)?.message ?? e)}`],
     };
@@ -321,10 +382,36 @@ export function ensureLoaded(): Promise<void> {
  */
 export async function setWorkspaceRoot(path: string): Promise<void> {
   if (!paths) paths = await invoke<ExtPaths>("ext_paths");
-  extSettings = { workspaceRoot: path.trim() };
+  extSettings = { ...extSettings, workspaceRoot: path.trim() };
   await saveExtSettings(extSettings, [paths.extensionsRoot]);
   repo = { ...repo, workspaceRoot: extSettings.workspaceRoot };
   emit();
+}
+
+/**
+ * 读一枚主题的 CSS 并过净化器。
+ *
+ * 判据在 `themeCss.ts` 里（纯函数，可测）。这里只负责读盘与两件与文件本身有关的事：
+ * 文件在不在、有没有被截断。**净化不能省**——主题 CSS 是插件唯一能改整张界面的注入面。
+ */
+async function readThemeCss(dir: string, root: string, entry: string): Promise<ThemeCssResult> {
+  const r = await invoke<FsReadResult>("ext_fs_read", { path: `${dir}/${entry}`, roots: [root] });
+  if (!r.exists) return { issue: `缺主题文件 ${entry}` };
+  if (r.truncated) return { issue: `主题文件 ${entry} 超过 256 KiB，已拒绝（主题不该这么大）` };
+  return guardThemeCss(r.text, entry);
+}
+
+/**
+ * 选一枚插件主题来画（`key` 传空串 = 回到内置主题）。
+ *
+ * 只写账本 + 重读盘，**不直接改 DOM**：套用统一走 `applyStyleExts`（那张界面配色的唯一出口），
+ * 它是被仓库变化触发的。这样"谁在画"只有一个事实源，不会出现两处各改一半。
+ */
+export async function setActiveTheme(key: string): Promise<void> {
+  if (!paths) paths = await invoke<ExtPaths>("ext_paths");
+  extSettings = { ...extSettings, activeTheme: key.trim() };
+  await saveExtSettings(extSettings, [paths.extensionsRoot]);
+  await reload();
 }
 
 /* ============================ 装 ============================ */
