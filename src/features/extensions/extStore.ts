@@ -79,6 +79,8 @@ export interface ExtEntry {
   version: string;
   installedAt: number;
   source: ExtIndexItem["source"];
+  /** 来源（`github:owner/name`）；空 = 本地目录装的。市场那栏据此把卡片标成「已安装」。 */
+  origin?: string;
   /**
    * 用户启用了它吗。**装完是 false**：不启用的插件不进「+面板」、不许起进程。
    * 与 `verdict` 是两件事：`enabled` 是意愿，`verdict` 是"批过没有"。面板要两个都成立才出现。
@@ -319,6 +321,7 @@ export async function reload(): Promise<void> {
         installedAt: index.items[manifest.id]?.installedAt ?? 0,
         source: index.items[manifest.id]?.source ?? "import",
         enabled: index.items[manifest.id]?.enabled ?? true,
+        origin: index.items[manifest.id]?.origin,
         verdict: trustVerdict(rec, fingerprint),
         permissions: flattenPermissions(manifest),
         themes,
@@ -500,7 +503,7 @@ export async function planFolder(srcDir: string, draftId: string): Promise<Insta
  * 返回"要说给用户听但不算失败"的事实（目前一条：包里有几个符号链接被跳过）。
  * 返回**结构化数据**而不是一句话：文案要在 `.tsx` 里过 `tx()`，否则英文界面上会蹦出一句中文。
  */
-export async function commitInstall(plan: InstallPlan): Promise<InstallWarn> {
+export async function commitInstall(plan: InstallPlan, opts?: { origin?: string }): Promise<InstallWarn> {
   if (!paths) throw new Error("还没读到插件目录");
   const root = paths.extensionsRoot;
 
@@ -532,7 +535,9 @@ export async function commitInstall(plan: InstallPlan): Promise<InstallWarn> {
   const now = Date.now();
   const next = applyInstall(index ?? { version: 1, items: {} }, trust ?? { version: 1, items: {} }, plan, {
     approvedAt: now,
-    source: "local",
+    // 市场装的记 `market`，本地目录装的记 `local`——两者在列表里要能分辨
+    source: opts?.origin ? "market" : "local",
+    origin: opts?.origin,
   });
   index = next.index;
   trust = next.trust;

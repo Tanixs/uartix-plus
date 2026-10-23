@@ -228,7 +228,15 @@ describe("P99c-R2 · 索引契约 v2 与 npm 那一节", () => {
 
   it("默认白名单里现在真的有官方 registry（加域这件事得在断言里看得见）", () => {
     expect(MARKET_ALLOW_HOSTS).toContain(NPM_REGISTRY_HOST);
-    expect(MARKET_ALLOW_HOSTS).toEqual(["raw.githubusercontent.com", "github.com", "registry.npmjs.org"]);
+    // P174-A13/A14 又加了两个 GitHub 自己的域（话题检索 + 仓库归档）。
+    // 这条断言的作用就是**让每次加域都在 diff 里露出来**——所以改它必须连着理由一起改。
+    expect(MARKET_ALLOW_HOSTS).toEqual([
+      "raw.githubusercontent.com",
+      "github.com",
+      "api.github.com",
+      "codeload.github.com",
+      "registry.npmjs.org",
+    ]);
   });
 
   it("v1 信封拒得出口：说的是「过旧」，不是「这条货架没东西」", () => {

@@ -125,6 +125,8 @@ export function trustRecordFor(manifest: ExtensionManifest, grantedAt: number): 
 export interface ApplyInput {
   approvedAt: number;
   source: ExtIndexItem["source"];
+  /** 来源标记（`github:owner/name`）。只在市场那条路上给，用来把卡片标成"已安装"。 */
+  origin?: string;
 }
 
 /**
@@ -138,7 +140,7 @@ export function applyInstall(
   index: ExtIndex,
   trust: TrustBook,
   plan: InstallPlan,
-  { approvedAt, source }: ApplyInput,
+  { approvedAt, source, origin }: ApplyInput,
 ): { index: ExtIndex; trust: TrustBook } {
   const prev = index.items[plan.id];
   const item: ExtIndexItem = {
@@ -150,6 +152,8 @@ export function applyInstall(
     // **新装默认不启用**：产品流程是"安装 → 启用 → 面板才出现"。
     // 但重装/升级要保留用户原来的选择——否则每次更新都悄悄把插件关掉（或悄悄打开）。
     enabled: prev ? prev.enabled : false,
+    // 重装没有新来源就沿用旧的：不然"从市场装的"会在升级一次后变成"本地装的"
+    ...((origin ?? prev?.origin) ? { origin: origin ?? prev?.origin } : {}),
   };
   const nextIndex = upsertIndex(index, plan.id, item);
   if (!needsApproval(plan)) return { index: nextIndex, trust };

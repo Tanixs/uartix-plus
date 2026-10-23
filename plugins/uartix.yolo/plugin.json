@@ -12,7 +12,7 @@
   "permissions": {
     "fs": {
       "read": ["$WS", "$EXT:deploy"],
-      "write": ["$WS/.uartix", "$WS/datasets", "$WS/runs", "$WS/logs"]
+      "write": ["$WS/.uartix", "$WS/datasets", "$WS/runs", "$WS/logs", "$WS/models"]
     },
     "process": { "spawn": ["python"] },
     "ui": { "panel": true }

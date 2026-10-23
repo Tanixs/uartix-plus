@@ -34,6 +34,9 @@ import {
   uninstall,
 } from "./extStore";
 import { extRootKeys, extWriteRootKeys, usesWorkspace } from "./manifest";
+import { ExtMarketView } from "./ExtMarketView";
+import { cleanIncoming, commitRepoInstall, prepareRepoInstall } from "./marketClient";
+import type { GhRepo } from "./ghSearch";
 import { canStart, canStop, phaseLabel, type ExtLogLevel } from "./extRuntime";
 import { needsApproval, type InstallPlan } from "./install";
 
@@ -90,6 +93,10 @@ export function ExtManagerPanel() {
   /** 装成功但要说一句的话（目前只有"包里有符号链接被跳过"）。 */
   const [notice, setNotice] = useState<{ skippedLinks: number } | null>(null);
   const [confirmUninstall, setConfirmUninstall] = useState<string>("");
+  /** 「已安装」/「市场」：同一块面板的两个视图（弹窗会让"搜→装→批准"断成两截）。 */
+  const [view, setView] = useState<"installed" | "market">("installed");
+  /** 市场安装的待批准计划带着来源走：装完之后要把 `origin` 写进账本。 */
+  const [pendingRepo, setPendingRepo] = useState<GhRepo | null>(null);
 
   const logBox = useRef<HTMLDivElement>(null);
   const entry = useMemo(() => repo.entries.find((e) => e.id === selected) ?? null, [repo.entries, selected]);
@@ -158,6 +165,32 @@ export function ExtManagerPanel() {
     }
   }
 
+  /**
+   * 从市场装一枚仓库：下载 → 解包 → **出计划**。
+   *
+   * 这里刻意不直接 `commitInstall`：市场装的包和本地装的包在**信任**这件事上完全一样，
+   * 都要过同一张批准卡。只有"已经信任过同一份权限面"才会直接落盘。
+   */
+  async function installFromRepo(repo: GhRepo) {
+    setErr("");
+    const got = await prepareRepoInstall(repo);
+    try {
+      if (needsApproval(got.plan)) {
+        setPending(got.plan);
+        setPendingRepo(repo);
+        setView("installed");
+        setSelected(got.plan.id);
+        return;
+      }
+      const warn = await commitRepoInstall(got.plan, repo);
+      setNotice(warn);
+      setSelected(got.plan.id);
+    } finally {
+      // 装没装成，临时目录都不留（`commit` 已经把文件复制走了）
+      await cleanIncoming(got.incomingDir);
+    }
+  }
+
   /** 选目录 → 算计划 → 信任就直接装，否则顶出批准条。 */
   async function pickAndInstall() {
     setErr("");
@@ -188,10 +221,14 @@ export function ExtManagerPanel() {
     setErr("");
     setBusy("commit");
     try {
-      const warn = await commitInstall(pending);
+      // 市场来的那一份带着 `pendingRepo`：`origin` 要写进账本（列表里能看出它是从哪个仓库装的）
+      const warn = pendingRepo ? await commitRepoInstall(pending, pendingRepo) : await commitInstall(pending);
       setNotice(warn);
       setSelected(pending.id);
       setPending(null);
+      setPendingRepo(null);
+      // 批准后源目录就没用了：解出来的那一份文件已经复制进 staging
+      if (pendingRepo) await cleanIncoming(pending.srcDir);
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {
@@ -273,6 +310,26 @@ export function ExtManagerPanel() {
       >
         <span style={{ fontWeight: 600 }}>{tx("插件", "Plugins")}</span>
         <span style={{ color: "var(--text-dim)" }}>{repo.entries.length}</span>
+        {/* 两个视图：已安装 / 市场。同一块面板里切，不弹窗——"搜→装→批准"要连着做 */}
+        <div style={{ display: "flex", gap: 0, marginLeft: "var(--sp-2)" }}>
+          {(["installed", "market"] as const).map((v) => (
+            <button
+              key={v}
+              className="btn"
+              onClick={() => setView(v)}
+              style={{
+                borderColor: view === v ? "var(--accent)" : "var(--border)",
+                color: view === v ? "var(--accent)" : "var(--text-dim)",
+                borderTopRightRadius: v === "installed" ? 0 : undefined,
+                borderBottomRightRadius: v === "installed" ? 0 : undefined,
+                borderTopLeftRadius: v === "market" ? 0 : undefined,
+                borderBottomLeftRadius: v === "market" ? 0 : undefined,
+              }}
+            >
+              {v === "installed" ? tx("已安装", "Installed") : tx("市场", "Market")}
+            </button>
+          ))}
+        </div>
         <div style={{ flex: "1 1 auto" }} />
         <button className="btn" disabled={!!busy} onClick={() => void pickAndInstall()} title={tx("从一个文件夹安装（选含 plugin.json 的目录）", "Install from a folder containing plugin.json")}>
           {busy === "pick" || busy === "plan" ? tx("正在读取…", "Reading…") : tx("安装…", "Install…")}
@@ -408,7 +465,18 @@ export function ExtManagerPanel() {
         </div>
       ) : null}
 
-      <div style={{ display: "flex", flex: "1 1 auto", minHeight: 0 }}>
+      {view === "market" ? (
+        <ExtMarketView
+          installed={Object.fromEntries(
+            repo.entries
+              .filter((e) => e.origin?.startsWith("github:"))
+              .map((e) => [e.origin!.slice("github:".length), e.version]),
+          )}
+          onInstall={installFromRepo}
+        />
+      ) : null}
+
+      <div style={{ display: view === "market" ? "none" : "flex", flex: "1 1 auto", minHeight: 0 }}>
         {/* 左列：装过的插件 */}
         <div
           style={{
@@ -517,7 +585,16 @@ export function ExtManagerPanel() {
                 <button className="btn" disabled={!!busy} onClick={() => void approve()}>
                   {busy === "commit" ? tx("正在安装…", "Installing…") : tx("批准并安装", "Approve and install")}
                 </button>
-                <button className="btn" disabled={!!busy} onClick={() => setPending(null)}>
+                <button
+                  className="btn"
+                  disabled={!!busy}
+                  onClick={() => {
+                    // 取消也要清：解包出来的临时目录留着只会成为"没人会去看"的垃圾
+                    if (pendingRepo) void cleanIncoming(pending.srcDir);
+                    setPendingRepo(null);
+                    setPending(null);
+                  }}
+                >
                   {tx("取消", "Cancel")}
                 </button>
               </div>

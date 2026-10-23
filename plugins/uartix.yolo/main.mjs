@@ -668,6 +668,20 @@ function parseProgress(j, line) {
     return;
   }
 
+  // 部署（deploy.ps1）：STEP 段落 + [OK] + Done
+  if (/^\s*={4,}\s*/.test(line)) {
+    p.phase = "deploy";
+    p.stepName = line.replace(/[=\s]/g, "").slice(0, 40);
+    p.detail = p.stepName;
+    emitJob(j);
+    return;
+  }
+  if (/\[OK\]/.test(line)) {
+    p.done = Math.min((p.done || 0) + 1, 20);
+    emitJob(j);
+    return;
+  }
+
   // 训练：ultralytics 每个 epoch 一行 "  12/300  3.2G  ..."
   let m = /^\s*(\d{1,4})\/(\d{1,4})\s+\S/.exec(line);
   if (m) {
@@ -807,6 +821,201 @@ function scanDeployTool() {
   }
 }
 
+
+/* ============================ 部署（$EXT:deploy） ============================ */
+
+/**
+ * 读一份 `deploy_config*.ps1` 里的关键变量。
+ *
+ * **只取那几个 `$Xxx = "..."` 行**，不解析 PowerShell 脚本本身：那是一门完整的语言，
+ * 用正则去"理解"它迟早会把 `$Model` 读成注释里的那一句。读不准就说"没读到"，不猜。
+ */
+function readDeployConfig(name) {
+  const tool = scanDeployTool();
+  if (!tool.bound) return { ok: false, error: "还没绑外部目录 deploy：去「插件」面板顶部绑一次" };
+  if (!name) return { ok: false, error: "没有选配置文件" };
+  const p = path.join(tool.dir, name);
+  if (!fs.existsSync(p)) return { ok: false, error: `没有这个配置文件：${name}` };
+  const text = fs.readFileSync(p, "utf8");
+  const pick = (v) => {
+    // 值可能带引号也可能不带（$ImgszW = 640）。注释行以 # 开头，^\s*$ 天然不会命中它。
+    const m = new RegExp("^\\s*\\$" + v + "\\s*=\\s*(?:\"([^\"]*)\"|([^#\\r\\n]*))", "m").exec(text);
+    if (!m) return "";
+    return (m[1] !== undefined ? m[1] : String(m[2] || "").trim());
+  };
+  return {
+    ok: true,
+    name,
+    path: p,
+    model: pick("Model"),
+    modelName: pick("ModelName"),
+    imgsz: `${pick("ImgszW") || "?"}×${pick("ImgszH") || "?"}`,
+    python: pick("PythonExe"),
+    docker: pick("DockerImage"),
+  };
+}
+
+/** 工作区里最新的 `runs/<run>/weights/best.pt`（按 mtime）。 */
+function latestBest() {
+  const runs = scanRuns("runs").map((r) => {
+    const bp = path.join(root, "runs", r.name, "weights", "best.pt");
+    return { ...r, bestPath: fs.existsSync(bp) ? bp : "" };
+  });
+  const withBest = runs.filter((r) => r.bestPath);
+  let best = null;
+  for (const r of withBest) {
+    try {
+      const t = fs.statSync(r.bestPath).mtimeMs;
+      if (!best || t > best.at) best = { at: t, path: r.bestPath, run: r.name };
+    } catch {
+      /* 文件刚被删 */
+    }
+  }
+  return best;
+}
+
+/**
+ * 交付：把最新一次训练的 `best.pt` 复制到 `models/delivered/<名字>-best.pt`。
+ *
+ * 为什么不直接把 `$Model` 指向 `runs/…/weights/best.pt`：那个目录会被下一次训练覆盖。
+ * 交付的意思是**留一份**，名字固定，部署脚本与 README 都指得稳。
+ */
+function deliverBest(modelName) {
+  const best = latestBest();
+  if (!best) return { ok: false, error: "工作区里没有找到训练产物（runs/<run>/weights/best.pt）" };
+  const dstDir = abs("models/delivered");
+  fs.mkdirSync(dstDir, { recursive: true });
+  const stem = String(modelName || best.run || "model").replace(/[^\w.-]+/g, "-");
+  const dst = path.join(dstDir, `${stem}-best.pt`);
+  fs.copyFileSync(best.path, dst);
+  return { ok: true, path: dst, from: best.path, run: best.run, bytes: fs.statSync(dst).size };
+}
+
+/**
+ * 生成**包装配置**：先 dot-source 用户那份，再覆盖 `$Model` / `$ModelName`。
+ *
+ * 这样 `deploy.ps1` 的 `. $Config` 读到的是一份"用户配置 + 我们这两行"，而用户那份
+ * `deploy_config.*.ps1` **一个字节都没动**。改用户文件是这类工具最容易越界的地方：
+ * 它没有版本控制、也没有备份，改坏了用户只能自己回忆原样。
+ */
+function writeWrapper(cfgName, modelPath, modelName) {
+  const dir = path.join(root, STATE_DIR, "deploy");
+  fs.mkdirSync(dir, { recursive: true });
+  const tool = scanDeployTool();
+  const src = path.join(tool.dir, cfgName).replace(/\\/g, "/");
+  const out = path.join(dir, `auto-${String(modelName || "model").replace(/[^\w.-]+/g, "-")}.ps1`);
+  const ps = (v) => `"${String(v).replace(/"/g, '`"')}"`;
+  const text = [
+    "# 由 uartix.yolo 生成：不要手改（每次部署会覆盖）",
+    "# 先读用户那份配置（只读），再覆盖下面两行",
+    `. ${ps(src)}`,
+    "",
+    `$ModelName = ${ps(modelName)}`,
+    `$Model     = ${ps(modelPath)}`,
+    "",
+  ].join("\n");
+  fs.writeFileSync(out, text, "utf8");
+  return out;
+}
+
+/** 部署状态的快照（面板「部署」页一次拿全）。 */
+function deployState() {
+  const tool = scanDeployTool();
+  const configs = (tool.configs || []).map((c) => readDeployConfig(c));
+  const best = latestBest();
+  const dd = abs("models/delivered");
+  let delivered = [];
+  try {
+    delivered = fs
+      .readdirSync(dd)
+      .filter((f) => f.endsWith(".pt"))
+      .map((f) => {
+        const st = fs.statSync(path.join(dd, f));
+        return { name: f, bytes: st.size, at: st.mtimeMs };
+      })
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 6);
+  } catch {
+    /* 还没交付过 */
+  }
+  return {
+    tool,
+    configs,
+    latest: best ? { path: best.path, run: best.run, at: best.at } : null,
+    delivered,
+    jobs: [...jobs.values()].filter((j) => j.kind === "deploy").slice(-4).map(snapshot),
+    active: active && active.kind === "deploy" ? snapshot(active) : null,
+  };
+}
+
+/**
+ * 起一次部署。
+ *
+ * `step` 与工具自己的 `-Step` 一一对应：`validate`（只检查、不动文件）/`all`/
+ * `convert`（从已有 onnx 直接编译）/`package`（只重新打包）。
+ */
+async function deployStart(cfgName, step, opts) {
+  needWorkspace();
+  if (active) throw new Error(`已经有一个任务在跑（${active.label}）：先停掉它再开始新的`);
+  const tool = scanDeployTool();
+  if (!tool.bound) throw new Error("还没绑外部目录 deploy：去「插件」面板顶部绑一次");
+  if (!tool.ready) throw new Error(`部署工具不完整：${tool.dir} 里缺 run.bat 或 deploy_config*.ps1`);
+  const cfg = readDeployConfig(cfgName);
+  if (!cfg.ok) throw new Error(cfg.error);
+
+  const ps1 = path.join(tool.dir, "deploy.ps1");
+  if (!fs.existsSync(ps1)) throw new Error(`部署工具里没有 deploy.ps1：${tool.dir}`);
+
+  // 交付最新产物（除非用户明确说不）——"把哪个模型部署出去"必须显式，不能靠猜
+  let modelPath = cfg.model;
+  let delivered = null;
+  if (opts && opts.deliver !== false) {
+    const d = deliverBest(cfg.modelName || path.basename(cfg.name, ".ps1"));
+    if (!d.ok) throw new Error(d.error);
+    modelPath = d.path;
+    delivered = d;
+  }
+  const wrapper = writeWrapper(cfg.name, modelPath, cfg.modelName || "model");
+
+  const label = `部署 ${cfg.modelName || cfg.name}${step === "all" ? "" : `（${step}）`}`;
+  const job = newJob("deploy", label);
+  job.configPath = wrapper;
+  jobs.set(job.id, job);
+  active = job;
+
+  pushLine(job, `[工作台] 工具: ${tool.dir}`, "sys");
+  pushLine(job, `[工作台] 配置: ${cfg.name}（用户那份只读）`, "sys");
+  if (delivered) pushLine(job, `[工作台] 交付: ${delivered.path}（来自 ${delivered.run}）`, "sys");
+  pushLine(job, `[工作台] 模型: ${modelPath}`, "sys");
+  pushLine(job, `[工作台] 包装配置: ${wrapper}`, "sys");
+  job.progress.phase = step === "validate" ? "check" : "prepare";
+  job.progress.detail = step === "validate" ? "只检查环境，不动任何文件" : "准备 ONNX";
+  emitJob(job);
+
+  try {
+    const child = ctx.process.spawn({
+      cmd: "powershell",
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, "-Config", wrapper, "-Step", step],
+      cwd: tool.dir,
+      env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+      onStdout: (l) => pushLine(job, l, "out"),
+      onStderr: (l) => pushLine(job, l, "err"),
+      onExit: (code) => finishJob(job, code),
+      onError: (e) => {
+        pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
+        finishJob(job, -1);
+      },
+    });
+    job.pid = child.pid || 0;
+    job.child = child;
+  } catch (e) {
+    pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
+    finishJob(job, -1);
+    throw e;
+  }
+  return snapshot(job);
+}
+
 async function panelState() {
   if (!root) {
     // 没登记工作区时**不抛**：面板要能把"去上面选一个目录"显示出来
@@ -882,6 +1091,23 @@ async function activate(c) {
 
     async startTrain(overrides) {
       return await startJob("train", overrides || {});
+    },
+
+    /* ---- 部署（$EXT:deploy）---- */
+    async deployState() {
+      return deployState();
+    },
+
+    /** `step`：validate / all / convert / package；`opts.deliver=false` 直接用配置里那个模型。 */
+    async deployStart(cfgName, step, opts) {
+      return await deployStart(cfgName, String(step || "all"), opts || {});
+    },
+
+    /** 只交付模型、不部署（"先把产物留一份"也是常见动作）。 */
+    async deployDeliver(modelName) {
+      const r = deliverBest(modelName);
+      if (!r.ok) throw new Error(r.error);
+      return { ...r, state: deployState() };
     },
 
     async stop() {

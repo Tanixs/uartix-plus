@@ -93,7 +93,13 @@ describe("P99b-N1：不自动联网", () => {
     expect(s.status).toBe("ready");
     const call = st.invokes.find((i) => i.cmd === "market_fetch");
     // 这条按**字面清单**对：多一个域就是多一个信任面，改白名单必须在这里显式过一次手（P99c-R2 加的就是 registry）
-    expect(call?.args.allowHosts).toEqual(["raw.githubusercontent.com", "github.com", "registry.npmjs.org"]);
+    expect(call?.args.allowHosts).toEqual([
+      "raw.githubusercontent.com",
+      "github.com",
+      "api.github.com",
+      "codeload.github.com",
+      "registry.npmjs.org",
+    ]);
     expect(Number(call?.args.maxBytes)).toBeGreaterThan(1024 * 100);
   });
 });

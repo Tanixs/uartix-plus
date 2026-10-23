@@ -55,6 +55,7 @@ export function normalizeIndex(raw: unknown): { index: ExtIndex; issues: string[
       // 以及被手改成 `"false"` / `0` 这种既不是 true 也不是 false 的值，一律按启用算——
       // 静默藏掉一批在用的面板，用户只会得到"我插件呢"这一种反馈，没有任何线索。
       enabled: item.enabled !== false,
+      ...(typeof item.origin === "string" && item.origin ? { origin: item.origin } : {}),
     };
   }
   return { index: out, issues };

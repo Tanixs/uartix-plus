@@ -90,6 +90,12 @@ export interface ExtIndexItem {
    * 静默把它们藏起来比多问一次更糟）。判据在 `normalizeIndex`，不在读盘那一侧各写一份。
    */
   enabled: boolean;
+  /**
+   * 从哪来（`github:owner/name`、`url:https://…`、空 = 本地目录）。**只用于显示与对账**：
+   * "这个插件是从哪个仓库装的"是市场那栏把卡片标成「已安装」的唯一依据。
+   * 它不参与信任判定（信任只看权限面摘要）。
+   */
+  origin?: string;
 }
 
 export interface ExtIndex {

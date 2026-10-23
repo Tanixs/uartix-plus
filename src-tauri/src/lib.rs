@@ -301,6 +301,7 @@ pub fn run() {
             ext_fs::ext_paths,
             ext_fs::ext_probe_node,
             ext_fs::ext_fs_write,
+            ext_fs::ext_fs_write_b64,
             ext_fs::ext_fs_read,
             ext_fs::ext_fs_list,
             ext_fs::ext_fs_remove,

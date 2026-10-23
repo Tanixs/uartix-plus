@@ -13,6 +13,7 @@
 //! 2. **store 名字是白名单**（`index` / `trust`），不是"相对路径"。
 //!    给相对路径就等于给了"往 extensions 下任意位置写"的口子。
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Read;
@@ -109,6 +110,29 @@ pub fn ext_fs_write(path: String, content: String, roots: Vec<String>) -> Result
     }
     fs::write(&path, content.as_bytes()).map_err(|e| io_err("写文件", e))?;
     Ok(json!({ "ok": true, "bytes": content.len(), "path": path }))
+}
+
+/// 写**二进制**（base64 传入，自动建父目录）。
+///
+/// 为什么单独一条而不是把 `ext_fs_write` 放宽：那条收的是 `String`，二进制经 JSON 走一趟
+/// 会被 `from_utf8_lossy` 换掉字节——**安装时少几个字节的 png，运行时才发现图是黑的**。
+/// 文本与字节各有各的入口，谁都不去猜对方。
+#[tauri::command]
+pub fn ext_fs_write_b64(path: String, b64: String, roots: Vec<String>) -> Result<Value, String> {
+    guard(&path, &roots)?;
+    // base64 比原文大 4/3：按解码后的上限折算，别让一个 8MB 的文件被 10.7MB 的串挡在门外
+    let cap_b64 = MAX_WRITE_BYTES / 3 * 4 + 8;
+    if b64.len() > cap_b64 {
+        return Err(format!("content_too_large: {} > {cap_b64}", b64.len()));
+    }
+    let bytes = STANDARD
+        .decode(b64.trim())
+        .map_err(|e| format!("base64 解不开：{e}"))?;
+    if let Some(parent) = Path::new(&path).parent() {
+        fs::create_dir_all(parent).map_err(|e| io_err("建目录", e))?;
+    }
+    fs::write(&path, &bytes).map_err(|e| io_err("写文件", e))?;
+    Ok(json!({ "ok": true, "bytes": bytes.len(), "path": path }))
 }
 
 /// 读文本。不存在返回 `{exists:false}`（不是错误——"还没装过"是正常状态）。

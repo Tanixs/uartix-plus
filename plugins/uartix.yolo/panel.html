@@ -251,6 +251,23 @@
         background: var(--accent);
         transition: width 180ms ease;
       }
+      .cfglist { display: flex; flex-direction: column; gap: 6px; }
+      .cfgrow {
+        display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+        border: 1px solid var(--border); border-radius: var(--radius-md);
+        background: var(--bg-inset); cursor: pointer; transition: border-color 120ms ease;
+      }
+      .cfgrow:hover { border-color: var(--accent); }
+      .cfgrow.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+      .cfgrow .nm { font-weight: 600; font-family: var(--font-mono); }
+      .cfgrow .mt { color: var(--text-dim); font-size: var(--fs-xs); }
+      .cfgrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex: 0 0 auto; }
+      .cfgrow.on .dot { background: var(--accent); }
+      .deliv { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+      .deliv .pill {
+        font-family: var(--font-mono); font-size: var(--fs-xs); padding: 3px 8px;
+        border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-dim);
+      }
       #logwrap {
         flex: 0 0 34%;
         min-height: 90px;
@@ -321,6 +338,7 @@
       <button data-tab="overview" class="on">概览</button>
       <button data-tab="data">数据</button>
       <button data-tab="train">训练</button>
+      <button data-tab="deploy">部署</button>
     </nav>
 
     <main>
@@ -388,6 +406,42 @@
           这里只改**本次运行**的参数。工作区里的 <code>config.yaml</code> 不会被改写——它是你自己的
           基准，插件每次把它读出来当底、再叠上这里的改动，写到 <code>.uartix/yolo/runs/&lt;job&gt;/config.yaml</code>。
         </p>
+      </section>
+
+      <!-- ============ 部署 ============ -->
+      <section id="tab-deploy" hidden>
+        <div class="card">
+          <h2>部署工具</h2>
+          <div class="kv" id="toolkv"></div>
+          <div class="note" id="toolnote"></div>
+        </div>
+
+        <div class="card">
+          <h2>模型</h2>
+          <div class="kv" id="modelkv"></div>
+          <div class="row" style="margin-top: 10px">
+            <button class="btn" id="deliver">交到 models/delivered</button>
+            <span class="note" style="margin: 0">把最新一次训练的 best.pt 复制一份出来（部署用它，训练产物不会被改动）</span>
+          </div>
+          <div class="deliv" id="delivlist"></div>
+        </div>
+
+        <div class="card">
+          <h2>配置与执行</h2>
+          <div class="cfglist" id="cfglist"></div>
+          <div class="row" style="margin-top: 12px; flex-wrap: wrap">
+            <button class="btn" id="dep-validate" title="只检查环境与配置，不动任何文件">只检查环境</button>
+            <button class="btn primary" id="dep-all">开始部署（全流程）</button>
+            <button class="btn" id="dep-convert" title="从 work/ 里已有的 ONNX 直接编译">只编译</button>
+            <button class="btn" id="dep-package" title="只重新生成 .mud 与例程">只打包</button>
+            <button class="btn" id="dep-stop">停止</button>
+          </div>
+          <p class="note">
+            插件**不改你那份 <code>deploy_config.*.ps1</code>**：它在
+            <code>.uartix/yolo/deploy/</code> 里生成一份包装配置（先读你的，再覆盖
+            <code>$Model</code> / <code>$ModelName</code>），把包装文件传给工具。跑完的日志和训练共用下面那一栏。
+          </p>
+        </div>
       </section>
 
       <!-- ============ 训练 ============ -->
@@ -584,6 +638,135 @@
           (d.error ? "<b>读取失败</b><span>" + esc(d.error) + "</span>" : "");
       }
 
+      /* ---------------- 部署 ---------------- */
+
+      var dep = { cfg: "", state: null };
+
+      function fmtBytes(n) {
+        if (!n) return "0 B";
+        if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+        if (n > 1024) return (n / 1024).toFixed(0) + " KB";
+        return n + " B";
+      }
+
+      function fmtAgo(ms) {
+        if (!ms) return "";
+        var d = Math.floor((Date.now() - ms) / 1000);
+        if (d < 60) return d + " 秒前";
+        if (d < 3600) return Math.floor(d / 60) + " 分钟前";
+        if (d < 86400) return Math.floor(d / 3600) + " 小时前";
+        return Math.floor(d / 86400) + " 天前";
+      }
+
+      async function loadDeploy() {
+        try {
+          dep.state = await uartix.call("deployState");
+        } catch (e) {
+          dep.state = { error: String((e && e.message) || e) };
+        }
+        renderDeployPage();
+      }
+
+      function renderDeployPage() {
+        var st2 = dep.state || {};
+        var tool = st2.tool || {};
+        var configs = st2.configs || [];
+
+        // 工具
+        if (!tool.bound) {
+          $("toolkv").innerHTML =
+            '<b>状态</b><span><span class="tag warn">还没配置</span></span>' +
+            "<b>怎么配</b><span>到「插件」面板顶部的「外部目录 deploy」里选一次 maixcam2_deploy 目录</span>";
+          $("toolnote").textContent = "没有部署工具也能训练；这一页只是暂时用不了。";
+        } else {
+          $("toolkv").innerHTML =
+            "<b>目录</b><span>" + esc(tool.dir) + "</span>" +
+            "<b>run.bat</b><span>" + (tool.runBat ? '<span class="tag ok">在</span>' : '<span class="tag warn">没找到</span>') + "</span>" +
+            "<b>配置文件</b><span>" + esc((tool.configs || []).join(" / ") || "(没有)") + "</span>" +
+            "<b>可否部署</b><span>" + (tool.ready ? '<span class="tag ok">可以</span>' : '<span class="tag warn">还不行</span>') + "</span>" +
+            (tool.error ? "<b>读取失败</b><span>" + esc(tool.error) + "</span>" : "");
+          $("toolnote").textContent = tool.ready
+            ? ""
+            : "工具目录里缺 run.bat 或 deploy_config*.ps1——插件不猜路径，缺什么就说什么。";
+        }
+
+        // 模型
+        var latest = st2.latest;
+        $("modelkv").innerHTML = latest
+          ? '<b>最新训练产物</b><span>' + esc(latest.path) + "</span>" +
+            "<b>来自</b><span>" + esc(latest.run) + " · " + fmtAgo(latest.at) + "</span>"
+          : '<b>最新训练产物</b><span><span class="tag warn">还没有</span> 先在上面把训练跑起来</span>';
+        $("deliver").disabled = !latest;
+        var dl = st2.delivered || [];
+        $("delivlist").innerHTML = dl.length
+          ? dl.map(function (d) {
+              return '<span class="pill" title="' + esc(fmtBytes(d.bytes)) + '">' + esc(d.name) + "</span>";
+            }).join("")
+          : '<span class="note" style="margin:0">还没交付过模型</span>';
+
+        // 配置列表
+        if (!configs.length) {
+          $("cfglist").innerHTML = '<div class="note" style="margin:0">没有可用的配置文件。</div>';
+        } else {
+          if (!dep.cfg || !configs.some(function (c) { return c.name === dep.cfg; })) dep.cfg = configs[0].name;
+          $("cfglist").innerHTML = configs.map(function (c) {
+            var on = c.name === dep.cfg;
+            return (
+              '<div class="cfgrow' + (on ? " on" : "") + '" data-cfg="' + esc(c.name) + '">' +
+                '<span class="dot"></span>' +
+                '<span class="nm">' + esc(c.name) + "</span>" +
+                '<span class="mt">' + esc(c.modelName || "(无 $ModelName)") + " · " + esc(c.imgsz) + " · " + esc(c.docker || "-") + "</span>" +
+                '<span style="flex:1 1 auto"></span>' +
+                (c.ok === false ? '<span class="tag warn">' + esc(c.error || "读不出") + "</span>" : "") +
+              "</div>"
+            );
+          }).join("");
+          var rows = $("cfglist").querySelectorAll(".cfgrow");
+          for (var i = 0; i < rows.length; i++) {
+            rows[i].onclick = function () {
+              dep.cfg = this.getAttribute("data-cfg");
+              renderDeployPage();
+            };
+          }
+        }
+
+        var running = !!(st2.active && st2.active.state === "running");
+        ["dep-validate", "dep-all", "dep-convert", "dep-package", "deliver"].forEach(function (id) {
+          var el = $(id);
+          if (el) el.disabled = running || (id !== "deliver" && !tool.ready);
+        });
+      }
+
+      async function runDeploy(step) {
+        if (!dep.cfg) return;
+        sysLog("部署开始（" + step + "）：" + dep.cfg);
+        try {
+          var job = await uartix.call("deployStart", dep.cfg, step, { deliver: step !== "validate" });
+          renderJob(job);
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+        }
+        loadDeploy();
+      }
+
+      $("deliver").onclick = async function () {
+        try {
+          var r = await uartix.call("deployDeliver", "");
+          sysLog("已交付：" + r.path);
+          dep.state = r.state;
+          renderDeployPage();
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+        }
+      };
+      $("dep-validate").onclick = function () { runDeploy("validate"); };
+      $("dep-all").onclick = function () { runDeploy("all"); };
+      $("dep-convert").onclick = function () { runDeploy("convert"); };
+      $("dep-package").onclick = function () { runDeploy("package"); };
+      $("dep-stop").onclick = async function () {
+        try { await uartix.call("stop"); } catch (e) { /* 没在跑 */ }
+      };
+
       function renderDataset() {
         var d = st.dataset || {};
         var eff = st.config.effective || {};
@@ -755,6 +938,7 @@
       });
       uartix.on("job", function (j) {
         if (!j) return;
+        if (j.kind === "deploy") loadDeploy();
         renderJob(j);
         if (j.state !== "running" && !j._doneShown) {
           j._doneShown = true;
@@ -768,6 +952,7 @@
       for (var i = 0; i < tabs.length; i++) {
         tabs[i].onclick = function () {
           var name = this.getAttribute("data-tab");
+          if (name === "deploy") loadDeploy();
           for (var k = 0; k < tabs.length; k++) tabs[k].className = tabs[k].getAttribute("data-tab") === name ? "on" : "";
           $("tab-overview").hidden = name !== "overview";
           $("tab-data").hidden = name !== "data";

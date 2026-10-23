@@ -340,7 +340,7 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
     expect(m.id).toBe("uartix.yolo");
     expect(m.contributes.panels?.[0]).toEqual({ id: "train", title: "YOLO 训练", entry: "panel.html" });
     // 要写工作区里的四个位置，一个都不能少（少了就是运行时才炸的 EACCES）
-    expect(m.permissions.fs.write).toEqual(["$WS/.uartix", "$WS/datasets", "$WS/runs", "$WS/logs"]);
+    expect(m.permissions.fs.write).toEqual(["$WS/.uartix", "$WS/datasets", "$WS/runs", "$WS/logs", "$WS/models"]);
     expect(existsSync(path.join(PLUGIN_SRC, m.main))).toBe(true);
     expect(existsSync(path.join(PLUGIN_SRC, m.contributes.panels[0].entry))).toBe(true);
   }, 20_000);
@@ -472,6 +472,76 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
  * 绑了就得报出 `run.bat` 与配置文件名。这条断了的表现是"面板上部署那块永远是'还没配置'",
  * 而用户明明绑了目录。
  */
+/**
+ * P174-A15：部署页的服务端（插件侧）。
+ *
+ * 不在这里真跑工具（那要 Docker + pulsar2 镜像，且会动用户的 work/out 目录）。
+ * 钉的是三件**能在没有环境时验的事**：
+ * 1. 配置读得出来（`$Model` / `$ModelName` / 尺寸 / Docker 镜像）；
+ * 2. 没有交付产物时 `deployDeliver` 说人话，而不是抛一个空路径；
+ * 3. 没绑工具时 `deployStart` 明确拒（不猜路径——猜错的形态是"部署到别人的目录里"）。
+ */
+describe("P174-A15 · 部署页的插件侧", () => {
+  function toolDir(tag) {
+    const d = path.join(dir, `deploy-${tag}`);
+    mkdirSync(d, { recursive: true });
+    writeFileSync(path.join(d, "run.bat"), "@echo off\r\n", "utf8");
+    writeFileSync(
+      path.join(d, "deploy_config.digits.ps1"),
+      [
+        '# 注释里的 $Model = "D:/should/not/be/read"',
+        '$Model = "D:/YOLO-Workspace/models/delivered/yolo11n-seg-digits-best.pt"',
+        '$ModelName = "yolo11n-seg-digits"',
+        "$ImgszW = 640",
+        "$ImgszH = 480",
+        '$DockerImage = "pulsar2:4.0"',
+      ].join("\n"),
+      "utf8",
+    );
+    return d;
+  }
+
+  it("deployState 读得出配置：取真正那一行，不取注释里那句", async () => {
+    const ws = makeWorkspace("deploy-state");
+    const pluginDir = copyPlugin("deploy-state");
+    const p = startPlugin(pluginDir, ws, { deploy: toolDir("state") });
+    await p.ready;
+    const st = await p.call("panel.train.deployState", {});
+    expect(st.tool.ready, JSON.stringify(st.tool)).toBe(true);
+    expect(st.configs).toHaveLength(1);
+    expect(st.configs[0].model).toBe("D:/YOLO-Workspace/models/delivered/yolo11n-seg-digits-best.pt");
+    expect(st.configs[0].modelName).toBe("yolo11n-seg-digits");
+    expect(st.configs[0].imgsz).toBe("640×480");
+    expect(st.configs[0].docker).toBe("pulsar2:4.0");
+    // 没有训练产物 ⇒ latest 为 null（界面据此把"交付"按钮置灰，而不是点了才报错）
+    expect(st.latest).toBeNull();
+    expect(st.delivered).toEqual([]);
+    p.child.stdin.end();
+    await p.done;
+  }, 30_000);
+
+  it("没有训练产物时交付 → 一句人话；没绑工具时部署 → 明确拒", async () => {
+    const ws = makeWorkspace("deploy-neg");
+    const pluginDir = copyPlugin("deploy-neg");
+    const p = startPlugin(pluginDir, ws, {});
+    await p.ready;
+
+    const miss = await p.call("panel.train.deployState", {});
+    expect(miss.tool.bound).toBe(false);
+
+    // 没绑工具：deployStart 要拒，而不是拿空路径去起进程
+    const err = await p.call("panel.train.deployStart", "x.ps1", "validate", {}).then(
+      () => null,
+      (e) => String(e.message || e),
+    );
+    expect(err, "没绑外部目录时 deployshould 被拒").toBeTruthy();
+    expect(err).toContain("deploy");
+
+    p.child.stdin.end();
+    await p.done;
+  }, 30_000);
+});
+
 describe("P174-A11 · 外部目录递进真插件", () => {
   it("没绑 ⇒ deploy.bound = false（插件照常启动，训练不受影响）", async () => {
     const ws = makeWorkspace("deploy-none");
