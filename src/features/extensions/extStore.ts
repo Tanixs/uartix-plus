@@ -1,5 +1,5 @@
 /**
- * P174-A6：扩展仓库的前端 IO 层（读盘、装、卸、跑）。
+ * P174-A6：插件仓库的前端 IO 层（读盘、装、卸、跑）。
  *
  * 分工仍然和 A5 一样：
  * - 纯判据在 `install.ts` / `repo.ts` / `manifest.ts`（可单测）；
@@ -59,7 +59,7 @@ import {
   type ExtPhase,
 } from "./extRuntime";
 
-/** 一个已安装的扩展：**账本上的事实**（装在哪、批过什么）+ **运行时状态**（在不在跑、日志）。 */
+/** 一个已安装的插件：**账本上的事实**（装在哪、批过什么）+ **运行时状态**（在不在跑、日志）。 */
 export interface ExtEntry {
   id: string;
   manifest: ExtensionManifest;
@@ -81,7 +81,7 @@ export interface ExtEntry {
 export interface ExtRepo {
   loading: boolean;
   appDir: string;
-  /** 工作区根（`$WS`）；空串 = 没登记。面板要据此提示"某个扩展需要它"。 */
+  /** 工作区根（`$WS`）；空串 = 没登记。面板要据此提示"某个插件需要它"。 */
   workspaceRoot: string;
   entries: ExtEntry[];
   /** 读盘过程中发现的问题（坏清单、悬空目录、账本损坏…）。**不吞**，面板上要能看见。 */
@@ -128,9 +128,9 @@ let trust: TrustBook | null = null;
 const tokens = new Map<string, string>();
 
 /**
- * 在途 RPC。键是宿主自己生成的 id（不是扩展给的），值带一个超时定时器。
+ * 在途 RPC。键是宿主自己生成的 id（不是插件给的），值带一个超时定时器。
  *
- * 为什么要超时：`call` 发出去之后，扩展可能因为死循环、等一个永不返回的 Promise、
+ * 为什么要超时：`call` 发出去之后，插件可能因为死循环、等一个永不返回的 Promise、
  * 或者干脆崩了而永远不回 `result`。没有定时器的话，面板上的那一次点击就永远转圈，
  * 而且**看不出是插件的问题还是界面的问题**。
  */
@@ -138,13 +138,13 @@ interface PendingCall {
   res: (v: unknown) => void;
   rej: (e: Error) => void;
   timer: number;
-  /** 谁发的：进程退出时要按 handle 把它的在途调用单独拒掉，不能一锅端（别的扩展还在跑）。 */
+  /** 谁发的：进程退出时要按 handle 把它的在途调用单独拒掉，不能一锅端（别的插件还在跑）。 */
   handle: string;
 }
 const pending = new Map<string, PendingCall>();
 let callSeq = 0;
 
-/** 面板事件订阅（扩展 `ctx.panels.emit` 的另一端）。 */
+/** 面板事件订阅（插件 `ctx.panels.emit` 的另一端）。 */
 export interface PanelEvent {
   extId: string;
   panelId: string;
@@ -160,7 +160,7 @@ export function onPanelEvent(cb: PanelEventCb): () => void {
 }
 
 let repo: ExtRepo = { loading: true, appDir: "", workspaceRoot: "", entries: [], issues: [] };
-/** 扩展子系统自己的设置（目前只有工作区根）。 */
+/** 插件子系统自己的设置（目前只有工作区根）。 */
 let extSettings: ExtSettings = emptyExtSettings();
 const subs = new Set<() => void>();
 const unlisteners: UnlistenFn[] = [];
@@ -205,16 +205,16 @@ export function getEntry(id: string): ExtEntry | undefined {
 
 /* ============================ 读盘 ============================ */
 
-/** 把 `<root>/<id>/extension.json` 读出来并校验。返回的 issues 由调用方合并（不静默丢）。 */
+/** 把 `<root>/<id>/plugin.json` 读出来并校验。返回的 issues 由调用方合并（不静默丢）。 */
 async function readManifestOf(dir: string, root: string): Promise<{ manifest?: ExtensionManifest; issue?: string }> {
-  const r = await invoke<FsReadResult>("ext_fs_read", { path: `${dir}/extension.json`, roots: [root] });
-  if (!r.exists) return { issue: "缺 extension.json（不是扩展目录）" };
-  if (r.truncated) return { issue: "extension.json 超过 256 KiB，已拒绝解析" };
+  const r = await invoke<FsReadResult>("ext_fs_read", { path: `${dir}/plugin.json`, roots: [root] });
+  if (!r.exists) return { issue: "缺 plugin.json（不是插件目录）" };
+  if (r.truncated) return { issue: "plugin.json 超过 256 KiB，已拒绝解析" };
   let raw: unknown;
   try {
     raw = JSON.parse(r.text);
   } catch {
-    return { issue: "extension.json 不是合法 JSON" };
+    return { issue: "plugin.json 不是合法 JSON" };
   }
   const v = validateExtension(raw);
   if (!v.ok) return { issue: v.errors[0] ?? "清单校验失败" };
@@ -225,7 +225,7 @@ async function readManifestOf(dir: string, root: string): Promise<{ manifest?: E
  * 重新读一遍整个仓库（磁盘是唯一真相）。
  *
  * 顺序刻意是"先列目录、再读每份清单、最后读两本账"：
- * 账本只用来补 `installedAt`/`source`/`verdict`，**不是**"有哪些扩展"的来源。
+ * 账本只用来补 `installedAt`/`source`/`verdict`，**不是**"有哪些插件"的来源。
  * 反过来相信账本的后果是：用户手工删了目录，界面上还留着一个点了就报错的条目。
  */
 export async function reload(): Promise<void> {
@@ -301,7 +301,7 @@ export async function reload(): Promise<void> {
       appDir: paths?.appDir ?? "",
       workspaceRoot: extSettings.workspaceRoot,
       entries: [],
-      issues: [...issues, `读取扩展目录失败：${String((e as Error)?.message ?? e)}`],
+      issues: [...issues, `读取插件目录失败：${String((e as Error)?.message ?? e)}`],
     };
     emit();
   }
@@ -340,7 +340,7 @@ export async function planFolder(srcDir: string, draftId: string): Promise<Insta
     paths = await invoke<ExtPaths>("ext_paths");
   }
   const { manifest, issue } = await readManifestOf(srcDir, srcDir);
-  if (!manifest) throw new Error(`这个目录不能当扩展装：${issue ?? "清单读不出来"}`);
+  if (!manifest) throw new Error(`这个目录不能当插件装：${issue ?? "清单读不出来"}`);
   if (!trust) {
     const r = await loadTrust([paths.extensionsRoot]);
     trust = r.trust;
@@ -359,7 +359,7 @@ export async function planFolder(srcDir: string, draftId: string): Promise<Insta
  * 返回**结构化数据**而不是一句话：文案要在 `.tsx` 里过 `tx()`，否则英文界面上会蹦出一句中文。
  */
 export async function commitInstall(plan: InstallPlan): Promise<InstallWarn> {
-  if (!paths) throw new Error("还没读到扩展目录");
+  if (!paths) throw new Error("还没读到插件目录");
   const root = paths.extensionsRoot;
 
   const copied = await invoke<{ files: number; bytes: number; skippedLinks: number }>("ext_copy_dir", {
@@ -405,11 +405,11 @@ export async function commitInstall(plan: InstallPlan): Promise<InstallWarn> {
  * 卸载：先停进程（它可能正在写状态），再删目录，再摘账本。
  *
  * 顺序反了会怎样：进程还活着、目录已经没了 ⇒ 插件下一次写文件失败，那条错误出现在
- * 一个"已经卸载"的扩展的日志里，而面板上它已经消失了——没人能看见那条日志。
+ * 一个"已经卸载"的插件的日志里，而面板上它已经消失了——没人能看见那条日志。
  */
 export async function uninstall(id: string): Promise<void> {
   const e = getEntry(id);
-  if (!paths) throw new Error("还没读到扩展目录");
+  if (!paths) throw new Error("还没读到插件目录");
   const root = paths.extensionsRoot;
   if (e && canStop(e.phase)) await stop(id);
 
@@ -424,15 +424,15 @@ export async function uninstall(id: string): Promise<void> {
 }
 
 /**
- * 批准一个**已经在磁盘上**的扩展。
+ * 批准一个**已经在磁盘上**的插件。
  *
  * 只有一条路径会用到这里：包是手工放进 `extensions/` 的，或者上一次安装崩在了中间。
  * 正常安装走的是 `commitInstall`——它在提升之后立刻写信任账，所以装完就是 trusted。
  */
 export async function approve(id: string): Promise<void> {
   const e = getEntry(id);
-  if (!e) throw new Error(`没有这个扩展：${id}`);
-  if (!paths) throw new Error("还没读到扩展目录");
+  if (!e) throw new Error(`没有这个插件：${id}`);
+  if (!paths) throw new Error("还没读到插件目录");
   const cur = trust ?? emptyTrust();
   const rec = trustRecordFor(e.manifest, Date.now());
   const next: TrustBook = { version: REPO_VERSION, items: { ...cur.items, [id]: rec } };
@@ -533,7 +533,7 @@ export async function start(id: string): Promise<void> {
   // 但"磁盘上直接躺着一个包"这条路绕过了安装——信任模型必须在**启动**这一层再拦一次，
   // 否则它就只是安装向导里的一个装饰。
   if (cur.verdict !== "trusted") {
-    const msg = "这个扩展的权限还没批准：在右侧点「批准」之后才能启动";
+    const msg = "这个插件的权限还没批准：在右侧点「批准」之后才能启动";
     patch(id, { phase: nextPhase(cur.phase, { type: "failed", error: msg }), error: msg });
     log(id, { at: Date.now(), level: "warn", text: msg });
     return;
@@ -655,10 +655,10 @@ function rejectPendingOf(handle: string, why: string): void {
 }
 
 /**
- * 调扩展注册的方法（`ctx.commands.register` 或 `ctx.panels.register` 的处理器）。
+ * 调插件注册的方法（`ctx.commands.register` 或 `ctx.panels.register` 的处理器）。
  *
  * 面板传进来的是 `panel.<panelId>.<method>`，命令是 `command.<id>`——前缀由**调用方**拼，
- * 这里不做猜测：拼错的后果是扩展侧一句 `not_found`，比宿主瞎猜一个方法名好查。
+ * 这里不做猜测：拼错的后果是插件侧一句 `not_found`，比宿主瞎猜一个方法名好查。
  */
 export async function callExt(
   handle: string,
@@ -667,9 +667,9 @@ export async function callExt(
   timeoutMs = RPC_TIMEOUT_MS,
 ): Promise<unknown> {
   const e = getEntry(handle);
-  if (!e) throw Object.assign(new Error(`没有这个扩展：${handle}`), { code: "not_found" });
+  if (!e) throw Object.assign(new Error(`没有这个插件：${handle}`), { code: "not_found" });
   if (e.phase !== "running") {
-    throw Object.assign(new Error("扩展还没在运行：先启动它"), { code: "unsupported" });
+    throw Object.assign(new Error("插件还没在运行：先启动它"), { code: "unsupported" });
   }
   await ensureListeners();
   const id = `c${(++callSeq).toString(36)}`;
@@ -706,7 +706,7 @@ async function resolveInExt(handle: string, rel: string): Promise<string | null>
 export async function readInExt(handle: string, rel: string): Promise<string> {
   const abs = await resolveInExt(handle, rel);
   if (!abs) throw Object.assign(new Error(`路径越界或非法：${rel}`), { code: "denied" });
-  if (!paths) throw new Error("还没读到扩展目录");
+  if (!paths) throw new Error("还没读到插件目录");
   const r = await invoke<{ exists: boolean; text: string; truncated: boolean }>("ext_fs_read", {
     path: abs,
     roots: [paths.extensionsRoot],
@@ -718,14 +718,14 @@ export async function readInExt(handle: string, rel: string): Promise<string> {
 export async function writeInExt(handle: string, rel: string, content: string): Promise<void> {
   const abs = await resolveInExt(handle, rel);
   if (!abs) throw Object.assign(new Error(`路径越界或非法：${rel}`), { code: "denied" });
-  if (!paths) throw new Error("还没读到扩展目录");
+  if (!paths) throw new Error("还没读到插件目录");
   await invoke("ext_fs_write", { path: abs, content, roots: [paths.extensionsRoot] });
 }
 
 export async function listInExt(handle: string, rel: string): Promise<{ name: string; dir: boolean }[]> {
   const abs = await resolveInExt(handle, rel);
   if (!abs) throw Object.assign(new Error(`路径越界或非法：${rel}`), { code: "denied" });
-  if (!paths) throw new Error("还没读到扩展目录");
+  if (!paths) throw new Error("还没读到插件目录");
   const r = await invoke<{ exists: boolean; items: { name: string; dir: boolean }[] }>("ext_fs_list", {
     dir: abs,
     roots: [paths.extensionsRoot],

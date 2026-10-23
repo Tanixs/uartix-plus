@@ -56,7 +56,7 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     orchestrator: pick("自动编排器", "Orchestrator"),
     vdev: pick("虚拟设备工坊", "Virtual Devices"),
     sendbuild: pick("TX组帧台", "TX Frame Builder"),
-    extruntime: pick("扩展", "Extensions"),
+    extruntime: pick("插件", "Plugins"),
   };
 };
 
@@ -68,7 +68,7 @@ export function panelTitleOf(id: string): string {
     const v = parsePanelViewId(id);
     const e = v ? getExtRepo().entries.find((x) => x.id === v.extId) : undefined;
     const d = e?.manifest.contributes.panels?.find((x) => x.id === v?.panelId);
-    return d?.title ?? tx("扩展面板", "Extension panel");
+    return d?.title ?? tx("插件面板", "Plugin panel");
   }
   if (id.startsWith("ext-panel-")) {
     const ext = getExt(id.slice("ext-panel-".length));

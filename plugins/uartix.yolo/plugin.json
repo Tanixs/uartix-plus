@@ -1,5 +1,5 @@
 {
-  "format": "uartix-extension",
+  "format": "uartix-plugin",
   "schemaVersion": 3,
   "id": "uartix.yolo",
   "version": "0.1.0",

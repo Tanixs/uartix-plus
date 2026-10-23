@@ -1,5 +1,8 @@
 /**
- * P174-A：`uartix-extension`（schemaVersion 3）清单定义与校验器。
+ * P174：**插件清单**（`uartix-plugin` / schemaVersion 3）的定义与校验器。
+ *
+ * 名字沿用 `uartix-plugin` 而不另起一个：这是**同一个插件系统的第 3 版**，不是并列的第二套东西。
+ * v1/v2 一律按"旧版插件"拒绝（`isLegacyPackage`），提示用户让 AI 按 v3 重新生成。
  *
  * 为什么单独一份、而不是在 `pluginManifest.ts` 上改：旧格式（`uartix-plugin` s2）是
  * **声明式配置**，新格式是**代码插件**，两者的必填项、限额、校验判据几乎不重叠
@@ -16,8 +19,11 @@
  */
 
 /** 新格式的标识与版本。名字与旧格式刻意不同，避免"schemaVersion 看懂就以为兼容"。 */
-export const EXT_FORMAT = "uartix-extension";
+export const EXT_FORMAT = "uartix-plugin";
 export const EXT_SCHEMA_VERSION = 3;
+
+/** 清单文件名。v3 起叫 `plugin.json`（旧版的 `extension.json` 不再读）。 */
+export const MANIFEST_FILE = "plugin.json";
 /** 旧格式标识，仅用于给出「格式已废弃」这句人话。 */
 export const LEGACY_PLUGIN_FORMAT = "uartix-plugin";
 export const LEGACY_PLUGIN_SCHEMA = 2;
@@ -33,13 +39,16 @@ export const EXT_LIMITS = {
   fileBytes: 8 * 1024 * 1024,
   /** 目录里文件数上限（`node_modules` 会很快吃掉它，所以给了 2000）。 */
   files: 2000,
-  /** `contributes.settings` 字段数。旧格式是 16，代码插件放宽到 64。 */
-  settingsFields: 64,
-  panels: 16,
-  commands: 64,
-  sections: 32,
-  mutations: 16,
-  secrets: 8,
+  /**
+   * 下面这几条**不是权限**，只是"一个插件声明几百枚面板"这种明显是生成事故的保护线。
+   * 数值给得比现实需要宽得多：能力面已经放开，别在这里重新长出限制。
+   */
+  settingsFields: 256,
+  panels: 64,
+  commands: 256,
+  sections: 256,
+  mutations: 128,
+  secrets: 64,
 } as const;
 
 /**
@@ -175,12 +184,16 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
  * 旧格式识别。**先于一切其他校验**：否则旧包会先撞上"缺 main"之类的错，
  * 用户看到的是"你少写了个字段"，而真相是"这个格式整个不做数了"。
  */
+/**
+ * 旧版插件：**同一个格式名、版本不是 3**。
+ *
+ * 与 A2 那版判据的区别：那时新旧是两个格式名（`uartix-extension` vs `uartix-plugin`），
+ * 于是"插件"这个词在代码里指两样东西。现在只有一个格式名，版本才是分界线——
+ * 这样 `format` 永远读作"这是 uartix 插件"，`schemaVersion` 才说"哪一代"。
+ */
 export function isLegacyPackage(raw: unknown): boolean {
   if (!isPlainObject(raw)) return false;
-  return (
-    raw.format === LEGACY_PLUGIN_FORMAT ||
-    (raw.schemaVersion === LEGACY_PLUGIN_SCHEMA && raw.format !== EXT_FORMAT)
-  );
+  return raw.format === LEGACY_PLUGIN_FORMAT && raw.schemaVersion !== EXT_SCHEMA_VERSION;
 }
 
 export function rejectLegacy(): ExtValidation {
@@ -188,9 +201,10 @@ export function rejectLegacy(): ExtValidation {
     ok: false,
     legacy: true,
     errors: [
-      "这是旧格式插件（uartix-plugin / schemaVersion 2），新版本已不再支持。" +
-        "它的功能已由 uartix-extension 覆盖：请从市场重新安装，或让 AI 助手按新格式重新生成。" +
-        "原文件仍可导出，不会自动删除。",
+      "这是旧版插件（uartix-plugin / schemaVersion 1 或 2），不再支持：当前只认 schemaVersion 3。" +
+        "v3 是代码插件（plugin.json + main.mjs + 可选面板 HTML），能力面覆盖旧版并更宽：" +
+        "请让 AI 助手按 v3 重新生成，或用插件市场里同功能的新版。" +
+        "原文件仍在磁盘上，不会自动删除。",
     ],
     warnings: [],
   };
@@ -567,7 +581,7 @@ export function validateExtension(raw: unknown): ExtValidation {
     out.errors.push(`清单本体 ${bytes} 字节，超过 1 MiB（清单不该塞代码或图片）`);
   }
   if (raw.format !== EXT_FORMAT) {
-    out.errors.push(`format 必须是 "${EXT_FORMAT}"（旧格式 "${LEGACY_PLUGIN_FORMAT}" 已废弃）`);
+    out.errors.push(`format 必须是 "${EXT_FORMAT}"（同一个格式名，版本由 schemaVersion 决定；当前为 3）`);
   }
   if (raw.schemaVersion !== EXT_SCHEMA_VERSION) {
     out.errors.push(`schemaVersion 必须是 ${EXT_SCHEMA_VERSION}`);

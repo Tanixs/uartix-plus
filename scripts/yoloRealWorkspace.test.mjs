@@ -53,7 +53,7 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
     async () => {
       const pluginDir = path.join(dir, "uartix.yolo");
       mkdirSync(pluginDir, { recursive: true });
-      for (const f of ["extension.json", "main.mjs", "panel.html"]) {
+      for (const f of ["plugin.json", "main.mjs", "panel.html"]) {
         writeFileSync(path.join(pluginDir, f), readFileSync(path.join(PLUGIN_SRC, f), "utf8"), "utf8");
       }
       const boot = path.join(dir, "bootstrap.mjs");

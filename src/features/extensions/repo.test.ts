@@ -31,7 +31,7 @@ const APP = "C:\\Users\\x\\AppData\\Roaming\\uartix";
 
 function manifest(over: Record<string, unknown> = {}): ExtensionManifest {
   const r = validateExtension({
-    format: "uartix-extension",
+    format: "uartix-plugin",
     schemaVersion: 3,
     id: "user.yolo.workbench",
     version: "1.0.0",

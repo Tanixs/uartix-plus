@@ -17,7 +17,7 @@ export const PANEL_GROUPS = [
   { key: "visual", zh: "可视化", en: "Visualization", ids: ["table", "plot2d", "spectrum", "view3d", "plot3d", "metrics"] },
   { key: "auto", zh: "测试与自动化", en: "Test & automation", ids: ["sequencer", "sentinel", "orchestrator"] },
   { key: "ai", zh: "AI 与探索", en: "AI & discovery", ids: ["ai", "xray"] },
-  { key: "extensions", zh: "扩展", en: "Extensions", ids: ["extruntime"] },
+  { key: "extensions", zh: "插件", en: "Plugins", ids: ["extruntime"] },
 ] as const satisfies readonly PanelGroup[];
 
 type GroupedPanelId = (typeof PANEL_GROUPS)[number]["ids"][number];

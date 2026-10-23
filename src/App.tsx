@@ -893,7 +893,7 @@ export default function App() {
                 </optgroup>
               )}
               {extViewPanels.length > 0 && (
-                <optgroup label={tx("扩展面板", "Extension panels")}>
+                <optgroup label={tx("插件面板", "Plugin panels")}>
                   {extViewPanels.map((p) => (
                     <option key={p.viewId} value={p.viewId}>
                       {p.title}

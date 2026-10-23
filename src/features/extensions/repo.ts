@@ -1,5 +1,5 @@
 /**
- * P174-A2：扩展仓库的**布局与信任判定**。
+ * P174-A2：插件仓库的**布局与信任判定**。
  *
  * 这里一行磁盘 IO 都没有，全是纯函数。理由：这两件事是"判据"，而判据要能被单测钉住；
  * 真正读写的部分在 Rust（`ext_*` 命令），它只负责"把我说好的路径读出来/写进去"。
@@ -19,7 +19,7 @@ export const INDEX_FILE = "index.json";
 export const TRUST_FILE = "trust.json";
 export const STAGING_DIR = "staging";
 
-/** 扩展根目录。`appDir` 由 Rust 给（`%APPDATA%` 下那一层）。 */
+/** 插件根目录。`appDir` 由 Rust 给（`%APPDATA%` 下那一层）。 */
 export function extensionsRoot(appDir: string): string {
   return `${trimSlash(appDir)}/extensions`;
 }

@@ -206,7 +206,7 @@ describe("P174-A · 变量展开", () => {
 describe("P174-A8 · 谁需要工作区根", () => {
   const m = (permissions: Record<string, unknown>) =>
     validateExtension({
-      format: "uartix-extension",
+      format: "uartix-plugin",
       schemaVersion: 3,
       id: "a.b",
       version: "1.0.0",

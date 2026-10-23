@@ -105,7 +105,7 @@ export function planInstall(input: PlanInput): InstallPlan {
 }
 
 /**
- * 给"磁盘上已经有、但没批准过"的扩展补一条信任记录。
+ * 给"磁盘上已经有、但没批准过"的插件补一条信任记录。
  *
  * 为什么需要它：批准原来只发生在**安装**那一刻（`commitInstall` 写信任账）。于是有两种东西
  * 会永久卡在"未批准"——手工放进 `extensions/` 的包、以及装到一半崩掉留下的半成品。

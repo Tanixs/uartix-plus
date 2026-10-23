@@ -23,7 +23,7 @@ const APP = "C:/Users/u/AppData/Roaming/uartix";
 
 function manifest(over: Record<string, unknown> = {}): ExtensionManifest {
   const r = validateExtension({
-    format: "uartix-extension",
+    format: "uartix-plugin",
     schemaVersion: 3,
     id: "demo.tool",
     version: "1.0.0",

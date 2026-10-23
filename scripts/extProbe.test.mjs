@@ -61,8 +61,8 @@ function writePlugin(pluginDir) {
     "utf8",
   );
   writeFileSync(
-    path.join(pluginDir, "extension.json"),
-    JSON.stringify({ format: "uartix-extension", schemaVersion: 3, id: "probe.hello", version: "1.0.0", name: "probe", main: "main.mjs" }),
+    path.join(pluginDir, "plugin.json"),
+    JSON.stringify({ format: "uartix-plugin", schemaVersion: 3, id: "probe.hello", version: "1.0.0", name: "probe", main: "main.mjs" }),
     "utf8",
   );
 }
@@ -244,7 +244,7 @@ const EXAMPLE_DIR = path.join(HERE, "..", "examples", "extensions", "uartix.hell
 
 describe("P174-A6 · 仓库示例包在真引导脚本里跑通", () => {
   it("清单合法 → activate 输出工作区 → 心跳到达 → dispose 报总数", async () => {
-    const manifestRaw = readFileSync(path.join(EXAMPLE_DIR, "extension.json"), "utf8");
+    const manifestRaw = readFileSync(path.join(EXAMPLE_DIR, "plugin.json"), "utf8");
     const v = validateExtension(JSON.parse(manifestRaw));
     // 示例包自己都不合法，就没有说服力——而且这里红的时候信息很清楚："示例坏了"，
     // 不是"某个用户的包装不上"。
@@ -356,7 +356,7 @@ describe("P174-A6 · 仓库示例包在真引导脚本里跑通", () => {
  */
 describe("P174-A7 · 面板 RPC 在真进程上走通", () => {
   it("panel.<id>.<method> 拿得到结果；未知方法得 not_found；emit 带 panelId 回来", async () => {
-    const manifestRaw = readFileSync(path.join(EXAMPLE_DIR, "extension.json"), "utf8");
+    const manifestRaw = readFileSync(path.join(EXAMPLE_DIR, "plugin.json"), "utf8");
     const v = validateExtension(JSON.parse(manifestRaw));
     expect(v.ok, `示例包清单不合法：${v.errors.join("；")}`).toBe(true);
     expect(v.manifest.contributes.panels?.[0]?.id).toBe("hello");

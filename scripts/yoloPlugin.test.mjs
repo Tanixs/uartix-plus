@@ -323,7 +323,7 @@ function startPlugin(pluginDir, ws) {
 
 describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
   it("清单合法，且声明了它真的要用的权限", () => {
-    const raw = JSON.parse(readFileSync(path.join(PLUGIN_SRC, "extension.json"), "utf8"));
+    const raw = JSON.parse(readFileSync(path.join(PLUGIN_SRC, "plugin.json"), "utf8"));
     const v = validateExtension(raw);
     expect(v.ok, `插件清单不合法：${v.errors.join("；")}`).toBe(true);
     const m = v.manifest;
@@ -340,7 +340,7 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
     // 插件从仓库里复制一份到临时目录：运行期它只往 $WS 写，但别让它有机会碰源码
     const pluginDir = path.join(dir, "plug", "uartix.yolo");
     mkdirSync(pluginDir, { recursive: true });
-    for (const f of ["extension.json", "main.mjs", "panel.html"]) {
+    for (const f of ["plugin.json", "main.mjs", "panel.html"]) {
       writeFileSync(path.join(pluginDir, f), readFileSync(path.join(PLUGIN_SRC, f), "utf8"), "utf8");
     }
 
@@ -430,7 +430,7 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
   it("没有工作区时 state() 说人话，而不是抛异常（面板要能把「去选目录」显示出来）", async () => {
     const pluginDir = path.join(dir, "plug2", "uartix.yolo");
     mkdirSync(pluginDir, { recursive: true });
-    for (const f of ["extension.json", "main.mjs", "panel.html"]) {
+    for (const f of ["plugin.json", "main.mjs", "panel.html"]) {
       writeFileSync(path.join(pluginDir, f), readFileSync(path.join(PLUGIN_SRC, f), "utf8"), "utf8");
     }
     const ws = makeWorkspace("empty"); // 只是借它的目录当 roots，hello 里给空工作区

@@ -1,9 +1,9 @@
 /**
- * P174-A6：扩展面板 —— 装、批、跑、卸都在这一面里。
+ * P174-A6：插件面板 —— 装、批、跑、卸都在这一面里。
  *
- * A5 那版是"一个内置示例 + 一屏日志"。这一批换成真仓库：左列是**磁盘上真实存在的扩展**，
+ * A5 那版是"一个内置示例 + 一屏日志"。这一批换成真仓库：左列是**磁盘上真实存在的插件**，
  * 右边是它的权限面、运行状态和日志。批准卡不再是弹窗，而是右列顶上的那一条——
- * 理由是它要展示的东西（权限清单 + 与上次的差异）本来就属于"这个扩展的详情"，
+ * 理由是它要展示的东西（权限清单 + 与上次的差异）本来就属于"这个插件的详情"，
  * 弹窗会把它们放在脱离上下文的浮层里，用户看完还得回想自己在批哪一个。
  *
  * 三条延续 A5 的决定：
@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import { open } from "@tauri-apps/plugin-dialog";
 import { tx, useLocale } from "../../i18n/strings";
 import {
-  // 与下面组件内那个 `approve()`（批准**待安装**的计划）区分：这个是批准**磁盘上已有**的扩展
+  // 与下面组件内那个 `approve()`（批准**待安装**的计划）区分：这个是批准**磁盘上已有**的插件
   approve as approveOnDisk,
   commitInstall,
   ensureLoaded,
@@ -61,7 +61,7 @@ function PermList(props: { lines: string[] }) {
   if (!props.lines.length) {
     return (
       <div style={{ color: "var(--text-dim)" }}>
-        {tx("这个扩展没有申请任何权限（它能做的事只有画自己的面板）", "This extension requests no permissions at all")}
+        {tx("这个插件没有申请任何权限（它能做的事只有画自己的面板）", "This extension requests no permissions at all")}
       </div>
     );
   }
@@ -110,7 +110,7 @@ export function ExtManagerPanel() {
   async function pickWorkspace() {
     setErr("");
     try {
-      const dir = await open({ directory: true, multiple: false, title: tx("选择工作区根（扩展的 $WS）", "Pick the workspace root (extension $WS)") });
+      const dir = await open({ directory: true, multiple: false, title: tx("选择工作区根（插件的 $WS）", "Pick the workspace root (plugin $WS)") });
       if (!dir || Array.isArray(dir)) return;
       await setWorkspaceRoot(dir);
     } catch (e) {
@@ -124,7 +124,7 @@ export function ExtManagerPanel() {
     setNotice(null);
     setBusy("pick");
     try {
-      const dir = await open({ directory: true, multiple: false, title: tx("选择扩展目录（含 extension.json）", "Pick an extension folder (with extension.json)") });
+      const dir = await open({ directory: true, multiple: false, title: tx("选择插件目录（含 plugin.json）", "Pick an plugin folder (with plugin.json)") });
       if (!dir || Array.isArray(dir)) return;
       setBusy("plan");
       const plan = await planFolder(dir, `draft-${Date.now().toString(36)}`);
@@ -217,10 +217,10 @@ export function ExtManagerPanel() {
           flex: "0 0 auto",
         }}
       >
-        <span style={{ fontWeight: 600 }}>{tx("扩展", "Extensions")}</span>
+        <span style={{ fontWeight: 600 }}>{tx("插件", "Plugins")}</span>
         <span style={{ color: "var(--text-dim)" }}>{repo.entries.length}</span>
         <div style={{ flex: "1 1 auto" }} />
-        <button className="btn" disabled={!!busy} onClick={() => void pickAndInstall()} title={tx("从一个文件夹安装（选含 extension.json 的目录）", "Install from a folder containing extension.json")}>
+        <button className="btn" disabled={!!busy} onClick={() => void pickAndInstall()} title={tx("从一个文件夹安装（选含 plugin.json 的目录）", "Install from a folder containing plugin.json")}>
           {busy === "pick" || busy === "plan" ? tx("正在读取…", "Reading…") : tx("安装…", "Install…")}
         </button>
         <button className="btn" disabled={!!busy} onClick={() => void reload()} title={tx("重新读盘", "Reload from disk")}>
@@ -228,7 +228,7 @@ export function ExtManagerPanel() {
         </button>
       </div>
 
-      {/* 工作区根（`$WS`）：声明了它的扩展没有这个就跑不起来，所以要摆在列表上面 */}
+      {/* 工作区根（`$WS`）：声明了它的插件没有这个就跑不起来，所以要摆在列表上面 */}
       <div
         style={{
           display: "flex",
@@ -264,7 +264,7 @@ export function ExtManagerPanel() {
           </button>
         ) : null}
         <div style={{ flex: "1 1 auto" }} />
-        <span>{tx("声明了 $WS 的扩展要用它；改动在下一次启动生效", "Used by extensions declaring $WS; applies on next start")}</span>
+        <span>{tx("声明了 $WS 的插件要用它；改动在下一次启动生效", "Used by extensions declaring $WS; applies on next start")}</span>
       </div>
 
       {err ? (
@@ -306,7 +306,7 @@ export function ExtManagerPanel() {
       ) : null}
 
       <div style={{ display: "flex", flex: "1 1 auto", minHeight: 0 }}>
-        {/* 左列：装过的扩展 */}
+        {/* 左列：装过的插件 */}
         <div
           style={{
             flex: "0 0 168px",
@@ -319,7 +319,7 @@ export function ExtManagerPanel() {
             <div style={{ padding: "var(--sp-3)", color: "var(--text-dim)" }}>{tx("正在读取…", "Reading…")}</div>
           ) : repo.entries.length === 0 ? (
             <div style={{ padding: "var(--sp-3)", color: "var(--text-dim)", lineHeight: "var(--lh-read)" }}>
-              {tx("还没装任何扩展。点上面的「安装…」选一个目录。", "Nothing installed yet. Use “Install…” above to pick a folder.")}
+              {tx("还没装任何插件。点上面的「安装…」选一个目录。", "Nothing installed yet. Use “Install…” above to pick a folder.")}
             </div>
           ) : (
             repo.entries.map((e) => {
@@ -436,8 +436,8 @@ export function ExtManagerPanel() {
               }}
             >
               {tx(
-                "扩展是独立的 Node 程序：装箱子里是数据集拆分、训练、部署这类整条流程，装进来就有自己的面板。",
-                "Extensions are standalone Node programs that can hold a whole workflow (dataset split, training, deploy) behind their own panel.",
+                "插件是独立的 Node 程序：装箱子里是数据集拆分、训练、部署这类整条流程，装进来就有自己的面板。",
+                "Plugins are standalone Node programs that can hold a whole workflow (dataset split, training, deploy) behind their own panel.",
               )}
             </div>
           ) : (
@@ -493,7 +493,7 @@ export function ExtManagerPanel() {
                   className="btn"
                   disabled={!!busy}
                   onClick={() => void doUninstall(entry.id)}
-                  title={tx("删除这个扩展的目录和账本条目", "Delete this extension's folder and ledger entry")}
+                  title={tx("删除这个插件的目录和账本条目", "Delete this extension's folder and ledger entry")}
                   style={confirmUninstall === entry.id ? { color: "var(--danger)" } : undefined}
                 >
                   {confirmUninstall === entry.id ? tx("确认卸载？", "Confirm?") : tx("卸载", "Uninstall")}
@@ -520,7 +520,7 @@ export function ExtManagerPanel() {
                           "Its permissions changed since you last approved — review the list below before approving.",
                         )
                       : tx(
-                          "这个扩展的权限还没被批准（可能是手工放进扩展目录的，或上次安装中断了）。批准之前不许启动。",
+                          "这个插件的权限还没被批准（可能是手工放进插件目录的，或上次安装中断了）。批准之前不许启动。",
                           "This extension has not been approved yet (hand-copied, or a previous install was interrupted). It cannot start until approved.",
                         )}
                   </span>
@@ -542,7 +542,7 @@ export function ExtManagerPanel() {
                   }}
                 >
                   {tx(
-                    "这个扩展要用工作区根（$WS），但还没设置——启动会被拒绝。请先在上面选一个目录。",
+                    "这个插件要用工作区根（$WS），但还没设置——启动会被拒绝。请先在上面选一个目录。",
                     "This extension needs a workspace root ($WS) but none is set — starting it will be refused. Pick a folder above.",
                   )}
                 </div>
