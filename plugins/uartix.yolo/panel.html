@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>YOLO 训练工作台</title>
+    <!--
+      自足的 HTML（宿主把面板渲染在不透明源的 iframe 里，没有外链可加载）。
+      跟插件进程说话只有一条路：`uartix.call(方法名, 参数)`；反过来是 `uartix.on(事件)`。
+    -->
+    <style>
+      :root {
+        color-scheme: dark light;
+        --bg: #16181c;
+        --panel: #1c1f24;
+        --inset: #121417;
+        --fg: #e6e8eb;
+        --dim: #9aa0a6;
+        --faint: #6b7178;
+        --line: #2b3036;
+        --accent: #4a9eff;
+        --ok: #3fb950;
+        --warn: #d29922;
+        --bad: #f85149;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #fbfbfc;
+          --panel: #f4f5f7;
+          --inset: #ffffff;
+          --fg: #1c1f23;
+          --dim: #5a616b;
+          --faint: #8b929b;
+          --line: #e1e4e8;
+          --accent: #1a73e8;
+          --ok: #1a7f37;
+          --warn: #9a6700;
+          --bad: #cf222e;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--fg);
+        font: 12px/1.5 "Segoe UI", system-ui, "Microsoft YaHei", sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        flex: 0 0 auto;
+      }
+      header h1 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0;
+      }
+      header .path {
+        color: var(--dim);
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 46%;
+      }
+      .spacer {
+        flex: 1 1 auto;
+      }
+      nav {
+        display: flex;
+        gap: 2px;
+        padding: 0 8px;
+        border-bottom: 1px solid var(--line);
+        flex: 0 0 auto;
+      }
+      nav button {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--dim);
+        padding: 6px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+      nav button.on {
+        color: var(--fg);
+        border-bottom-color: var(--accent);
+      }
+      main {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px;
+      }
+      section[hidden] {
+        display: none;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 10px 12px;
+        margin-bottom: 10px;
+      }
+      .card h2 {
+        font-size: 12px;
+        font-weight: 600;
+        margin: 0 0 8px;
+        color: var(--fg);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px 12px;
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        font-size: 11px;
+        color: var(--dim);
+      }
+      label.wide {
+        grid-column: 1 / -1;
+      }
+      input,
+      textarea {
+        font: inherit;
+        font-size: 12px;
+        padding: 4px 6px;
+        border-radius: 5px;
+        border: 1px solid var(--line);
+        background: var(--inset);
+        color: var(--fg);
+        width: 100%;
+      }
+      textarea {
+        min-height: 54px;
+        resize: vertical;
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 11px;
+      }
+      button.btn {
+        font: inherit;
+        padding: 5px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--inset);
+        color: var(--fg);
+        cursor: pointer;
+      }
+      button.btn:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      button.btn:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      button.primary {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      button.danger {
+        border-color: var(--bad);
+        color: var(--bad);
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .kv {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2px 12px;
+        font-size: 11px;
+      }
+      .kv b {
+        font-weight: 500;
+        color: var(--dim);
+      }
+      .kv span {
+        font-family: "Cascadia Mono", Consolas, monospace;
+        word-break: break-all;
+      }
+      .tag {
+        display: inline-block;
+        padding: 0 6px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        font-size: 10px;
+        line-height: 16px;
+        color: var(--dim);
+      }
+      .tag.ok {
+        color: var(--ok);
+        border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
+      }
+      .tag.bad {
+        color: var(--bad);
+        border-color: color-mix(in srgb, var(--bad) 45%, var(--line));
+      }
+      .tag.warn {
+        color: var(--warn);
+        border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 3px 8px;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      th {
+        color: var(--dim);
+        font-weight: 500;
+      }
+      td.num {
+        font-family: "Cascadia Mono", Consolas, monospace;
+      }
+      .bar {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--inset);
+        overflow: hidden;
+        border: 1px solid var(--line);
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        width: 0%;
+        background: var(--accent);
+        transition: width 180ms ease;
+      }
+      #logwrap {
+        flex: 0 0 34%;
+        min-height: 90px;
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid var(--line);
+      }
+      #logbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 3px 10px;
+        font-size: 11px;
+        color: var(--dim);
+        border-bottom: 1px solid var(--line);
+        flex: 0 0 auto;
+      }
+      #log {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        margin: 0;
+        padding: 4px 10px 10px;
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: var(--dim);
+        background: var(--inset);
+      }
+      #log .err {
+        color: var(--warn);
+      }
+      #log .sys {
+        color: var(--accent);
+      }
+      .note {
+        color: var(--faint);
+        font-size: 11px;
+        line-height: 1.6;
+        margin: 6px 0 0;
+      }
+      .banner {
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+        color: var(--warn);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>YOLO 训练工作台</h1>
+      <span class="path" id="ws">（没有工作区）</span>
+      <span class="spacer"></span>
+      <span id="pystat" class="tag">python ?</span>
+      <button class="btn" id="reload" title="重新读工作区与配置">刷新</button>
+    </header>
+
+    <div id="nows" class="banner" hidden>
+      还没有登记工作区根。请关掉这个面板，在「扩展」面板顶部选一个目录（就是含 config.yaml 的那一个），再打开这里。
+    </div>
+
+    <nav>
+      <button data-tab="overview" class="on">概览</button>
+      <button data-tab="data">数据</button>
+      <button data-tab="train">训练</button>
+    </nav>
+
+    <main>
+      <!-- ============ 概览 ============ -->
+      <section id="tab-overview">
+        <div class="card">
+          <h2>环境</h2>
+          <div class="kv" id="envkv"></div>
+          <div class="row" style="margin-top: 8px">
+            <button class="btn" id="probe">深度自检（torch / CUDA）</button>
+            <span class="note" style="margin: 0">要 import torch，第一遍通常 10~20 秒</span>
+          </div>
+          <div class="note" id="probenote"></div>
+        </div>
+
+        <div class="card">
+          <h2>数据集</h2>
+          <div class="kv" id="dskv"></div>
+        </div>
+
+        <div class="card">
+          <h2>训练记录</h2>
+          <div id="runs"></div>
+        </div>
+      </section>
+
+      <!-- ============ 数据 ============ -->
+      <section id="tab-data" hidden>
+        <div class="card">
+          <h2>数据来源与划分</h2>
+          <div class="grid">
+            <label class="wide">
+              素材文件夹（一行一个：X-AnyLabeling 导出的 json + 图片混放目录）
+              <textarea id="sources" spellcheck="false" placeholder="D:/OneDrive/Desktop/X-AnyLabeling/images/123lmages"></textarea>
+            </label>
+            <label class="wide">
+              数据集输出目录
+              <input id="output_dir" spellcheck="false" />
+            </label>
+            <label>
+              验证集比例 val_ratio
+              <input id="val_ratio" type="number" step="0.01" min="0" max="0.9" />
+            </label>
+            <label>
+              随机种子 seed
+              <input id="seed" type="number" step="1" />
+            </label>
+            <label class="wide">
+              类别表 classes（一行一个，顺序即类别 id）
+              <textarea id="classes" spellcheck="false"></textarea>
+            </label>
+          </div>
+          <div class="row" style="margin-top: 10px">
+            <button class="btn primary" id="build">构建数据集</button>
+            <button class="btn" id="savedata">保存这些设置</button>
+            <span class="note" style="margin: 0">约 1 分钟；重复运行只更新有变化的文件</span>
+          </div>
+        </div>
+        <p class="note">
+          这里只改**本次运行**的参数。工作区里的 <code>config.yaml</code> 不会被改写——它是你自己的
+          基准，插件每次把它读出来当底、再叠上这里的改动，写到 <code>.uartix/yolo/runs/&lt;job&gt;/config.yaml</code>。
+        </p>
+      </section>
+
+      <!-- ============ 训练 ============ -->
+      <section id="tab-train" hidden>
+        <div class="card">
+          <h2>训练参数</h2>
+          <div class="grid">
+            <label class="wide">
+              预训练权重 weights
+              <input id="weights" spellcheck="false" />
+            </label>
+            <label>
+              轮次 epochs
+              <input id="epochs" type="number" step="1" min="1" />
+            </label>
+            <label>
+              分辨率 imgsz
+              <input id="imgsz" type="number" step="32" min="64" />
+            </label>
+            <label>
+              批大小 batch
+              <input id="batch" type="number" step="1" min="1" />
+            </label>
+            <label>
+              设备 device（0=GPU，cpu=CPU）
+              <input id="device" />
+            </label>
+            <label>
+              实验名 name
+              <input id="name" />
+            </label>
+            <label>
+              早停 patience
+              <input id="patience" type="number" step="1" min="1" />
+            </label>
+            <label>
+              数据加载进程 workers
+              <input id="workers" type="number" step="1" min="0" />
+            </label>
+          </div>
+          <p class="note">
+            workers 在这台 16G 内存的机器上必须保持 0（多进程加载器会把内存撑爆）。
+            fliplr / flipud 固定为 0：数字识别不做镜像。要改这两条请直接改
+            <code>.uartix/yolo/config.json</code>——面板不提供入口，因为它们几乎总是错的。
+          </p>
+          <div class="row" style="margin-top: 10px">
+            <button class="btn primary" id="train">开始训练</button>
+            <button class="btn danger" id="stop" disabled>停止</button>
+            <button class="btn" id="savetrain">保存这些设置</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>进度</h2>
+          <div class="bar"><i id="bar"></i></div>
+          <div class="kv" id="jobkv" style="margin-top: 8px"></div>
+        </div>
+      </section>
+    </main>
+
+    <div id="logwrap">
+      <div id="logbar">
+        <span>日志</span>
+        <span id="logmeta" class="tag"></span>
+        <span class="spacer"></span>
+        <button class="btn" id="copylog">复制全部</button>
+        <button class="btn" id="clearlog">清屏</button>
+      </div>
+      <pre id="log"></pre>
+    </div>
+
+    <script>
+      /* ---------------- 小工具 ---------------- */
+      var $ = function (id) {
+        return document.getElementById(id);
+      };
+      function esc(s) {
+        return String(s == null ? "" : s);
+      }
+      function num(id, def) {
+        var v = $(id).value.trim();
+        if (v === "") return def;
+        var n = Number(v);
+        return isFinite(n) ? n : def;
+      }
+      function lines(text) {
+        return text
+          .split(/\r?\n/)
+          .map(function (s) {
+            return s.trim();
+          })
+          .filter(Boolean);
+      }
+      var toast = $("log");
+
+      /* ---------------- 日志 ---------------- */
+      var LOG_MAX = 3000;
+      function appendLog(batch) {
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < batch.length; i++) {
+          var l = batch[i];
+          var div = document.createElement("div");
+          div.className = l.stream === "err" ? "err" : l.stream === "sys" ? "sys" : "";
+          div.textContent = l.text;
+          frag.appendChild(div);
+        }
+        var near = toast.scrollHeight - toast.scrollTop - toast.clientHeight < 40;
+        toast.appendChild(frag);
+        while (toast.childNodes.length > LOG_MAX) toast.removeChild(toast.firstChild);
+        if (near) toast.scrollTop = toast.scrollHeight;
+      }
+      function sysLog(text) {
+        appendLog([{ text: "[面板] " + text, stream: "sys" }]);
+      }
+
+      /* ---------------- 状态 ---------------- */
+      var st = null;
+      var running = null;
+
+      function fill(id, v) {
+        if ($(id) && document.activeElement !== $(id)) $(id).value = v == null ? "" : String(v);
+      }
+
+      function renderEnv() {
+        var py = st.python || {};
+        var cfg = st.config || {};
+        var eff = cfg.effective || {};
+        var env = eff.env || {};
+        $("ws").textContent = st.workspace || "（没有工作区）";
+        $("nows").hidden = !st.needWorkspace;
+
+        var pyTag = $("pystat");
+        pyTag.className = "tag " + (py.ok ? "ok" : "bad");
+        pyTag.textContent = py.ok ? "python " + (py.version || "").replace(/^Python\s*/i, "") : "python 未就绪";
+        pyTag.title = (py.path || "") + (py.source ? "（来自 " + py.source + "）" : "");
+
+        $("envkv").innerHTML =
+          '<b>python</b><span>' +
+          esc(py.path || "(未找到)") +
+          "  " +
+          esc(py.ok ? "" : py.error) +
+          "</span>" +
+          "<b>来源</b><span>" +
+          esc(py.source || "-") +
+          "（改 _env.bat 或面板里的 env.python）</span>" +
+          "<b>config.yaml</b><span>" +
+          esc(cfg.baseFound ? "已读取（作为基准）" : cfg.baseError || "没找到，用内置默认") +
+          "</span>" +
+          "<b>代理</b><span>" +
+          esc(env.proxy_enable ? env.proxy || "(空)" : "关闭") +
+          "</span>";
+      }
+
+      function renderDataset() {
+        var d = st.dataset || {};
+        var eff = st.config.effective || {};
+        var ds = eff.dataset || {};
+        $("dskv").innerHTML =
+          '<b>输出目录</b><span>' +
+          esc(d.dir || "-") +
+          "</span>" +
+          "<b>data.yaml</b><span>" +
+          (d.exists ? '<span class="tag ok">已就绪</span>' : '<span class="tag warn">还没构建</span>') +
+          "  train " +
+          (d.trainCount || 0) +
+          " 张 / val " +
+          (d.valCount || 0) +
+          " 张</span>" +
+          "<b>类别</b><span>" +
+          esc((d.classes && d.classes.length ? d.classes : ds.classes || []).join(" / ") || "-") +
+          "</span>" +
+          "<b>素材来源</b><span>" +
+          esc((ds.sources || []).length ? (ds.sources || []).join("  ·  ") : "(还没填)") +
+          "</span>";
+
+        fill("sources", (ds.sources || []).join("\n"));
+        fill("output_dir", ds.output_dir || "");
+        fill("val_ratio", ds.val_ratio);
+        fill("seed", ds.seed);
+        fill("classes", (ds.classes || []).join("\n"));
+      }
+
+      function renderRuns() {
+        var runs = st.runs || [];
+        if (!runs.length) {
+          $("runs").innerHTML = '<span class="note">还没有训练记录（runs/*/results.csv）</span>';
+          return;
+        }
+        var h =
+          "<table><thead><tr><th>实验</th><th>轮次</th><th>mAP50(M)</th><th>mAP50-95(M)</th><th>best.pt</th></tr></thead><tbody>";
+        for (var i = 0; i < runs.length; i++) {
+          var r = runs[i];
+          var m = r.metrics || {};
+          var f = function (x) {
+            var n = Number(x);
+            return isFinite(n) ? n.toFixed(4) : "-";
+          };
+          h +=
+            "<tr><td>" +
+            esc(r.name) +
+            '</td><td class="num">' +
+            r.epochs +
+            '</td><td class="num">' +
+            f(m.mAP50M) +
+            '</td><td class="num">' +
+            f(m.mAP5095M) +
+            "</td><td>" +
+            (r.hasBest ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>') +
+            "</td></tr>";
+        }
+        $("runs").innerHTML = h + "</tbody></table>";
+      }
+
+      function renderTrainParams() {
+        var t = (st.config.effective || {}).train || {};
+        fill("weights", t.weights);
+        fill("epochs", t.epochs);
+        fill("imgsz", t.imgsz);
+        fill("batch", t.batch);
+        fill("device", t.device);
+        fill("name", t.name);
+        fill("patience", t.patience);
+        fill("workers", t.workers);
+      }
+
+      function renderJob(j) {
+        running = j && j.state === "running" ? j : null;
+        $("stop").disabled = !running;
+        $("train").disabled = !!running;
+        $("build").disabled = !!running;
+        var p = (j && j.progress) || {};
+        $("bar").style.width = (p.percent || 0) + "%";
+        $("bar").style.background = p.phase === "error" ? "var(--bad)" : "var(--accent)";
+        $("jobkv").innerHTML = j
+          ? "<b>状态</b><span>" +
+            esc(j.label) +
+            " · " +
+            esc(j.state) +
+            (j.code != null ? "（退出码 " + j.code + "）" : "") +
+            "</span>" +
+            "<b>阶段</b><span>" +
+            esc(p.phase || "-") +
+            "</span>" +
+            "<b>进度</b><span>" +
+            (p.percent || 0) +
+            "%  " +
+            esc(p.detail || "") +
+            "</span>" +
+            "<b>日志文件</b><span>" +
+            esc(j.logPath || "-") +
+            "</span>"
+          : '<span class="note">还没有跑过任务</span>';
+      }
+
+      function renderAll(s) {
+        st = s;
+        renderEnv();
+        renderDataset();
+        renderRuns();
+        renderTrainParams();
+        renderJob(s.active || (s.jobs && s.jobs.length ? s.jobs[s.jobs.length - 1] : null));
+      }
+
+      async function refresh(quiet) {
+        try {
+          var s = await uartix.call("state");
+          renderAll(s);
+          if (!quiet) sysLog("已刷新");
+        } catch (e) {
+          sysLog("读状态失败：" + (e && e.message ? e.message : e));
+        }
+      }
+
+      /* ---------------- 表单 → patch ---------------- */
+      async function save(kind) {
+        var patch = {};
+        if (kind === "data") {
+          patch.dataset = {
+            sources: lines($("sources").value),
+            output_dir: $("output_dir").value.trim(),
+            val_ratio: num("val_ratio", 0.15),
+            seed: num("seed", 42),
+            classes: lines($("classes").value),
+          };
+        } else {
+          patch.train = {
+            weights: $("weights").value.trim(),
+            epochs: num("epochs", 300),
+            imgsz: num("imgsz", 640),
+            batch: num("batch", 16),
+            device: $("device").value.trim(),
+            name: $("name").value.trim(),
+            patience: num("patience", 100),
+            workers: num("workers", 0),
+          };
+        }
+        try {
+          var s = await uartix.call("saveConfig", patch);
+          renderAll(s);
+          sysLog("设置已保存（写到 .uartix/yolo/config.json）");
+        } catch (e) {
+          sysLog("保存失败：" + (e && e.message ? e.message : e));
+        }
+      }
+
+      async function startJob(kind) {
+        try {
+          sysLog(kind === "data" ? "开始构建数据集…" : "开始训练…");
+          await save(kind === "data" ? "data" : "train");
+          var j = await uartix.call(kind === "data" ? "startDataset" : "startTrain", {});
+          toast.innerHTML = "";
+          renderJob(j);
+        } catch (e) {
+          sysLog("启动失败：" + (e && e.message ? e.message : e));
+        }
+      }
+
+      /* ---------------- 事件 ---------------- */
+      uartix.on("log", function (p) {
+        if (p && p.lines) appendLog(p.lines);
+      });
+      uartix.on("job", function (j) {
+        if (!j) return;
+        renderJob(j);
+        if (j.state !== "running" && !j._doneShown) {
+          j._doneShown = true;
+          sysLog(j.label + "：" + (j.state === "succeeded" ? "完成" : "失败（退出码 " + j.code + "）"));
+          refresh(true);
+        }
+      });
+
+      /* ---------------- 按钮 ---------------- */
+      var tabs = document.querySelectorAll("nav button");
+      for (var i = 0; i < tabs.length; i++) {
+        tabs[i].onclick = function () {
+          var name = this.getAttribute("data-tab");
+          for (var k = 0; k < tabs.length; k++) tabs[k].className = tabs[k].getAttribute("data-tab") === name ? "on" : "";
+          $("tab-overview").hidden = name !== "overview";
+          $("tab-data").hidden = name !== "data";
+          $("tab-train").hidden = name !== "train";
+        };
+      }
+      $("reload").onclick = function () {
+        refresh(false);
+      };
+      $("savedata").onclick = function () {
+        save("data");
+      };
+      $("savetrain").onclick = function () {
+        save("train");
+      };
+      $("build").onclick = function () {
+        startJob("data");
+      };
+      $("train").onclick = function () {
+        startJob("train");
+      };
+      $("stop").onclick = async function () {
+        try {
+          await uartix.call("stop");
+          sysLog("已请求停止");
+        } catch (e) {
+          sysLog("停止失败：" + (e && e.message ? e.message : e));
+        }
+      };
+      $("probe").onclick = async function () {
+        $("probenote").textContent = "自检中…（要 import torch）";
+        try {
+          var r = await uartix.call("probe");
+          $("probenote").textContent = r.ok
+            ? "python " +
+              r.python +
+              " · torch " +
+              (r.torch || ("✗ " + (r.torch_error || ""))) +
+              " · CUDA " +
+              (r.cuda ? r.gpu || "可用" : "不可用") +
+              " · ultralytics " +
+              (r.ultralytics || ("✗ " + (r.ultralytics_error || "")))
+            : "自检失败：" + r.error;
+        } catch (e) {
+          $("probenote").textContent = "自检失败：" + (e && e.message ? e.message : e);
+        }
+      };
+      $("clearlog").onclick = function () {
+        toast.innerHTML = "";
+      };
+      $("copylog").onclick = function () {
+        var t = toast.innerText || "";
+        if (navigator.clipboard) navigator.clipboard.writeText(t).then(null, function () {});
+      };
+
+      /* ---------------- 启动 ---------------- */
+      refresh(true);
+    </script>
+  </body>
+</html>
