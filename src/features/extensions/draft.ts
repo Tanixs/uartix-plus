@@ -78,7 +78,7 @@ const norm = (p: string) => String(p).replace(/\\/g, "/").replace(/\/+$/, "");
 export async function listDrafts(appDir: string): Promise<DraftEntry[]> {
   const root = draftRoot(appDir);
   const out: DraftEntry[] = [];
-  let names: string[] = [];
+  let names: string[];
   try {
     const r = await invoke<{ items: { name: string; dir: boolean }[] }>("ext_fs_list", { dir: root, roots: [appDir] });
     names = r.items.filter((i) => i.dir).map((i) => i.name);
