@@ -46,7 +46,7 @@ export const DARK_LUMINANCE_MAX = 0.4;
  * 色板（8 主题共有）+ 语义色 + 字号/圆角/动效（theme.css `:root` 的 P55 token）。间距不开放（布局安全）。
  *
  * 为什么要搬：这批开始"哪些键算合法"同时管着三件事——AI 覆盖层、插件主题产物、样式表引用。
- * 放在 `features/agent/` 里，`features/artifact/store.ts` 就得反向引 agent 才能校验一个主题包
+ * 放在 `features/agent/` 里，`features/plugins/artifact.ts` 就得反向引 agent 才能校验一个主题包
  * （方向不对，而且会把 store 的求值期副作用顺带拉进插件链路）。放在零 import 的叶子层，谁都能读。
  */
 export const APPEARANCE_TOKENS = [
@@ -115,7 +115,7 @@ export type AppearanceToken = (typeof APPEARANCE_TOKENS)[number];
 
 /**
  * P131-C 资产通道的一枚资产（base64 结构化字段）。
- * 类型住这个零 import 的叶子层，是因为 `ThemeSource` 与产物校验器（`artifact/store`）
+ * 类型住这个零 import 的叶子层，是因为 `ThemeSource` 与产物校验器（`plugins/artifact`）
  * 都要认它——放哪一边都会拉出一条反向依赖。判据（mime 白名单 / 尺寸 / SVG 脚本面）在
  * `features/styles/assetGuard.ts`。
  */

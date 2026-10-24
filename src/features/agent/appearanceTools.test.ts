@@ -3,7 +3,7 @@
  * 覆盖：值解析、取色纯函数、覆盖层 patch/undo 原子性、工具档位门、配方（含玻璃派生）、保存清层。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentPluginId } from "../artifact/id";
+import { agentPluginId } from "../plugins/pluginId";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(async (..._a: unknown[]) => undefined as unknown),
@@ -368,7 +368,7 @@ describe("appearance tools", () => {
   it("P131-A：两条持久化入口共用同一个 CSS 上限，超限照旧两边都拒", async () => {
     stubDom({ "--bg": "#101010" });
     const { tools } = await load();
-    const { THEME_CSS_MAX_BYTES } = await import("../artifact/store");
+    const { THEME_CSS_MAX_BYTES } = await import("../plugins/artifact");
     const scratch = await import("./styleScratch");
     const mid = `.big{padding:${"1".repeat(9000)}px}`;
     scratch.applyLayer("大层", mid);
@@ -397,7 +397,7 @@ describe("appearance tools", () => {
     stubDom({ "--bg": "#101010" });
     const { tools } = await load();
     const scratch = await import("./styleScratch");
-    const { THEME_CSS_MAX_BYTES } = await import("../artifact/store");
+    const { THEME_CSS_MAX_BYTES } = await import("../plugins/artifact");
     const a = await tools.executeAppearanceTool(call("style_append", { css: ".btn{color:#ff0000}" }), ctx("create"));
     expect(a.ok).toBe(true);
     const b = await tools.executeAppearanceTool(call("style_append", { css: ".tab{color:#00ff00}" }), ctx("create"));
@@ -448,7 +448,7 @@ describe("appearance tools", () => {
     stubDom({ "--bg": "#101010" });
     const { tools } = await load();
     const scratch = await import("./styleScratch");
-    const { THEME_CSS_MAX_BYTES } = await import("../artifact/store");
+    const { THEME_CSS_MAX_BYTES } = await import("../plugins/artifact");
     const seg = `.big{padding:${"1".repeat(THEME_CSS_MAX_BYTES - 24)}px}`;
     const first = await tools.executeAppearanceTool(call("style_append", { css: seg }), ctx("create"));
     expect(first.ok, "单段刚好在上限内，净化器不该先拒").toBe(true);

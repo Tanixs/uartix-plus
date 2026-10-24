@@ -27,11 +27,13 @@ vi.mock("../plot/plotStore", () => ({
 vi.mock("../ai/extRuntime", () => ({ applyStyleExts: vi.fn() }));
 
 const { createLocalAgentAdapter } = await import("./agentAdapter");
+const { argsHash } = await import("./toolRegistry");
 const store = await import("../plugins/pluginStore");
 const extStore = await import("../ai/extensionStore");
 import type { ApprovalGate, ApprovalRequest } from "./toolRegistry";
 import type { TaskContext, ToolCall } from "./types";
-import { ARTIFACT_KINDS, artifactKindMeta } from "../artifact/store";
+import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
+import { autoEnableBlockedCaps } from "../plugins/pluginManifest";
 
 function ctx(scope: TaskContext["scope"], allowed?: string[]): TaskContext {
   return { source: "local_agent", runId: "r1", signal: new AbortController().signal, scope, ...(allowed ? { allowed } : {}) };
@@ -90,6 +92,41 @@ describe("save_plugin 档位与落库", () => {
     expect((await a.execute(call("save_plugin", { kind: "panel", name: "x", payload: { format: "html", html: "y" }, id: "Bad ID" }), ctx("create"))).code).toBe("invalid_id");
   });
 
+  /**
+   * P99a-B1：`module` 让插件第一次能带 JS。这两张卡钉的是同一句话——
+   * **能带逻辑 ≠ 能自动生效**（详设 §11"不给 module 自动启用"）。
+   */
+  it("module 包：enable:true 也不自动启用（logic.run 不在纯 UI 能力集）", async () => {
+    const a = createLocalAgentAdapter({ runId: "r1", gate: fakeGate() });
+    const r = await a.execute(
+      call("save_plugin", { kind: "module", name: "计算器", payload: { format: "js", code: "uartix.host.post({type:'ping'})" }, enable: true }),
+      ctx("create"),
+    );
+    const data = r.data as { pluginId: string; enabled: boolean; state: string; caps: string[] };
+    expect(r.ok).toBe(true);
+    expect(data.caps).toEqual(["logic.run"]);
+    expect(data.enabled).toBe(false);
+    expect(data.state).toBe("installed_disabled");
+  });
+
+  it("module 包：封网自证不通过就保持停用，原因照实回传", async () => {
+    const a = createLocalAgentAdapter({ runId: "r1", gate: fakeGate() });
+    const saved = await a.execute(
+      call("save_plugin", { kind: "module", name: "探针包", payload: { format: "js", code: "var ok = 1;" } }),
+      ctx("create"),
+    );
+    const id = (saved.data as { pluginId: string }).pluginId;
+    const gate = fakeGate();
+    gate.takeToken = vi.fn(() => "tok");
+    const b = createLocalAgentAdapter({ runId: "r2", gate });
+    const r = await b.execute(call("enable_plugin", { id }), ctx("create"));
+    expect(r.ok).toBe(false);
+    // node 环境没有 Worker：证明不了封网 ⇒ fail-closed，不是"测不了算通过"
+    expect(r.code).toBe("module_probe_failed");
+    expect(String((r.data as { msg?: string }).msg)).toContain("no-worker");
+    expect(store.getPlugin(id)?.state).not.toBe("enabled");
+  });
+
   it("包校验失败回传 errors；显式同 ID＝升版本，撞名没指 ID＝拒并给候选（不再悄悄多一份）", async () => {
     const a = createLocalAgentAdapter({ runId: "r1", gate: fakeGate() });
     const bad = await a.execute(call("save_plugin", { kind: "theme", name: "坏主题", payload: {} }), ctx("create"));
@@ -128,7 +165,7 @@ describe("save_plugin 档位与落库", () => {
 });
 
 describe("enable_plugin 与 list_plugins", () => {
-  it("纯 UI 产物静默启用（三种产物都不含设备发送能力）", async () => {
+  it("纯 UI 插件静默启用；serial.send 插件走审批门，批准后启用", async () => {
     const gate = fakeGate();
     const a = createLocalAgentAdapter({ runId: "r1", gate });
     const pure = await a.execute(call("save_plugin", { kind: "widget", name: "纯UI件", payload: WIDGET_PAYLOAD }), ctx("create"));
@@ -136,6 +173,27 @@ describe("enable_plugin 与 list_plugins", () => {
     const on = await a.execute(call("enable_plugin", { id: pureId }), ctx("create"));
     expect(on.ok).toBe(true);
     expect(gate.requests).toHaveLength(0);
+
+    // 手工入库带 serial.send 的包
+    const staged = store.stagePackage({
+      format: "uartix-plugin", schemaVersion: 2, id: "user.t.sender", version: "0.1.0",
+      name: "发送件", hostApi: "^1.0", capabilities: ["ui.widget", "telemetry.read", "serial.send"],
+      contributions: { widgets: [{ id: "main", entry: "main.json" }] },
+      artifacts: { "main.json": { kind: "widget", ...WIDGET_PAYLOAD } }, provenance: { createdBy: "user", reviewed: false },
+    });
+    const senderId = store.installStaged(staged.stagingId!).id!;
+    const gated = await a.execute(call("enable_plugin", { id: senderId }), ctx("create"));
+    expect(gated).toMatchObject({ ok: false, status: "not_executed", code: "needs_local_approval" });
+    expect(gate.requests).toHaveLength(1);
+    expect(gate.requests[0].tool).toBe("enable_plugin");
+    expect(gate.requests[0].plan).toContain("serial.send");
+    expect(store.getPlugin(senderId)?.state).toBe("installed_disabled");
+    // 用户批准：绑定同参令牌
+    vi.mocked(gate.takeToken).mockImplementation((_rid, tool, hash) =>
+      tool === "enable_plugin" && hash === argsHash({ tool: "enable_plugin", id: senderId }) ? "tok-1" : null);
+    const ok = await a.execute(call("enable_plugin", { id: senderId }), ctx("create"));
+    expect(ok.ok).toBe(true);
+    expect(store.getPlugin(senderId)?.state).toBe("enabled");
   });
 
   it("preview 档位不改变状态；未知插件可读报错；list_plugins 只读", async () => {
@@ -171,6 +229,12 @@ describe("save_plugin 描述里的能力边界（P99a-D2）", () => {
     for (const k of ARTIFACT_KINDS) {
       expect(d, `模型侧没说清 ${k} 能声明哪些能力`).toContain(`${k}=[${artifactKindMeta(k).caps.join("+")}]`);
     }
+  });
+
+  it("「不会自动启用」那句列的恰好是纯 UI 能力集的补集，不多不少", () => {
+    const m = desc().match(/Packages declaring (.+?) are never auto-enabled/);
+    expect(m, "模型侧少了「哪些包不会自动启用」这句").toBeTruthy();
+    expect(m![1].split(" / ").sort()).toEqual([...autoEnableBlockedCaps()].sort());
   });
 
   it("明说小部件/面板包里的 uartix.app、send、ask 不生效", () => {

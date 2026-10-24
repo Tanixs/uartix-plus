@@ -8,7 +8,7 @@
  * 原始 aiw:* postMessage 协议仍然可用（与本桥共存）。
  */
 
-import { PLUGIN_IFRAME_CSP } from "../artifact/csp";
+import { PLUGIN_IFRAME_CSP } from "../plugins/pluginIsolation";
 
 function buildScript(bare: boolean, nonce?: string): string {
   // 新插件实例 nonce：桥为每条外发消息附加 n 字段，宿主按其裁决（P88b-3 §11）

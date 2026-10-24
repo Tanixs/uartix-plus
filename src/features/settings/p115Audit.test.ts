@@ -155,6 +155,14 @@ describe("P115-D · F18 任务状态中文化（行为级）", () => {
 });
 
 describe("P115-E · 插件卡图标 / 工作区药丸 / 窄窗兜底 / 令牌化", () => {
+  it("F20：类型图标按固定优先级取，未知 kind 落「更多」而不是插头", () => {
+    const src = code("features/plugins/PluginLibraryDialog.tsx");
+    expect(src).toMatch(/const KIND_ICON: Record<import\("\.\/artifact"\)\.ArtifactKind, \(\) => ReactElement>/);
+    expect(src.indexOf('"theme", "panel", "widget"'), "优先级表不见了（又退回 kinds[0] 看运气）").toBeGreaterThan(-1);
+    expect(src).not.toMatch(/const one = kinds\[0\]/);
+    expect(src).toMatch(/hit \? KIND_ICON\[hit\] : IconMore/);
+  });
+
   it("F21：工作区药丸挂 shared/Dropdown（portal+Esc+焦点归还），不再自写 mousedown 关闭", () => {
     const src = code("shell/TopBars.tsx");
     expect(src).toMatch(/<Dropdown anchor=\{btnRef\.current\} open=\{open\} onClose=\{\(\) => setOpen\(false\)\} className="cb-ws-menu">/);

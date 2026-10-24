@@ -60,7 +60,6 @@ const LEGACY_THEME = "vs.aiTheme";
 const isDerivedOnly = (e: AiExtension) => e.type === "theme";
 
 function load(): ExtSnapshot {
-  if (typeof localStorage === "undefined") return { exts: [], openIds: [] };
   let exts: AiExtension[] = [];
   let openIds: string[] = [];
   try {
@@ -92,7 +91,6 @@ const listeners = new Set<() => void>();
 
 /** 持久化只写非派生类投影（theme 由插件库重建，写两份就是两份真相） */
 function persist() {
-  if (typeof localStorage === "undefined") return;
   localStorage.setItem(
     KEY,
     JSON.stringify({

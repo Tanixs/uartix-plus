@@ -133,6 +133,34 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
     expect(bare, `这些码在时间线上是裸 snake_case：${bare.join("、")}`).toEqual([]);
   });
 
+  it("P99c-C2：市场装链的码由契约层穷举表供给，这里只合表（重抄一份就会漂）", async () => {
+    const { INSTALL_CODE_ZH } = (await import("../market/marketIndex")) as typeof import("../market/marketIndex");
+    const codes = Object.keys(INSTALL_CODE_ZH);
+    expect(codes.length, "契约表空了＝合表这件事根本没发生").toBeGreaterThan(6);
+    for (const c of codes) {
+      if (c === "ok") continue; // 成功码不走徽章兜底那条路
+      expect(receiptStatusText(false, "not_executed", c), `${c} 没跟着渲染成中文`).not.toBe(c);
+    }
+    // 反向半边：装链源码里**回出去**的每个码都必须在这张表里。
+    // 只扫 `code: "x"` 是不够的——内核的失败走 `bad("undeclared_capability", …)`，
+    // 那样从表里删一个码，运行时这条钉一声不响（证伪实测过）。
+    const fsSpec = "node:fs";
+    const { readFileSync } = (await import(fsSpec)) as unknown as { readFileSync: (p: string, enc?: string) => string };
+    const urlSpec = "node:url";
+    const { fileURLToPath } = (await import(urlSpec)) as unknown as {
+      fileURLToPath: (u: string | URL) => string;
+    };
+    const src = readFileSync(fileURLToPath(new URL("../market/marketInstall.ts", import.meta.url)), "utf8");
+    const used = new Set<string>([
+      ...[...src.matchAll(/code:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),
+      ...[...src.matchAll(/\bbad\(\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),
+    ]);
+    expect(used.size, "一个码都没扫到＝抓取式与源码脱钩了（§8-43②）").toBeGreaterThan(4);
+    const orphans = [...used].filter((c) => !codes.includes(c));
+    expect(orphans, `这些码在装链里回出去却没有中文：${orphans.join("、")}`).toEqual([]);
+    const bare = [...codes].filter((c) => c !== "ok" && receiptStatusText(false, "not_executed", c) === c);
+    expect(bare, `表在但没接到徽章上：${bare.join("、")}`).toEqual([]);
+  });
 
   it("receiptRows：标量直列、嵌套对象折叠键名、数组限量、绝不抛错", () => {
     expect(receiptRows(null)).toEqual([]);
@@ -151,7 +179,7 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
       "fs_read", "fs_list", "fs_write", "fs_grep", "fs_glob", "fs_edit", "session_read", "web_fetch", "web_search", "shell_exec", "repo_check",
       "theme_read", "theme_patch", "theme_preset", "image_swatch", "asset_put", "asset_list", "save_theme_extension", "style_commit", "style_append",
       "ui_inventory", "ui_inspect", "style_patch", "style_revert", "theme_audit", "theme_preview", "app_state",
-      "app_catalog", "app_read", "layout_apply", "chrome_set", "task_plan", "subagent",
+      "app_catalog", "app_read", "propose_market_install", "layout_apply", "chrome_set", "task_plan", "subagent",
     ];
     // 清单本身也要跟注册表对齐：两边谁漂了都红
     expect(hostEntryNames().sort()).toEqual([...real].sort());

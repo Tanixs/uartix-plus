@@ -22,7 +22,7 @@ import {
 } from "./themeCore";
 import { APPEARANCE_TOKENS } from "../features/agent/appearanceStore";
 
-// 读源文件走变量说明符的动态导入（同时绕开 tsc 缺 @types/node）
+// 读源文件走变量说明符的动态导入（同时绕开 tsc 缺 @types/node，同 marketStore.test 的写法）
 const fsSpec = "node:fs";
 const urlSpec = "node:url";
 const { readFileSync, readdirSync } = (await import(fsSpec)) as {

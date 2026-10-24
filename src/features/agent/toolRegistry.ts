@@ -18,7 +18,7 @@
  * 依赖纪律：本模块只依赖叶子（scopeTiers / toolPolicy / types），**不得 import 任何工具组、
  * pluginStore 或 agentAdapter**——注册表与被注册者成环就是 dev 白屏（§8-33）。
  */
-import { shortHash } from "../artifact/id"; // 零依赖叶子（与上面那条纪律不冲突：它不 import 任何 store）
+import { shortHash } from "../plugins/pluginId"; // 零依赖叶子（与上面那条纪律不冲突：它不 import 任何 store）
 import { DOMAIN_ZH, hasDomain, type Domain } from "./scopeTiers";
 import { decide, type EffectClass, type PolicyContext, type ToolPolicyMeta } from "./toolPolicy";
 import type { UndoResult } from "./settingsTools";

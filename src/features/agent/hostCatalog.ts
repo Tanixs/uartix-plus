@@ -44,7 +44,9 @@ export type CatalogGroup =
   | "analysis"
   | "modbus"
   | "vdev"
-  | "sentinel";
+  | "sentinel"
+  // P99b-N6：插件市场（C2「AI 提名装」的只读半边；写侧仍不在这条路上）
+  | "market";
 
 export const CATALOG_GROUP_ZH: Record<CatalogGroup, string> = {
   runtime: "运行现状",
@@ -62,6 +64,7 @@ export const CATALOG_GROUP_ZH: Record<CatalogGroup, string> = {
   modbus: "Modbus 工作台",
   vdev: "虚拟设备工坊",
   sentinel: "哨兵",
+  market: "插件市场",
 };
 
 export interface CatalogArgs {
@@ -430,24 +433,31 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
   {
     path: "plugins",
     group: "plugins",
-    zh: "AI 产物库",
-    gives: "每项 {id,name,version,state,caps,createdBy,historyVersions}",
+    zh: "插件库",
+    gives:
+      "每项 {id,name,version,state,caps,createdBy,historyVersions,candidateVersion}；含逻辑模块的包另给 modules/tools（它注册了哪几支 Agent 工具）",
     listKey: "items",
     defaultLimit: DEFAULT_LIST_LIMIT,
     maxBytes: 8192,
     async read() {
-      const { getSnapshot } = await import("../plugins/pluginStore");
-      const all = getSnapshot().plugins;
+      const [{ getSnapshot }, { moduleArtifactsOf }, { pluginToolDefsOf }] = await Promise.all([
+        import("../plugins/pluginStore"),
+        import("../plugins/moduleHost"),
+        import("../plugins/pluginToolDefs"),
+      ]);
       return {
-        total: all.length,
-        items: all.map((p) => ({
+        total: getSnapshot().plugins.length,
+        items: getSnapshot().plugins.map((p) => ({
           id: p.pkg.id,
           name: p.pkg.name,
           version: p.pkg.version,
           state: p.state,
           caps: p.pkg.capabilities,
-          createdBy: p.pkg.provenance?.createdBy ?? "user",
+          createdBy: p.pkg.provenance.createdBy,
           historyVersions: p.versions.length,
+          ...(p.candidate ? { candidateVersion: p.candidate.version } : {}),
+          ...(moduleArtifactsOf(p.pkg).length ? { modules: moduleArtifactsOf(p.pkg).length } : {}),
+          ...(pluginToolDefsOf(p.pkg.id).length ? { tools: pluginToolDefsOf(p.pkg.id).map((t) => t.baseName) } : {}),
         })),
       };
     },
@@ -859,8 +869,107 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
     },
   },
 
+  /* ---------------- P99b-N6：插件市场（两支都不联网） ----------------
+   *
+   * R3 是这批在这里的全部难度：**视图绝不能顺手刷新**。市场的第一条口径是"只有打开那一页才联网"，
+   * 模型问一句"货架上有什么"就把人推出这个承诺，那是拿自省面当后门。所以两支读 `getMarketSnapshot()`，
+   * 没取过就照实回"没取过 + 该怎么办"（与 `analysis.last` 同一形状），也不回用户配的地址原值——
+   * 目录一向不接 settings 这个源（`hostCatalog.test` 那条敏感源封闭的白名单就是为它设的）。
+   *
+   * 还有一条本批踩到的：`readCatalog` 把**顶层带 `error` 键**的回执当作"视图自己报失败"（→ ok:false），
+   * 所以失败原因放在未取回那一支的 `why` 里，ready 那一支不再挂错误字段（成功时 `error` 恒为空串）。
+   */
+  {
+    path: "market.status",
+    group: "market",
+    zh: "插件市场：上一次取回索引的现状",
+    gives:
+      "{available:true,status,indexName,source,generatedAt,entryCount,droppedCount,viaMirror,elapsedMs,fetchedAt,appVersion,why?} · 未取回时 {available:false,status,why,next}（货架页那句状态行读的就是这几个数；`why`＝上次取回失败的原因；用户配的索引地址与镜像前缀不外带——目录一向不接 settings 这个源）",
+    maxBytes: 4096,
+    async read() {
+      const { getMarketSnapshot } = await import("../market/marketStore");
+      const s = getMarketSnapshot();
+      if (!s.index) {
+        return {
+          available: false,
+          status: s.status,
+          why:
+            s.status === "loading"
+              ? "索引正在取回中（只可能在有人打开市场页时发生）"
+              : s.error || "本机还没取过这份索引",
+          next: "在应用里打开一次「插件市场」那一页；本视图不替你联网刷新",
+        };
+      }
+      return {
+        available: true,
+        status: s.status,
+        indexName: s.index.name,
+        source: s.index.source,
+        generatedAt: s.index.generatedAt,
+        entryCount: s.index.entries.length,
+        // 被剔除几条：货架页显示得、AI 读不到就是不对称（详设 §4-5）
+        droppedCount: s.index.dropped.length,
+        viaMirror: s.viaMirror,
+        elapsedMs: s.elapsedMs,
+        fetchedAt: s.fetchedAt,
+        appVersion: s.appVersion,
+        // 键名不能叫 `error`：readCatalog 把"顶层带 error 键"当作视图自己报失败（`runtime` 那支也是嵌在 serial 里给的）
+        ...(s.error ? { why: s.error } : {}),
+      };
+    },
+  },
+  {
+    path: "market.entries",
+    group: "market",
+    zh: "插件市场：货架上的条目（含与本机库的对照）",
+    gives:
+      "每项 {id,name,author,version,category,caps,verified,bytes,shots,descLen,compat,install,via,pending?}（`install`＝absent/same/update/newer-than-shelf，与货架徽章同一个 `compareInstall` 判定；`via`＝shelf/npm，即字节来自自建货架直链还是 npm 官方 registry；`pending` 只在有一条在飞的请求时出现；描述只给长度）",
+    listKey: "items",
+    defaultLimit: DEFAULT_LIST_LIMIT,
+    maxBytes: 8192,
+    async read() {
+      const [{ getMarketSnapshot }, { getSnapshot: local }, { marketPendingSnapshot }, { compat, compareInstall, packageOrigin }] =
+        await Promise.all([
+          import("../market/marketStore"),
+          import("../plugins/pluginStore"),
+          import("../market/marketPending"),
+          import("../market/marketIndex"),
+        ]);
+      const s = getMarketSnapshot();
+      if (!s.index) {
+        return {
+          available: false,
+          total: 0,
+          items: [],
+          why: s.error || "本机还没取过这份索引",
+          next: "在应用里打开一次「插件市场」那一页；本视图不替你联网刷新",
+        };
+      }
+      const versions = new Map(local().plugins.map((r) => [r.pkg.id, r.pkg.version]));
+      const live = new Map(marketPendingSnapshot().map((p) => [p.entryId, p.phase]));
+      return {
+        available: true,
+        total: s.index.entries.length,
+        items: byId(s.index.entries).map((e) => ({
+          id: e.id,
+          name: e.name,
+          author: e.author,
+          version: e.version,
+          category: e.category,
+          caps: e.capabilities,
+          verified: e.verified === true,
+          bytes: e.bytes,
+          shots: e.screenshots.length,
+          descLen: len(e.description.zh),
+          compat: compat(e, s.appVersion),
+          install: compareInstall(e, versions.get(e.id)),
+          via: packageOrigin(e),
+          ...(live.has(e.id) ? { pending: live.get(e.id) } : {}),
+        })),
+      };
+    },
+  },
 ];
-
 
 /* ============================ C1b 七面：读者侧的收敛助手 ============================
  * 这七面的 `getSnapshot()` 都是**整包**（点云 220k、校准点 20k、寄存器 hist 环、原始 hex、

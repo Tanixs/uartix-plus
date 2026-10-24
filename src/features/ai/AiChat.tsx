@@ -37,6 +37,7 @@ import {
 import * as agentRun from "../agent/agentRun";
 import { isLiveRun, type RunScope } from "../agent/types";
 import { Dropdown } from "../../shared/Dropdown";
+import { PluginLibraryDialog } from "../plugins/PluginLibraryDialog";
 import { resolveVars } from "../controls/variableStore";
 import * as serialStore from "../serial/serialStore";
 import { detectAnomalies, anomaliesToText, type Anomaly } from "./anomaly";
@@ -44,6 +45,7 @@ import { Markdown, CodeBlock, parseSegments } from "./markdown";
 import { EmptyState } from "../../shared/EmptyState";
 import { Glyph, IconChevron, IconClose, IconDock, IconPlus, IconPop, IconSend, IconSparkle, IconStop } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";
+import { ErrorBoundary } from "../../shared/ErrorBoundary";
 import { t, tx, useLocale } from "../../i18n/strings";
 
 const BUG_ENDPOINT = "https://larix.teuioe.cn/api/bugreport.php";
@@ -806,6 +808,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
         ? tx("已暂停", "paused")
         : tx("运行中", "running")
     : null;
+  const [plgLibOpen, setPlgLibOpen] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [editingId, setEditingId] = useState("");
   const [editText, setEditText] = useState("");
@@ -1283,6 +1286,9 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           onClose={() => setMoreOpen(false)}
           align="end"
         >
+          <button className="ai-scene-menu-item" role="menuitem" onClick={() => { setMoreOpen(false); setPlgLibOpen(true); }}>
+            {tx("本地插件库", "Local plugin library")}
+          </button>
           <button className="ai-scene-menu-item" role="menuitem"
             title={tx("含思维链、每次工具调用的参数与回执；API Key 一类秘密写出时会打码",
               "includes the thinking chain, every tool call's args and receipt; API keys are masked on the way out")}
@@ -2066,6 +2072,11 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
       </div>
       {/* P88d ③：活动任务不在当前会话视图时，右下角悬浮条一键切回 */}
       <AgentFloat sessionId={chat.activeId} onOpen={(id) => chatStore.switchSession(id)} />
+      {plgLibOpen && (
+        <ErrorBoundary label={tx("本地插件库", "Local plugin library")}>
+          <PluginLibraryDialog onClose={() => setPlgLibOpen(false)} />
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

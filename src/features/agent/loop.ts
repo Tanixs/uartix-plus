@@ -3,7 +3,7 @@ import { foldContext, shrinkReceipt, agentPayloadBytes, countImages, dropHistory
 import { parseTurnError, nextMaxTokens, sleepAbortable, TURN_RETRY_LIMIT, TURN_RETRY_BACKOFF_MS, MAX_TOKENS_LADDER, cancelledBeforeSend } from "./turnError";
 // P115-D：save_plugin 那段"能产出哪几类产物"从元表派生（中文侧 P99a-D2 已经这么改了，
 // 英文片段还手抄着 theme/widget/panel 三类——D1 加出六类之后它就在教一个不存在的清单）
-import { ARTIFACT_KINDS, artifactKindMeta } from "../artifact/store";
+import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
 
 /**
  * P109-A：这里只剩**兜底值**（设置读不到时用），不再是天花板。

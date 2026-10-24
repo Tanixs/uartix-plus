@@ -3,7 +3,7 @@
 // 少一批静态边也意味着 extRuntime 这条曾经的环边更薄（§8-33）。
 import { getActiveExtTheme } from "../extensions/activeTheme";
 import { getSnapshot as getExts } from "./extensionStore";
-import { setStyleApplier, restoreProjections } from "../artifact/store";
+import { setStyleApplier } from "../plugins/pluginStore";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
 import { ROOT_LAYER, submitRootVars } from "../../styles/rootVars";
 import {
@@ -348,9 +348,6 @@ let started = false;
 export function startExtRuntime() {
   if (started) return;
   started = true;
-  // 先重建 AI 产物的投影（主题/小部件/面板），再贴样式层——顺序反了会让主题首帧空一拍。
-  // 刻意不放在 store 模块求值期：那等于把启动顺序写进模块体（P92-F 白屏那一课）。
-  restoreProjections();
   applyStyleExts();
   // 只剩样式层：面板扩展挂载时按需渲染，脚本通道已随 P99a-D1c 删除
 }

@@ -52,6 +52,7 @@ export interface PaletteDeps {
   toggleDemo: () => void;
   demoOn: boolean;
   openAi: () => void;
+  openMarket: () => void;
   openSettings: (tab?: string) => void;
   openHelp: () => void;
   restartTour: () => void;
@@ -171,6 +172,7 @@ export function buildCommands(deps: PaletteDeps): PaletteCommand[] {
 
   out.push(
     { id: "ai", group: "AI", title: tx("打开 AI 助手", "Open the AI assistant"), keywords: "ai chat 问 ai", run: deps.openAi },
+    { id: "market", group: "AI", title: tx("打开扩展市场", "Open the extension market"), keywords: "market plugin 插件 扩展", run: deps.openMarket },
     { id: "settings", group: G_PREF, title: tx("打开设置", "Open settings"), keywords: "settings 设置", run: () => deps.openSettings() },
   );
   for (const mode of ["dark", "light", "navy", "ocean", "matcha", "amber"] as const) {

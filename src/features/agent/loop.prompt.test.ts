@@ -21,7 +21,7 @@ function registryNames(): Set<string> {
   // 与 hostEntries.ts 那七组一一对应（P133-B2 之后新增 `subagent.ts`：新工具组文件必须同时进这张表，
   // 否则这条守卫会把"提示点了一支真存在的工具"误判成死引用——本批就是被它自己抓到的）
   const files = ["./localEntries.ts", "./uiTools.ts", "./settingsTools.ts", "./appearanceTools.ts",
-    "./generalTools.ts", "./subagent.ts"];
+    "./generalTools.ts", "./marketTools.ts", "./pluginTools.ts", "./subagent.ts"];
   const names = new Set<string>();
   for (const f of files) {
     for (const m of read(f).matchAll(/\bname:\s*"([a-z][a-z0-9_]{2,39})"/g)) names.add(m[1]);

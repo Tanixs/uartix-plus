@@ -1,8 +1,9 @@
 /**
  * P99b-N6 · 设置项自己的完整性守卫（详设 §6 G1/G2/G6 + R1/R2/R4）。
  *
- * 这批为什么从这道守卫开始：`settingsSchema.ts` 那句注释写着「全量声明：每个 Settings 键
- * 恰好一条」，而历史上有过 store 有键、schema 漏登的情况。原来那道"完整性检查"
+ * 这批为什么从这道守卫开始：`settingsSchema.ts:26` 那句注释写着「全量声明：每个 Settings 键
+ * 恰好一条」——**而它现在已经是假的**（33 个 Settings 键、schema 只 31 条，缺的恰好是
+ * `marketIndexUrl` / `marketMirrorPrefix`）。原来那道"完整性检查"（`settingsTools.test.ts:22`）
  * 是拿 schema 数它自己，漏登一个键照样绿 ⇒ §8-52 那条"守卫的夹具自己红不了＝没有守卫"的又一次复发。
  */
 import { describe, expect, it, vi } from "vitest";
@@ -90,11 +91,12 @@ describe("P99b-N6 · 每个设置项都得有个改它的地方（不许只剩 l
   ];
 
   /**
-   * 还有一类——**写入者整个文件都不在设置页里**（比如 AI 对话面板自己的压缩按钮）。
+   * P102：还有一类——**写入者整个文件都不在设置页里**（市场那两行搬进了市场弹窗的「货架来源」）。
    * 它的"被引用"不能只扫 SettingsModal（那里本来就该没有它），要扫全 src：
    * 不然这条豁免会变成"文件删了名单还留着"的空门。
    */
   const WRITERS_ELSEWHERE = [
+    "features/market/MarketSourceRows.tsx",
     // P110-B2：手动历史预算的写入方是对话面板的「压缩 / 恢复自动」两个按钮
     // （AiChat.tsx 里那句 patch({ aiHistoryOverride })）。设置页那行只读显示，不代替它写。
     "features/ai/AiChat.tsx",
@@ -145,7 +147,7 @@ describe("P109-A/D · Agent 预算与恢复档的档位（模型不许写自己�
       expect(keys, `${k} 没进 Settings 类型（改了 schema 忘了改类型 = 静默丢设置）`).toContain(k);
       const e = schemaEntry(k);
       expect(e, `${k} 没进 schema`).toBeTruthy();
-      // 与预算三键同一形状的理由：能写自己的上限，就等于把"成本责任在用户侧"这句话作废
+      // 与 marketIndexUrl 同一形状的理由：能写自己的上限，就等于把"成本责任在用户侧"这句话作废
       expect(e!.sensitivity, `${k} 的敏感性不对：模型可以自行放宽预算上限`).toBe("protected");
       expect(agentWritableKeys().map(String), `${k} 出现在模型可写清单里`).not.toContain(k);
       // 三个预算键的默认值是 0 = 不限制；恢复档开关的默认值是"关"（保持原有回落行为）
@@ -182,20 +184,55 @@ describe("P133-A · Agent 执行面开关的档位", () => {
   });
 });
 
-describe("P99b-N6 · 放行域只有一份", () => {
-  it("放行域只有一份：声明只许出现在 extensions/hosts.ts，别处只准 import 它", () => {
+describe("P99b-N6 · 那两个市场键的档位与来源（R2/R4/R5）", () => {
+  it("索引地址与镜像前缀登记为 protected：AI 只读不改", async () => {
+    const keys = await settingsKeys();
+    for (const k of ["marketIndexUrl", "marketMirrorPrefix"]) {
+      expect(keys).toContain(k);
+      const e = schemaEntry(k);
+      expect(e, `${k} 没进 schema`).toBeTruthy();
+      expect(e!.sensitivity, `${k} 的敏感性不对：改它等于给模型一条换货架的通道`).toBe("protected");
+      expect(agentWritableKeys().map(String), `${k} 出现在模型可写清单里`).not.toContain(k);
+    }
+  });
+
+  it("两行的回显只准来自派生层：组件里不许自己判 https，也不许抄域名", () => {
+    const rows = read("features/market/MarketSourceRows.tsx");
+    expect(rows, "市场那两行根本没接派生层，回显就是手写的").toContain("marketEndpointTalk(");
+    expect(rows, "组件里再判一次 https ⇒ 与 applyMirror 各说一套").not.toMatch(/startsWith\("https|\^https:\/\//);
+  });
+
+  it("P102：两行搬进市场弹窗了——设置页里不许再留一份，市场里也得有入口打开它", () => {
+    expect(
+      read("features/settings/SettingsModal.tsx"),
+      "搬走变成了抄一份：两处各说一套，改一处漏一处",
+    ).not.toContain("marketEndpointTalk(");
+    expect(
+      read("features/market/MarketDialog.tsx"),
+      "两行搬过去了却没有入口能打开它 ⇒ 比原来更糟",
+    ).toContain("<MarketSourceRows />");
+  });
+
+  it("放行域只有一份：声明只许出现在 marketIndex.ts，别处只准 import 它", () => {
     // 唯一豁免：关于页那颗"项目主页"按钮里的仓库链接（那是一个 URL 按钮，不是一份域名单）。
     // 豁免写成常量放在下面，别让它变成"遇到不方便的钉就删掉钉"的口子。
     const REPO_LINK = "https://github.com/Tanixs/uartix-plus";
     const declared = ALL_SRC.filter((f) => read(f).includes("MARKET_ALLOW_HOSTS ="));
-    expect(declared, `域名单声明了 ${declared.length} 份`).toEqual(["features/extensions/hosts.ts"]);
+    expect(declared, `域名单声明了 ${declared.length} 份`).toEqual(["features/market/marketIndex.ts"]);
     const copies: string[] = [];
     for (const f of ALL_SRC) {
-      if (f === "features/extensions/hosts.ts") continue;
+      if (f === "features/market/marketIndex.ts") continue;
       const s = read(f).split(REPO_LINK).join("");
       if (s.includes("raw.githubusercontent.com")) copies.push(f);
     }
-    expect(copies, `这些文件抄了一份放行域（会过期，且与市场通道的判定脱钩）：${copies.join("、")}`).toEqual([]);
+    expect(copies, `这些文件抄了一份放行域（会过期，且与 applyMirror 的判定脱钩）：${copies.join("、")}`).toEqual([]);
+  });
+
+  it("镜像判定只有一处实现：applyMirror 必须复用 marketEndpointTalk 的内核", () => {
+    const store = read("features/market/marketStore.ts");
+    const body = store.slice(store.indexOf("export function applyMirror"), store.indexOf("\n}", store.indexOf("export function applyMirror")));
+    expect(body, "applyMirror 又开始自己判 https/域名单了 ⇒ 与设置页那句回显会各说一套").toContain("mirrorEndpointVerdict");
+    expect(/startsWith\("https|\/\^https:\/\//.test(body), "同一条件写两遍就是两套判定").toBe(false);
   });
 });
 

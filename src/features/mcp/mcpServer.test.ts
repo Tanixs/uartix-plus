@@ -299,7 +299,19 @@ describe("MCP 现状：审计与回执形状", () => {
 
 /* ================= P99c-C1b：命令行专用通道（cli.） ================= */
 
-describe("P99c-C1b · 工具清单与命令行面隔离", () => {
+vi.mock("../market/marketCli", () => ({
+  isCliKind: (kind: string) => kind.startsWith("cli."),
+  handleCli: async (kind: string, args: Record<string, unknown>) => ({ via: kind, args }),
+}));
+
+describe("P99c-C1b · cli. 通道与 MCP 工具面互不打扰", () => {
+  it("cli.* 在工具名检查之前分流，不会撞「未知工具」那句话术", async () => {
+    const r = await call("cli.market_status", { limit: 3 });
+    expect(r.ok).toBe(true);
+    expect(r.data).toEqual({ via: "cli.market_status", args: { limit: 3 } });
+    expect(r.err).toBeNull();
+  });
+
   it("工具清单里永不含 cli.*：模型那条路够不到命令行动作面（Q7 的前提：外来代码进本机由人批准）", async () => {
     const { ALL_TOOL_DEFS } = await import("./mcpTools");
     expect(ALL_TOOL_DEFS.length).toBeGreaterThan(0); // 反空断言：清单读空了这条就是假绿

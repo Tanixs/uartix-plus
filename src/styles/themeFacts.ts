@@ -6,7 +6,7 @@
  * 环守卫把这条写成了禁止边）。而插件库那颗开关的 tooltip 恰恰要知道"在画的是谁"才说得出
  * "启用这颗会挤掉谁"。所以把这份状态挪到叶子里：**写的人只有一个（extRuntime），读的人随便读**。
  *
- * 内存表 + 订阅：别处只读不写，唯一写者是 extRuntime。
+ * 与 `marketPending.ts` 同形状：内存表 + 订阅，别处只读不写。
  */
 
 export interface ActiveThemeFacts {

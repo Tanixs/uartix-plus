@@ -28,7 +28,7 @@ const { unresolvedAssetRefs } = await import("./assetRuntime");
 const { activeThemeFacts } = await import("../../styles/themeFacts");
 
 /** 主题文件的真实形状：从磁盘那份取（不另抄色值，抄了这份测试就只是在测自己） */
-// tsc 这侧没有 @types/node：读文件走变量说明符（同其它源码钉的写法）
+// tsc 这侧没有 @types/node：读文件走变量说明符（同 marketStore.test）
 const fsSpec = "node:fs";
 const urlSpec = "node:url";
 const { readFileSync } = (await import(fsSpec)) as { readFileSync: (p: string, e?: string) => string };
@@ -204,10 +204,9 @@ describe("P99b-N5 · 差量主题的兜底真的按明暗换层（Q2 裁决 / G4
 
 describe("P99b-N5 · 市场示例那种 6 键主题（详设 §1-4 的那两枚）", () => {
   it("示例包改名后的键集合过产物校验，装上后核心键仍然齐全", async () => {
-    const { validateArtifactPayload } = await import("../artifact/store");
+    const { validateManifest } = await import("../plugins/pluginManifest");
     const src = readFileSync(fileURLToPath(new URL("../../../market/pkg/theme-begonia.uartix.json", import.meta.url)), "utf8");
-    const pkg = JSON.parse(src) as { artifacts: Record<string, Record<string, unknown>> };
-    const v = validateArtifactPayload("theme", pkg.artifacts["main.json"]);
+    const v = validateManifest(JSON.parse(src));
     expect(v.errors, "示例主题自己就过不了校验，货架上那就是个坏包").toEqual([]);
     const vars = (JSON.parse(src).artifacts["main.json"] as { vars: Record<string, string> }).vars;
     themeProjection("plg:shelf:main", vars);

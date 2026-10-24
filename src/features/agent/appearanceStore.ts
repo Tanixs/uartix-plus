@@ -48,7 +48,7 @@ setRootVarsChangeCb(() => changeCbs.forEach((f) => f()));
 /**
  * P99b-N5：白名单本体搬到 `styles/themeCore`（零 import 叶子）。
  * 为什么要搬：这批开始"哪些键算合法"同时管着三件事——AI 覆盖层、插件主题产物、样式表引用；
- * 留在 features/agent 里，features/artifact/store.ts 校验一个主题包就得反向 import agent。
+ * 留在 features/agent 里，features/plugins/artifact.ts 校验一个主题包就得反向 import agent。
  */
 export { APPEARANCE_TOKENS, type AppearanceToken } from "../../styles/themeCore";
 import { APPEARANCE_TOKENS } from "../../styles/themeCore";

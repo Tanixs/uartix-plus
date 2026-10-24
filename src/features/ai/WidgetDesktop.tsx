@@ -11,7 +11,8 @@ import {
 import { getSnapshot, type AiExtension } from "./extensionStore";
 import { WidgetFrame, type WidgetFrameHandle } from "./WidgetFrame";
 import type { WidgetMenuItem } from "./widgetShell";
-import { artifactFrameCtx } from "../artifact/store";import { Glyph } from "../../shared/icons";
+import { pluginCtxForExt } from "../plugins/pluginStore";
+import { Glyph } from "../../shared/icons";
 
 /** 桌面挂件头部高度（px，与 .aiw-desktop-head 的 26px 对应；无边框形态为 0） */
 const HEAD_H = 26;
@@ -256,7 +257,7 @@ export function WidgetDesktop() {
             onHeight={handleHeight}
             onWin={onWin}
             sysMenu={sysMenu}
-            pluginCtx={artifactFrameCtx(widget.pluginRef)}
+            pluginCtx={pluginCtxForExt(widget.pluginRef)}
           />
         ) : miss ? (
           <div className="aiw-desktop-miss">

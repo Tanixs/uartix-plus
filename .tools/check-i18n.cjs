@@ -72,10 +72,10 @@ const BUDGETS = {
   // P121-A：`%d` 那句改口时顺手收紧（"按格式插值"→"插值"），20214 → 20211。
   // P133-H（同一格续账）：「全权执行」那一行改口，20211 → 20210。
   // P146（同一格续账）：P136 改写过帮助文案后实测 20209，棘轮只降不升，按门禁自己的话把数改小。
-  // P174-A18：市场页随旧市场删除，帮助正文实测降到 18716；棘轮只降不升，按门自己的口径改小。
-  "src/features/help/HelpModal.tsx": 17519,
+  "src/features/help/HelpModal.tsx": 20209,
   "src/features/console/QuickCommandBar.tsx": 100,
   "src/App.tsx": 10,
+  "src/features/plugins/PluginLibraryDialog.tsx": 4,
   "src/features/vdev/VdevPanel.tsx": 5,
   "src/features/ai/AiChat.tsx": 4,
   "src/features/controls/CardViews.tsx": 4,

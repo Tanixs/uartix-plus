@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useExtensions, setOpen, type AiExtension } from "./extensionStore";
 import { WidgetFrame, type WidgetFrameHandle } from "./WidgetFrame";
 import { popWidgetToDesktop, type WidgetMenuItem } from "./widgetShell";
-import { artifactFrameCtx, type ArtifactFrameCtx } from "../artifact/store";
+import { pluginCtxForExt, type PluginFrameCtx } from "../plugins/pluginStore";
 import { zoomFactor } from "../../shared/zoom";
 import { Glyph } from "../../shared/icons";
 import { tx, useLocale } from "../../i18n/strings";
@@ -23,7 +23,7 @@ function SingleFloat({
   html: string;
   chrome?: "none";
   index: number;
-  pluginCtx?: ArtifactFrameCtx;
+  pluginCtx?: PluginFrameCtx;
 }) {
   const bare = chrome === "none";
   const loc = useLocale();
@@ -184,7 +184,7 @@ export function WidgetFloats() {
           html={w.html ?? ""}
           chrome={w.chrome}
           index={i}
-          pluginCtx={artifactFrameCtx(w.pluginRef)}
+          pluginCtx={pluginCtxForExt(w.pluginRef)}
         />
       ))}
     </>
