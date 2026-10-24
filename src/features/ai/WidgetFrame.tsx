@@ -22,7 +22,7 @@ import { getChatFeed } from "./aiChatFeed";
 import { injectBridge } from "./widgetBridge";
 import { WidgetMenu, type WidgetMenuItem } from "./widgetShell";
 import { verdictPluginMessage, verdictPassivePush, verdictWinAction } from "../plugins/pluginIsolation";
-import { reportViolation, type PluginFrameCtx } from "../plugins/pluginStore";
+import { reportViolation, type ArtifactFrameCtx } from "../artifact/store";
 
 interface Props {
   widget: { id: string; name: string; html: string };
@@ -37,7 +37,7 @@ interface Props {
   /** 系统菜单项（置顶/穿透/弹出桌面/关闭…），由宿主提供；自定义菜单默认拼接在其后 */
   sysMenu?: () => WidgetMenuItem[];
   /** P88b-3 §11 插件隔离上下文：仅插件库影子扩展携带（P99a-B1a 起不再有迁移件旁路） */
-  pluginCtx?: PluginFrameCtx;
+  pluginCtx?: ArtifactFrameCtx;
 }
 
 export interface WidgetFrameHandle {

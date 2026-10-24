@@ -31,7 +31,6 @@ import { getSnapshot as getSentinel } from "../sentinel/sentinelStore";
 import {
   ASYNC_REQUIRED, NEEDS_MANUAL, SETTING_SEND, TOOL_DEFS, compactFrame, gateHighPriv, pageFrames, type McpToolDef,
 } from "./mcpTools";
-import { handleCli, isCliKind } from "../market/marketCli";
 
 const RING_CAP = 1024; // P66-1：256→1024，配合 beforeSeq 游标分页回看更深历史（compactFrame 已限单帧体积）
 const AUDIT_CAP = 50;
@@ -218,10 +217,6 @@ function surfaceError(r: {
 }
 
 async function dispatch(kind: string, args: Record<string, unknown>): Promise<unknown> {
-  // `cli.` 前缀＝命令行专用面（Q7：陌生人的代码进本机由人批准，所以这条链不给模型）：这些名字从来不在 TOOL_DEFS 里，
-  // `mcp-cli` 也只转发清单内的名字，所以模型那条路够不到；路由放在工具名检查之前，
-  // 否则命令行请求会被"未知工具"挡掉，两边的话术就对不上了。
-  if (isCliKind(kind)) return handleCli(kind, args);
   if (!TOOL_DEFS.some((t) => t.name === kind)) {
     throw new Error(`未知工具：${kind}`);
   }

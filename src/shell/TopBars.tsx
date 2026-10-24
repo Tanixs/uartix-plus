@@ -9,9 +9,7 @@ import type { WorkspacePreset } from "../features/settings/settingsStore";
 import { t, tx, useLocale } from "../i18n/strings";
 import { Dropdown } from "../shared/Dropdown";
 import { Glyph, IconCheck, IconChevron, IconPuzzle, IconRailCollapse, IconSettings, IconSparkle } from "../shared/icons";
-import { pendingBadge } from "../features/market/marketBrowse";
 import { railStrip, subscribeRail, toggleRailStrip } from "./railState";
-import { useAwaitingCount } from "../features/market/useMarketPending";
 import { WORKSPACE_META } from "./workspaceMeta";
 import { WinKeys, IconPin } from "./WindowControls";
 import { getWinSafe, useWindowPin } from "./windowCtl";
@@ -162,7 +160,6 @@ export function SystemButtons({
 }) {
   useLocale(); // 这一组按钮的 title/aria 都是 tx() 出来的，切语言要有人重渲染
   /** 装包请求里"等你点"的那几条：正在跑的不算（催你做不了的事比不催更坏） */
-  const awaitingBadge = pendingBadge(useAwaitingCount());
   return (
     <div className="toolbar-group cb-sys">
       {!fullPage && (
@@ -173,15 +170,14 @@ export function SystemButtons({
       {/* data-tour="plugins" 是入门引导第 9 步的高亮锚点（tourSteps.test.ts 按文件路径钉它挂在
           「插件管理」这颗上）。锚点写错不会报错，只会让引导悄悄退化成漂浮卡片。 */}
       <button
-        className={`tb-btn${awaitingBadge ? " tb-attn" : ""}`}
+        className="tb-btn"
         data-ctl="tool"
         title={tx("插件管理", "Plugin library")}
-        aria-label={awaitingBadge ? tx(`插件管理，${awaitingBadge} 条装包请求等你确认`, `Plugin library - ${awaitingBadge} install requests await your call`) : tx("插件管理", "Plugin library")}
+        aria-label={tx("插件管理", "Plugin library")}
         data-tour="plugins"
         onClick={onOpenLibrary}
       >
         <IconPuzzle size={16} />
-        {awaitingBadge ? <span className="tb-badge">{awaitingBadge}</span> : null}
       </button>
       <button className="tb-btn" data-ctl="tool" title={t("title.settings")} onClick={onOpenSettings}>
         <IconSettings />

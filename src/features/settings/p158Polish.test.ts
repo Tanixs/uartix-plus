@@ -16,7 +16,6 @@ const read = (rel: string) => readFileSync(`${SRC}${rel}`, "utf8");
 const CSS = "styles/theme.css";
 const SETTINGS = "features/settings/SettingsModal.tsx";
 const MODEL = "features/settings/ModelSettingsPage.tsx";
-const DIALOG = "features/plugins/PluginLibraryDialog.tsx";
 
 describe("P158-A · 设置页细节", () => {
   it("主题卡预览 44px + 两条微缩文字线", () => {
@@ -45,29 +44,6 @@ describe("P158-A · 设置页细节", () => {
   it("可点卡片有手型光标", () => {
     const css = read(CSS);
     expect(css).toMatch(/\.theme-card,\s*\.preset-card,\s*\.layout-slot \{ cursor: pointer; \}/);
-  });
-});
-
-describe("P158-B · 插件详情两栏与危险区", () => {
-  it("宽卡两栏（container query 收单列），不再把内容挤在左半张卡里", () => {
-    const css = read(CSS);
-    expect(css, "详情没有容器查询上下文").toMatch(/\.plg-detail \{[^}]*container-type: inline-size/);
-    expect(css, "两栏网格不见了").toMatch(/\.plg-cols \{[^}]*grid-template-columns: minmax\(0, 1fr\) minmax\(240px, 300px\)/);
-    expect(css, "窄卡没有收单列").toContain("@container (max-width: 720px)");
-  });
-
-  it("危险区成区：红调底 + 自己的标题 + 描边卸载（不再整块实红）", () => {
-    const css = read(CSS);
-    expect(css, "没有 danger-zone 规则").toContain(".plg-danger-zone {");
-    expect(css, "卸载仍是实心红块").toMatch(/\.plg-danger-zone \.plg-actions \.btn\.danger \{[^}]*background: transparent/);
-    const src = read(DIALOG);
-    expect(src, "JSX 没有危险区").toContain('className="plg-danger-zone"');
-    expect(src, "P157-E1 的危险组入口被拆没了").toContain('className="plg-actions plg-danger"');
-  });
-
-  it("空态有类型图标；插件行有轻 hover", () => {
-    expect(read(DIALOG), "空态还是只有一行字").toMatch(/className="plg-empty">\s*<IconPuzzle \/>/);
-    expect(read(CSS), "行没有 hover 回应").toContain(".plg-item:hover { border-color: var(--line-strong); }");
   });
 });
 

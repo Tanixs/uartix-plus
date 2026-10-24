@@ -32,7 +32,6 @@ function depsWith(over: Partial<PaletteDeps> = {}): PaletteDeps {
     toggleDemo: () => ran.push("demo"),
     demoOn: false,
     openAi: () => ran.push("ai"),
-    openMarket: () => ran.push("market"),
     openSettings: () => ran.push("settings"),
     openHelp: () => ran.push("help"),
     restartTour: () => ran.push("tour"),

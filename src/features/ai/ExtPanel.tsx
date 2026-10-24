@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 import { tx, useLocale } from "../../i18n/strings";
 import * as extStore from "./extensionStore";
 import { WidgetFrame } from "./WidgetFrame";
-import { pluginCtxForExt } from "../plugins/pluginStore";
+import { artifactFrameCtx } from "../artifact/store";
 
 /** dockview 动态面板宿主：渲染 panel 类型的 AI 扩展（沙箱 iframe） */
 export function ExtPanelHost({ extId }: { extId: string }) {
@@ -29,7 +29,7 @@ export function ExtPanelHost({ extId }: { extId: string }) {
       <WidgetFrame
         widget={{ id: ext.id, name: ext.name, html: ext.html ?? "" }}
         isDesktop={false}
-        pluginCtx={pluginCtxForExt(ext.pluginRef)}
+        pluginCtx={artifactFrameCtx(ext.pluginRef)}
       />
     </div>
   );

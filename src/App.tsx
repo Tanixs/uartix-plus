@@ -61,8 +61,6 @@ import * as chatStore from "./features/ai/chatStore";
 import { onAiScene, onOpenSettings, onPop } from "./features/ai/aiBus";
 import { onRequestOpenExtPanel } from "./features/ai/extBus";
 import { subscribeAppBus } from "./features/ai/appBus";
-import { MarketDialog } from "./features/market/MarketDialog";
-import { InstallConfirm } from "./features/market/InstallConfirm";
 import {
   backupAutoLayout,
   getLayout,
@@ -140,8 +138,6 @@ export default function App() {
     markWelcomeSeen();
     setWelcomeOpen(false);
   };
-  /** 插件市场只在这里渲染一份：插件库与标题栏两颗按钮都只发 `openMarket` 信号 */
-  const [marketOpen, setMarketOpen] = useState(false);
   const [analysisExport, setAnalysisExport] = useState<{ snapshot?: AnalysisSnapshot } | null>(null);
   useEffect(() => subscribeAnalysisExport((snapshot) => setAnalysisExport({ snapshot })), []);
   const [aiOpen, setAiOpen] = useState(false);
@@ -281,8 +277,6 @@ export default function App() {
       } else if (msg.kind === "applyPreset") {
         patch({ workspace: msg.preset as WorkspacePreset });
         resetLayout(msg.preset as WorkspacePreset);
-      } else if (msg.kind === "openMarket") {
-        setMarketOpen(true);
       } else if (msg.kind === "applyLayout") {
         // P99a-D1b：插件库「应用此布局」。布局 JSON 由包带来，执行权仍只在这里（dockview api 不出 App）
         const api = apiRef.current;
@@ -703,7 +697,6 @@ export default function App() {
       toggleDemo: () => void templateStore.toggleDemo(),
       demoOn: protoSnap.demoRunning,
       openAi: () => setAiOpen(true),
-      openMarket: () => setMarketOpen(true),
       openSettings: (tab) => {
         setSettingsTab(tab);
         setSettingsOpen(true);
@@ -1052,7 +1045,6 @@ export default function App() {
       {paletteOpen && (
         <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
       )}
-      {marketOpen && <MarketDialog onClose={() => setMarketOpen(false)} />}
       {analysisExport && <AnalysisExportDialog snapshot={analysisExport.snapshot} onClose={() => setAnalysisExport(null)} />}
       {aiOpen && (
         <AiFloat
@@ -1065,7 +1057,6 @@ export default function App() {
       )}
       {/* 装包确认卡：全局只这一份。以前挂在插件库弹窗里，关掉弹窗就没人看得见它——
           而命令行那句"请在应用里点装入"指的就是这里（N4 收的那笔账） */}
-      <InstallConfirm />
       <WidgetFloats />
       <SentinelFloat />
       <JsonDropImport />

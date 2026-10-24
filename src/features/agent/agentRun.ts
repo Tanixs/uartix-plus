@@ -15,9 +15,7 @@ import { invokeAgentProvider } from "./provider";
 import { activeRef } from "../ai/aiProfileStore";
 import { createLocalAgentAdapter, createReadOnlyAgentAdapter } from "./agentAdapter";
 import { SUBAGENT_CAPS, subagentCaps } from "./subagent";
-import { pluginToolEntries } from "./pluginTools";
 import { runtimeFacts } from "./hostCatalog";
-import { armEnabledModules } from "../plugins/pluginStore";
 import { undoRouteOf } from "./hostEntries";
 import type { ApprovalGate, ApprovalRequest, WaitOutcome } from "./toolRegistry";
 import { releaseDataLease } from "../plot/dataLease";
@@ -167,7 +165,7 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null;
 /**
  * 把一个 run 发布为 running 的**同一刻**立起它的控制器。
  * 不变式：`视图状态 === "running"` ⇔ `controller !== null`。以前控制器到 executeRun 里才 new，
- * 而它前面还压着 `await armEnabledModules()`——那段窗口里 `stopRun` 会静默早退（任务照跑、
+ * 而它前面还压着一段异步准备——那段窗口里 `stopRun` 会静默早退（任务照跑、
  * 界面停不掉）。C1 又在 run 起点加了 await，窗口从"几乎碰不到"变成"每次必撞"，所以把
  * 控制器改成发布前置、并由 `executeRun(view, ctrl, …)` 的签名强制（缺控制器就编译不过）。
  */
@@ -685,7 +683,7 @@ export async function startRun(options: {
   runs = [view, ...kept].slice(0, RUNS_KEPT);
   activeRunId = runId;
   // P99a-C1：控制器与 `running` 状态**同时**成立。以前它到 executeRun 里才 new，而 executeRun
-  // 前面还压着 `await armEnabledModules()`——于是存在"任务已是 running、控制器还不存在"的窗口，
+  // 前面还压着一段异步准备——于是存在"任务已是 running、控制器还不存在"的窗口，
   // `stopRun` 对着它静默早退（界面上停止按了没反应，测试里表现为 await 到天亮）。C1 给 run 起点
   // 多加了一次 await，这个窗口从"几乎碰不到"变成"每次必撞"，所以在这儿焊死。
   const ctrl = armController();
@@ -766,18 +764,12 @@ async function executeRun(
   // P93-A6：档位与授权域传进 adapter，用于**裁剪发给模型的工具定义**（未授权的主机工具不发）
   const allowed = normalizeAllowed(view.scope, view.allowed);
   /**
-   * P99a-B2：run 起点先把"已启用且带逻辑模块"的包臂起来（幂等，已在线的直接返回），
-   * 然后**取一次插件工具快照**传给 adapter。两件事的顺序是有意的：
-   * 工具面在本 run 内就此冻结，run 中途启用带工具的插件要到下一个任务才看得见（详设 §4.5-2 / Q2
-   * "自扩展不等于自提权"）。臂失败的包不注册工具，但必须出声——静默少工具只会让人去怀疑模型。
+   * 旧 run 起点要先臂起"带逻辑模块"的包再取插件工具快照。逻辑模块（专用 Worker + 封网自证）
+   * 随旧插件系统删除，AI 产物只剩主题/小部件/面板，不注册 Agent 工具——所以这里不再有
+   * 额外的工具面，adapter 直接用宿主那六组。
    */
-  const armed = await armEnabledModules();
-  if (armed.blocked.length) {
-    console.warn(`[agentRun] ${armed.blocked.length} 个包的逻辑模块未就绪：${armed.blocked.map((b) => `${b.id}（${b.msg}）`).join("；")}`);
-  }
   const adapter = createLocalAgentAdapter({
     runId, gate, scope: view.scope, allowed,
-    extraEntries: pluginToolEntries(),
     // P135-B：只读子代理的装配（开关在设置里，关着时工具自己会如实拒）
     subagent: makeSubagentDispatch(view, allowed),
   });

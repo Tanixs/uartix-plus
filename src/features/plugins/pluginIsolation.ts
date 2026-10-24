@@ -7,9 +7,23 @@
  *   曾经只要记录带 `legacy` 就跳过 nonce/能力/类型三重验，而全仓**没有任何活代码写入该字段**——
  *   它能做的唯一一件事，是从 localStorage 塞一条记录进来就免检用桥。
  */
-import type { PluginCap } from "./pluginManifest";
-
 import { PLUGIN_IFRAME_CSP } from "../artifact/csp";
+
+/**
+ * 桥侧裁决用到的能力名。**这一组不是插件清单的字段**，而是 AI 产物 iframe 与宿主之间的
+ * 协议词汇（谁发什么消息、需要哪种权力）。旧清单系统删掉后它仍然必须留在这里：
+ * `verdictPluginMessage` 是"产物界面不许越权"的唯一执行点。
+ */
+export type PluginCap =
+  | "serial.send"
+  | "ai.ask"
+  | "ui.action"
+  | "telemetry.read"
+  | "win.control"
+  | "agent.tool"
+  | "theme.tokens"
+  | "ui.widget"
+  | "ui.panel";
 export { PLUGIN_IFRAME_CSP };
 
 /**
@@ -118,7 +132,7 @@ export function verdictWinAction(action: string, caps: readonly string[]): MsgVe
 export const PASSIVE_DATA_TYPES = new Set(["aiw:snap", "aiw:chat"]);
 
 export interface PluginMsgCtx {
-  caps: string[];
+  caps: readonly string[];
   nonce: string;
 }
 

@@ -1,11 +1,11 @@
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 // P99a-D2：创造面能产出哪几类产物、哪几类要人工启用——从产物元表与能力白名单派生。
 // 原先这里手抄了一份"主题 / 小部件 / 面板"，D1 加出四类产物后它还在说三类（§8-36①）。
-import { ARTIFACT_KINDS, artifactKindMeta, THEME_CSS_MAX_BYTES } from "../plugins/artifact";
+import { THEME_CSS_MAX_BYTES } from "../artifact/store";
 import { APPEARANCE_TOKENS } from "../../styles/themeCore";
 import { slotCatalogText } from "../../styles/layerSlots";
 import { STYLE_CAPS } from "../styles/styleSanitize";
-import { autoEnableableKindLabels } from "../plugins/pluginManifest";
+import { autoEnableableKindLabels } from "../artifact/store";
 // P99b-N5：主题清单从装载层取（内置主题清单的唯一出处），不在这儿手抄第二份
 import { BUILTIN_THEME_IDS } from "../../styles/builtinThemes";
 // P115-D：可添加面板的清单同样从注册表派生。手抄那份漏了「指标面板」，还把已退役的
@@ -280,15 +280,12 @@ const NEED_HINT = (keys: NeedKey[]) =>
  * 那条要走插件库批准，不在自动启用范围内）。`prompts.test.ts` 有一条钉防它再漂回去。
  */
 const AUTO_KINDS = autoEnableableKindLabels();
-const MANUAL_KINDS = ARTIFACT_KINDS.map((k) => artifactKindMeta(k).label).filter(
-  (l) => !AUTO_KINDS.includes(l),
-);
 const UI_CREATIVITY_ROUTE =
   `【UI 创造引导】UI 创造类需求（${AUTO_KINDS.join(" / ")}）：` +
   "入口是输入框下方那颗<b>工作方式 pill</b>——选成『Agent 任务』即可；" +
   "顶栏没有单独的 Agent 按钮，不要让用户去找一个不存在的入口。" +
-  `任务里你用 save_plugin 把成果保存为插件并自动启用，用户无需手动安装。` +
-  `${MANUAL_KINDS.join(" / ")} 是例外：含代码或含高危能力，永不被自动启用，要用户自己在插件库里点一次。`;
+  `任务里你用 save_plugin 把成果保存为可复用的 AI 产物并自动启用，用户无需手动安装。` +
+  "这三类产物的能力由种类决定、不含设备发送，所以保存后自动启用，不需要用户再点一次批准。";
 
 /** 输出工具箱：card/command/codec 三个代码块工具（直接可用） */
 const TOOLBOX_LIGHT = `\n\n${ACTION_RULE}\n\n${UI_CREATIVITY_ROUTE}\n\n【输出工具箱】你可以直接输出可写入软件的代码块（用户确认后写入）：${NEED_HINT(["card", "command", "codec"])}。

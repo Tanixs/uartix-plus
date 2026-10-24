@@ -20,7 +20,7 @@ import {
 import { inWhitelist } from "./generalTools";
 import { guardStyleText } from "../styles/styleSanitize";
 import { applyLayer, layerCss, revertLayer, scratchCssMerged } from "./styleScratch";
-import { THEME_CSS_MAX_BYTES } from "../plugins/artifact";
+import { THEME_CSS_MAX_BYTES } from "../artifact/store";
 import { DOMAIN_ZH } from "./scopeTiers";
 import { slotCatalogText } from "../../styles/layerSlots";
 // P131-C 资产通道：判据与草稿层（`asset_put` 走的就是装包那一份校验，不开第二条更松的门）
@@ -490,7 +490,7 @@ async function persistTheme(
     // `user.agent.theme-ai`），两份不同主题因此撞成同一 id，再叠加"同 id 即原地升版"
     // 就会让后一份**静默覆盖**前一份。现在只有 id 与 name 同时相同才认作同一份主题，
     // 否则加后缀新建；人类可读的中文名继续留在 pkg.name。
-    const { agentPluginId, freeAgentId } = await import("../plugins/pluginId");
+    const { agentPluginId, freeAgentId } = await import("../artifact/id");
     const THEME_PREFIX = "user.agent.theme";
     const baseId = agentPluginId(THEME_PREFIX, name);
     const exact = getPlugin(baseId);

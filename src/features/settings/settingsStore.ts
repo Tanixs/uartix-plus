@@ -1,7 +1,6 @@
 import { useSyncExternalStore } from "react";
 // P99b-N6：示例货架的地址只有一处定义（市场契约叶子，不拉 store、不碰 Tauri）——
 // 默认值、读不到时的回落、设置页那句回显都引它，省掉"设置页说的默认值 ≠ 实际取的那条"。
-import { MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
 
 /** 九套内置工作区预设：运行时唯一事实源（normalize、appActions 白名单、layout_apply 工具同引这一份） */
 export const WORKSPACE_PRESETS = [
@@ -130,16 +129,6 @@ export interface Settings {
   mcpHighPriv: boolean;
   /** 桥握手 token（首启自动生成，32 hex） */
   mcpToken: string;
-  /** GitHub 发布（P157-E3）：细粒度 token，只在本机保存，发布时直接交给 api.github.com */
-  ghToken: string;
-  /** 默认仓库属主（空＝token 所属账号；填组织名则建在组织下） */
-  ghOwner: string;
-  /** 默认话题（发布时强制并入；GitHub /topics/<话题> 就是插件目录） */
-  ghTopic: string;
-  /** 插件市场（P99b-N1）：索引地址。默认是应用自带的示例货架（同源，不联网） */
-  marketIndexUrl: string;
-  /** 国内可达性兜底：直连失败后才试的 https 前缀，域同样要过市场白名单（空＝不用） */
-  marketMirrorPrefix: string;
 }
 
 /** 设置页「插件管理」那一栏的键——标题栏那颗、页签表、渲染分支都引它，别各处再写一遍 "ext" */
@@ -256,11 +245,6 @@ function load(): Settings {
     mcpAllowSend: false,
     mcpHighPriv: false,
     mcpToken: newToken(),
-    ghToken: "",
-    ghOwner: "",
-    ghTopic: "uartix-plugin",
-    marketIndexUrl: MARKET_BUNDLED_INDEX_URL,
-    marketMirrorPrefix: "",
   };
   try {
     const raw = localStorage.getItem(KEY);
@@ -339,19 +323,6 @@ function load(): Settings {
       mcpHighPriv: Boolean(p.mcpHighPriv),
       mcpToken:
         typeof p.mcpToken === "string" && p.mcpToken.length >= 16 ? p.mcpToken : newToken(),
-      ghToken: typeof p.ghToken === "string" ? p.ghToken.trim().slice(0, 200) : "",
-      ghOwner: typeof p.ghOwner === "string" ? p.ghOwner.trim().slice(0, 39) : "",
-      ghTopic: (() => {
-        const t = typeof p.ghTopic === "string"
-          ? p.ghTopic.trim().toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 50)
-          : "";
-        return t || "uartix-plugin";
-      })(),
-      marketIndexUrl:
-        typeof p.marketIndexUrl === "string" && p.marketIndexUrl.trim()
-          ? p.marketIndexUrl.trim().slice(0, 300)
-          : MARKET_BUNDLED_INDEX_URL,
-      marketMirrorPrefix: typeof p.marketMirrorPrefix === "string" ? p.marketMirrorPrefix.trim().slice(0, 300) : "",
     };
   } catch {
     return fallback;

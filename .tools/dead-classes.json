@@ -3,7 +3,24 @@
   "generatedAt": "2026-10-03",
   "theme": "fluent",
   "judge": "四道判据：CSS 有 ∧ 源码无同名字面量 ∧ 无模板前缀能拼出 ∧ 14 面没渲染（.tools/check-dead-classes.cjs）",
-  "exemptions": [],
+  "exemptions": [
+    {
+      "prefix": "u-over",
+      "reason": "uPlot 自己渲染的覆盖层类（画布游标/指针十字挂在它下面），宿主源码不会写出这个字面量"
+    },
+    {
+      "prefix": "u-axis",
+      "reason": "uPlot 自己渲染的坐标轴类，宿主只用 CSS 给它定字号"
+    },
+    {
+      "prefix": "u-legend",
+      "reason": "uPlot 自己渲染的图例容器类，宿主只用 CSS 给它定字体"
+    },
+    {
+      "prefix": "u-series",
+      "reason": "uPlot 图例里的系列行类，宿主只用 CSS 给它定内边距"
+    }
+  ],
   "budget": {
     "unreferenced": 0
   },

@@ -15,7 +15,7 @@ import { unpackTarGz, type PackFile } from "./packUnpack";
 import { planFolder, commitInstall, type InstallWarn } from "./extStore";
 import type { InstallPlan } from "./install";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
-import { MARKET_ALLOW_HOSTS } from "../market/marketIndex";
+import { MARKET_ALLOW_HOSTS } from "./hosts";
 
 /**
  * 这条通道允许访问的域：**直接复用市场那张唯一的表**（`MARKET_ALLOW_HOSTS`）。

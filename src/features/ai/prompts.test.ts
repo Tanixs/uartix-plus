@@ -7,7 +7,7 @@
  * 现在计数与清单都从注册表派生，本测试钉住"派生"这件事本身：
  * 哪天有人把它改回字面量，或者注册表里新增了 kind 而派生逻辑漏了它，这里就红。
  */
-import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
+import { ARTIFACT_KINDS, artifactKindMeta } from "../artifact/store";
 import { describe, expect, it } from "vitest";
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 import { buildSystemPrompt, routeNeeds, schemaFor } from "./prompts";

@@ -20,11 +20,9 @@ import {
   stagePackage, installStaged, setEnabled, getPlugin,
   getSnapshot as getPluginLib,
   proposeUpdate, approveUpdate, rollback as rollbackPlugin,
-  armModulePackage,
 } from "../plugins/pluginStore";
-import { PURE_UI_CAPS, autoEnableBlockedCaps } from "../plugins/pluginManifest";
-import { ARTIFACT_KINDS, artifactKindLabel, artifactKindMeta, type ArtifactKind } from "../plugins/artifact";
-import { agentPluginId, freeAgentId } from "../plugins/pluginId";
+import { ARTIFACT_KINDS, artifactKindLabel, artifactKindMeta, type ArtifactKind } from "../artifact/store";
+import { agentPluginId, freeAgentId } from "../artifact/id";
 import { channelStats, decimate } from "./runMath";
 import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolResultBody } from "./toolRegistry";
 import { setPlan, type PlanItem, type PlanStatus } from "./planLedger";
@@ -48,8 +46,7 @@ const PLUGIN_CAP_BOUNDARY =
   ARTIFACT_KINDS.map((k) => `${k}=[${artifactKindMeta(k).caps.join("+")}]`).join(" ") +
   ". You cannot add any. So uartix.app / uartix.send / uartix.ask inside a saved widget or panel package do nothing " +
   "(no ui.action / serial.send / ai.ask); those calls only work in user-created widgets and custom cards — " +
-  "say so instead of shipping a dead button. Packages declaring " +
-  `${autoEnableBlockedCaps().join(" / ")} are never auto-enabled: the user enables those once in the plugin library.`;
+  "say so instead of shipping a dead button.";
 /** plot_window 每通道抽稀点数硬顶。 */
 export const PLOT_WINDOW_MAX_POINTS = 2000;
 /**
@@ -77,7 +74,7 @@ export function nextVersion(cur: string): string {
   return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
 }
 
-/** 与 pluginManifest 的 ID_RE 同形（本地预检给出更可读的错误码）。 */
+/** 与 v3 清单的 ID_RE 同形（本地预检给出更可读的错误码）。 */
 const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31})+$/;
 
 const HOST = { kind: "host" } as const;
@@ -120,8 +117,13 @@ function writePlan(callId: string, ctx: ToolCtx, a: Record<string, unknown>): To
     },
   };
 }
-const PURE = PURE_UI_CAPS as readonly string[];
-const isPureUiCaps = (caps: readonly string[]) => caps.every((c) => PURE.includes(c));
+/**
+ * `save_plugin` 造出的三种产物都不碰设备发送（能力来自产物种类表），所以"能否自动启用"
+ * 不再需要一份能力黑名单：种类表里没有 `serial.send` / `agent.tool` 这些名字。
+ * 保留这个函数是为了让"启用"分支仍在同一个判断下收敛，将来加种类时只改这里。
+ */
+const isPureUiCaps = (caps: readonly string[]) =>
+  caps.every((c) => c !== "serial.send" && c !== "agent.tool" && c !== "logic.run");
 
 /** 人类可读的批准计划（§7.1：目标、实际影响、差异提示）。 */
 function describePlan(kind: string, effect: string, args: Record<string, unknown>): string {
@@ -497,8 +499,7 @@ export const localToolEntries: AgentToolEntry[] = [
     domain: "plugins",
     provenance: HOST,
     description:
-      `Save an artifact as a reusable local plugin package (uartix-plugin). Args: { kind: one of ${ARTIFACT_KINDS.join("|")}, name: string, payload: object (artifact content per kind; widget/panel payload = {format:'html',html} | {format:'declarative',blocks}; workspacePreset payload = {layout:<dockview JSON>, note?}; workflow payload = {goal:string, steps:[{tool,args?,note?}]} where every tool must be one you can actually call; module payload = {format:'js',code}); id?: string (dotted lowercase, default user.agent.*), desc?: string, enable?: boolean (auto-enable pure-UI plugin), update?: string (existing plugin id to revise), version?: string }. ` +
-      "A workflow artifact is a reusable task template, NOT a macro runner: the user loads it into the Agent composer and it still goes through the current scope and approval rules. " +
+      `Save an artifact as a reusable local artifact (theme / widget / panel). Args: { kind: one of ${ARTIFACT_KINDS.join("|")}, name: string, payload: object (artifact content per kind; widget/panel payload = {format:'html',html} | {format:'declarative',blocks}); id?: string (dotted lowercase, default user.agent.*), desc?: string, enable?: boolean (auto-enable; every artifact kind is pure UI), update?: string (existing artifact id to revise), version?: string }. ` +
       "Iterating on your own work: pass update (or just the same id) — it bumps the version and pushes the previous package onto the rollback stack instead of creating a near-duplicate plugin. " +
       "A name that already exists is refused with `duplicate_plugin_name` plus `existing_candidates` (id/version/createdBy/state) — read that list, then either pass update=\"<id>\" or pick a distinguishable name. Near-duplicate `-2` copies are never minted, because two side-by-side plugins left the user guessing which one is live. " +
       "Only plugins you (the agent) created can be revised silently; user/imported plugins return update_needs_user and are never overwritten. " +
@@ -536,35 +537,13 @@ export const localToolEntries: AgentToolEntry[] = [
       if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
         return notExecuted(callId, "invalid_payload", { hint: "payload 必须是对象（widget/panel 用 {format:'html'|'declarative',…}）" });
       }
-      /** 能力与 contributions 键都取自产物元表：这里不再有第四份手抄（P99a-D1a） */
-      const meta = artifactKindMeta(kind);
       /**
-       * 任务模板（P99a-D1b）的**存在性**检查：结构在元表校验器里，"这几步到底有没有这支工具"只能在这里查
-       * ——`artifact.ts` 是叶子模块，反过来 import 注册表就把插件层焊进 agent 图了（§8-33）。
-       * 不查就会产出一个"看着能跑、每步都撞 unknown_tool"的模板，而那正是这批要清掉的假承诺。
+       * 能力与 contributions 键都取自产物元表：这里不再有第四份手抄（P99a-D1a）。
+       * 旧工作区预设 / 任务模板 / 逻辑模块三种产物随旧插件系统一起退役——它们要么依赖
+       * 已删除的插件库动作入口，要么依赖已删除的 Worker 宿主。今天 AI 能造的只有
+       * 主题 / 小部件 / 面板，种类表就是这句话的唯一出处。
        */
-      if (kind === "workflow") {
-        const t = payload as { steps?: { tool: string }[] };
-        const names = Array.isArray(t.steps) ? t.steps.map((s) => String(s?.tool ?? "")) : [];
-        if (names.length) {
-          const [{ hostEntryNames }, { allPluginToolDefs }, { pluginToolName }] = await Promise.all([
-            import("./hostEntries"),
-            import("../plugins/pluginToolDefs"),
-            import("./toolRegistry"),
-          ]);
-          const known = new Set([
-            ...hostEntryNames(),
-            ...allPluginToolDefs().map((d) => pluginToolName(d.pkgId, d.baseName)),
-          ]);
-          const unknown = [...new Set(names)].filter((n) => !known.has(n));
-          if (unknown.length) {
-            return notExecuted(callId, "unknown_tool_ref", {
-              unknown,
-              hint: "任务模板只能引用本机已有的工具。你自己工具列表里的名字就是合法名字：请改用其中存在的，或把这几步从模板里去掉（插件注册的工具有 plg_ 前缀）",
-            });
-          }
-        }
-      }
+      const meta = artifactKindMeta(kind);
       // id：用户指定或按名称 slug 化。给的 id 若已存在 ⇒ 走下面的版本链更新；
       // 只有"名字撞车但没显式指向它"才加序号后缀，绝不静默覆盖别人的插件
       const provided = typeof a.id === "string" ? a.id.trim().toLowerCase() : "";
@@ -618,7 +597,7 @@ export const localToolEntries: AgentToolEntry[] = [
             id: r.pkg.id,
             name: r.pkg.name,
             version: r.pkg.version,
-            createdBy: r.pkg.provenance.createdBy,
+            createdBy: r.pkg.provenance?.createdBy ?? "user",
             state: r.state,
           }));
         if (sameName.length) {
@@ -642,10 +621,10 @@ export const localToolEntries: AgentToolEntry[] = [
       if (targetId) {
         const rec = getPlugin(targetId);
         if (!rec) return notExecuted(callId, "plugin_not_found", { id: targetId });
-        if (rec.pkg.provenance.createdBy !== "agent") {
+        if ((rec.pkg.provenance?.createdBy ?? "user") !== "agent") {
           return notExecuted(callId, "update_needs_user", {
             id: targetId,
-            createdBy: rec.pkg.provenance.createdBy,
+            createdBy: rec.pkg.provenance?.createdBy ?? "user",
             hint: "该插件不是 Agent 创建的：Agent 只自动改自己存的东西。可以另存一个新 id 交付，或请用户在插件库里批准候选",
           });
         }
@@ -705,7 +684,7 @@ export const localToolEntries: AgentToolEntry[] = [
     domain: "plugins",
     provenance: HOST,
     description:
-      "Enable an installed-but-disabled local plugin by id. Pure-UI plugins auto-enable within scope; plugins carrying serial.send require local approval. A plugin with a `module` artifact must first pass the realm egress lockdown probe — module_probe_failed means it stayed disabled, with the per-entry reason. Args: { id: string }.",
+      "Enable an installed-but-disabled local artifact by id. Every artifact kind AI can create is pure UI, so enabling never touches the device. Args: { id: string }.",
     parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false },
     summarize: (a) => `启用插件 ${String(a.id ?? "")}`,
     /** 携带非纯 UI 能力＝把"能向设备发送"重新挂回投影 → 无条件逐次批准（与旧实现同标准） */
@@ -729,17 +708,14 @@ export const localToolEntries: AgentToolEntry[] = [
       if (record.state === "enabled") {
         return { callId: ctx.callId, ok: true, status: "applied", data: { id, state: "enabled", note: "插件已是启用状态" } };
       }
-      // P99a-B1/B2：带逻辑模块（module 产物）的包必须先臂起 worker 并过封网自证才配启用。
-      // 失败就停在这儿，回执带原因——不是"启用了以后再标红"。
-      const probe = await armModulePackage(id);
-      if (!probe.ok) return notExecuted(ctx.callId, "module_probe_failed", { id, msg: probe.msg });
+      // P99a-B1/B2：带逻辑模块的旧包已随旧插件系统删除，这里只剩"启用产物"一件事。
       const r = setEnabled(id, true);
       if (!r.ok) return notExecuted(ctx.callId, "enable_failed", { id, msg: r.msg });
       return {
         callId: ctx.callId,
         ok: true,
         status: "applied",
-        data: { id, state: "enabled", caps: record.pkg.capabilities, ...(probe.modules ? { modules: probe.modules, note: probe.msg } : {}) },
+        data: { id, state: "enabled", caps: record.pkg.capabilities },
       };
     },
   }),

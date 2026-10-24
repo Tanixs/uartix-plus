@@ -107,7 +107,7 @@ describe("agentAdapter 策略门", () => {
 
     // 退回上一版：栈是来回切换的，所以再调一次又回到 v2
     // （装进来是 installed_disabled，走过一次 approveUpdate 后落回 disabled——两者都非启用，投影都没建）
-    expect(pluginStore.getPlugin(id)?.state).toBe("disabled");
+    expect(pluginStore.getPlugin(id)?.state).toBe("installed_disabled");
     const back = await a.execute(call("rollback_plugin", { id }), ctx("create"));
     expect(back).toMatchObject({ ok: true, status: "applied" });
     expect(pluginStore.getPlugin(id)?.pkg.version).toBe("0.1.0");
@@ -390,34 +390,3 @@ describe("P99a-C1：宿主自省目录的两个前端", () => {
   });
 });
 
-describe("P99a-D1b：任务模板（workflow）在写入期就查工具存在性", () => {
-  const tpl = (steps: unknown[]) => ({ kind: "workflow", name: "巡检台", payload: { goal: "先看通道再调采样率", steps } });
-
-  it("引用不存在的工具 → unknown_tool_ref（而不是存下来等运行时撞 unknown_tool）", async () => {
-    const a = createLocalAgentAdapter({ runId: "r-tpl", gate: fakeGate() });
-    const bad = await a.execute(call("save_plugin", tpl([{ tool: "plot_channels" }, { tool: "no_such_tool" }])), ctx("create"));
-    expect(bad.ok).toBe(false);
-    expect(bad.code).toBe("unknown_tool_ref");
-    expect((bad.data as { unknown: string[] }).unknown).toEqual(["no_such_tool"]);
-    // 回执必须教它下一步：模型自己工具列表里的名字就是合法名字
-    expect(String((bad.data as { hint: string }).hint)).toContain("工具列表");
-    // 只存了一支工具都没查过的坏包：库里不该多出一条僵尸模板
-    const store = await import("../plugins/pluginStore");
-    expect(store.getSnapshot().plugins.some((p) => p.pkg.name === "巡检台")).toBe(false);
-  });
-
-  it("全部步骤都存在 → 装成 workflows 产物，且 capabilities 由元表派生（不含 serial.send）", async () => {
-    const a = createLocalAgentAdapter({ runId: "r-tpl2", gate: fakeGate() });
-    const r = await a.execute(call("save_plugin", tpl([{ tool: "plot_channels", note: "看现有通道" }])), ctx("create"));
-    expect(r.ok).toBe(true);
-    const store = await import("../plugins/pluginStore");
-    const id = (r.data as { pluginId: string }).pluginId;
-    const rec = store.getPlugin(id);
-    expect(rec?.pkg.contributions.workflows).toHaveLength(1);
-    expect(rec?.pkg.capabilities).toEqual(["workflow.compose"]);
-    expect(rec?.pkg.capabilities).not.toContain("serial.send");
-    // 模板不会被自动应用成任何运行态：它只是库里一份可载入的说明
-    const extStore = await import("../ai/extensionStore");
-    expect(extStore.getSnapshot().exts.filter((e) => e.pluginRef === id)).toHaveLength(0);
-  });
-});

@@ -6,12 +6,11 @@
  * （而且产物表在同文件里还被抄了第二份）。P99a 之后：
  *  - 工具名/摘要 → `hostEntries.hostEntryByName()`（entry 上就带 labelZh/summarize）；
  *  - 动作 kind → `toolCatalog.ACTION_LABEL_ZH`（`Record<AppActionKind,…>`，漏配 tsc 直接红）；
- *  - 产物种类 → `plugins/artifact.ARTIFACT_KIND_LABEL`（与插件库同一份）。
+ *  - 产物种类 → `artifact/store.artifactKindLabel`（与产物库同一份）。
  * 本文件只剩"怎么把一条回执画成人话"这件它本来该管的事。
  */
 import { hostEntryByName, hostToolLabel, readableToolName } from "./hostEntries";
 import { actionKindLabel } from "./toolCatalog";
-import { INSTALL_CODE_ZH } from "../market/marketIndex";
 import type { RunEvent } from "./types";
 
 export { actionKindLabel };
@@ -155,8 +154,6 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     return status === "applied" ? "已完成" : status === "read" ? "已读取" : status === "validated" ? "已校验" : status;
   }
   const known: Record<string, string> = {
-    // 市场装链的码：中文在契约层（`marketIndex.INSTALL_CODE_ZH`，穷举 Record），这里只合表不重抄
-    ...INSTALL_CODE_ZH,
     needs_local_approval: "等待批准",
     // P133-D：批准门改成"真的等人"之后多出来的落点（`approval_rejected` 徽章本来就有，
     // 只是旧实现从不产生它——现在它有了出处）

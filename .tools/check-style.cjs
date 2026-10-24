@@ -494,7 +494,6 @@ const J_EXEMPT = {
   "ctlg-switch": "与 .ctlg-row 同元素，样式在 .ctlg-row；这三枚是控件卡类型的身份钩子（插件与 AI 覆写按它定位）",
   "ctlg-monitor": "同上（控件卡类型身份钩子）",
   "ctlg-led": "同上（控件卡类型身份钩子）",
-  "mkt-offshelf-toggle": "与 .plg-fchip 同元素，样式在 plg-fchip；这枚是「下架态开关」的身份钩子",
   "ai-streaming-only": "可见性钩子（流式期间才显示），布局由父级 .ai-msgs 管",
   "ai-edit-input": "与 .input 同元素，样式在 .input",
   "ext-panel-host": "扩展面板的宿主容器钩子，内部内容自带样式",

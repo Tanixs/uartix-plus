@@ -25,8 +25,7 @@ vi.mock("../../panels/panels", () => ({ panelTitleOf: (id: string) => `标题:${
 import { DOMAINS, DOMAIN_PRESETS, DOMAIN_ZH, PRIMARY_TIERS } from "../agent/scopeTiers";
 // P99a-D2：帮助要覆盖的两张新清单一律从代码取——产物种类元表与能力白名单。
 // （`artifact.ts:26` 的注释早就写着"中文名……帮助文本共用这一份"，这一批让那句话真的成立。）
-import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
-import { PLUGIN_CAPS, CAP_LABEL, autoEnableBlockedCaps } from "../plugins/pluginManifest";
+import { ARTIFACT_KINDS, artifactKindMeta } from "../artifact/store";
 // P99a-A5：工具名清单从注册表取（`TOOL_LABEL` 那张手抄表已删）——
 // 帮助覆盖检查因此跟着真实工具面走，不再跟着"有人记得抄的那份"走
 const { hostEntryByName, hostEntryNames } = await import("../agent/hostEntries");
@@ -164,25 +163,9 @@ describe("帮助文档不得落后于实现", () => {
     expect(hits, `这些开关/入口/API 已经不存在，却还在教用户去找：${hits.join("、")}`).toEqual([]);
   });
 
-  it("P99a-D2：六种产物种类的中文名都在帮助里（元表派生，加一类不写文档就红）", () => {
+  it("P99a-D2：三种产物种类的中文名都在帮助里（元表派生，加一类不写文档就红）", () => {
     const missing = ARTIFACT_KINDS.filter((k) => !helpSrc.includes(artifactKindMeta(k).label));
     expect(missing, `这些产物种类没写进帮助：${missing.join(", ")}`).toEqual([]);
-  });
-
-  it("P99a-D2：12 项插件能力的短名都在帮助里（能力名册不许只活在插件库 tooltip 里）", () => {
-    const missing = PLUGIN_CAPS.filter((c) => !helpSrc.includes(CAP_LABEL[c].name));
-    expect(missing, `这些能力没写进帮助：${missing.map((c) => CAP_LABEL[c].name).join("、")}`).toEqual([]);
-  });
-
-  it("P99a-D2：「哪些包不会自动启用」这句安全话术逐个点名补集（漏一个就是假安全感）", () => {
-    // 按 Section 切：整篇帮助里出现过名字不算数——那可能是别处的顺带一提。
-    const sections = helpSrc.split("<Section");
-    const withNote = sections.filter((s) => s.includes("不会自动启用"));
-    expect(withNote.length, "帮助里没有「不会自动启用」这句安全说明").toBeGreaterThan(0);
-    const missing = autoEnableBlockedCaps().filter(
-      (c) => !withNote.some((s) => s.includes(CAP_LABEL[c].name)),
-    );
-    expect(missing, `这些能力不会自动启用，帮助却没说：${missing.map((c) => CAP_LABEL[c].name).join("、")}`).toEqual([]);
   });
 
   it("帮助里那句「目录不含哪些面」必须与真实目录一致（补完一面，这句就得把它划掉）", async () => {
@@ -209,46 +192,6 @@ describe("帮助文档不得落后于实现", () => {
     expect(helpSrc).toContain("仍然逐条弹批准卡");
     // 高危档不跨重启恢复这件事，不说清楚就是埋雷
     expect(helpSrc).toContain("不跨重启恢复");
-  });
-
-  /* ================= P99b-N6 · 帮助第 12 页「插件市场」 =================
-   * 这一组钉子专治两种病：① 加了页签忘了写内容（点了是空白）；
-   * ② 页签写了内容、内容却说的不是实现做的事（用户照着做发现对不上）。
-   */
-  it("P99b-N6：每个页签都有对应的内容块（加了 tab 忘了写＝当场红）", () => {
-    const labels = [...helpSrc.matchAll(/\{ key: "([a-z0-9]+)", label: /g)].map((m) => m[1]);
-    const bodies = [...helpSrc.matchAll(/\{tab === "([a-z0-9]+)" && \(/g)].map((m) => m[1]);
-    expect(labels.length, "页签清单没抓到：HelpModal 的 tabs 写法变了，这条守卫要跟着改").toBeGreaterThanOrEqual(12);
-    const empty = labels.filter((k) => !bodies.includes(k));
-    expect(empty, `这些页签只有名字没有内容：${empty.join("、")}`).toEqual([]);
-    const orphan = bodies.filter((k) => !labels.includes(k));
-    expect(orphan, `这些内容块没有对应页签（写了没人看得见）：${orphan.join("、")}`).toEqual([]);
-  });
-
-  it("P99b-N6：市场那一页四节齐，而且三句承诺各自钉住", () => {
-    const at = helpSrc.indexOf('{tab === "market"');
-    expect(at, "没有市场那一页").toBeGreaterThan(-1);
-    const page = helpSrc.slice(at, helpSrc.indexOf("{tab === ", at + 30) < 0 ? helpSrc.length : helpSrc.indexOf("{tab === ", at + 30));
-    for (const t of ["市场从哪来、什么时候联网", "装进来归谁管", "它替你做了什么、没做什么", "怎么把你做的东西上架"]) {
-      expect(page, `市场那一页缺节「${t}」`).toContain(t);
-    }
-    // 联网时机 / 装前比版本：这两句是最容易被"顺手优化"掉的承诺
-    expect(page).toContain("才会去取");
-    expect(page).toContain("不缓存当现状");
-    expect(page).toContain("version_mismatch");
-    // 放行域与两句原话都从代码取，帮助里不许长出抄本（R4）
-    expect(page).toContain("MARKET_ALLOW_HOSTS.join");
-    expect(page).toContain("marketNoEndorse()");
-    expect(page).toContain("marketInstallNote()");
-    expect(page, "帮助里抄了一份域名清单＝等着过期").not.toContain("raw.githubusercontent.com");
-  });
-
-  it("P99b-N6：帮助里那条「离线一条命令」真存在（写进帮助就得跑得动）", () => {
-    expect(helpSrc).toContain("validate market/pkg/");
-    const cliSrc = readFileSync(here.replace(/[/\\]features[/\\]help[/\\].*$/, "/../scripts/plugin-cli-core.ts"), "utf8");
-    // 它得是**本地**命令：一旦哪天改成"要开着应用才能自检"，帮助那句"离线"就成了假话
-    expect(cliSrc, "validate 不再是本地命令了 ⇒ 帮助里那句「离线一条命令」要改口").toMatch(/LOCAL_COMMANDS\s*=\s*\[[^\]]*"validate"/);
-    expect(cliSrc).toContain("除 validate 外的前提");
   });
 
   /**

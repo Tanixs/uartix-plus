@@ -11,7 +11,6 @@
  */
 import { THEME_LIST, type Settings, type ThemeMode, type WorkspacePreset, type AiPreset, type AiFormat } from "./settingsStore";
 import { LOCALE_LIST } from "../../i18n/strings";
-import { MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
 
 export type Sensitivity = "safe" | "protected" | "secret";
 
@@ -74,7 +73,7 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "agentRestoreTier", type: "boolean", def: false, group: "ai", label: "重启后保留全权执行档", sensitivity: "protected", reversible: true },
   // P109-A：Agent 预算，**0 = 不限制**（默认）。三条一律 `protected` —— 模型不许写自己的上限，
   // 否则"无限预算的成本责任在用户侧"这句话就是空的（settingsTools 只放行 safe 键，
-  // 这条由 settingsSchema.test.ts 里与 marketIndexUrl 同一形状的测试钉住）。
+  // 这条由 settingsSchema.test.ts 里与预算三键同一形状的测试钉住）。
   { key: "agentMaxRounds", type: "int", min: 0, max: 100000, def: 0, group: "ai", label: "Agent 轮数上限（0=不限）", sensitivity: "protected", reversible: true },
   { key: "agentMaxCalls", type: "int", min: 0, max: 100000, def: 0, group: "ai", label: "Agent 工具调用上限（0=不限）", sensitivity: "protected", reversible: true },
   { key: "agentTimeoutMins", type: "int", min: 0, max: 1440, def: 0, group: "ai", label: "Agent 单次任务时限（分钟，0=不限）", sensitivity: "protected", reversible: true },
@@ -84,19 +83,6 @@ export const SETTINGS_SCHEMA: readonly SettingEntry[] = [
   { key: "mcpAllowSend", type: "boolean", def: false, group: "mcp", label: "MCP 允许远程发送", sensitivity: "protected", reversible: false },
   { key: "mcpHighPriv", type: "boolean", def: false, group: "mcp", label: "MCP 允许高权限动作", sensitivity: "protected", reversible: false },
   { key: "mcpToken", type: "string", maxLen: 128, def: "", group: "mcp", label: "MCP 握手 token", sensitivity: "secret", reversible: true },
-  // P157-E3：GitHub 一键发布。token 与 MCP 握手 token 同口径（secret：工具输出只报 configured）；
-  // 属主/话题标 protected —— 这两键决定"发到谁家、进哪个目录"，是信任面不是技术面（同 marketIndexUrl）。
-  { key: "ghToken", type: "string", maxLen: 200, def: "", group: "mcp", label: "GitHub 发布 Token", sensitivity: "secret", reversible: true },
-  { key: "ghOwner", type: "string", maxLen: 39, def: "", group: "mcp", label: "插件发布默认属主", sensitivity: "protected", reversible: true },
-  { key: "ghTopic", type: "string", maxLen: 50, def: "uartix-plugin", group: "mcp", label: "插件发布默认话题", sensitivity: "protected", reversible: true },
-  // P99b-N6：这两键从 N1 起就存在于 store，但一直没进 schema、也没进界面——
-  // 那句「全量声明：每个 Settings 键恰好一条」因此是假的（双向守卫现在钉着它）。
-  // **为什么是 protected 而不是 safe**：`marketIndexUrl` 决定"从哪台机器取包的元数据"。
-  // 让模型能改它，等于给它一条换货架的通道——即便仍有域白名单与 sha256 兜底，这是**信任面**
-  // 而不是技术面（详设 §3-R2）。本批既不新增也不放松任何审批，只是把两个此前只有人能改的键
-  // 放进了 UI，同时声明模型不可改。
-  { key: "marketIndexUrl", type: "string", maxLen: 300, def: MARKET_BUNDLED_INDEX_URL, group: "market", label: "插件市场索引地址", sensitivity: "protected", reversible: true },
-  { key: "marketMirrorPrefix", type: "string", maxLen: 300, def: "", group: "market", label: "插件市场镜像前缀", sensitivity: "protected", reversible: true },
 ] as const satisfies readonly SettingEntry[];
 
 const byKey = new Map(SETTINGS_SCHEMA.map((e) => [e.key as string, e]));

@@ -3,7 +3,7 @@
  * 钉死的是"中文名不再退化成残骸 id、不同主题绝不互相覆盖"这一条。
  */
 import { describe, expect, it } from "vitest";
-import { fnv1a, shortHash, agentPluginId, freeAgentId, isSameAgentArtifact } from "./pluginId";
+import { fnv1a, shortHash, agentPluginId, freeAgentId, isSameAgentArtifact } from "./id";
 
 describe("pluginId", () => {
   it("确定性：同一名字永远同一散列，不同名字不同散列", () => {

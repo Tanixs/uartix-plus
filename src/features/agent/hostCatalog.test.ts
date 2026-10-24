@@ -74,8 +74,6 @@ const ho = vi.hoisted(() => {
       latest: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [`f${i}`, { value: i, text: `${i}.0`, valid: true, ts: i }])) as Record<string, unknown>,
     },
     plugins: { plugins: [] as unknown[] },
-    moduleArtifactsOf: vi.fn(() => [] as unknown[]),
-    pluginToolDefsOf: vi.fn(() => [] as { baseName: string }[]),
     getVersion: vi.fn(async () => "9.9.9-test"),
     failSession: false,
   };
@@ -108,8 +106,6 @@ vi.mock("../controls/controlsStore", () => ({ getSnapshot: () => ho.controls }))
 vi.mock("../table/framesStore", () => ({ getSnapshot: () => ho.frames }));
 vi.mock("../protocol/telemetryStore", () => ({ getSnapshot: () => ho.telemetry }));
 vi.mock("../plugins/pluginStore", () => ({ getSnapshot: () => ho.plugins }));
-vi.mock("../plugins/moduleHost", () => ({ moduleArtifactsOf: ho.moduleArtifactsOf }));
-vi.mock("../plugins/pluginToolDefs", () => ({ pluginToolDefsOf: ho.pluginToolDefsOf }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: ho.getVersion }));
 /**
  * P99c-M：Tauri 命令通道本身钉住。ESM 命名空间是只读的，`core.invoke = …` 那种monkey-patch
@@ -264,44 +260,6 @@ const { POISON, c1b } = vi.hoisted(() => {
         alertCap: 200, autoDiag: false, diagCooldownMin: 10, mutedKeys: ["spike:温度1", "spike:温度2", "spike:温度3"],
       },
     } as Record<string, unknown>,
-    /* P99b-N6 · 插件市场：初值同样得是"取回成功、条目齐、带毒"的一份索引。
-       留一份空索引在这里，下面那两条毒值/键名扫描对 market.* 就等于没扫（§8-54）。 */
-    market: {
-      status: "ready",
-      index: {
-        schemaVersion: 1, name: "测试货架", generatedAt: "2026-09-20", source: "repo:tanixs/market",
-        docsUrl: "", categories: { theme: "主题", panel: "面板" },
-        entries: [
-          {
-            id: "uartix.b", name: "乙主题", author: "作者丙", category: "theme",
-            description: { zh: POISON.marketDesc, en: "english-ding" },
-            version: "1.2.0", packageUrl: POISON.marketUrl, sha256: POISON.marketSha, bytes: 2048,
-            capabilities: ["theme.tokens"], screenshots: ["s1", "s2"],
-            minAppVersion: "0.4.0", updated: "2026-09-18", verified: true,
-            homepage: "https://example.org/b",
-          },
-          {
-            id: "uartix.a", name: "甲面板", author: "作者乙", category: "panel",
-            description: { zh: "另一条说明" },
-            version: "0.1.0", packageUrl: POISON.marketUrl, sha256: POISON.marketSha, bytes: 512,
-            capabilities: [], screenshots: [], minAppVersion: "0.4.0", updated: "2026-09-19",
-          },
-          // 第三条专为"本机比货架新"那一格：少它的话，把 compareInstall 换成
-          // `local === shelf ? "same" : "update"` 这种naive 写法照样绿（探针 P13b 实测过）
-          {
-            id: "uartix.c", name: "丙小件", author: "作者丁", category: "panel",
-            description: { zh: "三条说明" },
-            version: "0.3.0", packageUrl: POISON.marketUrl, sha256: POISON.marketSha, bytes: 128,
-            capabilities: [], screenshots: [], minAppVersion: "0.3.0", updated: "2026-09-17",
-          },
-        ],
-        dropped: [{ id: "uartix.bad", reason: POISON.marketDropped }],
-      },
-      fetchedAt: 1234, elapsedMs: 4321, error: "", viaMirror: false,
-      favorites: [] as string[], appVersion: "0.4.1",
-    } as Record<string, unknown>,
-    marketPending: [] as { entryId: string; phase: string }[],
-    marketRefreshCalls: 0,
   };
   return { POISON, c1b };
 });
@@ -356,20 +314,6 @@ vi.mock("../modbus/slaveStore", () => ({ getSnapshot: () => c1b.slave }));
 vi.mock("../modbus/pollStore", () => ({ getSnapshot: () => c1b.poll }));
 vi.mock("../vdev/vdevStore", () => ({ getSnapshot: () => c1b.vdev }));
 vi.mock("../sentinel/sentinelStore", () => ({ getSnapshot: () => c1b.sentinel }));
-/* P99b-N6 · 市场的两支视图。这里 mock 的形态本身就是那条守卫的一部分：
-   `refreshIndex` 一被调用就抛——"视图不顺手联网"这件事光靠源文本钉防不住改天换个写法，
-   而这一炸会让「目录自洽」那条老用例当场红（R3/G5）。 */
-vi.mock("../market/marketStore", () => ({
-  getMarketSnapshot: () => c1b.market,
-  refreshIndex: () => {
-    c1b.marketRefreshCalls++;
-    throw new Error("视图不许联网刷新：market.* 只读现状，刷新是用户打开那一页的动作");
-  },
-  fetchPackage: () => {
-    throw new Error("视图不许取包");
-  },
-}));
-vi.mock("../market/marketPending", () => ({ marketPendingSnapshot: () => c1b.marketPending }));
 
 const { CATALOG_VIEWS, catalogMenu, readCatalog, runtimeFacts, RUNTIME_FACTS_MAX } = await import("./hostCatalog");
 
@@ -382,8 +326,6 @@ beforeEach(() => {
   ho.operator.pkg = null;
   ho.frames.rows = makeRows(3);
   ho.plugins.plugins = [{ pkg: { id: "user.agent.a", name: "A", version: "0.1.0", capabilities: ["theme.tokens"], provenance: { createdBy: "agent" }, artifacts: {} }, state: "enabled", versions: [] }];
-  ho.moduleArtifactsOf.mockReturnValue([]);
-  ho.pluginToolDefsOf.mockReturnValue([]);
 });
 
 describe("hostCatalog：目录自洽（菜单=能点到的菜）", () => {
@@ -449,16 +391,13 @@ describe("hostCatalog：目录自洽（菜单=能点到的菜）", () => {
     const ALLOWED = [
       "../analysis/analysisSnapshot", "../analysis/analysisStore",
       "../controls/commandStore", "../controls/controlsStore",
-      // P99b-N6：插件市场那两支。`marketIndex` 是纯契约函数（compareInstall/compat），
-      // `marketStore` 只被读快照——**它带 refreshIndex，读者一句都不许碰**（G5 那条钉）。
-      "../market/marketIndex", "../market/marketPending", "../market/marketStore",
       "../modbus/pollStore", "../modbus/slaveStore",
       "../operator/operatorStore",
       // P99c-O1：编排器活值。它自己不去碰 bind/engine，只调 `readOrchestratorRuntime`（那里只有一份判定）
       "../orchestrator/orchRuntimeRead",
       "../orchestrator/orchestratorStore", "../orchestrator/types",
       "../plot/plotStore", "../plot3d/plot3dStore",
-      "../plugins/moduleHost", "../plugins/pluginStore", "../plugins/pluginToolDefs",
+      "../plugins/pluginStore",
       "../protocol/telemetryStore", "../protocol/templateStore",
       // P121-E2（2026-09-30 点头）：`commands` 列表要报出引用式命令背后的**谱名**。
       // 只读 `getTemplate().name` 一个字段——谱的写方法（addTemplate/patchField/clearAll…）
@@ -615,15 +554,12 @@ describe("hostCatalog：各视图内容口径", () => {
     expect(d.serial.error).toBe("端口被占用");
   });
 
-  it("plugins 视图带来源/版本链/模块与工具（list_plugins 就是它的投影）", async () => {
-    ho.moduleArtifactsOf.mockReturnValue([{ path: "m.js" }]);
-    ho.pluginToolDefsOf.mockReturnValue([{ baseName: "ping" }]);
+  it("plugins 视图带来源与版本链（list_plugins 就是它的投影）", async () => {
     const r = await readCatalog("plugins");
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const item = (r.data as { items: Record<string, unknown>[] }).items[0];
-    expect(item).toMatchObject({ id: "user.agent.a", name: "A", version: "0.1.0", state: "enabled", caps: ["theme.tokens"], createdBy: "agent", modules: 1 });
-    expect(item.tools).toEqual(["ping"]);
+    expect(item).toMatchObject({ id: "user.agent.a", name: "A", version: "0.1.0", state: "enabled", caps: ["theme.tokens"], createdBy: "agent" });
     expect(item.historyVersions).toBe(0);
   });
 
@@ -712,8 +648,6 @@ describe("hostCatalog：C1b 七面 + N6 市场两支的字段封闭", () => {
     { path: "sequencer.suites" }, { path: "sequencer.suites/<id>", id: "s1" },
     { path: "analysis.last" }, { path: "modbus.slave" }, { path: "modbus.poll" },
     { path: "vdev.devices" }, { path: "sentinel.health" },
-    // P99b-N6：市场那两支一起进扫描（毒值/键名两条断言对它们同样成立）
-    { path: "market.status" }, { path: "market.entries" },
   ];
   /** 串行读（并发 dynamic import 同一被 mock 模块会拿到两份实例，见上面 byId 循环的注释） */
   async function readNew() {
@@ -789,118 +723,6 @@ describe("hostCatalog：C1b 七面 + N6 市场两支的字段封闭", () => {
   });
 });
 
-/* ================= P99b-N6 · market 两支：只读、不联网、对照用同一支判定 =================
- * 这一组的风险与 C1b 七面不同：七面怕"整包外带"，这两支怕**顺手刷新**。
- * 市场的"只有打开那一页才联网"是用户能感知的承诺（N1 起的第一条），模型问一句"货架上有什么"
- * 就把人推出这个承诺，等于拿自省面当后门——所以源文本钉 + 行为钉 + mock 里那记会炸的 refreshIndex 一起上。
- */
-describe("P99b-N6 · hostCatalog：market.status / market.entries", () => {
-  type Data = Record<string, unknown>;
-  const items = (r: CatalogReadResult) => ((r.data as Data).items ?? []) as Data[];
-
-  it("两支都在目录里，且都归「插件市场」这一组", () => {
-    const ms = CATALOG_VIEWS.filter((v) => v.group === "market");
-    expect(ms.map((v) => v.path)).toEqual(["market.status", "market.entries"]);
-    for (const v of ms) expect(v.gives.length, `${v.path} 没写能给哪些字段`).toBeGreaterThan(20);
-  });
-
-  it("status 读的是现状：几条 / 被剔几 / 走没走镜像 / 耗时，一个都不少", async () => {
-    const r = await readCatalog("market.status");
-    expect(r.ok).toBe(true);
-    const d = r.data as Data;
-    expect(d.available).toBe(true);
-    expect(d.entryCount).toBe(3);
-    // 货架页显示得、AI 读不到就是不对称（详设 §4-5）
-    expect(d.droppedCount).toBe(1);
-    expect(d.viaMirror).toBe(false);
-    expect(d.elapsedMs).toBe(4321);
-    expect(d.fetchedAt).toBe(1234);
-    expect(d.status).toBe("ready");
-  });
-
-  it("未取过 / 取回失败：照实说没有，并指向该去哪儿，且不回一份空货架当现状", async () => {
-    const saved = { ...c1b.market } as Record<string, unknown>;
-    try {
-      for (const [status, err] of [["idle", ""], ["failed", "拉不到索引（3.2 s）：直连不通"]] as const) {
-        c1b.market.index = null;
-        c1b.market.status = status;
-        c1b.market.error = err;
-        for (const p of ["market.status", "market.entries"]) {
-          const r = await readCatalog(p);
-          expect(r.ok, `${p} 在未取过时应当仍是一次成功的读取`).toBe(true);
-          const d = r.data as Data;
-          expect(d.available, `${p} 没照实说"没取过"`).toBe(false);
-          expect(String(d.next), `${p} 没说该去哪儿`).toContain("插件市场");
-          expect(String(d.next)).toContain("不替你联网刷新");
-        }
-      }
-    } finally {
-      c1b.market.index = saved.index;
-      c1b.market.status = saved.status;
-      c1b.market.error = saved.error;
-    }
-  });
-
-  it("本机有旧版是 update、本机更新是 newer-than-shelf：换 naive 写法就红（探针 P13b）", async () => {
-    ho.plugins.plugins.push(
-      { pkg: { id: "uartix.b", version: "1.1.0" } },
-      { pkg: { id: "uartix.c", version: "0.9.0" } },
-    );
-    try {
-      const r = await readCatalog("market.entries");
-      const byId = Object.fromEntries(items(r).map((x) => [x.id as string, x]));
-      expect(byId["uartix.b"].install, "本机 1.1.0 / 货架 1.2.0 该是 update").toBe("update");
-      expect(byId["uartix.a"].install, "本机没有的该是 absent").toBe("absent");
-      // 这一格是"local !== shelf 就叫 update"那种抄本写法的照妖镜
-      expect(byId["uartix.c"].install, "本机 0.9.0 / 货架 0.3.0 该是 newer-than-shelf").toBe("newer-than-shelf");
-      expect(byId["uartix.b"].verified).toBe(true);
-      expect(byId["uartix.b"].shots).toBe(2);
-      // 描述是投稿人写的自由文本：只给长度
-      expect(byId["uartix.a"].descLen).toBe(5);
-      // 次序按 id 稳定（§3-1）
-      expect(items(r).map((x) => x.id)).toEqual(["uartix.a", "uartix.b", "uartix.c"]);
-    } finally {
-      ho.plugins.plugins.length = 0;
-    }
-  });
-
-  it("有一条在飞的请求时才带 pending，没有就这个键压根不出现", async () => {
-    const before = await readCatalog("market.entries");
-    expect(items(before).some((x) => "pending" in x), "没排队却回了 pending").toBe(false);
-    c1b.marketPending.push({ entryId: "uartix.b", phase: "awaiting_you" });
-    try {
-      const after = await readCatalog("market.entries");
-      const byId = Object.fromEntries(items(after).map((x) => [x.id as string, x]));
-      expect(byId["uartix.b"].pending).toBe("awaiting_you");
-      expect("pending" in byId["uartix.a"], "没排队的那条不该带 pending").toBe(false);
-    } finally {
-      c1b.marketPending.length = 0;
-    }
-  });
-
-  it("读这两支一次都不会触发刷新（计数器 + mock 里那记会炸的 refreshIndex 两路一起钉）", async () => {
-    await readCatalog("market.status");
-    await readCatalog("market.entries");
-    expect(c1b.marketRefreshCalls, "自省面替用户联网了").toBe(0);
-  });
-
-  it("视图源码里不许出现 refreshIndex / fetch（R3 的源文本半边）", () => {
-    const src = readFileSync(fileURLToPath(new URL("./hostCatalog.ts", import.meta.url)), "utf8");
-    const start = src.indexOf("P99b-N6：插件市场（两支都不联网）");
-    expect(start, "市场那一段的锚点没了：这条守卫要跟着改").toBeGreaterThan(-1);
-    const body = src.slice(start, src.indexOf("\n];", start));
-    // 切片自己得先站得住：锚点找错、切到空串，后面四条断言就全是"凭空通过"（§8-52）
-    expect(body).toContain("market.entries");
-    expect(body.length, "切片小得不像两支视图：锚点或收尾找错了").toBeGreaterThan(600);
-    for (const bad of ["refreshIndex(", "fetch(", "fetchPackage(", "invoke("]) {
-      expect(body, `market 视图里出现了 ${bad} ⇒ 自省面开始替用户联网`).not.toContain(bad);
-    }
-    // 对照只能引契约那一份：视图里自己 `version.split(".")` 就是第二套判定（徽章与回执会分叉）
-    expect(body).toContain("compareInstall(");
-    expect(body, "市场视图自己比版本号＝第二套判定，与货架徽章会分叉").not.toMatch(/versions\.get\([^)]*\)\s*[=!]==?\s*e\.version|e\.version\s*[=!]==?\s*versions\.get/);
-  });
-});
-
 /* ================= P99c-O1：编排器活值进目录（一处判定，两处投影） ================= */
 describe("P99c-O1 · orchestrator.runtime", () => {
   it("给的是计数与阶段：三处原文一个都不漏，长值截断带标记（A7）", async () => {
@@ -969,25 +791,23 @@ describe("P99c-M · 市场视图的网络层探针", () => {
       throw new Error("守卫夹具：自省面不许出网");
     }) as typeof globalThis.fetch;
     try {
-      await readCatalog("market.status");
-      await readCatalog("market.entries");
+      await readCatalog("plugins");
       await readCatalog("orchestrator.runtime");
       expect(fetchCalls, `读一次目录就出网了：${fetchCalls.join("、")}`).toEqual([]);
       // 正向对照：同一颗探针抓得住一次真调用
-      await globalThis.fetch("/market/index.json").catch(() => undefined);
+      await globalThis.fetch("/__probe__").catch(() => undefined);
       expect(fetchCalls.length, "fetch 这颗探针根本没接住调用，上面那条绿是空的").toBe(1);
     } finally {
       globalThis.fetch = real;
     }
     fetchCalls = [];
-    await readCatalog("market.status");
+    await readCatalog("plugins");
     expect(fetchCalls, "还原后又被叫上了：说明出网的是这条读路径").toEqual([]);
   });
 
   it("invoke 那一层也一样：市场读面不碰任何 Tauri 通道", async () => {
     netSpy.invokes.length = 0;
-    await readCatalog("market.status");
-    await readCatalog("market.entries");
+    await readCatalog("plugins");
     await readCatalog("orchestrator.runtime");
     expect(netSpy.invokes, `读目录把命令发出去了：${netSpy.invokes.join("、")}`).toEqual([]);
     // 正向对照：这颗探针接得住一次真调用（不然上面的空数组是假的）
