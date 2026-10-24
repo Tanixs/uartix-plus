@@ -425,6 +425,26 @@ export async function setEnabled(id: string, on: boolean): Promise<void> {
 }
 
 /**
+ * 把一份草稿转成**正式安装**（P174-B1）。
+ *
+ * 转正**必须走批准卡**：草稿是"谁都能写进来的东西"，它凭什么直接变成已装插件？
+ * 所以这里只出安装计划；要弹批准条还是直接落盘，由调用方按 `needsApproval` 决定——
+ * **不存在任何"免批准转正"路径**。
+ *
+ * 转正成功后清掉草稿：一份草稿已经变成账本上的事实，再留着就是两个真相。
+ */
+export async function promoteDraft(name: string): Promise<{ plan: InstallPlan; installed: boolean }> {
+  if (!paths) paths = await invoke<ExtPaths>("ext_paths");
+  const { draftDirOf, discardDraft } = await import("./draft");
+  const dir = draftDirOf(paths.appDir, name);
+  const plan = await planFolder(dir, `draft-${Date.now().toString(36)}`);
+  if (needsApproval(plan)) return { plan, installed: false };
+  await commitInstall(plan);
+  await discardDraft(paths.appDir, name);
+  return { plan, installed: true };
+}
+
+/**
  * 绑定/解绑一个外部目录（`$EXT:<key>`）。`path` 传空串 = 解绑。
  *
  * 与工作区根同样的"只影响下一次启动"：`--allow-fs-write` 是启动参数。
