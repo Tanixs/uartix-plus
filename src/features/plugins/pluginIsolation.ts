@@ -9,20 +9,8 @@
  */
 import type { PluginCap } from "./pluginManifest";
 
-/** 新插件 iframe 的 CSP meta 内容。img 允许 data:/blob:；一切远程获取全部禁用。 */
-export const PLUGIN_IFRAME_CSP = [
-  "default-src 'none'",
-  "script-src 'unsafe-inline'",
-  "style-src 'unsafe-inline'",
-  "img-src data: blob:",
-  "font-src data:",
-  "connect-src 'none'",
-  "frame-src 'none'",
-  "object-src 'none'",
-  "media-src 'none'",
-  "form-action 'none'",
-  "base-uri 'none'",
-].join("; ");
+import { PLUGIN_IFRAME_CSP } from "../artifact/csp";
+export { PLUGIN_IFRAME_CSP };
 
 /**
  * iframe → 宿主的**全部**入站消息类型。新增一支就必须在这里加一行，
