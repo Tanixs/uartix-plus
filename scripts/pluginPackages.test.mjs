@@ -5,14 +5,14 @@
  * 被校验器拒了，而那条错误只在面板顶部一行黄字里出现（用户不会去看，或者看的时候已经滚走了）。
  * 这条门把"仓库自带的插件是否合法"变成每次提交都验的一件事——顺便也验了校验器本身没写歪。
  *
- * 覆盖面：`plugins/` 与 `examples/extensions/` 下所有带 `plugin.json` 的目录。
+ * 覆盖面：`plugins/` 与 `examples/plugins/` 下所有带 `plugin.json` 的目录。
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { MANIFEST_FILE, validateExtension } from "../src/features/extensions/manifest.ts";
-import { guardThemeCss } from "../src/features/extensions/themeCss.ts";
+import { MANIFEST_FILE, validateExtension } from "../src/features/plugins/engine/manifest.ts";
+import { guardThemeCss } from "../src/features/plugins/engine/themeCss.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -39,7 +39,7 @@ function findPackages(dir) {
       out.push({ dir: p, name, raw: mf });
       continue; // 一个包就是一个目录，不往里递归（包内的子目录不是包）
     } catch {
-      out.push(...findPackages(p)); // 没清单 ⇒ 可能是分组目录（plugins/ / examples/extensions/）
+      out.push(...findPackages(p)); // 没清单 ⇒ 可能是分组目录（plugins/ / examples/plugins/）
     }
   }
   return out;

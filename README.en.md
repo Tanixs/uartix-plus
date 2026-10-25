@@ -26,6 +26,8 @@ Define protocols by drag-and-drop · Parse and visualise in real time · Debug i
 
 ![Uartix+ main window: templates, frame canvas, properties, 2D plot, data table and control canvas](public/images/overview-en.png)
 
+> **Highlights in v0.6.0 — the plugin ecosystem ships.** Plugins use one v3 directory format and are managed inside Settings; a GitHub-topic market with repo covers and README previews, AI-written plugin drafts with preview, permission approval before anything runs, host logs and an append-only action journal; the YOLO training workbench gains run duration, a working deploy page and fixed save/publish paths.
+
 ---
 
 ## What it is
@@ -50,12 +52,13 @@ It is far more than a serial terminal that echoes characters. **Protocols need n
 | Automated testing & event orchestration | ❌ | ❌ | **block sequencer + ECA orchestrator + CI-ready CLI** |
 | IMU calibration | separate tools | ❌ | **ellipsoid 9-parameter fit + six-face wizard + live compensation preview** |
 | AI-generated components and actions | ❌ | ❌ | **built in (since v0.3.6)** |
+| Plugin system (panels / themes / widgets / presets / tasks) | ❌ | ❌ | **v3 packages + AI drafts + permission approval (v0.6.0)** |
 
 ---
 
 ## Capabilities
 
-- **21 panels**: protocol templates, Hex stream, structure discovery, frame canvas, data table, 2D plot, spectrum analysis, 3D attitude, 3D trajectory, video link, console, control canvas, Modbus workbench, virtual device workshop, test sequencer, auto-orchestrator, sentinel, AI assistant, properties, metrics and the TX frame builder — every one dockable / splittable / **tear-off into its own window**, with the `+ Panel` menu grouped in five sections
+- **21 built-in panels**: protocol templates, Hex stream, structure discovery, frame canvas, data table, 2D plot, spectrum analysis, 3D attitude, 3D trajectory, video link, console, control canvas, Modbus workbench, virtual device workshop, test sequencer, auto-orchestrator, sentinel, AI assistant, properties, metrics and the TX frame builder — every one dockable / splittable / **tear-off into its own window**, with the `+ Panel` menu grouped in five sections; **plugin-contributed panels** join the same `+ Panel` menu once enabled
 - **End-to-end industrial Modbus**: full RTU / TCP preset clusters out of the box, read responses expanded into `Register1..N`, coil areas unpacked one channel per bit, and exception codes carry their spec wording. The **Modbus Workbench** panel turns the machine into a virtual slave (editable data banks plus fault injection: never reply / reply a chosen exception code / reply delay) or a master that polls registers and coils on a schedule and writes the values straight into variables — **you can exercise the whole chain with no RS-485 hardware**
 - **Hardware-free full-chain debugging**: the **Virtual Device Workshop** plays a real instrument from a JSON spec — six signal models (including a first-order plant), drift, frame drops and command responses (`SET DUTY 45` number capture), and frames streamed out over UDP / TCP / serial; paired with the built-in **PID relay-feedback autotune** orchestration template, the whole connect-tune-verify loop runs with zero hardware
 - **Testing & automation**: the **sequencer** drags blocks into automated regression tests (frame-triggered runs, HTML reports) and its `seq-cli` ships a loopback device plus JUnit output for CI; the **auto-orchestrator** fuses the sequencer with triggers into an ECA engine (12 event kinds × 23 block kinds, typed variables and a sandboxed expression language); the **sentinel** silently watches for spikes, unknown frame types and silence, with one-click AI root-cause diagnosis
@@ -148,9 +151,9 @@ Interfaces cover serial / TCP client / TCP server / UDP / Bluetooth BLE, plus th
 
 ### AI assistant
 
-Since v0.3.6 the AI is not a chat box but an in-app engine.
+Since v0.3.6 the AI is not a chat box but an in-app engine; since v0.6.0 its creations land on the **plugin engine** — first as drafts you preview, promote and approve.
 
-- **Create by conversation**: protocol templates / control cards / command library / frame-factory protocols / themes / global styles / dockable panels / sandbox widgets / borderless widgets / direct actions / privileged scripts — ten output kinds, each installed from a confirmation card
+- **Create by conversation**: protocol templates / control cards / command library / themes / dockable panels / sandbox widgets / workspace presets / task templates. Whole panels, themes and widgets are written as plugin drafts — never installed or enabled automatically; you preview them in plugin management and decide whether to promote
 - **Say it, it happens**: requests such as opening a panel, switching layout, wiring an automation ("event → blocks") or generating and starting a virtual device are executed directly rather than described, through 40 whitelisted actions; destructive ones are flagged red and still need your confirmation
 - **Reads your screen**: paste or attach images (up to 4 per message, auto-compressed); "analyse this waveform" makes the AI screenshot the 2D plot itself; archaeology reports may only reason over numbered deterministic evidence, no invented numbers
 - **Protocol clusters in one shot**: multi-frame protocols are generated as a whole cluster, auto-grouped and archived, disabled until you enable them
@@ -158,6 +161,18 @@ Since v0.3.6 the AI is not a chat box but an in-app engine.
 - **Everything is an API**: sandbox components receive `window.uartix` — keyboard / cursor listening, AI reasoning awareness, asking the AI, custom context menus, window control, cross-widget broadcast, speech, theme subscription
 - **Borderless mode**: transparent window, drag-to-move while held, snap-and-dock on release, screen-edge clamping — build floating dashboards, notification strips, or a desktop pet (the pet is only an example; the capability is general)
 - **Visible and safe**: multi-stage reasoning streamed as it happens, no install button until generation completes, and sandbox components follow global theme changes live
+
+### Plugin engine (v0.6.0)
+
+A plugin is not a pasted script: it is a package with a manifest, a permission surface and an approval record. The host starts, stops, isolates and accounts for it; you make the call.
+
+- **v3 package**: one directory — `plugin.json` (`format: uartix-plugin`, `schemaVersion: 3`) plus optional `main.mjs` (isolated Node subprocess), panel/widget HTML, theme CSS, workspace presets and task templates. Legacy declarative packages are no longer installed or silently migrated.
+- **Permissions and approval**: the manifest declares fs read/write, subprocess, network and UI capabilities. Installed plugins are disabled until you approve their permission surface; writes are confined by Node's kernel-level `--allow-fs-write`, and panels/widgets run in opaque-origin iframes with no access to the host DOM, cookies or other plugins.
+- **One manager**: Settings → Plugin management lists plugins by what they produce (panels / themes / widgets / presets & tasks / commands / composite), with search, enable/disable, versions and trust state, directory bindings, cover and display metadata, GitHub publishing and batch removal.
+- **Market**: searches the GitHub topic `uartix-plugin`; cards show repo covers and the detail view shows README previews. Installing downloads, unpacks and validates the package, then shows the permission list for approval. The market is online only while you open and search it.
+- **AI drafts**: the AI writes panels / themes / widgets / presets / templates through `plugin_draft_save`. Drafts are **not installed plugins** — they cannot start; preview one in place, then choose Convert to plugin and pass the approval card. Promoted plugins start disabled; once enabled, their panels appear in `+ Panel`.
+- **Workspace and external roots**: manifests only name symbolic paths such as `$WS` and `$EXT:<key>`; you bind real directories once under Directory bindings, and the host expands them into the process arguments. Binding changes apply on the next start.
+- **Observability**: host stdout/stderr go to the run-log surface and to `plugins/<id>/logs/host.log` (line-safe rotation, 2 MiB default); install, approval, enable/disable, commands, bindings and profile switches are appended to an action journal that can be rebuilt and verified.
 
 ### Shipping it out
 
@@ -214,7 +229,7 @@ sudo dnf install libwebkit2gtk-4.1-devel build-essential libxdo-devel \
   openssl-devel libayatana-appindicator3-devel librsvg2-devel
 ```
 
-Before committing, make sure `cargo test` (78 Rust cases), `npm test` (455 vitest cases across 34 files) and `npx tsc --noEmit` all pass.
+Before committing, make sure `cargo test`, `npm test` (the full front-end suite) and `npx tsc --noEmit` all pass; run `npm run check:all` for the UI static gates.
 
 <details>
 <summary><b>Project layout</b></summary>
@@ -222,7 +237,8 @@ Before committing, make sure `cargo test` (78 Rust cases), `npm test` (455 vites
 ```
 src/
   features/
-    ai/             AI assistant: chat and streaming, ten block installers, uartix bridge, widget host, App Action API
+    ai/             AI assistant: chat and streaming, plugin draft tools, uartix bridge, App Action API
+    plugins/        Plugin system: v3 manifest and trust, drafts/promotion, GitHub market, host plan, panel bridge, run logs
     protocol/       template engine, drag-select definition, properties panel
     framecanvas/    Hex frame canvas (Canvas rendering + virtualisation + archive pool)
     controls/       control canvas, widgets, command library, scripts
@@ -239,7 +255,7 @@ src/
   panels/           dockview panel registry and menu grouping
   shell/            custom title bar, application shell
   shared/           icons, shared components, byte parsing helpers, drag kernel
-src-tauri/          Rust: serial, TCP / UDP, BLE, parallel parsing, checksums, XMODEM,
+src-tauri/          Rust: serial, TCP / UDP, BLE, parallel parsing, checksums, XMODEM, plugin host / fs cage,
                     session recording, virtual device simulation, AI streaming, MCP bridge, file IO
 ```
 

@@ -1,7 +1,8 @@
 /**
  * P94-G1 静态 import 环守卫（P92-F 白屏的制度化）。
  *
- * 为什么需要它：`pluginStore` 模块顶层调 `extRuntime.applyStyleExts`，而两者同处一个静态环
+ * 为什么需要它：当年的插件库在模块顶层调样式运行时（`uiRuntime.applyThemeRuntime`），
+ * 而两者同处一个静态环
  * ⇒ 求值期撞进对方未初始化的 `let` ⇒ TDZ ⇒ React 从未挂载 = 整窗白屏。而 **tsc / vitest /
  * build / cargo 当时全绿**（rollup 把环拉平，vitest 的解析顺序也不同），只有 dev 的 ESM
  * 实时求值会炸。仓库此前对循环依赖零护栏（eslint 未装 import/no-cycle）。
@@ -22,17 +23,17 @@ const SRC = path.join(__dirname, "..", "src");
 const BANNED_EDGES = [
   {
     from: "features/plugins/",
-    to: "features/ai/extRuntime.ts",
-    why: "P92-F 白屏根因：pluginStore 求值期顶层 restoreProjections() 会撞进 extRuntime 未初始化的 let appliedVars。plugins/ 全目录都不准静态依赖样式运行时——反向调用走 pluginStore 已导出的 setStyleApplier(fn)。",
+    to: "features/ai/uiRuntime.ts",
+    why: "P92-F 白屏根因：插件层在模块求值期调样式运行时，会撞进对方尚未初始化的层登记表（let appliedVars）。plugins/ 全目录都不准静态依赖样式运行时；「谁在画」经 engine/activeTheme 这个零依赖叶子传递。",
   },
 ];
 
 /* ============ ② 短环基线（长度 2/3）：新增即红，消除请同步删条目 ============ */
 /* ============ ② 短环允许清单（**P99a-D1c 起为空**）============
- * 原来登记的 4 条全部是 extRuntime 那圈历史边：
- *   appActions ↔ extRuntime、extRuntime ↔ widgetHub、
- *   appActions ↔ xferStore ↔ extRuntime、appActions ↔ sentinelStore ↔ extRuntime
- * P99a-D1c 删掉主世界脚本通道后，extRuntime 不再 import appActions / widgetHub / chatStore /
+ * 原来登记的 4 条全部是 uiRuntime 那圈历史边：
+ *   appActions ↔ uiRuntime、uiRuntime ↔ widgetHub、
+ *   appActions ↔ xferStore ↔ uiRuntime、appActions ↔ sentinelStore ↔ uiRuntime
+ * P99a-D1c 删掉主世界脚本通道后，uiRuntime 不再 import appActions / widgetHub / chatStore /
  * framesBus / variableStore / serialStore / settingsStore（那些 import 只为喂 ScriptApi），
  * 四条环当场一起消失——**删对代码会把环守卫变成空清单**，这比给清单再加一条好得多。
  * 现在任何一条短环都是新增，直接红。 */
@@ -52,10 +53,6 @@ const ALLOWED_EVAL_CALLS = new Set([
   // 编排器绑定层在求值期起引擎心跳并同步一次（历史包袱：应改为 App 显式 start）
   "features/orchestrator/orchestratorBind.ts::setInterval(tick, TICK_MS)",
   "features/orchestrator/orchestratorBind.ts::syncFromStore()",
-  // 插件库启动重建 theme 投影（P91-D1 单一真相；样式层已改走下面的注册边）
-  "features/plugins/pluginStore.ts::restoreProjections()",
-  // P92-F 的替代边：extRuntime 求值时把样式层应用者交给 pluginStore（注册即补跑脏活）
-  "features/ai/extRuntime.ts::setStyleApplier(applyStyleExts)",
 ]);
 
 /* ============================ 采集 ============================ */

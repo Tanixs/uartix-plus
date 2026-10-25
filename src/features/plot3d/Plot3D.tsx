@@ -37,7 +37,7 @@ import { fitEllipsoid, grade, FIT_MIN_POINTS, type FitOk } from "./ellipsoidFit"
 import { attachPdragZone } from "../../shared/pointerDrag";
 import { useSettings } from "../settings/settingsStore";
 import { useOperator } from "../operator/operatorStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { Flyout } from "../../shared/Flyout";
 import { Glyph, IconAutoSpin, IconCheck, IconChevron, IconCircle, IconClose, IconCrosshair, IconDot, IconEye, IconEyeOff, IconGear, IconLock, IconPlay, IconRotate, IconTarget, IconTrash, IconViewFront, IconViewIso, IconViewSide, IconViewTop } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";

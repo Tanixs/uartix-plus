@@ -309,7 +309,7 @@
     "set-ctl",
     "set-desc",
     "set-drag",
-    "set-ext-page",
+    "set-plugins-page",
     "set-group-title",
     "set-hint",
     "set-modal",

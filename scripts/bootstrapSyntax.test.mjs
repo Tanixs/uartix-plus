@@ -1,7 +1,7 @@
 /**
  * P174-A3：引导脚本的**真语法校验**。
  *
- * 为什么单独一个 .mjs 而不是并进 `src/features/extensions/bootstrap.test.ts`：
+ * 为什么单独一个 .mjs 而不是并进 `src/features/plugins/engine/bootstrap.test.ts`：
  * 这条要用 `node --check` 起子进程，而 `src/` 是浏览器环境、tsconfig 里没有 node 类型，
  * 引 `node:child_process` 会让 `tsc --noEmit` 直接红。**判据该搬家，不该靠 @ts-ignore 糊。**
  *
@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { BOOTSTRAP_FILE, BOOTSTRAP_SOURCE } from "../src/features/extensions/bootstrap.ts";
+import { BOOTSTRAP_FILE, BOOTSTRAP_SOURCE } from "../src/features/plugins/engine/bootstrap.ts";
 
 const dir = mkdtempSync(path.join(tmpdir(), "uartix-boot-"));
 afterAll(() => {

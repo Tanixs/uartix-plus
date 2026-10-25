@@ -14,7 +14,7 @@ import * as store from "./templateStore";
 import { fieldSize } from "./templateStore";
 import { DECLARED_DEFAULT, VARIABLE_TYPES } from "./fieldTypes";
 import * as sendStore from "../send/sendStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { requestOpenPanel } from "../ai/appBus";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";

@@ -3,7 +3,7 @@ import { tx, useLocale } from "../../i18n/strings";
 import { IconPlay, IconStop, IconTrash } from "../../shared/icons";
 import * as slave from "./slaveStore";
 import * as pollStore from "./pollStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { MB_EXCEPTION_LABELS, type MbArea } from "./mb";
 import { ModbusPoll } from "./ModbusPoll";
 

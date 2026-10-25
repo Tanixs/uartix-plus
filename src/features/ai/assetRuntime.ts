@@ -102,7 +102,7 @@ export function clearAssetLayer(layerId: string): void {
   dropRootVars(layerId);
 }
 
-/** 在画的主题资产层：`extRuntime` 每次重合成都调它 */
+/** 在画的主题资产层：`uiRuntime` 每次重合成都调它 */
 export function syncThemeAssets(assets: readonly ThemeAsset[]): number {
   return syncAssetLayer(ASSET_LAYER_ID, ROOT_LAYER.assets, assets);
 }

@@ -56,7 +56,8 @@
       header {
         display: flex;
         align-items: center;
-        gap: 10px;
+        flex-wrap: wrap;
+        gap: 6px 10px;
         padding: 8px 12px;
         border-bottom: 1px solid var(--line);
         flex: 0 0 auto;
@@ -65,6 +66,7 @@
         font-size: 13px;
         font-weight: 600;
         margin: 0;
+        white-space: nowrap;
       }
       header .path {
         color: var(--dim);
@@ -73,7 +75,9 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        max-width: 46%;
+        max-width: 100%;
+        flex: 1 1 220px;
+        min-width: 0;
       }
       .spacer {
         flex: 1 1 auto;
@@ -84,6 +88,11 @@
         padding: 0 8px;
         border-bottom: 1px solid var(--line);
         flex: 0 0 auto;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      nav::-webkit-scrollbar {
+        display: none;
       }
       nav button {
         background: none;
@@ -93,6 +102,7 @@
         padding: 6px 12px;
         font: inherit;
         cursor: pointer;
+        white-space: nowrap;
       }
       nav button.on {
         color: var(--fg);
@@ -218,8 +228,13 @@
         color: var(--warn);
         border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
       }
+      .tablewrap {
+        overflow-x: auto;
+        margin: 0 -2px;
+      }
       table {
         width: 100%;
+        min-width: 540px;
         border-collapse: collapse;
         font-size: 11px;
       }
@@ -229,6 +244,11 @@
         padding: 3px 8px;
         border-bottom: 1px solid var(--line);
         white-space: nowrap;
+      }
+      td.name {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       th {
         color: var(--dim);
@@ -254,19 +274,19 @@
       .cfglist { display: flex; flex-direction: column; gap: 6px; }
       .cfgrow {
         display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-        border: 1px solid var(--border); border-radius: var(--radius-md);
-        background: var(--bg-inset); cursor: pointer; transition: border-color 120ms ease;
+        border: 1px solid var(--line); border-radius: 8px;
+        background: var(--inset); cursor: pointer; transition: border-color 120ms ease;
       }
       .cfgrow:hover { border-color: var(--accent); }
       .cfgrow.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-      .cfgrow .nm { font-weight: 600; font-family: var(--font-mono); }
-      .cfgrow .mt { color: var(--text-dim); font-size: var(--fs-xs); }
-      .cfgrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex: 0 0 auto; }
+      .cfgrow .nm { font-weight: 600; font-family: "Cascadia Mono", Consolas, monospace; }
+      .cfgrow .mt { color: var(--dim); font-size: 10px; }
+      .cfgrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: 0 0 auto; }
       .cfgrow.on .dot { background: var(--accent); }
       .deliv { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
       .deliv .pill {
-        font-family: var(--font-mono); font-size: var(--fs-xs); padding: 3px 8px;
-        border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--text-dim);
+        font-family: "Cascadia Mono", Consolas, monospace; font-size: 10px; padding: 3px 8px;
+        border: 1px solid var(--line); border-radius: 999px; color: var(--dim);
       }
       #logwrap {
         flex: 0 0 34%;
@@ -278,7 +298,8 @@
       #logbar {
         display: flex;
         align-items: center;
-        gap: 8px;
+        flex-wrap: wrap;
+        gap: 6px 8px;
         padding: 3px 10px;
         font-size: 11px;
         color: var(--dim);
@@ -311,6 +332,19 @@
         line-height: 1.6;
         margin: 6px 0 0;
       }
+      .hints {
+        margin: 8px 0 0;
+        padding-left: 16px;
+        color: var(--faint);
+        font-size: 11px;
+        line-height: 1.7;
+      }
+      .hints li::marker {
+        color: var(--line);
+      }
+      .hints code {
+        color: var(--dim);
+      }
       .banner {
         padding: 8px 12px;
         border-bottom: 1px solid var(--line);
@@ -329,7 +363,9 @@
     </header>
 
     <div id="nows" class="banner" hidden>
-      还没有登记工作区根。请关掉这个面板，在「扩展」面板顶部选一个目录（就是含 config.yaml 的那一个），再打开这里。
+      还没有登记工作区根。
+      <button class="btn" id="pickws" title="选完还要在 设置 → 插件管理 → 展开本插件 → 工作区（$WS）里确认">选择工作区…</button>
+      <span style="opacity: .65">就是含 config.yaml 的那一个目录；确认后回这里点「刷新」。</span>
     </div>
 
     <div id="noconf" class="banner" hidden></div>
@@ -403,7 +439,7 @@
           </div>
         </div>
         <p class="note">
-          这里只改**本次运行**的参数。工作区里的 <code>config.yaml</code> 不会被改写——它是你自己的
+          这里只改<b>本次运行</b>的参数。工作区里的 <code>config.yaml</code> 不会被改写——它是你自己的
           基准，插件每次把它读出来当底、再叠上这里的改动，写到 <code>.uartix/yolo/runs/&lt;job&gt;/config.yaml</code>。
         </p>
       </section>
@@ -437,7 +473,7 @@
             <button class="btn" id="dep-stop">停止</button>
           </div>
           <p class="note">
-            插件**不改你那份 <code>deploy_config.*.ps1</code>**：它在
+            插件<b>不会改写</b>你那份 <code>deploy_config.*.ps1</code>：它在
             <code>.uartix/yolo/deploy/</code> 里生成一份包装配置（先读你的，再覆盖
             <code>$Model</code> / <code>$ModelName</code>），把包装文件传给工具。跑完的日志和训练共用下面那一栏。
           </p>
@@ -466,8 +502,8 @@
               <input id="batch" type="number" step="1" min="1" />
             </label>
             <label>
-              设备 device（0=GPU，cpu=CPU）
-              <input id="device" />
+              设备 device
+              <input id="device" title="0 = 第一块 GPU；cpu = 用 CPU 跑" />
             </label>
             <label>
               实验名 name
@@ -482,11 +518,13 @@
               <input id="workers" type="number" step="1" min="0" />
             </label>
           </div>
-          <p class="note">
-            workers 在这台 16G 内存的机器上必须保持 0（多进程加载器会把内存撑爆）。
-            fliplr / flipud 固定为 0：数字识别不做镜像。要改这两条请直接改
-            <code>.uartix/yolo/config.json</code>——面板不提供入口，因为它们几乎总是错的。
-          </p>
+          <ul class="hints">
+            <li>workers 在这台 16G 内存的机器上保持 0：多进程加载器会把内存撑爆。</li>
+            <li>fliplr / flipud 固定为 0：数字识别不做镜像。要改这两条，请直接改
+              <code>.uartix/yolo/config.json</code>——面板不提供入口，因为它们几乎总是错的。</li>
+            <li>设备填 <code>0</code> 用第一块 GPU，填 <code>cpu</code> 用 CPU；训练记录里的「训练时长」按
+              <code>results.csv</code> 的累计 <code>time</code> 统计。</li>
+          </ul>
           <div class="row" style="margin-top: 10px">
             <button class="btn primary" id="train">开始训练</button>
             <button class="btn danger" id="stop" disabled>停止</button>
@@ -611,7 +649,7 @@
       /**
        * 部署工具（`$EXT:deploy`）。
        *
-       * 路径不写死在插件里：用户在「插件」面板给它绑一次，宿主经 ctx.root("deploy") 递进来。
+       * 路径不写死在插件里：用户在插件管理的「目录绑定」里给它绑一次，宿主经 ctx.root("deploy") 递进来。
        * 没绑就直说"去绑一下"，而不是让这块显示成"坏了"。
        */
       function renderDeploy() {
@@ -619,7 +657,7 @@
         if (!d.bound) {
           $("depkv").innerHTML =
             '<b>状态</b><span><span class="tag warn">还没配置</span></span>' +
-            '<b>怎么配</b><span>到「插件」面板顶部的「外部目录 deploy」里选一次 maixcam2_deploy 目录</span>';
+            '<b>怎么配</b><span>到 设置 → 插件管理 → 展开本插件 → 目录绑定 里，给 deploy 选一次 maixcam2_deploy 目录</span>';
           return;
         }
         $("depkv").innerHTML =
@@ -676,7 +714,7 @@
         if (!tool.bound) {
           $("toolkv").innerHTML =
             '<b>状态</b><span><span class="tag warn">还没配置</span></span>' +
-            "<b>怎么配</b><span>到「插件」面板顶部的「外部目录 deploy」里选一次 maixcam2_deploy 目录</span>";
+            "<b>怎么配</b><span>到 设置 → 插件管理 → 展开本插件 → 目录绑定 里，给 deploy 选一次 maixcam2_deploy 目录</span>";
           $("toolnote").textContent = "没有部署工具也能训练；这一页只是暂时用不了。";
         } else {
           $("toolkv").innerHTML =
@@ -796,6 +834,13 @@
         fill("classes", (ds.classes || []).join("\n"));
       }
 
+      function fmtWhen(ms) {
+        if (!ms) return "";
+        var d = new Date(ms);
+        var p = function (n) { return (n < 10 ? "0" : "") + n; };
+        return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+      }
+
       function renderRuns() {
         var runs = st.runs || [];
         if (!runs.length) {
@@ -803,7 +848,7 @@
           return;
         }
         var h =
-          "<table><thead><tr><th>实验</th><th>轮次</th><th>mAP50(M)</th><th>mAP50-95(M)</th><th>best.pt</th></tr></thead><tbody>";
+          '<div class="tablewrap"><table><thead><tr><th>实验</th><th>轮次</th><th>训练时长</th><th>mAP50(M)</th><th>mAP50-95(M)</th><th>best.pt</th></tr></thead><tbody>';
         for (var i = 0; i < runs.length; i++) {
           var r = runs[i];
           var m = r.metrics || {};
@@ -811,11 +856,21 @@
             var n = Number(x);
             return isFinite(n) ? n.toFixed(4) : "-";
           };
+          var dur = r.durationText || "—";
+          var durTitle = r.durationText
+            ? (r.startedAt ? "开始 " + fmtWhen(r.startedAt) + " · " : "") + (r.finishedAt ? "完成 " + fmtWhen(r.finishedAt) : "")
+            : "这轮 results.csv 没有 time 列";
           h +=
-            "<tr><td>" +
+            '<tr><td class="name" title="' +
+            esc(r.dir || r.name) +
+            '">' +
             esc(r.name) +
             '</td><td class="num">' +
             r.epochs +
+            '</td><td class="num" title="' +
+            esc(durTitle) +
+            '">' +
+            esc(dur) +
             '</td><td class="num">' +
             f(m.mAP50M) +
             '</td><td class="num">' +
@@ -824,7 +879,7 @@
             (r.hasBest ? '<span class="tag ok">有</span>' : '<span class="tag">无</span>') +
             "</td></tr>";
         }
-        $("runs").innerHTML = h + "</tbody></table>";
+        $("runs").innerHTML = h + "</tbody></table></div>";
       }
 
       function renderTrainParams() {
@@ -957,10 +1012,23 @@
           $("tab-overview").hidden = name !== "overview";
           $("tab-data").hidden = name !== "data";
           $("tab-train").hidden = name !== "train";
+          /* R16：部署是第四块 section，这里原来只切三块——点了「部署」什么都不显示。 */
+          $("tab-deploy").hidden = name !== "deploy";
         };
       }
       $("reload").onclick = function () {
         refresh(false);
+      };
+      /* 选工作区：宿主弹系统对话框由用户选，选完还要在 设置 → 插件管理 → 目录绑定 里确认。
+         这条按钮只是把用户已经选好的东西送到那一步，不是插件自己给自己授权。 */
+      $("pickws").onclick = async function () {
+        try {
+          var r = await uartix.bindRoot("$WS");
+          if (!r) return;
+          sysLog("已选择 " + r.path + "：请到 设置 → 插件管理 → 展开本插件 → 目录绑定 里确认，然后点「刷新」");
+        } catch (e) {
+          sysLog("登记工作区失败：" + (e && e.message ? e.message : e));
+        }
       };
       $("savedata").onclick = function () {
         save("data");

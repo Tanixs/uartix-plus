@@ -82,7 +82,7 @@ vi.mock("../serial/serialStore", () => ({
 vi.mock("../protocol/telemetryStore", () => ({ getSnapshot: () => st.telemetry }));
 vi.mock("../sentinel/sentinelStore", () => ({ getSnapshot: () => st.sentinel }));
 vi.mock("../ai/contextCollector", () => ({ curveStatsText: () => "曲线统计文本" }));
-vi.mock("../ai/extRuntime", () => ({ toast: vi.fn() }));
+vi.mock("../ai/uiRuntime", () => ({ toast: vi.fn() }));
 vi.mock("../ai/appActions", () => ({
   HIGH_ONLY: st.HIGH_ONLY,
   runAppAction: vi.fn(async (kind: string, args: Record<string, unknown>, opts: { highPriv: boolean }) => {
@@ -294,27 +294,5 @@ describe("MCP 现状：审计与回执形状", () => {
     st.appResult = { ok: false, err: "x".repeat(500) };
     const r = await call("get_orchestrator");
     expect(r.err!.length).toBeLessThanOrEqual(300);
-  });
-});
-
-/* ================= P99c-C1b：命令行专用通道（cli.） ================= */
-
-vi.mock("../market/marketCli", () => ({
-  isCliKind: (kind: string) => kind.startsWith("cli."),
-  handleCli: async (kind: string, args: Record<string, unknown>) => ({ via: kind, args }),
-}));
-
-describe("P99c-C1b · cli. 通道与 MCP 工具面互不打扰", () => {
-  it("cli.* 在工具名检查之前分流，不会撞「未知工具」那句话术", async () => {
-    const r = await call("cli.market_status", { limit: 3 });
-    expect(r.ok).toBe(true);
-    expect(r.data).toEqual({ via: "cli.market_status", args: { limit: 3 } });
-    expect(r.err).toBeNull();
-  });
-
-  it("工具清单里永不含 cli.*：模型那条路够不到命令行动作面（Q7 的前提：外来代码进本机由人批准）", async () => {
-    const { ALL_TOOL_DEFS } = await import("./mcpTools");
-    expect(ALL_TOOL_DEFS.length).toBeGreaterThan(0); // 反空断言：清单读空了这条就是假绿
-    expect(ALL_TOOL_DEFS.some((t) => t.name.startsWith("cli."))).toBe(false);
   });
 });

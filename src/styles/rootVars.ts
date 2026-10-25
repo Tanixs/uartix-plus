@@ -2,7 +2,7 @@
  * P98-M0：根变量（`--*`）合成器 —— **单一写入者**。
  *
  * 为什么要有它（真机反馈："AI 改了按钮圆角/尺寸/阴影，停用和卸载插件都撤不回去"）：
- * 插件主题层（`extRuntime.applyStyleExts`）与 Agent 覆盖层（`appearanceStore.applyOverlay`）
+ * 插件主题层（`uiRuntime.applyThemeRuntime`）与 Agent 覆盖层（`appearanceStore.applyOverlay`）
  * **都往 `documentElement.style` 写同名变量**，而且各自记着"我写过哪些键"、各自 `removeProperty`。
  * 于是两件事同时成立：
  *   ① 谁后动手谁赢（不是设计出来的优先级，是调用顺序的巧合）；
@@ -21,7 +21,7 @@
 /** 层的固定优先级：**数值大的赢**。新增层只准在这里加，不准靠调用顺序抢赢。 */
 export const ROOT_LAYER = {
   /**
-   * P99b-N5：兜底层（暗/亮两张表二选一，由 `extRuntime` 按明暗归属提交）。
+   * P99b-N5：兜底层（暗/亮两张表二选一，由 `uiRuntime` 按明暗归属提交）。
    * 它必须在"在画那枚主题"之下：那枚主题没写的键由它补，写了的键不能被它倒压。
    */
   baseline: 0,

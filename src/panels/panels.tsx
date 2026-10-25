@@ -2,7 +2,6 @@ import { memo } from "react";
 import type { PanelId } from "../ipc/types";
 import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { getLocale, tx, useLocale } from "../i18n/strings";
-import { getExt } from "../features/ai/extensionStore";
 import { ConsolePanel } from "../features/console/ConsolePanel";
 import { HexView } from "../features/hexview/HexView";
 import { TemplatesPanel } from "../features/protocol/TemplatesPanel";
@@ -23,12 +22,11 @@ import { Plot3D } from "../features/plot3d/Plot3D";
 import MetricsPanel from "../features/analysis/MetricsPanel";
 import { OrchestratorPanel } from "../features/orchestrator/OrchestratorPanel";
 import { VdevPanel } from "../features/vdev/VdevPanel";
-import { ExtPanelHost } from "../features/ai/ExtPanel";
 import { SendBuildPanel } from "../features/send/SendBuildPanel";
-import { ExtManagerPanel } from "../features/extensions/ExtManagerPanel";
-import { ExtViewPanel } from "../features/extensions/ExtViewPanel";
-import { getSnapshot as getExtRepo } from "../features/extensions/extStore";
-import { EXT_VIEW_PREFIX, parsePanelViewId } from "../features/extensions/panelBridge";
+import { PluginOutputPanel } from "../features/plugins/engine/PluginOutputPanel";
+import { PluginViewPanel } from "../features/plugins/engine/PluginViewPanel";
+import { getSnapshot as getPluginEngineSnapshot } from "../features/plugins/engine/pluginEngine";
+import { PLUGIN_VIEW_PREFIX, parsePanelViewId } from "../features/plugins/engine/panelBridge";
 
 /** 面板页签名（语言感知，P33 i18n）；页签重挂靠 App 的 retitlePanels（locale 变化时 setTitle） */
 export const PANEL_TITLES = (): Record<PanelId, string> => {
@@ -57,22 +55,20 @@ export const PANEL_TITLES = (): Record<PanelId, string> => {
     vdev: pick("虚拟设备工坊", "Virtual Devices"),
     sendbuild: pick("TX组帧台", "TX Frame Builder"),
     extruntime: pick("插件", "Plugins"),
+    output: pick("运行日志", "Output"),
+    profiles: pick("工作场景", "Profiles"),
   };
 };
 
-/** 任意面板 id → 页签标题：内置面板查表；AI 扩展面板用扩展名（用户数据不翻译） */
+/** 任意面板 id → 页签标题：内置面板查表；插件面板用清单标题（用户数据不翻译） */
 export function panelTitleOf(id: string): string {
   // A7：插件自己的面板（iframe）。标题由清单里的 `contributes.panels[].title` 决定，
-  // 扩展被卸载后回落到一个中性名字——不然页签上会挂着一个 `ext-view-a.b:c` 这样的原始 id。
-  if (id.startsWith(EXT_VIEW_PREFIX)) {
+  // 插件被卸载后回落到一个中性名字——不然页签上会挂着一个 `plugin-view-a.b:c` 这样的原始 id。
+  if (id.startsWith(PLUGIN_VIEW_PREFIX)) {
     const v = parsePanelViewId(id);
-    const e = v ? getExtRepo().entries.find((x) => x.id === v.extId) : undefined;
+    const e = v ? getPluginEngineSnapshot().entries.find((x) => x.id === v.pluginId) : undefined;
     const d = e?.manifest.contributes.panels?.find((x) => x.id === v?.panelId);
     return d?.title ?? tx("插件面板", "Plugin panel");
-  }
-  if (id.startsWith("ext-panel-")) {
-    const ext = getExt(id.slice("ext-panel-".length));
-    return ext?.name ?? tx("AI 扩展面板", "AI extension panel");
   }
   return PANEL_TITLES()[id as PanelId] ?? id;
 }
@@ -98,7 +94,7 @@ const MMetrics = memo(MetricsPanel);
 const MOrchestrator = memo(OrchestratorPanel);
 const MVdev = memo(VdevPanel);
 const MSendBuild = memo(SendBuildPanel);
-const MExtManager = memo(ExtManagerPanel);
+const MOutput = memo(PluginOutputPanel);
 
 export const panelComponents = {
   templates: () => (
@@ -208,23 +204,49 @@ export const panelComponents = {
   ),
   extruntime: () => (
     <ErrorBoundary label={panelTitleOf("extruntime")}>
-      <MExtManager />
+      <RetiredPanel where={tx("插件的装/批/启用/配置/版本都在这里：设置 → 插件管理。进程日志与操作账本在「运行日志」面。", "Installing, approving, enabling, configuring and versioning now live in Settings → Plugins. Process logs and the action ledger are in the Output panel.")} />
     </ErrorBoundary>
   ),
-  extViewPanel: (props: { params?: { extId?: string; panelId?: string } }) => (
-    <ErrorBoundary label={`${props.params?.extId ?? ""}:${props.params?.panelId ?? ""}`}>
-      <ExtViewPanel params={props.params} />
+  output: () => (
+    <ErrorBoundary label={panelTitleOf("output")}>
+      <MOutput />
     </ErrorBoundary>
   ),
-  aiExtPanel: (props: { params?: { extId?: string } }) => (
-    <ErrorBoundary label={panelTitleOf(`ext-panel-${props.params?.extId ?? ""}`)}>
-      <ExtPanelHost extId={props.params?.extId ?? ""} />
+  profiles: () => (
+    <ErrorBoundary label={panelTitleOf("profiles")}>
+      <RetiredPanel where={tx("工作场景的编辑与保存在 设置 → 工作场景 里；一键切换走命令面板的「应用场景：…」。", "Profiles are edited under Settings → Profiles. Switching is a command-palette action: Apply profile: …")} />
+    </ErrorBoundary>
+  ),
+  pluginViewPanel: (props: { params?: { pluginId?: string; panelId?: string } }) => (
+    <ErrorBoundary label={`${props.params?.pluginId ?? ""}:${props.params?.panelId ?? ""}`}>
+      <PluginViewPanel params={props.params} />
     </ErrorBoundary>
   ),
   placeholder: () => (
     <PlaceholderPanel />
   ),
 };
+
+/**
+ * P174-R7①：整面退役的占位组件。
+ *
+ * 为什么留一个组件而不是直接删注册表条目：dockview 的存档里存的是**组件名字符串**，
+ * 用户摆好的布局里可能还挂着一枚 `extruntime`。删了注册表，`fromJSON` 会当场抛，
+ * 而那条 catch 的落点是"退回默认布局"——为一枚早已并入设置页的面板，
+ * 把用户整张布局换掉是不可接受的。所以这里保留一个中性面孔：App 在面板加出来时
+ * 就把退役列表里的关掉（`RETIRED_PANELS`），万一还是露出来一行，说的是"这功能去哪儿了"。
+ */
+function RetiredPanel(props: { where: string }) {
+  useLocale();
+  return (
+    <div className="ph">
+      <div className="ph-card">
+        <div className="ph-title">{tx("这一面已经并走了", "This panel has been merged")}</div>
+        <div className="ph-desc">{props.where}</div>
+      </div>
+    </div>
+  );
+}
 
 function PlaceholderPanel() {
   useLocale();

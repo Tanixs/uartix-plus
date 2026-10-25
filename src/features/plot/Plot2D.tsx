@@ -7,7 +7,7 @@ import * as sessionStore from "../session/sessionStore";
 import * as timeCursor from "../analysis/timeCursorStore";
 import { cancelPreview, navigateTime, previewTime, returnLatest, subscribeReplayClock } from "../analysis/timeNavigation";
 import type { AnnOut } from "../../ipc/types";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
 import { invokeAiScene } from "../ai/aiBus";

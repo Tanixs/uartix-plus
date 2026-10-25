@@ -186,10 +186,9 @@ export interface GroupCard extends BaseCard {
   children: GroupChild[];
 }
 
-/** 自定义卡片：沙箱 iframe（与小部件同格式 HTML + postMessage 桥），任意风格与功能 */
+/** 自定义卡片：保留的卡片类型，但不再承载 HTML（AI 造物统一走 v3 插件小部件）。 */
 export interface CustomCard extends BaseCard {
   type: "custom";
-  html: string;
 }
 
 export type ControlCard =
@@ -456,11 +455,7 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
         children: sanitizeChildren(raw.children),
       };
     case "custom":
-      return {
-        ...base,
-        type,
-        html: String(raw.html ?? ""),
-      };
+      return { ...base, type };
     default:
       return {
         ...base,
@@ -938,7 +933,7 @@ function defaultCard(type: ControlType, name: string): ControlCard {
         ],
       };
     case "custom":
-      return { ...base, type, html: "" };
+      return { ...base, type };
     default:
       return {
         ...base,

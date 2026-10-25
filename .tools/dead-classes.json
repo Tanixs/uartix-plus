@@ -3,7 +3,12 @@
   "generatedAt": "2026-10-03",
   "theme": "fluent",
   "judge": "四道判据：CSS 有 ∧ 源码无同名字面量 ∧ 无模板前缀能拼出 ∧ 14 面没渲染（.tools/check-dead-classes.cjs）",
-  "exemptions": [],
+  "exemptions": [
+    {
+      "prefix": "u-",
+      "reason": "uPlot 运行时自己长的 DOM 类（u-over/u-legend/u-axis/u-series），静态扫描看不到；删掉会让图表游标与图例失去样式"
+    }
+  ],
   "budget": {
     "unreferenced": 0
   },

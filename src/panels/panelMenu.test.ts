@@ -41,12 +41,14 @@ describe("PANEL_GROUPS", () => {
     expect(panelGroupOf("nope")).toBeUndefined();
   });
 
-  it("面板总数与清单一致（22 个内置面板）", () => {
+  it("面板总数与清单一致（23 个内置面板）", () => {
     // P121-C 加了「TX组帧台」：20 → 21。这条断言存在的意义就是"加面板必须留痕"，
     // 改数字的人必须顺带确认分组、标题、帮助覆盖都跟上了
     // P174-A5 加了「扩展运行时」：21 → 22（分组 extensions、标题 PANEL_TITLES.extruntime；
     // 它不接 Agent 工具，所以帮助覆盖那一关没有对应条目要补）
-    expect(PANEL_GROUPS.flatMap((g) => g.ids as readonly string[])).toHaveLength(22);
+    // P174-B2 加了「工作场景」：22 → 23（同组；不接 Agent 工具）
+    // P174-R7② 加了「运行日志」：23 → 24（同组；宿主输出 + 操作账本两个通道，不接 Agent 工具）
+    expect(PANEL_GROUPS.flatMap((g) => g.ids as readonly string[])).toHaveLength(24);
   });
 
   it("分组名随语言切换", () => {

@@ -2,13 +2,14 @@
   "format": "uartix-plugin",
   "schemaVersion": 3,
   "id": "uartix.yolo",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "name": "YOLO 训练工作台",
   "description": "数据集拆分 → 训练 → 部署收在一个面板里：读工作区的 config.yaml 当基准，参数在面板里改，起 python 子进程把日志和进度实时拉回来。",
   "author": "uartix",
+  "homepage": "https://github.com/Tanixs/uartix.yolo",
   "license": "MIT",
   "main": "main.mjs",
-  "activation": ["onPanel:train"],
+  "activation": ["onPanel:train", "onCommand:yolo.status", "onCommand:yolo.stop"],
   "permissions": {
     "fs": {
       "read": ["$WS", "$EXT:deploy"],
@@ -18,6 +19,10 @@
     "ui": { "panel": true }
   },
   "contributes": {
-    "panels": [{ "id": "train", "title": "YOLO 训练", "entry": "panel.html" }]
+    "panels": [{ "id": "train", "title": "YOLO 训练", "entry": "panel.html" }],
+    "commands": [
+      { "id": "yolo.status", "title": "YOLO：查看训练现状" },
+      { "id": "yolo.stop", "title": "YOLO：停止当前任务" }
+    ]
   }
 }

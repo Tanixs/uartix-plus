@@ -17,7 +17,7 @@ export const PANEL_GROUPS = [
   { key: "visual", zh: "可视化", en: "Visualization", ids: ["table", "plot2d", "spectrum", "view3d", "plot3d", "metrics"] },
   { key: "auto", zh: "测试与自动化", en: "Test & automation", ids: ["sequencer", "sentinel", "orchestrator"] },
   { key: "ai", zh: "AI 与探索", en: "AI & discovery", ids: ["ai", "xray"] },
-  { key: "extensions", zh: "插件", en: "Plugins", ids: ["extruntime"] },
+  { key: "plugins", zh: "插件", en: "Plugins", ids: ["extruntime", "output", "profiles"] },
 ] as const satisfies readonly PanelGroup[];
 
 type GroupedPanelId = (typeof PANEL_GROUPS)[number]["ids"][number];
@@ -43,7 +43,7 @@ export const _assertAllPanelsGrouped: _AllPanelsGrouped = true;
  *
  *  列在这里而不是从 `PANEL_GROUPS` 里删：分组表同时是 `ui_inventory` 与帮助覆盖度检查的
  *  事实源——面板"存在但不再可添加"这件事，对那两者也应当看得见。 */
-export const RETIRED_PANELS: readonly PanelId[] = ["templates"];
+export const RETIRED_PANELS: readonly PanelId[] = ["templates", "extruntime", "profiles"];
 
 export function isRetiredPanel(id: string): boolean {
   return (RETIRED_PANELS as readonly string[]).includes(id);

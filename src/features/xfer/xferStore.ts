@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { tx } from "../../i18n/strings";
 
 /**

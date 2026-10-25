@@ -565,13 +565,13 @@ if (!overlayTokens.length) {
   } else {
     console.log(`OK: ${overlayTokens.length} appearance overlay tokens all defined across themes`);
   }
-  /* iframe 主题桥一致性：广播采集键（extRuntime.THEME_VAR_KEYS）必须是覆盖白名单子集，
+  /* iframe 主题桥一致性：广播采集键（uiRuntime.THEME_VAR_KEYS）必须是覆盖白名单子集，
      否则 Agent 改了某个广播键、iframe 收到的却是旧值（跨主界面/iframe 不一致）。 */
-  const extSrc = fs.readFileSync(path.join(__dirname, "..", "src", "features", "ai", "extRuntime.ts"), "utf8");
+  const extSrc = fs.readFileSync(path.join(__dirname, "..", "src", "features", "ai", "uiRuntime.ts"), "utf8");
   const tvk = /THEME_VAR_KEYS = \[([\s\S]*?)\];/.exec(extSrc);
   const themeVarKeys = tvk ? [...tvk[1].matchAll(/"(--[\w-]+)"/g)].map((x) => x[1]) : [];
   if (!themeVarKeys.length) {
-    console.log("FAIL: cannot parse THEME_VAR_KEYS from extRuntime.ts");
+    console.log("FAIL: cannot parse THEME_VAR_KEYS from uiRuntime.ts");
     fails++;
   } else {
     const notCovered = themeVarKeys.filter((k) => !overlayTokens.includes(k));

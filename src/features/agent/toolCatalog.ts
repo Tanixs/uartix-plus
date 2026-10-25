@@ -28,12 +28,12 @@ const META: Record<AppActionKind, ToolPolicyMeta> = {
 
   // —— UI 视图操作（可逆、无数据副作用）——
   openPanel: { effect: "config_write", idempotent: true, reversible: true, mayTouchDevice: false },
+  openSettings: { effect: "config_write", idempotent: true, reversible: true, mayTouchDevice: false },
   applyPreset: { effect: "config_write", idempotent: true, reversible: true, mayTouchDevice: false },
   setTheme: { effect: "config_write", idempotent: true, reversible: true, mayTouchDevice: false },
   toast: { effect: "read", idempotent: false, reversible: true, mayTouchDevice: false },
   openWidget: { effect: "config_write", idempotent: true, reversible: true, mayTouchDevice: false },
   closeWidget: { effect: "config_write", idempotent: true, reversible: true, mayTouchDevice: false },
-  popWidget: { effect: "config_write", idempotent: true, reversible: true, mayTouchDevice: false },
   clearChannels: { effect: "config_write", idempotent: true, reversible: true, mayTouchDevice: false },
 
   // —— 新建草稿/新对象（自动，但不覆盖既有）——
@@ -54,7 +54,6 @@ const META: Record<AppActionKind, ToolPolicyMeta> = {
   removeProtocol: { effect: "destructive_write", idempotent: false, reversible: false, mayTouchDevice: false },
   removeCommand: { effect: "destructive_write", idempotent: false, reversible: false, mayTouchDevice: false },
   removeCodec: { effect: "destructive_write", idempotent: false, reversible: false, mayTouchDevice: false },
-  removeWidget: { effect: "destructive_write", idempotent: false, reversible: false, mayTouchDevice: false },
   clearPage: { effect: "destructive_write", idempotent: false, reversible: false, mayTouchDevice: false },
 
   // —— 设备/总线相关：可能触达实车 → 依 deviceContext 判定 ——
@@ -79,16 +78,16 @@ export function untaggedActions(): string[] {
  * 漏配只会静默回显 snake_case——§8-36① 说的就是这类"看得见的漂移"）。
  */
 export const ACTION_LABEL_ZH: Record<AppActionKind, string> = {
-  openPanel: "打开面板", applyPreset: "应用预设", setTheme: "切换主题",
+  openPanel: "打开面板", openSettings: "打开设置页", applyPreset: "应用预设", setTheme: "切换主题",
   listProtocols: "列出协议模板", listCommands: "列出指令", listCards: "列出卡片", listWidgets: "列出小部件",
   addChannel: "新增通道", clearChannels: "清空通道",
   writeCard: "新建控制卡片", writeCommand: "新建指令", writeTemplate: "写入协议模板", writeSendSpec: "写入发送谱", writeCodec: "写入编码配置",
   patchCard: "修改卡片", addPage: "新增页", clearPage: "清空页",
-  removeCard: "删除卡片", removeProtocol: "删除协议模板", removeCommand: "删除指令", removeCodec: "删除编码配置", removeWidget: "删除小部件",
+  removeCard: "删除卡片", removeProtocol: "删除协议模板", removeCommand: "删除指令", removeCodec: "删除编码配置", 
   openPort: "打开串口", closePort: "关闭串口", modbus: "Modbus 工作台", xferStart: "启动文件传输",
   readPlot: "读取曲线图", sentinel: "哨兵", xrayEvidence: "结构证据", xrayCrack: "校验爆破", xrayReport: "协议考古报告",
   orchestratorRead: "读取编排", orchestrator: "编排器操作", plot3dRead: "读取 3D 轨迹", plot3d: "3D 轨迹操作", vdev: "虚拟设备",
-  toast: "弹提示", openWidget: "打开小部件", closeWidget: "关闭小部件", popWidget: "弹出小部件",
+  toast: "弹提示", openWidget: "显示小部件", closeWidget: "隐藏小部件",
 };
 
 /** 动作 kind 的中文（未登记时同样可读化，绝不显示裸常量） */

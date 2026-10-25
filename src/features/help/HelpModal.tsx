@@ -4,11 +4,7 @@ import { tx, useLocale } from "../../i18n/strings";
 import * as tourStore from "../tour/tourStore";
 import { TOUR_STEPS } from "../tour/tourSteps";
 import { IconPlay } from "../../shared/icons";
-// P99b-N6：市场那一页说的每个数/每句承诺都要能指回实现——
-// 放行域、自带索引地址、"装完是停用态"与"列表不等于背书"那两句原文，一律从代码取，不抄第二份。
-import { MARKET_ALLOW_HOSTS, MARKET_BUNDLED_INDEX_URL } from "../market/marketIndex";
-import { marketInstallNote, marketNoEndorse } from "../market/marketBrowse";
-import { CAP_LABEL, autoEnableBlockedCaps } from "../plugins/pluginManifest";
+import { MARKET_ALLOW_HOSTS } from "../plugins/engine/hosts";
 
 export function HelpModal({ onClose }: { onClose: () => void }) {
   useLocale();
@@ -101,7 +97,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li><b>生成指令 / 生成卡片</b>：自然语言生成命令模板或控制卡片，回复内直接点「加入命令库」「临时发送」「写入控制画布」，生成即可用。</li>
                     <li>发送前可在输入框上方勾选「本次发送的上下文」（协议摘要/数据样本/Hex 选区等），AI 只看你授权的内容。</li>
                     <li>它还能<b>读这个软件本身</b>（连接现状、协议字段、控件、帧统计…见「AI 助手详解」里的自省目录一节），
-                      以及<b>把成果存成插件留在你机器上</b>（主题 / 小部件 / 面板 / 工作区预设 / 任务模板 / 逻辑模块，见「插件与创造」页）。</li>
+                      以及<b>把成果存成插件草稿留在你机器上</b>（主题 / 小部件 / 面板，见「插件与创造」页）。</li>
                   </ol>
                 </Section>
                 <Section title="控制台与快捷指令">
@@ -133,7 +129,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>要带哪些上下文，点输入框左侧的 <code>＋</code> → <b>发送上下文</b> 勾选；<b>协议清单</b>（一行式，便宜）默认带，<b>协议完整定义</b>只在需要精确分析时勾。面板上实时显示本次发送的估算体积。</li>
                     <li>支持思维链模型（如 deepseek-v4-pro / glm-5.3）：思考过程实时流式显示并计时，正文开始后自动折叠。<b>「显示思考过程」与「深度思考（先想后答）」是两个独立开关</b>（设置 → AI 服务）：只想看过程就开前者，长任务反复超时就把后者关掉，别为了看过程而背上等待。同处的<b>「流式读空闲超时」</b>只管本机这一侧：连续多少秒收不到任何字节才判定卡住并重试（默认 120 秒）——上游网关自己返回的超时错误调它没用，那种情况关深度思考或换更快的模型。</li>
                     <li>消息悬停出现操作钮：复制 / 编辑重发 / 重新生成 / 删除；会话侧栏支持多会话、搜索、双击重命名。</li>
-                    <li>顶栏「更多 ▾」四件事：<b>本地插件库</b>、<b>导出对话为 Markdown</b>（纯本地写文件）、
+                    <li>顶栏「更多 ▾」四件事：<b>插件管理</b>、<b>导出对话为 Markdown</b>（纯本地写文件）、
                       <b>上传巡检报告</b>、<b>清空当前对话</b>。
                       其中「上传巡检报告」是<b>真的往外发</b>：它把最近那条含「巡检发现」的回复正文（末尾最多 8000 字）连同软件版本与时间戳发到一个固定收报地址。
                       报告里写到的字段名、数值、端口、文件路径会<b>一起出去</b>——涉及客户设备或内部编号时先自己看一眼正文再点。</li>
@@ -194,7 +190,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <table className="help-table">
                     <tbody>
                       <tr><td>配置写入</td><td>改应用设置（可撤销项）与外观 token。仅预览档不给。</td></tr>
-                      <tr><td>插件库</td><td>保存/启用插件、保存主题、<b>升版与退回上一版</b>。这是"AI 造的东西能不能落地"的那道门。</td></tr>
+                      <tr><td>插件管理</td><td>保存草稿、转正、批准权限、启停插件、<b>升版与退回上一版</b>。这是"AI 造的东西能不能落地"的那道门。</td></tr>
                       <tr><td>设备发送</td><td>向仿真/虚拟设备自动发送。<b>实车连接或无法判定时一律逐次人工批准</b>，这一档授权也不例外。</td></tr>
                       <tr><td>文件读取</td><td>读<b>设置 → AI 服务 → 「Agent 文件白名单」</b>里列出的路径（含从图片取色）。白名单留空＝这条能力等于关掉：工具还在，但每次调用都被拒并回执「路径不在白名单」。</td></tr>
                       <tr><td>文件写入</td><td>在软件目录/工作区内<b>新建</b>文件。<b>覆盖已存在的文件仍要逐条批准</b>。</td></tr>
@@ -227,8 +223,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>这些改动是<b>会话临时层</b>：重启就没了，也不归插件管。满意了要显式说"保存为主题/固化下来"才会持久化——
                       让它报个名字就行，它会用 <code>style_commit</code> 把<b>当前真正生效的那几层</b>读出来存成已启用的主题插件
                       （不是凭记忆重抄一遍规则，重抄在多轮改动后一定走样）。想撤就 <code>style_revert</code>、卡片上的「撤销」，
-                      或直接 设置 → 外观 → <b>清除 AI 临时覆盖</b>；固化之后恢复路径变成 停用插件 或 <code>rollback_plugin</code>。</li>
-                    <li>改坏了的插件版本可以 <code>rollback_plugin</code> 退回上一版——Agent 自己改自己存的东西会升版本号并留下旧版，不会堆出一堆近似副本。</li>
+                      或直接 设置 → 外观 → <b>清除 AI 临时覆盖</b>；固化之后恢复路径变成插件管理里的停用、卸载或回滚。</li>
+                    <li>改坏了的插件版本可以在插件详情里<b>回滚到上一版</b>；Agent 的每次保存都会把旧版归档，不会堆出一堆近似副本。</li>
                   </ol>
                   <p className="help-tip">
                     全局选择器（<code>html</code>/<code>body</code>/<code>#root</code>/<code>*</code>）、<code>position:fixed</code> 遮罩、
@@ -240,7 +236,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <table className="help-table">
                     <tbody>
                       <tr><td>兜底层（暗/亮两张）</td><td>主题没写的键由它垫上，取的是内置 <code>dark</code>/<code>light</code> 那两枚的表。<b>不可停用，也不需要你动。</b></td></tr>
-                      <tr><td>在画的这一枚主题</td><td><b>内置与插件主题同级</b>：同一张列表里点哪枚就是哪枚，<b>同时只有一枚在画</b>。内置不可卸载；插件主题落盘在插件库，停用/卸载就是撤掉它。<b>落盘。</b></td></tr>
+                      <tr><td>在画的这一枚主题</td><td><b>内置与插件主题同级</b>：同一张列表里点哪枚就是哪枚，<b>同时只有一枚在画</b>。内置不可卸载；插件主题落盘在插件管理，停用/卸载就是撤掉它。<b>落盘。</b></td></tr>
                       <tr><td>{tx("外观设置", "Appearance settings")}</td><td>{tx("主题与缩放（外观页）、显示精度（数据页）、减弱动效（通用页）。", "Theme and zoom (Appearance), decimals (Data), reduced motion (General).")}<b>{tx("落盘。", "Persisted.")}</b></td></tr>
                       <tr><td>AI 临时 token 覆盖</td><td>AI 改主题色/字号/圆角时的会话层。<b>不落盘。</b></td></tr>
                       <tr><td>AI 组件样式层</td><td>AI 按组件下的样式（一层一个名字）。<b>不落盘。</b></td></tr>
@@ -270,7 +266,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>分析曲线</td><td>统计各通道均值/极值/周期/趋势斜率，诊断振荡与噪声</td></tr>
                       <tr><td>生成指令</td><td>描述需求 → 生成命令模板（写入命令库或临时发送）</td></tr>
                       <tr><td>生成卡片</td><td>描述需求 → 生成控制卡片（直接写入控制画布）</td></tr>
-                      <tr><td>创造</td><td>主题 / 小部件 / 面板 / 工作区预设 / 任务模板——经「Agent 任务」保存为插件并自动启用；<b>逻辑模块</b>（能带 JS 的那类）不会自动启用，要你在插件库里点一次。详见「插件与创造」页。</td></tr>
+                      <tr><td>创造</td><td>面板 / 主题 / 小部件 / 工作区预设 / 任务模板——经「Agent 任务」写成插件草稿并排队；装不装由你在插件管理里点「转正为插件」决定。详见「插件与创造」页。</td></tr>
                       <tr><td>诊断</td><td>结合连接状态与异常巡检给出结构化排查清单</td></tr>
                       <tr><td>调试报告</td><td>汇总本次会话生成 Markdown 报告，可存档</td></tr>
                     </tbody>
@@ -286,23 +282,27 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                 <Section title="代码块与 UI 创造（回复中直接可用）">
                   <table className="help-table">
                     <tbody>
-                      <tr><td>动作执行<br /><code>uartix-action</code></td><td>让 AI 直接操作软件：打开面板、切主题/布局、清空画布、删除配置、开关连接、读写编排器与 3D 轨迹、生成并启动虚拟设备等（39 个白名单动作）。回复中显示操作卡片，点「执行」逐个运行。<b>对 AI 说「清空控制画布」「打开曲线面板」「主题换成琉璃」即可。</b></td></tr>
-                      <tr><td>控制卡片<br /><code>uartix-card</code></td><td>生成滑条/按钮/开关/LED/摇杆/组合控件，或 <b>custom 自定义卡片</b>（任意 HTML 界面）。批量生成用 {"{"}"cards":[…]{"}"}。</td></tr>
+                      <tr><td>动作执行<br /><code>uartix-action</code></td><td>让 AI 直接操作软件：打开面板、切主题/布局、清空画布、删除配置、开关连接、读写编排器与 3D 轨迹、生成并启动虚拟设备等（一整套白名单动作）。回复中显示操作卡片，点「执行」逐个运行。<b>对 AI 说「清空控制画布」「打开曲线面板」「主题换成琉璃」即可。</b></td></tr>
+                      <tr><td>控制卡片<br /><code>uartix-card</code></td><td>生成滑条/按钮/开关/LED/摇杆/组合控件，批量生成用 {"{"}"cards":[…]{"}"}。（旧的 "custom 自定义卡片=任意 HTML" 随旧 AI 造物一起退役；要自定义界面请做成 v3 插件的面板/小部件。）</td></tr>
                       <tr><td>命令库命令<br /><code>uartix-command</code></td><td>单条或批量（{"{"}"commands":[…]{"}"}）写入命令库「AI 生成」分组，可带脚本。</td></tr>
                       <tr><td>协议模板<br /><code>uartix-template</code></td><td>生成帧结构模板（截帧边界/字段/校验），写入协议面板；多帧型协议支持 {"{"}"group":"簇名","templates":[…]{"}"} 一次写入整簇并自动建组归档，默认停用待你启用。</td></tr>
                       <tr><td>指令工厂协议<br /><code>uartix-codec</code></td><td>生成自定义协议（帧头/变量/长度/校验段），写入指令工厂「我的协议」，填参数即组帧。</td></tr>
-                      <tr><td>UI 创造<br /><code>主题 / 小部件 / 面板 / 工作区预设 / 任务模板 / 逻辑模块</code></td><td>对 AI 描述你想要的主题、浮窗小部件或常驻面板，AI 会引导你打开输入框下方的<b>「Agent 任务」pill</b>：任务里用 <code>save_plugin</code> 把成果保存为插件并自动启用，无需手动安装。插件在 设置 → 插件管理 启停、配置、导入导出；<b>Agent 再改同一个插件会升版本号并保留旧版</b>，可在插件库里退回上一版。<br />另外两类是能真正落地的产物：<b>工作区预设</b>（一套面板排布）在插件库那条产物上点<b>「应用此布局」</b>——整屏排列会被替换，动手前当前布局自动存进 设置 → 工作区 的自动备份槽，随时回得去；<b>任务模板</b>（一段目标 + 建议步骤）点<b>「载入 AI 助手」</b>只把话填进输入框，<b>不会替你发送</b>，发不发、用哪个授权档还是你说了算。AI 想存一个引用了不存在工具的模板会被直接拒绝，不会留下一个跑不动的模板。</td></tr>
+                      <tr><td>UI 创造<br /><code>面板 / 主题 / 小部件 / 工作区预设 / 任务模板</code></td><td>对 AI 描述你想要的主题、浮窗小部件或常驻面板，AI 会引导你打开输入框下方的<b>「Agent 任务」pill</b>：任务里用 <code>plugin_draft_save</code> 写 v3 插件草稿，再用 <code>plugin_draft_promote</code> 排队转正。草稿不安装、不启用、不运行；装不装由你在 设置 → 插件管理 里点「转正为插件」并过批准卡。插件可启停、配置、更新与回滚。</td></tr>
                     </tbody>
                   </table>
-                  <p className="help-tip">插件里的沙箱小部件 / 自定义面板 / 自定义卡片自动注入 <code>window.uartix</code> API（见上）；<b>能不能调某一支，看那个包声明了哪几项能力</b>——完整名册与"哪些包不会自动启用"在「插件与创造」页。</p>
+                  <p className="help-tip">插件里的面板与小部件自动拿到 <code>window.uartix</code> 桥（见上）；<b>能不能调某一支，看那个包声明了哪几项权限</b>——完整模型在「插件与创造」页。</p>
                 </Section>
                 <Section title="Agent 能调用的工具（展开看它做了什么）">
                   <p>Agent 任务卡展开后每一步都是一个工具。按能力分组，<b>括号里是它需要的授权域</b>：</p>
                   <table className="help-table">
                     <tbody>
-                      <tr><td>读</td><td><code>settings_read</code> · <code>app_state</code>（一次看全局，省得逐个探）· <code>app_catalog</code> / <code>app_read</code>（宿主信息目录：先看有哪些可读视图，再按路径取，列表可翻页）· <code>list_plugins</code> · <code>ui_inventory</code> / <code>ui_inspect</code>（看界面到底有什么）· <code>plot_channels</code> / <code>plot_window</code> · <code>theme_read</code> · <code>fs_read</code> / <code>fs_list</code> · <code>read_artifact</code>（回执太大时分页取回原文）</td></tr>
-                      <tr><td>写配置</td><td><code>settings_apply</code>（配置写入）· <code>run_app_action</code>（39 个白名单动作，协议/指令/卡片都走它）· <code>save_plugin</code> · <code>theme_patch</code> / <code>theme_preset</code> / <code>save_theme_extension</code> · <code>style_patch</code> · <code>fs_write</code> · <code>shell_exec</code></td></tr>
-                      <tr><td>外观</td><td><code>theme_read</code> / <code>theme_patch</code> / <code>theme_preset</code>（配置写入）· <code>image_swatch</code> 从图片取色（文件读取）· <code>asset_put</code> / <code>asset_list</code> (textures &amp; noise) · <code>save_theme_extension</code> / <code>style_commit</code> / <code>style_append</code> / <code>theme_preview</code> / <code>save_plugin</code> / <code>enable_plugin</code> / <code>rollback_plugin</code>（插件库）</td></tr>
+                      <tr><td>读</td><td><code>settings_read</code> · <code>app_state</code>（一次看全局，省得逐个探）· <code>app_catalog</code> / <code>app_read</code>（宿主信息目录：先看有哪些可读视图，再按路径取，列表可翻页）· <code>app_read</code> 的 <code>plugins</code> 视图 · <code>ui_inventory</code> / <code>ui_inspect</code>（看界面到底有什么）· <code>plot_channels</code> / <code>plot_window</code> · <code>theme_read</code> · <code>fs_read</code> / <code>fs_list</code> · <code>read_artifact</code>（回执太大时分页取回原文）</td></tr>
+                      <tr><td>写配置</td><td><code>settings_apply</code>（配置写入）· <code>run_app_action</code>（一整套白名单动作，协议/指令/卡片都走它）· <code>plugin_draft_save</code> / <code>plugin_draft_promote</code> · <code>theme_patch</code> / <code>theme_preset</code> / <code>save_theme_extension</code> · <code>style_patch</code> · <code>fs_write</code> · <code>shell_exec</code></td></tr>
+                      <tr><td>{tx("插件草稿", "Plugin drafts")}</td><td><code>plugin_draft_list</code> · <code>plugin_draft_save</code> · <code>plugin_draft_discard</code> · <code>plugin_draft_promote</code>{tx(
+                        "（先写进草稿区：不进已装清单、不启动、也不能执行；丢弃是删除，要你确认；转正只排进待确认表，必须由你在插件管理里点「转正为插件」并过批准卡）",
+                        " (writes into the drafts area first: not in the installed list, cannot start or run; discarding deletes and needs your confirmation; promotion only queues a request, and you must click Convert to plugin in the plugin manager and pass the approval card)",
+                      )}</td></tr>
+                      <tr><td>外观</td><td><code>theme_read</code> / <code>theme_patch</code> / <code>theme_preset</code>（配置写入）· <code>image_swatch</code> 从图片取色（文件读取）· <code>asset_put</code> / <code>asset_list</code> (textures &amp; noise) · <code>save_theme_extension</code> / <code>style_commit</code> / <code>style_append</code> / <code>theme_preview</code>（写成主题草稿）· <code>plugin_draft_list</code> / <code>plugin_draft_save</code> / <code>plugin_draft_promote</code> / <code>plugin_draft_discard</code></td></tr>
                       <tr><td>界面深改</td><td><code>ui_inventory</code> / <code>ui_inspect</code> / <code>theme_audit</code> 只读自省 · <code>style_patch</code> / <code>style_revert</code> 按组件下样式与撤回（界面深改）· <code>layout_apply</code> 换工作区版式（内置预设/布局槽，每次切换自动快照、可一键回滚）· <code>chrome_set</code> 工具栏三段的排序与显隐</td></tr>
                       <tr><td>{tx("计划", "Plan")}</td><td><code>task_plan</code>{tx(
                         "（模型自己报步骤清单并随手更新。它不是权限闸：还有未闭环项时宿主不认「已完成」这句话，会提醒收尾一次；只提醒一次，不做死闸）",
@@ -313,9 +313,9 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   </table>
                   <p>
                     <b>它是怎么「看见」这个软件的</b>：可读的东西集中在一张<b>宿主自省目录</b>里，覆盖这些面——运行现状、协议模板与完整字段表、
-                    指令库、控件面板、帧与解析统计、会话录制、曲线通道、插件库、<b>3D 轨迹</b>、<b>自动编排器</b>、<b>测试序列器</b>、
-                    <b>分析面板</b>、<b>Modbus 工作台</b>、<b>虚拟设备工坊</b>、<b>哨兵</b>、<b>插件市场</b>（货架上有什么、上一次取回是什么样——
-                    这两支视图<b>一次网都不联</b>，没取过就照实说没取过）。<code>app_catalog</code> 列菜单（有哪些视图以它当场返回为准，
+                    指令库、控件面板、帧与解析统计、会话录制、曲线通道、插件、<b>3D 轨迹</b>、<b>自动编排器</b>、<b>测试序列器</b>、
+                    <b>分析面板</b>、<b>Modbus 工作台</b>、<b>虚拟设备工坊</b>、<b>哨兵</b>、<b>插件市场</b>（按 GitHub 话题 <code>uartix-plugin</code>
+                    搜到的仓库与封面；只在打开并搜索时联网，失败就照实说原因）。<code>app_catalog</code> 列菜单（有哪些视图以它当场返回为准，
                     这里不抄一份数字给你过期），<code>app_read</code> 按路径取内容。目录里没有的东西是<b>不存在</b>，不是"藏在哪儿没告诉它"：
                     它反射不到任意内部状态，也读不到设置里的密钥那一类。列表视图的回执带 <code>total / returned / nextCursor</code>，
                     它照着翻页，而不是自己猜偏移。
@@ -352,27 +352,21 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
 ]}`}</pre>
                   <p>点「执行」逐步运行，每步结果显示在卡片上。含破坏性动作（清空/删除）时卡片红色标注。</p>
                 </Section>
-                <Section title="小部件 uartix API 与无边框形态">
+                <Section title="插件小部件与透明浮层">
                   <ul className="help-ol">
-                    <li>所有沙箱组件（小部件 / 自定义面板 / 自定义卡片）自动注入全局 <code>window.uartix</code>，AI 生成的代码直接调用：onSnap 数据快照、<b>onChat 感知 AI 对话（phase + 思维链/正文尾部）</b>、ask 向 AI 提问、send 串口发送、app 软件动作、onKey 键盘（浮窗悬停即收）、onCursor 鼠标跟随、screen 屏幕尺寸、resize 高度。</li>
-                    <li><b>能调哪几支，取决于它是"谁装的"</b>：你在扩展区自己建的小部件、以及控制画布里的自定义卡片，上面这套 API 全给（<code>send</code> 仍受全局「允许向设备发送」总闸）。
-                      而<b>插件包里</b>的小部件/面板只能调它那个包声明过的能力，缺就<b>静默不生效</b>（调用不报错，只是什么都不发生）：
-                      <code>uartix.app</code> 要<b>界面动作</b>、<code>uartix.send</code> 要<b>发送串口数据</b>、<code>uartix.ask</code> 与 onChat/数据快照推送要<b>向 AI 助手提问</b> / <b>读取数据快照</b>。
-                      所以"AI 用 save_plugin 存的小部件包"里点按钮发不出数据是<b>设计如此</b>——它那个包只有小部件 + 读数据两项能力；要能发或能操作软件，得你自己去装带对应能力的包。</li>
-                    <li>窗口控制 <code>uartix.win.*</code>：menu 弹菜单、close、popOut 弹出独立桌面窗、moveTo/moveBy/resizeTo/get、top 置顶、through 点击穿透（60 秒自动恢复）；移动类自动钳制屏幕边界，不会拖丢。</li>
-                    <li>右键菜单可完全自定义：<code>uartix.menu.define(items)</code> 换掉默认菜单（支持子菜单/分隔线/勾选/多组命名菜单），<code>uartix.onMenu(cb)</code> 接收点击，<code>uartix.menu.off()</code> 关闭自动菜单改由组件自己处理右键。</li>
-                    <li>无边框形态：AI 声明 <code>{"<meta name=\"uartix:chrome\" content=\"none\">"}</code>（卡片带「无边框形态」角标）——无标题栏、窗口透明，内容完全自绘：悬浮通知条、贴角信息窗、计时器、互动桌宠等任意形态。</li>
-                    <li>无边框形态开箱行为：按住空白处即拖动（按住跟随、松开即停、自动跳过按钮/输入框、限制不出屏幕）、右键自动弹菜单——由宿主内置，AI 不需要也不允许自己写拖拽代码。</li>
-                    <li>管理动作：listWidgets / openWidget / closeWidget / popWidget / removeWidget——「把某挂件弹出到桌面」「关闭某挂件浮窗」一句话直达。</li>
-                    <li>示例：对 AI 说「做一个无边框透明桌宠，眼睛跟随鼠标，AI 思考时冒问号，回答时气泡打字机，点击它能向 AI 提问，右键菜单里加『闹脾气』『睡觉』，串口断线时沮丧」。</li>
+                    <li>小部件是 v3 插件的一种贡献：清单里写 <code>contributes.widgets</code> 并声明 <code>permissions.ui.widget</code>，入口是一份 HTML。宿主把它放进主窗口内的 iframe 浮层，与面板共用同一套沙箱桥——只能经 <code>uartix.call</code> / <code>uartix.on</code> 与插件自己的 Node 进程说话，碰不到宿主 DOM，也碰不到别的插件。</li>
+                    <li><b>透明/无边框只是表现形态</b>：<code>transparent: true</code> 去掉窗口边框与底色，<code>clickThrough: true</code> 让空白处不挡鼠标。悬浮通知条、贴角信息窗、计时器、互动形象都是同一件事的不同画法。</li>
+                    <li>浮层位置记在本机（<code>vs.pluginWidgets.v1</code>）；右上角 × 只隐藏本次会话，插件的启用状态不变，插件详情里可以再显示回来。</li>
+                    <li>管理动作：<code>listWidgets</code> 查当前可用的小部件，<code>openWidget</code> / <code>closeWidget</code> 显示或隐藏浮层。没有"弹出成独立桌面窗口"这类旧能力。</li>
+                    <li>AI 想造一个小部件，走 <code>plugin_draft_save</code> 写草稿 → <code>plugin_draft_promote</code> 排队 → 你在插件管理里点「转正为插件」。草稿不运行，转正后才出现在界面上。</li>
                   </ul>
                 </Section>
-                <Section title="软件动作（app action）：39 种，三个入口">
+                <Section title="软件动作（app action）：一处登记，两个入口">
                   <p>
-                    这张表是<b>软件动作清单</b>——一处登记、三个入口共用：聊天回复里的 <code>uartix-action</code> 代码块（你点「执行」）、
-                    MCP 的 <code>run_action</code>、小部件/自定义卡片里的 <code>uartix.app(kind, args)</code>。
-                    除这三个入口外<b>没有</b>第四种调法：能跑 JS 的形态只剩插件里的<b>逻辑模块</b>（见「插件与创造」页），
-                    软件不再对用户开放"手写脚本调动作"的 API。
+                    这张表是<b>软件动作清单</b>——一处登记、两个入口共用：聊天回复里的 <code>uartix-action</code> 代码块（你点「执行」）、
+                    MCP 的 <code>run_action</code>。
+                    除这两个入口外<b>没有</b>第三种调法：v3 插件的面板/小部件只经 <code>uartix</code> 桥与它<b>自己那个</b> Node 子进程说话，
+                    拿不到"调宿主软件动作"的口子；软件也不再对用户开放"手写脚本调动作"的 API。
                   </p>
                   <table className="help-table">
                     <tbody>
@@ -381,8 +375,8 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>曲线</td><td>addChannel({"{"}tpl,field{"}"}) · clearChannels()</td></tr>
                       <tr><td>写入</td><td>writeCard / writeCommand / writeTemplate / writeCodec / writeSendSpec（参数 {"{"}json:"…"{"}"}，writeTemplate 支持协议簇批量）{tx("；writeSendSpec 只新建发送谱，每张都先真编一遍才落库", "; writeSendSpec only creates send specs, each one trial-encoded before it lands")}</td></tr>
                       <tr><td>控制页</td><td>clearPage()【破坏性】· addPage({"{"}name{"}"}) · patchCard({"{"}name,patch{"}"})</td></tr>
-                      <tr><td>删除</td><td>removeCard / removeProtocol / removeCommand / removeCodec / removeWidget（按 name）【破坏性】</td></tr>
-                      <tr><td>挂件</td><td>openWidget / closeWidget / popWidget({"{"}name{"}"}) 浮窗管理与弹出桌面</td></tr>
+                      <tr><td>删除</td><td>removeCard / removeProtocol / removeCommand / removeCodec（按 name）【破坏性】</td></tr>
+                      <tr><td>小部件</td><td>openWidget / closeWidget({"{"}name{"}"}) 显示或隐藏主窗口内的小部件浮层（只影响本次会话）</td></tr>
                       <tr><td>连接</td><td>openPort() · closePort()（需开启「允许向设备发送」总闸）</td></tr>
                       <tr><td>传输</td><td>xferStart({"{"}path,proto{"}"}) 预填文件传输对话框（path 可数组多文件排队；开始发送仍需用户点击）</td></tr>
                       <tr><td>Modbus</td><td>modbus({"{"}op:"…"{"}"}) 操作工作台：<code>status</code> · <code>slave.start/stop/configure/write/writeMany/resize</code> · <code>poll.add/remove/clear/configure/start/stop/reset</code>（高权限动作，会占用总线发数据，需逐次批准）</td></tr>
@@ -395,9 +389,6 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                       <tr><td>通知</td><td>toast({"{"}msg{"}"})</td></tr>
                     </tbody>
                   </table>
-                  <pre>{`// 小部件 / 自定义卡片里（window.uartix 由宿主自动注入，不用自己写 postMessage）：
-uartix.app("applyPreset", { preset: "analyze" });
-uartix.app("openPanel", { panel: "plot2d" });`}</pre>
                   <pre>{`// 聊天里对 AI 说"本机当从站，40003 写 1234，再开主站轮询读回来画曲线"，它输出的动作块：
 {"actions":[
   {"kind":"modbus","args":{"op":"slave.configure","address":1}},
@@ -407,7 +398,7 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
   {"kind":"modbus","args":{"op":"poll.start"}}
 ]}
 // 点「执行」逐条跑；modbus 会真的占总线发数据，所以每条都要你在批准卡上确认。`}</pre>
-                  <p className="help-tip">高权限动作（破坏性、modbus、sentinel、考古报告、编排器/3D 写入、虚拟设备等）在挂件侧一律不可调用——这是硬限制，不随设置变化；要执行请走 AI 助手的 Agent 任务，由你在批准卡上逐次确认。<b>插件包里的小部件还要另过一道能力门</b>：包没声明 <code>ui.action</code> 时 <code>uartix.app</code> 根本不通（详见「插件与创造」页）。</p>
+                  <p className="help-tip">高权限动作（破坏性、modbus、sentinel、考古报告、编排器/3D 写入、虚拟设备等）都受同一套批准卡约束——要执行请走 AI 助手的 Agent 任务，由你在批准卡上逐次确认。<b>v3 插件的面板 / 小部件跑在不透明源 iframe 里</b>：碰不到宿主 DOM，也碰不到别的插件，只能经 <code>uartix</code> 桥与它自己那个 Node 子进程说话；能读写哪些目录、能不能起子进程，全在批准卡上逐条列出。</p>
                 </Section>
                 <Section title="常用诉求 → 一句话指令">
                   <table className="help-table">
@@ -419,10 +410,9 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
                       <tr><td>做协议</td><td>「做一个指令工厂协议：帧头 AA 55、命令 u8、长度、数据、CRC16-Modbus」</td></tr>
                       <tr><td>协议考古</td><td>「结构发现面板分析完了吗？分析一下这个协议是什么结构，给我一份考古报告」</td></tr>
                       <tr><td>换主题</td><td>「主题换成琉璃，加一点液态玻璃感」</td></tr>
-                      <tr><td>做挂件</td><td>「做一个桌面电压监视挂件，低于 10V 变红闪烁」</td></tr>
-                      <tr><td>无边框挂件</td><td>「做一个无边框透明挂件贴在屏幕角落，AI 回答时气泡提示」</td></tr>
-                      <tr><td>桌宠（示例）</td><td>「做一个无边框桌宠，AI 思考时冒问号，回答时气泡打字机」</td></tr>
-                      <tr><td>挂件管理</td><td>「把 XX 弹出到桌面」「关闭 XX 浮窗」「重新打开 XX」</td></tr>
+                      <tr><td>做小部件</td><td>「做一个电压监视小部件，低于 10V 变红闪烁」</td></tr>
+                      <tr><td>透明无边框小部件</td><td>「做一个透明无边框的小部件贴在角落，AI 回答时冒气泡提示」（无边框只是 widgets 的一种表现，不是单独一类东西）</td></tr>
+                      <tr><td>小部件管理</td><td>「列出可用小部件」「显示/隐藏 XX 浮层」——只在主窗口内浮层，没有“弹出到桌面”这种独立窗口</td></tr>
                       <tr><td>自动化</td><td>「写个脚本：每 100ms 上报一次 roll，越界时蜂鸣」</td></tr>
                     </tbody>
                   </table>
@@ -480,78 +470,61 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
             {tab === "plugins" && (
               <>
                 <p>
-                  这一页讲<b>软件能装什么、装完归谁管</b>。入口有两个：<code>设置 → 插件管理</code>，
-                  以及 AI 助手顶栏「更多 ▾ → 本地插件库」（同一个东西，少跳一步）。
-                  包格式是 <code>uartix-plugin</code>，本地 JSON 存储。<b>标题栏 AI 助手旁边那颗拼图图标直接开「插件管理」</b>（就是设置页那一栏，不另做一个窗口）；<b>插件市场</b>在插件库面板里那颗按钮后面（设置 → 插件管理、AI 助手「更多 ▾ → 本地插件库」两处都有）。市场<b>只在你打开那一页时才联网</b>取索引（启动路径零外发），装进来的包一律是<b>停用态</b>，覆盖本机已有版本的那种还要你在确认卡上点「装入」。
+                  这一页讲<b>插件是什么、装完归谁管</b>。入口有两个：<code>设置 → 插件管理</code>，
+                  以及 AI 助手顶栏「更多 ▾ → 插件管理」（打开同一个设置页）。
+                  一个插件就是一个目录：<code>plugin.json</code>（format <code>uartix-plugin</code>、schemaVersion 3）
+                  + 可选的 <code>main.mjs</code>（独立 Node 子进程）+ 面板/小部件 HTML 与主题 CSS。
+                  旧版 schemaVersion 2 的声明式包<b>不再支持</b>，也不会迁移。
                 </p>
-                <Section title="六种产物：分别是什么、装上会不会自己生效">
+                <Section title="一个插件能贡献什么">
                   <table className="help-table">
                     <tbody>
-                      <tr><td>主题</td><td>一套外观变量（+可选受限 CSS）。<b>分两条路，结果不一样</b>：AI 保存/固化出来的主题<b>当场就是已启用</b>；<b>从插件市场装的是一枚停用态的包</b>，要你在市场「外观」页签或插件库里点一次「启用」才会上屏。停用/卸载即撤掉这枚主题，界面回到你在设置里选中的内置那枚。<b>同时只有一枚主题在画</b>——启用第二枚会把前一枚挤掉（回执里会点名是谁）。</td></tr>
-                      <tr><td>小部件</td><td>浮窗 / 桌面挂件（HTML 沙箱 iframe）。<b>会</b>自动启用。</td></tr>
-                      <tr><td>面板</td><td>一块常驻面板，可以是声明式积木，也可以是 HTML。<b>会</b>自动启用。</td></tr>
-                      <tr><td>工作区预设</td><td>一套面板排布（dockview 布局 JSON）。<b>启用 ≠ 生效</b>：它只是出现在库里，你要在那条产物上点<b>「应用此布局」</b>，整屏排列才会被替换；点之前当前布局自动存进 设置 → 工作区 的备份槽，随时回得去。</td></tr>
-                      <tr><td>任务模板</td><td>一段目标 + 给 AI 的建议步骤。点<b>「载入 AI 助手」</b>只是把话填进输入框，<b>不替你发送</b>；步骤是建议，不是硬指令。存的时候引用了不存在的工具会被直接拒绝。</td></tr>
-                      <tr><td>逻辑模块</td><td>本包自带的 JS，跑在<b>专用 Worker</b> 里（见下）。<b>不会</b>自动启用，永远要你在插件库里点一次。</td></tr>
+                      <tr><td>面板</td><td><code>contributes.panels</code>：一块常驻面板（不透明源 iframe），经 <code>uartix</code> 桥与插件进程说话。启用且已批准后才出现在「+ 面板」。</td></tr>
+                      <tr><td>主题</td><td><code>contributes.themes</code>：一份 CSS，过宿主净化器后进主题管线。要在 设置 → 外观 里选中它才会上屏，同一时间只有一枚插件主题在画。</td></tr>
+                      <tr><td>小部件</td><td><code>contributes.widgets</code>：主窗口内 iframe 浮层；<code>transparent</code> / <code>clickThrough</code> 只是表现形态。位置记在本机，× 只隐藏本次会话。</td></tr>
+                      <tr><td>命令</td><td><code>contributes.commands</code>：注册进命令面板，带 <code>plugin:</code> 分区；插件停用即消失。</td></tr>
+                      <tr><td>工作区预设</td><td><code>contributes.presets</code>（配 <code>permissions.ui.layout</code>）：一个包内 JSON 存一套 dockview 布局。在插件详情点「应用此布局」整屏换排布——<b>换前当前布局自动存进 设置 → 工作区 的备份槽</b>，随时回得去。</td></tr>
+                      <tr><td>任务模板</td><td><code>contributes.tasks</code>：一个包内 JSON 存「目标 + 建议步骤」。点「载入 AI 助手」只把话填进 AI 输入框，<b>不替你发送</b>；发不发、用哪个授权档仍由你决定。</td></tr>
+                      <tr><td>面板插槽 / 布局改动</td><td><code>inject.sections</code> 往宿主面板里加一块；<code>inject.mutations</code> 隐藏/改名/移动宿主面板。<b>设置、插件管理、批准卡、运行控制永远不可隐藏。</b></td></tr>
+                      <tr><td>Agent 工具</td><td>有 <code>main.mjs</code> 且声明 <code>permissions.ai.registerTools</code> 的插件可注册工具；名称强制 <code>plg_</code> 前缀，宿主同名工具永不被接管。</td></tr>
                     </tbody>
                   </table>
+                </Section>
+                <Section title="装、启、批：三件事分开">
+                  <ol className="help-ol">
+                    <li><b>安装</b>：从目录、tar.gz 包或 GitHub 市场装进来。新装一律是<b>停用态</b>。</li>
+                    <li><b>批准</b>：插件首次以某个权限面出现时，会有一张批准卡列出它要读写的目录、要起的程序、要连的地址。改清单会改变信任指纹，需要重新批准。</li>
+                    <li><b>启用</b>：<code>enabled</code> 是另一道门。只有「已启用 + 已批准」同时成立，它的面板、小部件、命令才出现，进程才会启动。停用会先停进程再撤界面。</li>
+                  </ol>
                   <p className="help-tip">
-                    前四类是"AI 存下来就能自己生效"的（<b>从市场装的除外——市场那条路径一律落成停用态</b>）。
-                    <b>逻辑模块不会自动启用</b>——会跑 JS 的包不得被自动放行，
-                    这是硬规矩：否则"AI 存一个包 → 自己启用 → 下一步多出一支自己能调的工具"就是自提权的正门。
+                    没有"免批准"路径，也没有"AI 存完就自动启用"。能力面可以宽，安全判据不松。
                   </p>
                 </Section>
-                <Section title="能力名册（12 项）：包能声明什么">
-                  <p>manifest 里写在这 12 项之外的能力，一律拒绝入库。名字与插件库详情里的标签是同一份：</p>
-                  <table className="help-table">
-                    <tbody>
-                      <tr><td>主题 token</td><td>改外观变量</td></tr>
-                      <tr><td>自定义面板</td><td>加一块常驻面板</td></tr>
-                      <tr><td>小部件</td><td>加浮窗 / 桌面挂件</td></tr>
-                      <tr><td>界面动作</td><td>调 39 个软件动作（<code>uartix.app</code>）；缺它那些调用静默不生效</td></tr>
-                      <tr><td>窗口控制</td><td>置顶 / 点击穿透 / 弹出独立窗口。<b>不会自动启用</b></td></tr>
-                      <tr><td>运行 JS</td><td>本包 JS 进专用 Worker。<b>不会自动启用</b></td></tr>
-                      <tr><td>注册 AI 工具</td><td>往 AI 助手的工具面里加自定义工具。<b>不会自动启用</b></td></tr>
-                      <tr><td>工作区布局预设</td><td>带一套面板排布（生效仍要你点「应用此布局」）</td></tr>
-                      <tr><td>任务模板</td><td>存一段可复用的目标 + 建议步骤</td></tr>
-                      <tr><td>读取数据快照</td><td>接收实时字段与 AI 对话状态推送</td></tr>
-                      <tr><td>发送串口数据</td><td>向设备发字节。<b>不会自动启用</b>，且另受全局「允许向设备发送」总闸限制</td></tr>
-                      <tr><td>向 AI 助手提问</td><td>组件反向问 AI。<b>不会自动启用</b></td></tr>
-                    </tbody>
-                  </table>
-                  <p className="help-tip">
-                    <b>不会自动启用</b>的那五项（窗口控制、运行 JS、注册 AI 工具、发送串口数据、向 AI 助手提问）是<b>按能力类别整类挡</b>的，
-                    不是按"作者看起来可不可信"挡的；作者自报的可信标记不构成信任。
-                  </p>
-                </Section>
-                <Section title="导入、启停、批量管理">
+                <Section title="插件跑在哪、封了什么">
                   <ul className="help-ol">
-                    <li><b>导入一律先停用</b>：选文件 / 粘贴包 JSON → 先跑校验（超限字段带截断标记报给你），通过了也还是停用状态，启用是你另一次动作。超 4 MiB 直接拒。</li>
-                    <li>导出：单个包或批量导成 JSON，可以直接发给别人；<b>没有</b>任何"导出即签名"的含义。</li>
-                    <li>批量：顶部多选后可批量启用 / 停用 / 卸载 / 导出，装多了不用一个个点。</li>
-                    <li>详情里能看见这个包声明了哪几项能力、带了哪几类产物、以及它有没有触发过<b>隔离违规</b>（伪造消息 / 越权调用）。多次违规会被隔离，卸载重装才解。</li>
-                    <li>版本链：同一个包被反复保存会升版本号并保留旧版，可<b>退回上一版</b>；更新候选要你先批准或拒绝，不会静默替换你在用的东西。</li>
+                    <li>插件代码跑在<b>独立 Node 子进程</b>里，不在 WebView、也不在宿主进程。写文件是内核级牢笼（<code>--allow-fs-write</code> 只给声明过的目录）；读声明只是知情，因为 Windows 上精确读白名单不生效。</li>
+                    <li>面板与小部件是<b>不透明源 iframe</b>（只有 <code>allow-scripts</code>，不给 same-origin），碰不到宿主 DOM、cookie、localStorage，也碰不到别的插件。</li>
+                    <li>主题 CSS 与面板 HTML 都过宿主自己的净化器：禁全局选择器、<code>@import</code>、<code>!important</code> 与外链资源。</li>
+                    <li>出问题看「运行日志」面：<b>宿主输出</b>是每个插件进程说的话（同时落盘到 <code>plugins/&lt;id&gt;/logs/host.log</code>，从头部轮转、只断在换行），<b>操作账本</b>是应用对它做过什么（装 / 批准 / 启停 / 执行命令 / 目录绑定 / 场景切换，append-only 且可重建校验）。插件启动失败会弹一条通知，点进去看的就是这一面。</li>
+                    <li>工作场景（一组有序启用的插件 + 主题/目录/配置补丁）在 <b>设置 → 工作场景</b> 里编辑；一键切换仍在命令面板（<code>应用场景：…</code>）。场景不会替未批准的插件开绿灯。</li>
+                    <li>路径一律由宿主解析：<code>$WS</code> 工作区根、<code>$EXT:&lt;key&gt;</code> 外部目录由你在 <b>设置 → 插件管理</b> 里绑一次，插件清单里不写死绝对路径。</li>
+                    <li>面板里可以放「选择工作区」按钮（<code>uartix.bindRoot</code>）：目录由系统对话框交给<b>你</b>选，选完还要在 设置 → 插件管理 由<b>你</b>确认。</li>
                   </ul>
                 </Section>
-                <Section title="逻辑模块：JS 跑在哪、封了什么、怎么算失控">
+                <Section title="AI 造插件：草稿 → 你点转正 → 批准卡">
                   <ul className="help-ol">
-                    <li>每包最多 1 个模块、代码上限 256 KiB；<b>不联网</b>（Worker 内取回原引用的路数被逐条封掉，出网通道不存在）。</li>
-                    <li>启用后先做<b>封网自证</b>：模块自己按宿主要求逐项验证"我确实拿不到 fetch / import / 主世界对象"，4 秒内自证不通过就标为<b>封网未通过（已拦停）</b>，工具不注册、代码不再跑。</li>
-                    <li>每次调用 10 秒超时；超时或崩掉会被终止并标<b>已失控终止（停用再启用可重来）</b>，重建最多 3 次。</li>
-                    <li>带工具的模块可注册自定义工具：每包 ≤8 支、全局 ≤64 支，名字强制 <code>plg_</code> 前缀 + 包名 + 稳定短哈希，<b>宿主同名工具永远不被接管</b>。</li>
-                    <li>新注册的工具<b>下一个任务才生效</b>——正在跑的任务不会中途多出手来。</li>
+                    <li>AI 用 <code>plugin_draft_save</code> 把面板 / 主题 / 小部件 / 工作区预设 / 任务模板写进应用数据目录下的 <code>.drafts</code>。<b>草稿不是插件</b>：不进账本、不进信任库、不进「+ 面板」，<b>不许启动</b>。</li>
+                    <li>清单校验通过后，AI 用 <code>plugin_draft_promote</code> 把转正请求放进插件管理的草稿分区。装不装由你点「转正为插件」；权限面没批过时那一步还会弹批准卡。</li>
+                    <li>AI 也可以写外观 token / CSS 草稿；<code>style_commit</code> 与 <code>save_theme_extension</code> 最后做的同样是写主题插件草稿并排队，不会替你安装。</li>
+                    <li>草稿可以随时丢弃（<code>plugin_draft_discard</code>，要过批准卡）；丢弃不影响已装插件。</li>
                   </ul>
-                  <p className="help-tip">
-                    如实说一句边界：realm 内封网是"同一条路走不通"，不是"引擎层面不可能"。所以信任边界仍然是<b>安装前你自己看一眼能力与产物 + 含 JS 的包必须人工启用</b>，
-                    Worker 加固是第二层，不是第一层。
-                  </p>
                 </Section>
-                <Section title="AI 造的插件 vs 你装的插件：能力从哪来">
+                <Section title="市场、更新、回滚、卸载">
                   <ul className="help-ol">
-                    <li>AI 用 <code>save_plugin</code> 存的包，能力<b>由产物种类决定</b>，它没有加码的余地：小部件包只有小部件 + 读取数据快照两项，所以那种包里的发送 / 界面动作 / 提问调用都不会生效。要那些能力得你自己装带相应能力的包。</li>
-                    <li>AI 自己造的包<b>碰不到设备发送</b>——这是产物表里写死的，不是一个可以被设置翻掉的开关。</li>
-                    <li>只有 AI 自己创建的包能被它静默升版；你导入的包它改不动，回执是 <code>update_needs_user</code>，绝不覆盖。</li>
-                    <li>插件带来的工具在台账里标着来源包，你能看出这一步是宿主动的还是某个包动的。</li>
+                    <li><b>插件市场</b>在设置 → 插件管理里那颗按钮后面。搜的是 GitHub 上带 <code>topic:uartix-plugin</code> 的仓库，<b>显式点「搜索 GitHub」才联网</b>。</li>
+                    <li>更新 = 重装同一条通道；版本归档在 <code>.versions</code> 里，详情页可<b>回滚到上一版</b>。</li>
+                    <li>卸载只在插件管理里做，每条都要确认；卸载会移除插件目录、账本条目与信任记录。</li>
+                    <li>插件配置在详情页里按清单声明渲染；值保存在插件子系统自己的设置里，不混进全局设置。</li>
                   </ul>
                 </Section>
               </>
@@ -569,12 +542,12 @@ uartix.app("openPanel", { panel: "plot2d" });`}</pre>
                       "Two bars on top, one job each: the identity bar (38px) answers which app this is - brand, the four app entries, pin and the three window controls; the toolbar (34px) is where the clickable things live - the workspace preset plus the interface / session / layout segments, whose order and visibility you set under Settings - Workspace.",
                     )}</li>
                     <li>{tx(
-                      "想多一枚面板，两个入口都行：工具栏最右边那枚「+ 面板」下拉（多列一组「最近使用」和 AI 扩展面板），或导轨的「视图」。两处列的是同一张清单，按五个分组摆好（数据接入 / 解析与画布 / 可视化 / 测试与自动化 / AI 与探索）。",
-                      "Two ways to add a panel: the “+ Panel” dropdown at the right end of the toolbar (it also groups recently used panels and AI extension panels), or Views in the rail. Both list the same set, in five groups: data input / parse and canvas / visualisation / test and automation / AI and discovery.",
+                      "想多一枚面板，两个入口都行：工具栏最右边那枚「+ 面板」下拉（多列一组「最近使用」和 AI 插件面板），或导轨的「视图」。两处列的是同一张清单，按五个分组摆好（数据接入 / 解析与画布 / 可视化 / 测试与自动化 / AI 与探索）。",
+                      "Two ways to add a panel: the “+ Panel” dropdown at the right end of the toolbar (it also groups recently used panels and AI plugin panels), or Views in the rail. Both list the same set, in five groups: data input / parse and canvas / visualisation / test and automation / AI and discovery.",
                     )}</li>
                     <li>{tx(
-                      "设置页占满整个工作区，不是一居中的弹窗：左列是带图标的导航（十一项，分成「基础 / 数据与诊断 / AI 与 Agent / 扩展 / 其他」四组），右栏顶部那行大字就是当前这一页的名字。出口两条：左上的「← 返回工作区」，或者按 Esc。",
-                      "Settings fills the whole workspace instead of sitting in a centred dialog: an icon nav on the left (eleven entries in four groups - basics, data and diagnostics, AI and agent, extensions, misc), and the page name in large type at the top of the right pane. Two exits: the “Back to workspace” link at the top left, or Esc.",
+                      "设置页占满整个工作区，不是一居中的弹窗：左列是带图标的导航（十一项，分成「基础 / 数据与诊断 / AI 与 Agent / 插件 / 其他」四组），右栏顶部那行大字就是当前这一页的名字。出口两条：左上的「← 返回工作区」，或者按 Esc。",
+                      "Settings fills the whole workspace instead of sitting in a centred dialog: an icon nav on the left (eleven entries in four groups - basics, data and diagnostics, AI and agent, plugins and integration, misc), and the page name in large type at the top of the right pane. Two exits: the “Back to workspace” link at the top left, or Esc.",
                     )}</li>
                     <li>{tx(
                       "开着设置页时，标题栏只留品牌图标和右边的置顶/最小化/最大化/关闭——那四颗入口在这里只会把你从一屏换到另一屏，所以收起来了。",
@@ -1035,7 +1008,7 @@ else send("RGT:" + phase);`}</pre>
                   <table className="help-table">
                     <tbody>
                       <tr><td>能做</td><td>连接串口 / 网络 / BLE 设备；用控制页与命令库发指令；看帧画布、数据表格、2D 曲线、频谱等全部观测面板；哨兵监测照常运行；编排器<b>可运行</b>（运行按钮手动跑、组照常触发，向设备发数据）、3D 校准<b>操作</b>（采样/拟合/六面）放行</td></tr>
-                      <tr><td>不能做</td><td>编辑/新建协议模板与字段；增删改控制页卡片、命令库与编排<b>结构</b>（组/事件/块/变量）；修改 3D 轴绑定与设置；修改设置；导入其它配置文件（改动都会被拦截并提示「Operator 模式：配置只读」——守卫在 store 层，AI/MCP/扩展面板等一切调用方同等受约束）</td></tr>
+                      <tr><td>不能做</td><td>编辑/新建协议模板与字段；增删改控制页卡片、命令库与编排<b>结构</b>（组/事件/块/变量）；修改 3D 轴绑定与设置；修改设置；导入其它配置文件（改动都会被拦截并提示「Operator 模式：配置只读」——守卫在 store 层，AI/MCP/插件面板等一切调用方同等受约束）</td></tr>
                     </tbody>
                   </table>
                 </Section>
@@ -1048,94 +1021,38 @@ else send("RGT:" + phase);`}</pre>
               <>
                 <Section title="市场从哪来、什么时候联网">
                   <p>
-                    货架上的清单来自一份<b>索引</b>：<code>{MARKET_BUNDLED_INDEX_URL}</code>（应用自带那份示例货架，同源、不出网），
-                    或你在 <b>设置 → 插件管理</b> 里填的另一个地址。<b>只有你打开「插件市场」那一页时才会去取</b>——
-                    启动路径、AI 的只读视图、命令行查状态都不替你联网（查不到就照实说没取过）。
+                    插件市场搜的是 GitHub 上带 <code>topic:uartix-plugin</code> 的仓库。<b>打开页面不会自动联网</b>：
+                    只有你在搜索框旁点<b>「搜索 GitHub」</b>时才会发请求，避免一开页就撞限流。
                   </p>
                   <p>
-                    取回来的清单<b>不缓存当现状</b>：这一页拉不到就显示失败页 + 真因 + 重试，
-                    不拿上一份清单继续显示。对一份每天在长的货架来说，<b>过期答案不是降级，是错误</b>。
-                  </p>
-                  <p>
-                    页面顶上那行状态的读法：<b>几条 · 几条被货架剔除 · 生成于哪天 · 耗时 · 走没走镜像</b>。
-                    「被剔除」是索引里有、但没过契约的条目（一条坏投稿不该让整架空掉，但也不能静默少几支）。
-                    同一个数在 AI 的 <code>app_read</code> 视图与市场页顶上这行里是同一份出处，不会两处各说一套。
-                  </p>
-                  <p className="help-tip">
-                    市场页顶上那颗齿轮里是两行设置（索引地址 / 镜像前缀），旁边会当场告诉你<b>这一条会不会被用上、不会的话为什么</b>；
-                    拉不到索引时它自己会摊开。远程地址的域必须在这个放行清单里：{MARKET_ALLOW_HOSTS.join(" / ")}——清单是从代码里读的，不是抄在这句话里的。
-                  </p>
-                  <p>
-                    货架上一条包可以写 <code>npm</code> 那一节，意思是<b>字节放在 npm 官方 registry 上</b>（详情页的「出处」那行会照实标出来）。
-                    这种情况我们取回的是那枚 tarball，<b>只从里面读出插件清单</b>：不装依赖、不跑包内任何脚本，取出来照样过同一个生产校验器，
-                    哈希与字节数也仍是<b>按索引声明逐条比对</b>——索引仍是唯一的门，换来源没有让门变松。<b>镜像前缀对这类条目不生效</b>：换域等于换信任来源。
+                    允许连接的域只有一份声明（<code>features/plugins/engine/hosts.ts</code> 的
+                    <code>MARKET_ALLOW_HOSTS</code>）：<code>{MARKET_ALLOW_HOSTS.join(" / ")}</code>。
+                    加域是信任面变更，必须显式过一次手。
                   </p>
                 </Section>
-                <Section title="装进来归谁管：一颗按钮、一处落地、三个启停入口">
+                <Section title="装进来归谁管">
                   <ol className="help-ol">
-                    <li>卡片与详情各一颗<b>「安装」</b>（或「更新到 v×」）。{marketInstallNote()}</li>
-                    <li><b>新装直接落地为停用态</b>，不再弹第二张卡；只有<b>覆盖本机已有版本</b>那种会停在右下角那张确认卡上等你点「装入」。命令行发起的装包停在<b>同一张卡</b>上，标题栏那颗拼图会亮「等你确认」——两个入口做的是同一件事，结论也只有一个来源。</li>
-                    <li>启用与停用有三个地方：市场页的<b>「外观」页签</b>（主题那一类）、<b>插件库</b>（所有种类）、<b>设置 → 外观</b>的主题卡。三处调的是同一个 <code>setEnabled</code>，同一动作同一句话，不存在"在这儿启用与在那儿启用不同"。</li>
-                    <li><b>主题互斥</b>：内置与插件主题同级，同时只有一枚在画；启用一枚主题会照实告诉你挤掉了谁。插件库里停用一枚包，它带的所有产物一起退出。</li>
-                    <li>卸载只在<b>插件库</b>做（市场不提供删除本机内容的按钮），每条都要你确认。</li>
+                    <li>卡片与详情各一颗<b>「安装」</b>。下载的是仓库打包的 v3 插件（tar.gz），解包后过与本地安装<b>同一个校验器</b>。</li>
+                    <li><b>新装落地为停用态</b>，不会自动出现在「+面板」；需要你在插件管理里启用。第一次装未知来源的包还会弹批准卡。</li>
+                    <li>启用 / 停用 / 卸载都在<b>插件管理</b>：市场不提供删除本机内容的按钮。</li>
+                    <li>主题是插件的一种贡献；在设置 → 外观里选中它才会画到界面上，同一时间只有一枚插件主题在画。</li>
                   </ol>
                 </Section>
-                <Section title="AI 能提名，但落地永远是你点">
+                <Section title="AI 不替你装">
                   <p>
-                    AI 先读 <code>app_read</code> 的 <code>market.entries</code>（<b>不联网</b>，读的是你打开那一页时取回的那份），
-                    再用 <code>propose_market_install</code> 提名一支。这支工具做的事只有两件：把那枚包<b>下载下来按货架声明逐条比对</b>，
-                    然后把"会装成什么"讲给你听——<b>它不装、不暂存、不启用，也不进插件库</b>。
+                    AI 可以做的是写<b>插件草稿</b>（<code>plugin_draft_save</code>），然后把转正请求排进设置 → 插件管理
+                    （<code>plugin_draft_promote</code>）。它<b>不能</b>安装、启用或运行草稿；装不装、批不批由你点。
+                    「草稿写好了」与「插件已装好」是两句不同的话。
                   </p>
-                  <p>
-                    它<b>每次都要求你在批准卡上点一次</b>（三档都一样），因为批准的内容是"允许我去下载一枚外部字节"这件事本身。
-                    批准之后回执末尾会写明下一步去哪点：「插件市场」那一页那一支上的<b>「装入」</b>，或者终端里的 <code>uartix plugin install</code>。
-                    「已提名」与「已装好」是两句不同的话——看到后者的字面就是它说错了。
-                  </p>
-                </Section>
-                <Section title="它替你做了什么、没做什么">
-                  <table className="help-table">
-                    <tbody>
-                      <tr>
-                        <td>做了</td>
-                        <td>
-                          按索引声明<b>逐条比对</b>再入库：sha256、字节数、包里的 id、以及<b>版本</b>（货架写 1.2.0、包内是 1.1.0 就报 <code>version_mismatch</code> 拒绝，不给你装一个"名字对得上内容不对"的东西）；
-                          再一遍<b>生产校验器</b>（与 AI 保存插件、导入文件包用的是同一个）；装进来是停用态。
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>没做</td>
-                        <td>
-                          <b>不替你启用</b>，不替你启用那些要点名的能力（{autoEnableBlockedCaps().map((c) => CAP_LABEL[c].name).join("、")}）——这些永远要你自己点一次；
-                          不替你决定"覆盖本机已有版本"（停在确认卡上）；也不替你判断这堆东西<b>好不好</b>——
-                          {marketNoEndorse()}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td>镜像换不掉内容</td>
-                        <td>镜像前缀只改「从哪台机器下载」。取回的字节仍然按索引里声明的哈希与字节数比对，过不了就是不过——所以换镜像不是开一条供应链后门。</td>
-                      </tr>
-                    </tbody>
-                  </table>
                 </Section>
                 <Section title="怎么把你做的东西上架">
                   <p>
-                    交<b>两样东西</b>：<code>market/pkg/&lt;名字&gt;.uartix.json</code>（或目录源 <code>market/pkg/&lt;名字&gt;/manifest.json</code> ＋旁挂真实文件）
-                    和一份元数据 <code>market/entries/&lt;名字&gt;.json</code>。<b>不要写哈希与字节数</b>——那是生成器算的，作者写不了也不该写。
-                  </p>
-                  <p>
-                    投稿前<b>离线一条命令</b>自检（不连应用、不联网、不读设置）：
-                  </p>
-                  <pre>{`npm run build:plugin-cli
-node dist-cli/uartix-plugin.cjs validate market/pkg/<名字>.uartix.json
-# 仓库里也可以：npm run market:validate -- market/pkg/<名字>`}</pre>
-                  <p>
-                    这条命令<b>跑的就是上架会跑的那几道</b>：包体过 <code>validateManifest</code>（生产校验器）、元数据与包体对账（id / 版本 / 能力）、
-                    产物过索引契约 <code>parseEntry</code>。回执会列出<b>它跑了哪几道、用的哪一版校验器</b>，
-                    跳过的也会照实说（比如你只给了一个孤零零的包、没给那份 entries）。
-                    为什么强调"同一个"：如果投稿人本地跑的是另一套宽松点的检查，就会出现<b>本地绿、上架红</b>——那种失败最难查，因为报错的人看不到判据。
+                    把一个合法的 v3 插件目录推到 GitHub 仓库，给仓库加上 <code>uartix-plugin</code> 话题，
+                    再在仓库里放一张封面图与 README。市场卡片会读话题搜索结果，详情页会展示 README 里的截图。
+                    包内必须是 <code>plugin.json</code>（format <code>uartix-plugin</code>、schemaVersion 3）与它声明的入口文件。
                   </p>
                   <p className="help-tip">
-                    主题那一类要特别留意变量<b>键名</b>：写错一个键不会崩，只会"那一项没落地"。校验器拒未知键时会给出<b>相近的真名</b>（比如 <code>--panel</code> 你会写成 <code>--bg-panel</code>）。
+                    装包时不跑安装脚本、不装依赖；主题 CSS 与面板 HTML 都过宿主自己的净化器。
                   </p>
                 </Section>
               </>

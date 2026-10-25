@@ -17,7 +17,7 @@ import { tx, useLocale } from "../../i18n/strings";
 import { IconClose, IconPlay, IconPlus, IconStop } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";
 import { requestAsk } from "../ai/chatStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { HelpHint } from "../../shared/HelpHint";
 
 /** 信号模型：`k` 是存档里的码，名字渲染时挑 */

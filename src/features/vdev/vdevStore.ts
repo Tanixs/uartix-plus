@@ -446,9 +446,9 @@ export function buildTemplateImport(spec: VDevSpec): { group: string; templates:
 
 const LIST_KEY = "vs.vdev.list";
 
-/** toast 动态导入：避免把 extRuntime→appActions 的重链拉进本模块图（测试/面板加载都更轻） */
+/** toast 动态导入：避免把 uiRuntime→appActions 的重链拉进本模块图（测试/面板加载都更轻） */
 async function notify(zh: string, en: string): Promise<void> {
-  const { toast } = await import("../ai/extRuntime");
+  const { toast } = await import("../ai/uiRuntime");
   toast(tx(zh, en));
 }
 const listeners = new Set<() => void>();

@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_STYLE_IDS, builtinStyleAssets, builtinStyleCss, hasBuiltinStyle } from "./builtinStyles";
 import { BUILTIN_THEME_IDS } from "./builtinThemes";
 import { guardStyleText } from "../features/styles/styleSanitize";
-import { THEME_CSS_MAX_BYTES } from "../features/plugins/artifact";
+import { THEME_CSS_MAX_BYTES } from "../features/plugins/engine/themeCss";
 import { danglingAssetRefs, decodeBase64, validateAsset } from "../features/styles/assetGuard";
 
 const fsSpec = "node:fs";

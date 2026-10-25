@@ -1,0 +1,1137 @@
+/**
+ * P174：**插件清单**（`uartix-plugin` / schemaVersion 3）的定义与校验器。
+ *
+ * 名字沿用 `uartix-plugin` 而不另起一个：这是**同一个插件系统的第 3 版**，不是并列的第二套东西。
+ * v1/v2 一律按"旧版插件"拒绝（`isLegacyPackage`），提示用户让 AI 按 v3 重新生成。
+ *
+ * 为什么单独一份、而不是在 `pluginManifest.ts` 上改：旧格式（`uartix-plugin` s2）是
+ * **声明式配置**，新格式是**代码插件**，两者的必填项、限额、校验判据几乎不重叠
+ * （旧的有 `artifacts`/`contributions`，新的有 `main`/`activation`/`permissions`/`inject`）。
+ * 硬塞进一个文件的结果是每个字段都带一句 `if (s2) …`，读的人永远不知道当前走哪条路。
+ * 旧路径保留原样、只加一个"拒装"入口（见 `rejectLegacy`），新路径从零写。
+ *
+ * 这一版的三条判据来自 P174 详设，不是随手定的：
+ * - **旧包拒装且不静默**：给得出「格式已废弃」这句话，而不是一句「校验失败」（详设 §5.7）。
+ * - **写是牢笼、其余是知情**：`fs.write` 参与生成 Node 命令行（真拦），
+ *   `fs.read`/`spawn`/`net` 只做结构校验并原样带给批准卡（详设 §10.1）。
+ * - **能力面不设限，接入口必须固定**：L2 只能占插槽、L3 只能改布局数据，
+ *   不能往宿主 React 树里塞组件（详设 §5.8）。
+ */
+
+/** 新格式的标识与版本。名字与旧格式刻意不同，避免"schemaVersion 看懂就以为兼容"。 */
+export const PLUGIN_FORMAT = "uartix-plugin";
+export const PLUGIN_SCHEMA_VERSION = 3;
+
+/** 清单文件名。v3 起叫 `plugin.json`（旧版的 `extension.json` 不再读）。 */
+export const MANIFEST_FILE = "plugin.json";
+/** 旧格式标识，仅用于给出「格式已废弃」这句人话。 */
+export const LEGACY_PLUGIN_FORMAT = "uartix-plugin";
+export const LEGACY_PLUGIN_SCHEMA = 2;
+
+/**
+ * 资源上限。集中一处，因为要被校验器、插件库 UI、宿主命令行生成、测试四方读；
+ * 抄两份就是一份等着漂的假账。
+ */
+export const PLUGIN_LIMITS = {
+  /** 解压后总字节（对比旧格式 4 MiB）。文件系统存储，不再受 localStorage 配额约束。 */
+  packageBytes: 64 * 1024 * 1024,
+  /** 单文件字节。`main.mjs` 打包产物体积也落在这条内。 */
+  fileBytes: 8 * 1024 * 1024,
+  /** 目录里文件数上限（`node_modules` 会很快吃掉它，所以给了 2000）。 */
+  files: 2000,
+  /**
+   * 下面这几条**不是权限**，只是"一个插件声明几百枚面板"这种明显是生成事故的保护线。
+   * 数值给得比现实需要宽得多：能力面已经放开，别在这里重新长出限制。
+   */
+  settingsFields: 256,
+  panels: 64,
+  themes: 8,
+  widgets: 8,
+  commands: 256,
+  sections: 256,
+  mutations: 128,
+  secrets: 64,
+  presets: 16,
+  tasks: 32,
+} as const;
+
+/**
+ * **永远不能被插件隐藏的宿主面板**。
+ *
+ * 这几块不是"普通面板"，是**用户自救的入口**：设置里能停用插件、插件管理能卸载、
+ * 批准卡是安全边界本身、运行控制是"停下来"的唯一按钮。允许插件 hide 它们，
+ * 等于允许插件把出口焊死——这是本仓 §8-44 那条"不可逆必须可人工干预"的直接推论。
+ *
+ * 判据在**装包时**执行，不是运行时才发现（运行时发现的代价是插件已经跑起来了）。
+ */
+export const NEVER_HIDEABLE_PANELS = ["settings", "plugin-manager", "approval", "run-control"] as const;
+
+/** 允许被 L2 注入的插槽名。宿主每个内置面板要在 JSX 里真的渲染它，闭合测试钉住。 */
+export const PANEL_SLOTS = [
+  "serial.side",
+  "serial.toolbar.after",
+  "analysis.after-table",
+  "hex.side",
+  "settings.general.after",
+] as const;
+export type PanelSlotId = (typeof PANEL_SLOTS)[number];
+
+/** 变量前缀。`$WS` 工作区根、`$EXT:<key>` 用户登记的外部根、`$APP` 应用数据目录。 */
+export const PATH_VARS = ["$WS", "$APP"] as const;
+
+/**
+ * 外部目录的键名规则。`$EXT:<key>` 里的 `<key>` 与 `settings.roots` 的键**同一套**——
+ * 两处各写一份正则，迟早会出现"能在清单里写、却绑不上去"的键。
+ */
+export const ROOT_KEY_RE = /^[a-z][a-z0-9-]{0,23}$/;
+/**
+ * 一条**完整的路径变量**（清单里写的整形）：`$WS` 或 `$EXT:<key>`。
+ *
+ * 桥（`uartix.bindRoot`）与账本（`root` 事件）都收这个形状，所以定义只有一份：
+ * 两处各写一个正则，早晚会有一处多放行一种写法，而那种写法到了展开路径的环节就变成 null。
+ */
+export const ROOT_SPEC_RE = /^\$WS$|^\$EXT:[a-z][a-z0-9-]{0,23}$/;
+const PLUGIN_VAR_RE = /^\$EXT:([a-z][a-z0-9-]{0,23})(\/|$)/;
+
+export interface PluginFsPermission {
+  /** 声明要读的路径。**这一项拦不住**（Windows 上 `--allow-fs-read` 精确路径不生效），只用于告知。 */
+  read?: string[];
+  /** 声明可写的**目录**。这一项是真牢笼：未声明的目录写会 `ERR_ACCESS_DENIED`。 */
+  write?: string[];
+}
+
+export interface PluginPermissions {
+  fs?: PluginFsPermission;
+  /** 声明会起的程序。**不参与拦截**，`--allow-child-process` 无条件给；只用于批准卡。 */
+  process?: { spawn?: string[] };
+  /** 声明会连的地址。**不参与拦截**，`connect-src` 恒为 `*`；只用于批准卡。 */
+  net?: { connect?: string[] };
+  ui?: {
+    panel?: boolean;
+    notify?: boolean;
+    clipboard?: boolean;
+    /** 贡献主题（改界面长相） */
+    theme?: boolean;
+    /** 主窗口里的小部件（独立 iframe 浮层） */
+    widget?: boolean;
+    /** 贡献「工作区预设」：一键把整屏面板排布换成插件自带的那套（换前自动备份当前布局） */
+    layout?: boolean;
+  };
+  ai?: { registerTools?: boolean; ask?: boolean };
+  secrets?: string[];
+}
+
+/** L2：往宿主已有面板的插槽里加一块（渲染为自己的 iframe，不进 React 树）。 */
+export interface PluginSection {
+  slot: PanelSlotId;
+  id: string;
+  title: string;
+  entry: string;
+  /** 显示条件，形如 `serial.connected`。只是给宿主读的字符串，本批不做表达式求值。 */
+  when?: string;
+}
+
+/** L3：改宿主已有面板的布局数据（隐藏 / 改标题 / 移动）。 */
+export type PluginMutationOp = "hide" | "retitle" | "move";
+export interface PluginMutation {
+  /** 目标面板 id。落在 `NEVER_HIDEABLE_PANELS` 时 `hide` 一律拒。 */
+  target: string;
+  op: PluginMutationOp;
+  title?: string;
+  before?: string;
+  note?: string;
+}
+
+export interface PluginInject {
+  sections?: PluginSection[];
+  mutations?: PluginMutation[];
+}
+
+/** 一枚插件主题：包内一份 CSS（变量块或整段组件覆盖），由宿主的净化器验过才用。 */
+export interface PluginThemeDecl {
+  id: string;
+  title: string;
+  /** 包内相对路径，通常 `theme.css`。 */
+  entry: string;
+  /** 供选择器预览用的底色倾向；不给就按 CSS 里实际声明推导。 */
+  scheme?: "dark" | "light";
+}
+
+export interface PluginWidgetDecl {
+  id: string;
+  title: string;
+  /** 包内 HTML 入口，和面板同一个沙箱。 */
+  entry: string;
+  width?: number;
+  height?: number;
+  /** 无边框透明（小部件的一种表现形态）；仍可拖动。 */
+  transparent?: boolean;
+  /** 点击穿透只作用于**主窗口内**这块浮层，不碰系统级窗口。 */
+  clickThrough?: boolean;
+  defaultPosition?: { x: number; y: number };
+}
+
+/**
+ * 一份「工作区预设」：包内一个 JSON，内容是 dockview 的序列化布局
+ * （`{ layout: <SerializedDockview>, note? }`）。用户在插件详情里点「应用此布局」，
+ * 宿主读包内文件、先把当前布局备份进设置的工作区备份槽，再整屏换上这一套。
+ */
+export interface PluginPresetDecl {
+  id: string;
+  title: string;
+  /** 包内 JSON 相对路径（如 `preset.json`）。 */
+  entry: string;
+}
+
+/**
+ * 一个「任务模板」：包内一个 JSON（`{ goal, steps?: [{tool,args?,note?}] }`）。
+ * 点「载入 AI 助手」只把那几句话填进输入框，**不替你发送**，也绝不绕过授权档与批准卡。
+ */
+export interface PluginTaskDecl {
+  id: string;
+  title: string;
+  /** 包内 JSON 相对路径（如 `task.json`）。 */
+  entry: string;
+}
+
+export interface PluginContributes {
+  panels?: { id: string; title: string; entry: string }[];
+  themes?: PluginThemeDecl[];
+  commands?: { id: string; title: string }[];
+  settings?: PluginSettingField[];
+  /** 主窗口内浮层；启用且批准后出现。 */
+  widgets?: PluginWidgetDecl[];
+  /** 工作区预设（一键换整屏排布）。 */
+  presets?: PluginPresetDecl[];
+  /** 任务模板（把目标+建议步骤填进 AI 输入框）。 */
+  tasks?: PluginTaskDecl[];
+}
+
+export interface PluginSettingField {
+  key: string;
+  label: string;
+  type: "number" | "string" | "boolean" | "enum";
+  default: number | string | boolean;
+  min?: number;
+  max?: number;
+  options?: string[];
+}
+
+export interface PluginManifest {
+  format: typeof PLUGIN_FORMAT;
+  schemaVersion: typeof PLUGIN_SCHEMA_VERSION;
+  id: string;
+  version: string;
+  name: string;
+  description?: string;
+  author?: string;
+  homepage?: string;
+  license?: string;
+  /** 可选：不给就是纯声明式插件（不起进程、不要任何权限）。 */
+  main?: string;
+  hostNode?: string;
+  activation: string[];
+  permissions: PluginPermissions;
+  contributes: PluginContributes;
+  inject: PluginInject;
+  requires?: { services?: string[] };
+  provenance?: { createdBy?: "agent" | "user" | "import"; source?: string };
+}
+
+export interface PluginValidation {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  manifest?: PluginManifest;
+  /** 命中旧格式时为 true，调用方据此显示「格式已废弃」而不是「校验失败」。 */
+  legacy?: boolean;
+}
+
+const ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31})+$/;
+const VER_RE = /^\d+\.\d+\.\d+$/;
+/**
+ * 包内局部 id（面板/插槽/区块）。允许单字符：`id: "x"` 完全合法，
+ * 拒绝它没有任何安全收益，只会让人猜"为什么这也不行"。
+ */
+const LOCAL_ID_RE = /^[a-z][a-z0-9-]{0,31}$/;
+const REL_PATH_RE = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[A-Za-z0-9._@\-/]+$/;
+const NODE_REQ_RE = /^>=\s*\d+(\.\d+)?$/;
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * 旧格式识别。**先于一切其他校验**：否则旧包会先撞上"缺 main"之类的错，
+ * 用户看到的是"你少写了个字段"，而真相是"这个格式整个不做数了"。
+ */
+/**
+ * 旧版插件：**同一个格式名、版本不是 3**。
+ *
+ * 与 A2 那版判据的区别：那时新旧是两个格式名（`uartix-extension` vs `uartix-plugin`），
+ * 于是"插件"这个词在代码里指两样东西。现在只有一个格式名，版本才是分界线——
+ * 这样 `format` 永远读作"这是 uartix 插件"，`schemaVersion` 才说"哪一代"。
+ */
+export function isLegacyPackage(raw: unknown): boolean {
+  if (!isPlainObject(raw)) return false;
+  return raw.format === LEGACY_PLUGIN_FORMAT && raw.schemaVersion !== PLUGIN_SCHEMA_VERSION;
+}
+
+export function rejectLegacy(): PluginValidation {
+  return {
+    ok: false,
+    legacy: true,
+    errors: [
+      "这是旧版插件（uartix-plugin / schemaVersion 1 或 2），不再支持：当前只认 schemaVersion 3。" +
+        "v3 是代码插件（plugin.json + main.mjs + 可选面板 HTML），能力面覆盖旧版并更宽：" +
+        "请让 AI 助手按 v3 重新生成，或用插件市场里同功能的新版。" +
+        "原文件仍在磁盘上，不会自动删除。",
+    ],
+    warnings: [],
+  };
+}
+
+/**
+ * 路径声明校验。读和写共用结构规则，但**语义不同**：
+ * - 读：允许文件级 glob 写法（`$WS/**`），因为反正拦不住，语义靠提醒；
+ * - 写：必须是**目录**（不许 `/**`、不许文件通配），因为它会变成 `--allow-fs-write` 的参数，
+ *   而 Node 那个参数只认目录前缀。给一个 glob 进去，结果不是"更严"，是"整条参数失效"。
+ */
+export function validatePathDecl(raw: unknown, kind: "read" | "write"): string[] {
+  const errs: string[] = [];
+  if (raw === undefined) return errs;
+  if (!Array.isArray(raw)) return [`permissions.fs.${kind} 必须是数组`];
+  if (raw.length > 32) errs.push(`permissions.fs.${kind} 最多 32 条`);
+  for (const item of raw) {
+    if (typeof item !== "string" || !item.trim()) {
+      errs.push(`permissions.fs.${kind} 的条目必须是非空字符串`);
+      continue;
+    }
+    const p = item.trim();
+    const startsWithVar = PATH_VARS.some((v) => p === v || p.startsWith(v + "/")) || PLUGIN_VAR_RE.test(p);
+    if (!startsWithVar) {
+      errs.push(`permissions.fs.${kind}「${p}」必须以 $WS / $APP / $EXT:<key> 开头（不许写死绝对路径，否则换机器就废）`);
+      continue;
+    }
+    if (p.includes("..")) {
+      errs.push(`permissions.fs.${kind}「${p}」不允许出现 ..`);
+      continue;
+    }
+    if (kind === "write") {
+      // 写是喂给 `--allow-fs-write` 的，只能是目录，且不许通配
+      if (p.endsWith("/**") || p.endsWith("/*") || p.includes("*")) {
+        errs.push(`permissions.fs.write「${p}」必须是目录，不能带通配（它直接作为 --allow-fs-write 的参数）`);
+      }
+    }
+  }
+  return errs;
+}
+
+function validatePermissions(raw: unknown, out: PluginValidation): PluginPermissions {
+  if (raw === undefined) return {};
+  if (!isPlainObject(raw)) {
+    out.errors.push("permissions 必须是对象（没有特权就给 {} 或省略）");
+    return {};
+  }
+  const perms: PluginPermissions = {};
+
+  if (raw.fs !== undefined) {
+    if (!isPlainObject(raw.fs)) {
+      out.errors.push("permissions.fs 必须是对象");
+    } else {
+      out.errors.push(...validatePathDecl(raw.fs.read, "read"));
+      out.errors.push(...validatePathDecl(raw.fs.write, "write"));
+      const fs: PluginFsPermission = {};
+      if (Array.isArray(raw.fs.read)) fs.read = (raw.fs.read as string[]).map((s) => s.trim());
+      if (Array.isArray(raw.fs.write)) fs.write = (raw.fs.write as string[]).map((s) => s.trim().replace(/\/+$/, ""));
+      perms.fs = fs;
+    }
+  }
+
+  if (raw.process !== undefined) {
+    if (!isPlainObject(raw.process) || (raw.process.spawn !== undefined && !Array.isArray(raw.process.spawn))) {
+      out.errors.push("permissions.process.spawn 必须是字符串数组");
+    } else {
+      const spawn = Array.isArray(raw.process.spawn) ? (raw.process.spawn as unknown[]) : [];
+      if (spawn.length > 32) out.errors.push("permissions.process.spawn 最多 32 条");
+      for (const p of spawn) {
+        // 只做形状校验：不许写路径，避免有人以为这能"锁定某个可执行文件"
+        if (typeof p !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(p)) {
+          out.errors.push(`permissions.process.spawn「${String(p)}」必须是裸程序名（不许带路径分隔符）`);
+        }
+      }
+      perms.process = { spawn: spawn.filter((p): p is string => typeof p === "string") };
+    }
+  }
+
+  if (raw.net !== undefined) {
+    if (!isPlainObject(raw.net) || (raw.net.connect !== undefined && !Array.isArray(raw.net.connect))) {
+      out.errors.push("permissions.net.connect 必须是字符串数组");
+    } else {
+      perms.net = {
+        connect: (Array.isArray(raw.net.connect) ? (raw.net.connect as unknown[]) : []).filter(
+          (s): s is string => typeof s === "string",
+        ),
+      };
+    }
+  }
+
+  if (raw.ui !== undefined) {
+    if (!isPlainObject(raw.ui)) out.errors.push("permissions.ui 必须是对象");
+    else {
+      perms.ui = {
+        panel: raw.ui.panel === true,
+        notify: raw.ui.notify === true,
+        clipboard: raw.ui.clipboard === true,
+        theme: raw.ui.theme === true,
+        widget: raw.ui.widget === true,
+        layout: raw.ui.layout === true,
+      };
+    }
+  }
+
+  if (raw.ai !== undefined) {
+    if (!isPlainObject(raw.ai)) out.errors.push("permissions.ai 必须是对象");
+    else {
+      perms.ai = { registerTools: raw.ai.registerTools === true, ask: raw.ai.ask === true };
+    }
+  }
+
+  if (raw.secrets !== undefined) {
+    if (!Array.isArray(raw.secrets)) out.errors.push("permissions.secrets 必须是字符串数组");
+    else if (raw.secrets.length > PLUGIN_LIMITS.secrets) out.errors.push(`permissions.secrets 最多 ${PLUGIN_LIMITS.secrets} 条`);
+    else {
+      const names = (raw.secrets as unknown[]).filter((s): s is string => typeof s === "string");
+      perms.secrets = names;
+    }
+  }
+
+  return perms;
+}
+
+function validateInject(raw: unknown, out: PluginValidation): PluginInject {
+  if (raw === undefined) return {};
+  if (!isPlainObject(raw)) {
+    out.errors.push("inject 必须是对象");
+    return {};
+  }
+  const inject: PluginInject = {};
+
+  if (raw.sections !== undefined) {
+    if (!Array.isArray(raw.sections)) out.errors.push("inject.sections 必须是数组");
+    else if (raw.sections.length > PLUGIN_LIMITS.sections) out.errors.push(`inject.sections 最多 ${PLUGIN_LIMITS.sections} 条`);
+    else {
+      const list: PluginSection[] = [];
+      const seen = new Set<string>();
+      for (const s of raw.sections) {
+        if (!isPlainObject(s)) {
+          out.errors.push("inject.sections 的条目必须是对象");
+          continue;
+        }
+        const slot = s.slot;
+        if (typeof slot !== "string" || !(PANEL_SLOTS as readonly string[]).includes(slot)) {
+          out.errors.push(`inject.sections.slot「${String(slot)}」不是已登记的插槽（可选：${PANEL_SLOTS.join(" / ")}）`);
+          continue;
+        }
+        const id = typeof s.id === "string" ? s.id : "";
+        if (!LOCAL_ID_RE.test(id)) {
+          out.errors.push(`inject.sections.id「${id}」必须匹配 ${LOCAL_ID_RE}`);
+          continue;
+        }
+        if (seen.has(id)) {
+          out.errors.push(`inject.sections.id「${id}」重复`);
+          continue;
+        }
+        const entry = typeof s.entry === "string" ? s.entry : "";
+        if (!REL_PATH_RE.test(entry)) {
+          out.errors.push(`inject.sections[${id}].entry「${entry}」必须是包内相对路径`);
+          continue;
+        }
+        seen.add(id);
+        list.push({
+          slot: slot as PanelSlotId,
+          id,
+          title: typeof s.title === "string" && s.title.trim() ? s.title.trim().slice(0, 60) : id,
+          entry,
+          ...(typeof s.when === "string" && s.when.trim() ? { when: s.when.trim().slice(0, 120) } : {}),
+        });
+      }
+      inject.sections = list;
+    }
+  }
+
+  if (raw.mutations !== undefined) {
+    if (!Array.isArray(raw.mutations)) out.errors.push("inject.mutations 必须是数组");
+    else if (raw.mutations.length > PLUGIN_LIMITS.mutations) out.errors.push(`inject.mutations 最多 ${PLUGIN_LIMITS.mutations} 条`);
+    else {
+      const list: PluginMutation[] = [];
+      for (const m of raw.mutations) {
+        if (!isPlainObject(m)) {
+          out.errors.push("inject.mutations 的条目必须是对象");
+          continue;
+        }
+        const target = typeof m.target === "string" ? m.target.trim() : "";
+        if (!target) {
+          out.errors.push("inject.mutations.target 必填");
+          continue;
+        }
+        const op = m.op;
+        if (op !== "hide" && op !== "retitle" && op !== "move") {
+          out.errors.push(`inject.mutations.op 只认 hide / retitle / move，实际「${String(op)}」`);
+          continue;
+        }
+        // 装包时就拦住：允许 hide 掉设置/插件管理/批准卡/运行控制，等于把出口焊死
+        if (op === "hide" && (NEVER_HIDEABLE_PANELS as readonly string[]).includes(target)) {
+          out.errors.push(
+            `inject.mutations 不能隐藏「${target}」：它是用户自救入口（设置/插件管理/批准卡/运行控制），` +
+              `允许插件关掉它等于把关不掉的后门装进系统`,
+          );
+          continue;
+        }
+        if (op === "retitle" && (typeof m.title !== "string" || !m.title.trim())) {
+          out.errors.push(`inject.mutations[${target}] retitle 必须给 title`);
+          continue;
+        }
+        if (op === "move" && (typeof m.before !== "string" || !m.before.trim())) {
+          out.errors.push(`inject.mutations[${target}] move 必须给 before`);
+          continue;
+        }
+        list.push({
+          target,
+          op,
+          ...(typeof m.title === "string" ? { title: m.title.trim().slice(0, 40) } : {}),
+          ...(typeof m.before === "string" ? { before: m.before.trim() } : {}),
+          ...(typeof m.note === "string" ? { note: m.note.slice(0, 200) } : {}),
+        });
+      }
+      inject.mutations = list;
+    }
+  }
+
+  return inject;
+}
+
+function normalizeWidgetDecl(
+  raw: unknown,
+  out: PluginValidation,
+  where: string,
+  fallbackId?: string,
+): PluginWidgetDecl | null {
+  if (!isPlainObject(raw)) {
+    out.errors.push(`${where} 必须是对象`);
+    return null;
+  }
+  const id = typeof raw.id === "string" ? raw.id : fallbackId ?? "";
+  if (!LOCAL_ID_RE.test(id)) {
+    out.errors.push(`${where}.id「${id}」非法（小写字母开头，字母/数字/-/_）`);
+    return null;
+  }
+  const entry = typeof raw.entry === "string" ? raw.entry : "";
+  if (!REL_PATH_RE.test(entry) || !/\.(html?)$/i.test(entry)) {
+    out.errors.push(`${where}[${id}].entry「${entry}」必须是包内 HTML 相对路径`);
+    return null;
+  }
+  const num = (key: "width" | "height", min: number, max: number): number | undefined => {
+    const v = raw[key];
+    if (v === undefined) return undefined;
+    if (typeof v !== "number" || !Number.isFinite(v) || v < min || v > max) {
+      out.errors.push(`${where}[${id}].${key} 必须是 ${min}..${max} 的数字`);
+      return undefined;
+    }
+    return Math.round(v);
+  };
+  const width = num("width", 120, 1200);
+  const height = num("height", 80, 900);
+  let defaultPosition: { x: number; y: number } | undefined;
+  if (raw.defaultPosition !== undefined) {
+    const d = raw.defaultPosition;
+    if (!isPlainObject(d) || typeof d.x !== "number" || typeof d.y !== "number" || !Number.isFinite(d.x) || !Number.isFinite(d.y)) {
+      out.errors.push(`${where}[${id}].defaultPosition 必须是 {x, y} 数字`);
+    } else {
+      defaultPosition = { x: Math.round(d.x), y: Math.round(d.y) };
+    }
+  }
+  return {
+    id,
+    title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim().slice(0, 60) : id,
+    entry,
+    ...(width !== undefined ? { width } : {}),
+    ...(height !== undefined ? { height } : {}),
+    ...(raw.transparent === true ? { transparent: true } : {}),
+    ...(raw.clickThrough === true ? { clickThrough: true } : {}),
+    ...(defaultPosition ? { defaultPosition } : {}),
+  };
+}
+
+function validateContributes(raw: unknown, out: PluginValidation): PluginContributes {
+  if (raw === undefined) return {};
+  if (!isPlainObject(raw)) {
+    out.errors.push("contributes 必须是对象");
+    return {};
+  }
+  const c: PluginContributes = {};
+
+  /**
+   * 旧格式的字段叫 `name`，v3 叫 `title`。用 name **不会报错**（标题会掉成 id），
+   * 而"清单过了、界面上的标题是一串 id"这种症状没人能反推到字段名。
+   * 真机见过的形态：模型照着 v1 印象写 `panels[].name` / `commands[].name`。
+   */
+  const warnNameInsteadOfTitle = (where: string, id: string, item: Record<string, unknown>): void => {
+    if (typeof item.title === "string" && item.title.trim()) return;
+    if (typeof item.name === "string" && item.name.trim()) {
+      out.warnings.push(`${where}[${id}] 用的是 name；v3 这个字段叫 title（标题会掉成 id「${id}」）`);
+    }
+  };
+
+  if (raw.panels !== undefined) {
+    if (!Array.isArray(raw.panels)) out.errors.push("contributes.panels 必须是数组");
+    else if (raw.panels.length > PLUGIN_LIMITS.panels) out.errors.push(`contributes.panels 最多 ${PLUGIN_LIMITS.panels} 条`);
+    else {
+      const list: { id: string; title: string; entry: string }[] = [];
+      const seen = new Set<string>();
+      for (const p of raw.panels) {
+        if (!isPlainObject(p)) {
+          out.errors.push("contributes.panels 的条目必须是对象");
+          continue;
+        }
+        const id = typeof p.id === "string" ? p.id : "";
+        if (!LOCAL_ID_RE.test(id) || seen.has(id)) {
+          out.errors.push(`contributes.panels.id「${id}」非法或重复`);
+          continue;
+        }
+        const entry = typeof p.entry === "string" ? p.entry : "";
+        if (!REL_PATH_RE.test(entry)) {
+          out.errors.push(`contributes.panels[${id}].entry「${entry}」必须是包内相对路径`);
+          continue;
+        }
+        warnNameInsteadOfTitle("contributes.panels", id, p);
+        seen.add(id);
+        list.push({
+          id,
+          title: typeof p.title === "string" && p.title.trim() ? p.title.trim().slice(0, 60) : id,
+          entry,
+        });
+      }
+      c.panels = list;
+    }
+  }
+
+  if (raw.themes !== undefined) {
+    if (!Array.isArray(raw.themes)) out.errors.push("contributes.themes 必须是数组");
+    else if (raw.themes.length > PLUGIN_LIMITS.themes) out.errors.push(`contributes.themes 最多 ${PLUGIN_LIMITS.themes} 条`);
+    else {
+      const list: PluginThemeDecl[] = [];
+      const seen = new Set<string>();
+      for (const t of raw.themes) {
+        if (!isPlainObject(t)) {
+          out.errors.push("contributes.themes 的条目必须是对象");
+          continue;
+        }
+        const id = typeof t.id === "string" ? t.id : "";
+        if (!LOCAL_ID_RE.test(id) || seen.has(id)) {
+          out.errors.push(`contributes.themes.id「${id}」非法或重复`);
+          continue;
+        }
+        const entry = typeof t.entry === "string" ? t.entry : "";
+        if (!REL_PATH_RE.test(entry)) {
+          out.errors.push(`contributes.themes[${id}].entry「${entry}」必须是包内相对路径`);
+          continue;
+        }
+        const scheme = t.scheme;
+        if (scheme !== undefined && scheme !== "dark" && scheme !== "light") {
+          out.errors.push(`contributes.themes[${id}].scheme 只能是 "dark" / "light"`);
+          continue;
+        }
+        warnNameInsteadOfTitle("contributes.themes", id, t);
+        seen.add(id);
+        list.push({
+          id,
+          title: typeof t.title === "string" && t.title.trim() ? t.title.trim().slice(0, 60) : id,
+          entry,
+          ...(scheme ? { scheme } : {}),
+        });
+      }
+      c.themes = list;
+    }
+  }
+
+  if (raw.commands !== undefined) {
+    if (!Array.isArray(raw.commands)) out.errors.push("contributes.commands 必须是数组");
+    else if (raw.commands.length > PLUGIN_LIMITS.commands) out.errors.push(`contributes.commands 最多 ${PLUGIN_LIMITS.commands} 条`);
+    else {
+      const list: { id: string; title: string }[] = [];
+      for (const cmd of raw.commands) {
+        if (!isPlainObject(cmd)) {
+          out.errors.push("contributes.commands 的条目必须是对象");
+          continue;
+        }
+        const id = typeof cmd.id === "string" ? cmd.id : "";
+        // 命令 id 用点分（`yolo.train`）：面板与 AI 工具都按这个找
+        if (!/^[a-z][a-z0-9]*(\.[a-z0-9-]+){1,3}$/.test(id)) {
+          out.errors.push(`contributes.commands.id「${id}」必须是点分小写（如 yolo.train）`);
+          continue;
+        }
+        warnNameInsteadOfTitle("contributes.commands", id, cmd);
+        list.push({ id, title: typeof cmd.title === "string" ? cmd.title.slice(0, 60) : id });
+      }
+      c.commands = list;
+    }
+  }
+
+  if (raw.settings !== undefined) {
+    if (!Array.isArray(raw.settings)) out.errors.push("contributes.settings 必须是数组");
+    else if (raw.settings.length > PLUGIN_LIMITS.settingsFields) {
+      out.errors.push(`contributes.settings 最多 ${PLUGIN_LIMITS.settingsFields} 项`);
+    } else {
+      const fields: PluginSettingField[] = [];
+      const seen = new Set<string>();
+      for (const f of raw.settings) {
+        if (!isPlainObject(f) || typeof f.key !== "string" || !/^[a-z][A-Za-z0-9]{0,39}$/.test(f.key)) {
+          out.errors.push("contributes.settings 字段 key 必须是 camelCase");
+          continue;
+        }
+        if (seen.has(f.key)) {
+          out.errors.push(`contributes.settings key「${f.key}」重复`);
+          continue;
+        }
+        seen.add(f.key);
+        const type = f.type;
+        if (type !== "number" && type !== "string" && type !== "boolean" && type !== "enum") {
+          out.errors.push(`contributes.settings.${f.key} type 非法`);
+          continue;
+        }
+        const def = f.default;
+        const typeOk =
+          (type === "number" && typeof def === "number" && Number.isFinite(def)) ||
+          (type === "boolean" && typeof def === "boolean") ||
+          ((type === "string" || type === "enum") && typeof def === "string");
+        if (!typeOk) {
+          out.errors.push(`contributes.settings.${f.key} default 与 type 不匹配`);
+          continue;
+        }
+        fields.push({
+          key: f.key,
+          label: typeof f.label === "string" && f.label.trim() ? f.label.slice(0, 60) : f.key,
+          type,
+          default: def as number | string | boolean,
+          ...(typeof f.min === "number" ? { min: f.min } : {}),
+          ...(typeof f.max === "number" ? { max: f.max } : {}),
+          ...(type === "enum" && Array.isArray(f.options)
+            ? { options: (f.options as unknown[]).filter((o): o is string => typeof o === "string").slice(0, 32) }
+            : {}),
+        });
+      }
+      c.settings = fields;
+    }
+  }
+
+  if (raw.widgets !== undefined) {
+    if (!Array.isArray(raw.widgets)) out.errors.push("contributes.widgets 必须是数组");
+    else if (raw.widgets.length > PLUGIN_LIMITS.widgets) out.errors.push(`contributes.widgets 最多 ${PLUGIN_LIMITS.widgets} 条`);
+    else {
+      const list: PluginWidgetDecl[] = [];
+      const seen = new Set<string>();
+      for (const w of raw.widgets) {
+        const norm = normalizeWidgetDecl(w, out, "contributes.widgets");
+        if (!norm) continue;
+        if (seen.has(norm.id)) {
+          out.errors.push(`contributes.widgets.id「${norm.id}」重复`);
+          continue;
+        }
+        warnNameInsteadOfTitle("contributes.widgets", norm.id, w);
+        seen.add(norm.id);
+        list.push(norm);
+      }
+      c.widgets = list;
+    }
+  }
+
+  /**
+   * presets / tasks 是同一形状（点一下读包内一个 JSON 交给宿主），共用一个归一器。
+   * entry 必须是 `.json`：它俩不是"能不能跑代码"的问题，而是宿主按固定读法解析的数据文件——
+   * 给个 `.html` 会在点按钮时才炸，那时用户不知道是插件写错了还是宿主坏了。
+   */
+  const normJsonDecl = (raw: unknown, where: string, seen: Set<string>): { id: string; title: string; entry: string } | null => {
+    if (!isPlainObject(raw)) {
+      out.errors.push(`${where} 的条目必须是对象`);
+      return null;
+    }
+    const id = typeof raw.id === "string" ? raw.id : "";
+    if (!LOCAL_ID_RE.test(id) || seen.has(id)) {
+      out.errors.push(`${where}.id「${id}」非法或重复`);
+      return null;
+    }
+    const entry = typeof raw.entry === "string" ? raw.entry : "";
+    if (!REL_PATH_RE.test(entry) || !/\.json$/i.test(entry)) {
+      out.errors.push(`${where}[${id}].entry「${entry}」必须是包内 JSON 相对路径`);
+      return null;
+    }
+    warnNameInsteadOfTitle(where, id, raw as Record<string, unknown>);
+    seen.add(id);
+    return { id, title: typeof raw.title === "string" && raw.title.trim() ? raw.title.trim().slice(0, 60) : id, entry };
+  };
+
+  if (raw.presets !== undefined) {
+    if (!Array.isArray(raw.presets)) out.errors.push("contributes.presets 必须是数组");
+    else if (raw.presets.length > PLUGIN_LIMITS.presets) out.errors.push(`contributes.presets 最多 ${PLUGIN_LIMITS.presets} 条`);
+    else {
+      const list: PluginPresetDecl[] = [];
+      const seen = new Set<string>();
+      for (const p of raw.presets) {
+        const d = normJsonDecl(p, "contributes.presets", seen);
+        if (d) list.push(d);
+      }
+      c.presets = list;
+    }
+  }
+
+  if (raw.tasks !== undefined) {
+    if (!Array.isArray(raw.tasks)) out.errors.push("contributes.tasks 必须是数组");
+    else if (raw.tasks.length > PLUGIN_LIMITS.tasks) out.errors.push(`contributes.tasks 最多 ${PLUGIN_LIMITS.tasks} 条`);
+    else {
+      const list: PluginTaskDecl[] = [];
+      const seen = new Set<string>();
+      for (const t of raw.tasks) {
+        const d = normJsonDecl(t, "contributes.tasks", seen);
+        if (d) list.push(d);
+      }
+      c.tasks = list;
+    }
+  }
+
+  return c;
+}
+
+function validateActivation(raw: unknown, hasMain: boolean, out: PluginValidation): string[] {
+  if (raw === undefined) {
+    if (hasMain) out.warnings.push("有 main 但没给 activation：插件只能被手动调用，不会自动激活");
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    out.errors.push("activation 必须是数组");
+    return [];
+  }
+  const list: string[] = [];
+  for (const a of raw) {
+    if (typeof a !== "string" || !/^on[A-Z][A-Za-z]*:[A-Za-z0-9._-]{1,64}$/.test(a)) {
+      out.errors.push(`activation「${String(a)}」格式非法，应为 onPanel:xxx / onCommand:xxx / onAITool:xxx / onWidget:xxx`);
+      continue;
+    }
+    list.push(a);
+  }
+  if (!hasMain && list.length) {
+    // 没有入口却声明了激活事件 = 一定会失败，装的时候就该说清
+    out.errors.push("没有 main 却声明了 activation：没有可执行的入口，请去掉 activation 或补上 main");
+  }
+  return list;
+}
+
+/** 校验并规范化一份 s3 清单。通过时返回规范形态，否则 errors 非空。 */
+export function validateExtension(raw: unknown): PluginValidation {
+  const out: PluginValidation = { ok: false, errors: [], warnings: [] };
+
+  // 1) 旧格式先拦：这句话必须比"缺字段"更早出现
+  if (isLegacyPackage(raw)) return rejectLegacy();
+
+  if (!isPlainObject(raw)) {
+    out.errors.push("清单必须是 JSON 对象");
+    return out;
+  }
+
+  // 2) 体积与标识
+  const bytes = JSON.stringify(raw).length;
+  if (bytes > 1024 * 1024) {
+    out.errors.push(`清单本体 ${bytes} 字节，超过 1 MiB（清单不该塞代码或图片）`);
+  }
+  if (raw.format !== PLUGIN_FORMAT) {
+    out.errors.push(`format 必须是 "${PLUGIN_FORMAT}"（同一个格式名，版本由 schemaVersion 决定；当前为 3）`);
+  }
+  if (raw.schemaVersion !== PLUGIN_SCHEMA_VERSION) {
+    out.errors.push(`schemaVersion 必须是 ${PLUGIN_SCHEMA_VERSION}`);
+  }
+  if (typeof raw.id !== "string" || !ID_RE.test(raw.id)) {
+    out.errors.push('id 必须是小写点分标识（如 "user.yolo.workbench"）');
+  }
+  if (typeof raw.version !== "string" || !VER_RE.test(raw.version)) {
+    out.errors.push("version 必须是 semver（如 1.0.0）");
+  }
+  if (typeof raw.name !== "string" || !raw.name.trim() || raw.name.trim().length > 60) {
+    out.errors.push("name 必须是 1..60 字符");
+  }
+
+  // 3) 入口
+  let main: string | undefined;
+  if (raw.main !== undefined) {
+    if (typeof raw.main !== "string" || !REL_PATH_RE.test(raw.main)) {
+      out.errors.push("main 必须是包内相对路径（如 main.mjs）");
+    } else if (!/\.(mjs|js|cjs)$/.test(raw.main)) {
+      out.errors.push("main 必须是 .mjs / .js / .cjs");
+    } else {
+      main = raw.main;
+    }
+  }
+  const hasMain = !!main;
+
+  if (raw.hostNode !== undefined) {
+    if (typeof raw.hostNode !== "string" || !NODE_REQ_RE.test(raw.hostNode.trim())) {
+      out.errors.push('hostNode 只支持 ">=20" 这种最低版本写法');
+    }
+  }
+
+  // 4) 权限 / 贡献 / 注入
+  const permissions = validatePermissions(raw.permissions, out);
+  const contributes = validateContributes(raw.contributes, out);
+  const inject = validateInject(raw.inject, out);
+  const activation = validateActivation(raw.activation, hasMain, out);
+
+  // 5) 语义交叉校验（单字段都合法、组合起来不成立的那几类）
+  const hasPanelPerm = permissions.ui?.panel === true;
+  const wantsPanel = (contributes.panels?.length ?? 0) > 0 || (inject.sections?.length ?? 0) > 0;
+  const wantsTheme = (contributes.themes?.length ?? 0) > 0;
+  if (wantsTheme && permissions.ui?.theme !== true) {
+    // 与面板同一条规矩：**改了界面就要在批准卡上说出来**，而不是装完才发现"我的配色是自己变的"
+    out.errors.push("要贡献主题（改界面长相），必须在 permissions.ui.theme 声明 true");
+  }
+  if (wantsPanel && !hasPanelPerm) {
+    out.errors.push("要贡献面板或往插槽注入，必须在 permissions.ui.panel 声明 true");
+  }
+  if ((contributes.widgets?.length ?? 0) > 0 && permissions.ui?.widget !== true) {
+    out.errors.push("要贡献小部件，必须在 permissions.ui.widget 声明 true");
+  }
+  // 工作区预设会**整屏换掉用户的排布**——和面板/主题一样，改了界面就要在批准卡上先说
+  if ((contributes.presets?.length ?? 0) > 0 && permissions.ui?.layout !== true) {
+    out.errors.push("要贡献工作区预设（一键换整屏布局），必须在 permissions.ui.layout 声明 true");
+  }
+  // 激活事件必须指向真的声明过的贡献项：写错不报，表现是"插件永远不自动激活"
+  const widgetIds = new Set((contributes.widgets ?? []).map((w) => w.id));
+  for (const a of activation) {
+    if (a.startsWith("onWidget:") && !widgetIds.has(a.slice("onWidget:".length))) {
+      out.errors.push(`activation「${a}」指向的小部件没有声明`);
+    }
+  }
+  if (!hasMain) {
+    const needsCode: string[] = [];
+    if (permissions.process?.spawn?.length) needsCode.push("permissions.process");
+    if (permissions.net?.connect?.length) needsCode.push("permissions.net");
+    if (permissions.fs?.write?.length) needsCode.push("permissions.fs.write");
+    if (needsCode.length) {
+      out.errors.push(`没有 main 却声明了 ${needsCode.join(" / ")}：纯声明式插件没有可执行入口，这些权限用不上`);
+    }
+    if (inject.sections?.some((s) => !s.entry)) {
+      out.errors.push("inject.sections 缺 entry：没有 main 时无法动态生成内容");
+    }
+  }
+  if (permissions.ai?.registerTools && !hasMain) {
+    out.errors.push("permissions.ai.registerTools 需要 main：工具要有代码才能注册");
+  }
+
+  // 6) 汇总
+  if (out.errors.length) return out;
+
+  out.ok = true;
+  out.manifest = {
+    format: PLUGIN_FORMAT,
+    schemaVersion: PLUGIN_SCHEMA_VERSION,
+    id: raw.id as string,
+    version: raw.version as string,
+    name: (raw.name as string).trim(),
+    ...(typeof raw.description === "string" && raw.description.trim()
+      ? { description: raw.description.trim().slice(0, 300) }
+      : {}),
+    ...(typeof raw.author === "string" && raw.author.trim() ? { author: raw.author.trim().slice(0, 40) } : {}),
+    ...(typeof raw.homepage === "string" && /^https:\/\/\S+$/i.test(raw.homepage) ? { homepage: raw.homepage } : {}),
+    ...(typeof raw.license === "string" ? { license: raw.license.slice(0, 40) } : {}),
+    ...(main ? { main } : {}),
+    ...(typeof raw.hostNode === "string" ? { hostNode: raw.hostNode.trim() } : {}),
+    activation,
+    permissions,
+    contributes,
+    inject,
+    ...(isPlainObject(raw.requires) ? { requires: { services: [] as string[] } } : {}),
+    provenance: {
+      createdBy: (["agent", "user", "import"] as const).find(
+        (k) => isPlainObject(raw.provenance) && raw.provenance.createdBy === k,
+      ) ?? "import",
+      ...(isPlainObject(raw.provenance) && typeof raw.provenance.source === "string"
+        ? { source: raw.provenance.source.slice(0, 120) }
+        : {}),
+    },
+  };
+  return out;
+}
+
+/** 变量展开所需的实参。由宿主在**调用时**注入，校验器本身不读任何全局状态。 */
+export interface PathVarBinding {
+  /** 工作区根（`$WS`）。未登记时为空串 → 用到它的作业会拿到空路径，调用方必须自己判。 */
+  workspace: string;
+  /** 应用数据目录（`$APP`）。 */
+  appDir: string;
+  /** 外部根登记表（`$EXT:<key>`）。 */
+  extra: Record<string, string>;
+}
+
+/**
+ * 展开一条路径声明；无法展开（变量没绑定）时返回 null，由调用方决定是拒还是跳过。
+ *
+ * 分隔符一律**归一成正斜杠**：Windows 上 Node 的 fs 与这几个启动参数都接受 `/`
+ * （详设 §5.4 的实测就是用 `D:/a` 跑的），而混用两种斜杠会让日志和断言都难读。
+ */
+export function expandPathSpec(spec: string, bind: PathVarBinding): string | null {
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const s = norm(spec.trim());
+  if (s === "$WS" || s.startsWith("$WS/")) {
+    if (!bind.workspace) return null;
+    return norm(bind.workspace) + s.slice(3);
+  }
+  if (s === "$APP" || s.startsWith("$APP/")) {
+    if (!bind.appDir) return null;
+    return norm(bind.appDir) + s.slice(4);
+  }
+  const m = s.match(PLUGIN_VAR_RE);
+  if (m) {
+    const dir = bind.extra[m[1]];
+    if (!dir) return null;
+    return norm(dir) + s.slice(`$EXT:${m[1]}`.length);
+  }
+  return null;
+}
+
+/**
+ * 生成插件宿主的 Node 命令行参数。
+ *
+ * **这是"牢笼"落地的唯一一处**，所以三件事写死在这里而不是散在调用方：
+ * 1. `--allow-fs-read=*` 是被迫的：Windows 上精确读白名单不生效（详设 §5.4 有 8 种写法的实测）；
+ * 2. `--allow-child-process` 无条件给：既然不按名单拦，就别留"声明漏了跑不起来"的坑；
+ * 3. `--allow-fs-write` 只按展开后的**目录**给；一条都展开不出来时**不给这个参数**——
+ *    不给就意味着整个进程只能读不能写，这是最紧的那一档。
+ */
+/**
+ * 给 Node 权限参数用的路径：**Windows 上用反斜杠**。
+ *
+ * 这不是美观问题，是 Node 24 实测出来的硬约束：`--allow-fs-write=D:/ws/.uartix` 之后写
+ * `D:\ws\.uartix\yolo\config.json` 会被 `ERR_ACCESS_DENIED` 拒掉——权限比较按**字面**前缀做，
+ * 只有 `--allow-fs-write=D:\ws\.uartix` 才放行（同一台机器、同一个文件，换个分隔符就过）。
+ * 而路径变量拼出来的都是正斜杠（settings 里存的是 `D:/…`），所以必须在**这一层**换成本机分隔符。
+ *
+ * 判据只看形状（盘符 / UNC），不看运行平台：测试在 node 下跑、应用在 WebView 里跑，
+ * "当前是不是 Windows"没有可靠的第三处来源，而 `D:/…` 这种形状本身就说明它是 Windows 路径。
+ */
+export function nodePermPath(p: string): string {
+  if (/^[A-Za-z]:[\\/]/.test(p) || p.startsWith("//")) return p.replace(/\//g, "\\");
+  return p;
+}
+
+export function buildHostNodeArgs(manifest: PluginManifest, bind: PathVarBinding): string[] {
+  const args = ["--permission", "--allow-fs-read=*"];
+  const writeDirs: string[] = [];
+  for (const spec of manifest.permissions.fs?.write ?? []) {
+    const dir = expandPathSpec(spec, bind);
+    if (!dir) continue; // 变量没登记 → 跳过（宁可不给写，也不给一个空/错路径）
+    if (dir.includes("*")) continue; // 通配进了参数只会让整条失效，已在校验期拒，这里再兜一层
+    writeDirs.push(dir);
+  }
+  const uniq = [...new Set(writeDirs)];
+  for (const d of uniq) args.push(`--allow-fs-write=${nodePermPath(d)}`);
+  args.push("--allow-child-process");
+  return args;
+}
+
+/**
+ * 这个插件是否要用工作区根（`$WS`）。
+ *
+ * 读和写都算：一个只读 `$WS` 的插件没有工作区同样跑不了。
+ * 判据放在这里而不是 `hostPlan` 里内联，是因为**界面也要问同一个问题**
+ * （"声明了工作区但没登记"要在面板上顶一条黄条，而不是等用户点启动才被拒）。
+ */
+export function usesWorkspace(m: PluginManifest): boolean {
+  const specs = [...(m.permissions.fs?.write ?? []), ...(m.permissions.fs?.read ?? [])];
+  return specs.some((p) => p === "$WS" || p.startsWith("$WS/"));
+}
+
+/**
+ * 这条变量对该插件是不是**写**声明。确认条与账本都要说清"这等于给了写权限"，
+ * 而判据与启动时的写笼子必须同源（都数 `permissions.fs.write`），所以留在这里。
+ */
+export function rootSpecWrites(m: PluginManifest, spec: string): boolean {
+  const want = spec.trim();
+  if (want === "$WS") return (m.permissions.fs?.write ?? []).some((p) => p === "$WS" || p.startsWith("$WS/"));
+  if (!want.startsWith("$EXT:")) return false;
+  const key = want.slice("$EXT:".length);
+  if (!ROOT_KEY_RE.test(key)) return false;
+  return pluginWriteRootKeys(m).includes(key);
+}
+
+/**
+ * R7③：这个插件**有没有申请过**这条路径变量（`$WS` 或 `$EXT:<key>`）。
+ *
+ * 这条判据是 `uartix.bindRoot()` 的第一道闸：一个只在面板里点了「选目录」的插件，
+ * 如果它的清单里从没写过这个键，就不该拿到那份绑定。允许它 = 允许插件把绑定表变成
+ * 自己的第二个授权通道（清单是给用户批准的，登记表是给进程当笼子的，两边必须同源）。
+ *
+ * 只认清单里出现过的**整形**：`$WS` 认 `$WS`，`$EXT:deploy` 认 `$EXT:deploy`。
+ * 不做前缀匹配，也不替用户猜"`$EXT:deploy` 大概是 deploy 键"。
+ */
+export function rootSpecDeclared(m: PluginManifest, spec: string): boolean {
+  const want = spec.trim();
+  if (want === "$WS") return usesWorkspace(m);
+  if (!want.startsWith("$EXT:")) return false;
+  const key = want.slice("$EXT:".length);
+  if (!ROOT_KEY_RE.test(key)) return false;
+  return pluginRootKeys(m).includes(key);
+}
+
+/**
+ * 这个插件用到了哪些外部目录键（`$EXT:<key>`）。读和写都算——只读的插件没有那个目录同样跑不了。
+ *
+ * 返回**排序去重**的键：界面要按它列"绑定/未绑定"，启动前要按它判缺；两处用同一个函数，
+ * 才不会出现"面板说齐了、启动说缺一个"。
+ */
+export function pluginRootKeys(m: PluginManifest): string[] {
+  const specs = [...(m.permissions.fs?.write ?? []), ...(m.permissions.fs?.read ?? [])];
+  const keys = new Set<string>();
+  for (const p of specs) {
+    const hit = p.trim().replace(/\\/g, "/").match(PLUGIN_VAR_RE);
+    if (hit) keys.add(hit[1]);
+  }
+  return [...keys].sort();
+}
+
+/**
+ * 只在**写**声明里出现的外部目录键。
+ *
+ * 为什么启动前要分开看：这套模型里"读"天生拦不住（`--allow-fs-read=*` 是被迫的，Windows
+ * 上精确路径不生效），读声明只是**知情**；而"写"是真牢笼。所以：
+ * - 写的外部目录没绑 ⇒ 启动前拒（它一写就会 `ERR_ACCESS_DENIED`，现象指错方向）；
+ * - 读的外部目录没绑 ⇒ **不拒**，递空值给插件，让它自己说"没配这项功能"。
+ *   拿一个只是告知性的声明去阻止启动，等于把向导当牢笼用。
+ */
+export function pluginWriteRootKeys(m: PluginManifest): string[] {
+  const specs = m.permissions.fs?.write ?? [];
+  const keys = new Set<string>();
+  for (const p of specs) {
+    const hit = p.trim().replace(/\\/g, "/").match(PLUGIN_VAR_RE);
+    if (hit) keys.add(hit[1]);
+  }
+  return [...keys].sort();
+}
+
+/**
+ * 界面用的一行：这个插件申请过哪些目录键，各自是不是**必须绑**。 *
+ * 放在清单这一层而不是组件里，是因为"必须绑"的判据就是"有没有写声明"——
+ * 拿一个只告知性的声明去拦启动是错的（见 `pluginWriteRootKeys` 那段），
+ * 这条判据值得和它的两条来源函数住在同一个文件里，被同一份测试钉住。
+ */
+export function declaredRootKeys(m: PluginManifest): { key: string; must: boolean }[] {
+  const writes = new Set(pluginWriteRootKeys(m));
+  return pluginRootKeys(m).map((key) => ({ key, must: writes.has(key) }));
+}
+
+/** 一个插件是否要求任何"会被限制"的权限（批准卡据此决定要不要单列一段）。 */
+export function hasEnforcedPermissions(m: PluginManifest): boolean {
+  return (m.permissions.fs?.write?.length ?? 0) > 0;
+}
+
+/** 是否会改动宿主已有面板（批准卡要单独列一句，不许混在权限里）。 */
+export function touchesHostPanels(m: PluginManifest): boolean {
+  return (m.inject.sections?.length ?? 0) > 0 || (m.inject.mutations?.length ?? 0) > 0;
+}

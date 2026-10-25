@@ -71,11 +71,19 @@ const BUDGETS = {
   // 在计数前就被剥掉），所以这一格从 20514 降到 20214。方向与棘轮一致：债只会更小。
   // P121-A：`%d` 那句改口时顺手收紧（"按格式插值"→"插值"），20214 → 20211。
   // P133-H（同一格续账）：「全权执行」那一行改口，20211 → 20210。
-  // P146（同一格续账）：P136 改写过帮助文案后实测 20209，棘轮只降不升，按门禁自己的话把数改小。
-  "src/features/help/HelpModal.tsx": 20209,
+  // P174：旧插件/旧市场话术删除后曾降到 17857；R5 给「工作区预设 / 任务模板」补了说明文案，实测 18039。
+  // 这 182 字是**新功能的文档**（不是未翻译债），仍远低于旧系统的 20209；如实登记，不拿删别的文档来凑数。
+  // R7③ 续账：给「面板里的选择工作区按钮 + 由你确认」补了一句说明（新功能的文档 + 安全说明），实测 18083。
+  // R8 续账：补「运行日志」面（两个通道 + 日志落盘 + 失败通知）与「场景在设置里编辑」两段，实测 18240。
+  // 两段都是**新功能的文档**：用户问"插件崩了去哪儿看"，帮助页得能回答；不是未翻译债。
+  // 0.6.0：插件入口统一为「插件管理」、市场描述改按 GitHub 话题检索，删掉若干旧说法后实测 18237。
+  "src/features/help/HelpModal.tsx": 18237,
+  // R7③：插件面板的宿主桥多了「目录绑定待确认」的几句话（都是 `tx()` 双语，中文第一参仍被计数）。
+  "src/features/plugins/engine/PluginViewPanel.tsx": 55,
+  // R12：草稿预览面的说明文字（"预览不安装、不写账本、不跑主进程"那几句），实测 73。
+  "src/features/plugins/engine/DraftPreviewDialog.tsx": 73,
   "src/features/console/QuickCommandBar.tsx": 100,
   "src/App.tsx": 10,
-  "src/features/plugins/PluginLibraryDialog.tsx": 4,
   "src/features/vdev/VdevPanel.tsx": 5,
   "src/features/ai/AiChat.tsx": 4,
   "src/features/controls/CardViews.tsx": 4,

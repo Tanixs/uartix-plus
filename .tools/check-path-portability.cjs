@@ -4,7 +4,7 @@
  *
  * 为什么补这道门：P118 那条 workflow 第一次跑 vitest 就红了 6 条，而**一条都不是断言问题**——
  * 是 4 个测试文件把源码路径拼错了：
- *   new URL("./pluginStore.ts", import.meta.url).pathname.slice(1)
+ *   new URL("./pluginEngine.ts", import.meta.url).pathname.slice(1)
  *   new URL(".", import.meta.url).pathname.replace(/^\//, "")
  * 这类"剥掉前导斜杠"的写法只在 Windows 上成立（`/D:/x` → `D:/x`）；Linux 上它把
  * `/home/runner/…` 削成**相对路径**，于是读文件 ENOENT。同一段代码在两台机器上是两种真相：

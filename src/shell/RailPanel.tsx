@@ -2,7 +2,6 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import { PANEL_GROUPS, panelGroupLabel, panelGroupsAddable } from "../panels/panelMenu";
 import { panelTitleOf } from "../panels/panels";
 import * as panelActivity from "../panels/panelActivity";
-import { getExt, useExtensions } from "../features/ai/extensionStore";
 import { requestClosePanel, requestOpenPanel } from "../features/ai/appBus";
 import { removeLayout, useLayouts } from "../features/settings/layoutsStore";
 import { tx, useLocale, getLocale } from "../i18n/strings";
@@ -61,8 +60,6 @@ function activityVersion() {
 function ViewPanel({ actions }: { actions: RailActions }) {
   useSyncExternalStore(panelActivity.subscribe, activityVersion);
   const layouts = useLayouts().slots;
-  const exts = useExtensions();
-  const extList = exts.exts.filter((e) => e.type === "panel" && e.enabled);
 
   return (
     <div className="rp-body">
@@ -150,24 +147,6 @@ function ViewPanel({ actions }: { actions: RailActions }) {
         </div>
       ))}
 
-      {extList.length > 0 && (
-        <div className="rp-sec">
-          <div className="rp-sec-title">{tx("AI 扩展面板", "AI extension panels")}</div>
-          {extList.map((e) => (
-            <div key={e.id} className="rp-item">
-              <button
-                type="button"
-                className="rp-item-name"
-                data-ctl="item"
-                title={tx("打开扩展面板", "Open the extension panel")}
-                onClick={() => requestOpenPanel(`ext-panel-${e.id}`)}
-              >
-                {e.name || getExt(e.id)?.name || e.id}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

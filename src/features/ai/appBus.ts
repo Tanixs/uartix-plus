@@ -6,6 +6,8 @@ export type AppBusMsg =
   | { kind: "openPanel"; panel: string }
   | { kind: "applyPreset"; preset: string }
   | { kind: "closePanel"; panel: string }
+  /** 打开设置并切到某一页（AI 造完东西后把用户带到"该点哪一下"的地方）。`tab` 由 App 白名单校验。 */
+  | { kind: "openSettings"; tab: string }
   /** 打开插件市场。渲染点**只有 App 一处**（两颗入口按钮都发这条），
    *  否则同一支弹窗有两个实例，Esc/滚动/收藏状态会各说一套。 */
   | { kind: "openMarket" }
@@ -42,6 +44,11 @@ export function requestClosePanel(panel: string) {
 }
 
 /** 请求打开插件市场（插件库按钮与标题栏按钮都走这里，弹窗本身只在 App 渲染一次） */
+/** 请求打开设置页（tab 是设置页的键；App 侧白名单校验，不认的键就当"通用"）。 */
+export function requestOpenSettings(tab: string) {
+  emit({ kind: "openSettings", tab });
+}
+
 export function requestOpenMarket() {
   emit({ kind: "openMarket" });
 }

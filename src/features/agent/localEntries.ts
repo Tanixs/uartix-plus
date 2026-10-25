@@ -1,11 +1,11 @@
 /**
- * P99a-A2/A5：本机适配器自带的九支工具（数据面 + 插件面 + 全局现状）。
+ * 本机适配器自带的数据面工具（取回回执 / 曲线 / 动作 / 计划 / 宿主目录）。
  *
  * 为什么单独一个文件而不是留在 `agentAdapter`：**显示层要从 entry 派生**
  * （中文名、参数摘要、撤销路由），而 toolDisplay 不能 import agentAdapter
- * （agentAdapter→pluginStore→extRuntime→chatStore→agentRun 会绕回 agentAdapter，就是环）。
+ * （那条边会绕回适配器自己，就是环）。
  * 于是 per-run 状态从闭包改走 `ctx.scratch`，entry 本身降级为模块级常量——
- * 这一步顺带把"九支工具只在适配器闭包里存在、显示层只能手抄一份标签"的旧结构拆了。
+ * 这一步顺带把"工具只在适配器闭包里存在、显示层只能手抄一份标签"的旧结构拆了。
  */
 import { getSnapshot as getSerial } from "../serial/serialStore";
 import { getSnapshot as getOperator } from "../operator/operatorStore";
@@ -16,15 +16,6 @@ import type { CatalogReadResult } from "./hostCatalog";
 import { isKnownActionKind, runAppActionSurface } from "./appActionSurface";
 import { actionKindLabel } from "./toolCatalog";
 import { actionMeta } from "./toolCatalog";
-import {
-  stagePackage, installStaged, setEnabled, getPlugin,
-  getSnapshot as getPluginLib,
-  proposeUpdate, approveUpdate, rollback as rollbackPlugin,
-  armModulePackage,
-} from "../plugins/pluginStore";
-import { PURE_UI_CAPS, autoEnableBlockedCaps } from "../plugins/pluginManifest";
-import { ARTIFACT_KINDS, artifactKindLabel, artifactKindMeta, type ArtifactKind } from "../plugins/artifact";
-import { agentPluginId, freeAgentId } from "../plugins/pluginId";
 import { channelStats, decimate } from "./runMath";
 import { defineTool, notExecuted, type AgentToolEntry, type ToolCtx, type ToolResultBody } from "./toolRegistry";
 import { setPlan, type PlanItem, type PlanStatus } from "./planLedger";
@@ -37,19 +28,6 @@ import { setPlan, type PlanItem, type PlanStatus } from "./planLedger";
  * 用变异探针打不出去 ⇒ 那句没被证明 ⇒ 撤掉，只留能证的部分。）
  */
 export const ARTIFACT_PAGE_BYTES = 8 * 1024;
-/**
- * `save_plugin` 的能力边界（P99a-D2）：包能声明什么**由产物元表决定**，模型没有加码的余地。
- * 不写清就会出现"存下来却静默不生效"的产物——小部件包没有 `ui.action`，它里面的 `uartix.app`
- * 就是不会动（`pluginIsolation.ts` 按能力硬拒），而模型会告诉用户"点一下就能发"。
- * §8-41①：能存不能落地是创造面头号谎言。这句话从表里派生，不手抄第二份清单。
- */
-const PLUGIN_CAP_BOUNDARY =
-  "Capability boundary (derived from the artifact table, not negotiable): a package's capabilities are exactly its kind's — " +
-  ARTIFACT_KINDS.map((k) => `${k}=[${artifactKindMeta(k).caps.join("+")}]`).join(" ") +
-  ". You cannot add any. So uartix.app / uartix.send / uartix.ask inside a saved widget or panel package do nothing " +
-  "(no ui.action / serial.send / ai.ask); those calls only work in user-created widgets and custom cards — " +
-  "say so instead of shipping a dead button. Packages declaring " +
-  `${autoEnableBlockedCaps().join(" / ")} are never auto-enabled: the user enables those once in the plugin library.`;
 /** plot_window 每通道抽稀点数硬顶。 */
 export const PLOT_WINDOW_MAX_POINTS = 2000;
 /**
@@ -59,26 +37,7 @@ export const PLOT_WINDOW_MAX_POINTS = 2000;
  */
 export const OVERVIEW_LIMIT = 8;
 /** P94-G4：清单类回执的统一封顶（超出必带 count/truncated，让模型知道"只看到一部分"）。 */
-export const LIST_CAP = { channels: 40, plugins: 60 } as const;
-
-/** save_plugin 默认 id：名称稳定哈希 + user.agent 前缀（P92 D2，中文名不再退化成单字母）。 */
-function slugPluginId(name: string): string {
-  return agentPluginId("user.agent", name);
-}
-
-/**
- * P97-I6 版本链：`save_plugin` 更新已有插件时的下一个版本号。
- * 必须与当前版本**不同**——`proposeUpdate` 对同版本号一律拒绝，而那条错误模型读不懂就会原地重试。
- * 非 x.y.z 形态挂时间戳后缀，不猜语义。
- */
-export function nextVersion(cur: string): string {
-  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(cur.trim());
-  if (!m) return `${(cur.trim() || "0.0.0").replace(/[+;].*$/, "")}+a${Date.now().toString(36)}`;
-  return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
-}
-
-/** 与 pluginManifest 的 ID_RE 同形（本地预检给出更可读的错误码）。 */
-const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}(\.[a-z0-9][a-z0-9_-]{0,31})+$/;
+export const LIST_CAP = { channels: 40 } as const;
 
 const HOST = { kind: "host" } as const;
 
@@ -120,9 +79,6 @@ function writePlan(callId: string, ctx: ToolCtx, a: Record<string, unknown>): To
     },
   };
 }
-const PURE = PURE_UI_CAPS as readonly string[];
-const isPureUiCaps = (caps: readonly string[]) => caps.every((c) => PURE.includes(c));
-
 /** 人类可读的批准计划（§7.1：目标、实际影响、差异提示）。 */
 function describePlan(kind: string, effect: string, args: Record<string, unknown>): string {
   const target = typeof args.id === "string" ? `（目标 ${args.id}）` : "";
@@ -296,43 +252,6 @@ export const localToolEntries: AgentToolEntry[] = [
       return { callId: ctx.callId, ok: true, status: r.readOnly ? "read" : "applied", data: r.data };
     },
   }),
-  defineTool({
-    name: "list_plugins",
-    labelZh: "查看插件库",
-    effect: "read",
-    domain: null,
-    provenance: HOST,
-    description: "List local plugin library entries (id/name/version/state/capabilities/createdBy/history/pending candidate). Read-only. Same reader as app_read path `plugins` — this one just keeps the historical receipt shape.",
-    parameters: { type: "object", properties: { q: { type: "string" } }, additionalProperties: false },
-    summarize: (a) => (String(a.q ?? "").trim() ? `查找插件「${String(a.q).trim()}」` : "查看插件库"),
-    async execute(_a, ctx) {
-      // P99a-C1：字段与分页都改由 hostCatalog 的 `plugins` 视图出（以前这里自己 map 一份 store，
-      // 与目录里那份就是同一件事的两个门——加一个字段必然只改一处）
-      const r = await readCatalog("plugins", { limit: LIST_CAP.plugins });
-      if (!r.ok) return notExecuted(ctx.callId, r.code, r.data);
-      const d = r.data as { total: number; items: Record<string, unknown>[] };
-      // P110-C：可选 `q` 按 id/名字过滤。库里几十件时，整库翻一遍既慢又吃上下文，
-      // 而“先找到我上次存的那个，再带 update 去改”正是这条工具要支持的动作。
-      const q = typeof _a.q === "string" ? _a.q.trim().toLowerCase() : "";
-      const shown = q
-        ? d.items.filter((it) =>
-            String(it.id ?? "").toLowerCase().includes(q) || String(it.name ?? "").toLowerCase().includes(q),
-          )
-        : d.items;
-      return {
-        callId: ctx.callId,
-        ok: true,
-        status: "read",
-        data: {
-          plugins: shown,
-          count: d.total,
-          returned: shown.length,
-          truncated: shown.length < d.total,
-          ...(shown.length < d.total ? { hint: `库内共 ${d.total} 项，仅返回前 ${shown.length} 项` } : {}),
-        },
-      };
-    },
-  }),
   // P109-C：任务计划。它是**完成契约**不是权限闸——不拦写操作、不改审批语义（§8-44），
   // 只把"还有步骤没闭环就想收工"变成宿主侧可查的事实，而不是模型自己的一句话。
   defineTool({
@@ -486,297 +405,6 @@ export const localToolEntries: AgentToolEntry[] = [
       if (want.has("plugins")) await grab("plugins", "plugins");
       out.note = `各段清单只给前 ${OVERVIEW_LIMIT} 项（见各自 total）；完整内容用 app_read，可读路径见 app_catalog。`;
       return { callId: ctx.callId, ok: true, status: "read", data: out };
-    },
-  }),
-  defineTool({
-    name: "save_plugin",
-    labelZh: "保存插件",
-    // 新建/改自己的旧版都是 draft_write：能力由 KIND_CAPS 派生且永不含 serial.send，
-    // 所以这条路本身不能提权（详设 §9.3），不需要逐次批准。
-    effect: "draft_write",
-    domain: "plugins",
-    provenance: HOST,
-    description:
-      `Save an artifact as a reusable local plugin package (uartix-plugin). Args: { kind: one of ${ARTIFACT_KINDS.join("|")}, name: string, payload: object (artifact content per kind; widget/panel payload = {format:'html',html} | {format:'declarative',blocks}; workspacePreset payload = {layout:<dockview JSON>, note?}; workflow payload = {goal:string, steps:[{tool,args?,note?}]} where every tool must be one you can actually call; module payload = {format:'js',code}); id?: string (dotted lowercase, default user.agent.*), desc?: string, enable?: boolean (auto-enable pure-UI plugin), update?: string (existing plugin id to revise), version?: string }. ` +
-      "A workflow artifact is a reusable task template, NOT a macro runner: the user loads it into the Agent composer and it still goes through the current scope and approval rules. " +
-      "Iterating on your own work: pass update (or just the same id) — it bumps the version and pushes the previous package onto the rollback stack instead of creating a near-duplicate plugin. " +
-      "A name that already exists is refused with `duplicate_plugin_name` plus `existing_candidates` (id/version/createdBy/state) — read that list, then either pass update=\"<id>\" or pick a distinguishable name. Near-duplicate `-2` copies are never minted, because two side-by-side plugins left the user guessing which one is live. " +
-      "Only plugins you (the agent) created can be revised silently; user/imported plugins return update_needs_user and are never overwritten. " +
-      PLUGIN_CAP_BOUNDARY,
-    parameters: {
-      type: "object",
-      properties: {
-        kind: { type: "string" },
-        name: { type: "string" },
-        payload: { type: "object" },
-        id: { type: "string" },
-        desc: { type: "string" },
-        enable: { type: "boolean" },
-        update: { type: "string" },
-        version: { type: "string" },
-      },
-      required: ["kind", "name", "payload"],
-      additionalProperties: false,
-    },
-    summarize: (a, truncated) => {
-      const k = artifactKindLabel(String(a.kind ?? ""));
-      const nm = String(a.name ?? "") || (truncated ? "参数过长，见日志" : "?");
-      const verb = String(a.update ?? "") ? "更新插件" : `保存${k}插件`;
-      return `${verb}「${nm}」${a.enable === true ? "并启用" : ""}`;
-    },
-    execute: async (a, ctx) => {
-      const callId = ctx.callId;
-      const kind = String(a.kind ?? "") as ArtifactKind;
-      if (!(ARTIFACT_KINDS as readonly string[]).includes(kind)) {
-        return notExecuted(callId, "invalid_kind", { kind, supported: ARTIFACT_KINDS });
-      }
-      const name = typeof a.name === "string" ? a.name.trim().slice(0, 60) : "";
-      if (!name) return notExecuted(callId, "invalid_name", { hint: "name 必须是 1..60 字符" });
-      const payload = a.payload;
-      if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-        return notExecuted(callId, "invalid_payload", { hint: "payload 必须是对象（widget/panel 用 {format:'html'|'declarative',…}）" });
-      }
-      /** 能力与 contributions 键都取自产物元表：这里不再有第四份手抄（P99a-D1a） */
-      const meta = artifactKindMeta(kind);
-      /**
-       * 任务模板（P99a-D1b）的**存在性**检查：结构在元表校验器里，"这几步到底有没有这支工具"只能在这里查
-       * ——`artifact.ts` 是叶子模块，反过来 import 注册表就把插件层焊进 agent 图了（§8-33）。
-       * 不查就会产出一个"看着能跑、每步都撞 unknown_tool"的模板，而那正是这批要清掉的假承诺。
-       */
-      if (kind === "workflow") {
-        const t = payload as { steps?: { tool: string }[] };
-        const names = Array.isArray(t.steps) ? t.steps.map((s) => String(s?.tool ?? "")) : [];
-        if (names.length) {
-          const [{ hostEntryNames }, { allPluginToolDefs }, { pluginToolName }] = await Promise.all([
-            import("./hostEntries"),
-            import("../plugins/pluginToolDefs"),
-            import("./toolRegistry"),
-          ]);
-          const known = new Set([
-            ...hostEntryNames(),
-            ...allPluginToolDefs().map((d) => pluginToolName(d.pkgId, d.baseName)),
-          ]);
-          const unknown = [...new Set(names)].filter((n) => !known.has(n));
-          if (unknown.length) {
-            return notExecuted(callId, "unknown_tool_ref", {
-              unknown,
-              hint: "任务模板只能引用本机已有的工具。你自己工具列表里的名字就是合法名字：请改用其中存在的，或把这几步从模板里去掉（插件注册的工具有 plg_ 前缀）",
-            });
-          }
-        }
-      }
-      // id：用户指定或按名称 slug 化。给的 id 若已存在 ⇒ 走下面的版本链更新；
-      // 只有"名字撞车但没显式指向它"才加序号后缀，绝不静默覆盖别人的插件
-      const provided = typeof a.id === "string" ? a.id.trim().toLowerCase() : "";
-      if (provided && !PLUGIN_ID_RE.test(provided)) {
-        return notExecuted(callId, "invalid_id", { id: provided, hint: "id 必须是小写点分标识（每段 ≤32 字符），如 user.agent.battery-panel" });
-      }
-      const id = freeAgentId(provided || slugPluginId(name), (cand) => !!getPlugin(cand));
-      const desc = typeof a.desc === "string" ? a.desc.trim().slice(0, 300) : "";
-      const buildManifest = (pkgId: string, version: string) => ({
-        format: "uartix-plugin",
-        schemaVersion: 2,
-        id: pkgId,
-        version,
-        name,
-        ...(desc ? { desc } : {}),
-        hostApi: "^1.0",
-        // 能力恒由元表派生且 `caps` 永不含 serial.send ⇒ 更新路径同样无法提权
-        capabilities: [...meta.caps],
-        contributions: { [meta.contribKey]: [{ id: "main", entry: "main.json", name }] },
-        artifacts: { "main.json": { ...payload, kind } },
-        provenance: { createdBy: "agent", reviewed: false },
-      });
-
-      /**
-       * P97-I6 迭代闭环：改自己上一个作品应当**升版本走版本链**，而不是再造一个插件。
-       * 触发条件取显式 `update` 或"给的 id 已存在"二者之一。
-       * 只对 Agent 自己创建的插件直改直生效：`duplicate()` 会把 provenance 翻成 user，
-       * 因此用户副本、导入件、迁移件一律回 `update_needs_user`，改动留给用户在插件库里批准。
-       */
-      const targetId = typeof a.update === "string" && a.update.trim()
-        ? a.update.trim().toLowerCase()
-        : provided && getPlugin(provided) ? provided : "";
-      /**
-       * P110-C：同名插件已经存在时**不再自动加 `-2` 另建一份**。
-       *
-       * 为什么这是缺陷而不是便利（用户 2026-09-27 的图 1、2）：旧写法把"名字撞了"当成
-       * "那就在 id 后面加个序号"，于是模型迭代自己上一个作品时，库里长出 `battery-panel`
-       * 与 `battery-panel-2` 两份并排的插件——用户看到的是"让你改你没改，又新建了一个"，
-       * 而旧那份还在画面上，谁都不知道该启用哪一个。这不是命名策略问题，是把"迭代"
-       * 这条路悄悄换成了"复制"。
-       *
-       * 现在：撞名就拒，并把候选连同"谁创建的、什么版本、启没启用"一起回给模型，
-       * 让它自己带 `update=<id>` 走上面的升版本链路。别人创建的件由 `update_needs_user`
-       * 挡着，所以这里也不给 Agent 一条改用户东西的后路。
-       */
-      if (!targetId) {
-        const wanted = name.trim().toLowerCase();
-        const sameName = getPluginLib()
-          .plugins.filter((r) => r.pkg.name.trim().toLowerCase() === wanted)
-          .map((r) => ({
-            id: r.pkg.id,
-            name: r.pkg.name,
-            version: r.pkg.version,
-            createdBy: r.pkg.provenance.createdBy,
-            state: r.state,
-          }));
-        if (sameName.length) {
-          const mine = sameName.some((r) => r.createdBy === "agent");
-          const listed = sameName
-            .map(
-              (r) =>
-                `${r.id} v${r.version}（${r.createdBy === "agent" ? "你存的" : r.createdBy}，${r.state === "enabled" ? "启用中" : "未启用"}）`,
-            )
-            .join("、");
-          return notExecuted(callId, "duplicate_plugin_name", {
-            name,
-            existing_candidates: sameName,
-            hint: mine
-              ? `库里已有同名插件：${listed}。要改自己上一个作品请带 update="<那个 id>"——会升版本并把旧版压进回滚栈，而不是另建一份副本；确实要做成另一个插件，就换个能区分的 name。`
-              : `库里已有同名插件：${listed}，但都不是你存的，Agent 不替用户改它。要么换个能区分的 name，要么把这件事交回用户在插件库里决定。`,
-          });
-        }
-      }
-
-      if (targetId) {
-        const rec = getPlugin(targetId);
-        if (!rec) return notExecuted(callId, "plugin_not_found", { id: targetId });
-        if (rec.pkg.provenance.createdBy !== "agent") {
-          return notExecuted(callId, "update_needs_user", {
-            id: targetId,
-            createdBy: rec.pkg.provenance.createdBy,
-            hint: "该插件不是 Agent 创建的：Agent 只自动改自己存的东西。可以另存一个新 id 交付，或请用户在插件库里批准候选",
-          });
-        }
-        const version = typeof a.version === "string" && a.version.trim() ? a.version.trim() : nextVersion(rec.pkg.version);
-        const prop = proposeUpdate(targetId, buildManifest(targetId, version));
-        if (!prop.ok) return notExecuted(callId, "update_rejected", { id: targetId, msg: prop.msg });
-        const ap = approveUpdate(targetId);
-        if (!ap.ok) return notExecuted(callId, "update_failed", { id: targetId, msg: ap.msg });
-        const after = getPlugin(targetId);
-        const pureUi = isPureUiCaps(meta.caps);
-        const enabled = a.enable === true && pureUi ? setEnabled(targetId, true).ok : after?.state === "enabled";
-        return {
-          callId,
-          ok: true,
-          status: "applied",
-          data: {
-            pluginId: targetId, version, updated: true, enabled,
-            history: after?.versions.length ?? 0,
-            warnings: prop.warnings?.slice(0, 8) ?? [],
-            hint: `已升版到 v${version}（旧版进版本栈，改坏了用 rollback_plugin 退回）`,
-          },
-        };
-      }
-
-      const manifest = buildManifest(id, "0.1.0");
-      const stagedResult = stagePackage(manifest);
-      if (!stagedResult.ok || !stagedResult.stagingId) {
-        return notExecuted(callId, "invalid_package", { errors: stagedResult.errors.slice(0, 8) });
-      }
-      const installed = installStaged(stagedResult.stagingId);
-      if (!installed.ok || !installed.id) {
-        return notExecuted(callId, "install_failed", { msg: installed.msg });
-      }
-      // enable=true 且纯 UI 能力 → 自动启用；含 serial.send / agent.tool 的包保持停用（走 enable_plugin 批准）
-      const pureUi = isPureUiCaps(meta.caps);
-      let enabled = false;
-      if (a.enable === true && pureUi) {
-        enabled = setEnabled(installed.id, true).ok;
-      }
-      return {
-        callId,
-        ok: true,
-        status: "applied",
-        data: {
-          pluginId: installed.id, version: "0.1.0", state: enabled ? "enabled" : "installed_disabled",
-          caps: meta.caps, enabled, warnings: stagedResult.warnings,
-          // 让模型知道下次该带 update 而不是再存一份副本
-          hint: `要改这个插件请带 update="${installed.id}"，会升版本而不是另建一个`,
-        },
-      };
-    },
-  }),
-  defineTool({
-    name: "enable_plugin",
-    labelZh: "启用插件",
-    effect: "draft_write",
-    domain: "plugins",
-    provenance: HOST,
-    description:
-      "Enable an installed-but-disabled local plugin by id. Pure-UI plugins auto-enable within scope; plugins carrying serial.send require local approval. A plugin with a `module` artifact must first pass the realm egress lockdown probe — module_probe_failed means it stayed disabled, with the per-entry reason. Args: { id: string }.",
-    parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false },
-    summarize: (a) => `启用插件 ${String(a.id ?? "")}`,
-    /** 携带非纯 UI 能力＝把"能向设备发送"重新挂回投影 → 无条件逐次批准（与旧实现同标准） */
-    assess: (a, ctx) => {
-      const record = getPlugin(String(a.id ?? ""));
-      if (!record) return { refuse: notExecuted(ctx.callId, "plugin_not_found", { id: String(a.id ?? "") }) };
-      return isPureUiCaps(record.pkg.capabilities)
-        ? { meta: { effect: "draft_write", idempotent: true, reversible: true, mayTouchDevice: false } }
-        : { meta: { effect: "protected_config", idempotent: false, reversible: true, mayTouchDevice: true } };
-    },
-    approvalBinding: (a) => ({ tool: "enable_plugin", id: String(a.id ?? "") }),
-    planFor: (a) => {
-      const id = String(a.id ?? "");
-      const record = getPlugin(id);
-      return `启用插件「${record?.pkg.name ?? id}」（${id}）将授予能力（${record?.pkg.capabilities.join("、") ?? "?"}），插件可向已连接设备发送数据。确认来源可信后批准。`;
-    },
-    execute: async (a, ctx) => {
-      const id = String(a.id ?? "");
-      const record = getPlugin(id);
-      if (!record) return notExecuted(ctx.callId, "plugin_not_found", { id });
-      if (record.state === "enabled") {
-        return { callId: ctx.callId, ok: true, status: "applied", data: { id, state: "enabled", note: "插件已是启用状态" } };
-      }
-      // P99a-B1/B2：带逻辑模块（module 产物）的包必须先臂起 worker 并过封网自证才配启用。
-      // 失败就停在这儿，回执带原因——不是"启用了以后再标红"。
-      const probe = await armModulePackage(id);
-      if (!probe.ok) return notExecuted(ctx.callId, "module_probe_failed", { id, msg: probe.msg });
-      const r = setEnabled(id, true);
-      if (!r.ok) return notExecuted(ctx.callId, "enable_failed", { id, msg: r.msg });
-      return {
-        callId: ctx.callId,
-        ok: true,
-        status: "applied",
-        data: { id, state: "enabled", caps: record.pkg.capabilities, ...(probe.modules ? { modules: probe.modules, note: probe.msg } : {}) },
-      };
-    },
-  }),
-  defineTool({
-    /* —— P97-I6：退回上一版。版本栈是"来回切换"（当前版会压回栈），所以再调一次即切回来 —— */
-    name: "rollback_plugin",
-    labelZh: "退回插件上一版",
-    effect: "draft_write",
-    domain: "plugins",
-    provenance: HOST,
-    description: "Revert a local plugin to its previous saved version (the stack the agent's own save_plugin updates build). Args: { id: string }. The stack toggles: calling it again returns to the version you just left. Requires the plugin-library authorization domain; enabled non-pure-UI plugins need local approval.",
-    parameters: { type: "object", properties: { id: { type: "string" } }, required: ["id"], additionalProperties: false },
-    summarize: (a) => `退回插件 ${String(a.id ?? "")} 上一版`,
-    /** 启用中的非纯 UI 件回滚＝把另一版的能力重新挂回投影，与 enable_plugin 同标准 */
-    assess: (a, ctx) => {
-      const record = getPlugin(String(a.id ?? ""));
-      if (!record) return { refuse: notExecuted(ctx.callId, "plugin_not_found", { id: String(a.id ?? "") }) };
-      return !isPureUiCaps(record.pkg.capabilities) && record.state === "enabled"
-        ? { meta: { effect: "protected_config", idempotent: false, reversible: true, mayTouchDevice: true } }
-        : { meta: { effect: "draft_write", idempotent: false, reversible: true, mayTouchDevice: false } };
-    },
-    approvalBinding: (a) => ({ tool: "rollback_plugin", id: String(a.id ?? "") }),
-    planFor: (a) => {
-      const id = String(a.id ?? "");
-      const record = getPlugin(id);
-      return `回滚启用中的插件「${record?.pkg.name ?? id}」（${id}）到 v${record?.versions[record.versions.length - 1]?.version ?? "?"}，该版本的能力（${record?.pkg.capabilities.join("、") ?? "?"}）将重新生效。`;
-    },
-    execute: (a, ctx) => {
-      const id = String(a.id ?? "");
-      const r = rollbackPlugin(id);
-      if (!r.ok) return notExecuted(ctx.callId, "rollback_failed", { id, msg: r.msg });
-      return {
-        callId: ctx.callId,
-        ok: true,
-        status: "applied",
-        data: { id, version: getPlugin(id)?.pkg.version ?? "", msg: r.msg, remaining: getPlugin(id)?.versions.length ?? 0 },
-      };
     },
   }),
 ];

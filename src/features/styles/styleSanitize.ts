@@ -1,7 +1,7 @@
 /**
  * P97-J0：Agent 注入 CSS 的净化器（纯函数，零运行时依赖）。
  *
- * 为什么现在必须有它：`extRuntime.ts:43-63` 早就允许把 `e.css` 文本拼进 `<style data-ai-ext>`，
+ * 为什么现在必须有它：`uiRuntime.ts:43-63` 早就允许把 `e.css` 文本拼进 `<style data-ai-ext>`，
  * `save_theme_extension` 也收 `css` 参数——但那边**只校验长度**（`appearanceTools.ts:445`），
  * "no global selectors except :root" 只是写在工具描述里的**话术**。一条 `body{display:none}`
  * 就能把整个界面关掉。能力面要放开（I2 组件级样式），**安全闸必须先于能力落地**。

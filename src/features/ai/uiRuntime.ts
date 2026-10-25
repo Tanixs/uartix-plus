@@ -1,0 +1,333 @@
+// P99a-D1c：这里曾经 import 了 framesBus / variableStore / serialStore / widgetHub / aiChatFeed /
+// appActions 六组模块，只为喂给主世界 `new Function` 的 ScriptApi。脚本通道删掉后它们全部无用了——
+// 少一批静态边也意味着 uiRuntime 这条曾经的环边更薄（§8-33）。
+import { getActiveExtTheme } from "../plugins/engine/activeTheme";
+import { getSnapshot as getEngineSnapshot } from "../plugins/engine/pluginEngine";
+import { varsFromThemeCss } from "../plugins/engine/themeVars";
+import { getSnapshot as getSettings } from "../settings/settingsStore";
+import { ROOT_LAYER, submitRootVars } from "../../styles/rootVars";
+import {
+  BUILTIN_THEMES,
+  BUILTIN_THEME_ERRORS,
+  baselineFor,
+} from "../../styles/builtinThemes";
+import {
+  resolveActiveTheme,
+  resolveScheme,
+  themeCoverage,
+  type ThemeScheme,
+  type ThemeSource,
+} from "../../styles/themeCore";
+/**
+ * 「在画哪枚」的事实表住在零 import 的叶子（`styles/themeFacts`），本文件是它**唯一的写者**。
+ * 为什么不放这儿让所有人 import：`features/plugins/` 全目录都不准静态依赖样式运行时
+ * （P92-F 整窗白屏那条禁止边），而插件库那颗开关也要读这份事实说出"启用这颗会挤掉谁"。
+ */
+import { notifyStyleApply, setActiveThemeFacts, type ActiveThemeFacts } from "../../styles/themeFacts";
+import { syncThemeAssets } from "./assetRuntime";
+import { builtinStyleAssets, builtinStyleCss } from "../../styles/builtinStyles";
+import { clearThemePreview, getThemePreview } from "./themePreview";
+
+/**
+ * 在画的那枚主题占的合成器层（外观来源面板按 id 报告）。
+ * P99b-N5：旧名 `plugin-theme` 说的是"插件主题叠出来的那一层"，而这批之后这一层里
+ * **内置与插件走的是同一条路**（详设 S2/S3），旧名字会指错东西。
+ */
+export const ACTIVE_THEME_LAYER_ID = "active-theme";
+/** 兜底层：暗/亮两张表二选一（详设 S1）。它由本文件按明暗归属提交，别处不许自己垫 */
+export const THEME_BASELINE_LAYER_ID = "theme-baseline";
+
+/* ---------------- 样式层：主题变量 + 自定义 CSS ---------------- */
+
+let styleEl: HTMLStyleElement | null = null;
+
+function ensureStyleEl(): HTMLStyleElement {
+  if (!styleEl) {
+    styleEl = document.createElement("style");
+    styleEl.dataset.aiExt = "1";
+    document.head.appendChild(styleEl);
+  }
+  return styleEl;
+}
+
+/** 上一次算出的明暗归属：差量主题没给 `--bg` 也没声明时沿用它的（详设 S4 的 ③），要连同出处一起报出去 */
+let lastScheme: ThemeScheme | null = null;
+
+/** 上一次注入的 CSS 分块（见 `injectedCssParts`）；空数组 = 这次什么都没注 */
+let lastCssParts: string[] = [];
+
+/** 一条出声的通道：装载期的解析错误只报一次，不静默用半张表（G12 的运行期那一半） */
+let builtinErrorsReported = false;
+
+/** 插件主题记录 → 主题源（CSS 里能读到的自定义属性就是它的 vars）。 */
+function themeSourceFromPlugin(
+  pluginId: string,
+  theme: { key: string; id: string; title: string; scheme: "dark" | "light" | null; css: string },
+): ThemeSource {
+  return {
+    id: theme.key,
+    name: theme.title,
+    builtin: false,
+    scheme: theme.scheme,
+    vars: varsFromThemeCss(theme.css),
+    css: theme.css,
+    pluginId,
+    createdAt: 0,
+  };
+}
+
+/** 在已装的插件里找一枚主题（key 或主题局部 id 都认）。 */
+function findPluginTheme(id: string): ThemeSource | null {
+  for (const entry of getEngineSnapshot().entries) {
+    for (const theme of entry.themes) {
+      if (theme.key === id || theme.id === id) return themeSourceFromPlugin(entry.id, theme);
+    }
+  }
+  return null;
+}
+
+// 事实表的形状与读写口都在 `styles/themeFacts`（见文件头那条注释）。
+
+function sysPrefersDark(): boolean {
+  if (typeof window === "undefined" || !window.matchMedia) return false;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+/**
+ * 按 id 找一枚主题源（P131-B3 预览用）。
+ * 内置九枚 + 已装插件贡献的主题都算，**没在画也算**——"装不装之前先看一眼"正是预览的意义。
+ */
+export function findThemeSourceById(id: string): ThemeSource | null {
+  if (!id) return null;
+  const builtin = BUILTIN_THEMES.find((t) => t.id === id);
+  if (builtin) return builtin;
+  return findPluginTheme(id);
+}
+
+/** 可预览清单（回执与界面都要用它，别在第二处再列一遍主题名） */
+export function listPreviewableThemes(): {
+  id: string;
+  name: string;
+  builtin: boolean;
+  enabled: boolean;
+  pluginId: string | null;
+}[] {
+  const snap = getEngineSnapshot();
+  const plugins = snap.entries.flatMap((entry) =>
+    entry.themes.map((t) => ({
+      id: t.key,
+      name: t.title,
+      builtin: false,
+      enabled: snap.activeTheme === t.key,
+      pluginId: entry.id,
+    })),
+  );
+  return [
+    ...BUILTIN_THEMES.map((t) => ({ id: t.id, name: t.name, builtin: true, enabled: true, pluginId: null })),
+    ...plugins,
+  ];
+}
+
+/**
+ * 重建主题层与 CSS 样式层。**这里是"哪枚主题在画"唯一的落地出口**（详设 R1/R7）。
+ *
+ * P99b-N5 改的是什么（详设 §2）：
+ *  - 旧写法把**所有**启用中的插件主题按 createdAt 合并成一层、CSS 拼接（源码注释自己写着
+ *    "后装的赢"），于是启用三枚就得到一个没人同意过的混血主题；内置那几枚则走样式表
+ *    `:root[data-theme]` 垫在下面。**两套机制画一个界面**。
+ *  - 现在内置与插件是同一种东西（一张 token 表），一次只有一枚进 `active-theme` 层；
+ *    底下垫的是**兜底层**（暗/亮两张表，按引用取自内置 dark/light，不是第三份抄本）。
+ *  - `data-theme` 属性留着但换了语义：它是"在画那枚的 id"这个事实的投影，
+ *    六个画布的 MutationObserver 因此一行不改就能跟插件主题同步。
+ */
+export function applyThemeRuntime() {
+  if (!builtinErrorsReported && BUILTIN_THEME_ERRORS.length) {
+    builtinErrorsReported = true;
+    console.error(`[theme] 内置主题装载有 ${BUILTIN_THEME_ERRORS.length} 处问题：${BUILTIN_THEME_ERRORS.slice(0, 3).join("；")}`);
+  }
+  /**
+   * P174：**v3 插件主题**是唯一一种插件主题。它由 `setActiveTheme` 显式选中
+   * （不是"启用就画"），`vars` 从 CSS 里读出来供明暗推导与覆盖度统计；
+   * `scheme` 用它声明的，没声明就按 CSS 的实际取值推导。
+   */
+  const extTheme = getActiveExtTheme();
+  const pluginThemes = extTheme
+    ? [
+        {
+          id: extTheme.id,
+          name: extTheme.name,
+          builtin: false,
+          scheme: extTheme.scheme,
+          vars: varsFromThemeCss(extTheme.css),
+          css: extTheme.css,
+          pluginId: extTheme.pluginId,
+          createdAt: Number.MAX_SAFE_INTEGER,
+        },
+      ]
+    : [];
+
+  const settings = getSettings();
+  const decision = resolveActiveTheme({
+    settingsTheme: settings.theme,
+    sysDark: sysPrefersDark(),
+    builtins: BUILTIN_THEMES,
+    enabledThemePlugins: pluginThemes,
+  });
+  const pickedSource: ThemeSource | null = decision.active
+    ? pluginThemes.find((t) => t.id === decision.active!.id) ?? BUILTIN_THEMES.find((t) => t.id === decision.active!.id) ?? null
+    : null;
+  /**
+   * P131-B3 预览：有一场没到期的预览在演，就画那一枚——但**只改这一处取源**，
+   * 层序、兜底、CSS 单写者、scheme 推导全部照旧走同一条路。
+   * 预览记录读不到对应主题（比如插件在演出中途被卸）就当没有预览，
+   * 顺手清掉：留着一个演不出来的预览比清掉更糟。
+   */
+  const preview = getThemePreview();
+  const previewSource = preview ? findThemeSourceById(preview.id) : null;
+  if (preview && !previewSource) clearThemePreview();
+  const livePreview = preview && previewSource ? preview : null;
+  /** 屏幕上真正在画的那一枚：有预览就是预览那枚（`data-theme` 的六个观察者跟着它走） */
+  const painted: ThemeSource | null = previewSource ?? pickedSource;
+  const vars = painted?.vars ?? {};
+  const { scheme, origin } = resolveScheme({ scheme: painted?.scheme ?? null, vars }, lastScheme);
+  lastScheme = scheme;
+  const baseline = baselineFor(scheme);
+  const { inherited } = themeCoverage(vars, baseline);
+
+  submitRootVars(THEME_BASELINE_LAYER_ID, ROOT_LAYER.baseline, baseline);
+  submitRootVars(ACTIVE_THEME_LAYER_ID, ROOT_LAYER.activeTheme, vars);
+
+  // CSS 只跟在画那一枚后面走：两枚主题的 CSS 拼接出来的东西没有任何一处能解释
+  const cssParts: string[] = [];
+  if (painted?.css) cssParts.push(`/* theme: ${painted.name} */\n${painted.css}`);
+  /**
+   * P131-D 内置 style 包：只有**内置那一枚**在画时才注入（插件主题自带自己的 css，
+   * 而它的 `data-theme` 是 `plg:…`，那些带 `[data-theme="<id>"]` 前缀的规则本来也匹配不上——
+   * 这里显式判一层，是为了不依赖"前缀恰好挡得住"这种巧合）。
+   */
+  const builtinPart = painted?.builtin ? builtinStyleCss(painted.id) : "";
+  if (painted && builtinPart) cssParts.push(`/* builtin-style: ${painted.id} */\n${builtinPart}`);
+  /**
+   * P131-C 资产层与 CSS 同一条规矩：**只跟在画那一枚后面**。
+   * 两枚主题的贴图叠在一起，谁也不知道屏幕上那张噪声是谁给的。
+   */
+  const declaredAssets = painted
+    ? (painted.builtin ? builtinStyleAssets(painted.id) : painted.assets ?? [])
+    : [];
+  const liveAssets = syncThemeAssets(declaredAssets);
+
+  const facts: ActiveThemeFacts = {
+    id: painted?.id ?? decision.active?.id ?? "",
+    name: painted?.name ?? decision.active?.name ?? "未装载",
+    builtin: painted?.builtin ?? decision.active?.builtin ?? true,
+    pluginId: painted?.pluginId ?? (painted ? null : decision.active?.pluginId ?? null),
+    scheme,
+    schemeOrigin: origin,
+    overrides: Object.keys(vars).length,
+    inherited: inherited.length,
+    baseline: scheme,
+    fallbackId: decision.builtinDrawn?.id ?? null,
+    conflicts: decision.conflicts.map((c) => c.name),
+    fellBack: decision.fellBack,
+    preview: livePreview
+      ? { id: livePreview.id, expiresAt: livePreview.expiresAt, returnsTo: decision.active?.id ?? "" }
+      : null,
+    assets: { declared: declaredAssets.length, live: liveAssets },
+  };
+
+  if (typeof document !== "undefined") {
+    ensureStyleEl().textContent = cssParts.join("\n\n");
+    const root = document.documentElement;
+    if (facts.id) root.dataset.theme = facts.id;
+    /**
+     * `data-scheme` 是明暗归属的**唯一可读投影**（详设 S4 算完才写到这）。
+     * 画布类组件一律读它，别再按主题**名字**判暗不暗——同级之后 id 可能是
+     * `plg:...:main`，按名字判会把暗色插件主题当亮色画。
+     */
+    root.dataset.scheme = scheme;
+    root.style.colorScheme = scheme;
+  }
+  lastCssParts = cssParts;
+  setActiveThemeFacts(facts);
+  notifyStyleApply();
+}
+
+/**
+ * 上一次注入的 CSS 是哪几块（来源标签 + 字节数）。
+ * 与 `rootVarLayers()` 同一族性质：DOM 缺席时也能读，所以"到底注入了什么"这件事
+ * 在 node 测试里可断言，而不是只能在真机上看。
+ */
+export function injectedCssParts(): { label: string; bytes: number }[] {
+  return lastCssParts.map((p) => {
+    const m = /^\/\* (.+?) \*\//.exec(p);
+    return { label: m ? m[1] : "(未标注来源)", bytes: p.length };
+  });
+}
+
+/** 主题桥：沙箱组件（iframe）拿不到主文档 CSS 变量，需显式采集注入 */
+export const THEME_VAR_KEYS = [
+  "--bg",
+  "--bg-panel",
+  "--bg-inset",
+  "--bg-titlebar",
+  "--border",
+  "--border-soft",
+  "--text",
+  "--text-dim",
+  "--accent",
+  "--accent-soft",
+  "--danger",
+  "--warn",
+  "--ok",
+  "--shadow",
+  "--scrollbar",
+  "--scrollbar-hover",
+  /* P103：表面层级也要过桥。否则 AI 造的小部件/自定义面板永远停在"旧观感"上——
+     宿主换了抬升面，iframe 里还是裸 --bg-panel 一层平铺（readComputed 拿到的是
+     已代入 var() 的 color-mix 文本，iframe 直接可用）。 */
+  "--raise-1",
+  "--raise-2",
+  "--line-strong",
+  "--scrim",
+  "--ring",
+];
+
+/**
+ * 采集主文档上生效的 CSS 变量（iframe/小部件主题桥，以及"保存为完整主题"的数据源）。
+ * P98-M0：读的是 `getComputedStyle` ⇒ 天然就是合成器算完的**有效值**，与哪一层供的值无关。
+ * `keys` 可换清单：默认 16 个色板键（iframe 桥够用），存主题时传全量 `APPEARANCE_TOKENS`
+ * ——否则 radius/fs/dur/ease 只能靠覆盖层恰好还在才补齐。
+ */
+export function collectThemeVars(keys: readonly string[] = THEME_VAR_KEYS): { vars: Record<string, string>; theme: string; scheme: string } {
+  if (typeof document === "undefined") return { vars: {}, theme: "dark", scheme: "dark" };
+  const cs = getComputedStyle(document.documentElement);
+  const vars: Record<string, string> = {};
+  for (const k of keys) {
+    const v = cs.getPropertyValue(k).trim();
+    if (v) vars[k] = v.slice(0, 200);
+  }
+  return { vars, theme: document.documentElement.dataset.theme || "dark", scheme: document.documentElement.dataset.scheme || "dark" };
+}
+
+/* ---------------- 扩展 toast（小部件/面板共用） ----------------
+ *
+ * P99a-D1c 删除了此处的"行为脚本运行时"：`ScriptApi` + `makeApi()` + `new Function("api", code)`。
+ * 那条通道是主世界里的无超时、不可中断 eval，且 `api.app.*` 一律带 `highPriv:true`——
+ * 它是全仓最高的一块攻击面。能跑 JS 的合法形态只有专用 Node 子进程那一条（v3 插件宿主）。
+ *
+ * P131-A：实现搬到 `shared/toast.ts`。原来这里是**一份独立的 DOM 手搓实现**，
+ * 与 `operator/lock.ts` 里那份共用同一对类名却各记各的 host —— 同一屏能挂两个提示列。
+ * 出口签名不变（`toast(msg)`），老调用方一行不用改。
+ */
+export { toast } from "../../shared/toast";
+
+/* ---------------- 总控：随插件主题变化同步运行时 ---------------- */
+
+let started = false;
+
+export function startUiRuntime() {
+  if (started) return;
+  started = true;
+  applyThemeRuntime();
+  // 只剩样式层：面板与小组件由 v3 插件宿主渲染，脚本通道已随 P99a-D1c 删除
+}

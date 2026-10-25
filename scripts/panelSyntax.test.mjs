@@ -47,7 +47,7 @@ function check(code) {
 describe("P174-A9 · 面板脚本语法", () => {
   const panels = [
     ["YOLO 工作台", path.join(ROOT, "plugins", "uartix.yolo", "panel.html")],
-    ["示例扩展", path.join(ROOT, "examples", "extensions", "uartix.hello", "panel.html")],
+    ["示例扩展", path.join(ROOT, "examples", "plugins", "uartix.hello", "panel.html")],
   ];
 
   for (const [name, file] of panels) {

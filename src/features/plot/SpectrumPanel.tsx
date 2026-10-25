@@ -29,7 +29,7 @@ import {
 } from "./spectrum";
 import * as templateStore from "../protocol/templateStore";
 import { requestOpenPanel } from "../ai/appBus";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconPause, IconPlay } from "../../shared/icons";
 

@@ -343,13 +343,13 @@ export const uiToolEntries: AgentToolEntry[] = [
     execute: async (args, ctx) => {
       const callId = ctx.callId;
       if (typeof document === "undefined") return bad(callId, "no_dom", { hint: "预览要画在界面上，当前环境没有 DOM" });
-      // 动态 import：extRuntime → chatStore → agentRun 会与 agent 链成环（§16 红线 R1），
+      // 动态 import：uiRuntime → chatStore → agentRun 会与 agent 链成环（§16 红线 R1），
       // 与 appearanceTools 里那几处保存链同一个理由，不是随手写的。
-      const { applyStyleExts, findThemeSourceById, listPreviewableThemes } = await import("../ai/extRuntime");
+      const { applyThemeRuntime, findThemeSourceById, listPreviewableThemes } = await import("../ai/uiRuntime");
       const { activeThemeFacts } = await import("../../styles/themeFacts");
       if (args.stop === true) {
         const had = clearThemePreview();
-        applyStyleExts();
+        applyThemeRuntime();
         return {
           callId,
           ok: true,
@@ -385,8 +385,8 @@ export const uiToolEntries: AgentToolEntry[] = [
         });
       }
       const seconds = clampPreviewSeconds(args.seconds);
-      setThemePreview({ id: source.id, expiresAt: Date.now() + seconds * 1000 }, applyStyleExts);
-      applyStyleExts();
+      setThemePreview({ id: source.id, expiresAt: Date.now() + seconds * 1000 }, applyThemeRuntime);
+      applyThemeRuntime();
       const facts = activeThemeFacts();
       return {
         callId,

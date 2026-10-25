@@ -7,7 +7,6 @@
  * 现在计数与清单都从注册表派生，本测试钉住"派生"这件事本身：
  * 哪天有人把它改回字面量，或者注册表里新增了 kind 而派生逻辑漏了它，这里就红。
  */
-import { ARTIFACT_KINDS, artifactKindMeta } from "../plugins/artifact";
 import { describe, expect, it } from "vitest";
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 import { buildSystemPrompt, routeNeeds, schemaFor } from "./prompts";
@@ -62,16 +61,20 @@ describe("prompts 能力速览与注册表同源", () => {
  */
 const route =
   /【UI 创造引导】[^\n]*/.exec(buildSystemPrompt("create", "（无）"))?.[0] ?? "";
-const kindLabels = ARTIFACT_KINDS.map((k) => artifactKindMeta(k).label);
+const CREATABLE = ["面板", "主题", "小部件", "工作区预设", "任务模板"];
 
-describe("UI 创造引导与产物元表对齐", () => {
-  it("引导句存在，且括号里承诺的每一种都有对应的产物中文名", () => {
+describe("UI 创造引导与 v3 草稿链路对齐", () => {
+  it("引导句存在，且只承诺面板 / 主题 / 小部件这三类", () => {
     expect(route.length, "创造场景的 system prompt 里没有这句引导了").toBeGreaterThan(0);
     const names = (/（([^）]+)）/.exec(route)?.[1] ?? "").split(/[ /、]+/).map((s) => s.trim()).filter(Boolean);
     expect(names.length).toBeGreaterThan(0);
     for (const n of names) {
-      expect(kindLabels, `系统提示承诺了「${n}」，但产物元表里没有这一类`).toContain(n);
+      expect(CREATABLE, `系统提示承诺了「${n}」，但 v3 草稿链路里没有这一类`).toContain(n);
     }
+    expect(route).toContain("plugin_draft_save");
+    expect(route).toContain("plugin_draft_promote");
+    expect(route, "又说回自动启用了，违反 v3 信任链").not.toContain("自动启用");
+    expect(route, "还在教模型用已删除的 save_plugin").not.toContain("save_plugin");
   });
 
   it("入口说法指着真的入口：pill，不是任何「工具栏按钮」", () => {
@@ -82,7 +85,7 @@ describe("UI 创造引导与产物元表对齐", () => {
   });
 
   it("已下架的产物形态不许再出现在这句引导里", () => {
-    for (const gone of ["行为脚本", "动效预设", "报告视图", "工作流"]) {
+    for (const gone of ["行为脚本", "动效预设", "报告视图", "工作流", "逻辑模块", "save_plugin"]) {
       expect(route, `系统提示还在承诺已下架的「${gone}」`).not.toContain(gone);
     }
   });

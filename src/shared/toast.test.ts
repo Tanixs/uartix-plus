@@ -5,7 +5,7 @@
  * 而那句话**从来没有被看见过**——`.ai-toast-host` / `.ai-toast` 这对类名在 src 下所有
  * .css 里一条规则都没有（门禁 J 只扫 TSX 的 `className`，看不见 `document.createElement`
  * 之后赋的类名，所以这个洞是静默的）。顺带还有第二份问题：同一对类名由两处各自实现
- * （`ai/extRuntime` 与 `operator/lock`），各记各的 host，同一屏可以挂出两列提示。
+ * （`ai/uiRuntime` 与 `operator/lock`），各记各的 host，同一屏可以挂出两列提示。
  *
  * 于是这里钉三件事：实现只有一份、类名真的有样式、行为本身（上限 / 自动消失 / 无 DOM 不出声）。
  */

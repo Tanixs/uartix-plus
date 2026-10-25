@@ -17,7 +17,7 @@ export type Domain = (typeof DOMAINS)[number];
  *  标签写成"动作"而不是"名词"：旧文案「文件」让人以为 Agent 能写文件。 */
 export const DOMAIN_ZH: Record<Domain, string> = {
   config: "配置写入",
-  plugins: "插件库",
+  plugins: "插件管理",
   device: "设备发送",
   files: "文件读取",
   network: "网络访问",
@@ -29,7 +29,7 @@ export const DOMAIN_ZH: Record<Domain, string> = {
 /** 授权域 → 一行边界说明（勾选行悬停与正文提示） */
 export const DOMAIN_TIP: Record<Domain, string> = {
   config: "设置与工作区配置的新建/修改（删除/覆盖仍需批准）",
-  plugins: "保存新插件并启用纯 UI 插件",
+  plugins: "写入插件草稿并排队转正（不安装、不启用；批准由用户在插件管理里做）",
   device: "仿真环境自动发送；实车/未知设备仍逐次批准",
   files: "读取/列出「Agent 文件白名单」内的本地文件（设置 → AI 服务）",
   network: "抓取公网网页与搜索（自动拒绝内网地址）",

@@ -3,7 +3,7 @@ import { isDarkScheme } from "../../styles/themeCore";
 import { useEffect, useRef, useState } from "react";
 import { onRx } from "../../ipc/binbus";
 import * as templateStore from "../protocol/templateStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { requestOpenPanel } from "../ai/appBus";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconPause, IconPlay, IconTrash } from "../../shared/icons";

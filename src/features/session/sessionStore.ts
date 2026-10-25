@@ -4,7 +4,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import type { AnnOut, SessionMeta, SessionPhase, SessionStatus } from "../../ipc/types";
 import * as templateStore from "../protocol/templateStore";
 import * as serialStore from "../serial/serialStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { tx } from "../../i18n/strings";
 import { confirmDialog } from "../../shared/Dialog";
 

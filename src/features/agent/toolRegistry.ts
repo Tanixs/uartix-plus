@@ -16,9 +16,8 @@
  *     按域裁剪对**全部** entry 生效——旧实现只裁两组，外观与内联九支根本不进裁剪。
  *
  * 依赖纪律：本模块只依赖叶子（scopeTiers / toolPolicy / types），**不得 import 任何工具组、
- * pluginStore 或 agentAdapter**——注册表与被注册者成环就是 dev 白屏（§8-33）。
+ * 插件引擎或 agentAdapter**——注册表与被注册者成环就是 dev 白屏（§8-33）。
  */
-import { shortHash } from "../plugins/pluginId"; // 零依赖叶子（与上面那条纪律不冲突：它不 import 任何 store）
 import { DOMAIN_ZH, hasDomain, type Domain } from "./scopeTiers";
 import { decide, type EffectClass, type PolicyContext, type ToolPolicyMeta } from "./toolPolicy";
 import type { UndoResult } from "./settingsTools";
@@ -29,6 +28,16 @@ export type { ToolProvenance } from "./types";
 
 /** 插件工具的强制名字前缀：撞名不等于接管。 */
 export const PLUGIN_TOOL_PREFIX = "plg_";
+
+/** 32 位 FNV-1a 的十六进制短哈希：只用于把组合工具名里的截断损失补回来。 */
+function shortHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
 
 /** 一条工具名：小写下划线，3..40 字符。插件名再加前缀与包名 slug。 */
 const TOOL_NAME_RE = /^[a-z][a-z0-9_]{2,39}$/;
@@ -199,7 +208,7 @@ export function defineTool(entry: AgentToolEntry): AgentToolEntry {
  * 为什么补那 4 位哈希（旧实现没有）：slug 与裸名都要截断才能满足 `TOOL_NAME_RE` 的 40 字符上限，
  * 而截断会让两个长名字撞成同一支工具——撞上的后果是"注册时同名校验把它当第二支拒掉"或更糟的
  * "换包了却没换名，读到了别人的实现"。哈希取自 `pkgId#rawName` 全量，所以截断不再损失区分度
- * （与 `pluginId.shortHash` 同一条路子，P92 D2 的教训）。
+ * （与旧 `pluginId.shortHash` 同一条路子，P92 D2 的教训）。
  */
 export function pluginToolName(pkgId: string, rawName: string): string {
   const slug = pkgId.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 12);

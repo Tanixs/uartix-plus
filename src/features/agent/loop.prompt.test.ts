@@ -21,7 +21,7 @@ function registryNames(): Set<string> {
   // 与 hostEntries.ts 那七组一一对应（P133-B2 之后新增 `subagent.ts`：新工具组文件必须同时进这张表，
   // 否则这条守卫会把"提示点了一支真存在的工具"误判成死引用——本批就是被它自己抓到的）
   const files = ["./localEntries.ts", "./uiTools.ts", "./settingsTools.ts", "./appearanceTools.ts",
-    "./generalTools.ts", "./marketTools.ts", "./pluginTools.ts", "./subagent.ts"];
+    "./generalTools.ts", "./draftTools.ts", "./subagent.ts"];
   const names = new Set<string>();
   for (const f of files) {
     for (const m of read(f).matchAll(/\bname:\s*"([a-z][a-z0-9_]{2,39})"/g)) names.add(m[1]);
@@ -65,7 +65,7 @@ it("P133-E：拒绝语义与生成物口径恒发，且不含任何工具名", a
 });
 
 it("基础提示里不许出现任何 `xxx_yyy` 形式的工具名（要提工具就走进分片段）", () => {
-  const base = /const PROMPT_BASE = "([\s\S]*?)";\n/.exec(loopSrc)?.[1] ?? "";
+  const base = /const PROMPT_BASE = "([\s\S]*?)";\r?\n/.exec(loopSrc)?.[1] ?? "";
   expect(base.length).toBeGreaterThan(200);
   const named = [...base.matchAll(/\b(?:read|save|theme|style|settings|app|ui|fs|list|enable|rollback|plot|image|web|shell|task|run|propose|layout|chrome|session)_[a-z0-9_]+\b/g)].map((m) => m[0]);
   expect(named, `基础段里点名了工具，可它不分档位：${named.join(", ")}`).toEqual([]);
@@ -75,18 +75,19 @@ it("死引用 read_appearance 不在发给模型的任何一段提示里（真�
   // 判据落在**渲染结果**上而不是源码上：源码里作为历史说明提一次它是允许的（注释里就在讲这件事），
   // 真正不能容忍的是模型照着它去调一支不存在的工具。
   const { buildSystemPrompt } = await import("./loop");
-  const all = buildSystemPrompt(new Set(["theme_read", "save_plugin", "task_plan", "theme_patch", "theme_preset", "save_theme_extension", "image_swatch"]));
+  const all = buildSystemPrompt(new Set(["theme_read", "plugin_draft_save", "task_plan", "theme_patch", "theme_preset", "save_theme_extension", "image_swatch"]));
   expect(all.length).toBeGreaterThan(400);
   expect(all).not.toContain("read_appearance");
 });
 
 it("外观那段的可见性跟着工具走：没发 theme_read 就不教怎么用", async () => {
   const { buildSystemPrompt } = await import("./loop");
-  const withTheme = buildSystemPrompt(new Set(["theme_read", "save_plugin"]));
+  const withTheme = buildSystemPrompt(new Set(["theme_read"]));
   const bare = buildSystemPrompt(new Set(["app_read"]));
   expect(withTheme).toContain("call theme_read first");
-  expect(withTheme).toContain("save_plugin with enable:true");
+  expect(withTheme).toContain("save_theme_extension");
   expect(bare, "工具没发出去，提示里却还在教怎么用 ⇒ 模型会去撞 unknown_tool").not.toContain("Appearance edits");
+  expect(bare).not.toContain("plugin_draft_save");
   expect(bare).not.toContain("save_plugin");
   // 基础段与可见性无关，永远在
   expect(bare).toContain("No tool call means task termination");

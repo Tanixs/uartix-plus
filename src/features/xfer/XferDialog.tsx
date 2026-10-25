@@ -3,7 +3,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import * as store from "./xferStore";
 import * as serialStore from "../serial/serialStore";
 import { isRecording } from "../session/sessionStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { useSettings } from "../settings/settingsStore";
 import { t, tx, useLocale } from "../../i18n/strings";
 

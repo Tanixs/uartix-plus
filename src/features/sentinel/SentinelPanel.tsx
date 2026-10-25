@@ -5,7 +5,7 @@ import * as store from "./sentinelStore";
 import type { AlertKind, AlertLevel, SentinelAlert } from "./sentinelEngine";
 import { requestOpenPanel } from "../ai/appBus";
 import * as plotStore from "../plot/plotStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { zoomFactor } from "../../shared/zoom";
 
 /**

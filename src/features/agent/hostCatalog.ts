@@ -16,7 +16,7 @@
  *    模型永远知道"我看的是不是全部"。
  *
  * 环纪律（§8-33）：所有 store 一律**读者内部动态 import**。这个文件被 `localEntries`/适配器
- * 在求值期读，静态挂上 store 就等于把 `pluginStore→extRuntime→chatStore→agentRun` 那条老环
+ * 在求值期读，静态挂上 store 就等于把 `插件引擎→uiRuntime→chatStore→agentRun` 那条老环
  * 再焊一次。
  */
 import { channelStats } from "./runMath";
@@ -44,9 +44,7 @@ export type CatalogGroup =
   | "analysis"
   | "modbus"
   | "vdev"
-  | "sentinel"
-  // P99b-N6：插件市场（C2「AI 提名装」的只读半边；写侧仍不在这条路上）
-  | "market";
+  | "sentinel";
 
 export const CATALOG_GROUP_ZH: Record<CatalogGroup, string> = {
   runtime: "运行现状",
@@ -64,7 +62,6 @@ export const CATALOG_GROUP_ZH: Record<CatalogGroup, string> = {
   modbus: "Modbus 工作台",
   vdev: "虚拟设备工坊",
   sentinel: "哨兵",
-  market: "插件市场",
 };
 
 export interface CatalogArgs {
@@ -115,10 +112,10 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
     group: "runtime",
     zh: "运行现状（连接/锁/录制/规模）",
     gives:
-      "serial{iface,status,port,rxTotal,txTotal,bps,error} · operatorLocked · appVersion · session{state,frames,durationMs,bridgePort,bridgeClients} · counts{channels,protocols,commands,controls,plugins}",
+      "serial{iface,status,port,rxTotal,txTotal,bps,error} · operatorLocked · appVersion · session{state,frames,durationMs,bridgePort,bridgeClients} · counts{channels,protocols,commands,controls,plugins}（plugins＝已安装插件数）",
     maxBytes: 4096,
     async read() {
-      const [{ getSnapshot: serial }, { getSnapshot: op }, { getSnapshot: sess }, plot, { getSnapshot: tpl }, { getSnapshot: cmds }, { getSnapshot: ctl }, { getSnapshot: plug }] =
+      const [{ getSnapshot: serial }, { getSnapshot: op }, { getSnapshot: sess }, plot, { getSnapshot: tpl }, { getSnapshot: cmds }, { getSnapshot: ctl }, plug] =
         await Promise.all([
           import("../serial/serialStore"),
           import("../operator/operatorStore"),
@@ -127,7 +124,7 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
           import("../protocol/templateStore"),
           import("../controls/commandStore"),
           import("../controls/controlsStore"),
-          import("../plugins/pluginStore"),
+          import("../plugins/engine/pluginEngine"),
         ]);
       const s = serial();
       const ss = sess();
@@ -141,7 +138,7 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
           protocols: tpl().rules.templates.length,
           commands: countCommands(cmds().groups),
           controls: ctl().pages.reduce((n, p) => n + p.cards.length, 0),
-          plugins: plug().plugins.length,
+          plugins: plug.getSnapshot().entries.length,
         },
       };
     },
@@ -433,32 +430,35 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
   {
     path: "plugins",
     group: "plugins",
-    zh: "插件库",
+    zh: "已安装插件",
     gives:
-      "每项 {id,name,version,state,caps,createdBy,historyVersions,candidateVersion}；含逻辑模块的包另给 modules/tools（它注册了哪几支 Agent 工具）",
+      "每项 {id,name,version,enabled,verdict,phase,permissions,panels,themes,widgets,commands,origin}；verdict＝trusted/needs-approval/changed，enabled 与 verdict 都成立时插件的面板才会出现",
     listKey: "items",
     defaultLimit: DEFAULT_LIST_LIMIT,
     maxBytes: 8192,
     async read() {
-      const [{ getSnapshot }, { moduleArtifactsOf }, { pluginToolDefsOf }] = await Promise.all([
-        import("../plugins/pluginStore"),
-        import("../plugins/moduleHost"),
-        import("../plugins/pluginToolDefs"),
-      ]);
+      const { ensureLoaded, getSnapshot } = await import("../plugins/engine/pluginEngine");
+      await ensureLoaded();
+      const s = getSnapshot();
       return {
-        total: getSnapshot().plugins.length,
-        items: getSnapshot().plugins.map((p) => ({
-          id: p.pkg.id,
-          name: p.pkg.name,
-          version: p.pkg.version,
-          state: p.state,
-          caps: p.pkg.capabilities,
-          createdBy: p.pkg.provenance.createdBy,
-          historyVersions: p.versions.length,
-          ...(p.candidate ? { candidateVersion: p.candidate.version } : {}),
-          ...(moduleArtifactsOf(p.pkg).length ? { modules: moduleArtifactsOf(p.pkg).length } : {}),
-          ...(pluginToolDefsOf(p.pkg.id).length ? { tools: pluginToolDefsOf(p.pkg.id).map((t) => t.baseName) } : {}),
+        total: s.entries.length,
+        items: s.entries.map((p) => ({
+          id: p.id,
+          name: p.manifest.name,
+          version: p.version,
+          enabled: p.enabled,
+          verdict: p.verdict,
+          phase: p.phase,
+          permissions: p.permissions,
+          panels: (p.manifest.contributes.panels ?? []).map((x) => x.id),
+          themes: p.themes.map((x) => x.id),
+          widgets: (p.manifest.contributes.widgets ?? []).map((x) => x.id),
+          presets: (p.manifest.contributes.presets ?? []).map((x) => x.id),
+          tasks: (p.manifest.contributes.tasks ?? []).map((x) => x.id),
+          commands: (p.manifest.contributes.commands ?? []).length,
+          origin: p.origin ?? null,
         })),
+        ...(s.issues.length ? { issues: s.issues.slice(0, 10) } : {}),
       };
     },
   },
@@ -869,106 +869,6 @@ export const CATALOG_VIEWS: readonly CatalogView[] = [
     },
   },
 
-  /* ---------------- P99b-N6：插件市场（两支都不联网） ----------------
-   *
-   * R3 是这批在这里的全部难度：**视图绝不能顺手刷新**。市场的第一条口径是"只有打开那一页才联网"，
-   * 模型问一句"货架上有什么"就把人推出这个承诺，那是拿自省面当后门。所以两支读 `getMarketSnapshot()`，
-   * 没取过就照实回"没取过 + 该怎么办"（与 `analysis.last` 同一形状），也不回用户配的地址原值——
-   * 目录一向不接 settings 这个源（`hostCatalog.test` 那条敏感源封闭的白名单就是为它设的）。
-   *
-   * 还有一条本批踩到的：`readCatalog` 把**顶层带 `error` 键**的回执当作"视图自己报失败"（→ ok:false），
-   * 所以失败原因放在未取回那一支的 `why` 里，ready 那一支不再挂错误字段（成功时 `error` 恒为空串）。
-   */
-  {
-    path: "market.status",
-    group: "market",
-    zh: "插件市场：上一次取回索引的现状",
-    gives:
-      "{available:true,status,indexName,source,generatedAt,entryCount,droppedCount,viaMirror,elapsedMs,fetchedAt,appVersion,why?} · 未取回时 {available:false,status,why,next}（货架页那句状态行读的就是这几个数；`why`＝上次取回失败的原因；用户配的索引地址与镜像前缀不外带——目录一向不接 settings 这个源）",
-    maxBytes: 4096,
-    async read() {
-      const { getMarketSnapshot } = await import("../market/marketStore");
-      const s = getMarketSnapshot();
-      if (!s.index) {
-        return {
-          available: false,
-          status: s.status,
-          why:
-            s.status === "loading"
-              ? "索引正在取回中（只可能在有人打开市场页时发生）"
-              : s.error || "本机还没取过这份索引",
-          next: "在应用里打开一次「插件市场」那一页；本视图不替你联网刷新",
-        };
-      }
-      return {
-        available: true,
-        status: s.status,
-        indexName: s.index.name,
-        source: s.index.source,
-        generatedAt: s.index.generatedAt,
-        entryCount: s.index.entries.length,
-        // 被剔除几条：货架页显示得、AI 读不到就是不对称（详设 §4-5）
-        droppedCount: s.index.dropped.length,
-        viaMirror: s.viaMirror,
-        elapsedMs: s.elapsedMs,
-        fetchedAt: s.fetchedAt,
-        appVersion: s.appVersion,
-        // 键名不能叫 `error`：readCatalog 把"顶层带 error 键"当作视图自己报失败（`runtime` 那支也是嵌在 serial 里给的）
-        ...(s.error ? { why: s.error } : {}),
-      };
-    },
-  },
-  {
-    path: "market.entries",
-    group: "market",
-    zh: "插件市场：货架上的条目（含与本机库的对照）",
-    gives:
-      "每项 {id,name,author,version,category,caps,verified,bytes,shots,descLen,compat,install,via,pending?}（`install`＝absent/same/update/newer-than-shelf，与货架徽章同一个 `compareInstall` 判定；`via`＝shelf/npm，即字节来自自建货架直链还是 npm 官方 registry；`pending` 只在有一条在飞的请求时出现；描述只给长度）",
-    listKey: "items",
-    defaultLimit: DEFAULT_LIST_LIMIT,
-    maxBytes: 8192,
-    async read() {
-      const [{ getMarketSnapshot }, { getSnapshot: local }, { marketPendingSnapshot }, { compat, compareInstall, packageOrigin }] =
-        await Promise.all([
-          import("../market/marketStore"),
-          import("../plugins/pluginStore"),
-          import("../market/marketPending"),
-          import("../market/marketIndex"),
-        ]);
-      const s = getMarketSnapshot();
-      if (!s.index) {
-        return {
-          available: false,
-          total: 0,
-          items: [],
-          why: s.error || "本机还没取过这份索引",
-          next: "在应用里打开一次「插件市场」那一页；本视图不替你联网刷新",
-        };
-      }
-      const versions = new Map(local().plugins.map((r) => [r.pkg.id, r.pkg.version]));
-      const live = new Map(marketPendingSnapshot().map((p) => [p.entryId, p.phase]));
-      return {
-        available: true,
-        total: s.index.entries.length,
-        items: byId(s.index.entries).map((e) => ({
-          id: e.id,
-          name: e.name,
-          author: e.author,
-          version: e.version,
-          category: e.category,
-          caps: e.capabilities,
-          verified: e.verified === true,
-          bytes: e.bytes,
-          shots: e.screenshots.length,
-          descLen: len(e.description.zh),
-          compat: compat(e, s.appVersion),
-          install: compareInstall(e, versions.get(e.id)),
-          via: packageOrigin(e),
-          ...(live.has(e.id) ? { pending: live.get(e.id) } : {}),
-        })),
-      };
-    },
-  },
 ];
 
 /* ============================ C1b 七面：读者侧的收敛助手 ============================

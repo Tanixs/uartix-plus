@@ -14,6 +14,7 @@ import * as templateStore from "../protocol/templateStore";
 import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
 import { PluginManagerBody } from "../plugins/PluginLibraryDialog";
+import { ProfilesPanel } from "../plugins/engine/ProfilesPanel";
 import * as sentinelStore from "../sentinel/sentinelStore";
 import * as timeCursor from "../analysis/timeCursorStore";
 import * as mcpServer from "../mcp/mcpServer";
@@ -22,11 +23,11 @@ import { JobDetails } from "../mcp/JobDetails";
 import { OperatorGenBlock } from "../operator/OperatorGen";
 import { mcpServerConfig } from "../mcp/mcpTools";
 import { imageStoreStats, setImageLimits, clearAllImages } from "../ai/imageStore";
-import { applyStyleExts, toast } from "../ai/extRuntime";
+import { applyThemeRuntime, toast } from "../ai/uiRuntime";
 import { clearThemePreview } from "../ai/themePreview";
 import { activeThemeFacts, subscribeStyleApply } from "../../styles/themeFacts";
 import { drawnTalk, pluginSectionStart, selectTheme, themeCards } from "./themePicker";
-import { themeBearingPackages, usePlugins } from "../plugins/pluginStore";
+import { ensureLoaded as ensurePluginsLoaded, getSnapshot as getPluginEngine, setActiveTheme, subscribe as subscribePluginEngine } from "../plugins/engine/pluginEngine";
 import { ModelSettingsPage } from "./ModelSettingsPage";
 import { aiStyleFootprint, clearAiStyleLayers, subscribeAiStyle } from "../agent/aiStyleLayers";
 import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
@@ -108,16 +109,12 @@ function appearanceResetNames(): string[] {
   return APPEARANCE_RESET_KEYS.map((k) => t(`set.${String(k)}`));
 }
 
-/* ---------------- 插件管理页（旧扩展管理已废弃，内嵌插件库主体） ---------------- */
+/* ---------------- 插件管理页（内嵌插件库主体） ---------------- */
 
-/**
- * P102：这里原先还有「插件市场」那两行（索引地址 / 镜像前缀）+ 一行取回状态。
- * 用户裁决：这一栏只留本地插件库。两行搬进市场弹窗自己里面（`market/MarketSourceRows.tsx`，
- * 顶上那颗齿轮展开）——它们服务的正是"这一页从哪儿取清单"，与货架状态是同一条信息，
- * 而且失败页原本就叫人回设置页改，绕一圈才回到用户站着的地方。
- */function ExtPage() {
+/** 设置页的插件管理整页：外壳沿用原插件库主体，数据全部来自 v3 引擎。 */
+function PluginsPage() {
   return (
-    <div className="set-ext-page">
+    <div className="set-plugins-page">
       <div className="set-plg-embed">
         <PluginManagerBody />
       </div>
@@ -143,7 +140,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
    * 旧实现在这里自己 `exts.filter(enabled && type==="theme")` 再数一遍——那是"哪枚主题在画"
    * 的第二处判定（详设 §1-8 说的那句谎就长在这种地方），现在只读一个出口。
    */
-  const plugins = usePlugins();
+  const plugins = useSyncExternalStore(subscribePluginEngine, getPluginEngine, getPluginEngine);
+  useEffect(() => {
+    void ensurePluginsLoaded();
+  }, []);
   const [sysDark] = useState(() =>
     typeof window === "undefined" ? false : window.matchMedia("(prefers-color-scheme: dark)").matches,
   );
@@ -154,7 +154,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     drawnId: drawn.id || null,
     drawnName: drawn.name || null,
     drawnPluginId: drawn.pluginId,
-    records: plugins.plugins,
+    records: plugins.entries,
     labelOf: (id) => t(`set.theme.${id}`),
   });
   /** 内置与插件之间那道横线插在哪（-1＝一枚插件主题都没装，不出现横线） */
@@ -165,26 +165,17 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     const r = await selectTheme(card, { pluginPkgId: drawn.pluginId, name: drawn.name });
     toast(r.ok ? r.msg : tx(`没换成：${r.msg}`, `Not switched: ${r.msg}`));
   };
-  /** 启用中的插件主题包（互斥之后至多一枚，但存量数据可能不止——两处按钮都读这一个列表） */
-  const enabledThemePkgIds = () =>
-    [...new Set(themeBearingPackages().filter((r) => r.state === "enabled").map((r) => r.pkg.id))];
   const disableThemeLayers = async () => {
-    const refs = enabledThemePkgIds();
-    if (!refs.length) {
+    if (!plugins.activeTheme) {
       toast(tx("现在没有插件主题在画，界面用的就是内置主题", "No plugin theme is driving the UI right now — a built-in one is"));
       return;
     }
-    const { setEnabled } = await import("../plugins/pluginStore");
-    const failed: string[] = [];
-    for (const id of refs) {
-      const r = setEnabled(id, false);
-      if (!r.ok) failed.push(`${id}：${r.msg}`);
+    try {
+      await setActiveTheme("");
+      toast(tx("已撤下插件主题，界面回到内置主题", "Plugin theme removed; the UI is back on a built-in theme"));
+    } catch (e) {
+      toast(tx(`撤下失败：${String((e as Error)?.message ?? e)}`, `Could not remove it: ${String((e as Error)?.message ?? e)}`));
     }
-    toast(
-      failed.length
-        ? tx(`部分停用失败：${failed.join("；")}`, `Some could not be disabled: ${failed.join("; ")}`)
-        : tx(`已停用 ${refs.length} 枚插件主题，界面回到内置主题`, `Disabled ${refs.length} plugin theme(s); the UI is back on a built-in theme`),
-    );
   };
   /**
    * P98-M1 外观来源面板。
@@ -208,12 +199,11 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
       : tx("AI 当前没有留下临时外观改动", "The AI left no temporary appearance changes"));
   };
   const restoreAppearanceDefaults = async () => {
-    const refs = enabledThemePkgIds();
-    const pluginThemeCount = refs.length;
+    const hasPluginTheme = !!plugins.activeTheme;
     const willDo = [
       aiStyle.tokens ? tx(`清除 AI 的 ${aiStyle.tokens} 项 token 覆盖`, `Clear ${aiStyle.tokens} AI token overrides`) : "",
       aiStyle.layers.length ? tx(`清除 AI 的 ${aiStyle.layers.length} 层组件样式`, `Clear ${aiStyle.layers.length} AI component style layers`) : "",
-      pluginThemeCount ? tx(`停用 ${pluginThemeCount} 个插件主题`, `Disable ${pluginThemeCount} plugin themes`) : "",
+      hasPluginTheme ? tx("撤下当前插件主题", "Remove the active plugin theme") : "",
       tx(
         `外观设置回默认（${appearanceResetNames().join("、")}）`,
         `Reset appearance settings to default (${appearanceResetNames().join(", ")})`,
@@ -221,7 +211,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     ].filter(Boolean);
     const ok = await confirmDialog({
       message: tx(
-        `恢复默认外观将执行：\n· ${willDo.join("\n· ")}\n\n注意：这一项**会把你自己在设置里选的主题/缩放/精度等一并回默认**。\n只想撤掉 AI 动过的，请用上面的「清除 AI 临时覆盖」。\n协议模板、命令库、插件库等其他数据不受影响。`,
+        `恢复默认外观将执行：\n· ${willDo.join("\n· ")}\n\n注意：这一项**会把你自己在设置里选的主题/缩放/精度等一并回默认**。\n只想撤掉 AI 动过的，请用上面的「清除 AI 临时覆盖」。\n协议模板、命令库、插件等其他数据不受影响。`,
         `Restoring the default appearance will:\n· ${willDo.join("\n· ")}\n\nNote: this **also resets the theme / zoom / precision you picked in Settings**.\nTo undo only what the AI changed, use “Clear AI overrides” above.\nProtocol templates, the command library, the plugin library and other data are untouched.`,
       ),
       danger: true,
@@ -229,11 +219,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     });
     if (!ok) return;
     clearAiStyleLayers();
-    if (pluginThemeCount) {
-      const { setEnabled } = await import("../plugins/pluginStore");
-      for (const id of refs) {
-        void setEnabled(id, false);
-      }
+    if (hasPluginTheme) {
+      try {
+        await setActiveTheme("");
+      } catch { /* 恢复默认的其余部分照做；主题撤不下时下一次读盘会再说 */ }
     }
     patch(appearanceDefaults());
     setAiStyle(aiStyleFootprint());
@@ -328,8 +317,15 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
     { key: "io", label: t("set.io"), group: tx("数据与诊断", "Data & diagnostics"), icon: <IconUpload /> },
     { key: "ai", label: t("set.ai"), group: tx("AI 与 Agent", "AI & agent"), icon: <IconSparkle />, sub: tx("回答行为、流式与授权面、Agent 预算", "Answer behaviour, streaming and permission tier, Agent budgets") },
     { key: "model", label: tx("模型设置", "Model settings"), group: tx("AI 与 Agent", "AI & agent"), icon: <IconCube />, sub: tx("管理自定义模型供应商，配置后可在聊天时选择使用。", "Manage model providers; pick one from the chat composer afterwards") },
-    { key: SETTINGS_TAB_PLUGINS, label: t("set.ext"), group: tx("扩展", "Extensions"), icon: <IconPuzzle /> },
-    { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}`, group: tx("扩展", "Extensions"), icon: <IconPlug /> },
+    { key: SETTINGS_TAB_PLUGINS, label: t("set.ext"), group: tx("插件与集成", "Plugins & Integration"), icon: <IconPuzzle /> },
+    {
+      key: "profiles",
+      label: tx("工作场景", "Profiles"),
+      group: tx("插件与集成", "Plugins & Integration"),
+      icon: <IconLayoutEdit />,
+      sub: tx("一组有序启用的插件 + 主题/目录/配置补丁；切换走命令面板「应用场景：…」", "An ordered plugin set plus theme/path/config patches; switch from the command palette"),
+    },
+    { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}`, group: tx("插件与集成", "Plugins & Integration"), icon: <IconPlug /> },
     { key: "about", label: t("set.about"), group: tx("其他", "Misc"), icon: <IconInfo /> },
   ];
   /** 页头那一句：说明写在页头一次，胜过在每一行重复一遍（P111-B） */
@@ -530,7 +526,13 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
             {tab === "model" ? (
               <ModelSettingsPage />
             ) : tab === SETTINGS_TAB_PLUGINS ? (
-              <ExtPage />
+              <PluginsPage />
+            ) : tab === "profiles" ? (
+              /* R14：工作场景从插件页底部搬出来，给它一整页。
+                 它本来就是两栏编辑器（左场景、右场景补丁），塞进 640px 的卡片里会三层滚动。 */
+              <div style={{ height: "calc(100vh / var(--zoom) - 190px)", minHeight: 420, border: "1px solid var(--border)", borderRadius: "var(--radius-m)", overflow: "hidden" }}>
+                <ProfilesPanel embedded />
+              </div>
             ) : (
             <SetGroups>
             {tab === "general" && (
@@ -657,7 +659,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                               `back in ${Math.max(0, Math.round((drawn.preview.expiresAt - Date.now()) / 1000))}s`,
                             )}
                           </span>
-                          <button className="btn sm" onClick={() => { clearThemePreview(); applyStyleExts(); }}>
+                          <button className="btn sm" onClick={() => { clearThemePreview(); applyThemeRuntime(); }}>
                             {tx("立即结束", "Stop now")}
                           </button>
                         </li>
@@ -1220,7 +1222,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                       className="btn danger-btn"
                       onClick={() => {
                         void (async () => {
-                          if (!(await confirmDialog({ message: tx("恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与插件库，且不可恢复。确定继续？", "Factory reset clears: protocol templates, the control canvas, the command library, variables, every setting and the plugin library. This cannot be undone. Continue?"), danger: true, okLabel: tx("清除并重启准备", "Wipe and prepare restart") }))) return;
+                          if (!(await confirmDialog({ message: tx("恢复出厂将清除：协议模板、控制画布、命令库、变量、全部设置与插件，且不可恢复。确定继续？", "Factory reset clears: protocol templates, the control canvas, the command library, variables, every setting and the plugin library. This cannot be undone. Continue?"), danger: true, okLabel: tx("清除并重启准备", "Wipe and prepare restart") }))) return;
                           const kill: string[] = [];
                           for (let i = 0; i < localStorage.length; i++) {
                             const k = localStorage.key(i);
@@ -1239,7 +1241,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 <div className="set-io-hint">{t("set.ai.privacy")}</div>
               </>
             )}
-            {/* P115-F15：原先这里还有一行 `{tab === SETTINGS_TAB_PLUGINS && <ExtPage />}`——
+            {/* P115-F15：原先这里还有一行 `{tab === SETTINGS_TAB_PLUGINS && <PluginsPage />}`——
                 外层三元在渲染头就把它拦截了，是够不着的死代码，删。 */}
             {tab === "mcp" && (
               <>

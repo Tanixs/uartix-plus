@@ -61,6 +61,19 @@ export interface PaletteDeps {
   setZoom: (pct: number) => void;
   locale: "zh" | "en";
   zoom: number;
+  /**
+   * P174-G1：插件贡献的命令（已按「启用 + 已批准」过滤，App 注入）。
+   *
+   * 这里**不 import pluginEngine**：命令面板的注册表要能在 node 下直接测，
+   * 而 pluginEngine 一引就摸 Tauri/localStorage。插件停用后 App 重新派生这张表，
+   * 条目自然消失——没有"禁用后仍留在调色板里"的第二份真值。
+   */
+  extensionCommands: { id: string; title: string; hint?: string; run: () => void }[];
+  /**
+   * P174-B2：工作场景命令（App 注入）。与插件命令同一条理由——注册表不 import profilesStore，
+   * 才能在 node 下直接测；场景变了 App 重新派生，条目自然跟着变。
+   */
+  profileCommands: { id: string; title: string; hint?: string; run: () => void }[];
 }
 
 export function buildCommands(deps: PaletteDeps): PaletteCommand[] {
@@ -172,9 +185,37 @@ export function buildCommands(deps: PaletteDeps): PaletteCommand[] {
 
   out.push(
     { id: "ai", group: "AI", title: tx("打开 AI 助手", "Open the AI assistant"), keywords: "ai chat 问 ai", run: deps.openAi },
-    { id: "market", group: "AI", title: tx("打开扩展市场", "Open the extension market"), keywords: "market plugin 插件 扩展", run: deps.openMarket },
+    { id: "market", group: "AI", title: tx("打开插件管理（市场在插件管理里）", "Open the plugin manager (market lives inside)"), keywords: "market plugin 插件 市场", run: deps.openMarket },
     { id: "settings", group: G_PREF, title: tx("打开设置", "Open settings"), keywords: "settings 设置", run: () => deps.openSettings() },
   );
+
+  // 插件贡献的命令：分组名与宿主自己的「插件」一致，用户不必记哪些是内置、哪些是装的
+  if (deps.extensionCommands.length) {
+    const G_EXT = tx("插件", "Plugins");
+    for (const c of deps.extensionCommands) {
+      out.push({
+        id: c.id,
+        group: G_EXT,
+        title: c.title,
+        hint: c.hint,
+        keywords: `plugin ext 插件 command ${c.id}`,
+        run: c.run,
+      });
+    }
+  }
+  if (deps.profileCommands.length) {
+    const G_PROFILE = tx("工作场景", "Profiles");
+    for (const c of deps.profileCommands) {
+      out.push({
+        id: c.id,
+        group: G_PROFILE,
+        title: c.title,
+        hint: c.hint,
+        keywords: `profile workspace 场景 工作场景 ${c.id}`,
+        run: c.run,
+      });
+    }
+  }
   for (const mode of ["dark", "light", "navy", "ocean", "matcha", "amber"] as const) {
     out.push({
       id: `theme:${mode}`,

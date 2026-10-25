@@ -20,8 +20,16 @@ export type PanelId =
   | "orchestrator"
   | "vdev"
   | "sendbuild"
-  /** P174：扩展运行时（宿主进程状态 + 插件日志）。后面装包/批准卡/市场都长在这个面上。 */
-  | "extruntime";
+  /**
+   * P174-A5：插件管理面板。R7① **整面退役**——装/批/启用/配置/版本并入设置 → 插件管理，
+   * 进程日志并入「运行日志」。id 与注册表留着，是因为老存档里还挂着这个组件名：
+   * 删了注册表 = 一整张用户摆好的布局退回默认。见 `panelMenu.RETIRED_PANELS`。
+   */
+  | "extruntime"
+  /** P174-R7②：「运行日志」——宿主输出 + 操作账本两个通道的诊断面。 */
+  | "output"
+  /** P174-B2：工作场景（Profile）。 */
+  | "profiles";
 
 export interface PanelMeta {
   id: PanelId;

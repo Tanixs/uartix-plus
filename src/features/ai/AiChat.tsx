@@ -37,7 +37,7 @@ import {
 import * as agentRun from "../agent/agentRun";
 import { isLiveRun, type RunScope } from "../agent/types";
 import { Dropdown } from "../../shared/Dropdown";
-import { PluginLibraryDialog } from "../plugins/PluginLibraryDialog";
+import { requestOpenSettings } from "./appBus";
 import { resolveVars } from "../controls/variableStore";
 import * as serialStore from "../serial/serialStore";
 import { detectAnomalies, anomaliesToText, type Anomaly } from "./anomaly";
@@ -45,7 +45,6 @@ import { Markdown, CodeBlock, parseSegments } from "./markdown";
 import { EmptyState } from "../../shared/EmptyState";
 import { Glyph, IconChevron, IconClose, IconDock, IconPlus, IconPop, IconSend, IconSparkle, IconStop } from "../../shared/icons";
 import { confirmDialog } from "../../shared/Dialog";
-import { ErrorBoundary } from "../../shared/ErrorBoundary";
 import { t, tx, useLocale } from "../../i18n/strings";
 
 const BUG_ENDPOINT = "https://larix.teuioe.cn/api/bugreport.php";
@@ -69,18 +68,18 @@ const quickTasks = () => [
   {
     label: tx("大字号+减少动效", "Bigger text, less motion"),
     goal: tx(
-      "把界面字号调大一档、动效放缓，满意后保存为插件并启用，告诉我怎么停用",
-      "Raise the UI font one step and slow the motion down; once I like it, save it as a plugin and enable it, and tell me how to turn it off",
+      "把界面字号调大一档、动效放缓，满意后存成主题草稿并排队转正；不要自动安装或启用，告诉我转正在哪里点",
+      "Raise the UI font one step and slow the motion down; once I like it, save it as a theme draft and queue promotion. Do not install or enable it; tell me where to promote it",
     ),
     tip: tx(
-      "字号与动效配方：先预览，再自动保存为已启用插件（本卡或插件库可停用）",
-      "Font and motion recipe: preview first, then auto-save as an enabled plugin (disable from this card or the plugin library)",
+      "字号与动效配方：先预览，再存成主题草稿并排队转正（安装与批准由你做）",
+      "Font and motion recipe: preview first, then save a theme draft and queue promotion (installation and approval are yours)",
     ),
   },
   {
     label: tx("玻璃质感主题", "Glass theme"),
     goal: tx(
-      "先用 theme_preset 的玻璃配方（glass）按当前主题派生整套外观：面板、嵌底、边框、文字、主色一起调，不要只改两三个 token；我看过效果后保存为「我的玻璃主题」并启用",
+      "先用 theme_preset 的玻璃配方（glass）按当前主题派生整套外观：面板、嵌底、边框、文字、主色一起调，不要只改两三个 token；我看过效果后存成「我的玻璃主题」草稿并排队转正，不要自动安装或启用",
       "Start from the theme_preset glass recipe and derive the whole look from the current theme: panels, insets, borders, text and accent together, not just two or three tokens; after I see it, save it as “My Glass Theme” and enable it",
     ),
     tip: tx(
@@ -117,7 +116,7 @@ const sceneHint = (scene: AiScene): string | undefined => {
       );
     case "create":
       return tx(
-        "创造：描述你想要的主题/小部件/面板，我会引导你用 Agent 任务把它保存为插件并自动启用",
+        "创造：描述你想要的主题/小部件/面板，我会引导你用 Agent 任务存成插件草稿，并带你去插件管理里预览与转正",
         "Create: describe the theme, widget or panel you want — I’ll walk you through saving it as a plugin via an Agent task, enabled automatically",
       );
     case "diagnose":
@@ -155,7 +154,7 @@ const sceneMenu = () => [
   { scene: "analyzeCurve" as const, label: tx("分析曲线", "Analyse curves"), tip: tx("分析当前 2D 曲线各通道的统计特征与周期", "Statistics and periodicity per channel of the current 2D curve") },
   { scene: "genCommand" as const, label: tx("生成指令", "Generate command"), tip: tx("描述需求，AI 生成命令模板或脚本", "Describe the need; the AI writes a command template or script") },
   { scene: "genCard" as const, label: tx("生成卡片", "Generate card"), tip: tx("描述需求，AI 生成控制卡片并写入控制画布", "Describe the need; the AI builds a control card on the control canvas") },
-  { scene: "create" as const, label: tx("创造", "Create"), tip: tx("主题 / 小部件 / 面板（经 Agent 任务保存为插件并自动启用）", "Theme / widget / panel (saved as a plugin via an Agent task, auto-enabled)") },
+  { scene: "create" as const, label: tx("创造", "Create"), tip: tx("主题 / 小部件 / 面板（经 Agent 任务存成草稿，预览后由你转正）", "Theme / widget / panel (saved as a draft, promoted by you after preview)") },
   { scene: "diagnose" as const, label: tx("诊断", "Diagnose"), tip: tx("描述问题，结合连接状态给出排查清单", "Describe the problem; get a checklist against the current link state") },
   { scene: "report" as const, label: tx("调试报告", "Debug report"), tip: tx("汇总本次会话生成 Markdown 调试报告", "Sum up this session into a Markdown debug report") },
 ];
@@ -287,7 +286,6 @@ const DESTRUCTIVE_ACTIONS = new Set([
   "removeProtocol",
   "removeCommand",
   "removeCodec",
-  "removeWidget",
 ]);
 
 interface ActionItem {
@@ -768,7 +766,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   const [plusOpen, setPlusOpen] = useState(false);
   const [modePanelOpen, setModePanelOpen] = useState(false);
   const [sceneMenuOpen, setSceneMenuOpen] = useState(false);
-  // P90 C1：顶栏「更多 ▾」（插件库/导出/巡检上报/清空）
+  // P90 C1：顶栏「更多 ▾」（插件管理/导出/巡检上报/清空）
   const [moreOpen, setMoreOpen] = useState(false);
   // P111-E：上下文百分比点开的那一面（照 Qoder：常驻只有数字，细节在浮层里）
   const [meterOpen, setMeterOpen] = useState(false);
@@ -808,7 +806,6 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
         ? tx("已暂停", "paused")
         : tx("运行中", "running")
     : null;
-  const [plgLibOpen, setPlgLibOpen] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [editingId, setEditingId] = useState("");
   const [editText, setEditText] = useState("");
@@ -1273,7 +1270,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
         <button
           ref={moreBtnRef}
           className={`ai-scene-btn${moreOpen ? " on" : ""}`}
-          title={tx("更多：插件库 / 导出对话 / 巡检上报 / 清空", "More: plugin library / export chat / patrol report / clear")}
+          title={tx("更多：插件管理 / 导出对话 / 巡检上报 / 清空", "More: plugin management / export chat / patrol report / clear")}
           aria-haspopup="menu"
           aria-expanded={moreOpen}
           onClick={() => setMoreOpen((v) => !v)}
@@ -1286,8 +1283,12 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
           onClose={() => setMoreOpen(false)}
           align="end"
         >
-          <button className="ai-scene-menu-item" role="menuitem" onClick={() => { setMoreOpen(false); setPlgLibOpen(true); }}>
-            {tx("本地插件库", "Local plugin library")}
+          <button
+            className="ai-scene-menu-item"
+            role="menuitem"
+            onClick={() => { setMoreOpen(false); requestOpenSettings("plugins"); }}
+          >
+            {tx("插件管理", "Plugin management")}
           </button>
           <button className="ai-scene-menu-item" role="menuitem"
             title={tx("含思维链、每次工具调用的参数与回执；API Key 一类秘密写出时会打码",
@@ -1377,7 +1378,7 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
               </div>
               <div className="ai-welcome-desc">
                 {tx(
-                  "框选 Hex 字节右键「AI 识别协议」；或点顶栏「场景 ▾」里的解读数据、分析曲线、生成指令、诊断问题。想做主题、小部件、面板？把输入区那颗「普通对话」切成「Agent 任务」，AI 会直接保存为插件并自动启用。发送前可勾选随消息附带的软件内上下文。",
+                  "框选 Hex 字节右键「AI 识别协议」；或点顶栏「场景 ▾」里的解读数据、分析曲线、生成指令、诊断问题。想做主题、小部件、面板？把输入区那颗「普通对话」切成「Agent 任务」，AI 会存成插件草稿，再带你去插件管理里预览、转正与批准。发送前可勾选随消息附带的软件内上下文。",
                   "Select Hex bytes and choose “AI: detect protocol” from the context menu, or open “Scenes ▾” in the top bar to interpret data, analyse curves, generate commands and diagnose problems. Want a theme, widget or panel? Switch the “Plain chat” pill under the input to “Agent task” and the AI saves it as a plugin and enables it. Before sending you can tick which in-app context travels with the message.",
                 )}
               </div>
@@ -2072,11 +2073,6 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
       </div>
       {/* P88d ③：活动任务不在当前会话视图时，右下角悬浮条一键切回 */}
       <AgentFloat sessionId={chat.activeId} onOpen={(id) => chatStore.switchSession(id)} />
-      {plgLibOpen && (
-        <ErrorBoundary label={tx("本地插件库", "Local plugin library")}>
-          <PluginLibraryDialog onClose={() => setPlgLibOpen(false)} />
-        </ErrorBoundary>
-      )}
     </div>
   );
 }

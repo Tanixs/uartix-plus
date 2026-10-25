@@ -1,7 +1,7 @@
 /**
  * P99a-A5：通道统计与抽稀的取数小件。
  * 从 `agentAdapter` 里拆出来是为了让"本机九支工具"能待在模块级常量里（显示层要从 entry 派生），
- * 而显示层不能 import 适配器——那条边会绕成 agentAdapter→pluginStore→…→agentAdapter 的环（§8-33）。
+ * 而显示层不能 import 适配器——那条边会绕成 agentAdapter→插件层→…→agentAdapter 的环（§8-33）。
  */
 import * as plot from "../plot/plotStore";
 

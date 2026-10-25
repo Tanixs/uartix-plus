@@ -17,14 +17,9 @@ import * as ucStore from "../console/userCodecStore";
 import * as plotStore from "../plot/plotStore";
 import * as xferStore from "../xfer/xferStore";
 import { openPort, closePort } from "../serial/serialStore";
-import { requestOpenPanel, requestApplyPreset } from "./appBus";
-import { toast } from "./extRuntime";
-import {
-  getSnapshot as getExts,
-  setOpen as setWidgetOpen,
-  type AiExtension,
-} from "./extensionStore";
-import { popWidgetToDesktop } from "./widgetShell";
+import { requestOpenPanel, requestApplyPreset, requestOpenSettings } from "./appBus";
+import { PLUGIN_VIEW_PREFIX } from "../plugins/engine/panelBridge";
+import { toast } from "./uiRuntime";
 import * as mbSlave from "../modbus/slaveStore";
 import * as mbPoll from "../modbus/pollStore";
 import * as sentinelStore from "../sentinel/sentinelStore";
@@ -188,12 +183,34 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
     }
     case "openPanel": {
       const panel = String(a.panel ?? "");
+      /* R7：插件面板与内置面板**同一个入口**。以前这里只认内置 id，
+         于是"AI 刚造出来一块面板"这件事在动作面上是断的——它连打开都做不到，
+         只能让用户自己去「+面板」里找。现在 plugin-view 前缀按同一道门（启用 + 已批准）放行。 */
+      if (panel.startsWith(PLUGIN_VIEW_PREFIX)) {
+        const { getSnapshot } = await import("../plugins/engine/pluginEngine");
+        const { panelEnabled } = await import("../plugins/engine/repo");
+        const { pluginPanelTarget } = await import("../plugins/engine/panelBridge");
+        const t = pluginPanelTarget(
+          getSnapshot().entries.map((e) => ({ id: e.id, name: e.manifest.name, manifest: e.manifest, enabled: panelEnabled(e) })),
+          panel,
+        );
+        if (!t.ok) throw new Error(t.reason);
+        requestOpenPanel(panel);
+        return `已打开插件面板「${t.title}」`;
+      }
       const titles = PANEL_TITLES();
       if (!Object.keys(titles).includes(panel)) {
-        throw new Error(`未知面板：${panel}（可选：${Object.keys(titles).join("/")}）`);
+        throw new Error(`未知面板：${panel}（可选：${Object.keys(titles).join("/")}，或插件面板 plugin-view-<插件id>:<面板id>）`);
       }
       requestOpenPanel(panel);
       return `已打开面板「${titles[panel as PanelId]}」`;
+    }
+    case "openSettings": {
+      /* 造完东西的交接动作：转正、批准、选主题都在设置里。
+         只开页面，不替用户点任何一下——白名单在 App 侧，这里只认键名。 */
+      const tab = String(a.tab ?? "plugins");
+      requestOpenSettings(tab);
+      return `已打开设置页「${tab}」`;
     }
     case "applyPreset": {
       const preset = String(a.preset ?? "");
@@ -219,7 +236,7 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
         drawnId: facts.id || null,
         drawnName: facts.name || null,
         drawnPluginId: facts.pluginId,
-        records: (await import("../plugins/pluginStore")).getSnapshot().plugins,
+        records: (await import("../plugins/engine/pluginEngine")).getSnapshot().entries,
       });
       const card = cards.find((c) => c.key === theme || c.pluginId === theme);
       if (!card) {
@@ -447,7 +464,7 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
           const spec = vs.normalizeSpec(a.spec);
           vs.saveToLibrary(spec);
           vs.setEditing(spec);
-          void import("../ai/extRuntime").then(({ toast }) => toast(`虚拟设备「${spec.name}」已入库（未运行）`));
+          void import("../ai/uiRuntime").then(({ toast }) => toast(`虚拟设备「${spec.name}」已入库（未运行）`));
           return { ok: true, name: spec.name, saved: true, hint: "对 AI 说「启动设备」或到虚拟设备工坊点启动" };
         }
         case "start": {
@@ -517,55 +534,63 @@ async function exec(kind: string, a: Record<string, unknown>): Promise<unknown> 
       return msg;
     }
     case "listWidgets": {
-      const snap = getExts();
-      return snap.exts
-        .filter((e) => e.type === "widget")
-        .map((e) => ({
-          name: e.name,
-          enabled: e.enabled,
-          open: snap.openIds.includes(e.id),
-          chrome: e.chrome ?? "default",
-        }));
+      const [{ ensureLoaded, getSnapshot }, { panelEnabled }, { getHiddenWidgets, widgetKey }] = await Promise.all([
+        import("../plugins/engine/pluginEngine"),
+        import("../plugins/engine/repo"),
+        import("../plugins/engine/widgetVisibility"),
+      ]);
+      await ensureLoaded();
+      const hidden = new Set(getHiddenWidgets());
+      return getSnapshot().entries
+        .filter((e) => panelEnabled(e))
+        .flatMap((e) =>
+          (e.manifest.contributes.widgets ?? []).map((w) => {
+            const key = widgetKey(e.id, w.id);
+            return {
+              pluginId: e.id,
+              widgetId: w.id,
+              name: w.title,
+              key,
+              open: !hidden.has(key),
+              transparent: w.transparent === true,
+              clickThrough: w.clickThrough === true,
+            };
+          }),
+        );
     }
-    case "openWidget": {
-      const w = findWidget(a);
-      if (!w.enabled) throw new Error(`挂件「${w.name}」未启用（请在设置→插件管理启用其来源插件）`);
-      setWidgetOpen(w.id, true);
-      return `挂件「${w.name}」浮窗已打开`;
-    }
+    case "openWidget":
     case "closeWidget": {
-      const w = findWidget(a);
-      setWidgetOpen(w.id, false);
-      return `挂件「${w.name}」浮窗已关闭`;
-    }
-    case "popWidget": {
-      const w = findWidget(a);
-      popWidgetToDesktop({ id: w.id, name: w.name, chrome: w.chrome });
-      return `挂件「${w.name}」已弹出为桌面小窗`;
-    }
-    case "removeWidget": {
-      const w = findWidget(a);
-      // 旧独立扩展已废弃：挂件一律来自插件库投影，删除 = 停用整个来源插件
-      if (!w.pluginRef) throw new Error(`not_an_extension：挂件「${w.name}」不是插件投影，无法删除`);
-      const { setEnabled: setPluginEnabled } = await import("../plugins/pluginStore");
-      const res = setPluginEnabled(w.pluginRef, false);
-      if (!res.ok) throw new Error(res.msg);
-      toast(`挂件「${w.name}」来自插件，已停用整个插件`);
-      return `该挂件来自插件 ${w.pluginRef}，已停用整个插件（可在设置→插件管理重新启用或卸载）`;
+      const w = await findWidget(a);
+      const { showWidget, hideWidget } = await import("../plugins/engine/widgetVisibility");
+      if (kind === "openWidget") showWidget(w.key);
+      else hideWidget(w.key);
+      return `小部件「${w.name}」已${kind === "openWidget" ? "显示" : "隐藏"}（本次会话）`;
     }
     default:
       throw new Error(`未知动作：${kind}`);
   }
 }
 
-/** 按名称/id 查找 widget 扩展 */
-function findWidget(a: Record<string, unknown>): AiExtension {
-  const name = String(a.name ?? "");
-  const w = getExts().exts.find(
-    (e) => e.type === "widget" && (e.name === name || e.id === name),
-  );
-  if (!w) throw new Error(`挂件「${name}」不存在（可先 listWidgets 查询）`);
-  return w;
+/** 按标题 / `pluginId:widgetId` / 裸 widgetId 找一枚 v3 插件小部件。 */
+async function findWidget(a: Record<string, unknown>): Promise<{ key: string; name: string }> {
+  const name = String(a.name ?? a.widgetId ?? "").trim();
+  const wantPlugin = typeof a.pluginId === "string" ? a.pluginId : "";
+  if (!name && !wantPlugin) throw new Error("需要 name（小部件标题或 pluginId:widgetId）");
+  const [{ ensureLoaded, getSnapshot }, { panelEnabled }, { widgetKey }] = await Promise.all([
+    import("../plugins/engine/pluginEngine"),
+    import("../plugins/engine/repo"),
+    import("../plugins/engine/widgetVisibility"),
+  ]);
+  await ensureLoaded();
+  for (const e of getSnapshot().entries) {
+    if (!panelEnabled(e)) continue;
+    if (wantPlugin && e.id !== wantPlugin) continue;
+    for (const w of e.manifest.contributes.widgets ?? []) {
+      const key = widgetKey(e.id, w.id);
+      if (name === key || name === w.id || name === w.title) return { key, name: w.title };
+    }
+  }
+  throw new Error(`小部件「${name || wantPlugin}」不存在（可先 listWidgets 查询）`);
 }
 
 /* ================= Modbus 工作台动作（M2-e） ================= */
@@ -740,7 +765,7 @@ function runModbusAction(a: Record<string, unknown>): unknown {
  * 编排器与 3D 的模块延迟加载。
  * 为什么不静态 import：orchestratorBind 在**模块求值期**就订阅事件源并同步一次 store
  * （P74 TDZ 白屏的现场）；把它塞进 appActions 的静态图会在既有的
- * `extRuntime ↔ appActions` 循环上再叠一层求值顺序依赖。动作真被调用时再加载，
+ * `uiRuntime ↔ appActions` 循环上再叠一层求值顺序依赖。动作真被调用时再加载，
  * 代价只有一次 await，且启动路径零增重（与 mcpServer 延迟加载 appActions 同一策略）。
  */
 async function orchMods() {

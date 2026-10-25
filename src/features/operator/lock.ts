@@ -5,7 +5,7 @@
  */
 
 // P131-A：提示条搬到 shared/toast.ts —— 这里原来是一份**独立的手搓实现**，与
-// `ai/extRuntime.toast()` 共用同一对类名却各记各的 host（同一屏可以挂两个提示列），
+// `ai/uiRuntime.toast()` 共用同一对类名却各记各的 host（同一屏可以挂两个提示列），
 // 而那对类名在 CSS 里一条规则都没有。shared/toast 是零业务依赖的叶子（它不 import 本模块
 // 可能拉进来的任何东西），所以上面那条"独立零业务依赖"的红线仍然成立。
 import { toast } from "../../shared/toast";

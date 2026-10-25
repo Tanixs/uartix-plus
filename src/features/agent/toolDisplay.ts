@@ -11,7 +11,6 @@
  */
 import { hostEntryByName, hostToolLabel, readableToolName } from "./hostEntries";
 import { actionKindLabel } from "./toolCatalog";
-import { INSTALL_CODE_ZH } from "../market/marketIndex";
 import type { RunEvent } from "./types";
 
 export { actionKindLabel };
@@ -155,8 +154,6 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     return status === "applied" ? "已完成" : status === "read" ? "已读取" : status === "validated" ? "已校验" : status;
   }
   const known: Record<string, string> = {
-    // 市场装链的码：中文在契约层（`marketIndex.INSTALL_CODE_ZH`，穷举 Record），这里只合表不重抄
-    ...INSTALL_CODE_ZH,
     needs_local_approval: "等待批准",
     // P133-D：批准门改成"真的等人"之后多出来的落点（`approval_rejected` 徽章本来就有，
     // 只是旧实现从不产生它——现在它有了出处）
@@ -193,18 +190,24 @@ export function receiptStatusText(ok: boolean, status: string, code?: string): s
     invalid_json: "参数格式错误",
     invalid_package: "插件包校验失败",
     install_failed: "插件安装失败",
-    plugin_not_found: "插件不存在",
+    // P174-B1：草稿四工具的落点。每一种都对应不同的下一步，不合并成一句"失败"
+    draft_args_invalid: "草稿参数不合法",
+    draft_rejected: "草稿写入被拒",
+    unknown_draft: "草稿不存在",
+    draft_discard_failed: "草稿丢弃失败",
+    invalid_draft: "草稿清单不合法",
+    draft_cannot_promote: "草稿暂时不能转正",
     // 下面四支是**目录**（`app_read`/`app_state`）能回的失败码：它们经 `r.code` 变量传进来，
     // P99a-F 那条"扫源码字面量"的钉看不见变量，所以这四个一直是裸码挂在时间线上（P99c-C2 补）
     unknown_path: "目录里没有这条路径",
     needs_id: "这条视图要带 id",
     read_failed: "视图读取出错",
     unknown_id: "标识不存在",
-    market_not_loaded: "货架索引还没取回",
     artifact_expired: "缓存已过期",
-    enable_failed: "启用失败",
-    module_probe_failed: "逻辑模块未通过封网自证",
     no_scratch_layers: "没有待固化的临时样式",
+    theme_too_large: "主题超过体积上限",
+    host_not_ready: "插件子系统未就绪",
+    draft_write_failed: "草稿写入失败",
     draft_overflow: "分段草稿超出上限",
     asset_rejected: "材质未通过资产校验",
     asset_reference_not_declared: "样式引用的材质没在草稿层里",

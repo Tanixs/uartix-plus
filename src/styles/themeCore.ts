@@ -3,7 +3,7 @@
  *
  * 为什么单独一层（详设 §2/§8-48）：这批把"内置主题"从样式表那一层搬到与插件主题同级的位置，
  * 于是"哪枚主题在画""它算亮还是暗""哪些键没人供"三件事第一次需要**同时**回答。
- * 写在组件或 extRuntime 里就没法在 node 下测，而这三问每一条都会直接落到界面上说的话。
+ * 写在组件或 uiRuntime 里就没法在 node 下测，而这三问每一条都会直接落到界面上说的话。
  *
  * 三条口径写死在这里：
  *  1. **差量合法，但缺的键必须有人兜底**（详设 §1-2：17 项核心色键今天只存在于主题文件里，
@@ -140,7 +140,7 @@ export interface ThemeSource {  /** 内置＝`dark`/`begonia`…；插件＝影�
    * 资产这条还没通（要先把 blob 的来源从"包产物"扩到"仓库字节"，那是单独一步）。
    */
   assets?: ThemeAsset[];
-  /** 插件来源时它所属的包 id（启停只能走 `pluginStore.setEnabled`） */
+  /** 插件来源时它所属的包 id（选主题只走 `pluginEngine.setActiveTheme`） */
   pluginId?: string;
   createdAt?: number;
 }
@@ -571,7 +571,7 @@ export function judgeSurfaceLadder(
 
 /**
  * 画布类组件判断"当前是不是暗色"的**唯一口径**：读 `documentElement.dataset.scheme`，
- * 那是 `applyStyleExts()` 按 S4 三层优先序算完写下的一个投影。
+ * 那是 `applyThemeRuntime()` 按 S4 三层优先序算完写下的一个投影。
  *
  * 为什么要有这个函数（本批实测第四条账）：以前有三处各写一遍"按主题**名字**判明暗"——
  * `widgetBridge` 的 `theme==="dark"||theme==="navy"||theme==="glaze"`、FrameCanvas 的

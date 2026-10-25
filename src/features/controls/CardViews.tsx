@@ -24,7 +24,6 @@ import * as variableStore from "./variableStore";
 import * as sendStore from "../send/sendStore";
 import { bindingDetail, bindingLabel, isLinked } from "./cardBinding";
 import { beep } from "./scriptRunner";
-import { WidgetFrame } from "../ai/WidgetFrame";
 import { NumInput, TextInput } from "../../shared/FormInputs";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
@@ -1468,18 +1467,11 @@ export function CustomCardView(props: {
       resizable={props.resizable}
       onResizeStart={props.onResizeStart}
     >
-      {card.html ? (
-        <WidgetFrame
-          widget={{ id: `card-${card.id}`, name: card.name, html: card.html }}
-          isDesktop={false}
-        />
-      ) : (
-        <div className="ctl-custom-empty" title={tx("让 AI 生成，或右键「设置」粘贴 HTML", "Let AI generate it, or right-click Settings and paste HTML")}>
-          {tx("自定义卡片（空）", "Custom card (empty)")}
-          <br />
-          <span>{tx("在 AI 助手中描述想要的控件，type 选 custom", "Describe the widget to the AI assistant with type=custom")}</span>
-        </div>
-      )}
+      <div className="ctl-custom-empty" title={tx("AI 造物统一走插件小部件", "AI-made UI now ships as plugin widgets")}>
+        {tx("自定义卡片（空）", "Custom card (empty)")}
+        <br />
+        <span>{tx("请改用插件小部件", "Use a plugin widget instead")}</span>
+      </div>
     </CardFrame>
   );
 }
@@ -1599,23 +1591,6 @@ export function CardModal(props: {
           )}
         </div>
       </Section>
-      {card.type === "custom" && (
-        <Section title={tx("卡片内容（自包含 HTML）", "Card Content (self-contained HTML)")}>
-          <div className="form-col">
-            <textarea
-              className="input ctl-tpl-input ctl-script-input"
-              rows={10}
-              spellCheck={false}
-              value={card.html}
-              placeholder={tx(
-                "粘贴 AI 生成的小部件 HTML（与 uartix-widget 同格式，支持 aiw:snap/aiw:send 桥）",
-                "Paste AI-generated widget HTML (same format as uartix-widget, with aiw:snap/aiw:send bridge)",
-              )}
-              onChange={(e) => patch({ html: e.target.value })}
-            />
-          </div>
-        </Section>
-      )}
       {(card.type === "led" || card.type === "buzzer") && (
         <Section title={tx("触发条件", "Trigger")}>
           <div className="form-row">

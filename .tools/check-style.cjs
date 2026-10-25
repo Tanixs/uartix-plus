@@ -494,17 +494,14 @@ const J_EXEMPT = {
   "ctlg-switch": "与 .ctlg-row 同元素，样式在 .ctlg-row；这三枚是控件卡类型的身份钩子（插件与 AI 覆写按它定位）",
   "ctlg-monitor": "同上（控件卡类型身份钩子）",
   "ctlg-led": "同上（控件卡类型身份钩子）",
-  "mkt-offshelf-toggle": "与 .plg-fchip 同元素，样式在 plg-fchip；这枚是「下架态开关」的身份钩子",
   "ai-streaming-only": "可见性钩子（流式期间才显示），布局由父级 .ai-msgs 管",
   "ai-edit-input": "与 .input 同元素，样式在 .input",
-  "ext-panel-host": "扩展面板的宿主容器钩子，内部内容自带样式",
   "orch-chip-wrap": "浮层锚点（relative 由 Dropdown 侧给），无自有视觉",
   // —— 明说的欠账：症状比 .set-hint 轻（父级是 flex/grid，被带着走），逐条还 ——
   "plot-measure-col": "欠账：测量列容器没写规则，靠父级 flex 撑着 ⇒ 间距不受控",
   "ai-anom-item": "欠账：异常项行没写规则。",
   "ai-ext-head": "欠账：扩展面板标题行没写规则。",
   "ai-edit-wrap": "欠账：消息编辑态容器没写规则。",
-  "ext-panel-miss": "欠账：「面板未找到」提示态没写规则。",
 };
 {
   // "有没有人写样式"的口径只有一份：J（JSX 的 className=）与 J2（命令式与 HTML 串）共用
@@ -578,10 +575,6 @@ const J2_CEILING = 4;
 const J2_EXEMPT = {
   // 这四枚都在 `declarativePanel.ts`：`.ux-block` 才是带视觉的那条规则，这几个是同元素的身份钩子
   // （运行时脚本按 `classList.contains("ux-metric")` 分流，`.ux-text` / `.ux-html` 供覆写定位）
-  "ux-metric": "与 .ux-block 同元素，卡片视觉在 .ux-block；这枚是运行时脚本分流用的身份钩子",
-  "ux-spark": "同上（趋势卡的身份钩子）",
-  "ux-text": "同上（文本卡的身份钩子，间距由 .ux-text-body 承担）",
-  "ux-html": "同上（自定义 HTML 块的身份钩子，容器视觉由 .ux-block 承担）",
 };
 {
   /** 一行的类名 token 抽取：返回 [{tok, form}]；`own` 是本文件自带样式的豁免集 */
@@ -809,7 +802,7 @@ const J3_EXEMPT = {};
  * P154-E 裁决（P147 §8 决定 7；用户 2026-10-07 授权"按推荐来"）：这条差异**记为有意**，收法取 (c)。
  * 内置包文件常驻 DOM，所以必须自锁 [data-theme]——上面①③两条就是它的机器。
  * 插件包的层随启停生灭：enable/disable/互斥都走 extStore 投影的增删，
- * applyStyleExts 每次从活投影全量重算 styleEl 的 textContent（extRuntime.ts:225），
+ * applyThemeRuntime 每次从活投影全量重算 styleEl 的 textContent（uiRuntime.ts:225），
  * 撤层有测试钉着：themeApply.test.ts「P154-E · 停用即撤层（组件层 CSS 那一半）」（CSS 文本）
  * + 同文件 G5/R4（变量那一半）+ themeMutex.test.ts G2（互斥把第一枚的投影摘掉）。
  * 所以插件包不需要门 K 的前缀强制——给它上前缀样板等于让作者替宿主的问题买单。

@@ -342,11 +342,7 @@ const CARD_TYPES = [
   "keypad",
   "keymon",
   "group",
-  "custom",
 ];
-
-/** 单个控制页 custom 沙箱卡片上限（iframe 性能保护） */
-const MAX_CUSTOM_PER_PAGE = 8;
 
 export function writeCommandFromAiJson(raw: string): WriteResult {
   let parsed: unknown;
@@ -545,18 +541,6 @@ function writeOneCard(obj: Record<string, unknown>): WriteResult {
     page = controlsStore.activePage();
   }
   if (!page) return { ok: false, msg: "控制页不存在且创建失败" };
-  if (type === "custom" && !String(obj.html ?? "").trim()) {
-    return { ok: false, msg: "custom 卡片缺少 html 字段" };
-  }
-  if (
-    type === "custom" &&
-    page.cards.filter((c) => c.type === "custom").length >= MAX_CUSTOM_PER_PAGE
-  ) {
-    return {
-      ok: false,
-      msg: `当前控制页自定义卡片已达上限（${MAX_CUSTOM_PER_PAGE} 个），请换页或先删除部分`,
-    };
-  }
 
   const before = new Set(page.cards.map((c) => c.id));
   const cardId = controlsStore.addCard(page.id, type);
@@ -564,7 +548,7 @@ function writeOneCard(obj: Record<string, unknown>): WriteResult {
     return { ok: false, msg: "卡片写入失败" };
   }
   const patch: Record<string, unknown> = {};
-  for (const k of ["name", "min", "max", "step", "template", "script", "unit", "html"] as const) {
+  for (const k of ["name", "min", "max", "step", "template", "script", "unit"] as const) {
     const v = obj[k];
     if (typeof v === "string" || typeof v === "number") patch[k] = v;
   }

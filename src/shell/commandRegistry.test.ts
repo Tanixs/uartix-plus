@@ -41,6 +41,8 @@ function depsWith(over: Partial<PaletteDeps> = {}): PaletteDeps {
     setZoom: () => ran.push("zoom"),
     locale: "zh",
     zoom: 100,
+    extensionCommands: [],
+    profileCommands: [],
     ...over,
   };
   return d;
@@ -100,6 +102,67 @@ describe("buildCommands：条目从事实源派生，不另立清单", () => {
     const cmds = buildCommands(depsWith({ openPanels: ["console"] }));
     expect(cmds.find((c) => c.id === "panel:console")?.hint).toBeTruthy();
     expect(cmds.find((c) => c.id === "panel:table")?.hint).toBeUndefined();
+  });
+});
+
+describe("P174-G1：插件贡献的命令", () => {
+  it("命令条目原样进「插件」分组，run 是 App 注入的那一个", () => {
+    let ran = "";
+    const cmds = buildCommands(
+      depsWith({
+        extensionCommands: [
+          { id: "plugin:a.b:yolo.train", title: "开始训练", hint: "示例插件", run: () => { ran = "ok"; } },
+        ],
+      }),
+    );
+    const c = cmds.find((x) => x.id === "plugin:a.b:yolo.train");
+    expect(c).toBeTruthy();
+    expect(c).toMatchObject({ group: "插件", title: "开始训练", hint: "示例插件" });
+    c!.run();
+    expect(ran).toBe("ok");
+  });
+
+  it("没有插件命令就不多出一个空分组（插件全停用后分组跟着消失）", () => {
+    expect(buildCommands(depsWith()).some((c) => c.group === "插件")).toBe(false);
+  });
+
+  it("跨插件的同名命令按 pluginId 区分，且都能按插件 id 搜到", () => {
+    const cmds = buildCommands(
+      depsWith({
+        extensionCommands: [
+          { id: "plugin:a.b:yolo.train", title: "开始训练", run: () => {} },
+          { id: "plugin:c.d:yolo.train", title: "开始训练", run: () => {} },
+        ],
+      }),
+    );
+    expect(cmds.filter((c) => c.id.startsWith("plugin:"))).toHaveLength(2);
+    expect(filterCommands(cmds, "a.b").map((c) => c.id)).toContain("plugin:a.b:yolo.train");
+  });
+});
+
+describe("P174-B2：工作场景命令", () => {
+  it("场景命令进「工作场景」分组，run 原样保留；没有场景就不出现空分组", () => {
+    let ran = "";
+    const cmds = buildCommands(
+      depsWith({
+        profileCommands: [
+          { id: "profile:apply:p1", title: "应用场景：YOLO", hint: "使用中", run: () => { ran = "ok"; } },
+        ],
+      }),
+    );
+    const c = cmds.find((x) => x.id === "profile:apply:p1");
+    expect(c).toMatchObject({ group: "工作场景", title: "应用场景：YOLO", hint: "使用中" });
+    c!.run();
+    expect(ran).toBe("ok");
+    expect(buildCommands(depsWith()).some((x) => x.group === "工作场景")).toBe(false);
+  });
+
+  it("中英文关键词都能搜到场景命令", () => {
+    const cmds = buildCommands(
+      depsWith({ profileCommands: [{ id: "profile:save-current", title: "把当前状态保存为场景", run: () => {} }] }),
+    );
+    expect(filterCommands(cmds, "workspace").some((c) => c.id === "profile:save-current")).toBe(true);
+    expect(filterCommands(cmds, "场景").some((c) => c.id === "profile:save-current")).toBe(true);
   });
 });
 

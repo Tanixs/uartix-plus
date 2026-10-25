@@ -6,10 +6,10 @@
  * 预览是第三条：**画在屏幕上，但什么都不写**。刷新即无，也不进插件库。
  *
  * 三条口径写在这里，因为它们各自都对应过真实的坑：
- *  1. **唯一的写者只有 `applyStyleExts()` 读**——预览不许自己去碰 `dataset.theme`。
+ *  1. **唯一的写者只有 `applyThemeRuntime()` 读**——预览不许自己去碰 `dataset.theme`。
  *     那会绕过合成器造出第二个"谁在画"的真相（P98-M0 拆掉的就是这类东西）；
  *  2. **到期时间存在记录里，不靠计时器准**。计时器只负责"到点叫醒重合成"；
- *     即使它被后台节流拖慢，`applyStyleExts()` 每次都会自己核对 `expiresAt`，
+ *     即使它被后台节流拖慢，`applyThemeRuntime()` 每次都会自己核对 `expiresAt`，
  *     所以屏幕上不可能留下一个已过期的预览（这一条在 node 里可直接断言）；
  *  3. **不持久化**：这里没有 store、没有 localStorage。刷新回到设置里那枚真主题，
  *     这是"预览"两个字的全部含义。
@@ -28,7 +28,7 @@ export const PREVIEW_MAX_MS = MAX_PREVIEW_MS;
 
 let current: ThemePreview | null = null;
 let wakeTimer: ReturnType<typeof setTimeout> | null = null;
-/** 到期叫醒时要跑的那次重合成由宿主注入（叶子不认识 extRuntime，避免反向依赖） */
+/** 到期叫醒时要跑的那次重合成由宿主注入（叶子不认识 uiRuntime，避免反向依赖） */
 let onExpire: (() => void) | null = null;
 
 export function setThemePreview(preview: ThemePreview, resync: () => void): void {

@@ -25,7 +25,7 @@ import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
 import { tx, useLocale } from "../../i18n/strings";
 import { alertDialog } from "../../shared/Dialog";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { attachPdragZone, type PdragDetail } from "../../shared/pointerDrag";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {

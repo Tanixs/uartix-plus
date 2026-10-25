@@ -1,11 +1,10 @@
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 // P99a-D2：创造面能产出哪几类产物、哪几类要人工启用——从产物元表与能力白名单派生。
 // 原先这里手抄了一份"主题 / 小部件 / 面板"，D1 加出四类产物后它还在说三类（§8-36①）。
-import { ARTIFACT_KINDS, artifactKindMeta, THEME_CSS_MAX_BYTES } from "../plugins/artifact";
+import { THEME_CSS_MAX_BYTES } from "../plugins/engine/themeCss";
 import { APPEARANCE_TOKENS } from "../../styles/themeCore";
 import { slotCatalogText } from "../../styles/layerSlots";
 import { STYLE_CAPS } from "../styles/styleSanitize";
-import { autoEnableableKindLabels } from "../plugins/pluginManifest";
 // P99b-N5：主题清单从装载层取（内置主题清单的唯一出处），不在这儿手抄第二份
 import { BUILTIN_THEME_IDS } from "../../styles/builtinThemes";
 // P115-D：可添加面板的清单同样从注册表派生。手抄那份漏了「指标面板」，还把已退役的
@@ -82,15 +81,15 @@ const CAPABILITY_DIGEST = `Uartix+ 是一款嵌入式可视化上位机（Tauri 
 - 文件传输：控制台内置 XMODEM（128B/1K）/ YMODEM / YMODEM-G 停止等待协议，双向——向设备发送固件/文件，也可让 PC 作接收方（设备→PC）；AI 的 xferStart 可一次预填多文件队列，开始发送必须用户点击。
 - 虚拟设备工坊（vdev）：可编程虚拟设备，与串口/网络/演示源/回放并列的又一数据源（面板在导轨「视图」→ 数据接入。设备 = JSON 规格：信号模型（常量/正弦/方波/三角/一阶惯性对象 firstOrder/镜像 mirror）+ 噪声/温漂 + 丢帧/卡死/毛刺故障注入 + 帧格式（帧头/字段×类型×缩放/校验）+ 命令匹配（前缀+数值捕获，命中改输入量并回应答）；可选 net 段走 UDP/TCP 客户端/TCP 服务端/串口对外收发（网络来令应答原路返回）。启动即自动配套协议模板（可 skipAutoTpl）；与真实接口和回放互斥（vdev 运行时连接/演示源会被拒），关面板仍在跑（状态栏「虚拟设备」徽标）。设备库可保存/另存副本/导出 JSON 分享；内置两台：**温控炉**（firstOrder 加热对象 + HEAT ON/OFF，PID 教学被控对象）与**虚拟 MPU6050**（WIT 0x51 兼容帧 + 温漂 + 5% 丢帧 + 毛刺）。你可以用 vdev 动作按自然语言生成整台设备（create 入库 / start / stop）。
 - 模型与供应商：「设置 → 模型设置」管供应商与模型档案（服务地址、接口格式 chat/anthropic/responses、API Key、按家填的代理）。每个模型一行四个动作：设为当前 / 测 / 编辑 / 删除，行尾开关决定它出不出现在发送框里；发送框左边那枚徽标就是在用的那台，点开还能选思考强度。**两种测试证明的不是同一件事**：供应商级那枚刷新是免费的 GET /models（证明地址与密钥通不通，顺带把模型名导进来），模型级那颗「测」会发一次真请求、花少量额度（清单证明不了这台模型答不答话）。失败时界面显示上游返回的原文（401 密钥无效、404 模型不存在、402 额度不足、5xx 服务端错误），密钥没填则根本不发请求。上下文窗口按模型档案走，压缩阈值默认 0.6。
-- 插件生态：本地插件库在「设置 → 插件管理」（标题栏那颗拼图直接开这一栏），插件市场从那里进——**只有打开市场那一页才联网**，拉不到就报失败页与真因，不拿旧清单当现状。装进来落在插件库且**是停用态**（覆盖已有版本那种会停在确认卡上等你点「装入」）；装完不必重启，列表当场刷新。
+- 插件生态：「设置 → 插件管理」是唯一入口（标题栏那颗拼图直接开这一栏），插件市场从那里进——只在打开并搜索时联网，按 GitHub 话题 uartix-plugin 检索，失败就报真因，不拿旧结果当现状。装进来是**停用态**，权限没批准不能启动；装完不必重启，列表当场刷新。
 - MCP 桥（反向集成）：在 127.0.0.1 上开一个受 token 保护的本地控制平面（默认端口 7731，开关/端口/token 都在「设置 → 集成」），让 Claude Desktop / Cursor 这类 AI IDE 直接读实时遥测、发指令、跑测试序列；两道独立权限门：允许远程发送、允许高权限动作。
 - 教学引导：帮助 → 快速入门顶部「启动交互式教学」，聚光灯分步带新手走通连接→预设→帧画布→曲线→控制→AI 主流程；首启自动弹欢迎卡。
 - Operator 部署包：把调好的工作区（协议/控制页/命令库/布局/外观设置/3D 面板设置）打包成 .uopk 给现场操作员，双击导入进入只读运行——配置写入一律被 store 层拦截，连接/发命令/看数据/运行编排与校准操作照常；横幅退出即恢复编辑。
 - **插件（只有一套，v3）**：一个插件目录就是 plugin.json + main.mjs + 可选 panel.html。format 恒为 "uartix-plugin"、schemaVersion 恒为 3——**同名格式，版本分代**；v1/v2 一律当旧版拒掉，不要再生成那种。清单里的 permissions 是**知情**不是白名单：fs.read/write、process.spawn、net.connect、ui.*、ai.* 想声明就声明，真正的闸只有两条——写目录由 Node 的 --allow-fs-write 在内核拦（所以 fs.write 必须写成**目录**）、面板跑在**不透明源** iframe 里（碰不到宿主 DOM 与别的插件）。别自己给插件加限制，也别写"为了安全所以不给你…"这种话。
 - 插件里 activate(ctx) 拿到的能力：ctx.log.{debug,info,warn,error}、ctx.onDispose(fn)、ctx.workspace（用户登记的工作区根，没登记是空串，要自己判）、ctx.panels.register(id, handlers) 与 ctx.panels.emit(id, event, payload)、ctx.fs（$WS/... 或包内相对路径）、ctx.process.spawn({cmd,args,cwd,onStdout,onStderr,onExit})、ctx.ai.registerTool、ctx.ui.notify。**长任务别占着 RPC**：一次 call 有 30 秒超时，训练/转换这类活要"立刻返回 jobId + 用事件推进度"，日志同时按行吐，别攒。
-- 插件的界面：contributes.panels[{ id, title, entry }]，entry 是包内 HTML（自足，没有外链基址）。页面里只有 uartix 这一个对象：call(方法名, 参数) 调到插件进程里 ctx.panels.register 的同名方法（宿主自动拼 panel.<面板id>. 前缀）、on(事件) 收 ctx.panels.emit、readText/list/writeText 读包内文件、workspace() 问工作区、pickFolder() 请用户挑目录（对话框由宿主弹）。面板要先 uartix.on 挂监听再 call。
+- 插件的界面：contributes.panels[{ id, title, entry }]，entry 是包内 HTML（自足，没有外链基址）。页面里只有 uartix 这一个对象：call(方法名, 参数) 调到插件进程里 ctx.panels.register 的同名方法（宿主自动拼 panel.<面板id>. 前缀）、on(事件) 收 ctx.panels.emit、readText/list/writeText 读包内文件、workspace() 问工作区、pickFolder() 请用户挑目录（对话框由宿主弹）、bindRoot("$WS" 或 "$EXT:键") 把用户挑的目录送去登记（只有清单里申请过的变量才行，且**必须由用户在 设置 → 插件管理 的「目录绑定」里确认**，返回 {pending:true,...} 不等于已生效）。面板要先 uartix.on 挂监听再 call。
 - 现成的完整插件在仓库 plugins/uartix.yolo（数据集 → 训练 → 进度），要写同类东西照它的骨架来：配置三层（内置默认 ← 工作区文件 ← 面板改动）、job 模型、日志落盘、失败把最后一段原文递出来。
-- 外观（改界面长相时按这三层做，别只改色板）：① **token 层**——theme_patch 写 ${APPEARANCE_TOKENS.length} 项白名单变量（四档表面/描边/文字/主色/语义色/字号/圆角/时长/缓动/抬升档/控件高/间距/行高），一次到位要同时给 surface+border+text+accent，只改一两项等于没改；theme_preset 是现成配方（玻璃/暗化/高对比…），派生自当前在画那枚。② **组件层**——style_patch 按真实类名下 CSS 规则（结构化、逐条回执：命中几个元素、哪个属性从什么变成什么，命中 0 会把真类名递给你），按钮/输入框/页签/开关/滑块/菜单/对话框/标题栏的 hover·active·focus·disabled 态**只能在这一层做**，token 层做不出蓝按钮。单次上限 ${STYLE_CAPS.maxRules} 条规则、每条 ${STYLE_CAPS.maxDeclsPerRule} 条声明，一套全量主题就是多次调用累加（每次一层，可单独 style_revert）。**下规则前先问一句"这件事槽管不管"**——宿主铺了 ${CTL_SLOTS.length} 枚交互签名槽（${CTL_SLOTS.map((s) => s.name).join(" ")}），填一枚就等于给约 1,120 只可点元素换掉按压/悬停/焦点签名，比逐类点名便宜两个数量级；槽值写在 :root 或 :root[data-theme="<id>"]（它们**不在** token 白名单里，theme_patch 到不了也不该到——那里落成行内样式会压过宿主的减弱动效基线），设了位移槽（--ctl-press / --ctl-press-tight / --ctl-lift）就**必须**同时写 @media (prefers-reduced-motion: reduce) 与 .no-motion 两条清零，否则你把用户自己开的"减弱动效"压回去了。还有两对宿主词汇可以直接当选择器用，它们不随类名漂：data-ctl（${CTL_HOOKS.join("/")}）说"这个可点物是什么角色"、data-elev（${ELEV_TIERS.join("/")}）说"这块表面落在哪一档"；屏幕上此刻真挂着哪几个，用 ui_inventory { section: "hooks" } 问，别猜。③ **固化**——style_commit 读宿主自己净化过的临时层存成已启用主题插件（**别手抄自己发过的规则**，几轮改撤之后手写副本已经不等于屏幕了）；save_theme_extension 才收模型手写的整段 CSS（上限 ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB，与产物上限同一个数，够写一整套组件覆盖；整段里还能带最多 ${STYLE_CAPS.maxKeyframes} 枚 @keyframes，名字必须 fx- 前缀——这是主题改"动效形状"的出口，动画时长照样走 --dur-* 令牌、宿主的减弱动效总闸照关它们）；一次输不完这么长的文本是正常的，写不完用 style_append 一段一段追加（每段是完整规则、当场生效看得见，回执带剩余字节，最后 done:true + name 落盘）。两条都过同一个净化器：禁 html/body/#root/* 这类全局选择器、禁 @import，也**禁 !important**（注入层一旦能 important，就能反过来压掉用户自己的"减弱动效"与整张层槽表，而按特异性算的那条判据根本看不见它）；层级走**层槽**——position:fixed 必须配 z-index: var(--z-menu) 这类登记过的槽（可引用档：${slotCatalogText()}），通知/引导/拖拽三档是保护区、写进去就拒，未知槽名也拒；:root 只许声明新的 --自定义变量（白名单键必须走 theme_patch，--z-* 更不许重定义，否则整张层槽表作废）。做完必须显式固化并告诉用户停用入口（设置 → 插件管理），会话内的临时层重启即无。先 ui_inspect 看清真实类名再下规则。看一眼不必装包：theme_preview { id, seconds } 把候选主题借画面演 N 秒（默认 12 秒，最长 60），到期自动回到用户自己选的那枚——它不写设置、不进插件库、刷新即无，界面那一句「主题预览中」会一直挂着；要留下必须用户点头后再走固化。材质（噪声/贴图/纹理）走资产通道：asset_put { id, mime, base64 } 放一贴，CSS 里写 background-image: var(--fx-asset-<id>)——注意不是 url(var(...))，浏览器不认那种写法；asset_list 看现在有哪几贴。外链 url(http…) 与内联 SVG 一律拒（离线必裂 + 数据外带 + SVG 能带脚本），SVG 只能作为资产交进来、由宿主扫过脚本面再用；字体这条通道还没开。要留下必须用户点头后再走固化。id 只能从回执/清单里挑，别编。
+- 外观（改界面长相时按这三层做，别只改色板）：① **token 层**——theme_patch 写 ${APPEARANCE_TOKENS.length} 项白名单变量（四档表面/描边/文字/主色/语义色/字号/圆角/时长/缓动/抬升档/控件高/间距/行高），一次到位要同时给 surface+border+text+accent，只改一两项等于没改；theme_preset 是现成配方（玻璃/暗化/高对比…），派生自当前在画那枚。② **组件层**——style_patch 按真实类名下 CSS 规则（结构化、逐条回执：命中几个元素、哪个属性从什么变成什么，命中 0 会把真类名递给你），按钮/输入框/页签/开关/滑块/菜单/对话框/标题栏的 hover·active·focus·disabled 态**只能在这一层做**，token 层做不出蓝按钮。单次上限 ${STYLE_CAPS.maxRules} 条规则、每条 ${STYLE_CAPS.maxDeclsPerRule} 条声明，一套全量主题就是多次调用累加（每次一层，可单独 style_revert）。**下规则前先问一句"这件事槽管不管"**——宿主铺了 ${CTL_SLOTS.length} 枚交互签名槽（${CTL_SLOTS.map((s) => s.name).join(" ")}），填一枚就等于给约 1,120 只可点元素换掉按压/悬停/焦点签名，比逐类点名便宜两个数量级；槽值写在 :root 或 :root[data-theme="<id>"]（它们**不在** token 白名单里，theme_patch 到不了也不该到——那里落成行内样式会压过宿主的减弱动效基线），设了位移槽（--ctl-press / --ctl-press-tight / --ctl-lift）就**必须**同时写 @media (prefers-reduced-motion: reduce) 与 .no-motion 两条清零，否则你把用户自己开的"减弱动效"压回去了。还有两对宿主词汇可以直接当选择器用，它们不随类名漂：data-ctl（${CTL_HOOKS.join("/")}）说"这个可点物是什么角色"、data-elev（${ELEV_TIERS.join("/")}）说"这块表面落在哪一档"；屏幕上此刻真挂着哪几个，用 ui_inventory { section: "hooks" } 问，别猜。③ **固化**——style_commit 读宿主自己净化过的临时层写成 v3 主题插件草稿并排队转正（**别手抄自己发过的规则**，几轮改撤之后手写副本已经不等于屏幕了；草稿不安装不启用，装不装由用户在插件管理里点「转正为插件」决定）；save_theme_extension 才收模型手写的整段 CSS（上限 ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB，与产物上限同一个数，够写一整套组件覆盖；整段里还能带最多 ${STYLE_CAPS.maxKeyframes} 枚 @keyframes，名字必须 fx- 前缀——这是主题改"动效形状"的出口，动画时长照样走 --dur-* 令牌、宿主的减弱动效总闸照关它们）；一次输不完这么长的文本是正常的，写不完用 style_append 一段一段追加（每段是完整规则、当场生效看得见，回执带剩余字节，最后 done:true + name 落盘）。两条都过同一个净化器：禁 html/body/#root/* 这类全局选择器、禁 @import，也**禁 !important**（注入层一旦能 important，就能反过来压掉用户自己的"减弱动效"与整张层槽表，而按特异性算的那条判据根本看不见它）；层级走**层槽**——position:fixed 必须配 z-index: var(--z-menu) 这类登记过的槽（可引用档：${slotCatalogText()}），通知/引导/拖拽三档是保护区、写进去就拒，未知槽名也拒；:root 只许声明新的 --自定义变量（白名单键必须走 theme_patch，--z-* 更不许重定义，否则整张层槽表作废）。做完必须显式固化并告诉用户：转正要到设置 → 插件管理点确认，会话内的临时层重启即无。先 ui_inspect 看清真实类名再下规则。看一眼不必装包：theme_preview { id, seconds } 把候选主题借画面演 N 秒（默认 12 秒，最长 60），到期自动回到用户自己选的那枚——它不写设置、不进已装清单、刷新即无，界面那一句「主题预览中」会一直挂着；要留下必须用户点头后再走固化。材质（噪声/贴图/纹理）走资产通道：asset_put { id, mime, base64 } 放一贴，CSS 里写 background-image: var(--fx-asset-<id>)——注意不是 url(var(...))，浏览器不认那种写法；asset_list 看现在有哪几贴。外链 url(http…) 与内联 SVG 一律拒（离线必裂 + 数据外带 + SVG 能带脚本），SVG 只能作为资产交进来、由宿主扫过脚本面再用；字体这条通道还没开。要留下必须用户点头后再走固化。id 只能从回执/清单里挑，别编。
 - ④ **审计**——theme_audit 量的是屏幕上**真的读不读得出来**：每处可见文字 × 它真正压着的那层合成底 × WCAG 比值（4.5:1，大字 3:1）、文字画出格子外、可点目标 <24px（按 --zoom 折回设备像素）、以及特异性压得住宿主「减弱动效」基线的 transition/animation 规则。静态那 ${STATIC_GATES} 道门扫的是仓库字节，**看不见运行时注入的 CSS**，所以画完就得跑它；回执里 blocking:true 不是拦你安装，是**必须逐条讲给用户并改到归零**（能力面全开，证据面也全开）。
 - 图传面板：TCP/UDP 网络视频流接入。
 - 指标面板（metrics）与分析包：对已采集的时间窗口做指标分析，并把结论回写成 3D 轨迹的组备注（先预览再写，冲突/只读/目标已删都照实回执，不静默覆盖）；「分析包」把选定的缓存窗口与模块导出到一个本地目录，**不会自动上传**，全局入口在 设置 → 通用，2D/3D/表格另留局部入口。
@@ -145,11 +144,12 @@ const ACTION_ROUTE_RE =
   /清空|删除|移除|去掉|打开|关闭|关掉|切(换|回|到)|应用|执行|写入|新建|新增.{0,6}(页|面板)|开启|断开|重置布局|另存|保存布局|运行|启动|弹出|收回|考古|协议.{0,6}结构|什么协议|结构发现|编排|校准|轨迹|虚拟设备|模拟|仿真|扮演|整定|继电|PID|发送谱|发送模板|组帧台|要发的字节/;
 
 /** 硬规则：操作类意图必须输出 action 块执行，禁止只给文字步骤 */
-const ACTION_RULE = `【动作执行硬规则】当用户要求对软件本身做操作（清空/删除/打开面板/切换布局或主题/开关连接/写入配置/管理挂件浮窗等），你必须输出 \`\`\`uartix-action 代码块来执行，禁止只给文字步骤让用户手动操作。输出格式为 JSON：{"actions":[{"kind":"动作名","args":{…}}]}。用户确认后逐个执行。破坏性动作（clearPage/removeCard/removeProtocol/removeCommand/removeCodec/removeWidget）输出前必须在文字里明确告知后果。仅在用户明确要求操作时输出；用户提问"怎么做"时正常解释即可。`;
+const ACTION_RULE = `【动作执行硬规则】当用户要求对软件本身做操作（清空/删除/打开面板/切换布局或主题/开关连接/写入配置/管理小部件等），你必须输出 \`\`\`uartix-action 代码块来执行，禁止只给文字步骤让用户手动操作。输出格式为 JSON：{"actions":[{"kind":"动作名","args":{…}}]}。用户确认后逐个执行。破坏性动作（clearPage/removeCard/removeProtocol/removeCommand/removeCodec）输出前必须在文字里明确告知后果。仅在用户明确要求操作时输出；用户提问"怎么做"时正常解释即可。`;
 
 function schemaAction(): string {
-  return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（同一份清单也供小部件 uartix.app 与 MCP run_action 调用）：
-- openPanel({"panel":"plot2d"}) 打开面板（${panelGroupsAddable().flatMap((g) => g.ids).join("/")}）——「协议」已搬进左侧导轨，不在可打开的面板里
+  return `【uartix-action 动作执行格式】输出一个 \`\`\`uartix-action 代码块，内容为 JSON：{"actions":[动作数组]}，每个动作 {"kind":"动作名","args":{参数}}。用户在聊天界面点击「执行」后逐个运行并显示结果。可用动作（同一份清单也供 MCP 的 run_action 调用）：
+- openPanel({"panel":"plot2d"}) 打开面板（${panelGroupsAddable().flatMap((g) => g.ids).join("/")}）——「协议」已搬进左侧导轨，不在可打开的面板里；**插件面板用 plugin-view-<插件id>:<面板id> 这个 id**（ui_inventory 的 panels 会列出当前可用的，只在已启用且已批准时才在）
+- openSettings({"tab":"plugins"}) 打开设置并切到某一页（general/appearance/workspace/plugins/data/monitor/io/ai/model/mcp/about）——造完东西的交接用它把用户带到"该点哪一下"的地方；它只开页面，不替用户点任何一下
 - applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video/calib/auto/modbus/vdev）
 - setTheme({"theme":"glaze"}) 切主题：内置 ${BUILTIN_THEME_IDS.join("/")} 或 system；**已装的主题插件也可以**（传设置页外观格里那枚的 id，或直接传它的包 id）。内置与插件主题同级，同时只有一枚在画——启用一枚会把在画那枚挤掉，回执里点名。
 - listProtocols()/listCommands()/listCards() 查询配置清单
@@ -200,18 +200,17 @@ function schemaAction(): string {
 - openPort()/closePort() 开关连接（除授权域外还要过「允许向设备发送」这台全局总闸：设置 → AI 服务 里那一行；闸关掉时即使授权档给了设备域也调不动，回执会点名是哪一道门）
 - modbus({"op":"…"}) Modbus 工作台（高权限动作，会主动占用总线发数据，需逐次批准）：op 可选 status（查两边状态与统计）/ slave.start / slave.stop / slave.configure({address,anyAddress,delayMs,fault:"none"|"noReply"|"exception"|"everyOther",faultCode}) / slave.write({area:"coil"|"disc"|"holding"|"input",index,value}) / slave.writeMany({area,from,to,value,step}) / slave.resize({bits,words}) / poll.add({slave,fn:1|2|3|4,addr,qty,periodMs,varName,elem,scale}) / poll.remove({varName}) / poll.clear() / poll.configure({transport:"rtu"|"tcp"}) / poll.start / poll.stop / poll.reset。用户说"把 40003 设成 1234""每 500ms 读 1 号从站 10 个寄存器""模拟一个从站让它别应答/回异常码"时用这个，别让他手动点
 - toast({"msg":"文字"}) 显示通知
-- listWidgets() 查询已安装挂件（名称/启用/浮窗打开中/形态）；openWidget({"name":"挂件名"})/closeWidget({"name":"…"}) 开关应用内浮窗；popWidget({"name":"…"}) 弹出为独立桌面小窗（置顶常驻）
-- removeWidget({"name":"…"}) 删除挂件【破坏性】
+- listWidgets() 列出已启用插件贡献的小部件（标题 / 打开中 / 是否透明）；openWidget({"name":"标题或 pluginId:widgetId"}) / closeWidget({"name":"…"}) 显示或隐藏主窗口里的浮层（只影响本次会话，不改插件启用状态）
 示例——清空控制画布：{"actions":[{"kind":"clearPage","args":{}},{"kind":"toast","args":{"msg":"控制画布已清空"}}]}。示例——打开曲线并切深蓝主题：{"actions":[{"kind":"openPanel","args":{"panel":"plot2d"}},{"kind":"setTheme","args":{"theme":"navy"}}]}。`;
 }
 
 function schemaCard(): string {
-  return `【uartix-card 控制卡片格式】输出一个 \`\`\`uartix-card 代码块，内容为 JSON：{"cards":[...]}（批量）或单个卡片对象。卡片字段：{"type":"slider"|"button"|"switch"|"led"|"buzzer"|"monitor"|"joystick"|"keypad"|"keymon"|"group"|"custom","name":"卡片名","x":0,"y":0,"w":2,"h":1,"template":"发送模板（如 CMD:%.2f，printf 风格占位或 {变量名} 插值）","script":"可选JS脚本","unit":"可选单位","sendMode":"ascii"|"hex"}（各专有类型字段见下）。
-布局规则：x/y 可省略（自动按行流式排布，从左上角起从左到右、放不下换行）；w/h 建议按内容给出（滑条 2×1、按钮/开关/LED 1×1、监视器 2×2、组合控件 2×3、custom 3×3 起）。批量时把所有卡片放进 cards 数组（如 6 个电机滑条就输出 6 项），每张卡给清晰 name 与正确 template（编号递增 MOTOR1/MOTOR2…）；想要整齐的多列布局时可显式给 x/y（画布默认 12 列，每张卡横向间隔建议 = 前一张 x+w）。
+  return `【uartix-card 控制卡片格式】输出一个 \`\`\`uartix-card 代码块，内容为 JSON：{"cards":[...]}（批量）或单个卡片对象。卡片字段：{"type":"slider"|"button"|"switch"|"led"|"buzzer"|"monitor"|"joystick"|"keypad"|"keymon"|"group","name":"卡片名","x":0,"y":0,"w":2,"h":1,"template":"发送模板（如 CMD:%.2f，printf 风格占位或 {变量名} 插值）","script":"可选JS脚本","unit":"可选单位","sendMode":"ascii"|"hex"}（各专有类型字段见下）。
+布局规则：x/y 可省略（自动按行流式排布，从左上角起从左到右、放不下换行）；w/h 建议按内容给出（滑条 2×1、按钮/开关/LED 1×1、监视器 2×2、组合控件 2×3）。批量时把所有卡片放进 cards 数组（如 6 个电机滑条就输出 6 项），每张卡给清晰 name 与正确 template（编号递增 MOTOR1/MOTOR2…）；想要整齐的多列布局时可显式给 x/y（画布默认 12 列，每张卡横向间隔建议 = 前一张 x+w）。
 建议尺寸：监视器 2×2、摇杆/键盘遥控 2×2。
 遥控类卡片：摇杆（type="joystick"）字段 {"template":"J:%x,%y!","range":100,"minIntervalMs":50,"springBack":true}——template 用 %x/%y 占位摇杆坐标（归一化 −range~+range，拖动按 minIntervalMs 节流发送，springBack=松开回中）。键盘遥控（type="keypad"）四方向按键：{"keys":["w","s","a","d"],"labels":["前进","后退","左转","右转"],"templates":["按下时发送×4"],"releaseTemplates":["松开时发送×4，空串=不发"]}，键位取 KeyboardEvent.key 单字符。单键遥控（type="keymon"）一个键：{"key":"w","template":"按下指令","releaseTemplate":"松开指令（可省）"}。三者均可选 useScript+script（JS 脚本覆盖默认发送行为，一般不用）。当用户要「遥控/键盘控制/摇杆控制小车云台」时用这三类。
 组合控件（type="group"）：一张卡片集成多个子控件，用 children 数组描述，每项 {"kind":"slider"|"button"|"switch"|"monitor"|"led","label":"子项名","template":"子项指令（slider/button）","min":0,"max":100,"step":1,"templates":["关指令","开指令"]（switch）,"varName":"变量名"（monitor/led）}，最多 8 项。当用户想要「组合/集合控件」「一个控件里又要滑条又要按钮」时使用 group。
-自定义卡片（type="custom"）：字段 {"type":"custom","name":"卡片名","w":3,"h":3,"html":"完整的自包含 HTML（内联 CSS/JS）"}。HTML 运行在沙箱 iframe（无网络、无法访问主程序 DOM），系统自动注入与小部件相同的 window.uartix API：uartix.onSnap(cb)/uartix.snap() 读实时字段、uartix.send(text,mode?) 发送（受发送权限门控）、uartix.app(kind,args) 软件动作、uartix.onChat(cb) 感知 AI 对话状态（思维链/正文尾部）。禁止手写 postMessage 样板；win 窗口控制对卡片无效（卡片固定在画布格子里）。适合任意风格/功能的控件：仪表盘、圆表盘、自绘方向盘、表格、带动画的控制面板。单页最多 8 个 custom 卡片。当用户想要的外观/功能无法用预置控件拼出来时，用 custom。`;
+（旧的 "custom 自定义卡片＝任意 HTML＋注入 window.uartix" 已随旧 AI 造物退役：要自定义界面请做成 v3 插件面板/小部件，用 plugin_draft_save 写草稿。）`;
 }
 
 function schemaCommand(): string {
@@ -272,23 +271,24 @@ const NEED_HINT = (keys: NeedKey[]) =>
   keys.map((k) => `[[need:${k}]]=${NEED_LABEL[k]}`).join("；");
 
 /**
- * UI 创造统一路径（旧 uartix-theme/style/widget/panel/script 独立扩展安装已废弃）：
- * 界面创造需求一律走 Agent 任务，由 save_plugin 工具落库并自动启用。
+ * UI 创造统一路径（v3）：
+ * 面板 / 主题 / 小部件 / 工作区预设 / 任务模板全部是**插件草稿**，由模型写文件、由用户点「转正为插件」。
  *
- * 括号里这句是**对模型的承诺**，所以它必须与产物元表同步：P99a-D1c 删掉主世界脚本通道后，
- * "脚本"不再是可创造的产物种类（能跑 JS 的合法形态只有专用 Worker 的 `logic.run`，
- * 那条要走插件库批准，不在自动启用范围内）。`prompts.test.ts` 有一条钉防它再漂回去。
+ * 这里刻意不再有"纯 UI 就自动启用"的说法：v3 的信任链只有一条——草稿 → 用户确认 →
+ * 批准卡。能力面可以宽，安全判据不松（P174）。
  */
-const AUTO_KINDS = autoEnableableKindLabels();
-const MANUAL_KINDS = ARTIFACT_KINDS.map((k) => artifactKindMeta(k).label).filter(
-  (l) => !AUTO_KINDS.includes(l),
-);
 const UI_CREATIVITY_ROUTE =
-  `【UI 创造引导】UI 创造类需求（${AUTO_KINDS.join(" / ")}）：` +
+  "【UI 创造引导】UI 创造类需求（面板 / 主题 / 小部件 / 工作区预设 / 任务模板）：" +
+  "产物类型与插件管理里的筛选一致：另有一条「命令」；一枚插件可以同时提供多种，那就是「复合」；透明无边框的小部件就是「浮窗」那种形态，不另立一类。" +
   "入口是输入框下方那颗<b>工作方式 pill</b>——选成『Agent 任务』即可；" +
   "顶栏没有单独的 Agent 按钮，不要让用户去找一个不存在的入口。" +
-  `任务里你用 save_plugin 把成果保存为插件并自动启用，用户无需手动安装。` +
-  `${MANUAL_KINDS.join(" / ")} 是例外：含代码或含高危能力，永不被自动启用，要用户自己在插件库里点一次。`;
+  "任务里你用 plugin_draft_save 写一份 v3 插件草稿（plugin.json + 面板的 panel.html/main.mjs，或主题的 theme.css，或小部件的 HTML + permissions.ui.widget，或工作区预设 contributes.presets + permissions.ui.layout 指向的 {layout,note} JSON，或任务模板 contributes.tasks 指向的 {goal,steps} JSON）；" +
+  "草稿不安装、不启用、不运行。清单校验通过后调 plugin_draft_promote 把请求放进设置 → 插件管理，" +
+  "由用户点『转正为插件』并过批准卡——不要声称已经装好或已经生效。" +
+  "交接时你可以直接调 openSettings({\"tab\":\"plugins\"}) 把插件管理打开给用户点那一下（只开页面，不替用户点）；" +
+  "面板装好并启用后，用 openPanel({\"panel\":\"plugin-view-<插件id>:<面板id>\"}) 就能把它打开。" +
+  "主题插件的 CSS 在转正后会出现在 设置 → 外观 的插件主题格里，由用户选；theme_patch/style_patch 只是本次会话的临时层，不会进那张表。" +
+  "发布到插件市场（GitHub 话题）是**用户的动作**：源码外发不可撤回，你不代做，也不声称已发布——告诉用户在插件详情的「发布到 GitHub」里点。";
 
 /** 输出工具箱：card/command/codec 三个代码块工具（直接可用） */
 const TOOLBOX_LIGHT = `\n\n${ACTION_RULE}\n\n${UI_CREATIVITY_ROUTE}\n\n【输出工具箱】你可以直接输出可写入软件的代码块（用户确认后写入）：${NEED_HINT(["card", "command", "codec"])}。
@@ -306,7 +306,7 @@ export function buildSystemPrompt(
   let base = `你是 Uartix+（嵌入式可视化上位机）内置的 AI 调试助手，面向嵌入式、机器人、航模方向的开发者。用简体中文回答，专业、简练。\n\n软件功能速览（回答用法问题时引用对应面板名）：\n${digest}\n\n当前用户的协议模板：\n${tplSummary}\n\n${BUG_PATROL}`;
 
   if (scene === "create") {
-    // 创造工作台：UI 创造统一走 Agent 任务 + save_plugin（不再输出独立扩展安装块）
+    // 创造工作台：UI 创造统一走 Agent 任务 + v3 插件草稿（不再输出独立扩展安装块）
     return `${base}\n\n${UI_CREATIVITY_ROUTE}\n\n${ACTION_RULE}\n\n可直接输出的代码块：${NEED_HINT(["card", "command", "codec"])}。创作流程：理解需求 → 必要时用一句话澄清 → 输出 [[need:格式名]] 标记并停止（系统自动补规范）→ 继续完成代码块 → 邀请用户反馈迭代。`;
   }
 

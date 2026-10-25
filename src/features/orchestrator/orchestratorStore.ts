@@ -19,7 +19,7 @@
  * Operator 只读边界（P74c C1，用户拍板「禁编辑、允许运行」）：
  * 本模块的**配置类**改动全部过 guardLocked()；**运行类**（setMasterOn 总开关）
  * 与**视图类**（updateGroup 的 collapsed 折叠）刻意放行——只读 ≠ 不能测试运行、
- * 不能展开看结构。守卫放在 store 而非 UI：AI/MCP/扩展面板等一切调用方同样受约束。
+ * 不能展开看结构。守卫放在 store 而非 UI：AI/MCP/插件面板等一切调用方同样受约束。
  */
 
 import { guardLocked } from "../operator/lock";

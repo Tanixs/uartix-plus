@@ -5,8 +5,8 @@
  * - theme_read 只读不开门（对齐 settings_read）；image_swatch 读取图片 → 前端 canvas 量化取色，
  *   需自定义档位勾选 files 域 + 路径落在白名单（复用 generalTools 同款域门），产出建议色后由模型
  *   调 theme_patch 应用——取色确定性计算，不依赖模型视觉能力；
- * - save_theme_extension 把覆盖层装成一个**真实插件**（stagePackage→installStaged→setEnabled）
- *   并启用，随后清空覆盖层（保存即持久化边界）；P90 E：默认收尾步骤，用户在插件库可一键停用。
+ * - save_theme_extension 把覆盖层写成一份 v3 主题**草稿**并排队转正：不安装、不启用，
+ *   装不装与批不批都由用户在插件管理里做；草稿落盘后清空覆盖层（保存即持久化边界）。
  */
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -20,11 +20,11 @@ import {
 import { inWhitelist } from "./generalTools";
 import { guardStyleText } from "../styles/styleSanitize";
 import { applyLayer, layerCss, revertLayer, scratchCssMerged } from "./styleScratch";
-import { THEME_CSS_MAX_BYTES } from "../plugins/artifact";
+import { THEME_CSS_MAX_BYTES } from "../plugins/engine/themeCss";
 import { DOMAIN_ZH } from "./scopeTiers";
 import { slotCatalogText } from "../../styles/layerSlots";
 // P131-C 资产通道：判据与草稿层（`asset_put` 走的就是装包那一份校验，不开第二条更松的门）
-import { ASSET_MAX_BYTES, ASSET_MIMES, danglingAssetRefs } from "../styles/assetGuard";
+import { ASSET_MAX_BYTES, ASSET_MIMES } from "../styles/assetGuard";
 import { listScratchAssets, putScratchAsset } from "./scratchAssets";
 import { activeThemeFacts } from "../../styles/themeFacts";
 import { unresolvedAssetNote, unresolvedAssetRefs } from "../ai/assetRuntime";
@@ -74,13 +74,6 @@ export function parseColorToRgb(s: string): [number, number, number] | null {
 
 const rgbToHex = (r: number, g: number, b: number): string =>
   "#" + [r, g, b].map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0")).join("");
-
-/** 语义化版本补丁位 +1（同名主题原地升版用）；解析失败退回时间戳版，绝不产出非法版本串 */
-function bumpPatch(v: string): string {
-  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(v.trim());
-  if (!m) return `0.1.${Date.now() % 100000}`;
-  return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
-}
 
 /** 玻璃配方：读取当前面板/嵌底色 → 同色半透明（深浅主题自适应）。解析失败则跳过该项（部分覆盖合法）。 */
 function glassVars(): Record<string, string> {
@@ -333,7 +326,7 @@ async function themePatch(parsed: Record<string, unknown>, ctx: ToolCtx): Promis
       ...(warn ? { warn } : {}),
       overlay: getOverrides(),
       // P90 E1：覆盖层只是预览，默认收尾=落成已启用插件（用户可一键停用）
-      next: "把改动清单讲给用户听；满意后调用 save_theme_extension 保存为已启用插件（除非用户要求只看临时效果）",
+      next: "把改动清单讲给用户听；满意后调用 save_theme_extension 把整套主题写成插件草稿并排队转正（除非用户要求只看临时效果）",
     },
     undoToken: r.undoToken,
   };
@@ -371,7 +364,7 @@ async function themePreset(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
       ...(dropped.length ? { dropped, warn: droppedHint(dropped) } : {}),
       ...(r.warned?.length ? { surfaceNotes: r.warned } : {}),
       overlay: getOverrides(),
-      next: "把改动清单讲给用户听；满意后调用 save_theme_extension 保存为已启用插件",
+      next: "把改动清单讲给用户听；满意后调用 save_theme_extension 把整套主题写成插件草稿并排队转正",
     },
     undoToken: r.undoToken,
   };
@@ -407,7 +400,7 @@ async function imageSwatch(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
       data: {
         path,
         ...sw,
-        hint: "可用 theme_patch 将建议色写入 --accent/--on-accent，或将主色写入 --bg-panel/--bg；预览满意后用 save_theme_extension 存为已启用插件",
+        hint: "可用 theme_patch 将建议色写入 --accent/--on-accent，或将主色写入 --bg-panel/--bg；预览满意后用 save_theme_extension 存为插件草稿并排队转正",
       },
     };
   } catch (e) {
@@ -416,16 +409,42 @@ async function imageSwatch(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
 }
 
 /**
- * 保存成主题插件的**唯一**安装链。
+ * 保存成主题插件草稿的**唯一**链路（v3）。
  *
- * P131-A（详设 A1）：模型手写的 CSS 从 8 KiB 提到与产物上限同一个数（`THEME_CSS_MAX_BYTES`）。
- * 原来那 8 KiB 是"一套全量主题写不完"的唯一原因：23 组件 × 6 状态的覆盖矩阵实测要 12–20 KB，
- * 于是模型只能退化成"改几个 token"——用户看到的是"AI 做的主题比内置的还素"，
- * 而机器原因是这条与它无关的限制。放开的是**字节数**，不是判据：净化器、结构规则、
- * 装包校验一条没减（同一份 `guardStyleText`，两条入口现在只差"这段 CSS 谁来写"）。
- * `style_commit` 仍是更可信的那条：它读宿主自己净化过的临时层，模型不复述自己发过的参数。
+ * 为什么不再直接装：v3 的信任链只有一条——草稿 → 用户点「转正为插件」→ 批准卡。
+ * 外观工具能做的最后一件事是**把完整的主题写成一份合法草稿并排队**，装不装由人决定。
+ * 这里没有 stagePackage / installStaged / setEnabled 任何一个落盘动词。
+ *
+ * 保存的是**完整主题**：当前主题的全量 token（合成器算出的有效值）+ 用户 CSS。
+ * 只存覆盖层那两三个键的老坑（"打开插件库看到几乎没内容"）不重演。
  */
 const SAVE_CSS_MAX_BYTES = THEME_CSS_MAX_BYTES;
+
+/** 主题草稿 id：`user.agent.theme.<slug>-<hash>`。中文名 slug 为空时只用哈希。 */
+function themePluginId(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 20);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  const tag = h.toString(16).padStart(8, "0").slice(0, 6);
+  return `user.agent.theme.${slug ? `${slug}-${tag}` : `t-${tag}`}`;
+}
+
+/** 把 token 表与资产写成主题 CSS 的前半段（宿主生成，不让模型复述）。 */
+function themeRootCss(vars: Record<string, string>, assets: { id: string; mime: string; data: string }[]): string {
+  const lines = Object.entries(vars).map(([k, v]) => `  ${k}: ${v};`);
+  const assetLines: string[] = [];
+  for (const a of assets) {
+    // 净化器只放行 ≤32 KB 的栅格 data URI；这里先自己判一次，免得整段 CSS 被拒后说不清是哪一枚
+    if (!/^image\/(png|jpeg|webp|gif|bmp|avif)$/.test(a.mime)) continue;
+    if (Math.ceil((a.data.length * 3) / 4) > 32 * 1024) continue;
+    assetLines.push(`  --fx-asset-${a.id}: url("data:${a.mime};base64,${a.data}");`);
+  }
+  const all = [...lines, ...assetLines];
+  return all.length ? `:root {\n${all.join("\n")}\n}` : "";
+}
 
 async function persistTheme(
   parsed: Record<string, unknown>,
@@ -433,153 +452,100 @@ async function persistTheme(
   cssMaxBytes: number,
 ): Promise<ToolResultBody> {
   const callId = ctx.callId;
-    const name = String(parsed.name ?? "").trim();
-    if (!name) return notExecuted(callId, "invalid_args", { hint: "name 必须是非空字符串" });
-    const css = typeof parsed.css === "string" ? parsed.css : undefined;
-    if (css) {
-      // P97-J0：这条通路以前**只校验长度**（旧 8000 字上限），"no global selectors except :root"
-      // 只是写在工具描述里的话术 ⇒ 一条 `body{display:none}` 就能把整个界面关掉。
-      // 现在过同一个净化器；组件级样式请走结构化的 style_patch（可逐条回执与撤销）。
-      const g = guardStyleText(css, cssMaxBytes, [...APPEARANCE_TOKENS]);
-      if (!g.ok) {
-        return notExecuted(callId, "unsafe_css", {
-          problems: g.problems.slice(0, 12),
-          ruleCount: g.ruleCount,
-          bytes: g.bytes,
-          hint: "按 problems 逐条修正后重发；改单个组件请改用 style_patch（结构化规则、带命中数回执、可撤销）",
-        });
-      }
+  const name = String(parsed.name ?? "").trim();
+  if (!name) return notExecuted(callId, "invalid_args", { hint: "name 必须是非空字符串" });
+  const css = typeof parsed.css === "string" ? parsed.css : undefined;
+  if (css) {
+    // 组件层走与主题安装同一条净化器。组件级样式请走结构化的 style_patch（可逐条回执与撤销）。
+    const g = guardStyleText(css, cssMaxBytes, []);
+    if (!g.ok) {
+      return notExecuted(callId, "unsafe_css", {
+        problems: g.problems.slice(0, 12),
+        ruleCount: g.ruleCount,
+        bytes: g.bytes,
+        hint: "按 problems 逐条修正后重发；改单个组件请改用 style_patch（结构化规则、带命中数回执、可撤销）",
+      });
     }
-    const overlay = getOverrides();
-    if (!Object.keys(overlay).length && !css) {
-      return notExecuted(callId, "empty_overlay", { hint: "当前没有可保存的外观修改；先用 theme_patch/theme_preset 生成覆盖" });
-    }
-    // P90 E2：改为走**真实插件安装链**（stagePackage → installStaged → setEnabled），
-    // 旧实现只 upsertProjection，成果不进插件库、用户在「插件管理」里根本看不到，
-    // 也就没有"一键停用"。动态 import：pluginStore→extRuntime→chatStore→agentRun
-    // 会与本模块所在的 agent 链成环（§16 P89 红线 R1）。
-    const { stagePackage, installStaged, setEnabled, proposeUpdate, approveUpdate, getPlugin } =
-      await import("../plugins/pluginStore");
-    // P91 D3：保存的是**完整主题**而不是补丁。旧实现只存 overlay 里那两三个 token，用户在插件库里
-    // 打开看到的是"几乎没内容"的主题（正是"生成的几乎没生成"的直接来源）。
-    // P98-M0 修正取法：直接读**全量 token 的有效计算值**，而不是"16 个色板键 + 覆盖层"。
-    // 旧写法下 radius/fs/dur/ease 只有"覆盖层恰好还留着"才进得了插件——AI 先 undo 再保存就会丢，
-    // 而丢了之后停用插件也"看起来没撤干净"（因为从来没生效过）。
-    const { collectThemeVars } = await import("../ai/extRuntime");
-    const vars = collectThemeVars(APPEARANCE_TOKENS).vars;
-    /** P131-C：草稿层的资产（可能为空）。存包时带上，存完清掉——持久化边界只有一处 */
-    const { scratchAssetRecords, revertScratchAssets } = await import("./scratchAssets");
-    const assetRecords = scratchAssetRecords();
-    /**
-     * P131-D2 资产引用闭合：存下来的包**只带草稿层那几枚**（在画那枚主题自带的贴图不会
-     * 跟着走）。CSS 引用了草稿层没有的资产 ⇒ 屏幕上现在是对的、换一枚主题就空了，
-     * 属于"存下来的样子 ≠ 屏幕上的样子"那类静默失败，所以在固化边界上拦一次，
-     * 并把该补的那几枚点名说出去（装包校验也会判，但那里的错误串不适合当行动指引）。
-     */
-    if (css) {
-      const dangling = danglingAssetRefs(css, assetRecords);
-      if (dangling.length) {
-        return notExecuted(callId, "asset_reference_not_declared", {
-          refs: dangling,
-          carried: assetRecords.map((a) => a.id),
-          hint: `这些资产名在草稿层里没有找到对应的枚：${dangling.join("、")}。要么先 asset_put 把它们放进草稿层（固化只会带走草稿层里的这些），要么改掉 CSS 里的引用；asset_list 看现在有什么`,
-        });
-      }
-    }
-    // P92 D2：id = 名称的稳定哈希。旧 slug 会把中文整个吃掉（「AI 助手现代玻璃风」→
-    // `user.agent.theme-ai`），两份不同主题因此撞成同一 id，再叠加"同 id 即原地升版"
-    // 就会让后一份**静默覆盖**前一份。现在只有 id 与 name 同时相同才认作同一份主题，
-    // 否则加后缀新建；人类可读的中文名继续留在 pkg.name。
-    const { agentPluginId, freeAgentId } = await import("../plugins/pluginId");
-    const THEME_PREFIX = "user.agent.theme";
-    const baseId = agentPluginId(THEME_PREFIX, name);
-    const exact = getPlugin(baseId);
-    const same = exact && exact.pkg.name.trim() === name.trim() ? exact : null;
-    const pluginId = same ? baseId : freeAgentId(baseId, (cand) => !!getPlugin(cand));
-    const version = same ? bumpPatch(same.pkg.version) : "0.1.0";
-    const manifest = {
-      format: "uartix-plugin",
-      schemaVersion: 2,
-      id: pluginId,
-      version,
+  }
+  const overlay = getOverrides();
+  if (!Object.keys(overlay).length && !css) {
+    return notExecuted(callId, "empty_overlay", { hint: "当前没有可保存的外观修改；先用 theme_patch/theme_preset 生成覆盖" });
+  }
+  const { collectThemeVars } = await import("../ai/uiRuntime");
+  const vars = collectThemeVars(APPEARANCE_TOKENS).vars;
+  const { scratchAssetRecords } = await import("./scratchAssets");
+  const assets = scratchAssetRecords();
+  const fullCss = [themeRootCss(vars, assets), css ?? ""].filter(Boolean).join("\n\n");
+  if (fullCss.length > cssMaxBytes) {
+    return notExecuted(callId, "theme_too_large", {
+      bytes: fullCss.length,
+      capBytes: cssMaxBytes,
+      hint: `整套主题 ${fullCss.length} 字节，超过单份主题上限 ${cssMaxBytes}；把 CSS 拆小或用 style_append 分段写入后再保存`,
+    });
+  }
+  const { ensureLoaded, getSnapshot, requestDraftPromotion } = await import("../plugins/engine/pluginEngine");
+  await ensureLoaded();
+  const snap = getSnapshot();
+  if (!snap.appDir) return notExecuted(callId, "host_not_ready", { hint: "插件子系统还没读到应用数据目录，稍后再试" });
+  const { draftDirName, writeDraftFiles } = await import("../plugins/engine/draft");
+  const id = themePluginId(name);
+  const draftName = draftDirName(id, "theme");
+  const manifest = {
+    format: "uartix-plugin",
+    schemaVersion: 3,
+    id,
+    version: "0.1.0",
+    name,
+    description: "由 Agent 外观任务生成",
+    activation: [],
+    permissions: { ui: { theme: true } },
+    contributes: { themes: [{ id: "main", title: name, entry: "theme.css" }] },
+    inject: {},
+    provenance: { createdBy: "agent" },
+  };
+  let written;
+  try {
+    written = await writeDraftFiles(snap.appDir, draftName, {
+      "plugin.json": JSON.stringify(manifest, null, 2),
+      "theme.css": fullCss,
+    });
+  } catch (e) {
+    return notExecuted(callId, "draft_write_failed", { msg: String(e instanceof Error ? e.message : e) });
+  }
+  if (written.entry.issue || !written.entry.manifest) {
+    return notExecuted(callId, "invalid_package", {
+      errors: [written.entry.issue || "清单校验失败"],
+      hint: "草稿已写到磁盘但清单不合法，转正会被同一套校验拒掉；把问题修正后重发",
+    });
+  }
+  let pending = false;
+  let promotionMsg = "";
+  try {
+    await requestDraftPromotion(draftName, `AI 外观任务生成的主题「${name}」`);
+    pending = true;
+  } catch (e) {
+    promotionMsg = String(e instanceof Error ? e.message : e);
+  }
+  return {
+    callId,
+    ok: true,
+    status: "validated",
+    data: {
+      draftName,
+      pluginId: id,
+      id,
       name,
-      desc: "由 Agent 外观任务生成",
-      hostApi: "^1.0",
-      capabilities: ["theme.tokens"],
-      contributions: { themes: [{ id: "main", entry: "main.json", name }] },
-      artifacts: {
-        "main.json": {
-          kind: "theme",
-          vars,
-          ...(css ? { css } : {}),
-          // P131-C：草稿层的贴图/噪声跟着 CSS 一起持久化，否则存完 CSS 里的
-          // url(var(--fx-asset-*)) 会解析成空——"存下来的样子"就不等于"屏幕上的样子"
-          ...(assetRecords.length ? { assets: assetRecords } : {}),
-        },
-      },
-      provenance: { createdBy: "agent", reviewed: false },
-    };
-    let updated = false;
-    if (same) {
-      const prop = proposeUpdate(pluginId, manifest);
-      if (!prop.ok) return notExecuted(callId, "invalid_package", { msg: prop.msg });
-      const prevCaps: string[] = same.pkg.capabilities;
-      const addedCaps = manifest.capabilities.filter((c) => !prevCaps.includes(c));
-      if (addedCaps.length) {
-        // 新增能力必须用户在库里批准，Agent 不自签
-        return {
-          callId,
-          ok: true,
-          status: "applied",
-          data: {
-            pluginId,
-            name,
-            pendingApproval: true,
-            hint: `同一份主题已存在，候选已就绪但含新增能力（${addedCaps.join("、")}）；请到 设置 → 插件管理 批准后生效`,
-          },
-        };
-      }
-      const ap = approveUpdate(pluginId);
-      if (!ap.ok) return notExecuted(callId, "install_failed", { msg: ap.msg });
-      updated = true;
-    } else {
-      const staged = stagePackage(manifest);
-      if (!staged.ok || !staged.stagingId) {
-        return notExecuted(callId, "invalid_package", {
-          errors: staged.errors.slice(0, 8),
-          // P92 D2：把"id 不合规"翻译成模型能照做的下一步，而不是只丢一串校验错误
-          ...(staged.errors.some((e) => e.toLowerCase().includes("id"))
-            ? { hint: `id 必须是小写点分 ASCII 标识；本次已自动生成 ${pluginId}，如需自定义请显式传 id 参数` }
-            : {}),
-        });
-      }
-      const installed = installStaged(staged.stagingId);
-      if (!installed.ok || !installed.id) {
-        return notExecuted(callId, "install_failed", { msg: installed.msg });
-      }
-    }
-    const en = setEnabled(pluginId, true);
-    const { clearOverlay } = await import("./appearanceStore");
-    clearOverlay(); // 保存即持久化边界：插件层接管渲染，覆盖层清空
-    if (assetRecords.length) revertScratchAssets(); // 资产同理：插件那枚已经带着它们了
-    return {
-      callId,
-      ok: true,
-      status: "applied",
-      data: {
-        pluginId,
-        id: pluginId,
-        name,
-        version,
-        updated,
-        enabled: en.ok,
-        tokens: Object.keys(vars).length,
-        // P90 E3：回执自带可行动文案，用户不必去猜"改完怎么恢复"
-        hint: en.ok
-          ? `已保存为插件「${name}」并启用；关闭：本卡『停用』或 设置 → 插件管理`
-          : `插件已保存但启用失败：${en.msg}`,
-      },
-    };
+      version: "0.1.0",
+      tokens: Object.keys(vars).length,
+      cssBytes: fullCss.length,
+      promotionPending: pending,
+      installed: false,
+      runnable: false,
+      hint: pending
+        ? `主题已存为草稿「${draftName}」并放进插件管理的待确认区；用户点「转正为插件」并通过批准卡后才会生效。预览仍在，转正后可清除 AI 临时覆盖。`
+        : `主题草稿已写好（${draftName}），但转正请求没排上：${promotionMsg}。到设置 → 插件管理 → 草稿分区手动转正。`,
+    },
+  };
 }
 
 /* ================= P131-A（详设 A1）：分段续写组件层 ================= */
@@ -629,7 +595,7 @@ async function styleAppend(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
         usedBytes: prev.length,
         incomingBytes: chunk.length,
         capBytes: SAVE_CSS_MAX_BYTES,
-        hint: `草稿已 ${prev.length} 字节，上限 ${SAVE_CSS_MAX_BYTES}：要么把这段裁短，要么 done:true + name 先把这一套存成插件，再开下一套草稿`,
+        hint: `草稿已 ${prev.length} 字节，上限 ${SAVE_CSS_MAX_BYTES}：要么把这段裁短，要么 done:true + name 先把这一套写成主题插件草稿，再开下一套草稿`,
       });
     }
     applyLayer(DRAFT_LAYER, next);
@@ -648,7 +614,7 @@ async function styleAppend(parsed: Record<string, unknown>, ctx: ToolCtx): Promi
         remainingBytes: Math.max(0, SAVE_CSS_MAX_BYTES - bytes),
         layer: DRAFT_LAYER,
         ...(assetMissing.length ? { assetRefsMissing: assetMissing, assetNote: unresolvedAssetNote(assetMissing) } : {}),
-        hint: "这段已生效，用户现在就能看见。继续追加下一段；整套写完传 done:true + name 存成已启用主题插件（也可随时 style_commit）",
+        hint: "这段已生效，用户现在就能看见。继续追加下一段；整套写完传 done:true + name 写成主题插件草稿并排队转正（也可随时 style_commit）",
       },
     };
   }
@@ -694,7 +660,7 @@ export const appearanceToolEntries: AgentToolEntry[] = [
     effect: "config_write",
     domain: "config",
     provenance: HOST,
-    description: `Apply appearance token overrides (session-level preview; undoable). Needs the ${DOMAIN_ZH.config} authorization. A style request is NOT satisfied by 1-2 tokens: cover surface (--bg/--bg-panel/--bg-inset), border (--border/--border-soft), text (--text/--text-dim) and accent together, or prefer theme_preset which derives a coherent set from the live theme. After the user can see the result, call save_theme_extension to persist it as an enabled plugin unless they asked for a temporary preview. Args: { tokens: Record<string,string> } over whitelist: ${APPEARANCE_TOKENS.join(" ")}. Unit tokens accept <n>px/<n>ms; --ease accepts cubic-bezier(...) or named curves; unknown/invalid tokens reject the whole patch atomically. Two layers of validation: format is atomic (whole patch rejected), but the surface ladder is checked AFTER it lands and drops only the offending keys — --raise-1/--raise-2 are DERIVED from --bg-panel/--text, so prefer editing the base tokens and let the derivation compute the elevation; if you must write them they have to stay on the same side as --text and within 24 L* of the panel. Read \`dropped\`/\`surfaceNotes\` in the receipt and fix those keys instead of resending the same values. **This is only layer 1 of 3** — tokens cannot paint a component state (a blue button, a tab underline, a hover lift, a disabled switch are all component rules). For those use style_patch (real class names, per-rule receipts), then style_commit to persist what is actually on screen.`,
+    description: `Apply appearance token overrides (session-level preview; undoable). Needs the ${DOMAIN_ZH.config} authorization. A style request is NOT satisfied by 1-2 tokens: cover surface (--bg/--bg-panel/--bg-inset), border (--border/--border-soft), text (--text/--text-dim) and accent together, or prefer theme_preset which derives a coherent set from the live theme. After the user can see the result, call save_theme_extension to persist it as a theme draft and queue promotion unless they asked for a temporary preview; only the user can install or enable it. Args: { tokens: Record<string,string> } over whitelist: ${APPEARANCE_TOKENS.join(" ")}. Unit tokens accept <n>px/<n>ms; --ease accepts cubic-bezier(...) or named curves; unknown/invalid tokens reject the whole patch atomically. Two layers of validation: format is atomic (whole patch rejected), but the surface ladder is checked AFTER it lands and drops only the offending keys — --raise-1/--raise-2 are DERIVED from --bg-panel/--text, so prefer editing the base tokens and let the derivation compute the elevation; if you must write them they have to stay on the same side as --text and within 24 L* of the panel. Read \`dropped\`/\`surfaceNotes\` in the receipt and fix those keys instead of resending the same values. **This is only layer 1 of 3** — tokens cannot paint a component state (a blue button, a tab underline, a hover lift, a disabled switch are all component rules). For those use style_patch (real class names, per-rule receipts), then style_commit to persist what is actually on screen.`,
     parameters: { type: "object", properties: { tokens: { type: "object" } }, required: ["tokens"], additionalProperties: false },
     summarize: (a) => {
       const tokens = a.tokens;
@@ -788,12 +754,12 @@ export const appearanceToolEntries: AgentToolEntry[] = [
   defineTool({
     name: "save_theme_extension",
     labelZh: "保存主题",
-    // 存为主题＝装插件并启用，撤销走插件库停用（覆盖层 undoToken 在保存后失效，见函数内注释）
+    // 存为主题＝写插件草稿并排队转正（不安装、不启用；批准由用户在插件管理里做）
     effect: "draft_write",
     domain: "plugins",
     provenance: HOST,
     description:
-      `Persist the appearance work as an ENABLED theme plugin (default final step of any appearance edit; overlay is cleared afterwards, undo tokens expire). It saves a COMPLETE theme — the currently active theme's full token set with your overlay applied on top — not just the patched tokens, and saving the same name again bumps the version in place instead of creating a duplicate. The user can switch it off from this card's 停用 button or 设置 → 插件管理. Needs the plugin-library (插件库) authorization. Args: { name: string, css?: string (a full component-layer stylesheet, up to ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB — enough for a whole theme; **validated** — html/body/*/#root selectors, url()/@import and script-era values are rejected per rule with the reason; position:fixed must land on a registered layer slot (z-index: ${slotCatalogText()}) because nothing a theme writes may outrank the notification/tour/drag tiers; a :root rule may only declare NEW --custom-properties (never --z-*, and whitelisted tokens go through theme_patch)) }. If the look came from style_patch layers, prefer style_commit: it persists what is actually on screen instead of a hand-retyped copy. Writing it in several replies? Use style_append instead of retyping the whole sheet here.`,
+      `Persist the appearance work as a v3 theme plugin DRAFT and queue it for promotion (the default final step of any appearance edit). This does NOT install or enable anything: it writes a complete theme — the currently active theme's full token set with your overlay applied on top — into the plugin draft area, then puts a promotion request in the plugin manager. Only the USER can promote it, and the normal approval card still applies. Saving the same name again overwrites the same draft. Needs the plugin-management (插件管理) authorization. Args: { name: string, css?: string (a full component-layer stylesheet, up to ${Math.round(THEME_CSS_MAX_BYTES / 1024)}KB — enough for a whole theme; **validated** — html/body/*/#root selectors, url()/@import and script-era values are rejected per rule with the reason; position:fixed must land on a registered layer slot (z-index: ${slotCatalogText()}) because nothing a theme writes may outrank the notification/tour/drag tiers; a :root rule may only declare NEW --custom-properties (never --z-*, and whitelisted tokens go through theme_patch)) }. If the look came from style_patch layers, prefer style_commit: it persists what is actually on screen instead of a hand-retyped copy. Writing it in several replies? Use style_append instead of retyping the whole sheet here.`,
     parameters: {
       type: "object",
       properties: { name: { type: "string" }, css: { type: "string" } },
@@ -808,12 +774,12 @@ export const appearanceToolEntries: AgentToolEntry[] = [
     /* —— P99a-B4（详设 §13.3）：就地固化临时层。读宿主真值，不让模型复述自己发过的参数 —— */
     name: "style_commit",
     labelZh: "固化临时样式",
-    // 与保存主题同权同域：写的是插件库条目，不是会话层
+    // 与保存主题同权同域：写的是插件草稿，不是会话层
     effect: "draft_write",
     domain: "plugins",
     provenance: HOST,
     description:
-      "Turn the CURRENT session scratch style layers (what `style_patch` actually applied) into an ENABLED theme plugin — the host reads the merged layer CSS itself, so the persisted look equals the look on screen. Do NOT retype the rules: after several patches and reverts a hand-written copy is not faithful. Args: { name: string } (same name again = version bump, not a duplicate plugin). Token overrides are captured from the live theme as well; afterwards the overlay is cleared and the scratch undo tokens expire — recovery path becomes 停用 in 设置 → 插件管理 or rollback_plugin. Fails with no_scratch_layers when nothing is pending. Needs the 插件库 authorization.",
+      "Turn the CURRENT session scratch style layers (what `style_patch` actually applied) into a v3 theme plugin DRAFT and queue it for promotion — the host reads the merged layer CSS itself, so the saved draft equals the look on screen. Do NOT retype the rules: after several patches and reverts a hand-written copy is not faithful. Args: { name: string } (same name again overwrites the same draft). Token overrides are captured from the live theme as well. The draft is NOT installed or enabled; only the user can promote it in 设置 → 插件管理, and the approval card still applies. Fails with no_scratch_layers when nothing is pending. Needs the 插件管理 authorization.",
     parameters: {
       type: "object",
       properties: { name: { type: "string" } },
@@ -843,7 +809,7 @@ export const appearanceToolEntries: AgentToolEntry[] = [
     domain: "plugins",
     provenance: HOST,
     description:
-      `Write a large component-layer stylesheet in **chunks** instead of one reply. Args: { css: string (whole rules only — the sanitizer judges each chunk on its own, so a rule split across two chunks fails both), name?: string, done?: boolean }. Every accepted chunk lands immediately as a session scratch layer the user can see, and the receipt says how many bytes are left out of ${Math.round(SAVE_CSS_MAX_BYTES / 1024)}KB. A rejected chunk leaves the draft untouched, so fix that one rule and resend just that chunk. Finish with done:true + name, which persists the WHOLE scratch set (this draft plus any style_patch layers — the look on screen, not a retype) as an enabled theme plugin and clears the draft. Not done yet? style_commit does the same persist step at any time, style_revert drops the layer. For token values (--bg, --accent, radius, duration) use theme_patch, not this tool.`,
+      `Write a large component-layer stylesheet in **chunks** instead of one reply. Args: { css: string (whole rules only — the sanitizer judges each chunk on its own, so a rule split across two chunks fails both), name?: string, done?: boolean }. Every accepted chunk lands immediately as a session scratch layer the user can see, and the receipt says how many bytes are left out of ${Math.round(SAVE_CSS_MAX_BYTES / 1024)}KB. A rejected chunk leaves the draft untouched, so fix that one rule and resend just that chunk. Finish with done:true + name, which writes the WHOLE scratch set (this draft plus any style_patch layers — the look on screen, not a retype) into a v3 theme plugin DRAFT and queues promotion; it does NOT install or enable the theme, the user decides that in 设置 → 插件管理. Not done yet? style_commit does the same draft step at any time, style_revert drops the layer. For token values (--bg, --accent, radius, duration) use theme_patch, not this tool.`,
     parameters: {
       type: "object",
       properties: {

@@ -171,15 +171,15 @@ describe("P99b-N6 · 入门引导里市场那一步", () => {
     const tb = readFileSync(fileURLToPath(new URL("../../shell/TopBars.tsx", import.meta.url)), "utf8");
     // 窗口从 220 放宽到 400：P105-F T5 给 aria-label 补了英文，那颗按钮的头几行变长了
     // （钉的还是同一条：data-tour="plugins" 必须挂在中文名为「插件管理」的那颗上）。
-    expect(/title=\{tx\("插件管理", "Plugin library"\)\}[\s\S]{0,400}data-tour="plugins"/.test(tb), "锚点不在「插件管理」那颗按钮上").toBe(true);
+    expect(/title=\{tx\("插件管理", "Plugin management"\)\}[\s\S]{0,400}data-tour="plugins"/.test(tb), "锚点不在「插件管理」那颗按钮上").toBe(true);
   });
 
-  it("这一步要说清两件用户会撞上的事：装来是停用态、覆盖要人确认", () => {
+  it("这一步要说清两件用户会撞上的事：装来是停用态、权限要批准", () => {
     const zh = numbered.find((s) => s.id === "market")!.body.zh;
     expect(zh).toContain("停用态");
-    expect(zh).toContain("确认卡");
-    // 「打开那一页才联网」是市场的招牌承诺，引导里说了就得在这儿钉住
-    expect(zh).toMatch(/打开那一页时才?联网/);
+    expect(zh).toContain("批准");
+    // 「打开并搜索时才联网」是市场的招牌承诺，引导里说了就得在这儿钉住
+    expect(zh).toMatch(/打开并搜索时联网/);
   });
 });
 

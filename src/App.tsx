@@ -8,16 +8,26 @@ import {
 } from "dockview-react";
 import { panelComponents, PANEL_TITLES, panelTitleOf } from "./panels/panels";
 import {
-  EXT_VIEW_PREFIX,
-  collectExtensionPanels,
+  PLUGIN_VIEW_PREFIX,
+  collectPluginPanels,
   parsePanelViewId,
-} from "./features/extensions/panelBridge";
+} from "./features/plugins/engine/panelBridge";
+import { collectPluginCommands } from "./features/plugins/engine/commandBridge";
 import {
-  ensureLoaded as ensureExtRepoLoaded,
-  getSnapshot as getExtRepoSnapshot,
-  subscribe as subscribeExtRepo,
-} from "./features/extensions/extStore";
-import { panelEnabled } from "./features/extensions/repo";
+  ensureLoaded as ensurePluginEngineLoaded,
+  getSnapshot as getPluginEngineSnapshot,
+  runCommand as runPluginCommand,
+  subscribe as subscribePluginEngine,
+} from "./features/plugins/engine/pluginEngine";
+import { panelEnabled } from "./features/plugins/engine/repo";
+import { newlyFailed } from "./features/plugins/engine/outputModel";
+import {
+  applyProfile,
+  ensureProfilesLoaded,
+  revertActiveProfile,
+  saveCurrentAsProfile,
+  useProfiles,
+} from "./features/plugins/engine/profilesStore";
 import { applyDefaultLayout, gridSize } from "./shell/defaultLayout";
 import {
   panelGroupsAddable,
@@ -43,26 +53,19 @@ import { IfaceAction } from "./features/serial/ifaces";
 import { ModbusBadge } from "./features/modbus/ModbusBadge";
 import { IconLayoutEdit } from "./shared/icons";
 import { confirmDialog } from "./shared/Dialog";
+import { toast } from "./shared/toast";
 import { applyUiZoom } from "./shared/zoom";
 import { SETTINGS_TAB_PLUGINS, type WorkspacePreset } from "./features/settings/settingsStore";
 import { JsonDropImport } from "./features/settings/JsonDropImport";
 import { AiFloat } from "./features/ai/AiFloat";
-import { WidgetFloats } from "./features/ai/WidgetFloats";
+import { PluginWidgetLayer } from "./features/plugins/engine/PluginWidgetLayer";
 import { SentinelFloat } from "./features/sentinel/SentinelPanel";
 import * as sentinelStore from "./features/sentinel/sentinelStore";
-import { startWidgetHub } from "./features/ai/widgetHub";
-import { applyStyleExts, startExtRuntime } from "./features/ai/extRuntime";
+import { applyThemeRuntime, startUiRuntime } from "./features/ai/uiRuntime";
 import { activeThemeFacts, subscribeStyleApply } from "./styles/themeFacts";
-import {
-  getExt as getExtSnapshot,
-  useExtensions,
-} from "./features/ai/extensionStore";
 import * as chatStore from "./features/ai/chatStore";
 import { onAiScene, onOpenSettings, onPop } from "./features/ai/aiBus";
-import { onRequestOpenExtPanel } from "./features/ai/extBus";
 import { subscribeAppBus } from "./features/ai/appBus";
-import { MarketDialog } from "./features/market/MarketDialog";
-import { InstallConfirm } from "./features/market/InstallConfirm";
 import {
   backupAutoLayout,
   getLayout,
@@ -140,8 +143,6 @@ export default function App() {
     markWelcomeSeen();
     setWelcomeOpen(false);
   };
-  /** 插件市场只在这里渲染一份：插件库与标题栏两颗按钮都只发 `openMarket` 信号 */
-  const [marketOpen, setMarketOpen] = useState(false);
   const [analysisExport, setAnalysisExport] = useState<{ snapshot?: AnalysisSnapshot } | null>(null);
   useEffect(() => subscribeAnalysisExport((snapshot) => setAnalysisExport({ snapshot })), []);
   const [aiOpen, setAiOpen] = useState(false);
@@ -154,38 +155,104 @@ export default function App() {
   const shellRef = useRef<HTMLDivElement>(null);
   const serial = useSyncExternalStore(serialStore.subscribe, serialStore.getSnapshot);
   const operator = operatorStore.useOperator(); // P67：只读模式横幅 + 布局应用
-  const exts = useExtensions();
-  const extPanelOptions = exts.exts.filter((e) => e.type === "panel" && e.enabled);
   /* A7：插件自己声明的面板（iframe）。清单里的 `contributes.panels` 就是这张表的唯一来源，
      所以装/卸之后不需要额外通知——仓库 store 一变，这里跟着重算。 */
-  const extRepo = useSyncExternalStore(subscribeExtRepo, getExtRepoSnapshot);
+  const pluginRepo = useSyncExternalStore(subscribePluginEngine, getPluginEngineSnapshot);
   // A12：只有**已启用且已批准**的插件才把面板挂进「+面板」——装完不启用就看不到
-  const extViewPanels = collectExtensionPanels(
-    extRepo.entries.map((e) => ({ id: e.id, manifest: e.manifest, enabled: panelEnabled(e) })),
+  const pluginViewPanels = collectPluginPanels(
+    pluginRepo.entries.map((e) => ({ id: e.id, manifest: e.manifest, enabled: panelEnabled(e) })),
   );
-  /* 面板清单来自磁盘（`extensions/<id>/extension.json`），所以启动时得读一次盘——
-     否则「+ 面板」里要等到有人打开扩展管理面才出现"扩展面板"那一组。 */
+  /* G1：插件贡献的命令和面板同一道门（启用 + 已批准）。停用后这张表重算，命令从调色板消失。 */
+  const pluginCommands = useMemo(
+    () =>
+      collectPluginCommands(
+        pluginRepo.entries.map((e) => ({
+          id: e.id,
+          name: e.manifest.name,
+          manifest: e.manifest,
+          enabled: panelEnabled(e),
+        })),
+      ),
+    [pluginRepo.entries],
+  );
+  /* 面板清单来自磁盘（`plugins/<id>/extension.json`），所以启动时得读一次盘——
+     否则「+ 面板」里要等到有人打开插件管理才出现"插件面板"那一组。 */
   useEffect(() => {
-    void ensureExtRepoLoaded();
+    void ensurePluginEngineLoaded();
+    void ensureProfilesLoaded();
   }, []);
 
-  /* A10：插件主题换了就重画一次。`applyStyleExts` 是整张界面配色的唯一出口，
+  /* R7②：插件落到 failed 的那一次要喊一声。
+     这一面不是给"日志迷"准备的：宿主起不来时，用户看见的只是"面板空白/点了没反应"，
+     而他不会为了查原因专门开一个日志面。只在**新落到 failed** 时报，已经 failed 的不重复喊。 */
+  const phasesRef = useRef<Record<string, "idle" | "starting" | "running" | "stopped" | "failed">>({});
+  useEffect(() => {
+    const fresh = newlyFailed(phasesRef.current, pluginRepo.entries);
+    phasesRef.current = Object.fromEntries(pluginRepo.entries.map((e) => [e.id, e.phase]));
+    for (const f of fresh) {
+      toast(
+        tx(`插件「${f.name}」启动失败${f.error ? `：${f.error}` : ""}（详情见「运行日志」）`, `Plugin “${f.name}” failed to start${f.error ? `: ${f.error}` : ""} — see the Output panel`),
+      );
+    }
+  }, [pluginRepo.entries]);
+
+  /* B2：工作场景命令。场景是"点一下切过去"的东西，命令面板比先开面板再点更直接。 */
+  const profiles = useProfiles();
+  const profileCommands = useMemo(() => {
+    const out: { id: string; title: string; hint?: string; run: () => void }[] = [];
+    for (const p of profiles.book.profiles) {
+      out.push({
+        id: `profile:apply:${p.id}`,
+        title: tx(`应用场景：${p.name}`, `Apply profile: ${p.name}`),
+        ...(p.id === profiles.book.activeId ? { hint: tx("使用中", "active") } : {}),
+        run: () => {
+          void applyProfile(p.id)
+            .then((r) => toast(r.warnings.length ? r.warnings.join("；") : tx(`已应用场景「${p.name}」`, `Applied profile “${p.name}”`)))
+            .catch((e) => toast(tx(`场景没有应用：${String((e as Error)?.message ?? e)}`, `Profile was not applied: ${String((e as Error)?.message ?? e)}`)));
+        },
+      });
+    }
+    out.push({
+      id: "profile:save-current",
+      title: tx("把当前状态保存为场景", "Save current state as a profile"),
+      run: () => {
+        const name = tx(`场景 ${profiles.book.profiles.length + 1}`, `Profile ${profiles.book.profiles.length + 1}`);
+        void saveCurrentAsProfile(name)
+          .then(() => toast(tx("已保存为新的场景", "Saved as a new profile")))
+          .catch((e) => toast(tx(`保存场景失败：${String((e as Error)?.message ?? e)}`, `Failed to save profile: ${String((e as Error)?.message ?? e)}`)));
+      },
+    });
+    if (profiles.book.activeId) {
+      out.push({
+        id: "profile:revert",
+        title: tx("回到场景应用前", "Undo profile apply"),
+        run: () => {
+          void revertActiveProfile()
+            .then(() => toast(tx("已回到应用前", "Back to the state before applying")))
+            .catch((e) => toast(tx(`回退失败：${String((e as Error)?.message ?? e)}`, `Undo failed: ${String((e as Error)?.message ?? e)}`)));
+        },
+      });
+    }
+    return out;
+  }, [profiles.book.profiles, profiles.book.activeId]);
+
+  /* A10：插件主题换了就重画一次。`applyThemeRuntime` 是整张界面配色的唯一出口，
      这里只负责"喂它一次"——不自己往 DOM 上写任何东西。 */
   useEffect(() => {
-    applyStyleExts();
-  }, [extRepo.activeTheme]);
+    applyThemeRuntime();
+  }, [pluginRepo.activeTheme]);
   // B6：「最近使用」置顶（会话内响应式；跨会话持久在 localStorage）
   const [recentPanels, setRecentPanels] = useState<string[]>(() => getRecentPanels());
   renderTick += 1;
 
   useEffect(() => {
     /**
-     * P99b-N5：主题落地只有 `extRuntime.applyStyleExts()` 一个出口（详设 R7）。
+     * P99b-N5：主题落地只有 `uiRuntime.applyThemeRuntime()` 一个出口（详设 R7）。
      * 这里以前自己写 `documentElement.dataset.theme`，并且**自己判 `system` 解析成 light 还是 dark**——
      * 同一段判断在 `SettingsModal` 与 `appActions.setTheme` 里还各有一份副本（三份里任何一份
      * 改了内置归类，另外两份就悄悄错）。现在三个触发点都只是"东西变了，重算一遍"。
      */
-    const apply = () => applyStyleExts();
+    const apply = () => applyThemeRuntime();
     apply();
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => apply();
@@ -215,6 +282,17 @@ export default function App() {
     notifyLocale();
     retitlePanelsRef.current?.();
   }, [settings.locale]);
+
+  /* R7 真机检查抓到的：插件面板的页签名在启动时挂的是兜底名「插件面板」。
+     原因不是标题算错，而是**算早了**——恢复布局那次 retitle 跑在插件读盘之前，
+     那时清单里还没有这个插件，标题只能落到兜底。补一次"清单变了就重挂"，
+     改名、卸载、装新版本也走同一条路（否则页签会挂着一个已经不存在的名字）。 */
+  const pluginTitles = pluginRepo.entries
+    .map((e) => `${e.id}=${e.manifest.name}:${(e.manifest.contributes.panels ?? []).map((p) => `${p.id}~${p.title}`).join(",")}`)
+    .join("|");
+  useEffect(() => {
+    retitlePanelsRef.current?.();
+  }, [pluginTitles]);
 
   // 保险：dockview 容器类名 DOM 级同步（部分版本对 className prop 变化不响应，
   // 导致主题切换后面板框架停留在旧配色；变量覆写已解耦，这里兜底类名本身）
@@ -261,14 +339,10 @@ export default function App() {
     operatorStore.init(); // 持久化的 Operator 部署包 → 恢复只读模式
     mcpServer.init();
     void chatStore.init();
-    startWidgetHub();
-    startExtRuntime();
+    startUiRuntime();
     const unScene = onAiScene((req) => {
       setAiOpen(true);
       chatStore.pushScene(req.scene, req.payload);
-    });
-    const unExtPanel = onRequestOpenExtPanel((extId) => {
-      addOrFocusPanel(`ext-panel-${extId}`);
     });
     // AI App Action：打开面板 / 切工作区预设（来自脚本、小部件、自定义卡片）
     const unAppBus = subscribeAppBus((msg) => {
@@ -281,8 +355,16 @@ export default function App() {
       } else if (msg.kind === "applyPreset") {
         patch({ workspace: msg.preset as WorkspacePreset });
         resetLayout(msg.preset as WorkspacePreset);
+      } else if (msg.kind === "openSettings") {
+        /* AI 造完东西要能"把用户带到该点哪一下的地方"（转正、批准、选主题都在设置里）。
+           tab 是白名单：总线是广播，谁都能发，不能让它把设置页切到一个不存在的键。 */
+        const ok = new Set(["general", "appearance", "workspace", "plugins", "data", "monitor", "io", "ai", "model", "mcp", "about"]);
+        setSettingsTab(ok.has(msg.tab) ? msg.tab : "general");
+        setSettingsOpen(true);
       } else if (msg.kind === "openMarket") {
-        setMarketOpen(true);
+        // 旧市场弹窗退役：入口落到插件管理（新市场按钮在那一页里）
+        setSettingsTab(SETTINGS_TAB_PLUGINS);
+        setSettingsOpen(true);
       } else if (msg.kind === "applyLayout") {
         // P99a-D1b：插件库「应用此布局」。布局 JSON 由包带来，执行权仍只在这里（dockview api 不出 App）
         const api = apiRef.current;
@@ -366,7 +448,6 @@ export default function App() {
     return () => {
       if (probeTimer) window.clearTimeout(probeTimer);
       unScene();
-      unExtPanel();
       unAppBus();
       unSettings();
       unPop();
@@ -392,7 +473,7 @@ export default function App() {
     };
     syncPanelsRef.current = syncPanels;
     syncPanels();
-    // 页签名语言感知：按当前语言重挂标题（占位区 ph-* 除外；扩展面板取扩展名）
+    // 页签名语言感知：按当前语言重挂标题（占位区 ph-* 除外；插件面板取插件名）
     const retitlePanels = () => {
       for (const p of api.panels) {
         if (p.id.startsWith("ph-")) continue;
@@ -703,7 +784,10 @@ export default function App() {
       toggleDemo: () => void templateStore.toggleDemo(),
       demoOn: protoSnap.demoRunning,
       openAi: () => setAiOpen(true),
-      openMarket: () => setMarketOpen(true),
+      openMarket: () => {
+        setSettingsTab(SETTINGS_TAB_PLUGINS);
+        setSettingsOpen(true);
+      },
       openSettings: (tab) => {
         setSettingsTab(tab);
         setSettingsOpen(true);
@@ -715,10 +799,23 @@ export default function App() {
       setZoom: (pct) => patch({ zoom: pct as 90 | 100 | 110 | 125 }),
       locale: settings.locale,
       zoom: settings.zoom,
+      extensionCommands: pluginCommands.map((c) => ({
+        id: c.paletteId,
+        title: c.title,
+        hint: c.pluginTitle,
+        run: () => {
+          // 命令面板已经先关掉了；这里失败只能走 toast——否则点击像"没反应"
+          void runPluginCommand(c.pluginId, c.commandId).catch((e) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast(tx(`插件命令没有执行：${msg}`, `Plugin command failed: ${msg}`));
+          });
+        },
+      })),
+      profileCommands,
     };
     return buildCommands(deps);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paletteActivity, layoutsSnapshot, serial.status, sessionSnap.state, protoSnap.demoRunning, settings.locale, settings.zoom, settings.theme]);
+  }, [paletteActivity, layoutsSnapshot, serial.status, sessionSnap.state, protoSnap.demoRunning, settings.locale, settings.zoom, settings.theme, pluginCommands, profileCommands]);
 
   const railActions: RailActions = {
     editLayout,
@@ -763,8 +860,8 @@ export default function App() {
       exist.api.setActive();
       return;
     }
-    // A7：插件自己的面板，id 形如 ext-view-<extId>:<panelId>
-    if (id.startsWith(EXT_VIEW_PREFIX)) {
+    // A7：插件自己的面板，id 形如 plugin-view-<pluginId>:<panelId>
+    if (id.startsWith(PLUGIN_VIEW_PREFIX)) {
       const v = parsePanelViewId(id);
       if (!v) return;
       const groups0 = api.groups;
@@ -775,32 +872,10 @@ export default function App() {
           : null);
       api.addPanel({
         id,
-        component: "extViewPanel",
+        component: "pluginViewPanel",
         title: panelTitleOf(id),
-        params: { extId: v.extId, panelId: v.panelId },
+        params: { pluginId: v.pluginId, panelId: v.panelId },
         ...(ref0 ? { position: { referencePanel: ref0.id, direction: "within" as const } } : {}),
-      });
-      return;
-    }
-    // AI 扩展面板：id 形如 ext-panel-<extId>，统一走 aiExtPanel 宿主组件
-    if (id.startsWith("ext-panel-")) {
-      const ext = getExtSnapshot(id.slice("ext-panel-".length));
-      const groups = api.groups;
-      const ref =
-        api.activePanel ??
-        (groups.length
-          ? groups[groups.length - 1].panels[
-              groups[groups.length - 1].panels.length - 1
-            ]
-          : null);
-      api.addPanel({
-        id,
-        component: "aiExtPanel",
-        title: `${ext?.name ?? tx("AI 扩展面板", "AI extension panel")}`,
-        params: { extId: id.slice("ext-panel-".length) },
-        ...(ref
-          ? { position: { referencePanel: ref.id, direction: "within" as const } }
-          : {}),
       });
       return;
     }
@@ -821,18 +896,6 @@ export default function App() {
         : {}),
     });
   };
-
-  // P88b-3：插件库「加入工作区」→ 打开对应影子扩展面板（ext-panel-<影子ID>）
-  const openExtPanelRef = useRef<(id: string) => void>(null);
-  openExtPanelRef.current = addOrFocusPanel;
-  useEffect(() => {
-    const h = (e: Event) => {
-      const detail = (e as CustomEvent<string>).detail;
-      if (detail) openExtPanelRef.current?.(`ext-panel-${detail}`);
-    };
-    window.addEventListener("ux:open-ext-panel", h);
-    return () => window.removeEventListener("ux:open-ext-panel", h);
-  }, []);
 
   // P103 批2：工具栏三段分区（接口参数 ｜ 会话 ｜ 面板与布局）。顺序与显隐由 chromeStore 驱动
   // （chrome_set 工具的落点）；段间竖线分隔，spacer 永远垫在最后一段之前（默认序 = 布局段贴右，同旧版）。
@@ -893,18 +956,9 @@ export default function App() {
                   ))}
                 </optgroup>
               ))}
-              {extPanelOptions.length > 0 && (
-                <optgroup label={tx("AI 扩展面板", "AI extension panels")}>
-                  {extPanelOptions.map((e) => (
-                    <option key={`ext-panel-${e.id}`} value={`ext-panel-${e.id}`}>
-                      {e.name}（AI）
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {extViewPanels.length > 0 && (
+              {pluginViewPanels.length > 0 && (
                 <optgroup label={tx("插件面板", "Plugin panels")}>
-                  {extViewPanels.map((p) => (
+                  {pluginViewPanels.map((p) => (
                     <option key={p.viewId} value={p.viewId}>
                       {p.title}
                     </option>
@@ -1052,7 +1106,6 @@ export default function App() {
       {paletteOpen && (
         <CommandPalette commands={paletteCommands} onClose={() => setPaletteOpen(false)} />
       )}
-      {marketOpen && <MarketDialog onClose={() => setMarketOpen(false)} />}
       {analysisExport && <AnalysisExportDialog snapshot={analysisExport.snapshot} onClose={() => setAnalysisExport(null)} />}
       {aiOpen && (
         <AiFloat
@@ -1065,8 +1118,7 @@ export default function App() {
       )}
       {/* 装包确认卡：全局只这一份。以前挂在插件库弹窗里，关掉弹窗就没人看得见它——
           而命令行那句"请在应用里点装入"指的就是这里（N4 收的那笔账） */}
-      <InstallConfirm />
-      <WidgetFloats />
+      <PluginWidgetLayer />
       <SentinelFloat />
       <JsonDropImport />
       <TourHost />

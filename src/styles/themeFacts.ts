@@ -1,10 +1,10 @@
 /**
  * P99b-N5：「现在哪一枚主题在画」的事实表 + 落地订阅（**零 import 叶子**）。
  *
- * 为什么不放在 `ai/extRuntime` 里让所有人去 import 它：`features/plugins/` 全目录都不准静态依赖
- * 样式运行时（P92-F 整窗白屏的根因就是 pluginStore 求值期撞进 extRuntime 未初始化的模块状态，
+ * 为什么不放在 `ai/uiRuntime` 里让所有人去 import 它：`features/plugins/` 全目录都不准静态依赖
+ * 样式运行时（P92-F 整窗白屏的根因就是插件层在求值期撞进 uiRuntime 未初始化的模块状态，
  * 环守卫把这条写成了禁止边）。而插件库那颗开关的 tooltip 恰恰要知道"在画的是谁"才说得出
- * "启用这颗会挤掉谁"。所以把这份状态挪到叶子里：**写的人只有一个（extRuntime），读的人随便读**。
+ * "启用这颗会挤掉谁"。所以把这份状态挪到叶子里：**写的人只有一个（uiRuntime），读的人随便读**。
  *
  * 与 `marketPending.ts` 同形状：内存表 + 订阅，别处只读不写。
  */
@@ -14,7 +14,7 @@ export interface ActiveThemeFacts {
   id: string;
   name: string;
   builtin: boolean;
-  /** 它属于哪个包（插件主题才有）——启停只能拿它去 `pluginStore.setEnabled` */
+  /** 它属于哪个包（插件主题才有）——切换只走 `pluginEngine.setActiveTheme` */
   pluginId: string | null;
   scheme: "dark" | "light";
   /** 明暗归属的出处：`inherit` 那一条必须点名（主题自己没给依据） */
@@ -64,7 +64,7 @@ export const EMPTY_THEME_FACTS: ActiveThemeFacts = {
 
 let facts: ActiveThemeFacts = EMPTY_THEME_FACTS;
 
-/** 唯一的写者：`ai/extRuntime.applyStyleExts()` */
+/** 唯一的写者：`ai/uiRuntime.applyThemeRuntime()` */
 export function setActiveThemeFacts(next: ActiveThemeFacts): void {
   facts = next;
 }

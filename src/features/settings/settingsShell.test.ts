@@ -130,7 +130,7 @@ describe("P155-S · 设置页列宽与顶线", () => {
       expect(bodyOfRule(sel), `${sel} 没引用 --set-col-w（改一处漏一处就是 P155 前那种错位）`).toContain("var(--set-col-w)");
     }
     expect(bodyOfRule(".msp"), "模型页没引用").toContain("var(--set-col-w)");
-    expect(bodyOfRule(".set-ext-page"), "插件页没引用").toContain("var(--set-col-w)");
+    expect(bodyOfRule(".set-plugins-page"), "插件页没引用").toContain("var(--set-col-w)");
   });
 
   it("全页打开时身份栏不画分级线：ib-fullpage 只由 fullPage 一个来源驱动", () => {

@@ -10,7 +10,7 @@
  *   保存为主题扩展后清层，由扩展层接管——保存即持久化边界，此后撤销令牌失效。
  * - 值校验：长度上限 + 禁 CSS 结构字符（;{}）+ 单位类 token 白名单格式，防注入与误值。
  *
- * 依赖方向：本模块不 import 任何 ai/ 模块（extRuntime/widgetHub 均引 chatStore，静态引入会与
+ * 依赖方向：本模块不 import 任何 ai/ 模块（uiRuntime/widgetHub 均引 chatStore，静态引入会与
  * chatStore→agentRun→agentAdapter→本模块构成循环）；iframe 广播经 setOverlayChangeCb 由 widgetHub 注册。
  * `styles/rootVars` 是零 import 叶子，两侧都可静态引，不构成环（§8-33）。
  */

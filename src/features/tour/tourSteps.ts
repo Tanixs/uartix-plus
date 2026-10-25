@@ -138,9 +138,9 @@ const CONTENT: RawStep[] = [
     title: { zh: "让它造东西，也给它装东西", en: "Let it build things" },
     body: {
       zh:
-        "同一条 Agent 任务能把成果存成插件留在你机器上：主题 / 小部件 / 面板 / 工作区预设 / 任务模板，存下就自动启用，之后在 设置 → 插件管理 统一启停、导出、退回上一版。带 JS 的「逻辑模块」是例外——它跑在专用 Worker 里、启用前先自证封网，永远不会自动启用，要你自己点一次。",
+        "同一条 Agent 任务能把成果存成插件草稿：面板 / 主题 / 小部件 / 工作区预设 / 任务模板。草稿不是插件——不进已装清单、不能启动；可以先在草稿行点「预览」看效果，再点「转正为插件」并过权限批准卡。装进来默认停用，启用后它的面板才会进「+ 面板」。",
       en:
-        "The same task can save its output as local plugins: themes / widgets / panels / workspace presets / task templates auto-enable and are managed under 设置 → 插件管理. JS-bearing 逻辑模块 never auto-enables — it runs in a dedicated Worker and must prove its network lockdown first.",
+        "The same task can save its output as plugin drafts: panels / themes / widgets / workspace presets / task templates. A draft is not an installed plugin — it cannot start; preview it first, then choose Convert to plugin and pass the permission card. Installed plugins start disabled, and a panel only joins + Panel after you enable it.",
     },
     selector: '[data-tour="ai"]',
   },
@@ -150,9 +150,9 @@ const CONTENT: RawStep[] = [
     title: { zh: "装东西的地方", en: "Where packages come from" },
     body: {
       zh:
-        "标题栏这颗开「插件管理」，里面那颗「插件市场」是货架：只在你打开那一页时才联网，平时一次外发都没有。装进来的包一律是停用态，还要你去启用才会生效；覆盖本机已有版本的那种会停在右下角那张确认卡上等你点「装入」。想换成自己的货架，点市场页顶上那颗齿轮——索引地址与镜像前缀两行旁边会当场告诉你填的这条会不会被用上。",
+        "标题栏这颗开「插件管理」；里面那颗「插件市场」按 GitHub 话题 uartix-plugin 检索，卡片带仓库封面，点开能看 README 预览。安装前逐条列出权限并要求批准，装进来是停用态，还要你启用才会生效。市场只在打开并搜索时联网。",
       en:
-        "This title-bar button opens 插件管理; its 插件市场 tab is the shelf, and it only goes online when you open that page. Installed packages land disabled — you enable them; anything overwriting a local version stops on the confirm card in the corner. The gear at the top of the market page holds the index URL and mirror prefix, and it says right there whether what you typed will actually be used.",
+        "This title-bar button opens plugin management; its market searches the GitHub topic uartix-plugin, shows repo covers and README previews. Installing lists permissions and requires approval; packages land disabled until you enable them. The market is online only while you open and search it.",
     },
     selector: '[data-tour="plugins"]',
   },
@@ -172,8 +172,8 @@ const DONE: RawStep = {
   title: { zh: "完成 · 去哪继续", en: "Done · Where to go next" },
   body: {
     // 「帮助（? ）」那半句是假的：全软件没有 ? 这个键位（B12 之后帮助只有按钮与命令面板两条路）。
-    zh: "进阶玩法：自动编排器搭自动化、3D 轨迹看姿态、虚拟设备工坊无硬件仿真、录制定整场会话随时回放；标题栏那颗拼图开的是「插件管理」，从那里进「插件市场」看别人做好的主题与面板（只有打开市场那一页才联网）。想重看本引导：标题栏的「帮助」顶部那颗按钮，或按 Ctrl+Shift+P 搜「重播入门引导」。AI 与插件的细节在「AI 助手详解」「插件与创造」「插件市场」三页。",
-    en: "Next: the orchestrator for automation, 3D trajectories, the virtual device workshop for hardware-free testing, and session recording/replay. The puzzle button in the title bar opens the plugin library - the market is one click inside it (it only goes online when that page is open). To replay this tour use the button at the top of Help, or press Ctrl+Shift+P and search for the guided tour. The AI and plugin details live on the AI, plugins and market pages.",
+    zh: "进阶玩法：自动编排器搭自动化、3D 轨迹看姿态、虚拟设备工坊无硬件仿真、录制定整场会话随时回放；标题栏那颗拼图开的是「插件管理」，从那里进「插件市场」搜 GitHub 话题（只有打开并搜索时才联网）。想重看本引导：标题栏的「帮助」顶部那颗按钮，或按 Ctrl+Shift+P 搜「重播入门引导」。AI 与插件的细节在「AI 助手详解」「插件与创造」「插件市场」三页。",
+    en: "Next: the orchestrator for automation, 3D trajectories, the virtual device workshop for hardware-free testing, and session recording/replay. The puzzle button in the title bar opens plugin management, where the market searches GitHub topics (online only while you search). To replay this tour use the button at the top of Help, or press Ctrl+Shift+P and search for the guided tour. The AI and plugin details live on the AI, plugins and market pages.",
   },
 };
 

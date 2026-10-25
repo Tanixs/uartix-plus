@@ -30,7 +30,7 @@ const plot = vi.hoisted(() => ({
   sampleRate: vi.fn(() => 50),
 }));
 vi.mock("../plot/plotStore", () => plot);
-vi.mock("../ai/extRuntime", () => ({ applyStyleExts: vi.fn() }));
+vi.mock("../ai/uiRuntime", () => ({ applyThemeRuntime: vi.fn() }));
 
 const { SUBAGENT_FACE, SUBAGENT_CAPS, subagentCaps, subagentCapHit, subagentToolEntries } = await import("./subagent");
 const { createReadOnlyAgentAdapter } = await import("./agentAdapter");

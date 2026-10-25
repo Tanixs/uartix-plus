@@ -15,7 +15,6 @@ export const HIGH_ONLY = new Set([
   "addPage",
   "openPort",
   "closePort",
-  "removeWidget",
   // 从站/轮询会主动占用总线发数据，等同发送权限
   "modbus",
   // 哨兵可暂停监测/清报警，属全局控制
@@ -32,6 +31,7 @@ export const HIGH_ONLY = new Set([
 
 export const APP_ACTION_KINDS = [
   "openPanel",
+  "openSettings",
   "applyPreset",
   "setTheme",
   "listProtocols",
@@ -69,8 +69,6 @@ export const APP_ACTION_KINDS = [
   "listWidgets",
   "openWidget",
   "closeWidget",
-  "popWidget",
-  "removeWidget",
 ] as const;
 
 export type AppActionKind = (typeof APP_ACTION_KINDS)[number];

@@ -142,7 +142,7 @@ export type DevOpenView = (typeof DEV_OPEN_VIEWS)[number];
  */
 export const DEV_SETTINGS_TABS = [
   "general", "appearance", "workspace", "data", "monitor", "io", "ai", "model",
-  SETTINGS_TAB_PLUGINS, "mcp", "about",
+  SETTINGS_TAB_PLUGINS, "profiles", "mcp", "about",
 ] as const;
 
 /** 纯函数：把「能不能生效」与 import.meta.env 解耦，好让测试能同时钉住两侧。缺省即拒绝。 */

@@ -9,7 +9,7 @@
  * 于是这里钉三条，都是能被源码反驳的：
  *  ① 空态标题必须与面板注册表里那一行的中文名**同词**（一处改名另一处红）；
  *  ② 空态文案里用「」点名的每个控件，全仓库必须真有一句 `tx("<那名>"…` 在用这个名字；
- *  ③ 扩展面板缺名时的兜底叫「AI 扩展面板」，与两处分组标题同词，旧名「AI 面板」不再出现。
+ *  ③ 插件面板缺名时的兜底叫「AI 插件面板」，与两处分组标题同词，旧名「AI 面板」不再出现。
  * 另加自证：②的抓取式必须真抓到东西，否则这是一条哑测试（§8-43②）。
  */
 import { describe, expect, it } from "vitest";
@@ -74,12 +74,9 @@ describe("P120 · AI 叫法与空态指向", () => {
     expect(missing, `文案点名了这些控件却没有一颗控件叫这个名字（改了界面忘改文案）：${missing.join("、")}`).toEqual([]);
   });
 
-  it("③ 扩展面板缺名兜底叫「AI 扩展面板」，旧名「AI 面板」不再作为话术出现", () => {
-    expect(PANELS, "页签标题的兜底名漂回「AI 面板」了").toContain('tx("AI 扩展面板"');
-    expect(APP, "加面板那处的兜底名漂回「AI 面板」了").toContain('tx("AI 扩展面板"');
-    expect(PANELS + APP, "「AI 面板」这个旧名不该再出现在界面话术里").not.toContain('tx("AI 面板"');
-    // 两处分组标题（工具栏「+ 面板」的 optgroup、导轨「视图」的段标题）也得是同一个词
-    expect(APP).toContain('tx("AI 扩展面板", "AI extension panels")');
-    expect(read("../../shell/RailPanel.tsx")).toContain('tx("AI 扩展面板", "AI extension panels")');
+  it("③ 插件面板统一叫「插件面板」，旧名「AI 插件面板」不再出现", () => {
+    expect(PANELS, "页签标题的兜底名漂了").toContain('tx("插件面板", "Plugin panel")');
+    expect(APP, "加面板那处的分组名漂了").toContain('tx("插件面板", "Plugin panels")');
+    expect(PANELS + APP, "旧的「AI 插件面板」叫法不该再出现").not.toContain("AI 插件面板");
   });
 });

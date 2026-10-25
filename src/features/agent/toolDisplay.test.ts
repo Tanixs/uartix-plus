@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-// hostEntries 会把工具组（含 settingsStore/pluginStore）拉进依赖图，这些 store 在模块
+// hostEntries 会把工具组（含 settingsStore/插件引擎）拉进依赖图，这些 store 在模块
 // 初始化时就摸 localStorage。静态 import 会被提升到 stub 之前执行，所以这里必须用
 // 项目既有的"先 stub 再 await import"写法（与 generalTools.test / uiTools.test 同一手法）。
 const memStorage = new Map<string, string>();
@@ -27,8 +27,8 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
   });
 
   it("summarizeArgs：登记工具产出中文摘要，未登记返回空串", () => {
-    expect(summarizeArgs("save_plugin", { kind: "panel", name: "巡检台", enable: true })).toBe(
-      "保存面板插件「巡检台」并启用",
+    expect(summarizeArgs("plugin_draft_save", { id: "user.demo", files: { "plugin.json": "{}" } })).toBe(
+      "写草稿 user.demo（1 个文件）",
     );
     expect(summarizeArgs("settings_preview_patch", { patch: { theme: "dark", zoom: 110 } })).toBe(
       "修改 theme、zoom",
@@ -133,35 +133,6 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
     expect(bare, `这些码在时间线上是裸 snake_case：${bare.join("、")}`).toEqual([]);
   });
 
-  it("P99c-C2：市场装链的码由契约层穷举表供给，这里只合表（重抄一份就会漂）", async () => {
-    const { INSTALL_CODE_ZH } = (await import("../market/marketIndex")) as typeof import("../market/marketIndex");
-    const codes = Object.keys(INSTALL_CODE_ZH);
-    expect(codes.length, "契约表空了＝合表这件事根本没发生").toBeGreaterThan(6);
-    for (const c of codes) {
-      if (c === "ok") continue; // 成功码不走徽章兜底那条路
-      expect(receiptStatusText(false, "not_executed", c), `${c} 没跟着渲染成中文`).not.toBe(c);
-    }
-    // 反向半边：装链源码里**回出去**的每个码都必须在这张表里。
-    // 只扫 `code: "x"` 是不够的——内核的失败走 `bad("undeclared_capability", …)`，
-    // 那样从表里删一个码，运行时这条钉一声不响（证伪实测过）。
-    const fsSpec = "node:fs";
-    const { readFileSync } = (await import(fsSpec)) as unknown as { readFileSync: (p: string, enc?: string) => string };
-    const urlSpec = "node:url";
-    const { fileURLToPath } = (await import(urlSpec)) as unknown as {
-      fileURLToPath: (u: string | URL) => string;
-    };
-    const src = readFileSync(fileURLToPath(new URL("../market/marketInstall.ts", import.meta.url)), "utf8");
-    const used = new Set<string>([
-      ...[...src.matchAll(/code:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),
-      ...[...src.matchAll(/\bbad\(\s*"([a-z0-9_]+)"/g)].map((m) => m[1]),
-    ]);
-    expect(used.size, "一个码都没扫到＝抓取式与源码脱钩了（§8-43②）").toBeGreaterThan(4);
-    const orphans = [...used].filter((c) => !codes.includes(c));
-    expect(orphans, `这些码在装链里回出去却没有中文：${orphans.join("、")}`).toEqual([]);
-    const bare = [...codes].filter((c) => c !== "ok" && receiptStatusText(false, "not_executed", c) === c);
-    expect(bare, `表在但没接到徽章上：${bare.join("、")}`).toEqual([]);
-  });
-
   it("receiptRows：标量直列、嵌套对象折叠键名、数组限量、绝不抛错", () => {
     expect(receiptRows(null)).toEqual([]);
     expect(receiptRows(42)).toEqual([{ k: "结果", v: "42" }]);
@@ -175,11 +146,11 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
     const real = [
       "settings_read", "settings_describe", "settings_apply", "settings_preview_patch",
       "plot_channels", "plot_window", "read_artifact", "run_app_action",
-      "save_plugin", "enable_plugin", "list_plugins", "rollback_plugin",
       "fs_read", "fs_list", "fs_write", "fs_grep", "fs_glob", "fs_edit", "session_read", "web_fetch", "web_search", "shell_exec", "repo_check",
       "theme_read", "theme_patch", "theme_preset", "image_swatch", "asset_put", "asset_list", "save_theme_extension", "style_commit", "style_append",
       "ui_inventory", "ui_inspect", "style_patch", "style_revert", "theme_audit", "theme_preview", "app_state",
-      "app_catalog", "app_read", "propose_market_install", "layout_apply", "chrome_set", "task_plan", "subagent",
+      "app_catalog", "app_read", "layout_apply", "chrome_set", "task_plan", "subagent",
+      "plugin_draft_list", "plugin_draft_save", "plugin_draft_discard", "plugin_draft_promote",
     ];
     // 清单本身也要跟注册表对齐：两边谁漂了都红
     expect(hostEntryNames().sort()).toEqual([...real].sort());
@@ -202,12 +173,9 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
     }
   });
 
-  it("P97-I6：升版与新建在卡片上要分得出来，产物种类中文名穷举", () => {
-    // 新增 ArtifactKind 而未配中文名 → 这行会红（kindZh 已收成 Record<ArtifactKind,…>，tsc 同样会拦）
-    expect(summarizeArgs("save_plugin", { kind: "panel", name: "电池", update: "user.agent.x" })).toBe("更新插件「电池」");
-    expect(summarizeArgs("save_plugin", { kind: "panel", name: "电池" })).toBe("保存面板插件「电池」");
-    expect(summarizeArgs("save_plugin", { kind: "未知种类", name: "X" })).toBe("保存未知种类插件「X」");
-    expect(summarizeArgs("rollback_plugin", { id: "user.agent.a" })).toBe("退回插件 user.agent.a 上一版");
+  it("草稿工具有各自的中文摘要（不再有 save_plugin 这类旧工具）", () => {
+    expect(summarizeArgs("plugin_draft_promote", { name: "user.demo-v1" })).toBe("请求转正草稿 user.demo-v1");
+    expect(summarizeArgs("plugin_draft_discard", { name: "user.demo-v1" })).toBe("丢弃草稿 user.demo-v1");
   });
 
   it("P90 B5：run_app_action 摘要按 kind 中文化并带上目标名", () => {
@@ -219,7 +187,7 @@ describe("toolDisplay：Agent 工具人类可读展示（P88d ④）", () => {
 
   it("P90 B5：未登记名可读兜底，不出现裸 snake_case / camelCase", () => {
     expect(toolLabel("brand_new_tool")).toBe("brand new tool");
-    expect(toolLabel("save_plugin")).toBe("保存插件");
+    expect(toolLabel("plugin_draft_save")).toBe("写插件草稿");
     expect(actionKindLabel("someFutureKind")).toBe("some future kind");
   });
 });

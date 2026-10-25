@@ -23,9 +23,6 @@ import { asSubagentData, nestedSubagentUsage, parseArgs, receiptRows, receiptSta
 // 台账→文本、状态人话、预算 ∞：与「导出对话为 md」共用同一份（P133-I，搬进 runLog.ts）
 import { capOf, serializeLog, statusLabel } from "./runLog";
 import { tx, useLocale } from "../../i18n/strings";
-// 插件库真值（停用按钮态）：AgentInline 是 UI 叶子，静态引入不成环
-// （pluginStore→extRuntime→chatStore→agentRun 链上没有任何一环回头引本文件）
-import { getSnapshot as getPluginSnapshot, subscribe as subscribePlugins } from "../plugins/pluginStore";
 
 function fmtClock(ts?: number): string {
   if (!ts) return "";
@@ -161,23 +158,6 @@ function ToolCard({
   trim?: "excerpt" | "dropped";
 }) {
   const [open, setOpen] = useState(false);
-  // P90 E4：任务保存的插件就地一键停用（覆盖层已清、撤销令牌已失效，"停用"才是恢复路径）。
-  // P91 D2：按钮态一律读插件库真值——旧实现用局部 useState，刷新后对已停用的插件
-  // 仍然再给一次「停用」，失败只写在 console 里（用户看到的就是"点了没反应"）。
-  const plugins = useSyncExternalStore(subscribePlugins, getPluginSnapshot);
-  const pluginId =
-    receipt.ok && typeof (receipt.data as { pluginId?: unknown } | undefined)?.pluginId === "string"
-      ? (receipt.data as { pluginId: string }).pluginId
-      : "";
-  const plugin = pluginId ? plugins.plugins.find((p) => p.pkg.id === pluginId) : undefined;
-  const disablePlugin = async () => {
-    const { setEnabled } = await import("../plugins/pluginStore");
-    const r = setEnabled(pluginId, false);
-    if (!r.ok) {
-      const { toast } = await import("../ai/extRuntime");
-      toast(tx(`停用失败：${r.msg}`, `Disabling failed: ${r.msg}`));
-    }
-  };
   const parsed = parseArgs(args);
   /** 卡上的话术是 `tx()` 出来的，切换语言时得有人重渲染（这几个渲染文案的小组件各按一次同一个钩子） */
   useLocale();
@@ -268,27 +248,6 @@ function ToolCard({
               {tx(
                 `这次调用返回的正文因落盘上限整份省略（原本 ${restOmitted} 字）；状态与结果码仍在，要内容请重新调用该工具。`,
                 `The body of this receipt was omitted at rest (${restOmitted} chars originally); status and codes remain - re-run the tool if you need the content.`,
-              )}
-            </div>
-          )}
-          {pluginId && (
-            <div className="ai-agent-kv">
-              <span className="ai-agent-k">{tx("持久化", "Persistence")}</span>
-              {!plugin ? (
-                <span className="ai-agent-v dim">{tx("插件已不在库中（记录保留）", "the plugin is no longer in the library (record kept)")}</span>
-              ) : plugin.state !== "enabled" ? (
-                <span className="ai-agent-v dim">{tx("已停用（插件库可重新启用）", "disabled (re-enable it in the plugin library)")}</span>
-              ) : (
-                <button
-                  className="ai-agent-undo"
-                  title={tx(
-                    `停用插件「${plugin.pkg.name}」，界面立即恢复；也可到 设置 → 插件管理 处理`,
-                    `Disable plugin “${plugin.pkg.name}” and the UI reverts at once; also under Settings → Plugins`,
-                  )}
-                  onClick={() => void disablePlugin()}
-                >
-                  {tx("在插件库停用", "Disable in plugin library")}
-                </button>
               )}
             </div>
           )}
@@ -461,7 +420,7 @@ function RunBlock({ view }: { view: AgentRunView }) {
     void Promise.resolve()
       .then(fn)
       .catch(async (e: unknown) => {
-        const { toast } = await import("../ai/extRuntime");
+        const { toast } = await import("../ai/uiRuntime");
         const reason = e instanceof Error ? e.message : String(e);
         toast(tx(`任务操作失败：${reason}`, `Task action failed: ${reason}`));
       })
@@ -693,7 +652,7 @@ export const RunEntry = memo(function RunEntry({ view }: { view: AgentRunView })
     void Promise.resolve()
       .then(() => agentRun.retryRun(view.runId))
       .catch(async (e: unknown) => {
-        const { toast } = await import("../ai/extRuntime");
+        const { toast } = await import("../ai/uiRuntime");
         toast(tx(`续跑失败：${e instanceof Error ? e.message : String(e)}`, `Resume failed: ${e instanceof Error ? e.message : String(e)}`));
       })
       .finally(() => setBusy(""));

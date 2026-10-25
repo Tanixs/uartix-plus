@@ -29,7 +29,7 @@ import * as plotStore from "../plot/plotStore";
 import * as imageStore from "../ai/imageStore";
 import * as sentinelStore from "../sentinel/sentinelStore";
 import { playAlertTone } from "../sentinel/sentinelSound";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { OrchEngine, type OrchDeps } from "./engine";
 import { flowInterpolateHex, flowInterpolateText } from "./sendTpl";
 import * as orchestratorStore from "./orchestratorStore";

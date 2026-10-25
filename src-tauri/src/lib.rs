@@ -14,8 +14,8 @@ mod parser;
 mod pipeline;
 mod ring;
 mod serial;
-mod ext_fs;
-mod ext_host;
+mod plugin_fs;
+mod plugin_host;
 mod session;
 mod vdev;
 mod xfer;
@@ -215,7 +215,7 @@ pub fn run() {
         .manage(session::SessionState::default())
         .manage(bridge::BridgeState::new())
         .manage(bridge_jobs::JobsState::new())
-        .manage(ext_host::ExtHostState::default())
+        .manage(plugin_host::PluginHostState::default())
         .invoke_handler(tauri::generate_handler![
             busevt::ipc_subscribe,
             busevt::ipc_stats,
@@ -298,23 +298,24 @@ pub fn run() {
             agent_tools::agent_http_get,
             github_publish::github_publish,
             market_fetch::market_fetch,
-            ext_fs::ext_paths,
-            ext_fs::ext_probe_node,
-            ext_fs::ext_fs_write,
-            ext_fs::ext_fs_write_b64,
-            ext_fs::ext_fs_read,
-            ext_fs::ext_fs_list,
-            ext_fs::ext_fs_remove,
-            ext_fs::ext_store_read,
-            ext_fs::ext_store_write,
-            ext_fs::ext_copy_dir,
-            ext_fs::ext_promote,
-            ext_fs::ext_remove_tree,
-            ext_host::ext_host_start,
-            ext_host::ext_host_send,
-            ext_host::ext_host_touch,
-            ext_host::ext_host_stop,
-            ext_host::ext_host_status,
+            plugin_fs::plugin_paths,
+            plugin_fs::plugin_probe_node,
+            plugin_fs::plugin_fs_write,
+            plugin_fs::plugin_fs_write_b64,
+            plugin_fs::plugin_fs_append,
+            plugin_fs::plugin_fs_read,
+            plugin_fs::plugin_fs_list,
+            plugin_fs::plugin_fs_remove,
+            plugin_fs::plugin_store_read,
+            plugin_fs::plugin_store_write,
+            plugin_fs::plugin_copy_dir,
+            plugin_fs::plugin_promote,
+            plugin_fs::plugin_remove_tree,
+            plugin_host::plugin_host_start,
+            plugin_host::plugin_host_send,
+            plugin_host::plugin_host_touch,
+            plugin_host::plugin_host_stop,
+            plugin_host::plugin_host_status,
             // 双击 .uopk（文件关联）时前端 operatorStore 经它取走待打开路径。
             // 这条曾经**只定义了没注册**，前端 invoke 直接 reject 又被空 catch 吞掉 ⇒ 表现为"双击没反应"；
             // 现由 .tools/check-commands-registered.cjs 钉住（§8-P44"注册命令≠State 可用"的镜像形状）。

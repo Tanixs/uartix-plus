@@ -12,7 +12,7 @@ import * as commandStore from "../controls/commandStore";
 import * as plotStore from "../plot/plotStore";
 import * as templateStore from "../protocol/templateStore";
 import { Inspector, VarsEditor, type Sel } from "./OrchestratorInspector";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { useListDrag, type DragPos } from "../../shared/useListDrag";
 import { attachPdragZone } from "../../shared/pointerDrag";
 import { alertDialog, confirmDialog } from "../../shared/Dialog";
@@ -434,7 +434,7 @@ export function OrchestratorPanel() {
   /* ---------- C1：Operator 只读边界 ----------
      边界（用户拍板「禁编辑、允许运行」）：结构/配置类入口置灰，
      总开关、▶ 运行、日志、导出、折叠、选中查看一律可用。
-     store 层另有同等守卫（AI/MCP/扩展面板调用也受约束），这里只做「点不动」的可见性。 */
+     store 层另有同等守卫（AI/MCP/插件面板调用也受约束），这里只做「点不动」的可见性。 */
   const readOnly = useOperator().pkg !== null;
   /** 只读时统一的一句说明，挂在所有被禁用的编辑入口 title 上 */
   const roTip = readOnly

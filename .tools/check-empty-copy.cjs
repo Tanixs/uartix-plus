@@ -52,9 +52,9 @@ const BUDGETS = {
   "src/features/protocol/PropertiesPanel.tsx": 13,
   "src/features/console/QuickCommandBar.tsx": 11,
   "src/features/vdev/VdevPanel.tsx": 8,
-  "src/features/plugins/PluginLibraryDialog.tsx": 7,
-  /* P161 详情多图：空态只说"还没有截图 + 上限"，20 字是实测值；不加操作教程。 */
-  "src/features/plugins/PluginShotGallery.tsx": 20,
+  /* R2：旧插件不再展示后，新引擎列表的空态只留"还没有代码插件"一句回执；
+     安装入口就在右上角，不再写一段安装教程。实测 7 字。 */
+  "src/features/plugins/engine/PluginEngineSection.tsx": 7,
   /* P163 设置搜索：无匹配只报"没有匹配的设置或页面"，10 字；不写搜索技巧。 */
   "src/features/settings/SettingsModal.tsx": 10,
   /* P133-G：模型设置页删掉最后一家供应商之后表可以真空了（原先"删空就回 seed"，

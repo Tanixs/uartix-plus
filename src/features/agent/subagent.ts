@@ -30,7 +30,7 @@ export const SUBAGENT_FACE = [
   "settings_describe", "settings_read", "settings_preview_patch",
   "theme_read", "asset_list", "image_swatch",
   "ui_inventory", "ui_inspect", "theme_audit",
-  "app_catalog", "app_read", "app_state", "list_plugins",
+  "app_catalog", "app_read", "app_state", "plugin_draft_list",
   "read_artifact",
   "fs_read", "fs_list", "fs_grep", "fs_glob", "session_read",
   "web_fetch", "web_search",

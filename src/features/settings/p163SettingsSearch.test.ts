@@ -15,17 +15,17 @@ const tabs: SettingsTabLike[] = [
   { key: "appearance", label: "外观", group: "基础", sub: "配色与覆盖层" },
   { key: "workspace", label: "工作区", group: "基础" },
   { key: "ai", label: "AI 服务", group: "AI 与 Agent" },
-  { key: "ext", label: "插件管理", group: "扩展" },
-  { key: "mcp", label: "集成", group: "扩展" },
+  { key: "plugins", label: "插件管理", group: "插件与集成" },
+  { key: "mcp", label: "集成", group: "插件与集成" },
   { key: "about", label: "About", group: "Misc" },
 ];
 
 describe("P163 · 设置搜索", () => {
   it("页面名/分组/说明可命中，前缀优先", () => {
     expect(searchSettings("外观", tabs)[0]).toMatchObject({ kind: "tab", tab: "appearance" });
-    expect(searchSettings("插件", tabs)[0]).toMatchObject({ kind: "tab", tab: "ext" });
+    expect(searchSettings("插件", tabs)[0]).toMatchObject({ kind: "tab", tab: "plugins" });
     expect(searchSettings("appear", tabs)[0]).toMatchObject({ kind: "tab", tab: "appearance" });
-    expect(searchSettings("扩展", tabs).length).toBeGreaterThanOrEqual(2);
+    expect(searchSettings("插件与集成", tabs).length).toBeGreaterThanOrEqual(2);
   });
 
   it("注册设置项命中并映射到正确页面", () => {

@@ -46,6 +46,12 @@ pub(crate) fn clamp_max(requested: u64) -> Result<u64, String> {
     })
 }
 
+/// 只有这个域值得带上用户的 GitHub token（搜索/README 的匿名限流是 10 次/分钟，很容易 403）。
+/// **codeload / raw 不带**：把 token 发给归档主机等于多一处外泄面，而公开仓库的 tarball 根本不需要它。
+fn auth_worthy_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("api.github.com")
+}
+
 /// 市场取回：白名单域 + https + 拒重定向 + 硬字节上限，返回 base64 与 sha256。
 #[tauri::command]
 pub async fn market_fetch(
@@ -54,6 +60,7 @@ pub async fn market_fetch(
     max_bytes: u64,
     proxy: Option<String>,
     no_proxy: Option<String>,
+    token: Option<String>,
 ) -> Result<Value, String> {
     let cap = clamp_max(max_bytes)?;
     let lower = url.trim().to_lowercase();
@@ -71,8 +78,18 @@ pub async fn market_fetch(
     let client = crate::ai::build_client(proxy.as_deref(), no_proxy.as_deref(), Some(MARKET_TIMEOUT))
         .map_err(|e| format!("建请求失败：{e}"))?;
     let started = Instant::now();
-    let resp = client
+    // GitHub 的 API 对**没有 User-Agent 的请求直接返 403**（实测：无 UA→403、带 UA→200）。
+    // 这条 UA 不是装饰——缺了它，市场搜索在完全没限流的情况下也会 403，用户看到的就是"拉不到"。
+    let mut req = client
         .get(&url)
+        .header("User-Agent", "UartixPlus/0.5 (Tauri)")
+        .header("Accept", "application/vnd.github+json");
+    // 带 token 只为抬高 api.github.com 的搜索限流；token 只发给 api.github.com，不给 codeload/raw。
+    let tok = token.unwrap_or_default();
+    if !tok.trim().is_empty() && auth_worthy_host(&host) {
+        req = req.bearer_auth(tok.trim());
+    }
+    let resp = req
         .send()
         .await
         .map_err(|e| {
@@ -170,5 +187,15 @@ mod tests {
         assert!(is_private_host("localhost"));
         assert!(is_private_host("169.254.1.1")); // 云元数据地址
         assert!(!is_private_host("raw.githubusercontent.com"));
+    }
+
+    #[test]
+    fn token_only_goes_to_the_api_host_never_the_archive() {
+        // 抬高搜索限流只针对 api.github.com；把 token 发给 codeload/raw 等于多一处外泄面
+        assert!(auth_worthy_host("api.github.com"));
+        assert!(auth_worthy_host("API.GitHub.com")); // 大小写不敏感
+        assert!(!auth_worthy_host("codeload.github.com"));
+        assert!(!auth_worthy_host("raw.githubusercontent.com"));
+        assert!(!auth_worthy_host("github.com"));
     }
 }

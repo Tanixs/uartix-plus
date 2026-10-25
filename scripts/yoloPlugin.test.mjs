@@ -19,9 +19,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { BOOTSTRAP_SOURCE } from "../src/features/extensions/bootstrap.ts";
-import { encodeMessage } from "../src/features/extensions/protocol.ts";
-import { validateExtension } from "../src/features/extensions/manifest.ts";
+import { BOOTSTRAP_SOURCE } from "../src/features/plugins/engine/bootstrap.ts";
+import { encodeMessage } from "../src/features/plugins/engine/protocol.ts";
+import { validateExtension } from "../src/features/plugins/engine/manifest.ts";
 
 const TOKEN = "yolo-probe-1";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -129,6 +129,17 @@ describe("P174-A9 · config.yaml 生成与回读", () => {
   });
 });
 
+describe("P174-A9 · 训练时长格式", () => {
+  it("秒 → 人能读的写法；缺失/0 返回空串（界面显示成「—」）", async () => {
+    const mod = await import("../../plugins/uartix.yolo/main.mjs");
+    expect(mod.fmtDuration(25)).toBe("25s");
+    expect(mod.fmtDuration(95)).toBe("1m 35s");
+    expect(mod.fmtDuration(3725)).toBe("1h 02m");
+    expect(mod.fmtDuration(0)).toBe("");
+    expect(mod.fmtDuration(undefined)).toBe("");
+  });
+});
+
 /* ============================ 整条链：真起插件进程 ============================ */
 
 /**
@@ -212,7 +223,7 @@ function makeWorkspace(tag) {
   writeFileSync(path.join(ws, "datasets", "x", "images", "val", "b0.jpg"), "x");
 
   writeFileSync(path.join(ws, "runs", "exp1", "results.csv"),
-    "epoch,metrics/mAP50(B),metrics/mAP50(M),metrics/mAP50-95(M)\n1,0.5,0.6,0.4\n2,0.7,0.75,0.6\n", "utf8");
+    "epoch,time,metrics/mAP50(B),metrics/mAP50(M),metrics/mAP50-95(M)\n1,12.5,0.5,0.6,0.4\n2,25,0.7,0.75,0.6\n", "utf8");
 
   return ws;
 }
@@ -384,6 +395,11 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
       expect(st.runs[0].name).toBe("exp1");
       expect(st.runs[0].epochs).toBe(2);
       expect(st.runs[0].metrics.mAP50M).toBe("0.75");
+      // 训练时长取 results.csv 的累计 time（最后一行的秒数），并给出可显示的写法
+      expect(st.runs[0].durationSec).toBe(25);
+      expect(st.runs[0].durationText).toBe("25s");
+      expect(st.runs[0].finishedAt).toBeGreaterThan(0);
+      expect(st.runs[0].startedAt).toBeLessThan(st.runs[0].finishedAt);
 
       /* ---- 2. saveConfig：只落"与基准不同的那些" ---- */
       const st2 = await c.call("panel.train.saveConfig", { train: { epochs: 7 } });
@@ -467,7 +483,7 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
 /**
  * P174-A11：**真插件**吃到了外部目录。
  *
- * 与契约层那条（`extProbe`）不同，这条走的是 `plugins/uartix.yolo` 本体：
+ * 与契约层那条（`pluginProbe`）不同，这条走的是 `plugins/uartix.yolo` 本体：
  * 它 `state()` 里的 `deploy` 块必须随 `hello.roots` 变化——没绑是 `bound:false`（不是崩），
  * 绑了就得报出 `run.bat` 与配置文件名。这条断了的表现是"面板上部署那块永远是'还没配置'",
  * 而用户明明绑了目录。

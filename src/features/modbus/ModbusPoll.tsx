@@ -3,7 +3,7 @@ import { tx, useLocale } from "../../i18n/strings";
 import { IconPlay, IconStop, IconTrash, IconChevron, IconPlus } from "../../shared/icons";
 import * as poll from "./pollStore";
 import { FC_LABEL } from "./mb";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { HelpHint } from "../../shared/HelpHint";
 
 /**

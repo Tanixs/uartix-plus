@@ -51,10 +51,31 @@ function pick(v: BlockMeta["label"] | BlockMeta["tip"]): string | undefined {
 /** 面板清单（panels.tsx 重模块动态取，只为拿显示名） */
 export async function panelRows(): Promise<{ group: string; panels: { id: string; title: string }[] }[]> {
   const { panelTitleOf } = await import("../../panels/panels");
-  return PANEL_GROUPS.map((g) => ({
+  const rows: { group: string; panels: { id: string; title: string }[] }[] = PANEL_GROUPS.map((g) => ({
     group: panelGroupLabel(g),
     panels: g.ids.map((id) => ({ id, title: panelTitleOf(id) })),
   }));
+  /* R7：插件贡献的面板也要在这张清单里。
+     少这一组，模型就只知道内置面板——"我刚造了一块面板"在它自己的世界观里不存在，
+     更谈不上用 openPanel 打开它。门与「+面板」同一道（已启用 **且** 已批准），
+     所以这里列出来的每一块，模型都真的能打开。 */
+  try {
+    const { getSnapshot } = await import("../plugins/engine/pluginEngine");
+    const { collectPluginPanels } = await import("../plugins/engine/panelBridge");
+    const { panelEnabled } = await import("../plugins/engine/repo");
+    const views = collectPluginPanels(
+      getSnapshot().entries.map((e) => ({ id: e.id, manifest: e.manifest, enabled: panelEnabled(e) })),
+    );
+    if (views.length) {
+      rows.push({
+        group: getLocale() === "en" ? "Plugin panels" : "插件面板",
+        panels: views.map((v) => ({ id: v.viewId, title: v.title })),
+      });
+    }
+  } catch {
+    /* 插件引擎还没就绪（或测试环境没有 Tauri）：清单至少要有内置那些 */
+  }
+  return rows;
 }
 
 export function controlRows(): string[] {

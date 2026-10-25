@@ -13,7 +13,7 @@ import { MatchEditor } from "../sequencer/SequencerPanel";
 import * as sequencerStore from "../sequencer/sequencerStore";
 import * as plotStore from "../plot/plotStore";
 import * as commandStore from "../controls/commandStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { isOperatorLocked } from "../operator/lock";
 import { IconClose, IconPlus } from "../../shared/icons";
 import { evalExpr } from "./expr";

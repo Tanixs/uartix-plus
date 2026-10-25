@@ -1,40 +1,36 @@
 /**
- * P99b-N5：外观选择器的**派生层**（详设 §8-48：新增一面先分派生层）。
+ * P99b-N5 / P174-R4：外观选择器的**派生层**（详设 §8-48：新增一面先分派生层）。
  *
  * 为什么单独一个文件：设置页那张网格里每一格——谁在画、点亮不亮、点下去会发生什么、
- * 有几项沿用兜底——都必须能指回主题表与插件库记录。写进 `SettingsModal` 就没法测，
- * 而这个界面过去恰恰在说谎（`settings.theme` 那枚卡永远显示"选中"，界面其实被插件压着，
- * 见详设 §1-8）。
+ * 有几项沿用兜底——都必须能指回主题表与插件记录。写进 `SettingsModal` 就没法测，
+ * 而这个界面过去恰恰在说谎（`settings.theme` 那枚卡永远显示"选中"，界面其实被插件压着）。
  *
- * 三条口径：
- *  1. **同级**：内置与插件主题排成一张列表，`drawn` 只有一格为真；内置的差别只标在"不可卸载"上；
- *  2. 预览格按**这一格自己**的明暗归属取兜底 —— 只给 `--accent` 的差量主题不该画成灰块；
- *  3. 点一颗插件主题＝**启用那个包**（它会带别的产物一起上屏），这句必须写在 tooltip 里，
- *     不能等点了才发现"我的面板怎么多了一块"。
+ * v3 之后"插件主题"只有一种：已装插件 `contributes.themes` 里的 CSS，由用户显式选为
+ * 当前主题（`pluginEngine.setActiveTheme`）。**不再靠"启用插件"来决定谁在画**——
+ * 启用是"允不允许它的面板/进程工作"，主题是"选哪一身皮"，两件事分开。
  *
- * 话术（tooltip / 回执 / 那行"当前在画的是谁"）在本层用 `tx()` 就近双语，与设置页同一种语言；
- * 但主题**名字**仍由组件经 `labelOf` 注入 —— 内置那几枚的名字住在中心键表（`set.theme.*`）里，
- * 本层再拼一份就等于开第二处名字真值。
+ * 话术（tooltip / 回执 / 那行"当前在画的是谁"）在本层用 `tx()` 就近双语；
+ * 但主题**名字**仍由组件经 `labelOf` 注入——内置那几枚的名字住在中心键表里。
  */
 import { BUILTIN_THEMES, baselineFor } from "../../styles/builtinThemes";
 import { resolveScheme, swatchOf, themeCoverage, type ThemeScheme, type ThemeSource } from "../../styles/themeCore";
-import { setEnabled, themeArtsOf, type PluginRecord } from "../plugins/pluginStore";
+import { varsFromThemeCss } from "../plugins/engine/themeVars";
+import type { InstalledPlugin } from "../plugins/engine/pluginEngine";
+import { setActiveTheme } from "../plugins/engine/pluginEngine";
 import { tx } from "../../i18n/strings";
 import { patch as patchSettings } from "./settingsStore";
 
 /**
- * `contributions` 键 → 人话（tooltip 要说清"还会一起装载什么"）。
+ * `contributes` 键 → 人话（tooltip 要说清"这枚主题来自哪个插件、它还有什么"）。
  * 表里存的是**中英两条**，取值时才翻：在模块求值期翻一次，语言就被钉死在那一刻了。
  */
 const SHIP_LABEL: Record<string, readonly [string, string]> = {
-  styles: ["样式层", "style layers"],
-  widgets: ["小部件", "widgets"],
   panels: ["面板", "panels"],
-  tools: ["工具", "tools"],
-  logics: ["逻辑模块", "logic modules"],
-  workflows: ["工作流模板", "workflow templates"],
+  widgets: ["小部件", "widgets"],
   commands: ["命令", "commands"],
-  presets: ["预设", "presets"],
+  themes: ["主题", "themes"],
+  sections: ["面板插槽", "panel sections"],
+  mutations: ["面板布局改动", "panel mutations"],
 };
 
 const shipLabel = (key: string): string => {
@@ -43,7 +39,7 @@ const shipLabel = (key: string): string => {
 };
 
 export interface ThemeCard {
-  /** 内置用主题 id；`system` 是元选项；插件主题用它的影子扩展 id（与"在画那枚"同一个口径） */
+  /** 内置用主题 id，`system` 是元选项；插件主题用 `plg:<pluginId>:<themeId>` */
   key: string;
   name: string;
   builtin: boolean;
@@ -55,7 +51,7 @@ export interface ThemeCard {
   serving: boolean;
   installed: boolean;
   enabled: boolean;
-  /** 插件主题才有：启停只能拿它去 `pluginStore.setEnabled` */
+  /** 插件主题才有：点它要写的主题键 */
   pluginId: string | null;
   swatch: { bg: string; panel: string; accent: string };
   /** 自己给了几项 / 几项沿用兜底（详设 R6：差量合法，但要说） */
@@ -73,11 +69,11 @@ export interface PickerInput {
   /** 设置里那枚内置选择（含 `system`） */
   settingsTheme: string;
   sysDark: boolean;
-  /** 在画那枚（来自 `extRuntime.activeThemeFacts()`，本层不许自己再判一次） */
+  /** 在画那枚（来自 `uiRuntime.activeThemeFacts()`，本层不许自己再判一次） */
   drawnId: string | null;
   drawnName: string | null;
   drawnPluginId: string | null;
-  records: readonly PluginRecord[];
+  records: readonly InstalledPlugin[];
   builtins?: readonly ThemeSource[];
   /**
    * 内置那几枚的中文名（名字住在中心键表 `set.theme.*` 里，由组件注入；
@@ -86,16 +82,16 @@ export interface PickerInput {
   labelOf?: (id: string) => string;
 }
 
-/** 插件包里的 theme 产物枚举住在 `pluginStore.themeArtsOf`（详设 §8-48：什么叫"带主题产物的包"只能有一处答案）。 */
-function shipsBesides(pkg: PluginRecord["pkg"], themeEntryId: string): string[] {
+/** 插件包除了这枚主题之外还带什么（面板/小部件/命令/另一枚主题）。 */
+function shipsBesides(entry: InstalledPlugin, themeId: string): string[] {
   const out: string[] = [];
-  for (const [key, list] of Object.entries(pkg.contributions ?? {})) {
-    if (key === "themes") {
-      if ((list ?? []).some((it) => it.id !== themeEntryId)) out.push(tx("另一枚主题", "another theme"));
-      continue;
-    }
-    if (list?.length) out.push(shipLabel(key));
-  }
+  const c = entry.manifest.contributes;
+  if (c.panels?.length) out.push(shipLabel("panels"));
+  if (c.widgets?.length) out.push(shipLabel("widgets"));
+  if (c.commands?.length) out.push(shipLabel("commands"));
+  if ((c.themes ?? []).some((t) => t.id !== themeId)) out.push(tx("另一枚主题", "another theme"));
+  if (entry.manifest.inject.sections?.length) out.push(shipLabel("sections"));
+  if (entry.manifest.inject.mutations?.length) out.push(shipLabel("mutations"));
   return out;
 }
 
@@ -123,10 +119,6 @@ export function themeCards(input: PickerInput): ThemeCard[] {
     const p = previewOf(sysTheme);
     cards.push({
       key: "system",
-      /* P105 反馈：这里原来写「跟随系统（现在是亮色）」——括号里那半句是**第二处**说同一件事：
-         它解析到的那枚内置卡片本来就带 `serving`，还会写明「跟随系统」现在用的就是这一枚
-         （见下面 builtins 循环里的那句）。元选项的名字就该只是个名字。
-         名字走 `label("system")` 由组件注入（名字住在中心键表里，见文件头）。 */
       name: label("system"),
       builtin: true,
       meta: true,
@@ -149,11 +141,6 @@ export function themeCards(input: PickerInput): ThemeCard[] {
 
   for (const t of builtins) {
     const p = previewOf(t);
-    /**
-     * `drawn` 只认"设置里选的就是这一枚"，**不认"它正好在供值"**——后者是 `serving`。
-     * 混起来的后果实测过：开着「跟随系统」时，元选项那一格和它代表的那枚内置会**同时**亮着，
-     * 正是详设 §1-8 那句"选择器显示自己选中而界面是别的"的另一个方向。
-     */
     const drawn = !drawnIsPlugin && input.settingsTheme === t.id;
     const serving = servingBuiltin === t.id;
     cards.push({
@@ -176,8 +163,8 @@ export function themeCards(input: PickerInput): ThemeCard[] {
           ? tx("「跟随系统」现在用的就是这一枚", "This is the one “System” is drawing right now")
           : drawnIsPlugin
             ? tx(
-                `点它会切到这一枚，并停用插件主题「${input.drawnName ?? "?"}」（同级之后一次只有一枚在画）`,
-                `Click to use this one and disable plugin theme “${input.drawnName ?? "?"}” (peers — only one is on screen)`,
+                `点它会切到这一枚，插件主题「${input.drawnName ?? "?"}」随之撤下（一次只有一枚在画）`,
+                `Click to use this one and drop plugin theme “${input.drawnName ?? "?"}” (only one is on screen)`,
               )
             : tx("点它切到这枚内置主题；内置不可卸载", "Click to use this built-in theme; built-ins can't be uninstalled"),
       alsoShips: [],
@@ -185,46 +172,43 @@ export function themeCards(input: PickerInput): ThemeCard[] {
   }
 
   for (const rec of input.records) {
-    if (rec.state === "quarantined") continue;
-    for (const art of themeArtsOf(rec.pkg)) {
+    for (const theme of rec.themes) {
+      const vars = varsFromThemeCss(theme.css);
       const t: ThemeSource = {
-        id: art.extId,
-        name: art.name,
+        id: theme.key,
+        name: theme.title,
         builtin: false,
-        scheme: art.artifact.scheme === "dark" || art.artifact.scheme === "light" ? art.artifact.scheme : null,
-        vars: (art.artifact.vars as Record<string, string>) ?? {},
+        scheme: theme.scheme,
+        vars,
       };
       const p = previewOf(t);
-      const enabled = rec.state === "enabled";
-      const drawn = enabled && input.drawnId === t.id;
-      const ships = shipsBesides(rec.pkg, art.entryId);
+      const drawn = input.drawnId === theme.key;
+      const ships = shipsBesides(rec, theme.id);
       cards.push({
-        key: t.id,
-        name: t.name,
+        key: theme.key,
+        name: theme.title,
         builtin: false,
         meta: false,
         drawn,
         serving: drawn,
         installed: true,
-        enabled,
-        pluginId: rec.pkg.id,
+        enabled: rec.enabled,
+        pluginId: theme.key,
         swatch: p.swatch,
-        overrides: Object.keys(t.vars).length,
+        overrides: Object.keys(vars).length,
         inherited: p.inherited,
         scheme: p.scheme,
         talk: drawn
           ? tx("当前在画的就是这一枚（插件主题）", "This is the one on screen (plugin theme)")
-          : enabled
+          : ships.length
             ? tx(
-                "已启用但没在画：还有更晚启用的一枚主题占着，互斥之下只有一枚上屏",
-                "Enabled but not on screen: a later-enabled theme holds the slot — only one shows",
+                `点它把插件「${rec.manifest.name}」的这枚主题设为当前主题（插件本身${rec.enabled ? "已启用" : "未启用"}；同时还有它的${ships.join("、")}）`,
+                `Click to make this theme of “${rec.manifest.name}” the active theme (the plugin is ${rec.enabled ? "enabled" : "disabled"}; it also ships ${ships.join(", ")})`,
               )
-            : ships.length
-              ? tx(
-                  `点它会启用插件「${rec.pkg.name}」，同时装载它的${ships.join("、")}`,
-                  `Click to enable plugin “${rec.pkg.name}”, loading its ${ships.join(", ")}`,
-                )
-              : tx(`点它会启用插件「${rec.pkg.name}」`, `Click to enable plugin “${rec.pkg.name}”`),
+            : tx(
+                `点它把插件「${rec.manifest.name}」的这枚主题设为当前主题（插件本身${rec.enabled ? "已启用" : "未启用"}）`,
+                `Click to make this theme of “${rec.manifest.name}” the active theme (the plugin is ${rec.enabled ? "enabled" : "disabled"})`,
+              ),
         alsoShips: ships,
       });
     }
@@ -246,9 +230,6 @@ export function themeCards(input: PickerInput): ThemeCard[] {
 
 /**
  * 内置与插件主题之间那道横线插在哪：第一枚非内置卡的下标，一枚都没装时 -1。
- *
- * 这条判断放在派生层：视图里写 `!c.builtin && cards[i - 1].builtin` 就是又开一处
- * "哪些算插件主题"的口径（P102 之前它连个形状都没有，全糊在卡面上）。
  */
 export function pluginSectionStart(cards: readonly { builtin: boolean }[]): number {
   return cards.findIndex((c) => !c.builtin);
@@ -288,15 +269,15 @@ export function drawnTalk(f: DrawnFacts): string {
     parts.push(tx(`检测到 ${f.conflicts.length} 枚插件主题同时启用，在画的只有这一枚`, `${f.conflicts.length} plugin themes enabled at once — only this one is on screen`));
   if (f.fellBack) parts.push(tx("设置里记的那枚内置已不存在，回落到第一枚", "the built-in recorded in settings is gone, fell back to the first one"));
   else if (!f.builtin && f.fallbackId)
-    parts.push(tx(`停用这枚插件主题后回到内置「${f.fallbackId}」`, `disabling it returns to built-in “${f.fallbackId}”`));
+    parts.push(tx(`切回内置主题会回到「${f.fallbackId}」`, `switching back to a built-in returns to “${f.fallbackId}”`));
   return parts.join(" · ");
 }
 
-/** 互斥那颗按钮的话术：停用在画那枚 / 启用某颗。两处（设置页与插件库）共用一句。 */
+/** 互斥那颗按钮的话术：撤下在画那枚 / 启用某颗。 */
 export function themeButtonTalk(kind: "drawn" | "other", name: string): string {
   return kind === "drawn"
-    ? tx(`停用「${name}」，界面回到当前选中的内置主题`, `Disable “${name}” and return to the selected built-in theme`)
-    : tx(`启用「${name}」，它会挤掉现在在画的那枚主题`, `Enable “${name}” — it takes over from the theme on screen`);
+    ? tx(`撤下「${name}」，界面回到当前选中的内置主题`, `Remove “${name}” and return to the selected built-in theme`)
+    : tx(`选用「${name}」，它会挤掉现在在画的那枚主题`, `Use “${name}” — it takes over from the theme on screen`);
 }
 
 /** 一颗卡上点下去要做什么，全应用只有这一个出口（详设 R7：设置页 / 市场 / AI 三处不许各写一份）。 */
@@ -309,14 +290,8 @@ export interface SelectableCard {
 }
 
 /**
- * 切换主题＝**选中那一枚，并让别的停止上屏**。
- *
- * - 内置（含 `system` 元选项）：写 `settings.theme`；若此刻是插件主题在画，顺手把它停用——
- *   同级之后"点哪枚就是哪枚"，留着那枚亮着的开关正是详设 §1-8 说的那种谎。
- * - 插件主题：只叫 `pluginStore.setEnabled(pkg, true)`，互斥由入口收敛执行
- *   （`enforceThemeMutex`），本层不自己写第二份"把别人关掉"的逻辑。
- *
- * 两个方向都不新增确认弹层（§8-44）：点卡就是那一次决定，回执里说清挤掉了谁。
+ * 切换主题＝**选中那一枚**。内置走 `settings.theme`，插件主题走 `engine.setActiveTheme`。
+ * 两个方向都不新增确认弹层（§8-44）：点卡就是那一次决定，回执里说清换掉了谁。
  */
 export async function selectTheme(
   card: SelectableCard,
@@ -325,29 +300,35 @@ export async function selectTheme(
   if (card.builtin) {
     patchSettings({ theme: card.key as never });
     if (drawn.pluginPkgId) {
-      const r = setEnabled(drawn.pluginPkgId, false);
-      if (!r.ok)
-        return { ok: false, msg: tx(`已选中内置主题「${card.name}」，但停用插件主题失败：${r.msg}`, `Selected built-in “${card.name}”, but disabling the plugin theme failed: ${r.msg}`) };
+      try {
+        await setActiveTheme("");
+      } catch (e) {
+        return { ok: false, msg: tx(`已选中内置主题「${card.name}」，但撤下插件主题失败：${String((e as Error)?.message ?? e)}`, `Selected built-in “${card.name}”, but removing the plugin theme failed: ${String((e as Error)?.message ?? e)}`) };
+      }
       await reapply();
       return {
         ok: true,
         msg: tx(
-          `已切到「${card.name}」；插件主题「${drawn.name ?? "?"}」已停用（同级，一次只有一枚在画）`,
-          `Switched to “${card.name}”; plugin theme “${drawn.name ?? "?"}” disabled (peers — only one is on screen)`,
+          `已切到「${card.name}」；插件主题「${drawn.name ?? "?"}」已撤下（一次只有一枚在画）`,
+          `Switched to “${card.name}”; plugin theme “${drawn.name ?? "?"}” removed (only one is on screen)`,
         ),
       };
     }
     await reapply();
     return { ok: true, msg: tx(`已切到「${card.name}」`, `Switched to “${card.name}”`) };
   }
-  if (!card.pluginId) return { ok: false, msg: tx("这颗卡没有对应的插件包，启停无处落地", "This card has no plugin package behind it, so it can't be enabled or disabled") };
-  const r = setEnabled(card.pluginId, true);
+  if (!card.pluginId) return { ok: false, msg: tx("这颗卡没有对应的插件主题", "This card has no plugin theme behind it") };
+  try {
+    await setActiveTheme(card.pluginId);
+  } catch (e) {
+    return { ok: false, msg: tx(`没换成：${String((e as Error)?.message ?? e)}`, `Not switched: ${String((e as Error)?.message ?? e)}`) };
+  }
   await reapply();
-  return r;
+  return { ok: true, msg: tx(`已切到插件主题「${card.name}」`, `Switched to plugin theme “${card.name}”`) };
 }
 
 /** 落地：三个入口都只经这一个函数碰到 `data-theme` / 变量层（详设 G6 的钉就钉在这句话上） */
 async function reapply(): Promise<void> {
-  const m = await import("../ai/extRuntime");
-  m.applyStyleExts();
+  const m = await import("../ai/uiRuntime");
+  m.applyThemeRuntime();
 }

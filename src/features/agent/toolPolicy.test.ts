@@ -100,7 +100,7 @@ it("catalog covers every app action exactly once and exports definitions", () =>
 });
 
 it("destructive and device actions are marked non-auto in create scope", () => {
-  for (const kind of ["removeProtocol", "clearPage", "removeWidget"] as const) {
+  for (const kind of ["removeProtocol", "clearPage"] as const) {
     expect(decide(ACTION_POLICY_META[kind], base)).toBe("require_local_approval");
   }
   for (const kind of ["openPort", "modbus", "orchestrator"] as const) {

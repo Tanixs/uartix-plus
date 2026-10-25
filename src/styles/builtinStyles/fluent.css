@@ -632,10 +632,9 @@
   }
 }
 
-/* 四族"可点的行"：右键菜单项 / 信息栏计数键 / 挂件菜单项 / 命令面板行。
+/* 三类"可点的行"：右键菜单项 / 信息栏计数键 / 命令面板行。
    hover 一律是**材质提亮一档**（Reveal 的"变亮"），不是变蓝底——选中档才用强调浅底。 */
 [data-theme="fluent"] .ctx-item,
-[data-theme="fluent"] .aiw-menu-item,
 [data-theme="fluent"] .cmdk-item {
   border-radius: var(--radius-m);
   color: var(--text);
@@ -643,19 +642,15 @@
 }
 
 [data-theme="fluent"] .ctx-item:hover,
-[data-theme="fluent"] .aiw-menu-item:hover,
 [data-theme="fluent"] .cmdk-item:hover,
 [data-theme="fluent"] .cmdk-item.sel {
   background: var(--fb-accent-light);
   color: var(--accent-text);
 }
 
-/* 禁用态宿主有两写法：按钮走 `:disabled`，挂件菜单是 `.disabled` 类 ⇒ 两边都得给。
-   洗到读不出不是"淡"，是看不见；这一档由 --text-dim + cursor 表达就够了。 */
+/* 禁用态：按钮走 `:disabled`。洗到读不出不是"淡"，是看不见；这一档由 --text-dim + cursor 表达就够了。 */
 [data-theme="fluent"] .ctx-item:disabled,
-[data-theme="fluent"] .cmdk-item:disabled,
-[data-theme="fluent"] .aiw-menu-item.disabled,
-[data-theme="fluent"] .aiw-menu-item.disabled:hover {
+[data-theme="fluent"] .cmdk-item:disabled {
   background: transparent;
   color: var(--text-dim);
 }

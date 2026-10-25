@@ -18,7 +18,7 @@ import * as fcStore from "./frameStore";
 import * as settingsStore from "../settings/settingsStore";
 import * as serialStore from "../serial/serialStore";
 import * as sessionStore from "../session/sessionStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
 import { fieldSize, PALETTE } from "../protocol/templateStore";

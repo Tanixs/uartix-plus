@@ -5,7 +5,7 @@ import { IfaceParams } from "./ifaces";
 import { IFACE_ITEMS, ifaceLabels, linkSummary, rtsHeldByDriver } from "./linkSummary";
 import { useSettings } from "../settings/settingsStore";
 import { toggleRailPanel } from "../../shell/railState";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { devIface } from "../../dev/bootOverrides";
 import { t, tx, useLocale } from "../../i18n/strings";
 

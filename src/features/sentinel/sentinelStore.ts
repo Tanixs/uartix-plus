@@ -5,7 +5,7 @@ import { activeRef } from "../ai/aiProfileStore";
 import { requestClosePanel, requestOpenPanel } from "../ai/appBus";
 import { invokeAiScene } from "../ai/aiBus";
 import { runScene } from "../ai/chatStore";
-import { toast, collectThemeVars } from "../ai/extRuntime";
+import { toast, collectThemeVars } from "../ai/uiRuntime";
 import { playAlertTone } from "./sentinelSound";
 import {
   broadcastWidgetState,

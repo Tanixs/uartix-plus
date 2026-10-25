@@ -15,9 +15,7 @@ import { invokeAgentProvider } from "./provider";
 import { activeRef } from "../ai/aiProfileStore";
 import { createLocalAgentAdapter, createReadOnlyAgentAdapter } from "./agentAdapter";
 import { SUBAGENT_CAPS, subagentCaps } from "./subagent";
-import { pluginToolEntries } from "./pluginTools";
 import { runtimeFacts } from "./hostCatalog";
-import { armEnabledModules } from "../plugins/pluginStore";
 import { undoRouteOf } from "./hostEntries";
 import type { ApprovalGate, ApprovalRequest, WaitOutcome } from "./toolRegistry";
 import { releaseDataLease } from "../plot/dataLease";
@@ -684,10 +682,9 @@ export async function startRun(options: {
   for (const r of kept.slice(RUNS_KEPT - 1)) dropSubRunsOf(r.runId);
   runs = [view, ...kept].slice(0, RUNS_KEPT);
   activeRunId = runId;
-  // P99a-C1：控制器与 `running` 状态**同时**成立。以前它到 executeRun 里才 new，而 executeRun
-  // 前面还压着 `await armEnabledModules()`——于是存在"任务已是 running、控制器还不存在"的窗口，
-  // `stopRun` 对着它静默早退（界面上停止按了没反应，测试里表现为 await 到天亮）。C1 给 run 起点
-  // 多加了一次 await，这个窗口从"几乎碰不到"变成"每次必撞"，所以在这儿焊死。
+  // P99a-C1：控制器与 `running` 状态**同时**成立。旧实现把控制器放到 executeRun 里才 new，
+  // 中间那段 await 里存在"任务已是 running、控制器还不存在"的窗口——`stopRun` 对着它静默早退。
+  // 现在在发布任务这一行焊死。
   const ctrl = armController();
   // P89 A4：Agent 任务会话不写聊天消息、永远无标题 → 侧栏全是「新对话」无法分辨。
   // P90 A2：标题取展示用目标（用户原话），不带附件全文。
@@ -765,19 +762,8 @@ async function executeRun(
   const gate = makeGate(runId);
   // P93-A6：档位与授权域传进 adapter，用于**裁剪发给模型的工具定义**（未授权的主机工具不发）
   const allowed = normalizeAllowed(view.scope, view.allowed);
-  /**
-   * P99a-B2：run 起点先把"已启用且带逻辑模块"的包臂起来（幂等，已在线的直接返回），
-   * 然后**取一次插件工具快照**传给 adapter。两件事的顺序是有意的：
-   * 工具面在本 run 内就此冻结，run 中途启用带工具的插件要到下一个任务才看得见（详设 §4.5-2 / Q2
-   * "自扩展不等于自提权"）。臂失败的包不注册工具，但必须出声——静默少工具只会让人去怀疑模型。
-   */
-  const armed = await armEnabledModules();
-  if (armed.blocked.length) {
-    console.warn(`[agentRun] ${armed.blocked.length} 个包的逻辑模块未就绪：${armed.blocked.map((b) => `${b.id}（${b.msg}）`).join("；")}`);
-  }
   const adapter = createLocalAgentAdapter({
     runId, gate, scope: view.scope, allowed,
-    extraEntries: pluginToolEntries(),
     // P135-B：只读子代理的装配（开关在设置里，关着时工具自己会如实拒）
     subagent: makeSubagentDispatch(view, allowed),
   });

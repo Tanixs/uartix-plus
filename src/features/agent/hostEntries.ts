@@ -9,7 +9,7 @@
  * 三个消费方共一份，才是"加一支工具只写一条 entry"成立的前提。
  *
  * ⚠ 派生表**一律惰性求值**（本文件不能有模块求值期的展开/投影）。
- * 依赖链是 hostEntries→localEntries→pluginStore→extRuntime→chatStore→agentRun→agentAdapter→hostEntries，
+ * 依赖链是 hostEntries→localEntries→插件引擎→uiRuntime→chatStore→agentRun→agentAdapter→hostEntries，
  * 两头同处一环：在模块体里读 `settingsToolEntries` 这类跨环绑定，取到的是"尚未初始化"的 undefined
  * ——第一版我就在这里写了 `const HOST_TOOL_ENTRIES = [...]` 与 `Object.fromEntries(...)`，
  * 结果 helpCoverage 直接 `Cannot read properties of undefined (reading 'filter')`（§8-33 的同一课）。
@@ -19,7 +19,7 @@ import { generalToolEntries } from "./generalTools";
 import { appearanceToolEntries } from "./appearanceTools";
 import { uiToolEntries } from "./uiTools";
 import { localToolEntries } from "./localEntries";
-import { marketToolEntries } from "./marketTools";
+import { draftToolEntries } from "./draftTools";
 import { subagentToolEntries } from "./subagent";
 import { PLUGIN_TOOL_PREFIX, type AgentToolEntry } from "./toolRegistry";
 import type { UndoResult } from "./settingsTools";
@@ -27,7 +27,7 @@ import type { UndoResult } from "./settingsTools";
 /** 惰性求一次（工具面在运行期不变，缓存无失效路径） */
 let cached: readonly AgentToolEntry[] | null = null;
 
-/** 七组宿主工具：设置 / 通用 / 外观 / 界面 / 本机数据与插件 / 市场提名（P99c-C2）/ 只读子代理（P135-B）。 */
+/** 七组宿主工具：设置 / 通用 / 外观 / 界面 / 本机数据 / 草稿（P174-B1）/ 只读子代理（P135-B）。 */
 export function hostToolEntries(): readonly AgentToolEntry[] {
   if (!cached) {
     cached = Object.freeze([
@@ -36,7 +36,7 @@ export function hostToolEntries(): readonly AgentToolEntry[] {
       ...appearanceToolEntries,
       ...uiToolEntries,
       ...localToolEntries,
-      ...marketToolEntries,
+      ...draftToolEntries,
       ...subagentToolEntries,
     ]);
   }

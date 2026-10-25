@@ -14,8 +14,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
-import { BOOTSTRAP_SOURCE } from "../src/features/extensions/bootstrap.ts";
-import { encodeMessage } from "../src/features/extensions/protocol.ts";
+import { BOOTSTRAP_SOURCE } from "../src/features/plugins/engine/bootstrap.ts";
+import { encodeMessage } from "../src/features/plugins/engine/protocol.ts";
 
 const WS = "D:/YOLO-Workspace";
 /** 部署工具目录（`$EXT:deploy`）。它就在工作区外面 —— 正是 A11 要解决的那种情况。 */

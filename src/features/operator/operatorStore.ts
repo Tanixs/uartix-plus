@@ -14,7 +14,7 @@ import * as controlsStore from "../controls/controlsStore";
 import * as commandStore from "../controls/commandStore";
 import { patch as patchSettings, getSnapshot as getSettings, type Settings } from "../settings/settingsStore";
 import { importSettingsFromPkg, exportSettingsForPkg as exportPlot3dForPkg } from "../plot3d/plot3dStore";
-import { toast } from "../ai/extRuntime";
+import { toast } from "../ai/uiRuntime";
 import { tx } from "../../i18n/strings";
 import { setOperatorLocked } from "./lock";
 import { validatePkg, OPERATOR_KIND, type OperatorPkg } from "./operatorPkg";

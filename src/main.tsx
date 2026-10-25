@@ -5,14 +5,18 @@ import "dockview-react/dist/styles/dockview.css";
 import "uplot/dist/uPlot.min.css";
 import "./styles/theme.css";
 
-// AI 挂件桌面窗：独立轻量根，不加载主界面（dockview/串口订阅全家桶）
-if (location.hash.startsWith("#/aiwidget-desktop/")) {
-  void import("./features/ai/WidgetDesktop").then(({ WidgetDesktop }) => {
-    ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-      <WidgetDesktop />,
-    );
-  });
-} else if (location.hash === "#/sentinel-widget") {
+/**
+ * 旧插件系统与旧 AI 造物已经整体删除，不再兼容。它们在 localStorage 里留的键
+ * 没有任何读取者，留着只会让下一次“我明明删了”的排查多绕一圈，所以在启动时清一次。
+ * 只碰这四个旧键，不动任何现役数据（会话、设置、插件子系统自己的存储都在别的键/目录里）。
+ */
+try {
+  for (const k of ["vs.pluginLib.v1", "vs.aiExts", "vs.aiWidgets", "vs.aiTheme", "uartix.market.fav.v1"]) {
+    localStorage.removeItem(k);
+  }
+} catch { /* 隐私模式/配额受限：清不掉不影响启动 */ }
+
+if (location.hash === "#/sentinel-widget") {
   // 哨兵桌面挂件窗（P62-S2）：同样独立轻量根
   void import("./features/sentinel/SentinelWidget").then(({ SentinelWidget }) => {
     ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

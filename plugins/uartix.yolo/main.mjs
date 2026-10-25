@@ -81,7 +81,7 @@ const DEFAULTS = {
 /* ============================ 基础设施 ============================ */
 
 let ctx = null;
-/** 工作区根（`$WS`）。空串说明用户没在扩展面板里登记，所有操作直接给出人话错误。 */
+/** 工作区根（`$WS`）。空串说明用户没在插件面板里登记，所有操作直接给出人话错误。 */
 let root = "";
 
 const jobs = new Map();
@@ -89,7 +89,7 @@ let seq = 0;
 let active = null;
 
 function needWorkspace() {
-  if (!root) throw new Error("还没登记工作区根：请在「扩展」面板顶部选一个目录（就是含 config.yaml 的那个）");
+  if (!root) throw new Error("还没登记工作区根：点面板上的「选择工作区…」，或在 设置 → 插件 顶部选一个目录（就是含 config.yaml 的那个）");
   return root;
 }
 
@@ -414,6 +414,18 @@ function scanDataset(dirIn) {
   };
 }
 
+/** 秒数 → 人能读的时长。0 / 缺失返回空串，界面自己决定显示成「—」。 */
+function fmtDuration(sec) {
+  var n = Math.round(Number(sec) || 0);
+  if (n <= 0) return "";
+  var h = Math.floor(n / 3600);
+  var m = Math.floor((n % 3600) / 60);
+  var s = n % 60;
+  if (h) return h + "h " + String(m).padStart(2, "0") + "m";
+  if (m) return m + "m " + String(s).padStart(2, "0") + "s";
+  return s + "s";
+}
+
 /** 训练记录：`<project>/<name>/results.csv` 的最后一行就是这一轮的最新指标。 */
 function scanRuns(project) {
   const dir = project || abs(DEFAULTS.train.project);
@@ -453,6 +465,9 @@ function scanRuns(project) {
     } catch {
       /* ignore */
     }
+    // ultralytics 的 results.csv 有一列累计秒数 `time`；老记录没有这一列就留空。
+    const elapsed = last ? Number(last.time) : 0;
+    const durationSec = Number.isFinite(elapsed) && elapsed > 0 ? elapsed : 0;
     runs.push({
       name,
       dir: d.replace(/\\/g, "/"),
@@ -460,6 +475,11 @@ function scanRuns(project) {
       hasBest: fs.existsSync(best),
       best: best.replace(/\\/g, "/"),
       mtime,
+      durationSec,
+      durationText: fmtDuration(durationSec),
+      // CSV 的 mtime 就是最后一次写入的时刻；有累计时长时一并给出起点，界面拿去做 tooltip。
+      finishedAt: mtime,
+      startedAt: durationSec > 0 && mtime > 0 ? Math.round(mtime - durationSec * 1000) : 0,
       metrics: last
         ? {
             mAP50M: last["metrics/mAP50(M)"] || last["metrics/mAP50(B)"] || "",
@@ -1052,6 +1072,41 @@ async function panelState() {
   };
 }
 
+/**
+ * 停掉当前在跑的任务。面板的 stop() 与宿主命令 `yolo.stop` 共用这一条——
+ * 两个入口做的是同一件事，就不该各写一份 kill 逻辑（§8-36：一份东西两套口径迟早漂移）。
+ */
+async function stopActive() {
+  const j = active;
+  if (!j) return { ok: false, reason: "没有在跑的任务" };
+  try {
+    j.child && j.child.kill();
+  } catch {
+    /* 可能已经退出 */
+  }
+  // ctx.process.spawn 返回的句柄只给了 kill；拿不到就直接让宿主杀进程树
+  if (j.pid) {
+    try {
+      process.kill(j.pid);
+    } catch {
+      /* 已经没了 */
+    }
+  }
+  pushLine(j, "[工作台] 用户要求停止", "sys");
+  return { ok: true, id: j.id };
+}
+
+/** 一行式现状，给宿主命令面板 / AI 用（不带面板那一大包 state）。 */
+function statusBrief() {
+  const j = active ? snapshot(active) : null;
+  return {
+    workspace: root || "",
+    needWorkspace: !root,
+    active: j ? { id: j.id, kind: j.kind, label: j.label, state: j.state, progress: j.progress } : null,
+    runningCount: [...jobs.values()].filter((x) => x.state === "running").length,
+  };
+}
+
 async function activate(c) {
   ctx = c;
   root = String(c.workspace || "");
@@ -1111,23 +1166,7 @@ async function activate(c) {
     },
 
     async stop() {
-      const j = active;
-      if (!j) return { ok: false, reason: "没有在跑的任务" };
-      try {
-        j.child && j.child.kill();
-      } catch {
-        /* 可能已经退出 */
-      }
-      // ctx.process.spawn 返回的句柄只给了 kill；拿不到就直接让宿主杀进程树
-      if (j.pid) {
-        try {
-          process.kill(j.pid);
-        } catch {
-          /* 已经没了 */
-        }
-      }
-      pushLine(j, "[工作台] 用户要求停止", "sys");
-      return { ok: true, id: j.id };
+      return await stopActive();
     },
 
     /** 面板重新挂载后补日志用（内存里保留最近 LOG_KEEP 行）。 */
@@ -1161,6 +1200,10 @@ async function activate(c) {
     },
   });
 
+  // 宿主命令面板 / AI 的入口：与面板按钮走同一批函数，不另立第二套实现。
+  c.commands.register("yolo.status", async () => statusBrief());
+  c.commands.register("yolo.stop", async () => await stopActive());
+
   c.onDispose(() => {
     c.log.info("YOLO 工作台正在退出：结束所有子进程");
   });
@@ -1168,4 +1211,4 @@ async function activate(c) {
 
 // `dumpConfig` / `parseSimpleYaml` 是纯函数（不碰 ctx），导出给测试与将来的复用：
 // 它们之间必须能往返——本插件生成的 config.yaml，用它自己的解析器读回来必须一模一样。
-export { activate, dumpConfig, parseSimpleYaml };
+export { activate, dumpConfig, fmtDuration, parseSimpleYaml };

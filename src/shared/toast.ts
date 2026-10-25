@@ -1,7 +1,7 @@
 /**
  * 一条浮在界面上的短话（P131-A）。
  *
- * 为什么单独一个叶子模块：这段代码原来有**两份**——`ai/extRuntime.toast()` 与
+ * 为什么单独一个叶子模块：这段代码原来有**两份**——`ai/uiRuntime.toast()` 与
  * `operator/lock.ts` 里各自 `document.createElement("div")` 建一个 `.ai-toast-host`。
  * 两份各自记自己的 host 变量，于是同一屏可以同时挂两个提示列，各说各的话；
  * 而更要紧的是：**两份实现共用的那对类名，在全部 CSS 里一条规则都没有**
@@ -9,7 +9,7 @@
  * 必须让用户看见的话，一直是无定位、无底色地贴在 body 末尾。
  *
  * 所以这里只做一件事：一处实现 + 一对有样式的类名。零业务依赖（`lock.ts` 的
- * "独立零依赖"红线靠这个前提才守得住：它不能 import extRuntime，那会把 chatStore
+ * "独立零依赖"红线靠这个前提才守得住：它不能 import uiRuntime，那会把 chatStore
  * 一路拉进 operator 链路）。
  */
 

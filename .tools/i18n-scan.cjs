@@ -113,10 +113,8 @@ function walkTsx(dir, out = []) {
  * 新文件从 T3a 起走这条路（P105-F 用户裁决：拆结构化 + 按出口分别措辞）。
  */
 const UI_TS = [
-  "src/features/plugins/pluginUiNames.ts",
-  // 市场那一面的全部话术（按钮字、空态、地址回声、出处、镜像判据）都长在这一层，
-  // 组件只是把它贴上去 —— 这里漏一句中文，界面上就是漏一句中文。
-  "src/features/market/marketBrowse.ts",
+  // v3 插件引擎里带用户可见话术的 .ts 都在这张表里点名申报；
+  // 旧市场那一层已随旧系统删除，新市场的话术在 .tsx 里走 tx()，由下面的字典检查覆盖。
 ];
 
 function uiTsFiles(root) {
