@@ -26,7 +26,7 @@ Define protocols by drag-and-drop · Parse and visualise in real time · Debug i
 
 ![Uartix+ main window: templates, frame canvas, properties, 2D plot, data table and control canvas](public/images/overview-en.png)
 
-> **Highlights in v0.6.0 — the plugin ecosystem ships.** Plugins use one v3 directory format and are managed inside Settings; a GitHub-topic market with repo covers and README previews, AI-written plugin drafts with preview, permission approval before anything runs, host logs and an append-only action journal; the YOLO training workbench gains run duration, a working deploy page and fixed save/publish paths.
+> **Highlights in v0.6.0 — the plugin ecosystem ships.** Plugins use one v3 directory format and are managed inside Settings; a GitHub-topic market with repo covers and README previews, AI-written plugin drafts with preview, permission approval before anything runs, host logs and an append-only action journal; the YOLO training workbench gains run completion times, a working deploy page and fixed save/publish paths.
 
 ---
 
