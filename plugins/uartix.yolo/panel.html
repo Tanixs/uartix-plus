@@ -522,8 +522,8 @@
             <li>workers 在这台 16G 内存的机器上保持 0：多进程加载器会把内存撑爆。</li>
             <li>fliplr / flipud 固定为 0：数字识别不做镜像。要改这两条，请直接改
               <code>.uartix/yolo/config.json</code>——面板不提供入口，因为它们几乎总是错的。</li>
-            <li>设备填 <code>0</code> 用第一块 GPU，填 <code>cpu</code> 用 CPU；训练记录里的「训练时长」按
-              <code>results.csv</code> 的累计 <code>time</code> 统计。</li>
+            <li>设备填 <code>0</code> 用第一块 GPU，填 <code>cpu</code> 用 CPU；训练记录的「完成时间」取
+              <code>results.csv</code> 的最后写入时刻，悬停可看完整时间与用时。</li>
           </ul>
           <div class="row" style="margin-top: 10px">
             <button class="btn primary" id="train">开始训练</button>
@@ -841,6 +841,13 @@
         return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
       }
 
+      function fmtShortWhen(ms) {
+        if (!ms) return "—";
+        var d = new Date(ms);
+        var p = function (n) { return (n < 10 ? "0" : "") + n; };
+        return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+      }
+
       function renderRuns() {
         var runs = st.runs || [];
         if (!runs.length) {
@@ -848,7 +855,7 @@
           return;
         }
         var h =
-          '<div class="tablewrap"><table><thead><tr><th>实验</th><th>轮次</th><th>训练时长</th><th>mAP50(M)</th><th>mAP50-95(M)</th><th>best.pt</th></tr></thead><tbody>';
+          '<div class="tablewrap"><table><thead><tr><th>实验</th><th>轮次</th><th>完成时间</th><th>mAP50(M)</th><th>mAP50-95(M)</th><th>best.pt</th></tr></thead><tbody>';
         for (var i = 0; i < runs.length; i++) {
           var r = runs[i];
           var m = r.metrics || {};
@@ -856,10 +863,10 @@
             var n = Number(x);
             return isFinite(n) ? n.toFixed(4) : "-";
           };
-          var dur = r.durationText || "—";
-          var durTitle = r.durationText
-            ? (r.startedAt ? "开始 " + fmtWhen(r.startedAt) + " · " : "") + (r.finishedAt ? "完成 " + fmtWhen(r.finishedAt) : "")
-            : "这轮 results.csv 没有 time 列";
+          var done = fmtShortWhen(r.finishedAt);
+          var doneTitle = r.finishedAt
+            ? "完成于 " + fmtWhen(r.finishedAt) + (r.durationText ? " · 用时 " + r.durationText : "")
+            : "results.csv 还没有写入时间";
           h +=
             '<tr><td class="name" title="' +
             esc(r.dir || r.name) +
@@ -868,9 +875,9 @@
             '</td><td class="num">' +
             r.epochs +
             '</td><td class="num" title="' +
-            esc(durTitle) +
+            esc(doneTitle) +
             '">' +
-            esc(dur) +
+            esc(done) +
             '</td><td class="num">' +
             f(m.mAP50M) +
             '</td><td class="num">' +
