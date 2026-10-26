@@ -447,8 +447,16 @@ export async function reload(): Promise<void> {
     const wanted = extSettings.activeTheme;
     const found = wanted ? entries.flatMap((e) => e.themes).find((t) => t.key === wanted) : undefined;
     const owner = found ? entries.find((e) => e.themes.some((t) => t.key === found.key)) : undefined;
-    if (wanted && (!found || !owner)) {
-      issues.push(`设置里选中的插件主题「${wanted}」已经不在了，已回到内置主题`);
+    // 主题插件和面板/小部件/命令同一条门：**启用且已批准**才允许它的主题上屏。
+    // 停用主题插件时若它正在供主题，这里会退回内置——否则“停用”只停了进程，界面还挂着它的皮。
+    const ownerUsable = !!owner && owner.enabled && owner.verdict === "trusted";
+    if (wanted && (!found || !owner || !ownerUsable)) {
+      const why = !found || !owner
+        ? "已经不在了"
+        : !owner.enabled
+          ? "的插件已停用"
+          : "的插件权限还没批准";
+      issues.push(`设置里选中的插件主题「${found?.title ?? wanted}」${why}，已回到内置主题`);
       extSettings = { ...extSettings, activeTheme: "" };
       if (paths) await savePluginEngineSettings(extSettings, [paths.pluginsRoot]);
       // 这次修复也是一次变更：不记下来，下一次核对就会把它报成"账本被人动过"。
@@ -458,7 +466,7 @@ export async function reload(): Promise<void> {
       }
     }
     setActiveExtTheme(
-      found && owner
+      found && owner && ownerUsable
         ? ({ id: found.key, name: found.title, scheme: found.scheme, css: found.css, pluginId: owner.id } satisfies ActiveExtTheme)
         : null,
     );
@@ -783,8 +791,18 @@ async function readThemeCss(dir: string, root: string, entry: string): Promise<T
  * 它是被仓库变化触发的。这样"谁在画"只有一个事实源，不会出现两处各改一半。
  */
 export async function setActiveTheme(key: string): Promise<void> {
+  const want = key.trim();
+  // 不能只靠"外观列表里没有这张卡"来挡：场景、AI、App Action 都能拿 key 直接调。
+  // 判据与 reload 同一条——插件启用且已批准，主题才准上屏。
+  if (want) {
+    if (!repo.entries.length) await ensureLoaded();
+    const owner = repo.entries.find((e) => e.themes.some((t) => t.key === want));
+    if (!owner) throw new Error("这枚主题已经不在插件库里");
+    if (!owner.enabled) throw new Error("这枚主题的插件还没启用，先在插件管理里启用它");
+    if (owner.verdict !== "trusted") throw new Error("这枚主题的插件权限还没批准，先在插件管理里批准");
+  }
   if (!paths) paths = await invoke<PluginPaths>("plugin_paths");
-  extSettings = { ...extSettings, activeTheme: key.trim() };
+  extSettings = { ...extSettings, activeTheme: want };
   await savePluginEngineSettings(extSettings, [paths.pluginsRoot]);
   await recordJournal({ t: "theme", at: Date.now(), key: extSettings.activeTheme });
   await reload();

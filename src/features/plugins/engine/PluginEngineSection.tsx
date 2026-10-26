@@ -158,9 +158,21 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
   async function doEnable(p: InstalledPlugin, on: boolean): Promise<void> {
     setBusy(p.id);
     setErr("");
+    const wasActiveTheme = p.themes.some((t) => t.key === repo.activeTheme);
+    const shipsThemes = (p.manifest.contributes.themes?.length ?? 0) > 0;
     try {
       await setEnabled(p.id, on);
-      setNotice(on ? tx(`已启用「${p.manifest.name}」`, `Enabled “${p.manifest.name}”`) : tx(`已停用「${p.manifest.name}」`, `Disabled “${p.manifest.name}”`));
+      if (!on && wasActiveTheme) {
+        setNotice(tx(`已停用「${p.manifest.name}」；它正在提供的主题已退回内置主题`, `Disabled “${p.manifest.name}”; its active theme fell back to a built-in one`));
+      } else if (on && shipsThemes) {
+        setNotice(
+          p.verdict === "trusted"
+            ? tx(`已启用「${p.manifest.name}」；它的主题已出现在 设置 → 外观 的插件主题里`, `Enabled “${p.manifest.name}”; its themes now appear under Settings → Appearance`)
+            : tx(`已启用「${p.manifest.name}」；权限批准后它的主题才会进入 设置 → 外观`, `Enabled “${p.manifest.name}”; its themes enter Settings → Appearance after approval`),
+        );
+      } else {
+        setNotice(on ? tx(`已启用「${p.manifest.name}」`, `Enabled “${p.manifest.name}”`) : tx(`已停用「${p.manifest.name}」`, `Disabled “${p.manifest.name}”`));
+      }
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {

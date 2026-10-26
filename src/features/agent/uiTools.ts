@@ -381,7 +381,7 @@ export const uiToolEntries: AgentToolEntry[] = [
         return bad(callId, "unknown_theme", {
           id,
           themes: catalog.map((t) => t.id),
-          hint: "这个 id 没有对应的主题；从 themes 里挑一个真的，别编",
+          hint: "这个 id 没有对应的主题；从 themes 里挑一个真的，别编。主题插件要先在插件管理里启用并批准，它的主题才会出现在 themes 里",
         });
       }
       const seconds = clampPreviewSeconds(args.seconds);

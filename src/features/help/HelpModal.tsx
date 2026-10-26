@@ -221,7 +221,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li><code>style_patch</code> 按组件下样式（结构化规则，不是一整段 CSS 文本）。回执逐条报：<b>命中几个元素、哪个属性从什么变成什么</b>；命中 0 的会直接把真实类名递给你（打偏了不会静默）。</li>
                     <li>想加发光/流光/粒子这类动效，先 <code>ui_inventory &#123;section:"fx"&#125;</code> 取内置配方与旋钮，别从零写关键帧。</li>
                     <li>这些改动是<b>会话临时层</b>：重启就没了，也不归插件管。满意了要显式说"保存为主题/固化下来"才会持久化——
-                      让它报个名字就行，它会用 <code>style_commit</code> 把<b>当前真正生效的那几层</b>读出来存成已启用的主题插件
+                      让它报个名字就行，它会用 <code>style_commit</code> 把<b>当前真正生效的那几层</b>读出来存成主题插件草稿并排队转正
                       （不是凭记忆重抄一遍规则，重抄在多轮改动后一定走样）。想撤就 <code>style_revert</code>、卡片上的「撤销」，
                       或直接 设置 → 外观 → <b>清除 AI 临时覆盖</b>；固化之后恢复路径变成插件管理里的停用、卸载或回滚。</li>
                     <li>改坏了的插件版本可以在插件详情里<b>回滚到上一版</b>；Agent 的每次保存都会把旧版归档，不会堆出一堆近似副本。</li>
@@ -480,7 +480,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <table className="help-table">
                     <tbody>
                       <tr><td>面板</td><td><code>contributes.panels</code>：一块常驻面板（不透明源 iframe），经 <code>uartix</code> 桥与插件进程说话。启用且已批准后才出现在「+ 面板」。</td></tr>
-                      <tr><td>主题</td><td><code>contributes.themes</code>：一份 CSS，过宿主净化器后进主题管线。要在 设置 → 外观 里选中它才会上屏，同一时间只有一枚插件主题在画。</td></tr>
+                      <tr><td>主题</td><td><code>contributes.themes</code>：一份 CSS，过宿主净化器后进主题管线。插件<b>启用且已批准</b>后，它的主题才会出现在 设置 → 外观；选中才会上屏，同一时间只有一枚插件主题在画。停用/失批时正在用它的界面退回内置。</td></tr>
                       <tr><td>小部件</td><td><code>contributes.widgets</code>：主窗口内 iframe 浮层；<code>transparent</code> / <code>clickThrough</code> 只是表现形态。位置记在本机，× 只隐藏本次会话。</td></tr>
                       <tr><td>命令</td><td><code>contributes.commands</code>：注册进命令面板，带 <code>plugin:</code> 分区；插件停用即消失。</td></tr>
                       <tr><td>工作区预设</td><td><code>contributes.presets</code>（配 <code>permissions.ui.layout</code>）：一个包内 JSON 存一套 dockview 布局。在插件详情点「应用此布局」整屏换排布——<b>换前当前布局自动存进 设置 → 工作区 的备份槽</b>，随时回得去。</td></tr>
@@ -1035,7 +1035,7 @@ else send("RGT:" + phase);`}</pre>
                     <li>卡片与详情各一颗<b>「安装」</b>。下载的是仓库打包的 v3 插件（tar.gz），解包后过与本地安装<b>同一个校验器</b>。</li>
                     <li><b>新装落地为停用态</b>，不会自动出现在「+面板」；需要你在插件管理里启用。第一次装未知来源的包还会弹批准卡。</li>
                     <li>启用 / 停用 / 卸载都在<b>插件管理</b>：市场不提供删除本机内容的按钮。</li>
-                    <li>主题是插件的一种贡献；在设置 → 外观里选中它才会画到界面上，同一时间只有一枚插件主题在画。</li>
+                    <li>主题是插件的一种贡献；插件启用且批准后，它的主题会出现在设置 → 外观，选中才会画到界面上（同一时间只有一枚插件主题在画）。</li>
                   </ol>
                 </Section>
                 <Section title="AI 不替你装">

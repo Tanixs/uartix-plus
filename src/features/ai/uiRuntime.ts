@@ -76,9 +76,10 @@ function themeSourceFromPlugin(
   };
 }
 
-/** 在已装的插件里找一枚主题（key 或主题局部 id 都认）。 */
+/** 在已启用且已批准的插件里找一枚主题（key 或主题局部 id 都认）。 */
 function findPluginTheme(id: string): ThemeSource | null {
   for (const entry of getEngineSnapshot().entries) {
+    if (!entry.enabled || entry.verdict !== "trusted") continue;
     for (const theme of entry.themes) {
       if (theme.key === id || theme.id === id) return themeSourceFromPlugin(entry.id, theme);
     }
@@ -95,7 +96,8 @@ function sysPrefersDark(): boolean {
 
 /**
  * 按 id 找一枚主题源（P131-B3 预览用）。
- * 内置九枚 + 已装插件贡献的主题都算，**没在画也算**——"装不装之前先看一眼"正是预览的意义。
+ * 内置九枚 + **已启用且已批准**的插件贡献的主题都算，**没在画也算**——"装不装之前先看一眼"
+ * 正是预览的意义；但停用/失批的插件主题不能绕过启用门被预览。
  */
 export function findThemeSourceById(id: string): ThemeSource | null {
   if (!id) return null;
@@ -113,15 +115,17 @@ export function listPreviewableThemes(): {
   pluginId: string | null;
 }[] {
   const snap = getEngineSnapshot();
-  const plugins = snap.entries.flatMap((entry) =>
-    entry.themes.map((t) => ({
-      id: t.key,
-      name: t.title,
-      builtin: false,
-      enabled: snap.activeTheme === t.key,
-      pluginId: entry.id,
-    })),
-  );
+  const plugins = snap.entries
+    .filter((entry) => entry.enabled && entry.verdict === "trusted")
+    .flatMap((entry) =>
+      entry.themes.map((t) => ({
+        id: t.key,
+        name: t.title,
+        builtin: false,
+        enabled: snap.activeTheme === t.key,
+        pluginId: entry.id,
+      })),
+    );
   return [
     ...BUILTIN_THEMES.map((t) => ({ id: t.id, name: t.name, builtin: true, enabled: true, pluginId: null })),
     ...plugins,

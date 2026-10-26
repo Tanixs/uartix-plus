@@ -16,6 +16,7 @@ import type { PluginSettingField } from "./manifest";
 import type { TrustVerdict } from "./repo";
 import { applyPluginConfigPatch, diffPluginConfig } from "./pluginConfig";
 import { ROOT_KEY_RE } from "./manifest";
+import { parseThemeKey } from "./activeTheme";
 import { createScope } from "../../artifact/effects";
 
 export const PROFILES_VERSION = 1;
@@ -162,8 +163,18 @@ export function planProfileApply(profile: WorkProfile, facts: readonly ProfilePl
       const v = ext.activeTheme;
       if (v === null) extensionPatch.activeTheme = "";
       else if (typeof v === "string") {
-        if (!v || v === "" || world.themes.includes(v)) extensionPatch.activeTheme = v;
-        else warnings.push(`场景里的主题「${v}」已经不在了，已忽略这一条`);
+        if (!v || v === "") extensionPatch.activeTheme = v;
+        else if (!world.themes.includes(v)) warnings.push(`场景里的主题「${v}」已经不在了，已忽略这一条`);
+        else {
+          // 主题插件和面板/命令同一条门：场景必须把提供者一起启用（且它已批准），
+          // 否则引擎会在应用时把主题退回内置，用户却以为场景完整生效了。
+          const owner = parseThemeKey(v)?.pluginId ?? "";
+          if (owner && !enabledSet.includes(owner)) {
+            warnings.push(`场景里的主题「${v}」来自未启用的插件「${owner}」，已跳过这一条`);
+          } else {
+            extensionPatch.activeTheme = v;
+          }
+        }
       }
     }
     if ("workspaceRoot" in ext) {

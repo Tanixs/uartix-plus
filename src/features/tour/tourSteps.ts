@@ -138,9 +138,9 @@ const CONTENT: RawStep[] = [
     title: { zh: "让它造东西，也给它装东西", en: "Let it build things" },
     body: {
       zh:
-        "同一条 Agent 任务能把成果存成插件草稿：面板 / 主题 / 小部件 / 工作区预设 / 任务模板。草稿不是插件——不进已装清单、不能启动；可以先在草稿行点「预览」看效果，再点「转正为插件」并过权限批准卡。装进来默认停用，启用后它的面板才会进「+ 面板」。",
+        "同一条 Agent 任务能把成果存成插件草稿：面板 / 主题 / 小部件 / 工作区预设 / 任务模板。草稿不是插件——不进已装清单、不能启动；可以先在草稿行点「预览」看效果，再点「转正为插件」并过权限批准卡。装进来默认停用，启用后它的面板才会进「+ 面板」；主题插件也是同一道启用门，启用并批准后它的主题才会出现在 设置 → 外观。",
       en:
-        "The same task can save its output as plugin drafts: panels / themes / widgets / workspace presets / task templates. A draft is not an installed plugin — it cannot start; preview it first, then choose Convert to plugin and pass the permission card. Installed plugins start disabled, and a panel only joins + Panel after you enable it.",
+        "The same task can save its output as plugin drafts: panels / themes / widgets / workspace presets / task templates. A draft is not an installed plugin — it cannot start; preview it first, then choose Convert to plugin and pass the permission card. Installed plugins start disabled; a panel joins + Panel and a theme plugin's themes enter Settings → Appearance only after you enable (and approve) it.",
     },
     selector: '[data-tour="ai"]',
   },

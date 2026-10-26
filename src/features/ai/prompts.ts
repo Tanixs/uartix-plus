@@ -151,7 +151,7 @@ function schemaAction(): string {
 - openPanel({"panel":"plot2d"}) 打开面板（${panelGroupsAddable().flatMap((g) => g.ids).join("/")}）——「协议」已搬进左侧导轨，不在可打开的面板里；**插件面板用 plugin-view-<插件id>:<面板id> 这个 id**（ui_inventory 的 panels 会列出当前可用的，只在已启用且已批准时才在）
 - openSettings({"tab":"plugins"}) 打开设置并切到某一页（general/appearance/workspace/plugins/data/monitor/io/ai/model/mcp/about）——造完东西的交接用它把用户带到"该点哪一下"的地方；它只开页面，不替用户点任何一下
 - applyPreset({"preset":"attitude"}) 切工作区预设（proto/analyze/attitude/console/video/calib/auto/modbus/vdev）
-- setTheme({"theme":"glaze"}) 切主题：内置 ${BUILTIN_THEME_IDS.join("/")} 或 system；**已装的主题插件也可以**（传设置页外观格里那枚的 id，或直接传它的包 id）。内置与插件主题同级，同时只有一枚在画——启用一枚会把在画那枚挤掉，回执里点名。
+- setTheme({"theme":"glaze"}) 切主题：内置 ${BUILTIN_THEME_IDS.join("/")} 或 system；**已启用且已批准的主题插件也可以**（传设置页外观格里那枚的 id，或直接传它的包 id）。内置与插件主题同级，同时只有一枚在画——选中一枚会把在画那枚挤掉，回执里点名；停用/失批的插件主题不在可选清单里。
 - listProtocols()/listCommands()/listCards() 查询配置清单
 - addChannel({"tpl":"模板名","field":"字段名"}) 加曲线通道；clearChannels() 清空通道
 - writeCard({"json":"…"})/writeCommand({"json":"…"})/writeTemplate({"json":"…"})/writeCodec({"json":"…"}) 写入配置（writeTemplate 支持 {"group":"簇名","templates":[…]} 一次写入协议簇并自动建组）
@@ -287,7 +287,7 @@ const UI_CREATIVITY_ROUTE =
   "由用户点『转正为插件』并过批准卡——不要声称已经装好或已经生效。" +
   "交接时你可以直接调 openSettings({\"tab\":\"plugins\"}) 把插件管理打开给用户点那一下（只开页面，不替用户点）；" +
   "面板装好并启用后，用 openPanel({\"panel\":\"plugin-view-<插件id>:<面板id>\"}) 就能把它打开。" +
-  "主题插件的 CSS 在转正后会出现在 设置 → 外观 的插件主题格里，由用户选；theme_patch/style_patch 只是本次会话的临时层，不会进那张表。" +
+  "主题插件的 CSS 在转正、启用并批准后才会出现在 设置 → 外观 的插件主题格里，由用户选；停用/失批会退回内置。theme_patch/style_patch 只是本次会话的临时层，不会进那张表。" +
   "发布到插件市场（GitHub 话题）是**用户的动作**：源码外发不可撤回，你不代做，也不声称已发布——告诉用户在插件详情的「发布到 GitHub」里点。";
 
 /** 输出工具箱：card/command/codec 三个代码块工具（直接可用） */

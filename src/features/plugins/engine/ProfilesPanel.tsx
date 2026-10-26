@@ -126,10 +126,13 @@ export function ProfilesPanel() {
     [repo.entries],
   );
 
-  const themeOptions = useMemo(
-    () => repo.entries.flatMap((e) => e.themes.map((t) => ({ key: t.key, title: `${e.manifest.name} · ${t.title}` }))),
-    [repo.entries],
-  );
+  const themeOptions = useMemo(() => {
+    // 当前已启用，或这个场景本身会启用；未批准的主题不进选择器。
+    const draftIds = new Set(draft?.plugins.map((p) => p.id) ?? []);
+    return repo.entries
+      .filter((e) => e.verdict === "trusted" && (e.enabled || draftIds.has(e.id)))
+      .flatMap((e) => e.themes.map((t) => ({ key: t.key, title: `${e.manifest.name} · ${t.title}` })));
+  }, [repo.entries, draft?.plugins]);
 
   async function doSave(): Promise<void> {
     if (!draft) return;
@@ -290,6 +293,13 @@ export function ProfilesPanel() {
   const wsHas = !!settingsPatch && Object.prototype.hasOwnProperty.call(settingsPatch, "workspaceRoot");
   const wsMode: "keep" | "set" | "clear" = !wsHas ? "keep" : settingsPatch!.workspaceRoot === null ? "clear" : "set";
   const wsValue = wsHas && typeof settingsPatch!.workspaceRoot === "string" ? settingsPatch!.workspaceRoot : "";
+  const themeValue =
+    !settingsPatch || !("activeTheme" in settingsPatch)
+      ? "__keep"
+      : !settingsPatch.activeTheme
+        ? "__builtin"
+        : settingsPatch.activeTheme;
+  const themeKnown = themeValue === "__keep" || themeValue === "__builtin" || themeOptions.some((t) => t.key === themeValue);
   const advancedCount = (wsHas ? 1 : 0) + (settingsPatch?.roots ? Object.keys(settingsPatch.roots).length : 0);
   const nameOf = (id: string): string => repo.entries.find((e) => e.id === id)?.manifest.name ?? id;
   const themeLabel = (v: string | null | undefined): string => {
@@ -461,13 +471,7 @@ export function ProfilesPanel() {
                 <FieldShell label={tx("主题", "Theme")}>
                   <select
                     className="input"
-                    value={
-                      !settingsPatch || !("activeTheme" in settingsPatch)
-                        ? "__keep"
-                        : !settingsPatch.activeTheme
-                          ? "__builtin"
-                          : settingsPatch.activeTheme
-                    }
+                    value={themeValue}
                     onChange={(e) =>
                       update((p) => {
                         p.patch.settings = { ...(p.patch.settings ?? {}) };
@@ -478,6 +482,7 @@ export function ProfilesPanel() {
                   >
                     <option value="__keep">{tx("保持现状", "Keep current")}</option>
                     <option value="__builtin">{tx("内置主题（清除插件主题）", "Built-in theme (clear plugin theme)")}</option>
+                    {!themeKnown ? <option value={themeValue}>{tx(`已不可用：${themeValue}`, `Unavailable: ${themeValue}`)}</option> : null}
                     {themeOptions.map((t) => (
                       <option key={t.key} value={t.key}>{t.title}</option>
                     ))}

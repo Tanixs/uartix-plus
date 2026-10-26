@@ -107,6 +107,17 @@ describe("planProfileApply：精确集合与信任门", () => {
     expect(r.plan.warnings.join()).toContain("不在了");
   });
 
+  it("主题的提供者不在场景启用集里 ⇒ 跳过主题并警告（引擎会退回内置，别假装完整生效）", () => {
+    const r = planProfileApply(
+      profile({ plugins: [{ id: "b" }], patch: { settings: { activeTheme: "plg:a:dark" } } }),
+      facts,
+      world,
+    );
+    if (!r.ok) return;
+    expect(r.plan.extensionPatch.activeTheme).toBeUndefined();
+    expect(r.plan.warnings.join()).toContain("未启用");
+  });
+
   it("null = 清空主题/工作区/解绑；未声明的外部目录键被跳过", () => {
     const r = planProfileApply(
       profile({

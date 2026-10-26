@@ -337,15 +337,32 @@ describe("扮演 AI：转正、批准、启用、打开——每一步谁说了�
     expect(ok).toMatchObject({ ok: true, title: "模拟面板" });
   });
 
-  it("主题：转正后落进设置页的插件主题格（key 是 plg:<包id>:<主题id>）", async () => {
+  it("主题：只有启用且批准后才进外观；停用/失批退回内置并撤出列表", async () => {
     await call("plugin_draft_save", { id: "sim.theme", files: themePkg });
     await promoteThroughApproval("sim.theme-draft");
-    const records = engine.getSnapshot().entries;
-    const cards = themeCards({ settingsTheme: "", sysDark: true, drawnId: null, drawnName: null, drawnPluginId: null, records, labelOf: (k) => k });
-    const mine = cards.find((c) => c.key === "plg:sim.theme:mint");
-    expect(mine, JSON.stringify(cards.map((c) => c.key))).toBeTruthy();
-    // 主题不看"启用"（启用是"它的面板/进程能不能工作"），只看包里有没有
+    const cardsOf = () =>
+      themeCards({
+        settingsTheme: "",
+        sysDark: true,
+        drawnId: null,
+        drawnName: null,
+        drawnPluginId: null,
+        records: engine.getSnapshot().entries,
+        labelOf: (k) => k,
+      });
     expect(engine.getSnapshot().entries.find((e) => e.id === "sim.theme")!.enabled).toBe(false);
+    expect(cardsOf().some((c) => c.key === "plg:sim.theme:mint")).toBe(false);
+    // 未启用时直接设主题也要被挡（不能靠"外观列表里没这张卡"当唯一防线）
+    await expect(engine.setActiveTheme("plg:sim.theme:mint")).rejects.toThrow("还没启用");
+
+    await engine.setEnabled("sim.theme", true);
+    expect(cardsOf().some((c) => c.key === "plg:sim.theme:mint")).toBe(true);
+    await engine.setActiveTheme("plg:sim.theme:mint");
+    expect(engine.getSnapshot().activeTheme).toBe("plg:sim.theme:mint");
+
+    await engine.setEnabled("sim.theme", false);
+    expect(engine.getSnapshot().activeTheme).toBe("");
+    expect(cardsOf().some((c) => c.key === "plg:sim.theme:mint")).toBe(false);
   });
 
   it("没有 main 的插件：ensureRunning 说人话，且**不把 phase 打成 failed**（防重试死循环）", async () => {

@@ -137,8 +137,8 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   const snt = useSyncExternalStore(sentinelStore.subscribe, sentinelStore.getSnapshot);
   /**
    * P99b-N5：外观选择器的数据全在 `themePicker`（内置与插件同级的几张卡，含"谁在画"）。
-   * 旧实现在这里自己 `exts.filter(enabled && type==="theme")` 再数一遍——那是"哪枚主题在画"
-   * 的第二处判定（详设 §1-8 说的那句谎就长在这种地方），现在只读一个出口。
+   * 可用性（已启用 + 已批准）与"谁在画"都在那个纯派生层判，这里只订阅引擎快照；
+   * 不在本组件里再 filter 一遍——两处各判一次就是旧版"哪枚在画"那句谎的来源。
    */
   const plugins = useSyncExternalStore(subscribePluginEngine, getPluginEngine, getPluginEngine);
   useEffect(() => {

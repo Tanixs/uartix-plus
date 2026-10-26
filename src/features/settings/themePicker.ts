@@ -6,8 +6,9 @@
  * 而这个界面过去恰恰在说谎（`settings.theme` 那枚卡永远显示"选中"，界面其实被插件压着）。
  *
  * v3 之后"插件主题"只有一种：已装插件 `contributes.themes` 里的 CSS，由用户显式选为
- * 当前主题（`pluginEngine.setActiveTheme`）。**不再靠"启用插件"来决定谁在画**——
- * 启用是"允不允许它的面板/进程工作"，主题是"选哪一身皮"，两件事分开。
+ * 当前主题（`pluginEngine.setActiveTheme`）。主题插件也走同一道启用门：**只有启用且已批准**
+ * 的插件，它的主题才出现在这张表里；停用/失批时正在画的那枚退回内置（引擎 reload 里判）。
+ * "启用"仍然是可用性，不是"点了自动选中"——选哪一身皮仍由这张表决定。
  *
  * 话术（tooltip / 回执 / 那行"当前在画的是谁"）在本层用 `tx()` 就近双语；
  * 但主题**名字**仍由组件经 `labelOf` 注入——内置那几枚的名字住在中心键表里。
@@ -172,6 +173,8 @@ export function themeCards(input: PickerInput): ThemeCard[] {
   }
 
   for (const rec of input.records) {
+    // 与面板/小部件/命令同一条门：未启用或未批准的主题插件不进外观表。
+    if (!rec.enabled || rec.verdict !== "trusted") continue;
     for (const theme of rec.themes) {
       const vars = varsFromThemeCss(theme.css);
       const t: ThemeSource = {
@@ -202,12 +205,12 @@ export function themeCards(input: PickerInput): ThemeCard[] {
           ? tx("当前在画的就是这一枚（插件主题）", "This is the one on screen (plugin theme)")
           : ships.length
             ? tx(
-                `点它把插件「${rec.manifest.name}」的这枚主题设为当前主题（插件本身${rec.enabled ? "已启用" : "未启用"}；同时还有它的${ships.join("、")}）`,
-                `Click to make this theme of “${rec.manifest.name}” the active theme (the plugin is ${rec.enabled ? "enabled" : "disabled"}; it also ships ${ships.join(", ")})`,
+                `点它把插件「${rec.manifest.name}」的这枚主题设为当前主题（同时还有它的${ships.join("、")}）`,
+                `Click to make this theme of “${rec.manifest.name}” the active theme (it also ships ${ships.join(", ")})`,
               )
             : tx(
-                `点它把插件「${rec.manifest.name}」的这枚主题设为当前主题（插件本身${rec.enabled ? "已启用" : "未启用"}）`,
-                `Click to make this theme of “${rec.manifest.name}” the active theme (the plugin is ${rec.enabled ? "enabled" : "disabled"})`,
+                `点它把插件「${rec.manifest.name}」的这枚主题设为当前主题`,
+                `Click to make this theme of “${rec.manifest.name}” the active theme`,
               ),
         alsoShips: ships,
       });
