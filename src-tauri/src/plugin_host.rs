@@ -170,7 +170,7 @@ pub async fn plugin_host_start(
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("扩展宿主起不来（{node_path}）：{e}"))?;
+        .map_err(|e| format!("插件宿主起不来（{node_path}）：{e}"))?;
     let pid = child.id();
     let stdin = child.stdin.take();
     let stdout = child.stdout.take();
@@ -247,7 +247,7 @@ pub async fn plugin_host_send(
     }
     let host = {
         let map = lock(&state.hosts);
-        map.get(&handle).cloned().ok_or_else(|| format!("没有在运行的扩展宿主：{handle}"))?
+        map.get(&handle).cloned().ok_or_else(|| format!("没有在运行的插件宿主：{handle}"))?
     };
     let mut h = lock(&host);
     let stdin = h.stdin.as_mut().ok_or("宿主 stdin 已关闭")?;
@@ -255,7 +255,7 @@ pub async fn plugin_host_send(
         .write_all(line.as_bytes())
         .and_then(|_| stdin.write_all(b"\n"))
         .and_then(|_| stdin.flush())
-        .map_err(|e| format!("写入扩展宿主失败：{e}"))?;
+        .map_err(|e| format!("写入插件宿主失败：{e}"))?;
     let now = wall_ms();
     h.last_active.store(now, Ordering::Relaxed);
     Ok(json!({"ok": true, "at": now}))
@@ -266,7 +266,7 @@ pub async fn plugin_host_send(
 pub async fn plugin_host_touch(state: State<'_, PluginHostState>, handle: String) -> Result<Value, String> {
     let host = {
         let map = lock(&state.hosts);
-        map.get(&handle).cloned().ok_or_else(|| format!("没有在运行的扩展宿主：{handle}"))?
+        map.get(&handle).cloned().ok_or_else(|| format!("没有在运行的插件宿主：{handle}"))?
     };
     let now = wall_ms();
     lock(&host).last_active.store(now, Ordering::Relaxed);
@@ -278,7 +278,7 @@ pub async fn plugin_host_touch(state: State<'_, PluginHostState>, handle: String
 pub async fn plugin_host_stop(state: State<'_, PluginHostState>, handle: String) -> Result<Value, String> {
     let host = {
         let mut map = lock(&state.hosts);
-        map.remove(&handle).ok_or_else(|| format!("没有在运行的扩展宿主：{handle}"))?
+        map.remove(&handle).ok_or_else(|| format!("没有在运行的插件宿主：{handle}"))?
     };
     teardown(&handle, &host);
     Ok(json!({"ok": true, "handle": handle}))

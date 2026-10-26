@@ -426,7 +426,7 @@ pub fn plugin_copy_dir(src: String, dst: String, roots: Vec<String>) -> Result<V
     let s = PathBuf::from(&src);
     let d = PathBuf::from(&dst);
     if is_root_itself(&d, &roots) {
-        return Err(format!("目标不能是扩展根目录：{dst}"));
+        return Err(format!("目标不能是插件根目录：{dst}"));
     }
     // 复制进自己（或从自己里面复制到自己）会无限增长，且第一次就写坏源
     if path_within(&d, &s) || path_within(&s, &d) {
@@ -481,7 +481,7 @@ pub fn plugin_promote(draft_id: String, id: String, roots: Vec<String>) -> Resul
         return Err(format!("没有这个暂存目录（可能是上一次安装被中断了）：{}", staging.display()));
     }
     if final_dir.exists() {
-        return Err(format!("已经有一个叫 {id} 的扩展：请先卸载再装"));
+        return Err(format!("已经有一个叫 {id} 的插件：请先在插件管理里卸载再装（卸载会清掉批准记录，重装需要重新批准）"));
     }
 
     let mut via_copy = false;
@@ -510,7 +510,7 @@ pub fn plugin_remove_tree(path: String, roots: Vec<String>) -> Result<Value, Str
     guard(&path, &roots)?;
     let p = PathBuf::from(&path);
     if is_root_itself(&p, &roots) {
-        return Err(format!("拒绝删除扩展根目录：{path}"));
+        return Err(format!("拒绝删除插件根目录：{path}"));
     }
     if !p.exists() {
         return Ok(json!({ "ok": true, "existed": false }));
@@ -742,7 +742,7 @@ mod install_tests {
                 roots(&ext_root)
             )
             .is_err(),
-            "不许往扩展根上复制（那样整个仓库都变成这个包）"
+            "不许往插件根上复制（那样整个仓库都变成这个包）"
         );
         let _ = fs::remove_dir_all(&root);
     }
