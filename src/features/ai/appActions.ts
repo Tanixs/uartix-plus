@@ -66,7 +66,16 @@ export async function runAppAction(
   opts: { highPriv: boolean },
 ): Promise<AppActionResult> {
   if (!(APP_ACTION_KINDS as readonly string[]).includes(kind)) {
-    return { ok: false, err: `未知动作：${kind}` };
+    // 弱模型最常见的走失：把「写插件草稿」当成动作块输出（真链路在 Agent 任务的
+    // plugin_draft_save 工具里，动作词汇表里刻意没有它）。报错顺手把人指回正路，
+    // 不然用户看到的只有一句"未知动作"，不知道下一步该去哪。
+    const draftish = /draft|plugin|widget|theme|preset|task/i.test(kind);
+    return {
+      ok: false,
+      err: draftish
+        ? `未知动作：${kind}。插件草稿没有动作块——工作方式切到「Agent 任务」后由 plugin_draft_save 工具完成，草稿转正仍在设置 → 插件管理由用户点。`
+        : `未知动作：${kind}`,
+    };
   }
   if (HIGH_ONLY.has(kind) && !opts.highPriv) {
     return { ok: false, err: `动作「${kind}」需要脚本高权限（小部件/卡片不可调用）` };
