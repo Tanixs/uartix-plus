@@ -8,35 +8,8 @@
       跟插件进程说话只有一条路：`uartix.call(方法名, 参数)`；反过来是 `uartix.on(事件)`。
     -->
     <style>
-      :root {
-        color-scheme: dark light;
-        --bg: #16181c;
-        --panel: #1c1f24;
-        --inset: #121417;
-        --fg: #e6e8eb;
-        --dim: #9aa0a6;
-        --faint: #6b7178;
-        --line: #2b3036;
-        --accent: #4a9eff;
-        --ok: #3fb950;
-        --warn: #d29922;
-        --bad: #f85149;
-      }
-      @media (prefers-color-scheme: light) {
-        :root {
-          --bg: #fbfbfc;
-          --panel: #f4f5f7;
-          --inset: #ffffff;
-          --fg: #1c1f23;
-          --dim: #5a616b;
-          --faint: #8b929b;
-          --line: #e1e4e8;
-          --accent: #1a73e8;
-          --ok: #1a7f37;
-          --warn: #9a6700;
-          --bad: #cf222e;
-        }
-      }
+      /* 配色由宿主桥接：srcdoc 里注入 --uartix-* 与常用别名（--bg/--panel/--line…）。
+         不再写死明暗，也不跟操作系统 prefers-color-scheme；宿主换主题时 iframe 会热更新。 */
       * {
         box-sizing: border-box;
       }
@@ -46,7 +19,9 @@
         height: 100%;
         background: var(--bg);
         color: var(--fg);
-        font: 12px/1.5 "Segoe UI", system-ui, "Microsoft YaHei", sans-serif;
+        font-family: var(--uartix-font, "Segoe UI", system-ui, "Microsoft YaHei", sans-serif);
+        font-size: var(--uartix-fs-body, 12px);
+        line-height: 1.5;
       }
       body {
         display: flex;
@@ -181,7 +156,8 @@
       }
       button.primary {
         border-color: var(--accent);
-        color: var(--accent);
+        background: var(--accent);
+        color: var(--on-accent);
       }
       button.danger {
         border-color: var(--bad);

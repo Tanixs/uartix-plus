@@ -504,6 +504,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                   <ul className="help-ol">
                     <li>插件代码跑在<b>独立 Node 子进程</b>里，不在 WebView、也不在宿主进程。写文件是内核级牢笼（<code>--allow-fs-write</code> 只给声明过的目录）；读声明只是知情，因为 Windows 上精确读白名单不生效。</li>
                     <li>面板与小部件是<b>不透明源 iframe</b>（只有 <code>allow-scripts</code>，不给 same-origin），碰不到宿主 DOM、cookie、localStorage，也碰不到别的插件。</li>
+                    <li><b>主题会跟过来</b>：宿主把设计 token 改名成 <code>--uartix-*</code> 垫进 iframe，输入框、按钮、卡片、滚动条就是宿主那套底色与圆角，换主题时热更新（脚本侧 <code>uartix.on("theme", fn)</code>）。</li>
                     <li>主题 CSS 与面板 HTML 都过宿主自己的净化器：禁全局选择器、<code>@import</code>、<code>!important</code> 与外链资源。</li>
                     <li>出问题看「运行日志」面：<b>宿主输出</b>是每个插件进程说的话（同时落盘到 <code>plugins/&lt;id&gt;/logs/host.log</code>，从头部轮转、只断在换行），<b>操作账本</b>是应用对它做过什么（装 / 批准 / 启停 / 执行命令 / 目录绑定 / 场景切换，append-only 且可重建校验）。插件启动失败会弹一条通知，点进去看的就是这一面。</li>
                     <li>工作场景（一组启用的插件 + 主题/目录/配置补丁）在 <b>设置 → 工作场景</b> 里编辑；一键切换仍在命令面板（<code>应用场景：…</code>）。场景不会替未批准的插件开绿灯。</li>

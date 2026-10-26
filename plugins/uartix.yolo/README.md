@@ -37,7 +37,7 @@
 | 读 | `$WS`、`$EXT:deploy` | 读是**知情**：Node 的精确读白名单在 Windows 上不生效，故读整盘放行、清单只告诉你它读了什么 |
 | 写 | `$WS/.uartix` `$WS/datasets` `$WS/runs` `$WS/logs` `$WS/models` | 写是**牢笼**：内核级 `--allow-fs-write` 只放行这几枚目录，越界直接 `ERR_ACCESS_DENIED` |
 | 进程 | `python` | 起子进程跑 ultralytics；停止走杀进程树（Windows 上只杀 node 会留孤儿吃满 GPU） |
-| 界面 | `ui.panel` | 一块 iframe 面板（不透明源，碰不到宿主 DOM 与别的插件） |
+| 界面 | `ui.panel` | 一块 iframe 面板（不透明源，碰不到宿主 DOM 与别的插件；宿主主题以 `--uartix-*` 变量桥入，换主题时面板热更新） |
 
 ## 依赖
 

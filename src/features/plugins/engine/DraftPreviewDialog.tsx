@@ -19,10 +19,12 @@
  * 换句话说：**预览看到的是"界面长什么样"，不是"它拿到了什么权限"。**
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { tx, useLocale } from "../../../i18n/strings";
-import { buildSrcdoc, PANEL_MSG_KEY, PANEL_PROTOCOL, parseBridgeMessage, resErr, resOk } from "./panelBridge";
+import { buildSrcdoc, eventMsg, PANEL_MSG_KEY, PANEL_PROTOCOL, parseBridgeMessage, resErr, resOk } from "./panelBridge";
+import { readHostTheme } from "./iframeTheme";
+import { subscribeStyleApply } from "../../../styles/themeFacts";
 import { draftPreviewTarget, readDraftFile, type DraftEntry } from "./draft";
 import { getSnapshot } from "./pluginEngine";
 import { varsFromThemeCss } from "./themeVars";
@@ -44,6 +46,23 @@ export function DraftPreviewDialog(props: { appDir: string; name: string; entry:
       mounted.current = false;
     };
   }, []);
+
+  /** 草稿预览和正式面板共用同一座主题桥：宿主换主题时预览也跟着换。 */
+  const postTheme = useCallback(() => {
+    const w = frame.current?.contentWindow;
+    if (!w) return;
+    try {
+      w.postMessage({ ...eventMsg("theme", readHostTheme()), [PANEL_MSG_KEY]: PANEL_PROTOCOL }, "*");
+    } catch {
+      /* 预览已经关掉 */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!html || target?.kind === "theme") return;
+    postTheme();
+    return subscribeStyleApply(postTheme);
+  }, [html, target, postTheme]);
 
   useEffect(() => {
     if (!target) return;
@@ -70,7 +89,12 @@ export function DraftPreviewDialog(props: { appDir: string; name: string; entry:
       const self = frame.current;
       if (!self || ev.source !== self.contentWindow) return;
       const m = parseBridgeMessage(ev.data);
-      if (!m || m.kind === "ready") return;
+      if (!m) return;
+      // iframe 里的脚本刚跑起来：把当前主题补给它（srcdoc 里那份可能是上一主题的）
+      if (m.kind === "ready") {
+        postTheme();
+        return;
+      }
       const post = (out: unknown): void => {
         try {
           self.contentWindow?.postMessage({ ...(out as object), [PANEL_MSG_KEY]: PANEL_PROTOCOL }, "*");
@@ -113,7 +137,7 @@ export function DraftPreviewDialog(props: { appDir: string; name: string; entry:
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [html, target, props.appDir, props.name]);
+  }, [html, target, props.appDir, props.name, postTheme]);
 
   const vars = useMemo(() => (target?.kind === "theme" ? varsFromThemeCss(css) : {}), [target, css]);
   const swatches = Object.entries(vars).filter(([, v]) => COLORISH.test(String(v)));
@@ -196,7 +220,18 @@ export function DraftPreviewDialog(props: { appDir: string; name: string; entry:
             title={`${props.entry.title} · ${target.title}`}
             sandbox="allow-scripts allow-forms allow-modals allow-popups"
             referrerPolicy="no-referrer"
-            srcDoc={html ? buildSrcdoc(html, { pluginId: `draft:${props.entry.id}`, panelId: target.id, title: target.title }) : ""}
+            srcDoc={
+              html
+                ? buildSrcdoc(html, {
+                    pluginId: `draft:${props.entry.id}`,
+                    panelId: target.id,
+                    title: target.title,
+                    theme: readHostTheme(),
+                    paintPage: target.kind !== "widget",
+                  })
+                : ""
+            }
+            onLoad={postTheme}
             style={{ flex: "1 1 auto", minHeight: 0, width: "100%", border: "none", background: target.kind === "widget" ? "transparent" : "var(--bg)" }}
           />
         )}

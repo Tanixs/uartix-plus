@@ -21,6 +21,7 @@
  */
 
 import { ROOT_SPEC_RE, type PluginManifest } from "./manifest";
+import { iframeThemeCss, type IframeTheme } from "./iframeTheme";
 
 /** 消息信封上的标记。用一个大写开头、带前缀的键，冲突概率远低于 `type`。 */
 export const PANEL_MSG_KEY = "__uartixPanel";
@@ -257,6 +258,7 @@ const BRIDGE_JS = [
   // 宿主会先校验清单声明、再弹一次**宿主自己的**确认条，用户在确认条上点头才算数；
   // 拒绝的话这个 Promise 直接 reject，插件该显示的就是"用户没批"。
   "    bindRoot: function (spec) { return ask({ kind: 'host', op: 'bindRoot', spec: String(spec) }); },",
+  "    theme: function () { return INFO.theme || { vars: {}, scheme: 'dark' }; },",
   "    on: function (event, fn) {",
   "      var k = String(event);",
   "      (handlers[k] = handlers[k] || []).push(fn);",
@@ -280,6 +282,22 @@ const BRIDGE_JS = [
   "      return;",
   "    }",
   "    if (d.kind === 'event') {",
+  "      if (d.event === 'theme' && d.payload) {",
+  "        var t = d.payload;",
+  "        INFO.theme = t;",
+  "        var v = t.vars || {};",
+  "        for (var k in v) {",
+  // 只认 --uartix-* 形状的属性名：这条消息的来源是宿主，但 iframe 里的插件代码可以
+  // 自己 postMessage 伪造一条，形状收死比"反正来源可信"便宜。
+  "          if (Object.prototype.hasOwnProperty.call(v, k) && /^--uartix-[a-z0-9-]+$/.test(k)) {",
+  "            try { document.documentElement.style.setProperty(k, v[k]); } catch (e3) {}",
+  "          }",
+  "        }",
+  "        if (t.scheme === 'dark' || t.scheme === 'light') {",
+  "          document.documentElement.style.colorScheme = t.scheme;",
+  "          document.documentElement.setAttribute('data-uartix-scheme', t.scheme);",
+  "        }",
+  "      }",
   "      var hs = handlers[d.event] || [];",
   "      for (var i = 0; i < hs.length; i++) {",
   "        try { hs[i](d.payload); } catch (e2) { /* 面板自己的错不该打断别的监听者 */ }",
@@ -297,10 +315,22 @@ const BRIDGE_JS = [
  * 不用正则去匹配 `</head>`：插件 HTML 里一个字符串就可能含有它，而错了之后
  * 表现是"某些面板的 uartix 是 undefined"——查起来毫无线索。
  */
-export function buildSrcdoc(html: string, info: { pluginId: string; panelId: string; title: string }): string {
+export function buildSrcdoc(
+  html: string,
+  info: { pluginId: string; panelId: string; title: string; theme?: IframeTheme; paintPage?: boolean },
+): string {
+  const theme = info.theme ?? { vars: {}, scheme: "dark" as const, font: "" };
   const boot =
+    '<style id="uartix-host-theme">' +
+    iframeThemeCss(theme, { paintPage: info.paintPage }) +
+    "</style>" +
     "<script>var INFO = " +
-    jsonForScript({ pluginId: info.pluginId, panelId: info.panelId, title: info.title }) +
+    jsonForScript({
+      pluginId: info.pluginId,
+      panelId: info.panelId,
+      title: info.title,
+      theme: { vars: theme.vars, scheme: theme.scheme, font: theme.font },
+    }) +
     ";\n" +
     BRIDGE_JS +
     "</script>";

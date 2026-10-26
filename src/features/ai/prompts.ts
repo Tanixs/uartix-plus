@@ -287,6 +287,7 @@ const UI_CREATIVITY_ROUTE =
   "由用户点『转正为插件』并过批准卡——不要声称已经装好或已经生效。" +
   "交接时你可以直接调 openSettings({\"tab\":\"plugins\"}) 把插件管理打开给用户点那一下（只开页面，不替用户点）；" +
   "面板装好并启用后，用 openPanel({\"panel\":\"plugin-view-<插件id>:<面板id>\"}) 就能把它打开。" +
+  "panel.html 与小部件 HTML 跑在不透明源 iframe 里，但**宿主主题已经桥进去了**：宿主把生效的 token 改名成 --uartix-* 注进页面（另有 --bg/--panel/--inset/--fg/--dim/--line/--accent/--on-accent 等短别名），并预置一层零特异性的基础样式（input/select/textarea/button/a/滚动条 与 .btn/.btn.primary/.input/.card 全是宿主那套底色、描边、圆角、焦点环）。所以**不要自己写死一套灰白配色**——贴主题写，插件想特立独行再用自己的规则覆盖；换主题时 iframe 热更新，脚本侧可读 uartix.theme()、订阅 uartix.on(\"theme\", fn)。" +
   "主题插件的 CSS 在转正、启用并批准后才会出现在 设置 → 外观 的插件主题格里，由用户选；停用/失批会退回内置。theme_patch/style_patch 只是本次会话的临时层，不会进那张表。" +
   "发布到插件市场（GitHub 话题）是**用户的动作**：源码外发不可撤回，你不代做，也不声称已发布——告诉用户在插件详情的「发布到 GitHub」里点。";
 

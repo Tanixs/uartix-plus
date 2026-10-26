@@ -18,7 +18,7 @@
  *    不该是一片空白，也不该报"加载失败"，它该说"这个插件已经不在了"。
  */
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { tx, useLocale } from "../../../i18n/strings";
 import {
@@ -39,6 +39,8 @@ import { canStart, phaseLabel } from "./runtime";
 import { rootSpecDeclared, rootSpecWrites } from "./manifest";
 import { panelEnabled } from "./repo";
 import { clearRootBindsOf, requestRootBind } from "./rootRequests";
+import { readHostTheme } from "./iframeTheme";
+import { subscribeStyleApply } from "../../../styles/themeFacts";
 import { toast } from "../../../shared/toast";
 import {
   buildSrcdoc,
@@ -82,6 +84,22 @@ export function PluginViewPanel(props: {
   const [html, setHtml] = useState("");
   const [err, setErr] = useState("");
   const frame = useRef<HTMLIFrameElement>(null);
+
+  /** 把宿主当前主题送进 iframe：初始在 srcdoc 里，之后换主题/切预览时走这一条。 */
+  const postTheme = useCallback(() => {
+    const w = frame.current?.contentWindow;
+    if (!w) return;
+    try {
+      w.postMessage({ ...eventMsg("theme", readHostTheme()), [PANEL_MSG_KEY]: PANEL_PROTOCOL }, "*");
+    } catch {
+      /* iframe 已经没了 */
+    }
+  }, []);
+
+  useEffect(() => {
+    postTheme();
+    return subscribeStyleApply(postTheme);
+  }, [postTheme]);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -169,7 +187,11 @@ export function PluginViewPanel(props: {
       const self = frame.current;
       if (!self || ev.source !== self.contentWindow) return;
       const m = parseBridgeMessage(ev.data);
-      if (!m || m.kind === "ready") return;
+      if (!m) return;
+      if (m.kind === "ready") {
+        postTheme();
+        return;
+      }
 
       void (async () => {
         try {
@@ -257,7 +279,7 @@ export function PluginViewPanel(props: {
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [html, pluginId, panelId]);
+  }, [html, pluginId, panelId, postTheme]);
 
   // 桥：插件 emit → iframe
   useEffect(() => {
@@ -277,7 +299,8 @@ export function PluginViewPanel(props: {
         title={`${entry.manifest.name} · ${def.title}`}
         sandbox="allow-scripts allow-forms allow-modals allow-popups"
         referrerPolicy="no-referrer"
-        srcDoc={html ? buildSrcdoc(html, { pluginId, panelId, title: def.title }) : ""}
+        srcDoc={html ? buildSrcdoc(html, { pluginId, panelId, title: def.title, theme: readHostTheme(), paintPage: false }) : ""}
+        onLoad={postTheme}
         style={{ width: "100%", height: "100%", border: "none", background: "transparent", display: "block" }}
       />
     );
@@ -330,7 +353,8 @@ export function PluginViewPanel(props: {
         // 只给脚本：不给 allow-same-origin ⇒ 不透明源（它碰不到宿主与别的插件）
         sandbox="allow-scripts allow-forms allow-modals allow-popups"
         referrerPolicy="no-referrer"
-        srcDoc={html ? buildSrcdoc(html, { pluginId, panelId, title: def.title }) : ""}
+        srcDoc={html ? buildSrcdoc(html, { pluginId, panelId, title: def.title, theme: readHostTheme() }) : ""}
+        onLoad={postTheme}
         style={{ flex: "1 1 auto", minHeight: 0, width: "100%", border: "none", background: "var(--bg)" }}
       />
     </div>

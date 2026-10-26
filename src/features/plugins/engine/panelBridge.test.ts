@@ -211,6 +211,49 @@ describe("buildSrcdoc", () => {
     expect(out.indexOf("window.uartix")).toBeLessThan(out.indexOf("纯文本"));
   });
 
+  it("主题变量里的 </style> 逃不出样式块（这是第二个注入面，不是同一个）", () => {
+    const out = buildSrcdoc("<html><head></head><body>x</body></html>", {
+      ...info,
+      theme: { vars: { "--uartix-bg": "</style><script>alert(1)</script>" }, scheme: "dark", font: "x" },
+    });
+    // 脏值整条丢掉：样式块里既没有多出的 </style>，也没有第二条 style/script
+    expect(out.match(/<\/style>/g)).toHaveLength(1);
+    expect(out.match(/<script/g)).toHaveLength(1);
+    expect(out).not.toContain("--uartix-bg: </style>");
+    expect(out).toContain('<style id="uartix-host-theme">');
+    // INFO 里那份只是 JSON 字符串（给 uartix.theme() 读的），标签必须转义过
+    expect(out).not.toContain("</script>alert");
+  });
+
+  it("主题桥：宿主 token 以 --uartix-* 落进 iframe，且排在插件自己的样式之前", () => {
+    const html = "<html><head><style>:root{--bg:#123456}</style></head><body>x</body></html>";
+    const out = buildSrcdoc(html, {
+      ...info,
+      theme: { vars: { "--uartix-bg": "#101014", "--uartix-accent": "#4c8dff" }, scheme: "dark", font: '"Segoe UI"' },
+    });
+    expect(out).toContain("--uartix-bg: #101014;");
+    expect(out).toContain("--uartix-accent: #4c8dff;");
+    expect(out.indexOf("uartix-host-theme")).toBeLessThan(out.indexOf("--bg:#123456"));
+    // 插件自己的那份一个字节不少：零特异性基础层是"垫",不是"替"
+    expect(out).toContain("<style>:root{--bg:#123456}</style>");
+  });
+
+  it("主题桥：uartix.theme() 读当前值，theme 事件来了要真的落到根上", () => {
+    const out = buildSrcdoc("<html><head></head><body>x</body></html>", { ...info });
+    expect(out).toContain("theme: function ()");
+    expect(out).toContain("d.event === 'theme'");
+    expect(out).toContain("document.documentElement.style.setProperty");
+    // 伪造的键名不接受：只认 --uartix-* 形状
+    expect(out).toContain("/^--uartix-[a-z0-9-]+$/.test(k)");
+  });
+
+  it("没传主题也要能出 srcdoc（草稿预览之外的老调用方不该因此白屏）", () => {
+    const out = buildSrcdoc("<html><head></head><body>x</body></html>", info);
+    expect(out).toContain('<style id="uartix-host-theme">');
+    expect(out).toContain("color-scheme: dark");
+    expect(out).not.toContain("undefined");
+  });
+
   it("标题里的 </script> 不许逃出脚本块（这是注入面，不是显示问题）", () => {
     const out = buildSrcdoc("<html><head></head><body>x</body></html>", {
       ...info,
