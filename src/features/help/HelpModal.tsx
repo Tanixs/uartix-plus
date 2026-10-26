@@ -506,7 +506,7 @@ export function HelpModal({ onClose }: { onClose: () => void }) {
                     <li>面板与小部件是<b>不透明源 iframe</b>（只有 <code>allow-scripts</code>，不给 same-origin），碰不到宿主 DOM、cookie、localStorage，也碰不到别的插件。</li>
                     <li>主题 CSS 与面板 HTML 都过宿主自己的净化器：禁全局选择器、<code>@import</code>、<code>!important</code> 与外链资源。</li>
                     <li>出问题看「运行日志」面：<b>宿主输出</b>是每个插件进程说的话（同时落盘到 <code>plugins/&lt;id&gt;/logs/host.log</code>，从头部轮转、只断在换行），<b>操作账本</b>是应用对它做过什么（装 / 批准 / 启停 / 执行命令 / 目录绑定 / 场景切换，append-only 且可重建校验）。插件启动失败会弹一条通知，点进去看的就是这一面。</li>
-                    <li>工作场景（一组有序启用的插件 + 主题/目录/配置补丁）在 <b>设置 → 工作场景</b> 里编辑；一键切换仍在命令面板（<code>应用场景：…</code>）。场景不会替未批准的插件开绿灯。</li>
+                    <li>工作场景（一组启用的插件 + 主题/目录/配置补丁）在 <b>设置 → 工作场景</b> 里编辑；一键切换仍在命令面板（<code>应用场景：…</code>）。场景不会替未批准的插件开绿灯。</li>
                     <li>路径一律由宿主解析：<code>$WS</code> 工作区根、<code>$EXT:&lt;key&gt;</code> 外部目录由你在 <b>设置 → 插件管理</b> 里绑一次，插件清单里不写死绝对路径。</li>
                     <li>面板里可以放「选择工作区」按钮（<code>uartix.bindRoot</code>）：目录由系统对话框交给<b>你</b>选，选完还要在 设置 → 插件管理 由<b>你</b>确认。</li>
                   </ul>

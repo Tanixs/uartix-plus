@@ -323,7 +323,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
       label: tx("工作场景", "Profiles"),
       group: tx("插件与集成", "Plugins & Integration"),
       icon: <IconLayoutEdit />,
-      sub: tx("一组有序启用的插件 + 主题/目录/配置补丁；切换走命令面板「应用场景：…」", "An ordered plugin set plus theme/path/config patches; switch from the command palette"),
+      sub: tx("一组启用的插件 + 主题/目录/配置补丁；切换走命令面板「应用场景：…」", "A set of enabled plugins plus theme/path/config patches; switch from the command palette"),
     },
     { key: "mcp", label: `${tx("集成", "Integration")}${jobSt.jobs.some((j) => ["queued", "running", "cancel_requested"].includes(j.state)) ? ` (${jobSt.jobs.filter((j) => ["queued", "running", "cancel_requested"].includes(j.state)).length})` : ""}`, group: tx("插件与集成", "Plugins & Integration"), icon: <IconPlug /> },
     { key: "about", label: t("set.about"), group: tx("其他", "Misc"), icon: <IconInfo /> },
@@ -531,7 +531,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
               /* R14：工作场景从插件页底部搬出来，给它一整页。
                  它本来就是两栏编辑器（左场景、右场景补丁），塞进 640px 的卡片里会三层滚动。 */
               <div style={{ height: "calc(100vh / var(--zoom) - 190px)", minHeight: 420, border: "1px solid var(--border)", borderRadius: "var(--radius-m)", overflow: "hidden" }}>
-                <ProfilesPanel embedded />
+                <ProfilesPanel />
               </div>
             ) : (
             <SetGroups>

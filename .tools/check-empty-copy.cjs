@@ -55,6 +55,12 @@ const BUDGETS = {
   /* R2：旧插件不再展示后，新引擎列表的空态只留"还没有代码插件"一句回执；
      安装入口就在右上角，不再写一段安装教程。实测 7 字。 */
   "src/features/plugins/engine/PluginEngineSection.tsx": 7,
+  /* 0.6.1 工作场景：左列表与编辑区的空态（读取中 / 还没有场景 / 从左边选一个 / 还没装插件），
+     合起来 41 字；都是操作指引，不写说明墙。 */
+  "src/features/plugins/engine/ProfilesPanel.tsx": 41,
+  /* 0.6.1 运行日志：四种空态（无输出 / 账本空 / 筛选无命中 / 已清屏）的标题、一句提示与
+     下一步按钮，合计 113 字；全部是“接着做什么”，不写技术说明墙。 */
+  "src/features/plugins/engine/PluginOutputPanel.tsx": 113,
   /* P163 设置搜索：无匹配只报"没有匹配的设置或页面"，10 字；不写搜索技巧。 */
   "src/features/settings/SettingsModal.tsx": 10,
   /* P133-G：模型设置页删掉最后一家供应商之后表可以真空了（原先"删空就回 seed"，

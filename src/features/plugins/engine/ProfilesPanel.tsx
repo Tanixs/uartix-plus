@@ -34,7 +34,7 @@ function clone(p: WorkProfile): WorkProfile {
 
 function Section(props: { title: string; hint?: string; children: ReactNode }) {
   return (
-    <section style={{ marginTop: "var(--sp-4)" }}>
+    <section>
       <div style={{ display: "flex", alignItems: "baseline", gap: "var(--sp-2)", marginBottom: "var(--sp-2)" }}>
         <span style={{ fontWeight: 600, fontSize: "var(--fs-sm)" }}>{props.title}</span>
         {props.hint ? <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>{props.hint}</span> : null}
@@ -73,7 +73,7 @@ const card: CSSProperties = {
   padding: "var(--sp-3)",
 };
 
-export function ProfilesPanel(props: { /** 已经在设置页里（页头由应用给），不再重复标题与说明。 */ embedded?: boolean } = {}) {
+export function ProfilesPanel() {
   useLocale();
   const ps = useProfiles();
   const repo = useSyncExternalStore(subscribe, getPluginEngineSnapshot, getPluginEngineSnapshot);
@@ -265,282 +265,274 @@ export function ProfilesPanel(props: { /** 已经在设置页里（页头由应�
     }
   }
 
+  async function pickRoot(key: string): Promise<void> {
+    if (!draft) return;
+    try {
+      const dir = await open({
+        directory: true,
+        multiple: false,
+        title: tx(`选择 $EXT:${key} 的目录`, `Pick the folder for $EXT:${key}`),
+      });
+      if (typeof dir === "string" && dir) {
+        update((p) => {
+          p.patch.settings = { ...(p.patch.settings ?? {}) };
+          p.patch.settings.roots = { ...(p.patch.settings.roots ?? {}), [key]: dir };
+        });
+      }
+    } catch (e) {
+      setError(String((e as Error)?.message ?? e));
+    }
+  }
+
   const activeId = ps.book.activeId;
   const activeName = ps.book.profiles.find((p) => p.id === activeId)?.name ?? "";
+  const settingsPatch = draft?.patch.settings;
+  const wsHas = !!settingsPatch && Object.prototype.hasOwnProperty.call(settingsPatch, "workspaceRoot");
+  const wsMode: "keep" | "set" | "clear" = !wsHas ? "keep" : settingsPatch!.workspaceRoot === null ? "clear" : "set";
+  const wsValue = wsHas && typeof settingsPatch!.workspaceRoot === "string" ? settingsPatch!.workspaceRoot : "";
+  const advancedCount = (wsHas ? 1 : 0) + (settingsPatch?.roots ? Object.keys(settingsPatch.roots).length : 0);
+  const nameOf = (id: string): string => repo.entries.find((e) => e.id === id)?.manifest.name ?? id;
+  const themeLabel = (v: string | null | undefined): string => {
+    if (v === undefined) return tx("保持现状", "Keep current");
+    if (v === null || v === "") return tx("内置主题", "Built-in theme");
+    return themeOptions.find((t) => t.key === v)?.title ?? v;
+  };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--bg-panel)" }}>
-      <header
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "var(--sp-2)",
-          padding: "var(--sp-3)",
-          borderBottom: "1px solid var(--border)",
-          flex: "0 0 auto",
-          flexWrap: "wrap",
-        }}
-      >
-        {props.embedded ? null : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <span style={{ fontWeight: 600 }}>{tx("工作场景", "Profiles")}</span>
-            <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>
-              {tx(
-                "一份场景 = 一组有序启用的插件 + 主题/目录/配置补丁。应用前会先给你看会改什么。",
-                "A workspace is an ordered plugin set plus theme/path/config patches. You see what will change before applying.",
-              )}
-            </span>
-          </div>
-        )}
-        <span style={{ flex: 1 }} />
+    <div className="prof-page">
+      <aside className="prof-side">
+        <div className="prof-side-actions">
+          <button className="btn" disabled={!!busy} onClick={() => void doNew()} title={tx("新建一个空白场景", "Create an empty scene")}>
+            {tx("新建场景", "New")}
+          </button>
+          <button className="btn" disabled={!!busy} onClick={() => void doSaveCurrent()} title={tx("把当前启用的插件、主题与目录保存成场景", "Capture the current plugins, theme and paths as a scene")}>
+            {tx("保存当前", "Capture")}
+          </button>
+        </div>
+
         {activeId ? (
-          <span
-            style={{
-              fontSize: "var(--fs-xs)",
-              color: "var(--accent)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-pill)",
-              padding: "2px 8px",
-            }}
-          >
-            {tx(`使用中：${activeName}`, `Active: ${activeName}`)}
-          </span>
+          <div className="prof-active">
+            <span className="mode">{tx("使用中", "Active")}</span>
+            <span className="name" title={activeName}>{activeName}</span>
+            <button className="btn" disabled={!!busy} onClick={() => void doRevert()} title={tx("恢复应用前的插件启停、主题、目录与配置", "Restore plugins, theme, paths and config from before applying")}>
+              {tx("撤销", "Undo")}
+            </button>
+          </div>
         ) : null}
-        <button style={btn()} disabled={!!busy} onClick={() => void doRevert()} title={tx("恢复应用前的插件启停、主题、目录与配置", "Restore enabled plugins, theme, paths and config from before applying")}>
-          {tx("回到应用前", "Undo apply")}
-        </button>
-        <button style={btn()} disabled={!!busy} onClick={() => void doSaveCurrent()}>
-          {tx("保存当前为场景", "Save current as workspace")}
-        </button>
-        <button style={btn()} disabled={!!busy} onClick={() => void doNew()}>
-          {tx("新建场景", "New workspace")}
-        </button>
-      </header>
 
-      {error ? (
-        <div style={{ padding: "var(--sp-2) var(--sp-3)", color: "var(--danger)", fontSize: "var(--fs-xs)", borderBottom: "1px solid var(--border)" }}>
-          {error}
-        </div>
-      ) : null}
-      {notice ? (
-        <div style={{ padding: "var(--sp-2) var(--sp-3)", color: "var(--text-dim)", fontSize: "var(--fs-xs)", borderBottom: "1px solid var(--border)" }}>
-          {notice}
-        </div>
-      ) : null}
-
-      <div style={{ display: "flex", flex: "1 1 auto", minHeight: 0 }}>
-        <aside style={{ width: 270, flex: "0 0 auto", borderRight: "1px solid var(--border)", overflow: "auto", padding: "var(--sp-3)", display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
-          {ps.loading ? <div style={{ color: "var(--text-dim)", fontSize: "var(--fs-xs)" }}>{tx("正在读取…", "Loading…")}</div> : null}
+        <div className="prof-list">
+          {ps.loading ? <div className="prof-empty">{tx("正在读取…", "Loading…")}</div> : null}
           {!ps.loading && !ps.book.profiles.length ? (
-            <div style={{ color: "var(--text-dim)", fontSize: "var(--fs-sm)", lineHeight: 1.6 }}>
-              {tx("还没有场景。点右上角「保存当前为场景」，或新建一份。", "No workspaces yet. Use “Save current as workspace” or create one.")}
-            </div>
+            <div className="prof-empty">{tx("还没有场景。新建一个，或把当前状态存下来。", "No scenes yet. Create one or capture the current state.")}</div>
           ) : null}
-          {ps.book.profiles.map((p) => {
-            const on = p.id === selected;
-            return (
-              <button
-                key={p.id}
-                onClick={() => selectProfile(p.id)}
-                style={{
-                  ...card,
-                  textAlign: "left",
-                  cursor: "pointer",
-                  borderColor: on ? "var(--accent)" : "var(--border)",
-                  background: on ? "var(--bg-hover)" : "var(--panel)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                }}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontWeight: 600, fontSize: "var(--fs-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                  {p.id === activeId ? <span style={{ fontSize: "var(--fs-xs)", color: "var(--accent)" }}>{tx("使用中", "active")}</span> : null}
-                </span>
-                <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)" }}>
-                  {tx(`${p.plugins.length} 个插件`, `${p.plugins.length} plugin(s)`)}
-                  {p.patch.settings?.activeTheme ? ` · ${tx("带主题", "theme")}` : ""}
-                </span>
-                {p.note ? <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.note}</span> : null}
-              </button>
-            );
-          })}
-          {ps.issues.length ? (
-            <div style={{ marginTop: "var(--sp-2)", fontSize: "var(--fs-xs)", color: "var(--warn)", lineHeight: 1.5 }}>
-              {ps.issues.map((s, i) => (
-                <div key={i}>{s}</div>
-              ))}
-            </div>
-          ) : null}
-        </aside>
+          {ps.book.profiles.map((p) => (
+            <button key={p.id} className={`prof-card${p.id === selected ? " on" : ""}`} onClick={() => selectProfile(p.id)}>
+              <span className="nm">{p.name}</span>
+              <span className="meta">
+                {tx(`${p.plugins.length} 个插件`, `${p.plugins.length} plugin(s)`)}
+                {p.note ? ` · ${p.note}` : ""}
+              </span>
+            </button>
+          ))}
+          {ps.issues.map((s, i) => (
+            <div key={i} className="prof-issue">{s}</div>
+          ))}
+        </div>
+      </aside>
 
-        <main style={{ flex: "1 1 auto", minWidth: 0, overflow: "auto", padding: "var(--sp-3)" }}>
-          {!draft ? (
-            <div style={{ color: "var(--text-dim)", fontSize: "var(--fs-sm)", padding: "var(--sp-4)" }}>
-              {tx("从左边选一个场景，或者新建一份。", "Pick a workspace on the left, or create one.")}
-            </div>
-          ) : (
-            <>
-              <div style={{ display: "flex", gap: "var(--sp-2)", alignItems: "flex-end", flexWrap: "wrap" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220, flex: "1 1 260px" }}>
-                  <label style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>{tx("名字", "Name")}</label>
-                  <input
-                    className="input"
-                    value={draft.name}
-                    maxLength={40}
-                    onChange={(e) => update((p) => (p.name = e.target.value))}
-                  />
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220, flex: "2 1 320px" }}>
-                  <label style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>{tx("备注（可选）", "Note (optional)")}</label>
-                  <input
-                    className="input"
-                    value={draft.note ?? ""}
-                    maxLength={200}
-                    onChange={(e) =>
-                      update((p) => {
-                        const v = e.target.value.trim();
-                        if (v) p.note = v;
-                        else delete p.note;
-                      })
-                    }
-                  />
-                </div>
-                <button style={btn()} disabled={!!busy || !dirty} onClick={() => void doSave()}>
+      <main className="prof-main">
+        {!draft ? (
+          <div className="prof-empty">{tx("从左边选一个场景，或者新建一份。", "Pick a scene on the left, or create one.")}</div>
+        ) : (
+          <div className="prof-editor">
+            {error ? <div className="prof-banner danger">{error}</div> : null}
+            {notice ? <div className="prof-banner">{notice}</div> : null}
+
+            <div className="prof-title-row">
+              <div className="prof-title-fields">
+                <input
+                  className="input prof-title-input"
+                  value={draft.name}
+                  maxLength={40}
+                  aria-label={tx("场景名字", "Scene name")}
+                  onChange={(e) => update((p) => (p.name = e.target.value))}
+                />
+                <input
+                  className="input"
+                  value={draft.note ?? ""}
+                  maxLength={200}
+                  placeholder={tx("备注（可选）", "Note (optional)")}
+                  onChange={(e) =>
+                    update((p) => {
+                      const v = e.target.value.trim();
+                      if (v) p.note = v;
+                      else delete p.note;
+                    })
+                  }
+                />
+              </div>
+              <div className="prof-actions">
+                <button className="btn" disabled={!!busy || !dirty} onClick={() => void doSave()}>
                   {tx("保存", "Save")}
                 </button>
-                <button style={btn(true)} disabled={!!busy} onClick={() => void doApply()}>
-                  {busy === "apply" ? tx("应用中…", "Applying…") : tx("应用这个场景", "Apply workspace")}
+                <button className="btn primary" disabled={!!busy || !preview?.ok} onClick={() => void doApply()}>
+                  {busy === "apply" ? tx("应用中…", "Applying…") : tx("应用场景", "Apply")}
                 </button>
-                <button style={btn()} disabled={!!busy} onClick={() => void doDuplicate()}>
+                <button className="btn" disabled={!!busy} onClick={() => void doDuplicate()} title={tx("复制这个场景", "Duplicate this scene")}>
                   {tx("复制", "Duplicate")}
                 </button>
                 <button
-                  style={{ ...btn(), color: confirmDelete === selected ? "var(--danger)" : "var(--text)" }}
+                  className="btn"
+                  style={confirmDelete === selected ? { color: "var(--danger)" } : undefined}
                   disabled={!!busy}
                   onClick={() => void doDelete()}
+                  title={confirmDelete === selected ? tx("再点一次确认删除", "Click again to confirm") : undefined}
                 >
-                  {confirmDelete === selected ? tx("再点一次确认删除", "Click again to delete") : tx("删除", "Delete")}
+                  {confirmDelete === selected ? tx("确认删除", "Confirm") : tx("删除", "Delete")}
                 </button>
               </div>
+            </div>
+            {dirty ? <div className="prof-dirty">{tx("有未保存的改动", "Unsaved changes")}</div> : null}
 
-              <Section title={tx("插件（按启用顺序）", "Plugins (enabled order)")} hint={tx("勾选 = 这个场景启用它；未勾选的已启用插件会在应用时停用", "Checked = enabled by this workspace; enabled plugins not checked will be disabled")}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  {[...draft.plugins.map((p) => p.id), ...repo.entries.filter((e) => !draft.plugins.some((p) => p.id === e.id)).map((e) => e.id)].map((id) => {
-                    const entry = repo.entries.find((e) => e.id === id);
-                    if (!entry) return null;
-                    const pos = draft.plugins.findIndex((p) => p.id === id);
-                    const on = pos >= 0;
-                    return (
-                      <div key={id} style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)", padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", background: on ? "var(--panel)" : "transparent" }}>
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          onChange={(e) =>
-                            update((p) => {
-                              if (e.target.checked) p.plugins.push({ id });
-                              else p.plugins = p.plugins.filter((x) => x.id !== id);
-                            })
-                          }
-                          aria-label={entry.manifest.name}
-                        />
-                        <span style={{ fontWeight: 500, fontSize: "var(--fs-sm)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.manifest.name}</span>
-                        <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)" }}>{entry.id} · v{entry.version}</span>
-                        {entry.verdict !== "trusted" ? (
-                          <span style={{ fontSize: "var(--fs-xs)", color: "var(--warn)" }}>{tx("未批准：场景不会替你启用", "not approved: scene will skip it")}</span>
-                        ) : null}
-                        <span style={{ flex: 1 }} />
-                        {on ? (
-                          <>
-                            <button
-                              style={btn()}
-                              disabled={pos <= 0}
-                              onClick={() => update((p) => {
-                                const arr = p.plugins;
-                                [arr[pos - 1], arr[pos]] = [arr[pos], arr[pos - 1]];
-                              })}
-                              aria-label={tx("上移", "Move up")}
-                            >
-                              ↑
-                            </button>
-                            <button
-                              style={btn()}
-                              disabled={pos >= draft.plugins.length - 1}
-                              onClick={() => update((p) => {
-                                const arr = p.plugins;
-                                [arr[pos + 1], arr[pos]] = [arr[pos], arr[pos + 1]];
-                              })}
-                              aria-label={tx("下移", "Move down")}
-                            >
-                              ↓
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                  {!repo.entries.length ? <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>{tx("还没装插件。", "No plugins installed yet.")}</div> : null}
+            {preview ? (
+              preview.ok ? (
+                <div className="prof-summary">
+                  <span>
+                    {tx(
+                      `应用后启用 ${preview.plan.enabledSet.length} 个插件${preview.plan.toDisable.length ? `，停用 ${preview.plan.toDisable.length} 个未勾选的` : ""}`,
+                      `Enables ${preview.plan.enabledSet.length} plugin(s)${preview.plan.toDisable.length ? `, disables ${preview.plan.toDisable.length} unchecked` : ""}`,
+                    )}
+                  </span>
+                  {preview.plan.extensionPatch.activeTheme !== undefined ? (
+                    <span>{tx(`主题：${themeLabel(preview.plan.extensionPatch.activeTheme)}`, `Theme: ${themeLabel(preview.plan.extensionPatch.activeTheme)}`)}</span>
+                  ) : null}
+                  {preview.plan.skipped
+                    .filter((x) => x.reason === "untrusted")
+                    .map((x) => (
+                      <span key={x.id} className="warn">{tx(`${nameOf(x.id)} 未批准，应用时会跳过`, `${nameOf(x.id)} is not approved and will be skipped`)}</span>
+                    ))}
+                  {preview.plan.skipped
+                    .filter((x) => x.reason === "missing")
+                    .map((x) => (
+                      <span key={x.id} className="warn">{tx(`${nameOf(x.id)} 没有安装，应用时会跳过`, `${nameOf(x.id)} is not installed and will be skipped`)}</span>
+                    ))}
                 </div>
-              </Section>
+              ) : (
+                <div className="prof-summary danger">
+                  {preview.errors.map((e, i) => (
+                    <div key={i}>· {e}</div>
+                  ))}
+                </div>
+              )
+            ) : null}
 
-              <Section title={tx("外观与目录", "Appearance & paths")} hint={tx("只写这里出现的键；其余保持现状", "Only keys shown here are changed")}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "var(--sp-2)" }}>
-                  <FieldShell label={tx("插件主题", "Plugin theme")}>
-                    <select
-                      className="input"
-                      value={
-                        !draft.patch.settings || !("activeTheme" in draft.patch.settings)
-                          ? "__keep"
-                          : !draft.patch.settings.activeTheme
-                            ? "__builtin"
-                            : draft.patch.settings.activeTheme
-                      }
-                      onChange={(e) =>
-                        update((p) => {
-                          p.patch.settings = { ...(p.patch.settings ?? {}) };
-                          if (e.target.value === "__keep") delete p.patch.settings.activeTheme;
-                          else p.patch.settings.activeTheme = e.target.value === "__builtin" ? "" : e.target.value;
-                        })
-                      }
-                    >
-                      <option value="__keep">{tx("保持现状", "Keep current")}</option>
-                      <option value="__builtin">{tx("内置主题", "Built-in theme")}</option>
-                      {themeOptions.map((t) => (
-                        <option key={t.key} value={t.key}>{t.title}</option>
-                      ))}
-                    </select>
-                  </FieldShell>
-                  <FieldShell label={tx("工作区根（$WS）", "Workspace root ($WS)")} note={tx("留空 = 清空", "empty = clear")}>
-                    <div style={{ display: "flex", gap: 6 }}>
+            <Section
+              title={tx("启用哪些插件", "Enabled plugins")}
+              hint={tx("勾选这个场景要用的插件；应用时会停用未勾选的已启用插件", "Checked plugins are enabled by this scene; unchecked enabled plugins are disabled on apply")}
+            >
+              <div className="prof-plugins">
+                {repo.entries.map((entry) => {
+                  const on = draft.plugins.some((p) => p.id === entry.id);
+                  return (
+                    <label key={entry.id} className={`prof-plugin${on ? "" : " off"}`}>
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={(e) =>
+                          update((p) => {
+                            if (e.target.checked) p.plugins.push({ id: entry.id });
+                            else p.plugins = p.plugins.filter((x) => x.id !== entry.id);
+                          })
+                        }
+                        aria-label={entry.manifest.name}
+                      />
+                      <span className="nm">{entry.manifest.name}</span>
+                      <span className="id">{entry.id} · v{entry.version}</span>
+                      {entry.verdict !== "trusted" ? <span className="warn">{tx("未批准，场景不会替你启用", "not approved; the scene will skip it")}</span> : null}
+                    </label>
+                  );
+                })}
+                {!repo.entries.length ? <div className="prof-empty">{tx("还没装插件。", "No plugins installed yet.")}</div> : null}
+              </div>
+            </Section>
+
+            <Section title={tx("外观", "Appearance")} hint={tx("没选的项目保持现状", "Anything not set here stays as it is")}>
+              <div className="prof-field-grid theme">
+                <FieldShell label={tx("主题", "Theme")}>
+                  <select
+                    className="input"
+                    value={
+                      !settingsPatch || !("activeTheme" in settingsPatch)
+                        ? "__keep"
+                        : !settingsPatch.activeTheme
+                          ? "__builtin"
+                          : settingsPatch.activeTheme
+                    }
+                    onChange={(e) =>
+                      update((p) => {
+                        p.patch.settings = { ...(p.patch.settings ?? {}) };
+                        if (e.target.value === "__keep") delete p.patch.settings.activeTheme;
+                        else p.patch.settings.activeTheme = e.target.value === "__builtin" ? "" : e.target.value;
+                      })
+                    }
+                  >
+                    <option value="__keep">{tx("保持现状", "Keep current")}</option>
+                    <option value="__builtin">{tx("内置主题（清除插件主题）", "Built-in theme (clear plugin theme)")}</option>
+                    {themeOptions.map((t) => (
+                      <option key={t.key} value={t.key}>{t.title}</option>
+                    ))}
+                  </select>
+                </FieldShell>
+              </div>
+            </Section>
+
+            <details className="prof-adv">
+              <summary>
+                {tx("高级覆盖：工作区根 / 外部目录", "Advanced: workspace root / external paths")}
+                {advancedCount ? <span className="prof-count">{advancedCount}</span> : null}
+              </summary>
+              <div className="prof-adv-body">
+                <p className="prof-adv-hint">
+                  {tx(
+                    "一般不用改；只有这个场景需要换工作区或外部目录时才设置。未设置的项目保持现状。",
+                    "Usually unnecessary; set these only when this scene needs a different workspace or external path. Unset items stay as they are.",
+                  )}
+                </p>
+                <div className="prof-field-grid">
+                  <FieldShell label={tx("工作区根（$WS）", "Workspace root ($WS)")}>
+                    <div className="prof-path-row">
                       <select
                         className="input"
-                        value={!draft.patch.settings || !("workspaceRoot" in draft.patch.settings) ? "__keep" : "__set"}
+                        value={wsMode}
                         onChange={(e) =>
                           update((p) => {
                             p.patch.settings = { ...(p.patch.settings ?? {}) };
-                            if (e.target.value === "__keep") delete p.patch.settings.workspaceRoot;
-                            else if (!("workspaceRoot" in p.patch.settings)) {
-                              p.patch.settings.workspaceRoot = repo.workspaceRoot;
-                            }
+                            const v = e.target.value;
+                            if (v === "keep") delete p.patch.settings.workspaceRoot;
+                            else if (v === "clear") p.patch.settings.workspaceRoot = null;
+                            else if (typeof p.patch.settings.workspaceRoot !== "string") p.patch.settings.workspaceRoot = repo.workspaceRoot ?? "";
                           })
                         }
-                        style={{ flex: "0 0 92px" }}
+                        style={{ flex: "0 0 112px" }}
                       >
-                        <option value="__keep">{tx("保持", "keep")}</option>
-                        <option value="__set">{tx("设置", "set")}</option>
+                        <option value="keep">{tx("保持现状", "Keep current")}</option>
+                        <option value="set">{tx("指定目录", "Set path")}</option>
+                        <option value="clear">{tx("清空", "Clear")}</option>
                       </select>
-                      {draft.patch.settings && "workspaceRoot" in draft.patch.settings ? (
+                      {wsMode === "set" ? (
                         <>
                           <input
                             className="input"
-                            value={draft.patch.settings.workspaceRoot ?? ""}
-                            placeholder={tx("绝对路径；留空 = 清空", "absolute path; empty = clear")}
-                            onChange={(e) => update((p) => {
-                              p.patch.settings = { ...(p.patch.settings ?? {}) };
-                              p.patch.settings.workspaceRoot = e.target.value;
-                            })}
+                            value={wsValue}
+                            placeholder={tx("绝对路径", "Absolute path")}
+                            onChange={(e) =>
+                              update((p) => {
+                                p.patch.settings = { ...(p.patch.settings ?? {}) };
+                                p.patch.settings.workspaceRoot = e.target.value;
+                              })
+                            }
                           />
-                          <button style={btn()} onClick={() => void pickWorkspace()}>{tx("选择…", "Pick…")}</button>
+                          <button className="btn" onClick={() => void pickWorkspace()}>{tx("选择…", "Pick…")}</button>
                         </>
                       ) : null}
                     </div>
@@ -548,42 +540,49 @@ export function ProfilesPanel(props: { /** 已经在设置页里（页头由应�
                 </div>
 
                 {rootKeyList.length ? (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "var(--sp-2)", marginTop: "var(--sp-2)" }}>
+                  <div className="prof-field-grid">
                     {rootKeyList.map((key) => {
-                      const roots = draft.patch.settings?.roots ?? {};
+                      const roots = settingsPatch?.roots ?? {};
                       const has = Object.prototype.hasOwnProperty.call(roots, key);
                       const v = roots[key];
-                      const mode = !has ? "inherit" : v === null ? "unbind" : "bind";
+                      const mode = !has ? "keep" : v === null ? "unbind" : "bind";
                       return (
                         <FieldShell key={key} label={`$EXT:${key}`}>
-                          <div style={{ display: "flex", gap: 6 }}>
+                          <div className="prof-path-row">
                             <select
                               className="input"
                               value={mode}
-                              onChange={(e) => update((p) => {
-                                p.patch.settings = { ...(p.patch.settings ?? {}) };
-                                const next = { ...(p.patch.settings.roots ?? {}) };
-                                if (e.target.value === "inherit") delete next[key];
-                                else if (e.target.value === "unbind") next[key] = null;
-                                else next[key] = repo.roots[key] ?? "";
-                                p.patch.settings.roots = next;
-                              })}
-                              style={{ flex: "0 0 96px" }}
+                              onChange={(e) =>
+                                update((p) => {
+                                  p.patch.settings = { ...(p.patch.settings ?? {}) };
+                                  const next = { ...(p.patch.settings.roots ?? {}) };
+                                  if (e.target.value === "keep") delete next[key];
+                                  else if (e.target.value === "unbind") next[key] = null;
+                                  else next[key] = repo.roots[key] ?? "";
+                                  p.patch.settings.roots = next;
+                                })
+                              }
+                              style={{ flex: "0 0 112px" }}
                             >
-                              <option value="inherit">{tx("保持", "keep")}</option>
-                              <option value="bind">{tx("绑定", "bind")}</option>
-                              <option value="unbind">{tx("解绑", "unbind")}</option>
+                              <option value="keep">{tx("保持现状", "Keep current")}</option>
+                              <option value="bind">{tx("绑定目录", "Bind")}</option>
+                              <option value="unbind">{tx("解绑", "Unbind")}</option>
                             </select>
                             {mode === "bind" ? (
-                              <input
-                                className="input"
-                                value={typeof v === "string" ? v : ""}
-                                placeholder={tx("绝对路径", "absolute path")}
-                                onChange={(e) => update((p) => {
-                                  p.patch.settings = { ...(p.patch.settings ?? {}) };
-                                  p.patch.settings.roots = { ...(p.patch.settings.roots ?? {}), [key]: e.target.value };
-                                })}
-                              />
+                              <>
+                                <input
+                                  className="input"
+                                  value={typeof v === "string" ? v : ""}
+                                  placeholder={tx("绝对路径", "Absolute path")}
+                                  onChange={(e) =>
+                                    update((p) => {
+                                      p.patch.settings = { ...(p.patch.settings ?? {}) };
+                                      p.patch.settings.roots = { ...(p.patch.settings.roots ?? {}), [key]: e.target.value };
+                                    })
+                                  }
+                                />
+                                <button className="btn" onClick={() => void pickRoot(key)}>{tx("选择…", "Pick…")}</button>
+                              </>
                             ) : null}
                           </div>
                         </FieldShell>
@@ -591,7 +590,8 @@ export function ProfilesPanel(props: { /** 已经在设置页里（页头由应�
                     })}
                   </div>
                 ) : null}
-              </Section>
+              </div>
+            </details>
 
               {draft.plugins.some((p) => (repo.entries.find((e) => e.id === p.id)?.manifest.contributes.settings?.length ?? 0) > 0) ? (
                 <Section title={tx("插件配置", "Plugin settings")} hint={tx("「默认」= 应用时删掉覆盖值；什么都不选 = 保持现状", "“Default” removes the override; untouched = keep current")}>
@@ -645,40 +645,9 @@ export function ProfilesPanel(props: { /** 已经在设置页里（页头由应�
                 </Section>
               ) : null}
 
-              <Section title={tx("应用预览", "Apply preview")}>
-                <div style={{ ...card, display: "flex", flexDirection: "column", gap: 6, fontSize: "var(--fs-xs)", lineHeight: 1.6 }}>
-                  {!preview ? null : preview.ok ? (
-                    <>
-                      <div>
-                        {tx("启用：", "Enable: ")}
-                        {preview.plan.toEnable.length ? preview.plan.toEnable.join("、") : tx("（无）", "(none)")}
-                      </div>
-                      <div>
-                        {tx("停用：", "Disable: ")}
-                        {preview.plan.toDisable.length ? preview.plan.toDisable.join("、") : tx("（无）", "(none)")}
-                      </div>
-                      <div>
-                        {tx("改动：", "Changes: ")}
-                        {[
-                          preview.plan.extensionPatch.activeTheme !== undefined ? tx("主题", "theme") : "",
-                          preview.plan.extensionPatch.workspaceRoot !== undefined ? tx("工作区根", "workspace root") : "",
-                          preview.plan.extensionPatch.roots.length ? tx(`${preview.plan.extensionPatch.roots.length} 个外部目录`, `${preview.plan.extensionPatch.roots.length} external path(s)`) : "",
-                          preview.plan.settings.length ? tx(`${preview.plan.settings.length} 个插件的配置`, `config for ${preview.plan.settings.length} plugin(s)`) : "",
-                        ].filter(Boolean).join("、") || tx("（无）", "(none)")}
-                      </div>
-                      {preview.plan.warnings.map((w, i) => (
-                        <div key={i} style={{ color: "var(--warn)" }}>· {w}</div>
-                      ))}
-                    </>
-                  ) : (
-                    preview.errors.map((e, i) => <div key={i} style={{ color: "var(--danger)" }}>· {e}</div>)
-                  )}
-                </div>
-              </Section>
-            </>
-          )}
-        </main>
-      </div>
+          </div>
+        )}
+      </main>
     </div>
   );
 

@@ -17,9 +17,11 @@
  *  3. **启停在这里，启用与批准绝不在这里**：前者是对进程的动作，后者是判据，判据只从设置详情走。
  */
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { tx, useLocale } from "../../../i18n/strings";
+import { EmptyState } from "../../../shared/EmptyState";
+import { requestOpenSettings } from "../../ai/appBus";
 import {
   ensureLoaded,
   getSnapshot,
@@ -69,14 +71,25 @@ export function PluginOutputPanel() {
     void ensureLoaded();
   }, []);
 
-  const lines = useMemo(() => {
+  const unfiltered = useMemo(() => {
     const nameOf = (id: string) => repo.entries.find((e) => e.id === id)?.manifest.name ?? id;
-    const all = channel === "host" ? hostLinesOfAll(repo.entries) : ledgerLinesOf(repo.journal, nameOf);
+    return channel === "host" ? hostLinesOfAll(repo.entries) : ledgerLinesOf(repo.journal, nameOf);
+  }, [repo.entries, repo.journal, channel]);
+
+  const lines = useMemo(() => {
     const f: OutputFilter = { channel, pluginId, minLevel, query };
-    return filterLines(all, f).filter((l) => l.at >= clearedAt);
-  }, [repo.entries, repo.journal, channel, pluginId, minLevel, query, clearedAt]);
+    return filterLines(unfiltered, f).filter((l) => l.at >= clearedAt);
+  }, [unfiltered, channel, pluginId, minLevel, query, clearedAt]);
 
   const status = useMemo(() => statusOf(repo.entries), [repo.entries]);
+  const errorCount = channel === "host" ? status.errored : unfiltered.filter((l) => l.level === "error").length;
+
+  // 复制/存文件/打开目录的回执是一次性的；留太久会像一条过期的状态条。
+  useEffect(() => {
+    if (!msg) return;
+    const t = window.setTimeout(() => setMsg(""), 4000);
+    return () => window.clearTimeout(t);
+  }, [msg]);
 
   // 跟随：新行来了就贴到底。翻了上去就该停住——"我在看第 3 行，你把我拽回底部"是这一面最难忍的交互
   useEffect(() => {
@@ -125,6 +138,13 @@ export function PluginOutputPanel() {
     URL.revokeObjectURL(url);
   }
 
+  function resetFilters(): void {
+    setQuery("");
+    setPluginId("");
+    setMinLevel(null);
+    setClearedAt(0);
+  }
+
   async function doOpenDir(): Promise<void> {
     if (!selectedEntry) {
       setMsg(tx("先在上面选中一个插件", "Pick a plugin above first"));
@@ -143,142 +163,184 @@ export function PluginOutputPanel() {
     }
   }
 
-  const btnRow: CSSProperties = {
-    display: "flex",
-    alignItems: "center",
-    gap: "var(--sp-2)",
-    padding: "var(--sp-2) var(--sp-3)",
-    flexWrap: "wrap",
-    borderBottom: "1px solid var(--border)",
-    fontSize: "var(--fs-xs)",
-  };
-  const sel: CSSProperties = {
-    background: "var(--bg)",
-    color: "var(--text)",
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    padding: "3px 6px",
-    fontSize: "var(--fs-xs)",
-  };
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, background: "var(--bg-panel)" }}>
-      <div style={btnRow}>
-        {CHANNELS.map((c) => (
-          <button
-            key={c.id}
-            className={`btn${channel === c.id ? " primary" : ""}`}
-            onClick={() => {
-              setChannel(c.id);
-              setClearedAt(0);
-            }}
-          >
-            {tx(c.zh, c.en)}
-          </button>
-        ))}
-        <select style={sel} value={pluginId} onChange={(e) => setPluginId(e.target.value)} aria-label={tx("按插件筛", "Filter by plugin")}>
-          <option value="">{tx("全部插件", "All plugins")}</option>
-          {repo.entries.map((e) => (
-            <option key={e.id} value={e.id}>
-              {e.manifest.name}
-            </option>
+    <div className="log-page">
+      <div className="log-head">
+        <div className="log-tabs" role="tablist" aria-label={tx("日志通道", "Log channels")}>
+          {CHANNELS.map((c) => (
+            <button
+              key={c.id}
+              role="tab"
+              aria-selected={channel === c.id}
+              className={`log-tab${channel === c.id ? " on" : ""}`}
+              onClick={() => {
+                setChannel(c.id);
+                setClearedAt(0);
+              }}
+            >
+              {tx(c.zh, c.en)}
+            </button>
           ))}
-        </select>
-        {channel === "host" ? (
+        </div>
+
+        <div className="log-tools">
+          <select className="input log-filter" value={pluginId} onChange={(e) => setPluginId(e.target.value)} aria-label={tx("按插件筛", "Filter by plugin")}>
+            <option value="">{tx("全部插件", "All plugins")}</option>
+            {repo.entries.map((e) => (
+              <option key={e.id} value={e.id}>{e.manifest.name}</option>
+            ))}
+          </select>
           <select
-            style={sel}
+            className="input log-filter"
             value={minLevel ?? ""}
             onChange={(e) => setMinLevel((e.target.value || null) as PluginLogLevel | null)}
             aria-label={tx("按级别筛", "Filter by level")}
           >
             <option value="">{tx("全部级别", "All levels")}</option>
             {HOST_LEVELS.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
+              <option key={l} value={l}>{l}</option>
             ))}
           </select>
-        ) : null}
-        <input
-          style={{ ...sel, flex: "1 1 120px", minWidth: 90 }}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={tx("搜文本 / 插件名", "Search text / plugin name")}
-          aria-label={tx("搜索日志", "Search log")}
-        />
-        <button className={`btn${follow ? " primary" : ""}`} onClick={() => setFollow((v) => !v)} title={tx("新行来了就滚到底", "Scroll to the newest line")}>
-          {tx("跟随", "Follow")}
-        </button>
-        <button className="btn" onClick={() => setClearedAt(Date.now())} title={tx("只影响这一面的显示，不清内存也不清盘", "View only: clears neither the buffer nor the file")}>
-          {tx("清屏", "Clear view")}
-        </button>
-        <button className="btn" onClick={() => void doCopy()} disabled={!lines.length}>
-          {tx("复制", "Copy")}
-        </button>
-        <button className="btn" onClick={() => void doSave()} disabled={!lines.length}>
-          {tx("存文件", "Save")}
-        </button>
-        <button className="btn" onClick={() => void doOpenDir()} title={tx("打开这个插件的日志目录", "Open this plugin's log folder")}>
-          {tx("日志目录", "Log folder")}
-        </button>
-        <button className="btn" onClick={() => void reload()} title={tx("重新读盘（账本与插件清单）", "Re-read the disk (ledger and plugin index)")}>
-          {tx("刷新", "Refresh")}
-        </button>
+          <input
+            className="input log-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={tx("搜索文本或插件", "Search text or plugin")}
+            aria-label={tx("搜索日志", "Search log")}
+          />
+        </div>
+
+        <div className="log-actions">
+          <button
+            className={`btn sm${follow ? " on" : ""}`}
+            aria-pressed={follow}
+            onClick={() => setFollow((v) => !v)}
+            title={tx("新行来了就滚到底", "Scroll to the newest line")}
+          >
+            {tx("跟随", "Follow")}
+          </button>
+          <button className="btn sm" onClick={() => setClearedAt(Date.now())} title={tx("只影响这一面的显示，不清内存也不清盘", "View only: clears neither the buffer nor the file")}>
+            {tx("清屏", "Clear view")}
+          </button>
+          <button className="btn sm" onClick={() => void doCopy()} disabled={!lines.length}>
+            {tx("复制", "Copy")}
+          </button>
+          <button className="btn sm" onClick={() => void doSave()} disabled={!lines.length}>
+            {tx("存文件", "Save")}
+          </button>
+          {channel === "host" ? (
+            <button className="btn sm" onClick={() => void doOpenDir()} disabled={!selectedEntry} title={tx("打开这个插件的日志目录", "Open this plugin's log folder")}>
+              {tx("日志目录", "Log folder")}
+            </button>
+          ) : null}
+          <button className="btn sm" onClick={() => void reload()} title={tx("重新读盘（账本与插件清单）", "Re-read the disk (ledger and plugin index)")}>
+            {tx("刷新", "Refresh")}
+          </button>
+        </div>
       </div>
 
-      <div style={{ ...btnRow, borderBottom: "1px solid var(--border)", color: "var(--text-dim)" }}>
-        <span style={{ color: "var(--text)" }}>
-          {status.running.length
-            ? tx(`在跑：${status.running.map((r) => `${r.name}${r.pid ? ` (pid ${r.pid})` : ""}`).join("、")}`, `Running: ${status.running.map((r) => `${r.name}${r.pid ? ` (pid ${r.pid})` : ""}`).join(", ")}`)
-            : tx("没有在跑的插件", "Nothing is running")}
-        </span>
-        <span style={{ color: status.errored ? "var(--danger)" : "var(--text-faint)" }}>
-          {tx(`${status.errored} 行错误`, `${status.errored} error line(s)`)}
-        </span>
-        <span>{tx(`显示 ${lines.length} 行`, `Showing ${lines.length}`)}</span>
-        <div style={{ flex: "1 1 auto" }} />
-        {selectedEntry ? (
+      <div className="log-status">
+        {channel === "host" ? (
+          status.running.length ? (
+            status.running.map((r) => (
+              <button
+                key={r.id}
+                className="log-chip"
+                onClick={() => {
+                  setPluginId(r.id);
+                  setMinLevel(null);
+                  setQuery("");
+                }}
+                title={tx(`只看「${r.name}」的日志`, `Show only ${r.name}`)}
+              >
+                <span className="dot" />
+                <span className="nm">{r.name}{r.pid ? ` · pid ${r.pid}` : ""}</span>
+              </button>
+            ))
+          ) : (
+            <span className="log-muted">{tx("暂无运行中的插件", "No plugins running")}</span>
+          )
+        ) : (
+          <span className="log-muted">{tx(`操作账本 · ${unfiltered.length} 条`, `Ledger · ${unfiltered.length} event(s)`)}</span>
+        )}
+        {errorCount ? (
+          <button
+            className="log-chip err"
+            onClick={() => {
+              setPluginId("");
+              setMinLevel("error");
+              setQuery("");
+              setClearedAt(0);
+            }}
+            title={tx("只看错误行", "Show error lines only")}
+          >
+            {tx(`${errorCount} 条错误`, `${errorCount} error line(s)`)}
+          </button>
+        ) : null}
+        <span className="log-muted">{tx(`显示 ${lines.length} 行`, `Showing ${lines.length}`)}</span>
+        {lines.length !== unfiltered.length ? <span className="log-muted">{tx(`共 ${unfiltered.length} 行`, `${unfiltered.length} total`)}</span> : null}
+        <span className="log-spacer" />
+        {channel === "host" && selectedEntry ? (
           <>
-            <span>{selectedEntry.manifest.name} · {tx(phaseLabel(selectedEntry.phase).zh, phaseLabel(selectedEntry.phase).en)}</span>
-            <button className="btn" disabled={!canStart(selectedEntry.phase)} onClick={() => void doStart()}>
+            <span className="log-muted">{selectedEntry.manifest.name} · {tx(phaseLabel(selectedEntry.phase).zh, phaseLabel(selectedEntry.phase).en)}</span>
+            <button className="btn sm" disabled={!canStart(selectedEntry.phase)} onClick={() => void doStart()}>
               {tx("启动", "Start")}
             </button>
-            <button className="btn" disabled={!canStop(selectedEntry.phase)} onClick={() => void doStop()}>
+            <button className="btn sm" disabled={!canStop(selectedEntry.phase)} onClick={() => void doStop()}>
               {tx("停止", "Stop")}
             </button>
           </>
         ) : null}
       </div>
 
-      {msg ? <div style={{ padding: "4px var(--sp-3)", fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>{msg}</div> : null}
+      {msg ? <div className="log-note">{msg}</div> : null}
       {issues.length ? (
-        <div style={{ padding: "4px var(--sp-3)", fontSize: "var(--fs-xs)", color: "var(--warn)", whiteSpace: "pre-wrap" }}>
+        <div className="log-issue">
           {tx("日志落盘出过问题（内存里的那份仍然完整）：", "Writing logs to disk hit a problem (the in-memory copy is intact):")}
           {issues.join("\n")}
         </div>
       ) : null}
 
-      <div ref={box} style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto", padding: "var(--sp-2) var(--sp-3)", fontFamily: "var(--font-mono)", fontSize: "var(--fs-xs)", lineHeight: 1.55 }}>
+      <div ref={box} className="log-body">
         {lines.length ? (
           lines.map((l, i) => (
-            <div key={`${l.at}-${i}`} style={{ color: LEVEL_COLORS[l.level], whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-              <span style={{ color: "var(--text-faint)" }}>{hhmmss(l.at)}</span>
-              {l.pluginName ? <span style={{ color: "var(--text-faint)" }}> · {l.pluginName}</span> : null}
+            <div key={`${l.at}-${i}`} className="log-line" style={{ color: LEVEL_COLORS[l.level] }}>
+              <span className="log-time">{hhmmss(l.at)}</span>
+              {l.pluginName ? <span className="log-src"> · {l.pluginName}</span> : null}
               {" "}
               {l.text}
             </div>
           ))
         ) : (
-          <div style={{ color: "var(--text-dim)", lineHeight: "var(--lh-read)" }}>
-            {channel === "host"
-              ? tx(
-                  "这里还没有宿主输出。启用并打开一个插件的面板，它的进程日志就会滚进来；每一行同时写到 plugins/<插件>/logs/host.log。",
-                  "No host output yet. Enable a plugin and open its panel — its process log lands here, and in plugins/<id>/logs/host.log.",
-                )
-              : tx(
-                  "操作账本是空的。装一次插件、批准一次权限，这里就会留下可重放的记录（谁、什么时候、给了哪些权限）。",
-                  "The ledger is empty. Install or approve something and a replayable record appears here (who, when, which permissions).",
-                )}
+          <div className="log-empty-wrap">
+            {unfiltered.length && clearedAt ? (
+              <EmptyState
+                title={tx("已清屏", "View cleared")}
+                hint={[tx("新的日志会继续显示；清屏只影响这一面的视图。", "New lines keep arriving; clearing only affects this view.")]}
+                actions={[{ label: tx("显示清屏前", "Show cleared lines"), onClick: () => setClearedAt(0) }]}
+              />
+            ) : unfiltered.length ? (
+              <EmptyState
+                title={tx("没有匹配的日志", "No matching lines")}
+                hint={[tx("当前筛选没有命中，清除筛选看看全部。", "Nothing matches the current filters; clear them to see everything.")]}
+                actions={[{ label: tx("清除筛选", "Clear filters"), primary: true, onClick: resetFilters }]}
+              />
+            ) : channel === "host" ? (
+              <EmptyState
+                title={tx("还没有宿主输出", "No host output yet")}
+                hint={[tx("启用并打开一个插件的面板，进程日志会滚到这里；每行也会写入磁盘。", "Enable a plugin and open its panel; its process log lands here and is also written to disk.")]}
+                actions={[
+                  { label: tx("打开插件管理", "Open plugin management"), primary: true, onClick: () => requestOpenSettings("plugins") },
+                  { label: tx("日志目录", "Log folder"), disabled: !selectedEntry, onClick: () => void doOpenDir() },
+                ]}
+              />
+            ) : (
+              <EmptyState
+                title={tx("操作账本还是空的", "The action ledger is empty")}
+                hint={[tx("安装、批准或启用一个插件后，这里会留下可重放的记录。", "Install, approve or enable a plugin and a replayable record will appear here.")]}
+                actions={[{ label: tx("打开插件管理", "Open plugin management"), primary: true, onClick: () => requestOpenSettings("plugins") }]}
+              />
+            )}
           </div>
         )}
       </div>
