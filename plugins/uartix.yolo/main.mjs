@@ -61,6 +61,15 @@ const RUNS_DIR = "train_runs";
  * 里面放 X-AnyLabeling 导出的目录，一个子目录 = 一批素材；面板只数列数、永不写永不删。
  */
 const INTAKE_DIR = "annotations";
+/**
+ * 起 python 必带的环境。两条都是端到端试用真撞出来的，不是防御性摆设：
+ * - `PYTHONIOENCODING/PYTHONUTF8`：Windows 上 python 的 stdout 默认走控制台代码页（这台是 cp936），
+ *   而插件按 UTF-8 解 —— 中文类别名会变成 `Բ` 这种"看着像字"的垃圾，且不报错。
+ * - `YOLO_AUTOINSTALL=false`：ultralytics 缺依赖时默认**自己 pip install**。导出后测速那条路
+ *   真触发了 `onnxruntime-gpu` 的自动安装。装东西是用户的事（详设 §3 红线 C 的同一口径），
+ *   所以让它缺什么就明确失败，别替用户改环境。
+ */
+const PY_ENV = { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", YOLO_AUTOINSTALL: "false" };
 /** 内存里保留多少行日志。界面上限一致，超出丢最旧的。 */
 const LOG_KEEP = 4000;
 
@@ -224,7 +233,7 @@ const PROBE_PY = [
   "    for k in src:",
   "        t.setdefault(k, kind)",
   "o = {'ultralytics': ultralytics.__version__, 'keys': {k: [t.get(k, ''), D[k]] for k in D}}",
-  "print(json.dumps(o, ensure_ascii=False, default=str))",
+  "print(json.dumps(o, ensure_ascii=True, default=str))",
 ].join("\n");
 
 /** 探测失败时的兜底：只摆"工作区配置里本来就有的那几个键"，并明确告诉用户降级了。 */
@@ -471,7 +480,7 @@ async function readBaseConfig() {
   const py = await detectPython();
   if (py.ok) {
     const code =
-      "import json,sys,yaml;json.dump(yaml.safe_load(open(sys.argv[1],encoding='utf-8')) or {},sys.stdout,ensure_ascii=False)";
+      "import json,sys,yaml;json.dump(yaml.safe_load(open(sys.argv[1],encoding='utf-8')) or {},sys.stdout,ensure_ascii=True)";
     const r = await runOnce(py.path, ["-c", code, file], 15000);
     if (r.code === 0) {
       try {
@@ -596,6 +605,11 @@ function runOnce(cmd, args, timeoutMs) {
         cmd,
         args,
         cwd: root || undefined,
+        // 探针一律按 UTF-8 收：Windows 上 python 的 stdout 默认走控制台代码页（这台是 cp936），
+        // 而这里按 UTF-8 解 —— 中文类别名会被解成 `Բ` / `` 这种"看着像字"的垃圾，
+        // 更糟的是它**不报错**：config.yaml 里 `classes: ['圆','方']` 变成乱码后照样写进快照，
+        // 构建数据集 exit 0、标注框 0 个。端到端跑真数据集才照得出来（P175 试用发现的）。
+        env: { ...PY_ENV, },
         onStdout: (l) => {
           if (out.length < 64 * 1024) out += l + "\n";
         },
@@ -832,7 +846,7 @@ async function modelLibrary(force) {
       "  out.append({'file':f,'ok':True,'task':m.task,'nc':getattr(m,'nc',None),'version':ck.get('version') or ta.get('version') or '','imgsz':ta.get('imgsz'),'optimizer':ta.get('optimizer')})\n" +
       " except Exception as e:\n" +
       "  out.append({'file':f,'ok':False,'error':str(e)[:180]})\n" +
-      "print(json.dumps(out,ensure_ascii=False))\n";
+      "print(json.dumps(out,ensure_ascii=True))\n";
     const r = await runOnce(py.path, ["-c", code, JSON.stringify(need.map((f) => f.file))], 180000);
     if (r.code !== 0) err = (r.err || r.out || "读权重失败").slice(-300);
     else {
@@ -1311,6 +1325,8 @@ function snapshot(j) {
     logPath: j.logPath,
     // 本次实验的 yaml 快照：面板上「复制这条命令 / 在资源管理器打开」都指它（W7 用它做复现）
     configPath: j.configPath || "",
+    // 「退出码 0 但结果不对」那类提醒（构建出来 0 个标注框）：状态还是成功，但不能让它悄悄过去
+    warning: j.warning || "",
     total: j.lines.length,
   };
 }
@@ -1459,12 +1475,16 @@ function finishJob(j, code) {
   j.state = code === 0 ? "succeeded" : "failed";
   j.code = code;
   j.endedAt = Date.now();
+  // 提醒要在**任何一次事件发出之前**算好：`flushLog` 也会推一份 job 快照，
+  // 先算就不会出现"前一份说成功、后一份才补提醒"的闪回。
+  if (code === 0 && j.kind === "dataset") j.warning = datasetWarning(j.lines);
   if (j.state === "failed" && j.progress.phase !== "error") {
     j.progress.phase = "error";
     j.progress.detail = `进程退出码 ${code}（往上翻日志看最后一行 [错误]）`;
   }
   flushLog();
   pushLine(j, `[工作台] 进程结束，退出码 ${code}`, "sys");
+  if (j.warning) pushLine(j, `[工作台] 提醒：${j.warning}`, "err");
   // 终态必须**自己发一次**：`flushLog` 只在"这一批确实有待发行"时才会顺带推 job 事件，
   // 而子进程的输出刚好在 120ms 的批之间被冲完时，批里是空的 —— 表现是面板永远停在"运行中"，
   // 只有下一次任务开始才解冻。这个竞态在满载的测试机上会被反复抓到。
@@ -1570,8 +1590,8 @@ async function startJob(kind, overrides) {
       args: kind === "train" ? [runner, "--config", confPath, "--root", root] : [runner, "--config", confPath],
       cwd: root,
       env: {
-        PYTHONIOENCODING: "utf-8",
-        PYTHONUTF8: "1",
+        ...PY_ENV,
+        
         OPENBLAS_NUM_THREADS: "1",
         KMP_DUPLICATE_LIB_OK: "TRUE",
         CUDA_MODULE_LOADING: "LAZY",
@@ -1851,7 +1871,7 @@ async function deployStart(req) {
       cmd: "powershell",
       args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, "-Config", wrapper, "-Step", step],
       cwd: tool.dir,
-      env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
+      env: { ...PY_ENV, },
       onStdout: (l) => pushLine(job, l, "out"),
       onStderr: (l) => pushLine(job, l, "err"),
       onExit: (code) => finishJob(job, code),
@@ -2253,7 +2273,7 @@ async function activate(c) {
         "try:\n" +
         " import ultralytics;o['ultralytics']=ultralytics.__version__\n" +
         "except Exception as e:o['ultralytics_error']=str(e)[:200]\n" +
-        "print(json.dumps(o,ensure_ascii=False))\n";
+        "print(json.dumps(o,ensure_ascii=True))\n";
       const r = await runOnce(py.path, ["-c", code], 60000);
       if (r.code !== 0) return { ok: false, error: (r.err || r.out || "自检失败").slice(0, 400) };
       try {
@@ -2615,7 +2635,7 @@ async function evalStart(opts) {
       cmd: py.path,
       args,
       cwd: root,
-      env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", OPENBLAS_NUM_THREADS: "1", KMP_DUPLICATE_LIB_OK: "TRUE", CUDA_MODULE_LOADING: "LAZY" },
+      env: { ...PY_ENV, OPENBLAS_NUM_THREADS: "1", KMP_DUPLICATE_LIB_OK: "TRUE", CUDA_MODULE_LOADING: "LAZY" },
       onStdout: (l) => pushLine(job, l, "out"),
       onStderr: (l) => pushLine(job, l, "err"),
       onExit: (code) => finishJob(job, code),
@@ -2815,7 +2835,7 @@ async function exportStart(req) {
       cmd: py.path,
       args,
       cwd: root,
-      env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", OPENBLAS_NUM_THREADS: "1", KMP_DUPLICATE_LIB_OK: "TRUE", CUDA_MODULE_LOADING: "LAZY" },
+      env: { ...PY_ENV, OPENBLAS_NUM_THREADS: "1", KMP_DUPLICATE_LIB_OK: "TRUE", CUDA_MODULE_LOADING: "LAZY" },
       onStdout: (l) => pushLine(job, l, "out"),
       onStderr: (l) => pushLine(job, l, "err"),
       onExit: (code) => finishJob(job, code),
@@ -2925,7 +2945,10 @@ function runProfiles(project, limit) {
  * 换一个 `name` 免得盖掉原产物。
  */
 function reproCommands(run) {
-  const py = "python";
+  // 用**探测到的那枚 python**，不是裸 `python`：这台机器的解释器是 conda 环境里的绝对路径
+  // （`_env.bat` 写的），PATH 上没有 `python` —— 写裸命令的话，「复制到 cmd 里能直接跑通」
+  // 这条承诺就是假的（端到端试用时照出来的）。没探测过才退回 `python`。
+  const py = pyCache.ok && pyCache.path ? pyCache.path.replace(/\\/g, "/") : "python";
   const ws = root.replace(/\\/g, "/");
   const runner = path.join(PKG_DIR, "runner", "train_job.py").replace(/\\/g, "/");
   const snap = abs(`train_runs/repro-${run.name}-${Date.now().toString(36)}.yaml`);
@@ -3122,6 +3145,41 @@ const FAILURE_KINDS = [
   },
 ];
 
+/**
+ * 构建数据集"退出码 0 但什么都没构建出来"的兜底判据。
+ *
+ * 用户的 `build_dataset.py` 对"标签名不在类别表"只打 `[警告]` 然后正常退出 —— 于是面板会显示成功，
+ * 而数据集里一个标注框都没有（端到端试用真撞上过一次：中文类别名被探针串成乱码）。
+ * 这里不猜原因，只把它自己打的账读回来：类别计数全 0、或全部样本都没有有效标注 → 提醒。
+ */
+function datasetWarning(lines) {
+  const text = (lines || []).join("\n");
+  let total = 0;
+  let classes = 0;
+  for (const m of text.matchAll(/类别\s+.+?\s*:\s*(\d+)\s*个标注框/g)) {
+    total += Number(m[1]) || 0;
+    classes += 1;
+  }
+  const skipped = [];
+  for (const m of text.matchAll(/跳过\s+(.+?)\s*:\s*(\d+)\s*个/g)) skipped.push([m[1], Number(m[2]) || 0]);
+  const skipN = skipped.reduce((n, s) => n + s[1], 0);
+  const samples = Number((/合计\s+(\d+)\s+个样本/.exec(text) || [])[1] || 0);
+  const empty = Number((/有\s+(\d+)\s+张图片没有任何有效标注框/.exec(text) || [])[1] || 0);
+
+  if (classes && total === 0) {
+    const why = skipped.length ? `被跳过的标签名：${skipped.map((s) => `${s[0]}（${s[1]} 个）`).join("、")}。` : "";
+    return `构建退出码是 0，但这次一个标注框都没落盘——标注里的标签名和类别表 classes 对不上。${why}` +
+      `先去「数据」页核对类别表与投料口再重新构建（类别名区分大小写；中文类别名如果显示成乱码，是编码问题，不是你没标）。`;
+  }
+  if (samples && empty >= samples) {
+    return `这 ${samples} 张图片全都没有有效标注框：要么没导出 json、要么 json 里的形状名不在类别表里。训练会跑但学不到东西。`;
+  }
+  if (skipN) {
+    return `有 ${skipN} 个标注被跳过（${skipped.map((s) => `${s[0]} ${s[1]} 个`).join("、")}）——它们不会进训练集，看看是不是类别表少了名字。`;
+  }
+  return "";
+}
+
 /** 从日志尾部往前找第一个命中的归类；用户主动停止不算失败。 */
 function classifyFailure(lines) {
   const list = (Array.isArray(lines) ? lines : []).map((l) => (typeof l === "string" ? l : String((l && l.text) || "")));
@@ -3197,6 +3255,7 @@ export {
   chartColumns,
   classifyFailure,
   coerceTrain,
+  datasetWarning,
   downsample,
   diffArgs,
   dumpConfig,

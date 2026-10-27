@@ -106,3 +106,37 @@ describe("P175 · 勾选框的排版不变量", () => {
     expect(css).toMatch(/input\[type="checkbox"\]\s*\{[^}]*width:\s*auto/);
   });
 });
+
+/* ============================================================================
+   P175 · 同名函数不许出现两次
+   ----------------------------------------------------------------------------
+   面板是**一个非 module 的 `<script>`**，同名函数声明后者会静默盖掉前者 —— 端到端试用时
+   就是这么把「概览 · 训练记录」整张表弄成空白的（`renderRuns` 被实验页那份同名函数盖了），
+   语法门是绿的、页面也不报错，只有真数据能照出来。我自己新加的 `num()` 也撞过一次
+   （撞的是"按 id 读数字输入框"那个），会把保存数据集的数值悄悄变成 NaN。
+   ============================================================================ */
+
+describe("P175 · 面板里不许有同名函数", () => {
+  const files = [
+    path.join(ROOT, "plugins", "uartix.yolo", "panel.html"),
+    path.join(ROOT, "plugins", "uartix.yolo", "main.mjs"),
+  ];
+
+  for (const file of files) {
+    it(`${path.basename(path.dirname(file))}/${path.basename(file)}：函数名不重复`, () => {
+      const src = readFileSync(file, "utf8");
+      const names = [...src.matchAll(/^\s*(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/gm)].map((m) => m[1]);
+      const count = {};
+      for (const n of names) count[n] = (count[n] || 0) + 1;
+      const dup = Object.entries(count).filter(([, v]) => v > 1);
+      expect(names.length, `${file} 里一个函数声明都没扫到，这条判据是空的`).toBeGreaterThan(5);
+      expect(dup, `同名函数会被后者静默盖掉：${JSON.stringify(dup)}`).toEqual([]);
+    });
+  }
+
+  it("反向自证：同名函数必须被扫出来", () => {
+    const src = "function a(){}\nfunction a(){}\nfunction b(){}";
+    const names = [...src.matchAll(/^\s*(?:async\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/gm)].map((m) => m[1]);
+    expect(names.filter((n, i) => names.indexOf(n) !== i)).toEqual(["a"]);
+  });
+});

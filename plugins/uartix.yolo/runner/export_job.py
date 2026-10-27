@@ -152,7 +152,10 @@ def main():
         speed["error"] = "取不到测速样本（没给 --data 或数据集里没有图）"
     else:
         try:
-            m2 = YOLO(produced)
+            # 显式带上 task：导出的文件（onnx/engine 等）里没有元数据，ultralytics 会猜，
+            # 猜错时先打一行 WARNING 再按 detect 解析分割输出 —— 测的是同一个网络，但用户看到的
+            # 第一句警告会让人怀疑这个数是不是测错了。源模型的 task 我们是知道的，就别让它猜。
+            m2 = YOLO(produced, task=task or None) if task else YOLO(produced)
             for s in samples[: args.warmup]:
                 m2.predict(source=s, imgsz=imgsz, verbose=False)
             t1 = time.time()

@@ -456,13 +456,21 @@
       <button data-tab="monitor">监控</button>
       <button data-tab="eval">评估</button>
       <button data-tab="runs">实验</button>
-      <button data-tab="help">帮助</button>
       <button data-tab="deploy">部署</button>
+      <button data-tab="help">帮助</button>
     </nav>
 
     <main>
       <!-- ============ 概览 ============ -->
       <section id="tab-overview">
+        <div class="card" id="nextcard" hidden>
+          <h2>下一步</h2>
+          <div class="row" style="align-items:center; gap:10px">
+            <span class="note" id="nexttext" style="margin:0; flex:1 1 260px"></span>
+            <button class="btn primary" id="nextgo">去</button>
+          </div>
+        </div>
+
         <div class="card">
           <h2>环境</h2>
           <div class="kv" id="envkv"></div>
@@ -509,7 +517,7 @@
           <h2>数据来源与划分</h2>
           <div class="grid">
             <label class="wide">
-              素材文件夹（一行一个；<b>留空 = 自动取 annotations/ 投料口里的每一批</b>）
+              素材文件夹（一行一个）——<b>留空 = 自动取 annotations/ 投料口里的每一批</b>
               <textarea id="sources" spellcheck="false" placeholder="D:/OneDrive/Desktop/X-AnyLabeling/images/123lmages"></textarea>
             </label>
             <label class="wide">
@@ -848,6 +856,7 @@
             这一页读的是每个 run 里<b>引擎自己写的</b> <code>args.yaml</code> 与 <code>results.csv</code>——面板不另存一份实验记录，
             所以不会有"面板说训过、盘上找不到"这种事。备注写在 <code>train_runs/&lt;实验&gt;.note</code>，
             归档复制进 <code>archive/&lt;实验&gt;-&lt;时间&gt;/</code>（<b>只复制，不搬走</b>：搬走会让 <code>runs/</code> 里的历史断档）。
+            想两两对比（参数差异 + 两条曲线并排）在<b>「评估」页最下面</b>——那里已经有指标表了。
           </p>
         </div>
 
@@ -963,8 +972,79 @@
         if (logFilter === "err") applyLogFilter();
         if (near) toast.scrollTop = toast.scrollHeight;
       }
-      function sysLog(text) {
-        appendLog([{ text: "[面板] " + text, stream: "sys" }]);
+      function sysLog(text, stream) {
+        appendLog([{ text: "[面板] " + text, stream: stream || "sys" }]);
+      }
+
+      /** 从别处跳到某个页签（「下一步」那颗按钮用）。 */
+      function showTab(name) {
+        var b = document.querySelector('nav button[data-tab="' + name + '"]');
+        if (b) b.click();
+      }
+
+      /**
+       * 「下一步」——这条存在的全部理由：单人本地训练是**按周回来一次**的活，
+       * 隔一周回来人已经不记得上次走到哪了。所以让面板自己说"现在缺哪一步"，
+       * 而不是让用户在八个页签里回忆流程。判断只用 state() 已经有的东西，不额外探测。
+       */
+      function renderNext() {
+        var card = $("nextcard");
+        if (!card) return;
+        var s = st;
+        var go = "data";
+        var text = "";
+        var btn = "去构建数据集";
+        if (!s) {
+          card.hidden = true;
+          return;
+        }
+        if (s.needWorkspace) {
+          text = "还没有工作区：先在右上角绑定你的 YOLO 工作目录（就是放 config.yaml 那一层）。";
+          go = "";
+          btn = "看怎么写";
+        } else {
+          var d = s.dataset || {};
+          var intake = s.intake || {};
+          var hasMaterial = (intake.subdirs || []).some(function (b2) { return b2.images > 0 && b2.json > 0; });
+          var runs = s.runs || [];
+          if (!d.exists || !d.trainCount) {
+            if (hasMaterial) {
+              text =
+                "素材已经在投料口里了（" +
+                (intake.subdirs || []).filter(function (b2) { return b2.images; }).length +
+                " 批）。下一步是「构建数据集」——它只读 annotations/，不碰你的标注文件。";
+              btn = "去构建数据集";
+            } else {
+              text = "先在 " +
+                "<code>annotations/</code> 里放一批 X-AnyLabeling 导出的结果（一个子目录 = 一批），然后回来构建数据集。";
+              btn = "看投料口";
+            }
+            go = "data";
+          } else if (!runs.length) {
+            text =
+              "数据集就绪：" + d.trainCount + " 张训练 / " + (d.valCount || 0) + " 张验证，" +
+              ((d.classes || []).length || "?") + " 个类别。还没训过任何一版——去「训练」开第一跑（默认值就能跑）。";
+            go = "train";
+            btn = "去训练";
+          } else {
+            var last = runs[0];
+            text =
+              "最近一版是 " + esc(last.name) + "（" + last.epochs + " 轮" +
+              (last.metrics && last.metrics.mAP50M ? "，mAP50 " + esc(fmtNum(last.metrics.mAP50M)) : "") +
+              "）。训完就该打分了：去「评估」跑一次 val，拿指标、阈值表和错例。";
+            go = "eval";
+            btn = "去评估";
+          }
+        }
+        card.hidden = false;
+        $("nexttext").innerHTML = text;
+        var b = $("nextgo");
+        b.textContent = btn;
+        b.disabled = !go;
+        b.onclick = function () {
+          if (go) showTab(go);
+          else showTab("help");
+        };
       }
 
       /* ---------------- 状态 ---------------- */
@@ -1476,7 +1556,8 @@
             "</span>" +
             "<b>日志文件</b><span>" +
             esc(j.logPath || "-") +
-            "</span>"
+            "</span>" +
+            (j.warning ? '<b>提醒</b><span style="color:var(--warn)">' + esc(j.warning) + "</span>" : "")
           : '<span class="note">还没有跑过任务</span>';
       }
 
@@ -1670,7 +1751,7 @@
             runsList = r.runs || [];
             $("runtag").textContent = runsList.length + " 个 run";
             $("runtag").className = "tag" + (runsList.length ? " ok" : "");
-            renderRuns();
+            renderExperimentList();
           })
           .catch(function (e) {
             $("runtag").textContent = "读不到";
@@ -1678,7 +1759,8 @@
           });
       }
 
-      function renderRuns() {
+      /** 实验页那份列表。名字必须和概览的 `renderRuns` 分开 —— 同名函数后者会静默盖掉前者。 */
+      function renderExperimentList() {
         if (!runsList.length) {
           $("runlist").innerHTML = '<span class="note">还没有 run。训练页点「开始训练」就会产出。</span>';
           return;
@@ -1827,7 +1909,10 @@
               var sp = h.speed || {};
               return (
                 "<tr><td class=\"num\">" + esc(h.name) + "</td><td>" + esc(h.format) + " · " + esc(h.task || "?") + '</td><td class="num">' + esc(fmtBytes(h.bytes || 0)) + "</td><td>" +
-                (sp.ok ? esc(sp.msPerImage + " ms/图 · " + sp.fps + " fps") : '<span class="tag">没测到</span>') +
+                (sp.ok
+                  ? esc(sp.msPerImage + " ms/图 · " + sp.fps + " fps")
+                  : '<span class="tag" title="' + esc(sp.error || "") + '">没测到</span>' +
+                    (sp.error ? '<span class="note" style="margin-left:6px">' + esc(speedReason(sp.error)) + "</span>" : "")) +
                 '</td><td class="name" title="' + esc(h.file) + '">' + esc(String(h.file || "").split("/").pop()) + "</td></tr>"
               );
             })
@@ -1926,18 +2011,30 @@
         var keys = Object.keys(m).sort();
         $("ev_metrics").innerHTML =
           '<div class="tablewrap"><table><thead><tr><th>指标</th><th>值</th></tr></thead><tbody>' +
-          keys.map(function (k) { return "<tr><td>" + esc(k) + '</td><td class="num">' + num(m[k]) + "</td></tr>"; }).join("") +
-          (res.speedMs ? '<tr><td>速度</td><td class="num">' + num(res.speedMs, 1) + " ms/图</td></tr>" : "") +
+          keys.map(function (k) { return "<tr><td>" + esc(k) + '</td><td class="num">' + numOrDash(m[k]) + "</td></tr>"; }).join("") +
+          (res.speedMs ? '<tr><td>速度</td><td class="num">' + numOrDash(res.speedMs, 1) + " ms/图</td></tr>" : "") +
           "</tbody></table></div>" +
           '<div class="note">权重 ' + esc(res.weights) + " · 数据 " + esc(res.data) + " · imgsz " + esc(res.imgsz) + " · conf " + esc(res.conf) + "</div>";
         $("ev_when").textContent = res.out ? "结果目录：" + res.out : "";
         $("ev_when").hidden = !res.out;
         var t = res.confTable || [];
+        // 全 0 不是"没跑出来"，是"这个权重在这条阈值下什么都没检出"——两句话得说对，
+        // 否则用户会以为是评估坏了，反复重跑（端到端试用真把它跑成了 0）。
+        var mv = keys.map(function (k) { return Number(m[k]); }).filter(isFinite);
+        var allZero = mv.length > 0 && mv.every(function (v) { return v === 0; });
         $("ev_conftbl").innerHTML = t.length
           ? '<div class="tablewrap"><table><thead><tr><th>conf</th><th>精确率</th><th>召回率</th></tr></thead><tbody>' +
-            t.map(function (r) { return '<tr><td class="num">' + esc(num(r.conf, 2)) + '</td><td class="num">' + num(r.precision) + '</td><td class="num">' + num(r.recall) + "</td></tr>"; }).join("") +
+            t.map(function (r) { return '<tr><td class="num">' + esc(numOrDash(r.conf, 2)) + '</td><td class="num">' + numOrDash(r.precision) + '</td><td class="num">' + numOrDash(r.recall) + "</td></tr>"; }).join("") +
             "</tbody></table></div>"
-          : '<span class="note">这次没拿到 PR 曲线（老结果或引擎没画）</span>';
+          : '<span class="note">' +
+            (allZero
+              ? "指标全是 0：这个权重在 conf=" + esc(res.conf) + " 下一个框都没检出，所以 PR 曲线是空的。把置信度阈值调低再评估一次；还是 0 就是这版没训到能用，不是评估出了问题。"
+              : "这次没拿到 PR 曲线（老结果或引擎没画）") +
+            "</span>";
+        if (allZero) {
+          $("evtag").textContent = "一个框都没检出";
+          $("evtag").className = "tag bad";
+        }
         var plots = res.plots || [];
         $("ev_plots").innerHTML = plots.length
           ? plots.map(function (p) { return '<button class="btn" data-plot="' + esc(p) + '">' + esc(p) + "</button>"; }).join("")
@@ -1963,7 +2060,7 @@
           $("ev_errlist").innerHTML =
             '<div class="note">共 ' + errs.length + " 张（最多列这么多）。把这些图拿去补标，回来重新构建数据集。</div>" +
             '<div class="tablewrap"><table><thead><tr><th>#</th><th>预测框</th><th>类别</th><th>图</th></tr></thead><tbody>' +
-            errs.map(function (e, i) { return '<tr><td class="num">' + (i + 1) + '</td><td class="num">' + esc(num(e.boxes, 0)) + "</td><td>" + esc((e.names || []).join(",")) + '</td><td class="name" title="' + esc(e.image) + '">' + esc(String(e.image || "").split("/").pop()) + "</td></tr>"; }).join("") +
+            errs.map(function (e, i) { return '<tr><td class="num">' + (i + 1) + '</td><td class="num">' + esc(numOrDash(e.boxes, 0)) + "</td><td>" + esc((e.names || []).join(",")) + '</td><td class="name" title="' + esc(e.image) + '">' + esc(String(e.image || "").split("/").pop()) + "</td></tr>"; }).join("") +
             "</tbody></table></div>";
         }
       }
@@ -2052,10 +2149,24 @@
        * 数字格子的兜底。`eval.json` 是盘上的文件（老结果、手改过的结果都可能长得不一样），
        * 缺一个键就把 `undefined` 印到界面上是最难看的一种故障。
        */
-      function num(v, d) {
+      function numOrDash(v, d) {
         if (v === "" || v == null) return "—";
         var n = Number(v);
         return isFinite(n) ? n.toFixed(d === undefined ? 4 : d) : "—";
+      }
+
+      /**
+       * 导出后测速失败时那句人话。原始报错留在 title 里（要贴给引擎的人看），
+       * 但"没测到速度"和"导出失败"是两件事，不能都只显示一个 python 异常让人猜。
+       */
+      function speedReason(err) {
+        var e = String(err || "");
+        if (/onnxruntime|InferenceSession|ExecutionProvider/i.test(e)) {
+          return "这台机器的 onnxruntime 跑不动这个文件（提供方不匹配），文件本身是好的，速度就测不出来";
+        }
+        if (/取不到测速样本/.test(e)) return "数据集里没有可取的验证图，没样本可测";
+        if (/CUDA|cuda/i.test(e)) return "GPU 侧跑不起来（驱动/显存），所以没测到数";
+        return "导出已成功，只是这一步没测出速度";
       }
 
       /** 列名在图例里已经带了 `train/` 前缀，注释里只留最后一段。 */
@@ -2200,6 +2311,7 @@
 
       function renderAll(s) {
         st = s;
+        renderNext();
         renderEnv();
         renderDataset();
         renderDeploy();
@@ -2271,6 +2383,9 @@
         if (j.state !== "running" && !j._doneShown) {
           j._doneShown = true;
           sysLog(j.label + "：" + (j.state === "succeeded" ? "完成" : "失败（退出码 " + j.code + "）"));
+          // 「完成但有提醒」必须单独说一句：退出码 0 却构建出 0 个标注框这种事，
+          // 只写在任务卡里会被划过去的日志盖掉。
+          if (j.state === "succeeded" && j.warning) sysLog("提醒：" + j.warning, "err");
           refresh(true);
           if (j.kind === "eval") loadMonitor(""); // 评估不产曲线，但失败归类要跟着刷新
         }

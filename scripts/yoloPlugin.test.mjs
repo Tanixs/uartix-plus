@@ -293,6 +293,7 @@ function fakeRunner(pluginDir) {
       "console.log('[信息] ========== 开始训练 ==========');",
       "console.log('[工作台自检] config 里有 epochs 7: ' + /^  epochs: 7$/m.test(text));",
       "console.log('[工作台自检] 快照里有 lr0: ' + /^  lr0: 0\\.005$/m.test(text));",
+      "console.log('[工作台自检] 不替用户装包: ' + (process.env.YOLO_AUTOINSTALL === 'false' && process.env.PYTHONIOENCODING === 'utf-8'));",
       "for (const e of [1, 2, 3]) {",
       "  console.log('      ' + e + '/3      3.21G     0.9     1.2     0.5     1.1         16        640: 100%');",
       "}",
@@ -571,6 +572,11 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
       const logs = c.events.filter((e) => e.event === "log").flatMap((e) => e.payload.lines);
       expect(logs.some((l) => l.text.includes("config 里有 epochs 7: true")), JSON.stringify(logs.slice(0, 12))).toBe(true);
       expect(logs.some((l) => l.text.includes("快照里有 lr0: true")), "新增参数没被 runner 读到，面板上的输入框就是装饰").toBe(true);
+      // 端到端试用撞出来的两条：探针/子进程必须按 UTF-8 收，且不许让 ultralytics 替用户 pip install
+      expect(
+        logs.some((l) => l.text.includes("不替用户装包: true")),
+        "子进程没拿到 YOLO_AUTOINSTALL=false / PYTHONIOENCODING=utf-8 —— 它会偷偷装包，中文也会串味",
+      ).toBe(true);
       // 命令与快照路径都打进日志：用户复制就能在命令行跑同一次（详设 §4.3）
       expect(logs.some((l) => l.text.includes("手动等价")), "日志里没给手动等价命令").toBe(true);
       expect(logs.some((l) => /runner[\\/]train_job\.py/.test(l.text)), "训练没走插件自带的 runner").toBe(true);
@@ -1340,9 +1346,102 @@ describe("P175-W8 · 终态事件不能被空日志批吞掉", () => {
   }, 90_000);
 });
 
+describe("P175 · 中文配置经过 python 探针不能变味", () => {
+  const PY = "D:/projects/anaconda3/envs/yolo_env/python.exe";
+  const hasPy = (() => {
+    try {
+      execFileSync(PY, ["--version"], { stdio: "pipe" });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const test = hasPy ? it : it.skip;
+
+  /**
+   * 端到端试用（真数据集 + 中文类别名）抓出来的 bug：读 `config.yaml` 走的是
+   * "让工作区的 python `yaml.safe_load` 一遍"这条正路，而 python 在 Windows 上
+   * 默认按**控制台代码页**（这台是 cp936）写 stdout，插件按 UTF-8 解 ——
+   * `classes: ['圆','方']` 变成 `["Բ",""]`。它不报错，只把乱码写进快照，
+   * 于是「构建数据集」exit 0、标注框 0 个。用户的类别名是数字，所以一直没撞上。
+   */
+  test("config.yaml 里的中文类别名必须原样回到面板上", async () => {
+    const ws = makeWorkspace("utf8-cfg");
+    writeFileSync(path.join(ws, "_env.bat"), `@echo off\r\nset "PYTHON_EXE=${PY.replace(/\//g, "\\")}"\r\n`, "utf8");
+    const cfg = readFileSync(path.join(ws, "config.yaml"), "utf8").replace("classes: ['1', '2', '3']", "classes: ['圆', '方']");
+    expect(cfg, "假工作区的 classes 行形状变了，这条判据要跟着改").toContain("classes: ['圆', '方']");
+    writeFileSync(path.join(ws, "config.yaml"), cfg, "utf8");
+
+    const p = startPlugin(copyPlugin("utf8-cfg"), ws);
+    try {
+      await p.ready;
+      const st = await p.call("panel.train.state", {});
+      expect(st.config.baseSource, "没走 python 探针（pyyaml 不在）——这条判据就白写了").toBe("python");
+      expect(st.python.ok, JSON.stringify(st.python)).toBe(true);
+      expect(st.config.effective.dataset.classes, "中文类别名被探针改味了").toEqual(["圆", "方"]);
+
+      // 落到盘上的那份也要是同一串字节：乱码的真正代价在这里
+      await p.call("panel.train.precheck", {});
+      const bytes = readFileSync(path.join(ws, ".uartix", "yolo", "preview.yaml"));
+      expect(bytes.includes(Buffer.from("圆", "utf8")), "preview.yaml 里没有「圆」的 UTF-8 字节").toBe(true);
+      expect(bytes.includes(Buffer.from([0xd4, 0xb2])), "preview.yaml 里出现了「圆」的 GBK 字节").toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 180_000);
+});
+
+describe("P175 · 构建「退出码 0 但 0 个标注框」不能悄悄过去", () => {
+  it("成功结束时也要把脚本自己打的账读回来提醒", async () => {
+    const ws = makeWorkspace("dwarn");
+    // 用户的 build_dataset.py 对"标签名不在类别表"只打警告然后正常退出 —— 这正是静默毁掉数据集的样子
+    writeFileSync(
+      path.join(ws, "scripts", "build_dataset.py"),
+      [
+        "console.log('[信息] 素材文件夹 D:/fake/anno/one : 10 个样本');",
+        "console.log('[信息] 合计 10 个样本（重名自动改名 0 个）');",
+        "console.log('[信息] 划分完成: 训练集 8 张 / 验证集 2 张 (val_ratio=0.20, seed=7)');",
+        "console.log('[信息] ========== 数据集构建完成 ==========');",
+        "console.log('[信息]   类别 圆 : 0 个标注框');",
+        "console.log('[信息]   类别 方 : 0 个标注框');",
+        "console.log('[警告]   跳过 标签[圆]不在类别表 : 12 个');",
+        "process.exit(0);",
+      ].join("\n"),
+      "utf8",
+    );
+    const p = startPlugin(copyPlugin("dwarn"), ws);
+    try {
+      await p.ready;
+      await p.call("panel.train.startDataset", {});
+      const j = await p.waitFor(() => {
+        const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
+        return jobs.find((x) => x.kind === "dataset" && x.state !== "running");
+      }, 45_000, "构建任务结束");
+      expect(j.state, "假脚本是正常退出的").toBe("succeeded");
+      expect(j.code).toBe(0);
+      expect(j.warning, "0 个标注框却没提醒").toContain("一个标注框都没落盘");
+      expect(j.warning).toContain("12 个");
+      // 反向自证：账对得上时不许乱叫
+      expect(await datasetWarnOf(["[信息]   类别 圆 : 44 个标注框", "[信息] 合计 10 个样本"])).toBe("");
+      expect(await datasetWarnOf(["[信息]   类别 圆 : 0 个标注框"])).toContain("一个标注框都没落盘");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  /** 直接拿插件自己的纯函数算，省得再起一个进程 —— 也证明这条判据测的是函数本身。 */
+  async function datasetWarnOf(lines) {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    return m.datasetWarning(lines);
+  }
+});
+
 /* ============================================================================
    P175-W8 · 页签完整性与"这个包发出去是完整的"
    ============================================================================ */
+
 
 describe("P175-W8 · 收官体检", () => {
   const panelSrc = () => readFileSync(path.join(PLUGIN_SRC, "panel.html"), "utf8");
