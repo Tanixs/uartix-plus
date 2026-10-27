@@ -1534,15 +1534,16 @@
         var p = (j && j.progress) || {};
         $("bar").style.width = (p.percent || 0) + "%";
         $("bar").style.background = p.phase === "error" ? "var(--bad)" : "var(--accent)";
+        var stopped = p.phase === "stopped";
         $("jobkv").innerHTML = j
           ? "<b>状态</b><span>" +
             esc(j.label) +
             " · " +
-            esc(j.state) +
-            (j.code != null ? "（退出码 " + j.code + "）" : "") +
+            (stopped ? "已停止（你按的停止，不是出错）" : esc(j.state)) +
+            (!stopped && j.code != null ? "（退出码 " + j.code + "）" : "") +
             "</span>" +
             "<b>阶段</b><span>" +
-            esc(p.phase || "-") +
+            esc(stopped ? "停止" : p.phase || "-") +
             "</span>" +
             "<b>进度</b><span>" +
             (p.percent || 0) +
@@ -2377,7 +2378,10 @@
         renderJob(j);
         if (j.state !== "running" && !j._doneShown) {
           j._doneShown = true;
-          sysLog(j.label + "：" + (j.state === "succeeded" ? "完成" : "失败（退出码 " + j.code + "）"));
+          sysLog(
+            j.label + "：" +
+              (j.state === "succeeded" ? "完成" : j.progress && j.progress.phase === "stopped" ? "已停止（你按的停止，不是出错）" : "失败（退出码 " + j.code + "）"),
+          );
           // 「完成但有提醒」必须单独说一句：退出码 0 却构建出 0 个标注框这种事，
           // 只写在任务卡里会被划过去的日志盖掉。
           if (j.state === "succeeded" && j.warning) sysLog("提醒：" + j.warning, "err");

@@ -1302,6 +1302,7 @@ function newJob(kind, label) {
     startedAt: Date.now(),
     endedAt: 0,
     code: null,
+    stopped: false,
     pid: 0,
     lines: [],
     total: 0,
@@ -1478,12 +1479,17 @@ function finishJob(j, code) {
   // 提醒要在**任何一次事件发出之前**算好：`flushLog` 也会推一份 job 快照，
   // 先算就不会出现"前一份说成功、后一份才补提醒"的闪回。
   if (code === 0 && j.kind === "dataset") j.warning = datasetWarning(j.lines);
-  if (j.state === "failed" && j.progress.phase !== "error") {
+  if (j.stopped) {
+    // 用户自己按的停止不是"失败"：进度条与措辞都要跟出错分开，否则看一眼就以为训练炸了
+    j.progress.phase = "stopped";
+    j.progress.detail = "你停掉的（不是出错）";
+  } else if (j.state === "failed" && j.progress.phase !== "error") {
     j.progress.phase = "error";
     j.progress.detail = `进程退出码 ${code}（往上翻日志看最后一行 [错误]）`;
   }
   flushLog();
   pushLine(j, `[工作台] 进程结束，退出码 ${code}`, "sys");
+  if (j.stopped) pushLine(j, "[工作台] 已按你的要求停止，产物停在最后一次写盘的位置", "sys");
   if (j.warning) pushLine(j, `[工作台] 提醒：${j.warning}`, "err");
   // 终态必须**自己发一次**：`flushLog` 只在"这一批确实有待发行"时才会顺带推 job 事件，
   // 而子进程的输出刚好在 120ms 的批之间被冲完时，批里是空的 —— 表现是面板永远停在"运行中"，
@@ -1493,7 +1499,10 @@ function finishJob(j, code) {
     lastFailure = null; // 成功一次就把上一次的失败结论清掉：留着会让用户以为还在失败
   } else {
     lastFailure = classifyFailure(j.lines);
-    if (lastFailure && lastFailure.kind !== "unknown") pushLine(j, `[工作台] 失败归类：${lastFailure.label} —— ${lastFailure.advice}`, "sys");
+    // "你停掉的"不配当一条失败归类来念（上面已经单独说过一次了，advice 还是空的）
+    if (lastFailure && lastFailure.kind !== "unknown" && lastFailure.kind !== "stopped") {
+      pushLine(j, `[工作台] 失败归类：${lastFailure.label} —— ${lastFailure.advice}`, "sys");
+    }
   }
   if (j.kind === "eval") {
     // 评估结果落在 `train_runs/eval/<ts>/eval.json`：读回来推给面板，指标表 / 阈值表 / 图 / 错例一次到位
@@ -1967,6 +1976,7 @@ async function stopActive() {
     }
   }
   pushLine(j, "[工作台] 用户要求停止", "sys");
+  j.stopped = true; // 终态要能分清"你停的"和"它崩的"
   return { ok: true, id: j.id };
 }
 

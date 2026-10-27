@@ -1439,6 +1439,41 @@ describe("P175 · 构建「退出码 0 但 0 个标注框」不能悄悄过去",
 });
 
 /* ============================================================================
+   P175 · 「你停掉的」不是「它崩的」
+   ============================================================================ */
+
+describe("P175 · 停止要说成停止", () => {
+  it("按停止之后：终态是 stopped，不念失败归类，也不给红色错误详情", async () => {
+    const ws = makeWorkspace("stopme");
+    const pluginDir = copyPlugin("stopme");
+    const runner = fakeRunner(pluginDir);
+    // 一个不会自己结束的 runner：打印开训后挂住，等用户按停止
+    writeFileSync(runner, "console.log('[信息] ========== 开始训练 ==========');\nsetInterval(() => {}, 1000);\n", "utf8");
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const job = await p.call("panel.train.startTrain", {});
+      expect(job.state).toBe("running");
+      const r = await p.call("panel.train.stop", {});
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+
+      const j = await p.waitFor(() => {
+        const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
+        return jobs.find((x) => x.id === job.id && x.state !== "running");
+      }, 45_000, "停止后的终态事件");
+      expect(j.progress.phase, "用户按的停止被当成了出错").toBe("stopped");
+      expect(j.progress.detail).toContain("不是出错");
+      const log = readFileSync(path.join(ws, "logs", `yolo-${job.id}.log`), "utf8");
+      expect(log).toContain("已按你的要求停止");
+      expect(log, "停止还要念一条失败归类，等于把用户自己的操作报成故障").not.toContain("失败归类");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+
+/* ============================================================================
    P175-W8 · 页签完整性与"这个包发出去是完整的"
    ============================================================================ */
 
