@@ -1902,6 +1902,8 @@ async function panelState() {
       deploy: scanDeployTool(),
       runs: [],
       trainRuns: [],
+      evals: 0,
+      exports: 0,
       intake: { dir: "", exists: false, subdirs: [], loose: { images: 0, json: 0, other: 0 }, truncated: false },
       // 参数面：没探过就老实说没探过。探测要 6 秒，所以它不塞在刷新里，面板自己调 params()
       params: specNow(),
@@ -1931,6 +1933,9 @@ async function panelState() {
     deploy: scanDeployTool(),
     runs: scanRuns(cfg.effective.train.project).slice(0, 12),
     trainRuns: scanTrainRuns(),
+    // 「下一步」要能说出"评估/导出做过了没"——不另存状态，直接数盘上那两堆目录（读几个 json 而已）
+    evals: scanEvals(5).length,
+    exports: scanExports(5).length,
     intake,
     params: specNow(),
     models: scanModels(24).map((f) => ({ ...f, facts: factsFor(f) })),

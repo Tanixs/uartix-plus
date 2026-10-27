@@ -989,61 +989,56 @@
        */
       function renderNext() {
         var card = $("nextcard");
-        if (!card) return;
         var s = st;
-        var go = "data";
-        var text = "";
-        var btn = "去构建数据集";
-        if (!s) {
+        if (!card) return;
+        // 没工作区时，顶部那条横幅已经有「选择工作区…」按钮 —— 这里再教一遍只会自相矛盾
+        if (!s || s.needWorkspace) {
           card.hidden = true;
           return;
         }
-        if (s.needWorkspace) {
-          text = "还没有工作区：先在右上角绑定你的 YOLO 工作目录（就是放 config.yaml 那一层）。";
-          go = "";
-          btn = "看怎么写";
+        var d = s.dataset || {};
+        var intake = s.intake || {};
+        var runs = s.runs || [];
+        var batches = (intake.subdirs || []).filter(function (x) { return x.images > 0 && x.json > 0; }).length;
+        var go = "data";
+        var text;
+        var btn;
+        if (!d.exists || !d.trainCount) {
+          text = batches
+            ? "素材已经在投料口里了（" + batches + " 批）。下一步是「构建数据集」——它只读 <code>annotations/</code>，不碰你的标注文件。"
+            : "先在 <code>annotations/</code> 里放一批 X-AnyLabeling 导出的结果（一个子目录 = 一批），然后回来构建数据集。";
+          btn = batches ? "去构建数据集" : "看投料口";
+        } else if (!runs.length) {
+          text =
+            "数据集就绪：" + d.trainCount + " 张训练 / " + (d.valCount || 0) + " 张验证，" +
+            ((d.classes || []).length || "?") + " 个类别。还没训过任何一版——去「训练」开第一跑（默认值就能跑）。";
+          go = "train";
+          btn = "去训练";
         } else {
-          var d = s.dataset || {};
-          var intake = s.intake || {};
-          var hasMaterial = (intake.subdirs || []).some(function (b2) { return b2.images > 0 && b2.json > 0; });
-          var runs = s.runs || [];
-          if (!d.exists || !d.trainCount) {
-            if (hasMaterial) {
-              text =
-                "素材已经在投料口里了（" +
-                (intake.subdirs || []).filter(function (b2) { return b2.images; }).length +
-                " 批）。下一步是「构建数据集」——它只读 annotations/，不碰你的标注文件。";
-              btn = "去构建数据集";
-            } else {
-              text = "先在 " +
-                "<code>annotations/</code> 里放一批 X-AnyLabeling 导出的结果（一个子目录 = 一批），然后回来构建数据集。";
-              btn = "看投料口";
-            }
-            go = "data";
-          } else if (!runs.length) {
-            text =
-              "数据集就绪：" + d.trainCount + " 张训练 / " + (d.valCount || 0) + " 张验证，" +
-              ((d.classes || []).length || "?") + " 个类别。还没训过任何一版——去「训练」开第一跑（默认值就能跑）。";
-            go = "train";
-            btn = "去训练";
-          } else {
-            var last = runs[0];
-            text =
-              "最近一版是 " + esc(last.name) + "（" + last.epochs + " 轮" +
-              (last.metrics && last.metrics.mAP50M ? "，mAP50 " + esc(fmtNum(last.metrics.mAP50M)) : "") +
-              "）。训完就该打分了：去「评估」跑一次 val，拿指标、阈值表和错例。";
+          var last = runs[0];
+          var what =
+            "最近一版是 " + esc(last.name) + "（" + last.epochs + " 轮" +
+            (last.metrics && last.metrics.mAP50M ? "，mAP50 " + esc(fmtNum(last.metrics.mAP50M)) : "") + "）。";
+          if (!(s.evals > 0)) {
+            text = what + "训完就该打分了：去「评估」跑一次 val，拿指标、阈值表和错例。";
             go = "eval";
             btn = "去评估";
+          } else if (!(s.exports > 0)) {
+            text = what + "已经评估过 " + s.evals + " 次。要上板的话去「部署」导出 —— 端侧的限制（比如 MaixCam 只吃检测）在那一页点之前就告诉你。";
+            go = "deploy";
+            btn = "去导出";
+          } else {
+            text = what + "训练 / 评估 / 导出都留了记录，这一版算是走完了。下一步通常是<b>回去改标注或调参数</b>——" +
+              "两版差在哪，去「实验」页对比（读的是引擎自己写的 args.yaml，不是面板的记忆）。";
+            go = "runs";
+            btn = "看实验";
           }
         }
         card.hidden = false;
         $("nexttext").innerHTML = text;
-        var b = $("nextgo");
-        b.textContent = btn;
-        b.disabled = !go;
-        b.onclick = function () {
-          if (go) showTab(go);
-          else showTab("help");
+        $("nextgo").textContent = btn;
+        $("nextgo").onclick = function () {
+          showTab(go);
         };
       }
 
