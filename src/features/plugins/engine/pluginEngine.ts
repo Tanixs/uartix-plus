@@ -1468,6 +1468,19 @@ export async function readInExt(handle: string, rel: string): Promise<string> {
   return r.text;
 }
 
+/** 读**字节**（base64）。发布封面与截图要用：`readInExt` 走文本，二进制会被毁成替换字符。 */
+export async function readInExtB64(handle: string, rel: string): Promise<{ b64: string; bytes: number; truncated: boolean }> {
+  const abs = await resolveInExt(handle, rel);
+  if (!abs) throw Object.assign(new Error(`路径越界或非法：${rel}`), { code: "denied" });
+  if (!paths) throw new Error("还没读到插件目录");
+  const r = await invoke<{ exists: boolean; b64: string; bytes: number; truncated: boolean }>("plugin_fs_read_b64", {
+    path: abs,
+    roots: [paths.pluginsRoot],
+  });
+  if (!r.exists) throw Object.assign(new Error(`包内没有这个文件：${rel}`), { code: "not_found" });
+  return { b64: r.b64, bytes: r.bytes, truncated: r.truncated };
+}
+
 export async function writeInExt(handle: string, rel: string, content: string): Promise<void> {
   const abs = await resolveInExt(handle, rel);
   if (!abs) throw Object.assign(new Error(`路径越界或非法：${rel}`), { code: "denied" });

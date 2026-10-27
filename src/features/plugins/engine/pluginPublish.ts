@@ -1,22 +1,36 @@
 /**
  * P174-R2：把**代码插件**发布到 GitHub 话题。
  *
- * 旧发布器只认旧的 `PluginRecord`；新引擎的包是目录，所以这里把包内文本文件读出来，
+ * 旧发布器只认旧的 `PluginRecord`；新引擎的包是目录，所以这里把包内文件读出来，
  * 原样作为 GitHub 仓库文件（`plugin.json` 在根，市场能直接认），再补 README 与封面。
  *
+ * R19b 改的一件事：**二进制不再一律跳过**。以前只按扩展名收文本，于是 `cover.jpg`
+ * 与 `shot-train.jpg` 永远传不上去——而市场的卡片封面和详情轮播要的就是这两张，
+ * 现象是"我明明有封面，市场上却是文字砖"。现在图片走字节通道原样上传。
+ *
  * 边界与旧发布器相同：token 只从设置读、只进 `github_publish`、不落日志；目标域固定
- * `api.github.com`；文件数与体积由 Rust 再挡一次。二进制资源暂不发布（文本插件如 YOLO
- * 不受影响），遇到二进制会跳过并在回执里点名。
+ * `api.github.com`；文件数与体积由 Rust 再挡一次。运行时产物（日志、版本归档、暂存）
+ * 始终不进发布包——那是这台机器上跑出来的东西，不是插件。
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import { listInExt, readInExt, type InstalledPlugin } from "./pluginEngine";
+import { listInExt, readInExt, readInExtB64, type InstalledPlugin } from "./pluginEngine";
 import type { PluginMeta } from "./pluginMeta";
 
 const TEXT_EXT = /\.(json|mjs|js|cjs|html|htm|css|md|txt|yaml|yml|svg)$/i;
-const MAX_FILES = 10; // 留两个位置给 README + 封面；Rust 侧硬顶 12
+/** 没有扩展名但确实是文本的常见名字。`LICENSE` 曾被报成"非文本"，就是漏在这里。 */
+const TEXT_NAME = /^(license|copying|notice|readme|changelog|authors|contributing|todo)$/i;
+/** 图片走 base64 原样上传：市场封面与 README 预览图只认这几种能直接 `<img>` 的。 */
+const IMAGE_EXT = /\.(png|jpe?g|webp|gif|ico)$/i;
+/** 运行时产物：本机跑出来的东西，发上去等于把别人的日志与旧版一起搬走。 */
+const RUNTIME_DIR = /^(logs|\.versions|\.incoming|staging|node_modules|\.git)(\/|$)/;
+const RUNTIME_NAME = /\.log$/i;
+
+const MAX_FILES = 10; // 留两个位置给 README + 展示封面；Rust 侧硬顶 12
 const MAX_DEPTH = 4;
 const MAX_TEXT_BYTES = 512 * 1024;
+/** 单张图的上限。GitHub 的 contents API 这档够用，市场读图侧的上限比这更小。 */
+const MAX_IMAGE_BYTES = 1024 * 1024;
 
 export interface PublishFile {
   path: string;
@@ -64,8 +78,8 @@ export function buildReadmeV3(p: InstalledPlugin, meta?: PluginMeta): string {
   return bits.join("\n");
 }
 
-/** 递归读包内文本文件；二进制/超大/过深的条目跳过并点名。 */
-export async function readPackageTextFiles(extId: string): Promise<{ files: PublishFile[]; skipped: string[] }> {
+/** 递归读包内可发布的文件；运行时产物/超大/过深的条目跳过并点名。 */
+export async function readPackageFiles(extId: string): Promise<{ files: PublishFile[]; skipped: string[] }> {
   const files: PublishFile[] = [];
   const skipped: string[] = [];
   async function walk(rel: string, depth: number): Promise<void> {
@@ -75,20 +89,39 @@ export async function readPackageTextFiles(extId: string): Promise<{ files: Publ
     }
     const items = await listInExt(extId, rel);
     for (const it of items) {
-      if (files.length >= MAX_FILES) {
-        skipped.push(`${rel}/${it.name}（超过 ${MAX_FILES} 个文件）`);
-        continue;
-      }
       const child = rel ? `${rel}/${it.name}` : it.name;
       if (it.dir) {
+        // 整目录先按"运行时产物"判：logs/ 进不去，就不会一条条列出 host.log 让人以为是文件坏了
+        if (RUNTIME_DIR.test(child)) {
+          skipped.push(`${child}/（运行时产物，不发布）`);
+          continue;
+        }
         await walk(child, depth + 1);
         continue;
       }
-      if (!TEXT_EXT.test(it.name)) {
-        skipped.push(`${child}（非文本，已跳过）`);
+      if (files.length >= MAX_FILES) {
+        skipped.push(`${child}（超过 ${MAX_FILES} 个文件）`);
+        continue;
+      }
+      if (RUNTIME_NAME.test(it.name)) {
+        skipped.push(`${child}（运行时产物，不发布）`);
+        continue;
+      }
+      const isImage = IMAGE_EXT.test(it.name);
+      if (!isImage && !TEXT_EXT.test(it.name) && !TEXT_NAME.test(it.name)) {
+        skipped.push(`${child}（既不是文本也不是图片，已跳过）`);
         continue;
       }
       try {
+        if (isImage) {
+          const r = await readInExtB64(extId, child);
+          if (r.truncated || r.bytes > MAX_IMAGE_BYTES) {
+            skipped.push(`${child}（超过 ${Math.round(MAX_IMAGE_BYTES / 1024)}KB，已跳过）`);
+            continue;
+          }
+          files.push({ path: child, content: r.b64 });
+          continue;
+        }
         const text = await readInExt(extId, child);
         if (new Blob([text]).size > MAX_TEXT_BYTES) {
           skipped.push(`${child}（超过 ${Math.round(MAX_TEXT_BYTES / 1024)}KB，已跳过）`);
@@ -148,11 +181,11 @@ export async function publishPluginV3(p: InstalledPlugin, meta: PluginMeta | und
 
   let pack: { files: PublishFile[]; skipped: string[] };
   try {
-    pack = await readPackageTextFiles(p.id);
+    pack = await readPackageFiles(p.id);
   } catch (e) {
     return { ok: false, msg: `读取包内文件失败：${String((e as Error)?.message ?? e)}` };
   }
-  if (!pack.files.length) return { ok: false, msg: "包里没有可发布的文本文件" };
+  if (!pack.files.length) return { ok: false, msg: "包里没有可发布的文件" };
 
   const files = [...pack.files];
   if (!files.some((f) => f.path === "README.md")) {
@@ -160,7 +193,10 @@ export async function publishPluginV3(p: InstalledPlugin, meta: PluginMeta | und
   }
   const cover = meta?.cover;
   const cm = cover ? /^data:image\/(png|jpeg|webp);base64,/.exec(cover) : null;
-  if (cover && cm) files.push({ path: `cover.${cm[1] === "jpeg" ? "jpg" : cm[1]}`, content: cover.slice(cm[0].length) });
+  // 包里本来就带 cover.* 时不再叠一份：同名两条会让 GitHub 那次提交自己跟自己打架，
+  // 而"展示封面"该赢的是用户在这台机器上选的那张（meta.cover），不是包里的旧图。
+  const hasPackCover = files.some((f) => /^cover\.(png|jpe?g|webp)$/i.test(f.path));
+  if (cover && cm && !hasPackCover) files.push({ path: `cover.${cm[1] === "jpeg" ? "jpg" : cm[1]}`, content: cover.slice(cm[0].length) });
   if (files.length > 12) return { ok: false, msg: "包内文件太多（发布上限 12 个，请先精简）" };
 
   const rawTopics = Array.isArray(opts.topics) ? opts.topics : opts.topics.split(/[,，]+/);

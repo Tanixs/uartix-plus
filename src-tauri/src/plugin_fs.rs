@@ -27,6 +27,10 @@ use tauri::Manager;
 const MAX_WRITE_BYTES: usize = 8 * 1024 * 1024;
 /// 读文本的上限：超过就截断并标 `truncated`，不静默裁（与 shell 的 64KB 头尾预算同一条规矩）。
 const MAX_READ_BYTES: u64 = 256 * 1024;
+/// 读**字节**的上限。图片天然比脚本大，但仍要有顶：发布的是仓库，不是把用户硬盘搬上去。
+/// 与 `github_publish::MAX_FILE_B64`（6 MiB base64 ≈ 4.5 MiB 原文件）留了很大余量，
+/// 真正的把关在"哪些文件允许进发布包"那一侧。
+const MAX_READ_B64_BYTES: u64 = 2 * 1024 * 1024;
 /// 追加型文件（目前只有插件宿主日志）的默认上限。为什么不是"无限追加"也不是 8 MB：
 /// 一台机器上装了十几个插件、每个都跑长任务时，"日志不该把应用数据目录吃掉"是硬约束；
 /// 而 2 MiB 足够把一次崩前的几百行留在盘上——这是这份文件存在的唯一理由。
@@ -234,6 +238,33 @@ pub fn plugin_fs_read(path: String, roots: Vec<String>) -> Result<Value, String>
         "text": text,
         "truncated": truncated,
         "bytes": size,
+    }))
+}
+
+/// 读**字节**，返回 base64。发布通道要用：封面与截图是二进制，`plugin_fs_read` 的
+/// `from_utf8_lossy` 会把它们毁成一堆替换字符——传上去的图就打不开了，而现象是
+/// "市场里没封面"，没人会怀疑到读文件这一层。
+/// 越界判据与 `plugin_fs_read` 同一条（`guard` → `path_in_roots`），只是不碰文本。
+#[tauri::command]
+pub fn plugin_fs_read_b64(path: String, roots: Vec<String>) -> Result<Value, String> {
+    guard(&path, &roots)?;
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Ok(json!({ "exists": false, "b64": "", "bytes": 0, "truncated": false }));
+    }
+    let meta = fs::metadata(p).map_err(|e| io_err("读元信息", e))?;
+    let size = meta.len();
+    let mut buf = Vec::new();
+    let mut f = fs::File::open(p).map_err(|e| io_err("打开文件", e))?;
+    std::io::Read::by_ref(&mut f)
+        .take(MAX_READ_B64_BYTES)
+        .read_to_end(&mut buf)
+        .map_err(|e| io_err("读文件", e))?;
+    Ok(json!({
+        "exists": true,
+        "b64": STANDARD.encode(&buf),
+        "bytes": size,
+        "truncated": size > MAX_READ_B64_BYTES,
     }))
 }
 
@@ -656,6 +687,35 @@ mod install_tests {
         fs::write(dir.join("extension.json"), r#"{"id":"a.b"}"#).unwrap();
         fs::write(dir.join("main.mjs"), "export function activate(){}").unwrap();
         fs::write(dir.join("lib").join("util.mjs"), "export const n = 1;").unwrap();
+    }
+
+    /// 封面与截图是二进制：文本读会 lossy 改掉字节，图传上去就打不开了。
+    /// 这条测的是"字节原样往返"，顺带钉住越界仍然拒。
+    #[test]
+    fn read_b64_round_trips_bytes_text_read_would_mangle() {
+        use super::{plugin_fs_read, plugin_fs_read_b64};
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let root = scratch("readb64");
+        // PNG 签名 + 两个非法 UTF-8 字节：正是 `from_utf8_lossy` 会改形的形状
+        let png: Vec<u8> = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00, b'A'];
+        fs::write(root.join("cover.png"), &png).unwrap();
+        let path = root.join("cover.png").to_string_lossy().to_string();
+
+        let r = plugin_fs_read_b64(path.clone(), roots(&root)).unwrap();
+        assert_eq!(r["exists"], Value::Bool(true));
+        let back = STANDARD.decode(r["b64"].as_str().unwrap()).unwrap();
+        assert_eq!(back, png, "base64 通道必须一个字节都不改");
+
+        let t = plugin_fs_read(path, roots(&root)).unwrap();
+        assert_ne!(
+            t["text"].as_str().unwrap().as_bytes().to_vec(),
+            png,
+            "文本读应当改形——否则这条测试就没测到东西"
+        );
+
+        let outside = root.join("..").join("outside.png").to_string_lossy().to_string();
+        assert!(plugin_fs_read_b64(outside, roots(&root)).is_err(), "越出 roots 必须拒");
+        fs::remove_dir_all(&root).ok();
     }
 
     #[test]

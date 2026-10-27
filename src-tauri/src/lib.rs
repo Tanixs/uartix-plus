@@ -304,6 +304,7 @@ pub fn run() {
             plugin_fs::plugin_fs_write_b64,
             plugin_fs::plugin_fs_append,
             plugin_fs::plugin_fs_read,
+            plugin_fs::plugin_fs_read_b64,
             plugin_fs::plugin_fs_list,
             plugin_fs::plugin_fs_remove,
             plugin_fs::plugin_store_read,

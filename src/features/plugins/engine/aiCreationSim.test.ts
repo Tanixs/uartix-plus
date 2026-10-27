@@ -379,8 +379,8 @@ describe("扮演 AI：转正、批准、启用、打开——每一步谁说了�
     // 空路径 = 包根：以前它被当成非法路径，发布第一步就失败
     const root = await engine.listInExt("sim.theme", "");
     expect(root.map((x) => x.name).sort()).toEqual(["plugin.json", "theme.css"]);
-    const { readPackageTextFiles } = await import("./pluginPublish");
-    const packed = await readPackageTextFiles("sim.theme");
+    const { readPackageFiles } = await import("./pluginPublish");
+    const packed = await readPackageFiles("sim.theme");
     expect(packed.files.map((f) => f.path).sort()).toEqual(["plugin.json", "theme.css"]);
     // 内容真的读到了（base64 非空），不是列了个空壳
     for (const f of packed.files) expect(f.content.length).toBeGreaterThan(8);
