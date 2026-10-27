@@ -17,7 +17,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listInExt, readInExt, readInExtB64, type InstalledPlugin } from "./pluginEngine";
 import type { PluginMeta } from "./pluginMeta";
 
-const TEXT_EXT = /\.(json|mjs|js|cjs|html|htm|css|md|txt|yaml|yml|svg)$/i;
+const TEXT_EXT = /\.(json|mjs|js|cjs|html|htm|css|md|txt|yaml|yml|svg|py|ps1)$/i;
 /** 没有扩展名但确实是文本的常见名字。`LICENSE` 曾被报成"非文本"，就是漏在这里。 */
 const TEXT_NAME = /^(license|copying|notice|readme|changelog|authors|contributing|todo)$/i;
 /** 图片走 base64 原样上传：市场封面与 README 预览图只认这几种能直接 `<img>` 的。 */

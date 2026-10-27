@@ -15,6 +15,14 @@
 - **两条命令**（`contributes.commands`）：`yolo.status`（看现状）、`yolo.stop`（停止当前任务），
   在命令面板和 AI 里都能直接调，与面板按钮走同一批函数。
 - 配置遵循**三层**：内置默认 ← 工作区 `config.yaml` 基准 ← 面板改动（只存与基准不同的那部分）。
+- **训练参数面不是抄来的**：面板那张表由当前那套 `ultralytics` 自己吐出来（`DEFAULT_CFG_DICT`，本机 111 键），
+  包里没这个键就不出现。所以包升级、键改名（`half` 已经没了）都会自动跟上，不会出现"面板能填、引擎不认"。
+- **每次实验落一份完整快照** `train_runs/<实验名>-<时间>.yaml`。它是面板与命令行的公共语言：
+  拿它去跑你自己的 `python scripts/train.py --config …` 照样成立（那条只认它自己那 20 个键）。
+- **不重新实现你的流水线**：工作区的 `config.yaml`、`scripts/*.py`、`00~07*.bat` 一个字节都不改；
+  新参数走插件自带的 `runner/train_job.py`（跟 `model.train(**overrides)` 直接透传），不动你的脚本。
+- **标注不归它管**：`annotations/` 只是一个投料口目录——你把 X-AnyLabeling 导出的文件夹丢进去，
+  面板只数有多少图、多少 json，点一下登记成素材来源，不搬、不改、不删你的东西。
 
 ## 装它
 
@@ -35,15 +43,15 @@
 | 类别 | 声明 | 实际约束 |
 | --- | --- | --- |
 | 读 | `$WS`、`$EXT:deploy` | 读是**知情**：Node 的精确读白名单在 Windows 上不生效，故读整盘放行、清单只告诉你它读了什么 |
-| 写 | `$WS/.uartix` `$WS/datasets` `$WS/runs` `$WS/logs` `$WS/models` | 写是**牢笼**：内核级 `--allow-fs-write` 只放行这几枚目录，越界直接 `ERR_ACCESS_DENIED` |
+| 写 | `$WS/.uartix` `$WS/annotations` `$WS/datasets` `$WS/logs` `$WS/models` `$WS/runs` `$WS/train_runs` | 写是**牢笼**：内核级 `--allow-fs-write` 只放行这几枚目录，越界直接 `ERR_ACCESS_DENIED`。注意没有"工作区根"这一条——**你那份 `config.yaml`、`scripts/*.py`、`00~07*.bat` 面板从早到尾都写不到** |
 | 进程 | `python` | 起子进程跑 ultralytics；停止走杀进程树（Windows 上只杀 node 会留孤儿吃满 GPU） |
 | 界面 | `ui.panel` | 一块 iframe 面板（不透明源，碰不到宿主 DOM 与别的插件；宿主主题以 `--uartix-*` 变量桥入，换主题时面板热更新） |
 
 ## 依赖
 
-本插件**自带** `main.mjs` + `panel.html`，不下载任何东西；但要真正跑训练，需要目标机器上有：
+本插件**自带** `main.mjs` + `panel.html` + `runner/train_job.py`，不下载任何东西；但要真正跑训练，需要目标机器上有：
 
-- Python + [`ultralytics`](https://github.com/ultralytics/ultralytics)（面板里那颗「深度自检」会报 torch/CUDA/ultralytics 版本）；
+- Python + [`ultralytics`](https://github.com/ultralytics/ultralytics)（面板里那颗「深度自检」会报 torch/CUDA/ultralytics 版本；YOLO26 需要 ≥ 8.4）；
 - 一个 YOLO 数据集（`images/` + `labels/` 结构，面板能扫描并按比例拆分）。
 
 ## 关于「桌宠 / 无边框」
@@ -55,6 +63,8 @@
 MIT。见 [LICENSE](LICENSE)。
 
 ## 版本
+
+`0.3.0`（W1，P175 第一批）— **参数面换成引擎自己给的**：训练页从 8 项涨到按五组摆开的 40+ 项（基础 / 优化器 / 增强 / 微调 / 性能与复现），每项都带引擎的真实默认值，包里没这个键就不出现；探测失败自动降级成最小集并明说。**新增参数真的会生效**：训练改由插件自带的 `runner/train_job.py` 执行（把 `train:` 段透传给 `model.train(**overrides)`，不认识的键点名丢掉），你那套 `scripts/train.py` 与 `00~07*.bat` 一个字没动。每次开跑在 `train_runs/` 落一份完整 yaml 快照，日志里同时给出「手动等价命令」。新增「先看这次会用什么参数」——让 `ultralytics` 自己的配置校验把这次要送进去的参数认一遍。数据页新增标注投料口 `annotations/`（只数不写）。权限多两枚写目录（`train_runs` / `annotations`），因此**要重新过一次批准卡**。
 
 `0.2.4` — 面板改由宿主主题驱动：删掉自带的深色配色，改读宿主桥进来的 `--uartix-*` 设计 token（另有 `--bg` / `--fg` / `--accent` 等短别名），输入框、按钮、卡片、滚动条与宿主同套底色、描边、圆角与焦点环；换主题时面板热更新，不再需要重开。
 

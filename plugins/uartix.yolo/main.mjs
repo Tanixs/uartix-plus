@@ -7,18 +7,30 @@
  * 参数在面板里改，插件生成一份「本次运行」的 config.yaml，起 python 子进程，把 stdout 逐行
  * 解析成进度与日志推给界面。
  *
- * ## 三个刻意的决定
+ * ## 四个刻意的决定
  *
  * 1. **不重新实现训练**。工作区里那套脚本跑出过 mAP50 = 0.995，重写等于用新 bug 换旧逻辑。
  *    插件只做三件它们不做的事：参数集中、进度可视化、失败能看见原因。
  *
  * 2. **不覆盖工作区的 config.yaml**。那份文件是用户自己的唯一真相（README 第 13 行写着
- *    "唯一需要修改的文件"）。插件把合并结果写到 `.uartix/yolo/runs/<jobId>/config.yaml`，
+ *    "唯一需要修改的文件"）。插件把合并结果写到 `train_runs/<实验名>-<时间>.yaml`，
  *    原文件只读。想恢复默认就删 `.uartix/yolo/config.json`。
  *
  * 3. **进度只解析脚本真的会打印的东西**。`build_dataset.py` 的 `[信息] 合计 N 个样本`、
  *    `[信息] 划分完成: 训练集 X 张 / 验证集 Y 张`，以及 ultralytics 的 `  12/300  ...` 行。
  *    不去猜"大概到哪了"——猜出来的进度条比没有更糟。
+ *
+ * 4. **新参数走插件自带的 runner，不改用户的 `scripts/train.py`**（P175-W1）。那份脚本把
+ *    `model.train(...)` 的参数逐个硬编码、只认 20 个键；面板现在能设 40 多个，改它就越了
+ *    "手动流水线一个字不动"的红线。所以 `runner/train_job.py` 在插件包里，读**同一份 yaml**
+ *    并把引擎认识的键全部透传。手动那条路仍然成立：同一份 yaml 交给 `scripts/train.py`
+ *    跑得出基准那 20 个键——面板的日志里两条命令都打出来，用户愿意用哪条都用哪条。
+ *
+ * ## 参数为什么不写死
+ *
+ * 面板上那张参数表来自 `probeParams()`：让当前那套 ultralytics 自己吐 `DEFAULT_CFG_DICT`。
+ * 手抄的表一定会过期——本机实测 `half` 已经没了、`mratio` 改叫 `mask_ratio`，
+ * 而过期的表表现为"面板能填、引擎不认"或者"引擎有、面板没入口"。包里没这个键 ⇒ 不渲染。
  *
  * ## 关于权限边界（写给后来的人）
  *
@@ -29,12 +41,26 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PANEL = "train";
+/** 插件包自己的目录：runner 跟着包走，不写死任何用户机器上的绝对路径。 */
+const PKG_DIR = path.dirname(fileURLToPath(import.meta.url));
+/** 插件自带的通用训练 runner（P175-W1）：新参数从这里透传给 ultralytics。 */
+const RUNNER = "runner/train_job.py";
 /** 插件自己的状态目录（相对工作区）。只放本次运行的配置与快照。 */
 const STATE_DIR = ".uartix/yolo";
-/** 每个 job 一个目录：`config.yaml` + 可选产物。 */
-const JOBS_DIR = `${STATE_DIR}/runs`;
+/**
+ * 第三层：每次实验的完整 yaml 快照（详设 §4.1）。
+ * 单独一个目录、不塞进 `runs/`——`runs/` 是 ultralytics 的产物区，混进去会让用户
+ * 分不清哪些是自己 bat 跑出来的。
+ */
+const RUNS_DIR = "train_runs";
+/**
+ * 标注投料口（用户自己标，面板只登记不生产）。
+ * 里面放 X-AnyLabeling 导出的目录，一个子目录 = 一批素材；面板只数列数、永不写永不删。
+ */
+const INTAKE_DIR = "annotations";
 /** 内存里保留多少行日志。界面上限一致，超出丢最旧的。 */
 const LOG_KEEP = 4000;
 
@@ -77,6 +103,217 @@ const DEFAULTS = {
     save_period: 25,
   },
 };
+
+/* ============================ 参数面（P175-W1，详设 §4.2 / §5.3） ============================ */
+
+/**
+ * 参数的**展示元数据**。这一层只回答"怎么摆、怎么说明"，**不回答"有没有这个键"**——
+ * 有没有由 `probeParams()` 从当前那套 ultralytics 里读（本机实测 111 键）。
+ *
+ * 为什么不在这里写一份完整参数表：`half` 已经没了、`mratio` 改叫 `mask_ratio`、
+ * `quantize` 是新加的——手抄的表一定会过期，而过期的表现是"面板能填、引擎不认"，
+ * 或者反过来"引擎有、面板没有"。包里没这个键 ⇒ 这一项直接不渲染（见 `specFromProbe`）。
+ *
+ * **刻意不暴露**（别以后手滑加回来）：`box/cls/dfl/pose/kobj/rle/angle` 这些损失权重
+ * （26 的 `dfl` 对模型根本无效，`reg_max=1`）、`nms/end2end`（架构决定，不是用户开关）、
+ * `save_dir`（由 project+name 推）、`multi_scale/rect/single_cls`、`overlap_mask/mask_ratio`、
+ * `distill_model`、`verbose`。`half/int8` 一律不做——已被 `quantize` 取代，那是导出页的事。
+ */
+const PARAM_META = [
+  {
+    id: "base",
+    title: "基础",
+    items: [
+      { key: "weights", label: "预训练权重", kind: "text", wide: true, always: true, hint: "yolo11*/yolo26* 的 .pt；相对路径按工作区算" },
+      { key: "data", label: "数据集 data.yaml", kind: "text", wide: true, hint: "留空 = 用数据页输出目录里的那份" },
+      { key: "epochs", label: "轮次 epochs", kind: "int", min: 1, hint: "训练多少遍" },
+      { key: "time", label: "时长上限 time", kind: "num", hint: "按小时封顶；留空 = 只看 epochs" },
+      { key: "imgsz", label: "分辨率 imgsz", kind: "int", min: 32, step: 32, hint: "部署端相机是多少就填多少" },
+      { key: "batch", label: "批大小 batch", kind: "num", hint: "整数；-1 = 自动挑（AutoBatch）；0.7 = 按显存比例。显存不够就减半" },
+      { key: "workers", label: "加载进程 workers", kind: "int", min: 0, hint: "这台 16G 内存保持 0，多进程会把内存撑爆" },
+      { key: "patience", label: "早停 patience", kind: "int", min: 1, hint: "连续多少轮没提升就停" },
+      { key: "device", label: "设备 device", kind: "text", hint: "0 = 第一块 GPU；cpu = 用 CPU" },
+      { key: "name", label: "实验名 name", kind: "text", hint: "产物落在 runs/<name>/" },
+      { key: "project", label: "输出总目录 project", kind: "text", wide: true },
+      { key: "exist_ok", label: "同名目录继续写 exist_ok", kind: "bool", hint: "开了会往同一个 runs/<name> 里覆盖" },
+    ],
+  },
+  {
+    id: "optimizer",
+    title: "优化器与学习率",
+    items: [
+      {
+        key: "optimizer",
+        label: "优化器",
+        kind: "select",
+        options: ["auto", "SGD", "MuSGD", "Adam", "AdamW", "NAdam", "RAdam", "RMSProp", "Adamax"],
+        hint: "MuSGD 是 YOLO26 的官方配方（要包版本 ≥ 8.4）",
+      },
+      { key: "lr0", label: "初始学习率 lr0", kind: "num", step: "any", hint: "SGD≈1e-2，Adam/AdamW≈1e-3" },
+      { key: "lrf", label: "末端比例 lrf", kind: "num", step: "any", hint: "最终学习率 = lr0 × lrf" },
+      { key: "momentum", label: "动量 momentum", kind: "num", step: "any" },
+      { key: "weight_decay", label: "权重衰减", kind: "num", step: "any" },
+      { key: "warmup_epochs", label: "预热轮数", kind: "num", step: "any" },
+      { key: "warmup_momentum", label: "预热动量", kind: "num", step: "any" },
+      { key: "warmup_bias_lr", label: "预热 bias lr", kind: "num", step: "any" },
+      { key: "cos_lr", label: "余弦学习率 cos_lr", kind: "bool", hint: "长训练更稳" },
+    ],
+  },
+  {
+    id: "augment",
+    title: "数据增强",
+    items: [
+      { key: "hsv_h", label: "色相 hsv_h", kind: "frac" },
+      { key: "hsv_s", label: "饱和度 hsv_s", kind: "frac" },
+      { key: "hsv_v", label: "明度 hsv_v", kind: "frac" },
+      { key: "degrees", label: "旋转角度 degrees", kind: "num", hint: "现场拍摄有小倾斜，10 度够用" },
+      { key: "translate", label: "平移 translate", kind: "frac" },
+      { key: "scale", label: "缩放 scale", kind: "num", step: "any" },
+      { key: "shear", label: "剪切 shear", kind: "num" },
+      { key: "perspective", label: "透视 perspective", kind: "frac", hint: "数字任务别开大" },
+      { key: "flipud", label: "上下翻转 flipud", kind: "frac", warn: "数字/文字识别必须为 0：翻了字就不认识了" },
+      { key: "fliplr", label: "左右镜像 fliplr", kind: "frac", warn: "数字/文字识别必须为 0：镜像后字就反了" },
+      { key: "bgr", label: "BGR 互换 bgr", kind: "frac" },
+      { key: "mosaic", label: "马赛克 mosaic", kind: "frac" },
+      { key: "mixup", label: "mixup", kind: "frac" },
+      { key: "cutmix", label: "cutmix", kind: "frac" },
+      { key: "copy_paste", label: "复制粘贴 copy_paste", kind: "frac", hint: "分割专用增强" },
+      { key: "copy_paste_mode", label: "复制粘贴策略", kind: "select", options: ["flip", "mixup"] },
+      { key: "close_mosaic", label: "收尾关 mosaic", kind: "int", hint: "最后 N 轮关掉马赛克，稳定收敛；0 = 一直开" },
+      { key: "erasing", label: "随机擦除 erasing", kind: "num", step: "any", hint: "数字任务慎用：擦到笔画就漏检" },
+      { key: "auto_augment", label: "分类增强策略", kind: "select", options: ["randaugment", "autoaugment", "augmix"], hint: "只对分类任务生效" },
+    ],
+  },
+  {
+    id: "finetune",
+    title: "微调与迁移",
+    items: [
+      { key: "freeze", label: "冻结前 N 层 freeze", kind: "int", min: 0, hint: "0 = 全开；数据少、只想换类别时冻前面几层更稳" },
+      { key: "pretrained", label: "用预训练权重 pretrained", kind: "bool", hint: "关掉 = 只拿结构从头训（一般不关）" },
+      { key: "fraction", label: "只用一部分数据 fraction", kind: "frac", hint: "快速试参数填 0.2，正式训填 1.0" },
+    ],
+  },
+  {
+    id: "perf",
+    title: "性能与复现",
+    items: [
+      { key: "cache", label: "图片缓存 cache", kind: "select", options: ["false", "ram", "disk"], hint: "ram 最快但吃内存；这台机器建议 disk 或 false" },
+      { key: "amp", label: "混合精度 amp", kind: "bool", hint: "关掉会明显变慢，一般不动" },
+      { key: "seed", label: "随机种子 seed", kind: "int", hint: "和工作区配置对齐，固定后每次划分一致" },
+      { key: "deterministic", label: "确定性算子 deterministic", kind: "bool", hint: "可复现但更慢" },
+      { key: "val", label: "训练时验证 val", kind: "bool", hint: "关掉就没有 mAP 曲线了" },
+      { key: "split", label: "评估用哪个 split", kind: "select", options: ["val", "test", "train"] },
+      { key: "save", label: "存权重 save", kind: "bool" },
+      { key: "save_period", label: "每 N 轮存检查点", kind: "int", hint: "-1 = 只存 best/last" },
+      { key: "plots", label: "出图 plots", kind: "bool", hint: "混淆矩阵 / PR 曲线 / train_batch 都靠它" },
+    ],
+  },
+];
+
+/** 探测当前那套 ultralytics 的参数真相。**只 import cfg，不 import torch**（实测约 6 秒，所以不塞进每次刷新）。 */
+const PROBE_PY = [
+  "import json",
+  "import ultralytics",
+  "from ultralytics.cfg import DEFAULT_CFG_DICT as D",
+  "from ultralytics.cfg import CFG_INT_KEYS, CFG_FLOAT_KEYS, CFG_BOOL_KEYS, CFG_STR_KEYS, CFG_FRACTION_KEYS",
+  "t = {}",
+  "for src, kind in ((CFG_INT_KEYS,'int'), (CFG_FLOAT_KEYS,'float'), (CFG_BOOL_KEYS,'bool'), (CFG_STR_KEYS,'str'), (CFG_FRACTION_KEYS,'frac')):",
+  "    for k in src:",
+  "        t.setdefault(k, kind)",
+  "o = {'ultralytics': ultralytics.__version__, 'keys': {k: [t.get(k, ''), D[k]] for k in D}}",
+  "print(json.dumps(o, ensure_ascii=False, default=str))",
+].join("\n");
+
+/** 探测失败时的兜底：只摆"工作区配置里本来就有的那几个键"，并明确告诉用户降级了。 */
+const MINIMAL_KEYS = Object.keys(DEFAULTS.train);
+
+let paramProbe = { pyKey: "", done: false, busy: null, ultralytics: "", keys: {}, degraded: false, error: "", source: "" };
+
+/**
+ * 元数据 × 探测结果 → 面板能直接渲染的分组。
+ * `buildParamSpec(probe)` 是纯函数（测试就是打这里进），运行时用的是同一份逻辑。
+ */
+function buildParamSpec(probe) {
+  const known = (probe && probe.keys) || {};
+  const groups = PARAM_META.map((g) => ({
+    id: g.id,
+    title: g.title,
+    items: g.items
+      .filter((it) => it.always || (probe && probe.degraded ? MINIMAL_KEYS.includes(it.key) : it.key in known))
+      .map((it) => {
+        const hit = known[it.key];
+        return {
+          key: it.key,
+          label: it.label,
+          kind: it.kind,
+          hint: it.hint || "",
+          warn: it.warn || "",
+          wide: !!it.wide,
+          options: it.options || null,
+          step: it.step !== undefined ? it.step : it.kind === "frac" ? 0.01 : it.kind === "int" ? 1 : "any",
+          min: it.min !== undefined ? it.min : it.kind === "frac" ? 0 : null,
+          max: it.kind === "frac" ? 1 : it.max !== undefined ? it.max : null,
+          // 引擎自己的默认值：面板拿它显示"包里有这一项、值是这么来的"
+          engineDefault: hit ? hit[1] : null,
+          // 引擎报的类型（int/float/bool/str/frac；多态键与 `weights` 这种工作区词汇是空串）
+          type: hit && hit[0] ? hit[0] : "",
+        };
+      }),
+  })).filter((g) => g.items.length);
+  return {
+    groups,
+    count: groups.reduce((n, g) => n + g.items.length, 0),
+    // 只有真的探过一次才叫 ready；`specNow()` 在未探时给出空表 + ready:false，面板据此显示"正在读参数表"
+    ready: true,
+    ultralytics: (probe && probe.ultralytics) || "",
+    keyCount: Object.keys(known).length,
+    degraded: !!(probe && probe.degraded),
+    error: (probe && probe.error) || "",
+    source: (probe && probe.source) || "",
+  };
+}
+
+const specNow = () => (paramProbe.done ? buildParamSpec(paramProbe) : { groups: [], count: 0, ready: false, degraded: false, ultralytics: "", keyCount: 0, error: "", source: "" });
+
+/**
+ * 拉参数表。6 秒的子进程，所以：**同一套 python 只探一次**，`state()` 只回缓存，
+ * 面板挂载后单独调 `params()` 把它填上——否则每次刷新都卡一下午。
+ */
+async function probeParams(force) {
+  const py = await detectPython();
+  const key = `${py.path}|${py.version}`;
+  if (!force && paramProbe.done && paramProbe.pyKey === key) return specNow();
+  if (paramProbe.busy) return await paramProbe.busy;
+  if (!py.ok) {
+    paramProbe = {
+      pyKey: key,
+      done: true,
+      busy: null,
+      ultralytics: "",
+      keys: {},
+      degraded: true,
+      error: `没有可用的 python（${py.source}：${py.path}）：${py.error}`,
+      source: "",
+    };
+    return specNow();
+  }
+  paramProbe.busy = (async () => {
+    const r = await runOnce(py.path, ["-c", PROBE_PY], 40000);
+    if (r.code !== 0) {
+      return { ultralytics: "", keys: {}, degraded: true, error: (r.err || r.out || "读不到 ultralytics 的参数表").slice(-300), source: py.source };
+    }
+    try {
+      const v = JSON.parse(r.out.trim().split(/\r?\n/).pop());
+      if (!v || !v.keys) throw new Error("输出里没有 keys");
+      return { ultralytics: String(v.ultralytics || ""), keys: v.keys, degraded: false, error: "", source: py.source };
+    } catch (e) {
+      return { ultralytics: "", keys: {}, degraded: true, error: `参数表解析失败：${(e && e.message) || e}`, source: py.source };
+    }
+  })();
+  const got = await paramProbe.busy;
+  paramProbe = { pyKey: key, done: true, busy: null, ...got };
+  return specNow();
+}
 
 /* ============================ 基础设施 ============================ */
 
@@ -494,6 +731,130 @@ function scanRuns(project) {
   return runs;
 }
 
+/**
+ * 投料口盘点：`$WS/annotations/`（详设之外的用户裁定——**标注用户自己来，面板只登记一个放数据的目录**）。
+ *
+ * 这一条**只数不写**：不建目录、不搬文件、不改文件名，一个字节都不碰。
+ * 目录不存在就老实说"还没有"，「建一个」是用户点出来的按钮，不是插件的自作主张。
+ * 计数有上限（一个标注文件夹可能上万张），超了就报 `truncated`，宁可少报也不要把面板卡住。
+ */
+const IMAGE_RE = /\.(jpg|jpeg|png|bmp)$/i;
+function scanIntake() {
+  const out = { dir: "", exists: false, subdirs: [], loose: { images: 0, json: 0, other: 0 }, truncated: false };
+  if (!root) return out;
+  out.dir = abs(INTAKE_DIR);
+  let ents;
+  try {
+    ents = fs.readdirSync(out.dir, { withFileTypes: true });
+  } catch {
+    return out; // 没有 = 没有，不是错误
+  }
+  out.exists = true;
+  const count = (d, depth, acc) => {
+    let list;
+    try {
+      list = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return acc;
+    }
+    for (const e of list) {
+      if (acc.n > 20000) {
+        out.truncated = true;
+        return;
+      }
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) {
+        if (depth < 2) count(p, depth + 1, acc);
+        continue;
+      }
+      acc.n++;
+      if (IMAGE_RE.test(e.name)) acc.images++;
+      else if (/\.json$/i.test(e.name)) acc.json++;
+      else acc.other++;
+    }
+  };
+  for (const e of ents) {
+    const p = path.join(out.dir, e.name);
+    if (!e.isDirectory()) {
+      const acc = { n: 0, images: 0, json: 0, other: 0 };
+      count(p, 0, acc);
+      out.loose.images += acc.images;
+      out.loose.json += acc.json;
+      out.loose.other += acc.n - acc.images - acc.json;
+      continue;
+    }
+    const acc = { n: 0, images: 0, json: 0, other: 0 };
+    count(p, 0, acc);
+    let mtime = 0;
+    try {
+      mtime = fs.statSync(p).mtimeMs;
+    } catch {
+      /* 只影响排序 */
+    }
+    out.subdirs.push({ name: e.name, path: p.replace(/\\/g, "/"), images: acc.images, json: acc.json, other: acc.n - acc.images - acc.json, mtime });
+  }
+  out.subdirs.sort((a, b) => b.mtime - a.mtime);
+  return out;
+}
+
+/** 建投料口目录（用户点一下才建；里面放什么、怎么标，全是用户的事）。 */
+function ensureIntake() {
+  const dir = abs(INTAKE_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  return { dir, created: true, intake: scanIntake() };
+}
+
+/** 面板上「开跑前先看」：拿当前设置写一份**临时**预览快照，让 runner 用 --dry-run 解析一遍。 */
+async function precheck(overrides) {
+  needWorkspace();
+  const { effective } = await effectiveConfig();
+  const merged = merge(effective, dropNulls({}, overrides || {}));
+  merged.dataset.output_dir = abs(merged.dataset.output_dir);
+  merged.train.project = abs(merged.train.project);
+  const py = await detectPython();
+  if (!py.ok) return { ok: false, error: `找不到可用的 python：${py.error}` };
+  const runner = path.join(PKG_DIR, "runner", "train_job.py").replace(/\\/g, "/");
+  if (!fs.existsSync(runner)) return { ok: false, error: `插件包里没有 ${RUNNER}` };
+  // 预览快照写在插件自己的状态目录里，**不进 train_runs/**：那一次都没开训，不该留下一份"实验"
+  const preview = abs(`${STATE_DIR}/preview.yaml`);
+  fs.mkdirSync(path.dirname(preview), { recursive: true });
+  fs.writeFileSync(preview, dumpConfig(merged), "utf8");
+  const run = await runOnce(py.path, [runner, "--config", preview, "--root", root, "--dry-run"], 90000);
+  if (run.code !== 0) return { ok: false, error: (run.err || run.out || "解析失败").slice(-600) };
+  try {
+    const v = JSON.parse(run.out.trim().split(/\r?\n/).pop());
+    return { ok: true, ...v, error: "" };
+  } catch (e) {
+    return { ok: false, error: `预览输出读不出来：${(e && e.message) || e}｜${(run.out || "").slice(-300)}` };
+  }
+}
+
+/** `train_runs/` 里已有的实验快照（只读列出，供"这次是覆盖还是新建"与 W7 的复现用）。 */
+function scanTrainRuns(limit) {
+  if (!root) return [];
+  const dir = abs(RUNS_DIR);
+  let names = [];
+  try {
+    names = fs.readdirSync(dir).filter((f) => /\.yaml$/i.test(f));
+  } catch {
+    return [];
+  }
+  const items = names
+    .map((f) => {
+      const p = path.join(dir, f);
+      let st;
+      try {
+        st = fs.statSync(p);
+      } catch {
+        return null;
+      }
+      return { name: f.replace(/\.yaml$/i, ""), file: p.replace(/\\/g, "/"), bytes: st.size, mtime: st.mtimeMs };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.mtime - a.mtime);
+  return items.slice(0, limit || 12);
+}
+
 /* ============================ 生成 config.yaml ============================ */
 
 /**
@@ -507,12 +868,41 @@ function yq(s) {
   return '"' + String(s).replace(/\\/g, "/").replace(/"/g, '\\"') + '"';
 }
 
+/**
+ * 面板送回来的值按元数据整形。
+ *
+ * 为什么要在写盘前做这件事：输入框里永远是字符串。`epochs: "300"` 侥幸能被引擎兜住，
+ * 但 `time: ""`（用户没填）会把"不限时长"变成"时长是空串"，而 `cache: "false"` 会被
+ * 当成一个非空字符串——**这类错都不报错，只是参数没生效**，是最难查的那一类。
+ */
+function coerceTrain(t) {
+  const kinds = {};
+  for (const g of PARAM_META) for (const it of g.items) kinds[it.key] = it.kind;
+  const out = {};
+  for (const [k, v] of Object.entries(t || {})) {
+    const kind = kinds[k];
+    if ((kind === "int" || kind === "num" || kind === "frac") && (v === "" || v === null)) continue; // 空 = 不传，交给引擎默认
+    if ((kind === "int" || kind === "num" || kind === "frac") && typeof v === "string" && v.trim() !== "" && !isNaN(Number(v))) {
+      out[k] = Number(v);
+      continue;
+    }
+    // 下拉里 "false"/"true" 是字符串写法（`cache: False` 才是 YAML 布尔）；勾选框同理，别让字符串 "false" 变成真值
+    if ((kind === "select" || kind === "bool") && (v === "false" || v === "true")) {
+      out[k] = v === "true";
+      continue;
+    }
+    out[k] = v;
+  }
+  return out;
+}
+
 function dumpConfig(c) {
   const L = [];
   const kv = (k, v, ind) => {
     const pad = " ".repeat(ind);
     if (typeof v === "boolean") L.push(`${pad}${k}: ${v ? "true" : "false"}`);
     else if (typeof v === "number" && Number.isFinite(v)) L.push(`${pad}${k}: ${v}`);
+    else if (v === null || v === undefined) L.push(`${pad}${k}: null`);
     else L.push(`${pad}${k}: ${yq(v)}`);
   };
   const list = (k, arr, ind) => {
@@ -522,7 +912,21 @@ function dumpConfig(c) {
       return;
     }
     L.push(`${pad}${k}:`);
-    for (const it of arr) L.push(`${pad}  - ${yq(it)}`);
+    for (const it of arr) L.push(`${pad}  - ${typeof it === "number" ? it : yq(it)}`);
+  };
+  const emit = (k, v, ind) => {
+    if (Array.isArray(v)) return list(k, v, ind);
+    if (isObj(v)) {
+      const entries = Object.entries(v);
+      if (!entries.length) {
+        L.push(`${" ".repeat(ind)}${k}: {}`);
+        return;
+      }
+      L.push(`${" ".repeat(ind)}${k}:`);
+      for (const [kk, vv] of entries) kv(kk, vv, ind + 2);
+      return;
+    }
+    kv(k, v, ind);
   };
 
   L.push("env:");
@@ -535,45 +939,37 @@ function dumpConfig(c) {
   kv("val_ratio", Number(c.dataset.val_ratio), 2);
   kv("seed", Number(c.dataset.seed), 2);
   list("classes", c.dataset.classes || [], 2);
-  L.push("  label_map: {}");
+  emit("label_map", c.dataset.label_map || {}, 2);
 
+  // 第三层快照的关键：**train 段整体透传**，不是逐个点名。
+  // 用户的 `scripts/train.py` 只读它认识的那 20 个键（多余的键它看都不看，不报错），
+  // 插件 runner 把剩下的也交给引擎——同一份文件，两边都成立。
   L.push("train:");
-  const t = c.train;
-  kv("weights", t.weights, 2);
-  kv("epochs", Number(t.epochs), 2);
-  kv("imgsz", Number(t.imgsz), 2);
-  kv("batch", Number(t.batch), 2);
-  kv("workers", Number(t.workers), 2);
-  kv("patience", Number(t.patience), 2);
-  kv("device", String(t.device), 2);
-  kv("name", t.name, 2);
-  kv("project", t.project, 2);
-  kv("optimizer", t.optimizer, 2);
-  kv("cos_lr", !!t.cos_lr, 2);
-  kv("close_mosaic", Number(t.close_mosaic), 2);
-  kv("degrees", Number(t.degrees), 2);
-  kv("fliplr", Number(t.fliplr), 2);
-  kv("flipud", Number(t.flipud), 2);
-  kv("copy_paste", Number(t.copy_paste), 2);
-  kv("mixup", Number(t.mixup), 2);
-  kv("cache", t.cache, 2);
-  kv("seed", Number(t.seed), 2);
-  kv("save_period", Number(t.save_period), 2);
+  const t = coerceTrain(c.train);
+  for (const [k, v] of Object.entries(t)) emit(k, v, 2);
   return L.join("\n") + "\n";
+}
+
+/** 本次实验的 yaml 快照落点：`train_runs/<实验名>-<时间>.yaml`（详设 §4.1 第 3 层）。 */
+function snapshotPathFor(kind, name, at) {
+  const stem = (String(name || kind).replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || kind).slice(0, 60);
+  const d = new Date(at || Date.now());
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  return abs(`${RUNS_DIR}/${kind === "train" ? `${stem}-${stamp}` : `${kind}-${stem}-${stamp}`}.yaml`);
 }
 
 /* ============================ job ============================ */
 
 function newJob(kind, label) {
   const id = `j${++seq}-${Date.now().toString(36)}`;
-  const dir = abs(`${JOBS_DIR}/${id}`);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(abs(RUNS_DIR), { recursive: true }); // 唯一写入点（详设 §6：只新增，不碰既有文件）
   fs.mkdirSync(abs("logs"), { recursive: true }); // 日志落 `$WS/logs/`（和用户既有习惯一致）
   return {
     id,
     kind,
     label,
-    dir,
+    dir: abs(RUNS_DIR),
     state: "running",
     startedAt: Date.now(),
     endedAt: 0,
@@ -599,6 +995,8 @@ function snapshot(j) {
     pid: j.pid,
     progress: { ...j.progress },
     logPath: j.logPath,
+    // 本次实验的 yaml 快照：面板上「复制这条命令 / 在资源管理器打开」都指它（W7 用它做复现）
+    configPath: j.configPath || "",
     total: j.lines.length,
   };
 }
@@ -756,39 +1154,56 @@ function finishJob(j, code) {
   if (active === j) active = null;
 }
 
-/** 起一个 job：写本次运行的 config.yaml → spawn → 逐行喂给 pushLine。 */
+/**
+ * 起一个 job：写本次实验的 yaml 快照（`train_runs/`）→ spawn → 逐行喂给 pushLine。
+ *
+ * 训练走**插件自带的 runner**，数据集构建继续走工作区自己的 `scripts/build_dataset.py`。
+ * 为什么训练要换：用户那份 `train.py` 把参数逐个硬编码，只认 20 个键，面板新增的
+ * `lr0 / mosaic / freeze` 它根本不会读；而红线又不许改他的脚本（详设 §4.4 裁定①）。
+ * 两边吃的是**同一份 yaml**，所以手动仍然复现得起来——日志里把两条命令都打出来。
+ */
 async function startJob(kind, overrides) {
   needWorkspace();
   if (active) throw new Error(`已经有一个任务在跑（${active.label}）：先停掉它再开始新的`);
   const { effective } = await effectiveConfig();
-  const merged = merge(effective, overrides || {});
+  // null 在这里的含义是"这一项不要了"（面板清空输入框时送回来的就是它），不能让 `weights: null` 落到 yaml 里
+  const merged = merge(effective, dropNulls({}, overrides || {}));
   merged.dataset.output_dir = abs(merged.dataset.output_dir);
   merged.train.project = abs(merged.train.project);
 
   const py = await detectPython();
   if (!py.ok) throw new Error(`找不到可用的 python（试过 ${py.source}：${py.path}）：${py.error}`);
 
+  const runner = kind === "train" ? path.join(PKG_DIR, "runner", "train_job.py").replace(/\\/g, "/") : abs("scripts/build_dataset.py");
+  if (!fs.existsSync(runner)) {
+    throw new Error(
+      kind === "train"
+        ? `插件包里没有 ${RUNNER}：这份插件装得不完整，重装一次（runner 是插件自带的，不在工作区里）`
+        : `工作区里没有 ${runner}：这个面板要配合 YOLO-Workspace 的 scripts/ 使用`,
+    );
+  }
+
   const label = kind === "dataset" ? "构建数据集" : `训练 ${merged.train.name}`;
   const job = newJob(kind, label);
 
-  const confPath = path.join(job.dir, "config.yaml");
+  const confPath = snapshotPathFor(kind, kind === "train" ? merged.train.name : path.basename(merged.dataset.output_dir || "ds"), job.startedAt);
   fs.writeFileSync(confPath, dumpConfig(merged), "utf8");
-
-  const script = abs(kind === "dataset" ? "scripts/build_dataset.py" : "scripts/train.py");
-  if (!fs.existsSync(script)) throw new Error(`工作区里没有 ${script}：这个面板要配合 YOLO-Workspace 的 scripts/ 使用`);
 
   job.configPath = confPath;
   jobs.set(job.id, job);
   active = job;
 
   pushLine(job, `[工作台] python: ${py.path}（${py.source}）`, "sys");
-  pushLine(job, `[工作台] 配置: ${confPath}`, "sys");
-  pushLine(job, `[工作台] 命令: "${py.path}" "${script}" --config "${confPath}"`, "sys");
+  pushLine(job, `[工作台] 本次实验快照: ${confPath}`, "sys");
+  pushLine(job, `[工作台] 命令: "${py.path}" "${runner}" --config "${confPath}"`, "sys");
+  if (kind === "train") {
+    pushLine(job, `[工作台] 手动等价（吃同一份快照，但只认它自己那 20 个键）: "${py.path}" "${abs("scripts/train.py")}" --config "${confPath}"`, "sys");
+  }
 
   try {
     const child = ctx.process.spawn({
       cmd: py.path,
-      args: [script, "--config", confPath],
+      args: kind === "train" ? [runner, "--config", confPath, "--root", root] : [runner, "--config", confPath],
       cwd: root,
       env: {
         PYTHONIOENCODING: "utf-8",
@@ -813,6 +1228,53 @@ async function startJob(kind, overrides) {
     throw e;
   }
   return snapshot(job);
+}
+
+/** 覆盖层里 `null` = 删掉这个键（面板上的输入框被清空时送回来的就是 null）。 */
+function dropNulls(base, patch) {
+  const out = merge(base, patch);
+  for (const [sec, val] of Object.entries(patch || {})) {
+    if (!isObj(val) || !isObj(out[sec])) continue;
+    for (const [k, v] of Object.entries(val)) if (v === null) delete out[sec][k];
+  }
+  return out;
+}
+
+/**
+ * 覆盖层只存"与基准不同的那些键"（详设 §4.1）。
+ *
+ * 参数面从 8 个涨到 40 多个以后，这条从"整洁"变成了**正确性**：不剪的话，用户每保存一次
+ * 就把整张表抄进 config.json，以后他改工作区的 `config.yaml`，面板的覆盖会永远压在它上面——
+ * 表现是"我明明改了配置，怎么没生效"。
+ */
+function pruneToBase(next, base) {
+  const out = {};
+  for (const [sec, val] of Object.entries(next || {})) {
+    if (!isObj(val)) {
+      out[sec] = val;
+      continue;
+    }
+    const b = isObj(base[sec]) ? base[sec] : {};
+    const keep = {};
+    for (const [k, v] of Object.entries(val)) {
+      const same = typeof v === "number" && typeof b[k] === "number" ? Math.abs(v - b[k]) < 1e-12 : v === b[k];
+      if (!same) keep[k] = v;
+    }
+    if (Object.keys(keep).length) out[sec] = keep;
+  }
+  return out;
+}
+
+/** 落盘一份面板覆盖，并把新状态还给面板。`saveConfig` 与「投料口→素材来源」共用这一条。 */
+async function applyPatch(patch) {
+  if (!isObj(patch)) throw new Error("patch 必须是对象");
+  const cur = readOverrides();
+  const mergedBase = merge(DEFAULTS, (await readBaseConfig()).value || {});
+  const next = pruneToBase(dropNulls(cur, patch), mergedBase);
+  fs.mkdirSync(path.dirname(overridesPath()), { recursive: true });
+  fs.writeFileSync(overridesPath(), JSON.stringify(next, null, 2), "utf8");
+  baseCache = { mtime: 0, value: null, error: "", source: "" }; // 让下次 state() 重算
+  return await panelState();
 }
 
 /* ============================ 面板 API ============================ */
@@ -1047,6 +1509,10 @@ async function panelState() {
       dataset: { dir: "", dataYaml: "", exists: false, trainCount: 0, valCount: 0, classes: [] },
       deploy: scanDeployTool(),
       runs: [],
+      trainRuns: [],
+      intake: { dir: "", exists: false, subdirs: [], loose: { images: 0, json: 0, other: 0 }, truncated: false },
+      // 参数面：没探过就老实说没探过。探测要 6 秒，所以它不塞在刷新里，面板自己调 params()
+      params: specNow(),
       jobs: [],
       active: null,
     };
@@ -1067,6 +1533,9 @@ async function panelState() {
     dataset: scanDataset(cfg.effective.dataset.output_dir),
     deploy: scanDeployTool(),
     runs: scanRuns(cfg.effective.train.project).slice(0, 12),
+    trainRuns: scanTrainRuns(),
+    intake: scanIntake(),
+    params: specNow(),
     jobs: [...jobs.values()].slice(-8).map(snapshot),
     active: snapshot(active),
   };
@@ -1120,13 +1589,7 @@ async function activate(c) {
 
     /** 保存面板上的改动。只存**与基准不同的那些**，这样用户改回默认时 diff 会自己消失。 */
     async saveConfig(patch) {
-      if (!isObj(patch)) throw new Error("patch 必须是对象");
-      const cur = readOverrides();
-      const next = merge(cur, patch);
-      fs.mkdirSync(path.dirname(overridesPath()), { recursive: true });
-      fs.writeFileSync(overridesPath(), JSON.stringify(next, null, 2), "utf8");
-      baseCache = { mtime: 0, value: null, error: "", source: "" }; // 让下次 state() 重算
-      return await panelState();
+      return await applyPatch(patch);
     },
 
     /** 清掉面板覆盖，回到"工作区 config.yaml + 内置默认"。 */
@@ -1146,6 +1609,35 @@ async function activate(c) {
 
     async startTrain(overrides) {
       return await startJob("train", overrides || {});
+    },
+
+    /* ---- 参数面与投料口（P175-W1）---- */
+
+    /** 读当前那套 ultralytics 的参数表。同一套 python 只探一次；`true` = 强制重探。 */
+    async params(refresh) {
+      return await probeParams(!!refresh);
+    },
+
+    /** 开跑前摘要：让 runner `--dry-run` 解析一遍，看清"引擎到底会收到哪些参数、哪些被丢了"。 */
+    async precheck(overrides) {
+      return await precheck(overrides || {});
+    },
+
+    /** 建投料口目录。**只在用户点按钮时**执行：标注是他自己的事，插件不替他决定目录长什么样。 */
+    async intakeEnsure() {
+      needWorkspace();
+      return ensureIntake();
+    },
+
+    /** 把投料口里的某个子目录登记成素材来源。名字必须来自盘上扫出来的那些（不拼用户给的路径）。 */
+    async intakeUse(name) {
+      needWorkspace();
+      const hit = scanIntake().subdirs.find((s) => s.name === String(name == null ? "" : name));
+      if (!hit) throw new Error(`投料口里没有这个子目录：${name}（先点「刷新」）`);
+      const { effective } = await effectiveConfig();
+      const srcs = (effective.dataset.sources || []).slice();
+      if (!srcs.includes(hit.path)) srcs.push(hit.path);
+      return await applyPatch({ dataset: { sources: srcs } });
     },
 
     /* ---- 部署（$EXT:deploy）---- */
@@ -1209,6 +1701,7 @@ async function activate(c) {
   });
 }
 
-// `dumpConfig` / `parseSimpleYaml` 是纯函数（不碰 ctx），导出给测试与将来的复用：
-// 它们之间必须能往返——本插件生成的 config.yaml，用它自己的解析器读回来必须一模一样。
-export { activate, dumpConfig, fmtDuration, parseSimpleYaml };
+// `dumpConfig` / `parseSimpleYaml` / `buildParamSpec` / `coerceTrain` 是纯函数（不碰 ctx），导出给测试与将来的复用：
+// 它们之间必须能往返——本插件生成的 config.yaml，用它自己的解析器读回来必须一模一样；
+// 参数表也必须是纯映射：喂给它一份"少一个键"的探测结果，它就得少渲染一项（详设 §10 判据 2）。
+export { activate, buildParamSpec, coerceTrain, dumpConfig, fmtDuration, parseSimpleYaml, PARAM_META };

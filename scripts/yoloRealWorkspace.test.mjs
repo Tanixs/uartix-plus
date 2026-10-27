@@ -167,24 +167,6 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
         expect(best, JSON.stringify(st.runs.map((r) => r.name))).toBeTruthy();
         expect(Number(best.metrics.mAP50M)).toBeGreaterThan(0.9);
 
-        // 把"到底读到了什么"打出来：这条用例平时是跳过的，跳过时没人看，跑起来时要能当体检报告读
-        console.log(
-          "[真工作区] python " +
-            st.python.version +
-            " · 训练 " +
-            st.dataset.trainCount +
-            " / 验证 " +
-            st.dataset.valCount +
-            " · 类别 " +
-            st.dataset.classes.join(",") +
-            " · 训练记录 " +
-            st.runs.length +
-            " 条（最佳 mAP50(M)=" +
-            best.metrics.mAP50M +
-            "）· 部署工具 " +
-            (st.deploy.ready ? st.deploy.configs.join("/") : "未配置"),
-        );
-
         /* 部署工具（A11）：路径是 hello.roots 递进去的，插件自己没写死过任何绝对路径。
            没绑时应当 bound:false 而不是崩 —— 那一半由 yoloPlugin 的用例钉，这里只验"真目录认得出来"。 */
         if (DEPLOY_OK) {
@@ -202,6 +184,55 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
         expect(String(probe.torch || "")).toMatch(/^\d+\./);
         expect(String(probe.ultralytics || "")).toMatch(/^\d+\./);
         expect(probe.cuda).toBe(true);
+
+        /* ---- 参数面（P175-W1）：真包探真键 ----
+           `yoloPlugin` 那边用 node 冒充 python，只能验"探测失败要降级"；这张表**到底探不探得出来**、
+           五组填不填得满，只有真机验得了。跑在这一条的时候插件进程仍然没有 --allow-fs-write：
+           参数面探测是纯读，写不了任何东西——这正是它该有的权限形状。 */
+        const ps = await call("panel.train.params", false);
+        expect(ps.degraded, `真包却降级了：${ps.error}`).toBe(false);
+        expect(ps.ready).toBe(true);
+        expect(ps.ultralytics).toMatch(/^8\./);
+        expect(ps.keyCount, "DEFAULT_CFG_DICT 该有上百个键").toBeGreaterThanOrEqual(100);
+        expect(ps.groups.map((g) => g.id), "五组参数面缺组").toEqual(["base", "optimizer", "augment", "finetune", "perf"]);
+        expect(ps.count, "面板上真正摆出来的项数").toBeGreaterThanOrEqual(40);
+        const keys = ps.groups.flatMap((g) => g.items.map((i) => i.key));
+        expect(keys).toContain("lr0");
+        expect(keys).toContain("copy_paste_mode");
+        expect(keys, "`half` 在 8.4 里已经不存在，面板不许有它").not.toContain("half");
+        // 每项都该带引擎自己的默认值（"这项默认是多少"不许面板自己编）
+        const e = ps.groups[0].items.find((i) => i.key === "epochs");
+        expect(typeof e.engineDefault).toBe("number");
+
+        // 投料口与快照：真工作区里现在还没有，读数必须老实
+        expect(st.intake.dir.replace(/\\/g, "/")).toContain("/annotations");
+        expect(typeof st.intake.exists).toBe("boolean");
+        expect(Array.isArray(st.trainRuns)).toBe(true);
+
+        // 把"到底读到了什么"打出来：这条用例平时是跳过的，跳过时没人看，跑起来时要能当体检报告读
+        console.log(
+          "[真工作区] python " +
+            st.python.version +
+            " · 训练 " +
+            st.dataset.trainCount +
+            " / 验证 " +
+            st.dataset.valCount +
+            " · 类别 " +
+            st.dataset.classes.join(",") +
+            " · 训练记录 " +
+            st.runs.length +
+            " 条（最佳 mAP50(M)=" +
+            best.metrics.mAP50M +
+            "）· 部署工具 " +
+            (st.deploy.ready ? st.deploy.configs.join("/") : "未配置") +
+            " · 参数面 " +
+            ps.count +
+            " 项 / 包里 " +
+            ps.keyCount +
+            " 键（ultralytics " +
+            ps.ultralytics +
+            "）",
+        );
       } finally {
         try {
           child.kill();
