@@ -617,8 +617,11 @@ mod tests {
 
     #[test]
     fn store_path_lands_inside_root() {
-        let p = store_path("index", &["C:\\app\\extensions".to_string()]).unwrap();
-        assert_eq!(p.to_string_lossy(), "C:\\app\\extensions\\index.json");
+        // 断言不能用写死的 `C:\app\extensions\index.json`：Linux 上反斜杠只是普通字符，
+        // PathBuf::join 补的是 `/`，CI 会红成"真机 BUG"的样子，其实只是测试没跨平台。
+        let root = "C:\\app\\extensions";
+        let p = store_path("index", &[root.to_string()]).unwrap();
+        assert_eq!(p, std::path::Path::new(root).join("index.json"));
     }
 }
 
