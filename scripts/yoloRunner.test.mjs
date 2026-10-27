@@ -9,7 +9,7 @@
  * 只跑 `--dry-run`：它不 import torch、不开训、不写工作区产物。真训练留给用户点按钮。
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -117,6 +117,30 @@ describe("P175-W1 · 真 runner 吃真配置", () => {
     // `half` 在 8.4 里已经被删掉了（详设 §1.5）：面板上绝不能有它，runner 也绝不兜它
     expect(r.engine.accepted).toBe(true);
   }, 120_000);
+
+  maybe("两个 runner 都能被真 python 解析（语法错不会让门禁红，只会让面板点了没反应）", () => {
+    for (const f of ["train_job.py", "eval_job.py", "export_job.py"]) {
+      const p = path.join(HERE, "..", "plugins", "uartix.yolo", "runner", f);
+      expect(existsSync(p), `缺 runner/${f}`).toBe(true);
+      let err = "";
+      try {
+        // 用 compile() 而不是 py_compile：后者会在插件包里落下 `__pycache__`，
+        // 那些 .pyc 会被发布通道当二进制跳过，还会让"包里有几个文件"这件事说谎。
+        execFileSync(PY, ["-c", "import sys; compile(open(sys.argv[1], encoding='utf-8').read(), sys.argv[1], 'exec')", p], { stdio: "pipe" });
+      } catch (e) {
+        err = String(e.stderr || e.message || "").slice(0, 400);
+      }
+      expect(err, `runner/${f} 解析不过`).toBe("");
+    }
+    expect(existsSync(path.join(HERE, "..", "plugins", "uartix.yolo", "runner", "__pycache__")), "测试在插件包里留下了 __pycache__").toBe(false);
+  }, 60_000);
+
+  maybe("eval_job.py 的 --help 起得来（argparse 形状是面板拼命令的依据）", () => {
+    const out = execFileSync(PY, [path.join(HERE, "..", "plugins", "uartix.yolo", "runner", "eval_job.py"), "--help"], { encoding: "utf8" });
+    for (const flag of ["--config", "--weights", "--data", "--out", "--conf", "--errors"]) {
+      expect(out, `--help 里没有 ${flag}`).toContain(flag);
+    }
+  }, 60_000);
 
   if (!OK) {
     it("（这台机器上没有 yolo_env，跳过真 runner 自检）", () => {

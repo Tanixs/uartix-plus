@@ -253,7 +253,7 @@ function makeWorkspace(tag) {
 function copyInto(from, to) {
   mkdirSync(to, { recursive: true });
   for (const e of readdirSync(from, { withFileTypes: true })) {
-    if (e.name === "node_modules" || e.name === ".versions" || e.name === "logs") continue;
+    if (e.name === "node_modules" || e.name === ".versions" || e.name === "logs" || e.name === "__pycache__") continue;
     const s = path.join(from, e.name);
     const d = path.join(to, e.name);
     if (e.isDirectory()) copyInto(s, d);
@@ -543,7 +543,8 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
       const finished = await c.waitFor(() => {
         const jobs = c.events.filter((e) => e.event === "job").map((e) => e.payload);
         return jobs.find((j) => j.state === "succeeded" || j.state === "failed");
-      }, 20_000, "任务结束");
+      // 等的是"真起一个子进程并跑完"：并行跑测试时这台机器会抢 CPU，上限给到 45 秒（跑得快时仍是 1 秒内返回）
+      }, 45_000, "任务结束");
 
       expect(finished.state, `任务失败：${JSON.stringify(finished)}`).toBe("succeeded");
       expect(finished.code).toBe(0);
@@ -630,7 +631,7 @@ describe("P174-A9 · 插件在真宿主里跑（node 冒充 python）", () => {
         /* 已经退出 */
       }
     }
-  }, 60_000);
+  }, 90_000);
 });
 
 /**
@@ -699,7 +700,7 @@ describe("P174-A15 · 部署页的插件侧", () => {
     expect(miss.tool.bound).toBe(false);
 
     // 没绑工具：deployStart 要拒，而不是拿空路径去起进程
-    const err = await p.call("panel.train.deployStart", "x.ps1", "validate", {}).then(
+    const err = await p.call("panel.train.deployStart", { cfgName: "x.ps1", step: "validate" }).then(
       () => null,
       (e) => String(e.message || e),
     );
@@ -833,7 +834,15 @@ describe("P175-W1 · 快照里值的形状（引擎看得懂的那一份）", ()
     const panel = readFileSync(path.join(PLUGIN_SRC, "panel.html"), "utf8");
     const main = readFileSync(path.join(PLUGIN_SRC, "main.mjs"), "utf8");
     const runner = readFileSync(path.join(PLUGIN_SRC, "runner", "train_job.py"), "utf8");
-    for (const [name, text] of [["panel.html", panel], ["main.mjs", main], ["train_job.py", runner]]) {
+    const evalRunner = readFileSync(path.join(PLUGIN_SRC, "runner", "eval_job.py"), "utf8");
+    const exportRunner = readFileSync(path.join(PLUGIN_SRC, "runner", "export_job.py"), "utf8");
+    for (const [name, text] of [
+      ["panel.html", panel],
+      ["main.mjs", main],
+      ["train_job.py", runner],
+      ["eval_job.py", evalRunner],
+      ["export_job.py", exportRunner],
+    ]) {
       expect(text, `${name} 里出现了 half= 这种旧写法`).not.toMatch(/\bhalf\s*[:=]/);
     }
   });
@@ -860,7 +869,7 @@ describe("P175-W1 · 投料口与开跑前摘要", () => {
       p.child.stdin.end();
       await p.done;
     }
-  }, 60_000);
+  }, 90_000);
 
   it("投料口：只数不写；登记素材只动面板覆盖；名字来自盘上的目录，不给拼路径的机会", async () => {
     const ws = makeWorkspace("intake");
@@ -914,7 +923,7 @@ describe("P175-W1 · 投料口与开跑前摘要", () => {
       await p.waitFor(() => {
         const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
         return jobs.find((j) => j.id === ds.id && j.state !== "running");
-      }, 20_000, "数据集任务结束");
+      }, 45_000, "数据集任务结束");
       const dlogs = p.events.filter((e) => e.event === "log").flatMap((e) => e.payload.lines);
       expect(dlogs.some((l) => /素材来源: 投料口 annotations\/ 自动取的 1 批/.test(l.text)), JSON.stringify(dlogs.slice(0, 8))).toBe(true);
 
@@ -924,7 +933,663 @@ describe("P175-W1 · 投料口与开跑前摘要", () => {
       p.child.stdin.end();
       await p.done;
     }
-  }, 60_000);
+  }, 90_000);
+});
+
+/* ============================================================================
+   P175-W3 · 标注体检（只读）与增强预览
+   ============================================================================ */
+
+describe("P175-W3 · 体检的解析部分（纯函数）", () => {
+  it("一行标注解析成形状、越界与类别计数", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "uartix-label-"));
+    const f = path.join(dir, "a.txt");
+    writeFileSync(
+      f,
+      [
+        "0 0.5 0.5 0.2 0.2", // 合法框
+        "1 1.2 0.5 0.2 0.2", // 坐标越界
+        "2 0.1 0.1 0.4 0.1 0.4 0.4", // 3 点多边形
+        "0 0.1 0.1 0.4 0.1 0.4 0.4 0.1 0.1", // 4 点（和 OBB 同形状）
+        "x 1 2 3", // 非法
+        "", // 空行不算
+      ].join("\n"),
+      "utf8",
+    );
+    const { parseLabelFile } = await import("../../plugins/uartix.yolo/main.mjs");
+    const r = parseLabelFile(f);
+    expect(r.boxes).toBe(2); // 越界那一行**也是**一个框：两件事要分开报，不许互相吞掉
+    expect(r.polys).toBe(1);
+    expect(r.quads).toBe(1);
+    expect(r.outOfBounds).toBe(1);
+    expect(r.bad).toBe(1);
+    expect(r.classes).toEqual({ 0: 2, 1: 1, 2: 1 });
+    expect(r.ids).toEqual([0, 1, 2, 0]);
+    expect(parseLabelFile(path.join(dir, "nope.txt"))).toBeNull();
+  });
+
+  it("data.yaml 的 names 两种写法都要读得出来", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "uartix-dy-"));
+    const f = path.join(dir, "data.yaml");
+    const { readDataYaml } = await import("../../plugins/uartix.yolo/main.mjs");
+    writeFileSync(f, "path: D:/x\ntrain: images/train\nval: images/val\nnc: 3\nnames: ['1', '2', '3']\n", "utf8");
+    expect(readDataYaml(f)).toMatchObject({ exists: true, nc: 3, names: ["1", "2", "3"] });
+    writeFileSync(f, "nc: 2\nnames:\n  0: cat\n  1: dog\n", "utf8");
+    expect(readDataYaml(f)).toMatchObject({ nc: 2, names: ["cat", "dog"] });
+    expect(readDataYaml(path.join(dir, "nope.yaml")).exists).toBe(false);
+  });
+});
+
+describe("P175-W3 · 体检走真插件（只读判据）", () => {
+  /** 在假工作区的数据集里种下几类真问题，看体检抓不抓得住。 */
+  function plantDataset(ws) {
+    const img = (split, name) => writeFileSync(path.join(ws, "datasets", "x", "images", split, name), "x");
+    const lbl = (split, name, text) => {
+      mkdirSync(path.join(ws, "datasets", "x", "labels", split), { recursive: true });
+      writeFileSync(path.join(ws, "datasets", "x", "labels", split, name), text, "utf8");
+    };
+    img("train", "a0.jpg");
+    img("train", "a1.jpg");
+    img("train", "shared.jpg"); // 与 val 同名 → 泄漏
+    img("val", "v0.jpg");
+    img("val", "shared.jpg");
+    lbl("train", "a0.txt", "0 0.5 0.5 0.2 0.2\n");
+    lbl("train", "a1.txt", "1 1.4 0.5 0.2 0.2\n"); // 越界
+    lbl("train", "shared.txt", ""); // 空标签
+    lbl("train", "orphan.txt", "0 0.5 0.5 0.2 0.2\n"); // 没有同名图片
+    lbl("val", "v0.txt", "7 0.5 0.5 0.2 0.2\n"); // 类别 id 7 而 nc=3
+    lbl("val", "shared.txt", "0 0.5 0.5 0.2 0.2\n");
+    writeFileSync(path.join(ws, "datasets", "x", "data.yaml"), "path: D:/x\ntrain: images/train\nval: images/val\nnc: 3\nnames: ['1', '2', '3']\n", "utf8");
+  }
+
+  it("越界 / 空标签 / 孤儿标签 / 泄漏 / nc 不匹配 / 缺类 全被抓到，且标签文件一个字节没变", async () => {
+    const ws = makeWorkspace("audit");
+    plantDataset(ws);
+    const labelsBefore = {};
+    for (const split of ["train", "val"]) {
+      const d = path.join(ws, "datasets", "x", "labels", split);
+      // 键里带上 split：两个 split 里有同名文件（这正是我种的泄漏用例），只按文件名会互相覆盖
+      for (const f of readdirSync(d)) labelsBefore[split + "/" + f] = { text: readFileSync(path.join(d, f), "utf8"), mtime: statSync(path.join(d, f)).mtimeMs };
+    }
+    const pluginDir = copyPlugin("audit");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    let a;
+    try {
+      await p.ready;
+      a = await p.call("panel.train.audit", "");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+    const keys = a.findings.map((f) => f.key);
+    expect(keys, JSON.stringify(a.findings)).toContain("outOfBounds");
+    expect(keys).toContain("emptyLabels");
+    expect(keys).toContain("orphanLabels");
+    expect(keys).toContain("leak");
+    expect(keys).toContain("ncMismatch");
+    expect(a.leakNames).toEqual(["shared"]);
+    expect(a.missingClasses, "类别 3 一次都没出现，该报缺类").toEqual(["3"]);
+    expect(a.splits.train.images).toBe(4); // 假工作区自带 a0~a2，加上种下去的 shared
+    expect(a.splits.val.images).toBe(3);
+    expect(a.splits.train.labels).toBe(4);
+    expect(a.outOfBounds).toBe(1);
+    // **只读判据**：体检一个标签文件都不许改
+    for (const split of ["train", "val"]) {
+      const d = path.join(ws, "datasets", "x", "labels", split);
+      for (const f of readdirSync(d)) {
+        const key = split + "/" + f;
+        expect(readFileSync(path.join(d, f), "utf8"), `体检改了 ${f}`).toBe(labelsBefore[key].text);
+        expect(statSync(path.join(d, f)).mtimeMs, `体检碰了 ${f} 的 mtime`).toBe(labelsBefore[key].mtime);
+      }
+    }
+  }, 90_000);
+
+  it("增强预览只给训练产物里的 train_batchN.jpg，别的路径一律拒", async () => {
+    const ws = makeWorkspace("preview");
+    mkdirSync(path.join(ws, "runs", "exp1"), { recursive: true });
+    writeFileSync(path.join(ws, "runs", "exp1", "train_batch0.jpg"), "fakejpegbytes");
+    const pluginDir = copyPlugin("preview");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const st = await p.call("panel.train.state", {});
+      expect(st.batches.map((b) => b.run + "/" + b.name)).toEqual(["exp1/train_batch0.jpg"]);
+      const ok = await p.call("panel.train.previewImage", path.join(ws, "runs", "exp1", "train_batch0.jpg").replace(/\\/g, "/"));
+      expect(ok.dataUrl).toMatch(/^data:image\/jpeg;base64,/);
+      for (const [what, file] of [
+        ["越出训练产物目录", path.join(ws, "config.yaml").replace(/\\/g, "/")],
+        ["只给任意 jpg 也不行", path.join(ws, "datasets", "x", "images", "train", "a0.jpg").replace(/\\/g, "/")],
+      ]) {
+        const err = await p.call("panel.train.previewImage", file).then(
+          () => null,
+          (e) => String(e.message || e),
+        );
+        expect(err, what).toBeTruthy();
+      }
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+
+/* ============================================================================
+   P175-W4 · 监控（曲线 / ETA / 显存 / 失败归类）
+   ============================================================================ */
+
+/** 真 `results.csv` 的形状（分割任务：loss 有 seg_loss，指标有 (B) 与 (M) 两组）。 */
+const CSV_FIXTURE = [
+  "epoch,        time,        train/box_loss,        train/seg_loss,        train/cls_loss,        train/dfl_loss,        metrics/precision(B),        metrics/recall(B),        metrics/mAP50(B),        metrics/mAP50-95(B),        metrics/precision(M),        metrics/recall(M),        metrics/mAP50(M),        metrics/mAP50-95(M),        val/box_loss,        val/seg_loss,        val/cls_loss,        val/dfl_loss,        lr/pg0,        lr/pg1,        lr/pg2",
+  "1,         12.5,         1.2,         2.1,         1.8,         1.5,         0.30,         0.20,         0.250,         0.150,         0.28,         0.19,         0.230,         0.130,         1.1,         2.0,         1.7,         1.4,         0.001,         0.001,         0.001",
+  "2,         25.0,         1.0,         1.7,         1.2,         1.2,         0.55,         0.41,         0.610,         0.400,         0.50,         0.38,         0.560,         0.360,         0.9,         1.6,         1.1,         1.0,         0.002,         0.002,         0.002",
+  "3,         37.5,         0.8,         1.3,         0.9,         1.0,         0.72,         0.60,         0.810,         0.580,         0.70,         0.55,         0.770,         0.540,         0.7,         1.2,         0.9,         0.8,         0.003,         0.003,         0.003",
+].join("\n");
+
+describe("P175-W4 · 监控的解析与归类（纯函数）", () => {
+  it("results.csv：列名去空白、值转数字、半行不报错", async () => {
+    const { parseResultsCsv } = await import("../../plugins/uartix.yolo/main.mjs");
+    const p = parseResultsCsv(CSV_FIXTURE);
+    expect(p.columns[0]).toBe("epoch");
+    expect(p.columns).toContain("train/seg_loss");
+    expect(p.rows).toHaveLength(3);
+    expect(p.rows[2]["metrics/mAP50(M)"]).toBe(0.77);
+    expect(p.rows[1].time).toBe(25);
+    expect(parseResultsCsv("epoch,time\n1,3").rows[0]).toEqual({ epoch: 1, time: 3 });
+    expect(parseResultsCsv("epoch,time\n1").rows).toEqual([]); // 引擎正在写的半行
+    expect(parseResultsCsv("").rows).toEqual([]);
+  });
+
+  it("只画实际存在的列；抽稀永远保留最后一个点", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    const p = m.parseResultsCsv(CSV_FIXTURE);
+    const c = m.chartColumns(p.columns);
+    // 按**规范顺序**给列，不是 csv 里的列序：列顺序变了（引擎改名/换序）也不影响画哪几条线
+    expect(c.loss).toEqual(["train/box_loss", "train/cls_loss", "train/dfl_loss", "train/seg_loss"]);
+    expect(c.map).toEqual(["metrics/mAP50(B)", "metrics/mAP50-95(B)", "metrics/mAP50(M)", "metrics/mAP50-95(M)"]);
+    expect(m.chartColumns(["epoch"]).loss).toEqual([]);
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ epoch: i + 1 }));
+    const d = m.downsample(rows, 120);
+    expect(d.length).toBeGreaterThanOrEqual(120);
+    expect(d[d.length - 1]).toBe(rows[999]);
+    expect(m.downsample(rows.slice(0, 3), 120)).toHaveLength(3);
+  });
+
+  it("失败归类：OOM / 路径 / 网络 / 用户停止 / 认不出来", async () => {
+    const { classifyFailure } = await import("../../plugins/uartix.yolo/main.mjs");
+    expect(classifyFailure(["bla", "torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB"]).kind).toBe("oom");
+    expect(classifyFailure(["FileNotFoundError: [Errno 2] data.yaml"]).kind).toBe("path");
+    expect(classifyFailure(["urllib.error.URLError: timed out"]).kind).toBe("download");
+    expect(classifyFailure(["Label length 7 is not valid"]).kind).toBe("labels");
+    expect(classifyFailure(["RuntimeError: 'lr0' is not a valid YOLO argument"]).kind).toBe("version");
+    expect(classifyFailure(["[工作台] 用户要求停止"]).kind).toBe("stopped");
+    expect(classifyFailure(["something weird"]).kind).toBe("unknown");
+    expect(classifyFailure([])).toBeNull();
+    // 每条归类都得给得出下一步做什么，否则等于没说
+    for (const line of ["CUDA out of memory", "FileNotFoundError", "URLError", "Label length", "not a valid YOLO argument", "no CUDA GPUs are available"]) {
+      const f = classifyFailure([line]);
+      expect(f.advice, `${line} 这一类没给建议`).toBeTruthy();
+      expect(f.label).toBeTruthy();
+    }
+  });
+});
+
+describe("P175-W4 · 监控走真插件", () => {
+  it("现成的 results.csv 能离线读出曲线、进度与 ETA", async () => {
+    const ws = makeWorkspace("mon");
+    writeFileSync(path.join(ws, "runs", "exp1", "results.csv"), CSV_FIXTURE, "utf8");
+    const pluginDir = copyPlugin("mon");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const m = await p.call("panel.train.monitor", "exp1");
+      expect(m.ok, JSON.stringify(m)).toBe(true);
+      expect(m.run).toBe("exp1");
+      expect(m.rows).toHaveLength(3);
+      expect(m.doneEpoch).toBe(3);
+      expect(m.epochs).toBe(50); // 基准 config.yaml 里的 epochs
+      expect(m.percent).toBe(6);
+      expect(m.perEpochSec).toBeCloseTo(12.5, 1); // 37.5 秒 / 3 轮
+      expect(m.remainText).toBeTruthy(); // 还剩 47 轮的估算
+      expect(m.chart.map).toContain("metrics/mAP50(M)");
+      expect(m.chart.loss).toContain("train/seg_loss");
+      expect(m.lastRow["metrics/mAP50-95(B)"]).toBe(0.58);
+      expect(typeof m.mem.ok).toBe("boolean");
+      if (m.mem.ok) expect(m.mem.percent).toBeGreaterThanOrEqual(0);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("任务失败后，监控里带着归类和下一步", async () => {
+    const ws = makeWorkspace("monfail");
+    const pluginDir = copyPlugin("monfail");
+    fakeRunner(pluginDir);
+    // 把假 runner 改成"以 OOM 退出"
+    writeFileSync(
+      path.join(pluginDir, "runner", "train_job.py"),
+      [
+        "console.log('[信息] ========== 开始训练 ==========');",
+        "console.log('torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB');",
+        "process.exit(1);",
+      ].join("\n"),
+      "utf8",
+    );
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const job = await p.call("panel.train.startTrain", {});
+      const fin = await p.waitFor(() => {
+        const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
+        return jobs.find((j) => j.id === job.id && j.state !== "running");
+      // 等的是"真起一个子进程并跑完"：并行跑测试时这台机器会抢 CPU，上限给到 45 秒（跑得快时仍是 1 秒内返回）
+      }, 45_000, "任务结束");
+      expect(fin.state).toBe("failed");
+      // 归类那行是 120ms 一批推出来的，别和它抢：等到日志里出现再断言
+      await p.waitFor(
+        () => p.events.some((e) => e.event === "log" && e.payload.lines.some((l) => /失败归类/.test(l.text))),
+        10_000,
+        "失败归类那行日志",
+      );
+      const logs = p.events.filter((e) => e.event === "log").flatMap((e) => e.payload.lines);
+      expect(logs.some((l) => /失败归类：显存/.test(l.text)), "日志里没给失败归类").toBe(true);
+      const m = await p.call("panel.train.monitor", "");
+      expect(m.failure, "监控里没有失败结论").toBeTruthy();
+      expect(m.failure.kind).toBe("oom");
+      expect(m.failure.advice).toContain("batch");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+
+/* ============================================================================
+   P175-W5 · 评估与对比
+   ============================================================================ */
+
+describe("P175-W5 · 参数差异（纯函数）", () => {
+  it("只比两边都有的标量；嵌套结构一边缺的都跳过", async () => {
+    const { diffArgs } = await import("../../plugins/uartix.yolo/main.mjs");
+    const d = diffArgs(
+      { epochs: 300, imgsz: 640, lr0: 0.01, batch: 16, names: { 0: "a" }, onlyA: 1, same: 1 },
+      { epochs: 100, imgsz: 640, lr0: 0.005, batch: -1, names: { 0: "b" }, onlyB: 2, same: 1 },
+    );
+    expect(d.map((x) => x.key)).toEqual(["batch", "epochs", "lr0"]);
+    expect(d.find((x) => x.key === "batch").b).toBe(-1);
+    expect(diffArgs({}, {})).toEqual([]);
+  });
+});
+
+describe("P175-W6 · 导出矩阵与端侧约束", () => {
+  it("格式矩阵：id 唯一、没有 tflite 这种别名、没有 half", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    const ids = m.EXPORT_FORMATS.map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain("onnx");
+    expect(ids).toContain("openvino");
+    expect(ids).toContain("engine");
+    expect(ids).toContain("rknn");
+    expect(ids, "tflite 是 saved_model 的别名，不该单列一个看起来像独立选项的东西").not.toContain("tflite");
+    for (const f of m.EXPORT_FORMATS) expect(f.label).toBeTruthy();
+  });
+
+  it("端侧约束：分割模型上不了 MaixCam 在线转换器；额外要 SDK 的格式会提前说", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    const seg = m.exportAdvice("onnx", "segment", {});
+    expect(seg.some((x) => x.level === "bad" && /MaixCam/.test(x.text)), JSON.stringify(seg)).toBe(true);
+    expect(m.exportAdvice("onnx", "detect", {}).some((x) => x.level === "bad")).toBe(false);
+    const trt = m.exportAdvice("engine", "detect", {});
+    expect(trt.some((x) => x.level === "warn" && /libnvinfer/.test(x.text)), JSON.stringify(trt)).toBe(true);
+    expect(m.exportAdvice("onnx", "detect", { dynamic: true }).some((x) => /dynamic/.test(x.text))).toBe(true);
+    expect(m.exportAdvice("onnx", "detect", { opset: 13 }).some((x) => /opset=17/.test(x.text))).toBe(true);
+    // 端到端模型部署这条要提：否则用户会在端侧找"以前那段后处理代码"
+    expect(m.exportAdvice("onnx", "detect", {}).some((x) => /NMS/.test(x.text))).toBe(true);
+  });
+
+  it("导出状态与历史读得回来；非法格式与不存在的权重直接拒", async () => {
+    const ws = makeWorkspace("export");
+    const dir = path.join(ws, "train_runs", "export", "20261027-010101");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      path.join(dir, "export.json"),
+      JSON.stringify({ ok: true, format: "onnx", file: "D:/x/y.onnx", bytes: 12345, task: "segment", speed: { ok: true, msPerImage: 8.2, fps: 122, images: 10 } }),
+      "utf8",
+    );
+    const pluginDir = copyPlugin("export");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.exportState", {});
+      expect(s.formats.length).toBeGreaterThan(10);
+      expect(s.cards[0].tasks).toEqual(["detect"]);
+      expect(s.history[0].format).toBe("onnx");
+      expect(s.weights.map((w) => w.name)).toEqual([]); // 假工作区里没有 .pt
+
+      const bad = await p.call("panel.train.exportStart", { format: "tflite", weights: "models/yolo11n-seg.pt" }).then(
+        () => null,
+        (e) => String(e.message || e),
+      );
+      expect(bad, "别名格式没被拒").toBeTruthy();
+      const missing = await p.call("panel.train.exportStart", { format: "onnx", weights: "models/没有这个.pt" }).then(
+        () => null,
+        (e) => String(e.message || e),
+      );
+      expect(missing, "权重不存在却没拒").toBeTruthy();
+      expect(missing).toContain("权重");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+
+/* ============================================================================
+   P175-W8 · 页签完整性与"这个包发出去是完整的"
+   ============================================================================ */
+
+describe("P175-W8 · 收官体检", () => {
+  const panelSrc = () => readFileSync(path.join(PLUGIN_SRC, "panel.html"), "utf8");
+
+  it("每块页签都有 section，且切换时都被显式处理（R16 那类「点了什么都不显示」）", () => {
+    const panel = panelSrc();
+    const tabs = [...panel.matchAll(/data-tab="([\w-]+)"/g)].map((m) => m[1]);
+    expect(new Set(tabs).size, "页签按钮重名").toBe(tabs.length);
+    expect(tabs.length, "页签少成这样，这条判据是空的").toBeGreaterThanOrEqual(6);
+    for (const t of tabs) {
+      expect(panel.includes(`id="tab-${t}"`), `缺 section #tab-${t}`).toBe(true);
+      expect(panel.includes(`$("tab-${t}").hidden = name !== "${t}"`), `切换时没处理 #tab-${t}：点了「${t}」会什么都不显示`).toBe(true);
+    }
+  });
+
+  it("包里的每个代码文件都发得出去（发布白名单不收 .py 的话，装回来就是个哑插件）", () => {
+    const walk = (d, acc = []) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        if (e.name === "__pycache__" || e.name === "node_modules" || e.name === ".versions") continue;
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) acc = walk(p, acc);
+        else if (!/(\.log|\.pyc)$/i.test(e.name)) acc.push(e.name);
+      }
+      return acc;
+    };
+    const names = walk(PLUGIN_SRC);
+    // 与 `pluginPublish.ts` 里那三条保持一致（改了发布规则就要改这里，两边不许各说一套）
+    const TEXT_EXT = /\.(json|mjs|js|cjs|html|htm|css|md|txt|yaml|yml|svg|py|ps1)$/i;
+    const TEXT_NAME = /^(license|copying|notice|readme|changelog|authors|contributing|todo)$/i;
+    const IMAGE = /\.(png|jpe?g|webp|gif|ico)$/i;
+    const skipped = names.filter((n) => !TEXT_EXT.test(n) && !TEXT_NAME.test(n) && !IMAGE.test(n));
+    expect(skipped, `这些文件发布时会被当二进制跳过：${skipped.join("、")}`).toEqual([]);
+    expect(names.filter((n) => n.endsWith(".py")).length, "三个 runner 都该在包里").toBeGreaterThanOrEqual(3);
+    // 发布上限 12：超了会静默跳过后面的文件，而"后面的文件"很可能就是 runner
+    expect(names.length, `包里有 ${names.length} 个文件，超过发布上限就会被静默跳过`).toBeLessThanOrEqual(12);
+  });
+
+  it("清单与 README 已经是 0.3.0，且面板帮助里写了这次新增的规矩", () => {
+    const raw = JSON.parse(readFileSync(path.join(PLUGIN_SRC, "plugin.json"), "utf8"));
+    expect(raw.version).toBe("0.3.0");
+    const readme = readFileSync(path.join(PLUGIN_SRC, "README.md"), "utf8");
+    expect(readme.split("## 版本")[1].slice(0, 40)).toContain("`0.3.0`");
+    const panel = panelSrc();
+    for (const must of ["annotations", "train_runs", "runner", "half", "last.pt", "YOLO26"]) {
+      expect(panel.includes(must), `面板帮助里没讲清 "${must}" 这条规矩`).toBe(true);
+    }
+  });
+});
+
+
+describe("P175-W7 · 实验管理", () => {
+  /** 造一个"跑完了一次"的 run：args.yaml + results.csv + weights/best.pt。 */
+  function makeRun(ws, name, argsText) {
+    const d = path.join(ws, "runs", name);
+    mkdirSync(path.join(d, "weights"), { recursive: true });
+    writeFileSync(path.join(d, "args.yaml"), argsText, "utf8");
+    writeFileSync(path.join(d, "results.csv"), CSV_FIXTURE, "utf8");
+    writeFileSync(path.join(d, "weights", "best.pt"), "best");
+    writeFileSync(path.join(d, "weights", "last.pt"), "last");
+    return d;
+  }
+
+  it("等价命令能反解回同一份参数（往返判据），.bat 只落 train_runs/bat/", async () => {
+    const ws = makeWorkspace("runs");
+    makeRun(
+      ws,
+      "exp1",
+      [
+        "task: segment",
+        "model: D:/WS/models/yolo11n-seg.pt",
+        "data: D:/WS/datasets/x/data.yaml",
+        "epochs: 77",
+        "imgsz: 512",
+        "batch: 8",
+        "lr0: 0.004",
+        "project: D:/WS/runs",
+        "name: exp1",
+      ].join("\n"),
+    );
+    const guard = userFilesFingerprint(ws);
+    const pluginDir = copyPlugin("runs");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const x = await p.call("panel.train.repro", { run: "exp1" });
+      expect(x.ok).toBe(true);
+      expect(x.commands.map((c) => c.id)).toEqual(["runner", "workspace", "cli"]);
+      // 三条命令都得指向那份快照 / args.yaml，且带工作区里的路径（不是面板内部的临时目录）
+      expect(x.commands[0].cmd).toContain("runner/train_job.py");
+      expect(x.commands[1].cmd).toContain("scripts/train.py");
+      expect(x.commands[2].cmd).toContain("args.yaml");
+
+      // **往返判据**：等价命令指向的快照，用插件自己的解析器读回来，参数得和 args.yaml 一致
+      const mod = await import("../../plugins/uartix.yolo/main.mjs");
+      const back = mod.parseSimpleYaml(x.text);
+      expect(back.train.epochs).toBe(77);
+      expect(back.train.imgsz).toBe(512);
+      expect(back.train.lr0).toBe(0.004);
+      expect(back.train.task).toBe("segment");
+      expect(back.train.weights).toBe("D:/WS/models/yolo11n-seg.pt");
+
+      const bat = await p.call("panel.train.saveReproBat", { run: "exp1", which: "workspace" });
+      expect(bat.file.replace(/\\/g, "/")).toContain("/train_runs/bat/");
+      expect(existsSync(bat.file)).toBe(true);
+      const body = readFileSync(bat.file, "utf8");
+      expect(body).toContain("train.py");
+      expect(body).toContain("--config");
+      // 编号脚本那批不许多出一个字节
+      assertUntouched(guard, ws, "生成复现 .bat 之后");
+      expect(readdirSync(ws).filter((f) => /^\d\d_.*\.bat$/.test(f))).toEqual(["03_train.bat"]);
+
+      const bad = await p.call("panel.train.repro", { run: "没有这个run" }).then(
+        () => null,
+        (e) => String(e.message || e),
+      );
+      expect(bad, "不存在的 run 却没拒").toBeTruthy();
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("备注落在 train_runs/<实验>.note；归档只复制不搬走", async () => {
+    const ws = makeWorkspace("archive");
+    const dir = makeRun(ws, "exp1", "task: segment\nepochs: 3\nname: exp1\nproject: D:/WS/runs\n");
+    const pluginDir = copyPlugin("archive");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const listed = await p.call("panel.train.experiments", {});
+      expect(listed.runs[0].name).toBe("exp1");
+      expect(listed.runs[0].task).toBe("segment");
+      expect(listed.runs[0].epochs).toBe(3);
+      expect(listed.runs[0].hasBest).toBe(true);
+
+      const noted = await p.call("panel.train.saveNote", { run: "exp1", text: "这版把 mosaic 降到 0.5" });
+      expect(noted.note).toContain("mosaic");
+      expect(existsSync(path.join(ws, "train_runs", "exp1.note"))).toBe(true);
+      // runs/ 里不许多出备注文件
+      expect(readdirSync(dir).sort()).toEqual(["args.yaml", "results.csv", "weights"]);
+
+      const arch = await p.call("panel.train.archiveRun", { run: "exp1" });
+      expect(arch.moved, "归档把用户的产物搬走了").toBe(false);
+      expect(arch.copied.sort()).toEqual(["args.yaml", "results.csv", "weights/best.pt"]);
+      expect(existsSync(path.join(ws, "runs", "exp1", "results.csv")), "归档之后 runs/ 里的原件没了").toBe(true);
+      expect(arch.dst.replace(/\\/g, "/")).toContain("/archive/exp1-");
+      for (const f of ["args.yaml", "results.csv"]) {
+        expect(readFileSync(path.join(arch.dst, f), "utf8")).toBe(readFileSync(path.join(dir, f), "utf8"));
+      }
+
+      const cleared = await p.call("panel.train.saveNote", { run: "exp1", text: "   " });
+      expect(cleared.note).toBe("");
+      expect(existsSync(path.join(ws, "train_runs", "exp1.note")), "清空备注后文件还在").toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+
+describe("P175-W5 · 参数面与调用形状", () => {
+  /** 扫面板里所有 `uartix.call(...)`，数最外层逗号（= 参数个数 - 1）。 */
+  function callSites(src) {
+    const re = /uartix\.call\(/g;
+    const out = [];
+    let m;
+    while ((m = re.exec(src))) {
+      let i = re.lastIndex;
+      let depth = 1;
+      let commas = 0;
+      while (i < src.length) {
+        const ch = src[i];
+        if (ch === "(" || ch === "[" || ch === "{") depth++;
+        else if (ch === ")" || ch === "]" || ch === "}") {
+          depth--;
+          if (depth === 0) break;
+        } else if (ch === "," && depth === 1) commas++;
+        i++;
+      }
+      out.push({ commas, snippet: src.slice(re.lastIndex, Math.min(i, src.length)).replace(/\s+/g, " ").slice(0, 70) });
+      re.lastIndex = i;
+    }
+    return out;
+  }
+
+  it("桥只转发 (method, args) 一个载荷 ⇒ 面板里不许出现三个参数的 uartix.call", () => {
+    const panel = readFileSync(path.join(PLUGIN_SRC, "panel.html"), "utf8");
+    const sites = callSites(panel);
+    expect(sites.length, "一条 uartix.call 都没扫到，这条判据是空的").toBeGreaterThan(10);
+    const bad = sites.filter((s) => s.commas > 1);
+    expect(bad.map((b) => b.snippet), "这些调用传了第三个参数：插件那边永远收不到（曾经让「只检查环境」实际跑成全流程）").toEqual([]);
+  });
+
+  it("插件侧注册的每个面板方法都只有一个形参", () => {
+    const main = readFileSync(path.join(PLUGIN_SRC, "main.mjs"), "utf8");
+    const re = /^\s{4}(?:async )?([A-Za-z][\w]*)\(([^)]*)\) \{/gm;
+    const multi = [];
+    let m;
+    while ((m = re.exec(main))) {
+      const params = m[2].trim();
+      if (!params) continue;
+      if (params.includes(",")) multi.push(`${m[1]}(${params})`);
+    }
+    expect(multi, "这些插件方法声明了多个位置参数，桥只会送到第一个").toEqual([]);
+  });
+});
+
+describe("P175-W5 · 评估状态与图（走真插件）", () => {
+  /** 在 train_runs/eval/ 里种一份"上次评估的结果"，让面板能把它读回来。 */
+  function plantEval(ws, name, result) {
+    const dir = path.join(ws, "train_runs", "eval", name);
+    mkdirSync(path.join(dir, "val"), { recursive: true });
+    writeFileSync(path.join(dir, "eval.json"), JSON.stringify(result), "utf8");
+    writeFileSync(path.join(dir, "val", "confusion_matrix.png"), "fakepng", "utf8");
+    return dir;
+  }
+
+  it("evalState 读得回历史与可选权重；evalImage 只认白名单文件名与评估目录", async () => {
+    const ws = makeWorkspace("eval");
+    mkdirSync(path.join(ws, "models", "delivered"), { recursive: true });
+    writeFileSync(path.join(ws, "models", "delivered", "digits-best.pt"), "x");
+    mkdirSync(path.join(ws, "datasets", "x", "labels", "train"), { recursive: true });
+    writeFileSync(path.join(ws, "datasets", "x", "labels", "train", "a0.txt"), "0 0.5 0.5 0.2 0.2\n", "utf8");
+    const outDir = path.join(ws, "train_runs", "eval", "20261027-010101").replace(/\\/g, "/");
+    plantEval(ws, "20261027-010101", {
+      ok: true,
+      weights: "D:/WS/models/delivered/digits-best.pt",
+      data: "D:/WS/datasets/x/data.yaml",
+      task: "segment",
+      imgsz: 640,
+      conf: 0.25,
+      out: outDir,
+      metrics: { "map50(B)": 0.91, "map50_95(B)": 0.62, "map50(M)": 0.88 },
+      confTable: [{ conf: 0.25, precision: 0.9, recall: 0.85 }],
+      plots: ["confusion_matrix.png"],
+      errors: [],
+      speedMs: 12.3,
+    });
+    const pluginDir = copyPlugin("eval");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.evalState", {});
+      expect(s.last, JSON.stringify(s.history)).toBeTruthy();
+      expect(s.last.metrics["map50(B)"]).toBe(0.91);
+      expect(s.weights.map((w) => w.name)).toContain("digits-best.pt");
+      expect(s.datasets.map((d) => d.name)).toContain("x");
+      expect(s.current.data.replace(/\\/g, "/")).toContain("datasets/x/data.yaml");
+
+      const img = await p.call("panel.train.evalImage", { dir: s.last.out, name: "confusion_matrix.png" });
+      expect(img.dataUrl).toMatch(/^data:image\/png;base64,/);
+
+      for (const [what, dir, name] of [
+        ["白名单外的文件名要拒", s.last.out, "../../config.yaml"],
+        ["不在评估目录下的要拒", path.join(ws, "runs", "exp1").replace(/\\/g, "/"), "confusion_matrix.png"],
+      ]) {
+        const err = await p.call("panel.train.evalImage", { dir, name }).then(
+          () => null,
+          (e) => String(e.message || e),
+        );
+        expect(err, what).toBeTruthy();
+      }
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("两个 run 能对比出参数差异，并各自带回曲线", async () => {
+    const ws = makeWorkspace("cmp");
+    for (const [name, epochs, lr] of [["exp1", 300, 0.01], ["exp2", 100, 0.005]]) {
+      const d = path.join(ws, "runs", name);
+      mkdirSync(d, { recursive: true });
+      writeFileSync(path.join(d, "args.yaml"), `epochs: ${epochs}\nlr0: ${lr}\nimgsz: 640\nname: ${name}\n`, "utf8");
+      writeFileSync(path.join(d, "results.csv"), CSV_FIXTURE, "utf8");
+    }
+    const pluginDir = copyPlugin("cmp");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const r = await p.call("panel.train.compareRuns", { a: "exp1", b: "exp2" });
+      expect(r.ok).toBe(true);
+      expect(r.diff.map((x) => x.key)).toEqual(["epochs", "lr0", "name"]); // 夹具里这三项就是不一样的
+      expect(r.a.rows.length).toBe(3);
+      expect(r.a.chart.map).toContain("metrics/mAP50(B)");
+      const bad = await p.call("panel.train.compareRuns", { a: "exp1", b: "" }).then(
+        () => null,
+        (e) => String(e.message || e),
+      );
+      expect(bad, "没选两个 run 却没拒").toBeTruthy();
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
 });
 
 /* ============================================================================
@@ -1031,7 +1696,7 @@ describe("P175-W2 · 拦截与识别走真插件", () => {
       await p.waitFor(() => {
         const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
         return jobs.find((j) => j.id === job.id && j.state !== "running");
-      }, 20_000, "训练结束");
+      }, 45_000, "训练结束");
       const snap = readdirSync(path.join(ws, "train_runs")).filter((f) => f.endsWith(".yaml"));
       expect(snap.length).toBe(1);
       expect(readFileSync(path.join(ws, "train_runs", snap[0]), "utf8")).toMatch(/^ {2}task: "segment"$/m);
@@ -1071,7 +1736,7 @@ describe("P175-W2 · 拦截与识别走真插件", () => {
       p.child.stdin.end();
       await p.done;
     }
-  }, 60_000);
+  }, 90_000);
 
   it("模型库：node 冒充的 python 读不了权重时，报失败而不是摆一堆假事实", async () => {
     const ws = makeWorkspace("mlib");
@@ -1096,5 +1761,5 @@ describe("P175-W2 · 拦截与识别走真插件", () => {
       p.child.stdin.end();
       await p.done;
     }
-  }, 60_000);
+  }, 90_000);
 });

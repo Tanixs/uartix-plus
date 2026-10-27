@@ -209,6 +209,23 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
         expect(typeof st.intake.exists).toBe("boolean");
         expect(Array.isArray(st.trainRuns)).toBe(true);
 
+        /* ---- 监控（P175-W4）：拿盘上那份真 results.csv 离线读出曲线 ----
+           这条判据的意义：曲线不是面板自造的采集，引擎写了什么我们就画什么。 */
+        const mon = await call("panel.train.monitor", "yolo11n_seg_640");
+        expect(mon.ok, JSON.stringify(mon.error || mon)).toBe(true);
+        expect(mon.rows.length, "真 results.csv 应该读出几十轮以上").toBeGreaterThan(30);
+        expect(mon.chart.loss).toContain("train/box_loss");
+        expect(mon.chart.map, "(B)/(M) 两组指标都该在").toContain("metrics/mAP50(M)");
+        expect(mon.doneEpoch).toBeGreaterThan(30);
+        expect(mon.elapsedText).toBeTruthy();
+        expect(typeof mon.mem.ok).toBe("boolean");
+        console.log(
+          "[监控] " +
+            mon.run +
+            " · " + mon.rows.length + " 个点（抽稀自 " + mon.doneEpoch + " 轮）· 每轮 " + mon.perEpochSec + " 秒 · 已用 " + mon.elapsedText +
+            " · 显存 " + (mon.mem.ok ? mon.mem.usedMiB + "/" + mon.mem.totalMiB + " MiB" : "读不到：" + mon.mem.error),
+        );
+
         // 把"到底读到了什么"打出来：这条用例平时是跳过的，跳过时没人看，跑起来时要能当体检报告读
         console.log(
           "[真工作区] python " +

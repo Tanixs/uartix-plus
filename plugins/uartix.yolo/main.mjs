@@ -102,6 +102,9 @@ const DEFAULTS = {
     seed: 42,
     save_period: 25,
   },
+  // 评估段的默认值：`imgsz/conf/device/workers` 与训练保持一致的读法，
+  // `model` / `data` **故意留空**——评估哪枚权重、哪个数据集必须是人点的，不猜。
+  eval: { imgsz: 640, conf: 0.25, device: "0", workers: 0 },
 };
 
 /* ============================ 参数面（P175-W1，详设 §4.2 / §5.3） ============================ */
@@ -396,6 +399,13 @@ function parseSimpleYaml(text) {
     const s = v.trim();
     if (s === "{}") return {};
     if (s === "[]") return [];
+    // 行内列表（`classes: ['1', '2', '3']`）：工作区那份 config.yaml 真的这么写，
+    // 兜底解析器不认的话类别表会变成一个字符串——表现是"面板里类别没了"
+    const inline = /^\[(.*)\]$/.exec(s);
+    if (inline) {
+      const body = inline[1].trim();
+      return body ? body.split(",").map((x) => scalar(x)) : [];
+    }
     if (s === "true") return true;
     if (s === "false") return false;
     if (s === "null" || s === "~") return null;
@@ -1241,6 +1251,16 @@ function dumpConfig(c) {
   L.push("train:");
   const t = coerceTrain(c.train);
   for (const [k, v] of Object.entries(t)) emit(k, v, 2);
+  // 快照是"整份配置的镜像"，不只是面板能改的那几项：工作区 config.yaml 里有 eval / export 段，
+  // 就原样带过去——这样用户拿同一份文件去跑自己的 04 / 05 那两个 .bat 也成立。
+  if (isObj(c.eval)) {
+    L.push("eval:");
+    for (const [k, v] of Object.entries(c.eval)) emit(k, v, 2);
+  }
+  if (isObj(c.export)) {
+    L.push("export:");
+    for (const [k, v] of Object.entries(c.export)) emit(k, v, 2);
+  }
   return L.join("\n") + "\n";
 }
 
@@ -1445,6 +1465,29 @@ function finishJob(j, code) {
   }
   flushLog();
   pushLine(j, `[工作台] 进程结束，退出码 ${code}`, "sys");
+  if (code === 0) {
+    lastFailure = null; // 成功一次就把上一次的失败结论清掉：留着会让用户以为还在失败
+  } else {
+    lastFailure = classifyFailure(j.lines);
+    if (lastFailure && lastFailure.kind !== "unknown") pushLine(j, `[工作台] 失败归类：${lastFailure.label} —— ${lastFailure.advice}`, "sys");
+  }
+  if (j.kind === "eval") {
+    // 评估结果落在 `train_runs/eval/<ts>/eval.json`：读回来推给面板，指标表 / 阈值表 / 图 / 错例一次到位
+    const result = code === 0 ? readEvalResult(j.evalOut) : null;
+    try {
+      ctx.panels.emit(PANEL, "eval", { job: snapshot(j), result });
+    } catch {
+      /* 面板没开就算了，结果文件在盘上 */
+    }
+  }
+  if (j.kind === "export") {
+    const result = code === 0 ? readExportResult(j.exportOut) : null;
+    try {
+      ctx.panels.emit(PANEL, "export", { job: snapshot(j), result });
+    } catch {
+      /* 同上 */
+    }
+  }
   if (active === j) active = null;
 }
 
@@ -1750,10 +1793,18 @@ function deployState() {
 /**
  * 起一次部署。
  *
- * `step` 与工具自己的 `-Step` 一一对应：`validate`（只检查、不动文件）/`all`/
- * `convert`（从已有 onnx 直接编译）/`package`（只重新打包）。
+ * **参数只有一个对象**：面板桥转发的就是 `(method, args)` 一个载荷，
+ * 位置参数是拿不到的（这里以前写成三个位置参数，结果 `step` 永远是 `all`——
+ * 「只检查环境」实际在跑全流程。判据见 `yoloPlugin.test.mjs` 的"调用形状"那条）。
+ *
+ * `step` 与工具自己的 `-Step` 一一对应：`validate`（只检查、不动文件）/ `all` /
+ * `convert`（从已有 onnx 直接编译）/ `package`（只重新打包）。`deliver:false` 表示不交付、直接用配置里那枚模型。
  */
-async function deployStart(cfgName, step, opts) {
+async function deployStart(req) {
+  const o = isObj(req) ? req : { cfgName: req };
+  const cfgName = String(o.cfgName == null ? "" : o.cfgName);
+  const step = String(o.step || "all");
+  const opts = isObj(o.opts) ? o.opts : { deliver: o.deliver };
   needWorkspace();
   if (active) throw new Error(`已经有一个任务在跑（${active.label}）：先停掉它再开始新的`);
   const tool = scanDeployTool();
@@ -1832,6 +1883,7 @@ async function panelState() {
       params: specNow(),
       models: [],
       task: null,
+      batches: [],
       jobs: [],
       active: null,
     };
@@ -1859,6 +1911,7 @@ async function panelState() {
     params: specNow(),
     models: scanModels(24).map((f) => ({ ...f, facts: factsFor(f) })),
     task: taskBlock(cfg.effective),
+    batches: scanTrainBatches(cfg.effective.train.project, "", 6),
     jobs: [...jobs.values()].slice(-8).map(snapshot),
     active: snapshot(active),
   };
@@ -1995,14 +2048,174 @@ async function activate(c) {
       return taskBlock(effective);
     },
 
+    /** 监控页：曲线 + ETA + 显存 + 失败归类，一次拿全。`runName` 留空 = 在跑的或最近一个 run。 */
+    async monitor(runName) {
+      return await monitor(typeof runName === "string" ? runName : "");
+    },
+
+    async memInfo() {
+      return await memInfo();
+    },
+
+    /* ---- 评估与对比（P175-W5）---- */
+
+    /** 起一次评估（插件自带 runner；结果只落 `train_runs/eval/`，不碰 `runs/`）。 */
+    async evalStart(opts) {
+      return await evalStart(opts);
+    },
+
+    async evalState() {
+      needWorkspace();
+      return await evalState();
+    },
+
+    /** 读评估目录里引擎画的那几张图。一个对象参数 `{ dir, name }`：只认白名单文件名，且必须在 `train_runs/eval/` 下。 */
+    async evalImage(req) {
+      needWorkspace();
+      const o = isObj(req) ? req : {};
+      const base = abs("train_runs/eval").toLowerCase();
+      const d = abs(typeof o.dir === "string" ? o.dir : "").replace(/\\/g, "/").toLowerCase();
+      if (!d.startsWith(base)) throw new Error("只读评估结果目录里的图");
+      const n = String(o.name == null ? "" : o.name);
+      if (!EVAL_IMAGES.includes(n)) throw new Error(`只给引擎画的那几张图（${EVAL_IMAGES.join(" / ")}）`);
+      let buf;
+      try {
+        buf = fs.readFileSync(path.join(abs(o.dir), "val", n));
+      } catch {
+        throw new Error(`读不到这张图：${n}`);
+      }
+      if (buf.length > 4 * 1024 * 1024) throw new Error(`图超过 4MB（${Math.round(buf.length / 1024)}KB），不往面板里塞`);
+      return { ok: true, name: n, bytes: buf.length, dataUrl: "data:" + (n.endsWith(".png") ? "image/png" : "image/jpeg") + ";base64," + buf.toString("base64") };
+    },
+
+    /** 两个 run 的参数差异 + 曲线叠加（复盘"改了哪一项值不值"）。一个对象参数 `{ a, b }`。 */
+    async compareRuns(req) {
+      needWorkspace();
+      const o = isObj(req) ? req : {};
+      const { effective } = await effectiveConfig();
+      const x = typeof o.a === "string" ? o.a : "";
+      const y = typeof o.b === "string" ? o.b : "";
+      if (!x || !y) throw new Error("要选两个 run 才能对比");
+      return compareRuns(effective.train.project, x, y);
+    },
+
+    /* ---- 导出与端侧（P175-W6）---- */
+
+    async exportStart(req) {
+      return await exportStart(req);
+    },
+
+    async exportState() {
+      needWorkspace();
+      return await exportState();
+    },
+
+    /** 导出前的约束核对（纯查、不写）：`{ format, task, dynamic, opset, nms }`。 */
+    async exportCheck(req) {
+      const o = isObj(req) ? req : {};
+      return { ok: true, advice: exportAdvice(String(o.format || "onnx"), String(o.task || ""), o) };
+    },
+
+    /* ---- 实验管理（P175-W7）---- */
+
+    /** 实验列表：每个 run 的 task / 模型 / 轮次 / 指标 / 是否已交付 / 备注。 */
+    async experiments() {
+      needWorkspace();
+      const { effective } = await effectiveConfig();
+      const delivered = (() => {
+        try {
+          return fs.readdirSync(abs("models/delivered")).map((f) => f.toLowerCase());
+        } catch {
+          return [];
+        }
+      })();
+      const runs = runProfiles(effective.train.project, 40).map((r) => ({
+        ...r,
+        delivered: delivered.some((f) => f.includes(String(r.name).toLowerCase())),
+      }));
+      return { ok: true, project: abs(effective.train.project || DEFAULTS.train.project), runs, delivered };
+    },
+
+    /** 「等价命令」：只生成并返回，不写盘（写盘是 `saveReproBat` 那一步）。 */
+    async repro(req) {
+      needWorkspace();
+      const o = isObj(req) ? req : {};
+      const { effective } = await effectiveConfig();
+      const run = runProfile(effective.train.project, String(o.run || ""));
+      if (!run.name || !fs.existsSync(run.dir)) throw new Error(`没有这个 run：${o.run}`);
+      const r = reproCommands(run);
+      return { ok: true, run: run.name, commands: r.commands, snapshot: r.snapshot, text: r.text };
+    },
+
+    /** 把某一条等价命令存成 .bat（落 `train_runs/bat/`，不碰 `00~07`）。 */
+    async saveReproBat(req) {
+      needWorkspace();
+      const o = isObj(req) ? req : {};
+      const { effective } = await effectiveConfig();
+      const run = runProfile(effective.train.project, String(o.run || ""));
+      if (!run.name || !fs.existsSync(run.dir)) throw new Error(`没有这个 run：${o.run}`);
+      return writeReproBat(run, String(o.which || "runner"));
+    },
+
+    /** 备注：写 `train_runs/<实验>.note`，不碰 `runs/`。 */
+    async saveNote(req) {
+      needWorkspace();
+      const o = isObj(req) ? req : {};
+      const { effective } = await effectiveConfig();
+      return saveRunNote(effective.train.project, String(o.run || ""), String(o.text || ""));
+    },
+
+    /** 归档：复制 args/results/best 到 `archive/<run>-<时间>/`。**只复制，不搬走**。 */
+    async archiveRun(req) {
+      needWorkspace();
+      const o = isObj(req) ? req : {};
+      const { effective } = await effectiveConfig();
+      return archiveRun(effective.train.project, String(o.run || ""));
+    },
+
+    /* ---- 标注体检与增强预览（P175-W3）---- */
+
+    /** 体检：**只读**。不写、不改、不删任何标签文件。 */
+    async audit(dir) {
+      needWorkspace();
+      const given = typeof dir === "string" ? dir.trim() : "";
+      const d = given || (await effectiveConfig()).effective.dataset.output_dir;
+      return auditDataset(d);
+    },
+
+    /**
+     * 把上一次训练真实产出的 `train_batch*.jpg` 取回来当增强预览。
+     *
+     * 面板画不出"假预览"：那需要自己实现一遍 mosaic / copy_paste，而实现歪了的预览
+     * 比没有预览更糟（用户会以为训练就是那样）。所以这里只给**引擎自己写出来的那张**。
+     * 路径必须落在 `project` 下面且文件名就是 `train_batchN.jpg`——不接受用户给的任意路径。
+     */
+    async previewImage(file) {
+      needWorkspace();
+      const { effective } = await effectiveConfig();
+      const base = abs(effective.train.project || DEFAULTS.train.project).toLowerCase();
+      const p = String(typeof file === "string" ? file : "").replace(/\\/g, "/");
+      const full = abs(p).replace(/\\/g, "/");
+      if (!full.toLowerCase().startsWith(base.toLowerCase())) throw new Error("预览只允许读训练产物目录里的图");
+      if (!/^train_batch\d*\.jpg$/i.test(path.basename(full))) throw new Error("预览只给 train_batchN.jpg（引擎产出的增强样本）");
+      let buf;
+      try {
+        buf = fs.readFileSync(full);
+      } catch {
+        throw new Error(`读不到这张预览图：${p}`);
+      }
+      if (buf.length > 2 * 1024 * 1024) throw new Error(`预览图超过 2MB（${Math.round(buf.length / 1024)}KB），不往面板里塞`);
+      return { ok: true, file: full, bytes: buf.length, dataUrl: "data:image/jpeg;base64," + buf.toString("base64") };
+    },
+
     /* ---- 部署（$EXT:deploy）---- */
     async deployState() {
       return deployState();
     },
 
-    /** `step`：validate / all / convert / package；`opts.deliver=false` 直接用配置里那个模型。 */
-    async deployStart(cfgName, step, opts) {
-      return await deployStart(cfgName, String(step || "all"), opts || {});
+    /** 一个对象参数：`{ cfgName, step, deliver }`（桥只转发一个载荷，位置参数拿不到）。 */
+    async deployStart(req) {
+      return await deployStart(req);
     },
 
     /** 只交付模型、不部署（"先把产物留一份"也是常见动作）。 */
@@ -2056,21 +2269,946 @@ async function activate(c) {
   });
 }
 
-// `dumpConfig` / `parseSimpleYaml` / `buildParamSpec` / `coerceTrain` 是纯函数（不碰 ctx），导出给测试与将来的复用：
-// 它们之间必须能往返——本插件生成的 config.yaml，用它自己的解析器读回来必须一模一样；
+/* ============================ 标注体检（P175-W3，详设 §5.2） ============================ */
+
+/**
+ * **这一整块只读**：一个标签文件都不写、不改、不删。
+ * 体检的价值在于"开训前告诉你这份数据会怎么毁掉你的指标"，而不是替你修——
+ * 修标注是用户在标注工具里的事（他自己在 X-AnyLabeling 里做）。
+ */
+
+/** 解析一份 YOLO 标签文件的全部行。 */
+function parseLabelFile(p) {
+  const out = { boxes: 0, polys: 0, quads: 0, bad: 0, outOfBounds: 0, classes: {}, ids: [] };
+  let text = "";
+  try {
+    text = fs.readFileSync(p, "utf8");
+  } catch {
+    return null;
+  }
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const parts = line.split(/\s+/);
+    const id = Number(parts[0]);
+    if (!Number.isInteger(id) || id < 0) {
+      out.bad++;
+      continue;
+    }
+    out.ids.push(id);
+    out.classes[id] = (out.classes[id] || 0) + 1;
+    const coords = parts.slice(1).map(Number);
+    if (coords.some((c) => !Number.isFinite(c))) {
+      out.bad++;
+      continue;
+    }
+    if (coords.some((c) => c < -0.001 || c > 1.001)) out.outOfBounds++;
+    if (coords.length === 4) out.boxes++;
+    else if (coords.length === 8) out.quads++;
+    else if (coords.length >= 6 && coords.length % 2 === 0) out.polys++;
+    else out.bad++;
+  }
+  return out;
+}
+
+function listSiblings(dir, ext) {
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.toLowerCase().endsWith(ext))
+      .map((f) => f.replace(/\.[^.]+$/, ""));
+  } catch {
+    return null; // 目录不存在 ≠ 空目录：调用方要能分清"没有"和"读不到"
+  }
+}
+
+/** 读 `data.yaml` 的 nc / names / train / val（形状不对就报出来，不猜）。 */
+function readDataYaml(file) {
+  const out = { exists: false, nc: null, names: [], train: "", val: "", error: "" };
+  let text = "";
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return out;
+  }
+  out.exists = true;
+  try {
+    const v = parseSimpleYaml(text);
+    out.nc = v.nc === undefined ? null : Number(v.nc);
+    out.train = String(v.train || "");
+    out.val = String(v.val || "");
+    const n = v.names;
+    if (Array.isArray(n)) out.names = n.map(String);
+    else if (isObj(n)) out.names = Object.keys(n).sort((a, b) => Number(a) - Number(b)).map((k) => String(n[k]));
+  } catch (e) {
+    out.error = String((e && e.message) || e);
+  }
+  return out;
+}
+
+/**
+ * 体检主体。`sample` 控制"逐行读标签"的上限（默认 400 个文件）：
+ * 一个上万张的数据集全读要几十秒，而体检的价值在前 400 个就能看出来。
+ * 超了就报 `truncated`，宁可少报也不把面板卡住。
+ */
+function auditDataset(dirIn, sample) {
+  const dir = abs(dirIn || DEFAULTS.dataset.output_dir);
+  const r = {
+    dir,
+    ok: true,
+    truncated: false,
+    sampled: 0,
+    dataYaml: readDataYaml(path.join(dir, "data.yaml")),
+    splits: {},
+    zeroLabelImages: 0,
+    emptyLabelFiles: 0,
+    outOfBounds: 0,
+    badLines: 0,
+    boxes: 0,
+    polys: 0,
+    quads: 0,
+    classHist: {},
+    maxClassId: -1,
+    missingClasses: [],
+    leakNames: [],
+    findings: [],
+  };
+  const limit = sample || 400;
+  for (const split of ["train", "val"]) {
+    const imgDir = path.join(dir, "images", split);
+    const lblDir = path.join(dir, "labels", split);
+    const imgs = listSiblings(imgDir, ".jpg").concat(listSiblings(imgDir, ".png") || [], listSiblings(imgDir, ".jpeg") || []);
+    const stems = new Set(imgs);
+    const labels = listSiblings(lblDir, ".txt");
+    r.splits[split] = { images: imgs.length, labels: labels === null ? 0 : labels.length, dirMissing: stems.size === 0 && labels === null };
+    if (labels === null) continue;
+    const take = labels.slice(0, Math.max(0, limit - r.sampled));
+    if (labels.length > take.length) r.truncated = true;
+    for (const stem of take) {
+      r.sampled++;
+      const one = parseLabelFile(path.join(lblDir, stem + ".txt"));
+      if (!one) continue;
+      if (!one.ids.length) r.emptyLabelFiles++;
+      if (!stems.has(stem)) r.zeroLabelImages++; // 有标签没图：引擎会在扫描阶段直接跳过它
+      r.outOfBounds += one.outOfBounds;
+      r.badLines += one.bad;
+      r.boxes += one.boxes;
+      r.polys += one.polys;
+      r.quads += one.quads;
+      for (const [k, n] of Object.entries(one.classes)) {
+        r.classHist[k] = (r.classHist[k] || 0) + n;
+        r.maxClassId = Math.max(r.maxClassId, Number(k));
+      }
+    }
+    if (split === "train") r.trainStems = imgs;
+    else r.valStems = imgs;
+  }
+  // train ↔ val 重名 = 数据泄漏：验证集里出现训练过的图，指标会好看但模型没学到东西
+  if (r.trainStems && r.valStems) {
+    const v = new Set(r.valStems);
+    r.leakNames = r.trainStems.filter((s) => v.has(s)).slice(0, 20);
+  }
+  const names = r.dataYaml.names || [];
+  if (names.length) r.missingClasses = names.map((n, i) => (r.classHist[i] ? null : n)).filter(Boolean);
+  delete r.trainStems;
+  delete r.valStems;
+
+  if (r.dataYaml.exists && r.dataYaml.nc != null && r.maxClassId >= r.dataYaml.nc) {
+    r.findings.push({ level: "bad", key: "ncMismatch", text: `标签里出现了类别 id ${r.maxClassId}，而 data.yaml 的 nc 只有 ${r.dataYaml.nc}：引擎会直接拒或错位训练。` });
+  }
+  if (r.outOfBounds) r.findings.push({ level: "bad", key: "outOfBounds", text: `${r.outOfBounds} 行坐标越界（<0 或 >1）：这些框会被裁掉或让 loss 变 NaN。` });
+  if (r.badLines) r.findings.push({ level: "warn", key: "badLines", text: `${r.badLines} 行不是合法标注（token 数对不上）：会被静默忽略。` });
+  if (r.emptyLabelFiles) r.findings.push({ level: "warn", key: "emptyLabels", text: `${r.emptyLabelFiles} 个标签文件是空的（背景图）。少量是对的，多了说明标注漏了。` });
+  if (r.zeroLabelImages) r.findings.push({ level: "warn", key: "orphanLabels", text: `${r.zeroLabelImages} 个标签找不到同名图片：这些标注不会进训练。` });
+  if (r.leakNames.length) r.findings.push({ level: "bad", key: "leak", text: `train 与 val 有 ${r.leakNames.length}${r.leakNames.length >= 20 ? "+" : ""} 个同名文件（数据泄漏）：指标会虚高，先去重再训。` });
+  if (r.missingClasses.length) r.findings.push({ level: "warn", key: "missingClasses", text: `这些类别在抽到的样本里一次都没出现：${r.missingClasses.join("、")}。要么样本太少，要么标注时漏标。` });
+  const hist = Object.values(r.classHist);
+  if (hist.length > 1 && Math.max(...hist) / Math.max(1, Math.min(...hist)) > 10) {
+    r.findings.push({ level: "warn", key: "imbalance", text: `类别数量差 ${Math.round(Math.max(...hist) / Math.min(...hist))} 倍：少数类的 mAP 会被拖低，考虑补标或按类加权。` });
+  }
+  if (r.quads) r.findings.push({ level: "info", key: "quads", text: `抽到 ${r.quads} 个 4 点多边形（1+8 个 token）——它和 OBB 的形状一样，本工作台只做 detect / segment。` });
+  if (!r.findings.length) r.findings.push({ level: "ok", key: "clean", text: `抽了 ${r.sampled} 个标签文件，没发现常见问题。` });
+  return r;
+}
+
+/** 上一次训练真实喂给网络的样本图（引擎产出的 `train_batch*.jpg`）——不是面板画出来的假预览。 */
+function scanTrainBatches(project, runName, limit) {
+  if (!root) return [];
+  const base = abs(project || DEFAULTS.train.project);
+  const out = [];
+  let dirs = [];
+  try {
+    dirs = (runName ? [runName] : fs.readdirSync(base)).filter((n) => !n.startsWith("."));
+  } catch {
+    return [];
+  }
+  for (const d of dirs) {
+    let files = [];
+    try {
+      files = fs.readdirSync(path.join(base, d)).filter((f) => /^train_batch\d*\.jpg$/i.test(f));
+    } catch {
+      continue;
+    }
+    for (const f of files.slice(0, limit || 3)) {
+      const p = path.join(base, d, f);
+      let st;
+      try {
+        st = fs.statSync(p);
+      } catch {
+        continue;
+      }
+      out.push({ run: d, name: f, file: p.replace(/\\/g, "/"), bytes: st.size, mtime: st.mtimeMs });
+    }
+  }
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out.slice(0, limit || 6);
+}
+
+/* ============================ 评估与对比（P175-W5，详设 §5.5） ============================ */
+
+/** 面板允许读回来的那几张图——都是引擎自己画的，面板不画第二份。 */
+const EVAL_IMAGES = ["confusion_matrix.png", "BoxPR_curve.png", "F1_curve.png", "P_curve.png", "R_curve.png", "val_batch0_pred.jpg", "val_batch0_labels.jpg"];
+
+/** 评估结果目录：`train_runs/eval/<时间戳>`——不塞进 `runs/`，那是用户手动跑出来的产物区。 */
+function evalOutDir(at) {
+  const d = new Date(at || Date.now());
+  const p = (n) => String(n).padStart(2, "0");
+  return abs(`train_runs/eval/${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`);
+}
+
+/** 读一次评估的结果（`eval.json` 是 runner 写的，指标 / 阈值表 / 图 / 错例都在里面）。 */
+function readEvalResult(dir) {
+  const file = path.join(String(dir), "eval.json");
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** 评估历史：`train_runs/eval/*` 倒序。只认有 eval.json 的目录——跑一半被杀的不算一次结果。 */
+function scanEvals(limit) {
+  if (!root) return [];
+  const base = abs("train_runs/eval");
+  let names = [];
+  try {
+    names = fs.readdirSync(base);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const n of names) {
+    const dir = path.join(base, n).replace(/\\/g, "/");
+    const one = readEvalResult(dir);
+    if (!one) continue;
+    out.push({ dir, name: n, at: one.at || 0, weights: one.weights, task: one.task, metrics: one.metrics });
+  }
+  out.sort((a, b) => String(b.name).localeCompare(String(a.name)));
+  return out.slice(0, limit || 10);
+}
+
+/**
+ * 两份 `args.yaml` 的差异（复盘用）。
+ *
+ * `args.yaml` 是引擎自己写的"这次训练真实用了什么"——它比面板的记忆可信。
+ * 只比**两边都是标量**的键：嵌套结构（names / 各种列表）在这里既难比又不是差异的来源。
+ */
+function diffArgs(a, b) {
+  const out = [];
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  for (const k of keys) {
+    const va = a ? a[k] : undefined;
+    const vb = b ? b[k] : undefined;
+    if (va === vb) continue;
+    if (typeof va === "object" || typeof vb === "object") continue;
+    if (va === undefined || vb === undefined) continue; // 一边没有多半是解析差异，不是真差异
+    out.push({ key: k, a: va, b: vb });
+  }
+  return out.sort((x, y) => String(x.key).localeCompare(String(y.key)));
+}
+
+/** 读一个 run 的 `args.yaml`（引擎写的）。 */
+function readRunArgs(runDir) {
+  try {
+    return parseSimpleYaml(fs.readFileSync(path.join(String(runDir), "args.yaml"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+/** 两条曲线叠加对比：把两个 run 的 results.csv 各自抽稀后一起交给面板。 */
+function compareRuns(project, a, b) {
+  const base = abs(project || DEFAULTS.train.project);
+  const one = (name) => {
+    const dir = path.join(base, name);
+    let parsed = { columns: [], rows: [] };
+    try {
+      parsed = parseResultsCsv(fs.readFileSync(path.join(dir, "results.csv"), "utf8"));
+    } catch {
+      /* 这个 run 没写出 csv */
+    }
+    return { name, dir: dir.replace(/\\/g, "/"), columns: parsed.columns, chart: chartColumns(parsed.columns), rows: downsample(parsed.rows, 140), args: readRunArgs(dir) };
+  };
+  const A = one(a);
+  const B = one(b);
+  const metricOf = (r) => {
+    const last = r.rows.length ? r.rows[r.rows.length - 1] : {};
+    return {
+      mAP50B: last["metrics/mAP50(B)"],
+      mAP5095B: last["metrics/mAP50-95(B)"],
+      mAP50M: last["metrics/mAP50(M)"],
+      mAP5095M: last["metrics/mAP50-95(M)"],
+      epochs: r.rows.length,
+    };
+  };
+  return { ok: true, a: A, b: B, diff: diffArgs(A.args, B.args), summary: { a: metricOf(A), b: metricOf(B) } };
+}
+
+/**
+ * 起一次评估。走插件自带的 `runner/eval_job.py`，**不动用户的 `scripts/validate_viz.py`**；
+ * 结果一律落在 `train_runs/eval/`，`runs/` 里一个文件都不新增。
+ */
+async function evalStart(opts) {
+  needWorkspace();
+  if (active) throw new Error(`已经有一个任务在跑（${active.label}）：先停掉它`);
+  const o = isObj(opts) ? opts : {};
+  const { effective } = await effectiveConfig();
+  const py = await detectPython();
+  if (!py.ok) throw new Error(`找不到可用的 python：${py.error}`);
+  const runner = path.join(PKG_DIR, "runner", "eval_job.py").replace(/\\/g, "/");
+  if (!fs.existsSync(runner)) throw new Error(`插件包里没有 runner/eval_job.py：重装一次插件`);
+
+  const weights = abs(String(o.weights || effective.eval?.model || effective.train.weights || ""));
+  const data = abs(String(o.data || effective.eval?.data || "")) || path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/");
+  const out = evalOutDir();
+  const merged = merge({}, effective);
+  merged.eval = {
+    model: weights,
+    data,
+    imgsz: Number(o.imgsz || (effective.eval && effective.eval.imgsz) || effective.train.imgsz || 640),
+    conf: Number(o.conf != null ? o.conf : (effective.eval && effective.eval.conf) || 0.25),
+    device: String(o.device != null ? o.device : (effective.eval && effective.eval.device) || effective.train.device || "0"),
+    workers: Number(o.workers != null ? o.workers : (effective.eval && effective.eval.workers) ?? effective.train.workers ?? 0),
+  };
+
+  const job = newJob("eval", `评估 ${path.basename(weights)}`);
+  const confPath = abs(`train_runs/eval-${new Date(job.startedAt).toISOString().replace(/[:.]/g, "-").slice(0, 19)}.yaml`);
+  fs.mkdirSync(path.dirname(confPath), { recursive: true });
+  fs.writeFileSync(confPath, dumpConfig(merged), "utf8");
+  job.configPath = confPath;
+  job.evalOut = out;
+  jobs.set(job.id, job);
+  active = job;
+
+  const args = [runner, "--config", confPath, "--weights", weights, "--data", data, "--out", out, "--conf", String(merged.eval.conf)];
+  if (o.errors) args.push("--errors", "--max-errors", String(Math.max(1, Math.min(200, Number(o.maxErrors) || 40))));
+  pushLine(job, `[工作台] python: ${py.path}（${py.source}）`, "sys");
+  pushLine(job, `[工作台] 结果目录: ${out}`, "sys");
+  pushLine(job, `[工作台] 命令: "${py.path}" "${runner}" ${args.slice(1).map((a) => `"${a}"`).join(" ")}`, "sys");
+
+  try {
+    const child = ctx.process.spawn({
+      cmd: py.path,
+      args,
+      cwd: root,
+      env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", OPENBLAS_NUM_THREADS: "1", KMP_DUPLICATE_LIB_OK: "TRUE", CUDA_MODULE_LOADING: "LAZY" },
+      onStdout: (l) => pushLine(job, l, "out"),
+      onStderr: (l) => pushLine(job, l, "err"),
+      onExit: (code) => finishJob(job, code),
+      onError: (e) => {
+        pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
+        finishJob(job, -1);
+      },
+    });
+    job.pid = child.pid || 0;
+    job.child = child;
+  } catch (e) {
+    pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
+    finishJob(job, -1);
+    throw e;
+  }
+  return snapshot(job);
+}
+
+/** 评估页一次拿全：最近一次结果 + 历史 + 可选权重 + 可选数据集。 */
+async function evalState() {
+  const list = scanEvals(10);
+  const last = list.length ? readEvalResult(list[0].dir) : null;
+  const { effective } = await effectiveConfig();
+  return {
+    ok: true,
+    last,
+    history: list,
+    weights: scanModels(40).map((f) => ({ file: f.file, name: f.name, task: factsFor(f)?.task || "", bytes: f.bytes })),
+    bests: scanRuns(effective.train.project).filter((r) => r.hasBest).map((r) => ({ run: r.name, file: r.best, mAP50: r.metrics ? r.metrics.mAP50M : "" })),
+    datasets: scanDatasetDirs(),
+    current: { data: path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/"), imgsz: effective.train.imgsz, device: String(effective.train.device), workers: effective.train.workers },
+  };
+}
+
+/** 工作区里所有含 `data.yaml` 的目录（评估/训练选数据集都用它）。 */
+function scanDatasetDirs() {
+  if (!root) return [];
+  const base = abs("datasets");
+  const out = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(base);
+  } catch {
+    return out;
+  }
+  for (const n of names) {
+    const d = path.join(base, n);
+    try {
+      if (!fs.statSync(d).isDirectory()) continue;
+      const y = path.join(d, "data.yaml");
+      if (!fs.existsSync(y)) continue;
+      out.push({ dir: d.replace(/\\/g, "/"), dataYaml: y.replace(/\\/g, "/"), name: n, train: countFiles(path.join(d, "images/train")), val: countFiles(path.join(d, "images/val")) });
+    } catch {
+      /* 读不动就跳过 */
+    }
+  }
+  return out;
+}
+
+/* ============================ 导出与端侧（P175-W6，详设 §5.6） ============================ */
+
+/**
+ * 格式矩阵（实测 8.4.102 支持的那些）。
+ * `needs` 是"这一档除了 pip 包还要什么"——不说清楚的话，用户会以为点了就能出文件。
+ * `tflite` 是 `saved_model` 的别名，不单列（列了就会有人找一个并不存在的选项）。
+ */
+const EXPORT_FORMATS = [
+  { id: "onnx", label: "ONNX", needs: "", note: "最通用；MaixCam / OpenVINO / TensorRT 的中转站" },
+  { id: "openvino", label: "OpenVINO", needs: "openvino", note: "Intel CPU / iGPU" },
+  { id: "engine", label: "TensorRT", needs: "libnvinfer（系统级）", note: "NVIDIA GPU 上最快；导出时可能要下东西" },
+  { id: "torchscript", label: "TorchScript", needs: "", note: "纯 python / libtorch 侧" },
+  { id: "coreml", label: "CoreML", needs: "macOS + coremltools", note: "Apple 设备" },
+  { id: "saved_model", label: "SavedModel", needs: "tensorflow", note: "TF 生态；tflite 走这一档" },
+  { id: "pb", label: "Frozen GraphDef", needs: "tensorflow", note: "老的 TF .pb" },
+  { id: "edgetpu", label: "Edge TPU", needs: "tensorflow + pycoral", note: "Google Coral" },
+  { id: "paddle", label: "PaddlePaddle", needs: "paddlepaddle", note: "百度生态" },
+  { id: "mnn", label: "MNN", needs: "MNN", note: "阿里移动端" },
+  { id: "ncnn", label: "ncnn", needs: "ncnn", note: "移动端 / 嵌入式 CPU" },
+  { id: "imx", label: "i.MX NPU", needs: "nxp ethos-u / vx-tooling", note: "NXP i.MX8MP 一类" },
+  { id: "rknn", label: "RKNN", needs: "rockchip rknn-toolkit2", note: "瑞芯微 RK3588 一类" },
+  { id: "executorch", label: "ExecuTorch", needs: "executorch", note: "PyTorch 官方端侧" },
+  { id: "axelera", label: "Axelera", needs: "axelera SDK", note: "Axelera NPU" },
+  { id: "deepx", label: "DeepX", needs: "deepx SDK", note: "DeepX VPU" },
+  { id: "qnn", label: "QNN", needs: "Qualcomm QNN SDK", note: "高通 Hexagon NPU" },
+  { id: "litert", label: "LiteRT", needs: "litert", note: "Google 新一代端侧" },
+  { id: "hailo", label: "Hailo", needs: "hailort + SDK", note: "Hailo NPU" },
+];
+
+/**
+ * 端侧约束卡。这些是**厂商文档写死的限制**，不是我们的偏好：
+ * 违反它们的导出会成功，但东西上不了板子——所以要在点之前就说。
+ */
+const EDGE_CARDS = [
+  {
+    id: "maixcam",
+    title: "MaixCam / MaixHub 在线转换器",
+    tasks: ["detect"],
+    opset: 17,
+    dynamic: false,
+    note: "官方在线转换器**只支持目标检测**（YOLO26 / YOLO11 / YOLOv8 系），示例固定 opset=17、dynamic=False。分割 / 姿态 / 分类要自己手动转。",
+  },
+];
+
+/** 导出前把端侧约束对一遍：能导 ≠ 能上板。 */
+function exportAdvice(fmt, task, opts) {
+  const out = [];
+  const f = EXPORT_FORMATS.find((x) => x.id === fmt);
+  if (f && f.needs) out.push({ level: "warn", text: `${f.label} 需要额外的 ${f.needs}；缺了会在导出那一步报错。` });
+  for (const c of EDGE_CARDS) {
+    if (c.tasks.includes(task)) continue;
+    out.push({ level: "bad", text: `${c.title}：只吃 ${c.tasks.join("/")}，这份模型是 ${task || "?"} —— 导出来也上不了板，得手动转。` });
+  }
+  // opset 这条只在"这份模型确实可能走那条端侧路"时才提：任务都不搭的话，上面那条 bad 已经说完了
+  if (EDGE_CARDS.some((c) => c.tasks.includes(task)) && Number(opts && opts.opset) && !EDGE_CARDS.some((c) => Number(opts.opset) === c.opset)) {
+    out.push({ level: "warn", text: `MaixCam 那条路的示例是 opset=${EDGE_CARDS[0].opset}；填了 ${opts.opset} 就要自己确认转换器吃不吃。` });
+  }
+  if (opts && opts.dynamic) out.push({ level: "warn", text: "dynamic=True 很多端侧栈不吃（MaixCam 就要 False）。" });
+  if (task === "detect" && opts && opts.nms !== true) {
+    out.push({ level: "info", text: "YOLO26 是端到端输出 [N,300,6]、免 NMS 后处理；如果端侧代码里以前那段后处理还在，要么删掉，要么导出时勾 nms。" });
+  }
+  return out;
+}
+
+/** 读一次导出的结果（runner 写的 `export.json`）。 */
+function readExportResult(dir) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(String(dir), "export.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** 导出历史：`train_runs/export/` 下每个目录里的 `export.json`。 */
+function scanExports(limit) {
+  if (!root) return [];
+  const base = abs("train_runs/export");
+  let names = [];
+  try {
+    names = fs.readdirSync(base);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const n of names) {
+    const dir = path.join(base, n).replace(/\\/g, "/");
+    const v = readExportResult(dir);
+    if (v) out.push({ dir, name: n, ...v });
+  }
+  out.sort((a, b) => String(b.name).localeCompare(String(a.name)));
+  return out.slice(0, limit || 10);
+}
+
+/**
+ * 起一次导出。走插件自带的 `runner/export_job.py`，**不动用户的 `scripts/export_onnx.py`**；
+ * 产物落 `train_runs/export/<时间戳>/`，不往 `models/` 里塞东西（交付是另一颗按钮，本来就有）。
+ */
+async function exportStart(req) {
+  needWorkspace();
+  if (active) throw new Error(`已经有一个任务在跑（${active.label}）：先停掉它`);
+  const o = isObj(req) ? req : {};
+  const fmt = String(o.format || "onnx").trim().toLowerCase();
+  if (!EXPORT_FORMATS.some((f) => f.id === fmt)) throw new Error(`不支持的导出格式：${o.format}`);
+  const py = await detectPython();
+  if (!py.ok) throw new Error(`找不到可用的 python：${py.error}`);
+  const runner = path.join(PKG_DIR, "runner", "export_job.py").replace(/\\/g, "/");
+  if (!fs.existsSync(runner)) throw new Error("插件包里没有 runner/export_job.py：重装一次插件");
+  const { effective } = await effectiveConfig();
+  const weights = abs(String(o.weights || effective.eval?.model || effective.train.weights || ""));
+  if (!weights || !fs.existsSync(weights)) throw new Error(`找不到要导出的权重：${weights || "(没填)"}`);
+  const data = abs(String(o.data || effective.eval?.data || "")) || path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/");
+  const imgsz = Number(o.imgsz || effective.export?.imgsz || effective.train.imgsz || 640);
+  const out = abs(`train_runs/export/${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`);
+  const merged = merge({}, effective);
+  merged.export = { format: fmt, imgsz, dynamic: !!o.dynamic, simplify: o.simplify !== false, opset: Number(o.opset) || 0, quantize: String(o.quantize || "") };
+
+  const job = newJob("export", `导出 ${fmt}`);
+  const confPath = snapshotPathFor("export", fmt, job.startedAt);
+  fs.mkdirSync(path.dirname(confPath), { recursive: true });
+  fs.writeFileSync(confPath, dumpConfig(merged), "utf8");
+  job.configPath = confPath;
+  job.exportOut = out;
+  jobs.set(job.id, job);
+  active = job;
+
+  const args = [runner, "--weights", weights, "--format", fmt, "--config", confPath, "--data", data, "--imgsz", String(imgsz), "--out", out];
+  if (o.dynamic) args.push("--dynamic");
+  if (o.simplify === false) args.push("--no-simplify");
+  if (Number(o.opset)) args.push("--opset", String(Number(o.opset)));
+  if (o.quantize) args.push("--quantize", String(o.quantize));
+  if (o.nms) args.push("--nms");
+  pushLine(job, `[工作台] python: ${py.path}（${py.source}）`, "sys");
+  pushLine(job, `[工作台] 产物目录: ${out}`, "sys");
+  pushLine(job, `[工作台] 命令: "${py.path}" "${runner}" ${args.map((a) => `"${a}"`).join(" ")}`, "sys");
+
+  try {
+    const child = ctx.process.spawn({
+      cmd: py.path,
+      args,
+      cwd: root,
+      env: { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", OPENBLAS_NUM_THREADS: "1", KMP_DUPLICATE_LIB_OK: "TRUE", CUDA_MODULE_LOADING: "LAZY" },
+      onStdout: (l) => pushLine(job, l, "out"),
+      onStderr: (l) => pushLine(job, l, "err"),
+      onExit: (code) => finishJob(job, code),
+      onError: (e) => {
+        pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
+        finishJob(job, -1);
+      },
+    });
+    job.pid = child.pid || 0;
+    job.child = child;
+  } catch (e) {
+    pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
+    finishJob(job, -1);
+    throw e;
+  }
+  return snapshot(job);
+}
+
+/** 导出页一次拿全：格式矩阵、端侧约束、历史、可选权重、当前任务。 */
+async function exportState() {
+  const { effective } = await effectiveConfig();
+  const weights = scanModels(40).map((f) => ({ file: f.file, name: f.name, task: factsFor(f)?.task || "", bytes: f.bytes }));
+  const chosen = String((effective.train && effective.train.weights) || "");
+  const here = weights.find((w) => w.file.toLowerCase() === chosen.toLowerCase());
+  const task = (here && here.task) || weightsTaskFacts(chosen).task || "";
+  const hist = scanExports(8);
+  return {
+    ok: true,
+    formats: EXPORT_FORMATS,
+    cards: EDGE_CARDS,
+    history: hist,
+    last: hist.length ? hist[0] : null,
+    weights,
+    bests: scanRuns(effective.train.project).filter((r) => r.hasBest).map((r) => ({ v: r.best, t: "run " + r.name + " 的 best.pt" })),
+    current: { weights: chosen, task, format: String(effective.export?.format || "onnx"), imgsz: effective.export?.imgsz || effective.train.imgsz || 640, data: path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/") },
+  };
+}
+
+/* ============================ 实验管理（P175-W7，详设 §5.7 / §4.3） ============================ */
+
+/** 一个 run 的档案：面板上的实验列表就是它。 */
+function runProfile(project, name) {
+  const dir = path.join(abs(project || DEFAULTS.train.project), name);
+  const args = readRunArgs(dir);
+  const best = path.join(dir, "weights", "best.pt");
+  const last = path.join(dir, "weights", "last.pt");
+  let hasBest = false;
+  let bestBytes = 0;
+  try {
+    const st = fs.statSync(best);
+    hasBest = true;
+    bestBytes = st.size;
+  } catch {
+    /* 还没写出 best.pt */
+  }
+  let parsed = { columns: [], rows: [] };
+  try {
+    parsed = parseResultsCsv(fs.readFileSync(path.join(dir, "results.csv"), "utf8"));
+  } catch {
+    /* 没写出 csv */
+  }
+  const rows = parsed.rows;
+  const lastRow = rows.length ? rows[rows.length - 1] : {};
+  const noteFile = abs(`train_runs/${String(name).replace(/[^\w.-]+/g, "-")}.note`);
+  let note = "";
+  try {
+    note = fs.readFileSync(noteFile, "utf8").trim();
+  } catch {
+    /* 还没写过备注 */
+  }
+  return {
+    name,
+    dir: dir.replace(/\\/g, "/"),
+    task: String(args.task || ""),
+    model: String(args.model || ""),
+    imgsz: args.imgsz == null ? "" : String(args.imgsz),
+    epochs: rows.length,
+    bestEpoch: rows.length,
+    hasBest,
+    best: hasBest ? best.replace(/\\/g, "/") : "",
+    bestBytes,
+    hasLast: fs.existsSync(last),
+    last: fs.existsSync(last) ? last.replace(/\\/g, "/") : "",
+    mAP50: lastRow["metrics/mAP50(B)"] ?? "",
+    mAP5095: lastRow["metrics/mAP50-95(B)"] ?? "",
+    mAP50M: lastRow["metrics/mAP50(M)"] ?? "",
+    durationText: fmtDuration(Number(lastRow.time) || 0),
+    note,
+    noteFile,
+    argsFile: path.join(dir, "args.yaml").replace(/\\/g, "/"),
+    argsKeys: Object.keys(args).length,
+  };
+}
+
+/** 实验列表（默认页那个表）。 */
+function runProfiles(project, limit) {
+  const runs = scanRuns(project);
+  return runs.slice(0, limit || 40).map((r) => runProfile(project, r.name));
+}
+
+/**
+ * 「等价命令」：面板上点出来的这一次，命令行怎么原样跑。
+ *
+ * 三条都是**真的能跑的**，不是示意图：
+ * ① 插件 runner（吃全部参数）；② 用户自己的 `scripts/train.py`（只吃它认得的那 20 个键，
+ * 但用的是**同一份 yaml**）；③ ultralytics CLI——直接吃引擎自己写的 `args.yaml`，
+ * 换一个 `name` 免得盖掉原产物。
+ */
+function reproCommands(run) {
+  const py = "python";
+  const ws = root.replace(/\\/g, "/");
+  const runner = path.join(PKG_DIR, "runner", "train_job.py").replace(/\\/g, "/");
+  const snap = abs(`train_runs/repro-${run.name}-${Date.now().toString(36)}.yaml`);
+  const args = readRunArgs(run.dir);
+  const merged = merge({}, DEFAULTS);
+  merged.train = merge(merge({}, DEFAULTS.train), args);
+  merged.train.weights = String(args.model || run.model || merged.train.weights);
+  merged.train.project = abs(String(args.project || run.project || "runs"));
+  merged.train.name = String(args.name || run.name);
+  merged.dataset.output_dir = abs(merged.dataset.output_dir);
+  const data = String(args.data || "");
+  if (data) merged.train.data = data;
+  return {
+    snapshot: snap,
+    text: dumpConfig(merged),
+    commands: [
+      { id: "runner", label: `插件 runner（全部 ${Object.keys(args).length} 个参数都吃）`, cmd: `"${py}" "${runner}" --config "${snap}" --root "${ws}"` },
+      { id: "workspace", label: "工作区脚本（只认它自己那 20 个键）", cmd: `"${py}" "${ws}/scripts/train.py" --config "${snap}"` },
+      { id: "cli", label: "ultralytics CLI（直接吃引擎写的 args.yaml）", cmd: `yolo train cfg="${run.argsFile}" name=${run.name}_repro exist_ok=false` },
+    ],
+  };
+}
+
+/** 把等价命令写成一个 .bat——落在 `train_runs/bat/`，绝不碰 `00~07` 那批编号脚本。 */
+function writeReproBat(run, which) {
+  const r = reproCommands(run);
+  fs.mkdirSync(path.dirname(r.snapshot), { recursive: true }); // 第一次复现时 train_runs/ 可能还不存在
+  fs.writeFileSync(r.snapshot, r.text, "utf8");
+  const hit = r.commands.find((c) => c.id === which) || r.commands[0];
+  const dir = abs("train_runs/bat");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `run_${String(run.name).replace(/[^\w.-]+/g, "-")}-${hit.id}.bat`);
+  const py = readEnvBat() || "python";
+  // 命令里那颗 `python` 换成 `_env.bat` 里那一条：复现脚本要能在装了环境的机器上双击就跑
+  const line = hit.cmd.replace(/^"python"/, `"${py.replace(/\\/g, "/")}"`);
+  const body = [
+    "@echo off",
+    "chcp 65001 >nul",
+    "REM 由 uartix.yolo 生成的复现脚本。只读，不改工作区里任何既有文件。",
+    `REM 快照：${r.snapshot.replace(/\\/g, "/")}`,
+    `REM 任务：${run.task || "?"} / 模型：${run.model || "?"}`,
+    line,
+    "echo.",
+    "echo ==== 复现结束。产物在 runs/ 下对应目录 ====",
+    "pause >nul",
+    "",
+  ].join("\r\n");
+  fs.writeFileSync(file, body, "utf8");
+  return { ok: true, file: file.replace(/\\/g, "/"), snapshot: r.snapshot, commands: r.commands };
+}
+
+/** 备注：写进 `train_runs/<实验>.note`，不碰 `runs/`（那是引擎的产物区）。 */
+function saveRunNote(project, name, text) {
+  const safe = String(name == null ? "" : name).replace(/[^\w.-]+/g, "-");
+  if (!safe) throw new Error("没有这个实验");
+  const file = abs(`train_runs/${safe}.note`);
+  const t = String(text == null ? "" : text).slice(0, 2000);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  if (t.trim()) fs.writeFileSync(file, t, "utf8");
+  else {
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* 本来就没有 */
+    }
+  }
+  return runProfile(project, name);
+}
+
+/**
+ * 归档：把 `args.yaml + results.csv + best.pt` **复制**进 `archive/<run>-<时间>/`。
+ *
+ * 设计稿写的是"移"。这里刻意改成复制：搬走会让 `runs/` 里的历史断档，
+ * 而那个目录是用户自己会去看的——断档的代价比多占一点磁盘大得多。
+ */
+function archiveRun(project, name) {
+  const run = runProfile(project, name);
+  if (!run.dir || !fs.existsSync(run.dir)) throw new Error(`没有这个 run：${name}`);
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  const dst = abs(`archive/${String(name).replace(/[^\w.-]+/g, "-")}-${stamp}`);
+  fs.mkdirSync(path.join(dst, "weights"), { recursive: true });
+  const copied = [];
+  for (const [src, rel] of [
+    [path.join(run.dir, "args.yaml"), "args.yaml"],
+    [path.join(run.dir, "results.csv"), "results.csv"],
+    [run.best, "weights/best.pt"],
+  ]) {
+    if (!src || !fs.existsSync(src)) continue;
+    fs.copyFileSync(src, path.join(dst, rel));
+    copied.push(rel);
+  }
+  if (run.note) fs.writeFileSync(path.join(dst, "note.txt"), run.note, "utf8");
+  return { ok: true, dst: dst.replace(/\\/g, "/"), copied, from: run.dir, moved: false };
+}
+
+/* ============================ 监控与失败归类（P175-W4，详设 §5.4） ============================ */
+
+/**
+ * 解析 `results.csv`。不自造采集：引擎已经逐轮往这个文件里写。
+ * 要的是**容忍形状变化**——非 resume 重跑会删重建、不同任务列集合不同
+ * （分割才有 `train/seg_loss` 与 `(M)` 那一组）、列名带空格和括号。列不认识就原样留着，不猜含义。
+ */
+function parseResultsCsv(text) {
+  const lines = String(text || "").split(/\r?\n/).filter((l) => l.trim());
+  if (!lines.length) return { columns: [], rows: [] };
+  const columns = lines[0].split(",").map((s) => s.trim().replace(/^/, ""));
+  const rows = [];
+  for (const line of lines.slice(1)) {
+    const cells = line.split(",");
+    if (cells.length < 2) continue; // 半行（引擎正在写）跳过，不报错
+    const row = {};
+    columns.forEach((c, i) => {
+      const raw = String(cells[i] == null ? "" : cells[i]).trim();
+      const n = Number(raw);
+      row[c] = raw !== "" && Number.isFinite(n) ? n : raw;
+    });
+    rows.push(row);
+  }
+  return { columns, rows };
+}
+
+/** 抽稀：几千个点画在面板上没意义。等间隔留 ~140 个，但最后一个点必须是真·最后。 */
+function downsample(rows, want) {
+  const n = want || 140;
+  if (rows.length <= n) return rows.slice();
+  const stride = rows.length / n;
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(rows[Math.floor(i * stride)]);
+  if (out[out.length - 1] !== rows[rows.length - 1]) out.push(rows[rows.length - 1]);
+  return out;
+}
+
+/** 曲线要画的列：只画**实际存在**的那些（缺哪列就少一条线，不编）。 */
+function chartColumns(columns) {
+  const has = (c) => columns.includes(c);
+  return {
+    loss: ["train/box_loss", "train/cls_loss", "train/dfl_loss", "train/seg_loss", "train/sem_loss"].filter(has),
+    map: ["metrics/mAP50(B)", "metrics/mAP50-95(B)", "metrics/mAP50(M)", "metrics/mAP50-95(M)"].filter(has),
+  };
+}
+
+/** 显存：`nvidia-smi` 比 import torch 快两个数量级（~0.2s vs ~7s）——轮询只用得起前者。 */
+async function memInfo() {
+  const r = await runOnce("nvidia-smi", ["--query-gpu=memory.total,memory.used", "--format=csv,noheader,nounits"], 8000);
+  if (r.code !== 0) return { ok: false, error: String(r.err || r.out || "nvidia-smi 不可用").slice(0, 160) };
+  const line = String(r.out || "").split(/\r?\n/).find((l) => l.includes(",")) || "";
+  const parts = line.split(",").map((x) => Number(String(x).trim()));
+  if (parts.length < 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return { ok: false, error: "nvidia-smi 输出读不懂" };
+  const total = parts[0];
+  const used = parts[1];
+  return { ok: true, totalMiB: total, usedMiB: used, freeMiB: Math.max(0, total - used), percent: total > 0 ? Math.round((used / total) * 100) : 0 };
+}
+
+/**
+ * 失败归类的规则表。顺序有意义：越具体的排越前面。
+ * 每条都带"下一步做什么"——只说"失败了"的面板等于没说。
+ */
+const FAILURE_KINDS = [
+  {
+    kind: "oom",
+    re: /CUDA out of memory|CUBLAS_STATUS_ALLOC_FAILED|DefaultCPUAllocator|not enough memory|allocation failed/i,
+    label: "显存 / 内存不够",
+    advice: "batch 减半（或填 -1 让引擎自己挑）；workers 保持 0；cache 改 false；或把 imgsz 降一档。",
+  },
+  {
+    kind: "labels",
+    re: /Label length|labels appear corrupt|Segment labels appear|corrupt/i,
+    label: "标注文件不合法",
+    advice: "去数据页点「体检一遍」：越界坐标、非法 token 数、train/val 重名都会以这种方式炸。",
+  },
+  {
+    kind: "path",
+    re: /FileNotFoundError|No such file or directory|找不到|does not exist|not a valid dataset/i,
+    label: "路径或文件缺失",
+    advice: "先看 data.yaml 与权重在不在；数据集没构建就去数据页构建；标注放进 annotations/ 投料口。",
+  },
+  {
+    kind: "version",
+    re: /is not supported for this model|requires .*>=|not a valid YOLO argument|Unrecognized argument/i,
+    label: "版本或参数不匹配",
+    advice: "这代模型 / 这个参数当前这套 ultralytics 不认。看「先看这次会用什么参数」里被丢掉的键，或升级包。",
+  },
+  {
+    kind: "cuda",
+    re: /Torch not compiled with CUDA|no CUDA GPUs are available|no kernel image|CUDA initialization/i,
+    label: "CUDA 用不了",
+    advice: "device 先改成 cpu 跑通流程，或确认这个环境装的是 CUDA 版 torch（概览点「深度自检」）。",
+  },
+  {
+    kind: "download",
+    re: /URLError|getaddrinfo|Failed to establish|Connection (?:reset|aborted)|timed out/i,
+    label: "网络 / 代理不通",
+    advice: "权重下载要出网。代理不对时把 .pt 手动放进 models/ 再选它——面板不替你改网络设置。",
+  },
+];
+
+/** 从日志尾部往前找第一个命中的归类；用户主动停止不算失败。 */
+function classifyFailure(lines) {
+  const list = (Array.isArray(lines) ? lines : []).map((l) => (typeof l === "string" ? l : String((l && l.text) || "")));
+  if (!list.length) return null;
+  const tail = list.slice(-200);
+  if (tail.some((l) => /用户要求停止/.test(l))) return { kind: "stopped", label: "你停掉的", advice: "", matched: "" };
+  for (const f of FAILURE_KINDS) {
+    const hit = tail.slice().reverse().find((l) => f.re.test(l));
+    if (hit) return { kind: f.kind, label: f.label, advice: f.advice, matched: hit.slice(0, 240) };
+  }
+  return { kind: "unknown", label: "没归类出来", advice: "把日志最后 20 行贴出来看；这一类以后可以补进规则表。", matched: "" };
+}
+
+/** 上一次任务的失败结论（跑成功就清掉——留着会让用户以为还在失败）。 */
+let lastFailure = null;
+
+/** 监控一次：在跑/最近一次 run 的曲线、进度、ETA、显存、失败归类。 */
+async function monitor(runName) {
+  needWorkspace();
+  const { effective } = await effectiveConfig();
+  const project = effective.train.project || DEFAULTS.train.project;
+  const runs = scanRuns(project);
+  const name = typeof runName === "string" && runName ? runName : active && active.kind === "train" ? String(effective.train.name || "") : runs[0] ? runs[0].name : "";
+  const brief = runs.slice(0, 12).map((r) => ({ name: r.name, epochs: r.epochs, mAP50: r.metrics ? r.metrics.mAP50M : "", hasBest: r.hasBest, durationText: r.durationText }));
+  if (!name) return { ok: false, error: "还没有训练产物（runs/ 里没找到 results.csv）", runs: brief, rows: [] };
+  const dir = path.join(abs(project), name);
+  let parsed = { columns: [], rows: [] };
+  let exists = false;
+  try {
+    parsed = parseResultsCsv(fs.readFileSync(path.join(dir, "results.csv"), "utf8"));
+    exists = true;
+  } catch {
+    /* 还没写出来：给空曲线而不是报错 */
+  }
+  const rows = parsed.rows;
+  const last = rows.length ? rows[rows.length - 1] : null;
+  const epochs = Number(effective.train.epochs) || 0;
+  const doneEpoch = last ? Number(last.epoch) || rows.length : 0;
+  // ETA 用**实测平均**（累计耗时 / 已完成轮数）。引擎打的那个数含准备数据的时间，第一版偏得离谱
+  const elapsed = last ? Number(last.time) || 0 : 0;
+  const perEpoch = doneEpoch > 0 && elapsed > 0 ? elapsed / doneEpoch : 0;
+  const remain = epochs > 0 && perEpoch > 0 && epochs > doneEpoch ? Math.round((epochs - doneEpoch) * perEpoch) : 0;
+  const mem = await memInfo();
+  const running = active && active.kind === "train" && active.state === "running" ? snapshot(active) : null;
+  return {
+    ok: true,
+    run: name,
+    dir: dir.replace(/\\/g, "/"),
+    exists,
+    epochs,
+    doneEpoch,
+    percent: epochs > 0 ? Math.min(100, Math.round((doneEpoch / epochs) * 100)) : 0,
+    elapsedText: fmtDuration(elapsed),
+    perEpochSec: Number(perEpoch.toFixed(1)),
+    remainText: fmtDuration(remain),
+    columns: parsed.columns,
+    chart: chartColumns(parsed.columns),
+    rows: downsample(rows, 140),
+    lastRow: last,
+    mem,
+    runs: brief,
+    active: running,
+    failure: running ? null : lastFailure,
+  };
+}
+
+// 纯函数导出给测试与将来的复用：`dumpConfig` ↔ `parseSimpleYaml` 必须能原样往返
+// （真正读它的是 Python 的 yaml.safe_load，格式写错的后果是"参数没生效"这种不报错的错）；
 // 参数表也必须是纯映射：喂给它一份"少一个键"的探测结果，它就得少渲染一项（详设 §10 判据 2）。
 export {
   activate,
   buildParamSpec,
+  chartColumns,
+  classifyFailure,
   coerceTrain,
+  downsample,
+  diffArgs,
   dumpConfig,
+  EXPORT_FORMATS,
+  exportAdvice,
+  FAILURE_KINDS,
   fmtDuration,
   inferWeights,
   labelShape,
   MODEL_FAMILIES,
   officialModels,
+  parseLabelFile,
+  parseResultsCsv,
   parseSimpleYaml,
   PARAM_META,
+  readDataYaml,
   resumeGuard,
   taskMismatch,
 };

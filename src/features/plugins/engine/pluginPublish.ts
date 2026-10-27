@@ -23,10 +23,11 @@ const TEXT_NAME = /^(license|copying|notice|readme|changelog|authors|contributin
 /** 图片走 base64 原样上传：市场封面与 README 预览图只认这几种能直接 `<img>` 的。 */
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|ico)$/i;
 /** 运行时产物：本机跑出来的东西，发上去等于把别人的日志与旧版一起搬走。 */
-const RUNTIME_DIR = /^(logs|\.versions|\.incoming|staging|node_modules|\.git)(\/|$)/;
-const RUNTIME_NAME = /\.log$/i;
+const RUNTIME_DIR = /^(logs|\.versions|\.incoming|staging|node_modules|\.git|__pycache__)(\/|$)/;
+const RUNTIME_NAME = /(\.log|\.pyc)$/i;
 
-const MAX_FILES = 10; // 留两个位置给 README + 展示封面；Rust 侧硬顶 12
+const MAX_FILES = 12; // 与 Rust 侧 `github_publish` 的硬顶一致：YOLO 这类包要带 3 个 runner，
+// 上限留余量不够就会**静默跳过 runner**，发出去的插件新增参数全哑——那比发布失败更糟。
 const MAX_DEPTH = 4;
 const MAX_TEXT_BYTES = 512 * 1024;
 /** 单张图的上限。GitHub 的 contents API 这档够用，市场读图侧的上限比这更小。 */

@@ -418,6 +418,13 @@
         border-radius: 999px;
         color: var(--dim);
       }
+      #batchimg img {
+        display: block;
+        max-width: 100%;
+        margin-top: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
     </style>
   </head>
   <body>
@@ -441,6 +448,10 @@
       <button data-tab="overview" class="on">概览</button>
       <button data-tab="data">数据</button>
       <button data-tab="train">训练</button>
+      <button data-tab="monitor">监控</button>
+      <button data-tab="eval">评估</button>
+      <button data-tab="runs">实验</button>
+      <button data-tab="help">帮助</button>
       <button data-tab="deploy">部署</button>
     </nav>
 
@@ -537,6 +548,30 @@
             在 YOLO11 / YOLO26 之间<b>通用</b>，老数据不用重标就能给新一代模型训。
           </p>
         </div>
+        <div class="card">
+          <h2>
+            标注体检
+            <span class="tag" id="audittag">还没体检</span>
+            <button class="btn" id="audit" title="抽最多 400 个标签文件逐项查；一个文件都不写">体检一遍（只读）</button>
+          </h2>
+          <div class="kv" id="auditsum"></div>
+          <div id="auditfind"></div>
+          <p class="note">
+            查的是"开训以后才会咬人"的那几样：越界坐标、空标签、找不到图的标签、类别分布与
+            <code>nc/names</code> 对不对得上、<b>train 与 val 重名（数据泄漏）</b>。
+            体检<b>只读</b>——修标注是你在 X-AnyLabeling 里的事，面板不动你的数据。
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>增强预览</h2>
+          <div id="batchbox"></div>
+          <p class="note">
+            这是<b>引擎自己写出来的</b> <code>train_batch*.jpg</code>——上一次训练真实喂进网络的样本，
+            mosaic / 旋转 / 镜像的效果都在里面。面板不画"假预览"：自己实现一遍增强只会预览出一张
+            和训练不一致的图，那比没有预览更糟。改了增强参数想看到新样子，就跑一轮再回来。
+          </p>
+        </div>
         <p class="note">
           这里只改<b>本次运行</b>的参数。工作区里的 <code>config.yaml</code> 不会被改写——它是你自己的
           基准，插件每次把它读出来当底、再叠上这里的改动，写到 <code>train_runs/&lt;实验&gt;.yaml</code> 那份快照里。
@@ -545,6 +580,58 @@
 
       <!-- ============ 部署 ============ -->
       <section id="tab-deploy" hidden>
+        <div class="card">
+          <h2>
+            导出
+            <span class="tag" id="extag">—</span>
+          </h2>
+          <div class="grid">
+            <label class="wide">
+              要导出的权重
+              <select id="ex_weights"></select>
+            </label>
+            <label>
+              格式
+              <select id="ex_format"></select>
+            </label>
+            <label>
+              imgsz
+              <input id="ex_imgsz" type="number" step="32" min="64" />
+            </label>
+            <label>
+              opset
+              <input id="ex_opset" type="number" step="1" min="0" placeholder="留空 = 引擎默认" />
+            </label>
+            <label>
+              quantize
+              <input id="ex_quantize" placeholder="16 / 8 / w8a16…" />
+            </label>
+            <label class="p bool">
+              <input type="checkbox" id="ex_dynamic" />
+              <span>dynamic 动态尺寸</span>
+            </label>
+            <label class="p bool">
+              <input type="checkbox" id="ex_simplify" checked />
+              <span>simplify 简化图</span>
+            </label>
+            <label class="p bool">
+              <input type="checkbox" id="ex_nms" />
+              <span>把 NMS 融进图里</span>
+            </label>
+          </div>
+          <div class="row" style="margin-top: 10px">
+            <button class="btn primary" id="ex-run">开始导出</button>
+            <button class="btn" id="ex-refresh">读导出历史</button>
+            <span class="note" style="margin: 0">产物落 <code>train_runs/export/</code>；你的 <code>scripts/export_onnx.py</code> 与 <code>05_export_onnx.bat</code> 不动。</span>
+          </div>
+          <div id="ex_advice"></div>
+          <div id="ex_history"></div>
+          <p class="note">
+            速度是<b>拿导出后的那个文件真跑一遍</b>测出来的（含预处理与后处理），不是引擎报的数——
+            端侧真正关心的是"这个文件多少毫秒"。测速样本取自数据集的 val 目录，取不到就只报体积。
+          </p>
+        </div>
+
         <div class="card">
           <h2>部署工具</h2>
           <div class="kv" id="toolkv"></div>
@@ -623,6 +710,198 @@
           <div class="kv" id="jobkv" style="margin-top: 8px"></div>
         </div>
       </section>
+
+      <!-- ============ 监控 ============ -->
+      <section id="tab-monitor" hidden>
+        <div class="card">
+          <h2>
+            <span id="monrun">还没有训练产物</span>
+            <span class="tag" id="montag">—</span>
+            <button class="btn" id="monrefresh" title="重读 results.csv 与显存">刷新曲线</button>
+            <label class="row" style="margin-left:auto; gap:4px; font-size:11px; color:var(--dim)">
+              <input type="checkbox" id="monauto" /> 自动刷新（5 秒）
+            </label>
+          </h2>
+          <div class="kv" id="monkv"></div>
+          <div class="bar" style="margin-top:8px"><i id="monmembar"></i></div>
+          <div class="note" id="monmem"></div>
+        </div>
+
+        <div class="card">
+          <h2>损失</h2>
+          <div id="chartloss"></div>
+          <div class="snap" id="legloss"></div>
+        </div>
+
+        <div class="card">
+          <h2>指标（(B) 是框、(M) 是掩膜）</h2>
+          <div id="chartmap"></div>
+          <div class="snap" id="legmap"></div>
+        </div>
+
+        <div class="card" id="failcard" hidden>
+          <h2>上一次失败的归类</h2>
+          <div class="kv" id="failkv"></div>
+        </div>
+
+        <div class="card">
+          <h2>选一个 run 看它的曲线</h2>
+          <div class="snap" id="runpick"></div>
+          <p class="note">
+            曲线读的是引擎自己写的 <code>runs/&lt;实验&gt;/results.csv</code>——面板不另存一份指标。
+            注意<b>非续训重跑会删重建这个文件</b>，所以"上一次的曲线"没了不是面板丢数据。
+            想在 TensorBoard 里看：先 <code>yolo settings tensorboard=True</code>，再自己起
+            <code>tensorboard --logdir runs</code>（面板不替你装东西，也不替你起进程）。
+          </p>
+        </div>
+      </section>
+
+      <!-- ============ 评估 ============ -->
+      <section id="tab-eval" hidden>
+        <div class="card">
+          <h2>
+            评估
+            <span class="tag" id="evtag">还没评估</span>
+          </h2>
+          <div class="grid">
+            <label class="wide">
+              要评估的权重
+              <select id="ev_weights"></select>
+            </label>
+            <label class="wide">
+              数据集 data.yaml
+              <select id="ev_data"></select>
+            </label>
+            <label>
+              imgsz
+              <input id="ev_imgsz" type="number" step="32" min="64" />
+            </label>
+            <label>
+              置信度阈值 conf
+              <input id="ev_conf" type="number" step="0.05" min="0" max="0.95" />
+            </label>
+            <label>
+              device
+              <input id="ev_device" />
+            </label>
+            <label class="p bool" style="align-self: end">
+              <input type="checkbox" id="ev_errors" />
+              <span>顺带出错例回收（predict + save_crop）</span>
+            </label>
+          </div>
+          <div class="row" style="margin-top: 10px">
+            <button class="btn primary" id="ev-run">开始评估</button>
+            <button class="btn" id="ev-refresh">读最近一次结果</button>
+            <span class="note" style="margin: 0">评估走插件自带的 runner，结果只落 <code>train_runs/eval/</code>；你的 <code>scripts/validate_viz.py</code> 与 <code>runs/</code> 都不动。</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>指标</h2>
+          <div id="ev_metrics"></div>
+          <div class="note" id="ev_when"></div>
+        </div>
+
+        <div class="card">
+          <h2>阈值对照</h2>
+          <div id="ev_conftbl"></div>
+          <p class="note">这张表读的是<b>同一次 val 的 PR 曲线</b>——和 <code>BoxPR_curve.png</code> 同源，所以表和图不会互相打脸。不重复跑 N 遍验证集。</p>
+        </div>
+
+        <div class="card">
+          <h2>图</h2>
+          <div class="snap" id="ev_plots"></div>
+          <div id="ev_img"></div>
+        </div>
+
+        <div class="card" id="ev_errcard" hidden>
+          <h2>错例（拿去 X-AnyLabeling 补标）</h2>
+          <div id="ev_errlist"></div>
+        </div>
+
+        <div class="card">
+          <h2>和另一个 run 比</h2>
+          <div class="row">
+            <select id="cmp_a" style="max-width:260px"></select>
+            <select id="cmp_b" style="max-width:260px"></select>
+            <button class="btn" id="cmp-run">对比</button>
+          </div>
+          <div id="cmpout"></div>
+        </div>
+      </section>
+
+      <!-- ============ 实验 ============ -->
+      <section id="tab-runs" hidden>
+        <div class="card">
+          <h2>
+            实验
+            <span class="tag" id="runtag">—</span>
+            <button class="btn" id="run-refresh">重新读</button>
+          </h2>
+          <div id="runlist"></div>
+          <p class="note">
+            这一页读的是每个 run 里<b>引擎自己写的</b> <code>args.yaml</code> 与 <code>results.csv</code>——面板不另存一份实验记录，
+            所以不会有"面板说训过、盘上找不到"这种事。备注写在 <code>train_runs/&lt;实验&gt;.note</code>，
+            归档复制进 <code>archive/&lt;实验&gt;-&lt;时间&gt;/</code>（<b>只复制，不搬走</b>：搬走会让 <code>runs/</code> 里的历史断档）。
+          </p>
+        </div>
+
+        <div class="card" id="reprocard" hidden>
+          <h2>
+            等价命令
+            <span class="tag" id="reprofor">—</span>
+          </h2>
+          <div id="reproout"></div>
+          <p class="note">
+            这三条都是<b>真能跑的</b>：面板生成快照时用的就是同一份 yaml。存成 .bat 会落在
+            <code>train_runs/bat/</code>——你原来那批 <code>00~07</code> 编号脚本一个字节都不动。
+          </p>
+        </div>
+      </section>
+
+      <!-- ============ 帮助 ============ -->
+      <section id="tab-help" hidden>
+        <div class="card">
+          <h2>这个面板和你的手动流水线是什么关系</h2>
+          <ul class="hints">
+            <li><b>三层配置</b>：工作区 <code>config.yaml</code>（你的基准，面板<b>只读</b>）→ 面板覆盖 <code>.uartix/yolo/config.json</code>（只存与基准不同的键，改回默认时 diff 自己消失）→ 每次实验的完整快照 <code>train_runs/&lt;实验&gt;-&lt;时间&gt;.yaml</code>。</li>
+            <li><b>面板能点的，命令行也跑得起来</b>：训练页的「先看这次会用什么参数」和实验页的「等价命令」给的就是同一份 yaml 的三个入口——插件 runner（吃全部参数）、你自己的 <code>scripts/train.py</code>（只认它那 20 个键）、ultralytics CLI（吃引擎写的 <code>args.yaml</code>）。</li>
+            <li><b>它不改你的东西</b>：<code>config.yaml</code>、<code>scripts/*.py</code>、<code>00~07*.bat</code>、<code>README_使用说明.txt</code> 全程只读；这条不是承诺，是测试（逐文件比 mtime 与内容）。新参数走插件自带的 <code>runner/</code>，所以不需要动你的脚本。</li>
+            <li><b>写只在这几处</b>：<code>.uartix/</code>、<code>annotations/</code>、<code>datasets/</code>、<code>runs/</code>、<code>logs/</code>、<code>models/</code>、<code>train_runs/</code>——就是批准卡上列的那几枚，内核级牢笼，越界直接 <code>ERR_ACCESS_DENIED</code>。</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h2>模型、任务与数据</h2>
+          <ul class="hints">
+            <li><b>只做 YOLO11 与 YOLO26</b>：它们是同一个 <code>ultralytics</code> 包里的两代模型，不是两套环境，所以没有"切环境"这一说，只有"这次用哪一枚权重"。</li>
+            <li><b>老数据不用重标</b>：YOLO 文本标注格式（<code>images/ + labels/ + data.yaml</code>，归一化 <code>class cx cy w h</code>）在这两代之间通用。这是"我手上的老标注还能不能用"的答案。</li>
+            <li><b>标注你自己来</b>：面板不生成、不搬运、不改名、不删任何标注。它只登记一个投料口 <code>annotations/</code>（一个子目录 = 一批），素材夹留空时「构建数据集」直接从这个目录取。</li>
+            <li><b>任务识别只是建议</b>：判据是标签每行的 token 数（5 = 框，1+2N = 多边形）。点了「按建议设置」才会写进配置。9 个 token 时多边形与 OBB 分不开，面板只报出来不替你决定；混合标注按 detect 训会<b>静默丢弃 segments</b>。</li>
+            <li><b>权重与任务不搭会当场拦</b>：拿 detect 权重跑 segment，引擎会拒；面板在开跑前就说清楚，并且不留下半份快照。</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h2>参数面与几个版本坑</h2>
+          <ul class="hints">
+            <li><b>参数表不是抄的</b>：每一项都来自当前这套 <code>ultralytics</code> 的默认表（本机 111 键）。包里没这个键就不出现——所以键改名会自动跟上，不会出现"面板能填、引擎不认"。读不到时降级成最小集并明说。</li>
+            <li><b>没有 <code>half</code> 这个开关</b>：它在 8.4 已被 <code>quantize</code> 取代（导出页有这一项）。旧教程里那行打开半精度的写法在面板里找不到，不是漏了，是引擎不要了。</li>
+            <li><b>续训只认 <code>last.pt</code></b>：<code>best.pt</code> 没有优化器/轮次状态，给它会静默退化；填 <code>true</code> 会让引擎去当前目录猜一个，所以面板要求你填完整路径。<b>跨 ultralytics 版本续训一律不做</b>（官方没有任何保证）。</li>
+            <li><b>数字 / 文字类任务</b>：<code>fliplr</code> / <code>flipud</code> 保持 0（镜像后字就反了），<code>erasing</code>、<code>perspective</code> 慎用。这两项面板会标红提醒。</li>
+            <li><b>这台机器</b>：16G 内存 → <code>workers</code> 保持 0；8G 显存 → <code>batch</code> 可以填 <code>-1</code> 让引擎自己挑，或 OOM 后减半。</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <h2>为什么这次要重新批准</h2>
+          <p class="note">
+            0.3.0 的清单多了两枚写目录（<code>train_runs/</code> 与 <code>annotations/</code>），版本号也变了 ⇒
+            信任指纹变化 ⇒ 会重新弹一次批准卡。这是设计的一部分，不是麻烦：<b>装、启用、发布这三件事永远由你点</b>，
+            面板和 AI 都不替你按。发布到市场是外发行为（源码出去了收不回来），所以那条路只到「打开页面」为止。
+          </p>
+        </div>
+      </section>
     </main>
 
     <div id="logwrap">
@@ -630,6 +909,8 @@
         <span>日志</span>
         <span id="logmeta" class="tag"></span>
         <span class="spacer"></span>
+        <button class="btn" id="logf-all" title="显示全部行">全部</button>
+        <button class="btn" id="logf-err" title="只留 stderr 与工作台自己的行">只看错误</button>
         <button class="btn" id="copylog">复制全部</button>
         <button class="btn" id="clearlog">清屏</button>
       </div>
@@ -674,6 +955,7 @@
         var near = toast.scrollHeight - toast.scrollTop - toast.clientHeight < 40;
         toast.appendChild(frag);
         while (toast.childNodes.length > LOG_MAX) toast.removeChild(toast.firstChild);
+        if (logFilter === "err") applyLogFilter();
         if (near) toast.scrollTop = toast.scrollHeight;
       }
       function sysLog(text) {
@@ -864,7 +1146,7 @@
         if (!dep.cfg) return;
         sysLog("部署开始（" + step + "）：" + dep.cfg);
         try {
-          var job = await uartix.call("deployStart", dep.cfg, step, { deliver: step !== "validate" });
+          var job = await uartix.call("deployStart", { cfgName: dep.cfg, step: step, deliver: step !== "validate" });
           renderJob(job);
         } catch (e) {
           sysLog("[错误] " + String((e && e.message) || e));
@@ -1310,6 +1592,561 @@
           });
       }
 
+      /* ---------------- 标注体检与增强预览（P175-W3）---------------- */
+      var auditResult = null;
+
+      function renderAudit() {
+        var sum = $("auditsum");
+        var find = $("auditfind");
+        var tag = $("audittag");
+        var a = auditResult;
+        if (!a) {
+          sum.innerHTML = '<span class="note">还没体检。开训前跑一遍值得——这几项都是"指标虚高 / 训练直接报错"的常见原因。</span>';
+          find.innerHTML = "";
+          return;
+        }
+        var bad = (a.findings || []).some(function (f) { return f.level === "bad"; });
+        var warn = (a.findings || []).some(function (f) { return f.level === "warn"; });
+        tag.textContent = bad ? "有问题" : warn ? "有隐患" : "干净";
+        tag.className = "tag " + (bad ? "bad" : warn ? "warn" : "ok");
+        var sp = a.splits || {};
+        var dy = a.dataYaml || {};
+        sum.innerHTML =
+          "<b>抽了</b><span>" + a.sampled + " 个标签文件" + (a.truncated ? "（到上限，后面没数完）" : "") + "</span>" +
+          "<b>train / val</b><span>图 " + ((sp.train || {}).images || 0) + " / " + ((sp.val || {}).images || 0) + " · 标签 " + ((sp.train || {}).labels || 0) + " / " + ((sp.val || {}).labels || 0) + "</span>" +
+          "<b>data.yaml</b><span>" + (dy.exists ? "nc " + (dy.nc == null ? "?" : dy.nc) + " · 类别 " + esc((dy.names || []).join("/")) : '<span class="tag warn">还没有 data.yaml</span>') + "</span>" +
+          "<b>形状</b><span>框 " + a.boxes + " · 多边形 " + a.polys + " · 四点 " + a.quads + (a.badLines ? " · 非法行 " + a.badLines : "") + "</span>" +
+          "<b>类别计数</b><span>" + esc(Object.keys(a.classHist || {}).map(function (k) { return k + ":" + a.classHist[k]; }).join("  ") || "-") + "</span>";
+        find.innerHTML = (a.findings || [])
+          .map(function (f) {
+            var c = f.level === "bad" ? "var(--bad)" : f.level === "warn" ? "var(--warn)" : "var(--dim)";
+            return '<div class="note" style="color:' + c + '">· ' + esc(f.text) + "</div>";
+          })
+          .join("");
+      }
+
+      function renderBatches() {
+        var list = st.batches || [];
+        var box = $("batchbox");
+        if (!list.length) {
+          box.innerHTML = '<span class="note">还没有 train_batch（跑一次训练，引擎就会往 runs/&lt;实验&gt;/ 里写一张）</span>';
+          return;
+        }
+        box.innerHTML =
+          list
+            .map(function (b, i) {
+              return '<button class="btn" data-batch="' + i + '" title="' + esc(b.file) + '">' + esc(b.run + " / " + b.name) + " · " + esc(fmtBytes(b.bytes)) + "</button>";
+            })
+            .join("") + '<div id="batchimg" class="note">点一张看细节。</div>';
+        var btns = box.querySelectorAll("[data-batch]");
+        for (var i = 0; i < btns.length; i++) {
+          btns[i].onclick = async function () {
+            var b = list[Number(this.getAttribute("data-batch"))];
+            var host = $("batchimg");
+            host.innerHTML = '<span class="note">读图中…</span>';
+            try {
+              var r = await uartix.call("previewImage", b.file);
+              host.innerHTML = '<img src="' + r.dataUrl + '" alt="' + esc(b.run + " 的增强样本") + '" />';
+            } catch (e) {
+              host.innerHTML = '<span class="note">读不到这张图：' + esc(e && e.message ? e.message : e) + "</span>";
+            }
+          };
+        }
+      }
+
+      /* ---------------- 实验管理（P175-W7）---------------- */
+      var runsList = [];
+
+      function loadRuns() {
+        $("runtag").textContent = "读中…";
+        uartix
+          .call("experiments")
+          .then(function (r) {
+            runsList = r.runs || [];
+            $("runtag").textContent = runsList.length + " 个 run";
+            $("runtag").className = "tag" + (runsList.length ? " ok" : "");
+            renderRuns();
+          })
+          .catch(function (e) {
+            $("runtag").textContent = "读不到";
+            $("runtag").className = "tag bad";
+          });
+      }
+
+      function renderRuns() {
+        if (!runsList.length) {
+          $("runlist").innerHTML = '<span class="note">还没有 run。训练页点「开始训练」就会产出。</span>';
+          return;
+        }
+        var h =
+          '<div class="tablewrap"><table><thead><tr><th>实验</th><th>任务</th><th>模型</th><th>轮次</th><th>mAP50(B)</th><th>mAP50(M)</th><th>用时</th><th>交付</th><th>备注</th><th></th></tr></thead><tbody>';
+        for (var i = 0; i < runsList.length; i++) {
+          var r = runsList[i];
+          h +=
+            "<tr><td class=\"name\" title=\"" + esc(r.dir) + '">' + esc(r.name) + "</td>" +
+            "<td>" + esc(r.task || "—") + '</td><td class="name" title="' + esc(r.model) + '">' + esc(String(r.model || "").split("/").pop() || "—") + "</td>" +
+            '<td class="num">' + r.epochs + '</td><td class="num">' + esc(fmtNum(r.mAP50)) + '</td><td class="num">' + esc(fmtNum(r.mAP50M)) + "</td>" +
+            '<td class="num">' + esc(r.durationText || "—") + "</td>" +
+            "<td>" + (r.delivered ? '<span class="tag ok">已交付</span>' : '<span class="tag">—</span>') + "</td>" +
+            '<td><input id="note_' + i + '" value="' + esc(r.note || "") + '" placeholder="这一版改了什么" style="min-width:160px" /></td>' +
+            "<td>" +
+            '<button class="btn" data-note="' + i + '">存备注</button> ' +
+            '<button class="btn" data-repro="' + i + '">等价命令</button> ' +
+            '<button class="btn" data-arch="' + i + '">归档</button>' +
+            "</td></tr>";
+        }
+        $("runlist").innerHTML = h + "</tbody></table></div>";
+        var box = $("runlist");
+        box.querySelectorAll("[data-note]").forEach(function (b) {
+          b.onclick = async function () {
+            var i = Number(b.getAttribute("data-note"));
+            var r = runsList[i];
+            try {
+              await uartix.call("saveNote", { run: r.name, text: $("note_" + i).value });
+              sysLog("备注已存到 train_runs/" + r.name + ".note");
+              loadRuns();
+            } catch (e) {
+              sysLog("存备注失败：" + (e && e.message ? e.message : e));
+            }
+          };
+        });
+        box.querySelectorAll("[data-repro]").forEach(function (b) {
+          b.onclick = function () {
+            showRepro(runsList[Number(b.getAttribute("data-repro"))]);
+          };
+        });
+        box.querySelectorAll("[data-arch]").forEach(function (b) {
+          b.onclick = async function () {
+            var r = runsList[Number(b.getAttribute("data-arch"))];
+            try {
+              var out = await uartix.call("archiveRun", { run: r.name });
+              sysLog("已归档（复制）到 " + out.dst + "：" + out.copied.join("、"));
+            } catch (e) {
+              sysLog("归档失败：" + (e && e.message ? e.message : e));
+            }
+          };
+        });
+      }
+
+      function showRepro(r) {
+        uartix
+          .call("repro", { run: r.name })
+          .then(function (x) {
+            $("reprocard").hidden = false;
+            $("reprofor").textContent = r.name;
+            $("reproout").innerHTML = x.commands
+              .map(function (c) {
+                return (
+                  '<div class="kv" style="margin-top:6px"><b>' +
+                  esc(c.label) +
+                  '</b><span style="white-space:pre-wrap">' +
+                  esc(c.cmd) +
+                  '</span></div><button class="btn" data-bat="' +
+                  esc(c.id) +
+                  '">存成 .bat</button>'
+                );
+              })
+              .join("") +
+              '<div class="note">快照会写到 ' + esc(x.snapshot) + "</div>";
+            $("reproout").querySelectorAll("[data-bat]").forEach(function (b) {
+              b.onclick = async function () {
+                try {
+                  var out = await uartix.call("saveReproBat", { run: r.name, which: b.getAttribute("data-bat") });
+                  sysLog("已存复现脚本：" + out.file);
+                } catch (e) {
+                  sysLog("存脚本失败：" + (e && e.message ? e.message : e));
+                }
+              };
+            });
+          })
+          .catch(function (e) {
+            sysLog("读等价命令失败：" + (e && e.message ? e.message : e));
+          });
+      }
+
+      /* ---------------- 导出与端侧（P175-W6）---------------- */
+      var exState = null;
+
+      function exForm() {
+        return {
+          weights: $("ex_weights").value,
+          format: $("ex_format").value,
+          imgsz: Number($("ex_imgsz").value) || 640,
+          opset: Number($("ex_opset").value) || 0,
+          quantize: $("ex_quantize").value.trim(),
+          dynamic: $("ex_dynamic").checked,
+          simplify: $("ex_simplify").checked,
+          nms: $("ex_nms").checked,
+        };
+      }
+
+      function exTaskOf(file) {
+        if (!exState) return "";
+        var hit = (exState.weights || []).find(function (w) { return w.file === file; });
+        return hit && hit.task ? hit.task : "";
+      }
+
+      function loadExport() {
+        uartix
+          .call("exportState")
+          .then(function (r) {
+            exState = r;
+            renderExportForm(r);
+            renderExportHistory(r.history);
+            checkAdvice();
+          })
+          .catch(function (e) {
+            $("extag").textContent = "读不到导出状态";
+            $("extag").className = "tag bad";
+          });
+      }
+
+      function renderExportForm(r) {
+        var ws = uniq((r.bests || []).concat([])).concat((r.weights || []).map(function (m) { return { v: m.file, t: m.name + (m.task ? " · " + m.task : "") }; }));
+        fillSelect($("ex_weights"), uniq(ws), r.last && r.last.weights ? r.last.weights : (r.current || {}).weights);
+        var fs = (r.formats || []).map(function (f) { return { v: f.id, t: f.label + (f.needs ? "（要 " + f.needs + "）" : "") }; });
+        fillSelect($("ex_format"), fs, (r.current || {}).format || "onnx");
+        if (!$("ex_imgsz").value) $("ex_imgsz").value = (r.current || {}).imgsz || 640;
+      }
+
+      function renderExportHistory(list) {
+        var rows = list || [];
+        if (!rows.length) {
+          $("ex_history").innerHTML = '<span class="note">还没有导出记录。</span>';
+          return;
+        }
+        $("ex_history").innerHTML =
+          '<div class="tablewrap"><table><thead><tr><th>时间</th><th>格式</th><th>体积</th><th>速度</th><th>产物</th></tr></thead><tbody>' +
+          rows
+            .map(function (h) {
+              var sp = h.speed || {};
+              return (
+                "<tr><td class=\"num\">" + esc(h.name) + "</td><td>" + esc(h.format) + " · " + esc(h.task || "?") + '</td><td class="num">' + esc(fmtBytes(h.bytes || 0)) + "</td><td>" +
+                (sp.ok ? esc(sp.msPerImage + " ms/图 · " + sp.fps + " fps") : '<span class="tag">没测到</span>') +
+                '</td><td class="name" title="' + esc(h.file) + '">' + esc(String(h.file || "").split("/").pop()) + "</td></tr>"
+              );
+            })
+            .join("") +
+          "</tbody></table></div>";
+      }
+
+      function checkAdvice() {
+        var f = exForm();
+        uartix
+          .call("exportCheck", { format: f.format, task: exTaskOf(f.weights), dynamic: f.dynamic, opset: f.opset, nms: f.nms })
+          .then(function (r) {
+            var a = r.advice || [];
+            $("ex_advice").innerHTML = a.length
+              ? a
+                  .map(function (x) {
+                    var c = x.level === "bad" ? "var(--bad)" : x.level === "warn" ? "var(--warn)" : "var(--dim)";
+                    return '<div class="note" style="color:' + c + '">· ' + esc(x.text) + "</div>";
+                  })
+                  .join("")
+              : "";
+          })
+          .catch(function () {});
+      }
+
+      /* ---------------- 评估与对比（P175-W5）---------------- */
+      var evState = null;
+
+      function uniq(list) {
+        var seen = {};
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+          var k = list[i].v;
+          if (!k || seen[k]) continue;
+          seen[k] = 1;
+          out.push(list[i]);
+        }
+        return out;
+      }
+
+      function fillSelect(sel, opts, current) {
+        var h = "";
+        for (var i = 0; i < opts.length; i++) {
+          h += '<option value="' + esc(opts[i].v) + '"' + (opts[i].v === current ? " selected" : "") + ">" + esc(opts[i].t) + "</option>";
+        }
+        sel.innerHTML = h || '<option value="">（没有可选项）</option>';
+      }
+
+      function loadEval() {
+        uartix
+          .call("evalState")
+          .then(function (r) {
+            evState = r;
+            renderEvalForm(r);
+            renderEval(r.last);
+          })
+          .catch(function (e) {
+            $("evtag").textContent = "读不到评估状态";
+            $("evtag").className = "tag bad";
+            sysLog("读评估状态失败：" + (e && e.message ? e.message : e));
+          });
+      }
+
+      function renderEvalForm(r) {
+        var opts = [];
+        (r.bests || []).forEach(function (b) {
+          opts.push({ v: b.file, t: "run " + b.run + " 的 best.pt" + (b.mAP50 ? " · mAP50 " + b.mAP50 : "") });
+        });
+        (r.weights || []).forEach(function (m) {
+          opts.push({ v: m.file, t: m.name + (m.task ? " · " + m.task : "") });
+        });
+        var cur = r.last && r.last.weights ? r.last.weights : "";
+        fillSelect($("ev_weights"), uniq(opts), cur);
+        var ds = (r.datasets || []).map(function (d) { return { v: d.dataYaml, t: d.name + "（train " + d.train + " / val " + d.val + "）" }; });
+        fillSelect($("ev_data"), ds, r.last && r.last.data ? r.last.data : (r.current || {}).data);
+        if (!$("ev_imgsz").value) $("ev_imgsz").value = (r.current || {}).imgsz || 640;
+        if (!$("ev_conf").value) $("ev_conf").value = r.last && r.last.conf ? r.last.conf : 0.25;
+        if (!$("ev_device").value) $("ev_device").value = String((r.current || {}).device == null ? "0" : r.current.device);
+        var runs = (st.runs || []).map(function (x) { return { v: x.name, t: x.name }; });
+        fillSelect($("cmp_a"), runs, runs[0] ? runs[0].v : "");
+        fillSelect($("cmp_b"), runs, runs[1] ? runs[1].v : "");
+      }
+
+      function renderEval(res) {
+        if (!res) {
+          $("ev_metrics").innerHTML = '<span class="note">还没有评估结果。选一枚权重点「开始评估」——一次 val 就能拿到指标、阈值表和那几张图。</span>';
+          $("ev_conftbl").innerHTML = "";
+          $("ev_plots").innerHTML = "";
+          $("ev_img").innerHTML = "";
+          $("ev_errcard").hidden = true;
+          return;
+        }
+        $("evtag").textContent = "ultralytics 任务 " + (res.task || "?");
+        $("evtag").className = "tag ok";
+        var m = res.metrics || {};
+        var keys = Object.keys(m).sort();
+        $("ev_metrics").innerHTML =
+          '<div class="tablewrap"><table><thead><tr><th>指标</th><th>值</th></tr></thead><tbody>' +
+          keys.map(function (k) { return "<tr><td>" + esc(k) + '</td><td class="num">' + Number(m[k]).toFixed(4) + "</td></tr>"; }).join("") +
+          (res.speedMs ? '<tr><td>速度</td><td class="num">' + Number(res.speedMs).toFixed(1) + " ms/图</td></tr>" : "") +
+          "</tbody></table></div>" +
+          '<div class="note">权重 ' + esc(res.weights) + " · 数据 " + esc(res.data) + " · imgsz " + esc(res.imgsz) + " · conf " + esc(res.conf) + "</div>";
+        $("ev_when").textContent = "结果目录：" + (res.out || "");
+        var t = res.confTable || [];
+        $("ev_conftbl").innerHTML = t.length
+          ? '<div class="tablewrap"><table><thead><tr><th>conf</th><th>精确率</th><th>召回率</th></tr></thead><tbody>' +
+            t.map(function (r) { return "<tr><td class=\"num\">" + r.conf + '</td><td class="num">' + r.precision + '</td><td class="num">' + r.recall + "</td></tr>"; }).join("") +
+            "</tbody></table></div>"
+          : '<span class="note">这次没拿到 PR 曲线（老结果或引擎没画）</span>';
+        var plots = res.plots || [];
+        $("ev_plots").innerHTML = plots.length
+          ? plots.map(function (p) { return '<button class="btn" data-plot="' + esc(p) + '">' + esc(p) + "</button>"; }).join("")
+          : '<span class="note">这次没出图（plots 可能被关了）</span>';
+        var btns = $("ev_plots").querySelectorAll("[data-plot]");
+        for (var i = 0; i < btns.length; i++) {
+          btns[i].onclick = function () {
+            var name = this.getAttribute("data-plot");
+            $("ev_img").innerHTML = '<span class="note">读图中…</span>';
+            uartix
+              .call("evalImage", { dir: res.out, name: name })
+              .then(function (r) {
+                $("ev_img").innerHTML = '<img src="' + r.dataUrl + '" alt="' + esc(name) + '" style="display:block;max-width:100%;margin-top:8px;border:1px solid var(--line);border-radius:8px" />';
+              })
+              .catch(function (e) {
+                $("ev_img").innerHTML = '<span class="note">读不到：' + esc(e && e.message ? e.message : e) + "</span>";
+              });
+          };
+        }
+        var errs = res.errors || [];
+        $("ev_errcard").hidden = !errs.length;
+        if (errs.length) {
+          $("ev_errlist").innerHTML =
+            '<div class="note">共 ' + errs.length + " 张（最多列这么多）。把这些图拿去补标，回来重新构建数据集。</div>" +
+            '<div class="tablewrap"><table><thead><tr><th>#</th><th>预测框</th><th>类别</th><th>图</th></tr></thead><tbody>' +
+            errs.map(function (e, i) { return "<tr><td class=\"num\">" + (i + 1) + '</td><td class="num">' + e.boxes + "</td><td>" + esc((e.names || []).join(",")) + '</td><td class="name" title="' + esc(e.image) + '">' + esc(e.image.split("/").pop()) + "</td></tr>"; }).join("") +
+            "</tbody></table></div>";
+        }
+      }
+
+      async function runCompare() {
+        var a = $("cmp_a").value;
+        var b = $("cmp_b").value;
+        if (!a || !b || a === b) {
+          $("cmpout").innerHTML = '<span class="note">要选两个不同的 run 才能对比。</span>';
+          return;
+        }
+        try {
+          var r = await uartix.call("compareRuns", { a: a, b: b });
+          var one = function (side) {
+            var rows = side.rows || [];
+            var cols = ((side.chart || {}).map || []).slice(0, 2);
+            return "<div>" + esc(side.name) + "</div>" + sparkline(rows, cols);
+          };
+          var d = (r.diff || []).filter(function (x) { return ["weights", "model", "data", "project", "name", "seed"].indexOf(x.key) < 0; });
+          $("cmpout").innerHTML =
+            '<div class="row" style="align-items:flex-start;gap:16px"><div style="flex:1 1 300px">' + one(r.a) + '</div><div style="flex:1 1 300px">' + one(r.b) + "</div></div>" +
+            '<div class="note">A mAP50(B) ' + esc(fmtNum(r.summary.a.mAP50B)) + " · B " + esc(fmtNum(r.summary.b.mAP50B)) + " ｜ A mAP50(M) " + esc(fmtNum(r.summary.a.mAP50M)) + " · B " + esc(fmtNum(r.summary.b.mAP50M)) + "</div>" +
+            (d.length
+              ? '<div class="tablewrap"><table><thead><tr><th>参数</th><th>A</th><th>B</th></tr></thead><tbody>' +
+                d.map(function (x) { return "<tr><td>" + esc(x.key) + '</td><td class="num">' + esc(String(x.a)) + '</td><td class="num">' + esc(String(x.b)) + "</td></tr>"; }).join("") +
+                "</tbody></table></div>"
+              : '<span class="note">两份 args.yaml 的标量参数没有差异（除了路径类的那几项）。</span>');
+        } catch (e) {
+          $("cmpout").innerHTML = '<span class="note">对比失败：' + esc(e && e.message ? e.message : e) + "</span>";
+        }
+      }
+
+      /* ---------------- 监控（P175-W4）---------------- */
+      var mon = null;
+      var monTimer = 0;
+      var CHART_COLORS = ["var(--accent)", "var(--ok)", "var(--warn)", "var(--bad)", "var(--dim)", "var(--faint)"];
+
+      function sparkline(rows, cols) {
+        if (!rows || !rows.length || !cols.length) {
+          return '<span class="note">' + (cols.length ? "还没有数据（results.csv 是空的或还没写出来）" : "这份 results.csv 里没有对应的列") + "</span>";
+        }
+        var W = 620;
+        var H = 150;
+        var P = 30;
+        var max = -Infinity;
+        var min = Infinity;
+        for (var i = 0; i < rows.length; i++) {
+          for (var j = 0; j < cols.length; j++) {
+            var v0 = Number(rows[i][cols[j]]);
+            if (isFinite(v0)) {
+              if (v0 > max) max = v0;
+              if (v0 < min) min = v0;
+            }
+          }
+        }
+        if (!isFinite(min)) return '<span class="note">这些列在这份 csv 里都没有数值</span>';
+        if (max === min) max = min + 1;
+        var xs = function (i) { return P + (rows.length > 1 ? (i * (W - P - 10)) / (rows.length - 1) : 0); };
+        var ys = function (v) { return H - 18 - ((v - min) * (H - 34)) / (max - min); };
+        var g =
+          '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:150px" role="img" aria-label="曲线">' +
+          '<line x1="' + P + '" y1="' + (H - 18) + '" x2="' + (W - 10) + '" y2="' + (H - 18) + '" stroke="var(--line)" stroke-width="1"/>' +
+          '<text x="2" y="12" fill="var(--faint)" font-size="9">' + esc(fmtNum(max)) + "</text>" +
+          '<text x="2" y="' + (H - 20) + '" fill="var(--faint)" font-size="9">' + esc(fmtNum(min)) + "</text>";
+        for (var c = 0; c < cols.length; c++) {
+          var pts = [];
+          for (var r = 0; r < rows.length; r++) {
+            var v = Number(rows[r][cols[c]]);
+            if (isFinite(v)) pts.push(xs(r).toFixed(1) + "," + ys(v).toFixed(1));
+          }
+          if (!pts.length) continue;
+          g += '<polyline fill="none" stroke="' + CHART_COLORS[c % CHART_COLORS.length] + '" stroke-width="1.6" points="' + pts.join(" ") + '"/>';
+        }
+        g += "</svg>";
+        return g;
+      }
+
+      function fmtNum(v) {
+        var n = Number(v);
+        if (!isFinite(n)) return "-";
+        return Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(3);
+      }
+
+      function legend(rows, cols) {
+        if (!rows || !rows.length) return "";
+        var last = rows[rows.length - 1];
+        return cols
+          .map(function (c, i) {
+            return (
+              '<span class="pill"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' +
+              CHART_COLORS[i % CHART_COLORS.length] +
+              ';margin-right:5px"></i>' +
+              esc(c) + " " + esc(fmtNum(last[c])) + "</span>"
+            );
+          })
+          .join("");
+      }
+
+      function renderMonitor() {
+        var m = mon;
+        if (!m) return;
+        $("monrun").textContent = m.ok ? "run：" + m.run : "没有训练产物";
+        $("montag").textContent = m.active ? "在跑" : m.ok ? (m.exists ? "已落盘" : "还没写出 csv") : "空";
+        $("montag").className = "tag " + (m.active ? "ok" : m.ok && m.exists ? "" : "warn");
+        if (!m.ok) {
+          $("monkv").innerHTML = '<span class="note">' + esc(m.error || "") + "</span>";
+          $("chartloss").innerHTML = "";
+          $("chartmap").innerHTML = "";
+          $("legloss").innerHTML = "";
+          $("legmap").innerHTML = "";
+          $("failcard").hidden = !m.failure;
+          $("runpick").innerHTML = "";
+          return;
+        }
+        var lr = m.lastRow || {};
+        $("monkv").innerHTML =
+          "<b>轮次</b><span>" + m.doneEpoch + " / " + (m.epochs || "?") + "（" + m.percent + "%）</span>" +
+          "<b>已用</b><span>" + esc(m.elapsedText || "—") + (m.perEpochSec ? " · 平均 " + m.perEpochSec + " 秒/轮" : "") + "</span>" +
+          "<b>预计剩余</b><span>" + esc(m.remainText || "—") + "</span>" +
+          "<b>mAP50 / mAP50-95</b><span>" + esc(fmtNum(lr["metrics/mAP50(B)"])) + " / " + esc(fmtNum(lr["metrics/mAP50-95(B)"])) +
+          (lr["metrics/mAP50(M)"] !== undefined ? " · 掩膜 " + esc(fmtNum(lr["metrics/mAP50(M)"])) + " / " + esc(fmtNum(lr["metrics/mAP50-95(M)"])) : "") +
+          "</span>" +
+          "<b>产物目录</b><span>" + esc(m.dir) + "</span>";
+        var mem = m.mem || {};
+        $("monmembar").style.width = (mem.ok ? mem.percent : 0) + "%";
+        $("monmembar").style.background = mem.ok && mem.percent > 90 ? "var(--bad)" : "var(--accent)";
+        $("monmem").textContent = mem.ok
+          ? "显存 " + mem.usedMiB + " / " + mem.totalMiB + " MiB（" + mem.percent + "%）" + (mem.percent > 90 ? " —— 快满了，batch 再大会 OOM" : "")
+          : "显存读不到：" + esc(mem.error || "");
+        var rows = m.rows || [];
+        $("chartloss").innerHTML = sparkline(rows, (m.chart || {}).loss || []);
+        $("legloss").innerHTML = legend(rows, (m.chart || {}).loss || []);
+        $("chartmap").innerHTML = sparkline(rows, (m.chart || {}).map || []);
+        $("legmap").innerHTML = legend(rows, (m.chart || {}).map || []);
+        var f = m.failure;
+        $("failcard").hidden = !f;
+        if (f) {
+          $("failkv").innerHTML =
+            "<b>归类</b><span>" + esc(f.label) + "</span>" +
+            "<b>下一步</b><span>" + esc(f.advice || "—") + "</span>" +
+            (f.matched ? "<b>命中的日志</b><span>" + esc(f.matched) + "</span>" : "");
+        }
+        var runs = m.runs || [];
+        $("runpick").innerHTML = runs.length
+          ? runs
+              .map(function (r) {
+                return (
+                  '<button class="btn" data-run="' + esc(r.name) + '"' + (r.name === m.run ? ' style="border-color:var(--accent)"' : "") + ">" +
+                  esc(r.name) + '<span style="opacity:.6"> ' + r.epochs + " 轮 · mAP50 " + esc(r.mAP50 || "-") + "</span></button>"
+                );
+              })
+              .join("")
+          : '<span class="note">runs/ 里还没有产物</span>';
+        var btns = $("runpick").querySelectorAll("[data-run]");
+        for (var i = 0; i < btns.length; i++) {
+          btns[i].onclick = function () {
+            loadMonitor(this.getAttribute("data-run"));
+          };
+        }
+      }
+
+      function loadMonitor(runName) {
+        uartix
+          .call("monitor", typeof runName === "string" ? runName : "")
+          .then(function (m) {
+            mon = m;
+            renderMonitor();
+          })
+          .catch(function (e) {
+            $("montag").textContent = "读不到";
+            $("montag").className = "tag bad";
+          });
+      }
+
+      /* ---------------- 日志过滤 ---------------- */
+      var logFilter = "all";
+
+      function applyLogFilter() {
+        var kids = toast.childNodes;
+        for (var i = 0; i < kids.length; i++) {
+          var el = kids[i];
+          if (!el || !el.className) continue;
+          var bad = el.className.indexOf("err") >= 0 || el.className.indexOf("sys") >= 0;
+          el.style.display = logFilter === "err" && !bad ? "none" : "";
+        }
+        $("logf-all").className = "btn" + (logFilter === "all" ? " primary" : "");
+        $("logf-err").className = "btn" + (logFilter === "err" ? " primary" : "");
+      }
+
       function renderAll(s) {
         st = s;
         renderEnv();
@@ -1319,6 +2156,8 @@
         renderTrainParams();
         renderSnapshots();
         renderIntake();
+        renderAudit();
+        renderBatches();
         // renderJob 先跑：它负责 `running` 这个状态；renderTask 要在它之后才能正确地置灰
         renderJob(s.active || (s.jobs && s.jobs.length ? s.jobs[s.jobs.length - 1] : null));
         renderTask();
@@ -1382,7 +2221,31 @@
           j._doneShown = true;
           sysLog(j.label + "：" + (j.state === "succeeded" ? "完成" : "失败（退出码 " + j.code + "）"));
           refresh(true);
+          if (j.kind === "eval") loadMonitor(""); // 评估不产曲线，但失败归类要跟着刷新
         }
+      });
+      uartix.on("eval", function (p) {
+        if (!p) return;
+        if (p.result) {
+          renderEval(p.result);
+          sysLog("评估结果已回来：" + Object.keys(p.result.metrics || {}).length + " 项指标");
+        } else {
+          $("evtag").textContent = "评估没拿到结果";
+          $("evtag").className = "tag bad";
+        }
+        loadEval();
+      });
+      uartix.on("export", function (p) {
+        if (!p) return;
+        if (p.result) {
+          $("extag").textContent = p.result.format + " · " + fmtBytes(p.result.bytes || 0);
+          $("extag").className = "tag ok";
+          sysLog("导出完成：" + p.result.file);
+        } else {
+          $("extag").textContent = "导出没拿到结果";
+          $("extag").className = "tag bad";
+        }
+        loadExport();
       });
 
       /* ---------------- 按钮 ---------------- */
@@ -1390,13 +2253,23 @@
       for (var i = 0; i < tabs.length; i++) {
         tabs[i].onclick = function () {
           var name = this.getAttribute("data-tab");
-          if (name === "deploy") loadDeploy();
+          if (name === "deploy") {
+            loadDeploy();
+            loadExport();
+          }
           for (var k = 0; k < tabs.length; k++) tabs[k].className = tabs[k].getAttribute("data-tab") === name ? "on" : "";
           $("tab-overview").hidden = name !== "overview";
           $("tab-data").hidden = name !== "data";
           $("tab-train").hidden = name !== "train";
+          $("tab-monitor").hidden = name !== "monitor";
+          $("tab-eval").hidden = name !== "eval";
+          $("tab-runs").hidden = name !== "runs";
+          $("tab-help").hidden = name !== "help";
           /* R16：部署是第四块 section，这里原来只切三块——点了「部署」什么都不显示。 */
           $("tab-deploy").hidden = name !== "deploy";
+          if (name === "monitor") loadMonitor("");
+          if (name === "eval") loadEval();
+          if (name === "runs") loadRuns();
         };
       }
       $("reload").onclick = function () {
@@ -1433,6 +2306,91 @@
       };
       $("intake-refresh").onclick = function () {
         refresh(false);
+      };
+      $("monrefresh").onclick = function () {
+        loadMonitor(mon && mon.ok ? mon.run : "");
+      };
+      $("ev-refresh").onclick = function () {
+        loadEval();
+      };
+      $("ex-refresh").onclick = function () {
+        loadExport();
+      };
+      $("run-refresh").onclick = function () {
+        loadRuns();
+      };
+      $("ex-run").onclick = async function () {
+        var f = exForm();
+        if (!f.weights) {
+          sysLog("先选一枚要导出的权重");
+          return;
+        }
+        $("extag").textContent = "导出中…";
+        $("extag").className = "tag";
+        try {
+          await uartix.call("exportStart", f);
+          sysLog("导出已开始，产物在 train_runs/export/");
+        } catch (e) {
+          $("extag").textContent = "导出没起来";
+          $("extag").className = "tag bad";
+          sysLog("导出失败：" + (e && e.message ? e.message : e));
+        }
+      };
+      ["ex_format", "ex_weights", "ex_dynamic", "ex_opset", "ex_nms"].forEach(function (id) {
+        $(id).onchange = checkAdvice;
+      });
+      $("cmp-run").onclick = function () {
+        runCompare();
+      };
+      $("ev-run").onclick = async function () {
+        if (!$("ev_weights").value) {
+          sysLog("先选一枚要评估的权重");
+          return;
+        }
+        $("evtag").textContent = "评估中…";
+        $("evtag").className = "tag";
+        try {
+          var j = await uartix.call("evalStart", {
+            weights: $("ev_weights").value,
+            data: $("ev_data").value,
+            imgsz: Number($("ev_imgsz").value) || 640,
+            conf: Number($("ev_conf").value),
+            device: $("ev_device").value.trim(),
+            errors: $("ev_errors").checked,
+          });
+          sysLog("评估已开始，结果会落到 " + (j.dir || "train_runs/eval/"));
+        } catch (e) {
+          $("evtag").textContent = "评估没起来";
+          $("evtag").className = "tag bad";
+          sysLog("评估失败：" + (e && e.message ? e.message : e));
+        }
+      };
+      $("monauto").onchange = function () {
+        if (monTimer) {
+          clearInterval(monTimer);
+          monTimer = 0;
+        }
+        if (this.checked) monTimer = setInterval(function () { loadMonitor(mon && mon.ok ? mon.run : ""); }, 5000);
+      };
+      $("logf-all").onclick = function () {
+        logFilter = "all";
+        applyLogFilter();
+      };
+      $("logf-err").onclick = function () {
+        logFilter = "err";
+        applyLogFilter();
+      };
+      $("audit").onclick = async function () {
+        $("audittag").textContent = "体检中…";
+        $("audittag").className = "tag";
+        try {
+          auditResult = await uartix.call("audit", "");
+          renderAudit();
+        } catch (e) {
+          $("audittag").textContent = "体检失败";
+          $("audittag").className = "tag bad";
+          sysLog("体检失败：" + (e && e.message ? e.message : e));
+        }
       };
       $("intake-make").onclick = async function () {
         try {
