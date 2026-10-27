@@ -1083,6 +1083,12 @@ select {
    而 `select.input option` 是 3 段——弹层列表不是可被 AI 单类覆写的基元，不该占那个台阶。 */
 select {
   appearance: base-select;
+  /* base-select 把收起态画成 button，而 button 是会换行的：选项一长（"双重累加 Sum+Add (匿名V7)"）
+     就折成第二行、把整枚控件顶高一档，同一行里的输入框还在 24px ⇒ 看起来像"文字跑到框外面"。
+     收起态只该有一行：读不完用省略号收口，展开弹层里本来就看得到全称。 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 弹层盒：与九类展开菜单同一条脸（值与 .tb-menu 等菜单类实测逐项相同）。
