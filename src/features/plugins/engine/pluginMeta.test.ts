@@ -33,6 +33,26 @@ describe("展示信息", () => {
     expect("version" in (m as object)).toBe(false);
   });
 
+  it("记住发布到过哪个仓库；形状不对就当没记过", () => {
+    setPluginMeta("a.b", { publishedRepo: "Tanixs/uartix.yolo" });
+    expect(getPluginMeta("a.b")?.publishedRepo).toBe("Tanixs/uartix.yolo");
+
+    // 存成 URL / 带空格 / 只有一段：都不是 `owner/name`，下次打开该退回"没记过"，
+    // 而不是把一坨脏字符串再填回输入框让用户以为是自己写错的
+    setPluginMeta("a.b", { publishedRepo: "https://github.com/Tanixs/x" });
+    expect(getPluginMeta("a.b")?.publishedRepo).toBeUndefined();
+    setPluginMeta("a.b", { publishedRepo: "Tanixs" });
+    expect(getPluginMeta("a.b")?.publishedRepo).toBeUndefined();
+  });
+
+  it("发布记录不挤掉展示字段，也不被展示字段抹掉", () => {
+    setPluginMeta("a.b", { name: "我的插件" });
+    setPluginMeta("a.b", { publishedRepo: "o/r" });
+    expect(getPluginMeta("a.b")).toMatchObject({ name: "我的插件", publishedRepo: "o/r" });
+    setPluginMeta("a.b", { name: undefined });
+    expect(getPluginMeta("a.b")?.publishedRepo).toBe("o/r");
+  });
+
   it("缺省回落清单；非法 id 拒绝", () => {
     expect(metaName("原名")).toBe("原名");
     expect(metaDescription("原描述", undefined)).toBe("原描述");

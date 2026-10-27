@@ -24,6 +24,14 @@ export interface PluginMeta {
   homepage?: string;
   cover?: string;
   screenshots?: string[];
+  /**
+   * 这台机器上次把它发布到了哪个仓库（`owner/name`）。
+   *
+   * 放这里而不是账本里：它是"用户在这台机器上的一个选择"，不是包的内容，也不参与信任指纹。
+   * 存在的理由是那条「仓库名」输入框——以前每次打开都从插件 id 现推一遍，
+   * 于是"我明明发到 uartix.yolo 了，再点发布又变回 yolo"。
+   */
+  publishedRepo?: string;
   updatedAt: number;
 }
 
@@ -53,6 +61,9 @@ function cleanImage(v: unknown, max: number): string | undefined {
   return dataUrlBytes(v) <= max ? v : undefined;
 }
 
+/** `owner/name`：只认 GitHub 允许的那串字符，别的形状（URL、带空格）一律当没记过。 */
+const OWNER_REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+
 function normalizeMeta(raw: unknown): PluginMeta | null {
   if (!isObj(raw)) return null;
   const cover = cleanImage(raw.cover, MAX_COVER_BYTES);
@@ -71,6 +82,9 @@ function normalizeMeta(raw: unknown): PluginMeta | null {
       : {}),
     ...(cover ? { cover } : {}),
     ...(screenshots.length ? { screenshots } : {}),
+    ...(typeof raw.publishedRepo === "string" && OWNER_REPO_RE.test(raw.publishedRepo.trim())
+      ? { publishedRepo: raw.publishedRepo.trim().slice(0, 120) }
+      : {}),
     updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : 0,
   };
   return Object.keys(meta).length > 1 ? meta : null;
@@ -135,7 +149,7 @@ export function setPluginMeta(id: string, patch: Partial<Omit<PluginMeta, "updat
   if (!ID_RE.test(id)) throw new Error(`插件 id 不合规：${id}`);
   const cur = book.items[id] ?? { updatedAt: 0 };
   const next: PluginMeta = { ...cur, ...patch, updatedAt: Date.now() };
-  for (const key of ["name", "description", "author", "homepage", "cover"] as const) {
+  for (const key of ["name", "description", "author", "homepage", "cover", "publishedRepo"] as const) {
     if (next[key] === undefined) delete next[key];
   }
   if (next.screenshots) {
