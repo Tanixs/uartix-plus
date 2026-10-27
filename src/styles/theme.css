@@ -271,6 +271,7 @@ input[type="checkbox"],
 input[type="radio"] {
   -webkit-appearance: none;
   appearance: none;
+  position: relative; /* 勾用 ::after 绝对定位居中，没有这个包含块就飘到祖先上去 */
   width: 16px;
   height: 16px;
   margin: 0;
@@ -292,14 +293,20 @@ input[type="checkbox"]:checked {
   color: var(--on-accent);
 }
 input[type="checkbox"]:checked::after {
+  /* 勾 = 一个 5×9 的盒，只留右边与下边两条描边，再转 45°：手臂比 5:9（≈1:1.8），
+     靠 inset:0 + margin:auto 落在内容盒正中，最后那记 translate 是视觉微调。
+     旧写法是 7×3 的扁 L 转 -45°，盒心在 (5.5,5.5) 而内容中心是 (7,7)——整只勾偏左上，
+     两条手臂还几乎等长，看着就是"勾歪到一边去了"。 */
   content: "";
-  display: block;
-  width: 7px;
-  height: 3px;
-  margin: 4px 0 0 2px;
-  border-left: 2px solid var(--on-accent);
-  border-bottom: 2px solid var(--on-accent);
-  transform: rotate(-45deg);
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 5px;
+  height: 9px;
+  border-style: solid;
+  border-width: 0 2px 2px 0;
+  border-color: var(--on-accent);
+  transform: rotate(45deg) translate(-0.5px, -1px);
 }
 input[type="radio"] {
   border-radius: 50%;
@@ -3096,6 +3103,17 @@ select optgroup {
   overflow-y: auto;
   padding: 10px 12px;
   background: var(--bg-panel);
+  /* 属性面板是这条面上唯一会被拖到两三百 px 的表单容器：给它一个 inline-size 容器，
+     下面的说明文字才好在窄到不值当对齐控件列时收回整幅。 */
+  container-type: inline-size;
+}
+
+/* 窄到放不下「label 64px 缩进 + 一句能读的说明」时，缩进让位给正文：
+   同一句话从四行变两行，读的人不用在折行里找主语。 */
+@container (max-width: 340px) {
+  .props-panel .form-hint {
+    margin-left: 0;
+  }
 }
 
 .props-title {
@@ -3188,7 +3206,9 @@ select optgroup {
 }
 
 .form-hint {
-  margin: 4px 0 8px 84px;
+  /* 缩进对齐的是**控件列**（label 56 + gap 8 = 64），不是随手一个 84：
+     多出来的 20px 在宽面板里看不出来，在窄的属性面板里就是把一行说明挤成四行。 */
+  margin: 4px 0 8px 64px;
   font-size: var(--fs-body);
   line-height: 1.5;
   color: var(--text-dim);

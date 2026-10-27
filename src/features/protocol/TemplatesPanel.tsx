@@ -8,7 +8,7 @@ import * as teleStore from "./telemetryStore";
 import { EmptyState } from "../../shared/EmptyState";
 import { clampFlyoutMenu, Flyout } from "../../shared/Flyout";
 import { zoomFactor } from "../../shared/zoom";
-import { Glyph, IconChevron } from "../../shared/icons";
+import { Glyph, IconChevron, IconClose, IconPlus } from "../../shared/icons";
 import { PRESETS, applyPreset, groupDisplayName, presetGroupKey } from "../framecanvas/presets";
 import { NewTplDlg } from "../framecanvas/NewTplDlg";
 import { requestOpenPanel } from "../ai/appBus";
@@ -455,7 +455,7 @@ export function TemplatesPanel() {
                       store.addClusterFrame(key);
                     }}
                   >
-                    ＋
+                    <Glyph><IconPlus /></Glyph>
                   </button>
                 )}
                 <input
@@ -480,7 +480,7 @@ export function TemplatesPanel() {
                     );
                   }}
                 >
-                  ×
+                  <Glyph><IconClose /></Glyph>
                 </button>
               </div>
               {multi && open && (
@@ -523,7 +523,7 @@ export function TemplatesPanel() {
                             store.removeTemplate(t.id);
                           }}
                         >
-                          ×
+                          <Glyph><IconClose /></Glyph>
                         </button>
                       </div>
                     );

@@ -28,7 +28,7 @@ import {
 } from "../../shared/hexBytes";
 import { formatLabelSpec, parseLabelSpec } from "../../shared/valueLabels";
 import { tx, useLocale } from "../../i18n/strings";
-import { Glyph } from "../../shared/icons";
+import { Glyph, IconClose } from "../../shared/icons";
 // P123-C：行控件搬到 shared（发送侧的块编辑面也要用它们，而它由本文件渲染 ——
 // 留在原地就是一个组件与它的使用者互相 import 的环）
 import { NumInput, TextInput } from "../../shared/FormInputs";
@@ -674,7 +674,7 @@ export function PropertiesPanel() {
                     store.removeField(tpl.id, f.id);
                   }}
                 >
-                  ×
+                  <Glyph><IconClose /></Glyph>
                 </button>
               </div>
             );

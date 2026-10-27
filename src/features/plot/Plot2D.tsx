@@ -13,7 +13,9 @@ import { Flyout } from "../../shared/Flyout";
 import { invokeAiScene } from "../ai/aiBus";
 import { attachPdragZone } from "../../shared/pointerDrag";
 import {
+  Glyph,
   IconChevron,
+  IconClose,
   IconCursorX,
   IconCursorY,
   IconStack,
@@ -1875,7 +1877,7 @@ export function Plot2D() {
               </span>
               {hz > 0 && <span className="plot-chip-hz">{hz.toFixed(0)}Hz</span>}
               <button className="tpl-del" onClick={() => plotStore.removeChannel(ch.id)}>
-                ×
+                <Glyph><IconClose /></Glyph>
               </button>
             </span>
           );
