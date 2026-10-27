@@ -473,7 +473,7 @@
           <h2>数据来源与划分</h2>
           <div class="grid">
             <label class="wide">
-              素材文件夹（一行一个：X-AnyLabeling 导出的 json + 图片混放目录）
+              素材文件夹（一行一个；<b>留空 = 自动取 annotations/ 投料口里的每一批</b>）
               <textarea id="sources" spellcheck="false" placeholder="D:/OneDrive/Desktop/X-AnyLabeling/images/123lmages"></textarea>
             </label>
             <label class="wide">
@@ -508,9 +508,9 @@
             <button class="btn" id="intake-refresh">重新数一遍</button>
           </div>
           <p class="note">
-            <b>标注你自己来，这个面板不碰。</b>它只负责给一个固定去处：把 X-AnyLabeling 导出的目录整个丢进
-            <code>annotations/</code>（一个子目录 = 一批素材），面板只数有多少张、多少个 json，
-            点一下就登记成「素材文件夹」——<b>不搬、不改、不删你的任何一个文件</b>。
+            <b>标注你自己来（X-AnyLabeling），这个面板不碰。</b>它只负责给一个固定去处：把导出的目录整个丢进
+            <code>annotations/</code>（一个子目录 = 一批素材），「构建数据集」在没显式写素材夹时<b>直接从这个目录取</b>；
+            面板只数有多少张、多少个 json——<b>不搬、不改、不删你的任何一个文件</b>。
           </p>
           <p class="note">
             顺带一句常被问的：YOLO 文本标注格式（<code>images/ + labels/ + data.yaml</code>）
@@ -1099,16 +1099,21 @@
       function renderIntake() {
         var a = st.intake || {};
         var subs = a.subdirs || [];
-        var srcs = ((((st.config || {}).effective || {}).dataset || {}).sources) || [];
+        var ds = (st.dataset || {});
+        var rs = ds.resolvedSources || [];
+        var from = ds.sourcesFrom || "";
         $("intakekv").innerHTML =
           "<b>目录</b><span>" + esc(a.dir || "-") + "</span>" +
           "<b>状态</b><span>" +
           (a.exists ? '<span class="tag ok">已就绪</span>' : '<span class="tag warn">还没有这个目录</span>') +
-          " 已登记的素材夹 " + subs.length + " 个</span>" +
+          " 素材夹 " + subs.length + " 个</span>" +
           "<b>散文件</b><span>图片 " + ((a.loose || {}).images || 0) + " · json " + ((a.loose || {}).json || 0) + " · 其它 " + ((a.loose || {}).other || 0) +
           (a.truncated ? "（数到上限，后面没数完）" : "") +
           "</span>" +
-          "<b>当前素材来源</b><span>" + (srcs.length ? esc(srcs.join("  ·  ")) : "(还没填)") + "</span>";
+          "<b>构建数据集会读</b><span>" +
+          (rs.length ? esc(rs.join("  ·  ")) : "(还没有来源)") +
+          (from === "intake" ? ' <span class="tag ok">自动取自投料口</span>' : from === "config" ? ' <span class="tag">配置里显式写的</span>' : from === "intake-empty" ? ' <span class="tag warn">投料口是空的</span>' : "") +
+          "</span>";
         if (!subs.length) {
           $("intakelist").innerHTML = '<span class="note">把标注导出的文件夹整个丢进上面那个目录，再点「重新数一遍」</span>';
           return;

@@ -867,7 +867,14 @@ describe("P175-W1 · 投料口与开跑前摘要", () => {
     const pluginDir = copyPlugin("intake");
     fakeRunner(pluginDir);
     const guard = userFilesFingerprint(ws);
-    const before = readdirSync(ws).sort().filter((n) => n !== ".uartix"); // 插件自己的状态目录允许出现，其它一律不许
+    // 牢笼判据（比白名单枚举更狠）：**只有清单里声明过的写目录**允许出现/变化。
+    // 以后谁给插件加一枚写目录，这条会自动跟上；反过来，插件在工作区里造出一个没声明的东西就红。
+    const declared = new Set(
+      JSON.parse(readFileSync(path.join(PLUGIN_SRC, "plugin.json"), "utf8")).permissions.fs.write.map((w) => String(w).replace("$WS/", "")),
+    );
+    expect(declared.size, "清单里的写目录一个都没读到，这条判据是空的").toBeGreaterThanOrEqual(6);
+    const outsideCage = (list) => list.filter((n) => !declared.has(n));
+    const before = outsideCage(readdirSync(ws)).sort();
     const p = startPlugin(pluginDir, ws);
     try {
       await p.ready;
@@ -898,7 +905,20 @@ describe("P175-W1 · 投料口与开跑前摘要", () => {
         (e) => String(e.message || e),
       );
       expect(bad, "带 .. 的名字被接受了").toBeTruthy();
-      expect(readdirSync(ws).sort().filter((n) => n !== ".uartix"), "登记素材不该在工作区里造出新东西").toEqual(before);
+
+      /* ---- 用户裁定：素材夹留空时，「构建数据集」直接从投料口取 ---- */
+      const cleared = await p.call("panel.train.saveConfig", { dataset: { sources: [] } });
+      expect(cleared.dataset.sourcesFrom, "留空却没落到投料口").toBe("intake");
+      expect(cleared.dataset.resolvedSources).toEqual([fwd(path.join(ws, "annotations", "第三批"))]);
+      const ds = await p.call("panel.train.startDataset", {});
+      await p.waitFor(() => {
+        const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
+        return jobs.find((j) => j.id === ds.id && j.state !== "running");
+      }, 20_000, "数据集任务结束");
+      const dlogs = p.events.filter((e) => e.event === "log").flatMap((e) => e.payload.lines);
+      expect(dlogs.some((l) => /素材来源: 投料口 annotations\/ 自动取的 1 批/.test(l.text)), JSON.stringify(dlogs.slice(0, 8))).toBe(true);
+
+      expect(outsideCage(readdirSync(ws)).sort(), "牢笼外的东西不许出现或变化").toEqual(before);
       assertUntouched(guard, ws, "投料口整轮操作之后");
     } finally {
       p.child.stdin.end();

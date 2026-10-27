@@ -804,6 +804,26 @@ function ensureIntake() {
   return { dir, created: true, intake: scanIntake() };
 }
 
+/**
+ * 素材来源怎么定（用户裁定："标注我自己在 X-AnyLabeling 里做，你给我留一个文件夹放数据，
+ * 后面分离数据集的按钮直接从这个文件夹取"）。
+ *
+ * 优先级：`config.yaml` / 面板里显式写了 `sources` → 照它（那是用户自己的选择，不擅自改）；
+ * 没写 → **自动取投料口 `annotations/` 下的每一个批次目录**（目录里有图或 json 才算一批，
+ * 空目录不算，免得刚建好就报"找不到样本"）。`from` 会一路带到日志与界面上，
+ * 因为"这次到底从哪儿读的数据"这种事不许靠猜。
+ */
+function resolveDatasetSources(effective, intakeIn) {
+  const declared = (effective.dataset && effective.dataset.sources) || [];
+  if (declared.length) return { sources: declared, from: "config" };
+  const a = intakeIn || scanIntake();
+  if (!a.exists) return { sources: [], from: "none" };
+  const hits = (a.subdirs || []).filter((s) => s.images > 0 || s.json > 0).map((s) => s.path);
+  if (hits.length) return { sources: hits, from: "intake" };
+  if (a.loose.images > 0) return { sources: [a.dir], from: "intake" };
+  return { sources: [], from: "intake-empty" };
+}
+
 /** 面板上「开跑前先看」：拿当前设置写一份**临时**预览快照，让 runner 用 --dry-run 解析一遍。 */
 async function precheck(overrides) {
   needWorkspace();
@@ -1185,6 +1205,12 @@ async function startJob(kind, overrides) {
 
   const label = kind === "dataset" ? "构建数据集" : `训练 ${merged.train.name}`;
   const job = newJob(kind, label);
+  if (kind === "dataset") {
+    // 没显式写 sources 就从投料口自动取——用户裁定的那条"分离数据集直接读这个文件夹"
+    const resolved = resolveDatasetSources(merged);
+    merged.dataset.sources = resolved.sources;
+    job.sourcesFrom = resolved.from;
+  }
 
   const confPath = snapshotPathFor(kind, kind === "train" ? merged.train.name : path.basename(merged.dataset.output_dir || "ds"), job.startedAt);
   fs.writeFileSync(confPath, dumpConfig(merged), "utf8");
@@ -1195,6 +1221,15 @@ async function startJob(kind, overrides) {
 
   pushLine(job, `[工作台] python: ${py.path}（${py.source}）`, "sys");
   pushLine(job, `[工作台] 本次实验快照: ${confPath}`, "sys");
+  if (kind === "dataset") {
+    const n = (merged.dataset.sources || []).length;
+    const from = job.sourcesFrom;
+    pushLine(
+      job,
+      `[工作台] 素材来源: ${from === "intake" ? `投料口 annotations/ 自动取的 ${n} 批` : from === "config" ? `配置里显式写的 ${n} 个目录` : from === "intake-empty" ? "投料口是空的：把 X-AnyLabeling 导出的文件夹放进 annotations/ 再试" : "（没填，且投料口还不存在）"}`,
+      "sys",
+    );
+  }
   pushLine(job, `[工作台] 命令: "${py.path}" "${runner}" --config "${confPath}"`, "sys");
   if (kind === "train") {
     pushLine(job, `[工作台] 手动等价（吃同一份快照，但只认它自己那 20 个键）: "${py.path}" "${abs("scripts/train.py")}" --config "${confPath}"`, "sys");
@@ -1506,7 +1541,7 @@ async function panelState() {
       needWorkspace: true,
       python: { path: "", ok: false, version: "", source: "", error: "" },
       config: { effective: DEFAULTS, overrides: {}, baseFound: false, baseError: "", baseSource: "" },
-      dataset: { dir: "", dataYaml: "", exists: false, trainCount: 0, valCount: 0, classes: [] },
+      dataset: { dir: "", dataYaml: "", exists: false, trainCount: 0, valCount: 0, classes: [], sourcesFrom: "none", resolvedSources: [] },
       deploy: scanDeployTool(),
       runs: [],
       trainRuns: [],
@@ -1519,6 +1554,8 @@ async function panelState() {
   }
   const cfg = await effectiveConfig();
   const py = await detectPython();
+  const intake = scanIntake();
+  const resolved = resolveDatasetSources(cfg.effective, intake);
   return {
     workspace: root,
     needWorkspace: false,
@@ -1530,11 +1567,11 @@ async function panelState() {
       baseError: cfg.baseError,
       baseSource: cfg.baseSource,
     },
-    dataset: scanDataset(cfg.effective.dataset.output_dir),
+    dataset: { ...scanDataset(cfg.effective.dataset.output_dir), sourcesFrom: resolved.from, resolvedSources: resolved.sources },
     deploy: scanDeployTool(),
     runs: scanRuns(cfg.effective.train.project).slice(0, 12),
     trainRuns: scanTrainRuns(),
-    intake: scanIntake(),
+    intake,
     params: specNow(),
     jobs: [...jobs.values()].slice(-8).map(snapshot),
     active: snapshot(active),
