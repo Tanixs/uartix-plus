@@ -1288,6 +1288,58 @@ describe("P175-W6 · 导出矩阵与端侧约束", () => {
   }, 90_000);
 });
 
+describe("P175-W8 · 终态事件不能被空日志批吞掉", () => {
+  /**
+   * 回归：子进程的输出刚好在两个 120ms 日志批之间被冲完时，`finishJob` 里那次
+   * `flushLog()` 的批是**空的**，early-return 顺带跳过了它唯一的 job 事件——
+   * 表现是面板永远停在"运行中"，只有下一次任务开始才解冻。满载的测试机上这个
+   * 竞态会被反复抓到，所以判据要让子进程**主动**走进那个时间窗，而不是指望真 runner 恰好那么慢。
+   */
+  it("安静地退出的子进程也必须发出 succeeded 终态事件", async () => {
+    const ws = makeWorkspace("silent-exit");
+    const pluginDir = copyPlugin("silent-exit");
+    const runner = fakeRunner(pluginDir);
+    // 只打印一行 → 忙等 600ms（>4 个日志批，让那一行被定时器冲干净）→ 无声退出
+    writeFileSync(
+      runner,
+      [
+        "console.log('[信息] 只此一行，之后再无输出');",
+        "const t = Date.now();",
+        "while (Date.now() - t < 600) { /* 占住子进程，不给插件任何新行 */ }",
+        "process.exit(0);",
+      ].join("\n"),
+      "utf8",
+    );
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const job = await p.call("panel.train.startTrain", {});
+      expect(job.state).toBe("running");
+
+      const terminal = await p.waitFor(() => {
+        const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
+        return jobs.find((j) => j.id === job.id && (j.state === "succeeded" || j.state === "failed"));
+      }, 30_000, "这个任务自身的终态事件");
+
+      expect(terminal.state, JSON.stringify(terminal)).toBe("succeeded");
+      expect(terminal.code).toBe(0);
+      // 终态那条"[工作台] 进程结束"仍要留在日志里（事件不丢，行也不丢）
+      expect(terminal.total).toBeGreaterThanOrEqual(2);
+      // 任务结束不该把 active 留成脏：下一次 startTrain 依旧立刻有事件流
+      const again = await p.call("panel.train.startTrain", {});
+      expect(again.state).toBe("running");
+      const t2 = await p.waitFor(() => {
+        const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
+        return jobs.find((j) => j.id === again.id && j.state !== "running");
+      }, 30_000, "第二次任务的终态事件");
+      expect(t2.state, JSON.stringify(t2)).toBe("succeeded");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+
 /* ============================================================================
    P175-W8 · 页签完整性与"这个包发出去是完整的"
    ============================================================================ */
@@ -1458,8 +1510,7 @@ describe("P175-W5 · 参数面与调用形状", () => {
   function callSites(src) {
     const re = /uartix\.call\(/g;
     const out = [];
-    let m;
-    while ((m = re.exec(src))) {
+    while (re.exec(src)) {
       let i = re.lastIndex;
       let depth = 1;
       let commas = 0;

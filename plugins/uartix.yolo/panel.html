@@ -131,6 +131,11 @@
         color: var(--fg);
         width: 100%;
       }
+      /* 勾选框不是文本框：给它 100% 宽就是把同行那句说明挤到下一行去（监控页的「自动刷新」就是这么歪的） */
+      input[type="checkbox"] {
+        width: auto;
+        flex: 0 0 auto;
+      }
       textarea {
         min-height: 54px;
         resize: vertical;
@@ -714,11 +719,11 @@
       <!-- ============ 监控 ============ -->
       <section id="tab-monitor" hidden>
         <div class="card">
-          <h2>
+          <h2 class="row">
             <span id="monrun">还没有训练产物</span>
             <span class="tag" id="montag">—</span>
             <button class="btn" id="monrefresh" title="重读 results.csv 与显存">刷新曲线</button>
-            <label class="row" style="margin-left:auto; gap:4px; font-size:11px; color:var(--dim)">
+            <label class="p bool" style="margin-left:auto; white-space:nowrap; font-size:11px; color:var(--dim)">
               <input type="checkbox" id="monauto" /> 自动刷新（5 秒）
             </label>
           </h2>
@@ -1889,7 +1894,7 @@
       function renderEvalForm(r) {
         var opts = [];
         (r.bests || []).forEach(function (b) {
-          opts.push({ v: b.file, t: "run " + b.run + " 的 best.pt" + (b.mAP50 ? " · mAP50 " + b.mAP50 : "") });
+          opts.push({ v: b.file, t: "run " + b.run + " 的 best.pt" + (b.mAP50 ? " · mAP50 " + fmtNum(b.mAP50) : "") });
         });
         (r.weights || []).forEach(function (m) {
           opts.push({ v: m.file, t: m.name + (m.task ? " · " + m.task : "") });
@@ -1921,15 +1926,16 @@
         var keys = Object.keys(m).sort();
         $("ev_metrics").innerHTML =
           '<div class="tablewrap"><table><thead><tr><th>指标</th><th>值</th></tr></thead><tbody>' +
-          keys.map(function (k) { return "<tr><td>" + esc(k) + '</td><td class="num">' + Number(m[k]).toFixed(4) + "</td></tr>"; }).join("") +
-          (res.speedMs ? '<tr><td>速度</td><td class="num">' + Number(res.speedMs).toFixed(1) + " ms/图</td></tr>" : "") +
+          keys.map(function (k) { return "<tr><td>" + esc(k) + '</td><td class="num">' + num(m[k]) + "</td></tr>"; }).join("") +
+          (res.speedMs ? '<tr><td>速度</td><td class="num">' + num(res.speedMs, 1) + " ms/图</td></tr>" : "") +
           "</tbody></table></div>" +
           '<div class="note">权重 ' + esc(res.weights) + " · 数据 " + esc(res.data) + " · imgsz " + esc(res.imgsz) + " · conf " + esc(res.conf) + "</div>";
-        $("ev_when").textContent = "结果目录：" + (res.out || "");
+        $("ev_when").textContent = res.out ? "结果目录：" + res.out : "";
+        $("ev_when").hidden = !res.out;
         var t = res.confTable || [];
         $("ev_conftbl").innerHTML = t.length
           ? '<div class="tablewrap"><table><thead><tr><th>conf</th><th>精确率</th><th>召回率</th></tr></thead><tbody>' +
-            t.map(function (r) { return "<tr><td class=\"num\">" + r.conf + '</td><td class="num">' + r.precision + '</td><td class="num">' + r.recall + "</td></tr>"; }).join("") +
+            t.map(function (r) { return '<tr><td class="num">' + esc(num(r.conf, 2)) + '</td><td class="num">' + num(r.precision) + '</td><td class="num">' + num(r.recall) + "</td></tr>"; }).join("") +
             "</tbody></table></div>"
           : '<span class="note">这次没拿到 PR 曲线（老结果或引擎没画）</span>';
         var plots = res.plots || [];
@@ -1957,7 +1963,7 @@
           $("ev_errlist").innerHTML =
             '<div class="note">共 ' + errs.length + " 张（最多列这么多）。把这些图拿去补标，回来重新构建数据集。</div>" +
             '<div class="tablewrap"><table><thead><tr><th>#</th><th>预测框</th><th>类别</th><th>图</th></tr></thead><tbody>' +
-            errs.map(function (e, i) { return "<tr><td class=\"num\">" + (i + 1) + '</td><td class="num">' + e.boxes + "</td><td>" + esc((e.names || []).join(",")) + '</td><td class="name" title="' + esc(e.image) + '">' + esc(e.image.split("/").pop()) + "</td></tr>"; }).join("") +
+            errs.map(function (e, i) { return '<tr><td class="num">' + (i + 1) + '</td><td class="num">' + esc(num(e.boxes, 0)) + "</td><td>" + esc((e.names || []).join(",")) + '</td><td class="name" title="' + esc(e.image) + '">' + esc(String(e.image || "").split("/").pop()) + "</td></tr>"; }).join("") +
             "</tbody></table></div>";
         }
       }
@@ -2036,9 +2042,49 @@
       }
 
       function fmtNum(v) {
+        if (v === "" || v == null) return "-";
         var n = Number(v);
         if (!isFinite(n)) return "-";
         return Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(3);
+      }
+
+      /**
+       * 数字格子的兜底。`eval.json` 是盘上的文件（老结果、手改过的结果都可能长得不一样），
+       * 缺一个键就把 `undefined` 印到界面上是最难看的一种故障。
+       */
+      function num(v, d) {
+        if (v === "" || v == null) return "—";
+        var n = Number(v);
+        return isFinite(n) ? n.toFixed(d === undefined ? 4 : d) : "—";
+      }
+
+      /** 列名在图例里已经带了 `train/` 前缀，注释里只留最后一段。 */
+      function shortCol(c) {
+        var s = String(c);
+        var i = s.lastIndexOf("/");
+        return i >= 0 ? s.slice(i + 1) : s;
+      }
+
+      /**
+       * 恒为 0 的列不进图：分割 run 的 `train/sem_loss` 整条是 0（那是语义分割任务的损失，
+       * 这代模型没用到），画出来是一条贴着轴的直线 + 一颗"0.000"的图例，把真正在动的
+       * 四条压成一小撮。省略掉，但把省了谁写在图例后面——不藏。
+       */
+      function splitFlat(rows, cols) {
+        var keep = [];
+        var flat = [];
+        for (var c = 0; c < cols.length; c++) {
+          var any = false;
+          for (var r = 0; r < rows.length; r++) {
+            var v = Number(rows[r][cols[c]]);
+            if (isFinite(v) && v !== 0) {
+              any = true;
+              break;
+            }
+          }
+          (any ? keep : flat).push(cols[c]);
+        }
+        return keep.length ? { keep: keep, flat: flat } : { keep: cols, flat: [] };
       }
 
       function legend(rows, cols) {
@@ -2088,10 +2134,15 @@
           ? "显存 " + mem.usedMiB + " / " + mem.totalMiB + " MiB（" + mem.percent + "%）" + (mem.percent > 90 ? " —— 快满了，batch 再大会 OOM" : "")
           : "显存读不到：" + esc(mem.error || "");
         var rows = m.rows || [];
-        $("chartloss").innerHTML = sparkline(rows, (m.chart || {}).loss || []);
-        $("legloss").innerHTML = legend(rows, (m.chart || {}).loss || []);
-        $("chartmap").innerHTML = sparkline(rows, (m.chart || {}).map || []);
-        $("legmap").innerHTML = legend(rows, (m.chart || {}).map || []);
+        var cl = splitFlat(rows, (m.chart || {}).loss || []);
+        var cm = splitFlat(rows, (m.chart || {}).map || []);
+        var flatNote = function (flat) {
+          return flat.length ? '<span class="note">省略 ' + flat.length + " 条恒为 0：" + flat.map(shortCol).join(" ") + "</span>" : "";
+        };
+        $("chartloss").innerHTML = sparkline(rows, cl.keep);
+        $("legloss").innerHTML = legend(rows, cl.keep) + flatNote(cl.flat);
+        $("chartmap").innerHTML = sparkline(rows, cm.keep);
+        $("legmap").innerHTML = legend(rows, cm.keep) + flatNote(cm.flat);
         var f = m.failure;
         $("failcard").hidden = !f;
         if (f) {
@@ -2106,7 +2157,7 @@
               .map(function (r) {
                 return (
                   '<button class="btn" data-run="' + esc(r.name) + '"' + (r.name === m.run ? ' style="border-color:var(--accent)"' : "") + ">" +
-                  esc(r.name) + '<span style="opacity:.6"> ' + r.epochs + " 轮 · mAP50 " + esc(r.mAP50 || "-") + "</span></button>"
+                  esc(r.name) + '<span style="opacity:.6"> ' + r.epochs + " 轮 · mAP50 " + esc(fmtNum(r.mAP50)) + "</span></button>"
                 );
               })
               .join("")

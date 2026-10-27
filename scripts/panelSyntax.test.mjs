@@ -65,3 +65,44 @@ describe("P174-A9 · 面板脚本语法", () => {
     expect(check("function a(){ if (1) { return 1; }\n")).not.toBe("");
   });
 });
+
+/* ============================================================================
+   P175 · 勾选框的排版不变量
+   ----------------------------------------------------------------------------
+   面板的全局样式是 `label { display:flex; flex-direction:column }`（表单标题要在控件上方），
+   而 `input { width:100% }`。两条叠在一起，任何"框 + 同一行那句说明"的写法都会变成
+   **框在上、字在下**——监控页的「自动刷新（5 秒）」就是这么歪的，而且只在截图里看得见。
+   所以把这条形状钉住：带 checkbox 的 label 必须走 `bool` 那一档。
+   ============================================================================ */
+
+describe("P175 · 勾选框的排版不变量", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+
+  /** 找出所有"里面有 checkbox、但没声明横排"的 label。 */
+  function badCheckboxLabels(html) {
+    const out = [];
+    const re = /<label\b([^>]*)>([\s\S]*?)<\/label>/g;
+    let m;
+    while ((m = re.exec(html))) {
+      if (!/type=["']checkbox["']/.test(m[2])) continue;
+      if (/\bbool\b/.test(m[1])) continue;
+      if (/flex-direction\s*:\s*row/.test(m[1])) continue;
+      out.push(m[0].replace(/\s+/g, " ").slice(0, 90));
+    }
+    return out;
+  }
+
+  it("每个带勾选框的 label 都是横排的（bool 档或显式 flex-direction:row）", () => {
+    const html = readFileSync(YOLO_PANEL, "utf8");
+    const bad = badCheckboxLabels(html);
+    expect(bad, `这些勾选框会被全局 label 竖排：\n${bad.join("\n")}`).toEqual([]);
+    // 反向自证：这条判据不是永真的
+    expect(badCheckboxLabels('<label><input type="checkbox" /> 自动刷新</label>')).toHaveLength(1);
+    expect(badCheckboxLabels('<label class="p bool"><input type="checkbox" /> 自动刷新</label>')).toEqual([]);
+  });
+
+  it("checkbox 不许继承 input 的 width:100%", () => {
+    const css = readFileSync(YOLO_PANEL, "utf8");
+    expect(css).toMatch(/input\[type="checkbox"\]\s*\{[^}]*width:\s*auto/);
+  });
+});
