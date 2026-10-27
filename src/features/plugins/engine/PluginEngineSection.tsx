@@ -48,6 +48,7 @@ import { PluginConfigEditor } from "./PluginConfigEditor";
 import { PluginVersions } from "./PluginVersions";
 import { PluginPublishForm } from "./PluginPublishForm";
 import { PluginMarketView } from "./PluginMarketView";
+import type { MarketInstalled } from "./marketStatus";
 import { PluginContribActions } from "./PluginContribActions";
 import { PluginRootsFold, WorkspaceRootRow } from "./PluginRootsSection";
 import { DraftPreviewDialog } from "./DraftPreviewDialog";
@@ -133,15 +134,19 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.appDir, installedKey]);
 
-  const installedRepos = useMemo(
-    () =>
-      Object.fromEntries(
-        repo.entries
-          .filter((e) => e.origin?.startsWith("github:"))
-          .map((e) => [e.origin!.slice("github:".length).split("@")[0], e.version]),
-      ),
-    [repo.entries],
-  );
+  const installedRepos = useMemo(() => {
+    const out: Record<string, MarketInstalled> = {};
+    for (const e of repo.entries) {
+      // 市场只认得"从市场装的那批"：本地方向装的 origin 是空的，拿仓库去比版本会指错东西
+      if (!e.origin?.startsWith("github:")) continue;
+      out[e.origin.slice("github:".length).split("@")[0]] = {
+        version: e.version,
+        enabled: e.enabled,
+        trusted: e.verdict === "trusted",
+      };
+    }
+    return out;
+  }, [repo.entries]);
 
   const visible = useMemo(
     () => repo.entries

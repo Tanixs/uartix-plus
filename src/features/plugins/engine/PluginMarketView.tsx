@@ -8,11 +8,21 @@
  * 视觉上刻意克制：卡片是**信息密度**的容器，不是装饰品——一枚插件只有"它是什么、
  * 谁写的、多久没动、能不能装"四件事要说，多于这些的都不放。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { tx, useLocale } from "../../../i18n/strings";
-import { readmeImagesForRepo, repoCover, searchPlugins } from "./marketClient";
+import { readmeImagesForRepo, repoCover, repoManifest, searchPlugins, type RepoManifestInfo } from "./marketClient";
 import { coverGradient, coverHue, coverInitials } from "./marketCover";
 import { PLUGIN_TOPIC, hasPluginTopic, type GhRepo } from "./ghSearch";
+import {
+  filterRepos,
+  installedNote,
+  marketStateOf,
+  sortRepos,
+  type MarketFilter,
+  type MarketInstalled,
+  type MarketSort,
+  type MarketState,
+} from "./marketStatus";
 
 /** 一枚卡片的状态机。`error` 带原因，因为"装不上"和"网断了"要分开说。 */
 type RowState =
@@ -22,8 +32,8 @@ type RowState =
 
 export interface PluginMarketViewProps {
   onInstall: (repo: GhRepo) => Promise<void>;
-  /** 已经装着的仓库（`owner/name` → 版本），用来把按钮换成「已安装」。 */
-  installed: Record<string, string>;
+  /** 已经装着的仓库（`owner/name` → 版本与启停/批准态），用来把按钮换成「已安装 / 更新」。 */
+  installed: Record<string, MarketInstalled>;
 }
 
 const fmtStars = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
@@ -33,6 +43,76 @@ const fmtDate = (iso: string): string => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
   return m ? `${m[2]}-${m[3]}` : "";
 };
+
+/** 卡片与详情共用的一句状态话术：判据在 `marketStatus`，话术在这里过 `tx()`。 */
+function stateText(state: MarketState, inst: MarketInstalled | undefined, remote: string): string {
+  const v = inst?.version ?? "";
+  if (state === "absent") return tx("未安装", "not installed");
+  if (state === "updatable") return tx(`可更新 v${v} → v${remote}`, `update v${v} → v${remote}`);
+  if (state === "behind") return tx(`已安装 v${v}（比仓库还新）`, `installed v${v} (ahead of the repo)`);
+  return tx(`已安装 v${v}`, `installed v${v}`);
+}
+
+/** 已装但还没到"能用"的那一步：市场里就说实话，别让用户回去翻插件管理才知道。 */
+function noteText(inst: MarketInstalled): string {
+  const n = installedNote(inst);
+  if (n === "unapproved") return tx("权限待批准", "approval pending");
+  if (n === "disabled") return tx("已停用", "disabled");
+  return "";
+}
+
+function kindTexts(k: RepoManifestInfo["kinds"]): string[] {
+  const out: string[] = [];
+  if (k.panels > 0) out.push(tx(`面板 ×${k.panels}`, `panels ×${k.panels}`));
+  if (k.themes > 0) out.push(tx(`主题 ×${k.themes}`, `themes ×${k.themes}`));
+  if (k.widgets > 0) out.push(tx(`小部件 ×${k.widgets}`, `widgets ×${k.widgets}`));
+  if (k.presets > 0) out.push(tx(`预设 ×${k.presets}`, `presets ×${k.presets}`));
+  if (k.tasks > 0) out.push(tx(`任务 ×${k.tasks}`, `tasks ×${k.tasks}`));
+  if (k.commands > 0) out.push(tx(`命令 ×${k.commands}`, `commands ×${k.commands}`));
+  return out;
+}
+
+/** 一项声明最多列四条，剩下的收成 `…+N`：预告是给人扫一眼的，不是把清单抄一遍。 */
+function listed(v: string[]): string {
+  const head = v.slice(0, 4).join("、");
+  return v.length > 4 ? `${head} …+${v.length - 4}` : head;
+}
+
+/**
+ * 权限预告。装**之前**就把清单声明的能力面摊开——以前这些要等下载解包后在批准卡上才第一次看见，
+ * 而"我先看看它要什么再决定装不装"正是市场该有的动作。
+ *
+ * 它只是预告：真判据仍是下载后的 `planFolder()` + 批准卡，这里读到什么都不放行。
+ */
+function permTexts(p: RepoManifestInfo["perms"]): string[] {
+  const out: string[] = [];
+  if (p.read.length) out.push(tx(`读：${listed(p.read)}`, `read: ${listed(p.read)}`));
+  if (p.write.length) out.push(tx(`写：${listed(p.write)}`, `write: ${listed(p.write)}`));
+  if (p.spawn.length) out.push(tx(`起子进程：${listed(p.spawn)}`, `spawn: ${listed(p.spawn)}`));
+  if (p.connect.length) out.push(tx(`联网：${listed(p.connect)}`, `connect: ${listed(p.connect)}`));
+  if (p.ui.length) out.push(tx(`界面：${listed(p.ui)}`, `ui: ${listed(p.ui)}`));
+  if (p.secrets.length) out.push(tx(`密钥：${listed(p.secrets)}`, `secrets: ${listed(p.secrets)}`));
+  if (p.ai.length) out.push(tx(`AI：${listed(p.ai)}`, `ai: ${listed(p.ai)}`));
+  return out;
+}
+
+/** 外链一律交给系统浏览器：WebView 里导航出去就回不来，也等于把会话上下文交给别人。 */
+function openExternal(url: string): Promise<void> {
+  return import("@tauri-apps/plugin-opener").then((m) => m.openUrl(url));
+}
+
+const FILTERS: { id: MarketFilter; label: () => string }[] = [
+  { id: "all", label: () => tx("全部", "All") },
+  { id: "absent", label: () => tx("没装过", "Not installed") },
+  { id: "installed", label: () => tx("已安装", "Installed") },
+  { id: "updatable", label: () => tx("可更新", "Updatable") },
+];
+
+const SORTS: { id: MarketSort; label: () => string }[] = [
+  { id: "updated", label: () => tx("最近更新", "Recently updated") },
+  { id: "stars", label: () => tx("Star 多", "Most starred") },
+  { id: "name", label: () => tx("名称", "Name") },
+];
 
 /** 左栏封面砖：有 cover 显示 cover，没有就按仓库名生成一枚色块，绝不出现破图。 */
 function RepoCover({ repo, cover }: { repo: GhRepo; cover?: string }) {
@@ -52,13 +132,16 @@ function RepoCover({ repo, cover }: { repo: GhRepo; cover?: string }) {
 
 function RepoDetail(props: {
   repo: GhRepo;
-  version?: string;
+  inst?: MarketInstalled;
+  /** 仓库那份 plugin.json 的摘要；null = 还没读到或读不到（这时不猜"可更新"） */
+  remote?: RepoManifestInfo | null;
   cover?: string;
   onBack: () => void;
   onInstall: (repo: GhRepo) => Promise<void>;
 }) {
   useLocale();
   const { repo } = props;
+  const state = marketStateOf(props.inst, props.remote?.version ?? "");
   const [imgs, setImgs] = useState<string[]>([]);
   const [busy, setBusy] = useState(true);
   const [slide, setSlide] = useState(0);
@@ -103,12 +186,18 @@ function RepoDetail(props: {
         <span style={{ fontWeight: 600 }}>{repo.name}</span>
         <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)", fontFamily: "var(--font-mono)" }}>{repo.full}</span>
         <span style={{ flex: 1 }} />
-        {props.version ? (
-          <span style={{ color: "var(--ok)", fontSize: "var(--fs-sm)" }}>{tx(`已安装 v${props.version}`, `installed v${props.version}`)}</span>
-        ) : (
+        {state === "absent" || state === "updatable" ? (
           <button className="btn primary" disabled={installing} onClick={() => void install()}>
-            {installing ? tx("准备安装…", "Preparing…") : tx("安装…", "Install…")}
+            {installing
+              ? tx("准备安装…", "Preparing…")
+              : state === "updatable"
+                ? tx(`更新到 v${props.remote?.version ?? ""}`, `Update to v${props.remote?.version ?? ""}`)
+                : tx("安装…", "Install…")}
           </button>
+        ) : (
+          <span style={{ color: "var(--ok)", fontSize: "var(--fs-sm)" }}>
+            {stateText(state, props.inst, props.remote?.version ?? "")}
+          </span>
         )}
       </div>
 
@@ -158,9 +247,40 @@ function RepoDetail(props: {
           <span>{fmtDate(repo.updated)}</span>
           {repo.archived ? <span style={{ color: "var(--warn)" }}>{tx("已归档", "archived")}</span> : null}
           {hasPluginTopic(repo) ? <span style={{ color: "var(--ok)" }}>#{PLUGIN_TOPIC}</span> : null}
-          {repo.topics.slice(0, 6).map((t) => <span key={t} style={{ color: "var(--text-faint)" }}>#{t}</span>)}
+          {/* 话题徽章已经说过 #uartix-plugin，列表里再列一遍是同一件事说两遍 */}
+          {repo.topics.filter((t) => t !== PLUGIN_TOPIC).slice(0, 6).map((t) => <span key={t} style={{ color: "var(--text-faint)" }}>#{t}</span>)}
         </div>
         <p style={{ margin: 0, fontSize: "var(--fs-sm)", lineHeight: 1.65 }}>{repo.description || tx("（没有描述）", "(no description)")}</p>
+
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "var(--sp-2)", fontSize: "var(--fs-xs)" }}>
+          <span style={{ color: state === "updatable" ? "var(--warn)" : state === "absent" ? "var(--text-faint)" : "var(--ok)" }}>
+            {stateText(state, props.inst, props.remote?.version ?? "")}
+          </span>
+          {props.inst ? <span style={{ color: "var(--warn)" }}>{noteText(props.inst)}</span> : null}
+          {props.remote ? kindTexts(props.remote.kinds).map((k) => <span key={k} style={{ color: "var(--text-dim)" }}>{k}</span>) : null}
+          <span style={{ flex: 1 }} />
+          <button className="btn sm" onClick={() => void openExternal(repo.htmlUrl)}>{tx("在 GitHub 打开", "Open on GitHub")}</button>
+        </div>
+
+        {props.remote && permTexts(props.remote.perms).length ? (
+          <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-m)", background: "var(--bg-inset)", padding: "8px 10px" }}>
+            <div style={{ fontSize: "var(--fs-xs)", fontWeight: 600, color: "var(--text-dim)", marginBottom: 4 }}>
+              {tx("它声明的能力面", "What it asks for")}
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 2, fontSize: "var(--fs-xs)", color: "var(--text-dim)", lineHeight: 1.6 }}>
+              {permTexts(props.remote.perms).map((p) => <li key={p}>{p}</li>)}
+            </ul>
+            <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)", marginTop: 6, lineHeight: 1.6 }}>
+              {tx(
+                "这是清单里的声明，装之前先看清；真正放行与否仍以下载解包后那张批准卡为准。",
+                "These are the manifest's declarations, shown before you install. What actually runs is still decided by the approval card after the package is downloaded and validated.",
+              )}
+            </div>
+          </div>
+        ) : props.remote ? (
+          <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)" }}>{tx("这份清单没有声明任何能力面。", "This manifest declares no capabilities.")}</div>
+        ) : null}
+
         <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>{repo.htmlUrl}</div>
         {err ? <div style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>{err}</div> : null}
       </div>
@@ -180,12 +300,53 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
   const [rows, setRows] = useState<Record<string, RowState>>({});
   const [covers, setCovers] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<GhRepo | null>(null);
+  /** `owner/name` → 仓库那份清单的摘要。只为"已装的"与"正打开的"取，见下面的 effect。 */
+  const [manifests, setManifests] = useState<Record<string, RepoManifestInfo | null>>({});
+  const [filter, setFilter] = useState<MarketFilter>("all");
+  const [sort, setSort] = useState<MarketSort>("updated");
   const seq = useRef(0);
+  /** 已经取过清单的 `full@updated`：翻页/重搜不重复打 API，仓库更新了才算新的一轮。 */
+  const seen = useRef(new Set<string>());
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  const stateOf = (repo: GhRepo): MarketState =>
+    marketStateOf(installed[repo.full], manifests[repo.full]?.version ?? "");
+
+  /**
+   * 远端版本按需取：**只读已装的那几枚 + 当前打开的那一枚**。
+   *
+   * 一次搜索 30+ 枚仓库，全读的话未登录 10 次/分钟立刻见底，而且绝大多数仓库用户根本
+   * 不关心它比本机新还是旧。已装集合是用户自己的小数目，这笔额度算得过来。
+   */
+  useEffect(() => {
+    if (!repos?.length) return;
+    const want = repos.filter((r) => installed[r.full] || selected?.full === r.full);
+    if (!want.length) return;
+    let alive = true;
+    for (const r of want) {
+      const key = `${r.full}@${r.updated}`;
+      if (seen.current.has(key)) continue;
+      seen.current.add(key);
+      void repoManifest(r).then((m) => {
+        if (!alive) return;
+        setManifests((x) => ({ ...x, [r.full]: m }));
+      });
+    }
+    return () => {
+      alive = false;
+    };
+    // manifests 不进依赖：它是这个 effect 自己写的东西，进依赖就是自激循环。
+    // 去重靠 seen（按 full@updated）：仓库更新了才会再取一次，重搜/翻页不重复打 API。
+  }, [repos, installed, selected]);
+
+  const shown = useMemo(
+    () => sortRepos(filterRepos(repos ?? [], filter, (r) => marketStateOf(installed[r.full], manifests[r.full]?.version ?? "")), sort),
+    [repos, filter, sort, installed, manifests],
+  );
 
   // 封面按可见顺序补，四条并发：既不会把一屏卡片卡在"等图"上，也不至于一次打出几十个请求。
   useEffect(() => {
@@ -242,7 +403,8 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
     return (
       <RepoDetail
         repo={selected}
-        version={installed[selected.full]}
+        inst={installed[selected.full]}
+        remote={manifests[selected.full]}
         cover={covers[selected.full]}
         onBack={() => setSelected(null)}
         onInstall={onInstall}
@@ -320,6 +482,38 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
             {busy ? tx("检索中…", "Searching…") : tx("搜索", "Search")}
           </button>
         </div>
+
+        {/* 结果内筛选与排序：都只动"已经搜出来的这一批"，不再打一次 GitHub——
+            市场是用户主动联网的地方，能省一次请求就省一次。 */}
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "var(--sp-1)" }}>
+          {FILTERS.map((f) => {
+            const n = f.id === "all" ? (repos?.length ?? 0) : filterRepos(repos ?? [], f.id, stateOf).length;
+            return (
+              <button
+                key={f.id}
+                className={`btn sm${filter === f.id ? " primary" : ""}`}
+                onClick={() => setFilter(f.id)}
+                disabled={!repos?.length}
+              >
+                {f.label()}
+                <span style={{ color: filter === f.id ? "inherit" : "var(--text-faint)" }}>&nbsp;{n}</span>
+              </button>
+            );
+          })}
+          <span style={{ flex: 1 }} />
+          <select
+            className="input"
+            value={sort}
+            disabled={!repos?.length}
+            onChange={(e) => setSort(e.target.value as MarketSort)}
+            title={tx("排序方式", "Sort order")}
+            style={{ width: "auto", height: "var(--ctl-h-1)", fontSize: "var(--fs-xs)" }}
+          >
+            {SORTS.map((s) => (
+              <option key={s.id} value={s.id}>{s.label()}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* 结果 */}
@@ -359,14 +553,25 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
 
         {repos && repos.length ? (
           <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)", marginBottom: "var(--sp-2)" }}>
-            {tx(`共 ${total} 个结果，显示前 ${repos.length} 个`, `${total} results, showing first ${repos.length}`)}
+            {shown.length === repos.length
+              ? tx(`共 ${total} 个结果，显示前 ${repos.length} 个`, `${total} results, showing first ${repos.length}`)
+              : tx(`共 ${total} 个结果，这一批里 ${shown.length} 个符合筛选`, `${total} results, ${shown.length} of this batch match the filter`)}
+          </div>
+        ) : null}
+
+        {repos?.length && !shown.length ? (
+          <div style={{ color: "var(--text-dim)", fontSize: "var(--fs-sm)" }}>
+            {tx("这一批里没有符合筛选的。换个筛选项，或先「全部」。", "Nothing in this batch matches the filter. Pick another, or All.")}
           </div>
         ) : null}
 
         <div className="plg-mkt-grid">
-          {(repos ?? []).map((repo) => {
+          {shown.map((repo) => {
             const st = rows[repo.full] ?? { kind: "idle" };
-            const ver = installed[repo.full];
+            const inst = installed[repo.full];
+            const remote = manifests[repo.full];
+            const state = marketStateOf(inst, remote?.version ?? "");
+            const actionable = state === "absent" || state === "updatable";
             return (
               <div key={repo.full} className="plg-mkt-card" onClick={() => setSelected(repo)}>
                 <RepoCover repo={repo} cover={covers[repo.full]} />
@@ -388,6 +593,14 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
 
                   <div className="plg-mkt-desc">{repo.description || tx("（没有描述）", "(no description)")}</div>
 
+                  {remote ? (
+                    <div className="plg-mkt-kinds">
+                      {kindTexts(remote.kinds).map((k) => (
+                        <span key={k} className="plg-mkt-kind">{k}</span>
+                      ))}
+                    </div>
+                  ) : null}
+
                   <div className="plg-mkt-meta">
                     <span>★ {fmtStars(repo.stars)}</span>
                     <span>{fmtDate(repo.updated)}</span>
@@ -397,16 +610,27 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
                       </span>
                     ))}
                     <div style={{ flex: "1 1 auto" }} />
-                    {ver ? (
-                      <span style={{ color: "var(--ok)" }}>{tx(`已安装 v${ver}`, `installed v${ver}`)}</span>
+                    {inst && !actionable ? (
+                      <span style={{ color: "var(--ok)" }}>{stateText(state, inst, remote?.version ?? "")}</span>
                     ) : st.kind === "working" ? (
                       <span style={{ color: "var(--text-dim)" }}>{stepLabel(st.step)}</span>
                     ) : (
-                      <button className="btn" onClick={(e) => { e.stopPropagation(); void install(repo); }}>
-                        {st.kind === "failed" ? tx("重试", "Retry") : tx("安装…", "Install…")}
+                      <button
+                        className={state === "updatable" ? "btn primary" : "btn"}
+                        onClick={(e) => { e.stopPropagation(); void install(repo); }}
+                      >
+                        {st.kind === "failed"
+                          ? tx("重试", "Retry")
+                          : state === "updatable"
+                            ? tx(`更新到 v${remote?.version ?? ""}`, `Update to v${remote?.version ?? ""}`)
+                            : tx("安装…", "Install…")}
                       </button>
                     )}
                   </div>
+
+                  {inst && noteText(inst) ? (
+                    <div className="plg-mkt-note">{noteText(inst)}</div>
+                  ) : null}
 
                   {st.kind === "failed" ? <div className="plg-mkt-fail">{st.msg}</div> : null}
                 </div>

@@ -10991,6 +10991,17 @@ body.pdrag-active *{cursor:grabbing !important;}
 }
 .plg-mkt-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--text-faint); }
 .plg-mkt-fail { font-size: var(--fs-xs); color: var(--danger); line-height: 1.5; }
+/* R19：清单摘要落到卡片上——产物种类先说"它是什么"，状态后说"我这边它是什么处境" */
+.plg-mkt-kinds { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.plg-mkt-kind {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+.plg-mkt-note { font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; }
 /* 0.6.1：工作场景——场景列表 + 编辑区。把顺序箭头、应用预览大盒子、工作区/外部目录
    常驻控件收起来：主编辑面只留“启用哪些插件 + 主题”，工作区与外部目录进高级折叠。 */
 .prof-page { display: flex; height: 100%; min-height: 0; background: var(--bg-panel); }

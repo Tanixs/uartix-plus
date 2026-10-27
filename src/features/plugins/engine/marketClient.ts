@@ -168,6 +168,127 @@ export async function commitRepoInstall(plan: InstallPlan, repo: GhRepo): Promis
 }
 
 /**
+ * 仓库里那份 `plugin.json` 的**摘要**：市场要拿它判"有没有更新"，并在装之前就说清权限面。
+ *
+ * 三条边界：
+ * - **这只是预告，不是判据**。真正的闸仍然是下载解包后的 `planFolder()` + 批准卡；
+ *   这里读到什么形状都只往界面上写短句，绝不拿它放行任何东西。
+ * - **远端 JSON 是不可信输入**：字段逐个验类型、字符串一律截断，解析不出来就返回 null。
+ * - **只为"已装的"和"正打开的"取**：一次搜索 30+ 枚仓库，挨个读清单会立刻撞
+ *   GitHub 未登录 10 次/分钟；已装集合是用户自己的小数目，额度上算得过账。
+ */
+export interface RepoPermBrief {
+  read: string[];
+  write: string[];
+  spawn: string[];
+  connect: string[];
+  ui: string[];
+  secrets: string[];
+  ai: string[];
+}
+
+/** 清单里声明的产物数量（0 的项视图自己就不渲染了）。 */
+export interface RepoKindBrief {
+  panels: number;
+  themes: number;
+  widgets: number;
+  presets: number;
+  tasks: number;
+  commands: number;
+}
+
+export interface RepoManifestInfo {
+  id: string;
+  version: string;
+  name: string;
+  perms: RepoPermBrief;
+  kinds: RepoKindBrief;
+}
+
+function short(s: unknown, max = 60): string {
+  return typeof s === "string" ? s.trim().slice(0, max) : "";
+}
+
+function strList(v: unknown, cap = 12): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => short(x, 48)).filter(Boolean).slice(0, cap);
+}
+
+/** 只翻声明了的项；`ui` / `ai` 那种 `{panel:true}` 取键名，值不是 true 的不算声明。 */
+function trueKeys(v: unknown, cap = 12): string[] {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return [];
+  const o = v as Record<string, unknown>;
+  return Object.keys(o)
+    .filter((k) => o[k] === true)
+    .slice(0, cap);
+}
+
+function permBrief(perm: Record<string, unknown>): RepoPermBrief {
+  const obj = (v: unknown): Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const fs = obj(perm.fs);
+  const pr = obj(perm.process);
+  const net = obj(perm.net);
+  return {
+    read: strList(fs.read),
+    write: strList(fs.write),
+    spawn: strList(pr.spawn),
+    connect: strList(net.connect),
+    ui: trueKeys(perm.ui),
+    secrets: strList(perm.secrets),
+    ai: trueKeys(perm.ai),
+  };
+}
+
+const KIND_KEYS = ["panels", "themes", "widgets", "presets", "tasks", "commands"] as const;
+
+function kindBrief(c: Record<string, unknown>): RepoKindBrief {
+  const out = { panels: 0, themes: 0, widgets: 0, presets: 0, tasks: 0, commands: 0 } as RepoKindBrief;
+  for (const k of KIND_KEYS) out[k] = Array.isArray(c[k]) ? Math.min(c[k].length, 99) : 0;
+  return out;
+}
+
+const manifestCache = new Map<string, RepoManifestInfo | null>();
+const manifestPending = new Map<string, Promise<RepoManifestInfo | null>>();
+
+export function repoManifest(repo: GhRepo): Promise<RepoManifestInfo | null> {
+  const key = `${repo.full}@${repo.updated}`;
+  const cached = manifestCache.get(key);
+  if (cached !== undefined) return Promise.resolve(cached);
+  const running = manifestPending.get(key);
+  if (running) return running;
+  const p = fetchManifest(repo);
+  manifestPending.set(key, p);
+  void p.then((v) => {
+    manifestPending.delete(key);
+    manifestCache.set(key, v);
+  });
+  return p;
+}
+
+async function fetchManifest(repo: GhRepo): Promise<RepoManifestInfo | null> {
+  if (!MARKET_API_HOST) return null;
+  try {
+    const url = `https://${MARKET_API_HOST}/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/contents/plugin.json?ref=${encodeURIComponent(repo.defaultBranch)}`;
+    const bytes = await fetchBytes(url, 512 * 1024);
+    const json = JSON.parse(new TextDecoder().decode(bytes)) as { content?: unknown; encoding?: unknown };
+    if (typeof json.content !== "string" || json.encoding !== "base64") return null;
+    const raw = JSON.parse(new TextDecoder().decode(b64ToBytes(json.content.replace(/\s+/g, "")))) as Record<string, unknown>;
+    const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+    return {
+      id: short(raw.id, 80),
+      version: short(raw.version, 32),
+      name: short(raw.name, 80),
+      perms: isObj(raw.permissions) ? permBrief(raw.permissions) : permBrief({}),
+      kinds: isObj(raw.contributes) ? kindBrief(raw.contributes) : kindBrief({}),
+    };
+  } catch {
+    // 没这个文件 / 网络失败 / JSON 坏了：市场照样能装，只是不显示"可更新"
+    return null;
+  }
+}
+
+/**
  * 市场卡片的封面：包根 `cover.<ext>`，只认能直接 img 的三种。
  *
  * 三条取舍：
