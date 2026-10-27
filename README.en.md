@@ -26,7 +26,9 @@ Define protocols by drag-and-drop · Parse and visualise in real time · Debug i
 
 ![Uartix+ main window: templates, frame canvas, properties, 2D plot, data table and control canvas](public/images/overview-en.png)
 
-> **Highlights in v0.6.0 — the plugin ecosystem ships.** Plugins use one v3 directory format and are managed inside Settings; a GitHub-topic market with repo covers and README previews, AI-written plugin drafts with preview, permission approval before anything runs, host logs and an append-only action journal; the YOLO training workbench gains run completion times, a working deploy page and fixed save/publish paths.
+> **Highlights in v0.6.4 — the YOLO training workbench ships 0.3.0.** The parameter surface is now driven by `ultralytics` itself (52 fields in five groups, defaults read from the engine, anything the package lacks simply does not appear), new parameters really take effect through the plugin's own runner, and three new pages — monitor / evaluation / experiments — join dataset auditing, an export matrix with edge-device constraints. The `annotations/` intake folder makes "you annotate, the panel only registers" a directory contract. Your existing manual pipeline (`config.yaml` / `scripts/*.py` / `00~07*.bat`) stays strictly read-only, enforced by tests that diff every file. The plugin market gains installed / updatable states and a pre-install permission preview, and publishing now carries binary assets.
+>
+> **v0.6.0 — the plugin ecosystem ships.** Plugins use one v3 directory format and are managed inside Settings, with a GitHub-topic market, AI-written drafts with preview, permission approval before anything runs, host logs and an append-only action journal.
 
 ---
 
@@ -52,7 +54,8 @@ It is far more than a serial terminal that echoes characters. **Protocols need n
 | Automated testing & event orchestration | ❌ | ❌ | **block sequencer + ECA orchestrator + CI-ready CLI** |
 | IMU calibration | separate tools | ❌ | **ellipsoid 9-parameter fit + six-face wizard + live compensation preview** |
 | AI-generated components and actions | ❌ | ❌ | **built in (since v0.3.6)** |
-| Plugin system (panels / themes / widgets / presets / tasks) | ❌ | ❌ | **v3 packages + AI drafts + permission approval (v0.6.0)** |
+| Plugin system (panels / themes / widgets / presets / tasks) | ❌ | ❌ | **v3 packages + AI drafts + permission approval + updatable market (v0.6.4)** |
+| Local YOLO training workbench | ❌ | ❌ | **Engine-driven parameter surface + monitor / evaluation / experiments (plugin 0.3.0)** |
 
 ---
 
@@ -174,6 +177,7 @@ A plugin is not a pasted script: it is a package with a manifest, a permission s
 - **AI drafts**: the AI writes panels / themes / widgets / presets / templates through `plugin_draft_save`. Drafts are **not installed plugins** — they cannot start; preview one in place, then choose Convert to plugin and pass the approval card. Promoted plugins start disabled; once enabled, their panels appear in `+ Panel`.
 - **Workspace and external roots**: manifests only name symbolic paths such as `$WS` and `$EXT:<key>`; you bind real directories once under Directory bindings, and the host expands them into the process arguments. Binding changes apply on the next start.
 - **Observability**: host stdout/stderr go to the run-log surface and to `plugins/<id>/logs/host.log` (line-safe rotation, 2 MiB default); install, approval, enable/disable, commands, bindings and profile switches are appended to an action journal that can be rebuilt and verified.
+- **Shipped example — the YOLO training workbench** (`plugins/uartix.yolo`, plugin 0.3.0): annotate → build → train → monitor → evaluate → export → deploy, as one panel. Its parameter surface is driven by `ultralytics` itself (52 of the 111 keys measured on this machine) and the source of truth stays on disk — a read-only `config.yaml`, a diff-only overlay, and a full yaml snapshot per experiment — so the commands the panel hands you also run from a plain terminal. It doubles as a live sample of this permission model: every write directory is caged by Node's `--allow-fs-write`, and the user's own manual pipeline is never touched.
 
 ### Shipping it out
 
