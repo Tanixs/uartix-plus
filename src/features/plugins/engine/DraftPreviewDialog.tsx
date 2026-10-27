@@ -186,7 +186,7 @@ export function DraftPreviewDialog(props: { appDir: string; name: string; entry:
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)", marginBottom: 6 }}>{tx("配色（来自 theme.css 的令牌）", "Palette (tokens from theme.css)")}</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "var(--sp-2)" }}>
                   {swatches.map(([k, v]) => (
-                    <div key={k} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+                    <div key={k} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-m)", overflow: "hidden" }}>
                       <div style={{ height: 44, background: String(v) }} />
                       <div style={{ padding: "3px 6px", fontFamily: "var(--font-mono)", fontSize: "var(--fs-xs)", color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${k}: ${v}`}>
                         {k}
@@ -203,7 +203,7 @@ export function DraftPreviewDialog(props: { appDir: string; name: string; entry:
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)", margin: "var(--sp-3) 0 6px" }}>{tx("尺寸与动效", "Sizes & motion")}</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-2)", fontFamily: "var(--font-mono)", fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>
                   {others.slice(0, 40).map(([k, v]) => (
-                    <span key={k} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "2px 6px" }}>
+                    <span key={k} style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-m)", padding: "2px 6px" }}>
                       {k}: {String(v)}
                     </span>
                   ))}

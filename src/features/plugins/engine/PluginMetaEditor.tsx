@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { tx, useLocale } from "../../../i18n/strings";
+import { Glyph, IconClose } from "../../../shared/icons";
 import type { InstalledPlugin } from "./pluginEngine";
 import {
   metaAuthor,
@@ -129,14 +130,14 @@ export function PluginMetaEditor(props: {
         <div style={{ display: "flex", gap: "var(--sp-2)", flexWrap: "wrap" }}>
           {meta.screenshots.map((s, i) => (
             <span key={i} style={{ position: "relative", display: "inline-flex" }}>
-              <img src={s} alt="" style={{ width: 96, height: 64, objectFit: "cover", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" }} />
+              <img src={s} alt="" style={{ width: 96, height: 64, objectFit: "cover", borderRadius: "var(--radius-m)", border: "1px solid var(--border)" }} />
               <button
                 className="btn"
                 style={{ position: "absolute", top: -6, right: -6, padding: "0 6px", lineHeight: "18px" }}
                 onClick={() => setPluginMeta(entry.id, { screenshots: meta.screenshots!.filter((_, j) => j !== i) })}
                 aria-label={tx("移除截图", "Remove screenshot")}
               >
-                ×
+                <Glyph><IconClose /></Glyph>
               </button>
             </span>
           ))}

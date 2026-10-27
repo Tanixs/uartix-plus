@@ -58,7 +58,7 @@ function FieldShell(props: { label: string; children: ReactNode; note?: string }
 
 const btn = (primary = false): CSSProperties => ({
   border: "1px solid var(--border)",
-  borderRadius: "var(--radius-sm)",
+  borderRadius: "var(--radius-m)",
   background: primary ? "var(--accent)" : "var(--bg-panel)",
   color: primary ? "var(--on-accent)" : "var(--text)",
   padding: "5px 10px",
