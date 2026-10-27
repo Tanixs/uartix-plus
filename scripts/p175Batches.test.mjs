@@ -43,11 +43,11 @@ const LEDGER = [
   {
     id: "W2",
     title: "模型代际（只 11 / 26）+ 任务识别与拦截",
-    done: false,
+    done: true,
     evidence: [
-      { file: "plugins/uartix.yolo/main.mjs", mustMatch: ["MODEL_FAMILIES", "function weightsFacts", "function detectTask", "taskMismatch"] },
-      { file: "plugins/uartix.yolo/panel.html", mustMatch: ["模型库", "任务"] },
-      { file: "scripts/yoloPlugin.test.mjs", mustMatch: ["代际不匹配", "混合"] },
+      { file: "plugins/uartix.yolo/main.mjs", mustMatch: ["MODEL_FAMILIES", "function weightsTaskFacts", "function detectTask", "function taskMismatch", "function resumeGuard", "function labelShape"] },
+      { file: "plugins/uartix.yolo/panel.html", mustMatch: ["模型库", "按建议设置"] },
+      { file: "scripts/yoloPlugin.test.mjs", mustMatch: ["代际", "混合数据集必须报出来", "不落快照"] },
     ],
   },
   {

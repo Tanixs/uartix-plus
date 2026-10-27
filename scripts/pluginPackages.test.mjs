@@ -7,6 +7,7 @@
  *
  * 覆盖面：`plugins/` 与 `examples/plugins/` 下所有带 `plugin.json` 的目录。
  */
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +46,16 @@ function findPackages(dir) {
   return out;
 }
 
+function findFiles(dir, re, depth = 0, acc = []) {
+  if (depth > 3) return acc;
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) findFiles(p, re, depth + 1, acc);
+    else if (re.test(e.name)) acc.push(p);
+  }
+  return acc;
+}
+
 const packages = [...findPackages(path.join(ROOT, "plugins")), ...findPackages(path.join(ROOT, "examples"))];
 
 describe("P174 · 仓库自带的插件包", () => {
@@ -80,6 +91,17 @@ describe("P174 · 仓库自带的插件包", () => {
       expect(pkg.name, `目录名与清单 id（${m.id}）不一致`).toBe(m.id);
 
       if (m.main) expect(() => statSync(path.join(pkg.dir, m.main)), `缺入口 ${m.main}`).not.toThrow();
+      // 包内每个 .mjs 都要过语法门：一个 `/** */` 里写出 `*/` 就能让整枚插件静默起不来，
+      // 而它的表现是"面板点了没反应"——排查成本极高，所以放在这里当场红。
+      for (const f of findFiles(pkg.dir, /\.mjs$/)) {
+        let err = "";
+        try {
+          execFileSync(process.execPath, ["--check", f], { stdio: "pipe" });
+        } catch (e) {
+          err = String(e.stderr || e.message || e).split("\n").slice(0, 4).join("\n");
+        }
+        expect(err, `语法不过：${path.relative(ROOT, f)}\n${err}`).toBe("");
+      }
       for (const panel of m.contributes.panels ?? []) {
         expect(() => statSync(path.join(pkg.dir, panel.entry)), `面板 ${panel.id} 缺入口 ${panel.entry}`).not.toThrow();
       }

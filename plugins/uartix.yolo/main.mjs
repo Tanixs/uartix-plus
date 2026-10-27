@@ -605,6 +605,280 @@ function runOnce(cmd, args, timeoutMs) {
   });
 }
 
+/* ============================ 模型代际与任务（P175-W2，详设 §1.3 / §1.4 / §5.1） ============================ */
+
+/**
+ * 模型代际：**只做 YOLO11 与 YOLO26**。
+ *
+ * 它们是同一个 `ultralytics` 包里的两代模型，不是两套环境——所以这里没有"环境切换"这种概念，
+ * 只有"这次用哪一枚权重"。范围裁定与理由记在详设 §1.2，界面上不解释历史包袱。
+ */
+const MODEL_FAMILIES = [
+  { id: "yolo11", label: "YOLO11", scales: ["n", "s", "m", "l", "x"], tasks: ["detect", "segment"] },
+  { id: "yolo26", label: "YOLO26", scales: ["n", "s", "m", "l", "x"], tasks: ["detect", "segment"] },
+];
+const TASKS = ["detect", "segment"];
+
+/** 官方可下载名（`-seg` 才是分割）。首次真用才会走网络下载。 */
+function officialModels() {
+  const out = [];
+  for (const fam of MODEL_FAMILIES) {
+    for (const sc of fam.scales) {
+      out.push({ name: `${fam.id}${sc}.pt`, family: fam.id, scale: sc, task: "detect", label: `${fam.label} ${sc}（检测）` });
+      out.push({ name: `${fam.id}${sc}-seg.pt`, family: fam.id, scale: sc, task: "segment", label: `${fam.label} ${sc}（分割）` });
+    }
+  }
+  return out;
+}
+
+/**
+ * 从文件名推断代际与任务（ultralytics 自己也按这套命名约定推）。
+ * **读不出就返回 known:false**——不猜：猜错的形态是"拿 detect 权重跑 segment"，
+ * 而引擎会拒绝，用户只会以为是面板的锅。
+ */
+function inferWeights(file) {
+  const base = path.basename(String(file == null ? "" : file)).toLowerCase();
+  const m = /^yolo(11|26)([nsmlx])(-seg)?\.pt$/.exec(base);
+  if (!m) return { name: base || "(没填)", family: null, scale: null, task: null, known: false };
+  return { name: base, family: `yolo${m[1]}`, scale: m[2], task: m[3] ? "segment" : "detect", known: true };
+}
+
+/** 任务与权重的匹配判断（详设 §1.3 的那张表落到代码上的样子）。 */
+function taskMismatch(task, facts) {
+  const t = String(task || "").trim();
+  const wt = String((facts && facts.task) || "").trim();
+  if (!t || !wt) return { ok: true, known: false, why: "" };
+  if (t === wt) return { ok: true, known: true, why: "" };
+  return {
+    ok: false,
+    known: true,
+    why: `这枚权重是 **${wt}** 的（${(facts && facts.source) || "读自权重"}），却要按 **${t}** 训：ultralytics 会直接拒绝。换一枚 ${t} 的权重，或把任务改成 ${wt}。`,
+  };
+}
+
+/**
+ * 续训守卫（详设 §1.5）：`resume` 只认 `last.pt`。
+ * `best.pt` 里没有 optimizer/scaler/EMA/epoch，给它会**静默退化**成"从头训但接着计数"。
+ */
+function resumeGuard(v) {
+  const s = String(v == null ? "" : v).trim();
+  if (!s || s === "false") return { ok: true, off: true };
+  if (/^\s*true\s*$/i.test(s)) return { ok: false, why: "resume 填 true 会让引擎从**当前工作目录**的 runs/**/last.pt 里挑一个——面板不能替你猜是哪一个。请把 last.pt 的完整路径填进来。" };
+  if (/best\.pt$/i.test(s)) return { ok: false, why: "resume 只能指向 last.pt：best.pt 没有优化器/轮次状态，续训会静默退化。" };
+  if (!/last\.pt$/i.test(s)) return { ok: false, why: "resume 要填训练产物里的 last.pt（或留空表示不续训）。" };
+  return { ok: true, off: false, path: s };
+}
+
+/**
+ * 标签形状 → 任务建议（详设 §1.4）。
+ *
+ * 判据是官方 `data/utils.py` 里真的在用的那一条：**每行 token 数**。
+ * `5` = 框；`1 + 2N (N≥3)` = 多边形；`9` 是 `1+8`，**既可能是 4 点多边形也可能是 OBB**——
+ * 所以 9 单独计一类，只报出来、不替用户决定（obb 不在范围内）。
+ * 混合（同一份数据里既有框又有多边形）必须报：detect 遇混合会**静默丢弃 segments**。
+ */
+function labelShape(rows) {
+  let boxes = 0;
+  let polys = 0;
+  let quads = 0;
+  let bad = 0;
+  for (const line of rows) {
+    const t = String(line).trim();
+    if (!t) continue;
+    const n = t.split(/\s+/).length;
+    if (n === 5) boxes++;
+    else if (n === 9) quads++;
+    else if (n > 6 && (n - 1) % 2 === 0) polys++;
+    else bad++;
+  }
+  const shaped = boxes + polys + quads;
+  const tally = [
+    { task: "detect", n: boxes },
+    { task: "segment", n: polys + quads },
+  ].sort((a, b) => b.n - a.n);
+  const top = tally[0];
+  const mixed = boxes > 0 && polys + quads > 0 && Math.min(boxes, polys + quads) / Math.max(1, shaped) > 0.02;
+  return {
+    task: shaped ? top.task : "",
+    confidence: shaped ? Number((top.n / shaped).toFixed(3)) : 0,
+    boxes,
+    polys,
+    quads,
+    bad,
+    shaped,
+    mixed,
+    // 9-token 占大头时，"多边形"与"OBB"分不开：只能报出来让用户看，不许悄悄按 segment 训
+    obbSuspect: quads > 0 && quads >= boxes && quads >= polys,
+  };
+}
+
+/** 扫 `labels/` 目录下的 .txt（train/val 都算），按固定步长抽样——同一个目录每次给出同一个结果。 */
+function sampleLabelFiles(dir, want) {
+  const out = [];
+  const root = path.join(dir, "labels");
+  const walk = (d, depth) => {
+    if (depth > 3 || out.length >= 4000) return;
+    let ents;
+    try {
+      ents = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of ents) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (e.name.endsWith(".txt")) out.push(p);
+    }
+  };
+  walk(root, 0);
+  const n = want || 200;
+  if (out.length <= n) return out;
+  const stride = out.length / n;
+  const picked = [];
+  for (let i = 0; i < n; i++) picked.push(out[Math.floor(i * stride)]);
+  return picked;
+}
+
+/** 任务自动识别：只出**建议 + 依据 + 置信度**，落不落配置由用户点（红线 D）。 */
+function detectTask(dirIn) {
+  const dir = abs(dirIn || DEFAULTS.dataset.output_dir);
+  const files = sampleLabelFiles(dir, 200);
+  const rows = [];
+  for (const f of files) {
+    try {
+      rows.push(...fs.readFileSync(f, "utf8").split(/\r?\n/));
+    } catch {
+      /* 少一个文件不影响建议 */
+    }
+    if (rows.length > 20000) break;
+  }
+  const shape = labelShape(rows);
+  return {
+    dir,
+    files: files.length,
+    lines: rows.filter((l) => String(l).trim()).length,
+    ...shape,
+    note: shape.shaped ? "这是建议，点了才会写进配置" : "还没找到标签文件（数据集没构建？）",
+  };
+}
+
+/** 盘上的权重（**只列不读内容**：读内容要 import torch，那是 `modelLibrary()` 那颗按钮的事）。 */
+function scanModels(limit) {
+  if (!root) return [];
+  const found = [];
+  const walk = (d, depth) => {
+    if (depth > 2 || found.length >= (limit || 60)) return;
+    let ents;
+    try {
+      ents = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of ents) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) {
+        if (e.name === ".versions" || e.name === "node_modules") continue;
+        walk(p, depth + 1);
+        continue;
+      }
+      if (!e.name.endsWith(".pt")) continue;
+      let st;
+      try {
+        st = fs.statSync(p);
+      } catch {
+        continue;
+      }
+      found.push({ file: p.replace(/\\/g, "/"), bytes: st.size, mtime: st.mtimeMs, ...inferWeights(e.name) });
+    }
+  };
+  walk(abs("models"), 0);
+  found.sort((a, b) => b.mtime - a.mtime);
+  return found;
+}
+
+const modelFacts = new Map();
+/** 一枚权重的"已知事实"：读过权重就用权重说的，否则用文件名推断的，再不行就是 null（不猜）。 */
+function factsFor(f) {
+  const g = modelFacts.get(`${f.file}|${f.mtime}`);
+  if (g && g.ok) return { task: g.task, nc: g.nc, version: g.version, imgsz: g.imgsz, optimizer: g.optimizer, source: "读自权重" };
+  return f.known ? { task: f.task, source: "按文件名推断" } : null;
+}
+/** 读权重内嵌的 task / nc / 训练它的包版本。要 import torch（实测 ~10 秒），所以单独一个按钮、按 mtime 缓存。 */
+async function modelLibrary(force) {
+  const files = scanModels();
+  if (!files.length) return { ok: true, items: [], probed: 0, error: "" };
+  const need = files.filter((f) => force || !modelFacts.has(`${f.file}|${f.mtime}`));
+  let err = "";
+  if (need.length) {
+    const py = await detectPython();
+    if (!py.ok) return { ok: false, items: files, probed: 0, error: `没有可用的 python：${py.error}` };
+    const code =
+      "import json,sys\n" +
+      "from ultralytics import YOLO\n" +
+      "out=[]\n" +
+      "for f in json.loads(sys.argv[1]):\n" +
+      " try:\n" +
+      "  m=YOLO(f); ck=getattr(m,'ckpt',None) or {}; ta=(ck.get('train_args') or {})\n" +
+      "  out.append({'file':f,'ok':True,'task':m.task,'nc':getattr(m,'nc',None),'version':ck.get('version') or ta.get('version') or '','imgsz':ta.get('imgsz'),'optimizer':ta.get('optimizer')})\n" +
+      " except Exception as e:\n" +
+      "  out.append({'file':f,'ok':False,'error':str(e)[:180]})\n" +
+      "print(json.dumps(out,ensure_ascii=False))\n";
+    const r = await runOnce(py.path, ["-c", code, JSON.stringify(need.map((f) => f.file))], 180000);
+    if (r.code !== 0) err = (r.err || r.out || "读权重失败").slice(-300);
+    else {
+      try {
+        const got = JSON.parse(r.out.trim().split(/\r?\n/).pop());
+        const byFile = {};
+        for (const g of got) byFile[String(g.file).replace(/\\/g, "/")] = g;
+        for (const f of need) {
+          const g = byFile[f.file] || byFile[abs(f.file)] || { ok: false, error: "探测没返回这一项" };
+          modelFacts.set(`${f.file}|${f.mtime}`, g);
+        }
+      } catch (e) {
+        err = `探测输出读不出来：${(e && e.message) || e}`;
+      }
+    }
+  }
+  const items = files.map((f) => {
+    const g = modelFacts.get(`${f.file}|${f.mtime}`);
+    return { ...f, facts: factsFor(f), probeError: g && !g.ok ? g.error : "", familyKnown: f.known };
+  });
+  return { ok: !err, items, probed: need.length, error: err };
+}
+
+/** 当前权重该按哪个任务训：读得出来就用读出来的，读不出来用文件名，再不行留空（不猜）。 */
+function weightsTaskFacts(weights) {
+  const files = scanModels(80);
+  const want = abs(weights || "").toLowerCase();
+  const hit = files.find((f) => f.file.toLowerCase() === want.toLowerCase());
+  if (hit) {
+    const g = modelFacts.get(`${hit.file}|${hit.mtime}`);
+    if (g && g.ok) return { task: g.task, source: "读自权重" };
+    if (hit.known) return { task: hit.task, source: "按文件名推断" };
+    return { task: "", source: "" };
+  }
+  const inf = inferWeights(weights);
+  return inf.known ? { task: inf.task, source: "按文件名推断" } : { task: "", source: "" };
+}
+
+/**
+ * 任务这一块的完整判断（面板一次拿到）：选了哪个、权重是什么、搭不搭、
+ * 标签看起来像什么（建议，不自动落盘）、续训填得对不对。
+ */
+function taskBlock(eff) {
+  const weights = (eff.train && (eff.train.weights || eff.train.model)) || "";
+  const facts = weightsTaskFacts(weights);
+  const chosen = String((eff.train && eff.train.task) || facts.task || "").trim();
+  return {
+    weights: String(weights || ""),
+    chosen,
+    facts,
+    mismatch: taskMismatch(chosen, facts),
+    suggest: detectTask(eff.dataset && eff.dataset.output_dir),
+    resume: resumeGuard(eff.train && eff.train.resume),
+  };
+}
+
 /* ============================ 工作区扫描 ============================ */
 
 function countFiles(dir) {
@@ -1194,6 +1468,14 @@ async function startJob(kind, overrides) {
   const py = await detectPython();
   if (!py.ok) throw new Error(`找不到可用的 python（试过 ${py.source}：${py.path}）：${py.error}`);
 
+  if (kind === "train") {
+    // 开跑前拦两道（详设 §1.3 / §1.5）：任务与权重不搭、续训指错文件。
+    // 这两条引擎自己也会拒，但拒在 30 秒之后的一行 traceback 里，不如现在说人话。
+    const block = taskBlock(merged);
+    if (!block.mismatch.ok) throw new Error(block.mismatch.why);
+    if (!block.resume.ok) throw new Error(block.resume.why);
+  }
+
   const runner = kind === "train" ? path.join(PKG_DIR, "runner", "train_job.py").replace(/\\/g, "/") : abs("scripts/build_dataset.py");
   if (!fs.existsSync(runner)) {
     throw new Error(
@@ -1548,6 +1830,8 @@ async function panelState() {
       intake: { dir: "", exists: false, subdirs: [], loose: { images: 0, json: 0, other: 0 }, truncated: false },
       // 参数面：没探过就老实说没探过。探测要 6 秒，所以它不塞在刷新里，面板自己调 params()
       params: specNow(),
+      models: [],
+      task: null,
       jobs: [],
       active: null,
     };
@@ -1573,6 +1857,8 @@ async function panelState() {
     trainRuns: scanTrainRuns(),
     intake,
     params: specNow(),
+    models: scanModels(24).map((f) => ({ ...f, facts: factsFor(f) })),
+    task: taskBlock(cfg.effective),
     jobs: [...jobs.values()].slice(-8).map(snapshot),
     active: snapshot(active),
   };
@@ -1652,7 +1938,8 @@ async function activate(c) {
 
     /** 读当前那套 ultralytics 的参数表。同一套 python 只探一次；`true` = 强制重探。 */
     async params(refresh) {
-      return await probeParams(!!refresh);
+      // 引导脚本会把"没参数"归一成 `{}`——那是真值，直接信它会每次挂载都重探一遍（6 秒）
+      return await probeParams(refresh === true);
     },
 
     /** 开跑前摘要：让 runner `--dry-run` 解析一遍，看清"引擎到底会收到哪些参数、哪些被丢了"。 */
@@ -1675,6 +1962,37 @@ async function activate(c) {
       const srcs = (effective.dataset.sources || []).slice();
       if (!srcs.includes(hit.path)) srcs.push(hit.path);
       return await applyPatch({ dataset: { sources: srcs } });
+    },
+
+    /* ---- 模型代际与任务（P175-W2）---- */
+
+    /** 模型库：读每枚 `.pt` 内嵌的 task / nc / 训练它的包版本。要 import torch（~10 秒），单独一颗按钮。 */
+    async modelLibrary(refresh) {
+      needWorkspace();
+      return await modelLibrary(refresh === true);
+    },
+
+    /** 任务自动识别：**只出建议**。点了「按这个任务训」才落配置（红线 D）。 */
+    async detectTask(dir) {
+      needWorkspace();
+      // 只认字符串：引导脚本会把"没参数"归一成 `{}`，`String({})` 会变成 `[object Object]` 并被当成路径
+      const given = typeof dir === "string" ? dir.trim() : "";
+      const d = given || (await effectiveConfig()).effective.dataset.output_dir;
+      return detectTask(d);
+    },
+
+    /** 用户点名要哪个任务。只接受 detect / segment，别的（obb / pose / classify）不在范围内。 */
+    async applyTask(task) {
+      const t = String(task == null ? "" : task);
+      if (!TASKS.includes(t)) throw new Error(`任务只支持 ${TASKS.join(" / ")}（收到：${task}）`);
+      return await applyPatch({ train: { task: t } });
+    },
+
+    /** 只问不写：这次的任务与权重搭不搭、续训填得对不对。 */
+    async checkTask() {
+      needWorkspace();
+      const { effective } = await effectiveConfig();
+      return taskBlock(effective);
     },
 
     /* ---- 部署（$EXT:deploy）---- */
@@ -1741,4 +2059,18 @@ async function activate(c) {
 // `dumpConfig` / `parseSimpleYaml` / `buildParamSpec` / `coerceTrain` 是纯函数（不碰 ctx），导出给测试与将来的复用：
 // 它们之间必须能往返——本插件生成的 config.yaml，用它自己的解析器读回来必须一模一样；
 // 参数表也必须是纯映射：喂给它一份"少一个键"的探测结果，它就得少渲染一项（详设 §10 判据 2）。
-export { activate, buildParamSpec, coerceTrain, dumpConfig, fmtDuration, parseSimpleYaml, PARAM_META };
+export {
+  activate,
+  buildParamSpec,
+  coerceTrain,
+  dumpConfig,
+  fmtDuration,
+  inferWeights,
+  labelShape,
+  MODEL_FAMILIES,
+  officialModels,
+  parseSimpleYaml,
+  PARAM_META,
+  resumeGuard,
+  taskMismatch,
+};

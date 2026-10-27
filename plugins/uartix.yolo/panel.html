@@ -233,6 +233,12 @@
       td.num {
         font-family: "Cascadia Mono", Consolas, monospace;
       }
+      tr.on td {
+        background: color-mix(in srgb, var(--accent) 10%, transparent);
+      }
+      tr.on td.name {
+        box-shadow: inset 2px 0 0 var(--accent);
+      }
       .bar {
         height: 6px;
         border-radius: 3px;
@@ -452,6 +458,20 @@
         </div>
 
         <div class="card">
+          <h2>
+            模型库
+            <span class="tag" id="mlibtag">按文件名推断</span>
+            <button class="btn" id="mlib" title="逐枚读权重内嵌的 task / nc / 训练它的包版本（要 import torch，约 10 秒）">读一遍权重</button>
+          </h2>
+          <div id="mliblist"></div>
+          <p class="note">
+            只做 <b>YOLO11</b> 与 <b>YOLO26</b> 两代——它们是同一个 <code>ultralytics</code> 包里的两代模型，不是两套环境。
+            灰字那行是权重<b>自己带的</b>信息：它是干什么任务的、被哪个版本的包训出来的。
+            没读之前只能按文件名推断（<code>yolo11n-seg.pt</code> → 分割），推断不出来的会标出来，<b>不猜</b>。
+          </p>
+        </div>
+
+        <div class="card">
           <h2>数据集</h2>
           <div class="kv" id="dskv"></div>
         </div>
@@ -567,6 +587,8 @@
             <span class="tag" id="psrc">参数面 ?</span>
             <button class="btn" id="reprobe" title="重新读一遍当前 ultralytics 的参数表（约 6 秒）">重探参数表</button>
           </h2>
+          <div class="row" id="taskrow" style="margin-bottom: 10px"></div>
+          <div class="note" id="tasknote" style="margin: 0 0 8px"></div>
           <div id="params">
             <span class="note">正在读参数表…（要 import ultralytics 的配置，约 6 秒）</span>
           </div>
@@ -1171,6 +1193,123 @@
           : '<span class="note">还没有跑过任务</span>';
       }
 
+      /* ---------------- 任务与模型库（P175-W2）---------------- */
+      function renderTask() {
+        var row = $("taskrow");
+        var note = $("tasknote");
+        var b = st.task;
+        if (!b) {
+          row.innerHTML = "";
+          note.innerHTML = "";
+          return;
+        }
+        var chosen = b.chosen || "";
+        var h = '<span class="tag">任务</span>';
+        h += '<button class="btn' + (chosen === "detect" ? " primary" : "") + '" data-task="detect">目标检测 detect</button>';
+        h += '<button class="btn' + (chosen === "segment" ? " primary" : "") + '" data-task="segment">实例分割 segment</button>';
+        h +=
+          '<span class="note" style="margin:0">权重 ' +
+          esc(b.weights || "(没填)") +
+          (b.facts && b.facts.task ? " · 它是 <b>" + esc(b.facts.task) + "</b>（" + esc(b.facts.source) + "）" : " · <b>任务读不出来</b>，先去概览点「读一遍权重」") +
+          "</span>";
+        row.innerHTML = h;
+        var btns = row.querySelectorAll("[data-task]");
+        for (var i = 0; i < btns.length; i++) {
+          btns[i].onclick = async function () {
+            try {
+              await uartix.call("applyTask", this.getAttribute("data-task"));
+              await refresh(true);
+            } catch (e) {
+              sysLog("设置任务失败：" + (e && e.message ? e.message : e));
+            }
+          };
+        }
+
+        var bits = [];
+        if (b.mismatch && !b.mismatch.ok) bits.push('<b style="color:var(--bad)">' + esc(b.mismatch.why) + "</b>");
+        if (b.resume && !b.resume.ok) bits.push('<b style="color:var(--bad)">续训：' + esc(b.resume.why) + "</b>");
+        var s = b.suggest || {};
+        if (s.shaped && s.task !== chosen) {
+          bits.push(
+            "标签看起来像 <b>" + esc(s.task) + "</b>（置信度 " + Math.round((s.confidence || 0) * 100) + "% · 框 " + s.boxes + " / 多边形 " + s.polys + " / 四点 " + s.quads + " · 抽了 " + s.files + " 个标签文件）" +
+            ' <button class="btn" data-apply-suggest="' + esc(s.task) + '">按建议设置</button>',
+          );
+        }
+        if (s.mixed) bits.push('<span style="color:var(--warn)">这份数据里框和多边形混在一起：按 detect 训会<b>静默丢弃 segments</b>（引擎行为），要么先分开，要么按 segment 训。</span>');
+        if (s.obbSuspect) bits.push('<span style="color:var(--warn)">多半是 4 点多边形或 OBB——本工作台只做 detect / segment，这一份请你人工确认再决定。</span>');
+        note.innerHTML = bits.length ? bits.join("<br />") : "";
+        var sug = note.querySelectorAll("[data-apply-suggest]");
+        for (var k = 0; k < sug.length; k++) {
+          sug[k].onclick = async function () {
+            try {
+              await uartix.call("applyTask", this.getAttribute("data-apply-suggest"));
+              sysLog("任务已按建议改成 " + this.getAttribute("data-apply-suggest"));
+              await refresh(true);
+            } catch (e) {
+              sysLog("设置任务失败：" + (e && e.message ? e.message : e));
+            }
+          };
+        }
+        // 任务与权重不搭时，那颗按钮按下去也是白按：现在就置灰，别等 30 秒后一行 traceback
+        $("train").disabled = !!running || !!(b.mismatch && !b.mismatch.ok) || !!(b.resume && !b.resume.ok);
+      }
+
+      function renderModels() {
+        var list = st.models || [];
+        var chosen = ((st.config || {}).effective || {}).train || {};
+        if (!list.length) {
+          $("mliblist").innerHTML = '<span class="note">models/ 里还没有 .pt（官方名可以先点一下填进权重框）</span>';
+          return;
+        }
+        var h = '<div class="tablewrap"><table><thead><tr><th>权重</th><th>代际</th><th>任务</th><th>类别数</th><th>训练它的包</th><th>大小</th></tr></thead><tbody>';
+        for (var i = 0; i < list.length; i++) {
+          var m = list[i];
+          var f = m.facts || {};
+          var on = String(chosen.weights || "").toLowerCase().indexOf(m.name.toLowerCase()) >= 0;
+          h +=
+            '<tr' + (on ? ' class="on"' : "") + ' data-pick="' + esc(m.file) + '" style="cursor:pointer">' +
+            '<td class="name" title="' + esc(m.file) + '">' + esc(m.name) + "</td>" +
+            "<td>" + esc(m.family || "—") + (m.scale ? " / " + esc(m.scale) : "") + "</td>" +
+            "<td>" + (f.task ? esc(f.task) + (f.source ? '<span class="note"> · ' + esc(f.source) + "</span>" : "") : '<span class="tag warn">读不出</span>') + "</td>" +
+            "<td class=\"num\">" + (f.nc == null ? "—" : f.nc) + "</td>" +
+            "<td class=\"num\">" + esc(f.version || "—") + "</td>" +
+            "<td class=\"num\">" + esc(fmtBytes(m.bytes)) + "</td></tr>";
+        }
+        h += "</tbody></table></div>";
+        $("mliblist").innerHTML = h;
+        var trs = $("mliblist").querySelectorAll("[data-pick]");
+        for (var j = 0; j < trs.length; j++) {
+          trs[j].onclick = async function () {
+            try {
+              await uartix.call("saveConfig", { train: { weights: this.getAttribute("data-pick") } });
+              sysLog("已选这枚权重当起点；任务不搭时面板会拦下来");
+              await refresh(true);
+            } catch (e) {
+              sysLog("选权重失败：" + (e && e.message ? e.message : e));
+            }
+          };
+        }
+      }
+
+      function loadModels(force) {
+        var tag = $("mlibtag");
+        tag.textContent = "读权重中…（要 import torch）";
+        tag.className = "tag";
+        uartix
+          .call("modelLibrary", !!force)
+          .then(function (r) {
+            tag.textContent = r.ok ? "已读 " + (r.items || []).length + " 枚" : "读权重失败";
+            tag.className = "tag" + (r.ok ? " ok" : " bad");
+            if (!r.ok) sysLog("读权重失败：" + r.error);
+            return refresh(true);
+          })
+          .catch(function (e) {
+            tag.textContent = "读权重失败";
+            tag.className = "tag bad";
+            sysLog("读权重失败：" + (e && e.message ? e.message : e));
+          });
+      }
+
       function renderAll(s) {
         st = s;
         renderEnv();
@@ -1180,7 +1319,10 @@
         renderTrainParams();
         renderSnapshots();
         renderIntake();
+        // renderJob 先跑：它负责 `running` 这个状态；renderTask 要在它之后才能正确地置灰
         renderJob(s.active || (s.jobs && s.jobs.length ? s.jobs[s.jobs.length - 1] : null));
+        renderTask();
+        renderModels();
       }
 
       async function refresh(quiet) {
@@ -1285,6 +1427,9 @@
       };
       $("reprobe").onclick = function () {
         loadParams(true);
+      };
+      $("mlib").onclick = function () {
+        loadModels(true);
       };
       $("intake-refresh").onclick = function () {
         refresh(false);

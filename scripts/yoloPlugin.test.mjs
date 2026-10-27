@@ -926,3 +926,175 @@ describe("P175-W1 · 投料口与开跑前摘要", () => {
     }
   }, 60_000);
 });
+
+/* ============================================================================
+   P175-W2 · 模型代际（只 11 / 26）与任务
+   ============================================================================ */
+
+describe("P175-W2 · 代际、任务与续训的判断（纯函数）", () => {
+  it("官方名只有两代、两种任务；文件名推断不出来就承认不知道", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    const names = m.officialModels();
+    expect(names).toHaveLength(20); // 两代 × 五档 × (检测 / 分割)
+    for (const x of names) {
+      expect(x.name).toMatch(/^yolo(11|26)[nsmlx](-seg)?\.pt$/);
+      expect(["detect", "segment"]).toContain(x.task);
+    }
+    expect(names.map((x) => x.name).join(",")).not.toMatch(/v5/);
+    expect(m.MODEL_FAMILIES.map((f) => f.id)).toEqual(["yolo11", "yolo26"]);
+
+    expect(m.inferWeights("models/yolo11n-seg.pt").task).toBe("segment");
+    expect(m.inferWeights("D:/WS/models/yolo26n.pt")).toMatchObject({ family: "yolo26", scale: "n", task: "detect", known: true });
+    expect(m.inferWeights("runs/exp/weights/best.pt").known, "best.pt 什么也推不出来，不许假装推得出").toBe(false);
+    expect(m.inferWeights("yolo11n-pose.pt").known, "姿态不在范围内").toBe(false);
+  });
+
+  it("任务与权重不搭要拦；读不出来时不拦也不猜", async () => {
+    const { taskMismatch } = await import("../../plugins/uartix.yolo/main.mjs");
+    const bad = taskMismatch("detect", { task: "segment", source: "读自权重" });
+    expect(bad.ok).toBe(false);
+    expect(bad.why).toContain("segment");
+    expect(bad.why).toContain("detect");
+    expect(taskMismatch("segment", { task: "segment" }).ok).toBe(true);
+    expect(taskMismatch("detect", {}).known, "没有事实就没有判断可言").toBe(false);
+    expect(taskMismatch("detect", {}).ok).toBe(true);
+  });
+
+  it("resume 只认 last.pt（best.pt 会静默退化，true 会让引擎去猜目录）", async () => {
+    const { resumeGuard } = await import("../../plugins/uartix.yolo/main.mjs");
+    expect(resumeGuard("").ok).toBe(true);
+    expect(resumeGuard(false).ok).toBe(true);
+    expect(resumeGuard("D:/WS/runs/exp/last.pt").ok).toBe(true);
+    expect(resumeGuard("D:/WS/runs/exp/weights/best.pt").ok).toBe(false);
+    expect(resumeGuard("true").ok).toBe(false);
+    expect(resumeGuard("true").why).toContain("last.pt");
+    expect(resumeGuard("D:/WS/别的.pt").ok).toBe(false);
+  });
+
+  it("标签 token 数 → 任务建议：框 / 多边形 / 四点（可能是 OBB）/ 混合", async () => {
+    const { labelShape } = await import("../../plugins/uartix.yolo/main.mjs");
+    // 合法形状：框 = 1+4 = 5 个 token；多边形 = 1+2N（N≥3）→ 7 / 11 个；9 个既可能是 4 点多边形也可能是 OBB
+    const box = ["0 0.5 0.5 0.2 0.2", "1 0.1 0.2 0.3 0.4"];
+    const poly = ["0 0.1 0.1 0.4 0.1 0.4 0.4", "1 0.2 0.2 0.5 0.2 0.5 0.5 0.2 0.5 0.3 0.1"];
+    const quad = ["0 0.1 0.1 0.4 0.1 0.4 0.4 0.1 0.1", "0 0.2 0.2 0.5 0.2 0.5 0.5 0.2 0.2"];
+    const detect = labelShape(box);
+    expect(detect.task).toBe("detect");
+    expect(detect.confidence).toBe(1);
+    const seg = labelShape([...poly, ...poly]);
+    expect(seg.task).toBe("segment");
+    expect(seg.polys).toBe(4);
+    // 全是 4 点（1+8）时，多边形与 OBB 分不开：只报出来，不替用户定
+    const q = labelShape(quad);
+    expect(q.obbSuspect, JSON.stringify(q)).toBe(true);
+    expect(q.shaped).toBe(2);
+    // 混合必须报出来：detect 遇混合会静默丢弃 segments（官方行为）
+    const mixed = labelShape([...box, ...box, ...box, ...poly]);
+    expect(mixed.mixed, JSON.stringify(mixed)).toBe(true);
+    expect(labelShape([]).task).toBe("");
+    expect(labelShape(["0 1 2"]).bad, "3 个 token 不是合法行").toBe(1);
+  });
+});
+
+describe("P175-W2 · 拦截与识别走真插件", () => {
+  /** 造一个带标签的数据集目录：rows 里的形状决定识别结果。 */
+  function makeLabels(ws, split, rows) {
+    const dir = path.join(ws, "datasets", "x", "labels", split);
+    mkdirSync(dir, { recursive: true });
+    rows.forEach((r, i) => writeFileSync(path.join(dir, `l${i}.txt`), r.join("\n"), "utf8"));
+  }
+
+  it("拿 detect 权重跑 segment（反之亦然）→ 开跑前就拦下来，且不落快照", async () => {
+    const ws = makeWorkspace("task-guard");
+    const pluginDir = copyPlugin("task-guard");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const st = await p.call("panel.train.saveConfig", { train: { weights: "models/yolo11n-seg.pt", task: "detect" } });
+      expect(st.task.mismatch.ok, JSON.stringify(st.task.mismatch)).toBe(false);
+      expect(st.task.chosen).toBe("detect");
+      const err = await p.call("panel.train.startTrain", {}).then(
+        () => null,
+        (e) => String(e.message || e),
+      );
+      expect(err, "任务与权重不搭却没拦住").toBeTruthy();
+      expect(err).toContain("segment");
+      expect(err).toContain("detect");
+      // 拦下来发生在写快照之前：不该在 train_runs/ 里留下一具尸体
+      expect(existsSync(path.join(ws, "train_runs")), "被拦下的训练还是写了快照").toBe(false);
+
+      // 改成搭的组合就能跑
+      const ok = await p.call("panel.train.applyTask", "segment");
+      expect(ok.task.mismatch.ok).toBe(true);
+      const job = await p.call("panel.train.startTrain", {});
+      expect(job.state).toBe("running");
+      await p.waitFor(() => {
+        const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
+        return jobs.find((j) => j.id === job.id && j.state !== "running");
+      }, 20_000, "训练结束");
+      const snap = readdirSync(path.join(ws, "train_runs")).filter((f) => f.endsWith(".yaml"));
+      expect(snap.length).toBe(1);
+      expect(readFileSync(path.join(ws, "train_runs", snap[0]), "utf8")).toMatch(/^ {2}task: "segment"$/m);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("任务只认 detect / segment；混合数据集必须报出来", async () => {
+    const ws = makeWorkspace("task-detect");
+    makeLabels(ws, "train", [
+      ["0 0.5 0.5 0.2 0.2", "1 0.1 0.2 0.3 0.4", "0 0.3 0.3 0.1 0.1"],
+      ["0 0.1 0.1 0.4 0.1 0.4 0.4 0.1 0.1"],
+    ]);
+    const pluginDir = copyPlugin("task-detect");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.detectTask", "");
+      expect(s.files, JSON.stringify(s)).toBeGreaterThan(0);
+      expect(s.mixed, JSON.stringify(s)).toBe(true);
+      expect(["detect", "segment"]).toContain(s.task);
+      expect(s.note).toContain("建议");
+      // 建议不许自己溜进配置
+      const st = await p.call("panel.train.state", {});
+      expect(st.task.chosen, "识别结果没经确认就落盘了（红线 D）").not.toBe(s.task === "detect" ? "segment" : "detect");
+
+      const bad = await p.call("panel.train.applyTask", "obb").then(
+        () => null,
+        (e) => String(e.message || e),
+      );
+      expect(bad, "obb 不在范围内却接受了").toBeTruthy();
+      expect(bad).toContain("detect");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 60_000);
+
+  it("模型库：node 冒充的 python 读不了权重时，报失败而不是摆一堆假事实", async () => {
+    const ws = makeWorkspace("mlib");
+    mkdirSync(path.join(ws, "models"), { recursive: true });
+    writeFileSync(path.join(ws, "models", "yolo11n-seg.pt"), "x");
+    writeFileSync(path.join(ws, "models", "yolo26n.pt"), "x");
+    const pluginDir = copyPlugin("mlib");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const st = await p.call("panel.train.state", {});
+      expect(st.models.map((m) => m.name).sort()).toEqual(["yolo11n-seg.pt", "yolo26n.pt"]);
+      // 没读过权重：只能有文件名推断出来的那一份，且标清楚来源
+      expect(st.models.find((m) => m.name === "yolo26n.pt").facts.task).toBe("detect");
+      expect(st.models.find((m) => m.name === "yolo26n.pt").facts.source).toBe("按文件名推断");
+      const r = await p.call("panel.train.modelLibrary", true);
+      expect(r.ok, "读不动却报了成功").toBe(false);
+      expect(String(r.error || "")).toBeTruthy();
+      expect(r.items.length).toBe(2);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 60_000);
+});
