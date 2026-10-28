@@ -511,20 +511,43 @@ pub fn plugin_promote(draft_id: String, id: String, roots: Vec<String>) -> Resul
     if !staging.is_dir() {
         return Err(format!("没有这个暂存目录（可能是上一次安装被中断了）：{}", staging.display()));
     }
+
+    // 更新：**先替换，不要逼用户卸载**。旧版本先挪到 staging/.trash-<id>-<ts>，
+    // 新的提上去之后再删旧的；中途任何一步失败都把旧的挪回来 ——
+    // 宁可这次更新失败，也不能让用户手上一个能跑的版本都没有。
+    let mut backup: Option<PathBuf> = None;
     if final_dir.exists() {
-        return Err(format!("已经有一个叫 {id} 的插件：请先在插件管理里卸载再装（卸载会清掉批准记录，重装需要重新批准）"));
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let trash = Path::new(root).join("staging").join(format!(".trash-{id}-{ts}"));
+        guard(trash.to_string_lossy().as_ref(), &roots)?;
+        if fs::rename(&final_dir, &trash).is_err() {
+            return Err(format!(
+                "旧版本挪不动（面板或插件进程可能还开着）：{} —— 关掉面板再更新一次",
+                final_dir.display()
+            ));
+        }
+        backup = Some(trash);
     }
 
     let mut via_copy = false;
     if fs::rename(&staging, &final_dir).is_err() {
-        // 退路：复制过去再删暂存。失败了就把半成品清掉，不留一个吊着的目录
+        // 退路：复制过去再删暂存。失败了就把半成品清掉、把旧版本挪回去
         via_copy = true;
         let mut budget = CopyBudget::default();
         if let Err(e) = copy_tree(&staging, &final_dir, &mut budget, 0) {
             let _ = fs::remove_dir_all(&final_dir);
+            if let Some(b) = &backup {
+                let _ = fs::rename(b, &final_dir);
+            }
             return Err(e);
         }
         let _ = fs::remove_dir_all(&staging);
+    }
+    if let Some(b) = backup {
+        let _ = fs::remove_dir_all(&b);
     }
     Ok(json!({
         "ok": true,
@@ -832,7 +855,7 @@ mod install_tests {
     }
 
     #[test]
-    fn promote_refuses_bad_id_and_existing_target() {
+    fn promote_refuses_bad_id() {
         let root = scratch("promote-bad");
         let ext_root = root.join("plugins");
         fs::create_dir_all(ext_root.join("staging").join("d1")).unwrap();
@@ -843,9 +866,40 @@ mod install_tests {
                 "「{bad}」不该被当成安装目录名"
             );
         }
-        // 目标已存在：更新安装必须先卸载，不许悄悄覆盖（避免"装到一半两个版本混着"）
-        fs::create_dir_all(ext_root.join("a.b")).unwrap();
-        assert!(plugin_promote("d1".to_string(), "a.b".to_string(), roots(&ext_root)).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// 已装同名插件时**原地替换**，不许逼用户先卸载。
+    ///
+    /// 用户 2026-10-28 的原话是"更新就更新，专门还需要我手动卸载？"——旧代码在
+    /// `final_dir.exists()` 上直接拒，市场那颗「更新到 v×」按钮点下去必然撞墙；
+    /// 撞完墙上一次留下的 staging 还会把下一次安装也堵死。
+    #[test]
+    fn promote_replaces_an_installed_version_in_place() {
+        let root = scratch("promote-replace");
+        let ext_root = root.join("plugins");
+        let final_dir = ext_root.join("a.b");
+        fs::create_dir_all(&final_dir).unwrap();
+        fs::write(final_dir.join("main.mjs"), "old").unwrap();
+        fs::write(final_dir.join("stale.txt"), "leftover").unwrap();
+
+        let staging = ext_root.join("staging").join("d2");
+        make_pkg(&staging);
+
+        let v = plugin_promote("d2".to_string(), "a.b".to_string(), roots(&ext_root)).expect("更新应当原地替换");
+        assert_eq!(v["ok"], Value::Bool(true));
+        assert!(final_dir.join("main.mjs").is_file());
+        assert!(
+            !final_dir.join("stale.txt").exists(),
+            "旧版本的文件不许留在新版本里（混着两个版本最难查）"
+        );
+        assert!(!staging.exists(), "暂存目录必须被清掉");
+        let leftovers: Vec<_> = fs::read_dir(ext_root.join("staging"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(leftovers.is_empty(), "备份目录也要删干净，实际留下：{leftovers:?}");
         let _ = fs::remove_dir_all(&root);
     }
 

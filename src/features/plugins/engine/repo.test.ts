@@ -136,11 +136,18 @@ describe("P174-A2 · 信任三态", () => {
     expect(trustVerdict(rec, digest + "x")).toBe("changed");
   });
 
-  it("只升版本号、权限面没变 ⇒ 仍然 trusted（不该为一次小版本再来一遍）", () => {
+  it("只升版本号、权限面没变 ⇒ 仍然 trusted（更新不该再弹一张卡）", () => {
     const bumped = manifest({ version: "1.0.1" });
-    // 版本号本身参与摘要，所以这里检验的是"产品语义"：
-    // 如果将来决定版本号不参与摘要，这条会红——那时要重新想清楚"你批的是哪一版"怎么回答
+    // 摘要里仍然记着版本（信任库要能回答"你批的是哪一版"），但**判定不看它**：
+    // 版本号不是权限面。用户 2026-10-28 明确要求过这一点。
     expect(trustDigestInput(bumped)).not.toBe(digest);
+    expect(trustVerdict(rec, trustDigestInput(bumped))).toBe("trusted");
+    // 真正的门是权限面：多一枚写目录，立刻要重批
+    const more = manifest({
+      version: "1.0.1",
+      permissions: { fs: { read: ["$WS/**"], write: ["$WS", "$WS/one-more"] }, ui: { panel: true } },
+    });
+    expect(trustVerdict(rec, trustDigestInput(more))).toBe("changed");
   });
 });
 

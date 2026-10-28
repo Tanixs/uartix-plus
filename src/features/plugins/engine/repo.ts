@@ -211,15 +211,37 @@ export function trustDigestInput(m: PluginManifest): string {
 export type TrustVerdict = "trusted" | "needs-approval" | "changed";
 
 /**
+ * 比较时把 `version` 剔掉：**版本号不是权限面**。
+ *
+ * 摘要里仍然记着版本（信任库里能看见"你批准的是哪一版"），但判定不看它。
+ * 理由：一次更新如果没加任何权限、没换入口，它能做的事和上一版一模一样，
+ * 弹一张卡只会训练用户闭眼点同意——那比不弹更坏。真正的门是**权限面**：
+ * 多一个写目录、多一个可执行文件、换一个入口，摘要立刻不同，照样要批。
+ * （这条是用户 2026-10-28 明确要求的："更新就更新，别每次都弹"。）
+ */
+function withoutVersion(digest: string): string {
+  try {
+    const j = JSON.parse(digest);
+    if (j && typeof j === "object" && !Array.isArray(j)) {
+      delete (j as Record<string, unknown>).version;
+      return JSON.stringify(j);
+    }
+  } catch {
+    /* 不是规范 JSON 就原样比，宁可多要一次批准，也不放过一次真变化 */
+  }
+  return digest;
+}
+
+/**
  * 三态判定。这是批准流的唯一判据，别处不许再写一份。
  *
  * - 没有记录 ⇒ `needs-approval`（第一次装）
- * - 有记录但摘要不同 ⇒ `changed`（权限面变了，必须重批；摘要相同则**不重批**）
- * - 有记录且摘要相同 ⇒ `trusted`
+ * - 有记录但**权限面**不同 ⇒ `changed`（必须重批）
+ * - 有记录且权限面相同 ⇒ `trusted`（版本更新不重批）
  */
 export function trustVerdict(stored: TrustRecord | undefined, digest: string): TrustVerdict {
   if (!stored) return "needs-approval";
-  if (stored.digest !== digest) return "changed";
+  if (withoutVersion(stored.digest) !== withoutVersion(digest)) return "changed";
   return "trusted";
 }
 

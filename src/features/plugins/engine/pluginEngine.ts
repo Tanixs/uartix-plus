@@ -845,32 +845,37 @@ export async function commitInstall(
 ): Promise<InstallWarn> {
   if (!paths) throw new Error("还没读到插件目录");
   const root = paths.pluginsRoot;
+  const dropStaging = () => invoke("plugin_remove_tree", { path: plan.stagingPath, roots: [root] }).catch(() => undefined);
 
-  const copied = await invoke<{ files: number; bytes: number; skippedLinks: number }>("plugin_copy_dir", {
-    src: plan.srcDir,
-    dst: plan.stagingPath,
-    roots: [root],
-  });
-  // 跳过的链接不是错误，但**必须说出来**：少了文件却"装成功了"，之后的表现是
-  // "某个功能运行时才炸"，那时没人会想到是安装时少拷了东西。（计数在下面的返回值里）
+  // 上一次安装被中断时留下的暂存目录会让复制直接死在"目标已存在"——
+  // 而用户根本不知道自己手上多了个目录。安装自己清自己的灰。
+  await dropStaging();
 
-  const staged = await readManifestOf(plan.stagingPath, root);
-  if (!staged.manifest) {
-    await invoke("plugin_remove_tree", { path: plan.stagingPath, roots: [root] }).catch(() => undefined);
-    throw new Error(`复制后的副本校验不过（已清理暂存）：${staged.issue ?? "未知"}`);
-  }
-  const stagedFingerprint = fingerprintOf(staged.manifest);
-  if (stagedFingerprint !== plan.fingerprint) {
-    await invoke("plugin_remove_tree", { path: plan.stagingPath, roots: [root] }).catch(() => undefined);
-    throw new Error("包在你确认之后被改动过（权限面已变），请重新安装");
-  }
-  if (staged.manifest.id !== plan.id) {
-    await invoke("plugin_remove_tree", { path: plan.stagingPath, roots: [root] }).catch(() => undefined);
-    throw new Error(`副本的 id（${staged.manifest.id}）与批准的不一致，已中止`);
-  }
+  let copied: { files: number; bytes: number; skippedLinks: number };
+  try {
+    copied = await invoke<{ files: number; bytes: number; skippedLinks: number }>("plugin_copy_dir", {
+      src: plan.srcDir,
+      dst: plan.stagingPath,
+      roots: [root],
+    });
+    // 跳过的链接不是错误，但**必须说出来**：少了文件却"装成功了"，之后的表现是
+    // "某个功能运行时才炸"，那时没人会想到是安装时少拷了东西。（计数在下面的返回值里）
 
-  await archiveInstalledVersion(plan.id, plan.version, root);
-  await invoke("plugin_promote", { draftId: plan.draftId, id: plan.id, roots: [root] });
+    const staged = await readManifestOf(plan.stagingPath, root);
+    if (!staged.manifest) throw new Error(`复制后的副本校验不过：${staged.issue ?? "未知"}`);
+    const stagedFingerprint = fingerprintOf(staged.manifest);
+    if (stagedFingerprint !== plan.fingerprint) throw new Error("包在你确认之后被改动过（权限面已变），请重新安装");
+    if (staged.manifest.id !== plan.id) throw new Error(`副本的 id（${staged.manifest.id}）与批准的不一致，已中止`);
+
+    await archiveInstalledVersion(plan.id, plan.version, root);
+    // 已经装着同名插件时，这一条会**原地把旧版本换掉**（旧目录先挪开、失败再挪回来）
+    await invoke("plugin_promote", { draftId: plan.draftId, id: plan.id, roots: [root] });
+  } catch (e) {
+    // 任何一步失败都把暂存清掉：留着它，下一次安装会死在"目标已存在"，
+    // 用户看到的是"卸载了也装不上"，而真正的原因是自己上次的残留。
+    await dropStaging();
+    throw e;
+  }
 
   const now = Date.now();
   const next = applyInstall(index ?? { version: 1, items: {} }, trust ?? { version: 1, items: {} }, plan, {
