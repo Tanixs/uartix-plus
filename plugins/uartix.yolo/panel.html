@@ -532,10 +532,34 @@
       }
       #batchimg img {
         display: block;
-        max-width: 100%;
+        width: 100%;
+        height: auto;
         margin-top: 8px;
         border: 1px solid var(--line);
         border-radius: 8px;
+        cursor: zoom-in;
+      }
+      /* 放大看图：面板内铺满，点哪儿都关、Esc 也关 */
+      .lb {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 14px;
+        background: rgba(0, 0, 0, 0.84);
+        cursor: zoom-out;
+      }
+      /* display:flex 会盖过 [hidden] 的 UA display:none —— 不写这条，空灯箱会把整个面板压暗 */
+      .lb[hidden] {
+        display: none;
+      }
+      .lb img {
+        max-width: 97%;
+        max-height: 95%;
+        border-radius: 6px;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
       }
     
       /* ================= 外壳：左栏导航 + 内容区 + 可收起日志 ================= */
@@ -602,6 +626,10 @@
         min-width: 0;
         display: flex;
         flex-direction: column;
+      }
+      /* 右栏放大：数据页的增强预览是一整张 4×4 拼图，缩在半栏里什么都看不清 */
+      .cols.wide-right {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr);
       }
       @media (max-width: 1000px) {
         .shell {
@@ -771,7 +799,7 @@
 
       <!-- ============ 数据 ============ -->
       <section id="tab-data" hidden>
-        <div class="cols">
+        <div class="cols wide-right">
 <div class="col">
 <div class="card">
           <h2>数据来源与划分</h2>
@@ -844,6 +872,7 @@
             这是<b>引擎自己写出来的</b> <code>train_batch*.jpg</code>——上一次训练真实喂进网络的样本，
             mosaic / 旋转 / 镜像的效果都在里面。面板不画"假预览"：自己实现一遍增强只会预览出一张
             和训练不一致的图，那比没有预览更糟。改了增强参数想看到新样子，就跑一轮再回来。
+            另外：<b>框上标的是类别 id（从 0 开始），不是类别名</b>——引擎画图时用的就是 id，0 就是你的第一个类。
           </p>
         </div>
 </div>
@@ -1234,6 +1263,8 @@
       </div>
       <pre id="log"></pre>
     </div>
+
+    <div id="lb" class="lb" hidden><img id="lbimg" alt="" /></div>
 
     <script>
       /* ---------------- 小工具 ---------------- */
@@ -2135,7 +2166,22 @@
             host.innerHTML = '<span class="note">读图中…</span>';
             try {
               var r = await uartix.call("previewImage", b.file);
-              host.innerHTML = '<img src="' + r.dataUrl + '" alt="' + esc(b.run + " 的增强样本") + '" />';
+              // 框上的数字是**类别 id**（0 起），不是类别名 —— 引擎画图时用的就是 id。
+              // 不写这句，用户会以为标注整体标错了一位。
+              var cls = ((st || {}).dataset || {}).classes || [];
+              var legend = cls.length
+                ? '<div class="note" style="margin-top:6px">框上的数字是<b>类别 id（从 0 开始）</b>：' +
+                  cls.map(function (n, i) { return i + " = " + esc(n); }).join(" · ") +
+                  "　·　<b>点图放大</b>（Esc 关闭）</div>"
+                : "";
+              host.innerHTML = '<img src="' + r.dataUrl + '" alt="' + esc(b.run + " 的增强样本") + '" title="点开看原图" />' + legend;
+              var im = host.querySelector("img");
+              if (im) {
+                im.onclick = function () {
+                  $("lbimg").src = r.dataUrl;
+                  $("lb").hidden = false;
+                };
+              }
             } catch (e) {
               host.innerHTML = '<span class="note">读不到这张图：' + esc(e && e.message ? e.message : e) + "</span>";
             }
@@ -3043,6 +3089,16 @@
         $("loglast").textContent = "";
         $("logwrap").classList.remove("hot");
       };
+      $("lb").onclick = function () {
+        this.hidden = true;
+        $("lbimg").src = "";
+      };
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !$("lb").hidden) {
+          $("lb").hidden = true;
+          $("lbimg").src = "";
+        }
+      });
       $("logtoggle").onclick = function () {
         var w = $("logwrap");
         var open = w.classList.toggle("open");
