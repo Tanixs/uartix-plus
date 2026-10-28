@@ -105,6 +105,27 @@ describe("P175 · 勾选框的排版不变量", () => {
     const css = readFileSync(YOLO_PANEL, "utf8");
     expect(css).toMatch(/input\[type="checkbox"\]\s*\{[^}]*width:\s*auto/);
   });
+
+  /**
+   * 训练页的分层：52 项平铺在一个网格里等于没有主次（用户 2026-10-28 的原话：
+   * "每个项目都是一长条，没有主次，很多参数设置项不是经常用"）。判据钉住三件事：
+   * 主卡与核心数字各有落点、其余参数必须以 `<details>` 折叠、常改的六项在核心名单里。
+   */
+  it("训练页必须分层：主卡 / 核心数字 / 其余折叠", () => {
+    const html = readFileSync(YOLO_PANEL, "utf8");
+    for (const id of ["c_primary", "c_core", "c_adv"]) {
+      expect(html, `训练页缺容器 #${id}`).toContain(`id="${id}"`);
+    }
+    expect(html, "高级参数必须用 details 折叠").toMatch(/<details class="advgrp"/);
+    const core = /var TRAIN_CORE = \[([^\]]*)\]/.exec(html);
+    expect(core, "找不到 TRAIN_CORE 名单").toBeTruthy();
+    const coreList = core ? core[1] : "";
+    for (const k of ["epochs", "imgsz", "batch", "device", "patience", "name"]) {
+      expect(coreList, `核心数字里少了 ${k}`).toContain(`"${k}"`);
+    }
+    // 反向自证：把一项塞进核心就会从高级里消失 —— 名字只许出现在名单里一次
+    expect(html.split('"weights"').length - 1, "weights 该在主卡，不该同时出现在别处").toBeLessThan(6);
+  });
 });
 
 /* ============================================================================

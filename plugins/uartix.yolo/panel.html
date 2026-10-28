@@ -339,33 +339,8 @@
         font-size: 11px;
       }
       /* ---- 参数面（由插件把 ultralytics 的参数表喂进来，这里只管摆）---- */
-      .pgroup {
-        border-top: 1px dashed var(--line);
-        padding-top: 10px;
-        margin-top: 12px;
-      }
-      .pgroup:first-child {
-        border-top: none;
-        padding-top: 0;
-        margin-top: 0;
-      }
-      .pgroup > h3 {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-        font-size: 11px;
-        font-weight: 600;
-        color: var(--dim);
-        margin: 0 0 8px;
-      }
-      .pgroup > h3 .n {
-        color: var(--faint);
-        font-weight: 400;
-        font-family: "Cascadia Mono", Consolas, monospace;
-        font-size: 10px;
-      }
       /* 参数格比数据页密：一行八格会把"包默认 0.01"挤到标签上去，170px 是实测不撞的宽度 */
-      .pgroup .grid {
+      #c_adv .grid {
         grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
       }
       label.p {
@@ -391,6 +366,133 @@
         align-items: center;
         gap: 6px;
         min-height: 26px;
+      }
+      /* ---- 训练页：分层参数面（练什么 → 练多久 → 高级折叠 → 常驻动作条）---- */
+      .tsec {
+        padding: 12px 14px;
+      }
+      .sec-h {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        margin: 0 0 10px;
+        flex-wrap: wrap;
+        min-height: 24px;
+      }
+      .sec-t {
+        font-size: 12.5px;
+        font-weight: 650;
+        color: var(--fg);
+      }
+      .sec-m {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: var(--faint);
+      }
+      #c_primary {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 14px;
+      }
+      #c_primary .p.wide {
+        grid-column: 1 / -1;
+      }
+      @media (max-width: 880px) {
+        #c_primary {
+          grid-template-columns: 1fr;
+        }
+      }
+      .coregrid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+        gap: 10px 12px;
+      }
+      .coregrid input {
+        height: 32px;
+        font-size: 13.5px;
+        font-variant-numeric: tabular-nums;
+        padding: 4px 8px;
+      }
+      .advgrp {
+        border-top: 1px solid var(--line);
+      }
+      .advgrp:first-of-type {
+        border-top: none;
+      }
+      .advgrp > summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 2px;
+        cursor: pointer;
+        list-style: none;
+        user-select: none;
+      }
+      .advgrp > summary::-webkit-details-marker {
+        display: none;
+      }
+      .advgrp > summary .chev {
+        width: 12px;
+        height: 12px;
+        flex: 0 0 auto;
+        color: var(--faint);
+        transition: transform 0.16s ease;
+      }
+      .advgrp[open] > summary .chev {
+        transform: rotate(90deg);
+        color: var(--accent);
+      }
+      .advgrp > summary .gt {
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--dim);
+      }
+      .advgrp > summary:hover .gt,
+      .advgrp[open] > summary .gt {
+        color: var(--fg);
+      }
+      .advgrp > summary .gc {
+        font-size: 10.5px;
+        color: var(--faint);
+        font-family: "Cascadia Mono", Consolas, monospace;
+      }
+      .advgrp > summary .gm {
+        margin-left: auto;
+        font-size: 10.5px;
+        color: var(--warn);
+      }
+      .advgrp > summary .gm.zero {
+        color: var(--faint);
+      }
+      .advgrp > .grid {
+        padding: 0 2px 12px 22px;
+      }
+      .coregrid label.p .cap,
+      #c_primary label.p .cap {
+        font-size: 11px;
+      }
+      .actionbar {
+        position: sticky;
+        top: 0;
+        z-index: 6;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin: 0 0 10px;
+        padding: 9px 12px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .actionbar .absum {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--dim);
+        font-variant-numeric: tabular-nums;
       }
       select {
         font: inherit;
@@ -681,31 +783,56 @@
 
       <!-- ============ 训练 ============ -->
       <section id="tab-train" hidden>
-        <div class="card">
-          <h2>
-            训练参数
+        <!-- ⑤ 动作条：滚到哪儿都在手边 -->
+        <div class="actionbar" id="trainbar">
+          <button class="btn primary" id="train">开始训练</button>
+          <button class="btn danger" id="stop" disabled>停止</button>
+          <button class="btn" id="precheck" title="让 runner 解析一遍这份配置，确认参数真的透传给了引擎">先看这次会用什么参数</button>
+          <button class="btn" id="savetrain">保存这些设置</button>
+          <span class="absum" id="absum"></span>
+        </div>
+      </section>
+
+        <!-- ① 练什么：任务 / 权重 / 数据集 —— 三个决定，占满整行也不冤 -->
+        <div class="card tsec">
+          <div class="sec-h">
+            <span class="sec-t">练什么</span>
             <span class="tag" id="psrc">参数面 ?</span>
-            <button class="btn" id="reprobe" title="重新读一遍当前 ultralytics 的参数表（约 6 秒）">重探参数表</button>
-          </h2>
-          <div class="row" id="taskrow" style="margin-bottom: 10px"></div>
-          <div class="note" id="tasknote" style="margin: 0 0 8px"></div>
-          <div id="params">
-            <span class="note">正在读参数表…（要 import ultralytics 的配置，约 6 秒）</span>
+            <span class="sec-m">
+              <button class="btn" id="reprobe" title="重新读一遍当前 ultralytics 的参数表（约 6 秒）">重探参数表</button>
+            </span>
           </div>
-          <ul class="hints">
-            <li>这张表<b>不是面板自己写的</b>：每项都来自当前那套 ultralytics 的 <code>DEFAULT_CFG_DICT</code>。包里没这个键就不出现，所以升级 / 改名（比如 <code>half</code> 已经没了）会自动跟上。</li>
-            <li>灰字是引擎自己的默认值；面板只把<b>与工作区 config.yaml 不同的</b>那些写进覆盖层，改回默认时 diff 自己消失。</li>
-            <li>训练由插件自带的 <code>runner/train_job.py</code> 执行（<b>没动</b>你的 <code>scripts/train.py</code>）。开跑前点「先看这次会用什么参数」，跑完去 <code>runs/&lt;实验名&gt;/args.yaml</code> 对答案。</li>
-          </ul>
-          <div class="row" style="margin-top: 10px">
-            <button class="btn primary" id="train">开始训练</button>
-            <button class="btn danger" id="stop" disabled>停止</button>
-            <button class="btn" id="savetrain">保存这些设置</button>
-            <button class="btn" id="precheck" title="让 runner 解析一遍这份配置，确认参数真的透传给了引擎">先看这次会用什么参数</button>
-          </div>
-          <div class="note" id="pre"></div>
+          <div class="row" id="taskrow" style="margin-bottom:6px"></div>
+          <div class="note" id="tasknote" style="margin:0 0 10px"></div>
+          <div id="c_primary"></div>
         </div>
 
+        <!-- ② 练多久：90% 的时刻只改这几个数 -->
+        <div class="card tsec">
+          <div class="sec-h">
+            <span class="sec-t">练多久、练多细</span>
+            <span class="sec-m">常改的六个都在这里；其余在下面的高级里</span>
+          </div>
+          <div class="coregrid" id="c_core"></div>
+        </div>
+
+        <!-- ③ 其余全部收在这里：默认折叠，标题上写着"改了几项" -->
+        <div class="card tsec">
+          <div class="sec-h">
+            <span class="sec-t">高级参数</span>
+            <span class="tag" id="advsum">全是默认</span>
+            <span class="sec-m">
+              <button class="btn" id="advall">展开全部</button>
+            </span>
+          </div>
+          <div id="c_adv"></div>
+          <ul class="hints" style="margin-top:10px">
+            <li>这张表<b>不是面板自己写的</b>：每项都来自当前那套 ultralytics 的 <code>DEFAULT_CFG_DICT</code>。包里没这个键就不出现，所以升级 / 改名（比如 <code>half</code> 已经没了）会自动跟上。</li>
+            <li>灰字是引擎自己的默认值；面板只把<b>与工作区 config.yaml 不同的</b>那些写进覆盖层，改回默认时 diff 自己消失。</li>
+          </ul>
+        </div>
+
+        <!-- ④ 快照与进度 -->
         <div class="card">
           <h2>本次实验落在哪儿</h2>
           <div class="kv" id="snapkv"></div>
@@ -714,6 +841,7 @@
             每次开跑前，面板在 <code>train_runs/&lt;实验名&gt;-&lt;时间&gt;.yaml</code> 落一份<b>完整快照</b>（含本次全部参数）。
             它是面板和命令行的公共语言：拿它去跑你自己的 <code>scripts/train.py --config …</code> 也成立，
             只是那条只认它自己那 20 个键。工作区的 <code>config.yaml</code>、<code>scripts/</code>、<code>00~07*.bat</code> 面板从不改写。
+            训练由插件自带的 <code>runner/train_job.py</code> 执行（<b>没动</b>你的脚本）；跑完去 <code>runs/&lt;实验名&gt;/args.yaml</code> 对答案。
           </p>
         </div>
 
@@ -721,8 +849,9 @@
           <h2>进度</h2>
           <div class="bar"><i id="bar"></i></div>
           <div class="kv" id="jobkv" style="margin-top: 8px"></div>
+          <div class="note" id="pre"></div>
         </div>
-      </section>
+
 
       <!-- ============ 监控 ============ -->
       <section id="tab-monitor" hidden>
@@ -1378,28 +1507,119 @@
         return '<label class="p' + (it.wide ? " wide" : "") + (it.warn ? " warn" : "") + '" title="' + esc(tip) + '">' + cap + box + "</label>";
       }
 
+      /* ---------------- 训练页的分层：练什么 / 练多久 / 高级折叠 ---------------- */
+      var TRAIN_PRIMARY = ["weights", "data"];
+      var TRAIN_CORE = ["epochs", "imgsz", "batch", "device", "patience", "name"];
+      /** 只含"留在高级里"的项；折叠标题上那句"改了 N 项"按它数。 */
+      var advSpec = [];
+
+      function specIndex() {
+        var map = {};
+        ((paramSpec && paramSpec.groups) || []).forEach(function (g) {
+          g.items.forEach(function (it) {
+            map[it.key] = it;
+          });
+        });
+        return map;
+      }
+
+      function chevIcon() {
+        return (
+          '<svg class="chev" viewBox="0 0 12 12" fill="none" aria-hidden="true">' +
+          '<path d="M4.5 2.5 8 6l-3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        );
+      }
+
+      /** 数"表单里与引擎默认不同"的项。空输入 = 交回默认，不算改过。 */
+      function countTouched(items) {
+        var n = 0;
+        for (var i = 0; i < items.length; i++) {
+          var it = items[i];
+          var el = $("p_" + it.key);
+          if (!el) continue;
+          if (it.kind === "bool") {
+            if (!!el.checked !== !!it.engineDefault) n++;
+            continue;
+          }
+          var v = String(el.value == null ? "" : el.value).trim();
+          var d = it.engineDefault == null ? "" : String(it.engineDefault);
+          if (v !== "" && v !== d) n++;
+        }
+        return n;
+      }
+
+      function refreshTrainSummary() {
+        if (!paramSpec || !paramSpec.groups) return;
+        var groups = document.querySelectorAll("#c_adv .advgrp");
+        var total = 0;
+        for (var i = 0; i < groups.length; i++) {
+          var g = advSpec[Number(groups[i].getAttribute("data-gi"))];
+          if (!g) continue;
+          var n = countTouched(g.items);
+          total += n;
+          var chip = groups[i].querySelector(".gm");
+          if (chip) {
+            chip.textContent = n ? "改了 " + n + " 项" : "默认";
+            chip.className = "gm" + (n ? "" : " zero");
+          }
+        }
+        var tag = $("advsum");
+        if (tag) {
+          tag.textContent = total ? "高级里改了 " + total + " 项" : "全是默认";
+          tag.className = "tag" + (total ? " warn" : "");
+        }
+        var bits = [];
+        [["epochs", " 轮"], ["imgsz", ""], ["batch", "batch "], ["device", "device "]].forEach(function (p) {
+          var el = $("p_" + p[0]);
+          if (!el) return;
+          var v = String(el.value || "").trim() || el.getAttribute("placeholder") || "?";
+          bits.push(p[1] === "batch " || p[1] === "device " ? p[1] + v : v + p[1]);
+        });
+        var sum = $("absum");
+        if (sum) sum.textContent = bits.join(" · ");
+      }
+
       function renderTrainParams() {
         var spec = (st && st.params && st.params.ready ? st.params : null) || paramSpec;
         if (spec && spec.groups && spec.groups.length) paramSpec = spec;
-        var box = $("params");
+        var host = $("c_adv");
         if (!paramSpec || !paramSpec.groups || !paramSpec.groups.length) {
-          box.innerHTML = '<span class="note">正在读参数表…（第一次要 import ultralytics 的配置，约 6 秒）</span>';
+          host.innerHTML = '<span class="note">正在读参数表…（第一次要 import ultralytics 的配置，约 6 秒）</span>';
+          $("c_primary").innerHTML = "";
+          $("c_core").innerHTML = "";
           return;
         }
         var src = $("psrc");
         src.textContent = paramSpec.degraded
           ? "参数面降级：" + (paramSpec.error || "读不到 ultralytics")
-          : "ultralytics " + (paramSpec.ultralytics || "?") + " · " + paramSpec.count + " 项（包里共 " + paramSpec.keyCount + " 键）";
+          : "ultralytics " + (paramSpec.ultralytics || "?") + " · " + paramSpec.count + " 项（包里 " + paramSpec.keyCount + " 键）";
         src.className = "tag" + (paramSpec.degraded ? " warn" : " ok");
 
-        var h = "";
-        for (var g = 0; g < paramSpec.groups.length; g++) {
-          var grp = paramSpec.groups[g];
-          h += '<div class="pgroup"><h3>' + esc(grp.title) + '<span class="n">' + grp.items.length + "</span></h3><div class=\"grid\">";
-          for (var i = 0; i < grp.items.length; i++) h += ctl(grp.items[i]);
-          h += "</div></div>";
-        }
-        box.innerHTML = h;
+        var idx = specIndex();
+        var primaryKeys = TRAIN_PRIMARY.filter(function (k) { return idx[k]; });
+        var coreKeys = TRAIN_CORE.filter(function (k) { return idx[k]; });
+        $("c_primary").innerHTML = primaryKeys.map(function (k) { return ctl(idx[k]); }).join("");
+        $("c_core").innerHTML = coreKeys.map(function (k) { return ctl(idx[k]); }).join("");
+
+        advSpec = [];
+        var html = "";
+        // 「基础」这一组把权重/轮次都拿走了，剩下的只有时长上限、workers、project、exist_ok——
+        // 还叫「基础」会让人以为里面是必填项，按它的实际内容改名
+        var ADV_TITLE = { base: "训练时长与输出" };
+        paramSpec.groups.forEach(function (g) {
+          var rest = g.items.filter(function (it) {
+            return TRAIN_PRIMARY.indexOf(it.key) < 0 && TRAIN_CORE.indexOf(it.key) < 0;
+          });
+          if (!rest.length) return;
+          var gi = advSpec.push({ id: g.id, title: g.title, items: rest }) - 1;
+          html +=
+            '<details class="advgrp" data-gi="' + gi + '"><summary>' + chevIcon() +
+            '<span class="gt">' + esc(ADV_TITLE[g.id] || g.title) + '</span><span class="gc">' + rest.length + " 项</span>" +
+            '<span class="gm zero">默认</span></summary><div class="grid">' +
+            rest.map(ctl).join("") + "</div></details>";
+        });
+        host.innerHTML = html;
+
         for (var k = 0; k < paramSpec.groups.length; k++) {
           var items = paramSpec.groups[k].items;
           for (var j = 0; j < items.length; j++) {
@@ -1410,6 +1630,7 @@
             else el.value = pval(it);
           }
         }
+        refreshTrainSummary();
       }
 
       /** 表单 → patch。**空输入送 null**（= 撤销这一项的覆盖，交回工作区基准 / 引擎默认）。 */
@@ -1572,9 +1793,10 @@
         h += '<button class="btn' + (chosen === "detect" ? " primary" : "") + '" data-task="detect">目标检测 detect</button>';
         h += '<button class="btn' + (chosen === "segment" ? " primary" : "") + '" data-task="segment">实例分割 segment</button>';
         h +=
-          '<span class="note" style="margin:0">权重 ' +
-          esc(b.weights || "(没填)") +
-          (b.facts && b.facts.task ? " · 它是 <b>" + esc(b.facts.task) + "</b>（" + esc(b.facts.source) + "）" : " · <b>任务读不出来</b>，先去概览点「读一遍权重」") +
+          '<span class="note" style="margin:0">' +
+          (b.facts && b.facts.task
+            ? "这个权重是 <b>" + esc(b.facts.task) + "</b>（" + esc(b.facts.source) + "）"
+            : "<b>任务读不出来</b>：先去概览点「读一遍权重」") +
           "</span>";
         row.innerHTML = h;
         var btns = row.querySelectorAll("[data-task]");
@@ -2463,6 +2685,20 @@
       $("train").onclick = function () {
         startJob("train");
       };
+      /* 训练页：折叠组上那句"改了 N 项"跟着输入走；「展开全部」一把拉开（再点收起） */
+      $("advall").onclick = function () {
+        var ds = document.querySelectorAll("#c_adv .advgrp");
+        var anyClosed = false;
+        for (var i = 0; i < ds.length; i++) if (!ds[i].open) anyClosed = true;
+        for (var j = 0; j < ds.length; j++) ds[j].open = anyClosed;
+        this.textContent = anyClosed ? "收起全部" : "展开全部";
+      };
+      (function () {
+        var form = $("tab-train");
+        if (!form) return;
+        form.addEventListener("input", refreshTrainSummary);
+        form.addEventListener("change", refreshTrainSummary);
+      })();
       $("reprobe").onclick = function () {
         loadParams(true);
       };

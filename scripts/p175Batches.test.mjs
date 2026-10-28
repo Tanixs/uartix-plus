@@ -174,11 +174,17 @@ describe("P175 · 批次监工", () => {
     expect(publish, "发布白名单不收 .py：发出去的插件会没有 runner").toContain("|py|");
   });
 
-  it("八批全 done 之后自动加严：清单与 README 必须已经是 0.3.0", () => {
+  it("八批全 done 之后自动加严：清单与 README 的版本账必须同步，且不低于 0.3.0", () => {
     if (LEDGER.some((b) => !b.done)) return; // 还没收官，这条不该说话
     const raw = JSON.parse(readFileSync(path.join(PKG, "plugin.json"), "utf8"));
-    expect(raw.version).toBe("0.3.0");
+    // P175 的基线是 0.3.0；之后的小版本（UI 重排之类）不该让这条红 —— 但**永远不许低于基线**，
+    // 也不许清单升了 README 的版本账没跟上（那种"发出去没人知道改了啥"最难查）。
+    const v = String(raw.version).split(".").map(Number);
+    const base = [0, 3, 0];
+    const cmp = v[0] - base[0] || v[1] - base[1] || v[2] - base[2];
+    expect(Number.isFinite(cmp), `清单版本号读不懂：${raw.version}`).toBe(true);
+    expect(cmp, `插件版本 ${raw.version} 低于 P175 基线 0.3.0`).toBeGreaterThanOrEqual(0);
     const readme = read("plugins/uartix.yolo/README.md") ?? "";
-    expect(readme.split("\n## 版本")[1]?.slice(0, 40), "README 的版本账第一条得是 0.3.0").toContain("`0.3.0`");
+    expect(readme.split("\n## 版本")[1]?.slice(0, 48), `README 的版本账第一条得是 ${raw.version}`).toContain("`" + raw.version + "`");
   });
 });
