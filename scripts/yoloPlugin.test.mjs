@@ -1085,6 +1085,25 @@ describe("P175-W3 · 体检走真插件（只读判据）", () => {
    P175-W4 · 监控（曲线 / ETA / 显存 / 失败归类）
    ============================================================================ */
 
+describe("P175 · 数据集不存在时体检不能崩", () => {
+  it("报「目录不存在」，而不是 Cannot read properties of null", async () => {
+    const ws = makeWorkspace("audit-missing");
+    const p = startPlugin(copyPlugin("audit-missing"), ws);
+    try {
+      await p.ready;
+      // 用户真实撞过：数据集还没构建就点体检 → `listSiblings` 返回 null → `.concat` 抛错
+      const a = await p.call("panel.train.audit", "D:/no/such/dataset");
+      const keys = (a.findings || []).map((f) => f.key);
+      expect(keys, JSON.stringify(a.findings)).toContain("noDataset");
+      expect(a.splits.train.dirMissing).toBe(true);
+      expect(a.splits.val.dirMissing).toBe(true);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 60_000);
+});
+
 /** 真 `results.csv` 的形状（分割任务：loss 有 seg_loss，指标有 (B) 与 (M) 两组）。 */
 const CSV_FIXTURE = [
   "epoch,        time,        train/box_loss,        train/seg_loss,        train/cls_loss,        train/dfl_loss,        metrics/precision(B),        metrics/recall(B),        metrics/mAP50(B),        metrics/mAP50-95(B),        metrics/precision(M),        metrics/recall(M),        metrics/mAP50(M),        metrics/mAP50-95(M),        val/box_loss,        val/seg_loss,        val/cls_loss,        val/dfl_loss,        lr/pg0,        lr/pg1,        lr/pg2",

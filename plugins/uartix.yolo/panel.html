@@ -730,6 +730,7 @@
     </div>
 
     <div id="noconf" class="banner" hidden></div>
+    <div id="cagewarn" class="banner" hidden></div>
 
     <div class="shell">
       <nav class="rail" aria-label="工作台页签">
@@ -1415,6 +1416,18 @@
         var eff = cfg.effective || {};
         var env = eff.env || {};
         $("ws").textContent = st.workspace || "（没有工作区）";
+        // 写权限探针：读不受限，所以"绑定改了没重启"时面板看着正常，一按按钮才炸
+        var cw = $("cagewarn");
+        var cage = st.cage || {};
+        if (cw) {
+          if (cage.ok === false) {
+            cw.hidden = false;
+            cw.innerHTML = "<b>当前插件进程写不了这些目录：</b>" + esc((cage.denied || []).join("、")) +
+              " —— 刚改过工作区绑定或更新过插件的话，<b>重启一次应用</b>就生效（读不受限，所以看起来是好的）。";
+          } else {
+            cw.hidden = true;
+          }
+        }
         $("nows").hidden = !st.needWorkspace;
 
         /* 工作区选错的典型形态：选到了上层目录（那里没有 config.yaml），

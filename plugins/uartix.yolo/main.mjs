@@ -342,6 +342,51 @@ function needWorkspace() {
   return root;
 }
 
+/**
+ * 一次性探针：当前这个插件进程**真的**能写清单里声明的那些目录吗？
+ * 读操作不受权限模型限制，所以"绑定改了但没重启"时面板看着好好的，一按构建/训练才炸——
+ * 那条 Node 原话（Access to this API has been restricted）没人看得懂，干脆在首屏就说清楚。
+ */
+let cageProbe = null;
+function probeCage() {
+  if (cageProbe || !root) return cageProbe;
+  const dirs = ["train_runs", "annotations", "datasets", "logs", "models", "runs", ".uartix"];
+  const denied = [];
+  for (const d of dirs) {
+    const p = path.join(root, d);
+    const existed = fs.existsSync(p);
+    try {
+      fs.mkdirSync(p, { recursive: true });
+      const f = path.join(p, ".uartix-write-probe");
+      fs.writeFileSync(f, "ok");
+      fs.rmSync(f, { force: true });
+      // 探针不许留下痕迹：目录是它建的、而且空了，就收回去（非空说明本来就有东西，留着）
+      if (!existed) {
+        try {
+          fs.rmdirSync(p);
+        } catch {
+          /* 非空：本来就有文件，别动 */
+        }
+      }
+    } catch {
+      denied.push(d);
+    }
+  }
+  cageProbe = { ok: denied.length === 0, denied };
+  return cageProbe;
+}
+/** Node 权限模型的原话（"Access to this API has been restricted…"）没人看得懂：翻成"重启应用"。 */
+function explainCage(e, what) {
+  const msg = String((e && e.message) || e);
+  if (/Access to this API has been restricted|ERR_ACCESS_DENIED/.test(msg)) {
+    return new Error(
+      what + "：当前插件进程没有这个位置的写权限。常见原因是刚改过工作区绑定、或刚更新过插件——" +
+        "这两样都要重启一次应用才生效（读操作不受影响，所以看着像好的）。",
+    );
+  }
+  return e;
+}
+
 /** 相对路径按工作区解析；绝对路径原样（统一成正斜杠：脚本那边到处 .replace("\\","/")）。 */
 function abs(p) {
   const s = String(p == null ? "" : p);
@@ -1562,7 +1607,12 @@ async function startJob(kind, overrides) {
   }
 
   const label = kind === "dataset" ? "构建数据集" : `训练 ${merged.train.name}`;
-  const job = newJob(kind, label);
+  let job;
+  try {
+    job = newJob(kind, label);
+  } catch (e) {
+    throw explainCage(e, "建任务目录（train_runs）失败");
+  }
   if (kind === "dataset") {
     // 没显式写 sources 就从投料口自动取——用户裁定的那条"分离数据集直接读这个文件夹"
     const resolved = resolveDatasetSources(merged);
@@ -1571,7 +1621,11 @@ async function startJob(kind, overrides) {
   }
 
   const confPath = snapshotPathFor(kind, kind === "train" ? merged.train.name : path.basename(merged.dataset.output_dir || "ds"), job.startedAt);
-  fs.writeFileSync(confPath, dumpConfig(merged), "utf8");
+  try {
+    fs.writeFileSync(confPath, dumpConfig(merged), "utf8");
+  } catch (e) {
+    throw explainCage(e, "写本次实验的快照失败（" + confPath + "）");
+  }
 
   job.configPath = confPath;
   jobs.set(job.id, job);
@@ -2056,6 +2110,7 @@ async function panelState() {
       config: { effective: DEFAULTS, overrides: {}, baseFound: false, baseError: "", baseSource: "" },
       dataset: { dir: "", dataYaml: "", exists: false, trainCount: 0, valCount: 0, classes: [], sourcesFrom: "none", resolvedSources: [] },
       deploy: scanDeployTool(),
+      cage: null,
       runs: [],
       trainRuns: [],
       evals: 0,
@@ -2089,6 +2144,7 @@ async function panelState() {
     deploy: scanDeployTool(),
     runs: scanRuns(cfg.effective.train.project).slice(0, 12),
     trainRuns: scanTrainRuns(),
+    cage: probeCage(),
     // 「下一步」要能说出"评估/导出做过了没"——不另存状态，直接数盘上那两堆目录（读几个 json 而已）
     evals: scanEvals(5).length,
     exports: scanExports(5).length,
@@ -2566,10 +2622,13 @@ function auditDataset(dirIn, sample) {
     findings: [],
   };
   const limit = sample || 400;
+  // `listSiblings` 在目录不存在时返回 null（"没有"≠"读不到"）；这里只取名单，统一当空处理，
+  // 否则 `null.concat(...)` 会把整次体检查成"体检失败"——数据集还没构建时用户最常撞上。
+  const list = (d, ext) => listSiblings(d, ext) || [];
   for (const split of ["train", "val"]) {
     const imgDir = path.join(dir, "images", split);
     const lblDir = path.join(dir, "labels", split);
-    const imgs = listSiblings(imgDir, ".jpg").concat(listSiblings(imgDir, ".png") || [], listSiblings(imgDir, ".jpeg") || []);
+    const imgs = list(imgDir, ".jpg").concat(list(imgDir, ".png"), list(imgDir, ".jpeg"));
     const stems = new Set(imgs);
     const labels = listSiblings(lblDir, ".txt");
     r.splits[split] = { images: imgs.length, labels: labels === null ? 0 : labels.length, dirMissing: stems.size === 0 && labels === null };
@@ -2607,6 +2666,10 @@ function auditDataset(dirIn, sample) {
 
   if (r.dataYaml.exists && r.dataYaml.nc != null && r.maxClassId >= r.dataYaml.nc) {
     r.findings.push({ level: "bad", key: "ncMismatch", text: `标签里出现了类别 id ${r.maxClassId}，而 data.yaml 的 nc 只有 ${r.dataYaml.nc}：引擎会直接拒或错位训练。` });
+  }
+  // 目录压根不存在时别报"干净"：那是"还没构建"，不是"体检通过"
+  if (r.splits.train.dirMissing && r.splits.val.dirMissing) {
+    r.findings.push({ level: "bad", key: "noDataset", text: "数据集目录不存在（" + String(dir).split("\\").join("/") + "）：先在「数据」页点构建数据集，再回来体检。" });
   }
   if (r.outOfBounds) r.findings.push({ level: "bad", key: "outOfBounds", text: `${r.outOfBounds} 行坐标越界（<0 或 >1）：这些框会被裁掉或让 loss 变 NaN。` });
   if (r.badLines) r.findings.push({ level: "warn", key: "badLines", text: `${r.badLines} 行不是合法标注（token 数对不上）：会被静默忽略。` });
@@ -3288,6 +3351,12 @@ const FAILURE_KINDS = [
     re: /Label length|labels appear corrupt|Segment labels appear|corrupt/i,
     label: "标注文件不合法",
     advice: "去数据页点「体检一遍」：越界坐标、非法 token 数、train/val 重名都会以这种方式炸。",
+  },
+  {
+    kind: "env",
+    re: /ModuleNotFoundError|No module named|ImportError/i,
+    label: "这套 python 里没有 ultralytics",
+    advice: "面板用的是 _env.bat 里那枚 python（概览「环境」能看到是谁）。装好依赖，或把 _env.bat 指到装过 ultralytics 的环境——面板不替你装包。",
   },
   {
     kind: "path",
