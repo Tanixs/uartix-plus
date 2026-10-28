@@ -1514,11 +1514,14 @@ describe("P175-W8 · 收官体检", () => {
     expect(names.length, `包里有 ${names.length} 个文件，超过发布上限就会被静默跳过`).toBeLessThanOrEqual(12);
   });
 
-  it("清单与 README 已经是 0.3.0，且面板帮助里写了这次新增的规矩", () => {
+  it("清单与 README 的版本账同步（且不低于 0.3.0），面板帮助里写了这次新增的规矩", () => {
     const raw = JSON.parse(readFileSync(path.join(PLUGIN_SRC, "plugin.json"), "utf8"));
-    expect(raw.version).toBe("0.3.0");
+    // 0.3.0 是 P175 的基线；之后的界面小版本不该把这条弄红，但两份账必须同步、且不许回退
+    const v = String(raw.version).split(".").map(Number);
+    const cmp = v[0] - 0 || v[1] - 3 || v[2] - 0;
+    expect(cmp, `插件版本 ${raw.version} 低于 P175 的 0.3.0 基线`).toBeGreaterThanOrEqual(0);
     const readme = readFileSync(path.join(PLUGIN_SRC, "README.md"), "utf8");
-    expect(readme.split("## 版本")[1].slice(0, 40)).toContain("`0.3.0`");
+    expect(readme.split("## 版本")[1].slice(0, 48)).toContain("`" + raw.version + "`");
     const panel = panelSrc();
     for (const must of ["annotations", "train_runs", "runner", "half", "last.pt", "YOLO26"]) {
       expect(panel.includes(must), `面板帮助里没讲清 "${must}" 这条规矩`).toBe(true);

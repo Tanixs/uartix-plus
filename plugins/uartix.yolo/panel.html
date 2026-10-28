@@ -407,8 +407,13 @@
       }
       .coregrid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
         gap: 10px 12px;
+      }
+      /* 核心格里输入框的 placeholder 已经显示了默认值，标签右边那行“包默认 …”是重复的，
+         窄栏里还会把标签挤成两行 —— 只在高级参数里保留它 */
+      .coregrid label.p .cap .dft {
+        display: none;
       }
       .coregrid input {
         height: 32px;
@@ -532,7 +537,154 @@
         border: 1px solid var(--line);
         border-radius: 8px;
       }
-    </style>
+    
+      /* ================= 外壳：左栏导航 + 内容区 + 可收起日志 ================= */
+      .shell {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 176px minmax(0, 1fr);
+      }
+      nav.rail {
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px;
+        border-bottom: none;
+        border-right: 1px solid var(--line);
+        overflow: auto;
+        scrollbar-width: thin;
+      }
+      nav.rail button {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 32px;
+        padding: 0 10px;
+        border: 1px solid transparent;
+        border-bottom: none;
+        border-radius: 6px;
+        color: var(--dim);
+        text-align: left;
+        white-space: nowrap;
+      }
+      nav.rail button:hover {
+        background: var(--inset);
+        color: var(--fg);
+      }
+      nav.rail button.on {
+        background: var(--inset);
+        border-color: var(--line);
+        border-bottom-color: var(--line);
+        color: var(--fg);
+        font-weight: 600;
+      }
+      nav.rail button .ic {
+        width: 14px;
+        height: 14px;
+        flex: 0 0 auto;
+        opacity: 0.75;
+      }
+      nav.rail button.on .ic {
+        opacity: 1;
+        color: var(--accent);
+      }
+      main {
+        padding: 10px 12px 14px;
+      }
+      /* 双栏：宽屏并排，窄屏自动落回单栏 */
+      .cols {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+      }
+      .cols > .col {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      @media (max-width: 1000px) {
+        .shell {
+          grid-template-columns: 58px minmax(0, 1fr);
+        }
+        nav.rail button {
+          justify-content: center;
+          padding: 0;
+        }
+        nav.rail button .tx {
+          display: none;
+        }
+        .cols {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      /* 日志：默认收成一条，点开才占高度 */
+      #logwrap {
+        flex: 0 0 auto;
+        min-height: 0;
+        overflow: hidden;
+      }
+      #logwrap.open {
+        flex: 0 1 30%;
+        min-height: 120px;
+      }
+      #logwrap:not(.open) #log {
+        display: none;
+      }
+      #logwrap:not(.open) .logtools {
+        display: none;
+      }
+      .logtools {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+      #loglast {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--faint);
+        font-family: "Cascadia Mono", Consolas, monospace;
+        font-size: 10.5px;
+      }
+      #logtoggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: none;
+        background: none;
+        color: var(--dim);
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 4px;
+        cursor: pointer;
+      }
+      #logtoggle:hover {
+        color: var(--fg);
+      }
+      #logtoggle .chev {
+        width: 11px;
+        height: 11px;
+        transition: transform 0.16s ease;
+      }
+      #logwrap.open #logtoggle .chev {
+        transform: rotate(90deg);
+      }
+      #logerr {
+        display: none;
+        font-size: 10px;
+        color: var(--bad);
+        border: 1px solid var(--bad);
+        border-radius: 999px;
+        padding: 0 6px;
+        line-height: 15px;
+      }
+      #logwrap.hot #logerr {
+        display: inline-block;
+      }
+</style>
   </head>
   <body>
     <header>
@@ -551,29 +703,32 @@
 
     <div id="noconf" class="banner" hidden></div>
 
-    <nav>
-      <button data-tab="overview" class="on">概览</button>
-      <button data-tab="data">数据</button>
-      <button data-tab="train">训练</button>
-      <button data-tab="monitor">监控</button>
-      <button data-tab="eval">评估</button>
-      <button data-tab="runs">实验</button>
-      <button data-tab="deploy">部署</button>
-      <button data-tab="help">帮助</button>
-    </nav>
+    <div class="shell">
+      <nav class="rail" aria-label="工作台页签">
+        <button data-tab="overview" class="on" title="概览"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.8" y="1.8" width="4.4" height="4.4" rx="1"/><rect x="7.8" y="1.8" width="4.4" height="4.4" rx="1"/><rect x="1.8" y="7.8" width="4.4" height="4.4" rx="1"/><rect x="7.8" y="7.8" width="4.4" height="4.4" rx="1"/></svg><span class="tx">概览</span></button>
+        <button data-tab="data" title="数据"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="7" cy="3.4" rx="4.6" ry="1.8"/><path d="M2.4 3.4v7.2c0 1 2.06 1.8 4.6 1.8s4.6-.8 4.6-1.8V3.4"/><path d="M2.4 7c0 1 2.06 1.8 4.6 1.8s4.6-.8 4.6-1.8"/></svg><span class="tx">数据</span></button>
+        <button data-tab="train" title="训练"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.2 2.8 11 7l-6.8 4.2z"/></svg><span class="tx">训练</span></button>
+        <button data-tab="monitor" title="监控"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 8.6h2.4l1.7-4.4 2.3 6.8 1.5-2.4h2.9"/></svg><span class="tx">监控</span></button>
+        <button data-tab="eval" title="评估"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.8"/><path d="M4.7 7.2 6.3 8.8l3-3.3"/></svg><span class="tx">评估</span></button>
+        <button data-tab="runs" title="实验"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 4h8.8M2.6 7h8.8M2.6 10h5.6"/></svg><span class="tx">实验</span></button>
+        <button data-tab="deploy" title="部署"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1.9 11.2 4.6v5L7 12.1 2.8 9.6v-5z"/><path d="M7 7.3v4.8M2.8 4.6 7 7.3l4.2-2.7"/></svg><span class="tx">部署</span></button>
+        <button data-tab="help" title="帮助"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M5.6 5.5a1.5 1.5 0 1 1 2.1 1.4c-.4.2-.7.6-.7 1.1"/><circle cx="7" cy="10.2" r=".55" fill="currentColor" stroke="none"/></svg><span class="tx">帮助</span></button>
+      </nav>
+
 
     <main>
       <!-- ============ 概览 ============ -->
       <section id="tab-overview">
-        <div class="card" id="nextcard" hidden>
+        <div class="cols">
+<div class="col">
+<div class="card" id="nextcard" hidden>
           <h2>下一步</h2>
           <div class="row" style="align-items:center; gap:10px">
             <span class="note" id="nexttext" style="margin:0; flex:1 1 260px"></span>
             <button class="btn primary" id="nextgo">去</button>
           </div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>环境</h2>
           <div class="kv" id="envkv"></div>
           <div class="row" style="margin-top: 8px">
@@ -582,8 +737,7 @@
           </div>
           <div class="note" id="probenote"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>
             模型库
             <span class="tag" id="mlibtag">按文件名推断</span>
@@ -596,26 +750,30 @@
             没读之前只能按文件名推断（<code>yolo11n-seg.pt</code> → 分割），推断不出来的会标出来，<b>不猜</b>。
           </p>
         </div>
-
-        <div class="card">
+</div>
+<div class="col">
+<div class="card">
           <h2>数据集</h2>
           <div class="kv" id="dskv"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>部署工具</h2>
           <div class="kv" id="depkv"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>训练记录</h2>
           <div id="runs"></div>
         </div>
+</div>
+</div>
+
       </section>
 
       <!-- ============ 数据 ============ -->
       <section id="tab-data" hidden>
-        <div class="card">
+        <div class="cols">
+<div class="col">
+<div class="card">
           <h2>数据来源与划分</h2>
           <div class="grid">
             <label class="wide">
@@ -645,7 +803,7 @@
             <span class="note" style="margin: 0">约 1 分钟；重复运行只更新有变化的文件</span>
           </div>
         </div>
-        <div class="card">
+<div class="card">
           <h2>标注投料口</h2>
           <div class="kv" id="intakekv"></div>
           <div class="snap" id="intakelist"></div>
@@ -663,7 +821,9 @@
             在 YOLO11 / YOLO26 之间<b>通用</b>，老数据不用重标就能给新一代模型训。
           </p>
         </div>
-        <div class="card">
+</div>
+<div class="col">
+<div class="card">
           <h2>
             标注体检
             <span class="tag" id="audittag">还没体检</span>
@@ -677,8 +837,7 @@
             体检<b>只读</b>——修标注是你在 X-AnyLabeling 里的事，面板不动你的数据。
           </p>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>增强预览</h2>
           <div id="batchbox"></div>
           <p class="note">
@@ -687,6 +846,9 @@
             和训练不一致的图，那比没有预览更糟。改了增强参数想看到新样子，就跑一轮再回来。
           </p>
         </div>
+</div>
+</div>
+
         <p class="note">
           这里只改<b>本次运行</b>的参数。工作区里的 <code>config.yaml</code> 不会被改写——它是你自己的
           基准，插件每次把它读出来当底、再叠上这里的改动，写到 <code>train_runs/&lt;实验&gt;.yaml</code> 那份快照里。
@@ -695,7 +857,9 @@
 
       <!-- ============ 部署 ============ -->
       <section id="tab-deploy" hidden>
-        <div class="card">
+        <div class="cols">
+<div class="col">
+<div class="card">
           <h2>
             导出
             <span class="tag" id="extag">—</span>
@@ -746,14 +910,14 @@
             端侧真正关心的是"这个文件多少毫秒"。测速样本取自数据集的 val 目录，取不到就只报体积。
           </p>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>部署工具</h2>
           <div class="kv" id="toolkv"></div>
           <div class="note" id="toolnote"></div>
         </div>
-
-        <div class="card">
+</div>
+<div class="col">
+<div class="card">
           <h2>模型</h2>
           <div class="kv" id="modelkv"></div>
           <div class="row" style="margin-top: 10px">
@@ -762,8 +926,7 @@
           </div>
           <div class="deliv" id="delivlist"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>配置与执行</h2>
           <div class="cfglist" id="cfglist"></div>
           <div class="row" style="margin-top: 12px; flex-wrap: wrap">
@@ -779,6 +942,9 @@
             <code>$Model</code> / <code>$ModelName</code>），把包装文件传给工具。跑完的日志和训练共用下面那一栏。
           </p>
         </div>
+</div>
+</div>
+
       </section>
 
       <!-- ============ 训练 ============ -->
@@ -791,10 +957,11 @@
           <button class="btn" id="savetrain">保存这些设置</button>
           <span class="absum" id="absum"></span>
         </div>
-      </section>
 
         <!-- ① 练什么：任务 / 权重 / 数据集 —— 三个决定，占满整行也不冤 -->
-        <div class="card tsec">
+        <div class="cols">
+<div class="col">
+<div class="card tsec">
           <div class="sec-h">
             <span class="sec-t">练什么</span>
             <span class="tag" id="psrc">参数面 ?</span>
@@ -806,18 +973,14 @@
           <div class="note" id="tasknote" style="margin:0 0 10px"></div>
           <div id="c_primary"></div>
         </div>
-
-        <!-- ② 练多久：90% 的时刻只改这几个数 -->
-        <div class="card tsec">
+<div class="card tsec">
           <div class="sec-h">
             <span class="sec-t">练多久、练多细</span>
             <span class="sec-m">常改的六个都在这里；其余在下面的高级里</span>
           </div>
           <div class="coregrid" id="c_core"></div>
         </div>
-
-        <!-- ③ 其余全部收在这里：默认折叠，标题上写着"改了几项" -->
-        <div class="card tsec">
+<div class="card tsec">
           <div class="sec-h">
             <span class="sec-t">高级参数</span>
             <span class="tag" id="advsum">全是默认</span>
@@ -831,9 +994,9 @@
             <li>灰字是引擎自己的默认值；面板只把<b>与工作区 config.yaml 不同的</b>那些写进覆盖层，改回默认时 diff 自己消失。</li>
           </ul>
         </div>
-
-        <!-- ④ 快照与进度 -->
-        <div class="card">
+</div>
+<div class="col">
+<div class="card">
           <h2>本次实验落在哪儿</h2>
           <div class="kv" id="snapkv"></div>
           <div class="snap" id="snaplist"></div>
@@ -844,18 +1007,22 @@
             训练由插件自带的 <code>runner/train_job.py</code> 执行（<b>没动</b>你的脚本）；跑完去 <code>runs/&lt;实验名&gt;/args.yaml</code> 对答案。
           </p>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>进度</h2>
           <div class="bar"><i id="bar"></i></div>
           <div class="kv" id="jobkv" style="margin-top: 8px"></div>
           <div class="note" id="pre"></div>
         </div>
+</div>
+</div>
 
+      </section>
 
       <!-- ============ 监控 ============ -->
       <section id="tab-monitor" hidden>
-        <div class="card">
+        <div class="cols">
+<div class="col">
+<div class="card">
           <h2 class="row">
             <span id="monrun">还没有训练产物</span>
             <span class="tag" id="montag">—</span>
@@ -868,25 +1035,23 @@
           <div class="bar" style="margin-top:8px"><i id="monmembar"></i></div>
           <div class="note" id="monmem"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>损失</h2>
           <div id="chartloss"></div>
           <div class="snap" id="legloss"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>指标（(B) 是框、(M) 是掩膜）</h2>
           <div id="chartmap"></div>
           <div class="snap" id="legmap"></div>
         </div>
-
-        <div class="card" id="failcard" hidden>
+</div>
+<div class="col">
+<div class="card" id="failcard" hidden>
           <h2>上一次失败的归类</h2>
           <div class="kv" id="failkv"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>选一个 run 看它的曲线</h2>
           <div class="snap" id="runpick"></div>
           <p class="note">
@@ -896,11 +1061,16 @@
             <code>tensorboard --logdir runs</code>（面板不替你装东西，也不替你起进程）。
           </p>
         </div>
+</div>
+</div>
+
       </section>
 
       <!-- ============ 评估 ============ -->
       <section id="tab-eval" hidden>
-        <div class="card">
+        <div class="cols">
+<div class="col">
+<div class="card">
           <h2>
             评估
             <span class="tag" id="evtag">还没评估</span>
@@ -937,31 +1107,28 @@
             <span class="note" style="margin: 0">评估走插件自带的 runner，结果只落 <code>train_runs/eval/</code>；你的 <code>scripts/validate_viz.py</code> 与 <code>runs/</code> 都不动。</span>
           </div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>指标</h2>
           <div id="ev_metrics"></div>
           <div class="note" id="ev_when"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>阈值对照</h2>
           <div id="ev_conftbl"></div>
           <p class="note">这张表读的是<b>同一次 val 的 PR 曲线</b>——和 <code>BoxPR_curve.png</code> 同源，所以表和图不会互相打脸。不重复跑 N 遍验证集。</p>
         </div>
-
-        <div class="card">
+</div>
+<div class="col">
+<div class="card">
           <h2>图</h2>
           <div class="snap" id="ev_plots"></div>
           <div id="ev_img"></div>
         </div>
-
-        <div class="card" id="ev_errcard" hidden>
+<div class="card" id="ev_errcard" hidden>
           <h2>错例（拿去 X-AnyLabeling 补标）</h2>
           <div id="ev_errlist"></div>
         </div>
-
-        <div class="card">
+<div class="card">
           <h2>和另一个 run 比</h2>
           <div class="row">
             <select id="cmp_a" style="max-width:260px"></select>
@@ -970,6 +1137,9 @@
           </div>
           <div id="cmpout"></div>
         </div>
+</div>
+</div>
+
       </section>
 
       <!-- ============ 实验 ============ -->
@@ -1045,17 +1215,22 @@
           </p>
         </div>
       </section>
-    </main>
+      </main>
+    </div>
 
     <div id="logwrap">
       <div id="logbar">
-        <span>日志</span>
+        <button id="logtoggle" title="展开 / 收起日志"><svg class="chev" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>日志</button>
         <span id="logmeta" class="tag"></span>
+        <span id="loglast"></span>
+        <span id="logerr">0 条错误</span>
         <span class="spacer"></span>
-        <button class="btn" id="logf-all" title="显示全部行">全部</button>
-        <button class="btn" id="logf-err" title="只留 stderr 与工作台自己的行">只看错误</button>
-        <button class="btn" id="copylog">复制全部</button>
-        <button class="btn" id="clearlog">清屏</button>
+        <span class="logtools">
+          <button class="btn" id="logf-all" title="显示全部行">全部</button>
+          <button class="btn" id="logf-err" title="只留 stderr 与工作台自己的行">只看错误</button>
+          <button class="btn" id="copylog">复制全部</button>
+          <button class="btn" id="clearlog">清屏</button>
+        </span>
       </div>
       <pre id="log"></pre>
     </div>
@@ -1086,6 +1261,8 @@
 
       /* ---------------- 日志 ---------------- */
       var LOG_MAX = 3000;
+      /** 收起状态下那条预览与红点计数：日志窗收起来了，但"出错了"不能一起被收走。 */
+      var logErrCount = 0;
       function appendLog(batch) {
         var frag = document.createDocumentFragment();
         for (var i = 0; i < batch.length; i++) {
@@ -1100,6 +1277,14 @@
         while (toast.childNodes.length > LOG_MAX) toast.removeChild(toast.firstChild);
         if (logFilter === "err") applyLogFilter();
         if (near) toast.scrollTop = toast.scrollHeight;
+
+        var last = batch.length ? batch[batch.length - 1] : null;
+        if (last) $("loglast").textContent = last.text;
+        for (var k = 0; k < batch.length; k++) if (batch[k].stream === "err") logErrCount++;
+        if (logErrCount) {
+          $("logerr").textContent = logErrCount + " 条错误";
+          if (!$("logwrap").classList.contains("open")) $("logwrap").classList.add("hot");
+        }
       }
       function sysLog(text, stream) {
         appendLog([{ text: "[面板] " + text, stream: stream || "sys" }]);
@@ -2853,6 +3038,18 @@
       };
       $("clearlog").onclick = function () {
         toast.innerHTML = "";
+        logErrCount = 0;
+        $("logerr").textContent = "0 条错误";
+        $("loglast").textContent = "";
+        $("logwrap").classList.remove("hot");
+      };
+      $("logtoggle").onclick = function () {
+        var w = $("logwrap");
+        var open = w.classList.toggle("open");
+        if (open) {
+          w.classList.remove("hot");
+          toast.scrollTop = toast.scrollHeight;
+        }
       };
       $("copylog").onclick = function () {
         var t = toast.innerText || "";
