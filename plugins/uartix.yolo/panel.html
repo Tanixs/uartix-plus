@@ -957,6 +957,20 @@
         </div>
 <div class="card">
           <h2>配置与执行</h2>
+          <div class="grid" style="margin-bottom:10px">
+            <label class="wide">
+              部署哪一枚权重（runs 里任意一版 / 交付区 / 模型库）
+              <select id="depmodel"></select>
+            </label>
+            <label class="wide">
+              其他 .pt 路径（填了就用它；可以来自任何盘任何目录）
+              <input id="depmodelpath" spellcheck="false" placeholder="D:/…/best.pt（留空 = 用上面选的那枚）" />
+            </label>
+            <label class="wide">
+              校准图（量化用；换数据集后最容易忘的就是它）
+              <select id="depcalib"></select>
+            </label>
+          </div>
           <div class="cfglist" id="cfglist"></div>
           <div class="row" style="margin-top: 12px; flex-wrap: wrap">
             <button class="btn" id="dep-validate" title="只检查环境与配置，不动任何文件">只检查环境</button>
@@ -968,7 +982,7 @@
           <p class="note">
             插件<b>不会改写</b>你那份 <code>deploy_config.*.ps1</code>：它在
             <code>.uartix/yolo/deploy/</code> 里生成一份包装配置（先读你的，再覆盖
-            <code>$Model</code> / <code>$ModelName</code>），把包装文件传给工具。跑完的日志和训练共用下面那一栏。
+            <code>$Model</code> / <code>$ModelName</code> / <code>$CalibSources</code>（校准图）），把包装文件传给工具。跑完的日志和训练共用下面那一栏。
           </p>
         </div>
 </div>
@@ -1470,7 +1484,7 @@
 
       /* ---------------- 部署 ---------------- */
 
-      var dep = { cfg: "", state: null };
+      var dep = { cfg: "", state: null, model: "", calib: "" };
 
       function fmtBytes(n) {
         if (!n) return "0 B";
@@ -1545,7 +1559,8 @@
               '<div class="cfgrow' + (on ? " on" : "") + '" data-cfg="' + esc(c.name) + '">' +
                 '<span class="dot"></span>' +
                 '<span class="nm">' + esc(c.name) + "</span>" +
-                '<span class="mt">' + esc(c.modelName || "(无 $ModelName)") + " · " + esc(c.imgsz) + " · " + esc(c.docker || "-") + "</span>" +
+                '<span class="mt" title="' + esc(c.calib || "") + '">' + esc(c.modelName || "(无 $ModelName)") + " · " + esc(c.imgsz) + " · " + esc(c.docker || "-") +
+                  " · 校准 " + esc(c.calib ? String(c.calib).split(/[\\/]/).filter(Boolean).pop() : "未设置") + "</span>" +
                 '<span style="flex:1 1 auto"></span>' +
                 (c.ok === false ? '<span class="tag warn">' + esc(c.error || "读不出") + "</span>" : "") +
               "</div>"
@@ -1560,6 +1575,42 @@
           }
         }
 
+        // 权重 / 校准图：候选由插件扫一份（训练产物 / 交付区 / 模型库 / 各数据集），面板只管摆
+        var cands = st2.candidates || [];
+        var selM = $("depmodel");
+        var optsM = ['<option value="">用最新一次训练（并留一份交付副本）</option>'];
+        for (var k = 0; k < cands.length; k++) {
+          var c = cands[k];
+          var lab =
+            c.kind === "run"
+              ? "run " + (c.run || c.name) + (c.mAP50 ? " · mAP50 " + fmtNum(c.mAP50) : "")
+              : c.kind === "delivered"
+                ? "交付区 · " + c.name
+                : "模型库 · " + c.name;
+          optsM.push('<option value="' + esc(c.path) + '">' + esc(lab) + "</option>");
+        }
+        selM.innerHTML = optsM.join("");
+        if (dep.model && !cands.some(function (x) { return x.path === dep.model; })) dep.model = "";
+        selM.value = dep.model;
+        selM.onchange = function () {
+          dep.model = this.value;
+          if (this.value) $("depmodelpath").value = "";
+        };
+
+        var selC = $("depcalib");
+        var optsC = [
+          '<option value="">自动：当前数据集的 images/train（没有就用配置里的）</option>',
+          '<option value="@config">跟配置文件走（$CalibSources）</option>',
+        ];
+        (st2.calib || []).forEach(function (x) {
+          optsC.push('<option value="' + esc(x.path) + '">' + esc(x.dataset) + " · " + x.images + " 张</option>");
+        });
+        selC.innerHTML = optsC.join("");
+        selC.value = dep.calib || "";
+        selC.onchange = function () {
+          dep.calib = this.value;
+        };
+
         var running = !!(st2.active && st2.active.state === "running");
         ["dep-validate", "dep-all", "dep-convert", "dep-package", "deliver"].forEach(function (id) {
           var el = $(id);
@@ -1571,7 +1622,14 @@
         if (!dep.cfg) return;
         sysLog("部署开始（" + step + "）：" + dep.cfg);
         try {
-          var job = await uartix.call("deployStart", { cfgName: dep.cfg, step: step, deliver: step !== "validate" });
+          var job = await uartix.call("deployStart", {
+            cfgName: dep.cfg,
+            step: step,
+            deliver: step !== "validate",
+            // 手填的路径优先（可以来自任何盘）；没填就用下拉里选的那枚
+            model: String(($("depmodelpath").value || "").trim() || dep.model || ""),
+            calib: dep.calib || "",
+          });
           renderJob(job);
         } catch (e) {
           sysLog("[错误] " + String((e && e.message) || e));
@@ -1847,6 +1905,7 @@
           }
         }
         refreshTrainSummary();
+        attachPicks();
       }
 
       /** 表单 → patch。**空输入送 null**（= 撤销这一项的覆盖，交回工作区基准 / 引擎默认）。 */
@@ -2780,10 +2839,73 @@
         try {
           var s = await uartix.call("state");
           renderAll(s);
+          loadPicks();
           if (!quiet) sysLog("已刷新");
         } catch (e) {
           sysLog("读状态失败：" + (e && e.message ? e.message : e));
         }
+      }
+
+      /* ---------------- 候选清单（权重 / 数据集 / 设备）：插件扫一份，四个页面共用 ---------------- */
+      var picksData = null;
+
+      function ensureDatalist(id, items) {
+        var dl = $(id);
+        if (!dl) {
+          dl = document.createElement("datalist");
+          dl.id = id;
+          document.body.appendChild(dl);
+        }
+        dl.innerHTML = items
+          .map(function (o) {
+            return '<option value="' + esc(o.value) + '">' + esc(o.label || "") + "</option>";
+          })
+          .join("");
+        return dl;
+      }
+
+      function attachPicks() {
+        if (!picksData) return;
+        var w = $("p_weights");
+        if (w) {
+          ensureDatalist(
+            "dl_weights",
+            (picksData.models || [])
+              .map(function (m) {
+                var lab = m.kind === "run" ? "run " + (m.run || m.name) + (m.mAP50 ? " · mAP50 " + m.mAP50 : "") : m.kind === "delivered" ? "交付区" : "模型库";
+                return { value: m.path, label: lab };
+              })
+              .concat((picksData.official || []).map(function (o) { return { value: o.name, label: o.label + "（官方名，会联网下载）" }; })),
+          );
+          w.setAttribute("list", "dl_weights");
+        }
+        var d = $("p_data");
+        if (d) {
+          ensureDatalist(
+            "dl_data",
+            (picksData.datasets || []).map(function (x) {
+              return { value: x.dataYaml, label: x.name + " · train " + x.train + " / val " + x.val };
+            }),
+          );
+          d.setAttribute("list", "dl_data");
+        }
+        var dev = $("p_device");
+        if (dev) {
+          ensureDatalist(
+            "dl_device",
+            (picksData.devices || []).map(function (x) { return { value: x.value, label: x.label }; }),
+          );
+          dev.setAttribute("list", "dl_device");
+        }
+      }
+
+      async function loadPicks() {
+        try {
+          picksData = await uartix.call("picks");
+        } catch (e) {
+          picksData = null;
+        }
+        attachPicks();
       }
 
       /* ---------------- 表单 → patch ---------------- */

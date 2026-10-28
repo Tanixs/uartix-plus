@@ -1727,13 +1727,18 @@ function readDeployConfig(name) {
     imgsz: `${pick("ImgszW") || "?"}×${pick("ImgszH") || "?"}`,
     python: pick("PythonExe"),
     docker: pick("DockerImage"),
+    // 校准图与 opset 也要读出来：换数据集后最容易忘改的就是校准来源，量化的好坏全看它
+    calib: pick("CalibSources"),
+    opset: pick("Opset"),
   };
 }
 
 /** 工作区里最新的 `runs/<run>/weights/best.pt`（按 mtime）。 */
-function latestBest() {
-  const runs = scanRuns("runs").map((r) => {
-    const bp = path.join(root, "runs", r.name, "weights", "best.pt");
+function latestBest(project) {
+  // 跟着配置里的 project 走：有人把训练产物放到别的盘，写死 runs 就会"找不到训练产物"
+  const base = String(project || abs("runs")).replace(/\\/g, "/");
+  const runs = scanRuns(base).map((r) => {
+    const bp = path.join(base, r.name, "weights", "best.pt").replace(/\\/g, "/");
     return { ...r, bestPath: fs.existsSync(bp) ? bp : "" };
   });
   const withBest = runs.filter((r) => r.bestPath);
@@ -1755,8 +1760,8 @@ function latestBest() {
  * 为什么不直接把 `$Model` 指向 `runs/…/weights/best.pt`：那个目录会被下一次训练覆盖。
  * 交付的意思是**留一份**，名字固定，部署脚本与 README 都指得稳。
  */
-function deliverBest(modelName) {
-  const best = latestBest();
+function deliverBest(modelName, project) {
+  const best = latestBest(project);
   if (!best) return { ok: false, error: "工作区里没有找到训练产物（runs/<run>/weights/best.pt）" };
   const dstDir = abs("models/delivered");
   fs.mkdirSync(dstDir, { recursive: true });
@@ -1772,32 +1777,139 @@ function deliverBest(modelName) {
  * 这样 `deploy.ps1` 的 `. $Config` 读到的是一份"用户配置 + 我们这两行"，而用户那份
  * `deploy_config.*.ps1` **一个字节都没动**。改用户文件是这类工具最容易越界的地方：
  * 它没有版本控制、也没有备份，改坏了用户只能自己回忆原样。
+ *
+ * `calibSamples`：这次训练用的数据集里的 `images/train`。**校准图必须跟着模型走**——
+ * 换数据集之后忘了改 `$CalibSources`，量化就会拿旧场景的图校准，板子上精度掉得莫名其妙。
  */
-function writeWrapper(cfgName, modelPath, modelName) {
+function writeWrapper(cfgName, modelPath, modelName, calibSamples) {
   const dir = path.join(root, STATE_DIR, "deploy");
   fs.mkdirSync(dir, { recursive: true });
   const tool = scanDeployTool();
   const src = path.join(tool.dir, cfgName).replace(/\\/g, "/");
   const out = path.join(dir, `auto-${String(modelName || "model").replace(/[^\w.-]+/g, "-")}.ps1`);
   const ps = (v) => `"${String(v).replace(/"/g, '`"')}"`;
-  const text = [
+  const lines = [
     "# 由 uartix.yolo 生成：不要手改（每次部署会覆盖）",
-    "# 先读用户那份配置（只读），再覆盖下面两行",
+    "# 先读用户那份配置（只读），再覆盖下面几行",
     `. ${ps(src)}`,
     "",
     `$ModelName = ${ps(modelName)}`,
     `$Model     = ${ps(modelPath)}`,
-    "",
-  ].join("\n");
+  ];
+  if (calibSamples) lines.push(`$CalibSources = ${ps(calibSamples)}`);
+  lines.push("");
+  const text = lines.join("\n");
   fs.writeFileSync(out, text, "utf8");
   return out;
 }
 
 /** 部署状态的快照（面板「部署」页一次拿全）。 */
-function deployState() {
+/**
+ * 可以拿来部署的权重：训练产物（每个 run 的 best.pt）、交付区、模型库。
+ * 用户要能"选之前训的那一版"，而不是永远只部署最新一次。
+ */
+function deployCandidates(project) {
+  const out = [];
+  const seen = new Set();
+  const push = (p, kind, extra) => {
+    const k = String(p).replace(/\\/g, "/");
+    if (seen.has(k) || !fs.existsSync(k)) return;
+    seen.add(k);
+    let at = 0;
+    try {
+      at = fs.statSync(k).mtimeMs;
+    } catch {
+      /* 刚被删 */
+    }
+    out.push({ path: k, kind, name: path.basename(k), at, ...extra });
+  };
+  for (const r of scanRuns(project)) {
+    if (!r.hasBest) continue;
+    push(r.best, "run", { run: r.name, mAP50: r.metrics ? r.metrics.mAP50M : "", epochs: r.epochs });
+  }
+  try {
+    for (const f of fs.readdirSync(abs("models/delivered"))) {
+      if (/\.pt$/i.test(f)) push(path.join(abs("models/delivered"), f).replace(/\\/g, "/"), "delivered", {});
+    }
+  } catch {
+    /* 还没交付过 */
+  }
+  try {
+    for (const f of fs.readdirSync(abs("models"))) {
+      if (/\.pt$/i.test(f)) push(path.join(abs("models"), f).replace(/\\/g, "/"), "models", {});
+    }
+  } catch {
+    /* 没有模型库 */
+  }
+  return out.sort((a, b) => b.at - a.at).slice(0, 24);
+}
+
+/** 能当校准来源的目录：工作区里每个数据集的 images/train（有图才算）。 */
+function calibCandidates() {
+  const out = [];
+  for (const d of scanDatasetDirs()) {
+    const train = path.join(String(d.dir).replace(/\\/g, "/"), "images", "train").replace(/\\/g, "/");
+    let n = 0;
+    try {
+      n = fs.readdirSync(train).filter((f) => /\.(jpe?g|png|bmp)$/i.test(f)).length;
+    } catch {
+      continue;
+    }
+    if (n) out.push({ path: train, dataset: d.name || path.basename(d.dir), images: n });
+  }
+  return out;
+}
+
+/** GPU 列表（device 下拉用）。问不到 nvidia-smi 就只给 cpu。 */
+async function deviceChoices() {
+  const r = await runOnce("nvidia-smi", ["--query-gpu=index,name", "--format=csv,noheader"], 4000);
+  const out = [];
+  if (r.code === 0) {
+    for (const line of String(r.out || "").split(/\r?\n/)) {
+      const m = /^\s*(\d+)\s*,\s*(.+)$/.exec(line);
+      if (m) out.push({ value: m[1], label: `${m[1]} · ${m[2].trim()}` });
+    }
+  }
+  out.push({ value: "cpu", label: "cpu（没有 CUDA，或想复现结果）" });
+  return out;
+}
+
+/**
+ * **候选清单的唯一来源**：训练页的权重 / 数据集 / 设备、评估与导出页的权重、部署页的模型与校准图，
+ * 全部从这里取。以后多一种来源（比如从市场下载的模型、第二块盘上的数据集），只改这一个函数，
+ * 四个页面一起长出来 —— 不要在各自的页面里再抄一份扫描逻辑。
+ */
+async function pickLists() {
+  const { effective } = await effectiveConfig();
+  const project = effective.train.project;
+  const datasets = scanDatasetDirs().map((d) => {
+    let classes = [];
+    try {
+      const y = readDataYaml(d.dataYaml);
+      classes = (y && y.names) || [];
+    } catch {
+      /* 读不出来就不带类别 */
+    }
+    return { ...d, classes };
+  });
+  return {
+    models: deployCandidates(project),
+    official: officialModels().map((m) => ({ name: m.name, label: m.label, task: m.task })),
+    datasets,
+    devices: await deviceChoices(),
+    calib: calibCandidates(),
+    current: {
+      weights: String((effective.train && effective.train.weights) || "").replace(/\\/g, "/"),
+      data: path.join(abs(effective.dataset.output_dir || ""), "data.yaml").replace(/\\/g, "/"),
+    },
+  };
+}
+
+async function deployState() {
+  const { effective } = await effectiveConfig();
   const tool = scanDeployTool();
   const configs = (tool.configs || []).map((c) => readDeployConfig(c));
-  const best = latestBest();
+  const best = latestBest(effective.train.project);
   const dd = abs("models/delivered");
   let delivered = [];
   try {
@@ -1818,6 +1930,8 @@ function deployState() {
     configs,
     latest: best ? { path: best.path, run: best.run, at: best.at } : null,
     delivered,
+    candidates: deployCandidates(effective.train.project),
+    calib: calibCandidates(),
     jobs: [...jobs.values()].filter((j) => j.kind === "deploy").slice(-4).map(snapshot),
     active: active && active.kind === "deploy" ? snapshot(active) : null,
   };
@@ -1837,6 +1951,10 @@ async function deployStart(req) {
   const o = isObj(req) ? req : { cfgName: req };
   const cfgName = String(o.cfgName == null ? "" : o.cfgName);
   const step = String(o.step || "all");
+  // 与 deploy.ps1 的 [ValidateSet] 一一对应。这里先挡一道：传进来的值会原样变成 ps1 的参数，
+  // 让 PowerShell 去报"参数绑定失败"远不如这里说清楚。
+  const STEPS = ["all", "validate", "prepare", "convert", "package"];
+  if (!STEPS.includes(step)) throw new Error(`不认识的部署步骤「${step}」（只有 ${STEPS.join(" / ")}）`);
   const opts = isObj(o.opts) ? o.opts : { deliver: o.deliver };
   needWorkspace();
   if (active) throw new Error(`已经有一个任务在跑（${active.label}）：先停掉它再开始新的`);
@@ -1849,16 +1967,40 @@ async function deployStart(req) {
   const ps1 = path.join(tool.dir, "deploy.ps1");
   if (!fs.existsSync(ps1)) throw new Error(`部署工具里没有 deploy.ps1：${tool.dir}`);
 
-  // 交付最新产物（除非用户明确说不）——"把哪个模型部署出去"必须显式，不能靠猜
+  // 配置只读一次：交付看 project、校准看 dataset.output_dir —— 两者都跟着用户那份 config.yaml 走
+  const { effective } = await effectiveConfig();
+
+  // 部署哪一枚？**面板选了就用面板选的**（runs/ 里任意一版、交付区、模型库、或别处的路径都行）；
+  // 没选才退回"最新一次训练的 best.pt 并留一份交付副本"。这件事必须显式，不能靠猜。
+  const picked = String(o.model || "").replace(/\\/g, "/").trim();
   let modelPath = cfg.model;
   let delivered = null;
-  if (opts && opts.deliver !== false) {
-    const d = deliverBest(cfg.modelName || path.basename(cfg.name, ".ps1"));
+  if (picked) {
+    const p = abs(picked);
+    if (!fs.existsSync(p)) throw new Error(`找不到要部署的权重：${picked}`);
+    if (!/\.pt$/i.test(p)) throw new Error(`只接受 .pt（导出 onnx 是部署工具自己那一步）：${picked}`);
+    modelPath = p;
+  } else if (opts && opts.deliver !== false) {
+    const d = deliverBest(cfg.modelName || path.basename(cfg.name, ".ps1"), effective.train.project);
     if (!d.ok) throw new Error(d.error);
     modelPath = d.path;
     delivered = d;
   }
-  const wrapper = writeWrapper(cfg.name, modelPath, cfg.modelName || "model");
+  // 校准图：面板选了就用面板的（可以指到任意数据集）；选「跟配置文件走」就不覆盖；
+  // 没选则自动用**当前训练数据集**的 images/train —— 换数据后忘了改 $CalibSources 是最常见的一坑。
+  const pickedCalib = String(o.calib || "").trim();
+  let calibDir = "";
+  if (pickedCalib === "@config") {
+    calibDir = "";
+  } else if (pickedCalib) {
+    const p = abs(pickedCalib);
+    if (!fs.existsSync(p)) throw new Error(`校准目录不存在：${pickedCalib}`);
+    calibDir = p;
+  } else {
+    const auto = path.join(abs(effective.dataset.output_dir || ""), "images", "train").replace(/\\/g, "/");
+    calibDir = fs.existsSync(auto) ? auto : "";
+  }
+  const wrapper = writeWrapper(cfg.name, modelPath, cfg.modelName || "model", calibDir);
 
   const label = `部署 ${cfg.modelName || cfg.name}${step === "all" ? "" : `（${step}）`}`;
   const job = newJob("deploy", label);
@@ -1871,6 +2013,11 @@ async function deployStart(req) {
   if (delivered) pushLine(job, `[工作台] 交付: ${delivered.path}（来自 ${delivered.run}）`, "sys");
   pushLine(job, `[工作台] 模型: ${modelPath}`, "sys");
   pushLine(job, `[工作台] 包装配置: ${wrapper}`, "sys");
+  if (calibDir) {
+    pushLine(job, `[工作台] 校准图: ${calibDir}（覆盖配置里的 ${cfg.calib || "未设置"}）`, "sys");
+  } else if (cfg.calib) {
+    pushLine(job, `[工作台] 校准图仍用配置里的 ${cfg.calib}（当前数据集没有 images/train，没法替你换）`, "sys");
+  }
   job.progress.phase = step === "validate" ? "check" : "prepare";
   job.progress.detail = step === "validate" ? "只检查环境，不动任何文件" : "准备 ONNX";
   emitJob(job);
@@ -2248,8 +2395,14 @@ async function activate(c) {
     },
 
     /* ---- 部署（$EXT:deploy）---- */
+    /** 训练/评估/导出/部署共用的候选清单（权重、数据集、设备、校准图）。 */
+    async picks() {
+      needWorkspace();
+      return await pickLists();
+    },
+
     async deployState() {
-      return deployState();
+      return await deployState();
     },
 
     /** 一个对象参数：`{ cfgName, step, deliver }`（桥只转发一个载荷，位置参数拿不到）。 */
@@ -2261,7 +2414,7 @@ async function activate(c) {
     async deployDeliver(modelName) {
       const r = deliverBest(modelName);
       if (!r.ok) throw new Error(r.error);
-      return { ...r, state: deployState() };
+      return { ...r, state: await deployState() };
     },
 
     async stop() {
@@ -2680,6 +2833,7 @@ async function evalState() {
     history: list,
     weights: scanModels(40).map((f) => ({ file: f.file, name: f.name, task: factsFor(f)?.task || "", bytes: f.bytes })),
     bests: scanRuns(effective.train.project).filter((r) => r.hasBest).map((r) => ({ run: r.name, file: r.best, mAP50: r.metrics ? r.metrics.mAP50M : "" })),
+    candidates: deployCandidates(effective.train.project),
     datasets: scanDatasetDirs(),
     current: { data: path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/"), imgsz: effective.train.imgsz, device: String(effective.train.device), workers: effective.train.workers },
   };
@@ -2885,6 +3039,7 @@ async function exportState() {
     last: hist.length ? hist[0] : null,
     weights,
     bests: scanRuns(effective.train.project).filter((r) => r.hasBest).map((r) => ({ v: r.best, t: "run " + r.name + " 的 best.pt" })),
+    candidates: deployCandidates(effective.train.project),
     current: { weights: chosen, task, format: String(effective.export?.format || "onnx"), imgsz: effective.export?.imgsz || effective.train.imgsz || 640, data: path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/") },
   };
 }
