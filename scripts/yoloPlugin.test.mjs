@@ -2299,3 +2299,137 @@ describe("P177-B · 引用阻止、级联回收与恢复", () => {
   }, 90_000);
 });
 
+
+/* ============================ P177-C · 官方权重下载（插件侧） ============================ */
+
+describe("P177-C · 官方清单、下载记账与权限边界", () => {
+  /** 把 runner/download_job.py 换成 node 能跑的假下载器：真网络由 yoloDownload.test.mjs 验。 */
+  function fakeDownloader(pluginDir, opts) {
+    const o = opts || {};
+    const p = path.join(pluginDir, "runner", "download_job.py");
+    writeFileSync(
+      p,
+      [
+        "const fs = require('node:fs');",
+        "const path = require('node:path');",
+        "const a = process.argv;",
+        "const out = a[a.indexOf('--out') + 1];",
+        "if (process.env.FAKE_DL_FAIL) { console.log(JSON.stringify({ type: 'error', message: '服务器返回 404 Not Found' })); process.exit(3); }",
+        "fs.mkdirSync(path.dirname(out), { recursive: true });",
+        "fs.writeFileSync(out, 'fake-weights');",
+        "console.log(JSON.stringify({ type: 'head', total: 12 }));",
+        "console.log(JSON.stringify({ type: 'progress', done: 6, total: 12, pct: 50, speed: 6 }));",
+        "console.log(JSON.stringify({ type: 'done', ok: true, path: out, bytes: 12, sha256: 'deadbeefdeadbeef' }));",
+        "process.exit(0);",
+      ].join("\n"),
+      "utf8",
+    );
+    return o;
+  }
+
+  it("清单只列 YOLO11/YOLO26 的检测与分割；不在清单里的名字直接拒", async () => {
+    const ws = makeWorkspace("dl-list");
+    const pluginDir = copyPlugin("dl-list");
+    fakeDownloader(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.modelDownloadState");
+      expect(s.items.length).toBe(20);
+      expect(s.release).toBe("v8.4.0");
+      expect(s.license).toContain("AGPL");
+      expect(new Set(s.items.map((x) => x.family))).toEqual(new Set(["yolo11", "yolo26"]));
+      expect(new Set(s.items.map((x) => x.task))).toEqual(new Set(["detect", "segment"]));
+      expect(s.items.every((x) => x.url.startsWith("https://github.com/ultralytics/assets/releases/download/v8.4.0/"))).toBe(true);
+      expect(s.items.find((x) => x.name === "yolo11n-seg.pt").task).toBe("segment");
+      expect(s.items.find((x) => x.name === "yolo26x.pt").family).toBe("yolo26");
+      await expect(p.call("panel.train.modelDownload", { name: "yolo11n-cls.pt" })).rejects.toThrow(/官方清单/);
+      await expect(p.call("panel.train.modelDownload", { name: "../../evil.pt" })).rejects.toThrow(/官方清单/);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("下载成功：落在 models/pretrained/<family>/、写 downloads.json、状态变成已有", async () => {
+    const ws = makeWorkspace("dl-ok");
+    const pluginDir = copyPlugin("dl-ok");
+    fakeDownloader(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const job = await p.call("panel.train.modelDownload", { name: "yolo11n-seg.pt" });
+      expect(job.kind).toBe("download");
+      // 等终态：轮询 state（active 变空 + 文件在）
+      let st = null;
+      for (let i = 0; i < 60; i++) {
+        st = await p.call("panel.train.modelDownloadState");
+        if (!st.active && st.items.find((x) => x.name === "yolo11n-seg.pt").exists) break;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      const item = st.items.find((x) => x.name === "yolo11n-seg.pt");
+      expect(item.exists, "文件没落到 models/pretrained").toBe(true);
+      expect(item.path.replace(/\\/g, "/")).toContain("/models/pretrained/yolo11/");
+      const ledger = JSON.parse(readFileSync(path.join(ws, "models", "pretrained", "downloads.json"), "utf8"));
+      expect(ledger.files["yolo11n-seg.pt"].sha256).toBe("deadbeefdeadbeef");
+      expect(ledger.files["yolo11n-seg.pt"].release).toBe("v8.4.0");
+      // 再点一次：exists，不会重复下载
+      const again = await p.call("panel.train.modelDownload", { name: "yolo11n-seg.pt" });
+      expect(again.exists).toBe(true);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
+
+  it("下载失败：错误写进进度、不写 downloads.json、不留下最终文件", async () => {
+    const ws = makeWorkspace("dl-fail");
+    const pluginDir = copyPlugin("dl-fail");
+    // 这个假下载器固定失败（等价于 runner 报 error 行并退出 3）
+    writeFileSync(
+      path.join(pluginDir, "runner", "download_job.py"),
+      [
+        "const a = process.argv;",
+        "console.log(JSON.stringify({ type: 'error', message: '服务器返回 404 Not Found' }));",
+        "process.exit(3);",
+      ].join("\n"),
+      "utf8",
+    );
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      await p.call("panel.train.modelDownload", { name: "yolo26s.pt" });
+      let st = null;
+      for (let i = 0; i < 40; i++) {
+        st = await p.call("panel.train.modelDownloadState");
+        if (!st.active) break;
+        await new Promise((r) => setTimeout(r, 120));
+      }
+      expect(st.active).toBe(null);
+      expect(st.items.find((x) => x.name === "yolo26s.pt").exists).toBe(false);
+      expect(existsSync(path.join(ws, "models", "pretrained", "yolo26", "yolo26s.pt"))).toBe(false);
+      expect(existsSync(path.join(ws, "models", "pretrained", "downloads.json")), "失败不能写账本").toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
+
+  it("只读模式：清单能读，下载被拒（不写盘）", async () => {
+    const ws = makeWorkspace("dl-ro");
+    const pluginDir = copyPlugin("dl-ro");
+    fakeDownloader(pluginDir);
+    const p = startPlugin(pluginDir, ws, {}, { readOnly: true });
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.modelDownloadState");
+      expect(s.readOnly).toBe(true);
+      expect(s.items.length).toBe(20);
+      await expect(p.call("panel.train.modelDownload", { name: "yolo11n.pt" })).rejects.toThrow(/只读/);
+      expect(existsSync(path.join(ws, "models", "pretrained"))).toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});

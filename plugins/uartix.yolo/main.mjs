@@ -3651,6 +3651,17 @@ async function activate(c) {
       throw new Error(`不认识的资产动作：${action}`);
     },
 
+    /** P177-C：官方权重清单 / 已下载状态 / 当前下载任务。 */
+    async modelDownloadState() {
+      needWorkspace();
+      return await modelDownloadState();
+    },
+
+    /** P177-C：下载一枚官方权重（只在白名单内，不自动设为训练权重）。 */
+    async modelDownload(req) {
+      return await modelDownload(req);
+    },
+
     async deployState() {
       return await deployState();
     },
@@ -4309,6 +4320,238 @@ async function exportState() {
     candidates: deployCandidates(effective.train.project),
     current: { weights: chosen, task, format: String(effective.export?.format || "onnx"), imgsz: effective.export?.imgsz || effective.train.imgsz || 640, data: path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/") },
   };
+}
+
+/* ============================ 官方权重下载（P177-C） ============================ */
+
+/**
+ * v1 只认官方 ultralytics/assets 的这一个 release（与当前 ultralytics 8.4.102 的默认
+ * `attempt_download_asset` 一致）。升级包版本时改这一处，不做"任意 URL 下载"。
+ */
+const DL_RELEASE = "v8.4.0";
+const DL_HOSTS = ["github.com", "objects.githubusercontent.com", "raw.githubusercontent.com"];
+const DL_LICENSE = "AGPL-3.0";
+const DL_MAX_BYTES = 200 * 1024 * 1024;
+
+function dlUrl(name) {
+  return `https://github.com/ultralytics/assets/releases/download/${DL_RELEASE}/${name}`;
+}
+
+/** 官方清单：只列本插件真能训/能部署的两类（detect / segment）× YOLO11 / YOLO26。 */
+const OFFICIAL_WEIGHTS = (() => {
+  const out = [];
+  for (const family of ["yolo11", "yolo26"]) {
+    for (const scale of ["n", "s", "m", "l", "x"]) {
+      for (const task of ["detect", "segment"]) {
+        const name = `${family}${scale}${task === "segment" ? "-seg" : ""}.pt`;
+        out.push({ name, family, scale, task, url: dlUrl(name), license: DL_LICENSE });
+      }
+    }
+  }
+  return out;
+})();
+
+const dlLedgerPath = () => abs("models/pretrained/downloads.json");
+
+function readDownloadLedger() {
+  const j = readJson(dlLedgerPath(), null);
+  return isObj(j) && isObj(j.files) ? j : { schemaVersion: 1, release: DL_RELEASE, files: {} };
+}
+
+function writeDownloadLedger(next) {
+  if (!canWrite()) return;
+  fs.mkdirSync(path.dirname(dlLedgerPath()), { recursive: true });
+  writeJsonAtomic(dlLedgerPath(), { ...next, schemaVersion: 1, release: DL_RELEASE, updatedAt: new Date().toISOString() });
+}
+
+function officialTarget(nameIn) {
+  const item = OFFICIAL_WEIGHTS.find((x) => x.name === String(nameIn || ""));
+  if (!item) throw new Error(`不在官方清单里：${nameIn || "(空)"}。v1 只允许 ultralytics/assets 的 YOLO11 / YOLO26 检测与分割权重`);
+  return { ...item, path: abs(`models/pretrained/${item.family}/${item.name}`) };
+}
+
+/** 模型页的下载面板：清单 + 已下载 + 正在下 + 许可证/来源，一次拿全。 */
+async function modelDownloadState() {
+  const ledger = readDownloadLedger();
+  const items = OFFICIAL_WEIGHTS.map((x) => {
+    const rec = ledger.files[x.name] || null;
+    const target = abs(`models/pretrained/${x.family}/${x.name}`);
+    let bytes = 0;
+    try {
+      bytes = fs.statSync(target).size;
+    } catch {
+      /* 还没下 */
+    }
+    return {
+      ...x,
+      path: target,
+      exists: !!bytes,
+      bytes,
+      sha256: rec && rec.sha256 ? String(rec.sha256) : "",
+      downloadedAt: rec && rec.downloadedAt ? String(rec.downloadedAt) : "",
+    };
+  });
+  const { effective } = await effectiveConfig();
+  const running = active && active.kind === "download" ? snapshot(active) : null;
+  return {
+    ok: true,
+    release: DL_RELEASE,
+    license: DL_LICENSE,
+    hosts: DL_HOSTS,
+    maxBytes: DL_MAX_BYTES,
+    items,
+    installed: items.filter((x) => x.exists).length,
+    proxy: effective.env && effective.env.proxy_enable ? String(effective.env.proxy || "") : "",
+    active: running,
+    readOnly: !canWrite(),
+  };
+}
+
+/**
+ * 起一次下载。**不自动设为训练权重、不自动装包**：下完只落盘 + 记账 + 探针读事实，
+ * 用不用由用户回去点。已存在同路径时直接返回 exists，不重下。
+ */
+async function modelDownload(req) {
+  needWorkspace();
+  if (active) throw new Error(`已经有一个任务在跑（${active.label}）：先停掉它`);
+  if (!canWrite()) throw new Error("当前是只读模式：能看模型清单，不能下载");
+  const o = isObj(req) ? req : {};
+  const item = officialTarget(o.name);
+  if (fs.existsSync(item.path) && fs.statSync(item.path).size > 0) {
+    return { ok: true, exists: true, path: item.path, bytes: fs.statSync(item.path).size, name: item.name };
+  }
+  const py = await detectPython();
+  if (!py.ok) throw new Error(`找不到可用的 python：${py.error}`);
+  const runner = path.join(PKG_DIR, "runner", "download_job.py").replace(/\\/g, "/");
+  if (!fs.existsSync(runner)) throw new Error("插件包里没有 runner/download_job.py：重装一次插件");
+
+  // 磁盘守卫：官方权重最大 ~140MB，留 512MB 余量给 .part 与解压/缓存
+  let free = 0;
+  try {
+    const st = fs.statfsSync(root);
+    free = Number(st.bavail) * Number(st.bsize) || 0;
+  } catch {
+    /* 某些文件系统不支持 statfs；不拦 */
+  }
+  if (free && free < 512 * 1024 * 1024) {
+    throw new Error(`工作区可用空间只剩 ${fmtBytes(free)}，不够下载（至少留 512 MB）。先到资产页清理，再回来`);
+  }
+
+  const { effective } = await effectiveConfig();
+  const proxy = effective.env && effective.env.proxy_enable ? String(effective.env.proxy || "") : "";
+  const ledger = readDownloadLedger();
+  const rec = ledger.files[item.name] || null;
+  const job = newJob("download", `下载 ${item.name}`);
+  job.download = { name: item.name, target: item.path, url: item.url };
+  jobs.set(job.id, job);
+  active = job;
+
+  const args = [runner, "--url", item.url, "--out", item.path, "--max-bytes", String(DL_MAX_BYTES), "--allow-hosts", DL_HOSTS.join(",")];
+  if (proxy) args.push("--proxy", proxy);
+  if (rec && Number(rec.bytes) > 0) args.push("--expect-bytes", String(Number(rec.bytes)));
+  if (rec && rec.sha256) args.push("--expect-sha256", String(rec.sha256));
+  pushLine(job, `[工作台] 来源: ${item.url}（release ${DL_RELEASE}）`, "sys");
+  pushLine(job, `[工作台] 目标: ${item.path}`, "sys");
+  pushLine(job, proxy ? `[工作台] 代理: 已按工作区配置启用` : "[工作台] 代理: 未启用（直连）", "sys");
+  if (rec && rec.sha256) pushLine(job, `[工作台] 已有下载记录，会核对大小与 SHA256`, "sys");
+
+  try {
+    const child = ctx.process.spawn({
+      cmd: py.path,
+      args,
+      cwd: root,
+      env: { ...PY_ENV, OPENBLAS_NUM_THREADS: "1", PYTHONUNBUFFERED: "1" },
+      onStdout: (l) => onDownloadLine(job, l),
+      onStderr: (l) => pushLine(job, l, "err"),
+      onExit: (code) => {
+        finishJob(job, code);
+        if (!job.stopped && code === 0 && job.downloadResult && job.downloadResult.ok) {
+          const next = readDownloadLedger();
+          next.files[item.name] = {
+            name: item.name,
+            url: item.url,
+            release: DL_RELEASE,
+            license: DL_LICENSE,
+            bytes: Number(job.downloadResult.bytes) || 0,
+            sha256: String(job.downloadResult.sha256 || ""),
+            downloadedAt: new Date().toISOString(),
+            path: item.path,
+          };
+          writeDownloadLedger(next);
+          try {
+            ctx.panels.emit(PANEL, "assets", { reason: "download", name: item.name });
+          } catch {
+            /* 面板没开 */
+          }
+          // 探针读 task/nc：读不出就只记文件，不猜事实
+          Promise.resolve()
+            .then(() => modelLibrary(true))
+            .catch(() => {});
+        }
+        if (active === job) active = null;
+      },
+      onError: (e) => {
+        pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
+        finishJob(job, -1);
+      },
+    });
+    job.pid = child.pid || 0;
+    job.child = child;
+  } catch (e) {
+    pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
+    finishJob(job, -1);
+    throw e;
+  }
+  return snapshot(job);
+}
+
+/** 下载器的输出是 JSON 行；转成人能读的那一句再进日志，同时更新进度。 */
+function onDownloadLine(job, line) {
+  const text = String(line || "").trim();
+  if (!text) return;
+  if (!text.startsWith("{")) {
+    pushLine(job, text, "out");
+    return;
+  }
+  let m = null;
+  try {
+    m = JSON.parse(text);
+  } catch {
+    pushLine(job, text, "out");
+    return;
+  }
+  const p = job.progress;
+  if (m.type === "head") {
+    job.download.total = Number(m.total) || 0;
+    p.phase = "download";
+    p.detail = `文件大小 ${fmtBytes(m.total)}`;
+    pushLine(job, `[下载] 文件大小 ${fmtBytes(m.total)}`, "sys");
+  } else if (m.type === "progress") {
+    job.download.done = Number(m.done) || 0;
+    job.download.total = Number(m.total) || job.download.total || 0;
+    p.phase = "download";
+    p.percent = Number(m.pct) || 0;
+    p.detail = `${fmtBytes(job.download.done)} / ${job.download.total ? fmtBytes(job.download.total) : "未知"}` + (m.speed ? ` · ${fmtBytes(m.speed)}/s` : "");
+  } else if (m.type === "retry") {
+    pushLine(job, `[下载] 第 ${m.attempt} 次失败，正在重试：${m.error || ""}`, "err");
+    p.detail = "网络不稳，正在重试（.part 保留）";
+  } else if (m.type === "done") {
+    job.downloadResult = m;
+    p.phase = "done";
+    p.percent = 100;
+    p.detail = `${fmtBytes(m.bytes)} · SHA256 ${String(m.sha256 || "").slice(0, 12)}…`;
+    pushLine(job, `[下载] 完成：${m.path}`, "sys");
+    pushLine(job, `[下载] SHA256 ${m.sha256}`, "sys");
+  } else if (m.type === "cancelled") {
+    pushLine(job, `[下载] ${m.message || "已取消"}`, "sys");
+  } else if (m.type === "error") {
+    job.downloadError = String(m.message || "下载失败");
+    p.phase = "error";
+    p.detail = job.downloadError;
+    pushLine(job, `[错误] ${job.downloadError}`, "err");
+  } else {
+    pushLine(job, text, "out");
+  }
 }
 
 /* ============================ 实验管理（P175-W7，详设 §5.7 / §4.3） ============================ */

@@ -403,3 +403,38 @@ describe("P177-B · 资产页清理与回收站", () => {
     expect(html).not.toMatch(/assetext[^"]*"删除/);
   });
 });
+
+/* ============================================================================
+   P177-C · 官方权重下载弹窗
+   ----------------------------------------------------------------------------
+   联网是这一版唯一新增的权限面。界面上必须同时说清三件事：来源（官方 release）、
+   许可证（AGPL-3.0，要勾）、以及"下载不等于设成训练权重"。
+   ============================================================================ */
+
+describe("P177-C · 官方权重下载", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("模型库有下载入口，弹窗里有许可证勾选与两代模型切换", () => {
+    expect(html).toContain('id="mldlopen"');
+    expect(html).toContain('id="mldlg"');
+    expect(html).toContain('id="mllicense"');
+    expect(html).toContain('data-mlfam="yolo11"');
+    expect(html).toContain('data-mlfam="yolo26"');
+    expect(html).toContain("AGPL-3.0");
+  });
+
+  it("走插件方法而不是自己发请求；只读模式禁下载", () => {
+    expect(html).toContain('uartix.call("modelDownloadState"');
+    expect(html).toContain('uartix.call("modelDownload"');
+    expect(html.includes('fetch("https://github.com')).toBe(false);
+    expect(html).toContain("只读模式：能看清单，不能下载");
+  });
+
+  it("进度与取消：job 事件更新弹窗，停止沿用任务条", () => {
+    expect(html).toContain('j.kind === "download"');
+    expect(html).toContain('id="mlprog"');
+    expect(html).toContain("function renderMlProgress(");
+    expect(html).toContain("function closeModelDownload(");
+  });
+});

@@ -1463,6 +1463,46 @@
         flex-wrap: wrap;
         margin-top: 10px;
       }
+      /* P177-C：官方权重清单（弹窗里一行一枚） */
+      .mlgrid {
+        margin-top: 8px;
+      }
+      .mlrow {
+        display: grid;
+        grid-template-columns: minmax(120px, 1fr) 52px minmax(110px, 1.1fr) 118px;
+        gap: 8px;
+        align-items: center;
+        padding: 6px 0;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+      }
+      .mlrow:first-child {
+        border-top: 0;
+      }
+      .mlrow .nm {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .mlrow .sz {
+        color: var(--dim);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .mlrow .btn {
+        padding: 3px 8px;
+        font-size: 11px;
+      }
+      @media (max-width: 760px) {
+        .mlrow {
+          grid-template-columns: minmax(100px, 1fr) 46px 100px;
+        }
+        .mlrow .sz {
+          display: none;
+        }
+      }
       .assetbar input[type="search"] {
         flex: 1 1 220px;
         max-width: 340px;
@@ -1899,6 +1939,7 @@
           <h2>
             模型库
             <span class="tag" id="mlibtag">按文件名推断</span>
+            <button class="btn" id="mldlopen" title="从 ultralytics/assets 官方 release 下载（AGPL-3.0）">下载官方权重</button>
             <button class="btn" id="mlib" title="逐枚读权重内嵌的 task / nc / 训练它的包版本（要 import torch，约 10 秒）">读一遍权重</button>
           </h2>
           <div id="mliblist"></div>
@@ -2371,6 +2412,31 @@
           <p class="note">删除一律先进回收站；永久删除只发生在「清空回收站」。原始 <code>annotations/</code>、用户脚本与外部部署目录永远不在清理范围。<button class="linkbtn" data-help="assets">为什么?</button></p>
         </div>
       </section>
+      <div id="mldlg" class="assetdlg" hidden role="dialog" aria-modal="true" aria-label="官方权重下载">
+        <div class="drawer-h">
+          <span class="drawer-t">官方权重 <span class="tag" id="mlrel">v8.4.0</span></span>
+          <button class="btn" id="mldlgclose" title="关闭（Esc）">关闭</button>
+        </div>
+        <div class="drawer-b">
+          <p class="note" style="margin:0 0 8px">只从 <code>ultralytics/assets</code> 官方 release 下载，只列检测与分割（本插件真能训/能部署的两类）。权重按 <b>AGPL-3.0</b> 提供，不打包进插件。</p>
+          <div class="row" style="flex-wrap:wrap;align-items:center">
+            <label class="p bool" style="font-size:11px"><input type="checkbox" id="mllicense" /> 我已了解 AGPL-3.0，仅本地使用 / 自行确认合规</label>
+            <span class="spacer"></span>
+            <span class="note" id="mlnote" style="margin:0"></span>
+          </div>
+          <div class="segmented" id="mlseg" role="tablist" aria-label="模型代">
+            <button data-mlfam="yolo11" class="on" role="tab" aria-selected="true">YOLO11</button>
+            <button data-mlfam="yolo26" role="tab" aria-selected="false">YOLO26</button>
+          </div>
+          <div id="mllist"></div>
+          <div id="mlprog" hidden>
+            <div class="bar" style="margin-top:10px"><i id="mlbar"></i></div>
+            <p class="note" id="mlprogtext" style="margin:6px 0 0"></p>
+          </div>
+        </div>
+      </div>
+      <div id="mldlgmask" class="drawer-mask" hidden></div>
+
       <div id="assetdlg" class="assetdlg" hidden role="dialog" aria-modal="true" aria-label="清理预览">
         <div class="drawer-h">
           <span class="drawer-t" id="assetdlgt">清理预览</span>
@@ -3463,7 +3529,9 @@
       if ($("assetdlgclose")) $("assetdlgclose").onclick = closeAssetDialog;
       if ($("assetdlgmask")) $("assetdlgmask").onclick = closeAssetDialog;
       document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape" && $("assetdlg") && !$("assetdlg").hidden) closeAssetDialog();
+        if (e.key !== "Escape") return;
+        if ($("assetdlg") && !$("assetdlg").hidden) closeAssetDialog();
+        else if ($("mldlg") && !$("mldlg").hidden) closeModelDownload();
       });
 
       function renderRuns() {
@@ -4106,6 +4174,100 @@
             sysLog("读权重失败：" + (e && e.message ? e.message : e));
           });
       }
+
+      /* ---------------- 官方权重下载（P177-C）---------------- */
+      var mldl = null;
+      var mlfam = "yolo11";
+
+      function mlTaskLabel(t) {
+        return t === "segment" ? "分割" : t === "detect" ? "检测" : t || "—";
+      }
+
+      function renderMlList() {
+        var host = $("mllist");
+        if (!host) return;
+        if (!mldl) { host.innerHTML = '<p class="note">还没读到官方清单。</p>'; return; }
+        var ro = !!mldl.readOnly;
+        var items = (mldl.items || []).filter(function (x) { return x.family === mlfam; });
+        host.innerHTML = '<div class="mlgrid">' + items.map(function (x) {
+          var btn = x.exists
+            ? '<button class="btn" disabled title="' + esc(x.path) + '">已有 · ' + esc(fmtBytes(x.bytes)) + "</button>"
+            : '<button class="btn" data-mlname="' + esc(x.name) + '"' + (ro ? " disabled title=\"只读模式：能看清单，不能下载\"" : "") + ">下载</button>";
+          return '<div class="mlrow"><span class="nm" title="' + esc(x.path) + '">' + esc(x.name) + "</span>" +
+            '<span class="tag">' + esc(mlTaskLabel(x.task)) + "</span>" +
+            '<span class="sz">' + (x.exists ? "已在 models/pretrained" : x.sha256 ? "校验 " + esc(x.sha256.slice(0, 10)) + "…" : "官方发布") + "</span>" +
+            btn + "</div>";
+        }).join("") + "</div>";
+        var bs = host.querySelectorAll("[data-mlname]");
+        for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { mlDownload(this.getAttribute("data-mlname")); };
+      }
+
+      function renderMlProgress(j) {
+        var box = $("mlprog");
+        if (!box) return;
+        if (!j) { box.hidden = true; return; }
+        box.hidden = false;
+        var p = j.progress || {};
+        var pct = Math.max(0, Math.min(100, Number(p.percent) || 0));
+        $("mlbar").style.width = (j.state === "running" ? Math.max(2, pct) : pct) + "%";
+        var head = j.state === "running" ? "下载中" : j.state === "succeeded" ? "完成" : "失败";
+        $("mlprogtext").textContent = head + " · " + (p.detail || j.label || "");
+      }
+
+      async function openModelDownload() {
+        $("mldlg").hidden = false;
+        $("mldlgmask").hidden = false;
+        $("mllist").innerHTML = '<p class="note">读官方清单…</p>';
+        try {
+          mldl = await uartix.call("modelDownloadState");
+          $("mlrel").textContent = mldl.release + " · " + mldl.license;
+          $("mlnote").textContent = "已下载 " + mldl.installed + " / " + mldl.items.length + (mldl.proxy ? " · 走工作区代理" : " · 直连");
+          renderMlList();
+          renderMlProgress(mldl.active);
+        } catch (e) {
+          $("mllist").innerHTML = '<p class="note">读不到官方清单：' + esc((e && e.message) || e) + "</p>";
+        }
+      }
+
+      function closeModelDownload() {
+        $("mldlg").hidden = true;
+        $("mldlgmask").hidden = true;
+      }
+
+      async function mlDownload(name) {
+        if (!$("mllicense").checked) { sysLog("下载前先勾选许可证确认（AGPL-3.0）"); return; }
+        try {
+          var r = await uartix.call("modelDownload", { name: name });
+          if (r && r.exists) sysLog(name + " 已经在本地：" + r.path);
+          else {
+            sysLog("开始下载 " + name + "（进度在弹窗里）");
+            renderMlProgress(r);
+          }
+          openModelDownload();
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+        }
+      }
+
+      if ($("mldlopen")) $("mldlopen").onclick = openModelDownload;
+      if ($("mldlgclose")) $("mldlgclose").onclick = closeModelDownload;
+      if ($("mldlgmask")) $("mldlgmask").onclick = closeModelDownload;
+      (function () {
+        var seg = $("mlseg");
+        if (!seg) return;
+        var bs = seg.querySelectorAll("button");
+        for (var i = 0; i < bs.length; i++) {
+          bs[i].onclick = function () {
+            mlfam = this.getAttribute("data-mlfam");
+            for (var k = 0; k < bs.length; k++) {
+              var on = bs[k].getAttribute("data-mlfam") === mlfam;
+              bs[k].className = on ? "on" : "";
+              bs[k].setAttribute("aria-selected", on ? "true" : "false");
+            }
+            renderMlList();
+          };
+        }
+      })();
 
       /* ---------------- 标注体检与增强预览（P175-W3）---------------- */
       var auditResult = null;
@@ -5516,6 +5678,13 @@
       });
       uartix.on("job", function (j) {
         if (!j) return;
+        if (j.kind === "download") {
+          if ($("mldlg") && !$("mldlg").hidden) renderMlProgress(j);
+          if (j.state !== "running") {
+            loadModels(false);
+            openModelDownload();
+          }
+        }
         if (j.kind === "deploy") {
           if (dep.last && dep.last.step) dep.last.state = j.state === "running" ? "running" : j.state;
           if (j.state === "succeeded" && dep.last) {
