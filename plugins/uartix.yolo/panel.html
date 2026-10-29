@@ -762,6 +762,12 @@
       input[type="checkbox"] {
         width: auto;
         flex: 0 0 auto;
+        accent-color: var(--accent);
+      }
+      input::placeholder,
+      textarea::placeholder {
+        color: var(--dim);
+        opacity: 1;
       }
       textarea {
         min-height: 54px;
@@ -972,31 +978,40 @@
         font-size: 11px;
       }
       /* ---- 参数面（由插件把 ultralytics 的参数表喂进来，这里只管摆）---- */
-      /* 参数格比数据页密：一行八格会把"包默认 0.01"挤到标签上去，170px 是实测不撞的宽度 */
-      #c_adv .grid {
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      }
       label.p {
-        gap: 2px;
+        gap: 4px;
+        min-width: 0;
       }
+      /* 标签行：名字 + ? 紧挨着；默认值不再常驻（进 tooltip 与 placeholder），
+         否则长标签会被右上角那枚“包默认 …”挤成两行。 */
       label.p .cap {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         gap: 6px;
+        min-height: 16px;
+        min-width: 0;
       }
-      label.p .cap .dft {
-        margin-left: auto;
-        color: var(--faint);
-        font-size: 10px;
-        font-family: "Cascadia Mono", Consolas, monospace;
-        white-space: nowrap;
+      label.p .cap .lab {
+        min-width: 0;
+        overflow-wrap: anywhere;
+        line-height: 1.35;
       }
       label.p.warn .cap {
         color: var(--warn);
       }
       label.p.warn {
-        border-left: 2px solid var(--warn);
-        padding-left: 6px;
+        position: relative;
+      }
+      /* 强调条画在格子左侧的间隙里：不再用 border+padding 把控件整体推右 8px */
+      label.p.warn::before {
+        content: "";
+        position: absolute;
+        left: -10px;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--warn);
       }
       .pwarn {
         display: block;
@@ -1007,24 +1022,33 @@
       }
       .qh {
         flex: 0 0 auto;
-        width: 14px;
-        height: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
         border-radius: 50%;
-        border: 1px solid var(--line);
-        background: var(--inset);
+        border: 1px solid transparent;
+        background: transparent;
         color: var(--dim);
         font: inherit;
-        font-size: 9px;
+        font-size: 11px;
+        font-weight: 600;
         line-height: 1;
         padding: 0;
         cursor: help;
-        align-self: center;
+        transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
       }
       .qh:hover,
       .qh:focus-visible {
-        color: var(--fg);
+        color: var(--accent);
         border-color: var(--accent);
+        background: var(--inset);
         outline: none;
+      }
+      .qh:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
       }
       /* ---- 参数说明浮层（P176-B2） ---- */
       .tip {
@@ -1112,11 +1136,92 @@
         border-color: var(--accent);
         color: var(--fg);
       }
+      /* 结果页/导出页那几个内联勾选框仍是横排（旧行为，别被参数字段带偏） */
       label.p.bool {
         flex-direction: row;
         align-items: center;
         gap: 6px;
         min-height: 26px;
+      }
+      /* 参数字段里的 bool 是“标签行 + 开关行”：和文本框同高，网格基线不再被 26px 的勾选框拉歪 */
+      label.p.bool.field {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+        min-height: 0;
+      }
+      .boolrow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        height: 32px;
+        padding: 0 9px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background: var(--inset);
+        cursor: pointer;
+      }
+      .p .boolrow .sw {
+        order: 2;
+        appearance: none;
+        -webkit-appearance: none;
+        flex: 0 0 auto;
+        width: 30px;
+        height: 18px;
+        padding: 0;
+        margin: 0;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background: var(--line);
+        position: relative;
+        cursor: pointer;
+        transition: background 0.16s ease;
+      }
+      .p .boolrow .sw::after {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--panel);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+        transition: transform 0.16s ease;
+      }
+      .p .boolrow .sw:checked {
+        background: var(--accent);
+      }
+      .p .boolrow .sw:checked::after {
+        transform: translateX(12px);
+      }
+      .p .boolrow .sw:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .boolrow .swtxt {
+        order: 1;
+        font-size: 11px;
+        color: var(--dim);
+        font-variant-numeric: tabular-nums;
+      }
+      .p .boolrow .swtxt::before {
+        content: "关";
+      }
+      .p .boolrow .sw:checked + .swtxt::before {
+        content: "开";
+      }
+      .p .boolrow .sw:checked ~ .swtxt {
+        color: var(--accent);
+      }
+      .p input:not([type="checkbox"]),
+      .p select {
+        height: 32px;
+      }
+      label.p,
+      .advgrp {
+        scroll-margin-top: 72px;
       }
       /* ---- 训练页：分层参数面（练什么 → 练多久 → 高级折叠 → 常驻动作条）---- */
       .tsec {
@@ -1166,11 +1271,6 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
-      /* 核心格里输入框的 placeholder 已经显示了默认值，标签右边那行“包默认 …”是重复的，
-         窄栏里还会把标签挤成两行 —— 只在高级参数里保留它 */
-      .coregrid label.p .cap .dft {
-        display: none;
-      }
       .coregrid input {
         height: 32px;
         font-size: 13.5px;
@@ -1187,10 +1287,20 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 10px 2px;
+        padding: 8px;
+        margin: 0 -8px;
+        border-radius: var(--r-sm);
         cursor: pointer;
         list-style: none;
         user-select: none;
+        transition: background 0.12s ease;
+      }
+      .advgrp > summary:hover {
+        background: var(--inset);
+      }
+      .advgrp > summary:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
       }
       .advgrp > summary::-webkit-details-marker {
         display: none;
@@ -1215,21 +1325,32 @@
       .advgrp[open] > summary .gt {
         color: var(--fg);
       }
-      .advgrp > summary .gc {
+      .advgrp > summary .gc,
+      .advgrp > summary .gm {
+        padding: 1px 7px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--inset);
         font-size: 10.5px;
-        color: var(--faint);
-        font-family: "Cascadia Mono", Consolas, monospace;
+        line-height: 1.5;
+      }
+      .advgrp > summary .gc {
+        color: var(--dim);
+        font-family: var(--mono);
       }
       .advgrp > summary .gm {
         margin-left: auto;
-        font-size: 10.5px;
         color: var(--warn);
       }
       .advgrp > summary .gm.zero {
-        color: var(--faint);
+        color: var(--dim);
       }
       .advgrp > .grid {
-        padding: 0 2px 12px 22px;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 10px 16px;
+        align-items: start;
+        padding: 2px 2px 14px 22px;
       }
       .coregrid label.p .cap,
       #c_primary label.p .cap {
@@ -1258,15 +1379,20 @@
       select {
         font: inherit;
         font-size: 12px;
-        padding: 4px 6px;
+        padding: 4px 26px 4px 6px;
         border-radius: 5px;
         border: 1px solid var(--line);
-        background: var(--inset);
+        background-color: var(--inset);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b929b' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 9px center;
         color: var(--fg);
         width: 100%;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        appearance: none;
+        -webkit-appearance: none;
       }
       .p input[type="checkbox"] {
         width: auto;
@@ -1285,6 +1411,68 @@
         border: 1px solid var(--line);
         border-radius: 999px;
         color: var(--dim);
+      }
+      /* P177-A 资产页：存储条 + 只读台账 */
+      .storagebar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        gap: 8px;
+        margin: 10px 0 12px;
+      }
+      .storagebar .sbox {
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--inset);
+      }
+      .storagebar .sbox b {
+        display: block;
+        font-size: 15px;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .storagebar .sbox span {
+        font-size: 10px;
+        color: var(--dim);
+      }
+      .assetbody {
+        margin-top: 10px;
+      }
+      .assetbody table td.name {
+        max-width: 420px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .assetbody .sub {
+        color: var(--dim);
+        font-size: 10.5px;
+      }
+      .assetbody .mono {
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--dim);
+      }
+      .assetbody .empty {
+        padding: 16px 2px;
+      }
+      /* 760 宽时表格不横滚：先收掉次要列，名称/大小/状态/操作永远留着 */
+      @media (max-width: 900px) {
+        .assetbody table.asset-datasets th:nth-child(2), .assetbody table.asset-datasets td:nth-child(2),
+        .assetbody table.asset-datasets th:nth-child(4), .assetbody table.asset-datasets td:nth-child(4),
+        .assetbody table.asset-datasets th:nth-child(7), .assetbody table.asset-datasets td:nth-child(7),
+        .assetbody table.asset-runs th:nth-child(5), .assetbody table.asset-runs td:nth-child(5),
+        .assetbody table.asset-runs th:nth-child(6), .assetbody table.asset-runs td:nth-child(6),
+        .assetbody table.asset-models th:nth-child(2), .assetbody table.asset-models td:nth-child(2),
+        .assetbody table.asset-models th:nth-child(4), .assetbody table.asset-models td:nth-child(4),
+        .assetbody table.asset-models th:nth-child(7), .assetbody table.asset-models td:nth-child(7),
+        .assetbody table.asset-deployments th:nth-child(2), .assetbody table.asset-deployments td:nth-child(2),
+        .assetbody table.asset-deployments th:nth-child(4), .assetbody table.asset-deployments td:nth-child(4),
+        .assetbody table.asset-deployments th:nth-child(7), .assetbody table.asset-deployments td:nth-child(7),
+        .assetbody table.asset-trash th:nth-child(3), .assetbody table.asset-trash td:nth-child(3) {
+          display: none;
+        }
+        .assetbody table td.name { max-width: 220px; }
       }
       #batchimg img {
         display: block;
@@ -1496,6 +1684,7 @@
         <button data-tab="train" title="训练"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.2 2.8 11 7l-6.8 4.2z"/></svg><span class="tx">训练</span></button>
         <button data-tab="result" title="结果"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 8.6h2.4l1.7-4.4 2.3 6.8 1.5-2.4h2.9"/></svg><span class="tx">结果</span></button>
         <button data-tab="runs" title="实验"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 4h8.8M2.6 7h8.8M2.6 10h5.6"/></svg><span class="tx">实验</span></button>
+        <button data-tab="assets" title="资产"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.2 4.6h9.6v6.8H2.2z"/><path d="M2.2 4.6 7 2l4.8 2.6M5.4 7.2h3.2"/></svg><span class="tx">资产</span></button>
         <button data-tab="deploy" title="部署"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1.9 11.2 4.6v5L7 12.1 2.8 9.6v-5z"/><path d="M7 7.3v4.8M2.8 4.6 7 7.3l4.2-2.7"/></svg><span class="tx">部署</span></button>
       </nav>
 
@@ -1561,6 +1750,7 @@
             <label class="wide">
               素材文件夹（留空 = 用 annotations/ 投料口）
               <textarea id="sources" spellcheck="false" placeholder="D:/OneDrive/Desktop/X-AnyLabeling/images/123lmages"></textarea>
+              <div class="snap" id="recent_sources"></div>
             </label>
             <label class="wide">
               数据集输出目录
@@ -1959,6 +2149,29 @@
         </div>
       </section>
 
+      <!-- ============ 资产（P177-A：只读骨架） ============ -->
+      <section id="tab-assets" hidden>
+        <div class="card">
+          <div class="sec-h">
+            <span class="sec-t">资产</span>
+            <span class="tag" id="assetstag">—</span>
+            <span class="sec-m">
+              <button class="btn" id="assetsrefresh">重新扫描</button>
+            </span>
+          </div>
+          <div class="storagebar" id="assetstorage"></div>
+          <div class="segmented" id="assetseg" role="tablist" aria-label="资产视图">
+            <button data-asset="datasets" class="on" role="tab" aria-selected="true">数据集</button>
+            <button data-asset="runs" role="tab" aria-selected="false">训练产物</button>
+            <button data-asset="models" role="tab" aria-selected="false">模型</button>
+            <button data-asset="deployments" role="tab" aria-selected="false">部署包</button>
+            <button data-asset="trash" role="tab" aria-selected="false">回收站</button>
+          </div>
+          <div id="assetbody" class="assetbody"><p class="note">打开这一页时扫描资产。</p></div>
+          <p class="note">这一版是只读台账：清理 / 回收站恢复 / 官方权重下载 / 部署包登记在后续批次开放。<button class="linkbtn" data-help="assets">为什么?</button></p>
+        </div>
+      </section>
+
       <!-- 帮助已移到右上角抽屉（P176-B1） -->
       </main>
     </div>
@@ -2029,6 +2242,10 @@
         <div class="card" id="help-perms">
           <h2>权限与批准</h2>
           <p class="note">写权限只有那七枚目录，越界会被内核直接拒绝。版本号变化不影响已批准的能力面；只有权限面变了才会重新弹批准卡。安装、启用、发布这三件事始终由你点。</p>
+        </div>
+        <div class="card" id="help-assets">
+          <h2>资产与清理</h2>
+          <p class="note">资产页是只读台账：数据集、训练产物、模型、部署包、回收站与磁盘占用。它只扫描文件系统，不搬、不删、不改你的文件；删除和恢复会在后续批次里以“引用检查 → 回收站 → 可恢复”的方式出现。</p>
         </div>
         <div id="helpnone" class="note" hidden>没有匹配的帮助。</div>
       </div>
@@ -2280,8 +2497,10 @@
 
       function fmtBytes(n) {
         if (!n) return "0 B";
-        if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
-        if (n > 1024) return (n / 1024).toFixed(0) + " KB";
+        if (n >= 1024 * 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024 / 1024).toFixed(2) + " TB";
+        if (n >= 1024 * 1024 * 1024) return (n / 1024 / 1024 / 1024).toFixed(1) + " GB";
+        if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+        if (n >= 1024) return (n / 1024).toFixed(0) + " KB";
         return n + " B";
       }
 
@@ -2613,6 +2832,144 @@
           .join("");
       }
 
+      /* ---------------- 资产（P177-A：只读台账） ---------------- */
+      var assets = null;
+      var assetView = "datasets";
+      var ASSET_VIEWS = ["datasets", "runs", "models", "deployments", "trash"];
+
+      function assetTag(status, label) {
+        var cls = status === "succeeded" || status === "ready" ? "ok" : status === "failed" || status === "interrupted" ? "bad" : status === "running" ? "warn" : "warn";
+        return '<span class="tag ' + cls + '">' + esc(label || status || "—") + "</span>";
+      }
+
+      function assetShort(pathIn) {
+        var s = String(pathIn || "").replace(/\\/g, "/");
+        var parts = s.split("/").filter(Boolean);
+        return parts.slice(-2).join("/") || s;
+      }
+
+      function renderAssetStorage(a) {
+        var s = (a && a.storage) || {};
+        var cells = [
+          ["数据集", s.datasets],
+          ["训练产物", s.runs],
+          ["模型", s.models],
+          ["部署包", s.deployments],
+          ["回收站", s.trash],
+        ];
+        var html = cells
+          .map(function (x) {
+            return '<div class="sbox"><b>' + esc(fmtBytes(Number(x[1]) || 0)) + "</b><span>" + esc(x[0]) + "</span></div>";
+          })
+          .join("");
+        if (s.freeBytes) html += '<div class="sbox"><b>' + esc(fmtBytes(s.freeBytes)) + "</b><span>工作区可用</span></div>";
+        $("assetstorage").innerHTML = html;
+      }
+
+      function renderAssets() {
+        var a = assets || {};
+        var body = $("assetbody");
+        if (!body) return;
+        $("assetstag").textContent = a.readOnly ? "只读（当前进程写不了）" : "只读台账";
+        $("assetstag").className = "tag" + (a.readOnly ? " warn" : "");
+        renderAssetStorage(a);
+        var rows = [];
+        var head = "";
+        if (assetView === "datasets") {
+          head = "<tr><th>数据集</th><th>ID</th><th>训练 / 验证</th><th>类别</th><th>大小</th><th>引用 run</th><th>额外目录</th><th>状态</th></tr>";
+          rows = Object.values(a.datasets || {}).map(function (d) {
+            var extras = (d.extras || []).map(function (x) { return esc(x.name) + " " + esc(fmtBytes(x.bytes)); }).join("<br>");
+            return "<tr><td class=\"name\" title=\"" + esc(d.dir) + "\">" + esc(d.name) + "</td>" +
+              "<td class=\"mono\">" + esc(d.id) + "</td>" +
+              "<td class=\"num\">" + esc(d.splits ? d.splits.train : 0) + " / " + esc(d.splits ? d.splits.val : 0) + "</td>" +
+              "<td class=\"num\">" + esc((d.classes || []).join(" / ") || "—") + "</td>" +
+              "<td class=\"num\">" + esc(fmtBytes(d.bytes)) + "</td>" +
+              "<td class=\"num\" title=\"" + esc((d.runIds || []).join("\\n")) + "\">" + esc((d.runIds || []).length) + "</td>" +
+              "<td class=\"sub\">" + (extras || "—") + "</td>" +
+              "<td>" + assetTag(d.status === "ready" ? "succeeded" : "incomplete", d.status === "ready" ? "就绪" : "不完整") + "</td></tr>";
+          });
+          if (!rows.length) body.innerHTML = '<p class="note empty">还没有构建过数据集（datasets/*/data.yaml）。</p>';
+        } else if (assetView === "runs") {
+          head = "<tr><th>run</th><th>状态</th><th>轮次</th><th>大小</th><th>数据集</th><th>best</th><th>部署包</th></tr>";
+          rows = Object.values(a.runs || {}).map(function (r) {
+            return "<tr><td class=\"name\" title=\"" + esc(r.dir) + "\">" + esc(r.name) + "</td>" +
+              "<td>" + assetTag(r.status, r.statusLabel) + (r.statusWhy ? '<div class="sub" title="' + esc(r.statusWhy) + '">' + esc(r.statusWhy.slice(0, 46)) + (r.statusWhy.length > 46 ? "…" : "") + "</div>" : "") + "</td>" +
+              "<td class=\"num\">" + esc(r.epochs) + (r.argsEpochs ? " / " + esc(r.argsEpochs) : "") + "</td>" +
+              "<td class=\"num\">" + esc(fmtBytes(r.bytes)) + "</td>" +
+              "<td>" + esc(r.datasetName || "—") + "</td>" +
+              "<td class=\"mono\" title=\"" + esc(r.best || "") + "\">" + esc(r.best ? assetShort(r.best) : "—") + "</td>" +
+              "<td class=\"num\">" + esc((r.deploymentIds || []).length) + "</td></tr>";
+          });
+          if (!rows.length) body.innerHTML = '<p class="note empty">runs/ 里还没有带 results.csv 的训练记录。</p>';
+        } else if (assetView === "models") {
+          head = "<tr><th>权重</th><th>SHA256</th><th>任务 / 类别</th><th>来源</th><th>引用</th><th>大小</th><th>副本</th></tr>";
+          rows = Object.values(a.models || {}).map(function (m) {
+            var p0 = (m.paths || [])[0] || "";
+            var refs = ((m.refs && m.refs.runs) || []).length + " run / " + ((m.refs && m.refs.deployments) || []).length + " 部署";
+            return "<tr><td class=\"name\" title=\"" + esc((m.paths || []).join("\\n")) + "\">" + esc(assetShort(p0)) + "</td>" +
+              "<td class=\"mono\" title=\"" + esc(m.sha256 || "") + "\">" + esc((m.sha256 || "").slice(0, 12) || "—") + "</td>" +
+              "<td>" + esc(m.task || "—") + " / " + esc(m.nc == null ? "—" : m.nc) + "</td>" +
+              "<td>" + esc(m.origin || "—") + (m.sourceRun ? '<div class="sub">' + esc(m.sourceRun) + "</div>" : "") + "</td>" +
+              "<td class=\"num\">" + esc(refs) + "</td>" +
+              "<td class=\"num\">" + esc(fmtBytes(m.bytes)) + "</td>" +
+              "<td class=\"num\">" + esc((m.paths || []).length) + "</td></tr>";
+          });
+          if (!rows.length) body.innerHTML = '<p class="note empty">models/ 里还没有 .pt。</p>';
+        } else if (assetView === "deployments") {
+          head = "<tr><th>部署包</th><th>目标</th><th>状态</th><th>模型</th><th>产物</th><th>大小</th><th>时间</th></tr>";
+          rows = Object.values(a.deployments || {}).map(function (d) {
+            return "<tr><td class=\"name\" title=\"" + esc(d.dir || "") + "\">" + esc(d.name || d.id) + "</td>" +
+              "<td>" + esc(d.target || "—") + "</td>" +
+              "<td>" + assetTag(d.status || "incomplete", d.status || "未登记") + "</td>" +
+              "<td class=\"mono\">" + esc(d.modelId || "—") + "</td>" +
+              "<td class=\"num\">" + esc((d.artifacts || []).length) + "</td>" +
+              "<td class=\"num\">" + esc(fmtBytes(d.bytes)) + "</td>" +
+              "<td class=\"num\">" + esc(fmtShortWhen(d.createdAt ? Date.parse(d.createdAt) : 0)) + "</td></tr>";
+          });
+          if (!rows.length) body.innerHTML = '<p class="note empty">还没有在 train_runs/deploy/ 登记过部署包（P177-D 开放登记）。</p>';
+        } else {
+          head = "<tr><th>回收站条目</th><th>大小</th><th>时间</th><th>说明</th></tr>";
+          rows = (a.trash || []).map(function (t) {
+            return "<tr><td class=\"name\" title=\"" + esc(t.dir || "") + "\">" + esc(t.id) + "</td>" +
+              "<td class=\"num\">" + esc(fmtBytes(t.bytes)) + "</td>" +
+              "<td class=\"num\">" + esc(fmtShortWhen(t.at)) + "</td>" +
+              "<td class=\"sub\">恢复 / 清空在 P177-B 开放</td></tr>";
+          });
+          if (!rows.length) body.innerHTML = '<p class="note empty">回收站是空的。</p>';
+        }
+        if (rows.length) body.innerHTML = '<div class="tablewrap"><table class="asset-tbl asset-' + assetView + '"><thead>' + head + "</thead><tbody>" + rows.join("") + "</tbody></table></div>";
+      }
+
+      async function loadAssets(force) {
+        var body = $("assetbody");
+        if (!body) return;
+        if (force || !assets) body.innerHTML = '<p class="note">扫描资产中…</p>';
+        try {
+          assets = await uartix.call("assetsState", !!force);
+          renderAssets();
+        } catch (e) {
+          body.innerHTML = '<p class="note">读资产失败：' + esc(e && e.message ? e.message : e) + "</p>";
+        }
+      }
+
+      (function () {
+        var seg = $("assetseg");
+        if (!seg) return;
+        var bs = seg.querySelectorAll("button");
+        for (var i = 0; i < bs.length; i++) {
+          bs[i].onclick = function () {
+            assetView = this.getAttribute("data-asset");
+            for (var k = 0; k < bs.length; k++) {
+              var on = bs[k].getAttribute("data-asset") === assetView;
+              bs[k].className = on ? "on" : "";
+              bs[k].setAttribute("aria-selected", on ? "true" : "false");
+            }
+            renderAssets();
+          };
+        }
+      })();
+      if ($("assetsrefresh")) $("assetsrefresh").onclick = function () { loadAssets(true); };
+
       function renderRuns() {
         var runs = st.runs || [];
         if (!runs.length) {
@@ -2673,11 +3030,18 @@
       function ctl(it) {
         var id = "p_" + it.key;
         var hb = '<button type="button" class="qh" aria-label="' + esc(it.label) + ' 的说明">?</button>';
-        if (it.kind === "bool") {
-          return '<label class="p bool" data-help-key="' + esc(it.key) + '"><input type="checkbox" id="' + id + '" /><span>' + esc(it.label) + "</span>" + hb + "</label>";
-        }
+        var cap = '<span class="cap"><span class="lab">' + esc(it.label) + "</span>" + hb + "</span>";
         var dft = it.engineDefault === null || it.engineDefault === undefined || it.engineDefault === "" ? "" : String(it.engineDefault);
-        var cap = '<span class="cap">' + esc(it.label) + hb + (dft ? '<i class="dft">包默认 ' + esc(dft) + "</i>" : "") + "</span>";
+        var warnHtml = it.warn ? '<span class="pwarn">⚠ ' + esc(it.warn) + "</span>" : "";
+        if (it.kind === "bool") {
+          return (
+            '<label class="p bool field' + (it.wide ? " wide" : "") + (it.warn ? " warn" : "") + '" data-help-key="' + esc(it.key) + '">' +
+            cap +
+            '<span class="boolrow"><input type="checkbox" class="sw" id="' + id + '" /><span class="swtxt" aria-hidden="true"></span></span>' +
+            warnHtml +
+            "</label>"
+          );
+        }
         var box = "";
         if (it.kind === "select") {
           // 空值 = 不覆盖，交回包默认：下拉里要能**看见**这个状态，否则用户以为面板坏了
@@ -2692,7 +3056,6 @@
         } else {
           box = '<input id="' + id + '" spellcheck="false" placeholder="' + esc(dft) + '" />';
         }
-        var warnHtml = it.warn ? '<span class="pwarn">⚠ ' + esc(it.warn) + "</span>" : "";
         return '<label class="p' + (it.wide ? " wide" : "") + (it.warn ? " warn" : "") + '" data-help-key="' + esc(it.key) + '">' + cap + box + warnHtml + "</label>";
       }
 
@@ -4499,18 +4862,73 @@
         return dl;
       }
 
+      function recentOptions(field) {
+        var arr = (picksData && picksData.recent && picksData.recent[field]) || [];
+        return arr.map(function (x) {
+          return { value: x.path, label: "最近 · " + (x.source || "路径") + (x.exists ? "" : "（缺失）") };
+        });
+      }
+
+      function mergeOptions(base, extra) {
+        var out = [];
+        var seen = {};
+        (base || []).concat(extra || []).forEach(function (o) {
+          if (!o || !o.value) return;
+          var k = String(o.value).replace(/\\/g, "/").toLowerCase();
+          if (seen[k]) return;
+          seen[k] = true;
+          out.push(o);
+        });
+        return out;
+      }
+
+      function renderRecentSources() {
+        var host = $("recent_sources");
+        if (!host) return;
+        var arr = (picksData && picksData.recent && picksData.recent.sources) || [];
+        if (!arr.length) {
+          host.innerHTML = "";
+          return;
+        }
+        host.innerHTML =
+          '<span class="note" style="margin:0">最近：</span>' +
+          arr
+            .map(function (x) {
+              var p = String(x.path || "");
+              var short = p.replace(/\\/g, "/").split("/").filter(Boolean).slice(-2).join("/") || p;
+              return '<button type="button" class="pill" data-recent-src="' + esc(p) + '" title="' + esc(p) + '">' + esc(short) + (x.exists ? "" : " · 缺失") + "</button>";
+            })
+            .join("");
+        host.onclick = function (e) {
+          var b = e.target.closest ? e.target.closest("[data-recent-src]") : null;
+          if (!b) return;
+          var ta = $("sources");
+          if (!ta) return;
+          var v = b.getAttribute("data-recent-src");
+          var cur = String(ta.value || "")
+            .split(/\r?\n/)
+            .map(function (s) { return s.trim(); })
+            .filter(Boolean);
+          if (cur.indexOf(v) < 0) cur.push(v);
+          ta.value = cur.join("\n");
+        };
+      }
+
       function attachPicks() {
         if (!picksData) return;
         var w = $("p_weights");
         if (w) {
           ensureDatalist(
             "dl_weights",
-            (picksData.models || [])
-              .map(function (m) {
-                var lab = m.kind === "run" ? "run " + (m.run || m.name) + (m.mAP50 ? " · mAP50 " + m.mAP50 : "") : m.kind === "delivered" ? "交付区" : "模型库";
-                return { value: m.path, label: lab };
-              })
-              .concat((picksData.official || []).map(function (o) { return { value: o.name, label: o.label + "（官方名，会联网下载）" }; })),
+            mergeOptions(
+              (picksData.models || [])
+                .map(function (m) {
+                  var lab = m.kind === "run" ? "run " + (m.run || m.name) + (m.mAP50 ? " · mAP50 " + m.mAP50 : "") : m.kind === "delivered" ? "交付区" : "模型库";
+                  return { value: m.path, label: lab };
+                })
+                .concat((picksData.official || []).map(function (o) { return { value: o.name, label: o.label + "（官方名，会联网下载）" }; })),
+              recentOptions("weights"),
+            ),
           );
           w.setAttribute("list", "dl_weights");
         }
@@ -4518,9 +4936,12 @@
         if (d) {
           ensureDatalist(
             "dl_data",
-            (picksData.datasets || []).map(function (x) {
-              return { value: x.dataYaml, label: x.name + " · train " + x.train + " / val " + x.val };
-            }),
+            mergeOptions(
+              (picksData.datasets || []).map(function (x) {
+                return { value: x.dataYaml, label: x.name + " · train " + x.train + " / val " + x.val };
+              }),
+              recentOptions("data"),
+            ),
           );
           d.setAttribute("list", "dl_data");
         }
@@ -4532,6 +4953,19 @@
           );
           dev.setAttribute("list", "dl_device");
         }
+        var od = $("output_dir");
+        if (od) {
+          ensureDatalist("dl_output", recentOptions("output_dir"));
+          od.setAttribute("list", "dl_output");
+        }
+        var dm = $("depmodelpath");
+        if (dm) {
+          ensureDatalist("dl_deploymodel", mergeOptions(picksData.models || [], recentOptions("weights")).map(function (x) {
+            return { value: x.path || x.value, label: x.label || x.name || "" };
+          }));
+          dm.setAttribute("list", "dl_deploymodel");
+        }
+        renderRecentSources();
       }
 
       async function loadPicks() {
@@ -4688,7 +5122,9 @@
           $("tab-train").hidden = name !== "train";
           $("tab-result").hidden = name !== "result";
           $("tab-runs").hidden = name !== "runs";
+          $("tab-assets").hidden = name !== "assets";
           $("tab-deploy").hidden = name !== "deploy";
+          if (name === "assets") loadAssets(false);
           if (name === "result") {
             var v = pendingResultView || resultView;
             pendingResultView = "";

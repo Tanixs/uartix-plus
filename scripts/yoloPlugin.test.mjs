@@ -1667,7 +1667,7 @@ describe("P175-W7 · 实验管理", () => {
       expect(arch.moved, "归档把用户的产物搬走了").toBe(false);
       expect(arch.copied.sort()).toEqual(["args.yaml", "results.csv", "weights/best.pt"]);
       expect(existsSync(path.join(ws, "runs", "exp1", "results.csv")), "归档之后 runs/ 里的原件没了").toBe(true);
-      expect(arch.dst.replace(/\\/g, "/")).toContain("/archive/exp1-");
+      expect(arch.dst.replace(/\\/g, "/")).toContain("/train_runs/archive/exp1-");
       for (const f of ["args.yaml", "results.csv"]) {
         expect(readFileSync(path.join(arch.dst, f), "utf8")).toBe(readFileSync(path.join(dir, f), "utf8"));
       }
@@ -1991,3 +1991,126 @@ describe("P175-W2 · 拦截与识别走真插件", () => {
     }
   }, 90_000);
 });
+
+/* ============================ P177-A · 资产台账与路径记忆 ============================ */
+
+describe("P177-A · 资产台账、run 状态与路径记忆", () => {
+  function seedRun(ws, name, withBest = true) {
+    const d = path.join(ws, "runs", name);
+    mkdirSync(path.join(d, "weights"), { recursive: true });
+    writeFileSync(
+      path.join(d, "args.yaml"),
+      [
+        "task: segment",
+        `model: ${fwd(ws)}/models/base.pt`,
+        `data: ${fwd(ws)}/datasets/x/data.yaml`,
+        "epochs: 10",
+        "imgsz: 512",
+        "batch: 8",
+        `project: ${fwd(ws)}/runs`,
+        `name: ${name}`,
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(path.join(d, "results.csv"), "epoch,time,metrics/mAP50(B),metrics/mAP50-95(M)\n1,12.5,0.5,0.4\n2,25,0.7,0.6\n", "utf8");
+    if (withBest) {
+      writeFileSync(path.join(d, "weights", "best.pt"), "best", "utf8");
+      writeFileSync(path.join(d, "weights", "last.pt"), "last", "utf8");
+    }
+    return d;
+  }
+
+  it("assetsState 能重建台账：数据集/run/模型/存储，并把无活进程的 running 标成中断", async () => {
+    const ws = makeWorkspace("assets");
+    seedRun(ws, "exp1");
+    writeFileSync(path.join(ws, "models", "base.pt"), "base", "utf8");
+    mkdirSync(path.join(ws, "train_runs", "runs"), { recursive: true });
+    writeFileSync(
+      path.join(ws, "train_runs", "runs", "exp1.json"),
+      JSON.stringify({ schemaVersion: 1, run: "exp1", status: "running", jobId: "j-old", datasetFingerprint: "old" }),
+      "utf8",
+    );
+    const pluginDir = copyPlugin("assets");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const a = await p.call("panel.train.assetsState", true);
+      expect(a.readOnly, "有写权限时不该是只读").toBe(false);
+      const ds = Object.values(a.datasets);
+      expect(ds.length).toBe(1);
+      expect(ds[0].splits).toEqual({ train: 3, val: 1 });
+      expect(ds[0].classes).toEqual(["1", "2"]);
+      expect(ds[0].fingerprint).toHaveLength(64);
+      expect(ds[0].runIds).toContain("exp1");
+
+      const run = a.runs.exp1;
+      expect(run.status, "重启后 running 应该变成 interrupted").toBe("interrupted");
+      expect(run.datasetId).toBe(ds[0].id);
+      expect(run.bestSha).toHaveLength(64);
+      expect(run.bytes).toBeGreaterThan(0);
+
+      const model = Object.values(a.models).find((m) => m.paths.some((x) => x.endsWith("base.pt")));
+      expect(model, "模型没进台账").toBeTruthy();
+      expect(model.sha256).toHaveLength(64);
+      expect(model.refs.runs).toContain("exp1");
+      expect(a.storage.models).toBeGreaterThan(0);
+
+      const meta = JSON.parse(readFileSync(path.join(ws, "train_runs", "runs", "exp1.json"), "utf8"));
+      expect(meta.status).toBe("interrupted");
+      expect(meta.reason).toContain("重启");
+      expect(existsSync(path.join(ws, "train_runs", "catalog.json"))).toBe(true);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("saveConfig 会记住最近路径；picks() 能把它们带回面板", async () => {
+    const ws = makeWorkspace("prefs");
+    const pluginDir = copyPlugin("prefs");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      await p.call("panel.train.saveConfig", {
+        train: { weights: "D:/fake/models/base.pt", data: "D:/fake/datasets/x/data.yaml" },
+        dataset: { output_dir: "D:/fake/datasets/x", sources: ["D:/fake/anno/one"] },
+      });
+      const picks = await p.call("panel.train.picks", {});
+      expect(picks.recent.weights.some((x) => x.path === "D:/fake/models/base.pt"), JSON.stringify(picks.recent)).toBe(true);
+      expect(picks.recent.data.some((x) => x.path === "D:/fake/datasets/x/data.yaml")).toBe(true);
+      expect(picks.recent.output_dir.some((x) => x.path === "D:/fake/datasets/x")).toBe(true);
+      expect(picks.recent.sources.some((x) => x.path === "D:/fake/anno/one")).toBe(true);
+      const prefs = JSON.parse(readFileSync(path.join(ws, ".uartix", "yolo", "prefs.json"), "utf8"));
+      expect(prefs.schemaVersion).toBe(1);
+      expect(prefs.recent.weights[0].source).toBe("config");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("deployDeliver 不再生成 [object Object] 文件名；同 SHA 重复交付不叠加副本", async () => {
+    const ws = makeWorkspace("deliver");
+    seedRun(ws, "exp1");
+    const pluginDir = copyPlugin("deliver");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const r = await p.call("panel.train.deployDeliver", {});
+      expect(r.ok).toBe(true);
+      expect(path.basename(r.path)).toBe("exp1-best.pt");
+      expect(path.basename(r.path).toLowerCase()).not.toContain("object");
+      const r2 = await p.call("panel.train.deployDeliver", {});
+      expect(r2.duplicate, "同一份权重重复交付应该识别出来").toBe(true);
+      expect(r2.path).toBe(r.path);
+      expect(readdirSync(path.join(ws, "models", "delivered")).filter((f) => f.endsWith(".pt")).length).toBe(1);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+

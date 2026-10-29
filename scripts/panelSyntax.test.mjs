@@ -170,15 +170,15 @@ describe("P175 · 面板里不许有同名函数", () => {
    这里钉住形状，防止下一次改版又长回去。
    ============================================================================ */
 
-describe("P176-B1 · 六工作面与文案分层", () => {
+describe("P176-B1 · 六块工作面 + P177 资产页", () => {
   const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
   const html = readFileSync(YOLO_PANEL, "utf8");
 
   /** 导航里的页签（脚本里拼的选择器是 `nav button[data-tab="…"]`，不是 `<button data-tab=`，天然不会混进来）。 */
   const tabs = [...html.matchAll(/<button data-tab="([a-z]+)"/g)].map((m) => m[1]);
 
-  it("导航只有六块工作面", () => {
-    expect(tabs).toEqual(["overview", "data", "train", "result", "runs", "deploy"]);
+  it("导航是六块工作面 + 资产（P177）", () => {
+    expect(tabs).toEqual(["overview", "data", "train", "result", "runs", "assets", "deploy"]);
   });
 
   it("帮助不再占页签，改从右上角抽屉打开", () => {

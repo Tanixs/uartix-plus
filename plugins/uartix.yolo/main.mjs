@@ -40,6 +40,7 @@
  */
 
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -72,6 +73,21 @@ const INTAKE_DIR = "annotations";
 const PY_ENV = { PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1", YOLO_AUTOINSTALL: "false" };
 /** 内存里保留多少行日志。界面上限一致，超出丢最旧的。 */
 const LOG_KEEP = 4000;
+
+/** P177-A：资产索引、run 记录、路径偏好（都在已有写权限目录内）。 */
+const CATALOG_FILE = `${RUNS_DIR}/catalog.json`;
+const RUN_META_DIR = `${RUNS_DIR}/runs`;
+const PREFS_FILE = `${STATE_DIR}/prefs.json`;
+const TRASH_DIR = `${STATE_DIR}/trash`;
+const RECENT_MAX = 12;
+const RECENT_FIELDS = ["weights", "data", "output_dir", "sources", "calib", "deploy"];
+const PLUGIN_VERSION = (() => {
+  try {
+    return String(JSON.parse(fs.readFileSync(path.join(PKG_DIR, "plugin.json"), "utf8")).version || "");
+  } catch {
+    return "";
+  }
+})();
 
 /**
  * 内置默认 = 这台机器上验证过的一套（来自工作区的 config.yaml + README 第四节）。
@@ -471,6 +487,480 @@ function readJson(file, fallback) {
 
 function isObj(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/* ============================ P177-A 资产地基 ============================ */
+
+function canWrite() {
+  return !!root && probeCage().ok;
+}
+
+/** catalog/prefs/run 记录都走这一条：临时文件 + rename，Windows 上 rename 失败就退回复制。 */
+function writeJsonAtomic(file, obj) {
+  if (!canWrite()) return false;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), "utf8");
+    try {
+      fs.renameSync(tmp, file);
+    } catch {
+      fs.copyFileSync(tmp, file);
+      fs.rmSync(tmp, { force: true });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const fileHashCache = new Map();
+function sha256File(file) {
+  try {
+    const st = fs.statSync(file);
+    const key = `${file}|${st.size}|${st.mtimeMs}`;
+    const hit = fileHashCache.get(key);
+    if (hit) return hit;
+    const h = createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+    fileHashCache.set(key, h);
+    return h;
+  } catch {
+    return "";
+  }
+}
+
+/** 目录体积/文件数/最新 mtime；只 stat，不读内容。 */
+function walkStats(dir) {
+  let bytes = 0;
+  let files = 0;
+  let newest = 0;
+  const walk = (d) => {
+    let ents;
+    try {
+      ents = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of ents) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      try {
+        const st = fs.statSync(p);
+        bytes += st.size;
+        files += 1;
+        if (st.mtimeMs > newest) newest = st.mtimeMs;
+      } catch {
+        /* 文件刚被删 */
+      }
+    }
+  };
+  walk(dir);
+  return { bytes, files, newest };
+}
+
+/** 数据集里的非标准附加物（origin / origin_json_backup / zip / 嵌套 images…）。 */
+function datasetExtras(dir) {
+  const allowed = new Set(["images", "labels", "data.yaml"]);
+  const out = [];
+  let ents;
+  try {
+    ents = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of ents) {
+    if (allowed.has(e.name)) continue;
+    const p = path.join(dir, e.name);
+    const st = walkStats(p);
+    out.push({ name: e.name, kind: e.isDirectory() ? "dir" : "file", bytes: st.bytes, files: st.files });
+  }
+  return out;
+}
+
+/**
+ * 数据集快速指纹：data.yaml + 类别 + 划分 + 图片/标签总字节 + 最新 mtime。
+ * 不读 44GB 内容；内容变了 mtime/字节通常会变。完整哈希是后续“冻结”动作的事。
+ */
+function datasetFingerprintFor(dirIn, dsIn) {
+  const dir = abs(dirIn || DEFAULTS.dataset.output_dir);
+  const ds = dsIn || scanDataset(dir);
+  const img = walkStats(path.join(dir, "images"));
+  const lab = walkStats(path.join(dir, "labels"));
+  let yaml = "";
+  try {
+    yaml = fs.readFileSync(path.join(dir, "data.yaml"), "utf8");
+  } catch {
+    /* 没 data.yaml 也给它一个指纹，状态会标 incomplete */
+  }
+  const raw = JSON.stringify({
+    yaml,
+    classes: ds.classes || [],
+    train: ds.trainCount || 0,
+    val: ds.valCount || 0,
+    imgBytes: img.bytes,
+    labBytes: lab.bytes,
+    newest: Math.max(img.newest, lab.newest),
+  });
+  return createHash("sha256").update(raw).digest("hex");
+}
+
+/* ---- run 记录（train_runs/runs/<run>.json） ---- */
+
+function safeRunName(name) {
+  return String(name == null ? "" : name)
+    .replace(/[^\w.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+function runMetaFile(name) {
+  return abs(`${RUN_META_DIR}/${safeRunName(name)}.json`);
+}
+function readRunMeta(name) {
+  if (!name) return null;
+  const v = readJson(runMetaFile(name), null);
+  return isObj(v) ? v : null;
+}
+function writeRunMeta(name, patch) {
+  if (!name || !canWrite()) return null;
+  const file = runMetaFile(name);
+  const prev = readJson(file, null);
+  const next = {
+    schemaVersion: 1,
+    run: String(name),
+    ...(isObj(prev) ? prev : {}),
+    ...(isObj(patch) ? patch : {}),
+    updatedAt: new Date().toISOString(),
+  };
+  writeJsonAtomic(file, next);
+  catalogCache.at = 0;
+  return next;
+}
+
+/** 插件重启时，把没有活进程的 running 记录标成 interrupted（只在可写时落盘）。 */
+function reconcileRunMeta() {
+  if (!root || !canWrite()) return;
+  let names = [];
+  try {
+    names = fs.readdirSync(abs(RUN_META_DIR)).filter((f) => f.endsWith(".json"));
+  } catch {
+    return;
+  }
+  for (const f of names) {
+    const meta = readJson(path.join(abs(RUN_META_DIR), f), null);
+    if (!isObj(meta) || meta.status !== "running") continue;
+    const run = String(meta.run || path.basename(f, ".json"));
+    const alive = [...jobs.values()].some((j) => j.runName === run && j.state === "running");
+    if (alive) continue;
+    writeRunMeta(run, {
+      status: "interrupted",
+      finishedAt: Date.now(),
+      reason: "插件重启时这个任务已经不在（没有活进程）",
+      artifacts: meta.artifacts || {},
+    });
+  }
+}
+
+const STATUS_LABEL = {
+  running: "运行中",
+  succeeded: "完成",
+  stopped: "已停止",
+  failed: "失败",
+  interrupted: "中断",
+  external: "外部 run",
+  incomplete: "不完整",
+};
+
+/**
+ * run 状态：插件自己启动的看 sidecar；手动 run 只做“外部/不完整”推断，不冒充中断。
+ * profile 来自 runProfile；meta 来自 train_runs/runs/<run>.json。
+ */
+function runStatusOf(name, profile, meta) {
+  const p = profile || {};
+  const m = meta || readRunMeta(name);
+  const managed = !!m;
+  if (m && m.status) {
+    let status = String(m.status);
+    let why = String(m.reason || "");
+    if (status === "running") {
+      const alive = [...jobs.values()].some((j) => j.runName === name && j.state === "running");
+      if (!alive) {
+        status = "interrupted";
+        why = why || "插件重启时这个任务已经不在（没有活进程）";
+      }
+    }
+    return { status, label: STATUS_LABEL[status] || status, why, managed };
+  }
+  if (!p.hasResultsCsv) return { status: "incomplete", label: STATUS_LABEL.incomplete, why: "没有 results.csv（引擎没写出训练记录）", managed: false };
+  if (!p.hasBest && !p.hasLast) return { status: "incomplete", label: STATUS_LABEL.incomplete, why: "没有 best.pt / last.pt（权重没落盘）", managed: false };
+  const early = Number(p.argsEpochs) > 0 && Number(p.epochs) > 0 && Number(p.epochs) < Number(p.argsEpochs);
+  return {
+    status: "external",
+    label: STATUS_LABEL.external,
+    why: early
+      ? `外部 run：配置 ${p.argsEpochs} 轮，实际 ${p.epochs} 轮（可能早停/中断，面板没有它的结束记录）`
+      : "外部 run：面板没有它的启动/结束记录（可能是手动流水线跑的）",
+    managed: false,
+  };
+}
+
+/* ---- 路径偏好 ---- */
+
+function readPrefs() {
+  const raw = readJson(abs(PREFS_FILE), null);
+  const recent = {};
+  for (const f of RECENT_FIELDS) {
+    const arr = raw && raw.recent && Array.isArray(raw.recent[f]) ? raw.recent[f] : [];
+    recent[f] = arr
+      .filter((x) => isObj(x) && typeof x.path === "string" && x.path.trim())
+      .map((x) => ({ ...x, path: x.path.replace(/\\/g, "/"), exists: !!x.exists }))
+      .slice(0, RECENT_MAX);
+  }
+  return { schemaVersion: 1, recent, ...(isObj(raw) && raw.pinned ? { pinned: raw.pinned } : {}) };
+}
+
+function savePrefs(prefs) {
+  return writeJsonAtomic(abs(PREFS_FILE), prefs);
+}
+
+/** 记一条最近路径；同一个解析后路径只留最新一条。 */
+function rememberPath(field, value, source) {
+  const f = String(field || "");
+  const v = String(value == null ? "" : value).trim().replace(/\\/g, "/");
+  if (!RECENT_FIELDS.includes(f) || !v || !canWrite()) return;
+  const prefs = readPrefs();
+  const key = abs(v).toLowerCase();
+  const old = prefs.recent[f] || [];
+  const rest = old.filter((x) => abs(String(x.path || "")).toLowerCase() !== key);
+  rest.unshift({ path: v, at: Date.now(), source: String(source || ""), exists: fs.existsSync(abs(v)) });
+  prefs.recent[f] = rest.slice(0, RECENT_MAX);
+  savePrefs(prefs);
+}
+
+function rememberConfigPaths(eff) {
+  if (!isObj(eff)) return;
+  const train = isObj(eff.train) ? eff.train : {};
+  const ds = isObj(eff.dataset) ? eff.dataset : {};
+  rememberPath("weights", train.weights, "config");
+  rememberPath("data", train.data || (ds.output_dir ? path.join(abs(ds.output_dir), "data.yaml") : ""), "config");
+  rememberPath("output_dir", ds.output_dir, "config");
+  for (const s of ds.sources || []) rememberPath("sources", s, "config");
+}
+
+/* ---- 资产索引 ---- */
+
+function listTrash() {
+  const base = abs(TRASH_DIR);
+  const out = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(base);
+  } catch {
+    return out;
+  }
+  for (const n of names) {
+    const d = path.join(base, n);
+    const st = walkStats(d);
+    out.push({ id: n, dir: d.replace(/\\/g, "/"), bytes: st.bytes, files: st.files, at: fs.statSync(d).mtimeMs });
+  }
+  return out.sort((a, b) => b.at - a.at);
+}
+
+function listDeploymentBundles() {
+  const base = abs(`${RUNS_DIR}/deploy`);
+  const out = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  } catch {
+    return out;
+  }
+  for (const n of names) {
+    const d = path.join(base, n);
+    const meta = readJson(path.join(d, "deployment.json"), null);
+    const st = walkStats(d);
+    out.push({
+      id: isObj(meta) && meta.id ? String(meta.id) : n,
+      name: n,
+      dir: d.replace(/\\/g, "/"),
+      bytes: st.bytes,
+      files: st.files,
+      ...(isObj(meta) ? meta : {}),
+    });
+  }
+  return out.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+}
+
+let catalogCache = { at: 0, value: null };
+
+/**
+ * 资产索引：文件系统是真相，catalog 只是索引。它可在任意时刻重建；
+ * 只读模式只返回内存结果，不写盘。
+ */
+async function catalogBuild(force) {
+  if (!root) return { schemaVersion: 1, updatedAt: new Date().toISOString(), datasets: {}, runs: {}, models: {}, deployments: {}, trash: [], storage: {}, readOnly: true };
+  if (!force && catalogCache.value && Date.now() - catalogCache.at < 10000) return catalogCache.value;
+  const { effective } = await effectiveConfig();
+  const project = effective.train.project;
+
+  const datasets = {};
+  const datasetByDir = {};
+  for (const d of scanDatasetDirs()) {
+    const ds = scanDataset(d.dir);
+    const st = walkStats(d.dir);
+    const fp = datasetFingerprintFor(d.dir, ds);
+    const id = `ds-${String(d.name || "dataset").replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "dataset"}-${fp.slice(0, 8)}`;
+    const entry = {
+      id,
+      name: String(d.name || path.basename(d.dir)),
+      dir: d.dir,
+      dataYaml: d.dataYaml,
+      classes: ds.classes || [],
+      splits: { train: ds.trainCount || 0, val: ds.valCount || 0 },
+      bytes: st.bytes,
+      files: st.files,
+      fingerprint: fp,
+      extras: datasetExtras(d.dir),
+      runIds: [],
+      status: ds.exists && (ds.trainCount || ds.valCount) ? "ready" : "incomplete",
+      updatedAt: st.newest,
+    };
+    datasets[id] = entry;
+    datasetByDir[d.dir.toLowerCase()] = id;
+  }
+
+  const runs = {};
+  for (const r of scanRuns(project)) {
+    const p = runProfile(project, r.name);
+    const meta = readRunMeta(r.name);
+    const status = runStatusOf(r.name, p, meta);
+    const st = walkStats(p.dir);
+    const dataPath = String(p.argsData ? abs(p.argsData) : "").replace(/\\/g, "/");
+    const dsDir = dataPath ? path.dirname(dataPath).replace(/\\/g, "/").toLowerCase() : "";
+    const datasetId = datasetByDir[dsDir] || "";
+    runs[r.name] = {
+      id: r.name,
+      name: r.name,
+      dir: p.dir,
+      status: status.status,
+      statusLabel: status.label,
+      statusWhy: status.why,
+      managed: status.managed,
+      epochs: p.epochs,
+      argsEpochs: p.argsEpochs,
+      bestEpoch: p.bestEpoch,
+      hasBest: p.hasBest,
+      hasLast: p.hasLast,
+      bytes: st.bytes,
+      files: st.files,
+      datasetId,
+      datasetName: datasetId ? datasets[datasetId].name : "",
+      dataPath,
+      argsWeights: String(p.argsWeights || ""),
+      best: p.best,
+      bestSha: p.best ? sha256File(p.best) : "",
+      last: p.last,
+      finishedAt: p.finishedAt,
+      startedAt: p.startedAt,
+      mAP50M: p.mAP50M,
+      mAP5095M: p.mAP5095M,
+      note: p.note,
+      snapshot: meta && meta.snapshot ? String(meta.snapshot) : "",
+      log: meta && meta.log ? String(meta.log) : "",
+      deploymentIds: [],
+    };
+    if (datasetId) datasets[datasetId].runIds.push(r.name);
+  }
+
+  const models = {};
+  const modelByPath = {};
+  const modelBySha = {};
+  for (const f of scanModels(200)) {
+    const sha = sha256File(f.file);
+    const key = sha || `path:${f.file}`;
+    const origin = /\/models\/delivered\//i.test(f.file) ? "delivered" : /\/models\/pretrained\//i.test(f.file) ? "downloaded" : "local";
+    if (!models[key]) {
+      const facts = factsFor(f);
+      models[key] = {
+        id: `mdl-${(sha || key).slice(0, 8)}`,
+        sha256: sha,
+        bytes: f.bytes,
+        paths: [],
+        task: (facts && facts.task) || f.task || "",
+        family: f.family || "",
+        scale: f.scale || "",
+        nc: facts && facts.nc != null ? facts.nc : null,
+        names: [],
+        origin,
+        sourceRun: "",
+        license: "",
+        refs: { runs: [], deployments: [] },
+        verifiedAt: 0,
+      };
+    }
+    const m = models[key];
+    if (!m.paths.includes(f.file)) m.paths.push(f.file);
+    if (!m.bytes) m.bytes = f.bytes;
+    modelByPath[f.file.toLowerCase()] = key;
+  }
+  for (const r of Object.values(runs)) {
+    if (r.bestSha && models[r.bestSha]) {
+      models[r.bestSha].refs.runs.push(r.id);
+      if (!models[r.bestSha].sourceRun) models[r.bestSha].sourceRun = r.id;
+    }
+    const argsWeights = String(r.argsWeights ? abs(r.argsWeights) : "").replace(/\\/g, "/").toLowerCase();
+    if (argsWeights && modelByPath[argsWeights]) {
+      const k = modelByPath[argsWeights];
+      if (!models[k].refs.runs.includes(r.id)) models[k].refs.runs.push(r.id);
+    }
+  }
+
+  const deployments = {};
+  for (const d of listDeploymentBundles()) {
+    deployments[d.id] = d;
+    if (d.modelId && models[d.modelId]) models[d.modelId].refs.deployments.push(d.id);
+    if (d.runId && runs[d.runId]) runs[d.runId].deploymentIds.push(d.id);
+  }
+
+  const trash = listTrash();
+  const sum = (arr, k) => arr.reduce((n, x) => n + (Number(x[k]) || 0), 0);
+  const storage = {
+    datasets: sum(Object.values(datasets), "bytes"),
+    runs: sum(Object.values(runs), "bytes"),
+    models: sum(Object.values(models), "bytes"),
+    deployments: sum(Object.values(deployments), "bytes"),
+    trash: sum(trash, "bytes"),
+    freeBytes: 0,
+    totalBytes: 0,
+  };
+  try {
+    const s = fs.statfsSync(root);
+    storage.freeBytes = Number(s.bavail) * Number(s.bsize) || 0;
+    storage.totalBytes = Number(s.blocks) * Number(s.bsize) || 0;
+  } catch {
+    /* Windows 上有些文件系统不支持 statfs；留 0，界面不显示 */
+  }
+  const catalog = {
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    datasets,
+    runs,
+    models,
+    deployments,
+    trash,
+    storage,
+    readOnly: !canWrite(),
+  };
+  if (canWrite()) {
+    const prev = readJson(abs(CATALOG_FILE), null);
+    const a = prev ? JSON.stringify({ ...prev, updatedAt: "" }) : "";
+    const b = JSON.stringify({ ...catalog, updatedAt: "" });
+    if (force || a !== b) writeJsonAtomic(abs(CATALOG_FILE), catalog);
+  }
+  catalogCache = { at: Date.now(), value: catalog };
+  return catalog;
 }
 
 /** 深合并（只合对象，数组整体替换：类别表不该被"合并"成两倍长）。 */
@@ -1633,6 +2123,25 @@ function finishJob(j, code) {
       /* 同上 */
     }
   }
+  if (j.kind === "train" && j.runName) {
+    const runDir = path.join(abs(j.project || DEFAULTS.train.project), j.runName);
+    const has = (rel) => fs.existsSync(path.join(runDir, rel));
+    writeRunMeta(j.runName, {
+      status: j.stopped ? "stopped" : code === 0 ? "succeeded" : "failed",
+      finishedAt: j.endedAt,
+      exitCode: code,
+      reason: j.stopped ? "你按的停止" : code === 0 ? "" : (lastFailure && lastFailure.label) || "",
+      artifacts: {
+        best: has("weights/best.pt"),
+        last: has("weights/last.pt"),
+        resultsCsv: has("results.csv"),
+        argsYaml: has("args.yaml"),
+      },
+      datasetFingerprint: j.datasetFingerprint || "",
+      log: j.logPath,
+      snapshot: j.configPath || "",
+    });
+  }
   if (active === j) active = null;
 }
 
@@ -1695,6 +2204,27 @@ async function startJob(kind, overrides) {
   }
 
   job.configPath = confPath;
+  job.project = String(merged.train.project || "");
+  job.dataPath = String(merged.train.data || path.join(merged.dataset.output_dir || "", "data.yaml")).replace(/\\/g, "/");
+  job.datasetFingerprint = datasetFingerprintFor(merged.dataset.output_dir);
+  if (kind === "train") {
+    job.runName = String(merged.train.name || "");
+    writeRunMeta(job.runName, {
+      status: "running",
+      jobId: job.id,
+      startedAt: job.startedAt,
+      snapshot: confPath,
+      log: job.logPath,
+      dataPath: job.dataPath,
+      datasetFingerprint: job.datasetFingerprint,
+      pluginVersion: PLUGIN_VERSION,
+      appVersion: "",
+    });
+  }
+  rememberPath("weights", merged.train.weights, "train");
+  rememberPath("data", job.dataPath, "train");
+  rememberPath("output_dir", merged.dataset.output_dir, kind);
+  for (const src of merged.dataset.sources || []) rememberPath("sources", src, kind);
   jobs.set(job.id, job);
   active = job;
 
@@ -1788,6 +2318,11 @@ async function applyPatch(patch) {
   fs.mkdirSync(path.dirname(overridesPath()), { recursive: true });
   fs.writeFileSync(overridesPath(), JSON.stringify(next, null, 2), "utf8");
   baseCache = { mtime: 0, value: null, error: "", source: "" }; // 让下次 state() 重算
+  try {
+    rememberConfigPaths((await effectiveConfig()).effective);
+  } catch {
+    /* 记路径失败不影响保存 */
+  }
   return await panelState();
 }
 
@@ -1886,10 +2421,34 @@ function deliverBest(modelName, project) {
   if (!best) return { ok: false, error: "工作区里没有找到训练产物（runs/<run>/weights/best.pt）" };
   const dstDir = abs("models/delivered");
   fs.mkdirSync(dstDir, { recursive: true });
-  const stem = String(modelName || best.run || "model").replace(/[^\w.-]+/g, "-");
-  const dst = path.join(dstDir, `${stem}-best.pt`);
+  // 传对象/路径/空串都要能活：旧版 String({}) 会生出一个 -object-Object--best.pt
+  let hinted = isObj(modelName)
+    ? String(modelName.name || modelName.run || modelName.file || "")
+    : String(modelName == null ? "" : modelName);
+  hinted = hinted.trim();
+  if (/[\\/]/.test(hinted)) hinted = path.basename(hinted).replace(/\.pt$/i, "");
+  let stem = hinted.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  if (!stem || /object-Object/i.test(stem)) {
+    stem = String(best.run || "model").replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "model";
+  }
+  const srcSha = sha256File(best.path);
+  let dst = path.join(dstDir, `${stem}-best.pt`);
+  if (fs.existsSync(dst)) {
+    if (srcSha && sha256File(dst) === srcSha) {
+      return { ok: true, path: dst.replace(/\\/g, "/"), from: best.path, run: best.run, bytes: fs.statSync(dst).size, duplicate: true, sha256: srcSha };
+    }
+    for (let n = 2; fs.existsSync(dst) && n < 100; n++) dst = path.join(dstDir, `${stem}-${n}-best.pt`);
+  }
   fs.copyFileSync(best.path, dst);
-  return { ok: true, path: dst, from: best.path, run: best.run, bytes: fs.statSync(dst).size };
+  return {
+    ok: true,
+    path: dst.replace(/\\/g, "/"),
+    from: best.path,
+    run: best.run,
+    bytes: fs.statSync(dst).size,
+    duplicate: false,
+    sha256: srcSha || sha256File(dst),
+  };
 }
 
 /**
@@ -2067,6 +2626,7 @@ async function pickLists() {
     datasets,
     devices: await deviceChoices(),
     calib: calibCandidates(),
+    recent: readPrefs().recent,
     current: {
       weights: String((effective.train && effective.train.weights) || "").replace(/\\/g, "/"),
       data: path.join(abs(effective.dataset.output_dir || ""), "data.yaml").replace(/\\/g, "/"),
@@ -2177,6 +2737,8 @@ async function deployStart(req) {
     calibDir = fs.existsSync(auto) ? auto : "";
   }
   const wrapper = writeWrapper(cfg.name, modelPath, cfg.modelName || "model", calibDir);
+  rememberPath("weights", modelPath, "deploy");
+  rememberPath("calib", calibDir || cfg.calib, "deploy");
 
   const label = `部署 ${cfg.modelName || cfg.name}${step === "all" ? "" : `（${step}）`}`;
   const job = newJob("deploy", label);
@@ -2326,6 +2888,11 @@ async function activate(c) {
   ctx = c;
   root = String(c.workspace || "");
   c.log.info(root ? `YOLO 工作台已就绪；工作区 = ${root}` : "YOLO 工作台已就绪；**还没有登记工作区根**");
+  try {
+    reconcileRunMeta();
+  } catch {
+    /* 只读/没工作区时跳过；不挡启动 */
+  }
 
   c.panels.register(PANEL, {
     /** 面板挂载时调一次：环境、配置、数据集、训练记录、任务列表，一次拿全（少一轮往返）。 */
@@ -2535,7 +3102,7 @@ async function activate(c) {
       return saveRunNote(effective.train.project, String(o.run || ""), String(o.text || ""));
     },
 
-    /** 归档：复制 args/results/best 到 `archive/<run>-<时间>/`。**只复制，不搬走**。 */
+    /** 归档：复制 args/results/best 到 `train_runs/archive/<run>-<时间>/`。**只复制，不搬走**。 */
     async archiveRun(req) {
       needWorkspace();
       const o = isObj(req) ? req : {};
@@ -2585,6 +3152,12 @@ async function activate(c) {
       return await pickLists();
     },
 
+    /** P177-A：资产索引（数据集 / run / 模型 / 部署包 / 回收站 / 存储）。只读骨架先上。 */
+    async assetsState(force) {
+      needWorkspace();
+      return await catalogBuild(force === true);
+    },
+
     async deployState() {
       return await deployState();
     },
@@ -2601,7 +3174,8 @@ async function activate(c) {
 
     /** 只交付模型、不部署（"先把产物留一份"也是常见动作）。 */
     async deployDeliver(modelName) {
-      const r = deliverBest(modelName);
+      const { effective } = await effectiveConfig();
+      const r = deliverBest(modelName, effective.train.project);
       if (!r.ok) throw new Error(r.error);
       return { ...r, state: await deployState() };
     },
@@ -2969,6 +3543,8 @@ async function evalStart(opts) {
   const weights = abs(String(o.weights || effective.eval?.model || effective.train.weights || ""));
   const data = abs(String(o.data || effective.eval?.data || "")) || path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/");
   const out = evalOutDir();
+  rememberPath("weights", weights, "eval");
+  rememberPath("data", data, "eval");
   const merged = merge({}, effective);
   merged.eval = {
     model: weights,
@@ -3173,6 +3749,8 @@ async function exportStart(req) {
   const data = abs(String(o.data || effective.eval?.data || "")) || path.join(abs(effective.dataset.output_dir), "data.yaml").replace(/\\/g, "/");
   const imgsz = Number(o.imgsz || effective.export?.imgsz || effective.train.imgsz || 640);
   const out = abs(`train_runs/export/${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`);
+  rememberPath("weights", weights, "export");
+  rememberPath("data", data, "export");
   const merged = merge({}, effective);
   merged.export = { format: fmt, imgsz, dynamic: !!o.dynamic, simplify: o.simplify !== false, opset: Number(o.opset) || 0, quantize: String(o.quantize || "") };
 
@@ -3265,12 +3843,14 @@ function runProfile(project, name) {
   }
   const rows = parsed.rows;
   const lastRow = rows.length ? rows[rows.length - 1] : {};
+  const hasResultsCsv = fs.existsSync(path.join(dir, "results.csv"));
   let finishedAt = 0;
   try {
     finishedAt = fs.statSync(path.join(dir, "results.csv")).mtimeMs;
   } catch {
     /* 没写出 csv */
   }
+  const durationSec = Number(lastRow.time) || 0;
   // 最佳轮按掩膜 mAP50-95 找（检测任务没有 M 列就退回框），而不是拿最后一轮冒名
   let bestEpoch = rows.length ? Number(lastRow.epoch) || rows.length : 0;
   let bestVal = -Infinity;
@@ -3288,7 +3868,7 @@ function runProfile(project, name) {
   } catch {
     /* 还没写过备注 */
   }
-  return {
+  const base = {
     name,
     dir: dir.replace(/\\/g, "/"),
     task: String(args.task || ""),
@@ -3297,6 +3877,11 @@ function runProfile(project, name) {
     epochs: rows.length,
     bestEpoch,
     finishedAt,
+    startedAt: finishedAt && durationSec > 0 ? Math.round(finishedAt - durationSec * 1000) : 0,
+    hasResultsCsv,
+    argsEpochs: Number(args.epochs) || 0,
+    argsData: String(args.data || ""),
+    argsWeights: String(args.weights || args.model || ""),
     hasBest,
     best: hasBest ? best.replace(/\\/g, "/") : "",
     bestBytes,
@@ -3313,6 +3898,8 @@ function runProfile(project, name) {
     argsFile: path.join(dir, "args.yaml").replace(/\\/g, "/"),
     argsKeys: Object.keys(args).length,
   };
+  const status = runStatusOf(name, base, readRunMeta(name));
+  return { ...base, status: status.status, statusLabel: status.label, statusWhy: status.why, managed: status.managed };
 }
 
 /** 实验列表（默认页那个表）。 */
@@ -3404,7 +3991,7 @@ function saveRunNote(project, name, text) {
 }
 
 /**
- * 归档：把 `args.yaml + results.csv + best.pt` **复制**进 `archive/<run>-<时间>/`。
+ * 归档：把 `args.yaml + results.csv + best.pt` **复制**进 `train_runs/archive/<run>-<时间>/`。
  *
  * 设计稿写的是"移"。这里刻意改成复制：搬走会让 `runs/` 里的历史断档，
  * 而那个目录是用户自己会去看的——断档的代价比多占一点磁盘大得多。
@@ -3413,7 +4000,7 @@ function archiveRun(project, name) {
   const run = runProfile(project, name);
   if (!run.dir || !fs.existsSync(run.dir)) throw new Error(`没有这个 run：${name}`);
   const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
-  const dst = abs(`archive/${String(name).replace(/[^\w.-]+/g, "-")}-${stamp}`);
+  const dst = abs(`${RUNS_DIR}/archive/${String(name).replace(/[^\w.-]+/g, "-")}-${stamp}`);
   fs.mkdirSync(path.join(dst, "weights"), { recursive: true });
   const copied = [];
   for (const [src, rel] of [

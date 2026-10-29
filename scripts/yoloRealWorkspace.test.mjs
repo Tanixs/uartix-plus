@@ -142,6 +142,15 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
         await readyP;
         const st = await call("panel.train.state", {});
 
+        // P177-A：没有 --allow-fs-write 时，资产台账仍要能读，但必须明说只读
+        const assets = await call("panel.train.assetsState", true);
+        expect(assets.readOnly, "无写权限时资产页必须标只读").toBe(true);
+        expect(Object.keys(assets.datasets).length, "真工作区一个数据集都没扫到").toBeGreaterThan(0);
+        expect(
+          Object.values(assets.runs).every((r) => typeof r.status === "string" && r.status),
+          "run 状态缺失",
+        ).toBe(true);
+
         // python 来自 `_env.bat`，而且它能读 YAML（这条是兜底解析器之外的正路）
         expect(st.python.ok, JSON.stringify(st.python)).toBe(true);
         expect(st.python.source).toBe("_env.bat");

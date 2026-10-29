@@ -64,6 +64,7 @@ MIT。见 [LICENSE](LICENSE)。
 
 ## 版本
 
+`0.5.0` — **P177-A：资产台账与 run 状态**：新增第 7 个「资产」工作面（只读台账：数据集 / 训练产物 / 模型 / 部署包 / 回收站 / 存储），数据集带快速指纹与 run 血缘；run 状态持久化到 `train_runs/runs/<run>.json`（running / succeeded / stopped / failed / interrupted / external / incomplete），重启后不再把“结束/崩溃/手动跑”混在一起，手动 run 不冒充中断；路径输入框记住最近使用（`.uartix/yolo/prefs.json`，每字段 12 条，标存在/缺失）；归档改到 `train_runs/archive/`（修掉原来写 `archive/` 却不在写权限里的 bug）；交付命名修掉 `[object Object]`，同 SHA 重复交付只留一份。清理、回收站恢复、官方权重下载、部署包登记在后续批次。
 `0.4.5` — **P176-B6：部署四步与收尾**：部署页顶部四步时间线（环境 → 导出 → 编译 → 打包），每步显示就绪 / 进行中 / 完成 / 失败，可单独执行；环境步骤接 Docker/WSL 检测。配方列表改成全宽表格（配方 / 模型名 / 尺寸 / 镜像 / 校准），点行选中，窄屏不再挤成横向滚动。帮助抽屉加搜索与「部署与 Docker」分节；部署页长说明压到 120 字内，细节进抽屉。a11y：页签与结果分段带 aria 状态、图例 aria-pressed、焦点可见、减少动效。
 `0.4.4` — **P176-B5：实验表与对比**：实验页改成可排序表（完成时间 / 轮次 / 最佳轮 / mAP50-95(B) / mAP50-95(M) / 用时 / 状态），行操作收进 `⋯` 弹层（看曲线 / 评估 / 等价命令 / 归档 / 备注）。对比卡从「结果 → 指标」移到实验页：两个 run 的曲线叠加（A 实线 / B 虚线）、指标 A→B 与差值、参数差异只列不同的项。
 `0.4.3` — **P176-B4：图表 v2**：结果页的两张手绘折线换成 `lineChart`——Y 轴刻度、X 轴轮次、图例点击显隐、悬停十字线与逐条数值、平滑（原值 / 0.6 / 0.9，只影响画线，tooltip 读原始值）、最佳轮标记与竖线、数字表 fallback。新增学习率曲线与本次会话的显存曲线；单点与空数据不崩。监控/对比的抽稀从 140 行提到 400 行，最佳轮标记不再因抽稀偏一轮。
@@ -98,7 +99,7 @@ MIT。见 [LICENSE](LICENSE)。
 
 同批（W6）把部署页的**导出**重做了：格式矩阵（onnx / openvino / engine / torchscript / coreml / saved_model / pb / edgetpu / paddle / mnn / ncnn / imx / rknn / executorch / axelera / deepx / qnn / litert / hailo，`tflite` 是别名不单列）、`imgsz / dynamic / simplify / opset / quantize / nms`（**没有 `half`**，它在 8.4 已被 `quantize` 取代）、导出后显示**体积 + 拿导出文件真跑一遍测出的 ms/图**，以及**端侧约束卡**——MaixCam / MaixHub 在线转换器只吃目标检测（opset=17、dynamic=False），所以分割模型"导出成功"也上不了板，这一点在点之前就说。产物落 `train_runs/export/`，你的 `scripts/export_onnx.py` 与 `05_export_onnx.bat` 不动。
 
-同批（W7）加了**实验页**：列表读每个 run 的 `args.yaml` + `results.csv`（面板不另存一份实验记录，所以不会出现"面板说训过、盘上找不到"），可写备注（落在 `train_runs/<实验>.note`，不碰 `runs/`）、可两两对比（参数差异 + 曲线并排）、**等价命令**三条可复制可存成 `.bat`（只落 `train_runs/bat/`，编号脚本不动），以及归档——**只复制不搬走**：`archive/<实验>-<时间>/` 里放 `args.yaml + results.csv + best.pt`，`runs/` 里的原件留在原地。
+同批（W7）加了**实验页**：列表读每个 run 的 `args.yaml` + `results.csv`（面板不另存一份实验记录，所以不会出现"面板说训过、盘上找不到"），可写备注（落在 `train_runs/<实验>.note`，不碰 `runs/`）、可两两对比（参数差异 + 曲线并排）、**等价命令**三条可复制可存成 `.bat`（只落 `train_runs/bat/`，编号脚本不动），以及归档——**只复制不搬走**：`train_runs/archive/<实验>-<时间>/` 里放 `args.yaml + results.csv + best.pt`，`runs/` 里的原件留在原地。
 
 同批（W8）加了面板内**帮助**页（三层配置、面板与手动同源、只读清单、只做 11/26、任务识别只是建议、`half` 为什么没了、续训为什么只认 `last.pt`、为什么这次要重新批准），并补了三条防回退的判据：每块页签都必须有 section 且切换时被显式处理（防"点了什么都不显示"）、包里每个文件都发得出去（防静默跳过 runner）、包内文件数不超过发布上限。
 
