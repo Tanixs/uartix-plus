@@ -438,3 +438,40 @@ describe("P177-C · 官方权重下载", () => {
     expect(html).toContain("function closeModelDownload(");
   });
 });
+
+/* ============================================================================
+   P177-D · 部署页：一个目标画像 + 开跑前校验 + 部署包
+   ----------------------------------------------------------------------------
+   两份旧 PS1 并列成"两个配方"是这个页面最容易复发的老毛病：它们只是两份底座，
+   目标画像只有一个。判据盯住目标卡、校验条、旧标签与登记的出口。
+   ============================================================================ */
+
+describe("P177-D · 部署目标画像与部署包", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("顶部有唯一的目标画像卡，写明输入/容器/校准", () => {
+    expect(html).toContain('id="targetcard"');
+    expect(html).toContain('function renderTargetCard(');
+    expect(html).toContain("一个目标 · 多个部署实例");
+    expect(html).toContain("YOLO26 工具未声明支持");
+  });
+
+  it("旧配方标「旧」并给出差异，而不是并列成两个目标", () => {
+    expect(html).toContain('var legacy = issues.length');
+    expect(html).toContain("两份 <code>deploy_config*.ps1</code> 只是外部底座");
+  });
+
+  it("开跑前校验：红/黄/绿三档 + 校准不一致要勾选才放行", () => {
+    expect(html).toContain('id="depcheck"');
+    expect(html).toContain('uartix.call("deployPrecheck"');
+    expect(html).toContain("我知道校准来源不是当前训练集");
+    expect(html).toContain("function applyDepGate(");
+  });
+
+  it("部署包有登记出口，并说明外部目录只读", () => {
+    expect(html).toContain('id="depbundles"');
+    expect(html).toContain('uartix.call("deployRegister"');
+    expect(html).toContain("外部 <code>work/calib</code> 不复制、不删除");
+  });
+});

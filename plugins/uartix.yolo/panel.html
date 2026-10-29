@@ -909,6 +909,18 @@
         border: 1px solid var(--line); border-radius: 8px; background: var(--inset);
       }
       .depenv .hint { flex: 1 1 100%; font-size: 11px; line-height: 1.65; color: var(--dim); white-space: pre-wrap; margin: 0; }
+      /* P177-D：开跑前校验（每条一行，红/黄/绿三档） */
+      .depcheck {
+        margin-top: 10px; padding-top: 8px;
+        border-top: 1px solid var(--line);
+      }
+      .depcheck .ck {
+        display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 6px;
+        font-size: 11px; line-height: 1.5; padding: 2px 0; color: var(--dim);
+      }
+      .depcheck .ck b { color: var(--ok); text-align: center; font-weight: 700; }
+      .depcheck .ck.warn b { color: var(--warn); }
+      .depcheck .ck.bad b, .depcheck .ck.bad span { color: var(--bad); }
       .deliv { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
       .deliv .pill {
         font-family: "Cascadia Mono", Consolas, monospace; font-size: 10px; padding: 3px 8px;
@@ -2033,6 +2045,7 @@
 
       <!-- ============ 部署 ============ -->
       <section id="tab-deploy" hidden>
+        <div class="card" id="targetcard"></div>
         <div class="stepper" id="depstepper" aria-label="部署步骤"></div>
         <div class="cols">
 <div class="col">
@@ -2127,6 +2140,7 @@
             </label>
           </div>
           <div class="cfglist" id="cfglist"></div>
+          <div id="depcheck"></div>
           <div class="depenv" id="depenv"></div>
           <div class="row" style="margin-top: 12px; flex-wrap: wrap">
             <button class="btn primary" id="dep-all">开始部署（全流程）</button>
@@ -2134,6 +2148,8 @@
             <span class="note" style="margin: 0">四个步骤可以在上面单独点。</span>
           </div>
         </div>
+
+        <div class="card" id="depbundles"></div>
 
       </section>
 
@@ -2869,6 +2885,116 @@
         });
       }
 
+      /* ---------------- P177-D：目标画像 / 开跑前校验 / 部署包 ---------------- */
+      var depCheck = null;
+      var depCheckTimer = 0;
+      var depCalibOk = false;
+
+      function renderTargetCard(st2) {
+        var host = $("targetcard");
+        if (!host) return;
+        var t = st2.target || {};
+        if (!t.id) { host.innerHTML = ""; return; }
+        var input = t.input || {};
+        var cal = t.calibration || {};
+        host.innerHTML =
+          '<div class="sec-h"><span class="sec-t">目标画像</span><span class="tag ok">' + esc(t.title || t.id) + '</span>' +
+          '<span class="sec-m">一个目标 · 多个部署实例</span></div>' +
+          '<div class="kv">' +
+          "<b>输入</b><span>" + esc((input.width || 640) + "×" + (input.height || 480) + " · opset " + (input.opset || 11)) + "</span>" +
+          "<b>容器</b><span>" + esc((t.runtime || {}).dockerImage || "pulsar2:4.0") + "</span>" +
+          "<b>能力</b><span>检测 / 分割 · YOLO11（YOLO26 工具未声明支持，会先警告）</span>" +
+          "<b>校准</b><span>默认用训练集 images/train · 至少 " + esc(cal.minSamples || 60) + " 张 · seed " + esc(cal.seed || 42) + "</span>" +
+          '</div><p class="note" style="margin:6px 0 0">下面的两份 <code>deploy_config*.ps1</code> 只是外部底座（只读），不是两个目标画像。<button class="linkbtn" data-help="deploy">为什么?</button></p>';
+      }
+
+      function applyDepGate() {
+        var b = $("dep-all");
+        if (!b) return;
+        var blocked = depCheck && depCheck.ok === false;
+        var need = depCheck && depCheck.needsCalibConfirm && !depCalibOk;
+        b.disabled = !!dep.running || !dep.ready || blocked || need;
+        b.title = blocked ? "校验没过：先解决红字那几项" : need ? "校准来源与训练集不一致：先勾选确认" : "";
+      }
+
+      function renderDepCheck() {
+        var host = $("depcheck");
+        if (!host) return;
+        if (!depCheck) { host.innerHTML = ""; applyDepGate(); return; }
+        var rows = depCheck.checks || [];
+        var html = '<div class="depcheck">' + rows.map(function (r) {
+          var icon = r.level === "bad" ? "×" : r.level === "warn" ? "!" : "✓";
+          return '<div class="ck ' + esc(r.level) + '"><b>' + icon + "</b><span>" + esc(r.text) + "</span></div>";
+        }).join("");
+        if (depCheck.needsCalibConfirm) {
+          html += '<label class="p bool" style="margin-top:6px;font-size:11px"><input type="checkbox" id="depcalibok"' + (depCalibOk ? " checked" : "") +
+            " /> 我知道校准来源不是当前训练集，仍按这个来源量化</label>";
+        }
+        html += "</div>";
+        host.innerHTML = html;
+        var cb = $("depcalibok");
+        if (cb) cb.onchange = function () { depCalibOk = this.checked; applyDepGate(); };
+        applyDepGate();
+      }
+
+      async function refreshDepCheck() {
+        var host = $("depcheck");
+        if (!host) return;
+        host.innerHTML = '<p class="note" style="margin:8px 0 0">开跑前校验中…</p>';
+        try {
+          depCheck = await uartix.call("deployPrecheck", {
+            cfgName: dep.cfg || "",
+            model: ($("depmodelpath") && $("depmodelpath").value.trim()) || dep.model || "",
+            calib: ($("depcalib") && $("depcalib").value) || dep.calib || "",
+          });
+        } catch (e) {
+          depCheck = null;
+          host.innerHTML = '<p class="note" style="margin:8px 0 0">校验没跑起来：' + esc((e && e.message) || e) + "</p>";
+        }
+        renderDepCheck();
+      }
+
+      function scheduleDepCheck() {
+        clearTimeout(depCheckTimer);
+        depCheckTimer = setTimeout(refreshDepCheck, 220);
+      }
+
+      function renderBundles(st2) {
+        var host = $("depbundles");
+        if (!host) return;
+        var list = st2.deployments || [];
+        var html = '<div class="sec-h"><span class="sec-t">部署包</span><span class="tag">train_runs/deploy</span><span class="sec-m">' + list.length + " 个</span></div>";
+        if (!list.length) {
+          html += '<p class="note" style="margin:6px 0">还没有登记过部署包。跑完「打包」会自动登记；也可以手动登记当前配方的产物。</p>';
+        } else {
+          html += '<div class="tablewrap"><table><thead><tr><th>包</th><th>目标</th><th>状态</th><th>产物</th><th>大小</th><th>校准</th><th>时间</th></tr></thead><tbody>' +
+            list.slice(0, 8).map(function (b) {
+              return '<tr><td class="name" title="' + esc(b.dir || "") + '">' + esc(b.name || b.id) + "</td>" +
+                "<td>" + esc(b.target || "—") + "</td>" +
+                "<td>" + esc(b.status || "—") + "</td>" +
+                '<td class="num">' + esc((b.artifacts || []).length) + "</td>" +
+                '<td class="num">' + esc(fmtBytes(b.bytes || 0)) + "</td>" +
+                "<td>" + (b.calibMatched ? '<span class="tag ok">匹配</span>' : '<span class="tag warn">不一致</span>') + "</td>" +
+                '<td class="num">' + esc(fmtShortWhen(b.createdAt ? Date.parse(b.createdAt) : 0)) + "</td></tr>";
+            }).join("") + "</tbody></table></div>";
+        }
+        html += '<div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn" id="depreg">登记当前配方的产物</button>' +
+          '<span class="note" style="margin:0">只复制最终产物 + meta + 最近日志；外部 <code>work/calib</code> 不复制、不删除。</span></div>';
+        host.innerHTML = html;
+        var btn = $("depreg");
+        if (btn) btn.onclick = async function () {
+          btn.disabled = true;
+          try {
+            var r = await uartix.call("deployRegister", { cfgName: dep.cfg || "" });
+            if (r && r.ok) { sysLog("已登记部署包：" + r.bundle.dir); await loadDeploy(); }
+            else sysLog("[错误] " + ((r && r.error) || "登记失败"));
+          } catch (e) {
+            sysLog("[错误] " + String((e && e.message) || e));
+          }
+          btn.disabled = false;
+        };
+      }
+
       function renderDeployPage() {
         var st2 = dep.state || {};
         var tool = st2.tool || {};
@@ -2914,15 +3040,17 @@
           var cfgRows = configs.map(function (c) {
             var on = c.name === dep.cfg;
             var cal = c.calib ? String(c.calib).split(/[\\/]/).filter(Boolean).pop() : "未设置";
+            var issues = c.issues || [];
+            var legacy = issues.length ? '<span class="tag warn" title="' + esc(issues.map(function (x) { return x.text; }).join("\\n")) + '">旧</span>' : "";
             return (
               '<tr class="' + (on ? "on" : "") + '" data-cfg="' + esc(c.name) + '">' +
                 '<td><span class="dot"></span></td>' +
-                '<td class="name" title="' + esc(c.name) + '">' + esc(c.name) + "</td>" +
+                '<td class="name" title="' + esc(c.name) + '">' + esc(c.name) + " " + legacy + "</td>" +
                 "<td>" + esc(c.modelName || "—") + "</td>" +
                 '<td class="num">' + esc(c.imgsz) + "</td>" +
                 "<td>" + esc(c.docker || "—") + "</td>" +
                 '<td class="name" title="' + esc(c.calib || "") + '">' + esc(cal) + "</td>" +
-                "<td>" + (c.ok === false ? '<span class="tag warn">' + esc(c.error || "读不出") + "</span>" : "") + "</td></tr>"
+                "<td>" + (c.ok === false ? '<span class="tag warn">' + esc(c.error || "读不出") + "</span>" : issues.length ? '<span class="tag">' + esc(issues[0].text.slice(0, 28)) + (issues[0].text.length > 28 ? "…" : "") + "</span>" : "") + "</td></tr>"
             );
           }).join("");
           $("cfglist").innerHTML =
@@ -2974,11 +3102,16 @@
         };
 
         var running = !!(st2.active && st2.active.state === "running") || dep.last.state === "running";
+        dep.running = running;
+        dep.ready = !!tool.ready;
         if ($("dep-all")) $("dep-all").disabled = running || !tool.ready;
         if ($("deliver")) $("deliver").disabled = running || !latest;
         if ($("dep-stop")) $("dep-stop").disabled = !running;
+        renderTargetCard(st2);
+        renderBundles(st2);
         renderStepper(tool, running);
         renderDeployEnv();
+        scheduleDepCheck();
       }
 
       async function runDeploy(step) {

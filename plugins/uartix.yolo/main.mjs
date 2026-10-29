@@ -1996,6 +1996,15 @@ function fmtDuration(sec) {
   return s + "s";
 }
 
+/** 字节 → 人能读的体积（面板另有一份；插件侧日志/进度也用同一套口径）。 */
+function fmtBytes(bytes) {
+  const v = Number(bytes) || 0;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+  if (v < 1024 * 1024 * 1024) return `${(v / 1024 / 1024).toFixed(1)} MB`;
+  return `${(v / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
 /** 训练记录：`<project>/<name>/results.csv` 的最后一行就是这一轮的最新指标。 */
 function scanRuns(project) {
   const dir = project || abs(DEFAULTS.train.project);
@@ -3067,6 +3076,267 @@ async function pickLists() {
   };
 }
 
+/* ============================ 部署目标画像（P177-D） ============================ */
+
+/**
+ * 一个目标画像，不是两个。两份 `deploy_config*.ps1` 只是两份**外部底座**（只读），
+ * 它们之间的差别是部署实例的参数，不是两套硬件。
+ */
+const DEPLOY_TARGET = {
+  id: "maixcam2-pulsar2-4.0",
+  title: "MaixCAM2 · Pulsar2 4.0",
+  tool: { kind: "maixcam2_deploy", runBat: "run.bat", deployPs1: "deploy.ps1" },
+  input: { width: 640, height: 480, opset: 11 },
+  runtime: { dockerImage: "pulsar2:4.0" },
+  model: { families: ["yolo11", "yolov8"], tasks: ["detect", "segment"], labels: "from-model" },
+  calibration: { samples: 100, seed: 42, minSamples: 60, sourcePolicy: "dataset-train-images" },
+  outputs: { workDir: "work", calibDir: "calib", outDir: "out", deployDir: "deploy" },
+  // YOLO26 是插件能训的，但**目标工具没声明支持**：不拦死，只给警告，让用户自己决定
+  unsupportedFamilies: ["yolo26"],
+};
+
+function deployConfigIssues(cfg, effective) {
+  const out = [];
+  if (!cfg || !cfg.ok) return out;
+  const targetData = path.join(abs(effective.dataset.output_dir || ""), "images", "train").replace(/\\/g, "/").toLowerCase();
+  const calib = String(cfg.calib || "").replace(/\\/g, "/").toLowerCase();
+  if (cfg.model && /\/models\/delivered\/best\.pt$|\/models\/best\.pt$/i.test(String(cfg.model).replace(/\\/g, "/"))) {
+    out.push({ level: "warn", text: "模型指向旧 best.pt（不是某次 run 的固定版本）" });
+  }
+  if (cfg.modelName === "best") {
+    out.push({ level: "warn", text: "模型名是通用的 best——上板后分不清是哪一版" });
+  }
+  if (calib && targetData && calib !== targetData) {
+    out.push({ level: "warn", text: `校准来源 ${cfg.calib} 与当前数据集的 images/train 不一致；量化可能偏，建议改成当前数据集` });
+  }
+  if (String(cfg.opset || "") && String(cfg.opset) !== String(DEPLOY_TARGET.input.opset)) {
+    out.push({ level: "warn", text: `opset=${cfg.opset}（目标画像默认 ${DEPLOY_TARGET.input.opset}）` });
+  }
+  if (cfg.docker && String(cfg.docker) !== DEPLOY_TARGET.runtime.dockerImage) {
+    out.push({ level: "warn", text: `镜像 ${cfg.docker}（目标画像默认 ${DEPLOY_TARGET.runtime.dockerImage}）` });
+  }
+  return out;
+}
+
+function countImages(dir, cap) {
+  let n = 0;
+  const walk = (d, depth) => {
+    if (depth > 2 || n >= (cap || 5000)) return;
+    let ents = [];
+    try {
+      ents = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of ents) {
+      if (n >= (cap || 5000)) return;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (IMAGE_RE.test(e.name)) n += 1;
+    }
+  };
+  walk(dir, 0);
+  return n;
+}
+
+/** 开跑前校验：只读、不启动任何进程。blockers 拦住，warnings 需要用户勾一下。 */
+async function deployPrecheck(req) {
+  needWorkspace();
+  const o = isObj(req) ? req : {};
+  const { effective } = await effectiveConfig();
+  const checks = [];
+  const blockers = [];
+  const warnings = [];
+  const add = (level, text, extra) => {
+    const row = { level, text, ...(extra || {}) };
+    checks.push(row);
+    if (level === "bad") blockers.push(row);
+    if (level === "warn") warnings.push(row);
+  };
+
+  const modelPath = abs(String(o.model || effective.train.weights || ""));
+  const modelFacts = modelPath && fs.existsSync(modelPath) ? (scanModels(80).find((f) => f.file.toLowerCase() === modelPath.toLowerCase()) || null) : null;
+  const inf = inferWeights(modelPath);
+  if (!modelPath || !fs.existsSync(modelPath)) add("bad", `找不到要部署的权重：${modelPath || "(没填)"}`);
+  else {
+    add("ok", `模型：${path.basename(modelPath)}（${fmtBytes(fs.statSync(modelPath).size)}）`);
+    const task = (modelFacts && modelFacts.task) || inf.task || "";
+    if (!task) add("warn", "读不出任务（文件名也不是官方命名）：部署前请确认它是检测还是分割");
+    else if (!DEPLOY_TARGET.model.tasks.includes(task)) add("bad", `目标只支持 ${DEPLOY_TARGET.model.tasks.join(" / ")}，这枚是 ${task}`);
+    else add("ok", `任务：${task}`);
+    const fam = (modelFacts && modelFacts.family) || inf.family || "";
+    if (fam && DEPLOY_TARGET.unsupportedFamilies.includes(fam)) {
+      add("warn", `${fam} 是插件能训的，但目标工具（Pulsar2 4.0 配方）没有声明支持；导出的包可能上不了板`);
+    }
+  }
+
+  const calibDir = String(o.calib || "").trim();
+  if (!calibDir || calibDir === "@config") {
+    add("warn", "校准来源跟配置文件走：面板没法替你核对它是不是当前训练集");
+  } else if (!fs.existsSync(calibDir)) {
+    add("bad", `校准目录不存在：${calibDir}`);
+  } else {
+    const n = countImages(calibDir, DEPLOY_TARGET.calibration.minSamples + 1);
+    if (n < DEPLOY_TARGET.calibration.minSamples) add("bad", `校准图只有 ${n} 张，少于目标要求的 ${DEPLOY_TARGET.calibration.minSamples} 张`);
+    else add("ok", `校准图：${n} 张`);
+    const want = path.join(abs(effective.dataset.output_dir || ""), "images", "train").replace(/\\/g, "/").toLowerCase();
+    const got = calibDir.replace(/\\/g, "/").toLowerCase();
+    if (want && got !== want) {
+      add("warn", "校准来源不是当前训练数据集的 images/train；INT8 量化可能偏，确认后勾选再跑");
+    } else if (want) {
+      add("ok", "校准来源与训练数据集一致");
+    }
+  }
+
+  const imgsz = Number(o.imgsz || DEPLOY_TARGET.input.width) || DEPLOY_TARGET.input.width;
+  if (imgsz % 32 !== 0) add("bad", `输入宽度 ${imgsz} 不是 32 的倍数`);
+  else add("ok", `输入 ${imgsz}×${DEPLOY_TARGET.input.height}`);
+  if (Number(o.opset || DEPLOY_TARGET.input.opset) !== DEPLOY_TARGET.input.opset) {
+    add("warn", `opset=${o.opset} 与目标默认 ${DEPLOY_TARGET.input.opset} 不同`);
+  }
+  const env = await dockerEnv();
+  if (env.ok) add("ok", `Docker ${env.version || "可用"}`);
+  else add(env.wsl === "broken" ? "bad" : "warn", env.hint || env.error || "Docker 不可用");
+
+  return { ok: blockers.length === 0, target: DEPLOY_TARGET, checks, blockers, warnings, needsCalibConfirm: warnings.some((w) => /校准来源不是当前训练数据集/.test(w.text)) };
+}
+
+/** 在外部目录里找一次打包的产物：只在 deploy/out/work/logs 里按名字找，不递归整盘。 */
+function scanExternalArtifacts(modelName) {
+  const tool = scanDeployTool();
+  if (!tool.bound) return { bound: false, dir: "", artifacts: [], meta: "", log: "", error: "还没绑外部目录" };
+  const name = String(modelName || "");
+  if (!name) return { bound: true, dir: tool.dir, artifacts: [], meta: "", log: "", error: "没有模型名" };
+  const want = [
+    `${name}.mud`,
+    `${name}_npu.axmodel`,
+    `${name}_vnpu.axmodel`,
+    `${name}.axmodel`,
+    `demo_${name}.py`,
+  ];
+  const artifacts = [];
+  for (const sub of ["deploy", "out"]) {
+    const d = path.join(tool.dir, sub);
+    for (const f of want) {
+      const p = path.join(d, f);
+      try {
+        const st = fs.statSync(p);
+        if (st.isFile() && !artifacts.some((a) => a.name === f)) {
+          artifacts.push({ name: f, bytes: st.size, sha256: sha256File(p), externalPath: p.replace(/\\/g, "/"), sub });
+        }
+      } catch {
+        /* 这个子目录里没有 */
+      }
+    }
+  }
+  let meta = "";
+  const mp = path.join(tool.dir, "work", "meta.json");
+  if (fs.existsSync(mp)) meta = mp;
+  let log = "";
+  const ld = path.join(tool.dir, "logs");
+  try {
+    const files = fs.readdirSync(ld).filter((f) => /\.(log|txt)$/i.test(f)).map((f) => ({ f, m: fs.statSync(path.join(ld, f)).mtimeMs })).sort((a, b) => b.m - a.m);
+    if (files.length) log = path.join(ld, files[0].f);
+  } catch {
+    /* 没有 logs 目录 */
+  }
+  return { bound: true, dir: tool.dir, artifacts, meta, log, error: artifacts.length ? "" : `外部目录里没找到 ${name} 的 .mud / axmodel / demo` };
+}
+
+/**
+ * 登记一次打包：把最终产物 + meta + 最近日志复制到 `train_runs/deploy/<bundle>/`，
+ * 计算 SHA，写 `deployment.json`。外部目录**只读**，一个字节都不写。
+ */
+async function deployRegister(req) {
+  needWorkspace();
+  if (!canWrite()) throw new Error("当前是只读模式：能看部署包，不能登记");
+  const o = isObj(req) ? req : {};
+  const { effective } = await effectiveConfig();
+  const cfgName = String(o.cfgName || "");
+  const cfg = cfgName ? readDeployConfig(cfgName) : { ok: false, modelName: "" };
+  const modelName = String(o.modelName || (cfg.ok ? cfg.modelName : "") || "").replace(/[^\w.-]+/g, "-");
+  if (!modelName) throw new Error("没有模型名：先在配方里设 $ModelName，或在面板里填一个");
+  const modelPath = abs(String(o.model || (cfg.ok ? cfg.model : "") || ""));
+  const calibDir = abs(String(o.calib || (cfg.ok ? cfg.calib : "") || ""));
+  const scan = scanExternalArtifacts(modelName);
+  if (!scan.artifacts.length) return { ok: false, error: scan.error, modelName };
+
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  const id = `dep-${modelName}-${stamp}`;
+  const bundleDir = abs(`train_runs/deploy/${id}`);
+  fs.mkdirSync(bundleDir, { recursive: true });
+  const copied = [];
+  for (const a of scan.artifacts) {
+    const dest = path.join(bundleDir, a.name);
+    fs.copyFileSync(a.externalPath, dest);
+    copied.push({ name: a.name, bytes: a.bytes, sha256: a.sha256, from: a.externalPath });
+  }
+  let metaName = "";
+  if (scan.meta) {
+    metaName = "meta.json";
+    fs.copyFileSync(scan.meta, path.join(bundleDir, metaName));
+    copied.push({ name: metaName, bytes: fs.statSync(scan.meta).size, sha256: sha256File(scan.meta), from: scan.meta.replace(/\\/g, "/") });
+  }
+  let logName = "";
+  if (scan.log) {
+    logName = `convert-${path.basename(scan.log)}`;
+    fs.copyFileSync(scan.log, path.join(bundleDir, logName));
+    copied.push({ name: logName, bytes: fs.statSync(scan.log).size, sha256: sha256File(scan.log), from: scan.log.replace(/\\/g, "/") });
+  }
+
+  const runMatch = /\/runs\/([^/]+)\/weights\//i.exec(modelPath.replace(/\\/g, "/"));
+  const catalog = await catalogBuild(true);
+  const modelSha = modelPath && fs.existsSync(modelPath) ? sha256File(modelPath) : "";
+  const modelEntry = modelSha ? catalog.models[modelSha] : null;
+  const dataset = Object.values(catalog.datasets).find((d) => d.dir.toLowerCase() === abs(effective.dataset.output_dir || "").toLowerCase());
+  const calibFingerprint = (() => {
+    const d = String(calibDir || "").replace(/\\/g, "/");
+    if (!d) return "";
+    const ds = Object.values(catalog.datasets).find((x) => d.toLowerCase().startsWith(x.dir.toLowerCase()));
+    return ds ? ds.fingerprint : "";
+  })();
+  const matched = !!(
+    calibDir &&
+    dataset &&
+    calibDir.replace(/\\/g, "/").toLowerCase() === path.join(dataset.dir, "images", "train").replace(/\\/g, "/").toLowerCase()
+  );
+
+  const meta = {
+    schemaVersion: 1,
+    id,
+    name: modelName,
+    target: DEPLOY_TARGET.id,
+    targetTitle: DEPLOY_TARGET.title,
+    status: "packaged",
+    createdAt: new Date().toISOString(),
+    modelPath: modelPath.replace(/\\/g, "/"),
+    modelId: modelEntry ? modelEntry.id : modelSha ? `mdl-${modelSha.slice(0, 8)}` : "",
+    modelSha256: modelSha,
+    runId: runMatch ? runMatch[1] : "",
+    datasetId: dataset ? dataset.id : "",
+    datasetFingerprint: dataset ? dataset.fingerprint : "",
+    calibDir: calibDir.replace(/\\/g, "/"),
+    calibFingerprint,
+    calibMatched: matched,
+    recipe: cfgName,
+    artifacts: copied,
+    externalDir: scan.dir,
+    externalPaths: copied.map((c) => c.from),
+    logs: logName ? [logName] : [],
+    readOnlyExternal: true,
+  };
+  writeJsonAtomic(path.join(bundleDir, "deployment.json"), meta);
+  catalogCache = { at: 0, value: null };
+  externalCacheCache = { at: 0, value: null };
+  auditLog({ action: "deploy-register", kind: "deployment", id, path: bundleDir, bytes: copied.reduce((n, c) => n + c.bytes, 0) });
+  try {
+    ctx.panels.emit(PANEL, "assets", { reason: "deploy-register", id });
+  } catch {
+    /* 面板没开 */
+  }
+  return { ok: true, bundle: { ...meta, dir: bundleDir.replace(/\\/g, "/"), bytes: copied.reduce((n, c) => n + c.bytes, 0) }, state: await catalogBuild(true) };
+}
+
 async function deployState() {
   const { effective } = await effectiveConfig();
   const tool = scanDeployTool();
@@ -3089,11 +3359,14 @@ async function deployState() {
   }
   return {
     tool,
-    configs,
+    target: DEPLOY_TARGET,
+    configs: configs.map((c) => ({ ...c, issues: c.ok ? deployConfigIssues(c, effective) : [] })),
     latest: best ? { path: best.path, run: best.run, at: best.at } : null,
     delivered,
     candidates: deployCandidates(effective.train.project),
     calib: calibCandidates(),
+    deployments: listDeploymentBundles(),
+    external: externalCacheStats(),
     jobs: [...jobs.values()].filter((j) => j.kind === "deploy").slice(-4).map(snapshot),
     active: active && active.kind === "deploy" ? snapshot(active) : null,
   };
@@ -3186,9 +3459,15 @@ async function deployStart(req) {
   pushLine(job, `[工作台] 包装配置: ${wrapper}`, "sys");
   if (calibDir) {
     pushLine(job, `[工作台] 校准图: ${calibDir}（覆盖配置里的 ${cfg.calib || "未设置"}）`, "sys");
+    const want = path.join(abs(effective.dataset.output_dir || ""), "images", "train").replace(/\\/g, "/").toLowerCase();
+    if (want && calibDir.replace(/\\/g, "/").toLowerCase() !== want) {
+      pushLine(job, `[工作台] 注意：校准来源不是当前训练集的 images/train（${want}），INT8 量化可能偏`, "err");
+    }
   } else if (cfg.calib) {
     pushLine(job, `[工作台] 校准图仍用配置里的 ${cfg.calib}（当前数据集没有 images/train，没法替你换）`, "sys");
   }
+  pushLine(job, `[工作台] 目标：${DEPLOY_TARGET.title} · ${DEPLOY_TARGET.input.width}×${DEPLOY_TARGET.input.height} · opset ${DEPLOY_TARGET.input.opset} · ${DEPLOY_TARGET.runtime.dockerImage}`, "sys");
+  job.deployMeta = { modelName: cfg.modelName || "", modelPath, calibDir, cfgName: cfg.name, step };
   job.progress.phase = step === "validate" ? "check" : "prepare";
   job.progress.detail = step === "validate" ? "只检查环境，不动任何文件" : "准备 ONNX";
   emitJob(job);
@@ -3207,7 +3486,20 @@ async function deployStart(req) {
       env: { ...PY_ENV, },
       onStdout: (l) => pushLine(job, l, "out"),
       onStderr: (l) => pushLine(job, l, "err"),
-      onExit: (code) => finishJob(job, code),
+      onExit: (code) => {
+        finishJob(job, code);
+        // 打包成功后自动登记：把外部 deploy/ 与 out/ 里的最终产物复制进 train_runs/deploy/<bundle>/。
+        // 外部目录仍然只读；登记失败不影响这次部署的结果，只多一行说明。
+        if (code === 0 && !job.stopped && (step === "all" || step === "package")) {
+          Promise.resolve()
+            .then(() => deployRegister({ modelName: cfg.modelName || "", model: modelPath, calib: calibDir, cfgName: cfg.name }))
+            .then((r) => {
+              if (r && r.ok) pushLine(job, `[工作台] 部署包已登记：${r.bundle.dir}（${r.bundle.artifacts.length} 个产物）`, "sys");
+              else pushLine(job, `[工作台] 这次没登记部署包：${(r && r.error) || scanExternalArtifacts(cfg.modelName || "").error}`, "err");
+            })
+            .catch((e) => pushLine(job, `[工作台] 登记部署包失败：${(e && e.message) || e}`, "err"));
+        }
+      },
       onError: (e) => {
         pushLine(job, `[工作台] 起进程失败：${(e && e.message) || e}`, "sys");
         finishJob(job, -1);
@@ -3669,6 +3961,16 @@ async function activate(c) {
     /** 一个对象参数：`{ cfgName, step, deliver }`（桥只转发一个载荷，位置参数拿不到）。 */
     async deployStart(req) {
       return await deployStart(req);
+    },
+
+    /** P177-D：开跑前校验（模型 / 校准 / 尺寸 / opset / Docker），只读不启动。 */
+    async deployPrecheck(req) {
+      return await deployPrecheck(req);
+    },
+
+    /** P177-D：把外部 deploy/out 里的最终产物登记成 train_runs/deploy/<bundle>/（外部只读）。 */
+    async deployRegister(req) {
+      return await deployRegister(req);
     },
 
     /** 部署前问一句：Docker 引擎（以及它脚下的 WSL）到底能不能用。 */

@@ -2433,3 +2433,171 @@ describe("P177-C · 官方清单、下载记账与权限边界", () => {
     }
   }, 90_000);
 });
+
+/* ============================ P177-D · 部署目标画像与部署包 ============================ */
+
+describe("P177-D · 一个目标画像、开跑前校验、部署包登记", () => {
+  /** 造一个假的 maixcam2_deploy 目录（外部只读），两份旧 PS1 + 一次打包产物。 */
+  function seedDeployTool(name, modelName) {
+    const ext = path.join(dir, `ext-${name}`);
+    mkdirSync(path.join(ext, "deploy"), { recursive: true });
+    mkdirSync(path.join(ext, "work"), { recursive: true });
+    mkdirSync(path.join(ext, "logs"), { recursive: true });
+    writeFileSync(path.join(ext, "run.bat"), "@echo off\r\n", "utf8");
+    writeFileSync(path.join(ext, "deploy.ps1"), "# fake deploy.ps1\r\nparam($Config,$Step)\r\n", "utf8");
+    writeFileSync(
+      path.join(ext, "deploy_config.ps1"),
+      ['$Model = "D:/YOLO-Workspace/models/delivered/best.pt"', '$ModelName = "best"', '$CalibSources = "D:/old/anno"', "$ImgszW = 640", "$ImgszH = 480", "$Opset = 11", '$DockerImage = "pulsar2:4.0"'].join("\r\n"),
+      "utf8",
+    );
+    writeFileSync(
+      path.join(ext, "deploy_config.digits.ps1"),
+      [`$Model = "D:/YOLO-Workspace/models/delivered/${modelName}-best.pt"`, `$ModelName = "${modelName}"`, '$CalibSources = "D:/old/123lmages_seg/images/train"', "$ImgszW = 640", "$ImgszH = 480", "$Opset = 11", '$DockerImage = "pulsar2:4.0"'].join("\r\n"),
+      "utf8",
+    );
+    for (const f of [`${modelName}.mud`, `${modelName}_npu.axmodel`, `${modelName}_vnpu.axmodel`, `demo_${modelName}.py`]) {
+      writeFileSync(path.join(ext, "deploy", f), `artifact:${f}`, "utf8");
+    }
+    writeFileSync(path.join(ext, "work", "meta.json"), '{"tool":"pulsar2","version":"4.0"}', "utf8");
+    writeFileSync(path.join(ext, "logs", "convert-20261029.log"), "convert ok\n", "utf8");
+    return ext;
+  }
+
+  function seedManyImages(ws, rel, n) {
+    const d = path.join(ws, rel);
+    mkdirSync(d, { recursive: true });
+    for (let i = 0; i < n; i++) writeFileSync(path.join(d, `im${i}.jpg`), "x");
+    return d;
+  }
+
+  it("deployState 只有一份目标画像；两份旧 PS1 被标旧并给出差异", async () => {
+    const ws = makeWorkspace("dep-state");
+    seedManyImages(ws, "datasets/x/images/train", 60);
+    const ext = seedDeployTool("dep-state", "digits");
+    const pluginDir = copyPlugin("dep-state");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws, { deploy: ext });
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.deployState");
+      expect(s.target.id).toBe("maixcam2-pulsar2-4.0");
+      expect(s.target.input).toEqual({ width: 640, height: 480, opset: 11 });
+      expect(s.target.model.tasks).toEqual(["detect", "segment"]);
+      expect(s.target.unsupportedFamilies).toContain("yolo26");
+      expect(s.configs.length).toBe(2);
+      const plain = s.configs.find((c) => c.name === "deploy_config.ps1");
+      expect(plain.issues.length).toBeGreaterThan(0);
+      expect(plain.issues.map((x) => x.text).join(" ")).toMatch(/best\.pt|best/);
+      const digits = s.configs.find((c) => c.name === "deploy_config.digits.ps1");
+      expect(digits.issues.map((x) => x.text).join(" ")).toContain("校准");
+      expect(s.target.id, "目标只能有一个").toBe("maixcam2-pulsar2-4.0");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("开跑前校验：模型不存在/校准太少拦住；校准与训练集不一致要确认；YOLO26 给警告", async () => {
+    const ws = makeWorkspace("dep-check");
+    seedManyImages(ws, "datasets/x/images/train", 60);
+    seedManyImages(ws, "datasets/other/images/train", 60);
+    const ext = seedDeployTool("dep-check", "digits");
+    const pluginDir = copyPlugin("dep-check");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws, { deploy: ext });
+    try {
+      await p.ready;
+      const run = path.join(ws, "runs", "exp1");
+      mkdirSync(path.join(run, "weights"), { recursive: true });
+      writeFileSync(path.join(run, "weights", "best.pt"), "best", "utf8");
+      const model = path.join(run, "weights", "best.pt");
+
+      const missing = await p.call("panel.train.deployPrecheck", { model: path.join(ws, "nope.pt") });
+      expect(missing.ok).toBe(false);
+      expect(missing.blockers.some((b) => /找不到/.test(b.text))).toBe(true);
+
+      const fewDir = seedManyImages(ws, "datasets/few/images/train", 3);
+      const few = await p.call("panel.train.deployPrecheck", { model, calib: fewDir });
+      // 只有 3 张 → 少于 60
+      expect(few.ok).toBe(false);
+      expect(few.blockers.some((b) => /少于/.test(b.text))).toBe(true);
+
+      const mismatch = await p.call("panel.train.deployPrecheck", {
+        model,
+        calib: path.join(ws, "datasets", "other", "images", "train"),
+      });
+      // 这台机器的 WSL/Docker 可能是坏的（或被安全策略拦住）——那是另一条红线，不影响这里的校准判据
+      expect(mismatch.needsCalibConfirm).toBe(true);
+      expect(mismatch.warnings.some((w) => /不是当前训练数据集/.test(w.text))).toBe(true);
+
+      const matched = await p.call("panel.train.deployPrecheck", {
+        model,
+        calib: path.join(ws, "datasets", "x", "images", "train"),
+      });
+      expect(matched.needsCalibConfirm).toBe(false);
+      expect(matched.warnings.some((w) => /校准来源不是当前训练集/.test(w.text))).toBe(false);
+
+      const y26 = path.join(ws, "models", "yolo26n.pt");
+      writeFileSync(y26, "y26", "utf8");
+      const warn26 = await p.call("panel.train.deployPrecheck", {
+        model: y26,
+        calib: path.join(ws, "datasets", "x", "images", "train"),
+      });
+      expect(warn26.warnings.some((w) => /YOLO26|yolo26/.test(w.text))).toBe(true);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
+
+  it("登记部署包：产物复制到 train_runs/deploy/<bundle>/、写 deployment.json 与 SHA，外部文件一个字节不动", async () => {
+    const ws = makeWorkspace("dep-reg");
+    seedManyImages(ws, "datasets/x/images/train", 60);
+    const ext = seedDeployTool("dep-reg", "yolo11n-seg-0123");
+    const before = {};
+    for (const f of ["yolo11n-seg-0123.mud", "yolo11n-seg-0123_npu.axmodel", "yolo11n-seg-0123_vnpu.axmodel", "demo_yolo11n-seg-0123.py"]) {
+      const p0 = path.join(ext, "deploy", f);
+      before[f] = { text: readFileSync(p0, "utf8"), mtime: statSync(p0).mtimeMs };
+    }
+    const pluginDir = copyPlugin("dep-reg");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws, { deploy: ext });
+    try {
+      await p.ready;
+      const r = await p.call("panel.train.deployRegister", {
+        cfgName: "deploy_config.digits.ps1",
+        model: path.join(ws, "runs", "exp1", "weights", "best.pt"),
+        calib: path.join(ws, "datasets", "x", "images", "train"),
+      });
+      expect(r.ok, JSON.stringify(r)).toBe(true);
+      expect(r.bundle.id.startsWith("dep-yolo11n-seg-0123-")).toBe(true);
+      const dir = r.bundle.dir.replace(/\//g, path.sep);
+      for (const f of ["yolo11n-seg-0123.mud", "yolo11n-seg-0123_npu.axmodel", "yolo11n-seg-0123_vnpu.axmodel", "demo_yolo11n-seg-0123.py", "meta.json", "deployment.json"]) {
+        expect(existsSync(path.join(dir, f)), `bundle 里缺 ${f}`).toBe(true);
+      }
+      const meta = JSON.parse(readFileSync(path.join(dir, "deployment.json"), "utf8"));
+      expect(meta.target).toBe("maixcam2-pulsar2-4.0");
+      expect(meta.artifacts.length).toBeGreaterThanOrEqual(4);
+      expect(meta.artifacts.every((a) => a.sha256 && a.sha256.length === 64)).toBe(true);
+      expect(meta.runId).toBe("exp1");
+      expect(meta.calibMatched).toBe(true);
+      expect(meta.readOnlyExternal).toBe(true);
+
+      // 外部目录：内容与 mtime 都不许动
+      for (const f of Object.keys(before)) {
+        const p0 = path.join(ext, "deploy", f);
+        expect(readFileSync(p0, "utf8")).toBe(before[f].text);
+        expect(statSync(p0).mtimeMs).toBe(before[f].mtime);
+      }
+      // 不复制 work/calib 全量
+      expect(existsSync(path.join(dir, "work"))).toBe(false);
+      expect(existsSync(path.join(dir, "calib"))).toBe(false);
+
+      const st = await p.call("panel.train.assetsState", true);
+      expect(st.deployments[r.bundle.id], "catalog 里要有这条部署包").toBeTruthy();
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
+});
