@@ -2447,7 +2447,10 @@
           <div id="mllist"></div>
           <div id="mlprog" hidden>
             <div class="bar" style="margin-top:10px"><i id="mlbar"></i></div>
-            <p class="note" id="mlprogtext" style="margin:6px 0 0"></p>
+            <div class="row" style="margin-top:6px;align-items:center">
+              <p class="note" id="mlprogtext" style="margin:0;flex:1"></p>
+              <button class="btn" id="mlcancel">取消下载</button>
+            </div>
           </div>
         </div>
       </div>
@@ -4345,6 +4348,7 @@
         $("mlbar").style.width = (j.state === "running" ? Math.max(2, pct) : pct) + "%";
         var head = j.state === "running" ? "下载中" : j.state === "succeeded" ? "完成" : "失败";
         $("mlprogtext").textContent = head + " · " + (p.detail || j.label || "");
+        if ($("mlcancel")) $("mlcancel").hidden = j.state !== "running";
       }
 
       async function openModelDownload() {
@@ -4382,6 +4386,10 @@
         }
       }
 
+      if ($("mlcancel")) $("mlcancel").onclick = async function () {
+        try { await uartix.call("stop"); sysLog("已请求取消下载；.part 会保留，下次能续传"); }
+        catch (e) { sysLog("[错误] " + String((e && e.message) || e)); }
+      };
       if ($("mldlopen")) $("mldlopen").onclick = openModelDownload;
       if ($("mldlgclose")) $("mldlgclose").onclick = closeModelDownload;
       if ($("mldlgmask")) $("mldlgmask").onclick = closeModelDownload;

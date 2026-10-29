@@ -436,6 +436,8 @@ describe("P177-C · 官方权重下载", () => {
     expect(html).toContain('id="mlprog"');
     expect(html).toContain("function renderMlProgress(");
     expect(html).toContain("function closeModelDownload(");
+    expect(html).toContain('id="mlcancel"');
+    expect(html).toContain('uartix.call("stop")');
   });
 });
 
