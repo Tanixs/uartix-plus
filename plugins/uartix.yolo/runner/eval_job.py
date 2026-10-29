@@ -79,27 +79,69 @@ def metric_map(box, mask):
     return out
 
 
-def conf_table(results, want):
-    """从这一次 val 的 PR / F1 曲线里取若干 conf 点的精确率 / 召回率 / F1。
+def per_class_rows(box, mask, names):
+    """逐类指标：类别名 + P/R/mAP50/mAP50-95（框与掩膜各一套）。
 
-    曲线是 ultralytics 画 `P_curve.png` 用的同一份数据——所以这张表和图不会互相打脸。
+    `names` 是 `model.names`（dict[id -> 名字]）；`Metric` 上的 p/r/ap50/ap 都是按类别 id 排的数组。
+    分割任务里掩膜指标挂在 `.seg`，不是 `.mask` —— 这里由调用方传对对象。
+    """
+    rows = {}
+    for tag, src in (("B", box), ("M", mask)):
+        if src is None:
+            continue
+        cols = {
+            "precision": getattr(src, "p", None),
+            "recall": getattr(src, "r", None),
+            "map50": getattr(src, "ap50", None),
+            "map5095": getattr(src, "ap", None),
+        }
+        n = max((len(v) for v in cols.values() if v is not None), default=0)
+        for c in range(n):
+            if isinstance(names, dict):
+                name = str(names.get(c, c))
+            elif isinstance(names, (list, tuple)) and c < len(names):
+                name = str(names[c])
+            else:
+                name = str(c)
+            row = rows.setdefault(c, {"id": c, "name": name})
+            for k, arr in cols.items():
+                val = None
+                if arr is not None and c < len(arr):
+                    try:
+                        val = round(float(arr[c]), 4)
+                    except Exception:  # noqa: BLE001
+                        val = None
+                row[k + tag] = val
+    return [rows[k] for k in sorted(rows)]
+
+
+def conf_table(results, want):
+    """从这一次 val 的 P/R-Confidence 曲线里取若干 conf 点的精确率 / 召回率。
+
+    曲线是 ultralytics 画 `P_curve.png` / `R_curve.png` 用的同一份数据——所以这张表和图不会互相打脸。
+    取数走 `curves_results`：`Metric.curves` 在当前版本里恒为空，早期写法因此永远拿不到表。
     """
     try:
-        curves = results.box.curves  # (P, R, F1, PR)
-        pr = curves[3] if len(curves) > 3 else None
-        if pr is None:
+        cr = getattr(results, "curves_results", None) or []
+        if len(cr) < 4:
             return []
-        xs = pr[0].tolist()
-        ys = pr[1].tolist()
+        import numpy as np
+
+        xs = np.asarray(cr[2][0], dtype=float).reshape(-1)
+        p = np.asarray(cr[2][1], dtype=float)
+        r = np.asarray(cr[3][1], dtype=float)
+        if p.ndim == 2:
+            p = p.mean(axis=0)
+        if r.ndim == 2:
+            r = r.mean(axis=0)
     except Exception as e:  # noqa: BLE001
-        warn("读不到 PR 曲线，阈值表跳过：%s" % e)
+        warn("读不到 P/R 曲线，阈值表跳过：%s" % e)
         return []
     out = []
     for c in want:
-        # ys 的形状是 (2, N)：第一行 precision、第二行 recall，按 conf 从高到低
         try:
-            idx = min(range(len(xs)), key=lambda i: abs(xs[i] - c))
-            out.append({"conf": round(float(xs[idx]), 3), "precision": round(float(ys[0][idx]), 4), "recall": round(float(ys[1][idx]), 4)})
+            idx = int(np.argmin(np.abs(xs - c)))
+            out.append({"conf": round(float(xs[idx]), 3), "precision": round(float(p[idx]), 4), "recall": round(float(r[idx]), 4)})
         except Exception:  # noqa: BLE001
             continue
     return out
@@ -150,7 +192,10 @@ def main():
     task = getattr(model, "task", "") or ""
     r = model.val(data=data, imgsz=imgsz, conf=args.conf, device=device, workers=workers, plots=True, project=out_dir, name="val", exist_ok=True)
 
-    metrics = metric_map(getattr(r, "box", None), getattr(r, "mask", None))
+    # SegmentMetrics 的掩膜指标在 `.seg`；早期写法读 `.mask`，分割评估因此只报了框指标
+    seg = getattr(r, "seg", None)
+    mask = seg if seg is not None else getattr(r, "mask", None)
+    metrics = metric_map(getattr(r, "box", None), mask)
     table = conf_table(r, [0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50, 0.60, 0.70, 0.80])
     val_dir = os.path.join(out_dir, "val")
     pngs = [f for f in ("confusion_matrix.png", "BoxPR_curve.png", "F1_curve.png", "P_curve.png", "R_curve.png") if os.path.exists(os.path.join(val_dir, f))]
@@ -193,6 +238,7 @@ def main():
         "conf": args.conf,
         "out": out_dir.replace("\\", "/"),
         "metrics": metrics,
+        "perClass": per_class_rows(getattr(r, "box", None), mask, getattr(model, "names", {})),
         "confTable": table,
         "plots": pngs,
         "errors": errors,

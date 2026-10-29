@@ -793,6 +793,27 @@ describe("P175-W1 · 参数表由包自己驱动（详设 §4.2、§10 判据 2�
     expect(keys, "降级时不许把没探到的键吹成有").not.toContain("lr0");
     expect(deg.groups.map((g) => g.id), "微调组在降级态没有可给的键，不该留一个空标题").not.toContain("finetune");
   });
+
+  it("每个参数都带帮助文案（P176-B2：52 项一个不漏）", async () => {
+    const mod = await import("../../plugins/uartix.yolo/main.mjs");
+    const allKeys = mod.PARAM_META.flatMap((g) => g.items.map((i) => i.key));
+    expect(allKeys.length).toBe(52);
+    const spec = mod.buildParamSpec({
+      keys: Object.fromEntries(allKeys.map((k) => [k, ["", k === "weights" ? "" : 0]])),
+      ultralytics: "9.0.0",
+      degraded: false,
+    });
+    const items = spec.groups.flatMap((g) => g.items);
+    expect(items.length).toBe(allKeys.length);
+    for (const it of items) {
+      expect(it.help, `${it.key} 没有帮助文案`).toBeTruthy();
+      expect(String(it.help.one || "").length, `${it.key} 的一句话太短`).toBeGreaterThan(6);
+    }
+    // related 只许指向真实存在的键（面板会过滤，但数据本身也不该编）
+    for (const it of items) {
+      for (const r of it.help.related || []) expect(mod.PARAM_HELP[r], `${it.key} 指向不存在的 ${r}`).toBeTruthy();
+    }
+  });
 });
 
 describe("P175-W1 · 快照里值的形状（引擎看得懂的那一份）", () => {

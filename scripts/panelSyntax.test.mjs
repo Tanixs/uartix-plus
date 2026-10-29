@@ -161,3 +161,194 @@ describe("P175 · 面板里不许有同名函数", () => {
     expect(names.filter((n, i) => names.indexOf(n) !== i)).toEqual(["a"]);
   });
 });
+
+/* ============================================================================
+   P176-B1 · 六工作面 + 帮助抽屉 + 文案分层
+   ----------------------------------------------------------------------------
+   用户 2026-10-29 的原话："每个项目都是一长条，没有主次""文案、文字，都好乱好杂"。
+   详设 §3/§5 把方向定死：8 页签收成 6 块、帮助移到右上角抽屉、主界面说明 ≤120 字。
+   这里钉住形状，防止下一次改版又长回去。
+   ============================================================================ */
+
+describe("P176-B1 · 六工作面与文案分层", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  /** 导航里的页签（脚本里拼的选择器是 `nav button[data-tab="…"]`，不是 `<button data-tab=`，天然不会混进来）。 */
+  const tabs = [...html.matchAll(/<button data-tab="([a-z]+)"/g)].map((m) => m[1]);
+
+  it("导航只有六块工作面", () => {
+    expect(tabs).toEqual(["overview", "data", "train", "result", "runs", "deploy"]);
+  });
+
+  it("帮助不再占页签，改从右上角抽屉打开", () => {
+    expect(html).toContain('id="helpbtn"');
+    expect(html).toContain('id="helpdrawer"');
+    expect(html).not.toContain('id="tab-help"');
+  });
+
+  it("监控与评估合进「结果」", () => {
+    expect(html).toContain('id="tab-result"');
+    expect(html).toContain('id="result-curves"');
+    expect(html).toContain('id="result-metrics"');
+    expect(html).not.toContain('id="tab-monitor"');
+    expect(html).not.toContain('id="tab-eval"');
+  });
+
+  it("主界面说明 ≤120 字，长解释进帮助抽屉", () => {
+    const long = [];
+    for (const t of ["overview", "data", "train", "result", "deploy"]) {
+      const start = html.indexOf(`<section id="tab-${t}"`);
+      expect(start, `找不到 #tab-${t}`).toBeGreaterThan(0);
+      const end = html.indexOf("</section>", start);
+      const section = html.slice(start, end);
+      for (const m of section.matchAll(/<(p|div|span) class="note"[^>]*>([\s\S]*?)<\/\1>/g)) {
+        const text = m[2].replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        if (text.length > 120) long.push(`${t}：${text.length} 字 —— ${text.slice(0, 48)}`);
+      }
+    }
+    expect(long, `这些说明该进「?」抽屉：\n${long.join("\n")}`).toEqual([]);
+  });
+
+  it("每个「为什么?」都指向存在的帮助分节", () => {
+    const refs = [...new Set([...html.matchAll(/data-help="([a-z-]+)"/g)].map((m) => m[1]))];
+    expect(refs.length, "一个 data-help 都没有，这条判据是空的").toBeGreaterThan(4);
+    for (const r of refs) expect(html, `缺帮助分节 #help-${r}`).toContain(`id="help-${r}"`);
+  });
+});
+
+/* ============================================================================
+   P176-B2 · 参数说明浮层
+   ----------------------------------------------------------------------------
+   用户 2026-10-29："一些高级参数鼠标悬停时应该浮出提示说明性文字"。
+   形状钉住三件事：每个参数都有触发点、都带 data-help-key；警告必须常驻；
+   浮层有最大宽度与方向箭头（不能是一个贴边的原生 title）。
+   ============================================================================ */
+
+describe("P176-B2 · 参数说明浮层", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("参数控件带 ? 触发点与 data-help-key", () => {
+    expect(html).toContain('class="qh"');
+    expect(html).toContain("data-help-key=");
+    expect(html).toContain('id="tip"');
+    expect(html).toContain('role="tooltip"');
+  });
+
+  it("警告常驻，不再只挂在原生 title 上", () => {
+    expect(html).toContain('class="pwarn"');
+    expect(html, "参数还把说明塞在原生 title 里").not.toContain('esc(it.hint || "")');
+  });
+
+  it("浮层有最大宽度与方向箭头", () => {
+    expect(html).toMatch(/\.tip\s*\{[^}]*max-width:\s*320px/);
+    expect(html).toContain('.tip[data-side="top"]');
+    expect(html).toContain('.tip[data-side="bottom"]');
+  });
+});
+
+/* ============================================================================
+   P176-B3 · 结果页四段
+   ----------------------------------------------------------------------------
+   监控与评估不是两套页面，而是同一个 run 的四个问题：曲线、指标、错例、失败。
+   这里钉住四段与共用头部/KPI 的形状，防止又退回"两页各管一半"。
+   ============================================================================ */
+
+describe("P176-B3 · 结果页四段", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("四段视图与共用头部都在", () => {
+    const views = [...html.matchAll(/<button data-view="([a-z]+)"/g)].map((m) => m[1]);
+    expect(views).toEqual(["curves", "metrics", "errors", "failure"]);
+    for (const id of ["result-curves", "result-metrics", "result-errors", "result-failure", "resrun", "reskpi", "ev_perclass"]) {
+      expect(html, `缺 #${id}`).toContain(`id="${id}"`);
+    }
+    expect(html).not.toContain('id="result-live"');
+    expect(html).not.toContain('id="result-eval"');
+  });
+
+  it("KPI 与逐类条有落点", () => {
+    expect(html).toMatch(/\.kpi5\s*\{/);
+    expect(html).toMatch(/\.pcbar\s*\{/);
+    expect(html).toContain('id="ev_errcount"');
+    expect(html).toContain('id="failempty"');
+  });
+});
+
+/* ============================================================================
+   P176-B4 / B5 · 图表 v2 与实验对比
+   ============================================================================ */
+
+describe("P176-B4 · 图表 v2", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("曲线组件具备刻度、图例、悬停与数字表", () => {
+    expect(html).toContain("function lineChart(");
+    expect(html).toContain('class="chartbar"');
+    expect(html).toContain('class="charttip"');
+    expect(html).toContain("chart-hit");
+    expect(html).toContain("data-sm=");
+    expect(html).not.toContain("function sparkline(");
+    expect(html).not.toContain("sparkline(");
+  });
+
+  it("结果页用新组件画 loss/mAP，并带学习率与显存位", () => {
+    for (const id of ["chartloss", "chartmap", "chartlr", "memchart"]) expect(html, `缺 #${id}`).toContain(`id="${id}"`);
+    expect(html).toContain('lineChart($("chartloss"');
+    expect(html).toContain('lineChart($("chartmap"');
+  });
+});
+
+describe("P176-B5 · 实验表与对比", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("实验页是表 + 排序 + 行操作弹层", () => {
+    expect(html).toContain("function renderExperimentList(");
+    expect(html).toContain("data-sort=");
+    expect(html).toContain('id="runmenu"');
+    expect(html).toContain("function openRunMenu(");
+    expect(html).toContain("data-more=");
+  });
+
+  it("对比卡在实验页，且用叠加曲线", () => {
+    const runs = html.slice(html.indexOf('id="tab-runs"'));
+    expect(runs).toContain('id="cmpcard"');
+    expect(runs).toContain('id="cmp_a"');
+    expect(runs).toContain('lineChart($("cmpchart"');
+    expect(html).toContain("function cmpMerge(");
+  });
+});
+
+/* ============================================================================
+   P176-B6 · 部署四步、配方表、帮助搜索与收尾
+   ============================================================================ */
+
+describe("P176-B6 · 部署流程与收尾", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("部署页有四步时间线与配方表", () => {
+    expect(html).toContain('id="depstepper"');
+    expect(html).toContain("data-dstep=");
+    expect(html).toContain("function renderStepper(");
+    expect(html).toMatch(/class="cfgtbl"/);
+    expect(html).toContain("只准备");
+  });
+
+  it("帮助抽屉可搜索", () => {
+    expect(html).toContain('id="helpsearch"');
+    expect(html).toContain("function filterHelp(");
+    expect(html).toContain('id="help-deploy"');
+  });
+
+  it("a11y：焦点可见 / 减少动效 / aria 状态", () => {
+    expect(html).toContain(":focus-visible");
+    expect(html).toContain("prefers-reduced-motion");
+    expect(html).toContain('aria-selected="true"');
+    expect(html).toContain("aria-pressed");
+  });
+});

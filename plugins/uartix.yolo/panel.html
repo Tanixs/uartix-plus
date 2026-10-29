@@ -13,6 +13,26 @@
       * {
         box-sizing: border-box;
       }
+      /* ---- P176-B1 设计 token：字号 / 间距 / 圆角只在这里定，新组件一律引用 ---- */
+      :root {
+        --fs-page: 15px;
+        --fs-card: 13px;
+        --fs-body: 12px;
+        --fs-aux: 11px;
+        --fs-micro: 10px;
+        --lh-tight: 1.35;
+        --lh-body: 1.55;
+        --sp-1: 4px;
+        --sp-2: 8px;
+        --sp-3: 12px;
+        --sp-4: 16px;
+        --sp-5: 24px;
+        --r-sm: 6px;
+        --r-md: 8px;
+        --r-lg: 10px;
+        --pad-card: 12px;
+        --mono: "Cascadia Mono", Consolas, monospace;
+      }
       html,
       body {
         margin: 0;
@@ -100,10 +120,617 @@
         margin-bottom: 10px;
       }
       .card h2 {
-        font-size: 12px;
+        font-size: var(--fs-card);
         font-weight: 600;
         margin: 0 0 8px;
         color: var(--fg);
+      }
+      /* ---- 概览：状态条 + KPI 磁贴 ---- */
+      .statusstrip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+        margin-bottom: 10px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--inset);
+        font-size: var(--fs-aux);
+        color: var(--dim);
+      }
+      .chip b {
+        color: var(--fg);
+        font-weight: 600;
+      }
+      .chip .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--dim);
+      }
+      .chip.ok .dot {
+        background: var(--ok);
+      }
+      .chip.warn .dot {
+        background: var(--warn);
+      }
+      .chip.bad .dot {
+        background: var(--bad);
+      }
+      .kpigrid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--sp-2);
+        margin-bottom: 10px;
+      }
+      .kpi {
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--inset);
+        padding: 8px 10px;
+        min-width: 0;
+      }
+      .kpi .k {
+        font-size: var(--fs-micro);
+        color: var(--dim);
+      }
+      .kpi .v {
+        font-family: var(--mono);
+        font-size: 20px;
+        font-weight: 600;
+        line-height: 1.2;
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kpi .u {
+        font-size: var(--fs-micro);
+        color: var(--faint);
+        margin-left: 3px;
+        font-weight: 400;
+      }
+      /* ---- 结果页头部与 5 枚 KPI（B3） ---- */
+      .reshead {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      .resrun {
+        flex-direction: row;
+        white-space: nowrap;
+        align-items: center;
+        gap: 6px;
+        color: var(--dim);
+      }
+      .resrun select {
+        max-width: 320px;
+      }
+      .kpi5 {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+      .kpi .pb {
+        height: 4px;
+        margin-top: 6px;
+        border-radius: 999px;
+        background: var(--line);
+        overflow: hidden;
+      }
+      .kpi .pb i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+      }
+      @media (max-width: 1200px) {
+        .kpi5 {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 1000px) {
+        .kpi5 {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      /* ---- 逐类指标条（B3） ---- */
+      .pchead,
+      .pcrow {
+        display: grid;
+        grid-template-columns: 120px 1fr 54px;
+        gap: 4px 8px;
+        align-items: center;
+      }
+      .pchead.two,
+      .pcrow.two {
+        grid-template-columns: 120px 1fr 54px 1fr 54px;
+      }
+      .pchead {
+        margin-bottom: 2px;
+        font-size: var(--fs-micro);
+        color: var(--dim);
+        white-space: nowrap;
+      }
+      .pchead span:not(:first-child) {
+        text-align: right;
+      }
+      .pcrow {
+        padding: 5px 0;
+        border-top: 1px solid var(--line);
+      }
+      .pcname {
+        font-size: var(--fs-aux);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .pcbar {
+        height: 6px;
+        border-radius: 999px;
+        background: var(--line);
+        overflow: hidden;
+      }
+      .pcbar i {
+        display: block;
+        height: 100%;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+      .pcbar.m i {
+        background: #8b5cf6;
+      }
+      .pcrow b {
+        font-family: var(--mono);
+        font-size: var(--fs-aux);
+        font-weight: 500;
+        text-align: right;
+      }
+      @media (max-width: 760px) {
+        .pchead,
+        .pcrow {
+          grid-template-columns: 84px 1fr 48px;
+        }
+        .pchead.two,
+        .pcrow.two {
+          grid-template-columns: 84px 1fr 48px 1fr 48px;
+        }
+      }
+      /* ---- 部署步骤 / 配方表 / 帮助搜索（B6） ---- */
+      .stepper {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .step {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--inset);
+        min-width: 0;
+      }
+      .step .sn {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        background: var(--line);
+        color: var(--dim);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        flex: 0 0 auto;
+      }
+      .step .st {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .step .st b {
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .step .st span {
+        font-size: 10px;
+        color: var(--faint);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .step .btn {
+        padding: 2px 6px;
+        font-size: 10px;
+        flex: 0 0 auto;
+      }
+      .step.done .sn {
+        background: var(--ok);
+        color: #fff;
+      }
+      .step.ready .sn,
+      .step.running .sn {
+        background: var(--accent);
+        color: #fff;
+      }
+      .step.failed .sn {
+        background: var(--bad);
+        color: #fff;
+      }
+      .step.running {
+        border-color: var(--accent);
+      }
+      .cfgtbl .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--line);
+      }
+      .cfgtbl tr.on .dot {
+        background: var(--accent);
+      }
+      .cfgtbl tr[data-cfg] {
+        cursor: pointer;
+      }
+      .cfgtbl tr[data-cfg]:hover td {
+        background: var(--inset);
+      }
+      .cfgtbl td {
+        white-space: nowrap;
+      }
+      .cfgtbl td.name {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .helpsearch {
+        flex: 1 1 120px;
+        min-width: 90px;
+        padding: 3px 8px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-sm);
+        background: var(--inset);
+        color: var(--fg);
+        font-size: var(--fs-aux);
+      }
+      @media (max-width: 1200px) {
+        .stepper {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 760px) {
+        .stepper {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition-duration: 0.01ms !important;
+          animation-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+      /* ---- 实验表 / 对比（B5） ---- */
+      .runtable td.name b {
+        font-weight: 600;
+      }
+      .runtable .rnote {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--faint);
+        font-size: var(--fs-micro);
+        margin-top: 2px;
+      }
+      .runtable th.sortable {
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+      }
+      .runtable th.sortable:hover {
+        color: var(--fg);
+      }
+      .runactions {
+        width: 40px;
+        text-align: right;
+      }
+      .runmore {
+        min-width: 26px;
+        padding: 2px 6px;
+        line-height: 1.2;
+      }
+      .popmenu {
+        position: fixed;
+        z-index: 70;
+        min-width: 190px;
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--panel);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .popmenu[hidden] {
+        display: none;
+      }
+      .popmenu > button {
+        text-align: left;
+        border: 0;
+        background: transparent;
+        color: var(--fg);
+        font: inherit;
+        font-size: var(--fs-aux);
+        padding: 5px 8px;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+      .popmenu > button:hover {
+        background: var(--inset);
+      }
+      .menunote {
+        display: flex;
+        gap: 4px;
+        margin-top: 4px;
+        padding-top: 4px;
+        border-top: 1px solid var(--line);
+      }
+      .menunote input {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+      .menunote button {
+        flex: 0 0 auto;
+      }
+      .cmpkpis {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        margin: 8px 0 10px;
+      }
+      .cmpkpis .k.up {
+        color: var(--ok);
+      }
+      .cmpkpis .k.down {
+        color: var(--bad);
+      }
+      @media (max-width: 760px) {
+        .cmpkpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      /* ---- 曲线 v2（B4） ---- */
+      .chart-host {
+        min-width: 0;
+      }
+      .chartbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 12px;
+        margin-bottom: 6px;
+      }
+      .chartlegs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        flex: 1 1 auto;
+      }
+      .chartleg {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--inset);
+        color: var(--dim);
+        font: inherit;
+        font-size: var(--fs-micro);
+        cursor: pointer;
+      }
+      .chartleg i {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+      }
+      .chartleg.off {
+        opacity: 0.42;
+      }
+      .chartsm {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        font-size: var(--fs-micro);
+        color: var(--dim);
+      }
+      .chartsm button {
+        border: 0;
+        background: transparent;
+        color: var(--dim);
+        font: inherit;
+        font-size: var(--fs-micro);
+        padding: 2px 6px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .chartsm button.on {
+        background: var(--panel);
+        color: var(--fg);
+        box-shadow: 0 0 0 1px var(--line);
+      }
+      .chartwrap {
+        position: relative;
+      }
+      .chartsvg {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .charttip {
+        position: absolute;
+        z-index: 5;
+        min-width: 140px;
+        max-width: 240px;
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        font-size: var(--fs-micro);
+        line-height: 1.5;
+        pointer-events: none;
+      }
+      .charttip[hidden] {
+        display: none;
+      }
+      .charttip .tt {
+        font-weight: 600;
+        color: var(--fg);
+        margin-bottom: 2px;
+      }
+      .charttip .tv {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--dim);
+      }
+      .charttip .tv i {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        margin-right: 4px;
+      }
+      .charttip .tv b {
+        font-family: var(--mono);
+        font-weight: 500;
+        color: var(--fg);
+      }
+      .chartempty {
+        padding: 22px 0;
+        text-align: center;
+        color: var(--faint);
+        font-size: var(--fs-aux);
+      }
+      .charttable {
+        margin-top: 6px;
+        font-size: var(--fs-micro);
+        color: var(--dim);
+      }
+      .charttable summary {
+        cursor: pointer;
+      }
+      .charttable .tablewrap {
+        max-height: 180px;
+        overflow: auto;
+      }
+      .memchart {
+        margin-top: 6px;
+      }
+      /* ---- 结果页：实时 / 评估 分段 ---- */
+      .segmented {
+        display: inline-flex;
+        gap: 2px;
+        padding: 2px;
+        margin-bottom: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--inset);
+      }
+      .segmented button {
+        border: 0;
+        background: transparent;
+        color: var(--dim);
+        font: inherit;
+        font-size: var(--fs-aux);
+        padding: 4px 12px;
+        border-radius: var(--r-sm);
+        cursor: pointer;
+      }
+      .segmented button.on {
+        background: var(--panel);
+        color: var(--fg);
+        box-shadow: 0 0 0 1px var(--line);
+      }
+      /* ---- 帮助抽屉 ---- */
+      .drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(460px, 92vw);
+        background: var(--panel);
+        border-left: 1px solid var(--line);
+        z-index: 40;
+        display: flex;
+        flex-direction: column;
+      }
+      .drawer[hidden] {
+        display: none;
+      }
+      .drawer-mask {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.18);
+        z-index: 39;
+      }
+      .drawer-mask[hidden] {
+        display: none;
+      }
+      .drawer-h {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--line);
+        flex: 0 0 auto;
+      }
+      .drawer-t {
+        font-size: var(--fs-card);
+        font-weight: 600;
+      }
+      .drawer-b {
+        overflow: auto;
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .drawer-b .card {
+        margin-bottom: 0;
+      }
+      .linkbtn {
+        border: 0;
+        background: none;
+        color: var(--accent);
+        font: inherit;
+        font-size: inherit;
+        padding: 0;
+        margin-left: 4px;
+        cursor: pointer;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+      }
+      @media (max-width: 1000px) {
+        .kpigrid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       .grid {
         display: grid;
@@ -270,6 +897,12 @@
       .cfgrow .mt { color: var(--dim); font-size: 10px; }
       .cfgrow .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: 0 0 auto; }
       .cfgrow.on .dot { background: var(--accent); }
+      .depenv {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        margin-top: 10px; padding: 8px 10px;
+        border: 1px solid var(--line); border-radius: 8px; background: var(--inset);
+      }
+      .depenv .hint { flex: 1 1 100%; font-size: 11px; line-height: 1.65; color: var(--dim); white-space: pre-wrap; margin: 0; }
       .deliv { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
       .deliv .pill {
         font-family: "Cascadia Mono", Consolas, monospace; font-size: 10px; padding: 3px 8px;
@@ -361,6 +994,124 @@
       label.p.warn .cap {
         color: var(--warn);
       }
+      label.p.warn {
+        border-left: 2px solid var(--warn);
+        padding-left: 6px;
+      }
+      .pwarn {
+        display: block;
+        margin-top: 2px;
+        font-size: var(--fs-micro);
+        line-height: 1.4;
+        color: var(--warn);
+      }
+      .qh {
+        flex: 0 0 auto;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        background: var(--inset);
+        color: var(--dim);
+        font: inherit;
+        font-size: 9px;
+        line-height: 1;
+        padding: 0;
+        cursor: help;
+        align-self: center;
+      }
+      .qh:hover,
+      .qh:focus-visible {
+        color: var(--fg);
+        border-color: var(--accent);
+        outline: none;
+      }
+      /* ---- 参数说明浮层（P176-B2） ---- */
+      .tip {
+        position: fixed;
+        z-index: 60;
+        max-width: 320px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--panel);
+        color: var(--fg);
+        font-size: var(--fs-aux);
+        line-height: 1.55;
+        pointer-events: auto;
+      }
+      .tip[hidden] {
+        display: none;
+      }
+      .tip::after {
+        content: "";
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        transform: rotate(45deg);
+      }
+      .tip[data-side="top"]::after {
+        left: var(--arrow, 50%);
+        bottom: -6px;
+        border-top: 0;
+        border-left: 0;
+      }
+      .tip[data-side="bottom"]::after {
+        left: var(--arrow, 50%);
+        top: -6px;
+        border-bottom: 0;
+        border-right: 0;
+      }
+      .tip .tt {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .tip .tk {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 400;
+        color: var(--dim);
+      }
+      .tip .tb {
+        margin-top: 4px;
+        color: var(--fg);
+      }
+      .tip .tm {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2px 8px;
+        margin-top: 6px;
+        color: var(--dim);
+      }
+      .tip .tm b {
+        font-weight: 500;
+        color: var(--faint);
+      }
+      .tip .tr {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 8px;
+      }
+      .tip .tr button {
+        border: 1px solid var(--line);
+        background: var(--inset);
+        color: var(--dim);
+        font: inherit;
+        font-size: 10px;
+        border-radius: 999px;
+        padding: 1px 7px;
+        cursor: pointer;
+      }
+      .tip .tr button:hover {
+        border-color: var(--accent);
+        color: var(--fg);
+      }
       label.p.bool {
         flex-direction: row;
         align-items: center;
@@ -407,8 +1158,13 @@
       }
       .coregrid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 10px 12px;
+      }
+      @media (max-width: 1000px) {
+        .coregrid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       /* 核心格里输入框的 placeholder 已经显示了默认值，标签右边那行“包默认 …”是重复的，
          窄栏里还会把标签挤成两行 —— 只在高级参数里保留它 */
@@ -720,6 +1476,7 @@
       <span class="path" id="ws">（没有工作区）</span>
       <span class="spacer"></span>
       <span id="pystat" class="tag">python ?</span>
+      <button class="btn" id="helpbtn" title="帮助（Esc 关闭）" aria-haspopup="dialog">?</button>
       <button class="btn" id="reload" title="重新读工作区与配置">刷新</button>
     </header>
 
@@ -734,20 +1491,20 @@
 
     <div class="shell">
       <nav class="rail" aria-label="工作台页签">
-        <button data-tab="overview" class="on" title="概览"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.8" y="1.8" width="4.4" height="4.4" rx="1"/><rect x="7.8" y="1.8" width="4.4" height="4.4" rx="1"/><rect x="1.8" y="7.8" width="4.4" height="4.4" rx="1"/><rect x="7.8" y="7.8" width="4.4" height="4.4" rx="1"/></svg><span class="tx">概览</span></button>
+        <button data-tab="overview" class="on" title="概览" aria-current="page"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.8" y="1.8" width="4.4" height="4.4" rx="1"/><rect x="7.8" y="1.8" width="4.4" height="4.4" rx="1"/><rect x="1.8" y="7.8" width="4.4" height="4.4" rx="1"/><rect x="7.8" y="7.8" width="4.4" height="4.4" rx="1"/></svg><span class="tx">概览</span></button>
         <button data-tab="data" title="数据"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="7" cy="3.4" rx="4.6" ry="1.8"/><path d="M2.4 3.4v7.2c0 1 2.06 1.8 4.6 1.8s4.6-.8 4.6-1.8V3.4"/><path d="M2.4 7c0 1 2.06 1.8 4.6 1.8s4.6-.8 4.6-1.8"/></svg><span class="tx">数据</span></button>
         <button data-tab="train" title="训练"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.2 2.8 11 7l-6.8 4.2z"/></svg><span class="tx">训练</span></button>
-        <button data-tab="monitor" title="监控"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 8.6h2.4l1.7-4.4 2.3 6.8 1.5-2.4h2.9"/></svg><span class="tx">监控</span></button>
-        <button data-tab="eval" title="评估"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="4.8"/><path d="M4.7 7.2 6.3 8.8l3-3.3"/></svg><span class="tx">评估</span></button>
+        <button data-tab="result" title="结果"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.6 8.6h2.4l1.7-4.4 2.3 6.8 1.5-2.4h2.9"/></svg><span class="tx">结果</span></button>
         <button data-tab="runs" title="实验"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.6 4h8.8M2.6 7h8.8M2.6 10h5.6"/></svg><span class="tx">实验</span></button>
         <button data-tab="deploy" title="部署"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1.9 11.2 4.6v5L7 12.1 2.8 9.6v-5z"/><path d="M7 7.3v4.8M2.8 4.6 7 7.3l4.2-2.7"/></svg><span class="tx">部署</span></button>
-        <button data-tab="help" title="帮助"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="5"/><path d="M5.6 5.5a1.5 1.5 0 1 1 2.1 1.4c-.4.2-.7.6-.7 1.1"/><circle cx="7" cy="10.2" r=".55" fill="currentColor" stroke="none"/></svg><span class="tx">帮助</span></button>
       </nav>
 
 
     <main>
       <!-- ============ 概览 ============ -->
       <section id="tab-overview">
+        <div class="statusstrip" id="statusstrip"></div>
+        <div class="kpigrid" id="kpigrid"></div>
         <div class="cols">
 <div class="col">
 <div class="card" id="nextcard" hidden>
@@ -762,7 +1519,7 @@
           <div class="kv" id="envkv"></div>
           <div class="row" style="margin-top: 8px">
             <button class="btn" id="probe">深度自检（torch / CUDA）</button>
-            <span class="note" style="margin: 0">要 import torch，第一遍通常 10~20 秒</span>
+            <span class="note" style="margin: 0">首次约 10~20 秒</span>
           </div>
           <div class="note" id="probenote"></div>
         </div>
@@ -773,11 +1530,7 @@
             <button class="btn" id="mlib" title="逐枚读权重内嵌的 task / nc / 训练它的包版本（要 import torch，约 10 秒）">读一遍权重</button>
           </h2>
           <div id="mliblist"></div>
-          <p class="note">
-            只做 <b>YOLO11</b> 与 <b>YOLO26</b> 两代——它们是同一个 <code>ultralytics</code> 包里的两代模型，不是两套环境。
-            灰字那行是权重<b>自己带的</b>信息：它是干什么任务的、被哪个版本的包训出来的。
-            没读之前只能按文件名推断（<code>yolo11n-seg.pt</code> → 分割），推断不出来的会标出来，<b>不猜</b>。
-          </p>
+          <p class="note">权重自带任务与版本；没读之前按文件名推断。<button class="linkbtn" data-help="models">为什么?</button></p>
         </div>
 </div>
 <div class="col">
@@ -806,7 +1559,7 @@
           <h2>数据来源与划分</h2>
           <div class="grid">
             <label class="wide">
-              素材文件夹（一行一个）——<b>留空 = 自动取 annotations/ 投料口里的每一批</b>
+              素材文件夹（留空 = 用 annotations/ 投料口）
               <textarea id="sources" spellcheck="false" placeholder="D:/OneDrive/Desktop/X-AnyLabeling/images/123lmages"></textarea>
             </label>
             <label class="wide">
@@ -840,15 +1593,7 @@
             <button class="btn" id="intake-make" title="只建这个空目录，里面放什么、怎么标都由你决定">建这个文件夹</button>
             <button class="btn" id="intake-refresh">重新数一遍</button>
           </div>
-          <p class="note">
-            <b>标注你自己来（X-AnyLabeling），这个面板不碰。</b>它只负责给一个固定去处：把导出的目录整个丢进
-            <code>annotations/</code>（一个子目录 = 一批素材），「构建数据集」在没显式写素材夹时<b>直接从这个目录取</b>；
-            面板只数有多少张、多少个 json——<b>不搬、不改、不删你的任何一个文件</b>。
-          </p>
-          <p class="note">
-            顺带一句常被问的：YOLO 文本标注格式（<code>images/ + labels/ + data.yaml</code>）
-            在 YOLO11 / YOLO26 之间<b>通用</b>，老数据不用重标就能给新一代模型训。
-          </p>
+          <p class="note">把 X-AnyLabeling 导出目录放进 <code>annotations/</code>，构建时只读。<button class="linkbtn" data-help="data">为什么?</button></p>
         </div>
 </div>
 <div class="col">
@@ -860,33 +1605,21 @@
           </h2>
           <div class="kv" id="auditsum"></div>
           <div id="auditfind"></div>
-          <p class="note">
-            查的是"开训以后才会咬人"的那几样：越界坐标、空标签、找不到图的标签、类别分布与
-            <code>nc/names</code> 对不对得上、<b>train 与 val 重名（数据泄漏）</b>。
-            体检<b>只读</b>——修标注是你在 X-AnyLabeling 里的事，面板不动你的数据。
-          </p>
+          <p class="note">只读检查越界、空标签、重名泄漏与类别失衡。<button class="linkbtn" data-help="audit">为什么?</button></p>
         </div>
 <div class="card">
           <h2>增强预览</h2>
           <div id="batchbox"></div>
-          <p class="note">
-            这是<b>引擎自己写出来的</b> <code>train_batch*.jpg</code>——上一次训练真实喂进网络的样本，
-            mosaic / 旋转 / 镜像的效果都在里面。面板不画"假预览"：自己实现一遍增强只会预览出一张
-            和训练不一致的图，那比没有预览更糟。改了增强参数想看到新样子，就跑一轮再回来。
-            另外：<b>框上标的是类别 id（从 0 开始），不是类别名</b>——引擎画图时用的就是 id，0 就是你的第一个类。
-          </p>
+          <p class="note">引擎真实喂进网络的 train_batch 样本；框上数字是类别 id。<button class="linkbtn" data-help="augment">为什么?</button></p>
         </div>
 </div>
 </div>
 
-        <p class="note">
-          这里只改<b>本次运行</b>的参数。工作区里的 <code>config.yaml</code> 不会被改写——它是你自己的
-          基准，插件每次把它读出来当底、再叠上这里的改动，写到 <code>train_runs/&lt;实验&gt;.yaml</code> 那份快照里。
-        </p>
       </section>
 
       <!-- ============ 部署 ============ -->
       <section id="tab-deploy" hidden>
+        <div class="stepper" id="depstepper" aria-label="部署步骤"></div>
         <div class="cols">
 <div class="col">
 <div class="card">
@@ -894,6 +1627,7 @@
             导出
             <span class="tag" id="extag">—</span>
           </h2>
+          <p class="note">只做 ONNX 等中间格式与测速；上板文件在下面「部署」里生成。<button class="linkbtn" data-help="deploy">为什么?</button></p>
           <div class="grid">
             <label class="wide">
               要导出的权重
@@ -949,6 +1683,7 @@
 <div class="col">
 <div class="card">
           <h2>模型</h2>
+          <p class="note">交付区：给 best.pt 留一份固定名字的副本，训练不会覆盖。<button class="linkbtn" data-help="deploy">为什么?</button></p>
           <div class="kv" id="modelkv"></div>
           <div class="row" style="margin-top: 10px">
             <button class="btn" id="deliver">交到 models/delivered</button>
@@ -956,8 +1691,13 @@
           </div>
           <div class="deliv" id="delivlist"></div>
         </div>
+
+</div>
+</div>
+
 <div class="card">
           <h2>配置与执行</h2>
+          <p class="note">选一份配方当底座；面板只覆盖模型与校准图，原文件不改。<button class="linkbtn" data-help="deploy">为什么?</button></p>
           <div class="grid" style="margin-bottom:10px">
             <label class="wide">
               部署哪一枚权重（runs 里任意一版 / 交付区 / 模型库）
@@ -973,21 +1713,13 @@
             </label>
           </div>
           <div class="cfglist" id="cfglist"></div>
+          <div class="depenv" id="depenv"></div>
           <div class="row" style="margin-top: 12px; flex-wrap: wrap">
-            <button class="btn" id="dep-validate" title="只检查环境与配置，不动任何文件">只检查环境</button>
             <button class="btn primary" id="dep-all">开始部署（全流程）</button>
-            <button class="btn" id="dep-convert" title="从 work/ 里已有的 ONNX 直接编译">只编译</button>
-            <button class="btn" id="dep-package" title="只重新生成 .mud 与例程">只打包</button>
             <button class="btn" id="dep-stop">停止</button>
+            <span class="note" style="margin: 0">四个步骤可以在上面单独点。</span>
           </div>
-          <p class="note">
-            插件<b>不会改写</b>你那份 <code>deploy_config.*.ps1</code>：它在
-            <code>.uartix/yolo/deploy/</code> 里生成一份包装配置（先读你的，再覆盖
-            <code>$Model</code> / <code>$ModelName</code> / <code>$CalibSources</code>（校准图）），把包装文件传给工具。跑完的日志和训练共用下面那一栏。
-          </p>
         </div>
-</div>
-</div>
 
       </section>
 
@@ -1020,7 +1752,7 @@
 <div class="card tsec">
           <div class="sec-h">
             <span class="sec-t">练多久、练多细</span>
-            <span class="sec-m">常改的六个都在这里；其余在下面的高级里</span>
+            <span class="sec-m">常用六项；其余在高级</span>
           </div>
           <div class="coregrid" id="c_core"></div>
         </div>
@@ -1033,10 +1765,7 @@
             </span>
           </div>
           <div id="c_adv"></div>
-          <ul class="hints" style="margin-top:10px">
-            <li>这张表<b>不是面板自己写的</b>：每项都来自当前那套 ultralytics 的 <code>DEFAULT_CFG_DICT</code>。包里没这个键就不出现，所以升级 / 改名（比如 <code>half</code> 已经没了）会自动跟上。</li>
-            <li>灰字是引擎自己的默认值；面板只把<b>与工作区 config.yaml 不同的</b>那些写进覆盖层，改回默认时 diff 自己消失。</li>
-          </ul>
+          <p class="note">参数表来自当前 ultralytics；只保存与基准不同的项。<button class="linkbtn" data-help="params">为什么?</button></p>
         </div>
 </div>
 <div class="col">
@@ -1044,12 +1773,7 @@
           <h2>本次实验落在哪儿</h2>
           <div class="kv" id="snapkv"></div>
           <div class="snap" id="snaplist"></div>
-          <p class="note">
-            每次开跑前，面板在 <code>train_runs/&lt;实验名&gt;-&lt;时间&gt;.yaml</code> 落一份<b>完整快照</b>（含本次全部参数）。
-            它是面板和命令行的公共语言：拿它去跑你自己的 <code>scripts/train.py --config …</code> 也成立，
-            只是那条只认它自己那 20 个键。工作区的 <code>config.yaml</code>、<code>scripts/</code>、<code>00~07*.bat</code> 面板从不改写。
-            训练由插件自带的 <code>runner/train_job.py</code> 执行（<b>没动</b>你的脚本）；跑完去 <code>runs/&lt;实验名&gt;/args.yaml</code> 对答案。
-          </p>
+          <p class="note">每次开跑前落一份完整快照（含全部参数），面板与命令行共用。<button class="linkbtn" data-help="snapshot">为什么?</button></p>
         </div>
 <div class="card">
           <h2>进度</h2>
@@ -1062,57 +1786,61 @@
 
       </section>
 
-      <!-- ============ 监控 ============ -->
-      <section id="tab-monitor" hidden>
-        <div class="cols">
-<div class="col">
-<div class="card">
-          <h2 class="row">
-            <span id="monrun">还没有训练产物</span>
-            <span class="tag" id="montag">—</span>
-            <button class="btn" id="monrefresh" title="重读 results.csv 与显存">刷新曲线</button>
-            <label class="p bool" style="margin-left:auto; white-space:nowrap; font-size:11px; color:var(--dim)">
-              <input type="checkbox" id="monauto" /> 自动刷新（5 秒）
-            </label>
-          </h2>
-          <div class="kv" id="monkv"></div>
-          <div class="bar" style="margin-top:8px"><i id="monmembar"></i></div>
-          <div class="note" id="monmem"></div>
+      <!-- ============ 结果（曲线 / 指标 / 错例 / 失败，P176-B3） ============ -->
+      <section id="tab-result" hidden>
+        <div class="reshead">
+          <label class="resrun">
+            <span>训练记录</span>
+            <select id="resrun"></select>
+          </label>
+          <span class="tag" id="montag" role="status" aria-live="polite">—</span>
+          <span class="spacer"></span>
+          <button class="btn" id="monrefresh" title="重读 results.csv 与显存">刷新</button>
+          <label class="p bool" style="white-space:nowrap; font-size:11px; color:var(--dim)">
+            <input type="checkbox" id="monauto" /> 自动刷新（5 秒）
+          </label>
         </div>
+        <div class="kpigrid kpi5" id="reskpi"></div>
+        <div class="segmented" id="resultseg" role="tablist" aria-label="结果视图">
+          <button data-view="curves" class="on" role="tab" aria-selected="true">曲线</button>
+          <button data-view="metrics" role="tab" aria-selected="false">指标</button>
+          <button data-view="errors" role="tab" aria-selected="false">错例</button>
+          <button data-view="failure" role="tab" aria-selected="false">失败</button>
+        </div>
+
+        <div id="result-curves">
+          <div class="cols">
+<div class="col">
 <div class="card">
           <h2>损失</h2>
           <div id="chartloss"></div>
           <div class="snap" id="legloss"></div>
         </div>
 <div class="card">
-          <h2>指标（(B) 是框、(M) 是掩膜）</h2>
+          <h2>指标（框 / 掩膜）</h2>
           <div id="chartmap"></div>
           <div class="snap" id="legmap"></div>
+          <p class="note">数据来自 <code>runs/&lt;实验&gt;/results.csv</code>，面板不另存。<button class="linkbtn" data-help="result">为什么?</button></p>
         </div>
 </div>
 <div class="col">
-<div class="card" id="failcard" hidden>
-          <h2>上一次失败的归类</h2>
-          <div class="kv" id="failkv"></div>
-        </div>
 <div class="card">
-          <h2>选一个 run 看它的曲线</h2>
-          <div class="snap" id="runpick"></div>
-          <p class="note">
-            曲线读的是引擎自己写的 <code>runs/&lt;实验&gt;/results.csv</code>——面板不另存一份指标。
-            注意<b>非续训重跑会删重建这个文件</b>，所以"上一次的曲线"没了不是面板丢数据。
-            想在 TensorBoard 里看：先 <code>yolo settings tensorboard=True</code>，再自己起
-            <code>tensorboard --logdir runs</code>（面板不替你装东西，也不替你起进程）。
-          </p>
+          <h2>这一次的状态</h2>
+          <div class="kv" id="monkv"></div>
+          <div class="bar" style="margin-top:8px"><i id="monmembar"></i></div>
+          <div class="note" id="monmem"></div>
+          <div id="memchart" class="memchart"></div>
+        </div>
+<div class="card" id="cardlr" hidden>
+          <h2>学习率</h2>
+          <div id="chartlr"></div>
         </div>
 </div>
 </div>
+        </div><!-- /curves -->
 
-      </section>
-
-      <!-- ============ 评估 ============ -->
-      <section id="tab-eval" hidden>
-        <div class="cols">
+        <div id="result-metrics" hidden>
+          <div class="cols">
 <div class="col">
 <div class="card">
           <h2>
@@ -1145,10 +1873,10 @@
               <span>顺带出错例回收（predict + save_crop）</span>
             </label>
           </div>
-          <div class="row" style="margin-top: 10px">
+          <div class="row" style="margin-top: 10px; flex-wrap: wrap">
             <button class="btn primary" id="ev-run">开始评估</button>
             <button class="btn" id="ev-refresh">读最近一次结果</button>
-            <span class="note" style="margin: 0">评估走插件自带的 runner，结果只落 <code>train_runs/eval/</code>；你的 <code>scripts/validate_viz.py</code> 与 <code>runs/</code> 都不动。</span>
+            <span class="note" style="margin: 0">结果只落 <code>train_runs/eval/</code>；你的脚本与 <code>runs/</code> 都不动。</span>
           </div>
         </div>
 <div class="card">
@@ -1157,9 +1885,13 @@
           <div class="note" id="ev_when"></div>
         </div>
 <div class="card">
+          <h2>逐类指标 <span class="tag">mAP50-95</span></h2>
+          <div id="ev_perclass"></div>
+        </div>
+<div class="card">
           <h2>阈值对照</h2>
           <div id="ev_conftbl"></div>
-          <p class="note">这张表读的是<b>同一次 val 的 PR 曲线</b>——和 <code>BoxPR_curve.png</code> 同源，所以表和图不会互相打脸。不重复跑 N 遍验证集。</p>
+          <p class="note">读的是同一次 val 的 P/R 曲线，和 <code>P_curve.png</code> 同源。</p>
         </div>
 </div>
 <div class="col">
@@ -1168,22 +1900,27 @@
           <div class="snap" id="ev_plots"></div>
           <div id="ev_img"></div>
         </div>
-<div class="card" id="ev_errcard" hidden>
-          <h2>错例（拿去 X-AnyLabeling 补标）</h2>
-          <div id="ev_errlist"></div>
-        </div>
-<div class="card">
-          <h2>和另一个 run 比</h2>
-          <div class="row">
-            <select id="cmp_a" style="max-width:260px"></select>
-            <select id="cmp_b" style="max-width:260px"></select>
-            <button class="btn" id="cmp-run">对比</button>
-          </div>
-          <div id="cmpout"></div>
-        </div>
 </div>
 </div>
+        </div><!-- /metrics -->
 
+        <div id="result-errors" hidden>
+          <div class="card" id="ev_errcard">
+            <h2>错例（拿去 X-AnyLabeling 补标）<span class="tag" id="ev_errcount">—</span></h2>
+            <div id="ev_errlist"></div>
+          </div>
+        </div><!-- /errors -->
+
+        <div id="result-failure" hidden>
+          <div class="card" id="failcard" hidden>
+            <h2>上一次失败的归类</h2>
+            <div class="kv" id="failkv"></div>
+          </div>
+          <div class="card" id="failempty">
+            <h2>失败与告警</h2>
+            <div class="note" id="failnote">当前没有失败的训练任务。任务失败时，这里会给出归类、原因和下一步。</div>
+          </div>
+        </div><!-- /failure -->
       </section>
 
       <!-- ============ 实验 ============ -->
@@ -1195,12 +1932,18 @@
             <button class="btn" id="run-refresh">重新读</button>
           </h2>
           <div id="runlist"></div>
-          <p class="note">
-            这一页读的是每个 run 里<b>引擎自己写的</b> <code>args.yaml</code> 与 <code>results.csv</code>——面板不另存一份实验记录，
-            所以不会有"面板说训过、盘上找不到"这种事。备注写在 <code>train_runs/&lt;实验&gt;.note</code>，
-            归档复制进 <code>archive/&lt;实验&gt;-&lt;时间&gt;/</code>（<b>只复制，不搬走</b>：搬走会让 <code>runs/</code> 里的历史断档）。
-            想两两对比（参数差异 + 两条曲线并排）在<b>「评估」页最下面</b>——那里已经有指标表了。
-          </p>
+          <p class="note">读每个 run 的 <code>args.yaml</code> 与 <code>results.csv</code>；面板不另存实验记录。</p>
+        </div>
+
+<div class="card" id="cmpcard">
+          <h2>对比两个 run <span class="tag" id="cmptag">—</span></h2>
+          <div class="row" style="flex-wrap:wrap">
+            <select id="cmp_a" style="max-width:260px"></select>
+            <select id="cmp_b" style="max-width:260px"></select>
+            <button class="btn primary" id="cmp-run">对比</button>
+          </div>
+          <p class="note">曲线 A 实线 / B 虚线；参数表只列不同的项。<button class="linkbtn" data-help="result">为什么?</button></p>
+          <div id="cmpout"></div>
         </div>
 
         <div class="card" id="reprocard" hidden>
@@ -1216,51 +1959,80 @@
         </div>
       </section>
 
-      <!-- ============ 帮助 ============ -->
-      <section id="tab-help" hidden>
-        <div class="card">
-          <h2>这个面板和你的手动流水线是什么关系</h2>
-          <ul class="hints">
-            <li><b>三层配置</b>：工作区 <code>config.yaml</code>（你的基准，面板<b>只读</b>）→ 面板覆盖 <code>.uartix/yolo/config.json</code>（只存与基准不同的键，改回默认时 diff 自己消失）→ 每次实验的完整快照 <code>train_runs/&lt;实验&gt;-&lt;时间&gt;.yaml</code>。</li>
-            <li><b>面板能点的，命令行也跑得起来</b>：训练页的「先看这次会用什么参数」和实验页的「等价命令」给的就是同一份 yaml 的三个入口——插件 runner（吃全部参数）、你自己的 <code>scripts/train.py</code>（只认它那 20 个键）、ultralytics CLI（吃引擎写的 <code>args.yaml</code>）。</li>
-            <li><b>它不改你的东西</b>：<code>config.yaml</code>、<code>scripts/*.py</code>、<code>00~07*.bat</code>、<code>README_使用说明.txt</code> 全程只读；这条不是承诺，是测试（逐文件比 mtime 与内容）。新参数走插件自带的 <code>runner/</code>，所以不需要动你的脚本。</li>
-            <li><b>写只在这几处</b>：<code>.uartix/</code>、<code>annotations/</code>、<code>datasets/</code>、<code>runs/</code>、<code>logs/</code>、<code>models/</code>、<code>train_runs/</code>——就是批准卡上列的那几枚，内核级牢笼，越界直接 <code>ERR_ACCESS_DENIED</code>。</li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h2>模型、任务与数据</h2>
-          <ul class="hints">
-            <li><b>只做 YOLO11 与 YOLO26</b>：它们是同一个 <code>ultralytics</code> 包里的两代模型，不是两套环境，所以没有"切环境"这一说，只有"这次用哪一枚权重"。</li>
-            <li><b>老数据不用重标</b>：YOLO 文本标注格式（<code>images/ + labels/ + data.yaml</code>，归一化 <code>class cx cy w h</code>）在这两代之间通用。这是"我手上的老标注还能不能用"的答案。</li>
-            <li><b>标注你自己来</b>：面板不生成、不搬运、不改名、不删任何标注。它只登记一个投料口 <code>annotations/</code>（一个子目录 = 一批），素材夹留空时「构建数据集」直接从这个目录取。</li>
-            <li><b>任务识别只是建议</b>：判据是标签每行的 token 数（5 = 框，1+2N = 多边形）。点了「按建议设置」才会写进配置。9 个 token 时多边形与 OBB 分不开，面板只报出来不替你决定；混合标注按 detect 训会<b>静默丢弃 segments</b>。</li>
-            <li><b>权重与任务不搭会当场拦</b>：拿 detect 权重跑 segment，引擎会拒；面板在开跑前就说清楚，并且不留下半份快照。</li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h2>参数面与几个版本坑</h2>
-          <ul class="hints">
-            <li><b>参数表不是抄的</b>：每一项都来自当前这套 <code>ultralytics</code> 的默认表（本机 111 键）。包里没这个键就不出现——所以键改名会自动跟上，不会出现"面板能填、引擎不认"。读不到时降级成最小集并明说。</li>
-            <li><b>没有 <code>half</code> 这个开关</b>：它在 8.4 已被 <code>quantize</code> 取代（导出页有这一项）。旧教程里那行打开半精度的写法在面板里找不到，不是漏了，是引擎不要了。</li>
-            <li><b>续训只认 <code>last.pt</code></b>：<code>best.pt</code> 没有优化器/轮次状态，给它会静默退化；填 <code>true</code> 会让引擎去当前目录猜一个，所以面板要求你填完整路径。<b>跨 ultralytics 版本续训一律不做</b>（官方没有任何保证）。</li>
-            <li><b>数字 / 文字类任务</b>：<code>fliplr</code> / <code>flipud</code> 保持 0（镜像后字就反了），<code>erasing</code>、<code>perspective</code> 慎用。这两项面板会标红提醒。</li>
-            <li><b>这台机器</b>：16G 内存 → <code>workers</code> 保持 0；8G 显存 → <code>batch</code> 可以填 <code>-1</code> 让引擎自己挑，或 OOM 后减半。</li>
-          </ul>
-        </div>
-
-        <div class="card">
-          <h2>为什么这次要重新批准</h2>
-          <p class="note">
-            0.3.0 的清单多了两枚写目录（<code>train_runs/</code> 与 <code>annotations/</code>），版本号也变了 ⇒
-            信任指纹变化 ⇒ 会重新弹一次批准卡。这是设计的一部分，不是麻烦：<b>装、启用、发布这三件事永远由你点</b>，
-            面板和 AI 都不替你按。发布到市场是外发行为（源码出去了收不回来），所以那条路只到「打开页面」为止。
-          </p>
-        </div>
-      </section>
+      <!-- 帮助已移到右上角抽屉（P176-B1） -->
       </main>
     </div>
+
+    <!-- ============ 帮助抽屉（P176-B1：从左侧页签移到右上角） ============ -->
+    <div id="helpmask" class="drawer-mask" hidden></div>
+    <aside id="helpdrawer" class="drawer" hidden role="dialog" aria-label="帮助">
+      <div class="drawer-h">
+        <span class="drawer-t">帮助</span>
+        <input id="helpsearch" class="helpsearch" placeholder="搜：参数 / 校准 / Docker…" aria-label="搜索帮助" />
+        <button class="btn" id="helpclear" title="清空搜索">清空</button>
+        <button class="btn" id="helpclose" title="关闭（Esc）">关闭</button>
+      </div>
+      <div class="drawer-b">
+        <div class="card" id="help-config">
+          <h2>配置与边界</h2>
+          <ul class="hints">
+            <li><b>三层配置</b>：工作区 <code>config.yaml</code>（只读基准）→ 面板覆盖 <code>.uartix/yolo/config.json</code>（只存差异）→ 每次实验的完整快照 <code>train_runs/&lt;实验&gt;-&lt;时间&gt;.yaml</code>。</li>
+            <li><b>面板能点的，命令行也跑得起来</b>：快照是公共语言；插件 runner 吃全部参数，你自己的 <code>scripts/train.py</code> 只认它的 20 个键。</li>
+            <li><b>不改你的东西</b>：<code>config.yaml</code>、<code>scripts/*.py</code>、<code>00~07*.bat</code> 全程只读。</li>
+            <li><b>写只在这几处</b>：<code>.uartix/</code>、<code>annotations/</code>、<code>datasets/</code>、<code>runs/</code>、<code>logs/</code>、<code>models/</code>、<code>train_runs/</code>。</li>
+          </ul>
+        </div>
+        <div class="card" id="help-models">
+          <h2>模型、任务与数据</h2>
+          <ul class="hints">
+            <li><b>只做 YOLO11 与 YOLO26</b>：同一个 <code>ultralytics</code> 包里的两代模型，不是两套环境。</li>
+            <li><b>老数据不用重标</b>：YOLO 文本格式（<code>images/ + labels/ + data.yaml</code>）两代通用。</li>
+            <li><b>权重与任务不搭会当场拦</b>：拿 detect 权重跑 segment，开跑前就说明，不留下半份快照。</li>
+            <li><b>模型库先按文件名推断</b>：读一遍权重才知道它自带的任务、类别数和训练它的包版本；读不出就标出来，不猜。</li>
+          </ul>
+        </div>
+        <div class="card" id="help-params">
+          <h2>参数与训练</h2>
+          <ul class="hints">
+            <li><b>参数表不是抄的</b>：每项来自当前 <code>ultralytics</code> 的 <code>DEFAULT_CFG_DICT</code>；包里没有就不出现。</li>
+            <li><b>只存差异</b>：面板只把与工作区 <code>config.yaml</code> 不同的键写进覆盖层，改回默认时 diff 自己消失。</li>
+            <li><b>没有 half</b>：8.4 已被 <code>quantize</code> 取代，那是导出页的事。</li>
+            <li><b>续训只认 <code>last.pt</code></b>：<code>best.pt</code> 没有优化器状态；跨包版本续训不做。</li>
+            <li><b>数字/文字任务</b>：<code>fliplr</code> / <code>flipud</code> 保持 0；<code>erasing</code> 慎用。</li>
+            <li><b>本机</b>：16 GB 内存 → <code>workers</code> 8 左右；8 GB 显存 → batch 16，OOM 就减半。</li>
+          </ul>
+        </div>
+        <div class="card" id="help-snapshot">
+          <h2>训练快照与等价命令</h2>
+          <p class="note">每次开跑前写 <code>train_runs/&lt;实验名&gt;-&lt;时间&gt;.yaml</code>，含本次全部参数。训练由 <code>runner/train_job.py</code> 执行，跑完去 <code>runs/&lt;实验名&gt;/args.yaml</code> 对答案。快照能直接喂给你自己的 <code>scripts/train.py --config …</code>，只是它只认自己那 20 个键。</p>
+        </div>
+        <div class="card" id="help-data">
+          <h2>数据与标注</h2>
+          <p class="note">标注由你在 X-AnyLabeling 里完成。面板只认一个投料口 <code>annotations/</code>：一个子目录 = 一批素材，把导出目录整个丢进去即可。构建与体检都只读，不搬、不改、不删任何标注文件。</p>
+        </div>
+        <div class="card" id="help-audit">
+          <h2>标注体检看什么</h2>
+          <p class="note">越界坐标、空标签、找不到图的标签、类别分布与 <code>nc/names</code> 是否一致、train 与 val 是否重名（数据泄漏）。它只报问题，修标注仍在 X-AnyLabeling 里做。</p>
+        </div>
+        <div class="card" id="help-augment">
+          <h2>增强预览</h2>
+          <p class="note">显示的是引擎自己写出的 <code>train_batch*.jpg</code>，也就是上一次训练真实喂进网络的样本。面板不画假预览；改了增强参数要看新效果，跑一轮再回来。框上的数字是类别 id（从 0 开始），不是类别名。</p>
+        </div>
+        <div class="card" id="help-result">
+          <h2>曲线与 TensorBoard</h2>
+          <p class="note">曲线读的是引擎自己写的 <code>runs/&lt;实验&gt;/results.csv</code>；非续训重跑会删重建这个文件，所以“上一次的曲线”没了不是面板丢数据。想在 TensorBoard 里看：先 <code>yolo settings tensorboard=True</code>，再自己起 <code>tensorboard --logdir runs</code>（面板不替你装东西，也不替你起进程）。</p>
+        </div>
+        <div class="card" id="help-deploy">
+          <h2>部署与 Docker</h2>
+          <p class="note">部署工具不改你的 <code>deploy_config*.ps1</code>：面板在 <code>.uartix/yolo/deploy/</code> 生成包装配置，覆盖 <code>$Model</code> / <code>$ModelName</code> / <code>$CalibSources</code>（校准图）。编译由工具自己的 <code>deploy.ps1</code> 调 Docker/Pulsar2 执行；Docker 引擎没起时先看「配置与边界」里的 WSL 修复步骤。</p>
+        </div>
+        <div class="card" id="help-perms">
+          <h2>权限与批准</h2>
+          <p class="note">写权限只有那七枚目录，越界会被内核直接拒绝。版本号变化不影响已批准的能力面；只有权限面变了才会重新弹批准卡。安装、启用、发布这三件事始终由你点。</p>
+        </div>
+        <div id="helpnone" class="note" hidden>没有匹配的帮助。</div>
+      </div>
+    </aside>
 
     <div id="logwrap">
       <div id="logbar">
@@ -1280,6 +2052,8 @@
     </div>
 
     <div id="lb" class="lb" hidden><img id="lbimg" alt="" /></div>
+    <div id="tip" class="tip" role="tooltip" hidden></div>
+    <div id="runmenu" class="popmenu" role="menu" hidden></div>
 
     <script>
       /* ---------------- 小工具 ---------------- */
@@ -1336,8 +2110,12 @@
         appendLog([{ text: "[面板] " + text, stream: stream || "sys" }]);
       }
 
-      /** 从别处跳到某个页签（「下一步」那颗按钮用）。 */
+      /** 从别处跳到某个页签（「下一步」那颗按钮用）。旧名字 monitor/eval 映射到「结果」的两个视图。 */
       function showTab(name) {
+        if (name === "eval" || name === "monitor") {
+          pendingResultView = name === "eval" ? "metrics" : "curves";
+          name = "result";
+        }
         var b = document.querySelector('nav button[data-tab="' + name + '"]');
         if (b) b.click();
       }
@@ -1380,7 +2158,7 @@
             "最近一版是 " + esc(last.name) + "（" + last.epochs + " 轮" +
             (last.metrics && last.metrics.mAP50M ? "，mAP50 " + esc(fmtNum(last.metrics.mAP50M)) : "") + "）。";
           if (!(s.evals > 0)) {
-            text = what + "训完就该打分了：去「评估」跑一次 val，拿指标、阈值表和错例。";
+            text = what + "训完就该打分了：去「结果 → 指标」跑一次 val，拿指标、阈值表和错例。";
             go = "eval";
             btn = "去评估";
           } else if (!(s.exports > 0)) {
@@ -1497,7 +2275,8 @@
 
       /* ---------------- 部署 ---------------- */
 
-      var dep = { cfg: "", state: null, model: "", calib: "" };
+      var dep = { cfg: "", state: null, model: "", calib: "", last: { step: "", state: "" }, done: {} };
+      var depEnv = null;
 
       function fmtBytes(n) {
         if (!n) return "0 B";
@@ -1522,6 +2301,79 @@
           dep.state = { error: String((e && e.message) || e) };
         }
         renderDeployPage();
+        if (!depEnv) checkDeployEnv(); // 不 await：检测要几秒，页面先能用
+      }
+
+      async function checkDeployEnv() {
+        var box = $("depenv");
+        if (box) box.innerHTML = '<span class="note" style="margin:0">正在检测 Docker（引擎没起时会顺带测一次 WSL，最多 20 秒）…</span>';
+        try {
+          depEnv = await uartix.call("deployEnv");
+        } catch (e) {
+          depEnv = { ok: false, error: String((e && e.message) || e), wsl: "", hint: "" };
+        }
+        renderDeployEnv();
+        if (dep.state) renderDeployPage();
+      }
+
+      function renderDeployEnv() {
+        var box = $("depenv");
+        if (!box) return;
+        if (!depEnv) {
+          box.innerHTML =
+            '<span class="note" style="margin:0">部署的<b>编译</b>这一步要用 Docker；先确认引擎能不能用。</span>' +
+            '<button class="btn" id="dep-env">检测 Docker</button>';
+        } else if (depEnv.ok) {
+          box.innerHTML =
+            '<span class="tag ok">Docker 已就绪</span>' +
+            '<span class="note" style="margin:0">引擎 ' + esc(depEnv.version) + "。</span>" +
+            '<button class="btn" id="dep-env">重新检测</button>';
+        } else {
+          box.innerHTML =
+            '<span class="tag warn">Docker 没起来</span>' +
+            '<span class="note" style="margin:0">' + esc(depEnv.error || "引擎无响应") + "</span>" +
+            (depEnv.hint ? '<p class="hint">' + esc(depEnv.hint) + "</p>" : "") +
+            '<button class="btn" id="dep-env">重新检测</button>';
+        }
+        var b = $("dep-env");
+        if (b) b.onclick = checkDeployEnv;
+      }
+
+      var DEP_STEPS = [
+        { id: "env", n: "1", t: "环境", s: "Docker · Python · 配方", step: "validate", btn: "只检查" },
+        { id: "onnx", n: "2", t: "导出", s: "ONNX + 校准图", step: "prepare", btn: "只准备" },
+        { id: "convert", n: "3", t: "编译", s: "Pulsar2", step: "convert", btn: "只编译" },
+        { id: "package", n: "4", t: "打包", s: ".mud + 例程", step: "package", btn: "只打包" },
+      ];
+
+      function depStageState(id, tool) {
+        var last = (dep && dep.last) || {};
+        var map = { env: "validate", onnx: "prepare", convert: "convert", package: "package" };
+        if (last.state === "running") return last.step === "all" || last.step === map[id] ? "running" : "idle";
+        if (last.state === "succeeded" && (last.step === "all" || last.step === map[id])) return "done";
+        if ((last.state === "failed" || last.state === "stopped") && last.step === map[id]) return "failed";
+        if (dep.done && dep.done[id]) return "done";
+        if (id === "env") return depEnv && depEnv.ok && tool.ready ? "ready" : "warn";
+        return "idle";
+      }
+
+      function renderStepper(tool, running) {
+        var host = $("depstepper");
+        if (!host) return;
+        var LABEL = { ready: "就绪", done: "完成", running: "进行中", failed: "失败", warn: "待检查", idle: "未运行" };
+        var TAG = { ready: "ok", done: "ok", running: "", failed: "bad", warn: "warn", idle: "" };
+        host.innerHTML = DEP_STEPS.map(function (x) {
+          var st = depStageState(x.id, tool);
+          return (
+            '<div class="step ' + st + '"><span class="sn">' + x.n + '</span>' +
+            '<div class="st"><b>' + esc(x.t) + "</b><span>" + esc(x.s) + "</span></div>" +
+            '<span class="tag ' + TAG[st] + '">' + LABEL[st] + "</span>" +
+            '<button class="btn" data-dstep="' + x.step + '"' + (running || !tool.ready ? " disabled" : "") + ">" + x.btn + "</button></div>"
+          );
+        }).join("");
+        host.querySelectorAll("[data-dstep]").forEach(function (b) {
+          b.onclick = function () { runDeploy(b.getAttribute("data-dstep")); };
+        });
       }
 
       function renderDeployPage() {
@@ -1561,31 +2413,35 @@
             }).join("")
           : '<span class="note" style="margin:0">还没交付过模型</span>';
 
-        // 配置列表
+        // 配置列表（B6：配方表）
         if (!configs.length) {
           $("cfglist").innerHTML = '<div class="note" style="margin:0">没有可用的配置文件。</div>';
         } else {
           if (!dep.cfg || !configs.some(function (c) { return c.name === dep.cfg; })) dep.cfg = configs[0].name;
-          $("cfglist").innerHTML = configs.map(function (c) {
+          var cfgRows = configs.map(function (c) {
             var on = c.name === dep.cfg;
+            var cal = c.calib ? String(c.calib).split(/[\\/]/).filter(Boolean).pop() : "未设置";
             return (
-              '<div class="cfgrow' + (on ? " on" : "") + '" data-cfg="' + esc(c.name) + '">' +
-                '<span class="dot"></span>' +
-                '<span class="nm">' + esc(c.name) + "</span>" +
-                '<span class="mt" title="' + esc(c.calib || "") + '">' + esc(c.modelName || "(无 $ModelName)") + " · " + esc(c.imgsz) + " · " + esc(c.docker || "-") +
-                  " · 校准 " + esc(c.calib ? String(c.calib).split(/[\\/]/).filter(Boolean).pop() : "未设置") + "</span>" +
-                '<span style="flex:1 1 auto"></span>' +
-                (c.ok === false ? '<span class="tag warn">' + esc(c.error || "读不出") + "</span>" : "") +
-              "</div>"
+              '<tr class="' + (on ? "on" : "") + '" data-cfg="' + esc(c.name) + '">' +
+                '<td><span class="dot"></span></td>' +
+                '<td class="name" title="' + esc(c.name) + '">' + esc(c.name) + "</td>" +
+                "<td>" + esc(c.modelName || "—") + "</td>" +
+                '<td class="num">' + esc(c.imgsz) + "</td>" +
+                "<td>" + esc(c.docker || "—") + "</td>" +
+                '<td class="name" title="' + esc(c.calib || "") + '">' + esc(cal) + "</td>" +
+                "<td>" + (c.ok === false ? '<span class="tag warn">' + esc(c.error || "读不出") + "</span>" : "") + "</td></tr>"
             );
           }).join("");
-          var rows = $("cfglist").querySelectorAll(".cfgrow");
-          for (var i = 0; i < rows.length; i++) {
-            rows[i].onclick = function () {
-              dep.cfg = this.getAttribute("data-cfg");
+          $("cfglist").innerHTML =
+            '<div class="tablewrap"><table class="cfgtbl"><thead><tr><th></th><th>配方</th><th>模型名</th><th>尺寸</th><th>镜像</th><th>校准</th><th></th></tr></thead><tbody>' +
+            cfgRows +
+            "</tbody></table></div>";
+          $("cfglist").querySelectorAll("tr[data-cfg]").forEach(function (tr) {
+            tr.onclick = function () {
+              dep.cfg = tr.getAttribute("data-cfg");
               renderDeployPage();
             };
-          }
+          });
         }
 
         // 权重 / 校准图：候选由插件扫一份（训练产物 / 交付区 / 模型库 / 各数据集），面板只管摆
@@ -1624,15 +2480,18 @@
           dep.calib = this.value;
         };
 
-        var running = !!(st2.active && st2.active.state === "running");
-        ["dep-validate", "dep-all", "dep-convert", "dep-package", "deliver"].forEach(function (id) {
-          var el = $(id);
-          if (el) el.disabled = running || (id !== "deliver" && !tool.ready);
-        });
+        var running = !!(st2.active && st2.active.state === "running") || dep.last.state === "running";
+        if ($("dep-all")) $("dep-all").disabled = running || !tool.ready;
+        if ($("deliver")) $("deliver").disabled = running || !latest;
+        if ($("dep-stop")) $("dep-stop").disabled = !running;
+        renderStepper(tool, running);
+        renderDeployEnv();
       }
 
       async function runDeploy(step) {
         if (!dep.cfg) return;
+        dep.last = { step: step, state: "running" };
+        renderDeployPage();
         sysLog("部署开始（" + step + "）：" + dep.cfg);
         try {
           var job = await uartix.call("deployStart", {
@@ -1645,6 +2504,7 @@
           });
           renderJob(job);
         } catch (e) {
+          dep.last.state = "failed";
           sysLog("[错误] " + String((e && e.message) || e));
         }
         loadDeploy();
@@ -1660,10 +2520,7 @@
           sysLog("[错误] " + String((e && e.message) || e));
         }
       };
-      $("dep-validate").onclick = function () { runDeploy("validate"); };
       $("dep-all").onclick = function () { runDeploy("all"); };
-      $("dep-convert").onclick = function () { runDeploy("convert"); };
-      $("dep-package").onclick = function () { runDeploy("package"); };
       $("dep-stop").onclick = async function () {
         try { await uartix.call("stop"); } catch (e) { /* 没在跑 */ }
       };
@@ -1709,6 +2566,51 @@
         var d = new Date(ms);
         var p = function (n) { return (n < 10 ? "0" : "") + n; };
         return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+      }
+
+      /**
+       * 概览：状态条 + KPI（P176-B1）。
+       * 只用 state() 已经有的东西，不额外探测——这一块必须在首屏 0 成本出现。
+       */
+      function renderOverview() {
+        var s = st || {};
+        var d = s.dataset || {};
+        var cfg = s.config || {};
+        var py = s.python || {};
+        var runs = s.runs || [];
+        var last = runs[0] || {};
+        var m = last.metrics || {};
+        var wsOk = !!s.workspace && !!cfg.baseFound;
+        var dsOk = !!(d.exists && d.trainCount);
+        var chips = [];
+        chips.push(
+          '<span class="chip ' + (s.workspace ? (wsOk ? "ok" : "warn") : "bad") + '" title="' + esc(s.workspace || "还没有登记工作区") +
+            '"><span class="dot"></span>工作区 <b>' + esc(s.workspace ? (wsOk ? "已就绪" : "缺 config.yaml") : "未登记") + "</b></span>",
+        );
+        chips.push(
+          '<span class="chip ' + (dsOk ? "ok" : "warn") + '" id="chip-data" style="cursor:pointer" title="去数据页"><span class="dot"></span>数据 <b>' +
+            esc(dsOk ? d.trainCount + " / " + (d.valCount || 0) + " 张 · " + ((d.classes || []).length || "?") + " 类" : "未构建") + "</b></span>",
+        );
+        chips.push(
+          '<span class="chip ' + (py.ok ? "ok" : "bad") + '" title="' + esc(py.path || "") + '"><span class="dot"></span>环境 <b>' +
+            esc(py.ok ? "python " + String(py.version || "").replace(/^Python\s*/i, "") : "python 未就绪") + "</b></span>",
+        );
+        $("statusstrip").innerHTML = chips.join("");
+        var cd = $("chip-data");
+        if (cd) cd.onclick = function () { showTab("data"); };
+
+        var best = Number(m.mAP5095M);
+        var tiles = [
+          { k: "训练图", v: d.trainCount || 0, u: "张" },
+          { k: "验证图", v: d.valCount || 0, u: "张" },
+          { k: "类别", v: (d.classes || []).length || 0, u: "类" },
+          { k: "最近 best mask mAP50-95", v: isFinite(best) ? best.toFixed(3) : "—", u: "" },
+        ];
+        $("kpigrid").innerHTML = tiles
+          .map(function (x) {
+            return '<div class="kpi"><div class="k">' + esc(x.k) + '</div><div class="v">' + esc(String(x.v)) + (x.u ? '<span class="u">' + esc(x.u) + "</span>" : "") + "</div></div>";
+          })
+          .join("");
       }
 
       function renderRuns() {
@@ -1770,11 +2672,12 @@
 
       function ctl(it) {
         var id = "p_" + it.key;
+        var hb = '<button type="button" class="qh" aria-label="' + esc(it.label) + ' 的说明">?</button>';
         if (it.kind === "bool") {
-          return '<label class="p bool"><input type="checkbox" id="' + id + '" /><span>' + esc(it.label) + "</span></label>";
+          return '<label class="p bool" data-help-key="' + esc(it.key) + '"><input type="checkbox" id="' + id + '" /><span>' + esc(it.label) + "</span>" + hb + "</label>";
         }
         var dft = it.engineDefault === null || it.engineDefault === undefined || it.engineDefault === "" ? "" : String(it.engineDefault);
-        var cap = '<span class="cap">' + esc(it.label) + (dft ? '<i class="dft">包默认 ' + esc(dft) + "</i>" : "") + "</span>";
+        var cap = '<span class="cap">' + esc(it.label) + hb + (dft ? '<i class="dft">包默认 ' + esc(dft) + "</i>" : "") + "</span>";
         var box = "";
         if (it.kind === "select") {
           // 空值 = 不覆盖，交回包默认：下拉里要能**看见**这个状态，否则用户以为面板坏了
@@ -1785,13 +2688,12 @@
             '<input id="' + id + '" type="number" step="' + (it.step === undefined ? "any" : it.step) + '"' +
             (it.min === null || it.min === undefined ? "" : ' min="' + it.min + '"') +
             (it.max === null || it.max === undefined ? "" : ' max="' + it.max + '"') +
-            ' placeholder="' + esc(dft) + '" title="' + esc(it.hint || "") + '" />';
+            ' placeholder="' + esc(dft) + '" />';
         } else {
           box = '<input id="' + id + '" spellcheck="false" placeholder="' + esc(dft) + '" />';
         }
-        var tip = it.warn || it.hint || "";
-        if (it.warn) tip = "⚠ " + it.warn + (it.hint ? " ｜ " + it.hint : "");
-        return '<label class="p' + (it.wide ? " wide" : "") + (it.warn ? " warn" : "") + '" title="' + esc(tip) + '">' + cap + box + "</label>";
+        var warnHtml = it.warn ? '<span class="pwarn">⚠ ' + esc(it.warn) + "</span>" : "";
+        return '<label class="p' + (it.wide ? " wide" : "") + (it.warn ? " warn" : "") + '" data-help-key="' + esc(it.key) + '">' + cap + box + warnHtml + "</label>";
       }
 
       /* ---------------- 训练页的分层：练什么 / 练多久 / 高级折叠 ---------------- */
@@ -1809,6 +2711,166 @@
         });
         return map;
       }
+
+      /* ---------------- 参数说明浮层（P176-B2） ---------------- */
+      var tipKey = "";
+      var tipPin = false;
+      var tipTimer = 0;
+      var tipPress = 0;
+      var tipAnchor = null;
+
+      function hideTip(force) {
+        if (tipPin && !force) return;
+        var t = $("tip");
+        if (t) t.hidden = true;
+        tipKey = "";
+        tipAnchor = null;
+      }
+
+      function positionTip(anchor) {
+        var t = $("tip");
+        if (!t) return;
+        var r = anchor.getBoundingClientRect();
+        var tr = t.getBoundingClientRect();
+        var gap = 9;
+        var top = r.top - tr.height - gap;
+        var side = "top";
+        if (top < 8) {
+          top = r.bottom + gap;
+          side = "bottom";
+        }
+        var left = r.left + r.width / 2 - tr.width / 2;
+        left = Math.max(12, Math.min(left, window.innerWidth - tr.width - 12));
+        t.style.top = top + "px";
+        t.style.left = left + "px";
+        t.setAttribute("data-side", side);
+        var arrow = r.left + r.width / 2 - left - 5;
+        t.style.setProperty("--arrow", Math.max(10, Math.min(arrow, tr.width - 20)) + "px");
+      }
+
+      function showTip(key, anchor) {
+        var idx = specIndex();
+        var it = idx[key];
+        var t = $("tip");
+        if (!it || !t) return;
+        var h = it.help || {};
+        var dft = it.engineDefault === null || it.engineDefault === undefined || it.engineDefault === "" ? "—" : String(it.engineDefault);
+        var rows = [["默认", dft]];
+        if (h.range) rows.push(["范围", h.range]);
+        if (h.impact) rows.push(["影响", h.impact]);
+        if (it.warn) rows.push(["注意", it.warn]);
+        var rel = (h.related || []).filter(function (k) { return idx[k]; });
+        t.innerHTML =
+          '<div class="tt">' + esc(it.label) + '<span class="tk">' + esc(it.key) + "</span></div>" +
+          '<div class="tb">' + esc(h.one || it.hint || "引擎参数") + "</div>" +
+          '<div class="tm">' + rows.map(function (r) { return "<b>" + esc(r[0]) + "</b><span>" + esc(r[1]) + "</span>"; }).join("") + "</div>" +
+          (rel.length
+            ? '<div class="tr">' + rel.map(function (k) { return '<button type="button" data-goto="' + esc(k) + '">' + esc(idx[k].label || k) + "</button>"; }).join("") + "</div>"
+            : "");
+        t.hidden = false;
+        t.classList.toggle("pin", tipPin);
+        tipKey = key;
+        tipAnchor = anchor;
+        positionTip(anchor);
+      }
+
+      function scheduleTip(key, anchor) {
+        clearTimeout(tipTimer);
+        tipTimer = setTimeout(function () {
+          if (!tipPin) showTip(key, anchor);
+        }, 300);
+      }
+
+      function gotoParam(key) {
+        var el = $("p_" + key);
+        if (!el) return;
+        var d = el.closest("details");
+        if (d) d.open = true;
+        el.scrollIntoView({ block: "center" });
+        try {
+          el.focus({ preventScroll: true });
+        } catch (e) {
+          el.focus();
+        }
+      }
+
+      (function () {
+        var host = $("tab-train");
+        if (!host) return;
+        host.addEventListener("mouseover", function (e) {
+          var lab = e.target.closest ? e.target.closest("[data-help-key]") : null;
+          if (!lab || tipPin) return;
+          if (lab.contains(e.relatedTarget)) return;
+          scheduleTip(lab.getAttribute("data-help-key"), lab);
+        });
+        host.addEventListener("mouseout", function (e) {
+          var lab = e.target.closest ? e.target.closest("[data-help-key]") : null;
+          if (!lab) return;
+          if (lab.contains(e.relatedTarget)) return;
+          clearTimeout(tipTimer);
+          hideTip();
+        });
+        host.addEventListener("focusin", function (e) {
+          var q = e.target.closest ? e.target.closest(".qh") : null;
+          if (!q) return;
+          var lab = q.closest("[data-help-key]");
+          if (lab) showTip(lab.getAttribute("data-help-key"), lab);
+        });
+        host.addEventListener("focusout", function (e) {
+          var q = e.target.closest ? e.target.closest(".qh") : null;
+          if (q) hideTip();
+        });
+        host.addEventListener("pointerdown", function (e) {
+          if (e.pointerType === "mouse") return;
+          var lab = e.target.closest ? e.target.closest("[data-help-key]") : null;
+          if (!lab) return;
+          clearTimeout(tipPress);
+          tipPress = setTimeout(function () { showTip(lab.getAttribute("data-help-key"), lab); }, 500);
+        });
+        ["pointerup", "pointercancel", "pointerleave"].forEach(function (n) {
+          host.addEventListener(n, function () { clearTimeout(tipPress); });
+        });
+        host.addEventListener("click", function (e) {
+          var q = e.target.closest ? e.target.closest(".qh") : null;
+          if (q) {
+            e.preventDefault();
+            e.stopPropagation();
+            var lab = q.closest("[data-help-key]");
+            if (!lab) return;
+            var key = lab.getAttribute("data-help-key");
+            if (tipPin && tipKey === key) {
+              tipPin = false;
+              hideTip(true);
+            } else {
+              tipPin = true;
+              showTip(key, lab);
+            }
+            return;
+          }
+          var go = e.target.closest ? e.target.closest("[data-goto]") : null;
+          if (go) {
+            e.preventDefault();
+            tipPin = false;
+            hideTip(true);
+            gotoParam(go.getAttribute("data-goto"));
+            return;
+          }
+          if (!e.target.closest("#tip")) {
+            tipPin = false;
+            hideTip(true);
+          }
+        });
+      })();
+      // 滚动时跟着锚点走，而不是直接藏掉：编辑器里的滚动条一动，
+      // 用户正看着的说明不该凭空消失。
+      function followTip() {
+        if (tipPin || !tipAnchor) return;
+        var r = tipAnchor.getBoundingClientRect();
+        if (r.bottom < 8 || r.top > window.innerHeight - 8) hideTip(true);
+        else positionTip(tipAnchor);
+      }
+      window.addEventListener("scroll", followTip, true);
+      window.addEventListener("resize", followTip);
 
       function chevIcon() {
         return (
@@ -1867,6 +2929,8 @@
       }
 
       function renderTrainParams() {
+        tipPin = false;
+        hideTip(true);
         var spec = (st && st.params && st.params.ready ? st.params : null) || paramSpec;
         if (spec && spec.groups && spec.groups.length) paramSpec = spec;
         var host = $("c_adv");
@@ -2264,6 +3328,10 @@
       /* ---------------- 实验管理（P175-W7）---------------- */
       var runsList = [];
 
+      var runSort = { key: "when", dir: -1 };
+      var pendingRun = "";
+      var pendingEvalWeight = "";
+
       function loadRuns() {
         $("runtag").textContent = "读中…";
         uartix
@@ -2273,6 +3341,7 @@
             $("runtag").textContent = runsList.length + " 个 run";
             $("runtag").className = "tag" + (runsList.length ? " ok" : "");
             renderExperimentList();
+            fillCompareSelects();
           })
           .catch(function (e) {
             $("runtag").textContent = "读不到";
@@ -2281,57 +3350,159 @@
       }
 
       /** 实验页那份列表。名字必须和概览的 `renderRuns` 分开 —— 同名函数后者会静默盖掉前者。 */
+            function fillCompareSelects() {
+        var names = (runsList || []).map(function (r) { return r.name; });
+        if (!names.length) names = ((st && st.runs) || []).map(function (r) { return r.name; });
+        var opts = names.map(function (n) { return { v: n, t: n }; });
+        fillSelect($("cmp_a"), opts, $("cmp_a").value || names[0] || "");
+        fillSelect($("cmp_b"), opts, $("cmp_b").value || names[1] || names[0] || "");
+      }
+
+      function runSortTh(key, label, cls) {
+        var on = runSort.key === key;
+        return '<th class="' + (cls || "") + ' sortable" data-sort="' + key + '">' + esc(label) + (on ? (runSort.dir > 0 ? " ▲" : " ▼") : "") + "</th>";
+      }
+
+      function openRun(name) {
+        pendingRun = name;
+        showTab("result");
+      }
+
+      function pickEvalWeight(file) {
+        var sel = $("ev_weights");
+        if (!sel || !file) return;
+        var has = false;
+        for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === file) has = true;
+        if (!has) {
+          var o = document.createElement("option");
+          o.value = file;
+          o.textContent = String(file).split("/").pop();
+          sel.appendChild(o);
+        }
+        sel.value = file;
+      }
+
+      function closeRunMenu() {
+        var m = $("runmenu");
+        if (m) m.hidden = true;
+      }
+
+      function openRunMenu(anchor, r) {
+        var menu = $("runmenu");
+        if (!menu) return;
+        menu.innerHTML =
+          '<button data-act="view">看曲线</button>' +
+          '<button data-act="eval">评估这一版</button>' +
+          '<button data-act="repro">等价命令</button>' +
+          '<button data-act="arch">归档（复制）</button>' +
+          '<div class="menunote"><input id="runmenu_note" value="' + esc(r.note || "") + '" placeholder="这一版改了什么" /><button data-act="note">存</button></div>';
+        menu.hidden = false;
+        var rect = anchor.getBoundingClientRect();
+        var mw = menu.offsetWidth || 190;
+        menu.style.top = Math.round(rect.bottom + 4) + "px";
+        menu.style.left = Math.round(Math.max(8, Math.min(rect.right - mw, window.innerWidth - mw - 8))) + "px";
+        menu.onclick = async function (e) {
+          var b = e.target.closest ? e.target.closest("[data-act]") : null;
+          if (!b) return;
+          var act = b.getAttribute("data-act");
+          if (act === "view") { closeRunMenu(); openRun(r.name); return; }
+          if (act === "eval") { closeRunMenu(); pendingEvalWeight = r.best || ""; showTab("result"); setResultView("metrics"); return; }
+          if (act === "repro") { closeRunMenu(); showRepro(r); return; }
+          if (act === "arch") {
+            closeRunMenu();
+            try {
+              var out = await uartix.call("archiveRun", { run: r.name });
+              sysLog("已归档（复制）到 " + out.dst + "：" + out.copied.join("、"));
+            } catch (e2) { sysLog("归档失败：" + (e2 && e2.message ? e2.message : e2)); }
+            return;
+          }
+          if (act === "note") {
+            try {
+              await uartix.call("saveNote", { run: r.name, text: $("runmenu_note").value });
+              sysLog("备注已存到 train_runs/" + r.name + ".note");
+              closeRunMenu();
+              loadRuns();
+            } catch (e2) { sysLog("存备注失败：" + (e2 && e2.message ? e2.message : e2)); }
+          }
+        };
+      }
+      document.addEventListener("click", function (e) {
+        var m = $("runmenu");
+        if (!m || m.hidden) return;
+        if (e.target.closest && (e.target.closest("#runmenu") || e.target.closest("[data-more]"))) return;
+        closeRunMenu();
+      });
+
       function renderExperimentList() {
         if (!runsList.length) {
           $("runlist").innerHTML = '<span class="note">还没有 run。训练页点「开始训练」就会产出。</span>';
           return;
         }
+        var byName = {};
+        ((st && st.runs) || []).forEach(function (x) { byName[x.name] = x; });
+        var rows = runsList.map(function (r) {
+          var s0 = byName[r.name] || {};
+          var m = s0.metrics || {};
+          return Object.assign({}, r, {
+            when: Number(r.finishedAt || s0.finishedAt || 0),
+            durationSec: Number(r.durationSec || 0),
+            mAP5095B: Number(r.mAP5095),
+            mAP5095M: Number(r.mAP5095M !== "" && r.mAP5095M != null ? r.mAP5095M : m.mAP5095M),
+            status: r.delivered ? "已交付" : r.hasBest ? "有 best" : "无权重",
+          });
+        });
+        rows.sort(function (a, b) {
+          var k = runSort.key;
+          var x = a[k];
+          var y = b[k];
+          var n;
+          if (typeof x === "number" || typeof y === "number") n = (Number(x) || 0) - (Number(y) || 0);
+          else n = String(x || "").localeCompare(String(y || ""));
+          return runSort.dir * (n || 0);
+        });
         var h =
-          '<div class="tablewrap"><table><thead><tr><th>实验</th><th>任务</th><th>模型</th><th>轮次</th><th>mAP50(B)</th><th>mAP50(M)</th><th>用时</th><th>交付</th><th>备注</th><th></th></tr></thead><tbody>';
-        for (var i = 0; i < runsList.length; i++) {
-          var r = runsList[i];
+          '<div class="tablewrap"><table class="runtable"><thead><tr>' +
+          runSortTh("name", "实验", "name") +
+          runSortTh("when", "完成时间") +
+          runSortTh("epochs", "轮次", "num") +
+          runSortTh("bestEpoch", "最佳轮", "num") +
+          runSortTh("mAP5095B", "mAP50-95(B)", "num") +
+          runSortTh("mAP5095M", "mAP50-95(M)", "num") +
+          runSortTh("durationSec", "用时", "num") +
+          "<th>状态</th><th></th></tr></thead><tbody>";
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          var when = r.when ? fmtShortWhen(r.when) : "—";
+          var whenTitle = r.when ? fmtWhen(r.when) : "results.csv 没写出时间";
           h +=
-            "<tr><td class=\"name\" title=\"" + esc(r.dir) + '">' + esc(r.name) + "</td>" +
-            "<td>" + esc(r.task || "—") + '</td><td class="name" title="' + esc(r.model) + '">' + esc(String(r.model || "").split("/").pop() || "—") + "</td>" +
-            '<td class="num">' + r.epochs + '</td><td class="num">' + esc(fmtNum(r.mAP50)) + '</td><td class="num">' + esc(fmtNum(r.mAP50M)) + "</td>" +
+            '<tr><td class="name" title="' + esc(r.dir) + '"><b>' + esc(r.name) + "</b>" +
+            (r.note ? '<div class="rnote" title="' + esc(r.note) + '">' + esc(r.note) + "</div>" : "") + "</td>" +
+            '<td class="num" title="' + esc(whenTitle) + '">' + esc(when) + "</td>" +
+            '<td class="num">' + r.epochs + "</td>" +
+            '<td class="num">' + (r.bestEpoch || "—") + "</td>" +
+            '<td class="num">' + esc(chartNum(r.mAP5095B)) + "</td>" +
+            '<td class="num">' + esc(chartNum(r.mAP5095M)) + "</td>" +
             '<td class="num">' + esc(r.durationText || "—") + "</td>" +
-            "<td>" + (r.delivered ? '<span class="tag ok">已交付</span>' : '<span class="tag">—</span>') + "</td>" +
-            '<td><input id="note_' + i + '" value="' + esc(r.note || "") + '" placeholder="这一版改了什么" style="min-width:160px" /></td>' +
-            "<td>" +
-            '<button class="btn" data-note="' + i + '">存备注</button> ' +
-            '<button class="btn" data-repro="' + i + '">等价命令</button> ' +
-            '<button class="btn" data-arch="' + i + '">归档</button>' +
-            "</td></tr>";
+            "<td>" + (r.delivered ? '<span class="tag ok">已交付</span>' : r.hasBest ? '<span class="tag">有 best</span>' : '<span class="tag warn">无权重</span>') + "</td>" +
+            '<td class="runactions"><button class="btn runmore" data-more="' + i + '" title="操作">⋯</button></td></tr>';
         }
         $("runlist").innerHTML = h + "</tbody></table></div>";
         var box = $("runlist");
-        box.querySelectorAll("[data-note]").forEach(function (b) {
-          b.onclick = async function () {
-            var i = Number(b.getAttribute("data-note"));
-            var r = runsList[i];
-            try {
-              await uartix.call("saveNote", { run: r.name, text: $("note_" + i).value });
-              sysLog("备注已存到 train_runs/" + r.name + ".note");
-              loadRuns();
-            } catch (e) {
-              sysLog("存备注失败：" + (e && e.message ? e.message : e));
+        box.querySelectorAll("[data-sort]").forEach(function (th) {
+          th.onclick = function () {
+            var k = th.getAttribute("data-sort");
+            if (runSort.key === k) runSort.dir = -runSort.dir;
+            else {
+              runSort.key = k;
+              runSort.dir = k === "name" ? 1 : -1;
             }
+            renderExperimentList();
           };
         });
-        box.querySelectorAll("[data-repro]").forEach(function (b) {
-          b.onclick = function () {
-            showRepro(runsList[Number(b.getAttribute("data-repro"))]);
-          };
-        });
-        box.querySelectorAll("[data-arch]").forEach(function (b) {
-          b.onclick = async function () {
-            var r = runsList[Number(b.getAttribute("data-arch"))];
-            try {
-              var out = await uartix.call("archiveRun", { run: r.name });
-              sysLog("已归档（复制）到 " + out.dst + "：" + out.copied.join("、"));
-            } catch (e) {
-              sysLog("归档失败：" + (e && e.message ? e.message : e));
-            }
+        box.querySelectorAll("[data-more]").forEach(function (b) {
+          b.onclick = function (ev) {
+            ev.stopPropagation();
+            openRunMenu(b, rows[Number(b.getAttribute("data-more"))]);
           };
         });
       }
@@ -2515,6 +3686,47 @@
         var runs = (st.runs || []).map(function (x) { return { v: x.name, t: x.name }; });
         fillSelect($("cmp_a"), runs, runs[0] ? runs[0].v : "");
         fillSelect($("cmp_b"), runs, runs[1] ? runs[1].v : "");
+        if (pendingEvalWeight) {
+          pickEvalWeight(pendingEvalWeight);
+          pendingEvalWeight = "";
+        }
+      }
+
+      function renderPerClass(res) {
+        var host = $("ev_perclass");
+        if (!host) return;
+        var pc = (res && res.perClass) || [];
+        if (!pc.length) {
+          host.innerHTML = '<span class="note">这次评估没有逐类数据（旧结果或评估器版本）。重跑一次评估就有了。</span>';
+          return;
+        }
+        var hasM = pc.some(function (x) { return x.map5095M != null; });
+        var hasB = pc.some(function (x) { return x.map5095B != null; });
+        var two = hasM && hasB ? " two" : "";
+        var head = '<div class="pchead' + two + '"><span>类别</span>' +
+          (hasB ? "<span>框</span>" : "") + (hasM ? "<span>掩膜</span>" : "") + "</div>";
+        var rows = pc.map(function (x) {
+          var cells = "";
+          if (hasB) {
+            var b = Number(x.map5095B);
+            cells += '<div class="pcbar"><i style="width:' + (isFinite(b) ? Math.max(0, Math.min(100, b * 100)) : 0) + '%"></i></div><b>' + numOrDash(x.map5095B) + "</b>";
+          }
+          if (hasM) {
+            var m = Number(x.map5095M);
+            cells += '<div class="pcbar m"><i style="width:' + (isFinite(m) ? Math.max(0, Math.min(100, m * 100)) : 0) + '%"></i></div><b>' + numOrDash(x.map5095M) + "</b>";
+          }
+          return '<div class="pcrow' + two + '"><span class="pcname" title="类别 id ' + esc(x.id) + '">' + esc(x.name) + "</span>" + cells + "</div>";
+        }).join("");
+        var weakest = null;
+        pc.forEach(function (x) {
+          var v = Number(hasM ? x.map5095M : x.map5095B);
+          if (!isFinite(v)) return;
+          if (!weakest || v < weakest.v) weakest = { v: v, name: x.name };
+        });
+        var foot = weakest
+          ? '<div class="note">最弱：' + esc(weakest.name) + "（" + (hasM ? "掩膜" : "框") + " " + weakest.v.toFixed(3) + "）。先补这一类的难例标注。</div>"
+          : "";
+        host.innerHTML = head + rows + foot;
       }
 
       function renderEval(res) {
@@ -2523,7 +3735,9 @@
           $("ev_conftbl").innerHTML = "";
           $("ev_plots").innerHTML = "";
           $("ev_img").innerHTML = "";
-          $("ev_errcard").hidden = true;
+          $("ev_perclass").innerHTML = '<span class="note">还没有评估结果。</span>';
+          $("ev_errlist").innerHTML = '<span class="note">还没有评估结果。先在上面选权重跑一次。</span>';
+          $("ev_errcount").textContent = "—";
           return;
         }
         $("evtag").textContent = "ultralytics 任务 " + (res.task || "?");
@@ -2576,14 +3790,37 @@
           };
         }
         var errs = res.errors || [];
-        $("ev_errcard").hidden = !errs.length;
+        renderPerClass(res);
+        $("ev_errcount").textContent = errs.length ? errs.length + " 张" : "0 张";
         if (errs.length) {
           $("ev_errlist").innerHTML =
             '<div class="note">共 ' + errs.length + " 张（最多列这么多）。把这些图拿去补标，回来重新构建数据集。</div>" +
             '<div class="tablewrap"><table><thead><tr><th>#</th><th>预测框</th><th>类别</th><th>图</th></tr></thead><tbody>' +
             errs.map(function (e, i) { return '<tr><td class="num">' + (i + 1) + '</td><td class="num">' + esc(numOrDash(e.boxes, 0)) + "</td><td>" + esc((e.names || []).join(",")) + '</td><td class="name" title="' + esc(e.image) + '">' + esc(String(e.image || "").split("/").pop()) + "</td></tr>"; }).join("") +
             "</tbody></table></div>";
+        } else {
+          $("ev_errlist").innerHTML = '<span class="note">这次评估没有回收错例。下次勾上「顺带出错例回收」再跑一次。</span>';
         }
+      }
+
+            function cmpMerge(a, b, key) {
+        var map = {};
+        (a.rows || []).forEach(function (r) {
+          var e = Number(r.epoch);
+          if (!isFinite(e)) return;
+          map[e] = map[e] || { epoch: e };
+          map[e].A = Number(r[key]);
+        });
+        (b.rows || []).forEach(function (r) {
+          var e = Number(r.epoch);
+          if (!isFinite(e)) return;
+          map[e] = map[e] || { epoch: e };
+          map[e].B = Number(r[key]);
+        });
+        return Object.keys(map)
+          .map(Number)
+          .sort(function (x, y) { return x - y; })
+          .map(function (e) { return map[e]; });
       }
 
       async function runCompare() {
@@ -2595,20 +3832,63 @@
         }
         try {
           var r = await uartix.call("compareRuns", { a: a, b: b });
-          var one = function (side) {
-            var rows = side.rows || [];
-            var cols = ((side.chart || {}).map || []).slice(0, 2);
-            return "<div>" + esc(side.name) + "</div>" + sparkline(rows, cols);
-          };
+          var key = "metrics/mAP50-95(M)";
+          var has = function (side) { return (side.columns || []).indexOf(key) >= 0; };
+          if (!has(r.a) || !has(r.b)) key = "metrics/mAP50-95(B)";
+          if (!has(r.a) || !has(r.b)) {
+            $("cmpout").innerHTML = '<span class="note">这两个 run 的 results.csv 里都没有 mAP50-95 列，没法画对比曲线。</span>';
+            return;
+          }
+          var sa = r.summary.a;
+          var sb = r.summary.b;
+          var isM = key.indexOf("(M)") >= 0;
+          var metricRows = isM
+            ? [
+                ["mAP50-95(M)", sa.mAP5095M, sb.mAP5095M],
+                ["mAP50(M)", sa.mAP50M, sb.mAP50M],
+                ["mAP50-95(B)", sa.mAP5095B, sb.mAP5095B],
+              ]
+            : [
+                ["mAP50-95(B)", sa.mAP5095B, sb.mAP5095B],
+                ["mAP50(B)", sa.mAP50B, sb.mAP50B],
+              ];
+          var kpis = metricRows
+            .map(function (x) {
+              var av = Number(x[1]);
+              var bv = Number(x[2]);
+              var d = bv - av;
+              var cls = !isFinite(d) ? "" : d >= 0 ? " up" : " down";
+              return (
+                '<div class="kpi"><div class="k">' + esc(x[0]) + '</div><div class="v">' + esc(chartNum(av)) + ' <span class="u">→</span> ' + esc(chartNum(bv)) +
+                '</div><div class="k' + cls + '">' + (isFinite(d) ? (d >= 0 ? "+" : "") + d.toFixed(3) : "—") + "</div></div>"
+              );
+            })
+            .join("");
           var d = (r.diff || []).filter(function (x) { return ["weights", "model", "data", "project", "name", "seed"].indexOf(x.key) < 0; });
+          var diff = d.length
+            ? '<details class="charttable"><summary>参数差异（' + d.length + ' 项）</summary><div class="tablewrap"><table><thead><tr><th>参数</th><th>A</th><th>B</th></tr></thead><tbody>' +
+              d.map(function (x) { return "<tr><td>" + esc(x.key) + '</td><td class="num">' + esc(String(x.a)) + '</td><td class="num">' + esc(String(x.b)) + "</td></tr>"; }).join("") +
+              "</tbody></table></div></details>"
+            : '<span class="note">两份 args.yaml 的标量参数没有差异（路径/名字类已忽略）。</span>';
           $("cmpout").innerHTML =
-            '<div class="row" style="align-items:flex-start;gap:16px"><div style="flex:1 1 300px">' + one(r.a) + '</div><div style="flex:1 1 300px">' + one(r.b) + "</div></div>" +
-            '<div class="note">A mAP50(B) ' + esc(fmtNum(r.summary.a.mAP50B)) + " · B " + esc(fmtNum(r.summary.b.mAP50B)) + " ｜ A mAP50(M) " + esc(fmtNum(r.summary.a.mAP50M)) + " · B " + esc(fmtNum(r.summary.b.mAP50M)) + "</div>" +
-            (d.length
-              ? '<div class="tablewrap"><table><thead><tr><th>参数</th><th>A</th><th>B</th></tr></thead><tbody>' +
-                d.map(function (x) { return "<tr><td>" + esc(x.key) + '</td><td class="num">' + esc(String(x.a)) + '</td><td class="num">' + esc(String(x.b)) + "</td></tr>"; }).join("") +
-                "</tbody></table></div>"
-              : '<span class="note">两份 args.yaml 的标量参数没有差异（除了路径类的那几项）。</span>');
+            '<div class="cmpkpis">' + kpis + "</div>" +
+            '<div class="note">A 实线 / B 虚线，按轮次对齐；悬停看同一轮的数值。</div>' +
+            '<div id="cmpchart"></div>' +
+            diff;
+          $("cmptag").textContent = chartLabel(key);
+          $("cmptag").className = "tag ok";
+          lineChart($("cmpchart"), {
+            rows: cmpMerge(r.a, r.b, key),
+            x: "epoch",
+            series: [
+              { key: "A", label: "A · " + r.a.name, color: CHART_COLORS[0] },
+              { key: "B", label: "B · " + r.b.name, color: CHART_COLORS[1], dash: true },
+            ],
+            height: 250,
+            smooth: 0.6,
+            table: true,
+            aria: "两个 run 的 " + chartLabel(key) + " 对比",
+          });
         } catch (e) {
           $("cmpout").innerHTML = '<span class="note">对比失败：' + esc(e && e.message ? e.message : e) + "</span>";
         }
@@ -2616,48 +3896,305 @@
 
       /* ---------------- 监控（P175-W4）---------------- */
       var mon = null;
+      var memHist = [];
       var monTimer = 0;
-      var CHART_COLORS = ["var(--accent)", "var(--ok)", "var(--warn)", "var(--bad)", "var(--dim)", "var(--faint)"];
+      var CHART_COLORS = ["#3b82f6", "#8b5cf6", "#14b8a6", "#f59e0b", "#22c55e", "#ec4899", "#eab308", "#64748b"];
 
-      function sparkline(rows, cols) {
-        if (!rows || !rows.length || !cols.length) {
-          return '<span class="note">' + (cols.length ? "还没有数据（results.csv 是空的或还没写出来）" : "这份 results.csv 里没有对应的列") + "</span>";
-        }
-        var W = 620;
-        var H = 150;
-        var P = 30;
-        var max = -Infinity;
-        var min = Infinity;
+      function chartLabel(key) {
+        var s = String(key);
+        var prefix = s.indexOf("train/") === 0 ? "train " : s.indexOf("val/") === 0 ? "val " : "";
+        var i = s.lastIndexOf("/");
+        if (i >= 0) s = s.slice(i + 1);
+        s = s.replace("box_loss", "box").replace("seg_loss", "seg").replace("cls_loss", "cls").replace("dfl_loss", "dfl");
+        s = s.replace(/\(([BM])\)/, " $1");
+        return prefix + s;
+      }
+
+      function chartNum(v) {
+        if (!isFinite(v)) return "-";
+        var a = Math.abs(v);
+        if (a >= 100) return String(Math.round(v));
+        if (a >= 1) return v.toFixed(2);
+        if (a >= 0.01) return v.toFixed(3);
+        return v.toFixed(4);
+      }
+
+      function chartSmooth(rows, key, alpha) {
+        var out = [];
+        var s = null;
         for (var i = 0; i < rows.length; i++) {
-          for (var j = 0; j < cols.length; j++) {
-            var v0 = Number(rows[i][cols[j]]);
-            if (isFinite(v0)) {
-              if (v0 > max) max = v0;
-              if (v0 < min) min = v0;
+          var v = Number(rows[i][key]);
+          if (!isFinite(v)) {
+            out.push(null);
+            continue;
+          }
+          s = s === null ? v : s * alpha + v * (1 - alpha);
+          out.push(s);
+        }
+        return out;
+      }
+
+      /**
+       * 曲线组件（P176-B4）：手写 SVG，不引依赖。
+       *
+       * 一张图回答一个问题：纵轴有刻度、图例可点、悬停出十字线与数值、
+       * 平滑只影响画出来的线（tooltip 仍读原始值）、最佳轮有标记、下面能展开数字表。
+       * 数据永远来自 results.csv 抽稀后的 rows，不另存。
+       */
+      function lineChart(host, spec) {
+        if (!host) return;
+        host.__spec = spec;
+        host.classList.add("chart-host");
+        var st0 = host.__chart || { hidden: {}, smooth: spec.smooth == null ? 0 : Number(spec.smooth) };
+        host.__chart = st0;
+        var rows = (spec.rows || []).slice(0, 3000);
+        var series = (spec.series || []).filter(function (s) { return s && s.key; });
+        if (!rows.length || !series.length) {
+          host.innerHTML = '<div class="chartempty">' + esc(spec.empty || "还没有数据") + "</div>";
+          return;
+        }
+        function legBtns() {
+          return series
+            .map(function (s) {
+              return (
+                '<button type="button" class="chartleg' + (st0.hidden[s.key] ? " off" : "") + '" data-k="' + esc(s.key) + '" aria-pressed="' + (st0.hidden[s.key] ? "false" : "true") + '">' +
+                '<i style="background:' + (s.color || CHART_COLORS[0]) + '"></i>' + esc(s.label || chartLabel(s.key)) + "</button>"
+              );
+            })
+            .join("");
+        }
+        function bindLegends() {
+          host.querySelectorAll(".chartleg").forEach(function (b) {
+            b.onclick = function () {
+              var k = b.getAttribute("data-k");
+              st0.hidden[k] = !st0.hidden[k];
+              lineChart(host, spec);
+            };
+          });
+        }
+        var vis = series.filter(function (s) { return !st0.hidden[s.key]; });
+        if (!vis.length) {
+          host.innerHTML = '<div class="chartbar"><div class="chartlegs">' + legBtns() + '</div></div><div class="chartempty">所有曲线都被图例关掉了</div>';
+          bindLegends();
+          return;
+        }
+        var W = Math.max(280, Math.round(host.clientWidth || 640));
+        var H = spec.height || 220;
+        var compact = !!spec.compact;
+        var m = compact ? { l: 8, r: 8, t: 8, b: 8 } : { l: 44, r: 14, t: 16, b: 26 };
+        var pw = Math.max(40, W - m.l - m.r);
+        var ph = Math.max(30, H - m.t - m.b);
+        var xs = rows.map(function (r, i) {
+          var v = spec.x ? Number(r[spec.x]) : i;
+          return isFinite(v) ? v : i;
+        });
+        var x0 = xs[0];
+        var x1 = xs[xs.length - 1];
+        if (x0 === x1) {
+          x0 -= 0.5;
+          x1 += 0.5;
+        }
+        var data = {};
+        vis.forEach(function (s) {
+          data[s.key] = chartSmooth(rows, s.key, Number(st0.smooth) || 0);
+        });
+        var ymin = Infinity;
+        var ymax = -Infinity;
+        vis.forEach(function (s) {
+          data[s.key].forEach(function (v) {
+            if (isFinite(v)) {
+              ymin = Math.min(ymin, v);
+              ymax = Math.max(ymax, v);
+            }
+          });
+        });
+        (spec.thresholds || []).forEach(function (t) {
+          if (isFinite(t.y)) {
+            ymin = Math.min(ymin, t.y);
+            ymax = Math.max(ymax, t.y);
+          }
+        });
+        if (!isFinite(ymin)) {
+          ymin = 0;
+          ymax = 1;
+        }
+        var pad = (ymax - ymin) * 0.08 || (Math.abs(ymax) || 1) * 0.08;
+        ymin -= pad;
+        ymax += pad;
+        function X(v) {
+          return m.l + ((v - x0) / (x1 - x0)) * pw;
+        }
+        function Y(v) {
+          return m.t + (1 - (v - ymin) / (ymax - ymin)) * ph;
+        }
+        var g = [];
+        g.push('<svg class="chartsvg" viewBox="0 0 ' + W + " " + H + '" width="' + W + '" height="' + H + '" role="img" aria-label="' + esc(spec.aria || "训练曲线") + '">');
+        if (!compact) {
+          for (var gi = 0; gi <= 3; gi++) {
+            var gy = m.t + (ph * gi) / 3;
+            var gv = ymax - ((ymax - ymin) * gi) / 3;
+            g.push('<line x1="' + m.l + '" y1="' + gy.toFixed(1) + '" x2="' + (m.l + pw) + '" y2="' + gy.toFixed(1) + '" stroke="var(--line)" stroke-dasharray="3 3"/>');
+            g.push('<text x="' + (m.l - 6) + '" y="' + (gy + 3).toFixed(1) + '" text-anchor="end" fill="var(--faint)" font-size="9">' + esc(chartNum(gv)) + "</text>");
+          }
+          for (var xi = 0; xi <= 5; xi++) {
+            var xv = x0 + ((x1 - x0) * xi) / 5;
+            var gx = X(xv);
+            var lab = spec.xLabel ? spec.xLabel(xv) : spec.x === "epoch" ? String(Math.round(xv)) : chartNum(xv);
+            g.push('<text x="' + gx.toFixed(1) + '" y="' + (H - 6) + '" text-anchor="middle" fill="var(--faint)" font-size="9">' + esc(lab) + "</text>");
+          }
+        }
+        (spec.thresholds || []).forEach(function (t) {
+          var ty = Y(t.y);
+          g.push('<line x1="' + m.l + '" y1="' + ty.toFixed(1) + '" x2="' + (m.l + pw) + '" y2="' + ty.toFixed(1) + '" stroke="var(--warn)" stroke-dasharray="5 4" opacity=".7"/>');
+          g.push('<text x="' + (m.l + 4) + '" y="' + (ty - 3).toFixed(1) + '" fill="var(--warn)" font-size="9">' + esc(t.label || chartNum(t.y)) + "</text>");
+        });
+        vis.forEach(function (s) {
+          var arr = data[s.key];
+          var pts = [];
+          for (var i = 0; i < rows.length; i++) {
+            var v = arr[i];
+            if (!isFinite(v)) continue;
+            pts.push(X(xs[i]).toFixed(1) + "," + Y(v).toFixed(1));
+          }
+          if (!pts.length) return;
+          var dash = s.dash ? ' stroke-dasharray="5 4"' : "";
+          g.push('<polyline fill="none" stroke="' + (s.color || CHART_COLORS[0]) + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"' + dash + ' points="' + pts.join(" ") + '"/>');
+          if (pts.length === 1) {
+            var one = pts[0].split(",");
+            g.push('<circle cx="' + one[0] + '" cy="' + one[1] + '" r="3" fill="' + (s.color || CHART_COLORS[0]) + '"/>');
+          }
+        });
+        if (spec.best && spec.best.key && !st0.hidden[spec.best.key]) {
+          var bk = spec.best.key;
+          var bi = -1;
+          var bv = spec.best.mode === "min" ? Infinity : -Infinity;
+          for (var i2 = 0; i2 < rows.length; i2++) {
+            var v2 = Number(rows[i2][bk]);
+            if (!isFinite(v2)) continue;
+            if (spec.best.mode === "min" ? v2 < bv : v2 > bv) {
+              bv = v2;
+              bi = i2;
+            }
+          }
+          if (bi >= 0) {
+            var bx = X(xs[bi]);
+            var by = Y(bv);
+            g.push('<line x1="' + bx.toFixed(1) + '" y1="' + m.t + '" x2="' + bx.toFixed(1) + '" y2="' + (m.t + ph) + '" stroke="var(--accent)" stroke-dasharray="4 4" opacity=".55"/>');
+            g.push('<circle cx="' + bx.toFixed(1) + '" cy="' + by.toFixed(1) + '" r="3.5" fill="var(--panel)" stroke="var(--accent)" stroke-width="1.6"/>');
+            if (!compact) {
+              var blabel = "ep" + String(rows[bi].epoch != null ? rows[bi].epoch : xs[bi]);
+              var btx = bx + 5;
+              var banchor = "start";
+              if (btx + 40 > W - m.r) {
+                btx = bx - 5;
+                banchor = "end";
+              }
+              g.push('<text x="' + btx.toFixed(1) + '" y="' + (m.t + 9) + '" text-anchor="' + banchor + '" fill="var(--accent)" font-size="9">' + esc(blabel) + "</text>");
             }
           }
         }
-        if (!isFinite(min)) return '<span class="note">这些列在这份 csv 里都没有数值</span>';
-        if (max === min) max = min + 1;
-        var xs = function (i) { return P + (rows.length > 1 ? (i * (W - P - 10)) / (rows.length - 1) : 0); };
-        var ys = function (v) { return H - 18 - ((v - min) * (H - 34)) / (max - min); };
-        var g =
-          '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:150px" role="img" aria-label="曲线">' +
-          '<line x1="' + P + '" y1="' + (H - 18) + '" x2="' + (W - 10) + '" y2="' + (H - 18) + '" stroke="var(--line)" stroke-width="1"/>' +
-          '<text x="2" y="12" fill="var(--faint)" font-size="9">' + esc(fmtNum(max)) + "</text>" +
-          '<text x="2" y="' + (H - 20) + '" fill="var(--faint)" font-size="9">' + esc(fmtNum(min)) + "</text>";
-        for (var c = 0; c < cols.length; c++) {
-          var pts = [];
-          for (var r = 0; r < rows.length; r++) {
-            var v = Number(rows[r][cols[c]]);
-            if (isFinite(v)) pts.push(xs(r).toFixed(1) + "," + ys(v).toFixed(1));
-          }
-          if (!pts.length) continue;
-          g += '<polyline fill="none" stroke="' + CHART_COLORS[c % CHART_COLORS.length] + '" stroke-width="1.6" points="' + pts.join(" ") + '"/>';
+        g.push(
+          '<g class="chart-hover" style="display:none"><line class="chart-cross" y1="' + m.t + '" y2="' + (m.t + ph) + '" stroke="var(--dim)" stroke-dasharray="3 3"/>' +
+            vis.map(function (s) { return '<circle class="chart-dot" data-k="' + esc(s.key) + '" r="3" fill="' + (s.color || CHART_COLORS[0]) + '" stroke="var(--panel)" stroke-width="1"/>'; }).join("") +
+            "</g>",
+        );
+        g.push('<rect class="chart-hit" x="' + m.l + '" y="' + m.t + '" width="' + pw + '" height="' + ph + '" fill="transparent"/>');
+        g.push("</svg>");
+        var bar = "";
+        if (!compact) {
+          bar =
+            '<div class="chartbar"><div class="chartlegs">' + legBtns() + "</div>" +
+            (spec.smooth === false
+              ? ""
+              : '<div class="chartsm">平滑 <button data-sm="0"' + (Number(st0.smooth) === 0 ? ' class="on"' : "") + '>原值</button><button data-sm="0.6"' +
+                (Number(st0.smooth) === 0.6 ? ' class="on"' : "") + '>0.6</button><button data-sm="0.9"' + (Number(st0.smooth) === 0.9 ? ' class="on"' : "") + ">0.9</button></div>") +
+            "</div>";
         }
-        g += "</svg>";
-        return g;
+        var table = "";
+        if (!compact && spec.table !== false) {
+          var tail = rows.slice(-30);
+          var keys = vis.map(function (s) { return s.key; });
+          table =
+            '<details class="charttable"><summary>看数字</summary><div class="tablewrap"><table><thead><tr><th>' + esc(spec.x === "epoch" ? "轮次" : "x") + "</th>" +
+            keys.map(function (k) { return "<th>" + esc(chartLabel(k)) + "</th>"; }).join("") +
+            "</tr></thead><tbody>" +
+            tail.map(function (r) {
+              return '<tr><td class="num">' + esc(String(r[spec.x] != null ? r[spec.x] : "")) + "</td>" +
+                keys.map(function (k) { return '<td class="num">' + esc(chartNum(Number(r[k]))) + "</td>"; }).join("") + "</tr>";
+            }).join("") +
+            "</tbody></table></div></details>";
+        }
+        host.innerHTML = bar + '<div class="chartwrap">' + g.join("") + '<div class="charttip" hidden></div></div>' + table;
+        var wrap = host.querySelector(".chartwrap");
+        if (wrap) wrap.__host = host;
+        var tip = host.querySelector(".charttip");
+        var hit = host.querySelector(".chart-hit");
+        var hover = host.querySelector(".chart-hover");
+        var cross = host.querySelector(".chart-cross");
+        var dots = {};
+        host.querySelectorAll(".chart-dot").forEach(function (d) {
+          dots[d.getAttribute("data-k")] = d;
+        });
+        if (hit) {
+          hit.addEventListener("mousemove", function (ev) {
+            var r = host.querySelector("svg").getBoundingClientRect();
+            var px = ev.clientX - r.left;
+            var idx = Math.round(((px - m.l) / pw) * (rows.length - 1));
+            idx = Math.max(0, Math.min(rows.length - 1, idx));
+            var cx = X(xs[idx]);
+            cross.setAttribute("x1", cx);
+            cross.setAttribute("x2", cx);
+            var lines = [
+              '<div class="tt">' +
+                (spec.x === "epoch" ? "第 " + esc(String(rows[idx].epoch != null ? rows[idx].epoch : xs[idx])) + " 轮" : esc(spec.xLabel ? spec.xLabel(xs[idx]) : "")) +
+                "</div>",
+            ];
+            vis.forEach(function (s) {
+              var v = Number(rows[idx][s.key]);
+              var d = dots[s.key];
+              if (d) {
+                if (isFinite(v)) {
+                  d.setAttribute("cx", cx);
+                  d.setAttribute("cy", Y(v));
+                  d.style.display = "";
+                } else d.style.display = "none";
+              }
+              lines.push(
+                '<div class="tv"><span><i style="background:' + (s.color || CHART_COLORS[0]) + '"></i>' + esc(s.label || chartLabel(s.key)) +
+                  "</span><b>" + (isFinite(v) ? esc(chartNum(v)) : "—") + "</b></div>",
+              );
+            });
+            tip.innerHTML = lines.join("");
+            tip.hidden = false;
+            hover.style.display = "";
+            var left = cx + 12;
+            if (left + 190 > W) left = cx - 202;
+            tip.style.left = Math.max(4, left) + "px";
+            tip.style.top = m.t + 2 + "px";
+          });
+          hit.addEventListener("mouseleave", function () {
+            tip.hidden = true;
+            hover.style.display = "none";
+          });
+        }
+        bindLegends();
+        host.querySelectorAll(".chartsm button").forEach(function (b) {
+          b.onclick = function () {
+            st0.smooth = Number(b.getAttribute("data-sm"));
+            lineChart(host, spec);
+          };
+        });
       }
+
+      var chartResizeTimer = 0;
+      window.addEventListener("resize", function () {
+        clearTimeout(chartResizeTimer);
+        chartResizeTimer = setTimeout(function () {
+          document.querySelectorAll(".chart-host").forEach(function (h) {
+            if (h.__spec) lineChart(h, h.__spec);
+          });
+        }, 160);
+      });
 
       function fmtNum(v) {
         if (v === "" || v == null) return "-";
@@ -2719,17 +4256,42 @@
         return keep.length ? { keep: keep, flat: flat } : { keep: cols, flat: [] };
       }
 
-      function legend(rows, cols) {
-        if (!rows || !rows.length) return "";
-        var last = rows[rows.length - 1];
-        return cols
-          .map(function (c, i) {
-            return (
-              '<span class="pill"><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:' +
-              CHART_COLORS[i % CHART_COLORS.length] +
-              ';margin-right:5px"></i>' +
-              esc(c) + " " + esc(fmtNum(last[c])) + "</span>"
-            );
+
+      /** 结果页 KPI：轮次 / best mask / 当前 loss / 显存 / ETA（P176-B3）。 */
+      function renderResultKpis(m) {
+        var host = $("reskpi");
+        if (!host) return;
+        var ok = !!(m && m.ok);
+        var lr = (m && m.lastRow) || {};
+        var mem = (m && m.mem) || {};
+        var best = "—";
+        var cur = "—";
+        if (ok) {
+          var rr = ((st && st.runs) || []).filter(function (r) { return r.name === m.run; })[0];
+          var bm = rr && rr.metrics ? Number(rr.metrics.mAP5095M) : NaN;
+          if (!isFinite(bm)) bm = Number(lr["metrics/mAP50-95(M)"]);
+          if (isFinite(bm)) best = bm.toFixed(3);
+          var bl = Number(lr["train/box_loss"]);
+          var sl = Number(lr["train/seg_loss"]);
+          var bits = [];
+          if (isFinite(bl)) bits.push(bl.toFixed(3));
+          if (isFinite(sl)) bits.push(sl.toFixed(3));
+          if (bits.length) cur = bits.join(" / ");
+        }
+        var tiles = [
+          { k: "轮次", v: ok ? m.doneEpoch + " / " + (m.epochs || "?") : "—", u: "轮", bar: ok ? m.percent || 0 : 0 },
+          { k: "best mask mAP50-95", v: best, u: "" },
+          { k: "当前 loss（框 / 掩膜）", v: cur, u: "" },
+          { k: "显存", v: mem.ok ? mem.usedMiB + " / " + mem.totalMiB : "—", u: "MiB", sub: mem.ok ? mem.percent + "%" : "" },
+          { k: "预计剩余", v: ok ? (m.percent >= 100 ? "已完成" : m.remainText || "—") : "—", u: "" },
+        ];
+        host.innerHTML = tiles
+          .map(function (x) {
+            return '<div class="kpi"><div class="k">' + esc(x.k) + '</div><div class="v">' + esc(String(x.v)) +
+              (x.u ? '<span class="u">' + esc(x.u) + "</span>" : "") + "</div>" +
+              (x.sub ? '<div class="k">' + esc(x.sub) + "</div>" : "") +
+              (x.bar != null ? '<div class="pb"><i style="width:' + Math.max(0, Math.min(100, x.bar)) + '%"></i></div>' : "") +
+              "</div>";
           })
           .join("");
       }
@@ -2737,9 +4299,21 @@
       function renderMonitor() {
         var m = mon;
         if (!m) return;
-        $("monrun").textContent = m.ok ? "run：" + m.run : "没有训练产物";
+        renderResultKpis(m);
         $("montag").textContent = m.active ? "在跑" : m.ok ? (m.exists ? "已落盘" : "还没写出 csv") : "空";
         $("montag").className = "tag " + (m.active ? "ok" : m.ok && m.exists ? "" : "warn");
+        var sel = $("resrun");
+        if (sel) {
+          var rs = m.runs || [];
+          sel.innerHTML = rs.length
+            ? rs.map(function (r) {
+                return '<option value="' + esc(r.name) + '">' + esc(r.name) + " · " + r.epochs + " 轮" +
+                  (r.mAP50 ? " · mAP50 " + esc(fmtNum(r.mAP50)) : "") + "</option>";
+              }).join("")
+            : '<option value="">还没有训练产物</option>';
+          sel.value = m.ok ? m.run : "";
+          sel.onchange = function () { if (this.value) loadMonitor(this.value); };
+        }
         if (!m.ok) {
           $("monkv").innerHTML = '<span class="note">' + esc(m.error || "") + "</span>";
           $("chartloss").innerHTML = "";
@@ -2747,14 +4321,14 @@
           $("legloss").innerHTML = "";
           $("legmap").innerHTML = "";
           $("failcard").hidden = !m.failure;
-          $("runpick").innerHTML = "";
+          $("failempty").hidden = !!m.failure;
           return;
         }
         var lr = m.lastRow || {};
         $("monkv").innerHTML =
           "<b>轮次</b><span>" + m.doneEpoch + " / " + (m.epochs || "?") + "（" + m.percent + "%）</span>" +
           "<b>已用</b><span>" + esc(m.elapsedText || "—") + (m.perEpochSec ? " · 平均 " + m.perEpochSec + " 秒/轮" : "") + "</span>" +
-          "<b>预计剩余</b><span>" + esc(m.remainText || "—") + "</span>" +
+          "<b>预计剩余</b><span>" + esc(m.percent >= 100 ? "已完成" : m.remainText || "—") + "</span>" +
           "<b>mAP50 / mAP50-95</b><span>" + esc(fmtNum(lr["metrics/mAP50(B)"])) + " / " + esc(fmtNum(lr["metrics/mAP50-95(B)"])) +
           (lr["metrics/mAP50(M)"] !== undefined ? " · 掩膜 " + esc(fmtNum(lr["metrics/mAP50(M)"])) + " / " + esc(fmtNum(lr["metrics/mAP50-95(M)"])) : "") +
           "</span>" +
@@ -2771,34 +4345,81 @@
         var flatNote = function (flat) {
           return flat.length ? '<span class="note">省略 ' + flat.length + " 条恒为 0：" + flat.map(shortCol).join(" ") + "</span>" : "";
         };
-        $("chartloss").innerHTML = sparkline(rows, cl.keep);
-        $("legloss").innerHTML = legend(rows, cl.keep) + flatNote(cl.flat);
-        $("chartmap").innerHTML = sparkline(rows, cm.keep);
-        $("legmap").innerHTML = legend(rows, cm.keep) + flatNote(cm.flat);
+        lineChart($("chartloss"), {
+          rows: rows,
+          x: "epoch",
+          series: cl.keep.map(function (k, i) {
+            return { key: k, label: chartLabel(k), color: CHART_COLORS[i % CHART_COLORS.length], dash: k.indexOf("val/") === 0 };
+          }),
+          height: 230,
+          smooth: 0,
+          table: true,
+          empty: "还没有 loss 曲线（results.csv 是空的或还没写出来）",
+          aria: "训练与验证损失曲线",
+        });
+        $("legloss").innerHTML = flatNote(cl.flat);
+        var bestKey = cm.keep.filter(function (k) { return k.indexOf("(M)") >= 0; }).pop() || cm.keep[0] || "";
+        lineChart($("chartmap"), {
+          rows: rows,
+          x: "epoch",
+          series: cm.keep.map(function (k, i) {
+            return { key: k, label: chartLabel(k), color: CHART_COLORS[i % CHART_COLORS.length], dash: k.indexOf("(M)") >= 0 };
+          }),
+          height: 230,
+          smooth: 0.6,
+          table: true,
+          best: bestKey ? { key: bestKey, mode: "max" } : null,
+          empty: "还没有指标曲线",
+          aria: "框与掩膜 mAP 曲线",
+        });
+        $("legmap").innerHTML = flatNote(cm.flat);
+        var lrCols = (m.columns || []).filter(function (c) { return c.indexOf("lr/") === 0; });
+        $("cardlr").hidden = !lrCols.length;
+        if (lrCols.length) {
+          lineChart($("chartlr"), {
+            rows: rows,
+            x: "epoch",
+            series: lrCols.map(function (k, i) {
+              return { key: k, label: chartLabel(k), color: CHART_COLORS[(i + 2) % CHART_COLORS.length] };
+            }),
+            height: 140,
+            smooth: 0,
+            table: false,
+            aria: "学习率曲线",
+          });
+        }
+        if (mem.ok) {
+          var now = Date.now();
+          if (!memHist.length || now - memHist[memHist.length - 1].t > 2500) memHist.push({ t: now, v: mem.usedMiB });
+          if (memHist.length > 120) memHist.shift();
+          if (memHist.length >= 2) {
+            lineChart($("memchart"), {
+              rows: memHist,
+              x: "t",
+              series: [{ key: "v", label: "已用", color: CHART_COLORS[3] }],
+              height: 72,
+              compact: true,
+              smooth: 0,
+              table: false,
+              xLabel: function (v) {
+                return new Date(v).toTimeString().slice(0, 8);
+              },
+              aria: "本次会话显存曲线",
+            });
+          } else {
+            $("memchart").innerHTML = '<span class="note">再刷新一次就有显存曲线</span>';
+          }
+        } else {
+          $("memchart").innerHTML = '<span class="note">显存读不到</span>';
+        }
         var f = m.failure;
         $("failcard").hidden = !f;
+        $("failempty").hidden = !!f;
         if (f) {
           $("failkv").innerHTML =
             "<b>归类</b><span>" + esc(f.label) + "</span>" +
             "<b>下一步</b><span>" + esc(f.advice || "—") + "</span>" +
             (f.matched ? "<b>命中的日志</b><span>" + esc(f.matched) + "</span>" : "");
-        }
-        var runs = m.runs || [];
-        $("runpick").innerHTML = runs.length
-          ? runs
-              .map(function (r) {
-                return (
-                  '<button class="btn" data-run="' + esc(r.name) + '"' + (r.name === m.run ? ' style="border-color:var(--accent)"' : "") + ">" +
-                  esc(r.name) + '<span style="opacity:.6"> ' + r.epochs + " 轮 · mAP50 " + esc(fmtNum(r.mAP50)) + "</span></button>"
-                );
-              })
-              .join("")
-          : '<span class="note">runs/ 里还没有产物</span>';
-        var btns = $("runpick").querySelectorAll("[data-run]");
-        for (var i = 0; i < btns.length; i++) {
-          btns[i].onclick = function () {
-            loadMonitor(this.getAttribute("data-run"));
-          };
         }
       }
 
@@ -2833,6 +4454,7 @@
       function renderAll(s) {
         st = s;
         renderNext();
+        renderOverview();
         renderEnv();
         renderDataset();
         renderDeploy();
@@ -2957,15 +4579,25 @@
       }
 
       /* ---------------- 事件 ---------------- */
+      // 同一个任务的终态可能被宿主发两次；按 id 去重，别让"失败（退出码 1）"刷两行
+      var doneShown = {};
       uartix.on("log", function (p) {
         if (p && p.lines) appendLog(p.lines);
       });
       uartix.on("job", function (j) {
         if (!j) return;
-        if (j.kind === "deploy") loadDeploy();
+        if (j.kind === "deploy") {
+          if (dep.last && dep.last.step) dep.last.state = j.state === "running" ? "running" : j.state;
+          if (j.state === "succeeded" && dep.last) {
+            var stg = { validate: "env", prepare: "onnx", convert: "convert", package: "package" }[dep.last.step];
+            if (dep.last.step === "all") dep.done = { env: true, onnx: true, convert: true, package: true };
+            else if (stg) dep.done[stg] = true;
+          }
+          loadDeploy();
+        }
         renderJob(j);
-        if (j.state !== "running" && !j._doneShown) {
-          j._doneShown = true;
+        if (j.state !== "running" && j.id && !doneShown[j.id]) {
+          doneShown[j.id] = true;
           sysLog(
             j.label + "：" +
               (j.state === "succeeded" ? "完成" : j.progress && j.progress.phase === "stopped" ? "已停止（你按的停止，不是出错）" : "失败（退出码 " + j.code + "）"),
@@ -2974,7 +4606,7 @@
           // 只写在任务卡里会被划过去的日志盖掉。
           if (j.state === "succeeded" && j.warning) sysLog("提醒：" + j.warning, "err");
           refresh(true);
-          if (j.kind === "eval") loadMonitor(""); // 评估不产曲线，但失败归类要跟着刷新
+          if (j.kind === "eval") loadMonitor(mon && mon.ok ? mon.run : ""); // 评估不产曲线；刷新 KPI 与失败归类
         }
       });
       uartix.on("eval", function (p) {
@@ -3001,8 +4633,43 @@
         loadExport();
       });
 
+      /* ---------------- 结果页：曲线 / 指标 / 错例 / 失败 ---------------- */
+      var resultView = "curves";
+      var pendingResultView = "";
+      var RESULT_VIEWS = ["curves", "metrics", "errors", "failure"];
+      function setResultView(v) {
+        if (v === "live" || v === "monitor") v = "curves";
+        if (v === "eval") v = "metrics";
+        resultView = RESULT_VIEWS.indexOf(v) >= 0 ? v : "curves";
+        for (var i = 0; i < RESULT_VIEWS.length; i++) {
+          var el = $("result-" + RESULT_VIEWS[i]);
+          if (el) el.hidden = RESULT_VIEWS[i] !== resultView;
+        }
+        var bs = document.querySelectorAll("#resultseg button");
+        for (var k = 0; k < bs.length; k++) {
+          var onv = bs[k].getAttribute("data-view") === resultView;
+          bs[k].className = onv ? "on" : "";
+          bs[k].setAttribute("aria-selected", onv ? "true" : "false");
+        }
+        if (resultView === "curves") {
+          var rn = pendingRun || (mon && mon.ok ? mon.run : "");
+          pendingRun = "";
+          loadMonitor(rn);
+        }
+        if (resultView === "metrics" || resultView === "errors") loadEval();
+        if (resultView === "failure") renderMonitor();
+      }
+      (function () {
+        var seg = $("resultseg");
+        if (!seg) return;
+        var bs = seg.querySelectorAll("button");
+        for (var i = 0; i < bs.length; i++) {
+          bs[i].onclick = function () { setResultView(this.getAttribute("data-view")); };
+        }
+      })();
+
       /* ---------------- 按钮 ---------------- */
-      var tabs = document.querySelectorAll("nav button");
+      var tabs = document.querySelectorAll("nav button[data-tab]");
       for (var i = 0; i < tabs.length; i++) {
         tabs[i].onclick = function () {
           var name = this.getAttribute("data-tab");
@@ -3010,21 +4677,77 @@
             loadDeploy();
             loadExport();
           }
-          for (var k = 0; k < tabs.length; k++) tabs[k].className = tabs[k].getAttribute("data-tab") === name ? "on" : "";
+          for (var k = 0; k < tabs.length; k++) {
+            var onTab = tabs[k].getAttribute("data-tab") === name;
+            tabs[k].className = onTab ? "on" : "";
+            if (onTab) tabs[k].setAttribute("aria-current", "page");
+            else tabs[k].removeAttribute("aria-current");
+          }
           $("tab-overview").hidden = name !== "overview";
           $("tab-data").hidden = name !== "data";
           $("tab-train").hidden = name !== "train";
-          $("tab-monitor").hidden = name !== "monitor";
-          $("tab-eval").hidden = name !== "eval";
+          $("tab-result").hidden = name !== "result";
           $("tab-runs").hidden = name !== "runs";
-          $("tab-help").hidden = name !== "help";
-          /* R16：部署是第四块 section，这里原来只切三块——点了「部署」什么都不显示。 */
           $("tab-deploy").hidden = name !== "deploy";
-          if (name === "monitor") loadMonitor("");
-          if (name === "eval") loadEval();
+          if (name === "result") {
+            var v = pendingResultView || resultView;
+            pendingResultView = "";
+            setResultView(v);
+          }
           if (name === "runs") loadRuns();
         };
       }
+      /* ---------------- 帮助抽屉（P176-B1） ---------------- */
+      function openHelp(id) {
+        $("helpdrawer").hidden = false;
+        $("helpmask").hidden = false;
+        $("helpsearch").value = "";
+        filterHelp("");
+        var sec = id ? $("help-" + id) : null;
+        if (sec) sec.scrollIntoView({ block: "start" });
+        else $("helpclose").focus();
+      }
+      function closeHelp() {
+        $("helpdrawer").hidden = true;
+        $("helpmask").hidden = true;
+      }
+      $("helpbtn").onclick = function () { openHelp(""); };
+      $("helpclose").onclick = closeHelp;
+      $("helpmask").onclick = closeHelp;
+      function filterHelp(q) {
+        q = String(q || "").trim().toLowerCase();
+        var cards = document.querySelectorAll("#helpdrawer .drawer-b .card");
+        var shown = 0;
+        cards.forEach(function (c) {
+          var hit = !q || (c.textContent || "").toLowerCase().indexOf(q) >= 0;
+          c.hidden = !hit;
+          if (hit) shown++;
+        });
+        var none = $("helpnone");
+        if (none) {
+          none.hidden = shown > 0 || !q;
+          none.textContent = shown ? "" : "没有匹配「" + q + "」的帮助。";
+        }
+      }
+      $("helpsearch").oninput = function () { filterHelp(this.value); };
+      $("helpclear").onclick = function () {
+        $("helpsearch").value = "";
+        filterHelp("");
+        $("helpsearch").focus();
+      };
+      document.addEventListener("click", function (e) {
+        var t = e.target && e.target.closest ? e.target.closest("[data-help]") : null;
+        if (t) {
+          e.preventDefault();
+          openHelp(t.getAttribute("data-help"));
+          return;
+        }
+        if (!(e.target.closest && (e.target.closest(".qh") || e.target.closest("#tip")))) {
+          tipPin = false;
+          hideTip(true);
+        }
+      });
+
       $("reload").onclick = function () {
         refresh(false);
       };
@@ -3229,9 +4952,28 @@
         $("lbimg").src = "";
       };
       document.addEventListener("keydown", function (e) {
-        if (e.key === "Escape" && !$("lb").hidden) {
-          $("lb").hidden = true;
-          $("lbimg").src = "";
+        if (e.key === "Escape") {
+          if (!$("tip").hidden) {
+            tipPin = false;
+            hideTip(true);
+          } else if (!$("lb").hidden) {
+            $("lb").hidden = true;
+            $("lbimg").src = "";
+          } else if (!$("helpdrawer").hidden) {
+            closeHelp();
+          }
+          return;
+        }
+        // Alt+1..6 跳页签：六块工作面各有一个数字位
+        if (e.altKey && !e.ctrlKey && !e.metaKey) {
+          var n = Number(e.key);
+          if (n >= 1 && n <= 6) {
+            var b = document.querySelectorAll("nav button[data-tab]")[n - 1];
+            if (b) {
+              e.preventDefault();
+              b.click();
+            }
+          }
         }
       });
       $("logtoggle").onclick = function () {

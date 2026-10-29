@@ -222,6 +222,72 @@ const PARAM_META = [
   },
 ];
 
+/**
+ * 参数帮助（P176-B2）：每个引擎键的一句话说明、范围、影响与相关参数。
+ *
+ * 为什么放在插件而不是 panel.html：参数表本来就是这个文件产出的，
+ * 帮助文本跟着它走才能保证「键在、说明就在」。面板只负责把它摆成 tooltip。
+ * `one` 控制在 40 字以内；`related` 里的键必须真实存在（面板会过滤一遍）。
+ */
+const PARAM_HELP = {
+  weights: { one: "从哪枚 .pt 开始训；分割任务必须用 -seg 权重。", range: "官方名或任意 .pt 路径", impact: "决定任务类型与收敛速度", related: ["data", "epochs"] },
+  data: { one: "data.yaml 的路径；留空就用数据页构建出来的那份。", range: "yaml 路径", impact: "类别与 train/val 划分", related: ["epochs", "imgsz"] },
+  epochs: { one: "总共训练多少轮；早停会先于它结束。", range: "≥ 1 的整数", impact: "欠拟合 / 过拟合 / 训练时长", related: ["patience", "time"] },
+  time: { one: "按小时封顶，到点就停。", range: "小时；留空 = 只看轮次", impact: "训练时长", related: ["epochs"] },
+  imgsz: { one: "输入边长；部署相机是多少就填多少。", range: "32 的倍数", impact: "小目标与推理速度", related: ["batch"] },
+  batch: { one: "每步送进显存的图片数。", range: "整数；-1 = 自动；0.7 = 显存比例", impact: "显存 / 稳定性 / 速度", related: ["workers", "cache"] },
+  workers: { one: "后台读图的进程数；太少会让 GPU 等数据。", range: "≥ 0 的整数", impact: "GPU 利用率 / 内存", related: ["cache", "batch"] },
+  patience: { one: "连续多少轮没提升就早停。", range: "≥ 1 的整数", impact: "训练时长", related: ["epochs"] },
+  device: { one: "0 = 第一块 GPU，cpu = 用 CPU。", range: "0 / 1 / cpu", impact: "训练速度", related: ["batch"] },
+  name: { one: "实验名，产物落在 runs/<name>/。", range: "字母数字与 - _", impact: "产物目录命名", related: ["project"] },
+  project: { one: "所有 run 的父目录。", range: "目录路径", impact: "产物位置", related: ["name"] },
+  exist_ok: { one: "同名目录已存在时继续写，不报错。", range: "开 / 关", impact: "旧结果是否被覆盖", related: ["name"] },
+
+  optimizer: { one: "auto 让引擎按模型挑；YOLO26 可用 MuSGD。", range: "auto / SGD / MuSGD / Adam / AdamW…", impact: "收敛速度与稳定性", related: ["lr0", "cos_lr"] },
+  lr0: { one: "训练起点的步长，太大震荡、太小收敛慢。", range: "SGD 约 1e-2；AdamW 约 1e-3", impact: "收敛速度与稳定性", related: ["optimizer", "lrf"] },
+  lrf: { one: "最终学习率 = lr0 × lrf。", range: "0~1", impact: "末期精细程度", related: ["lr0"] },
+  momentum: { one: "历史梯度占多大比重，影响更新惯性。", range: "0~1", impact: "稳定性", related: ["weight_decay"] },
+  weight_decay: { one: "抑制权重变大，轻量正则。", range: "≥ 0", impact: "过拟合", related: ["momentum", "lr0"] },
+  warmup_epochs: { one: "前几轮把学习率慢慢升上来。", range: "≥ 0 的轮数", impact: "初期稳定性", related: ["warmup_momentum", "warmup_bias_lr"] },
+  warmup_momentum: { one: "预热期的动量。", range: "0~1", impact: "初期稳定性", related: ["warmup_epochs"] },
+  warmup_bias_lr: { one: "预热期 bias 的学习率。", range: "≥ 0", impact: "初期稳定性", related: ["warmup_epochs"] },
+  cos_lr: { one: "学习率按余弦曲线降到末端。", range: "开 / 关", impact: "长训练的末期稳定性", related: ["lr0"] },
+
+  hsv_h: { one: "随机微调色相，模拟不同颜色。", range: "0~1", impact: "颜色泛化", related: ["hsv_s", "hsv_v"] },
+  hsv_s: { one: "随机微调饱和度。", range: "0~1", impact: "光照与颜色泛化", related: ["hsv_h", "hsv_v"] },
+  hsv_v: { one: "随机微调明暗。", range: "0~1", impact: "光照泛化", related: ["hsv_h", "hsv_s"] },
+  degrees: { one: "随机旋转角度；现场有倾斜就开一点。", range: "0~180 度", impact: "倾斜鲁棒性", related: ["shear", "perspective"] },
+  translate: { one: "随机平移画面。", range: "0~1", impact: "位置泛化", related: ["scale"] },
+  scale: { one: "随机放大缩小目标。", range: "≥ 0", impact: "尺度泛化", related: ["translate", "mosaic"] },
+  shear: { one: "斜切变形，模拟拍摄角度偏移。", range: "0~180 度", impact: "视角泛化", related: ["degrees"] },
+  perspective: { one: "透视变形；数字/文字任务慎用。", range: "0~0.001", impact: "视角泛化", related: ["degrees"] },
+  flipud: { one: "上下翻转；数字/文字被翻反就认不出。", range: "0~1", impact: "数字任务必须为 0", related: ["fliplr"] },
+  fliplr: { one: "左右镜像；数字/文字会反过来。", range: "0~1", impact: "数字任务必须为 0", related: ["flipud"] },
+  bgr: { one: "随机互换 RGB/BGR 通道。", range: "0~1", impact: "颜色通道鲁棒性", related: ["hsv_h"] },
+  mosaic: { one: "四张图拼成一张，增加小目标与上下文。", range: "0~1", impact: "小目标与上下文", related: ["close_mosaic", "mixup"] },
+  mixup: { one: "两张图半透明叠加。", range: "0~1", impact: "正则化", related: ["cutmix"] },
+  cutmix: { one: "把另一张图的一块贴过来。", range: "0~1", impact: "正则化", related: ["mixup"] },
+  copy_paste: { one: "把实例复制粘贴到别处，分割专用。", range: "0~1", impact: "小目标与遮挡", related: ["copy_paste_mode"] },
+  copy_paste_mode: { one: "复制粘贴时用 flip 还是 mixup 合成。", range: "flip / mixup", impact: "合成方式", related: ["copy_paste"] },
+  close_mosaic: { one: "最后 N 轮关掉马赛克，让模型稳定收敛。", range: "≥ 0 的轮数", impact: "末期稳定性", related: ["mosaic"] },
+  erasing: { one: "随机擦掉一块；数字可能被擦掉笔画。", range: "0~1", impact: "数字任务慎用", related: ["hsv_v"] },
+  auto_augment: { one: "分类任务的自动增强策略，检测/分割不生效。", range: "randaugment / autoaugment / augmix", impact: "仅分类任务", related: [] },
+
+  freeze: { one: "冻结前 N 层不更新；数据少时更稳。", range: "≥ 0 的层数", impact: "小数据稳定性", related: ["pretrained", "fraction"] },
+  pretrained: { one: "从预训练权重开始；关掉就从随机初始化训。", range: "开 / 关", impact: "收敛速度", related: ["weights"] },
+  fraction: { one: "只用一部分数据训练。", range: "0~1", impact: "快速试参数", related: ["epochs"] },
+
+  cache: { one: "把图片缓存到内存或磁盘，减少重复读盘。", range: "false / ram / disk", impact: "速度与内存", related: ["workers", "batch"] },
+  amp: { one: "混合精度训练，省显存、提速。", range: "开 / 关", impact: "速度与显存", related: ["batch"] },
+  seed: { one: "固定数据划分与增强的随机性。", range: "整数", impact: "可复现", related: ["deterministic"] },
+  deterministic: { one: "用确定性算子，结果可复现但更慢。", range: "开 / 关", impact: "速度与可复现", related: ["seed"] },
+  val: { one: "训练过程中跑验证；关掉就没有 mAP 曲线。", range: "开 / 关", impact: "能否看到指标", related: ["split", "plots"] },
+  split: { one: "训练中验证用哪个 split。", range: "val / test / train", impact: "指标口径", related: ["val"] },
+  save: { one: "保存 best/last 权重。", range: "开 / 关", impact: "产物", related: ["save_period"] },
+  save_period: { one: "每 N 轮额外存一个检查点。", range: "≥ 1；-1 = 只存 best/last", impact: "磁盘占用", related: ["save"] },
+  plots: { one: "输出混淆矩阵、PR 曲线与 train_batch 图。", range: "开 / 关", impact: "可解释性", related: ["val"] },
+};
+
 /** 探测当前那套 ultralytics 的参数真相。**只 import cfg，不 import torch**（实测约 6 秒，所以不塞进每次刷新）。 */
 const PROBE_PY = [
   "import json",
@@ -259,6 +325,7 @@ function buildParamSpec(probe) {
           label: it.label,
           kind: it.kind,
           hint: it.hint || "",
+          help: PARAM_HELP[it.key] || null,
           warn: it.warn || "",
           wide: !!it.wide,
           options: it.options || null,
@@ -1853,7 +1920,9 @@ function writeWrapper(cfgName, modelPath, modelName, calibSamples) {
   if (calibSamples) lines.push(`$CalibSources = ${ps(calibSamples)}`);
   lines.push("");
   const text = lines.join("\n");
-  fs.writeFileSync(out, text, "utf8");
+  // PowerShell 5.1 读没有 BOM 的脚本时按系统代码页（这台是 GBK）解析：
+  // 中文模型名/路径会被读坏。带 BOM 才会按 UTF-8 读。
+  fs.writeFileSync(out, "\uFEFF" + text, "utf8");
   return out;
 }
 
@@ -1926,6 +1995,52 @@ async function deviceChoices() {
   }
   out.push({ value: "cpu", label: "cpu（没有 CUDA，或想复现结果）" });
   return out;
+}
+
+/**
+ * Docker 引擎能不能用，以及"不能用"卡在哪一层。
+ *
+ * `docker version` 问的是**引擎**（Server），不是 CLI：Docker Desktop 的 CLI 常在，引擎却没起。
+ * 引擎没起时再测一次 WSL 的系统发行版——"一直转圈"最常见的根因是 WSL 连虚拟机都创建不出来
+ * （HCS/ERROR_NOT_FOUND），那和插件权限、目录绑定、管理员身份都无关。
+ */
+async function dockerEnv() {
+  const v = await runOnce("docker", ["version", "--format", "{{.Server.Version}}"], 8000);
+  const version = String(v.out || "")
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .pop() || "";
+  if (v.code === 0 && /^\d+\.\d+/.test(version)) return { ok: true, version, wsl: "ok", error: "", hint: "" };
+
+  const raw = String(v.err || v.out || "")
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const error = raw.slice(-2).join(" ") || "docker version 没有输出";
+  // 只有引擎没起时才测 WSL：这一步会真的创建虚拟机，正常机器上要几秒
+  const w = await runOnce("wsl", ["--system", "-e", "echo", "ok"], 20000);
+  if (w.code === 0) {
+    return {
+      ok: false,
+      version: "",
+      wsl: "ok",
+      error,
+      hint: "Docker 引擎没起来，但 WSL 正常。先打开 Docker Desktop（管理员或普通身份都行），等鲸鱼图标不再转圈再部署。",
+    };
+  }
+  return {
+    ok: false,
+    version: "",
+    wsl: "broken",
+    error,
+    hint:
+      "WSL 连自己的系统虚拟机都创建不出来（常见错误码 Wsl/Service/CreateInstance/CreateVm/HCS/ERROR_NOT_FOUND），Docker 只是受害者。\n" +
+      "这不是插件没权限，也不是「以管理员身份运行」能解决的。在【管理员】PowerShell 里依次执行：\n" +
+      "  wsl --shutdown\n" +
+      "  wsl --update\n" +
+      "然后重启电脑。开机后先跑 wsl -d docker-desktop -e echo ok，能回 ok 再开 Docker Desktop。",
+  };
 }
 
 /**
@@ -2021,6 +2136,13 @@ async function deployStart(req) {
   const ps1 = path.join(tool.dir, "deploy.ps1");
   if (!fs.existsSync(ps1)) throw new Error(`部署工具里没有 deploy.ps1：${tool.dir}`);
 
+  // 只有 convert 真正需要 Docker。引擎没起、且 WSL 也坏了时，deploy.ps1 会干等 180 秒
+  // 再抛一句"Docker 不可用"——用户看到的就是一直转圈。这里提前给出人话。
+  if (step === "all" || step === "convert") {
+    const env = await dockerEnv();
+    if (!env.ok && env.wsl === "broken") throw new Error(env.hint);
+  }
+
   // 配置只读一次：交付看 project、校准看 dataset.output_dir —— 两者都跟着用户那份 config.yaml 走
   const { effective } = await effectiveConfig();
 
@@ -2077,9 +2199,15 @@ async function deployStart(req) {
   emitJob(job);
 
   try {
+    // PowerShell 5.1 的 stdout 默认跟随系统代码页（这台是 GBK），而日志按 UTF-8 收——
+    // 不先改编码，deploy.ps1 打的每一句中文都会变成乱码。
+    const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+    const psCmd =
+      "try { [Console]::OutputEncoding=[System.Text.Encoding]::UTF8 } catch {}; " +
+      "& " + q(ps1) + " -Config " + q(wrapper) + " -Step " + q(step);
     const child = ctx.process.spawn({
       cmd: "powershell",
-      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, "-Config", wrapper, "-Step", step],
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCmd],
       cwd: tool.dir,
       env: { ...PY_ENV, },
       onStdout: (l) => pushLine(job, l, "out"),
@@ -2466,6 +2594,11 @@ async function activate(c) {
       return await deployStart(req);
     },
 
+    /** 部署前问一句：Docker 引擎（以及它脚下的 WSL）到底能不能用。 */
+    async deployEnv() {
+      return await dockerEnv();
+    },
+
     /** 只交付模型、不部署（"先把产物留一份"也是常见动作）。 */
     async deployDeliver(modelName) {
       const r = deliverBest(modelName);
@@ -2802,7 +2935,7 @@ function compareRuns(project, a, b) {
     } catch {
       /* 这个 run 没写出 csv */
     }
-    return { name, dir: dir.replace(/\\/g, "/"), columns: parsed.columns, chart: chartColumns(parsed.columns), rows: downsample(parsed.rows, 140), args: readRunArgs(dir) };
+    return { name, dir: dir.replace(/\\/g, "/"), columns: parsed.columns, chart: chartColumns(parsed.columns), rows: downsample(parsed.rows, 400), args: readRunArgs(dir) };
   };
   const A = one(a);
   const B = one(b);
@@ -3132,6 +3265,22 @@ function runProfile(project, name) {
   }
   const rows = parsed.rows;
   const lastRow = rows.length ? rows[rows.length - 1] : {};
+  let finishedAt = 0;
+  try {
+    finishedAt = fs.statSync(path.join(dir, "results.csv")).mtimeMs;
+  } catch {
+    /* 没写出 csv */
+  }
+  // 最佳轮按掩膜 mAP50-95 找（检测任务没有 M 列就退回框），而不是拿最后一轮冒名
+  let bestEpoch = rows.length ? Number(lastRow.epoch) || rows.length : 0;
+  let bestVal = -Infinity;
+  for (const row of rows) {
+    const v = Number(row["metrics/mAP50-95(M)"] ?? row["metrics/mAP50-95(B)"]);
+    if (Number.isFinite(v) && v > bestVal) {
+      bestVal = v;
+      bestEpoch = Number(row.epoch) || bestEpoch;
+    }
+  }
   const noteFile = abs(`train_runs/${String(name).replace(/[^\w.-]+/g, "-")}.note`);
   let note = "";
   try {
@@ -3146,7 +3295,8 @@ function runProfile(project, name) {
     model: String(args.model || ""),
     imgsz: args.imgsz == null ? "" : String(args.imgsz),
     epochs: rows.length,
-    bestEpoch: rows.length,
+    bestEpoch,
+    finishedAt,
     hasBest,
     best: hasBest ? best.replace(/\\/g, "/") : "",
     bestBytes,
@@ -3155,7 +3305,9 @@ function runProfile(project, name) {
     mAP50: lastRow["metrics/mAP50(B)"] ?? "",
     mAP5095: lastRow["metrics/mAP50-95(B)"] ?? "",
     mAP50M: lastRow["metrics/mAP50(M)"] ?? "",
+    mAP5095M: lastRow["metrics/mAP50-95(M)"] ?? "",
     durationText: fmtDuration(Number(lastRow.time) || 0),
+    durationSec: Number(lastRow.time) || 0,
     note,
     noteFile,
     argsFile: path.join(dir, "args.yaml").replace(/\\/g, "/"),
@@ -3476,7 +3628,7 @@ async function monitor(runName) {
     remainText: fmtDuration(remain),
     columns: parsed.columns,
     chart: chartColumns(parsed.columns),
-    rows: downsample(rows, 140),
+    rows: downsample(rows, 400),
     lastRow: last,
     mem,
     runs: brief,
@@ -3509,6 +3661,7 @@ export {
   parseLabelFile,
   parseResultsCsv,
   parseSimpleYaml,
+  PARAM_HELP,
   PARAM_META,
   readDataYaml,
   resumeGuard,
