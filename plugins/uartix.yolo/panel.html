@@ -1909,6 +1909,8 @@
       <button class="btn" id="reload" title="重新读工作区与配置">刷新</button>
     </header>
 
+    <div id="jserr" class="banner" hidden style="border-color:var(--bad);color:var(--bad)"></div>
+
     <div id="nows" class="banner" hidden>
       还没有登记工作区根。
       <button class="btn" id="pickws" title="选完还要在 设置 → 插件管理 → 展开本插件 → 工作区（$WS）里确认">选择工作区…</button>
@@ -5755,23 +5757,32 @@
         $("logf-err").className = "btn" + (logFilter === "err" ? " primary" : "");
       }
 
+      /** 一块坏了只坏一块：以前任意一个 render 抛错，整页就停在"只有标题"。 */
+      function safeRender(name, fn, arg) {
+        try {
+          fn(arg);
+        } catch (e) {
+          showPanelErr(name + "：" + ((e && e.message) || e));
+        }
+      }
+
       function renderAll(s) {
         st = s;
-        renderNext();
-        renderOverview();
-        renderEnv();
-        renderDataset();
-        renderDeploy();
-        renderRuns();
-        renderTrainParams();
-        renderSnapshots();
-        renderIntake();
-        renderAudit();
-        renderBatches();
+        safeRender("下一步", renderNext);
+        safeRender("概览", renderOverview);
+        safeRender("环境", renderEnv);
+        safeRender("数据集", renderDataset);
+        safeRender("部署", renderDeploy);
+        safeRender("训练记录", renderRuns);
+        safeRender("参数面", renderTrainParams);
+        safeRender("快照", renderSnapshots);
+        safeRender("投料口", renderIntake);
+        safeRender("体检", renderAudit);
+        safeRender("增强预览", renderBatches);
         // renderJob 先跑：它负责 `running` 这个状态；renderTask 要在它之后才能正确地置灰
-        renderJob(s.active || (s.jobs && s.jobs.length ? s.jobs[s.jobs.length - 1] : null));
-        renderTask();
-        renderModels();
+        safeRender("任务", renderJob, s.active || (s.jobs && s.jobs.length ? s.jobs[s.jobs.length - 1] : null));
+        safeRender("任务状态", renderTask);
+        safeRender("模型库", renderModels);
       }
 
       async function refresh(quiet) {
@@ -5781,7 +5792,9 @@
           loadPicks();
           if (!quiet) sysLog("已刷新");
         } catch (e) {
-          sysLog("读状态失败：" + (e && e.message ? e.message : e));
+          var why = "读状态失败：" + (e && e.message ? e.message : e);
+          sysLog(why);
+          showPanelErr(why);
         }
       }
 
@@ -6372,6 +6385,25 @@
         var t = toast.innerText || "";
         if (navigator.clipboard) navigator.clipboard.writeText(t).then(null, function () {});
       };
+
+      /* 面板自己出错时必须看得见：以前这里一抛错就是整页空白，只剩标题。 */
+      var panelErrs = [];
+      function showPanelErr(msg) {
+        var text = String(msg || "");
+        if (!text) return;
+        panelErrs.push(text);
+        var box = document.getElementById("jserr");
+        if (!box) return;
+        box.hidden = false;
+        box.innerHTML = "<b>面板出错：</b>" + esc(text) + (panelErrs.length > 1 ? ' <span style="opacity:.7">（共 ' + panelErrs.length + " 条，完整日志在下面）</span>" : "");
+      }
+      window.addEventListener("error", function (e) {
+        showPanelErr((e && e.message ? e.message : "脚本错误") + (e && e.filename ? " @ " + String(e.filename).split("/").pop() + ":" + e.lineno : ""));
+      });
+      window.addEventListener("unhandledrejection", function (e) {
+        var r = e && e.reason;
+        showPanelErr("未处理的异步错误：" + ((r && r.message) || r || ""));
+      });
 
       /* ---------------- 启动 ---------------- */
       // 参数表探测要 6 秒，不能挡首屏：先把工作区读出来，再单独把参数面填上
