@@ -2702,3 +2702,70 @@ describe("P177-E · 续训默认开新 run，原生 resume 只是高级选项", 
     }
   }, 90_000);
 });
+
+/* ============================ P177-E 补：体检两项、批量、保留策略 ============================ */
+
+describe("P177-E 补 · 重复图 / 投料口来源账 / 回收站保留策略", () => {
+  it("体检能找出完全相同的图，并带回投料口来源账", async () => {
+    const ws = makeWorkspace("audit2");
+    const same = Buffer.alloc(4096, 7);
+    writeFileSync(path.join(ws, "datasets", "x", "images", "train", "dupA.jpg"), same);
+    writeFileSync(path.join(ws, "datasets", "x", "images", "val", "dupB.jpg"), same);
+    const pluginDir = copyPlugin("audit2");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const a = await p.call("panel.train.audit", path.join(ws, "datasets", "x"));
+      expect(a.duplicates, "体检结果里要有 duplicates").toBeTruthy();
+      expect(a.duplicates.groups.length).toBeGreaterThanOrEqual(1);
+      const g = a.duplicates.groups[0];
+      expect(g.count).toBeGreaterThanOrEqual(2);
+      expect(g.paths.join(" ")).toContain("dupA.jpg");
+      expect(a.duplicates.reclaimBytes).toBeGreaterThan(0);
+      expect(a.findings.some((f) => f.key === "duplicateImages")).toBe(true);
+      expect(a.intake, "体检结果里要有投料口来源账").toBeTruthy();
+      expect(a.intake.subdirs.some((x) => x.name === "第二批数字" && x.images === 3)).toBe(true);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("保留策略默认「不自动清理」；设 30 天后只清理超过 30 天的条目", async () => {
+    const ws = makeWorkspace("retention");
+    mkdirSync(path.join(ws, "runs", "old1", "weights"), { recursive: true });
+    writeFileSync(path.join(ws, "runs", "old1", "results.csv"), "epoch,time\n1,1\n", "utf8");
+    const pluginDir = copyPlugin("retention");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      let st = await p.call("panel.train.assetsState", true);
+      expect(st.retention.keepDays, "默认必须是不自动清理").toBe(0);
+
+      // 先回收一条，再把它的 deletedAt 改到 40 天前
+      const t = await p.call("panel.train.assetsCleanup", { action: "trash", items: [{ kind: "run", id: "old1" }], confirm: "清理" });
+      expect(t.ok).toBe(true);
+      const entry = t.state.trash[0];
+      const metaPath = path.join(entry.dir.replace(/\//g, path.sep), ".trash.json");
+      const meta = JSON.parse(readFileSync(metaPath, "utf8"));
+      meta.deletedAt = new Date(Date.now() - 40 * 86400000).toISOString();
+      writeFileSync(metaPath, JSON.stringify(meta), "utf8");
+
+      const keep = await p.call("panel.train.assetsCleanup", { action: "retention", days: 30 });
+      expect(keep.keepDays).toBe(30);
+      expect(keep.state.retention.keepDays).toBe(30);
+
+      await expect(p.call("panel.train.assetsCleanup", { action: "purgeOld", days: 30, confirm: "随便" })).rejects.toThrow(/清理过期/);
+      const purged = await p.call("panel.train.assetsCleanup", { action: "purgeOld", days: 30, confirm: "清理过期" });
+      expect(purged.purged).toBe(1);
+      expect(purged.state.trash.length).toBe(0);
+      const prefs = JSON.parse(readFileSync(path.join(ws, ".uartix", "yolo", "prefs.json"), "utf8"));
+      expect(prefs.trashKeepDays).toBe(30);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});

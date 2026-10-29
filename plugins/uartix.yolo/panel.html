@@ -1515,6 +1515,12 @@
           display: none;
         }
       }
+      .assetbody .assetpick {
+        width: auto;
+        height: auto;
+        margin: 0 6px 0 0;
+        vertical-align: middle;
+      }
       .assetbar input[type="search"] {
         flex: 1 1 220px;
         max-width: 340px;
@@ -3389,7 +3395,7 @@
                 assetBtn("trash-one", { kind: "extra", name: x.name, dsid: d.id, id: d.id + "::" + x.name }, "回收", ro) + "</span>";
             }).join("");
             var clean = assetCleanSet["dataset:" + d.id] || (d.extras || []).some(function (x) { return assetCleanSet["extra:" + d.id + "::" + x.name]; });
-            return '<tr data-search="' + esc((d.name + " " + d.id + " " + (d.status || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(d.dir) + '">' + esc(d.name) + "</td>" +
+            return '<tr data-search="' + esc((d.name + " " + d.id + " " + (d.status || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(d.dir) + '">' + assetPick("dataset", d.id, d.dir, "", d.name) + esc(d.name) + "</td>" +
               '<td class="mono">' + esc(d.id) + "</td>" +
               '<td class="num">' + esc(d.splits ? d.splits.train : 0) + " / " + esc(d.splits ? d.splits.val : 0) + "</td>" +
               '<td class="num">' + esc((d.classes || []).join(" / ") || "—") + "</td>" +
@@ -3404,7 +3410,7 @@
           head = "<tr><th>run</th><th>状态</th><th>轮次</th><th>大小</th><th>数据集</th><th>best</th><th>部署包</th><th>操作</th></tr>";
           rows = Object.values(a.runs || {}).map(function (r) {
             var clean = assetCleanSet["run:" + r.id];
-            return '<tr data-search="' + esc((r.name + " " + (r.statusLabel || "") + " " + (r.statusWhy || "") + " " + (r.datasetName || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(r.dir) + '">' + esc(r.name) + "</td>" +
+            return '<tr data-search="' + esc((r.name + " " + (r.statusLabel || "") + " " + (r.statusWhy || "") + " " + (r.datasetName || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(r.dir) + '">' + assetPick("run", r.id, r.dir, "", r.name) + esc(r.name) + "</td>" +
               "<td>" + assetTag(r.status, r.statusLabel) + (r.statusWhy ? '<div class="sub" title="' + esc(r.statusWhy) + '">' + esc(r.statusWhy.slice(0, 46)) + (r.statusWhy.length > 46 ? "…" : "") + "</div>" : "") + "</td>" +
               '<td class="num">' + esc(r.epochs) + (r.argsEpochs ? " / " + esc(r.argsEpochs) : "") + "</td>" +
               '<td class="num">' + esc(fmtBytes(r.bytes)) + "</td>" +
@@ -3436,7 +3442,7 @@
           head = "<tr><th>部署包</th><th>目标</th><th>状态</th><th>模型</th><th>产物</th><th>大小</th><th>时间</th><th>操作</th></tr>";
           rows = Object.values(a.deployments || {}).map(function (d) {
             var clean = assetCleanSet["deployment:" + d.id];
-            return '<tr data-search="' + esc(((d.name || d.id) + " " + (d.target || "") + " " + (d.status || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(d.dir || "") + '">' + esc(d.name || d.id) + "</td>" +
+            return '<tr data-search="' + esc(((d.name || d.id) + " " + (d.target || "") + " " + (d.status || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(d.dir || "") + '">' + assetPick("deployment", d.id, d.dir, "", d.name || d.id) + esc(d.name || d.id) + "</td>" +
               "<td>" + esc(d.target || "—") + "</td>" +
               "<td>" + assetTag(d.status || "incomplete", d.status || "未登记") + "</td>" +
               '<td class="mono">' + esc(d.modelId || "—") + "</td>" +
@@ -3464,8 +3470,35 @@
           bar.id = "assettrashbar";
           bar.className = "row";
           bar.style.cssText = "margin-top:8px;flex-wrap:wrap";
-          bar.innerHTML = '<button class="btn danger" id="assetpurgeall"' + (ro ? " disabled" : "") + '>清空回收站（需输入「清空」）</button><span class="note" style="margin:0">默认不自动清空；永久删除后不可恢复。</span>';
+          var keep = (a.retention && a.retention.keepDays) || 0;
+          bar.innerHTML = '<button class="btn danger" id="assetpurgeall"' + (ro ? " disabled" : "") + '>清空回收站（需输入「清空」）</button>' +
+            '<label style="display:flex;flex-direction:row;align-items:center;gap:6px;font-size:11px">保留策略' +
+            '<select id="assetkeep"' + (ro ? " disabled" : "") + ' style="width:auto">' +
+            '<option value="0"' + (keep === 0 ? " selected" : "") + ">不自动清理</option>" +
+            '<option value="30"' + (keep === 30 ? " selected" : "") + ">30 天</option>" +
+            '<option value="90"' + (keep === 90 ? " selected" : "") + ">90 天</option></select></label>" +
+            '<button class="btn" id="assetpurgeold"' + (ro || !keep ? " disabled" : "") + ">清理超过 " + (keep || "N") + " 天的条目</button>" +
+            '<span class="note" style="margin:0">插件从不自己删；策略只影响右边这颗按钮，永久删除后不可恢复。</span>';
           body.parentNode.insertBefore(bar, body.nextSibling);
+          if ($("assetkeep")) $("assetkeep").onchange = async function () {
+            var days = Number(this.value) || 0;
+            try {
+              var r = await uartix.call("assetsCleanup", { action: "retention", days: days });
+              if (r && r.state) { assets = r.state; renderAssets(); }
+              sysLog(days ? "保留策略：超过 " + days + " 天的条目，点按钮才会清理" : "保留策略：不自动清理");
+            } catch (e) {
+              sysLog("[错误] " + String((e && e.message) || e));
+            }
+          };
+          if ($("assetpurgeold")) $("assetpurgeold").onclick = function () {
+            var days = Number($("assetkeep") && $("assetkeep").value) || 0;
+            if (!days) { sysLog("先把保留策略设成 30 或 90 天"); return; }
+            openAssetDialog("清理过期条目", '<p class="blocked">会永久删除回收站里超过 ' + days + ' 天的条目，不能恢复。</p><div class="confirmrow"><span>输入「清理过期」确认：</span><input id="assetconfirm" /><button class="btn danger" id="assetok">永久删除</button></div>');
+            $("assetok").onclick = async function () {
+              if ($("assetconfirm").value.trim() !== "清理过期") { sysLog("确认文本不对：要输入「清理过期」"); return; }
+              await runAssetCall({ action: "purgeOld", days: days, confirm: "清理过期" }, "已清理过期条目");
+            };
+          };
           if ($("assetpurgeall")) $("assetpurgeall").onclick = function () {
             openAssetDialog("清空回收站", '<p class="blocked">这会永久删除回收站里的全部条目，不能恢复。</p><div class="confirmrow"><span>输入「清空」确认：</span><input id="assetconfirm" /><button class="btn danger" id="assetok">永久删除</button></div>');
             $("assetok").onclick = async function () {
@@ -3475,7 +3508,59 @@
           };
         }
         bindAssetActions();
+        updateAssetPickBar();
         applyAssetFilter();
+      }
+
+      /** P177-B 补：表格行多选。勾选框放在名称格里，不新增列（列号被窄屏媒体查询依赖）。 */
+      function assetPick(kind, id, p, dsid, name) {
+        return '<input type="checkbox" class="assetpick" data-kind="' + esc(kind) + '" data-id="' + esc(id || "") +
+          '" data-path="' + esc(p || "") + '" data-dsid="' + esc(dsid || "") + '" data-name="' + esc(name || "") +
+          '" aria-label="选择 ' + esc(name || id) + '" /> ';
+      }
+
+      function selectedAssetRows() {
+        var out = [];
+        var cbs = document.querySelectorAll("#assetbody .assetpick:checked");
+        for (var i = 0; i < cbs.length; i++) {
+          var cb = cbs[i];
+          var o = { kind: cb.getAttribute("data-kind") || "" };
+          if (cb.getAttribute("data-id")) o.id = cb.getAttribute("data-id");
+          if (cb.getAttribute("data-path")) o.path = cb.getAttribute("data-path");
+          if (cb.getAttribute("data-name")) o.name = cb.getAttribute("data-name");
+          if (cb.getAttribute("data-dsid")) o.datasetId = cb.getAttribute("data-dsid");
+          out.push(o);
+        }
+        return out;
+      }
+
+      function updateAssetPickBar() {
+        var old = $("assetpickbar");
+        var rows = selectedAssetRows();
+        if (!rows.length) {
+          if (old) old.remove();
+          return;
+        }
+        var bar = old || document.createElement("div");
+        bar.id = "assetpickbar";
+        bar.className = "row";
+        bar.style.cssText = "margin-top:8px;flex-wrap:wrap;gap:8px";
+        bar.innerHTML = '<span class="note" style="margin:0">已选 ' + rows.length + " 项</span>" +
+          '<button class="btn primary" id="assetpicksend">预演回收</button>' +
+          '<button class="btn" id="assetpickall">全选本页</button>' +
+          '<button class="btn" id="assetpicknone">清空选择</button>';
+        if (!old) $("assetbody").parentNode.insertBefore(bar, $("assetbody").nextSibling);
+        $("assetpicksend").onclick = function () { previewAsset(selectedAssetRows(), false); };
+        $("assetpickall").onclick = function () {
+          var cbs = document.querySelectorAll("#assetbody .assetpick");
+          for (var i = 0; i < cbs.length; i++) cbs[i].checked = true;
+          updateAssetPickBar();
+        };
+        $("assetpicknone").onclick = function () {
+          var cbs = document.querySelectorAll("#assetbody .assetpick");
+          for (var i = 0; i < cbs.length; i++) cbs[i].checked = false;
+          updateAssetPickBar();
+        };
       }
 
       function bindAssetActions() {
@@ -3496,6 +3581,8 @@
         }
         var sug = document.querySelectorAll("#assuglist input[data-sug]");
         for (var j = 0; j < sug.length; j++) sug[j].onchange = updateAssetSugNote;
+        var picks = document.querySelectorAll("#assetbody .assetpick");
+        for (var k = 0; k < picks.length; k++) picks[k].onchange = updateAssetPickBar;
       }
 
       function selectedSuggestions() {
@@ -4434,7 +4521,13 @@
           "<b>train / val</b><span>图 " + ((sp.train || {}).images || 0) + " / " + ((sp.val || {}).images || 0) + " · 标签 " + ((sp.train || {}).labels || 0) + " / " + ((sp.val || {}).labels || 0) + "</span>" +
           "<b>data.yaml</b><span>" + (dy.exists ? "nc " + (dy.nc == null ? "?" : dy.nc) + " · 类别 " + esc((dy.names || []).join("/")) : '<span class="tag warn">还没有 data.yaml</span>') + "</span>" +
           "<b>形状</b><span>框 " + a.boxes + " · 多边形 " + a.polys + " · 四点 " + a.quads + (a.badLines ? " · 非法行 " + a.badLines : "") + "</span>" +
-          "<b>类别计数</b><span>" + esc(Object.keys(a.classHist || {}).map(function (k) { return k + ":" + a.classHist[k]; }).join("  ") || "-") + "</span>";
+          "<b>类别计数</b><span>" + esc(Object.keys(a.classHist || {}).map(function (k) { return k + ":" + a.classHist[k]; }).join("  ") || "-") + "</span>" +
+          "<b>重复图</b><span>" + (a.duplicates && a.duplicates.groups.length
+            ? '<span class="tag warn">' + a.duplicates.groups.length + " 组</span> 多用约 " + esc(fmtBytes(a.duplicates.reclaimBytes)) + "（算了 " + a.duplicates.hashed + " 张的 SHA256）"
+            : "没发现完全相同的图") + "</span>" +
+          "<b>投料口</b><span>" + (a.intake && a.intake.exists
+            ? esc((a.intake.subdirs || []).map(function (x) { return x.name + " " + x.images + "图/" + x.json + "json"; }).join(" · ") || "（没有子目录）")
+            : "还没建 annotations/") + "</span>";
         find.innerHTML = (a.findings || [])
           .map(function (f) {
             var c = f.level === "bad" ? "var(--bad)" : f.level === "warn" ? "var(--warn)" : "var(--dim)";

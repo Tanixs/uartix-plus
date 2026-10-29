@@ -718,7 +718,13 @@ function readPrefs() {
       .map((x) => ({ ...x, path: x.path.replace(/\\/g, "/"), exists: !!x.exists }))
       .slice(0, RECENT_MAX);
   }
-  return { schemaVersion: 1, recent, ...(isObj(raw) && raw.pinned ? { pinned: raw.pinned } : {}) };
+  return {
+    schemaVersion: 1,
+    recent,
+    ...(isObj(raw) && raw.pinned ? { pinned: raw.pinned } : {}),
+    // 回收站保留策略：0 = 不自动清理（默认）。只影响"按策略清理"按钮，插件从不自己定时删。
+    trashKeepDays: Math.max(0, Number(raw && raw.trashKeepDays) || 0),
+  };
 }
 
 function savePrefs(prefs) {
@@ -851,6 +857,27 @@ function moveToTrash(target, meta) {
   writeJsonAtomic(path.join(entryDir, ".trash.json"), record);
   auditLog({ action: "trash", kind: record.kind, id: record.id, path: record.originalPath, bytes: record.bytes, cascade: record.cascade });
   return record;
+}
+
+/** 按保留策略清理回收站：**只在你点按钮时执行**，插件从不自己定时删。 */
+function purgeOldTrash(keepDays, confirm) {
+  if (!canWrite()) throw new Error("当前是只读模式：不能永久删除");
+  if (String(confirm || "") !== "清理过期") throw new Error("永久删除要二次确认：确认文本必须是「清理过期」");
+  const days = Math.max(0, Number(keepDays) || 0);
+  if (!days) throw new Error("保留策略是「不自动清理」：先把天数设成 30 或 90，再点清理");
+  const cut = Date.now() - days * 86400000;
+  const old = listTrash().filter((e) => e.at && e.at < cut);
+  let bytes = 0;
+  for (const e of old) {
+    try {
+      fs.rmSync(abs(e.dir), { recursive: true, force: true });
+      bytes += Number(e.bytes) || 0;
+      auditLog({ action: "purge", kind: e.kind, id: e.id, path: e.originalPath, bytes: e.bytes, reason: `超过 ${days} 天` });
+    } catch {
+      /* 一条失败继续下一条 */
+    }
+  }
+  return { ok: true, purged: old.length, bytes, keepDays: days };
 }
 
 function listTrash() {
@@ -1383,6 +1410,7 @@ async function catalogBuild(force) {
     storage,
     external,
     audit: readAudit(30),
+    retention: { keepDays: readPrefs().trashKeepDays || 0 },
     readOnly: !canWrite(),
   };
   catalog.suggestions = cleanupSuggestions(catalog, project);
@@ -2831,6 +2859,7 @@ function readDeployConfig(name) {
     // 校准图与 opset 也要读出来：换数据集后最容易忘改的就是校准来源，量化的好坏全看它
     calib: pick("CalibSources"),
     opset: pick("Opset"),
+    labels: pick("Labels"),
   };
 }
 
@@ -3171,6 +3200,21 @@ async function deployPrecheck(req) {
     if (fam && DEPLOY_TARGET.unsupportedFamilies.includes(fam)) {
       add("warn", `${fam} 是插件能训的，但目标工具（Pulsar2 4.0 配方）没有声明支持；导出的包可能上不了板`);
     }
+  }
+
+  // 配方里的 $Labels 非空时：数量必须和权重自带类别数一致，否则上板后类别整体错位
+  const cfg = o.cfgName ? readDeployConfig(String(o.cfgName)) : null;
+  if (cfg && cfg.ok && String(cfg.labels || "").trim()) {
+    const want = String(cfg.labels).split(/[,，\s]+/).filter(Boolean).length;
+    const facts = modelFacts ? factsFor(modelFacts) : null;
+    const nc = facts && facts.nc != null ? facts.nc : null;
+    if (nc != null && want !== Number(nc)) {
+      add("bad", `配方的 Labels 有 ${want} 个类别，而权重自带 ${nc} 个：上板后类别会整体错位`);
+    } else {
+      add("ok", `Labels：${want} 个类别${nc != null ? "（与权重一致）" : "（权重没读过 nc，跑之前点一次「读一遍权重」）"}`);
+    }
+    const dsN = (effective.dataset.classes || []).length;
+    if (dsN && want !== dsN) add("warn", `Labels 有 ${want} 个，当前数据集类别表有 ${dsN} 个：确认这是同一套类别顺序`);
   }
 
   const calibDir = String(o.calib || "").trim();
@@ -3910,7 +3954,21 @@ async function activate(c) {
         return { ok: true, suggestions: c.suggestions || [], audit: c.audit || [] };
       }
       if (action === "audit") return { ok: true, entries: readAudit(o.limit || 60) };
+      if (action === "retention") {
+        if (!canWrite()) throw new Error("当前是只读模式：能看保留策略，不能改");
+        const days = Math.max(0, Number(o.days) || 0);
+        const prefs = readPrefs();
+        prefs.trashKeepDays = days;
+        savePrefs(prefs);
+        catalogCache = { at: 0, value: null };
+        return { ok: true, keepDays: days, state: await catalogBuild(true) };
+      }
       if (!canWrite()) throw new Error("当前是只读模式：能看资产，不能清理 / 恢复 / 永久删除");
+      if (action === "purgeOld") {
+        const r = purgeOldTrash(Number(o.days) || readPrefs().trashKeepDays, o.confirm);
+        catalogCache = { at: 0, value: null };
+        return { ...r, state: await catalogBuild(true) };
+      }
       if (action === "preview") {
         const c = await catalogBuild(false);
         const plan = cleanupPlan(c, o.items, o.cascade);
@@ -4126,6 +4184,61 @@ function readDataYaml(file) {
  * 一个上万张的数据集全读要几十秒，而体检的价值在前 400 个就能看出来。
  * 超了就报 `truncated`，宁可少报也不把面板卡住。
  */
+/**
+ * 完全相同的图（同一份文件被复制到 train/val 或两个数据集）：按大小分组，
+ * 只对"同尺寸 ≥2"的候选算 SHA256 —— 44G 数据集也不至于被读一遍。
+ */
+function findDuplicateImages(dirs, cap) {
+  const files = [];
+  const walk = (d, depth) => {
+    if (depth > 2 || files.length >= (cap || 3000)) return;
+    let ents = [];
+    try {
+      ents = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of ents) {
+      if (files.length >= (cap || 3000)) return;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (IMAGE_RE.test(e.name)) {
+        try {
+          const st = fs.statSync(p);
+          files.push({ p, size: st.size });
+        } catch {
+          /* 读不到就跳过 */
+        }
+      }
+    }
+  };
+  for (const d of dirs) walk(d, 0);
+  const bySize = new Map();
+  for (const f of files) {
+    if (!bySize.has(f.size)) bySize.set(f.size, []);
+    bySize.get(f.size).push(f.p);
+  }
+  const groups = [];
+  let hashed = 0;
+  for (const [size, list] of bySize) {
+    if (list.length < 2 || size < 1024) continue;
+    const bySha = new Map();
+    for (const p of list.slice(0, 40)) {
+      if (hashed >= 400) break;
+      const sha = sha256File(p);
+      hashed += 1;
+      if (!sha) continue;
+      if (!bySha.has(sha)) bySha.set(sha, []);
+      bySha.get(sha).push(p);
+    }
+    for (const [, paths] of bySha) {
+      if (paths.length > 1) groups.push({ size, count: paths.length, paths: paths.map((x) => x.replace(/\\/g, "/")).slice(0, 6), bytes: size * (paths.length - 1) });
+    }
+    if (groups.length >= 20) break;
+  }
+  return { scanned: files.length, hashed, groups: groups.slice(0, 20), reclaimBytes: groups.reduce((n, g) => n + g.bytes, 0) };
+}
+
 function auditDataset(dirIn, sample) {
   const dir = abs(dirIn || DEFAULTS.dataset.output_dir);
   const r = {
@@ -4191,6 +4304,26 @@ function auditDataset(dirIn, sample) {
   delete r.trainStems;
   delete r.valStems;
 
+  // P177 §6.3 新增两项：完全重复的图 + 投料口来源账（都只读）
+  try {
+    r.duplicates = findDuplicateImages([path.join(dir, "images", "train"), path.join(dir, "images", "val")], 3000);
+  } catch {
+    r.duplicates = { scanned: 0, hashed: 0, groups: [], reclaimBytes: 0 };
+  }
+  try {
+    const it = scanIntake();
+    r.intake = { dir: it.dir, exists: it.exists, subdirs: (it.subdirs || []).map((x) => ({ name: x.name, images: x.images, json: x.json })), loose: it.loose };
+  } catch {
+    r.intake = null;
+  }
+
+  if (r.duplicates && r.duplicates.groups.length) {
+    r.findings.push({
+      level: "warn",
+      key: "duplicateImages",
+      text: `发现 ${r.duplicates.groups.length} 组完全相同的图（最多算 ${r.duplicates.hashed} 张的 SHA256），多用约 ${fmtBytes(r.duplicates.reclaimBytes)}；重复图会让 val 指标偏乐观，去资产页处理前先确认。`,
+    });
+  }
   if (r.dataYaml.exists && r.dataYaml.nc != null && r.maxClassId >= r.dataYaml.nc) {
     r.findings.push({ level: "bad", key: "ncMismatch", text: `标签里出现了类别 id ${r.maxClassId}，而 data.yaml 的 nc 只有 ${r.dataYaml.nc}：引擎会直接拒或错位训练。` });
   }

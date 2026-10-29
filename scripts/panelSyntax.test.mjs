@@ -502,3 +502,33 @@ describe("P177-E · 续训", () => {
     expect(html).toContain("填进训练表单");
   });
 });
+
+/* ============================================================================
+   P177-E 补 · 表格多选、保留策略、体检两项
+   ============================================================================ */
+
+describe("P177-E 补 · 批量与保留策略", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("资产表能勾选多行，并在底部出现「预演回收」", () => {
+    expect(html).toContain("function assetPick(");
+    expect(html).toContain('class="assetpick"');
+    expect(html).toContain('bar.id = "assetpickbar"');
+    expect(html).toContain("预演回收");
+    expect(html).toContain("全选本页");
+  });
+
+  it("回收站有保留策略，默认「不自动清理」，且只影响按钮", () => {
+    expect(html).toContain('id="assetkeep"');
+    expect(html).toContain("不自动清理");
+    expect(html).toContain("插件从不自己删");
+    expect(html).toContain('action: "purgeOld"');
+  });
+
+  it("体检结果显示重复图与投料口来源账", () => {
+    expect(html).toContain("<b>重复图</b>");
+    expect(html).toContain("<b>投料口</b>");
+    expect(html).toContain("a.duplicates.groups.length");
+  });
+});
