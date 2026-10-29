@@ -2613,6 +2613,9 @@ async function startJob(kind, overrides) {
     const block = taskBlock(merged);
     if (!block.mismatch.ok) throw new Error(block.mismatch.why);
     if (!block.resume.ok) throw new Error(block.resume.why);
+    // P177-E 磁盘守卫：按同类 run 的实测体积 × 1.5 预估。宁可现在说一句，也不要跑到一半盘满。
+    const disk = await diskGuard();
+    if (!disk.ok) throw new Error(disk.note);
   }
 
   const runner = kind === "train" ? path.join(PKG_DIR, "runner", "train_job.py").replace(/\\/g, "/") : abs("scripts/build_dataset.py");
@@ -3835,6 +3838,17 @@ async function activate(c) {
       return archiveRun(effective.train.project, String(o.run || ""));
     },
 
+    /** P177-E：续训计划（默认从 last.pt 开新 run；原生 resume 只是高级选项）。 */
+    async resumePlan(req) {
+      return await resumePlan(req);
+    },
+
+    /** P177-E：磁盘守卫（按同类 run 实测体积 × 1.5 预估）。 */
+    async diskGuard() {
+      needWorkspace();
+      return await diskGuard();
+    },
+
     /* ---- 标注体检与增强预览（P175-W3）---- */
 
     /** 体检：**只读**。不写、不改、不删任何标签文件。 */
@@ -5034,7 +5048,87 @@ function saveRunNote(project, name, text) {
  * 设计稿写的是"移"。这里刻意改成复制：搬走会让 `runs/` 里的历史断档，
  * 而那个目录是用户自己会去看的——断档的代价比多占一点磁盘大得多。
  */
+/**
+ * 中断/停止后的续训计划（P177-E）。
+ *
+ * 默认**开新 run**：`weights = last.pt`、`name = <原名>-resume`、`resume` 留空。
+ * 这样优化器状态保住了、原 run 的产物不被覆盖、曲线重新从第 1 轮计（看得清"续了多久"）。
+ * Ultralytics 原生 `resume=last.pt` 只作为高级选项：它会写回原 run 目录并接着原轮次，
+ * 跨包版本时容易失败，所以不放在默认路径上。
+ */
+async function resumePlan(req) {
+  needWorkspace();
+  const o = isObj(req) ? req : {};
+  const run = String(o.run || "");
+  if (!run) throw new Error("没说哪个 run");
+  const { effective } = await effectiveConfig();
+  const project = String(o.project || effective.train.project || DEFAULTS.train.project);
+  const dir = path.join(abs(project), run);
+  if (!fs.existsSync(dir)) throw new Error(`没有这个 run：${run}`);
+  const last = path.join(dir, "weights", "last.pt");
+  const args = readRunArgs(dir);
+  const native = String(o.mode || "new") === "native";
+  if (!fs.existsSync(last)) {
+    return {
+      ok: false,
+      run,
+      why: `这个 run 没有 weights/last.pt：${last}。没有优化器状态就没法续训；从 best.pt 接着训只会"从头开始但轮次接着数"，不要这么做。`,
+      patch: null,
+    };
+  }
+  const epochs = Number(args.epochs) || Number(effective.train.epochs) || 300;
+  const patch = {
+    task: String(args.task || effective.train.task || ""),
+    weights: last.replace(/\\/g, "/"),
+    data: String(args.data || effective.train.data || ""),
+    project: String(args.project || project),
+    name: native ? run : `${run}-resume`,
+    epochs,
+    resume: native ? last.replace(/\\/g, "/") : "",
+  };
+  return {
+    ok: true,
+    run,
+    native,
+    last: last.replace(/\\/g, "/"),
+    patch,
+    warnings: native
+      ? ["原生 resume 会写回原 run 目录、接着原轮次；跨 ultralytics 版本可能直接失败。产物会被这次续训覆盖。"]
+      : ["开新 run：原 run 不动，曲线从第 1 轮重新计；优化器状态来自 last.pt。", "跑之前确认 epochs 是「总共要跑到多少轮」，不是「再跑多少轮」——Ultralytics 的 epochs 是总轮次。"],
+  };
+}
+
+/** 训练前的磁盘守卫：按同类 run 的实测体积 × 1.5 预估；不够就明说，不启动。 */
+async function diskGuard() {
+  const { effective } = await effectiveConfig();
+  const project = abs(effective.train.project || DEFAULTS.train.project);
+  let sample = 0;
+  let count = 0;
+  for (const r of scanRuns(project).slice(0, 12)) {
+    if (!r.bytes) continue;
+    sample += r.bytes;
+    count += 1;
+  }
+  const perRun = count ? sample / count : 0;
+  const need = perRun ? perRun * 1.5 : 512 * 1024 * 1024;
+  let free = 0;
+  try {
+    const st = fs.statfsSync(root);
+    free = Number(st.bavail) * Number(st.bsize) || 0;
+  } catch {
+    return { ok: true, free: 0, need: 0, note: "这个文件系统不支持查询可用空间，跳过磁盘守卫" };
+  }
+  return {
+    ok: free >= need,
+    free,
+    need,
+    sampleRuns: count,
+    note: free >= need ? "" : `可用 ${fmtBytes(free)}，按同类 run 预估这次要 ${fmtBytes(need)}（${count} 个样本 × 1.5）。先到资产页清理，或把 project 换到空间更大的盘。`,
+  };
+}
+
 function archiveRun(project, name) {
+
   const run = runProfile(project, name);
   if (!run.dir || !fs.existsSync(run.dir)) throw new Error(`没有这个 run：${name}`);
   const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);

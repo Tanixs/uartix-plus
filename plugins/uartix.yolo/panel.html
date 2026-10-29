@@ -2500,7 +2500,7 @@
             <li><b>参数表不是抄的</b>：每项来自当前 <code>ultralytics</code> 的 <code>DEFAULT_CFG_DICT</code>；包里没有就不出现。</li>
             <li><b>只存差异</b>：面板只把与工作区 <code>config.yaml</code> 不同的键写进覆盖层，改回默认时 diff 自己消失。</li>
             <li><b>没有 half</b>：8.4 已被 <code>quantize</code> 取代，那是导出页的事。</li>
-            <li><b>续训只认 <code>last.pt</code></b>：<code>best.pt</code> 没有优化器状态；跨包版本续训不做。</li>
+            <li><b>续训只认 <code>last.pt</code></b>：<code>best.pt</code> 没有优化器状态。默认从 <code>last.pt</code> <b>开一个新 run</b>（<code>&lt;原名&gt;-resume</code>），原 run 不动；Ultralytics 原生 resume 会写回原目录，只在高级选项里给。</li>
             <li><b>数字/文字任务</b>：<code>fliplr</code> / <code>flipud</code> 保持 0；<code>erasing</code> 慎用。</li>
             <li><b>本机</b>：16 GB 内存 → <code>workers</code> 8 左右；8 GB 显存 → batch 16，OOM 就减半。</li>
           </ul>
@@ -2531,11 +2531,11 @@
         </div>
         <div class="card" id="help-perms">
           <h2>权限与批准</h2>
-          <p class="note">写权限只有那七枚目录，越界会被内核直接拒绝。版本号变化不影响已批准的能力面；只有权限面变了才会重新弹批准卡。安装、启用、发布这三件事始终由你点。</p>
+          <p class="note">写权限只有那七枚目录，越界会被内核直接拒绝。0.5.2 起多了 <b>联网</b>（github.com / objects.githubusercontent.com / raw.githubusercontent.com），只用于下载官方权重；权限面变了，所以更新后要重新批准一次，批准卡上会多三行「联网 …」。宿主目前不按域名拦截，白名单由下载器自己做。安装、启用、发布这三件事始终由你点。</p>
         </div>
         <div class="card" id="help-assets">
           <h2>资产与清理</h2>
-          <p class="note">资产页是只读台账：数据集、训练产物、模型、部署包、回收站与磁盘占用。它只扫描文件系统，不搬、不删、不改你的文件；删除和恢复会在后续批次里以“引用检查 → 回收站 → 可恢复”的方式出现。</p>
+          <p class="note">资产页是台账：数据集、训练产物、模型、部署包、回收站与磁盘占用。清理建议只是建议——每条都写着为什么、多大、被谁引用，默认一条都不勾。删除先进 <code>.uartix/yolo/trash/</code>，恢复回原路径，永久删除与清空要输入确认词；全部写 <code>.uartix/yolo/audit.jsonl</code>。原始 <code>annotations/</code>、用户脚本与外部部署目录永远不在清理范围；外部 <code>work/calib</code> 只统计体积并给一份手工清单。</p>
         </div>
         <div id="helpnone" class="note" hidden>没有匹配的帮助。</div>
       </div>
@@ -4541,12 +4541,60 @@
         if (m) m.hidden = true;
       }
 
+      /* ---------------- P177-E：续训计划 ---------------- */
+      async function openResume(run, mode) {
+        try {
+          var r = await uartix.call("resumePlan", { run: run, mode: mode || "new" });
+          if (!r.ok) {
+            openAssetDialog("不能续训", '<p class="blocked">' + esc(r.why || "没有可用的 last.pt") + "</p>");
+            return;
+          }
+          var p = r.patch || {};
+          var html = '<div class="kv">' +
+            "<b>权重（last.pt）</b><span>" + esc(p.weights || "") + "</span>" +
+            "<b>新实验名</b><span>" + esc(p.name || "") + "</span>" +
+            "<b>轮次（总共）</b><span>" + esc(p.epochs) + "</span>" +
+            "<b>resume</b><span>" + (p.resume ? esc(p.resume) : "留空（开新 run）") + "</span>" +
+            "</div>";
+          (r.warnings || []).forEach(function (w) {
+            html += '<p class="note" style="color:var(--warn);margin:6px 0 0">· ' + esc(w) + "</p>";
+          });
+          html += '<div class="confirmrow"><button class="btn primary" id="resumeapply">填进训练表单</button>' +
+            (r.native ? "" : '<button class="btn" id="resumenative">改用原生 resume（高级）</button>') + "</div>";
+          openAssetDialog("继续训练 · " + run, html);
+          $("resumeapply").onclick = function () { applyResumePatch(r); };
+          if ($("resumenative")) $("resumenative").onclick = function () { openResume(run, "native"); };
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+        }
+      }
+
+      async function applyResumePatch(r) {
+        var p = r.patch || {};
+        try {
+          var curTask = (((st || {}).config || {}).effective || {}).train || {};
+          if (p.task && p.task !== String(curTask.task || "")) await uartix.call("applyTask", p.task);
+          var map = { weights: "p_weights", data: "p_data", epochs: "p_epochs", name: "p_name", project: "p_project", resume: "p_resume" };
+          for (var k in map) {
+            var el = $(map[k]);
+            if (el && p[k] != null) el.value = p[k];
+          }
+          closeAssetDialog();
+          showTab("train");
+          refreshTrainSummary();
+          sysLog("已把续训参数填进训练页（" + (p.name || "") + "）；确认后点「开始训练」");
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+        }
+      }
+
       function openRunMenu(anchor, r) {
         var menu = $("runmenu");
         if (!menu) return;
         menu.innerHTML =
           '<button data-act="view">看曲线</button>' +
           '<button data-act="eval">评估这一版</button>' +
+          '<button data-act="resume">继续训练…</button>' +
           '<button data-act="repro">等价命令</button>' +
           '<button data-act="arch">归档（复制）</button>' +
           '<div class="menunote"><input id="runmenu_note" value="' + esc(r.note || "") + '" placeholder="这一版改了什么" /><button data-act="note">存</button></div>';
@@ -4561,6 +4609,7 @@
           var act = b.getAttribute("data-act");
           if (act === "view") { closeRunMenu(); openRun(r.name); return; }
           if (act === "eval") { closeRunMenu(); pendingEvalWeight = r.best || ""; showTab("result"); setResultView("metrics"); return; }
+          if (act === "resume") { closeRunMenu(); openResume(r.name, "new"); return; }
           if (act === "repro") { closeRunMenu(); showRepro(r); return; }
           if (act === "arch") {
             closeRunMenu();

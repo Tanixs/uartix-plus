@@ -475,3 +475,28 @@ describe("P177-D · 部署目标画像与部署包", () => {
     expect(html).toContain("外部 <code>work/calib</code> 不复制、不删除");
   });
 });
+
+/* ============================================================================
+   P177-E · 续训入口
+   ----------------------------------------------------------------------------
+   默认路径必须"开新 run"，原生 resume 只能作为高级选项出现；判据盯住这两个词
+   同时出现在界面上，防止下一版又把它做成默认。
+   ============================================================================ */
+
+describe("P177-E · 续训", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("实验页菜单有「继续训练…」，默认走 resumePlan(new)", () => {
+    expect(html).toContain('data-act="resume"');
+    expect(html).toContain("继续训练…");
+    expect(html).toContain('uartix.call("resumePlan", { run: run, mode: mode || "new" })');
+  });
+
+  it("原生 resume 标成高级选项，并把风险说在按钮旁边", () => {
+    expect(html).toContain("改用原生 resume（高级）");
+    // 风险文案由插件返回（resumePlan 的 warnings），面板负责原样显示
+    expect(html).toContain("(r.warnings || []).forEach");
+    expect(html).toContain("填进训练表单");
+  });
+});

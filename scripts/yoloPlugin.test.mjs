@@ -2601,3 +2601,104 @@ describe("P177-D · 一个目标画像、开跑前校验、部署包登记", () 
     }
   }, 120_000);
 });
+
+/* ============================ P177-E · 续训计划与磁盘守卫 ============================ */
+
+describe("P177-E · 续训默认开新 run，原生 resume 只是高级选项", () => {
+  function seedResumeRun(ws, name, opts) {
+    const o = opts || {};
+    const d = path.join(ws, "runs", name);
+    mkdirSync(path.join(d, "weights"), { recursive: true });
+    writeFileSync(
+      path.join(d, "args.yaml"),
+      ["task: segment", `data: ${fwd(ws)}/datasets/x/data.yaml`, "epochs: 300", "imgsz: 640", "batch: 16", `project: ${fwd(ws)}/runs`, `name: ${name}`].join("\n"),
+      "utf8",
+    );
+    writeFileSync(path.join(d, "results.csv"), "epoch,time,metrics/mAP50-95(M)\n1,10,0.4\n2,20,0.5\n", "utf8");
+    if (o.best) writeFileSync(path.join(d, "weights", "best.pt"), "best", "utf8");
+    if (o.last) writeFileSync(path.join(d, "weights", "last.pt"), "last", "utf8");
+    return d;
+  }
+
+  it("有 last.pt：默认开 <原名>-resume、resume 留空、优化器状态来自 last.pt", async () => {
+    const ws = makeWorkspace("resume");
+    seedResumeRun(ws, "exp1", { best: true, last: true });
+    const pluginDir = copyPlugin("resume");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const r = await p.call("panel.train.resumePlan", { run: "exp1" });
+      expect(r.ok).toBe(true);
+      expect(r.native).toBe(false);
+      expect(r.patch.name).toBe("exp1-resume");
+      expect(r.patch.resume).toBe("");
+      expect(r.patch.weights.replace(/\\/g, "/")).toMatch(/runs\/exp1\/weights\/last\.pt$/);
+      expect(r.patch.task).toBe("segment");
+      expect(r.patch.epochs).toBe(300);
+      expect(r.warnings.join(" ")).toContain("原 run 不动");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("没有 last.pt：拒绝并说明为什么不能用 best.pt 顶替", async () => {
+    const ws = makeWorkspace("resume-nolast");
+    seedResumeRun(ws, "exp1", { best: true, last: false });
+    const pluginDir = copyPlugin("resume-nolast");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const r = await p.call("panel.train.resumePlan", { run: "exp1" });
+      expect(r.ok).toBe(false);
+      expect(r.why).toContain("last.pt");
+      expect(r.why).toContain("best.pt");
+      expect(r.patch).toBe(null);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("原生 resume：写回原 run 目录，并把风险写在 warnings 里", async () => {
+    const ws = makeWorkspace("resume-native");
+    seedResumeRun(ws, "exp1", { best: true, last: true });
+    const pluginDir = copyPlugin("resume-native");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const r = await p.call("panel.train.resumePlan", { run: "exp1", mode: "native" });
+      expect(r.ok).toBe(true);
+      expect(r.native).toBe(true);
+      expect(r.patch.name).toBe("exp1");
+      expect(r.patch.resume.replace(/\\/g, "/")).toMatch(/last\.pt$/);
+      expect(r.warnings.join(" ")).toContain("写回原 run 目录");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("磁盘守卫：给出可用空间与预估值（不删任何东西）", async () => {
+    const ws = makeWorkspace("disk");
+    seedResumeRun(ws, "exp1", { best: true, last: true });
+    const pluginDir = copyPlugin("disk");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const d = await p.call("panel.train.diskGuard");
+      expect(typeof d.ok).toBe("boolean");
+      expect(typeof d.free).toBe("number");
+      expect(typeof d.need).toBe("number");
+      expect(d.need).toBeGreaterThan(0);
+      expect(existsSync(path.join(ws, "runs", "exp1", "results.csv")), "守卫不能动文件").toBe(true);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
