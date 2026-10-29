@@ -10,7 +10,7 @@
  * 再带一条反向夹具说明这个检查不是永真的。
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -484,6 +484,23 @@ describe("P177-D · 部署目标画像与部署包", () => {
    默认路径必须"开新 run"，原生 resume 只能作为高级选项出现；判据盯住这两个词
    同时出现在界面上，防止下一版又把它做成默认。
    ============================================================================ */
+
+/* ============================================================================
+   宿主读取上限：panel.html 不能超过 256 KiB
+   ----------------------------------------------------------------------------
+   `plugin_fs_read` 的上限是 256 KiB，超了就截断（`truncated` 字段前端没用）。
+   0.6.0 的面板长到 269,635 字节，尾部脚本被截掉 ⇒ 整段 `<script>` 解析失败 ⇒
+   页面只剩静态标题、所有按钮失效，而且 `window.onerror` 也注册不上（它就在那段脚本里）。
+   这条判据不许降级：真要写长，先把宿主上限改大并确认安装版已跟上。
+   ============================================================================ */
+
+describe("面板文件大小硬上限", () => {
+  it("panel.html 小于 256 KiB（宿主 plugin_fs_read 的读取上限）", () => {
+    const f = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+    const bytes = statSync(f).size;
+    expect(bytes, `panel.html 已 ${bytes} 字节；超过 262144 会被宿主截断成空白页`).toBeLessThan(256 * 1024);
+  });
+});
 
 describe("P177-E · 续训", () => {
   const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");

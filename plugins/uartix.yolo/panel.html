@@ -3,17 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <title>YOLO 训练工作台</title>
-    <!--
-      自足的 HTML（宿主把面板渲染在不透明源的 iframe 里，没有外链可加载）。
-      跟插件进程说话只有一条路：`uartix.call(方法名, 参数)`；反过来是 `uartix.on(事件)`。
-    -->
+    
     <style>
-      /* 配色由宿主桥接：srcdoc 里注入 --uartix-* 与常用别名（--bg/--panel/--line…）。
-         不再写死明暗，也不跟操作系统 prefers-color-scheme；宿主换主题时 iframe 会热更新。 */
+      
       * {
         box-sizing: border-box;
       }
-      /* ---- P176-B1 设计 token：字号 / 间距 / 圆角只在这里定，新组件一律引用 ---- */
+      
       :root {
         --fs-page: 15px;
         --fs-card: 13px;
@@ -125,7 +121,7 @@
         margin: 0 0 8px;
         color: var(--fg);
       }
-      /* ---- 概览：状态条 + KPI 磁贴 ---- */
+      
       .statusstrip {
         display: flex;
         flex-wrap: wrap;
@@ -195,7 +191,7 @@
         margin-left: 3px;
         font-weight: 400;
       }
-      /* ---- 结果页头部与 5 枚 KPI（B3） ---- */
+      
       .reshead {
         display: flex;
         align-items: center;
@@ -238,7 +234,7 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
-      /* ---- 逐类指标条（B3） ---- */
+      
       .pchead,
       .pcrow {
         display: grid;
@@ -300,7 +296,7 @@
           grid-template-columns: 84px 1fr 48px 1fr 48px;
         }
       }
-      /* ---- 部署步骤 / 配方表 / 帮助搜索（B6） ---- */
+      
       .stepper {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -425,7 +421,7 @@
           scroll-behavior: auto !important;
         }
       }
-      /* ---- 实验表 / 对比（B5） ---- */
+      
       .runtable td.name b {
         font-weight: 600;
       }
@@ -515,7 +511,7 @@
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
-      /* ---- 曲线 v2（B4） ---- */
+      
       .chart-host {
         min-width: 0;
       }
@@ -643,7 +639,7 @@
       .memchart {
         margin-top: 6px;
       }
-      /* ---- 结果页：实时 / 评估 分段 ---- */
+      
       .segmented {
         display: inline-flex;
         gap: 2px;
@@ -668,7 +664,7 @@
         color: var(--fg);
         box-shadow: 0 0 0 1px var(--line);
       }
-      /* ---- 帮助抽屉 ---- */
+      
       .drawer {
         position: fixed;
         top: 0;
@@ -758,7 +754,7 @@
         color: var(--fg);
         width: 100%;
       }
-      /* 勾选框不是文本框：给它 100% 宽就是把同行那句说明挤到下一行去（监控页的「自动刷新」就是这么歪的） */
+      
       input[type="checkbox"] {
         width: auto;
         flex: 0 0 auto;
@@ -909,7 +905,7 @@
         border: 1px solid var(--line); border-radius: 8px; background: var(--inset);
       }
       .depenv .hint { flex: 1 1 100%; font-size: 11px; line-height: 1.65; color: var(--dim); white-space: pre-wrap; margin: 0; }
-      /* P177-D：开跑前校验（每条一行，红/黄/绿三档） */
+      
       .depcheck {
         margin-top: 10px; padding-top: 8px;
         border-top: 1px solid var(--line);
@@ -989,13 +985,12 @@
         color: var(--warn);
         font-size: 11px;
       }
-      /* ---- 参数面（由插件把 ultralytics 的参数表喂进来，这里只管摆）---- */
+      
       label.p {
         gap: 4px;
         min-width: 0;
       }
-      /* 标签行：名字 + ? 紧挨着；默认值不再常驻（进 tooltip 与 placeholder），
-         否则长标签会被右上角那枚“包默认 …”挤成两行。 */
+      
       label.p .cap {
         display: flex;
         align-items: center;
@@ -1014,7 +1009,7 @@
       label.p.warn {
         position: relative;
       }
-      /* 强调条画在格子左侧的间隙里：不再用 border+padding 把控件整体推右 8px */
+      
       label.p.warn::before {
         content: "";
         position: absolute;
@@ -1062,7 +1057,7 @@
         outline: 2px solid var(--accent);
         outline-offset: 1px;
       }
-      /* ---- 参数说明浮层（P176-B2） ---- */
+      
       .tip {
         position: fixed;
         z-index: 60;
@@ -1148,14 +1143,14 @@
         border-color: var(--accent);
         color: var(--fg);
       }
-      /* 结果页/导出页那几个内联勾选框仍是横排（旧行为，别被参数字段带偏） */
+      
       label.p.bool {
         flex-direction: row;
         align-items: center;
         gap: 6px;
         min-height: 26px;
       }
-      /* 参数字段里的 bool 是“标签行 + 开关行”：和文本框同高，网格基线不再被 26px 的勾选框拉歪 */
+      
       label.p.bool.field {
         flex-direction: column;
         align-items: stretch;
@@ -1235,7 +1230,7 @@
       .advgrp {
         scroll-margin-top: 72px;
       }
-      /* ---- 训练页：分层参数面（练什么 → 练多久 → 高级折叠 → 常驻动作条）---- */
+      
       .tsec {
         padding: 12px 14px;
       }
@@ -1424,7 +1419,7 @@
         border-radius: 999px;
         color: var(--dim);
       }
-      /* P177-A 资产页：存储条 + 只读台账 */
+      
       .storagebar {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
@@ -1475,7 +1470,7 @@
         flex-wrap: wrap;
         margin-top: 10px;
       }
-      /* P177-C：官方权重清单（弹窗里一行一枚） */
+      
       .mlgrid {
         margin-top: 8px;
       }
@@ -1578,7 +1573,7 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      /* 窄屏把「为什么建议」折进名称下面：只藏掉右侧那列会让人看不懂为什么该删 */
+      
       .assug .sugrow .why-inline {
         display: none;
         font-weight: 400;
@@ -1690,14 +1685,13 @@
           display: block;
         }
       }
-      /* 760 再收一列：引用 run 只是个数，让额外目录与状态有呼吸空间 */
+      
       @media (max-width: 900px) {
         .assetbody table.asset-datasets th:nth-child(6), .assetbody table.asset-datasets td:nth-child(6) {
           display: none;
         }
       }
-      /* 1024 及以下时表格不横滚：先收掉次要列，名称/大小/状态/操作永远留着
-         （断点按**内容区**算：1024 视口减去左侧导航只剩 ~848px，9 列放不下） */
+      
       @media (max-width: 1120px) {
         .assetbody table.asset-datasets th:nth-child(2), .assetbody table.asset-datasets td:nth-child(2),
         .assetbody table.asset-datasets th:nth-child(4), .assetbody table.asset-datasets td:nth-child(4),
@@ -1724,7 +1718,7 @@
         border-radius: 8px;
         cursor: zoom-in;
       }
-      /* 放大看图：面板内铺满，点哪儿都关、Esc 也关 */
+      
       .lb {
         position: fixed;
         inset: 0;
@@ -1736,7 +1730,7 @@
         background: rgba(0, 0, 0, 0.84);
         cursor: zoom-out;
       }
-      /* display:flex 会盖过 [hidden] 的 UA display:none —— 不写这条，空灯箱会把整个面板压暗 */
+      
       .lb[hidden] {
         display: none;
       }
@@ -1747,7 +1741,7 @@
         box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
       }
     
-      /* ================= 外壳：左栏导航 + 内容区 + 可收起日志 ================= */
+      
       .shell {
         flex: 1 1 auto;
         min-height: 0;
@@ -1800,7 +1794,7 @@
       main {
         padding: 10px 12px 14px;
       }
-      /* 双栏：宽屏并排，窄屏自动落回单栏 */
+      
       .cols {
         display: grid;
         grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
@@ -1812,7 +1806,7 @@
         display: flex;
         flex-direction: column;
       }
-      /* 右栏放大：数据页的增强预览是一整张 4×4 拼图，缩在半栏里什么都看不清 */
+      
       .cols.wide-right {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr);
       }
@@ -1831,7 +1825,7 @@
           grid-template-columns: minmax(0, 1fr);
         }
       }
-      /* 日志：默认收成一条，点开才占高度 */
+      
       #logwrap {
         flex: 0 0 auto;
         min-height: 0;
@@ -1931,9 +1925,8 @@
         <button data-tab="deploy" title="部署"><svg class="ic" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 1.9 11.2 4.6v5L7 12.1 2.8 9.6v-5z"/><path d="M7 7.3v4.8M2.8 4.6 7 7.3l4.2-2.7"/></svg><span class="tx">部署</span></button>
       </nav>
 
-
     <main>
-      <!-- ============ 概览 ============ -->
+      
       <section id="tab-overview">
         <div class="statusstrip" id="statusstrip"></div>
         <div class="kpigrid" id="kpigrid"></div>
@@ -1984,7 +1977,7 @@
 
       </section>
 
-      <!-- ============ 数据 ============ -->
+      
       <section id="tab-data" hidden>
         <div class="cols wide-right">
 <div class="col">
@@ -2051,7 +2044,7 @@
 
       </section>
 
-      <!-- ============ 部署 ============ -->
+      
       <section id="tab-deploy" hidden>
         <div class="card" id="targetcard"></div>
         <div class="stepper" id="depstepper" aria-label="部署步骤"></div>
@@ -2161,9 +2154,9 @@
 
       </section>
 
-      <!-- ============ 训练 ============ -->
+      
       <section id="tab-train" hidden>
-        <!-- ⑤ 动作条：滚到哪儿都在手边 -->
+        
         <div class="actionbar" id="trainbar">
           <button class="btn primary" id="train">开始训练</button>
           <button class="btn danger" id="stop" disabled>停止</button>
@@ -2172,7 +2165,7 @@
           <span class="absum" id="absum"></span>
         </div>
 
-        <!-- ① 练什么：任务 / 权重 / 数据集 —— 三个决定，占满整行也不冤 -->
+        
         <div class="cols">
 <div class="col">
 <div class="card tsec">
@@ -2224,7 +2217,7 @@
 
       </section>
 
-      <!-- ============ 结果（曲线 / 指标 / 错例 / 失败，P176-B3） ============ -->
+      
       <section id="tab-result" hidden>
         <div class="reshead">
           <label class="resrun">
@@ -2275,7 +2268,7 @@
         </div>
 </div>
 </div>
-        </div><!-- /curves -->
+        </div>
 
         <div id="result-metrics" hidden>
           <div class="cols">
@@ -2340,14 +2333,14 @@
         </div>
 </div>
 </div>
-        </div><!-- /metrics -->
+        </div>
 
         <div id="result-errors" hidden>
           <div class="card" id="ev_errcard">
             <h2>错例（拿去 X-AnyLabeling 补标）<span class="tag" id="ev_errcount">—</span></h2>
             <div id="ev_errlist"></div>
           </div>
-        </div><!-- /errors -->
+        </div>
 
         <div id="result-failure" hidden>
           <div class="card" id="failcard" hidden>
@@ -2358,10 +2351,10 @@
             <h2>失败与告警</h2>
             <div class="note" id="failnote">当前没有失败的训练任务。任务失败时，这里会给出归类、原因和下一步。</div>
           </div>
-        </div><!-- /failure -->
+        </div>
       </section>
 
-      <!-- ============ 实验 ============ -->
+      
       <section id="tab-runs" hidden>
         <div class="card">
           <h2>
@@ -2397,7 +2390,7 @@
         </div>
       </section>
 
-      <!-- ============ 资产（P177-A：只读骨架） ============ -->
+      
       <section id="tab-assets" hidden>
         <div class="card">
           <div class="sec-h">
@@ -2473,11 +2466,11 @@
       </div>
       <div id="assetdlgmask" class="drawer-mask" hidden></div>
 
-      <!-- 帮助已移到右上角抽屉（P176-B1） -->
+      
       </main>
     </div>
 
-    <!-- ============ 帮助抽屉（P176-B1：从左侧页签移到右上角） ============ -->
+    
     <div id="helpmask" class="drawer-mask" hidden></div>
     <aside id="helpdrawer" class="drawer" hidden role="dialog" aria-label="帮助">
       <div class="drawer-h">
@@ -2574,7 +2567,6 @@
     <div id="runmenu" class="popmenu" role="menu" hidden></div>
 
     <script>
-      /* ---------------- 小工具 ---------------- */
       var $ = function (id) {
         return document.getElementById(id);
       };
@@ -2597,9 +2589,7 @@
       }
       var toast = $("log");
 
-      /* ---------------- 日志 ---------------- */
       var LOG_MAX = 3000;
-      /** 收起状态下那条预览与红点计数：日志窗收起来了，但"出错了"不能一起被收走。 */
       var logErrCount = 0;
       function appendLog(batch) {
         var frag = document.createDocumentFragment();
@@ -2628,7 +2618,6 @@
         appendLog([{ text: "[面板] " + text, stream: stream || "sys" }]);
       }
 
-      /** 从别处跳到某个页签（「下一步」那颗按钮用）。旧名字 monitor/eval 映射到「结果」的两个视图。 */
       function showTab(name) {
         if (name === "eval" || name === "monitor") {
           pendingResultView = name === "eval" ? "metrics" : "curves";
@@ -2638,16 +2627,10 @@
         if (b) b.click();
       }
 
-      /**
-       * 「下一步」——这条存在的全部理由：单人本地训练是**按周回来一次**的活，
-       * 隔一周回来人已经不记得上次走到哪了。所以让面板自己说"现在缺哪一步"，
-       * 而不是让用户在八个页签里回忆流程。判断只用 state() 已经有的东西，不额外探测。
-       */
       function renderNext() {
         var card = $("nextcard");
         var s = st;
         if (!card) return;
-        // 没工作区时，顶部那条横幅已经有「选择工作区…」按钮 —— 这里再教一遍只会自相矛盾
         if (!s || s.needWorkspace) {
           card.hidden = true;
           return;
@@ -2698,7 +2681,6 @@
         };
       }
 
-      /* ---------------- 状态 ---------------- */
       var st = null;
       var running = null;
 
@@ -2712,7 +2694,6 @@
         var eff = cfg.effective || {};
         var env = eff.env || {};
         $("ws").textContent = st.workspace || "（没有工作区）";
-        // 写权限探针：读不受限，所以"绑定改了没重启"时面板看着正常，一按按钮才炸
         var cw = $("cagewarn");
         var cage = st.cage || {};
         if (cw) {
@@ -2726,8 +2707,6 @@
         }
         $("nows").hidden = !st.needWorkspace;
 
-        /* 工作区选错的典型形态：选到了上层目录（那里没有 config.yaml），
-           于是"参数全用内置默认、数据集空的" —— 看起来像插件坏了。这条横幅专治它。 */
         var nc = $("noconf");
         var noConf = !st.needWorkspace && cfg && !cfg.baseFound;
         nc.hidden = !noConf;
@@ -2761,12 +2740,6 @@
           "</span>";
       }
 
-      /**
-       * 部署工具（`$EXT:deploy`）。
-       *
-       * 路径不写死在插件里：用户在插件管理的「目录绑定」里给它绑一次，宿主经 ctx.root("deploy") 递进来。
-       * 没绑就直说"去绑一下"，而不是让这块显示成"坏了"。
-       */
       function renderDeploy() {
         var d = st.deploy || {};
         if (!d.bound) {
@@ -2790,8 +2763,6 @@
           "</span>" +
           (d.error ? "<b>读取失败</b><span>" + esc(d.error) + "</span>" : "");
       }
-
-      /* ---------------- 部署 ---------------- */
 
       var dep = { cfg: "", state: null, model: "", calib: "", last: { step: "", state: "" }, done: {} };
       var depEnv = null;
@@ -2896,7 +2867,6 @@
         });
       }
 
-      /* ---------------- P177-D：目标画像 / 开跑前校验 / 部署包 ---------------- */
       var depCheck = null;
       var depCheckTimer = 0;
       var depCalibOk = false;
@@ -3011,7 +2981,6 @@
         var tool = st2.tool || {};
         var configs = st2.configs || [];
 
-        // 工具
         if (!tool.bound) {
           $("toolkv").innerHTML =
             '<b>状态</b><span><span class="tag warn">还没配置</span></span>' +
@@ -3029,7 +2998,6 @@
             : "工具目录里缺 run.bat 或 deploy_config*.ps1——插件不猜路径，缺什么就说什么。";
         }
 
-        // 模型
         var latest = st2.latest;
         $("modelkv").innerHTML = latest
           ? '<b>最新训练产物</b><span>' + esc(latest.path) + "</span>" +
@@ -3043,7 +3011,6 @@
             }).join("")
           : '<span class="note" style="margin:0">还没交付过模型</span>';
 
-        // 配置列表（B6：配方表）
         if (!configs.length) {
           $("cfglist").innerHTML = '<div class="note" style="margin:0">没有可用的配置文件。</div>';
         } else {
@@ -3076,7 +3043,6 @@
           });
         }
 
-        // 权重 / 校准图：候选由插件扫一份（训练产物 / 交付区 / 模型库 / 各数据集），面板只管摆
         var cands = st2.candidates || [];
         var selM = $("depmodel");
         var optsM = ['<option value="">用最新一次训练（并留一份交付副本）</option>'];
@@ -3135,7 +3101,6 @@
             cfgName: dep.cfg,
             step: step,
             deliver: step !== "validate",
-            // 手填的路径优先（可以来自任何盘）；没填就用下拉里选的那枚
             model: String(($("depmodelpath").value || "").trim() || dep.model || ""),
             calib: dep.calib || "",
           });
@@ -3205,10 +3170,6 @@
         return p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
       }
 
-      /**
-       * 概览：状态条 + KPI（P176-B1）。
-       * 只用 state() 已经有的东西，不额外探测——这一块必须在首屏 0 成本出现。
-       */
       function renderOverview() {
         var s = st || {};
         var d = s.dataset || {};
@@ -3250,7 +3211,6 @@
           .join("");
       }
 
-      /* ---------------- 资产（P177-A 台账 + P177-B 清理/回收站） ---------------- */
       var assets = null;
       var assetView = "datasets";
       var ASSET_VIEWS = ["datasets", "runs", "models", "deployments", "trash"];
@@ -3514,7 +3474,6 @@
         applyAssetFilter();
       }
 
-      /** P177-B 补：表格行多选。勾选框放在名称格里，不新增列（列号被窄屏媒体查询依赖）。 */
       function assetPick(kind, id, p, dsid, name) {
         return '<input type="checkbox" class="assetpick" data-kind="' + esc(kind) + '" data-id="' + esc(id || "") +
           '" data-path="' + esc(p || "") + '" data-dsid="' + esc(dsid || "") + '" data-name="' + esc(name || "") +
@@ -3800,15 +3759,12 @@
         $("runs").innerHTML = h + "</tbody></table></div>";
       }
 
-      /* ---------------- 参数面：表由插件探测，面板只管摆 ---------------- */
       var paramSpec = null;
 
       function pval(it) {
         var t = ((st && st.config || {}).effective || {}).train || {};
         var v = t[it.key];
         if (v === undefined || v === null) {
-          // 勾选框没有"没填"这个状态：基准里没这一项时按**引擎默认**摆，不能一律摆成未勾选
-          // （否则第一次保存就把 amp / plots / val 悄悄关掉了）
           return it.kind === "bool" ? it.engineDefault === true : "";
         }
         if (it.kind === "select" && typeof v === "boolean") return v ? "true" : "false";
@@ -3833,7 +3789,6 @@
         }
         var box = "";
         if (it.kind === "select") {
-          // 空值 = 不覆盖，交回包默认：下拉里要能**看见**这个状态，否则用户以为面板坏了
           var opts = (dft ? '<option value="">— 不覆盖（' + esc(dft) + "）—</option>" : "") + (it.options || []).map(function (o) { return '<option value="' + esc(o) + '">' + esc(o) + "</option>"; }).join("");
           box = '<select id="' + id + '">' + opts + "</select>";
         } else if (it.kind === "int" || it.kind === "num" || it.kind === "frac") {
@@ -3848,10 +3803,8 @@
         return '<label class="p' + (it.wide ? " wide" : "") + (it.warn ? " warn" : "") + '" data-help-key="' + esc(it.key) + '">' + cap + box + warnHtml + "</label>";
       }
 
-      /* ---------------- 训练页的分层：练什么 / 练多久 / 高级折叠 ---------------- */
       var TRAIN_PRIMARY = ["weights", "data"];
       var TRAIN_CORE = ["epochs", "imgsz", "batch", "device", "patience", "name"];
-      /** 只含"留在高级里"的项；折叠标题上那句"改了 N 项"按它数。 */
       var advSpec = [];
 
       function specIndex() {
@@ -3864,7 +3817,6 @@
         return map;
       }
 
-      /* ---------------- 参数说明浮层（P176-B2） ---------------- */
       var tipKey = "";
       var tipPin = false;
       var tipTimer = 0;
@@ -4013,8 +3965,6 @@
           }
         });
       })();
-      // 滚动时跟着锚点走，而不是直接藏掉：编辑器里的滚动条一动，
-      // 用户正看着的说明不该凭空消失。
       function followTip() {
         if (tipPin || !tipAnchor) return;
         var r = tipAnchor.getBoundingClientRect();
@@ -4031,7 +3981,6 @@
         );
       }
 
-      /** 数"表单里与引擎默认不同"的项。空输入 = 交回默认，不算改过。 */
       function countTouched(items) {
         var n = 0;
         for (var i = 0; i < items.length; i++) {
@@ -4106,8 +4055,6 @@
 
         advSpec = [];
         var html = "";
-        // 「基础」这一组把权重/轮次都拿走了，剩下的只有时长上限、workers、project、exist_ok——
-        // 还叫「基础」会让人以为里面是必填项，按它的实际内容改名
         var ADV_TITLE = { base: "训练时长与输出" };
         paramSpec.groups.forEach(function (g) {
           var rest = g.items.filter(function (it) {
@@ -4137,7 +4084,6 @@
         attachPicks();
       }
 
-      /** 表单 → patch。**空输入送 null**（= 撤销这一项的覆盖，交回工作区基准 / 引擎默认）。 */
       function collectTrainPatch() {
         var out = {};
         var groups = (paramSpec && paramSpec.groups) || [];
@@ -4150,7 +4096,6 @@
             if (!el) continue;
             if (it.kind === "bool") {
               var on = !!el.checked;
-              // 基准里根本没这一项、而用户又没动过（= 引擎默认）⇒ 送 null，不把它钉死在覆盖层里
               out[it.key] = base[it.key] === undefined && on === !!it.engineDefault ? null : on;
               continue;
             }
@@ -4282,7 +4227,6 @@
           : '<span class="note">还没有跑过任务</span>';
       }
 
-      /* ---------------- 任务与模型库（P175-W2）---------------- */
       function renderTask() {
         var row = $("taskrow");
         var note = $("tasknote");
@@ -4340,7 +4284,6 @@
             }
           };
         }
-        // 任务与权重不搭时，那颗按钮按下去也是白按：现在就置灰，别等 30 秒后一行 traceback
         $("train").disabled = !!running || !!(b.mismatch && !b.mismatch.ok) || !!(b.resume && !b.resume.ok);
       }
 
@@ -4400,7 +4343,6 @@
           });
       }
 
-      /* ---------------- 官方权重下载（P177-C）---------------- */
       var mldl = null;
       var mlfam = "yolo11";
 
@@ -4499,7 +4441,6 @@
         }
       })();
 
-      /* ---------------- 标注体检与增强预览（P175-W3）---------------- */
       var auditResult = null;
 
       function renderAudit() {
@@ -4559,8 +4500,6 @@
             host.innerHTML = '<span class="note">读图中…</span>';
             try {
               var r = await uartix.call("previewImage", b.file);
-              // 框上的数字是**类别 id**（0 起），不是类别名 —— 引擎画图时用的就是 id。
-              // 不写这句，用户会以为标注整体标错了一位。
               var cls = ((st || {}).dataset || {}).classes || [];
               var legend = cls.length
                 ? '<div class="note" style="margin-top:6px">框上的数字是<b>类别 id（从 0 开始）</b>：' +
@@ -4582,7 +4521,6 @@
         }
       }
 
-      /* ---------------- 实验管理（P175-W7）---------------- */
       var runsList = [];
 
       var runSort = { key: "when", dir: -1 };
@@ -4606,7 +4544,6 @@
           });
       }
 
-      /** 实验页那份列表。名字必须和概览的 `renderRuns` 分开 —— 同名函数后者会静默盖掉前者。 */
             function fillCompareSelects() {
         var names = (runsList || []).map(function (r) { return r.name; });
         if (!names.length) names = ((st && st.runs) || []).map(function (r) { return r.name; });
@@ -4644,7 +4581,6 @@
         if (m) m.hidden = true;
       }
 
-      /* ---------------- P177-E：续训计划 ---------------- */
       async function openResume(run, mode) {
         try {
           var r = await uartix.call("resumePlan", { run: run, mode: mode || "new" });
@@ -4849,7 +4785,6 @@
           });
       }
 
-      /* ---------------- 导出与端侧（P175-W6）---------------- */
       var exState = null;
 
       function exForm() {
@@ -4936,7 +4871,6 @@
           .catch(function () {});
       }
 
-      /* ---------------- 评估与对比（P175-W5）---------------- */
       var evState = null;
 
       function uniq(list) {
@@ -5059,8 +4993,6 @@
         $("ev_when").textContent = res.out ? "结果目录：" + res.out : "";
         $("ev_when").hidden = !res.out;
         var t = res.confTable || [];
-        // 全 0 不是"没跑出来"，是"这个权重在这条阈值下什么都没检出"——两句话得说对，
-        // 否则用户会以为是评估坏了，反复重跑（端到端试用真把它跑成了 0）。
         var mv = keys.map(function (k) { return Number(m[k]); }).filter(isFinite);
         var allZero = mv.length > 0 && mv.every(function (v) { return v === 0; });
         $("ev_conftbl").innerHTML = t.length
@@ -5200,7 +5132,6 @@
         }
       }
 
-      /* ---------------- 监控（P175-W4）---------------- */
       var mon = null;
       var memHist = [];
       var monTimer = 0;
@@ -5240,13 +5171,6 @@
         return out;
       }
 
-      /**
-       * 曲线组件（P176-B4）：手写 SVG，不引依赖。
-       *
-       * 一张图回答一个问题：纵轴有刻度、图例可点、悬停出十字线与数值、
-       * 平滑只影响画出来的线（tooltip 仍读原始值）、最佳轮有标记、下面能展开数字表。
-       * 数据永远来自 results.csv 抽稀后的 rows，不另存。
-       */
       function lineChart(host, spec) {
         if (!host) return;
         host.__spec = spec;
@@ -5509,20 +5433,12 @@
         return Math.abs(n) >= 100 ? n.toFixed(0) : n.toFixed(3);
       }
 
-      /**
-       * 数字格子的兜底。`eval.json` 是盘上的文件（老结果、手改过的结果都可能长得不一样），
-       * 缺一个键就把 `undefined` 印到界面上是最难看的一种故障。
-       */
       function numOrDash(v, d) {
         if (v === "" || v == null) return "—";
         var n = Number(v);
         return isFinite(n) ? n.toFixed(d === undefined ? 4 : d) : "—";
       }
 
-      /**
-       * 导出后测速失败时那句人话。原始报错留在 title 里（要贴给引擎的人看），
-       * 但"没测到速度"和"导出失败"是两件事，不能都只显示一个 python 异常让人猜。
-       */
       function speedReason(err) {
         var e = String(err || "");
         if (/onnxruntime|InferenceSession|ExecutionProvider/i.test(e)) {
@@ -5533,18 +5449,12 @@
         return "导出已成功，只是这一步没测出速度";
       }
 
-      /** 列名在图例里已经带了 `train/` 前缀，注释里只留最后一段。 */
       function shortCol(c) {
         var s = String(c);
         var i = s.lastIndexOf("/");
         return i >= 0 ? s.slice(i + 1) : s;
       }
 
-      /**
-       * 恒为 0 的列不进图：分割 run 的 `train/sem_loss` 整条是 0（那是语义分割任务的损失，
-       * 这代模型没用到），画出来是一条贴着轴的直线 + 一颗"0.000"的图例，把真正在动的
-       * 四条压成一小撮。省略掉，但把省了谁写在图例后面——不藏。
-       */
       function splitFlat(rows, cols) {
         var keep = [];
         var flat = [];
@@ -5562,8 +5472,6 @@
         return keep.length ? { keep: keep, flat: flat } : { keep: cols, flat: [] };
       }
 
-
-      /** 结果页 KPI：轮次 / best mask / 当前 loss / 显存 / ETA（P176-B3）。 */
       function renderResultKpis(m) {
         var host = $("reskpi");
         if (!host) return;
@@ -5742,7 +5650,6 @@
           });
       }
 
-      /* ---------------- 日志过滤 ---------------- */
       var logFilter = "all";
 
       function applyLogFilter() {
@@ -5757,7 +5664,6 @@
         $("logf-err").className = "btn" + (logFilter === "err" ? " primary" : "");
       }
 
-      /** 一块坏了只坏一块：以前任意一个 render 抛错，整页就停在"只有标题"。 */
       function safeRender(name, fn, arg) {
         try {
           fn(arg);
@@ -5779,7 +5685,6 @@
         safeRender("投料口", renderIntake);
         safeRender("体检", renderAudit);
         safeRender("增强预览", renderBatches);
-        // renderJob 先跑：它负责 `running` 这个状态；renderTask 要在它之后才能正确地置灰
         safeRender("任务", renderJob, s.active || (s.jobs && s.jobs.length ? s.jobs[s.jobs.length - 1] : null));
         safeRender("任务状态", renderTask);
         safeRender("模型库", renderModels);
@@ -5798,7 +5703,6 @@
         }
       }
 
-      /* ---------------- 候选清单（权重 / 数据集 / 设备）：插件扫一份，四个页面共用 ---------------- */
       var picksData = null;
 
       function ensureDatalist(id, items) {
@@ -5931,7 +5835,6 @@
         attachPicks();
       }
 
-      /* ---------------- 表单 → patch ---------------- */
       async function save(kind) {
         var patch = {};
         if (kind === "data") {
@@ -5966,8 +5869,6 @@
         }
       }
 
-      /* ---------------- 事件 ---------------- */
-      // 同一个任务的终态可能被宿主发两次；按 id 去重，别让"失败（退出码 1）"刷两行
       var doneShown = {};
       uartix.on("log", function (p) {
         if (p && p.lines) appendLog(p.lines);
@@ -5997,8 +5898,6 @@
             j.label + "：" +
               (j.state === "succeeded" ? "完成" : j.progress && j.progress.phase === "stopped" ? "已停止（你按的停止，不是出错）" : "失败（退出码 " + j.code + "）"),
           );
-          // 「完成但有提醒」必须单独说一句：退出码 0 却构建出 0 个标注框这种事，
-          // 只写在任务卡里会被划过去的日志盖掉。
           if (j.state === "succeeded" && j.warning) sysLog("提醒：" + j.warning, "err");
           refresh(true);
           if (j.kind === "eval") loadMonitor(mon && mon.ok ? mon.run : ""); // 评估不产曲线；刷新 KPI 与失败归类
@@ -6028,7 +5927,6 @@
         loadExport();
       });
 
-      /* ---------------- 结果页：曲线 / 指标 / 错例 / 失败 ---------------- */
       var resultView = "curves";
       var pendingResultView = "";
       var RESULT_VIEWS = ["curves", "metrics", "errors", "failure"];
@@ -6063,7 +5961,6 @@
         }
       })();
 
-      /* ---------------- 按钮 ---------------- */
       var tabs = document.querySelectorAll("nav button[data-tab]");
       for (var i = 0; i < tabs.length; i++) {
         tabs[i].onclick = function () {
@@ -6094,7 +5991,6 @@
           if (name === "runs") loadRuns();
         };
       }
-      /* ---------------- 帮助抽屉（P176-B1） ---------------- */
       function openHelp(id) {
         $("helpdrawer").hidden = false;
         $("helpmask").hidden = false;
@@ -6148,8 +6044,6 @@
       $("reload").onclick = function () {
         refresh(false);
       };
-      /* 选工作区：宿主弹系统对话框由用户选，选完还要在 设置 → 插件管理 → 目录绑定 里确认。
-         这条按钮只是把用户已经选好的东西送到那一步，不是插件自己给自己授权。 */
       $("pickws").onclick = async function () {
         try {
           var r = await uartix.bindRoot("$WS");
@@ -6171,7 +6065,6 @@
       $("train").onclick = function () {
         startJob("train");
       };
-      /* 训练页：折叠组上那句"改了 N 项"跟着输入走；「展开全部」一把拉开（再点收起） */
       $("advall").onclick = function () {
         var ds = document.querySelectorAll("#c_adv .advgrp");
         var anyClosed = false;
@@ -6361,7 +6254,6 @@
           }
           return;
         }
-        // Alt+1..6 跳页签：六块工作面各有一个数字位
         if (e.altKey && !e.ctrlKey && !e.metaKey) {
           var n = Number(e.key);
           if (n >= 1 && n <= 6) {
@@ -6386,7 +6278,6 @@
         if (navigator.clipboard) navigator.clipboard.writeText(t).then(null, function () {});
       };
 
-      /* 面板自己出错时必须看得见：以前这里一抛错就是整页空白，只剩标题。 */
       var panelErrs = [];
       function showPanelErr(msg) {
         var text = String(msg || "");
@@ -6405,8 +6296,6 @@
         showPanelErr("未处理的异步错误：" + ((r && r.message) || r || ""));
       });
 
-      /* ---------------- 启动 ---------------- */
-      // 参数表探测要 6 秒，不能挡首屏：先把工作区读出来，再单独把参数面填上
       refresh(true).then(function () {
         if (st && !st.needWorkspace) loadParams(false);
       });
