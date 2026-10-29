@@ -148,22 +148,26 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
         expect(st.config.baseFound, st.config.baseError).toBe(true);
         expect(st.config.baseSource).toBe("python");
 
-        // 真实配置里的关键值
-        expect(st.config.effective.dataset.classes).toEqual(["1", "2", "3"]);
+        // 真实配置里的关键值。数据集可能被面板覆盖过（.uartix/yolo/config.json），
+        // 所以钉"配置与盘上数据一致"，不钉某次选择留下的具体类别名。
+        expect(Array.isArray(st.config.effective.dataset.classes)).toBe(true);
+        expect(st.config.effective.dataset.classes.length).toBeGreaterThanOrEqual(2);
         expect(st.config.effective.train.imgsz).toBe(640);
         expect(st.config.effective.train.fliplr).toBe(0);
-        expect(st.config.effective.train.workers).toBe(0);
-        expect(String(st.config.effective.dataset.output_dir)).toContain("123lmages_seg");
+        expect(Number.isFinite(Number(st.config.effective.train.workers))).toBe(true);
+        expect(String(st.config.effective.dataset.output_dir).replace(/\\/g, "/")).toContain("datasets/");
 
         // 真实数据集与训练记录
         expect(st.dataset.exists).toBe(true);
         expect(st.dataset.trainCount).toBeGreaterThan(1000);
         expect(st.dataset.valCount).toBeGreaterThan(100);
-        expect(st.dataset.classes).toEqual(["1", "2", "3"]);
+        expect(st.dataset.classes).toEqual(st.config.effective.dataset.classes);
         expect(st.runs.length).toBeGreaterThan(0);
         expect(st.runs.some((r) => r.hasBest)).toBe(true);
-        // 那次 mAP50(M) = 0.995 的训练记录应该还在（README 第七节）
-        const best = st.runs.find((r) => r.name === "yolo11n_seg_640");
+        // 至少有一条读出了真实 mAP 的训练记录（run 名会随实验变，不钉死）
+        const best = st.runs
+          .filter((r) => r.metrics && Number.isFinite(Number(r.metrics.mAP50M)))
+          .sort((a, b) => Number(b.metrics.mAP50M) - Number(a.metrics.mAP50M))[0];
         expect(best, JSON.stringify(st.runs.map((r) => r.name))).toBeTruthy();
         expect(Number(best.metrics.mAP50M)).toBeGreaterThan(0.9);
 

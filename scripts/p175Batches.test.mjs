@@ -66,7 +66,7 @@ const LEDGER = [
     done: true,
     evidence: [
       { file: "plugins/uartix.yolo/main.mjs", mustMatch: ["function parseResultsCsv", "function classifyFailure", "function memInfo", "function monitor", "results\\.csv"] },
-      { file: "plugins/uartix.yolo/panel.html", mustMatch: ["tab-monitor", "sparkline", "只看错误"] },
+      { file: "plugins/uartix.yolo/panel.html", mustMatch: ["chartloss", "chartmap", "只看错误"] },
       { file: "scripts/yoloPlugin.test.mjs", mustMatch: ["失败归类", "OOM"] },
       { file: "scripts/yoloRealWorkspace.test.mjs", mustMatch: ["panel.train.monitor"] },
     ],
@@ -109,7 +109,7 @@ const LEDGER = [
     done: true,
     evidence: [
       { file: "plugins/uartix.yolo/README.md", mustMatch: ["`0\\.3\\.0`", "runner/train_job.py", "deployStart"] },
-      { file: "plugins/uartix.yolo/panel.html", mustMatch: ["tab-help", "为什么这次要重新批准"] },
+      { file: "plugins/uartix.yolo/panel.html", mustMatch: ["helpdrawer", "help-perms"] },
       { file: "scripts/yoloPlugin.test.mjs", mustMatch: ["每块页签都有 section", "包里的每个代码文件都发得出去"] },
     ],
   },
