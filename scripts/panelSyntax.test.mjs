@@ -352,3 +352,54 @@ describe("P176-B6 · 部署流程与收尾", () => {
     expect(html).toContain("aria-pressed");
   });
 });
+
+/* ============================================================================
+   P177-B · 资产页的清理 / 回收站 / 审计形状
+   ----------------------------------------------------------------------------
+   这一页最容易"看起来像能用"：按钮都在，但背后什么都不做。所以判据盯着
+   五个子页、二次确认输入、只读文案、以及"不代删外部目录"这句话必须留在界面上。
+   ============================================================================ */
+
+describe("P177-B · 资产页清理与回收站", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("资产页有五个子页，一个都不少", () => {
+    const subs = [...html.matchAll(/data-asset="([a-z]+)"/g)].map((m) => m[1]);
+    expect(subs).toEqual(["datasets", "runs", "models", "deployments", "trash"]);
+  });
+
+  it("清理流程：建议 → 勾选 → 预演 → 输入「清理」才移入回收站", () => {
+    expect(html).toContain('id="assuglist"');
+    expect(html).toContain('data-sug="');
+    expect(html).toContain('id="assugpreview"');
+    expect(html).toContain("function previewAsset(");
+    expect(html).toContain("输入「清理」确认");
+    expect(html).toContain('action: "preview"');
+    expect(html).toContain('action: "trash"');
+    expect(html).toContain("连同引用一起再预演");
+  });
+
+  it("回收站：恢复 / 永久删除 / 清空都要走二次确认", () => {
+    expect(html).toContain('action: "restore"');
+    expect(html).toContain('action: "purge"');
+    expect(html).toContain('action: "purgeAll"');
+    expect(html).toContain("输入「清空」确认");
+    expect(html).toContain("输入「删除」确认");
+  });
+
+  it("审计与只读：最近审计可见；只读时写按钮禁用且界面说清楚", () => {
+    expect(html).toContain('id="assetaudit"');
+    expect(html).toContain("a.audit || []");
+    expect(html).toContain("只读（当前进程写不了）");
+    expect(html).toContain("var ro = !!a.readOnly");
+    expect(html).toContain('(ro ? " disabled" : "")');
+  });
+
+  it("外部缓存只列体积 + 复制清单，不代删", () => {
+    expect(html).toContain('id="assetextcard"');
+    expect(html).toContain("复制清理清单");
+    expect(html).toContain("插件不删外部目录");
+    expect(html).not.toMatch(/assetext[^"]*"删除/);
+  });
+});

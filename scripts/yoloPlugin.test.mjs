@@ -338,13 +338,14 @@ function assertUntouched(before, ws, what) {
   }
 }
 
-function startPlugin(pluginDir, ws, roots) {
-  const bootPath = path.join(dir, `boot-${path.basename(ws)}.mjs`);
+function startPlugin(pluginDir, ws, roots, opts) {
+  const bootPath = path.join(dir, `boot-${path.basename(ws || "nows")}.mjs`);
   writeFileSync(bootPath, BOOTSTRAP_SOURCE, "utf8");
   const args = [PERM, "--allow-fs-read=*"];
   // 没工作区时**不给**这个参数：`--allow-fs-write=`（空值）会让 node 直接起不来，
   // 而那条用例要验的是"没有工作区时插件怎么答"，不是"参数拼错时 node 怎么崩"
-  if (ws) args.push(`--allow-fs-write=${ws}`);
+  // opts.readOnly：传工作区但**不批写权限**，验只读模式（P177-B）。
+  if (ws && !(opts && opts.readOnly)) args.push(`--allow-fs-write=${ws}`);
   args.push("--allow-child-process", bootPath, pluginDir);
   const child = spawn(process.execPath, args, { cwd: pluginDir, windowsHide: true });
 
@@ -2107,6 +2108,190 @@ describe("P177-A · 资产台账、run 状态与路径记忆", () => {
       expect(r2.duplicate, "同一份权重重复交付应该识别出来").toBe(true);
       expect(r2.path).toBe(r.path);
       expect(readdirSync(path.join(ws, "models", "delivered")).filter((f) => f.endsWith(".pt")).length).toBe(1);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+
+/* ============================ P177-B · 清理、引用与回收站 ============================ */
+
+describe("P177-B · 引用阻止、级联回收与恢复", () => {
+  function seedRun(ws, name, epochs, rows) {
+    const d = path.join(ws, "runs", name);
+    mkdirSync(path.join(d, "weights"), { recursive: true });
+    writeFileSync(
+      path.join(d, "args.yaml"),
+      [
+        "task: segment",
+        `model: ${fwd(ws)}/models/base.pt`,
+        `data: ${fwd(ws)}/datasets/x/data.yaml`,
+        `epochs: ${epochs}`,
+        "imgsz: 512",
+        "batch: 8",
+        `project: ${fwd(ws)}/runs`,
+        `name: ${name}`,
+      ].join("\n"),
+      "utf8",
+    );
+    const csv = ["epoch,time,metrics/mAP50(B),metrics/mAP50-95(M)"];
+    for (let i = 1; i <= rows; i++) csv.push(`${i},${i * 12.5},0.5,0.4`);
+    writeFileSync(path.join(d, "results.csv"), csv.join("\n") + "\n", "utf8");
+    writeFileSync(path.join(d, "weights", "best.pt"), "best", "utf8");
+    writeFileSync(path.join(d, "weights", "last.pt"), "last", "utf8");
+    return d;
+  }
+
+  it("被 run 引用的数据集默认阻止；勾选连带才一起进回收站；恢复回原路径；原始标注一个字节不变", async () => {
+    const ws = makeWorkspace("clean-ref");
+    seedRun(ws, "exp1", 10, 2);
+    mkdirSync(path.join(ws, "datasets", "x", "origin"), { recursive: true });
+    writeFileSync(path.join(ws, "datasets", "x", "origin", "raw.txt"), "legacy", "utf8");
+    const annoPath = path.join(ws, "annotations", "第二批数字", "c0.json");
+    const annoBefore = readFileSync(annoPath);
+    const annoStat = statSync(annoPath).mtimeMs;
+
+    const pluginDir = copyPlugin("clean-ref");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const a = await p.call("panel.train.assetsState", true);
+      const ds = Object.values(a.datasets).find((x) => x.name === "x");
+      expect(ds, "数据集没进台账").toBeTruthy();
+      expect(ds.extras.map((x) => x.name)).toContain("origin");
+
+      // 1) 非级联：被 exp1 引用 → 预演就阻止，什么都不动
+      const pv = await p.call("panel.train.assetsCleanup", { action: "preview", items: [{ kind: "dataset", id: ds.id }] });
+      expect(pv.ok).toBe(false);
+      expect(pv.blocked.length).toBe(1);
+      expect(pv.blocked[0].why).toContain("exp1");
+      expect(pv.actions.length).toBe(0);
+
+      const refused = await p.call("panel.train.assetsCleanup", {
+        action: "trash",
+        items: [{ kind: "dataset", id: ds.id }],
+        confirm: "清理",
+      });
+      expect(refused.ok, "有引用时不能真删").toBe(false);
+      expect(existsSync(path.join(ws, "datasets", "x", "data.yaml"))).toBe(true);
+
+      // 2) 级联：数据集 + run 一起进回收站
+      const moved = await p.call("panel.train.assetsCleanup", {
+        action: "trash",
+        items: [{ kind: "dataset", id: ds.id }],
+        cascade: true,
+        confirm: "清理",
+      });
+      expect(moved.ok).toBe(true);
+      expect(moved.moved.length).toBe(2);
+      expect(moved.moved.map((x) => x.kind).sort()).toEqual(["dataset", "run"]);
+      expect(existsSync(path.join(ws, "datasets", "x"))).toBe(false);
+      expect(existsSync(path.join(ws, "runs", "exp1"))).toBe(false);
+      expect(moved.state.trash.length).toBe(2);
+      // 原始素材不在级联范围：内容与 mtime 都不许动
+      expect(readFileSync(annoPath).equals(annoBefore)).toBe(true);
+      expect(statSync(annoPath).mtimeMs).toBe(annoStat);
+
+      const runEntry = moved.state.trash.find((x) => x.kind === "run");
+      const restored = await p.call("panel.train.assetsCleanup", { action: "restore", id: runEntry.id });
+      expect(restored.ok).toBe(true);
+      expect(existsSync(path.join(ws, "runs", "exp1", "results.csv")), "恢复要回原路径").toBe(true);
+      expect(restored.state.trash.length, "恢复后回收站少一条").toBe(1);
+
+      // 3) 永久删除要二次确认；确认后审计留痕
+      const dsEntry = restored.state.trash[0];
+      await expect(
+        p.call("panel.train.assetsCleanup", { action: "purge", id: dsEntry.id, confirm: "随便" }),
+      ).rejects.toThrow();
+      const purged = await p.call("panel.train.assetsCleanup", { action: "purge", id: dsEntry.id, confirm: "删除" });
+      expect(purged.ok).toBe(true);
+      expect(purged.state.trash.length).toBe(0);
+      expect(existsSync(path.join(ws, "datasets", "x")), "永久删除后不该复活").toBe(false);
+
+      const audit = await p.call("panel.train.assetsCleanup", { action: "audit", limit: 20 });
+      const acts = audit.entries.map((x) => x.action);
+      expect(acts).toContain("trash");
+      expect(acts).toContain("restore");
+      expect(acts).toContain("purge");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
+
+  it("清理建议：同 SHA 只留一条模型两个副本；短 run 与 legacy extras 只提示不预选；清空要输入「清空」", async () => {
+    const ws = makeWorkspace("clean-sug");
+    seedRun(ws, "short", 300, 2);
+    mkdirSync(path.join(ws, "models", "delivered"), { recursive: true });
+    writeFileSync(path.join(ws, "models", "delivered", "good-best.pt"), "same-weight", "utf8");
+    writeFileSync(path.join(ws, "models", "delivered", "怪名--best.pt"), "same-weight", "utf8");
+    mkdirSync(path.join(ws, "datasets", "x", "origin_json_backup"), { recursive: true });
+    writeFileSync(path.join(ws, "datasets", "x", "origin_json_backup", "b.json"), "{}", "utf8");
+
+    const pluginDir = copyPlugin("clean-sug");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.assetsCleanup", { action: "suggest" });
+      const kinds = s.suggestions.map((x) => x.kind);
+      expect(kinds).toContain("model");
+      expect(kinds).toContain("run");
+      expect(kinds).toContain("extra");
+      const dup = s.suggestions.find((x) => x.kind === "model");
+      expect(dup.reason).toContain("SHA");
+      expect(s.suggestions.every((x) => x.preset === false), "默认不预选任何一条").toBe(true);
+      const short = s.suggestions.find((x) => x.kind === "run");
+      expect(short.reason).toContain("2/300");
+      expect(short.reason).toContain("不能断言中断");
+
+      // 删一条重复副本：另一条不受影响
+      const a = await p.call("panel.train.assetsState", true);
+      const m = Object.values(a.models).find((x) => x.paths.length === 2);
+      expect(m).toBeTruthy();
+      const victim = m.paths.find((x) => x.includes("怪名"));
+      const t = await p.call("panel.train.assetsCleanup", {
+        action: "trash",
+        items: [{ kind: "model", path: victim }],
+        confirm: "清理",
+      });
+      expect(t.ok).toBe(true);
+      expect(existsSync(victim)).toBe(false);
+      const other = m.paths.find((x) => x !== victim);
+      expect(existsSync(other), "同 SHA 的另一份副本不能被连带删掉").toBe(true);
+
+      // 清空：确认文本不对就拒绝，对了才清
+      await expect(p.call("panel.train.assetsCleanup", { action: "purgeAll", confirm: "删除" })).rejects.toThrow();
+      const all = await p.call("panel.train.assetsCleanup", { action: "purgeAll", confirm: "清空" });
+      expect(all.ok).toBe(true);
+      expect(all.purged).toBe(1);
+      expect(all.state.trash.length).toBe(0);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
+
+  it("只读模式：能读建议与回收站，清理/恢复/永久删除一律拒绝", async () => {
+    const ws = makeWorkspace("clean-ro");
+    seedRun(ws, "exp1", 10, 2);
+    const pluginDir = copyPlugin("clean-ro");
+    fakeRunner(pluginDir);
+    // 传工作区但不给 --allow-fs-write：模拟宿主没批写权限
+    const p = startPlugin(pluginDir, ws, {}, { readOnly: true });
+    try {
+      await p.ready;
+      const a = await p.call("panel.train.assetsState", true);
+      expect(a.readOnly).toBe(true);
+      const s = await p.call("panel.train.assetsCleanup", { action: "suggest" });
+      expect(s.ok).toBe(true);
+      await expect(
+        p.call("panel.train.assetsCleanup", { action: "trash", items: [{ kind: "run", id: "exp1" }], confirm: "清理" }),
+      ).rejects.toThrow(/只读/);
+      await expect(p.call("panel.train.assetsCleanup", { action: "purgeAll", confirm: "清空" })).rejects.toThrow(/只读/);
+      expect(existsSync(path.join(ws, "runs", "exp1", "results.csv")), "只读模式不能动文件").toBe(true);
     } finally {
       p.child.stdin.end();
       await p.done;

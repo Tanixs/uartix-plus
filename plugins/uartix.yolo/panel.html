@@ -1456,15 +1456,198 @@
       .assetbody .empty {
         padding: 16px 2px;
       }
-      /* 760 宽时表格不横滚：先收掉次要列，名称/大小/状态/操作永远留着 */
+      .assetbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 10px;
+      }
+      .assetbar input[type="search"] {
+        flex: 1 1 220px;
+        max-width: 340px;
+      }
+      .assug {
+        margin-top: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--r-md);
+        background: var(--insert, transparent);
+        padding: 8px 10px;
+      }
+      .assug > summary {
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--fg);
+        list-style: none;
+      }
+      .assug > summary::-webkit-details-marker {
+        display: none;
+      }
+      .assug > summary::before {
+        content: "▸";
+        display: inline-block;
+        width: 14px;
+        color: var(--dim);
+      }
+      .assug[open] > summary::before {
+        content: "▾";
+      }
+      .assug .sugrow {
+        display: grid;
+        grid-template-columns: 18px minmax(120px, 1fr) minmax(180px, 2fr) 70px;
+        gap: 8px;
+        align-items: center;
+        padding: 5px 0;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+      }
+      .assug .sugrow:first-of-type {
+        border-top: 0;
+      }
+      .assug .sugrow .why {
+        color: var(--dim);
+        line-height: 1.35;
+      }
+      .assug .sugrow .sz {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: var(--dim);
+      }
+      .assug .sugrow .nm {
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      /* 窄屏把「为什么建议」折进名称下面：只藏掉右侧那列会让人看不懂为什么该删 */
+      .assug .sugrow .why-inline {
+        display: none;
+        font-weight: 400;
+        color: var(--dim);
+        white-space: normal;
+        line-height: 1.35;
+        margin-top: 2px;
+      }
+      .assug .sugacts {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+        padding: 6px 0 2px;
+      }
+      .assug .sugacts .spacer {
+        flex: 1;
+      }
+      .assetrowacts {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+      }
+      .assetrowacts .btn {
+        padding: 1px 7px;
+        font-size: 10px;
+      }
+      .assetpath {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        justify-content: space-between;
+        max-width: 320px;
+      }
+      .assetpath span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .assetdlg {
+        position: fixed;
+        z-index: 80;
+        left: 50%;
+        top: 8vh;
+        transform: translateX(-50%);
+        width: min(680px, calc(100vw - 40px));
+        max-height: 78vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--panel);
+        color: var(--fg);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+      }
+      .assetdlg[hidden] {
+        display: none;
+      }
+      .assetdlg .drawer-h {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      .assetdlg .drawer-h .drawer-t {
+        font-weight: 600;
+        flex: 1;
+      }
+      .assetdlg .drawer-b {
+        padding: 10px 12px;
+        overflow: auto;
+        font-size: 11.5px;
+      }
+      .assetdlg .planrow {
+        display: grid;
+        grid-template-columns: minmax(90px, 1fr) 90px 80px;
+        gap: 8px;
+        padding: 4px 0;
+        border-top: 1px solid var(--line);
+      }
+      .assetdlg .planrow:first-child {
+        border-top: 0;
+      }
+      .assetdlg .blocked {
+        color: var(--bad);
+        line-height: 1.45;
+      }
+      .assetdlg .confirmrow {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+      .assetdlg .confirmrow input {
+        flex: 1 1 160px;
+      }
       @media (max-width: 900px) {
+        .assug .sugrow {
+          grid-template-columns: 18px minmax(90px, 1fr) 66px;
+        }
+        .assug .sugrow .why {
+          display: none;
+        }
+        .assug .sugrow .why-inline {
+          display: block;
+        }
+      }
+      /* 760 再收一列：引用 run 只是个数，让额外目录与状态有呼吸空间 */
+      @media (max-width: 900px) {
+        .assetbody table.asset-datasets th:nth-child(6), .assetbody table.asset-datasets td:nth-child(6) {
+          display: none;
+        }
+      }
+      /* 1024 及以下时表格不横滚：先收掉次要列，名称/大小/状态/操作永远留着
+         （断点按**内容区**算：1024 视口减去左侧导航只剩 ~848px，9 列放不下） */
+      @media (max-width: 1120px) {
         .assetbody table.asset-datasets th:nth-child(2), .assetbody table.asset-datasets td:nth-child(2),
         .assetbody table.asset-datasets th:nth-child(4), .assetbody table.asset-datasets td:nth-child(4),
-        .assetbody table.asset-datasets th:nth-child(7), .assetbody table.asset-datasets td:nth-child(7),
         .assetbody table.asset-runs th:nth-child(5), .assetbody table.asset-runs td:nth-child(5),
         .assetbody table.asset-runs th:nth-child(6), .assetbody table.asset-runs td:nth-child(6),
         .assetbody table.asset-models th:nth-child(2), .assetbody table.asset-models td:nth-child(2),
         .assetbody table.asset-models th:nth-child(4), .assetbody table.asset-models td:nth-child(4),
+        .assetbody table.asset-models th:nth-child(5), .assetbody table.asset-models td:nth-child(5),
         .assetbody table.asset-models th:nth-child(7), .assetbody table.asset-models td:nth-child(7),
         .assetbody table.asset-deployments th:nth-child(2), .assetbody table.asset-deployments td:nth-child(2),
         .assetbody table.asset-deployments th:nth-child(4), .assetbody table.asset-deployments td:nth-child(4),
@@ -2160,6 +2343,21 @@
             </span>
           </div>
           <div class="storagebar" id="assetstorage"></div>
+          <details class="assug" id="assetcards" open>
+            <summary id="assugsum">清理建议</summary>
+            <div id="assuglist"></div>
+            <div class="sugacts">
+              <button class="btn" id="assugall">全选</button>
+              <button class="btn primary" id="assugpreview">预演选中</button>
+              <span class="note" id="assugnote" style="margin:0"></span>
+            </div>
+          </details>
+          <div class="assetbar">
+            <input id="assetsearch" type="search" placeholder="搜名称 / ID / 状态…" aria-label="搜索资产" />
+            <label class="p bool" style="font-size:11px; white-space:nowrap"><input type="checkbox" id="assetonly" /> 只看可清理</label>
+            <span class="spacer"></span>
+            <span class="note" id="assetextsum" style="margin:0"></span>
+          </div>
           <div class="segmented" id="assetseg" role="tablist" aria-label="资产视图">
             <button data-asset="datasets" class="on" role="tab" aria-selected="true">数据集</button>
             <button data-asset="runs" role="tab" aria-selected="false">训练产物</button>
@@ -2168,9 +2366,19 @@
             <button data-asset="trash" role="tab" aria-selected="false">回收站</button>
           </div>
           <div id="assetbody" class="assetbody"><p class="note">打开这一页时扫描资产。</p></div>
-          <p class="note">这一版是只读台账：清理 / 回收站恢复 / 官方权重下载 / 部署包登记在后续批次开放。<button class="linkbtn" data-help="assets">为什么?</button></p>
+          <div id="assetextcard"></div>
+          <div id="assetaudit"></div>
+          <p class="note">删除一律先进回收站；永久删除只发生在「清空回收站」。原始 <code>annotations/</code>、用户脚本与外部部署目录永远不在清理范围。<button class="linkbtn" data-help="assets">为什么?</button></p>
         </div>
       </section>
+      <div id="assetdlg" class="assetdlg" hidden role="dialog" aria-modal="true" aria-label="清理预览">
+        <div class="drawer-h">
+          <span class="drawer-t" id="assetdlgt">清理预览</span>
+          <button class="btn" id="assetdlgclose" title="关闭（Esc）">关闭</button>
+        </div>
+        <div class="drawer-b" id="assetdlgbody"></div>
+      </div>
+      <div id="assetdlgmask" class="drawer-mask" hidden></div>
 
       <!-- 帮助已移到右上角抽屉（P176-B1） -->
       </main>
@@ -2832,10 +3040,12 @@
           .join("");
       }
 
-      /* ---------------- 资产（P177-A：只读台账） ---------------- */
+      /* ---------------- 资产（P177-A 台账 + P177-B 清理/回收站） ---------------- */
       var assets = null;
       var assetView = "datasets";
       var ASSET_VIEWS = ["datasets", "runs", "models", "deployments", "trash"];
+      var assetPending = null;
+      var assetCleanSet = {};
 
       function assetTag(status, label) {
         var cls = status === "succeeded" || status === "ready" ? "ok" : status === "failed" || status === "interrupted" ? "bad" : status === "running" ? "warn" : "warn";
@@ -2848,6 +3058,28 @@
         return parts.slice(-2).join("/") || s;
       }
 
+      function assetBtn(act, attrs, label, disabled) {
+        var s = '<button class="btn" data-aa="' + esc(act) + '"';
+        for (var k in attrs || {}) if (Object.prototype.hasOwnProperty.call(attrs, k)) s += " data-" + k + '="' + esc(attrs[k]) + '"';
+        s += disabled ? " disabled" : "";
+        return s + ">" + esc(label) + "</button>";
+      }
+
+      function assetItemFrom(el) {
+        var o = { kind: el.getAttribute("data-kind") || "" };
+        if (el.getAttribute("data-id")) o.id = el.getAttribute("data-id");
+        if (el.getAttribute("data-path")) o.path = el.getAttribute("data-path");
+        if (el.getAttribute("data-name")) o.name = el.getAttribute("data-name");
+        if (el.getAttribute("data-dsid")) o.datasetId = el.getAttribute("data-dsid");
+        return o;
+      }
+
+      function assetMarkClean(kind, id, pathIn) {
+        var p = String(pathIn || "").replace(/\\/g, "/").toLowerCase();
+        if (p) assetCleanSet[p] = true;
+        if (id) assetCleanSet[kind + ":" + id] = true;
+      }
+
       function renderAssetStorage(a) {
         var s = (a && a.storage) || {};
         var cells = [
@@ -2857,6 +3089,7 @@
           ["部署包", s.deployments],
           ["回收站", s.trash],
         ];
+        if (s.external) cells.push(["外部缓存", s.external]);
         var html = cells
           .map(function (x) {
             return '<div class="sbox"><b>' + esc(fmtBytes(Number(x[1]) || 0)) + "</b><span>" + esc(x[0]) + "</span></div>";
@@ -2866,78 +3099,322 @@
         $("assetstorage").innerHTML = html;
       }
 
+      function renderAssetSuggestions(a) {
+        var list = a.suggestions || [];
+        var ro = !!a.readOnly;
+        $("assugsum").textContent = "清理建议 " + list.length + " 项" + (list.length ? " · 预计可释放 " + fmtBytes(list.reduce(function (n, x) { return n + (Number(x.bytes) || 0); }, 0)) : "");
+        if (!list.length) {
+          $("assuglist").innerHTML = '<p class="note" style="margin:6px 0 2px">没发现重复权重、短 run、孤儿结果或 legacy extras。</p>';
+          $("assugpreview").disabled = true;
+          $("assugall").disabled = true;
+          return;
+        }
+        $("assugpreview").disabled = ro;
+        $("assugall").disabled = ro;
+        $("assuglist").innerHTML = list
+          .map(function (x, i) {
+            assetMarkClean(x.kind, x.id, x.path);
+            var risk = x.risk === "safe" ? '<span class="tag ok">较安全</span>' : x.risk === "warn" ? '<span class="tag warn">需确认</span>' : '<span class="tag">提示</span>';
+            return '<div class="sugrow" data-search="' + esc((x.name + " " + x.kind + " " + x.reason + " " + (x.path || "")).toLowerCase()) + '">' +
+              '<input type="checkbox" data-sug="' + i + '"' + (ro ? " disabled" : "") + " />" +
+              '<span class="nm" title="' + esc(x.path || "") + '">' + esc(x.name || x.id) + " " + risk + '<span class="why-inline">' + esc(x.reason || "") + "</span></span>" +
+              '<span class="why">' + esc(x.reason || "") + "</span>" +
+              '<span class="sz">' + esc(fmtBytes(x.bytes)) + " " + assetBtn("sug-preview", { idx: String(i) }, "预演", ro) + "</span></div>";
+          })
+          .join("");
+      }
+
+      function renderAssetExternal(a) {
+        var host = $("assetextcard");
+        var sum = $("assetextsum");
+        var ext = a.external;
+        if (!host) return;
+        if (!ext || !ext.bound) {
+          host.innerHTML = "";
+          if (sum) sum.textContent = "";
+          return;
+        }
+        if (sum) sum.textContent = "外部缓存 " + fmtBytes(ext.bytes) + "（只读）";
+        host.innerHTML = '<div class="card" style="margin-top:10px"><h2>外部部署缓存 <span class="tag">只读</span></h2>' +
+          '<div class="kv">' + (ext.items || []).map(function (x) {
+            return "<b>" + esc(x.name) + "</b><span>" + esc(fmtBytes(x.bytes)) + " · " + esc(x.path) + "</span>";
+          }).join("") + "</div>" +
+          '<div class="row" style="margin-top:8px"><button class="btn" id="assetextcopy">复制清理清单</button>' +
+          '<span class="note" style="margin:0">插件不删外部目录；把清单贴到 PowerShell 里自己确认。</span></div></div>';
+        var b = $("assetextcopy");
+        if (b) b.onclick = function () {
+          var text = (ext.cleanList || []).join("\r\n");
+          if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { sysLog("外部缓存清理清单已复制"); }, function () { sysLog(text); });
+          else sysLog(text);
+        };
+      }
+
+      function renderAssetAudit(a) {
+        var host = $("assetaudit");
+        if (!host) return;
+        if (assetView !== "trash") {
+          host.innerHTML = "";
+          return;
+        }
+        var list = a.audit || [];
+        host.innerHTML = '<div class="card" style="margin-top:10px"><h2>最近审计 <span class="tag">本地</span></h2>' +
+          (list.length
+            ? '<div class="kv">' + list.slice(0, 10).map(function (x) {
+                return "<b>" + esc(x.action) + "</b><span>" + esc((x.kind || "") + " · " + (x.id || "") + " · " + (x.at || "")) + "</span>";
+              }).join("") + "</div>"
+            : '<p class="note" style="margin:0">还没有清理 / 恢复记录。</p>') + "</div>";
+      }
+
       function renderAssets() {
         var a = assets || {};
         var body = $("assetbody");
         if (!body) return;
-        $("assetstag").textContent = a.readOnly ? "只读（当前进程写不了）" : "只读台账";
+        $("assetstag").textContent = a.readOnly ? "只读（当前进程写不了）" : "资产台账";
         $("assetstag").className = "tag" + (a.readOnly ? " warn" : "");
+        assetCleanSet = {};
         renderAssetStorage(a);
+        renderAssetSuggestions(a);
+        renderAssetExternal(a);
+        renderAssetAudit(a);
+        var ro = !!a.readOnly;
         var rows = [];
         var head = "";
         if (assetView === "datasets") {
-          head = "<tr><th>数据集</th><th>ID</th><th>训练 / 验证</th><th>类别</th><th>大小</th><th>引用 run</th><th>额外目录</th><th>状态</th></tr>";
+          head = "<tr><th>数据集</th><th>ID</th><th>训练 / 验证</th><th>类别</th><th>大小</th><th>引用 run</th><th>额外目录</th><th>状态</th><th>操作</th></tr>";
           rows = Object.values(a.datasets || {}).map(function (d) {
-            var extras = (d.extras || []).map(function (x) { return esc(x.name) + " " + esc(fmtBytes(x.bytes)); }).join("<br>");
-            return "<tr><td class=\"name\" title=\"" + esc(d.dir) + "\">" + esc(d.name) + "</td>" +
-              "<td class=\"mono\">" + esc(d.id) + "</td>" +
-              "<td class=\"num\">" + esc(d.splits ? d.splits.train : 0) + " / " + esc(d.splits ? d.splits.val : 0) + "</td>" +
-              "<td class=\"num\">" + esc((d.classes || []).join(" / ") || "—") + "</td>" +
-              "<td class=\"num\">" + esc(fmtBytes(d.bytes)) + "</td>" +
-              "<td class=\"num\" title=\"" + esc((d.runIds || []).join("\\n")) + "\">" + esc((d.runIds || []).length) + "</td>" +
-              "<td class=\"sub\">" + (extras || "—") + "</td>" +
-              "<td>" + assetTag(d.status === "ready" ? "succeeded" : "incomplete", d.status === "ready" ? "就绪" : "不完整") + "</td></tr>";
+            var extras = (d.extras || []).map(function (x) {
+              return '<span class="assetpath"><span title="' + esc(x.name) + '">' + esc(x.name) + " " + esc(fmtBytes(x.bytes)) + "</span>" +
+                assetBtn("trash-one", { kind: "extra", name: x.name, dsid: d.id, id: d.id + "::" + x.name }, "回收", ro) + "</span>";
+            }).join("");
+            var clean = assetCleanSet["dataset:" + d.id] || (d.extras || []).some(function (x) { return assetCleanSet["extra:" + d.id + "::" + x.name]; });
+            return '<tr data-search="' + esc((d.name + " " + d.id + " " + (d.status || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(d.dir) + '">' + esc(d.name) + "</td>" +
+              '<td class="mono">' + esc(d.id) + "</td>" +
+              '<td class="num">' + esc(d.splits ? d.splits.train : 0) + " / " + esc(d.splits ? d.splits.val : 0) + "</td>" +
+              '<td class="num">' + esc((d.classes || []).join(" / ") || "—") + "</td>" +
+              '<td class="num">' + esc(fmtBytes(d.bytes)) + "</td>" +
+              '<td class="num" title="' + esc((d.runIds || []).join("\\n")) + '">' + esc((d.runIds || []).length) + "</td>" +
+              '<td class="sub">' + (extras || "—") + "</td>" +
+              "<td>" + assetTag(d.status === "ready" ? "succeeded" : "incomplete", d.status === "ready" ? "就绪" : "不完整") + "</td>" +
+              '<td><div class="assetrowacts">' + assetBtn("trash-one", { kind: "dataset", id: d.id, name: d.name }, "回收", ro) + "</div></td></tr>";
           });
           if (!rows.length) body.innerHTML = '<p class="note empty">还没有构建过数据集（datasets/*/data.yaml）。</p>';
         } else if (assetView === "runs") {
-          head = "<tr><th>run</th><th>状态</th><th>轮次</th><th>大小</th><th>数据集</th><th>best</th><th>部署包</th></tr>";
+          head = "<tr><th>run</th><th>状态</th><th>轮次</th><th>大小</th><th>数据集</th><th>best</th><th>部署包</th><th>操作</th></tr>";
           rows = Object.values(a.runs || {}).map(function (r) {
-            return "<tr><td class=\"name\" title=\"" + esc(r.dir) + "\">" + esc(r.name) + "</td>" +
+            var clean = assetCleanSet["run:" + r.id];
+            return '<tr data-search="' + esc((r.name + " " + (r.statusLabel || "") + " " + (r.statusWhy || "") + " " + (r.datasetName || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(r.dir) + '">' + esc(r.name) + "</td>" +
               "<td>" + assetTag(r.status, r.statusLabel) + (r.statusWhy ? '<div class="sub" title="' + esc(r.statusWhy) + '">' + esc(r.statusWhy.slice(0, 46)) + (r.statusWhy.length > 46 ? "…" : "") + "</div>" : "") + "</td>" +
-              "<td class=\"num\">" + esc(r.epochs) + (r.argsEpochs ? " / " + esc(r.argsEpochs) : "") + "</td>" +
-              "<td class=\"num\">" + esc(fmtBytes(r.bytes)) + "</td>" +
+              '<td class="num">' + esc(r.epochs) + (r.argsEpochs ? " / " + esc(r.argsEpochs) : "") + "</td>" +
+              '<td class="num">' + esc(fmtBytes(r.bytes)) + "</td>" +
               "<td>" + esc(r.datasetName || "—") + "</td>" +
-              "<td class=\"mono\" title=\"" + esc(r.best || "") + "\">" + esc(r.best ? assetShort(r.best) : "—") + "</td>" +
-              "<td class=\"num\">" + esc((r.deploymentIds || []).length) + "</td></tr>";
+              '<td class="mono" title="' + esc(r.best || "") + '">' + esc(r.best ? assetShort(r.best) : "—") + "</td>" +
+              '<td class="num">' + esc((r.deploymentIds || []).length) + "</td>" +
+              '<td><div class="assetrowacts">' + assetBtn("trash-one", { kind: "run", id: r.id, name: r.name }, "回收", ro) + "</div></td></tr>";
           });
           if (!rows.length) body.innerHTML = '<p class="note empty">runs/ 里还没有带 results.csv 的训练记录。</p>';
         } else if (assetView === "models") {
-          head = "<tr><th>权重</th><th>SHA256</th><th>任务 / 类别</th><th>来源</th><th>引用</th><th>大小</th><th>副本</th></tr>";
+          head = "<tr><th>权重</th><th>SHA256</th><th>任务 / 类别</th><th>来源</th><th>引用</th><th>大小</th><th>副本 / 回收</th></tr>";
           rows = Object.values(a.models || {}).map(function (m) {
-            var p0 = (m.paths || [])[0] || "";
+            var paths = (m.paths || []).map(function (p) {
+              return '<span class="assetpath"><span title="' + esc(p) + '">' + esc(assetShort(p)) + "</span>" +
+                assetBtn("trash-one", { kind: "model", path: p, id: m.id, name: p.split(/[\\/]/).pop() }, "回收", ro) + "</span>";
+            }).join("");
             var refs = ((m.refs && m.refs.runs) || []).length + " run / " + ((m.refs && m.refs.deployments) || []).length + " 部署";
-            return "<tr><td class=\"name\" title=\"" + esc((m.paths || []).join("\\n")) + "\">" + esc(assetShort(p0)) + "</td>" +
-              "<td class=\"mono\" title=\"" + esc(m.sha256 || "") + "\">" + esc((m.sha256 || "").slice(0, 12) || "—") + "</td>" +
+            var clean = (m.paths || []).some(function (p) { return assetCleanSet[String(p).toLowerCase()]; });
+            return '<tr data-search="' + esc(((m.paths || []).join(" ") + " " + (m.task || "") + " " + (m.origin || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc((m.paths || []).join("\\n")) + '">' + esc(m.paths && m.paths[0] ? assetShort(m.paths[0]) : "—") + "</td>" +
+              '<td class="mono" title="' + esc(m.sha256 || "") + '">' + esc((m.sha256 || "").slice(0, 12) || "—") + "</td>" +
               "<td>" + esc(m.task || "—") + " / " + esc(m.nc == null ? "—" : m.nc) + "</td>" +
               "<td>" + esc(m.origin || "—") + (m.sourceRun ? '<div class="sub">' + esc(m.sourceRun) + "</div>" : "") + "</td>" +
-              "<td class=\"num\">" + esc(refs) + "</td>" +
-              "<td class=\"num\">" + esc(fmtBytes(m.bytes)) + "</td>" +
-              "<td class=\"num\">" + esc((m.paths || []).length) + "</td></tr>";
+              '<td class="num">' + esc(refs) + "</td>" +
+              '<td class="num">' + esc(fmtBytes(m.bytes)) + "</td>" +
+              "<td>" + paths + "</td></tr>";
           });
           if (!rows.length) body.innerHTML = '<p class="note empty">models/ 里还没有 .pt。</p>';
         } else if (assetView === "deployments") {
-          head = "<tr><th>部署包</th><th>目标</th><th>状态</th><th>模型</th><th>产物</th><th>大小</th><th>时间</th></tr>";
+          head = "<tr><th>部署包</th><th>目标</th><th>状态</th><th>模型</th><th>产物</th><th>大小</th><th>时间</th><th>操作</th></tr>";
           rows = Object.values(a.deployments || {}).map(function (d) {
-            return "<tr><td class=\"name\" title=\"" + esc(d.dir || "") + "\">" + esc(d.name || d.id) + "</td>" +
+            var clean = assetCleanSet["deployment:" + d.id];
+            return '<tr data-search="' + esc(((d.name || d.id) + " " + (d.target || "") + " " + (d.status || "")).toLowerCase()) + '" data-clean="' + (clean ? "1" : "0") + '"><td class="name" title="' + esc(d.dir || "") + '">' + esc(d.name || d.id) + "</td>" +
               "<td>" + esc(d.target || "—") + "</td>" +
               "<td>" + assetTag(d.status || "incomplete", d.status || "未登记") + "</td>" +
-              "<td class=\"mono\">" + esc(d.modelId || "—") + "</td>" +
-              "<td class=\"num\">" + esc((d.artifacts || []).length) + "</td>" +
-              "<td class=\"num\">" + esc(fmtBytes(d.bytes)) + "</td>" +
-              "<td class=\"num\">" + esc(fmtShortWhen(d.createdAt ? Date.parse(d.createdAt) : 0)) + "</td></tr>";
+              '<td class="mono">' + esc(d.modelId || "—") + "</td>" +
+              '<td class="num">' + esc((d.artifacts || []).length) + "</td>" +
+              '<td class="num">' + esc(fmtBytes(d.bytes)) + "</td>" +
+              '<td class="num">' + esc(fmtShortWhen(d.createdAt ? Date.parse(d.createdAt) : 0)) + "</td>" +
+              '<td><div class="assetrowacts">' + assetBtn("trash-one", { kind: "deployment", id: d.id, name: d.name || d.id }, "回收副本", ro) + "</div></td></tr>";
           });
           if (!rows.length) body.innerHTML = '<p class="note empty">还没有在 train_runs/deploy/ 登记过部署包（P177-D 开放登记）。</p>';
         } else {
-          head = "<tr><th>回收站条目</th><th>大小</th><th>时间</th><th>说明</th></tr>";
+          head = "<tr><th>回收站条目</th><th>大小</th><th>时间</th><th>原路径 / 说明</th><th>操作</th></tr>";
           rows = (a.trash || []).map(function (t) {
-            return "<tr><td class=\"name\" title=\"" + esc(t.dir || "") + "\">" + esc(t.id) + "</td>" +
-              "<td class=\"num\">" + esc(fmtBytes(t.bytes)) + "</td>" +
-              "<td class=\"num\">" + esc(fmtShortWhen(t.at)) + "</td>" +
-              "<td class=\"sub\">恢复 / 清空在 P177-B 开放</td></tr>";
+            return '<tr data-search="' + esc(((t.id || "") + " " + (t.kind || "") + " " + (t.originalPath || "") + " " + (t.reason || "")).toLowerCase()) + '" data-clean="1"><td class="name" title="' + esc(t.dir || "") + '">' + esc(t.name || t.id) + '<div class="sub">' + esc(t.kind || "") + "</div></td>" +
+              '<td class="num">' + esc(fmtBytes(t.bytes)) + "</td>" +
+              '<td class="num">' + esc(fmtShortWhen(t.at)) + "</td>" +
+              '<td class="sub" title="' + esc(t.originalPath || "") + '">' + esc(assetShort(t.originalPath || "") || "—") + "<br>" + esc(t.reason || "") + "</td>" +
+              '<td><div class="assetrowacts">' + assetBtn("restore", { id: t.id }, "恢复", ro) + assetBtn("purge", { id: t.id }, "永久删除", ro) + "</div></td></tr>";
           });
           if (!rows.length) body.innerHTML = '<p class="note empty">回收站是空的。</p>';
         }
         if (rows.length) body.innerHTML = '<div class="tablewrap"><table class="asset-tbl asset-' + assetView + '"><thead>' + head + "</thead><tbody>" + rows.join("") + "</tbody></table></div>";
+        if ($("assettrashbar")) $("assettrashbar").remove();
+        if (assetView === "trash") {
+          var bar = document.createElement("div");
+          bar.id = "assettrashbar";
+          bar.className = "row";
+          bar.style.cssText = "margin-top:8px;flex-wrap:wrap";
+          bar.innerHTML = '<button class="btn danger" id="assetpurgeall"' + (ro ? " disabled" : "") + '>清空回收站（需输入「清空」）</button><span class="note" style="margin:0">默认不自动清空；永久删除后不可恢复。</span>';
+          body.parentNode.insertBefore(bar, body.nextSibling);
+          if ($("assetpurgeall")) $("assetpurgeall").onclick = function () {
+            openAssetDialog("清空回收站", '<p class="blocked">这会永久删除回收站里的全部条目，不能恢复。</p><div class="confirmrow"><span>输入「清空」确认：</span><input id="assetconfirm" /><button class="btn danger" id="assetok">永久删除</button></div>');
+            $("assetok").onclick = async function () {
+              if ($("assetconfirm").value.trim() !== "清空") { sysLog("确认文本不对：要输入「清空」"); return; }
+              await runAssetCall({ action: "purgeAll", confirm: "清空" }, "回收站已清空");
+            };
+          };
+        }
+        bindAssetActions();
+        applyAssetFilter();
+      }
+
+      function bindAssetActions() {
+        var bs = document.querySelectorAll("#tab-assets [data-aa]");
+        for (var i = 0; i < bs.length; i++) {
+          bs[i].onclick = function () {
+            var act = this.getAttribute("data-aa");
+            if (act === "trash-one") return previewAsset([assetItemFrom(this)], false);
+            if (act === "sug-preview") {
+              var idx = Number(this.getAttribute("data-idx"));
+              var s = (assets && assets.suggestions) || [];
+              if (s[idx]) return previewAsset([s[idx]], false);
+              return;
+            }
+            if (act === "restore") return doRestore(this.getAttribute("data-id"));
+            if (act === "purge") return confirmPurge(this.getAttribute("data-id"));
+          };
+        }
+        var sug = document.querySelectorAll("#assuglist input[data-sug]");
+        for (var j = 0; j < sug.length; j++) sug[j].onchange = updateAssetSugNote;
+      }
+
+      function selectedSuggestions() {
+        var out = [];
+        var list = (assets && assets.suggestions) || [];
+        var bs = document.querySelectorAll("#assuglist input[data-sug]:checked");
+        for (var i = 0; i < bs.length; i++) {
+          var idx = Number(bs[i].getAttribute("data-sug"));
+          if (list[idx]) out.push(list[idx]);
+        }
+        return out;
+      }
+
+      function updateAssetSugNote() {
+        var n = selectedSuggestions().length;
+        var el = $("assugnote");
+        if (el) el.textContent = n ? "已选 " + n + " 项" : "勾选后一起预演；不会自动删";
+      }
+
+      function applyAssetFilter() {
+        var q = String(($("assetsearch") && $("assetsearch").value) || "").trim().toLowerCase();
+        var only = !!($("assetonly") && $("assetonly").checked);
+        var rows = document.querySelectorAll("#assetbody tbody tr");
+        for (var i = 0; i < rows.length; i++) {
+          var text = String(rows[i].getAttribute("data-search") || "").toLowerCase();
+          var clean = rows[i].getAttribute("data-clean") === "1";
+          rows[i].hidden = (!!q && text.indexOf(q) < 0) || (only && !clean);
+        }
+        var srows = document.querySelectorAll("#assuglist .sugrow");
+        for (var j = 0; j < srows.length; j++) {
+          var st = String(srows[j].getAttribute("data-search") || "").toLowerCase();
+          srows[j].hidden = !!q && st.indexOf(q) < 0;
+        }
+      }
+
+      function openAssetDialog(title, bodyHtml) {
+        $("assetdlgt").textContent = title;
+        $("assetdlgbody").innerHTML = bodyHtml;
+        $("assetdlg").hidden = false;
+        $("assetdlgmask").hidden = false;
+      }
+      function closeAssetDialog() {
+        $("assetdlg").hidden = true;
+        $("assetdlgmask").hidden = true;
+        assetPending = null;
+      }
+
+      async function previewAsset(items, cascade) {
+        if (!items || !items.length) { sysLog("先勾选要清理的条目"); return; }
+        try {
+          var p = await uartix.call("assetsCleanup", { action: "preview", items: items, cascade: !!cascade });
+          assetPending = { items: items, cascade: !!cascade, plan: p };
+          renderAssetPlan();
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+        }
+      }
+
+      function renderAssetPlan() {
+        var p = assetPending && assetPending.plan;
+        if (!p) return;
+        var html = "";
+        if ((p.actions || []).length) {
+          html += '<div class="note" style="margin:0 0 6px">共 ' + p.actions.length + " 项 · " + esc(fmtBytes(p.totalBytes)) + "，会移动到 <code>.uartix/yolo/trash/</code>：</div>";
+          html += (p.actions || []).map(function (x) {
+            return '<div class="planrow"><span class="nm" title="' + esc(x.path) + '">' + esc(assetShort(x.path)) + '</span><span class="sz">' + esc(fmtBytes(x.bytes)) + '</span><span class="sub">' + esc(x.kind) + (x.cascade ? " · 连带" : "") + "</span></div>";
+          }).join("");
+        }
+        if ((p.blocked || []).length) {
+          html += '<p class="blocked"><b>有 ' + p.blocked.length + " 项被引用阻止：</b></p><ul class=\"hints\">" +
+            p.blocked.map(function (x) { return "<li>" + esc(x.why) + "</li>"; }).join("") + "</ul>";
+          if (!assetPending.cascade) {
+            html += '<div class="row" style="margin-top:8px"><button class="btn" id="assetcascade">连同引用一起再预演</button><span class="note" style="margin:0">会连带把引用的 run / 部署包副本一起放进回收站。</span></div>';
+          }
+        }
+        if (!(p.blocked || []).length) {
+          html += '<div class="confirmrow"><span>输入「清理」确认：</span><input id="assetconfirm" /><button class="btn danger" id="assetok">移入回收站</button></div>';
+        }
+        openAssetDialog("清理预览", html);
+        if ($("assetcascade")) $("assetcascade").onclick = function () { previewAsset(assetPending.items, true); };
+        if ($("assetok")) $("assetok").onclick = async function () {
+          if ($("assetconfirm").value.trim() !== "清理") { sysLog("确认文本不对：要输入「清理」"); return; }
+          await runAssetCall({ action: "trash", items: assetPending.items, cascade: assetPending.cascade, confirm: "清理" }, "已移入回收站");
+        };
+      }
+
+      async function runAssetCall(req, okMsg) {
+        try {
+          var r = await uartix.call("assetsCleanup", req);
+          if (r && r.ok === false) {
+            sysLog("[错误] " + (r.error || "清理没有执行"));
+            if (r.actions) { assetPending = { items: (assetPending && assetPending.items) || [], cascade: !!(assetPending && assetPending.cascade), plan: r }; renderAssetPlan(); }
+            return r;
+          }
+          closeAssetDialog();
+          if (r && r.state) { assets = r.state; renderAssets(); }
+          else await loadAssets(true);
+          sysLog(okMsg);
+          return r;
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+        }
+      }
+
+      async function doRestore(id) {
+        try {
+          var r = await uartix.call("assetsCleanup", { action: "restore", id: id });
+          closeAssetDialog();
+          if (r && r.state) { assets = r.state; renderAssets(); }
+          sysLog("已恢复：" + ((r && r.restored) || id));
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+        }
+      }
+
+      function confirmPurge(id) {
+        openAssetDialog("永久删除", '<p class="blocked">这一条会从回收站永久删除，不能恢复。</p><div class="confirmrow"><span>输入「删除」确认：</span><input id="assetconfirm" /><button class="btn danger" id="assetok">永久删除</button></div>');
+        $("assetok").onclick = function () {
+          if ($("assetconfirm").value.trim() !== "删除") { sysLog("确认文本不对：要输入「删除」"); return; }
+          runAssetCall({ action: "purge", id: id, confirm: "删除" }, "已永久删除");
+        };
       }
 
       async function loadAssets(force) {
@@ -2969,6 +3446,25 @@
         }
       })();
       if ($("assetsrefresh")) $("assetsrefresh").onclick = function () { loadAssets(true); };
+      if ($("assetsearch")) $("assetsearch").oninput = applyAssetFilter;
+      if ($("assetonly")) $("assetonly").onchange = applyAssetFilter;
+      if ($("assugall")) $("assugall").onclick = function () {
+        var bs = document.querySelectorAll("#assuglist input[data-sug]");
+        var any = false;
+        for (var i = 0; i < bs.length; i++) if (!bs[i].checked) any = true;
+        for (var j = 0; j < bs.length; j++) bs[j].checked = any;
+        updateAssetSugNote();
+      };
+      if ($("assugpreview")) $("assugpreview").onclick = function () {
+        var sel = selectedSuggestions();
+        if (!sel.length) { sysLog("先勾选清理建议"); return; }
+        previewAsset(sel, false);
+      };
+      if ($("assetdlgclose")) $("assetdlgclose").onclick = closeAssetDialog;
+      if ($("assetdlgmask")) $("assetdlgmask").onclick = closeAssetDialog;
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && $("assetdlg") && !$("assetdlg").hidden) closeAssetDialog();
+      });
 
       function renderRuns() {
         var runs = st.runs || [];
