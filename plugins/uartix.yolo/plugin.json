@@ -2,7 +2,7 @@
   "format": "uartix-plugin",
   "schemaVersion": 3,
   "id": "uartix.yolo",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "name": "YOLO 训练工作台",
   "description": "数据集拆分 → 训练 → 评估 → 部署收在一个面板里：读工作区的 config.yaml 当基准，参数面直接由装好的 ultralytics 给出（不做一份会过期的白名单），每次实验在 train_runs/ 落一份完整 yaml——面板能点的，命令行也跑得起来。",
   "author": "uartix",

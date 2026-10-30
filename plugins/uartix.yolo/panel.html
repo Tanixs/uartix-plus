@@ -2804,8 +2804,10 @@ var res = (e.resumable || [])[0];
 if (res) {
 box.innerHTML = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">' +
 '<div class="note" style="margin:0 0 6px">上次没装完（停在' + esc(res.phase || "中途") + "）：" + esc(String(res.error || "").slice(0, 90)) + "</div>" +
-'<button class="btn primary" id="envres"' + (ro ? " disabled" : "") + ">继续安装" + (res.hasVenv ? "（跳过已装好的部分）" : "") + "</button></div>";
+'<button class="btn primary" id="envres"' + (ro ? " disabled" : "") + ">继续安装" + (res.hasVenv ? "（跳过已装好的部分）" : "") + "</button>" +
+(ro ? "" : '<button class="btn" id="envpur">清理全部…</button>') + "</div>";
 if ($("envres")) $("envres").onclick = function () { startEnvInstall(res.id.indexOf("cpu") === 0 ? "cpu" : ""); };
+if ($("envpur")) $("envpur").onclick = function () { envPurgeArm = true; renderEnvInstall(); };
 return;
 }
 var rec = e.recommended || {};
