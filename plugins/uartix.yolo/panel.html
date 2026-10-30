@@ -1912,6 +1912,12 @@
     </div>
 
     <div id="noconf" class="banner" hidden></div>
+    <div id="nopy" class="banner" hidden>
+      <b>还没有可用的 Python</b>——训练 / 评估 / 导出都要它。
+      <button class="btn primary" id="nopyin">一键安装运行环境</button>
+      <button class="btn" id="nopycpu">装 CPU 版</button>
+      <span style="opacity: .65">装在 <code>.uartix/yolo/envs/</code>，不碰你已有的 conda，也不要管理员权限。</span>
+    </div>
     <div id="cagewarn" class="banner" hidden></div>
 
     <div class="shell">
@@ -2490,6 +2496,17 @@
             <li><b>写只在这几处</b>：<code>.uartix/</code>、<code>annotations/</code>、<code>datasets/</code>、<code>runs/</code>、<code>logs/</code>、<code>models/</code>、<code>train_runs/</code>。</li>
           </ul>
         </div>
+        <div class="card" id="help-env">
+          <h2>运行环境（Python / torch）</h2>
+          <ul class="hints">
+            <li><b>它装在哪</b>：<code>.uartix/yolo/envs/&lt;画像&gt;/venv</code>，连 uv 安装器、缓存、托管 Python 都在 <code>envs/</code> 下面。不进 PATH、不写系统目录、不要管理员，也不碰你的 conda / <code>_env.bat</code>。</li>
+            <li><b>什么时候用它</b>：优先级是 <code>config 里写死的 env.python</code> &gt; 插件环境 &gt; <code>_env.bat</code> &gt; 系统 Python。你手写的那条永远最大；不想让插件环境抢，点「用回工作区 Python」，它只是不被选中，不会被删。</li>
+            <li><b>版本是钉死的</b>：Python 3.12.16 / torch 2.12.0 / torchvision 0.27.0 / ultralytics 8.4.128（装不上按 8.4.121 → 8.4.102 退）。GPU 档按驱动选 CUDA 12.6 或 13.0，太老的卡（Pascal/Volta）强制 12.6，没卡就 CPU。</li>
+            <li><b>镜像优先</b>：uv 与 Python 走中科大 → 南大 → GitHub；torch 轮子走阿里云 → 南大 → 官方；PyPI 走清华 → 阿里 → 官方。配置里开着代理会先探活再用（代理没起来就直连）。</li>
+            <li><b>断了能续</b>：进度行会写停在哪一步；再点「继续安装」只补没完成的部分（venv / torch / ultralytics 按磁盘上的文件判断），不会重下 4 GB。</li>
+            <li><b>怎么拆</b>：「清理全部…」把环境 + uv + 缓存整体移入回收站（不是直接删），你原来的 Python 一个字节都不动；想彻底删再去资产页的回收站。</li>
+          </ul>
+        </div>
         <div class="card" id="help-models">
           <h2>模型、任务与数据</h2>
           <ul class="hints">
@@ -2536,7 +2553,7 @@
         </div>
         <div class="card" id="help-perms">
           <h2>权限与批准</h2>
-          <p class="note">写权限只有那七枚目录，越界会被内核直接拒绝。0.5.2 起多了 <b>联网</b>（github.com / objects.githubusercontent.com / raw.githubusercontent.com），只用于下载官方权重；权限面变了，所以更新后要重新批准一次，批准卡上会多三行「联网 …」。宿主目前不按域名拦截，白名单由下载器自己做。安装、启用、发布这三件事始终由你点。</p>
+          <p class="note">写权限只有那七枚目录，越界会被内核直接拒绝。<b>联网</b>共 10 个域名：GitHub 三枚用于下载官方权重，另外七枚是装环境用的镜像与 PyPI（含清华、阿里云、南大、中科大、download.pytorch.org）。<b>可执行</b>是 <code>python</code> / <code>uv</code> / <code>powershell</code>——最后一个只用来解压 uv 的 zip，不执行任何脚本。权限面变了，更新后要重新批准一次；批准卡会逐条列出这些行。宿主不按域名拦截，白名单由下载器自己做。安装、启用、发布这三件事始终由你点。</p>
         </div>
         <div class="card" id="help-assets">
           <h2>资产与清理</h2>
@@ -2724,6 +2741,23 @@ pyTag.className = "tag " + (py.ok ? "ok" : "bad");
 pyTag.textContent = py.ok ? "python " + (py.version || "").replace(/^Python\s*/i, "") : "python 未就绪";
 pyTag.title = (py.path || "") + (py.source ? "（来自 " + py.source + "）" : "");
 
+/* 首次引导：有工作区但没有能用的 Python。装完 state 会刷新，这条自己消失。 */
+var nopy = $("nopy");
+if (nopy) {
+  var pyRo = !!(envInfo && envInfo.readOnly);
+  nopy.hidden = !!st.needWorkspace || py.ok;
+  if (!nopy.hidden) {
+    if ($("nopyin")) {
+      $("nopyin").disabled = pyRo;
+      $("nopyin").onclick = function () { startEnvInstall(""); };
+    }
+    if ($("nopycpu")) {
+      $("nopycpu").disabled = pyRo;
+      $("nopycpu").onclick = function () { startEnvInstall("cpu"); };
+    }
+  }
+}
+
 $("envkv").innerHTML =
 '<b>python</b><span>' +
 esc(py.path || "(未找到)") +
@@ -2748,8 +2782,17 @@ var envInfo = null;
    iframe 只给了 allow-scripts，原生弹窗会被静默吞掉，按下去像没反应。 */
 var envPurgeArm = false;
 
-async function envPurge() {
-envPurgeArm = false;
+/* 切换"用不用插件环境"。传空串 = 用回工作区/系统的 Python（后端把偏好开关一起关掉）。 */
+async function envPrefer(id) {
+try {
+await uartix.call("envSetDefault", { id: id || "" });
+sysLog(id ? "已切到插件环境" : "已切回工作区 Python（插件环境保留，随时能再启用）");
+await loadEnv();
+refresh(true);
+} catch (e) { sysLog("[错误] " + String((e && e.message) || e)); }
+}
+
+async function envPurge() {envPurgeArm = false;
 try {
 var r = await uartix.call("envPurgeAll", { reason: "面板清理全部插件环境" });
 sysLog("已清理 " + (r.removed || 0) + " 项（约 " + fmtBytes(r.freed || 0) + "），都进了回收站，可恢复");
@@ -2786,10 +2829,14 @@ if ($("envpury")) $("envpury").onclick = envPurge;
 if ($("envpurc")) $("envpurc").onclick = function () { envPurgeArm = false; renderEnvInstall(); };
 return;
 }
-box.innerHTML = '<div class="note" style="margin:8px 0 0"><span class="tag ok">插件环境</span> ' + esc(cur.label || cur.id) +
+var off = e.preferPluginEnv === false;
+box.innerHTML = '<div class="note" style="margin:8px 0 0"><span class="tag ' + (off ? "" : "ok") + '">插件环境</span> ' + esc(cur.label || cur.id) +
 " · torch " + esc((cur.packages && cur.packages.torch) || "?") + " · " + esc(fmtBytes(cur.bytes || 0)) +
-(ro ? "" : ' <button class="btn" id="envpur">清理全部…</button>') + "</div>";
+(off ? "（已停用，用的是 " + esc(((e.current || {}).source) || "工作区 Python") + "）" : "") +
+(ro ? "" : off ? ' <button class="btn" id="envon">启用它</button>' : ' <button class="btn" id="envoff">用回工作区 Python</button> <button class="btn" id="envpur">清理全部…</button>') + "</div>";
 if ($("envpur")) $("envpur").onclick = function () { envPurgeArm = true; renderEnvInstall(); };
+if ($("envoff")) $("envoff").onclick = function () { envPrefer(""); };
+if ($("envon")) $("envon").onclick = function () { envPrefer(cur.id); };
 return;
 }
 if (e.lock) {

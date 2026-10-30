@@ -1726,6 +1726,8 @@ function envList() {
 /** 选中的插件环境：prefs 指定优先；否则取第一份 ready 的。 */
 function selectedEnv() {
   const prefs = readPrefs();
+  // 用户把开关拨到"不用插件环境"时，装了也不该抢 —— 这条是给"我本来就有 conda"的人留的退路。
+  if (prefs.runtime && prefs.runtime.autoPreferPluginEnv === false) return null;
   const all = envList();
   const want = String((prefs.runtime && prefs.runtime.selected) || "");
   const hit = all.find((e) => e.id === want && e.status === "ready" && e.exists);
@@ -1771,6 +1773,8 @@ async function envState() {
     selected: sel ? sel.id : "",
     current: py,
     usingPluginEnv: !!(sel && py.path && py.path.toLowerCase() === String(sel.python && sel.python.exe || "").toLowerCase()),
+    // 用户有没有把"用插件环境"这个开关关掉（关掉后装了也不抢）
+    preferPluginEnv: !(prefs.runtime && prefs.runtime.autoPreferPluginEnv === false),
     installLocation: String((prefs.runtime && prefs.runtime.location) || "workspace"),
     locationOptions: [
       { id: "workspace", label: "工作区内（随工作区删除，多工作区各一份）" },
@@ -2379,7 +2383,7 @@ async function envInstall(req) {
     };
     writeJsonAtomic(path.join(envRoot, "env.json"), meta);
     const prefs = readPrefs();
-    prefs.runtime = { ...(prefs.runtime || {}), selected: id, location: "workspace" };
+    prefs.runtime = { ...(prefs.runtime || {}), selected: id, location: "workspace", autoPreferPluginEnv: true };
     savePrefs(prefs);
     pyCache = { path: py, ok: true, version: `Python ${ENV_SPEC.python}`, source: `plugin-env:${id}`, error: "" };
     job.progress.phase = "done";
@@ -2439,7 +2443,9 @@ async function envSetDefault(req) {
     if (!hit) throw new Error(`没有这份可用的环境：${id}`);
   }
   const prefs = readPrefs();
-  prefs.runtime = { ...(prefs.runtime || {}), selected: id, autoPreferPluginEnv: true };
+  // id 为空 = "用回工作区/系统的 Python"：不是"没有默认"，而是**明确关掉偏好开关**，
+  // 否则 selectedEnv() 会退回到"第一份 ready"，用户点了没反应。
+  prefs.runtime = { ...(prefs.runtime || {}), selected: id, autoPreferPluginEnv: !!id };
   savePrefs(prefs);
   pyCache = { path: "", ok: false, version: "", source: "", error: "" };
   return { ok: true, selected: id, state: await envState() };

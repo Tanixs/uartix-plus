@@ -551,3 +551,39 @@ describe("P177-E 补 · 批量与保留策略", () => {
     expect(html).toContain("a.duplicates.groups.length");
   });
 });
+
+/* ============================================================================
+   P178-D：首次引导与环境开关
+   ----------------------------------------------------------------------------
+   没有 Python 时面板得自己说出来，而不是让人点了训练才看到报错；
+   「用回工作区 Python」必须真的能关掉偏好开关（后端 `autoPreferPluginEnv`），
+   否则按钮点下去像没反应 —— 这条判据盯的就是"按钮有没有接上那个开关"。
+   ============================================================================ */
+
+describe("P178-D · 首次引导与环境开关", () => {
+  const YOLO_PANEL = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
+  const html = readFileSync(YOLO_PANEL, "utf8");
+
+  it("没有 Python 时有引导条，两个按钮都在，且会置灰只读", () => {
+    expect(html).toContain('id="nopy"');
+    expect(html).toContain('id="nopyin"');
+    expect(html).toContain('id="nopycpu"');
+    expect(html, "引导条要按 needWorkspace / python.ok 显隐").toMatch(/nopy\.hidden\s*=\s*[^;]*py\.ok/);
+    expect(html, "只读时按钮要置灰").toMatch(/\$\("nopyin"\)\.disabled\s*= pyRo/);
+  });
+
+  it("环境卡有「用回工作区 Python」，走的是 envSetDefault 的空 id", () => {
+    expect(html).toContain("用回工作区 Python");
+    expect(html, "要有 envPrefer 这个入口").toMatch(/function envPrefer\(id\)/);
+    expect(html, "关掉的时候要传空 id").toMatch(/envPrefer\(""\)/);
+    expect(html, "能再启用").toMatch(/envPrefer\(cur\.id\)/);
+    expect(html, "要读 preferPluginEnv 才能显示成已停用").toContain("preferPluginEnv === false");
+  });
+
+  it("帮助里有「运行环境」分节，且写清了不碰 conda 与怎么拆", () => {
+    expect(html).toContain('id="help-env"');
+    expect(html).toContain("运行环境（Python / torch）");
+    expect(html, "要写明优先级").toContain("插件环境 &gt;");
+    expect(html, "要写明删除去回收站").toContain("回收站");
+  });
+});

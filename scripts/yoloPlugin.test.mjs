@@ -3248,3 +3248,50 @@ describe("P178-C · 拆除与体检", () => {
     }
   }, 120_000);
 });
+
+/* ============================ P178-D · 环境开关 ============================ */
+
+/** 造一份已经装好的环境（ready）：真 python 的 junction + site-packages 文件。 */
+function seedReadyEnv(ws, id) {
+  const root = seedHalfInstalled(ws, id);
+  const meta = JSON.parse(readFileSync(envMetaPath(ws, id), "utf8"));
+  writeFileSync(
+    envMetaPath(ws, id),
+    JSON.stringify({ ...meta, status: "ready", phase: "ready", packages: { torch: "2.12.0", torchvision: "0.27.0", ultralytics: "8.4.128" } }),
+    "utf8",
+  );
+  return root;
+}
+
+describe("P178-D · 环境开关（用回自己的 Python）", () => {
+  it("关掉之后装了也不抢；再启用又回来（不是删除，只是不被选中）", async () => {
+    if (!HAS_PY) return;
+    const ws = makeWorkspace("env-switch");
+    const pluginDir = copyPlugin("env-switch");
+    fakeRunner(pluginDir);
+    seedReadyEnv(ws, "cpu-py312");
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const a = await p.call("panel.train.envState");
+      expect(a.selected).toBe("cpu-py312");
+      expect(a.preferPluginEnv).toBe(true);
+      expect(String((a.current || {}).source || "")).toContain("plugin-env");
+
+      const off = await p.call("panel.train.envSetDefault", { id: "" });
+      expect(off.state.preferPluginEnv, "关掉开关要能从 state 里看出来").toBe(false);
+      expect(off.state.selected, "关掉之后不该还指着某个环境").toBe("");
+      expect(String((off.state.current || {}).source || ""), "应该退回 _env.bat / 系统 Python").not.toContain("plugin-env");
+      // 关键：环境本身还在，随时能再启用
+      expect(off.state.envs.filter((e) => e.status === "ready").length, "关掉不等于删掉").toBe(1);
+
+      const on = await p.call("panel.train.envSetDefault", { id: "cpu-py312" });
+      expect(on.state.preferPluginEnv).toBe(true);
+      expect(on.state.selected).toBe("cpu-py312");
+      expect(String((on.state.current || {}).source || "")).toContain("plugin-env");
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
+});
