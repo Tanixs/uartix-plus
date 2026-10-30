@@ -20,7 +20,7 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,7 +49,20 @@ const PERM = permFlag();
 const dir = mkdtempSync(path.join(tmpdir(), "uartix-yolo-"));
 /** Windows 路径统一成正斜杠再比：插件内部到处是这种归一。 */
 const fwd = (p) => String(p).replace(/\\/g, "/");
+/**
+ * 指向用户真 python 的目录软链。**收尾时必须先 unlink 再删临时目录**：
+ * `rm -r` 对 junction 本来就只删链接，但这条链的另一头是用户 conda 环境，
+ * 不值得拿"Node 行为应该没问题"去赌。
+ */
+const JUNCTIONS = [];
 afterAll(() => {
+  for (const j of JUNCTIONS) {
+    try {
+      unlinkSync(j);
+    } catch {
+      /* 已经没了 */
+    }
+  }
   try {
     rmSync(dir, { recursive: true, force: true });
   } catch {
@@ -2916,7 +2929,15 @@ const envLockPath = (ws) => path.join(ws, ".uartix", "yolo", "envs", ".install.l
 function seedHalfInstalled(ws, id) {
   const root = path.join(ws, ".uartix", "yolo", "envs", id);
   mkdirSync(path.join(root, "venv"), { recursive: true });
-  symlinkSync(REAL_PY_DIR, path.join(root, "venv", "Scripts"), "junction");
+  const link = path.join(root, "venv", "Scripts");
+  symlinkSync(REAL_PY_DIR, link, "junction");
+  JUNCTIONS.push(link);
+  // 续装判定看的是 site-packages 里的文件（不看 import：那要 5–20 秒，机器忙起来更久）
+  for (const pkg of ["torch", "torchvision", "ultralytics"]) {
+    const d = path.join(root, "venv", "Lib", "site-packages", pkg);
+    mkdirSync(d, { recursive: true });
+    writeFileSync(path.join(d, "__init__.py"), "", "utf8");
+  }
   writeFileSync(
     envMetaPath(ws, id),
     JSON.stringify({
@@ -3127,4 +3148,103 @@ describe("P178-B · 镜像体检（纯函数）", () => {
     expect(allDown.host).toBe("");
     expect(allDown.ok).toBe(false);
   });
+});
+
+/* ============================ P178-C · 接入与拆除 ============================ */
+
+/**
+ * 用户的原话是「装的东西后面都要清了，毕竟我的电脑已经有环境了，不要把原来的环境弄乱」。
+ * 所以这一批的判据重点不是"能不能装"，而是**拆得干不干净、有没有碰到别人的东西**。
+ */
+describe("P178-C · 拆除与体检", () => {
+  it("uv 的一切落点都在 envs/ 下面（缓存/托管 Python/工具一律改道，不碰用户目录）", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    const c = m.buildEnvCommands({ uvExe: "uv.exe", envRoot: "C:/ws/.uartix/yolo/envs/cpu-py312", variant: "cpu" });
+    const root = "C:/ws/.uartix/yolo/envs/cpu-py312";
+    for (const k of ["UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "UV_PYTHON_BIN_DIR", "UV_TOOL_DIR", "UV_TOOL_BIN_DIR"]) {
+      expect(c.torch.env[k], `${k} 必须显式指定，否则 uv 会写到 %APPDATA%/%LOCALAPPDATA%`).toBeTruthy();
+      expect(String(c.torch.env[k]).replace(/\\/g, "/").startsWith("C:/ws/.uartix/yolo/envs/"), `${k} 跑出了 envs/`).toBe(true);
+    }
+    expect(c.venv.env.UV_PYTHON_INSTALL_DIR.replace(/\\/g, "/")).toBe(root + "/python");
+    expect(c.venv.env.UV_PYTHON_INSTALL_MIRROR).toContain("mirrors.ustc.edu.cn");
+  });
+
+  it("清理全部：环境 + uv + 缓存都进回收站，工作区里的其它东西一个字节都不动", async () => {
+    const ws = makeWorkspace("env-purge");
+    const pluginDir = copyPlugin("env-purge");
+    fakeRunner(pluginDir);
+    const envs = path.join(ws, ".uartix", "yolo", "envs");
+    // 两份"环境"（其中一份是半成品）+ uv + cache + tools
+    for (const id of ["cpu-py312", "gpu-cu130-py312"]) {
+      mkdirSync(path.join(envs, id, "venv"), { recursive: true });
+      writeFileSync(path.join(envs, id, "env.json"), JSON.stringify({ schemaVersion: 1, id, kind: "cpu", label: id, status: "ready", diskBytes: 1234 }), "utf8");
+    }
+    for (const sub of ["uv", "cache", "tools"]) mkdirSync(path.join(envs, sub), { recursive: true });
+    writeFileSync(path.join(envs, "uv", "uv.exe"), "fake", "utf8");
+    // 诱饵：工作区里"别人的东西"
+    const keepModel = path.join(ws, "models", "keep.pt");
+    writeFileSync(keepModel, "模型不能动", "utf8");
+    const keepData = path.join(ws, "datasets", "x", "data.yaml");
+    writeFileSync(keepData, "names: [a, b]\n", "utf8");
+
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const before = await p.call("panel.train.envState");
+      expect(before.purgeable.count).toBe(2);
+      expect(before.purgeable.hasUv).toBe(true);
+      expect(before.purgeable.hasCache).toBe(true);
+
+      const r = await p.call("panel.train.envPurgeAll", {});
+      expect(r.ok).toBe(true);
+      expect(r.removed, "两个环境 + uv + cache + tools = 5 项").toBe(5);
+      expect(existsSync(path.join(envs, "cpu-py312")), "环境目录该没了").toBe(false);
+      expect(existsSync(path.join(envs, "uv")), "uv 该没了").toBe(false);
+      expect(existsSync(path.join(envs, "cache")), "缓存该没了（逐个删环境最容易漏的就是它）").toBe(false);
+
+      // 诱饵必须原样（这两份代表"工作区里别人的东西"：权重与数据集）
+      expect(readFileSync(keepModel, "utf8")).toBe("模型不能动");
+      expect(readFileSync(keepData, "utf8")).toBe("names: [a, b]\n");
+      expect(existsSync(path.join(ws, "scripts")), "脚本目录也不该被顺手扫走").toBe(true);
+
+      // 进的是回收站，不是直接删
+      const trash = path.join(ws, ".uartix", "yolo", "trash");
+      expect(existsSync(trash)).toBe(true);
+      const after = await p.call("panel.train.envState");
+      expect(after.envs.length).toBe(0);
+      expect(after.selected, "清完就不该还指着某个环境").toBe("");
+      expect(after.purgeable.hasUv).toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
+
+  it("体检：能 import 三件套就 ok，解释器丢了就直说并给原因", async () => {
+    if (!HAS_PY) return;
+    const ws = makeWorkspace("env-doctor");
+    const pluginDir = copyPlugin("env-doctor");
+    fakeRunner(pluginDir);
+    seedHalfInstalled(ws, "cpu-py312");
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const d = await p.call("panel.train.envDoctor", { id: "cpu-py312" });
+      expect(d.ok, "真 python 上三件套都在，体检该过：" + JSON.stringify(d.rows).slice(0, 200)).toBe(true);
+      expect(d.rows.some((r) => r.k === "Python" && r.ok)).toBe(true);
+      expect(d.rows.some((r) => r.k === "解释器" && r.ok)).toBe(true);
+
+      // 再造一份"只有 env.json、没有 venv"的（**不碰任何 junction**：
+      // 对指向 conda 的目录软链做 rm -r，风险是碰到用户真环境，判据不值得这么换）
+      const broken = path.join(ws, ".uartix", "yolo", "envs", "broken-py312");
+      mkdirSync(broken, { recursive: true });
+      writeFileSync(path.join(broken, "env.json"), JSON.stringify({ schemaVersion: 1, id: "broken-py312", kind: "cpu", label: "坏掉的", status: "broken" }), "utf8");
+      const d2 = await p.call("panel.train.envDoctor", { id: "broken-py312" });
+      expect(d2.ok).toBe(false);
+      expect(String(d2.reason)).toMatch(/解释器不见了/);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 120_000);
 });

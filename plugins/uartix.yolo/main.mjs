@@ -1675,17 +1675,25 @@ function buildEnvCommands(opt) {
   if (!isCpu) torchArgs.push(`torchvision==${ENV_SPEC.torchvision}+${variant}`, "--find-links", torchSrc);
   else torchArgs.push(`torchvision==${ENV_SPEC.torchvision}`);
   torchArgs.push("--index-url", pypi);
+  /**
+   * uv 会往用户目录写东西（缓存、托管 Python、工具目录）。**全部改道到 envs/ 下面**：
+   * 这台机器上已经有 conda 环境，装插件环境绝不能顺手在 `%APPDATA%\uv` 或
+   * `%LOCALAPPDATA%\uv` 里留下第二份缓存/Python —— 那是"清不干净"的来源，也是
+   * 用户说的"别把原来的环境弄乱"。这五个变量就是全部落点。
+   */
+  const home = (sub) => path.join(envRoot, "..", sub);
+  const uvEnv = { UV_CACHE_DIR: home("cache"), UV_PYTHON_INSTALL_DIR: path.join(envRoot, "python"), UV_PYTHON_BIN_DIR: home("bin"), UV_TOOL_DIR: home("tools"), UV_TOOL_BIN_DIR: home("bin") };
   return {
     venv: {
       cmd: uvExe,
       args: [...pre, "venv", "--python", ENV_SPEC.python, "--python-preference", "only-managed", venv],
-      env: { UV_PYTHON_INSTALL_DIR: path.join(envRoot, "python"), UV_PYTHON_INSTALL_MIRROR: pythonMirror, UV_CACHE_DIR: path.join(envRoot, "..", "cache") },
+      env: { ...uvEnv, UV_PYTHON_INSTALL_MIRROR: pythonMirror },
     },
-    torch: { cmd: uvExe, args: [...pre, ...torchArgs], env: { UV_CACHE_DIR: path.join(envRoot, "..", "cache") } },
+    torch: { cmd: uvExe, args: [...pre, ...torchArgs], env: { ...uvEnv } },
     ultralytics: {
       cmd: uvExe,
       args: [...pre, "pip", "install", "--python", py, `ultralytics==${ENV_SPEC.ultralytics}`, "--index-url", pypi],
-      env: { UV_CACHE_DIR: path.join(envRoot, "..", "cache") },
+      env: { ...uvEnv },
     },
     python: py,
   };
@@ -1701,7 +1709,7 @@ function envList() {
   const base = abs(ENV_DIR);
   let names = [];
   try {
-    names = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory() && !["cache", "uv"].includes(e.name)).map((e) => e.name);
+    names = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory() && !["cache", "uv", "bin", "tools"].includes(e.name)).map((e) => e.name);
   } catch {
     return [];
   }
@@ -1783,6 +1791,14 @@ async function envState() {
         bytes: e.bytes,
       })),
     mirrors: envMirrorCache.value ? { at: envMirrorCache.at, rows: envMirrorCache.value.rows, stale: Date.now() - envMirrorCache.at >= 10 * 60e3 } : null,
+    // 清理时要拆掉多少：环境目录按 env.json 记的体积算；uv/缓存只报"有没有"（走路可能几千个文件，不该在开面板时做）
+    purgeable: {
+      count: envs.length,
+      bytes: envs.reduce((n, e) => n + (Number(e.bytes) || 0), 0),
+      hasUv: fs.existsSync(abs(`${ENV_DIR}/uv`)),
+      hasCache: fs.existsSync(abs(`${ENV_DIR}/cache`)),
+      hasTools: fs.existsSync(abs(`${ENV_DIR}/tools`)),
+    },
     readOnly: !canWrite(),
   };
 }
@@ -2105,16 +2121,18 @@ async function envImports(py) {
 /**
  * 上次装到哪一步了。**按磁盘上的事实判断**，不看 env.json 的 phase：
  * 写 phase 的那行可能被强杀在中间，而 venv/torch 在不在是硬的。
+ *
+ * 用**文件**而不是 `import torch` 探针：探针要 5–20 秒（机器忙起来更久），而这段逻辑
+ * 每次点"安装"都会走一遍；真正的 import 由最后那步自检负责 —— 半截的包文件写得再全也过不了自检。
  */
-async function envResumePlan(envRoot) {
+function envResumePlan(envRoot) {
   const py = path.join(envRoot, "venv", "Scripts", "python.exe");
+  const site = path.join(envRoot, "venv", "Lib", "site-packages");
+  const has = (name) => fs.existsSync(path.join(site, name, "__init__.py"));
   const out = { meta: readEnvMeta(envRoot), venv: fs.existsSync(py), torch: false, ultralytics: false };
   if (!out.venv) return out;
-  const imp = await envImports(py);
-  if (imp) {
-    out.torch = !!(imp.torch && imp.torchvision);
-    out.ultralytics = !!imp.ultralytics;
-  }
+  out.torch = has("torch") && has("torchvision");
+  out.ultralytics = has("ultralytics");
   return out;
 }
 
@@ -2223,7 +2241,7 @@ async function envInstall(req) {
     // **必须先读再写**：下面那行会覆盖 env.json，先写就把"第一次创建时间"和
     // "上次死在哪一步"一起冲掉了，续装会变成一次来历不明的新装。
     step("plan", 2, "看看上次装到哪一步");
-    resume = await envResumePlan(envRoot);
+    resume = envResumePlan(envRoot);
     if (resume.venv) {
       pushLine(job, `[环境] 发现上次装到一半：venv 在${resume.torch ? "、torch 能用" : ""}${resume.ultralytics ? "、ultralytics 能用" : ""}，跳过已完成的部分`, "sys");
     }
@@ -2444,6 +2462,76 @@ async function envRemove(req) {
   pyCache = { path: "", ok: false, version: "", source: "", error: "" };
   catalogCache = { at: 0, value: null };
   return { ok: true, trashed: rec.id, state: await envState() };
+}
+
+/**
+ * 把插件装的一切都拆掉：每个环境目录 + uv 安装器 + 缓存 + 工具目录，**全部进回收站**。
+ *
+ * 为什么要有"清全部"而不是让人逐个删：uv 的缓存和托管 Python 不在任何一份 `envs/<id>/` 里，
+ * 逐个删环境会留下几 GB 的 `envs/cache`。用户说得直白："装的东西后面都要清了"。
+ *
+ * 三条硬边界（断言在代码里，不靠自觉）：
+ * 1. 只动 `$WS/.uartix/yolo/envs/` 下面的东西，路径不在里面就直接拒绝；
+ * 2. 进回收站，不 rm —— 后悔还能恢复；
+ * 3. 有任务在跑 / 有活锁时不许清。
+ */
+async function envPurgeAll(req) {
+  needWorkspace();
+  if (!canWrite()) throw new Error("当前是只读模式：不能清理");
+  if (active) throw new Error(`有任务在跑（${active.label}）：先停掉再清理`);
+  const live = envLockAlive();
+  if (live) throw new Error(`另一个面板正在安装（pid ${live.pid}）：不能清`);
+  const o = isObj(req) ? req : {};
+  const base = abs(ENV_DIR);
+  const targets = [];
+  for (const e of envList()) targets.push({ dir: String(e.dir), name: e.label || e.id, id: e.id });
+  for (const sub of ["uv", "cache", "tools", "bin"]) {
+    const p = path.join(base, sub);
+    if (fs.existsSync(p)) targets.push({ dir: p, name: `uv/${sub}`, id: sub });
+  }
+  if (!targets.length) return { ok: true, removed: 0, freed: 0, trashed: [], state: await envState() };
+  const trashed = [];
+  let freed = 0;
+  for (const t of targets) {
+    // 最后一米也校验：moveToTrash 只保证"在工作区内"，这里要的是"只在这个子目录里"
+    ensureInside(base, t.dir, "要清理的插件环境");
+    const rec = moveToTrash(t.dir, { kind: "env", id: t.id, name: t.name, reason: o.reason || "用户清理插件环境" });
+    trashed.push(rec.id);
+    freed += Number(rec.bytes) || 0;
+  }
+  try {
+    fs.unlinkSync(abs(ENV_LOCK));
+  } catch {
+    /* 没有就算了 */
+  }
+  const prefs = readPrefs();
+  prefs.runtime = { ...(prefs.runtime || {}), selected: "", location: "workspace" };
+  savePrefs(prefs);
+  pyCache = { path: "", ok: false, version: "", source: "", error: "" };
+  catalogCache = { at: 0, value: null };
+  return { ok: true, removed: trashed.length, freed, trashed, state: await envState() };
+}
+
+/**
+ * 体检：选中的那份插件环境现在还好吗（文件还在不在、三个包能不能 import、和装的时候对不对得上）。
+ * 只读，不修；发现不对劲就让人重装，不偷偷改。
+ */
+async function envDoctor(req) {
+  const o = isObj(req) ? req : {};
+  const id = String(o.id || (selectedEnv() || {}).id || "");
+  const hit = envList().find((e) => e.id === id);
+  if (!hit) return { ok: false, reason: id ? `没有这份环境：${id}` : "还没有插件环境", rows: [] };
+  const py = String((hit.python && hit.python.exe) || path.join(abs(hit.dir), "venv", "Scripts", "python.exe"));
+  const rows = [{ k: "目录", v: hit.dir, ok: fs.existsSync(hit.dir) }];
+  const hasPy = fs.existsSync(py);
+  rows.push({ k: "解释器", v: py, ok: hasPy });
+  if (!hasPy) return { ok: false, reason: "解释器不见了（多半是手动删过 envs/ 或移动过工作区）", id, rows, meta: hit };
+  const imp = await envImports(py);
+  rows.push({ k: "torch / torchvision / ultralytics", v: imp ? JSON.stringify(imp) : "import 探针失败", ok: !!imp && imp.torch && imp.torchvision && imp.ultralytics });
+  const ver = await runOnce(py, ["-c", "import sys;print(sys.version.split()[0])"], 30000);
+  rows.push({ k: "Python", v: (ver.out || "").trim() || "读不到", ok: ver.code === 0 });
+  const bad = rows.filter((r) => !r.ok);
+  return { ok: bad.length === 0, id, rows, reason: bad.length ? bad.map((r) => r.k).join(" / ") + " 有问题" : "", meta: hit };
 }
 
 async function detectPython() {
@@ -4926,6 +5014,16 @@ async function activate(c) {
       if (live) throw new Error(`锁还活着（pid ${live.pid}）：安装可能真的在跑，不能清`);
       envLockDrop();
       return { ok: true, state: await envState() };
+    },
+
+    /** 把插件装的一切（环境 + uv + 缓存 + 工具）整体移入回收站。`{ reason?: string }` */
+    async envPurgeAll(req) {
+      return await envPurgeAll(req);
+    },
+
+    /** 体检选中的环境：文件在不在、三个包能不能 import、Python 版本。只读。 */
+    async envDoctor(req) {
+      return await envDoctor(req);
     },
 
     async deployState() {
