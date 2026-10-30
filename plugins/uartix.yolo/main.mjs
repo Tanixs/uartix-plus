@@ -40,6 +40,9 @@
  */
 
 import fs from "node:fs";
+import http from "node:http";
+import https from "node:https";
+import net from "node:net";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -724,6 +727,12 @@ function readPrefs() {
     ...(isObj(raw) && raw.pinned ? { pinned: raw.pinned } : {}),
     // 回收站保留策略：0 = 不自动清理（默认）。只影响"按策略清理"按钮，插件从不自己定时删。
     trashKeepDays: Math.max(0, Number(raw && raw.trashKeepDays) || 0),
+    // P178：用哪份插件环境、装在哪、老用户是否优先用自建环境
+    runtime: {
+      selected: String((raw && raw.runtime && raw.runtime.selected) || ""),
+      location: String((raw && raw.runtime && raw.runtime.location) || "workspace"),
+      autoPreferPluginEnv: !(raw && raw.runtime && raw.runtime.autoPreferPluginEnv === false),
+    },
   };
 }
 
@@ -1595,6 +1604,650 @@ let pyCache = { path: "", ok: false, version: "", source: "", error: "" };
  * 那行路径是用户自己维护的（README 第六节第 4 条："换了 Python 环境：只改 _env.bat 里那一行"），
  * 插件跟着它走就不会出现"面板说 python 在这、训练脚本却在另一个环境"这种事。
  */
+/* ============================ 环境自举（P178） ============================ */
+
+/**
+ * 一个"从没装过 Python"的用户也能开训：插件自己装一份私有环境。
+ *
+ * 版本全部钉死（2026-10-30 核对过镜像上确实存在这些文件）：
+ * - CPython 3.12.16（python-build-standalone 20261026）
+ * - torch 2.12.0 / torchvision 0.27.0（cu126 / cu130 / cpu 三档）
+ * - ultralytics 8.4.128（回退 8.4.121 / 8.4.102）
+ * 选 2.12.0 而不是更新的 2.14.x：阿里云 cu126 目录最高只有 2.12.0，且 2.12 已稳定半年。
+ */
+const ENV_DIR = `${STATE_DIR}/envs`;
+const ENV_SPEC = { python: "3.12.16", torch: "2.12.0", torchvision: "0.27.0", ultralytics: "8.4.128", ultraFallbacks: ["8.4.121", "8.4.102"] };
+const ENV_MIRRORS = {
+  uv: [
+    "https://mirrors.ustc.edu.cn/github-release/astral-sh/uv/LatestRelease",
+    "https://mirror.nju.edu.cn/github-release/astral-sh/uv/LatestRelease",
+    "https://github.com/astral-sh/uv/releases/download",
+  ],
+  python: [
+    "https://mirrors.ustc.edu.cn/github-release/astral-sh/python-build-standalone",
+    "https://mirror.nju.edu.cn/github-release/astral-sh/python-build-standalone",
+    "https://github.com/astral-sh/python-build-standalone/releases/download",
+  ],
+  torch: {
+    cu126: ["https://mirrors.aliyun.com/pytorch-wheels/cu126", "https://mirrors.nju.edu.cn/pytorch/whl/cu126", "https://download.pytorch.org/whl/cu126"],
+    cu130: ["https://mirrors.aliyun.com/pytorch-wheels/cu130", "https://mirrors.nju.edu.cn/pytorch/whl/cu130", "https://download.pytorch.org/whl/cu130"],
+    cpu: ["https://download.pytorch.org/whl/cpu"],
+  },
+  pypi: ["https://pypi.tuna.tsinghua.edu.cn/simple", "https://mirrors.aliyun.com/pypi/simple", "https://pypi.org/simple"],
+};
+
+/** 旧卡（Pascal / Volta）在 CUDA 13 上跑不了：名字里认得出就强制 cu126。 */
+function needsLegacyCuda(nameIn) {
+  return /\b(GTX\s*10[5-8]0|GTX\s*10[2-4]0|P100|P40|P4\b|V100|Tesla\s*V)/i.test(String(nameIn || ""));
+}
+
+/**
+ * 驱动 + 卡名 → 画像。纯函数：测试直接钉这张表。
+ * 没卡 / 驱动读不出 / 驱动 < 525.60 → CPU（并说明原因，不吓唬用户）。
+ */
+function recommendEnvProfile(gpuName, driverText) {
+  const name = String(gpuName || "").trim();
+  if (!name) return { kind: "cpu", variant: "cpu", why: "没有检测到 NVIDIA 显卡，用 CPU 版" };
+  const v = parseFloat(String(driverText || "").replace(/[^\d.]/g, ""));
+  if (!isFinite(v) || v <= 0) return { kind: "cpu", variant: "cpu", why: "读不到显卡驱动版本，先按 CPU 版装" };
+  if (v < 525.6) return { kind: "cpu", variant: "cpu", why: `驱动 ${driverText} 低于 525.60，GPU 版跑不起来（建议先更新驱动）` };
+  if (needsLegacyCuda(name)) return { kind: "gpu", variant: "cu126", why: `${name} 属于 Pascal/Volta，CUDA 13 不支持，用 CUDA 12.6` };
+  if (v >= 580.88) return { kind: "gpu", variant: "cu130", why: `驱动 ${driverText} 支持 CUDA 13.0` };
+  return { kind: "gpu", variant: "cu126", why: `驱动 ${driverText} 支持到 CUDA 12.6` };
+}
+
+/** 安装器命令（纯函数）：把"用哪个源、装哪一档"变成可逐字比对的 argv。 */
+function buildEnvCommands(opt) {
+  const o = opt || {};
+  const uvExe = String(o.uvExe || "uv");
+  const envRoot = String(o.envRoot || "");
+  const venv = path.join(envRoot, "venv");
+  const py = path.join(venv, "Scripts", "python.exe");
+  const variant = String(o.variant || "cpu");
+  const src = o.sources || {};
+  const torchSrc = String(src.torch || (ENV_MIRRORS.torch[variant] || [])[0] || "");
+  const pypi = String(src.pypi || ENV_MIRRORS.pypi[0]);
+  const pythonMirror = String(src.python || ENV_MIRRORS.python[0]);
+  const isCpu = variant === "cpu";
+  const torchArgs = ["pip", "install", "--python", py, `torch==${ENV_SPEC.torch}${isCpu ? "" : "+" + variant}`];
+  if (!isCpu) torchArgs.push(`torchvision==${ENV_SPEC.torchvision}+${variant}`, "--find-links", torchSrc);
+  else torchArgs.push(`torchvision==${ENV_SPEC.torchvision}`);
+  torchArgs.push("--index-url", pypi);
+  return {
+    venv: {
+      cmd: uvExe,
+      args: ["venv", "--python", ENV_SPEC.python, "--python-preference", "only-managed", venv],
+      env: { UV_PYTHON_INSTALL_DIR: path.join(envRoot, "python"), UV_PYTHON_INSTALL_MIRROR: pythonMirror, UV_CACHE_DIR: path.join(envRoot, "..", "cache") },
+    },
+    torch: { cmd: uvExe, args: torchArgs, env: { UV_CACHE_DIR: path.join(envRoot, "..", "cache") } },
+    ultralytics: {
+      cmd: uvExe,
+      args: ["pip", "install", "--python", py, `ultralytics==${ENV_SPEC.ultralytics}`, "--index-url", pypi],
+      env: { UV_CACHE_DIR: path.join(envRoot, "..", "cache") },
+    },
+    python: py,
+  };
+}
+
+/** 读一份 env.json；坏文件当不存在，不炸整个面板。 */
+function readEnvMeta(dir) {
+  const j = readJson(path.join(dir, "env.json"), null);
+  return isObj(j) && j.id ? j : null;
+}
+
+function envList() {
+  const base = abs(ENV_DIR);
+  let names = [];
+  try {
+    names = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory() && !["cache", "uv"].includes(e.name)).map((e) => e.name);
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const n of names) {
+    const dir = path.join(base, n);
+    const meta = readEnvMeta(dir);
+    if (!meta) continue;
+    out.push({ ...meta, dir: dir.replace(/\\/g, "/"), bytes: Number(meta.diskBytes) || 0, exists: fs.existsSync(path.join(dir, "venv", "Scripts", "python.exe")) });
+  }
+  return out.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+}
+
+/** 选中的插件环境：prefs 指定优先；否则取第一份 ready 的。 */
+function selectedEnv() {
+  const prefs = readPrefs();
+  const all = envList();
+  const want = String((prefs.runtime && prefs.runtime.selected) || "");
+  const hit = all.find((e) => e.id === want && e.status === "ready" && e.exists);
+  if (hit) return hit;
+  return all.find((e) => e.status === "ready" && e.exists) || null;
+}
+
+/** 探测一张 NVIDIA 卡：没有 nvidia-smi 就返回 null（不是错误）。 */
+async function envNvidia() {
+  const r = await runOnce("nvidia-smi", ["--query-gpu=name,driver_version,memory.total", "--format=csv,noheader,nounits"], 8000);
+  if (r.code !== 0) return null;
+  const line = String(r.out || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean)[0] || "";
+  if (!line) return null;
+  const parts = line.split(",").map((x) => x.trim());
+  return { name: parts[0] || "", driver: parts[1] || "", vramMiB: Number(parts[2]) || 0 };
+}
+
+function envDisk() {
+  try {
+    const st = fs.statfsSync(root || ".");
+    return { free: Number(st.bavail) * Number(st.bsize) || 0, total: Number(st.blocks) * Number(st.bsize) || 0 };
+  } catch {
+    return { free: 0, total: 0 };
+  }
+}
+
+/** 面板要的全部环境事实：一张卡、一个推荐、已有环境、镜像健康、当前任务。 */
+async function envState() {
+  const nv = await envNvidia();
+  const rec = recommendEnvProfile(nv && nv.name, nv && nv.driver);
+  const envs = envList();
+  const sel = selectedEnv();
+  const prefs = readPrefs();
+  const py = await detectPython();
+  return {
+    ok: true,
+    platform: process.platform,
+    gpu: nv,
+    recommended: rec,
+    disk: envDisk(),
+    spec: ENV_SPEC,
+    envs,
+    selected: sel ? sel.id : "",
+    current: py,
+    usingPluginEnv: !!(sel && py.path && py.path.toLowerCase() === String(sel.python && sel.python.exe || "").toLowerCase()),
+    installLocation: String((prefs.runtime && prefs.runtime.location) || "workspace"),
+    locationOptions: [
+      { id: "workspace", label: "工作区内（随工作区删除，多工作区各一份）" },
+      { id: "appdata", label: "用户数据目录（多工作区共用，省磁盘）" },
+    ],
+    active: active && active.kind === "env" ? snapshot(active) : null,
+    readOnly: !canWrite(),
+  };
+}
+
+/* ---------------- P178：下载器 / 镜像 / 安装器 ---------------- */
+
+/** 小文件下载（uv.zip）：跟随重定向、Range 续传、.part 原子落盘。没有 Python 时也能用。 */
+function httpsDownload(url, dest, opt) {
+  const o = opt || {};
+  // 只给测试用的口子：`insecure` + 回环地址才允许走明文 http / 自签证书，
+  // 和 `runner/download_job.py --insecure` 同一口径（生产路径从不传它）。
+  const loop = (u) => {
+    try {
+      const h = new URL(u).hostname;
+      return h === "127.0.0.1" || h === "localhost" || h === "::1";
+    } catch {
+      return false;
+    }
+  };
+  const pickMod = (u) => (o.insecure && loop(u) ? (/^http:\/\//i.test(u) ? http : https) : https);
+  const tlsOpt = (u) => (o.insecure && loop(u) ? { rejectUnauthorized: false } : {});
+  return new Promise((resolve, reject) => {
+    const part = dest + ".part";
+    const have = fs.existsSync(part) ? fs.statSync(part).size : 0;
+    const go = (u, depth) => {
+      if (depth > 5) return reject(new Error("重定向次数过多"));
+      const req = pickMod(u).request(
+        u,
+        { method: "GET", ...tlsOpt(u), headers: { "User-Agent": "uartix-yolo/0.7", ...(have ? { Range: `bytes=${have}-` } : {}) } },
+        (res) => {
+          const code = res.statusCode || 0;
+          if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
+            res.resume();
+            return go(new URL(String(res.headers.location), u).toString(), depth + 1);
+          }
+          if (code === 404) { res.resume(); return reject(new Error(`404：${u}`)); }
+          if (code >= 400) { res.resume(); return reject(new Error(`HTTP ${code}：${u}`)); }
+          const total = Number(res.headers["content-length"] || 0) + (code === 206 ? have : 0);
+          const f = fs.createWriteStream(part, { flags: code === 206 ? "a" : "w" });
+          let done = code === 206 ? have : 0;
+          let aborted = false;
+          let settled = false;
+          // 断流是这个下载器最容易踩的坑：对端把连接掐了，`res` 只会发 `aborted`/`error`，
+          // 不会发 `end` —— 没有这一条，promise 永远不落，用户看到的是"进度条不动"。
+          const fail = (err) => {
+            if (settled) return;
+            settled = true;
+            try { f.destroy(); } catch { /* 还没开出来 */ }
+            reject(err);
+          };
+          res.on("data", (d) => {
+            done += d.length;
+            if (o.onProgress) o.onProgress(done, total);
+            if (o.cancelled && o.cancelled()) req.destroy(new Error("已取消"));
+          });
+          res.on("aborted", () => {
+            aborted = true;
+            fail(new Error(`下载中断（已收 ${done}/${total || "?"} 字节；保留 .part，下次从断点续）`));
+          });
+          res.on("error", (e) => fail(new Error(`下载中断：${(e && e.message) || e}（已收 ${done}/${total || "?"} 字节）`)));
+          res.pipe(f);
+          f.on("finish", () => f.close(() => {
+            if (settled) return;
+            // 长度对不上就不许改名：半截 uv.zip 会让 Expand-Archive 报"压缩包损坏"，
+            // 用户看到的是"插件坏了"，而不是"网断了再试一次"。留着 .part 下次续传。
+            if (aborted || (total && done !== total)) {
+              settled = true;
+              return reject(new Error(`下载不完整：${done}/${total || "?"} 字节（保留 .part，下次从断点续）`));
+            }
+            try {
+              fs.renameSync(part, dest);
+            } catch (e) {
+              settled = true;
+              return reject(e);
+            }
+            settled = true;
+            resolve({ bytes: done, total });
+          }));
+          f.on("error", (e) => fail(e));
+        },
+      );
+      // 连接层面的错（DNS / 拒绝连接 / 超时）：promise 已经落过的再 reject 是空操作
+      req.on("error", reject);
+      req.setTimeout(30000, () => req.destroy(new Error("下载超时（30 秒没有数据）")));
+      req.end();
+    };
+    go(url, 0);
+  });
+}
+
+/** HEAD 探测一个 URL（镜像健康检查）：只关心"能不能拿到"，不下载正文。 */
+function headOk(url, timeoutMs) {
+  return new Promise((resolve) => {
+    const t0 = Date.now();
+    const go = (u, depth) => {
+      if (depth > 4) return resolve({ ok: false, ms: Date.now() - t0 });
+      const req = https.request(u, { method: "HEAD", headers: { "User-Agent": "uartix-yolo/0.7" }, timeout: timeoutMs || 4000 }, (res) => {
+        const code = res.statusCode || 0;
+        if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
+          res.resume();
+          return go(new URL(String(res.headers.location), u).toString(), depth + 1);
+        }
+        res.resume();
+        resolve({ ok: code >= 200 && code < 400, ms: Date.now() - t0 });
+      });
+      req.on("timeout", () => req.destroy(new Error("timeout")));
+      req.on("error", () => resolve({ ok: false, ms: Date.now() - t0 }));
+      req.end();
+    };
+    go(url, 0);
+  });
+}
+
+/** 安装期间的一条命令：成功 resolve，失败 reject（带最后两行输出）。 */
+function runEnvStep(job, spec, label) {
+  return new Promise((resolve, reject) => {
+    const tail = [];
+    const child = ctx.process.spawn({
+      cmd: spec.cmd,
+      args: spec.args,
+      cwd: root,
+      env: { ...PY_ENV, ...(job.envProxy || {}), ...(spec.env || {}), PYTHONUNBUFFERED: "1" },
+      onStdout: (l) => {
+        pushLine(job, l, "out");
+        tail.push(l);
+        if (tail.length > 4) tail.shift();
+      },
+      onStderr: (l) => {
+        pushLine(job, l, "err");
+        tail.push(l);
+        if (tail.length > 4) tail.shift();
+      },
+      onExit: (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`${label}失败（退出码 ${code}）：${tail.filter(Boolean).slice(-2).join(" / ").slice(0, 300)}`));
+      },
+      onError: (e) => reject(new Error(`${label}起不来：${(e && e.message) || e}`)),
+    });
+    job.child = child;
+    job.pid = child.pid || 0;
+  });
+}
+
+/**
+ * 代理探活：配置里开着代理、但代理没起来（Clash 关了 / 换了端口）是最常见的坑。
+ * 连不上就**不**把代理塞给 uv —— 否则每一次下载都会先撞一遍死端口，比直连还慢。
+ */
+function proxyAlive(proxyUrl) {
+  return new Promise((resolve) => {
+    let host = "";
+    let port = 0;
+    try {
+      const u = new URL(String(proxyUrl));
+      host = u.hostname;
+      port = Number(u.port) || (u.protocol === "https:" ? 443 : 80);
+    } catch {
+      return resolve(false);
+    }
+    if (!host || !port) return resolve(false);
+    const s = net.connect({ host, port });
+    let done = false;
+    const fin = (ok) => {
+      if (done) return;
+      done = true;
+      try {
+        s.destroy();
+      } catch {
+        /* 已经关了 */
+      }
+      resolve(ok);
+    };
+    s.setTimeout(800, () => fin(false));
+    s.on("connect", () => fin(true));
+    s.on("error", () => fin(false));
+  });
+}
+
+/** 解压 uv.zip（Windows 自带 Expand-Archive，不额外装东西）。 */async function unzipUv(job, zipPath, outDir) {
+  const q = (s) => "'" + String(s).replace(/'/g, "''") + "'";
+  await runEnvStep(
+    job,
+    {
+      cmd: "powershell",
+      args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `Expand-Archive -LiteralPath ${q(zipPath)} -DestinationPath ${q(outDir)} -Force`],
+    },
+    "解压 uv",
+  );
+}
+
+/** 下载 uv.exe：按镜像顺序试，成功即停。 */
+async function ensureUv(job) {
+  const uvDir = abs(`${ENV_DIR}/uv`);
+  const uvExe = path.join(uvDir, "uv.exe");
+  if (fs.existsSync(uvExe)) {
+    const r = await runOnce(uvExe, ["--version"], 10000);
+    if (r.code === 0) return { uvExe, version: (r.out || "").trim() };
+  }
+  fs.mkdirSync(uvDir, { recursive: true });
+  const zip = path.join(uvDir, "uv.zip");
+  const tried = [];
+  for (const base of ENV_MIRRORS.uv) {
+    const url = `${base.replace(/\/+$/, "")}/uv-x86_64-pc-windows-msvc.zip`;
+    job.progress.detail = `下载安装器（${new URL(url).host}）`;
+    try {
+      await httpsDownload(url, zip, {
+        onProgress: (done, total) => {
+          job.progress.phase = "uv";
+          job.progress.detail = `下载安装器 ${fmtBytes(done)}${total ? " / " + fmtBytes(total) : ""}`;
+          job.progress.percent = total ? Math.min(5, Math.round((done / total) * 5)) : 1;
+        },
+        cancelled: () => job.stopped,
+      });
+      await unzipUv(job, zip, uvDir);
+      if (!fs.existsSync(uvExe)) {
+        const found = [];
+        for (const e of fs.readdirSync(uvDir, { withFileTypes: true })) {
+          if (e.isFile() && e.name.toLowerCase() === "uv.exe") found.push(path.join(uvDir, e.name));
+          if (e.isDirectory()) {
+            const p = path.join(uvDir, e.name, "uv.exe");
+            if (fs.existsSync(p)) found.push(p);
+          }
+        }
+        if (found.length) fs.copyFileSync(found[0], uvExe);
+      }
+      if (!fs.existsSync(uvExe)) throw new Error("解压后没有 uv.exe");
+      const v = await runOnce(uvExe, ["--version"], 10000);
+      if (v.code !== 0) throw new Error("uv.exe 起不来");
+      job.envSources = { ...(job.envSources || {}), uv: new URL(url).host };
+      pushLine(job, `[环境] 安装器就绪：${(v.out || "").trim()}（${new URL(url).host}）`, "sys");
+      return { uvExe, version: (v.out || "").trim() };
+    } catch (e) {
+      tried.push(`${new URL(url).host}: ${(e && e.message) || e}`);
+      pushLine(job, `[环境] 这个源不行，换下一个：${tried[tried.length - 1].slice(0, 200)}`, "err");
+    }
+  }
+  throw new Error(`安装器下载失败（试过 ${tried.length} 个源）：\n${tried.join("\n")}`);
+}
+
+function envIdFor(kind, variant) {
+  return kind === "cpu" ? "cpu-py312" : `gpu-${variant}-py312`;
+}
+
+/**
+ * 装一份私有环境。**必须由用户点按钮触发**；失败保留缓存，可续装。
+ * v1 位置只支持工作区（`$WS/.uartix/yolo/envs`）——`$LOCALAPPDATA` 不在插件写权限内，
+ * 要支持它需要宿主新增一枚写目录，另开。
+ */
+async function envInstall(req) {
+  needWorkspace();
+  if (!canWrite()) throw new Error("当前是只读模式：能看环境，不能安装");
+  if (active) throw new Error(`已经有一个任务在跑（${active.label}）：先停掉它`);
+  const o = isObj(req) ? req : {};
+  const nv = await envNvidia();
+  const rec = recommendEnvProfile(nv && nv.name, nv && nv.driver);
+  const variant = String(o.variant || (rec.kind === "gpu" ? rec.variant : "cpu"));
+  if (!["cu126", "cu130", "cpu"].includes(variant)) throw new Error(`不支持的画像：${variant}`);
+  // 位置暂时只有工作区（`$LOCALAPPDATA` 不在插件写权限里）。用户传了别的就直说，不悄悄落到工作区。
+  const where = String(o.location || "workspace");
+  if (where !== "workspace") throw new Error("这一版只能装在工作区内（$WS/.uartix/yolo/envs）；装到用户数据目录需要先给插件新增一枚写目录");
+  const kind = variant === "cpu" ? "cpu" : "gpu";
+  const id = envIdFor(kind, variant);
+  const envRoot = abs(`${ENV_DIR}/${id}`);
+  const need = kind === "gpu" ? 6 * 1024 * 1024 * 1024 : 2.5 * 1024 * 1024 * 1024;
+  const free = envDisk().free;
+  if (free && free < need) {
+    throw new Error(`磁盘不够：${variant} 至少需要 ${fmtBytes(need)}，当前可用 ${fmtBytes(free)}。先到资产页清理，或换到空间更大的盘。`);
+  }
+
+  const job = newJob("env", `安装环境 ${variant}`);
+  job.envTarget = { id, variant, kind, envRoot: envRoot.replace(/\\/g, "/") };
+  jobs.set(job.id, job);
+  active = job;
+  const step = (phase, pct, detail) => {
+    job.progress.phase = phase;
+    job.progress.percent = pct;
+    job.progress.detail = detail;
+    emitJob(job);
+  };
+
+  let code = 1;
+  try {
+    // 配置里开了代理就先用它，但**先探活**：代理没起来时把 uv 指向死端口，
+    // 每个镜像都会"连得上但没响应"，比直连更难排查。
+    try {
+      const { effective } = await effectiveConfig();
+      const cfgProxy = effective.env && effective.env.proxy_enable ? String(effective.env.proxy || "") : "";
+      if (cfgProxy) {
+        if (await proxyAlive(cfgProxy)) {
+          job.envProxy = { HTTPS_PROXY: cfgProxy, HTTP_PROXY: cfgProxy, ALL_PROXY: cfgProxy };
+          pushLine(job, `[环境] 走配置里的代理 ${cfgProxy}`, "sys");
+        } else {
+          pushLine(job, `[环境] 配置里开着代理 ${cfgProxy}，但连不上：这次直连镜像`, "err");
+        }
+      }
+    } catch {
+      /* 读不到配置就直连：安装不该被一个坏 config.yaml 挡住 */
+    }
+    fs.mkdirSync(envRoot, { recursive: true });
+    writeJsonAtomic(path.join(envRoot, "env.json"), {
+      schemaVersion: 1,
+      id,
+      kind,
+      label: kind === "gpu" ? `GPU · CUDA ${variant === "cu130" ? "13.0" : "12.6"} · Python 3.12` : "CPU · Python 3.12",
+      status: "installing",
+      createdAt: new Date().toISOString(),
+      gpu: nv || null,
+      spec: ENV_SPEC,
+      sources: {},
+    });
+
+    step("uv", 1, "准备安装器（uv）");
+    const uv = await ensureUv(job);
+
+    step("python", 8, `安装 Python ${ENV_SPEC.python}`);
+    const cmds = buildEnvCommands({ uvExe: uv.uvExe, envRoot, variant, sources: {} });
+    let venvOk = false;
+    let lastErr = "";
+    for (let i = 0; i < ENV_MIRRORS.python.length && !venvOk; i++) {
+      const c = buildEnvCommands({ uvExe: uv.uvExe, envRoot, variant, sources: { python: ENV_MIRRORS.python[i] } });
+      try {
+        await runEnvStep(job, c.venv, "装 Python");
+        venvOk = true;
+        job.envSources = { ...(job.envSources || {}), python: new URL(ENV_MIRRORS.python[i]).host };
+      } catch (e) {
+        lastErr = (e && e.message) || String(e);
+        pushLine(job, `[环境] Python 源 ${new URL(ENV_MIRRORS.python[i]).host} 失败：${lastErr.slice(0, 160)}`, "err");
+      }
+    }
+    if (!venvOk) throw new Error(`Python 装不上（试过 ${ENV_MIRRORS.python.length} 个源）：${lastErr}`);
+
+    step("torch", 25, `安装 torch ${ENV_SPEC.torch}${kind === "gpu" ? "+" + variant : ""}（体积大，耐心等）`);
+    // CPU 版没有 `-f` 可换：torch 直接从 PyPI 拿（Windows 上 PyPI 的 torch 就是 CPU 构建），
+    // 所以"换源"要换的是 **PyPI 镜像**，而不是那张只有一条的 torch 目录表。
+    const torchBases = kind === "cpu" ? ENV_MIRRORS.pypi : ENV_MIRRORS.torch[variant] || [];
+    let torchOk = false;
+    lastErr = "";
+    for (const base of torchBases) {
+      const c = buildEnvCommands({ uvExe: uv.uvExe, envRoot, variant, sources: kind === "cpu" ? { pypi: base } : { torch: base } });
+      try {
+        await runEnvStep(job, c.torch, "装 torch");
+        torchOk = true;
+        job.envSources = { ...(job.envSources || {}), torch: new URL(base).host };
+        break;
+      } catch (e) {
+        lastErr = (e && e.message) || String(e);
+        pushLine(job, `[环境] torch 源 ${new URL(base).host} 失败，换下一个：${lastErr.slice(0, 160)}`, "err");
+      }
+    }
+    if (!torchOk) throw new Error(`torch 装不上（试过 ${torchBases.length} 个源）：${lastErr}`);
+
+    step("ultralytics", 80, `安装 ultralytics ${ENV_SPEC.ultralytics}`);
+    let ultraOk = false;
+    lastErr = "";
+    for (const ver of [ENV_SPEC.ultralytics, ...ENV_SPEC.ultraFallbacks]) {
+      for (const pypi of ENV_MIRRORS.pypi) {
+        const c = buildEnvCommands({ uvExe: uv.uvExe, envRoot, variant, sources: { pypi } });
+        const spec = { ...c.ultralytics, args: c.ultralytics.args.map((x) => (x === `ultralytics==${ENV_SPEC.ultralytics}` ? `ultralytics==${ver}` : x)) };
+        try {
+          await runEnvStep(job, spec, "装 ultralytics");
+          ultraOk = true;
+          job.envSources = { ...(job.envSources || {}), pypi: new URL(pypi).host };
+          job.envUltra = ver;
+          break;
+        } catch (e) {
+          lastErr = (e && e.message) || String(e);
+        }
+      }
+      if (ultraOk) break;
+    }
+    if (!ultraOk) throw new Error(`ultralytics 装不上：${lastErr}`);
+
+    step("probe", 92, "自检（import torch / CUDA / 版本）");
+    const code =
+      "import json,torch,ultralytics\n" +
+      "print(json.dumps({'torch':torch.__version__,'cuda':bool(torch.cuda.is_available()),'device':(torch.cuda.get_device_name(0) if torch.cuda.is_available() else ''),'ultralytics':ultralytics.__version__},ensure_ascii=True))\n";
+    const py = cmds.python;
+    const pr = await runOnce(py, ["-c", code], 120000);
+    if (pr.code !== 0) throw new Error(`自检失败：${(pr.err || pr.out || "").slice(-300)}`);
+    let probe = null;
+    try {
+      probe = JSON.parse(String(pr.out || "").trim().split(/\r?\n/).pop());
+    } catch {
+      throw new Error("自检输出读不懂：" + String(pr.out || "").slice(-200));
+    }
+    if (kind === "gpu" && !probe.cuda) {
+      throw new Error("装的是 GPU 版，但 torch.cuda.is_available() = false。多半是驱动太旧或显卡不在 CUDA 支持列表：先更新驱动，或改用 CPU 版。");
+    }
+
+    const meta = {
+      schemaVersion: 1,
+      id,
+      kind,
+      label: kind === "gpu" ? `GPU · CUDA ${variant === "cu130" ? "13.0" : "12.6"} · Python 3.12` : "CPU · Python 3.12",
+      status: "ready",
+      createdAt: job.startedAt ? new Date(job.startedAt).toISOString() : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      python: { version: ENV_SPEC.python, exe: py.replace(/\\/g, "/") },
+      installer: { uv: uv.version, uvExe: uv.uvExe.replace(/\\/g, "/") },
+      packages: { torch: probe.torch, torchvision: ENV_SPEC.torchvision, ultralytics: probe.ultralytics || job.envUltra },
+      gpu: nv || null,
+      probe: { ...probe, checkedAt: new Date().toISOString() },
+      sources: job.envSources || {},
+      diskBytes: walkStats(envRoot).bytes,
+      location: "workspace",
+    };
+    writeJsonAtomic(path.join(envRoot, "env.json"), meta);
+    const prefs = readPrefs();
+    prefs.runtime = { ...(prefs.runtime || {}), selected: id, location: "workspace" };
+    savePrefs(prefs);
+    pyCache = { path: py, ok: true, version: `Python ${ENV_SPEC.python}`, source: `plugin-env:${id}`, error: "" };
+    job.progress.phase = "done";
+    job.progress.percent = 100;
+    job.progress.detail = `${meta.label} 装好了：torch ${probe.torch} / ultralytics ${probe.ultralytics}`;
+    code = 0;
+    try { ctx.panels.emit(PANEL, "env", { id, meta }); } catch { /* 面板没开 */ }
+    return { ok: true, id, meta };
+  } catch (e) {
+    const msg = (e && e.message) || String(e);
+    try {
+      writeJsonAtomic(path.join(envRoot, "env.json"), {
+        schemaVersion: 1,
+        id,
+        kind,
+        label: kind === "gpu" ? `GPU · ${variant}` : "CPU",
+        status: job.stopped ? "cancelled" : "broken",
+        createdAt: new Date().toISOString(),
+        error: msg.slice(0, 500),
+        gpu: nv || null,
+        spec: ENV_SPEC,
+      });
+    } catch {
+      /* 目录都写不了就算了，错误已经抛给调用方 */
+    }
+    throw e;
+  } finally {
+    // 终态必须走 finishJob：否则这条 env 任务会在 jobs 里永远显示「运行中」，
+    // 面板顶上的任务卡和 `state.jobs` 都会一直挂着一个不动的进度条。
+    try {
+      finishJob(job, code);
+    } catch {
+      /* 日志收尾失败不挡返回值 */
+    }
+    if (active === job) active = null;
+  }
+}
+
+async function envSetDefault(req) {
+  needWorkspace();
+  if (!canWrite()) throw new Error("当前是只读模式：不能改默认环境");
+  const o = isObj(req) ? req : {};
+  const id = String(o.id || "");
+  if (id) {
+    const hit = envList().find((e) => e.id === id && e.status === "ready" && e.exists);
+    if (!hit) throw new Error(`没有这份可用的环境：${id}`);
+  }
+  const prefs = readPrefs();
+  prefs.runtime = { ...(prefs.runtime || {}), selected: id, autoPreferPluginEnv: true };
+  savePrefs(prefs);
+  pyCache = { path: "", ok: false, version: "", source: "", error: "" };
+  return { ok: true, selected: id, state: await envState() };
+}
+
+async function envRemove(req) {
+  needWorkspace();
+  if (!canWrite()) throw new Error("当前是只读模式：不能删除环境");
+  const o = isObj(req) ? req : {};
+  const id = String(o.id || "");
+  const hit = envList().find((e) => e.id === id);
+  if (!hit) throw new Error(`没有这份环境：${id}`);
+  if (active) throw new Error("有任务在跑：先停掉再删环境");
+  const prefs = readPrefs();
+  if (prefs.runtime && prefs.runtime.selected === id) {
+    prefs.runtime.selected = "";
+    savePrefs(prefs);
+  }
+  const rec = moveToTrash(hit.dir, { kind: "env", id, name: hit.label || id, reason: "用户删除插件环境" });
+  pyCache = { path: "", ok: false, version: "", source: "", error: "" };
+  catalogCache = { at: 0, value: null };
+  return { ok: true, trashed: rec.id, state: await envState() };
+}
+
 async function detectPython() {
   const over = readOverrides();
   const forced = over && over.env && over.env.python;
@@ -1602,6 +2255,18 @@ async function detectPython() {
     const r = await probePython(String(forced), "config.env.python");
     pyCache = r;
     return r;
+  }
+  // P178：插件自建环境优先于 _env.bat / PATH（用户显式指定仍然最大）
+  const sel = selectedEnv();
+  if (sel) {
+    const exe = String((sel.python && sel.python.exe) || path.join(abs(sel.dir), "venv", "Scripts", "python.exe"));
+    if (fs.existsSync(exe)) {
+      const r = await probePython(exe, `plugin-env:${sel.id}`);
+      if (r.ok) {
+        pyCache = r;
+        return r;
+      }
+    }
   }
   const fromBat = readEnvBat();
   if (fromBat) {
@@ -4026,6 +4691,29 @@ async function activate(c) {
       return await modelDownload(req);
     },
 
+    /* ---- P178：环境自举 ---- */
+
+    /** 环境全景：显卡/驱动/推荐画像/已有环境/当前解释器/磁盘。 */
+    async envState() {
+      needWorkspace();
+      return await envState();
+    },
+
+    /** 装一份私有环境（必须用户点按钮）。`{ variant?: "cu126"|"cu130"|"cpu" }` */
+    async envInstall(req) {
+      return await envInstall(req);
+    },
+
+    /** 切换默认环境；id 传空串表示"不用插件环境"。 */
+    async envSetDefault(req) {
+      return await envSetDefault(req);
+    },
+
+    /** 删除一份环境（进回收站，可恢复）。 */
+    async envRemove(req) {
+      return await envRemove(req);
+    },
+
     async deployState() {
       return await deployState();
     },
@@ -5494,6 +6182,7 @@ async function monitor(runName) {
 // 参数表也必须是纯映射：喂给它一份"少一个键"的探测结果，它就得少渲染一项（详设 §10 判据 2）。
 export {
   activate,
+  buildEnvCommands,
   buildParamSpec,
   chartColumns,
   classifyFailure,
@@ -5516,6 +6205,9 @@ export {
   PARAM_HELP,
   PARAM_META,
   readDataYaml,
+  recommendEnvProfile,
   resumeGuard,
   taskMismatch,
+  // 只给测试：下载器要对着本地假服务验续传/重定向，没有导出口就没法在进程内测
+  httpsDownload,
 };

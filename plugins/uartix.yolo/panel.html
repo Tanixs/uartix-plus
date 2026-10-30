@@ -1942,6 +1942,7 @@
 <div class="card">
           <h2>环境</h2>
           <div class="kv" id="envkv"></div>
+          <div id="envinst"></div>
           <div class="row" style="margin-top: 8px">
             <button class="btn" id="probe">深度自检（torch / CUDA）</button>
             <span class="note" style="margin: 0">首次约 10~20 秒</span>
@@ -2738,6 +2739,57 @@
           "<b>代理</b><span>" +
           esc(env.proxy_enable ? env.proxy || "(空)" : "关闭") +
           "</span>";
+        renderEnvInstall();
+      }
+
+      /* P178：环境自举的极简入口。完整向导（换镜像/换画像/日志）等应用读取上限生效后再展开。 */
+      var envInfo = null;
+
+      function renderEnvInstall() {
+        var box = $("envinst");
+        if (!box) return;
+        var e = envInfo;
+        if (!e) { box.innerHTML = ""; return; }
+        var ro = !!e.readOnly;
+        var act = e.active;
+        if (act && act.state === "running") {
+          box.innerHTML = '<div class="note" style="margin:8px 0 0">安装中 · ' + esc((act.progress && act.progress.detail) || "") +
+            ' <b>' + (Number(act.progress && act.progress.percent) || 0) + "%</b></div>";
+          return;
+        }
+        var ready = (e.envs || []).filter(function (x) { return x.status === "ready" && x.exists; });
+        if (ready.length) {
+          var cur = ready.filter(function (x) { return x.id === e.selected; })[0] || ready[0];
+          box.innerHTML = '<div class="note" style="margin:8px 0 0"><span class="tag ok">插件环境</span> ' + esc(cur.label || cur.id) +
+            ' · torch ' + esc((cur.packages && cur.packages.torch) || "?") + " · " + esc(fmtBytes(cur.bytes || 0)) + "</div>";
+          return;
+        }
+        var rec = e.recommended || {};
+        var cpu = rec.variant === "cpu";
+        box.innerHTML = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">' +
+          '<div class="note" style="margin:0 0 6px">还没有插件环境：' + esc(rec.why || "") + "</div>" +
+          '<button class="btn primary" id="envin"' + (ro ? " disabled" : "") + ">一键安装（" + (cpu ? "CPU" : "GPU " + esc(rec.variant)) + " · " + (cpu ? "≈1.6 GB" : "≈4.5 GB") + "）</button>" +
+          '<button class="btn" id="envicpu"' + (ro || cpu ? " disabled" : "") + ">装 CPU 版</button></div>";
+        if ($("envin")) $("envin").onclick = function () { startEnvInstall(""); };
+        if ($("envicpu")) $("envicpu").onclick = function () { startEnvInstall("cpu"); };
+      }
+
+      async function startEnvInstall(variant) {
+        try {
+          sysLog("开始安装环境（" + (variant || "推荐画像") + "）：下载 + 安装可能十几分钟，进度在任务卡与日志里");
+          await uartix.call("envInstall", variant ? { variant: variant } : {});
+          sysLog("环境装好了，训练页可以直接用");
+          await loadEnv();
+          refresh(true);
+        } catch (e) {
+          sysLog("[错误] " + String((e && e.message) || e));
+          await loadEnv();
+        }
+      }
+
+      async function loadEnv() {
+        try { envInfo = await uartix.call("envState"); } catch (e) { envInfo = null; }
+        renderEnvInstall();
       }
 
       function renderDeploy() {
@@ -5875,6 +5927,10 @@
       });
       uartix.on("job", function (j) {
         if (!j) return;
+        if (j.kind === "env") {
+          if (envInfo) { envInfo.active = j; renderEnvInstall(); }
+          if (j.state !== "running") { loadEnv(); refresh(true); }
+        }
         if (j.kind === "download") {
           if ($("mldlg") && !$("mldlg").hidden) renderMlProgress(j);
           if (j.state !== "running") {
@@ -6298,6 +6354,7 @@
 
       refresh(true).then(function () {
         if (st && !st.needWorkspace) loadParams(false);
+        loadEnv();
       });
     </script>
   </body>

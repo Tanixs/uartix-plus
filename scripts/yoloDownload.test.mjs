@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { validateExtension } from "../src/features/plugins/engine/manifest.ts";
 import { flattenPermissions, trustDigestInput } from "../src/features/plugins/engine/repo.ts";
+import { httpsDownload } from "../plugins/uartix.yolo/main.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RUNNER = path.join(HERE, "..", "plugins", "uartix.yolo", "runner", "download_job.py");
@@ -290,7 +291,10 @@ describe("P177-C · 权限面与包内文件数", () => {
   const manifest = JSON.parse(readFileSync(path.join(PLUGIN, "plugin.json"), "utf8"));
 
   it("声明了 net.connect 的三台主机（批准卡会因此重来一次）", () => {
-    expect(manifest.permissions.net.connect).toEqual(["github.com", "objects.githubusercontent.com", "raw.githubusercontent.com"]);
+    // P178 起还要装环境：新增了 PyPI / PyTorch / 国内镜像的域名
+    for (const h of ["github.com", "objects.githubusercontent.com", "raw.githubusercontent.com", "pypi.org", "files.pythonhosted.org", "download.pytorch.org", "mirrors.ustc.edu.cn", "mirror.nju.edu.cn", "mirrors.aliyun.com", "pypi.tuna.tsinghua.edu.cn"]) {
+      expect(manifest.permissions.net.connect, `缺 ${h}`).toContain(h);
+    }
     const v = validateExtension(manifest);
     expect(v.errors, JSON.stringify(v.errors)).toEqual([]);
     // 真实流程里 install 会先把 inject 补成默认值；清单本身可以不写，这里照做
@@ -321,4 +325,106 @@ describe("P177-C · 权限面与包内文件数", () => {
     // 包里不许有 .pyc：发布通道会当二进制跳过，还会让"几个文件"说谎
     expect(files.some((f) => f.endsWith(".pyc"))).toBe(false);
   });
+});
+
+/**
+ * P178-A：插件自己的下载器（`main.mjs` 里的 `httpsDownload`）。
+ *
+ * uv 本体（约 34MB）就是走这条路径拿的 —— 它要是坏了，**每一台新机器都装不上**。
+ * 同样用本地假服务制造重定向 / 续传 / 404，判据落在"落盘字节"上而不是"有没有抛错"。
+ * 只认 https 的规矩没破：`insecure` 只在回环地址上放行明文，生产路径不传。
+ */
+describe("P178-A · 插件下载器（uv 引导）", () => {
+  const tmp = (n) => path.join(dir, `dl-${n}-${Math.random().toString(36).slice(2, 7)}`);
+
+  it("200 直给：字节数对得上、.part 不残留、进度回调递增", async () => {
+    const body = payload(300_000, 11);
+    const srv = await serve((req, res) => {
+      res.writeHead(200, { "Content-Length": String(body.length) });
+      res.end(body);
+    });
+    try {
+      const out = tmp("ok");
+      const seen = [];
+      const r = await httpsDownload(`http://127.0.0.1:${srv.port}/uv.zip`, out, {
+        insecure: true,
+        onProgress: (done, total) => seen.push([done, total]),
+      });
+      expect(readFileSync(out).equals(body)).toBe(true);
+      expect(existsSync(out + ".part")).toBe(false);
+      expect(r.bytes).toBe(body.length);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen[seen.length - 1][0]).toBe(body.length);
+    } finally {
+      await srv.close();
+    }
+  }, 30_000);
+
+  it("302 重定向：跟到第二跳，内容仍是完整文件（镜像站常用这套）", async () => {
+    const body = payload(120_000, 5);
+    const srv = await serve((req, res) => {
+      if (req.url === "/uv.zip") {
+        res.writeHead(302, { Location: "http://127.0.0.1:" + req.socket.localPort + "/real/uv.zip" });
+        return res.end();
+      }
+      res.writeHead(200, { "Content-Length": String(body.length) });
+      res.end(body);
+    });
+    try {
+      const out = tmp("302");
+      await httpsDownload(`http://127.0.0.1:${srv.port}/uv.zip`, out, { insecure: true });
+      expect(readFileSync(out).equals(body)).toBe(true);
+    } finally {
+      await srv.close();
+    }
+  }, 30_000);
+
+  it("断在半路：.part 留着，下次从断点续（Range 生效，不从头再来）", async () => {
+    const body = payload(400_000, 9);
+    let rangeSeen = "";
+    const srv = await serve((req, res) => {
+      const from = Number(String(req.headers.range || "").replace(/[^\d]/g, "")) || 0;
+      rangeSeen = req.headers.range || "";
+      if (from > 0) {
+        res.writeHead(206, { "Content-Length": String(body.length - from), "Content-Range": `bytes ${from}-${body.length - 1}/${body.length}` });
+        return res.end(body.subarray(from));
+      }
+      // 第一趟：只给前一半就断开。**必须等 write 的 flush 回调**再 destroy——
+      // 直接 `res.destroy()` 会把还没发出去的数据丢掉，客户端只会看到"socket hang up"，
+      // 那不是"断在半路"，测不到续传。
+      res.writeHead(200, { "Content-Length": String(body.length) });
+      res.write(body.subarray(0, 200_000), () => setTimeout(() => res.destroy(), 30));
+    });
+    try {
+      const out = tmp("resume");
+      await expect(httpsDownload(`http://127.0.0.1:${srv.port}/uv.zip`, out, { insecure: true })).rejects.toBeTruthy();
+      expect(existsSync(out + ".part"), "断流后 .part 必须留着才能续").toBe(true);
+      const half = statSync(out + ".part").size;
+      expect(half).toBeGreaterThan(0);
+      expect(half).toBeLessThan(body.length);
+      await httpsDownload(`http://127.0.0.1:${srv.port}/uv.zip`, out, { insecure: true });
+      expect(rangeSeen, "第二趟必须带 Range 头").toContain("bytes=");
+      expect(readFileSync(out).equals(body), "续传后的文件必须和原件逐字节一致").toBe(true);
+      expect(existsSync(out + ".part")).toBe(false);
+    } finally {
+      await srv.close();
+    }
+  }, 40_000);
+
+  it("404 / 5xx：报错带状态码，不留半截文件", async () => {
+    const srv = await serve((req, res) => {
+      res.writeHead(req.url === "/404.zip" ? 404 : 500);
+      res.end("nope");
+    });
+    try {
+      await expect(httpsDownload(`http://127.0.0.1:${srv.port}/404.zip`, tmp("404"), { insecure: true })).rejects.toThrow(/404/);
+      await expect(httpsDownload(`http://127.0.0.1:${srv.port}/500.zip`, tmp("500"), { insecure: true })).rejects.toThrow(/HTTP 500/);
+    } finally {
+      await srv.close();
+    }
+  }, 30_000);
+
+  it("非回环地址不给明文口子：http://example.com 仍走 https（等于拒掉）", async () => {
+    await expect(httpsDownload("http://example.com/uv.zip", tmp("plain"), { insecure: true })).rejects.toBeTruthy();
+  }, 20_000);
 });

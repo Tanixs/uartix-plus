@@ -2769,3 +2769,96 @@ describe("P177-E 补 · 重复图 / 投料口来源账 / 回收站保留策略",
     }
   }, 90_000);
 });
+
+/* ============================ P178 · 环境自举 ============================ */
+
+describe("P178 · 环境画像与安装命令（纯函数）", () => {
+  it("驱动 → 画像：无卡/低驱动走 CPU，≥525 cu126，≥580 cu130，Pascal 强制 cu126", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    expect(m.recommendEnvProfile("", "").variant).toBe("cpu");
+    expect(m.recommendEnvProfile("RTX 4060", "").variant).toBe("cpu");
+    expect(m.recommendEnvProfile("RTX 4060", "500.10").variant).toBe("cpu");
+    expect(m.recommendEnvProfile("RTX 4060", "550.54").variant).toBe("cu126");
+    expect(m.recommendEnvProfile("RTX 4060", "580.88").variant).toBe("cu130");
+    expect(m.recommendEnvProfile("Tesla P100", "580.88").variant, "Pascal 上不了 CUDA 13").toBe("cu126");
+    expect(m.recommendEnvProfile("NVIDIA GeForce RTX 5090", "590.10").variant).toBe("cu130");
+  });
+
+  it("安装命令：GPU 固定 +cuXXX 且用阿里云 find-links；CPU 不带 +cu / 不带 -f", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    const gpu = m.buildEnvCommands({ uvExe: "uv.exe", envRoot: "C:/ws/.uartix/yolo/envs/gpu-cu126-py312", variant: "cu126" });
+    expect(gpu.torch.args).toContain("torch==2.12.0+cu126");
+    expect(gpu.torch.args).toContain("torchvision==0.27.0+cu126");
+    expect(gpu.torch.args).toContain("--find-links");
+    expect(gpu.torch.args.join(" ")).toContain("mirrors.aliyun.com/pytorch-wheels/cu126");
+    expect(gpu.venv.args).toContain("3.12.16");
+    expect(gpu.venv.env.UV_PYTHON_INSTALL_MIRROR).toContain("mirrors.ustc.edu.cn");
+    expect(gpu.ultralytics.args.join(" ")).toContain("ultralytics==8.4.128");
+
+    const cpu = m.buildEnvCommands({ uvExe: "uv.exe", envRoot: "C:/ws/.uartix/yolo/envs/cpu-py312", variant: "cpu" });
+    expect(cpu.torch.args).toContain("torch==2.12.0");
+    expect(cpu.torch.args).not.toContain("--find-links");
+    expect(cpu.torch.args.join(" ")).not.toContain("+cpu");
+    expect(cpu.venv.env.UV_PYTHON_INSTALL_DIR.replace(/\\/g, "/")).toContain("/python");
+  });
+});
+
+describe("P178 · 环境状态与只读边界", () => {
+  it("envState 给出推荐画像与空环境列表，且不写盘", async () => {
+    const ws = makeWorkspace("env-state");
+    const pluginDir = copyPlugin("env-state");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.envState");
+      expect(s.ok).toBe(true);
+      expect(s.recommended && s.recommended.variant, "没有推荐画像").toBeTruthy();
+      expect(["cu126", "cu130", "cpu"]).toContain(s.recommended.variant);
+      expect(Array.isArray(s.envs)).toBe(true);
+      expect(s.envs.length).toBe(0);
+      expect(s.disk.free).toBeGreaterThan(0);
+      expect(typeof s.usingPluginEnv).toBe("boolean");
+      expect(existsSync(path.join(ws, ".uartix", "yolo", "envs")), "只读探测不该建目录").toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("只读模式：能看状态，envInstall 被拒且不建目录", async () => {
+    const ws = makeWorkspace("env-ro");
+    const pluginDir = copyPlugin("env-ro");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws, {}, { readOnly: true });
+    try {
+      await p.ready;
+      const s = await p.call("panel.train.envState");
+      expect(s.readOnly).toBe(true);
+      await expect(p.call("panel.train.envInstall", { variant: "cpu" })).rejects.toThrow(/只读/);
+      expect(existsSync(path.join(ws, ".uartix", "yolo", "envs"))).toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
+
+describe("P178 · 安装前置校验（拒绝要说得清，且一个字节都不写）", () => {
+  it("写权限下：不支持的画像 / 装到工作区外，都在建目录之前就被拒", async () => {
+    const ws = makeWorkspace("env-guard");
+    const pluginDir = copyPlugin("env-guard");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      await expect(p.call("panel.train.envInstall", { variant: "rocm" })).rejects.toThrow(/不支持的画像/);
+      // 位置暂时只有工作区：传 appdata 必须直说，不能悄悄落到 $WS
+      await expect(p.call("panel.train.envInstall", { variant: "cpu", location: "appdata" })).rejects.toThrow(/只能装在工作区内/);
+      expect(existsSync(path.join(ws, ".uartix", "yolo", "envs")), "被拒的安装不该留下空目录").toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});
