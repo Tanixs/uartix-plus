@@ -2742,7 +2742,7 @@
         renderEnvInstall();
       }
 
-      /* P178：环境自举的极简入口。完整向导（换镜像/换画像/日志）等应用读取上限生效后再展开。 */
+      /* P178：环境自举入口 */
       var envInfo = null;
 
       function renderEnvInstall() {
@@ -2762,6 +2762,22 @@
           var cur = ready.filter(function (x) { return x.id === e.selected; })[0] || ready[0];
           box.innerHTML = '<div class="note" style="margin:8px 0 0"><span class="tag ok">插件环境</span> ' + esc(cur.label || cur.id) +
             ' · torch ' + esc((cur.packages && cur.packages.torch) || "?") + " · " + esc(fmtBytes(cur.bytes || 0)) + "</div>";
+          return;
+        }
+        if (e.lock) {
+          box.innerHTML = '<div class="note" style="margin:8px 0 0">另一个面板正在安装（进程 ' + (Number(e.lock.pid) || "?") + "）。等它结束再试。" +
+            (ro ? "" : ' <button class="btn" id="envul">确认已结束，清理锁</button>') + "</div>";
+          if ($("envul")) $("envul").onclick = async function () {
+            try { await uartix.call("envUnlock"); await loadEnv(); } catch (er) { sysLog("[错误] " + String((er && er.message) || er)); }
+          };
+          return;
+        }
+        var res = (e.resumable || [])[0];
+        if (res) {
+          box.innerHTML = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">' +
+            '<div class="note" style="margin:0 0 6px">上次没装完（停在' + esc(res.phase || "中途") + "）：" + esc(String(res.error || "").slice(0, 90)) + "</div>" +
+            '<button class="btn primary" id="envres"' + (ro ? " disabled" : "") + ">继续安装" + (res.hasVenv ? "（跳过已装好的部分）" : "") + "</button></div>";
+          if ($("envres")) $("envres").onclick = function () { startEnvInstall(res.id.indexOf("cpu") === 0 ? "cpu" : ""); };
           return;
         }
         var rec = e.recommended || {};

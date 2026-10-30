@@ -16,9 +16,12 @@ use std::time::Duration;
 const API: &str = "https://api.github.com";
 const TIMEOUT: Duration = Duration::from_secs(25);
 const MAX_BODY: usize = 256 * 1024;
+/// 包内文件数上限。这是产品约定（一个插件包就是十来个小文件），不是能力限制。
 const MAX_FILES: usize = 12;
-const MAX_FILE_B64: usize = 6 * 1024 * 1024;
-const MAX_TOTAL_B64: usize = 12 * 1024 * 1024;
+/// 单文件 base64 上限。与 `plugin_fs::MAX_READ_B64_BYTES` 对齐：
+/// 读得出来的文件就该发得出去，否则又会出现"本地能用、发出去就报错"。
+const MAX_FILE_B64: usize = 16 * 1024 * 1024;
+const MAX_TOTAL_B64: usize = 48 * 1024 * 1024;
 const FORCED_TOPIC: &str = "uartix-plugin";
 const MAX_TOPICS: usize = 20;
 

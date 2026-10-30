@@ -1616,7 +1616,7 @@ let pyCache = { path: "", ok: false, version: "", source: "", error: "" };
  * 选 2.12.0 而不是更新的 2.14.x：阿里云 cu126 目录最高只有 2.12.0，且 2.12 已稳定半年。
  */
 const ENV_DIR = `${STATE_DIR}/envs`;
-const ENV_SPEC = { python: "3.12.16", torch: "2.12.0", torchvision: "0.27.0", ultralytics: "8.4.128", ultraFallbacks: ["8.4.121", "8.4.102"] };
+const ENV_SPEC = { python: "3.12.16", pythonTag: "20261026", torch: "2.12.0", torchvision: "0.27.0", ultralytics: "8.4.128", ultraFallbacks: ["8.4.121", "8.4.102"] };
 const ENV_MIRRORS = {
   uv: [
     "https://mirrors.ustc.edu.cn/github-release/astral-sh/uv/LatestRelease",
@@ -1660,6 +1660,8 @@ function recommendEnvProfile(gpuName, driverText) {
 function buildEnvCommands(opt) {
   const o = opt || {};
   const uvExe = String(o.uvExe || "uv");
+  // uv 正常就是一个 exe；测试时会换成 `node fake-uv.mjs`，所以命令前缀要能带一串。
+  const pre = Array.isArray(o.uvPrefix) ? o.uvPrefix.map(String) : [];
   const envRoot = String(o.envRoot || "");
   const venv = path.join(envRoot, "venv");
   const py = path.join(venv, "Scripts", "python.exe");
@@ -1676,13 +1678,13 @@ function buildEnvCommands(opt) {
   return {
     venv: {
       cmd: uvExe,
-      args: ["venv", "--python", ENV_SPEC.python, "--python-preference", "only-managed", venv],
+      args: [...pre, "venv", "--python", ENV_SPEC.python, "--python-preference", "only-managed", venv],
       env: { UV_PYTHON_INSTALL_DIR: path.join(envRoot, "python"), UV_PYTHON_INSTALL_MIRROR: pythonMirror, UV_CACHE_DIR: path.join(envRoot, "..", "cache") },
     },
-    torch: { cmd: uvExe, args: torchArgs, env: { UV_CACHE_DIR: path.join(envRoot, "..", "cache") } },
+    torch: { cmd: uvExe, args: [...pre, ...torchArgs], env: { UV_CACHE_DIR: path.join(envRoot, "..", "cache") } },
     ultralytics: {
       cmd: uvExe,
-      args: ["pip", "install", "--python", py, `ultralytics==${ENV_SPEC.ultralytics}`, "--index-url", pypi],
+      args: [...pre, "pip", "install", "--python", py, `ultralytics==${ENV_SPEC.ultralytics}`, "--index-url", pypi],
       env: { UV_CACHE_DIR: path.join(envRoot, "..", "cache") },
     },
     python: py,
@@ -1767,6 +1769,20 @@ async function envState() {
       { id: "appdata", label: "用户数据目录（多工作区共用，省磁盘）" },
     ],
     active: active && active.kind === "env" ? snapshot(active) : null,
+    // P178-B：锁（活着的才算）、上次没装完的（可按磁盘事实续装）、镜像体检缓存
+    lock: envLockAlive(),
+    resumable: envs
+      .filter((e) => ["installing", "cancelled", "broken"].includes(String(e.status)))
+      .map((e) => ({
+        id: e.id,
+        label: e.label || e.id,
+        status: e.status,
+        phase: String(e.phase || ""),
+        error: String(e.error || "").slice(0, 240),
+        hasVenv: !!e.exists,
+        bytes: e.bytes,
+      })),
+    mirrors: envMirrorCache.value ? { at: envMirrorCache.at, rows: envMirrorCache.value.rows, stale: Date.now() - envMirrorCache.at >= 10 * 60e3 } : null,
     readOnly: !canWrite(),
   };
 }
@@ -1958,11 +1974,28 @@ function proxyAlive(proxyUrl) {
 
 /** 下载 uv.exe：按镜像顺序试，成功即停。 */
 async function ensureUv(job) {
+  // 测试口子：`UARTIX_YOLO_UV_TEST=1` + `UARTIX_YOLO_UV_CMD='["node","fake-uv.mjs"]'`。
+  // 状态机的成功/失败/取消/续装四条路都要跑，但真装一次是 4.5 GB —— 换成假安装器。
+  // 生产路径没有这两个变量，永远走下面的真下载。
+  if (process.env.UARTIX_YOLO_UV_TEST === "1" && process.env.UARTIX_YOLO_UV_CMD) {
+    let cmd = [];
+    try {
+      cmd = JSON.parse(process.env.UARTIX_YOLO_UV_CMD);
+    } catch {
+      cmd = [];
+    }
+    if (Array.isArray(cmd) && cmd.length && typeof cmd[0] === "string") {
+      const r = await runOnce(cmd[0], [...cmd.slice(1), "--version"], 20000);
+      if (r.code !== 0) throw new Error(`测试安装器起不来：${(r.err || r.out || "").slice(0, 200)}`);
+      pushLine(job, `[环境] 测试用假安装器：${(r.out || "").trim()}`, "sys");
+      return { uvExe: cmd[0], prefix: cmd.slice(1), version: `${(r.out || "").trim()}（测试）` };
+    }
+  }
   const uvDir = abs(`${ENV_DIR}/uv`);
   const uvExe = path.join(uvDir, "uv.exe");
   if (fs.existsSync(uvExe)) {
     const r = await runOnce(uvExe, ["--version"], 10000);
-    if (r.code === 0) return { uvExe, version: (r.out || "").trim() };
+    if (r.code === 0) return { uvExe, prefix: [], version: (r.out || "").trim() };
   }
   fs.mkdirSync(uvDir, { recursive: true });
   const zip = path.join(uvDir, "uv.zip");
@@ -1996,7 +2029,7 @@ async function ensureUv(job) {
       if (v.code !== 0) throw new Error("uv.exe 起不来");
       job.envSources = { ...(job.envSources || {}), uv: new URL(url).host };
       pushLine(job, `[环境] 安装器就绪：${(v.out || "").trim()}（${new URL(url).host}）`, "sys");
-      return { uvExe, version: (v.out || "").trim() };
+      return { uvExe, prefix: [], version: (v.out || "").trim() };
     } catch (e) {
       tried.push(`${new URL(url).host}: ${(e && e.message) || e}`);
       pushLine(job, `[环境] 这个源不行，换下一个：${tried[tried.length - 1].slice(0, 200)}`, "err");
@@ -2007,6 +2040,122 @@ async function ensureUv(job) {
 
 function envIdFor(kind, variant) {
   return kind === "cpu" ? "cpu-py312" : `gpu-${variant}-py312`;
+}
+
+/* ---------------- P178-B：安装锁 / 续装 / 镜像体检 ---------------- */
+
+const ENV_LOCK = `${ENV_DIR}/.install.lock`;
+
+/**
+ * 锁：同一时刻只允许一份安装。两个面板实例同时跑 `uv pip install` 会把同一个 venv 写坏。
+ * 判活用 `kill(pid, 0)`；再加 6 小时硬上限 —— pid 会被复用，光看 pid 会把死锁当成活的。
+ */
+function envLockAlive() {
+  let j = null;
+  try {
+    j = JSON.parse(fs.readFileSync(abs(ENV_LOCK), "utf8"));
+  } catch {
+    return null;
+  }
+  if (!isObj(j) || !Number(j.pid)) return null;
+  if (Date.now() - Number(j.at || 0) > 6 * 3600e3) return null;
+  try {
+    process.kill(Number(j.pid), 0);
+    return j;
+  } catch {
+    return null;
+  }
+}
+
+function envLockTake(id) {
+  const cur = envLockAlive();
+  if (cur) throw new Error(`另一个面板正在安装（pid ${cur.pid}，${new Date(Number(cur.at)).toLocaleString()} 开始）。等它结束再试；确认它已经没了就点「清理锁」`);
+  fs.mkdirSync(path.dirname(abs(ENV_LOCK)), { recursive: true });
+  writeJsonAtomic(abs(ENV_LOCK), { pid: process.pid, at: Date.now(), id: String(id || "") });
+}
+
+function envLockDrop() {
+  try {
+    fs.unlinkSync(abs(ENV_LOCK));
+  } catch {
+    /* 本来就没有 */
+  }
+}
+
+/** 一次 python 探针：哪些包已经能 import（续装时用来跳过已完成的大步骤）。 */
+async function envImports(py) {
+  const code =
+    "import json\n" +
+    "r={}\n" +
+    "for m in ('torch','torchvision','ultralytics'):\n" +
+    "    try:\n" +
+    "        __import__(m); r[m]=True\n" +
+    "    except Exception:\n" +
+    "        r[m]=False\n" +
+    "print(json.dumps(r))\n";
+  const r = await runOnce(py, ["-c", code], 120000);
+  if (r.code !== 0) return null;
+  try {
+    return JSON.parse(String(r.out || "").trim().split(/\r?\n/).pop());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 上次装到哪一步了。**按磁盘上的事实判断**，不看 env.json 的 phase：
+ * 写 phase 的那行可能被强杀在中间，而 venv/torch 在不在是硬的。
+ */
+async function envResumePlan(envRoot) {
+  const py = path.join(envRoot, "venv", "Scripts", "python.exe");
+  const out = { meta: readEnvMeta(envRoot), venv: fs.existsSync(py), torch: false, ultralytics: false };
+  if (!out.venv) return out;
+  const imp = await envImports(py);
+  if (imp) {
+    out.torch = !!(imp.torch && imp.torchvision);
+    out.ultralytics = !!imp.ultralytics;
+  }
+  return out;
+}
+
+/** 镜像体检（结果缓存 10 分钟）：安装前先知道哪条链路通，失败时日志才说得清。 */
+const envMirrorCache = { at: 0, value: null };
+function envMirrorTargets() {
+  const tag = ENV_SPEC.pythonTag;
+  return [
+    ...ENV_MIRRORS.uv.map((b, i) => ({ layer: "uv", rank: i, url: `${b.replace(/\/+$/, "")}/uv-x86_64-pc-windows-msvc.zip` })),
+    ...ENV_MIRRORS.python.map((b, i) => ({
+      layer: "python",
+      rank: i,
+      url: `${b.replace(/\/+$/, "")}/${tag}/cpython-${ENV_SPEC.python}%2B${tag}-x86_64-pc-windows-msvc-install_only.tar.gz`,
+    })),
+    ...(ENV_MIRRORS.torch.cu126 || []).map((b, i) => ({ layer: "torch", rank: i, url: `${b.replace(/\/+$/, "")}/` })),
+    ...ENV_MIRRORS.pypi.map((b, i) => ({ layer: "pypi", rank: i, url: `${b.replace(/\/+$/, "")}/ultralytics/` })),
+  ];
+}
+
+async function envMirrors(force) {
+  if (!force && envMirrorCache.value && Date.now() - envMirrorCache.at < 10 * 60e3) return envMirrorCache.value;
+  const targets = envMirrorTargets();
+  const rows = await Promise.all(
+    targets.map(async (t) => {
+      const r = await headOk(t.url, 4000);
+      return { layer: t.layer, rank: t.rank, host: (() => { try { return new URL(t.url).host; } catch { return ""; } })(), ok: r.ok, ms: r.ms };
+    }),
+  );
+  const value = { at: Date.now(), rows };
+  envMirrorCache.at = value.at;
+  envMirrorCache.value = value;
+  return value;
+}
+
+/** 某一层的第一选择通不通；不通就返回"已切到 X"，给安装日志与面板用。 */
+function mirrorPick(mirrors, layer, list) {
+  const rows = ((mirrors && mirrors.rows) || []).filter((r) => r.layer === layer);
+  const first = rows.find((r) => r.rank === 0);
+  if (!first || first.ok) return { host: (list[0] ? new URL(list[0]).host : ""), switched: false, ok: first ? first.ok : null };
+  const alt = rows.sort((a, b) => a.rank - b.rank).find((r) => r.ok);
+  return { host: alt ? alt.host : "", switched: true, ok: false };
 }
 
 /**
@@ -2034,7 +2183,8 @@ async function envInstall(req) {
   if (free && free < need) {
     throw new Error(`磁盘不够：${variant} 至少需要 ${fmtBytes(need)}，当前可用 ${fmtBytes(free)}。先到资产页清理，或换到空间更大的盘。`);
   }
-
+  // 锁要在建目录之前拿：拿不到就一个字节都别写（不能让"被拒"留下半成品）。
+  // 放在 try 里是为了 finally 一定能放掉 —— 锁泄漏比安装失败更难查。
   const job = newJob("env", `安装环境 ${variant}`);
   job.envTarget = { id, variant, kind, envRoot: envRoot.replace(/\\/g, "/") };
   jobs.set(job.id, job);
@@ -2046,8 +2196,12 @@ async function envInstall(req) {
     emitJob(job);
   };
 
-  let code = 1;
+  let exitCode = 1;
+  let locked = false;
+  let resume = { venv: false, torch: false, ultralytics: false, meta: null };
   try {
+    envLockTake(id);
+    locked = true;
     // 配置里开了代理就先用它，但**先探活**：代理没起来时把 uv 指向死端口，
     // 每个镜像都会"连得上但没响应"，比直连更难排查。
     try {
@@ -2065,27 +2219,50 @@ async function envInstall(req) {
       /* 读不到配置就直连：安装不该被一个坏 config.yaml 挡住 */
     }
     fs.mkdirSync(envRoot, { recursive: true });
+    // 续装：venv / torch / ultralytics 已经在的话就别重下 4 GB。
+    // **必须先读再写**：下面那行会覆盖 env.json，先写就把"第一次创建时间"和
+    // "上次死在哪一步"一起冲掉了，续装会变成一次来历不明的新装。
+    step("plan", 2, "看看上次装到哪一步");
+    resume = await envResumePlan(envRoot);
+    if (resume.venv) {
+      pushLine(job, `[环境] 发现上次装到一半：venv 在${resume.torch ? "、torch 能用" : ""}${resume.ultralytics ? "、ultralytics 能用" : ""}，跳过已完成的部分`, "sys");
+    }
     writeJsonAtomic(path.join(envRoot, "env.json"), {
       schemaVersion: 1,
       id,
       kind,
       label: kind === "gpu" ? `GPU · CUDA ${variant === "cu130" ? "13.0" : "12.6"} · Python 3.12` : "CPU · Python 3.12",
       status: "installing",
-      createdAt: new Date().toISOString(),
+      phase: "plan",
+      createdAt: (resume.meta && resume.meta.createdAt) || new Date().toISOString(),
       gpu: nv || null,
       spec: ENV_SPEC,
       sources: {},
     });
 
-    step("uv", 1, "准备安装器（uv）");
+    // 镜像体检：只为了让日志说得清"为什么换了源"，不挡安装（真连不上会在每一步自己重试）
+    try {
+      const mirrors = await envMirrors(false);
+      job.envMirrors = mirrors;
+      for (const layer of ["uv", "python", "torch", "pypi"]) {
+        const list = layer === "torch" ? ENV_MIRRORS.torch[variant] || [] : ENV_MIRRORS[layer] || [];
+        const pick = mirrorPick(mirrors, layer, list);
+        if (pick.switched) pushLine(job, `[环境] ${layer} 的第一选择 ${list[0] ? new URL(list[0]).host : ""} 连不上，已切到 ${pick.host || "备用源"}`, "err");
+      }
+    } catch {
+      /* 体检本身失败不挡安装 */
+    }
+
+    step("uv", 3, "准备安装器（uv）");
     const uv = await ensureUv(job);
+    const cp = (extra) => ({ uvExe: uv.uvExe, uvPrefix: uv.prefix || [], envRoot, variant, ...(extra || {}) });
 
     step("python", 8, `安装 Python ${ENV_SPEC.python}`);
-    const cmds = buildEnvCommands({ uvExe: uv.uvExe, envRoot, variant, sources: {} });
-    let venvOk = false;
+    const cmds = buildEnvCommands(cp({ sources: {} }));
+    let venvOk = !!resume.venv;
     let lastErr = "";
     for (let i = 0; i < ENV_MIRRORS.python.length && !venvOk; i++) {
-      const c = buildEnvCommands({ uvExe: uv.uvExe, envRoot, variant, sources: { python: ENV_MIRRORS.python[i] } });
+      const c = buildEnvCommands(cp({ sources: { python: ENV_MIRRORS.python[i] } }));
       try {
         await runEnvStep(job, c.venv, "装 Python");
         venvOk = true;
@@ -2101,10 +2278,10 @@ async function envInstall(req) {
     // CPU 版没有 `-f` 可换：torch 直接从 PyPI 拿（Windows 上 PyPI 的 torch 就是 CPU 构建），
     // 所以"换源"要换的是 **PyPI 镜像**，而不是那张只有一条的 torch 目录表。
     const torchBases = kind === "cpu" ? ENV_MIRRORS.pypi : ENV_MIRRORS.torch[variant] || [];
-    let torchOk = false;
+    let torchOk = !!resume.torch;
     lastErr = "";
-    for (const base of torchBases) {
-      const c = buildEnvCommands({ uvExe: uv.uvExe, envRoot, variant, sources: kind === "cpu" ? { pypi: base } : { torch: base } });
+    for (const base of torchOk ? [] : torchBases) {
+      const c = buildEnvCommands(cp({ sources: kind === "cpu" ? { pypi: base } : { torch: base } }));
       try {
         await runEnvStep(job, c.torch, "装 torch");
         torchOk = true;
@@ -2118,11 +2295,12 @@ async function envInstall(req) {
     if (!torchOk) throw new Error(`torch 装不上（试过 ${torchBases.length} 个源）：${lastErr}`);
 
     step("ultralytics", 80, `安装 ultralytics ${ENV_SPEC.ultralytics}`);
-    let ultraOk = false;
+    let ultraOk = !!resume.ultralytics;
+    if (ultraOk) pushLine(job, "[环境] ultralytics 上次已经装好，跳过", "sys");
     lastErr = "";
-    for (const ver of [ENV_SPEC.ultralytics, ...ENV_SPEC.ultraFallbacks]) {
+    for (const ver of ultraOk ? [] : [ENV_SPEC.ultralytics, ...ENV_SPEC.ultraFallbacks]) {
       for (const pypi of ENV_MIRRORS.pypi) {
-        const c = buildEnvCommands({ uvExe: uv.uvExe, envRoot, variant, sources: { pypi } });
+        const c = buildEnvCommands(cp({ sources: { pypi } }));
         const spec = { ...c.ultralytics, args: c.ultralytics.args.map((x) => (x === `ultralytics==${ENV_SPEC.ultralytics}` ? `ultralytics==${ver}` : x)) };
         try {
           await runEnvStep(job, spec, "装 ultralytics");
@@ -2139,11 +2317,11 @@ async function envInstall(req) {
     if (!ultraOk) throw new Error(`ultralytics 装不上：${lastErr}`);
 
     step("probe", 92, "自检（import torch / CUDA / 版本）");
-    const code =
+    const probeSrc =
       "import json,torch,ultralytics\n" +
       "print(json.dumps({'torch':torch.__version__,'cuda':bool(torch.cuda.is_available()),'device':(torch.cuda.get_device_name(0) if torch.cuda.is_available() else ''),'ultralytics':ultralytics.__version__},ensure_ascii=True))\n";
     const py = cmds.python;
-    const pr = await runOnce(py, ["-c", code], 120000);
+    const pr = await runOnce(py, ["-c", probeSrc], 120000);
     if (pr.code !== 0) throw new Error(`自检失败：${(pr.err || pr.out || "").slice(-300)}`);
     let probe = null;
     try {
@@ -2154,6 +2332,12 @@ async function envInstall(req) {
     if (kind === "gpu" && !probe.cuda) {
       throw new Error("装的是 GPU 版，但 torch.cuda.is_available() = false。多半是驱动太旧或显卡不在 CUDA 支持列表：先更新驱动，或改用 CPU 版。");
     }
+    // 依赖一致性：**只记不拦**。ultralytics 会把 opencv/numpy 拉成各种版本，
+    // 谁跟谁冲突它自己也能 import —— 记下来，真出问题时才有据可查。
+    step("probe", 96, "检查依赖一致性（uv pip check）");
+    const ck = await runOnce(uv.uvExe, [...(uv.prefix || []), "pip", "check", "--python", py], 120000);
+    const deps = ck.code === 0 ? "ok" : String(ck.out || ck.err || `退出码 ${ck.code}`).trim().slice(-400);
+    if (ck.code !== 0) pushLine(job, `[环境] 依赖检查有话说（不影响使用）：${deps.slice(0, 200)}`, "err");
 
     const meta = {
       schemaVersion: 1,
@@ -2161,14 +2345,17 @@ async function envInstall(req) {
       kind,
       label: kind === "gpu" ? `GPU · CUDA ${variant === "cu130" ? "13.0" : "12.6"} · Python 3.12` : "CPU · Python 3.12",
       status: "ready",
-      createdAt: job.startedAt ? new Date(job.startedAt).toISOString() : new Date().toISOString(),
+      phase: "ready",
+      // 续装不是"新装一份"：第一次创建的时间要留着，否则资产页按时间排会把它排到最前面
+      createdAt: (resume.meta && resume.meta.createdAt) || (job.startedAt ? new Date(job.startedAt).toISOString() : new Date().toISOString()),
       updatedAt: new Date().toISOString(),
       python: { version: ENV_SPEC.python, exe: py.replace(/\\/g, "/") },
       installer: { uv: uv.version, uvExe: uv.uvExe.replace(/\\/g, "/") },
       packages: { torch: probe.torch, torchvision: ENV_SPEC.torchvision, ultralytics: probe.ultralytics || job.envUltra },
       gpu: nv || null,
-      probe: { ...probe, checkedAt: new Date().toISOString() },
+      probe: { ...probe, deps, checkedAt: new Date().toISOString() },
       sources: job.envSources || {},
+      resumed: { venv: resume.venv, torch: resume.torch, ultralytics: resume.ultralytics },
       diskBytes: walkStats(envRoot).bytes,
       location: "workspace",
     };
@@ -2180,35 +2367,46 @@ async function envInstall(req) {
     job.progress.phase = "done";
     job.progress.percent = 100;
     job.progress.detail = `${meta.label} 装好了：torch ${probe.torch} / ultralytics ${probe.ultralytics}`;
-    code = 0;
+    exitCode = 0;
     try { ctx.panels.emit(PANEL, "env", { id, meta }); } catch { /* 面板没开 */ }
     return { ok: true, id, meta };
   } catch (e) {
     const msg = (e && e.message) || String(e);
-    try {
-      writeJsonAtomic(path.join(envRoot, "env.json"), {
+    // 没拿到锁 = 这次安装根本没开始：一个字节都别写（包括 env.json），
+    // 否则"被别的面板挡住"会在这里留一个假的 broken 环境。
+    if (locked) {
+      try {
+        writeJsonAtomic(path.join(envRoot, "env.json"), {
         schemaVersion: 1,
         id,
         kind,
         label: kind === "gpu" ? `GPU · ${variant}` : "CPU",
         status: job.stopped ? "cancelled" : "broken",
-        createdAt: new Date().toISOString(),
+        // phase 记「死在哪一步」，续装时给用户看的；logTail 是最后 20 行，复制诊断够用
+        phase: String(job.progress.phase || ""),
+        createdAt: (resume.meta && resume.meta.createdAt) || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         error: msg.slice(0, 500),
+        logTail: job.lines.slice(-20).map((x) => String(x).slice(0, 300)),
         gpu: nv || null,
         spec: ENV_SPEC,
-      });
-    } catch {
-      /* 目录都写不了就算了，错误已经抛给调用方 */
+        sources: job.envSources || {},
+        });
+      } catch {
+        /* 目录都写不了就算了，错误已经抛给调用方 */
+      }
     }
     throw e;
   } finally {
     // 终态必须走 finishJob：否则这条 env 任务会在 jobs 里永远显示「运行中」，
     // 面板顶上的任务卡和 `state.jobs` 都会一直挂着一个不动的进度条。
     try {
-      finishJob(job, code);
+      finishJob(job, exitCode);
     } catch {
       /* 日志收尾失败不挡返回值 */
     }
+    // 锁一定要放掉：留着会让用户永远装不了第二次，而错误提示只会说"另一个面板在装"
+    if (locked) envLockDrop();
     if (active === job) active = null;
   }
 }
@@ -4714,6 +4912,22 @@ async function activate(c) {
       return await envRemove(req);
     },
 
+    /** 镜像体检（缓存 10 分钟）：`{ force?: true }`。面板"镜像体检"与安装前的日志都用它。 */
+    async envMirrors(req) {
+      const o = isObj(req) ? req : {};
+      return { ok: true, ...(await envMirrors(o.force === true)) };
+    },
+
+    /** 清掉一个**死锁**（进程已经不在了 / 超过 6 小时）。活着的锁不给清。 */
+    async envUnlock() {
+      needWorkspace();
+      if (!canWrite()) throw new Error("当前是只读模式：不能清锁");
+      const live = envLockAlive();
+      if (live) throw new Error(`锁还活着（pid ${live.pid}）：安装可能真的在跑，不能清`);
+      envLockDrop();
+      return { ok: true, state: await envState() };
+    },
+
     async deployState() {
       return await deployState();
     },
@@ -6210,4 +6424,7 @@ export {
   taskMismatch,
   // 只给测试：下载器要对着本地假服务验续传/重定向，没有导出口就没法在进程内测
   httpsDownload,
+  // 只给测试：镜像体检的靶子表与"第一选择不通就切"的判定，都是纯函数
+  envMirrorTargets,
+  mirrorPick,
 };

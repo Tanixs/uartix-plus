@@ -20,7 +20,7 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -347,7 +347,8 @@ function startPlugin(pluginDir, ws, roots, opts) {
   // opts.readOnly：传工作区但**不批写权限**，验只读模式（P177-B）。
   if (ws && !(opts && opts.readOnly)) args.push(`--allow-fs-write=${ws}`);
   args.push("--allow-child-process", bootPath, pluginDir);
-  const child = spawn(process.execPath, args, { cwd: pluginDir, windowsHide: true });
+  // opts.env：P178-B 要把假安装器（`node fake-uv.mjs`）通过环境变量递给插件子进程
+  const child = spawn(process.execPath, args, { cwd: pluginDir, windowsHide: true, env: { ...process.env, ...((opts && opts.env) || {}) } });
 
   const events = [];
   const results = new Map();
@@ -2861,4 +2862,269 @@ describe("P178 · 安装前置校验（拒绝要说得清，且一个字节都�
       await p.done;
     }
   }, 90_000);
+});
+
+/* ============================ P178-B · 安装器状态机（假 uv） ============================ */
+
+/**
+ * 真装一次是 4.5 GB + 十几分钟，而"装失败时会不会把状态写坏"才是最该验的。
+ * 这里把 uv 换成 `scripts/fixtures/fake-uv.mjs`（60 行），四条路都能精确制造：
+ * 成功 / 某步失败 / 续装 / 锁。**不联网、不碰用户机器**。
+ */
+const FAKE_UV = path.join(HERE, "fixtures", "fake-uv.mjs");
+/** 这台机器上那套真 python（有 torch + ultralytics）：假 uv 用 junction 把 venv/Scripts 指过去，
+ *  自检就真的是在 import torch，而不是桩数据。没有它就跳过"必须装成功"的那几条。 */
+const REAL_PY_DIR = "D:/projects/anaconda3/envs/yolo_env";
+const HAS_PY = existsSync(path.join(REAL_PY_DIR, "python.exe"));
+
+/**
+ * 假安装器的调用日志**必须落在工作区里**：插件进程跑在 Node 权限模型下
+ * （`--allow-fs-write=<ws>`），子进程继承这层限制，写工作区外会静默失败，
+ * 判据就会变成"一条 install 都没调"这种看不出来的假红。
+ */
+function fakeEnv(ws, tag, extra) {
+  const log = path.join(ws, `.fakeuv-${tag}-${Math.random().toString(36).slice(2, 6)}.jsonl`);
+  return {
+    log,
+    env: {
+      UARTIX_YOLO_UV_TEST: "1",
+      UARTIX_YOLO_UV_CMD: JSON.stringify([process.execPath, FAKE_UV]),
+      FAKE_UV_LOG: log,
+      ...(extra || {}),
+    },
+  };
+}
+
+function uvCalls(log) {
+  if (!existsSync(log)) return [];
+  return readFileSync(log, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return { argv: [] };
+      }
+    });
+}
+
+const envMetaPath = (ws, id) => path.join(ws, ".uartix", "yolo", "envs", id, "env.json");
+const envLockPath = (ws) => path.join(ws, ".uartix", "yolo", "envs", ".install.lock");
+
+/** 造一份"上次装到一半"的环境：env.json 是 broken，但 venv 里真的能 import torch。 */
+function seedHalfInstalled(ws, id) {
+  const root = path.join(ws, ".uartix", "yolo", "envs", id);
+  mkdirSync(path.join(root, "venv"), { recursive: true });
+  symlinkSync(REAL_PY_DIR, path.join(root, "venv", "Scripts"), "junction");
+  writeFileSync(
+    envMetaPath(ws, id),
+    JSON.stringify({
+      schemaVersion: 1,
+      id,
+      kind: "cpu",
+      label: "CPU · Python 3.12",
+      status: "broken",
+      phase: "ultralytics",
+      createdAt: "2026-10-30T01:00:00.000Z",
+      error: "上次在装 ultralytics 时断网",
+      spec: {},
+    }),
+    "utf8",
+  );
+  return root;
+}
+
+describe("P178-B · 安装器状态机（假安装器）", () => {
+  it("新装：venv → torch → ultralytics 都真调了，自检过不去就 broken/phase=probe、不设默认", async () => {
+    const ws = makeWorkspace("env-fresh");
+    const pluginDir = copyPlugin("env-fresh");
+    fakeRunner(pluginDir);
+    const f = fakeEnv(ws, "fresh");
+    const p = startPlugin(pluginDir, ws, {}, { env: f.env });
+    try {
+      await p.ready;
+      // 假安装器建的 venv 里没有 python.exe（见 fixtures/fake-uv.mjs 顶部注释），自检必然失败。
+      // 这条要验的正是"装到最后一步才发现环境是坏的"时，状态与默认值有没有被写坏。
+      await expect(p.call("panel.train.envInstall", { variant: "cpu" })).rejects.toThrow(/自检失败/);
+
+      const meta = JSON.parse(readFileSync(envMetaPath(ws, "cpu-py312"), "utf8"));
+      expect(meta.status).toBe("broken");
+      expect(meta.phase).toBe("probe");
+      expect(existsSync(envLockPath(ws)), "失败也要放锁").toBe(false);
+
+      const calls = uvCalls(f.log);
+      const kinds = calls.map((c) => c.kind);
+      expect(kinds.filter((k) => k === "install").length, "torch 与 ultralytics 各装一次").toBe(2);
+      expect(calls.some((c) => c.kind === "install" && c.which === "torch")).toBe(true);
+      expect(calls.some((c) => c.kind === "install" && c.which === "ultralytics")).toBe(true);
+
+      const st = await p.call("panel.train.envState");
+      expect(st.selected, "自检没过就不能设成默认").toBe("");
+      expect(st.resumable[0]).toMatchObject({ status: "broken", phase: "probe", hasVenv: false });
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 180_000);
+
+  it("torch 装不上：broken + phase=torch + 日志留尾 + 不设默认 + 锁放掉", async () => {
+    const ws = makeWorkspace("env-torchfail");
+    const pluginDir = copyPlugin("env-torchfail");
+    fakeRunner(pluginDir);
+    const f = fakeEnv(ws, "torchfail", { FAKE_UV_FAIL: "torch" });
+    const p = startPlugin(pluginDir, ws, {}, { env: f.env });
+    try {
+      await p.ready;
+      await expect(p.call("panel.train.envInstall", { variant: "cpu" })).rejects.toThrow(/torch 装不上/);
+
+      const meta = JSON.parse(readFileSync(envMetaPath(ws, "cpu-py312"), "utf8"));
+      expect(meta.status).toBe("broken");
+      expect(meta.phase).toBe("torch");
+      expect(String(meta.error)).toMatch(/torch/);
+      expect(meta.label, "失败也要保留可读的名字").toMatch(/CPU/);
+      expect(Array.isArray(meta.logTail) && meta.logTail.length > 0, "失败要点日志尾巴，不然只能让人重跑一次复现").toBe(true);
+      expect(existsSync(envLockPath(ws)), "失败也要放锁，否则用户永远装不了第二次").toBe(false);
+
+      const st = await p.call("panel.train.envState");
+      expect(st.selected, "没装好就不能设成默认").toBe("");
+      expect(st.resumable.length).toBe(1);
+      expect(st.resumable[0]).toMatchObject({ id: "cpu-py312", status: "broken", phase: "torch" });
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 180_000);
+
+  it("续装：venv/torch/ultralytics 都在就不再调安装器，直接自检通过", async () => {
+    if (!HAS_PY) return;
+    const ws = makeWorkspace("env-resume");
+    const pluginDir = copyPlugin("env-resume");
+    fakeRunner(pluginDir);
+    seedHalfInstalled(ws, "cpu-py312");
+    const f = fakeEnv(ws, "resume");
+    const p = startPlugin(pluginDir, ws, {}, { env: f.env });
+    try {
+      await p.ready;
+      const before = await p.call("panel.train.envState");
+      expect(before.resumable.length, "半成品必须能被看见").toBe(1);
+      expect(before.resumable[0].hasVenv).toBe(true);
+
+      const r = await p.call("panel.train.envInstall", { variant: "cpu" });
+      expect(r.ok).toBe(true);
+      const meta = JSON.parse(readFileSync(envMetaPath(ws, "cpu-py312"), "utf8"));
+      expect(meta.status).toBe("ready");
+      expect(meta.resumed, "三步都该被认出来已装好").toEqual({ venv: true, torch: true, ultralytics: true });
+      expect(meta.createdAt, "续装不该改写原始创建时间").toBe("2026-10-30T01:00:00.000Z");
+
+      const kinds = uvCalls(f.log).map((c) => c.kind);
+      expect(kinds.includes("venv"), "venv 已经在了，不该再调 uv venv").toBe(false);
+      expect(kinds.includes("install"), "torch/ultralytics 都能 import，不该再装一遍").toBe(false);
+      expect(kinds.includes("check"), "依赖检查仍然要做").toBe(true);
+
+      // 这条同时是**成功路径**的判据：真 python 上自检真的过了
+      expect(String(meta.packages.torch)).toMatch(/^\d+\.\d+/);
+      expect(meta.probe.deps, "uv pip check 的结论要落盘").toBe("ok");
+      expect(String(meta.python.exe).replace(/\\/g, "/")).toContain("/envs/cpu-py312/venv/Scripts/python.exe");
+      expect(existsSync(envLockPath(ws)), "装完锁必须放掉").toBe(false);
+
+      const st = await p.call("panel.train.envState");
+      expect(st.selected, "装完要设成默认").toBe("cpu-py312");
+      expect(st.envs.filter((e) => e.status === "ready").length).toBe(1);
+      expect(st.resumable.length, "装成功之后不该还挂着「可续装」").toBe(0);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 180_000);
+
+  it("锁：活着的安装挡住第二次；死锁自动忽略，也能手动清掉", async () => {
+    const ws = makeWorkspace("env-lock");
+    const pluginDir = copyPlugin("env-lock");
+    fakeRunner(pluginDir);
+    const lock = envLockPath(ws);
+    mkdirSync(path.dirname(lock), { recursive: true });
+    // 活锁：pid 用一个确实存在的进程（就是测试进程自己）
+    writeFileSync(lock, JSON.stringify({ pid: process.pid, at: Date.now(), id: "cpu-py312" }), "utf8");
+    const f = fakeEnv(ws, "lock");
+    const p = startPlugin(pluginDir, ws, {}, { env: f.env });
+    try {
+      await p.ready;
+      await expect(p.call("panel.train.envInstall", { variant: "cpu" })).rejects.toThrow(/另一个面板正在安装/);
+      expect(existsSync(envMetaPath(ws, "cpu-py312")), "被锁挡住时不该建任何东西").toBe(false);
+
+      // 死锁：pid 不存在
+      writeFileSync(lock, JSON.stringify({ pid: 999999999, at: Date.now(), id: "cpu-py312" }), "utf8");
+      const st = await p.call("panel.train.envState");
+      expect(st.lock, "死锁不能被当成活的").toBe(null);
+
+      const u = await p.call("panel.train.envUnlock");
+      expect(u.ok).toBe(true);
+      expect(existsSync(lock)).toBe(false);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+
+  it("依赖检查不一致只记录、不拦（ultralytics 的依赖冲突不该让人白装一次）", async () => {
+    if (!HAS_PY) return;
+    const ws = makeWorkspace("env-baddeps");
+    const pluginDir = copyPlugin("env-baddeps");
+    fakeRunner(pluginDir);
+    seedHalfInstalled(ws, "cpu-py312");
+    const f = fakeEnv(ws, "baddeps", { FAKE_UV_BADDEPS: "1" });
+    const p = startPlugin(pluginDir, ws, {}, { env: f.env });
+    try {
+      await p.ready;
+      const r = await p.call("panel.train.envInstall", { variant: "cpu" });
+      expect(r.ok, "依赖检查报不一致不该让安装失败").toBe(true);
+      const meta = JSON.parse(readFileSync(envMetaPath(ws, "cpu-py312"), "utf8"));
+      expect(meta.status).toBe("ready");
+      expect(String(meta.probe.deps)).toMatch(/numpy/);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 180_000);
+});
+
+describe("P178-B · 镜像体检（纯函数）", () => {
+  it("靶子表：四层各三源；Python 那条带 tag 与 %2B", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    const t = m.envMirrorTargets();
+    for (const layer of ["uv", "python", "torch", "pypi"]) {
+      expect(t.filter((x) => x.layer === layer).length, `${layer} 应该有三个源`).toBe(3);
+    }
+    const py = t.find((x) => x.layer === "python" && x.rank === 0);
+    expect(py.url).toContain("20261026");
+    expect(py.url, "asset 名里的 + 必须编码，否则镜像站当成空格").toContain("%2B");
+    expect(py.url).toMatch(/cpython-3\.12\.16/);
+    expect(t.find((x) => x.layer === "uv").url).toMatch(/uv-x86_64-pc-windows-msvc\.zip$/);
+  });
+
+  it("第一选择挂了就切第二；全挂就说没有可用的", async () => {
+    const m = await import("../../plugins/uartix.yolo/main.mjs");
+    const list = ["https://a.example/simple", "https://b.example/simple", "https://c.example/simple"];
+    const up = m.mirrorPick({ rows: [{ layer: "pypi", rank: 0, host: "a.example", ok: true }] }, "pypi", list);
+    expect(up.switched).toBe(false);
+    expect(up.host).toBe("a.example");
+
+    const down = m.mirrorPick(
+      {
+        rows: [
+          { layer: "pypi", rank: 0, host: "a.example", ok: false },
+          { layer: "pypi", rank: 1, host: "b.example", ok: true },
+        ],
+      },
+      "pypi",
+      list,
+    );
+    expect(down.switched).toBe(true);
+    expect(down.host).toBe("b.example");
+
+    const allDown = m.mirrorPick({ rows: [{ layer: "pypi", rank: 0, host: "a.example", ok: false }] }, "pypi", list);
+    expect(allDown.host).toBe("");
+    expect(allDown.ok).toBe(false);
+  });
 });
