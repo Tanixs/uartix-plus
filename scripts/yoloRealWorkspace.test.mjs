@@ -151,9 +151,12 @@ describe("P174-A9 · 真工作区自检（只读）", () => {
           "run 状态缺失",
         ).toBe(true);
 
-        // python 来自 `_env.bat`，而且它能读 YAML（这条是兜底解析器之外的正路）
+        // python 得能用，而且它能读 YAML（这条是兜底解析器之外的正路）。
+        // 来源只要求"是两条正路之一"：装了插件环境后（P178）它按优先级会盖过 `_env.bat`，
+        // 这不是回退，是设计 —— 把这条钉死成 `_env.bat` 会让"用户真的装了环境"变成测试红。
         expect(st.python.ok, JSON.stringify(st.python)).toBe(true);
-        expect(st.python.source).toBe("_env.bat");
+        const pySrc = String(st.python.source);
+        expect(pySrc === "_env.bat" || pySrc.startsWith("plugin-env:"), `python 来源既不是 _env.bat 也不是插件环境：${pySrc}`).toBe(true);
         expect(st.config.baseFound, st.config.baseError).toBe(true);
         expect(st.config.baseSource).toBe("python");
 

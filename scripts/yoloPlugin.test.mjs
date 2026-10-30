@@ -3295,3 +3295,41 @@ describe("P178-D · 环境开关（用回自己的 Python）", () => {
     }
   }, 120_000);
 });
+
+/* ============================ 日志接回来（面板重载） ============================ */
+
+/**
+ * 用户报的现象：切到别的面板 / 换个主题回来，日志全没了。
+ * 根因是日志只活在 iframe 的 DOM 里，面板一重载（srcdoc 重建）就归零。
+ * 判据：跑一个任务 → 调 logs → 必须能把历史原样取回（带 stream，前端才分得清错误行）。
+ */
+describe("日志重挂恢复", () => {
+  it("任务跑完后 logs 仍能取回全部行（含 err 流标记），面板重载不丢", async () => {
+    const ws = makeWorkspace("logs-restore");
+    const pluginDir = copyPlugin("logs-restore");
+    fakeRunner(pluginDir);
+    const p = startPlugin(pluginDir, ws);
+    try {
+      await p.ready;
+      const ds = await p.call("panel.train.startDataset", {});
+      await p.waitFor(() => {
+        const jobs = p.events.filter((e) => e.event === "job").map((e) => e.payload);
+        return jobs.find((j) => j.id === ds.id && j.state !== "running");
+      }, 45_000, "数据集任务结束");
+
+      const r = await p.call("panel.train.logs", { limit: 200 });
+      expect(r.ok).toBe(true);
+      expect(r.job, "应当带回最近那条任务").toBeTruthy();
+      expect(r.job.id).toBe(ds.id);
+      expect(r.job.state).not.toBe("running");
+      expect(r.lines.length).toBeGreaterThan(0);
+      expect(r.lines.every((l) => typeof l.text === "string")).toBe(true);
+      expect(r.lines.every((l) => typeof l.stream === "string"), "stream 丢了前端就分不清错误行").toBe(true);
+      expect(r.lines.some((l) => /\[工作台\]/.test(l.text)), "要带回工作台自己的行").toBe(true);
+      expect(r.total).toBeGreaterThanOrEqual(r.lines.length);
+    } finally {
+      p.child.stdin.end();
+      await p.done;
+    }
+  }, 90_000);
+});

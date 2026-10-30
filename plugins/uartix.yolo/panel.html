@@ -1472,19 +1472,38 @@
       }
       
       .mlgrid {
-        margin-top: 8px;
+        margin-top: 2px;
       }
+      /* 表头 + 行用同一套列宽：以前没有表头，第三列又塞了长句，窄下来就打架 */
+      .mlhead,
       .mlrow {
         display: grid;
-        grid-template-columns: minmax(120px, 1fr) 52px minmax(110px, 1.1fr) 118px;
+        grid-template-columns: minmax(0, 1fr) 46px 72px 78px;
         gap: 8px;
         align-items: center;
+      }
+      .mlhead {
+        color: var(--faint);
+        font-size: var(--fs-micro);
+        padding: 0 0 4px;
+      }
+      .mlhead span:last-child {
+        text-align: right;
+      }
+      .mlrow {
         padding: 6px 0;
         border-top: 1px solid var(--line);
         font-size: 11px;
       }
-      .mlrow:first-child {
-        border-top: 0;
+      .mlrow > * {
+        min-width: 0;
+      }
+      .mlrow .btn {
+        justify-self: end;
+      }
+      .mlrow .sz {
+        text-align: right;
+        font-family: var(--mono);
       }
       .mlrow .nm {
         font-weight: 600;
@@ -1631,6 +1650,10 @@
       }
       .assetdlg[hidden] {
         display: none;
+      }
+      /* 官方权重：五列（名称/任务/大小/按钮）+ 一行进度，680 太挤 */
+      #mldlg {
+        width: min(760px, calc(100vw - 40px));
       }
       .assetdlg .drawer-h {
         display: flex;
@@ -2438,16 +2461,12 @@
       </section>
       <div id="mldlg" class="assetdlg" hidden role="dialog" aria-modal="true" aria-label="官方权重下载">
         <div class="drawer-h">
-          <span class="drawer-t">官方权重 <span class="tag" id="mlrel">v8.4.0</span></span>
+          <span class="drawer-t">官方权重 <span class="tag" id="mlrel">v8.4.0</span> <span class="tag" id="mlnote"></span></span>
           <button class="btn" id="mldlgclose" title="关闭（Esc）">关闭</button>
         </div>
         <div class="drawer-b">
           <p class="note" style="margin:0 0 8px">只从 <code>ultralytics/assets</code> 官方 release 下载，只列检测与分割（本插件真能训/能部署的两类）。权重按 <b>AGPL-3.0</b> 提供，不打包进插件。</p>
-          <div class="row" style="flex-wrap:wrap;align-items:center">
-            <label class="p bool" style="font-size:11px"><input type="checkbox" id="mllicense" /> 我已了解 AGPL-3.0，仅本地使用 / 自行确认合规</label>
-            <span class="spacer"></span>
-            <span class="note" id="mlnote" style="margin:0"></span>
-          </div>
+          <label class="p bool" style="font-size:11px;display:flex;margin:0 0 8px"><input type="checkbox" id="mllicense" /> 我已了解 AGPL-3.0，仅本地使用 / 自行确认合规</label>
           <div class="segmented" id="mlseg" role="tablist" aria-label="模型代">
             <button data-mlfam="yolo11" class="on" role="tab" aria-selected="true">YOLO11</button>
             <button data-mlfam="yolo26" role="tab" aria-selected="false">YOLO26</button>
@@ -2459,6 +2478,7 @@
               <p class="note" id="mlprogtext" style="margin:0;flex:1"></p>
               <button class="btn" id="mlcancel">取消下载</button>
             </div>
+            <p class="note" id="mlwhere" style="margin:4px 0 0;font-family:var(--mono);font-size:11px"></p>
           </div>
         </div>
       </div>
@@ -2634,6 +2654,24 @@ if (!$("logwrap").classList.contains("open")) $("logwrap").classList.add("hot");
 }
 function sysLog(text, stream) {
 appendLog([{ text: "[面板] " + text, stream: stream || "sys" }]);
+}
+
+/* 面板重载后把历史接回来：切到别的面板、切主题、把面板拖到另一个分组都会重建 iframe，
+   而这之前日志只活在 DOM 里 —— 用户看到的就是"日志全部消失了"。 */
+async function restoreLog() {
+try {
+var r = await uartix.call("logs", { limit: 300 });
+if (!r || !r.lines || !r.lines.length) return;
+var more = (r.total || 0) - r.lines.length;
+if (more > 0) appendLog([{ text: "（更早的 " + more + " 行没显示；完整日志在 " + ((r.job && r.job.logPath) || "logs/") + "）", stream: "sys" }]);
+appendLog(r.lines);
+if (r.job) {
+$("logmeta").textContent = (r.job.label || "") + " · " + (r.job.state === "running" ? "进行中" : "已结束");
+if (r.job.state === "running" && !$("logwrap").classList.contains("open")) $("logwrap").classList.add("hot");
+}
+} catch (e) {
+/* 老宿主没有这个方法：静默（日志只是没接回来，不影响别的） */
+}
 }
 
 function showTab(name) {
@@ -2812,8 +2850,9 @@ if (!e) { box.innerHTML = ""; return; }
 var ro = !!e.readOnly;
 var act = e.active;
 if (act && act.state === "running") {
-box.innerHTML = '<div class="note" style="margin:8px 0 0">安装中 · ' + esc((act.progress && act.progress.detail) || "") +
-' <b>' + (Number(act.progress && act.progress.percent) || 0) + "%</b></div>";
+var pct = Math.max(0, Math.min(100, Number(act.progress && act.progress.percent) || 0));
+box.innerHTML = '<div style="margin:8px 0 0"><div class="bar"><i style="width:' + Math.max(2, pct) + '%"></i></div>' +
+'<div class="note" style="margin:4px 0 0">安装中 · ' + esc((act.progress && act.progress.detail) || "") + " <b>" + pct + "%</b></div></div>";
 return;
 }
 var ready = (e.envs || []).filter(function (x) { return x.status === "ready" && x.exists; });
@@ -4501,35 +4540,87 @@ if (!host) return;
 if (!mldl) { host.innerHTML = '<p class="note">还没读到官方清单。</p>'; return; }
 var ro = !!mldl.readOnly;
 var items = (mldl.items || []).filter(function (x) { return x.family === mlfam; });
-host.innerHTML = '<div class="mlgrid">' + items.map(function (x) {
+var rows = items.map(function (x) {
 var btn = x.exists
-? '<button class="btn" disabled title="' + esc(x.path) + '">已有 · ' + esc(fmtBytes(x.bytes)) + "</button>"
-: '<button class="btn" data-mlname="' + esc(x.name) + '"' + (ro ? " disabled title=\"只读模式：能看清单，不能下载\"" : "") + ">下载</button>";
+? '<button class="btn" disabled title="' + esc(x.path) + '">已有</button>'
+: '<button class="btn primary" data-mlname="' + esc(x.name) + '"' + (ro ? ' disabled title="只读模式：能看清单，不能下载"' : "") + ">下载</button>";
 return '<div class="mlrow"><span class="nm" title="' + esc(x.path) + '">' + esc(x.name) + "</span>" +
 '<span class="tag">' + esc(mlTaskLabel(x.task)) + "</span>" +
-'<span class="sz">' + (x.exists ? "已在 models/pretrained" : x.sha256 ? "校验 " + esc(x.sha256.slice(0, 10)) + "…" : "官方发布") + "</span>" +
+'<span class="sz">' + (x.exists ? esc(fmtBytes(x.bytes)) : "—") + "</span>" +
 btn + "</div>";
-}).join("") + "</div>";
+}).join("");
+host.innerHTML = '<div class="mlhead"><span>权重</span><span>任务</span><span>大小</span><span></span></div>' +
+'<div class="mlgrid">' + rows + "</div>" +
+'<p class="note" style="margin:8px 0 0">下载到 <code>models/pretrained/&lt;代&gt;/</code>，单文件 5–60 MB。' +
+"取消或断网会留下 <code>.part</code>，下次点同一个会从断点续。</p>";
 var bs = host.querySelectorAll("[data-mlname]");
 for (var i = 0; i < bs.length; i++) bs[i].onclick = function () { mlDownload(this.getAttribute("data-mlname")); };
+}
+
+/* 下载进度的三个"别让它看起来卡死"的东西：速度、剩余时间、多久没进展。
+   以前只有一行字节数，网一慢用户就只能盯着一个不动的数字。 */
+var mlSample = { id: "", done: 0, at: 0, speed: 0, total: 0 };
+var mlLast = 0;
+var mlTimer = 0;
+var mlJob = null;
+
+function fmtEta(sec) {
+if (!isFinite(sec) || sec <= 0) return "";
+var s = Math.round(sec);
+if (s < 60) return s + " 秒";
+var m = Math.floor(s / 60);
+if (m < 60) return m + " 分 " + (s % 60) + " 秒";
+return Math.floor(m / 60) + " 小时 " + (m % 60) + " 分";
 }
 
 function renderMlProgress(j) {
 var box = $("mlprog");
 if (!box) return;
-if (!j) { box.hidden = true; return; }
+if (!j) { box.hidden = true; mlJob = null; return; }
 box.hidden = false;
+mlJob = j;
 var p = j.progress || {};
 var pct = Math.max(0, Math.min(100, Number(p.percent) || 0));
 $("mlbar").style.width = (j.state === "running" ? Math.max(2, pct) : pct) + "%";
-var head = j.state === "running" ? "下载中" : j.state === "succeeded" ? "完成" : "失败";
-$("mlprogtext").textContent = head + " · " + (p.detail || j.label || "");
+var d = j.download || {};
+var tgt = d.target || "";
+if ($("mlwhere")) $("mlwhere").textContent = tgt ? "保存到 " + tgt : "";
+
+var now = Date.now();
+if (mlSample.id !== j.id) { mlSample = { id: j.id, done: Number(d.done) || 0, at: now, speed: 0, total: Number(d.total) || 0 }; mlLast = now; }
+if (Number(d.total)) mlSample.total = Number(d.total);
+if (Number(d.done) > mlSample.done) {
+var dt = (now - mlSample.at) / 1000;
+if (dt >= 0.4) { mlSample.speed = (Number(d.done) - mlSample.done) / dt; mlSample.done = Number(d.done); mlSample.at = now; }
+mlLast = now;
+}
+
+var head = j.state === "running" ? "下载中" : j.state === "succeeded" ? "完成" : j.state === "failed" ? "失败" : j.state;
+var extra = "";
+if (j.state === "running") {
+if (mlSample.speed > 0) extra += " · " + fmtBytes(mlSample.speed) + "/s";
+var eta = mlSample.total > mlSample.done && mlSample.speed > 0 ? (mlSample.total - mlSample.done) / mlSample.speed : 0;
+if (eta) extra += " · 还剩 " + fmtEta(eta);
+var idle = Math.round((now - mlLast) / 1000);
+if (idle >= 8) extra += " · 已经 " + idle + " 秒没有新数据（可能在重试，也可能网络卡了）";
+}
+$("mlprogtext").textContent = head + " · " + (p.detail || j.label || "") + extra;
 if ($("mlcancel")) $("mlcancel").hidden = j.state !== "running";
+}
+
+/* 面板靠事件推进；网卡住时没有事件，所以自己每 1.5s 重画一次（只更新那一行字）。 */
+function mlTick() {
+if ($("mldlg") && !$("mldlg").hidden && mlJob && mlJob.state === "running") {
+var now = Date.now();
+var idle = Math.round((now - mlLast) / 1000);
+if (idle >= 8) renderMlProgress(mlJob);
+}
 }
 
 async function openModelDownload() {
 $("mldlg").hidden = false;
 $("mldlgmask").hidden = false;
+if (!mlTimer) mlTimer = setInterval(mlTick, 1500);
 $("mllist").innerHTML = '<p class="note">读官方清单…</p>';
 try {
 mldl = await uartix.call("modelDownloadState");
@@ -4545,6 +4636,8 @@ $("mllist").innerHTML = '<p class="note">读不到官方清单：' + esc((e && e
 function closeModelDownload() {
 $("mldlg").hidden = true;
 $("mldlgmask").hidden = true;
+if (mlTimer) { clearInterval(mlTimer); mlTimer = 0; }
+mlJob = null;
 }
 
 async function mlDownload(name) {
@@ -6448,6 +6541,7 @@ showPanelErr("未处理的异步错误：" + ((r && r.message) || r || ""));
 refresh(true).then(function () {
 if (st && !st.needWorkspace) loadParams(false);
 loadEnv();
+restoreLog();
 });
     </script>
   </body>

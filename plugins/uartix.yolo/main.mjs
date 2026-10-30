@@ -1920,6 +1920,15 @@ function headOk(url, timeoutMs) {
 function runEnvStep(job, spec, label) {
   return new Promise((resolve, reject) => {
     const tail = [];
+    const t0 = Date.now();
+    let lastOut = "";
+    // 心跳：uv 装 torch 时可能几分钟只有它自己的进度条（带 \r，我们的按行解析看不到）。
+    // 没有这一条，面板上就一直停在"安装 torch…25%"，看着像卡死。
+    const beat = setInterval(() => {
+      const sec = Math.round((Date.now() - t0) / 1000);
+      job.progress.detail = `${label} · 已 ${fmtDuration(sec) || sec + "s"}` + (lastOut ? ` · ${lastOut.slice(0, 60)}` : "");
+      emitJob(job);
+    }, 3000);
     const child = ctx.process.spawn({
       cmd: spec.cmd,
       args: spec.args,
@@ -1927,19 +1936,25 @@ function runEnvStep(job, spec, label) {
       env: { ...PY_ENV, ...(job.envProxy || {}), ...(spec.env || {}), PYTHONUNBUFFERED: "1" },
       onStdout: (l) => {
         pushLine(job, l, "out");
+        lastOut = String(l || "").trim();
         tail.push(l);
         if (tail.length > 4) tail.shift();
       },
       onStderr: (l) => {
         pushLine(job, l, "err");
+        lastOut = String(l || "").trim();
         tail.push(l);
         if (tail.length > 4) tail.shift();
       },
       onExit: (code) => {
+        clearInterval(beat);
         if (code === 0) resolve();
         else reject(new Error(`${label}失败（退出码 ${code}）：${tail.filter(Boolean).slice(-2).join(" / ").slice(0, 300)}`));
       },
-      onError: (e) => reject(new Error(`${label}起不来：${(e && e.message) || e}`)),
+      onError: (e) => {
+        clearInterval(beat);
+        reject(new Error(`${label}起不来：${(e && e.message) || e}`));
+      },
     });
     job.child = child;
     job.pid = child.pid || 0;
@@ -3334,6 +3349,9 @@ function newJob(kind, label) {
     stopped: false,
     pid: 0,
     lines: [],
+    // 面板重载（切面板 / 切主题 / 拖到别的分组）会丢掉 iframe 里的日志 DOM。
+    // `recent` 存"带颜色"的那一份，重载后由 `logs()` 原样送回，不用去猜每条是什么流。
+    recent: [],
     total: 0,
     progress: { phase: "", percent: 0, epoch: 0, epochs: 0, step: "", detail: "" },
     logPath: abs(`logs/yolo-${id}.log`),
@@ -3358,6 +3376,9 @@ function snapshot(j) {
     // 「退出码 0 但结果不对」那类提醒（构建出来 0 个标注框）：状态还是成功，但不能让它悄悄过去
     warning: j.warning || "",
     total: j.lines.length,
+    // 下载任务要显示"存到哪"和"还剩多少"，这两个字段由面板直接读
+    ...(j.download ? { download: { ...j.download } } : {}),
+    ...(j.envTarget ? { envTarget: { ...j.envTarget } } : {}),
   };
 }
 
@@ -3368,6 +3389,9 @@ function pushLine(j, text, stream) {
   const line = String(text).replace(/\r$/, "");
   j.lines.push(line);
   if (j.lines.length > LOG_KEEP) j.lines.splice(0, j.lines.length - LOG_KEEP);
+  if (!j.recent) j.recent = [];
+  j.recent.push({ text: line, stream: stream || "" });
+  if (j.recent.length > LOG_KEEP) j.recent.splice(0, j.recent.length - LOG_KEEP);
   pendingLines.push({ id: j.id, text: line, stream, at: Date.now() });
   if (pendingLines.length > 400) flushLog();
   else if (!flushTimer) flushTimer = setTimeout(flushLog, 120);
@@ -4627,6 +4651,20 @@ async function activate(c) {
     /** 面板挂载时调一次：环境、配置、数据集、训练记录、任务列表，一次拿全（少一轮往返）。 */
     async state() {
       return await panelState();
+    },
+
+    /**
+     * 把日志接回来。**面板一重载，iframe 里那份 DOM 就没了**——
+     * 切到别的面板、切主题、把面板拖到另一个分组，都会重建 iframe。
+     * 以前只有新行会推过去，历史就"凭空消失"了；现在重挂时从这里补一次。
+     */
+    async logs(req) {
+      needWorkspace();
+      const o = isObj(req) ? req : {};
+      const limit = Math.max(20, Math.min(2000, Number(o.limit) || 400));
+      const j = active || [...jobs.values()].pop() || null;
+      if (!j) return { ok: true, job: null, lines: [], total: 0 };
+      return { ok: true, job: snapshot(j), lines: (j.recent || []).slice(-limit), total: j.lines.length };
     },
 
     /** 保存面板上的改动。只存**与基准不同的那些**，这样用户改回默认时 diff 会自己消失。 */
