@@ -817,6 +817,37 @@
         font-family: "Cascadia Mono", Consolas, monospace;
         word-break: break-all;
       }
+      .envi {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 0;
+        border-top: 1px solid var(--line);
+        font-size: 11px;
+      }
+      .envi b {
+        font-weight: 500;
+        max-width: 220px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .envi .note {
+        flex: 1 1 auto;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .envi .btn {
+        flex: 0 0 auto;
+        padding: 2px 8px;
+        font-size: 11px;
+      }
+      /* 环境卡的摘要行/确认行是文字里内联按钮，相邻按钮之间补 8px，别只靠空格挤着 */
+      #envinst .btn + .btn {
+        margin-left: 8px;
+      }
       .tag {
         display: inline-block;
         padding: 0 6px;
@@ -1972,11 +2003,14 @@
           <h2>环境</h2>
           <div class="kv" id="envkv"></div>
           <div id="envinst"></div>
+          <div id="envlist"></div>
           <div class="row" style="margin-top: 8px">
-            <button class="btn" id="probe">深度自检（torch / CUDA）</button>
+            <button class="btn" id="envdoc" title="快速检查选中环境的目录、解释器、三个包与 Python 版本（只读，不改任何东西）"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:12px;height:12px;vertical-align:-2px;margin-right:4px"><circle cx="7" cy="7" r="5.2"/><path d="M4.5 7.1 6.2 8.8 9.6 5.3"/></svg>自检</button>
+            <button class="btn" id="probe" title="深度自检：真的 import torch，看 CUDA 能不能用、ultralytics 版本对不对"><svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:12px;height:12px;vertical-align:-2px;margin-right:4px"><rect x="3.4" y="3.4" width="7.2" height="7.2" rx="1.2"/><path d="M5.4 1.8v1.6M8.6 1.8v1.6M5.4 10.6v1.6M8.6 10.6v1.6M1.8 5.4h1.6M1.8 8.6h1.6M10.6 5.4h1.6M10.6 8.6h1.6"/></svg>深度自检</button>
             <span class="note" style="margin: 0">首次约 10~20 秒</span>
           </div>
           <div class="note" id="probenote"></div>
+          <div id="envdocnote"></div>
         </div>
 <div class="card">
           <h2>
@@ -2846,6 +2880,7 @@ function renderEnvInstall() {
 var box = $("envinst");
 if (!box) return;
 var e = envInfo;
+renderEnvEntries(e);
 if (!e) { box.innerHTML = ""; return; }
 var ro = !!e.readOnly;
 var act = e.active;
@@ -2872,10 +2907,12 @@ var off = e.preferPluginEnv === false;
 box.innerHTML = '<div class="note" style="margin:8px 0 0"><span class="tag ' + (off ? "" : "ok") + '">插件环境</span> ' + esc(cur.label || cur.id) +
 " · torch " + esc((cur.packages && cur.packages.torch) || "?") + " · " + esc(fmtBytes(cur.bytes || 0)) +
 (off ? "（已停用，用的是 " + esc(((e.current || {}).source) || "工作区 Python") + "）" : "") +
-(ro ? "" : off ? ' <button class="btn" id="envon">启用它</button>' : ' <button class="btn" id="envoff">用回工作区 Python</button> <button class="btn" id="envpur">清理全部…</button>') + "</div>";
+(ro ? "" : off ? ' <button class="btn primary" id="envon">启用</button>' : ' <button class="btn" id="envoff">用回工作区 Python</button> <button class="btn" id="envpur">清理全部…</button>') +
+(ro ? "" : ' <button class="btn danger" id="envdcur" title="连同这份环境的 venv 一起移入回收站，可恢复">' + ENVTRASH + "删除</button>") + "</div>";
 if ($("envpur")) $("envpur").onclick = function () { envPurgeArm = true; renderEnvInstall(); };
 if ($("envoff")) $("envoff").onclick = function () { envPrefer(""); };
 if ($("envon")) $("envon").onclick = function () { envPrefer(cur.id); };
+if ($("envdcur")) $("envdcur").onclick = function () { envDelClick(cur.id); };
 return;
 }
 if (e.lock) {
@@ -2891,9 +2928,11 @@ if (res) {
 box.innerHTML = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">' +
 '<div class="note" style="margin:0 0 6px">上次没装完（停在' + esc(res.phase || "中途") + "）：" + esc(String(res.error || "").slice(0, 90)) + "</div>" +
 '<button class="btn primary" id="envres"' + (ro ? " disabled" : "") + ">继续安装" + (res.hasVenv ? "（跳过已装好的部分）" : "") + "</button>" +
-(ro ? "" : '<button class="btn" id="envpur">清理全部…</button>') + "</div>";
+(ro ? "" : '<button class="btn" id="envpur">清理全部…</button>' +
+' <button class="btn danger" id="envdres" title="连同这份装了一半的环境一起移入回收站，可恢复">' + ENVTRASH + "删除</button>") + "</div>";
 if ($("envres")) $("envres").onclick = function () { startEnvInstall(res.id.indexOf("cpu") === 0 ? "cpu" : ""); };
 if ($("envpur")) $("envpur").onclick = function () { envPurgeArm = true; renderEnvInstall(); };
+if ($("envdres")) $("envdres").onclick = function () { envDelClick(res.id); };
 return;
 }
 var rec = e.recommended || {};
@@ -2904,6 +2943,46 @@ box.innerHTML = '<div style="margin-top:8px;padding-top:8px;border-top:1px solid
 '<button class="btn" id="envicpu"' + (ro || cpu ? " disabled" : "") + ">装 CPU 版</button></div>";
 if ($("envin")) $("envin").onclick = function () { startEnvInstall(""); };
 if ($("envicpu")) $("envicpu").onclick = function () { startEnvInstall("cpu"); };
+}
+
+var ENVTRASH = '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:11px;height:11px;vertical-align:-1px;margin-right:3px"><path d="M2.4 4.2h9.2M5.4 4.2V2.8h3.2v1.4M3.6 4.2l.5 7.4h6.4l.5-7.4"/><path d="M5.8 6.5v3.4M8.2 6.5v3.4"/></svg>';
+
+/* 每份插件环境一行：状态 + 名字 + torch/体积 + 删除。删除走 envRemove（进回收站，可恢复），
+   有安装任务在跑时后端会拒绝，这里先把按钮禁掉，省一次报错。 */
+function renderEnvEntries(e) {
+var box = $("envlist");
+if (!box) return;
+var all = (e && e.envs) || [];
+/* 摘要行已经展示了那一份（选中的 ready，或待续装的那份），列表里不再重复；
+   它的删除入口在摘要行上。 */
+var shown = "";
+var ready = all.filter(function (x) { return x.status === "ready" && x.exists; });
+if (ready.length) shown = (ready.filter(function (x) { return x.id === e.selected; })[0] || ready[0]).id;
+else if (e && (e.resumable || [])[0]) shown = e.resumable[0].id;
+all = all.filter(function (x) { return x.id !== shown; });
+if (!all.length) { box.innerHTML = ""; return; }
+var ro = !!(e && e.readOnly);
+var busy = !!(e && e.active && e.active.state === "running");
+box.innerHTML = all.map(function (x) {
+var ready = x.status === "ready" && x.exists;
+var tag = ready ? "ok" : x.exists ? "warn" : "bad";
+var txt = ready ? "可用" : String(x.status) === "installing" ? "安装中" : x.exists ? "待修复" : "缺解释器";
+return '<div class="envi"><span class="tag ' + tag + '">' + txt + '</span>' +
+'<b title="' + esc(x.dir || "") + '">' + esc(x.label || x.id) + '</b>' +
+'<span class="note">torch ' + esc((x.packages && x.packages.torch) || "?") + " · " + esc(fmtBytes(x.bytes || x.diskBytes || 0)) + '</span>' +
+(ro || busy ? "" : '<button class="btn danger" data-envdel="' + esc(x.id) + '" title="连同这份环境的 venv 一起移入回收站，可恢复">' + ENVTRASH + "删除</button>") + "</div>";
+}).join("");
+var btns = box.querySelectorAll("[data-envdel]");
+for (var i = 0; i < btns.length; i++) btns[i].onclick = function () { envDelClick(this.getAttribute("data-envdel")); };
+}
+
+async function envDelClick(id) {
+try {
+var r = await uartix.call("envRemove", { id: id });
+sysLog("已删除环境 " + id + (r && r.trashed ? "（已进回收站 " + r.trashed + "，可恢复）" : ""));
+await loadEnv();
+refresh(true);
+} catch (e) { sysLog("[错误] " + String((e && e.message) || e)); }
 }
 
 async function startEnvInstall(variant) {
@@ -6470,6 +6549,22 @@ r.python +
 : "自检失败：" + r.error;
 } catch (e) {
 $("probenote").textContent = "自检失败：" + (e && e.message ? e.message : e);
+}
+};
+/* 环境自检（envDoctor，只读）：按 rows 的 k / v / ok 直接铺出来，不修、不装。 */
+$("envdoc").onclick = async function () {
+var n = $("envdocnote");
+if (!n) return;
+n.innerHTML = '<div class="note" style="margin:6px 0 0">自检中…（会 import torch / torchvision / ultralytics）</div>';
+try {
+var r = await uartix.call("envDoctor", {});
+var rows = (r && r.rows) || [];
+if (!rows.length) { n.innerHTML = '<div class="note" style="margin:6px 0 0">' + esc((r && r.reason) || "还没有插件环境") + "</div>"; return; }
+n.innerHTML = '<div class="kv" style="margin-top:6px">' + rows.map(function (x) {
+return "<b>" + esc(x.k) + "</b><span>" + (x.ok ? "" : '<span class="tag bad">异常</span> ') + esc(String(x.v == null ? "" : x.v)) + "</span>";
+}).join("") + '</div><div class="note" style="margin:6px 0 0"><span class="tag ' + (r.ok ? "ok" : "bad") + '">' + (r.ok ? "通过" : "有问题") + "</span> " + esc(r.reason || "") + "</div>";
+} catch (e) {
+n.innerHTML = '<div class="note" style="margin:6px 0 0">自检失败：' + esc((e && e.message) || e) + "</div>";
 }
 };
 $("clearlog").onclick = function () {
