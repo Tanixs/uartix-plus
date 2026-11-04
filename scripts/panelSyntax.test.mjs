@@ -498,20 +498,23 @@ describe("P177-D · 部署目标画像与部署包", () => {
    ============================================================================ */
 
 describe("面板文件大小硬上限", () => {
-  it("panel.html 小于宿主当前读取上限（护栏不是配额）", () => {
+  it("panel.html 体积锁死当前值（改动面板必须同步更新这个数字）", () => {
     const f = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
     const bytes = statSync(f).size;
     /**
-     * 断言值跟着 `limits.ts` 的 `PANEL_READ_MAX_BYTES` 走，而不是写死一个数字：
-     * 这条判据盯的是"面板不许长过宿主读得动的量"——超出会被 `plugin_fs_read` 截断，
-     * 现象是整页空白，不是报错。它**不是**给插件的体积配额；配额在包校验那一层。
+     * 为什么锁死而不是设上限：
+     * - 宿主读取上限 `PANEL_READ_MAX_BYTES`（16 MiB）太大，当配额等于没拦——
+     *   面板悄悄长胖 50 KB 也不会被发现，等到用户报告"面板空白"才知道超了。
+     * - 锁死当前值后，任何一次 panel.html 改动都会让这条红，逼改的人确认
+     *   "我确实改了面板"并手动更新这个数字，等于把体积变化放进提交审查里。
+     * - 真正的截断护栏仍在：`pluginContract.test.mjs` 盯 TS/Rust 上限同源，
+     *   `panel_fs_read` 超 `PANEL_READ_MAX_BYTES` 才会被截断。
      *
-     * 注意：0.6.4 那版构建里宿主仍是 256 KiB；这个常量只在新构建里生效。
+     * 改了面板就把下面这个数字改成实际字节数（`Get-Item panel.html | % Length`）。
      */
-    expect(
-      bytes,
-      `panel.html 已 ${bytes} 字节；超过宿主读取上限 ${PANEL_READ_MAX_BYTES} 会被截断成空白页`,
-    ).toBeLessThan(PANEL_READ_MAX_BYTES);
+    const PANEL_LOCKED_BYTES = 242766;
+    expect(bytes, `panel.html 现为 ${bytes} 字节，锁死值是 ${PANEL_LOCKED_BYTES}；改了面板就更新这个数字`).toBe(PANEL_LOCKED_BYTES);
+    expect(bytes, `panel.html 已 ${bytes} 字节；超过宿主读取上限 ${PANEL_READ_MAX_BYTES} 会被截断成空白页`).toBeLessThan(PANEL_READ_MAX_BYTES);
   });
 });
 
