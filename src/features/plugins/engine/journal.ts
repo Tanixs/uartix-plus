@@ -14,7 +14,7 @@
  * 判据全在这个文件里（纯函数），IO 在 `store.ts` / `pluginEngine.ts`。
  */
 
-import { ROOT_SPEC_RE } from "./manifest";
+import { ROOT_SPEC_RE, isTrustTier, type TrustTier } from "./manifest";
 import type { PluginIndex, PluginIndexItem, TrustBook, TrustRecord } from "./repo";
 
 export const JOURNAL_VERSION = 1;
@@ -41,6 +41,8 @@ export interface JournalTrustItem {
   version: string;
   digest: string;
   grantedAt: number;
+  /** 授权档位。**可选**：这个字段出现之前的旧日志没有它，重放时按受限处理。 */
+  tier?: TrustTier;
   grantedSummary: string[];
 }
 
@@ -104,6 +106,7 @@ export function journalTrustItemOf(rec: TrustRecord): JournalTrustItem {
     version: rec.version,
     digest: rec.digest,
     grantedAt: rec.grantedAt,
+    tier: rec.tier,
     grantedSummary: [...rec.grantedSummary],
   };
 }
@@ -274,6 +277,10 @@ export function verifyJournal(book: JournalBook, actual: JournalState): string[]
     if (a.grantedSummary.join("\n") !== b.grantedSummary.join("\n")) {
       issues.push(`${prefix}：信任记录「${id}」的批准范围不同`);
     }
+    // 档位也是批准事实：日志说受限、账本说完全信任，就是有人动过账本
+    if ((a.tier ?? "restricted") !== (b.tier ?? "restricted")) {
+      issues.push(`${prefix}：信任记录「${id}」的档位 日志=${show(a.tier)} / 账本=${show(b.tier)}`);
+    }
   }
 
   if (rebuilt.activeTheme !== actual.activeTheme) {
@@ -314,6 +321,8 @@ function normalizeTrustItem(raw: unknown): JournalTrustItem | null {
     version: raw.version,
     digest: raw.digest,
     grantedAt: typeof raw.grantedAt === "number" ? raw.grantedAt : 0,
+    // 旧日志没有 tier：按受限重放，与 `normalizeTrust` 的迁移口径一致
+    tier: isTrustTier(raw.tier) ? raw.tier : "restricted",
     grantedSummary: Array.isArray(raw.grantedSummary)
       ? raw.grantedSummary.filter((s): s is string => typeof s === "string")
       : [],

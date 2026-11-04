@@ -18,9 +18,31 @@
  *   不能往宿主 React 树里塞组件（详设 §5.8）。
  */
 
+import {
+  PLUGIN_MAX_FILE_BYTES,
+  PLUGIN_MAX_FILES,
+  PLUGIN_MAX_MANIFEST_BYTES,
+  PLUGIN_MAX_PACKAGE_BYTES,
+  formatBytes,
+  // 注意必须带 .ts 后缀：docs/tools/p178/install070.mjs 用裸 node 直接 import 本文件，
+  // Node 的 ESM 解析不认 "./limits" 这种无扩展名写法（vite/vitest 认，node 不认）。
+} from "./limits.ts";
+
 /** 新格式的标识与版本。名字与旧格式刻意不同，避免"schemaVersion 看懂就以为兼容"。 */
 export const PLUGIN_FORMAT = "uartix-plugin";
 export const PLUGIN_SCHEMA_VERSION = 3;
+
+/**
+ * 授权档位。**受限是默认**，也是旧账本的迁移口径（见 `repo.ts` 的 `tierOf`）。
+ *
+ * 为什么把类型放在清单这一层：它是这套信任模型的固定词汇，`repo` / `install` /
+ * `hostPlan` / UI 四方都要用；放在任何一方都会让另外三方反向依赖它。
+ */
+export type TrustTier = "restricted" | "full";
+export const DEFAULT_TRUST_TIER: TrustTier = "restricted";
+export function isTrustTier(v: unknown): v is TrustTier {
+  return v === "restricted" || v === "full";
+}
 
 /** 清单文件名。v3 起叫 `plugin.json`（旧版的 `extension.json` 不再读）。 */
 export const MANIFEST_FILE = "plugin.json";
@@ -34,11 +56,11 @@ export const LEGACY_PLUGIN_SCHEMA = 2;
  */
 export const PLUGIN_LIMITS = {
   /** 解压后总字节（对比旧格式 4 MiB）。文件系统存储，不再受 localStorage 配额约束。 */
-  packageBytes: 64 * 1024 * 1024,
-  /** 单文件字节。`main.mjs` 打包产物体积也落在这条内。 */
-  fileBytes: 8 * 1024 * 1024,
+  packageBytes: PLUGIN_MAX_PACKAGE_BYTES,
+  /** 单文件字节。`main.mjs` 打包产物体积也落在这条内。2026-11-03：8 MiB → 16 MiB。 */
+  fileBytes: PLUGIN_MAX_FILE_BYTES,
   /** 目录里文件数上限（`node_modules` 会很快吃掉它，所以给了 2000）。 */
-  files: 2000,
+  files: PLUGIN_MAX_FILES,
   /**
    * 下面这几条**不是权限**，只是"一个插件声明几百枚面板"这种明显是生成事故的保护线。
    * 数值给得比现实需要宽得多：能力面已经放开，别在这里重新长出限制。
@@ -840,8 +862,8 @@ export function validateExtension(raw: unknown): PluginValidation {
 
   // 2) 体积与标识
   const bytes = JSON.stringify(raw).length;
-  if (bytes > 1024 * 1024) {
-    out.errors.push(`清单本体 ${bytes} 字节，超过 1 MiB（清单不该塞代码或图片）`);
+  if (bytes > PLUGIN_MAX_MANIFEST_BYTES) {
+    out.errors.push(`清单本体 ${bytes} 字节，超过 ${formatBytes(PLUGIN_MAX_MANIFEST_BYTES)}（清单不该塞代码或图片）`);
   }
   if (raw.format !== PLUGIN_FORMAT) {
     out.errors.push(`format 必须是 "${PLUGIN_FORMAT}"（同一个格式名，版本由 schemaVersion 决定；当前为 3）`);
@@ -1021,8 +1043,25 @@ export function nodePermPath(p: string): string {
   return p;
 }
 
-export function buildHostNodeArgs(manifest: PluginManifest, bind: PathVarBinding): string[] {
+export function buildHostNodeArgs(
+  manifest: PluginManifest,
+  bind: PathVarBinding,
+  tier: TrustTier = DEFAULT_TRUST_TIER,
+): string[] {
   const args = ["--permission", "--allow-fs-read=*"];
+  /**
+   * 完全信任：把**唯一真正能拦住的那一项**（写路径）也打开。
+   *
+   * 为什么只加这一个参数：`--allow-fs-read=*` 与 `--allow-child-process` 在受限档
+   * 本来就是无条件给的（Windows 上精确读白名单不生效；子进程是布尔开关，没有按名拦截），
+   * 所以"完全信任"在本机实际多出来的能力就是**可写任意路径**。把清单里的写目录再逐条
+   * 展开反而没有意义——`=*` 已经覆盖它们，两套参数叠在一起只会让审计时说不清哪条在生效。
+   */
+  if (tier === "full") {
+    args.push("--allow-fs-write=*");
+    args.push("--allow-child-process");
+    return args;
+  }
   const writeDirs: string[] = [];
   for (const spec of manifest.permissions.fs?.write ?? []) {
     const dir = expandPathSpec(spec, bind);

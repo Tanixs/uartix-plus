@@ -97,6 +97,20 @@ describe("P174-A3 · 装配", () => {
     expect(plan.cwd).toBe(`${APP}/plugins/user.yolo.workbench`);
     expect(plan.args.some((a) => a.startsWith("--allow-fs-write="))).toBe(false);
   });
+
+  it("完全信任档 ⇒ 写笼子整体打开（--allow-fs-write=*），不再逐目录展开", () => {
+    const plan = planHostStart({
+      ...BASE,
+      manifest: manifest(),
+      bind: { workspace: "D:/YOLO-Workspace", appDir: APP, extra: {} },
+      tier: "full",
+    });
+    expect(plan.args).toContain("--permission");
+    expect(plan.args).toContain("--allow-fs-read=*");
+    expect(plan.args).toContain("--allow-child-process");
+    // 完全信任只给这一条写参数：=* 已经覆盖所有声明目录，再逐条给会让审计说不清
+    expect(plan.args.filter((a) => a.startsWith("--allow-fs-write="))).toEqual(["--allow-fs-write=*"]);
+  });
 });
 
 /**

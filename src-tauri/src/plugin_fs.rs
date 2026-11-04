@@ -20,11 +20,13 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use crate::agent_tools::path_in_roots;
+use crate::plugin_limits::{PLUGIN_MAX_FILE_BYTES, PLUGIN_MAX_PACKAGE_BYTES};
 use std::process::Command;
 use tauri::Manager;
 
 /// 单次写入上限。清单/账本/引导脚本都远小于这个数；真传大文件请走未来的 zip 通道。
-const MAX_WRITE_BYTES: usize = 8 * 1024 * 1024;
+/// 2026-11-03：与单文件上限（16 MiB）同源，集中到 `plugin_limits`，不再在这里各写一份。
+const MAX_WRITE_BYTES: usize = PLUGIN_MAX_FILE_BYTES;
 /// 读文本的上限：超过就截断并标 `truncated`，不静默裁（与 shell 的 64KB 头尾预算同一条规矩）。
 ///
 /// 2026-10-29：256 KiB 这个值把 YOLO 工作台面板（0.6.0 时 269,635 字节）截掉了尾部，
@@ -32,11 +34,12 @@ const MAX_WRITE_BYTES: usize = 8 * 1024 * 1024;
 /// 2026-10-30：与 `files.rs` 的 `PKG_MAX_FILE_BYTES`（16 MiB）对齐 —— 凡是**能合法装进包**的
 /// 文件就必须能整读，否则会出现"装得上但打不开"这种最难查的组合。这个数只防"误读一个 4 GB 的
 /// 日志把应用撑爆"，不是功能闸门；真需要读更大的东西，走分块/流式，而不是在这里加限制。
-const MAX_READ_BYTES: u64 = 16 * 1024 * 1024;
+/// 2026-11-03：数值已集中到 `plugin_limits`；**旧构建仍按 256 KiB 截断**，新构建才生效。
+const MAX_READ_BYTES: u64 = PLUGIN_MAX_FILE_BYTES as u64;
 /// 读**字节**的上限（base64 返回）。图片天然比脚本大，但仍要有顶：
-/// 与 `github_publish::MAX_FILE_B64`（16 MiB base64 ≈ 12 MiB 原文件）对齐，
+/// 与 `github_publish` 的单文件上限同源（16 MiB 原文件），
 /// 保证"能发布出去的文件"一定能被读出来。
-const MAX_READ_B64_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_READ_B64_BYTES: u64 = PLUGIN_MAX_FILE_BYTES as u64;
 /// 追加型文件（目前只有插件宿主日志）的默认上限。为什么不是"无限追加"也不是 8 MB：
 /// 一台机器上装了十几个插件、每个都跑长任务时，"日志不该把应用数据目录吃掉"是硬约束；
 /// 而 2 MiB 足够把一次崩前的几百行留在盘上——这是这份文件存在的唯一理由。
@@ -383,7 +386,9 @@ pub fn plugin_store_write(name: String, data: Value, roots: Vec<String>) -> Resu
 const MAX_COPY_FILES: usize = 2000;
 /// 单次安装的总字节上限。与 `MAX_COPY_FILES` 一起挡的是"选错目录"这种手滑：
 /// 选到 `C:\` 时会先在文件数上撞墙，而不是先把几十 GB 复制进去再失败。
-const MAX_COPY_BYTES: u64 = 32 * 1024 * 1024;
+/// 2026-11-03：与解包上限（`PLUGIN_MAX_PACKAGE_BYTES` 64 MiB）对齐。原来这里写 32 MiB，
+/// 而解包允许 64 MiB —— 一个 40 MiB 的包会"市场解包成功、安装复制失败"，现象是装不上但不知为何。
+const MAX_COPY_BYTES: u64 = PLUGIN_MAX_PACKAGE_BYTES as u64;
 /// 目录层级上限。源包里放一条 `a/a/a/...` 的深链，靠这个止损。
 const MAX_COPY_DEPTH: usize = 20;
 
@@ -744,6 +749,22 @@ mod install_tests {
 
         let outside = root.join("..").join("outside.png").to_string_lossy().to_string();
         assert!(plugin_fs_read_b64(outside, roots(&root)).is_err(), "越出 roots 必须拒");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    /// 2026-11-03：读取上限从旧构建的 256 KiB 抬到 16 MiB。
+    /// 这条测试直接写一个 **1 MiB** 的文件并整读——旧构建会把它截断（`truncated:true`），
+    /// 新构建必须原样返回。它钉的是"面板长过 256 KiB 不再白屏"这条用户可见的事实。
+    #[test]
+    fn read_does_not_truncate_files_larger_than_the_old_256_kib_limit() {
+        use super::plugin_fs_read;
+        let root = scratch("readbig");
+        let n = 1024 * 1024;
+        let p = root.join("big.txt");
+        fs::write(&p, "a".repeat(n)).unwrap();
+        let r = plugin_fs_read(p.to_string_lossy().to_string(), roots(&root)).expect("读取应当成功");
+        assert_eq!(r["truncated"], Value::Bool(false), "1 MiB 文件不该再被 256 KiB 截断");
+        assert_eq!(r["text"].as_str().unwrap().len(), n);
         fs::remove_dir_all(&root).ok();
     }
 

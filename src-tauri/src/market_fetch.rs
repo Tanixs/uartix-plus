@@ -17,10 +17,15 @@ use sha2::{Digest, Sha256};
 use std::time::{Duration, Instant};
 
 use crate::agent_tools::{is_private_host, url_host};
+use crate::plugin_limits::{PLUGIN_MARKET_ABSOLUTE_MAX_BYTES, PLUGIN_MARKET_TIMEOUT_SECS};
 
-const MARKET_TIMEOUT: Duration = Duration::from_secs(20);
-/// 再大的响应也不是市场该给的：这条比前端任何单项上限都宽，只挡"根本不讲理"的响应
-const MARKET_ABSOLUTE_MAX: u64 = 8 * 1024 * 1024;
+/// 2026-11-03：20s → 60s。市场归档单文件放到 16 MiB 后，20 秒在慢网/代理下不够，
+/// 而超时会被报成"远端不可达"，用户会去查网络而不是查体积。
+const MARKET_TIMEOUT: Duration = Duration::from_secs(PLUGIN_MARKET_TIMEOUT_SECS);
+/// 再大的响应也不是市场该给的：这条比前端任何单项上限都宽，只挡"根本不讲理"的响应。
+/// 2026-11-03：8 MiB → 16 MiB，与归档/单文件上限对齐；否则前端把上限抬到 16 MiB，
+/// 这里仍会夹回 8 MiB，现象是"设置里放开了，实际还是装不上"。
+const MARKET_ABSOLUTE_MAX: u64 = PLUGIN_MARKET_ABSOLUTE_MAX_BYTES;
 
 /// 精确或 `.` 边界子域。**空条目一律不放行**（`endsWith("")` 会把所有域放进名单）。
 pub(crate) fn host_allowed(host: &str, allow: &[String]) -> bool {

@@ -14,6 +14,12 @@
  *    源文本测试钉住这一点（与 P99c-C2 的 `propose_market_install` 同一条纪律）。
  */
 import { defineTool, notExecuted, type AgentToolEntry } from "./toolRegistry";
+import {
+  PLUGIN_DRAFT_WRITE_FILES,
+  PLUGIN_MAX_FILE_BYTES,
+  PLUGIN_MAX_TRANSFER_BYTES,
+  formatBytes,
+} from "../plugins/engine/limits";
 
 const HOST = { kind: "host" } as const;
 
@@ -100,7 +106,7 @@ export const draftToolEntries: readonly AgentToolEntry[] = Object.freeze([
       "EXACT v3 field names — guessing from the old format is the #1 reason a draft validates but silently loses its titles/handlers: panel/theme/widget/preset/task declarations are { id, title, entry } (the label field is `title`, NOT `name`; there is no `area`/`size`); commands are { id, title }; host code needs the `main` field (`main` = `main.mjs`) plus `activation: [\"onPanel:<panelId>\", \"onCommand:<commandId>\"]`; writing files at runtime needs `permissions.fs.write` (a read declaration never grants writes). Minimal panel manifest: {\"format\":\"uartix-plugin\",\"schemaVersion\":3,\"id\":\"user.demo\",\"version\":\"1.0.0\",\"name\":\"Demo\",\"main\":\"main.mjs\",\"activation\":[\"onPanel:main\"],\"permissions\":{\"ui\":{\"panel\":true},\"fs\":{\"write\":[\"$WS\"]}},\"contributes\":{\"panels\":[{\"id\":\"main\",\"title\":\"Demo\",\"entry\":\"panel.html\"}]}}. Layouts: a panel plugin uses `contributes.panels` + `panel.html` + `main.mjs` exporting `activate(ctx)`; a theme uses `contributes.themes` + a CSS entry; a widget uses `contributes.widgets` + `permissions.ui.widget` + an HTML entry that calls `uartix.call`/`uartix.on` (transparent/frameless is just a widget presentation, `transparent: true` — there is no separate “desktop pet” concept); a workspace preset uses `contributes.presets` + `permissions.ui.layout` + a JSON entry `{layout:<dockview layout>, note?}` (applying it backs up the current layout first); a task template uses `contributes.tasks` + a JSON entry `{goal, steps?:[{tool,args?,note?}]}` that only fills the AI input box and never sends. " +
       "Panel/widget HTML runs in an opaque-origin iframe: no host DOM, no `:host`, no host localStorage. The host THEME, however, IS bridged — every design token arrives renamed as `--uartix-*` (`var(--uartix-bg)`, `var(--uartix-text)`, `var(--uartix-accent)`, `var(--uartix-border)`, `var(--uartix-radius-m)`…) plus the short aliases `--bg --panel --inset --fg --dim --faint --line --accent --on-accent --ok --warn --bad`, and a ZERO-SPECIFICITY base stylesheet already paints `body`, `input`, `select`, `textarea`, `button`, `a`, `code`, scrollbars and the classes `.btn`, `.btn.primary`, `.btn.danger`, `.input`, `.card`. USE THEM: a panel that hard-codes its own grey/white scheme ignores the user's theme and reads as a bug, not a style — restate the tokens only when the panel genuinely needs a look of its own. Read the live theme via `uartix.theme()` and re-derive on change via `uartix.on(\"theme\", fn)`. Talk to the host only through uartix.call/on/readText/list/writeText/bindRoot. " +
      "File keys must be relative paths inside the draft (no absolute paths, drive letters, `..`, or empty segments). Same path overwrites; files not mentioned are left untouched. " +
-      "Limits per call: 200 files, 8 MiB per file, 32 MiB total — split larger packages across calls. Args: { id, tag?, files }.",
+      `Limits per call: ${PLUGIN_DRAFT_WRITE_FILES} files, ${formatBytes(PLUGIN_MAX_FILE_BYTES)} per file, ${formatBytes(PLUGIN_MAX_TRANSFER_BYTES)} total — split larger packages across calls. Args: { id, tag?, files }.`,
     parameters: {
       type: "object",
       properties: {

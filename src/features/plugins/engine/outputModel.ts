@@ -112,7 +112,11 @@ export function describeJournalEvent(
     case "theme":
       return { text: `切换主题 ${ev.key || "（回到内置）"}`, level: "info" };
     case "approve":
-      return { text: `批准 ${name} v${ev.trust.version} 的权限（${ev.trust.grantedSummary.length} 项）`, level: "info" };
+      // 档位也是批准事实：日志面上要能一眼看出"这次批的是受限还是完全信任"
+      return {
+        text: `批准 ${name} v${ev.trust.version} 的权限（${ev.trust.tier === "full" ? "完全信任" : "受限"} · ${ev.trust.grantedSummary.length} 项）`,
+        level: "info",
+      };
     case "command":
       // `ok` 是"这次执行有没有结果"，不是"插件逻辑成不成功"——文案不能说成"命令失败"
       return { text: `执行命令 ${ev.command}：${ev.ok ? "有结果" : "无结果/出错"}`, level: ev.ok ? "info" : "error" };

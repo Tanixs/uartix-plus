@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { validateExtension, type PluginManifest } from "./manifest";
-import { emptyIndex, emptyTrust, flattenPermissions, type TrustBook } from "./repo";
+import { emptyIndex, emptyTrust, flattenPermissions, tierOf, type TrustBook, type TrustRecord } from "./repo";
 import {
   applyInstall,
   applyUninstall,
@@ -130,6 +130,8 @@ describe("applyInstall（写两本账）", () => {
       version: "1.0.0",
       digest: p.fingerprint,
       grantedAt: 1234,
+      // 默认档位是受限：没有显式选择时不许写成完全信任
+      tier: "restricted",
       // 账上存的就是批准卡上列的那几行，不是重新算一遍
       grantedSummary: p.permissions,
     });
@@ -158,6 +160,40 @@ describe("applyInstall（写两本账）", () => {
   });
 });
 
+describe("2026-11-03 · 授权档位（受限 / 完全信任）", () => {
+  it("用户选完全信任 ⇒ 账上留痕，默认仍是受限", () => {
+    const m = manifest();
+    const full = planInstall({ appDir: APP, srcDir: "D:/pkgs/demo", manifest: m, trust: emptyTrust(), draftId: "d1", tier: "full" });
+    expect(full.tier).toBe("full");
+    const { trust } = applyInstall(emptyIndex(), emptyTrust(), full, { approvedAt: 7, source: "local" });
+    expect(trust.items[m.id].tier).toBe("full");
+
+    // 没有显式选择就是受限：档位的默认值不许被"上次是全信任"带跑
+    const again = planInstall({ appDir: APP, srcDir: "D:/pkgs/demo", manifest: m, trust: emptyTrust(), draftId: "d2" });
+    expect(again.tier).toBe("restricted");
+  });
+
+  it("权限面变了 ⇒ 计划里带着上次的档位供界面说明，但这次仍默认回受限", () => {
+    const m = manifest();
+    const full = planInstall({ appDir: APP, srcDir: "D:/pkgs/demo", manifest: m, trust: emptyTrust(), draftId: "d1", tier: "full" });
+    const { trust } = applyInstall(emptyIndex(), emptyTrust(), full, { approvedAt: 1, source: "local" });
+    const upgraded = manifest({ permissions: { fs: { write: ["$WS/runs", "$WS/weights"], read: ["$WS"] } } });
+    const p = planInstall({ appDir: APP, srcDir: "D:/pkgs/demo", manifest: upgraded, trust, draftId: "d2" });
+    expect(p.verdict).toBe("changed");
+    expect(p.previousTier).toBe("full");
+    expect(p.tier, "新权限面必须重新选档位").toBe("restricted");
+  });
+
+  it("trustRecordFor 可以显式写完全信任；旧记录缺字段按受限读", () => {
+    const m = manifest();
+    expect(trustRecordFor(m, 1, "full").tier).toBe("full");
+    expect(tierOf({ tier: "full" } as Pick<TrustRecord, "tier">)).toBe("full");
+    // 旧账本上真的没有这个字段：类型上存在、运行时 undefined，必须按受限读
+    expect(tierOf({} as Pick<TrustRecord, "tier">)).toBe("restricted");
+    expect(tierOf(null)).toBe("restricted");
+  });
+});
+
 describe("trustRecordFor（批准磁盘上已有的插件）", () => {
   it("补出来的记录能让它变成 trusted，且摘要与权限行同源", () => {
     const m = manifest();
@@ -168,6 +204,7 @@ describe("trustRecordFor（批准磁盘上已有的插件）", () => {
     // 账上记的就是批准卡上列的那几行（不是另算一遍）
     expect(rec.grantedSummary).toEqual(flattenPermissions(m));
     expect(rec.grantedAt).toBe(999);
+    expect(rec.tier, "不显式传档位时必须按受限记账").toBe("restricted");
     // 关键：补完之后再判就是 trusted，不会"批了还让再批一次"
     expect(trustVerdict(rec, fingerprintOf(m))).toBe("trusted");
   });

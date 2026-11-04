@@ -14,9 +14,13 @@
  * "能不能改 token"，而是"改 token 还是改元素"——`:root{--bg:#000}` 放行，`body{…}` 不收。
  */
 import { guardStyleText } from "../../styles/styleSanitize";
+import { PLUGIN_THEME_CSS_MAX_BYTES } from "./limits";
 
-/** 主题 CSS 的字节上限。与读盘那侧的 256 KiB 截断是两个数：那个管"文件多大"，这个管"渲染多重"。 */
-export const THEME_CSS_MAX_BYTES = 200 * 1024;
+/**
+ * 主题 CSS 的字节上限。与读盘那侧的 16 MiB 截断是两个数：那个管"文件多大"，
+ * 这个管"渲染多重"——一份 16 MiB 的 CSS 能让整张界面卡死，而主题只该换配色。
+ */
+export const THEME_CSS_MAX_BYTES = PLUGIN_THEME_CSS_MAX_BYTES;
 
 export interface ThemeCssResult {
   /** 通过时给出**原文**（净化器只判不改，改写会让作者的 CSS 与生效的 CSS 对不上账）。 */

@@ -13,15 +13,24 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::time::Duration;
 
+use crate::plugin_limits::{
+    PLUGIN_MAX_PUBLISH_FILE_B64_BYTES, PLUGIN_MAX_TRANSFER_B64_BYTES,
+    PLUGIN_PUBLISH_RESPONSE_MAX_BYTES, PLUGIN_PUBLISH_TIMEOUT_SECS,
+};
+
 const API: &str = "https://api.github.com";
-const TIMEOUT: Duration = Duration::from_secs(25);
-const MAX_BODY: usize = 256 * 1024;
+/// 2026-11-03：从 25s 放宽到 120s。单文件 PUT 要传最多 ~22 MiB 的 base64，
+/// 慢网/代理下 25 秒必然超时，而那会被报成"发布失败"，与体积限制完全无关。
+const TIMEOUT: Duration = Duration::from_secs(PLUGIN_PUBLISH_TIMEOUT_SECS);
+/// 响应体上限。**不能停在 256 KiB**：GitHub 的 `contents` GET 会把旧文件内容
+/// 以 base64 回显，读一份 16 MiB 文件的 sha 需要 ~22.3 MiB 响应体。
+const MAX_BODY: usize = PLUGIN_PUBLISH_RESPONSE_MAX_BYTES;
 /// 包内文件数上限。这是产品约定（一个插件包就是十来个小文件），不是能力限制。
 const MAX_FILES: usize = 12;
-/// 单文件 base64 上限。与 `plugin_fs::MAX_READ_B64_BYTES` 对齐：
-/// 读得出来的文件就该发得出去，否则又会出现"本地能用、发出去就报错"。
-const MAX_FILE_B64: usize = 16 * 1024 * 1024;
-const MAX_TOTAL_B64: usize = 48 * 1024 * 1024;
+/// 单文件 base64 上限。与 `plugin_fs::MAX_READ_B64_BYTES` 同源：读得出来的文件就该发得出去。
+/// 注意它是 **base64 字符数**，16 MiB 原文件编码后约 21.3 MiB，所以常量单独留了余量。
+const MAX_FILE_B64: usize = PLUGIN_MAX_PUBLISH_FILE_B64_BYTES;
+const MAX_TOTAL_B64: usize = PLUGIN_MAX_TRANSFER_B64_BYTES;
 const FORCED_TOPIC: &str = "uartix-plugin";
 const MAX_TOPICS: usize = 20;
 
@@ -176,7 +185,10 @@ async fn send_json(req: reqwest::RequestBuilder) -> Result<(u16, Value), String>
     let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = resp.chunk().await.map_err(|e| format!("读取 GitHub 响应失败：{e}"))? {
         if buf.len() + chunk.len() > MAX_BODY {
-            return Err("GitHub 响应异常（超过 256KB）".into());
+            return Err(format!(
+                "GitHub 响应异常（超过 {} MiB）",
+                MAX_BODY / 1024 / 1024
+            ));
         }
         buf.extend_from_slice(&chunk);
     }

@@ -18,6 +18,7 @@ import { getSnapshot as getSettings } from "../../settings/settingsStore";
 import { MARKET_ALLOW_HOSTS, MARKET_API_HOST } from "./hosts";
 import { COVER_MAX_FETCH_BYTES, coverCandidates, gitHubFileBytes, imageMime } from "./marketCover";
 import { README_IMG_MAX, readmePreviewRefs } from "./marketReadme";
+import { PLUGIN_MAX_ARCHIVE_BYTES, PLUGIN_MANIFEST_FETCH_MAX_BYTES } from "./limits";
 
 /**
  * 这条通道允许访问的域：**直接复用市场那张唯一的表**（`MARKET_ALLOW_HOSTS`）。
@@ -28,8 +29,11 @@ import { README_IMG_MAX, readmePreviewRefs } from "./marketReadme";
  */
 const GH_HOSTS = MARKET_ALLOW_HOSTS;
 
-/** 归档字节上限。插件包不该比这更大；Rust 侧还有一道 8 MiB 的硬顶。 */
-export const ARCHIVE_MAX_BYTES = 8 * 1024 * 1024;
+/**
+ * 归档字节上限。2026-11-03：8 MiB → 16 MiB，与 `limits.ts` 的单文件上限同源。
+ * Rust 侧 `market_fetch` 的绝对上限也同步抬到 16 MiB，否则这里放宽了也会被夹回去。
+ */
+export const ARCHIVE_MAX_BYTES = PLUGIN_MAX_ARCHIVE_BYTES;
 
 function b64ToBytes(b64: string): Uint8Array {
   const bin = atob(b64);
@@ -270,7 +274,7 @@ async function fetchManifest(repo: GhRepo): Promise<RepoManifestInfo | null> {
   if (!MARKET_API_HOST) return null;
   try {
     const url = `https://${MARKET_API_HOST}/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}/contents/plugin.json?ref=${encodeURIComponent(repo.defaultBranch)}`;
-    const bytes = await fetchBytes(url, 512 * 1024);
+    const bytes = await fetchBytes(url, PLUGIN_MANIFEST_FETCH_MAX_BYTES);
     const json = JSON.parse(new TextDecoder().decode(bytes)) as { content?: unknown; encoding?: unknown };
     if (typeof json.content !== "string" || json.encoding !== "base64") return null;
     const raw = JSON.parse(new TextDecoder().decode(b64ToBytes(json.content.replace(/\s+/g, "")))) as Record<string, unknown>;

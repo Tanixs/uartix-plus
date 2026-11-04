@@ -102,6 +102,21 @@ describe("normalizeTrust（缺摘要的条目一律无效）", () => {
     const r = normalizeTrust({ items: { "a.b": { digest: "d", grantedSummary: ["ok", 3, null] } } });
     expect(r.trust.items["a.b"].grantedSummary).toEqual(["ok"]);
   });
+
+  it("档位迁移：缺字段按受限，full 原样保留，乱值回落受限并说出来", () => {
+    const r = normalizeTrust({
+      items: {
+        "old.one": { id: "old.one", version: "1", digest: "d", grantedAt: 1, grantedSummary: [] },
+        "new.full": { id: "new.full", version: "1", digest: "d", grantedAt: 2, tier: "full", grantedSummary: [] },
+        "bad.tier": { id: "bad.tier", version: "1", digest: "d", grantedAt: 3, tier: "root", grantedSummary: [] },
+      },
+    });
+    // 旧账本（没有 tier）必须按最紧的档迁移：升级应用不该把老插件悄悄抬成完全信任
+    expect(r.trust.items["old.one"].tier).toBe("restricted");
+    expect(r.trust.items["new.full"].tier).toBe("full");
+    expect(r.trust.items["bad.tier"].tier).toBe("restricted");
+    expect(r.issues.join("\n")).toContain("档位无法识别");
+  });
 });
 
 /**

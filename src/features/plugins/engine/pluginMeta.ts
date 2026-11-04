@@ -8,12 +8,21 @@
  */
 
 import { useSyncExternalStore } from "react";
+import {
+  PLUGIN_META_COVER_MAX_BYTES,
+  PLUGIN_META_SHOT_MAX_BYTES,
+  PLUGIN_META_TOTAL_MAX_BYTES,
+} from "./limits";
 
 export const META_KEY = "vs.pluginMeta.v1";
-const MAX_COVER_BYTES = 256 * 1024;
-const MAX_SHOT_BYTES = 256 * 1024;
+/**
+ * 展示图上限集中在 `limits.ts`，**刻意不跟随 16 MiB**：
+ * 这份元信息存在 localStorage（配额只有几 MB），把封面放到插件包量级会让整份账本写不进去。
+ */
+const MAX_COVER_BYTES = PLUGIN_META_COVER_MAX_BYTES;
+const MAX_SHOT_BYTES = PLUGIN_META_SHOT_MAX_BYTES;
 const MAX_SHOTS = 4;
-const MAX_TOTAL_BYTES = 1024 * 1024;
+const MAX_TOTAL_BYTES = PLUGIN_META_TOTAL_MAX_BYTES;
 const ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const IMAGE_DATA_URL = /^data:image\/(png|jpeg|webp);base64,/;
 

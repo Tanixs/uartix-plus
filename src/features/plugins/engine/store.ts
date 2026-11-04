@@ -11,7 +11,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { emptyIndex, emptyTrust, type PluginIndex, type TrustBook } from "./repo";
-import { ROOT_KEY_RE } from "./manifest";
+import { ROOT_KEY_RE, isTrustTier } from "./manifest";
 import { normalizeJournal, type JournalBook } from "./journal";
 import { emptyProfilesBook, normalizeProfiles, type ProfilesBook } from "./profiles";
 
@@ -76,11 +76,21 @@ export function normalizeTrust(raw: unknown): { trust: TrustBook; issues: string
       issues.push(`信任条目「${id}」缺少摘要，已跳过（它无法参与判定）`);
       continue;
     }
+    /**
+     * 档位迁移：**没有 `tier` 字段就是受限**（这个字段出现之前批过的插件都按受限算）。
+     * 不这么做的后果是：升级一次应用，老账本上的每个插件都变成"档位读不懂"，
+     * 用户要么被迫重批、要么被静默抬成完全信任——两种都比"按最紧的档"坏。
+     */
+    const badTier = item.tier !== undefined && !isTrustTier(item.tier);
+    if (badTier) {
+      issues.push(`信任条目「${id}」的档位无法识别，已按受限处理`);
+    }
     out.items[id] = {
       id,
       version: typeof item.version === "string" ? item.version : "",
       digest: item.digest,
       grantedAt: typeof item.grantedAt === "number" ? item.grantedAt : 0,
+      tier: isTrustTier(item.tier) ? item.tier : "restricted",
       grantedSummary: Array.isArray(item.grantedSummary)
         ? item.grantedSummary.filter((s): s is string => typeof s === "string")
         : [],

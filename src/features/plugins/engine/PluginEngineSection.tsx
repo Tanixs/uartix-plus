@@ -32,6 +32,7 @@ import {
   setActiveTheme,
   setEnabled,
   setEnabledSet,
+  setTrustTier,
   subscribe,
   uninstall,
   uninstallMany,
@@ -52,7 +53,7 @@ import type { MarketInstalled } from "./marketStatus";
 import { PluginContribActions } from "./PluginContribActions";
 import { PluginRootsFold, WorkspaceRootRow } from "./PluginRootsSection";
 import { DraftPreviewDialog } from "./DraftPreviewDialog";
-import { declaredRootKeys } from "./manifest";
+import { declaredRootKeys, DEFAULT_TRUST_TIER, type TrustTier } from "./manifest";
 import { closeMarketDialog, useMarketDialogOpen } from "./marketDialog";
 import { hideWidget, showWidget, useHiddenWidgets, widgetKey } from "./widgetVisibility";
 import { cleanIncoming, commitRepoInstall, prepareRepoInstall } from "./marketClient";
@@ -90,6 +91,98 @@ function Fold(props: { title: string; hint?: string; children: React.ReactNode }
   );
 }
 
+/* ============================ 授权档位（2026-11-03） ============================ */
+
+/**
+ * 档位文案。**授权卡不再逐条列 23 行路径**——用户 2026-11-03 的原话是
+ * "把权限面放开，不要搞这么多安全限制"。所以这里只说三件事：
+ * 档位叫什么、它实际放开了什么、你放弃了什么。
+ * 完整清单仍然留在 `trust.json` 里（审计用），界面上折叠成"可选查看"。
+ */
+function tierTitle(t: TrustTier): string {
+  return t === "full" ? tx("完全信任", "Full trust") : tx("受限", "Restricted");
+}
+
+function tierOneLine(t: TrustTier): string {
+  return t === "full"
+    ? tx(
+        "可读写任意路径、启动任意程序、连接任意域名。",
+        "Reads and writes anywhere, runs any program, connects to any domain.",
+      )
+    : tx(
+        "写入只落在它声明的目录；启动程序与联网按清单声明判断（本机不逐项拦截）。",
+        "Writes stay inside the folders it declares; programs and network follow the manifest (not intercepted per item here).",
+      );
+}
+
+function tierSacrifice(t: TrustTier): string {
+  return t === "full"
+    ? tx(
+        "你放弃的是：工作区隔离。完全信任档等于插件可写任意路径；现有回收站只覆盖工作区内路径，跨盘误删不可恢复。",
+        "You give up workspace isolation. Full trust means the plugin can write to any path; the existing trash only covers paths inside the workspace, so deletions on another drive cannot be recovered.",
+      )
+    : tx(
+        "你放弃的是：它写不进未声明的目录，依赖新目录的功能会不可用。",
+        "You give up: it cannot write to undeclared folders, so features that need new folders will not work.",
+      );
+}
+
+/**
+ * 档位选择器。**默认受限**；完全信任不藏在第二个对话框里——选中它，
+ * 风险句就出现在同一张卡上，随后的确认按钮就是那次"一次确认"。
+ */
+function TierPicker(props: {
+  tier: TrustTier;
+  onChange: (t: TrustTier) => void;
+  disabled?: boolean;
+}) {
+  const { tier, onChange, disabled = false } = props;
+  return (
+    <div className="plg-tier">
+      <div className="plg-tier-opts" role="radiogroup" aria-label={tx("授权档位", "Trust level")}>
+        {(["restricted", "full"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="radio"
+            aria-checked={tier === t}
+            className={`plg-tier-opt${tier === t ? " on" : ""}${t === "full" ? " full" : ""}`}
+            disabled={disabled}
+            onClick={() => onChange(t)}
+          >
+            <span className="plg-tier-name">{tierTitle(t)}</span>
+            <span className="plg-tier-one">{tierOneLine(t)}</span>
+          </button>
+        ))}
+      </div>
+      {/* 完全信任的"你放弃了什么"同时就是那条醒目提示：同一句话不重复两遍 */}
+      {tier === "full" ? (
+        <div className="plg-tier-risk" role="alert">
+          {tierSacrifice("full")}
+        </div>
+      ) : (
+        <div className="plg-tier-sacrifice">{tierSacrifice("restricted")}</div>
+      )}
+    </div>
+  );
+}
+
+/** 完整权限清单（审计用）。默认折叠：批准卡上先给结论，再给证据。 */
+function PermissionDetails(props: { lines: string[] }) {
+  return (
+    <details className="plg-perm-detail">
+      <summary>{tx(`完整权限清单（${props.lines.length} 项，审计用）`, `Full permission list (${props.lines.length} items, for audit)`)}</summary>
+      {props.lines.length ? (
+        <ul>
+          {props.lines.map((x) => <li key={x}>{x}</li>)}
+        </ul>
+      ) : (
+        <div className="plg-detail-dim">{tx("没有申请任何权限", "No permissions requested")}</div>
+      )}
+    </details>
+  );
+}
+
 export function PluginEngineSection({ query = "", filter = "all" }: PluginEngineSectionProps) {
   useLocale();
   const repo = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
@@ -103,6 +196,10 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
   const [pendingInstall, setPendingInstall] = useState<InstallPlan | null>(null);
   const [pendingDraft, setPendingDraft] = useState<{ plan: InstallPlan; name: string } | null>(null);
   const [pendingMarket, setPendingMarket] = useState<{ plan: InstallPlan; repo: GhRepo; incomingDir: string } | null>(null);
+  /** 授权卡上当前选中的档位（所有"待安装"卡共用；每开一张新卡重置成受限）。 */
+  const [pendingTier, setPendingTier] = useState<TrustTier>(DEFAULT_TRUST_TIER);
+  /** 已装插件详情里的档位草稿（按插件 id 记；没选过就沿用账上的档位）。 */
+  const [tierChoices, setTierChoices] = useState<Record<string, TrustTier>>({});
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmBatch, setConfirmBatch] = useState(false);
@@ -185,12 +282,41 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
     }
   }
 
-  async function doApprove(p: InstalledPlugin): Promise<void> {
+  async function doApprove(p: InstalledPlugin, tier: TrustTier = DEFAULT_TRUST_TIER): Promise<void> {
     setBusy(p.id);
     setErr("");
     try {
-      await approve(p.id);
-      setNotice(tx(`已批准「${p.manifest.name}」的权限`, `Approved permissions for “${p.manifest.name}”`));
+      await approve(p.id, tier);
+      setTierChoices((prev) => ({ ...prev, [p.id]: tier }));
+      setNotice(
+        tier === "full"
+          ? tx(`已按「完全信任」批准「${p.manifest.name}」；它可以写任意路径`, `Approved “${p.manifest.name}” with full trust; it can write any path`)
+          : tx(`已按「受限」批准「${p.manifest.name}」的权限`, `Approved permissions for “${p.manifest.name}” (restricted)`),
+      );
+    } catch (e) {
+      setErr(String((e as Error)?.message ?? e));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  /**
+   * 已批准插件切档位。**切完宿主会被停掉**（`setTrustTier` 负责）：
+   * Node 的权限参数是启动时定死的，只改账不停进程等于界面说"已受限"、后台仍可写全盘。
+   */
+  async function doSetTier(p: InstalledPlugin, tier: TrustTier): Promise<void> {
+    setBusy(p.id);
+    setErr("");
+    try {
+      const wasRunning = p.phase === "running" || p.phase === "starting";
+      await setTrustTier(p.id, tier);
+      setTierChoices((prev) => ({ ...prev, [p.id]: tier }));
+      setNotice(
+        tx(
+          `「${p.manifest.name}」已切换为「${tierTitle(tier)}」档${wasRunning ? "；宿主已停止，下次启动按新档位运行" : "；下次启动按新档位运行"}`,
+          `“${p.manifest.name}” is now “${tierTitle(tier)}”${wasRunning ? "; the host was stopped and will use the new tier next time" : "; the new tier applies next time it starts"}`,
+        ),
+      );
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {
@@ -225,6 +351,8 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
       if (typeof dir !== "string" || !dir) return;
       setBusy("install");
       const plan = await planFolder(dir, `draft-${Date.now().toString(36)}`);
+      // 每张新卡都从**受限**开始：不继承上一张卡的档位选择，避免"顺手点过一次完全信任"变成默认值
+      setPendingTier(DEFAULT_TRUST_TIER);
       setPendingInstall(plan);
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
@@ -238,9 +366,13 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
     setBusy("install");
     setErr("");
     try {
-      await commitInstall(pendingInstall);
+      await commitInstall({ ...pendingInstall, tier: pendingTier });
       setPendingInstall(null);
-      setNotice(tx("已安装（默认停用，去列表里点启用）", "Installed (disabled by default — enable it in the list)"));
+      setNotice(
+        pendingTier === "full"
+          ? tx("已按「完全信任」安装（默认停用，去列表里点启用）", "Installed with full trust (disabled by default — enable it in the list)")
+          : tx("已安装（默认停用，去列表里点启用）", "Installed (disabled by default — enable it in the list)"),
+      );
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {
@@ -257,6 +389,7 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
         setNotice(tx(`草稿「${d.title}」已转正`, `Promoted draft “${d.title}”`));
         await refreshDrafts();
       } else {
+        setPendingTier(DEFAULT_TRUST_TIER);
         setPendingDraft({ plan: got.plan, name: d.name });
       }
     } catch (e) {
@@ -271,9 +404,13 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
     setBusy("promote");
     setErr("");
     try {
-      await commitDraftPromotion(pendingDraft.plan, pendingDraft.name);
+      await commitDraftPromotion({ ...pendingDraft.plan, tier: pendingTier }, pendingDraft.name);
       setPendingDraft(null);
-      setNotice(tx("草稿已转正", "Draft promoted"));
+      setNotice(
+        pendingTier === "full"
+          ? tx("草稿已按「完全信任」转正", "Draft promoted with full trust")
+          : tx("草稿已转正", "Draft promoted"),
+      );
       await refreshDrafts();
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
@@ -307,6 +444,7 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
     setErr("");
     try {
       const preview = await prepareRepoInstall(repo);
+      setPendingTier(DEFAULT_TRUST_TIER);
       setPendingMarket({ plan: preview.plan, repo, incomingDir: preview.incomingDir });
       closeMarketDialog();
     } catch (e) {
@@ -322,10 +460,14 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
     setBusy("market-install");
     setErr("");
     try {
-      await commitRepoInstall(pendingMarket.plan, pendingMarket.repo);
+      await commitRepoInstall({ ...pendingMarket.plan, tier: pendingTier }, pendingMarket.repo);
       await cleanIncoming(pendingMarket.incomingDir);
       setPendingMarket(null);
-      setNotice(tx("市场插件已安装（默认停用）", "Market plugin installed (disabled by default)"));
+      setNotice(
+        pendingTier === "full"
+          ? tx("市场插件已按「完全信任」安装（默认停用）", "Market plugin installed with full trust (disabled by default)")
+          : tx("市场插件已安装（默认停用）", "Market plugin installed (disabled by default)"),
+      );
     } catch (e) {
       setErr(String((e as Error)?.message ?? e));
     } finally {
@@ -410,7 +552,11 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
     }
   }
 
-  const pendingPerms = pendingMarket?.plan.permissions ?? pendingInstall?.permissions ?? pendingDraft?.plan.permissions ?? [];
+  /** 当前这张授权卡对应的安装计划（市场 / 本地 / 草稿三选一）。 */
+  const pendingPlan = pendingMarket?.plan ?? pendingInstall ?? pendingDraft?.plan ?? null;
+  const pendingPerms = pendingPlan?.permissions ?? [];
+  /** 纯声明式插件没有主进程：完全信任不会多给任何能力，选择器里禁掉它。 */
+  const pendingHasMain = !!pendingPlan?.manifest.main;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)", minHeight: 0 }}>
@@ -458,14 +604,28 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
               {tx(`要安装 GitHub 上的「${pendingMarket.plan.name}」吗？（v${pendingMarket.plan.version}）`, `Install “${pendingMarket.plan.name}” from GitHub? (v${pendingMarket.plan.version})`)}
             </h4>
             <p className="plg-detail-desc">
-              {tx(`来源：${pendingMarket.repo.full}；安装后默认停用。`, `Source: ${pendingMarket.repo.full}; installed disabled.`)}
+              {tx(`来源：${pendingMarket.repo.full}；安装后默认停用。先选授权档位，再装入。`, `Source: ${pendingMarket.repo.full}; installed disabled. Pick a trust level, then install.`)}
             </p>
-            <ul className="plg-detail-desc">
-              {pendingPerms.map((x) => <li key={x}>{x}</li>)}
-            </ul>
+            {pendingMarket.plan.verdict === "changed" && pendingMarket.plan.previousTier ? (
+              <div className="plg-detail-dim">
+                {tx(`上次批准的是「${tierTitle(pendingMarket.plan.previousTier)}」档；权限面变了，这次请重新确认。`, `Last approved tier was “${tierTitle(pendingMarket.plan.previousTier)}”; the permission surface changed, so please confirm again.`)}
+              </div>
+            ) : null}
+            {pendingHasMain ? (
+              <TierPicker tier={pendingTier} onChange={setPendingTier} disabled={!!busy} />
+            ) : (
+              <div className="plg-detail-dim">
+                {tx("这个插件没有主进程，不涉及进程权限；按「受限」档记录。", "This plugin has no host process, so process permissions do not apply; it is recorded as restricted.")}
+              </div>
+            )}
+            <PermissionDetails lines={pendingPerms} />
             <div style={{ display: "flex", gap: "var(--sp-2)" }}>
-              <button className="btn primary" disabled={!!busy} onClick={() => void confirmMarket()}>
-                {tx("装入", "Install")}
+              <button
+                className={`btn ${pendingTier === "full" ? "danger" : "primary"}`}
+                disabled={!!busy}
+                onClick={() => void confirmMarket()}
+              >
+                {pendingTier === "full" ? tx("完全信任并装入", "Install with full trust") : tx("装入（受限）", "Install (restricted)")}
               </button>
               <button className="btn" disabled={!!busy} onClick={() => void cancelMarket()}>
                 {tx("取消", "Cancel")}
@@ -484,14 +644,34 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
                 : tx(`要安装「${pendingInstall?.name}」吗？（v${pendingInstall?.version}）`, `Install “${pendingInstall?.name}”? (v${pendingInstall?.version})`)}
             </h4>
             <p className="plg-detail-desc">
-              {tx("它会拿到下面这些权限；安装后默认停用，启用后才会跑。", "It will receive the permissions below. It starts disabled; enable it when you want it to run.")}
+              {tx("先选授权档位，再装入；安装后默认停用，启用后才会跑。", "Pick a trust level, then install. It starts disabled; enable it when you want it to run.")}
             </p>
-            <ul className="plg-detail-desc">
-              {pendingPerms.length ? pendingPerms.map((x) => <li key={x}>{x}</li>) : <li>{tx("没有申请任何权限", "No permissions requested")}</li>}
-            </ul>
+            {pendingPlan?.verdict === "changed" && pendingPlan.previousTier ? (
+              <div className="plg-detail-dim">
+                {tx(`上次批准的是「${tierTitle(pendingPlan.previousTier)}」档；权限面变了，这次请重新确认。`, `Last approved tier was “${tierTitle(pendingPlan.previousTier)}”; the permission surface changed, so please confirm again.`)}
+              </div>
+            ) : null}
+            {pendingHasMain ? (
+              <TierPicker tier={pendingTier} onChange={setPendingTier} disabled={!!busy} />
+            ) : (
+              <div className="plg-detail-dim">
+                {tx("这个插件没有主进程，不涉及进程权限；按「受限」档记录。", "This plugin has no host process, so process permissions do not apply; it is recorded as restricted.")}
+              </div>
+            )}
+            <PermissionDetails lines={pendingPerms} />
             <div style={{ display: "flex", gap: "var(--sp-2)" }}>
-              <button className="btn primary" disabled={!!busy} onClick={() => void (pendingDraft ? confirmPromote() : confirmInstall())}>
-                {pendingDraft ? tx("批准并转正", "Approve and promote") : tx("装入", "Install")}
+              <button
+                className={`btn ${pendingTier === "full" ? "danger" : "primary"}`}
+                disabled={!!busy}
+                onClick={() => void (pendingDraft ? confirmPromote() : confirmInstall())}
+              >
+                {pendingDraft
+                  ? pendingTier === "full"
+                    ? tx("完全信任并转正", "Promote with full trust")
+                    : tx("批准并转正（受限）", "Approve and promote (restricted)")
+                  : pendingTier === "full"
+                    ? tx("完全信任并装入", "Install with full trust")
+                    : tx("装入（受限）", "Install (restricted)")}
               </button>
               <button
                 className="btn"
@@ -512,6 +692,11 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
         const on = p.enabled;
         const open = !selectMode && openId === p.id;
         const meta = metaBook.items[p.id];
+        /**
+         * 详情里的档位草稿。**未批准/权限已变时默认回受限**，不沿用账上的旧档：
+         * `changed` 意味着用户这次看到的是新权限面，就该重新做一次决定。
+         */
+        const chosenTier = tierChoices[p.id] ?? (p.verdict === "trusted" ? p.tier : DEFAULT_TRUST_TIER);
         return (
           <div key={p.id} className={`plg-item${open ? " open" : ""}`}>
             <div className="plg-item-row">
@@ -541,6 +726,10 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
                     {kindsOrFallback(pluginKinds(p.manifest)).map((k) => (
                       <span key={k.zh} className="plg-chip">{tx(k.zh, k.en)}</span>
                     ))}
+                    {/* 完全信任在列表里就要看得见：不能等展开详情才知道它能写全盘 */}
+                    {p.verdict === "trusted" && p.tier === "full" ? (
+                      <span className="plg-chip warn">{tx("完全信任 · 可写任意路径", "full trust · writes any path")}</span>
+                    ) : null}
                     {p.verdict !== "trusted" ? <span className="plg-chip warn">{tx("未批准", "not approved")}</span> : null}
                   </span>
                   <span className="plg-item-desc">{metaDescription(p.manifest.description ?? "", meta) || tx("（没有描述）", "(no description)")}</span>
@@ -567,18 +756,66 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
                 <div className="plg-cols">
                   <section className="plg-col-main">
                     {p.verdict !== "trusted" ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)", padding: "6px 8px", border: "1px solid var(--warn)", borderRadius: "var(--radius-m)" }}>
-                        <span style={{ color: "var(--warn)", fontSize: "var(--fs-sm)" }}>{tx("权限还没批准，插件不会启动", "Permissions are not approved; the plugin will not start")}</span>
-                        <button className="btn primary" disabled={!!busy} onClick={() => void doApprove(p)}>
-                          {tx("批准这些权限", "Approve these permissions")}
+                      <div className="plg-approve-bar">
+                        <span>{tx("权限还没批准，插件不会启动", "Permissions are not approved; the plugin will not start")}</span>
+                        <button className="btn primary" disabled={!!busy} onClick={() => void doApprove(p, DEFAULT_TRUST_TIER)}>
+                          {tx("批准（受限）", "Approve (restricted)")}
                         </button>
+                        <span className="plg-detail-dim">
+                          {tx("要完全信任？在下面「权限与批准」里切档位。", "Want full trust? Switch the tier under “Permissions & approval” below.")}
+                        </span>
                       </div>
                     ) : null}
 
-                    <Fold title={tx("权限与批准", "Permissions & approval")} hint={tx(`${p.permissions.length} 项`, `${p.permissions.length} item(s)`)}>
-                      <ul className="plg-detail-desc" style={{ margin: 0 }}>
-                        {p.permissions.length ? p.permissions.map((x) => <li key={x}>{x}</li>) : <li>{tx("没有申请任何权限", "No permissions requested")}</li>}
-                      </ul>
+                    <Fold
+                      title={tx("权限与批准", "Permissions & approval")}
+                      hint={tx(`${tierTitle(p.tier)} · ${p.permissions.length} 项`, `${tierTitle(p.tier)} · ${p.permissions.length} item(s)`)}
+                    >
+                      {p.verdict === "changed" ? (
+                        <div className="plg-detail-dim">
+                          {tx(`权限面变了；上次批准的是「${tierTitle(p.tier)}」档，这次要重新选一次。`, `The permission surface changed; last approved tier was “${tierTitle(p.tier)}”. Choose again.`)}
+                        </div>
+                      ) : null}
+                      {p.manifest.main ? (
+                        <TierPicker
+                          tier={chosenTier}
+                          onChange={(t) => setTierChoices((prev) => ({ ...prev, [p.id]: t }))}
+                          disabled={!!busy}
+                        />
+                      ) : (
+                        <div className="plg-detail-dim">
+                          {tx("这个插件没有主进程，不涉及进程权限；按「受限」档记录。", "This plugin has no host process, so process permissions do not apply; it is recorded as restricted.")}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)", flexWrap: "wrap" }}>
+                        {p.verdict !== "trusted" ? (
+                          <button
+                            className={`btn ${chosenTier === "full" ? "danger" : "primary"}`}
+                            disabled={!!busy}
+                            onClick={() => void doApprove(p, chosenTier)}
+                          >
+                            {chosenTier === "full" ? tx("完全信任并批准", "Approve with full trust") : tx("批准（受限）", "Approve (restricted)")}
+                          </button>
+                        ) : chosenTier !== p.tier ? (
+                          <button
+                            className={`btn ${chosenTier === "full" ? "danger" : "primary"}`}
+                            disabled={!!busy}
+                            onClick={() => void doSetTier(p, chosenTier)}
+                          >
+                            {chosenTier === "full"
+                              ? tx("改为完全信任（可写任意路径）", "Switch to full trust (writes any path)")
+                              : tx("改为受限（下次启动生效）", "Switch to restricted (applies next start)")}
+                          </button>
+                        ) : (
+                          <span className="plg-detail-dim">
+                            {tx(`当前档位「${tierTitle(p.tier)}」已生效`, `Current tier “${tierTitle(p.tier)}” is active`)}
+                          </span>
+                        )}
+                        {p.verdict === "trusted" && p.tier === "full" ? (
+                          <span className="plg-chip warn">{tx("可写任意路径", "writes any path")}</span>
+                        ) : null}
+                      </div>
+                      <PermissionDetails lines={p.permissions} />
                     </Fold>
 
                     <Fold title={tx("插件信息与封面", "Info & cover")} hint={tx("只改展示层", "display only")}>
@@ -688,12 +925,12 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
 
                     <h4 className="plg-sec">{tx("信任", "Trust")}</h4>
                     <div className="plg-detail-dim">
-                      {trustLabel(p)} · {tx(`${p.permissions.length} 项权限`, `${p.permissions.length} permission(s)`)}
+                      {trustLabel(p)} · {tierTitle(p.tier)} · {tx(`${p.permissions.length} 项声明`, `${p.permissions.length} declared item(s)`)}
                     </div>
                     {p.verdict !== "trusted" ? (
                       <div style={{ marginTop: "var(--sp-2)" }}>
-                        <button className="btn primary" disabled={!!busy} onClick={() => void doApprove(p)}>
-                          {tx("批准这些权限", "Approve these permissions")}
+                        <button className="btn primary" disabled={!!busy} onClick={() => void doApprove(p, DEFAULT_TRUST_TIER)}>
+                          {tx("批准（受限）", "Approve (restricted)")}
                         </button>
                       </div>
                     ) : null}
@@ -703,7 +940,11 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
                       entry={p}
                       onNotice={setNotice}
                       onError={setErr}
-                      onPending={(plan) => setPendingInstall(plan)}
+                      onPending={(plan) => {
+                        // 回滚也是一次新安装：档位重新从受限开始选
+                        setPendingTier(DEFAULT_TRUST_TIER);
+                        setPendingInstall(plan);
+                      }}
                     />
 
                     <div style={{ marginTop: "var(--sp-3)" }}>

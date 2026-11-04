@@ -12,7 +12,7 @@
  *    而不是整个 manifest 的哈希。改一句描述不该让人重新批准，加一个写目录才该。
  */
 
-import type { PluginManifest } from "./manifest";
+import type { PluginManifest, TrustTier } from "./manifest";
 
 export const REPO_VERSION = 1;
 export const INDEX_FILE = "index.json";
@@ -134,8 +134,24 @@ export interface TrustRecord {
   version: string;
   digest: string;
   grantedAt: number;
+  /**
+   * 用户批准的**授权档位**。
+   *
+   * 为什么要落进 `trust.json` 而不是只记在内存/设置里：这是审计事实——
+   * "这个插件是在 2026-11-03 被用户点了完全信任"必须能和权限面一样被翻出来。
+   * 旧账本没有这个字段，`normalizeTrust` 一律按 `restricted` 迁移（见 `store.ts`）。
+   */
+  tier: TrustTier;
   /** 批准时用户看到的那份权限快照（给人看的，不参与判定；判定只看 digest）。 */
   grantedSummary: string[];
+}
+
+/**
+ * 从一条信任记录读出档位。**缺字段 = 受限**（旧账本/旧日志的迁移口径）。
+ * 判定集中在这里，别处不许再写 `rec.tier === "full"` 之外的猜测。
+ */
+export function tierOf(rec: Pick<TrustRecord, "tier"> | undefined | null): TrustTier {
+  return rec?.tier === "full" ? "full" : "restricted";
 }
 
 export interface TrustBook {

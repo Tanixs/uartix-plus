@@ -128,7 +128,7 @@ describe("P174-A2 · 稳定序列化与信任摘要", () => {
 describe("P174-A2 · 信任三态", () => {
   const m = manifest();
   const digest = trustDigestInput(m);
-  const rec: TrustRecord = { id: m.id, version: m.version, digest, grantedAt: 1, grantedSummary: [] };
+  const rec: TrustRecord = { id: m.id, version: m.version, digest, grantedAt: 1, tier: "restricted", grantedSummary: [] };
 
   it("没记录 ⇒ 要批准；摘要同 ⇒ 已信任；摘要不同 ⇒ 变了要重批", () => {
     expect(trustVerdict(undefined, digest)).toBe("needs-approval");

@@ -22,6 +22,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 
+use crate::plugin_limits::PLUGIN_HOST_LINE_MAX_BYTES;
+
 /// 空闲多久挂起。比面板交互周期长得多，又短到用户不会觉得"装了个东西一直在跑"。
 const IDLE_TIMEOUT_MS: u64 = 60_000;
 /// 巡检间隔。比超时短一个量级，保证最多晚 5s 回收。
@@ -239,8 +241,8 @@ pub async fn plugin_host_send(
     handle: String,
     line: String,
 ) -> Result<Value, String> {
-    if line.len() > 8 * 1024 * 1024 {
-        return Err("单条消息过大".into());
+    if line.len() > PLUGIN_HOST_LINE_MAX_BYTES {
+        return Err(format!("单条消息过大（上限 {PLUGIN_HOST_LINE_MAX_BYTES} 字节）"));
     }
     if line.contains('\n') || line.contains('\r') {
         return Err("line 不许含裸换行（会破坏 JSONL 分帧）".into());

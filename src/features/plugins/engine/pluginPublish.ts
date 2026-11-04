@@ -16,6 +16,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listInExt, readInExt, readInExtB64, type InstalledPlugin } from "./pluginEngine";
 import type { PluginMeta } from "./pluginMeta";
+import {
+  PLUGIN_MAX_PUBLISH_FILE_BYTES,
+  PLUGIN_MAX_PUBLISH_FILES,
+  formatBytes,
+} from "./limits";
 
 const TEXT_EXT = /\.(json|mjs|js|cjs|html|htm|css|md|txt|yaml|yml|svg|py|ps1)$/i;
 /** 没有扩展名但确实是文本的常见名字。`LICENSE` 曾被报成"非文本"，就是漏在这里。 */
@@ -26,12 +31,16 @@ const IMAGE_EXT = /\.(png|jpe?g|webp|gif|ico)$/i;
 const RUNTIME_DIR = /^(logs|\.versions|\.incoming|staging|node_modules|\.git|__pycache__)(\/|$)/;
 const RUNTIME_NAME = /(\.log|\.pyc)$/i;
 
-const MAX_FILES = 12; // 与 Rust 侧 `github_publish` 的硬顶一致：YOLO 这类包要带 3 个 runner，
+const MAX_FILES = PLUGIN_MAX_PUBLISH_FILES; // 与 Rust 侧 `github_publish` 的硬顶一致：YOLO 这类包要带 3 个 runner，
 // 上限留余量不够就会**静默跳过 runner**，发出去的插件新增参数全哑——那比发布失败更糟。
 const MAX_DEPTH = 4;
-const MAX_TEXT_BYTES = 512 * 1024;
-/** 单张图的上限。GitHub 的 contents API 这档够用，市场读图侧的上限比这更小。 */
-const MAX_IMAGE_BYTES = 1024 * 1024;
+/**
+ * 单文件发布上限。2026-11-03：文本 512 KiB / 图片 1 MiB → 统一 16 MiB（与包内单文件同源）。
+ * 原来那两道会让一个 600 KB 的 panel.html "装得上、发不出去"；
+ * 注意这是**本地闸**，GitHub 自己的 contents API 对超大文件另有约束，超了会在发布结果里报出来。
+ */
+const MAX_TEXT_BYTES = PLUGIN_MAX_PUBLISH_FILE_BYTES;
+const MAX_IMAGE_BYTES = PLUGIN_MAX_PUBLISH_FILE_BYTES;
 
 export interface PublishFile {
   path: string;
@@ -117,7 +126,7 @@ export async function readPackageFiles(extId: string): Promise<{ files: PublishF
         if (isImage) {
           const r = await readInExtB64(extId, child);
           if (r.truncated || r.bytes > MAX_IMAGE_BYTES) {
-            skipped.push(`${child}（超过 ${Math.round(MAX_IMAGE_BYTES / 1024)}KB，已跳过）`);
+            skipped.push(`${child}（超过 ${formatBytes(MAX_IMAGE_BYTES)}，已跳过）`);
             continue;
           }
           files.push({ path: child, content: r.b64 });
@@ -125,7 +134,7 @@ export async function readPackageFiles(extId: string): Promise<{ files: PublishF
         }
         const text = await readInExt(extId, child);
         if (new Blob([text]).size > MAX_TEXT_BYTES) {
-          skipped.push(`${child}（超过 ${Math.round(MAX_TEXT_BYTES / 1024)}KB，已跳过）`);
+          skipped.push(`${child}（超过 ${formatBytes(MAX_TEXT_BYTES)}，已跳过）`);
           continue;
         }
         files.push({ path: child, content: b64utf8(text) });
@@ -198,7 +207,7 @@ export async function publishPluginV3(p: InstalledPlugin, meta: PluginMeta | und
   // 而"展示封面"该赢的是用户在这台机器上选的那张（meta.cover），不是包里的旧图。
   const hasPackCover = files.some((f) => /^cover\.(png|jpe?g|webp)$/i.test(f.path));
   if (cover && cm && !hasPackCover) files.push({ path: `cover.${cm[1] === "jpeg" ? "jpg" : cm[1]}`, content: cover.slice(cm[0].length) });
-  if (files.length > 12) return { ok: false, msg: "包内文件太多（发布上限 12 个，请先精简）" };
+  if (files.length > MAX_FILES) return { ok: false, msg: `包内文件太多（发布上限 ${MAX_FILES} 个，请先精简）` };
 
   const rawTopics = Array.isArray(opts.topics) ? opts.topics : opts.topics.split(/[,，]+/);
   try {

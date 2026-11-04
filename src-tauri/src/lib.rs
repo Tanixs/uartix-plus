@@ -16,6 +16,7 @@ mod ring;
 mod serial;
 mod plugin_fs;
 mod plugin_host;
+mod plugin_limits;
 mod session;
 mod vdev;
 mod xfer;

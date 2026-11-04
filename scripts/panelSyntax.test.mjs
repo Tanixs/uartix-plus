@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import { PANEL_READ_MAX_BYTES } from "../src/features/plugins/engine/limits.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -497,10 +498,20 @@ describe("P177-D · 部署目标画像与部署包", () => {
    ============================================================================ */
 
 describe("面板文件大小硬上限", () => {
-  it("panel.html 小于宿主读取上限 16 MiB", () => {
+  it("panel.html 小于宿主当前读取上限（护栏不是配额）", () => {
     const f = path.join(ROOT, "plugins", "uartix.yolo", "panel.html");
     const bytes = statSync(f).size;
-    expect(bytes, `panel.html 已 ${bytes} 字节；超过 16 MiB 会被宿主 plugin_fs_read 截断成空白页`).toBeLessThan(16 * 1024 * 1024);
+    /**
+     * 断言值跟着 `limits.ts` 的 `PANEL_READ_MAX_BYTES` 走，而不是写死一个数字：
+     * 这条判据盯的是"面板不许长过宿主读得动的量"——超出会被 `plugin_fs_read` 截断，
+     * 现象是整页空白，不是报错。它**不是**给插件的体积配额；配额在包校验那一层。
+     *
+     * 注意：0.6.4 那版构建里宿主仍是 256 KiB；这个常量只在新构建里生效。
+     */
+    expect(
+      bytes,
+      `panel.html 已 ${bytes} 字节；超过宿主读取上限 ${PANEL_READ_MAX_BYTES} 会被截断成空白页`,
+    ).toBeLessThan(PANEL_READ_MAX_BYTES);
   });
 });
 

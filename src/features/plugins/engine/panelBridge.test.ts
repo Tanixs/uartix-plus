@@ -18,6 +18,7 @@ import {
   resErr,
   resOk,
 } from "./panelBridge";
+import { PLUGIN_MAX_FILE_BYTES } from "./limits";
 
 describe("视图 id", () => {
   it("拼出来能解回去（插件 id 带点、面板 id 带短横都不影响）", () => {
@@ -112,10 +113,12 @@ describe("parseBridgeMessage（来自 iframe 的输入一律当不可信）", ()
     expect(parseBridgeMessage(env({ kind: "req", reqId: "r".repeat(65), method: "ping" }))).toBeNull();
   });
 
-  it("fs：writeText 必须带 content，且不许超过 1 MiB", () => {
+  it("fs：writeText 必须带 content，且不许超过单文件上限", () => {
     expect(parseBridgeMessage(env({ kind: "fs", reqId: "r1", op: "writeText", path: "a.txt" }))).toBeNull();
     expect(
-      parseBridgeMessage(env({ kind: "fs", reqId: "r1", op: "writeText", path: "a.txt", content: "x".repeat(1024 * 1024 + 1) })),
+      parseBridgeMessage(
+        env({ kind: "fs", reqId: "r1", op: "writeText", path: "a.txt", content: "x".repeat(PLUGIN_MAX_FILE_BYTES + 1) }),
+      ),
     ).toBeNull();
     expect(parseBridgeMessage(env({ kind: "fs", reqId: "r1", op: "readText", path: "a.txt" }))).not.toBeNull();
   });

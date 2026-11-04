@@ -22,6 +22,7 @@
 
 import { ROOT_SPEC_RE, type PluginManifest } from "./manifest";
 import { iframeThemeCss, type IframeTheme } from "./iframeTheme";
+import { PLUGIN_MAX_FILE_BYTES } from "./limits";
 
 /** 消息信封上的标记。用一个大写开头、带前缀的键，冲突概率远低于 `type`。 */
 export const PANEL_MSG_KEY = "__uartixPanel";
@@ -139,8 +140,11 @@ export type BridgeIn =
 const MAX_REQ_ID = 64;
 const MAX_METHOD = 200;
 const MAX_PATH = 300;
-/** 一次写文件的字节上限。与 `plugin_fs_write` 的 8 MiB 上限对齐，这里是更早的一道。 */
-const MAX_WRITE = 1024 * 1024;
+/**
+ * 一次写文件的字节上限。与 `plugin_fs_write` 的单文件上限（16 MiB）对齐：
+ * 这里只是更早的一道，不能让面板写出一个"Rust 侧本来收得下"的文件却在桥上前置拒绝。
+ */
+const MAX_WRITE = PLUGIN_MAX_FILE_BYTES;
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

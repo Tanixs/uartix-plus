@@ -196,6 +196,10 @@ describe("对账（日志被人动过 / 账本被人动过）", () => {
     const trust = { ...state.trust, "demo.tool": { ...state.trust["demo.tool"], digest: "改过了" } };
     expect(verifyJournal(book, { ...state, trust }).join("\n")).toContain("权限摘要不同");
 
+    // 档位被人从"完全信任"改回"受限"（或反过来）也要报出来：它是批准事实，不是展示字段
+    const tiered = { ...state.trust, "demo.tool": { ...state.trust["demo.tool"], tier: "full" as const } };
+    expect(verifyJournal(book, { ...state, trust: tiered }).join("\n")).toContain("档位");
+
     expect(verifyJournal(book, { ...state, activeTheme: "plg:x:y" }).join("\n")).toContain("当前主题");
   });
 

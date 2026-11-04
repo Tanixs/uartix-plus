@@ -14,6 +14,12 @@
  *    （跳过的东西必须能被看见，否则包里放了什么就没人知道了）。
  */
 
+import {
+  PLUGIN_MAX_FILE_BYTES,
+  PLUGIN_MAX_FILES,
+  PLUGIN_MAX_PACKAGE_BYTES,
+} from "./limits";
+
 export interface PackFile {
   /** 包内相对路径，已归一成 `/` 分隔。 */
   name: string;
@@ -37,11 +43,11 @@ export interface UnpackLimits {
   maxTotalBytes: number;
 }
 
-/** 与 `PLUGIN_LIMITS` 同量级：包不该比"一个插件包"更大。 */
+/** 与 `PLUGIN_LIMITS` 同源（`limits.ts` 是唯一来源）：包不该比"一个插件包"更大。 */
 export const UNPACK_LIMITS: UnpackLimits = {
-  maxFiles: 2000,
-  maxFileBytes: 8 * 1024 * 1024,
-  maxTotalBytes: 64 * 1024 * 1024,
+  maxFiles: PLUGIN_MAX_FILES,
+  maxFileBytes: PLUGIN_MAX_FILE_BYTES,
+  maxTotalBytes: PLUGIN_MAX_PACKAGE_BYTES,
 };
 
 /** 路径归一 + 判死。返回 null ＝ 这条不该被写出去。 */

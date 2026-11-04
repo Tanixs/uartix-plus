@@ -465,6 +465,19 @@ describe("P174-A · 宿主命令行（牢笼落地处）", () => {
     const args = buildHostNodeArgs(m, { ...BIND, extra: {} });
     expect(args.some((a) => a.startsWith("--allow-fs-write="))).toBe(false);
   });
+
+  it("完全信任档：只给 --allow-fs-write=*，不给逐目录参数", () => {
+    const m = okManifest({
+      permissions: { fs: { write: ["$WS", "$WS/runs"] }, ui: { panel: true } },
+    });
+    const args = buildHostNodeArgs(m, BIND, "full");
+    expect(args).toContain("--allow-fs-write=*");
+    // `=*` 已经覆盖所有声明目录；两套参数叠在一起只会让审计说不清哪条在生效
+    expect(args.filter((a) => a.startsWith("--allow-fs-write="))).toEqual(["--allow-fs-write=*"]);
+    // 读与子进程本来就没有名单，完全信任档不改它们
+    expect(args).toContain("--allow-fs-read=*");
+    expect(args).toContain("--allow-child-process");
+  });
 });
 
 describe("P174-R4 · widgets 贡献面", () => {

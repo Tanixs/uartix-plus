@@ -9,11 +9,13 @@
  */
 
 import {
+  DEFAULT_TRUST_TIER,
   buildHostNodeArgs,
   pluginWriteRootKeys,
   usesWorkspace,
   type PluginManifest,
   type PathVarBinding,
+  type TrustTier,
 } from "./manifest";
 import { pluginDir, pluginsRoot, STAGING_DIR } from "./repo";
 
@@ -28,6 +30,11 @@ export interface HostPlanInput {
   nodePath: string;
   /** 一次性随机串，由调用方注入（测试里给固定值）。 */
   token: string;
+  /**
+   * 授权档位。**默认受限**；只有用户在 approved trust.json 里留下的 `full` 才走到放开分支。
+   * 这个值必须来自**信任账**而不是清单：插件不能自己声明"请完全信任我"。
+   */
+  tier?: TrustTier;
 }
 
 export interface HostPlan {
@@ -62,6 +69,7 @@ export class HostPlanError extends Error {
  */
 export function planHostStart(input: HostPlanInput): HostPlan {
   const { manifest, bind, appDir, scriptPath, nodePath, token } = input;
+  const tier = input.tier ?? DEFAULT_TRUST_TIER;
 
   if (!manifest.main) {
     throw new HostPlanError("这个插件没有 main，不该起进程", "no_main");
@@ -109,7 +117,7 @@ export function planHostStart(input: HostPlanInput): HostPlan {
     throw new HostPlanError(`插件目录不合法：${dir}`, "bad_dir");
   }
 
-  const args = buildHostNodeArgs(manifest, bind);
+  const args = buildHostNodeArgs(manifest, bind, tier);
 
   return {
     handle: manifest.id,

@@ -15,7 +15,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { BOOTSTRAP_SOURCE } from "./bootstrap";
-import { ROOT_KEY_RE, validateExtension, type PluginManifest } from "./manifest";
+import {
+  ROOT_KEY_RE,
+  validateExtension,
+  type PluginManifest,
+  type TrustTier,
+} from "./manifest";
+import { formatBytes, PLUGIN_MAX_FILE_BYTES } from "./limits";
 import { setActiveExtTheme, themeKey, type ActiveExtTheme } from "./activeTheme";
 import { planHostStart, HostPlanError } from "./hostPlan";
 import { guardThemeCss, type ThemeCssResult } from "./themeCss";
@@ -37,6 +43,7 @@ import {
   flattenPermissions,
   resolveInExtDir,
   STAGING_DIR,
+  tierOf,
   trustVerdict,
   type PluginIndex,
   type PluginIndexItem,
@@ -116,6 +123,11 @@ export interface InstalledPlugin {
   enabled: boolean;
   /** 与信任库比出来的三态；`needs-approval`/`changed` 的面板会顶一条黄条。 */
   verdict: TrustVerdict;
+  /**
+   * 用户在信任账上批的档位。**旧账本没有这个字段时由 `tierOf` 归一成受限**。
+   * 它只影响宿主启动参数（`--allow-fs-write=*`），不影响"启用/批准"这两道门。
+   */
+  tier: TrustTier;
   permissions: string[];
   /** `contributes.settings` 的覆盖值（只含与默认值不同的键）。 */
   config: Record<string, unknown>;
@@ -291,7 +303,8 @@ export function getEntry(id: string): InstalledPlugin | undefined {
 async function readManifestOf(dir: string, root: string): Promise<{ manifest?: PluginManifest; issue?: string }> {
   const r = await invoke<FsReadResult>("plugin_fs_read", { path: `${dir}/plugin.json`, roots: [root] });
   if (!r.exists) return { issue: "缺 plugin.json（不是插件目录）" };
-  if (r.truncated) return { issue: "plugin.json 超过 256 KiB，已拒绝解析" };
+  // 读取上限是护栏不是配额：超过它说明文件不该塞进清单（清单本体另有 1 MiB 校验）
+  if (r.truncated) return { issue: `plugin.json 超过 ${formatBytes(PLUGIN_MAX_FILE_BYTES)}，已拒绝解析` };
   let raw: unknown;
   try {
     raw = JSON.parse(r.text);
@@ -423,6 +436,7 @@ export async function reload(): Promise<void> {
         enabled: index.items[manifest.id]?.enabled ?? true,
         origin: index.items[manifest.id]?.origin,
         verdict: trustVerdict(rec, fingerprint),
+        tier: tierOf(rec),
         permissions: flattenPermissions(manifest),
         config: { ...(extSettings.pluginConfig[manifest.id] ?? {}) },
         themes,
@@ -780,7 +794,7 @@ export async function setExternalRoot(key: string, path: string, by?: RootBindOr
 async function readThemeCss(dir: string, root: string, entry: string): Promise<ThemeCssResult> {
   const r = await invoke<FsReadResult>("plugin_fs_read", { path: `${dir}/${entry}`, roots: [root] });
   if (!r.exists) return { issue: `缺主题文件 ${entry}` };
-  if (r.truncated) return { issue: `主题文件 ${entry} 超过 256 KiB，已拒绝（主题不该这么大）` };
+  if (r.truncated) return { issue: `主题文件 ${entry} 超过 ${formatBytes(PLUGIN_MAX_FILE_BYTES)}，已拒绝（主题不该这么大）` };
   return guardThemeCss(r.text, entry);
 }
 
@@ -1071,17 +1085,48 @@ export async function uninstallMany(
  *
  * 只有一条路径会用到这里：包是手工放进 `plugins/` 的，或者上一次安装崩在了中间。
  * 正常安装走的是 `commitInstall`——它在提升之后立刻写信任账，所以装完就是 trusted。
+ *
+ * `tier` 由调用方（授权卡）传入。**默认受限**：函数签名不取"完全信任"作为默认值，
+ * 免得任何一条漏传的调用路径悄悄把插件抬成全权限。
  */
-export async function approve(id: string): Promise<void> {
+export async function approve(id: string, tier: TrustTier = "restricted"): Promise<void> {
   const e = getEntry(id);
   if (!e) throw new Error(`没有这个插件：${id}`);
   if (!paths) throw new Error("还没读到插件目录");
   const cur = trust ?? emptyTrust();
-  const rec = trustRecordFor(e.manifest, Date.now());
+  const rec = trustRecordFor(e.manifest, Date.now(), tier);
   const next: TrustBook = { version: REPO_VERSION, items: { ...cur.items, [id]: rec } };
   trust = next;
   await saveTrust(next, [paths.pluginsRoot]);
   await recordJournal(approveJournalEvent(rec));
+  await reload();
+}
+
+/**
+ * 切换一个**已批准**插件的授权档位（受限 ⇄ 完全信任）。
+ *
+ * 为什么切档要先停进程：Node 的权限参数是**启动那一刻**定死的，没有热改这回事。
+ * 只改 `trust.json` 而不停进程，界面会显示"已改为受限"，而后台那个进程仍然带着
+ * `--allow-fs-write=*` —— 这是这套信任模型里最不能出现的一种谎。
+ * 停掉之后下一次启动按新档位装配；用户不需要卸载重装。
+ */
+export async function setTrustTier(id: string, tier: TrustTier): Promise<void> {
+  const e = getEntry(id);
+  if (!e) throw new Error(`没有这个插件：${id}`);
+  if (!paths) throw new Error("还没读到插件目录");
+  const cur = trust ?? emptyTrust();
+  const rec = cur.items[id];
+  if (!rec) throw new Error("这个插件还没批准过：先批准一次，再切档位");
+  if (tierOf(rec) === tier) return;
+
+  if (canStop(e.phase)) await stop(id);
+
+  const nextRec = { ...rec, tier, grantedAt: Date.now() };
+  const next: TrustBook = { version: REPO_VERSION, items: { ...cur.items, [id]: nextRec } };
+  trust = next;
+  await saveTrust(next, [paths.pluginsRoot]);
+  // 档位变更是批准事实，进账本：之后能从日志里回答"谁在什么时候把它放开了"
+  await recordJournal(approveJournalEvent(nextRec));
   await reload();
 }
 
@@ -1234,6 +1279,8 @@ export async function start(id: string): Promise<void> {
       scriptPath: paths.bootstrapPath,
       nodePath: node.path,
       token,
+      // 档位来自信任账（`cur.tier`），不是清单：插件自己声明不了"完全信任"
+      tier: cur.tier,
     });
     const res = await invoke<{ pid: number }>("plugin_host_start", {
       handle: plan.handle,

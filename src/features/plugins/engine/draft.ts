@@ -16,6 +16,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { validateExtension, type PluginManifest } from "./manifest";
+import { formatBytes, PLUGIN_DRAFT_WRITE_FILES, PLUGIN_MAX_FILE_BYTES, PLUGIN_MAX_TRANSFER_BYTES } from "./limits";
 import { flattenPermissions } from "./repo";
 
 /** 草稿根：`<appDir>/.drafts`。放 appDir 下是因为 `plugin_fs_write` 只认登记的根。 */
@@ -154,9 +155,9 @@ export const DRAFT_LIMIT = 200;
  * 要更大的包就分几次写（同一份草稿按 tag 续写）。
  */
 export const DRAFT_WRITE_LIMITS = {
-  files: 200,
-  fileBytes: 8 * 1024 * 1024,
-  totalBytes: 32 * 1024 * 1024,
+  files: PLUGIN_DRAFT_WRITE_FILES,
+  fileBytes: PLUGIN_MAX_FILE_BYTES,
+  totalBytes: PLUGIN_MAX_TRANSFER_BYTES,
 } as const;
 
 const norm = (p: string) => String(p).replace(/\\/g, "/").replace(/\/+$/, "");
@@ -238,7 +239,7 @@ async function readDraftAt(appDir: string, name: string, dir: string, installedV
       roots: [appDir],
     });
     if (!f.exists) issue = "缺 plugin.json";
-    else if (f.truncated) issue = "plugin.json 超过 256 KiB";
+    else if (f.truncated) issue = `plugin.json 超过 ${formatBytes(PLUGIN_MAX_FILE_BYTES)}`;
     else {
       try {
         raw = JSON.parse(f.text);
@@ -316,9 +317,13 @@ export async function writeDraftFiles(
     const content = files[rel0];
     if (typeof content !== "string") throw new Error(`文件内容必须是字符串：${rel0}`);
     const size = new TextEncoder().encode(content).length;
-    if (size > DRAFT_WRITE_LIMITS.fileBytes) throw new Error(`文件 ${rel} 超过 8 MiB`);
+    if (size > DRAFT_WRITE_LIMITS.fileBytes) {
+      throw new Error(`文件 ${rel} 超过 ${formatBytes(DRAFT_WRITE_LIMITS.fileBytes)}`);
+    }
     bytes += size;
-    if (bytes > DRAFT_WRITE_LIMITS.totalBytes) throw new Error("这次要写的总字节超过 32 MiB，请分几次写");
+    if (bytes > DRAFT_WRITE_LIMITS.totalBytes) {
+      throw new Error(`这次要写的总字节超过 ${formatBytes(DRAFT_WRITE_LIMITS.totalBytes)}，请分几次写`);
+    }
     out.push({ rel, content });
   }
   for (const f of out) {

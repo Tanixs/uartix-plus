@@ -12,7 +12,7 @@
  * 判据放进去等于没测。
  */
 
-import type { PluginManifest } from "./manifest";
+import { DEFAULT_TRUST_TIER, type PluginManifest, type TrustTier } from "./manifest";
 import {
   pluginDir,
   permissionDelta,
@@ -20,6 +20,7 @@ import {
   removeFromIndex,
   REPO_VERSION,
   stagingDir,
+  tierOf,
   trustDigestInput,
   trustVerdict,
   upsertIndex,
@@ -53,8 +54,12 @@ export interface InstallPlan {
   version: string;
   manifest: PluginManifest;
   fingerprint: string;
-  /** 这次要向用户说明的权限行（`flattenPermissions` 的输出，人能读的那种）。 */
+  /** 这次要向用户说明的权限行（`flattenPermissions` 的输出，人能读的那种；授权卡默认折叠）。 */
   permissions: string[];
+  /** 用户这次选的授权档位。默认受限；完全信任必须由用户在批准卡上显式选择。 */
+  tier: TrustTier;
+  /** 上一次批准的档位（`changed` 时显示"上次批的是哪一档"）；第一次装为 null。 */
+  previousTier: TrustTier | null;
   verdict: TrustVerdict;
   /** 与"上次批准的那一份"相比新增/移除了什么；`needs-approval` 时两者都空。 */
   delta: PermissionDelta;
@@ -76,6 +81,12 @@ export interface PlanInput {
   trust: TrustBook;
   /** 暂存目录名。由调用方给（纯函数里不许有随机/时间），测试里给固定值。 */
   draftId: string;
+  /**
+   * 用户选的档位。**默认受限**，且重装/升级也默认回受限——
+   * 不让上一次的"完全信任"跟着新权限面一起续命：用户这次看到的是新清单，
+   * 就该重新做一次档位决定（少一次点击，多一次知情）。
+   */
+  tier?: TrustTier;
 }
 
 export function planInstall(input: PlanInput): InstallPlan {
@@ -93,6 +104,8 @@ export function planInstall(input: PlanInput): InstallPlan {
     manifest,
     fingerprint,
     permissions,
+    tier: input.tier ?? DEFAULT_TRUST_TIER,
+    previousTier: prev ? tierOf(prev) : null,
     verdict,
     // 第一次装时"新增了什么"等于"要什么"，但批准卡上不该把两者混着说——
     // 所以 delta 只在 changed 时有意义，needs-approval 时留空，界面据此换一种说法。
@@ -112,12 +125,17 @@ export function planInstall(input: PlanInput): InstallPlan {
  * 它们在列表里是黄点、点启动就该被拒，但界面上**没有任何地方能批准它们**：
  * 用户唯一的出路是删掉重装。这条路径补上这个洞。
  */
-export function trustRecordFor(manifest: PluginManifest, grantedAt: number): TrustRecord {
+export function trustRecordFor(
+  manifest: PluginManifest,
+  grantedAt: number,
+  tier: TrustTier = DEFAULT_TRUST_TIER,
+): TrustRecord {
   return {
     id: manifest.id,
     version: manifest.version,
     digest: fingerprintOf(manifest),
     grantedAt,
+    tier,
     grantedSummary: flattenPermissions(manifest),
   };
 }
@@ -166,6 +184,8 @@ export function applyInstall(
         version: plan.version,
         digest: plan.fingerprint,
         grantedAt: approvedAt,
+        // 档位与权限行一起落账：审计时要能回答"它是在哪一档被批的"。
+        tier: plan.tier,
         // 存"用户看到的那几行"，不是重新算一遍：批准卡上写的是什么，账上就是什么。
         // 中间换了措辞就等于偷偷改了证据。
         grantedSummary: plan.permissions,

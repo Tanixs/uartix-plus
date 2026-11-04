@@ -60,7 +60,7 @@ describe("logBatchText（落盘的那一批长什么样）", () => {
 
 describe("describeJournalEvent（账本每一类事件都要有话说）", () => {
   const nameOf = (id: string) => (id === "a.b" ? "AB" : "");
-  const trust = { version: "1.0.0", digest: "d", grantedAt: 5, grantedSummary: ["读工作区", "起 python"] };
+  const trust = { version: "1.0.0", digest: "d", grantedAt: 5, tier: "restricted" as const, grantedSummary: ["读工作区", "起 python"] };
   const item = { version: "1.0.0", digest: "d", installedAt: 1, source: "local", enabled: false } as const;
 
   const cases: [JournalEvent, string][] = [
@@ -70,7 +70,7 @@ describe("describeJournalEvent（账本每一类事件都要有话说）", () =>
     [{ t: "disable", at: 1, id: "a.b" }, "停用 AB"],
     [{ t: "theme", at: 1, key: "plg:a.b:x" }, "切换主题 plg:a.b:x"],
     [{ t: "theme", at: 1, key: "" }, "切换主题 （回到内置）"],
-    [{ t: "approve", at: 1, id: "a.b", trust }, "批准 AB v1.0.0 的权限（2 项）"],
+    [{ t: "approve", at: 1, id: "a.b", trust }, "批准 AB v1.0.0 的权限（受限 · 2 项）"],
     [{ t: "command", at: 1, id: "a.b", command: "yolo.status", ok: true }, "执行命令 yolo.status：有结果"],
     [{ t: "command", at: 1, id: "a.b", command: "yolo.stop", ok: false }, "执行命令 yolo.stop：无结果/出错"],
     [{ t: "profile", at: 1, id: "p1", name: "车间", action: "apply" }, "场景「车间」已应用"],
