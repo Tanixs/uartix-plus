@@ -76,9 +76,13 @@ describe("P179-UI07 · 首启快速导览", () => {
 
   it("App 首启走快速导览，且欢迎卡只留在 dev 取证入口", () => {
     const app = readFileSync(fileURLToPath(new URL("../../App.tsx", import.meta.url)), "utf8");
-    expect(app, "首启入口没接快速导览").toMatch(/!welcomeSeen\(\)\s*&&\s*devWelcomeAt\(\)\s*===\s*null/);
+    // 判据一律是 undefined：devWelcomeAt() 没被要求看某一张时返回 undefined，
+    // 写成 `!== null` / `=== null` 会让"生产永不弹卡"和"首启必进导览"同时失效
+    // （P1 实测撞上过：两条都不是空转，是恒假）。
+    expect(app, "首启入口没接快速导览").toMatch(/!welcomeSeen\(\)\s*&&\s*devWelcomeAt\(\)\s*===\s*undefined/);
     expect(app, "首启入口没启动 QUICK_STEPS").toContain("tourStore.start(QUICK_STEPS)");
-    expect(app, "欢迎卡又回到首启状态了").toMatch(/useState\(\(\)\s*=>\s*devWelcomeAt\(\)\s*!==\s*null\)/);
+    expect(app, "欢迎卡又回到首启状态了").toMatch(/useState\(\(\)\s*=>\s*devWelcomeAt\(\)\s*!==\s*undefined\)/);
+    expect(app, "判据又写回 null 了（undefined !== null 恒真）").not.toMatch(/devWelcomeAt\(\)\s*[!=]==\s*null/);
   });
 });
 

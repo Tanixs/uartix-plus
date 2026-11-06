@@ -137,8 +137,10 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   /** P104-B7：一次性首启欢迎轮播。`?welcome=0|1` 在 React 挂载前就改好这个键（bootOverrides）。
-      P179-UI07：生产不再弹这张卡——首启直接进 3 步导览；只有 dev 取证入口还会打开它。 */
-  const [welcomeOpen, setWelcomeOpen] = useState(() => devWelcomeAt() !== null);
+      P179-UI07：生产不再弹这张卡——首启直接进 3 步导览；只有 dev 取证入口还会打开它。
+      判据是 `undefined`：`devWelcomeAt()` 在"没要求看某一张"时返回 undefined，
+      写成 `!== null` 会让它永远为真（生产首启仍弹卡）。 */
+  const [welcomeOpen, setWelcomeOpen] = useState(() => devWelcomeAt() !== undefined);
   const tourSnap = useSyncExternalStore(tourStore.subscribe, tourStore.getSnapshot);
   const closeWelcome = () => {
     markWelcomeSeen();
@@ -565,7 +567,7 @@ export default function App() {
     /* P179-UI07：首启只出现一层引导。原来会先弹欢迎轮播、关掉再看着 10 步导览，
        用户要连过两道墙才碰到画布。现在生产环境直接进 3 步快速导览（演示源自开），
        欢迎卡只剩 `?welcome=` 的取证入口。跳过（Esc）与看过都写在同一个键上。 */
-    if (!welcomeSeen() && devWelcomeAt() === null) {
+    if (!welcomeSeen() && devWelcomeAt() === undefined) {
       markWelcomeSeen();
       window.setTimeout(() => tourStore.start(QUICK_STEPS), 320);
     }
