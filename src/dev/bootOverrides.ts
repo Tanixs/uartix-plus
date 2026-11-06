@@ -141,7 +141,7 @@ export type DevOpenView = (typeof DEV_OPEN_VIEWS)[number];
  * 抄字面量当场被判红（本批实测）。
  */
 export const DEV_SETTINGS_TABS = [
-  "general", "appearance", "workspace", "data", "monitor", "io", "ai", "model",
+  "general", "appearance", "data", "monitor", "ai",
   SETTINGS_TAB_PLUGINS, "profiles", "mcp", "about",
 ] as const;
 

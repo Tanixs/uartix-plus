@@ -335,7 +335,7 @@ export const IconSend = () =>
   svg(<path d="M4 12h13M13 6l6 6-6 6" />);
 
 export const IconStop = () =>
-  svg(<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />);
+  svg(<rect x="6.5" y="6.5" width="11" height="11" rx="2" />);
 
 export const IconSparkle = () =>
   svg(

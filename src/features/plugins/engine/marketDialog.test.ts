@@ -52,10 +52,10 @@ describe("入口与外壳", () => {
     // 封面进详情的第一张：它是"这个包长什么样"的官方答案
     expect(market).toContain("props.cover ? [props.cover, ...imgs");
   });
-  it("市场弹窗仍用 GitHub 话题视图与旧插件库外壳", () => {
+  it("市场已收进设置页右分栏（不再叠模态），开关仍是同一个", () => {
     expect(section).toContain("useMarketDialogOpen");
     expect(section).toContain("<PluginMarketView");
-    expect(section).toContain('className="plg-overlay"');
-    expect(section).toContain('className="plg-dialog"');
+    expect(section).toContain('className="plg-market-pane"');
+    expect(section, "市场又退回独立的 plg-overlay 模态了").not.toContain('className="plg-overlay"');
   });
 });

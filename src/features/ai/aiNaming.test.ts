@@ -8,7 +8,7 @@
  *
  * 于是这里钉三条，都是能被源码反驳的：
  *  ① 空态标题必须与面板注册表里那一行的中文名**同词**（一处改名另一处红）；
- *  ② 空态文案里用「」点名的每个控件，全仓库必须真有一句 `tx("<那名>"…` 在用这个名字；
+ *  ② 空态点名的控件（P179-UI11 起是三个一键发起入口），全仓库必须真有一句 `tx("<那名>"…` 在用这个名字；
  *  ③ 插件面板缺名时的兜底叫「AI 插件面板」，与两处分组标题同词，旧名「AI 面板」不再出现。
  * 另加自证：②的抓取式必须真抓到东西，否则这是一条哑测试（§8-43②）。
  */
@@ -30,9 +30,14 @@ const AICHAT = read("./AiChat.tsx");
 const PANELS = read("../../panels/panels.tsx");
 const APP = read("../../App.tsx");
 
-/** 空态那一块：标题与描述各取 `tx(` 的第一个参数 */
+/** 空态标题取 `tx(` 的第一个参数 */
 const welcomeTitle = AICHAT.match(/ai-welcome-title"[\s\S]{0,160}?tx\("([^"]+)"/)?.[1] ?? "";
-const welcomeDesc = AICHAT.match(/ai-welcome-desc"[\s\S]{0,160}?tx\(\s*"([\s\S]*?)",/)?.[1] ?? "";
+/** P179-UI11：空态不再是一段说明墙，点名的对象换成三个「一键发起」入口的标签。 */
+const starterLabels = [...(AICHAT.match(/className="ai-starters"([\s\S]*?)\].map\(\(s\) => \(/)?.[1] ?? "")
+  .matchAll(/label: tx\("([^"]+)"/g)].map((m) => m[1]);
+/** 空态整块里仍可能出现的「」点名：有就必须在话术池里（旧式指向已死控件的文案在这里红）。 */
+const welcomeBlock = AICHAT.match(/className="ai-welcome"([\s\S]*?)\n {10}\}/)?.[1] ?? "";
+const welcomeQuoted = [...welcomeBlock.matchAll(/「([^」]+)」/g)].map((m) => m[1]);
 
 /** 界面话术池：src 下所有 `tx("<中文>"` 的第一个参数（面板标题、按钮、tooltip 都在这） */
 function speechPool(): Set<string> {
@@ -63,13 +68,13 @@ describe("P120 · AI 叫法与空态指向", () => {
     expect(welcomeTitle, "面板叫一个名字、空态叫另一个名字 ⇒ 用户以为那是两处东西").toBe(registry);
   });
 
-  it("② 空态文案里「」点名的控件，界面上必须真以那个名字存在", () => {
-    expect(welcomeDesc.length, "空态描述没抓到，这条测的是空集").toBeGreaterThan(40);
-    const named = [...welcomeDesc.matchAll(/「([^」]+)」/g)].map((m) => m[1]);
-    // 自证：抓取式瞎了会让这条永远绿
-    expect(named.length, "一句空态里一个控件名都没点到？那是抓取式自己瞎了").toBeGreaterThanOrEqual(3);
+  it("② 空态点名的控件，界面上必须真以那个名字存在", () => {
+    // P179-UI11 改判：空态从"一段说明墙"换成"三个一键发起 + 一行模型状态"，
+    // 所以点名的对象变成那三个入口自己的标签；同时保留「」引用的旧判据（有就必须有同名控件）。
+    expect(starterLabels.length, "三个入口一个都没抓到？那是抓取式自己瞎了").toBeGreaterThanOrEqual(3);
     const pool = speechPool();
     expect(pool.size, "话术池是空的 ⇒ 走盘断了，②的判据没有意义").toBeGreaterThan(200);
+    const named = [...starterLabels, ...welcomeQuoted];
     const missing = named.filter((n) => !pool.has(n));
     expect(missing, `文案点名了这些控件却没有一颗控件叫这个名字（改了界面忘改文案）：${missing.join("、")}`).toEqual([]);
   });

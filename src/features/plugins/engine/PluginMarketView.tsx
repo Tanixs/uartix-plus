@@ -10,9 +10,10 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { tx, useLocale } from "../../../i18n/strings";
-import { readmeImagesForRepo, repoCover, repoManifest, searchPlugins, type RepoManifestInfo } from "./marketClient";
+import { readmeImagesForRepo, repoCover, repoManifest, searchPlugins, type RepoKindBrief, type RepoManifestInfo } from "./marketClient";
 import { coverGradient, coverHue, coverInitials } from "./marketCover";
 import { PLUGIN_TOPIC, hasPluginTopic, type GhRepo } from "./ghSearch";
+import { IconLayoutEdit, IconSparkle, IconTerminal } from "../../../shared/icons";
 import {
   filterRepos,
   installedNote,
@@ -114,18 +115,32 @@ const SORTS: { id: MarketSort; label: () => string }[] = [
   { id: "name", label: () => tx("名称", "Name") },
 ];
 
+/** 类型图标（P179-UI10）：市场卡片封面统一成"类型图标 + 迷你预览"。
+ *  kinds 只有读到远端 plugin.json 时才有（没读到不猜），所以图标是渐进出现：
+ *  没 kinds 时仍是首字母色块，有了就把色块换成类型图标；有真封面时图标压在右下角。
+ *  这样同一类插件在列表、详情、已装列表里都是同一枚图标，不再靠一张大截图认人。 */
+function kindIconOf(kinds?: RepoKindBrief) {
+  if (!kinds) return null;
+  if (kinds.themes > 0) return <IconSparkle />;
+  if (kinds.widgets > 0 || kinds.panels > 0 || kinds.presets > 0) return <IconLayoutEdit />;
+  if (kinds.commands > 0) return <IconTerminal />;
+  return null;
+}
+
 /** 左栏封面砖：有 cover 显示 cover，没有就按仓库名生成一枚色块，绝不出现破图。 */
-function RepoCover({ repo, cover }: { repo: GhRepo; cover?: string }) {
+function RepoCover({ repo, cover, kinds }: { repo: GhRepo; cover?: string; kinds?: RepoKindBrief }) {
   const hue = coverHue(repo.full);
+  const icon = kindIconOf(kinds);
   return (
     <span className="plg-mkt-cover" aria-hidden="true">
       {cover ? (
         <img src={cover} alt="" loading="lazy" />
       ) : (
         <span className="plg-mkt-ph" style={{ background: coverGradient(hue) }}>
-          {coverInitials(repo.name)}
+          {icon ?? coverInitials(repo.name)}
         </span>
       )}
+      {cover && icon ? <span className="plg-mkt-kind-ico">{icon}</span> : null}
     </span>
   );
 }
@@ -574,7 +589,7 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
             const actionable = state === "absent" || state === "updatable";
             return (
               <div key={repo.full} className="plg-mkt-card" onClick={() => setSelected(repo)}>
-                <RepoCover repo={repo} cover={covers[repo.full]} />
+                <RepoCover repo={repo} cover={covers[repo.full]} kinds={remote?.kinds} />
 
                 <div className="plg-mkt-body">
                   <div className="plg-mkt-head">

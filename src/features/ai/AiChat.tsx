@@ -820,7 +820,8 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
   // P110-B1：配置态来自档案表。必须**订阅那张表**——只订 settingsStore 的话，
   // 在设置页加好供应商回到对话面板，这里不会刷新（旧的"未配置"空态就一直挂着）。
   const profiles = useAiProfiles();
-  const configured = !!activeRef(profiles);
+  const active = activeRef(profiles);
+  const configured = !!active;
 
   // P90 A3：Agent 模式没有目标文本就不能发（图片/文件是附加物，空发曾被静默丢弃）
   const canSend = agentMode
@@ -1371,16 +1372,68 @@ export function AiChat({ onDock }: { onDock?: () => void }) {
         )}
         <div className="ai-msgs" ref={scrollRef} onScroll={onScroll}>
           {messages.length === 0 && (
+            /* P179-UI11：空态不再是一段"可以去哪儿点"的说明墙，而是三个能直接发起的任务
+               + 一行模型状态 + 配置入口。一次点击就发出（sendText 会带上当前已勾选的上下文），
+               不需要先读三段介绍再自己想去哪儿点。 */
             <div className="ai-welcome">
               <div className="ai-welcome-title">
                 <IconSparkle />
                 {tx("AI 助手", "AI assistant")}
               </div>
-              <div className="ai-welcome-desc">
-                {tx(
-                  "框选 Hex 字节右键「AI 识别协议」；或点顶栏「场景 ▾」里的解读数据、分析曲线、生成指令、诊断问题。想做主题、小部件、面板？把输入区那颗「普通对话」切成「Agent 任务」，AI 会存成插件草稿，再带你去插件管理里预览、转正与批准。发送前可勾选随消息附带的软件内上下文。",
-                  "Select Hex bytes and choose “AI: detect protocol” from the context menu, or open “Scenes ▾” in the top bar to interpret data, analyse curves, generate commands and diagnose problems. Want a theme, widget or panel? Switch the “Plain chat” pill under the input to “Agent task” and the AI saves it as a plugin and enables it. Before sending you can tick which in-app context travels with the message.",
-                )}
+              <div className="ai-model-state">
+                <span className={`ai-model-dot${chat.streaming ? " busy" : ""}`} aria-hidden />
+                <span className="ai-model-name">
+                  {active ? `${active.model.label} · ${active.provider.label}` : tx("未配置模型", "No model configured")}
+                </span>
+                <button className="ai-model-cfg" onClick={() => invokeOpenSettings()} title={tx("打开模型设置", "Open model settings")}>
+                  {tx("配置", "Configure")}
+                </button>
+              </div>
+              <div className="ai-starters">
+                {[
+                  {
+                    id: "frame",
+                    label: tx("解释这一帧", "Explain this frame"),
+                    tip: tx("逐字段说明当前帧的含义与疑点", "Walk through the selected frame field by field"),
+                    prompt: tx(
+                      "解释当前选中的这一帧：逐个字段说明含义、数值是否合理，并指出可能的异常。如果没有选中数据，告诉我怎么在帧画布或 Hex 里框选。",
+                      "Explain the currently selected frame: field meanings, whether the values make sense, and any anomalies. If nothing is selected, tell me how to select bytes in the frame canvas or Hex view.",
+                    ),
+                  },
+                  {
+                    id: "protocol",
+                    label: tx("帮我写协议", "Draft a protocol"),
+                    tip: tx("按现有字节样本拟一个可编辑的模板草案", "Draft an editable template from the current byte samples"),
+                    prompt: tx(
+                      "根据当前上下文里的字节样本，帮我拟一个协议模板草案：帧头、长度、字段、校验分别怎么定义，并说明还缺哪些样本。",
+                      "From the byte samples in the current context, draft a protocol template: header, length, fields and checksum — and tell me which samples are still missing.",
+                    ),
+                  },
+                  {
+                    id: "rate",
+                    label: tx("分析采样率", "Analyse sample rate"),
+                    tip: tx("看采样间隔是否稳定、有没有丢帧", "Check whether the sample interval is stable and frames are missing"),
+                    prompt: tx(
+                      "分析当前数据的采样率与稳定性：平均间隔、抖动、可能的丢帧，并给出下一步该看哪个面板。",
+                      "Analyse the current sample rate and stability: mean interval, jitter, possible dropped frames, and which panel to check next.",
+                    ),
+                  },
+                ].map((s) => (
+                  <button
+                    key={s.id}
+                    className="ai-starter"
+                    title={s.tip}
+                    disabled={chat.streaming}
+                    onClick={() => {
+                      if (chat.streaming) return;
+                      stickRef.current = true;
+                      void chatStore.sendText(s.prompt, "qa");
+                    }}
+                  >
+                    <span className="ai-starter-t">{s.label}</span>
+                    <span className="ai-starter-d">{s.tip}</span>
+                  </button>
+                ))}
               </div>
             </div>
           )}

@@ -7591,18 +7591,54 @@ a > svg {
   flex-direction: column;
   gap: 10px;
 }
-.ai-welcome { padding: 22px 10px 10px; text-align: center; }
+.ai-welcome { padding: 22px 10px 10px; max-width: 520px; margin: 0 auto; }
 .ai-welcome-title {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 7px;
   font-size: var(--fs-md);
   font-weight: 700;
   color: var(--text);
 }
 .ai-welcome-title svg { color: var(--accent); }
-.ai-welcome-desc { margin-top: 8px; font-size: var(--fs-sm); line-height: 1.7; color: var(--text-dim); }
+/* P179-UI11：空态 = 三个可直接发起的任务 + 当前模型状态 + 配置入口。
+   取代原来那段"去哪儿点什么"的说明墙（旧 .ai-welcome-desc 一并删除）。 */
+.ai-model-state { margin-top: 8px; display: flex; align-items: center; gap: 7px; font-size: var(--fs-xs); color: var(--text-dim); }
+.ai-model-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
+.ai-model-dot.busy { background: var(--accent); }
+.ai-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-model-cfg {
+  min-height: var(--target-min);
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--accent-text);
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  cursor: pointer;
+}
+.ai-model-cfg:hover { background: var(--accent-soft); }
+.ai-starters { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.ai-starter {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 44px;
+  padding: 7px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+}
+.ai-starter:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ai-starter:disabled { opacity: .55; cursor: not-allowed; }
+.ai-starter-t { font-size: var(--fs-body); font-weight: 600; }
+.ai-starter-d { font-size: var(--fs-xs); color: var(--text-dim); line-height: var(--lh-body); }
 .ai-msg { display: flex; flex-direction: column; }
 .ai-msg.user { align-items: flex-end; }
 .ai-msg.assistant { align-items: flex-start; }
@@ -9884,7 +9920,62 @@ html:has(.sw), .sw { background: transparent; }
 html.drag-active, html.drag-active * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
 
 /* ---------- 检查器 / 变量库 ---------- */
-.orch-ins { width: 285px; flex: none; border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-panel); }
+/* P179-UI12：右栏容器固定 300，页签在外层；Inspector / VarsEditor 都填满容器，
+   不再各自带 285px 宽度与左边框（否则收起/切页签时宽度会跳）。 */
+.orch-rail { width: 300px; flex: none; border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; background: var(--bg-panel); }
+.orch-rail-head { flex: none; display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-bottom: 1px solid var(--border-soft); }
+.orch-rail-tabs { flex: 1; min-width: 0; display: flex; gap: 2px; }
+.orch-rail-tab {
+  min-height: var(--target-min);
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--fs-body);
+  font-family: inherit;
+  cursor: pointer;
+}
+.orch-rail-tab:hover { color: var(--text); background: var(--ctl-fill-hover); }
+.orch-rail-tab[aria-selected="true"] { color: var(--accent-text); background: var(--accent-soft); }
+.orch-rail-x {
+  width: var(--target-min);
+  height: var(--target-min);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.orch-rail-x:hover { color: var(--text); background: var(--ctl-fill-hover); }
+.orch-rail-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.orch-rail-hint { padding: 14px 12px; font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-dim); }
+.orch-rail-toggle {
+  width: var(--target-min);
+  flex: none;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.orch-rail-toggle:hover { color: var(--accent-text); background: var(--accent-soft); }
+.orch-watch { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px; gap: 8px; overflow: hidden; }
+.orch-watch-stats { flex: none; display: flex; flex-wrap: wrap; gap: 6px; }
+.orch-watch-n { font-size: var(--fs-xs); color: var(--text-dim); border: 1px solid var(--border); border-radius: var(--radius-s); padding: 2px 6px; }
+.orch-watch-n.live { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.orch-watch-n.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.orch-watch-rows { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.orch-watch-rows .orch-log-row { padding: 3px 4px; }
+.orch-ins { width: 100%; flex: 1; min-width: 0; border-left: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--bg-panel); }
 .orch-ins-head { flex: none; display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-bottom: 1px solid var(--border-soft); }
 .orch-ins-t { font-size: var(--fs-sm); font-weight: 700; color: var(--text); white-space: nowrap; }
 .orch-ins-path { flex: 1; min-width: 0; font-size: var(--fs-body); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
@@ -10858,7 +10949,20 @@ body.pdrag-active *{cursor:grabbing !important;}
 }
 .plg-fchip:hover:not(.on) { color: var(--text); border-color: var(--line-strong); background: var(--raise-1); }
 .plg-fchip.on { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
-.plg-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+.plg-list { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+/* P179-UI09：插件管理一页两栏——左已装、右市场。各自滚动，市场不再是第二层模态。 */
+.plg-eng-root { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.plg-eng-main { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--sp-2); padding-right: 2px; }
+.plg-market-pane {
+  flex: 0 0 min(520px, 56%);
+  min-width: 320px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+.plg-market-body { flex: 1; min-height: 0; overflow-y: auto; }
 .plg-empty {
   font-size: var(--fs-sm);
   color: var(--text-dim);
@@ -10933,13 +11037,30 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-mkt-card:hover { border-color: var(--line-strong); }
 .plg-mkt-cover {
   flex: none;
-  width: 108px;
-  height: 82px;
+  position: relative;
+  width: 64px;
+  height: 64px;
   border-radius: var(--radius-m);
   overflow: hidden;
   background: var(--raise-1);
   border: 1px solid var(--border-soft);
 }
+/* P179-UI10：封面只是"认类型"的迷你预览，不再用 108×82 的大截图抢注意力；
+   类型图标压在右下角，跟列表/详情用的是同一枚。 */
+.plg-mkt-cover .plg-mkt-kind-ico {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, #000 46%, transparent);
+  color: #fff;
+}
+.plg-mkt-cover .plg-mkt-kind-ico svg { width: 12px; height: 12px; }
 .plg-mkt-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .plg-mkt-ph {
   display: flex;

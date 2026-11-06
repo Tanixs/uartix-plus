@@ -75,7 +75,7 @@ import {
   subscribe as subscribeLayouts,
 } from "./features/settings/layoutsStore";
 import * as tourStore from "./features/tour/tourStore";
-import { TOUR_STEPS } from "./features/tour/tourSteps";
+import { TOUR_STEPS, QUICK_STEPS } from "./features/tour/tourSteps";
 import { useChrome } from "./features/settings/chromeStore";
 import { applyLayoutJson, looksLikeLayoutJson } from "./features/settings/applyLayout";
 import {
@@ -136,8 +136,9 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
   const [helpOpen, setHelpOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  /** P104-B7：一次性首启欢迎轮播。`?welcome=0|1` 在 React 挂载前就改好这个键（bootOverrides）。 */
-  const [welcomeOpen, setWelcomeOpen] = useState(() => !welcomeSeen());
+  /** P104-B7：一次性首启欢迎轮播。`?welcome=0|1` 在 React 挂载前就改好这个键（bootOverrides）。
+      P179-UI07：生产不再弹这张卡——首启直接进 3 步导览；只有 dev 取证入口还会打开它。 */
+  const [welcomeOpen, setWelcomeOpen] = useState(() => devWelcomeAt() !== null);
   const tourSnap = useSyncExternalStore(tourStore.subscribe, tourStore.getSnapshot);
   const closeWelcome = () => {
     markWelcomeSeen();
@@ -561,6 +562,13 @@ export default function App() {
     syncPanels();
     // 兜底：布局恢复/首帧渲染后可见性可能尚未稳定，延迟再同步一次
     window.setTimeout(syncPanels, 200);
+    /* P179-UI07：首启只出现一层引导。原来会先弹欢迎轮播、关掉再看着 10 步导览，
+       用户要连过两道墙才碰到画布。现在生产环境直接进 3 步快速导览（演示源自开），
+       欢迎卡只剩 `?welcome=` 的取证入口。跳过（Esc）与看过都写在同一个键上。 */
+    if (!welcomeSeen() && devWelcomeAt() === null) {
+      markWelcomeSeen();
+      window.setTimeout(() => tourStore.start(QUICK_STEPS), 320);
+    }
   }, []);
 
   // Operator 部署包布局（P67-O2）：激活时整屏应用；切换前把当前布局快照到自动备份槽

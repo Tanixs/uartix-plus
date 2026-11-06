@@ -22,7 +22,7 @@ vi.stubGlobal("localStorage", {
 vi.mock("../ai/appBus", () => ({ requestOpenPanel: vi.fn() }));
 vi.mock("../protocol/templateStore", () => ({ getSnapshot: () => ({ demoRunning: false }), toggleDemo: vi.fn() }));
 
-const { TOUR_STEPS } = await import("./tourSteps");
+const { TOUR_STEPS, QUICK_STEPS } = await import("./tourSteps");
 import { PRIMARY_TIERS } from "../agent/scopeTiers";
 
 const fsSpec = "node:fs";
@@ -53,6 +53,34 @@ const allSrc = (() => {
 
 /** 内容步 = 去掉欢迎与完成（它们不带"第 N 步"编号） */
 const numbered = TOUR_STEPS.filter((s) => s.id !== "welcome" && s.id !== "done");
+
+/* ================= P179-UI07 · 首启只走 3 步 =================
+ * 审查文档要的是"欢迎轮播 + 10 步导览"合并成一套；这里钉住"首启那套真的只有 3 步"，
+ * 以及 App 的入口真的接在它上面——不然改回 !welcomeSeen() 弹欢迎卡也没人发现。
+ */
+describe("P179-UI07 · 首启快速导览", () => {
+  it("恰好 3 步，且不带欢迎/完成卡（否则又是多层堆叠）", () => {
+    expect(QUICK_STEPS).toHaveLength(3);
+    expect(QUICK_STEPS.map((s) => s.id)).toEqual(["quick-connect", "quick-preset", "quick-canvas"]);
+    for (const s of QUICK_STEPS) {
+      expect(s.title.zh, `快速导览里出现了欢迎/完成卡：${s.id}`).toMatch(/第 [123] 步/);
+      expect(s.selector, `${s.id} 没有高亮目标，会退化成漂浮说明文`).toBeTruthy();
+    }
+  });
+
+  it("第 2 步就启动演示源，第 3 步落到帧画布（用户不用先点按钮）", () => {
+    expect(QUICK_STEPS[1].do, "第 2 步没开演示源").toBeTruthy();
+    expect(QUICK_STEPS[2].selector).toBe('[data-panel="framecanvas"]');
+    expect(QUICK_STEPS[2].frame).toBe(true);
+  });
+
+  it("App 首启走快速导览，且欢迎卡只留在 dev 取证入口", () => {
+    const app = readFileSync(fileURLToPath(new URL("../../App.tsx", import.meta.url)), "utf8");
+    expect(app, "首启入口没接快速导览").toMatch(/!welcomeSeen\(\)\s*&&\s*devWelcomeAt\(\)\s*===\s*null/);
+    expect(app, "首启入口没启动 QUICK_STEPS").toContain("tourStore.start(QUICK_STEPS)");
+    expect(app, "欢迎卡又回到首启状态了").toMatch(/useState\(\(\)\s*=>\s*devWelcomeAt\(\)\s*!==\s*null\)/);
+  });
+});
 
 describe("入门引导的结构事实不得手写", () => {
   it("欢迎语里的步数 == 真实内容步数（改了步骤忘了改文案就红）", () => {

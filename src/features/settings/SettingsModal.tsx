@@ -34,7 +34,7 @@ import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { SetGroups, SetRow } from "../../shared/SetRow";
-import { IconChevron, IconClose, IconCube, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSearch, IconSparkle, IconStack, IconTrash, IconTune, IconUpload } from "../../shared/icons";
+import { IconChevron, IconClose, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSearch, IconSparkle, IconStack, IconTrash, IconTune } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 import { rangeStyle } from "../../shell/rangeFill";
@@ -230,7 +230,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
   };
   const layouts = useLayouts();
   const [layoutName, setLayoutName] = useState("");
-  const [tab, setTab] = useState(initialTab ?? "general");
+  /* 旧深链归一（P179-UI08）：命令面板/AI 交接/模型选择器还会传 model、workspace、io。
+     不归一的话这三页在导航里已经消失，用户会落到一个"没有高亮项"的页面上。 */
+  const TAB_ALIAS: Record<string, string> = { workspace: "general", model: "ai", io: "data" };
+  const [tab, setTab] = useState(TAB_ALIAS[initialTab ?? ""] ?? initialTab ?? "general");
   const [msg, setMsg] = useState("");
   const [navQuery, setNavQuery] = useState("");
   const [navActive, setNavActive] = useState(0);
@@ -309,14 +312,14 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
    * 混在一起时那一页 8 行、滚三屏，而"界面长什么样"和"用什么语言/缩放"不是一类决定。
    */
   const tabs: { key: string; label: string; group: string; icon: React.ReactNode; sub?: string }[] = [
-    { key: "general", label: t("set.general"), group: tx("基础", "Basics"), icon: <IconTune /> },
+    { key: "general", label: t("set.general"), group: tx("基础", "Basics"), icon: <IconTune />, sub: tx("语言、缩放，以及工作区预设与布局恢复", "Language, zoom, workspace presets and layout restore") },
     { key: "appearance", label: tx("外观", "Appearance"), group: tx("基础", "Basics"), icon: <IconStack />, sub: tx("配色与那三层覆盖：谁在画这界面、怎么撤回去", "Palette and the three override layers: what is painting this UI and how to undo it") },
-    { key: "workspace", label: t("set.workspace"), group: tx("基础", "Basics"), icon: <IconLayoutEdit /> },
-    { key: "data", label: t("set.data"), group: tx("数据与诊断", "Data & diagnostics"), icon: <IconLogs /> },
+    /* P179-UI08：12 项 → 9 项。工作区并入「通用」、数据与导入导出并入「数据」、
+       模型设置并入「AI」；旧 key（workspace / io / model）仍可作深链，
+       在 useState 里就地归一，不把用户丢进空白页。 */
+    { key: "data", label: t("set.data"), group: tx("数据与诊断", "Data & diagnostics"), icon: <IconLogs />, sub: tx("数据保存、清理与导入导出", "Data retention, cleanup, import and export") },
     { key: "monitor", label: tx("监测", "Monitoring"), group: tx("数据与诊断", "Data & diagnostics"), icon: <IconPulse /> },
-    { key: "io", label: t("set.io"), group: tx("数据与诊断", "Data & diagnostics"), icon: <IconUpload /> },
-    { key: "ai", label: t("set.ai"), group: tx("AI 与 Agent", "AI & agent"), icon: <IconSparkle />, sub: tx("回答行为、流式与授权面、Agent 预算", "Answer behaviour, streaming and permission tier, Agent budgets") },
-    { key: "model", label: tx("模型设置", "Model settings"), group: tx("AI 与 Agent", "AI & agent"), icon: <IconCube />, sub: tx("管理自定义模型供应商，配置后可在聊天时选择使用。", "Manage model providers; pick one from the chat composer afterwards") },
+    { key: "ai", label: t("set.ai"), group: tx("AI 与 Agent", "AI & agent"), icon: <IconSparkle />, sub: tx("回答行为、流式与授权面、Agent 预算、模型供应商", "Answer behaviour, streaming and permission tier, Agent budgets and providers") },
     { key: SETTINGS_TAB_PLUGINS, label: t("set.ext"), group: tx("插件与集成", "Plugins & Integration"), icon: <IconPuzzle /> },
     {
       key: "profiles",
@@ -523,7 +526,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 卡片只加 background/shadow，不加 border —— G 门那条计数因此不动。
                 两页不走这个包装：「模型设置」自带两栏卡片结构；「插件管理」是一列卡片，
                 再套一层白卡就成了"白卡套白卡"，反而看不出分层。 */}
-            {tab === "model" ? (
+            {(tab === "ai" || tab === "model") ? (
               <ModelSettingsPage />
             ) : tab === SETTINGS_TAB_PLUGINS ? (
               <PluginsPage />
@@ -687,7 +690,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 ), tx("从上到下层层覆盖：兜底层 < 当前主题（内置与插件同级，只有一枚）< AI 临时层。哪一层有内容，就说明当前界面是被它改的", "Layers stack top-down: baseline < active theme (built-in and plugin are peers; exactly one) < AI temporary. Whichever layer has content is whichever one is driving the UI"))}
               </>
             )}
-            {tab === "workspace" && (
+            {(tab === "general" || tab === "workspace") && (
               <>
                 {row(t("set.preset"), (
                   <div className="preset-grid">
@@ -1401,7 +1404,7 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                 ), tx("最近 5 次远程工具调用（共保留 50 条审计环形）", "Last 5 remote tool calls (50-entry audit ring)"))}
               </>
             )}
-            {tab === "io" && (
+            {(tab === "data" || tab === "io") && (
               <>
                 {ioBlock(
                   t("set.exportFull"),

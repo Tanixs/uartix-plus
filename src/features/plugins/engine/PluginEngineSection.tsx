@@ -16,7 +16,6 @@
  */
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { createPortal } from "react-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { tx, useLocale } from "../../../i18n/strings";
 import { IconPuzzle } from "../../../shared/icons";
@@ -559,7 +558,11 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
   const pendingHasMain = !!pendingPlan?.manifest.main;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)", minHeight: 0 }}>
+    /* P179-UI09：市场从"盖在插件管理上的第二层模态"改成同一页的右分栏。
+       左栏仍是已装列表，右栏是市场（点「插件市场」展开）；两栏各自滚动，
+       不再有 backdrop、不再把用户从设置页里拔出去，也不需要关掉再回来继续管插件。 */
+    <div className="plg-eng-root">
+      <div className="plg-eng-main">
       <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)", padding: "0 var(--sp-1)" }}>
         <span style={{ fontWeight: 600, fontSize: "var(--fs-md)" }}>{tx("插件", "Plugins")}</span>
         <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)" }}>{visible.length + drafts.length}</span>
@@ -1034,31 +1037,22 @@ export function PluginEngineSection({ query = "", filter = "all" }: PluginEngine
         <DraftPreviewDialog appDir={repo.appDir} name={previewDraft.name} entry={previewDraft} onClose={() => setPreviewDraft(null)} />
       ) : null}
 
-      {marketOpen
-        ? createPortal(
-            <div
-              role="presentation"
-              className="plg-overlay"
-              onMouseDown={(e) => {
-                if (e.target === e.currentTarget) closeMarketDialog();
-              }}
-            >
-              <div className="plg-dialog" role="dialog" aria-modal="true" aria-label={tx("插件市场", "Plugin market")}>
-                <div className="plg-head">
-                  <span className="plg-title">{tx("插件市场", "Plugin market")}</span>
-                  <span className="plg-sub">{tx("GitHub 话题检索；装前仍过权限批准卡", "GitHub topic search; permissions are still approved before install")}</span>
-                  <div className="plg-head-actions">
-                    <button className="btn" onClick={() => closeMarketDialog()}>{tx("关闭", "Close")}</button>
-                  </div>
-                </div>
-                <div className="plg-list" style={{ overflow: "hidden", padding: 0 }}>
-                  <PluginMarketView installed={installedRepos} onInstall={installFromMarket} />
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      </div>
+
+      {marketOpen ? (
+        <aside className="plg-market-pane" aria-label={tx("插件市场", "Plugin market")}>
+          <div className="plg-head">
+            <span className="plg-title">{tx("插件市场", "Plugin market")}</span>
+            <span className="plg-sub">{tx("GitHub 话题检索；装前仍过权限批准卡", "GitHub topic search; permissions are still approved before install")}</span>
+            <div className="plg-head-actions">
+              <button className="btn" onClick={() => closeMarketDialog()}>{tx("收起市场", "Hide market")}</button>
+            </div>
+          </div>
+          <div className="plg-market-body">
+            <PluginMarketView installed={installedRepos} onInstall={installFromMarket} />
+          </div>
+        </aside>
+      ) : null}
     </div>
   );
 }

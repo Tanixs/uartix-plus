@@ -189,3 +189,51 @@ export const TOUR_STEPS: tourStore.TourStep[] = [
   })),
   DONE,
 ];
+
+/**
+ * P179-UI07：首启只走这一套（3 步），把原来的"欢迎轮播 + 10 步导览"合并成一层。
+ *
+ * 为什么不是把 TOUR_STEPS 砍成 3 条：那 10 步里有 AI 授权档、市场信任链、发送组包
+ * 这些"第二次打开才用得上的东西"，从帮助里重播仍然值得看；首启要的只是"别挡路"。
+ * 所以首启走 QUICK_STEPS（连接 → 选协议 → 看帧，演示源中途自动开），
+ * 帮助/命令面板里的「重播入门引导」仍走完整版。
+ *
+ * 三条硬口径：每步只有一件事、不带欢迎/完成卡（那两张会把 3 步撑成 5 层）、
+ * 第 2 步就启动演示源（用户只需读字，不用先点按钮才看得到帧）。
+ */
+export const QUICK_STEPS: tourStore.TourStep[] = [
+  {
+    id: "quick-connect",
+    title: { zh: "第 1 步 · 接设备", en: "Step 1 · Connect" },
+    body: {
+      zh: "接口和串口参数在左侧「接入」里选，真正建立链路按的是圈住的这颗「连接」。没有硬件就点「下一步」：内置演示源会替你出数据。",
+      en: "Pick the interface and port settings under Link on the left; this circled Connect button opens it. No hardware? Hit Next — the built-in demo source will stream data for you.",
+    },
+    selector: '[data-tour="connect"]',
+    rail: "link",
+  },
+  {
+    id: "quick-preset",
+    title: { zh: "第 2 步 · 选协议", en: "Step 2 · Pick a protocol" },
+    body: {
+      zh: "「协议」导轨里的「＋ 预设」有匿名 V7、维特 WIT、Modbus RTU；导入的是可编辑副本，改坏了删掉重导即可。演示源已经在跑了，坏帧会被自动筛掉。",
+      en: "Protocol's + Preset ships V7, WIT and Modbus RTU; imports are editable copies — break one and re-import. The demo source is already running, and bad frames are filtered out.",
+    },
+    selector: '[data-tour="preset"]',
+    rail: "templates",
+    do: ensureDemo(),
+    settleMs: 900,
+  },
+  {
+    id: "quick-canvas",
+    title: { zh: "第 3 步 · 看帧", en: "Step 3 · Watch frames" },
+    body: {
+      zh: "这里是帧画布：在字节格上框选、右键「定义为字段」，零代码定义私有协议；通过校验的完整帧会逐帧落进这里。想停演示源，按「协议」底部那颗按钮。",
+      en: "This is the frame canvas: drag over byte cells, right-click to define a field — zero-code private protocols. Only complete frames that pass the template land here. Stop the demo with the toggle at the bottom of Protocol.",
+    },
+    selector: '[data-panel="framecanvas"]',
+    frame: true,
+    do: openPanel("framecanvas"),
+    settleMs: 800,
+  },
+];

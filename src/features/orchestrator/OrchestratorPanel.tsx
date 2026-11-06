@@ -431,6 +431,43 @@ export function OrchestratorPanel() {
   const [logOnlyFail, setLogOnlyFail] = useState(false);
   const [flashGroup, setFlashGroup] = useState<string | null>(null);
 
+  /* ---------- P179-UI12：右栏固定宽度 + 页签 + 可收起 ----------
+     原来右栏是一块 285px 的"谁选中谁独占"区域：选块变检查器、取消变变量库，
+     每次都整块替换。宽度虽然碰巧相同，但用户没有"收起"的选项，也看不出里面还有
+     另外两页。现在：宽度固定 300、三页签（属性 / 变量 / 监视）、可收起，
+     选中块只切页签内容，不重排画布；收起态与页签记在 localStorage。
+     变量库默认收起 —— 首次打开编排器时画布要尽可能宽。 */
+  const [railOpen, setRailOpen] = useState(() => {
+    try {
+      return localStorage.getItem("vs.orch.rail") === "open";
+    } catch {
+      return false;
+    }
+  });
+  const [railTab, setRailTab] = useState<"insp" | "vars" | "watch">(() => {
+    try {
+      const v = localStorage.getItem("vs.orch.tab");
+      return v === "vars" || v === "watch" ? v : "insp";
+    } catch {
+      return "insp";
+    }
+  });
+  const setRail = (open: boolean, tab?: "insp" | "vars" | "watch") => {
+    setRailOpen(open);
+    if (tab) setRailTab(tab);
+    try {
+      localStorage.setItem("vs.orch.rail", open ? "open" : "closed");
+      localStorage.setItem("vs.orch.tab", tab ?? railTab);
+    } catch {
+      /* 存档不可用就当这次没记：不影响功能 */
+    }
+  };
+  /** 选中块 = 打开右栏并切到属性页；取消选中不动宽度，只留在原来的页签 */
+  const select = (next: Sel | null) => {
+    setSel(next);
+    if (next && (next.blockId || next.eventId)) setRail(true, "insp");
+  };
+
   /* ---------- C1：Operator 只读边界 ----------
      边界（用户拍板「禁编辑、允许运行」）：结构/配置类入口置灰，
      总开关、▶ 运行、日志、导出、折叠、选中查看一律可用。
@@ -742,9 +779,12 @@ export function OrchestratorPanel() {
           {tx("日志", "Log")}
         </button>
         <button
-          className={`btn sm${!sel || (!sel.blockId && !sel.eventId) ? " primary" : ""}`}
-          title={tx("查看/编辑编排变量库（选中块时点此回到变量视图）", "Flow vars (click to leave the selected block)")}
-          onClick={() => setSel(null)}
+          className={`btn sm${railOpen && railTab === "vars" ? " primary" : ""}`}
+          title={tx("查看/编辑编排变量库（打开右栏的变量页）", "Flow vars (opens the Vars tab in the right rail)")}
+          onClick={() => {
+            setSel(null);
+            setRail(true, "vars");
+          }}
         >
           {tx("变量库", "Vars")}
         </button>
@@ -921,7 +961,7 @@ export function OrchestratorPanel() {
               doc={doc}
               masterOn={doc.settings.masterOn}
               sel={sel}
-              onSelect={setSel}
+              onSelect={select}
               addAt={addAt}
               setAddAt={setAddAt}
               startDrag={startDrag}
@@ -932,10 +972,62 @@ export function OrchestratorPanel() {
             />
           ))}
         </div>
-        {sel && (sel.blockId || sel.eventId) ? (
-          <Inspector sel={sel} doc={doc} onSel={setSel} />
+        {railOpen ? (
+          <div className="orch-rail">
+            <div className="orch-rail-head">
+              <div className="orch-rail-tabs" role="tablist" aria-label={tx("右栏页面", "Right rail tabs")}>
+                {(
+                  [
+                    ["insp", tx("属性", "Inspect")],
+                    ["vars", tx("变量", "Vars")],
+                    ["watch", tx("监视", "Watch")],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    role="tab"
+                    aria-selected={railTab === k}
+                    className="orch-rail-tab"
+                    onClick={() => setRail(true, k)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="orch-rail-x"
+                aria-label={tx("收起右栏", "Collapse right rail")}
+                title={tx("收起右栏（下次打开编排器仍保持收起）", "Collapse the rail (stays collapsed next time)")}
+                onClick={() => setRail(false)}
+              >
+                <IconClose />
+              </button>
+            </div>
+            <div className="orch-rail-body">
+              {railTab === "insp" ? (
+                sel && (sel.blockId || sel.eventId) ? (
+                  <Inspector sel={sel} doc={doc} onSel={select} />
+                ) : (
+                  <div className="orch-rail-hint">
+                    {tx("在画布上选中一个事件或块，这里编辑它的参数。", "Select an event or block on the canvas to edit it here.")}
+                  </div>
+                )
+              ) : railTab === "vars" ? (
+                <VarsEditor />
+              ) : (
+                <OrchWatch doc={doc} runN={runN} />
+              )}
+            </div>
+          </div>
         ) : (
-          <VarsEditor />
+          <button
+            className="orch-rail-toggle"
+            aria-label={tx("展开右栏", "Expand right rail")}
+            title={tx("展开右栏（属性 / 变量 / 监视）", "Expand the rail (Inspect / Vars / Watch)")}
+            onClick={() => setRail(true)}
+          >
+            <IconChevron dir="left" />
+          </button>
         )}
       </div>
       {logOpen && (
@@ -948,6 +1040,39 @@ export function OrchestratorPanel() {
           onClose={() => setLogOpen(false)}
         />
       )}
+    </div>
+  );
+}
+
+/* ================= 右栏「监视」页（P179-UI12） =================
+ * 只做一件事：不打开日志抽屉也能看见"现在在跑什么、最近有没有炸"。
+ * 800 条环形缓冲按 5 条取样；异常计数用一次遍历，不走 filter（这页每 500ms 跟着面板重渲染，
+ * 不给每帧分配再添一笔）。
+ */
+function OrchWatch({ doc, runN }: { doc: FlowDoc; runN: number }) {
+  const all = bind.orchEngine.getLogs();
+  let fails = 0;
+  for (const l of all) if (l.phase === "fail" || l.phase === "fuse") fails++;
+  const rows = all.slice(-5).reverse();
+  const nameOf = (id: string) => (id ? doc.groups.find((g) => g.id === id)?.name ?? id : tx("全局", "Global"));
+  return (
+    <div className="orch-watch">
+      <div className="orch-watch-stats">
+        <span className={`orch-watch-n${runN > 0 ? " live" : ""}`}>
+          {runN > 0 ? tx(`运行中 ${runN}`, `${runN} running`) : tx("空闲", "Idle")}
+        </span>
+        <span className="orch-watch-n">{tx(`最近 ${all.length} 条`, `${all.length} entries`)}</span>
+        {fails > 0 && <span className="orch-watch-n bad">{tx(`异常 ${fails}`, `${fails} issues`)}</span>}
+      </div>
+      <div className="orch-watch-rows">
+        {rows.length === 0 ? (
+          <div className="orch-rail-hint">{tx("还没有运行记录。打开总开关或按 ▶ 运行后，这里显示最近 5 条。", "No runs yet. Arm the master switch or press Run and the last 5 entries show up here.")}</div>
+        ) : (
+          rows.map((l, i) => (
+            <LogRow key={`${l.ts}-${l.instId}-${l.blockId ?? ""}-${i}`} l={l} groupName={nameOf(l.groupId)} />
+          ))
+        )}
+      </div>
     </div>
   );
 }
