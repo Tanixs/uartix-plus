@@ -323,7 +323,7 @@ export function DataTable() {
             >
               {[500, 1000, 5000, 10000, 50000].map((n) => (
                 <option key={n} value={n}>
-                  {t("tbl.cache")} {n}
+                  {t("tbl.cache")} {n} {t("tbl.rows")}
                 </option>
               ))}
             </select>

@@ -2,7 +2,7 @@
  * P174-R3/B3：市场入口不能被"清旧"顺手清掉。
  *
  * 旧货架 UI 退役了，但**插件市场这件事还在**：入口在插件管理工具栏，内容仍是 GitHub
- * `topic:uartix-plugin` 检索；弹窗外壳用回旧插件库的 `plg-overlay/plg-dialog`。
+ * `topic:uartix-plugin` 检索；P179-UI09 起它不再盖一层模态，而是同一块设置页的右分栏。
  */
 import { describe, expect, it } from "vitest";
 import { closeMarketDialog, isMarketDialogOpen, openMarketDialog, subscribeMarketDialog } from "./marketDialog";
@@ -57,5 +57,17 @@ describe("入口与外壳", () => {
     expect(section).toContain("<PluginMarketView");
     expect(section).toContain('className="plg-market-pane"');
     expect(section, "市场又退回独立的 plg-overlay 模态了").not.toContain('className="plg-overlay"');
+  });
+  it("卡片只答三件事（UI-19）：owner/name、星数、话题一律进详情", () => {
+    const card = market.slice(market.indexOf('className="plg-mkt-grid"'));
+    expect(card, "owner/name 又回卡片上了").not.toContain('className="plg-mkt-id"');
+    expect(card, "星数又回卡片上了").not.toContain("★ ");
+    expect(card, "话题计数又回卡片上了").not.toContain("repo.topics");
+  });
+  it("市场零内联排版（UI-20）：只有封面渐变这类运行时值允许走 style", () => {
+    const inline = [...market.matchAll(/style=\{\{(.*?)\}\}/gs)]
+      .map((m) => m[1].trim())
+      .filter((s) => !s.includes("coverGradient("));
+    expect(inline, `这些静态排版还在内联：${inline.join(" | ")}`).toEqual([]);
   });
 });

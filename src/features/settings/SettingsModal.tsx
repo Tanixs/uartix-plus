@@ -34,7 +34,7 @@ import { appearanceDefaults, APPEARANCE_RESET_KEYS } from "./settingsSchema";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { SetGroups, SetRow } from "../../shared/SetRow";
-import { IconChevron, IconClose, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSearch, IconSparkle, IconStack, IconTrash, IconTune } from "../../shared/icons";
+import { IconCheck, IconChevron, IconClose, IconEdit, IconInfo, IconLayoutEdit, IconLogs, IconPlug, IconPulse, IconPuzzle, IconSearch, IconSparkle, IconStack, IconTrash, IconTune } from "../../shared/icons";
 import appIcon from "../../assets/icon.svg";
 import avatarUrl from "../../assets/avatar.png";
 import { rangeStyle } from "../../shell/rangeFill";
@@ -602,8 +602,17 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                           <span className="theme-swatch" style={{ background: c.swatch.bg }}>
                             <span className="theme-bar" style={{ background: c.swatch.accent }} />
                             <span className="theme-panel" style={{ background: c.swatch.panel }} />
+                            {c.drawn ? (
+                              <span className="theme-check" aria-hidden="true"><IconCheck /></span>
+                            ) : null}
                           </span>
                           <span className="theme-name">{c.name}</span>
+                          {/* 「跟随系统」不是一枚固定明暗的主题：它解析到哪一枚由系统决定，
+                              所以这格不能替它声明亮/暗（否则系统偏好与当前界面不一致时，
+                              卡上写「暗」而界面是亮色，看起来像自相矛盾）。 */}
+                          <span className="theme-tag">
+                            {c.meta ? tx("自动", "Auto") : c.scheme === "dark" ? tx("暗", "Dark") : tx("亮", "Light")}
+                          </span>
                         </button>
                       </Fragment>
                     ))}

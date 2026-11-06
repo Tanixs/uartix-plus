@@ -2587,7 +2587,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
             {stats.gridStep > 0 && isFinite(stats.gridStep) && (
               <span title={tx("网格步长（真实单位/格）＝比例尺", "grid step (real units per cell) = scale")}>
                 {" "}
-                · {tx("格", "grid")} {fmtVal(stats.gridStep)}
+                · {tx("网格", "grid")} {fmtVal(stats.gridStep)}
               </span>
             )}
             <span ref={tbTRef} />
@@ -3324,7 +3324,7 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
                   </button>
                 ))}
                 <button className="ctx-item" onClick={closeAnd(() => window.dispatchEvent(new Event("vs-analysis-export")))}>
-                  {tx("分析包…", "Analysis package…")}
+                  {tx("导出分析包", "Export analysis package")}
                 </button>
                 <button className="ctx-item" onClick={closeAnd(() => void exportPng())}>
                   {tx("快照 PNG", "Snapshot PNG")}

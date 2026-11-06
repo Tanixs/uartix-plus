@@ -1962,7 +1962,7 @@ export function Plot2D() {
                   onClick={openAnalysisPackage}
                   title={tx("打开分析包并选择缓存窗口；如需沿用 A/B 范围，请先在指标面板使用该范围并刷新", "Open analysis package and choose a cache window; to reuse A/B, apply that range and refresh in the metrics panel first")}
                 >
-                  {tx("分析包…", "Analysis package…")}
+                  {tx("导出分析包", "Export analysis package")}
                 </button>
               </div>
             )}
@@ -2169,7 +2169,7 @@ export function Plot2D() {
               title={tx("打开全局分析包对话框（可选时间范围、通道与模块）", "Open the global analysis package dialog (choose time range, channels and modules)")}
               onClick={openAnalysisPackage}
             >
-              {tx("分析包…", "Analysis package…")}
+              {tx("导出分析包", "Export analysis package")}
             </button>
             <div className="ctx-group">AI</div>
             <button

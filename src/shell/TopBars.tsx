@@ -163,7 +163,7 @@ export function SystemButtons({
     <div className="toolbar-group cb-sys">
       {!fullPage && (
         <>
-      <button className="tb-btn" data-ctl="tool" title={tx("AI 助手 (Ctrl+K)", "AI Assistant (Ctrl+K)")} data-tour="ai" onClick={onOpenAi}>
+      <button className="tb-btn" data-ctl="tool" title={tx("AI 助手 (Ctrl+K)", "AI Assistant (Ctrl+K)")} aria-label={tx("AI 助手", "AI Assistant")} data-tour="ai" onClick={onOpenAi}>
         <IconSparkle />
       </button>
       {/* data-tour="plugins" 是入门引导第 9 步的高亮锚点（tourSteps.test.ts 按文件路径钉它挂在
@@ -178,10 +178,10 @@ export function SystemButtons({
       >
         <IconPuzzle size={16} />
       </button>
-      <button className="tb-btn" data-ctl="tool" title={t("title.settings")} onClick={onOpenSettings}>
+      <button className="tb-btn" data-ctl="tool" title={t("title.settings")} aria-label={t("title.settings")} onClick={onOpenSettings}>
         <IconSettings />
       </button>
-      <button className="tb-btn" data-ctl="tool" title={t("title.help")} onClick={onOpenHelp}>
+      <button className="tb-btn" data-ctl="tool" title={t("title.help")} aria-label={t("title.help")} onClick={onOpenHelp}>
         <IconHelp />
       </button>
       {/* 置顶前一道小竖线（P105 反馈③"像以前一样"）：它标的是"左边四颗是去哪，
@@ -193,6 +193,7 @@ export function SystemButtons({
         className={`tb-btn${pinned ? " on" : ""}`}
         data-ctl="tool"
         title={pinned ? t("title.unpin") : t("title.pin")}
+        aria-label={pinned ? t("title.unpin") : t("title.pin")}
         aria-pressed={pinned}
         onClick={onTogglePin}
       >

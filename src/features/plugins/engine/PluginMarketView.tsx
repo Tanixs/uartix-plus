@@ -13,7 +13,7 @@ import { tx, useLocale } from "../../../i18n/strings";
 import { readmeImagesForRepo, repoCover, repoManifest, searchPlugins, type RepoKindBrief, type RepoManifestInfo } from "./marketClient";
 import { coverGradient, coverHue, coverInitials } from "./marketCover";
 import { PLUGIN_TOPIC, hasPluginTopic, type GhRepo } from "./ghSearch";
-import { IconLayoutEdit, IconSparkle, IconTerminal } from "../../../shared/icons";
+import { IconChevron, IconLayoutEdit, IconSparkle, IconTerminal } from "../../../shared/icons";
 import {
   filterRepos,
   installedNote,
@@ -195,12 +195,12 @@ function RepoDetail(props: {
   const slides = props.cover ? [props.cover, ...imgs.filter((x) => x !== props.cover)] : imgs;
   const img = slides[slide];
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: "1 1 auto", overflow: "auto" }}>
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "var(--sp-2)", padding: "var(--sp-2) var(--sp-3)", borderBottom: "1px solid var(--border)", flex: "0 0 auto" }}>
+    <div className="plgv-root">
+      <div className="plgv-bar">
         <button className="btn" onClick={props.onBack}>{tx("← 返回市场", "← Back to market")}</button>
-        <span style={{ fontWeight: 600 }}>{repo.name}</span>
-        <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)", fontFamily: "var(--font-mono)" }}>{repo.full}</span>
-        <span style={{ flex: 1 }} />
+        <span className="plgv-name">{repo.name}</span>
+        <span className="plgv-repo">{repo.full}</span>
+        <span className="plgv-spacer" />
         {state === "absent" || state === "updatable" ? (
           <button className="btn primary" disabled={installing} onClick={() => void install()}>
             {installing
@@ -210,82 +210,90 @@ function RepoDetail(props: {
                 : tx("安装…", "Install…")}
           </button>
         ) : (
-          <span style={{ color: "var(--ok)", fontSize: "var(--fs-sm)" }}>
-            {stateText(state, props.inst, props.remote?.version ?? "")}
-          </span>
+          <span className="plgv-ok">{stateText(state, props.inst, props.remote?.version ?? "")}</span>
         )}
       </div>
 
-      <div style={{ padding: "var(--sp-3)", display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
-        <div style={{ position: "relative", border: "1px solid var(--border)", borderRadius: "var(--radius-m)", background: "var(--bg-inset)", minHeight: 220, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+      <div className="plgv-body">
+        <div className="plgv-stage">
           {img ? (
-            <img src={img} alt="" style={{ display: "block", width: "100%", maxHeight: 380, objectFit: "contain" }} loading="lazy" />
+            <img className="plgv-img" src={img} alt="" loading="lazy" />
           ) : busy ? (
-            <span style={{ color: "var(--text-dim)", fontSize: "var(--fs-sm)" }}>{tx("正在读 README 预览…", "Reading README previews…")}</span>
+            <span className="plgv-hint">{tx("正在读 README 预览…", "Reading README previews…")}</span>
           ) : (
-            <span style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--sp-2)" }}>
+            <span className="plgv-empty">
               <span
-                className="plg-mkt-ph"
+                className="plg-mkt-ph plgv-ph"
                 aria-hidden="true"
-                style={{
-                  width: 168,
-                  height: 112,
-                  borderRadius: "var(--radius-m)",
-                  background: coverGradient(coverHue(repo.full)),
-                }}
+                style={{ background: coverGradient(coverHue(repo.full)) }}
               >
                 {coverInitials(repo.name)}
               </span>
-              <span style={{ color: "var(--text-dim)", fontSize: "var(--fs-sm)" }}>
+              <span className="plgv-hint">
                 {tx("这个仓库没有上传封面，也没有 README 预览图", "This repo has no cover and no README preview image")}
               </span>
             </span>
           )}
           {slides.length > 1 ? (
             <>
-              <button className="btn" style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)" }} onClick={() => setSlide((n) => (n - 1 + slides.length) % slides.length)} aria-label={tx("上一张", "Previous")}>‹</button>
-              <button className="btn" style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)" }} onClick={() => setSlide((n) => (n + 1) % slides.length)} aria-label={tx("下一张", "Next")}>›</button>
-              <span style={{ position: "absolute", right: 10, bottom: 8, fontSize: "var(--fs-xs)", color: "var(--text-dim)", background: "color-mix(in srgb, var(--bg-panel) 80%, transparent)", padding: "1px 6px", borderRadius: "var(--radius-pill)" }}>{slide + 1} / {slides.length}</span>
+              <button
+                className="btn plgv-nav plgv-prev"
+                onClick={() => setSlide((n) => (n - 1 + slides.length) % slides.length)}
+                aria-label={tx("上一张", "Previous")}
+              >
+                <IconChevron dir="left" />
+              </button>
+              <button
+                className="btn plgv-nav plgv-next"
+                onClick={() => setSlide((n) => (n + 1) % slides.length)}
+                aria-label={tx("下一张", "Next")}
+              >
+                <IconChevron dir="right" />
+              </button>
+              <span className="plgv-count">{slide + 1} / {slides.length}</span>
             </>
           ) : null}
         </div>
         {slides.length > 1 ? (
-          <div style={{ display: "flex", justifyContent: "center", gap: 6 }}>
+          <div className="plgv-dots">
             {slides.map((_, i) => (
-              <button key={i} onClick={() => setSlide(i)} aria-label={tx(`第 ${i + 1} 张`, `Image ${i + 1}`)} style={{ width: 7, height: 7, padding: 0, border: "none", borderRadius: "50%", cursor: "pointer", background: i === slide ? "var(--accent)" : "var(--border)" }} />
+              <button
+                key={i}
+                className={`plgv-dot${i === slide ? " on" : ""}`}
+                onClick={() => setSlide(i)}
+                aria-label={tx(`第 ${i + 1} 张`, `Image ${i + 1}`)}
+              />
             ))}
           </div>
         ) : null}
 
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--sp-2)", flexWrap: "wrap", fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>
+        <div className="plgv-meta">
           <span>★ {fmtStars(repo.stars)}</span>
           <span>{fmtDate(repo.updated)}</span>
-          {repo.archived ? <span style={{ color: "var(--warn)" }}>{tx("已归档", "archived")}</span> : null}
-          {hasPluginTopic(repo) ? <span style={{ color: "var(--ok)" }}>#{PLUGIN_TOPIC}</span> : null}
+          {repo.archived ? <span className="plgv-warn">{tx("已归档", "archived")}</span> : null}
+          {hasPluginTopic(repo) ? <span className="plgv-ok">#{PLUGIN_TOPIC}</span> : null}
           {/* 话题徽章已经说过 #uartix-plugin，列表里再列一遍是同一件事说两遍 */}
-          {repo.topics.filter((t) => t !== PLUGIN_TOPIC).slice(0, 6).map((t) => <span key={t} style={{ color: "var(--text-faint)" }}>#{t}</span>)}
+          {repo.topics.filter((t) => t !== PLUGIN_TOPIC).slice(0, 6).map((t) => <span key={t} className="plgv-faint">#{t}</span>)}
         </div>
-        <p style={{ margin: 0, fontSize: "var(--fs-sm)", lineHeight: 1.65 }}>{repo.description || tx("（没有描述）", "(no description)")}</p>
+        <p className="plgv-desc">{repo.description || tx("（没有描述）", "(no description)")}</p>
 
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "var(--sp-2)", fontSize: "var(--fs-xs)" }}>
-          <span style={{ color: state === "updatable" ? "var(--warn)" : state === "absent" ? "var(--text-faint)" : "var(--ok)" }}>
+        <div className="plgv-state">
+          <span className={state === "updatable" ? "plgv-warn" : state === "absent" ? "plgv-faint" : "plgv-ok"}>
             {stateText(state, props.inst, props.remote?.version ?? "")}
           </span>
-          {props.inst ? <span style={{ color: "var(--warn)" }}>{noteText(props.inst)}</span> : null}
-          {props.remote ? kindTexts(props.remote.kinds).map((k) => <span key={k} style={{ color: "var(--text-dim)" }}>{k}</span>) : null}
-          <span style={{ flex: 1 }} />
+          {props.inst ? <span className="plgv-warn">{noteText(props.inst)}</span> : null}
+          {props.remote ? kindTexts(props.remote.kinds).map((k) => <span key={k} className="plgv-dim">{k}</span>) : null}
+          <span className="plgv-spacer" />
           <button className="btn sm" onClick={() => void openExternal(repo.htmlUrl)}>{tx("在 GitHub 打开", "Open on GitHub")}</button>
         </div>
 
         {props.remote && permTexts(props.remote.perms).length ? (
-          <div style={{ border: "1px solid var(--border)", borderRadius: "var(--radius-m)", background: "var(--bg-inset)", padding: "8px 10px" }}>
-            <div style={{ fontSize: "var(--fs-xs)", fontWeight: 600, color: "var(--text-dim)", marginBottom: 4 }}>
-              {tx("它声明的能力面", "What it asks for")}
-            </div>
-            <ul style={{ margin: 0, paddingLeft: 16, display: "grid", gap: 2, fontSize: "var(--fs-xs)", color: "var(--text-dim)", lineHeight: 1.6 }}>
+          <div className="plgv-perms">
+            <div className="plgv-perm-title">{tx("它声明的能力面", "What it asks for")}</div>
+            <ul className="plgv-perm-list">
               {permTexts(props.remote.perms).map((p) => <li key={p}>{p}</li>)}
             </ul>
-            <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)", marginTop: 6, lineHeight: 1.6 }}>
+            <div className="plgv-perm-note">
               {tx(
                 "这是清单里的声明，装之前先看清；真正放行与否仍以下载解包后那张批准卡为准。",
                 "These are the manifest's declarations, shown before you install. What actually runs is still decided by the approval card after the package is downloaded and validated.",
@@ -293,11 +301,11 @@ function RepoDetail(props: {
             </div>
           </div>
         ) : props.remote ? (
-          <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)" }}>{tx("这份清单没有声明任何能力面。", "This manifest declares no capabilities.")}</div>
+          <div className="plgv-faint">{tx("这份清单没有声明任何能力面。", "This manifest declares no capabilities.")}</div>
         ) : null}
 
-        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>{repo.htmlUrl}</div>
-        {err ? <div style={{ color: "var(--danger)", fontSize: "var(--fs-sm)" }}>{err}</div> : null}
+        <div className="plgv-url">{repo.htmlUrl}</div>
+        {err ? <div className="plgv-err">{err}</div> : null}
       </div>
     </div>
   );
@@ -435,61 +443,36 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
         : tx("校验包…", "Validating…");
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        minHeight: 0,
-        flex: "1 1 auto",
-        borderTop: "1px solid var(--border)",
-      }}
-    >
+    <div className="plg-mkt-root">
       {/* 检索区 */}
-      <div
-        style={{
-          padding: "var(--sp-3)",
-          borderBottom: "1px solid var(--border)",
-          flex: "0 0 auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--sp-2)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "var(--sp-2)" }}>
-          <span style={{ fontSize: "var(--fs-md)", fontWeight: 600 }}>{tx("插件市场", "Plugin market")}</span>
-          <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-dim)" }}>
-            {tx(
-              "仓库打上 uartix-plugin 话题就会被检索到；装之前仍要过一遍权限批准卡",
-              "Repos tagged with the uartix-plugin topic show up here. Installing still goes through the permission card.",
-            )}
-          </span>
-        </div>
+      <div className="plg-mkt-search">
+        <span className="plg-mkt-hint">
+          {tx(
+            "仓库打上 uartix-plugin 话题就会被检索到",
+            "Repos tagged with the uartix-plugin topic show up here.",
+          )}
+        </span>
 
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "var(--sp-2)" }}>
+        <div className="plg-mkt-search-row">
           <input
             ref={inputRef}
-            className="input"
+            className="input plg-mkt-input"
             value={text}
             placeholder={tx("搜插件：yolo、串口、数据…", "Search plugins: yolo, serial, data…")}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") void run();
             }}
-            style={{ flex: "1 1 240px", minWidth: 0 }}
           />
           <button
-            className="btn"
+            className={`btn${onlyTopic ? " plg-mkt-topic-on" : ""}`}
             onClick={() => {
               const next = !onlyTopic;
               setOnlyTopic(next);
               void run(text, next);
             }}
             title={tx("只搜带 uartix-plugin 话题的仓库", "Only repos tagged uartix-plugin")}
-            style={
-              onlyTopic
-                ? { borderColor: "var(--accent)", color: "var(--accent)" }
-                : { color: "var(--text-dim)" }
-            }
+            aria-pressed={onlyTopic}
           >
             #{PLUGIN_TOPIC}
           </button>
@@ -500,7 +483,7 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
 
         {/* 结果内筛选与排序：都只动"已经搜出来的这一批"，不再打一次 GitHub——
             市场是用户主动联网的地方，能省一次请求就省一次。 */}
-        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "var(--sp-1)" }}>
+        <div className="plg-mkt-filter-row">
           {FILTERS.map((f) => {
             const n = f.id === "all" ? (repos?.length ?? 0) : filterRepos(repos ?? [], f.id, stateOf).length;
             return (
@@ -511,18 +494,17 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
                 disabled={!repos?.length}
               >
                 {f.label()}
-                <span style={{ color: filter === f.id ? "inherit" : "var(--text-faint)" }}>&nbsp;{n}</span>
+                <span className="plg-mkt-count">{n}</span>
               </button>
             );
           })}
-          <span style={{ flex: 1 }} />
+          <span className="plg-mkt-spacer" />
           <select
-            className="input"
+            className="input plg-mkt-sort"
             value={sort}
             disabled={!repos?.length}
             onChange={(e) => setSort(e.target.value as MarketSort)}
             title={tx("排序方式", "Sort order")}
-            style={{ width: "auto", height: "var(--ctl-h-1)", fontSize: "var(--fs-xs)" }}
           >
             {SORTS.map((s) => (
               <option key={s.id} value={s.id}>{s.label()}</option>
@@ -532,12 +514,12 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
       </div>
 
       {/* 结果 */}
-      <div style={{ overflow: "auto", flex: "1 1 auto", padding: "var(--sp-3)" }}>
+      <div className="plg-mkt-results">
         {err ? (
-          <div style={{ color: "var(--danger)", fontSize: "var(--fs-sm)", lineHeight: 1.6 }}>
+          <div className="plg-mkt-msg err">
             {tx("检索失败：", "Search failed: ")}
             {err}
-            <div style={{ color: "var(--text-dim)", marginTop: "var(--sp-1)" }}>
+            <div className="sub">
               {tx(
                 "常见原因：没联网、代理没配、或 GitHub 限流（未登录 10 次/分钟；在 设置 → 集成 配了 GitHub Token 会自动带上，额度更高）。",
                 "Usual causes: offline, proxy not set, or GitHub rate limit (10/min unauthenticated; a GitHub Token under Settings → Integration is sent automatically for a higher quota).",
@@ -547,19 +529,19 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
         ) : null}
 
         {rateLimited ? (
-          <div style={{ color: "var(--warn)", fontSize: "var(--fs-sm)", lineHeight: 1.6 }}>
+          <div className="plg-mkt-msg warn">
             {tx("GitHub 限流了，等一分钟再搜（未登录每分钟 10 次）。", "GitHub rate limit hit. Wait a minute (10/min unauthenticated).")}
           </div>
         ) : null}
 
         {!err && !rateLimited && repos === null ? (
-          <div style={{ color: "var(--text-dim)", fontSize: "var(--fs-sm)" }}>
+          <div className="plg-mkt-msg">
             {tx("输入关键词后回车；留空回车＝看看最近更新的插件。", "Type a keyword and press Enter; empty shows recently updated plugins.")}
           </div>
         ) : null}
 
         {!err && !rateLimited && repos && repos.length === 0 ? (
-          <div style={{ color: "var(--text-dim)", fontSize: "var(--fs-sm)" }}>
+          <div className="plg-mkt-msg">
             {onlyTopic
               ? tx("没有匹配的仓库。换个词，或关掉 #话题 搜全站（多半不是插件）。", "No match. Try another word, or turn off the topic filter.")
               : tx("没有匹配的仓库。", "No matching repos.")}
@@ -567,7 +549,7 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
         ) : null}
 
         {repos && repos.length ? (
-          <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-faint)", marginBottom: "var(--sp-2)" }}>
+          <div className="plg-mkt-sum">
             {shown.length === repos.length
               ? tx(`共 ${total} 个结果，显示前 ${repos.length} 个`, `${total} results, showing first ${repos.length}`)
               : tx(`共 ${total} 个结果，这一批里 ${shown.length} 个符合筛选`, `${total} results, ${shown.length} of this batch match the filter`)}
@@ -575,7 +557,7 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
         ) : null}
 
         {repos?.length && !shown.length ? (
-          <div style={{ color: "var(--text-dim)", fontSize: "var(--fs-sm)" }}>
+          <div className="plg-mkt-msg">
             {tx("这一批里没有符合筛选的。换个筛选项，或先「全部」。", "Nothing in this batch matches the filter. Pick another, or All.")}
           </div>
         ) : null}
@@ -587,8 +569,22 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
             const remote = manifests[repo.full];
             const state = marketStateOf(inst, remote?.version ?? "");
             const actionable = state === "absent" || state === "updatable";
+            const open = () => setSelected(repo);
             return (
-              <div key={repo.full} className="plg-mkt-card" onClick={() => setSelected(repo)}>
+              <div
+                key={repo.full}
+                className="plg-mkt-card"
+                role="button"
+                tabIndex={0}
+                aria-label={tx(`查看 ${repo.name} 详情`, `View ${repo.name} details`)}
+                onClick={open}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    open();
+                  }
+                }}
+              >
                 <RepoCover repo={repo} cover={covers[repo.full]} kinds={remote?.kinds} />
 
                 <div className="plg-mkt-body">
@@ -599,36 +595,22 @@ export function PluginMarketView({ onInstall, installed }: PluginMarketViewProps
                         plugin
                       </span>
                     ) : null}
-                    {repo.archived ? (
-                      <span style={{ fontSize: "var(--fs-xs)", color: "var(--warn)" }}>{tx("已归档", "archived")}</span>
-                    ) : null}
+                    {repo.archived ? <span className="plg-mkt-archived">{tx("已归档", "archived")}</span> : null}
                   </div>
-
-                  <div className="plg-mkt-id">{repo.full}</div>
 
                   <div className="plg-mkt-desc">{repo.description || tx("（没有描述）", "(no description)")}</div>
 
-                  {remote ? (
-                    <div className="plg-mkt-kinds">
-                      {kindTexts(remote.kinds).map((k) => (
-                        <span key={k} className="plg-mkt-kind">{k}</span>
-                      ))}
-                    </div>
-                  ) : null}
-
+                  {/* UI-19：卡片只答"它是什么 / 多久没动 / 能不能装"三件事。
+                      owner/name、话题数、星数都是"决定要不要点进去"才需要的信息，放详情页。 */}
                   <div className="plg-mkt-meta">
-                    <span>★ {fmtStars(repo.stars)}</span>
+                    {remote?.version ? <span className="plg-mkt-kind">v{remote.version}</span> : null}
+                    {remote ? kindTexts(remote.kinds).map((k) => <span key={k} className="plg-mkt-kind">{k}</span>) : null}
                     <span>{fmtDate(repo.updated)}</span>
-                    {repo.topics.slice(0, 2).map((t) => (
-                      <span key={t} style={{ color: "var(--text-dim)" }}>
-                        #{t}
-                      </span>
-                    ))}
-                    <div style={{ flex: "1 1 auto" }} />
+                    <span className="plg-mkt-spacer" />
                     {inst && !actionable ? (
-                      <span style={{ color: "var(--ok)" }}>{stateText(state, inst, remote?.version ?? "")}</span>
+                      <span className="plg-mkt-ok">{stateText(state, inst, remote?.version ?? "")}</span>
                     ) : st.kind === "working" ? (
-                      <span style={{ color: "var(--text-dim)" }}>{stepLabel(st.step)}</span>
+                      <span className="plg-mkt-dim">{stepLabel(st.step)}</span>
                     ) : (
                       <button
                         className={state === "updatable" ? "btn primary" : "btn"}

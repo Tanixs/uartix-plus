@@ -146,7 +146,7 @@ export default function MetricsPanel() {
       <label>{tx("时间容差 ms", "Time tolerance ms")} <input className="input" type="number" min="0" value={tolerance} onChange={(e) => setTolerance(e.target.value)} /></label>
       <label>{tx("距离阈值 raw", "Distance threshold raw")} <input className="input" type="number" min="0" step="any" value={distance} onChange={(e) => setDistance(e.target.value)} /></label>
       <button className="btn primary sm" disabled={!channelId && !groupA && !groupB} onClick={refresh}>{tx("手动刷新", "Refresh")}</button>
-      <button className="btn sm" disabled={!result} onClick={() => analysisStore.dispatchAnalysisEvent("vs-analysis-export")}>{tx("分析包…", "Analysis package…")}</button>
+      <button className="btn sm" disabled={!result} onClick={() => analysisStore.dispatchAnalysisEvent("vs-analysis-export")}>{tx("导出分析包", "Export analysis package")}</button>
       <button className="btn sm" disabled={!result} onClick={() => analysisStore.dispatchAnalysisEvent("vs-analysis-ai")}>{tx("交给 AI…", "Ask AI…")}</button>
     </div>
     <div className="analysis-results">

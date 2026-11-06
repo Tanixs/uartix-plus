@@ -248,7 +248,7 @@ const zh: Dict = {
   "tbl.pause": "暂停刷新",
   "tbl.clear": "清空",
   "tbl.cap": "表格缓存行数上限",
-  "tbl.filter": "筛选（时间 / 模板 / 字段值）",
+  "tbl.filter": "筛选：时间 / 模板 / 字段值",
   "tbl.columns": "选择表格显示的字段列（导出仅含显示列）",
   "tbl.noCols": "暂无字段列",
   "tbl.capped": "超出上限，最旧数据已移除",
@@ -259,6 +259,7 @@ const zh: Dict = {
   "tbl.locate": "点击定位到 Hex 区",
   "tbl.empty": "暂无数据",
   "tbl.cache": "缓存",
+  "tbl.rows": "行",
   "tbl.showAll": "全部显示",
   "tbl.truncated": "已截断",
 };
@@ -493,7 +494,7 @@ const en: Dict = {
   "tbl.pause": "Pause refresh",
   "tbl.clear": "Clear",
   "tbl.cap": "Table row cache limit",
-  "tbl.filter": "Filter (time / template / value)",
+  "tbl.filter": "Filter: time / template / value",
   "tbl.columns": "Choose visible columns (export follows visibility)",
   "tbl.noCols": "No field columns",
   "tbl.capped": "Over limit, oldest rows dropped",
@@ -504,6 +505,7 @@ const en: Dict = {
   "tbl.locate": "Click to locate in Hex view",
   "tbl.empty": "No data",
   "tbl.cache": "Cache",
+  "tbl.rows": "rows",
   "tbl.showAll": "Show all",
   "tbl.truncated": "Truncated",
 };

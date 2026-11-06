@@ -6117,6 +6117,9 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 }
 .tb-btn:hover { background: var(--accent-soft); color: var(--accent); }
 .tb-btn.on { color: var(--accent); background: var(--accent-soft); }
+/* P179-UI18：`all: unset` 连焦点环一起抹了，而全局缺省是 `--ctl-focus-outline: none`
+   ⇒ 键盘 Tab 到这排图标钮时屏幕上没有任何指示。补回 2px 环（与 .btn 同档）。 */
+.tb-btn:focus-visible { outline: var(--ctl-ring-w) solid var(--ctl-ring); outline-offset: 1px; }
 .tb-close:hover { background: color-mix(in srgb, var(--danger) 85%, transparent) !important; color: var(--on-danger, #fff) !important; }
 .tb-sep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; }
 .tb-menu {
@@ -6766,7 +6769,9 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 
 .theme-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  /* P179-UI17：一行 4~5 张。84px 的窄格在 9 枚内置主题下会排成两行小方块，
+     主题名和亮/暗标签都塞不进去；110 起才能让"名字 + 亮暗"各占一行。 */
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 8px;
   width: 100%;
 }
@@ -9938,6 +9943,7 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
 }
 .orch-rail-tab:hover { color: var(--text); background: var(--ctl-fill-hover); }
 .orch-rail-tab[aria-selected="true"] { color: var(--accent-text); background: var(--accent-soft); }
+.orch-rail-tab:focus-visible { outline: var(--ctl-ring-w) solid var(--ctl-ring); outline-offset: -2px; }
 .orch-rail-x {
   width: var(--target-min);
   height: var(--target-min);
@@ -10963,6 +10969,21 @@ body.pdrag-active *{cursor:grabbing !important;}
   padding-left: 12px;
 }
 .plg-market-body { flex: 1; min-height: 0; overflow-y: auto; }
+/* P179-UI P2-6 窄窗：两栏挤不下时改成上下两段。
+   900 实测左栏只剩 ~270px：「插件 0」被挤成竖排、工具动作按钮贴边（溢出 1px）。
+   并排本来就读不清，所以窄窗把市场放到列表下面，两段各拿一部分高度、各自滚动。 */
+@media (max-width: 1000px) {
+  .plg-eng-root { flex-direction: column; }
+  .plg-market-pane {
+    flex: 0 0 44%;
+    min-width: 0;
+    min-height: 180px;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding-left: 0;
+    padding-top: var(--sp-2);
+  }
+}
 .plg-empty {
   font-size: var(--fs-sm);
   color: var(--text-dim);
@@ -11021,8 +11042,29 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-item-name { font-size: var(--fs-md); font-weight: 600; }
 .plg-item-id { font-size: var(--fs-body); color: var(--text-dim); font-family: var(--font-mono); }
 /* P174-R17：市场卡片——封面砖在左。图来自仓库根的 cover.<ext>（发布器写的），
-   没有图就渲染按名字生成的色块；两种都占同一块 108×82，图加载完不会跳版。 */
-.plg-mkt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: var(--sp-2); }
+   没有图就渲染按名字生成的色块；两种都占同一块 64×64，图加载完不会跳版。 */
+/* P179-UI19/20：市场只答"它是什么 / 多久没动 / 能不能装"——
+   卡片三行（名称+徽标 / 一行说明 / 类型·版本·更新时间·安装），owner/name、话题、星数进详情。
+   全部走语义类（`.plg-mkt-*` / `.plgv-*`），源码里不再用内联样式拼版（静态面清零，
+   只留封面渐变的动态 background）。 */
+.plg-mkt-root { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; border-top: 1px solid var(--border); }
+.plg-mkt-search { padding: var(--sp-3); border-bottom: 1px solid var(--border); flex: 0 0 auto; display: flex; flex-direction: column; gap: var(--sp-2); }
+.plg-mkt-hint { font-size: var(--fs-xs); color: var(--text-dim); line-height: var(--lh-body); }
+.plg-mkt-search-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.plg-mkt-input { flex: 1 1 240px; min-width: 0; }
+.plg-mkt-topic-on { border-color: var(--accent); color: var(--accent); }
+.plg-mkt-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1); }
+.plg-mkt-count { margin-left: 4px; color: var(--text-faint); }
+.plg-mkt-filter-row .btn.primary .plg-mkt-count { color: inherit; }
+.plg-mkt-spacer { flex: 1 1 auto; }
+.plg-mkt-sort { width: auto; height: var(--ctl-h-1); font-size: var(--fs-xs); }
+.plg-mkt-results { overflow: auto; flex: 1 1 auto; padding: var(--sp-3); }
+.plg-mkt-msg { font-size: var(--fs-sm); line-height: var(--lh-body); color: var(--text-dim); }
+.plg-mkt-msg.err { color: var(--danger); }
+.plg-mkt-msg.warn { color: var(--warn); }
+.plg-mkt-msg .sub { color: var(--text-dim); margin-top: var(--sp-1); }
+.plg-mkt-sum { font-size: var(--fs-xs); color: var(--text-faint); margin-bottom: var(--sp-2); }
+.plg-mkt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-2); }
 .plg-mkt-card {
   display: flex;
   align-items: flex-start;
@@ -11035,6 +11077,7 @@ body.pdrag-active *{cursor:grabbing !important;}
   min-width: 0;
 }
 .plg-mkt-card:hover { border-color: var(--line-strong); }
+.plg-mkt-card:focus-visible { outline: var(--ctl-ring-w) solid var(--ctl-ring); outline-offset: 1px; }
 .plg-mkt-cover {
   flex: none;
   position: relative;
@@ -11060,7 +11103,7 @@ body.pdrag-active *{cursor:grabbing !important;}
   background: color-mix(in srgb, #000 46%, transparent);
   color: #fff;
 }
-.plg-mkt-cover .plg-mkt-kind-ico svg { width: 12px; height: 12px; }
+.plg-mkt-cover .plg-mkt-kind-ico svg { width: 14px; height: 14px; }
 .plg-mkt-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .plg-mkt-ph {
   display: flex;
@@ -11078,21 +11121,22 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plg-mkt-head { display: flex; align-items: baseline; gap: var(--sp-1); min-width: 0; flex-wrap: wrap; }
 .plg-mkt-name { font-weight: 600; font-size: var(--fs-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .plg-mkt-badge { font-size: var(--fs-xs); color: var(--ok); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0 6px; }
-.plg-mkt-id { font-size: var(--fs-xs); color: var(--text-faint); font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plg-mkt-archived { font-size: var(--fs-xs); color: var(--warn); }
 .plg-mkt-desc {
   font-size: var(--fs-sm);
   color: var(--text-dim);
   line-height: 1.55;
-  min-height: 3.1em;
+  min-height: 1.55em;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.plg-mkt-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--text-faint); }
+.plg-mkt-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--text-faint); min-height: var(--ctl-h-2); }
+.plg-mkt-ok { color: var(--ok); }
+.plg-mkt-dim { color: var(--text-dim); }
 .plg-mkt-fail { font-size: var(--fs-xs); color: var(--danger); line-height: 1.5; }
 /* R19：清单摘要落到卡片上——产物种类先说"它是什么"，状态后说"我这边它是什么处境" */
-.plg-mkt-kinds { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .plg-mkt-kind {
   font-size: var(--fs-xs);
   color: var(--text-dim);
@@ -11102,6 +11146,51 @@ body.pdrag-active *{cursor:grabbing !important;}
   white-space: nowrap;
 }
 .plg-mkt-note { font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; }
+
+/* ---- 详情面（UI-20 同一套语义类，源码零内联排版） ---- */
+.plgv-root { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: auto; }
+.plgv-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.plgv-name { font-weight: 600; }
+.plgv-repo { font-size: var(--fs-xs); color: var(--text-faint); font-family: var(--font-mono); }
+.plgv-spacer { flex: 1 1 auto; }
+.plgv-body { padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.plgv-stage { position: relative; border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--bg-inset); min-height: 220px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.plgv-img { display: block; width: 100%; max-height: 380px; object-fit: contain; }
+.plgv-hint { color: var(--text-dim); font-size: var(--fs-sm); }
+.plgv-empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
+.plgv-ph { width: 168px; height: 112px; border-radius: var(--radius-m); }
+.plgv-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--target-min);
+  height: var(--target-min);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.plgv-prev { left: var(--sp-2); }
+.plgv-next { right: var(--sp-2); }
+.plgv-count { position: absolute; right: 10px; bottom: 8px; font-size: var(--fs-xs); color: var(--text-dim); background: color-mix(in srgb, var(--bg-panel) 80%, transparent); padding: 1px 6px; border-radius: var(--radius-pill); }
+.plgv-dots { display: flex; justify-content: center; gap: var(--sp-0); }
+.plgv-dot { width: var(--target-min); height: var(--target-min); padding: 0; border: 0; background: none; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.plgv-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+.plgv-dot.on::before { background: var(--accent); }
+.plgv-dot:focus-visible { outline: var(--ctl-ring-w) solid var(--ctl-ring); outline-offset: -2px; border-radius: 50%; }
+.plgv-meta { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-xs); color: var(--text-dim); }
+.plgv-desc { margin: 0; font-size: var(--fs-sm); line-height: var(--lh-body); }
+.plgv-state { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-xs); }
+.plgv-ok { color: var(--ok); }
+.plgv-warn { color: var(--warn); }
+.plgv-faint { color: var(--text-faint); font-size: var(--fs-xs); }
+.plgv-dim { color: var(--text-dim); }
+.plgv-perms { border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--bg-inset); padding: var(--sp-1) var(--sp-2); }
+.plgv-perm-title { font-size: var(--fs-xs); font-weight: 600; color: var(--text-dim); margin-bottom: var(--sp-1); }
+.plgv-perm-list { margin: 0; padding-left: 16px; display: grid; gap: 2px; font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.6; }
+.plgv-perm-note { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 6px; line-height: 1.6; }
+.plgv-url { font-size: var(--fs-xs); color: var(--text-faint); font-family: var(--font-mono); word-break: break-all; }
+.plgv-err { color: var(--danger); font-size: var(--fs-sm); }
 /* 0.6.1：工作场景——场景列表 + 编辑区。把顺序箭头、应用预览大盒子、工作区/外部目录
    常驻控件收起来：主编辑面只留“启用哪些插件 + 主题”，工作区与外部目录进高级折叠。 */
 .prof-page { display: flex; height: 100%; min-height: 0; background: var(--bg-panel); }
@@ -11433,19 +11522,26 @@ body.pdrag-active *{cursor:grabbing !important;}
    "在画"看环、"没在画"看淡，其余话术进 title（由 themePicker 拼好，视图不另算）。 */
 .theme-card { position: relative; }
 .theme-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.theme-card.on { box-shadow: 0 0 0 2px var(--accent); }
-/* 圆点是第二道信号：只靠一圈描边色，亮底暗底上都容易被看成"只是被 hover 了"（非字符，§8-25） */
-.theme-card.on::after {
-  content: "";
+/* P179-UI17：选中三重编码——勾（图形）、描边（位置）、加粗（字重）。
+   原来那圈 2px 外环 + 8px 圆点是"两道信号都在做同一件事（我只是被选中）"，
+   既和焦点环抢同一圈位置，也在亮底上糊成一枚灰点；换成实心勾就一眼看完。 */
+.theme-card.on { border-color: var(--accent); background: var(--accent-soft); }
+.theme-check {
   position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 8px;
-  height: 8px;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 2px var(--bg-panel);
+  color: var(--bg-panel);
+  box-shadow: 0 0 0 1px var(--bg-panel);
 }
+.theme-check svg { width: 12px; height: 12px; }
+.theme-tag { font-size: var(--fs-xs); color: var(--text-faint); line-height: 1; }
+.theme-card.on .theme-tag { color: var(--accent-text); }
 .theme-card.from-plugin { border-style: dashed; }
 /* 没在画的插件主题（没启用、或被更晚启用那枚顶掉，两种话术在 title 里分说）：整格压淡 */
 .theme-card.from-plugin.off { opacity: .58; }
