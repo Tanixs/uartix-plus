@@ -8,12 +8,17 @@ import * as templateStore from "../protocol/templateStore";
 import { presetGroupKey, groupDisplayName } from "../framecanvas/presets";
 import { ColumnTreeMenu, type ColGroup } from "./ColumnTreeMenu";
 import {
+  IconChevron,
+  IconClose,
   IconColumns,
+  IconDownload,
   IconPause,
   IconPlay,
   IconTrash,
 } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
+import { Toolbar } from "../../shared/Toolbar";
+import { ActionMenu } from "../../shared/ActionMenu";
 import { useSettings } from "../settings/settingsStore";
 import { t, tx, useLocale } from "../../i18n/strings";
 
@@ -297,79 +302,111 @@ export function DataTable() {
   };
 
   const arrow = (key: string) =>
-    sort?.key === key ? (sort.dir === 1 ? " ▲" : " ▼") : "";
+    sort?.key === key ? (
+      <IconChevron size={12} dir={sort.dir === 1 ? "up" : "down"} />
+    ) : null;
 
   return (
     <div className="tbl">
-      <div className="tbl-bar p-bar">
-        <button
-          className={`btn icon-btn ${frames.paused ? "on" : ""}`}
-          onClick={() => framesStore.setPaused(!frames.paused)}
-          title={frames.paused ? t("tbl.resume") : t("tbl.pause")}
-        >
-          {frames.paused ? <IconPlay /> : <IconPause />}
-        </button>
-        <button className="btn icon-btn" onClick={() => framesStore.clearRows()} title={t("tbl.clear")}>
-          <IconTrash />
-        </button>
-        <select
-          className="input"
-          value={frames.maxRows}
-          title={t("tbl.cap")}
-          onChange={(e) => framesStore.setMaxRows(Number(e.target.value))}
-        >
-          {[500, 1000, 5000, 10000, 50000].map((n) => (
-            <option key={n} value={n}>
-              {t("tbl.cache")} {n}
-            </option>
-          ))}
-        </select>
-        <input
-          className="input tbl-filter"
-          placeholder={t("tbl.filter")}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+      {/* P179-UI03：左=数据范围（缓存上限 + 筛选 + 截断状态），右=视图/工具（≤3 + ⋯）。
+          分析包与导出收进 ⋯：它们是低频动作，不该与"暂停/清空"同权重。 */}
+      <Toolbar
+        className="tbl-bar"
+        left={
+          <>
+            <select
+              className="input tbl-cap"
+              value={frames.maxRows}
+              title={t("tbl.cap")}
+              aria-label={t("tbl.cap")}
+              onChange={(e) => framesStore.setMaxRows(Number(e.target.value))}
+            >
+              {[500, 1000, 5000, 10000, 50000].map((n) => (
+                <option key={n} value={n}>
+                  {t("tbl.cache")} {n}
+                </option>
+              ))}
+            </select>
+            <input
+              className="input tbl-filter"
+              placeholder={t("tbl.filter")}
+              aria-label={t("tbl.filter")}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            {frames.capped && (
+              <span className="tbl-capped" title={t("tbl.capped")}>
+                {t("tbl.truncated")}
+              </span>
+            )}
+          </>
+        }
+        right={
+          <>
+            <button
+              className={`btn icon-btn ${frames.paused ? "on" : ""}`}
+              onClick={() => framesStore.setPaused(!frames.paused)}
+              title={frames.paused ? t("tbl.resume") : t("tbl.pause")}
+              aria-label={frames.paused ? t("tbl.resume") : t("tbl.pause")}
+              aria-pressed={frames.paused}
+            >
+              {frames.paused ? <IconPlay /> : <IconPause />}
+            </button>
+            <button className="btn icon-btn" onClick={() => framesStore.clearRows()} title={t("tbl.clear")} aria-label={t("tbl.clear")}>
+              <IconTrash />
+            </button>
+            <button
+              ref={colBtnRef}
+              className={`btn icon-btn ${menuOpen ? "on" : ""}`}
+              title={t("tbl.columns")}
+              aria-label={t("tbl.columns")}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              <IconColumns />
+            </button>
+            <ActionMenu
+              label={tx("更多数据操作", "More data actions")}
+              items={[
+                {
+                  id: "analysis",
+                  label: tx("导出分析包", "Export analysis package"),
+                  title: tx("打开分析包；在对话框中选择缓存范围", "Open analysis package; choose the cache scope in the dialog"),
+                  Icon: <IconDownload />,
+                  // The event accepts a computed snapshot, not a row selection. Open the
+                  // global dialog without a snapshot; the user picks its cache scope there.
+                  onSelect: () => window.dispatchEvent(new Event("vs-analysis-export")),
+                },
+                {
+                  id: "csv",
+                  label: tx("导出 CSV", "Export CSV"),
+                  title: t("tbl.exportCsv"),
+                  Icon: <IconDownload />,
+                  onSelect: () => doExport("csv"),
+                },
+                {
+                  id: "xlsx",
+                  label: tx("导出 XLSX", "Export XLSX"),
+                  title: t("tbl.exportExcel"),
+                  Icon: <IconDownload />,
+                  onSelect: () => doExport("xlsx"),
+                },
+              ]}
+            />
+          </>
+        }
+      />
+      {menuOpen && (
+        <ColumnTreeMenu
+          anchor={colBtnRef.current}
+          groups={colGroups}
+          hidden={hiddenCols}
+          onSetMany={setVisibleMany}
+          onToggleField={toggleCol}
+          onClose={() => setMenuOpen(false)}
         />
-        <button
-          ref={colBtnRef}
-          className={`btn icon-btn ${menuOpen ? "on" : ""}`}
-          title={t("tbl.columns")}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          <IconColumns />
-        </button>
-        {menuOpen && (
-          <ColumnTreeMenu
-            anchor={colBtnRef.current}
-            groups={colGroups}
-            hidden={hiddenCols}
-            onSetMany={setVisibleMany}
-            onToggleField={toggleCol}
-            onClose={() => setMenuOpen(false)}
-          />
-        )}
-        <div className="tbl-bar-spacer" />
-        {frames.capped && (
-          <span className="tbl-capped" title={t("tbl.capped")}>
-            {t("tbl.truncated")}
-          </span>
-        )}
-        <button
-          className="btn"
-          // The event accepts a computed snapshot, not a row selection. Open the
-          // global dialog without a snapshot; the user picks its cache scope there.
-          onClick={() => window.dispatchEvent(new Event("vs-analysis-export"))}
-          title={tx("打开分析包；在对话框中选择缓存范围", "Open analysis package; choose the cache scope in the dialog")}
-        >
-          {tx("分析包…", "Analysis package…")}
-        </button>
-        <button className="btn" onClick={() => doExport("csv")} title={t("tbl.exportCsv")}>
-          CSV
-        </button>
-        <button className="btn" onClick={() => doExport("xlsx")} title={t("tbl.exportExcel")}>
-          XLSX
-        </button>
-      </div>
+      )}
       <div className="tbl-scroll" ref={bodyRef} onScroll={onScroll}>
         <div
           className="tbl-inner"
@@ -390,12 +427,14 @@ export function DataTable() {
                   <button
                     className="tbl-col-del"
                     title={t("tbl.hideCol")}
+                    aria-label={t("tbl.hideCol")}
                     onClick={(e) => {
                       e.stopPropagation();
                       toggleCol(c.key);
                     }}
                   >
-                    ×
+                    {/* UI-15：字符「×」换成 SVG 图标，字符图标在不同字体下光学尺寸不一致 */}
+                    <IconClose />
                   </button>
                 )}
               </div>
@@ -433,3 +472,4 @@ export function DataTable() {
     </div>
   );
 }
+

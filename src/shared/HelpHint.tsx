@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { IconInfo } from "./icons";
 
 export function HelpHint({ text }: { text: string }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -32,7 +33,7 @@ export function HelpHint({ text }: { text: string }) {
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
       >
-        ?
+        <IconInfo />
       </span>
       {open &&
         createPortal(

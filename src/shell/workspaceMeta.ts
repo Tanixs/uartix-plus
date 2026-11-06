@@ -16,6 +16,7 @@ export const WORKSPACE_META = (): {
   label: string;
   desc: string;
 }[] => [
+  { key: "quick", label: t("set.preset.quick"), desc: t("set.preset.quick.desc") },
   { key: "proto", label: t("set.preset.proto"), desc: t("set.preset.proto.desc") },
   { key: "analyze", label: t("set.preset.analyze"), desc: t("set.preset.analyze.desc") },
   { key: "attitude", label: t("set.preset.attitude"), desc: t("set.preset.attitude.desc") },

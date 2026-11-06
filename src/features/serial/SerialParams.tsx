@@ -68,27 +68,26 @@ export function ConnectButton() {
     }
   };
 
-  const label =
-    s.status === "connected"
-      ? t("tb.disconnect")
-      : s.status === "reconnecting"
-        ? t("tb.reconnecting")
-        : t("tb.connect");
+  /* P179-UI02：一屏唯一的主行动。未连接=accent 实底「连接」；连接中=「取消」；
+     已连接=绿点+「已连接」（点它仍然是断开，标题里说清）。不再用中性描边与只读信息同权重。 */
+  const connected = s.status === "connected";
+  const reconnecting = s.status === "reconnecting";
+  const label = connected ? tx("已连接", "Connected") : reconnecting ? tx("取消", "Cancel") : t("tb.connect");
 
   return (
     <button
-      className={`connect-btn ${s.status}`}
+      className={`connect-btn ${connected ? "connected" : reconnecting ? "reconnecting" : "primary"}`}
       data-tour="connect"
       onClick={onConnect}
       title={
-        s.status === "connected"
+        connected
           ? t("tb.clickDisconnect")
-          : s.status === "reconnecting"
+          : reconnecting
             ? t("tb.serialReconnecting")
             : t("tb.openSerial")
       }
     >
-      <span className="connect-dot" />
+      {(connected || reconnecting) && <span className="connect-dot" />}
       {label}
     </button>
   );
@@ -269,3 +268,4 @@ export function LinkParams() {
     </>
   );
 }
+

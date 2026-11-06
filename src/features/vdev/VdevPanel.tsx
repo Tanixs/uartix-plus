@@ -15,6 +15,7 @@ import * as vdevStore from "./vdevStore";
 import type { VDevCommand, VDevField, VDevFrameCfg, VDevNet, VDevNetTransport, VDevSignal, VDevSpec } from "./vdevStore";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconClose, IconPlay, IconPlus, IconStop } from "../../shared/icons";
+import { EmptyState } from "../../shared/EmptyState";
 import { confirmDialog } from "../../shared/Dialog";
 import { requestAsk } from "../ai/chatStore";
 import { toast } from "../ai/uiRuntime";
@@ -249,27 +250,23 @@ export function VdevPanel() {
           </div>
         </div>
         {!spec ? (
-          <div className="vdev-empty">
-            {/* B11 样片（第二个）：与自动编排器同一形状——标题与页签重复、
-                一段 100 字定义、一条 3 步列表，共 123 汉字。
-                留一行 hint + 两颗载入按钮，定义与步骤整体进 `?`。 */}
-            <div className="vdev-empty-d">
-              {tx("让软件扮演一台会反应的设备：输出数据帧、收指令并回应", "A device the software plays: it streams frames, takes commands and answers back")}
+          <div className="empty-host">
+          <EmptyState
+            title={tx("还没有虚拟设备", "No virtual device yet")}
+            hint={[tx("让软件扮演一台会反应的设备：输出数据帧、收指令并回应", "A device the software plays: it streams frames, takes commands and answers back")]}
+            extra={
               <HelpHint
                 text={tx(
                   "用自然语言让 AI 生成虚拟传感器（有温漂、偶尔丢帧的 MPU6050…），或载入内置设备；设备像真的一样输出数据帧、接收指令并反应，还能经 UDP / TCP / 串口对外收发。与时间机器互补：回放的是过去，虚拟设备生成的是现在。步骤：载入内置或 AI 生成 → 检查规格 → 点「启动设备」（协议模板自动配套、2D 曲线点亮）→ 从控制台 / 编排器发命令，设备会反应。",
                   "Describe a sensor in natural language and let AI build it (an MPU6050 with thermal drift and the odd dropped frame…), or load a built-in. The device streams frames, takes commands and reacts — and can emit/receive over UDP / TCP / serial. It complements the time machine: replay gives you the past, a virtual device gives you the now. Load or generate → review the spec → Start (the protocol template is imported for you and the curves light up) → send commands from the console or orchestrator and the device answers.",
                 )}
               />
-            </div>
-            <div className="vdev-empty-ops">
-              <button className="btn primary" onClick={() => loadBuiltin("温控炉")}>
-                {tx("载入「温控炉」（PID 教学被控对象）", "Load \"Furnace\" (PID plant)")}
-              </button>
-              <button className="btn" onClick={() => loadBuiltin("虚拟 MPU6050")}>
-                {tx("载入「虚拟 MPU6050」", "Load \"Virtual MPU6050\"")}
-              </button>
-            </div>
+            }
+            actions={[
+              { label: tx("载入温控炉", "Load Furnace"), primary: true, onClick: () => loadBuiltin("温控炉") },
+              { label: tx("载入 MPU6050", "Load MPU6050"), onClick: () => loadBuiltin("虚拟 MPU6050") },
+            ]}
+          />
           </div>
         ) : (
           <fieldset className="vdev-editor" disabled={s.running}>

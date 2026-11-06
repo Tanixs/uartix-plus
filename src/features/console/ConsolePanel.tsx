@@ -3,7 +3,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { onRx, onTx } from "../../ipc/binbus";
 import * as store from "../serial/serialStore";
-import { IconPause, IconPlay, IconTrash } from "../../shared/icons";
+import { IconPause, IconPlay, IconTrash, IconTune } from "../../shared/icons";
+import { Dropdown } from "../../shared/Dropdown";
+import { Toolbar } from "../../shared/Toolbar";
+import { StatusPill } from "../../shared/StatusPill";
 import { patch, useSettings } from "../settings/settingsStore";
 import { t, tx, useLocale } from "../../i18n/strings";
 import { QuickCommandBar } from "./QuickCommandBar";
@@ -326,79 +329,94 @@ export function ConsolePanel() {
 
   const effectivePaused = paused || autoPaused;
 
+  /* P179-UI03/14：一级只留 模式 / 暂停 / 清空 / 显示 / 录制（≤5）；
+     时间戳、换行、Rx/Tx 这些显示偏好收进「显示」浮层——它们是偏好，不是数据操作。
+     280px 窄面板下右侧按钮换成图标档，不换行。 */
+  const [optsOpen, setOptsOpen] = useState(false);
+  const optsRef = useRef<HTMLButtonElement | null>(null);
+
   return (
     <div className="console">
-      <div className="console-bar p-bar">
-        <select
-          className="input"
-          value={mode}
-          onChange={(e) => {
-            setMode(e.target.value as "ascii" | "hex");
-            decoderRef.current = new TextDecoder("utf-8");
-          }}
-          title={t("con.mode")}
-        >
-          <option value="ascii">ASCII</option>
-          <option value="hex">Hex</option>
-        </select>
-        <label className="chk">
-          <input
-            type="checkbox"
-            checked={showTs}
-            onChange={(e) => setShowTs(e.target.checked)}
-          />
-          {t("con.ts")}
-        </label>
-        <label className="chk">
-          <input
-            type="checkbox"
-            checked={wrap}
-            onChange={(e) => patch({ conWrap: e.target.checked })}
-          />
-          {t("con.wrap")}
-        </label>
-        <label className="chk">
-          <input
-            type="checkbox"
-            checked={showRx}
-            onChange={(e) => setShowRx(e.target.checked)}
-          />
-          {t("con.showRx")}
-        </label>
-        <label className="chk">
-          <input
-            type="checkbox"
-            checked={showTx}
-            onChange={(e) => setShowTx(e.target.checked)}
-          />
-          {t("con.showTx")}
-        </label>
-        <button
-          className={`btn icon-btn ${effectivePaused ? "on" : ""}`}
-          onClick={() => {
-            const next = !paused;
-            setPaused(next);
-            setAutoPaused(false);
-            store.setViewFrozen(next);
-          }}
-          title={effectivePaused ? t("con.resume") : t("con.pause")}
-        >
-          {effectivePaused ? <IconPlay /> : <IconPause />}
-        </button>
-        <button className="btn icon-btn" onClick={clearAll} title={t("con.clear")}>
-          <IconTrash />
-        </button>
-        <div className="console-spacer" />
-        {recording && (
-          <span className="rec">
-            <span className="rec-dot" />
-            {t("con.recording")}
-          </span>
-        )}
-        <button className="btn" onClick={toggleRecord}>
-          {recording ? t("con.stopRecord") : t("con.record")}
-        </button>
-      </div>
+      <Toolbar
+        className="console-bar"
+        left={
+          <>
+            <select
+              className="input"
+              value={mode}
+              onChange={(e) => {
+                setMode(e.target.value as "ascii" | "hex");
+                decoderRef.current = new TextDecoder("utf-8");
+              }}
+              title={t("con.mode")}
+              aria-label={t("con.mode")}
+            >
+              <option value="ascii">ASCII</option>
+              <option value="hex">Hex</option>
+            </select>
+            {recording && (
+              <StatusPill tone="danger" title={t("con.recording")}>
+                {t("con.recording")}
+              </StatusPill>
+            )}
+          </>
+        }
+        right={
+          <>
+            <button
+              className={`btn icon-btn ${effectivePaused ? "on" : ""}`}
+              onClick={() => {
+                const next = !paused;
+                setPaused(next);
+                setAutoPaused(false);
+                store.setViewFrozen(next);
+              }}
+              title={effectivePaused ? t("con.resume") : t("con.pause")}
+              aria-label={effectivePaused ? t("con.resume") : t("con.pause")}
+              aria-pressed={effectivePaused}
+            >
+              {effectivePaused ? <IconPlay /> : <IconPause />}
+            </button>
+            <button className="btn icon-btn" onClick={clearAll} title={t("con.clear")} aria-label={t("con.clear")}>
+              <IconTrash />
+            </button>
+            <button
+              ref={optsRef}
+              type="button"
+              className="btn icon-btn"
+              title={tx("显示偏好", "Display options")}
+              aria-label={tx("显示偏好", "Display options")}
+              aria-haspopup="menu"
+              aria-expanded={optsOpen}
+              onClick={() => setOptsOpen((v) => !v)}
+            >
+              <IconTune />
+            </button>
+            <Dropdown anchor={optsRef.current} open={optsOpen} onClose={() => setOptsOpen(false)} align="end" className="console-opts">
+              <span className="tb-menu-title">{tx("显示", "Display")}</span>
+              <label className="chk console-opt-row">
+                <input type="checkbox" checked={showTs} onChange={(e) => setShowTs(e.target.checked)} />
+                {t("con.ts")}
+              </label>
+              <label className="chk console-opt-row">
+                <input type="checkbox" checked={wrap} onChange={(e) => patch({ conWrap: e.target.checked })} />
+                {t("con.wrap")}
+              </label>
+              <label className="chk console-opt-row">
+                <input type="checkbox" checked={showRx} onChange={(e) => setShowRx(e.target.checked)} />
+                {t("con.showRx")}
+              </label>
+              <label className="chk console-opt-row">
+                <input type="checkbox" checked={showTx} onChange={(e) => setShowTx(e.target.checked)} />
+                {t("con.showTx")}
+              </label>
+            </Dropdown>
+            <button className="btn" onClick={toggleRecord}>
+              {recording ? t("con.stopRecord") : t("con.record")}
+            </button>
+          </>
+        }
+      />
       <div
         ref={viewRef}
         className={`console-view ${wrap ? "wrap" : ""}`}
@@ -498,3 +516,4 @@ export function ConsolePanel() {
     </div>
   );
 }
+

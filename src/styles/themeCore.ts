@@ -108,7 +108,10 @@ export const APPEARANCE_TOKENS = [
   "--sp-1h",
   "--sp-6",
   "--lh-ui",
+  "--lh-body",
   "--lh-read",
+  /* P179-UI06：交互目标下限进白名单，AI 调整密度时也要受同一条值域（18~40px）约束。 */
+  "--target-min",
 ] as const;
 
 export type AppearanceToken = (typeof APPEARANCE_TOKENS)[number];
@@ -582,3 +585,4 @@ export function judgeSurfaceLadder(
 export function isDarkScheme(schemeAttr: string | undefined | null): boolean {
   return schemeAttr !== "light";
 }
+

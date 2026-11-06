@@ -30,11 +30,12 @@ import * as templateStore from "../protocol/templateStore";
 import { requestOpenPanel } from "../ai/appBus";
 import * as timeCursor from "../analysis/timeCursorStore";
 import { cancelPreview, navigateTime, previewTime, returnLatest, subscribeReplayClock } from "../analysis/timeNavigation";
-import type { GroupStats, PickResult, Plot3DScene, ViewPreset } from "./scene";
+import type { GroupStats, PickResult, Plot3DScene } from "./scene";
 import { createScene } from "./scene";
 import { whyEmpty, dispatchRemedy, diagStage, REMEDY_LABEL, type DiagnoseInput, type EmptyDiagnosis } from "./diagnose";
 import { fitEllipsoid, grade, FIT_MIN_POINTS, type FitOk } from "./ellipsoidFit";
 import { attachPdragZone } from "../../shared/pointerDrag";
+import { ActionMenu } from "../../shared/ActionMenu";
 import { useSettings } from "../settings/settingsStore";
 import { useOperator } from "../operator/operatorStore";
 import { toast } from "../ai/uiRuntime";
@@ -879,6 +880,23 @@ export function Plot3D() {
   const [pairInfo, setPairInfo] = useState<Record<GroupId, plot3dStore.PairStatSnapshot> | null>(null);
   const [themeTick, setThemeTick] = useState(0);
   const [dlg, setDlg] = useState<GroupId | null>(null);
+  /* P179-UI05：轨迹组抽屉默认收起。此前它常驻左上，1440 宽下与中央空态卡几乎相接；
+     收起后画布可用面积恢复，需要绑定/管理时再展开。偏好只存 localStorage，不进 FlowDoc。 */
+  const [groupsOpen, setGroupsOpen] = useState(() => {
+    try {
+      return localStorage.getItem("vs.p3d.groups") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setGroupsOpenPersist = (v: boolean) => {
+    setGroupsOpen(v);
+    try {
+      localStorage.setItem("vs.p3d.groups", v ? "1" : "0");
+    } catch {
+      /* 隐私模式/配额满：本次会话内仍然生效 */
+    }
+  };
 
   // ---------- 右键菜单（画布 / 组行两态） ----------
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -2247,14 +2265,6 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
     }
   };
 
-  /** 视角预设：钮上是图标，所以这里只有码与悬停提示（原先那份 zh/en 名字没人读过，删了） */
-  const presets: { p: ViewPreset; tip: string }[] = [
-    { p: "top", tip: tx("俯视：看航迹/路径平面形状", "Top view: the plan-form shape of the track") },
-    { p: "side", tip: tx("侧视", "Side view") },
-    { p: "front", tip: tx("正视", "Front view") },
-    { p: "iso", tip: tx("等轴：立体全貌（默认）", "Isometric: the whole 3D shape (default)") },
-  ];
-
   const calibSrcG = s3d.calibSrc ? s3d.groups.find((g) => g.id === s3d.calibSrc) : undefined;
   const calibSrcMissing = !!s3d.calibSrc && !calibSrcG;
   const g1Bound = plot3dStore.calibSourceReady(); // P87e：按 calibSrc 判定（不再固定组1）
@@ -2331,8 +2341,37 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
         onContextMenu={onContextMenu}
         onDoubleClick={onDoubleClick}
       >
-        {/* P87a 组托盘（左上）：三行独立轨迹；通道与 2D 图例共享；拖 vs-field 落行=智能绑定 */}
+        {/* P179-UI05：组托盘默认收起成一颗"轨迹组"按钮，展开后才是原来的三行管理面板。
+            它此前常驻左上，与中央空态卡在 1440 宽下几乎相接；收起后画布可用面积 ≥70%。 */}
+        {!groupsOpen && (
+          <button
+            type="button"
+            className="p3d-hud tl p3d-groups-toggle"
+            onClick={() => setGroupsOpenPersist(true)}
+            title={tx("展开轨迹组（可见性 / X·Y·Z 绑定 / 组设置）", "Open groups (visibility / X·Y·Z binding / settings)")}
+            aria-label={tx("展开轨迹组", "Open groups")}
+            aria-expanded={false}
+          >
+            <IconGear />
+            {tx("轨迹组", "Groups")}
+            <span className="p3d-groups-count">{s3d.groups.length}</span>
+          </button>
+        )}
+        {groupsOpen && (
         <div className="p3d-hud tl p3d-groups" ref={trayRef}>
+          <div className="p3d-groups-head">
+            <span>{tx("轨迹组", "Groups")}</span>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => setGroupsOpenPersist(false)}
+              title={tx("收起轨迹组", "Collapse groups")}
+              aria-label={tx("收起轨迹组", "Collapse groups")}
+              aria-expanded
+            >
+              <IconChevron size={12} dir="left" />
+            </button>
+          </div>
           {s3d.groups.map((g) => {
             const bound = !!(g.chX && g.chY);
             return (
@@ -2407,24 +2446,18 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
             {fsvg(<path d="M12 5v14M5 12h14" />)} {tx("新增轨迹组", "Add group")}
           </button>
         </div>
+        )}
 
         {/* 视角组（右上，P82② → P87a +撤销/重做）：毛玻璃胶囊——视角预设｜聚焦·跟随·自旋｜撤销重做｜校准·清空 */}
         <div className="p3d-hud tr p3d-tray">
-          {presets.map((it) => (
-            <button
-              key={it.p}
-              className="icon-btn"
-              onClick={() => sceneRef.current?.setViewPreset(it.p)}
-              title={it.tip}
-            >
-              {it.p === "top" ? <IconViewTop /> : it.p === "side" ? <IconViewSide /> : it.p === "front" ? <IconViewFront /> : <IconViewIso />}
-            </button>
-          ))}
-          <span className="p3d-tray-sep" />
+          {/* P179-UI05：一级只留 重置 / 聚焦 / 跟随 / 标定 + ⋯（≤5）。
+              视角预设、自动旋转、撤销重做、打点、清空都进 ⋯：多数用户一进来只需要
+              "把视角摆正、看清最新点"，其余是低频或破坏性动作。 */}
           <button
             className="icon-btn"
             onClick={() => sceneRef.current?.resetView()}
             title={tx("重置视角", "Reset view")}
+            aria-label={tx("重置视角", "Reset view")}
           >
             <IconRotate />
           </button>
@@ -2432,12 +2465,15 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
             className="icon-btn"
             onClick={() => sceneRef.current?.focusLatest()}
             title={tx("聚焦最新点", "Focus latest point")}
+            aria-label={tx("聚焦最新点", "Focus latest point")}
           >
             <IconCrosshair />
           </button>
           <button
             className={`icon-btn${s3d.follow ? " on" : ""}`}
             onClick={() => plot3dStore.setSetting({ follow: !s3d.follow })}
+            aria-pressed={s3d.follow}
+            aria-label={tx("跟随最新点", "Follow latest point")}
             title={tx(
               "跟随模式：视角平滑锁定最新点（与自动旋转互斥；开启时平移暂失效）",
               "Follow mode: camera smoothly locks onto the latest point (mutually exclusive with auto-rotate; panning disabled while on)",
@@ -2446,51 +2482,10 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
             <IconLock />
           </button>
           <button
-            className={`icon-btn${s3d.autoRotate ? " on" : ""}`}
-            onClick={() => plot3dStore.setSetting({ autoRotate: !s3d.autoRotate })}
-            title={tx("自动旋转：绕中心缓慢转动展示（与跟随互斥）", "Auto rotate: slow turntable showcase (exclusive with follow)")}
-          >
-            <IconAutoSpin />
-          </button>
-          <span className="p3d-tray-sep" />
-          <button
-            className="icon-btn"
-            disabled={!p3d.canUndo || opLocked}
-            onClick={doUndo}
-            title={tx("撤销组配置 (Ctrl+Z)", "Undo group settings (Ctrl+Z)")}
-          >
-            <IconUndo />
-          </button>
-          <button
-            className="icon-btn"
-            disabled={!p3d.canRedo || opLocked}
-            onClick={doRedo}
-            title={tx("重做组配置 (Ctrl+Y)", "Redo group settings (Ctrl+Y)")}
-          >
-            <IconRedo />
-          </button>
-          <span className="p3d-tray-sep" />
-          <button
-            className="icon-btn"
-            disabled={!recording || s3d.calibMode}
-            onClick={() => {
-              const stamp = new Date().toISOString().slice(11, 19);
-              void sessionStore.annotate(`3D ${stamp}`);
-              toast(tx("已打点（时间轴/2D/3D 旗标同步浮现）", "Marker placed (synced on timeline / 2D / 3D flags)"));
-            }}
-            title={
-              recording
-                ? tx("打点：在当前时刻记一条标注（需录制中）", "Drop a marker at current time (requires recording)")
-                : tx("打点需要先在顶栏开始录制会话", "Marking requires an active recording session")
-            }
-          >
-            <IconFlag />
-          </button>
-          <span className="p3d-tray-sep" />
-          <button
             className={`icon-btn${s3d.calibMode ? " on" : ""}`}
             disabled={!s3d.calibMode && (!g1Bound || !s3d.calibSrc)}
             onClick={() => (s3d.calibMode ? exitCalibMode() : plot3dStore.setSetting({ calibMode: true }))}
+            aria-label={tx("椭球校准", "Ellipsoid calibration")}
             title={
               !s3d.calibSrc
                 ? tx("未选择校准源：在组行右键「设为校准源」", "No calibration source: right-click a group row → set as source")
@@ -2504,16 +2499,73 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
           >
             <IconTarget />
           </button>
-          <button
-            className="icon-btn p3d-tray-danger"
-            onClick={() => void clearGroupData()}
-            title={tx(
-              "清空全部轨迹组数据：历史清零、新数据从零画（校准采样不动；不可撤销）",
-              "Clear all groups' trajectory data: drop history, new data from zero (calibration untouched; not undoable)",
-            )}
-          >
-            <IconTrash />
-          </button>
+          <ActionMenu
+            label={tx("更多 3D 操作", "More 3D actions")}
+            items={[
+              {
+                id: "view-top",
+                label: tx("视角：俯视", "View: top"),
+                Icon: <IconViewTop />,
+                onSelect: () => sceneRef.current?.setViewPreset("top"),
+              },
+              {
+                id: "view-side",
+                label: tx("视角：侧视", "View: side"),
+                Icon: <IconViewSide />,
+                onSelect: () => sceneRef.current?.setViewPreset("side"),
+              },
+              {
+                id: "view-front",
+                label: tx("视角：前视", "View: front"),
+                Icon: <IconViewFront />,
+                onSelect: () => sceneRef.current?.setViewPreset("front"),
+              },
+              {
+                id: "view-iso",
+                label: tx("视角：等轴测", "View: isometric"),
+                Icon: <IconViewIso />,
+                onSelect: () => sceneRef.current?.setViewPreset("iso"),
+              },
+              {
+                id: "spin",
+                label: tx("自动旋转", "Auto rotate"),
+                Icon: <IconAutoSpin />,
+                onSelect: () => plot3dStore.setSetting({ autoRotate: !s3d.autoRotate }),
+              },
+              {
+                id: "undo",
+                label: tx("撤销组配置", "Undo group settings"),
+                Icon: <IconUndo />,
+                disabled: !p3d.canUndo || opLocked,
+                onSelect: doUndo,
+              },
+              {
+                id: "redo",
+                label: tx("重做组配置", "Redo group settings"),
+                Icon: <IconRedo />,
+                disabled: !p3d.canRedo || opLocked,
+                onSelect: doRedo,
+              },
+              {
+                id: "flag",
+                label: tx("打点", "Drop marker"),
+                Icon: <IconFlag />,
+                disabled: !recording || s3d.calibMode,
+                onSelect: () => {
+                  const stamp = new Date().toISOString().slice(11, 19);
+                  void sessionStore.annotate(`3D ${stamp}`);
+                  toast(tx("已打点（时间轴/2D/3D 旗标同步浮现）", "Marker placed (synced on timeline / 2D / 3D flags)"));
+                },
+              },
+              {
+                id: "clear",
+                label: tx("清空轨迹数据", "Clear trajectory data"),
+                Icon: <IconTrash />,
+                danger: true,
+                onSelect: () => void clearGroupData(),
+              },
+            ]}
+          />
         </div>
 
         {/* 统计（右下）：按组点数 + 游标秒数 + 主组配对诊断副行 */}
@@ -3376,3 +3428,4 @@ Any running capture stops; ellipsoid samples / fit / preview / six-face temp sta
     </div>
   );
 }
+

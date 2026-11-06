@@ -70,6 +70,7 @@ const EASE_RE = /^(cubic-bezier\([^;{}]{1,60}\)|linear|ease|ease-in|ease-out|eas
 const PX_RANGE_BY_PREFIX: [RegExp, number, number][] = [
   [/^--ctl-h-/, 18, 40],
   [/^--sp-/, 0, 48],
+  [/^--target-/, 18, 40],
 ];
 /** 行高无单位（1 ~ 2.4）；`26px` 这种必须被拒 */
 const LH_RANGE: [number, number] = [1, 2.4];

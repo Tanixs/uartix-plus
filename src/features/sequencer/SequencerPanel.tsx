@@ -11,6 +11,7 @@ import * as commandStore from "../controls/commandStore";
 import * as variableStore from "../controls/variableStore";
 import { useListDrag, type DragPos } from "../../shared/useListDrag";
 import { HelpHint } from "../../shared/HelpHint";
+import { EmptyState } from "../../shared/EmptyState";
 
 /**
  * 测试序列器面板（T2 编辑器 + T3 执行视图）。
@@ -93,19 +94,21 @@ export function SequencerPanel() {
   if (!suite) {
     return (
       <div className="seq">
-        <div className="seq-empty">
-          <div className="seq-empty-desc">
-            {tx("把「发送 → 等帧 → 断言」串成可重复跑的测试序列", "Chain send → wait-frame → assert into a sequence you can run again")}
+        {/* P179-UI04：与全库空态同一组件、同一排版（不再自带标题/说明/按钮皮肤）。 */}
+        <div className="empty-host">
+        <EmptyState
+          title={tx("尚无测试序列", "No sequences yet")}
+          hint={[tx("发送 → 等帧 → 断言，组成可重复序列", "Chain send → wait-frame → assert into a rerunnable sequence")]}
+          extra={
             <HelpHint
               text={tx(
                 "支持分组循环、单步调试与帧触发；序列可被自动编排器调用。所有数据保存在本机。",
                 "Groups and loops, step debugging and frame triggers; a sequence can also be called by the orchestrator. All data stays on this machine.",
               )}
             />
-          </div>
-          <button className="btn primary" onClick={() => setSelectedId(sequencerStore.addSuite("").id)}>
-            {tx("＋ 新建序列", "＋ New sequence")}
-          </button>
+          }
+          actions={[{ label: tx("新建序列", "New sequence"), primary: true, onClick: () => setSelectedId(sequencerStore.addSuite("").id) }]}
+        />
         </div>
       </div>
     );
@@ -1001,3 +1004,4 @@ function ResultNode(props: {
     </div>
   );
 }
+

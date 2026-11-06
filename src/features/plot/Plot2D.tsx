@@ -26,6 +26,7 @@ import {
 } from "../../shared/icons";
 import { zoomFactor } from "../../shared/zoom";
 import { HelpHint } from "../../shared/HelpHint";
+import { EmptyState } from "../../shared/EmptyState";
 import {
   fmtVal,
   hexA,
@@ -1890,13 +1891,18 @@ export function Plot2D() {
         <div ref={chartRef} className="plot-chart" />
         {!hasChannels && (
           <div className="plot-empty">
-            {tx("点亮「协议」里的字段图例即可实时绘图，或把字段直接拖进来", "Toggle an eye in the legend under Protocol to plot live — or drag a field here")}
-            {/* B11：四条鼠标手势不是"这块能干什么"，是操作手册，按口径进 `?` */}
-            <HelpHint
-              text={tx(
-                "左键拖动平移 · 中键框选缩放 · 双击保形回实时 · 滚轮缩放（悬停在哪根轴上就缩放那根）· 右键图表更多设置。",
-                "Left-drag to pan · middle-drag to box-zoom · double-click to resume live · scroll to zoom the axis you hover · right-click the chart for more settings.",
-              )}
+            {/* P179-UI04：与其它面板同一套空态；B11 的四条鼠标手势仍收在 `?` 里。 */}
+            <EmptyState
+              title={tx("还没有曲线", "No curves yet")}
+              hint={[tx("点亮「协议」字段图例即可绘图，或把字段拖进来", "Toggle an eye under Protocol to plot — or drag a field here")]}
+              extra={
+                <HelpHint
+                  text={tx(
+                    "左键拖动平移 · 中键框选缩放 · 双击保形回实时 · 滚轮缩放（悬停在哪根轴上就缩放那根）· 右键图表更多设置。",
+                    "Left-drag to pan · middle-drag to box-zoom · double-click to resume live · scroll to zoom the axis you hover · right-click the chart for more settings.",
+                  )}
+                />
+              }
             />
           </div>
         )}
@@ -2332,3 +2338,4 @@ export function Plot2D() {
     </div>
   );
 }
+

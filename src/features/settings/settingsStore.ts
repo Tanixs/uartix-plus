@@ -2,6 +2,9 @@ import { useSyncExternalStore } from "react";
 
 /** 九套内置工作区预设：运行时唯一事实源（normalize、appActions 白名单、layout_apply 工具同引这一份） */
 export const WORKSPACE_PRESETS = [
+  /* P179-UI01：首启默认。只摆三块（协议模板 / 帧画布 / 控制台），
+     "完整工作台"仍是 proto，老用户一键就能切回去；已有存档不迁移。 */
+  "quick",
   "proto",
   "analyze",
   "attitude",
@@ -218,7 +221,7 @@ function load(): Settings {
     zoom: 100,
     decimals: clampDecimals(localStorage.getItem("vs.decimals") ?? "2", 2),
     perfHud: false,
-    workspace: "proto",
+    workspace: "quick",
     cellSize: 60,
     fcCellSize: 42,
     sbCellSize: 22,
@@ -372,3 +375,4 @@ export function patch(p: Partial<Settings>) {
   snapshot = { ...snapshot, ...p };
   emit();
 }
+

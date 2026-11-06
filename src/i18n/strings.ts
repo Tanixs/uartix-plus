@@ -65,6 +65,7 @@ const zh: Dict = {
   "set.conWrap": "控制台自动换行",
   "set.reduceMotion": "减弱动效",
   "set.preset": "预设布局",
+  "set.preset.quick": "快速上手",
   "set.preset.proto": "协议调试",
   "set.preset.analyze": "数据分析",
   "set.preset.attitude": "姿态调参",
@@ -76,6 +77,7 @@ const zh: Dict = {
   "set.preset.vdev": "虚拟设备",
   /* P104-B5：预设的一句话说明。此前这九行是 SettingsModal 里的中文硬编码（label 走 t()、desc 不走），
      英文构建里会漏出中文；命令条的工作区药丸要把它们带到壳上，就必须先补齐。 */
+  "set.preset.quick.desc": "协议 + 帧画布 + 控制台",
   "set.preset.proto.desc": "画布 + 属性 + Hex",
   "set.preset.analyze.desc": "表格 + 曲线 + 频谱",
   "set.preset.attitude.desc": "3D 姿态 + 曲线",
@@ -318,6 +320,7 @@ const en: Dict = {
   "set.conWrap": "Console auto-wrap",
   "set.reduceMotion": "Reduce motion",
   "set.preset": "Layout Preset",
+  "set.preset.quick": "Quick Start",
   "set.preset.proto": "Protocol Debug",
   "set.preset.analyze": "Data Analysis",
   "set.preset.attitude": "Attitude Tuning",
@@ -327,6 +330,7 @@ const en: Dict = {
   "set.preset.auto": "Automation",
   "set.preset.modbus": "Industrial Modbus",
   "set.preset.vdev": "Virtual Device",
+  "set.preset.quick.desc": "Template + Canvas + Console",
   "set.preset.proto.desc": "Canvas + Properties + Hex",
   "set.preset.analyze.desc": "Table + Plot + Spectrum",
   "set.preset.attitude.desc": "3D Attitude + Plot",

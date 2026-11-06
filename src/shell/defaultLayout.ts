@@ -99,6 +99,28 @@ export function applyDefaultLayout(
      `auto` 保持三列（序列器/编排器/哨兵是三个并列的工作台，不是"库 + 画布"），
      它用的是 `leftW`，见下。 */
 
+  if (preset === "quick") {
+    /* P179-UI01：首启只给一条最短路径——协议 → 帧画布 → 控制台。
+       协议模板在 R5 之后**住进导轨**（不再是 dock 面板），所以这里只排两块 dock；
+       调用方在应用 quick 预设时展开导轨「协议」，第三块面向用户可见。
+       不摆属性/表格/曲线：它们属于"已经会用之后"的满配工作台（proto）。 */
+    api.addPanel({
+      id: "framecanvas",
+      component: "framecanvas",
+      title: titleOf("framecanvas"),
+    });
+    api.addPanel({
+      id: "console",
+      component: "console",
+      title: titleOf("console"),
+      initialHeight: bottomH,
+      minimumHeight: 120,
+      position: { referencePanel: "framecanvas", direction: "below" },
+    });
+    api.getPanel("framecanvas")?.api.setActive();
+    return;
+  }
+
   if (preset === "console") {
     api.addPanel({
       id: "hexview",
@@ -375,3 +397,4 @@ export function applyDefaultLayout(
   });
   api.getPanel(first)?.api.setActive();
 }
+

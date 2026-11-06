@@ -11,6 +11,7 @@ import {
 } from "react";
 import { clampFlyoutMenu } from "../../shared/Flyout";
 import { HelpHint } from "../../shared/HelpHint";
+import { EmptyState } from "../../shared/EmptyState";
 import { invoke } from "@tauri-apps/api/core";
 import type { Endian, FieldDef, FieldRole, FieldType, FrameTemplate } from "../../ipc/types";
 import { ENDIAN_LABEL } from "../../ipc/types";
@@ -28,6 +29,8 @@ import { labeledValue } from "../../shared/valueLabels";
 import { tx, useLocale } from "../../i18n/strings";
 import { Glyph } from "../../shared/icons";
 import { rangeStyle } from "../../shell/rangeFill";
+import { Toolbar } from "../../shared/Toolbar";
+import { ActionMenu } from "../../shared/ActionMenu";
 import {
   PAD_T,
   BLOK_PAD,
@@ -86,7 +89,6 @@ function SessionTransport() {
   const [annoOpen, setAnnoOpen] = useState(false);
   const annoRef = useRef<HTMLDivElement>(null);
   const loaded = s.state === "recorded" || s.state === "playing" || s.state === "paused";
-  const busy = s.state === "playing" || s.state === "paused";
   const speedNum = () => (spd === "max" ? 0 : spd);
   const onPlay = async () => {
     const st = serialStore.getSnapshot();
@@ -151,16 +153,11 @@ function SessionTransport() {
       window.removeEventListener("keydown", onKey);
     };
   }, [annoOpen]);
+  /* P179-UI03：回放传输条只在"已加载会话/回放模式"出现。未加载时它整条不存在，
+     「打开会话」升为工具栏一级动作——否则空载时就有一排不可用的播放控件占位。 */
+  if (!loaded) return null;
   return (
     <div className="fc-transport">
-      <button
-        className="btn sm icon"
-        disabled={busy}
-        onClick={() => void sessionStore.openSession()}
-        title={tx("打开会话录制文件（.usess）", "Open session recording (.usess)")}
-      >
-        <IconFolder />
-      </button>
       {loaded ? (
         <>
           <button
@@ -1864,80 +1861,102 @@ function FrameCanvas() {
 
   return (
     <div className="fc-root" tabIndex={0} onKeyDown={onKeyDown}>
-      <div className="fc-toolbar p-bar">
-        <button
-          className={`btn sm icon${saveSt === "ok" ? " saved-ok" : ""}${saveSt === "err" ? " saved-err" : ""}${saveSt === "saving" ? " saving" : ""}`}
-          onClick={doSave}
-          title={
-            saveSt === "err"
-              ? tx("保存失败：模板格式未通过解析内核校验", "Save failed: template rejected by parser core")
-              : saveSt === "ok"
-                ? tx("已保存并同步到解析内核", "Saved & synced to parser core")
-                : tx("保存协议模板（立即同步到本地与解析内核）", "Save template (syncs to local & parser core)")
-          }
-        >
-          {saveSt === "ok" ? <IconCheck /> : saveSt === "err" ? <IconAlert /> : <IconSave />}
-        </button>
-        {proto.syncError ? (
-          <span
-            className={`fc-sync-warn${errOpen ? " open" : ""}`}
-            data-ctl="disc"
-            title={proto.syncError}
-            onClick={() => setErrOpen((v) => !v)}
-          >
-            {errOpen ? `${tx("校验未通过", "Validation failed")}: ${proto.syncError}` : tx("校验未通过（点击查看原因）", "Validation failed (click for reason)")}
-          </span>
-        ) : null}
-        <ArchStat />
-        <span className="fc-navinfo" ref={navRef} />
-        {(() => {
-          const sc = proto.selection;
-          if (sc?.kind !== "field") return null;
-          const t0 = proto.rules.templates.find((x) => x.id === sc.templateId);
-          const f0 = t0?.fields.find((x) => x.id === sc.fieldId);
-          if (!t0 || !f0) return null;
-          return (
-            <span className="fc-crumb" title={tx("Esc 返回模板属性", "Esc to go back to template properties")}>
-              {t0.name} <i>›</i> {f0.name} <em>Esc</em>
-            </span>
-          );
-        })()}
-        <label className="fc-cellsz" title={tx("单元格尺寸（20~96，画布上 Ctrl+滚轮缩放，自动保存）", "Cell size (20–96; Ctrl+wheel on canvas zooms; saved automatically)")}>
-          <input
-            type="range"
-            style={rangeStyle(cellSize, 20, 96)}
-            min={20}
-            max={96}
-            value={cellSize}
-            onKeyDown={(e) => e.stopPropagation()}
-            onChange={(e) => setCellSize(Number(e.target.value))}
-          />
-          <b>{cellSize}</b>
-        </label>
-        <button className="btn sm icon" onClick={doUndo} disabled={proto.undoStack.length === 0} title={tx("撤销 (Ctrl+Z)", "Undo (Ctrl+Z)")}>
-          <IconUndo />
-        </button>
-        <button className="btn sm icon" onClick={doRedo} disabled={proto.redoStack.length === 0} title={tx("重做 (Ctrl+Y)", "Redo (Ctrl+Y)")}>
-          <IconRedo />
-        </button>
-        <SessionTransport />
-        <div className="fc-toolbar-spacer" />
-        <button className="btn sm icon nav" onClick={() => setViewF((f) => f - 1)} title={tx("上一帧 (←)", "Previous frame (←)")}>
-          <IconPrev />
-        </button>
-        <button className={`btn sm icon${liveUI ? " on" : ""}`} onClick={setViewLive} title={tx("跟随最新有效帧（页签切换即跟随该类型）", "Follow latest valid frame (tab switch follows that type)")}>
-          <IconFollow on={liveUI} />
-        </button>
-        <button className="btn sm icon nav" onClick={() => setViewF((f) => f + 1)} title={tx("下一帧 (→)", "Next frame (→)")}>
-          <IconNext />
-        </button>
-        <button className="btn sm icon" onClick={() => { fcStore.clearArchive(); diffBaseRef.current = null; setDiffOn(false); viewRef.current = { live: true, fi: 0 }; dirtyRef.current = true; }} title={tx("清空帧归档字节池", "Clear frame archive")}>
-          <IconTrash />
-        </button>
-        <button className={`btn sm icon${diffOn ? " on" : ""}`} onClick={toggleDiff} title={diffOn ? tx("退出帧对比（清除基线）", "Exit frame diff (clear baseline)") : tx("帧对比：把当前帧设为基线，翻帧看逐字节差异", "Frame diff: set current frame as baseline, then step frames to spot byte differences")}>
-          <IconDiff />
-        </button>
-      </div>
+      {/* P179-UI03：左=归档状态/校验/面包屑，中=画布密度，右=翻帧 + 打开会话 + ⋯。
+          保存、撤销、重做、清空、对比全部进 ⋯：它们不是"看一眼帧"这条主线上的动作。 */}
+      <Toolbar
+        className="fc-toolbar"
+        left={
+          <>
+            {proto.syncError ? (
+              <span
+                className={`fc-sync-warn${errOpen ? " open" : ""}`}
+                data-ctl="disc"
+                title={proto.syncError}
+                onClick={() => setErrOpen((v) => !v)}
+              >
+                {errOpen ? `${tx("校验未通过", "Validation failed")}: ${proto.syncError}` : tx("校验未通过（点击查看原因）", "Validation failed (click for reason)")}
+              </span>
+            ) : null}
+            <ArchStat />
+            <span className="fc-navinfo" ref={navRef} />
+            {(() => {
+              const sc = proto.selection;
+              if (sc?.kind !== "field") return null;
+              const t0 = proto.rules.templates.find((x) => x.id === sc.templateId);
+              const f0 = t0?.fields.find((x) => x.id === sc.fieldId);
+              if (!t0 || !f0) return null;
+              return (
+                <span className="fc-crumb" title={tx("Esc 返回模板属性", "Esc to go back to template properties")}>
+                  {t0.name} <i>›</i> {f0.name} <em>Esc</em>
+                </span>
+              );
+            })()}
+          </>
+        }
+        center={
+          <label className="fc-cellsz" title={tx("单元格尺寸（20~96，画布上 Ctrl+滚轮缩放，自动保存）", "Cell size (20–96; Ctrl+wheel on canvas zooms; saved automatically)")}>
+            <input
+              type="range"
+              style={rangeStyle(cellSize, 20, 96)}
+              min={20}
+              max={96}
+              value={cellSize}
+              onKeyDown={(e) => e.stopPropagation()}
+              onChange={(e) => setCellSize(Number(e.target.value))}
+            />
+            <b>{cellSize}</b>
+          </label>
+        }
+        right={
+          <>
+            <button className="btn sm icon nav" onClick={() => setViewF((f) => f - 1)} title={tx("上一帧 (←)", "Previous frame (←)")} aria-label={tx("上一帧", "Previous frame")}>
+              <IconPrev />
+            </button>
+            <button className={`btn sm icon${liveUI ? " on" : ""}`} onClick={setViewLive} title={tx("跟随最新有效帧（页签切换即跟随该类型）", "Follow latest valid frame (tab switch follows that type)")} aria-label={tx("跟随最新帧", "Follow latest frame")} aria-pressed={liveUI}>
+              <IconFollow on={liveUI} />
+            </button>
+            <button className="btn sm icon nav" onClick={() => setViewF((f) => f + 1)} title={tx("下一帧 (→)", "Next frame (→)")} aria-label={tx("下一帧", "Next frame")}>
+              <IconNext />
+            </button>
+            <button className="btn sm icon" onClick={() => void sessionStore.openSession()} title={tx("打开会话录制文件（.usess）", "Open session recording (.usess)")} aria-label={tx("打开会话", "Open session")}>
+              <IconFolder />
+            </button>
+            <ActionMenu
+              label={tx("更多画布操作", "More canvas actions")}
+              items={[
+                {
+                  id: "save",
+                  label: saveSt === "ok" ? tx("已保存", "Saved") : saveSt === "err" ? tx("保存失败", "Save failed") : tx("保存模板", "Save template"),
+                  title:
+                    saveSt === "err"
+                      ? tx("保存失败：模板格式未通过解析内核校验", "Save failed: template rejected by parser core")
+                      : tx("保存协议模板（立即同步到本地与解析内核）", "Save template (syncs to local & parser core)"),
+                  Icon: saveSt === "ok" ? <IconCheck /> : saveSt === "err" ? <IconAlert /> : <IconSave />,
+                  onSelect: doSave,
+                },
+                { id: "undo", label: tx("撤销", "Undo"), title: tx("撤销 (Ctrl+Z)", "Undo (Ctrl+Z)"), Icon: <IconUndo />, disabled: proto.undoStack.length === 0, onSelect: doUndo },
+                { id: "redo", label: tx("重做", "Redo"), title: tx("重做 (Ctrl+Y)", "Redo (Ctrl+Y)"), Icon: <IconRedo />, disabled: proto.redoStack.length === 0, onSelect: doRedo },
+                {
+                  id: "diff",
+                  label: diffOn ? tx("退出帧对比", "Exit frame diff") : tx("帧对比", "Frame diff"),
+                  title: diffOn ? tx("退出帧对比（清除基线）", "Exit frame diff (clear baseline)") : tx("帧对比：把当前帧设为基线，翻帧看逐字节差异", "Frame diff: set current frame as baseline, then step frames to spot byte differences"),
+                  Icon: <IconDiff />,
+                  onSelect: toggleDiff,
+                },
+                {
+                  id: "clear",
+                  label: tx("清空帧归档", "Clear frame archive"),
+                  title: tx("清空帧归档字节池", "Clear frame archive"),
+                  Icon: <IconTrash />,
+                  danger: true,
+                  onSelect: () => { fcStore.clearArchive(); diffBaseRef.current = null; setDiffOn(false); viewRef.current = { live: true, fi: 0 }; dirtyRef.current = true; },
+                },
+              ]}
+            />
+            <SessionTransport />
+          </>
+        }
+      />
       {renderTabs()}
       <CoverageStrip
         tpl={curTpl}
@@ -2352,17 +2371,37 @@ function FrameCanvas() {
         <ArchEmptyGate>
           {!curTpl && (
             <div className="fc-empty">
-              <div className="fc-empty-title">{tx("等待有效帧…", "Waiting for a valid frame…")}</div>
-              <div className="fc-empty-desc">
-                {tx("只显示通过协议模板校验的完整帧。", "Only complete frames that pass the protocol template are shown.")}
-                {serial.status !== "connected" ? tx("可先连接设备，或启动演示源。", "Connect a device, or start the demo source.") : ""}
-                <HelpHint
-                  text={tx(
-                    "还没有模板：在左侧「协议」里点「＋ 预设」导入一个（维特 WIT / 匿名 V7 / Modbus RTU 都有现成的），或点「＋ 新建」自己画。",
-                    "No template yet: in Protocol on the left, hit \"+ Preset\" to import one (WIT / anonymous V7 / Modbus RTU all ship ready-made), or \"+ New\" to draw your own.",
-                  )}
-                />
-              </div>
+              <EmptyState
+                title={tx("等待有效帧…", "Waiting for a valid frame…")}
+                hint={[tx("只显示通过协议模板校验的完整帧。", "Only complete frames that pass the protocol template are shown.")]}
+                extra={
+                  <HelpHint
+                    text={tx(
+                      "还没有模板：在左侧「协议」里点「＋ 预设」导入一个（维特 WIT / 匿名 V7 / Modbus RTU 都有现成的），或点「＋ 新建」自己画。",
+                      "No template yet: in Protocol on the left, hit \"+ Preset\" to import one (WIT / anonymous V7 / Modbus RTU all ship ready-made), or \"+ New\" to draw your own.",
+                    )}
+                  />
+                }
+                /* UI-01：首启最短路径 连接/演示源 → 选协议 → 看帧。
+                   未连接时把「启动演示源」放成唯一主按钮，一次点击即可出帧。 */
+                actions={
+                  serial.status !== "connected"
+                    ? [
+                        {
+                          label: tx("启动演示源", "Start demo source"),
+                          primary: true,
+                          title: tx("不接硬件，直接灌入演示帧", "Feed demo frames without hardware"),
+                          onClick: () => void templateStore.toggleDemo(),
+                        },
+                        {
+                          label: tx("连接设备", "Connect device"),
+                          title: tx("在左侧「接入」里选择串口 / 网络并连接", "Pick serial / network in the Link rail and connect"),
+                          onClick: () => window.dispatchEvent(new Event("ux:focus-link")),
+                        },
+                      ]
+                    : []
+                }
+              />
             </div>
           )}
         </ArchEmptyGate>
@@ -3107,3 +3146,4 @@ function FieldDialog({
 }
 
 export default FrameCanvas;
+

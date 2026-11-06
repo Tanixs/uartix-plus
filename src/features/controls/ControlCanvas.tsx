@@ -627,7 +627,15 @@ export function ControlCanvas() {
   }, [page?.id]);
 
   if (!page) {
-    return <div className="ctl"><div className="ctl-empty">{tx("无控制页", "No control pages")}</div></div>;
+    return (
+      <div className="ctl">
+        <EmptyState
+          variant="inline"
+          title={tx("无控制页", "No control pages")}
+          actions={[{ label: tx("新建页", "New page"), primary: true, onClick: () => store.addPage() }]}
+        />
+      </div>
+    );
   }
 
   const getVal = (c: SliderCard): number =>

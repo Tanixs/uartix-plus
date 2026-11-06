@@ -552,7 +552,11 @@ export default function App() {
         /* 连备份都写不下就算了，至少别白屏 */
       }
     }
-    applyDefaultLayout(api, getSettingsSnapshot().workspace, panelTitleOf, railWidth(), stripWidth());
+    const ws = getSettingsSnapshot().workspace;
+    // P179-UI01：协议模板住在导轨（R5 之后不再是 dock 面板）。quick 的三块面里
+    // 「协议」这一块只有展开导轨才可见，所以应用预设时把它展开；其余预设不动用户的导轨。
+    if (ws === "quick") openRailPanel("templates");
+    applyDefaultLayout(api, ws, panelTitleOf, railWidth(), stripWidth());
     retitlePanels();
     syncPanels();
     // 兜底：布局恢复/首帧渲染后可见性可能尚未稳定，延迟再同步一次
@@ -693,6 +697,7 @@ export default function App() {
     }
     clearStoredLayout();
     api.clear();
+    if (preset === "quick") openRailPanel("templates");
     applyDefaultLayout(api, preset, panelTitleOf, railWidth(), stripWidth());
     if (preset === "attitude") {
       const exists = controlsStore
@@ -1278,3 +1283,4 @@ function PerfHud() {
     </span>
   );
 }
+

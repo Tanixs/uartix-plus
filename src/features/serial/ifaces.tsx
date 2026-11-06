@@ -39,7 +39,8 @@ function IfaceConnectButton() {
   };
   return (
     <button
-      className={`btn${busy ? " on" : ""}`}
+      // P179-UI02：与串口那颗同一套状态语法（未连接=唯一 accent 实底）。
+      className={`btn${busy ? " on" : " primary"}`}
       title={busy ? t("tb.disconnect") : t("tb.connect")}
       // 入门引导第 1 步的聚光灯锚点。原先只有串口那颗（ConnectButton）带它，
       // 于是选 TCP / UDP / BLE 时第 1 步找不到东西可圈，退化成一张漂浮卡 ——
@@ -47,8 +48,12 @@ function IfaceConnectButton() {
       data-tour="connect"
       onClick={() => void onToggle()}
     >
-      <span className={`dot ${busy ? "connected" : "disconnected"}`} />
-      {busy ? t("tb.disconnect") : t("tb.connect")}
+      {busy && <span className={`dot ${busy ? "connected" : "disconnected"}`} />}
+      {busy
+        ? s.status === "reconnecting"
+          ? tx("取消", "Cancel")
+          : tx("已连接", "Connected")
+        : t("tb.connect")}
     </button>
   );
 }
@@ -298,3 +303,4 @@ export function IfaceParams({ kind }: { kind: IfaceKind }) {
   if (kind === "ble") return <BleParams />;
   return <NetParams kind={kind} />;
 }
+

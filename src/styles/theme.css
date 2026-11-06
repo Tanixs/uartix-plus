@@ -10,8 +10,10 @@
   --sp-3: 12px;
   --sp-4: 16px;
   --sp-5: 24px;
-  --fs-xs: 10px;
-  --fs-body: 11px;
+  /* P179-UI06：中文正文从 10/11px 抬到 11/12px。10px 中文不是"紧凑"是"费眼"；
+     90% 缩放仍可作紧凑模式，所以这里只抬默认档，不给 90% 加反向补偿。 */
+  --fs-xs: 11px;
+  --fs-body: 12px;
   --fs-sm: 12px;
   --fs-md: 14px;
   --fs-lg: 16px;
@@ -42,9 +44,10 @@
      这一组是"壳与基元"的尺寸来源：控制条高、控件高三档、间距基、行高。
      为什么单独一段而不是并进上面的 P55 块：P55 那块是"值"，这段是"角色"
      ——下面每条注释写的是它**谁在用**，不是它多大。 */
-  --ctl-h-1: 20px; /* 行内小钮 / chip / 徽标 */
+  --ctl-h-1: 20px; /* 仅非交互徽标 / 行内 chip；可点击元素一律 ≥ --target-min */
   --ctl-h-2: 24px; /* 默认：工具栏、表单控件、菜单行、页签、图标钮 */
   --ctl-h-3: 28px; /* 主行动：连接/发送/确认、面板头与工具条 */
+  --target-min: 24px; /* 交互目标下限（100% 缩放）；20px 只留给不可点的徽标 */
   /* P104-B1：界面缩放因子，由 shared/zoom.ts 的 applyUiZoom() 与 style.zoom 同步写入，
      让 CSS 侧也能看见当前缩放（默认 1，保证 JS 未写入时不悬空）。
      为什么留这个变量却不拿它做"缩放不变热区"：B0 实测 90% 时 117 只可交互元素里 116 只
@@ -58,6 +61,7 @@
   --sp-0: 2px;
   --sp-6: 32px;
   --lh-ui: 1.2; /* 单行控件与表格单元格 */
+  --lh-body: 1.45; /* 正文段落：中文在 12px 下需要比 1.2 更松的行距 */
   --lh-read: 1.75; /* 长文：帮助正文、对话气泡 */
 }
 
@@ -603,7 +607,9 @@ body {
   padding: 0 var(--sp-1h);
   border: 0;
   border-radius: var(--radius-s);
-  background: var(--bg-inset);
+  /* P179-UI02：链路摘要不再铺凹陷底——它现在是只读状态文字，长得像输入框
+     会让人以为可以在这里改参数（真正可编辑的地方在左栏「接入」）。 */
+  background: transparent;
   color: var(--text-dim);
   font-family: var(--font-mono);
   font-size: var(--fs-body);
@@ -620,8 +626,8 @@ body {
 }
 
 .cb-capsule:hover {
-  background: var(--raise-1);
-  color: var(--text);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 /* 工作区药丸 */
@@ -1461,6 +1467,18 @@ select optgroup {
   flex: 0 0 auto;
   transition: background var(--dur-base);
 }
+/* UI-02：未连接是工具栏里唯一的 accent 实底主行动；已连接/连接中各自有自己的语义色，
+   所以"实底"只会出现在真正需要点的那一态，不会与状态胶囊抢权重。 */
+.connect-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.connect-btn.primary:hover {
+  background: var(--ctl-fill-primary-hover);
+  border-color: var(--ctl-fill-primary-hover);
+  color: var(--on-accent);
+}
 .connect-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
@@ -1532,11 +1550,6 @@ select optgroup {
         --raise-1 才是按 data-scheme 分过方向的"抬升一档"（亮色往灰、暗色往亮），正是 Primer .Box-header
         相对 .Box 的那一步 subtle 差。 */
   border-bottom: 1px solid var(--border);
-  user-select: none;
-}
-
-.console-spacer {
-  flex: 1;
   user-select: none;
 }
 
@@ -4737,22 +4750,6 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   background: var(--accent-soft);
 }
 
-.ctl-empty {
-  position: absolute;
-  inset: 40px 0 0 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  text-align: center;
-  font-size: var(--fs-sm);
-  line-height: 1.8;
-  color: var(--text-dim);
-  pointer-events: none;
-  user-select: none;
-}
-
 .ctl-err {
   flex: 0 0 auto;
   padding: 4px 10px;
@@ -5558,10 +5555,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
    I 门就是为它写的），换行让条自己长高，按钮仍然点得到。 */
 .fc-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;box-sizing:border-box;min-height:28px;padding:2px 8px;border-bottom:1px solid var(--border);flex:none;}
 .fc-toolbar .btn.icon{display:inline-flex;align-items:center;justify-content:center;padding:5px 7px;}
-.fc-toolbar .btn.saved-ok{color:var(--ok);border-color:color-mix(in srgb, var(--ok) 50%, transparent);background:color-mix(in srgb, var(--ok) 12%, transparent);}
-.fc-toolbar .btn.saved-err{color:var(--danger);border-color:color-mix(in srgb, var(--danger) 55%, transparent);background:color-mix(in srgb, var(--danger) 12%, transparent);animation:fc-shake .3s;}
 .fc-toolbar .btn.saving{opacity:.55;pointer-events:none;}
-@keyframes fc-shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
 /* P148/P150 副产：命中区审计从 P148 起也认 `[data-ctl]`，这枚"点一下看校验失败原因"的胶囊
    于是被量出来 19px（本仓自己的地板是 24，P132-D）。它是可点的（data-ctl="disc" + onClick），
    所以按控件补高度，而不是把 24 那条地板改软。
@@ -6868,13 +6862,11 @@ label.set-switch,
 
 .help-hint {
   display: inline-flex;
-  width: 13px;
-  height: 13px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   border: 1px solid var(--border);
   color: var(--text-dim);
-  font-size: var(--fs-xs);
-  font-weight: 600;
   align-items: center;
   justify-content: center;
   cursor: help;
@@ -6882,9 +6874,12 @@ label.set-switch,
   flex: 0 0 auto;
   user-select: none;
 }
+/* 视觉 16px，命中区补到 24px（--target-min）：四周各外扩 4px 的透明伪元素，
+   不改排版、不改脉冲。 */
+.help-hint::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; }
+.help-hint svg { width: 12px; height: 12px; }
 .help-hint:hover {
-  /* 那枚 `?` 是**字**（账上 hover 档实测 3.83~4.46 那一族），所以走 `--accent-text`；
-     圆圈的描边仍是 `--accent`——与 `.hex-pause-btn.on` 同一条口径：只改字，不改描边。 */
+  /* 描边仍是 --accent，只把图形与圈内的“i”提到 --accent-text —— 与 .hex-pause-btn.on 同一口径。 */
   color: var(--accent-text);
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -9255,9 +9250,7 @@ a > svg {
 .sq-res-st.st-aborted { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .sq-res-st.st-skipped { color: var(--text-dim); background: var(--bg-inset); }
 
-/* 空态 */
-.seq-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; }
-.seq-empty-desc { max-width: 420px; font-size: var(--fs-sm); line-height: 1.8; color: var(--text-dim); text-align: center; }
+/* 空态文案统一由 shared/EmptyState 承担（P179-UI04），这里不再留面板私有空态样式 */
 
 /* ================= P62 哨兵 Sentinel ================= */
 .snt { height: 100%; display: flex; flex-direction: column; background: var(--bg); color: var(--text); overflow: hidden; }
@@ -9426,8 +9419,6 @@ html:has(.sw), .sw { background: transparent; }
   padding: 4px 6px;
   gap: 4px;
 }
-.p3d-tray-sep { width: 1px; height: 16px; background: var(--border); margin: 0 2px; flex: none; }
-.p3d-tray .icon-btn.p3d-tray-danger:hover { color: var(--danger); border-color: var(--danger); }
 .p3d-hud.bl { bottom: 24px; left: 8px; }
 .p3d-hud.br {
   bottom: 22px;
@@ -10362,18 +10353,6 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
   color: var(--text-dim);
   padding-top: 10px;
 }
-.vdev-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  text-align: center;
-  padding: 20px;
-}
-.vdev-empty-d { max-width: 560px; font-size: var(--fs-sm); line-height: 1.8; color: var(--text-dim); }
-.vdev-empty-ops { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .vdev-editor {
   flex: 1 1 auto;
   min-width: 0;
@@ -11945,4 +11924,245 @@ body.pdrag-active *{cursor:grabbing !important;}
 .sb-preview{flex:1;min-width:0;font-family:var(--font-mono,ui-monospace,monospace);font-size:var(--fs-sm);color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .sb-preview.bad{color:var(--danger);white-space:normal;overflow:auto;max-height:40px;}
 .sb-notes{flex:none;max-width:40%;font-size:var(--fs-sm);color:var(--text-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+/* ---------------- P157 共享基元：工具条 / 状态胶囊 / 空态三形态 ----------------
+   这一组是 UI-03/04/05 的统一消费面：面板不再各自写一套工具条与空态皮肤，
+   尺寸全部走 token，避免"同类组件多套实现"在下一次主题/密度调整时又漂开。 */
+
+/* 三段式工具条：左=数据范围/状态，中=视图，右=工具。一级 ≤5，其余进 ⋯。
+   窄面板允许右侧收缩并隐藏文字，但不换行（换行会把工具条变成两张脸）。 */
+.panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  min-height: var(--ctl-h-3);
+  padding: 3px var(--sp-2);
+  white-space: nowrap;
+}
+.pt-left,
+.pt-center,
+.pt-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.pt-center {
+  flex: 1 1 auto;
+  justify-content: center;
+  min-width: 0;
+}
+.pt-right {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+.tb-actions {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+.action-menu {
+  min-width: 190px;
+  padding: var(--sp-1);
+}
+.tb-menu-sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--border-soft);
+}
+.tb-menu-item.danger {
+  color: var(--danger);
+}
+.tb-menu-item.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+/* 已有面板头（.console-bar 等）接入三段式后，旧的 flex-wrap 必须关掉：
+   换行会让"左状态 / 中视图 / 右工具"在窄面板下变成三行，比原来更难扫。 */
+.console-bar.panel-toolbar,
+.tbl-bar.panel-toolbar {
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+}
+.tbl-cap {
+  width: 116px;
+  flex: none;
+}
+.tbl-col-del svg {
+  width: 12px;
+  height: 12px;
+}
+.console-opts {
+  min-width: 176px;
+}
+.console-opt-row {
+  min-height: var(--target-min);
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-s);
+}
+.console-opt-row:hover {
+  background: var(--raise-1);
+}
+
+/* 只读状态胶囊：无底无边框，只有一个状态点 + 一行字。
+   它跟按钮的区别必须一眼可见——可点的才有底色与描边。 */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1h);
+  height: var(--ctl-h-1);
+  font-size: var(--fs-sm);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.status-pill > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex: none;
+}
+.status-pill.tone-ok { color: var(--text); }
+.status-pill.tone-ok > i { background: var(--ok); }
+.status-pill.tone-busy > i { background: var(--accent); color: var(--on-accent); }
+.status-pill.tone-warn > i { background: var(--warn); }
+.status-pill.tone-danger > i { background: var(--danger); }
+
+/* 空态：统一 24px 图标 / 12px 标题 / 11px 说明；不再用虚线框。 */
+.empty-title {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.empty-hint {
+  font-size: var(--fs-xs);
+  line-height: var(--lh-body);
+  max-width: 340px;
+  text-align: center;
+}
+.empty-inline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-height: var(--target-min);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-body);
+  color: var(--text-dim);
+}
+.empty-inline-actions {
+  display: inline-flex;
+  gap: var(--sp-1);
+}
+.empty-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: var(--z-raised);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  width: min(320px, 84%);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--bg-panel);
+  box-shadow: var(--elevation-shadow-3);
+  text-align: center;
+  pointer-events: auto;
+}
+.empty-overlay .empty-actions {
+  margin-top: 0;
+}
+.empty-close {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--target-min);
+  height: var(--target-min);
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.empty-close:hover {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+/* UI-04：给绝对定位的空态一个就近的包含块。否则在 .seq / .vdev 这类没有
+   position:relative 的面板里，.empty-state 会一路锚到停靠容器，盖住相邻面板。 */
+.empty-host {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+/* UI-05：3D 轨迹组抽屉的入口与表头。收起态只占一颗 28px 高的胶囊，
+   展开态才有原来的三行管理面板；两者都落在同一个左上锚点，不会与中央空态卡相交。 */
+.p3d-groups-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1h);
+  height: var(--ctl-h-3);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-body);
+  color: var(--text);
+  cursor: pointer;
+}
+.p3d-groups-toggle:hover {
+  color: var(--accent-text);
+}
+.p3d-groups-toggle svg {
+  width: 14px;
+  height: 14px;
+}
+.p3d-groups-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--raise-1);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+.p3d-groups-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-1);
+  margin-bottom: var(--sp-1);
+  color: var(--text-dim);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--border-soft);
+}
+.p3d-groups-head .icon-btn {
+  width: var(--target-min);
+  height: var(--target-min);
+}
+
+/* UI-06：20/22px 这类"本来就欠着"的交互目标抬到下限；16px 的勾选框本体保留，
+   由所在行承担 24px 命中（视觉尺寸与命中区是两件事，不能靠放大字号解决）。 */
+.chk,
+.le-btn,
+.rp-head-close,
+.ctl-tab-rename {
+  min-height: var(--target-min);
+}
+.le-btn,
+.rp-head-close {
+  width: var(--target-min);
+  height: var(--target-min);
+}
+
 

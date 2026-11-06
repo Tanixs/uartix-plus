@@ -1,14 +1,16 @@
-/** 空态：图标 + 标题 + 至多一行提示 + 动作按钮。
+/** 空态：图标 + 标题 + 至多一条提示 + 动作按钮（P179-UI04）。
  *
- * P104-B4 加 `actions` 槽。这条改动是 B11 的前提，也是"默认页说明墙"的**根因修复**：
- * 这个组件此前只有 `{title, hint}`——**没有按钮位**。
- * 于是作者想让用户"点右上「＋滑条」"时，唯一能做的事就是写一句话去指认那个按钮，
- * 六个面板的默认页因此都出现了「左侧…」「右侧…」「右键卡片可…」这类空间导航句。
- * 说明墙不是粗心，是组件缺口的必然产物。给它按钮位，文字才真的可以删。
+ * 三种形态来自同一组件，避免"同一个无数据状态四种皮肤"：
+ *  - `card`（默认）：面板中央，图标 + 标题 + 说明 + 最多 1 主 1 次；
+ *  - `inline`：表格/日志里的一行说明，不占大块面积；
+ *  - `overlay`：画布上的可关闭浮卡，宽度 ≤360，不遮挡画布超过 30%。
  *
- * 配套硬规矩（写进 P104-B2 详设 §3，B11 逐面板执行）：
- *  hint 上限 1 条；默认页不得出现指认其它控件位置的文字——要给，就把那个控件放进来。
+ * P104-B4 起有 `actions` 槽：默认页不再靠"左侧…「＋滑条」…"这类空间导航句指认控件，
+ * 要给就把控件放进来。硬规矩：hint 上限 1 条；空态只允许一颗 primary。
  */
+import { IconClose } from "./icons";
+import { tx, useLocale } from "../i18n/strings";
+
 export interface EmptyStateAction {
   label: string;
   onClick: () => void;
@@ -18,34 +20,54 @@ export interface EmptyStateAction {
   title?: string;
 }
 
+export type EmptyStateVariant = "card" | "inline" | "overlay";
+
 export function EmptyState({
   title,
   hint,
   actions,
+  extra,
+  variant = "card",
+  onClose,
 }: {
   title: string;
   hint?: string[];
   actions?: EmptyStateAction[];
+  /** 说明行之后的附加节点（例如 HelpHint）——空态仍由本组件统一排版 */
+  extra?: React.ReactNode;
+  variant?: EmptyStateVariant;
+  /** 仅 overlay：给了就显示关闭按钮 */
+  onClose?: () => void;
 }) {
-  return (
-    <div className="empty-state">
-      <svg
-        width="42"
-        height="42"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.2"
-      >
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <path d="M3 9h18M9 9v11" opacity="0.5" />
-      </svg>
+  useLocale(); // overlay 的关闭按钮说明要跟着语言切换
+  const closeLabel = tx("关闭说明", "Close note");
+  const body = (
+    <>
+      {variant !== "inline" && (
+        <svg
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M3 9h18M9 9v11" opacity="0.5" />
+        </svg>
+      )}
       <div className="empty-title">{title}</div>
-      {hint?.map((h, i) => (
-        <div key={i} className="empty-hint">
-          {h}
+      {hint?.length ? (
+        <div className="empty-hint">
+          {hint.map((h, i) => (
+            <div key={i}>{h}</div>
+          ))}
         </div>
-      ))}
+      ) : null}
+      {extra}
       {actions && actions.length > 0 && (
         <div className="empty-actions">
           {actions.map((a) => (
@@ -62,6 +84,52 @@ export function EmptyState({
           ))}
         </div>
       )}
-    </div>
+    </>
   );
+
+  if (variant === "inline") {
+    return (
+      <div className="empty-inline">
+        <span>{title}</span>
+        {actions?.length ? (
+          <div className="empty-inline-actions">
+            {actions.map((a) => (
+              <button
+                key={a.label}
+                type="button"
+                className={`btn sm${a.primary ? " primary" : ""}`}
+                disabled={a.disabled}
+                title={a.title}
+                onClick={() => a.onClick()}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (variant === "overlay") {
+    return (
+      <div className="empty-overlay" role="note">
+        {onClose && (
+          <button
+            type="button"
+            className="empty-close"
+            aria-label={closeLabel}
+            title={closeLabel}
+            onClick={onClose}
+          >
+            <IconClose />
+          </button>
+        )}
+        {body}
+      </div>
+    );
+  }
+
+  return <div className="empty-state">{body}</div>;
 }
+
