@@ -174,7 +174,10 @@ describe("canvas embed schema v2", () => {
     const pageId = store.getSnapshot().activePageId;
     const r = store.addEmbedCard(pageId, "plot2d");
     expect(r.ok).toBe(true);
-    const card = store.activePage()!.cards.at(-1)!;
+    // tsconfig 的 lib 是 ES2020（`npm run build` 走 `tsc`），`Array.prototype.at` 要 ES2022 ——
+    // 这里用等价的索引写法，别为了测试单独放宽整个工程的 lib。
+    const cards = store.activePage()!.cards;
+    const card = cards[cards.length - 1]!;
     expect(card).toMatchObject({
       type: "embed",
       panelId: "plot2d",
