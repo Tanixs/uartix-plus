@@ -152,7 +152,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
 }
 
 /** 二级面板：只在有内容时占宽（收起 = 0，不渲染）。 */
-export function RailPanel({ actions }: { actions: RailActions }) {
+export function RailPanel({ actions, onPanelKeyDown }: { actions: RailActions; onPanelKeyDown?: (e: React.KeyboardEvent) => void }) {
   useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const open = useSyncExternalStore(subscribeRail, railPanel);
   const protoTab = useSyncExternalStore(subscribeRail, railProtoTab);
@@ -213,9 +213,11 @@ export function RailPanel({ actions }: { actions: RailActions }) {
   return (
     <aside
       ref={asideRef}
+      id="rail-panel"
       className="rail-panel"
       style={{ "--rail-w": `${w}px` } as React.CSSProperties}
       aria-label={tx("工作区内容", "Workspace content")}
+      onKeyDown={onPanelKeyDown}
     >
       {/* P180-UI-2：面板头**常驻**。展开页要有自己的标题，否则"标题-分组-条目"三级只剩后两级，
           面板一滚起来就只剩一堆同级文字。但关闭钮仍只在无 48px 条时出现——有条时点同一项即收起，

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { Fragment, useRef, useSyncExternalStore } from "react";
 import { IconFrameSpec, IconLayoutEdit, IconPlug, IconSlider, IconStack, IconTerminal } from "../shared/icons";
 import { tx, useLocale } from "../i18n/strings";
 import { railPanel, railStrip, subscribeRail, toggleRailPanel, type RailKey } from "./railState";
@@ -37,24 +37,49 @@ export function SideRail({ actions }: { actions: RailActions }) {
   // 面板在无条状态下由自己的头（.rp-head）报案名与关闭钮，宽度照旧进布局分母。
   const strip = useSyncExternalStore(subscribeRail, railStrip);
 
+  /**
+   * P180-UI-3：展开页是**常驻列**不是浮层（P155-R），所以不做"点外面就收"——
+   * 那会在用户点画布去用库里的内容时把库收掉。键盘的关闭语义用 Escape 补：
+   * 先把焦点落回触发它的那一格（面板随后卸载，焦点不能掉到 body），再收起。
+   */
+  const btnRefs = useRef(new Map<string, HTMLButtonElement>());
+  const closeByKeyboard = () => {
+    if (!open) return;
+    btnRefs.current.get(open)?.focus();
+    toggleRailPanel(null);
+  };
+  const onRailKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "Escape" || !open) return;
+    e.preventDefault();
+    closeByKeyboard();
+  };
+
   return (
     <>
       {strip && (
-        <nav className="rail2" aria-label={tx("工作区", "Workspaces")}>
+        <nav className="rail2" aria-label={tx("工作区", "Workspaces")} onKeyDown={onRailKeyDown}>
           {railItems().map((it) => (
-            <button
-              key={it.key}
-              type="button"
-              className={`rail2-btn${open === it.key ? " on" : ""}${it.key === "views" && actions.editLayout ? " act" : ""}`}
-              data-ctl="tool"
-              aria-expanded={open === it.key}
-              aria-current={open === it.key ? "page" : undefined}
-              title={it.label + " · " + it.tip}
-              onClick={() => toggleRailPanel(it.key)}
-            >
-              {it.icon()}
-              <span className="rail2-label">{it.label}</span>
-            </button>
+            <Fragment key={it.key}>
+              {/* 「库」与「视图」不是一个组：一枚发丝线把两组分开，节奏与按钮同为 4px。 */}
+              {it.key === "views" && <span className="rail2-sep" aria-hidden="true" />}
+              <button
+                ref={(el) => {
+                  if (el) btnRefs.current.set(it.key, el);
+                  else btnRefs.current.delete(it.key);
+                }}
+                type="button"
+                className={`rail2-btn${open === it.key ? " on" : ""}${it.key === "views" && actions.editLayout ? " act" : ""}`}
+                data-ctl="tool"
+                aria-controls={open === it.key ? "rail-panel" : undefined}
+                aria-expanded={open === it.key}
+                aria-current={open === it.key ? "page" : undefined}
+                title={it.label + " · " + it.tip}
+                onClick={() => toggleRailPanel(it.key)}
+              >
+                {it.icon()}
+                <span className="rail2-label">{it.label}</span>
+              </button>
+            </Fragment>
           ))}
           <span className="rail2-spacer" />
           {/* 编辑布局的开关位在「视图」项上（它才是"看什么"的那一节），这里只给状态点 */}
@@ -65,7 +90,7 @@ export function SideRail({ actions }: { actions: RailActions }) {
           )}
         </nav>
       )}
-      <RailPanel actions={actions} />
+      <RailPanel actions={actions} onPanelKeyDown={onRailKeyDown} />
     </>
   );
 }

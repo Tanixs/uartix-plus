@@ -98,11 +98,14 @@ describe("P145/P155-R 导轨收起：分母各算各的、面板有把手、开�
     expect(side, "SideRail 里不该再有第二个收起入口（同一件事两个把手就是两本账）").not.toContain("toggleRailStrip");
     expect(side, "条收起仍必须是**不渲染**（留着 DOM 就有能 Tab 进去的键盘陷阱）").toMatch(/\{strip && \(/);
     expect(side, "P145 的整块不渲染回来了——面板要跟条各自独立").not.toMatch(/if \(!strip\) return null;/);
-    expect(side, "RailPanel 必须在条收起时照渲染").toContain("<RailPanel actions={actions} />");
+    expect(side, "RailPanel 必须在条收起时照渲染").toMatch(/<RailPanel actions=\{actions\}/);
+    expect(side, "面板的键盘关闭没有接线（Escape 要能收起并回落焦点）").toContain("onPanelKeyDown={onRailKeyDown}");
 
     const panel = read("./RailPanel.tsx");
     expect(panel, "无条状态的面板头（把手）不见了").toContain('className="rp-head"');
     expect(panel, "面板头没有关闭动作").toContain("toggleRailPanel(null)");
+    expect(panel, "展开页没有接键盘事件（Escape 关闭进不来）").toContain("onKeyDown={onPanelKeyDown}");
+    expect(panel, "展开页缺少可被 rail 按钮 aria-controls 指到的落点").toContain('id="rail-panel"');
     // P180-UI-2 改判：面板头**常驻**（展开页要有自己的标题，否则"标题-分组-条目"只剩两级），
     // 但关闭钮仍只在无条时出现——有条时点同一项即收起，两处都放就是两份入口。
     // 所以这条判据盯的是关闭钮所在的那个条件块，而不是整个 .rp-head。

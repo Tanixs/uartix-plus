@@ -2641,6 +2641,29 @@ select optgroup {
   background: var(--accent);
 }
 
+/* 按下态：悬停/聚焦之外还差"手指真的压下去"这一下。优先用交互签名槽的 active 填充，
+   主题没填就是 --raise-2，不会比 hover 更淡；当前项按下则在本色上再压一档 accent。 */
+.rail2-btn:active {
+  background: var(--ctl-fill-active);
+  color: var(--text);
+}
+
+.rail2-btn.on:active {
+  background: color-mix(in srgb, var(--accent-soft) 84%, var(--accent) 16%);
+  color: var(--accent-text);
+}
+
+/* 「库」（接入/协议/控件/命令）与「视图」不是一个组。一枚 20px 的发丝线分组，
+   颜色复用深度引导线，节奏仍按 --sp-1：不另造一套分隔语法。 */
+.rail2-sep {
+  flex: none;
+  width: 20px;
+  height: 1px;
+  margin: var(--sp-0) 0;
+  border-radius: var(--radius-pill);
+  background: var(--depth-rail);
+}
+
 .rail2-label {
   font-size: var(--fs-xs);
   line-height: 1;
