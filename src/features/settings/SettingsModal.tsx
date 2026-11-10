@@ -1071,7 +1071,10 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   />
                 ), t("set.ai.idle.tip"))}
                 <details className="set-coll">
-                  <summary>{t("set.ai.grp.net")}</summary>
+                  <summary>
+                    <IconChevron size={12} />
+                    {t("set.ai.grp.net")}
+                  </summary>
                   <div className="set-coll-body">
                     {row(t("set.ai.proxy"), (
                       <input

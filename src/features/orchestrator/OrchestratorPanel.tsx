@@ -1617,6 +1617,7 @@ function RenderNode(props: {
     <div key={node.id}>
       <div
         className={`sq-row orch-row k-${kindCls(node.kind)} d${Math.min(depth, 4)}${selected ? " sel" : ""}`}
+        data-depth={Math.min(depth, 3)}
         data-orch-row={node.id}
         onClick={() => onSelect({ groupId, blockId: node.id })}
       >

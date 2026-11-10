@@ -3195,9 +3195,12 @@ select optgroup {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  /* 面板标题与下方分区之间只留一条发丝线（G 门：不加 border，用 inset 影） */
+  box-shadow: inset 0 -1px 0 var(--border-soft);
+  font-size: var(--fs-md);
+  font-weight: 700;
   user-select: none;
 }
 
@@ -3208,18 +3211,34 @@ select optgroup {
   }
 }
 
+/* 分区头 = 属性面板的一级结构：一枚 accent 竖标 + 一档底色，和设置页的分组头
+   用同一套深度语言；原来的「上边距 + border-top」在长表单里只是一条又一条线。 */
 .props-section {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin: 14px 0 8px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border-soft);
+  position: relative;
+  margin: 16px 0 8px;
+  padding: var(--sp-1) var(--sp-1h) var(--sp-1) calc(var(--sp-2) + var(--sp-0));
+  border-radius: var(--radius-s);
+  background: var(--depth-bg-1);
   font-size: var(--fs-sm);
-  font-weight: 600;
-  color: var(--text-dim);
+  font-weight: 700;
+  color: var(--text);
   user-select: none;
+}
+/* 竖标绝对定位：它不能成为 flex 子项，否则 space-between 会把分区名推到中间。 */
+.props-section::before {
+  content: "";
+  position: absolute;
+  left: var(--sp-1);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
 }
 
 .props-hint {
@@ -3607,7 +3626,9 @@ select optgroup {
   top: 0;
   z-index: 3;
   display: grid;
-  background: var(--bg-panel);
+  /* 列头是"表带"而不是数据行的一员：走面板工具条那条 --bar-bg（在 inset 与 panel
+     之间取中），与下方纸面数据行形成一档色差；此前与行同底色，只靠字重区分。 */
+  background: var(--bar-bg);
   border-bottom: 1px solid var(--border);
   user-select: none;
 }
@@ -3616,10 +3637,10 @@ select optgroup {
   padding: 0 8px;
   line-height: 26px;
   font-size: var(--fs-body);
-  /* 字号与行高都不动（26 是虚拟滚动的 HEADER_H 常量，碰不得），只加字重：
-     夹具截图里表头比数据行还轻，列标题压不住场面 */
+  /* 字号与行高都不动（26 是虚拟滚动的 HEADER_H 常量，碰不得），只加字重与色阶：
+     表头是读数面的第一级，应该比数据行更实，而不是更淡。 */
   font-weight: 600;
-  color: var(--text-dim);
+  color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5033,6 +5054,9 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   /* 步长 = 折叠钮 24 + 与组名的间距 4：子项文字正好落在**父组名**的起点上，
      而不是落在父组头左缘的某个随机位置——这是"像一棵树"的第一条判据。 */
   --depth-step: 28px;
+  /* 密集复核面（编排器块树 / 设置行 / 属性分区）没有折叠钮占位，28 会把
+     深层内容挤到面板外；同一套深度语言换一个步长档，而不是各面板自己写数字。 */
+  --depth-step-tight: 16px;
   /* 引导线落在折叠钮中心：线、箭头、子项三点共线，孩子是谁的一目了然 */
   --depth-rail-x: 12px;
   --depth-rail: color-mix(in srgb, var(--line-strong) 70%, transparent);
@@ -6640,7 +6664,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   max-width: var(--set-col-w);
 }
 .set-card > .set-row:last-child { border-bottom: none; }
-.set-card > .set-group-title { margin: 0; padding: 16px 0 6px; }
+.set-card > .set-group-title { margin: 0; padding: 14px var(--sp-1h) 6px var(--sp-2); }
 /* 首组不再叠自己那 16px：卡片已经给了 10px，这里补 4px 就是原来的 14px 观感。
    组与组之间仍是 16px（上面那条），所以"第一组特殊、其余不特殊"这条没被破坏。 */
 .set-card > .set-group-title:first-child { padding-top: 4px; }
@@ -6707,7 +6731,7 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   box-shadow: var(--shadow-pop), var(--shadow);
 }
 .msp-card > .set-row:last-child { border-bottom: none; }
-.msp-card > .set-group-title { margin: 0; padding: 16px 0 6px; }
+.msp-card > .set-group-title { margin: 0; padding: 14px var(--sp-1h) 6px var(--sp-2); }
 .msp-card > .set-group-title:first-child { padding-top: 14px; }
 .msp-test { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; min-width: 0; }
 /* P112-B：详情改竖排（label 在上、控件通栏），模型收成一行 + 四个动作，字段点编辑才展开 */
@@ -9238,25 +9262,48 @@ a > svg {
 .ai-usage-line { font-size: var(--fs-body); color: var(--text-dim); font-family: var(--font-mono); }
 .ai-usage-line.dim { opacity: 0.75; }
 
-/* ================= 设置页：分组标题 / 折叠块 / 危险区 ================= */
+/* 设置页的分组头 = 卡内的一级分区：左侧一枚 3px 竖标 + 一档抬升底色，
+   让"卡 → 分区 → 行"三级在去字之后仍是三个色块而不是一片白。
+   标题用 --text 而不是 --text-dim：它是要读的分区名，不是辅助读数。 */
 .set-group-title {
-  margin: 18px 0 2px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1h);
+  margin: 18px 0 var(--sp-1);
+  padding: var(--sp-1) var(--sp-1h) var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-s);
+  background: var(--depth-bg-1);
   font-size: var(--fs-sm);
   font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  color: var(--text);
+  user-select: none;
+}
+.set-group-title::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  height: 14px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
 }
 .set-group-title:first-child { margin-top: 10px; }
 
+/* 子分组（可折叠块）要比所在卡**凹一档**：它嵌在分区里，与分区同亮就只剩
+   一条边框在说"我在这"。凹底 + 左缘对齐，父卡/分区/子块三档一眼可数。 */
 .set-coll {
   margin: 10px 0 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  background: var(--bg-panel);
+  background: var(--bg-inset);
+  box-shadow: inset 0 1px 0 var(--border-soft);
 }
 .set-coll summary {
   list-style: none;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1h);
   padding: 10px 14px;
   font-size: var(--fs-sm);
   font-weight: 600;
@@ -9264,14 +9311,13 @@ a > svg {
   user-select: none;
 }
 .set-coll summary::-webkit-details-marker { display: none; }
-.set-coll summary::before {
-  content: "\25B8";
-  display: inline-block;
-  margin-right: 7px;
+/* 折叠箭头是 SVG（§8-25 禁字符图标）：收起指右、展开转 90° 指下。 */
+.set-coll summary svg {
+  flex: none;
   color: var(--text-dim);
-  transition: transform var(--dur-base);
+  transition: transform var(--dur-base) var(--ease);
 }
-.set-coll[open] summary::before { transform: rotate(90deg); }
+.set-coll[open] summary svg { transform: rotate(90deg); }
 .set-coll-body { padding: 0 14px 8px; border-top: 1px solid var(--border-soft); }
 .set-coll-body .set-row:first-child { padding-top: 10px; }
 
@@ -9477,11 +9523,11 @@ a > svg {
 .seq-addbar .btn { flex: none; }
 .seq-tree { flex: 1; min-height: 0; overflow: auto; padding-bottom: 8px; }
 
-.sq-row { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 10px; border-bottom: 1px solid var(--border-soft); min-height: 30px; position: relative; }
+/* 块树（编排器 / 序列器共用）：深度只给色阶与字重，缩进由 `.sq-children` 的
+   固定步长承担。去掉原来 d2/d3/d4 三条手写 padding——那是"每层各自记一个数"，
+   加一层就要再补一条，且与子块自身的 22px 外边距叠成不可预测的总深度。 */
+.sq-row { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px calc(var(--depth-step-tight) + var(--sp-1)); border-bottom: 1px solid var(--border-soft); min-height: 30px; position: relative; color: var(--d-fg, var(--text)); }
 .sq-row:hover { background: var(--raise-1); }
-.sq-row.d2 { padding-left: 26px; }
-.sq-row.d3 { padding-left: 42px; }
-.sq-row.d4 { padding-left: 58px; }
 .sq-grip { cursor: grab; color: var(--text-dim); font-size: var(--fs-sm); flex: none; user-select: none; -webkit-user-drag: element; touch-action: none; padding: 0 2px; }
 .sq-grip:active { cursor: grabbing; }
 .sq-en { accent-color: var(--accent); flex: none; margin: 0; }
@@ -9514,7 +9560,23 @@ a > svg {
 .sq-a { all: unset; cursor: pointer; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: var(--radius-s); font-size: var(--fs-sm); color: var(--text-dim); }
 .sq-a:hover { background: var(--accent-soft); color: var(--accent); }
 .sq-a.bad:hover { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
-.sq-children { margin-left: 22px; border-left: 2px solid var(--accent-soft); padding-left: 2px; }
+/* 子块：一步 = 一个 --depth-step-tight，引导线用渐变背景（G 门只降边框，不加线）。
+   线从父行下缘垂到子块底部，任何深度都是"箭头—线—孩子"三点一线。 */
+.sq-children {
+  position: relative;
+  margin-left: var(--depth-step-tight);
+  padding-left: var(--sp-1);
+}
+.sq-children::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: var(--sp-0);
+  width: 1px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, var(--depth-rail), transparent 92%);
+}
 .sq-childadd { width: 104px; height: 22px; padding: 0 4px; font-size: var(--fs-body); margin: 3px 0 3px 12px; color: var(--text-dim); }
 
 /* 拖放指示：before/after 用顶/底亮线，in 用整体描边 */
@@ -10165,11 +10227,11 @@ html:has(.sw), .sw { background: transparent; }
 .orch-children { display: flex; flex-direction: column; padding: 2px 4px 4px; }
 .orch-row { border: 0; border-radius: var(--radius-m); margin: 1px 0; }
 .orch-row.sel { background: var(--accent-soft); }
-.orch-summary { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orch-summary { flex: 1; min-width: 0; font-size: var(--fs-sm); color: var(--d-fg, var(--text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .orch-k-logic { color: var(--k-logic); border: 1px solid color-mix(in srgb, var(--k-logic) 40%, transparent); background: color-mix(in srgb, var(--k-logic) 10%, transparent); }
 .orch-failtag { flex: none; font-size: var(--fs-xs); line-height: 15px; padding: 0 5px; border-radius: var(--radius-s); cursor: pointer; color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); user-select: none; }
 .orch-failtag.c { color: var(--k-wait); border-color: color-mix(in srgb, var(--k-wait) 40%, transparent); background: color-mix(in srgb, var(--k-wait) 8%, transparent); }
-.orch-branch { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.08em; color: var(--k-logic); padding: 2px 0 1px 14px; }
+.orch-branch { display: flex; align-items: center; gap: var(--sp-1h); font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.08em; color: var(--k-logic); margin: var(--sp-0) 0; padding: 2px var(--sp-1h); border-radius: var(--radius-s); background: var(--depth-bg-1); }
 .orch-addhere-wrap { display: inline-block; }
 .orch-drop-before::before, .orch-drop-after::before { content: ""; position: absolute; left: 8px; right: 8px; height: 3px; border-radius: var(--radius-s); background: var(--accent); z-index: 2; }
 .orch-drop-before::before { top: -2px; }
@@ -10291,7 +10353,7 @@ html.drag-active, html.drag-active * { cursor: grabbing !important; user-select:
 /* 分层底色：画布(最深) → 组卡(面板色) → 容器子流(微差+引导线)，层级一眼可数 */
 .orch-canvas { background: var(--bg-inset); }
 .orch-card { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14); }
-.orch-card .sq-children { background: color-mix(in srgb, var(--text) 3%, transparent); border-radius: 0 var(--radius-l) var(--radius-l) 0; margin: 2px 6px 4px 14px; padding: 1px 2px 3px 4px; }
+.orch-card .sq-children { background: color-mix(in srgb, var(--text) 3%, transparent); border-radius: 0 var(--radius-l) var(--radius-l) 0; margin: 2px var(--sp-1h) var(--sp-1) var(--depth-step-tight); padding: 1px var(--sp-0) 3px var(--sp-1); }
 
 /* 块行类型色左条：与 kind 徽章同色系（同一 --k-* 令牌），扫一眼即知块类别 */
 .orch-row::before { content: ""; position: absolute; left: 2px; top: 4px; bottom: 4px; width: 3px; border-radius: var(--radius-s); background: transparent; }
@@ -11416,8 +11478,10 @@ body.pdrag-active *{cursor:grabbing !important;}
 
 /* ---- 详情面（UI-20 同一套语义类，源码零内联排版） ---- */
 .plgv-root { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: auto; }
-.plgv-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
-.plgv-name { font-weight: 600; }
+.plgv-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--raise-1); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+/* 详情页是"退回市场"之后的新一层：名字必须是这一面的第一级读数，
+   仓库全名退成等宽副行——两者原来同为 600 字重，页签与详情分不开。 */
+.plgv-name { font-size: var(--fs-lg); font-weight: 700; }
 .plgv-repo { font-size: var(--fs-xs); color: var(--text-faint); font-family: var(--font-mono); }
 .plgv-spacer { flex: 1 1 auto; }
 .plgv-body { padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
@@ -11453,7 +11517,7 @@ body.pdrag-active *{cursor:grabbing !important;}
 .plgv-faint { color: var(--text-faint); font-size: var(--fs-xs); }
 .plgv-dim { color: var(--text-dim); }
 .plgv-perms { border: 1px solid var(--border); border-radius: var(--radius-m); background: var(--bg-inset); padding: var(--sp-1) var(--sp-2); }
-.plgv-perm-title { font-size: var(--fs-xs); font-weight: 600; color: var(--text-dim); margin-bottom: var(--sp-1); }
+.plgv-perm-title { font-size: var(--fs-xs); font-weight: 700; color: var(--text); margin-bottom: var(--sp-1); }
 .plgv-perm-list { margin: 0; padding-left: 16px; display: grid; gap: 2px; font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.6; }
 .plgv-perm-note { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 6px; line-height: 1.6; }
 .plgv-url { font-size: var(--fs-xs); color: var(--text-faint); font-family: var(--font-mono); word-break: break-all; }
@@ -12624,11 +12688,15 @@ body.pdrag-active *{cursor:grabbing !important;}
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
-  padding: 0 var(--sp-1);
+  padding: var(--sp-1) var(--sp-1);
   margin-bottom: var(--sp-1);
-  color: var(--text-dim);
+  border-radius: var(--radius-s);
+  /* 抽屉头 = 这一块的标题带；行是它的子级。原来两者同底，只有一条软线相隔。 */
+  background: var(--raise-1);
+  color: var(--text);
   font-size: var(--fs-sm);
-  border-bottom: 1px solid var(--border-soft);
+  font-weight: 600;
+  box-shadow: inset 0 -1px 0 var(--border-soft);
 }
 .p3d-groups-head .icon-btn {
   width: var(--target-min);

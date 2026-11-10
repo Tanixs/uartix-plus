@@ -445,6 +445,7 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
       <div key={step.id}>
         <div
           className={`sq-row d${Math.min(depth, 4)}`}
+          data-depth={Math.min(depth, 3)}
           data-sq-row={step.id}
         >
           <span
