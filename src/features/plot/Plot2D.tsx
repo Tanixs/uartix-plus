@@ -40,6 +40,7 @@ import {
 } from "./plotMeasure";
 import { tx, useLocale } from "../../i18n/strings";
 import { usePanelChrome, type ChromeAction } from "../../panels/panelChrome";
+import { registerPanelView } from "../../panels/viewState";
 
 /** 会话标注竖线颜色（P3b）：琥珀色，与「起」灰虚线、「最新」主题实线区分 */
 const ANN_COLOR = "#e8a33d";
@@ -1412,6 +1413,32 @@ export function Plot2D() {
     uRef.current = u;
     setFollow(true);
     yManualRef.current = false;
+    // 停靠↔内嵌切换：把用户当前视野（x/y 区间 + 跟随）搬过去，避免重新挂载后跳回默认窗口。
+    // 数据仍在 plotStore，不重建订阅；这里只搬运 uPlot 实例上的视图态。
+    const unregisterView = registerPanelView("plot2d", {
+      capture: () => {
+        const xs = u.scales.x;
+        const ys = u.scales.y;
+        if (xs.min == null || xs.max == null || ys.min == null || ys.max == null) return null;
+        if (!(xs.max > xs.min) || !(ys.max > ys.min)) return null;
+        return {
+          xMin: xs.min,
+          xMax: xs.max,
+          yMin: ys.min,
+          yMax: ys.max,
+          follow: followXRef.current,
+        };
+      },
+      restore: (v) => {
+        if (!("xMin" in v)) return;
+        setFollow(v.follow);
+        // 恢复到非自动 Y 的视野时必须同时标记"手动"，否则下一次喂数会按 yAuto 重新铺满。
+        yManualRef.current = !plotStore.getSnapshot().settings.yAuto;
+        u.setScale("x", { min: v.xMin, max: v.xMax });
+        u.setScale("y", { min: v.yMin, max: v.yMax });
+        u.redraw();
+      },
+    });
     affineRef.current = channels.map(() => null);
     stackMetaRef.current = [];
     // 默认不自动铺设游标：由用户在图区单击放置（旧实现按全量范围 35%/65% 落位，
@@ -1427,6 +1454,7 @@ export function Plot2D() {
     });
     ro.observe(wrap);
     return () => {
+      unregisterView();
       ro.disconnect();
       while (cleanupRefs.current.length) {
         const arr = cleanupRefs.current.pop();

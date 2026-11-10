@@ -283,7 +283,11 @@ export function ControlCanvas() {
     await invoke("save_text_file", {
       path,
       content: JSON.stringify(
-        { kind: "uartix-controls", version: 1, data: store.exportPages() },
+        {
+          kind: "uartix-controls",
+          version: store.CONTROLS_SCHEMA_VERSION,
+          data: store.exportPages(),
+        },
         null,
         2,
       ),
@@ -301,15 +305,31 @@ export function ControlCanvas() {
     try {
       const obj = JSON.parse(await invoke<string>("read_text_file", { path })) as {
         kind?: string;
+        version?: unknown;
         data?: unknown;
       };
       if (obj.kind !== "uartix-controls" || !obj.data) {
         await alertDialog(tx("不是控制画布文件（kind 不匹配）", "This is not a control-canvas file (kind does not match)"));
         return;
       }
+      // 新版本文件不能静默降级读：内嵌卡片等新字段会被旧逻辑丢成空画布。
+      const badVersion = store.checkControlsVersion(obj.version);
+      if (badVersion) {
+        await alertDialog(badVersion);
+        return;
+      }
       const d = obj.data as { name?: string; cols?: number; cards?: Record<string, unknown>[] };
       const arr = Array.isArray(d) ? d[0] : d;
-      store.importPage(arr);
+      const report = { droppedPanels: [] as string[] };
+      store.importPage(arr, report);
+      if (report.droppedPanels.length) {
+        toast(
+          tx(
+            `已导入，但丢弃了 ${report.droppedPanels.length} 张不支持的面板卡片：${report.droppedPanels.join(", ")}`,
+            `Imported, but dropped ${report.droppedPanels.length} unsupported panel card(s): ${report.droppedPanels.join(", ")}`,
+          ),
+        );
+      }
     } catch (e) {
       await alertDialog(tx(`导入失败: ${e}`, `Import failed: ${e}`));
     }
@@ -344,13 +364,22 @@ export function ControlCanvas() {
         const maxW = Math.max(1, (cur?.cols ?? 8) - rz.card.x);
         const maxH = Math.max(1, (cur?.rows || 48) - rz.card.y);
         const scale = liveScale(rz.innerW0);
-        const nw0 = Math.max(
-          1,
-          Math.min(maxW, rz.card.w + Math.round((e.clientX - rz.startClientX) / (STEPq * scale))),
+        // 内嵌面板有语义最小格数：拖小了只会露出半截坐标轴，直接按住下限。
+        const minW = rz.card.type === "embed" ? Math.max(1, rz.card.minW) : 1;
+        const minH = rz.card.type === "embed" ? Math.max(1, rz.card.minH) : 1;
+        const nw0 = Math.min(
+          maxW,
+          Math.max(
+            minW,
+            rz.card.w + Math.round((e.clientX - rz.startClientX) / (STEPq * scale)),
+          ),
         );
-        const nh0 = Math.max(
-          1,
-          Math.min(maxH, (rz.card.h || 1) + Math.round((e.clientY - rz.startClientY) / (STEPq * scale))),
+        const nh0 = Math.min(
+          maxH,
+          Math.max(
+            minH,
+            (rz.card.h || 1) + Math.round((e.clientY - rz.startClientY) / (STEPq * scale)),
+          ),
         );
         // 摇杆与键盘遥控锁定正方形（n×n），杜绝拖成 1×N 长条
         const isSquare = rz.card.type === "joystick" || rz.card.type === "keypad";
@@ -698,6 +727,7 @@ export function ControlCanvas() {
       card.type !== "monitor" &&
       card.type !== "group" &&
       card.type !== "custom" &&
+      card.type !== "embed" &&
       card.useScript
     ) {
       if (!card.script.trim()) {

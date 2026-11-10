@@ -1570,7 +1570,7 @@ export function CardModal(props: {
     <div className="modal-mask" role="dialog" aria-modal="true" onMouseDown={props.onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-title">
-        {`${store.panelTypeName(card.type)}${tx("设置", "Settings")} · ${card.name}`}
+        {`${card.type === "embed" ? tx("面板", "Panel") : store.panelTypeName(card.type)}${tx("设置", "Settings")} · ${card.name}`}
       </div>
       <Section title={tx("基础", "Basics")}>
         <div className="form-row">

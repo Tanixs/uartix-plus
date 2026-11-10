@@ -26,7 +26,11 @@ export function exportFullBackup(): FullBackup {
 }
 
 /** 按 kind 分发导入，返回用户可读的结果描述 */
-export async function importDispatch(kind: string, data: unknown): Promise<string> {
+export async function importDispatch(
+  kind: string,
+  data: unknown,
+  version?: unknown,
+): Promise<string> {
   switch (kind) {
     case "uartix-templates": {
       const d = data as {
@@ -39,6 +43,9 @@ export async function importDispatch(kind: string, data: unknown): Promise<strin
       return `已导入 ${d.templates.length} 个协议模板（副本）`;
     }
     case "uartix-controls": {
+      // 先验版本再动 store：v3+ 文件里的新字段会被当前版本丢成空画布，必须明确拒绝。
+      const badVersion = controlsStore.checkControlsVersion(version);
+      if (badVersion) throw new Error(badVersion);
       const arr = Array.isArray(data) ? data[0] : data;
       const page = arr as {
         name?: string;
@@ -46,8 +53,12 @@ export async function importDispatch(kind: string, data: unknown): Promise<strin
         rows?: number;
         cards?: Record<string, unknown>[];
       };
-      controlsStore.importPage(page);
-      return `已导入为新控制页（${(page.cards ?? []).length} 卡片）`;
+      const report = { droppedPanels: [] as string[] };
+      controlsStore.importPage(page, report);
+      const dropped = report.droppedPanels.length
+        ? `，丢弃 ${report.droppedPanels.length} 张不支持的面板卡片`
+        : "";
+      return `已导入为新控制页（${(page.cards ?? []).length} 卡片${dropped}）`;
     }
     case "uartix-commands": {
       const groups = data as Parameters<typeof commandStore.importGroupsMerge>[0];

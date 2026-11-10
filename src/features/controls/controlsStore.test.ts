@@ -167,3 +167,127 @@ describe("P121-F · 控制画布的只读锁按字段拆", () => {
     expect(store.activePage()!.id).toBe(second);
   });
 });
+
+describe("canvas embed schema v2", () => {
+  it("adds whitelisted panel cards at their semantic minimum size", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.getSnapshot().activePageId;
+    const r = store.addEmbedCard(pageId, "plot2d");
+    expect(r.ok).toBe(true);
+    const card = store.activePage()!.cards.at(-1)!;
+    expect(card).toMatchObject({
+      type: "embed",
+      panelId: "plot2d",
+      w: 4,
+      h: 3,
+      minW: 4,
+      minH: 3,
+      aspectLock: false,
+    });
+    expect(store.findEmbedCard("plot2d")?.pageId).toBe(pageId);
+    expect(store.getSnapshot().version).toBe(store.CONTROLS_SCHEMA_VERSION);
+  });
+
+  it("rejects unknown panels, duplicates and pages smaller than the minimum", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.getSnapshot().activePageId;
+    expect(store.addEmbedCard(pageId, "plot3d")).toEqual({ ok: false, reason: "unknown-panel" });
+    const small = store.importPage({ name: "tiny", cols: 3, rows: 3, cards: [] });
+    expect(store.addEmbedCard(small, "plot2d")).toEqual({ ok: false, reason: "page-too-small" });
+    expect(store.addEmbedCard(pageId, "plot2d").ok).toBe(true);
+    expect(store.addEmbedCard(pageId, "plot2d")).toEqual({ ok: false, reason: "duplicate" });
+  });
+
+  it("rejects the second heavy card when the page is full", async () => {
+    const store = await import("./controlsStore");
+    const page = store.importPage({ name: "full", cols: 4, rows: 3, cards: [] });
+    expect(store.addEmbedCard(page, "plot2d").ok).toBe(true);
+    expect(store.addEmbedCard(page, "hexview")).toEqual({ ok: false, reason: "no-space" });
+  });
+
+  it("drops unknown embed panel ids on import and reports the count", async () => {
+    const store = await import("./controlsStore");
+    const report = { droppedPanels: [] as string[] };
+    const pageId = store.importPage(
+      {
+        name: "mixed",
+        cols: 12,
+        rows: 12,
+        cards: [
+          { type: "embed", panelId: "plot2d" },
+          { type: "embed", panelId: "modbus" },
+          { type: "slider", x: 0, y: 5 },
+        ],
+      },
+      report,
+    );
+    expect(report.droppedPanels).toEqual(["modbus"]);
+    const page = store.getSnapshot().pages.find((p) => p.id === pageId)!;
+    expect(page.cards.filter((c) => c.type === "embed")).toHaveLength(1);
+    expect(page.cards).toHaveLength(2);
+  });
+
+  it("persists v2 with embed fields and migrates v1 snapshots on load", async () => {
+    const store = await import("./controlsStore");
+    store.addEmbedCard(store.getSnapshot().activePageId, "hexview");
+    vi.advanceTimersByTime(300);
+    const saved = JSON.parse(localStorage.getItem("vs.controls")!) as {
+      version: number;
+      pages: { cards: Record<string, unknown>[] }[];
+    };
+    expect(saved.version).toBe(2);
+    expect(saved.pages[0].cards.some((c) => c.type === "embed" && c.panelId === "hexview")).toBe(true);
+
+    // v1（无 version 字段）存档：读入即升到 v2，合法内嵌卡保留
+    vi.resetModules();
+    localStorage.setItem(
+      "vs.controls",
+      JSON.stringify({
+        activePageId: "p1",
+        pages: [
+          {
+            id: "p1",
+            name: "v1",
+            cols: 8,
+            rows: 8,
+            locked: false,
+            cards: [
+              { id: "c1", type: "embed", panelId: "plot2d", x: 0, y: 0, w: 1, h: 1, name: "曲线" },
+            ],
+          },
+        ],
+      }),
+    );
+    const reloaded = await import("./controlsStore");
+    expect(reloaded.getSnapshot().version).toBe(2);
+    const migrated = reloaded.getSnapshot().pages[0].cards[0];
+    expect(migrated).toMatchObject({ type: "embed", panelId: "plot2d", w: 4, h: 3 });
+
+    // 未知 panelId 在本地恢复时静默丢弃，不留空卡
+    vi.resetModules();
+    localStorage.setItem(
+      "vs.controls",
+      JSON.stringify({
+        pages: [
+          {
+            id: "p2",
+            name: "bad",
+            cols: 8,
+            rows: 8,
+            locked: false,
+            cards: [{ id: "c2", type: "embed", panelId: "nope", x: 0, y: 0, w: 4, h: 3 }],
+          },
+        ],
+      }),
+    );
+    const cleaned = await import("./controlsStore");
+    expect(cleaned.getSnapshot().pages[0].cards).toHaveLength(0);
+  });
+
+  it("rejects files newer than the supported schema", async () => {
+    const store = await import("./controlsStore");
+    expect(store.checkControlsVersion(undefined)).toBeNull();
+    expect(store.checkControlsVersion(2)).toBeNull();
+    expect(store.checkControlsVersion(3)).toContain("v3");
+  });
+});

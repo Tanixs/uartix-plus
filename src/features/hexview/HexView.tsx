@@ -16,6 +16,7 @@ import { Flyout } from "../../shared/Flyout";
 import { IconChevron, IconPause, IconPlay, IconTrash } from "../../shared/icons";
 import { t, tx } from "../../i18n/strings";
 import { hexSliceCovers } from "./hexCoverage";
+import { registerPanelView } from "../../panels/viewState";
 
 const ROW_H = 20;
 const COLS = 16;
@@ -65,6 +66,21 @@ export function HexView() {
   const fetchingRef = useRef(false);
   const lastFetchRef = useRef(0);
   const dirtyRef = useRef(true);
+  // 停靠↔内嵌切换：只搬运滚动位置（最后可见字节列）。恢复后停在原处、不自动跟随，
+  // 避免切换动作本身把视野拉回尾部；用户点「跟随」即可回到实时。
+  useEffect(
+    () =>
+      registerPanelView("hexview", {
+        capture: () => ({ scrollOffset: Math.max(0, Math.round(viewRef.current.viewEnd)) }),
+        restore: (v) => {
+          if (!("scrollOffset" in v)) return;
+          viewRef.current.viewEnd = Math.max(0, Math.round(v.scrollOffset));
+          viewRef.current.follow = false;
+          dirtyRef.current = true;
+        },
+      }),
+    [],
+  );
   // 暂停：停更画面（数据仍在后台接收累计），恢复后立即补刷一次
   const pausedRef = useRef(false);
   const [paused, setPaused] = useState(false);

@@ -42,12 +42,12 @@ export function JsonDropImport() {
       }
       try {
         const text = await f.text();
-        const obj = JSON.parse(text) as { kind?: string; data?: unknown };
+        const obj = JSON.parse(text) as { kind?: string; version?: unknown; data?: unknown };
         if (!obj.kind || obj.data === undefined) {
           flash(false, tx("文件格式不正确：缺少 kind/data（是否为 Uartix+ 导出的文件？）", "Malformed file: kind/data is missing (is this a file exported by Uartix+?)"));
           return;
         }
-        const message = await importDispatch(obj.kind, obj.data);
+        const message = await importDispatch(obj.kind, obj.data, obj.version);
         flash(true, message);
       } catch (err) {
         flash(false, tx(`导入失败：${String(err).replace(/^Error:\s*/, "")}`, `Import failed: ${String(err).replace(/^Error:\s*/, "")}`));

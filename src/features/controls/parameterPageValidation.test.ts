@@ -10,7 +10,7 @@ function fixture(): ControlPage {
     { id: "ki", name: "Ki", min: -5, max: 5, step: 0.5, value: 0, unit: "" },
   ], () => `card-${++id}` as `${string}-${string}-${string}-${string}-${string}`), id: "page-1", locked: false };
 }
-const snapshot = (page: ControlPage): ControlsSnapshot => ({ pages: [page], activePageId: page.id });
+const snapshot = (page: ControlPage): ControlsSnapshot => ({ version: 2, pages: [page], activePageId: page.id });
 const slider = (page: ControlPage) => page.cards[0] as SliderCard;
 
 describe("parameter page preview validation", () => {
@@ -29,7 +29,7 @@ describe("parameter page preview validation", () => {
 
   it("rejects deletion of the captured page", () => {
     const captured = captureParameterPage(fixture());
-    expect(() => requireCurrentParameterPage({ pages: [], activePageId: captured.pageId }, captured))
+    expect(() => requireCurrentParameterPage({ version: 2, pages: [], activePageId: captured.pageId }, captured))
       .toThrow("definitions changed");
   });
 

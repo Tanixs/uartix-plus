@@ -3,6 +3,21 @@ export type SendMode = "ascii" | "hex";
 import { getLocale } from "../../i18n/strings";
 import { guardLocked } from "../operator/lock";
   import { DEBUG_SCHEMA, sanitizeManaged, sanitizeDebugProfile, buildDebugPreset, type ManagedControl, type DebugProfile, type DebugParameter } from "./debugPreset";
+import {
+  EMBED_PANEL_MIN,
+  embedPanelName,
+  isEmbedPanelId,
+  sanitizeEmbedViewState,
+  type EmbedPanelId,
+  type EmbedPanelViewState,
+} from "./embedPanels";
+
+/**
+ * 控制画布存档 schema 版本。v2 = 引入 `type:"embed"` 内嵌面板卡片。
+ * v1 存档没有版本字段，按 v1 读入并就地升级；高于当前版本的导入文件必须拒绝，
+ * 否则新版本的卡片会被旧代码静默丢成空白画布。
+ */
+export const CONTROLS_SCHEMA_VERSION = 2;
 
 /**
  * 控件类型的**唯一运行时真相**（P97-I5）：以前只有 TS 联合，于是 ControlCanvas 的调色板
@@ -22,11 +37,17 @@ export const CONTROL_TYPES = [
   "custom",
 ] as const;
 export type ControlType = (typeof CONTROL_TYPES)[number];
+/**
+ * 卡片类型 = 可拖入的控件类型 + `embed`（画布内嵌面板）。
+ * `embed` 故意不进 CONTROL_TYPES：那是控件库的清单，内嵌面板从「面板」分组另走一条入口，
+ * 免得用户以为任意面板都能拖进画布。
+ */
+export type CardType = ControlType | "embed";
 
 export interface BaseCard {
   managed?: ManagedControl;
   id: string;
-  type: ControlType;
+  type: CardType;
   name: string;
   x: number;
   y: number;
@@ -191,6 +212,23 @@ export interface CustomCard extends BaseCard {
   type: "custom";
 }
 
+/**
+ * 内嵌面板卡片（schema v2）：把 2D 曲线 / Hex 数据流当控件放进画布。
+ *
+ * - `panelId`：白名单 id（见 embedPanels.ts），导入时未知 id 整卡丢弃；
+ * - `viewState`：停靠↔内嵌切换时搬运的视图态，不参与发送；
+ * - `minW/minH`：语义最小格数（落盘冗余存一份，便于旧版本提示与导出阅读）；
+ * - `aspectLock`：拖角缩放时是否锁长宽比（P1 两个面板默认关闭）。
+ */
+export interface EmbedCard extends BaseCard {
+  type: "embed";
+  panelId: EmbedPanelId;
+  viewState?: EmbedPanelViewState;
+  minW: number;
+  minH: number;
+  aspectLock: boolean;
+}
+
 export type ControlCard =
   | SliderCard
   | ButtonCard
@@ -202,7 +240,8 @@ export type ControlCard =
   | KeypadCard
   | KeymonCard
   | GroupCard
-  | CustomCard;
+  | CustomCard
+  | EmbedCard;
 
 export const PANEL_TYPE_NAMES: Record<ControlType, string> = {
   slider: "滑条",
@@ -243,6 +282,8 @@ export interface ControlPage {
 }
 
 export interface ControlsSnapshot {
+  /** 存档 schema 版本；v1 存档无此字段，读入时补成当前版本。 */
+  version: number;
   pages: ControlPage[];
   activePageId: string;
 }
@@ -325,7 +366,7 @@ export function newGroupChild(kind: GroupChildKind): GroupChild {
   ])[0];
 }
 
-function migrateCard(raw: Record<string, unknown>): ControlCard {
+function migrateCard(raw: Record<string, unknown>): ControlCard | null {
   const str = (v: unknown): string | undefined =>
     typeof v === "string" && v ? v : undefined;
   const base = {
@@ -340,7 +381,23 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
     sendTemplateId: str(raw.sendTemplateId),
     paramId: str(raw.paramId),
   };
-  const type = (raw.type ?? "slider") as ControlType;
+  const type = (raw.type ?? "slider") as CardType;
+  if (type === "embed") {
+    // 未知 panelId 整卡丢弃（由调用方计数告警）：不能留一张指向不存在组件的空卡。
+    if (!isEmbedPanelId(raw.panelId)) return null;
+    const panelId = raw.panelId;
+    const min = EMBED_PANEL_MIN[panelId];
+    return {
+      ...base,
+      type: "embed",
+      name: String(raw.name ?? embedPanelName(panelId)),
+      panelId,
+      viewState: sanitizeEmbedViewState(panelId, raw.viewState) ?? undefined,
+      minW: Math.max(min.w, Math.round(Number(raw.minW) || 0)),
+      minH: Math.max(min.h, Math.round(Number(raw.minH) || 0)),
+      aspectLock: Boolean(raw.aspectLock),
+    };
+  }
   switch (type) {
     case "button":
       return {
@@ -475,7 +532,7 @@ function migrateCard(raw: Record<string, unknown>): ControlCard {
   }
 }
 
-function migrateLegacyScript(raw: Record<string, unknown>): ControlCard {
+function migrateLegacyScript(raw: Record<string, unknown>): ControlCard | null {
   return migrateCard({
     ...raw,
     type: "button",
@@ -505,6 +562,15 @@ export function normalizeGeometry(
   }
   const maxW = Math.max(1, Math.round(Number(cols)) || 1);
   const maxH = Math.max(1, Math.round(Number(rows)) || 1);
+  // 内嵌面板有语义最小尺寸（2D 4×3 / Hex 3×2）：保存/导入/拖角都要抬到下限，
+  // 但页面本身比下限还小时只能取页面尺寸，避免卡片溢出画布。
+  if (c.type === "embed") {
+    const min = EMBED_PANEL_MIN[c.panelId];
+    if (min) {
+      c.w = Math.max(c.w, Math.min(min.w, maxW));
+      c.h = Math.max(c.h, Math.min(min.h, maxH));
+    }
+  }
   if (c.w > maxW || c.h > maxH) {
     if (c.type === "keypad" || c.type === "joystick") {
       const side = Math.min(c.w, c.h, maxW, maxH);
@@ -556,13 +622,16 @@ function load(): ControlsSnapshot {
       const parsed = JSON.parse(saved) as ControlsSnapshot;
       if (parsed.pages && parsed.pages.length) {
         return {
+          version: CONTROLS_SCHEMA_VERSION,
           activePageId: parsed.activePageId,
           pages: parsed.pages.map((p) => {
             const cols = Math.max(2, Math.min(24, Math.round(Number(p.cols) || 8)));
             const rows = Math.max(2, Math.min(48, Math.round(Number((p as ControlPage).rows) || 8)));
-            const cards = (p.cards as unknown as Record<string, unknown>[]).map((r) =>
-              r.type === "script" ? migrateLegacyScript(r) : migrateCard(r),
-            );
+            // 未知内嵌 panelId 在本地恢复时静默丢弃：模块求值期没有 UI 可弹告警，
+            // 留一张空卡比丢卡更糟；导入路径会通过 report 把丢弃数报给用户。
+            const cards = (p.cards as unknown as Record<string, unknown>[])
+              .map((r) => (r.type === "script" ? migrateLegacyScript(r) : migrateCard(r)))
+              .filter((c): c is ControlCard => c !== null);
             return {
               ...p,
               cols,
@@ -586,7 +655,7 @@ function load(): ControlsSnapshot {
     cards: [],
     locked: false,
   };
-  return { pages: [page], activePageId: page.id };
+  return { version: CONTROLS_SCHEMA_VERSION, pages: [page], activePageId: page.id };
 }
 
 let snapshot: ControlsSnapshot = load();
@@ -638,7 +707,11 @@ export function createDebugPage(name: string, parameters: DebugParameter[]): str
     ...preset, id: crypto.randomUUID(), name: pageName, locked: false,
     debugProfile: { schema: DEBUG_SCHEMA, version: 1 },
   };
-  const next = { pages: [...snapshot.pages, page], activePageId: page.id };
+  const next = {
+    version: CONTROLS_SCHEMA_VERSION,
+    pages: [...snapshot.pages, page],
+    activePageId: page.id,
+  };
   // Persist before publishing so a failed write never exposes a partial creation.
   localStorage.setItem("vs.controls", JSON.stringify(next));
   if (persistTimer) clearTimeout(persistTimer);
@@ -662,6 +735,7 @@ export function addPage() {
     locked: false,
   };
   snapshot = {
+    version: CONTROLS_SCHEMA_VERSION,
     pages: [...snapshot.pages, page],
     activePageId: page.id,
   };
@@ -673,6 +747,7 @@ export function removePage(id: string) {
   const pages = snapshot.pages.filter((p) => p.id !== id);
   if (!pages.length) return;
   snapshot = {
+    version: CONTROLS_SCHEMA_VERSION,
     pages,
     activePageId:
       snapshot.activePageId === id ? pages[0].id : snapshot.activePageId,
@@ -680,26 +755,40 @@ export function removePage(id: string) {
   emit();
 }
 
-export function importPage(raw: {
-  name?: string;
-  cols?: number;
-  rows?: number;
-  cards?: Record<string, unknown>[];
-}): string {
+export function importPage(
+  raw: {
+    name?: string;
+    cols?: number;
+    rows?: number;
+    cards?: Record<string, unknown>[];
+  },
+  report?: { droppedPanels: string[] },
+): string {
   if (guardLocked()) throw new Error("Operator 配置已锁定 / Operator configuration is locked");
   pushHistoryLike();
+  const cards: ControlCard[] = [];
+  for (const r of raw.cards ?? []) {
+    const card = r.type === "script" ? migrateLegacyScript(r) : migrateCard(r);
+    if (!card) {
+      // 未知/越界的内嵌 panelId：丢弃并交给调用方计数，不能留空卡占位。
+      report?.droppedPanels.push(String(r.panelId ?? r.type ?? "unknown"));
+      continue;
+    }
+    cards.push(card);
+  }
+  const cols = clampGrid(raw.cols ?? 8, 24);
+  const rows = clampGrid(raw.rows ?? 8, 48);
   const page: ControlPage = {
     id: crypto.randomUUID(),
     name: String(raw.name ?? "导入控制页").slice(0, 24),
-    cols: clampGrid(raw.cols ?? 8, 24),
-    rows: clampGrid(raw.rows ?? 8, 48),
+    cols,
+    rows,
     locked: false,
     debugProfile: sanitizeDebugProfile((raw as { debugProfile?: unknown }).debugProfile),
-    cards: (raw.cards ?? []).map((r) =>
-      r.type === "script" ? migrateLegacyScript(r) : migrateCard(r),
-    ),
+    cards: declumpCards(cards, cols, rows),
   };
   snapshot = {
+    version: CONTROLS_SCHEMA_VERSION,
     pages: [...snapshot.pages, page],
     activePageId: page.id,
   };
@@ -955,6 +1044,8 @@ function defaultCard(type: ControlType, name: string): ControlCard {
 export function addCard(pageId: string, type: ControlType = "slider"): string {
   // 加一张卡就是加一条能上线的字节：只读包里不放行（返回空串，调用方据此不往下写）
   if (guardLocked()) return "";
+  // 内嵌面板走 addEmbedCard（需要 panelId / 最小格数 / 互斥校验），不接受这条通用入口。
+  if ((type as string) === "embed") return "";
   const page = snapshot.pages.find((p) => p.id === pageId);
   const card = defaultCard(type, `${type}_${(page?.cards.length ?? 0) + 1}`);
   if (page) {
@@ -970,6 +1061,85 @@ export function addCard(pageId: string, type: ControlType = "slider"): string {
   };
   emit();
   return card.id;
+}
+
+export type EmbedAddResult =
+  | { ok: true; cardId: string }
+  | {
+      ok: false;
+      reason:
+        | "locked"
+        | "unknown-panel"
+        | "page-missing"
+        | "duplicate"
+        | "page-too-small"
+        | "no-space";
+    };
+
+/**
+ * 往画布放一张内嵌面板卡。返回结构化原因而不是空串——调用方要据此给用户
+ * "已停靠/已在画布/画布装不下"的具体提示，不能只在控制台里静默失败。
+ *
+ * 这里只校验画布自身约束（白名单、重复、最小格数、空位）；"是否已停靠在 dock"
+ * 属于跨形态互斥，放在 panelPlacement.ts，避免 store 反向依赖面板层。
+ */
+export function addEmbedCard(pageId: string, panelId: string): EmbedAddResult {
+  if (guardLocked()) return { ok: false, reason: "locked" };
+  if (!isEmbedPanelId(panelId)) return { ok: false, reason: "unknown-panel" };
+  const page = snapshot.pages.find((p) => p.id === pageId);
+  if (!page) return { ok: false, reason: "page-missing" };
+  if (findEmbedCard(panelId)) return { ok: false, reason: "duplicate" };
+  const min = EMBED_PANEL_MIN[panelId];
+  const rows = page.rows || 48;
+  if (page.cols < min.w || rows < min.h) return { ok: false, reason: "page-too-small" };
+  const pos = findFlowPos(page, min.w, min.h);
+  // findFlowPos 在排不下时返回 y=rows；用它判定"超额"，不引入第二套扫描。
+  if (pos.y + min.h > rows) return { ok: false, reason: "no-space" };
+  const card: EmbedCard = {
+    id: crypto.randomUUID(),
+    type: "embed",
+    name: embedPanelName(panelId),
+    x: pos.x,
+    y: pos.y,
+    w: min.w,
+    h: min.h,
+    panelId,
+    minW: min.w,
+    minH: min.h,
+    aspectLock: false,
+  };
+  snapshot = {
+    ...snapshot,
+    pages: snapshot.pages.map((p) =>
+      p.id === pageId ? { ...p, cards: [...p.cards, card] } : p,
+    ),
+  };
+  emit();
+  return { ok: true, cardId: card.id };
+}
+
+/** 跨页查找内嵌实例：单实例互斥要求同一面板全局只有一张卡。 */
+export function findEmbedCard(
+  panelId: string,
+): { pageId: string; card: EmbedCard } | null {
+  for (const page of snapshot.pages) {
+    for (const card of page.cards) {
+      if (card.type === "embed" && card.panelId === panelId) {
+        return { pageId: page.id, card };
+      }
+    }
+  }
+  return null;
+}
+
+/** 导入文件版本检查；返回用户可读错误，null = 可导入（含无版本字段的 v1）。 */
+export function checkControlsVersion(version: unknown): string | null {
+  const v = Number(version);
+  if (!Number.isFinite(v)) return null;
+  if (v <= CONTROLS_SCHEMA_VERSION) return null;
+  return getLocale() === "en"
+    ? `This canvas file uses schema v${v}, but this app supports up to v${CONTROLS_SCHEMA_VERSION}. Update the app before importing.`
+    : `控制画布文件版本为 v${v}，当前应用最高支持 v${CONTROLS_SCHEMA_VERSION}，请更新应用后再导入。`;
 }
 
 /** 流式排布：从左上角起按行扫描（行优先），返回第一个能容纳 w×h 的空位 */
@@ -1045,7 +1215,9 @@ export function patchCard(
                 if ("type" in patch && patch.type !== c.type)
                   throw new Error("managed 卡片类型不可修改 / Managed card type cannot be changed");
               }
-              const merged = migrateCard({ ...c, ...patch }) as ControlCard;
+              const merged = migrateCard({ ...c, ...patch });
+              // 非法的内嵌 panelId（patch 想改成白名单外）整卡保持原样，不落空卡。
+              if (!merged) return c;
               return normalizeGeometry(merged, p.cols, p.rows || 48);
             }),
           }

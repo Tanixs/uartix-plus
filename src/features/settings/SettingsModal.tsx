@@ -60,7 +60,7 @@ function fmtBytes(n: number): string {
  * 预览格由 `themePicker` 按那张表算出来（缺键按兜底层补，详设 §1-8）。
  */
 
-async function saveJson(kind: string, data: unknown): Promise<void> {
+async function saveJson(kind: string, data: unknown, version = 1): Promise<void> {
   const path = await save({
     title: t("set.export"),
     defaultPath: `${kind}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`,
@@ -69,7 +69,7 @@ async function saveJson(kind: string, data: unknown): Promise<void> {
   if (!path) return;
   await invoke("save_text_file", {
     path,
-    content: JSON.stringify({ kind, version: 1, data }, null, 2),
+    content: JSON.stringify({ kind, version, data }, null, 2),
   });
 }
 
@@ -1447,14 +1447,18 @@ export function SettingsModal({ onClose, onResetLayout, initialTab, onApplyLayou
                   t("set.exportControls"),
                   t("set.io.controls.tip"),
                   async () => {
-                    await saveJson("uartix-controls", controlsStore.exportPages());
+                    await saveJson(
+                      "uartix-controls",
+                      controlsStore.exportPages(),
+                      controlsStore.CONTROLS_SCHEMA_VERSION,
+                    );
                     setMsg(tx("控制画布已导出", "Control canvas exported"));
                   },
                   async () => {
                     const d = await loadJson<unknown>(["uartix-controls"]);
                     if (!d) return;
-                    const obj = d as { kind?: string; data?: unknown };
-                    setMsg(await importDispatch(obj.kind ?? "uartix-controls", obj.data ?? d));
+                    const obj = d as { kind?: string; version?: unknown; data?: unknown };
+                    setMsg(await importDispatch(obj.kind ?? "uartix-controls", obj.data ?? d, obj.version));
                   },
                 )}
                 {ioBlock(
