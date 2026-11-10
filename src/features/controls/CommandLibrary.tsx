@@ -8,7 +8,7 @@ import { useSettings } from "../settings/settingsStore";
 import { bakeReferenceFrame, previewReferenceFrame, runCommand } from "./cmdExec";
 import * as sendStore from "../send/sendStore";
 import { TextInput } from "../../shared/FormInputs";
-import { IconChevron, IconClose } from "../../shared/icons";
+import { IconChevron, IconClose, IconEdit, IconPlus } from "../../shared/icons";
 import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
 import { attachPdragZone, beginPointerDrag } from "../../shared/pointerDrag";
@@ -39,6 +39,9 @@ export function CommandLibrary() {
   const [renamingNode, setRenamingNode] = useState<string | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [flashCmd, setFlashCmd] = useState<string | null>(null);
+  // 「当前在看哪一条」：点击发送的同时把这条标成选中。它是本面板的局部态，不进 store，
+  // 所以只驱动这一棵树的渲染，不引订阅。
+  const [selCmd, setSelCmd] = useState<string | null>(null);
   const [cmdMenu, setCmdMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [cmdMenuPos, setCmdMenuPos] = useState<{ left: number; top: number } | null>(null);
   const cmdMenuRef = useRef<HTMLDivElement | null>(null);
@@ -156,13 +159,23 @@ export function CommandLibrary() {
     }
   };
 
+  /**
+   * 层级阶梯（P180-UI-1）：**深度只由 DOM 嵌套给出缩进**，色阶/字重由 `data-depth` 取。
+   *
+   * 改之前每层都是 `marginLeft: 10px` + 同一张 `border-soft` 卡 + 同一档 `bg-inset`，
+   * 去掉文字只剩一片同色方块 —— 用户原话「每一层颜色或者阴影都一样」。
+   * 现在：缩进走 `.cmd-kids` 的固定步长（`--depth-step`），引导线画在子块左边，
+   * 组件里不再出现任何数字；`data-depth` 只截到 3 档（第 4 层起不再变淡，
+   * 否则深层树会淡到读不出字）。
+   */
   const renderCmdTree = (items: commandStore.CommandNode[], depth: number) => (
     <>
       {items.map((n) => {
+        const lvl = Math.min(depth, 3);
         if (isGroup(n)) {
           const collapsed = collapsedGroups.has(n.id);
           return (
-            <div key={n.id} className="cmd-group" style={{ marginLeft: depth ? 10 : 0 }}>
+            <div key={n.id} className="cmd-group" data-depth={lvl}>
               <div
                 className={`cmd-group-head${
                   dropTarget && dropTarget.id === n.id
@@ -188,6 +201,7 @@ export function CommandLibrary() {
               >
                 <button
                   className="cmd-fold"
+                  aria-expanded={!collapsed}
                   title={collapsed ? tx("展开", "Expand") : tx("折叠", "Collapse")}
                   onClick={() => {
                     const next = new Set(collapsedGroups);
@@ -227,6 +241,8 @@ export function CommandLibrary() {
                     n.name
                   )}
                 </span>
+                {/* 条数：分组头与叶子命令的第一眼区别。空分组显示 0，也顺带说明"这里面没东西" */}
+                <span className="cmd-group-count">{n.items.length}</span>
                 <button
                   className="cmd-add-toggle"
                   title={tx("添加命令 / 子分组", "Add command / subgroup")}
@@ -235,7 +251,8 @@ export function CommandLibrary() {
                     setGroupMenuId(groupMenuId === n.id ? null : n.id);
                   }}
                 >
-                  ＋<IconChevron size={12} dir="down" />
+                  <IconPlus />
+                  <IconChevron size={12} dir="down" />
                 </button>
                 {groupMenuId === n.id && (
                   <div
@@ -248,7 +265,8 @@ export function CommandLibrary() {
                         setGroupMenuId(null);
                       }}
                     >
-                      {tx("＋ 添加命令", "＋ Add command")}
+                      <IconPlus />
+                      {tx("添加命令", "Add command")}
                     </button>
                     <button
                       onClick={() => {
@@ -256,22 +274,26 @@ export function CommandLibrary() {
                         setGroupMenuId(null);
                       }}
                     >
-                      {tx("＋ 添加子分组", "＋ Add subgroup")}
+                      <IconPlus />
+                      {tx("添加子分组", "Add subgroup")}
                     </button>
                   </div>
                 )}
-                <button title={tx("删除分组", "Delete group")} onClick={() => commandStore.removeNode(n.id)}><IconClose /></button>
+                <button className="cmd-del" title={tx("删除分组", "Delete group")} onClick={() => commandStore.removeNode(n.id)}><IconClose /></button>
               </div>
-              {!collapsed &&
-                (renamingNode === n.id ? null : renderCmdTree(n.items, depth + 1))}
+              {!collapsed && renamingNode !== n.id && n.items.length > 0 && (
+                <div className="cmd-kids">{renderCmdTree(n.items, depth + 1)}</div>
+              )}
             </div>
           );
         }
         const editing = editingCmd === n.id;
         return (
-          <div key={n.id} className="cmd-item-wrap" style={{ marginLeft: depth ? 10 : 0 }}>
+          <div key={n.id} className="cmd-item-wrap" data-depth={lvl}>
             <div
               className={`cmd-item ${n.scriptEnabled && n.script ? "script" : ""} ${flashCmd === n.id ? "flash" : ""} ${
+                selCmd === n.id ? "is-sel" : ""
+              } ${
                 dropTarget && dropTarget.id === n.id
                   ? dropTarget.pos === "before"
                     ? " drop-before"
@@ -301,6 +323,7 @@ export function CommandLibrary() {
                 });
               }}
               onClick={() => {
+                setSelCmd(n.id);
                 runCommand(n)
                   .then(() => setErr(null))
                   .catch((er) => setErr(String(er)));
@@ -311,15 +334,20 @@ export function CommandLibrary() {
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                setSelCmd(n.id);
                 setCmdMenuPos(null);
                 setCmdMenu({ id: n.id, x: e.clientX, y: e.clientY });
               }}
               title={tx("单击发送 · 双击编辑 · 右键更多 · 可拖到画布部署", "Click to send · double-click to edit · right-click for more · drag onto the canvas to place it")}
             >
               <span className="cmd-item-name">{n.name}</span>
-              <span className="cmd-item-tpl">
-                {n.scriptEnabled && n.script ? tx("⚡脚本", "⚡ script") : n.sendTemplateId ? tx("📐 发送谱引用", "📐 template reference") : n.template}
-              </span>
+              {n.scriptEnabled && n.script ? (
+                <span className="cmd-kinds">{tx("脚本", "script")}</span>
+              ) : n.sendTemplateId ? (
+                <span className="cmd-kinds">{tx("谱引用", "spec")}</span>
+              ) : (
+                <span className="cmd-item-tpl">{n.template}</span>
+              )}
               <button
                 className="cmd-edit"
                 title={tx("编辑命令", "Edit command")}
@@ -328,7 +356,7 @@ export function CommandLibrary() {
                   setEditingCmd(editing ? null : n.id);
                 }}
               >
-                ✎
+                <IconEdit />
               </button>
             </div>
             {editing && <div className="cmd-edit-hint">{tx("编辑中…（弹窗）", "Editing… (dialog)")}</div>}
@@ -350,8 +378,12 @@ export function CommandLibrary() {
             className="btn"
             onClick={() => commandStore.addGroup(tx(`分组${cmds.groups.length + 1}`, `Group ${cmds.groups.length + 1}`))}
           >
-            {tx("＋ 分组", "＋ Group")}
+            <IconPlus />
+            {tx("分组", "Group")}
           </button>
+          <span className="cmd-toolbar-hint">
+            {tx("顶层分组", "top level")}
+          </span>
         </div>
         {renderCmdTree(cmds.groups, 0)}
         <div className="widget-hint">

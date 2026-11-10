@@ -4871,24 +4871,19 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 }
 
 .cmd-add-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-0);
   border: 0;
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: var(--fs-body);
-  padding: 0 3px;
-  display: inline-flex;
-  align-items: center;
   border-radius: var(--radius-s);
 }
 
 .cmd-add-toggle:hover {
   color: var(--accent);
   background: var(--accent-soft);
-}
-
-.cmd-group-head {
-  position: relative;
 }
 
 .cmd-group-menu {
@@ -4916,6 +4911,9 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   border-radius: var(--radius-s);
   cursor: pointer;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
 }
 
 .cmd-group-menu button:hover {
@@ -4967,17 +4965,244 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   color: var(--text-dim);
 }
 
+/* ---------------- P180-UI 层级刻度（树 / 列表 / 折叠容器的统一语言） ----------------
+   病根（用户原话）：命令树「每一层颜色或者阴影都一样」。旧实现每层给 `marginLeft:10px`
+   + 同一张 border-soft 卡 + 同一档 bg-inset，去掉文字只剩一片同色方块，父子关系无从还原。
+   这里把"深度"变成一个可查询的输入：容器写 `data-depth`，四档给出**字重 / 文本色阶 /
+   行底色**三件事；缩进由 `.cmd-kids` 的固定步长承担，引导线画在子块左缘。
+   为什么不按层写类名：树是递归渲染的，深度事先不知道，类名会一直往上长；
+   属性选择器 + 自定义属性让"第 N 层"在任何面板都是同一套值（导轨/设置/编排器同源复用）。
+   **深过 3 层不再变淡**：再降就成读不出的灰，结构感交给缩进与引导线接住。 */
+:root {
+  /* 步长 = 折叠钮 24 + 与组名的间距 4：子项文字正好落在**父组名**的起点上，
+     而不是落在父组头左缘的某个随机位置——这是"像一棵树"的第一条判据。 */
+  --depth-step: 28px;
+  /* 引导线落在折叠钮中心：线、箭头、子项三点共线，孩子是谁的一目了然 */
+  --depth-rail-x: 12px;
+  --depth-rail: color-mix(in srgb, var(--line-strong) 70%, transparent);
+  --depth-fg-1: color-mix(in srgb, var(--text) 88%, var(--bg-panel));
+  --depth-fg-2: color-mix(in srgb, var(--text) 76%, var(--bg-panel));
+  --depth-fg-3: var(--text-dim);
+  /* 组头底色：0/1 两层各有一档，再深就不涂了。
+     方向按"相对面板抬一档"取（`--raise-1`），两套 scheme 的绝对明暗由主题决定，
+     所以这里不必再分亮暗各写一套；亮色那一档在下面 `[data-scheme="light"]` 里只调深浅。 */
+  --depth-bg-0: var(--raise-1);
+  --depth-bg-1: color-mix(in srgb, var(--raise-1) 55%, var(--bg-titlebar));
+}
+
+:root[data-scheme="light"] {
+  /* 亮色下 `--raise-1` 只比面板深 2 个色阶，做组头条不够"实"，
+     换成"凹档再压一点"：在大片 #eef0f4 的导轨底上能看出这是一条头 */
+  --depth-bg-0: color-mix(in srgb, var(--bg-inset) 92%, var(--text) 8%);
+  --depth-bg-1: color-mix(in srgb, var(--bg-inset) 55%, var(--bg-titlebar));
+}
+
+/* 深度 → 三档读数。这里只声明变量、不直接画：谁消费哪一项由组件自己的规则决定，
+   所以"叶子行不该有底、分组头该有底"这类判断仍留在各自的规则里。 */
+[data-depth="0"] {
+  --d-fg: var(--text);
+  --d-w: 600;
+  --d-bg: var(--depth-bg-0);
+}
+
+[data-depth="1"] {
+  --d-fg: var(--depth-fg-1);
+  --d-w: 600;
+  --d-bg: var(--depth-bg-1);
+}
+
+[data-depth="2"] {
+  --d-fg: var(--depth-fg-2);
+  --d-w: 500;
+  --d-bg: transparent;
+}
+
+[data-depth="3"] {
+  --d-fg: var(--depth-fg-3);
+  --d-w: 500;
+  --d-bg: transparent;
+}
+
 .cmd-tree {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
+}
+
+/* 导轨被压窄时（窗口小或用户拖窄，下限 180）28 的步长会把第 3 层挤成一两个字。
+   收紧到 20、折叠钮同步收窄，仍是"箭头—线—孩子"三点一线；
+   代价是折叠钮窄 4px（高度仍 24），换来深层命令名读得全。
+   容器查询挂在 `.rp-body-cmd`（只有命令库这一格），不会波及控件库与协议页。 */
+.rp-body-cmd {
+  container-type: inline-size;
+}
+
+@container (max-width: 260px) {
+  .cmd-tree {
+    --depth-step: 20px;
+    --depth-rail-x: 10px;
+  }
+
+  .cmd-group-head .cmd-fold {
+    width: 20px;
+  }
+}
+
+/* 更窄（<240）时深层行连"名字 + 模板 + 铅笔"都放不下：
+   先撤铅笔（编辑仍可双击行 / 右键菜单进入），把宽度让给命令名与命中区。
+   只撤 2/3 层的，浅层行保持原样。 */
+@container (max-width: 240px) {
+  .cmd-item-wrap[data-depth="2"] .cmd-edit,
+  .cmd-item-wrap[data-depth="3"] .cmd-edit {
+    display: none;
+  }
+}
+
+.cmd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.cmd-toolbar-hint {
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
 }
 
 .cmd-group {
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-m);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
+/* 分组头：深度决定字重与色阶，底色只在 0/1 层出现（更深层靠引导线，不再叠卡） */
+.cmd-group-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--ctl-h-2);
+  padding: 0 var(--sp-1) 0 var(--depth-step);
+  border-radius: var(--radius-s);
+  background: var(--d-bg);
+  color: var(--d-fg);
+  font-size: var(--fs-sm);
+  font-weight: var(--d-w);
+  user-select: none;
+}
+
+.cmd-group-head:hover {
+  background: var(--ctl-fill-hover);
+}
+
+.cmd-group-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmd-group-count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.cmd-group-head button {
+  flex: none;
+  width: var(--target-min);
+  height: var(--target-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.cmd-group-head button:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* 「＋」是双图标（加号 + 折叠箭头），不吃 24 的方框宽 */
+.cmd-group-head .cmd-add-toggle {
+  width: auto;
+  padding: 0 var(--sp-0);
+}
+
+/* 删除是破坏性动作：静置不占视线，悬停/键盘进入才出现（仍可 Tab 到，focus-within 会显形） */
+.cmd-group-head .cmd-del {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cmd-group-head:hover .cmd-del,
+.cmd-group-head:focus-within .cmd-del {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* 子块：固定缩进步长 + 一条向下渐隐的引导线。
+   线用 background 画而不是 border —— G 门（边框只许降）把这条边界钉着，
+   而"结构线"本来就该随主题淡化，border 做不到渐变收尾。 */
+.cmd-kids {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-0);
+  padding-left: var(--depth-step);
+  margin-top: var(--sp-0);
+}
+
+.cmd-kids::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--depth-rail-x) - 1px);
+  top: 0;
+  bottom: 2px;
+  width: 1px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    var(--depth-rail),
+    color-mix(in srgb, var(--depth-rail) 40%, transparent) 86%,
+    transparent
+  );
+}
+
+.cmd-item-wrap {
+  min-width: 0;
+}
+
+/* 叶子行：24 命中、按压区整行；悬停/选中在自己这一层的左缘立一根 accent 竖条，
+   竖条落在"该层缩进边"上 ⇒ 任意深度都能看出当前停在第几层。 */
+.cmd-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: var(--target-min);
+  padding: 0 var(--sp-1) 0 var(--depth-step);
+  border-radius: var(--radius-s);
+  color: var(--d-fg);
+  font-size: var(--fs-body);
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+}
+
+.cmd-item:hover {
+  background: var(--accent-soft);
+}
+
+/* 拖拽落点：上/下是插入线，into 是整块描边（分组头才吃 into） */
 .cmd-item.drop-before,
 .cmd-group-head.drop-before {
   box-shadow: inset 0 2px 0 var(--accent);
@@ -4992,69 +5217,37 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   box-shadow: inset 0 0 0 2px var(--accent);
 }
 
-.cmd-group-head {
-  border-radius: var(--radius-m) var(--radius-m) 0 0;
-}
-
-.cmd-group-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  background: var(--bg-inset);
-  font-size: var(--fs-sm);
-  font-weight: 600;
-  user-select: none;
-}
-
-.cmd-group-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cmd-group-head button {
-  border: 0;
-  background: transparent;
-  color: var(--text-dim);
-  cursor: pointer;
-  font-size: var(--fs-sm);
-  padding: 0 2px;
-}
-
-.cmd-group-head button:hover {
-  color: var(--accent);
-}
-
-.cmd-item-wrap {
-  border-top: 1px solid var(--border-soft);
-}
-
-.cmd-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  font-size: var(--fs-body);
-  cursor: pointer;
-}
-
-.cmd-item:hover {
+.cmd-item.is-sel {
   background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.cmd-item:hover::before,
+.cmd-item.is-sel::before {
+  content: "";
+  position: absolute;
+  /* 竖条压在**本层的引导线**上（不是压在文字边）：线在哪一层亮起来，
+     就说明当前停在第几层——这是"三态在任意深度都可读"的落点 */
+  left: calc(var(--depth-rail-x) - 1px);
+  top: var(--sp-1);
+  bottom: var(--sp-1);
+  width: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
 }
 
 .cmd-item-name {
-  color: var(--text);
+  /* 名字优先：只在真的放不下时才收缩（下限 2.5em ≈ 三个汉字），
+     模板是机器串、可以让位——窄栏深层行靠这条才读得出是哪条命令。 */
+  flex: 0 1 auto;
+  min-width: 2.5em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 64px;
 }
 
 .cmd-item-tpl {
-  flex: 1;
+  flex: 1 1 20px;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -5064,17 +5257,47 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   text-overflow: ellipsis;
 }
 
+/* 种类徽标（脚本 / 谱引用）：文字而不是字符图标（§8-25）。
+   允许收缩并省略：窄栏里它是唯一可以牺牲的一格（名字与命中区都不能让）。 */
+.cmd-kinds {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0 var(--sp-1h);
+  border-radius: var(--radius-pill);
+  background: var(--raise-1);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .cmd-edit {
+  flex: none;
+  margin-left: auto;
+  width: var(--target-min);
+  height: var(--target-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
+  border-radius: var(--radius-s);
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: var(--fs-sm);
-  padding: 0 2px;
 }
 
 .cmd-edit:hover {
   color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.cmd-group-head button:focus-visible,
+.cmd-item:focus-visible,
+.cmd-edit:focus-visible {
+  outline: var(--ctl-ring-w) solid var(--ctl-ring);
+  outline-offset: 1px;
 }
 
 .ctl-btn {
@@ -5206,29 +5429,17 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 }
 
 .cmd-fold {
-  border: 0;
-  background: transparent;
+  /* 折叠钮浮在缩进槽里，不参与行内排版：组名与叶子命令因此落在同一条竖线上，
+     同深度的兄弟节点（不论分组还是命令）左缘完全对齐。 */
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   color: var(--text-dim);
-  cursor: pointer;
-  padding: 0 2px;
-  display: inline-flex;
-  align-items: center;
 }
 
 .cmd-fold:hover {
   color: var(--accent);
-}
-
-.cmd-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.cmd-item-tpl {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .ctx-has-sub {

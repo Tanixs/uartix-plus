@@ -279,7 +279,7 @@ export function RailPanel({ actions }: { actions: RailActions }) {
         </div>
       )}
       {open === "commands" && (
-        <div className="rp-body rp-body-lib">
+        <div className="rp-body rp-body-lib rp-body-cmd">
           <CommandLibrary />
         </div>
       )}
