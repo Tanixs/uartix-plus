@@ -1077,14 +1077,18 @@ export type EmbedAddResult =
     };
 
 /**
- * 往画布放一张内嵌面板卡。返回结构化原因而不是空串——调用方要据此给用户
- * "已停靠/已在画布/画布装不下"的具体提示，不能只在控制台里静默失败。
+ * 画布自身约束的干跑：白名单、重复、最小格数、空位，均不写状态。
+ * `addEmbedCard` 与 `canAddEmbedCard` 共用同一份判断，避免"预览能放、落下却说没空位"。
  *
- * 这里只校验画布自身约束（白名单、重复、最小格数、空位）；"是否已停靠在 dock"
- * 属于跨形态互斥，放在 panelPlacement.ts，避免 store 反向依赖面板层。
+ * 这里只校验画布自身约束；"是否已停靠在 dock" 属于跨形态互斥，
+ * 放在 panelPlacement.ts，避免 store 反向依赖面板层。
  */
-export function addEmbedCard(pageId: string, panelId: string): EmbedAddResult {
-  if (guardLocked()) return { ok: false, reason: "locked" };
+function checkEmbedPlacement(
+  pageId: string,
+  panelId: string,
+):
+  | { ok: true; pos: { x: number; y: number }; min: { w: number; h: number } }
+  | { ok: false; reason: Exclude<EmbedAddResult, { ok: true }>["reason"] } {
   if (!isEmbedPanelId(panelId)) return { ok: false, reason: "unknown-panel" };
   const page = snapshot.pages.find((p) => p.id === pageId);
   if (!page) return { ok: false, reason: "page-missing" };
@@ -1095,18 +1099,46 @@ export function addEmbedCard(pageId: string, panelId: string): EmbedAddResult {
   const pos = findFlowPos(page, min.w, min.h);
   // findFlowPos 在排不下时返回 y=rows；用它判定"超额"，不引入第二套扫描。
   if (pos.y + min.h > rows) return { ok: false, reason: "no-space" };
+  return { ok: true, pos, min };
+}
+
+/** 只校验不落库：双向切换先干跑，避免"关了停靠才发现画布放不下"。 */
+export function canAddEmbedCard(pageId: string, panelId: string): EmbedAddResult {
+  if (guardLocked()) return { ok: false, reason: "locked" };
+  const r = checkEmbedPlacement(pageId, panelId);
+  return r.ok ? { ok: true, cardId: "" } : r;
+}
+
+/**
+ * 往画布放一张内嵌面板卡。返回结构化原因而不是空串——调用方要据此给用户
+ * "已停靠/已在画布/画布装不下"的具体提示，不能只在控制台里静默失败。
+ */
+export function addEmbedCard(
+  pageId: string,
+  panelId: string,
+  viewState?: EmbedPanelViewState | null,
+): EmbedAddResult {
+  if (guardLocked()) return { ok: false, reason: "locked" };
+  const checked = checkEmbedPlacement(pageId, panelId);
+  if (!checked.ok) return checked;
+  const { pos, min } = checked;
+  // 旧存档/坏数据不进卡：宁可回到默认视野，也不让 NaN 把 uPlot 弄白。
+  const view = isEmbedPanelId(panelId)
+    ? sanitizeEmbedViewState(panelId, viewState)
+    : null;
   const card: EmbedCard = {
     id: crypto.randomUUID(),
     type: "embed",
-    name: embedPanelName(panelId),
+    name: embedPanelName(panelId as EmbedPanelId),
     x: pos.x,
     y: pos.y,
     w: min.w,
     h: min.h,
-    panelId,
+    panelId: panelId as EmbedPanelId,
     minW: min.w,
     minH: min.h,
     aspectLock: false,
+    ...(view ? { viewState: view } : {}),
   };
   snapshot = {
     ...snapshot,

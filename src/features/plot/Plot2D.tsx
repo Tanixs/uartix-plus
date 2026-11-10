@@ -23,6 +23,7 @@ import {
   IconFitView,
   IconTrash,
   IconCamera,
+  IconDock,
 } from "../../shared/icons";
 import { zoomFactor } from "../../shared/zoom";
 import { HelpHint } from "../../shared/HelpHint";
@@ -41,6 +42,8 @@ import {
 import { tx, useLocale } from "../../i18n/strings";
 import { usePanelChrome, type ChromeAction } from "../../panels/panelChrome";
 import { registerPanelView } from "../../panels/viewState";
+import * as panelActivity from "../../panels/panelActivity";
+import { movePanelToCanvas, placementRejectText } from "../../panels/panelPlacement";
 
 /** 会话标注竖线颜色（P3b）：琥珀色，与「起」灰虚线、「最新」主题实线区分 */
 const ANN_COLOR = "#e8a33d";
@@ -1493,6 +1496,9 @@ export function Plot2D() {
     feedTickRef.current = () => {
       const u = uRef.current;
       if (!u) return;
+      // 不可见（停靠页签在后台 / 内嵌卡滚出视口）时只保留脏标记：
+      // 数据仍在有界缓冲里，恢复可见后的下一次 tick 会一次补齐，不丢段。
+      if (!panelActivity.isVisible("plot2d")) return;
       plotStore.clearDirty();
       const settings = plotStore.getSnapshot().settings;
       const snap = plotStore.getSnapshot();
@@ -1828,6 +1834,19 @@ export function Plot2D() {
       on: !!snap,
       disabled: snapBlocked && !snap,
       run: () => toggleSnapshot(),
+    },
+    {
+      id: "embed",
+      label: tx("内嵌到控制画布", "Embed in canvas"),
+      title: tx(
+        "把 2D 曲线整体搬进控制画布：同一面板单实例，停靠页签随即关闭，视野原样带过去",
+        "Move the 2D plot into the control canvas: a single instance, the dock tab closes and the view carries over",
+      ),
+      Icon: IconDock,
+      run: () => {
+        const r = movePanelToCanvas("plot2d");
+        if (!r.ok) toast(placementRejectText(r.reason));
+      },
     },
     {
       id: "clearChannels",

@@ -13,10 +13,14 @@ import { requestOpenPanel } from "../ai/appBus";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
-import { IconChevron, IconPause, IconPlay, IconTrash } from "../../shared/icons";
+import { IconChevron, IconDock, IconPause, IconPlay, IconTrash } from "../../shared/icons";
 import { t, tx } from "../../i18n/strings";
 import { hexSliceCovers } from "./hexCoverage";
 import { registerPanelView } from "../../panels/viewState";
+import { usePanelChrome } from "../../panels/panelChrome";
+import * as panelActivity from "../../panels/panelActivity";
+import { movePanelToCanvas, placementRejectText } from "../../panels/panelPlacement";
+import { toast } from "../ai/uiRuntime";
 
 const ROW_H = 20;
 const COLS = 16;
@@ -81,6 +85,22 @@ export function HexView() {
       }),
     [],
   );
+  // 页签条唯一动作：整体搬到控制画布。移动逻辑在 panelPlacement（先 capture 滚动位置再关页签）。
+  usePanelChrome("hexview", [
+    {
+      id: "embed",
+      label: tx("内嵌到控制画布", "Embed in canvas"),
+      title: tx(
+        "把 Hex 数据流整体搬进控制画布：同一面板单实例，停靠页签随即关闭，滚动位置原样带过去",
+        "Move the Hex stream into the control canvas: a single instance, the dock tab closes and the scroll position carries over",
+      ),
+      Icon: IconDock,
+      run: () => {
+        const r = movePanelToCanvas("hexview");
+        if (!r.ok) toast(placementRejectText(r.reason));
+      },
+    },
+  ]);
   // 暂停：停更画面（数据仍在后台接收累计），恢复后立即补刷一次
   const pausedRef = useRef(false);
   const [paused, setPaused] = useState(false);
@@ -413,9 +433,15 @@ export function HexView() {
     mo.observe(document.documentElement, { attributeFilter: ["data-theme"] });
     const loop = () => {
       // 面板不在前台（堆叠后台页签的 DOM 被 dockview 摘除，clientWidth=0）
-      // → 跳过取数+重绘；数据在 Rust ring buffer 不丢，切回前台自动补取
+      // 或内嵌卡滚出画布视口 → 跳过取数+重绘；数据在 Rust ring buffer 不丢，
+      // 切回前台/滚回视口后 dirty 仍在，下一帧自动补取。
       const canvas = canvasRef.current;
-      if (dirtyRef.current && canvas && canvas.clientWidth > 0) {
+      if (
+        dirtyRef.current &&
+        panelActivity.isVisible("hexview") &&
+        canvas &&
+        canvas.clientWidth > 0
+      ) {
         dirtyRef.current = false;
         ensureData();
         draw();

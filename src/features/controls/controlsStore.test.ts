@@ -191,6 +191,36 @@ describe("canvas embed schema v2", () => {
     expect(store.getSnapshot().version).toBe(store.CONTROLS_SCHEMA_VERSION);
   });
 
+  it("dry-runs placement and only persists a sanitized view state", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.getSnapshot().activePageId;
+    const before = store.getSnapshot();
+    expect(store.canAddEmbedCard(pageId, "plot2d").ok).toBe(true);
+    // 干跑不能发快照：否则拖拽悬停会把整张画布重渲染一遍。
+    expect(store.getSnapshot()).toBe(before);
+
+    expect(
+      store.addEmbedCard(pageId, "plot2d", {
+        xMin: 1,
+        xMax: 2,
+        yMin: -1,
+        yMax: 1,
+        follow: false,
+      }).ok,
+    ).toBe(true);
+    expect(store.findEmbedCard("plot2d")?.card.viewState).toEqual({
+      xMin: 1,
+      xMax: 2,
+      yMin: -1,
+      yMax: 1,
+      follow: false,
+    });
+
+    // 坏视图态宁可丢掉，也不能把 NaN 写进存档。
+    expect(store.addEmbedCard(pageId, "hexview", { scrollOffset: -3 }).ok).toBe(true);
+    expect(store.findEmbedCard("hexview")?.card.viewState).toBeUndefined();
+  });
+
   it("rejects unknown panels, duplicates and pages smaller than the minimum", async () => {
     const store = await import("./controlsStore");
     const pageId = store.getSnapshot().activePageId;

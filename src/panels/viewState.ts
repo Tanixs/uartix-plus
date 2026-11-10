@@ -57,6 +57,20 @@ export function discardPanelView(panelId: EmbedPanelId) {
   pending.delete(panelId);
 }
 
+/**
+ * 用卡片里持久化的视野预置下一次挂载。
+ *
+ * 只在没有 pending 时生效：停靠→内嵌是"刚 capture 的实时视野"，
+ * 优先级必须高于"上次存盘时的旧视野"，否则切换看起来像跳回历史。
+ */
+export function primePanelView(
+  panelId: EmbedPanelId,
+  state: EmbedPanelViewState | null | undefined,
+): void {
+  if (!state || pending.has(panelId)) return;
+  pending.set(panelId, state);
+}
+
 export function hasPanelViewAdapter(panelId: EmbedPanelId): boolean {
   return adapters.has(panelId);
 }

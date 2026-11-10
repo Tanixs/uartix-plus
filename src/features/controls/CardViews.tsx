@@ -79,6 +79,11 @@ export interface CardFrameProps {
   cont?: boolean;
   resizable?: boolean;
   onResizeStart?: (e: React.MouseEvent, card: ControlCard) => void;
+  /**
+   * 只有指定的拖拽把手能移动整卡（内嵌卡片用标题条）。
+   * 内容区要让 uPlot 平移/框选、Hex 滚动直通，整卡拖动会把那些操作全吃掉。
+   */
+  dragHandleOnly?: boolean;
   children: React.ReactNode;
 }
 
@@ -137,7 +142,9 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
   return (
     <div
       ref={rootRef}
-      className={`ctl-card ${props.cont ? "cont" : ""}${linked ? " linked" : ""}`}
+      className={`ctl-card ${props.cont ? "cont" : ""}${linked ? " linked" : ""}${
+        card.type === "embed" ? " embed" : ""
+      }`}
       data-id={card.id}
       style={{
         left: props.left,
@@ -145,7 +152,15 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
         width: props.width,
         height: props.height,
       }}
-      onMouseDown={(e) => props.onDragStart(e, card)}
+      onMouseDown={(e) => {
+        if (
+          props.dragHandleOnly &&
+          !(e.target as Element).closest("[data-embed-head]")
+        ) {
+          return;
+        }
+        props.onDragStart(e, card);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();

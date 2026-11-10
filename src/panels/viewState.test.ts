@@ -52,4 +52,22 @@ describe("panel view-state handoff", () => {
     s.registerPanelView("plot2d", { capture: () => null, restore });
     expect(restore).not.toHaveBeenCalled();
   });
+
+  it("primes a persisted view when no fresh capture exists", async () => {
+    const s = await import("./viewState");
+    s.primePanelView("plot2d", view);
+    const restore = vi.fn();
+    s.registerPanelView("plot2d", { capture: () => null, restore });
+    expect(restore).toHaveBeenCalledWith(view);
+  });
+
+  it("lets a fresh capture win over a persisted view", async () => {
+    const s = await import("./viewState");
+    s.registerPanelView("plot2d", { capture: () => view, restore: vi.fn() });
+    s.capturePanelView("plot2d");
+    s.primePanelView("plot2d", { ...view, xMin: 100, xMax: 200 });
+    const restore = vi.fn();
+    s.registerPanelView("plot2d", { capture: () => null, restore });
+    expect(restore).toHaveBeenCalledWith(view);
+  });
 });

@@ -1,7 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../features/operator/lock", () => ({ guardLocked: () => false }));
-vi.mock("../i18n/strings", () => ({ getLocale: () => "zh" }));
+vi.mock("../i18n/strings", () => ({ getLocale: () => "zh", tx: (zh: string) => zh }));
 
 beforeEach(() => {
   vi.resetModules();
@@ -53,5 +53,52 @@ describe("panel placement mutex", () => {
       ok: false,
       reason: "unknown-panel",
     });
+  });
+
+  it("moves a closed panel into the active page through the same guard", async () => {
+    const activity = await import("./panelActivity");
+    activity.syncPanels([]);
+    const placement = await import("./panelPlacement");
+    const r = placement.movePanelToCanvas("hexview");
+    expect(r.ok).toBe(true);
+    expect(placement.panelPlacementOf("hexview")).toBe("embed");
+    // 第二次走的是"已内嵌"，而不是再放一张。
+    expect(placement.movePanelToCanvas("hexview")).toEqual({
+      ok: false,
+      reason: "already-embedded",
+    });
+  });
+
+  it("refuses to remove a card when the dock bridge is not ready", async () => {
+    const activity = await import("./panelActivity");
+    activity.syncPanels([]);
+    const store = await import("../features/controls/controlsStore");
+    const pageId = store.getSnapshot().activePageId;
+    const placement = await import("./panelPlacement");
+    expect(placement.movePanelToCanvas("plot2d").ok).toBe(true);
+    const card = store.findEmbedCard("plot2d");
+    expect(card).not.toBeNull();
+    expect(placement.movePanelToDock(pageId, card!.card)).toEqual({
+      ok: false,
+      reason: "dock-unavailable",
+    });
+    // 失败不能把卡片抹掉：落点仍然是内嵌。
+    expect(store.findEmbedCard("plot2d")).not.toBeNull();
+  });
+
+  it("has readable text for every reject reason", async () => {
+    const placement = await import("./panelPlacement");
+    const reasons = [
+      "unknown-panel",
+      "docked",
+      "already-embedded",
+      "locked",
+      "page-missing",
+      "page-too-small",
+      "no-space",
+    ] as const;
+    for (const r of reasons) {
+      expect(placement.placementRejectText(r).length).toBeGreaterThan(0);
+    }
   });
 });

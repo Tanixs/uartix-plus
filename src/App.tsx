@@ -37,6 +37,7 @@ import {
   pushRecentPanel,
 } from "./panels/panelMenu";
 import * as panelActivity from "./panels/panelActivity";
+import { registerDockApi, unregisterDockApi } from "./shell/dockBridge";
 import { IdentityBar, ToolBar, LinkCapsule } from "./shell/TopBars";
 import { InfoBar } from "./shell/InfoBar";
 import { SideRail } from "./shell/SideRail";
@@ -153,6 +154,8 @@ export default function App() {
     { id: string; left: number; top: number; width: number; height: number }[]
   >([]);
   const apiRef = useRef<DockviewApi | null>(null);
+  /** 控制画布"移回停靠"要用：声明早于 addOrFocusPanel，避免 onReady 闭包里先用后声明。 */
+  const addOrFocusPanelRef = useRef<(id: string) => void>(() => {});
   const syncPanelsRef = useRef<(() => void) | null>(null);
   const retitlePanelsRef = useRef<(() => void) | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -571,7 +574,17 @@ export default function App() {
       markWelcomeSeen();
       window.setTimeout(() => tourStore.start(QUICK_STEPS), 320);
     }
+    // 控制画布的内嵌卡片要能"移回停靠"：把 dock 的唯一入口交给面板层，
+    // 复用 addOrFocusPanel（最近使用、退役面板改派都在这条路上）。
+    registerDockApi(api, (id) => addOrFocusPanelRef.current(id));
   }, []);
+
+  useEffect(
+    () => () => {
+      unregisterDockApi(apiRef.current);
+    },
+    [],
+  );
 
   // Operator 部署包布局（P67-O2）：激活时整屏应用；切换前把当前布局快照到自动备份槽
   useEffect(() => {
@@ -911,6 +924,11 @@ export default function App() {
         : {}),
     });
   };
+
+  // 面板层的"移回停靠"永远拿到最新闭包（最近面板、导轨改派都跟着状态走）。
+  useEffect(() => {
+    addOrFocusPanelRef.current = addOrFocusPanel;
+  });
 
   // P103 批2：工具栏三段分区（接口参数 ｜ 会话 ｜ 面板与布局）。顺序与显隐由 chromeStore 驱动
   // （chrome_set 工具的落点）；段间竖线分隔，spacer 永远垫在最后一段之前（默认序 = 布局段贴右，同旧版）。

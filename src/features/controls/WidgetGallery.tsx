@@ -1,9 +1,10 @@
 import { beginPointerDrag } from "../../shared/pointerDrag";
-import { WIDGET_ICONS } from "../../shared/icons";
+import { IconLanes, IconTerminal, WIDGET_ICONS } from "../../shared/icons";
 import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
 import * as store from "./controlsStore";
 import type { ControlType } from "./controlsStore";
+import { EMBED_PANEL_IDS, embedPanelName } from "./embedPanels";
 
 /**
  * P104-R3 控件库：从控制画布的抽屉（`sideTab === "widgets"`）整块搬进左侧导轨「控件」项。
@@ -55,6 +56,29 @@ export function WidgetGallery() {
             {WIDGET_ICONS[type]}
           </span>{" "}
           {widgetLabel(type)}
+        </div>
+      ))}
+      <div className="widget-group-title">{tx("面板", "Panels")}</div>
+      {EMBED_PANEL_IDS.map((panelId) => (
+        <div
+          key={panelId}
+          className="widget-item pdrag-src"
+          onPointerDown={(e) =>
+            beginPointerDrag(e, {
+              kind: "vs-panel",
+              data: JSON.stringify({ panelId }),
+              label: embedPanelName(panelId),
+            })
+          }
+          title={tx(
+            "拖到右侧画布内嵌；面板会从停靠区整体搬过去",
+            "Drag onto the canvas to embed; the panel moves out of the dock",
+          )}
+        >
+          <span className="widget-icon">
+            {panelId === "plot2d" ? <IconLanes /> : <IconTerminal />}
+          </span>{" "}
+          {embedPanelName(panelId)}
         </div>
       ))}
       <div className="widget-hint">

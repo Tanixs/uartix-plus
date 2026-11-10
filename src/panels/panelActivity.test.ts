@@ -59,4 +59,37 @@ describe("panel activity union", () => {
     const snap = a.getSnapshot();
     expect(a.getSnapshot()).toBe(snap);
   });
+
+  it("keeps a scrolled-out embed card open but not visible", async () => {
+    const a = await import("./panelActivity");
+    a.syncPanels([{ id: "controls", visible: true }]);
+    a.setEmbeddedPanels(["plot2d"], "controls");
+    a.setEmbeddedCardVisible("plot2d", false);
+    expect(a.isOpen("plot2d")).toBe(true);
+    expect(a.isVisible("plot2d")).toBe(false);
+
+    // 滚回视口：数据泵没停过，渲染门控重新打开。
+    a.setEmbeddedCardVisible("plot2d", true);
+    expect(a.isVisible("plot2d")).toBe(true);
+  });
+
+  it("drops viewport-hidden marks when the embed set is replaced", async () => {
+    const a = await import("./panelActivity");
+    a.syncPanels([{ id: "controls", visible: true }]);
+    a.setEmbeddedPanels(["plot2d"], "controls");
+    a.setEmbeddedCardVisible("plot2d", false);
+    // 切页：卡片集合清空，隐藏标记不能留到下一次挂载。
+    a.setEmbeddedPanels([], "controls");
+    a.setEmbeddedPanels(["plot2d"], "controls");
+    expect(a.isVisible("plot2d")).toBe(true);
+  });
+
+  it("clears a stale hidden mark on unmount", async () => {
+    const a = await import("./panelActivity");
+    a.syncPanels([{ id: "controls", visible: true }]);
+    a.setEmbeddedPanels(["hexview"], "controls");
+    a.setEmbeddedCardVisible("hexview", false);
+    a.clearEmbeddedCardVisibility("hexview");
+    expect(a.isVisible("hexview")).toBe(true);
+  });
 });

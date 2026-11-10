@@ -498,7 +498,6 @@ const J_EXEMPT = {
   "ai-edit-input": "与 .input 同元素，样式在 .input",
   "orch-chip-wrap": "浮层锚点（relative 由 Dropdown 侧给），无自有视觉",
   // —— 明说的欠账：症状比 .set-hint 轻（父级是 flex/grid，被带着走），逐条还 ——
-  "plot-measure-col": "欠账：测量列容器没写规则，靠父级 flex 撑着 ⇒ 间距不受控",
   "ai-anom-item": "欠账：异常项行没写规则。",
   "ai-ext-head": "欠账：扩展面板标题行没写规则。",
   "ai-edit-wrap": "欠账：消息编辑态容器没写规则。",

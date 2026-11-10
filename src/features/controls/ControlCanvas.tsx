@@ -27,6 +27,15 @@ import { tx, useLocale } from "../../i18n/strings";
 import { alertDialog } from "../../shared/Dialog";
 import { toast } from "../ai/uiRuntime";
 import { attachPdragZone, type PdragDetail } from "../../shared/pointerDrag";
+import { EmbedCardView } from "../../panels/embedHost";
+import * as panelActivity from "../../panels/panelActivity";
+import {
+  canPlacePanelInCanvas,
+  movePanelToCanvas,
+  movePanelToDock,
+  placementRejectText,
+} from "../../panels/panelPlacement";
+import { EMBED_PANEL_MIN, isEmbedPanelId } from "./embedPanels";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -645,7 +654,7 @@ export function ControlCanvas() {
     const el = wrapRef.current;
     if (!el) return;
     return attachPdragZone(el, {
-      kinds: "vs-widget vs-cmd vs-field",
+      kinds: "vs-widget vs-cmd vs-field vs-panel",
       onOver: (dd) => gridOverRef.current(dd),
       onLeave: () => setDropPrev(null),
       onDrop: (dd) => {
@@ -654,6 +663,23 @@ export function ControlCanvas() {
       },
     });
   }, [page?.id]);
+
+  /**
+   * 内嵌面板的"开着"集合必须由真正挂卡的宿主同步：之前没人调 setEmbeddedPanels，
+   * 并集里永远没有 plot2d/hexview，数据泵因此空跑。这里只看**当前页**：
+   * 别的页上的卡没挂载，本来就不该算打开。
+   */
+  const embedSig = (page?.cards ?? [])
+    .filter(
+      (c): c is store.EmbedCard =>
+        c.type === "embed" && isEmbedPanelId(c.panelId),
+    )
+    .map((c) => c.panelId)
+    .join(",");
+  useEffect(() => {
+    panelActivity.setEmbeddedPanels(embedSig ? embedSig.split(",") : [], "controls");
+  }, [embedSig]);
+  useEffect(() => () => panelActivity.setEmbeddedPanels([], "controls"), []);
 
   if (!page) {
     return (
@@ -1054,6 +1080,23 @@ export function ControlCanvas() {
       );
       if (!busy) store.patchCard(page.id, id, { x: tx, y: ty });
     };
+    if (d.kind === "vs-panel") {
+      let panelId: unknown;
+      try {
+        panelId = (JSON.parse(d.data) as { panelId?: unknown }).panelId;
+      } catch {
+        return;
+      }
+      if (!isEmbedPanelId(panelId)) return;
+      // 拖入即"移动"：已在停靠区的面板会先 capture 再关页签，不会出现两个实例。
+      const r = movePanelToCanvas(panelId);
+      if (!r.ok) {
+        toast(placementRejectText(r.reason));
+        return;
+      }
+      placeAt(r.cardId, d.x, d.y);
+      return;
+    }
     if (d.kind === "vs-field") {
       try {
         const p = JSON.parse(d.data) as { tplId: string; fieldId: string };
@@ -1121,6 +1164,31 @@ export function ControlCanvas() {
   gridOverRef.current = (d) => {
     const g = gridRef.current;
     if (!g) return;
+    if (d.kind === "vs-panel") {
+      let panelId: unknown;
+      try {
+        panelId = (JSON.parse(d.data) as { panelId?: unknown }).panelId;
+      } catch {
+        setDropPrev(null);
+        return;
+      }
+      if (!isEmbedPanelId(panelId)) {
+        setDropPrev(null);
+        return;
+      }
+      const min = EMBED_PANEL_MIN[panelId];
+      const r = g.getBoundingClientRect();
+      const zf = zfactor || 1;
+      const tx = Math.max(0, Math.min(page.cols - min.w, Math.round(((d.x - r.left) / zf - OFFq) / STEPq)));
+      const ty = Math.max(0, Math.min(gridRows - min.h, Math.round(((d.y - r.top) / zf - OFFq) / STEPq)));
+      const busy = page.cards.some(
+        (c) => !(tx + min.w <= c.x || c.x + c.w <= tx || ty + min.h <= c.y || c.y + (c.h || 1) <= ty),
+      );
+      // 先按最小格数告诉用户"能不能放"；真正落卡时还会再校验一次重复/容量。
+      const gate = canPlacePanelInCanvas(page.id, panelId);
+      setDropPrev(gate.ok && !busy ? { x: tx, y: ty, w: min.w, h: min.h } : null);
+      return;
+    }
     let type: ControlType = "slider";
     if (d.kind === "vs-widget") {
       try {
@@ -1207,6 +1275,9 @@ export function ControlCanvas() {
       return <CardFrame key={c.id} {...common}>
         <p className="ctl-managed-hint">{tx("受管设备动作未配置；未启用发送、脚本或键盘监听。", "Managed device action unconfigured; sending, scripts and keyboard listeners are disabled.")}</p>
       </CardFrame>;
+    }
+    if (c.type === "embed") {
+      return <EmbedCardView key={c.id} {...common} card={c} />;
     }
     switch (c.type) {
       case "slider":
@@ -1536,6 +1607,25 @@ export function ControlCanvas() {
                 onClick={() => { void sendControl(menuCard, ctxFor(menuCard), true); setMenu(null); }}
               >
                 {tx("立即发送", "Send now")}
+              </button>
+            )}
+            {menuCard.type === "embed" && (
+              <button
+                className="ctx-item"
+                onClick={() => {
+                  const r = movePanelToDock(page.id, menuCard);
+                  setMenu(null);
+                  if (!r.ok) {
+                    toast(
+                      tx(
+                        "停靠区尚未就绪，稍后再试",
+                        "The dock area is not ready yet — try again in a moment",
+                      ),
+                    );
+                  }
+                }}
+              >
+                {tx("移回停靠", "Move back to dock")}
               </button>
             )}
             <div
