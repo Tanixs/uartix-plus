@@ -2613,14 +2613,21 @@ select optgroup {
 }
 
 .rail2-btn:hover {
-  background: var(--raise-1);
+  background: var(--ctl-fill-hover);
   color: var(--text);
 }
 
-/* 当前项：底 + 左缘一道 accent。这是导航的固有反馈，不是 B5 那种"有没有面板开着"的装饰徽标 */
+/* 当前项与相邻项要**三重**可分：底色（accent-soft）+ 字色（accent-text）+ 字重，
+   外加左缘一枚 2px accent 竖条。只靠底色的话，浅色主题下"相邻项 hover"与"当前"
+   几乎同色，用户看不出自己在哪一格；去掉文字只看形状时也要能认出这一枚。 */
 .rail2-btn.on {
   background: var(--accent-soft);
   color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.rail2-btn.on .rail2-label {
+  font-weight: 600;
 }
 
 .rail2-btn.on::before {
@@ -2720,19 +2727,22 @@ select optgroup {
 }
 
 /* P155-R：无 48px 条时的面板头（把手）——条收起后这块面板仍立在这里，得有地方
-   报自己是谁、并关掉它。只在无条状态渲染（RailPanel 判 railStrip）；有条时这一行不存在。 */
+   报自己是谁、并关掉它。P180-UI-2 起这一行**常驻**：展开页要有自己的标题，
+   否则"标题-分组-条目"三级只剩后两级；关闭钮仍只在无条状态出现（有条时点同一项即收起）。 */
 .rp-head {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 8px 6px 6px 12px;
+  min-height: var(--ctl-h-3);
+  padding: var(--sp-1h) var(--sp-1h) var(--sp-1) var(--sp-2);
   border-bottom: 1px solid var(--border-soft);
 }
+/* 第 1 级：面板标题。比分组头（12px/600）再上一档字号，面板滚动后仍知道自己在哪一页 */
 .rp-head-title {
   flex: 1;
   min-width: 0;
-  font-size: var(--fs-sm);
+  font-size: var(--fs-md);
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
@@ -2749,7 +2759,6 @@ select optgroup {
   justify-content: center;
   border-radius: var(--radius-s);
   color: var(--text-dim);
-  font-size: var(--fs-md);
   cursor: pointer;
 }
 .rp-head-close:hover { background: var(--raise-1); color: var(--text); }
@@ -2770,7 +2779,7 @@ select optgroup {
    分段控件不写 border —— G 门那条边框天花板只降不升，选中态靠底色。 */
 .rp-proto{display:flex;flex-direction:column;flex:1;min-height:0;}
 .rp-seg{display:flex;gap:4px;flex:none;padding:6px 6px 2px;}
-.rp-seg button{all:unset;cursor:pointer;padding:4px 10px;border-radius:var(--radius-pill);font-size:var(--fs-sm);color:var(--text-dim);}
+.rp-seg button{all:unset;cursor:pointer;display:inline-flex;align-items:center;min-height:var(--target-min);padding:0 10px;border-radius:var(--radius-pill);font-size:var(--fs-sm);color:var(--text-dim);}
 .rp-seg button:hover{background:var(--raise-1);color:var(--text);}
 /* 选中的那一枚页签是"字"不是色块，所以走 `--accent-text`（P132-D 的"accent 当字"口径）：
    账上 `.on` 在 light 4.29 / matcha 3.46（P132-G speclib 面）。描边与底色仍吃 `--accent` 系。 */
@@ -2804,8 +2813,25 @@ select optgroup {
   color: var(--danger);
 }
 
+/* P180-UI-2：分组 = 层级第 2 级，条目 = 第 3 级。色阶/字重直接吃命令树那套 `--d-*`：
+   `.rp-sec` 挂 data-depth="1"、`.rp-item`/`.rp-slot` 挂 data-depth="2"，样式只引用变量。
+   这样侧栏与命令树是同一套层级语言，不是每个面板各搞一套。 */
 .rp-sec {
-  margin-bottom: var(--sp-1);
+  position: relative;
+  margin-bottom: var(--sp-1h);
+}
+
+/* 层级引导线：从分组头下缘垂到本节底部，落在条目缩进槽里（条目左缘是 10px，线在 9px），
+   所以它既不会被行底色盖住，也不需要给每一条画结构线。 */
+.rp-sec::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--sp-1) + var(--sp-1h) - 1px);
+  top: calc(var(--ctl-h-2) + var(--sp-0));
+  bottom: var(--sp-1);
+  width: 1px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, var(--depth-rail), transparent 92%);
 }
 
 .rp-sec-title,
@@ -2813,15 +2839,22 @@ select optgroup {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-2);
+  min-height: var(--ctl-h-2);
+  padding: 0 var(--sp-1h);
   font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--text-dim);
+  font-weight: var(--d-w, 600);
+  letter-spacing: 0.02em;
+  color: var(--d-fg, var(--text-dim));
+  background: var(--d-bg, transparent);
+  border-radius: var(--radius-s);
 }
 
+/* 带动作的节标题（「显示区布局 + 编辑布局」）：字号上一档，底下垫一条发丝线。
+   线走 inset box-shadow 不走 border —— G 门那条边框天花板只降不升。 */
 .rp-sec-head {
+  min-height: var(--ctl-h-3);
   font-size: var(--fs-sm);
-  color: var(--text);
+  box-shadow: inset 0 -1px 0 var(--border-soft);
 }
 
 .rp-mini {
@@ -2854,30 +2887,37 @@ select optgroup {
 .rp-item {
   display: flex;
   align-items: center;
-  min-height: var(--ctl-h-2);
+  min-height: var(--target-min);
+  margin: 0 var(--sp-1) 0 calc(var(--sp-2) + var(--sp-1h));
   padding-right: var(--sp-1);
+  border-radius: var(--radius-s);
+  color: var(--d-fg, var(--text));
 }
 
 .rp-item:hover {
-  background: var(--raise-1);
+  background: var(--ctl-fill-hover);
 }
 
+/* 已打开且可见：整行给 accent-soft、文字改 accent-text（这对是既有配对，
+   9 套主题的对比度账上已成立），不再只把字染成 accent。 */
 .rp-item.vis {
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .rp-item-name {
   flex: 1 1 auto;
   min-width: 0;
-  height: var(--ctl-h-2);
+  min-height: var(--target-min);
   display: flex;
   align-items: center;
-  padding: 0 var(--sp-2);
+  padding: 0 var(--sp-1) 0 calc(var(--sp-2) + var(--sp-0));
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: inherit;
   font-family: var(--font-ui);
   font-size: var(--fs-sm);
+  font-weight: var(--d-w, 500);
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
@@ -2886,14 +2926,15 @@ select optgroup {
 }
 
 .rp-item.open .rp-item-name {
-  color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
 }
 
 .rp-item-close,
 .rp-slot-del {
   flex: none;
-  width: var(--ctl-h-2);
-  height: var(--ctl-h-2);
+  width: var(--target-min);
+  height: var(--target-min);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2901,8 +2942,6 @@ select optgroup {
   border-radius: var(--radius-s);
   background: transparent;
   color: var(--text-dim);
-  font-size: var(--fs-md);
-  line-height: 1;
   cursor: pointer;
 }
 
@@ -2916,28 +2955,30 @@ select optgroup {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 0 var(--sp-1);
 }
 
 .rp-slot {
   display: flex;
   align-items: center;
-  min-height: var(--ctl-h-2);
+  min-height: var(--target-min);
+  margin: 0 var(--sp-1) 0 calc(var(--sp-2) + var(--sp-1h));
+  border-radius: var(--radius-s);
 }
 
 .rp-slot-name {
   flex: 1 1 auto;
   min-width: 0;
-  height: var(--ctl-h-2);
+  min-height: var(--target-min);
   display: flex;
   align-items: center;
-  padding: 0 var(--sp-1);
+  padding: 0 var(--sp-1) 0 calc(var(--sp-2) + var(--sp-0));
   border: 0;
   border-radius: var(--radius-s);
   background: transparent;
-  color: var(--text);
+  color: var(--d-fg, var(--text));
   font-family: var(--font-ui);
   font-size: var(--fs-sm);
+  font-weight: var(--d-w, 500);
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
@@ -2947,13 +2988,13 @@ select optgroup {
 
 .rp-slot-name:hover,
 .rp-slot-add:hover {
-  background: var(--raise-1);
+  background: var(--ctl-fill-hover);
 }
 
 .rp-slot-add {
   gap: var(--sp-1);
-  height: var(--ctl-h-2);
-  padding: 0 var(--sp-1);
+  min-height: var(--target-min);
+  padding: 0 var(--sp-1) 0 calc(var(--sp-2) + var(--sp-0));
   border: 0;
   border-radius: var(--radius-s);
   background: transparent;
@@ -2965,9 +3006,24 @@ select optgroup {
 }
 
 .rp-hint {
-  padding: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2) var(--sp-1) calc(var(--sp-2) + var(--sp-0));
   font-size: var(--fs-body);
   color: var(--text-dim);
+}
+
+/* P180-UI-2：导轨与展开页里所有可点的地方都要有焦点环。这几个按钮里有三个是
+   `all: unset`（会把浏览器默认 outline 一起抹掉），不给就是"键盘走进去看不到自己在哪"。 */
+.rail2-btn:focus-visible,
+.rp-head-close:focus-visible,
+.rp-mini:focus-visible,
+.rp-seg button:focus-visible,
+.rp-item-name:focus-visible,
+.rp-item-close:focus-visible,
+.rp-slot-name:focus-visible,
+.rp-slot-del:focus-visible,
+.rp-slot-add:focus-visible {
+  outline: var(--ctl-ring-w) solid var(--ctl-ring);
+  outline-offset: -1px;
 }
 /* 图例原本是 .tpl-panel 的一个 flex 段，搬进导轨后自己充当那根列 */
 .legend-root {

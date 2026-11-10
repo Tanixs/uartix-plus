@@ -5,7 +5,7 @@ import * as panelActivity from "../panels/panelActivity";
 import { requestClosePanel, requestOpenPanel } from "../features/ai/appBus";
 import { removeLayout, useLayouts } from "../features/settings/layoutsStore";
 import { tx, useLocale, getLocale } from "../i18n/strings";
-import { IconLayoutEdit, IconPlus } from "../shared/icons";
+import { IconClose, IconLayoutEdit, IconPlus } from "../shared/icons";
 import {
   railPanel,
   railProtoTab,
@@ -63,7 +63,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
 
   return (
     <div className="rp-body">
-      <div className="rp-sec">
+      <div className="rp-sec" data-depth="1">
         <div className="rp-sec-head">
           {tx("显示区布局", "Area layout")}
           <button
@@ -82,7 +82,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
             <div className="rp-hint">{tx("还没有命名布局。摆好窗口后在这里存一个。", "No named layouts yet. Arrange the windows, then save one here.")}</div>
           )}
           {layouts.map((s) => (
-            <div key={s.id} className="rp-slot">
+            <div key={s.id} className="rp-slot" data-depth="2">
               <button
                 type="button"
                 className="rp-slot-name"
@@ -98,7 +98,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
                   title={tx("删除该布局", "Delete this layout")}
                   onClick={() => removeLayout(s.id)}
                 >
-                  ×
+                  <IconClose />
                 </button>
               )}
             </div>
@@ -115,13 +115,13 @@ function ViewPanel({ actions }: { actions: RailActions }) {
       </div>
 
       {panelGroupsAddable().map((g) => (
-        <div key={g.key} className="rp-sec">
+        <div key={g.key} className="rp-sec" data-depth="1">
           <div className="rp-sec-title">{panelGroupLabel(g)}</div>
           {g.ids.map((id) => {
             const open = panelActivity.isOpen(id);
             const vis = panelActivity.isVisible(id);
             return (
-              <div key={id} className={`rp-item${vis ? " vis" : ""}${open ? " open" : ""}`}>
+              <div key={id} className={`rp-item${vis ? " vis" : ""}${open ? " open" : ""}`} data-depth="2">
                 <button
                   type="button"
                   className="rp-item-name"
@@ -138,7 +138,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
                     title={tx("关闭面板（关闭后其数据管道随之停止）", "Close the panel (its data pipeline stops with it)")}
                     onClick={() => requestClosePanel(id)}
                   >
-                    ×
+                    <IconClose />
                   </button>
                 )}
               </div>
@@ -217,11 +217,12 @@ export function RailPanel({ actions }: { actions: RailActions }) {
       style={{ "--rail-w": `${w}px` } as React.CSSProperties}
       aria-label={tx("工作区内容", "Workspace content")}
     >
-      {/* P155-R：条收起后这块面板仍立着——头行就是它的"把手"：报案名 + 关闭钮。
-          条在的时候这一行不渲染（项名与切换都在条上，两处都写就是两份入口）。 */}
-      {!strip && (
-        <div className="rp-head">
-          <span className="rp-head-title">{railItemLabel(open)}</span>
+      {/* P180-UI-2：面板头**常驻**。展开页要有自己的标题，否则"标题-分组-条目"三级只剩后两级，
+          面板一滚起来就只剩一堆同级文字。但关闭钮仍只在无 48px 条时出现——有条时点同一项即收起，
+          两处都放就是两份入口（P155-R 的判据只约束"入口"，不约束"标题"）。 */}
+      <div className="rp-head">
+        <span className="rp-head-title">{railItemLabel(open)}</span>
+        {!strip && (
           <button
             type="button"
             className="rp-head-close"
@@ -229,10 +230,10 @@ export function RailPanel({ actions }: { actions: RailActions }) {
             title={tx("收起这块面板", "Hide this panel")}
             onClick={() => toggleRailPanel(null)}
           >
-            ×
+            <IconClose />
           </button>
-        </div>
-      )}
+        )}
+      </div>
       {open === "views" && <ViewPanel actions={actions} />}
       {/* R4：接入面板是新写的（接口选择 + 参数一处看完）；
           协议面板是把 TemplatesPanel **原样换个家**——组件本来就自包含，

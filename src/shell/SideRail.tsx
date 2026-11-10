@@ -48,6 +48,7 @@ export function SideRail({ actions }: { actions: RailActions }) {
               className={`rail2-btn${open === it.key ? " on" : ""}${it.key === "views" && actions.editLayout ? " act" : ""}`}
               data-ctl="tool"
               aria-expanded={open === it.key}
+              aria-current={open === it.key ? "page" : undefined}
               title={it.label + " · " + it.tip}
               onClick={() => toggleRailPanel(it.key)}
             >

@@ -103,7 +103,10 @@ describe("P145/P155-R 导轨收起：分母各算各的、面板有把手、开�
     const panel = read("./RailPanel.tsx");
     expect(panel, "无条状态的面板头（把手）不见了").toContain('className="rp-head"');
     expect(panel, "面板头没有关闭动作").toContain("toggleRailPanel(null)");
-    expect(panel, "面板头不判 railStrip——有条时也画出来就是两份入口").toMatch(/!strip && \(/);
+    // P180-UI-2 改判：面板头**常驻**（展开页要有自己的标题，否则"标题-分组-条目"只剩两级），
+    // 但关闭钮仍只在无条时出现——有条时点同一项即收起，两处都放就是两份入口。
+    // 所以这条判据盯的是关闭钮所在的那个条件块，而不是整个 .rp-head。
+    expect(panel, "关闭钮在有条状态也画出来了（两份入口）").toMatch(/!strip && \(/);
 
     const css = read("../styles/theme.css");
     expect(css, "图标两态的 .irc-closed 规则不在").toMatch(/\.irc\.irc-closed \.irc-arrow\s*\{\s*transform:\s*rotate\(180deg\)/);
