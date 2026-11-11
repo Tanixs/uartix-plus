@@ -879,3 +879,26 @@ TX 组帧台=滚表单；插件面板=iframe 内滚内容（跨文档，父页�
 
 
 
+
+## 21. 清理批 1：粘贴的只读锁与内嵌互斥（2026-11-12 追加）
+
+### 21.1 问题
+
+- `pasteCard` 没有 `guardLocked()`：Operator 只读包下「画布右键 → 粘贴」仍能把卡落进页面，
+  与"只读"承诺相反；同批的 `removeCard` / `patchCard` 都已有这道门。
+- `copyCard` 允许复制 `embed` 卡：内嵌面板同一 `panelId` 全局单实例（`findEmbedCard`），
+  复制出来再粘贴必被 `checkEmbedPlacement` 拒绝，于是「粘贴」亮着却永远失败；
+  若将来有人绕过校验，还会出现两张同 `panelId` 的卡，而 `panelActivity` 以 `panelId` 为键，
+  两张卡的可见性判定会互相串。
+
+### 21.2 处置
+
+| 位置 | 改动 |
+| --- | --- |
+| `copyCard` | `type === "embed"` 时不写剪贴板（剪贴板保持上一次的非内嵌内容或为空） |
+| `pasteCard` | 入口先 `guardLocked()`，并拒绝剪贴板里的内嵌卡（旧会话/其它写入入口兜底） |
+| 卡片右键「复制」 | 对内嵌卡不渲染该项 |
+| 画布右键「粘贴」 | 只读时 `disabled`，title 说明"Operator 只读模式：不能新增卡片" |
+
+单测：`clipboard guards` 两条——内嵌卡进不了剪贴板且粘贴返回 null；只读时粘贴不改变卡数，
+解锁后同一次粘贴成功。门禁：controlsStore.test 25 条全绿。

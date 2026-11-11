@@ -1652,13 +1652,15 @@ export function ControlCanvas() {
             <button className="ctx-item" onClick={() => { setRenamingCard(menuCard.id); setMenu(null); }}>
               {tx("重命名", "Rename")}
             </button>
-            <button
-              className="ctx-item"
-              onClick={() => { store.copyCard(page.id, menuCard.id); setMenu(null); }}
-              title={tx("复制控件全部属性（模板指令 / 脚本 / 键位等），在画布空白处右键粘贴", "Copy all card properties (template / script / keys), then right-click empty canvas to paste")}
-            >
-              {tx("复制", "Copy")}
-            </button>
+            {menuCard.type !== "embed" && (
+              <button
+                className="ctx-item"
+                onClick={() => { store.copyCard(page.id, menuCard.id); setMenu(null); }}
+                title={tx("复制控件全部属性（模板指令 / 脚本 / 键位等），在画布空白处右键粘贴", "Copy all card properties (template / script / keys), then right-click empty canvas to paste")}
+              >
+                {tx("复制", "Copy")}
+              </button>
+            )}
             {canSend(menuCard) && (
               <button
                 className="ctx-item"
@@ -1734,12 +1736,18 @@ export function ControlCanvas() {
             <div className="ctx-title">{tx("控制画布", "Control canvas")}</div>
             <button
               className="ctx-item"
-              disabled={!store.hasClipboard()}
+              disabled={guardLocked() || !store.hasClipboard()}
               onClick={() => {
                 store.pasteCard(page.id, gridMenu.gx, gridMenu.gy);
                 setGridMenu(null);
               }}
-              title={store.hasClipboard() ? tx("粘贴已复制的控件到此处", "Paste the copied control here") : tx("先右键控件选「复制」", "Right-click a control and choose Copy first")}
+              title={
+                guardLocked()
+                  ? tx("Operator 只读模式：不能新增卡片", "Operator read-only: cannot add cards")
+                  : store.hasClipboard()
+                    ? tx("粘贴已复制的控件到此处", "Paste the copied control here")
+                    : tx("先右键控件选「复制」", "Right-click a control and choose Copy first")
+              }
             >
               {tx("粘贴", "Paste")}
             </button>

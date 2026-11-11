@@ -1411,7 +1411,9 @@ let clipboard: ControlCard | null = null;
 export function copyCard(pageId: string, cardId: string) {
   const page = snapshot.pages.find((p) => p.id === pageId);
   const card = page?.cards.find((c) => c.id === cardId);
-  if (card) clipboard = structuredClone(card);
+  // 内嵌卡没有"再放一张"的语义：同一 panelId 全局单实例，复制出来的卡粘贴时必被拒。
+  // 与其让「粘贴」亮着却永远失败，不如剪贴板里根本不装它。
+  if (card && card.type !== "embed") clipboard = structuredClone(card);
 }
 
 export function hasClipboard(): boolean {
@@ -1424,8 +1426,11 @@ export function pasteCard(
   gx?: number,
   gy?: number,
 ): string | null {
+  // 只读包下不允许落卡；内嵌卡在 copyCard 已拦一次，这里再兜一层
+  // （剪贴板可能来自旧版本会话或其它写入入口）。
+  if (guardLocked() || !clipboard || clipboard.type === "embed") return null;
   const page = snapshot.pages.find((p) => p.id === pageId);
-  if (!page || !clipboard) return null;
+  if (!page) return null;
   const rows = page.rows || 48;
   const card = normalizeGeometry(
     structuredClone(clipboard),

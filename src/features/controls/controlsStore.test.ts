@@ -497,3 +497,33 @@ describe("canvas embed schema v2", () => {
     expect(store.checkControlsVersion(3)).toContain("v3");
   });
 });
+
+describe("clipboard guards", () => {
+  it("never puts an embedded card on the clipboard", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.activePage()!.id;
+    const added = store.addEmbedCard(pageId, "plot2d");
+    expect(added.ok).toBe(true);
+    const embedId = (added as { ok: true; cardId: string }).cardId;
+    store.copyCard(pageId, embedId);
+    // 内嵌卡全局单实例：复制出来必然粘贴失败，所以剪贴板保持为空，
+    // 「粘贴」不会亮着一个永远失败的入口。
+    expect(store.hasClipboard()).toBe(false);
+    expect(store.pasteCard(pageId, 0, 0)).toBeNull();
+  });
+
+  it("refuses to paste while the Operator package is read-only", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.activePage()!.id;
+    const cardId = store.addCard(pageId, "slider");
+    store.copyCard(pageId, cardId);
+    expect(store.hasClipboard()).toBe(true);
+    const count = store.activePage()!.cards.length;
+    locked.value = true;
+    expect(store.pasteCard(pageId, 0, 0)).toBeNull();
+    expect(store.activePage()!.cards).toHaveLength(count);
+    locked.value = false;
+    expect(store.pasteCard(pageId, 0, 0)).not.toBeNull();
+    expect(store.activePage()!.cards).toHaveLength(count + 1);
+  });
+});
