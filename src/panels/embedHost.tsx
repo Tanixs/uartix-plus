@@ -110,7 +110,7 @@ export function EmbedCardView(props: EmbedCardViewProps) {
   const pluginPanel = parsePluginEmbedId(card.panelId);
   return (
     <CardFrame {...props} card={card} dragHandleOnly>
-      <div className="ctl-embed">
+      <div className="ctl-embed" data-wheel-locked={locked ? "1" : undefined}>
         <div className="ctl-embed-head" data-embed-head>
           <span className="ctl-embed-title">{card.name}</span>
           <span className="ctl-embed-meta">{embedName(card.panelId)}</span>
@@ -144,7 +144,8 @@ export function EmbedCardView(props: EmbedCardViewProps) {
             </button>
           )}
         </div>
-        <div className="ctl-embed-body" ref={bodyRef}>
+        {/* 滚轮归属见 wheelRouting：指针落在这一层且未锁定 → 控件自己消费 */}
+        <div className="ctl-embed-body" data-wheel-scope="control" ref={bodyRef}>
           {card.panelId === "plot2d" ? (
             <MPlot2D />
           ) : card.panelId === "hexview" ? (

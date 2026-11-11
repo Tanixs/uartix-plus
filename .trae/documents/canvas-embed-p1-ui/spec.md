@@ -808,5 +808,41 @@ dockview 8.2 切页签的顺序是：
 静默截图 `tab-3-back.png` 可见完整正弦波与坐标轴。
 七项门禁全绿（vitest 2776、tsc、eslint 0 error、check:all OK(17)、vite build、cargo check）。
 
+## 19. 滚轮语义分流（2026-11-11 追加）
+
+### 19.1 旧行为
+
+`.ctl-grid` 上的 wheel 监听是"无条件 preventDefault + 滚画布"。内嵌控件自己的
+wheel 处理（uPlot 缩放、Hex/表格/组帧台/帧画布的内部滚动、3D 相机）同时也会执行，
+于是"图表缩一格、画布又滚一段"；用户侧感受就是"所有滚轮都在滚控制画布"。
+
+### 19.2 统一判定
+
+新增 `src/features/controls/wheelRouting.ts`，全画布只有这一条规则：
+
+| 指针位置 | 页面锁定 | 归属 |
+| --- | --- | --- |
+| 卡内容区 `[data-wheel-scope="control"]` | 否 | 控件消费 |
+| 卡内容区 | 是 | 画布滚 |
+| 卡内容区内且卡自身 `[data-wheel-locked="1"]`（仅 3D 交互锁） | — | 画布滚 |
+| 标题条 / 卡外 / 空白 | — | 画布滚 |
+
+实现：画布的 wheel 监听改为 **capture + passive:false**，画布接管时
+`preventDefault + stopPropagation`，控件接管时完全不动作。这样不需要在每个控件里
+各写一份"要不要滚画布"的 if-else，也不会出现双重动作。
+
+### 19.3 各控件的默认动作
+
+2D 曲线=uPlot 缩放/框选；Hex=滚缓冲区；数据表格=滚行；频谱=留在图内（无缩放语义，
+但不再误滚画布）；X-Ray=滚内容；序列器/哨兵/帧画布=滚内容；3D 轨迹=相机缩放；
+TX 组帧台=滚表单；插件面板=iframe 内滚内容（跨文档，父页本就收不到）。
+
+### 19.4 验证
+
+无头合成 wheel 事件（`WheelEvent` 派发到 `.ctl-embed-body` / `.ctl-embed-head`）：
+未锁定内容区 `defaultPrevented=false` 且事件到达控件；标题条与锁定态
+`defaultPrevented=true` 且事件被 capture 拦下；解锁后恢复。四例全通过，控制台无异常。
+
+
 
 

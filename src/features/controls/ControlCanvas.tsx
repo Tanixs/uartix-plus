@@ -37,6 +37,7 @@ import {
   placementRejectText,
 } from "../../panels/panelPlacement";
 import { embedMinOf, isEmbedPanelTarget, isEmbedTargetId } from "./embedPanels";
+import { resolveWheelOwner } from "./wheelRouting";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -178,6 +179,9 @@ export function ControlCanvas() {
     if (g) g.style.display = "none";
   };
   const page = store.activePage();
+  /** 页面锁定态：锁定时滚轮一律滚画布（判定在 capture 里长驻，用 ref 读最新值） */
+  const pageLockedRef = useRef(false);
+  pageLockedRef.current = !!page?.locked;
   const gridRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const valuesRef = useRef<Map<string, number>>(new Map());
@@ -349,15 +353,20 @@ export function ControlCanvas() {
     const el = wrapRef.current;
     if (!el) return;
     const h = (e: WheelEvent) => {
+      // 一套判定：卡内容区且未锁定 → 控件消费（图表缩放 / 内部滚动）；
+      // 锁定或指针在卡外 → 画布滚。
+      if (resolveWheelOwner(e.target, pageLockedRef.current) === "control") return;
       const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
       const dx = e.deltaMode === 1 ? e.deltaX * 33 : e.deltaX;
       if (!dy && !dx) return;
       e.preventDefault();
+      // capture 阶段拦下：控件不必"缩一下再跟着滚一段"
+      e.stopPropagation();
       el.scrollTop += dy;
       el.scrollLeft += dx;
     };
-    el.addEventListener("wheel", h, { passive: false });
-    return () => el.removeEventListener("wheel", h);
+    el.addEventListener("wheel", h, { passive: false, capture: true });
+    return () => el.removeEventListener("wheel", h, { capture: true });
   }, []);
 
   useEffect(() => {
