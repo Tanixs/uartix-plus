@@ -5126,11 +5126,12 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 
 .cmd-group-menu {
   position: absolute;
-  top: calc(100% + 2px);
-  right: 18px;
+  top: calc(100% + var(--sp-0));
+  /* 右缘对组头内容盒收 8px（不是散装 18）：小窗再窄也不会把菜单推出面板 */
+  right: var(--sp-2);
   z-index: 30;
   min-width: 130px;
-  padding: 4px;
+  padding: var(--sp-1);
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-m);
@@ -5145,12 +5146,13 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   color: var(--text);
   font-size: var(--fs-body);
   text-align: left;
-  padding: 5px 8px;
+  padding: var(--sp-1) var(--sp-2);
   border-radius: var(--radius-s);
   cursor: pointer;
   white-space: nowrap;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: var(--sp-1);
 }
 
@@ -5311,11 +5313,18 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   display: flex;
   align-items: center;
   gap: var(--sp-2);
+  min-width: 0;
 }
 
+/* 提示是次要信息：窄栏里它让位、省略，不许把「分组」按钮挤出内容盒 */
 .cmd-toolbar-hint {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: var(--fs-xs);
   color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cmd-group {
@@ -5331,7 +5340,8 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   align-items: center;
   gap: var(--sp-1);
   min-height: var(--ctl-h-2);
-  padding: 0 var(--sp-1) 0 var(--depth-step);
+  /* 右缘与内容盒保持 8px 呼吸：行尾就是命中区，不能把图标/计数顶到面板边 */
+  padding: 0 var(--sp-2) 0 var(--depth-step);
   border-radius: var(--radius-s);
   background: var(--d-bg);
   color: var(--d-fg);
@@ -5361,7 +5371,11 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   font-variant-numeric: tabular-nums;
 }
 
-.cmd-group-head button {
+/* 只给**组头这一行自己的**按钮定形（折叠 / ＋ / 删除）。
+   写成后代选择器会连浮层菜单 `.cmd-group-menu` 里的按钮一起钉成 24×24，
+   而菜单按钮是"图标 + 一行字"，被钉窄后文字从 24px 盒子里溢出到小窗外面，
+   读作"文字贴边、图标跑出弹层"（用户报的就是这一处）。 */
+.cmd-group-head > button {
   flex: none;
   width: var(--target-min);
   height: var(--target-min);
@@ -5438,7 +5452,8 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   align-items: center;
   gap: var(--sp-1);
   min-height: var(--target-min);
-  padding: 0 var(--sp-1) 0 var(--depth-step);
+  /* 与分组头同一条右缘呼吸：叶子的铅笔也不许顶到面板边 */
+  padding: 0 var(--sp-2) 0 var(--depth-step);
   border-radius: var(--radius-s);
   color: var(--d-fg);
   font-size: var(--fs-body);
@@ -5682,13 +5697,25 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
      同深度的兄弟节点（不论分组还是命令）左缘完全对齐。 */
   position: absolute;
   left: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  /* 居中**不用 transform**：P143 交互签名总线的 :hover/:active 会改写 transform
+     （缺省 --ctl-lift / --ctl-press 都是 none），那会把 translateY(-50%) 顶掉，
+     图标在悬停瞬间整块往下掉半个钮高（实测 12px，用户报的"下浮"就是这个）。
+     这里用 top/bottom + margin:auto 居中，总线再怎么改 transform 都挪不动它。 */
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
   color: var(--text-dim);
 }
 
 .cmd-fold:hover {
   color: var(--accent);
+}
+
+/* 悬停/按下零位移：主题若填了抬起/按压签名，也不许作用在树的折叠箭头身上——
+   它在一格一格里跳动比"抬一下"更像故障。按特异性压过总线（总线是 0,2,0）。 */
+.cmd-group-head .cmd-fold:hover:not(:disabled),
+.cmd-group-head .cmd-fold:active:not(:disabled) {
+  transform: none;
 }
 
 .ctx-has-sub {

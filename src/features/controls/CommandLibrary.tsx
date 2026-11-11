@@ -214,6 +214,7 @@ export function CommandLibrary() {
                 </button>
                 <span
                   className="cmd-group-name"
+                  title={renamingNode === n.id ? undefined : n.name}
                   onDoubleClick={() => setRenamingNode(n.id)}
                 >
                   {renamingNode === n.id ? (
@@ -340,13 +341,13 @@ export function CommandLibrary() {
               }}
               title={tx("单击发送 · 双击编辑 · 右键更多 · 可拖到画布部署", "Click to send · double-click to edit · right-click for more · drag onto the canvas to place it")}
             >
-              <span className="cmd-item-name">{n.name}</span>
+              <span className="cmd-item-name" title={n.name}>{n.name}</span>
               {n.scriptEnabled && n.script ? (
                 <span className="cmd-kinds">{tx("脚本", "script")}</span>
               ) : n.sendTemplateId ? (
                 <span className="cmd-kinds">{tx("谱引用", "spec")}</span>
               ) : (
-                <span className="cmd-item-tpl">{n.template}</span>
+                <span className="cmd-item-tpl" title={n.template}>{n.template}</span>
               )}
               <button
                 className="cmd-edit"

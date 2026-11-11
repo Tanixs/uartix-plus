@@ -86,7 +86,7 @@ function ViewPanel({ actions }: { actions: RailActions }) {
               <button
                 type="button"
                 className="rp-slot-name"
-                title={s.auto ? tx("自动备份：切换预设前的现场快照", "Auto backup: snapshot before a preset switch") : tx("应用此布局", "Apply this layout")}
+                title={`${s.name} · ${s.auto ? tx("自动备份：切换预设前的现场快照", "Auto backup: snapshot before a preset switch") : tx("应用此布局", "Apply this layout")}`}
                 onClick={() => actions.onApplyLayoutSlot(s.id)}
               >
                 {s.name}
