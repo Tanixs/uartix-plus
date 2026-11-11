@@ -4653,13 +4653,6 @@ select optgroup {
   white-space: nowrap;
 }
 
-.ctl-embed-min {
-  flex: 0 0 auto;
-  color: var(--depth-fg-3);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .ctl-embed-body {
   position: relative;
   flex: 1 1 auto;
@@ -13016,4 +13009,32 @@ body.pdrag-active *{cursor:grabbing !important;}
   height: var(--target-min);
 }
 
+
+
+/* 缩放中的临时尺寸提示（ControlCanvas 在拖角起手时挂到卡片上，松手随节点移除）。
+   替掉标题条上常驻的「≥w×h」：那条只在建卡时写一次，之后既不变也不解释为什么缩不动。
+   只有内嵌卡有它——普通控件的 1×1 下限不需要解释。
+   位置让开右下角的 .ctl-resize 把手（14px），避免被指针压住。 */
+.ctl-rz-hint {
+  position: absolute;
+  right: 6px;
+  bottom: 20px;
+  z-index: 56;
+  padding: 0 var(--sp-1h);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-s);
+  background: var(--bg-panel);
+  color: var(--depth-fg-2);
+  font-size: var(--fs-xs);
+  line-height: var(--ctl-h-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 顶到语义最小格数：换成强调色，回答"为什么缩不动了" */
+.ctl-rz-hint[data-min="1"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 

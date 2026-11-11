@@ -2,7 +2,6 @@ import { memo, useEffect, useRef, useState } from "react";
 import type { EmbedCard } from "../features/controls/controlsStore";
 import { CardFrame, type CardFrameProps } from "../features/controls/CardViews";
 import {
-  embedMinOf,
   embedName,
   hasPointerLock,
   parsePluginEmbedId,
@@ -105,7 +104,8 @@ export function EmbedCardView(props: EmbedCardViewProps) {
     };
   }, [card.panelId]);
 
-  const min = embedMinOf(card.panelId);
+  /* 尺寸信息只在拖角缩放进行中出现（ControlCanvas 的 `.ctl-rz-hint`），
+     标题条不再常驻"≥w×h"：那个值既不会变，也不指导任何操作。 */
   // 插件面板：卡片 id 就是它的停靠 id `plugin-view-<插件>:<面板>`，拆出参数交给 iframe 宿主。
   const pluginPanel = parsePluginEmbedId(card.panelId);
   return (
@@ -114,15 +114,6 @@ export function EmbedCardView(props: EmbedCardViewProps) {
         <div className="ctl-embed-head" data-embed-head>
           <span className="ctl-embed-title">{card.name}</span>
           <span className="ctl-embed-meta">{embedName(card.panelId)}</span>
-          <span
-            className="ctl-embed-min"
-            title={tx(
-              `最小 ${min.w}×${min.h} 格，拖右下角调整大小`,
-              `Minimum ${min.w}×${min.h} cells; drag the bottom-right corner to resize`,
-            )}
-          >
-            ≥{min.w}×{min.h}
-          </span>
           {canLock && (
             <button
               className="ctl-embed-lock"

@@ -58,6 +58,23 @@ import {
 const GAP = 8;
 const OFF = GAP / 2;
 
+/**
+ * 缩放中的尺寸提示文案。**必须放在模块作用域**：`move` 里有一个表示落点 x 的局部
+ * `const tx`，它会遮蔽 i18n 的 `tx()`，在同一个函数体内调用 `tx()` 会直接 TDZ 抛错
+ * （探针里表现为"提示卡在第一次 move 的值不再更新"）。
+ */
+function rzHintText(nw: number, nh: number, atW: boolean, atH: boolean): string {
+  const suffix =
+    atW && atH
+      ? tx(" · 最小", " · min")
+      : atW
+        ? tx(" · 宽最小", " · min w")
+        : atH
+          ? tx(" · 高最小", " · min h")
+          : "";
+  return `${nw}×${nh}${suffix}`;
+}
+
 
 function MountCascade(props: {
   anchorEl: HTMLElement | null;
@@ -220,6 +237,8 @@ export function ControlCanvas() {
         innerW0: number;
         w?: number;
         h?: number;
+        /** 缩放中的临时尺寸提示（只有内嵌卡有最小格语义），松手随节点移除 */
+        hint?: HTMLSpanElement;
       }
   >(null);
 
@@ -406,6 +425,14 @@ export function ControlCanvas() {
         const nh = isSquare ? Math.min(nw0, nh0) : nh0;
         rz.w = nw;
         rz.h = nh;
+        if (rz.hint) {
+          // 提示的是"这次拖到多大 + 哪一维已经到底"。常驻的 ≥w×h 恰恰相反：
+          // 它只在建卡时写一次，之后既不变也不解释为什么缩不动。
+          const atW = nw <= minW;
+          const atH = nh <= minH;
+          rz.hint.textContent = rzHintText(nw, nh, atW, atH);
+          rz.hint.dataset.min = atW || atH ? "1" : "";
+        }
         // 两轴永远一起写：拖拽期间 DOM 暂管尺寸，不能让任何一轴落到 auto
         // （卡片是 `container-type: size`，auto = 没有内在尺寸 = 塌成一条）。
         applyCardBox(rz.el, nw, nh, STEPq, GAPq);
@@ -451,6 +478,7 @@ export function ControlCanvas() {
       if (rz) {
         resizeRef.current = null;
         rz.el.style.zIndex = "";
+        rz.hint?.remove();
         const cur = store.activePage();
         if (!cur) {
           // 页面没了也不能清空尺寸：React 不会再写回来（值没变就不 patch 样式），
@@ -1022,12 +1050,21 @@ export function ControlCanvas() {
     e.preventDefault();
     const inner = gridRef.current;
     if (!inner) return;
+    // 只有内嵌卡需要尺寸提示：它的最小格数是语义下限（缩过头只剩半截坐标轴），
+    // 普通控件的 1×1 下限不需要解释。
+    const hint =
+      card.type === "embed" ? document.createElement("span") : undefined;
+    if (hint) {
+      hint.className = "ctl-rz-hint";
+      el.appendChild(hint);
+    }
     resizeRef.current = {
       card,
       el,
       startClientX: e.clientX,
       startClientY: e.clientY,
       innerW0: inner.getBoundingClientRect().width,
+      hint,
     };
   };
 
