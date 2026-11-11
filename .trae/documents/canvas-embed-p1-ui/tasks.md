@@ -55,3 +55,15 @@
 - [x] V12 门禁全绿（插件四文件 151 / vitest 2734 / tsc 0 / eslint 0 错 22 警告 / check:all OK(17) / vite build / cargo check）
 - [x] V13 `HANDOFF.md` 追加视图段（本地，gitignore）
 - [x] V14 提交并输出阶段报告
+
+## 缺陷修复段：拖拽塌陷与滚轮分流（2026-11-11）
+
+- [x] F1 复现：无头 Chrome + CDP 真实拖拽，抓到 `styleWidth/styleHeight` 为空、卡片 22×60（竖条）/196×14（横条）
+- [x] F2 根因：resize 提交前清空 React 管理的 `style.width/height`；React style diff 不回写未变轴；`container-type: size` 把 `auto` 解析成内容宽高 → 塌成一条
+- [x] F3 新增 `features/controls/cardBox.ts`（`applyCardBox` 原子写两轴、永不写空/NaN）+ `cardBox.test.ts` 3 例
+- [x] F4 `ControlCanvas` resize 全过程 / 提交 / 页面消失兜底 / 归一化回写全部改走 `applyCardBox`
+- [x] F5 只读（Operator）下拖拽与 resize 不起手
+- [x] F6 `AttitudeModelView` 宿主非被动 wheel：未锁定截停冒泡、锁定放行；卡片内只缩放模型，卡片外滚画布
+- [x] F7 无头取证：卡内 `scrollTop 0→0`、卡外 `0→120`、锁定后卡内 `0→120`；内嵌卡移动后尺寸不变、单轴 resize 后另一轴保持
+- [x] F8 门禁全绿（插件四文件 151 / vitest 2737 / tsc 0 / eslint 0 错 22 警告 / check:all OK(17) / vite build / cargo check）
+- [x] F9 提交、同步 HANDOFF 与 spec，输出阶段报告

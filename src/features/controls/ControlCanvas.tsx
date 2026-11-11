@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import * as store from "./controlsStore";
+import { applyCardBox } from "./cardBox";
 import { DebugPresetDialog } from "./DebugPresetDialog";
 import { ParameterSetDialog } from "./ParameterSetDialog";
 import { executeManagedControl, managedActionReady, routeSliderValue } from "./controlExecution";
@@ -396,8 +397,9 @@ export function ControlCanvas() {
         const nh = isSquare ? Math.min(nw0, nh0) : nh0;
         rz.w = nw;
         rz.h = nh;
-        rz.el.style.width = `${nw * STEPq - GAPq}px`;
-        rz.el.style.height = `${nh * STEPq - GAPq}px`;
+        // 两轴永远一起写：拖拽期间 DOM 暂管尺寸，不能让任何一轴落到 auto
+        // （卡片是 `container-type: size`，auto = 没有内在尺寸 = 塌成一条）。
+        applyCardBox(rz.el, nw, nh, STEPq, GAPq);
         rz.el.style.zIndex = "60";
         return;
       }
@@ -442,8 +444,9 @@ export function ControlCanvas() {
         rz.el.style.zIndex = "";
         const cur = store.activePage();
         if (!cur) {
-          rz.el.style.width = "";
-          rz.el.style.height = "";
+          // 页面没了也不能清空尺寸：React 不会再写回来（值没变就不 patch 样式），
+          // 卡片会当场塌成一条。退回卡片自己的格子数。
+          applyCardBox(rz.el, rz.card.w, rz.card.h || 1, STEPq, GAPq);
           return;
         }
         const nw = rz.w ?? rz.card.w;
@@ -476,13 +479,17 @@ export function ControlCanvas() {
           while (fw > minW && hit(fw, fh)) fw--;
         }
         if (fw === rz.card.w && fh === (rz.card.h || 1)) {
-          rz.el.style.width = `${fw * STEPq - GAPq}px`;
-          rz.el.style.height = `${fh * STEPq - GAPq}px`;
+          applyCardBox(rz.el, fw, fh, STEPq, GAPq);
           return;
         }
-        rz.el.style.width = "";
-        rz.el.style.height = "";
+        // 先把落点尺寸写进 DOM，再交给 store；**不要**先清空样式。
+        // 清空后 React 只补「变化过」的那个轴，另一个轴会停在 auto（塌成一条的根因）。
+        applyCardBox(rz.el, fw, fh, STEPq, GAPq);
         store.patchCard(cur.id, rz.card.id, { w: fw, h: fh });
+        // 内嵌卡有宽高比/最小格数归一化：以 store 的最终值为准再写一遍，
+        // 避免"提交被归一化回原尺寸、React 又判定没变"时 DOM 停在拖拽值。
+        const latest = store.findCardById(rz.card.id)?.card;
+        if (latest) applyCardBox(rz.el, latest.w, latest.h || 1, STEPq, GAPq);
         // 缩到原尺寸仍与邻居重叠（历史遗留）→ 就近挪开，而不是继续压扁自己
         store.resolveOverlaps(cur.id);
         return;
@@ -940,7 +947,8 @@ export function ControlCanvas() {
   };
 
   const onCardDragStart = (e: React.MouseEvent<HTMLDivElement>, card: ControlCard) => {
-    if (e.button !== 0 || page.locked) return;
+    // 只读包里不进入拖拽：否则会走完 ghost/换位再被 store 拒绝，看起来像"抖一下又弹回"。
+    if (e.button !== 0 || page.locked || guardLocked()) return;
     const el = (e.currentTarget as HTMLElement).closest(
       ".ctl-card",
     ) as HTMLDivElement;
@@ -994,7 +1002,8 @@ export function ControlCanvas() {
   };
 
   const onResizeStart = (e: React.MouseEvent, card: ControlCard) => {
-    if (e.button !== 0 || page.locked) return;
+    // 同拖拽：只读包不让 resize 起手，避免"能拖动、松手弹回"的假象。
+    if (e.button !== 0 || page.locked || guardLocked()) return;
     const wrap = wrapRef.current;
     if (!wrap) return;
     const el = wrap.querySelector<HTMLDivElement>(

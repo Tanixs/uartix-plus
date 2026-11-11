@@ -316,3 +316,41 @@ closeDockPanel(id): boolean  // api.getPanel(id)?.api.close()
 
 本批不迁移持久数据（`EmbedCard.viewState` 是可缺省字段）。若需回滚：`git revert` 单提交即可；已导出的 v2 存档在旧版本会被版本检查拒绝，不会静默丢卡。
 
+## 13. 卡布拖拽/滚轮缺陷修复（2026-11-11 追加）
+
+### 13.1 控件拖成一条 / 内嵌卡只剩阴影（同一个根因）
+
+**根因（DOM 与 React 共管同一组样式）**
+1. `ControlCanvas` 的 resize 结束逻辑先把 `el.style.width = ""` / `el.style.height = ""` 清空，再 `store.patchCard`；
+2. React 的 style diff 只重写「值发生变化」的属性——只改一个轴的 resize，另一个轴的值没变，React 不再写回；
+3. 未写回的轴落到 `auto`，而 `.ctl-card` 是 `container-type: size`（尺寸包含，没有内容内在尺寸），`auto` 解析为收缩到内容宽/高 → 卡片塌成一条，看起来只剩边框阴影。
+
+无头 Chrome + CDP 取证（`Input.dispatchMouseEvent` 真实拖拽）：
+- 只改高度：`styleWidth` 为空，实测 `22px × 60px`（竖条）；
+- 只改宽度：`styleHeight` 为空，实测 `196px × 14px`（横条）。
+
+**修法**
+- 新增 `features/controls/cardBox.ts`：`applyCardBox(el,w,h,step,gap)` **原子地写两轴**，永不写空串，非有限值/0 格回落 1 格；
+- resize 过程、提交、以及"页面消失"兜底路径全部改为 `applyCardBox`，不再清空；
+- 提交后按 `store.findCardById` 的最终值再写一遍，覆盖嵌入卡宽高比/最小格数的归一化；
+- 只读（Operator）下不进入拖拽/resize，避免"拖得动、松手弹回"。
+
+**为什么不会再复发**：`cardBox.test.ts` 钉住「只改一轴时另一轴仍必须被写回」与「永不写空/NaN」；代码里不再存在任何 `style.width/height = ""`。塌陷链路的两个必要条件（清空 + React 不补写）同时被移除。
+
+### 13.2 姿态 3D 卡片滚轮同时滚动画布
+
+**根因**：`ControlCanvas` 在 `.ctl-grid` 上挂了非被动 wheel（`preventDefault` + `scrollTop += dy`）；`OrbitControls` 只在 canvas 上 `preventDefault`，**不 stopPropagation**，事件继续冒泡到 `.ctl-grid`。
+
+**修法**：`AttitudeModelView` 在宿主上挂 `{ passive:false }` 的 wheel，未锁定时 `stopPropagation + preventDefault`；锁定时不拦，滚轮交还画布。缩放量取 `deltaY`，不依赖坐标，全局 CSS zoom 不影响。
+
+无头取证：指针在卡片内 `scrollTop 0→0`；卡片外 `0→120`；锁定后卡片内 `0→120`。
+
+### 13.3 同类排查
+
+- 画布内其它卡片：resize 全走 `applyCardBox`，不再有单轴写入；
+- 只读态：拖拽与 resize 都不起手；
+- 事件绑定：拖拽/缩放的 window 监听在 effect cleanup 中移除，theme/zoom 变化会重建而不是叠加；
+- 未改动 `theme.css` 与命令库树（另一会话正在改），本批只做精准 JS/CSS 之外的 Edit。
+
+> 手测补充：13.1 用「拖右下角只沿一个方向缩放」验证：另一个轴必须保持原尺寸；13.2 用滚轮分别在卡片内/外验证。
+
