@@ -14,11 +14,12 @@ import {
 } from "./embedPanels";
 
 /**
- * 控制画布存档 schema 版本。v2 = 引入 `type:"embed"` 内嵌面板卡片。
- * v1 存档没有版本字段，按 v1 读入并就地升级；高于当前版本的导入文件必须拒绝，
+ * 控制画布存档 schema 版本。v2 = 引入 `type:"embed"` 内嵌面板卡片；
+ * v3 = 卡片可挂载命令（`commandId`，引用式，见 `commandMount.ts`）。
+ * 旧版没有版本字段，按 v1 读入并就地升级；高于当前版本的导入文件必须拒绝，
  * 否则新版本的卡片会被旧代码静默丢成空白画布。
  */
-export const CONTROLS_SCHEMA_VERSION = 2;
+export const CONTROLS_SCHEMA_VERSION = 3;
 
 /**
  * 控件类型的**唯一运行时真相**（P97-I5）：以前只有 TS 联合，于是 ControlCanvas 的调色板
@@ -60,6 +61,12 @@ export interface BaseCard {
    * 引用式让"改谱 ⇒ 命令 / 序列器 / 卡片三处跟着变"成立（详设 §7 P121-D 的验收句）。
    */
   sendTemplateId?: string;
+  /**
+   * 这张卡挂载的命令 id（引用式，schema v3）。带着它时模板/脚本/谱引用都由命令决定，
+   * 卡片上的 `template` 等字段不再参与发送——命令是唯一真相（命令 → 谱 → 卡片）。
+   * 没有它 = 旧卡的拷贝语义，行为与 v2 完全一致。
+   */
+  commandId?: string;
   /**
    * 这张卡的控制值灌进谱的哪个参数（滑条 value / 开关 state）。
    * 必须显式存：不存就得靠"参数叫什么名字"去猜，而猜参数名是这条仓库明令禁止的。
@@ -382,6 +389,8 @@ function migrateCard(raw: Record<string, unknown>): ControlCard | null {
     // 空串一律当"没有引用"：清掉引用不该留下一根指向空 id 的线
     sendTemplateId: str(raw.sendTemplateId),
     paramId: str(raw.paramId),
+    // 空串/非字符串一律当"没挂命令"：不能留一根指向空 id 的失效引用
+    commandId: str(raw.commandId),
   };
   const type = (raw.type ?? "slider") as CardType;
   if (type === "embed") {

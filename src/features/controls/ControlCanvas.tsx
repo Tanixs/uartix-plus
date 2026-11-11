@@ -37,6 +37,7 @@ import {
   placementRejectText,
 } from "../../panels/panelPlacement";
 import { embedMinOf, isEmbedPanelTarget, isEmbedTargetId } from "./embedPanels";
+import { isMountable, mountedState, withMountedCommand } from "./commandMount";
 import { resolveWheelOwner } from "./wheelRouting";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
@@ -768,11 +769,32 @@ export function ControlCanvas() {
     ctx: Record<string, number | string>,
   ): Promise<void> => runCmdScript(script, ctx);
 
+  /**
+   * 发送前把"挂载命令"解析成实际发送字段（命令 → 谱 → 卡片）。
+   * 失效引用（命令被删）**必须拦下**：不能静默发卡片上残留的旧模板。
+   */
+  const resolveSendCard = (c: ControlCard): ControlCard | null => {
+    const state = mountedState(c);
+    if (state.kind === "missing") {
+      setErr(
+        tx(
+          `「${c.name}」挂载的命令已被删除：右键「挂载命令」换绑，或「解绑命令」回到卡片自己的模板`,
+          `The command mounted on "${c.name}" was deleted — right-click to mount another, or unmount and go back to the card's own template`,
+        ),
+      );
+      return null;
+    }
+    return state.kind === "ok" ? withMountedCommand(c) : c;
+  };
+
   const sendControl = async (
-    card: ControlCard,
+    input: ControlCard,
     ctx: Record<string, number | string>,
     force = false,
   ) => {
+    const resolved = resolveSendCard(input);
+    if (!resolved) return;
+    const card = resolved;
     if (card.managed !== undefined) {
       if (managedBusy.current) return;
       if (card.type === "slider") valuesRef.current.set(card.id, Number(ctx.value ?? getVal(card)));
@@ -913,7 +935,11 @@ export function ControlCanvas() {
     }
   };
 
-  const doSend = async (card: SliderCard, value: number) => {
+  const doSend = async (input: SliderCard, value: number) => {
+    // 连续拖动的滑条不走 sendControl，这里同样要解析挂载引用并拦下失效命令
+    const resolved = resolveSendCard(input);
+    if (!resolved) return;
+    const card = resolved as SliderCard;
     if (card.managed !== undefined) return;
     try {
       if (card.sendTemplateId) {
@@ -1068,50 +1094,42 @@ export function ControlCanvas() {
     };
   };
 
+  /**
+   * 挂载 = 记一个**引用**（`commandId`），不再拷命令内容（schema v3）。
+   * 旧卡没有 commandId 的仍按拷贝语义发送，行为不变。
+   */
   const mountCommand = (
     card: ControlCard,
-    cmd: RunnableCommand & { name?: string },
+    cmd: RunnableCommand & { name?: string; id?: string; nodeId?: string },
   ) => {
-    const useScript = !!cmd.scriptEnabled && !!cmd.script;
-    // 引用式命令**没有字节可拷**（它的 template 是空的）。
-    // 支持引用的卡片类型把引用接过来；不支持的（开关带两档各自的模板）就地说明——
-    // 原先这里会把空 template 写进卡片，症状是"拖了一下，卡片原来那条指令没了"。
-    if (cmd.sendTemplateId && !useScript) {
-      if (card.type === "slider" || card.type === "button") {
-        store.patchCard(page.id, card.id, {
-          sendTemplateId: cmd.sendTemplateId,
-          template: "",
-          sendMode: "hex",
-          useScript: false,
-          script: "",
-        });
-      } else {
-        setErr(
-          tx(
-            `「${card.name}」挂不了引用式命令：它自己带模板，不认发送谱。要引用就拖成滑条或按钮卡`,
-            `"${card.name}" cannot mount a referenced send template: it carries its own. Use a slider or button card`,
-          ),
-        );
-      }
+    if (!isMountable(card)) {
+      setErr(
+        tx(
+          `「${card.name}」挂不了命令：只有滑条 / 按钮 / 摇杆 / 单键监控是一卡一条命令，开关、键盘遥控、组合控件一卡对应多条指令`,
+          `"${card.name}" cannot mount a command: only slider / button / joystick / key monitor map one card to one command; switches, keypads and groups map one card to several`,
+        ),
+      );
       return;
     }
-    if (card.type === "switch" && !useScript) {
-      const templates = [...card.templates];
-      templates[card.state] = cmd.template;
-      store.patchCard(page.id, card.id, {
-        templates,
-        sendMode: cmd.sendMode,
-        useScript: false,
-        script: "",
-      });
-    } else {
-      store.patchCard(page.id, card.id, {
-        template: cmd.template,
-        sendMode: cmd.sendMode,
-        useScript,
-        script: cmd.script,
-      });
+    const commandId = cmd.id ?? cmd.nodeId;
+    if (!commandId) {
+      // 拖拽源没带 id 就没法建引用；宁可说清楚，也不退回去拷一份字节造成两条真相。
+      setErr(
+        tx(
+          "这次拖拽没有携带命令 id，无法建立引用；请从命令库重新拖入",
+          "This drag carries no command id, so a reference cannot be created — drag it from the command library again",
+        ),
+      );
+      return;
     }
+    store.patchCard(page.id, card.id, {
+      commandId,
+      // 引用式：卡片上的模板/脚本/谱引用一律清空，命令是唯一真相
+      template: "",
+      sendTemplateId: undefined,
+      useScript: false,
+      script: "",
+    });
   };
 
   const usedRows = page.cards.reduce((m, c) => Math.max(m, c.y + (c.h || 1)), 1);
@@ -1285,10 +1303,12 @@ export function ControlCanvas() {
   };
 
   const canSend = (c: ControlCard) =>
-    c.type === "slider" ||
-    c.type === "button" ||
-    c.type === "switch" ||
-    c.type === "joystick";
+    (c.type === "slider" ||
+      c.type === "button" ||
+      c.type === "switch" ||
+      c.type === "joystick") &&
+    // 失效引用不能再发：入口直接不出现，避免"点了才报错"
+    mountedState(c).kind !== "missing";
 
   const renderCard = (c: ControlCard) => {
     // 渲染兜底：w/h/x/y 非有限值时按最小 1×1 格渲染，绝不产生 sub-cell 扁条
@@ -1688,26 +1708,47 @@ export function ControlCanvas() {
                 {tx("移回停靠", "Move back to dock")}
               </button>
             )}
-            <div
-              ref={mountAnchorRef}
-              className="ctx-item ctx-has-sub"
-              onClick={(e) => { e.stopPropagation(); setMountOpen((v) => !v); }}
-              onMouseEnter={() => { disarmMountClose(); setMountOpen(true); }}
-            >
-              {tx("挂载命令", "Mount command")} <span className="ctx-arrow"><IconChevron size={12} /></span>
-            </div>
-            {mountOpen && (
-              <MountCascade
-                anchorEl={mountAnchorRef.current}
-                zf={zfactor}
-                onArm={armMountClose}
-                onDisarm={disarmMountClose}
-                onPick={(item) => {
-                  mountCommand(menuCard, item);
+            {isMountable(menuCard) && menuCard.commandId && (
+              <button
+                className="ctx-item"
+                onClick={() => {
+                  store.patchCard(page.id, menuCard.id, { commandId: undefined });
                   setMenu(null);
-                  setMountOpen(false);
                 }}
-              />
+                title={tx(
+                  "解绑后这张卡回到自己的模板串（挂载期间命令是唯一真相）",
+                  "After unmounting, the card goes back to its own template (the command is the source of truth while mounted)",
+                )}
+              >
+                {tx("解绑命令", "Unmount command")}
+              </button>
+            )}
+            {isMountable(menuCard) && (
+              <>
+                <div
+                  ref={mountAnchorRef}
+                  className="ctx-item ctx-has-sub"
+                  onClick={(e) => { e.stopPropagation(); setMountOpen((v) => !v); }}
+                  onMouseEnter={() => { disarmMountClose(); setMountOpen(true); }}
+                >
+                  {menuCard.commandId
+                    ? tx("换绑命令", "Change command")
+                    : tx("挂载命令", "Mount command")} <span className="ctx-arrow"><IconChevron size={12} /></span>
+                </div>
+                {mountOpen && (
+                  <MountCascade
+                    anchorEl={mountAnchorRef.current}
+                    zf={zfactor}
+                    onArm={armMountClose}
+                    onDisarm={disarmMountClose}
+                    onPick={(item) => {
+                      mountCommand(menuCard, item);
+                      setMenu(null);
+                      setMountOpen(false);
+                    }}
+                  />
+                )}
+              </>
             )}
             <div className="ctx-group">{tx("操作", "Actions")}</div>
             <button

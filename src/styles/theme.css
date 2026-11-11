@@ -13038,3 +13038,21 @@ body.pdrag-active *{cursor:grabbing !important;}
   color: var(--accent);
 }
 
+
+/* 挂载命令失效角标（schema v3 引用式挂载）：命令被删后卡片保留，但发送已被停用。
+   必须在卡面上直接说清楚，而不是等用户点了才弹错。位置避开右上角的锁定钮。 */
+.ctl-mount-bad {
+  position: absolute;
+  top: var(--sp-0);
+  right: var(--sp-0);
+  z-index: 57;
+  padding: 0 var(--sp-1h);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-s);
+  background: var(--bg-panel);
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  line-height: var(--ctl-h-1);
+  white-space: nowrap;
+  pointer-events: none;
+}

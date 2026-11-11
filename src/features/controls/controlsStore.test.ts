@@ -441,10 +441,10 @@ describe("canvas embed schema v2", () => {
       version: number;
       pages: { cards: Record<string, unknown>[] }[];
     };
-    expect(saved.version).toBe(2);
+    expect(saved.version).toBe(store.CONTROLS_SCHEMA_VERSION);
     expect(saved.pages[0].cards.some((c) => c.type === "embed" && c.panelId === "hexview")).toBe(true);
 
-    // v1（无 version 字段）存档：读入即升到 v2，合法内嵌卡保留
+    // v1（无 version 字段）存档：读入即升到当前版本，合法内嵌卡保留
     vi.resetModules();
     localStorage.setItem(
       "vs.controls",
@@ -465,7 +465,7 @@ describe("canvas embed schema v2", () => {
       }),
     );
     const reloaded = await import("./controlsStore");
-    expect(reloaded.getSnapshot().version).toBe(2);
+    expect(reloaded.getSnapshot().version).toBe(reloaded.CONTROLS_SCHEMA_VERSION);
     const migrated = reloaded.getSnapshot().pages[0].cards[0];
     expect(migrated).toMatchObject({ type: "embed", panelId: "plot2d", w: 4, h: 3 });
 
@@ -493,8 +493,8 @@ describe("canvas embed schema v2", () => {
   it("rejects files newer than the supported schema", async () => {
     const store = await import("./controlsStore");
     expect(store.checkControlsVersion(undefined)).toBeNull();
-    expect(store.checkControlsVersion(2)).toBeNull();
-    expect(store.checkControlsVersion(3)).toContain("v3");
+    expect(store.checkControlsVersion(3)).toBeNull();
+    expect(store.checkControlsVersion(4)).toContain("v4");
   });
 });
 
@@ -525,5 +525,24 @@ describe("clipboard guards", () => {
     locked.value = false;
     expect(store.pasteCard(pageId, 0, 0)).not.toBeNull();
     expect(store.activePage()!.cards).toHaveLength(count + 1);
+  });
+});
+
+describe("commandId migration (v3)", () => {
+  it("keeps a reference and treats an empty string as no mount", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.importPage({
+      name: "P",
+      cols: 8,
+      rows: 8,
+      cards: [
+        { id: "a", type: "slider", x: 0, y: 0, w: 3, h: 2, commandId: "cmd-1" },
+        { id: "b", type: "slider", x: 3, y: 0, w: 3, h: 2, commandId: "" },
+      ],
+    });
+    const cards = store.getSnapshot().pages.find((p) => p.id === pageId)!.cards;
+    expect(cards[0].commandId).toBe("cmd-1");
+    // 空串不能留成"指向空 id 的失效引用"
+    expect(cards[1].commandId).toBeUndefined();
   });
 });

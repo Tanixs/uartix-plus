@@ -902,3 +902,54 @@ TX 组帧台=滚表单；插件面板=iframe 内滚内容（跨文档，父页�
 
 单测：`clipboard guards` 两条——内嵌卡进不了剪贴板且粘贴返回 null；只读时粘贴不改变卡数，
 解锁后同一次粘贴成功。门禁：controlsStore.test 25 条全绿。
+
+## 22. 清理批 2：命令挂载改为引用式（schema v3，2026-11-12 追加）
+
+### 22.1 旧行为
+
+「挂载命令」是一次性**拷贝**：把命令的 `template / sendMode / script / useScript` 写进卡片，
+之后命令改了卡片不跟着变；卡片也不记"我来自哪条命令"，没有解绑、没有失效态。
+更糟的是它对 led / buzzer / monitor / group / custom / embed 也显示，写进去的 `template`
+被 `migrateCard` 丢弃——点了等于没点。
+
+### 22.2 新结构（单链）
+
+```
+命令(CommandItem) → [sendTemplateId 引用] 发送谱 → 卡片(commandId 引用命令)
+```
+
+- 卡片只存 `commandId`（schema v3），不再存命令内容的拷贝；
+- 发送时 `resolveSendCard()` 用 `withMountedCommand()` 把命令的字段覆盖到卡上：
+  `template / sendMode / script / useScript / sendTemplateId` 全部以命令为准，
+  **命令没引用谱就把卡上残留的 `sendTemplateId` 清空**，杜绝"卡又引谱又引命令"两条真相；
+- 命令自身的 `overrides` 作为 `mountOverrides` 随本次发送带上（不落盘），
+  `runSpecCard` 把它和卡片 `paramId` 的值合并成最终参数覆盖；
+- `paramId` 始终归卡片：它回答的是"这张卡的值灌进谱的哪个参数"，不是命令的属性。
+
+### 22.3 失效与兼容
+
+| 情形 | 行为 |
+| --- | --- |
+| 命令被删 | `mountedState() = missing`：卡面出现「命令失效」角标，`立即发送` 入口消失，点击发送被拦下并说明原因 |
+| 旧卡（无 `commandId`） | 完全维持 v2 拷贝语义，不迁移、不改字节 |
+| 空串 `commandId` | 读入即当"没挂载"，不留指向空 id 的失效引用 |
+| 只读 Operator 包 | 改绑/解绑走 `patchCard`，落在 `RUNTIME_CARD_KEYS` 之外，被 `guardLocked()` 拦下 |
+
+可挂载类型收敛为 **slider / button / joystick / keymon**（一卡一条命令）。
+switch（两档）、keypad（四向）、group（子项各一条）一卡对应多条指令，挂一条没有确定语义，
+所以右键不显示该项；旧卡上拷贝好的两档模板继续照常工作。
+
+### 22.4 入口
+
+- 卡右键：可挂载卡显示「挂载命令 / 换绑命令」，已挂载时多一项「解绑命令」；
+- 卡设置：新增「挂载命令」区，下拉列出命令库（分组用缩进），显示"已挂载：<命令名>"
+  或"（命令已删除）"，并说明"命令 → 发送谱 → 卡片"的单链与解绑后的降级路径。
+
+### 22.5 验证
+
+- 单测 `commandMount.test.ts` 6 条：字段覆盖且保住 `paramId`；命令无谱时清掉卡的旧谱引用；
+  命令有谱/覆盖值时以命令为准；删除命令得到 `missing` 且合并函数不伪装成"未挂载"；
+  无 `commandId` 返回同一对象；可挂载类型白名单。
+- `controlsStore.test.ts` 新增 v3 迁移：`commandId` 保留、空串归一为 `undefined`；
+  存档版本断言改为跟随 `CONTROLS_SCHEMA_VERSION`。
+- 门禁：tsc 0 错、eslint 0 error/22 warning、vitest 全绿。

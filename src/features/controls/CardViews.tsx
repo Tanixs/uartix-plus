@@ -21,6 +21,8 @@ import type {
   SwitchCard,
 } from "./controlsStore";
 import * as variableStore from "./variableStore";
+import * as commandStore from "./commandStore";
+import { isMountable, mountedState } from "./commandMount";
 import * as sendStore from "../send/sendStore";
 import { bindingDetail, bindingLabel, isLinked } from "./cardBinding";
 import { beep } from "./scriptRunner";
@@ -113,7 +115,10 @@ function broadcastLive(
 export function CardFrame(props: CardFrameProps) {  const { card } = props;
   // P122-D2：TX组帧台正盯着哪一块，灌那个参数的卡就带一个常驻色（位置反馈的"知道是谁"那一半）
   useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
+  // 命令被删要当场把卡标成失效：名字改了同理（标题/提示都读同一份快照）
+  useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   const linked = isLinked(card, sendStore.getFocus());
+  const mountBroken = card.commandId ? mountedState(card).kind === "missing" : false;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dropRef = useRef(props.onDropTemplate);
   dropRef.current = props.onDropTemplate;
@@ -181,6 +186,17 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
             if (e.key === "Escape") props.onRenameCancel();
           }}
         />
+      )}
+      {mountBroken && (
+        <span
+          className="ctl-mount-bad"
+          title={tx(
+            "挂载的命令已被删除：发送已停用。右键「挂载命令」换绑，或「解绑命令」回到卡片自己的模板",
+            "The mounted command was deleted, so sending is disabled — right-click to mount another, or unmount to use the card's own template",
+          )}
+        >
+          {tx("命令失效", "Command missing")}
+        </span>
       )}
       {props.children}
       {props.resizable && (
@@ -1546,6 +1562,10 @@ export function CardModal(props: {
   const vars = variableStore.listVars();
   // 引用式卡片要显示它引用的是哪张谱：谱改了这张卡就跟着改，所以这里得跟着订阅
   useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
+  // 挂载区要显示命令名与"已删除"状态，命令库变更必须重渲染
+  useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
+  const cmds = commandStore.flatCommands();
+  const mountedItem = card.commandId ? commandStore.getCommand(card.commandId) : null;
   const spec = card.sendTemplateId ? sendStore.getTemplate(card.sendTemplateId) : undefined;
   const patch = (p: Record<string, unknown>) =>
     store.patchCard(props.pageId, card.id, p);
@@ -1606,6 +1626,50 @@ export function CardModal(props: {
           )}
         </div>
       </Section>
+      {isMountable(card) && (
+        <Section title={tx("挂载命令", "Mounted command")}>
+          <div className="form-row">
+            <label>{tx("命令", "Command")}</label>
+            <select
+              className="input"
+              value={card.commandId ?? ""}
+              onChange={(e) => patch({ commandId: e.target.value || undefined })}
+            >
+              <option value="">
+                {tx("— 不挂载（用卡片自己的模板）", "— None (use the card's own template)")}
+              </option>
+              {cmds.map(({ item, depth }) => (
+                <option key={item.id} value={item.id}>
+                  {"　".repeat(depth) + item.name}
+                </option>
+              ))}
+              {card.commandId && !mountedItem && (
+                <option value={card.commandId}>
+                  {tx("（命令已删除）", "(command deleted)")}
+                </option>
+              )}
+            </select>
+          </div>
+          <div className="form-col">
+            <div className="form-hint">
+            {!card.commandId
+              ? tx(
+                  "挂载后由命令决定发送内容（命令 → 发送谱 → 卡片）：改命令不用再改卡片。",
+                  "Once mounted the command decides what is sent (command → send template → card), so editing the command does not require touching the card.",
+                )
+              : mountedItem
+                ? tx(
+                    `已挂载：${mountedItem.name}。命令改动即时生效；解绑后回到卡片自己的模板。`,
+                    `Mounted: ${mountedItem.name}. Edits to the command apply immediately; unmounting returns to the card's own template.`,
+                  )
+                : tx(
+                    "这条命令已被删除：卡片发送已停用。换绑一条命令，或解绑后改回卡片自己的模板。",
+                    "That command was deleted, so this card cannot send. Mount another command, or unmount and use the card's own template.",
+                  )}
+            </div>
+          </div>
+        </Section>
+      )}
       {(card.type === "led" || card.type === "buzzer") && (
         <Section title={tx("触发条件", "Trigger")}>
           <div className="form-row">

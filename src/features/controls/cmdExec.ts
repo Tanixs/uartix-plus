@@ -162,16 +162,23 @@ export async function runCommand(
  * 没配 `paramId` 的卡（按钮卡）就发谱的默认值。
  */
 export async function runSpecCard(
-  card: { sendTemplateId?: string; paramId?: string },
+  card: {
+    sendTemplateId?: string;
+    paramId?: string;
+    /** 挂载卡带的"命令自身参数覆盖值"：不落盘，只在这次发送里生效 */
+    mountOverrides?: Record<string, string>;
+  },
   value?: number,
 ): Promise<void> {
+  const overrides: Record<string, string> = { ...(card.mountOverrides ?? {}) };
+  if (value !== undefined && card.paramId) overrides[card.paramId] = String(value);
   await runCommand({
     sendMode: "hex",
     template: "",
     script: "",
     scriptEnabled: false,
     sendTemplateId: card.sendTemplateId,
-    overrides: value !== undefined && card.paramId ? { [card.paramId]: String(value) } : undefined,
+    overrides: Object.keys(overrides).length ? overrides : undefined,
   });
 }
 
