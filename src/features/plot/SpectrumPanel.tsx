@@ -31,6 +31,7 @@ import * as templateStore from "../protocol/templateStore";
 import { requestOpenPanel } from "../ai/appBus";
 import { toast } from "../ai/uiRuntime";
 import { tx, useLocale } from "../../i18n/strings";
+import * as panelActivity from "../../panels/panelActivity";
 import { IconPause, IconPlay } from "../../shared/icons";
 
 const HIST_BINS = 40;
@@ -323,6 +324,9 @@ export function SpectrumPanel() {
     const timer = setInterval(() => {
       const wrap = wrapRef.current;
       if (!wrap || wrap.clientWidth === 0 || document.hidden) return;
+      // 后台页签 / 内嵌卡滚出视口：整帧跳过重算。首次建图时的 compute 不走这条路，
+      // 所以不会因为 registry 晚一步同步而白屏。
+      if (!panelActivity.isVisible("spectrum")) return;
       if (prefsRef.current.paused) return;
       if (!chanId) return;
       const d = getChanData(chanId);

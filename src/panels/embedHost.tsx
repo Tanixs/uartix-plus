@@ -10,6 +10,9 @@ import { AttitudeModelView } from "../features/attitude/AttitudeModelView";
 import { TrajectoryView } from "../features/plot3d/TrajectoryView";
 import { HexView } from "../features/hexview/HexView";
 import { Plot2D } from "../features/plot/Plot2D";
+import { DataTable } from "../features/table/DataTable";
+import { SpectrumPanel } from "../features/plot/SpectrumPanel";
+import { XRayPanel } from "../features/xray/XRayPanel";
 import { IconLock, IconUnlock } from "../shared/icons";
 import { tx, useLocale } from "../i18n/strings";
 import * as panelActivity from "./panelActivity";
@@ -23,6 +26,9 @@ import { primePanelView } from "./viewState";
  */
 const MPlot2D = memo(Plot2D);
 const MHexView = memo(HexView);
+const MDataTable = memo(DataTable);
+const MXRayPanel = memo(XRayPanel);
+const MSpectrumPanel = memo(SpectrumPanel);
 const MAttitudeView = memo(AttitudeModelView);
 const MTrajectoryView = memo(TrajectoryView);
 
@@ -128,6 +134,12 @@ export function EmbedCardView(props: EmbedCardViewProps) {
             <MPlot2D />
           ) : card.panelId === "hexview" ? (
             <MHexView />
+          ) : card.panelId === "datatable" ? (
+            <MDataTable />
+          ) : card.panelId === "xray" ? (
+            <MXRayPanel />
+          ) : card.panelId === "spectrum" ? (
+            <MSpectrumPanel />
           ) : card.panelId === "attitude3d" ? (
             <MAttitudeView locked={locked} />
           ) : (

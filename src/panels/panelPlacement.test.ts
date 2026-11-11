@@ -43,6 +43,39 @@ describe("panel placement mutex", () => {
     });
   });
 
+  it("resolves the datatable embed id to the table dock tab", async () => {
+    const activity = await import("./panelActivity");
+    const store = await import("../features/controls/controlsStore");
+    const pageId = store.getSnapshot().activePageId;
+    const placement = await import("./panelPlacement");
+    activity.syncPanels([{ id: "table", visible: true }]);
+    expect(placement.panelPlacementOf("datatable")).toBe("dock");
+    expect(placement.canPlaceEmbedInCanvas(pageId, "datatable")).toEqual({
+      ok: false,
+      reason: "docked",
+    });
+    expect(placement.movePanelToCanvas("datatable")).toEqual({
+      ok: false,
+      reason: "docked",
+    });
+
+    activity.syncPanels([]);
+    expect(placement.panelPlacementOf("datatable")).toBe("closed");
+    expect(placement.movePanelToCanvas("datatable").ok).toBe(true);
+    expect(store.findEmbedCard("datatable")?.card).toMatchObject({ w: 4, h: 4 });
+  });
+
+  it("caps each wave-1 whole panel at one instance", async () => {
+    const activity = await import("./panelActivity");
+    activity.syncPanels([]);
+    const placement = await import("./panelPlacement");
+    expect(placement.addEmbedFromGallery("xray").ok).toBe(true);
+    expect(placement.addEmbedFromGallery("xray")).toEqual({
+      ok: false,
+      reason: "already-embedded",
+    });
+  });
+
   it("rejects panels outside the P1 whitelist", async () => {
     const activity = await import("./panelActivity");
     activity.syncPanels([]);

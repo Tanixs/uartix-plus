@@ -231,6 +231,57 @@ describe("canvas embed schema v2", () => {
     expect(store.addEmbedCard(pageId, "plot2d")).toEqual({ ok: false, reason: "duplicate" });
   });
 
+  it("accepts the wave-1 data panels at their own minimum sizes", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.importPage({ name: "wave1", cols: 12, rows: 12, cards: [] });
+    const sizes = [
+      ["datatable", 4, 4],
+      ["xray", 4, 4],
+      ["spectrum", 4, 3],
+    ] as const;
+    for (const [id, w, h] of sizes) {
+      expect(store.addEmbedCard(pageId, id).ok).toBe(true);
+      expect(store.findEmbedCard(id)?.card).toMatchObject({
+        type: "embed",
+        panelId: id,
+        w,
+        h,
+        minW: w,
+        minH: h,
+        aspectLock: false,
+      });
+    }
+  });
+
+  it("keeps wave-1 cards on import and still reports unknown ids", async () => {
+    const store = await import("./controlsStore");
+    const report = { droppedPanels: [] as string[] };
+    const pageId = store.importPage(
+      {
+        name: "wave1-mixed",
+        cols: 12,
+        rows: 12,
+        cards: [
+          { type: "embed", panelId: "datatable" },
+          { type: "embed", panelId: "xray" },
+          { type: "embed", panelId: "spectrum" },
+          { type: "embed", panelId: "vdev" },
+        ],
+      },
+      report,
+    );
+    expect(report.droppedPanels).toEqual(["vdev"]);
+    const page = store.getSnapshot().pages.find((p) => p.id === pageId)!;
+    const byId = new Map(
+      page.cards
+        .filter((c) => c.type === "embed")
+        .map((c) => [(c as { panelId: string }).panelId, c]),
+    );
+    expect(byId.get("datatable")).toMatchObject({ w: 4, h: 4 });
+    expect(byId.get("xray")).toMatchObject({ w: 4, h: 4 });
+    expect(byId.get("spectrum")).toMatchObject({ w: 4, h: 3 });
+  });
+
   it("rejects the second heavy card when the page is full", async () => {
     const store = await import("./controlsStore");
     const page = store.importPage({ name: "full", cols: 4, rows: 3, cards: [] });

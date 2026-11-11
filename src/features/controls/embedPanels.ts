@@ -11,8 +11,31 @@
 import { getLocale } from "../../i18n/strings";
 
 /** 整板形态：有对应的停靠面板，可与停靠区互相搬。 */
-export const EMBED_PANEL_IDS = ["plot2d", "hexview"] as const;
+export const EMBED_PANEL_IDS = [
+  "plot2d",
+  "hexview",
+  "datatable",
+  "xray",
+  "spectrum",
+] as const;
 export type EmbedPanelId = (typeof EMBED_PANEL_IDS)[number];
+
+/**
+ * 整板 id → 停靠面板 id。数据门控、停靠互斥、移回停靠仍按停靠 id 记账：
+ * `datatable` 是给"画布里的数据表格"起的名字，停靠页签一直叫 `table`；
+ * 其余整板两者同名（映射到自身），保留映射表是为了让调用点不再拼字符串。
+ */
+export const EMBED_PANEL_DOCK_ID: Record<EmbedPanelId, string> = {
+  plot2d: "plot2d",
+  hexview: "hexview",
+  datatable: "table",
+  xray: "xray",
+  spectrum: "spectrum",
+};
+
+export function dockIdOf(id: EmbedPanelId): string {
+  return EMBED_PANEL_DOCK_ID[id];
+}
 
 /** 视图形态：只存在于画布，没有停靠页签，因此不参与"移回停靠"。 */
 export const EMBED_VIEW_IDS = ["attitude3d", "trajectory3d"] as const;
@@ -31,6 +54,12 @@ export type EmbedKind = "panel" | "view";
 export const EMBED_ID_MIN: Record<EmbedId, { w: number; h: number }> = {
   plot2d: { w: 4, h: 3 },
   hexview: { w: 3, h: 2 },
+  // 数据表格 4×4：工具条 + 列头 + 至少 6 行数据；4×3 在 60px 格下只剩 3 行，筛选后常常空白。
+  datatable: { w: 4, h: 4 },
+  // X-Ray 4×4：参数行两排 + 样本条 + 16×14 的字节网格；再窄列熵条会糊成一片。
+  xray: { w: 4, h: 4 },
+  // 频谱 4×3：工具条一排可换行 + 一张图 + 摘要行，图高至少 4~5 格才有分辨力。
+  spectrum: { w: 4, h: 3 },
   attitude3d: { w: 4, h: 3 },
   trajectory3d: { w: 5, h: 4 },
 };
@@ -65,12 +94,18 @@ export function embedKindOf(id: EmbedId): EmbedKind {
 const TITLES_ZH: Record<EmbedId, string> = {
   plot2d: "2D 曲线",
   hexview: "Hex 数据流",
+  datatable: "数据表格",
+  xray: "结构发现 X-Ray",
+  spectrum: "频谱分析",
   attitude3d: "姿态 3D 模型",
   trajectory3d: "3D 轨迹视图",
 };
 const TITLES_EN: Record<EmbedId, string> = {
   plot2d: "2D Plot",
   hexview: "Hex Stream",
+  datatable: "Data Table",
+  xray: "X-Ray Discovery",
+  spectrum: "Spectrum",
   attitude3d: "3D Attitude Model",
   trajectory3d: "3D Trajectory View",
 };
@@ -84,6 +119,7 @@ export function embedName(id: EmbedId): string {
  * 内嵌视图态：切换「停靠 ↔ 内嵌」时随卡片搬运的最小状态集。
  * - 2D：uPlot 当前 x/y 区间 + 是否跟随；
  * - Hex：滚动位置（最后可见字节列，等价 scrollOffset）；
+ * - 表格 / X-Ray / 频谱：工具栏与局部排序不跨形态搬运，返回 null；
  * - 姿态视图 / 轨迹视图：没有可搬的视野（相机只在画布内，切走即重来），返回 null。
  */
 export interface Plot2DEmbedViewState {
@@ -119,7 +155,8 @@ export function sanitizeEmbedViewState(
     if (xMax <= xMin || yMax <= yMin) return null;
     return { xMin, xMax, yMin, yMax, follow: Boolean(r.follow) };
   }
-  if (id === "attitude3d" || id === "trajectory3d") return null;
+  // 只有 Hex 能把滚动位置带过去；其余整板（表格/X-Ray/频谱）与两种视图没有可搬状态。
+  if (id !== "hexview") return null;
   const off = finite(r.scrollOffset);
   if (off === null || off < 0) return null;
   return { scrollOffset: Math.round(off) };

@@ -4667,6 +4667,16 @@ select optgroup {
   overflow: hidden;
 }
 
+/* 窄卡里的 X-Ray 顶部行：允许换行 + 提示先收缩，别把按钮顶出右边界。
+   停靠面板宽度足够，这两条只在卡片作用域里生效。 */
+.ctl-embed-body .xray-bar {
+  flex-wrap: wrap;
+}
+.ctl-embed-body .xray-hint {
+  flex: 1 1 80px;
+  min-width: 0;
+}
+
 /* 组件根（uPlot 容器 / Hex 根）绝对填满，避免 canvas 按内容把自己撑破卡片 */
 .ctl-embed-body > * {
   position: absolute;

@@ -7,6 +7,7 @@
  */
 import {
   EMBED_ID_MIN,
+  dockIdOf,
   isEmbedId,
   isEmbedPanelId,
   isEmbedViewId,
@@ -52,7 +53,10 @@ export type PlacePanelResult =
 
 /** 当前面板落在哪：停靠优先（dock 里开着就不可能同时内嵌，由互斥保证）。 */
 export function panelPlacementOf(panelId: string): PanelPlacement {
-  if (panelActivity.isDocked(panelId)) return "dock";
+  // 内嵌 id 可能与停靠 id 不同名（datatable ↔ table）：停靠状态按映射后的 id 查，
+  // 内嵌卡仍按卡片自己的 panelId 查。两种入参都能得到正确答案。
+  const dockId = isEmbedPanelId(panelId) ? dockIdOf(panelId) : panelId;
+  if (panelActivity.isDocked(dockId)) return "dock";
   if (controlsStore.findEmbedCard(panelId)) return "embed";
   return "closed";
 }
@@ -67,7 +71,7 @@ export function placePanelInCanvas(
   viewState?: EmbedPanelViewState | null,
 ): PlacePanelResult {
   if (!isEmbedPanelId(panelId)) return { ok: false, reason: "unknown-panel" };
-  if (panelActivity.isDocked(panelId)) return { ok: false, reason: "docked" };
+  if (panelActivity.isDocked(dockIdOf(panelId))) return { ok: false, reason: "docked" };
   const r = controlsStore.addEmbedCard(pageId, panelId, viewState);
   if (r.ok) return r;
   return r.reason === "duplicate"
@@ -80,7 +84,9 @@ export function canPlaceEmbedInCanvas(
   id: string,
 ): { ok: true } | { ok: false; reason: PlacementRejectReason } {
   if (!isEmbedId(id)) return { ok: false, reason: "unknown-panel" };
-  if (panelActivity.isDocked(id)) return { ok: false, reason: "docked" };
+  if (isEmbedPanelId(id) && panelActivity.isDocked(dockIdOf(id))) {
+    return { ok: false, reason: "docked" };
+  }
   if (isEmbedViewId(id) && controlsStore.countEmbedCards(id) >= VIEW_INSTANCE_CAP[id]) {
     return { ok: false, reason: "view-limit" };
   }
@@ -133,9 +139,11 @@ export function movePanelToCanvas(panelId: string): PlacePanelResult {
   const dry = controlsStore.canAddEmbedCard(page.id, panelId);
   if (!dry.ok) return { ok: false, reason: mapStoreReason(dry.reason) };
 
-  const docked = panelActivity.isDocked(panelId);
+  // 停靠页签用的是 dock id（datatable → table），关/开都必须走映射。
+  const dockId = dockIdOf(panelId);
+  const docked = panelActivity.isDocked(dockId);
   const view = docked ? capturePanelView(panelId) : null;
-  if (docked && !closeDockPanel(panelId)) {
+  if (docked && !closeDockPanel(dockId)) {
     discardPanelView(panelId);
     return { ok: false, reason: "docked" };
   }
@@ -143,7 +151,7 @@ export function movePanelToCanvas(panelId: string): PlacePanelResult {
   if (!r.ok) {
     discardPanelView(panelId);
     // 已关停靠却落卡失败：把页签开回去，别让面板凭空消失。
-    if (docked) openDockPanel(panelId);
+    if (docked) openDockPanel(dockId);
     return { ok: false, reason: mapStoreReason(r.reason) };
   }
   return r;
@@ -164,7 +172,7 @@ export function movePanelToDock(
   if (!isEmbedPanelId(card.panelId)) return { ok: false, reason: "dock-unavailable" };
   const view = capturePanelView(card.panelId);
   controlsStore.removeCard(pageId, card.id);
-  if (!openDockPanel(card.panelId)) {
+  if (!openDockPanel(dockIdOf(card.panelId))) {
     // 极端情况（注入的 opener 失效）：把卡片加回去，保持"至少有一个落点"。
     controlsStore.addEmbedCard(pageId, card.panelId, view);
     discardPanelView(card.panelId);

@@ -3,6 +3,7 @@ import {
   EMBED_ID_ASPECT,
   EMBED_ID_MIN,
   EMBED_IDS,
+  dockIdOf,
   embedKindOf,
   embedName,
   isEmbedId,
@@ -15,10 +16,16 @@ describe("embed whitelist", () => {
     expect([...EMBED_IDS]).toEqual([
       "plot2d",
       "hexview",
+      "datatable",
+      "xray",
+      "spectrum",
       "attitude3d",
       "trajectory3d",
     ]);
     expect(embedKindOf("plot2d")).toBe("panel");
+    expect(embedKindOf("datatable")).toBe("panel");
+    expect(embedKindOf("xray")).toBe("panel");
+    expect(embedKindOf("spectrum")).toBe("panel");
     expect(embedKindOf("attitude3d")).toBe("view");
     expect(embedKindOf("trajectory3d")).toBe("view");
     expect(isEmbedViewId("attitude3d")).toBe(true);
@@ -40,6 +47,22 @@ describe("embed whitelist", () => {
   it("gives the trajectory view a 5x4 minimum and the same 4:3 lock", () => {
     expect(EMBED_ID_MIN.trajectory3d).toEqual({ w: 5, h: 4 });
     expect(EMBED_ID_ASPECT.trajectory3d).toBeCloseTo(4 / 3);
+  });
+
+  it("gives the wave-1 data panels their own minimums and no aspect lock", () => {
+    expect(EMBED_ID_MIN.datatable).toEqual({ w: 4, h: 4 });
+    expect(EMBED_ID_MIN.xray).toEqual({ w: 4, h: 4 });
+    expect(EMBED_ID_MIN.spectrum).toEqual({ w: 4, h: 3 });
+    for (const id of ["datatable", "xray", "spectrum"] as const) {
+      expect(EMBED_ID_ASPECT[id]).toBeUndefined();
+    }
+  });
+
+  it("maps only the data table to a differently-named dock panel", () => {
+    expect(dockIdOf("datatable")).toBe("table");
+    for (const id of ["plot2d", "hexview", "xray", "spectrum"] as const) {
+      expect(dockIdOf(id)).toBe(id);
+    }
   });
 
   it("names every target in both languages", () => {
@@ -73,5 +96,11 @@ describe("embed view state", () => {
   it("has nothing to carry for either view", () => {
     expect(sanitizeEmbedViewState("attitude3d", { anything: 1 })).toBeNull();
     expect(sanitizeEmbedViewState("trajectory3d", { anything: 1 })).toBeNull();
+  });
+
+  it("does not misread a data panel's payload as the hex scroll offset", () => {
+    for (const id of ["datatable", "xray", "spectrum"] as const) {
+      expect(sanitizeEmbedViewState(id, { scrollOffset: 32 })).toBeNull();
+    }
   });
 });

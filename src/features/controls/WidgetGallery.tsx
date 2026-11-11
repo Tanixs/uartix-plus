@@ -1,5 +1,13 @@
 import { beginPointerDrag } from "../../shared/pointerDrag";
-import { IconCube, IconLanes, IconTerminal, WIDGET_ICONS } from "../../shared/icons";
+import {
+  IconColumns,
+  IconCube,
+  IconLanes,
+  IconPulse,
+  IconSearch,
+  IconTerminal,
+  WIDGET_ICONS,
+} from "../../shared/icons";
 import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
 import * as store from "./controlsStore";
@@ -80,6 +88,12 @@ export function WidgetGallery() {
               <IconLanes />
             ) : embedId === "hexview" ? (
               <IconTerminal />
+            ) : embedId === "datatable" ? (
+              <IconColumns />
+            ) : embedId === "xray" ? (
+              <IconSearch />
+            ) : embedId === "spectrum" ? (
+              <IconPulse />
             ) : (
               <IconCube />
             )}

@@ -499,3 +499,100 @@ CSS 只管排布（`flex-wrap`、`min-width:0`、不叠放），不出现 `trans
 - 偏差：`check-empty-copy` 需为 `TrajectoryView.tsx` 登记 15 字空态文案（门要求新空态显式入册），
   已按"一句回执、不写说明墙"的口径登记。
 
+## 15. 面板控件化 · 第一波（2026-11-11 追加，用户已确认）
+
+### 15.1 范围与形态
+
+| 面板 | 停靠 id | 内嵌 id | 形态 | 最小格数 | 上限 | 比例锁 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 数据表格 | `table` | `datatable` | 整板（连工具栏/列菜单） | 4×4 | 1 | 无 |
+| 结构发现 X-Ray | `xray` | `xray` | 整板（连参数行/分析按钮） | 4×4 | 1 | 无 |
+| 频谱分析 | `spectrum` | `spectrum` | 整板（连工具条/摘要行） | 4×3 | 1 | 无 |
+
+- 三者在 `embedPanels.ts` 进入 `EMBED_PANEL_IDS`，因此 `EMBED_IDS`、`isEmbedId`、
+  `sanitizeEmbedViewState`、导入丢弃告警、Operator 包路径全部自动生效；
+  `Operator` 包不另设白名单——`operatorStore.activate` → `importPage` → `migrateCard` → `isEmbedId`
+  是同一条校验链，未知 id 仍整卡丢弃并由 `report.droppedPanels` 计数。
+- `datatable` 与停靠 id 不同名，新增 `EMBED_PANEL_DOCK_ID`（唯一映射表）与 `dockIdOf()`；
+  `xray` / `spectrum` 映射到自身。停靠互斥、移回停靠、`openDockPanel/closeDockPanel` 一律走映射，
+  不再由调用点拼 id。
+- 视图态：三块都是整板，`sanitizeEmbedViewState` 返回 `null`（工具栏与滚动位置不跨形态搬运；
+  表格排序/过滤是组件内局部状态，跨形态重建可接受）。
+
+### 15.2 数据门控（采集与可见性）
+
+- `framesStore.ts`：`table` 与 `datatable` 取并集——
+  1) `onFrames` 采集门：`isOpen("table") || isOpen("datatable")`；
+  2) 切回前台补 emit：`isVisible("table") || isVisible("datatable")`；
+  3) `flush` 的可见性判断同上。
+  抽两个局部函数 `tableOpen()` / `tableVisible()`，三处调用，避免再写散落的字符串。
+- `plotStore.ts` 的采集门控已含 `spectrum`，且内嵌 id 与停靠 id 相同，无需改动；
+  但补一条注释说明"内嵌频谱走同一 id，无需并集"，防止后人再猜。
+- `SpectrumPanel` 的 800ms 重算定时器补 `panelActivity.isVisible("spectrum")` 早退；
+  首次 `compute()` 仍在 uPlot 建图时同步执行，不会白屏。滚出视口 / 宿主切后台即停算。
+- X-Ray 的 `onRx` 订阅在组件 `useEffect` 内：卡片不挂载就无订阅，关面板即停；
+  `SampleRing` 有 64KB 硬上限，滚出视口继续积累但内存有界，不额外加门控。
+- `frameStore` / 其他 store 不在本波范围。
+
+### 15.3 宿主与交互
+
+- `embedHost.tsx`：新增 `MDataTable` / `MXRay` / `MSpectrum` 三个 `memo`，
+  在 `ctl-embed-body` 按 `card.panelId` 分支挂载；可见性 rAF 仍用 `card.panelId` 上报，
+  `datatable` 因此能被 `framesStore` 的可见性并集读到。
+- 三块都是整板：不显示姿态/轨迹的"锁定交互"按钮（`isEmbedViewId` 为 false）。
+- 上下文菜单「移回停靠」按 `isEmbedPanelId` 生效；`movePanelToDock` 用 `dockIdOf` 打开对应停靠页签。
+- 控件库 `WidgetGallery` 三个新条目各配 SVG 图标：`IconColumns`（表格）、`IconSearch`（X-Ray）、
+  `IconPulse`（频谱）；不新增位图、不用 emoji/字符图标。
+
+### 15.4 拒绝文案与降级
+
+- 第二张同类卡：`already-embedded`（"该面板已经在控制画布内嵌了"）。
+- 停靠区已开着：`docked`（引导从页签「内嵌到控制画布」进入，或先关停靠）。
+- 页面小于 4×4 / 4×3：`page-too-small`；无空位：`no-space`。
+- 不新增 `view-limit` 分支：整板靠 `findEmbedCard` 的单实例互斥天然只有一张。
+
+### 15.5 改动文件
+
+1. `src/features/controls/embedPanels.ts`：ids、最小格数、双语名、`EMBED_PANEL_DOCK_ID`/`dockIdOf`。
+2. `src/panels/panelPlacement.ts`：停靠判断与开关一律走 `dockIdOf`。
+3. `src/panels/embedHost.tsx`：三个 memo + 分支。
+4. `src/features/table/framesStore.ts`：`tableOpen()` / `tableVisible()` 并集。
+5. `src/features/plot/SpectrumPanel.tsx`：可见性早退。
+6. `src/features/plot/plotStore.ts`：仅注释（门控已覆盖）。
+7. `src/features/controls/WidgetGallery.tsx`：三个图标分支。
+8. 测试：`embedPanels.test.ts`、`controlsStore.test.ts`（新 id 导入/保留最小尺寸）、
+   `panelPlacement.test.ts`（dock 映射与第二张拒绝）。
+
+### 15.6 验证
+
+- 单测：`npx vitest run`（全量），插件四文件门禁。
+- 无头静默截图（允许；不启动 GUI）：`.tmp/verify-wave1.mjs` 复用轨迹段的 Tauri 存根，
+  拖入三张卡 → 卡片非空白、控制台 0 error；滚出视口后 `framesStore` 停止 `emit`（用 store 计数断言）；
+  第二张同 id 被拒（`already-embedded`）；4×3 窄卡下频谱工具条换行不叠。
+- 七项门禁：插件四文件、全量 vitest、`tsc`、`eslint`、`check:all`、`vite build`、`cargo check`。
+- 提交：本波单独一个提交，不跨波混入；随后同步 HANDOFF / 本 spec / tasks，并发第一波阶段报告。
+
+### 15.7 不做
+
+- Modbus、编排器、虚拟设备、AI 继续停靠；若发现低成本可嵌，先报告再动。
+- 不新增每类渲染预算/降级阶梯：三块都不是 WebGL，频谱重算已有 800ms 节流 + 可见性早退。
+
+### 15.8 落地结果（2026-11-11）
+
+- 七项门禁全绿：插件四文件 151、全量 vitest **2764 / 226**、tsc 0、eslint 0 错 22 警告、
+  `check:all` OK(17)、`vite build` 成功、`cargo check` 0 错（4 条既有 warning）。
+- 无头取证（`.tmp/verify-wave1.mjs`）：三张卡组件根 262×236 / 262×236 / 262×168，
+  控制台 0 error；`panelActivity` 初态 `open/visible=true`、画布滚 900px 后
+  `open=true, visible=false`、滚回 `visible=true`；同类第二张三块均 `already-embedded`。
+- 窄卡：X-Ray 工具条在 262px 宽换行为 71px、子元素 0 溢出；频谱 240px 卡 93px、0 溢出；
+  表格 262px 宽 0 溢出。
+- 已知残留：X-Ray 滚出视口仍继续积累（64KB 有界）；RailPanel/命令面板可绕过内嵌互斥
+  开出停靠实例（既有缺口，本波未引入）。
+
+### 15.9 验收口径
+
+- 用户能在画布上同屏看到表格 / X-Ray / 频谱，并正常操作其工具栏；
+- 面板关闭或滚出视口后数据泵停下（表格采集/脏刷、频谱重算）；
+- 导入含未知 id 的包仍丢弃并提示；Operator 包只读模式可加载三块卡；
+- 每类只有一张，第二张给中文可读原因；最小尺寸与降级文案一致。
+

@@ -87,7 +87,18 @@
 
 ## 追加段：面板控件化适配清单（排在轨迹视图之后，需先出清单再动代码）
 
-- [ ] C1 适配分类清单（整板可嵌 / 只嵌视图 / 不嵌 + 成本与一句话理由），覆盖 2D、Hex、帧画布、数据表格、3D 轨迹、3D 姿态、AI、Modbus、序列器、编排器、哨兵、虚拟设备、X-Ray、TX 组帧台、插件面板
-- [ ] C2 按「用户价值 ÷ 成本」排波次，给每波交付物与验收方式
-- [ ] C3 清单经用户确认后才开始第一波
+- [x] C1 适配分类清单（整板可嵌 / 只嵌视图 / 不嵌 + 成本与一句话理由），覆盖 2D、Hex、帧画布、数据表格、3D 轨迹、3D 姿态、AI、Modbus、序列器、编排器、哨兵、虚拟设备、X-Ray、TX 组帧台、插件面板
+- [x] C2 按「用户价值 ÷ 成本」排波次，给每波交付物与验收方式
+- [x] C3 清单经用户确认后才开始第一波
+
+## 第一波：数据表格 / X-Ray / 频谱（整板可嵌，2026-11-11 开工）
+
+- [x] W1-1 `embedPanels`：新增 `datatable` / `xray` / `spectrum`，最小格数 4×4 / 4×4 / 4×3，双语名与 `EMBED_PANEL_DOCK_ID`/`dockIdOf`
+- [x] W1-2 `panelPlacement`：停靠互斥与移回停靠一律走 `dockIdOf`；第二张同 id 保持 `already-embedded`
+- [x] W1-3 `embedHost`：三个 memo 与整板分支（不显示视图锁定按钮）
+- [x] W1-4 `framesStore`：采集门 + 隐藏脏刷 + flush 可见性并集（`table` ∪ `datatable`）
+- [x] W1-5 `SpectrumPanel` 可见性早退；`plotStore` 门控注释（已含 `spectrum`）
+- [x] W1-6 控件库 SVG 图标（表格 / X-Ray / 频谱）
+- [x] W1-7 单测同步（embedPanels / controlsStore / panelPlacement）
+- [x] W1-8 无头静默截图验证 + 七项门禁 + 单独提交 + 阶段报告（插件四文件 151 / vitest 2764 / tsc 0 / eslint 0 错 22 警告 / check:all OK(17) / build / cargo 0）
 
