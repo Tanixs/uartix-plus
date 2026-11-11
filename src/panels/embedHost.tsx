@@ -1,11 +1,17 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { EmbedCard } from "../features/controls/controlsStore";
+import * as controlsStore from "../features/controls/controlsStore";
 import { CardFrame, type CardFrameProps } from "../features/controls/CardViews";
 import {
   embedName,
   hasPointerLock,
   parsePluginEmbedId,
 } from "../features/controls/embedPanels";
+import { guardLocked } from "../features/operator/lock";
+import {
+  getSnapshot as getPluginSnapshot,
+  subscribe as subscribePlugins,
+} from "../features/plugins/engine/pluginEngine";
 import { AttitudeModelView } from "../features/attitude/AttitudeModelView";
 import { TrajectoryView } from "../features/plot3d/TrajectoryView";
 import { HexView } from "../features/hexview/HexView";
@@ -108,12 +114,32 @@ export function EmbedCardView(props: EmbedCardViewProps) {
      标题条不再常驻"≥w×h"：那个值既不会变，也不指导任何操作。 */
   // 插件面板：卡片 id 就是它的停靠 id `plugin-view-<插件>:<面板>`，拆出参数交给 iframe 宿主。
   const pluginPanel = parsePluginEmbedId(card.panelId);
+  /**
+   * 插件被卸载后，卡片不会自己消失（它属于布局），但也不该继续显示一块空 iframe：
+   * 标题条标成失效，内容区换成一句说明 + 删除入口。`loading` 期间不判失效——
+   * 插件清单还在读盘时 entries 是空表，否则每张插件卡都会先闪一下"已卸载"。
+   */
+  const pluginRepo = useSyncExternalStore(subscribePlugins, getPluginSnapshot, getPluginSnapshot);
+  const pluginGone =
+    pluginPanel !== null &&
+    !pluginRepo.loading &&
+    !pluginRepo.entries.some(
+      (e) =>
+        e.id === pluginPanel.pluginId &&
+        e.manifest.contributes.panels?.some((p) => p.id === pluginPanel.panelId),
+    );
+  const removeSelf = () => {
+    const hit = controlsStore.findCardById(card.id);
+    if (hit) controlsStore.removeCard(hit.pageId, card.id);
+  };
   return (
     <CardFrame {...props} card={card} dragHandleOnly>
       <div className="ctl-embed" data-wheel-locked={locked ? "1" : undefined}>
         <div className="ctl-embed-head" data-embed-head>
           <span className="ctl-embed-title">{card.name}</span>
-          <span className="ctl-embed-meta">{embedName(card.panelId)}</span>
+          <span className="ctl-embed-meta" style={pluginGone ? { color: "var(--danger)" } : undefined}>
+            {pluginGone ? tx("插件已卸载", "Plugin uninstalled") : embedName(card.panelId)}
+          </span>
           {canLock && (
             <button
               className="ctl-embed-lock"
@@ -160,11 +186,34 @@ export function EmbedCardView(props: EmbedCardViewProps) {
           ) : card.panelId === "trajectory3d" ? (
             <MTrajectoryView locked={locked} />
           ) : pluginPanel ? (
-            // bare：卡片自己的标题栏已经写了名字，不要让 iframe 再长一个面板头。
-            <MPluginView
-              bare
-              params={{ pluginId: pluginPanel.pluginId, panelId: pluginPanel.panelId }}
-            />
+            pluginGone ? (
+              <div className="ctl-embed-gone">
+                <p>
+                  {tx(
+                    `插件「${pluginPanel.pluginId}」已卸载，这张卡不再能工作`,
+                    `Plugin “${pluginPanel.pluginId}” was uninstalled — this card can no longer run`,
+                  )}
+                </p>
+                <button
+                  className="btn sm"
+                  disabled={guardLocked()}
+                  title={
+                    guardLocked()
+                      ? tx("Operator 只读：不能删除卡片", "Operator read-only: cards cannot be deleted")
+                      : tx("删除这张已经失效的卡片", "Delete this card — it can no longer work")
+                  }
+                  onClick={removeSelf}
+                >
+                  {tx("删除卡片", "Delete card")}
+                </button>
+              </div>
+            ) : (
+              // bare：卡片自己的标题栏已经写了名字，不要让 iframe 再长一个面板头。
+              <MPluginView
+                bare
+                params={{ pluginId: pluginPanel.pluginId, panelId: pluginPanel.panelId }}
+              />
+            )
           ) : (
             <MTrajectoryView locked={locked} />
           )}

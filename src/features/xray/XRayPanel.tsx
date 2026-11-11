@@ -2,6 +2,7 @@
 import { isDarkScheme } from "../../styles/themeCore";
 import { useEffect, useRef, useState } from "react";
 import { onRx } from "../../ipc/binbus";
+import * as panelActivity from "../../panels/panelActivity";
 import * as templateStore from "../protocol/templateStore";
 import { toast } from "../ai/uiRuntime";
 import { requestOpenPanel } from "../ai/appBus";
@@ -73,11 +74,19 @@ export function XRayPanel() {
   const [seqBusy, setSeqBusy] = useState(false);
   const seqStale = seq !== null && seqKey !== null && result !== null && seqKey !== `${result.L}@${result.phase}@${cluster.length}`;
 
-  // 面板打开期间静默累积原始 RX（回放重灌/演示源/真机全覆盖）；关闭即 unsub（生命周期红线）
+  // 面板打开期间静默累积原始 RX（回放重灌/演示源/真机全覆盖）；关闭即 unsub（生命周期红线）。
+  // 可见性门：切走页签或卡片滚出视口后不再吞帧——X-Ray 分析的是"最近一段窗口"，
+  // 看不见的时段补不回来也不该补（与频谱的重算门同一口径），缓冲区只保留真正看过的数据。
   useEffect(() => {
-    const un = onRx((p) => ringRef.current.push(p.bytes));
-    // 样本量显示 500ms 节流（onRx 33ms 一批，没必要跟着刷）
-    const t = window.setInterval(() => setSampled(ringRef.current.size), 500);
+    const un = onRx((p) => {
+      if (!panelActivity.isVisible("xray")) return;
+      ringRef.current.push(p.bytes);
+    });
+    // 样本量显示 500ms 节流（onRx 33ms 一批，没必要跟着刷）；不可见时连这次 setState 也省掉
+    const t = window.setInterval(() => {
+      if (!panelActivity.isVisible("xray")) return;
+      setSampled(ringRef.current.size);
+    }, 500);
     return () => {
       un();
       window.clearInterval(t);

@@ -1455,7 +1455,7 @@ export function KeymonCardView(props: {
   );
 }
 
-/** 自定义卡片：沙箱 iframe（与小部件同一桥协议），任意风格与功能 */
+/** 历史空壳卡：不再承载 HTML，也不再从控件库出库；只负责把旧存档里的 custom 卡读出来时给一句去向说明 */
 export function CustomCardView(props: {
   card: CustomCard;
   left: number;

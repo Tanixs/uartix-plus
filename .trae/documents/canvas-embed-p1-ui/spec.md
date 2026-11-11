@@ -1037,3 +1037,72 @@ switch（两档）、keypad（四向）、group（子项各一条）一卡对应
 七项门禁全绿：插件四文件 151、全量 vitest **227 文件 / 2785**、tsc 0 错、
 eslint 0 error / 22 warning、`check:all` OK(17)、`vite build` 成功、
 `cargo check` 0 错（4 条既有 warning）。
+
+## 25. 清理批 5：失效态与守卫（2026-11-12 追加）
+
+### 25.1 C-11 `custom` 空壳卡出库
+
+`custom` 从"AI 造物"退役后已经不再承载 HTML（渲染的是一句"请改用插件小部件"），
+但控件库仍把它列在第一位可拖项，`ui_inventory` 也照旧报给 AI——拖出来只会得到一张永远空的卡。
+
+- `controlsStore` 新增 `CREATABLE_CONTROL_TYPES = CONTROL_TYPES.filter(t => t !== "custom")`，
+  作为"能新建的类型"的唯一出处；
+- 控件库与 `uiSurface.controlRows()` 都改读这份清单；
+- **保留读取**：`ControlType` 仍含 `custom`，`CONTROL_TYPES` 仍是全量类型表，
+  旧存档/导出包里的 custom 卡照常 `migrateCard` 并通过 `CustomCardView` 渲染空态；
+- `CustomCardView` 的头注改回事实（此前还写着"沙箱 iframe…任意风格"）。
+
+### 25.2 C-12 X-Ray 加可见性门
+
+X-Ray 的 `onRx` 订阅只要组件挂着就无条件吞帧：停靠页签切走或卡片滚出视口后仍持续写入
+64KB 环形缓冲（§15.8 的已知残留）。分析本来就只回答"最近一段窗口"，看不见的时段
+补不回来也不该补：
+
+- `onRx` 回调先查 `panelActivity.isVisible("xray")`，不可见直接丢弃；
+- 500ms 的样本量 `setSampled` 同样加门，不可见时不做无意义重渲染；
+- 与频谱的 800ms 重算门同一口径，停靠/内嵌两种形态共用 `xray` 这个 id，无需并集。
+
+### 25.3 C-13 插件卸载后的卡片
+
+插件面板卡片的 `panelId` 是 `plugin-view-<插件>:<面板>`，插件被卸载后卡片仍留在布局里。
+此前内嵌形态会落到 `PluginViewPanel` 的通用"插件不在了"文案，既没有失效标识也没有出路。
+
+- `EmbedCardView` 订阅插件引擎快照，在 `!loading` 且找不到插件或面板定义时判失效
+  （`loading` 期间不判，避免读盘时每张插件卡先闪一下"已卸载"）；
+- 标题条的面板名换成危险的「插件已卸载」；
+- 内容区换成 `.ctl-embed-gone` 占位：一句"插件「x」已卸载，这张卡不再能工作" +
+  「删除卡片」按钮（走 `findCardById` 找页 → `removeCard`）；Operator 只读下按钮禁用并说明原因。
+
+### 25.4 C-14「移回停靠」失败文案分流
+
+`movePanelToDock` 原来把所有失败都归成 `dock-unavailable`，卡片菜单统一 toast
+"停靠区尚未就绪，稍后再试"——视图形态（姿态/轨迹）根本没有停靠页签，再等也不会成功。
+
+- 失败原因拆成 `no-dock-tab`（这个目标没有停靠页签）与 `dock-unavailable`（停靠区没就绪/
+  opener 失效）；目标判定提前到就绪判断之前，因为它与"等一等"无关；
+- 新增 `moveToDockRejectText()`，调用点不再自己拼文案；卡片仍不会因失败被抹掉。
+
+### 25.5 C-15 `declumpPage` 补 guard
+
+`resolveOverlaps` / `removeCard` / `patchCard` 都已有 `guardLocked()`，只有整理布局的
+`declumpPage` 漏了：Operator 只读包里右键「整理布局」仍会重排卡片（改写存档几何）。
+补上同一道门。单测：锁下 `declumpPage` 不 emit、两张重叠卡坐标不变；解锁后同一操作把它们挪开。
+
+### 25.6 改动文件
+
+1. `src/features/controls/controlsStore.ts`：`CREATABLE_CONTROL_TYPES`、`declumpPage` guard。
+2. `src/features/controls/WidgetGallery.tsx`：改读可新建清单。
+3. `src/features/agent/uiSurface.ts`：`controlRows()` 改读可新建清单。
+4. `src/features/controls/CardViews.tsx`：`CustomCardView` 头注纠正。
+5. `src/features/xray/XRayPanel.tsx`：采样与样本量刷新的可见性门。
+6. `src/panels/embedHost.tsx`：插件失效判定、标题标失效、占位与删除入口。
+7. `src/panels/panelPlacement.ts`：`no-dock-tab` 与 `moveToDockRejectText()`。
+8. `src/features/controls/ControlCanvas.tsx`：移回停靠失败文案走分流函数。
+9. `src/styles/theme.css`：仅追加 `.ctl-embed-gone`。
+10. 测试：`controlsStore.test.ts`（锁下 declump）、`panelPlacement.test.ts`（视图移回停靠）。
+
+### 25.7 验证
+
+- 单测：`controlsStore.test`（declump 锁）、`panelPlacement.test`（`no-dock-tab`）。
+- 七项门禁：见本段阶段报告（插件四文件 / 全量 vitest / tsc / eslint / check:all /
+  vite build / cargo check）。

@@ -152,7 +152,10 @@ describe("uiTools", () => {
     const r = await executeUiTool(call("ui_inventory", { section: "controls" }), ctxFor("preview"));
     expect(r.ok).toBe(true);
     expect((r.data as { controls: string[] }).controls).toContain("slider");
-    expect((r.data as { controls: string[] }).controls).toHaveLength(11);
+    // 清单与控件库同一出处：只列能新建的类型。`custom` 是只读的历史空壳卡（C-11），不该再报给模型
+    const { CREATABLE_CONTROL_TYPES } = await import("../controls/controlsStore");
+    expect((r.data as { controls: string[] }).controls).toHaveLength(CREATABLE_CONTROL_TYPES.length);
+    expect((r.data as { controls: string[] }).controls).not.toContain("custom");
     const bad = await executeUiTool(call("ui_inventory", { section: "nope" }), ctxFor("preview"));
     expect(bad.ok).toBe(false);
     expect((bad.data as { error: string }).error).toBe("unknown_section");

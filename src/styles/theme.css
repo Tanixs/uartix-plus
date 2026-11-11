@@ -13056,3 +13056,20 @@ body.pdrag-active *{cursor:grabbing !important;}
   white-space: nowrap;
   pointer-events: none;
 }
+
+
+/* 插件被卸载后的卡片占位：卡片属于布局不会自己消失，但 iframe 已经无从加载。
+   一句说明 + 一个删除入口，替代一块永远空白的 iframe；标题条同步标「插件已卸载」。 */
+.ctl-embed-gone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1h);
+  height: 100%;
+  padding: var(--sp-2);
+  text-align: center;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-read);
+}

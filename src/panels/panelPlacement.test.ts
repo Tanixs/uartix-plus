@@ -197,6 +197,23 @@ describe("panel placement mutex", () => {
     expect(store.findEmbedCard("plot2d")).not.toBeNull();
   });
 
+  it("refuses to move a view-only card to the dock and says it has no tab", async () => {
+    const activity = await import("./panelActivity");
+    activity.syncPanels([]);
+    const store = await import("../features/controls/controlsStore");
+    const pageId = store.getSnapshot().activePageId;
+    const placement = await import("./panelPlacement");
+    expect(placement.addEmbedFromGallery("attitude3d").ok).toBe(true);
+    const card = store.findEmbedCard("attitude3d");
+    expect(card).not.toBeNull();
+    // 视图没有停靠页签：原因必须与"停靠区还没好"分开，否则用户会以为再等等就行
+    expect(placement.movePanelToDock(pageId, card!.card)).toEqual({
+      ok: false,
+      reason: "no-dock-tab",
+    });
+    expect(store.findEmbedCard("attitude3d")).not.toBeNull();
+  });
+
   it("adds a view straight from the gallery and caps it at one instance", async () => {
     const activity = await import("./panelActivity");
     activity.syncPanels([]);

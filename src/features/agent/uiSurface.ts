@@ -22,7 +22,7 @@ import {
 } from "../../styles/renderAudit";
 import type { Rgba } from "../../styles/themeCore";
 import { APP_ACTION_KINDS } from "../ai/appActionKinds";
-import { CONTROL_TYPES } from "../controls/controlsStore";
+import { CREATABLE_CONTROL_TYPES } from "../controls/controlsStore";
 import { BLOCK_REGISTRY, EVENT_REGISTRY } from "../orchestrator/blockRegistry";
 import { PANEL_GROUPS, panelGroupLabel } from "../../panels/panelMenu";
 import { APPEARANCE_TOKENS } from "./appearanceStore";
@@ -79,7 +79,8 @@ export async function panelRows(): Promise<{ group: string; panels: { id: string
 }
 
 export function controlRows(): string[] {
-  return [...CONTROL_TYPES];
+  // 与控件库同一份清单：只列能新建的类型（历史空壳 custom 不出库）
+  return [...CREATABLE_CONTROL_TYPES];
 }
 
 export function blockRows() {

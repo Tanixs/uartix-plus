@@ -34,6 +34,7 @@ import {
   addEmbedFromGallery,
   canPlaceEmbedInCanvas,
   movePanelToDock,
+  moveToDockRejectText,
   placementRejectText,
 } from "../../panels/panelPlacement";
 import { embedMinOf, isEmbedPanelTarget, isEmbedTargetId } from "./embedPanels";
@@ -1709,14 +1710,7 @@ export function ControlCanvas() {
                 onClick={() => {
                   const r = movePanelToDock(page.id, menuCard);
                   setMenu(null);
-                  if (!r.ok) {
-                    toast(
-                      tx(
-                        "停靠区尚未就绪，稍后再试",
-                        "The dock area is not ready yet — try again in a moment",
-                      ),
-                    );
-                  }
+                  if (!r.ok) toast(moveToDockRejectText(r.reason));
                 }}
               >
                 {tx("移回停靠", "Move back to dock")}

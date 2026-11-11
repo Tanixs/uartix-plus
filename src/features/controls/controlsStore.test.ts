@@ -166,6 +166,32 @@ describe("P121-F · 控制画布的只读锁按字段拆", () => {
     store.setActivePage(second);
     expect(store.activePage()!.id).toBe(second);
   });
+
+  it("锁下不能整理布局：declumpPage 不发事件、不动卡片", async () => {
+    const { store, pageId, slider, sw } = await setup();
+    // 先把两张卡叠在同一个格子上，制造"整理会改动几何"的前置
+    store.patchCard(pageId, slider, { x: 0, y: 0 });
+    store.patchCard(pageId, sw, { x: 0, y: 0 });
+    const at = (id: string) =>
+      store.getSnapshot().pages.find((p) => p.id === pageId)!.cards.find((c) => c.id === id)!;
+    const wasSlider = { x: at(slider).x, y: at(slider).y };
+    const wasSwitch = { x: at(sw).x, y: at(sw).y };
+    const listener = vi.fn();
+    const unsubscribe = store.subscribe(listener);
+    locked.value = true;
+    store.declumpPage(pageId);
+    expect(at(slider)).toMatchObject(wasSlider);
+    expect(at(sw)).toMatchObject(wasSwitch);
+    expect(listener).not.toHaveBeenCalled();
+    locked.value = false;
+    store.declumpPage(pageId);
+    expect(listener).toHaveBeenCalled();
+    expect(
+      at(sw).x !== wasSwitch.x || at(sw).y !== wasSwitch.y,
+      "解锁后同一张重叠卡应被挪开",
+    ).toBe(true);
+    unsubscribe();
+  });
 });
 
 describe("canvas embed schema v2", () => {

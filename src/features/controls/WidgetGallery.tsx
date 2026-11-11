@@ -52,6 +52,12 @@ function widgetLabel(type: ControlType): string {
   }
 }
 
+/**
+ * 控件库只列**还能新建**的类型（`CREATABLE_CONTROL_TYPES` 剔掉了历史空壳 `custom`：
+ * 旧存档里还有，读入后照常渲染，但不再从这里出库）。
+ */
+const GALLERY_TYPES = store.CREATABLE_CONTROL_TYPES;
+
 export function WidgetGallery() {
   useLocale(); // 列表与拖拽影子上的名字都是 tx() 出来的，切语言要有人重渲染
   // 插件面板是动态的（装了才有），不在静态白名单里：启用且受信任的插件面板逐块列出来，
@@ -62,7 +68,7 @@ export function WidgetGallery() {
   );
   return (
     <div className="widget-list">
-      {store.CONTROL_TYPES.map((type) => (
+      {GALLERY_TYPES.map((type) => (
         <div
           key={type}
           className="widget-item pdrag-src"

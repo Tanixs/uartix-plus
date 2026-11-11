@@ -167,6 +167,9 @@ export function movePanelToCanvas(panelId: string, name?: string): PlacePanelRes
   return r;
 }
 
+/** 「移回停靠」的两种失败原因：语义不同，调用方要给不同的话。 */
+export type MoveToDockReject = "no-dock-tab" | "dock-unavailable";
+
 /**
  * 内嵌 → 停靠。
  *
@@ -176,11 +179,12 @@ export function movePanelToCanvas(panelId: string, name?: string): PlacePanelRes
 export function movePanelToDock(
   pageId: string,
   card: controlsStore.EmbedCard,
-): { ok: true } | { ok: false; reason: "dock-unavailable" } {
-  if (!isDockReady()) return { ok: false, reason: "dock-unavailable" };
+): { ok: true } | { ok: false; reason: MoveToDockReject } {
   // 视图形态没有停靠页签：拿它去 openDockPanel 只会失败并把卡片误删，这里直接挡住。
+  // 放在就绪判断**之前**：这张卡永远搬不回去，原因与"停靠区还没好"不是一回事。
   // 插件面板有停靠页签（卡片 id 即停靠 id），按整板处理。
-  if (!isEmbedPanelTarget(card.panelId)) return { ok: false, reason: "dock-unavailable" };
+  if (!isEmbedPanelTarget(card.panelId)) return { ok: false, reason: "no-dock-tab" };
+  if (!isDockReady()) return { ok: false, reason: "dock-unavailable" };
   const view = isEmbedPanelId(card.panelId) ? capturePanelView(card.panelId) : null;
   controlsStore.removeCard(pageId, card.id);
   if (!openDockPanel(dockIdOfEmbed(card.panelId))) {
@@ -190,6 +194,19 @@ export function movePanelToDock(
     return { ok: false, reason: "dock-unavailable" };
   }
   return { ok: true };
+}
+
+/** 「移回停靠」失败原因 → 用户可读的一句话（与放置拒绝分开：它们的动作不同）。 */
+export function moveToDockRejectText(reason: MoveToDockReject): string {
+  switch (reason) {
+    case "no-dock-tab":
+      return tx(
+        "这个视图没有停靠页签，只存在于控制画布，不能移回停靠",
+        "This view has no dock tab — it only exists on the control canvas, so it cannot move back",
+      );
+    case "dock-unavailable":
+      return tx("停靠区尚未就绪，稍后再试", "The dock area is not ready yet — try again in a moment");
+  }
 }
 
 /**

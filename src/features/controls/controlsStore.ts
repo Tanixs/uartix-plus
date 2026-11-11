@@ -40,6 +40,12 @@ export const CONTROL_TYPES = [
 ] as const;
 export type ControlType = (typeof CONTROL_TYPES)[number];
 /**
+ * 控件库与 AI 面板清单里**还能新建**的类型。
+ * `custom` 只剩读取能力：旧存档里的空壳卡照常渲染（`CustomCardView`），
+ * 但不再提供新建入口——AI 造物统一走插件小部件之后，拖出来也只是一张永远空的卡。
+ */
+export const CREATABLE_CONTROL_TYPES = CONTROL_TYPES.filter((t) => t !== "custom");
+/**
  * 卡片类型 = 可拖入的控件类型 + `embed`（画布内嵌面板）。
  * `embed` 故意不进 CONTROL_TYPES：那是控件库的清单，内嵌面板从「面板」分组另走一条入口，
  * 免得用户以为任意面板都能拖进画布。
@@ -1311,6 +1317,7 @@ export function removeCard(pageId: string, cardId: string) {
 }
 
 export function declumpPage(pageId: string) {
+  if (guardLocked()) return;
   const page = snapshot.pages.find((p) => p.id === pageId);
   if (!page) return;
   snapshot = {
