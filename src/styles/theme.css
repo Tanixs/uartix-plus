@@ -4689,6 +4689,54 @@ select optgroup {
   .ctl-embed-body .hex-status-right { display: none; }
 }
 
+/* 视图形态的交互锁：只出现在有指针手势的卡片（姿态模型）标题条上 */
+.ctl-embed-lock {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: var(--sp-1);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-s);
+  color: var(--depth-fg-3);
+  cursor: pointer;
+}
+
+.ctl-embed-lock:hover { color: var(--depth-fg-1); background: var(--bg-inset); }
+.ctl-embed-lock[aria-pressed="true"] { color: var(--accent); }
+
+/* 姿态模型视图：只占内容区，无工具栏/状态栏 */
+.att-view { position: absolute; inset: 0; }
+.att-view-host { position: absolute; inset: 0; }
+.att-view-host canvas { display: block; width: 100%; height: 100%; }
+
+.att-view-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--depth-fg-3);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+
+.att-view-locked {
+  position: absolute;
+  right: var(--sp-1);
+  bottom: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-s);
+  background: var(--depth-bg-1);
+  color: var(--depth-fg-3);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+
 /* 减弱动效时不许干脆没有反馈：改成一圈不动的亮边，同样是一闪即走（类照样被摘） */
 @media (prefers-reduced-motion: reduce) { .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent); } }
 html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent); }

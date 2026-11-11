@@ -4,11 +4,12 @@ import { getLocale } from "../../i18n/strings";
 import { guardLocked } from "../operator/lock";
   import { DEBUG_SCHEMA, sanitizeManaged, sanitizeDebugProfile, buildDebugPreset, type ManagedControl, type DebugProfile, type DebugParameter } from "./debugPreset";
 import {
-  EMBED_PANEL_MIN,
-  embedPanelName,
-  isEmbedPanelId,
+  EMBED_ID_ASPECT,
+  EMBED_ID_MIN,
+  embedName,
+  isEmbedId,
   sanitizeEmbedViewState,
-  type EmbedPanelId,
+  type EmbedId,
   type EmbedPanelViewState,
 } from "./embedPanels";
 
@@ -213,16 +214,17 @@ export interface CustomCard extends BaseCard {
 }
 
 /**
- * 内嵌面板卡片（schema v2）：把 2D 曲线 / Hex 数据流当控件放进画布。
+ * 内嵌面板卡片（schema v2）：把 2D 曲线 / Hex 数据流 / 姿态 3D 模型当控件放进画布。
  *
- * - `panelId`：白名单 id（见 embedPanels.ts），导入时未知 id 整卡丢弃；
- * - `viewState`：停靠↔内嵌切换时搬运的视图态，不参与发送；
+ * - `panelId`：内嵌目标 id（`embedPanels.ts` 的白名单）。两种形态共用这个字段：
+ *   整板（plot2d/hexview）有停靠对应物，视图（attitude3d）只存在于画布。导入时未知 id 整卡丢弃；
+ * - `viewState`：停靠↔内嵌切换时搬运的视图态，不参与发送（视图形态没有可搬的视野）；
  * - `minW/minH`：语义最小格数（落盘冗余存一份，便于旧版本提示与导出阅读）；
- * - `aspectLock`：拖角缩放时是否锁长宽比（P1 两个面板默认关闭）。
+ * - `aspectLock`：拖角缩放时是否锁长宽比（视图形态默认锁，2D/Hex 默认不锁）。
  */
 export interface EmbedCard extends BaseCard {
   type: "embed";
-  panelId: EmbedPanelId;
+  panelId: EmbedId;
   viewState?: EmbedPanelViewState;
   minW: number;
   minH: number;
@@ -383,19 +385,22 @@ function migrateCard(raw: Record<string, unknown>): ControlCard | null {
   };
   const type = (raw.type ?? "slider") as CardType;
   if (type === "embed") {
-    // 未知 panelId 整卡丢弃（由调用方计数告警）：不能留一张指向不存在组件的空卡。
-    if (!isEmbedPanelId(raw.panelId)) return null;
+    // 未知目标 id 整卡丢弃（由调用方计数告警）：不能留一张指向不存在组件的空卡。
+    if (!isEmbedId(raw.panelId)) return null;
     const panelId = raw.panelId;
-    const min = EMBED_PANEL_MIN[panelId];
+    const min = EMBED_ID_MIN[panelId];
     return {
       ...base,
       type: "embed",
-      name: String(raw.name ?? embedPanelName(panelId)),
+      name: String(raw.name ?? embedName(panelId)),
       panelId,
       viewState: sanitizeEmbedViewState(panelId, raw.viewState) ?? undefined,
       minW: Math.max(min.w, Math.round(Number(raw.minW) || 0)),
       minH: Math.max(min.h, Math.round(Number(raw.minH) || 0)),
-      aspectLock: Boolean(raw.aspectLock),
+      aspectLock:
+        typeof raw.aspectLock === "boolean"
+          ? raw.aspectLock
+          : EMBED_ID_ASPECT[panelId] !== undefined,
     };
   }
   switch (type) {
@@ -562,13 +567,22 @@ export function normalizeGeometry(
   }
   const maxW = Math.max(1, Math.round(Number(cols)) || 1);
   const maxH = Math.max(1, Math.round(Number(rows)) || 1);
-  // 内嵌面板有语义最小尺寸（2D 4×3 / Hex 3×2）：保存/导入/拖角都要抬到下限，
+  // 内嵌卡片有语义最小尺寸（2D/姿态 4×3、Hex 3×2）：保存/导入/拖角都要抬到下限，
   // 但页面本身比下限还小时只能取页面尺寸，避免卡片溢出画布。
   if (c.type === "embed") {
-    const min = EMBED_PANEL_MIN[c.panelId];
+    const min = EMBED_ID_MIN[c.panelId];
     if (min) {
       c.w = Math.max(c.w, Math.min(min.w, maxW));
       c.h = Math.max(c.h, Math.min(min.h, maxH));
+    }
+    // 视图形态锁宽高比：以宽度为准算高度，再按高度回推宽度。
+    // 只钳一次而不是循环收敛——两次都夹在同一组上下限里，再迭代也不会变。
+    const aspect = EMBED_ID_ASPECT[c.panelId];
+    if (aspect) {
+      const hFromW = Math.round(c.w / aspect);
+      c.h = Math.min(Math.max(hFromW, Math.min(min.h, maxH)), maxH);
+      const wFromH = Math.round(c.h * aspect);
+      c.w = Math.min(Math.max(wFromH, Math.min(min.w, maxW)), maxW);
     }
   }
   if (c.w > maxW || c.h > maxH) {
@@ -1089,11 +1103,11 @@ function checkEmbedPlacement(
 ):
   | { ok: true; pos: { x: number; y: number }; min: { w: number; h: number } }
   | { ok: false; reason: Exclude<EmbedAddResult, { ok: true }>["reason"] } {
-  if (!isEmbedPanelId(panelId)) return { ok: false, reason: "unknown-panel" };
+  if (!isEmbedId(panelId)) return { ok: false, reason: "unknown-panel" };
   const page = snapshot.pages.find((p) => p.id === pageId);
   if (!page) return { ok: false, reason: "page-missing" };
   if (findEmbedCard(panelId)) return { ok: false, reason: "duplicate" };
-  const min = EMBED_PANEL_MIN[panelId];
+  const min = EMBED_ID_MIN[panelId];
   const rows = page.rows || 48;
   if (page.cols < min.w || rows < min.h) return { ok: false, reason: "page-too-small" };
   const pos = findFlowPos(page, min.w, min.h);
@@ -1123,21 +1137,21 @@ export function addEmbedCard(
   if (!checked.ok) return checked;
   const { pos, min } = checked;
   // 旧存档/坏数据不进卡：宁可回到默认视野，也不让 NaN 把 uPlot 弄白。
-  const view = isEmbedPanelId(panelId)
+  const view = isEmbedId(panelId)
     ? sanitizeEmbedViewState(panelId, viewState)
     : null;
   const card: EmbedCard = {
     id: crypto.randomUUID(),
     type: "embed",
-    name: embedPanelName(panelId as EmbedPanelId),
+    name: embedName(panelId as EmbedId),
     x: pos.x,
     y: pos.y,
     w: min.w,
     h: min.h,
-    panelId: panelId as EmbedPanelId,
+    panelId: panelId as EmbedId,
     minW: min.w,
     minH: min.h,
-    aspectLock: false,
+    aspectLock: EMBED_ID_ASPECT[panelId as EmbedId] !== undefined,
     ...(view ? { viewState: view } : {}),
   };
   snapshot = {
@@ -1162,6 +1176,20 @@ export function findEmbedCard(
     }
   }
   return null;
+}
+
+/**
+ * 全应用该内嵌目标出现过几张卡。
+ * 视图形态靠它钉同屏上限（整板有停靠互斥，通常也只会有一张）。
+ */
+export function countEmbedCards(panelId: string): number {
+  let n = 0;
+  for (const page of snapshot.pages) {
+    for (const card of page.cards) {
+      if (card.type === "embed" && card.panelId === panelId) n++;
+    }
+  }
+  return n;
 }
 
 /** 导入文件版本检查；返回用户可读错误，null = 可导入（含无版本字段的 v1）。 */

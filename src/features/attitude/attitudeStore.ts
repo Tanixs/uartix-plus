@@ -142,8 +142,9 @@ export async function init() {
   if (initialized) return;
   initialized = true;
   onFrames((ev: FramesEventPayload) => {
-    // 面板关闭 → 完全停止解析绑定变量（关闭了的面板绝不允许后台运行）
-    if (!panelActivity.isOpen("view3d")) return;
+    // 面板关闭 → 完全停止解析绑定变量（关闭了的面板绝不允许后台运行）。
+    // 内嵌视图是独立的落点：只开着画布里的姿态视图时同样要收数，否则模型永远停在初始姿态。
+    if (!panelActivity.isOpen("view3d") && !panelActivity.isOpen("attitude3d")) return;
     const cfg = snapshot.config;
     const refs =
       cfg.mode === "euler"

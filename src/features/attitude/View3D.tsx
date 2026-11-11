@@ -85,8 +85,11 @@ function loadCustom(): CustomMeta | null {
   }
 }
 
-/** 平面"贴纸"箭头：平放在模型顶部，指向 +X 机头方向 */
-function addStickerArrow(
+/**
+ * 平面"贴纸"箭头：平放在模型顶部，指向 +X 机头方向。
+ * 导出给画布内嵌视图用：两处必须画同一个模型，否则同一套姿态数据会出现两种机头朝向。
+ */
+export function addStickerArrow(
   model: THREE_NS.Group,
   THREE: typeof THREE_NS,
   topY: number,
@@ -117,7 +120,7 @@ function addStickerArrow(
   model.add(mesh);
 }
 
-function buildModel(
+export function buildModel(
   model: THREE_NS.Group,
   type: "cube" | "uav",
   THREE: typeof THREE_NS,

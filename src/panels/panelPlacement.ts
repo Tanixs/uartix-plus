@@ -6,10 +6,17 @@
  * 因此这里不做复制，只做移动；目标已存在就返回具体原因让 UI 提示。
  */
 import {
-  EMBED_PANEL_MIN,
+  EMBED_ID_MIN,
+  isEmbedId,
   isEmbedPanelId,
+  isEmbedViewId,
+  type EmbedId,
+  type EmbedViewId,
   type EmbedPanelViewState,
 } from "../features/controls/embedPanels";
+import {
+  ATTITUDE_VIEW_MAX_INSTANCES,
+} from "../features/attitude/attitudeViewQuality";
 import * as controlsStore from "../features/controls/controlsStore";
 import { tx } from "../i18n/strings";
 import { closeDockPanel, isDockReady, openDockPanel } from "../shell/dockBridge";
@@ -18,10 +25,19 @@ import { capturePanelView, discardPanelView } from "./viewState";
 
 export type PanelPlacement = "dock" | "embed" | "closed";
 
+/**
+ * 视图形态的同屏上限。整板靠"停靠↔内嵌互斥"天然只有一份；
+ * 视图没有停靠对应物，所以要单独钉一个数（姿态 3D 每个实例都是一个 WebGL 上下文）。
+ */
+const VIEW_INSTANCE_CAP: Record<EmbedViewId, number> = {
+  attitude3d: ATTITUDE_VIEW_MAX_INSTANCES,
+};
+
 export type PlacementRejectReason =
   | "unknown-panel"
   | "docked"
   | "already-embedded"
+  | "view-limit"
   | "locked"
   | "page-missing"
   | "page-too-small"
@@ -56,17 +72,19 @@ export function placePanelInCanvas(
     : { ok: false, reason: r.reason };
 }
 
-/** 卡片能否在当前页面放下（不写状态，供拖拽悬停时提前给出禁止/允许反馈）。 */
-export function canPlacePanelInCanvas(
+export function canPlaceEmbedInCanvas(
   pageId: string,
-  panelId: string,
+  id: string,
 ): { ok: true } | { ok: false; reason: PlacementRejectReason } {
-  if (!isEmbedPanelId(panelId)) return { ok: false, reason: "unknown-panel" };
-  if (panelActivity.isDocked(panelId)) return { ok: false, reason: "docked" };
-  if (controlsStore.findEmbedCard(panelId)) return { ok: false, reason: "already-embedded" };
+  if (!isEmbedId(id)) return { ok: false, reason: "unknown-panel" };
+  if (panelActivity.isDocked(id)) return { ok: false, reason: "docked" };
+  if (isEmbedViewId(id) && controlsStore.countEmbedCards(id) >= VIEW_INSTANCE_CAP[id]) {
+    return { ok: false, reason: "view-limit" };
+  }
+  if (controlsStore.findEmbedCard(id)) return { ok: false, reason: "already-embedded" };
   const page = controlsStore.getSnapshot().pages.find((p) => p.id === pageId);
   if (!page) return { ok: false, reason: "page-missing" };
-  const min = EMBED_PANEL_MIN[panelId];
+  const min = EMBED_ID_MIN[id];
   if (page.cols < min.w || (page.rows || 48) < min.h) {
     return { ok: false, reason: "page-too-small" };
   }
@@ -77,6 +95,23 @@ function mapStoreReason(
   reason: Exclude<controlsStore.EmbedAddResult, { ok: true }>["reason"],
 ): PlacementRejectReason {
   return reason === "duplicate" ? "already-embedded" : reason;
+}
+
+/**
+ * 控件库拖入的统一入口：整板走停靠迁移，视图直接落卡。
+ *
+ * 视图没有停靠页签，"搬"这个动作不存在；但两条路都要过同一套容量/上限校验，
+ * 否则从库里拖与从页签 chrome 点会给出不同的失败体验。
+ */
+export function addEmbedFromGallery(embedId: string): PlacePanelResult {
+  if (!isEmbedId(embedId)) return { ok: false, reason: "unknown-panel" };
+  if (!isEmbedViewId(embedId)) return movePanelToCanvas(embedId);
+  const page = controlsStore.activePage();
+  if (!page) return { ok: false, reason: "page-missing" };
+  const dry = canPlaceEmbedInCanvas(page.id, embedId);
+  if (!dry.ok) return dry;
+  const r = controlsStore.addEmbedCard(page.id, embedId as EmbedId);
+  return r.ok ? r : { ok: false, reason: mapStoreReason(r.reason) };
 }
 
 /**
@@ -122,6 +157,8 @@ export function movePanelToDock(
   card: controlsStore.EmbedCard,
 ): { ok: true } | { ok: false; reason: "dock-unavailable" } {
   if (!isDockReady()) return { ok: false, reason: "dock-unavailable" };
+  // 视图形态没有停靠页签：拿它去 openDockPanel 只会失败并把卡片误删，这里直接挡住。
+  if (!isEmbedPanelId(card.panelId)) return { ok: false, reason: "dock-unavailable" };
   const view = capturePanelView(card.panelId);
   controlsStore.removeCard(pageId, card.id);
   if (!openDockPanel(card.panelId)) {
@@ -146,6 +183,11 @@ export function placementRejectText(reason: PlacementRejectReason): string {
       );
     case "already-embedded":
       return tx("该面板已经在控制画布内嵌了", "This panel is already embedded in the control canvas");
+    case "view-limit":
+      return tx(
+        "姿态视图最多同屏 1 个（每个实例都是一个 WebGL 上下文）",
+        "At most one attitude view can be embedded at a time (each instance is a WebGL context)",
+      );
     case "no-space":
       return tx(
         "当前控制页没有放得下的空位：先挪开卡片或新建一页",

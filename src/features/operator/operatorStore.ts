@@ -125,6 +125,8 @@ export function activate(raw: unknown): string {
   const snapSettings: Partial<Settings> | null = structuredClone(getSettings());
   const snapPlot3d = exportPlot3dForPkg();
   setOperatorLocked(false);
+  // 未知内嵌目标（含旧包里的面板/视图 id）一律丢弃并计数：部署包不能开出空白卡片。
+  const dropped: string[] = [];
   try {
     const p = pkg.payload;
     if (p.templates) {
@@ -136,7 +138,10 @@ export function activate(raw: unknown): string {
         controlsStore.removePage(id);
       }
       for (const page of p.controls) {
-        controlsStore.importPage(page as unknown as { name?: string; cards?: Record<string, unknown>[] });
+        controlsStore.importPage(
+          page as unknown as { name?: string; cards?: Record<string, unknown>[] },
+          { droppedPanels: dropped },
+        );
       }
     }
     if (p.commands?.length) {
@@ -177,7 +182,9 @@ export function activate(raw: unknown): string {
   } catch {
     /* 持久化失败不阻塞本会话 */
   }
-  return `Operator 模式已生效：${pkg.meta.name}`;
+  return dropped.length
+    ? `Operator 模式已生效：${pkg.meta.name}（已丢弃 ${dropped.length} 张不支持的内嵌卡片：${[...new Set(dropped)].join(", ")}）`
+    : `Operator 模式已生效：${pkg.meta.name}`;
 }
 
 /** 退出只读模式：解锁 + 清除持久化；已导入的配置保留在界面中 */

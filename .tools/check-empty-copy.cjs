@@ -72,6 +72,10 @@ const BUDGETS = {
      没有它，输入一个错拼的词之后界面会**静默变空**，用户分不清"没匹配"和"卡住了"。
      与其余条目同性质：功能性的空态回执。 */
   "src/shell/CommandPalette.tsx": 7,
+  /* 内嵌姿态 3D 视图：空态只有"等待姿态数据…"这一句回执（6 字）——
+     模型本身就在画布上，没有需要配置的东西，不写说明墙。
+     锁态那句"交互已锁定"是右下角状态标签（`.att-view-locked`），不命中 empty 识别式。 */
+  "src/features/attitude/AttitudeModelView.tsx": 6,
 };
 
 const cjk = (s) => (s.match(/[一-鿿]/g) || []).length;

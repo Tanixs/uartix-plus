@@ -1,10 +1,10 @@
 import { beginPointerDrag } from "../../shared/pointerDrag";
-import { IconLanes, IconTerminal, WIDGET_ICONS } from "../../shared/icons";
+import { IconCube, IconLanes, IconTerminal, WIDGET_ICONS } from "../../shared/icons";
 import { HelpHint } from "../../shared/HelpHint";
 import { tx, useLocale } from "../../i18n/strings";
 import * as store from "./controlsStore";
 import type { ControlType } from "./controlsStore";
-import { EMBED_PANEL_IDS, embedPanelName } from "./embedPanels";
+import { EMBED_IDS, embedName } from "./embedPanels";
 
 /**
  * P104-R3 控件库：从控制画布的抽屉（`sideTab === "widgets"`）整块搬进左侧导轨「控件」项。
@@ -59,26 +59,32 @@ export function WidgetGallery() {
         </div>
       ))}
       <div className="widget-group-title">{tx("面板", "Panels")}</div>
-      {EMBED_PANEL_IDS.map((panelId) => (
+      {EMBED_IDS.map((embedId) => (
         <div
-          key={panelId}
+          key={embedId}
           className="widget-item pdrag-src"
           onPointerDown={(e) =>
             beginPointerDrag(e, {
               kind: "vs-panel",
-              data: JSON.stringify({ panelId }),
-              label: embedPanelName(panelId),
+              data: JSON.stringify({ panelId: embedId }),
+              label: embedName(embedId),
             })
           }
           title={tx(
-            "拖到右侧画布内嵌；面板会从停靠区整体搬过去",
-            "Drag onto the canvas to embed; the panel moves out of the dock",
+            "拖到右侧画布内嵌：整板会从停靠区整体搬过去，视图只放内容那一块",
+            "Drag onto the canvas to embed: whole panels move out of the dock, views only bring their content",
           )}
         >
           <span className="widget-icon">
-            {panelId === "plot2d" ? <IconLanes /> : <IconTerminal />}
+            {embedId === "plot2d" ? (
+              <IconLanes />
+            ) : embedId === "hexview" ? (
+              <IconTerminal />
+            ) : (
+              <IconCube />
+            )}
           </span>{" "}
-          {embedPanelName(panelId)}
+          {embedName(embedId)}
         </div>
       ))}
       <div className="widget-hint">

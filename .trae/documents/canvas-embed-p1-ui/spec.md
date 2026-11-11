@@ -1,7 +1,7 @@
 # 画布内嵌 P1 · UI 接入规格（spec）
 
-> 状态：已实施（2D/Hex 整板段，2026-11-10）  
-> 后续：按用户新口径，embed 抽象将下沉到「视图 id」，并追加姿态 3D 模型视图；本文件记录的是第一段（整板）落地口径。
+> 状态：已实施（2D/Hex 整板段，2026-11-10；姿态 3D 视图段，2026-11-11）  
+> 后续：按用户新口径，embed 抽象已下沉到「视图 id」并落地第一个视图（`attitude3d`）；3D 轨迹视图仍待评估。
 > 前置提交：`0866d28`（逻辑层：schema v2 / panelActivity 并集 / 视图态契约 / 单实例互斥）  
 > 语言：中文；代码注释中文，解释「为什么」。  
 > 硬约束：浅色默认；SVG 图标；禁字符图标与 emoji；元素不重叠、对齐成体系；禁 `transform: scale`；禁操作本机 GUI（验证只跑单测 / 构建 / 无头渲染）。
@@ -239,7 +239,65 @@ closeDockPanel(id): boolean  // api.getPanel(id)?.api.close()
 | 4 拒绝提示 | `placementRejectText` + `toast` | 停靠中/已内嵌/无空位分别出现不同可读文案 |
 | 5 卡片视觉 | `theme.css` + CardFrame | 浅色下标题条/边框/手柄清晰；窄卡收图例与工具栏；无 `transform: scale` |
 
-## 10. 手测脚本（用户自行执行，agent 不操作用户电脑）
+## 10. 视图段（attitude3d，2026-11-11 追加）
+
+### 10.1 口径变更
+
+内嵌目标从「整块面板」下沉到「视图」：`plot2d` / `hexview` 仍是整板（有停靠对应物，可双向搬），
+`attitude3d` 是视图（只渲染模型本身，不挂面板工具栏/绑定区/状态栏，也不参与「移回停靠」）。
+
+- `embedPanels.ts` 是白名单唯一出处：`EMBED_PANEL_IDS` / `EMBED_VIEW_IDS` / `EMBED_IDS`、
+  `EMBED_ID_MIN`、`EMBED_ID_ASPECT`、`isEmbedId` / `isEmbedPanelId` / `isEmbedViewId`、
+  `embedKindOf`、`embedName`、`sanitizeEmbedViewState`。
+- `EmbedCard.panelId` 类型放宽为 `EmbedId`；视图的 `viewState` 恒为 `null`（相机由用户现调，不跨实例迁移）。
+- schema 同时表达两种形态；导入导出、Operator 包白名单、控件库、drop 判定全部走同一张 `EMBED_IDS`。
+  未知 id 在导入时丢弃并告警（`importPage({ droppedPanels })` → activate 回执里列出）。
+
+### 10.2 宿主与形态
+
+共用 `EmbedCardView` 卡片宿主（标题条 + 内容体 + rAF 可见性 + 拖动只认 `[data-embed-head]`）。
+视图形态额外在标题条右侧给一颗「锁定交互」图标钮（`aria-pressed`，Lock/Unlock SVG），
+锁上后 `OrbitControls.enabled = false`：拖卡片、滚页面都不会误转视角。2D/Hex 不显示该按钮。
+
+`AttitudeModelView` 数据只订阅 `attitudeStore`（`config` / `values`；settings 只用于取全局 zoom 折算像素比），
+模型几何复用 `View3D.tsx` 导出的 `buildModel` / `addStickerArrow`，避免两处机头朝向不一致。
+
+### 10.3 实例上限与渲染预算（纯函数 `attitudeViewQuality.ts`）
+
+| 常量 | 值 | 含义 |
+| --- | --- | --- |
+| `ATTITUDE_VIEW_MAX_INSTANCES` | 1 | 视图同屏上限；第二张被 `view-limit` 拒（不是靠文档） |
+| `ATTITUDE_WEBGL_BUDGET` | 2 | 姿态自身：停靠 1 + 内嵌 1 |
+| `TRAJECTORY_WEBGL_BUDGET` | 1 | 3D 轨迹单独计，不与姿态共享 |
+
+降级阶梯（只降不升；重挂载回到 L0）：
+
+| 级别 | dprCap | 目标 fps | 降级条件 |
+| --- | --- | --- | --- |
+| L0 | 2 | 30 | fps < 24 持续 2000ms → L1 |
+| L1 | 1.5 | 30 | fps < 20 持续 2000ms → L2 |
+| L2 | 1 | 20 | 终点，不再降 |
+
+像素比：`pixelRatioFor(dpr, zf, level) = clamp(dpr × zf, 1, dprCap, 2)`；`zf = zoom / 100`。
+不可见（`panelActivity.isVisible("attitude3d")` 为假）时整帧跳过并重置采样窗口，避免 fps 被算成 0 误降级。
+
+### 10.4 尺寸与交互
+
+- 最小格数 `EMBED_ID_MIN.attitude3d = { w: 4, h: 3 }`；宽高比 `EMBED_ID_ASPECT.attitude3d = 4/3`，
+  `normalizeGeometry` 在最小格数钳制之后按 4:3 回正，resize 时同样被钳制。
+- 指针：左键旋转、右键平移、滚轮缩放全部是 `OrbitControls` 默认映射，不另写手势。
+- 可见性沿用 rAF 每 6 帧比较 `getBoundingClientRect` 与 `.ctl-grid`，不用 `IntersectionObserver`。
+
+### 10.5 视图段测试
+
+| 文件 | 用例 |
+| --- | --- |
+| `attitudeViewQuality.test.ts` | 预算分开计、dwell、只降不升、cap/target 表、`pixelRatioFor` 三条 |
+| `embedPanels.test.ts` | 两种 id 的判定、`embedKindOf`、最小格数/宽高比、视图 `viewState` 恒 null |
+| `controlsStore.test.ts` | 视图按 4:3 最小尺寸落卡；导入的 12×2 被回正为 12×9；未知视图 id 丢弃 |
+| `panelPlacement.test.ts` | 视图从控件库直加；第二张 `view-limit`；拒因文案全覆盖 |
+
+## 11. 手测脚本（用户自行执行，agent 不操作用户电脑）
 
 1. 打开「2D 曲线」停靠面板 → 页签 chrome 点「内嵌到控制画布」→ 卡片出现，曲线继续、视野不跳；
 2. 拖卡片标题条换位置；在曲线区拖动/滚轮 → 只平移/缩放曲线，不移动卡片；
@@ -249,8 +307,12 @@ closeDockPanel(id): boolean  // api.getPanel(id)?.api.close()
 6. 把页面缩小到放不下最小格数 → 出现「页面太小 / 没有空位」toast；
 7. 切到别的控制页再切回 → 卡片与视野保留（视图态随卡片存档）；
 8. 浅色主题下检查标题条、边框、手柄不重叠、不越界。
+9. 控件库「面板」拖「姿态 3D 模型」→ 卡片只出现模型，没有面板工具栏/侧栏/状态栏；
+10. 卡片内左键拖 = 旋转、右键拖 = 平移、滚轮 = 缩放；点标题条锁按钮后再拖卡片 → 视角不动，图标变锁；
+11. 再拖一张姿态视图 → 出现「姿态视图最多同屏 1 个」toast；
+12. 卡片拖右下角缩放 → 宽高比保持 4:3，且不会小于 4×3 格。
 
-## 11. 回滚
+## 12. 回滚
 
 本批不迁移持久数据（`EmbedCard.viewState` 是可缺省字段）。若需回滚：`git revert` 单提交即可；已导出的 v2 存档在旧版本会被版本检查拒绝，不会静默丢卡。
 

@@ -86,12 +86,28 @@ describe("panel placement mutex", () => {
     expect(store.findEmbedCard("plot2d")).not.toBeNull();
   });
 
+  it("adds a view straight from the gallery and caps it at one instance", async () => {
+    const activity = await import("./panelActivity");
+    activity.syncPanels([]);
+    const placement = await import("./panelPlacement");
+    expect(placement.panelPlacementOf("attitude3d")).toBe("closed");
+    const first = placement.addEmbedFromGallery("attitude3d");
+    expect(first.ok).toBe(true);
+    expect(placement.panelPlacementOf("attitude3d")).toBe("embed");
+    // 视图没有停靠对应物，第二张只能被上限挡住
+    expect(placement.addEmbedFromGallery("attitude3d")).toEqual({
+      ok: false,
+      reason: "view-limit",
+    });
+  });
+
   it("has readable text for every reject reason", async () => {
     const placement = await import("./panelPlacement");
     const reasons = [
       "unknown-panel",
       "docked",
       "already-embedded",
+      "view-limit",
       "locked",
       "page-missing",
       "page-too-small",

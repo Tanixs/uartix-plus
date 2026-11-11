@@ -36,3 +36,22 @@
 - 三种主要原因（docked / already-embedded / no-space）都有可读 toast；
 - 卡片只可拖标题条，内容区不抢事件；
 - 全量门禁绿，工作树只含本批改动。
+
+## 视图段：embed 下沉到视图（attitude3d，2026-11-11）
+
+- [x] V1 `embedPanels.ts`：`EMBED_PANEL_IDS` / `EMBED_VIEW_IDS` / `EMBED_IDS`、`EMBED_ID_MIN`、`EMBED_ID_ASPECT`、`isEmbedId` / `isEmbedPanelId` / `isEmbedViewId`、`embedKindOf` / `embedName` / `sanitizeEmbedViewState`
+  - [x] `embedPanels.test.ts` 6 例
+- [x] V2 `attitudeViewQuality.ts`：预算（姿态 2 / 轨迹 1 分开计）、L0-L2 降级阶梯、`pixelRatioFor(dpr×zf, cap 2)`
+  - [x] `attitudeViewQuality.test.ts` 7 例
+- [x] V3 `AttitudeModelView.tsx`：只渲染模型、只订阅 `attitudeStore`、OrbitControls 默认手势、锁交互、rAF 可见性、主题切换不重置相机
+- [x] V4 `View3D.tsx` 导出 `buildModel` / `addStickerArrow`，两处共用同一模型
+- [x] V5 `attitudeStore` 收数门控：`isOpen("view3d") || isOpen("attitude3d")`
+- [x] V6 `controlsStore`：`panelId: EmbedId`、`EMBED_ID_MIN`、4:3 宽高比钳制、`countEmbedCards`、导入未知视图 id 丢弃
+- [x] V7 `panelPlacement`：`VIEW_INSTANCE_CAP` / `view-limit`、`addEmbedFromGallery`、视图不参与 `movePanelToDock`
+- [x] V8 `embedHost`：视图分支 + 标题条锁按钮（SVG、`aria-pressed`）+ `embedName`
+- [x] V9 `WidgetGallery` / `ControlCanvas`：`EMBED_IDS`、视图图标、右键「移回停靠」仅整板
+- [x] V10 `operatorStore`：导入丢弃回执（`droppedPanels`）
+- [x] V11 `theme.css`：`.ctl-embed-lock`、`.att-view*`（无 `transform: scale`）
+- [x] V12 门禁全绿（插件四文件 151 / vitest 2734 / tsc 0 / eslint 0 错 22 警告 / check:all OK(17) / vite build / cargo check）
+- [x] V13 `HANDOFF.md` 追加视图段（本地，gitignore）
+- [x] V14 提交并输出阶段报告

@@ -238,6 +238,38 @@ describe("canvas embed schema v2", () => {
     expect(store.addEmbedCard(page, "hexview")).toEqual({ ok: false, reason: "no-space" });
   });
 
+  it("adds the attitude view with a locked 4:3 minimum", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.getSnapshot().activePageId;
+    expect(store.addEmbedCard(pageId, "attitude3d").ok).toBe(true);
+    const cards = store.activePage()!.cards;
+    const card = cards[cards.length - 1]!;
+    expect(card).toMatchObject({
+      type: "embed",
+      panelId: "attitude3d",
+      w: 4,
+      h: 3,
+      minW: 4,
+      minH: 3,
+      aspectLock: true,
+    });
+  });
+
+  it("clamps an imported attitude card back to its 4:3 shape", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.importPage({
+      name: "wide",
+      cols: 20,
+      rows: 12,
+      cards: [
+        { type: "embed", panelId: "attitude3d", x: 0, y: 0, w: 12, h: 2, name: "姿态" },
+      ],
+    });
+    const card = store.getSnapshot().pages.find((p) => p.id === pageId)!.cards[0]!;
+    // 宽高比锁 4:3：宽 12 → 高 9；不会留下 12×2 的扁条（模型会被裁掉机臂）
+    expect(card).toMatchObject({ w: 12, h: 9, aspectLock: true });
+  });
+
   it("drops unknown embed panel ids on import and reports the count", async () => {
     const store = await import("./controlsStore");
     const report = { droppedPanels: [] as string[] };
@@ -249,12 +281,13 @@ describe("canvas embed schema v2", () => {
         cards: [
           { type: "embed", panelId: "plot2d" },
           { type: "embed", panelId: "modbus" },
+          { type: "embed", panelId: "trajectory3d" },
           { type: "slider", x: 0, y: 5 },
         ],
       },
       report,
     );
-    expect(report.droppedPanels).toEqual(["modbus"]);
+    expect(report.droppedPanels).toEqual(["modbus", "trajectory3d"]);
     const page = store.getSnapshot().pages.find((p) => p.id === pageId)!;
     expect(page.cards.filter((c) => c.type === "embed")).toHaveLength(1);
     expect(page.cards).toHaveLength(2);

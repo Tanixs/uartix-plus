@@ -9,6 +9,7 @@
  * 不新增订阅、不轮询：pending 是一次性的，消费即删。
  */
 import type {
+  EmbedId,
   EmbedPanelId,
   EmbedPanelViewState,
 } from "../features/controls/embedPanels";
@@ -19,8 +20,8 @@ export interface EmbedPanelViewAdapter {
   restore: (state: EmbedPanelViewState) => void;
 }
 
-const adapters = new Map<EmbedPanelId, EmbedPanelViewAdapter>();
-const pending = new Map<EmbedPanelId, EmbedPanelViewState>();
+const adapters = new Map<string, EmbedPanelViewAdapter>();
+const pending = new Map<string, EmbedPanelViewState>();
 
 /**
  * 注册当前挂载实例的 adapter，并立即消费上一次 capture 留下的状态。
@@ -64,7 +65,7 @@ export function discardPanelView(panelId: EmbedPanelId) {
  * 优先级必须高于"上次存盘时的旧视野"，否则切换看起来像跳回历史。
  */
 export function primePanelView(
-  panelId: EmbedPanelId,
+  panelId: EmbedId,
   state: EmbedPanelViewState | null | undefined,
 ): void {
   if (!state || pending.has(panelId)) return;

@@ -30,12 +30,12 @@ import { attachPdragZone, type PdragDetail } from "../../shared/pointerDrag";
 import { EmbedCardView } from "../../panels/embedHost";
 import * as panelActivity from "../../panels/panelActivity";
 import {
-  canPlacePanelInCanvas,
-  movePanelToCanvas,
+  addEmbedFromGallery,
+  canPlaceEmbedInCanvas,
   movePanelToDock,
   placementRejectText,
 } from "../../panels/panelPlacement";
-import { EMBED_PANEL_MIN, isEmbedPanelId } from "./embedPanels";
+import { EMBED_ID_MIN, isEmbedId, isEmbedPanelId } from "./embedPanels";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -672,7 +672,7 @@ export function ControlCanvas() {
   const embedSig = (page?.cards ?? [])
     .filter(
       (c): c is store.EmbedCard =>
-        c.type === "embed" && isEmbedPanelId(c.panelId),
+        c.type === "embed" && isEmbedId(c.panelId),
     )
     .map((c) => c.panelId)
     .join(",");
@@ -1087,9 +1087,9 @@ export function ControlCanvas() {
       } catch {
         return;
       }
-      if (!isEmbedPanelId(panelId)) return;
-      // 拖入即"移动"：已在停靠区的面板会先 capture 再关页签，不会出现两个实例。
-      const r = movePanelToCanvas(panelId);
+      if (!isEmbedId(panelId)) return;
+      // 拖入即"移动"：已在停靠区的整板会先 capture 再关页签；视图没有停靠对应物，直接落卡。
+      const r = addEmbedFromGallery(panelId);
       if (!r.ok) {
         toast(placementRejectText(r.reason));
         return;
@@ -1172,11 +1172,11 @@ export function ControlCanvas() {
         setDropPrev(null);
         return;
       }
-      if (!isEmbedPanelId(panelId)) {
+      if (!isEmbedId(panelId)) {
         setDropPrev(null);
         return;
       }
-      const min = EMBED_PANEL_MIN[panelId];
+      const min = EMBED_ID_MIN[panelId];
       const r = g.getBoundingClientRect();
       const zf = zfactor || 1;
       const tx = Math.max(0, Math.min(page.cols - min.w, Math.round(((d.x - r.left) / zf - OFFq) / STEPq)));
@@ -1185,7 +1185,7 @@ export function ControlCanvas() {
         (c) => !(tx + min.w <= c.x || c.x + c.w <= tx || ty + min.h <= c.y || c.y + (c.h || 1) <= ty),
       );
       // 先按最小格数告诉用户"能不能放"；真正落卡时还会再校验一次重复/容量。
-      const gate = canPlacePanelInCanvas(page.id, panelId);
+      const gate = canPlaceEmbedInCanvas(page.id, panelId);
       setDropPrev(gate.ok && !busy ? { x: tx, y: ty, w: min.w, h: min.h } : null);
       return;
     }
@@ -1609,7 +1609,7 @@ export function ControlCanvas() {
                 {tx("立即发送", "Send now")}
               </button>
             )}
-            {menuCard.type === "embed" && (
+            {menuCard.type === "embed" && isEmbedPanelId(menuCard.panelId) && (
               <button
                 className="ctx-item"
                 onClick={() => {
