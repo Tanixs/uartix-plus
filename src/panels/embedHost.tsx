@@ -2,9 +2,10 @@ import { memo, useEffect, useRef, useState } from "react";
 import type { EmbedCard } from "../features/controls/controlsStore";
 import { CardFrame, type CardFrameProps } from "../features/controls/CardViews";
 import {
-  EMBED_ID_MIN,
+  embedMinOf,
   embedName,
   hasPointerLock,
+  parsePluginEmbedId,
 } from "../features/controls/embedPanels";
 import { AttitudeModelView } from "../features/attitude/AttitudeModelView";
 import { TrajectoryView } from "../features/plot3d/TrajectoryView";
@@ -14,8 +15,10 @@ import { DataTable } from "../features/table/DataTable";
 import { SpectrumPanel } from "../features/plot/SpectrumPanel";
 import { XRayPanel } from "../features/xray/XRayPanel";
 import { SequencerPanel } from "../features/sequencer/SequencerPanel";
+import { SendBuildPanel } from "../features/send/SendBuildPanel";
 import { SentinelPanel } from "../features/sentinel/SentinelPanel";
 import FrameCanvas from "../features/framecanvas/FrameCanvas";
+import { PluginViewPanel } from "../features/plugins/engine/PluginViewPanel";
 import { IconLock, IconUnlock } from "../shared/icons";
 import { tx, useLocale } from "../i18n/strings";
 import * as panelActivity from "./panelActivity";
@@ -33,10 +36,13 @@ const MDataTable = memo(DataTable);
 const MXRayPanel = memo(XRayPanel);
 const MSpectrumPanel = memo(SpectrumPanel);
 const MSequencer = memo(SequencerPanel);
+const MSendBuild = memo(SendBuildPanel);
 const MSentinel = memo(SentinelPanel);
 const MFrameCanvas = memo(FrameCanvas);
 const MAttitudeView = memo(AttitudeModelView);
 const MTrajectoryView = memo(TrajectoryView);
+/** 插件面板自己管 iframe/消息桥/续租；memo 只是不跟着整页补丁重建 iframe。 */
+const MPluginView = memo(PluginViewPanel);
 
 export interface EmbedCardViewProps extends Omit<CardFrameProps, "card" | "children"> {
   card: EmbedCard;
@@ -99,7 +105,9 @@ export function EmbedCardView(props: EmbedCardViewProps) {
     };
   }, [card.panelId]);
 
-  const min = EMBED_ID_MIN[card.panelId];
+  const min = embedMinOf(card.panelId);
+  // 插件面板：卡片 id 就是它的停靠 id `plugin-view-<插件>:<面板>`，拆出参数交给 iframe 宿主。
+  const pluginPanel = parsePluginEmbedId(card.panelId);
   return (
     <CardFrame {...props} card={card} dragHandleOnly>
       <div className="ctl-embed">
@@ -149,12 +157,22 @@ export function EmbedCardView(props: EmbedCardViewProps) {
             <MSpectrumPanel />
           ) : card.panelId === "sequencer" ? (
             <MSequencer />
+          ) : card.panelId === "sendbuild" ? (
+            <MSendBuild />
           ) : card.panelId === "sentinel" ? (
             <MSentinel embedded />
           ) : card.panelId === "framecanvas" ? (
             <MFrameCanvas />
           ) : card.panelId === "attitude3d" ? (
             <MAttitudeView locked={locked} />
+          ) : card.panelId === "trajectory3d" ? (
+            <MTrajectoryView locked={locked} />
+          ) : pluginPanel ? (
+            // bare：卡片自己的标题栏已经写了名字，不要让 iframe 再长一个面板头。
+            <MPluginView
+              bare
+              params={{ pluginId: pluginPanel.pluginId, panelId: pluginPanel.panelId }}
+            />
           ) : (
             <MTrajectoryView locked={locked} />
           )}

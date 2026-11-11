@@ -9,7 +9,6 @@
  * 不新增订阅、不轮询：pending 是一次性的，消费即删。
  */
 import type {
-  EmbedId,
   EmbedPanelId,
   EmbedPanelViewState,
 } from "../features/controls/embedPanels";
@@ -46,15 +45,16 @@ export function registerPanelView(
   };
 }
 
-/** 切换前调用：把当前实例的视图态暂存给下一个挂载点。返回同一份状态供写入卡片。 */
-export function capturePanelView(panelId: EmbedPanelId): EmbedPanelViewState | null {
+/** 切换前调用：把当前实例的视图态暂存给下一个挂载点。返回同一份状态供写入卡片。
+ *  入参放宽到 string：插件面板也走同一套搬动流程，只是从来没有 adapter。 */
+export function capturePanelView(panelId: string): EmbedPanelViewState | null {
   const state = adapters.get(panelId)?.capture() ?? null;
   if (state) pending.set(panelId, state);
   return state;
 }
 
 /** 切换被取消（例如目标位置非法）时丢弃暂存，避免下次无关重挂载吃到旧视野。 */
-export function discardPanelView(panelId: EmbedPanelId) {
+export function discardPanelView(panelId: string) {
   pending.delete(panelId);
 }
 
@@ -65,7 +65,7 @@ export function discardPanelView(panelId: EmbedPanelId) {
  * 优先级必须高于"上次存盘时的旧视野"，否则切换看起来像跳回历史。
  */
 export function primePanelView(
-  panelId: EmbedId,
+  panelId: string,
   state: EmbedPanelViewState | null | undefined,
 ): void {
   if (!state || pending.has(panelId)) return;

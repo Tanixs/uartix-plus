@@ -4689,6 +4689,13 @@ select optgroup {
   min-width: 150px;
 }
 
+/* TX 组帧台窄卡：备注先让位（底部预览才是"看到的字节就是发出去的字节"），
+   块栏收窄把宽度让给字节网格。 */
+@container ctl-embed (max-width: 360px) {
+  .ctl-embed-body .sb-notes { display: none; }
+  .ctl-embed-body .sb-palette { width: 76px; }
+}
+
 /* 组件根（uPlot 容器 / Hex 根）绝对填满，避免 canvas 按内容把自己撑破卡片 */
 .ctl-embed-body > * {
   position: absolute;

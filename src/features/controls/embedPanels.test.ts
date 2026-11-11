@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
+import { panelViewId } from "../plugins/engine/panelBridge";
 import {
   EMBED_ID_ASPECT,
   EMBED_ID_MIN,
   EMBED_IDS,
+  PLUGIN_PANEL_MIN,
   dockIdOf,
   embedKindOf,
+  embedMinOf,
   embedName,
   hasPointerLock,
   isEmbedId,
+  isEmbedPanelTarget,
+  isEmbedTargetId,
   isEmbedViewId,
+  isPluginEmbedId,
+  parsePluginEmbedId,
   sanitizeEmbedViewState,
 } from "./embedPanels";
 
@@ -21,6 +28,7 @@ describe("embed whitelist", () => {
       "xray",
       "spectrum",
       "sequencer",
+      "sendbuild",
       "attitude3d",
       "trajectory3d",
       "sentinel",
@@ -31,6 +39,7 @@ describe("embed whitelist", () => {
     expect(embedKindOf("xray")).toBe("panel");
     expect(embedKindOf("spectrum")).toBe("panel");
     expect(embedKindOf("sequencer")).toBe("panel");
+    expect(embedKindOf("sendbuild")).toBe("panel");
     expect(embedKindOf("attitude3d")).toBe("view");
     expect(embedKindOf("trajectory3d")).toBe("view");
     expect(embedKindOf("sentinel")).toBe("view");
@@ -67,9 +76,36 @@ describe("embed whitelist", () => {
 
   it("maps only the data table to a differently-named dock panel", () => {
     expect(dockIdOf("datatable")).toBe("table");
-    for (const id of ["plot2d", "hexview", "xray", "spectrum", "sequencer"] as const) {
+    for (const id of ["plot2d", "hexview", "xray", "spectrum", "sequencer", "sendbuild"] as const) {
       expect(dockIdOf(id)).toBe(id);
     }
+  });
+
+  it("keeps wave-3 panels at 5x4 and no aspect lock", () => {
+    expect(EMBED_ID_MIN.sendbuild).toEqual({ w: 5, h: 4 });
+    expect(EMBED_ID_ASPECT.sendbuild).toBeUndefined();
+    expect(hasPointerLock("sendbuild")).toBe(false);
+  });
+
+  it("accepts plugin panels as dynamic whole panels, but not as views or static ids", () => {
+    const id = "plugin-view-acme.serial-console:bode";
+    // 前缀只有一份真值：停靠 id 生成器造出来的 id 必须被白名单认。
+    expect(isPluginEmbedId(panelViewId("acme.serial-console", "bode"))).toBe(true);
+    expect(panelViewId("acme.serial-console", "bode")).toBe(id);
+    expect(isPluginEmbedId(id)).toBe(true);
+    expect(parsePluginEmbedId(id)).toEqual({ pluginId: "acme.serial-console", panelId: "bode" });
+    expect(isEmbedTargetId(id)).toBe(true);
+    expect(isEmbedPanelTarget(id)).toBe(true);
+    expect(isEmbedId(id)).toBe(false);
+    expect(isEmbedViewId(id)).toBe(false);
+    // 形状不对的一律不认：缺面板段、带空格、前缀不对
+    for (const bad of ["plugin-view-acme", "plugin-view-a:b:c", "plugin-view-a: b", "plugin-vi", 42, null]) {
+      expect(isPluginEmbedId(bad)).toBe(false);
+    }
+    expect(embedMinOf(id)).toEqual(PLUGIN_PANEL_MIN);
+    expect(embedMinOf("sendbuild")).toEqual({ w: 5, h: 4 });
+    expect(embedName(id).length).toBeGreaterThan(0);
+    expect(sanitizeEmbedViewState(id, { scrollOffset: 3 })).toBeNull();
   });
 
   it("gives wave-2 views their own minimums and only locks 3D cameras", () => {

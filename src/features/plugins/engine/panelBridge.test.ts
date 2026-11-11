@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
   PANEL_MSG_KEY,
   PANEL_PROTOCOL,
+  SIZE_EVENT,
   buildSrcdoc,
   collectPluginPanels,
   eventMsg,
@@ -17,6 +18,7 @@ import {
   parsePanelViewId,
   resErr,
   resOk,
+  sizeMsg,
 } from "./panelBridge";
 import { PLUGIN_MAX_FILE_BYTES } from "./limits";
 
@@ -182,6 +184,19 @@ describe("回给 iframe 的消息", () => {
   it("事件消息带 event 与 payload", () => {
     expect(eventMsg("heartbeat", { beats: 3 })).toEqual({ kind: "event", event: "heartbeat", payload: { beats: 3 } });
   });
+
+  it("尺寸消息取整且不为负（iframe 侧据此排版，NaN 会把画布摊坏）", () => {
+    expect(sizeMsg(320.4, 180.6)).toEqual({
+      kind: "event",
+      event: SIZE_EVENT,
+      payload: { width: 320, height: 181 },
+    });
+    expect(sizeMsg(-5, Number.NaN)).toEqual({
+      kind: "event",
+      event: SIZE_EVENT,
+      payload: { width: 0, height: 0 },
+    });
+  });
 });
 
 describe("buildSrcdoc", () => {
@@ -255,6 +270,26 @@ describe("buildSrcdoc", () => {
     expect(out).toContain('<style id="uartix-host-theme">');
     expect(out).toContain("color-scheme: dark");
     expect(out).not.toContain("undefined");
+  });
+
+  it("尺寸：初始值进 INFO，后续变化走 resize 事件并更新 uartix.size", () => {
+    const out = buildSrcdoc("<html><head></head><body>x</body></html>", {
+      ...info,
+      size: { width: 300.4, height: 240.6 },
+    });
+    const m = /var INFO = (\{.*?\});/s.exec(out);
+    expect(m).toBeTruthy();
+    expect((JSON.parse(m![1]) as { size: unknown }).size).toEqual({ width: 300, height: 241 });
+    // iframe 侧必须能读到初始值，并在 resize 到达时覆盖它
+    expect(out).toContain("size: INFO.size");
+    expect(out).toContain("d.event === 'resize'");
+    expect(out).toContain("window.uartix.size = d.payload");
+  });
+
+  it("尺寸缺省时是 0×0，不是 NaN/undefined（老调用方不用改）", () => {
+    const out = buildSrcdoc("<html><head></head><body>x</body></html>", info);
+    const m = /var INFO = (\{.*?\});/s.exec(out);
+    expect((JSON.parse(m![1]) as { size: unknown }).size).toEqual({ width: 0, height: 0 });
   });
 
   it("标题里的 </script> 不许逃出脚本块（这是注入面，不是显示问题）", () => {

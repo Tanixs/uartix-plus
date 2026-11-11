@@ -253,6 +253,63 @@ describe("canvas embed schema v2", () => {
     }
   });
 
+  it("accepts wave-3 targets: TX frame builder and a dynamic plugin panel", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.importPage({ name: "wave3", cols: 16, rows: 16, cards: [] });
+    expect(store.addEmbedCard(pageId, "sendbuild").ok).toBe(true);
+    expect(store.findEmbedCard("sendbuild")?.card).toMatchObject({
+      type: "embed",
+      panelId: "sendbuild",
+      w: 5,
+      h: 4,
+      minW: 5,
+      minH: 4,
+      aspectLock: false,
+    });
+
+    // 插件面板：卡片 id 就是停靠 id，默认名由控件库传进来（这里显式给名字）
+    const pluginId = "plugin-view-acme.serial-console:bode";
+    const r = store.addEmbedCard(pageId, pluginId, null, "  波特率观测  ");
+    expect(r.ok).toBe(true);
+    expect(store.findEmbedCard(pluginId)?.card).toMatchObject({
+      panelId: pluginId,
+      name: "波特率观测",
+      w: 5,
+      h: 4,
+      aspectLock: false,
+    });
+    expect(store.addEmbedCard(pageId, pluginId)).toEqual({ ok: false, reason: "duplicate" });
+    // 视图态对插件面板没有意义，坏数据也不会落盘
+    expect(store.findEmbedCard(pluginId)?.card.viewState).toBeUndefined();
+  });
+
+  it("keeps plugin panel cards on import and drops malformed plugin ids", async () => {
+    const store = await import("./controlsStore");
+    const report = { droppedPanels: [] as string[] };
+    const pageId = store.importPage(
+      {
+        name: "wave3-import",
+        cols: 16,
+        rows: 16,
+        cards: [
+          { type: "embed", panelId: "plugin-view-acme.logger:tail", name: "日志" },
+          { type: "embed", panelId: "plugin-view-acme.logger" },
+          { type: "embed", panelId: "sendbuild" },
+        ],
+      },
+      report,
+    );
+    expect(report.droppedPanels).toEqual(["plugin-view-acme.logger"]);
+    const page = store.getSnapshot().pages.find((p) => p.id === pageId)!;
+    const byId = new Map(
+      page.cards
+        .filter((c) => c.type === "embed")
+        .map((c) => [(c as { panelId: string }).panelId, c]),
+    );
+    expect(byId.get("plugin-view-acme.logger:tail")).toMatchObject({ w: 5, h: 4, name: "日志" });
+    expect(byId.get("sendbuild")).toMatchObject({ w: 5, h: 4 });
+  });
+
   it("keeps wave-1 cards on import and still reports unknown ids", async () => {
     const store = await import("./controlsStore");
     const report = { droppedPanels: [] as string[] };

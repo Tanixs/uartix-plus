@@ -665,3 +665,84 @@ CSS 只管排布（`flex-wrap`、`min-width:0`、不叠放），不出现 `trans
   ② 帧画布默认在停靠区开着，用户从控件库添加会先收到 `docked`，需先关页签；
   ③ 哨兵滚出视口仍按同 id 采集（引擎门控是 `isOpen`），与停靠版一致，本波不改。
 
+## 17. 面板控件化 · 第三波（2026-11-11 追加，用户已确认）
+
+### 17.1 顺序约束（不可反）
+
+插件面板进卡片之前，必须先有**沙箱尺寸通知**：停靠面板里 iframe 几乎占满窗口，
+插件按 `100vw/100vh` 排版看不出问题；一进卡片只有 5×4 那么大，固定画布立刻溢出。
+所以本波先交付协议、再放宽白名单。
+
+### 17.2 沙箱尺寸通知（先做）
+
+- `panelBridge.ts`
+  - `SIZE_EVENT = "resize"`；`sizeMsg(w, h)` 统一收敛为"有限、非负、整数"，
+    NaN/Infinity 一律归 0（漏进 iframe 会把插件画布摊坏）。
+  - `buildSrcdoc(..., { size })`：初始尺寸写进 `INFO.size`；iframe 桥暴露
+    `uartix.size`（可读对象），收到 `resize` 事件时原地替换。
+  - 消息仍是 `event` 形状，插件侧用现成的 `uartix.on("resize", fn)` 订阅，不新增 API 面。
+- `PluginViewPanel.tsx`
+  - `ready` 与 `onLoad` 各补发一次当前尺寸；
+  - 用 `ResizeObserver` 观察 iframe 本身（拖卡片右下角会连续触发），变化即 `post(sizeMsg)`；
+  - 观察目标随 `html` 重建重挂；iframe 未就绪时不发（`contentWindow` 为空）。
+
+### 17.3 插件面板的内嵌形态
+
+| 面板 | 卡片 id | 形态 | 最小格数 | 上限 |
+| --- | --- | --- | --- | --- |
+| 插件面板（每个实例） | `plugin-view-<插件id>:<面板id>` | 动态整板（有停靠页签） | 5×4 | 1 / 实例 |
+
+- **不另造参数通道**：卡片 `panelId` 直接复用插件面板的停靠 id，一个 id 同时回答
+  "哪块面板"与"要不要走 iframe 宿主"；导入/互斥/去重沿用既有按 id 记账。
+- `embedPanels`：`PluginPanelEmbedId`（模板字面量）、`parsePluginEmbedId` /
+  `isPluginEmbedId` / `isEmbedTargetId` / `isEmbedPanelTarget`、`PLUGIN_PANEL_MIN` 5×4、
+  `embedMinOf` / `embedAspectOf`（插件无宽高比锁）。
+- `controlsStore`：`EmbedCard.panelId` 放宽到 `EmbedTargetId`；迁移、钳制、放置统一走
+  `embedMinOf` / `embedAspectOf`；插件卡片没有可搬的 `viewState`。
+- `panelPlacement`：插件面板按整板处理——停靠互斥、`movePanelToCanvas` 先关页签、
+  `movePanelToDock` 用同一个 id 开页签；`viewState` 的 capture/discard/prime 放宽到
+  `string`（插件没有 adapter，自然返回 null）。
+- `WidgetGallery`：已启用且受信任的插件面板动态列出（`collectPluginPanels`），
+  卡片名用面板自己的标题，不落"插件面板"兜底名。
+- `embedHost`：`bare` 形态只给 iframe（卡片标题条已经写了名字，不长第二个面板头）。
+
+### 17.4 TX 组帧台
+
+- `sendbuild` 进 `EMBED_PANEL_IDS`、映射到自身停靠 id，最小 5×4：
+  字节网格 `MIN_COLS=4` 可在窄卡收缩，96px 块栏 + 尺在 5×4 下仍放得下 4 列 × 7 行。
+- 窄卡容器查询（仅 `.ctl-embed-body` 作用域）：≤360px 时隐藏 `.sb-notes`（预览优先）、
+  块栏收窄到 76px，把宽度让给字节网格。
+- 控件库图标 `IconSend`。
+
+### 17.5 改动文件
+
+1. `src/features/plugins/engine/panelBridge.ts`：`SIZE_EVENT` / `sizeMsg` / `INFO.size` / 桥内 resize。
+2. `src/features/plugins/engine/PluginViewPanel.tsx`：`postSize`、`ResizeObserver`、ready/onLoad 补发。
+3. `src/features/controls/embedPanels.ts`：`sendbuild`、插件动态 id 与最小/命名/查询辅助。
+4. `src/features/controls/controlsStore.ts`：`EmbedTargetId` 与 `embedMinOf` / `embedAspectOf`。
+5. `src/panels/panelPlacement.ts` / `src/panels/viewState.ts`：动态 id 的互斥与搬运。
+6. `src/panels/embedHost.tsx` / `src/features/controls/ControlCanvas.tsx`：插件 `bare` 分支与拖放。
+7. `src/features/controls/WidgetGallery.tsx`：TX 图标 + 插件面板动态条目。
+8. `src/styles/theme.css`：仅追加 `.ctl-embed-body` 下的 TX 窄卡规则。
+9. 测试：`panelBridge.test.ts`、`embedPanels.test.ts`、`controlsStore.test.ts`、`panelPlacement.test.ts`。
+
+### 17.6 验证与落地结果（2026-11-11）
+
+- 尺寸协议端到端（真实 Chromium + 真 srcdoc）：初始 `uartix.size = 111×222`；
+  宿主 post `sizeMsg(320.4, 180.6)` 后 iframe 侧收到 `320×181`，`uartix.size` 同步更新。
+- TX 组帧台 5×4 卡（默认格宽下 332×264）：根 330×236 铺满；工具行换行到 60px、
+  底栏 36px，子元素 0 溢出；`.sb-body` `clientWidth = scrollWidth = 330`；
+  控制画布 `scrollWidth = clientWidth = 1066`（卡片不撑宽画布）。
+- 同类第二张：`already-embedded`；控制台 0 error。
+- 单测：`panelBridge` 31、`embedPanels` 13、`controlsStore` 23、`panelPlacement` 13 全绿。
+- 七项门禁：见提交说明与阶段报告。
+
+### 17.7 残留风险
+
+- 无真装插件参与无头取证：`ResizeObserver → postSize` 的 React 接线只做了代码路径与
+  协议端到端验证，未在真实插件面板上观测；协议本身已用真 iframe 验证。
+- 插件 iframe 在卡片滚出视口后仍保持挂载（与停靠页签后台一致）；没有新增"不可见即销毁"
+  语义，避免插件进程被反复重启。
+- 插件标题只在从控件库拖入时带入；若存档里的卡片名被清空，显示兜底名"插件面板"。
+
+

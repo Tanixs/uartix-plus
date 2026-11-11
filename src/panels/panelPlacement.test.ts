@@ -76,6 +76,50 @@ describe("panel placement mutex", () => {
     });
   });
 
+  it("caps the TX frame builder at one instance like other whole panels", async () => {
+    const activity = await import("./panelActivity");
+    activity.syncPanels([]);
+    const store = await import("../features/controls/controlsStore");
+    const placement = await import("./panelPlacement");
+    expect(placement.addEmbedFromGallery("sendbuild").ok).toBe(true);
+    expect(store.findEmbedCard("sendbuild")?.card).toMatchObject({ w: 5, h: 4 });
+    expect(placement.addEmbedFromGallery("sendbuild")).toEqual({
+      ok: false,
+      reason: "already-embedded",
+    });
+  });
+
+  it("treats a plugin panel as a whole panel: dock mutex, one card, title carried", async () => {
+    const activity = await import("./panelActivity");
+    const store = await import("../features/controls/controlsStore");
+    const placement = await import("./panelPlacement");
+    const id = "plugin-view-acme.logger:tail";
+
+    // 停靠区里开着 → 不许再落一张（两处 iframe 会各跑一份插件）
+    activity.syncPanels([{ id, visible: true }]);
+    expect(placement.panelPlacementOf(id)).toBe("dock");
+    expect(placement.addEmbedFromGallery(id, "日志")).toEqual({
+      ok: false,
+      reason: "docked",
+    });
+
+    activity.syncPanels([]);
+    expect(placement.addEmbedFromGallery(id, "日志").ok).toBe(true);
+    const card = store.findEmbedCard(id)?.card;
+    expect(card).toMatchObject({
+      panelId: id,
+      name: "日志",
+      w: 5,
+      h: 4,
+      aspectLock: false,
+    });
+    expect(placement.panelPlacementOf(id)).toBe("embed");
+    expect(placement.addEmbedFromGallery(id, "日志")).toEqual({
+      ok: false,
+      reason: "already-embedded",
+    });
+  });
+
   it("blocks a docked sentinel and caps wave-2 views at one", async () => {
     const activity = await import("./panelActivity");
     const store = await import("../features/controls/controlsStore");

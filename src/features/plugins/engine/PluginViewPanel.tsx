@@ -50,6 +50,7 @@ import {
   parseBridgeMessage,
   resErr,
   resOk,
+  sizeMsg,
   type BridgeOut,
 } from "./panelBridge";
 
@@ -178,6 +179,32 @@ export function PluginViewPanel(props: {
     }
   }
 
+  /**
+   * 告诉插件 iframe 现在有多大。
+   *
+   * 停靠面板里 iframe 几乎占满窗口，插件按 `100vw/100vh` 排版看不出问题；
+   * 一进控制画布，iframe 只有卡片那么大，固定画布立刻溢出。所以尺寸必须由宿主告知，
+   * 而且在**每次变化**时都发一条（拖右下角改卡片大小就会连续变）。
+   */
+  const postSize = useCallback(() => {
+    const el = frame.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    post(sizeMsg(r.width, r.height));
+  }, []);
+
+  // 尺寸通知：加载完成先发一次，之后 ResizeObserver 每次变化再发。
+  // 只依赖 html：换面板/换插件时 iframe 会重建，观察目标也要重挂。
+  useEffect(() => {
+    if (!html) return;
+    const el = frame.current;
+    if (!el) return;
+    postSize();
+    const ro = new ResizeObserver(() => postSize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [html, postSize]);
+
   // 桥：iframe → 宿主
   useEffect(() => {
     if (!html) return;
@@ -190,6 +217,7 @@ export function PluginViewPanel(props: {
       if (!m) return;
       if (m.kind === "ready") {
         postTheme();
+        postSize();
         return;
       }
 
@@ -279,7 +307,7 @@ export function PluginViewPanel(props: {
 
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [html, pluginId, panelId, postTheme]);
+  }, [html, pluginId, panelId, postTheme, postSize]);
 
   // 桥：插件 emit → iframe
   useEffect(() => {
@@ -300,7 +328,10 @@ export function PluginViewPanel(props: {
         sandbox="allow-scripts allow-forms allow-modals allow-popups"
         referrerPolicy="no-referrer"
         srcDoc={html ? buildSrcdoc(html, { pluginId, panelId, title: def.title, theme: readHostTheme(), paintPage: false }) : ""}
-        onLoad={postTheme}
+        onLoad={() => {
+          postTheme();
+          postSize();
+        }}
         style={{ width: "100%", height: "100%", border: "none", background: "transparent", display: "block" }}
       />
     );
@@ -354,7 +385,10 @@ export function PluginViewPanel(props: {
         sandbox="allow-scripts allow-forms allow-modals allow-popups"
         referrerPolicy="no-referrer"
         srcDoc={html ? buildSrcdoc(html, { pluginId, panelId, title: def.title, theme: readHostTheme() }) : ""}
-        onLoad={postTheme}
+        onLoad={() => {
+          postTheme();
+          postSize();
+        }}
         style={{ flex: "1 1 auto", minHeight: 0, width: "100%", border: "none", background: "var(--bg)" }}
       />
     </div>

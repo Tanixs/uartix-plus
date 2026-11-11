@@ -208,6 +208,23 @@ export function eventMsg(event: string, payload: unknown): BridgeOut {
   return { kind: "event", event, payload };
 }
 
+/**
+ * 沙箱尺寸通知的事件名。宿主在内嵌卡片里时 iframe 只有卡片那么大，
+ * 插件若按固定画布摆版面就会溢出——它得先知道**可用尺寸**，再决定怎么排。
+ */
+export const SIZE_EVENT = "resize";
+
+/** 尺寸消息：`{ width, height }`（CSS 像素，已取整）。iframe 侧同时更新 `uartix.size` 并派发给 `on('resize')`。 */
+export function sizeMsg(width: number, height: number): BridgeOut {
+  return eventMsg(SIZE_EVENT, { width: px(width), height: px(height) });
+}
+
+/** 尺寸一律收敛到"有限、非负、整数"：NaN/Infinity 漏进 iframe 会把插件画布摊坏。 */
+function px(v: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+}
+
 /* ============================ srcdoc 组装 ============================ */
 
 /**
@@ -263,6 +280,9 @@ const BRIDGE_JS = [
   // 拒绝的话这个 Promise 直接 reject，插件该显示的就是"用户没批"。
   "    bindRoot: function (spec) { return ask({ kind: 'host', op: 'bindRoot', spec: String(spec) }); },",
   "    theme: function () { return INFO.theme || { vars: {}, scheme: 'dark' }; },",
+  // 初始尺寸来自宿主组装 srcdoc 时能测到的那一次；之后的每一次变化走 `resize` 事件。
+  // 插件按这个值排版，就不会把固定画布摊到卡片外。
+  "    size: INFO.size || { width: 0, height: 0 },",
   "    on: function (event, fn) {",
   "      var k = String(event);",
   "      (handlers[k] = handlers[k] || []).push(fn);",
@@ -286,6 +306,9 @@ const BRIDGE_JS = [
   "      return;",
   "    }",
   "    if (d.kind === 'event') {",
+  "      if (d.event === 'resize' && d.payload) {",
+  "        window.uartix.size = d.payload;",
+  "      }",
   "      if (d.event === 'theme' && d.payload) {",
   "        var t = d.payload;",
   "        INFO.theme = t;",
@@ -321,9 +344,18 @@ const BRIDGE_JS = [
  */
 export function buildSrcdoc(
   html: string,
-  info: { pluginId: string; panelId: string; title: string; theme?: IframeTheme; paintPage?: boolean },
+  info: {
+    pluginId: string;
+    panelId: string;
+    title: string;
+    theme?: IframeTheme;
+    paintPage?: boolean;
+    /** 组装时能测到的 iframe 尺寸；测不到就留 0，加载后宿主会立刻补发一条 `resize`。 */
+    size?: { width: number; height: number };
+  },
 ): string {
   const theme = info.theme ?? { vars: {}, scheme: "dark" as const, font: "" };
+  const size = { width: px(info.size?.width ?? 0), height: px(info.size?.height ?? 0) };
   const boot =
     '<style id="uartix-host-theme">' +
     iframeThemeCss(theme, { paintPage: info.paintPage }) +
@@ -334,6 +366,7 @@ export function buildSrcdoc(
       panelId: info.panelId,
       title: info.title,
       theme: { vars: theme.vars, scheme: theme.scheme, font: theme.font },
+      size,
     }) +
     ";\n" +
     BRIDGE_JS +

@@ -36,7 +36,7 @@ import {
   movePanelToDock,
   placementRejectText,
 } from "../../panels/panelPlacement";
-import { EMBED_ID_MIN, isEmbedId, isEmbedPanelId } from "./embedPanels";
+import { embedMinOf, isEmbedPanelTarget, isEmbedTargetId } from "./embedPanels";
 import type { CommandItem, CommandNode } from "./commandStore";
 import {
   BuzzerCardView,
@@ -679,7 +679,7 @@ export function ControlCanvas() {
   const embedSig = (page?.cards ?? [])
     .filter(
       (c): c is store.EmbedCard =>
-        c.type === "embed" && isEmbedId(c.panelId),
+        c.type === "embed" && isEmbedTargetId(c.panelId),
     )
     .map((c) => c.panelId)
     .join(",");
@@ -1091,14 +1091,17 @@ export function ControlCanvas() {
     };
     if (d.kind === "vs-panel") {
       let panelId: unknown;
+      let name: string | undefined;
       try {
-        panelId = (JSON.parse(d.data) as { panelId?: unknown }).panelId;
+        const parsed = JSON.parse(d.data) as { panelId?: unknown; name?: unknown };
+        panelId = parsed.panelId;
+        name = typeof parsed.name === "string" ? parsed.name : undefined;
       } catch {
         return;
       }
-      if (!isEmbedId(panelId)) return;
+      if (!isEmbedTargetId(panelId)) return;
       // 拖入即"移动"：已在停靠区的整板会先 capture 再关页签；视图没有停靠对应物，直接落卡。
-      const r = addEmbedFromGallery(panelId);
+      const r = addEmbedFromGallery(panelId, name);
       if (!r.ok) {
         toast(placementRejectText(r.reason, panelId));
         return;
@@ -1181,11 +1184,11 @@ export function ControlCanvas() {
         setDropPrev(null);
         return;
       }
-      if (!isEmbedId(panelId)) {
+      if (!isEmbedTargetId(panelId)) {
         setDropPrev(null);
         return;
       }
-      const min = EMBED_ID_MIN[panelId];
+      const min = embedMinOf(panelId);
       const r = g.getBoundingClientRect();
       const zf = zfactor || 1;
       const tx = Math.max(0, Math.min(page.cols - min.w, Math.round(((d.x - r.left) / zf - OFFq) / STEPq)));
@@ -1618,7 +1621,7 @@ export function ControlCanvas() {
                 {tx("立即发送", "Send now")}
               </button>
             )}
-            {menuCard.type === "embed" && isEmbedPanelId(menuCard.panelId) && (
+            {menuCard.type === "embed" && isEmbedPanelTarget(menuCard.panelId) && (
               <button
                 className="ctx-item"
                 onClick={() => {

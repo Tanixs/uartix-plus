@@ -4,13 +4,13 @@ import { getLocale } from "../../i18n/strings";
 import { guardLocked } from "../operator/lock";
   import { DEBUG_SCHEMA, sanitizeManaged, sanitizeDebugProfile, buildDebugPreset, type ManagedControl, type DebugProfile, type DebugParameter } from "./debugPreset";
 import {
-  EMBED_ID_ASPECT,
-  EMBED_ID_MIN,
+  embedAspectOf,
+  embedMinOf,
   embedName,
-  isEmbedId,
+  isEmbedTargetId,
   sanitizeEmbedViewState,
-  type EmbedId,
   type EmbedPanelViewState,
+  type EmbedTargetId,
 } from "./embedPanels";
 
 /**
@@ -224,7 +224,7 @@ export interface CustomCard extends BaseCard {
  */
 export interface EmbedCard extends BaseCard {
   type: "embed";
-  panelId: EmbedId;
+  panelId: EmbedTargetId;
   viewState?: EmbedPanelViewState;
   minW: number;
   minH: number;
@@ -386,9 +386,10 @@ function migrateCard(raw: Record<string, unknown>): ControlCard | null {
   const type = (raw.type ?? "slider") as CardType;
   if (type === "embed") {
     // 未知目标 id 整卡丢弃（由调用方计数告警）：不能留一张指向不存在组件的空卡。
-    if (!isEmbedId(raw.panelId)) return null;
+    // 插件面板也在白名单内，id 形如 `plugin-view-<插件>:<面板>`。
+    if (!isEmbedTargetId(raw.panelId)) return null;
     const panelId = raw.panelId;
-    const min = EMBED_ID_MIN[panelId];
+    const min = embedMinOf(panelId);
     return {
       ...base,
       type: "embed",
@@ -400,7 +401,7 @@ function migrateCard(raw: Record<string, unknown>): ControlCard | null {
       aspectLock:
         typeof raw.aspectLock === "boolean"
           ? raw.aspectLock
-          : EMBED_ID_ASPECT[panelId] !== undefined,
+          : embedAspectOf(panelId) !== undefined,
     };
   }
   switch (type) {
@@ -570,14 +571,14 @@ export function normalizeGeometry(
   // 内嵌卡片有语义最小尺寸（2D/姿态 4×3、Hex 3×2）：保存/导入/拖角都要抬到下限，
   // 但页面本身比下限还小时只能取页面尺寸，避免卡片溢出画布。
   if (c.type === "embed") {
-    const min = EMBED_ID_MIN[c.panelId];
+    const min = embedMinOf(c.panelId);
     if (min) {
       c.w = Math.max(c.w, Math.min(min.w, maxW));
       c.h = Math.max(c.h, Math.min(min.h, maxH));
     }
     // 视图形态锁宽高比：以宽度为准算高度，再按高度回推宽度。
     // 只钳一次而不是循环收敛——两次都夹在同一组上下限里，再迭代也不会变。
-    const aspect = EMBED_ID_ASPECT[c.panelId];
+    const aspect = embedAspectOf(c.panelId);
     if (aspect) {
       const hFromW = Math.round(c.w / aspect);
       c.h = Math.min(Math.max(hFromW, Math.min(min.h, maxH)), maxH);
@@ -1103,11 +1104,11 @@ function checkEmbedPlacement(
 ):
   | { ok: true; pos: { x: number; y: number }; min: { w: number; h: number } }
   | { ok: false; reason: Exclude<EmbedAddResult, { ok: true }>["reason"] } {
-  if (!isEmbedId(panelId)) return { ok: false, reason: "unknown-panel" };
+  if (!isEmbedTargetId(panelId)) return { ok: false, reason: "unknown-panel" };
   const page = snapshot.pages.find((p) => p.id === pageId);
   if (!page) return { ok: false, reason: "page-missing" };
   if (findEmbedCard(panelId)) return { ok: false, reason: "duplicate" };
-  const min = EMBED_ID_MIN[panelId];
+  const min = embedMinOf(panelId);
   const rows = page.rows || 48;
   if (page.cols < min.w || rows < min.h) return { ok: false, reason: "page-too-small" };
   const pos = findFlowPos(page, min.w, min.h);
@@ -1131,27 +1132,27 @@ export function addEmbedCard(
   pageId: string,
   panelId: string,
   viewState?: EmbedPanelViewState | null,
+  /** 卡片默认名。插件面板传面板标题；静态白名单缺省用 `embedName()`。 */
+  name?: string,
 ): EmbedAddResult {
   if (guardLocked()) return { ok: false, reason: "locked" };
   const checked = checkEmbedPlacement(pageId, panelId);
   if (!checked.ok) return checked;
   const { pos, min } = checked;
   // 旧存档/坏数据不进卡：宁可回到默认视野，也不让 NaN 把 uPlot 弄白。
-  const view = isEmbedId(panelId)
-    ? sanitizeEmbedViewState(panelId, viewState)
-    : null;
+  const view = sanitizeEmbedViewState(panelId as EmbedTargetId, viewState);
   const card: EmbedCard = {
     id: crypto.randomUUID(),
     type: "embed",
-    name: embedName(panelId as EmbedId),
+    name: name?.trim() || embedName(panelId as EmbedTargetId),
     x: pos.x,
     y: pos.y,
     w: min.w,
     h: min.h,
-    panelId: panelId as EmbedId,
+    panelId: panelId as EmbedTargetId,
     minW: min.w,
     minH: min.h,
-    aspectLock: EMBED_ID_ASPECT[panelId as EmbedId] !== undefined,
+    aspectLock: embedAspectOf(panelId as EmbedTargetId) !== undefined,
     ...(view ? { viewState: view } : {}),
   };
   snapshot = {

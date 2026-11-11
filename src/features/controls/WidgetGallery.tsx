@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import { beginPointerDrag } from "../../shared/pointerDrag";
 import {
   IconColumns,
@@ -6,7 +7,9 @@ import {
   IconLanes,
   IconPlay,
   IconPulse,
+  IconPuzzle,
   IconSearch,
+  IconSend,
   IconShield,
   IconTerminal,
   WIDGET_ICONS,
@@ -16,6 +19,9 @@ import { tx, useLocale } from "../../i18n/strings";
 import * as store from "./controlsStore";
 import type { ControlType } from "./controlsStore";
 import { EMBED_IDS, embedName } from "./embedPanels";
+import { collectPluginPanels } from "../plugins/engine/panelBridge";
+import { getSnapshot as getPluginSnapshot, subscribe as subscribePlugins } from "../plugins/engine/pluginEngine";
+import { panelEnabled } from "../plugins/engine/repo";
 
 /**
  * P104-R3 控件库：从控制画布的抽屉（`sideTab === "widgets"`）整块搬进左侧导轨「控件」项。
@@ -48,6 +54,12 @@ function widgetLabel(type: ControlType): string {
 
 export function WidgetGallery() {
   useLocale(); // 列表与拖拽影子上的名字都是 tx() 出来的，切语言要有人重渲染
+  // 插件面板是动态的（装了才有），不在静态白名单里：启用且受信任的插件面板逐块列出来，
+  // 卡片 id 直接用它们的停靠 id（`plugin-view-<插件>:<面板>`）。
+  const repo = useSyncExternalStore(subscribePlugins, getPluginSnapshot, getPluginSnapshot);
+  const pluginPanels = collectPluginPanels(
+    repo.entries.map((e) => ({ id: e.id, manifest: e.manifest, enabled: panelEnabled(e) })),
+  );
   return (
     <div className="widget-list">
       {store.CONTROL_TYPES.map((type) => (
@@ -99,6 +111,8 @@ export function WidgetGallery() {
               <IconPulse />
             ) : embedId === "sequencer" ? (
               <IconPlay />
+            ) : embedId === "sendbuild" ? (
+              <IconSend />
             ) : embedId === "sentinel" ? (
               <IconShield />
             ) : embedId === "framecanvas" ? (
@@ -108,6 +122,29 @@ export function WidgetGallery() {
             )}
           </span>{" "}
           {embedName(embedId)}
+        </div>
+      ))}
+      {pluginPanels.map((p) => (
+        <div
+          key={p.viewId}
+          className="widget-item pdrag-src"
+          onPointerDown={(e) =>
+            beginPointerDrag(e, {
+              kind: "vs-panel",
+              // 带上标题：卡片的默认名要用面板自己的名字，而不是兜底的"插件面板"。
+              data: JSON.stringify({ panelId: p.viewId, name: p.title }),
+              label: p.title,
+            })
+          }
+          title={tx(
+            "插件面板：拖到画布内嵌（已在停靠区时会整体搬过去）",
+            "Plugin panel: drag onto the canvas to embed (moves it out of the dock if open)",
+          )}
+        >
+          <span className="widget-icon">
+            <IconPuzzle />
+          </span>{" "}
+          {p.title}
         </div>
       ))}
       <div className="widget-hint">

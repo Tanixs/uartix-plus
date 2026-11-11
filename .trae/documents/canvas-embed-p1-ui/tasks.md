@@ -113,3 +113,16 @@
 - [x] W2-7 单测同步（embedPanels / panelPlacement）
 - [x] W2-8 无头静默验证 + 七项门禁 + 单独提交 + 阶段报告
 
+## 第三波：TX 组帧台 / 插件面板（2026-11-11 开工）
+
+- [x] W3-1 插件沙箱尺寸通知（**先做**）：`panelBridge` 的 `SIZE_EVENT`/`sizeMsg`、`buildSrcdoc` 初始 `INFO.size`、桥内 `resize` 更新 `uartix.size`；`PluginViewPanel` 在 `ready`/`onLoad` 补发并用 `ResizeObserver` 跟踪 iframe
+- [x] W3-2 `embedPanels`：插件面板作为动态整板（`plugin-view-<插件>:<面板>`）、`PLUGIN_PANEL_MIN` 5×4、`embedMinOf`/`embedAspectOf`/`isEmbedTargetId`/`isEmbedPanelTarget`
+- [x] W3-3 `controlsStore`：`EmbedCard.panelId` 放宽到 `EmbedTargetId`，迁移/钳制/放置走 `embedMinOf`/`embedAspectOf`
+- [x] W3-4 `panelPlacement`：插件面板按整板互斥、搬运；`viewState` 的 capture/discard/prime 放宽到 string
+- [x] W3-5 `embedHost` + `ControlCanvas`：插件面板 `bare` iframe 分支，拖放/右键「移回停靠」按动态 id
+- [x] W3-6 `WidgetGallery`：TX 组帧台 `IconSend`；已启用插件面板动态列出（`IconPuzzle`，标题随卡片名带入）
+- [x] W3-7 TX 组帧台整板：`sendbuild` 白名单、最小 5×4、`embedHost` 分支、窄卡容器查询（隐藏备注、收窄块栏）
+- [x] W3-8 单测同步（panelBridge 尺寸协议 / embedPanels / controlsStore / panelPlacement）
+- [x] W3-9 无头静默验证（TX 5×4 窄卡 0 溢出；尺寸协议真实 iframe 端到端）+ 七项门禁 + 单独提交 + 阶段报告
+
+
