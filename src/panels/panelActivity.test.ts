@@ -60,6 +60,18 @@ describe("panel activity union", () => {
     expect(a.getSnapshot()).toBe(snap);
   });
 
+  it("refreshes the snapshot when only visibility changes", async () => {
+    const a = await import("./panelActivity");
+    a.syncPanels([{ id: "plot2d", visible: true }]);
+    const shown = a.getSnapshot();
+    // 页签切后台：open 不变、visible 变。快照必须跟着变，否则消费方看到的
+    // 可见集与 isVisible() 是两个真值（P0 回归取证时正是这样对不上）。
+    a.syncPanels([{ id: "plot2d", visible: false }]);
+    expect(a.isVisible("plot2d")).toBe(false);
+    expect(a.getSnapshot()).not.toBe(shown);
+    expect(a.getSnapshot()).toBe("plot2d|");
+  });
+
   it("keeps a scrolled-out embed card open but not visible", async () => {
     const a = await import("./panelActivity");
     a.syncPanels([{ id: "controls", visible: true }]);

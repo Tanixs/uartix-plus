@@ -745,4 +745,68 @@ CSS 只管排布（`flex-wrap`、`min-width:0`、不叠放），不出现 `trans
   语义，避免插件进程被反复重启。
 - 插件标题只在从控件库拖入时带入；若存档里的卡片名被清空，显示兜底名"插件面板"。
 
+## 18. 回归修复：页签切回后停靠面板不再出点（2026-11-11 追加，P0）
+
+### 18.1 现象与隔离
+
+停靠「2D 曲线」在**同组页签切走再切回**之后彻底不再喂数（已画出的旧曲线还在，
+新点永远不出现）；新建 `analyze` 布局、或从「控制台」切回「2D 曲线」后
+`panelActivity.isVisible("plot2d") === false` 且长期保持。
+
+按用户给的三个方向 isolation 后定位到 `panelActivity` 的 isVisible 并集，
+且**不是并集算错，而是喂给并集的原始值是上一拍的**：
+
+| 怀疑点 | 结论 |
+| --- | --- |
+| `viewState` 恢复 | 排除：只发生在停靠↔内嵌搬运，页面内切页签不触发 |
+| uPlot `setSize/pxRatio` | 排除：尺寸从 289 → 321 正常变化，canvas 不空 |
+| `panelActivity` 并集 | 命中：`visible` 集合长期缺 `plot2d` |
+
+无头取证（真 Chromium + 真 binbus 帧，1440×900）：
+切到「控制台」时 `isVisible` 仍为 true（错）、`dirty` 累积；
+切回「2D 曲线」后 `isVisible` 变 false 并**一直** false，`dirty` 停在 true，
+新帧入库（`rows` 400 → 800 → 1200）但画面不动。
+
+### 18.2 根因（具体到行）
+
+`src/App.tsx` 的 `syncPanels()` 在 dockview 事件回调里**同步**读 `p.api.isVisible`。
+dockview 8.2 切页签的顺序是：
+
+1. `GroupPanelModel.openPanel()/setActivePanel()` → `doSetActivePanel()`：
+   同位同步栈里 fire `onDidActivePanelChange`（`main.esm.mjs` 10763–10778）；
+2. 之后才 `this.updateContainer()`（10630）→ `panel.runEvents()`（11744–11748）
+   把每个 panel 的 `_isVisible` 写新（`PanelApiImpl` 5070–5071）。
+
+所以事件回调里读到的是**上一个前景页签**的值：切走时旧面板仍是 `true`（只多喂一会儿，
+无害），切回来时它仍是 `false` —— `Plot2D.feedTickRef` 的
+`if (!panelActivity.isVisible("plot2d")) return;` 从此每次空转。
+
+### 18.3 为什么历史修复没兜住
+
+- 喂数侧的历次修复（P76① 严格递增时间戳、增量对齐缓存、视窗裁剪、降采样）全在
+  "`feedTick` 已经被调用"的前提下修数据形态；可见性门在它们**之前**就 return 了。
+- 可见性门本身从 v0.3.0 起就是 `isVisible` 语义，从未改过；它默认
+  "事件里读到的 isVisible 是正确的"，这次首度在真正的页签组（2D/Hex/控制台同组）
+  里被证伪——以前的取证都是 `?open=panel/plot2d` 或默认布局，plot2d 独占一组，
+  永远没有"切回来"这一步。
+- 旁证掩盖：`panelActivity.getSnapshot()` 只用 open 键做缓存判断，
+  visible 变化不刷新，于是快照里一直写着 plot2d 可见，与 `isVisible()` 对不上，
+  排查时容易被误当成"并集算错"。
+
+### 18.4 修复
+
+1. `src/App.tsx`：`syncPanels` 合并触发、推迟到微任务里读 `api.isVisible`
+   （此时 dockview 这一拍的同步派发已结束，值才是当前页签的）。
+2. `src/panels/panelActivity.ts`：`getSnapshot()` 的缓存键改为 `open|visible`，
+   可见性单独变化也要换新串，消除"两个真值"。
+3. 测试：`panelActivity.test.ts` 增加"仅可见性变化时快照必须更新"。
+
+### 18.5 验证
+
+同一探针修复后：切走 `isVisible=false`（正确）、`dirty` 累积；切回
+`isVisible=true`、`dirty` 归零，续灌新帧 `rows` 1200、蓝色曲线像素 9364，
+静默截图 `tab-3-back.png` 可见完整正弦波与坐标轴。
+七项门禁全绿（vitest 2776、tsc、eslint 0 error、check:all OK(17)、vite build、cargo check）。
+
+
 

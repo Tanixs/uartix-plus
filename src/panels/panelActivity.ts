@@ -129,10 +129,14 @@ export function subscribe(cb: () => void): () => void {
 let cachedKeys = "";
 let cachedSnapshot = "";
 export function getSnapshot(): string {
-  const keys = [...openPanels].sort().join(",");
+  /* 缓存键必须同时含 open 与 visible：只按 open 判变时，页签切前台/后台
+     （open 不变、visible 变）拿到的还是上一次的串——消费方于是看到
+     "isVisible() 已是 false，快照里却还写着它可见"，前后两个真值。 */
+  const keys =
+    [...openPanels].sort().join(",") + "|" + [...visiblePanels].sort().join(",");
   if (keys !== cachedKeys) {
     cachedKeys = keys;
-    cachedSnapshot = keys + "|" + [...visiblePanels].sort().join(",");
+    cachedSnapshot = keys;
   }
   return cachedSnapshot;
 }

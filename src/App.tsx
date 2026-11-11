@@ -472,10 +472,23 @@ export default function App() {
     apiRef.current = api;
     // 面板开/关与前后台状态 → panelActivity（store 门控与渲染节流的依据）。
     // panel.api.isVisible 由 dockview 维护：所在标签组前台页签 = true。
+    /* P0 回归：`onDidActivePanelChange` 回调里**不能**同步读 api.isVisible。
+       dockview 8.2 切页签是先 doSetActivePanel()（同一同步栈里 fire 上面这个事件），
+       再 updateContainer() → panel.runEvents() 才把各面板的 _isVisible 写新。
+       于是事件里读到的是「上一个前景页签」的值：切走时旧面板仍是 true（无害），
+       切回来时它仍是 false —— 2D 曲线 feedTick 的可见性门从此一直 return，
+       停靠面板表现为"再也出不了点"（频谱/表格共用同一门控）。
+       微任务里再读：dockview 这一拍的同步派发已结束，值才是当前页签的。 */
+    let syncQueued = false;
     const syncPanels = () => {
-      panelActivity.syncPanels(
-        api.panels.map((p) => ({ id: p.id, visible: p.api.isVisible })),
-      );
+      if (syncQueued) return;
+      syncQueued = true;
+      queueMicrotask(() => {
+        syncQueued = false;
+        panelActivity.syncPanels(
+          api.panels.map((p) => ({ id: p.id, visible: p.api.isVisible })),
+        );
+      });
     };
     syncPanelsRef.current = syncPanels;
     syncPanels();
