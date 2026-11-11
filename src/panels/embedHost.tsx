@@ -4,7 +4,7 @@ import { CardFrame, type CardFrameProps } from "../features/controls/CardViews";
 import {
   EMBED_ID_MIN,
   embedName,
-  isEmbedViewId,
+  hasPointerLock,
 } from "../features/controls/embedPanels";
 import { AttitudeModelView } from "../features/attitude/AttitudeModelView";
 import { TrajectoryView } from "../features/plot3d/TrajectoryView";
@@ -13,6 +13,9 @@ import { Plot2D } from "../features/plot/Plot2D";
 import { DataTable } from "../features/table/DataTable";
 import { SpectrumPanel } from "../features/plot/SpectrumPanel";
 import { XRayPanel } from "../features/xray/XRayPanel";
+import { SequencerPanel } from "../features/sequencer/SequencerPanel";
+import { SentinelPanel } from "../features/sentinel/SentinelPanel";
+import FrameCanvas from "../features/framecanvas/FrameCanvas";
 import { IconLock, IconUnlock } from "../shared/icons";
 import { tx, useLocale } from "../i18n/strings";
 import * as panelActivity from "./panelActivity";
@@ -29,6 +32,9 @@ const MHexView = memo(HexView);
 const MDataTable = memo(DataTable);
 const MXRayPanel = memo(XRayPanel);
 const MSpectrumPanel = memo(SpectrumPanel);
+const MSequencer = memo(SequencerPanel);
+const MSentinel = memo(SentinelPanel);
+const MFrameCanvas = memo(FrameCanvas);
 const MAttitudeView = memo(AttitudeModelView);
 const MTrajectoryView = memo(TrajectoryView);
 
@@ -54,7 +60,8 @@ export function EmbedCardView(props: EmbedCardViewProps) {
   // 视图形态的指针交互（旋转/平移/缩放）默认开启；锁上之后拖卡片、滚页面都不会误转视角。
   // 只影响视图形态：2D/Hex 的平移与滚动本来就是用户意图。
   const [locked, setLocked] = useState(false);
-  const isView = isEmbedViewId(card.panelId);
+  // 只有带指针相机的 3D 视图需要"锁定交互"；哨兵/帧画布是普通数据视图。
+  const canLock = hasPointerLock(card.panelId);
 
   // 卡片里存着上次的视野（切页/重启后仍在）。预置必须发生在子组件注册 adapter 之前，
   // 所以放在 render 阶段的一次性初始化里；已有 pending（刚 capture）时 prime 不覆盖。
@@ -108,7 +115,7 @@ export function EmbedCardView(props: EmbedCardViewProps) {
           >
             ≥{min.w}×{min.h}
           </span>
-          {isView && (
+          {canLock && (
             <button
               className="ctl-embed-lock"
               title={
@@ -140,6 +147,12 @@ export function EmbedCardView(props: EmbedCardViewProps) {
             <MXRayPanel />
           ) : card.panelId === "spectrum" ? (
             <MSpectrumPanel />
+          ) : card.panelId === "sequencer" ? (
+            <MSequencer />
+          ) : card.panelId === "sentinel" ? (
+            <MSentinel embedded />
+          ) : card.panelId === "framecanvas" ? (
+            <MFrameCanvas />
           ) : card.panelId === "attitude3d" ? (
             <MAttitudeView locked={locked} />
           ) : (

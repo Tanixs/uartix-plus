@@ -596,3 +596,72 @@ CSS 只管排布（`flex-wrap`、`min-width:0`、不叠放），不出现 `trans
 - 导入含未知 id 的包仍丢弃并提示；Operator 包只读模式可加载三块卡；
 - 每类只有一张，第二张给中文可读原因；最小尺寸与降级文案一致。
 
+## 16. 面板控件化 · 第二波（2026-11-11 追加，用户已确认）
+
+### 16.1 范围与形态
+
+| 面板 | id | 形态 | 最小格数 | 上限 | 锁定交互 |
+| --- | --- | --- | --- | --- | --- |
+| 序列器 | `sequencer` | 整板（有停靠页签，可互相搬） | 6×5 | 1 | 无 |
+| 哨兵 | `sentinel` | 只嵌视图（从控件库落卡，不搬页签） | 6×5 | 1 | 无 |
+| 帧画布 | `framecanvas` | 只嵌视图 | 5×4 | 1 | 无 |
+
+- `sequencer` 进 `EMBED_PANEL_IDS` 并映射到自身停靠 id；`sentinel` / `framecanvas`
+  进 `EMBED_VIEW_IDS`，`VIEW_INSTANCE_CAP` 各 1。第二张：序列器 `already-embedded`，
+  哨兵/帧画布 `view-limit`。
+- 新增 `EMBED_POINTER_LOCK_IDS` + `hasPointerLock()`：只有姿态/轨迹显示"锁定交互"，
+  哨兵/帧画布是普通数据视图，不渲染这个按钮。
+- `sanitizeEmbedViewState`：三块都没有可搬状态，返回 null（不把 `scrollOffset` 误读成 Hex）。
+
+### 16.2 运行态语义
+
+- 序列器：组件与停靠版共用 `sequencerBind` 的全局运行态；运行中 Start 禁用、Stop 可用，
+  步骤编辑提示与停靠版一致，不额外复制状态。
+- 哨兵：`embedded` 属性只改「最小化」的落点——卡片形态先把卡片本身收掉
+  （`controlsStore.findEmbedCard("sentinel")` → `removeCard`），再 `minimizeToFloat()`；
+  避免卡片与浮球同时存在两份观测台。停靠形态保持原来的"关页签 + 浮球"。
+- 帧画布：
+  1) 主快捷键仍由 `.fc-root` 的 React `onKeyDown` 处理，天然要求焦点在卡内；
+  2) 唯一的 window 级 `M` 标注快捷键新增"本实例所属 `.fc-root` 必须包含
+     `document.activeElement`"的前置判断，卡片停在后台页/滚出视口时不再抢全局按键；
+  3) rAF 重绘在 `clientWidth > 0` 之外再要求 `panelActivity.isVisible("framecanvas")`，
+     滚出视口整帧跳过，`dirtyRef` 保留到重新可见。
+- 三块的数据门控都按同 id 记账（`sequencerBind` / `sentinelStore` / `frameStore` 的
+  `isOpen`/`isVisible`），内嵌后无需并集；停靠互斥统一走 `dockIdOfEmbed`，视图与停靠
+  同名也不能同时挂两份。
+
+### 16.3 文案与窄卡
+
+- `placementRejectText(reason, id?)`：视图形态被停靠占用时提示"先关闭停靠页签，
+  再从控件库拖入"，不再指向不存在的"页签内嵌"按钮。
+- `.ctl-embed-body` 作用域内：`.snt-head` / `.snt-head-actions` 允许换行、
+  `.snt-side` 收窄到 42%（最小 150px）；帧画布工具条本身已可换行。
+- 控件库图标：序列器 `IconPlay`、哨兵 `IconShield`、帧画布 `IconFrameSpec`（全部现有 SVG）。
+
+### 16.4 改动文件
+
+1. `embedPanels.ts`：wave-2 ids、最小格数、双语名、`hasPointerLock`、`sequencer` 停靠映射。
+2. `panelPlacement.ts`：视图也有停靠页签的互斥、`VIEW_INSTANCE_CAP`、按 id 的拒绝文案。
+3. `embedHost.tsx`：三个 memo 与分支；`embedded` 传给哨兵。
+4. `SentinelPanel.tsx`：`embedded` 属性与最小化落点。
+5. `FrameCanvas.tsx`：M 键卡内聚焦、rAF 可见性门控、`panelActivity` 订阅。
+6. `WidgetGallery.tsx`：三个 SVG 图标。
+7. `theme.css`：仅追加 `.ctl-embed-body` 下的哨兵窄卡规则。
+8. 测试：`embedPanels.test.ts`、`panelPlacement.test.ts`。
+
+### 16.5 落地结果（2026-11-11）
+
+- 无头取证（`.tmp/verify-wave2.mjs`）：三张卡 400×332 / 400×332 / 332×264，
+  组件根 398×304 / 398×304 / 330×236；工具行 0 溢出；控制台 0 error。
+- 可见性：初态 seq/sent `[open,visible]=[true,true]`、帧画布 `[true,false]`（卡片在
+  296px 高的控制画布视口下方，判定正确）；滚 900px 三者 visible 全 false；
+  滚回后 seq/sent 恢复 true；滚到 350px 帧画布恢复 true（证明按卡逐张判定、可恢复）。
+- 同类第二张：`sequencer → already-embedded`、`sentinel → view-limit`、
+  `framecanvas → docked`（默认布局已开着帧画布页签，互斥生效）。
+- 哨兵卡内最小化：`cardGone=true, float=true`（不会出现卡片+浮球两份）。
+- 七项门禁全绿：插件四文件 151、全量 vitest 226 文件（较上一波 +2 项）、tsc 0、
+  eslint 0 错 22 警告、`check:all` OK(17)、`vite build`、`cargo check` 0 错（4 条既有 warning）。
+- 残留：① M 快捷键的聚焦门控没有真实会话/按键注入验证，只做了代码路径与 rAF 取证；
+  ② 帧画布默认在停靠区开着，用户从控件库添加会先收到 `docked`，需先关页签；
+  ③ 哨兵滚出视口仍按同 id 采集（引擎门控是 `isOpen`），与停靠版一致，本波不改。
+

@@ -19,6 +19,7 @@ import * as fcStore from "./frameStore";
 import * as settingsStore from "../settings/settingsStore";
 import * as serialStore from "../serial/serialStore";
 import * as sessionStore from "../session/sessionStore";
+import * as panelActivity from "../../panels/panelActivity";
 import { toast } from "../ai/uiRuntime";
 import * as templateStore from "../protocol/templateStore";
 import * as telemetryStore from "../protocol/telemetryStore";
@@ -88,6 +89,7 @@ function SessionTransport() {
   const [spd, setSpd] = useState<number | "max">(1);
   const [annoOpen, setAnnoOpen] = useState(false);
   const annoRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const loaded = s.state === "recorded" || s.state === "playing" || s.state === "paused";
   const speedNum = () => (spd === "max" ? 0 : spd);
   const onPlay = async () => {
@@ -124,9 +126,13 @@ function SessionTransport() {
     void sessionStore.annotate(text);
   };
   // 快捷键 M：录制/回放中打标注（输入框聚焦时不抢键）
+  // 卡内聚焦才接管：内嵌卡可能停在后台页/滚出视口，window 监听不能把其它面板的按键抢过来。
+  // 用 transport 的 DOM 反查所属 .fc-root，避免两个实例（异常状态）互相串台。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "m" && e.key !== "M") return;
+      const root = rootRef.current?.closest(".fc-root");
+      if (!root || !root.contains(document.activeElement)) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (s.state !== "recording" && s.state !== "playing" && s.state !== "paused") return;
@@ -157,7 +163,7 @@ function SessionTransport() {
      「打开会话」升为工具栏一级动作——否则空载时就有一排不可用的播放控件占位。 */
   if (!loaded) return null;
   return (
-    <div className="fc-transport">
+    <div className="fc-transport" ref={rootRef}>
       {loaded ? (
         <>
           <button
@@ -1235,9 +1241,14 @@ function FrameCanvas() {
       if (animsRef.current.size > 0) dirtyRef.current = true;
       for (const [k, u] of animsRef.current) if (u < Date.now()) animsRef.current.delete(k);
       // 面板不在前台（堆叠后台页签的 DOM 被 dockview 摘除，clientWidth=0）
-      // → 跳过重绘，dirty 保留到切回前台
+      // 或内嵌卡滚出视口（clientWidth 仍 > 0）→ 跳过重绘，dirty 保留到重新可见
       const canvas = canvasRef.current;
-      if (dirtyRef.current && canvas && canvas.clientWidth > 0) {
+      if (
+        dirtyRef.current &&
+        canvas &&
+        canvas.clientWidth > 0 &&
+        panelActivity.isVisible("framecanvas")
+      ) {
         dirtyRef.current = false;
         paint();
       }

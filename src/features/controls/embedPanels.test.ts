@@ -6,6 +6,7 @@ import {
   dockIdOf,
   embedKindOf,
   embedName,
+  hasPointerLock,
   isEmbedId,
   isEmbedViewId,
   sanitizeEmbedViewState,
@@ -19,15 +20,21 @@ describe("embed whitelist", () => {
       "datatable",
       "xray",
       "spectrum",
+      "sequencer",
       "attitude3d",
       "trajectory3d",
+      "sentinel",
+      "framecanvas",
     ]);
     expect(embedKindOf("plot2d")).toBe("panel");
     expect(embedKindOf("datatable")).toBe("panel");
     expect(embedKindOf("xray")).toBe("panel");
     expect(embedKindOf("spectrum")).toBe("panel");
+    expect(embedKindOf("sequencer")).toBe("panel");
     expect(embedKindOf("attitude3d")).toBe("view");
     expect(embedKindOf("trajectory3d")).toBe("view");
+    expect(embedKindOf("sentinel")).toBe("view");
+    expect(embedKindOf("framecanvas")).toBe("view");
     expect(isEmbedViewId("attitude3d")).toBe(true);
     expect(isEmbedViewId("trajectory3d")).toBe(true);
     // 整板 3D 轨迹仍不可嵌：它是独立的停靠面板，不是视图
@@ -60,9 +67,20 @@ describe("embed whitelist", () => {
 
   it("maps only the data table to a differently-named dock panel", () => {
     expect(dockIdOf("datatable")).toBe("table");
-    for (const id of ["plot2d", "hexview", "xray", "spectrum"] as const) {
+    for (const id of ["plot2d", "hexview", "xray", "spectrum", "sequencer"] as const) {
       expect(dockIdOf(id)).toBe(id);
     }
+  });
+
+  it("gives wave-2 views their own minimums and only locks 3D cameras", () => {
+    expect(EMBED_ID_MIN.sequencer).toEqual({ w: 6, h: 5 });
+    expect(EMBED_ID_MIN.sentinel).toEqual({ w: 6, h: 5 });
+    expect(EMBED_ID_MIN.framecanvas).toEqual({ w: 5, h: 4 });
+    expect(hasPointerLock("attitude3d")).toBe(true);
+    expect(hasPointerLock("trajectory3d")).toBe(true);
+    expect(hasPointerLock("sentinel")).toBe(false);
+    expect(hasPointerLock("framecanvas")).toBe(false);
+    expect(hasPointerLock("sequencer")).toBe(false);
   });
 
   it("names every target in both languages", () => {
@@ -99,7 +117,14 @@ describe("embed view state", () => {
   });
 
   it("does not misread a data panel's payload as the hex scroll offset", () => {
-    for (const id of ["datatable", "xray", "spectrum"] as const) {
+    for (const id of [
+      "datatable",
+      "xray",
+      "spectrum",
+      "sequencer",
+      "sentinel",
+      "framecanvas",
+    ] as const) {
       expect(sanitizeEmbedViewState(id, { scrollOffset: 32 })).toBeNull();
     }
   });

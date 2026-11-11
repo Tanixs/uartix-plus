@@ -76,6 +76,40 @@ describe("panel placement mutex", () => {
     });
   });
 
+  it("blocks a docked sentinel and caps wave-2 views at one", async () => {
+    const activity = await import("./panelActivity");
+    const store = await import("../features/controls/controlsStore");
+    const placement = await import("./panelPlacement");
+    store.importPage({ name: "wave2", cols: 12, rows: 24, cards: [] });
+
+    activity.syncPanels([{ id: "sentinel", visible: true }]);
+    expect(placement.addEmbedFromGallery("sentinel")).toEqual({
+      ok: false,
+      reason: "docked",
+    });
+    // 视图没有页签内嵌入口：文案必须指向"先关页签"，不能指向不存在的按钮
+    expect(placement.placementRejectText("docked", "sentinel")).not.toBe(
+      placement.placementRejectText("docked", "plot2d"),
+    );
+
+    activity.syncPanels([]);
+    expect(placement.addEmbedFromGallery("sentinel").ok).toBe(true);
+    expect(placement.addEmbedFromGallery("sentinel")).toEqual({
+      ok: false,
+      reason: "view-limit",
+    });
+    expect(placement.addEmbedFromGallery("framecanvas").ok).toBe(true);
+    expect(placement.addEmbedFromGallery("framecanvas")).toEqual({
+      ok: false,
+      reason: "view-limit",
+    });
+    expect(placement.addEmbedFromGallery("sequencer").ok).toBe(true);
+    expect(placement.addEmbedFromGallery("sequencer")).toEqual({
+      ok: false,
+      reason: "already-embedded",
+    });
+  });
+
   it("rejects panels outside the P1 whitelist", async () => {
     const activity = await import("./panelActivity");
     activity.syncPanels([]);

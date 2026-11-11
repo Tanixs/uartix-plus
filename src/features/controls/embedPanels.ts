@@ -17,6 +17,7 @@ export const EMBED_PANEL_IDS = [
   "datatable",
   "xray",
   "spectrum",
+  "sequencer",
 ] as const;
 export type EmbedPanelId = (typeof EMBED_PANEL_IDS)[number];
 
@@ -31,14 +32,24 @@ export const EMBED_PANEL_DOCK_ID: Record<EmbedPanelId, string> = {
   datatable: "table",
   xray: "xray",
   spectrum: "spectrum",
+  sequencer: "sequencer",
 };
 
 export function dockIdOf(id: EmbedPanelId): string {
   return EMBED_PANEL_DOCK_ID[id];
 }
 
-/** 视图形态：只存在于画布，没有停靠页签，因此不参与"移回停靠"。 */
-export const EMBED_VIEW_IDS = ["attitude3d", "trajectory3d"] as const;
+/**
+ * 视图形态：只渲染内容区，不参与"移回停靠"。
+ * 姿态/轨迹是纯画布视图；哨兵/帧画布虽然停靠区也有页签，但这里按"视图"
+ * 处理（从控件库直接落卡，不从页签搬），避免把多栏工作台当成可随意搬动的整板。
+ */
+export const EMBED_VIEW_IDS = [
+  "attitude3d",
+  "trajectory3d",
+  "sentinel",
+  "framecanvas",
+] as const;
 export type EmbedViewId = (typeof EMBED_VIEW_IDS)[number];
 
 export const EMBED_IDS = [...EMBED_PANEL_IDS, ...EMBED_VIEW_IDS] as const;
@@ -60,6 +71,12 @@ export const EMBED_ID_MIN: Record<EmbedId, { w: number; h: number }> = {
   xray: { w: 4, h: 4 },
   // 频谱 4×3：工具条一排可换行 + 一张图 + 摘要行，图高至少 4~5 格才有分辨力。
   spectrum: { w: 4, h: 3 },
+  // 序列器 6×5：工具行可换行 + 步骤列表；5×4 下步骤的字段摘要会被截成两三个字。
+  sequencer: { w: 6, h: 5 },
+  // 哨兵 6×5：报警时间线与 232px 通道栏并排，5×4 下通道栏会把时间线压到只剩图标宽度。
+  sentinel: { w: 6, h: 5 },
+  // 帧画布 5×4：工具条可换行 + 一屏至少 6 行帧格；再窄字段名会互相压。
+  framecanvas: { w: 5, h: 4 },
   attitude3d: { w: 4, h: 3 },
   trajectory3d: { w: 5, h: 4 },
 };
@@ -74,6 +91,16 @@ export const EMBED_ID_ASPECT: Partial<Record<EmbedId, number>> = {
   attitude3d: 4 / 3,
   trajectory3d: 4 / 3,
 };
+
+/**
+ * 需要「锁定交互」按钮的视图：只有自带指针相机/旋转的 3D 视图。
+ * 哨兵、帧画布是普通数据视图，锁上反而让用户点不动，别跟着 isEmbedViewId 走。
+ */
+export const EMBED_POINTER_LOCK_IDS = ["attitude3d", "trajectory3d"] as const;
+
+export function hasPointerLock(id: EmbedId): boolean {
+  return (EMBED_POINTER_LOCK_IDS as readonly string[]).includes(id);
+}
 
 export function isEmbedPanelId(v: unknown): v is EmbedPanelId {
   return typeof v === "string" && (EMBED_PANEL_IDS as readonly string[]).includes(v);
@@ -97,6 +124,9 @@ const TITLES_ZH: Record<EmbedId, string> = {
   datatable: "数据表格",
   xray: "结构发现 X-Ray",
   spectrum: "频谱分析",
+  sequencer: "序列器",
+  sentinel: "哨兵",
+  framecanvas: "帧画布",
   attitude3d: "姿态 3D 模型",
   trajectory3d: "3D 轨迹视图",
 };
@@ -106,6 +136,9 @@ const TITLES_EN: Record<EmbedId, string> = {
   datatable: "Data Table",
   xray: "X-Ray Discovery",
   spectrum: "Spectrum",
+  sequencer: "Sequencer",
+  sentinel: "Sentinel",
+  framecanvas: "Frame Canvas",
   attitude3d: "3D Attitude Model",
   trajectory3d: "3D Trajectory View",
 };

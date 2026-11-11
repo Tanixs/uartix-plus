@@ -4,6 +4,7 @@ import { IconShield, IconBell, IconPulse, IconTrash, IconChevron, IconSparkle } 
 import * as store from "./sentinelStore";
 import type { AlertKind, AlertLevel, SentinelAlert } from "./sentinelEngine";
 import { requestOpenPanel } from "../ai/appBus";
+import * as controlsStore from "../controls/controlsStore";
 import * as plotStore from "../plot/plotStore";
 import { toast } from "../ai/uiRuntime";
 import { zoomFactor } from "../../shared/zoom";
@@ -68,7 +69,7 @@ function HealthRing({ score, crit }: { score: number; crit: boolean }) {
   );
 }
 
-export function SentinelPanel() {
+export function SentinelPanel({ embedded = false }: { embedded?: boolean } = {}) {
   useLocale();
   const s = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const [q, setQ] = useState("");
@@ -95,6 +96,19 @@ export function SentinelPanel() {
   };
 
   const alerting = s.activeCrit > 0 || s.activeWarn > 0;
+
+  /**
+   * 「最小化」在两种形态下的落点不同：
+   * - 停靠：关掉页签，浮球驻留；
+   * - 卡片：没有可关的页签，必须先把卡片本身收掉，否则会同时出现卡片和浮球两份观测台。
+   */
+  const minimize = () => {
+    if (embedded) {
+      const hit = controlsStore.findEmbedCard("sentinel");
+      if (hit) controlsStore.removeCard(hit.pageId, hit.card.id);
+    }
+    store.minimizeToFloat();
+  };
 
   return (
     <div className={`snt${!s.cfg.enabled ? " off" : ""}`}>
@@ -134,7 +148,16 @@ export function SentinelPanel() {
               {tx("全部确认", "Ack all")}
             </button>
           )}
-          <button type="button" className="btn sm" onClick={store.minimizeToFloat} title={tx("缩成右下角浮球继续监测（关面板不关监测）", "Minimize to a floating ball; keeps monitoring after the panel closes")}>
+          <button
+            type="button"
+            className="btn sm"
+            onClick={minimize}
+            title={
+              embedded
+                ? tx("收起卡片，缩成右下角浮球继续监测", "Collapse this card into the floating ball; monitoring continues")
+                : tx("缩成右下角浮球继续监测（关面板不关监测）", "Minimize to a floating ball; keeps monitoring after the panel closes")
+            }
+          >
             {tx("最小化", "Minimize")}
           </button>
           <button type="button" className="btn sm danger" onClick={store.clearAlerts} disabled={s.alerts.length === 0} title={tx("清空报警历史", "Clear alert history")}>

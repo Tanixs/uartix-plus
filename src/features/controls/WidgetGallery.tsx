@@ -2,9 +2,12 @@ import { beginPointerDrag } from "../../shared/pointerDrag";
 import {
   IconColumns,
   IconCube,
+  IconFrameSpec,
   IconLanes,
+  IconPlay,
   IconPulse,
   IconSearch,
+  IconShield,
   IconTerminal,
   WIDGET_ICONS,
 } from "../../shared/icons";
@@ -94,6 +97,12 @@ export function WidgetGallery() {
               <IconSearch />
             ) : embedId === "spectrum" ? (
               <IconPulse />
+            ) : embedId === "sequencer" ? (
+              <IconPlay />
+            ) : embedId === "sentinel" ? (
+              <IconShield />
+            ) : embedId === "framecanvas" ? (
+              <IconFrameSpec />
             ) : (
               <IconCube />
             )}

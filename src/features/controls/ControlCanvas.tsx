@@ -1100,7 +1100,7 @@ export function ControlCanvas() {
       // 拖入即"移动"：已在停靠区的整板会先 capture 再关页签；视图没有停靠对应物，直接落卡。
       const r = addEmbedFromGallery(panelId);
       if (!r.ok) {
-        toast(placementRejectText(r.reason));
+        toast(placementRejectText(r.reason, panelId));
         return;
       }
       placeAt(r.cardId, d.x, d.y);

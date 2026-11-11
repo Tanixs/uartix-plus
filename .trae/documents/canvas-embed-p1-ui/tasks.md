@@ -102,3 +102,14 @@
 - [x] W1-7 单测同步（embedPanels / controlsStore / panelPlacement）
 - [x] W1-8 无头静默截图验证 + 七项门禁 + 单独提交 + 阶段报告（插件四文件 151 / vitest 2764 / tsc 0 / eslint 0 错 22 警告 / check:all OK(17) / build / cargo 0）
 
+## 第二波：序列器 / 哨兵 / 帧画布（2026-11-11 开工）
+
+- [x] W2-1 `embedPanels`：`sequencer` 整板 + `sentinel`/`framecanvas` 视图，最小 6×5 / 6×5 / 5×4，`hasPointerLock`
+- [x] W2-2 `panelPlacement`：视图也有停靠页签的互斥、每类上限 1、按 id 的 `docked` 文案
+- [x] W2-3 `embedHost`：三个 memo 与分支，只有 3D 视图显示锁定按钮，哨兵传 `embedded`
+- [x] W2-4 哨兵卡内「最小化」先收卡再缩浮球，运行态与停靠版一致
+- [x] W2-5 帧画布：M 键卡内聚焦才接管；rAF 补 `isVisible` 门控
+- [x] W2-6 控件库图标（序列器 / 哨兵 / 帧画布）与 `.ctl-embed-body` 窄卡规则
+- [x] W2-7 单测同步（embedPanels / panelPlacement）
+- [x] W2-8 无头静默验证 + 七项门禁 + 单独提交 + 阶段报告
+

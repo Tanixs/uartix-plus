@@ -4677,6 +4677,18 @@ select optgroup {
   min-width: 0;
 }
 
+/* 内嵌卡里的哨兵：右侧通道栏按比例收窄、顶栏动作允许换行，6×5 下时间线仍有可读宽度 */
+.ctl-embed-body .snt-head {
+  flex-wrap: wrap;
+}
+.ctl-embed-body .snt-head-actions {
+  flex-wrap: wrap;
+}
+.ctl-embed-body .snt-side {
+  width: 42%;
+  min-width: 150px;
+}
+
 /* 组件根（uPlot 容器 / Hex 根）绝对填满，避免 canvas 按内容把自己撑破卡片 */
 .ctl-embed-body > * {
   position: absolute;
