@@ -422,8 +422,22 @@ export function ControlCanvas() {
         );
         // 摇杆与键盘遥控锁定正方形（n×n），杜绝拖成 1×N 长条
         const isSquare = rz.card.type === "joystick" || rz.card.type === "keypad";
-        const nw = isSquare ? Math.min(nw0, nh0) : nw0;
-        const nh = isSquare ? Math.min(nw0, nh0) : nh0;
+        let nw = isSquare ? Math.min(nw0, nh0) : nw0;
+        let nh = isSquare ? Math.min(nw0, nh0) : nh0;
+        // 内嵌视图形态（姿态 / 轨迹）声明了锁宽高比：按变化更大的那一轴驱动另一轴，
+        // 别让一次斜拖把模型/轨迹拉成扁的。schema 里的 aspectLock 到这里才算真正生效。
+        const lockRatio = rz.card.type === "embed" && rz.card.aspectLock;
+        if (lockRatio) {
+          const w0 = rz.card.w || 1;
+          const h0 = rz.card.h || 1;
+          const dw = Math.abs(nw0 - w0) / w0;
+          const dh = Math.abs(nh0 - h0) / h0;
+          if (dw >= dh) {
+            nh = Math.max(minH, Math.min(maxH, Math.round((nw0 * h0) / w0)));
+          } else {
+            nw = Math.max(minW, Math.min(maxW, Math.round((nh0 * w0) / h0)));
+          }
+        }
         rz.w = nw;
         rz.h = nh;
         if (rz.hint) {
@@ -508,6 +522,17 @@ export function ControlCanvas() {
           while (n > 1 && hit(n, n)) n--;
           fw = n;
           fh = n;
+        } else if (rz.card.type === "embed" && rz.card.aspectLock) {
+          // 比例卡撞到邻居时同步缩，别只砍一轴——否则"锁定比例"只在拖动中成立，
+          // 松手那一下就被碰撞修正拉回自由比例。
+          const w0 = rz.card.w || 1;
+          const h0 = rz.card.h || 1;
+          const stopW = Math.min(nw, w0);
+          const stopH = Math.min(nh, h0);
+          while (hit(fw, fh) && (fw > stopW || fh > stopH)) {
+            fw = Math.max(stopW, fw - 1);
+            fh = Math.max(stopH, Math.round((fw * h0) / w0));
+          }
         } else {
           // 碰撞缩减不越过本次缩放前的原尺寸：放大撞到邻居时最多退回原尺寸，
           // 绝不会把宽度挤成 1×N 竖条（缩小方向本来就不会产生碰撞）

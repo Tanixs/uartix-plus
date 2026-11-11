@@ -1565,6 +1565,8 @@ export function CardModal(props: {
   // 挂载区要显示命令名与"已删除"状态，命令库变更必须重渲染
   useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   const cmds = commandStore.flatCommands();
+  const widthCols =
+    store.getSnapshot().pages.find((p) => p.id === props.pageId)?.cols ?? 8;
   const mountedItem = card.commandId ? commandStore.getCommand(card.commandId) : null;
   const spec = card.sendTemplateId ? sendStore.getTemplate(card.sendTemplateId) : undefined;
   const patch = (p: Record<string, unknown>) =>
@@ -1611,7 +1613,9 @@ export function CardModal(props: {
         <div className="form-row">
           <label>{tx("名称", "Name")}</label>
           <TextInput value={card.name} onCommit={(v) => patch({ name: v })} />
-          {card.type !== "keypad" && (
+          {/* 内嵌卡的尺寸只走拖角：写格数会被 normalizeGeometry 按语义最小格数抬回去，
+              留着这个下拉就是"设了没用"。普通卡的宽度上限是当前页列数。 */}
+          {card.type !== "keypad" && card.type !== "embed" && (
             <>
               <label>{tx("宽度", "Width")}</label>
               <select
@@ -1619,8 +1623,11 @@ export function CardModal(props: {
                 value={card.w}
                 onChange={(e) => patch({ w: Number(e.target.value) })}
               >
-                <option value={1}>{tx("1 格", "1 cell")}</option>
-                <option value={2}>{tx("2 格", "2 cells")}</option>
+                {Array.from({ length: widthCols }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {tx(`${n} 格`, `${n} ${n > 1 ? "cells" : "cell"}`)}
+                  </option>
+                ))}
               </select>
             </>
           )}
