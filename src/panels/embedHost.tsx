@@ -120,12 +120,12 @@ export function EmbedCardView(props: EmbedCardViewProps) {
               title={
                 locked
                   ? tx(
-                      "解锁：恢复左键旋转 / 右键平移 / 滚轮缩放",
-                      "Unlock: restore drag-rotate / right-drag-pan / wheel-zoom",
+                      "视图交互锁（已锁）：拖动卡片不会转动视角。点击解锁后恢复左键旋转 / 右键平移 / 滚轮缩放",
+                      "View interaction lock (on): dragging the card cannot rotate the view. Unlock to restore drag-rotate / right-drag-pan / wheel-zoom",
                     )
                   : tx(
-                      "锁定交互：拖动卡片时不误转视角",
-                      "Lock interaction so dragging the card cannot rotate the view",
+                      "视图交互锁（未锁）：左键旋转 / 右键平移 / 滚轮缩放。点一下可锁住，避免拖动卡片时误转视角",
+                      "View interaction lock (off): drag to rotate / right-drag to pan / wheel to zoom. Lock it so moving the card cannot rotate the view",
                     )
               }
               aria-pressed={locked}

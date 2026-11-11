@@ -21,7 +21,7 @@ import * as commandStore from "./commandStore";
 import { isGroup } from "./commandStore";
 import { useSettings } from "../settings/settingsStore";
 import { runSpecCard, sendCmd, runCmdScript, type RunnableCommand } from "./cmdExec";
-import { IconLock, IconMore, IconUnlock, IconSlider, IconChevron } from "../../shared/icons";
+import { IconLock, IconMore, IconUnlock, IconChevron } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
 import { tx, useLocale } from "../../i18n/strings";
@@ -1327,11 +1327,13 @@ export function ControlCanvas() {
     }
   };
 
+  /**
+   * 「按当前值发送」只对**有当前值**的卡出现：判定直接看 `ctxFor` 能不能组出载荷，
+   * 不再按类型列白名单。按钮没有"当前值"（它每点一次就发一次），键位/键盘也没有可发的值；
+   * 这样就不会出现"入口在、点下去发出去的是空对象"。
+   */
   const canSend = (c: ControlCard) =>
-    (c.type === "slider" ||
-      c.type === "button" ||
-      c.type === "switch" ||
-      c.type === "joystick") &&
+    Object.keys(ctxFor(c)).length > 0 &&
     // 失效引用不能再发：入口直接不出现，避免"点了才报错"
     mountedState(c).kind !== "missing";
 
@@ -1491,19 +1493,12 @@ export function ControlCanvas() {
         </button>
         <div className="ctl-tabs-spacer" />
         <button
-          className="btn icon-btn"
-          onClick={() => addCardOrSay("slider")}
-          title={tx("添加滑条卡片", "Add slider card")}
-        >
-          <IconSlider />
-        </button>
-        <button
           className={`btn icon-btn ${page.locked ? "on" : ""}`}
           onClick={() => store.setPageLocked(page.id, !page.locked)}
           title={
             page.locked
-              ? tx("已锁定：卡片不可拖动/调整，仅可操作。点击解锁", "Locked: cards can only be operated. Click to unlock")
-              : tx("未锁定：可拖动卡片位置与右下角调整大小。点击锁定", "Unlocked: drag cards to move, resize from the corner. Click to lock")
+              ? tx("页面布局锁（已锁）：卡片不可拖动/调整，滚轮交还画布；控件本身仍可操作。点击解锁", "Page layout lock (on): cards cannot be moved or resized, and the wheel goes back to the canvas; the controls themselves still work. Click to unlock")
+              : tx("页面布局锁（未锁）：可拖动/调整卡片；滚轮落在控件内容区时由控件消费。点击锁定", "Page layout lock (off): cards can be moved and resized; the wheel is consumed by the control when over its body. Click to lock")
           }
         >
           {page.locked ? <IconLock /> : <IconUnlock />}
@@ -1567,13 +1562,6 @@ export function ControlCanvas() {
                     </option>
                   ))}
                 </select>
-                <button
-                  className="btn sm"
-                  title={tx("整理：清除重叠并重新排布当前页卡片", "Tidy: clear overlaps and re-layout cards on this page")}
-                  onClick={() => store.declumpPage(page.id)}
-                >
-                  {tx("整理", "Tidy")}
-                </button>
               </div>
               <div className="ctl-more-sep" />
               <div className="ctl-more-title">{tx("文件", "File")}</div>
@@ -1709,9 +1697,10 @@ export function ControlCanvas() {
             {canSend(menuCard) && (
               <button
                 className="ctx-item"
+                title={tx("不用拖动控件，直接把它当前的值/档位发给设备", "Send the card's current value or position without touching the control")}
                 onClick={() => { void sendControl(menuCard, ctxFor(menuCard), true); setMenu(null); }}
               >
-                {tx("立即发送", "Send now")}
+                {tx("按当前值发送", "Send current value")}
               </button>
             )}
             {menuCard.type === "embed" && isEmbedPanelTarget(menuCard.panelId) && (
@@ -1775,7 +1764,6 @@ export function ControlCanvas() {
                 )}
               </>
             )}
-            <div className="ctx-group">{tx("操作", "Actions")}</div>
             <button
               className="ctx-item danger"
               onClick={() => { store.removeCard(page.id, menuCard.id); setMenu(null); }}

@@ -1187,7 +1187,7 @@ function OperatorBanner({ onExit }: { onExit: () => void }) {
       <span className="op-name">{op.pkg.meta.name}</span>
       {op.pkg.meta.description && <span className="op-desc">{op.pkg.meta.description}</span>}
       <span className="op-hint">
-        {tx("配置只读：可连接设备、发送命令、查看数据", "Read-only: connect devices, send commands, view data")}
+        {tx("部署只读锁：配置不可修改；可连接设备、发送命令、查看数据", "Deployment read-only lock: configuration is fixed; devices can connect, commands can be sent, data can be viewed")}
       </span>
       <span style={{ flex: 1 }} />
       <button
