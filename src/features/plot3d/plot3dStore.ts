@@ -12,6 +12,7 @@
  * - 源裁剪/重建（下标语义失效）用「时间水位 lastT」逐组续传：只消费时间戳
  *   > lastT 的锚点，绝不重灌、绝不重复。
  * - 面板关闭 = setSink(null) = 停泵（用户红线：关闭了的面板绝不允许后台运行）；
+ *   内嵌轨迹视图走 setViewSink，两个消费端都关掉才真正停泵。
  *   后台页签（浏览器把 interval 节流到 ~1Hz）仍继续喂数，切回不丢段。
  * - P87a A7：组配置撤销/重做栈（50 层，独立于模板撤销栈）；视图类
  *   （相机/跟随/网格/可见性）不入栈；清空不可撤销（数据已丢弃，如实处理）。
@@ -797,8 +798,29 @@ export interface GroupBatch {
 }
 
 type Sink = (entries: GroupBatch[], cursorSec: number | null) => void;
+/** 停靠面板的消费端 */
 let sink: Sink | null = null;
+/** 画布内嵌轨迹视图的消费端（P1 视图段）：与停靠面板并列，同一拍喂同一批数据 */
+let viewSink: Sink | null = null;
 let pumpTimer: number | null = null;
+
+/** 任一消费端在跑才开泵；都关掉就计时器归零（红线：没有面板开着不许后台跑） */
+function syncPump() {
+  const any = sink !== null || viewSink !== null;
+  if (any && pumpTimer === null) {
+    // 与 2D/频谱同节奏：120ms 消费一次；后台页签浏览器节流到 ~1Hz 仍不丢段
+    pumpTimer = setInterval(pumpOnce, 120) as unknown as number;
+  } else if (!any && pumpTimer !== null) {
+    clearInterval(pumpTimer as unknown as ReturnType<typeof setInterval>);
+    pumpTimer = null;
+  }
+}
+
+/** 新消费端挂上时必须重灌：泵按组只留一个时间水位，后挂的实例要靠 reloaded 补历史 */
+function markReplayForNewSink() {
+  for (const gs of gst.values()) gs.replay = true;
+  invalidateCursor();
+}
 
 /**
  * 时间游标（P70 T2）：null = 跟随最新；数值 = 截断显示到该相对秒。全局共享
@@ -1048,21 +1070,25 @@ export function _setSessionForTest(p: (() => SessionProbe) | null) {
  *  opts.keepCalib：WebGL 重建（context lost）路径用——停泵到旧场景但保留校准
  *  采样/拟合（那是几分钟的工作量），新场景挂上后经重放标记恢复显示 */
 export function setSink(cb: Sink | null, opts?: { keepCalib?: boolean }) {
-  if (cb !== null && cb !== sink) {
-    for (const gs of gst.values()) gs.replay = true;
-    invalidateCursor();
-  }
+  if (cb !== null && cb !== sink) markReplayForNewSink();
   sink = cb;
-  if (cb !== null && pumpTimer === null) {
-    // 与 2D/频谱同节奏：120ms 消费一次；后台页签浏览器节流到 ~1Hz 仍不丢段
-    pumpTimer = setInterval(pumpOnce, 120) as unknown as number;
-  } else if (cb === null && pumpTimer !== null) {
-    clearInterval(pumpTimer as unknown as ReturnType<typeof setInterval>);
-    pumpTimer = null;
-  }
+  syncPump();
   // 清理必须独立于 timer 分支：WebGL 重建已 keepCalib 停过泵（timer=null），
   // 真关面板的第二次 setSink(null) 若只在 timer 分支里清，校准数据会跨会话残留
   if (cb === null && !opts?.keepCalib) clearCalibAll();
+}
+
+/**
+ * 画布内嵌轨迹视图的消费端（P1 视图段）。
+ *
+ * 与停靠面板共用同一个泵与同一份时间水位；视图后挂上时靠 `markReplayForNewSink`
+ * 让所有组重灌一次保留历史，避免"后开的窗口是空的"。
+ * 关视图**不清校准会话**：校准属于停靠面板的操作态，视图没有校准 UI。
+ */
+export function setViewSink(cb: Sink | null) {
+  if (cb !== null && cb !== viewSink) markReplayForNewSink();
+  viewSink = cb;
+  syncPump();
 }
 
 /** 全局消费状态：lastCursor = 上次下发的游标（游标去抖，变动 ≤5ms 不重复下发） */
@@ -1324,7 +1350,8 @@ export function calibSourceReady(): boolean {
 const pumpWarnAt: { skipped?: number; scrub?: number } = {};
 
 function pumpOnce() {
-  if (!sink || !panelActivity.isOpen("plot3d")) return;
+  // 停靠整板与画布轨迹视图任一存在即消费；两处都关掉时泵已在 syncPump 停掉
+  if ((!sink && !viewSink) || (!panelActivity.isOpen("plot3d") && !panelActivity.isOpen("trajectory3d"))) return;
   const chans = getPlotSnapshot().channels;
   sanitizeBinds(chans);
   const s = settings;
@@ -1578,7 +1605,9 @@ function pumpOnce() {
   if (cursorChanged) st.lastCursor = cursorSec;
   // 游标变化时即使无新数据也要下发（如 seek 向后：重灌点全 ≤ 水位，批次为空）
   if (entries.length > 0 || cursorChanged) {
-    sink(entries, cursorSec);
+    // 两个 if 而不是数组/forEach：这段 8.3Hz 跑，不为"分发"分配对象
+    if (sink) sink(entries, cursorSec);
+    if (viewSink) viewSink(entries, cursorSec);
   }
 }
 

@@ -354,3 +354,148 @@ closeDockPanel(id): boolean  // api.getPanel(id)?.api.close()
 
 > 手测补充：13.1 用「拖右下角只沿一个方向缩放」验证：另一个轴必须保持原尺寸；13.2 用滚轮分别在卡片内/外验证。
 
+## 14. 轨迹视图段（trajectory3d，2026-11-11 追加）
+
+### 14.1 形态与白名单
+
+`trajectory3d` 是第二个**视图**形态，只渲染 3D 轨迹内容（画布 + 轴标签 + 最小 HUD），
+不挂 `Plot3D` 的组托盘 / 时间条 / 统计栏 / 右键菜单。整板 `plot3d` **仍然不可嵌**（保持现状），
+两者是不同 id：整板停靠与轨迹视图可以同屏，各算各的 WebGL 预算。
+
+- `embedPanels.ts`：`EMBED_VIEW_IDS = ["attitude3d", "trajectory3d"]`；
+  `EMBED_ID_MIN.trajectory3d = { w: 5, h: 4 }`（300×240 @60px 格，容得下 3 个图例点与轴标签）；
+  `EMBED_ID_ASPECT.trajectory3d = 4 / 3`（与姿态同口径，竖条会裁掉轴标签，16:9 扁条会压扁轨迹）；
+  `embedName` 中文「3D 轨迹视图」/ 英文「3D Trajectory View」；
+  `sanitizeEmbedViewState` 对两个视图 id 都返回 `null`。
+- 控件库、导入导出、`canAddEmbedCard`、`ControlCanvas.setEmbeddedPanels` 全部自动继承 `EMBED_IDS`，不再加第二张表。
+
+### 14.2 复用与抽取（不另起一套并列实现）
+
+| 公共件 | 位置 | 谁用 |
+| --- | --- | --- |
+| 卡片宿主、标题条、锁按钮、rAF 可见性 | `panels/embedHost.tsx`（已存在） | 全部内嵌 |
+| 降级阶梯状态机 `makeLadder(tiers)` | 新增 `panels/viewQuality.ts` | 姿态、轨迹各传自己的 tiers |
+| 非被动 wheel 分流 `attachViewWheelGuard(host, isLocked)` | 新增 `panels/viewQuality.ts` 同文件 | 姿态、轨迹 |
+| 像素比 `pixelRatioFor(dpr, zf, level)` | `makeLadder` 返回值 | 姿态、轨迹 |
+
+`attitudeViewQuality.ts` 改为「配置 + 转出」薄层：`TIERS` 保持现值，导出名
+（`nextQuality` / `dprCapOf` / `targetFpsOf` / `pixelRatioFor` / `QualityLevel`）全部保留，
+现有 7 例测试不改语义。`AttitudeModelView` 的 wheel 监听改调 `attachViewWheelGuard`（行为不变）。
+
+`embedHost` 的可见性上报修正为 `card.panelId`（此前传 `card.id` 的 uuid，与
+`setEmbeddedPanels` 的 panelId 集合对不上，滚出视口从未真正生效）；同 id 至多一张卡由放置互斥保证。
+
+### 14.3 数据侧（只订阅 `plotStore` + `plot3dStore`）
+
+- `plot3dStore` 增加**第二个 sink**：`setViewSink(cb)` / `viewSink`，与停靠面板的 `sink` 并列；
+  `pumpOnce` 门控改为 `isOpen("plot3d") || isOpen("trajectory3d")`；每个 tick 先 `sink(entries,cursorSec)`
+  再 `viewSink(entries,cursorSec)`（两个 if，不建数组）。泵定时器在任一 sink 存在时运行，都为空才停。
+- 新 sink 注册时把现有组的 `replay` 置真（沿用 `setSink` 的续传机制），后挂的视图拿到保留历史重灌，
+  不与已挂实例抢同一份水位；`setSink(null)` 仍只清校准会话，`setViewSink(null)` 不清。
+- `plotStore.init` 的采集门控增加 `!isOpen("trajectory3d")`：只开轨迹视图也有数据入库。
+- 视图组件用 `useSyncExternalStore` 分别订阅 `plotStore`（channels）与 `plot3dStore`（settings），
+  不新增第三个订阅；每帧路径只调 `scene.applyBatch` / `applySettings`（后者按 `s3d`、通道签名、`themeTick` 去重）。
+
+### 14.4 `TrajectoryView.tsx`
+
+新增 `src/features/plot3d/TrajectoryView.tsx`（`locked` prop，与 `AttitudeModelView` 同形）：
+
+1. 复用 `createScene(host, { onContextLost, isVisible })`，不复制渲染器 / LOD / 拾取逻辑；
+2. `scene.setViewSink((entries, cursorSec) => scene.applyBatch(entries, cursorSec))`；卸载 `setViewSink(null)` → `dispose()`；
+3. `applySettings(settings, channels, cbSafe, accent)`；`setFollow` / `setAutoRotate` 与停靠面板同款 effect；
+4. 主题切换 `scene.applyTheme()`（不重建场景，不重置相机）；
+5. 每 1s 读一次 `scene.stats().fps` 走轨迹阶梯；不可见时跳过采样并重置窗口（避免 0fps 误降级）；
+6. `locked` → `scene.setInteractionsEnabled(false)`，恢复时置真；wheel 分流用公共 guard（锁定时放行给画布）。
+
+`scene.ts` 只加四个薄 API（均无每帧分配）：
+`setPixelRatio(r)`、`setFpsCap(fps)`（0 = 不限，仅 L2 用 20）、`setInteractionsEnabled(on)`、
+`setAxisLabelsVisible(on)`；渲染循环内 `fpsCap` 只多一次数值比较。`createScene` 的 `cbs` 增加可选
+`isVisible?: () => boolean`，循环在原有 `IntersectionObserver` 之外再判一层（宿主页签/控制页不可见时整帧跳过，
+回到可见时补一帧：`needsRender = true`）。
+
+### 14.5 实例上限与降级阶梯（`trajectoryViewQuality.ts`）
+
+| 常量 | 值 | 含义 |
+| --- | --- | --- |
+| `TRAJECTORY_VIEW_MAX_INSTANCES` | 1 | 轨迹视图同屏上限；第二张 `view-limit` 拒 |
+| `TRAJECTORY_WEBGL_BUDGET` | 2 | 轨迹自身：停靠 1 + 视图 1，**不与姿态相加** |
+
+| 级别 | dprCap | 目标 fps | 降级条件（只降不升，重挂载回 L0） |
+| --- | --- | --- | --- |
+| L0 | 2 | 30 | rAF 实测 < 22fps 持续 2500ms → L1 |
+| L1 | 1.5 | 30 | < 18fps 持续 2500ms → L2 |
+| L2 | 1 | 20 | 终点；仅此级给 `setFpsCap(20)` |
+
+阈值比姿态略宽（22/18 vs 24/20，dwell 2500 vs 2000）：轨迹每实例最多 3 组 ×（12 万尾窗 + 10 万全景），
+且是事件驱动渲染，短暂 GC / 导入抖动更容易造成假降级；L2 的 20fps 上限是真正削减 GPU 占用的那一步。
+`pixelRatioFor(dpr, zf, level) = clamp(dpr × zf, 1, dprCap, 2)`，`zf = zoom / 100`，与本轮全局缩放口径一致。
+
+### 14.6 相机与视图态：不迁移
+
+结论：切页 / 重启回到默认机位，`viewState` 恒为 `null`，与姿态视图一致。
+
+理由：
+1. 轨迹视图没有停靠↔内嵌的搬运动作（`movePanelToDock` 对视图一律拒绝），不存在「接手上一处视野」的语义；
+2. `scene` 把三组并集包围盒归一化到 ±0.8，默认机位 `(1.9, 1.5, 2.1)` 看向原点必定看全轨迹，默认值本身可读；
+3. 迁移要把 `position/target/zoom` 写进 FlowDoc，增加 schema 字段、旧版本兼容与失效面，收益仅是省一次拖拽。
+
+代价：切页回来需重新摆视角；不带相机也让存档更小、跨机器导入不会落进一个别人摆的奇怪角度。
+
+### 14.7 指针语义与长按测距
+
+- 左键旋转 / 右键（或中键）平移 / 滚轮缩放：沿用 `scene.ts` 的 `OrbitControls.mouseButtons`，不另写手势；
+- 卡片内滚轮：未锁定 `stopPropagation + preventDefault`（非被动监听），只缩放轨迹不滚 `.ctl-grid`；
+  锁定时不拦，滚轮交还画布 —— 与姿态视图同一套 `attachViewWheelGuard`；
+- **长按测距不保留**。理由：① 视图定位是「监视同屏」，测距是分析动作，属于整板 `plot3d`；
+  ② 长按与卡片拖动/触控笔手势语义冲突，锁定交互后更难解释；③ 保留就得把测量气泡、命中拾取、
+  测距菜单一起搬进来，卡片尺寸下必然与图例/HUD 抢空间。需要测距请用停靠面板（数据同源，结果一致）。
+
+### 14.8 尺寸收敛（HUD / 轴标签 / 图例）
+
+容器宽度分三档，由 `ResizeObserver` 读 `wrap.clientWidth`（只在跨档时写一次 DOM/开关）：
+
+| 容器宽度 | 图例 | 轴标签（scene sprite） | 统计 HUD |
+| --- | --- | --- | --- |
+| ≥ 300px | 色点 + 组名 | 显示 | 点数 + fps |
+| 220–299px | 仅色点 | 隐藏（`setAxisLabelsVisible(false)`） | 点数 + fps |
+| < 220px | 隐藏 | 隐藏 | 隐藏 |
+
+CSS 只管排布（`flex-wrap`、`min-width:0`、不叠放），不出现 `transform: scale`；卡片高度不足时图例先于画布隐藏。
+
+### 14.9 测试
+
+| 文件 | 用例 |
+| --- | --- |
+| `trajectoryViewQuality.test.ts`（新） | 姿态/轨迹预算分开、L0→L1→L2 阈值与 dwell、只降不升、`pixelRatioFor` 三条、`TRAJECTORY_WEBGL_BUDGET=2` |
+| `viewQuality.test.ts`（新） | 通用阶梯：同一 tiers 下等价于旧姿态实现；`pixelRatioFor` 夹到 [1, min(cap,2)]；两个 guard 的锁定分支 |
+| `embedPanels.test.ts` | `EMBED_IDS` 含 `trajectory3d`；5×4 / 4:3；两个视图 `viewState` 恒 null；未知 `plot3d` 仍不可嵌 |
+| `controlsStore.test.ts` | 轨迹视图按 5×4 落卡、`aspectLock:true`；12×2 导入回正；未知 id 丢弃 |
+| `panelPlacement.test.ts` | 轨迹视图直加、第二张 `view-limit`、拒绝文案覆盖 |
+| `plot3dStore.test.ts` | 双 sink 同批下发、只开视图仍泵、停靠关视图在泵继续、两 sink 全空停泵 |
+| `panelActivity.test.ts` | `setEmbeddedCardVisible(panelId)` 生效（配合宿主的 id 修正） |
+
+### 14.10 无头验证（静默截图，允许）
+
+沿用 `.tmp/repro-ctl.mjs`（gitignored）：seed 一页含 `trajectory3d` 卡片 → CDP 截图确认画面非空白、
+卡片不塌；`Input.dispatchMouseEvent` 在卡片内滚轮 → `.ctl-grid.scrollTop` 不变，卡片外 → 变化；
+点锁按钮后卡片内滚轮 → 变化；拖右下角只改一轴 → 另一轴保持、比例 4:3。
+
+### 14.11 验收与回滚
+
+- `plot3d` 整板行为零变化；轨迹视图第二张被 `view-limit` 拒且文案可读；
+- 全量门禁七项全绿；工作树只含本批改动，`theme.css` 仅追加 `.ctl-embed`/`.tv-*` 规则，不动既有选择器；
+- 回滚：本批不迁移持久数据（`trajectory3d` 是新增 id，旧版本导入按未知 id 丢弃并告警），`git revert` 单提交即可。
+
+### 14.12 实施结果（2026-11-11）
+
+- 代码：`panels/viewQuality.ts`（新）、`features/plot3d/trajectoryViewQuality.ts`（新）、
+  `features/plot3d/TrajectoryView.tsx`（新）、`plot3dStore.setViewSink`、`scene.ts` 四个薄 API、
+  `embedPanels` / `controlsStore` / `panelPlacement` / `embedHost` / `plotStore` 各一处接点。
+- 无头（`.tmp/verify-traj.mjs`，注入最小 Tauri IPC 存根）：卡片 332×264、canvas 330×236 非空白；
+  滚轮 内 `0→0` / 外 `0→120` / 锁定 `0→120`；resize 332×264 → 468×332（7×5、两轴同步、画布 466×304）；
+  `data-chrome` 0→1→2 且 180px 下图例/HUD 收起、无相交矩形；控制台 0 error。
+- 门禁：插件四文件 151 / 全量 vitest 2757（226 文件）/ tsc 0 / eslint 0 错 22 警告 /
+  check:all OK(17) / vite build / cargo check 0 错（4 条既有 warning）。
+- 偏差：`check-empty-copy` 需为 `TrajectoryView.tsx` 登记 15 字空态文案（门要求新空态显式入册），
+  已按"一句回执、不写说明墙"的口径登记。
+

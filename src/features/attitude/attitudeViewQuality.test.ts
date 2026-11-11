@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   ATTITUDE_VIEW_MAX_INSTANCES,
   ATTITUDE_WEBGL_BUDGET,
-  TRAJECTORY_WEBGL_BUDGET,
   dprCapOf,
   nextQuality,
   pixelRatioFor,
@@ -13,8 +12,7 @@ describe("attitude view budget", () => {
   it("keeps the canvas view at one instance and the app-wide attitude budget at two", () => {
     expect(ATTITUDE_VIEW_MAX_INSTANCES).toBe(1);
     expect(ATTITUDE_WEBGL_BUDGET).toBe(2);
-    // 3D 轨迹单独记账，不许和姿态预算相加后再判断
-    expect(TRAJECTORY_WEBGL_BUDGET).toBe(1);
+    // 3D 轨迹的预算在 trajectoryViewQuality.ts 单独记账，不许和姿态预算相加后再判断
   });
 });
 

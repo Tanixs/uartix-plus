@@ -1430,3 +1430,65 @@ describe("P90 D3 游标裁决（陈旧 scrub 不再把画面截成空白）", ()
     expect(calls[calls.length - 1].cursor).toBeCloseTo(0.05, 6);
   });
 });
+
+describe("P1 视图段：轨迹视图第二 sink", () => {
+  beforeEach(() => {
+    store.setViewSink(null);
+    panelActivity.setEmbeddedPanels([]);
+  });
+  afterEach(() => {
+    store.setViewSink(null);
+    panelActivity.setEmbeddedPanels([]);
+  });
+
+  it("停靠与视图两个消费端同拍拿到同一批数据", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    const dock = collect();
+    const view: Call[] = [];
+    store.setViewSink((entries, cursor) => view.push({ entries, cursor }));
+    pump(1);
+    expect(gseq(dock, "g1")).toHaveLength(1);
+    expect(gseq(view, "g1")).toHaveLength(1);
+    // 同一批对象，不复制：视图侧 scene 自己拷进 LOD 缓冲
+    expect(view[0]!.entries).toBe(dock[0]!.entries);
+  });
+
+  it("只开轨迹视图（内嵌）仍泵；视图关掉后停泵", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    panelActivity.syncPanels([]);
+    panelActivity.setEmbeddedPanels(["trajectory3d"], "controls");
+    const view: Call[] = [];
+    store.setViewSink((entries, cursor) => view.push({ entries, cursor }));
+    pump(1);
+    expect(gseq(view, "g1")).toHaveLength(1);
+    store.setViewSink(null);
+    const n = view.length;
+    h.setSeries(
+      ser(
+        [0, 10, 20, 30, 40, 50, 60],
+        [1, 2, 3, 4, 5, 6, 7],
+        [11, 12, 13, 14, 15, 16, 17],
+        [21, 22, 23, 24, 25, 26, 27],
+        [null, 100, 101, 102, 103, 104, 105],
+      ),
+    );
+    pump(2);
+    expect(view).toHaveLength(n);
+  });
+
+  it("关停靠不动视图的泵，关视图也不清校准会话", () => {
+    h.setSeries(makeSeries());
+    bindG1();
+    const view: Call[] = [];
+    store.setViewSink((entries, cursor) => view.push({ entries, cursor }));
+    store.setSink(null);
+    pump(1);
+    expect(gseq(view, "g1")).toHaveLength(1);
+    store.setSetting({ calibMode: true });
+    store.setViewSink(null);
+    // 校准是停靠面板的操作态，关一个纯视图不应该顺手清掉
+    expect(store.getSnapshot().settings.calibMode).toBe(true);
+  });
+});

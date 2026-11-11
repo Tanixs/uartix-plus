@@ -103,6 +103,14 @@ export interface Plot3DScene {
   clearTrajectory(gid?: GroupId): void;
   pick(px: number, py: number): PickResult | null;
   stats(): { groups: Record<GroupId, GroupStats>; fps: number; gridStep: number };
+  /** P1 视图段：像素比（dpr × 界面缩放，视图侧按档位夹到 ≤2） */
+  setPixelRatio(r: number): void;
+  /** P1 视图段：渲染上限帧率（0 = 不限）；只给轨迹视图 L2 用 */
+  setFpsCap(fps: number): void;
+  /** P1 视图段：锁定交互（拖卡片时不许误转视角） */
+  setInteractionsEnabled(on: boolean): void;
+  /** P1 视图段：窄卡隐藏轴标签（网格与轨迹保留） */
+  setAxisLabelsVisible(on: boolean): void;
   /** P91 C1：注册/清除"游标把画面截空"回调（边沿触发，非每帧） */
   setOnCursorEmpty(cb: ((gid: GroupId) => void) | null): void;
   /** P91 C1/C5：空态归因与 window.__p3d 探针共用的只读快照 */
@@ -148,6 +156,8 @@ export async function createScene(
     onToggleFollow?: () => void;
     /** P87b：gltf 文件读/解析失败回调（UI toast + 场景回退箭头占位） */
     onModelError?: (gid: GroupId, src: string) => void;
+    /** 宿主可见性（P1 视图段）：控制页/页签不可见时整帧跳过，不必等 IntersectionObserver */
+    isVisible?: () => boolean;
   },
 ): Promise<Plot3DScene> {
   const T3 = await import("three");
@@ -922,6 +932,8 @@ export async function createScene(
   const gridGroup = new T3.Group();
   scene.add(gridGroup);
   let axisLabels: THREE_NS.Sprite[] = [];
+  /** 窄卡收敛（P1 视图段）：轴标签是全场景最先和边线打架的元素，宽度不够时整组关掉 */
+  let axisLabelsOn = true;
 
   function makeTextSprite(text: string, color: string, worldH: number): THREE_NS.Sprite {
     const pad = 8;
@@ -1054,6 +1066,7 @@ export async function createScene(
       );
       sp.position.copy(b);
       sp.position.y += 0.05;
+      sp.visible = axisLabelsOn;
       axisLabels.push(sp);
       gridGroup.add(sp);
     }
@@ -1336,6 +1349,11 @@ export async function createScene(
   let fps = 0;
   let frames = 0;
   let fpsT = performance.now();
+  /** 渲染上限帧率（0 = 不限）：只在轨迹视图 L2 用 20，普通停靠面板不节流 */
+  let renderFpsCap = 0;
+  let lastRenderAt = 0;
+  /** 宿主可见性缓存：由 false → true 时补一帧（离屏期间 backbuffer 可能被回收） */
+  let gateVisible = true;
   // 跟随模式（P70 T2）：target 每帧向锚点 lerp（指数平滑），camera 加同款
   // delta 保持视角偏移向量（Foxglove Position 档语义）；tween 进行时让路。
   // P87a：锚点 = 主组（g1 优先，其次任一有数据的可见组）游标截断点/最新点
@@ -1382,7 +1400,11 @@ export async function createScene(
 
   const loop = (now: number) => {
     raf = requestAnimationFrame(loop);
-    if (!visible) return;
+    // 宿主层可见性（控制页隐藏/页签切走）：整帧跳过，连 controls.update 都不跑
+    const gate = cbs.isVisible ? cbs.isVisible() : true;
+    if (gate && !gateVisible) needsRender = true;
+    gateVisible = gate;
+    if (!visible || !gate) return;
     if (tween) {
       const u = Math.min(1, (now - tween.start) / tween.dur);
       const e = easeInOut(u);
@@ -1477,7 +1499,7 @@ export async function createScene(
         needsRender = true;
       }
     }
-    if (needsRender) {
+    if (needsRender && (renderFpsCap <= 0 || now - lastRenderAt >= 1000 / renderFpsCap)) {
       // 异常隔离（P88d）：单组尺寸补偿异常绝不允许中断整个 rAF 循环
       //（循环一断=点线全消失的"面板空白"观感）
       try {
@@ -1489,6 +1511,7 @@ export async function createScene(
         }
       }
       renderer.render(scene, camera);
+      lastRenderAt = now;
       needsRender = false;
     }
     frames++;
@@ -2871,6 +2894,27 @@ export async function createScene(
       const out: Record<string, GroupStats> = {};
       for (const g of gstates.values()) out[g.gid] = { tail: g.tCount, overview: g.oCount };
       return { groups: out as Record<GroupId, GroupStats>, fps, gridStep: curGridStep };
+    },
+
+    setPixelRatio(r: number) {
+      const next = Math.max(1, Math.min(2, Number.isFinite(r) ? r : 1));
+      renderer.setPixelRatio(next);
+      needsRender = true;
+    },
+
+    setFpsCap(fps: number) {
+      renderFpsCap = Number.isFinite(fps) && fps > 0 ? fps : 0;
+    },
+
+    setInteractionsEnabled(on: boolean) {
+      controls.enabled = on;
+      needsRender = true;
+    },
+
+    setAxisLabelsVisible(on: boolean) {
+      axisLabelsOn = on;
+      for (const sp of axisLabels) sp.visible = on;
+      needsRender = true;
     },
 
     /** P91 C1：注册/清除截空回调（面板卸载必须清，否则旧闭包会吃掉新场景的回调） */

@@ -7,6 +7,7 @@ import {
   isEmbedViewId,
 } from "../features/controls/embedPanels";
 import { AttitudeModelView } from "../features/attitude/AttitudeModelView";
+import { TrajectoryView } from "../features/plot3d/TrajectoryView";
 import { HexView } from "../features/hexview/HexView";
 import { Plot2D } from "../features/plot/Plot2D";
 import { IconLock, IconUnlock } from "../shared/icons";
@@ -23,6 +24,7 @@ import { primePanelView } from "./viewState";
 const MPlot2D = memo(Plot2D);
 const MHexView = memo(HexView);
 const MAttitudeView = memo(AttitudeModelView);
+const MTrajectoryView = memo(TrajectoryView);
 
 export interface EmbedCardViewProps extends Omit<CardFrameProps, "card" | "children"> {
   card: EmbedCard;
@@ -72,15 +74,17 @@ export function EmbedCardView(props: EmbedCardViewProps) {
       );
       if (visible !== last) {
         last = visible;
-        panelActivity.setEmbeddedCardVisible(card.id, visible);
+        // 必须用 panelId：registry 的 embedded 集合由 setEmbeddedPanels(panelId) 建立，
+        // 此前传 card.id 的 uuid 永远对不上，滚出视口从未真正生效。
+        panelActivity.setEmbeddedCardVisible(card.panelId, visible);
       }
     };
     raf = requestAnimationFrame(loop);
     return () => {
       cancelAnimationFrame(raf);
-      panelActivity.clearEmbeddedCardVisibility(card.id);
+      panelActivity.clearEmbeddedCardVisibility(card.panelId);
     };
-  }, [card.id]);
+  }, [card.panelId]);
 
   const min = EMBED_ID_MIN[card.panelId];
   return (
@@ -124,8 +128,10 @@ export function EmbedCardView(props: EmbedCardViewProps) {
             <MPlot2D />
           ) : card.panelId === "hexview" ? (
             <MHexView />
-          ) : (
+          ) : card.panelId === "attitude3d" ? (
             <MAttitudeView locked={locked} />
+          ) : (
+            <MTrajectoryView locked={locked} />
           )}
         </div>
       </div>

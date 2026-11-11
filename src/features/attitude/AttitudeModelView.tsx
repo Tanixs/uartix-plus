@@ -5,6 +5,7 @@ import * as store from "./attitudeStore";
 import { useSettings } from "../settings/settingsStore";
 import { tx } from "../../i18n/strings";
 import * as panelActivity from "../../panels/panelActivity";
+import { attachViewWheelGuard } from "../../panels/viewQuality";
 import { buildModel } from "./View3D";
 import {
   nextQuality,
@@ -88,14 +89,7 @@ export function AttitudeModelView({ locked = false }: AttitudeModelViewProps) {
       // 这里在宿主上截停冒泡，避免事件继续传到底下 `.ctl-grid` 的整板滚轮
       // handler（否则缩放模型的同时控制画布也在滚）。锁定时不拦：模型不接管
       // 指针，滚轮交还给画布滚动，与"锁定交互"的语义一致。
-      // 非被动监听是必须的：被动监听里 preventDefault 会被忽略。
-      // 缩放量取 deltaY，不依赖 clientX/Y，所以全局 CSS zoom 不影响滚轮手感。
-      const onWheel = (e: WheelEvent) => {
-        if (lockedRef.current) return;
-        e.stopPropagation();
-        e.preventDefault();
-      };
-      host.addEventListener("wheel", onWheel, { passive: false });
+      const detachWheel = attachViewWheelGuard(host, () => lockedRef.current);
 
       scene.add(new THREE.AmbientLight(0xffffff, 0.6));
       const key = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -230,7 +224,7 @@ export function AttitudeModelView({ locked = false }: AttitudeModelViewProps) {
 
       cleanup = () => {
         cancelAnimationFrame(raf);
-        host.removeEventListener("wheel", onWheel);
+        detachWheel();
         ro.disconnect();
         mo.disconnect();
         controls.dispose();

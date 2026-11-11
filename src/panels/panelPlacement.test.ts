@@ -101,6 +101,21 @@ describe("panel placement mutex", () => {
     });
   });
 
+  it("caps the trajectory view independently from the attitude view", async () => {
+    const activity = await import("./panelActivity");
+    activity.syncPanels([]);
+    const store = await import("../features/controls/controlsStore");
+    const placement = await import("./panelPlacement");
+    // 先把姿势视图占满，再放轨迹视图：两者的上限分开计，不能互相挤占
+    expect(placement.addEmbedFromGallery("attitude3d").ok).toBe(true);
+    expect(placement.addEmbedFromGallery("trajectory3d").ok).toBe(true);
+    expect(placement.addEmbedFromGallery("trajectory3d")).toEqual({
+      ok: false,
+      reason: "view-limit",
+    });
+    expect(store.findEmbedCard("trajectory3d")).not.toBeNull();
+  });
+
   it("has readable text for every reject reason", async () => {
     const placement = await import("./panelPlacement");
     const reasons = [

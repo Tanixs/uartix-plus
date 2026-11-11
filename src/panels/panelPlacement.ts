@@ -17,6 +17,7 @@ import {
 import {
   ATTITUDE_VIEW_MAX_INSTANCES,
 } from "../features/attitude/attitudeViewQuality";
+import { TRAJECTORY_VIEW_MAX_INSTANCES } from "../features/plot3d/trajectoryViewQuality";
 import * as controlsStore from "../features/controls/controlsStore";
 import { tx } from "../i18n/strings";
 import { closeDockPanel, isDockReady, openDockPanel } from "../shell/dockBridge";
@@ -27,10 +28,12 @@ export type PanelPlacement = "dock" | "embed" | "closed";
 
 /**
  * 视图形态的同屏上限。整板靠"停靠↔内嵌互斥"天然只有一份；
- * 视图没有停靠对应物，所以要单独钉一个数（姿态 3D 每个实例都是一个 WebGL 上下文）。
+ * 视图没有停靠对应物，所以要单独钉一个数（每个实例都是一个 WebGL 上下文）。
+ * 姿态与轨迹各 1：两者的预算是分开记的，不互相挤占。
  */
 const VIEW_INSTANCE_CAP: Record<EmbedViewId, number> = {
   attitude3d: ATTITUDE_VIEW_MAX_INSTANCES,
+  trajectory3d: TRAJECTORY_VIEW_MAX_INSTANCES,
 };
 
 export type PlacementRejectReason =
@@ -184,9 +187,10 @@ export function placementRejectText(reason: PlacementRejectReason): string {
     case "already-embedded":
       return tx("该面板已经在控制画布内嵌了", "This panel is already embedded in the control canvas");
     case "view-limit":
+      // 两种视图的上限当前都是 1，文案不点名，避免新增视图时漏改一句
       return tx(
-        "姿态视图最多同屏 1 个（每个实例都是一个 WebGL 上下文）",
-        "At most one attitude view can be embedded at a time (each instance is a WebGL context)",
+        "该视图最多同屏 1 个（每个实例都是一个独立 WebGL 上下文）",
+        "At most one instance of this view can be embedded (each is a WebGL context)",
       );
     case "no-space":
       return tx(

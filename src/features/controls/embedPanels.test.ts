@@ -12,10 +12,19 @@ import {
 
 describe("embed whitelist", () => {
   it("keeps whole panels and views in one table", () => {
-    expect([...EMBED_IDS]).toEqual(["plot2d", "hexview", "attitude3d"]);
+    expect([...EMBED_IDS]).toEqual([
+      "plot2d",
+      "hexview",
+      "attitude3d",
+      "trajectory3d",
+    ]);
     expect(embedKindOf("plot2d")).toBe("panel");
     expect(embedKindOf("attitude3d")).toBe("view");
+    expect(embedKindOf("trajectory3d")).toBe("view");
     expect(isEmbedViewId("attitude3d")).toBe(true);
+    expect(isEmbedViewId("trajectory3d")).toBe(true);
+    // 整板 3D 轨迹仍不可嵌：它是独立的停靠面板，不是视图
+    expect(isEmbedId("plot3d")).toBe(false);
     expect(isEmbedId("modbus")).toBe(false);
     expect(isEmbedId(null)).toBe(false);
   });
@@ -26,6 +35,11 @@ describe("embed whitelist", () => {
     // 数据面不锁比例：横长一点更有用
     expect(EMBED_ID_ASPECT.plot2d).toBeUndefined();
     expect(EMBED_ID_ASPECT.hexview).toBeUndefined();
+  });
+
+  it("gives the trajectory view a 5x4 minimum and the same 4:3 lock", () => {
+    expect(EMBED_ID_MIN.trajectory3d).toEqual({ w: 5, h: 4 });
+    expect(EMBED_ID_ASPECT.trajectory3d).toBeCloseTo(4 / 3);
   });
 
   it("names every target in both languages", () => {
@@ -56,7 +70,8 @@ describe("embed view state", () => {
     expect(sanitizeEmbedViewState("hexview", { scrollOffset: -2 })).toBeNull();
   });
 
-  it("has nothing to carry for the attitude view", () => {
+  it("has nothing to carry for either view", () => {
     expect(sanitizeEmbedViewState("attitude3d", { anything: 1 })).toBeNull();
+    expect(sanitizeEmbedViewState("trajectory3d", { anything: 1 })).toBeNull();
   });
 });

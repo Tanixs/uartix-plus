@@ -76,6 +76,9 @@ const BUDGETS = {
      模型本身就在画布上，没有需要配置的东西，不写说明墙。
      锁态那句"交互已锁定"是右下角状态标签（`.att-view-locked`），不命中 empty 识别式。 */
   "src/features/attitude/AttitudeModelView.tsx": 6,
+  /* 内嵌 3D 轨迹视图：视图卡里没有组配置界面，空态只留一句「去哪绑 X/Y」的回执（15 字）。
+     画布上仍有网格与坐标轴，不是空白页；不写 LOD / 配对 / 归一化之类的说明墙。 */
+  "src/features/plot3d/TrajectoryView.tsx": 15,
 };
 
 const cjk = (s) => (s.match(/[一-鿿]/g) || []).length;

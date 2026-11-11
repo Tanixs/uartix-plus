@@ -4737,6 +4737,80 @@ select optgroup {
   pointer-events: none;
 }
 
+/* 3D 轨迹视图：只占内容区；HUD/图例按容器宽度分三档收敛，互不叠放 */
+.tv-root { position: absolute; inset: 0; }
+.tv-canvas { position: absolute; inset: 0; }
+.tv-canvas canvas { display: block; width: 100%; height: 100%; }
+
+.tv-legend {
+  position: absolute;
+  left: var(--sp-1);
+  top: var(--sp-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sp-1);
+  max-width: calc(100% - 2 * var(--sp-1));
+  pointer-events: none;
+}
+
+.tv-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 1px 5px;
+  border-radius: var(--radius-s);
+  background: var(--depth-bg-1);
+  color: var(--depth-fg-2);
+  font-size: var(--fs-sm);
+}
+
+.tv-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.tv-legend-name {
+  max-width: 72px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-hud {
+  position: absolute;
+  left: var(--sp-1);
+  bottom: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-s);
+  background: var(--depth-bg-1);
+  color: var(--depth-fg-3);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.tv-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16%;
+  text-align: center;
+  color: var(--depth-fg-3);
+  font-size: var(--fs-sm);
+  pointer-events: none;
+}
+
+/* 220–299px：先收组名（色点仍能对上轨迹颜色），轴标签由 scene 同档关闭 */
+.tv-root[data-chrome="1"] .tv-legend-name { display: none; }
+/* <220px：图例与统计一起收，只留画布 */
+.tv-root[data-chrome="2"] .tv-legend,
+.tv-root[data-chrome="2"] .tv-hud { display: none; }
+
 /* 减弱动效时不许干脆没有反馈：改成一圈不动的亮边，同样是一闪即走（类照样被摘） */
 @media (prefers-reduced-motion: reduce) { .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent); } }
 html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent); }

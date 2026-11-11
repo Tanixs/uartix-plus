@@ -67,3 +67,27 @@
 - [x] F7 无头取证：卡内 `scrollTop 0→0`、卡外 `0→120`、锁定后卡内 `0→120`；内嵌卡移动后尺寸不变、单轴 resize 后另一轴保持
 - [x] F8 门禁全绿（插件四文件 151 / vitest 2737 / tsc 0 / eslint 0 错 22 警告 / check:all OK(17) / vite build / cargo check）
 - [x] F9 提交、同步 HANDOFF 与 spec，输出阶段报告
+
+## 轨迹视图段：trajectory3d（2026-11-11）
+
+- [x] R1 `panels/viewQuality.ts`：`makeLadder(tiers)` + `attachViewWheelGuard(host, isLocked)`；`viewQuality.test.ts`
+- [x] R2 `attitudeViewQuality.ts` 改为薄配置层（导出名与阈值不变）；`AttitudeModelView` 改用公共 wheel guard
+- [x] R3 `trajectoryViewQuality.ts`：`TRAJECTORY_VIEW_MAX_INSTANCES=1`、`TRAJECTORY_WEBGL_BUDGET=2`、L0/L1/L2（22/18fps，dwell 2500，L2 fpsCap 20）；单测
+- [x] R4 `embedPanels.ts`：加入 `trajectory3d`（min 5×4、aspect 4/3、双语名、viewState null）；测试同步
+- [x] R5 `plot3dStore`：`setViewSink` 第二 sink、泵门控含 `isOpen("trajectory3d")`、任一无 sink 才停泵；单测
+- [x] R6 `plotStore.init` 采集门控增加 `trajectory3d`
+- [x] R7 `scene.ts` 四个薄 API：`setPixelRatio` / `setFpsCap` / `setInteractionsEnabled` / `setAxisLabelsVisible`；`cbs.isVisible` 门控
+- [x] R8 `TrajectoryView.tsx`：复用 `createScene`，只订阅 `plotStore`+`plot3dStore`，锁交互、wheel 分流、主题、1s 阶梯采样、三档 HUD 收敛
+- [x] R9 `embedHost`：轨迹分支 + 锁按钮复用；可见性上报改 `card.panelId`
+- [x] R10 `panelPlacement`：`VIEW_INSTANCE_CAP.trajectory3d`；`view-limit` 文案通用化；测试
+- [x] R11 `theme.css` 精准追加 `.tv-*`（无 `transform: scale`，不改既有选择器）
+- [x] R12 无头静默截图验证：非空白、滚轮分流（内/外/锁定）、单轴 resize 不塌
+- [x] R13 七项门禁全绿（插件四文件 / vitest / tsc / eslint / check:all / vite build / cargo check）
+- [x] R14 提交（说明原因）、同步 HANDOFF 与 spec、输出阶段报告
+
+## 追加段：面板控件化适配清单（排在轨迹视图之后，需先出清单再动代码）
+
+- [ ] C1 适配分类清单（整板可嵌 / 只嵌视图 / 不嵌 + 成本与一句话理由），覆盖 2D、Hex、帧画布、数据表格、3D 轨迹、3D 姿态、AI、Modbus、序列器、编排器、哨兵、虚拟设备、X-Ray、TX 组帧台、插件面板
+- [ ] C2 按「用户价值 ÷ 成本」排波次，给每波交付物与验收方式
+- [ ] C3 清单经用户确认后才开始第一波
+
