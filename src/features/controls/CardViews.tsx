@@ -439,6 +439,10 @@ export function SliderCardView(props: {
         max={card.max}
         step={card.step}
         defaultValue={props.initial}
+        title={tx(
+          "拖动：松手发一帧。聚焦后按方向键：每次松键也发一帧（与松手发送同一时机）",
+          "Drag: sends one frame on release. With focus, arrow keys: each key release sends one frame (same release timing)",
+        )}
         onMouseDown={(e) => e.stopPropagation()}
         onInput={(e) =>
           commit(parseFloat((e.target as HTMLInputElement).value), "value")
@@ -1000,6 +1004,10 @@ export function GroupCardView(props: {
                   max={ch.max}
                   step={ch.step}
                   value={v}
+                  title={tx(
+                    "拖动：松手发一帧。聚焦后按方向键：每次松键也发一帧（与松手发送同一时机）",
+                    "Drag: sends one frame on release. With focus, arrow keys: each key release sends one frame (same release timing)",
+                  )}
                   onInput={(e) =>
                     commitSlider(ch, parseFloat((e.target as HTMLInputElement).value))
                   }
