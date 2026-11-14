@@ -657,4 +657,19 @@ describe("switch position persistence", () => {
     const card = saved.pages.find((p) => p.id === pageId)!.cards.find((c) => c.id === cardId)!;
     expect(card.state).toBe(1);
   });
+
+  it("recovers an out-of-range position left by an older document", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.activePage()!.id;
+    const cardId = store.addCard(pageId, "switch");
+    const read = () =>
+      store.getSnapshot().pages.find((p) => p.id === pageId)!.cards.find((c) => c.id === cardId)!;
+    // 3 档改 2 档后旧档位 2 越界：写入与加载共用同一出口，必须回收到最后一档。
+    store.patchCard(pageId, cardId, { state: 2 });
+    expect(read()).toMatchObject({ state: 1 });
+    store.patchCard(pageId, cardId, { positions: 2 });
+    expect(read()).toMatchObject({ state: 1 });
+    store.patchCard(pageId, cardId, { state: -3 });
+    expect(read()).toMatchObject({ state: 0 });
+  });
 });

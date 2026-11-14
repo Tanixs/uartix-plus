@@ -537,18 +537,26 @@ function migrateCard(
         useScript: Boolean(raw.useScript),
         script: String(raw.script ?? ""),
       };
-    case "switch":
+    case "switch": {
+      const positions = (Number(raw.positions) === 3 ? 3 : 2) as 2 | 3;
+      // 旧档可能把档位从 3 降到 2 后留下 state=2：不钳的话刷新后没有任何一档是亮的，
+      // 卡片看起来"丢了状态"。写入/加载共用这一个出口，范围外的档位一律回收。
+      const rawState = Number(raw.state ?? 0);
+      const state = Number.isFinite(rawState)
+        ? Math.min(positions - 1, Math.max(0, Math.round(rawState)))
+        : 0;
       return {
         ...base,
         type,
-        positions: (Number(raw.positions) === 3 ? 3 : 2) as 2 | 3,
+        positions,
         templates: (raw.templates as string[]) ?? ["SW:1!", "SW:0!"],
         labels: (raw.labels as string[]) ?? ["开", "关"],
         sendMode: (raw.sendMode as SendMode) ?? "ascii",
-        state: Number(raw.state ?? 0),
+        state,
         useScript: Boolean(raw.useScript),
         script: String(raw.script ?? ""),
       };
+    }
     case "led":
       return {
         ...base,
