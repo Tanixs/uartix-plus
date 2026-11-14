@@ -37,7 +37,7 @@ import {
   moveToDockRejectText,
   placementRejectText,
 } from "../../panels/panelPlacement";
-import { embedMinOf, isEmbedPanelTarget, isEmbedTargetId } from "./embedPanels";
+import { embedMinOf, hasDockTabForEmbed, isEmbedTargetId } from "./embedPanels";
 import { isMountable, mountedState, withMountedCommand } from "./commandMount";
 import { resolveWheelOwner } from "./wheelRouting";
 import type { CommandItem, CommandNode } from "./commandStore";
@@ -1711,7 +1711,7 @@ export function ControlCanvas() {
                 {tx("按当前值发送", "Send current value")}
               </button>
             )}
-            {menuCard.type === "embed" && isEmbedPanelTarget(menuCard.panelId) && (
+            {menuCard.type === "embed" && isEmbedTargetId(menuCard.panelId) && hasDockTabForEmbed(menuCard.panelId) && (
               <button
                 className="ctx-item"
                 onClick={() => {

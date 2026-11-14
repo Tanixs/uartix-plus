@@ -42,9 +42,10 @@ export function dockIdOf(id: EmbedPanelId): string {
 }
 
 /**
- * 视图形态：只渲染内容区，不参与"移回停靠"。
- * 姿态/轨迹是纯画布视图；哨兵/帧画布虽然停靠区也有页签，但这里按"视图"
- * 处理（从控件库直接落卡，不从页签搬），避免把多栏工作台当成可随意搬动的整板。
+ * 视图形态：只渲染内容区（不挂面板 chrome）。
+ * 它们没有"整板"语义，但只要停靠区有对应页签，仍应与整板一样可以双向搬动——
+ * 否则"内嵌"就是单程票：页签让位后画布上这张卡再也回不去。
+ * 帧画布仍按 E6 只出不回（它不在页签内嵌入口里），故不给映射。
  */
 export const EMBED_VIEW_IDS = [
   "attitude3d",
@@ -53,6 +54,16 @@ export const EMBED_VIEW_IDS = [
   "framecanvas",
 ] as const;
 export type EmbedViewId = (typeof EMBED_VIEW_IDS)[number];
+
+/**
+ * 视图 id → 停靠面板 id。姿态/轨迹的停靠页签与卡片不同名（view3d / plot3d），
+ * 不映射的话 `isDocked` 永远查不到，页签不会让位，卡片也搬不回去。
+ */
+export const EMBED_VIEW_DOCK_ID: Partial<Record<EmbedViewId, string>> = {
+  attitude3d: "view3d",
+  trajectory3d: "plot3d",
+  sentinel: "sentinel",
+};
 
 export const EMBED_IDS = [...EMBED_PANEL_IDS, ...EMBED_VIEW_IDS] as const;
 export type EmbedId = EmbedPanelId | EmbedViewId;
@@ -89,11 +100,26 @@ export function isEmbedTargetId(v: unknown): v is EmbedTargetId {
   return isEmbedId(v) || isPluginEmbedId(v);
 }
 
-/** 有停靠页签、可双向搬动的目标：整板与插件面板；静态视图不算。 */
+/** 整板形态、可双向搬动的目标（不含视图）。 */
 export function isEmbedPanelTarget(
   v: unknown,
 ): v is EmbedPanelId | PluginPanelEmbedId {
   return isEmbedPanelId(v) || isPluginEmbedId(v);
+}
+
+/** 目标在停靠区有没有页签，因而能不能「移回停靠」。 */
+export function hasDockTabForEmbed(id: EmbedTargetId): boolean {
+  return isEmbedPanelTarget(id) || (isEmbedViewId(id) && EMBED_VIEW_DOCK_ID[id] !== undefined);
+}
+
+/**
+ * 目标实际对应的停靠 id。整板可能不同名（datatable → table），
+ * 视图同理（attitude3d → view3d）；插件面板的卡片 id 就是停靠 id，原样返回。
+ */
+export function dockIdOfTarget(id: EmbedTargetId): string {
+  if (isEmbedPanelId(id)) return dockIdOf(id);
+  if (isEmbedViewId(id)) return EMBED_VIEW_DOCK_ID[id] ?? id;
+  return id;
 }
 
 /**

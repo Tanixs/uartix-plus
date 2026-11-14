@@ -6,8 +6,9 @@
  * 因此这里不做复制，只做移动；目标已存在就返回具体原因让 UI 提示。
  */
 import {
-  dockIdOf,
+  dockIdOfTarget,
   embedMinOf,
+  hasDockTabForEmbed,
   isEmbedPanelId,
   isEmbedPanelTarget,
   isEmbedTargetId,
@@ -29,8 +30,8 @@ export type PanelPlacement = "dock" | "embed" | "closed";
 
 /**
  * 视图形态的同屏上限。整板靠"停靠↔内嵌互斥"天然只有一份；
- * 视图没有"停靠↔内嵌"的搬动关系（哨兵/帧画布虽同名有页签，也按视图落卡），
- * 所以逐个钉数。姿态与轨迹各 1 且预算分开记；哨兵/帧画布各 1 防重复订阅。
+ * 视图从控件库直接落卡时不经过停靠，所以逐个钉数。
+ * 姿态与轨迹各 1 且预算分开记；哨兵/帧画布各 1 防重复订阅。
  */
 const VIEW_INSTANCE_CAP: Record<EmbedViewId, number> = {
   attitude3d: ATTITUDE_VIEW_MAX_INSTANCES,
@@ -40,10 +41,11 @@ const VIEW_INSTANCE_CAP: Record<EmbedViewId, number> = {
   framecanvas: 1,
 };
 
-/** 停靠状态一律按停靠 id 查：整板可能不同名（datatable → table），视图与停靠同名。
+/** 停靠状态一律按停靠 id 查：整板可能不同名（datatable → table），
+ *  姿态/轨迹的视图 id 也与页签不同名（attitude3d → view3d）；
  *  插件面板的卡片 id 就是它的停靠 id（`plugin-view-…`），原样返回。 */
 function dockIdOfEmbed(id: string): string {
-  return isEmbedPanelId(id) ? dockIdOf(id) : id;
+  return isEmbedTargetId(id) ? dockIdOfTarget(id) : id;
 }
 
 export type PlacementRejectReason =
@@ -184,10 +186,13 @@ export function movePanelToDock(
   pageId: string,
   card: controlsStore.EmbedCard,
 ): { ok: true } | { ok: false; reason: MoveToDockReject } {
-  // 视图形态没有停靠页签：拿它去 openDockPanel 只会失败并把卡片误删，这里直接挡住。
+  // 只有停靠区真有页签的目标才搬得回去：整板、插件面板，以及姿态/轨迹/哨兵这类
+  // 视图（页签 id 见 EMBED_VIEW_DOCK_ID）。没有页签的（帧画布）直接挡住——
+  // 拿它去 openDockPanel 只会失败并把卡片误删。
   // 放在就绪判断**之前**：这张卡永远搬不回去，原因与"停靠区还没好"不是一回事。
-  // 插件面板有停靠页签（卡片 id 即停靠 id），按整板处理。
-  if (!isEmbedPanelTarget(card.panelId)) return { ok: false, reason: "no-dock-tab" };
+  if (!isEmbedTargetId(card.panelId) || !hasDockTabForEmbed(card.panelId)) {
+    return { ok: false, reason: "no-dock-tab" };
+  }
   if (!isDockReady()) return { ok: false, reason: "dock-unavailable" };
   const view = isEmbedPanelId(card.panelId) ? capturePanelView(card.panelId) : null;
   controlsStore.removeCard(pageId, card.id);

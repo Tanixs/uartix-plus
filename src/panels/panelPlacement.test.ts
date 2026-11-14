@@ -197,21 +197,42 @@ describe("panel placement mutex", () => {
     expect(store.findEmbedCard("plot2d")).not.toBeNull();
   });
 
-  it("refuses to move a view-only card to the dock and says it has no tab", async () => {
+  it("moves a view card back to its own dock tab (attitude3d → view3d)", async () => {
     const activity = await import("./panelActivity");
-    activity.syncPanels([]);
+    const bridge = await import("../shell/dockBridge");
     const store = await import("../features/controls/controlsStore");
-    const pageId = store.getSnapshot().activePageId;
     const placement = await import("./panelPlacement");
+    const tabs = new Set<string>();
+    const opened: string[] = [];
+    bridge.registerDockApi({
+      getPanel: (id: string) => (tabs.has(id) ? { api: { close() {}, setActive() {} } } : undefined),
+    } as never, (id) => { tabs.add(id); opened.push(id); });
+    activity.syncPanels([]);
+    const pageId = store.getSnapshot().activePageId;
     expect(placement.addEmbedFromGallery("attitude3d").ok).toBe(true);
     const card = store.findEmbedCard("attitude3d");
     expect(card).not.toBeNull();
-    // 视图没有停靠页签：原因必须与"停靠区还没好"分开，否则用户会以为再等等就行
+    expect(placement.movePanelToDock(pageId, card!.card)).toEqual({ ok: true });
+    // 视图的卡片 id 与页签 id 不同名，搬回时必须开页签 id，而不是 attitude3d
+    expect(opened).toEqual(["view3d"]);
+    expect(store.findEmbedCard("attitude3d")).toBeNull();
+  });
+
+  it("still refuses a view that genuinely has no dock tab", async () => {
+    const activity = await import("./panelActivity");
+    const bridge = await import("../shell/dockBridge");
+    const store = await import("../features/controls/controlsStore");
+    const placement = await import("./panelPlacement");
+    bridge.registerDockApi({ getPanel: () => undefined } as never, () => {});
+    activity.syncPanels([]);
+    const pageId = store.getSnapshot().activePageId;
+    expect(placement.addEmbedFromGallery("framecanvas").ok).toBe(true);
+    const card = store.findEmbedCard("framecanvas");
     expect(placement.movePanelToDock(pageId, card!.card)).toEqual({
       ok: false,
       reason: "no-dock-tab",
     });
-    expect(store.findEmbedCard("attitude3d")).not.toBeNull();
+    expect(store.findEmbedCard("framecanvas")).not.toBeNull();
   });
 
   it("adds a view straight from the gallery and caps it at one instance", async () => {
@@ -267,18 +288,38 @@ describe("panel placement mutex", () => {
     });
   });
 
-  it("lands a view that has no dock tab without touching the dock", async () => {
+  it("closes a view's dock tab too, then reopens it on the way back (full round trip)", async () => {
     const activity = await import("./panelActivity");
     const bridge = await import("../shell/dockBridge");
     const store = await import("../features/controls/controlsStore");
     const placement = await import("./panelPlacement");
-    const close = vi.fn();
-    bridge.registerDockApi({ getPanel: () => ({ api: { close, setActive: () => {} } }) } as never, () => {});
+    const tabs = new Set<string>(["view3d"]);
+    const closed: string[] = [];
+    const opened: string[] = [];
+    bridge.registerDockApi({
+      getPanel: (id: string) => (tabs.has(id) ? { api: { close: () => { tabs.delete(id); closed.push(id); }, setActive: () => {} } } : undefined),
+    } as never, (id) => { tabs.add(id); opened.push(id); });
     activity.syncPanels([{ id: "view3d", visible: true }]);
 
+    // ① 停靠 → 内嵌：页签先让位，画布上只有一张卡
     expect(placement.movePanelToCanvas("attitude3d").ok).toBe(true);
-    expect(close).not.toHaveBeenCalled();
+    expect(closed).toEqual(["view3d"]);
     expect(store.findEmbedCard("attitude3d")?.card).toMatchObject({ w: 4, h: 3 });
+    // 同一时刻不能既挂停靠又挂卡片
+    expect(placement.movePanelToCanvas("attitude3d")).toEqual({ ok: false, reason: "already-embedded" });
+
+    // ② 内嵌 → 移回停靠：开 view3d（不是 attitude3d），卡片消失
+    const card = store.findEmbedCard("attitude3d");
+    const pageId = store.getSnapshot().activePageId;
+    expect(placement.movePanelToDock(pageId, card!.card)).toEqual({ ok: true });
+    expect(opened).toEqual(["view3d"]);
+    expect(store.findEmbedCard("attitude3d")).toBeNull();
+
+    // ③ 再内嵌：回到画布，仍然只有一张
+    activity.syncPanels([{ id: "view3d", visible: true }]);
+    expect(placement.movePanelToCanvas("attitude3d").ok).toBe(true);
+    expect(closed).toEqual(["view3d", "view3d"]);
+    expect(store.countEmbedCards("attitude3d")).toBe(1);
   });
 
   it("has readable text for every reject reason", async () => {
