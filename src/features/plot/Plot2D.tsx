@@ -1411,6 +1411,15 @@ export function Plot2D() {
     const data: uPlot.AlignedData = [aligned.x, ...aligned.cols];
     fedXRef.current = aligned.x;
     const u = new uPlot(opts, data, chart);
+    // 首帧 Y 域：x/y 都显式 auto:false，uPlot 构造时只按喂数窗口铺 X（_init 的
+    // autoScaleX），Y 不会自动取域。数据泵（120ms）只在 plotStore.isDirty() 时
+    // 才补 Y；设备停发、或数据全部来自虚拟通道（导入轨迹）时 dirty 恒 false，
+    // Y 永久 null → Y 轴隐藏、曲线不画、viewState 也 capture 不到。
+    // 挂载时按已缓存数据直接铺一次，首帧即完整；后续 tick 照旧接管。
+    if (!st.stack) {
+      const ry = yRangeOf(data, channels, null, null, st.yMode);
+      if (ry) u.setScale("y", { min: ry[0], max: ry[1] });
+    }
     uRef.current = u;
     setFollow(true);
     yManualRef.current = false;

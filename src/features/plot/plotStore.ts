@@ -630,6 +630,10 @@ export function addVirtualChannel(name: string, ts: number[], vs: number[]): str
   d.v = vs;
   channels = [...channels, channel];
   alignedCache = null;
+  // 一次性注入整段数据同样要唤醒消费方：2D 的喂数 tick 以 isDirty() 为门，
+  // 虚拟通道不经过 appendPoint（那里才置 dirty），不置位时已挂载的面板永远
+  // 收不到这次注入——导入轨迹后曲线不出点、Y 轴保持 null。
+  dirty = true;
   emit();
   return id;
 }
