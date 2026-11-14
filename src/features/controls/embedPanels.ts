@@ -159,6 +159,36 @@ export function embedMinOf(id: EmbedTargetId): { w: number; h: number } {
   return isEmbedId(id) ? EMBED_ID_MIN[id] : PLUGIN_PANEL_MIN;
 }
 
+/**
+ * 新建卡片的默认格数（E8）：比最小尺寸大一档。
+ *
+ * 原来落卡直接用最小值，于是"首开 2D 曲线"只有 264×196，坐标轴与图例挤在一起；
+ * 默认档在这里统一维护，放置时先试默认、页面装不下再退回 `EMBED_ID_MIN`。
+ * 两种 3D 视图的取值要过 `normalizeGeometry` 的 4:3 回推仍然稳定：
+ * 5×4 与 7×5 是这条回推的不动点（6×5 会被推成 7×5）。
+ */
+export const EMBED_ID_DEFAULT: Record<EmbedId, { w: number; h: number }> = {
+  plot2d: { w: 5, h: 4 },
+  hexview: { w: 4, h: 3 },
+  datatable: { w: 5, h: 5 },
+  xray: { w: 5, h: 5 },
+  spectrum: { w: 5, h: 4 },
+  sequencer: { w: 7, h: 6 },
+  sendbuild: { w: 6, h: 5 },
+  sentinel: { w: 7, h: 6 },
+  framecanvas: { w: 6, h: 5 },
+  attitude3d: { w: 5, h: 4 },
+  trajectory3d: { w: 7, h: 5 },
+};
+
+/** 插件面板的默认格数：与最小值的 6×5 同一套口径。 */
+export const PLUGIN_PANEL_DEFAULT = { w: 6, h: 5 } as const;
+
+/** 目标 id 的默认格数（静态表 or 插件面板默认值）。 */
+export function embedDefaultOf(id: EmbedTargetId): { w: number; h: number } {
+  return isEmbedId(id) ? EMBED_ID_DEFAULT[id] : PLUGIN_PANEL_DEFAULT;
+}
+
 /** 目标 id 的宽高比锁（只有两种 3D 视图有）。 */
 export function embedAspectOf(id: EmbedTargetId): number | undefined {
   return isEmbedId(id) ? EMBED_ID_ASPECT[id] : undefined;

@@ -42,3 +42,45 @@ export function toast(msg: string): void {
   while (h.children.length > MAX_VISIBLE) h.firstElementChild?.remove();
   window.setTimeout(() => el.remove(), SHOW_MS);
 }
+
+export interface ToastAction {
+  label: string;
+  /** 点击后先收起提示再执行；执行抛错不影响提示收起。 */
+  onAct: () => void;
+}
+
+/**
+ * 带一个动作按钮的提示（E4 · 删除内嵌卡的「撤销」）。
+ *
+ * 停留 6s：2.6s 只够"看见"，不够"看见 → 决定 → 点中"。按钮只是提示的一部分，
+ * 不提供键盘焦点陷阱；用户在 6s 内不点即视为放弃。
+ */
+export function toastAction(msg: string, action: ToastAction, ms = 6000): void {
+  const h = ensureHost();
+  if (!h) return;
+  const el = document.createElement("div");
+  el.className = "ai-toast ai-toast-act";
+  el.setAttribute("data-elev", "4");
+  const text = document.createElement("span");
+  text.className = "ai-toast-text";
+  text.textContent = String(msg).slice(0, 200);
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ai-toast-btn";
+  btn.textContent = action.label;
+  el.append(text, btn);
+  let done = false;
+  const close = () => {
+    if (done) return;
+    done = true;
+    window.clearTimeout(timer);
+    el.remove();
+  };
+  const timer = window.setTimeout(close, ms);
+  btn.addEventListener("click", () => {
+    close();
+    action.onAct();
+  });
+  h.appendChild(el);
+  while (h.children.length > MAX_VISIBLE) h.firstElementChild?.remove();
+}

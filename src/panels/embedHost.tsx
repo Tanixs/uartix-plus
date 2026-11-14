@@ -3,8 +3,10 @@ import type { EmbedCard } from "../features/controls/controlsStore";
 import * as controlsStore from "../features/controls/controlsStore";
 import { CardFrame, type CardFrameProps } from "../features/controls/CardViews";
 import {
+  embedKindOf,
   embedName,
   hasPointerLock,
+  isEmbedId,
   parsePluginEmbedId,
 } from "../features/controls/embedPanels";
 import { guardLocked } from "../features/operator/lock";
@@ -27,6 +29,7 @@ import { PluginViewPanel } from "../features/plugins/engine/PluginViewPanel";
 import { IconLock, IconUnlock } from "../shared/icons";
 import { tx, useLocale } from "../i18n/strings";
 import * as panelActivity from "./panelActivity";
+import { removeEmbedCardWithUndo } from "./panelPlacement";
 import { rectsOverlap } from "./embedVisibility";
 import { primePanelView } from "./viewState";
 
@@ -130,15 +133,26 @@ export function EmbedCardView(props: EmbedCardViewProps) {
     );
   const removeSelf = () => {
     const hit = controlsStore.findCardById(card.id);
-    if (hit) controlsStore.removeCard(hit.pageId, card.id);
+    if (hit) removeEmbedCardWithUndo(hit.pageId, card);
   };
+  /* E3：标题条左侧是卡片名，右侧只放"不会重复"的信息。
+     卡片名仍是默认名时（首开就是这样），右侧改说类型与格数；用户改过名之后，
+     默认名才是有信息量的那一半，右侧回到面板类型名 + 格数。两段永远不同文。 */
+  const defaultName = embedName(card.panelId);
+  const kindLabel =
+    isEmbedId(card.panelId) && embedKindOf(card.panelId) === "view"
+      ? tx("视图", "View")
+      : tx("整板", "Panel");
+  const metaText = pluginGone
+    ? tx("插件已卸载", "Plugin uninstalled")
+    : `${card.name.trim() !== defaultName ? defaultName : kindLabel} · ${card.w}×${card.h}`;
   return (
     <CardFrame {...props} card={card} dragHandleOnly>
       <div className="ctl-embed" data-wheel-locked={locked ? "1" : undefined}>
         <div className="ctl-embed-head" data-embed-head>
           <span className="ctl-embed-title">{card.name}</span>
           <span className="ctl-embed-meta" style={pluginGone ? { color: "var(--danger)" } : undefined}>
-            {pluginGone ? tx("插件已卸载", "Plugin uninstalled") : embedName(card.panelId)}
+            {metaText}
           </span>
           {canLock && (
             <button

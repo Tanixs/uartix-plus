@@ -195,7 +195,7 @@ describe("P121-F · 控制画布的只读锁按字段拆", () => {
 });
 
 describe("canvas embed schema v2", () => {
-  it("adds whitelisted panel cards at their semantic minimum size", async () => {
+  it("adds whitelisted panel cards at the default size, one notch above the minimum", async () => {
     const store = await import("./controlsStore");
     const pageId = store.getSnapshot().activePageId;
     const r = store.addEmbedCard(pageId, "plot2d");
@@ -207,8 +207,8 @@ describe("canvas embed schema v2", () => {
     expect(card).toMatchObject({
       type: "embed",
       panelId: "plot2d",
-      w: 4,
-      h: 3,
+      w: 5,
+      h: 4,
       minW: 4,
       minH: 3,
       aspectLock: false,
@@ -257,23 +257,23 @@ describe("canvas embed schema v2", () => {
     expect(store.addEmbedCard(pageId, "plot2d")).toEqual({ ok: false, reason: "duplicate" });
   });
 
-  it("accepts the wave-1 data panels at their own minimum sizes", async () => {
+  it("accepts the wave-1 data panels at their own default sizes", async () => {
     const store = await import("./controlsStore");
     const pageId = store.importPage({ name: "wave1", cols: 12, rows: 12, cards: [] });
     const sizes = [
-      ["datatable", 4, 4],
-      ["xray", 4, 4],
-      ["spectrum", 4, 3],
+      ["datatable", 5, 5, 4, 4],
+      ["xray", 5, 5, 4, 4],
+      ["spectrum", 5, 4, 4, 3],
     ] as const;
-    for (const [id, w, h] of sizes) {
+    for (const [id, w, h, minW, minH] of sizes) {
       expect(store.addEmbedCard(pageId, id).ok).toBe(true);
       expect(store.findEmbedCard(id)?.card).toMatchObject({
         type: "embed",
         panelId: id,
         w,
         h,
-        minW: w,
-        minH: h,
+        minW,
+        minH,
         aspectLock: false,
       });
     }
@@ -286,8 +286,8 @@ describe("canvas embed schema v2", () => {
     expect(store.findEmbedCard("sendbuild")?.card).toMatchObject({
       type: "embed",
       panelId: "sendbuild",
-      w: 5,
-      h: 4,
+      w: 6,
+      h: 5,
       minW: 5,
       minH: 4,
       aspectLock: false,
@@ -300,8 +300,10 @@ describe("canvas embed schema v2", () => {
     expect(store.findEmbedCard(pluginId)?.card).toMatchObject({
       panelId: pluginId,
       name: "波特率观测",
-      w: 5,
-      h: 4,
+      w: 6,
+      h: 5,
+      minW: 5,
+      minH: 4,
       aspectLock: false,
     });
     expect(store.addEmbedCard(pageId, pluginId)).toEqual({ ok: false, reason: "duplicate" });
@@ -369,10 +371,48 @@ describe("canvas embed schema v2", () => {
     const store = await import("./controlsStore");
     const page = store.importPage({ name: "full", cols: 4, rows: 3, cards: [] });
     expect(store.addEmbedCard(page, "plot2d").ok).toBe(true);
+    // E8 回退：默认档 5×4 装不进 4×3 的页，退回语义最小值而不是报 page-too-small
+    expect(store.findEmbedCard("plot2d")?.card).toMatchObject({ w: 4, h: 3 });
     expect(store.addEmbedCard(page, "hexview")).toEqual({ ok: false, reason: "no-space" });
   });
 
-  it("adds the attitude view with a locked 4:3 minimum", async () => {
+  it("restores a deleted embed card with its geometry and view state (undo path)", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.importPage({ name: "undo", cols: 12, rows: 12, cards: [] });
+    expect(store.addEmbedCard(pageId, "plot2d").ok).toBe(true);
+    const card = store.findEmbedCard("plot2d")!.card;
+    const kept = {
+      ...card,
+      x: 3,
+      y: 2,
+      w: 6,
+      h: 5,
+      // 删除瞬间从挂载实例抓下来的实时视野，撤销时要一起回来
+      viewState: { xMin: 1, xMax: 9, yMin: -2, yMax: 2, follow: false },
+    };
+    expect(store.removeCard(pageId, card.id)).toBe(true);
+    expect(store.findEmbedCard("plot2d")).toBeNull();
+    expect(store.restoreCard(pageId, kept)).toBe(true);
+    const restored = store
+      .getSnapshot()
+      .pages.find((p) => p.id === pageId)!
+      .cards.find((c) => c.id === card.id)!;
+    expect(restored).toMatchObject({
+      type: "embed",
+      x: 3,
+      y: 2,
+      w: 6,
+      h: 5,
+      viewState: { xMin: 1, xMax: 9, yMin: -2, yMax: 2, follow: false },
+    });
+    // 重复点撤销幂等：不会插第二张
+    expect(store.restoreCard(pageId, kept)).toBe(true);
+    expect(
+      store.getSnapshot().pages.find((p) => p.id === pageId)!.cards,
+    ).toHaveLength(1);
+  });
+
+  it("adds the attitude view with its default size above the locked 4:3 minimum", async () => {
     const store = await import("./controlsStore");
     const pageId = store.getSnapshot().activePageId;
     expect(store.addEmbedCard(pageId, "attitude3d").ok).toBe(true);
@@ -381,8 +421,9 @@ describe("canvas embed schema v2", () => {
     expect(card).toMatchObject({
       type: "embed",
       panelId: "attitude3d",
-      w: 4,
-      h: 3,
+      // 5×4 是 4:3 回推的不动点：再大的一档（6×5）会被 normalizeGeometry 推成 7×5。
+      w: 5,
+      h: 4,
       minW: 4,
       minH: 3,
       aspectLock: true,
@@ -404,7 +445,7 @@ describe("canvas embed schema v2", () => {
     expect(card).toMatchObject({ w: 12, h: 9, aspectLock: true });
   });
 
-  it("adds the trajectory view with a locked 5x4 minimum", async () => {
+  it("adds the trajectory view above the locked 5x4 minimum", async () => {
     const store = await import("./controlsStore");
     const pageId = store.getSnapshot().activePageId;
     expect(store.addEmbedCard(pageId, "trajectory3d").ok).toBe(true);
@@ -413,8 +454,9 @@ describe("canvas embed schema v2", () => {
     expect(card).toMatchObject({
       type: "embed",
       panelId: "trajectory3d",
-      w: 5,
-      h: 4,
+      // 7×5 同样是不动点（6×5 会被推成 7×5），比最小 5×4 大一档。
+      w: 7,
+      h: 5,
       minW: 5,
       minH: 4,
       aspectLock: true,
@@ -669,6 +711,12 @@ describe("S2 · 发送格式 ASCII / HEX", () => {
     const { formatJoy } = await import("./controlsStore");
     expect(formatJoy("J:%x,%y!", 1.5, -1, "hex")).toBe("J:00 00 C0 3F,00 00 80 BF!");
     expect(formatJoy("J:%x,%y!", 1.5, -1, "ascii")).toBe("J:1.5,-1!");
+  });
+
+  it("摇杆回中的 -0 归一到 +0（不写 0x80000000）", async () => {
+    const { formatJoy } = await import("./controlsStore");
+    expect(formatJoy("%y", 0, -0, "hex")).toBe("00 00 00 00");
+    expect(formatJoy("%x,%y", -0, 0, "hex")).toBe("00 00 00 00,00 00 00 00");
   });
 
   it("旧档没有 sendMode 时补 ascii；不发自由文本的卡不带这个字段", async () => {

@@ -53,6 +53,11 @@ export function capturePanelView(panelId: string): EmbedPanelViewState | null {
   return state;
 }
 
+/** 只读当前实例的视图态：不写 pending，供「删除后撤销」把视野随卡片一起留底。 */
+export function peekPanelView(panelId: string): EmbedPanelViewState | null {
+  return adapters.get(panelId)?.capture() ?? null;
+}
+
 /** 切换被取消（例如目标位置非法）时丢弃暂存，避免下次无关重挂载吃到旧视野。 */
 export function discardPanelView(panelId: string) {
   pending.delete(panelId);

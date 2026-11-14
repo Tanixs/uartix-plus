@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { panelViewId } from "../plugins/engine/panelBridge";
 import {
   EMBED_ID_ASPECT,
+  EMBED_ID_DEFAULT,
   EMBED_ID_MIN,
   EMBED_IDS,
+  PLUGIN_PANEL_DEFAULT,
   PLUGIN_PANEL_MIN,
   dockIdOf,
+  embedDefaultOf,
   embedKindOf,
   embedMinOf,
   embedName,
@@ -118,6 +121,19 @@ describe("embed whitelist", () => {
     expect(hasPointerLock("sentinel")).toBe(false);
     expect(hasPointerLock("framecanvas")).toBe(false);
     expect(hasPointerLock("sequencer")).toBe(false);
+  });
+
+  it("keeps every default size one notch above its minimum in this same table", () => {
+    // E8：默认档集中在这里，别在放置逻辑里散落 magic number。
+    for (const id of EMBED_IDS) {
+      const min = EMBED_ID_MIN[id];
+      const def = EMBED_ID_DEFAULT[id];
+      expect(def.w).toBeGreaterThanOrEqual(min.w);
+      expect(def.h).toBeGreaterThanOrEqual(min.h);
+      expect(def.w + def.h).toBeGreaterThan(min.w + min.h);
+    }
+    expect(embedDefaultOf("plot2d")).toEqual({ w: 5, h: 4 });
+    expect(embedDefaultOf("plugin-view-acme.logger:tail")).toEqual(PLUGIN_PANEL_DEFAULT);
   });
 
   it("names every target in both languages", () => {

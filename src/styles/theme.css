@@ -13124,71 +13124,29 @@ body.pdrag-active *{cursor:grabbing !important;}
   animation: ctl-reveal 900ms ease-out 1;
 }
 
-/* S2 · 卡面发送格式角标。
-   挂载命令时格式由命令决定，HEX 以 `.ctl-mount-fmt` 并进挂载徽标里；
-   未挂载时用下面这枚独立角标，和 `.ctl-mount` 同角、同层级。
-   绝对定位不参与 flex —— 窄卡里它只在卡片自己的盒子内占角，
-   不会把数值行或滑条轨道挤出原有几何（有 container 条件再收一档尺寸）。 */
-.ctl-fmt-bad {
+/* S2-b · HEX 的极淡信号：一枚 3px 圆点。
+   常驻文字角标（`.ctl-fmt-bad`）与挂载徽标里的格式字段都已删掉——权威显示移到
+   右键「发送格式」菜单；这里只保留"这张卡是 HEX"的存在感：
+   绝对定位、3px、不可点、不带文案，窄卡里也挤不坏数值与滑条几何。
+   颜色只用既有 token（`--accent`），不新增色板。 */
+.ctl-fmt-dot {
   position: absolute;
-  top: var(--sp-0);
-  right: var(--sp-0);
+  top: 4px;
+  right: 4px;
   z-index: 57;
-  padding: 0 var(--sp-1h);
-  border-radius: var(--radius-s);
-  background: var(--bg-panel);
-  box-shadow: inset 0 0 0 1px var(--accent);
-  color: var(--accent);
-  font-size: var(--fs-xs);
-  line-height: var(--ctl-h-1);
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  max-width: calc(100% - var(--sp-1));
-  overflow: hidden;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.45;
   pointer-events: none;
 }
 
-/* 并进挂载徽标的格式小字：竖线分隔，不另起一枚角标，免得两个角标叠在同一个角上。 */
-.ctl-mount-fmt {
-  flex: none;
-  padding-left: var(--sp-1h);
-  box-shadow: inset 1px 0 0 var(--border-soft);
-  color: var(--accent);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-/* 1 列窄卡：角标收成紧贴边角的小签，仍然可读；挂载徽标里就省掉插头图标，
-   把「HEX」留在可见区（名字本来就已经隐藏）。收一档只在视觉上缩角标自己
-   （transform 不改盒子），60×60 的 1×1 卡里数值字身与滑条轨道都不受影响。 */
+/* 1 列 / 1 行窄卡：贴边 2px 收一档，仍然只是 3px 的点，不改任何盒子尺寸。 */
 @container (max-width: 96px) {
-  .ctl-fmt-bad {
-    top: 0;
-    padding: 0 var(--sp-0);
-    line-height: 14px;
-    transform: scale(0.85);
-    transform-origin: top right;
-  }
-  .ctl-mount:has(.ctl-mount-fmt) svg {
-    display: none;
-  }
-  .ctl-mount-fmt {
-    padding-left: 0;
-    box-shadow: none;
-  }
-}
-
-/* 只有 1 行高的滑条卡：脚注本来就被隐藏，滑条下方是空的。
-   角标改贴右下角、按同一比例收小，正好落在滑条拇指下沿之外——
-   数值行完全让开，滑条轨道与拇指也不被遮。 */
-@container (max-height: 78px) {
-  .ctl-card:has(.ctl-slider) .ctl-fmt-bad {
-    top: auto;
-    bottom: 0;
-    padding: 0 var(--sp-0);
-    line-height: 14px;
-    transform: scale(0.8);
-    transform-origin: bottom right;
+  .ctl-fmt-dot {
+    top: 3px;
+    right: 3px;
   }
 }
 
@@ -13258,4 +13216,57 @@ body.pdrag-active *{cursor:grabbing !important;}
 
 .ctl-pf-btn:hover {
   background: var(--accent-soft);
+}
+
+/* E4 · 带「撤销」动作的 toast（删除内嵌卡）。只用既有 token；描边走 inset 阴影，
+   不占门禁 G 的边框预算。 */
+.ai-toast-act {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.ai-toast-act .ai-toast-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-toast-btn {
+  flex: none;
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-s);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ai-toast-btn:hover {
+  background: var(--accent-soft);
+}
+
+/* E3 · 内嵌卡标题条：左侧名称吃剩余宽度，右侧「类型 · 格数」在窄卡里先让位
+   （260px 处已有隐藏规则，这里只保证挤压时先收 meta 不压标题）。 */
+.ctl-embed-title {
+  flex: 1 1 auto;
+}
+
+.ctl-embed-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* S2-b · 右键「发送格式」子菜单：当前项打勾并用 accent 字，
+   与组卡弹窗里的「发送格式」是同一句措辞、同一组取值。 */
+.ctx-tick {
+  display: inline-block;
+  width: 12px;
+  flex: none;
+  text-align: center;
+  color: var(--accent-text);
+}
+
+.ctx-item[aria-checked="true"] {
+  color: var(--accent-text);
 }

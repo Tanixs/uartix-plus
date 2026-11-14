@@ -22,9 +22,10 @@ import {
 import { TRAJECTORY_VIEW_MAX_INSTANCES } from "../features/plot3d/trajectoryViewQuality";
 import * as controlsStore from "../features/controls/controlsStore";
 import { tx } from "../i18n/strings";
+import { toast, toastAction } from "../shared/toast";
 import { closeDockPanel, isDockReady, openDockPanel } from "../shell/dockBridge";
 import * as panelActivity from "./panelActivity";
-import { capturePanelView, discardPanelView } from "./viewState";
+import { capturePanelView, discardPanelView, peekPanelView } from "./viewState";
 
 export type PanelPlacement = "dock" | "embed" | "closed";
 
@@ -237,8 +238,21 @@ export function placementRejectText(reason: PlacementRejectReason, id?: string):
         "该面板正在停靠区显示；请从页签的「内嵌到控制画布」进入，或先关闭停靠页签",
         "This panel is docked — use “Embed in control canvas” on its tab, or close the tab first",
       );
-    case "already-embedded":
+    case "already-embedded": {
+      // 互斥跨控制页（翻页也共享同一份存档）：只说"已内嵌"用户找不到那张卡，
+      // 必须点名它在哪一页。
+      const hit = id ? controlsStore.findEmbedCard(id) : null;
+      const pageName = hit
+        ? controlsStore.getSnapshot().pages.find((p) => p.id === hit.pageId)?.name
+        : undefined;
+      if (pageName) {
+        return tx(
+          `该面板已内嵌在控制页「${pageName}」：切到那一页查看，或先删除那张卡`,
+          `This panel is already embedded on control page “${pageName}” — switch there or remove that card first`,
+        );
+      }
       return tx("该面板已经在控制画布内嵌了", "This panel is already embedded in the control canvas");
+    }
     case "view-limit":
       // 所有视图的上限当前都是 1，文案不点名，避免新增视图时漏改一句。
       // 不写死 WebGL：哨兵/帧画布是普通视图，限制它们的理由是不重复订阅同一条帧流。
@@ -263,4 +277,36 @@ export function placementRejectText(reason: PlacementRejectReason, id?: string):
     case "unknown-panel":
       return tx("这个面板不支持内嵌到控制画布", "This panel cannot be embedded in the control canvas");
   }
+}
+
+/**
+ * E4：删除内嵌卡并给一次撤销机会（不加模态确认：低频且完全可逆）。
+ *
+ * 删除前用 `peekPanelView` **只读**抓一份实时视野（不写 pending，撤销窗口内
+ * 不点撤销也不会污染下次挂载）；副本随卡片一起留在 toast 闭包里，撤销时
+ * `restoreCard` 挂回原 id/位置/尺寸，`EmbedCardView` 用这份 viewState 预置视野。
+ */
+export function removeEmbedCardWithUndo(
+  pageId: string,
+  card: controlsStore.EmbedCard,
+): boolean {
+  const live = isEmbedPanelId(card.panelId) ? peekPanelView(card.panelId) : null;
+  const kept: controlsStore.EmbedCard = live ? { ...card, viewState: live } : card;
+  if (!controlsStore.removeCard(pageId, card.id)) return false;
+  toastAction(
+    tx(`已删除「${card.name}」`, `Deleted “${card.name}”`),
+    {
+      label: tx("撤销", "Undo"),
+      onAct: () => {
+        if (controlsStore.restoreCard(pageId, kept)) return;
+        toast(
+          tx(
+            "无法撤销：这个面板已经在画布中，或所属控制页已不存在",
+            "Cannot undo: this panel is already on the canvas, or its page no longer exists",
+          ),
+        );
+      },
+    },
+  );
+  return true;
 }

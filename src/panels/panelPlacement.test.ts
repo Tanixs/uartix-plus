@@ -62,7 +62,18 @@ describe("panel placement mutex", () => {
     activity.syncPanels([]);
     expect(placement.panelPlacementOf("datatable")).toBe("closed");
     expect(placement.movePanelToCanvas("datatable").ok).toBe(true);
-    expect(store.findEmbedCard("datatable")?.card).toMatchObject({ w: 4, h: 4 });
+    expect(store.findEmbedCard("datatable")?.card).toMatchObject({ w: 5, h: 5 });
+  });
+
+  it("names the owning control page when a panel is already embedded elsewhere", async () => {
+    const activity = await import("./panelActivity");
+    activity.syncPanels([]);
+    const store = await import("../features/controls/controlsStore");
+    const pageId = store.importPage({ name: "产线A", cols: 12, rows: 12, cards: [] });
+    const placement = await import("./panelPlacement");
+    expect(placement.placePanelInCanvas(pageId, "plot2d").ok).toBe(true);
+    // 互斥跨控制页：只说"已内嵌"用户翻不到，文案必须点名在哪一页
+    expect(placement.placementRejectText("already-embedded", "plot2d")).toContain("产线A");
   });
 
   it("caps each wave-1 whole panel at one instance", async () => {
@@ -82,7 +93,7 @@ describe("panel placement mutex", () => {
     const store = await import("../features/controls/controlsStore");
     const placement = await import("./panelPlacement");
     expect(placement.addEmbedFromGallery("sendbuild").ok).toBe(true);
-    expect(store.findEmbedCard("sendbuild")?.card).toMatchObject({ w: 5, h: 4 });
+    expect(store.findEmbedCard("sendbuild")?.card).toMatchObject({ w: 6, h: 5 });
     expect(placement.addEmbedFromGallery("sendbuild")).toEqual({
       ok: false,
       reason: "already-embedded",
@@ -109,8 +120,8 @@ describe("panel placement mutex", () => {
     expect(card).toMatchObject({
       panelId: id,
       name: "日志",
-      w: 5,
-      h: 4,
+      w: 6,
+      h: 5,
       aspectLock: false,
     });
     expect(placement.panelPlacementOf(id)).toBe("embed");
@@ -280,7 +291,7 @@ describe("panel placement mutex", () => {
     const r = placement.movePanelToCanvas("sentinel");
     expect(r.ok).toBe(true);
     expect(closed).toEqual(["sentinel"]);
-    expect(store.findEmbedCard("sentinel")?.card).toMatchObject({ w: 6, h: 5 });
+    expect(store.findEmbedCard("sentinel")?.card).toMatchObject({ w: 7, h: 6 });
     // 第二次走"已内嵌"，不会关第二次页签
     expect(placement.movePanelToCanvas("sentinel")).toEqual({
       ok: false,
@@ -304,7 +315,7 @@ describe("panel placement mutex", () => {
     // ① 停靠 → 内嵌：页签先让位，画布上只有一张卡
     expect(placement.movePanelToCanvas("attitude3d").ok).toBe(true);
     expect(closed).toEqual(["view3d"]);
-    expect(store.findEmbedCard("attitude3d")?.card).toMatchObject({ w: 4, h: 3 });
+    expect(store.findEmbedCard("attitude3d")?.card).toMatchObject({ w: 5, h: 4 });
     // 同一时刻不能既挂停靠又挂卡片
     expect(placement.movePanelToCanvas("attitude3d")).toEqual({ ok: false, reason: "already-embedded" });
 

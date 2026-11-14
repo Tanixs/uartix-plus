@@ -5,6 +5,7 @@ import { guardLocked } from "../operator/lock";
   import { DEBUG_SCHEMA, sanitizeManaged, sanitizeDebugProfile, buildDebugPreset, type ManagedControl, type DebugProfile, type DebugParameter } from "./debugPreset";
 import {
   embedAspectOf,
+  embedDefaultOf,
   embedMinOf,
   embedName,
   isEmbedTargetId,
@@ -1242,7 +1243,7 @@ function checkEmbedPlacement(
   pageId: string,
   panelId: string,
 ):
-  | { ok: true; pos: { x: number; y: number }; min: { w: number; h: number } }
+  | { ok: true; pos: { x: number; y: number }; size: { w: number; h: number } }
   | { ok: false; reason: Exclude<EmbedAddResult, { ok: true }>["reason"] } {
   if (!isEmbedTargetId(panelId)) return { ok: false, reason: "unknown-panel" };
   const page = snapshot.pages.find((p) => p.id === pageId);
@@ -1251,10 +1252,16 @@ function checkEmbedPlacement(
   const min = embedMinOf(panelId);
   const rows = page.rows || 48;
   if (page.cols < min.w || rows < min.h) return { ok: false, reason: "page-too-small" };
-  const pos = findFlowPos(page, min.w, min.h);
-  // findFlowPos 在排不下时返回 y=rows；用它判定"超额"，不引入第二套扫描。
-  if (pos.y + min.h > rows) return { ok: false, reason: "no-space" };
-  return { ok: true, pos, min };
+  // E8：先试比最小大一档的默认尺寸；页面装不下（列数/行数不足，或找不到空位）再退回最小。
+  // 两种候选走同一条 findFlowPos，避免"预览按默认、落卡按最小"两套口径。
+  for (const size of [embedDefaultOf(panelId), min]) {
+    if (size.w > page.cols || size.h > rows) continue;
+    const pos = findFlowPos(page, size.w, size.h);
+    // findFlowPos 在排不下时返回 y=rows；用它判定"超额"，不引入第二套扫描。
+    if (pos.y + size.h > rows) continue;
+    return { ok: true, pos, size };
+  }
+  return { ok: false, reason: "no-space" };
 }
 
 /** 只校验不落库：双向切换先干跑，避免"关了停靠才发现画布放不下"。 */
@@ -1278,7 +1285,7 @@ export function addEmbedCard(
   if (guardLocked()) return { ok: false, reason: "locked" };
   const checked = checkEmbedPlacement(pageId, panelId);
   if (!checked.ok) return checked;
-  const { pos, min } = checked;
+  const { pos, size } = checked;
   // 旧存档/坏数据不进卡：宁可回到默认视野，也不让 NaN 把 uPlot 弄白。
   const view = sanitizeEmbedViewState(panelId as EmbedTargetId, viewState);
   const card: EmbedCard = {
@@ -1287,11 +1294,11 @@ export function addEmbedCard(
     name: name?.trim() || embedName(panelId as EmbedTargetId),
     x: pos.x,
     y: pos.y,
-    w: min.w,
-    h: min.h,
+    w: size.w,
+    h: size.h,
     panelId: panelId as EmbedTargetId,
-    minW: min.w,
-    minH: min.h,
+    minW: embedMinOf(panelId as EmbedTargetId).w,
+    minH: embedMinOf(panelId as EmbedTargetId).h,
     aspectLock: embedAspectOf(panelId as EmbedTargetId) !== undefined,
     ...(view ? { viewState: view } : {}),
   };
@@ -1493,8 +1500,10 @@ export function patchCard(
 }
 
 
-export function removeCard(pageId: string, cardId: string) {
-  if (guardLocked()) return;
+export function removeCard(pageId: string, cardId: string): boolean {
+  if (guardLocked()) return false;
+  const page = snapshot.pages.find((p) => p.id === pageId);
+  if (!page || !page.cards.some((c) => c.id === cardId)) return false;
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) =>
@@ -1504,6 +1513,31 @@ export function removeCard(pageId: string, cardId: string) {
     ),
   };
   emit();
+  return true;
+}
+
+/**
+ * 撤销删除：把原卡片（含 id / 位置 / 尺寸 / 视图态）放回原页。
+ *
+ * 内嵌卡删除后靠它做「撤销」——卡片自带的 `viewState` 是删除瞬间从挂载实例
+ * 抓下来的实时视野，挂回后由 `primePanelView` 在子组件注册适配器时消费。
+ * 同 id 已存在（重复点撤销）视作成功；该面板在此窗口内又被内嵌时不插第二张。
+ */
+export function restoreCard(pageId: string, card: ControlCard): boolean {
+  if (guardLocked()) return false;
+  const page = snapshot.pages.find((p) => p.id === pageId);
+  if (!page) return false;
+  if (page.cards.some((c) => c.id === card.id)) return true;
+  if (card.type === "embed" && findEmbedCard(card.panelId)) return false;
+  const restored = normalizeGeometry(card, page.cols, page.rows || 48);
+  snapshot = {
+    ...snapshot,
+    pages: snapshot.pages.map((p) =>
+      p.id === pageId ? { ...p, cards: [...p.cards, restored] } : p,
+    ),
+  };
+  emit();
+  return true;
 }
 
 export function declumpPage(pageId: string) {
@@ -1735,8 +1769,11 @@ export function formatJoy(
   const f = (v: number) => String(Number(v.toFixed(2)));
   if (mode === "hex") {
     const enc = (v: number) => {
+      // -0 === 0 但 f32 位型不同（0x80000000 vs 0x00000000）：摇杆回中经 Math.round
+      // 可能得到 -0，直接写会让设备看到"负零"。统一按 +0 归一。
+      const n = v === 0 ? 0 : v;
       const buf = new ArrayBuffer(4);
-      new DataView(buf).setFloat32(0, v, true);
+      new DataView(buf).setFloat32(0, n, true);
       return Array.from(new Uint8Array(buf))
         .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
         .join(" ");

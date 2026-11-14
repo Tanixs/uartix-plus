@@ -37,6 +37,7 @@ import {
   movePanelToDock,
   moveToDockRejectText,
   placementRejectText,
+  removeEmbedCardWithUndo,
 } from "../../panels/panelPlacement";
 import { embedMinOf, hasDockTabForEmbed, isEmbedTargetId } from "./embedPanels";
 import { isMountable, mountedState, withMountedCommand } from "./commandMount";
@@ -259,6 +260,9 @@ export function ControlCanvas() {
   const [menu, setMenu] = useState<{ cardId: string; x: number; y: number } | null>(null);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(null);
   const [mountOpen, setMountOpen] = useState(false);
+  /* S2-b：卡面不再常驻「HEX」角标，右键「发送格式」成为权威显示。 */
+  const [fmtOpen, setFmtOpen] = useState(false);
+  const fmtAnchorRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [gridMenu, setGridMenu] = useState<{ x: number; y: number; gx: number; gy: number } | null>(null);
   const [gridMenuPos, setGridMenuPos] = useState<{ left: number; top: number } | null>(null);
@@ -1405,6 +1409,7 @@ export function ControlCanvas() {
       onMenu: (card: ControlCard, x: number, y: number) => {
         setMenuPos(null);
         setMountOpen(false);
+        setFmtOpen(false);
         setGridMenu(null);
         setMenu({ cardId: card.id, x, y });
       },
@@ -1814,9 +1819,63 @@ export function ControlCanvas() {
                 )}
               </>
             )}
+            {"sendMode" in menuCard &&
+              !menuCard.sendTemplateId &&
+              !("useScript" in menuCard && menuCard.useScript) &&
+              !menuCard.commandId && (
+              <>
+                <div
+                  ref={fmtAnchorRef}
+                  className="ctx-item ctx-has-sub"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setFmtOpen((v) => !v);
+                  }}
+                  onMouseEnter={() => setFmtOpen(true)}
+                >
+                  {tx("发送格式", "Send format")} <span className="ctx-arrow"><IconChevron size={12} /></span>
+                </div>
+                {fmtOpen && (
+                  <Flyout
+                    anchor={fmtAnchorRef.current}
+                    zf={zfactor}
+                    onArm={() => setFmtOpen(false)}
+                  >
+                    {(["ascii", "hex"] as const).map((m) => {
+                      const on = menuCard.sendMode === m;
+                      return (
+                        <button
+                          key={m}
+                          className="ctx-item"
+                          role="menuitemradio"
+                          aria-checked={on}
+                          onClick={() => {
+                            store.patchCard(page.id, menuCard.id, { sendMode: m });
+                            setMenu(null);
+                            setFmtOpen(false);
+                          }}
+                        >
+                          <span className="ctx-item-l">
+                            <span className="ctx-tick" aria-hidden="true">
+                              {on ? "✓" : ""}
+                            </span>
+                            {m === "ascii" ? "ASCII" : "HEX"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </Flyout>
+                )}
+              </>
+            )}
             <button
               className="ctx-item danger"
-              onClick={() => { store.removeCard(page.id, menuCard.id); setMenu(null); }}
+              onClick={() => {
+                // E4：内嵌卡删除走可撤销路径（连视野一起留底）；普通控件仍直接删。
+                if (menuCard.type === "embed") removeEmbedCardWithUndo(page.id, menuCard);
+                else store.removeCard(page.id, menuCard.id);
+                setMenu(null);
+              }}
             >
               {tx("删除", "Delete")}
             </button>
@@ -1897,7 +1956,8 @@ export function ControlCanvas() {
           pageId={page.id}
           onClose={() => setEditing(null)}
           onDelete={() => {
-            store.removeCard(page.id, editCard.id);
+            if (editCard.type === "embed") removeEmbedCardWithUndo(page.id, editCard);
+            else store.removeCard(page.id, editCard.id);
             setEditing(null);
           }}
         />
