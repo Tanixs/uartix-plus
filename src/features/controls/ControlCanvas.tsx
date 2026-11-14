@@ -1726,7 +1726,9 @@ export function ControlCanvas() {
             {isMountable(menuCard) && menuCard.commandId && (
               <button
                 className="ctx-item"
+                disabled={guardLocked()}
                 onClick={() => {
+                  if (guardLocked()) return;
                   store.patchCard(page.id, menuCard.id, { commandId: undefined });
                   setMenu(null);
                 }}
@@ -1743,8 +1745,18 @@ export function ControlCanvas() {
                 <div
                   ref={mountAnchorRef}
                   className="ctx-item ctx-has-sub"
-                  onClick={(e) => { e.stopPropagation(); setMountOpen((v) => !v); }}
-                  onMouseEnter={() => { disarmMountClose(); setMountOpen(true); }}
+                  aria-disabled={guardLocked() || undefined}
+                  title={guardLocked() ? tx("只读模式：挂载标识照常显示，但不能改绑", "Read-only: the mount is shown but cannot be changed") : undefined}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (guardLocked()) return;
+                    setMountOpen((v) => !v);
+                  }}
+                  onMouseEnter={() => {
+                    if (guardLocked()) return;
+                    disarmMountClose();
+                    setMountOpen(true);
+                  }}
                 >
                   {menuCard.commandId
                     ? tx("换绑命令", "Change command")

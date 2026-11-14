@@ -26,11 +26,13 @@ import { isMountable, mountedState } from "./commandMount";
 import * as sendStore from "../send/sendStore";
 import { bindingDetail, bindingLabel, isLinked } from "./cardBinding";
 import { beep } from "./scriptRunner";
+import { guardLocked } from "../operator/lock";
 import { NumInput, TextInput } from "../../shared/FormInputs";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { rangeStyle, syncRangeFill } from "../../shell/rangeFill";
 import { toast } from "../../shared/toast";
+import { IconPlug } from "../../shared/icons";
 
 function fmtVal(v: number): string {
   if (Number.isInteger(v)) return String(v);
@@ -148,7 +150,24 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
   // 命令被删要当场把卡标成失效：名字改了同理（标题/提示都读同一份快照）
   useSyncExternalStore(commandStore.subscribe, commandStore.getSnapshot);
   const linked = isLinked(card, sendStore.getFocus());
-  const mountBroken = card.commandId ? mountedState(card).kind === "missing" : false;
+  const mount = mountedState(card);
+  const mountBroken = mount.kind === "missing";
+  const mountItem = mount.kind === "ok" ? mount.item : null;
+  /* 挂载是引用式：命令改名/改模板，卡面角标当场跟着变。模板变了名字没变时，
+     只换文字用户未必发现，所以变化后让角标闪一下并暂时写明"已更新"。 */
+  const mountSig = mountItem
+    ? `${mountItem.name}\u0000${mountItem.template}\u0000${mountItem.sendMode}`
+    : "";
+  const [mountFlash, setMountFlash] = useState(false);
+  const lastMountSig = useRef(mountSig);
+  useEffect(() => {
+    const prev = lastMountSig.current;
+    lastMountSig.current = mountSig;
+    if (!mountSig || !prev || prev === mountSig) return;
+    setMountFlash(true);
+    const timer = window.setTimeout(() => setMountFlash(false), 1600);
+    return () => window.clearTimeout(timer);
+  }, [mountSig]);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const dropRef = useRef(props.onDropTemplate);
   dropRef.current = props.onDropTemplate;
@@ -181,6 +200,14 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
         card.type === "embed" ? " embed" : ""
       }`}
       data-id={card.id}
+      title={
+        mountItem
+          ? tx(
+              `已挂载命令：${mountItem.name}\n模板：${mountItem.template || "—"}`,
+              `Mounted command: ${mountItem.name}\nTemplate: ${mountItem.template || "—"}`,
+            )
+          : undefined
+      }
       style={{
         left: props.left,
         top: props.top,
@@ -226,6 +253,22 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
           )}
         >
           {tx("命令失效", "Command missing")}
+        </span>
+      )}
+      {mountItem && (
+        <span
+          className={`ctl-mount${mountFlash ? " ctl-mount-flash" : ""}`}
+          title={tx(
+            `已挂载命令「${mountItem.name}」\n模板：${mountItem.template || "—"}\n发送格式：${mountItem.sendMode.toUpperCase()}\n改命令名或模板，卡片立即跟随；右键可换绑 / 解绑`,
+            `Mounted command "${mountItem.name}"\nTemplate: ${mountItem.template || "—"}\nFormat: ${mountItem.sendMode.toUpperCase()}\nRenaming or retemplating the command updates this card immediately; right-click to remount / unmount`,
+          )}
+        >
+          <IconPlug />
+          <span className="ctl-mount-name">
+            {mountFlash
+              ? tx(`已更新 · ${mountItem.name}`, `Updated · ${mountItem.name}`)
+              : tx(`命令 · ${mountItem.name}`, `Cmd · ${mountItem.name}`)}
+          </span>
         </span>
       )}
       {props.children}
@@ -1692,6 +1735,7 @@ export function CardModal(props: {
             <select
               className="input"
               value={card.commandId ?? ""}
+              disabled={guardLocked()}
               onChange={(e) => patch({ commandId: e.target.value || undefined })}
             >
               <option value="">
@@ -1725,6 +1769,14 @@ export function CardModal(props: {
                     "这条命令已被删除：卡片发送已停用。换绑一条命令，或解绑后改回卡片自己的模板。",
                     "That command was deleted, so this card cannot send. Mount another command, or unmount and use the card's own template.",
                   )}
+              {guardLocked() && (
+                <div>
+                  {tx(
+                    "只读模式：挂载状态照常显示，但不能换绑或解绑。",
+                    "Read-only: the mount is shown, but it cannot be changed.",
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </Section>

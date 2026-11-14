@@ -13069,6 +13069,61 @@ body.pdrag-active *{cursor:grabbing !important;}
   pointer-events: none;
 }
 
+/* 已挂载命令角标（schema v3）：卡面要能直接读出"这张卡发的是哪条命令"，
+   不能只藏在设置弹窗里。绝对定位不占文档流——窄卡也只在自己的盒子里省略，
+   不会把标题/数值/滑条挤变形。 */
+.ctl-mount {
+  position: absolute;
+  top: var(--sp-0);
+  right: var(--sp-0);
+  z-index: 57;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  max-width: calc(100% - var(--sp-2));
+  padding: 0 var(--sp-1h);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-s);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  line-height: var(--ctl-h-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.ctl-mount-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 窄卡（1 列）里名字放不下，只留 12px 的插头图标：位置仍稳定可辨，
+   宽度收在自己的盒子里，不会压住居中的数值。 */
+@container (max-width: 96px) {
+  .ctl-mount {
+    gap: 0;
+    padding: 0 var(--sp-1);
+  }
+  .ctl-mount svg {
+    width: 12px;
+    height: 12px;
+  }
+  .ctl-mount-name {
+    display: none;
+  }
+}
+
+/* 命令改名 / 改模板后闪一下并短暂写明"已更新"：引用式挂载的改动是静默生效的，
+   没有这个提示，用户只能靠再打开一次命令列表确认。 */
+.ctl-mount-flash {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: ctl-reveal 900ms ease-out 1;
+}
+
 
 /* 插件被卸载后的卡片占位：卡片属于布局不会自己消失，但 iframe 已经无从加载。
    一句说明 + 一个删除入口，替代一块永远空白的 iframe；标题条同步标「插件已卸载」。 */
