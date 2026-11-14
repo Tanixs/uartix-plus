@@ -169,6 +169,102 @@ export function Plot2D() {
   const snapBlocked = plot.settings.stack || plot.settings.xSource !== "time";
 
   /**
+   * 组装喂给 uPlot 的显示数据。堆叠模式先做仿射归一化（每通道落进 1/K 条带），
+   * 并记录反算映射供游标/读数使用。喂数有三个入口——120ms tick、挂载首帧、Auto 取景，
+   * 归一化若只做在 tick 里，静止数据（虚拟通道/设备停发）在另外两处会把原始值
+   * 直接画进 [0,1] 的 Y 域，整条曲线出屏。
+   */
+  const displayData = (
+    aligned: { x: number[]; cols: (number | null)[][] },
+    chans: plotStore.Channel[],
+  ): uPlot.AlignedData => {
+    const data: uPlot.AlignedData = [aligned.x, ...aligned.cols];
+    if (!settingsRef.current.stack) return data;
+    const vis = chans.map((ch, i) => ({ ch, i })).filter((x) => x.ch.visible);
+    const K = Math.max(1, vis.length);
+    affineRef.current = chans.map(() => null);
+    stackMetaRef.current = vis.map((x) => ({
+      ci: x.i,
+      name: x.ch.name,
+      color: x.ch.color,
+      lo: 0,
+      hi: 0,
+    }));
+    vis.forEach((x, slot) => {
+      const ys = data[x.i + 1] as (number | null)[];
+      let mn = Infinity;
+      let mx = -Infinity;
+      for (const v of ys) {
+        if (v !== null && v !== undefined) {
+          if (v < mn) mn = v;
+          if (v > mx) mx = v;
+        }
+      }
+      if (!Number.isFinite(mn)) {
+        mn = 0;
+        mx = 1;
+      }
+      const pad = (mx - mn || Math.abs(mx) || 1) * 0.1;
+      const lo = mn - pad;
+      const hi = mx + pad;
+      const a = 0.76 / (K * (hi - lo));
+      const b = (slot + 0.5) / K - 0.38 / K - a * lo;
+      // 变换写入新数组：plotStore 的对齐缓存跨 tick 复用同一批 cols 引用，
+      // 原地改写会把归一化值当成原始值反复叠加
+      const out: (number | null)[] = new Array(ys.length);
+      for (let j = 0; j < ys.length; j++) {
+        const v = ys[j];
+        out[j] = v === null ? null : a * v + b;
+      }
+      data[x.i + 1] = out;
+      affineRef.current[x.i] = { a, b };
+      stackMetaRef.current[slot] = {
+        ci: x.i,
+        name: x.ch.name,
+        color: x.ch.color,
+        lo: mn,
+        hi: mx,
+      };
+    });
+    return data;
+  };
+
+  /**
+   * Y 域统一收口：喂数三个入口（挂载首帧 / 120ms tick / Auto 取景）都必须走这里。
+   * 堆叠模式下 Y 是归一化坐标，域恒为 [0,1]，必须显式 setScale——uPlot 的
+   * scale.range 只在 dataLen==0 时调用，一旦已有数据整段跳过，域保持 null →
+   * Y 轴刻度隐藏、series 不画（只剩 X 轴与图例）。非堆叠按喂数数据取域，
+   * view 为 null 表示「全量适配」，否则按传入的 X 视野统计。
+   */
+  const applyYDomain = (
+    u: uPlot,
+    data: uPlot.AlignedData,
+    chans: plotStore.Channel[],
+    view: { min: number | null; max: number | null },
+  ) => {
+    if (settingsRef.current.stack) {
+      if (u.scales.y.min !== 0 || u.scales.y.max !== 1) {
+        u.setScale("y", { min: 0, max: 1 });
+      }
+      return;
+    }
+    const r = yRangeOf(data, chans, view.min, view.max, settingsRef.current.yMode);
+    if (r) u.setScale("y", { min: r[0], max: r[1] });
+  };
+
+  /**
+   * 「改域 + 立刻重绘」的统一入口。uPlot 的 setScale 默认排到微任务，而 redraw()
+   * 会用**当前（旧）域**重新 setScale("x")，把同一 tick 内尚未生效的新 X 覆盖掉
+   * ——Y 不受影响，所以"只改了 Y"的假象很容易被误判成功能正常。
+   * 所有改完域马上要看结果的路径（恢复视野 / Auto 取景 / 框选 / 联动游标）都走这里：
+   * batch 先同步提交，再重绘。
+   */
+  const applyView = (u: uPlot, txn: (u: uPlot) => void) => {
+    u.batch(txn);
+    u.redraw();
+  };
+
+  /**
    * 游标测量面板位置（布局像素，相对 .plot-wrap 左下）。两套面板可各自拖动，
    * 避免遮挡曲线；位置持久化。null = 未拖动过，使用 CSS 默认（X 左下 / Y 右下）。
    */
@@ -355,9 +451,10 @@ export function Plot2D() {
     const max = u.scales.x.max;
     if (min != null && max != null && (x < min || x > max)) {
       const half = Math.max((max - min) / 2, 0.001);
-      u.setScale("x", { min: x - half, max: x + half });
+      applyView(u, (u2) => u2.setScale("x", { min: x - half, max: x + half }));
+    } else {
+      u.redraw();
     }
-    u.redraw();
     syncMeasure();
   };
   useEffect(() => {
@@ -1232,15 +1329,15 @@ export function Plot2D() {
                 const x1v = xToVal(rr);
                 const yTopv = yToVal(t);
                 const yBotv = yToVal(bt);
-                if (rr - l > 6 && x0v != null && x1v != null) {
-                  u.setScale("x", { min: x0v, max: x1v });
-                  setFollow(false);
-                }
-                if (bt - t > 6 && yTopv != null && yBotv != null) {
-                  u.setScale("y", { min: yBotv, max: yTopv });
-                  if (!settingsRef.current.yAuto) yManualRef.current = true;
-                }
-                u.redraw();
+                if (x0v != null && x1v != null && rr - l > 6) setFollow(false);
+                if (bt - t > 6 && yTopv != null && yBotv != null && !settingsRef.current.yAuto)
+                  yManualRef.current = true;
+                applyView(u, (u2) => {
+                  if (rr - l > 6 && x0v != null && x1v != null)
+                    u2.setScale("x", { min: x0v, max: x1v });
+                  if (bt - t > 6 && yTopv != null && yBotv != null)
+                    u2.setScale("y", { min: yBotv, max: yTopv });
+                });
               }
             };
             // 空闲态光标反馈：靠近游标线 → 对应方向 resize 光标
@@ -1408,18 +1505,18 @@ export function Plot2D() {
     } else {
       aligned = plotStore.buildAligned(FED_CAP);
     }
-    const data: uPlot.AlignedData = [aligned.x, ...aligned.cols];
+    const data = displayData(aligned, channels);
     fedXRef.current = aligned.x;
     const u = new uPlot(opts, data, chart);
-    // 首帧 Y 域：x/y 都显式 auto:false，uPlot 构造时只按喂数窗口铺 X（_init 的
-    // autoScaleX），Y 不会自动取域。数据泵（120ms）只在 plotStore.isDirty() 时
-    // 才补 Y；设备停发、或数据全部来自虚拟通道（导入轨迹）时 dirty 恒 false，
-    // Y 永久 null → Y 轴隐藏、曲线不画、viewState 也 capture 不到。
-    // 挂载时按已缓存数据直接铺一次，首帧即完整；后续 tick 照旧接管。
-    if (!st.stack) {
-      const ry = yRangeOf(data, channels, null, null, st.yMode);
-      if (ry) u.setScale("y", { min: ry[0], max: ry[1] });
-    }
+    // 首帧域（X/Y 都要）。uPlot 的 setScale 默认排到微任务，而紧随其后的
+    // 游标/堆叠 effect 会立刻调 redraw()，redraw 用「此刻仍是 null」的 x 重新
+    // setScale("x", null, null) → 首帧域被抹掉（切堆叠重建后整张图空白即此因）。
+    // batch 立即提交，后续 effect 读到的就是真域。
+    const xw = aligned.x;
+    u.batch(() => {
+      applyYDomain(u, data, channels, { min: null, max: null });
+      if (xw.length > 1) u.setScale("x", { min: xw[0], max: xw[xw.length - 1] });
+    });
     uRef.current = u;
     setFollow(true);
     yManualRef.current = false;
@@ -1444,13 +1541,18 @@ export function Plot2D() {
         setFollow(v.follow);
         // 恢复到非自动 Y 的视野时必须同时标记"手动"，否则下一次喂数会按 yAuto 重新铺满。
         yManualRef.current = !plotStore.getSnapshot().settings.yAuto;
-        u.setScale("x", { min: v.xMin, max: v.xMax });
-        u.setScale("y", { min: v.yMin, max: v.yMax });
-        u.redraw();
+        const { xMin, xMax, yMin, yMax } = v;
+        applyView(u, (u2) => {
+          u2.setScale("x", { min: xMin, max: xMax });
+          u2.setScale("y", { min: yMin, max: yMax });
+        });
       },
     });
-    affineRef.current = channels.map(() => null);
-    stackMetaRef.current = [];
+    // 非堆叠清空映射；堆叠的映射已由 displayData 按本帧数据写好，勿覆盖
+    if (!st.stack) {
+      affineRef.current = channels.map(() => null);
+      stackMetaRef.current = [];
+    }
     // 默认不自动铺设游标：由用户在图区单击放置（旧实现按全量范围 35%/65% 落位，
     // 跟随态下视野只显示最近窗口，游标会“飞到”视野外很远处）
     if (!st.cursorX) xCurRef.current = { a: null, b: null };
@@ -1535,58 +1637,7 @@ export function Plot2D() {
       }
       // 视窗裁剪喂数：重绘成本只与视野内点数相关（卡顿根治点）
       const aligned = plotStore.buildAlignedWindow(wLo, wHi, FED_CAP);
-      const data: uPlot.AlignedData = [aligned.x, ...aligned.cols];
-      // 堆叠：先原地仿射变换再 setData —— 只触发一次重绘
-      if (settings.stack) {
-        const vis = snap.channels
-          .map((ch, i) => ({ ch, i }))
-          .filter((x) => x.ch.visible);
-        const K = Math.max(1, vis.length);
-        affineRef.current = snap.channels.map(() => null);
-        stackMetaRef.current = vis.map((x) => ({
-          ci: x.i,
-          name: x.ch.name,
-          color: x.ch.color,
-          lo: 0,
-          hi: 0,
-        }));
-        vis.forEach((x, slot) => {
-          const ys = data[x.i + 1] as (number | null)[];
-          let mn = Infinity;
-          let mx = -Infinity;
-          for (const v of ys) {
-            if (v !== null && v !== undefined) {
-              if (v < mn) mn = v;
-              if (v > mx) mx = v;
-            }
-          }
-          if (!Number.isFinite(mn)) {
-            mn = 0;
-            mx = 1;
-          }
-          const pad = (mx - mn || Math.abs(mx) || 1) * 0.1;
-          const lo = mn - pad;
-          const hi = mx + pad;
-          const a = 0.76 / (K * (hi - lo));
-          const b = (slot + 0.5) / K - 0.38 / K - a * lo;
-          // 变换写入新数组：plotStore 的对齐缓存跨 tick 复用同一批 cols 引用，
-          // 原地改写会把归一化值当成原始值反复叠加
-          const out: (number | null)[] = new Array(ys.length);
-          for (let j = 0; j < ys.length; j++) {
-            const v = ys[j];
-            out[j] = v === null ? null : a * v + b;
-          }
-          data[x.i + 1] = out;
-          affineRef.current[x.i] = { a, b };
-          stackMetaRef.current[slot] = {
-            ci: x.i,
-            name: x.ch.name,
-            color: x.ch.color,
-            lo: mn,
-            hi: mx,
-          };
-        });
-      }
+      const data = displayData(aligned, snap.channels);
       fedXRef.current = aligned.x;
       // 锚点一律用可见末点 lastDisp：喂数末点（合并轴）可能含隐藏通道在
       // lastDisp 之后的点，用它会让「最新」线跑到可见曲线前方
@@ -1596,14 +1647,14 @@ export function Plot2D() {
       // 拖拽/框选进行中：跳过一切会移动视口的操作，但仍显式重绘，
       // 让新数据实时上屏（旧实现此处 return 会漏掉 redraw → 卡住不动）
       const interacting = !!panRef.current || !!boxRef.current || !!cursorDragRef.current;
-      if (!interacting && settings.yAuto && !settings.stack) {
-        // Y 自适应只统计当前视野内的点（示波器行为）
-        const r = yRangeOf(data, snap.channels, u.scales.x.min, u.scales.x.max, settings.yMode);
-        if (r) u.setScale("y", { min: r[0], max: r[1] });
-      } else if (!settings.stack && u.scales.y.min == null) {
-        // yAuto 关闭且从未设过 Y：首帧做一次全量适配，否则 uPlot auto:false 下无范围 → 空白
-        const r = yRangeOf(data, snap.channels, null, null, settings.yMode);
-        if (r) u.setScale("y", { min: r[0], max: r[1] });
+      // 堆叠模式：Y 域恒 [0,1]（归一化），只需在从未设过时补一次；
+      // 非堆叠：yAuto 开着按视野自适应，关着则首帧全量适配一次。
+      if (!interacting && (settings.yAuto || u.scales.y.min == null)) {
+        const view =
+          settings.yAuto && !settings.stack
+            ? { min: u.scales.x.min ?? null, max: u.scales.x.max ?? null }
+            : { min: null, max: null };
+        applyYDomain(u, data, snap.channels, view);
       }
       const xs = data[0];
       const sx = u.scales.x;
@@ -1632,8 +1683,9 @@ export function Plot2D() {
           if (c.a != null) fa = (c.a - sx.min) / s0;
           if (c.b != null) fb = (c.b - sx.min) / s0;
         }
-        // 锚定喂数末点：与「最新」线、曲线末端三者在同一位置
-        u.setScale("x", { min: anchor - span * 0.95, max: anchor + span * 0.05 });
+        // 锚定喂数末点：与「最新」线、曲线末端三者在同一位置。
+        // batch 先落地：后面的 redraw() 会用旧域覆盖尚未提交的 X（游标骑行时必经）
+        u.batch(() => u.setScale("x", { min: anchor - span * 0.95, max: anchor + span * 0.05 }));
         if (fa != null || fb != null) {
           const nmin = anchor - span * 0.95;
           xCurRef.current = {
@@ -1748,28 +1800,23 @@ export function Plot2D() {
     yManualRef.current = false;
     // 先按目标视野重新喂数再设轴，避免 120ms 内曲线缺段闪断
     const aligned = plotStore.buildAlignedWindow(lo, hi, FED_CAP);
-    const data: uPlot.AlignedData = [aligned.x, ...aligned.cols];
+    const data = displayData(aligned, plotStore.getSnapshot().channels);
     fedXRef.current = aligned.x;
-    u.setData(data, false);
-    u.setScale("x", { min: lo, max: hi });
-    if (!settingsRef.current.stack) {
-      const r = yRangeOf(data, plotStore.getSnapshot().channels, lo, hi, settingsRef.current.yMode);
-      if (r) u.setScale("y", { min: r[0], max: r[1] });
-    }
-    u.redraw();
+    applyView(u, (u2) => {
+      u2.setData(data, false);
+      u2.setScale("x", { min: lo, max: hi });
+      applyYDomain(u2, data, plotStore.getSnapshot().channels, { min: lo, max: hi });
+    });
   };
 
   const resetView = () => {
     setFollow(true);
     yManualRef.current = false;
     const u = uRef.current;
-    if (!u || u.scales.y == null) return;
-    // y 已显式 auto:false，setScale(y, undefined) 不再触发 uPlot 内部自适应；
-    // 复位语义 = 回实时 + Y 全量适配（yAuto 开着时下一 tick 会按视野接管）
-    if (!settingsRef.current.stack) {
-      const r = yRangeOf(u.data, plotStore.getSnapshot().channels, null, null, settingsRef.current.yMode);
-      if (r) u.setScale("y", { min: r[0], max: r[1] });
-    }
+    if (!u) return;
+    // 复位语义 = 回实时 + Y 全量适配（yAuto 开着时下一 tick 会按视野接管）；
+    // 堆叠下由 applyYDomain 固定 [0,1]
+    applyYDomain(u, u.data, plotStore.getSnapshot().channels, { min: null, max: null });
     u.redraw();
   };
 

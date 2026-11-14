@@ -17,7 +17,7 @@ import {
   getSnapshot as getPlotSnapshot,
   getChanData,
   subscribe as subscribePlot,
-  isDirty as plotDirty,
+  getDataVersion,
   addChannel,
   type Channel,
 } from "./plotStore";
@@ -183,6 +183,8 @@ export function SpectrumPanel() {
   /* ---------------- 数据 → uPlot + 摘要 ---------------- */
 
   const sigRef = useRef(""); // 数据签名：末时间戳+点数，变了才重算
+  /** 上次重算时的全局数据版本：兜住「签名不变但数据被整段替换」（虚拟通道重导） */
+  const verRef = useRef(-1);
   const compute = (): boolean => {
     const u = uRef.current;
     if (!u || !chan) return false;
@@ -331,10 +333,16 @@ export function SpectrumPanel() {
       if (!chanId) return;
       const d = getChanData(chanId);
       const sig = `${d.t.length}|${d.t.length ? d.t[d.t.length - 1] : 0}`;
-      if (sig === sigRef.current && !plotDirty()) return;
+      // 用只增不清的全局版本号判定「有没有写过数据」：dirty 是 2D 喂数泵独占的
+      // 信号（谁读谁清），2D 没开时永远为真，频谱会无条件每 800ms 重算一次
+      const ver = getDataVersion();
+      if (sig === sigRef.current && ver === verRef.current) return;
       // 终态（出图/点数不足/诊断原因）都推进签名——签名含长度+末戳，任何新数据
       // 都会产生新签名自然重算；只有图表未就绪（返回 false）才留待下轮重试
-      if (computeRef.current()) sigRef.current = sig;
+      if (computeRef.current()) {
+        sigRef.current = sig;
+        verRef.current = ver;
+      }
     }, REFRESH_MS);
     return () => clearInterval(timer);
   }, [chanId]);

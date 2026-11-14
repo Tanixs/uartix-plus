@@ -97,6 +97,21 @@ let snapshot: PlotSnapshot = { channels, settings };
 const listeners = new Set<() => void>();
 let initialized = false;
 let dirty = false;
+/** 数据版本号：每次写入数据自增。dirty 是「2D 喂数泵独占的信号」（谁读谁清），
+ *  多消费者（2D / 频谱 / 分析）不能共用——因此另发一个只增不清的版本号，
+ *  由各消费者自己记住上次处理到哪一版。 */
+let dataVersion = 0;
+
+/** 数据写入口统一收口：唤醒 2D 喂数并推进版本号。
+ *  所有往通道缓冲里写数据的入口（增量 append / 整段注入 / 清空）都必须走这里。 */
+function markDataChanged() {
+  dirty = true;
+  dataVersion += 1;
+}
+
+export function getDataVersion() {
+  return dataVersion;
+}
 
 
 function emit() {
@@ -155,7 +170,7 @@ function appendPoint(chId: string, t: number, v: number) {
   const last = d.t.length ? d.t[d.t.length - 1] : -Infinity;
   d.t.push(t > last ? t : last + 1);
   d.v.push(v);
-  dirty = true;
+  markDataChanged();
   if (d.t.length > MAX_POINTS) {
     const keep = d.t.length - Math.floor(d.t.length / 2);
     d.t = d.t.slice(d.t.length - keep);
@@ -633,7 +648,7 @@ export function addVirtualChannel(name: string, ts: number[], vs: number[]): str
   // 一次性注入整段数据同样要唤醒消费方：2D 的喂数 tick 以 isDirty() 为门，
   // 虚拟通道不经过 appendPoint（那里才置 dirty），不置位时已挂载的面板永远
   // 收不到这次注入——导入轨迹后曲线不出点、Y 轴保持 null。
-  dirty = true;
+  markDataChanged();
   emit();
   return id;
 }
@@ -739,6 +754,8 @@ export function clearChannels() {
   dataMap.clear();
   timeOriginMs = null;
   sanitizeXSrc();
+  // 缓冲区已清空：推进版本让频谱/分析等消费者丢弃旧列（2D 图本身随 channels 重建）
+  markDataChanged();
   emit();
 }
 
