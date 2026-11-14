@@ -470,6 +470,12 @@ export default function App() {
   const onReady = useCallback((event: DockviewReadyEvent) => {
     const api = event.api;
     apiRef.current = api;
+    /* 控制画布的内嵌卡片要能"移回停靠"：把 dock 的唯一入口交给面板层，
+       复用 addOrFocusPanel（最近使用、退役面板改派都在这条路上）。
+       必须在这里注册，不能放到 onReady 末尾——"恢复已存布局"的分支会在
+       下面 `syncPanels(); return;` 提前返回，末尾注册只对"首启/坏档"生效，
+       老用户（几乎所有启动）的移回停靠会永远报"停靠区尚未就绪"。 */
+    registerDockApi(api, (id) => addOrFocusPanelRef.current(id));
     // 面板开/关与前后台状态 → panelActivity（store 门控与渲染节流的依据）。
     // panel.api.isVisible 由 dockview 维护：所在标签组前台页签 = true。
     /* P0 回归：`onDidActivePanelChange` 回调里**不能**同步读 api.isVisible。
@@ -587,9 +593,6 @@ export default function App() {
       markWelcomeSeen();
       window.setTimeout(() => tourStore.start(QUICK_STEPS), 320);
     }
-    // 控制画布的内嵌卡片要能"移回停靠"：把 dock 的唯一入口交给面板层，
-    // 复用 addOrFocusPanel（最近使用、退役面板改派都在这条路上）。
-    registerDockApi(api, (id) => addOrFocusPanelRef.current(id));
   }, []);
 
   useEffect(
