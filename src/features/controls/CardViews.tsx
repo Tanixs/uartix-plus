@@ -153,6 +153,9 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
   const mount = mountedState(card);
   const mountBroken = mount.kind === "missing";
   const mountItem = mount.kind === "ok" ? mount.item : null;
+  /* 卡面角标要显示**生效**的发送格式：挂载命令时模式由命令决定，
+     卡片自己的 sendMode 在这张卡上不参与发送。 */
+  const hexMode = (mountItem?.sendMode ?? (isSendModeCard(card) ? card.sendMode : "ascii")) === "hex";
   /* 挂载是引用式：命令改名/改模板，卡面角标当场跟着变。模板变了名字没变时，
      只换文字用户未必发现，所以变化后让角标闪一下并暂时写明"已更新"。 */
   const mountSig = mountItem
@@ -264,11 +267,23 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
           )}
         >
           <IconPlug />
+          {mountItem.sendMode === "hex" && <span className="ctl-mount-fmt">HEX</span>}
           <span className="ctl-mount-name">
             {mountFlash
               ? tx(`已更新 · ${mountItem.name}`, `Updated · ${mountItem.name}`)
               : tx(`命令 · ${mountItem.name}`, `Cmd · ${mountItem.name}`)}
           </span>
+        </span>
+      )}
+      {hexMode && !mountItem && (
+        <span
+          className="ctl-fmt-bad"
+          title={tx(
+            "发送格式：HEX（滑条的 %% / 摇杆的 %x、%y 按 f32 小端写入，其余字符按十六进制字节解析）",
+            "Send format: HEX (%% / %x, %y written as little-endian f32; other chars parsed as hex bytes)",
+          )}
+        >
+          HEX
         </span>
       )}
       {props.children}
@@ -1643,6 +1658,32 @@ function ScriptFields({
   );
 }
 
+/** 能自由选发送格式的卡：组卡与六类指令卡都带 `sendMode` 字段（LED/蜂鸣器/监视不发自由文本） */
+type SendModeCard = Extract<ControlCard, { sendMode: SendMode }>;
+function isSendModeCard(card: ControlCard): card is SendModeCard {
+  return "sendMode" in card;
+}
+
+/**
+ * S2：发送格式的唯一一处 UI。组卡早就用这个字段发 HEX，六类指令卡此前只有字段没有入口；
+ * 两处必须同一句措辞、同一个 `<select>`，否则用户会看到"组合控件叫发送格式、按钮叫别的"。
+ */
+function SendFormatRow(props: { value: SendMode; onChange: (mode: SendMode) => void }) {
+  return (
+    <div className="form-row">
+      <label>{tx("发送格式", "Send format")}</label>
+      <select
+        className="input"
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value as SendMode)}
+      >
+        <option value="ascii">ASCII</option>
+        <option value="hex">HEX</option>
+      </select>
+    </div>
+  );
+}
+
 export function CardModal(props: {
   card: ControlCard;
   pageId: string;
@@ -1897,16 +1938,10 @@ export function CardModal(props: {
             "A group card can hold sliders, buttons, switches, monitors and LED children; sliders send on release, buttons on click, switches on toggle. Up to 8 children.",
           )}
         >
+          {isSendModeCard(card) && (
+            <SendFormatRow value={card.sendMode} onChange={(m) => patch({ sendMode: m })} />
+          )}
           <div className="form-row">
-            <label>{tx("发送格式", "Send format")}</label>
-            <select
-              className="input"
-              value={card.sendMode}
-              onChange={(e) => patch({ sendMode: e.target.value })}
-            >
-              <option value="ascii">ASCII</option>
-              <option value="hex">HEX</option>
-            </select>
             <label>{tx("添加", "Add")}</label>
             <select
               className="input"
@@ -2165,6 +2200,9 @@ export function CardModal(props: {
       )}
       {hasScriptMode && (
         <Section title={tx("指令", "Command")}>
+          {isSendModeCard(card) && !card.useScript && !card.sendTemplateId && (
+            <SendFormatRow value={card.sendMode} onChange={(m) => patch({ sendMode: m })} />
+          )}
           <div className="form-row">
             <label>{tx("指令模式", "Command mode")}</label>
             <select

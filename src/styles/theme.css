@@ -13124,6 +13124,73 @@ body.pdrag-active *{cursor:grabbing !important;}
   animation: ctl-reveal 900ms ease-out 1;
 }
 
+/* S2 · 卡面发送格式角标。
+   挂载命令时格式由命令决定，HEX 以 `.ctl-mount-fmt` 并进挂载徽标里；
+   未挂载时用下面这枚独立角标，和 `.ctl-mount` 同角、同层级。
+   绝对定位不参与 flex —— 窄卡里它只在卡片自己的盒子内占角，
+   不会把数值行或滑条轨道挤出原有几何（有 container 条件再收一档尺寸）。 */
+.ctl-fmt-bad {
+  position: absolute;
+  top: var(--sp-0);
+  right: var(--sp-0);
+  z-index: 57;
+  padding: 0 var(--sp-1h);
+  border-radius: var(--radius-s);
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  line-height: var(--ctl-h-1);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  max-width: calc(100% - var(--sp-1));
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* 并进挂载徽标的格式小字：竖线分隔，不另起一枚角标，免得两个角标叠在同一个角上。 */
+.ctl-mount-fmt {
+  flex: none;
+  padding-left: var(--sp-1h);
+  box-shadow: inset 1px 0 0 var(--border-soft);
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* 1 列窄卡：角标收成紧贴边角的小签，仍然可读；挂载徽标里就省掉插头图标，
+   把「HEX」留在可见区（名字本来就已经隐藏）。收一档只在视觉上缩角标自己
+   （transform 不改盒子），60×60 的 1×1 卡里数值字身与滑条轨道都不受影响。 */
+@container (max-width: 96px) {
+  .ctl-fmt-bad {
+    top: 0;
+    padding: 0 var(--sp-0);
+    line-height: 14px;
+    transform: scale(0.85);
+    transform-origin: top right;
+  }
+  .ctl-mount:has(.ctl-mount-fmt) svg {
+    display: none;
+  }
+  .ctl-mount-fmt {
+    padding-left: 0;
+    box-shadow: none;
+  }
+}
+
+/* 只有 1 行高的滑条卡：脚注本来就被隐藏，滑条下方是空的。
+   角标改贴右下角、按同一比例收小，正好落在滑条拇指下沿之外——
+   数值行完全让开，滑条轨道与拇指也不被遮。 */
+@container (max-height: 78px) {
+  .ctl-card:has(.ctl-slider) .ctl-fmt-bad {
+    top: auto;
+    bottom: 0;
+    padding: 0 var(--sp-0);
+    line-height: 14px;
+    transform: scale(0.8);
+    transform-origin: bottom right;
+  }
+}
 
 /* 插件被卸载后的卡片占位：卡片属于布局不会自己消失，但 iframe 已经无从加载。
    一句说明 + 一个删除入口，替代一块永远空白的 iframe；标题条同步标「插件已卸载」。 */

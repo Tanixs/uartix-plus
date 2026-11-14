@@ -643,6 +643,72 @@ describe("slider parameter validation", () => {
   });
 });
 
+/**
+ * S2 · 发送格式（ASCII / HEX）。
+ *
+ * 编码口径**只认组卡早就有的那条路**：ASCII 走 `%d/%f`，HEX 把 `%%`（滑条/按钮/开关/键位）
+ * 或 `%x/%y`（摇杆）换成 f32 小端的十六进制字节串。这里钉住它是为了别在补入口时
+ * 顺手发明第二种字节序/类型——卡片发送读的就是这两个函数。
+ */
+describe("S2 · 发送格式 ASCII / HEX", () => {
+  it("ASCII 口径不变：%d 取整、%f 六位、%% 还原成 %", async () => {
+    const { formatTemplate } = await import("./controlsStore");
+    expect(formatTemplate("V:%d!", 2.6, "ascii")).toBe("V:3!");
+    expect(formatTemplate("X:%.2f", 1.234, "ascii")).toBe("X:1.23");
+    expect(formatTemplate("100%%", 0, "ascii")).toBe("100%");
+  });
+
+  it("HEX 口径沿用组卡：%% 写 f32 小端，其余字符原样", async () => {
+    const { formatTemplate } = await import("./controlsStore");
+    // 1.5 = 0x3FC00000，小端字节序 00 00 C0 3F
+    expect(formatTemplate("AA %% BB", 1.5, "hex")).toBe("AA 00 00 C0 3F BB");
+    expect(formatTemplate("%%", 2.6, "hex")).toBe("66 66 26 40");
+  });
+
+  it("摇杆 HEX：%x/%y 各写一份 f32 小端", async () => {
+    const { formatJoy } = await import("./controlsStore");
+    expect(formatJoy("J:%x,%y!", 1.5, -1, "hex")).toBe("J:00 00 C0 3F,00 00 80 BF!");
+    expect(formatJoy("J:%x,%y!", 1.5, -1, "ascii")).toBe("J:1.5,-1!");
+  });
+
+  it("旧档没有 sendMode 时补 ascii；不发自由文本的卡不带这个字段", async () => {
+    localStorage.setItem(
+      "vs.controls",
+      JSON.stringify({
+        activePageId: "p1",
+        pages: [
+          {
+            id: "p1",
+            name: "旧档",
+            cols: 8,
+            rows: 8,
+            locked: false,
+            cards: [
+              { id: "s", type: "slider", x: 0, y: 0, w: 2, h: 2, template: "S:%d" },
+              { id: "b", type: "button", x: 2, y: 0, template: "B!" },
+              { id: "w", type: "switch", x: 4, y: 0 },
+              { id: "j", type: "joystick", x: 0, y: 2 },
+              { id: "k", type: "keypad", x: 3, y: 2 },
+              { id: "m", type: "keymon", x: 6, y: 2 },
+              { id: "g", type: "group", x: 0, y: 5, children: [] },
+              { id: "l", type: "led", x: 4, y: 5, varName: "x" },
+              { id: "z", type: "buzzer", x: 5, y: 5, varName: "x" },
+              { id: "n", type: "monitor", x: 6, y: 5, varName: "x" },
+            ],
+          },
+        ],
+      }),
+    );
+    const store = await import("./controlsStore");
+    const cards = store.getSnapshot().pages[0]!.cards;
+    const byId = (id: string) => cards.find((c) => c.id === id)!;
+    for (const id of ["s", "b", "w", "j", "k", "m", "g"])
+      expect(byId(id), `旧档 ${id} 的 sendMode 应补成 ascii`).toMatchObject({ sendMode: "ascii" });
+    for (const id of ["l", "z", "n"])
+      expect("sendMode" in byId(id), `${id} 不发自由文本，不该被补出 sendMode`).toBe(false);
+  });
+});
+
 describe("switch position persistence", () => {
   it("writes the clicked position into the saved card", async () => {
     const store = await import("./controlsStore");
