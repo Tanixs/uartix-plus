@@ -13140,3 +13140,55 @@ body.pdrag-active *{cursor:grabbing !important;}
   font-size: var(--fs-xs);
   line-height: var(--lh-read);
 }
+
+/* S4 · 发送前模板变量预检提示。
+   一条拦截只挂一条（批量合并成汇总后也只一条），按钮是唯一的放行口；
+   host 本身不吃点击，避免挡住画布上的卡片。 */
+.ctl-pf-host {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1h);
+  pointer-events: none;
+}
+
+.ctl-pf {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: min(560px, calc((100vw - 32px) / var(--zoom)));
+  padding: var(--sp-1h) var(--sp-2);
+  background: var(--bg-panel);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow);
+  color: var(--text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-read);
+  pointer-events: auto;
+}
+
+.ctl-pf-msg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ctl-pf-btn {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ctl-pf-btn:hover {
+  background: var(--accent-soft);
+}

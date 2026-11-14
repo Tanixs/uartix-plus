@@ -21,6 +21,7 @@ import * as commandStore from "./commandStore";
 import { isGroup } from "./commandStore";
 import { useSettings } from "../settings/settingsStore";
 import { runSpecCard, sendCmd, runCmdScript, type RunnableCommand } from "./cmdExec";
+import { preflightTemplate } from "./preflight";
 import { IconLock, IconMore, IconUnlock, IconChevron } from "../../shared/icons";
 import { EmptyState } from "../../shared/EmptyState";
 import { Flyout } from "../../shared/Flyout";
@@ -780,15 +781,39 @@ export function ControlCanvas() {
 
   /* P104-R3：发送与脚本执行的实现搬进 `cmdExec`——命令库现在住在左侧导轨，
      和这里的卡片是两个调用方，同一份发送逻辑不该再有两份。
-     错误面仍留在本地：画布报的错不该往导轨那边喊。 */
-  const sendRaw = async (mode: SendMode, text: string) => {
+     错误面仍留在本地：画布报的错不该往导轨那边喊。
+
+     S4：卡片模板的发送统一走这里——先预检（缺变量拦截），再求值、再格式化、再发。
+     调用方只传**原始模板**，`shape` 负责原来 `formatJoy`/`formatTemplate` 那一步；
+     这样"缺变量"判的是模板本身，而不是已经被拼过运行值的字符串。 */
+  const sendTpl = async (
+    mode: SendMode,
+    tpl: string,
+    shape?: (resolved: string) => string,
+    source?: string,
+  ): Promise<boolean> => {
     try {
-      await sendCmd(mode, text);
+      const pre = await preflightTemplate(tpl, mode, { source });
+      if (!pre.ok) {
+        const names = pre.missing.join(tx("」「", '", "'));
+        setErr(
+          pre.reason === "timeout" || pre.reason === "declined"
+            ? tx(`变量「${names}」没有数据，已放弃发送`, `Variable(s) "${names}" have no data — send abandoned`)
+            : tx(`变量「${names}」没有数据，已拦截发送`, `Variable(s) "${names}" have no data — send blocked`),
+        );
+        return false;
+      }
+      const resolved = variableStore.resolveVars(tpl);
+      await sendCmd(mode, shape ? shape(resolved) : resolved);
       setErr(null);
+      return true;
     } catch (e) {
       setErr(String(e));
+      return false;
     }
   };
+
+  const cardSource = (card: ControlCard) => `${card.name}(${card.id})`;
 
   const runCardScript = (
     script: string,
@@ -880,26 +905,31 @@ export function ControlCanvas() {
             setErr(String(e));
           }
         } else {
-          await sendRaw(card.sendMode, variableStore.resolveVars(card.template));
+          await sendTpl(card.sendMode, card.template, undefined, cardSource(card));
         }
         break;
       case "switch": {
         const i = Number(ctx.state ?? card.state);
-        await sendRaw(
+        await sendTpl(
           card.sendMode,
-          variableStore.resolveVars(card.templates[i] ?? ""),
+          card.templates[i] ?? "",
+          undefined,
+          cardSource(card),
         );
         break;
       }
       case "joystick":
-        await sendRaw(
+        await sendTpl(
           card.sendMode,
-          store.formatJoy(
-            variableStore.resolveVars(card.template),
-            Number(ctx.x ?? 0),
-            Number(ctx.y ?? 0),
-            card.sendMode,
-          ),
+          card.template,
+          (resolved) =>
+            store.formatJoy(
+              resolved,
+              Number(ctx.x ?? 0),
+              Number(ctx.y ?? 0),
+              card.sendMode,
+            ),
+          cardSource(card),
         );
         break;
       case "keypad": {
@@ -908,7 +938,7 @@ export function ControlCanvas() {
         const tpl =
           (phase === "release" ? card.releaseTemplates[dir] : card.templates[dir]) ?? "";
         if (tpl) {
-          await sendRaw(card.sendMode, variableStore.resolveVars(tpl));
+          await sendTpl(card.sendMode, tpl, undefined, cardSource(card));
         }
         break;
       }
@@ -916,7 +946,7 @@ export function ControlCanvas() {
         const phase = String(ctx.phase ?? "press");
         const tpl = phase === "release" ? card.releaseTemplate : card.template;
         if (tpl) {
-          await sendRaw(card.sendMode, variableStore.resolveVars(tpl));
+          await sendTpl(card.sendMode, tpl, undefined, cardSource(card));
         }
         break;
       }
@@ -933,23 +963,26 @@ export function ControlCanvas() {
   ) => {
     if (card.managed !== undefined) return;
     const mode = card.sendMode;
+    const source = cardSource(card);
     try {
       switch (child.kind) {
         case "slider": {
           const value = Number(ctx.value ?? child.min);
-          await sendRaw(
+          await sendTpl(
             mode,
-            store.formatTemplate(variableStore.resolveVars(child.template), value, mode),
+            child.template,
+            (resolved) => store.formatTemplate(resolved, value, mode),
+            source,
           );
           break;
         }
         case "button":
-          await sendRaw(mode, variableStore.resolveVars(child.template));
+          await sendTpl(mode, child.template, undefined, source);
           break;
         case "switch": {
           const i = Number(ctx.state ?? 0) ? 1 : 0;
           const tpl = child.templates[i] ?? "";
-          if (tpl) await sendRaw(mode, variableStore.resolveVars(tpl));
+          if (tpl) await sendTpl(mode, tpl, undefined, source);
           break;
         }
         default:
@@ -971,14 +1004,18 @@ export function ControlCanvas() {
       if (card.sendTemplateId) {
         await runSpecCard(card, value);
       } else {
-        await sendCmd(
+        const sent = await sendTpl(
           card.sendMode,
-          store.formatTemplate(
-            variableStore.resolveVars(card.template),
-            value,
-            card.sendMode,
-          ),
+          card.template,
+          (resolved) => store.formatTemplate(resolved, value, card.sendMode),
+          cardSource(card),
         );
+        if (!sent) {
+          // 被预检拦下：清掉待发值，别让下一次拖动替这次补发
+          const st = throttleRef.current.get(card.id);
+          if (st) st.pending = null;
+          return;
+        }
       }
       setErr(null);
       const st = throttleRef.current.get(card.id);

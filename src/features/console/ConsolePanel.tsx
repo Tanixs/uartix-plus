@@ -10,6 +10,7 @@ import { StatusPill } from "../../shared/StatusPill";
 import { patch, useSettings } from "../settings/settingsStore";
 import { t, tx, useLocale } from "../../i18n/strings";
 import { QuickCommandBar } from "./QuickCommandBar";
+import { onNote } from "./noteBus";
 import { XferDialog } from "../xfer/XferDialog";
 import * as xferStore from "../xfer/xferStore";
 
@@ -157,7 +158,14 @@ export function ConsolePanel() {
         ts: Date.now(),
       });
     }).then((u) => unsubs.push(u));
-    return () => unsubs.forEach((u) => u());
+    // S4：发送前的变量拦截不是 TX，也要在日志里留一行（时间/来源/模板/缺失变量）
+    const offNote = onNote((text) => {
+      pushChunk({ kind: "rx", bytes: new TextEncoder().encode(text), ts: Date.now() });
+    });
+    return () => {
+      unsubs.forEach((u) => u());
+      offNote();
+    };
   }, []);
 
   useEffect(() => {

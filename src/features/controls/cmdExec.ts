@@ -5,6 +5,7 @@ import { beep, runScript } from "./scriptRunner";
 import { tx } from "../../i18n/strings";
 import * as sendStore from "../send/sendStore";
 import { encodeSend, sendValues } from "../send/encodeSend";
+import { preflightTemplate } from "./preflight";
 
 /**
  * P104-R3：命令发送与脚本执行的**唯一**实现。
@@ -31,6 +32,8 @@ export interface RunnableCommand {
   /** 引用一张发送谱（P121-D）。带着它时 `template` 不再参与发送 */
   sendTemplateId?: string;
   overrides?: Record<string, string>;
+  /** 命令名（只用于拦截日志的来源；不参与发送） */
+  name?: string;
 }
 
 /** 一条引用式命令此刻该发出的那一帧：字节已算好，`settle` 告诉它最后有没有出门 */
@@ -152,6 +155,17 @@ export async function runCommand(
   }
   if (!(cmd.template ?? "").trim()) {
     throw new Error(tx("指令内容为空", "The command has no content"));
+  }
+  // S4：求值之前先问一次模板变量有没有值。能取到值时这一步不改变任何字节；
+  // HEX 缺值一律拦下（不给放行），ASCII 由 `preflightTemplate` 给出 5 秒决策。
+  const pre = await preflightTemplate(cmd.template, cmd.sendMode, { source: cmd.name });
+  if (!pre.ok) {
+    const names = pre.missing.join(tx("」「", '", "'));
+    throw new Error(
+      pre.reason === "timeout" || pre.reason === "declined"
+        ? tx(`变量「${names}」没有数据，已放弃发送`, `Variable(s) "${names}" have no data — send abandoned`)
+        : tx(`变量「${names}」没有数据，已拦截发送`, `Variable(s) "${names}" have no data — send blocked`),
+    );
   }
   await sendCmd(cmd.sendMode, variableStore.resolveVars(cmd.template));
 }
