@@ -200,14 +200,16 @@ describe("特异性与减弱动效", () => {
 
 describe("层槽：谁能盖住谁", () => {
   it("fixed + 铺满视口 + 高于对话框档 → 报 covers_host_dialog", () => {
-    const r = auditLayerClash(".veil{position:fixed;inset:0;z-index:var(--z-float)}");
+    const r = auditLayerClash(".veil{position:fixed;inset:0;z-index:var(--z-menu)}");
     expect(r).toHaveLength(1);
     expect(r[0].selector).toBe(".veil");
-    expect(r[0].zResolved).toBe(500);
+    expect(r[0].zResolved).toBe(2000);
     expect(r[0].reason).toBe("covers_host_dialog");
   });
 
   it("低于对话框档的不报；不铺满视口的也不报（报了只是噪声）", () => {
+    // E2 起遮码在 --z-popup(999)：--z-float 的全屏层不再盖得住对话框
+    expect(auditLayerClash(".veil{position:fixed;inset:0;z-index:var(--z-float)}")).toHaveLength(0);
     expect(auditLayerClash(".tip{position:fixed;inset:auto 12px 40px auto;z-index:var(--z-raised)}")).toHaveLength(0);
     expect(auditLayerClash(".pop{position:fixed;top:10px;left:10px;width:120px;height:60px;z-index:1500}")).toHaveLength(0);
     expect(auditLayerClash(".full{position:fixed;top:0;right:0;bottom:0;left:0;z-index:1500}")).toHaveLength(1);

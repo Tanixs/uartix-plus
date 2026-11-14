@@ -332,12 +332,12 @@ export function auditMotionOverride(css: string, baseline: [number, number, numb
 /* ================= 层槽：谁能盖住谁 ================= */
 
 /**
- * 宿主对话框遮码所在的档（`.modal-mask` 实测 200）。
+ * 宿主对话框遮码所在的档（`.modal-mask` 自 E2 起是 `--z-popup` = 999）。
  * 注入层里 `position:fixed` + 高于这档 + 铺满视口 = 能把"清除 AI 临时覆盖"那个入口盖住。
  * 这条**不靠禁令**解决：层槽表只保证主题拿不到通知/引导/拖拽那三档，
- * 而 200 以上、2000 以下是合法区，所以这里出证据、由人决定留不留。
+ * 而 999 以上、2000 以下是合法区，所以这里出证据、由人决定留不留。
  */
-export const HOST_DIALOG_Z = 200;
+export const HOST_DIALOG_Z = 999;
 
 export interface LayerClashIssue {
   selector: string;

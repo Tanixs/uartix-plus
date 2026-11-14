@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { tx, useLocale } from "../../i18n/strings";
 import { IconDownload, IconPlay, IconPlus, IconStop, IconTrash, IconUpload, IconArrowUp, IconArrowDown, IconChevron, IconCopy, IconClose } from "../../shared/icons";
 import { alertDialog, confirmDialog } from "../../shared/Dialog";
@@ -341,10 +341,97 @@ function SuiteBar(props: {
 
 const ADD_KINDS: StepKind[] = ["send", "wait", "waitForFrame", "assertVar", "group", "note"];
 
+/**
+ * S1：把 `.seq-tree` 的滚动位置对齐到行边界。
+ *
+ * 结果面板展开时 `.seq-tree` 的视口会被压矮，若视口高度不是行高的整数倍，
+ * 视口底边就切在某一行的中间——该行的 `.sq-acts` 落在裁剪区外，
+ * `elementFromPoint` 命中的是下面 `.seq-results` 的标题条，按钮点不到。
+ * 这里在布局稳定/滚动停止后，从「行顶对齐」与「行底对齐」两类候选里挑位置：
+ * 先排除「按钮被裁掉一半」的候选（行只露出一小条边不算——那一行根本看不见按钮，
+ * 也算不出要点的目标），再取离当前位置最近的；位移大于 1px 才写入，
+ * 因此重复触发不会再动，也不会和结果面板抢高度。
+ */
+function snapTreeRows(el: HTMLDivElement) {
+  const rows = Array.from(el.querySelectorAll<HTMLElement>("[data-sq-row]"));
+  if (rows.length === 0) return;
+  const box = el.getBoundingClientRect();
+  const viewH = el.clientHeight;
+  if (viewH <= 0) return;
+  const max = Math.max(0, el.scrollHeight - viewH);
+  const tops: number[] = [];
+  const bottoms: number[] = [];
+  /** 每行操作按钮在行内的可见带（相对行顶）。量不到按钮时按 20px 居中兜底 */
+  const bands: { top: number; bottom: number }[] = [];
+  for (const row of rows) {
+    const r = row.getBoundingClientRect();
+    const top = r.top - box.top + el.scrollTop;
+    tops.push(top);
+    bottoms.push(r.bottom - box.top + el.scrollTop);
+    const btn = row.querySelector<HTMLElement>(".sq-acts button");
+    if (btn) {
+      const b = btn.getBoundingClientRect();
+      bands.push({ top: b.top - r.top, bottom: b.bottom - r.top });
+    } else {
+      bands.push({ top: (r.height - 20) / 2, bottom: (r.height + 20) / 2 });
+    }
+  }
+  const clip = (v: number) => Math.round(Math.min(max, Math.max(0, v)));
+  const cands = new Set<number>();
+  for (const t of tops) cands.add(clip(t));
+  for (const b of bottoms) cands.add(clip(b - viewH));
+  let best = el.scrollTop;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const c of cands) {
+    let halfBtn = 0;
+    const viewBottom = c + viewH;
+    for (let i = 0; i < tops.length; i++) {
+      if (bottoms[i] <= c + 0.5 || tops[i] >= viewBottom - 0.5) continue;
+      const visTop = Math.max(tops[i], c);
+      const visBottom = Math.min(bottoms[i], viewBottom);
+      // 按钮带只露出一部分（既没全露也没全藏）= 用户看到半截按钮，重罚
+      const overlap = Math.min(visBottom, tops[i] + bands[i].bottom) - Math.max(visTop, tops[i] + bands[i].top);
+      const bandH = bands[i].bottom - bands[i].top;
+      if (overlap > 0.5 && overlap < bandH - 0.5) halfBtn += overlap;
+    }
+    const score = halfBtn * 1000;
+    const closer = Math.abs(c - el.scrollTop) < Math.abs(best - el.scrollTop);
+    if (score < bestScore - 0.5 || (Math.abs(score - bestScore) <= 0.5 && closer)) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  if (Math.abs(best - el.scrollTop) > 1) el.scrollTop = best;
+}
+
 function StepEditor(props: { suite: Suite; running: boolean }) {
   const { suite, running } = props;
   /** 拖拽期步骤索引：行 id → 是否分组（每次拖拽构建，替代每帧递归查树） */
   const stepIdxRef = useRef<Map<string, boolean> | null>(null);
+  /** S1：步骤树视口（结果面板展开/收起、窗口变化时重新对齐行边界） */
+  const treeRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = treeRef.current;
+    if (!el) return;
+    let timer: number | undefined;
+    // 只在视口「变矮」时对齐（结果面板展开、拖分隔条压矮步骤区）：这是按钮被切走的时刻。
+    // 变高/首次挂载/用户自己滚动都不动它——不能用对齐去抢用户的滚动位置或把列表弹到底。
+    let lastH = el.clientHeight;
+    const ro = new ResizeObserver(() => {
+      const h = el.clientHeight;
+      if (h < lastH - 0.5) {
+        if (timer !== undefined) window.clearTimeout(timer);
+        timer = window.setTimeout(() => snapTreeRows(el), 90);
+      }
+      lastH = h;
+    });
+    ro.observe(el);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, []);
 
   const moveBy = (stepId: string, delta: -1 | 1) => {
     const loc = sequencerStore.locateStep(suite.id, stepId);
@@ -505,7 +592,7 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
           </span>
         )}
       </div>
-      <div className="seq-tree" data-sq-list>
+      <div className="seq-tree" data-sq-list ref={treeRef}>
         {suite.steps.map((s) => renderRow(s, 1))}
       </div>
     </div>

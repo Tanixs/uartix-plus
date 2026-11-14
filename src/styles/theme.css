@@ -5105,7 +5105,9 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
 .modal-mask {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  /* E2：对话框遮码必须在浮挂件（--z-float=500）之上——AI 浮窗曾以 500 压住设置页，
+     展开时把「125%」这类页面元素全挡住；抬到弹层档 --z-popup=999（仍低于菜单/通知/引导/拖拽）。 */
+  z-index: var(--z-popup);
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
