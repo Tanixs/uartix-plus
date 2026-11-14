@@ -13,14 +13,11 @@ import { requestOpenPanel } from "../ai/appBus";
 import { fieldSize, PALETTE } from "../protocol/templateStore";
 import { useSettings } from "../settings/settingsStore";
 import { Flyout } from "../../shared/Flyout";
-import { IconChevron, IconDock, IconPause, IconPlay, IconTrash } from "../../shared/icons";
+import { IconChevron, IconPause, IconPlay, IconTrash } from "../../shared/icons";
 import { t, tx } from "../../i18n/strings";
 import { hexSliceCovers } from "./hexCoverage";
 import { registerPanelView } from "../../panels/viewState";
-import { usePanelChrome } from "../../panels/panelChrome";
 import * as panelActivity from "../../panels/panelActivity";
-import { movePanelToCanvas, placementRejectText } from "../../panels/panelPlacement";
-import { toast } from "../ai/uiRuntime";
 
 const ROW_H = 20;
 const COLS = 16;
@@ -85,22 +82,8 @@ export function HexView() {
       }),
     [],
   );
-  // 页签条唯一动作：整体搬到控制画布。移动逻辑在 panelPlacement（先 capture 滚动位置再关页签）。
-  usePanelChrome("hexview", [
-    {
-      id: "embed",
-      label: tx("内嵌到控制画布", "Embed in canvas"),
-      title: tx(
-        "把 Hex 数据流整体搬进控制画布：同一面板单实例，停靠页签随即关闭，滚动位置原样带过去",
-        "Move the Hex stream into the control canvas: a single instance, the dock tab closes and the scroll position carries over",
-      ),
-      Icon: IconDock,
-      run: () => {
-        const r = movePanelToCanvas("hexview");
-        if (!r.ok) toast(placementRejectText(r.reason));
-      },
-    },
-  ]);
+  // 页签条的「内嵌到控制画布」由 PanelChromeActions 按白名单统一长出（embedPanels.ts
+  // 的 embedTargetForDockPanel），面板不再各注册一份；搬运仍走 panelPlacement。
   // 暂停：停更画面（数据仍在后台接收累计），恢复后立即补刷一次
   const pausedRef = useRef(false);
   const [paused, setPaused] = useState(false);

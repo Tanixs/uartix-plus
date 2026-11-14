@@ -305,6 +305,101 @@ export interface ControlsSnapshot {
 
 const GROUP_KINDS: GroupChildKind[] = ["slider", "button", "switch", "monitor", "led"];
 
+export type SliderParamField = "min" | "max" | "step" | "defaultValue";
+export type SliderParamReason = "non-finite" | "step" | "order" | "range" | "grid";
+
+/** 一次参数写入被修正了什么：UI 用它给出可见反馈，而不是静默改值。 */
+export interface SliderParamFix {
+  field: SliderParamField;
+  from: number;
+  value: number;
+  reason: SliderParamReason;
+  /** 组合控件子项才有 */
+  childId?: string;
+  childLabel?: string;
+}
+
+interface NormalizedSlider {
+  min: number;
+  max: number;
+  step: number;
+  defaultValue: number;
+  fixes: SliderParamFix[];
+}
+
+const finiteNumber = (v: unknown, fallback: number): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+/** 去掉浮点尾灰：0.1 步进对齐后别出现 60.000000000000014 */
+const tidy = (n: number): number => Number(n.toPrecision(12));
+
+/**
+ * 滑条参数的唯一校验出口（卡片与组合子项共用）。
+ *
+ * 先修步进、再修区间、最后把默认值收敛进区间并对齐到步进网格。
+ * `keep` 告诉它 min/max 冲突时保留哪一侧：编辑 min 时保留 max（min 让位），
+ * 编辑 max 时保留 min；导入/加载没有编辑者，按保留 max 处理。
+ */
+export function normalizeSliderParams(
+  raw: {
+    min: unknown;
+    max: unknown;
+    step: unknown;
+    defaultValue?: unknown;
+  },
+  keep?: "min" | "max",
+): NormalizedSlider {
+  const fixes: SliderParamFix[] = [];
+  let min = finiteNumber(raw.min, 0);
+  let max = finiteNumber(raw.max, 100);
+  let step = finiteNumber(raw.step, 1);
+
+  if (raw.min !== undefined && !Number.isFinite(Number(raw.min)))
+    fixes.push({ field: "min", from: Number(raw.min), value: min, reason: "non-finite" });
+  if (raw.max !== undefined && !Number.isFinite(Number(raw.max)))
+    fixes.push({ field: "max", from: Number(raw.max), value: max, reason: "non-finite" });
+  if (raw.step !== undefined && !Number.isFinite(Number(raw.step)))
+    fixes.push({ field: "step", from: Number(raw.step), value: step, reason: "non-finite" });
+
+  if (step <= 0) {
+    const from = step;
+    step = 1;
+    fixes.push({ field: "step", from, value: step, reason: "step" });
+  }
+
+  if (min > max) {
+    if (keep === "min") {
+      // 保留 min（用户刚编辑了 max）：把 max 抬到 min
+      const from = max;
+      max = min;
+      fixes.push({ field: "max", from, value: max, reason: "order" });
+    } else {
+      // 保留 max（用户刚编辑了 min / 导入数据）：把 min 压到 max
+      const from = min;
+      min = max;
+      fixes.push({ field: "min", from, value: min, reason: "order" });
+    }
+  }
+
+  let defaultValue = min;
+  if (raw.defaultValue !== undefined) {
+    const rawDef = finiteNumber(raw.defaultValue, min);
+    if (!Number.isFinite(Number(raw.defaultValue)))
+      fixes.push({ field: "defaultValue", from: Number(raw.defaultValue), value: defaultValue, reason: "non-finite" });
+    defaultValue = Math.min(max, Math.max(min, rawDef));
+    if (defaultValue !== rawDef)
+      fixes.push({ field: "defaultValue", from: rawDef, value: defaultValue, reason: "range" });
+    const snapped = tidy(Math.min(max, Math.max(min, min + Math.round((defaultValue - min) / step) * step)));
+    if (snapped !== defaultValue)
+      fixes.push({ field: "defaultValue", from: defaultValue, value: snapped, reason: "grid" });
+    defaultValue = snapped;
+  }
+
+  return { min, max, step, defaultValue, fixes };
+}
+
 /** 校验并规范化组合控件子项：非法 kind 丢弃、数值收敛、最多 8 个 */
 export function sanitizeChildren(raw: unknown): GroupChild[] {
   if (!Array.isArray(raw)) return [];
@@ -314,13 +409,14 @@ export function sanitizeChildren(raw: unknown): GroupChild[] {
     const r = item as Record<string, unknown>;
     const kind = String(r.kind ?? "") as GroupChildKind;
     if (!GROUP_KINDS.includes(kind)) continue;
+    const slider = normalizeSliderParams({ min: r.min, max: r.max, step: r.step });
     out.push({
       id: String(r.id ?? crypto.randomUUID()),
       kind,
       label: String(r.label ?? GROUP_KIND_LABEL[kind]),
-      min: Number(r.min ?? 0),
-      max: Number(r.max ?? 100),
-      step: Math.max(Number(r.step) > 0 ? Number(r.step) : 1, 0.001),
+      min: slider.min,
+      max: slider.max,
+      step: slider.step,
       template: String(r.template ?? ""),
       templates: Array.isArray(r.templates)
         ? [0, 1].map((i) => String((r.templates as unknown[])[i] ?? ""))
@@ -338,6 +434,7 @@ export function sanitizeChildren(raw: unknown): GroupChild[] {
   }
   return out;
 }
+
 
 const GROUP_OPS: LedOp[] = ["gt", "ge", "lt", "le", "eq", "ne"];
 
@@ -534,22 +631,30 @@ function migrateCard(raw: Record<string, unknown>): ControlCard | null {
       };
     case "custom":
       return { ...base, type };
-    default:
+    default: {
+      // 滑条参数走唯一校验出口：非法值在这里被钳制，运行时只会看到合法区间。
+      const slider = normalizeSliderParams({
+        min: raw.min,
+        max: raw.max,
+        step: raw.step,
+        defaultValue: raw.defaultValue ?? 50,
+      });
       return {
         ...base,
         type: "slider",
         template: String(raw.template ?? "CMD:%.2f!"),
         sendMode: (raw.sendMode as SendMode) ?? "ascii",
-        min: Number(raw.min ?? 0),
-        max: Number(raw.max ?? 100),
-        step: Number(raw.step ?? 1),
-        defaultValue: Number(raw.defaultValue ?? 50),
+        min: slider.min,
+        max: slider.max,
+        step: slider.step,
+        defaultValue: slider.defaultValue,
         sendTrigger:
           (raw.sendTrigger as "onRelease" | "continuous") ?? "onRelease",
         minIntervalMs: Number(raw.minIntervalMs ?? 50),
         useScript: Boolean(raw.useScript),
         script: String(raw.script ?? ""),
       };
+    }
   }
 }
 
@@ -1258,14 +1363,69 @@ export function findFlowPos(
  */
 const RUNTIME_CARD_KEYS = new Set(["state"]);
 
+export interface PatchCardResult {
+  /** 本次写入被校验钳制的滑条参数（卡片与组合子项），空数组表示原样落库。 */
+  sliderFixes: SliderParamFix[];
+}
+
+/** 对比"想写的参数"与"规范化后的结果"，把修正项捞出来给 UI 提示。 */
+function collectSliderFixes(
+  before: ControlCard,
+  after: ControlCard,
+  patch: Record<string, unknown>,
+  out: SliderParamFix[],
+): void {
+  if (
+    before.type === "slider" &&
+    after.type === "slider" &&
+    ["min", "max", "step", "defaultValue"].some((k) => k in patch)
+  ) {
+    const editedMin = "min" in patch && !("max" in patch);
+    const editedMax = "max" in patch && !("min" in patch);
+    const n = normalizeSliderParams(
+      {
+        min: "min" in patch ? patch.min : before.min,
+        max: "max" in patch ? patch.max : before.max,
+        step: "step" in patch ? patch.step : before.step,
+        defaultValue: "defaultValue" in patch ? patch.defaultValue : before.defaultValue,
+      },
+      editedMin ? "max" : editedMax ? "min" : undefined,
+    );
+    out.push(...n.fixes);
+  }
+
+  // 组合子项的 min/max/step 也走同一套规则：编辑子项范围时同样要看得见修正。
+  if (before.type === "group" && after.type === "group" && Array.isArray(patch.children)) {
+    const rawById = new Map<string, Record<string, unknown>>();
+    for (const raw of patch.children) {
+      if (!raw || typeof raw !== "object") continue;
+      const r = raw as Record<string, unknown>;
+      if (typeof r.id === "string") rawById.set(r.id, r);
+    }
+    for (const child of after.children) {
+      const r = rawById.get(child.id);
+      if (!r) continue;
+      const editedMin = "min" in r && !("max" in r);
+      const editedMax = "max" in r && !("min" in r);
+      const n = normalizeSliderParams(
+        { min: r.min, max: r.max, step: r.step },
+        editedMin ? "max" : editedMax ? "min" : undefined,
+      );
+      out.push(...n.fixes.map((f) => ({ ...f, childId: child.id, childLabel: child.label })));
+    }
+  }
+}
+
 export function patchCard(
   pageId: string,
   cardId: string,
   patch: Record<string, unknown>,
-) {
+): PatchCardResult {
   // P121-F：按字段拆。混进任何一个配置字段就整份拒绝（不做"半生效"——
   // 一半生效的写入比整份失败更难解释，也没法撤销）。
-  if (guardLocked() && Object.keys(patch).some((k) => !RUNTIME_CARD_KEYS.has(k))) return;
+  if (guardLocked() && Object.keys(patch).some((k) => !RUNTIME_CARD_KEYS.has(k)))
+    return { sliderFixes: [] };
+  const sliderFixes: SliderParamFix[] = [];
   snapshot = {
     ...snapshot,
     pages: snapshot.pages.map((p) =>
@@ -1294,6 +1454,7 @@ export function patchCard(
               const merged = migrateCard({ ...c, ...patch });
               // 非法的内嵌 panelId（patch 想改成白名单外）整卡保持原样，不落空卡。
               if (!merged) return c;
+              collectSliderFixes(c, merged, patch, sliderFixes);
               return normalizeGeometry(merged, p.cols, p.rows || 48);
             }),
           }
@@ -1301,7 +1462,9 @@ export function patchCard(
     ),
   };
   emit();
+  return { sliderFixes };
 }
+
 
 export function removeCard(pageId: string, cardId: string) {
   if (guardLocked()) return;

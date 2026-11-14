@@ -137,9 +137,13 @@ export function addEmbedFromGallery(embedId: string, name?: string): PlacePanelR
  *
  * 顺序：先干跑画布容量 → capture 视野 → 关停靠 → 落卡。
  * 干跑必须早于关闭：画布放不下时不能先把用户的停靠页签关掉再告诉他失败。
+ *
+ * 也接受视图 id（哨兵/姿态/轨迹）：它们没有"整板"语义，但没有停靠页签的视图
+ * 直接落卡；哨兵这种既有页签又按视图记账的，走同一条"先关页签再落卡"。
+ * 视图没有可搬的视野，捕获取舍由 isEmbedPanelId 决定。
  */
 export function movePanelToCanvas(panelId: string, name?: string): PlacePanelResult {
-  if (!isEmbedPanelTarget(panelId)) return { ok: false, reason: "unknown-panel" };
+  if (!isEmbedTargetId(panelId)) return { ok: false, reason: "unknown-panel" };
   if (panelActivity.isEmbedded(panelId) || controlsStore.findEmbedCard(panelId)) {
     return { ok: false, reason: "already-embedded" };
   }

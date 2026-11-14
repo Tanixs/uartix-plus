@@ -1030,6 +1030,11 @@ export function ControlCanvas() {
     });
   };
 
+  /** 区间变化把旧值钳回合法域：只改运行值，绝不因为改设置而发一帧 */
+  const onClamp = (card: SliderCard, v: number) => {
+    valuesRef.current.set(card.id, v);
+  };
+
   const onRelease = (card: SliderCard, v: number) => {
     valuesRef.current.set(card.id, v);
     if (card.sendTrigger === "onRelease") void sendControl(card, { value: v }, true);
@@ -1395,6 +1400,7 @@ export function ControlCanvas() {
             initial={getVal(c)}
             onValue={onValue}
             onRelease={onRelease}
+            onClamp={onClamp}
           />
         );
       case "button":
@@ -1406,7 +1412,8 @@ export function ControlCanvas() {
               ? tx("未配置或当前会话状态不允许", "Unconfigured or unavailable in the current session state")
               : undefined : undefined} />;
       case "switch":
-        return <SwitchCardView key={c.id} {...common} card={c} onSend={sendControl} />;
+        return <SwitchCardView key={c.id} {...common} card={c} onSend={sendControl}
+          onStateChange={(card, st) => store.patchCard(page.id, card.id, { state: st })} />;
       case "led":
         return <LedCardView key={c.id} {...common} card={c} />;
       case "buzzer":

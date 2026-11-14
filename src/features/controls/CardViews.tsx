@@ -30,10 +30,40 @@ import { NumInput, TextInput } from "../../shared/FormInputs";
 import { Section } from "../../shared/Section";
 import { HelpHint } from "../../shared/HelpHint";
 import { rangeStyle, syncRangeFill } from "../../shell/rangeFill";
+import { toast } from "../../shared/toast";
 
 function fmtVal(v: number): string {
   if (Number.isInteger(v)) return String(v);
   return v.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/** 把 store 的修正项翻译成一句可见反馈（不静默改值） */
+function sliderFixNotice(fixes: store.SliderParamFix[]): string {
+  const label = (f: store.SliderParamFix) =>
+    f.field === "min"
+      ? tx("最小值", "min")
+      : f.field === "max"
+        ? tx("最大值", "max")
+        : f.field === "step"
+          ? tx("步进", "step")
+          : tx("默认值", "default");
+  const why = (f: store.SliderParamFix) =>
+    f.reason === "step"
+      ? tx("步进必须大于 0", "step must be greater than 0")
+      : f.reason === "order"
+        ? tx("最小值不能大于最大值", "min cannot exceed max")
+        : f.reason === "range"
+          ? tx("默认值超出范围", "default is outside the range")
+          : f.reason === "grid"
+            ? tx("默认值不在步进网格上", "default is off the step grid")
+            : tx(`${label(f)}不是有效数字`, `${label(f)} is not a valid number`);
+  const items = fixes
+    .slice(0, 3)
+    .map(
+      (f) =>
+        `${f.childLabel ? tx(`子项「${f.childLabel}」`, `"${f.childLabel}": `) : ""}${why(f)}${tx("，已改为 ", " → ")}${fmtVal(f.value)}`,
+    );
+  return tx("滑条参数已修正：", "Slider parameters corrected: ") + items.join(tx("；", "; "));
 }
 
 function evalCond(
@@ -224,6 +254,8 @@ export function SliderCardView(props: {
   locked?: boolean;
   onValue: (card: SliderCard, v: number) => void;
   onRelease: (card: SliderCard, v: number) => void;
+  /** 区间/步进改动把当前值钳回合法域时调用：只更新运行值，不触发发送 */
+  onClamp: (card: SliderCard, v: number) => void;
   onMenu: (card: ControlCard, x: number, y: number) => void;
   onDragStart: (e: React.MouseEvent<HTMLDivElement>, card: ControlCard) => void;
   onRenameCommit: (name: string) => void;
@@ -294,7 +326,11 @@ export function SliderCardView(props: {
   };
 
   useEffect(() => {
-    commit(current(), "none");
+    const before = current();
+    const after = commit(before, "none");
+    // 卡面/range 已经写成 after；运行值（实际发送来源）必须一起收敛，
+    // 否则改完区间后"看到的"和"发出去的"会分叉。
+    if (after !== before) props.onClamp(card, after);
   }, [card.min, card.max, card.step]);
 
   return (
@@ -499,6 +535,8 @@ export function SwitchCardView(props: {
   renaming: boolean;
   locked?: boolean;
   onSend: (card: ControlCard, ctx: Record<string, number | string>) => void;
+  /** 档位点击写回卡片：刷新后与最后一次指令的档位一致 */
+  onStateChange: (card: ControlCard, state: number) => void;
   onMenu: (card: ControlCard, x: number, y: number) => void;
   onDragStart: (e: React.MouseEvent<HTMLDivElement>, card: ControlCard) => void;
   onRenameCommit: (name: string) => void;
@@ -546,6 +584,7 @@ export function SwitchCardView(props: {
             onClick={() => {
               if (i === state) return;
               setState(i);
+              props.onStateChange(card, i);
               props.onSend(card, { state: i, label: card.labels[i] ?? "" });
             }}
           >
@@ -1569,8 +1608,10 @@ export function CardModal(props: {
     store.getSnapshot().pages.find((p) => p.id === props.pageId)?.cols ?? 8;
   const mountedItem = card.commandId ? commandStore.getCommand(card.commandId) : null;
   const spec = card.sendTemplateId ? sendStore.getTemplate(card.sendTemplateId) : undefined;
-  const patch = (p: Record<string, unknown>) =>
-    store.patchCard(props.pageId, card.id, p);
+  const patch = (p: Record<string, unknown>) => {
+    const r = store.patchCard(props.pageId, card.id, p);
+    if (r.sliderFixes.length) toast(sliderFixNotice(r.sliderFixes));
+  };
 
   const hasScriptMode =
     card.type === "slider" ||
@@ -1807,6 +1848,12 @@ export function CardModal(props: {
             <select
               className="input"
               value=""
+              disabled={card.children.length >= 8}
+              title={
+                card.children.length >= 8
+                  ? tx("组合控件最多 8 个子项；移除一项后才能继续添加", "A group card holds up to 8 children; remove one to add more")
+                  : undefined
+              }
               onChange={(e) => {
                 const kind = e.target.value as GroupChildKind;
                 if (!kind) return;
@@ -1815,7 +1862,11 @@ export function CardModal(props: {
                 patch({ children: [...card.children, ch] });
               }}
             >
-              <option value="">{tx("＋ 选择类型…", "＋ Add…")}</option>
+              <option value="">
+                {card.children.length >= 8
+                  ? tx("已达 8 项上限", "8-item limit reached")
+                  : tx("＋ 选择类型…", "＋ Add…")}
+              </option>
               {(Object.keys(store.GROUP_KIND_LABEL) as GroupChildKind[]).map((k) => (
                 <option key={k} value={k}>
                   {store.groupKindLabel(k)}
@@ -1823,6 +1874,14 @@ export function CardModal(props: {
               ))}
             </select>
           </div>
+          {card.children.length >= 8 && (
+            <p className="form-hint" role="status">
+              {tx(
+                "已达 8 项上限：先移除一个子项，再添加新的。",
+                "8-item limit reached: remove one child before adding another.",
+              )}
+            </p>
+          )}
           {card.children.map((ch, i) => (
             <div className="form-col ctlg-cfg" key={ch.id}>
               <div className="form-row">
@@ -1905,7 +1964,7 @@ export function CardModal(props: {
                         width={56}
                         onCommit={(v) => {
                           const children = [...card.children];
-                          children[i] = { ...ch, step: v > 0 ? v : 1 };
+                          children[i] = { ...ch, step: v };
                           patch({ children });
                         }}
                       />
@@ -2243,11 +2302,7 @@ export function CardModal(props: {
               </div>
               <div className="form-pair">
                 <label>{tx("步进", "Step")}</label>
-                <NumInput
-                  value={card.step}
-                  width={72}
-                  onCommit={(v) => patch({ step: v > 0 ? v : 1 })}
-                />
+                <NumInput value={card.step} width={72} onCommit={(v) => patch({ step: v })} />
               </div>
               <div className="form-pair">
                 <label>{tx("默认值", "Default")}</label>

@@ -244,6 +244,43 @@ describe("panel placement mutex", () => {
     expect(store.findEmbedCard("trajectory3d")).not.toBeNull();
   });
 
+  it("moves a docked view out through the same entry as a whole panel", async () => {
+    const activity = await import("./panelActivity");
+    const bridge = await import("../shell/dockBridge");
+    const store = await import("../features/controls/controlsStore");
+    const placement = await import("./panelPlacement");
+    const closed: string[] = [];
+    const api = {
+      getPanel: (id: string) => ({ api: { close: () => closed.push(id), setActive: () => {} } }),
+    };
+    bridge.registerDockApi(api as never, () => {});
+    activity.syncPanels([{ id: "sentinel", visible: true }]);
+
+    const r = placement.movePanelToCanvas("sentinel");
+    expect(r.ok).toBe(true);
+    expect(closed).toEqual(["sentinel"]);
+    expect(store.findEmbedCard("sentinel")?.card).toMatchObject({ w: 6, h: 5 });
+    // 第二次走"已内嵌"，不会关第二次页签
+    expect(placement.movePanelToCanvas("sentinel")).toEqual({
+      ok: false,
+      reason: "already-embedded",
+    });
+  });
+
+  it("lands a view that has no dock tab without touching the dock", async () => {
+    const activity = await import("./panelActivity");
+    const bridge = await import("../shell/dockBridge");
+    const store = await import("../features/controls/controlsStore");
+    const placement = await import("./panelPlacement");
+    const close = vi.fn();
+    bridge.registerDockApi({ getPanel: () => ({ api: { close, setActive: () => {} } }) } as never, () => {});
+    activity.syncPanels([{ id: "view3d", visible: true }]);
+
+    expect(placement.movePanelToCanvas("attitude3d").ok).toBe(true);
+    expect(close).not.toHaveBeenCalled();
+    expect(store.findEmbedCard("attitude3d")?.card).toMatchObject({ w: 4, h: 3 });
+  });
+
   it("has readable text for every reject reason", async () => {
     const placement = await import("./panelPlacement");
     const reasons = [

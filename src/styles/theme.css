@@ -3413,6 +3413,16 @@ select optgroup {
   border-color: var(--danger);
 }
 
+/* C15：行内删除按钮（组合子项的 ✕）不参与满宽。
+   满宽 + 12px 上边距是为对话框底部的整行危险操作准备的；放进表单行后会变成
+   一只红框把整行撑满，8 个子项各来一只，连设置面板都被撑宽。 */
+.form-row > .danger-btn {
+  flex: 0 0 auto;
+  width: auto;
+  margin-top: 0;
+  padding-inline: var(--sp-2);
+}
+
 .danger-btn:hover {
   background: color-mix(in srgb, var(--danger) 10%, transparent) !important;
   color: var(--danger) !important;

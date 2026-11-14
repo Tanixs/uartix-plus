@@ -572,3 +572,84 @@ describe("commandId migration (v3)", () => {
     expect(cards[1].commandId).toBeUndefined();
   });
 });
+
+describe("slider parameter validation", () => {
+  it("normalizes step, order and default in one pass", async () => {
+    const store = await import("./controlsStore");
+    const n = store.normalizeSliderParams({ min: 0, max: 10, step: 0, defaultValue: 5.2 });
+    expect(n).toMatchObject({ min: 0, max: 10, step: 1 });
+    expect(n.fixes.map((f) => [f.field, f.reason, f.value])).toEqual([
+      ["step", "step", 1],
+      ["defaultValue", "grid", 5],
+    ]);
+
+    // 非有限值回落，且报出来源
+    const bad = store.normalizeSliderParams({ min: NaN, max: Infinity, step: 1, defaultValue: NaN });
+    expect(bad).toMatchObject({ min: 0, max: 100, step: 1, defaultValue: 0 });
+    expect(bad.fixes.map((f) => f.reason)).toEqual(["non-finite", "non-finite", "non-finite"]);
+
+    // min > max：编辑 min 时保留 max（min 让位）
+    const collide = store.normalizeSliderParams({ min: 200, max: 100, step: 1, defaultValue: 50 }, "max");
+    expect(collide).toMatchObject({ min: 100, max: 100, defaultValue: 100 });
+    expect(collide.fixes.map((f) => f.field)).toEqual(["min", "defaultValue"]);
+  });
+
+  it("clamps on patchCard and reports every correction to the caller", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.activePage()!.id;
+    const cardId = store.addCard(pageId, "slider");
+    const read = () =>
+      store.getSnapshot().pages.find((p) => p.id === pageId)!.cards.find((c) => c.id === cardId)!;
+
+    const r = store.patchCard(pageId, cardId, { min: 200 });
+    expect(read()).toMatchObject({ min: 100, max: 100, defaultValue: 100 });
+    expect(r.sliderFixes.map((f) => `${f.field}:${f.reason}:${f.value}`)).toEqual([
+      "min:order:100",
+      "defaultValue:range:100",
+    ]);
+
+    const step = store.patchCard(pageId, cardId, { step: 0 });
+    expect(read()).toMatchObject({ step: 1 });
+    expect(step.sliderFixes.map((f) => `${f.field}:${f.reason}:${f.value}`)).toEqual(["step:step:1"]);
+
+    const def = store.patchCard(pageId, cardId, { defaultValue: 500 });
+    expect(read()).toMatchObject({ defaultValue: 100 });
+    expect(def.sliderFixes).toMatchObject([{ field: "defaultValue", reason: "range", value: 100 }]);
+  });
+
+  it("applies the same rules to group child sliders", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.activePage()!.id;
+    const cardId = store.addCard(pageId, "group");
+    const group = () => {
+      const c = store.getSnapshot().pages.find((p) => p.id === pageId)!.cards.find((x) => x.id === cardId)!;
+      return c.type === "group" ? c : null;
+    };
+    const child = group()!.children[0];
+    const children = group()!.children.map((ch) =>
+      ch.id === child.id ? { ...ch, min: 90, max: 10, step: 0 } : ch,
+    );
+    const r = store.patchCard(pageId, cardId, { children });
+    expect(group()!.children[0]).toMatchObject({ min: 10, max: 10, step: 1 });
+    expect(r.sliderFixes.map((f) => `${f.childId === child.id}:${f.field}:${f.reason}`)).toEqual([
+      "true:step:step",
+      "true:min:order",
+    ]);
+  });
+});
+
+describe("switch position persistence", () => {
+  it("writes the clicked position into the saved card", async () => {
+    const store = await import("./controlsStore");
+    const pageId = store.activePage()!.id;
+    const cardId = store.addCard(pageId, "switch");
+    // 点击路径 = 写回卡片 state；脚本桥与编排绑定也写同一个字段。
+    store.patchCard(pageId, cardId, { state: 1 });
+    vi.runAllTimers();
+    const saved = JSON.parse(localStorage.getItem("vs.controls")!) as {
+      pages: { id: string; cards: { id: string; state?: number }[] }[];
+    };
+    const card = saved.pages.find((p) => p.id === pageId)!.cards.find((c) => c.id === cardId)!;
+    expect(card.state).toBe(1);
+  });
+});

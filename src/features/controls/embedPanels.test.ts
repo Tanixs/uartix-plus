@@ -9,6 +9,7 @@ import {
   embedKindOf,
   embedMinOf,
   embedName,
+  embedTargetForDockPanel,
   hasPointerLock,
   isEmbedId,
   isEmbedPanelTarget,
@@ -121,6 +122,22 @@ describe("embed whitelist", () => {
 
   it("names every target in both languages", () => {
     for (const id of EMBED_IDS) expect(embedName(id).length).toBeGreaterThan(0);
+  });
+
+  it("maps dock tabs to embed targets so the entry can live in one place", () => {
+    // 整板页签：停靠 id 就是内嵌 id
+    for (const id of ["plot2d", "hexview", "xray", "spectrum", "sequencer", "sendbuild"] as const) {
+      expect(embedTargetForDockPanel(id)).toBe(id);
+    }
+    // 名字不同 / 视图寄居在别的页签：由这张表翻译
+    expect(embedTargetForDockPanel("table")).toBe("datatable");
+    expect(embedTargetForDockPanel("view3d")).toBe("attitude3d");
+    expect(embedTargetForDockPanel("plot3d")).toBe("trajectory3d");
+    expect(embedTargetForDockPanel("sentinel")).toBe("sentinel");
+    // 帧画布这次不进入口；其它非白名单面板不该凭空长按钮
+    expect(embedTargetForDockPanel("framecanvas")).toBeNull();
+    expect(embedTargetForDockPanel("modbus")).toBeNull();
+    expect(embedTargetForDockPanel("controls")).toBeNull();
   });
 });
 

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { IDockviewHeaderActionsProps } from "dockview-react";
-import { splitChrome, usePanelChromeFor } from "../panels/panelChrome";
-import { IconMore } from "../shared/icons";
+import { splitChrome, usePanelChromeFor, type ChromeAction } from "../panels/panelChrome";
+import { IconDock, IconMore } from "../shared/icons";
 import { zoomFactor } from "../shared/zoom";
 import { tx, useLocale } from "../i18n/strings";
+import { embedTargetForDockPanel } from "../features/controls/embedPanels";
+import { movePanelToCanvas, placementRejectText } from "../panels/panelPlacement";
+import { toast } from "../features/ai/uiRuntime";
 
 /**
  * P104-B10 组级页签动作。
@@ -20,7 +23,28 @@ export function PanelChromeActions(props: IDockviewHeaderActionsProps) {
   useLocale(); // 守卫三：这一面说的话是 tx() 出来的，切语言得有人重渲染
   const id = props.activePanel?.id;
   const items = usePanelChromeFor(id);
-  const { primary, overflow } = splitChrome(items);
+  // 内嵌入口只在这里长一次：按停靠页签 id 查白名单映射，面板不必各自注册。
+  // 放第一位是统一"入口位置"：面板动作再多，也不会把它挤进 ⋯ 菜单。
+  const embedTarget = id ? embedTargetForDockPanel(id) : null;
+  const allItems: ChromeAction[] = embedTarget
+    ? [
+        {
+          id: "embed",
+          label: tx("内嵌到控制画布", "Embed in canvas"),
+          title: tx(
+            "把这块内容放进控制画布：同一内容只保留一个实例；它有停靠页签时，页签先让位",
+            "Place this content on the control canvas: one instance only; if it has a dock tab, the tab makes way first",
+          ),
+          Icon: IconDock,
+          run: () => {
+            const r = movePanelToCanvas(embedTarget);
+            if (!r.ok) toast(placementRejectText(r.reason, embedTarget));
+          },
+        },
+        ...items.filter((a) => a.id !== "embed"),
+      ]
+    : items;
+  const { primary, overflow } = splitChrome(allItems);
   const [menuOpen, setMenuOpen] = useState(false);
   const moreRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -56,7 +80,7 @@ export function PanelChromeActions(props: IDockviewHeaderActionsProps) {
     setPos({ left, top });
   }, [menuOpen, overflow.length]);
 
-  if (!id || items.length === 0) return null;
+  if (!id || allItems.length === 0) return null;
 
   return (
     <div className="pca" data-panel={id}>

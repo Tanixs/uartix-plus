@@ -97,6 +97,32 @@ export function isEmbedPanelTarget(
 }
 
 /**
+ * 停靠页签 id → 该页签上「内嵌到控制画布」应落卡的目标 id。
+ *
+ * 页签条只有停靠 id（`table` / `view3d` / `plot3d`），而卡片用的是白名单 id
+ * （`datatable` / `attitude3d` / `trajectory3d`）。这张映射让入口只写一份：
+ * 页签条按它自动长出按钮，面板自己不必各注册一遍。
+ *
+ * 只收用户点名的 8 类（5 个整板 + 姿态 3D / 3D 轨迹 / 哨兵）；
+ * 帧画布当前仍按 E6 的"先关页签"处理，未进这张表。
+ */
+export function embedTargetForDockPanel(dockId: string): EmbedTargetId | null {
+  if (isEmbedPanelId(dockId)) return dockId;
+  switch (dockId) {
+    case "table":
+      return "datatable";
+    case "view3d":
+      return "attitude3d";
+    case "plot3d":
+      return "trajectory3d";
+    case "sentinel":
+      return "sentinel";
+    default:
+      return null;
+  }
+}
+
+/**
  * 插件面板的最小格数。5×4（60px 格下 300×240）不是按某个插件量出来的——
  * 插件界面由作者决定，宿主能给的只有一条下限：低于它，任何带工具栏的页面都排不开。
  */
