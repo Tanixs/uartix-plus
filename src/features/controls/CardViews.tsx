@@ -281,9 +281,20 @@ export function SliderCardView(props: {
   const sliderRef = useRef<HTMLInputElement>(null);
   const spanRef = useRef<HTMLDivElement>(null);
   const stepRef = useRef<HTMLInputElement>(null);
-  /* 挂载时补一次填色：defaultValue 走的是 DOM 初始值，渲染期算不到它 */
+  /* 默认值改了但运行值还没建立时，range 的 defaultValue 不会跟着更新：
+     卡面文本会先变，range.value 仍是挂载时的旧值，发送又会读旧值。
+     这里把三者一起对齐（拖拽中 initial 与 DOM 值相同，属无操作）。 */
   useEffect(() => {
-    if (sliderRef.current) syncRangeFill(sliderRef.current);
+    const el = sliderRef.current;
+    if (!el) return;
+    const v = props.initial;
+    if (Math.abs(parseFloat(el.value) - v) > 1e-9) {
+      el.value = String(v);
+      if (spanRef.current) spanRef.current.textContent = fmtVal(v);
+      if (stepRef.current && document.activeElement !== stepRef.current)
+        stepRef.current.value = String(v);
+    }
+    syncRangeFill(el);
   }, [props.initial]);
 
   const current = (): number =>

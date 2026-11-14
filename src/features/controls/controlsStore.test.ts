@@ -612,6 +612,11 @@ describe("slider parameter validation", () => {
     expect(read()).toMatchObject({ step: 1 });
     expect(step.sliderFixes.map((f) => `${f.field}:${f.reason}:${f.value}`)).toEqual(["step:step:1"]);
 
+    // 编辑 max 时保住 min：min=100 时把 max 改成 0，不能把区间整体压成 0。
+    const order = store.patchCard(pageId, cardId, { max: 0 });
+    expect(read()).toMatchObject({ min: 100, max: 100, defaultValue: 100 });
+    expect(order.sliderFixes.map((f) => `${f.field}:${f.reason}:${f.value}`)).toEqual(["max:order:100"]);
+
     const def = store.patchCard(pageId, cardId, { defaultValue: 500 });
     expect(read()).toMatchObject({ defaultValue: 100 });
     expect(def.sliderFixes).toMatchObject([{ field: "defaultValue", reason: "range", value: 100 }]);

@@ -26,7 +26,9 @@ export function NumInput({
   const commit = () => {
     const v = parseFloat(txt.replace(",", "."));
     if (!Number.isNaN(v)) onCommit(v);
-    else setTxt(String(value));
+    // 校验可能把输入改回原值（如 max 被抬回 min）：此时 value 不变、下面的 effect 不会触发，
+    // 输入框会一直显示非法值。先回显当前合法值，真被改了就由 value 变化的 effect 覆盖。
+    setTxt(String(value));
   };
   return (
     <input

@@ -409,7 +409,13 @@ export function sanitizeChildren(raw: unknown): GroupChild[] {
     const r = item as Record<string, unknown>;
     const kind = String(r.kind ?? "") as GroupChildKind;
     if (!GROUP_KINDS.includes(kind)) continue;
-    const slider = normalizeSliderParams({ min: r.min, max: r.max, step: r.step });
+    // 子项与整卡同一条规则：只改一侧时保住另一侧，避免把一个非法上限连带压掉下限。
+    const editedMin = "min" in r && !("max" in r);
+    const editedMax = "max" in r && !("min" in r);
+    const slider = normalizeSliderParams(
+      { min: r.min, max: r.max, step: r.step },
+      editedMin ? "max" : editedMax ? "min" : undefined,
+    );
     out.push({
       id: String(r.id ?? crypto.randomUUID()),
       kind,
@@ -478,7 +484,10 @@ export function newGroupChild(kind: GroupChildKind): GroupChild {
   ])[0];
 }
 
-function migrateCard(raw: Record<string, unknown>): ControlCard | null {
+function migrateCard(
+  raw: Record<string, unknown>,
+  keep?: "min" | "max",
+): ControlCard | null {
   const str = (v: unknown): string | undefined =>
     typeof v === "string" && v ? v : undefined;
   const base = {
@@ -633,12 +642,15 @@ function migrateCard(raw: Record<string, unknown>): ControlCard | null {
       return { ...base, type };
     default: {
       // 滑条参数走唯一校验出口：非法值在这里被钳制，运行时只会看到合法区间。
-      const slider = normalizeSliderParams({
-        min: raw.min,
-        max: raw.max,
-        step: raw.step,
-        defaultValue: raw.defaultValue ?? 50,
-      });
+      const slider = normalizeSliderParams(
+        {
+          min: raw.min,
+          max: raw.max,
+          step: raw.step,
+          defaultValue: raw.defaultValue ?? 50,
+        },
+        keep,
+      );
       return {
         ...base,
         type: "slider",
@@ -1451,7 +1463,14 @@ export function patchCard(
                 if ("type" in patch && patch.type !== c.type)
                   throw new Error("managed 卡片类型不可修改 / Managed card type cannot be changed");
               }
-              const merged = migrateCard({ ...c, ...patch });
+              // 编辑意图决定 min/max 冲突时保留哪一侧：只改 max 就保住 min，
+              // 否则 min=100 时把 max 改成 0 会把区间整体压成 0，用户以为改的是上限却连下限一起丢了。
+              const editedMin = "min" in patch && !("max" in patch);
+              const editedMax = "max" in patch && !("min" in patch);
+              const merged = migrateCard(
+                { ...c, ...patch },
+                editedMin ? "max" : editedMax ? "min" : undefined,
+              );
               // 非法的内嵌 panelId（patch 想改成白名单外）整卡保持原样，不落空卡。
               if (!merged) return c;
               collectSliderFixes(c, merged, patch, sliderFixes);
