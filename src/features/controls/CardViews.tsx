@@ -156,6 +156,23 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
   /* 卡面角标要显示**生效**的发送格式：挂载命令时模式由命令决定，
      卡片自己的 sendMode 在这张卡上不参与发送。 */
   const hexMode = (mountItem?.sendMode ?? (isSendModeCard(card) ? card.sendMode : "ascii")) === "hex";
+  /* S2-b：常驻文字角标太抢眼。HEX 只剩一个 3px 的淡点（不占布局、不可点），
+     "不注意看不见、但一定存在"；权威显示在右键「发送格式」，悬停 title 补一句话。 */
+  const fmtTip =
+    mountItem ||
+    !isSendModeCard(card) ||
+    card.sendTemplateId ||
+    ("useScript" in card && card.useScript)
+      ? undefined
+      : hexMode
+        ? tx(
+            "发送格式：HEX（右键「发送格式」切换；数值占位写 %%，按 f32 小端写入）",
+            "Send format: HEX (right-click → Send format; use %% for numbers, little-endian f32)",
+          )
+        : tx(
+            "发送格式：ASCII（右键「发送格式」切换）",
+            "Send format: ASCII (right-click → Send format)",
+          );
   /* 挂载是引用式：命令改名/改模板，卡面角标当场跟着变。模板变了名字没变时，
      只换文字用户未必发现，所以变化后让角标闪一下并暂时写明"已更新"。 */
   const mountSig = mountItem
@@ -209,7 +226,7 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
               `已挂载命令：${mountItem.name}\n模板：${mountItem.template || "—"}`,
               `Mounted command: ${mountItem.name}\nTemplate: ${mountItem.template || "—"}`,
             )
-          : undefined
+          : fmtTip
       }
       style={{
         left: props.left,
@@ -267,7 +284,6 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
           )}
         >
           <IconPlug />
-          {mountItem.sendMode === "hex" && <span className="ctl-mount-fmt">HEX</span>}
           <span className="ctl-mount-name">
             {mountFlash
               ? tx(`已更新 · ${mountItem.name}`, `Updated · ${mountItem.name}`)
@@ -275,16 +291,8 @@ export function CardFrame(props: CardFrameProps) {  const { card } = props;
           </span>
         </span>
       )}
-      {hexMode && !mountItem && (
-        <span
-          className="ctl-fmt-bad"
-          title={tx(
-            "发送格式：HEX（滑条的 %% / 摇杆的 %x、%y 按 f32 小端写入，其余字符按十六进制字节解析）",
-            "Send format: HEX (%% / %x, %y written as little-endian f32; other chars parsed as hex bytes)",
-          )}
-        >
-          HEX
-        </span>
+      {hexMode && (
+        <span className="ctl-fmt-dot" aria-hidden="true" />
       )}
       {props.children}
       {props.resizable && (
@@ -1667,20 +1675,67 @@ function isSendModeCard(card: ControlCard): card is SendModeCard {
 /**
  * S2：发送格式的唯一一处 UI。组卡早就用这个字段发 HEX，六类指令卡此前只有字段没有入口；
  * 两处必须同一句措辞、同一个 `<select>`，否则用户会看到"组合控件叫发送格式、按钮叫别的"。
+ *
+ * HEX 边界（本轮补）：模板里留着 `%d` / `%.2f` 这类 ASCII 数值格式符时，切到 HEX
+ * 它们不会被替换，`%` 在 hex 解析里是非法字符，发送会被拒。这里是唯一的"切过去就说话"
+ * 的地方——不等到用户点了发送、看到失败才让他猜。
  */
-function SendFormatRow(props: { value: SendMode; onChange: (mode: SendMode) => void }) {
+const ASCII_NUM_SPEC = /%(?:\d+)?(?:\.\d+)?[df]/;
+
+/** 一张卡当前会发出的模板；组卡用它各子项的模板。 */
+function sendTemplatesOf(card: SendModeCard): string[] {
+  switch (card.type) {
+    case "slider":
+    case "button":
+    case "joystick":
+      return [card.template];
+    case "switch":
+      return card.templates;
+    case "keypad":
+      return [...card.templates, ...card.releaseTemplates];
+    case "keymon":
+      return [card.template, card.releaseTemplate];
+    case "group":
+      return card.children.flatMap((ch) =>
+        ch.kind === "slider" || ch.kind === "button"
+          ? [ch.template]
+          : ch.kind === "switch"
+            ? ch.templates
+            : [],
+      );
+  }
+}
+
+function SendFormatRow(props: {
+  value: SendMode;
+  onChange: (mode: SendMode) => void;
+  templates?: string[];
+}) {
+  const mixed =
+    props.value === "hex" &&
+    (props.templates ?? []).some((t) => ASCII_NUM_SPEC.test(t));
   return (
-    <div className="form-row">
-      <label>{tx("发送格式", "Send format")}</label>
-      <select
-        className="input"
-        value={props.value}
-        onChange={(e) => props.onChange(e.target.value as SendMode)}
-      >
-        <option value="ascii">ASCII</option>
-        <option value="hex">HEX</option>
-      </select>
-    </div>
+    <>
+      <div className="form-row">
+        <label>{tx("发送格式", "Send format")}</label>
+        <select
+          className="input"
+          value={props.value}
+          onChange={(e) => props.onChange(e.target.value as SendMode)}
+        >
+          <option value="ascii">ASCII</option>
+          <option value="hex">HEX</option>
+        </select>
+      </div>
+      {mixed && (
+        <p className="form-hint" role="status">
+          {tx(
+            "模板里还有 %d / %.2f 这类 ASCII 数值格式符：HEX 模式下不会替换，% 会被当成非法十六进制字符而拒发。数值占位请写成 %%（按 f32 小端写入）。",
+            "The template still contains ASCII specifiers such as %d / %.2f: HEX mode does not substitute them, and % is invalid in a hex string, so sending is rejected. Write %% for numeric placeholders (little-endian f32).",
+          )}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -1939,7 +1994,11 @@ export function CardModal(props: {
           )}
         >
           {isSendModeCard(card) && (
-            <SendFormatRow value={card.sendMode} onChange={(m) => patch({ sendMode: m })} />
+            <SendFormatRow
+              value={card.sendMode}
+              onChange={(m) => patch({ sendMode: m })}
+              templates={sendTemplatesOf(card)}
+            />
           )}
           <div className="form-row">
             <label>{tx("添加", "Add")}</label>
@@ -2201,7 +2260,11 @@ export function CardModal(props: {
       {hasScriptMode && (
         <Section title={tx("指令", "Command")}>
           {isSendModeCard(card) && !card.useScript && !card.sendTemplateId && (
-            <SendFormatRow value={card.sendMode} onChange={(m) => patch({ sendMode: m })} />
+            <SendFormatRow
+              value={card.sendMode}
+              onChange={(m) => patch({ sendMode: m })}
+              templates={sendTemplatesOf(card)}
+            />
           )}
           <div className="form-row">
             <label>{tx("指令模式", "Command mode")}</label>
