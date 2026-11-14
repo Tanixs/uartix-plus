@@ -16,6 +16,7 @@ import {
   auditOverflow,
   flattenOver,
   HIT_TARGET_MIN_PX,
+  HOST_DIALOG_Z,
   needFor,
   NO_MOTION_BASELINE,
   parseRenderColor,
@@ -24,6 +25,7 @@ import {
   summarizeAudit,
 } from "./renderAudit";
 import type { TextSample } from "./renderAudit";
+import { ALL_LAYERS } from "./layerSlots";
 
 const c = (hex: string) => parseRenderColor(hex)!;
 
@@ -225,6 +227,24 @@ describe("层槽：谁能盖住谁", () => {
 
   it("没写 z-index 的 fixed 不报（它按 DOM 序排，判不了层）", () => {
     expect(auditLayerClash(".a{position:fixed;inset:0}")).toHaveLength(0);
+  });
+
+  /**
+   * E2：非模态浮挂件（AI 浮窗）必须低于宿主对话框遮码，否则展开态会把设置页整块盖住、
+   * 页面控件连点都点不到。这里读**真样式表**而不是在断言里再抄一份数字：
+   * 两边各写一份就等于给"以后只改一边"留了门。
+   */
+  it("E2：AI 浮窗(--z-float) 低于宿主对话框遮码(--z-popup)", () => {
+    const css = readFileSync(fileURLToPath(new URL("./theme.css", import.meta.url)), "utf8");
+    const ruleBody = (selector: string) => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const m = new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(css);
+      return m?.[1] ?? "";
+    };
+    expect(ruleBody(".ai-float"), "AI 浮窗的层级必须走 --z-float 槽").toContain("z-index: var(--z-float)");
+    expect(ruleBody(".modal-mask"), "宿主对话框遮码必须走 --z-popup 槽").toContain("z-index: var(--z-popup)");
+    expect(ALL_LAYERS["z-float"]).toBeLessThan(ALL_LAYERS["z-popup"]);
+    expect(HOST_DIALOG_Z, "审计用的对话框档必须与槽表同一个数").toBe(ALL_LAYERS["z-popup"]);
   });
 });
 
