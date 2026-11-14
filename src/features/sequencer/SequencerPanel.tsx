@@ -421,8 +421,14 @@ function StepEditor(props: { suite: Suite; running: boolean }) {
     const ro = new ResizeObserver(() => {
       const h = el.clientHeight;
       if (h < lastH - 0.5) {
+        // 收缩前已经贴底：用户正在操作最后一行（运行态结果在长高）。此时按行边界对齐
+        // 会把它挤出视口，点不到删除/上移/下移；保持贴底，最后一行连同按钮仍在视口内。
+        const atBottom = el.scrollTop + lastH >= el.scrollHeight - 1;
         if (timer !== undefined) window.clearTimeout(timer);
-        timer = window.setTimeout(() => snapTreeRows(el), 90);
+        timer = window.setTimeout(() => {
+          if (atBottom) el.scrollTop = el.scrollHeight;
+          else snapTreeRows(el);
+        }, 90);
       }
       lastH = h;
     });
