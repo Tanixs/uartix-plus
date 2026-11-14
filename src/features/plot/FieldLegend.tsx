@@ -155,7 +155,9 @@ export function FieldLegend() {
               );
               const row = (
                 <div
-                  key={f.id}
+                  /* 字段 id 只在模板内唯一：多张模板平铺进同一列表时必须带模板作用域，
+                     否则旧档的 4/5/6 会跨模板撞 key（React 重复 key 警告）。 */
+                  key={`${tpl.id}:${f.id}`}
                   className={`legend-item ${selected ? "selected" : ""} pdrag-src`}
                   onPointerDown={(e) => {
                     if (!numeric || e.button !== 0) return;

@@ -47,8 +47,12 @@ function fmtNum(v: number): string {
 }
 
 interface Col {
+  /** 列身份：字段列是 `f:<模板id>:<字段id>`。字段 id 只在模板内唯一（旧档是 4/5/6 这类
+      按模板计数的小数字），跨模板平铺成同一列表时会撞 key，所以必须带上模板作用域。 */
   key: string;
   label: string;
+  /** 字段列才有：取数/标签用的原始字段 id */
+  fieldId?: string;
 }
 
 export function DataTable() {
@@ -57,7 +61,7 @@ export function DataTable() {
   const loc = useLocale();
   const frames = useSyncExternalStore(framesStore.subscribe, framesStore.getSnapshot);
   const proto = useSyncExternalStore(templateStore.subscribe, templateStore.getSnapshot);
-  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 } | null>(null);
+  const [sort, setSort] = useState<{ key: string; fieldId?: string; dir: 1 | -1 } | null>(null);
   const [filter, setFilter] = useState("");
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(loadHiddenCols);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -76,7 +80,11 @@ export function DataTable() {
     return templates.flatMap((t) =>
       t.fields
         .filter((f) => DECODABLE_ROLES.has(f.role))
-        .map((f) => ({ key: f.id, label: `${t.name}·${f.name}` })),
+        .map((f) => ({
+          key: `f:${t.id}:${f.id}`,
+          fieldId: f.id,
+          label: `${t.name}·${f.name}`,
+        })),
     );
   }, [templates]);
 
@@ -86,7 +94,7 @@ export function DataTable() {
     for (const t of templates) {
       const fields = t.fields
         .filter((f) => DECODABLE_ROLES.has(f.role))
-        .map((f) => ({ id: f.id, name: f.name, csv: f.type === "csv" }));
+        .map((f) => ({ id: `f:${t.id}:${f.id}`, name: f.name, csv: f.type === "csv" }));
       const key = presetGroupKey(t) ?? t.id;
       let g = byKey.get(key);
       if (!g) {
@@ -105,9 +113,23 @@ export function DataTable() {
 
   useEffect(() => {
     const ids = new Set(fieldColsAll.map((c) => c.key));
+    /* 旧档隐藏列存的是裸字段 id；列身份升级成带模板作用域后要就地迁移，
+       否则用户之前藏掉的列会在升级后重新冒出来。 */
+    const scopedByField = new Map<string, string[]>();
+    for (const c of fieldColsAll) {
+      if (!c.fieldId) continue;
+      const arr = scopedByField.get(c.fieldId) ?? [];
+      arr.push(c.key);
+      scopedByField.set(c.fieldId, arr);
+    }
     setHiddenCols((prev) => {
-      const next = new Set([...prev].filter((id) => ids.has(id)));
-      return next.size === prev.size ? prev : next;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (ids.has(id)) next.add(id);
+        else for (const scoped of scopedByField.get(id) ?? []) next.add(scoped);
+      }
+      const same = next.size === prev.size && [...prev].every((id) => next.has(id));
+      return same ? prev : next;
     });
   }, [fieldColsAll]);
 
@@ -126,7 +148,9 @@ export function DataTable() {
     return [
       { key: "ts", label: tx("时间", "Time") },
       { key: "tpl", label: tx("模板", "Template") },
-      ...fieldColsAll.filter((c) => !hiddenCols.has(c.key)),
+      ...fieldColsAll.filter(
+        (c) => !hiddenCols.has(c.key) && !(c.fieldId && hiddenCols.has(c.fieldId)),
+      ),
       { key: "valid", label: tx("状态", "Status") },
     ];
   }, [fieldColsAll, hiddenCols, loc]);
@@ -163,15 +187,16 @@ export function DataTable() {
       });
     }
     if (sort) {
-      const { key, dir } = sort;
+      const { key, fieldId, dir } = sort;
       arr = [...arr].sort((a, b) => {
         let c = 0;
         if (key === "ts") c = a.tsMs - b.tsMs;
         else if (key === "tpl") c = a.tplName.localeCompare(b.tplName, "zh");
         else if (key === "valid") c = (a.valid ? 1 : 0) - (b.valid ? 1 : 0);
         else {
-          const fa = a.fields.find((x) => x.id === key);
-          const fb = b.fields.find((x) => x.id === key);
+          const fid = fieldId ?? key;
+          const fa = a.fields.find((x) => x.id === fid);
+          const fb = b.fields.find((x) => x.id === fid);
           if (fa && fb) {
             if (fa.text !== null || fb.text !== null) {
               c = (fa.text ?? "").localeCompare(fb.text ?? "", "zh");
@@ -234,14 +259,15 @@ export function DataTable() {
   // ≈ 102px；此前给 92px，实测列里显示成 "00:00:01.…"（夹具截图实锤）。表头与行共用这一个串，不会错位。
   const gridCols = `104px 108px repeat(${Math.max(cols.length - 3, 0)}, minmax(96px, 1fr)) 76px`;
 
-  const cellText = (r: FrameRow, key: string): string => {
-    if (key === "ts") return fmtTime(r.tsMs);
-    if (key === "tpl") return r.tplName;
-    if (key === "valid") return r.valid ? "OK" : "ERR";
-    const f = r.fields.find((x) => x.id === key);
+  const cellText = (r: FrameRow, col: Col): string => {
+    if (col.key === "ts") return fmtTime(r.tsMs);
+    if (col.key === "tpl") return r.tplName;
+    if (col.key === "valid") return r.valid ? "OK" : "ERR";
+    const id = col.fieldId ?? col.key;
+    const f = r.fields.find((x) => x.id === id);
     if (!f) return "–";
     if (f.text !== null) return f.text;
-    return labeledValue(labelById.get(key), f.value, fmtNum);
+    return labeledValue(labelById.get(id), f.value, fmtNum);
   };
 
   const doExport = async (kind: "csv" | "xlsx") => {
@@ -266,12 +292,13 @@ export function DataTable() {
         r.tplName,
         r.valid ? "OK" : r.error ?? "ERR",
         ...fieldCols.map((c) => {
-          const f = r.fields.find((x) => x.id === c.key);
+          const fid = c.fieldId ?? c.key;
+          const f = r.fields.find((x) => x.id === fid);
           if (!f) return "";
           if (f.text !== null) return f.text;
           // 导出同样带上值标签（异常码等枚举量在 Excel 里直接可读）
-          const lb = labelById.has(c.key)
-            ? labeledValue(labelById.get(c.key), f.value, (n) => String(n))
+          const lb = labelById.has(fid)
+            ? labeledValue(labelById.get(fid), f.value, (n) => String(n))
             : "";
           return lb || Number(f.value.toFixed(6));
         }),
@@ -293,10 +320,10 @@ export function DataTable() {
     }
   };
 
-  const toggleSort = (key: string) => {
+  const toggleSort = (col: Col) => {
     setSort((s) => {
-      if (!s || s.key !== key) return { key, dir: 1 };
-      if (s.dir === 1) return { key, dir: -1 };
+      if (!s || s.key !== col.key) return { key: col.key, fieldId: col.fieldId, dir: 1 };
+      if (s.dir === 1) return { key: col.key, fieldId: col.fieldId, dir: -1 };
       return null;
     });
   };
@@ -418,12 +445,12 @@ export function DataTable() {
                 key={c.key}
                 className="tbl-hcell"
                 data-ctl="col"
-                onClick={() => toggleSort(c.key)}
+                onClick={() => toggleSort(c)}
                 title={`${t("tbl.sortBy")}：${c.label}`}
               >
                 {c.label}
                 {arrow(c.key)}
-                {!["ts", "tpl", "valid"].includes(c.key) && (
+                {c.fieldId && (
                   <button
                     className="tbl-col-del"
                     title={t("tbl.hideCol")}
@@ -450,7 +477,7 @@ export function DataTable() {
             >
               {cols.map((c) => (
                 <div key={c.key} className="tbl-cell">
-                  {cellText(r, c.key)}
+                  {cellText(r, c)}
                 </div>
               ))}
             </div>
