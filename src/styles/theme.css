@@ -5177,6 +5177,21 @@ html.no-motion .ctl-reveal { animation: none; box-shadow: 0 0 0 2px var(--accent
   width: 100%;
 }
 
+/* S6：脚本编辑器是多行文本，但 .input 的 height:var(--ctl-h-2)（24px）会把 rows=8
+   压成单行。这里恢复内容自适应的多行高度：下限 6 行保证可读，上限 46vh/380px
+   （编辑弹窗本体 86vh 且可滚，脚本再长也在框内滚动），不把弹窗/卡片布局撑破；
+   窄卡下宽度 100%、长行自动换行，仍可编辑。 */
+.ctl-script-input {
+  height: auto;
+  field-sizing: content;
+  min-height: calc(6 * 1.6 * var(--fs-sm));
+  max-height: min(380px, calc(46vh / var(--zoom)));
+  padding: 6px var(--sp-1h);
+  line-height: 1.6;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
+
 .ctl-body {
   flex: 1 1 auto;
   display: flex;
