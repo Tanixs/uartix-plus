@@ -108,6 +108,9 @@ export function Plot2D() {
   const subTimer = useRef<number | null>(null);
   const [, setTick] = useState(0);
   const [followState, setFollowState] = useState(true);
+  /** 混源一次性视图动作（fit/follow）：存 ref 避免 feedTick 依赖重建 */
+  const fitViewRef = useRef<() => void>(() => {});
+  const resetViewRef = useRef<() => void>(() => {});
   const fedXRef = useRef<number[]>([]);
   /** 可见通道最新点的显示 X 值（「最新」线锚点；视窗裁剪下 u.data 末尾不可靠） */
   const latestDispRef = useRef<number | null>(null);
@@ -1608,6 +1611,14 @@ export function Plot2D() {
       // 不可见（停靠页签在后台 / 内嵌卡滚出视口）时只保留脏标记：
       // 数据仍在有界缓冲里，恢复可见后的下一次 tick 会一次补齐，不丢段。
       if (!panelActivity.isVisible("plot2d")) return;
+      // 混源一次性视图动作：先把两段一起取进画面（暂停跟随），还原后回到跟随最新。
+      // 必须发生在正常视窗计算之前——否则跟随窗会以最新点为锚把虚拟段挤出视野。
+      const mixCmd = plotStore.consumeMixViewCommand();
+      if (mixCmd) {
+        if (mixCmd === "fit") fitViewRef.current();
+        else resetViewRef.current();
+        return;
+      }
       plotStore.clearDirty();
       const settings = plotStore.getSnapshot().settings;
       const snap = plotStore.getSnapshot();
@@ -1819,6 +1830,10 @@ export function Plot2D() {
     applyYDomain(u, u.data, plotStore.getSnapshot().channels, { min: null, max: null });
     u.redraw();
   };
+
+  // feedTick 是 120ms interval 里的闭包，直接引用本渲染的函数会过期；每次渲染刷新一次。
+  fitViewRef.current = fitView;
+  resetViewRef.current = resetView;
 
   const hasChannels = plot.channels.length > 0;
   const cursorXOn = plot.settings.cursorX;

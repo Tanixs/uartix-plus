@@ -173,39 +173,57 @@ function isOtherBasis(t: number, origin: number): boolean {
 let virtualWithData = 0;
 /** 本次混源只提示一次；清掉全部虚拟通道/清空全部通道后重新武装 */
 let basisMixNotified = false;
+/** 混源后的一次性视图指令，由 2D 图在下一个喂数 tick 消费：
+ *  "fit" = 全量取景并暂停跟随（两段一起进画面）；"follow" = 还原后回到跟随最新。 */
+let mixViewCommand: "fit" | "follow" | null = null;
 
-/** 混源提示（一次性）：不藏「这张图混了两个时间基准」，并直接给两个去处。
- *  「分开看」= 换到序号轴，两段数据按各自采样序号排开，不再挤在同一个时间刻度上；
- *  「清掉虚拟通道」= 删掉导入段，回到纯实时数据。 */
+/** 2D 图消费一次性视图指令（谁读谁清，保证只执行一次）。 */
+export function consumeMixViewCommand(): "fit" | "follow" | null {
+  const cmd = mixViewCommand;
+  mixViewCommand = null;
+  return cmd;
+}
+
+/** 把已锚定的虚拟段整体平移到新原点：真实帧首点成为原点，虚拟段按相对偏移
+ *  落到 0..span，两段进同一个可见时间轴（真实通道的时间戳一个都不动）。 */
+function rebaseVirtualTo(origin: number, oldOrigin: number) {
+  const shift = origin - oldOrigin;
+  if (!Number.isFinite(shift) || shift === 0) return;
+  for (const ch of channels) {
+    if (!ch.virtual) continue;
+    const d = dataMap.get(ch.id);
+    if (!d || d.t.length === 0) continue;
+    d.t = d.t.map((t) => t + shift);
+  }
+  alignedCache = null;
+  markDataChanged();
+}
+
+/** 混源处理（一次性）：默认动作先把图变成可读，再告知用户发生了什么——
+ *  不再让用户先面对一个被压扁/离屏的轴、再自己点按钮救回来。
+ *  - 虚拟段先到：真实帧到达时原点改到真实首帧，虚拟段整体平移跟进；
+ *  - 真实帧先到：注入虚拟段时按相对偏移平移到当前原点（见 addVirtualChannel）；
+ *  两种情形都让 2D 图做一次全量取景（暂停跟随），两段同时可见。
+ *  提示只留一个出口：「还原（回到纯时间轴）」清掉虚拟段并恢复跟随。 */
 function notifyBasisMix() {
   if (basisMixNotified) return;
   basisMixNotified = true;
+  mixViewCommand = "fit";
   toastActions(
     tx(
-      "这张图混了虚拟轨迹与实时数据两个时间基准：同一 X 轴会把两段数据错开。",
-      "This chart mixes virtual trace and live data on two time bases — one X axis will separate them.",
+      "检测到虚拟轨迹与实时数据两个时间基准：已把虚拟段并入当前时间轴，并让两段同时可见。",
+      "Two time bases detected (virtual trace + live data). The virtual segment was merged onto the live axis; both segments are now in view.",
     ),
     [
       {
-        label: tx("分开看（序号轴）", "Separate (index X)"),
-        onAct: () => {
-          setSetting({ xSource: "index" });
-          toast(
-            tx(
-              "已切到序号轴：两段数据按各自采样序号排开，不再共用一个时间刻度",
-              "Switched to index X: both segments are laid out by sample index, no shared time scale",
-            ),
-          );
-        },
-      },
-      {
-        label: tx("清掉虚拟通道", "Clear virtual channels"),
+        label: tx("还原（回到纯时间轴）", "Restore (live time axis)"),
         onAct: () => {
           const n = clearVirtualChannels();
+          mixViewCommand = "follow";
           toast(
             tx(
-              `已清掉 ${n} 个虚拟通道，图回到纯实时数据`,
-              `Cleared ${n} virtual channel(s); chart is back to live data`,
+              `已清掉 ${n} 个虚拟通道，回到纯实时时间轴`,
+              `Cleared ${n} virtual channel(s); back to the live time axis`,
             ),
           );
         },
@@ -232,8 +250,12 @@ function appendPoint(chId: string, t: number, v: number) {
     virtualWithData > 0 &&
     isEpochMs(t) !== isEpochMs(timeOriginMs)
   ) {
-    // 纯虚拟先入时原点锚在虚拟段；真实帧一到就是绝对时钟 —— 检测到同图两个基准，
-    // 提示一次（不每次绘制都弹）。真实数据本身照常入库，不做丢弃。
+    // 虚拟段先入时原点锚在虚拟首点；真实帧一到就是另一套时钟。先把原点改到
+    // 真实首帧、虚拟段整体平移跟进（两段落在同一段可见时间轴里），再提示一次。
+    // 真实通道的时间戳不动——「以真实数据为准，虚拟段让位」。
+    const oldOrigin = timeOriginMs;
+    timeOriginMs = t;
+    rebaseVirtualTo(t, oldOrigin);
     notifyBasisMix();
   }
   const d = getChanData(chId);
