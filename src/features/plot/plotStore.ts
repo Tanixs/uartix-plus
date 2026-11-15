@@ -298,7 +298,9 @@ interface AlignedCache {
 let alignedCache: AlignedCache | null = null;
 
 function chanSigOf(): string {
-  return `${settings.xSource}|${channels.map((c) => c.id).join(",")}`;
+  // 原点必须进缓存签名：显示 X = (t − 原点)/1000，原点一变，缓存里所有旧 proj
+  // 都不再是「当前坐标系」。只靠调用点手动置 null 漏一处就是整张图画旧投影。
+  return `${settings.xSource}|${timeOriginMs ?? "null"}|${channels.map((c) => c.id).join(",")}`;
 }
 
 /** 回退全量重建的阈值：留 2.5 倍余量，避免刚重建完下一 tick 又触发重建 */
@@ -773,6 +775,7 @@ export function clearVirtualChannels(): number {
   channels = channels.filter((c) => !c.virtual);
   virtualWithData = 0;
   basisMixNotified = false;
+  releaseOriginIfNoData();
   alignedCache = null;
   markDataChanged();
   sanitizeXSrc();
@@ -786,8 +789,20 @@ export function removeChannel(id: string) {
   channels = channels.filter((c) => c.id !== id);
   dataMap.delete(id);
   if (virtualWithData === 0) basisMixNotified = false;
+  releaseOriginIfNoData();
   sanitizeXSrc();
   emit();
+}
+
+/** 最后一个有数据的通道被删掉时把原点交还：否则原点继续锚在已删除数据的时间
+ *  基准上，下一条真实帧会投影成绝对时钟秒（1.79e9），轴与曲线直接离屏。 */
+function releaseOriginIfNoData() {
+  for (const ch of channels) {
+    if ((dataMap.get(ch.id)?.t.length ?? 0) > 0) return;
+  }
+  if (timeOriginMs === null) return;
+  timeOriginMs = null;
+  alignedCache = null;
 }
 
 export function removeByTpl(tplId: string, fieldId: string | null) {
@@ -882,6 +897,7 @@ export function setColor(id: string, color: string) {
 export function clearChannels() {
   channels = [];
   dataMap.clear();
+  alignedCache = null;
   timeOriginMs = null;
   virtualWithData = 0;
   basisMixNotified = false;

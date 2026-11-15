@@ -1615,8 +1615,13 @@ export function Plot2D() {
       // 必须发生在正常视窗计算之前——否则跟随窗会以最新点为锚把虚拟段挤出视野。
       const mixCmd = plotStore.consumeMixViewCommand();
       if (mixCmd) {
-        if (mixCmd === "fit") fitViewRef.current();
-        else resetViewRef.current();
+        if (mixCmd === "fit") {
+          // 原点变了：游标/测量/快照都是按旧显示坐标存的，不能继续指着同一时刻。
+          clearTimeCursors();
+          setSnap(null);
+          snapRef.current = null;
+          fitViewRef.current();
+        } else resetViewRef.current();
         return;
       }
       plotStore.clearDirty();
@@ -1809,6 +1814,9 @@ export function Plot2D() {
     const hi = x1 + padX;
     setFollow(false);
     yManualRef.current = false;
+    // 全量取景后视野右边界就是数据末端：旧的「新点」积压数已不成立，立刻归零
+    backlogRef.current = 0;
+    setBacklog(0);
     // 先按目标视野重新喂数再设轴，避免 120ms 内曲线缺段闪断
     const aligned = plotStore.buildAlignedWindow(lo, hi, FED_CAP);
     const data = displayData(aligned, plotStore.getSnapshot().channels);
