@@ -4,6 +4,8 @@ import * as panelActivity from "../../panels/panelActivity";
 import { leaseCount } from "./dataLease";
 import { PALETTE, OKABE_PALETTE } from "../protocol/templateStore";
 import { getSnapshot as getSettings } from "../settings/settingsStore";
+import { toast, toastActions } from "../../shared/toast";
+import { tx } from "../../i18n/strings";
 
 export interface Channel {
   id: string;
@@ -151,6 +153,68 @@ export function timeOrigin(): number {
   return timeOriginMs ?? 0;
 }
 
+/** 绝对时钟（墙钟 epoch 毫秒）与相对时间（会话内小数值）的分界。
+ *  只用来判断「同一张图混了两个时间基准」；真实串口帧的 tsMs 是 Date.now() 量级。 */
+const EPOCH_MIN_MS = 100_000_000_000;
+/** 同为墙钟但首点相距超过 6 小时：视为另一套时钟（虚拟段平移对齐并提示）。
+ *  同一次导入/同一会话的偏移远小于这个量级，不会误报。 */
+const MIX_GAP_MS = 6 * 3600_000;
+
+function isEpochMs(t: number): boolean {
+  return Math.abs(t) >= EPOCH_MIN_MS;
+}
+
+/** 首点与当前原点是否是同一时间基准（类别不同，或同为绝对时钟但相距过远） */
+function isOtherBasis(t: number, origin: number): boolean {
+  return isEpochMs(t) !== isEpochMs(origin) || Math.abs(t - origin) > MIX_GAP_MS;
+}
+
+/** 当前有数据的虚拟通道数（O(1) 混源判定；避免每帧扫通道表） */
+let virtualWithData = 0;
+/** 本次混源只提示一次；清掉全部虚拟通道/清空全部通道后重新武装 */
+let basisMixNotified = false;
+
+/** 混源提示（一次性）：不藏「这张图混了两个时间基准」，并直接给两个去处。
+ *  「分开看」= 换到序号轴，两段数据按各自采样序号排开，不再挤在同一个时间刻度上；
+ *  「清掉虚拟通道」= 删掉导入段，回到纯实时数据。 */
+function notifyBasisMix() {
+  if (basisMixNotified) return;
+  basisMixNotified = true;
+  toastActions(
+    tx(
+      "这张图混了虚拟轨迹与实时数据两个时间基准：同一 X 轴会把两段数据错开。",
+      "This chart mixes virtual trace and live data on two time bases — one X axis will separate them.",
+    ),
+    [
+      {
+        label: tx("分开看（序号轴）", "Separate (index X)"),
+        onAct: () => {
+          setSetting({ xSource: "index" });
+          toast(
+            tx(
+              "已切到序号轴：两段数据按各自采样序号排开，不再共用一个时间刻度",
+              "Switched to index X: both segments are laid out by sample index, no shared time scale",
+            ),
+          );
+        },
+      },
+      {
+        label: tx("清掉虚拟通道", "Clear virtual channels"),
+        onAct: () => {
+          const n = clearVirtualChannels();
+          toast(
+            tx(
+              `已清掉 ${n} 个虚拟通道，图回到纯实时数据`,
+              `Cleared ${n} virtual channel(s); chart is back to live data`,
+            ),
+          );
+        },
+      },
+    ],
+    9000,
+  );
+}
+
 export function getChanData(id: string): ChanData {
   let d = dataMap.get(id);
   if (!d) {
@@ -161,7 +225,17 @@ export function getChanData(id: string): ChanData {
 }
 
 function appendPoint(chId: string, t: number, v: number) {
-  if (timeOriginMs === null) timeOriginMs = t;
+  if (timeOriginMs === null) {
+    timeOriginMs = t;
+  } else if (
+    !basisMixNotified &&
+    virtualWithData > 0 &&
+    isEpochMs(t) !== isEpochMs(timeOriginMs)
+  ) {
+    // 纯虚拟先入时原点锚在虚拟段；真实帧一到就是绝对时钟 —— 检测到同图两个基准，
+    // 提示一次（不每次绘制都弹）。真实数据本身照常入库，不做丢弃。
+    notifyBasisMix();
+  }
   const d = getChanData(chId);
   // 同戳/乱序兜底（P76①）：Rust parser 的 tsMs 是 chunk 级接收时间戳，同块多帧
   // 共享同一 t → 通道时间轴出现平台，频谱的局部跨度变 0 → amplitudeSpectrum
@@ -640,10 +714,25 @@ export function addVirtualChannel(name: string, ts: number[], vs: number[]): str
     visible: true,
     virtual: true,
   };
+  let times = ts;
+  if (ts.length > 0) {
+    if (timeOriginMs === null) {
+      // 纯虚拟先入：把原点锚在虚拟段首点（而不是留给之后才到的真实帧），
+      // 否则真实帧一到原点跳到 epoch，整段虚拟数据变成 -1.7e9 秒离屏。
+      timeOriginMs = ts[0];
+    } else if (isOtherBasis(ts[0], timeOriginMs)) {
+      // 反向混源：已有实时帧（绝对时钟），注入的是相对时间。平移注入段到当前原点，
+      // 避免它同样落到 ±1.7e9 秒之外；同时明确提示这不是同一时间基准。
+      const shift = timeOriginMs - ts[0];
+      times = ts.map((t) => t + shift);
+      notifyBasisMix();
+    }
+  }
   const d = getChanData(id);
-  d.t = ts;
+  d.t = times;
   d.v = vs;
   channels = [...channels, channel];
+  if (times.length > 0) virtualWithData += 1;
   alignedCache = null;
   // 一次性注入整段数据同样要唤醒消费方：2D 的喂数 tick 以 isDirty() 为门，
   // 虚拟通道不经过 appendPoint（那里才置 dirty），不置位时已挂载的面板永远
@@ -653,9 +742,28 @@ export function addVirtualChannel(name: string, ts: number[], vs: number[]): str
   return id;
 }
 
+/** 清掉全部虚拟通道（混源提示里的「清掉虚拟通道」走这里）。
+ *  返回删除数量，供提示回执；同时重新武装混源提示，下次再混入时还能提醒一次。 */
+export function clearVirtualChannels(): number {
+  const doomed = channels.filter((c) => c.virtual);
+  if (doomed.length === 0) return 0;
+  for (const ch of doomed) dataMap.delete(ch.id);
+  channels = channels.filter((c) => !c.virtual);
+  virtualWithData = 0;
+  basisMixNotified = false;
+  alignedCache = null;
+  markDataChanged();
+  sanitizeXSrc();
+  emit();
+  return doomed.length;
+}
+
 export function removeChannel(id: string) {
+  const doomed = channels.find((c) => c.id === id);
+  if (doomed?.virtual && (dataMap.get(id)?.t.length ?? 0) > 0) virtualWithData -= 1;
   channels = channels.filter((c) => c.id !== id);
   dataMap.delete(id);
+  if (virtualWithData === 0) basisMixNotified = false;
   sanitizeXSrc();
   emit();
 }
@@ -753,6 +861,8 @@ export function clearChannels() {
   channels = [];
   dataMap.clear();
   timeOriginMs = null;
+  virtualWithData = 0;
+  basisMixNotified = false;
   sanitizeXSrc();
   // 缓冲区已清空：推进版本让频谱/分析等消费者丢弃旧列（2D 图本身随 channels 重建）
   markDataChanged();

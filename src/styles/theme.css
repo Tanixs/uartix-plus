@@ -13238,12 +13238,22 @@ body.pdrag-active *{cursor:grabbing !important;}
 .ai-toast-act {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-2);
 }
 
 .ai-toast-act .ai-toast-text {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+/* 动作按钮组：两个去处（分开看 / 清掉虚拟通道）并排，窄屏换行也不压正文 */
+.ai-toast-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  flex: none;
+  margin-left: auto;
 }
 
 .ai-toast-btn {

@@ -50,12 +50,13 @@ export interface ToastAction {
 }
 
 /**
- * 带一个动作按钮的提示（E4 · 删除内嵌卡的「撤销」）。
+ * 带动作按钮的提示（E4 · 删除内嵌卡的「撤销」；混源时间基准提示给了两个去处）。
  *
  * 停留 6s：2.6s 只够"看见"，不够"看见 → 决定 → 点中"。按钮只是提示的一部分，
  * 不提供键盘焦点陷阱；用户在 6s 内不点即视为放弃。
+ * 多动作时按钮组可换行，避免长文案把两个去处挤出提示条。
  */
-export function toastAction(msg: string, action: ToastAction, ms = 6000): void {
+export function toastActions(msg: string, actions: ToastAction[], ms = 6000): void {
   const h = ensureHost();
   if (!h) return;
   const el = document.createElement("div");
@@ -64,11 +65,8 @@ export function toastAction(msg: string, action: ToastAction, ms = 6000): void {
   const text = document.createElement("span");
   text.className = "ai-toast-text";
   text.textContent = String(msg).slice(0, 200);
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "ai-toast-btn";
-  btn.textContent = action.label;
-  el.append(text, btn);
+  const acts = document.createElement("span");
+  acts.className = "ai-toast-acts";
   let done = false;
   const close = () => {
     if (done) return;
@@ -77,10 +75,22 @@ export function toastAction(msg: string, action: ToastAction, ms = 6000): void {
     el.remove();
   };
   const timer = window.setTimeout(close, ms);
-  btn.addEventListener("click", () => {
-    close();
-    action.onAct();
-  });
+  for (const action of actions) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "ai-toast-btn";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => {
+      close();
+      action.onAct();
+    });
+    acts.appendChild(btn);
+  }
+  el.append(text, acts);
   h.appendChild(el);
   while (h.children.length > MAX_VISIBLE) h.firstElementChild?.remove();
+}
+
+export function toastAction(msg: string, action: ToastAction, ms = 6000): void {
+  toastActions(msg, [action], ms);
 }
