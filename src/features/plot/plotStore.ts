@@ -211,8 +211,8 @@ function notifyBasisMix() {
   mixViewCommand = "fit";
   toastActions(
     tx(
-      "检测到虚拟轨迹与实时数据两个时间基准：已把虚拟段并入当前时间轴，并让两段同时可见。",
-      "Two time bases detected (virtual trace + live data). The virtual segment was merged onto the live axis; both segments are now in view.",
+      "检测到虚拟轨迹与实时数据两个时间基准：已把虚拟段并入当前时间轴并暂停跟随，两段同时可见。",
+      "Two time bases detected (virtual trace + live data). The virtual segment was merged onto the live axis; follow is paused so both segments stay in view.",
     ),
     [
       {
