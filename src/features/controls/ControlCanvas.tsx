@@ -822,7 +822,8 @@ export function ControlCanvas() {
   const runCardScript = (
     script: string,
     ctx: Record<string, number | string>,
-  ): Promise<void> => runCmdScript(script, ctx);
+    card: ControlCard,
+  ): Promise<void> => runCmdScript(script, ctx, { source: cardSource(card) });
 
   /**
    * 发送前把"挂载命令"解析成实际发送字段（命令 → 谱 → 卡片）。
@@ -883,7 +884,7 @@ export function ControlCanvas() {
         return;
       }
       try {
-        await runCardScript(card.script, ctx);
+        await runCardScript(card.script, ctx, card);
         setErr(null);
       } catch (e) {
         setErr(String(e));

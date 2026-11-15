@@ -8,6 +8,8 @@
  *  - ASCII：拦截 + 点名 + 5 秒内可点「仍要发送」；超时不点 = 放弃本次；
  *  - HEX：一律拦截（缺失会发出 `7B E9 80 9F…` 这类垃圾字节，比不发更危险）；
  *  - 批量：短窗口内多条被拦只汇总一次，不逐条弹窗；
+ *  - 同一轮：序列器 / 脚本 / 编排器传入 `scope`，用户点过「仍要发送」后，
+ *    该轮内相同模板不再反复询问（换一轮/换模板仍会问）；
  *  - 每次真正被拦都进控制台发送日志（时间 / 来源 / 模板 / 缺失变量）。
  *
  * 只做判定与提示，不碰 `resolveVars`：能取到值时这里返回 `ok`，调用方照旧求值发送，
@@ -76,9 +78,13 @@ function notReady(v: number | string | undefined): boolean {
   return v.trim() === "";
 }
 
-/** 取不到值的变量（按出现顺序，重复只报一次） */
-export function missingTemplateVars(tpl: string): string[] {
-  return templateVarNames(tpl).filter((name) => notReady(variableStore.getVar(name)));
+export type GetVar = (name: string) => number | string | undefined;
+
+/** 取不到值的变量（按出现顺序，重复只报一次）。
+ *  `getVar` 让编排器把「编排变量优先、控制变量兜底」的同一套取值接进来，
+ *  不另写一份判定。 */
+export function missingTemplateVars(tpl: string, getVar: GetVar = variableStore.getVar): string[] {
+  return templateVarNames(tpl).filter((name) => notReady(getVar(name)));
 }
 
 /* ---------------- 提示适配器（生产 = DOM；单测注入） ---------------- */
@@ -157,6 +163,34 @@ let batch: Batch | null = null;
 
 const advised = new Map<string, number>();
 
+/** 同一轮内的放行记录：`scope\0mode\0模板\0缺失集` → 时间。
+ *  只在用户点「仍要发送」后写入；有上限，防止长时间运行累积。 */
+const grants = new Map<string, number>();
+const GRANT_CAP = 500;
+
+function grantKey(scope: string, key: string): string {
+  return `${scope}\u0000${key}`;
+}
+
+/** 结束一轮（运行结束/脚本退出）：丢弃该轮的放行记录。
+ *  不调用也不会出错，只是把记录留到上限淘汰。 */
+export function endPreflightScope(scope: string): void {
+  const prefix = `${scope}\u0000`;
+  for (const k of [...grants.keys()]) {
+    if (k.startsWith(prefix)) grants.delete(k);
+  }
+}
+
+function rememberGrant(scope: string | undefined, key: string): void {
+  if (!scope) return;
+  grants.set(grantKey(scope, key), Date.now());
+  while (grants.size > GRANT_CAP) {
+    const oldest = grants.keys().next().value;
+    if (oldest === undefined) break;
+    grants.delete(oldest);
+  }
+}
+
 function advise(key: string, message: string): void {
   const now = Date.now();
   const last = advised.get(key);
@@ -217,16 +251,46 @@ function flushBatch(): void {
 
 /* ---------------- 唯一入口 ---------------- */
 
+function blockedMessage(missing: string[], mode: SendMode): string {
+  return tx(
+    `变量「${missing.join("」「")}」没有数据，${mode === "hex" ? "HEX 模式已拦截发送" : "已拦截发送"}`,
+    `Variable(s) "${missing.join('", "')}" have no data — ${mode === "hex" ? "HEX send blocked" : "send blocked"}`,
+  );
+}
+
+/** 被预检拦下：调用方（序列器/编排器）把它转成步骤失败原因，脚本里可被 catch。 */
+export class SendBlockedError extends Error {
+  constructor(
+    public readonly missing: string[],
+    public readonly mode: SendMode,
+  ) {
+    super(blockedMessage(missing, mode));
+    this.name = "SendBlockedError";
+  }
+}
+
+export interface PreflightOptions {
+  /** 调用来源（序列器/脚本/编排器/控件卡），写进控制台发送日志与提示 */
+  source?: string;
+  /** 本轮标识：点过「仍要发送」后，同轮同模板不再询问 */
+  scope?: string;
+  /** 变量取值器（默认持久变量；编排器传「编排变量优先、控制变量兜底」） */
+  getVar?: GetVar;
+}
+
 export async function preflightTemplate(
   tpl: string,
   mode: SendMode,
-  opts: { source?: string } = {},
+  opts: PreflightOptions = {},
 ): Promise<PreflightResult> {
-  const missing = missingTemplateVars(tpl);
+  const missing = missingTemplateVars(tpl, opts.getVar);
   if (missing.length === 0) return { ok: true };
 
   const source = opts.source?.trim() || tx("未命名", "unnamed");
   const key = `${mode}\u0000${tpl}\u0000${missing.join("\u0000")}`;
+
+  // 本轮已经放行过同一模板/同一缺失集：直接放行，不再打断连续操作
+  if (opts.scope && grants.has(grantKey(opts.scope, key))) return { ok: true };
 
   if (mode === "hex") {
     // HEX 没有放行：缺失变量发出去的是错误字节，不给「仍要发送」
@@ -269,6 +333,7 @@ export async function preflightTemplate(
     handle?.close();
     if (active?.promise === promise) active = null;
     if (reason === "allow") {
+      rememberGrant(opts.scope, key);
       resolve({ ok: true });
       return;
     }
@@ -285,9 +350,10 @@ export async function preflightTemplate(
   active = { key, entry, promise, finish };
   timer = setTimeout(() => finish("timeout"), PROMPT_MS);
   const show = promptAdapter ?? domPrompt;
-  handle = show(
-    tx(`变量「${missing.join("」「")}」没有数据，已拦截发送`, `Variable(s) "${missing.join('", "')}" have no data — send blocked`),
-    () => finish("allow"),
-  );
+  const baseMsg = tx(`变量「${missing.join("」「")}」没有数据，已拦截发送`, `Variable(s) "${missing.join('", "')}" have no data — send blocked`);
+  const roundHint = opts.scope
+    ? tx("；本轮相同模板不再询问", "; the same template will not ask again this round")
+    : "";
+  handle = show(baseMsg + roundHint, () => finish("allow"));
   return promise;
 }

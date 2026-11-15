@@ -153,6 +153,40 @@ describe("S4 · 模式差异", () => {
     prompt.accept();
     await expect(Promise.all([a, b])).resolves.toEqual([{ ok: true }, { ok: true }]);
   });
+
+  it("外部取值器可接管变量判定（编排器：编排变量优先）", async () => {
+    const prompt = installPrompt();
+    await expect(
+      preflight.preflightTemplate("SPD:{速度}!", "ascii", {
+        getVar: (name) => (name === "速度" ? 42 : undefined),
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(prompt.seen).toEqual([]);
+  });
+
+  it("同一轮放行一次后，相同模板不再询问；换一轮仍会问", async () => {
+    const prompt = installPrompt();
+    const a = preflight.preflightTemplate("SPD:{速度}!", "ascii", { scope: "seq:1" });
+    expect(prompt.seen).toHaveLength(1);
+    prompt.accept();
+    await expect(a).resolves.toEqual({ ok: true });
+
+    await expect(
+      preflight.preflightTemplate("SPD:{速度}!", "ascii", { scope: "seq:1" }),
+    ).resolves.toEqual({ ok: true });
+    expect(prompt.seen).toHaveLength(1);
+
+    const other = preflight.preflightTemplate("SPD:{速度}!", "ascii", { scope: "seq:2" });
+    expect(prompt.seen).toHaveLength(2);
+    prompt.accept();
+    await expect(other).resolves.toEqual({ ok: true });
+
+    preflight.endPreflightScope("seq:1");
+    const again = preflight.preflightTemplate("SPD:{速度}!", "ascii", { scope: "seq:1" });
+    expect(prompt.seen).toHaveLength(3);
+    prompt.accept();
+    await expect(again).resolves.toEqual({ ok: true });
+  });
 });
 
 describe("S4 · 批量汇总", () => {

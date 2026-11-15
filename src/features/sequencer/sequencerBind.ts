@@ -19,6 +19,12 @@ import * as serialStore from "../serial/serialStore";
 import * as cmdExec from "../controls/cmdExec";
 import * as variableStore from "../controls/variableStore";
 import * as commandStore from "../controls/commandStore";
+import {
+  preflightTemplate,
+  missingTemplateVars,
+  SendBlockedError,
+  type GetVar,
+} from "../controls/preflight";
 import { CODECS, userCodecToCodec, type Codec } from "../console/commandFactory";
 import * as userCodecStore from "../console/userCodecStore";
 import * as sequencerStore from "./sequencerStore";
@@ -32,12 +38,26 @@ function codecById(id: string): Codec | undefined {
   return def ? userCodecToCodec(def) : undefined;
 }
 
+/** 预检上下文：来源/本轮标识由调用方给；getVar 供编排器接入自己的变量层。 */
+export interface ResolveContext {
+  source?: string;
+  scope?: string;
+  getVar?: GetVar;
+}
+
 /** 载荷 → 实际发送内容。null = 解析失败（引擎记 fail）。
+ *  变量齐全时保持同步返回（字节与时机与旧实现完全一致）；只有缺变量时才返回
+ *  Promise：先走控件卡同一份预检（ASCII 可确认放行 / HEX 一律拦截），放行后再求值。
  *  自动编排器（P74）复用同一实现（hex/ascii/factory 分支）；cmd 分支由编排器
  *  自行处理以接入编排器变量插值。
  *  B4e：factory 一次组出多帧 → 透传 `{ frames }`（空帧过滤；单帧仍走 text，兼容旧调用方）。 */
-export function resolveSend(payload: SendPayload): ResolvedSend | null {
+export function resolveSend(
+  payload: SendPayload,
+  ctx: ResolveContext = {},
+): ResolvedSend | null | Promise<ResolvedSend | null> {
   if (payload.type === "hex") {
+    // 序列器的 HEX 载荷是字面字节，不做变量求值 —— 不适用「缺变量」判定，
+    // 保持原样放行（预检只接在真正会求值的地方）。
     return payload.text.trim() ? { mode: "hex", text: payload.text } : null;
   }
   if (payload.type === "ascii") {
@@ -61,7 +81,20 @@ export function resolveSend(payload: SendPayload): ResolvedSend | null {
     }
     if (!item.template.trim()) return null;
     // 变量占位 {var} 与控制画布同语义；脚本命令暂不支持（v2：经 scriptRunner 执行）
-    return { mode: item.sendMode, text: variableStore.resolveVars(item.template) };
+    const build = (): ResolvedSend => ({
+      mode: item.sendMode,
+      text: variableStore.resolveVars(item.template),
+    });
+    const getVar = ctx.getVar ?? variableStore.getVar;
+    if (missingTemplateVars(item.template, getVar).length === 0) return build();
+    return preflightTemplate(item.template, item.sendMode, {
+      source: ctx.source,
+      scope: ctx.scope,
+      getVar,
+    }).then((r) => {
+      if (!r.ok) throw new SendBlockedError(r.missing, item.sendMode);
+      return build();
+    });
   }
   // factory：单帧走 text（旧语义）；多帧透传（B4e）
   try {

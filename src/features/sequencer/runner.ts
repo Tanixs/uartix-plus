@@ -38,8 +38,13 @@ import {
 export interface SequencerDeps {
   /** 最终发送（与 serialStore.sendData 同参） */
   send(mode: "ascii" | "hex", text: string): void | Promise<void>;
-  /** 把 send 载荷解析成实际发送内容；null = 解析失败（如 cmdId 不存在）。B4e：factory 可返回多帧 */
-  resolveSend(payload: SendPayload): ResolvedSend | null;
+  /** 把 send 载荷解析成实际发送内容；null = 解析失败（如 cmdId 不存在）。B4e：factory 可返回多帧。
+   *  缺变量时返回 Promise（先走预检：ASCII 可确认放行 / HEX 拦截）；变量齐全时仍是同步值，
+   *  编码与发送时机与旧实现一致。`ctx` 用于区分来源与本轮放行范围。 */
+  resolveSend(
+    payload: SendPayload,
+    ctx?: { source?: string; scope?: string },
+  ): ResolvedSend | null | Promise<ResolvedSend | null>;
   /** 订阅解码后帧流；返回取消订阅函数 */
   onFrames(cb: (rows: FrameRow[]) => void): () => void;
   getVar(name: string): number | string | undefined;
@@ -384,7 +389,26 @@ async function execStep(step: Step, ctx: Ctx, startedAt: number, depth: number):
 type ResultBase = Pick<StepResult, "stepId" | "kind" | "label" | "startedAt">;
 
 async function execSend(step: SendStep, ctx: Ctx, base: ResultBase): Promise<StepResult> {
-  const resolved = ctx.deps.resolveSend(step.payload);
+  let resolved: ResolvedSend | null;
+  try {
+    const out = ctx.deps.resolveSend(step.payload, {
+      source: `序列器 · ${base.label}`,
+      scope: `seq:${ctx.runId}`,
+    });
+    // 变量齐全时 deps 返回同步值：这里不 await，保持与旧实现同一 tick 发送
+    resolved =
+      out && typeof (out as Promise<ResolvedSend | null>).then === "function"
+        ? await (out as Promise<ResolvedSend | null>)
+        : (out as ResolvedSend | null);
+  } catch (e) {
+    // 预检拦截（变量缺失）：步骤记 fail，控制台发送日志已按来源留痕
+    return {
+      ...base,
+      status: "fail",
+      durationMs: 0,
+      detail: capDetail(e instanceof Error ? e.message : String(e)),
+    };
+  }
   if (!resolved) {
     return { ...base, status: "fail", durationMs: 0, detail: "发送内容解析失败（命令不存在或载荷无效）" };
   }

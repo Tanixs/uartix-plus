@@ -49,8 +49,12 @@ import {
 
 export interface OrchDeps {
   now(): number;
-  /** 与 sequencerBind.resolveSend 同一实现（P74-3 接线；B4e：factory 可返回多帧） */
-  resolveSend(payload: SendPayload): ResolvedSend | null;
+  /** 与 sequencerBind.resolveSend 同一实现（P74-3 接线；B4e：factory 可返回多帧）。
+   *  缺变量时返回 Promise（控件卡同一份预检）；变量齐全时同步返回，编码与发送时机不变。 */
+  resolveSend(
+    payload: SendPayload,
+    ctx?: { source?: string; scope?: string },
+  ): ResolvedSend | null | Promise<ResolvedSend | null>;
   send(mode: "ascii" | "hex", text: string): void | Promise<void>;
   /** 运行现有序列套件；wait=true 时返回最终是否成功 */
   runSuite(suiteId: string, wait: boolean): boolean | Promise<boolean>;
@@ -629,7 +633,21 @@ export class OrchEngine {
         if (!this.takeSendToken()) {
           return fail(`发送速率超限（>${ORCH_LIMITS.sendBucketRate}/s），本条丢弃`);
         }
-        const resolved = this.deps.resolveSend(node.payload);
+        let resolved: ResolvedSend | null;
+        try {
+          const out = this.deps.resolveSend(node.payload, {
+            source: `编排器 · ${gid}`,
+            scope: `orch:${inst.id}`,
+          });
+          // 变量齐全时 deps 同步返回：不 await，保持与旧实现同一 tick 发送
+          resolved =
+            out && typeof (out as Promise<ResolvedSend | null>).then === "function"
+              ? await (out as Promise<ResolvedSend | null>)
+              : (out as ResolvedSend | null);
+        } catch (e) {
+          // 预检拦截（变量缺失）：块记 fail；控制台发送日志已按「编排器 · 组」留痕
+          return fail(e instanceof Error ? e.message : String(e));
+        }
         if (!resolved) return fail("发送内容解析失败（命令不存在或载荷无效）");
         // 同 runner：发送谱引用的自增号在解析时已占下，没出门要退还
         const settle = "frames" in resolved ? undefined : resolved.settle;

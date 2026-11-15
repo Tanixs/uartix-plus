@@ -5,7 +5,12 @@ import { beep, runScript } from "./scriptRunner";
 import { tx } from "../../i18n/strings";
 import * as sendStore from "../send/sendStore";
 import { encodeSend, sendValues } from "../send/encodeSend";
-import { preflightTemplate } from "./preflight";
+import {
+  endPreflightScope,
+  missingTemplateVars,
+  preflightTemplate,
+  SendBlockedError,
+} from "./preflight";
 
 /**
  * P104-R3：命令发送与脚本执行的**唯一**实现。
@@ -146,7 +151,7 @@ export async function runCommand(
   ctx: Record<string, number | string> = {},
 ): Promise<void> {
   if (cmd.scriptEnabled && cmd.script.trim()) {
-    await runCmdScript(cmd.script, ctx);
+    await runCmdScript(cmd.script, ctx, { source: cmd.name });
     return;
   }
   if (cmd.sendTemplateId) {
@@ -200,6 +205,7 @@ export async function runSpecCard(
 export async function runCmdScript(
   script: string,
   ctx: Record<string, number | string>,
+  opts: { source?: string } = {},
 ): Promise<void> {
   const vars = variableStore
     .listVars()
@@ -208,15 +214,34 @@ export async function runCmdScript(
       value: variableStore.getVar(vd.name) ?? (vd.kind === "str" ? "" : 0),
     }));
   for (const [k, v] of Object.entries(ctx)) vars.push({ name: k, value: v });
-  await runScript(
-    script,
-    {
-      send: (text, mode) => sendCmd(mode ?? "ascii", String(text)),
-      beep,
-      delay_ms: (ms: number) =>
-        new Promise<void>((r) => setTimeout(r, Math.max(0, ms))),
-      get: (name: string) => variableStore.getVar(name),
-    },
-    vars,
-  );
+  // 同一轮：脚本里循环 send() 时，用户放行过一次的相同模板不再逐次询问
+  const scope = `script:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  try {
+    await runScript(
+      script,
+      {
+        send: async (text, mode) => {
+          const m = mode ?? "ascii";
+          const out = String(text);
+          // 脚本在运行时拼字符串：这里拿不到「模板」，只能检查最终文本里是否还残留
+          // {var} 占位符。有残留才走预检（ASCII 可确认放行 / HEX 一律拦截）。
+          if (missingTemplateVars(out).length > 0) {
+            const r = await preflightTemplate(out, m, {
+              source: opts.source ? `脚本 · ${opts.source}` : "脚本",
+              scope,
+            });
+            if (!r.ok) throw new SendBlockedError(r.missing, m);
+          }
+          await sendCmd(m, out);
+        },
+        beep,
+        delay_ms: (ms: number) =>
+          new Promise<void>((r) => setTimeout(r, Math.max(0, ms))),
+        get: (name: string) => variableStore.getVar(name),
+      },
+      vars,
+    );
+  } finally {
+    endPreflightScope(scope);
+  }
 }

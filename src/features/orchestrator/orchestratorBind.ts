@@ -24,6 +24,12 @@ import * as serialStore from "../serial/serialStore";
 import * as variableStore from "../controls/variableStore";
 import * as cmdExec from "../controls/cmdExec";
 import * as commandStore from "../controls/commandStore";
+import {
+  preflightTemplate,
+  missingTemplateVars,
+  SendBlockedError,
+  type GetVar,
+} from "../controls/preflight";
 import * as controlsStore from "../controls/controlsStore";
 import * as plotStore from "../plot/plotStore";
 import * as imageStore from "../ai/imageStore";
@@ -56,7 +62,42 @@ function flowValue(name: string): number | string | boolean | undefined {
   return orchEngine.getVar(name);
 }
 
-function resolveSendOrch(payload: SendPayload): ResolvedSend | null {
+/** 预检用的取值器：与最终发送同一优先级（编排变量 → 控制变量）；布尔折 0/1 */
+const combinedVar: GetVar = (name) => {
+  const v = flowValue(name);
+  if (v !== undefined) return typeof v === "boolean" ? (v ? 1 : 0) : v;
+  return variableStore.getVar(name);
+};
+
+/** ascii/hex 载荷在编排器里只做编排变量插值，不回落控制变量 */
+const flowVar: GetVar = (name) => {
+  const v = flowValue(name);
+  return typeof v === "boolean" ? (v ? 1 : 0) : v;
+};
+
+/** 变量齐全时同步返回（字节/时机不变）；缺变量时先走控件卡同一份预检再求值。
+ *  ASCII 可确认放行、HEX 一律拦截；`scope` 让同一轮内相同模板只问一次。 */
+export function resolveSendOrch(
+  payload: SendPayload,
+  ctx: { source?: string; scope?: string } = {},
+): ResolvedSend | null | Promise<ResolvedSend | null> {
+  const check = (
+    tpl: string,
+    mode: "ascii" | "hex",
+    getVar: GetVar,
+    build: () => ResolvedSend,
+  ): ResolvedSend | Promise<ResolvedSend | null> => {
+    if (missingTemplateVars(tpl, getVar).length === 0) return build();
+    return preflightTemplate(tpl, mode, {
+      source: ctx.source,
+      scope: ctx.scope,
+      getVar,
+    }).then((r) => {
+      if (!r.ok) throw new SendBlockedError(r.missing, mode);
+      return build();
+    });
+  };
+
   // cmd 分支自行处理：命令库模板的 {var} 先走编排器变量，再回落控制画布变量
   if (payload.type === "cmd") {
     const item = commandStore.getCommand(payload.cmdId);
@@ -72,19 +113,23 @@ function resolveSendOrch(payload: SendPayload): ResolvedSend | null {
       }
     }
     if (!item.template.trim()) return null;
-    return {
+    return check(item.template, item.sendMode, combinedVar, () => ({
       mode: item.sendMode,
       text: variableStore.resolveVars(flowInterpolateText(item.template, flowValue)),
-    };
+    }));
   }
-  const r = sequencerBind.resolveSend(payload);
+  // 非 cmd 载荷（ascii/hex/factory）：序列器分支不涉及变量求值，必然同步
+  const r = sequencerBind.resolveSend(payload) as ResolvedSend | null;
   if (!r) return null;
-  // B4e：factory 多帧逐帧插值透传
-  if ("frames" in r) return { mode: "hex", frames: r.frames.map((f) => flowInterpolateHex(f, flowValue)) };
-  return {
+  if ("frames" in r) {
+    // B4e：factory 多帧逐帧插值透传（hex 字节已成形，不做变量判定）
+    return { mode: "hex", frames: r.frames.map((f) => flowInterpolateHex(f, flowValue)) };
+  }
+  // ascii/hex：发送前会做编排变量插值，因此这里按 text 本身预检（只认编排变量）
+  return check(r.text, r.mode, flowVar, () => ({
     mode: r.mode,
     text: r.mode === "hex" ? flowInterpolateHex(r.text, flowValue) : flowInterpolateText(r.text, flowValue),
-  };
+  }));
 }
 
 /** 序列器变量语义（number|string|undefined）：布尔折算 0/1 */
